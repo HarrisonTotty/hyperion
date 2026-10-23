@@ -2556,16 +2556,46 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
   gas-envelope body until this task, and `NotApplicable` for every other body. A gas-envelope
   body's surface section is `NotApplicable` (T48.e), so that exactly one of the two applies at any
   time.
-  - T_int and T_irr: a giant's internal heat by ruling 112.7's split (the record's effective and
-    equilibrium temperatures) and T12's flux. A sub-Neptune has no internal heat in the record
-    today; the builder states one (its envelope's cooling, or none) and records it.
+  - T_int and T_irr (decision-p14-t24d-profile §3, 2026-10-23). T_irr⁴ = T_eq⁴ ÷ f with f = ¼,
+    the record's T_eq carrying its Bond albedo, so the profile emits the record's σT_eff⁴. T_int
+    is the record's internal heat blended with a stated cooling law by `giant_share`, the radius
+    blend's weight: T_int⁴ = L_int ÷ (4πR²σ) + (1 − s) T_law⁴, with L_int the record's (by
+    ruling 112.7), so a giant from 0.414 Jupiter masses keeps the record's T_int and an envelope
+    below 0.3 Jupiter masses takes the law's. T_int is positive for every envelope.
+    - The law: T_law = 84.13 K × (M ÷ 95.161 M⊕)^0.2744 × (max(t, 1 Myr) ÷ 4.57 Gyr)^−0.32. Its
+      anchor is Saturn's 2.84 ± 0.20 W m⁻² (Wang et al. 2024, Nat. Commun. 15, 5045) and its mass
+      index Neptune's 0.433 ± 0.046 W m⁻² (Pearl and Conrath 1991, JGR 96, 18921), each at the
+      table's mass. The age index is Burrows et al. 2001's T_eff ∝ t^−0.32 (Rev. Mod. Phys. 73,
+      719, Eq. 2), and the floor `substellar::MIN_AGE`.
+    - Checks, recorded: the law gives Jupiter 117.1 K against Li et al. 2018's 107.2 K, where the
+      record's 104.8 K is the one used; and Uranus 50.2 K against Wang et al. 2025's 34.2 K
+      (0.078 W m⁻²) or Pearl et al. 1990's 29.3 K, the known outlier.
+    - The law lives in this module, so the record's internal luminosity, the bulk section's
+      effective temperature and every reader of them are unchanged; below 0.414 Jupiter masses
+      the envelope's T_int is therefore not the bulk section's, and both docs say so.
   - A Guillot 2010 Eq. 29 profile, joined to the dry adiabat below the level where its gradient
     dln T ÷ dln p first exceeds ∇_ad = R ÷ c_p(T). c_p(T) is T49.b's function over the envelope's
     composition, with hydrogen frozen at 3:1 ortho to para (normal hydrogen; equilibrium hydrogen
     is the recorded other bound; science-r08-gases-2.md §1.3–§1.4).
 
+    The thermal optical depth is τ = κ₁ p₁ ÷ (n g) × (p ÷ p₁)ⁿ, with p₁ = 1 bar and n = 2: an
+    opacity proportional to pressure, as H₂'s collision-induced absorption is (Robinson and
+    Catling 2012, Eq. 6; Mollière et al. 2020 take τ = δP^α with α between 1 and 2). Eq. 29 is
+    written in τ, and holds for any κ(p) at a fixed γ, since Guillot's moment equations are in
+    column mass with dτ = κ dm. A constant opacity (n = 1) keeps the gradient below ¼ at every
+    depth, under every H₂–He R ÷ c_p, and never joins (decision-p14-t24d-profile §1.1). With
+    n = 2 the gradient tends to ½, above any ideal gas's R ÷ c_p, so the join forms wherever
+    T_int is positive; for γ ≤ 1 it lies above τ = 4 (⅔ + c₀ (T_eq ÷ T_int)⁴), with c₀ = ⅔ +
+    1 ÷ (γ√3). The constants: γ = 0.4 (Guillot 2010's fiducial for HD 209458 b), which draws no
+    inversion and keeps the first crossing unique; f = ¼; and κ₁ = 2.87 × 10⁻³ m² kg⁻¹, fitted
+    through this module on the table's Jupiter to 166.1 K at 1 bar, which the builder refits
+    with T49.b's function and states to three figures. Robinson and Catling's Jupiter gives κ₁
+    of 2.46 × 10⁻³ (their τ₀ of 6 at 1.1 bar) and their 2014 Table 1 gives 3.12 × 10⁻³.
+
     Below the join the adiabat is integrated as T24.e's is, S̃(T) = S̃(T_join) + ln(p ÷ p_join).
-    It is published as (p, T) nodes at T24.e's spacing, from p_join to 100 bar (10⁷ Pa).
+    It is published as (p, T) nodes at T24.e's spacing, from p_join to the larger of 100 bar
+    (10⁷ Pa) and e^0.3 p_join, so that a join deeper than 100 bar, as a weakly heated
+    sub-Neptune's under strong light has, still carries one segment.
     Deeper, `temperature_at` takes the last segment's exponent. Near 100 bar, hydrogen's density
     departs from the ideal gas's by about 3% (its second virial coefficient, from memory), the
     recorded limit for a later real-gas form.
@@ -2589,7 +2619,16 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
   - _Tests:_ Jupiter's T(1 bar) 166 K ± 10%, the adiabat from the Galileo probe's 22 bar and
     427.7 K reaches 1 bar within 1 K of the measured 166.1 K (Seiff et al. 1998, from memory).
     Computed: 166.5 K with normal hydrogen and 167.0 K with equilibrium hydrogen; constant classes
-    would give 170.7 K; its NH₃ deck at 0.5–1 bar, and CH₄/H₂ ≈ 2 × 10⁻³;
+    would give 170.7 K;
+    the profile's T(22 bar) within 2 K of 427.7 K (computed 427.0 K), T(0.1 bar) within
+    100–120 K (110.2 K) and the join within 0.5–1.5 bar (0.902 bar); the gradient below n ÷ 4
+    at every depth, with no join for n = 1 and a finite join for n = 2 at every positive T_int,
+    inside the bracket; T_law 84.13 K for the table's Saturn and 52.57 K for Neptune at 4.57 Gyr,
+    T_int continuous at 0.3 and 0.414 Jupiter masses, Jupiter's the record's, and T_int finite
+    and positive at an age of 0 and of 13.8 Gyr; a join deeper than 100 bar with one segment;
+    Saturn's, Uranus's and Neptune's 1-bar temperatures printed and recorded (computed for
+    Saturn at 149.7 K, Uranus 99.1 K and Neptune 94.8 K, against 134, 76 and 72 K);
+    its NH₃ deck at 0.5–1 bar, and CH₄/H₂ ≈ 2 × 10⁻³;
     the tests of T52.d; a sub-Neptune's envelope is `Ok` and its surface `NotApplicable`;
     a rocky body's envelope is `NotApplicable`; the figures are continuous in time, and a body
     that loses its envelope changes section at its recorded state change.
@@ -2755,6 +2794,12 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
          2022), returning its sulphur to SO₂.
        - Only the surface removes SO₂, by reaction with calcite to anhydrite. Its column is
          N_SO₂ = Φ t_dry.
+       - Its mole fraction is capped at 10⁻² of the air column, in every case
+         (decision-thick-acid-decks, 2026-10-23). SO₂ enters none of T24.a's fractions, molar
+         mass or greenhouse, so the model holds it only as a trace, and Φ t_dry, fixed whatever
+         the air, would otherwise pass the air itself as p_s falls: 3.7 times it in a 10-mbar CO₂
+         air at O = 1 under Earth's gravity. A body at the cap is counted at the gate; SO₂ as a
+         major gas is P14.T55.a's.
        - t_dry is fixed on Venus's measured state: 130 ppm below its clouds (Marcq et al. 2008,
          130 ± 50 ppmv at 30–40 km) in its measured column (4.69 × 10²⁰ kg of CO₂ and
          1.08 × 10¹⁹ kg of N₂ [M], P14.T57.a's inventory), at T24.b's O for Venus. At O = 1 that is
@@ -2878,6 +2923,9 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - Every τ is non-negative, and every mode's base pressure is at least its top's.
     - The inventory is continuous in time but at T13.c's state changes, and T24.a's fractions are
       unchanged by this task.
+    - A runaway whose Φ t_dry passes 10⁻² of its air column carries x_SO₂ = 10⁻² exactly, and its
+      absorber's column is 10⁻² of the air's; Venus, the median Venus and the four case-1 bodies
+      of 23's census are unchanged to the bit (decision-thick-acid-decks).
     - No case-2 layer, and no world without a case-1 deck, carries `acid_uv_absorber`.
   - _Files:_ `planetary/hooks/{sulphur, aerosols, mod}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::sulphur`.
@@ -4149,6 +4197,33 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
     `just smart-ci origin/rendering-and-planets` and a hidden look: `BELT 1` selected from the
     list on GDG 76DY08 A-11 at `ALL` at 1280 × 720, 1920 × 1080 and 150%, its label drawn where a
     place qualifies, and a lesser body's label beside it given way.
+- **P14.T42.f No tick across an annulus's label** (added 2026-10-23 by main's UX decision on the
+  landing look of T42.d and T42.e, decision-zone-labels, follow-up 2). T42.d took a place that no
+  orbit, annulus edge or tick crosses as a preference, so where none had one a label still stood
+  across a belt's or the optimistic zone's ticks, which in its own `--text-muted` took letters
+  out: on GDG 76DY08 A-11 at `ALL`, `SNOW LINE` at 1280 × 720 and `HABITABLE ZONE` (four ticks)
+  and `SNOW LINE` at 1920 × 1080 and 150%; on GDG 75DX08 A-7 at `INNER`, `OPTIMISTIC` at
+  1280 × 720 and 150%. A tick is short, straight and in the label's colour, so through a word it
+  reads as a letter's stroke, while an orbit or an edge is a long curve the eye follows through
+  it. So no tick may cross an annulus's label: `tickInksPx` gives the `ticks` ops at a line's
+  weight (a belt's, a ring's, the optimistic zone's edges' and the chart's data edge's) at the
+  line scale, apart from `curveInksPx`, whose orbits and edges stay preferred, and a place a tick
+  crosses, touching included, does not qualify in either of the annuli's passes. Where none
+  qualifies the label is left out, as T42.d rules: at `ALL` on A-11 the look found all three zone
+  labels clear of the ticks at 1920 × 1080, and left out at 1280 × 720 and 150%.
+  - _Files:_ under `apps/hyperion/src/renderer/src/`: `spatial/furniture.ts` (`tickInksPx`,
+    `AnnulusLabelSurroundings.ticks`), `spatial/SpatialView.tsx`, their tests; the guide's
+    annulus-label bullet (decision-zone-labels, follow-up 2, G4).
+  - _Tests:_ in `spatial/furniture.test.ts`: `tickInksPx` takes each line tick at the line scale
+    and no mark's tick, and `curveInksPx` no tick, at 1.5; an annulus's label with ticks across
+    every place is left out; one whose first places two ticks cross moves along its edge to a
+    place no tick crosses, though an orbit crosses every place; T42.d's crowd (f) given the ticks.
+    In `spatial/SpatialView.test.tsx`: a zone's label whose every place a belt's ticks cross is
+    not drawn, and is with the belt switched off. T42.d's and T42.e's tests unchanged and passing.
+  - _Accept:_ `pnpm typecheck`, `pnpm lint`, `pnpm --filter hyperion exec vitest run
+src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displays/galaxy`,
+    the console-ux skill's lint, `just smart-ci origin/rendering-and-planets`; the look is
+    look-92-93's fix runs, made on this change before its review's amendments to docs and tests.
 
 #### P14.T43 Body list and readouts
 
@@ -7115,6 +7190,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
       2 × 10⁻³);
     - a sub-Neptune's envelope `Ok`;
     - continuous in time, but at recorded state changes.
+    - printed, not asserted: on Jupiter, Saturn and Sudarsky's 900, 1,200 and 1,500 K giants,
+      each refractory or salt deck below the join, its τ(550), base and the τ its profile puts
+      above 1 bar; a deck at τ 1 or more there stops the task for main
+      (decision-deep-decks-split §5).
   - _Files:_ `planetary/hooks/{envelope_atmosphere, mod}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::envelope_atmosphere`.
 - **P14.T52.e The equilibrium network's further carriers** (a rider of 24, optional; after T52.a;
@@ -11682,11 +11761,13 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
        - water is never limiting on a runaway world, though T13.c removes its water;
        - t_dry, ε_v and σ_d are fixed on Venus;
        - Hu et al.'s law is applied on cold, dry worlds and off 1 bar;
-       - a runaway world colder than about 430 K (rare, carbon-poor) still takes the cycling rule;
-         **amended** (decision-absurd-states-24 R3): a runaway world colder than about 430 K under
-         its deck is solved deckless from 24 and takes the thin layer (P14.T53.b part 1 (b)); one
-         whose deckless climate is hotter than that would hold a partial deck, not modelled
+       - a runaway world colder than about 430 K under its deck is solved deckless from 24 and
+         takes the thin layer (P14.T53.b part 1 (b), decision-absurd-states-24 R3); one whose
+         deckless climate is hotter than that would hold a partial deck, not modelled
          (P14.T53.e);
+       - the SO₂ column is Φ t_dry whatever the air, so a thinner runaway's deck spans more of
+         it and is thicker than Venus's (τ(550) 86–1,579 over 23's golden systems, against
+         Venus's 34.5), its mole fraction capped at 10⁻² (decision-thick-acid-decks);
        - a dry temperate world hot enough to cycle its acid, which T13.c's climate does not
          produce, would take the thin layer;
        - the UV is not modelled beyond "a star lights it";
@@ -26543,6 +26624,95 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     τ monotonic in O and gone by T_eq 400 K; no deck on a temperate or snowball world to O 10³,
     its layer under 1, and no `acid_uv_absorber` there; the source and t_dry; continuity; the
     column as the flux times its life in each case; the same bits twice.
+  - _Amendment (`p14-chem`, 2026-10-23): the cycling temperature, and the case as an input_
+    (decision-absurd-states-24 R3, with decision-thick-acid-decks §3's cap; first commit of
+    P14.T24.d with T52.d's batch). No figure of T24.g moves: Venus and the median Venus stay case 1
+    to the bit, and `planetary/aerosols` holds to the bit. `GENERATOR_VERSION` stays 23; no hold.
+    - **`ACID_CYCLING_TEMPERATURE` = 430 K** in `hooks/sulphur.rs`, cited: VIRA's 432.5 K at 38 km
+      and 4.34 bar, 425.1 K at 39 km (Seiff et al. 1985, Adv. Space Res. 5(11), 3, the
+      low-latitude model); Magellan's acid vapour "dropping precipitously below 38 km" (Jenkins et
+      al. 1994, Icarus 110, 79); its thermal decomposition below the cloud base (Dai et al. 2022,
+      JGR Planets 127, e2021JE007060, §2.3 and §3.1). The module does not read it: it is P14.T53.b
+      part 1 (b)'s test of the decked solve's T_s.
+    - **The case is the caller's.** `SulphurInputs.cycle` replaces `state`.
+      `SulphurCycle::case_of(state, deck)` maps T13.c's state and `RunawayDeck` (`Kept`, the
+      default and every runaway at 23; `Deckless`, from 24) to the case:
+      - a runaway under its deck cycles;
+      - a deckless runaway, a temperate world and a snowball pass once through, wet or dry by
+        `liquid_water` (a deckless runaway, its water lost, is dry);
+      - any other state makes none.
+
+      `AerosolInputs.runaway_deck` carries the deck into the inventory, which calls `case_of`.
+      P14.T54.b routes the published state and arm (b)'s deck through it, and edits no line of
+      `sulphur.rs`. `RunawayDeck`'s final home is `derive::atmosphere`, beside `SurfaceState`
+      (main, 2026-10-23): it is built in `sulphur.rs` here, and whichever of p14-chem and
+      p14-escape lands second moves it and leaves a `pub use` in `sulphur.rs`, so that
+      `hooks::sulphur::RunawayDeck`, `case_of` and `AerosolInputs` keep their paths.
+
+    - **`SULPHUR_DIOXIDE_TRACE_LIMIT` = 10⁻²**, in every case (decision-thick-acid-decks §3): the
+      column is Φ t, or 10⁻² of the air's column where Φ t passes it, its mole fraction then 10⁻²
+      exactly; below the cap the column and its mole fraction keep their bits. Its source is the
+      model's own contract (SO₂ in none of T24.a's fractions, molar mass or greenhouse, so only a
+      trace), at R3's 1% line, which the cap and its test replace. It binds on no golden or census
+      body.
+    - _Tests_ (+3 and a row): `a_deckless_runaway_passes_its_sulphur_once_through_dry` (the
+      measured Venus's air, deckless: no acid deck, no `acid_uv_absorber`, a sulphate layer under
+      τ 1, the column the flux times `DRY_ONCE_THROUGH_LIFETIME`),
+      `the_case_follows_the_state_and_the_deck`, `sulphur_dioxide_is_capped_at_a_trace_of_the_air`
+      (a 10-mbar CO₂ air at O 1 under Earth's gravity, Φ t_dry 3.7 times its column, carries 10⁻²
+      exactly and its absorber 10⁻² of the air's, as does a once-through world past the cap), a
+      deckless row in `the_column_is_the_flux_times_its_life` (now at O 0.2, below the cap on the
+      table's Earth's air), and `case_of`'s doctest.
+    - _The case-1 census_ (the 15 golden systems at the epoch, by a dev probe outside the
+      repository). There are four case-1 bodies, and no x_SO₂ reaches 1% of its air (the largest
+      is 0.10%), so none is at the cap; the probe's output is the same to the bit with it:
+
+      | Body               | T_s     | p_s      | O     | x_SO₂       | τ(550) | Δp ÷ p_s |
+      | ------------------ | ------- | -------- | ----- | ----------- | ------ | -------- |
+      | solar_like 256     | 536.6 K | 4.57 bar | 0.126 | 4.57 × 10⁻⁴ | 96.3   | 0.110    |
+      | solar_like 512     | 566.1 K | 30.2 bar | 0.157 | 9.24 × 10⁻⁵ | 86.0   | 0.078    |
+      | close_binary 58113 | 535.1 K | 11.5 bar | 0.524 | 6.75 × 10⁻⁴ | 598    | 0.163    |
+      | close_binary 58114 | 495.9 K | 9.25 bar | 0.707 | 1.02 × 10⁻³ | 1,579  | 0.320    |
+
+    - _The thinner runaways' decks (decision-thick-acid-decks, 2026-10-23)._ Recorded. At 24 only
+      the 10⁻² cap changes the module, and it moves no census body.
+      - The census's four case-1 decks carry τ(550) 86–1,579, 2.5–46 times Venus's 34.5. Φ t_dry
+        fixes the SO₂ column whatever the air, and τ = σ_d N_SO₂ Δp ÷ p_s, so a deck spanning
+        from 8% to 32% of a thinner air's column, against Venus's 1.4%, holds more of it. Their
+        low gravities (about 3.5–4.7 m s⁻² on a CO₂ air, from the census's x_SO₂) add to it, as
+        the entry's "a thicker or lower-gravity column holds more" says.
+      - It is not absurd. The acid is from 3 × 10⁻⁷ to 1.4 × 10⁻⁵ of the air's mass (0.21–3.8
+        kg m⁻² at the table's Venus's 2.39 × 10⁻³ kg m⁻² per unit τ) and at most 4.5 × 10⁻⁵
+        within the deck's layers, against Venus's 5.8 × 10⁻⁶ and a thin terrestrial water cloud's
+        some 5 × 10⁻⁵ (from memory). By σ_d its sulphur is about 2% of the SO₂ within those
+        layers in every body, so it never outruns its supply, and no x_SO₂ passes 0.10%.
+      - Nothing drawn or published moves with it. T51.b's area mix gives every runaway Venus's
+        cover 1 at 0.76 whatever its τ, and no climate reads the deck. R08 classes all four
+        `cloudDeck`, as it does Venus. A deck this thick reflects by its top's mixture, which the
+        fixed shares keep Venus's. Only the light under it is dimmer, about 1/40 of a Venus's at
+        τ 1,579 (two-stream, conservative).
+      - The figure is probably high. T24.c's other decks settle faster as their supply grows
+        (`f_sed` by supply, β 0.57). On a rough reading (τ ∝ M_vap^(1−β) ÷ H, normalised on
+        Venus, unfitted) close_binary 58114 would sit near 2–5 times Venus's, not 46. Lincowski
+        et al. 2018's Venus-like TRAPPIST-1 decks are "a few tens". The route, after 24, is the
+        acid deck's τ by T24.c's supply law with the measured Venus kept at 34.5, in a T24.g
+        follow-up that is not yet a task. A task that derives a runaway's albedo from its deck
+        takes it first.
+      - R08's discrete-ordinate check (f) holds τ 1,000. The bless note states the sample's
+        largest deck τ for R08.
+    - _The cycling temperature's pressure (decision-thick-acid-decks, 2026-10-23)._ Recorded, not
+      built. H₂SO₄ ⇌ SO₃ + H₂O is half done where K_p = p_H₂O, and NIST-JANAF's log K_f at 400
+      and 500 K (tables H-076, O-058 and H-064) give T_½ ≈ 11,656 K ÷ (17.46 − ln(x_H₂O p ÷ 1
+      bar)), which reproduces the science check's 406 K at 0.42 bar. At Venus's 31 ppm of water it
+      gives T_½ 337 K at 1.2 mbar, 420–432 K at 1.1–2.4 bar, 442 K at Venus's 4.34 bar (where the
+      adopted 430 K is VIRA's, at 38 km) and 455–477 K at 9–30 bar.
+      - No census body changes case. R3's five, at 273–360 K under their decks, lie below their
+        T_½ (337–432 K), and the four case-1 bodies, at 496–566 K, lie above theirs (443–477 K).
+      - Built, it would keep a thin air's deck down to its lower T_½ and drop a thick air's below
+        its higher one. It would rest on a runaway's water, which the model does not carry (it
+        keeps "the few ppm the acid needs"). If taken, it is P14.T53.e's, with the gate's count
+        (ii) of partial decks as its evidence, and the arm compares T_s with a function of p_s in
+        place of the constant.
 - **Deviations in P14.T53.a, as built (`p14-escape`, 2026-10-22).** Escape by regime and
   fractionation, the greenhouse's CO₂ form and its refits, the weathering thermostat and the
   maximum-greenhouse ceiling, all behind one hold, `ESCAPE_VERSION` = 24 (`EscapeRules`, `Held` at
@@ -26792,7 +26962,9 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     T42.d's look finds one unreadable there, the follow-up is for a ruling between counting those
     curves as obstacles (more labels left out) and a `1px` `--surface-0` casing round the curve
     labels' glyphs (the lines cut under the letters, against R07's Q6 (d), which keeps lines
-    whole).
+    whole). _Seen at T42.d's and T42.e's look and ruled in direction (decision-zone-labels,
+    follow-up 2): the ticks became a rule (P14.T42.f); for the orbits and edges, the casing. See
+    the deferred findings from that look._
   - _R4, a multiple's zones labelled without their host_ (GDG 0W1Q01 D-116: three `STABLE ZONE`
     and three `SNOW LINE` labels set as a grid that does not say whose each is). T42.d's 0.5 rem
     thins the grid but names no host. For a later ruling; the lean is the host's name after the
@@ -27038,3 +27210,540 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     sentence, after the order: "A belt's scattered disc is selected with its belt: its edges are
     drawn, and its label placed, with the belt's." _Applied in
     `docs(spatial): P14.T42.e The annulus labels' docs after the selected pass`._
+- **Deferred findings (2026-10-13 rule)**, from the landing look of P14.T42.d and T42.e
+  (look-92-93, 2026-10-23) and decision-zone-labels, follow-up 2:
+  - _Orbits and edges across drawn labels_ (R2's residue): at `INNER` on GDG 75DX08 A-3 at
+    1280 × 720 `HABITABLE ZONE`'s `ZONE` is hard to read, and at 1920 × 1080 the `BODY` frame's
+    `A j RING 1` loses its `j` to an orbit. Not a blocker (no false reading), and not P14.T42.f's,
+    which makes the ticks alone a rule. Ruled in direction: when briefed, the remedy is a `1px`
+    `--surface-0` casing round an annulus label's glyphs, not the orbits and edges as obstacles,
+    which would leave out nearly every inner zone at every zoom. Clear of every stalk, symbol,
+    other bracket and tick since T42.d, T42.f and T42.g, an annulus's label's casing can cut only
+    orbits, annulus edges and the `--line` grid, by a pixel round its letters; R07's Q6 (d), which
+    keeps stalks whole, is untouched. It needs guide text, a contrast check and a look of its own,
+    and waits behind the critical path.
+  - _Zone labels at `ALL` mostly left out, as ruled._ On the 1214 × 625 stage the habitable zone's
+    outer edge spans 5.6 px on A-7, 159 on A-11, 2.6 on A-3 and 0.2 on D-116, and the zone labels
+    drawn are A-7 0 of 3, A-11 1–3 of 3, A-3 0 of 3 and D-116 3–5 of 22, fewer at 1280 × 720 and
+    150%. decision-zone-labels' "inner system about 500 px across" took A-11's belt for the inner
+    system. The zones are dots at `ALL` in three of the four systems, so W1 stands as recorded.
+  - _A selected belt's scattered disc at `BELTS`_ (A-7, A-11) is left out: `BELTS` fits the belt
+    proper, and the disc's edges lie beyond the view, so its label has no place inside, as ruled.
+- **Deviations in P14.T24.d, as built (`p14-chem`, 2026-10-23).** `GENERATOR_VERSION` stays 23.
+  The profile and the internal temperature are pure: nothing on the record calls them until
+  P14.T54.b. No draw, no domain tag, no hold at 24. One golden is new at 23, an extension:
+  `planetary/envelope_profile`, the table's four giants, a sub-Neptune joining below 100 bar and a
+  hot Jupiter by hand, each one's inputs, parameters, join, nodes and `temperature_at` at stated
+  levels, for R08's copy of the envelope's arm (it moves at 24 by its header alone).
+  `planetary/record.rs`, the protocol and the server are not touched. `record::Envelope`, its
+  conversion in `convert/planetary.rs` and the section's `Ok` are P14.T54.b.i's (P14.T54.b: "It
+  adds … `record::Envelope` (T24.d with T52.d, replacing `match envelope {}`)";
+  decision-p14-t54b-open, P14.T54.b.i; main, 2026-10-23), and `GuillotProfileDto`'s new
+  `optical_depth_exponent` is p14-wire-24's (decision-p14-t24d-profile §2, §9). The record reads
+  κ₁, n, γ, f, T_int and T_irr from the profile's getters (§2's "p14-chem's `record::Envelope`
+  holds …": the values, not the type, as decision-p14-t54b-open supersedes it).
+  - _Moved to P14.T54.b.i, with `record::Envelope`:_ the entry's record tests (a sub-Neptune's
+    envelope `Ok` and its surface `NotApplicable`; a rocky body's envelope `NotApplicable`; the
+    figures continuous in time on the record; a body that loses its envelope changing section at
+    its recorded state change) and its second command, `cargo test -p hyperion-sim
+planetary::record`, which passes here unchanged. The module's own are built: P14.T52.d's
+    `a_sub_neptune_s_envelope_is_modelled`, `an_envelope_past_hydrogen_dominance_is_not_modelled`
+    and the continuity tests in T_eq, T_int and g.
+  - _Accepted,_ besides the task's commands, by `cargo test -p hyperion-sim
+planetary::hooks::structure::envelope` (the profile's 14 tests, which the task's filter does
+    not select).
+  - _The rulings applied:_ decision-p14-t24d-profile (2026-10-23), on the lane's finding that a
+    constant opacity never joins its adiabat (Q1) and that an envelope with no internal heat never
+    does either (Q2): τ ∝ p² with κ₁ fitted on Jupiter, γ 0.4 and f ¼; T_int the record's heat
+    blended with a cooling law by `giant_share`.
+  - _Files:_ the profile is `hooks/structure/envelope.rs` (with `structure/envelope/tests.rs`), a
+    child of T24.e's `structure` module beside its first variant, so that it shares the adiabat's
+    helpers (`adiabat_temperature`, `entropy`, `segment_count`) rather than repeating them. The
+    internal temperature is in `hooks/envelope_atmosphere.rs`, as ruled (§3.4), which T52.d's
+    atmosphere joins. `structure.rs` gains `VerticalStructure::Envelope(EnvelopeProfile)`, its
+    `temperature_at` arm and a crate constructor `ProfileNode::new`; its `temperature_at` doctest
+    reads the tropopause before wrapping the profile, rather than matching the enum.
+  - _The interface:_
+    - `EnvelopeProfile::derive` over `EnvelopeProfileInputs` (`internal_temperature`,
+      `irradiation_temperature`, `gravity`, `gases` and `grey`), with `join_pressure`, `nodes` (the
+      pressures ascending from the join), `temperature_at`, `skin_temperature`,
+      `photosphere_pressure` (τ = ⅔), `grey`, `gravity`, `internal_temperature` and
+      `irradiation_temperature`; `DeriveEnvelopeProfileError` (mixture, no gas columns,
+      temperatures, unheated, gravity, no join, too deep).
+    - `GreyProfile::{new, ADOPTED}` (`BuildGreyProfileError`), its κ₁
+      `thermal_opacity_m2_per_kg`, n in [1, 2] (1 a
+      constant opacity, which never joins) and γ in (0, 1] (so that no profile has an inversion,
+      and `temperature_at` never rises with height), with `optical_depth`, `pressure_at_depth`,
+      `temperature`, `radiative_gradient` and `join_bracket_optical_depth`;
+      `irradiation_temperature(T_eq)`, T_irr⁴ = 4 T_eq⁴, so that f T_irr⁴ = T_eq⁴ at f ¼; and
+      `dry_adiabat_temperature`, the dry adiabat through a point.
+    - `envelope_internal_temperature(L_int, R, M, t)` and `cooling_law_temperature(M, t)`, each
+      `Result<Kelvin, DeriveInternalTemperatureError>` from P14.T52.d's commit, with
+      `COOLING_LAW_{TEMPERATURE, MASS, MASS_INDEX, AGE_INDEX, AGE}`.
+  - _The constants:_ κ₁ 2.87 × 10⁻³ m² kg⁻¹ (`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`), fitted at
+    2.8709 × 10⁻³ on the table's Jupiter's hydrogen and helium (T50.b's He ÷ H₂ 0.1533 about a protosolar host), its record's T_int
+    104.81 K and T_eq 103.64 K (the ruling's own check, 2.866 × 10⁻³); n 2; γ 0.4; f ¼. The join
+    is sought from τ 10⁻⁶ down in steps of 0.05 in ln p to the ruling's bracket, then refined by
+    50 bisections; the scan ends one step past the bracket, where a gas whose c_p ÷ R is exactly
+    5/2 (a 1 K unlit envelope's) meets it.
+  - _Review (2026-10-23):_ units in the opacity's names and a typed gravity error; n and γ held to
+    the ranges the bracket and the monotone profile need; the internal temperature refusing a
+    luminosity, radius, mass or age out of its range (a signed zero's luminosity explicitly +0): a
+    NaN at this commit, and from P14.T52.d's commit `DeriveInternalTemperatureError` (`Mass`,
+    `Age`, `Luminosity`, `Radius`; main's check that no NaN from T_int reaches the record);
+    `derive`'s example; the golden.
+  - _Figures,_ on the adopted constants over each giant's hydrogen and helium alone (T52.d's
+    mixture adds its heavy gases):
+
+    | Body    | T_int             | T(0.1 bar) | T(1 bar) | T(22 bar) | Join                 |
+    | ------- | ----------------- | ---------- | -------- | --------- | -------------------- |
+    | Jupiter | 104.81 K (record) | 110.2 K    | 166.09 K | 426.8 K   | 0.901 bar at 160.5 K |
+    | Saturn  | 84.13 K (law)     | 86.3 K     | 149.8 K  | 383.6 K   | 0.584 bar            |
+    | Uranus  | 50.24 K (law)     | 59.4 K     | 99.2 K   | 276.6 K   | 0.910 bar            |
+    | Neptune | 52.57 K (law)     | 53.1 K     | 94.8 K   | 266.5 K   | 0.702 bar            |
+
+    Jupiter's photosphere (τ = ⅔) lies at 0.339 bar and its skin at 108.4 K. A 5 M⊕ sub-Neptune on
+    the law's 37.5 K under 10 m s⁻² joins at 117 bar at T_eq 600 K and 423 bar at 1,200 K (the
+    ruling's 129 and 463 bar were at its own gravity). The law gives 29.15 K at 2 M⊕, 45.34 K at
+    10 M⊕ and 91.96 K at 0.414 Jupiter masses, at 4.57 Gyr.
+
+  - _Corrections recorded:_
+    - The skin: Guillot's T_skin⁴ = T_int⁴ ÷ 2 + f T_irr⁴ (½ + √3 γ ÷ 4) equals T24.e's
+      T_eff⁴ ÷ 2 only as γ → 0, not "at γ = 1" as decision-composition §1.12 has it. At γ 0.4
+      Jupiter's skin is 108.4 K against T24.e's 104.2 K at its T_eff.
+    - Guillot's f is 1 at the substellar point, ½ for the dayside and ¼ for the planet (§2.4);
+      2/3 is not in the paper. Eq. 29 carries no albedo (§2.2): T_irr⁴ = T_eq⁴ ÷ f is this
+      module's statement, energy-consistent with the record (decision-p14-t24d-profile §1.3).
+    - The Galileo probe's 22-bar figure is 428 K at 22.05 bar in the PDS profile and 429 K in Seiff
+      et al. 1998's abstract, against the plan's 427.7 K: it moves the 1-bar test by about 0.5 K
+      (the science check, 2026-10-23).
+  - _Tests_ (`cargo test -p hyperion-sim planetary::hooks::structure::envelope`, 14;
+    `planetary::hooks::envelope_atmosphere`, 8, the golden `the_envelope_profiles_are_pinned`
+    among them; and four doctests, a Jupiter by hand, the Galileo adiabat, and the law's and the
+    blend's Saturn):
+    - Eq. 29 as written (the skin, the deep limit, γ = 1's flat starlight); T_irr's mean; τ's
+      inverse;
+    - the gradient below n ÷ 4 at every depth, a constant opacity's NoJoin on Jupiter over κ
+      10⁻³–3 × 10⁻² and γ 0.1–1, and a join inside its bracket for T_int 1–1,000 K and T_eq
+      0–3,000 K, none with no internal heat;
+    - the join where the gradient first meets the adiabat's (to 10⁻⁹), every node on the adiabat
+      to 10⁻¹² in S̃ and evenly spaced, the temperature continuous at the join, at every node and
+      below the last, and rising with depth;
+    - the Galileo adiabat's 166.5 K at 1 bar on normal hydrogen;
+    - the cases' profiles; the refusals; continuity in T_eq, T_int and g; the same bits twice;
+    - the law's anchors, its blend by `giant_share` (the generated Saturn's 84.13 K, Jupiter's
+      record, continuous at 0.3 and 0.414 Jupiter masses), and its floor and ageing;
+    - κ₁'s fit and the table's Jupiter against the probe; the cold giants' joins and warm 1-bar
+      temperatures; a join below 100 bar with one segment.
+  - **Deferred findings, from decision-p14-t24d-profile:**
+    - The grey profile runs the cold giants warm at 1 bar: Saturn 149.7 K against 134 ± 4 K,
+      Neptune 94.8 K against 72 ± 2 K, and Uranus 99.1 K against 76 K on the law's T_int. No
+      single temperature scaling of κ₁ serves, since Uranus and Neptune need opacities four times
+      apart at one T_eff. The route is a temperature-dependent mean opacity (Freedman et al. 2014)
+      or a non-grey profile (Parmentier and Guillot 2014), after 24.
+    - Neptune's CH₄ deck forms nearer 0.5 bar than the observed 1.5–2 bar, beside G3's τ 5.82,
+      whose "lower K" route Leconte et al. 2017 does not support.
+    - The law is fitted on 17–95 M⊕ and extrapolated to the smallest sub-Neptunes, where the
+      core's heat flow is the physical floor; Uranus is its known outlier.
+    - Below 0.414 Jupiter masses the envelope's T_int is not the bulk section's; carrying the
+      law into the record's internal luminosity (the rings, the moons, the photometry) is a
+      later planetary bump's.
+    - A hot envelope below 0.3 Jupiter masses has no inflation heating, as the record has none
+      there; its join lies deep (129 bar for 5 M⊕ at 600 K at the ruling's gravity; 117 bar as
+      built at 10 m s⁻²).
+    - n = 2 and κ₁ are H₂ CIA's: a hot envelope's line opacity and a pM envelope's inversion
+      (γ above 1) are not drawn.
+- **Deviations in P14.T52.d, as built (`p14-chem`, 2026-10-23).** `GENERATOR_VERSION` stays 23.
+  The envelope's atmosphere is pure: nothing on the record calls it until P14.T54.b (its tripwire,
+  `nothing_on_the_record_calls_the_envelope_atmosphere_yet`, which P14.T54.b deletes). No draw, no
+  domain tag, no hold at 24. One golden is new at 23, an extension, and it moves at 24 by its header
+  alone: `planetary/envelope_atmosphere` (1,593 lines, 107,692 bytes), the table's four
+  giants, a KELT-9b-like dayside and an 8 M⊕ sub-Neptune, each one's inputs, composition, μ,
+  `c_p` ÷ R, decks, modes, absorbers, hazes' τ and rows not formed and not modelled.
+  `planetary/envelope_profile` is unchanged to the byte. `planetary/record.rs`, the protocol and
+  the server are not touched: `record::Envelope`'s type, tests and wiring are P14.T54.b.i's.
+  - _Files:_ `hooks/envelope_atmosphere.rs` (beside P14.T24.d's internal temperature) and its
+    `tests.rs`; `hooks/mod.rs` (its bullet, "Built so far", and the re-export of `DeckKind`,
+    `DeriveEnvelopeAtmosphereError`, `DeriveInternalTemperatureError`, `EnvelopeAtmosphere` and
+    `EnvelopeAtmosphereInputs`). Beyond the plan's list:
+    - `chem/envelope_abundances.rs` (its test module `pub(crate)`) and its tests (`table_giant`
+      and `synthetic` `pub(crate)`, which this task's tests reuse);
+    - the tripwires' `own` lists in `chem/condense/tests.rs` and `hooks/aerosols/tests.rs`, which
+      gain this module;
+    - `hooks/structure/envelope.rs`, docs only: κ₁'s doc states its fit and its checks, and γ's
+      quote is cited to Guillot's §3 (after his Eq. 30), with `κ_th` and `κ_v` in his §2.5.
+  - _P14.T24.d's review fix, landing in this commit (main's check: no NaN from `T_int` reaches the
+    record or the wire):_ `cooling_law_temperature` and `envelope_internal_temperature` return
+    `Result<Kelvin, DeriveInternalTemperatureError>` (`Mass`, `Age`, `Luminosity`, `Radius`, each
+    carrying its typed value) in place of a NaN. A luminosity of −0 W still gives +0's bits.
+    - Their docs gain `# Errors`, and their doctests end `Ok::<(), DeriveInternalTemperatureError>`.
+    - T24.d's tests assert each variant, in `an_input_out_of_range_is_refused_by_its_own_variant`.
+    - A new test, `every_table_envelope_s_internal_temperature_is_finite_and_positive`, covers
+      every gas envelope of the Solar System table (the four giants) and every golden case.
+    - `EnvelopeAtmosphere` takes `T_int` as an input and refuses one that is not finite and
+      positive; `EnvelopeProfile::derive` refuses a non-finite one. So a NaN reaches neither the
+      profile nor the record. `planetary/envelope_profile`'s bytes do not move.
+  - _The interface:_ `EnvelopeAtmosphere::derive(&EnvelopeAtmosphereInputs)`.
+    - _Inputs:_ `abundances` (T50.b's), `network` (T52.a's, built once by the caller),
+      `internal_temperature`, `equilibrium_temperature`, `gravity`, `fe_h`, `grey`, `starlit`.
+    - _Getters:_ `profile()`, `internal_temperature()`, `irradiation_temperature()`,
+      `composition()`, `mean_molar_mass_g_per_mol()`, `heat_capacity_over_r()`, `upper_gas()` (the
+      10-mbar gas, the absorbers' and the photochemistry's), `decks()` (T24.c's `AerosolDeck`),
+      `deck_bounds()`, `deck_column_masses()`, `modes()`, `deck_optical_depth(condensate)`,
+      `haze_optical_depth()`, `absorbers()`, `not_formed()`, `not_modelled()`. There is no
+      `structure()` getter: a caller wraps `profile()`'s clone in `VerticalStructure::Envelope`.
+    - _Errors:_ `DeriveEnvelopeAtmosphereError`.
+      - The inputs' five: `InternalTemperature`, `EquilibriumTemperature`, `Gravity`, `FeH` and
+        `Metallicity`, the last for a power of ten that overflows or underflows.
+      - `NotHydrogenDominated { share }`, for which `is_not_modelled()` is true (the whole section
+        `NotModelled`, decision-p14-t24d-profile §4).
+      - `LevelAboveRecords`.
+      - The steps' own, wrapped: `Speciation`, `Profile`, `Quench`, `Gas`, `Condensation`,
+        `Sedimentation`, `Rule`, `Mode`, `Absorber` and `Mixture` (also a total that is not finite
+        and positive when a gas is renormalised).
+    - `DeckKind` (`Volatile`, `Refractory`, `SulphideOrSalt`; `of`, `fixed_sedimentation`).
+    - _Constants:_ `COMPOSITION_LEVEL`, `ABSORBER_LEVEL`, `QUENCH_COLUMN_BOTTOM`,
+      `DECK_COLUMN_TOP`, `DECK_COLUMN_BOTTOM`, `COMPOSITION_FLOOR`, `SOOT_GRID_EDGE`,
+      `REFRACTORY_CONDENSATES`, `SULPHIDE_AND_SALT_CONDENSATES`, `REFRACTORY_SEDIMENTATION`,
+      `SULPHIDE_AND_SALT_SEDIMENTATION`, `ABSORBERS`, `CO_TRAPPED`.
+  - _The chain, and every stated choice:_
+    - **The inputs:** checked, a −0 K `T_eq` taken as +0.
+    - **Profile, two passes.** T52.a's speciation at 100 bar (`ADIABAT_BOTTOM`), first at the
+      network's 300 K floor (the cold limit), then at that profile's T(100 bar), held at the
+      6,000 K ceiling. The reason: the adiabat's `c_p` reads the deep gas, CO-rich on a hot
+      envelope and CH₄-rich on a cold one.
+      - Each pass's `c_p` mixture is the rows with gas columns at or above 10⁻¹² (the
+        composition's floor), renormalised. The floor is for cost (each species is a statistical
+        sum at every level of the join's scan); what it drops moves `c_p` by under 10⁻⁹.
+      - T_irr = `irradiation_temperature(T_eq)`; Guillot's parameters are the caller's.
+    - **The quench.** T52.b's `Quench`, in a column of the second pass's μ:
+      `EddyDiffusion::JUPITER_LIKE`, 10³ m² s⁻¹ ("P14.T52.d gives every envelope";
+      decision-p14-t24d-profile §4); metallicity E × 10^[Fe/H].
+      - It is searched from 10 mbar (the shallowest level read) to 1 kbar (`MixingColumn`'s
+        ideal-gas limit, T52.b's Jupiter column).
+      - Its gas is read at 1 bar and 10 mbar.
+      - A read level hotter than 6,000 K, or NaN, is refused with its own variant,
+        `LevelAboveRecords`, for which `is_not_modelled()` is false. On Sudarsky's giant at f ¼ the
+        1-bar level reaches it between T_eq 5,300 K (T(1 bar) 5,939 K) and 5,400 K (6,051 K).
+      - The quench's bottom needs no cap. A level as slow as the mixing is far cooler (about
+        900–2,300 K over ZM14's fits), and the hot bottom is only scanned, never solved. The
+        KELT-9b-like dayside (5,990 K at 100 bar, its join at 224 bar) derives without one.
+    - **The decks.** T52.c's loop runs on the 1-bar quenched gas (T52.c's record: "such as the
+      1-bar"), along the profile, at `CLOUD_EDDY_DIFFUSION` (10 m² s⁻¹, AM01's `K_min`), from
+      10 kbar to 1 Pa, coverage 1, in two passes (T24.c's).
+      - The first pass takes the untrimmed 1-bar gas's μ and each fixed kind's `f_sed` (the
+        baseline 3 for the volatiles).
+      - The second takes the μ of the 1-bar gas trimmed by the first pass's decks, the published
+        composition's own (main's ruling A, 2026-10-23), so that the decks and the published μ
+        agree, with each volatile's supply `f_sed` at its first-pass base.
+      - Bases read only T(p) and the mole fractions, so no base moves: the largest base shift
+        between the passes is 0, to the bit, on the six golden cases.
+      - The decks are published as T24.c's (`AerosolDeck::of`, `AerosolMode::of_settling` at each
+        base's temperature, `NoDensity` modes passed through labelled), with the loop's
+        `not_formed`.
+    - **The composition at 1 bar.** Each species is scaled by what the decks leave of its vapour
+      there: `remaining(v, 1 bar)` ÷ `remaining(v, 10 kbar)`, the denominator the deep gas's
+      amount by the same code, so an undrawn vapour's share is exactly 1.
+      - A deck's own or co-reacting species (H₂O, NH₃, CH₄, H₂S, …) takes its own share. Any other
+        carrier of a drawn element (TiO, SiO, HCl, a metal's atom and ion) takes its element's.
+      - No species is both, or carries two drawn elements (each T52.a trace species holds one trace
+        atom; tested over every law).
+      - The charge is not rebalanced.
+      - Shares under 10⁻¹² are dropped and the rest renormalised, sorted largest first (ties by
+        row). μ and `c_p` ÷ R come from T49.b's mixture functions at T(1 bar). e⁻, H⁻ and the ions
+        are members where they reach the floor.
+    - **The absorbers at 10 mbar** (science-r08-unowned-absorbers §2.3 ruling 1; §2.2: "The 10 mbar
+      column is the realistic one", its column above 0.1 bar the upper bound).
+      - Every atom and first ion of T52.a's 13 metals, with TiO, VO, SiO, H, H⁻ and e⁻
+        (`ABSORBERS`, 32, a closed set).
+      - Each comes from the 10-mbar gas trimmed as the composition is, renormalised: a slab of its
+        share from 10 mbar (`ABSORBER_LEVEL`) to 1 Pa, column x Δp N_A ÷ (μ g), listed at or above
+        10⁻¹².
+      - The review moved the base from 0.1 bar to 10 mbar. A 0.1-bar base carried KELT-9b's 10-mbar
+        ion fractions down to where Fe outnumbers Fe⁺, and the columns are now a tenth of those.
+      - FeH is `not_modelled()` (`formation::NOT_MODELLED`).
+      - SO₂'s layer is a slab of its own. The booking of T52.b's H₂S + 2 H₂O → SO₂ + 3 H₂ acts
+        within the 10–0.01 mbar layer, while the composition lies below it and no listed absorber
+        is H₂S, H₂O or H₂, so it moves no published quantity (stated, not computed).
+    - **The hazes** (starlit only) sit on `UpperAtmosphere { T_eq, the skin, m, g, the 10-mbar
+gas's μ }`. Every rule reads the trimmed 10-mbar gas:
+      - SO₂ and the S₈ haze from its S atoms per molecule (and SO₂ from its H₂O);
+      - soot from its CH₄, only within Gao et al. 2020's grid (stated, below);
+      - the ice giants' haze based at the CH₄ deck's base, and the chromophore at the NH₃ deck's,
+        on a Jupiter-like cloud alone (stated, below). Each is a state change at its deck's onset:
+        no taper, since none is sourced.
+      - Each haze becomes a mode of its own material at full sky. Its τ(550) is T49.e's table at
+        T(its base) for a column mass, or the rule's own optical depth (`of_rule`).
+      - A `Layer` keeps its exponent where it is not negative. The ice giants' −0.5 is published
+        well mixed: `ModeProfile` takes no negative exponent, and its τ above p goes as p ÷ `p_b`
+        rather than (p ÷ `p_b`)^0.5.
+      - The chromophore's Gaussian is a well-mixed slab between its 1/e points, `p_peak` e^±0.25.
+      - The ice giants' haze's 0.035 at 0.8 µm is taken as its τ(550), a lower bound (T49.e is
+        550 nm's alone).
+      - `haze_optical_depth` is the hazes' τ(550) summed over those modelled.
+    - **The chromophore on a Jupiter-like ammonia cloud alone** (the review's B1, main's ruling,
+      2026-10-23), a stated choice: it is drawn only on an NH₃ deck with no CH₄ deck above it, since
+      Braude et al. 2020 retrieve it on Jupiter alone (T52.b's record).
+      - The table's Jupiter and Saturn carry it; Uranus and Neptune do not (tested).
+      - The root cause of an ice giant's NH₃ deck is P14.T50.b's, for later, not this batch. Its
+        uniform enrichment gives the ice giants protosolar N/S of about 5, against the measured
+        S > N (Guillot et al. 2022, arXiv:2205.04100, Table 2: Uranus N/H 1.04 × 10⁻⁴ and S/H
+        5.30 × 10⁻⁴, Molter et al. 2021; Neptune 2.88 × 10⁻⁴ and 7.97 × 10⁻⁴, Tollefson et al.
+        2021). So NH₄SH exhausts their H₂S and leaves NH₃ decks at 7–8 bar, where H₂S should be
+        left instead.
+    - **Soot within Gao et al. 2020's grid** (the review's B2, main's ruling, 2026-10-23), a stated
+      choice: their models span T_eq 700–2,800 K (Nature Astronomy 4, 951).
+      - The rule's column is scaled by a linear taper in T_eq (`SOOT_GRID_EDGE`), 0 at and below
+        600 K and whole from 700 K, continuous. The rule's own 950 K edge is unchanged, and T52.b's
+        rule is not touched.
+      - The table's Jupiter and Saturn carry no soot, and at T_eq 650 K the soot is half the rule's
+        column, to 10⁻⁹ (tested).
+      - The cool giants' stratospheric hazes are not modelled. Saturn's observed stratospheric τ is
+        0.01–0.025 at 0.9 µm (Sanz-Requena et al. 2019, arXiv:1905.11301).
+  - _The f_sed kinds_ (decision-bump-plan-after-22, G5: "one stated rule, by row kind"), each
+    at σ_g 2 (`DECK_WIDTH`), with K = `K_min` throughout:
+
+    | Kind             | Rows (closed)                                                                                                                               | `f_sed`                                  | Source                                                               |
+    | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
+    | Volatile         | the 14 phase-diagram rows (H₂O, CH₄, NH₃, N₂, O₂, CO₂, Ar, Kr, Xe, N₂O, CO, SO₂, H₂S, C₂H₆), NH₄SH (product law), H₂SO₄ (Kulmala–Laaksonen) | T24.c's supply rule, envelope humidity 1 | G5; T24.c's fit                                                      |
+    | Refractory       | Fe, MgSiO₃, Mg₂SiO₄, SiO₂, Al₂O₃, CaTiO₃, TiO₂                                                                                              | 2                                        | Saumon and Marley 2008 §2.5, §4.1; Morley et al. 2012 §4.2.2 "2 ± 1" |
+    | Sulphide or salt | Cr, MnS, Na₂S, ZnS, KCl (Morley et al. 2012's set)                                                                                          | 4.5                                      | Morley et al. 2012 §4.2.2 "fsed values of 4-5", its middle           |
+
+    The two fixed lists are exactly the rows with a vapour law (tested), and a vapour-law row in
+    neither falls to Refractory.
+
+  - **The decks' K and their depth (decision-deep-decks-split, 2026-10-23).** K is `K_min`, that
+    is 10 m² s⁻¹, for every deck (G5). Ackerman and Marley 2001's eq. 5 for the refractory and
+    salt decks below the join (F = σ `T_int`⁴, L = H; decision-p14-t24d-profile §5) is recorded,
+    not built.
+    - At those decks' bases eq. 5 gives 1–5 × 10⁴ m² s⁻¹ on the four giants, so their grains are
+      some √(K ÷ `K_min`), 31–68 times, too small, and their τ(550) that much too high. Their
+      columns and cold traps do not move at a fixed `f_sed`.
+    - That τ is 10³–10⁶: Jupiter's MnS, Na₂S, KCl and ZnS at 3.0 × 10⁵, 4.2 × 10⁵, 1.5 × 10⁴
+      and 6.2 × 10³, from bases of 2,783, 1,109, 426 and 351 bar, and Uranus's ZnS at 2.4 × 10⁶.
+      It is their kilobar columns': Jupiter's Mg₂SiO₄ holds 5.5 × 10⁴ kg m⁻², about τ 3 × 10⁴
+      even in grains of 1 mm. The layers are Jupiter's known deep clouds (Lodders and Fegley's
+      of 2006), which no light reaches (Morley et al. 2012 count a cloud by its τ above its
+      photosphere's bottom).
+    - Plan 08's split reads an envelope only above its floor, where τ(550) from the top reaches
+      ten, and draws nothing below it (decision-deep-decks-split): near 41 bar on the generated
+      Jupiter, where only KCl's and ZnS's tails reach, each under 0.05.
+    - The route, after 24: K per deck in `Sedimentation`, eq. 5's at its base, in one run of the
+      loop, not one a deck. It is taken sooner if a deck below the join puts τ(550) of 1 or more
+      above 1 bar (this task's printed test; P14.T54.b.k's count (x)).
+    - (The review's fixes moved none of these deck figures: they touch the hazes, the absorbers'
+      slab and the code's names, not the decks.)
+    - This task's printed test (`the_deep_decks_put_little_above_one_bar`), at 23's densities and at
+      T49.n's 24 densities alike:
+      - no deck below the join puts τ 1 or more above 1 bar;
+      - the largest modelled is Sudarsky's 1,500 K Mg₂SiO₄ at 0.479 (base 168 bar), and the largest
+        geometric stand-in for a liquid refractory with no optics is the 1,200 K giant's MgSiO₃ at
+        0.401;
+      - every cold giant's deep deck puts 0 above 1 bar, its top deeper.
+      - Above the join, outside the stop line, the 1,500 K giant's liquid MgSiO₃ (base 110 bar)
+        puts a stand-in 0.958 there, once liquid optics exist (main, 2026-10-23: for P14.T54.b.k's
+        count (x)). A class IV giant's silicates near 1,500 K come within a factor of two of the
+        stop line's τ above 1 bar, before their liquids carry optics.
+  - _Co-trapping_ (main's ruling, 2026-10-23, after the science check of Lodders 2002 and 2003,
+    Visscher et al. 2010, Lodders and Fegley 2006, Wakeford et al. 2017 and Pelletier et al. 2023;
+    Ca with CaTiO₃'s Ti confirmed). No law aloft takes Ni, V or the Ca aluminates.
+    - Without this, Jupiter's 1-bar composition held Ca 1.0 × 10⁻⁵ and Ni 8.8 × 10⁻⁶, and its
+      10-mbar absorbers Ca, Ni and VO. Uranus's composition held Ca 2.3 × 10⁻⁴ and Ni 1.9 × 10⁻⁴.
+    - `CO_TRAPPED` (a closed set) holds each metal with a host element. A carrier takes the smaller
+      of its own share and its host's.
+      - **Ni with Fe:** Ni's 50% condensation, 1,353 K, is 4 K below Fe metal's appearance and 19 K
+        above Fe's 50% at 10⁻⁴ bar (Lodders 2003, ApJ 591, 1220, Table 8, §3.1).
+      - **Ca with CaTiO₃'s Ti.** Ca leaves in the Ca aluminates and gehlenite; hibonite holds about
+        12% of it (Wakeford et al. 2017 §2.1). Lodders 2002 (ApJ 577, 974, §3, Table 2) has 97% of
+        the Ca and 96% of the Ti in solids at 1,818 K; Visscher et al. 2010 §4.1. Ti condenses
+        within 40–65 K of gehlenite's onset.
+      - **V with CaTiO₃'s Ti** (Lodders 2002 §7; Lodders and Fegley 2006 §1.5.2), with its error
+        stated (below).
+    - On Jupiter none of Ca, Ni, V or VO now reaches the floor in the composition or the absorbers.
+      On the KELT-9b-like dayside, with no deck, all three atoms are absorbers (tested).
+  - _Tests_ (`cargo test -p hyperion-sim planetary::hooks::envelope_atmosphere`, 38 with
+    T24.d's; two new doctests, `DeckKind::of` and `EnvelopeAtmosphere::derive`'s Jupiter), with
+    their measured figures:
+    - **Jupiter** (table, protosolar host, the record's T_int 104.81 K):
+      - T(1 bar) 166.08 K (asserted 166.1 ± 10%);
+      - NH₃'s base 0.726 bar (0.5–1);
+      - CH₄ ÷ H₂ 2.037 × 10⁻³ (1.5–3 × 10⁻³);
+      - join 0.899 bar, photosphere 0.339 bar.
+    - **Sudarsky et al. 2000's classes**, on a 1 M_J giant at 24.79 m s⁻², T_int 100 K, about a
+      solar host (E 2.65). The classes read T_eff = (T_eq⁴ + T_int⁴)^¼.
+      - I, T_eff 130 K: the topmost deck of τ > 0.1 is NH₃ (base 0.665 bar, τ 2.37).
+      - II, T_eff 250 K: it is H₂O (base 0.314 bar, τ 0.40), with no NH₃ deck. At 255 K the water
+        deck is at 0.239 bar, τ 0.18; from 260 K none forms. The model's water class ends between
+        255 and 260 K, about 100 K low against Sudarsky's "clear above about 350 K".
+      - III, T_eff 400 K: no volatile deck at all.
+      - IV, T_eff 1,200 K: Na 9.9 × 10⁻⁶ and K 6.4 × 10⁻⁷ at 10 mbar; the silicate bases at 264
+        (Mg₂SiO₄) and 179 bar (MgSiO₃), below the 0.339-bar photosphere.
+      - V, T_eff 1,800 K: Mg₂SiO₄'s base at 0.229 bar (1,726 K), top 0.062 bar, τ 28, at or above
+        the photosphere.
+      - Sudarsky's low-gravity arm is untested: every class case is at 24.79 m s⁻².
+    - **Fortney et al. 2008's TiO split.** TiO is listed at T_eq 2,000 K (1.5 × 10⁻⁸, 3.5% of the
+      envelope's Ti) and not at 1,000 K.
+      - Bisected on "listed at or above 10⁻¹²", the split falls at T_eq 1,770.5–1,771.5 K. On "TiO
+        holds at least 1% of the envelope's Ti at 10 mbar" it falls at 1,965.8–1,966.8 K.
+      - The comparisons: Fortney et al.'s 1,246–1,393 K (0.05–0.04 au, A = 0), and Baxter et al.
+        2020's observed 1,660 ± 100 K (arXiv:2007.15287).
+    - **KELT-9b-like dayside** (T_eq 4,050 K, f ½, g 20, E 1, T_int 300 K stated):
+      - T(10 mbar) 4,363.4 K (above the 4,300 K the level needs);
+      - H₂O 2.2 × 10⁻⁶ of the O and TiO 4.2 × 10⁻⁶ of the Ti (each under 1%);
+      - Fe⁺ 61.1% of the iron; Ca⁺ 99.6% of the calcium;
+      - all 13 metals' atoms listed; T(1 bar) 5,397 K. At T_eq 5,500 K the same dayside is
+        refused, `LevelAboveRecords` at 1 bar (7,329 K), not "not modelled" (tested).
+    - **Sub-Neptunes:**
+      - 8 M⊕, 3% envelope, T_eff 550 K, E 99.99: `Ok`, μ 4.90, composition summing to 1 with H₂
+        first; its join at 70.8 bar. No soot below 600 K.
+      - 3 M⊕ (E about 263): refused with `NotHydrogenDominated`, share 0.650; `is_not_modelled()`.
+    - **The rest:**
+      - continuous at fixed abundances: 10⁻⁶ of T_eq, T_int or g moves T(p), shares ≥ 10⁻⁶ and
+        each deck's τ by under 10⁻⁴, with the same decks;
+      - the same bits twice (the six golden cases), and the same whatever was derived before
+        (`assert_order_independent` over Jupiter, the KELT-9b-like dayside and the sub-Neptune);
+      - each deck's kind's `f_sed` (Jupiter has all three; the volatiles within 2% of the supply
+        rule recomputed on the published deck), and the kinds a closed set;
+      - one vapour per species; the absorbers the network's, FeH not modelled;
+      - the chromophore on Jupiter and Saturn alone; soot only within Gao et al.'s grid;
+      - an unlit envelope with no haze or SO₂ and the same decks;
+      - the composition whole (10⁻⁹), floored and sorted;
+      - the inputs' refusals (`FeH` for a NaN [Fe/H], `Metallicity` for 400 dex), and −0 K as +0;
+      - co-trapping; the T_int check; the tripwire (`DeckKind` among its patterns); the golden.
+    - **The deep decks, printed, not asserted** (`the_deep_decks_put_little_above_one_bar`;
+      decision-deep-decks-split §5, §8.1). On Jupiter, Saturn and Sudarsky's 900, 1,200 and
+      1,500 K giants, each refractory or salt deck below the join is printed with its τ(550), base,
+      top, `f_sed` and the τ its profile puts above 1 bar. Those above the join are printed beside
+      them, outside the stop line.
+      - The figures are the same at 23's densities and inside `with_read_densities(Read, …)`,
+        T49.n's 24 densities. Those give the liquid refractories (Fe, MgSiO₃, Mg₂SiO₄, Al₂O₃,
+        CaTiO₃) a density but no optics: no index file is a liquid's, so their τ stays not modelled
+        at 24. Liquid Cr, MnS, Na₂S and KCl have no density at either.
+      - Where a size and density are known, the test prints AM01's geometric-limit stand-in,
+        (3 ÷ 2) M ÷ (ρ r_eff), beside the label.
+      - Below the join, the largest modelled τ above 1 bar is 0.479: Sudarsky's 1,500 K
+        Mg₂SiO₄, τ 2.27 × 10⁶, base 168 bar, top 0.030 bar.
+      - Below the join, the largest stand-in is 0.401: the 1,200 K giant's liquid MgSiO₃, τ about
+        2.3 × 10⁶, base 179 bar.
+      - The stop line (τ 1 or more above 1 bar, a deck below the join) is not crossed.
+      - Every cold giant's deep deck puts 0 above 1 bar: its top lies deeper (Jupiter's KCl and ZnS
+        tops at 16.8 and 14.4 bar).
+      - Above the join, where `K_min` is AM01's own prescription, the 1,500 K giant's liquid MgSiO₃
+        (base 110 bar, top 0.033 bar) puts a stand-in τ of 0.958 above 1 bar, just under 1.
+    - **Recorded** (`the_giants_records_are_printed`, `--nocapture`):
+      - Jupiter's NH₄SH deck τ 1.60 at 2.31 bar, against Irwin et al. 2026's τ 6–38. Theirs is at
+        1.5 µm, for a mixed H₂O–NH₃/NH₄SH cloud at 1–2 bar. Its NH₃ deck is τ 2.49 and its H₂O
+        deck τ 1.73 at 5.31 bar.
+      - Saturn's hazes τ 0.31, the chromophore alone. Its NH₃ deck is τ 0.96 at 1.27 bar. The
+        plan's ~10 is its tropospheric haze (Karkoschka and Tomasko 2005, via Sanz-Requena et al.
+        2019), which no rule makes.
+      - Neptune's CH₄ deck: base 0.648 bar, τ 5.77, under R08's split of 10. It is 1.44 times the
+        top of G2's 0.5–4, a range built on Irwin et al. 2022 Table 2's 1–2 at 0.8 µm for a layer at
+        2.0–2.1 bar (Uranus 2.0–3.5 at 1.4–1.5 bar). It remains G3's record.
+      - Uranus's CH₄ deck: base 0.503 bar, τ 3.76. Jupiter's haze is τ 0.31 and the ice giants'
+        0.035.
+      - The volatile decks' `f_sed` runs 0.01 (a trace H₂SO₄ deck's floor) to 9.6 × 10⁵ (Uranus's
+        H₂O), and their `r_eff` from 0.037 µm (Neptune's trace CO₂) to 397 µm (Uranus's H₂O).
+    - **Neptune's CH₄ τ, its cause** (main's ask; a development probe of the loop on Neptune's
+      published 1-bar gas through the module's two passes):
+      - as derived, base 0.656 bar, τ 5.79;
+      - CH₄ at the measured 7% (Irwin et al. 2022, 7 ± 1%), rather than T50.b's 3.58%: base 0.763
+        bar, τ 6.50 (+12%);
+      - the profile scaled to 72 K at 1 bar: base 1.65 bar, τ 5.60 (−3%);
+      - both: base 1.98 bar, the observed 2.0–2.1 bar, τ 5.92.
+      - Uranus at its measured ~3% CH₄ and 76 K: base 1.31 bar, τ 4.18.
+      - The warmer profile moves the base and barely τ; the methane abundance moves τ by about a
+        tenth. The excess the chain first had, 6.95, was the deck column's untrimmed μ: 4.11 g mol⁻¹,
+        with the 2.9% of water the 97-bar deck takes, against the composition's 3.07. Column mass
+        goes as μ^0.57 at the supply rule.
+      - Ruling A took it to 5.77; Uranus moved from 4.70 to 3.76, and Jupiter's NH₃ from 2.53 to
+        2.49 (its μ 2.37 → 2.31).
+  - _The cost:_ two profile derivations, seven solves of T52.a (two profile passes, three quench
+    levels, the 1-bar and 10-mbar gas) and two runs of the loop. One derive takes about 35 ms
+    unoptimised (the table's Jupiter, its abundances included, a mean of 20), and 10 ms on the
+    KELT-9b-like dayside, where no deck forms. Provisional: a debug test on a busy machine, for
+    P14.T33.a's `body_detail`.
+  - _Plan corrections:_
+    - Sudarsky et al. 2000's classes read the envelope's T_eff = (T_eq⁴ + T_int⁴)^¼, not T_eq
+      (decision-p14-t24d-profile §5). Their 250 K and 350 K are in §1 and §9, not the abstract.
+    - KELT-9b's ions are stated at their levels (Kitzmann et al. 2018, ApJ 863, 183, Fig. 2): Fe⁺
+      above Fe at about 10 mbar above about 4,300 K, and Ca⁺ above Ca at 10–100 mbar above about
+      3,000 K. A level-free "lists Fe⁺ above Fe" would fail at 100 mbar.
+    - Leconte et al. 2017 give no K for the inhibited layer. Treated as radiative, it is `K_min`,
+      which the cold decks already take, so G3's "lower K" route for Neptune's τ is spent.
+    - substance's `element.rs` says Lodders 2003 "was not read". It now has been (by the science
+      check of the co-trapping list), and its Al, Ca, Ti, V, Fe and Ni values match Table 8. For a
+      later docs pass; `element.rs` is not edited here.
+  - **Deferred findings (2026-10-13 rule), from P14.T52.d:**
+    - _Sudarsky's class V is a window:_ a silicate deck reaches the photosphere only for T_eff of
+      about 1,650–1,800 K.
+      - MgSiO₃'s base is at 0.306 bar at 1,650 K and 0.209 bar at 1,700 K; Mg₂SiO₄'s at 0.229 bar
+        at 1,800 K.
+      - At 1,500 K the silicates' base lies at the adiabat crossing (168 bar). From 1,850 K no
+        silicate deck forms; at 2,000 K only Al₂O₃ and CaTiO₃ do, CaTiO₃ based at 0.31 bar.
+      - Sudarsky et al. have silicates high from about 1,500 K. The grey profile (γ 0.4, its upper
+        air 0.91–1.12 T_eq) sets the window. The route is a non-grey profile or γ above 1.
+    - _The water class ends at 255–260 K of T_eff_, about 100 K below Sudarsky et al.'s ~350 K. The
+      grey profile's skin is 0.91 T_eq.
+    - _TiO's split falls at T_eq 1,771 K (listed) or 1,966 K (1% of the Ti)._ That is above both
+      Fortney et al.'s 1,246–1,393 K and Baxter et al. 2020's observed 1,660 ± 100 K.
+      - CaTiO₃'s deep cold trap near the join sets it (Spiegel, Silverio and Burrows 2009), which
+        Fortney et al. do not take; at T_eq 1,800 K the CaTiO₃ deck runs from 175 bar.
+      - A pM envelope's missing inversion is decision-p14-t24d-profile §4's record.
+    - _The alkalis at 900 K:_ Na is partly cold-trapped by a deep Na₂S deck (47 bar), 3.6 × 10⁻⁸
+      against 9.9 × 10⁻⁶ at 10 mbar. It is still listed, but the model's alkali class starts nearer
+      1,000 K than Sudarsky's 900 K.
+    - _Co-trapping is a stand-in:_ the route is laws for Ni, V and the Ca phases in T49.b and
+      T52.c.
+      - Vanadium tracked by Ti leaves the gas about 150 K too hot: V's 50% removal is at 1,429 K
+        against Ti's 1,582 K (Lodders 2003, Table 8), and "the fraction of V removed from the gas is
+        much less than the fraction of Ti removed" (Lodders 2002 §7).
+      - So VO and V are depleted in a window of roughly T_eq 1,750–1,930 K where they should stay.
+        Pelletier et al. 2023 (Nature 619, 491) find V and VO near protosolar on WASP-76b with Ti
+        depleted.
+    - _The ice giants' N/S_ (P14.T50.b's, for later): see the chromophore's choice above.
+    - _The ice giants' CO quench is pinned at the column's 1-kbar bottom_ (the review's S2). The true
+      quench lies near 1.2–1.4 kbar at about 880 K, so their CO is about 4–9 times low. The route:
+      extend the scan to about 3 kbar and solve once there.
+    - _The deep decks run beyond the ideal gas and the fits' calibrations_ (the review's C2).
+      Uranus's ZnS deck has τ 2.4 × 10⁶, and its H₂O deck `f_sed` 9.6 × 10⁵, beyond G4's 10⁵. No
+      consumer should sum deck τ without a level cut (plan 08's split reads only above its floor).
+    - _A Bottom-bound deck's share_ (the review's C3): `left`'s denominator, the remaining amount at
+      the column's bottom, is the saturated amount there for a deck bound at it. So the share above
+      is overstated by the input over its saturation. It moves nothing today: every Bottom-bound
+      deck's vapour is trapped far below the published levels.
+    - _G1's two size items, not built:_ sizes at the radius whose fall speed is v_sed
+      (`radius_falling_at`), and a cap at the fall speed of the largest stable drop (r_max). Each
+      is a refit of v₁.
+    - _Trace decks:_ every vapour that saturates forms a deck. They carry negligible τ and are
+      published as formed:
+      - H₂SO₄ decks from about 10⁻⁴⁰ of SO₂ on Saturn, Uranus and Neptune (columns 10⁻³⁸–10⁻³⁴
+        kg m⁻², f_sed at its 0.01 floor);
+      - CO₂ decks on the ice giants (τ 10⁻²–10⁻³);
+      - Xe decks at their tropopauses (10⁻⁴ kg m⁻², no density).
+    - _Decks bound at the column's 10-kbar bottom_ (the brief's "few decks are Bottom-bound" does not
+      hold): Jupiter's Fe and CaTiO₃, six of Saturn's (Fe, CaTiO₃, Al₂O₃, Mg₂SiO₄, MgSiO₃, Cr),
+      eight of each ice giant's (those and MnS and Na₂S) and five of the sub-Neptune's. Their columns
+      count only what condenses within the column. All lie far below the photosphere; a deeper
+      bottom would leave P14.T52.a's ideal gas and the adiabat's published nodes further behind.
+    - _The S₈ haze_ from T52.b's column is thick here: τ(550) 26–360 at T_eff 255–350 K on the
+      Sudarsky giant (r_eff 0.33 µm). For a check against Gao et al. 2017.
+    - _The ice giants' haze:_ its exponent −0.5 is published well mixed, and its 0.8 µm τ is taken
+      as τ(550), a lower bound. The chromophore's Gaussian is published as a slab between its 1/e
+      points.
+    - _Neptune's CH₄ deck_ forms at 0.65 bar against the observed 2.0–2.1 bar (the warm grey
+      profile, decision-p14-t24d-profile §1.5). Its τ 5.77 lies above G2's 0.5–4 (G3's record), and
+      its methane, T50.b's 3.58%, is half Irwin et al. 2022's 7 ± 1%.
+    - _The cool giants' stratospheric hazes are not modelled_ (soot's grid edge): Saturn's observed
+      stratospheric τ is 0.01–0.025 at 0.9 µm (Sanz-Requena et al. 2019). Saturn's tropospheric
+      haze, the plan's ~10 (Karkoschka and Tomasko 2005), has no rule either. Its chromophore takes
+      the Great Red Spot's column (T52.b's record).
+    - _A read level above 6,000 K_ (1 bar or 10 mbar) is refused, and `is_not_modelled` is false
+      for it. T54.b decides whether that section is `NotModelled` too, and counts them. At f ¼ the
+      1-bar level reaches 6,000 K between T_eq 5,300 and 5,400 K.
+    - _The trimmed gas's charge_ is not rebalanced: an ion goes with its metal, the electrons stay.
+    - _One deck per condensate,_ at its deepest crossing: a vapour that saturates again in a cooler
+      layer above is not condensed twice.
+    - _Continuity:_ continuous in time at fixed abundances. Continuity in time is that of the inputs
+      that carry it: T_int by the law, T_eq, g, and T50.b's abundances by its own test. The record's
+      is P14.T54.b.i's.

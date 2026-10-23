@@ -15,7 +15,8 @@ describeMarchGate({
   sources: () => tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES)),
   // Since R08.T8.e high's count on the bare ground is scaled by its optical depth: at one source the
   // march's ordinary worst is the disc at 20 steps (1.35%; 0.53% at 36 steps throughout), measured
-  // 2026-10-22.
+  // 2026-10-22; the thin sky at 28 steps puts the sky's ordinary worst at six sources at 0.12%
+  // (0.07%), measured 2026-10-23.
   record: {
     highMisses: [[], []],
     high: [
@@ -39,7 +40,7 @@ describeMarchGate({
         kernel: {
           march: 0.00983,
           marchTwilight: 0.00396,
-          sky: 0.00073,
+          sky: 0.0012,
           skyTwilight: 0.00434,
           lastLight: 0.0022,
         },

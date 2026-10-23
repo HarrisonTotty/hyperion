@@ -24,7 +24,8 @@ describeMarchGate({
   // medium (`decision-r08-t6d-findings.md` §10.4.3): the rays over it are recorded. Since R08.T8.e
   // high's count on the bare ground is scaled by its optical depth, the named misses' sky chords at
   // 36: at one source the march's ordinary worst is the disc at 28 steps, 20 and 4 for each of the
-  // slab's two edges (1.59%; 1.12% at 36 steps throughout), measured 2026-10-22.
+  // slab's two edges (1.59%; 1.12% at 36 steps throughout), measured 2026-10-22; the thin sky at 28
+  // steps puts the sky's ordinary worst at six sources at 0.12% (0.07%), measured 2026-10-23.
   record: {
     highMisses: [
       [
@@ -58,7 +59,7 @@ describeMarchGate({
         kernel: {
           march: 0.01109,
           marchTwilight: 0.00963,
-          sky: 0.00073,
+          sky: 0.0012,
           skyTwilight: 0.01124,
           lastLight: 0.00913,
         },

@@ -1171,8 +1171,8 @@ describe("the per-frame twins' steps", () => {
     expect(compared).toBeGreaterThan(0);
   });
 
-  // R08.T8.e: high's count by the bare ground's optical depth (`marchSteps.ts`'s `marchSamplesOf`).
-  it("march the bare ground at 20 steps on high, and the sky, thin or thick, and a drawn surface at 36", () => {
+  // R08.T8.e: high's count by a segment's optical depth (`marchSteps.ts`'s `marchSamplesOf`).
+  it("march a thin sky segment at 28 steps on high, a thick one and a drawn surface at 36, and the bare ground at 20", () => {
     const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
     const a = WGS84.equatorialRadiusM;
     const r = a + 400_000;
@@ -1190,7 +1190,7 @@ describe("the per-frame twins' steps", () => {
       );
     const open = Number.POSITIVE_INFINITY;
     const cases = [
-      { what: "thin sky, tangent 70 km", d: toTangent(70_000), tSurfaceM: open, n: 36 },
+      { what: "thin sky, tangent 70 km", d: toTangent(70_000), tSurfaceM: open, n: 28 },
       { what: "thick sky, tangent 5 km", d: toTangent(5_000), tSurfaceM: open, n: 36 },
       { what: "bare ground, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: open, n: 20 },
       { what: "drawn surface, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 399_000, n: 36 },

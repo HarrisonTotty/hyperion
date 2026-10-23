@@ -18,7 +18,7 @@
 // composite's read of the screen's edges falls on the outer froxels' centres. The slice axis is
 // already the pair's: slice k holds the march at (k + 1) reach / slices, which the composite reads
 // at distance / reach - 1/2 / slices. Changes (plan R08, R08.T6.c): the view's own path takes its
-// absorbers by the path's column, under the sun's curves of growth (`viewAbsorberStep`), so that
+// absorbers by the path's column, under the sun's curves of growth (`viewMarchStep`), so that
 // the mean transmittance in alpha carries them. Changes (plan R08, R08.T7, Design note 7): one
 // march sums every drawn source, each light slot's share carried on its own path (`ViewMarch` in
 // source.wgsl), and alpha is slot 0's mean transmittance. Changes (plan R08, R08.T6.f, Design note

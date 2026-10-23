@@ -704,12 +704,14 @@ describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
 
 // --- The ray march's count by a segment's optical depth (plan R08, R08.T8.e) ---------------------
 
-describe("the ray march's count by the bare ground's optical depth (R08.T8.e)", () => {
+describe("the ray march's count by a segment's optical depth (R08.T8.e)", () => {
   const rule: MarchDepthSteps = {
     groundFloor: 20,
     groundFloorPerEdge: 4,
     groundRampDepths: [2, 8],
+    thinSky: { samples: 28, depthG: 0.05 },
   };
+  const groundOnly: MarchDepthSteps = { ...rule, thinSky: null };
   const KINDS: readonly MarchSegmentKind[] = ["ground", "sky", "surface"];
 
   it("scales high's 36 steps by the rule `decision-r08-t8-leans.md` §8's lever 3 asks, and leaves low's 16", () => {
@@ -718,7 +720,7 @@ describe("the ray march's count by the bare ground's optical depth (R08.T8.e)", 
     expect(TABLE_SIZES.low.marchDepthSteps).toBeNull();
   });
 
-  it("takes the setting's count with no rule, on the sky, on a drawn surface, and at a depth that is not finite", () => {
+  it("takes the setting's count with no rule, on a drawn surface, and at a depth that is not finite", () => {
     for (const kind of KINDS) {
       for (const depth of [0, 0.01, 1, 5, 100]) {
         expect(marchSamplesOf(kind, depth, 36, 0, null)).toBe(36);
@@ -727,11 +729,24 @@ describe("the ray march's count by the bare ground's optical depth (R08.T8.e)", 
         expect(marchSamplesOf(kind, depth, 36, 2, rule)).toBe(36);
       }
     }
-    for (const kind of ["sky", "surface"] as const) {
-      for (const depth of [0, 0.001, 0.01, 0.0499, 1, 5, 100]) {
-        expect(marchSamplesOf(kind, depth, 36, 2, rule)).toBe(36);
-      }
+    for (const depth of [0, 0.001, 0.01, 0.0499, 1, 5, 100]) {
+      expect(marchSamplesOf("surface", depth, 36, 2, rule)).toBe(36);
     }
+  });
+
+  it("marches a thin sky segment at 28 steps, at most the setting's, and a thicker one at the setting's", () => {
+    expect([0, 0.001, 0.01, 0.0499].map((d) => marchSamplesOf("sky", d, 36, 2, rule))).toEqual([
+      28, 28, 28, 28,
+    ]);
+    expect([0.05, 0.1, 3].map((d) => marchSamplesOf("sky", d, 36, 0, rule))).toEqual([36, 36, 36]);
+    expect(marchSamplesOf("sky", 0.01, 16, 0, rule)).toBe(16);
+  });
+
+  it("leaves the sky at the setting's count under a rule with no thin sky", () => {
+    for (const depth of [0, 0.001, 0.0499, 1]) {
+      expect(marchSamplesOf("sky", depth, 36, 2, groundOnly)).toBe(36);
+    }
+    expect(marchSamplesOf("ground", 0.5, 36, 0, groundOnly)).toBe(20);
   });
 
   it("gives the bare ground its floor up to the ramp's start, 4 more for each march edge, and never more than the setting's", () => {

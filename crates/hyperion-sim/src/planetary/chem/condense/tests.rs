@@ -751,6 +751,7 @@ fn nothing_on_the_record_calls_the_condensation_yet() {
         "substance/aloft",
         "planetary/hooks/aerosols",
         "planetary/hooks/sulphur",
+        "planetary/hooks/envelope_atmosphere",
     ];
     let patterns = [
         "chem::condense",

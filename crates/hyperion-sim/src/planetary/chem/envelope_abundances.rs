@@ -955,4 +955,4 @@ fn metal_mass_per_hydrogen(per_hydrogen: &[f64; Element::ALL.len()]) -> f64 {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -20,7 +20,8 @@
  * gate holds as the ray march's ({@link kernelOf}).
  *
  * Since R08.T8.e (`decision-r08-t8-leans.md` §8, lever 3) a scheme carries the ray march's count by
- * the bare ground's optical depth ({@link Scheme}'s `marchDepthSteps`, high's `TableSizes` rule),
+ * the bare ground's and the thin sky's optical depth ({@link Scheme}'s `marchDepthSteps`, high's
+ * `TableSizes` rule),
  * and its ray-march families' pixels under the kernel's rule take the count the kernel takes
  * ({@link gateMarchSamples}); the sky view's families keep the sky view's own count, and the
  * references and even steps take theirs throughout.
@@ -50,7 +51,11 @@ import {
   transmittanceRMuToUv,
   transmittanceUvToRMu,
 } from "../view/atmosphere/opticalDepth";
-import { sphereBareGroundDepthG, type TwinSources } from "../view/atmosphere/tablesCpu";
+import {
+  sphereBareGroundDepthG,
+  sphereSkyDepthG,
+  type TwinSources,
+} from "../view/atmosphere/tablesCpu";
 
 /** WGS 84's equatorial radius a, m (NIMA TR8350.2): the twin's sphere. */
 export const BOTTOM_M = 6_378_137;
@@ -351,10 +356,11 @@ export function marchKindOf(ray: GateRay): MarchSegmentKind {
 
 /**
  * A gate ray's count as the ray march takes it under `rule` (plan R08, R08.T8.e;
- * `marchSteps.ts`'s `marchSamplesOf`): `n` with no rule, on the sky or on a drawn surface; on the
- * bare ground scaled by its green optical depth on the gate's sphere through `transmittanceAt`
- * (light slot 0, the twin's own transmittance read) from its ground point along −d
- * (`tablesCpu.ts`'s `sphereBareGroundDepthG`), on a medium with `edges` march edges.
+ * `marchSteps.ts`'s `marchSamplesOf`): `n` with no rule, on a drawn surface, or on the sky under a
+ * rule with no thin sky; otherwise scaled by the segment's green optical depth on the gate's sphere
+ * through `transmittanceAt` (light slot 0, the twin's own transmittance read), the bare ground's from
+ * its ground point along −d, the sky's from its lowest point along each side (`tablesCpu.ts`'s
+ * `sphereBareGroundDepthG` and `sphereSkyDepthG`), on a medium with `edges` march edges.
  */
 export function gateMarchSamples(
   ray: GateRay,
@@ -364,7 +370,7 @@ export function gateMarchSamples(
   transmittanceAt: TwinSources["sunTransmittance"],
 ): number {
   const kind = marchKindOf(ray);
-  if (rule === null || kind !== "ground") {
+  if (rule === null || kind === "surface" || (kind === "sky" && rule.thinSky === null)) {
     return n;
   }
   const segment = {
@@ -374,11 +380,11 @@ export function gateMarchSamples(
     tEndM: ray.tEndM,
     fromCamera: ray.tStartM <= 0,
   };
-  const depthG = sphereBareGroundDepthG(
-    transmittanceAt,
-    { kind: "sphere", bottomRadiusM: BOTTOM_M },
-    segment,
-  );
+  const sphere = { kind: "sphere", bottomRadiusM: BOTTOM_M } as const;
+  const depthG =
+    kind === "ground"
+      ? sphereBareGroundDepthG(transmittanceAt, sphere, segment)
+      : sphereSkyDepthG(transmittanceAt, sphere, segment);
   return marchSamplesOf(kind, depthG, n, edges, rule);
 }
 

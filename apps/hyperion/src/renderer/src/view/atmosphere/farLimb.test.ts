@@ -44,7 +44,11 @@ import {
   compositeTransmittanceTwin,
   FAR_LIMB_BLEND_FROM,
   FAR_LIMB_BLEND_WIDTH,
+  FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS,
   FAR_LIMB_GAUSS_LEGENDRE,
+  FAR_LIMB_ROOM_SHARE,
+  FAR_LIMB_SCHEDULE,
+  FAR_LIMB_TWO_NODE_SCALE_HEIGHTS,
   farLimbBlend,
   farLimbFootprintTwin,
   farLimbShellsOf,
@@ -224,6 +228,15 @@ const wgslRule = (name: string): number[][] => {
     Number(m[2]),
   ]);
 };
+
+/** The shell piece's nodes `roomM` under a 100 km top, H held at 1 km. */
+const scheduledAt = (roomM: number, scaleHeights: number): number =>
+  FAR_LIMB_SCHEDULE({
+    scaleHeights,
+    scaledHeightM: 100_000 - roomM,
+    scaleHeightM: 1_000,
+    topM: 100_000,
+  });
 
 /** Each value as recorded to about 10⁻⁹ of itself. */
 const toRounding = (values: readonly number[]): unknown =>
@@ -433,18 +446,50 @@ describe("the far limb's blend (R08.T8.c)", () => {
 
   it("holds the same Gauss–Legendre rules and blend as farLimb.wgsl", () => {
     expect(wgslRule("FAR_LIMB_GAUSS_2")).toEqual(FAR_LIMB_GAUSS_LEGENDRE[2]);
+    expect(wgslRule("FAR_LIMB_GAUSS_4")).toEqual(FAR_LIMB_GAUSS_LEGENDRE[4]);
     expect(wgslRule("FAR_LIMB_GAUSS_8")).toEqual(FAR_LIMB_GAUSS_LEGENDRE[8]);
     expect(farLimbWgsl).toContain(`const FAR_LIMB_BLEND_FROM : f32 = ${FAR_LIMB_BLEND_FROM};`);
     expect(farLimbWgsl).toContain(`const FAR_LIMB_BLEND_WIDTH : f32 = ${FAR_LIMB_BLEND_WIDTH};`);
+    // The shell piece's schedule (R08.T8.e, lever 4), written as the kernel holds it.
+    expect(farLimbWgsl).toContain(`const FAR_LIMB_ROOM_SHARE : f32 = ${FAR_LIMB_ROOM_SHARE};`);
+    expect(farLimbWgsl).toContain(
+      `const FAR_LIMB_TWO_NODE_SCALE_HEIGHTS : f32 = ${FAR_LIMB_TWO_NODE_SCALE_HEIGHTS.toFixed(1)};`,
+    );
+    expect(farLimbWgsl).toContain(
+      `const FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS : f32 = ${FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS.toFixed(1)};`,
+    );
   });
 
   it("takes Gauss–Legendre rules exact to degree 2n − 1", () => {
-    for (const n of [2, 8] as const) {
+    for (const n of [2, 4, 8] as const) {
       const moments = Array.from({ length: 2 * n }, (_, k) =>
         FAR_LIMB_GAUSS_LEGENDRE[n].reduce((sum, [x, w]) => sum + w * x ** k, 0),
       );
       expect(moments).toEqual(moments.map((_, k) => expect.closeTo(1 / (k + 1), 13)));
     }
+  });
+
+  // R08.T8.e (`decision-r08-t8-leans.md` §11, Ruling 3): fewer shell nodes only where the piece
+  // lies where H is held to the room left to the top.
+  it("schedules 2 shell nodes near the top to 2 local scale heights, 4 to 4, and 8 elsewhere", () => {
+    expect([
+      FAR_LIMB_ROOM_SHARE,
+      FAR_LIMB_TWO_NODE_SCALE_HEIGHTS,
+      FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS,
+    ]).toEqual([1.01, 2, 4]);
+    // Within the room held, at its margin, and in space over the top.
+    expect([0.5, 2, 2.01, 4, 4.01, 30].map((n) => scheduledAt(800, n))).toEqual([2, 2, 4, 4, 8, 8]);
+    expect([scheduledAt(1_010, 1), scheduledAt(-500, 1)]).toEqual([2, 2]);
+    // H no longer held to the room: §6.1's 8 at every extent.
+    expect([0.1, 1, 2, 8].map((n) => scheduledAt(1_011, n))).toEqual([8, 8, 8, 8]);
+    expect(
+      FAR_LIMB_SCHEDULE({
+        scaleHeights: 0.5,
+        scaledHeightM: 50_000,
+        scaleHeightM: 8_000,
+        topM: 100_000,
+      }),
+    ).toBe(8);
   });
 
   // s of each limb-set ray's high pixel, by the local scale height at its tangent point.
@@ -670,18 +715,20 @@ describe("the far limb's fidelity on high against the converged footprint (R08.T
   // tangent point) the pixels over are the backlit 0.3 and 1 H rows that T8.b recorded as the edge's
   // aliasing, the 0.1 H row's s over 1 now taking its footprint's mean. Since R08.T8.e the bare
   // ground's count follows its optical depth on high: the medians on R05's Earth from 10⁸ m and the
-  // measured Earth from 10⁹ m moved (0.35% → 0.38%, 0.71% → 0.70%; 2026-10-22), no worst or count.
+  // measured Earth from 10⁹ m moved (0.35% → 0.38%, 0.71% → 0.70%; 2026-10-22), no worst or count;
+  // its thin sky at 28 steps those on R05's Earth and the Saturn-class figure from 10⁹ m (1.47% →
+  // 1.48%, 0.30% → 0.34%; 2026-10-23).
   it("records the worst and median e and the count over 5% per body and distance", () => {
     expect(figuresOf((p) => p.e)).toEqual(
       recordedFigures({
         "R05's Earth, 10⁷ m": { worst: 0.4221, median: 0.00594, over: 4 },
         "R05's Earth, 10⁸ m": { worst: 0.03225, median: 0.00382, over: 0 },
-        "R05's Earth, 10⁹ m": { worst: 0.1086, median: 0.0147, over: 5 },
+        "R05's Earth, 10⁹ m": { worst: 0.1086, median: 0.01479, over: 5 },
         "the measured Earth, 10⁷ m": { worst: 0.26588, median: 0.00095, over: 2 },
         "the measured Earth, 10⁸ m": { worst: 0.02854, median: 0.00201, over: 0 },
         "the measured Earth, 10⁹ m": { worst: 0.09207, median: 0.00697, over: 5 },
         "Saturn-class, 10⁸ m": { worst: 0.05016, median: 0.00096, over: 1 },
-        "Saturn-class, 10⁹ m": { worst: 0.02953, median: 0.003, over: 0 },
+        "Saturn-class, 10⁹ m": { worst: 0.02953, median: 0.0034, over: 0 },
         "R05's Earth, s = 1": { worst: 0.00153, median: 0.00012, over: 0 },
       }),
     );
@@ -964,7 +1011,9 @@ describe("the kernel's own quadrature on the limb set, e_q (R08.T8.b)", () => {
   // the worst at 0.1 H with the Sun 90–100° behind the camera (the gate's limb from 400 km stands
   // at 4.35% and its night limb at 4.69% on R05's Earth). Low's 16 steps put nine rays a body
   // over, the Saturn-class limb's worst at 1 H, sun 100°/0° (31.86%), over the 24.0% that
-  // `LOW_TWIN_WORST.rayMarch` measured on Earth's media.
+  // `LOW_TWIN_WORST.rayMarch` measured on Earth's media. R08.T8.e's thin sky at 28 steps moves only
+  // high's medians (2026-10-23); at 16 and 20 steps the Saturn-class limb at 10 H, sun 100°/0°, rose
+  // to 4.48% and 2.32%, and at 12 to 14.6%.
   it("records e_q per body and setting: the worst, where it is, the median and the count over 5%", () => {
     const record = Object.fromEntries(
       [...results.entries()].map(([key, es]) => {
@@ -974,11 +1023,11 @@ describe("the kernel's own quadrature on the limb set, e_q (R08.T8.b)", () => {
     );
     const at = recordedAt;
     expect(record).toEqual({
-      "R05's Earth, high": at("sun 100°/180°, 0.1 H", { worst: 0.04645, median: 0.0033, over: 0 }),
+      "R05's Earth, high": at("sun 100°/180°, 0.1 H", { worst: 0.04645, median: 0.00337, over: 0 }),
       "R05's Earth, low": at("sun 90°/0°, 0.1 H", { worst: 0.24039, median: 0.0107, over: 9 }),
       "the measured Earth, high": at("sun 100°/180°, 0.1 H", {
         worst: 0.04418,
-        median: 0.00082,
+        median: 0.00109,
         over: 0,
       }),
       "the measured Earth, low": at("sun 100°/180°, 0.1 H", {
@@ -986,7 +1035,7 @@ describe("the kernel's own quadrature on the limb set, e_q (R08.T8.b)", () => {
         median: 0.01938,
         over: 9,
       }),
-      "Saturn-class, high": at("sun 90°/180°, 0.1 H", { worst: 0.01303, median: 0.00178, over: 0 }),
+      "Saturn-class, high": at("sun 90°/180°, 0.1 H", { worst: 0.01303, median: 0.00186, over: 0 }),
       "Saturn-class, low": at("sun 100°/0°, 1 H", { worst: 0.31862, median: 0.01014, over: 9 }),
     });
   });

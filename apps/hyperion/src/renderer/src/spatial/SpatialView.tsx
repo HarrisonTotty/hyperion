@@ -44,6 +44,7 @@ import {
   markInksPx,
   placeAnnulusLabels,
   placeCurveLabels,
+  tickInksPx,
   TRIAD_BOX_REM,
   triadBoxRem as triadBoxOf,
   triadFootprintPx,
@@ -432,9 +433,9 @@ export function SpatialView({
       ? []
       : placeCurveLabels(drawList.curveLabels, viewport, furniture, marksInks);
   // The annuli's labels, and what both of their passes measure for them, once: every mark's
-  // bracket's box, which they keep 0.25 rem outside, and the curves, which they prefer a place clear
-  // of. A view that labels no annulus, as the star chart, measures neither (plan 14, P14.T42.d,
-  // T42.e).
+  // bracket's box, which they keep 0.25 rem outside, the ticks, which they never cross, and the
+  // orbits and edges, which they prefer a place clear of. A view that labels no annulus, as the
+  // star chart, measures none of them (plan 14, P14.T42.d, T42.e, T42.f).
   const annuli =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
@@ -446,12 +447,13 @@ export function SpatialView({
           marks: marksInks,
           brackets: drawList.anchors.map((anchor) => bracketBoxPx(anchor, viewport.remPx, strokes)),
           curves: curveInksPx(drawList.ops, pixelRatio),
+          ticks: tickInksPx(drawList.ops, pixelRatio),
         };
   // A selected belt's, ring's or halo's label is the selection's: placed next, before the marks'
   // labels, which give way to it, by the annuli's rules, 0.5 rem from what stands before it, 0.25 rem
-  // outside every mark's bracket's box and preferring a place no curve crosses, or not drawn, with
-  // no last resort, as the selection's label has none (plan 14, P14.T42.e). A scene that selects an
-  // annulus selects no mark, so the two never compete.
+  // outside every mark's bracket's box, crossed by no tick and preferring a place no orbit or edge
+  // crosses, or not drawn, with no last resort, as the selection's label has none (plan 14,
+  // P14.T42.e, T42.f). A scene that selects an annulus selects no mark, so the two never compete.
   const selectedAnnuli = annuli.filter((label) => label.selected === true);
   const selectedAnnulusLabels =
     viewport === null || annulusInks === null || selectedAnnuli.length === 0

@@ -16,9 +16,12 @@
 // camera, so that nothing pops and no hysteresis is needed. The footprint is projected on the
 // screen direction in which h rises, a trapezoid (a box where the limb lies along a texel's side), cut
 // where h meets the datum's edge and the top: the ground piece takes 2 Gauss-Legendre nodes, the
-// shell piece 8 (the ceiling at every span: 2 under one local scale height put the Saturn-class
-// figure's 1 H pixel from 1e8 m at 10.9% of its converged footprint, where 8 hold it at 5.0%), and
-// space none, each piece weighted by its share and each node by the projection's density there.
+// shell piece 8 (2 under one local scale height put the Saturn-class figure's 1 H pixel from 1e8 m
+// at 10.9% of its converged footprint, where 8 hold it at 5.0%) but where its local scale height is
+// held to the room left to the top (top - h* <= 1.01 H at the centre's tangent point), where it
+// takes 2 up to 2 H tall and 4 up to 4 H (since R08.T8.e, lever 4 of `decision-r08-t8-leans.md`
+// section 11; `tablesCpu.ts`'s FAR_LIMB_SCHEDULE), and space none, each piece weighted by its share
+// and each node by the projection's density there.
 // Texels whose footprint lies wholly on the face, wholly in space, or whose closest approach lies
 // behind the camera, and every texel with w_L 0, keep the centre ray. Each node is marched at the
 // scene's depth under its own point. h is a difference of radii, which Design note 18 keeps out of
@@ -35,6 +38,12 @@ const FAR_LIMB_BOX_WIDTH : f32 = 1e-4;
 const FAR_LIMB_GAUSS_2 = array<vec2f, 2>(
   vec2f(0.211324865405187, 0.5),
   vec2f(0.788675134594813, 0.5),
+);
+const FAR_LIMB_GAUSS_4 = array<vec2f, 4>(
+  vec2f(0.069431844202974, 0.173927422568727),
+  vec2f(0.330009478207572, 0.326072577431273),
+  vec2f(0.669990521792428, 0.326072577431273),
+  vec2f(0.930568155797026, 0.173927422568727),
 );
 const FAR_LIMB_GAUSS_8 = array<vec2f, 8>(
   vec2f(0.019855071751232, 0.050614268145188),
@@ -55,7 +64,15 @@ struct FarLimbProjection {
   halfWidth : f32,
 }
 
-// Node i of the `count`-node rule above, 2 or 8 (`farLimbAddPiece` before R08.T8.d held both rules
+// The shell piece's schedule (R08.T8.e, lever 4; `tablesCpu.ts`'s FAR_LIMB_ROOM_SHARE,
+// FAR_LIMB_TWO_NODE_SCALE_HEIGHTS and FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS): the room left to the top,
+// in local scale heights, under which H is held to it, and the piece's tallest extents, in local
+// scale heights, for 2 and 4 nodes there.
+const FAR_LIMB_ROOM_SHARE : f32 = 1.01;
+const FAR_LIMB_TWO_NODE_SCALE_HEIGHTS : f32 = 2.0;
+const FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS : f32 = 4.0;
+
+// Node i of the `count`-node rule above, 2, 4 or 8 (`farLimbAddPiece` before R08.T8.d held the rules
 // in arrays it indexed by a loop variable, which Tint copies whole into each invocation): each read
 // by a constant index.
 fn farLimbGaussNode(count : u32, i : u32) -> vec2f {
@@ -64,6 +81,22 @@ fn farLimbGaussNode(count : u32, i : u32) -> vec2f {
       return FAR_LIMB_GAUSS_2[0];
     }
     return FAR_LIMB_GAUSS_2[1];
+  }
+  if (count == 4u) {
+    switch (i) {
+      case 0u: {
+        return FAR_LIMB_GAUSS_4[0];
+      }
+      case 1u: {
+        return FAR_LIMB_GAUSS_4[1];
+      }
+      case 2u: {
+        return FAR_LIMB_GAUSS_4[2];
+      }
+      default: {
+        return FAR_LIMB_GAUSS_4[3];
+      }
+    }
   }
   switch (i) {
     case 0u: {
@@ -200,7 +233,7 @@ fn farLimbShareBelow(p : FarLimbProjection, xi : f32) -> f32 {
   return 1.0 - farLimbShareUnder(p, -t);
 }
 
-// A piece [lowXi, highXi] of the footprint: `count` Gauss-Legendre nodes (2 or 8), each weighted by
+// A piece [lowXi, highXi] of the footprint: `count` Gauss-Legendre nodes (2, 4 or 8), each weighted by
 // the projection's density there, the piece's weights scaled to its share; no nodes, and so no
 // piece, where it is empty or holds no share.
 fn farLimbPieceOf(p : FarLimbProjection, lowXi : f32, highXi : f32, count : u32) -> FarLimbPiece {
@@ -297,7 +330,8 @@ fn farLimbFootprintOf(
   let tangent = origin + centre.y * dir;
   let sin2 = tangent.z * tangent.z / dot(tangent, tangent);
   let s = gravityRatioAt(body, sin2);
-  let scaleM = oblateScaleHeightAt(body, table, s * max(centre.x, 0.0));
+  let hStar = s * max(centre.x, 0.0);
+  let scaleM = oblateScaleHeightAt(body, table, hStar);
   // The table's H is in h*, s times the geometric height's: the span over H / s.
   let blend = clamp((spanM * s / scaleM - FAR_LIMB_BLEND_FROM) / FAR_LIMB_BLEND_WIDTH, 0.0, 1.0);
   if (!(blend > 0.0)) {
@@ -316,7 +350,18 @@ fn farLimbFootprintOf(
   footprint.g = g;
   footprint.size = size;
   footprint.ground = farLimbPieceOf(p, -p.halfWidth, groundXi, 2u);
-  footprint.shell = farLimbPieceOf(p, groundXi, topXi, 8u);
+  // The shell piece's nodes (R08.T8.e, lever 4): 8, but where H is held to the room left to the top
+  // 2 up to 2 H tall and 4 up to 4 H; a NaN takes 8, as the twin's comparisons give it.
+  let shellExtent = (topXi - groundXi) * gLength / scaleM;
+  var shellCount = 8u;
+  if (topM - hStar <= FAR_LIMB_ROOM_SHARE * scaleM) {
+    if (shellExtent <= FAR_LIMB_TWO_NODE_SCALE_HEIGHTS) {
+      shellCount = 2u;
+    } else if (shellExtent <= FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS) {
+      shellCount = 4u;
+    }
+  }
+  footprint.shell = farLimbPieceOf(p, groundXi, topXi, shellCount);
   footprint.count = footprint.ground.count + footprint.shell.count;
   return footprint;
 }

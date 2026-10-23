@@ -101,7 +101,9 @@ use crate::planetary::chem::condense::{
 use crate::planetary::chem::quench::{EddyDiffusion, MixingColumn};
 use crate::planetary::derive::atmosphere::SurfaceState;
 use crate::planetary::hooks::structure::RadiativeConvective;
-use crate::planetary::hooks::sulphur::{DeriveSulphurError, Sulphur, SulphurCycle, SulphurInputs};
+use crate::planetary::hooks::sulphur::{
+    DeriveSulphurError, RunawayDeck, Sulphur, SulphurCycle, SulphurInputs,
+};
 use crate::substance::aloft::law_aloft;
 use crate::substance::{
     CondensedPhase, ExtinctionBasis, MOLAR_GAS_CONSTANT, SizeDistribution, SubstanceId,
@@ -1321,6 +1323,10 @@ pub struct AerosolInputs<'a> {
     /// Whether the surface holds liquid water (P14.T24.a's flag), which sets SO₂'s life on a
     /// temperate or snowball world (P14.T24.g).
     pub liquid_water: bool,
+    /// Whether a runaway greenhouse's climate keeps Venus's acid deck (P14.T53.b part 1 (b)),
+    /// which with the state gives P14.T24.g's case ([`SulphurCycle::case_of`]); read only for a
+    /// runaway.
+    pub runaway_deck: RunawayDeck,
 }
 
 /// [`AerosolInventory::derive`] refused its inputs.
@@ -1456,6 +1462,7 @@ impl AerosolInventory {
     /// use hyperion_sim::planetary::derive::atmosphere::SurfaceState;
     /// use hyperion_sim::planetary::hooks::aerosols::{AerosolInputs, AerosolInventory};
     /// use hyperion_sim::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
+    /// use hyperion_sim::planetary::hooks::sulphur::RunawayDeck;
     /// use hyperion_sim::substance::by_key;
     /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
     ///
@@ -1481,6 +1488,7 @@ impl AerosolInventory {
     ///     surface_liquid_cover: 0.7,
     ///     outgassing: 0.0,
     ///     liquid_water: true,
+    ///     runaway_deck: RunawayDeck::Kept,
     /// })?;
     /// let water = inventory
     ///     .decks()
@@ -1838,7 +1846,7 @@ fn dust(inputs: &AerosolInputs<'_>) -> Result<Option<AerosolMode>, BuildModeErro
 #[must_use]
 const fn sulphur_inputs<'a>(inputs: &AerosolInputs<'a>) -> SulphurInputs<'a> {
     SulphurInputs {
-        state: inputs.state,
+        cycle: SulphurCycle::case_of(inputs.state, inputs.runaway_deck),
         outgassing: inputs.outgassing,
         starlit: inputs.star_temperature.is_some(),
         liquid_water: inputs.liquid_water,

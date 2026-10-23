@@ -211,9 +211,9 @@ export function marchStep(split: MarchSplit, i: number): MarchStep {
 
 /**
  * The ray march's count scaled by a segment's optical depth (plan R08, R08.T8.e; lever 3 of
- * `decision-r08-t8-leans.md` §8, taken by §9, Ruling 2, item 3), on the bare ground alone: at most
- * the setting's count, down to the floors R05.T12.e's gate sets, at no wider tolerance, the shader
- * and the twin alike ({@link marchSamplesOf}).
+ * `decision-r08-t8-leans.md` §8, taken by §9, Ruling 2, item 3; the thin sky's floor by §10,
+ * Ruling 4, item 2): at most the setting's count, down to the floors R05.T12.e's gate sets, at no
+ * wider tolerance, the shader and the twin alike ({@link marchSamplesOf}).
  *
  * @remarks
  * Measured against the gate at one source and at six on R05's Earth, `earth.ts`'s `EARTH_REFERENCE`
@@ -223,13 +223,20 @@ export function marchStep(split: MarchSplit, i: number): MarchStep {
  * 28 on the slab Earth, whose ozone slab's two edges cut each ray into three pieces. Grazing bare
  * ground under a twilight sun behind the camera (the gate's `past` family from 50 km, depth 6–10)
  * needs 22–28 even on R05's Earth, so the ground's count climbs back to the setting's over
- * {@link MarchDepthSteps.groundRampDepths}. A sky segment and a drawn surface keep the setting's
- * count. A thin sky segment's error follows its depth in the gate (every one under 0.05 in green
- * held at 8–12 steps), but 12 steps there put the far limb of a Saturn-class body at 10⁹ m over
- * its 5% flicker bound (5.42%) and its quadrature on the limb set to 14.6%, the camera's last light
- * from 50–100 km 4–10 codes off, and a seam of 3.5 codes at the horizontal from 40 km, where a thin
- * ray up meets a thick one down; and it saved about 6% of the march's steps from orbit. So the sky
- * takes no rule (R08.T8.e, 2026-10-22).
+ * {@link MarchDepthSteps.groundRampDepths}. A drawn surface keeps the setting's count.
+ *
+ * A thin sky segment's error follows its depth in the gate (every one under 0.05 in green held at
+ * 8–12 steps), but the gate does not bound the floor (2026-10-22–23): 12 steps put the far limb of
+ * a Saturn-class body at 10⁹ m over its 5% flicker bound (5.42%) and its quadrature on the limb set
+ * to 14.6%, the camera's last light from 50–100 km 4–10 codes off, and a seam of 3.5 codes at the
+ * horizontal from 40 km, where a thin ray up meets a thick one down. Searched at 16, 20, 24, 28 and
+ * 32 steps against the gate, the far limb's flicker and fidelity, the band's seam, the top's step
+ * and the last light, which binds: on high its worst window stands at 3.76, 2.70 and 2.27 codes at
+ * 16, 20 and 24 (1.68 at 36, from 95 km; §5.4's warp held it within 1.7), and at 28 at 1.68 as at
+ * 36, the rows it moves at most 1.26 (80 km, from 1.21). So the thin sky takes 28 steps
+ * ({@link MarchDepthSteps.thinSky}). On T8.c's timing frames it takes the march's mean steps a
+ * marched pixel from 0.622 to 0.604 of 36 from 400 km on the measured Earth, and 4–7% more off the
+ * far cameras' footprint nodes over the thin limb.
  */
 export interface MarchDepthSteps {
   /** The bare ground's count on a medium with no march edge, before its ramp. */
@@ -242,6 +249,19 @@ export interface MarchDepthSteps {
    * above.
    */
   readonly groundRampDepths: readonly [number, number];
+  /** A thin sky segment's count, or `null` where the sky keeps the setting's count. */
+  readonly thinSky: ThinSkyRule | null;
+}
+
+/** A thin sky segment's count under {@link MarchDepthSteps} (plan R08, R08.T8.e). */
+export interface ThinSkyRule {
+  /** The count of a sky segment under `depthG`, at most the setting's. */
+  readonly samples: number;
+  /**
+   * The green optical depth, absorbers included, under which a sky segment is thin: summed from its
+   * lowest point along each side it has.
+   */
+  readonly depthG: number;
 }
 
 /**
@@ -253,13 +273,16 @@ export type MarchSegmentKind = "ground" | "sky" | "surface";
 
 /**
  * The ray march's count for one segment (plan R08, R08.T8.e; `decision-r08-t8-leans.md` §8, lever 3):
- * the setting's `samples` with no rule, on the sky, on a drawn surface, or where the depth is not
- * finite; on the bare ground the floor F₀ = min(`samples`, `groundFloor` + `groundFloorPerEdge` ×
- * `edges`) up to d₀, the setting's from d₁, and between them F₀ + 2⌈(`samples` − F₀)(d − d₀) ÷
- * (2 (d₁ − d₀))⌉, held to [F₀, `samples`]. The kernel forms the same in `f32` (`rayMarch.wgsl`).
+ * the setting's `samples` with no rule, on a drawn surface, or where the depth is not finite; on a
+ * sky segment the rule's {@link ThinSkyRule}'s count, at most `samples`, under its depth, and
+ * `samples` otherwise or with none; on the bare ground the floor F₀ = min(`samples`, `groundFloor` +
+ * `groundFloorPerEdge` × `edges`) up to d₀, the setting's from d₁, and between them F₀ +
+ * 2⌈(`samples` − F₀)(d − d₀) ÷ (2 (d₁ − d₀))⌉, held to [F₀, `samples`]. The kernel forms the same in
+ * `f32` (`rayMarch.wgsl`).
  *
- * @param depthG - The bare ground's green optical depth, absorbers included: the light's from the
- *   ground point along −d (`tablesCpu.ts`'s `rayMarchTexelInto`).
+ * @param depthG - The segment's green optical depth, absorbers included: the bare ground's from its
+ *   ground point along −d, a sky segment's from its lowest point along each side
+ *   (`tablesCpu.ts`'s `rayMarchTexelInto`).
  * @param samples - The setting's count (`TableSizes`' `rayMarchSamples`).
  * @param edges - The medium's march edges, as many as the kernel's `layerEdges.count.x`.
  * @param rule - The setting's {@link MarchDepthSteps}, or `null` for the setting's count everywhere.
@@ -271,8 +294,14 @@ export function marchSamplesOf(
   edges: number,
   rule: MarchDepthSteps | null,
 ): number {
-  if (rule === null || kind !== "ground" || !Number.isFinite(depthG)) {
+  if (rule === null || kind === "surface" || !Number.isFinite(depthG)) {
     return samples;
+  }
+  if (kind === "sky") {
+    const { thinSky } = rule;
+    return thinSky !== null && depthG < thinSky.depthG
+      ? Math.min(samples, thinSky.samples)
+      : samples;
   }
   const floor = Math.min(samples, rule.groundFloor + rule.groundFloorPerEdge * edges);
   const [d0, d1] = rule.groundRampDepths;

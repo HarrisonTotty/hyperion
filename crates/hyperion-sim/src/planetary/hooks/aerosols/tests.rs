@@ -71,6 +71,7 @@ fn inputs_of<'a>(
         }),
         outgassing: table_figures(body).map_or(0.0, |f| f.outgassing()),
         liquid_water: conditions.liquid_water(),
+        runaway_deck: RunawayDeck::Kept,
     }
 }
 
@@ -142,6 +143,7 @@ impl HandAir {
             surface_liquid_cover: 0.0,
             outgassing: 0.0,
             liquid_water: false,
+            runaway_deck: RunawayDeck::Kept,
         }
     }
 
@@ -599,7 +601,11 @@ fn nothing_on_the_record_calls_the_inventory_yet() {
     let mut files = Vec::new();
     walk(&src, &mut files);
     assert!(files.len() > 100, "the walk found the crate's sources");
-    let own = ["planetary/hooks/aerosols", "planetary/hooks/sulphur"];
+    let own = [
+        "planetary/hooks/aerosols",
+        "planetary/hooks/sulphur",
+        "planetary/hooks/envelope_atmosphere",
+    ];
     // The record's own `AerosolInventory` is its placeholder, which P14.T54.b replaces with this.
     let patterns = [
         "hooks::aerosols",
@@ -1251,6 +1257,7 @@ fn measured_mars_inventory() -> AerosolInventory {
         surface_liquid_cover: 0.0,
         outgassing: 0.0,
         liquid_water: false,
+        runaway_deck: RunawayDeck::Kept,
     })
     .unwrap()
 }
@@ -1381,6 +1388,7 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
         surface_liquid_cover: 0.0,
         outgassing: 0.0,
         liquid_water: false,
+        runaway_deck: RunawayDeck::Kept,
     };
     let inventory = AerosolInventory::derive(&inputs).unwrap();
     let dust: Vec<&AerosolMode> = inventory

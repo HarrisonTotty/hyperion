@@ -55,6 +55,7 @@ impl Air {
             surface_liquid_cover: 0.0,
             outgassing,
             liquid_water: self.liquid_water,
+            runaway_deck: RunawayDeck::Kept,
         }
     }
 
@@ -139,6 +140,7 @@ fn table_inventory(name: &str) -> (AerosolInventory, f64) {
         surface_liquid_cover: 0.0,
         outgassing,
         liquid_water: conditions.liquid_water(),
+        runaway_deck: RunawayDeck::Kept,
     };
     (
         AerosolInventory::derive(&inputs).unwrap_or_else(|e| panic!("{name}: {e}")),
@@ -183,7 +185,7 @@ fn the_measured_venus_carries_its_four_mode_deck() {
     let inventory = venus.inventory(VENUS_OUTGASSING);
     assert_sound(&inventory);
     let sulphur = Sulphur::derive(&SulphurInputs {
-        state: venus.state,
+        cycle: SulphurCycle::case_of(venus.state, RunawayDeck::Kept),
         outgassing: VENUS_OUTGASSING,
         starlit: true,
         liquid_water: false,
@@ -419,6 +421,7 @@ fn a_temperate_world_keeps_a_thin_layer_at_any_outgassing() {
                 surface_liquid_cover: 0.7,
                 outgassing: o,
                 liquid_water: wet,
+                runaway_deck: RunawayDeck::Kept,
             };
             let inventory = AerosolInventory::derive(&inputs).unwrap();
             assert_sound(&inventory);
@@ -486,13 +489,14 @@ fn the_sulphur_is_continuous() {
 
 /// Once through, SO₂'s column is its flux times its life: [`WET_SULPHUR_LIFETIME`] over liquid
 /// water and [`DRY_ONCE_THROUGH_LIFETIME`] without; and a cycling world's is the flux times
-/// [`DRY_SULPHUR_LIFETIME`], whatever its air.
+/// [`DRY_SULPHUR_LIFETIME`], whatever its air, below the trace limit (the table's Earth's air at
+/// O 0.2, the cycling column under 1% of it; the limit is the next test's).
 #[test]
 fn the_column_is_the_flux_times_its_life() {
     let (_, conditions, structure) = table_air("Earth");
-    let inputs = |state: SurfaceState, liquid_water: bool| SulphurInputs {
-        state,
-        outgassing: 2.0,
+    let inputs = |state: SurfaceState, deck: RunawayDeck, liquid_water: bool| SulphurInputs {
+        cycle: SulphurCycle::case_of(state, deck),
+        outgassing: 0.2,
         starlit: true,
         liquid_water,
         surface_pressure: conditions.surface_pressure(),
@@ -500,18 +504,40 @@ fn the_column_is_the_flux_times_its_life() {
         gravity: MetresPerSecondSquared::new(9.81),
         structure: &structure,
     };
-    let flux = 2.0 * EARTH_SULPHUR_DIOXIDE_FLUX;
-    for (state, wet, life) in [
-        (SurfaceState::Temperate, true, WET_SULPHUR_LIFETIME),
-        (SurfaceState::Temperate, false, DRY_ONCE_THROUGH_LIFETIME),
-        (SurfaceState::Snowball, false, DRY_ONCE_THROUGH_LIFETIME),
-        (SurfaceState::RunawayGreenhouse, false, DRY_SULPHUR_LIFETIME),
+    let flux = 0.2 * EARTH_SULPHUR_DIOXIDE_FLUX;
+    let (kept, deckless) = (RunawayDeck::Kept, RunawayDeck::Deckless);
+    for (state, deck, wet, life) in [
+        (SurfaceState::Temperate, kept, true, WET_SULPHUR_LIFETIME),
+        (
+            SurfaceState::Temperate,
+            kept,
+            false,
+            DRY_ONCE_THROUGH_LIFETIME,
+        ),
+        (
+            SurfaceState::Snowball,
+            kept,
+            false,
+            DRY_ONCE_THROUGH_LIFETIME,
+        ),
+        (
+            SurfaceState::RunawayGreenhouse,
+            kept,
+            false,
+            DRY_SULPHUR_LIFETIME,
+        ),
+        (
+            SurfaceState::RunawayGreenhouse,
+            deckless,
+            false,
+            DRY_ONCE_THROUGH_LIFETIME,
+        ),
     ] {
-        let sulphur = Sulphur::derive(&inputs(state, wet));
+        let sulphur = Sulphur::derive(&inputs(state, deck, wet));
         assert_same_bits(sulphur.flux(), flux);
         assert!(
             (sulphur.column_per_m2() / (flux * life.value()) - 1.0).abs() < 1e-15,
-            "{state:?}"
+            "{state:?} {deck:?}"
         );
     }
     for state in [
@@ -519,8 +545,128 @@ fn the_column_is_the_flux_times_its_life() {
         SurfaceState::MagmaOcean,
         SurfaceState::GasEnvelope,
     ] {
-        assert_eq!(Sulphur::derive(&inputs(state, false)), Sulphur::NONE);
+        for deck in [kept, deckless] {
+            assert_eq!(Sulphur::derive(&inputs(state, deck, false)), Sulphur::NONE);
+        }
     }
+}
+
+/// SO₂ is held a trace (decision-thick-acid-decks §3): a runaway in a 10-mbar CO₂ air at O 1 under
+/// Earth's gravity, whose Φ `t_dry` is 3.7 times its air's column, carries
+/// [`SULPHUR_DIOXIDE_TRACE_LIMIT`] exactly, and its absorber's column is the limit times the air's;
+/// so does a once-through world past the limit; below it, the column is the flux times its life.
+#[test]
+fn sulphur_dioxide_is_capped_at_a_trace_of_the_air() {
+    let (_, _, structure) = table_air("Earth");
+    let (p, mu, g) = (1_000.0, 44.01, 9.806_65);
+    let inputs = |cycle: SulphurCycle, outgassing: f64| SulphurInputs {
+        cycle,
+        outgassing,
+        starlit: true,
+        liquid_water: false,
+        surface_pressure: Pascals::new(p),
+        mean_molar_mass_g_per_mol: mu,
+        gravity: MetresPerSecondSquared::new(g),
+        structure: &structure,
+    };
+    let air = air_column(p, mu, g);
+    let uncapped = EARTH_SULPHUR_DIOXIDE_FLUX * DRY_SULPHUR_LIFETIME.value() / air;
+    assert!(
+        (3.6..3.8).contains(&uncapped),
+        "Φ t_dry {uncapped} of the air"
+    );
+    for (cycle, o) in [
+        (SulphurCycle::Cycling, 1.0),
+        (SulphurCycle::OnceThrough, 1e8),
+    ] {
+        let sulphur = Sulphur::derive(&inputs(cycle, o));
+        assert_same_bits(sulphur.mole_fraction(), SULPHUR_DIOXIDE_TRACE_LIMIT);
+        assert_same_bits(sulphur.column_per_m2(), SULPHUR_DIOXIDE_TRACE_LIMIT * air);
+        let absorber = sulphur
+            .absorber(Pascals::new(p), Pascals::new(0.1 * p))
+            .unwrap()
+            .expect("an absorber");
+        assert_same_bits(absorber.column_per_m2(), SULPHUR_DIOXIDE_TRACE_LIMIT * air);
+    }
+    let o = 1e-3;
+    let below = Sulphur::derive(&inputs(SulphurCycle::Cycling, o));
+    let column = o * EARTH_SULPHUR_DIOXIDE_FLUX * DRY_SULPHUR_LIFETIME.value();
+    assert_same_bits(below.column_per_m2(), column);
+    assert_same_bits(below.mole_fraction(), column / air);
+    assert!(below.mole_fraction() < SULPHUR_DIOXIDE_TRACE_LIMIT);
+}
+
+/// A runaway too cold beneath its deck to cycle its acid, solved deckless (P14.T53.b part 1 (b),
+/// decision-absurd-states-24 R3), passes its sulphur once through as a dry world: the measured
+/// Venus's air given the deckless case carries no acid deck and no `acid_uv_absorber`, its SO₂
+/// column is the flux times [`DRY_ONCE_THROUGH_LIFETIME`], and it keeps a thin sulphate layer.
+#[test]
+fn a_deckless_runaway_passes_its_sulphur_once_through_dry() {
+    let venus = measured_venus(735.0, 226.6);
+    let mut inputs = venus.inputs(VENUS_OUTGASSING);
+    inputs.runaway_deck = RunawayDeck::Deckless;
+    let inventory = AerosolInventory::derive(&inputs).expect("an inventory");
+    let acid = row("H2SO4");
+    assert!(inventory.decks().iter().all(|d| d.condensate() != acid));
+    assert!(
+        inventory
+            .modes()
+            .iter()
+            .all(|m| m.material() != row("acid_uv_absorber"))
+    );
+    let layer = inventory
+        .modes()
+        .iter()
+        .find(|m| m.deck() == acid)
+        .expect("a sulphate layer");
+    let tau = layer.optical_depth().expect("its τ").value();
+    assert!(tau > 0.0 && tau < 1.0, "the layer's τ {tau}");
+    let sulphur = Sulphur::derive(&SulphurInputs {
+        cycle: SulphurCycle::case_of(venus.state, RunawayDeck::Deckless),
+        outgassing: VENUS_OUTGASSING,
+        starlit: true,
+        liquid_water: false,
+        surface_pressure: Pascals::new(venus.p_s),
+        mean_molar_mass_g_per_mol: venus.mu,
+        gravity: MetresPerSecondSquared::new(venus.g),
+        structure: &venus.structure,
+    });
+    assert_eq!(sulphur.cycle(), SulphurCycle::OnceThrough);
+    let column = VENUS_OUTGASSING * EARTH_SULPHUR_DIOXIDE_FLUX * DRY_ONCE_THROUGH_LIFETIME.value();
+    assert!((sulphur.column_per_m2() / column - 1.0).abs() < 1e-15);
+}
+
+/// The case keeps P14.T24.g's rule by state for every runaway under its deck, and a deckless
+/// runaway alone changes case; the cycling temperature is 430 K.
+#[test]
+fn the_case_follows_the_state_and_the_deck() {
+    let states = [
+        (SurfaceState::RunawayGreenhouse, SulphurCycle::Cycling),
+        (SurfaceState::Temperate, SulphurCycle::OnceThrough),
+        (SurfaceState::Snowball, SulphurCycle::OnceThrough),
+        (SurfaceState::Airless, SulphurCycle::None),
+        (SurfaceState::MagmaOcean, SulphurCycle::None),
+        (SurfaceState::GasEnvelope, SulphurCycle::None),
+    ];
+    for (state, cycle) in states {
+        assert_eq!(
+            SulphurCycle::case_of(state, RunawayDeck::Kept),
+            cycle,
+            "{state:?}"
+        );
+        let deckless = if state == SurfaceState::RunawayGreenhouse {
+            SulphurCycle::OnceThrough
+        } else {
+            cycle
+        };
+        assert_eq!(
+            SulphurCycle::case_of(state, RunawayDeck::Deckless),
+            deckless,
+            "{state:?}"
+        );
+    }
+    assert_eq!(RunawayDeck::default(), RunawayDeck::Kept);
+    assert!((ACID_CYCLING_TEMPERATURE.value() - 430.0).abs() < 1e-12);
 }
 
 /// The same inputs give the same bits twice: the measured Venus's and the table's Earth's.
