@@ -91,6 +91,19 @@ pub fn sample_worlds() -> &'static [SampleWorld] {
     &WORLDS
 }
 
+/// The sample world named `name`, one of [`sample_worlds`], for a test that runs one world.
+///
+/// # Panics
+///
+/// If no sample world is named `name`, naming it.
+#[must_use]
+pub fn sample_world(name: &str) -> &'static SampleWorld {
+    sample_worlds()
+        .iter()
+        .find(|world| world.name() == name)
+        .unwrap_or_else(|| panic!("{name} is a sample world"))
+}
+
 impl SampleWorld {
     /// Its name, the name of its `reference` function and of its golden.
     #[must_use]
