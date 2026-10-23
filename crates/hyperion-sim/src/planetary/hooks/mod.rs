@@ -22,9 +22,10 @@
 //! - [`structure`]: the [`VerticalStructure`] of a surface's air (P14.T24.e), a scaled adiabat
 //!   over P14.T49.b's `c_p`(T) to an isothermal skin, with [`temperature_at`](structure::temperature_at),
 //!   which the flight model's drag and rendering plan R08 read, and of a gas envelope
-//!   ([`EnvelopeProfile`], P14.T24.d), Guillot's grey profile joined to its dry adiabat. It is
-//!   pure until P14.T54.b, the 23 → 24 bump, puts it in the record's surface and envelope
-//!   sections.
+//!   ([`EnvelopeProfile`], P14.T24.d), Guillot's grey profile joined to its dry adiabat.
+//!   P14.T54.b's wiring puts the surface's in the record's surface section, held off the record
+//!   until the 23 → 24 bump; the envelope's stays pure until P14.T54.b puts it in the record's
+//!   envelope section.
 //! - [`envelope_atmosphere`]: a gas envelope's visible atmosphere (P14.T24.d with P14.T52.d): its
 //!   internal temperature, the record's giant cooling blended with a stated cooling law
 //!   ([`envelope_internal_temperature`]), and its [`EnvelopeAtmosphere`], Guillot's profile on the

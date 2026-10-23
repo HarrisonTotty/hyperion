@@ -200,6 +200,7 @@ use crate::units::{
     KilogramsPerCubicMetre, Megayears, Metres, MetresPerSecondSquared, Radians, Seconds,
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
+use air::{AirRules, record_structure};
 use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water, shell_lag};
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
@@ -999,17 +1000,20 @@ pub struct PlanetarySystem {
     satellites: Vec<Satellites>,
     belts: Vec<Belt>,
     halo: Option<SystemHalo>,
-    /// Which rules its records' cold traps follow (P14.T51.f): those in force, which the tests may
-    /// change ([`with_record_rules`](Self::with_record_rules)).
+    /// Which rules its records' cold traps (P14.T51.f) and air's sections (P14.T54.b) follow: those
+    /// in force, which the tests may change ([`with_record_rules`](Self::with_record_rules)).
     record: RecordRules,
 }
 
-/// The rules a system's records' cold traps follow (P14.T51.f): the generator version's, and for
-/// the tests the batch's ahead of its bump. P14.T54.b deletes it with the holds.
+/// The rules a system's records' cold traps (P14.T51.f) and air's sections (P14.T24.e's vertical
+/// structure, P14.T54.b) follow: the generator version's, and for the tests the batch's ahead of
+/// its bump. P14.T54.b deletes it with the holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RecordRules {
     /// Its cold traps: their hold at 24.
     pub(crate) cold_traps: ColdTrapRules,
+    /// Its air's sections: their hold at 24 (`air::AIR_SECTIONS_VERSION`).
+    pub(crate) air: AirRules,
 }
 
 impl RecordRules {
@@ -1018,6 +1022,7 @@ impl RecordRules {
     pub(crate) fn in_force() -> Self {
         Self {
             cold_traps: ColdTrapRules::in_force(),
+            air: AirRules::in_force(),
         }
     }
 }
@@ -1737,9 +1742,9 @@ impl PlanetarySystem {
         &self.satellites
     }
 
-    /// The same system with its records' cold traps under `rules` (P14.T51.i), for
-    /// the tests and the cold traps' probe to reach 24's record path ahead of the bump. P14.T54.b
-    /// deletes it with the holds.
+    /// The same system with its records' cold traps (P14.T51.i) and air's sections (P14.T54.b)
+    /// under `rules`, for the tests and the cold traps' probe to reach 24's record path ahead of
+    /// the bump. P14.T54.b deletes it with the holds.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_record_rules(self, rules: RecordRules) -> Self {
@@ -5254,7 +5259,7 @@ struct SurfaceCase<'a> {
     continental_asymptote: f64,
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
-    /// The rules its cold traps follow.
+    /// The rules its cold traps and its air's sections follow.
     record: RecordRules,
 }
 
@@ -5392,6 +5397,11 @@ struct SurfaceCraters {
 /// the row its last pass read, to the bit; the conditions' ground's inertia reads the lid the
 /// published pass's context holds, as that pass's climate did. Not modelled over the passes'
 /// stand-in and for a body whose passes took no lid.
+///
+/// **The vertical structure** (P14.T24.e, wired by P14.T54.b; `air::record_structure`): from the
+/// conditions with their regime, the bulk section's equilibrium temperature and the figures' heat
+/// flow, as plan 14's T54.b names them; computed as none for a surface with no air. Not modelled
+/// while the air's sections are held, below generator version 24 (`air::AIR_SECTIONS_VERSION`).
 #[must_use]
 fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<Surface> {
     let Some(seasonal) = time.seasonal else {
@@ -5492,6 +5502,12 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         ice_threshold: figures.ice_threshold(),
     });
     let crust = record_crust(sky.crust_lid, &figures, &conditions);
+    let structure = record_structure(
+        case.record.air,
+        &conditions,
+        bulk.equilibrium_temperature(),
+        figures.heat_flow(),
+    );
     Section::Ok(
         Surface::new(air.state(), material, conditions, figures, published)
             .expect(
@@ -5499,7 +5515,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
                  regime",
             )
             .with_basis(basis)
-            .with_crust(crust),
+            .with_crust(crust)
+            .with_vertical_structure(structure),
     )
 }
 
@@ -6120,6 +6137,7 @@ impl<'c> Epoch<'c> {
     }
 }
 
+mod air;
 pub(crate) mod moon_ice;
 #[cfg(test)]
 pub(crate) mod tests;

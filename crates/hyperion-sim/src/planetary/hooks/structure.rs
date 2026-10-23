@@ -61,13 +61,16 @@
 //! and above the tropopause `T_skin`. A reader needs only the nodes: R08's client copies the
 //! formula and keeps no thermodynamics of its own.
 //!
-//! # Not on the record yet
+//! # On the record
 //!
-//! This module is pure: nothing on the record calls it at generator version 22
-//! (decision-bump-plan-after-22 §1.3). P14.T54.b, the 23 → 24 bump, puts its value in the record's
-//! surface section ([`record::Surface::vertical_structure`](crate::planetary::record::Surface::vertical_structure))
-//! and on the wire. P14.T24.d's gas envelope's profile ([`envelope`]) is its second variant,
-//! [`VerticalStructure::Envelope`], so that one [`temperature_at`] serves both.
+//! P14.T54.b's wiring puts its value in the record's surface section
+//! ([`record::Surface::vertical_structure`](crate::planetary::record::Surface::vertical_structure))
+//! and on the wire, from the conditions, the bulk section's `T_eq` and the figures' heat flow
+//! ([`StructureInputs::of_surface`]), and an airless surface's as none
+//! ([`DeriveStructureError::NoAir`]). The record holds it off until the 23 → 24 bump, so that below
+//! generator version 24 it is not modelled (decision-bump-plan-after-22 §1.3). P14.T24.d's gas
+//! envelope's profile ([`envelope`]) is its second variant, [`VerticalStructure::Envelope`], so
+//! that one [`temperature_at`] serves both; P14.T54.b.i puts it in the record's envelope section.
 //!
 //! # Determinism
 //!

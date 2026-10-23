@@ -52,6 +52,7 @@ use crate::planetary::hooks::cold_traps::ColdTrapRules;
 pub use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::figures::{GlobalFigures, PartitionGround};
+pub use crate::planetary::hooks::structure::VerticalStructure;
 use crate::planetary::hooks::surface::{ClimateRegime, OceanWeight, SurfaceConditions};
 use crate::planetary::index::{BodyIndex, BodySub};
 pub use crate::planetary::label::BodyLabel;
@@ -593,9 +594,11 @@ impl BulkProperties {
 /// The contents of a surface section (design note 16, P14.T48.e): a body's surface state and
 /// material, its surface conditions with their climate regime (P14.T24.a, T48.d), its global
 /// figures (P14.T24.b, T48.a–c), its condensates (P14.T51.a, from P14.T54.a) and its crust
-/// (P14.T51.c, from P14.T54.a, not modelled for a body whose passes took no lid), every substance
-/// in them a [`SubstanceId`](crate::substance::SubstanceId), and the members whose tasks land
-/// later, each [`Modelled::NotModelled`] until they do (decision-composition §1.10).
+/// (P14.T51.c, from P14.T54.a, not modelled for a body whose passes took no lid), its air's
+/// vertical structure (P14.T24.e, held off the record until P14.T54.b's bump at generator version
+/// 24), every substance in them a [`SubstanceId`](crate::substance::SubstanceId), and the members
+/// whose tasks land later, each [`Modelled::NotModelled`] until they do (decision-composition
+/// §1.10).
 ///
 /// It is the one section rendering plan R09's coarse pass reads
 /// ([`CoarseInputs::for_body`](crate::planetary::surface::CoarseInputs::for_body)). A record's
@@ -614,7 +617,7 @@ pub struct Surface {
     climate: ClimateRegime,
     conditions: SurfaceConditions,
     figures: GlobalFigures,
-    vertical_structure: Modelled<VerticalStructure>,
+    vertical_structure: Modelled<Option<VerticalStructure>>,
     aerosols: Modelled<AerosolInventory>,
     condensates: Condensates,
     crust: Modelled<CrustComposition>,
@@ -696,6 +699,20 @@ impl Surface {
         }
     }
 
+    /// The surface with its air's vertical structure `structure` (P14.T24.e, wired by P14.T54.b):
+    /// `Ok(None)` for a surface computed to hold no air, and not modelled while the air's sections
+    /// are held off the record (`system::air::record_structure`).
+    #[must_use]
+    pub(crate) fn with_vertical_structure(
+        self,
+        structure: Modelled<Option<VerticalStructure>>,
+    ) -> Self {
+        Self {
+            vertical_structure: structure,
+            ..self
+        }
+    }
+
     /// What its conditions and condensates were built on (rule (f)); `None` for a surface built
     /// apart from a record. The tests of rule (f) read it.
     #[cfg(test)]
@@ -748,10 +765,22 @@ impl Surface {
         &self.figures
     }
 
-    /// The vertical structure above the surface (P14.T24.e), not modelled until it lands.
+    /// The vertical structure of the surface's air (P14.T24.e's [`VerticalStructure`], its scaled
+    /// adiabat from the ground to an isothermal skin): `Ok(None)` for a surface computed to hold no
+    /// air, an airless body's or a melt's whose volatiles are gone, which the wire sends `null`.
+    ///
+    /// It is not modelled below generator version 24, which holds it off the record until
+    /// P14.T54.b's bump, and for an air whose structure is refused for anything but having no air
+    /// ([`RadiativeConvective::derive`](crate::planetary::hooks::RadiativeConvective::derive)),
+    /// which no generated body gives. The structure starts at the conditions' mean surface
+    /// temperature and surface pressure, and its skin is of the bulk section's equilibrium
+    /// temperature and the figures' heat flow.
     #[must_use]
-    pub const fn vertical_structure(&self) -> Modelled<&VerticalStructure> {
-        self.vertical_structure.as_ref()
+    pub const fn vertical_structure(&self) -> Modelled<Option<&VerticalStructure>> {
+        match &self.vertical_structure {
+            Modelled::Ok(structure) => Modelled::Ok(structure.as_ref()),
+            Modelled::NotModelled => Modelled::NotModelled,
+        }
     }
 
     /// The aerosol and absorber inventory (P14.T24.c), not modelled until it lands.
@@ -845,15 +874,6 @@ impl<T> Modelled<T> {
         }
     }
 }
-
-/// The vertical structure of a surface's air (P14.T24.e: the lapse rate α, the skin temperature
-/// and the adiabat's nodes), held off the record until the 23 → 24 bump, so the type has no value.
-///
-/// P14.T24.e builds it as [`hooks::VerticalStructure`](crate::planetary::hooks::VerticalStructure),
-/// a pure module at generator version 22; P14.T54.b puts that type in this one's place and fills
-/// the member (decision-bump-plan-after-22 §1.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum VerticalStructure {}
 
 /// A surface air's aerosol and absorber inventory (P14.T24.c: its modes, decks and absorbers),
 /// which no task builds yet, so the type has no value.

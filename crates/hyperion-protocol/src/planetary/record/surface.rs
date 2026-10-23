@@ -427,7 +427,8 @@ pub struct ProfileNodeDto {
 /// dln `T_ad` ÷ dln p = α R ÷ `c_p`(T) (Robinson and Catling 2012, Astrophys. J. 757, 104).
 ///
 /// Its surface temperature and pressure are the section's `mean_surface_temperature_k` and
-/// `surface_pressure_pa`, sent once. Absent from the wire until P14.T24.e, which may reshape it.
+/// `surface_pressure_pa`, which its first node repeats. Sent from P14.T54.b's bump at generator
+/// version 24, and absent from a server whose generator does not model it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct VerticalStructureDto {
@@ -811,7 +812,10 @@ pub struct BodySurfaceDto {
     pub craters: CraterContractDto,
     /// The wet epoch (P14.T48.b); `null` for a world never wet.
     pub wet_epoch: Option<WetEpochDto>,
-    /// The vertical structure (P14.T24.e); absent until that task.
+    /// The vertical structure of the surface's air (P14.T24.e): `null` for a surface computed to
+    /// hold no air, an airless body's or a melt's whose volatiles are gone, and absent from a
+    /// server whose generator does not model it, every one before P14.T54.b's bump at generator
+    /// version 24.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<VerticalStructureDto>>", optional)]
     pub vertical_structure: Modelled<VerticalStructureDto>,

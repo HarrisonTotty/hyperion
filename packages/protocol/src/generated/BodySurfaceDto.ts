@@ -176,7 +176,10 @@ craters: CraterContractDto,
  */
 wet_epoch: WetEpochDto | null, 
 /**
- * The vertical structure (P14.T24.e); absent until that task.
+ * The vertical structure of the surface's air (P14.T24.e): `null` for a surface computed to
+ * hold no air, an airless body's or a melt's whose volatiles are gone, and absent from a
+ * server whose generator does not model it, every one before P14.T54.b's bump at generator
+ * version 24.
  */
 vertical_structure?: VerticalStructureDto | null, 
 /**

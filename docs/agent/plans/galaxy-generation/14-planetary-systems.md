@@ -28957,3 +28957,54 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       Chem. Ref. Data 23, 515), 3% uncertain: 626 ± 19 MPa.
     - _P1's wording_ "every floor lies at or above ice V's 629.34 MPa" (T51.g.b's floors) reads as
       a lower bound; the same entry's "at or under 629.34 MPa" is meant.
+- **Deviations in P14.T54.b, as built (`p14-wire-24`, 2026-10-23).** The 23 → 24 batch's wiring,
+  split into P14.T54.b.a–.l (decision-p14-t54b-open). Every commit before P14.T54.b.l is a
+  checkpoint at 23 that moves no golden, its wiring behind a hold at 24.
+  - _P14.T54.b.a, the vertical structure on the record and the wire._ `GENERATOR_VERSION` stays
+    23, and no golden moves (`planetary_golden`, `observe_in_system_golden` and
+    `the_structure_is_pinned` pass unchanged).
+    - _The hold:_ `AIR_SECTIONS_VERSION` = 24 with `AirRules { Held, Batch }`, in the new
+      `planetary/system/air.rs`, which holds the record-side assembly of the air's sections;
+      `RecordRules` gains `air`, so `PlanetarySystem::with_record_rules` reaches the batch's
+      record at 23. Its tripwire, `the_air_sections_are_held_only_until_the_24_bump`, asserts the
+      version, `AirRules::in_force() == Held` and every golden system's surface
+      `vertical_structure` `NotModelled` at the epoch and at the clock window's end; its message
+      lists what P14.T54.b.l deletes. Under `Held` nothing is computed.
+    - _The member_ is `Modelled<Option<VerticalStructure>>`, `record::VerticalStructure` now the
+      re-export of `hooks::structure::VerticalStructure`. A new variant for "no air" was not
+      taken: `temperature_at` would gain a meaningless case, and the record's rule is that a
+      member computed as none is `Ok` of a value saying so. `DeriveStructureError::NoAir` gives
+      `Ok(None)`, sent `null`; any other refusal gives `NotModelled`, which carries no reason (0
+      refusals over the 40-system sample: 73 airs, 527 airless, the deepest adiabat 39 segments).
+    - _The inputs:_ the conditions with their regime (`StructureInputs::of_surface`), the bulk
+      section's T_eq and the figures' heat flow, as T54.b and T24.e name them, so that a reader
+      rebuilds the skin from what the record publishes. Rule (f)'s basis heat flow, the published
+      pass's context's, differs only on a bracketed body, by its context residual, and reaches
+      the skin only through T_int.
+    - _The wire:_ the server's `vertical_structure_member` sends `VerticalStructureDto`, its
+      `alpha`, `skin_temperature_k` and `adiabat`, `null` for none and absent while held; the
+      DTO's shape is unchanged (its docs only; bindings regenerated). A direct match stands in
+      for `later`, which cannot take an `Option<&T>` member. P14.T24.d's `Envelope` variant of
+      `VerticalStructure` (landed after this subtask was first cut) is `unreachable!` in the
+      surface's conversion, as `surface_state`'s `GasEnvelope` is: no surface holds one.
+    - _Venus:_ T24.e's 300–370 K at 1 bar, re-checked on T57.a's Venus under the switch: the
+      table's Venus (696.33 K, 57.84 bar) gives 356.40 K at 1 bar. The tripwire
+      `the_venus_test_is_rechecked_at_the_23_to_24_bump` stays until P14.T54.b.l.
+    - _Figures under the switch, stated:_ the table's Earth 290.57 K at 0.77 bar, α 0.6, skin
+      215.63 K, tropopause 0.135 bar; Venus α 0.88, skin 192.63 K, tropopause 0.051 bar; Titan
+      92.75 K at 1.47 bar, α 0.77, skin 62.44 K, tropopause 0.240 bar. A generated Earth
+      (system 112) 304.8 K at 2.46 bar, skin 202.7 K; Venus (system 1) 765 K at 350 bar, skin
+      169.3 K; Titan (system 91) 105.6 K at 2.13 bar, skin 73.05 K.
+    - _Recorded:_ two sample airs come out isothermal, their skin held at T_s:
+      `42002cae0000000a.0201` and `.0202`, Snowballs at 70.3 and 66.3 K (T24.e's deferred "skin
+      above the ground" finding, on generated bodies).
+    - _Tests:_ the tripwire; the record's structure is the derivation's or none without air (the
+      table: Venus, Earth, Mars and Titan carry one, Mercury, the Moon, Ganymede and Ceres
+      `null`); the table's Earth, Venus and Titan under the switch; every air carries its
+      structure and every airless surface none under the batch; plausible generated Earth, Venus
+      and Titan; the held record carries none and equals the batch's but for it; the same seed
+      twice; the server's three arms on a structure built through the sim's public API.
+    - _Left for P14.T54.b.l:_ the hold, `AirRules`, `record_structure`'s rules argument,
+      `RecordRules::air`, the Venus tripwire, `the_held_record_carries_no_structure` and the
+      hold's tripwire; the server's absent-members test flips to present, `null` on an airless
+      surface.

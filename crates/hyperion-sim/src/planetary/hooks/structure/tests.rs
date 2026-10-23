@@ -351,15 +351,18 @@ fn a_skin_as_warm_as_the_ground_leaves_an_isothermal_air() {
     assert_same_bits(profile.skin_temperature().value(), 80.0);
 }
 
-/// P14.T54.b's re-check: at the 23 → 24 bump the table's Venus is P14.T57.a's, and T24.e's
-/// 300–370 K test at 1 bar is re-run on it (decision-bump-plan-after-22 §1.3; plan 14's Risks,
-/// P14.T24.e). This tripwire fails at version 24 until the wiring re-checks it and deletes it.
+/// P14.T54.b's re-check of T24.e's 300–370 K Venus at 1 bar on P14.T57.a's Venus: made by
+/// P14.T54.b.a under the air's switch, which states it (`system::air`'s
+/// `the_table_s_earth_venus_and_titan_carry_their_structures_under_the_switch`: 356.4 K), and here
+/// on the table's structure (`the_table_s_tropopauses_skins_and_lapse_factors_fall_in_their_ranges`).
+/// This tripwire goes at P14.T54.b.l, the 23 → 24 bump, with the air's hold
+/// (decision-p14-t54b-open §1.3).
 #[test]
 fn the_venus_test_is_rechecked_at_the_23_to_24_bump() {
     assert!(
         crate::GENERATOR_VERSION.get() < 24,
-        "P14.T54.b: re-check T24.e's 300–370 K Venus at 1 bar on T57.a's Venus, then delete this \
-         tripwire"
+        "P14.T54.b.l: T24.e's 300–370 K Venus at 1 bar is re-checked on T57.a's Venus under the \
+         air's switch (P14.T54.b.a); delete this tripwire with the air's hold"
     );
 }
 
@@ -713,13 +716,12 @@ fn table_structure(name: &str) -> (DerivedBody, SurfaceConditions, RadiativeConv
 /// The table's Earth, Venus and Titan meet the plan's tests: Earth's tropopause at 0.12–0.25 bar
 /// and 205–220 K, and Titan's below 0.3 bar at 60–75 K, with water's, the dry and methane's α.
 ///
-/// The table's Venus is P14.T13.c's 735 K at 57.8 bar with 1.65% nitrogen until P14.T57.a's refit
-/// lands, and gives 381.1 K at 1 bar, 1.1 K above the plan's interim 300–380 K (computed by hand
-/// as 378 K on other inputs). That is recorded and deferred (plan 14's Risks, P14.T24.e), and the
-/// plan's 300–370 K is held on the measured Venus
-/// (`the_dry_factor_is_refitted_on_venus_s_measured_state`) and re-checked by P14.T54.b on
-/// T57.a's Venus. Here the table's Venus, its column shallower than the measured one, ends warmer
-/// at 1 bar, and the golden pins it.
+/// The table's Venus is P14.T57.a's, 696.3 K at 57.84 bar, and meets the plan's 300–370 K at 1
+/// bar: 356.4 K, which the golden pins. That is P14.T54.b's re-check of T24.e's test (plan 14's
+/// "Deviations in P14.T24.e, as built"), which P14.T54.b.a also makes on the record's path under
+/// the air's switch; before T57.a's refit the table's 735 K Venus gave 381.1 K. The measured Venus
+/// meets it too (`the_dry_factor_is_refitted_on_venus_s_measured_state`), and the table's, its
+/// column shallower than the measured one, ends warmer at 1 bar.
 #[test]
 fn the_table_s_tropopauses_skins_and_lapse_factors_fall_in_their_ranges() {
     let (_, _, earth) = table_structure("Earth");
@@ -742,6 +744,10 @@ fn the_table_s_tropopauses_skins_and_lapse_factors_fall_in_their_ranges() {
             .is_none()
     );
     let one_bar = venus.temperature_at(Pascals::new(1.0e5)).value();
+    assert!(
+        (300.0..=370.0).contains(&one_bar),
+        "Venus at 1 bar: {one_bar} K"
+    );
     let measured = profile_of(
         &measured_venus(),
         735.0,

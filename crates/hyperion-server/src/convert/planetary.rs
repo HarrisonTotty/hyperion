@@ -18,12 +18,12 @@ use hyperion_protocol::{
     DestructionCauseDto, DetailLevelDto, DetailSeedHex, ErrorCode, FigureDatumDto, FigureLawDto,
     GasShareDto, HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto, Modelled,
     MoonOriginDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto, PlanetClassDto,
-    PopulationDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto, RingGapDto,
-    RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto, SeenPositionDto,
-    SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    PopulationDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto,
+    RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
+    SeenPositionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
     SurfaceCondensateDto, SurfaceMaterialDto, SurfaceStateDto, SystemBodiesDto,
     SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TectonicRegimeDto,
-    ThermalRegimeDto, WetEpochDto, ZoneDto,
+    ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -45,7 +45,7 @@ use hyperion_sim::planetary::hooks::figures::WetEpoch;
 use hyperion_sim::planetary::hooks::surface::regime::{Forcing, ThermalRegime};
 use hyperion_sim::planetary::hooks::{
     ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface, SubsurfaceOcean,
-    TectonicRegime,
+    TectonicRegime, VerticalStructure,
 };
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
@@ -1002,7 +1002,9 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 ///
 /// The members of later tasks are absent, as the record holds them not modelled; each task fills
 /// its own here when it lands, as P14.T54.a fills the condensates and the crust, which is absent
-/// only where the record holds none (a body whose passes took no lid). The melt's own vapour,
+/// only where the record holds none (a body whose passes took no lid), and P14.T54.b the vertical
+/// structure ([`vertical_structure_member`]), absent while the record holds the air's sections
+/// off, below generator version 24. The melt's own vapour,
 /// `silicate_vapour`, has no member in the record and is sent absent from every surface until
 /// P14.T55.b.
 #[must_use]
@@ -1051,10 +1053,7 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         },
         craters: crater_contract(figures.craters()),
         wet_epoch: figures.wet_epoch().map(wet_epoch),
-        vertical_structure: later(
-            surface.vertical_structure(),
-            |structure| match *structure {},
-        ),
+        vertical_structure: vertical_structure_member(surface.vertical_structure()),
         aerosols: later(surface.aerosols(), |aerosols| match *aerosols {}),
         condensates: Modelled::Value(condensates(surface.condensates())),
         crust: later(surface.crust(), |composition| Some(crust(composition))),
@@ -1127,6 +1126,52 @@ fn tectonic_regime(regime: TectonicRegime) -> TectonicRegimeDto {
         TectonicRegime::HeatPipe => TectonicRegimeDto::HeatPipe,
         TectonicRegime::Episodic => TectonicRegimeDto::Episodic,
         TectonicRegime::IceShell => TectonicRegimeDto::IceShell,
+    }
+}
+
+/// A record's vertical structure member as the wire carries it (P14.T24.e, wired by P14.T54.b):
+/// absent while the record does not model it, `null` for a surface computed to hold no air, and
+/// otherwise its structure ([`vertical_structure`]).
+#[must_use]
+fn vertical_structure_member(
+    member: RecordModelled<Option<&VerticalStructure>>,
+) -> Modelled<VerticalStructureDto> {
+    match member {
+        RecordModelled::Ok(Some(structure)) => Modelled::Value(vertical_structure(structure)),
+        RecordModelled::Ok(None) => Modelled::Null,
+        RecordModelled::NotModelled => Modelled::NotModelled,
+    }
+}
+
+/// A surface air's vertical structure as the wire carries it: its α, its skin's temperature in K
+/// and its adiabat's nodes from the ground to the tropopause, each pressure in Pa and temperature
+/// in K. Its ground's temperature and pressure are the surface section's own
+/// `mean_surface_temperature_k` and `surface_pressure_pa`, which its first node repeats.
+///
+/// # Panics
+///
+/// For [`VerticalStructure::Envelope`], which a record's surface never holds: the surface's
+/// structure is its air's, a `RadiativeConvective` (`system::air::record_structure` builds no
+/// other), and a gas envelope's profile (P14.T24.d) belongs to the envelope section,
+/// P14.T54.b.i's.
+#[must_use]
+fn vertical_structure(structure: &VerticalStructure) -> VerticalStructureDto {
+    match structure {
+        VerticalStructure::RadiativeConvective(profile) => VerticalStructureDto {
+            alpha: profile.lapse_factor(),
+            skin_temperature_k: profile.skin_temperature().value(),
+            adiabat: profile
+                .nodes()
+                .iter()
+                .map(|node| ProfileNodeDto {
+                    pressure_pa: node.pressure().value(),
+                    temperature_k: node.temperature().value(),
+                })
+                .collect(),
+        },
+        VerticalStructure::Envelope(_) => {
+            unreachable!("a record's surface never carries a gas envelope's profile")
+        }
     }
 }
 
@@ -1519,11 +1564,22 @@ mod tests {
     /// base lying at or beyond ice V's melting pressure (liquid under high-pressure ice, P14.T55.k's),
     /// and none is below it; an ocean rests on rock or, from that bump, on ice V. The condensates
     /// and the crust are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`,
-    /// `every_solid_surface_sends_its_record_s_crust`).
+    /// `every_solid_surface_sends_its_record_s_crust`). The vertical structure is not modelled on
+    /// every golden body's record and absent on the wire while the sim holds the air's sections off
+    /// the record, below generator version 24 (`AIR_SECTIONS_VERSION`, whose tripwire
+    /// `the_air_sections_are_held_only_until_the_24_bump` this is the wire's half of; at the bump,
+    /// P14.T54.b.l, it is present here, `null` on an airless surface;
+    /// `a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat` tests its conversion).
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let (mut moons, mut absent) = (0, Vec::new());
         for (sim, dto, wire) in ok_surfaces() {
+            assert_eq!(
+                sim.vertical_structure(),
+                RecordModelled::NotModelled,
+                "{}: the air's sections are held",
+                wire.id
+            );
             assert_eq!(
                 [
                     dto.vertical_structure.is_not_modelled(),
@@ -1566,6 +1622,70 @@ mod tests {
         if hyperion_sim::GENERATOR_VERSION < hyperion_sim::GeneratorVersion::new(24) {
             assert_eq!(absent, Vec::<String>::new(), "absent at 23");
         }
+    }
+
+    /// P14.T54.b: a vertical structure is sent as its α, its skin's temperature and its adiabat's
+    /// nodes, each to the bit and in the record's order, the ground first; a member computed as
+    /// none is `null`, and one not modelled absent. The structure is an Earth's by hand, built
+    /// through the sim's public API, since no record carries one while the sim holds the air's
+    /// sections off it (below generator version 24).
+    #[test]
+    fn a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat() {
+        use hyperion_sim::planetary::derive::atmosphere::Gas;
+        use hyperion_sim::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
+        use hyperion_sim::units::Pascals;
+
+        let gases = [
+            (Gas::Nitrogen.substance(), 0.77),
+            (Gas::Oxygen.substance(), 0.21),
+            (Gas::Water.substance(), 0.01),
+            (Gas::Argon.substance(), 0.01),
+        ];
+        let profile = RadiativeConvective::derive(&StructureInputs {
+            surface_temperature: Kelvin::new(288.0),
+            surface_pressure: Pascals::new(1.0e5),
+            gases: &gases,
+            condensable: Some(Gas::Water.substance()),
+            skin_temperature: Kelvin::new(214.0),
+        })
+        .unwrap();
+        let structure = VerticalStructure::RadiativeConvective(profile.clone());
+        let dto = vertical_structure(&structure);
+        assert_eq!(dto.alpha.to_bits(), profile.lapse_factor().to_bits());
+        assert_eq!(
+            dto.skin_temperature_k.to_bits(),
+            profile.skin_temperature().value().to_bits()
+        );
+        assert!(profile.nodes().len() > 2, "{:?}", profile.nodes());
+        assert_eq!(dto.adiabat.len(), profile.nodes().len());
+        for (sent, node) in dto.adiabat.iter().zip(profile.nodes()) {
+            assert_eq!(
+                (sent.pressure_pa.to_bits(), sent.temperature_k.to_bits()),
+                (
+                    node.pressure().value().to_bits(),
+                    node.temperature().value().to_bits()
+                )
+            );
+        }
+        assert_eq!(
+            (
+                dto.adiabat[0].pressure_pa.to_bits(),
+                dto.adiabat[0].temperature_k.to_bits()
+            ),
+            (1.0e5_f64.to_bits(), 288.0_f64.to_bits())
+        );
+        assert_eq!(
+            vertical_structure_member(RecordModelled::Ok(Some(&structure))),
+            Modelled::Value(dto)
+        );
+        assert_eq!(
+            vertical_structure_member(RecordModelled::Ok(None)),
+            Modelled::Null
+        );
+        assert_eq!(
+            vertical_structure_member(RecordModelled::NotModelled),
+            Modelled::NotModelled
+        );
     }
 
     /// P14.T54.a: every `ok` surface sends its record's published condensates (P14.T51.a), a

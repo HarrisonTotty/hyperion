@@ -23,7 +23,9 @@ use crate::planetary::hooks::figures::{Crust, LEFTOVER_DENSITY, TectonicRegime};
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
-use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
+use crate::planetary::record::{
+    DetailLevel, Modelled, MoonOrigin, Population, RecordSection, SectionState,
+};
 use crate::planetary::satellites::{MoonPlane, generate_satellites};
 use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary, synthetic_star};
 use crate::stellar::Phase;
@@ -654,7 +656,14 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
                 condensates.clone(),
             )
             .map(|rebuilt| rebuilt.with_basis(*surface.basis().unwrap()))
-            .map(|rebuilt| rebuilt.with_crust(surface.crust().ok().map(|crust| **crust)));
+            .map(|rebuilt| rebuilt.with_crust(surface.crust().ok().map(|crust| **crust)))
+            // And its air's vertical structure (P14.T54.b), not modelled while the air is held.
+            .map(|rebuilt| {
+                rebuilt.with_vertical_structure(match surface.vertical_structure() {
+                    Modelled::Ok(structure) => Modelled::Ok(structure.cloned()),
+                    Modelled::NotModelled => Modelled::NotModelled,
+                })
+            });
             assert_eq!(rebuilt.as_ref(), Some(surface));
             assert_eq!(
                 Surface::new(
@@ -6606,6 +6615,15 @@ fn the_record_s_figures_reuse_its_last_pass_s_k_to_the_bit() {
     assert!(surfaces > 50, "{surfaces}");
 }
 
+/// The system `system` with its records' cold traps under `cold_traps` (P14.T51.i), its other
+/// rules those in force.
+fn under_cold_traps(system: &PlanetarySystem, cold_traps: ColdTrapRules) -> PlanetarySystem {
+    system.clone().with_record_rules(RecordRules {
+        cold_traps,
+        ..RecordRules::in_force()
+    })
+}
+
 /// P14.T51.i, end to end: under 24's record rules (the cold traps' batch) the sample's airless,
 /// uncollisional planets and members carry the regolith's albedo from their derivation, and their
 /// records' ices move from the held rules' where the cold traps' branch and traps apply; under the
@@ -6620,7 +6638,7 @@ fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
         if ctx.age_at_epoch().value() <= 0.0 {
             continue;
         }
-        let under = |cold_traps| system.clone().with_record_rules(RecordRules { cold_traps });
+        let under = |cold_traps| under_cold_traps(system, cold_traps);
         let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
         let (held_epoch, batch_epoch) = (Epoch::new(&held, ctx, t), Epoch::new(&batch, ctx, t));
         for body in batch.bodies() {
@@ -6681,7 +6699,7 @@ fn time_the_cold_traps_over_the_sample() {
         if ctx.age_at_epoch().value() <= 0.0 {
             continue;
         }
-        let under = |cold_traps| system.clone().with_record_rules(RecordRules { cold_traps });
+        let under = |cold_traps| under_cold_traps(system, cold_traps);
         let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
         // Every record of the system, how many of its bodies are airless and not collisional, and
         // how many ices its records' figures list, the cold traps' among them.
@@ -9003,6 +9021,7 @@ fn the_sample_s_argon_ices_under_24_s_rules() {
                     for ctx in sample() {
                         let system = generate(SEED, ctx).with_record_rules(RecordRules {
                             cold_traps: ColdTrapRules::Batch,
+                            ..RecordRules::in_force()
                         });
                         let snapshot = system.snapshot_at(ctx, RECORD_TIME);
                         tally_refusals(&snapshot, ctx, &mut bodies, &mut refused);
