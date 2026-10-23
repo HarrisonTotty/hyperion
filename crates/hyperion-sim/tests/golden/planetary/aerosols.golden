@@ -1,0 +1,318 @@
+# generator_version = 23
+# P14.T24.c's aerosol and absorber inventory, with P14.T24.g's sulphur
+# (hyperion_sim::planetary::hooks::aerosols): the Solar System table's Earth, Venus,
+# Mars and Titan at their own outgassing under a whole sky's coverage, and an Earth at
+# 1 PAL of O2. Pure until P14.T54.b; nothing on the record reads it. The measured
+# Mars, by hand, carries its dust.
+earth deck H2O: Liquid
+earth deck H2O base = 0x40f0b16be043d532  # 68374.7422521904
+earth deck H2O base temperature = 0x4071cae7e77ea66f  # 284.6816172549506
+earth deck H2O top = 0x40ca30457b4504a3  # 13408.54282438971
+earth deck H2O vapour below = 0x3f945e25d052a887  # 0.019890395011920716
+earth deck H2O vapour above = 0x3f1d785042590d0a  # 0.00011241903174501549
+earth deck H2O f_sed = 0x40899d3edf01c495  # 819.655698789417
+earth mode 0 H2O: Liquid sphere of deck H2O
+earth mode 0 H2O size: log-normal
+earth mode 0 H2O r_eff = 0x3f080c2399979805  # 4.5866810250136426e-5
+earth mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
+earth mode 0 H2O column mass = 0x3fb4109575389a50  # 0.07837804900973677
+earth mode 0 H2O tau basis: GeometricLimit
+earth mode 0 H2O tau = 0x4004841b5f30a8be  # 2.5645053326344103
+earth mode 0 H2O base = 0x40f0b16be043d532  # 68374.7422521904
+earth mode 0 H2O top = 0x40ca30457b4504a3  # 13408.54282438971
+earth mode 0 H2O exponent = 0x40899d3edf01c495  # 819.655698789417
+earth mode 0 H2O coverage = 0x3ff0000000000000  # 1.0
+earth mode 1 H2SO4: Liquid sphere of deck H2SO4
+earth mode 1 H2SO4 size: log-normal
+earth mode 1 H2SO4 r_eff = 0x3e84195dc56760e9  # 1.4974986824071056e-7
+earth mode 1 H2SO4 v_eff = 0x3fd23dcd2f5ef188  # 0.2850220644575292
+earth mode 1 H2SO4 column mass = 0x3eb28847753f5921  # 1.1046135641644161e-6
+earth mode 1 H2SO4 tau basis: Table(Sphere)
+earth mode 1 H2SO4 tau = 0x3f6a86ab129e14d1  # 0.0032380429519799155
+earth mode 1 H2SO4 base = 0x40ca6d887e40f249  # 13531.066352957061
+earth mode 1 H2SO4 top = 0x40a5246d31cd8ea1  # 2706.2132705914123
+earth mode 1 H2SO4 exponent = 0x0000000000000000  # 0.0
+earth mode 1 H2SO4 coverage = 0x3ff0000000000000  # 1.0
+earth absorber SO2 column = 0x43c0113095ff3a4d  # 2.3155200000023987e18
+earth absorber SO2 base = 0x40f2cf5acc4d4fa9  # 77045.67487841718
+earth absorber SO2 top = 0x40ca6d887e40f249  # 13531.066352957061
+earth not formed: N2 BulkGas
+venus deck H2SO4: Liquid
+venus deck H2SO4 base = 0x40fea94d8c24363d  # 125588.84671422183
+venus deck H2SO4 base temperature = 0x40773a84c14da868  # 371.65741091094105
+venus deck H2SO4 top = 0x40b3cd1c828601d8  # 5069.11136663003
+venus deck H2SO4 vapour below = 0x3eea53d2b2539c37  # 1.2553898680113275e-5
+venus deck H2SO4 vapour above = 0x3cc2b95c87668aee  # 5.19697288789308e-16
+venus deck H2SO4 f_sed = 0x0000000000000000  # 0.0
+venus mode 0 H2SO4: Liquid sphere of deck H2SO4
+venus mode 0 H2SO4 size: log-normal
+venus mode 0 H2SO4 r_eff = 0x3ea05548a400ca1e  # 4.867654936956783e-7
+venus mode 0 H2SO4 v_eff = 0x3fcb5798c6885470  # 0.21361074155780413
+venus mode 0 H2SO4 column mass = 0x3f66a3f092532560  # 0.002763719431275888
+venus mode 0 H2SO4 tau basis: Table(Sphere)
+venus mode 0 H2SO4 tau = 0x4020061e8e549c57  # 8.011951873615699
+venus mode 0 H2SO4 base = 0x40fea94d8c24363d  # 125588.84671422183
+venus mode 0 H2SO4 top = 0x40b3cd1c828601d7  # 5069.111366630029
+venus mode 0 H2SO4 exponent = 0x0000000000000000  # 0.0
+venus mode 0 H2SO4 coverage = 0x3ff0000000000000  # 1.0
+venus mode 1 acid_uv_absorber: Liquid sphere of deck H2SO4
+venus mode 1 acid_uv_absorber size: log-normal
+venus mode 1 acid_uv_absorber r_eff = 0x3eb39d53536855d3  # 1.1691184461695044e-6
+venus mode 1 acid_uv_absorber v_eff = 0x3fb082b577d34ee0  # 0.06449445891785954
+venus mode 1 acid_uv_absorber column mass = 0x3f85619bc2e500a4  # 0.010440079579553015
+venus mode 1 acid_uv_absorber tau basis: Table(Sphere)
+venus mode 1 acid_uv_absorber tau = 0x40233a8b11325535  # 9.614342248338838
+venus mode 1 acid_uv_absorber base = 0x40d4fc8ce7b4d36e  # 21490.201642233347
+venus mode 1 acid_uv_absorber top = 0x40b3cd1c828601d7  # 5069.111366630029
+venus mode 1 acid_uv_absorber exponent = 0x0000000000000000  # 0.0
+venus mode 1 acid_uv_absorber coverage = 0x3ff0000000000000  # 1.0
+venus mode 2 H2SO4: Liquid sphere of deck H2SO4
+venus mode 2 H2SO4 size: log-normal
+venus mode 2 H2SO4 r_eff = 0x3eba39cea2b4fcd6  # 1.563180044808316e-6
+venus mode 2 H2SO4 v_eff = 0x3fa7159fec2d4540  # 0.04508685834901849
+venus mode 2 H2SO4 column mass = 0x3f96345f11f3b9bf  # 0.02168415591307293
+venus mode 2 H2SO4 tau basis: Table(Sphere)
+venus mode 2 H2SO4 tau = 0x402cd7d099cb7fd1  # 14.42151337250826
+venus mode 2 H2SO4 base = 0x40fea94d8c24363d  # 125588.84671422183
+venus mode 2 H2SO4 top = 0x40d8a3d9fc71bed2  # 25231.40603297839
+venus mode 2 H2SO4 exponent = 0x0000000000000000  # 0.0
+venus mode 2 H2SO4 coverage = 0x3ff0000000000000  # 1.0
+venus mode 3 H2SO4: Liquid sphere of deck H2SO4
+venus mode 3 H2SO4 size: log-normal
+venus mode 3 H2SO4 r_eff = 0x3ed1e5f5a28267ea  # 4.267282328518691e-6
+venus mode 3 H2SO4 v_eff = 0x3fb082b577d34ee0  # 0.06449445891785954
+venus mode 3 H2SO4 column mass = 0x3fb7690011a0e9f3  # 0.09144592695603375
+venus mode 3 H2SO4 tau basis: Table(Sphere)
+venus mode 3 H2SO4 tau = 0x4034d4c152a131a5  # 20.83107487140082
+venus mode 3 H2SO4 base = 0x40fea94d8c24363d  # 125588.84671422183
+venus mode 3 H2SO4 top = 0x40e542f474af1221  # 43543.63924363652
+venus mode 3 H2SO4 exponent = 0x0000000000000000  # 0.0
+venus mode 3 H2SO4 coverage = 0x3ff0000000000000  # 1.0
+venus absorber SO2 column = 0x459846ece29a0dfe  # 1.878345925410058e27
+venus absorber SO2 base = 0x415610b5664d1251  # 5784277.598454074
+venus absorber SO2 top = 0x40b3cd1c828601d8  # 5069.11136663003
+venus not formed: CO2 BulkGas
+mars deck H2O: Solid
+mars deck H2O base = 0x40c4aac32951c4ec  # 10581.524698468354
+mars deck H2O base temperature = 0x406857e57d798b80  # 194.74676393260233
+mars deck H2O top = 0x40a9f9bd915b6f02  # 3324.8702496121414
+mars deck H2O vapour below = 0x3edc2b50ec33120f  # 6.71606148045348e-6
+mars deck H2O vapour above = 0x3e5722a89a4fa080  # 2.154650648517291e-8
+mars deck H2O f_sed = 0x40225ec6f08a9f4c  # 9.185111538812315
+mars mode 0 H2O: Solid crystal of deck H2O
+mars mode 0 H2O size: log-normal
+mars mode 0 H2O r_eff = 0x3ed4fc866575a4d6  # 5.003553801821375e-6
+mars mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
+mars mode 0 H2O column mass = 0x3f512f21f6064b0a  # 0.001048834958144953
+mars mode 0 H2O tau basis: Table(PhaseTable)
+mars mode 0 H2O tau = 0x3fd65d15af8dc8ec  # 0.349431439818672
+mars mode 0 H2O base = 0x40c4aac32951c4ec  # 10581.524698468354
+mars mode 0 H2O top = 0x40a9f9bd915b6f02  # 3324.8702496121414
+mars mode 0 H2O exponent = 0x40225ec6f08a9f4c  # 9.185111538812315
+mars mode 0 H2O coverage = 0x3ff0000000000000  # 1.0
+mars not formed: N2 BulkGas
+titan deck H2O: Solid
+titan deck H2O base = 0x41018b2ee5bd0bca  # 143717.86217698298
+titan deck H2O base temperature = 0x4057166713f166e5  # 92.35004137586982
+titan deck H2O top = 0x406df109a73ff716  # 239.53242838376235
+titan deck H2O vapour below = 0x3b83e5cf2b834188  # 5.266875327517155e-22
+titan deck H2O vapour above = 0x3950ae69f19a8d5a  # 1.2850809210675673e-32
+titan deck H2O f_sed = 0x3f847ae147ae147b  # 0.01
+titan deck CH4: Solid
+titan deck CH4 base = 0x40f86416487237b2  # 99905.39268705135
+titan deck CH4 base temperature = 0x405553309f87a1cf  # 85.29984272237128
+titan deck CH4 top = 0x40d6ba25af6b7b9e  # 23272.58883177826
+titan deck CH4 vapour below = 0x3faa735f291d3d82  # 0.05166146637804571
+titan deck CH4 vapour above = 0x3f57191afb25c9da  # 0.0014097941862841663
+titan deck CH4 f_sed = 0x40c63cad5fb85eaf  # 11385.354483648522
+titan mode 0 H2O: Solid crystal of deck H2O
+titan mode 0 H2O size: log-normal
+titan mode 0 H2O r_eff = 0x3e84a18b57e8e111  # 1.537131701521962e-7
+titan mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
+titan mode 0 H2O column mass = 0x3c837b91e3ca705d  # 3.379708813471412e-17
+titan mode 0 H2O tau basis: Table(SpheresOutsidePhaseTable)
+titan mode 0 H2O tau = 0x3d3c4f851af257b9  # 1.0057954389385371e-13
+titan mode 0 H2O base = 0x41018b2ee5bd0bca  # 143717.86217698298
+titan mode 0 H2O top = 0x406df109a73ff716  # 239.53242838376235
+titan mode 0 H2O exponent = 0x3f847ae147ae147b  # 0.01
+titan mode 0 H2O coverage = 0x3ff0000000000000  # 1.0
+titan mode 1 CH4: Solid crystal of deck CH4
+titan mode 1 CH4 size: log-normal
+titan mode 1 CH4 r_eff = 0x3f320c52e870a062  # 0.0002753927623779848
+titan mode 1 CH4 v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
+titan mode 1 CH4 column mass = 0x3fc128ed9d4d4ba9  # 0.13406152897604542
+titan mode 1 CH4 tau basis: GeometricLimit
+titan mode 1 CH4 tau = 0x3ff76d54b57b5160  # 1.4641921128396334
+titan mode 1 CH4 base = 0x40f86416487237b2  # 99905.39268705135
+titan mode 1 CH4 top = 0x40d6ba25af6b7b9e  # 23272.58883177826
+titan mode 1 CH4 exponent = 0x40c63cad5fb85eaf  # 11385.354483648522
+titan mode 1 CH4 coverage = 0x3ff0000000000000  # 1.0
+titan mode 2 tholin: Solid aggregate of deck tholin
+titan mode 2 tholin monomer radius = 0x3e6ad7f29abcaf48  # 5e-8
+titan mode 2 tholin monomers = 0x40a7700000000000  # 3000.0
+titan mode 2 tholin fractal dimension = 0x4000000000000000  # 2.0
+titan mode 2 tholin column mass: not modelled
+titan mode 2 tholin tau basis: Rule
+titan mode 2 tholin tau = 0x40200839311f912a  # 8.016061339476966
+titan mode 2 tholin base = 0x4101e57f6deb016b  # 146607.92867089374
+titan mode 2 tholin top = 0x402d52537153286b  # 14.660792867089375
+titan mode 2 tholin exponent = 0x0000000000000000  # 0.0
+titan mode 2 tholin coverage = 0x3ff0000000000000  # 1.0
+titan not formed: N2 BulkGas
+oxygenated earth absorber O3 column = 0x44b111e079a5ea6e  # 8.061e22
+oxygenated earth absorber O3 node 0 pressure = 0x40f8bcd000000000  # 101325.0
+oxygenated earth absorber O3 node 0 mixing ratio = 0x3f9b3d07c84b5dcc  # 0.0266
+oxygenated earth absorber O3 node 1 pressure = 0x40f5f18000000000  # 89880.0
+oxygenated earth absorber O3 node 1 mixing ratio = 0x3f9e00d1b71758e2  # 0.0293
+oxygenated earth absorber O3 node 2 pressure = 0x40f368c000000000  # 79500.0
+oxygenated earth absorber O3 node 2 mixing ratio = 0x3fa096bb98c7e282  # 0.0324
+oxygenated earth absorber O3 node 3 pressure = 0x40f11e8000000000  # 70120.0
+oxygenated earth absorber O3 node 3 mixing ratio = 0x3fa0ff972474538f  # 0.0332
+oxygenated earth absorber O3 node 4 pressure = 0x40ee1b8000000000  # 61660.0
+oxygenated earth absorber O3 node 4 mixing ratio = 0x3fa15b573eab367a  # 0.0339
+oxygenated earth absorber O3 node 5 pressure = 0x40ea644000000000  # 54050.0
+oxygenated earth absorber O3 node 5 mixing ratio = 0x3fa34d6a161e4f76  # 0.0377
+oxygenated earth absorber O3 node 6 pressure = 0x40e70e8000000000  # 47220.0
+oxygenated earth absorber O3 node 6 mixing ratio = 0x3fa50b0f27bb2fec  # 0.0411
+oxygenated earth absorber O3 node 7 pressure = 0x40e412c000000000  # 41110.0
+oxygenated earth absorber O3 node 7 mixing ratio = 0x3fa9a6b50b0f27bb  # 0.0501
+oxygenated earth absorber O3 node 8 pressure = 0x40e1684000000000  # 35650.0
+oxygenated earth absorber O3 node 8 mixing ratio = 0x3fae90ff97247454  # 0.0597
+oxygenated earth absorber O3 node 9 pressure = 0x40de140000000000  # 30800.0
+oxygenated earth absorber O3 node 9 mixing ratio = 0x3fb779a6b50b0f28  # 0.0917
+oxygenated earth absorber O3 node 10 pressure = 0x40d9e10000000000  # 26500.0
+oxygenated earth absorber O3 node 10 mixing ratio = 0x3fc0c49ba5e353f8  # 0.131
+oxygenated earth absorber O3 node 11 pressure = 0x40d62b0000000000  # 22700.0
+oxygenated earth absorber O3 node 11 mixing ratio = 0x3fcb851eb851eb85  # 0.215
+oxygenated earth absorber O3 node 12 pressure = 0x40d2f20000000000  # 19400.0
+oxygenated earth absorber O3 node 12 mixing ratio = 0x3fd3d70a3d70a3d7  # 0.31
+oxygenated earth absorber O3 node 13 pressure = 0x40d0310000000000  # 16580.0
+oxygenated earth absorber O3 node 13 mixing ratio = 0x3fd8a3d70a3d70a4  # 0.385
+oxygenated earth absorber O3 node 14 pressure = 0x40cbacffffffffff  # 14169.999999999998
+oxygenated earth absorber O3 node 14 mixing ratio = 0x3fe0189374bc6a7f  # 0.503
+oxygenated earth absorber O3 node 15 pressure = 0x40c7a70000000000  # 12110.0
+oxygenated earth absorber O3 node 15 mixing ratio = 0x3fe4d4fdf3b645a2  # 0.651
+oxygenated earth absorber O3 node 16 pressure = 0x40c4370000000000  # 10350.0
+oxygenated earth absorber O3 node 16 mixing ratio = 0x3febd70a3d70a3d7  # 0.87
+oxygenated earth absorber O3 node 17 pressure = 0x40c1490000000000  # 8850.0
+oxygenated earth absorber O3 node 17 mixing ratio = 0x3ff30a3d70a3d70a  # 1.19
+oxygenated earth absorber O3 node 18 pressure = 0x40bd8d0000000001  # 7565.000000000001
+oxygenated earth absorber O3 node 18 mixing ratio = 0x3ff970a3d70a3d71  # 1.59
+oxygenated earth absorber O3 node 19 pressure = 0x40b9430000000000  # 6467.0
+oxygenated earth absorber O3 node 19 mixing ratio = 0x40003d70a3d70a3d  # 2.03
+oxygenated earth absorber O3 node 20 pressure = 0x40b5990000000000  # 5529.0
+oxygenated earth absorber O3 node 20 mixing ratio = 0x4004a3d70a3d70a4  # 2.58
+oxygenated earth absorber O3 node 21 pressure = 0x40b2790000000000  # 4729.0
+oxygenated earth absorber O3 node 21 mixing ratio = 0x40083d70a3d70a3d  # 3.03
+oxygenated earth absorber O3 node 22 pressure = 0x40af9e0000000000  # 4047.0
+oxygenated earth absorber O3 node 22 mixing ratio = 0x400d333333333333  # 3.65
+oxygenated earth absorber O3 node 23 pressure = 0x40ab160000000000  # 3467.0
+oxygenated earth absorber O3 node 23 mixing ratio = 0x4010ae147ae147ae  # 4.17
+oxygenated earth absorber O3 node 24 pressure = 0x40a7380000000000  # 2972.0
+oxygenated earth absorber O3 node 24 mixing ratio = 0x4012851eb851eb85  # 4.63
+oxygenated earth absorber O3 node 25 pressure = 0x40a3ea0000000000  # 2549.0
+oxygenated earth absorber O3 node 25 mixing ratio = 0x40147ae147ae147b  # 5.12
+oxygenated earth absorber O3 node 26 pressure = 0x409b3c0000000000  # 1743.0
+oxygenated earth absorber O3 node 26 mixing ratio = 0x4017333333333333  # 5.8
+oxygenated earth absorber O3 node 27 pressure = 0x4092b40000000000  # 1197.0
+oxygenated earth absorber O3 node 27 mixing ratio = 0x401a333333333333  # 6.55
+oxygenated earth absorber O3 node 28 pressure = 0x4089080000000000  # 801.0
+oxygenated earth absorber O3 node 28 mixing ratio = 0x401d7ae147ae147b  # 7.37
+oxygenated earth absorber O3 node 29 pressure = 0x4081f4cccccccccd  # 574.6
+oxygenated earth absorber O3 node 29 mixing ratio = 0x401f5c28f5c28f5c  # 7.84
+oxygenated earth absorber O3 node 30 pressure = 0x4079f00000000001  # 415.00000000000006
+oxygenated earth absorber O3 node 30 mixing ratio = 0x401f333333333333  # 7.8
+oxygenated earth absorber O3 node 31 pressure = 0x4071f1999999999a  # 287.1
+oxygenated earth absorber O3 node 31 mixing ratio = 0x401d333333333333  # 7.3
+oxygenated earth absorber O3 node 32 pressure = 0x4069c00000000000  # 206.0
+oxygenated earth absorber O3 node 32 mixing ratio = 0x4018cccccccccccd  # 6.2
+oxygenated earth absorber O3 node 33 pressure = 0x4062a33333333334  # 149.10000000000002
+oxygenated earth absorber O3 node 33 mixing ratio = 0x4015000000000000  # 5.25
+oxygenated earth absorber O3 node 34 pressure = 0x405b400000000001  # 109.00000000000001
+oxygenated earth absorber O3 node 34 mixing ratio = 0x4010666666666666  # 4.1
+oxygenated earth absorber O3 node 35 pressure = 0x4053f1eb851eb852  # 79.78
+oxygenated earth absorber O3 node 35 mixing ratio = 0x4008cccccccccccd  # 3.1
+oxygenated earth absorber O3 node 36 pressure = 0x4045400000000000  # 42.5
+oxygenated earth absorber O3 node 36 mixing ratio = 0x3ffccccccccccccd  # 1.8
+oxygenated earth absorber O3 node 37 pressure = 0x4035e66666666666  # 21.9
+oxygenated earth absorber O3 node 37 mixing ratio = 0x3ff199999999999a  # 1.1
+oxygenated earth absorber O3 node 38 pressure = 0x4025cccccccccccd  # 10.9
+oxygenated earth absorber O3 node 38 mixing ratio = 0x3fe6666666666666  # 0.7
+oxygenated earth absorber O3 node 39 pressure = 0x4014e147ae147ae2  # 5.220000000000001
+oxygenated earth absorber O3 node 39 mixing ratio = 0x3fd3333333333333  # 0.3
+oxygenated earth absorber O3 node 40 pressure = 0x4003333333333333  # 2.4
+oxygenated earth absorber O3 node 40 mixing ratio = 0x3fd0000000000000  # 0.25
+oxygenated earth absorber O3 node 41 pressure = 0x3ff0cccccccccccd  # 1.05
+oxygenated earth absorber O3 node 41 mixing ratio = 0x3fd3333333333333  # 0.3
+oxygenated earth absorber O3 node 42 pressure = 0x3fdc8b4395810626  # 0.44600000000000006
+oxygenated earth absorber O3 node 42 mixing ratio = 0x3fe0000000000000  # 0.5
+oxygenated earth absorber O3 node 43 pressure = 0x3fc78d4fdf3b645a  # 0.184
+oxygenated earth absorber O3 node 43 mixing ratio = 0x3fe6666666666666  # 0.7
+oxygenated earth absorber O3 node 44 pressure = 0x3fb374bc6a7ef9db  # 0.076
+oxygenated earth absorber O3 node 44 mixing ratio = 0x3fe6666666666666  # 0.7
+oxygenated earth absorber O3 node 45 pressure = 0x3fa0624dd2f1a9fc  # 0.032
+oxygenated earth absorber O3 node 45 mixing ratio = 0x3fd999999999999a  # 0.4
+oxygenated earth absorber O3 node 46 pressure = 0x3f8db22d0e560419  # 0.0145
+oxygenated earth absorber O3 node 46 mixing ratio = 0x3fc999999999999a  # 0.2
+oxygenated earth absorber O3 node 47 pressure = 0x3f7d14e3bcd35a86  # 0.0071
+oxygenated earth absorber O3 node 47 mixing ratio = 0x3fa999999999999a  # 0.05
+oxygenated earth absorber O3 node 48 pressure = 0x3f706cca2db61bb0  # 0.00401
+oxygenated earth absorber O3 node 48 mixing ratio = 0x3f747ae147ae147b  # 0.005
+oxygenated earth absorber O3 node 49 pressure = 0x3f64cec41dd1a21f  # 0.00254
+oxygenated earth absorber O3 node 49 mixing ratio = 0x3f40624dd2f1a9fc  # 0.0005
+oxygenated earth not formed: N2 BulkGas
+measured mars deck H2O: Solid
+measured mars deck H2O base = 0x407d158a71090c71  # 465.3462992051564
+measured mars deck H2O base temperature = 0x4068736f32e897ee  # 195.60732407978452
+measured mars deck H2O top = 0x4065dea3eaa6d74a  # 174.95750935159805
+measured mars deck H2O vapour below = 0x3f26fe2672af0f97  # 0.00017542094550837266
+measured mars deck H2O vapour above = 0x3ef0358483bcd23a  # 1.5458157789543225e-5
+measured mars deck H2O f_sed = 0x401447327252229a  # 5.069528375876553
+measured mars mode 0 H2O: Solid crystal of deck H2O
+measured mars mode 0 H2O size: log-normal
+measured mars mode 0 H2O r_eff = 0x3ec1a30f6528c5ee  # 2.1024887158153417e-6
+measured mars mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
+measured mars mode 0 H2O column mass = 0x3f5417c2cb8a7463  # 0.0012263681693760679
+measured mars mode 0 H2O tau basis: Table(PhaseTable)
+measured mars mode 0 H2O tau = 0x3ff02da86d4955d1  # 1.0111469525339667
+measured mars mode 0 H2O base = 0x407d158a71090c71  # 465.3462992051564
+measured mars mode 0 H2O top = 0x4065dea3eaa6d74a  # 174.95750935159805
+measured mars mode 0 H2O exponent = 0x401447327252229a  # 5.069528375876553
+measured mars mode 0 H2O coverage = 0x3fb999999999999a  # 0.1
+measured mars mode 1 mars_dust: Solid nonSphericalMineral of deck mars_dust
+measured mars mode 1 mars_dust size: gamma
+measured mars mode 1 mars_dust r_eff = 0x3eae1c9b783345e7  # 8.974e-7
+measured mars mode 1 mars_dust v_eff = 0x3fd3333333333333  # 0.3
+measured mars mode 1 mars_dust column mass = 0x3f474491bbd7b6fe  # 0.0007100783911348771
+measured mars mode 1 mars_dust tau basis: Table(PhaseTable)
+measured mars mode 1 mars_dust tau = 0x3fdfffffffffffff  # 0.49999999999999994
+measured mars mode 1 mars_dust base = 0x4083e00000000000  # 636.0
+measured mars mode 1 mars_dust top = 0x403faa219e68bf79  # 31.664575481961467
+measured mars mode 1 mars_dust exponent = 0x0000000000000000  # 0.0
+measured mars mode 1 mars_dust coverage = 0x3ff0000000000000  # 1.0
+measured mars absorber O3 column = 0x4428e1a653062c6d  # 2.2949081627983862e20
+measured mars absorber O3 node 0 pressure = 0x4083e00000000000  # 636.0
+measured mars absorber O3 node 0 mixing ratio = 0x3fde2b9c382d7e39  # 0.4714117573366568
+measured mars absorber O3 node 1 pressure = 0x407ad6fbfbe0285b  # 429.4365195041807
+measured mars absorber O3 node 1 mixing ratio = 0x3fd3333333333333  # 0.3
+measured mars absorber O3 node 2 pressure = 0x4068ae25809f0a9f  # 197.4420779329566
+measured mars absorber O3 node 2 mixing ratio = 0x3fd0000000000000  # 0.25
+measured mars absorber O3 node 3 pressure = 0x40559860d08b294c  # 86.38090909566853
+measured mars absorber O3 node 3 mixing ratio = 0x3fd3333333333333  # 0.3
+measured mars absorber O3 node 4 pressure = 0x4042587d28244d05  # 36.69131948254111
+measured mars absorber O3 node 4 mixing ratio = 0x3fe0000000000000  # 0.5
+measured mars absorber O3 node 5 pressure = 0x402e46427ba45ef3  # 15.137225974860007
+measured mars absorber O3 node 5 mixing ratio = 0x3fe6666666666666  # 0.7
+measured mars absorber O3 node 6 pressure = 0x4019026371450086  # 6.252332467876959
+measured mars absorber O3 node 6 mixing ratio = 0x3fe6666666666666  # 0.7
+measured mars absorber O3 node 7 pressure = 0x40050f7c297d79b4  # 2.632561039106088
+measured mars absorber O3 node 7 mixing ratio = 0x3fd999999999999a  # 0.4
+measured mars absorber O3 node 8 pressure = 0x3ff316088599b64c  # 1.1928792208449464
+measured mars absorber O3 node 8 mixing ratio = 0x3fc999999999999a  # 0.2
+measured mars absorber O3 node 9 pressure = 0x3fe2b0f164d28f37  # 0.5840994805516634
+measured mars absorber O3 node 9 mixing ratio = 0x3fa999999999999a  # 0.05
+measured mars absorber O3 node 10 pressure = 0x3fd51cf6b664d43f  # 0.32989280521298164
+measured mars absorber O3 node 10 mixing ratio = 0x3f747ae147ae147b  # 0.005
+measured mars absorber O3 node 11 pressure = 0x3fcabf2f9b17ac7c  # 0.20895953247904575
+measured mars absorber O3 node 11 mixing ratio = 0x3f40624dd2f1a9fc  # 0.0005
+measured mars not formed: CO2 BulkGas
