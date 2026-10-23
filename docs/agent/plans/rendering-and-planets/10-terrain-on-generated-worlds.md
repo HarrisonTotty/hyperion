@@ -4352,7 +4352,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     (`#![cfg(feature = "testing")]`) runs the four reference worlds through `coarse_pass` itself,
     once each per binary, in 2 s. It asserts finiteness, an outward unit normal and the vertex's
     bit equality. When R09.T16's `sample_worlds()` lands, that list takes this one's place, a small
-    follow-up under T3's ID.
+    follow-up under T3's ID. _Moved onto `sample_worlds()` on 2026-10-23 (Risks, "Deviations in
+    T3's `sample_worlds()` follow-up, as built")._
   - _Acceptance_, as built:
     - `cargo test -p hyperion-surface --lib ground` (the goldens alone: `--lib ground::golden`);
     - `cargo test -p hyperion-surface --lib patch::collision`;
@@ -13832,3 +13833,80 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   lines 821 and 1122; README row 383; plan 07's pass order (the `terrain shadows` slot before
   `bodies`; `FrameTerrain.draws` submits the cascades' passes on the high setting); the Tasks
   opening's "T9 after T8"; `just test-render`'s seven parts wherever six are named.
+- **Deviations in T3's `sample_worlds()` follow-up, as built** (2026-10-23; lane
+  `lane/99-r10-t3-sample-worlds`, on `rendering-and-planets` at `762073e7`; `GENERATOR_VERSION`
+  23, no bump). The binary and this record; nothing generated moves.
+  - _What moved._ `crates/hyperion-sim/tests/surface_ground_worlds.rs` reads R09.T16's
+    `sample_worlds()` in place of its own four reference worlds and its own `coarse_pass` calls:
+    `mod common;` under `#[expect(dead_code, …)]`, as `surface_coarse_golden.rs` has it, and each
+    world's field from `SampleWorld::field()`, one pass a process under `reference::SEED`. The old
+    loop's body is `assert_the_ground_holds(&SampleWorld)`, and the tests are named for it:
+    - `the_ground_holds_on_every_fast_sample_world`, over the four `Tier::Fast` worlds (Mars, the
+      Moon, Ceres and the Europa), asserting there are four;
+    - `the_ground_holds_on_the_earth_like_sample_world` and
+      `the_ground_holds_on_the_locked_earth_like_sample_world`, each `#[ignore = "slow: …"]` with
+      its world's pass and its cost, each looking its world up by name and asserting `Tier::Slow`;
+    - the fast test also asserts that its four names and the slow tests' two (the constants
+      `EARTH` and `LOCKED_EARTH` that the slow tests look up, listed in `SLOW`), sorted, are
+      `sample_worlds()`'s names sorted. So every world runs in exactly one test, and a seventh
+      world fails there until a tier's test takes it.
+  - _Each world's sampler_ is the testkit's `Lcg`, seeded by FNV-1a 64 over the world's name
+    (`sampler(name)`), with the old binary's sampler seed, `0x6772_6f75_6e64_7277`, in place of the
+    offset basis. A world's points so depend on its name alone, not on the test that runs it, the
+    order the worlds run in or its place in `sample_worlds()`. They differ from the old binary's,
+    which drew every world's points from one sampler in turn; no golden holds them. The detail
+    seed `DETAIL` is unchanged.
+  - _The checks are T3's as built_, with their tolerances, unchanged: `height()` and
+    `point_height()` finite at 64 random directions and three fixed ones (`(1, 1, −1)`,
+    `(0, 1, 1)` and `(0, 0, 1)`), each at a height drawn from −500 m to 5 km; the normal a unit
+    vector to 10⁻¹⁴ in |n|², pointing out of the body against `figure.normal(ground.dir())`; and
+    at vertex (40, 9) of the `NegZ` patch `(1 << (finest − 2), 3)` at the finest level, at 120 m,
+    the ground equal to `height_at` there, bit for bit.
+  - _The margins on the new worlds_ (one run of the same points with a print added, never
+    committed): the largest |(|n|² − 1)| is 4.4 × 10⁻¹⁶ on both the Europa and the locked Earth,
+    against 10⁻¹⁴, and the smallest n · up is 0.900 on the Europa (a triangle about 26° off the
+    datum's normal) and 0.817 on the locked Earth (about 35°), against 0. On Mars, the Moon and
+    Ceres it is 0.902, 0.844 and 0.751, each at most 4.4 × 10⁻¹⁶ in |n|². The reference Earth was
+    not measured.
+  - _Times_ (dev profile under nextest, the laptop: an i7-8665U, 8 threads, nextest on 4, beside
+    #65's `atmosphere-reference` trace on 4 threads at nice 10, so provisional):
+    - `the_ground_holds_on_every_fast_sample_world`, 16.4 s, at a 1-minute load of 7.2 before and
+      6.7 after. By R09.T16's figures its four passes come to about 8.4 s on the desktop, Mars's
+      7.1 s in the test profile most of it;
+    - by name, `--run-ignored only`, the two side by side:
+      `the_ground_holds_on_the_locked_earth_like_sample_world` 36.0 s and
+      `the_ground_holds_on_the_earth_like_sample_world` 168.9 s, at a load of 6.1 before and 5.3
+      after, against R09.T16's 22.4 s and about 100 s for their passes on the desktop;
+    - the fast suite's saving: the reference Earth's pass, about 100 s in the test profile on the
+      desktop (94.9 s bench) and 169 s here, leaves the binary's fast test and so every `ci`.
+  - _Acceptance, as built._ T3's acceptance,
+    `cargo test -p hyperion-sim --features testing --test surface_ground_worlds`, runs the fast
+    test and shows the slow two as ignored, so it covers the four fast worlds alone: the reference
+    Earth and the locked Earth are `Tier::Slow`, as R09.T16's tiers have them. The slow two run by
+    name with `cargo nextest run` over the same `-p`, `--features` and `--test`, adding
+    `--run-ignored only`, the command the binary's module documentation gives.
+  - _The gate's plan is wider than a token change's_ (asked on the issue, 2026-10-23; main kept
+    `mod common;` with no `#[path]` module, the configured gate as it plans and only this binary's
+    two slow tests run by name). Over this change, the binary and this record alone,
+    `just smart-ci --plan origin/rendering-and-planets` plans nextest on 122 of the sim's 4,439
+    tests, in about twenty of its integration binaries (`frame`, `galaxy_*`, `gas`, `placement_*`,
+    `planetary_golden`, `query*`, `substellar_*` and this one) and five of the library's source
+    readers; the wasip1 run on 117 of them; the doctests of `tests/common/mod.rs`; and 32 of the
+    sim's slow tests as reached, which no step runs. Main's mock, a token change in the old binary,
+    planned this binary's fast test alone.
+    - The cause is `common`'s token graph. The old binary declared no `common`, and smart-ci's
+      Rust graph takes a `mod` declaration added, removed or changed as changing every item of the
+      file it names (`tools/smart-ci/rust_graph.py`). So the new `mod common;` counts every item
+      of `tests/common/mod.rs` as changed, and every test that reaches one is chosen (`--explain`:
+      `frame.rs (fn a_nearby_system) -> common/mod.rs (fn sunlike_point)`).
+    - The 32 slow tests reached through `common`, which this change does not touch, were not run.
+    - `surface_material_worlds.rs` (T1.b), `surface_albedo_worlds.rs` (T10.a) and
+      `surface_reading_worlds.rs` (T5) declare no `common` at the base either, so each of their
+      `sample_worlds()` follow-ups will plan as wide.
+- **Deferred findings (2026-10-13 rule) (R10.T3's `sample_worlds()` follow-up)** (recorded, not
+  ruled; each leaves the algorithm and the contracts as built).
+  - _A world lookup in each binary._ `world(name)`, the sample world of a name, is now in this
+    binary and in `surface_coarse_golden.rs`, and T1.b's, T2's, T5's and T10.a's follow-ups may
+    copy it again, with a name-seeded sampler like this one's. A `sample_world(name)` in
+    `tests/common/surface_worlds.rs` would hold one copy, a change to the helper that this
+    follow-up leaves alone.
