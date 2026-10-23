@@ -4224,6 +4224,41 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
 src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displays/galaxy`,
     the console-ux skill's lint, `just smart-ci origin/rendering-and-planets`; the look is
     look-92-93's fix runs, made on this change before its review's amendments to docs and tests.
+- **P14.T42.g A ring's label beside its own planet** (added 2026-10-23 by main's UX decision on
+  the landing look of T42.e, decision-zone-labels, follow-up 2). In `FOCUS BODY` on GDG 76DY08
+  A-11 /2304 at its fit, the selected ring `A j RING 1` (/2432) is labelled at 1920 × 1080 and not
+  at 1280 × 720 or 150%: the ring lies inside its planet's bracket's box on the screen, so every
+  place beside its outer edge stands within 0.25 rem of that box and none qualifies; so does any
+  ringed planet's ring at a fit that takes in distant moons, selected or not. That clearance keeps
+  an annulus's label from being read as a body's name, which a ring's label cannot be of its own
+  planet: it names a ring (`A j RING 1`, `MASSIVE RING`), drawn about that very body, which the
+  frame names (`BODY <designation>`). So an annulus drawn about a mark (`AnnulusMark.aboutId`,
+  which `bodyScene` sets to the planet's ID on each of its rings) gives its label
+  (`RingLabel.aboutMarkId`) no clearance from that one mark's bracket's box, while no reticle is
+  drawn about that mark (it is neither the selection nor the destination). It keeps 0.125 rem from
+  that mark's symbol and every stalk, 0.25 rem outside every other mark's bracket's box, 0.5 rem
+  from every label and no tick across it, selected or not, with no last resort. Zones and belts,
+  drawn about a host whose name a label beside it would read as, set no `aboutId`. With the planet
+  selected, its drawn bracket keeps the ring's label 0.25 rem off as any mark's does, so a ring
+  inside it is labelled once it is selected from the list (main's ruling on issue #96).
+  - _Files:_ under `apps/hyperion/src/renderer/src/`: `spatial/marks.ts`, `spatial/drawList.ts`,
+    `spatial/furniture.ts` (`AnnulusLabelSurroundings.brackets` gains each box's mark ID),
+    `spatial/SpatialView.tsx`, `displays/system/bodyFrame.ts`, their tests; the guide's
+    annulus-label bullet (decision-zone-labels, follow-up 2, G5, verbatim).
+  - _Tests:_ in `spatial/furniture.test.ts`: a ring's label with `aboutMarkId` on a ring 12 px
+    across about a class-3 mark, every place within 0.25 rem of that mark's bracket's box, is
+    drawn, 0.125 rem or more from the mark's symbol; without `aboutMarkId` it is not drawn; a
+    second mark's bracket's box over its first place still sends it elsewhere; ticks across every
+    place leave it out. In `spatial/drawList.test.ts`: a ring annulus's `aboutId` reaches its
+    label as `aboutMarkId`, and a zone's and a belt's labels have none. In
+    `displays/system/bodyFrame.test.ts`: every ring's annulus carries its planet's ID. In
+    `spatial/SpatialView.test.tsx`: a ring inside its planet's bracket's box is labelled, selected
+    and not, the unselected one 0.5 rem from the planet's label. Unchanged and passing: T42.d's,
+    T42.e's and T42.f's tests, `labels.test.ts`, the `displays/galaxy` tests, and
+    `SystemView.bodies.test.tsx` on its 1214 × 625 stage.
+  - _Accept:_ as T42.f's; at landing, main's hidden look at `FOCUS BODY` on A-11 /2304 at
+    1280 × 720, 1920 × 1080 and 150%, `A j RING 1` selected and not, its label drawn, and at `ALL`
+    no zone's or belt's label beside a star.
 
 #### P14.T43 Body list and readouts
 
@@ -27747,3 +27782,181 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     - _Continuity:_ continuous in time at fixed abundances. Continuity in time is that of the inputs
       that carry it: T_int by the law, T_eq, g, and T50.b's abundances by its own test. The record's
       is P14.T54.b.i's.
+- **Deviations in P14.T42.g, as built (`lane/96-p14-t42g-ring-bracket`, 2026-10-23).** A ring's
+  label beside its own planet (decision-zone-labels, follow-up 2, main's ruling on the look's
+  point 2, and main's ruling on issue #96 on the drawn bracket), in the client, the guide and this
+  plan only: no Rust, protocol, binding, server, sim, GPU, golden, `styles.css`, `labels.ts` or
+  `bodyMap.ts` change. The lane started from 16291ed8 and merged `rendering-and-planets` at
+  215bcd5f (P15.T3.a and T3.b: `crates/hyperion-fit/` and plan 15, none of this task's files)
+  before its first commit and its gate; after the merge `GENERATOR_VERSION` is 23 and
+  `PROTOCOL_VERSION` 3, as at the base.
+  - _The names_, as the brief gives them: `AnnulusMark.aboutId?: string | undefined`, which
+    `bodyScene` sets to `body.id` on each ring's annulus; `RingLabel.aboutMarkId?: string`, which
+    `markCurveLabels`' annulus branch sets by a conditional spread, so that an annulus with no
+    `aboutId` gives its label no field and the exact rimward test is unchanged; and
+    `AnnulusLabelSurroundings.brackets`, now each mark's ID with its bracket's box,
+    `ReadonlyArray<{ readonly id: string; readonly box: BoxPx }>`, inline as the brief writes it.
+    In `placeAnnulusLabels`: `nearAnyBracket`, the one test of every bracket's box, which a label
+    with no `aboutMarkId` takes; and `nearOtherBrackets`, a map from a waived mark's ID to a test
+    of every box but that mark's, which `nearBracketFor` makes when a label first asks for it, so
+    one per distinct ID; `qualifies` and `choose` take the label's test as an argument.
+    `SpatialView.tsx`'s `annulusInks.brackets` gives each anchor's `id` with its box. An
+    `aboutMarkId` that names no anchor, as for a planet `bodySymbol` gives no symbol, waives
+    nothing.
+  - _Main's ruling on issue #96, as built._ The lane's UX review found that the waiver let an
+    unselected ring's label cross its planet's drawn selection bracket, which `markInksPx` does
+    not count, in the usual way into the frame: `FOCUS BODY` leaves the selection as it was, so a
+    planet selected to focus it keeps its bracket. A jsdom probe confirmed it (the label from
+    491.2 to 592 px across, the bracket's bottom-left arms through it), and the question went to
+    the issue with a lean to count the drawn arms as inks. Main ruled instead that the waiver
+    holds only while no reticle is drawn about that mark, the selection's bracket or the
+    destination's chevrons. Built as `AnnulusLabelSurroundings.reticledIds: ReadonlySet<string>`,
+    the ruling's first form, rather than a `drawn` flag on each `brackets` entry: one set beside
+    the boxes. `SpatialView.tsx` fills it from the draw list's own `reticle` and `chevrons` ops,
+    each of which carries its mark's ID: `reticleOps` draws them about the placed marks whose ID
+    is `scene.selectedId` or `scene.destinationId`, so the set is the ruling's, and it follows
+    what is drawn (the TypeScript review's consider, against a first fill that restated that rule
+    over the anchors). `nearBracketFor` gives a label whose `aboutMarkId` is in it the test of
+    every box. The
+    guide's G5 and this task's entry take main's revised text. The stated limit, main's: with
+    the planet selected in `FOCUS BODY`, a ring inside its bracket on the screen stays unlabelled
+    at small sizes until the ring is selected from the list, which takes the planet's bracket
+    away and names the ring.
+  - _Comments beyond the brief's one._ The brief let the comment over `annulusInks` name T42.g.
+    The TypeScript review found three more that stated the bracket rule with no exception, and
+    each now has the clause: `furniture.ts`' module doc, and `SpatialView.tsx`'s comments on the
+    selected pass and on the other annuli's pass. A comment at `aboutId: body.id` says that the
+    waiver rests on a ring's label naming a ring (`populationName`; the UX review). No code
+    beyond the brief's and main's ruling on issue #96.
+  - _The ruling, point by point_ (decision-zone-labels, follow-up 2, point 2, with main's ruling
+    on issue #96):
+    - No clearance from the one mark's bracket's box: `nearBracketFor`. `furniture.test.ts`'s "sets
+      a ring's label about its own planet, every place within 0.25 rem of the planet's bracket's
+      box, 0.125 rem clear of its symbol", which pins first that all 96 places stand within
+      0.25 rem of the box; and `SpatialView.test.tsx`'s selected and unselected rings, each inside
+      its planet's bracket's box and labelled within 0.25 rem of it.
+    - Only while no reticle is drawn about that mark: `reticledIds`. `furniture.test.ts`'s "keeps
+      a ring's label 0.25 rem outside its planet's bracket's box while a reticle is drawn about the
+      planet: here, every place within it, it is left out", and "sets a ring's label inside its
+      planet's bracket's box while no reticle is drawn" and "… while a reticle is drawn about
+      another mark only, from 491.2 to 592 px across", the probe's scene built through
+      `buildDrawList`. `SpatialView.test.tsx`'s "keeps a ring's label 0.25 rem outside its
+      planet's bracket's box while the planet is the selection" and "… is the destination, or
+      leaves it out (main's ruling on issue #96)"; and "draws an unselected ring's label within
+      0.25 rem of its planet's bracket's box while a moon is the selection" (the TypeScript
+      review's should-fix: a reticle about another mark keeps the waiver). The ring selected from
+      the list, as `bodyScene` gives it (the annulus selected, `selectedId` null), draws no bracket
+      about the planet: "draws a selected ring's label within 0.25 rem of its planet's bracket's
+      box, no bracket drawn about the planet".
+    - 0.125 rem from the planet's symbol: its ink stays among `marks` (`nearMark`, unchanged),
+      which inside the waived box alone keeps the label off the planet: "moves a ring's label
+      about its own planet off the planet's symbol, still inside the planet's bracket's box",
+      whose first place stands on the symbol (added for the TypeScript review). Every stalk:
+      unchanged (R07.T16.j's and T42.d's stalk tests).
+    - 0.25 rem outside every other mark's bracket's box: "sets a ring's label about its own planet
+      0.25 rem outside a second mark's bracket's box at its first place", a class-2 moon whose
+      bracket's box touches that place and whose symbol stands 0.125 rem or more clear of it, so
+      that the moon's bracket alone refuses it. The moon was moved there for the plan-conformance
+      review: centred on the place, its symbol alone refused it, and the test passed with every
+      bracket waived.
+    - 0.5 rem from every label: `standing`, unchanged; "draws an unselected ring's label within
+      0.25 rem of its planet's bracket's box, 0.5 rem from the planet's label", which is drawn.
+    - No tick across it: "leaves out a ring's label about its own planet where a tick crosses
+      every place".
+    - The curves preferred: `choose`, unchanged (T42.d's curve tests).
+    - No last resort: the tick test; and "leaves out a ring's label with no planet named, every
+      place within 0.25 rem of that bracket's box".
+    - Selected or not: `SpatialView.test.tsx`'s selected and unselected rings; `bodyFrame.test.ts`'s
+      "draws every ring about the planet's mark, selected or not".
+    - Zones and belts unchanged: `bodyMap.ts` sets no `aboutId` and is unchanged;
+      `drawList.test.ts`'s test, in which a zone's and a belt's labels have no `aboutMarkId`; and
+      T42.e's "leaves out a selected belt's label whose every place stands within 0.25 rem of a
+      mark's bracket's box", unchanged and passing.
+
+    Every point is built as ruled.
+
+  - _Tests._ `furniture.test.ts`: 8 new, 110 in the file. Five are in "placeAnnulusLabels about a
+    ring's own planet (plan 14, P14.T42.g)", a class-3 mark at (120, 150), its bracket's box 13 px
+    about its centre, and a ring 12 px across about it. Two helpers stand above that describe:
+    `markAt` (a mark's ink and its bracket's box with its ID, as T42.d's `planetBelow` builds
+    them) and `everyPlace` (the 96 places a label tries: its point and 23 along its edge, four
+    each). They are at module level because oxlint's `consistent-function-scoping` refuses them
+    inside it. Three are in "placeAnnulusLabels about a ring's planet with a reticle drawn about
+    it (plan 14, P14.T42.g; main's ruling on issue #96)": the probe's scene, a class-2 planet at
+    the centre of a 1200 × 900 stage at the default camera's fit and its ring 0.3 to 0.6 units
+    about it, through `buildDrawList`, with the planet's label standing at its right.
+    `drawList.test.ts`: 1 new, 77 in the file. `bodyFrame.test.ts`: 1 new, 29.
+    `SpatialView.test.tsx`: 5 new, 161 in the file, in "SpatialView's ring label about its own
+    planet (plan 14, P14.T42.g)". Its scene is the probe's: the ring's outer edge stands 5.02 px
+    or less from the centre, inside the bracket's box 12 px about it.
+    - Ten of the 15 fail on the base, where a ring's label inside its planet's bracket's box is
+      left out or carries no ID. Five pin what the base already does: no `aboutMarkId`; ticks;
+      the reticled planet; and the planet as the selection and as the destination. Mutations,
+      each checked and reverted: no waiver at all (the base's placement) fails the eight of them
+      in `furniture.test.ts` and `SpatialView.test.tsx`; waiving every bracket for a label with
+      `aboutMarkId` fails the second-mark test; skipping the symbol test for it fails the symbol
+      test; `reticledIds.size > 0` for `.has(aboutMarkId)` fails the other-mark and the moon
+      tests; and an empty fill in `SpatialView.tsx` fails the selection and destination tests.
+    - The call sites whose surroundings changed shape: T42.d's "sets an annulus label 0.25 rem
+      outside every mark's bracket's box" passes `[{ id: "p", box: bracket }]`; T42.d's crowd
+      builds `{ id, box }` from each anchor, and its fault check reads each `box`, still testing
+      every one; the crowd passes its selection's anchor, the last, as `reticledIds`; and `amid`
+      gives an empty `reticledIds`. No existing assertion changed.
+    - Unchanged and passing: T42.d's, T42.e's and T42.f's tests; `labels.test.ts`, byte for byte;
+      R07.T16.j's curve-label tests; every `displays/system` test, `SystemView.bodies.test.tsx` on
+      its 1214 × 625 stage included, and every `displays/galaxy` test, in the acceptance run.
+  - _The lint._ The console-ux lint on the changed renderer files: 0 errors and 0 checks, in the
+    five source files it reads.
+  - _Reviews._ TypeScript, UX and plan conformance, then TypeScript and UX again on main's ruling
+    on issue #96.
+    - TypeScript: no must-fix. Should-fix, done: the three comments above. Considers: a test in
+      which the symbol rule binds inside the waived box, done; and `RingLabel`'s annulus-only
+      fields as a variant of their own, deferred below. Its note on a selected planet's drawn
+      bracket joined the UX review's. On the ruling's delta: no must-fix. Should-fix, done: the
+      other-mark and moon tests. Considers, done: the fill from the draw list's reticle ops; and
+      the reticled test's check, which an empty result passed whatever it held, now the result
+      itself.
+    - UX: no must-fix; the lint clean. Should-fix, against the ruling and the pasted text: "the
+      planet's drawn bracket can now cross a ring's label (a gap in the ruling and in the pasted
+      text)", asked on the issue and settled by main's ruling on issue #96, built above. Consider,
+      done: the comment at `aboutId: body.id`. On the ruling's delta: no must-fix or should-fix.
+      One consider, against main's revised G5, for main and not applied: the guide says "while no
+      bracket is drawn there" where the ruling and the code say no reticle, so with the planet the
+      destination alone (chevrons, no bracket) the guide would allow what the code refuses; the
+      reviewer's text, "while no reticle is drawn about the planet". No display sets a
+      destination where an annulus is drawn about a mark today.
+    - Plan conformance: must-fix, done: the second-mark test's moon. Should-fix, done: the
+      deferred findings for `labels.ts` and plan 05. Consider, done: `SpatialView.tsx`'s two
+      comments. It found the guide's text and the entry as the brief gives them.
+  - _Pending:_ main's look at 1280 × 720, 1920 × 1080 and 1920 × 1080 at 150 %: `FOCUS BODY` on
+    GDG 76DY08 A-11 /2304, `A j RING 1` selected and not, its label drawn; and at `ALL`, no zone's
+    or belt's label beside a star. After main's ruling on issue #96, "not selected" holds with the
+    label drawn only while no bracket is drawn about the planet. With the planet itself selected,
+    the usual way into the frame, the ring's label stands 0.25 rem outside the planet's bracket or
+    is not drawn, by the stated limit.
+- **Deferred findings (2026-10-13 rule)**, from P14.T42.g:
+  - _`bracketBoxPx`'s doc_ (`spatial/labels.ts` 189–191, outside this task's scope) says "and so
+    does an annulus's label about every mark (plan 14, P14.T42.d)", which no longer holds for a
+    ring's label about its own planet. The lean: "and so does an annulus's label about every mark
+    but the one its annulus is drawn about while no reticle is drawn about it (plan 14, P14.T42.d,
+    T42.g)".
+  - _Plan 05's T42.d note_ ("Narrowed for annulus labels by P14.T42.d", outside this task's
+    scope) says an annulus's label stands "0.25 rem outside every mark's bracket's box". The lean:
+    "0.25 rem outside every mark's bracket's box but, for a ring's label, its own planet's while
+    no reticle is drawn about it (P14.T42.g)".
+  - _`RingLabel`'s annulus-only fields_ (the TypeScript review's consider): `yieldsToMarks`,
+    `selected` and now `aboutMarkId` mean something only on an annulus's label, and a plane
+    ring's or a path's label could carry them unnoticed. The lean: an annulus's label as a
+    `CurveLabel` variant of its own, holding the three, in a refactor of its own across
+    `drawList.ts`, `furniture.ts` and `SpatialView.tsx`.
+  - _G5's "bracket" against the ruling's "reticle"_ (the UX review's consider on the ruling's
+    delta, against main's text). The guide lets a ring's label stand inside its planet's bracket's
+    place "while no bracket is drawn there"; the ruling, the entry and the code lift the waiver
+    while any reticle is drawn about the planet, its destination's chevrons included, which no
+    ink counts. With the planet the destination alone the code is the stricter, within the
+    guide's "may". The lean: the reviewer's "while no reticle is drawn about the planet", as the
+    guide names the selection's bracket and the destination's chevrons the reticles; main's text.
+  - _A ring named for itself_ (the UX review's consider): the waiver rests on a ring's label
+    naming a ring, `<planet> RING <n>` from the server or `populationName`'s `MASSIVE RING` and
+    `DUSTY RING`. A task that gives rings proper names revisits it; the comment at
+    `aboutId: body.id` says so.
