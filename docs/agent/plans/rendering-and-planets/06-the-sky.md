@@ -3423,14 +3423,15 @@ it needs no bump.
 
 ## Risks and open points
 
-- **Re-validated at ce7aeb3** (2026-10-02, `main` and `rendering-and-planets` at RM1's close, R05
-  not built; `origin/galaxy-generation` compared). Consumes now record the as-built names of R01
-  (positional `createPackedCube`, the padded-row buffer layout, `main`-entry kernels and splat, no
-  splat catalogue kind, no per-resource destroy, the readback guard), R02 (no viewport or galactic
-  position on `CameraState`, no HDR target in the wireframe, the interim's real files and labels,
-  the sprites' storage layout), R03 (`BulkPayload`, `requestBulk(body, manifestOf)`, the client's
-  64 MiB / 257-chunk limits, `FakeWebSocket`'s path, the `SystemPlace` union, R03.T15's pending
-  transfer check), R04 (units in base, four of this plan's missing; `Span` and `UniverseTime` in
+- **Re-validated at ce7aeb3**, now 2b75d16c (2026-10-02, `main` and `rendering-and-planets`
+  at RM1's close, R05 not built; `origin/galaxy-generation` compared). Consumes now record
+  the as-built names of R01 (positional `createPackedCube`, the padded-row buffer layout,
+  `main`-entry kernels and splat, no splat catalogue kind, no per-resource destroy, the
+  readback guard), R02 (no viewport or galactic position on `CameraState`, no HDR target
+  in the wireframe, the interim's real files and labels, the sprites' storage layout),
+  R03 (`BulkPayload`, `requestBulk(body, manifestOf)`, the client's 64 MiB / 257-chunk
+  limits, `FakeWebSocket`'s path, the `SystemPlace` union, R03.T15's pending transfer
+  check), R04 (units in base, four of this plan's missing; `Span` and `UniverseTime` in
   the sim) and the galaxy plans (the candidate's word order confirmed; `query_time` private;
   `Quality::Budget(NonZeroU32)`; fit tasks registered in `task.rs`'s `REGISTRY`; `SystemSource`
   and `FeatureMemberSource` not `Sync`; generator version 19, not 15). Task edits: T16.b is due
@@ -3440,8 +3441,9 @@ it needs no bump.
   T13.g's transient scratch and T14's release need; T10 classifies `Sky` in `kind()` and
   `is_large()` and builds its encoder over plain values; T11 reuses `query_time` and removes
   `BulkPayload`'s `expect(dead_code)`; T15 extends the guide's existing `STARS` row; T17 runs its
-  named slow tests and benches only; `HostDiscDto`'s field names are pinned for R07. Brainstorm drift since the plan's creation (899db5e): only the
-  CSP ruling (R04.T10.a), which the sky's decode worker, a same-origin module worker compiling no
+  named slow tests and benches only; `HostDiscDto`'s field names are pinned for R07.
+  Brainstorm drift since the plan's creation (899db5e, now 9d955b26): only the CSP ruling
+  (R04.T10.a), which the sky's decode worker, a same-origin module worker compiling no
   WebAssembly, meets as it is. No generator-version bump and no protocol-version change follow.
   **Pending re-validation:** T13.f waits on R05 (`QualitySetting`, `ViewSettings`, `SETTINGS`,
   `AllocationTally`, being re-validated in parallel); T16.a waits on P09.T40 (not built on `main`
@@ -4249,7 +4251,7 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   choose; the ask stays open in the roadmap's between-plans table (R06 owner, R08 asking).
 - **Deviations in T1, as built.** None: the R06 row of galaxy plan 04's reserved kinds and plan 06's
   "Asked by rendering plan R06" heading with A1–A4 are drafted for the galaxy plans' owner
-  (`fb5b47c`). _Accepted 2026-10-19 (`signoff-12.md`, item 29), A2 amended._
+  (`fb5b47c`, now `39c88c18`). _Accepted 2026-10-19 (`signoff-12.md`, item 29), A2 amended._
 - **Deviations in T6.a, as built.** `generate_cell_where` draws each candidate's mass through
   `placement::record::candidate_mass` (factored out of `SystemRecord::of_candidate` with the same
   calls) and evaluates a kept candidate whole, drawing its mass word a second time. The 500-cell

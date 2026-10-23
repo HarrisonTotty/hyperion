@@ -468,8 +468,8 @@ its first task.
   (`buildCommand`, `parseClientArgs`, `ClientArgs` of `address` and `port` only, each option read
   by hand), which gains the spike flag; the justfile's `ci` recipe, which gains nothing of the
   spike's (Design note 20).
-- **As built, re-validated 2026-10-02 at ce7aeb3** (the call sites below, and the tasks, use these
-  names; the sketches above are otherwise unchanged):
+- **As built, re-validated 2026-10-02 at ce7aeb3**, now 2b75d16c (the call sites below, and the
+  tasks, use these names; the sketches above are otherwise unchanged):
   - _R01._ The engine is our own WebGPU adapter in `view/engine/webgpu/` (`createWebGpuEngine`),
     Babylon having been dropped (R01 Design notes 23–24); shaders are standard WGSL: `@group(0)`
     `Frame` from `view/shaders/frame.wgsl`, concatenated as a `?raw` import (as
@@ -3691,9 +3691,9 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   T15.b) and `view/quality/qualitySetting.ts` (T7.b, T12.c, then R06, R07, R08 and R12). Each is
   appended to, never reordered; a conflict keeps both sides, and `tags.golden` is re-blessed after
   a merge rather than merged by hand.
-- **Re-validated at ce7aeb3** (2026-10-02, after RM1 merged). Swept every Consumes item against
-  the code and folded in R01's, R02's and R04's as-built deviations and RM1's decision records
-  (Babylon dropped and the WGSL binding convention, the hardware decisions, the protocol
+- **Re-validated at ce7aeb3**, now 2b75d16c (2026-10-02, after RM1 merged). Swept every Consumes
+  item against the code and folded in R01's, R02's and R04's as-built deviations and RM1's decision
+  records (Babylon dropped and the WGSL binding convention, the hardware decisions, the protocol
   decision dropping the post-process `depth` input, the CSP ruled unchanged, `height.worker.ts`).
   The brainstorm has changed since the plan was written only in the CSP passages, which the plan
   already carried. What changed here: Consumes gained an "As built" entry with the real names;
@@ -3844,8 +3844,8 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   Ruled: T13.a also records the patch counts and demand under min(hard, 4σ_n) for the ridged
   planet, and T19 judges a ridged run's streaming failure caused only by that over-refinement as
   "ours to fix", never a fired rule.
-- **Review fixes to T1–T6** (43c1613 and the commit after it). `LatticeCache` boxes serve only
-  the identical octave (a cache reused across planets or seeds never returns another's
+- **Review fixes to T1–T6** (43c1613, now 3e7630c5, and the commit after it). `LatticeCache` boxes
+  serve only the identical octave (a cache reused across planets or seeds never returns another's
   gradients); every height is asserted finite in the normals and the collision interpolant too;
   `cube::SampleGrid` (`Mesh`, `Double`) replaces `sample_dir`'s raw quads; the wasm exports take
   `VertexPath`, `NormalScale` and `Ridges` enums, and `testPlanetVersion()` is exported so a stale
