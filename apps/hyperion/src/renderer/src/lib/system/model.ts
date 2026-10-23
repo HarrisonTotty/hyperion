@@ -964,9 +964,16 @@ export interface GuillotProfile {
 /**
  * A gas-envelope body's visible atmosphere (the protocol's `BodyEnvelopeDto`, plan 14's P14.T24.d,
  * on the wire by P14.T35.e): the section of a giant or a sub-Neptune, whose surface section does
- * not apply.
+ * not apply, and from generator version 24 of a solid body under a supercritical envelope
+ * (P14.T53.b part 2), sent `not_modelled` until P14.T53.b part 3.
  */
 export interface BodyEnvelope {
+  /**
+   * The condensable whose supercritical fluid the envelope is, by its registry key; `null` for an
+   * H₂/He envelope. No server sends it other than `null` before P14.T53.b part 3: a solid body
+   * under a supercritical envelope has its envelope `not_modelled` until then.
+   */
+  readonly supercritical: string | null;
   /** Zero for a body with no internal heat. */
   readonly internalTemperatureK: number;
   readonly irradiationTemperatureK: number;
@@ -990,11 +997,16 @@ export interface BodyEnvelope {
  * and hooks.
  */
 export interface BodyRecord extends SystemBody {
-  /** `not_applicable` for a body in the gas-envelope state, whose air is its envelope. */
+  /**
+   * `not_applicable` for a body in the gas-envelope state, and from generator version 24 for a
+   * solid body under a supercritical envelope (P14.T53.b part 2), whose air is its envelope.
+   */
   readonly surface: Section<BodySurface>;
   /**
-   * A gas-envelope body's air (`not_modelled` until P14.T24.d), and `not_applicable` for every
-   * other body; `not_modelled` where an older server leaves the field out.
+   * A gas-envelope body's air (`not_modelled` until P14.T24.d), a solid body's under a
+   * supercritical envelope from generator version 24 (`not_modelled` until P14.T53.b part 3), and
+   * `not_applicable` for every other body; `not_modelled` where an older server leaves the field
+   * out.
    */
   readonly envelope: Section<BodyEnvelope>;
   readonly hooks: Section<BodyHooks>;

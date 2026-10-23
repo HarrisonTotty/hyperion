@@ -3211,4 +3211,20 @@ mod tests {
         }
         assert!(rings > 0, "no golden system has a ring");
     }
+
+    /// P14.T54.b.d: a solid planet under a supercritical envelope (P14.T53.b part 2, from
+    /// generator version 24) is sent its surface `not_applicable` and its envelope `not_modelled`
+    /// by their tags alone, as a giant's: neither value's conversion runs, so nothing reaches
+    /// [`surface_state`]'s gas-envelope arm or [`envelope`]'s empty match.
+    #[test]
+    fn a_surface_not_applicable_and_an_envelope_not_modelled_are_sent_by_their_tags() {
+        assert_eq!(
+            section(&Section::<Surface>::NotApplicable, surface),
+            SectionDto::NotApplicable
+        );
+        assert_eq!(
+            section(&Section::<Envelope>::NotModelled, |inner| envelope(*inner)),
+            SectionDto::NotModelled
+        );
+    }
 }

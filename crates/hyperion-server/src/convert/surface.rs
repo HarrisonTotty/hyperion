@@ -406,8 +406,9 @@ pub(crate) fn survey_source(source: SurveySourceDto) -> SurveySource {
 /// Why the surface of the body `body` names cannot be surveyed, as the wire says it.
 ///
 /// A body that does not resolve is refused as `body_detail` refuses it ([`body_refusal`]); one
-/// with no solid surface (a giant, a ring, a belt, the halo, or a body not yet formed or gone at
-/// the record's time) is `bad_request` naming `body`, and so is one whose field's level cannot be
+/// with no solid surface (a giant; from generator version 24, P14.T53.b part 2's solid body under
+/// a supercritical envelope; a ring, a belt or the halo; or a body not yet formed or gone at the
+/// record's time) is `bad_request` naming `body`, and so is one whose field's level cannot be
 /// had because the record's figure is not modelled either. A section the record withholds is the
 /// server's own bug (`internal`): the service reads full records. So is every refusal of the
 /// inputs other than a section's state (R09.T10.f; decision-backlog-2 §3.3), each a fault of the
@@ -424,8 +425,8 @@ pub(crate) fn surface_refusal(body: &BodyIdHex, error: SurfaceJobError) -> Reque
         SurfaceJobError::Inputs(ReadCoarseInputsError::Section(
             SurfaceInputsError::NoSolidSurface,
         )) => format!(
-            "body {} has no solid surface: it is a giant, a ring, a belt or the halo, or is not \
-             present at the epoch",
+            "body {} has no solid surface: it is a giant, lies under a supercritical envelope, is \
+             a ring, a belt or the halo, or is not present at the epoch",
             body.as_str()
         ),
         SurfaceJobError::Inputs(ReadCoarseInputsError::Section(

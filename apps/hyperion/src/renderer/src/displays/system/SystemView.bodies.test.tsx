@@ -24,6 +24,7 @@ import {
   earthDetail,
   earthDetailOfAnOlderServer,
   earthMassAndOrbit,
+  earthUnderASupercriticalEnvelope,
   FIXTURE_EARTH,
   FIXTURE_JUPITER,
   FIXTURE_SYSTEM,
@@ -1669,6 +1670,22 @@ describe("SystemView's body readout", () => {
     // As every server sends a giant's envelope until P14.T24.d.
     await answerDetail(socket, jupiterWithEnvelope({ state: "not_modelled" }));
 
+    expect(terms("ATMOSPHERE")).toHaveLength(1);
+    expect(reading("ATMOSPHERE")).toBe("NOT YET MODELLED");
+    expect(terms("MOLE FRACTION")).toHaveLength(0);
+  });
+
+  it("reads a rocky planet under a supercritical envelope with no SURFACE and its ATMOSPHERE NOT YET MODELLED", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // Decision-absurd-states-24 R2.3: from generator version 24 such a planet's surface does not
+    // apply, and its envelope is not modelled until P14.T53.b part 3.
+    await answerDetail(socket, earthUnderASupercriticalEnvelope());
+
+    expect(reading("CLASS")).toBe("ROCKY");
+    expect(terms("SURFACE")).toHaveLength(0);
+    expect(terms("SURFACE PRESSURE")).toHaveLength(0);
     expect(terms("ATMOSPHERE")).toHaveLength(1);
     expect(reading("ATMOSPHERE")).toBe("NOT YET MODELLED");
     expect(terms("MOLE FRACTION")).toHaveLength(0);

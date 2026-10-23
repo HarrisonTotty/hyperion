@@ -1597,7 +1597,8 @@ function toSurface(surface: BodySurfaceDto): BodySurface {
  * A gas-envelope body's envelope section, checked (plan 14's P14.T24.d, on the wire by
  * P14.T35.e): temperatures not negative, the profile's parameters and the join positive, the
  * adiabat's pressures rising from the join, none above it, the composition summing to 1 and
- * largest first.
+ * largest first. Its supercritical condensable is any registry key, or `null` for an H₂/He
+ * envelope (P14.T54.b.d).
  */
 function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
   const profile = envelope.profile;
@@ -1616,6 +1617,7 @@ function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
     "envelope unusable",
   );
   return {
+    supercritical: envelope.supercritical,
     internalTemperatureK: envelope.internal_temperature_k,
     irradiationTemperatureK: envelope.irradiation_temperature_k,
     profile: {

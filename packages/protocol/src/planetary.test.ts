@@ -326,6 +326,8 @@ describe("body_detail", () => {
 
     expect(record.surface).toEqual({ state: "not_applicable" });
     expect(okValue(record.bulk).class).toBe("gas_giant");
+    // An H2/He envelope names no supercritical condensable, and says so with null (P14.T54.b.d).
+    expect(envelope.supercritical).toBeNull();
     expect(envelope.composition.map((gas) => gas.species)).toEqual(["H2", "He", "CH4"]);
     expect(envelope.decks.map((deck) => [deck.material, deck.phase, deck.deck])).toEqual([
       ["NH3", "solid", "NH3"],

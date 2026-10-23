@@ -27,6 +27,7 @@ import {
   earthDetail,
   earthDetailOfAnOlderServer,
   earthMassAndOrbit,
+  earthUnderASupercriticalEnvelope,
   FIXTURE_EARTH,
   FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
@@ -986,6 +987,29 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     expect(envelope.profile.redistributionFactor).toBe(0.25);
   });
 
+  it("reads an envelope's supercritical condensable by its key, and an H2/He envelope's as null", () => {
+    const hydrogen = okSection(
+      recordOf(toBodyDetail(jupiterDetail(), FIXTURE_SYSTEM, DESIGNATION)).envelope,
+    );
+    const water = okSection(
+      recordOf(jupiterWithEnvelope({ ...jupiterEnvelope(), supercritical: "H2O" })).envelope,
+    );
+
+    expect([hydrogen.supercritical, water.supercritical]).toEqual([null, "H2O"]);
+  });
+
+  it("reads a solid planet under a supercritical envelope, its surface not applicable and its envelope not modelled", () => {
+    // P14.T53.b part 2: from generator version 24 a rocky body may send the pair a giant sends.
+    const record = recordOf(
+      toBodyDetail(earthUnderASupercriticalEnvelope(), FIXTURE_SYSTEM, DESIGNATION),
+    );
+
+    expect([record.surface, record.envelope]).toEqual([
+      { state: "not_applicable" },
+      { state: "not_modelled" },
+    ]);
+  });
+
   it("reads an older server's record, which has no envelope, as its envelope not modelled", () => {
     const record = recordOf(
       toBodyDetail(earthDetailOfAnOlderServer(), FIXTURE_SYSTEM, DESIGNATION),
@@ -1079,6 +1103,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     }
     const envelopeResult = jupiterWithEnvelope({
       ...envelope,
+      supercritical: unknown,
       composition: envelope.composition.map((gas) => ({
         species: unknown,
         mole_fraction: gas.mole_fraction,

@@ -1319,6 +1319,7 @@
         "envelope": {
           "state": "ok",
           "value": {
+            "supercritical": null,
             "internal_temperature_k": 99.0,
             "irradiation_temperature_k": 155.4,
             "profile": {

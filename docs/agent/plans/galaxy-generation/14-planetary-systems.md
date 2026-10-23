@@ -29206,3 +29206,41 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     - _Left for P14.T54.b.l:_ `record_modifiers`' and `planet_field`'s rules arguments with the
       hold; the scan with its `HELD` list; the server's absent-members test takes the modifiers as
       present where the record models them.
+  - _P14.T54.b.d, the envelope's `supercritical` member and P14.T53.b part 2's sections in the
+    conversion._ `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3; no sim file changes, so no
+    golden can move.
+    - _The member:_ `BodyEnvelopeDto.supercritical`, an `Option<String>` placed first (it says what
+      the envelope is): the condensable's registry key, else `null` for an H₂/He envelope, a plain
+      member always present on an `ok` envelope, never absent. No envelope is sent yet (the
+      conversion's `match envelope {}` is uninhabited), so no type already sent changes. The
+      protocol's Jupiter envelope and its JSON (`null`), the keyed-members test, a water envelope's
+      wire form and the shared fixture's `body_detail_jupiter` follow, and the module doc lists
+      the member among those `null` for none. The client's `BodyEnvelope.supercritical` is
+      `string | null`, any registry key, passed unchecked as every key is.
+    - _The sections:_ part 2's own hunks (the protocol's section docs, and the server's
+      `every_present_planet_has_exactly_one_of_a_surface_and_an_envelope` relaxed) are
+      p14-escape's 24855106 and are not repeated; whichever lands second re-cuts. No
+      `unreachable!` or panic fires on a solid body sent surface `not_applicable` and envelope
+      `not_modelled`, so the plan's "the conversion's `unreachable!` is replaced" has nothing to
+      replace: the conversion sends both by their tags (`section`), and `surface_state`'s
+      `GasEnvelope` arm, `vertical_structure`'s `Envelope` arm and `envelope`'s empty match are
+      reached only from an `Ok` section's value. The surface service refuses the body's field
+      `bad_request` through `for_body`'s `NoSolidSurface`, which reads the tag whatever the class;
+      the refusal's text and doc now name a body under a supercritical envelope beside a giant.
+      The client's decoder reads the pair as it reads a giant's.
+    - _The console:_ `BodyRecordReadings` leaves the `not_applicable` `SURFACE` out and reads the
+      `not_modelled` envelope `ATMOSPHERE NOT YET MODELLED`, as built; `envelopeRows`' remark,
+      which supposed the section a gas-envelope body's alone, now says `GAS ENVELOPE` holds while
+      every `ok` envelope's `supercritical` is `null`, and that part 3's first `ok` one leads with
+      its condensable (`SUPERCRITICAL H2O`, decision-absurd-states-24 R2.4).
+    - _Recorded, not built:_ the view's `surfaceless` (`view/scene/fromServer.ts`) decides by class
+      from the list entry, which carries no surface section, so from 24 the view's ground readout
+      takes a rocky body under a supercritical envelope for a solid one, not a giant; the server
+      refuses its field (`bad_request`), which the field store holds failed as a refusal, not a
+      crash. For P14.T53.b part 3 or the serve gate's opening.
+    - _Tests:_ the protocol's water envelope and the `null` sent on an H₂/He one, the keyed
+      members with an unknown `supercritical`, the fixture's round trip; the server's tag-only
+      conversion of the pair; the client's `supercritical` (`null`, a key, an unknown key) and a
+      rocky record with the pair decoded; the console's rocky planet with no `SURFACE` and
+      `ATMOSPHERE NOT YET MODELLED` (`earthUnderASupercriticalEnvelope`, in the shared test
+      fixture).

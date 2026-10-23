@@ -84,6 +84,24 @@ export function earthDetailOfAnOlderServer(): ResponseFor<"body_detail"> {
   return { ...detail, record: { ...older, surface: { state: "not_modelled" } } };
 }
 
+/**
+ * The slice's Earth at the `full` level as a server from generator version 24 sends a solid planet
+ * under a supercritical envelope (P14.T53.b part 2; decision-absurd-states-24 R2.3): its class
+ * still rocky, its surface not applicable and its envelope not modelled, the pair a giant's record
+ * sends.
+ */
+export function earthUnderASupercriticalEnvelope(): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  return {
+    ...detail,
+    record: {
+      ...detail.record,
+      surface: { state: "not_applicable" },
+      envelope: { state: "not_modelled" },
+    },
+  };
+}
+
 /** The slice's Earth at the `mass_and_orbit` level. */
 export function earthMassAndOrbit(): ResponseFor<"body_detail"> {
   return response("body_detail_mass_and_orbit", "body_detail");

@@ -24,13 +24,13 @@
 //!
 //! A value the generator computes as none is `null`: an airless body's mean molar mass, a world
 //! with no condensable's `condensable`, a world never wet's `wet_epoch`, a body computed to hold no
-//! subsurface ocean's `subsurface_ocean`. A member this generator version does not compute is
-//! absent ([`Modelled::NotModelled`]), and a reader takes it as not modelled, never as none. The
-//! members whose tasks land later (P14.T24.c, T24.e, T51.d, T53.d and T55.b) are absent until
-//! they do, and each task may reshape its own member's type while no build has sent a value of it;
-//! once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The
-//! condensates (P14.T51.a) and the crust (P14.T51.c) are sent from P14.T54.a's batch, so their
-//! shapes are now fixed.
+//! subsurface ocean's `subsurface_ocean`, an H₂/He envelope's `supercritical`. A member this
+//! generator version does not compute is absent ([`Modelled::NotModelled`]), and a reader takes it
+//! as not modelled, never as none. The members whose tasks land later (P14.T24.c, T24.e, T51.d,
+//! T53.d and T55.b) are absent until they do, and each task may reshape its own member's type
+//! while no build has sent a value of it; once a build has, a change bumps
+//! [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The condensates (P14.T51.a) and the crust
+//! (P14.T51.c) are sent from P14.T54.a's batch, so their shapes are now fixed.
 //!
 //! # Closed classes
 //!
@@ -1054,6 +1054,13 @@ pub struct GuillotProfileDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyEnvelopeDto {
+    /// The condensable whose supercritical fluid the envelope is, by its registry key: `null` for
+    /// an H₂/He envelope, a giant's or a sub-Neptune's (decision-absurd-states-24 R2.3).
+    ///
+    /// A solid body under a supercritical envelope (P14.T53.b part 2) is sent its envelope
+    /// `not_modelled`, so no build sends this member other than `null` before P14.T53.b part 3
+    /// gives that envelope its value. Always present on an `ok` envelope, as `null` where none.
+    pub supercritical: Option<String>,
     /// The internal temperature `T_int`, K, not negative: 0 for a body with no internal heat.
     pub internal_temperature_k: f64,
     /// The irradiation temperature `T_irr`, K, not negative.
@@ -1357,6 +1364,7 @@ pub(crate) mod tests {
     /// through 166.1 K at 1 bar, and an ammonia-ice deck at 0.45–0.7 bar.
     pub(crate) fn jupiter_envelope() -> BodyEnvelopeDto {
         BodyEnvelopeDto {
+            supercritical: None,
             internal_temperature_k: 99.0,
             irradiation_temperature_k: 155.4,
             profile: GuillotProfileDto {
@@ -1452,6 +1460,7 @@ pub(crate) mod tests {
 
     pub(crate) fn jupiter_envelope_json() -> Value {
         json!({
+            "supercritical": null,
             "internal_temperature_k": 99.0,
             "irradiation_temperature_k": 155.4,
             "profile": {
@@ -2033,6 +2042,21 @@ pub(crate) mod tests {
         assert_wire_form(&sub_neptune_envelope(), sub_neptune_envelope_json());
     }
 
+    /// P14.T54.b.d: an envelope names the condensable it is the supercritical fluid of, and an
+    /// H₂/He envelope sends the member `null`, never leaves it out.
+    #[test]
+    fn an_envelope_names_its_supercritical_condensable_or_sends_null() {
+        let water = BodyEnvelopeDto {
+            supercritical: Some("H2O".to_owned()),
+            ..sub_neptune_envelope()
+        };
+        let mut wire = sub_neptune_envelope_json();
+        wire["supercritical"] = json!("H2O");
+        assert_wire_form(&water, wire);
+        let hydrogen = serde_json::to_value(jupiter_envelope()).unwrap();
+        assert_eq!(hydrogen.get("supercritical"), Some(&Value::Null));
+    }
+
     /// Decision-p14-t35e-wire §1.5 item 4: every member a later task fills round-trips absent,
     /// `null` and a value, and an absent one is written with no key.
     #[test]
@@ -2269,10 +2293,12 @@ pub(crate) mod tests {
         wire["biosphere"] = json!({ "fluxes": [{ "species": unknown, "flux_earth": 1.0 }] });
         assert_wire_form(&surface, wire);
         let mut envelope = jupiter_envelope();
+        envelope.supercritical = Some(unknown.to_owned());
         envelope.composition[0].species = unknown.to_owned();
         envelope.decks[0].material = unknown.to_owned();
         envelope.decks[0].deck = Some(unknown.to_owned());
         let mut wire = jupiter_envelope_json();
+        wire["supercritical"] = json!(unknown);
         wire["composition"][0]["species"] = json!(unknown);
         wire["decks"][0]["material"] = json!(unknown);
         wire["decks"][0]["deck"] = json!(unknown);

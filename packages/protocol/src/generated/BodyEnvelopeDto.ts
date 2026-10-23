@@ -15,6 +15,15 @@ import type { ProfileNodeDto } from "./ProfileNodeDto";
  */
 export type BodyEnvelopeDto = { 
 /**
+ * The condensable whose supercritical fluid the envelope is, by its registry key: `null` for
+ * an H₂/He envelope, a giant's or a sub-Neptune's (decision-absurd-states-24 R2.3).
+ *
+ * A solid body under a supercritical envelope (P14.T53.b part 2) is sent its envelope
+ * `not_modelled`, so no build sends this member other than `null` before P14.T53.b part 3
+ * gives that envelope its value. Always present on an `ok` envelope, as `null` where none.
+ */
+supercritical: string | null, 
+/**
  * The internal temperature `T_int`, K, not negative: 0 for a body with no internal heat.
  */
 internal_temperature_k: number, 
