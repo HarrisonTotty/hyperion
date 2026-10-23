@@ -66,8 +66,8 @@
 //! This module is pure: nothing on the record calls it at generator version 22
 //! (decision-bump-plan-after-22 §1.3). P14.T54.b, the 23 → 24 bump, puts its value in the record's
 //! surface section ([`record::Surface::vertical_structure`](crate::planetary::record::Surface::vertical_structure))
-//! and on the wire. P14.T24.d adds the gas envelope's profile as a second variant of
-//! [`VerticalStructure`], so that one [`temperature_at`] serves both.
+//! and on the wire. P14.T24.d's gas envelope's profile ([`envelope`]) is its second variant,
+//! [`VerticalStructure::Envelope`], so that one [`temperature_at`] serves both.
 //!
 //! # Determinism
 //!
@@ -90,8 +90,11 @@ use crate::substance::{
 use crate::units::consts::STEFAN_BOLTZMANN;
 use crate::units::{Kelvin, Pascals, WattsPerSquareMetre};
 
+pub mod envelope;
 #[cfg(test)]
 mod tests;
+
+use envelope::EnvelopeProfile;
 
 /// The lapse factor α of an air whose condensable is water and whose latent heat can drive it:
 /// 0.6, Earth's (Robinson and Catling 2014, Nature Geoscience 7, 12, Table 1, read at source,
@@ -166,6 +169,15 @@ pub struct ProfileNode {
 }
 
 impl ProfileNode {
+    /// A node at `pressure` and `temperature`, each a profile's own (not checked).
+    #[must_use]
+    pub(crate) const fn new(pressure: Pascals, temperature: Kelvin) -> Self {
+        Self {
+            pressure,
+            temperature,
+        }
+    }
+
     /// The pressure, positive.
     #[must_use]
     pub const fn pressure(&self) -> Pascals {
@@ -181,12 +193,14 @@ impl ProfileNode {
 
 /// A body's vertical structure, read through [`temperature_at`].
 ///
-/// One variant so far: a surface's air ([`RadiativeConvective`], P14.T24.e). P14.T24.d adds the
-/// gas envelope's, a Guillot profile joined to its adiabat, so that one function serves both.
+/// A surface's air ([`RadiativeConvective`], P14.T24.e) or a gas envelope's ([`EnvelopeProfile`],
+/// P14.T24.d), so that one function serves both.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VerticalStructure {
     /// A scaled adiabat from the ground to an isothermal skin (P14.T24.e).
     RadiativeConvective(RadiativeConvective),
+    /// Guillot's grey profile joined to its dry adiabat (P14.T24.d).
+    Envelope(EnvelopeProfile),
 }
 
 impl VerticalStructure {
@@ -195,6 +209,7 @@ impl VerticalStructure {
     pub fn temperature_at(&self, p: Pascals) -> Kelvin {
         match self {
             Self::RadiativeConvective(profile) => profile.temperature_at(p),
+            Self::Envelope(profile) => profile.temperature_at(p),
         }
     }
 }
@@ -204,7 +219,8 @@ impl VerticalStructure {
 ///
 /// So the picture and the drag read the same air: R08's `temperatureAt` copies it, held to this
 /// module's golden at 10⁻¹². It is continuous in p and never rises with height (with falling p). For a
-/// [`RadiativeConvective`] structure it is [`RadiativeConvective::temperature_at`].
+/// [`RadiativeConvective`] structure it is [`RadiativeConvective::temperature_at`], and for an
+/// [`EnvelopeProfile`] [`EnvelopeProfile::temperature_at`] (no inversion at its γ below 1).
 ///
 /// # Examples
 ///
@@ -236,10 +252,8 @@ impl VerticalStructure {
 ///     condensable: Some(Gas::Water.substance()),
 ///     skin_temperature: skin,
 /// })?;
+/// let tropopause = earth.tropopause_pressure();
 /// let air = VerticalStructure::RadiativeConvective(earth);
-/// let tropopause = match &air {
-///     VerticalStructure::RadiativeConvective(profile) => profile.tropopause_pressure(),
-/// };
 /// assert!((0.12e5..0.25e5).contains(&tropopause.value()));
 /// assert!((temperature_at(&air, Pascals::new(1.0e5)).value() - 288.0).abs() < 1e-9);
 /// assert!((temperature_at(&air, Pascals::new(1.0e3)).value() - skin.value()).abs() < 1e-9);

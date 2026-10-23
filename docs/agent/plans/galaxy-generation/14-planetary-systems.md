@@ -2556,16 +2556,46 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
   gas-envelope body until this task, and `NotApplicable` for every other body. A gas-envelope
   body's surface section is `NotApplicable` (T48.e), so that exactly one of the two applies at any
   time.
-  - T_int and T_irr: a giant's internal heat by ruling 112.7's split (the record's effective and
-    equilibrium temperatures) and T12's flux. A sub-Neptune has no internal heat in the record
-    today; the builder states one (its envelope's cooling, or none) and records it.
+  - T_int and T_irr (decision-p14-t24d-profile §3, 2026-10-23). T_irr⁴ = T_eq⁴ ÷ f with f = ¼,
+    the record's T_eq carrying its Bond albedo, so the profile emits the record's σT_eff⁴. T_int
+    is the record's internal heat blended with a stated cooling law by `giant_share`, the radius
+    blend's weight: T_int⁴ = L_int ÷ (4πR²σ) + (1 − s) T_law⁴, with L_int the record's (by
+    ruling 112.7), so a giant from 0.414 Jupiter masses keeps the record's T_int and an envelope
+    below 0.3 Jupiter masses takes the law's. T_int is positive for every envelope.
+    - The law: T_law = 84.13 K × (M ÷ 95.161 M⊕)^0.2744 × (max(t, 1 Myr) ÷ 4.57 Gyr)^−0.32. Its
+      anchor is Saturn's 2.84 ± 0.20 W m⁻² (Wang et al. 2024, Nat. Commun. 15, 5045) and its mass
+      index Neptune's 0.433 ± 0.046 W m⁻² (Pearl and Conrath 1991, JGR 96, 18921), each at the
+      table's mass. The age index is Burrows et al. 2001's T_eff ∝ t^−0.32 (Rev. Mod. Phys. 73,
+      719, Eq. 2), and the floor `substellar::MIN_AGE`.
+    - Checks, recorded: the law gives Jupiter 117.1 K against Li et al. 2018's 107.2 K, where the
+      record's 104.8 K is the one used; and Uranus 50.2 K against Wang et al. 2025's 34.2 K
+      (0.078 W m⁻²) or Pearl et al. 1990's 29.3 K, the known outlier.
+    - The law lives in this module, so the record's internal luminosity, the bulk section's
+      effective temperature and every reader of them are unchanged; below 0.414 Jupiter masses
+      the envelope's T_int is therefore not the bulk section's, and both docs say so.
   - A Guillot 2010 Eq. 29 profile, joined to the dry adiabat below the level where its gradient
     dln T ÷ dln p first exceeds ∇_ad = R ÷ c_p(T). c_p(T) is T49.b's function over the envelope's
     composition, with hydrogen frozen at 3:1 ortho to para (normal hydrogen; equilibrium hydrogen
     is the recorded other bound; science-r08-gases-2.md §1.3–§1.4).
 
+    The thermal optical depth is τ = κ₁ p₁ ÷ (n g) × (p ÷ p₁)ⁿ, with p₁ = 1 bar and n = 2: an
+    opacity proportional to pressure, as H₂'s collision-induced absorption is (Robinson and
+    Catling 2012, Eq. 6; Mollière et al. 2020 take τ = δP^α with α between 1 and 2). Eq. 29 is
+    written in τ, and holds for any κ(p) at a fixed γ, since Guillot's moment equations are in
+    column mass with dτ = κ dm. A constant opacity (n = 1) keeps the gradient below ¼ at every
+    depth, under every H₂–He R ÷ c_p, and never joins (decision-p14-t24d-profile §1.1). With
+    n = 2 the gradient tends to ½, above any ideal gas's R ÷ c_p, so the join forms wherever
+    T_int is positive; for γ ≤ 1 it lies above τ = 4 (⅔ + c₀ (T_eq ÷ T_int)⁴), with c₀ = ⅔ +
+    1 ÷ (γ√3). The constants: γ = 0.4 (Guillot 2010's fiducial for HD 209458 b), which draws no
+    inversion and keeps the first crossing unique; f = ¼; and κ₁ = 2.87 × 10⁻³ m² kg⁻¹, fitted
+    through this module on the table's Jupiter to 166.1 K at 1 bar, which the builder refits
+    with T49.b's function and states to three figures. Robinson and Catling's Jupiter gives κ₁
+    of 2.46 × 10⁻³ (their τ₀ of 6 at 1.1 bar) and their 2014 Table 1 gives 3.12 × 10⁻³.
+
     Below the join the adiabat is integrated as T24.e's is, S̃(T) = S̃(T_join) + ln(p ÷ p_join).
-    It is published as (p, T) nodes at T24.e's spacing, from p_join to 100 bar (10⁷ Pa).
+    It is published as (p, T) nodes at T24.e's spacing, from p_join to the larger of 100 bar
+    (10⁷ Pa) and e^0.3 p_join, so that a join deeper than 100 bar, as a weakly heated
+    sub-Neptune's under strong light has, still carries one segment.
     Deeper, `temperature_at` takes the last segment's exponent. Near 100 bar, hydrogen's density
     departs from the ideal gas's by about 3% (its second virial coefficient, from memory), the
     recorded limit for a later real-gas form.
@@ -2589,7 +2619,16 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
   - _Tests:_ Jupiter's T(1 bar) 166 K ± 10%, the adiabat from the Galileo probe's 22 bar and
     427.7 K reaches 1 bar within 1 K of the measured 166.1 K (Seiff et al. 1998, from memory).
     Computed: 166.5 K with normal hydrogen and 167.0 K with equilibrium hydrogen; constant classes
-    would give 170.7 K; its NH₃ deck at 0.5–1 bar, and CH₄/H₂ ≈ 2 × 10⁻³;
+    would give 170.7 K;
+    the profile's T(22 bar) within 2 K of 427.7 K (computed 427.0 K), T(0.1 bar) within
+    100–120 K (110.2 K) and the join within 0.5–1.5 bar (0.902 bar); the gradient below n ÷ 4
+    at every depth, with no join for n = 1 and a finite join for n = 2 at every positive T_int,
+    inside the bracket; T_law 84.13 K for the table's Saturn and 52.57 K for Neptune at 4.57 Gyr,
+    T_int continuous at 0.3 and 0.414 Jupiter masses, Jupiter's the record's, and T_int finite
+    and positive at an age of 0 and of 13.8 Gyr; a join deeper than 100 bar with one segment;
+    Saturn's, Uranus's and Neptune's 1-bar temperatures printed and recorded (computed for
+    Saturn at 149.7 K, Uranus 99.1 K and Neptune 94.8 K, against 134, 76 and 72 K);
+    its NH₃ deck at 0.5–1 bar, and CH₄/H₂ ≈ 2 × 10⁻³;
     the tests of T52.d; a sub-Neptune's envelope is `Ok` and its surface `NotApplicable`;
     a rocky body's envelope is `NotApplicable`; the figures are continuous in time, and a body
     that loses its envelope changes section at its recorded state change.
@@ -27183,3 +27222,97 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     system. The zones are dots at `ALL` in three of the four systems, so W1 stands as recorded.
   - _A selected belt's scattered disc at `BELTS`_ (A-7, A-11) is left out: `BELTS` fits the belt
     proper, and the disc's edges lie beyond the view, so its label has no place inside, as ruled.
+- **Deviations in P14.T24.d, as built (`p14-chem`, 2026-10-23).** `GENERATOR_VERSION` stays 23.
+  The profile and the internal temperature are pure: nothing on the record calls them until
+  P14.T54.b. No draw, no domain tag, no hold at 24, no golden. `planetary/record.rs`, the protocol
+  and the server are not touched: `record::Envelope` and `GuillotProfileDto`'s new
+  `optical_depth_exponent` are p14-wire-24's (decision-p14-t24d-profile §2, §9), and the record
+  carries κ₁, n, γ, f, T_int and T_irr from the profile's getters.
+  - _The rulings applied:_ decision-p14-t24d-profile (2026-10-23), on the lane's finding that a
+    constant opacity never joins its adiabat (Q1) and that an envelope with no internal heat never
+    does either (Q2): τ ∝ p² with κ₁ fitted on Jupiter, γ 0.4 and f ¼; T_int the record's heat
+    blended with a cooling law by `giant_share`.
+  - _Files:_ the profile is `hooks/structure/envelope.rs` (with `structure/envelope/tests.rs`), a
+    child of T24.e's `structure` module beside its first variant, so that it shares the adiabat's
+    helpers (`adiabat_temperature`, `entropy`, `segment_count`) rather than repeating them. The
+    internal temperature is in `hooks/envelope_atmosphere.rs`, as ruled (§3.4), which T52.d's
+    atmosphere joins. `structure.rs` gains `VerticalStructure::Envelope(EnvelopeProfile)`, its
+    `temperature_at` arm and a crate constructor `ProfileNode::new`; its `temperature_at` doctest
+    reads the tropopause before wrapping the profile, rather than matching the enum.
+  - _The interface:_
+    - `EnvelopeProfile::derive(&EnvelopeProfileInputs { internal_temperature,
+irradiation_temperature, gravity, gases, grey })`, with `join_pressure`, `nodes` (the
+      pressures ascending from the join), `temperature_at`, `skin_temperature`,
+      `photosphere_pressure` (τ = ⅔), `grey`, `gravity`, `internal_temperature` and
+      `irradiation_temperature`; `DeriveEnvelopeProfileError` (mixture, no gas columns,
+      temperatures, unheated, gravity, no join, too deep).
+    - `GreyProfile::{new, ADOPTED}` with `optical_depth`, `pressure_at_depth`, `fourth_power`,
+      `temperature`, `radiative_gradient` and `join_bracket_optical_depth`;
+      `irradiation_temperature(T_eq)`, T_irr⁴ = 4 T_eq⁴, so that f T_irr⁴ = T_eq⁴ at f ¼; and
+      `dry_adiabat_temperature`, the dry adiabat through a point.
+    - `envelope_internal_temperature(L_int, R, M, t)` and `cooling_law_temperature(M, t)`, with
+      `COOLING_LAW_{TEMPERATURE, MASS, MASS_INDEX, AGE_INDEX, AGE}`.
+  - _The constants:_ κ₁ 2.87 × 10⁻³ m² kg⁻¹, fitted at 2.8709 × 10⁻³ on the table's Jupiter's
+    hydrogen and helium (T50.b's He ÷ H₂ 0.1533 about a protosolar host), its record's T_int
+    104.81 K and T_eq 103.64 K (the ruling's own check, 2.866 × 10⁻³); n 2; γ 0.4; f ¼. The join
+    is sought from τ 10⁻⁶ down in steps of 0.05 in ln p to the ruling's bracket, then refined by
+    50 bisections.
+  - _Figures,_ on the adopted constants over each giant's hydrogen and helium alone (T52.d's
+    mixture adds its heavy gases):
+
+    | Body    | T_int             | T(0.1 bar) | T(1 bar) | T(22 bar) | Join                 |
+    | ------- | ----------------- | ---------- | -------- | --------- | -------------------- |
+    | Jupiter | 104.81 K (record) | 110.2 K    | 166.09 K | 426.8 K   | 0.901 bar at 160.5 K |
+    | Saturn  | 84.13 K (law)     | 86.3 K     | 149.8 K  | 383.6 K   | 0.584 bar            |
+    | Uranus  | 50.24 K (law)     | 59.4 K     | 99.2 K   | 276.6 K   | 0.910 bar            |
+    | Neptune | 52.57 K (law)     | 53.1 K     | 94.8 K   | 266.5 K   | 0.702 bar            |
+
+    Jupiter's photosphere (τ = ⅔) lies at 0.339 bar and its skin at 108.4 K. A 5 M⊕ sub-Neptune on
+    the law's 37.5 K under 10 m s⁻² joins at 117 bar at T_eq 600 K and 423 bar at 1,200 K (the
+    ruling's 129 and 463 bar were at its own gravity). The law gives 29.15 K at 2 M⊕, 45.34 K at
+    10 M⊕ and 91.96 K at 0.414 Jupiter masses, at 4.57 Gyr.
+
+  - _Corrections recorded:_
+    - The skin: Guillot's T_skin⁴ = T_int⁴ ÷ 2 + f T_irr⁴ (½ + √3 γ ÷ 4) equals T24.e's
+      T_eff⁴ ÷ 2 only as γ → 0, not "at γ = 1" as decision-composition §1.12 has it. At γ 0.4
+      Jupiter's skin is 108.4 K against T24.e's 104.2 K at its T_eff.
+    - Guillot's f is 1 at the substellar point, ½ for the dayside and ¼ for the planet (§2.4);
+      2/3 is not in the paper. Eq. 29 carries no albedo (§2.2): T_irr⁴ = T_eq⁴ ÷ f is this
+      module's statement, energy-consistent with the record (decision-p14-t24d-profile §1.3).
+    - The Galileo probe's 22-bar figure is 428 K at 22.05 bar in the PDS profile and 429 K in Seiff
+      et al. 1998's abstract, against the plan's 427.7 K: it moves the 1-bar test by about 0.5 K
+      (the science check, 2026-10-23).
+  - _Tests_ (`cargo test -p hyperion-sim planetary::hooks::structure::envelope`, 14;
+    `planetary::hooks::envelope_atmosphere`, 7; and three doctests, the Galileo adiabat and the
+    law's and the blend's Saturn):
+    - Eq. 29 as written (the skin, the deep limit, γ = 1's flat starlight); T_irr's mean; τ's
+      inverse;
+    - the gradient below n ÷ 4 at every depth, a constant opacity's NoJoin on Jupiter over κ
+      10⁻³–3 × 10⁻² and γ 0.1–1, and a join inside its bracket for T_int 1–1,000 K and T_eq
+      0–3,000 K, none with no internal heat;
+    - the join where the gradient first meets the adiabat's (to 10⁻⁹), every node on the adiabat
+      to 10⁻¹² in S̃ and evenly spaced, the temperature continuous at the join, at every node and
+      below the last, and rising with depth;
+    - the Galileo adiabat's 166.5 K at 1 bar on normal hydrogen;
+    - the cases' profiles; the refusals; continuity in T_eq, T_int and g; the same bits twice;
+    - the law's anchors, its blend by `giant_share` (the generated Saturn's 84.13 K, Jupiter's
+      record, continuous at 0.3 and 0.414 Jupiter masses), and its floor and ageing;
+    - κ₁'s fit and the table's Jupiter against the probe; the cold giants' joins and warm 1-bar
+      temperatures; a join below 100 bar with one segment.
+  - **Deferred findings, from decision-p14-t24d-profile:**
+    - The grey profile runs the cold giants warm at 1 bar: Saturn 149.7 K against 134 ± 4 K,
+      Neptune 94.8 K against 72 ± 2 K, and Uranus 99.1 K against 76 K on the law's T_int. No
+      single temperature scaling of κ₁ serves, since Uranus and Neptune need opacities four times
+      apart at one T_eff. The route is a temperature-dependent mean opacity (Freedman et al. 2014)
+      or a non-grey profile (Parmentier and Guillot 2014), after 24.
+    - Neptune's CH₄ deck forms nearer 0.5 bar than the observed 1.5–2 bar, beside G3's τ 5.82,
+      whose "lower K" route Leconte et al. 2017 does not support.
+    - The law is fitted on 17–95 M⊕ and extrapolated to the smallest sub-Neptunes, where the
+      core's heat flow is the physical floor; Uranus is its known outlier.
+    - Below 0.414 Jupiter masses the envelope's T_int is not the bulk section's; carrying the
+      law into the record's internal luminosity (the rings, the moons, the photometry) is a
+      later planetary bump's.
+    - A hot envelope below 0.3 Jupiter masses has no inflation heating, as the record has none
+      there; its join lies deep (129 bar for 5 M⊕ at 600 K).
+    - n = 2 and κ₁ are H₂ CIA's: a hot envelope's line opacity and a pM envelope's inversion
+      (γ above 1) are not drawn.
