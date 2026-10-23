@@ -5,17 +5,26 @@ import {
   earthBody,
   fiveLineSlotMedium,
   fourAbsorberMedium,
+  iceGiantMethaneBody,
   lineAbsorberMedium,
+  r05EarthWithOzoneAbsorber,
   SATURN_SPHEROID,
   saturnBody,
   saturnClassMedium,
   saturnScaleHeightM,
+  SUN_TEFF_K,
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
-import { countingRenderEngine, type RecordedDispatch } from "../../test/countingRenderEngine";
+import {
+  boundNames,
+  countingRenderEngine,
+  type RecordedDispatch,
+} from "../../test/countingRenderEngine";
 import type { AllocationEvent } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
+import { kernelBindings } from "../engine/webgpu/compute";
+import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
 import {
   ABSORBER_COLUMNS,
   ABSORBER_CURVE_DECADES,
@@ -24,7 +33,12 @@ import {
   type AbsorberCurve,
 } from "./absorbers";
 import { hydrostaticColumn } from "./column";
-import { R05_EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
+import {
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  HILLAIRE_REFERENCE,
+  R05_EARTH_REFERENCE,
+} from "./earth";
 import { tableRadiusM } from "./hillaire";
 import {
   ABSORBER_PRESSURE_FLOOR_PA,
@@ -49,6 +63,7 @@ import {
   ABSORBER_CURVE_DEPTH_MAX,
   ABSORBER_CURVE_NODES,
   ABSORBER_SLOTS,
+  type AbsorberCurveSlots,
   absorberCount,
   absorberSlots,
   type AtmosphereBody,
@@ -86,10 +101,14 @@ import {
   packLobeTables,
   packMediumUniform,
   packPhaseTables,
+  PER_PLANET_ROW_BYTES,
+  perPlanetRowOf,
   PHASE_TABLE_ENTRIES,
   resampledDensity,
   resampledPhase,
   SHARED_TABLE_CURVE_SLOT,
+  SLOT_DEPTHS_KERNEL,
+  slotDepthsRefusal,
   tablesPlanOf,
   TERMS_BUFFER_BYTES,
   TRANSMITTANCE_KERNEL,
@@ -98,7 +117,16 @@ import {
   withKernelArmFormat,
   withoutForwardDelta,
 } from "./tables";
-import { kernelOpticalDepth } from "./tablesCpu";
+import {
+  kernelOpticalDepth,
+  MULTI_SCATTERING_KERNEL_OPTIONS,
+  oblatePlanetTwin,
+  type OblateTwinSizes,
+  oblateRayMarchSunReadOf,
+  planetTwin,
+  rayMarchSunReadOf,
+  type SunRead,
+} from "./tablesCpu";
 import {
   FORWARD_LOBE_MIN_SHARE,
   FORWARD_LOBE_X_NODES,
@@ -485,7 +513,10 @@ describe("AtmosphereTables", () => {
 
   it("binds the table made anew to the transmittance kernel", async () => {
     const { engine, tables } = await resizedToFive();
-    expect(engine.dispatched.at(-2)?.bindings.storage["lastAbsorberPressureColumnOut"]).toEqual({
+    const transmittance = engine.dispatched.findLast(
+      (d) => d.kernel === "atmosphere transmittance",
+    );
+    expect(transmittance?.bindings.storage["lastAbsorberPressureColumnOut"]).toEqual({
       texture: tables.lastAbsorberPressureColumn,
       level: 0,
     });
@@ -1586,12 +1617,13 @@ describe("AtmosphereTables with the lights' curves", () => {
     const tables = new AtmosphereTables(engine, medium, R, curves);
     engine.onAllocation((e) => events.push(e));
     tables.setMedium(medium, R, [own, own]);
-    // The multiple-scattering table takes a second layer for the second light (R08.T7), and the
-    // sky's irradiance with it (R08.T9.b).
+    // The multiple-scattering table takes a second layer for the second light (R08.T7), the sky's
+    // irradiance with it (R08.T9.b), and the slot layers a second slot's (R08.T8.e).
     expect(destroyedNames(events)).toEqual([
       tables.absorberCurves.name,
       tables.multiScattering.name,
       tables.irradiance().name,
+      tables.slotDepths?.name,
     ]);
   });
 
@@ -1851,5 +1883,433 @@ describe("the pressure channels (R08.T4.d)", () => {
     expect(transmittanceWgsl).toContain(
       `const PRESSURE_CHANNELS_A_TABLE : u32 = ${PRESSURE_CHANNELS_A_TABLE}u;`,
     );
+  });
+});
+
+// --- Each light slot's optical depth (plan R08, R08.T8.e, lever 5) ---------------------------------
+
+/** The bytes the tables hold under `atmosphere-tables`, made less released, from allocation events. */
+function liveTableBytes(events: readonly AllocationEvent[]): number {
+  let bytes = 0;
+  for (const e of events) {
+    if (e.kind !== "uploaded" && e.category === "atmosphere-tables") {
+      bytes += e.kind === "created" ? e.bytes : -e.bytes;
+    }
+  }
+  return bytes;
+}
+
+/**
+ * A medium of seven terms whose tabulated phases put its per-planet row near 2 MB (their forward-lobe
+ * tables, 197 KB a term), with R05's Earth's ozone as its absorber: the gas, five haze layers and the
+ * ozone, under `lights` copies of the ozone's curves.
+ */
+function nearTheRow(lights: number): { medium: AtmosphereMedium; curves: AbsorberCurveSlots } {
+  const ozone = r05EarthWithOzoneAbsorber();
+  const absorber = ozone.medium.terms.find((term) => term.absorber !== undefined);
+  const curve = ozone.curves[0];
+  if (absorber === undefined || curve === undefined) {
+    throw new Error("R05's Earth with its ozone has an absorber and its curves");
+  }
+  const hazes = Array.from({ length: 5 }, (_, k): MediumTerm => ({ ...HAZE, name: `haze ${k}` }));
+  return {
+    medium: { ...TABULATED, name: "near the row", terms: [GAS, ...hazes, absorber] },
+    curves: Array.from({ length: lights }, () => curve),
+  };
+}
+
+describe("the slot layers (R08.T8.e, lever 5)", () => {
+  const four = fourAbsorberMedium();
+  const binary = fourAbsorberMedium([SUN_TEFF_K, 3_300]);
+
+  it("are built after the transmittance slices and before the multiple scattering", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, four.medium, R, four.curves);
+    expect({ builds: tables.builds, kernels: engine.dispatched.map((d) => d.kernel) }).toEqual({
+      builds: 1,
+      kernels: [
+        "atmosphere transmittance",
+        "atmosphere slot depths",
+        "atmosphere multiple scattering",
+      ],
+    });
+  });
+
+  it("are built in one dispatch, a workgroup layer a κ slice and light slot", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, binary.medium, R, binary.curves);
+    const slots = engine.dispatched.filter((d) => d.kernel === "atmosphere slot depths");
+    expect({ builds: tables.builds, workgroups: slots.map((d) => d.workgroups) }).toEqual({
+      builds: 1,
+      workgroups: [[TRANSMITTANCE_SIZE.widthTexels / 8, TRANSMITTANCE_SIZE.heightTexels / 8, 2]],
+    });
+  });
+
+  it("read the stored tables and the lights' curves, and write the layers", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, four.medium, R, four.curves);
+    const built = engine.dispatched.find((d) => d.kernel === "atmosphere slot depths");
+    expect([built?.bindings.sampled, built?.bindings.storage]).toEqual([
+      {
+        transmittance: tables.transmittance,
+        absorberColumns: tables.absorberColumns,
+        absorberPressureColumns: tables.absorberPressureColumns,
+        lastAbsorberPressureColumn: tables.lastAbsorberPressureColumn,
+        absorberCurves: tables.absorberCurves,
+      },
+      { slotDepthsOut: { texture: tables.slotDepths, level: 0 } },
+    ]);
+  });
+
+  it("are one rgba16float texture at the transmittance's size, a layer a κ slice and light slot", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, binary.medium, R, binary.curves);
+    const made = engine.textureSpecs.filter((spec) => spec.name === tables.slotDepths?.name);
+    expect(made.map((spec) => [spec.size, spec.format])).toEqual([
+      [[TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.heightTexels, 2], "rgba16float"],
+    ]);
+  });
+
+  it("are made only where the body takes them: one texture there and none where it keeps the shared read", async () => {
+    const made = await Promise.all(
+      [nearTheRow(1), nearTheRow(2)].map(async ({ medium, curves }) => {
+        const engine = await countingRenderEngine();
+        const tables = new AtmosphereTables(engine, medium, R, curves);
+        const count = engine.textureSpecs.filter(
+          (spec) => spec.name === "atmosphere slot depths",
+        ).length;
+        return [count, tables.slotDepths !== null];
+      }),
+    );
+    expect(made).toEqual([
+      [1, true],
+      [0, false],
+    ]);
+  });
+
+  it("are not made for a medium with no absorber, whose stored depth is the whole", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    expect([tables.slotDepths, tables.slotDepthsRefusal]).toEqual([null, { kind: "noAbsorber" }]);
+  });
+
+  it("are not made on a body of two latitude bands, whose s effect the layers cannot take (§13, point 1)", async () => {
+    const engine = await countingRenderEngine();
+    const giant = iceGiantMethaneBody();
+    const tables = new AtmosphereTables(
+      engine,
+      giant.medium,
+      tableRadiusM(giant.body.figure),
+      giant.curves,
+      giant.body,
+    );
+    expect([tables.slotDepths, tables.slotDepthsRefusal]).toEqual([
+      null,
+      { kind: "severalBands", bands: 2 },
+    ]);
+  });
+
+  it("are not made for curves on more light slots than MAX_BODY_LIGHTS (§13, point 3)", async () => {
+    const engine = await countingRenderEngine();
+    const many = fourAbsorberMedium(Array.from({ length: MAX_BODY_LIGHTS + 1 }, () => SUN_TEFF_K));
+    const tables = new AtmosphereTables(engine, many.medium, R, many.curves);
+    expect([tables.slotDepths, tables.slotDepthsRefusal]).toEqual([
+      null,
+      { kind: "lightSlots", slots: MAX_BODY_LIGHTS + 1, most: MAX_BODY_LIGHTS },
+    ]);
+  });
+
+  it("are not made where they would put the per-planet row over 2 MB, the row under it without them (§13, point 2)", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = nearTheRow(2);
+    const tables = new AtmosphereTables(engine, medium, R, curves);
+    expect([
+      tables.slotDepths,
+      tables.slotDepthsRefusal,
+      tables.row.baseBytes < PER_PLANET_ROW_BYTES,
+    ]).toEqual([null, { kind: "row", rowBytes: 2_151_048, mostBytes: 2_000_000 }, true]);
+  });
+
+  it("are made where the per-planet row with them stays within 2 MB", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = nearTheRow(1);
+    const tables = new AtmosphereTables(engine, medium, R, curves);
+    expect([tables.slotDepthsRefusal, tables.rowBytes]).toEqual([null, 1_991_544]);
+  });
+
+  it("never widen the slices or bands: a body kept off by the row keeps its own plan", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = nearTheRow(2);
+    expect(new AtmosphereTables(engine, medium, R, curves).plan).toEqual(tablesPlanOf(null, R));
+  });
+
+  it("are released for a new medium that keeps the shared read", async () => {
+    const engine = await countingRenderEngine();
+    const events: AllocationEvent[] = [];
+    const tables = new AtmosphereTables(engine, four.medium, R, four.curves);
+    engine.onAllocation((e) => events.push(e));
+    tables.setMedium(R05_EARTH_REFERENCE, R);
+    expect([tables.slotDepths, destroyedNames(events).includes("atmosphere slot depths")]).toEqual([
+      null,
+      true,
+    ]);
+  });
+
+  it("are made again and rebuilt after the engine's restore", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, four.medium, R, four.curves);
+    const before = tables.slotDepths;
+    engine.dispatched.length = 0;
+    engine.restore();
+    const built = engine.dispatched.find((d) => d.kernel === "atmosphere slot depths");
+    expect([
+      tables.slotDepths !== null && tables.slotDepths !== before,
+      built?.bindings.storage["slotDepthsOut"]?.texture,
+    ]).toEqual([true, tables.slotDepths]);
+  });
+
+  it("take their kernel once a device, at the first build that makes them", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    const shared = engine.counts.kernels;
+    tables.setMedium(four.medium, R, four.curves);
+    tables.setMedium(binary.medium, R, binary.curves);
+    expect(engine.counts.kernels - shared).toBe(1);
+  });
+});
+
+describe("the per-planet row (R08.T8.e, decision-r08-t8-leans.md §13, point 2)", () => {
+  const line = lineAbsorberMedium();
+  const five = fiveLineSlotMedium();
+  const four = fourAbsorberMedium();
+  const binary = fourAbsorberMedium([SUN_TEFF_K, 3_300]);
+  const giant = iceGiantMethaneBody();
+  const media: ReadonlyArray<
+    readonly [string, AtmosphereMedium, number, AbsorberCurveSlots, AtmosphereBody | null]
+  > = [
+    ["R05's Earth", R05_EARTH_REFERENCE, R, NO_ABSORBER_CURVES, null],
+    ["the measured Earth with one star", EARTH_REFERENCE, R, EARTH_REFERENCE_CURVES, null],
+    [
+      "the measured Earth with two",
+      EARTH_REFERENCE,
+      R,
+      [...EARTH_REFERENCE_CURVES, ...EARTH_REFERENCE_CURVES],
+      null,
+    ],
+    ["the tabulated medium", TABULATED, R, NO_ABSORBER_CURVES, null],
+    ["a line absorber", line.medium, R, line.curves, null],
+    ["five line slots", five.medium, R, five.curves, null],
+    ["a binary's four absorbers", binary.medium, R, binary.curves, null],
+    [
+      "four absorbers on Saturn's figure",
+      four.medium,
+      tableRadiusM(SATURN_SPHEROID),
+      four.curves,
+      saturnBody(),
+    ],
+    [
+      "the ice giant's methane",
+      giant.medium,
+      tableRadiusM(giant.body.figure),
+      giant.curves,
+      giant.body,
+    ],
+  ];
+
+  it.each(media)(
+    "counts every per-planet allocation as built, at its allocated size: %s",
+    async (_name, medium, radiusM, curves, body) => {
+      const engine = await countingRenderEngine();
+      const events: AllocationEvent[] = [];
+      engine.onAllocation((e) => events.push(e));
+      const tables = new AtmosphereTables(engine, medium, radiusM, curves, body);
+      expect(tables.rowBytes).toBe(liveTableBytes(events));
+    },
+  );
+
+  it("takes 131,072 B a κ slice and light slot for the layers", () => {
+    const plan = tablesPlanOf(saturnBody(), tableRadiusM(SATURN_SPHEROID));
+    expect(perPlanetRowOf(binary.medium, binary.curves, plan).slotDepthBytes).toBe(
+      plan.kappa.length * 2 * 256 * 64 * 8,
+    );
+  });
+
+  it("comes to 570,264 B on the measured Earth with one star and 729,768 B with two, the layers made", async () => {
+    const rows = await Promise.all(
+      [EARTH_REFERENCE_CURVES, [...EARTH_REFERENCE_CURVES, ...EARTH_REFERENCE_CURVES]].map(
+        async (curves) =>
+          new AtmosphereTables(await countingRenderEngine(), EARTH_REFERENCE, R, curves).rowBytes,
+      ),
+    );
+    expect(rows).toEqual([570_264, 729_768]);
+  });
+
+  it("refuses the layers by the row only past the base and the layers' sum over 2 MB", () => {
+    const plan = tablesPlanOf(null, R);
+    const { medium, curves } = nearTheRow(2);
+    const row = perPlanetRowOf(medium, curves, plan);
+    expect(slotDepthsRefusal(medium, curves, plan)).toEqual({
+      kind: "row",
+      rowBytes: row.baseBytes + row.slotDepthBytes,
+      mostBytes: PER_PLANET_ROW_BYTES,
+    });
+  });
+});
+
+/**
+ * Small oblate twins for a test of the twin's choice of read, which takes only the medium, its
+ * curves and the body's plan: no table of theirs is read.
+ */
+const READ_CHOICE_SIZES: OblateTwinSizes = {
+  transmittance: { widthTexels: 8, heightTexels: 4 },
+  transmittanceSamples: 8,
+  multiScattering: {
+    ...MULTI_SCATTERING_KERNEL_OPTIONS,
+    size: { widthTexels: 2, heightTexels: 2 },
+    samples: 4,
+  },
+};
+
+/** The kernel's choice of the ray march's read: by slot exactly where its tables hold the layers. */
+async function kernelReadOf(
+  medium: AtmosphereMedium,
+  radiusM: number,
+  curves: AbsorberCurveSlots,
+  body?: AtmosphereBody,
+): Promise<SunRead> {
+  const engine = await countingRenderEngine();
+  const tables = new AtmosphereTables(engine, medium, radiusM, curves, body);
+  return tables.slotDepthsRefusal === null ? "slotDepths" : "curves";
+}
+
+describe("the twin's choice of the ray march's read (R08.T8.e, lever 5)", () => {
+  it("takes the slot read on a sphere exactly where the kernel's tables hold the layers", async () => {
+    const four = fourAbsorberMedium();
+    const cases = [
+      { name: "four absorbers", ...four },
+      { name: "near the row, one light", ...nearTheRow(1) },
+      { name: "near the row, two lights", ...nearTheRow(2) },
+      { name: "R05's Earth", medium: R05_EARTH_REFERENCE, curves: NO_ABSORBER_CURVES },
+    ];
+    const reads = await Promise.all(
+      cases.map(async ({ name, medium, curves }) => [
+        name,
+        rayMarchSunReadOf(planetTwin(medium, R, curves)),
+        await kernelReadOf(medium, R, curves),
+      ]),
+    );
+    expect(reads).toEqual([
+      ["four absorbers", "slotDepths", "slotDepths"],
+      ["near the row, one light", "slotDepths", "slotDepths"],
+      ["near the row, two lights", "curves", "curves"],
+      ["R05's Earth", "curves", "curves"],
+    ]);
+  }, 120_000);
+
+  it("takes the slot read on an oblate body exactly where the kernel's tables hold the layers", async () => {
+    const giant = iceGiantMethaneBody();
+    const earth = { medium: EARTH_REFERENCE, curves: EARTH_REFERENCE_CURVES, body: earthBody() };
+    const reads = await Promise.all(
+      [
+        { name: "the ice giant, two bands", ...giant },
+        { name: "the measured Earth on WGS 84, one band", ...earth },
+      ].map(async ({ name, medium, curves, body }) => [
+        name,
+        oblateRayMarchSunReadOf(oblatePlanetTwin(medium, body, curves, READ_CHOICE_SIZES)),
+        await kernelReadOf(medium, tableRadiusM(body.figure), curves, body),
+      ]),
+    );
+    expect(reads).toEqual([
+      ["the ice giant, two bands", "curves", "curves"],
+      ["the measured Earth on WGS 84, one band", "slotDepths", "slotDepths"],
+    ]);
+  });
+});
+
+describe("the slot layers' kernel arm (R08.T8.e, §13 point 9)", () => {
+  const four = fourAbsorberMedium();
+
+  it("are dispatched with every binding the slot-depth kernel declares, uniforms included, in both arms", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, four.medium, R, four.curves);
+    tables.buildKernelArm();
+    const arm = withKernelArmFormat(SLOT_DEPTHS_KERNEL);
+    const boundBy = (name: string): string[][] =>
+      engine.dispatched.filter((d) => d.kernel === name).map((d) => boundNames(d.bindings));
+    expect([boundBy(SLOT_DEPTHS_KERNEL.name), boundBy(arm.name)]).toEqual([
+      [[...kernelBindings(SLOT_DEPTHS_KERNEL.reference).keys()].toSorted()],
+      [[...kernelBindings(arm.reference).keys()].toSorted()],
+    ]);
+  });
+
+  it("builds the arm's layers after its transmittance and before its multiple scattering", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, four.medium, R, four.curves);
+    engine.dispatched.length = 0;
+    tables.buildKernelArm();
+    expect(engine.dispatched.map((d) => d.kernel)).toEqual([
+      `atmosphere transmittance (${KERNEL_ARM_FORMAT})`,
+      `atmosphere slot depths (${KERNEL_ARM_FORMAT})`,
+      `atmosphere multiple scattering (${KERNEL_ARM_FORMAT})`,
+    ]);
+  });
+
+  it("builds them into rgba32float over the stored tables, as the stored layers are", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, four.medium, R, four.curves);
+    engine.dispatched.length = 0;
+    const arm = tables.buildKernelArm();
+    const built = engine.dispatched.find(
+      (d) => d.kernel === `atmosphere slot depths (${KERNEL_ARM_FORMAT})`,
+    );
+    const spec = engine.textureSpecs.find((s) => s.name === "atmosphere slot depths (kernel arm)");
+    expect([
+      spec?.format,
+      built?.bindings.sampled["transmittance"],
+      built?.bindings.storage["slotDepthsOut"]?.texture,
+    ]).toEqual([KERNEL_ARM_FORMAT, tables.transmittance, arm.slotDepths]);
+  });
+
+  it("builds none where the tables hold none", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    expect(tables.buildKernelArm().slotDepths).toBeNull();
+  });
+});
+
+describe("the slot-depth kernel's WGSL (R08.T8.e)", () => {
+  const code = SLOT_DEPTHS_KERNEL.reference.replaceAll(/\/\/[^\n]*/gu, "");
+
+  it("loads each texel of the stored tables with sliceStoredAt's guards", () => {
+    expect([
+      /let stored = textureLoad\(transmittance, texel, slice, 0\);/u.test(code),
+      /if \(count > 0u\) \{\s*let firstFour = textureLoad\(absorberPressureColumns, texel, slice, 0\);/u.test(
+        code,
+      ),
+      /min\(texel, textureDimensions\(lastAbsorberPressureColumn\) - 1u\)/u.test(code),
+      /if \(count > 1u\) \{\s*columns\.more = textureLoad\(absorberColumns, texel, slice, 0\);/u.test(
+        code,
+      ),
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it("adds the slot's curves through absorberDepth and holds the sum to the half float's largest", () => {
+    expect([
+      /absorberDepth\(absorberCurves, count, slot, lines, columns, pressureColumns\)/u.test(code),
+      /min\(stored\.rgb \+ absorbed, vec3f\(SLOT_DEPTH_MAX\)\)/u.test(code),
+      /const SLOT_DEPTH_MAX : f32 = 65504\.0;/u.test(code),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("calls no builtin trigonometry, R05 radius form or sebh remap", () => {
+    expect(forbiddenIn(SLOT_DEPTHS_KERNEL.reference)).toEqual([]);
+  });
+
+  it("takes view/shaders/preciseTrig.wgsl first, then common.wgsl, and no medium.wgsl", () => {
+    expect([
+      SLOT_DEPTHS_KERNEL.reference.startsWith("// Trigonometry"),
+      SLOT_DEPTHS_KERNEL.reference.includes(commonWgsl),
+      /fn mediumAtHeight\(/u.test(SLOT_DEPTHS_KERNEL.reference),
+    ]).toEqual([true, true, false]);
   });
 });

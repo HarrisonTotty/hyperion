@@ -95,6 +95,15 @@
 // side, is under 0.05 takes 28 on high (`view.marchSky`). A drawn surface keeps the setting's
 // count. From orbit the face is most of the march's step work; R05.T12.e's gate holds every ray at
 // the rule on all three media at 1 and 6 sources, at no wider tolerance.
+//
+// Changes (plan R08, R08.T8.e; lever 5 of `decision-r08-t8-leans.md` sections 10 and 13): two kernels
+// are made from this module, each with a file of its own appended that gives the step its sources'
+// light and the bare ground its light (`rayMarchSourcesAt`, `rayMarchGroundLightAt`):
+// `rayMarchCurves.wgsl`, the shared table's read with each slot's curves applied on read, as before;
+// and `rayMarchSlots.wgsl`, one read a source a step of its light slot's layer of the per-planet slot
+// layers, for a body whose tables hold them (`tables.ts`'s slotDepthsRefusal), chosen when its
+// pipeline is made. The ray's count (lever 3, `rayMarchDepthAlong`), the forward lobes' depth, the
+// view's own path and every other kernel keep the shared read.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -200,7 +209,7 @@ fn rayMarchStep(
   let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
   let local = sampleMediumAt(s * datum.heightM);
   let start = sampleStartOf(body, p, bigQ, datum.heightM, datum.normal, datum.normal, s, local);
-  let shares = viewSourcesAt(body, start, datum.normal, ray.dir, lobes, local);
+  let shares = rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, local);
   viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
@@ -448,7 +457,7 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   // The bare ground under the atmosphere, seen from above it where nothing is drawn: each source's
   // light on it through the sliced lookup from its own place (R08.T6.f), weighted as the sky is,
   // through its own slot's throughput (R08.T7), and the source's cosine against the datum's normal
-  // there.
+  // there; its light the kernel's read (`rayMarchGroundLightAt`, R08.T8.e).
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     let p = origin + ground.x * dir;
     let datum = datumPointOf(body, p, 0.0);
@@ -459,8 +468,8 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
       let source = view.sources[k];
       let slot = skySlotOf(source);
       let muSun = dot(source.direction.xyz, datum.normal);
-      let light = sourceLightAt(body, start, source.direction.xyz, slot);
-      luminance += viewThroughputOf(&march, slot) * source.weight.rgb * light.toSun
+      let toSun = rayMarchGroundLightAt(body, start, source.direction.xyz, slot);
+      luminance += viewThroughputOf(&march, slot) * source.weight.rgb * toSun
         * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;
     }
   }

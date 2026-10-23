@@ -55,8 +55,10 @@ import {
   marchTwin,
   mediumMarchEdgesM,
   piecedSteps,
+  placedSteps,
   type PlanetTwin,
   planetTwin,
+  rayMarchSunReadOf,
   rayMarchTwin,
   skyViewReadTwin,
   skyViewTexelsTwin,
@@ -323,7 +325,102 @@ describe("a K5 primary and an M3 companion under ozone and methane (R08.T7; deci
       expect(e).toBeLessThan(SLOT_ZERO_COMPANION[elevationDeg === 5 ? "up" : "below"][1]);
     },
   );
+
+  // R08.T8.e, lever 5 (`decision-r08-t8-leans.md` §10 and §13, point 9): the binary takes the ray
+  // march by slot, each star's light from its own slot's layer, which the gate, whose sources are
+  // all on slot 0, never reads.
+  describe("in the ray march by slot (R08.T8.e, lever 5)", () => {
+    const viewport = { widthPx: 8, heightPx: 4 };
+    const distanceM = WGS84.equatorialRadiusM + 400_000;
+    const at = limbCamera(
+      distanceM,
+      limbPitchRad(distanceM, WGS84.equatorialRadiusM, 0, viewport, 3.5, 1.5),
+      viewport,
+    );
+    const marchOf = (suns: ReadonlyArray<SunState>): TwinTable =>
+      rayMarchTwin(planet, frameView(binary.medium, 2, at, suns), TABLE_SIZES.high, () => 0);
+
+    it("takes the slot read for the binary, its two stars on two slots", () => {
+      expect(rayMarchSunReadOf(planet)).toBe("slotDepths");
+    });
+
+    it("sums each star's march alone to the pair's, each on its own slot's layer, to 10⁻⁶", () => {
+      // Each alone keeps the pair's view and so its first source's warp (`withSources`).
+      const both = frameView(binary.medium, 2, at, [primary(8), companion(4)]);
+      const march = (view: TwinView): TwinTable =>
+        rayMarchTwin(planet, view, TABLE_SIZES.high, () => 0);
+      const alone = summed(march(withSources(both, [0])), march(withSources(both, [1])));
+      expect(worstRelative(march(both), alone, 1e-6)).toBeLessThan(1e-6);
+    }, 120_000);
+
+    it("lights the companion from slot 1's layer, which slot 0's differs from", () => {
+      const own = marchOf([companion(4)]);
+      const borrowed = marchOf([companion(4, 0)]);
+      expect(worstRelative(borrowed, own, 1e-3)).toBeGreaterThan(1e-4);
+    }, 120_000);
+
+    it.each([0, 1])(
+      "records slot %i's march by slot against the curves' read on the limb from 400 km",
+      (slot) => {
+        expect(slotReadChange(planet, binary.medium, slot)).toBeCloseTo(
+          SLOT_READ_CHANGE[slot] ?? Number.NaN,
+          5,
+        );
+      },
+    );
+  });
 });
+
+/**
+ * The march's largest change by the slot read (R08.T8.e) against the curves' read of the same light
+ * slot, relative and floored at 10⁻³ of the largest: the limb from 400 km over the twin's sphere at
+ * tangent heights of 2 to 40 km, R05's placed 36 steps, one source on `slot` on the tangent point's
+ * horizon, whose paths through the air graze as far as the ray's.
+ */
+function slotReadChange(planet: PlanetTwin, medium: AtmosphereMedium, slot: number): number {
+  const bottomM = planet.bottomRadiusM;
+  const topM = bottomM + medium.topHeightM;
+  const o: Vec3 = { x: bottomM + 400_000, y: 0, z: 0 };
+  const sphere = { kind: "sphere", bottomRadiusM: bottomM } as const;
+  const curves = tableSources(planet);
+  const slots = tableSources(planet, "slotDepths");
+  const pairs = [2, 5, 10, 15, 20, 25, 30, 40].map((tangentKm) => {
+    const sin = (bottomM + tangentKm * 1_000) / o.x;
+    const d: Vec3 = { x: -Math.sqrt(1 - sin * sin), y: 0, z: sin };
+    const along = -(o.x * d.x);
+    const half = Math.sqrt(along * along - (o.x * o.x - topM * topM));
+    const sun: Vec3 = { x: 0, y: 1, z: 0 };
+    const ray: TwinRay = {
+      originM: o,
+      direction: d,
+      sun,
+      sources: [{ direction: sun, weight: [1, 1, 1], slot }],
+      tStartM: along - half,
+      tEndM: along + half,
+      fromCamera: false,
+    };
+    const steps = placedSteps(ray, TABLE_SIZES.high.rayMarchSamples);
+    return [
+      marchTwin(medium, slots, sphere, ray, steps).luminance,
+      marchTwin(medium, curves, sphere, ray, steps).luminance,
+    ] as const;
+  });
+  const largest = Math.max(...pairs.flatMap(([, today]) => [...today]));
+  let worst = 0;
+  for (const [bySlot, today] of pairs) {
+    for (const c of [0, 1, 2] as const) {
+      worst = Math.max(worst, Math.abs(bySlot[c] - today[c]) / Math.max(today[c], 1e-3 * largest));
+    }
+  }
+  return worst;
+}
+
+/**
+ * {@link slotReadChange} of the K5 primary on slot 0 and the M3 companion on slot 1, 7.34 × 10⁻⁵ and
+ * 8.42 × 10⁻⁵ (measured 2026-10-23): the interpolation of each star's own curves between the table's
+ * texels, the twin's tables being unrounded.
+ */
+const SLOT_READ_CHANGE = [7.344e-5, 8.424e-5] as const;
 
 /**
  * The companion's sky on light slot 0's layer and curves against its own, worst relative over the

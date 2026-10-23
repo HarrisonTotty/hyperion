@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { BOTTOM_M, kernelOf } from "../../test/atmosphereGate";
 import { describeMarchGate, raysOf } from "../../test/marchGate";
 import { R05_EARTH_REFERENCE } from "./earth";
-import { planetTwin, tableSources } from "./tablesCpu";
+import { planetTwin } from "./tablesCpu";
 
 /**
  * R05.T12.e's quadrature gate for the widened march (R08.T8) on R05's Earth, and the count of the
@@ -29,7 +29,7 @@ it("covers the march's 268 rays, the night limb's among them, the last light's 5
 describeMarchGate({
   name: "R05's Earth",
   medium: R05_EARTH_REFERENCE,
-  sources: () => tableSources(planetTwin(R05_EARTH_REFERENCE, BOTTOM_M)),
+  planet: () => planetTwin(R05_EARTH_REFERENCE, BOTTOM_M),
   // At one source on high the night limb sets the march's twilight worst (4.69%, from 400 km at
   // 0.1 H, sun 100°/180°; 4.79% in even steps alone) and the high limb from 99.999 km the sky's
   // (4.32%); the last light's is 0.79%, where even steps put it at 12.47%. Since R08.T8.e high's

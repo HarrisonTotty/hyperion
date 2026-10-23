@@ -160,6 +160,30 @@ export function wgslStructs(wgsl: string): ReadonlyMap<string, readonly string[]
 }
 
 /**
+ * The functions `wgsl` declares that `roots` reach through their calls, the roots among them: what
+ * an entry point's compiled code holds (plan R08, R08.T8.e).
+ */
+export function wgslReached(wgsl: string, roots: readonly string[]): ReadonlySet<string> {
+  const functions = wgslFunctions(wgsl);
+  const reached = new Set<string>();
+  const pending = [...roots];
+  for (let name = pending.pop(); name !== undefined; name = pending.pop()) {
+    const fn = functions.get(name);
+    if (reached.has(name) || fn === undefined) {
+      continue;
+    }
+    reached.add(name);
+    for (const call of fn.body.matchAll(/\b(\w+)\s*\(/gu)) {
+      const callee = call[1];
+      if (callee !== undefined && functions.has(callee) && !reached.has(callee)) {
+        pending.push(callee);
+      }
+    }
+  }
+  return reached;
+}
+
+/**
  * Each parameter or return type, of the functions `roots` and of every helper they reach through
  * their calls, that holds an array by value (plan R08, R08.T8.d; `decision-r08-t8-leans.md` §8), as
  * `"<fn> <param> : <type>"` or `"<fn> -> <type>"`, sorted by function name, parameters before the
@@ -189,21 +213,7 @@ export function arraysByValueFrom(wgsl: string, roots: readonly string[]): strin
     }
     return members.some((member) => holdsArray(member, new Set([...seen, type])));
   };
-  const reached = new Set<string>();
-  const pending = [...roots];
-  for (let name = pending.pop(); name !== undefined; name = pending.pop()) {
-    const fn = functions.get(name);
-    if (reached.has(name) || fn === undefined) {
-      continue;
-    }
-    reached.add(name);
-    for (const call of fn.body.matchAll(/\b(\w+)\s*\(/gu)) {
-      const callee = call[1];
-      if (callee !== undefined && functions.has(callee) && !reached.has(callee)) {
-        pending.push(callee);
-      }
-    }
-  }
+  const reached = wgslReached(wgsl, roots);
   const offences: string[] = [];
   for (const name of [...reached].toSorted()) {
     const fn = functions.get(name);

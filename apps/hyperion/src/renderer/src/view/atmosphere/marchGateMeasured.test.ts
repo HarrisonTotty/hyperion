@@ -1,7 +1,7 @@
 import { BOTTOM_M } from "../../test/atmosphereGate";
 import { describeMarchGate } from "../../test/marchGate";
 import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES } from "./earth";
-import { planetTwin, tableSources } from "./tablesCpu";
+import { planetTwin } from "./tablesCpu";
 
 /**
  * R05.T12.e's quadrature gate for the widened march (R08.T8) on the measured Earth, a file of its
@@ -12,7 +12,7 @@ import { planetTwin, tableSources } from "./tablesCpu";
 describeMarchGate({
   name: "the measured Earth",
   medium: EARTH_REFERENCE,
-  sources: () => tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES)),
+  planet: () => planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES),
   // Since R08.T8.e high's count on the bare ground is scaled by its optical depth: at one source the
   // march's ordinary worst is the disc at 20 steps (1.35%; 0.53% at 36 steps throughout), measured
   // 2026-10-22; the thin sky at 28 steps puts the sky's ordinary worst at six sources at 0.12%

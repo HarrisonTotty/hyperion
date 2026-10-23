@@ -171,7 +171,9 @@ import {
   pressureChannelOf,
   resampledPhase,
   SHARED_TABLE_CURVE_SLOT,
+  slotDepthsRefusal,
   type TableSize,
+  tablesPlanOf,
   TRANSMITTANCE_SAMPLES,
   TRANSMITTANCE_SIZE,
   TRANSMITTANCE_STEPS_A_PIECE,
@@ -857,6 +859,182 @@ export interface TwinTransmittance {
   readonly lastAbsorberPressureColumn: TwinTable;
   /** Each light's curves, one an absorber slot (`tables.ts`'s `AbsorberCurveSlots`). */
   readonly curves: AbsorberCurveSlots;
+  /**
+   * Each light slot's optical depth to the top, a table a slot at the transmittance's texels, as
+   * the slot-depth kernel stores them (plan R08, R08.T8.e, lever 5; {@link slotDepthTablesTwin}):
+   * a reader given the GPU's own (the smoke's twins over its read-back tables) takes these, and
+   * otherwise builds them from the tables, as the kernel does, once.
+   */
+  readonly slotDepths?: ReadonlyArray<TwinTable>;
+}
+
+/**
+ * Which read a march takes of a source's light (plan R08, R08.T8.e, lever 5;
+ * `decision-r08-t8-leans.md` §10 and §13): `curves`, the shared tables' stored optical depth and
+ * absorber columns with the light slot's curves applied on read, as every kernel took it before; or
+ * `slotDepths`, one read of the light slot's layer ({@link slotDepthTablesTwin}), the ray march's
+ * read on a body whose tables hold the layers (`tables.ts`'s `slotDepthsRefusal`). A medium with no
+ * absorber takes the shared read under either, its stored depth being the whole.
+ */
+export type SunRead = "curves" | "slotDepths";
+
+/**
+ * Each light slot's optical depth to the top, as `slotDepths.wgsl` builds it from `tables` (plan R08,
+ * R08.T8.e, lever 5): a table a light slot of `tables.curves`, each texel the stored optical depth
+ * there (rgb) plus that slot's curves at the texel's own stored absorber columns and
+ * pressure-weighted columns, read with `oblate.wgsl`'s `sliceStoredAt`'s guards (the pressure
+ * columns under an absorber, the further slots' columns for two or more, the fifth channel's table
+ * at its own size), each curve clamped as every read clamps it, the sum held to the half float's
+ * largest; alpha 0. None for a medium with no absorber. At a texel's own (h, μ) its e^(−τ) is the
+ * curves' read of that slot's light ({@link tableSources}), exactly.
+ *
+ * @throws RangeError as `tables.ts`'s `checkAbsorberCurves`, for curves that do not fit the medium.
+ */
+export function slotDepthTablesTwin(
+  medium: AtmosphereMedium,
+  tables: TwinTransmittance,
+): TwinTable[] {
+  const slots = absorberSlots(medium);
+  checkAbsorberCurves(medium, tables.curves);
+  if (slots.length === 0) {
+    return [];
+  }
+  const { widthTexels: w, heightTexels: h, texels: stored } = tables.transmittance;
+  const more = tables.absorberColumns.texels;
+  const pressure = tables.absorberPressureColumns.texels;
+  const last = tables.lastAbsorberPressureColumn;
+  const columns = new Float64Array(ABSORBER_SLOTS);
+  const pressureColumns = new Float64Array(ABSORBER_SLOTS);
+  const absorbed: TwinRgb = [0, 0, 0];
+  return tables.curves.map((_, slot) => {
+    const absorbers = twinAbsorbers(medium, tables.curves, slot);
+    const texels = new Float64Array(w * h * 4);
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const at = (y * w + x) * 4;
+        columns.fill(0);
+        pressureColumns.fill(0);
+        columns[0] = stored[at + 3] ?? Number.NaN;
+        for (let c = 0; c < PRESSURE_CHANNELS_A_TABLE; c += 1) {
+          pressureColumns[c] = pressure[at + c] ?? Number.NaN;
+        }
+        const lastAt =
+          (Math.min(y, last.heightTexels - 1) * last.widthTexels +
+            Math.min(x, last.widthTexels - 1)) *
+          4;
+        pressureColumns[4] = last.texels[lastAt] ?? Number.NaN;
+        if (slots.length > 1) {
+          for (let k = 1; k < ABSORBER_SLOTS; k += 1) {
+            columns[k] = more[at + k - 1] ?? Number.NaN;
+          }
+        }
+        absorberDepthInto(absorbers, columns, pressureColumns, absorbed);
+        for (const c of CHANNELS) {
+          texels[at + c] = Math.min((stored[at + c] ?? Number.NaN) + absorbed[c], HALF_MAX);
+        }
+      }
+    }
+    return { widthTexels: w, heightTexels: h, texels };
+  });
+}
+
+/**
+ * Each set of tables' slot layers with the medium they were built for, built once a medium
+ * ({@link slotLayersOf}), as {@link UNIT_READ_ABSORBERS} holds its absorbers.
+ */
+const SLOT_LAYERS = new WeakMap<
+  TwinTransmittance,
+  { readonly medium: AtmosphereMedium; readonly layers: ReadonlyArray<TwinTable> }
+>();
+
+/**
+ * The slot layers a reader of `tables` takes: those the tables carry, or {@link slotDepthTablesTwin}'s,
+ * built once for the tables and `medium`.
+ */
+function slotLayersOf(
+  medium: AtmosphereMedium,
+  tables: TwinTransmittance,
+): ReadonlyArray<TwinTable> {
+  const given = tables.slotDepths;
+  if (given !== undefined) {
+    return given;
+  }
+  let held = SLOT_LAYERS.get(tables);
+  if (held?.medium !== medium) {
+    held = { medium, layers: slotDepthTablesTwin(medium, tables) };
+    SLOT_LAYERS.set(tables, held);
+  }
+  return held.layers;
+}
+
+/** Light slot `slot`'s layer of `layers`, or a RangeError naming the slot. */
+function slotLayerAt(layers: ReadonlyArray<TwinTable>, slot: number): TwinTable {
+  const layer = layers[slot];
+  if (layer === undefined) {
+    throw new RangeError(`the slot layers hold ${layers.length} light slots, not slot ${slot}`);
+  }
+  return layer;
+}
+
+/**
+ * Light slot `slot`'s transmittance to the top at the transmittance tables' unit range (u, v), each
+ * clamped to [0, 1] and taken through Bruneton's texel mapping, under `read` (R08.T8.e): the curves'
+ * read (`common.wgsl`'s `transmittanceThroughLayer`), or one bilinear read of the slot's layer
+ * ({@link slotDepthTablesTwin}), exponentiated. At a texel's centre, u = x ÷ (width − 1) and
+ * v = y ÷ (height − 1), the two are the same; between texels they differ by the interpolation.
+ *
+ * @throws RangeError as {@link slotDepthTablesTwin}, or for a slot the curves do not hold.
+ */
+export function tableTransmittanceAtUnitTwin(
+  medium: AtmosphereMedium,
+  tables: TwinTransmittance,
+  u: number,
+  v: number,
+  slot: number,
+  read: SunRead,
+): Rgb {
+  const out: TwinRgb = [0, 0, 0];
+  if (read === "slotDepths" && absorberSlots(medium).length > 0) {
+    tableAtUnitInto(slotLayerAt(slotLayersOf(medium, tables), slot), u, v, out);
+    return [Math.exp(-out[0]), Math.exp(-out[1]), Math.exp(-out[2])];
+  }
+  transmittanceThroughTablesInto(
+    tables,
+    unitReadAbsorbers(medium, tables, slot),
+    u,
+    v,
+    out,
+    UNIT_READ,
+  );
+  return [out[0], out[1], out[2]];
+}
+
+/** The scratch of {@link tableTransmittanceAtUnitTwin}'s curves' read, made once. */
+const UNIT_READ = readScratch();
+
+/** Each set of tables' absorbers by light slot, as {@link tableTransmittanceAtUnitTwin} reads them. */
+const UNIT_READ_ABSORBERS = new WeakMap<
+  TwinTransmittance,
+  { readonly medium: AtmosphereMedium; readonly bySlot: Map<number, TwinAbsorbers> }
+>();
+
+/** The medium's absorbers under light slot `slot`'s curves of `tables`, checked once a medium. */
+function unitReadAbsorbers(
+  medium: AtmosphereMedium,
+  tables: TwinTransmittance,
+  slot: number,
+): TwinAbsorbers {
+  let held = UNIT_READ_ABSORBERS.get(tables);
+  if (held?.medium !== medium) {
+    held = { medium, bySlot: new Map() };
+    UNIT_READ_ABSORBERS.set(tables, held);
+  }
+  let absorbers = held.bySlot.get(slot);
+  if (absorbers === undefined) {
+    absorbers = twinAbsorbers(medium, tables.curves, slot);
+    held.bySlot.set(slot, absorbers);
+  }
+  return absorbers;
 }
 
 /**
@@ -1766,10 +1944,14 @@ export interface TwinSources {
  * 10 m offset, the slot's layer, or the one layer), each bilinear through Bruneton's texel mapping
  * (plan R08, Design note 19).
  *
+ * @param read - The read of a source's light (R08.T8.e): `curves`, every kernel's, or
+ *   `slotDepths`, one bilinear read of the light slot's layer ({@link slotDepthTablesTwin}),
+ *   exponentiated, the ray march's on a body whose tables hold the layers. The forward lobes' depth
+ *   and a march's own path take the shared tables under either.
  * @throws RangeError as `tables.ts`'s `checkAbsorberCurves`, for curves that do not fit the
  *   planet's absorbers, or, at a read, for a slot the curves do not hold.
  */
-export function tableSources(planet: PlanetTwin): TwinSources {
+export function tableSources(planet: PlanetTwin, read: SunRead = "curves"): TwinSources {
   const bottom = planet.bottomRadiusM;
   const atmosphereM = planet.medium.topHeightM;
   const shell = { bottomRadiusM: bottom, topRadiusM: bottom + atmosphereM };
@@ -1786,12 +1968,23 @@ export function tableSources(planet: PlanetTwin): TwinSources {
   };
   absorbersAt(0);
   const scratch = readScratch();
+  const slotLayers =
+    read === "slotDepths" && absorberSlots(planet.medium).length > 0
+      ? slotLayersOf(planet.medium, planet)
+      : null;
   return {
     bottomRadiusM: bottom,
     sunTransmittance: (heightM, muSun, out, slot) => {
       const rM = bottom + Math.min(Math.max(heightM, 0), atmosphereM);
       const [u, v] = transmittanceRMuToUv(shell, rM, muSun);
-      transmittanceThroughTablesInto(planet, absorbersAt(slot), u, v, out, scratch);
+      if (slotLayers === null) {
+        transmittanceThroughTablesInto(planet, absorbersAt(slot), u, v, out, scratch);
+        return;
+      }
+      tableAtUnitInto(slotLayerAt(slotLayers, slot), u, v, out);
+      for (const c of CHANNELS) {
+        out[c] = Math.exp(-out[c]);
+      }
     },
     multiScattering: (heightM, muSun, out, slot) => {
       const v =
@@ -2192,6 +2385,8 @@ interface OblateMarch {
   readonly reader: OblateReader;
   readonly frame: MarchFrame;
   readonly heights: "geometry" | "geodetic";
+  /** Each source's light: the curves' read, or the ray march's slot read (R08.T8.e). */
+  readonly read: SunRead;
 }
 
 /**
@@ -2399,7 +2594,15 @@ class Marcher {
       const v = geodeticHeights ? source.bodyFixed : source.direction;
       const muSun = (v.x * normal.x + v.y * normal.y + v.z * normal.z) / normalLength;
       const slot = source.slot;
-      const lit = reader.sunInto(placeM, start, source.bodyFixed, slot, this.#toSun, this.#depth)
+      const lit = reader.sunInto(
+        placeM,
+        start,
+        source.bodyFixed,
+        slot,
+        this.#toSun,
+        this.#depth,
+        reads.read,
+      )
         ? 1
         : 0;
       reader.multiScatteringInto(scaledHeightM, s, muSun, slot, this.#multiple);
@@ -3215,13 +3418,54 @@ interface RayMarchContext {
   /** The marches' layer edges of the terms ({@link marchEdgesOf}), m. */
   readonly edgesM: ReadonlyArray<number>;
   readonly pressureBarOf: ((heightM: number) => number) | null;
-  /** A sphere's table reads, or an oblate body's slices and bands (R08.T6.e). */
+  /**
+   * A sphere's table reads, or an oblate body's slices and bands (R08.T6.e): the march's and the
+   * bare ground's, by slot where the kernel reads by slot (R08.T8.e).
+   */
   readonly reads: MarchReads;
+  /** The same tables under the curves' read, which the ray's count keeps (R08.T8.e). */
+  readonly countReads: MarchReads;
   readonly geometry: MarchGeometry;
   readonly view: TwinView;
   readonly samples: number;
   /** The count by a segment's optical depth (R08.T8.e), or `null` for `samples` everywhere. */
   readonly depthSteps: MarchDepthSteps | null;
+}
+
+/** Each planet's ray-march read, decided once ({@link rayMarchSunReadOf}). */
+const RAY_MARCH_READS = new WeakMap<PlanetTwin | OblatePlanetTwin, SunRead>();
+
+/**
+ * The read the ray march takes of a source's light on a sphere's tables (plan R08, R08.T8.e, lever
+ * 5): `slotDepths` where the kernel's tables would hold the slot layers for the planet's medium and
+ * curves on one slice and band of its radius (`tables.ts`'s `slotDepthsRefusal`, which needs an
+ * absorber, at most `MAX_BODY_LIGHTS` light slots and the 2 MB row), so that the twin's march takes
+ * the slot read exactly where `hillaire.ts` marches by slot; `curves` otherwise.
+ */
+export function rayMarchSunReadOf(planet: PlanetTwin): SunRead {
+  let read = RAY_MARCH_READS.get(planet);
+  if (read === undefined) {
+    const plan = tablesPlanOf(null, planet.bottomRadiusM);
+    read = slotDepthsRefusal(planet.medium, planet.curves, plan) === null ? "slotDepths" : "curves";
+    RAY_MARCH_READS.set(planet, read);
+  }
+  return read;
+}
+
+/**
+ * {@link rayMarchSunReadOf} on an oblate body's tables (R08.T8.e): `slotDepths` where its slicing's
+ * plan takes the slot layers, which needs one latitude band among the rest, so that a body of
+ * several bands, the ice giants' and Saturn's, keeps the curves' read
+ * (`decision-r08-t8-leans.md` §13, point 1).
+ */
+export function oblateRayMarchSunReadOf(planet: OblatePlanetTwin): SunRead {
+  let read = RAY_MARCH_READS.get(planet);
+  if (read === undefined) {
+    const plan = tablesPlanOf(planet.body, planet.referenceRadiusM);
+    read = slotDepthsRefusal(planet.medium, planet.curves, plan) === null ? "slotDepths" : "curves";
+    RAY_MARCH_READS.set(planet, read);
+  }
+  return read;
 }
 
 function rayMarchContext(
@@ -3235,7 +3479,8 @@ function rayMarchContext(
     terms,
     edgesM: marchEdgesOf(terms, planet.medium.topHeightM),
     pressureBarOf: pressureBarLookup(planet.medium),
-    reads: { kind: "sphere", sources: tableSources(planet) },
+    reads: { kind: "sphere", sources: tableSources(planet, rayMarchSunReadOf(planet)) },
+    countReads: { kind: "sphere", sources: tableSources(planet) },
     geometry: { kind: "spheroid", figure: view.figure },
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
@@ -3249,7 +3494,8 @@ function rayMarchTexelInto(
   marched: RayMarchRay | null,
   out: Float64Array,
 ): void {
-  const { medium, terms, edgesM, pressureBarOf, reads, geometry, view, depthSteps } = context;
+  const { medium, terms, edgesM, pressureBarOf, reads, countReads, geometry, view, depthSteps } =
+    context;
   if (marched === null) {
     out.set([0, 0, 0, 1]);
     return;
@@ -3261,8 +3507,10 @@ function rayMarchTexelInto(
   if (ray.skySegment === true) {
     kind = bareGroundM === null ? "sky" : "ground";
   }
+  // Lever 3's count keeps the curves' read in both kernels (R08.T8.e, `decision-r08-t8-leans.md`
+  // §13, point 4).
   const depthAlong = (placeM: Vec3, direction: Vec3): number =>
-    lightDepthGOf(reads, geometry, placeM, direction);
+    lightDepthGOf(countReads, geometry, placeM, direction);
   let depthG = Number.NaN;
   if (depthSteps !== null && kind === "ground") {
     depthG = bareGroundDepthG(depthAlong, ray);
@@ -3319,7 +3567,7 @@ function groundLightInto(
   if (reads.kind === "oblate") {
     const geodetic = geodeticOf(groundM, figure);
     const n = geodetic.normal;
-    reads.reader.sunInto(groundM, geodetic, s, light.slot, out, [0, 0, 0]);
+    reads.reader.sunInto(groundM, geodetic, s, light.slot, out, [0, 0, 0], reads.read);
     return s.x * n.x + s.y * n.y + s.z * n.z;
   }
   const a2 = figure.equatorialRadiusM ** 2;
@@ -4395,6 +4643,9 @@ class OblateReader {
   readonly #absorbed: TwinRgb = [0, 0, 0];
   readonly #lower: TwinRgb = [0, 0, 0];
   readonly #upper: TwinRgb = [0, 0, 0];
+  readonly #layerRead: TwinRgb = [0, 0, 0];
+  /** Whether the medium has an absorber, without which the slot read is the shared one. */
+  readonly #absorbing: boolean;
 
   constructor(planet: OblatePlanetTwin) {
     this.#planet = planet;
@@ -4411,6 +4662,7 @@ class OblateReader {
     this.#lnBands = Float64Array.from(planet.bands, (band) => Math.log(band.gravityRatio));
     checkAbsorberCurves(planet.medium, planet.curves);
     this.absorbersAt(0);
+    this.#absorbing = hasAbsorbers(this.#terms);
   }
 
   /** The medium's absorbers under light slot `slot`'s curves, checked once. */
@@ -4705,7 +4957,9 @@ class OblateReader {
    * A source's transmittance into `transmittance` from the body-fixed `positionM` along `direction`
    * under light slot `slot`'s curves, and the stored optical depth into `depth`, the forward lobes'
    * read: the sliced lookup's stored values, divided by s, with the slot's curves added; whether the
-   * ground leaves the source lit.
+   * ground leaves the source lit. Under `read` `slotDepths` (R08.T8.e, `rayMarchSlots.wgsl`'s
+   * `slicedSlotDepthsOf`) the transmittance is the sliced lookup's read of the slot's layer, divided
+   * by s, at the same slices, cosines and weights, and the stored depth the same as the curves'.
    */
   sunInto(
     positionM: Vec3,
@@ -4714,8 +4968,16 @@ class OblateReader {
     slot: number,
     transmittance: TwinRgb,
     depth: TwinRgb,
+    read: SunRead = "curves",
   ): boolean {
     const ray = this.rayOf(positionM, geodetic, direction, "fitted");
+    if (read === "slotDepths" && this.#absorbing) {
+      this.#slotAlong(ray, slot, transmittance, depth);
+      for (const c of CHANNELS) {
+        transmittance[c] = Math.exp(-transmittance[c]);
+      }
+      return !ray.shadowed;
+    }
     this.#depthsInto(ray, slot, depth);
     for (const c of CHANNELS) {
       transmittance[c] = Math.exp(-(depth[c] + this.#absorbed[c]));
@@ -4730,6 +4992,40 @@ class OblateReader {
   opticalDepthInto(ray: SlicedRay, slot: number, depth: TwinRgb): Rgb {
     this.#depthsInto(ray, slot, depth);
     return [this.#absorbed[0], this.#absorbed[1], this.#absorbed[2]];
+  }
+
+  /**
+   * Light slot `slot`'s layer read along a sliced ray into `total`, and the stored optical depth into
+   * `depth` (R08.T8.e, `rayMarchSlots.wgsl`'s `slicedSlotDepthsOf`): each slice's layer and table read
+   * at the ray's h\*, held in the shell, at its own cosine, weighted as {@link OblateReader}'s stored
+   * read weights them, and each sum divided by s.
+   */
+  #slotAlong(ray: SlicedRay, slot: number, total: TwinRgb, depth: TwinRgb): void {
+    total.fill(0);
+    depth.fill(0);
+    const height = Math.min(Math.max(ray.scaledHeightM, 0), this.#topM);
+    const stored = this.#layerRead;
+    for (const { slice, weight, cosine } of ray.reads) {
+      const shell = this.#shells[slice];
+      const tables = this.#planet.slices[slice];
+      if (shell === undefined || tables === undefined) {
+        throw new Error(`a sliced read names slice ${slice} of ${this.#shells.length}`);
+      }
+      const [u, v] = transmittanceRMuToUv(shell, shell.bottomRadiusM + height, cosine);
+      tableAtUnitInto(slotLayerAt(slotLayersOf(this.#planet.medium, tables), slot), u, v, stored);
+      for (const c of CHANNELS) {
+        total[c] += weight * stored[c];
+      }
+      tableAtUnitInto(tables.transmittance, u, v, stored);
+      for (const c of CHANNELS) {
+        depth[c] += weight * stored[c];
+      }
+    }
+    const divisor = ray.gravityRatio;
+    for (const c of CHANNELS) {
+      total[c] /= divisor;
+      depth[c] /= divisor;
+    }
   }
 
   /** {@link OblateReader.opticalDepthInto} without the copy of the absorbers' depth. */
@@ -4857,6 +5153,35 @@ export function slicedSunTransmittance(
       Math.exp(-(depth[2] + absorbed[2])),
     ],
   };
+}
+
+/**
+ * A source's transmittance from the body-fixed `positionM` along the unit `direction` to the top, as
+ * the oblate marches read a source's light (R08.T8.e): the fitted sliced lookup under `read`, the
+ * curves' (`slicedSunTransmittance`'s) or one read of light slot `slot`'s layer
+ * ({@link slotDepthTablesTwin}) divided by s, unshadowed. The methane record holds the two against
+ * each other on bodies of several bands too, which the ray march never takes by slot.
+ *
+ * @throws RangeError as {@link slicedSunTransmittance}, or for a slot the layers do not hold.
+ */
+export function oblateSunTransmittanceTwin(
+  planet: OblatePlanetTwin,
+  positionM: Vec3,
+  direction: Vec3,
+  slot: number,
+  read: SunRead,
+): Rgb {
+  const out: TwinRgb = [0, 0, 0];
+  oblateReaderOf(planet).sunInto(
+    positionM,
+    geodeticOf(positionM, planet.body.figure),
+    direction,
+    slot,
+    out,
+    [0, 0, 0],
+    read,
+  );
+  return [out[0], out[1], out[2]];
 }
 
 /**
@@ -5494,7 +5819,7 @@ function oblateSkyViewMarcher(
     const marcher = new Marcher(
       terms,
       pressureBarOf,
-      { kind: "oblate", reader, frame, heights: "geometry" },
+      { kind: "oblate", reader, frame, heights: "geometry", read: "curves" },
       geometry,
       ray,
     );
@@ -5606,7 +5931,7 @@ export function oblateAerialPerspectiveTwin(
       const marcher = new Marcher(
         terms,
         pressureBarOf,
-        { kind: "oblate", reader, frame, heights: "geometry" },
+        { kind: "oblate", reader, frame, heights: "geometry", read: "curves" },
         geometry,
         ray,
       );
@@ -5721,6 +6046,14 @@ function oblateRayMarchContext(
       reader: oblateReaderOf(planet),
       frame: BODY_FRAME,
       heights: "geodetic",
+      read: oblateRayMarchSunReadOf(planet),
+    },
+    countReads: {
+      kind: "oblate",
+      reader: oblateReaderOf(planet),
+      frame: BODY_FRAME,
+      heights: "geodetic",
+      read: "curves",
     },
     geometry: {
       kind: "gravitySpheroid",

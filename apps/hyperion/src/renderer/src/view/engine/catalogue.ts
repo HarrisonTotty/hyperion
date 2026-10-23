@@ -12,6 +12,7 @@ import {
   AERIAL_PERSPECTIVE_KERNEL,
   COMPOSITE_MATERIAL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
   SKY_VIEW_KERNEL,
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
@@ -19,6 +20,7 @@ import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS, SMOOTH_MESH_MATERIAL } fro
 import {
   IRRADIANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
+  SLOT_DEPTHS_KERNEL,
   TRANSMITTANCE_KERNEL,
 } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
@@ -86,14 +88,16 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME
 );
 
 /**
- * R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering, and since plan
- * R08's R08.T9.b the sky's irradiance (`irradiance.wgsl`). R08's `surfaceLighting.wgsl`, a
- * library, is catalogued inside the lit-body probe and the disc materials, which compose it.
+ * R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering, since plan
+ * R08's R08.T9.b the sky's irradiance (`irradiance.wgsl`), and since R08.T8.e each light slot's
+ * optical depth (`slotDepths.wgsl`). R08's `surfaceLighting.wgsl`, a library, is catalogued inside
+ * the lit-body probe and the disc materials, which compose it.
  */
 const ATMOSPHERE_TABLE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   TRANSMITTANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
   IRRADIANCE_KERNEL,
+  SLOT_DEPTHS_KERNEL,
 ].map((spec) => ({ kind: "compute", spec }));
 
 /** R07's post-processing kernels and passes (plan R07, T12–T15). */
@@ -105,14 +109,14 @@ const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ];
 
 /**
- * R05.T12.c's per-frame atmosphere: the sky view, the aerial perspective and the ray march, and
- * the composite that lays them over the terrain.
+ * R05.T12.c's per-frame atmosphere: the sky view, the aerial perspective and the ray march, since
+ * R08.T8.e in both its forms (the shared read, and by slot), and the composite that lays them over
+ * the terrain.
  */
 const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
-  ...[SKY_VIEW_KERNEL, AERIAL_PERSPECTIVE_KERNEL, RAY_MARCH_KERNEL].map((spec): CatalogueEntry => ({
-    kind: "compute",
-    spec,
-  })),
+  ...[SKY_VIEW_KERNEL, AERIAL_PERSPECTIVE_KERNEL, RAY_MARCH_KERNEL, RAY_MARCH_SLOTS_KERNEL].map(
+    (spec): CatalogueEntry => ({ kind: "compute", spec }),
+  ),
   { kind: "material", spec: COMPOSITE_MATERIAL },
 ];
 

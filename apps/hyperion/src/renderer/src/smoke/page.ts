@@ -8,17 +8,19 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in nine parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6, 8 and 9 the atmosphere's CPU-twin groups (R08.T6, R08.T7, R08.T9.b,
- * R08.T8.a, R08.T8.b, R08.T8.c), part 4 with R05.T12.e's marches before them and part 6 with
- * R05.T12.c's frames, part 7 R10's terrain groups, and part 1 every other; with no part given the
- * page runs them all, in its order.
+ * groups are in ten parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 6 and 8 to 10 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e), part 4 with R05.T12.e's marches before them
+ * and part 6 with R05.T12.c's frames, part 7 R10's terrain groups, and part 1 every other; with no
+ * part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
- * Earth, in part 8; R08.T9.b's surface lighting in two in part 6, Earth's and the Saturn-class
- * figure's; R08.T8.a's march band in part 9 with R08.T7's several suns (in part 6 it took the part
- * from 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four
- * atmospheres' tables and kernels, 2026-10-21); R08.T8.b's far limb, with the composite from above
+ * Earth, in part 8; R08.T6.b's kernels over N terms in two, its medium of four absorbers in part 6
+ * and the others in part 2; R08.T9.b's surface lighting in two, Earth's in part 6 and the
+ * Saturn-class figure's in part 2; R08.T8.a's march band in part 9 (in part 6 it took the part from
+ * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
+ * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
+ * its binary; R08.T8.b's far limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 8
  * after R08.T6.f's Earth; and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
@@ -51,6 +53,8 @@ import {
   checkAtmosphereSteps,
   checkAtmosphereTables,
   checkAtmosphereTwins,
+  checkAtmosphereTwinsFourAbsorbers,
+  checkBinarySlotLayers,
   checkFarLimb,
   checkFarLimbFootprint,
   checkLowPick,
@@ -123,18 +127,20 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 };
 
 /**
- * A part of the page's groups: 2 to 6, 8 and 9 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
- * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c), whose twins outweigh their GPU work (2 R08.T6.b's, 3
- * R08.T6.g's, 4 R08.T8.b's far limb, with the composite from above the top, 5 R08.T6.f's
- * Saturn-class figure and R08.T6.i's layer edges, 6 R08.T9.b's Earth and Saturn-class figure, 8
- * R08.T6.f's Earth and R08.T8.c's far limb's footprint, 9 R08.T8.a's march band and R08.T7's
- * several suns), 7 R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6
- * to 163 s at a load of 2 once R10.T9.b's cascades joined them (2026-10-21), and 1 every other
- * group but R05.T12.e's and R05.T12.c's frames, which parts 4 and 6 run first, before their twins
- * start, to even the parts out (R08.T9.b's lit materials, larger, took part 1 past 150 s under
- * load), R08.T8.b's low pick, which has no twin, among them; part 1 also takes the captures,
- * R08.T8.c's far limb's among them, when asked, under the same watchdog, and R08.T8.c's far limb's
- * timings when the run lifted timestamp quantization (`gpuTiming`).
+ * A part of the page's groups: 2 to 6 and 8 to 10 the atmosphere's CPU-twin groups (R08.T6,
+ * R08.T7, R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e), whose twins outweigh their GPU work
+ * (2 R08.T6.b's but its medium of four absorbers, and R08.T9.b's Saturn-class figure, 3 R08.T6.g's,
+ * 4 R08.T8.b's far limb, with the composite from above the top, 5 R08.T6.f's Saturn-class figure
+ * and R08.T6.i's layer edges, 6 R08.T6.b's medium of four absorbers and R08.T9.b's Earth, 8
+ * R08.T6.f's Earth and R08.T8.c's far limb's footprint, 9 R08.T8.a's march band, 10 R08.T7's
+ * several suns and R08.T8.e's slot layers on its binary), 7 R10's terrain groups (R10.T10.b,
+ * T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
+ * joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's frames, which
+ * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
+ * materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
+ * among them; part 1 also takes the captures, R08.T8.c's far limb's among them, when asked, under
+ * the same watchdog, and R08.T8.c's far limb's timings when the run lifted timestamp quantization
+ * (`gpuTiming`).
  *
  * @remarks
  * R08.T8.c's footprints, whose nodes the twins and SwiftShader march on every limb from above the
@@ -143,9 +149,21 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * R08.T6.i, R08.T6.f's Earth, R08.T8.a's march band and R08.T7 moved to them and to part 5: at
  * those figures part 3 holds 122 s, part 4 129, part 5 117, part 6 80, part 9 130 and part 8 68
  * with R08.T8.c's footprint beside it, every part about 130 s at most but part 2, R08.T6.b's alone
- * at 149 s.
+ * at 149 s. R08.T8.e's slot layers and the ray march's kernel by slot then took part 2 past the
+ * watchdog (175 s at 100bee27's gate), so R08.T6.b's medium of four absorbers moved to part 6 in a
+ * group of its own (59 to 67 s) and R08.T9.b's Saturn-class figure to part 2 (19 s): on SwiftShader
+ * at a load of 7 to 12 part 2 holds 140 s (R08.T6.b's group 116 s) and part 6 122 to 124 s
+ * (2026-10-23). With the slot layers' texel checks (R08.T6.b's absorbing media and R08.T7's binary)
+ * part 2 holds 141 s, part 5 119, part 6 133 to 137 and part 9 158 to 160 at a load of 7 to 14, so
+ * the binary's, with its kernel arm, left R08.T7's group for a group of its own (13 s), and with it
+ * in part 1 part 9 held 152 to 154 s (R08.T8.a's march band 79 to 81 s, R08.T7's 71 s) and part 1
+ * 122 to 123 s at a load of 8 to 11 (2026-10-23). No group of part 9 fitted another part whole, so
+ * part 10 joined, with R08.T7's several suns and the binary's slot layers beside it: on the whole
+ * render at a load of 9 to 20 (median 14) part 1 holds 131 s, part 9 88 s and part 10 98 s
+ * (R08.T7's 79 s, the binary's slot layers 15 s), its runs 3 s outside their groups, Electron's
+ * start, the adapter and the page's load (2026-10-23).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -171,6 +189,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 8;
     case "9":
       return 9;
+    case "10":
+      return 10;
     default:
       return null;
   }
@@ -225,7 +245,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 9 or all");
+    return failed("the part asked for is not 1 to 10 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -345,6 +365,9 @@ async function run(
   await group(2, "R08.T6.b the kernels over N terms", () =>
     checkAtmosphereTwins(engine, checks, twins),
   );
+  await group(6, "R08.T6.b the kernels over four absorbers", () =>
+    checkAtmosphereTwinsFourAbsorbers(engine, checks, twins),
+  );
   await group(5, "R08.T6.f slices and bands on a Saturn-class figure", () =>
     checkAtmosphereSlicesSaturn(engine, checks, twins),
   );
@@ -360,7 +383,7 @@ async function run(
   await group(6, "R08.T9.b surface lighting on Earth", () =>
     checkSurfaceLightingEarth(engine, checks, twins),
   );
-  await group(6, "R08.T9.b surface lighting on a Saturn-class figure", () =>
+  await group(2, "R08.T9.b surface lighting on a Saturn-class figure", () =>
     checkSurfaceLightingSaturn(engine, checks, twins),
   );
   await group(9, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
@@ -386,9 +409,10 @@ async function run(
       shared.dispose();
     }
   });
-  await group(9, "R08.T7 several suns, and the sky through the air", () =>
+  await group(10, "R08.T7 several suns, and the sky through the air", () =>
     checkSeveralSuns(engine, checks, twins),
   );
+  await group(10, "R08.T8.e the binary's slot layers", () => checkBinarySlotLayers(engine, checks));
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
   await group(8, "R08.T8.c the far limb's footprint", () =>
     checkFarLimbFootprint(engine, checks, twins),

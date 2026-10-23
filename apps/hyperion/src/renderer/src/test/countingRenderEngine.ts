@@ -107,6 +107,16 @@ export interface RecordedDispatch {
   readonly framesBefore: number;
 }
 
+/** The names a dispatch binds, every group of its bindings together, sorted. */
+export function boundNames(bindings: ComputeBindings): string[] {
+  return [
+    ...Object.keys(bindings.uniforms),
+    ...Object.keys(bindings.buffers),
+    ...Object.keys(bindings.sampled),
+    ...Object.keys(bindings.storage),
+  ].toSorted();
+}
+
 /** One recorded buffer write. */
 export interface RecordedWrite {
   readonly buffer: string;

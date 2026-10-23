@@ -54,7 +54,7 @@ import {
 } from "../view/atmosphere/medium";
 import { tableRadiusM } from "../view/atmosphere/hillaire";
 import { bodyGravity, type BodyGravity, type LevelSpheroid } from "../view/atmosphere/oblate";
-import { BOLTZMANN_J_PER_K, molecularTerm } from "../view/atmosphere/rayleigh";
+import { BOLTZMANN_J_PER_K, type GasFractions, molecularTerm } from "../view/atmosphere/rayleigh";
 import { type BakeSpectrum, bakeSpectrumOf } from "../view/atmosphere/spectralColour";
 import type { AbsorberCurveSlots, AtmosphereBody } from "../view/atmosphere/tables";
 import { toyPart, toySidecar } from "./kDistributionToys";
@@ -557,6 +557,170 @@ export function saturnScaleHeightM(): number {
     (BOLTZMANN_J_PER_K * SATURN_TEMPERATURE_K) /
     (molarMass * ATOMIC_MASS_CONSTANT_KG * gravity.referenceGravityMS2)
   );
+}
+
+// --- Methane-rich media (plan R08, R08.T8.e, lever 5's methane record) ---------------------------
+
+/** A medium with its curves and the sphere its tables stand on. */
+export interface MediumWithCurvesOnRadius extends MediumWithCurves {
+  /** The tables' ground radius, m. */
+  readonly radiusM: number;
+}
+
+/** Titan's mean radius, m: 2,574.73 km (Zebker et al. 2009, Science 324, 921). */
+export const TITAN_RADIUS_M = 2_574_730;
+
+/** Titan's GM, m³ s⁻²: 8,978.1356 km³ s⁻² (Jacobson et al. 2006, AJ 132, 2520, Table 3). */
+export const TITAN_GM_M3S2 = 8.978_135_6e12;
+
+/**
+ * Titan's surface pressure, Pa, and temperature, K: 1,467 hPa and 93.65 K (Fulchignoni et al. 2005,
+ * Nature 438, 785, Huygens' HASI).
+ */
+export const TITAN_SURFACE: { readonly pressurePa: number; readonly temperatureK: number } = {
+  pressurePa: 146_700,
+  temperatureK: 93.65,
+};
+
+/**
+ * A Titan-class air by volume: methane at its near-surface 5.65% (Niemann et al. 2010, JGR 115,
+ * E12006, Huygens' GCMS), here held through the whole column, where on Titan it falls to 1.48% in
+ * the stratosphere; nitrogen the rest.
+ */
+export const TITAN_FRACTIONS = [
+  { species: "N2", moleFraction: 0.9435 },
+  { species: "CH4", moleFraction: 0.0565 },
+] as const;
+
+/**
+ * A methane-rich medium on a sphere, a test's (R08.T8.e's methane record, `decision-r08-t8-leans.md`
+ * §13, points 1 and 10): Titan's radius, gravity GM ÷ R² and surface, an isothermal column at the
+ * surface's temperature, the N₂–CH₄ air's molecular term (R08.T3.c) and its methane as one absorber
+ * well mixed through the column, about 5.0 km-amagat (N = x p ÷ (m̄ g), 1.348 × 10²⁹ m⁻²; 5.1 in
+ * the column as built), under the Sun's curves (a 5,772 K Planck sun). A sphere has one latitude
+ * band, so its ray march reads its sources by slot. Titan's haze, the deepest of its opacities, is
+ * not drawn.
+ */
+export function titanClassMethaneMedium(): MediumWithCurvesOnRadius {
+  const fractions = TITAN_FRACTIONS.map(({ species, moleFraction }) => ({
+    properties: gasProperties(species),
+    moleFraction,
+  }));
+  const column = hydrostaticColumn({
+    surfacePa: TITAN_SURFACE.pressurePa,
+    temperature: { kind: "isothermal", temperatureK: TITAN_SURFACE.temperatureK },
+    meanMolarMassGPerMol: meanMolarMassGPerMol(fractions),
+    referenceGravityMS2: TITAN_GM_M3S2 / TITAN_RADIUS_M ** 2,
+    referenceRadiusM: TITAN_RADIUS_M,
+  });
+  return {
+    ...methaneMediumOn(column, "titan-class methane", TITAN_FRACTIONS),
+    radiusM: TITAN_RADIUS_M,
+  };
+}
+
+/**
+ * Uranus at 1 bar (Archinal et al. 2018, Celest. Mech. Dyn. Astron. 130, 22: a, c and the rotation
+ * of 501.160 092 8° d⁻¹), GM of Jacobson 2014 (AJ 148, 76): the system's 5,794,556.4 km³ s⁻² less
+ * the satellites' 605.1 (its Table 12); an ice giant of two κ slices and two latitude bands (Design
+ * note 17).
+ */
+export const URANUS_SPHEROID: LevelSpheroid = {
+  equatorialRadiusM: 25_559e3,
+  polarRadiusM: 24_973e3,
+  gmM3S2: 5.793_951_3e15,
+  angularVelocityRadS: ((501.160_092_8 / 360) * 2 * Math.PI) / 86_400,
+};
+
+/**
+ * A Uranus-like air by volume below its clouds: 15.2% He (Conrath et al. 1987, JGR 92, 15003) and
+ * 2.3% CH4 (Lindal et al. 1987, JGR 92, 14987, Voyager's radio occultation, which gives the radii
+ * too), H₂ the rest; 76 K at 1 bar (Lindal 1992, AJ 103, 967, Tables 1–2).
+ */
+export const URANUS_FRACTIONS = [
+  { species: "H2", moleFraction: 0.825 },
+  { species: "He", moleFraction: 0.152 },
+  { species: "CH4", moleFraction: 0.023 },
+] as const;
+
+/** Uranus's 1-bar temperature, K (Lindal 1992, AJ 103, 967, Tables 1–2). */
+export const URANUS_TEMPERATURE_K = 76;
+
+/** A medium with its curves and the body its tables are sliced for. */
+export interface MediumWithCurvesOnBody extends MediumWithCurves {
+  readonly body: AtmosphereBody;
+}
+
+/**
+ * A methane-rich ice giant, a test's (R08.T8.e's methane record): {@link URANUS_SPHEROID} with its
+ * normal gravity, two latitude bands, an isothermal column of the Uranus-like air from 1 bar at
+ * g_ref and R_ref, its molecular term and its methane as one absorber well mixed through the column
+ * (about 2.2 km-amagat; on Uranus it condenses above the clouds), under the Sun's curves. Its bands
+ * keep the ray march off the slot read (`decision-r08-t8-leans.md` §13, point 1), so its record is
+ * the twin's alone.
+ */
+export function iceGiantMethaneBody(): MediumWithCurvesOnBody {
+  const gravity = gravityOfSpheroid(URANUS_SPHEROID);
+  const fractions = URANUS_FRACTIONS.map(({ species, moleFraction }) => ({
+    properties: gasProperties(species),
+    moleFraction,
+  }));
+  const column = hydrostaticColumn({
+    surfacePa: 1e5,
+    temperature: { kind: "isothermal", temperatureK: URANUS_TEMPERATURE_K },
+    meanMolarMassGPerMol: meanMolarMassGPerMol(fractions),
+    referenceGravityMS2: gravity.referenceGravityMS2,
+    referenceRadiusM: tableRadiusM(URANUS_SPHEROID),
+  });
+  return {
+    ...methaneMediumOn(column, "ice-giant methane", URANUS_FRACTIONS),
+    body: { figure: URANUS_SPHEROID, gravity },
+  };
+}
+
+/**
+ * A medium on `column` of the air `fractions`' molecular term and its methane, CH₄'s share of the
+ * column's molecules, as one absorber layer from the datum to the top, under a 5,772 K Planck
+ * sun's curves.
+ *
+ * @throws Error where the air has no methane, or the methane takes no absorber term on the column.
+ */
+function methaneMediumOn(
+  column: AtmosphereColumn,
+  name: string,
+  fractions: GasFractions,
+): MediumWithCurves {
+  const fraction = fractions.find(({ species }) => species === "CH4")?.moleFraction;
+  if (fraction === undefined) {
+    throw new Error(`${name}'s air has methane`);
+  }
+  const moleculesPerM2 =
+    column.surfaceNumberDensityPerM3 * columnLengthM(column.density, column.topHeightM);
+  const { specs } = absorberSpecs(
+    [
+      {
+        species: "CH4",
+        columnPerM2: fraction * moleculesPerM2,
+        basePa: column.pressuresPa[0] ?? Number.NaN,
+        topPa: 0,
+      },
+    ],
+    column,
+  );
+  const [methane] = specs;
+  if (methane === undefined || specs.length !== 1) {
+    throw new Error(`${name}'s methane takes one absorber term on its column`);
+  }
+  const sun = planckBakeSpectrum(SUN_TEFF_K);
+  return {
+    medium: {
+      name,
+      topHeightM: column.topHeightM,
+      groundAlbedo: [0.3, 0.3, 0.3],
+      terms: [molecularTerm(column, fractions).term, absorberTerm(methane, column)],
+    },
+    curves: [[absorberCurve(methane, sun)]],
+  };
 }
 
 /**

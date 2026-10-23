@@ -736,7 +736,8 @@ describe("the far limb's fidelity on high against the converged footprint (R08.T
 
   // Measured 2026-10-22: the centre ray alone, against the converged footprint (T8.b recorded it
   // against its 8 × 8 mean). From 10⁹ m the worst is 27 and 30 times the footprint's light. Moved in
-  // the fourth or fifth figure by R08.T8.e's count on the bare ground (2026-10-22).
+  // the fourth or fifth figure by R08.T8.e's count on the bare ground (2026-10-22), and the measured
+  // Earth's from 10⁹ m 29.72396 → 29.72401 by lever 5's slot read (2026-10-23).
   it("records the same of the centre ray alone, the march as T8.b drew it", () => {
     expect(figuresOf((p) => p.eCentre)).toEqual(
       recordedFigures({
@@ -745,7 +746,7 @@ describe("the far limb's fidelity on high against the converged footprint (R08.T
         "R05's Earth, 10⁹ m": { worst: 27.1252, median: 0.99945, over: 35 },
         "the measured Earth, 10⁷ m": { worst: 0.95701, median: 0.00757, over: 6 },
         "the measured Earth, 10⁸ m": { worst: 2.19016, median: 0.46668, over: 35 },
-        "the measured Earth, 10⁹ m": { worst: 29.72396, median: 0.99994, over: 35 },
+        "the measured Earth, 10⁹ m": { worst: 29.72401, median: 0.99994, over: 35 },
         "Saturn-class, 10⁸ m": { worst: 0.58009, median: 0.01077, over: 7 },
         "Saturn-class, 10⁹ m": { worst: 3.23772, median: 0.52268, over: 35 },
         "R05's Earth, s = 1": { worst: 0.8886, median: 0.02282, over: 10 },
