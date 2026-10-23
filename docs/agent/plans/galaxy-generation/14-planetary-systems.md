@@ -4262,6 +4262,30 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   - _Commit:_ `fix(client): P14.T43.h The ocean under a Snowball's ice in the readout`.
   - _Lifespan:_ moot once P14.T53.c ends W3 (b) with T51.g's shell; the "For 24" follow-up then
     reads `subsurface_ocean` under the same row.
+- **P14.T43.i A regular moon's ocean under its ice in the readout** (decision-p14-t43h-review
+  §4; signoff-p14-t43h-ux, "Recorded, not blocking"; a display change only, with no wire, output
+  or protocol change; after P14.T43.h).
+  - `displays/system/BodyRecordReadings.tsx`'s `surfaceRows`: the `SUBSURFACE OCEAN` row also
+    stands where `subsurfaceOcean` (the wire's `subsurface_ocean`) is a value, on any surface
+    state, reading its `liquid` by `substanceName(key, "upper")` with no share, depth, shell,
+    floor, solute or temperature (`SUBSURFACE OCEAN H2O`, `SUBSURFACE OCEAN NaCl BRINE`). Where
+    both the member and T43.h's ocean under a Snowball's ice are present, one row, the member's
+    liquid. `none` and `not_modelled` add no row. `LIQUID COVER`, rule 1, `oceanUnderIce`,
+    `liquidsOnIce` and the row's place, the last of the section's, are unchanged.
+  - The guide's `SUBSURFACE OCEAN` row: its last sentence names a regular moon's ocean among those
+    the row reads, no longer among those not read.
+  - _Tests_ (`SystemView.bodies.test.tsx`):
+    - the fixture's Titan reads `SUBSURFACE OCEAN H2O` as its last surface row, and leaves
+      T43.h's no-row cases;
+    - an `airless` surface with a `brine_nacl` ocean reads `SUBSURFACE OCEAN NaCl BRINE` after
+      `COLD TRAPS`;
+    - `subsurface_ocean: null` adds no row;
+    - T43.h's `0700` with a `brine_nacl` member kept reads one row, `NaCl BRINE`, and its
+      `LIQUID COVER` as T43.h pins it;
+    - an unknown liquid key reads `UNLISTED MATERIAL`;
+    - Earth's and the lava world's rows unchanged, and every other T43.h test unchanged.
+  - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
+  - _Commit:_ `feat(client): P14.T43.i A regular moon's ocean under its ice in the readout`.
 
 #### P14.T44 Time control
 
@@ -16034,6 +16058,87 @@ tables::gauss_legendre`.
     to an entry, since the cover is built from the condensates after their cut to eight. The
     no-unit test is kept, as the sign-off asks. Reading a regular moon's `subsurface_ocean`
     under the row is P14.T43.i, briefed to the laptop.
+- **Deviations in P14.T43.i, as built (`lane/92-p14-t43i-moon-ocean`, 2026-10-23).** A regular
+  moon's ocean under its ice in the readout (decision-p14-t43h-review §4), in the client, the
+  guide and this plan only: no wire, protocol, binding, decoder, fixture, golden, output or
+  `styles.css` change. `GENERATOR_VERSION` is 23 and `PROTOCOL_VERSION` 3 after the lane's last
+  merge (19acbc21).
+  - _The names._ `subsurfaceOceanLiquid(surface, ocean)`, the row's liquid by its registry key:
+    the `liquid` of `subsurfaceOcean` where it is a value, on any surface state and whatever the
+    condensates are, else the substance of `ocean`, the item `oceanUnderIce` returns, else `null`.
+    `surfaceRows` holds it as `oceanLiquid`, and shows `SUBSURFACE OCEAN` only where it is not
+    `null`, in its place, reading `substanceName(oceanLiquid, "upper")` with no unit. `ocean` and
+    `liquids` are computed as before, so `LIQUID COVER` reads T43.h's rebuilt list wherever rule 1
+    fires, the member present or not.
+  - _The docs._ `surfaceRows`' TSDoc names the member's reading on any surface, the member's
+    liquid where both stand, and names the member's shell, depth, floor, solute fraction and base
+    temperature among the members not read, in place of T43.h's "a regular moon's ocean";
+    `BodyRecordReadings`' remarks name the ocean under a body's ice, which on an airless moon
+    follows the cold traps' state.
+  - _The guide._ The `SUBSURFACE OCEAN` row's last sentence, as the brief gives it; Prettier kept
+    the table's widths.
+  - _The readings the tests pin._
+    - The fixture's Titan, in order: `SURFACE SNOWBALL`, `T SURF 94 K`,
+      `SURFACE PRESSURE 147 kPa`, `MOLE FRACTION N2 94.4 % · CH4 5.65 %`, `CRUST PRIMARY · H2O`,
+      `MANTLE REDOX OXIDISED`, `MELT COVER NONE`, `LIQUID COVER CH4–C2H6–N2 MIXTURE 1.00 %`,
+      `ICE COVER H2O 99.0 %`, `SUBSURFACE OCEAN H2O`.
+    - The airless moon, in order: `SURFACE AIRLESS`, `T SURF 102 K`, `SURFACE PRESSURE NONE`,
+      `MOLE FRACTION NONE`, `EXOSPHERE NOT YET MODELLED`, `CRUST PRIMARY · H2O`,
+      `MANTLE REDOX OXIDISED`, `MELT COVER NONE`, `LIQUID COVER NONE`, `ICE COVER H2O 100 %`,
+      `COLD TRAPS NOT YET MODELLED`, `SUBSURFACE OCEAN NaCl BRINE`.
+    - `0700` with a `brine_nacl` member: one row, `SUBSURFACE OCEAN NaCl BRINE`, and
+      `LIQUID COVER CH4–C2H6–N2 MIXTURE 97.3 % · N2 2.72 %`; with its member `null`:
+      `SUBSURFACE OCEAN H2O`, the cover's, by rule 1 alone.
+    - The fixture's Titan with a `novel_liquid` member: `SUBSURFACE OCEAN UNLISTED MATERIAL`, and
+      no `novel_` text; with its member `null`: no row.
+    - Each reading is the brief's, its no-break spaces as the formatter sets them.
+  - _Tests._ `SystemView.bodies.test.tsx`, 5 new cases, 110 in the file: the fixture's Titan's
+    rows, the airless moon's, the two oceans' one row, the unknown key, and `0700` with a `null`
+    member, beyond the brief's list (conformance and UX reviews), so that a test fails if a member
+    computed as none ever hides the cover's ocean. The one flipped case: `the fixture's Titan` left
+    T43.h's no-row `it.each`, which the Titan's rows test replaces, and
+    `the fixture's Titan, its ocean computed as none` took its place, so the `it.each` keeps six
+    cases. The helpers `titanOcean()`, the fixture's Titan's member, which throws where it is
+    absent or `null` as `crustOf` does, and `airlessBrineMoon()`, on `titanWithNoOceanKey()`'s
+    surface with its air set as `airlessEarth` sets it, its temperature and ocean's figures
+    stand-ins and the fixture's Titan's other members kept. No other existing assertion changed;
+    the four cases that read a member's row fail on the base.
+  - _The lint._ The console-ux lint: 0 errors and 0 checks (it skips the test file).
+  - _Reviews._ TypeScript, UX and plan conformance: no must-fix and no should-fix.
+    - TypeScript: three considers, two applied (`subsurfaceOceanLiquid`'s summary no longer
+      calls a member not modelled one the generator states as none; `airlessBrineMoon`'s summary
+      no longer says it has no `subsurface_ocean` key), one not, since the brief asks for both
+      readings in one case (split the two oceans' test).
+    - UX: the fit measured from the bundled fonts' advance widths: `SUBSURFACE OCEAN` 10.81rem
+      inside the `fit-content(11.5rem)` track; in B612 Mono `NaCl BRINE` 91.0 px,
+      `NH3–H2O MIXTURE` 136.5 px and `UNLISTED MATERIAL` 154.7 px, against a value column of
+      about 177 px at 1280 × 720, so each sets on one line. Two considers, for main (deferred
+      below); the test the first asks for is added.
+    - Plan conformance: three considers applied (the `null` member beside the cover's ocean; the
+      `NONE` remark's source; the members `airlessBrineMoon` keeps). Its point for main is
+      deferred below.
+  - _Pending:_ the visual check at 1280 × 720, 1920 × 1080 and 1920 × 1080 at 150 %, main's at
+    landing.
+- **Deferred findings (2026-10-13 rule)**, from P14.T43.i:
+  - A `NONE` form for a moon whose member is `null` waits on P14.T51.g's sign-off, once every
+    body's member is computed; until then `null` adds no row (main's ruling).
+  - For main (UX review, consider): a regular moon in the `SNOWBALL` state may send
+    `subsurface_ocean: null`, from its tidal rule (`moons/regular.rs`'s `has_subsurface_ocean`),
+    beside the cover's appended ocean, from its heat flow and water (`hooks/figures/cover.rs`'s
+    `under_ice_ocean`), two rules apart; the row then reads the cover's `H2O` beside a member
+    computed as none, as the brief's rule 5 has it (rule 1 decides alone).
+  - For main (UX review, consider, on the signed wording): after the edit, the clause after the
+    colon lists what the row leaves out where it stands, not why its absence is not none; only a
+    regular moon carries the member, so a captured or giant-impact icy moon, or an icy planet,
+    reads no row and no note. The review's lean: T51.g's sign-off covers the not-modelled case
+    with `NONE`, and the sentence is revisited then.
+  - For main (plan conformance): the guide's "under a `SNOWBALL`'s ice or a regular moon's"
+    holds at 23, but from P14.T51.g every body's member is computed and the code reads it on any
+    state, so the sentence then lists fewer bodies than the row reads: T51.g's or T54.b's guide
+    pass.
+  - T43.h's _Lifespan_ names a "For 24" follow-up that reads `subsurface_ocean` under the row;
+    this task does it, so once P14.T53.c ends W3 (b) what remains is to retire `oceanUnderIce`
+    and `liquidsOnIce`: for a docs batch.
 - **Deviations in P14.T49.j, as built (`lane/34-p14-t49j-thermal-columns`, 2026-10-16).** The
   condensed phases' thermal columns and the airless regolith's thermal-inertia law, a pure module,
   `substance::thermal` (`substance/thermal.rs`; its rows in `substance/thermal/rows.rs`, its tests

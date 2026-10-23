@@ -11,6 +11,7 @@ import type {
   ResponseFor,
   SectionDto,
   SubstanceAreaDto,
+  SubsurfaceOceanDto,
   SurfaceCondensateDto,
 } from "@hyperion/protocol";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
@@ -303,6 +304,15 @@ function titanWithNoOceanKey(): BodySurfaceDto {
   return titan;
 }
 
+/** The ocean under the fixture's Titan's ice, as its `ok` surface section sends it. */
+function titanOcean(): SubsurfaceOceanDto {
+  const { subsurface_ocean: ocean } = surfaceOf(titanDetail());
+  if (ocean === undefined || ocean === null) {
+    throw new Error("the fixture's Titan sends its subsurface ocean");
+  }
+  return ocean;
+}
+
 /** LOOK72's `020e56ef60080003.0700`'s water ice, over its whole surface. */
 const ICE_0700: SurfaceCondensateDto = {
   substance: "H2O",
@@ -437,6 +447,42 @@ function snowball0703(): BodySurfaceDto {
       { substance: "CO2", area_fraction: 0.021968461594893355 },
     ],
     ice_fraction: 1,
+  };
+}
+
+/**
+ * A Europa-like airless icy moon, its whole surface under water ice and an ocean of NaCl brine
+ * under the ice, which its own `subsurface_ocean` states, on {@link titanWithNoOceanKey}'s surface,
+ * its air and its figures set as {@link airlessEarth} sets them (P14.T43.i).
+ *
+ * @remarks
+ * Its temperature and its ocean's figures are stand-ins: the readout reads the ocean's liquid
+ * alone. It keeps the fixture's Titan's crust, which reads, and its other members, its craters,
+ * climate regime and wet epoch among them, which the readout does not read. Its ice,
+ * {@link ICE_0700}, carries no trapped share, so its `COLD TRAPS` row stands.
+ */
+function airlessBrineMoon(): BodySurfaceDto {
+  return {
+    ...titanWithNoOceanKey(),
+    state: "airless",
+    mean_surface_temperature_k: 102,
+    surface_pressure_pa: 0,
+    gases: [],
+    mean_molar_mass_g_per_mol: null,
+    heat_capacity_over_r: null,
+    condensates: [ICE_0700],
+    surface_liquids: [],
+    ocean_fraction: 0,
+    surface_ices: [{ substance: "H2O", area_fraction: 1 }],
+    ice_fraction: 1,
+    subsurface_ocean: {
+      shell_thickness_m: 20000,
+      thickness_m: 100000,
+      floor: "rock",
+      liquid: "brine_nacl",
+      solute_mass_fraction: 0.05,
+      base_temperature_k: 270,
+    },
   };
 }
 
@@ -1257,7 +1303,10 @@ describe("SystemView's body readout", () => {
       "a Snowball whose condensates are not modelled",
       () => earthWithSurface(snowball0700OfAnOlderServer),
     ],
-    ["the fixture's Titan", () => earthWithSurface(() => surfaceOf(titanDetail()))],
+    [
+      "the fixture's Titan, its ocean computed as none",
+      () => earthWithSurface(() => ({ ...surfaceOf(titanDetail()), subsurface_ocean: null })),
+    ],
     ["the fixture's lava world", () => earthWithSurface(() => surfaceOf(lavaWorldDetail()))],
   ])("shows no SUBSURFACE OCEAN row for %s", async (_name, detail) => {
     const { user, socket } = renderView();
@@ -1287,6 +1336,98 @@ describe("SystemView's body readout", () => {
 
     expect(reading("LIQUID COVER")).toBe("NOT YET MODELLED");
     expect(reading("ICE COVER")).toBe("NOT YET MODELLED");
+  });
+
+  // P14.T43.i (decision-p14-t43h-review §4): the ocean the wire states, under any body's ice.
+  it("reads the ocean under the fixture's Titan's ice, which its wire states, last, as SUBSURFACE OCEAN", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => surfaceOf(titanDetail())),
+    );
+
+    expect(rowsBetween("SURFACE", "GENERATOR INPUTS")).toEqual([
+      ["SURFACE", "SNOWBALL"],
+      ["T SURF", "94 K"],
+      ["SURFACE PRESSURE", "147 kPa"],
+      ["MOLE FRACTION", partsReading("N2 94.4 %", "CH4 5.65 %")],
+      ["CRUST", "PRIMARY · H2O"],
+      ["MANTLE REDOX", "OXIDISED"],
+      ["MELT COVER", "NONE"],
+      ["LIQUID COVER", "CH4–C2H6–N2 MIXTURE 1.00\u00A0%"],
+      ["ICE COVER", partsReading("H2O 99.0 %")],
+      ["SUBSURFACE OCEAN", "H2O"],
+    ]);
+  });
+
+  it("reads an airless icy moon's brine ocean under its ice after its COLD TRAPS row", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthWithSurface(airlessBrineMoon));
+
+    expect(rowsBetween("SURFACE", "GENERATOR INPUTS")).toEqual([
+      ["SURFACE", "AIRLESS"],
+      ["T SURF", "102 K"],
+      ["SURFACE PRESSURE", "NONE"],
+      ["MOLE FRACTION", "NONE"],
+      ["EXOSPHERE", "NOT YET MODELLED"],
+      ["CRUST", "PRIMARY · H2O"],
+      ["MANTLE REDOX", "OXIDISED"],
+      ["MELT COVER", "NONE"],
+      ["LIQUID COVER", "NONE"],
+      ["ICE COVER", partsReading("H2O 100 %")],
+      ["COLD TRAPS", "NOT YET MODELLED"],
+      ["SUBSURFACE OCEAN", "NaCl BRINE"],
+    ]);
+  });
+
+  it("reads one SUBSURFACE OCEAN row, the wire's ocean's liquid, where a Snowball's cover holds an ocean under its ice too", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => ({
+        ...snowball0700(),
+        subsurface_ocean: { ...titanOcean(), liquid: "brine_nacl" },
+      })),
+    );
+
+    expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
+    expect(reading("SUBSURFACE OCEAN")).toBe("NaCl BRINE");
+    expect(reading("LIQUID COVER")).toBe("CH4–C2H6–N2 MIXTURE 97.3\u00A0% · N2\u00A02.72\u00A0%");
+  });
+
+  it("reads the ocean under a Snowball's ice from its cover where its wire computes its subsurface ocean as none", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // A member computed as none adds no row of its own: the cover's rule decides alone.
+    await answerDetail(
+      socket,
+      earthWithSurface(() => ({ ...snowball0700(), subsurface_ocean: null })),
+    );
+
+    expect(reading("SUBSURFACE OCEAN")).toBe("H2O");
+  });
+
+  it("names a subsurface ocean's liquid the console does not know as UNLISTED MATERIAL, never by its key", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => ({
+        ...surfaceOf(titanDetail()),
+        subsurface_ocean: { ...titanOcean(), liquid: "novel_liquid" },
+      })),
+    );
+
+    expect(reading("SUBSURFACE OCEAN")).toBe("UNLISTED MATERIAL");
+    expect(within(readout()).queryByText(/novel_/)).not.toBeInTheDocument();
   });
 
   it("names a crust and a cover the console does not know as UNLISTED MATERIAL, never by its key", async () => {

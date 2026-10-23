@@ -448,6 +448,27 @@ function liquidsOnIce(surface: BodySurface, ocean: SubstanceArea): ReadonlyArray
 }
 
 /**
+ * The liquid of the ocean under a body's ice, by its registry key, as `SUBSURFACE OCEAN` reads it,
+ * or `null` where neither the member nor the cover states one (plan 14, P14.T43.i;
+ * decision-p14-t43h-review §4): the liquid of {@link BodySurface.subsurfaceOcean} where it is a
+ * value, on any surface, else the substance of `ocean`, the ocean under a `snowball`'s ice
+ * ({@link oceanUnderIce}).
+ *
+ * @remarks
+ * The member is the generator's own statement of the ocean, not an item of the cover, so it stands
+ * whatever the condensates are, and its liquid is the one read where both are present. A member
+ * computed as none, or not modelled, adds no row of its own, and `ocean` decides alone: a `NONE`
+ * form waits on P14.T51.g's sign-off, once every body's member is computed
+ * (decision-p14-t43h-review).
+ */
+function subsurfaceOceanLiquid(surface: BodySurface, ocean: SubstanceArea | null): string | null {
+  if (surface.subsurfaceOcean.kind === "value") {
+    return surface.subsurfaceOcean.value.liquid;
+  }
+  return ocean === null ? null : ocean.substance;
+}
+
+/**
  * The rows of a surface section (plan 14, P14.T43.b, _Amended for T35.e_): its state in words under
  * the section's own name, so that `SURFACE` keeps its place whether the section is shown or stands
  * in; the mean surface temperature; the surface pressure; the air's gases by mole fraction; and then
@@ -494,11 +515,15 @@ function liquidsOnIce(surface: BodySurface, ocean: SubstanceArea): ReadonlyArray
  * of its liquids is the ocean under its ice ({@link oceanUnderIce}; plan 14, P14.T43.h), which
  * covers none of the surface. `LIQUID COVER` then reads the liquids on the ice alone, at their own
  * extents ({@link liquidsOnIce}), or `NONE`, and the ocean reads in a row of its own, the last of
- * the section's, `SUBSURFACE OCEAN`, its liquid named with no share (`SUBSURFACE OCEAN H2O`).
+ * the section's, `SUBSURFACE OCEAN`, its liquid named with no share (`SUBSURFACE OCEAN H2O`). The
+ * row also stands on any surface whose ocean under its ice the wire states, as a regular moon's
+ * ({@link BodySurface.subsurfaceOcean}, the wire's `subsurface_ocean`; P14.T43.i), and reads that
+ * ocean's liquid, the member's where both stand ({@link subsurfaceOceanLiquid}):
+ * `SUBSURFACE OCEAN NaCl BRINE`.
  *
  * The section's other members are on the wire and not yet read here: its material, climate regime
- * and global figures; a regular moon's ocean under its ice ({@link BodySurface.subsurfaceOcean},
- * the wire's `subsurface_ocean`); the crusts that do not lie at the surface and the crust's
+ * and global figures; the ocean's shell, depth, floor, solute fraction and base temperature
+ * ({@link BodySurface.subsurfaceOcean}); the crusts that do not lie at the surface and the crust's
  * provinces, which the view's `MATERIAL` reading names point by point once the terrain is served;
  * the mantle's redox figure ({@link CrustComposition.mantleRedoxIw}), which waits on a name the
  * guide does not have; and the condensates' own figures, their reservoirs, layers and seasons.
@@ -513,6 +538,7 @@ function surfaceRows(surface: BodySurface): ReactNode {
   const coverModelled = surface.condensates.kind !== "not_modelled";
   const ocean = oceanUnderIce(surface);
   const liquids = ocean === null ? surface.surfaceLiquids : liquidsOnIce(surface, ocean);
+  const oceanLiquid = subsurfaceOceanLiquid(surface, ocean);
   const notModelled = value(sectionStateLabel("not_modelled"));
   return (
     <>
@@ -552,10 +578,10 @@ function surfaceRows(surface: BodySurface): ReactNode {
       {surface.state === "airless" && !coldTrapsKnown(surface.condensates) ? (
         <ReadoutRow label="COLD TRAPS" shown={notModelled} wide />
       ) : null}
-      {ocean === null ? null : (
+      {oceanLiquid === null ? null : (
         <ReadoutRow
           label="SUBSURFACE OCEAN"
-          shown={value(substanceName(ocean.substance, "upper"))}
+          shown={value(substanceName(oceanLiquid, "upper"))}
           wide
         />
       )}
@@ -794,14 +820,14 @@ export interface BodyRecordReadingsProps {
  * where it lies; and, from the whole record only, its surface (its state, mean temperature,
  * pressure and gases, and, over a melt, its own vapour's state; then the crust at the surface, the
  * mantle's redox class, the melt's share of the surface, the liquids and ices that cover it by
- * substance and, beside them, an airless body's cold traps' state or the ocean under a Snowball's
- * ice), a gas-envelope body's envelope in the surface's place, read as its `ATMOSPHERE` (its
- * gases), and its hooks, whose detail seed is the one hook the wire carries, the em dash until the
- * server derives it. A section withheld or not modelled reads so, once, in place of its rows; one
- * that does not apply is left out. A server since P14.T35.e sends one of `surface` and `envelope`
- * as not applicable for every planet it resolves to the `surface` level, so the planet's air is
- * read from the other; an older server sends no envelope, which reads
- * `ATMOSPHERE NOT YET MODELLED`.
+ * substance and, beside them, an airless body's cold traps' state and the ocean under a body's ice,
+ * which on an airless moon follows the cold traps' state), a gas-envelope body's envelope in the
+ * surface's place, read as its `ATMOSPHERE` (its gases), and its hooks, whose detail seed is the
+ * one hook the wire carries, the em dash until the server derives it. A section withheld or not
+ * modelled reads so, once, in place of its rows; one that does not apply is left out. A server
+ * since P14.T35.e sends one of `surface` and `envelope` as not applicable for every planet it
+ * resolves to the `surface` level, so the planet's air is read from the other; an older server
+ * sends no envelope, which reads `ATMOSPHERE NOT YET MODELLED`.
  *
  * The distance is the one reading the display derives: from the server's elements at the display
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
