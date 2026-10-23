@@ -2243,28 +2243,29 @@ function bracketAbout(xPx: number, yPx: number): BoxPx {
   return bracketBoxPx({ id: "m", xPx, yPx, depth: 0, radiusPx: 6 }, 16, reticleStrokesCssPx(1));
 }
 
+/** A habitable zone 14 to 20 ly about the view centre, labelled at its outer rimward point. */
+const ZONE: AnnulusMark = {
+  id: "hz",
+  innerRadius: 14,
+  outerRadius: 20,
+  ticks: false,
+  label: "HABITABLE ZONE",
+};
+/** The zone's outer edge's rimward point, where the default camera draws it. */
+const RIMWARD = drawnAt(scale(FRAME.coreward, -20));
+/** The zone's label's first place: 0.5 rem right of the point, 0.25 rem below. */
+const FIRST: BoxPx = {
+  leftPx: RIMWARD.xPx + 8,
+  topPx: RIMWARD.yPx + 4,
+  widthPx: textSizeRem("HABITABLE ZONE", 0.1).widthRem * 16,
+  heightPx: 17.5,
+};
+
 describe("SpatialView's annulus labels, placed after the marks' (plan 14, P14.T42.d)", () => {
   beforeEach(() => {
     stubLayout(1200, 900);
   });
 
-  /** A habitable zone 14 to 20 ly about the view centre, labelled at its outer rimward point. */
-  const ZONE: AnnulusMark = {
-    id: "hz",
-    innerRadius: 14,
-    outerRadius: 20,
-    ticks: false,
-    label: "HABITABLE ZONE",
-  };
-  /** The zone's outer edge's rimward point, where the default camera draws it. */
-  const RIMWARD = drawnAt(scale(FRAME.coreward, -20));
-  /** The zone's label's first place: 0.5 rem right of the point, 0.25 rem below. */
-  const FIRST: BoxPx = {
-    leftPx: RIMWARD.xPx + 8,
-    topPx: RIMWARD.yPx + 4,
-    widthPx: textSizeRem("HABITABLE ZONE", 0.1).widthRem * 16,
-    heightPx: 17.5,
-  };
   it("draws a lesser mark's label over an annulus label's first place, which stands 0.5 rem off it", () => {
     // A mark 10 px left of and 12 px below the rimward point, clear of the zone's label's first
     // place by its symbol, its label `M` across that place: dropped for it before (D4).
@@ -2347,6 +2348,133 @@ describe("SpatialView's annulus labels, placed after the marks' (plan 14, P14.T4
 
     const zone = drawnBox("HABITABLE ZONE", 0.1);
     expect([across(FIRST) > 0, sameBox(zone, FIRST), across(zone)]).toEqual([true, false, 0]);
+  });
+});
+
+/** A label over the view, `null` where it is not drawn, as a lesser mark's may not be. */
+function labelOrNull(text: string): HTMLElement | null {
+  return screen.queryByText(
+    (_, element) => element instanceof HTMLSpanElement && element.textContent === text,
+  );
+}
+
+describe("SpatialView's selected annulus's label, placed as the selection's (plan 14, P14.T42.e)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  /**
+   * A selected annulus at the zone's place, unticked and labelled as a belt: the pass tells a belt
+   * from a zone by nothing but its flags.
+   */
+  const BELT: AnnulusMark = { ...ZONE, id: "belt", label: "BELT 1", selected: true };
+  /** The belt's label's first place, where the zone's starts. */
+  const BELT_FIRST: BoxPx = { ...FIRST, widthPx: textSizeRem("BELT 1", 0.1).widthRem * 16 };
+  /**
+   * A lesser mark 10 px left of and 12 px below the rimward point, as in T42.d's first test: its
+   * label `M` covers the first place, which its bracket's box stands 6 px left of.
+   */
+  const LESSER = aMark("m", { position: onPlaneAt(RIMWARD.xPx - 10, RIMWARD.yPx + 12) });
+  const LESSER_BRACKET = bracketAbout(RIMWARD.xPx - 10, RIMWARD.yPx + 12);
+
+  it("keeps a selected belt's label at its first place, where a lesser mark's label gives way", () => {
+    renderView({ scene: aScene({ points: [LESSER], annuli: [BELT] }) });
+
+    expect([
+      boxGapPx(BELT_FIRST, LESSER_BRACKET),
+      sameBox(drawnBox("BELT 1", 0.1), BELT_FIRST),
+      labelOrNull("M"),
+    ]).toEqual([expect.closeTo(6, 6), true, null]);
+  });
+
+  it("still draws a lesser mark's label over an unselected belt's first place, as T42.d built", () => {
+    renderView({ scene: aScene({ points: [LESSER], annuli: [{ ...BELT, selected: false }] }) });
+
+    const mark = drawnBox("M", 0);
+    const belt = annulusBox("BELT 1");
+    expect([boxGapPx(mark, BELT_FIRST), belt === null || boxGapPx(belt, mark) >= 8 - 1e-6]).toEqual(
+      [0, true],
+    );
+  });
+
+  it("keeps a selected belt's label at its first place, which a zone's label earlier in the scene would take", () => {
+    renderView({ scene: aScene({ points: [], annuli: [ZONE, BELT] }) });
+
+    const belt = drawnBox("BELT 1", 0.1);
+    const zone = annulusBox("HABITABLE ZONE");
+    expect([
+      boxGapPx(FIRST, BELT_FIRST),
+      sameBox(belt, BELT_FIRST),
+      zone === null || boxGapPx(zone, belt) >= 8 - 1e-6,
+    ]).toEqual([0, true, true]);
+  });
+
+  it("leaves out a selected belt's label whose every place stands within 0.25 rem of a mark's bracket's box", () => {
+    // A belt 0.1 to 0.3 ly about a mark, within 2.6 px of its centre on the screen: every place
+    // beside its outer edge, 0.5 rem to one side and 0.25 rem above or below, starts inside the
+    // mark's bracket's box, 12 px about its centre. The mark's own label stands beside it.
+    const at = onPlaneAt(800, 300);
+    renderView({
+      scene: aScene({
+        points: [aMark("m", { position: at })],
+        annuli: [{ ...BELT, centre: at, innerRadius: 0.1, outerRadius: 0.3 }],
+      }),
+    });
+
+    expect([annulusBox("BELT 1"), overlayLabel("M").textContent]).toEqual([null, "M"]);
+  });
+
+  it("places a selected belt's scattered disc's label with the belt's, before the marks' labels", () => {
+    // The belt 5 to 10 ly, labelled at its spinward point, and its scattered disc at the zone's
+    // place, both selected, as `populationAnnuli` gives them: the lesser mark's label covers the
+    // disc's first place, which `HABITABLE ZONE`'s length makes `FIRST`.
+    const belt: AnnulusMark = {
+      id: "belt",
+      innerRadius: 5,
+      outerRadius: 10,
+      ticks: false,
+      label: "BELT 1",
+      labelSpinward: true,
+      selected: true,
+    };
+    const disc: AnnulusMark = {
+      ...ZONE,
+      id: "belt:scattered",
+      label: "SCATTERED DISC",
+      selected: true,
+    };
+    renderView({ scene: aScene({ points: [LESSER], annuli: [belt, disc] }) });
+
+    // The belt's label, placed before it in the scene's order, stands 0.5 rem off it.
+    const placed = drawnBox("SCATTERED DISC", 0.1);
+    const beltLabel = annulusBox("BELT 1");
+    expect([
+      sameBox(placed, FIRST),
+      labelOrNull("M"),
+      beltLabel === null || boxGapPx(beltLabel, placed) >= 8 - 1e-6,
+    ]).toEqual([true, null, true]);
+  });
+
+  it("keeps a selected belt's label 0.5 rem from a curve label placed before it", () => {
+    // A belt 15 to 20 ly about a point 40 ly coreward, whose outer edge's rimward point is the
+    // plane ring's coreward point: the ring's label, placed first, stands at the belt's first place.
+    const centre = scale(FRAME.coreward, 40);
+    const point = drawnAt(scale(FRAME.coreward, 20));
+    const beltFirst: BoxPx = { ...BELT_FIRST, leftPx: point.xPx + 8, topPx: point.yPx + 4 };
+    renderView({
+      scene: aScene({
+        points: [],
+        plane: { spacing: 20, extent: 50, rings: [{ radius: 20, label: "PLANE 20 ly" }] },
+        annuli: [{ ...BELT, centre, innerRadius: 15, outerRadius: 20 }],
+      }),
+    });
+
+    const ring = drawnBox("PLANE 20 ly", 0.1);
+    const belt = annulusBox("BELT 1");
+    expect([sameBox(ring, beltFirst), belt === null || boxGapPx(belt, ring) >= 8 - 1e-6]).toEqual([
+      true,
+      true,
+    ]);
   });
 });
 

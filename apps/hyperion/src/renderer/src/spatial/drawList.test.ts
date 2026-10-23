@@ -1113,6 +1113,36 @@ describe("buildDrawList annuli", () => {
     ]);
   });
 
+  it("flags a selected annulus's label alone as the selection's (plan 14, P14.T42.e)", () => {
+    const scene = sceneOf([], {
+      spheres: [{ radius: 50, role: "data_edge", label: "QUERY EDGE 50 AU" }],
+      plane: { spacing: 20, extent: 50, rings: [{ radius: 20, label: "20 AU" }] },
+      annuli: [
+        annulus("hz", 10, 20, { label: "HABITABLE ZONE", selected: false }),
+        annulus("belt", 25, 30, { label: "BELT 1", ticks: true, selected: true }),
+      ],
+      paths: [path("b", tiltedCircle(10, 0), { label: "b", labelAt: local(0, 10, 0) })],
+      observer: { position: local(5, 5, 0), label: "OBSERVER" },
+    });
+
+    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
+
+    expect(
+      curveLabels.map((label) => [
+        label.key,
+        label.placement === "ring" && label.yieldsToMarks === true,
+        "selected" in label ? label.selected : "absent",
+      ]),
+    ).toEqual([
+      ["sphere:0:0", false, "absent"],
+      ["ring:0", false, "absent"],
+      ["annulus:hz", true, "absent"],
+      ["annulus:belt", true, true],
+      ["path:b", false, "absent"],
+      ["observer", false, "absent"],
+    ]);
+  });
+
   it("gives an annulus's label the points along its outer edge either way from its rimward point (R07.T16.j)", () => {
     const scene = bareScene({ annuli: [annulus("hz", 10, 20, { label: "HABITABLE ZONE" })] });
 

@@ -27,7 +27,13 @@ import {
 import { StatusText } from "../components/StatusText";
 import { AxisTriad } from "./AxisTriad";
 import { AXIS_FALLBACK_MESSAGE, CoreArrow } from "./CoreArrow";
-import { buildDrawList, observerBoxPx, type ScreenPoint } from "./drawList";
+import {
+  buildDrawList,
+  type CurveLabel,
+  observerBoxPx,
+  type RingLabel,
+  type ScreenPoint,
+} from "./drawList";
 import { FrameReading } from "./FrameReading";
 import {
   type BoxPx,
@@ -128,6 +134,11 @@ function Figures({ text }: FiguresProps) {
 /** A `transform` that moves an element from the top left to a point given in `rem`. */
 function translateRem(leftRem: number, topRem: number): string {
   return `translate(${leftRem}rem, ${topRem}rem)`;
+}
+
+/** Whether a curve label is an annulus's, placed by `placeAnnulusLabels` (plan 14, P14.T42.d). */
+function isAnnulusLabel(label: CurveLabel): label is RingLabel {
+  return label.placement === "ring" && label.yieldsToMarks === true;
 }
 
 /** The preset a letter key chooses, `T`, `S`, `F` or `O`, or `null` for any other key. */
@@ -420,10 +431,39 @@ export function SpatialView({
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
       : placeCurveLabels(drawList.curveLabels, viewport, furniture, marksInks);
+  // The annuli's labels, and what both of their passes measure for them, once: every mark's
+  // bracket's box, which they keep 0.25 rem outside, and the curves, which they prefer a place clear
+  // of. A view that labels no annulus, as the star chart, measures neither (plan 14, P14.T42.d,
+  // T42.e).
+  const annuli =
+    drawList === null || viewport === null || triadBox === null || coreArrow === null
+      ? []
+      : drawList.curveLabels.filter(isAnnulusLabel);
+  const annulusInks =
+    drawList === null || viewport === null || annuli.length === 0
+      ? null
+      : {
+          marks: marksInks,
+          brackets: drawList.anchors.map((anchor) => bracketBoxPx(anchor, viewport.remPx, strokes)),
+          curves: curveInksPx(drawList.ops, pixelRatio),
+        };
+  // A selected belt's, ring's or halo's label is the selection's: placed next, before the marks'
+  // labels, which give way to it, by the annuli's rules, 0.5 rem from what stands before it, 0.25 rem
+  // outside every mark's bracket's box and preferring a place no curve crosses, or not drawn, with
+  // no last resort, as the selection's label has none (plan 14, P14.T42.e). A scene that selects an
+  // annulus selects no mark, so the two never compete.
+  const selectedAnnuli = annuli.filter((label) => label.selected === true);
+  const selectedAnnulusLabels =
+    viewport === null || annulusInks === null || selectedAnnuli.length === 0
+      ? []
+      : placeAnnulusLabels(selectedAnnuli, viewport, {
+          standing: [...furniture, ...curveLabels],
+          ...annulusInks,
+        });
   // Marks' labels, placed after those, keep off the core arrow and 0.5 rem from the other text:
-  // the triad, the core arrow's label and those curve labels
-  // (decision-r07-quality-and-destination, addendum D, D4; R07.T16.j); in observed mode they keep
-  // off the observer's eye too (plan 12, P12.T11.c).
+  // the triad, the core arrow's label, those curve labels and a selected annulus's
+  // (decision-r07-quality-and-destination, addendum D, D4; R07.T16.j; plan 14, P14.T42.e); in
+  // observed mode they keep off the observer's eye too (plan 12, P12.T11.c).
   const coreLabel = coreArrow === null || coreArrow.kind === "undefined" ? [] : [coreArrow.label];
   const markLabels =
     drawList === null ||
@@ -437,28 +477,20 @@ export function SpatialView({
           obstacles: coreArrowBoxes(coreArrow, viewport.remPx).filter(
             (box) => !coreLabel.includes(box),
           ),
-          texts: [triadBox, ...coreLabel, ...curveLabels],
+          texts: [triadBox, ...coreLabel, ...curveLabels, ...selectedAnnulusLabels],
           unselectedIds,
           observer: observerBoxPx(scene, camera, viewport),
         });
-  // The annuli's labels, placed last, give way to every body's: 0.5 rem from everything placed,
-  // 0.25 rem outside every mark's bracket's box, preferring a place no curve crosses, or not drawn
-  // (plan 14, P14.T42.d). A view that labels no annulus, as the star chart, measures nothing for
-  // them.
+  // The other annuli's labels, placed last, give way to every body's and to a selected annulus's:
+  // 0.5 rem from everything placed, 0.25 rem outside every mark's bracket's box, preferring a place
+  // no curve crosses, or not drawn (plan 14, P14.T42.d); the zones' first, in the scene's order.
+  const otherAnnuli = annuli.filter((label) => label.selected !== true);
   const annulusLabels =
-    drawList === null ||
-    viewport === null ||
-    triadBox === null ||
-    coreArrow === null ||
-    !drawList.curveLabels.some(
-      (label) => label.placement === "ring" && label.yieldsToMarks === true,
-    )
+    viewport === null || annulusInks === null || otherAnnuli.length === 0
       ? []
-      : placeAnnulusLabels(drawList.curveLabels, viewport, {
-          standing: [...furniture, ...curveLabels, ...markLabels],
-          marks: marksInks,
-          brackets: drawList.anchors.map((anchor) => bracketBoxPx(anchor, viewport.remPx, strokes)),
-          curves: curveInksPx(drawList.ops, pixelRatio),
+      : placeAnnulusLabels(otherAnnuli, viewport, {
+          standing: [...furniture, ...curveLabels, ...selectedAnnulusLabels, ...markLabels],
+          ...annulusInks,
         });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -602,7 +634,7 @@ export function SpatialView({
           <div className="spatial-view__labels" aria-hidden="true">
             {viewport === null
               ? null
-              : [...curveLabels, ...annulusLabels].map((label) => (
+              : [...curveLabels, ...selectedAnnulusLabels, ...annulusLabels].map((label) => (
                   <span
                     key={label.key}
                     className="spatial-label spatial-label--curve"
