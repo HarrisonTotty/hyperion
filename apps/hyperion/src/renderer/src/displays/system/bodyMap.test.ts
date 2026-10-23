@@ -227,8 +227,8 @@ describe("zoneAnnuli", () => {
         annulus.edgeTicks === true,
       ]),
     ).toEqual([
-      ["SNOW LINE", 337_938_907_867.118_65, 337_938_907_867.118_65, false, false],
       ["HABITABLE ZONE", 148_000_000_000, 253_000_000_000, false, false],
+      ["SNOW LINE", 337_938_907_867.118_65, 337_938_907_867.118_65, false, false],
       ["OPTIMISTIC", 112_000_000_000, 265_000_000_000, false, true],
     ]);
   });
@@ -257,9 +257,10 @@ describe("zoneAnnuli", () => {
     }
     const { bodies, layout } = built({ ...slice, zones: [{ ...zone, outer_m: 4e12 }] });
 
+    // The habitable zone first, whose label is placed first (P14.T42.d).
     expect(
       zoneAnnuli(bodies.zones, FIXTURE_SYSTEM, layout, TIME, ALL_ZONE_LAYERS).map((a) => a.label),
-    ).toEqual(["STABLE ZONE", "SNOW LINE", "HABITABLE ZONE", "OPTIMISTIC"]);
+    ).toEqual(["HABITABLE ZONE", "STABLE ZONE", "SNOW LINE", "OPTIMISTIC"]);
     expect(
       zoneAnnuli(bodies.zones, FIXTURE_SYSTEM, layout, TIME, {
         ...ALL_ZONE_LAYERS,
@@ -271,7 +272,7 @@ describe("zoneAnnuli", () => {
         ...ALL_ZONE_LAYERS,
         optimistic: false,
       }).map((a) => a.label),
-    ).toEqual(["STABLE ZONE", "SNOW LINE", "HABITABLE ZONE"]);
+    ).toEqual(["HABITABLE ZONE", "STABLE ZONE", "SNOW LINE"]);
   });
 
   it("draws no habitable zone about a host with no light", () => {
@@ -528,8 +529,8 @@ describe("orbitScene with bodies", () => {
       FIXTURE_EARTH,
     ]);
     expect(scene.annuli?.map((annulus) => annulus.label)).toEqual([
-      "SNOW LINE",
       "HABITABLE ZONE",
+      "SNOW LINE",
       "OPTIMISTIC",
     ]);
   });

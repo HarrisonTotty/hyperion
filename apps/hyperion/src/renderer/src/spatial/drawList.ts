@@ -220,6 +220,13 @@ export interface RingLabel extends CurveLabelBase {
    * when absent.
    */
   readonly clearOfPointPx?: number;
+  /**
+   * Whether the label is an annulus's, which gives way to the marks' labels: it is placed after
+   * them, 0.5 rem clear of every label, 0.25 rem outside every mark's bracket's box, and is not
+   * drawn where it has no such place (plan 14, P14.T42.d; `placeAnnulusLabels`). Only an annulus's
+   * label has it; a plane ring's, a path's and the observer's do not.
+   */
+  readonly yieldsToMarks?: true;
 }
 
 /** Where to put the DOM label of a sphere, a ring, an annulus or a path. */
@@ -785,8 +792,8 @@ function ringLabels(
 
 /**
  * The labels of the annuli, each at its outer edge's rimward point, or its spinward point where it
- * asks, away from the rings' labels at their coreward points; then those of the paths, each at its
- * anchor.
+ * asks, away from the rings' labels at their coreward points, and each giving way to the marks'
+ * labels (`yieldsToMarks`; plan 14, P14.T42.d); then those of the paths, each at its anchor.
  */
 function markCurveLabels(
   scene: SpatialScene,
@@ -811,6 +818,7 @@ function markCurveLabels(
       yPx: at.yPx,
       stack: 0,
       alongPx: ringPointsPx(band, annulus.outerRadius, fromDeg, toScreen),
+      yieldsToMarks: true,
     });
   }
   for (const path of scene.paths ?? []) {

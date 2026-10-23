@@ -181,6 +181,22 @@ function bracketDrawnPx(anchor: Anchor, remPx: number, reticles: ReticleStrokesC
 }
 
 /**
+ * The box of the selection's bracket's place about a mark, CSS px: the bracket as `paint` draws it,
+ * moved out by four times the outline shift, to its line's outer edge, half the mark stroke beyond,
+ * whether or not the mark is selected.
+ *
+ * @remarks
+ * A label held inside the view about a mark out of it stands {@link LABEL_TEXT_CLEARANCE_REM}
+ * outside it (plan 12, P12.T11.e), and so does an annulus's label about every mark (plan 14,
+ * P14.T42.d), where a mark's own label starts.
+ *
+ * @param reticles - The marks' strokes at the display's ratio, CSS px (`reticleStrokesCssPx`).
+ */
+export function bracketBoxPx(anchor: Anchor, remPx: number, reticles: ReticleStrokesCss): BoxPx {
+  return squareBoxPx(anchor, bracketDrawnPx(anchor, remPx, reticles) + reticles.markStrokePx / 2);
+}
+
+/**
  * How far from its mark's centre a label's box starts, CSS px: `LABEL_TEXT_CLEARANCE_REM` beyond
  * the outer edge, the line and half the mark stroke, of the selection's bracket, moved out by four
  * times the outline shift, whether or not the mark is selected or the destination
@@ -301,10 +317,7 @@ function clearOfItsBracket(
   viewport: Viewport,
   reticles: ReticleStrokesCss,
 ): boolean {
-  const bracket = squareBoxPx(
-    anchor,
-    bracketDrawnPx(anchor, viewport.remPx, reticles) + reticles.markStrokePx / 2,
-  );
+  const bracket = bracketBoxPx(anchor, viewport.remPx, reticles);
   return boxGapPx(label, bracket) > LABEL_TEXT_CLEARANCE_REM * viewport.remPx - 1e-9;
 }
 
@@ -360,9 +373,7 @@ function destinationLabel(
   const neighbours = [
     ...anchors
       .filter((other) => other.id !== anchor.id)
-      .map((other) =>
-        squareBoxPx(other, bracketDrawnPx(other, remPx, reticles) + reticles.markStrokePx / 2),
-      ),
+      .map((other) => bracketBoxPx(other, remPx, reticles)),
     ...others,
     ...texts,
   ];
