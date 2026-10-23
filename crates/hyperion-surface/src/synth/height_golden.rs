@@ -80,8 +80,8 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::channels::{
     ChannelBody, ChannelNetwork, MINIMUM_SLOPE, Outlet, Segment, bankfull_depth, bankfull_width,
-    channel_head_area, channel_structure_function, channel_variance, deepest_level, hack_area,
-    head_length, main_stream_length, tributary_rise, valley_depth,
+    channel_head_area, channel_structure_function, channel_variance, deepest_level, epoch_valley,
+    hack_area, head_length, main_stream_length, tributary_rise, valley_depth,
 };
 use super::craters::rims::{coarse_band_half_width, kept_relief, rims_structure_function};
 use super::craters::{CraterCache, CraterOctave, SmallCrater, SmallCraters};
@@ -274,8 +274,8 @@ fn spread_craters(field: &CoarseField, count: usize) -> Vec<usize> {
 }
 
 /// Up to `count` of `field`'s coarse cells whose channels reach L + 4 or deeper (failing `count`
-/// of those, any finer level), the first on a face edge if one is, the rest spread through
-/// cell-index order.
+/// of those, any finer level, or on a world dry now a trunk that cuts its epoch's valley,
+/// R09.T6.c's), the first on a face edge if one is, the rest spread through cell-index order.
 fn channelled_cells(field: &CoarseField, count: usize) -> Vec<PatchKey> {
     let header = field.header();
     let level = header.level().get();
@@ -287,7 +287,11 @@ fn channelled_cells(field: &CoarseField, count: usize) -> Vec<PatchKey> {
                 deepest_level(field.cell(c).expect("a whole field"), body),
             )
         })
-        .filter(|&(_, deepest)| deepest > level)
+        .filter(|&(c, deepest)| {
+            deepest > level
+                || epoch_valley(field.cell(c).expect("a whole field"), body)
+                    .is_some_and(|valley| valley.depth().value() > 0.0)
+        })
         .collect();
     let deep: Vec<PatchKey> = all
         .iter()

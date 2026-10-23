@@ -23,7 +23,8 @@
 //!   runoffs times the cells' areas accumulated over that routing, over its drainage area
 //!   (Hergarten 2021, eq. 20), zero where that is zero.
 //! - **The channel incision** ([`CellState::channel_incision`]): on a world dry now, z0 less the
-//!   solve, before any closure (decision-r09-t14-choices F2); zero elsewhere.
+//!   solve, before any closure (decision-r09-t14-choices F2), zero inside a waiting crater's rim
+//!   (R09.T6.c); zero elsewhere.
 //! - **The marker** [`Working::routed`], which the re-routing after the late craters reads.
 //!
 //! # The final field ([`finish`], Q7's steps 2–7)

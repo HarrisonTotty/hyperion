@@ -246,7 +246,7 @@ fn assert_structural_share(world: Reference) {
     let local = local_variance(&f.working.spectrum, f.pass().level()).value();
     let before = f.matched.before;
     let ratio = before.structural_m2 / (before.amplitude_square * local);
-    let belted = budget::records(&f.working).any(|r| ReliefStyle::of(&r).belt() > 0.0);
+    let belted = budget::records(f.inputs(), &f.working).any(|r| ReliefStyle::of(&r).belt() > 0.0);
     assert_eq!(belted, world == Reference::Earth, "{world:?}");
     if belted {
         assert!((1.0..=1.15).contains(&ratio), "{world:?}: {ratio}");
@@ -882,7 +882,7 @@ fn the_reference_earth_holds_r09_t12e_s_tests() {
     print_sea(world, f);
     assert_the_sea_holds(f.grid(), f.inputs(), &f.working, &f.field, &f.sea);
     assert_earth_hypsometry();
-    let records: Vec<SynthesisCell> = budget::records(&f.working).collect();
+    let records: Vec<SynthesisCell> = budget::records(f.inputs(), &f.working).collect();
     let b: Vec<f64> = records.iter().map(|r| ReliefStyle::of(r).belt()).collect();
     let lift = crater_lift(f, &f.working.craters, Phase::AfterErosion);
     for values in [lift, b] {
@@ -1638,7 +1638,7 @@ fn uniform_reads(grid: &CellGraph, values: &[f64], every: u32) -> u32 {
 fn the_uniform_cells_are_read_as_the_interpolant_gives_them() {
     for world in [Reference::Moon, Reference::Ceres] {
         let f = finished(world);
-        let records: Vec<SynthesisCell> = budget::records(&f.working).collect();
+        let records: Vec<SynthesisCell> = budget::records(f.inputs(), &f.working).collect();
         let a: Vec<f64> = records
             .iter()
             .map(|r| ReliefStyle::of(r).amplitude())
@@ -1650,7 +1650,7 @@ fn the_uniform_cells_are_read_as_the_interpolant_gives_them() {
         }
     }
     let f = finished(Reference::Mars);
-    let records: Vec<SynthesisCell> = budget::records(&f.working).collect();
+    let records: Vec<SynthesisCell> = budget::records(f.inputs(), &f.working).collect();
     let a: Vec<f64> = records
         .iter()
         .map(|r| ReliefStyle::of(r).amplitude())

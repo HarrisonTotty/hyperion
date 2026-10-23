@@ -18,9 +18,9 @@ use super::DecodeBlockError;
 use crate::craters::{CraterParams, CraterParamsParts, CraterTarget, Screening, TargetClass};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, Crust, FieldHeaderParts, FlowDirection,
-    LIQUID_BINS, LiquidBasis, LiquidProperties, LogArea, LogPrecipitation, LogRunoff, LogSteepness,
-    MaterialPalette, MechanicsFamily, Morphology, PaletteEntry, PaletteRole, PrecipitationSource,
-    SurfaceClass, SynthesisCell, Wind,
+    LIQUID_BINS, LiquidBasis, LiquidProperties, LogArea, LogIncision, LogPrecipitation, LogRunoff,
+    LogSteepness, MaterialPalette, MechanicsFamily, Morphology, PaletteEntry, PaletteRole,
+    PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
 };
 use crate::spheroid::Spheroid;
 use crate::substance_key::SubstanceKey;
@@ -66,8 +66,9 @@ macro_rules! wire_table {
     };
 }
 
-// One cell's synthesis record (Design note 17's 21 bytes, the two runoff bytes, which follow the
-// steepness, the substance byte and the sea floor's), in its declared order.
+// One cell's synthesis record (Design note 17's 21 bytes, the two runoff bytes and the epoch
+// incision's, which follow the steepness, the substance byte and the sea floor's), in its declared
+// order.
 wire_table!(fixed SynthesisCell {
     elevation_mm: i32,
     boundary_distance_km: i16,
@@ -80,6 +81,7 @@ wire_table!(fixed SynthesisCell {
     steepness: LogSteepness,
     runoff: LogRunoff,
     catchment_runoff: LogRunoff,
+    epoch_incision: LogIncision,
     water_surface_mm: i32,
     ice: u8,
     substances: u8,
@@ -336,6 +338,7 @@ wire_scaled!(
     LogArea: u16,
     LogSteepness: u8,
     LogRunoff: u8,
+    LogIncision: u8,
     LogPrecipitation: u8,
     SurfaceClass: u8
 );
@@ -608,16 +611,17 @@ mod tests {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// The records' strides are Design note 17's: 25 bytes a synthesis record (its 21, the
-    /// substance byte, the sea floor's and the two runoff bytes) and 50 a climate record; the
-    /// header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field added to any moves them,
-    /// and the payload's size with them. A palette entry is 61 to 466 bytes: 61 with neither a
-    /// liquid record nor an `FeO_T`, 69 with an `FeO_T` alone, and 202 to 466 with a record
-    /// (decision-r11-palette-liquids §1.5; decision-p14-t51d-weathering §1.6).
+    /// The records' strides are Design note 17's: 26 bytes a synthesis record (its 21, the
+    /// substance byte, the sea floor's, the two runoff bytes and the epoch incision's) and 50 a
+    /// climate record; the header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field
+    /// added to any moves them, and the payload's size with them. A palette entry is 61 to 466
+    /// bytes: 61 with neither a liquid record nor an `FeO_T`, 69 with an `FeO_T` alone, and 202 to
+    /// 466 with a record (decision-r11-palette-liquids §1.5; decision-p14-t51d-weathering §1.6).
     #[test]
     fn wire_records_have_design_note_seventeens_strides() {
-        assert_eq!(SynthesisCell::BYTES, 25);
+        assert_eq!(SynthesisCell::BYTES, 26);
         assert_eq!(LogRunoff::BYTES, 1);
+        assert_eq!(LogIncision::BYTES, 1);
         assert_eq!(BandSpectrum::BYTES, 32);
         assert_eq!(ClimateCell::BYTES, 50);
         assert_eq!(Wind::BYTES, 2);

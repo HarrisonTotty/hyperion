@@ -54,9 +54,24 @@
 //!   coarse cells' edges, so the coarse drainage areas hold for the trunks, not for every
 //!   tributary's water.
 //!
-//! A coarse cell carries tributaries only where it is dry, has a channel (a flow direction and a
-//! steepness index above zero) and sheds runoff of its own. A key point that is inherited heads no
-//! segment of its own, and nor does one that lies on the segment it would join.
+//! A coarse cell carries tributaries only where it is dry, has a channel (a flow direction, a
+//! steepness index above zero and a catchment that sheds runoff) and sheds runoff of its own, and
+//! is not a world dry now's (below). A key point that is inherited heads no segment of its own, and
+//! nor does one that lies on the segment it would join. A coarse cell no water reaches, its
+//! catchment shedding none, heads no trunk.
+//!
+//! # A world dry now
+//!
+//! A world whose wet epoch ended carries each cell's channel incision from that epoch
+//! ([`SynthesisCell::epoch_incision`]; R09.T6.c, decision-r09-t14-choices F2). There the network
+//! is its trunks alone: each cuts the epoch's valley ([`EpochValley`]), no deeper than its
+//! incision, ten times as wide as deep (each wall 5:1), its floor its bankfull channel, and no
+//! sub-cell tributary is drawn, so
+//! that a short epoch's valleys are the coarse pass's own channels and the upland between them
+//! stays undissected (main's ruling for T6.c, option A). A world wet now or never wet carries no
+//! epoch's code and keeps the steady state as T6.b builds it, to the bit wherever every channelled
+//! cell's catchment sheds runoff; where one's does not, it heads no trunk, a join target the less
+//! for its neighbours' tributaries.
 //!
 //! # Profiles
 //!
@@ -151,10 +166,11 @@ use crate::tags::SURFACE_CHANNEL;
 pub mod incision;
 
 pub use incision::{
-    CHANNEL_HEAD_AREA, CUT_WIDTH, ChannelBody, DEBRIS_FLOW_SLOPE, MEAN_SAMPLES,
+    CHANNEL_HEAD_AREA, CUT_WIDTH, ChannelBody, DEBRIS_FLOW_SLOPE, EpochValley, MEAN_SAMPLES,
     MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE, TRIBUTARY_VARIANCE_SHARE,
-    VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WHOLE_VARIANCE_SHARE, channel_head_area,
-    channel_structure_function, channel_variance, deepest_level, valley_depth,
+    VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WALL_RUN_PER_DEPTH, WHOLE_VARIANCE_SHARE,
+    channel_head_area, channel_structure_function, channel_variance, deepest_level, epoch_valley,
+    valley_depth,
 };
 pub(crate) use incision::{ChannelCache, unresolved_channel_variance};
 
@@ -649,11 +665,16 @@ fn read<F: FieldView>(field: &F, cell: PatchKey) -> Result<&SynthesisCell, ReadC
     field.cell(cell).ok_or(ReadCellError { cell })
 }
 
-/// Whether a coarse cell has channels below it: it is dry, its water goes somewhere, and it has a
-/// channel steepness above zero.
+/// Whether a coarse cell has channels below it: it is dry, its water goes somewhere, it has a
+/// channel steepness above zero, and water reaches it, its catchment shedding runoff, so that a
+/// headwater cell with no water of its own or from upstream (inside a late crater's rim on a world
+/// dry now) carries none (decision-r09-t14-choices, "T14.d follow-up" C; R09.T6.c).
 #[must_use]
 fn has_channels(cell: &SynthesisCell) -> bool {
-    cell.flow.edge().is_some() && cell.steepness != LogSteepness::ZERO && !cell.is_under_water()
+    cell.flow.edge().is_some()
+        && cell.steepness != LogSteepness::ZERO
+        && !cell.is_under_water()
+        && cell.catchment_runoff != LogRunoff::NONE
 }
 
 /// The steepness index of a coarse cell's tributaries, m^0.9 ([`tributary_steepness_m0_9`]), or `None`
@@ -799,14 +820,17 @@ pub enum Outlet {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Kind {
     /// A trunk: its receiver, its crossing's parameter and spheroid point (metres), the coarse
-    /// cell's drainage area along it, square metres, and its valley's depth, metres
-    /// ([`valley_depth`]); its bed runs straight between its ends.
+    /// cell's drainage area along it, square metres, its valley's depth, metres ([`valley_depth`],
+    /// or on a world dry now the epoch's valley's, [`EpochValley`]'s G), and on a world dry now
+    /// that valley's wall width, metres (`None` for T6.b's steady state); its bed runs straight
+    /// between its ends.
     Trunk {
         receiver: PatchKey,
         exit: f64,
         crossing_m: [f64; 3],
         area_m2: f64,
         valley_m: f64,
+        epoch_wall_m: Option<f64>,
     },
     /// A tributary: the cell heading the segment it joins and the parameter there, its steepness
     /// index (m^0.9, [`tributary_steepness_m0_9`]), the main stream's length above its key point and
@@ -1045,7 +1069,8 @@ impl Segment {
     }
 
     /// How far its bed lies below its trunk's valley top at parameter `t`, metres: the trunk's
-    /// valley depth along a trunk ([`valley_depth`]), and along a tributary the inherited top less
+    /// valley depth along a trunk ([`valley_depth`], or on a world dry now the epoch's valley's
+    /// depth, [`EpochValley`]), and along a tributary the inherited top less
     /// its bed there, which falls upstream as the bed rises and is below zero where the channel
     /// has risen above the top (see [`Channels::incision_at`]).
     ///
@@ -1494,12 +1519,16 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         Ok(segment)
     }
 
-    /// The trunk of coarse cell `coarse`, from its key point to its receiver's.
+    /// The trunk of coarse cell `coarse`, from its key point to its receiver's; none where its
+    /// flow is terminal or no water reaches it, its catchment shedding none (R09.T6.c).
     fn trunk(&mut self, coarse: PatchKey) -> Result<Option<Segment>, ReadCellError> {
         let own = read(self.field, coarse)?;
         let Some(edge) = own.flow.edge() else {
             return Ok(None);
         };
+        if own.catchment_runoff == LogRunoff::NONE {
+            return Ok(None);
+        }
         let receiver = coarse.edge_neighbour(edge);
         let into = read(self.field, receiver)?;
         let from = self.key_point(coarse).dir();
@@ -1516,10 +1545,20 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
             self.channels.gravity,
         );
         // The relief its tributaries cut, from its cell's channel heads down to it; none where
-        // the cell carries no tributaries.
-        let valley_m = tributary_steepness_of(own).map_or(0.0, |k| {
-            valley_depth(k, self.channels.radius, coarse.level()).value()
-        });
+        // the cell carries no tributaries. On a world dry now, the epoch's valley instead
+        // (R09.T6.c): no deeper than its incision, ten times as wide as deep.
+        let (valley_m, epoch_wall_m) = if own.epoch_incision.is_epoch() {
+            let epoch = epoch_valley(own, self.channels.body())
+                .expect("a dry-now cell with a receiver and water has its epoch's valley");
+            (epoch.depth().value(), Some(epoch.wall().value()))
+        } else {
+            (
+                tributary_steepness_of(own).map_or(0.0, |k| {
+                    valley_depth(k, self.channels.radius, coarse.level()).value()
+                }),
+                None,
+            )
+        };
         Ok(Some(Segment {
             cell: coarse,
             from_m,
@@ -1535,6 +1574,7 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 crossing_m,
                 area_m2: area.value(),
                 valley_m: num::assert_finite(valley_m),
+                epoch_wall_m,
             },
         }))
     }
@@ -1547,6 +1587,11 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         let Some(steepness) = tributary_steepness_of(&own) else {
             return Ok(None);
         };
+        // A world dry now's epoch cut its trunks alone: its level cut is the coarse level
+        // (R09.T6.c; [`EpochValley`]).
+        if own.epoch_incision.is_epoch() {
+            return Ok(None);
+        }
         if self.is_inherited(cell) {
             return Ok(None);
         }

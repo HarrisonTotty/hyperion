@@ -98,7 +98,7 @@ mod palette;
 mod partial;
 
 pub use cells::{
-    BoundaryKind, ClimateCell, Crust, DecodeFieldCodeError, FlowDirection, LogArea,
+    BoundaryKind, ClimateCell, Crust, DecodeFieldCodeError, FlowDirection, LogArea, LogIncision,
     LogPrecipitation, LogRunoff, LogSteepness, QuantiseValueError, SurfaceClass, SurfaceClassRange,
     SynthesisCell, Wind,
 };
@@ -436,6 +436,14 @@ pub enum BuildFieldError {
         /// The cell's index.
         cell: u32,
     },
+    /// A cell carries a wet epoch's incision, a [`LogIncision`] other than
+    /// [`LogIncision::NONE`], on an airless body, whose header's surface pressure is exactly 0 Pa
+    /// (`FieldHeader::is_airless`): such a body has no wet epoch in this generator, so no epoch cut
+    /// its ground and the synthesis draws no epoch valleys there (R09.T6.c).
+    IncisionWithoutAir {
+        /// The cell's index.
+        cell: u32,
+    },
     /// A climate record carries a month past the header's year (an anomaly, a precipitation or a
     /// wind that is not calm), or an anomaly in a one-month year.
     MonthOutsideYear {
@@ -513,6 +521,11 @@ impl std::fmt::Display for BuildFieldError {
                 f,
                 "cell {cell} or its catchment sheds runoff on an airless body, of surface pressure 0 \
                  Pa"
+            ),
+            Self::IncisionWithoutAir { cell } => write!(
+                f,
+                "cell {cell} carries a wet epoch's incision on an airless body, of surface pressure \
+                 0 Pa"
             ),
             Self::MonthOutsideYear { cell } => {
                 write!(f, "climate cell {cell} carries a month outside the year")
@@ -777,14 +790,17 @@ pub(crate) fn check_substances(
     Ok(())
 }
 
-/// Checks the runoffs of the synthesis record of cell `cell` against `header`: on an airless body
-/// ([`FieldHeader::is_airless`]) a cell sheds none, and nor does its catchment, so that no channel
-/// cuts its ground (R09.T8.d).
+/// Checks the runoffs and the epoch incision of the synthesis record of cell `cell` against
+/// `header`: on an airless body ([`FieldHeader::is_airless`]) a cell sheds none, nor does its
+/// catchment, so that no channel cuts its ground (R09.T8.d), and it carries no wet epoch's
+/// incision, since such a body had none (R09.T6.c).
 ///
 /// # Errors
 ///
-/// [`BuildFieldError::RunoffWithoutAir`] if the body is airless and either runoff is not
-/// [`LogRunoff::NONE`].
+/// - [`BuildFieldError::RunoffWithoutAir`] if the body is airless and either runoff is not
+///   [`LogRunoff::NONE`].
+/// - [`BuildFieldError::IncisionWithoutAir`] if the body is airless, its runoffs are none and the
+///   epoch incision is not [`LogIncision::NONE`].
 pub(crate) fn check_runoff(
     cell: u32,
     record: &SynthesisCell,
@@ -793,6 +809,9 @@ pub(crate) fn check_runoff(
     let sheds = record.runoff != LogRunoff::NONE || record.catchment_runoff != LogRunoff::NONE;
     if header.is_airless() && sheds {
         return Err(BuildFieldError::RunoffWithoutAir { cell });
+    }
+    if header.is_airless() && record.epoch_incision.is_epoch() {
+        return Err(BuildFieldError::IncisionWithoutAir { cell });
     }
     Ok(())
 }
@@ -1470,7 +1489,8 @@ mod tests {
     }
 
     /// An airless body's cells shed no runoff, nor do their catchments, which the level bound's
-    /// zero channel terms count on (R09.T8.d); a body with air may carry either.
+    /// zero channel terms count on (R09.T8.d), and carry no wet epoch's incision (R09.T6.c); a
+    /// body with air may carry any of them.
     #[test]
     fn an_airless_field_refuses_runoff() {
         for world in [SyntheticWorld::MoonLike, SyntheticWorld::MarsLike] {
@@ -1507,7 +1527,38 @@ mod tests {
             );
             assert!(!refused(&|c| c.runoff = LogRunoff::NONE));
         }
-        // A tenuous body keeps an atmosphere and may have had a wet epoch: 1 Pa carries runoff.
+        // Nor does an airless body carry a wet epoch's incision, cut or not (R09.T6.c).
+        for world in [SyntheticWorld::MoonLike, SyntheticWorld::MarsLike] {
+            let field = synthetic_field(world);
+            let header = field.header().clone();
+            let refused = |incision: LogIncision| {
+                let mut synthesis = field.synthesis().to_vec();
+                synthesis[11].epoch_incision = incision;
+                match CoarseField::new(
+                    header.clone(),
+                    synthesis,
+                    field.climate_layer().to_vec(),
+                    field.craters().to_vec(),
+                ) {
+                    Ok(_) => false,
+                    Err(error) => {
+                        assert_eq!(error, BuildFieldError::IncisionWithoutAir { cell: 11 });
+                        assert_eq!(
+                            error.to_string(),
+                            "cell 11 carries a wet epoch's incision on an airless body, of \
+                             surface pressure 0 Pa"
+                        );
+                        true
+                    }
+                }
+            };
+            let airless = header.is_airless();
+            assert_eq!(refused(LogIncision::new(40)), airless);
+            assert_eq!(refused(LogIncision::UNCUT), airless);
+            assert!(!refused(LogIncision::NONE));
+        }
+        // A tenuous body keeps an atmosphere and may have had a wet epoch: 1 Pa carries runoff and
+        // an epoch's incision.
         let moon = synthetic_field(SyntheticWorld::MoonLike);
         let mut parts = moon.header().parts().clone();
         parts.surface_pressure = Pascals::new(1.0);
@@ -1516,6 +1567,7 @@ mod tests {
         let mut synthesis = moon.synthesis().to_vec();
         synthesis[11].runoff = LogRunoff::new(121);
         synthesis[11].catchment_runoff = LogRunoff::new(140);
+        synthesis[11].epoch_incision = LogIncision::new(40);
         assert!(
             CoarseField::new(
                 tenuous,
@@ -1529,13 +1581,9 @@ mod tests {
         for &world in SyntheticWorld::ALL {
             let field = synthetic_field(world);
             if field.header().is_airless() {
-                assert!(
-                    field
-                        .synthesis()
-                        .iter()
-                        .all(|c| c.runoff == LogRunoff::NONE
-                            && c.catchment_runoff == LogRunoff::NONE)
-                );
+                assert!(field.synthesis().iter().all(|c| c.runoff == LogRunoff::NONE
+                    && c.catchment_runoff == LogRunoff::NONE
+                    && c.epoch_incision == LogIncision::NONE));
             }
         }
     }

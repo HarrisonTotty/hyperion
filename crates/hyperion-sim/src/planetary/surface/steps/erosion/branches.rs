@@ -34,9 +34,10 @@
 
 use hyperion_surface::num;
 
-use hyperion_surface::field::Crust;
+use hyperion_surface::field::{Crust, LogIncision, LogSteepness};
 use hyperion_surface::synth::channels::{
-    DEBRIS_FLOW_SLOPE, bankfull_width, channel_forming_discharge_m3_s, mean_discharge_m3_s,
+    ChannelBody, DEBRIS_FLOW_SLOPE, EpochValley, MEAN_TRUNK_LENGTH, bankfull_depth, bankfull_width,
+    channel_forming_discharge_m3_s, mean_discharge_m3_s, valley_depth,
 };
 
 use super::super::climate::after_erosion::NetLoss;
@@ -50,9 +51,10 @@ use super::drainage::canonical;
 use super::erodibility::{Erodibility, Fluid};
 use super::multigrid::{self, FullBodies, Options, Outcome, Problem, Uplift, Water};
 use super::solver::{self, Cells, Threshold, Time};
+use crate::math;
 use crate::planetary::surface::inputs::{CoarseInputs, WetEpoch};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
-use crate::units::{Gigayears, MetresPerSecondSquared, SquareMetres};
+use crate::units::{Gigayears, Metres, MetresPerSecondSquared, SquareMetres};
 
 /// Which branch of the step a world takes, by its wet epoch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,40 +192,85 @@ pub(crate) fn cell_exposure(
         .collect()
 }
 
-/// Each valley wall's horizontal run per metre of the valley's depth: 5, the walls' mean gradient
-/// of 0.2 inverted (decision-r09-t14-mars-ceiling §2.2 and §5).
+/// The coarse cell's lowering on a world dry now, metres: the void of the valley R09.T6.c's
+/// synthesis draws in it, one trunk's epoch valley `valley` ([`EpochValley`]) cut into an upland
+/// that stays at its construction, over the cell, `L` = min(d, ℓ G (`w_bf` + W) ÷ w²) with ℓ the
+/// trunk's mean length in the cell, [`MEAN_TRUNK_LENGTH`] cells of width `cell_m` w, √(Ω R²), and d
+/// the channel's incision `incision_m` at full K (decision-r09-t14-mars-ceiling §2.2 and §5;
+/// decision-r09-t14-choices F2).
 ///
-/// A valley of depth d on its bankfull floor `w_bf` with 10:1 walls is `w_bf` + 10d wide at its
-/// top, each wall running 5d, so that its cross-section's mean width is `w_bf` + 5d and its void
-/// a unit length d (`w_bf` + 5d): the floor's d `w_bf` and the two walls' triangles, ½ d × 5d each.
-/// The width is "about ten times the depth" (Luo, Cang and Howard 2017, Nat. Commun. 8, 15766,
-/// Methods, after Williams and Phillips 2001, JGR 106, 23737), medium-low confidence; the 10:1
-/// walls are Mars's rock, and an ice or methane epoch is an extrapolation (labelled).
-pub(crate) const WALL_RUN_PER_DEPTH: f64 = 5.0;
-
-/// The coarse cell's lowering on a world dry now, metres: the void of one trunk valley cut into
-/// an upland that stays at its construction, over the cell, `L` = min(d, d (`w_bf` + 5d) ÷ w), for
-/// the channel's incision `incision_m` d at full K, the valley's floor `floor_m` `w_bf` (its
-/// bankfull channel, [`valley_floor_m`]) and the cell's width `cell_m` w, √(Ω R²)
-/// (decision-r09-t14-mars-ceiling §2.2).
-///
-/// The valley's walls rise at a mean gradient of 0.2 from its floor, so its top width is
-/// `w_bf` + 10d and its void d (`w_bf` + 5d) a unit length ([`WALL_RUN_PER_DEPTH`]). Capped at d,
-/// where the valley is as wide as its
-/// cell, the space-filling limit. K, t and the runoff never move to pass the ceiling; the channel's
-/// incision is kept unscaled apart ([`CellState::channel_incision`]). R09.T6.c's valleys take the
-/// same cross-section, and that task's commit makes this count exactly the valleys it draws.
+/// G is the lesser of R09.T6.b's steady-state groove and the epoch's incision as the field codes
+/// it, and the walls rise 5 G each at most
+/// ([`WALL_RUN_PER_DEPTH`](hyperion_surface::synth::channels::WALL_RUN_PER_DEPTH)), so that its top width is
+/// `w_bf` + 10G: the cell lowers by the void the synthesis cuts, whose mean it adds back to the
+/// upland (T6.b's zero-mean rule), and the upland stays at z0. A dry-now cell carries its trunk
+/// alone (main's ruling for R09.T6.c, option A), so the trunk is every valley it draws. Capped at
+/// d, where the valley is as wide as its cell, the space-filling limit. K, t and the runoff never
+/// move to pass the ceiling; the channel's incision is kept unscaled apart
+/// ([`CellState::channel_incision`]).
 ///
 /// [`CellState::channel_incision`]: super::super::CellState::channel_incision
 #[must_use]
-pub(crate) fn dry_now_lowering_m(incision_m: f64, floor_m: f64, cell_m: f64) -> f64 {
-    if incision_m <= 0.0 {
+pub(crate) fn dry_now_lowering_m(valley: &EpochValley, incision_m: f64, cell_m: f64) -> f64 {
+    if incision_m <= 0.0 || valley.depth().value() <= 0.0 {
         return 0.0;
     }
-    num::min(
-        incision_m,
-        incision_m * (floor_m + WALL_RUN_PER_DEPTH * incision_m) / cell_m,
+    num::min(incision_m, MEAN_TRUNK_LENGTH * valley.void_m2() / cell_m)
+}
+
+/// The valley R09.T6.c's synthesis draws on a dry-now cell's trunk, as the branch knows it before
+/// the final routing ([`EpochValley::of`]): its steady-state depth at the steepness index
+/// `steepness_m0_9` (m^0.9, the cell's own, the epoch's runoff being uniform), its bankfull channel
+/// at the wet epoch's runoff `runoff_m_per_year` over its drainage area `drainage_m2`, and its
+/// incision `incision_m` as the field codes it ([`LogIncision`]); `body` the field's.
+///
+/// The synthesis reads the same from the final field's codes: its routing after the re-match and
+/// the late craters, the quantised steepness, drainage and catchment runoff. The two differ only
+/// where those move, and only where the steady-state depth binds (the plan's "Deviations in T6.c,
+/// as built").
+///
+/// # Panics
+///
+/// If an input is negative or not finite.
+#[must_use]
+pub(crate) fn drawn_valley(
+    steepness_m0_9: f64,
+    runoff_m_per_year: f64,
+    drainage_m2: f64,
+    incision_m: f64,
+    body: ChannelBody,
+) -> EpochValley {
+    let area = SquareMetres::new(drainage_m2);
+    let forming =
+        channel_forming_discharge_m3_s(mean_discharge_m3_s(runoff_m_per_year, area), area);
+    let valley = if steepness_m0_9 > 0.0 {
+        valley_depth(steepness_m0_9, body.radius, body.level)
+    } else {
+        Metres::ZERO
+    };
+    let coded = LogIncision::from_metres(Metres::new(incision_m))
+        .expect("a finite, non-negative incision has a code, the last saturating")
+        .incision()
+        .expect("a world dry now's incision code is the epoch's");
+    EpochValley::of(
+        valley,
+        bankfull_width(forming, body.gravity),
+        bankfull_depth(forming, body.gravity),
+        coded,
+        body,
     )
+}
+
+/// A dry-now cell's channel steepness index on the construction, m^0.9, as the branch can know it
+/// before the final routing: its fall to its receiver on the solve's last routing over the link's
+/// length, held at zero where the receiver stands higher, times its drainage area there to the
+/// θ ([`LogSteepness::THETA`]), `write_routing`'s index on the construction `z0`.
+#[must_use]
+fn construction_steepness_m0_9(outcome: &Outcome, z0: &[f64], c: usize) -> f64 {
+    outcome.routing.receiver(cell_of(c)).map_or(0.0, |link| {
+        let slope = num::max(0.0, z0[c] - z0[slot(link.cell)]) / link.length_m;
+        num::assert_finite(slope * math::powf(outcome.drainage_m2[c], LogSteepness::THETA))
+    })
 }
 
 /// The floor of a dry-now cell's valley, metres: the bankfull width of its channel at the wet
@@ -258,6 +305,12 @@ pub(crate) struct DryNow {
     pub(crate) incision_m: Vec<f64>,
     /// Each cell's valley floor ([`valley_floor_m`]) where it is incised, metres; zero elsewhere.
     pub(crate) floor_m: Vec<f64>,
+    /// Each cell inside a waiting crater's rim ([`inside_waiting_rims`]): its ground formed after
+    /// the epoch's flow, so it sheds no runoff of its own and carries no epoch valley.
+    pub(crate) young: Vec<bool>,
+    /// Each cell's drawn valley's depth G ([`drawn_valley`]), metres: zero inside a waiting rim
+    /// and where the epoch cut nothing.
+    pub(crate) valley_m: Vec<f64>,
     /// Each cell's coarse lowering ([`dry_now_lowering_m`]), metres.
     pub(crate) lowering_m: Vec<f64>,
     /// Each cell's elevation as written, z0 less its lowering, metres; a bound's its ground.
@@ -278,6 +331,20 @@ impl DryNow {
             .collect();
         output_runoff_m_per_year(&dry_now_runoff_m_per_year(epoch, renewed.len()), &renewed)
     }
+
+    /// Each cell's channel incision in the output, metres: [`incision_m`](Self::incision_m), but
+    /// zero inside a waiting crater's rim ([`young`](Self::young)), whose ground formed after the
+    /// epoch's flow, so that a late crater's ground carries no epoch valley
+    /// ([`LogIncision::UNCUT`] in the field; R09.T6.c), and none is taken from it
+    /// ([`lowering_m`](Self::lowering_m)). The solve is untouched.
+    #[must_use]
+    pub(crate) fn output_incision_m(&self) -> Vec<f64> {
+        self.incision_m
+            .iter()
+            .zip(&self.young)
+            .map(|(&incision, &late)| if late { 0.0 } else { incision })
+            .collect()
+    }
 }
 
 /// A world dry now's erosion on `working` as the climate step left it, or `None` where the
@@ -286,8 +353,8 @@ impl DryNow {
 /// exposure on every cell; then each cell of an exposure below it renewed, its channel the
 /// transient at its own exposure's time on the solve's last routing (its construction to the bit
 /// where it saw none: the reference Mars's provinces, its surface renewed after the epoch, as the
-/// late craters are placed on eroded ground); then each eroded cell lowered by its valley's void
-/// ([`dry_now_lowering_m`]).
+/// late craters are placed on eroded ground); then each eroded cell outside a waiting crater's rim
+/// lowered by the void of the valley the synthesis draws in it ([`dry_now_lowering_m`]).
 ///
 /// A cell upstream of a renewed one keeps the incision its characteristic took through the
 /// renewed ground during the epoch, and may end below it: a valley embayed by younger lava, which
@@ -310,11 +377,18 @@ pub(crate) fn dry_now(pass: &Pass<'_>, working: &Working) -> Option<DryNow> {
         .map(|cell| cell.elevation.value())
         .collect();
     let solved = renewed_channels(pass, working, &outcome, &z0, &exposure, share);
+    let young = inside_waiting_rims(pass, working);
     let omega = pass.grid().solid_angles_sr();
     let r = inputs.radius().value();
+    let body = ChannelBody {
+        radius: inputs.radius(),
+        level: pass.level().get(),
+        gravity: inputs.craters().gravity(),
+    };
     let n = z0.len();
     let (mut incision_m, mut floor_m) = (Vec::with_capacity(n), Vec::with_capacity(n));
-    let (mut lowering_m, mut elevation_m) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let (mut valley_m, mut lowering_m) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let mut elevation_m = Vec::with_capacity(n);
     for c in 0..n {
         let d = num::max(0.0, z0[c] - solved[c]);
         let floor = if d > 0.0 {
@@ -326,9 +400,24 @@ pub(crate) fn dry_now(pass: &Pass<'_>, working: &Working) -> Option<DryNow> {
         } else {
             0.0
         };
-        let lowering = dry_now_lowering_m(d, floor, r * omega[c].sqrt());
+        let (valley, lowering) = if d > 0.0 && !young[c] {
+            let drawn = drawn_valley(
+                construction_steepness_m0_9(&outcome, &z0, c),
+                epoch.runoff_m_per_year,
+                outcome.drainage_m2[c],
+                d,
+                body,
+            );
+            (
+                drawn.depth().value(),
+                dry_now_lowering_m(&drawn, d, r * omega[c].sqrt()),
+            )
+        } else {
+            (0.0, 0.0)
+        };
         incision_m.push(d);
         floor_m.push(floor);
+        valley_m.push(valley);
         lowering_m.push(lowering);
         elevation_m.push(z0[c] - lowering);
     }
@@ -338,6 +427,8 @@ pub(crate) fn dry_now(pass: &Pass<'_>, working: &Working) -> Option<DryNow> {
         exposure,
         incision_m,
         floor_m,
+        young,
+        valley_m,
         lowering_m,
         elevation_m,
     })

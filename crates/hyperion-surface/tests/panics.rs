@@ -16,9 +16,9 @@ use hyperion_surface::craters::{self, CraterParams, CraterParamsParts, Screening
 use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv};
 use hyperion_surface::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseField, CoarseLevel, Cover, Crust,
-    FieldHeader, FieldHeaderParts, FieldView, FlowDirection, LogArea, LogPrecipitation, LogRunoff,
-    LogSteepness, MaterialPalette, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
-    boundary_diameter, cell_index, coarse_level, month_at, month_blend,
+    FieldHeader, FieldHeaderParts, FieldView, FlowDirection, LogArea, LogIncision,
+    LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, PrecipitationSource, SurfaceClass,
+    SynthesisCell, Wind, boundary_diameter, cell_index, coarse_level, month_at, month_blend,
 };
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::{LatticeCache, NoiseKey, Octave, gradient_noise};
@@ -226,7 +226,9 @@ fn level_five_field() -> CoarseField {
     level_five_field_flowing(FlowDirection::Terminal)
 }
 
-/// A level-5 field whose every cell's water goes `flow`, with a channel where it goes anywhere.
+/// A level-5 field whose every cell's water goes `flow`, with a channel and water reaching it, and
+/// an atmosphere to carry it, where it goes anywhere: a cell no water reaches carries no trunk
+/// (R09.T6.c), and an airless body sheds none.
 fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
     level_five_field_of(BodyRef::new(1, 2), flow)
 }
@@ -277,7 +279,11 @@ fn level_five_field_weathered(
         temperature_step: 0,
         anomaly_step: 0,
         surface_age: Gigayears::new(4.0),
-        surface_pressure: Pascals::ZERO,
+        surface_pressure: if flow == FlowDirection::Terminal {
+            Pascals::ZERO
+        } else {
+            Pascals::new(610.0)
+        },
         albedo_scale: None,
         palette: MaterialPalette::default(),
         crust_palette: [None; 4],
@@ -302,7 +308,12 @@ fn level_five_field_weathered(
             LogSteepness::new(64)
         },
         runoff: LogRunoff::NONE,
-        catchment_runoff: LogRunoff::NONE,
+        catchment_runoff: if flow == FlowDirection::Terminal {
+            LogRunoff::NONE
+        } else {
+            LogRunoff::new(121)
+        },
+        epoch_incision: LogIncision::NONE,
         water_surface_mm: 0,
         ice: 0,
         substances: SynthesisCell::NO_SUBSTANCES,
@@ -600,9 +611,10 @@ mod incision {
     use hyperion_surface::field::{BodyRef, FieldView};
     use hyperion_surface::synth::SynthCache;
     use hyperion_surface::synth::channels::{
-        ChannelBody, Channels, bankfull_depth, bankfull_width, channel_forming_discharge_m3_s,
-        channel_head_area, channel_structure_function, channel_variance, deepest_level,
-        mean_discharge_m3_s, tributary_steepness_m0_9, valley_depth,
+        ChannelBody, Channels, EpochValley, bankfull_depth, bankfull_width,
+        channel_forming_discharge_m3_s, channel_head_area, channel_structure_function,
+        channel_variance, deepest_level, mean_discharge_m3_s, tributary_steepness_m0_9,
+        valley_depth,
     };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -747,6 +759,23 @@ mod incision {
         let channels = Channels::new(ours.header(), DetailSeed::new(1));
         let mut cache = SynthCache::new();
         let _ = channels.network_in(&theirs, &mut cache);
+    }
+
+    #[test]
+    #[should_panic(expected = "a valley's depths and widths must be finite and non-negative")]
+    fn an_epoch_valley_of_a_negative_incision_is_refused() {
+        let body = ChannelBody {
+            radius: Metres::new(3.3895e6),
+            level: 7,
+            gravity: MetresPerSecondSquared::new(3.71),
+        };
+        let _ = EpochValley::of(
+            Metres::new(400.0),
+            Metres::new(100.0),
+            Metres::new(2.0),
+            Metres::new(-1.0),
+            body,
+        );
     }
 
     #[test]

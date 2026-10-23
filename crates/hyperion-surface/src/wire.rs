@@ -8,7 +8,7 @@
 //! [`decode_payload`] for the whole), and inserts the blocks into its
 //! [`PartialField`](crate::field::PartialField), in any order: block 0 of every payload, delta or
 //! whole, carries the whole [`FieldHeader`], so the first block a worker is given builds its field
-//! (Design note 17). Every cell travels exact and whole, as the 25 bytes the field holds it in,
+//! (Design note 17). Every cell travels exact and whole, as the 26 bytes the field holds it in,
 //! so the client's synthesis reads what the server's does to the bit.
 //!
 //! # A block
@@ -54,12 +54,12 @@
 //!    index past its last, two `u32`, and its [`ResolutionCode`], a byte: the block's surveyed
 //!    cells with their codes and its margin cells at [`ResolutionCode::NONE`], sorted, disjoint and
 //!    canonical (no two adjacent ranges of one code), in [`cell_index`] order.
-//! 3. A synthesis record for every cell of the cover, in the cover's order, 25 bytes each, the
+//! 3. A synthesis record for every cell of the cover, in the cover's order, 26 bytes each, the
 //!    fields of [`SynthesisCell`] in their declared order: `elevation_mm` (`i32`),
 //!    `boundary_distance_km` (`i16`), `plate`, `crust`, `boundary`, `boundary_obliquity`, `flow`
-//!    (a byte each), `drainage` (`u16`), `steepness`, `runoff` and `catchment_runoff` (a byte
-//!    each), `water_surface_mm` (`i32`), and `ice`, `substances`, `class`, `crater_state` and
-//!    `seafloor` (a byte each).
+//!    (a byte each), `drainage` (`u16`), `steepness`, `runoff`, `catchment_runoff` and
+//!    `epoch_incision` (a byte each), `water_surface_mm` (`i32`), and `ice`, `substances`,
+//!    `class`, `crater_state` and `seafloor` (a byte each).
 //! 4. A climate record for every climate cell over the cover's cells (each cell's parent, one level
 //!    up, once, in index order), 50 bytes each, the fields of [`ClimateCell`] in their declared
 //!    order: `sea_level_temperature` (`i16`), the twelve `month_anomaly` bytes, the twelve
@@ -111,6 +111,12 @@ mod form;
 /// computed under, which a decoder refuses unless it is its own
 /// ([`DecodeBlockError::GeneratorVersion`]).
 ///
+/// Until the serve gate opens, the first send of a generated body's payload, format 1's layout is
+/// still open: a member added before it (the sea floor's byte, the two runoff bytes, R09.T6.c's
+/// epoch incision) extends format 1 and re-blesses the payload goldens at the generator version in
+/// force, and only from the gate does a layout change take a new format (plan R09, "Generator
+/// version"; decision-bump-plan-after-22 §1.4).
+///
 /// # Codes grow by appending
 ///
 /// The one-byte codes of the closed sets are registries that grow without a new format: the
@@ -130,7 +136,7 @@ mod form;
 /// row, whose 0 to 3 are R10's unassigned row and its `PhaseLaw` codes) are bytes whose meanings
 /// their owners assign, by the same rule. A substance is its key, a
 /// string, so a new substance is a new key, which an older reader can still name. The scaled codes
-/// ([`LogArea`], [`LogSteepness`], [`LogRunoff`], [`LogPrecipitation`], [`Wind`],
+/// ([`LogArea`], [`LogSteepness`], [`LogRunoff`], [`LogIncision`], [`LogPrecipitation`], [`Wind`],
 /// [`ResolutionCode`], the sea floor's two nibbles and the linear steps) keep their scales: a new
 /// scale is a new format. The golden file `tests/golden/wire/codes.golden` pins every code's
 /// decoded value, so a renumbered code fails it and an appended one only extends it.
@@ -159,6 +165,7 @@ mod form;
 /// [`LogArea`]: crate::field::LogArea
 /// [`LogSteepness`]: crate::field::LogSteepness
 /// [`LogRunoff`]: crate::field::LogRunoff
+/// [`LogIncision`]: crate::field::LogIncision
 /// [`LogPrecipitation`]: crate::field::LogPrecipitation
 /// [`Wind`]: crate::field::Wind
 pub const SURFACE_PAYLOAD_FORMAT: u16 = 1;

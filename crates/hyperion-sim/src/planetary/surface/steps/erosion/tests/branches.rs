@@ -234,8 +234,10 @@ fn the_paleo_water_stored_is_the_inventory() {
 /// before R09.T14.d's re-match): the field routed; every eroded cell at the branch's elevation,
 /// its construction less its valley's void, and every bound at its ground, to the bit; the water
 /// surface the elevation everywhere (dry now); each cell's channel incision the branch's, z0 less
-/// its solved channel, never negative and at least its lowering; every cell's drainage at least
-/// its own area and its catchment's runoff the accumulated own runoffs over it, at most the
+/// its solved channel, never negative and at least its lowering, outside a waiting crater's rim,
+/// and zero inside it, whose ground formed after the epoch and which neither carries a valley nor
+/// lowers for one (R09.T6.c); every cell's drainage at
+/// least its own area and its catchment's runoff the accumulated own runoffs over it, at most the
 /// epoch's; a steepness index on every cell that drains, none at a root; and the state
 /// quantising.
 #[test]
@@ -243,6 +245,8 @@ fn the_step_writes_the_reference_mars_s_outputs() {
     let staged = Staged::of(reference::mars_like());
     let pass = staged.pass();
     let dry = dry_now(&pass, &staged.working).unwrap();
+    let young = dry.young.clone();
+    assert_eq!(young, inside_waiting_rims(&pass, &staged.working));
     let mut working = staged.working.clone();
     let provisional = provisional(&pass, &mut working).expect("the reference Mars is eroded");
     assert_eq!(provisional.branch, Branch::DryNow);
@@ -257,9 +261,14 @@ fn the_step_writes_the_reference_mars_s_outputs() {
             None => assert_same_bits(cell.elevation.value(), dry.elevation_m[c]),
         }
         assert_same_bits(cell.water_surface.value(), cell.elevation.value());
-        assert_same_bits(cell.channel_incision.value(), dry.incision_m[c]);
-        assert!(cell.channel_incision.value() >= 0.0, "cell {c}");
+        let incision = if young[c] { 0.0 } else { dry.incision_m[c] };
+        assert_same_bits(cell.channel_incision.value(), incision);
+        assert!(dry.incision_m[c] >= 0.0, "cell {c}");
         assert!(dry.lowering_m[c] <= dry.incision_m[c], "cell {c}");
+        if young[c] {
+            assert_same_bits(dry.lowering_m[c], 0.0);
+            assert_same_bits(dry.valley_m[c], 0.0);
+        }
         let own = omega[c] * r * r;
         assert!(cell.drainage.value() >= own * (1.0 - 1e-12), "cell {c}");
         assert!(cell.catchment_runoff_m_per_year <= 0.1 * (1.0 + 1e-12));
@@ -271,11 +280,15 @@ fn the_step_writes_the_reference_mars_s_outputs() {
         }
     }
     eprintln!(
-        "{routed} of {} cells drain to a neighbour",
-        working.cells.len()
+        "{routed} of {} cells drain to a neighbour, {} inside a waiting crater's rim",
+        working.cells.len(),
+        young.iter().filter(|&&late| late).count()
     );
     assert!(routed > 0);
-    assert_eq!(budget::records(&working).count(), working.cells.len());
+    assert_eq!(
+        budget::records(pass.inputs(), &working).count(),
+        working.cells.len()
+    );
 }
 
 /// The provinces' own surface (decision-r09-t14-mars-ceiling §4.1, Q4's test (4)): on the

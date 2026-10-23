@@ -197,8 +197,11 @@ pub struct CellState {
     pub catchment_runoff_m_per_year: f64,
     /// The erosion's channel incision at the cell on a world dry now, z0 less the solver's
     /// elevation, before any width closure: what the wet epoch cut (R09.T14.c;
-    /// decision-r09-t14-choices F2, for R09.T6.c's valleys of a short wet epoch). Zero on every
-    /// other world and before the erosion. Unquantised: no field member carries it yet.
+    /// decision-r09-t14-choices F2, for R09.T6.c's valleys of a short wet epoch), metres,
+    /// non-negative. Zero inside a waiting crater's rim, whose ground formed after the epoch, on
+    /// every other world and before the erosion. Quantised into
+    /// [`SynthesisCell::epoch_incision`](hyperion_surface::field::SynthesisCell::epoch_incision)
+    /// on a world dry now, `LogIncision::NONE` on every other.
     pub(crate) channel_incision: Metres,
     /// The share of the cell under ice, 0 to 1.
     pub ice_fraction: f64,

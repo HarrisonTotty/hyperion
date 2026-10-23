@@ -6,7 +6,7 @@ use core::f64::consts::TAU;
 
 use hyperion_surface::field::{
     BoundaryKind, CraterState, Crust, FlowDirection, KoppenGeiger, KoppenGeigerGroup, LogArea,
-    LogRunoff, LogSteepness, MechanicsFamily, PaletteEntry, PaletteRole, SurfaceClass,
+    LogIncision, LogRunoff, LogSteepness, MechanicsFamily, PaletteEntry, PaletteRole, SurfaceClass,
     SurfaceClassRange, SurfaceForm, SynthesisCell, coarse_level, month_edges,
 };
 use hyperion_surface::material::{MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE};
@@ -481,6 +481,7 @@ fn the_massive_ice_code_is_r10_s_threshold_on_the_byte() {
             steepness: LogSteepness::ZERO,
             runoff: LogRunoff::NONE,
             catchment_runoff: LogRunoff::NONE,
+            epoch_incision: LogIncision::NONE,
             water_surface_mm: 0,
             ice: code,
             substances: SynthesisCell::NO_SUBSTANCES,

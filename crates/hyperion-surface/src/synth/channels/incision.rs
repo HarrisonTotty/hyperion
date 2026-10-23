@@ -17,6 +17,11 @@
 //!   down to it ([`valley_depth`]); its top runs that far above its bed all along it.
 //! - A tributary inherits the top where it joins, so its bed rises towards the top upstream, and its
 //!   groove shallows to its channel alone where it has risen to it.
+//! - On a world dry now a trunk's valley is its epoch's ([`EpochValley`]; R09.T6.c): no deeper than
+//!   the epoch's incision at its cell and with no floor at the channel's depth, its wall width W
+//!   [`WALL_RUN_PER_DEPTH`] times its depth, at most the level's, so that it is ten times as wide
+//!   as deep (each wall 5:1); and no
+//!   tributary is drawn below it.
 //!
 //! So the network's relief below a coarse cell is the stream-power relief of its own channels, from
 //! the coarse cell's `k_s` and runoffs and Hack's law (Design note 13), and a tributary's valley
@@ -48,7 +53,8 @@
 //!
 //! # The cut
 //!
-//! Level k > L is evaluated below a coarse cell only where the cell carries tributaries and the
+//! Level k > L is evaluated below a coarse cell only where the cell carries tributaries (never on a
+//! world dry now's, whose epoch's level cut is L; [`EpochValley`]) and the
 //! bankfull width of a channel draining one mean cell of the level at the cell's runoff is at least
 //! [`CUT_WIDTH`], and only to the channel heads, a mean cell of at least [`channel_head_area`]
 //! ([`deepest_level`]); a segment of a level its coarse cell cuts cuts no groove, and the trunks,
@@ -153,6 +159,21 @@ pub const VALLEY_WALL_GRADIENT: f64 = 0.6;
 /// limit cannot resolve a channel (Design note 13).
 pub const CUT_WIDTH: Metres = Metres::new(2.0 * BAND_LIMIT_M);
 
+/// Each wall of a valley of a short wet epoch runs this far across per metre of the valley's
+/// depth: 5, the walls' mean gradient of 0.2 inverted (R09.T6.c; decision-r09-t14-mars-ceiling §5).
+///
+/// A valley of depth G on its bankfull floor `w_bf` is `w_bf` + 10G wide at its top, each wall
+/// running 5G as the groove's 1 − smoothstep, so that its cross-section's mean width is `w_bf` + 5G,
+/// its void a unit length G (`w_bf` + 5G) and its steepest wall 1.5 G ÷ 5G = 0.3, under
+/// [`VALLEY_WALL_GRADIENT`]. The width is "about ten times the depth" (Luo, Cang and Howard 2017,
+/// Nat. Commun. 8, 15766, doi:10.1038/ncomms15766, Methods, after Williams and Phillips 2001, JGR
+/// 106(E10), 23737, doi:10.1029/2000JE001409, whose top width is linear in depth below 125 m and
+/// whose width-to-depth ratio falls as the depth grows, which the floor term gives; their walls'
+/// steepening with depth is not modelled), medium-low confidence; the 5:1 walls are Mars's rock,
+/// and an ice or methane epoch is an extrapolation (labelled). The coarse pass's width closure on a
+/// world dry now lowers each cell by the same cross-section's void ([`EpochValley`]).
+pub const WALL_RUN_PER_DEPTH: f64 = 5.0;
+
 /// The samples a side of the grid on which a level's mean over a parent cell is taken: 8, 64 in
 /// all, four a side of each of the level's own cells. A design choice: on an independent 24 × 24
 /// grid, a level's corrected incision has a mean up to 5.6% of its RMS over a parent cell, and on
@@ -241,6 +262,149 @@ pub fn valley_depth(steepness_m0_9: f64, radius: Metres, level: u8) -> Metres {
     Metres::new(num::assert_finite(rise(steepness_m0_9, heads, cell)))
 }
 
+/// A trunk's valley on a world dry now: the valley of a short wet epoch, whose cross-section the
+/// synthesis cuts and whose void the coarse pass's width closure takes from the cell (R09.T6.c;
+/// decision-r09-t14-choices F2; decision-r09-t14-mars-ceiling §2.2 and §5).
+///
+/// Its depth G is the lesser of R09.T6.b's steady-state groove, min(max(`valley`, `d_bf`), `G_max`),
+/// and the epoch's incision at the cell, with no floor at the channel's bankfull depth, so that a
+/// valley the epoch cut less deep than its channel is as shallow as its incision; its floor is the
+/// bankfull channel, half its width either side of the axis (T6.b's); and each wall rises over
+/// W = min([`WALL_RUN_PER_DEPTH`] G, T6.b's wall) as T6.b's 1 − smoothstep. The cap at T6.b's wall,
+/// half the coarse cell's mean width, keeps every groove within the 5 × 5 search's reach, and binds
+/// only where G exceeds a tenth of the cell (3.8 km on the reference Mars); its steepest wall is
+/// then 1.5 G ÷ W ≤ [`VALLEY_WALL_GRADIENT`], since G ≤ `G_max`.
+///
+/// A dry-now cell carries this trunk alone: the epoch's level cut is the coarse level, so its
+/// network draws no sub-cell tributaries. The ruled tributary incision, the cell's at the same K t
+/// in the short-time regime, (`r_t` `A_t`)^m `S_t` ÷ (r̄ A)^m S, is identically 1 on T6.b's
+/// tributary profiles, `S_t` = `k_s` (r̄ ÷ `r_t`)^θ `A_t`^−θ with m = θ, except where the minimum
+/// slope binds, so it cuts no level; and the tributaries T6.b's inherited valley top keeps below
+/// the top, the epoch's knickpoints' reach, would give the reference Mars 0.177 km⁻¹ of valleys
+/// (15 times Hynek, Beach and Hoke 2010's 0.0115 km⁻¹ for Noachian units), 6.14 m of global layer
+/// and a ceiling at 3.3 times its bound (main's ruling, option A; the plan's "Deviations in T6.c,
+/// as built"). A channel-initiation area that is sourced and independent of the grid is a later
+/// item.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EpochValley {
+    depth: Metres,
+    floor_width: Metres,
+    wall: Metres,
+}
+
+impl EpochValley {
+    /// The valley of a trunk whose steady-state valley depth is `valley` ([`valley_depth`], zero
+    /// where the cell has no channels), whose bankfull channel is `bankfull_width` wide and
+    /// `bankfull_depth` deep, cut by the epoch's `incision`, on a coarse cell of `body`.
+    ///
+    /// # Panics
+    ///
+    /// If an input is negative or not finite, or `body` is not a body.
+    #[must_use]
+    pub fn of(
+        valley: Metres,
+        bankfull_width: Metres,
+        bankfull_depth: Metres,
+        incision: Metres,
+        body: ChannelBody,
+    ) -> Self {
+        body.check();
+        let [valley, width, depth, incision] = [valley, bankfull_width, bankfull_depth, incision]
+            .map(|m| {
+                let v = m.value();
+                assert!(
+                    v.is_finite() && v >= 0.0,
+                    "a valley's depths and widths must be finite and non-negative, got {v} m"
+                );
+                v
+            });
+        let r = body.radius.value();
+        let steady = num::min(num::max(valley, depth), groove_cap_m(r, body.level));
+        let g = num::min(steady, incision);
+        let wall = num::min(
+            WALL_RUN_PER_DEPTH * g,
+            VALLEY_WALL_SHARE * mean_cell_width(r, body.level),
+        );
+        Self {
+            depth: Metres::new(g),
+            floor_width: Metres::new(width),
+            wall: Metres::new(wall),
+        }
+    }
+
+    /// The valley's depth below the upland, G.
+    #[must_use]
+    pub const fn depth(&self) -> Metres {
+        self.depth
+    }
+
+    /// The valley's floor's width, its bankfull channel's, `w_bf`.
+    #[must_use]
+    pub const fn floor_width(&self) -> Metres {
+        self.floor_width
+    }
+
+    /// Each wall's width, W.
+    #[must_use]
+    pub const fn wall(&self) -> Metres {
+        self.wall
+    }
+
+    /// Its void a unit length of valley, G (`w_bf` + W), square metres: the floor's G `w_bf` and
+    /// the two smoothstep walls' G W ÷ 2 each.
+    #[must_use]
+    pub fn void_m2(&self) -> f64 {
+        self.depth.value() * (self.floor_width.value() + self.wall.value())
+    }
+}
+
+/// The valley of the trunk of the coarse cell `cell` of `body` on a world dry now
+/// ([`EpochValley`]): `None` where the cell carries no epoch's valley, its code
+/// [`LogIncision::NONE`](crate::field::LogIncision::NONE), a world wet now or never wet, whose
+/// trunk is T6.b's, or where it has no trunk. A cell the epoch did not cut
+/// ([`LogIncision::UNCUT`](crate::field::LogIncision::UNCUT)) has a valley of depth zero.
+///
+/// The steady-state depth reads the cell's tributaries' steepness, or its own `k_s` where it sheds
+/// no runoff of its own (a cell renewed after part of the epoch), and its bankfull channel its
+/// catchment's runoff over its drainage, as its trunk's segment does.
+///
+/// # Panics
+///
+/// If `body` is not a body.
+#[must_use]
+pub fn epoch_valley(cell: &SynthesisCell, body: ChannelBody) -> Option<EpochValley> {
+    let incision = cell.epoch_incision.incision()?;
+    cell.flow.edge()?;
+    if cell.catchment_runoff == crate::field::LogRunoff::NONE {
+        return None;
+    }
+    let (_, width, depth) = channel_size(
+        cell.catchment_runoff.metres_per_year(),
+        cell.drainage.area(),
+        body.gravity,
+    );
+    let valley = epoch_valley_steepness(cell)
+        .map_or(Metres::ZERO, |k| valley_depth(k, body.radius, body.level));
+    Some(EpochValley::of(
+        valley,
+        Metres::new(width),
+        Metres::new(depth),
+        incision,
+        body,
+    ))
+}
+
+/// The steepness index a dry-now cell's trunk valley's steady-state depth reads, m^0.9: its
+/// tributaries' ([`tributary_steepness_of`]), or its own `k_s` where it has channels but sheds no
+/// runoff of its own; `None` without channels.
+#[must_use]
+pub(crate) fn epoch_valley_steepness(cell: &SynthesisCell) -> Option<f64> {
+    if !super::has_channels(cell) {
+        return None;
+    }
+    Some(tributary_steepness_of(cell).unwrap_or_else(|| cell.steepness.index_m0_9()))
+}
+
 /// A body as the channels' closed forms read it: its mean radius, its coarse level and its surface
 /// gravity, which a field's header gives ([`ChannelBody::of`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -308,6 +472,10 @@ fn deepest_level_cut(cell: &SynthesisCell, body: ChannelBody, cut_m: f64) -> u8 
     let Some(steepness) = tributary_steepness_of(cell) else {
         return level;
     };
+    // A world dry now's epoch cut its trunks alone ([`EpochValley`]).
+    if cell.epoch_incision.is_epoch() {
+        return level;
+    }
     let heads = channel_head_area(steepness).value();
     let runoff = cell.runoff.metres_per_year();
     let mut deepest = level;
@@ -423,11 +591,22 @@ impl Groove {
         let wall_m = VALLEY_WALL_SHARE * mean_cell_width(radius_m, segment.level());
         let cap_m = groove_cap_m(radius_m, segment.level());
         let floor_depth = segment.depth_m;
-        let (chords, chord_count, depth) = match segment.kind {
-            Kind::Trunk { valley_m, .. } => {
-                let depth = num::min(num::max(valley_m, floor_depth), cap_m);
+        let (chords, chord_count, depth, wall_m) = match segment.kind {
+            Kind::Trunk {
+                valley_m,
+                epoch_wall_m,
+                ..
+            } => {
                 let chords = segment.chords().expect("a trunk has two chords");
-                (chords, 2, Depth::Constant(depth))
+                match epoch_wall_m {
+                    // T6.b's steady state: at least the channel, at most the level's cap.
+                    None => {
+                        let depth = num::min(num::max(valley_m, floor_depth), cap_m);
+                        (chords, 2, Depth::Constant(depth), wall_m)
+                    }
+                    // A world dry now's: the epoch's valley as it is ([`EpochValley`]).
+                    Some(epoch_wall) => (chords, 2, Depth::Constant(valley_m), epoch_wall),
+                }
             }
             Kind::Tributary {
                 steepness,
@@ -450,7 +629,7 @@ impl Groove {
                     floor_m: num::min(floor_depth, cap_m),
                     cap_m,
                 };
-                ([chord, chord], 1, depth)
+                ([chord, chord], 1, depth, wall_m)
             }
         };
         // A tributary's depth is at least its channel's, so only a groove with no channel and no
@@ -1222,6 +1401,18 @@ pub const TRIBUTARY_VARIANCE_SHARE: f64 = 0.46;
 /// and Mars-like worlds, 0.27 to 1.38 (R09.T6.b's measurement on 32 × 32 grids). Provisional.
 pub const WHOLE_VARIANCE_SHARE: f64 = 0.52;
 
+/// The share of the sum of a coarse cell's levels' variances that their summed incision realises:
+/// [`WHOLE_VARIANCE_SHARE`] where the levels anticorrelate, and 1 on a world dry now's cell, whose
+/// one level, its epoch's trunk, has no other to anticorrelate with (R09.T6.c).
+#[must_use]
+fn whole_share(cell: &SynthesisCell) -> f64 {
+    if cell.epoch_incision.is_epoch() {
+        1.0
+    } else {
+        WHOLE_VARIANCE_SHARE
+    }
+}
+
 /// One level's closed-form incision statistics over a coarse cell.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct LevelTerm {
@@ -1263,6 +1454,22 @@ fn level_terms_to(cell: &SynthesisCell, body: ChannelBody, last: u8) -> Vec<Leve
     let (r, level) = (body.radius.value(), body.level);
     let mut out = Vec::new();
     if cell.flow.edge().is_none() {
+        return out;
+    }
+    // A world dry now's: its trunk's epoch valley alone ([`EpochValley`]).
+    if cell.epoch_incision.is_epoch() {
+        if let Some(valley) = epoch_valley(cell, body)
+            && valley.depth().value() > 0.0
+        {
+            let density = MEAN_TRUNK_LENGTH / mean_cell_width(r, level);
+            out.push(level_term(
+                level,
+                density,
+                valley.depth().value(),
+                0.5 * valley.floor_width().value(),
+                valley.wall().value(),
+            ));
+        }
         return out;
     }
     let tributaries = tributary_steepness_of(cell);
@@ -1331,7 +1538,9 @@ fn band_share(radius_m: f64, level: u8, finer_than: f64) -> f64 {
 /// ρ their length a unit area, h half the bankfull width and W the wall width. Each level is
 /// counted in the band from its mean cell's width to twice it. A finer level realises
 /// [`TRIBUTARY_VARIANCE_SHARE`] of its own closed form, and their sum's variance is
-/// [`WHOLE_VARIANCE_SHARE`] of the sum of theirs. The result is an estimate for the coarse pass's
+/// [`WHOLE_VARIANCE_SHARE`] of the sum of theirs. On a world dry now the cell's one term is its
+/// trunk's epoch valley ([`EpochValley`]: G its depth, h half its bankfull width and W its walls),
+/// taken whole (R09.T6.c). The result is an estimate for the coarse pass's
 /// budget, within a factor of two of the whole incision's realised variance below a coarse cell
 /// (R09.T6.b's test on the Earth- and Mars-like worlds), not a pinned law.
 ///
@@ -1355,7 +1564,7 @@ pub fn channel_variance(
     for term in level_terms(cell, body) {
         variance += band_share(r, term.level, w) * term.variance;
     }
-    SquareMetres::new(WHOLE_VARIANCE_SHARE * variance)
+    SquareMetres::new(whole_share(cell) * variance)
 }
 
 /// The channels' share of the structure function of `field`'s ground at the coarse cell `cell` in
@@ -1365,7 +1574,8 @@ pub fn channel_variance(
 /// Each level contributes its band share of 2V (1 − exp(−s r² ÷ 2V)), with V its variance
 /// ([`channel_variance`]'s terms) and s the mean square of its slope along a random direction,
 /// ρ G² 1.2 ÷ W for its smoothstep walls: the small-lag law s r² and the large-lag 2V of two
-/// independent samples; the sum is scaled by [`WHOLE_VARIANCE_SHARE`] as the variance is, so that it
+/// independent samples; the sum is scaled by [`WHOLE_VARIANCE_SHARE`] as the variance is (taken
+/// whole on a world dry now's cell, its epoch's trunk alone; R09.T6.c), so that it
 /// saturates at twice [`channel_variance`]. The small-lag slope is the levels' sum scaled alike, an
 /// approximation (the plan's Risks).
 ///
@@ -1403,7 +1613,7 @@ pub fn channel_structure_function(
         let saturation = 2.0 * term.variance;
         d += share * saturation * (1.0 - math::exp(-term.slope2 * r * r / saturation));
     }
-    Some(SquareMetres::new(WHOLE_VARIANCE_SHARE * d))
+    Some(SquareMetres::new(whole_share(record) * d))
 }
 
 /// [`channel_variance`] of `field`'s coarse cell `cell`, or `None` where `field` does not hold it.

@@ -8,19 +8,20 @@
 
 use std::time::Instant;
 
-use hyperion_surface::field::{CoarseLevel, Crust, LogRunoff, LogSteepness, SynthesisCell};
+use hyperion_surface::field::{
+    CoarseLevel, Crust, LogIncision, LogRunoff, LogSteepness, SynthesisCell,
+};
 use hyperion_surface::num;
 use hyperion_surface::synth::channels::{
     ChannelBody, MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE,
-    TRIBUTARY_VARIANCE_SHARE, VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WHOLE_VARIANCE_SHARE,
-    bankfull_depth, bankfull_width, channel_forming_discharge_m3_s, channel_head_area,
-    channel_variance, deepest_level, hack_area, head_length, main_stream_length,
-    mean_discharge_m3_s, tributary_rise, tributary_steepness_m0_9, valley_depth,
+    TRIBUTARY_VARIANCE_SHARE, VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WALL_RUN_PER_DEPTH,
+    WHOLE_VARIANCE_SHARE, bankfull_depth, bankfull_width, channel_forming_discharge_m3_s,
+    channel_head_area, channel_variance, deepest_level, epoch_valley, hack_area, head_length,
+    main_stream_length, mean_discharge_m3_s, tributary_rise, tributary_steepness_m0_9,
+    valley_depth,
 };
 
-use super::super::branches::{
-    DryNow, WALL_RUN_PER_DEPTH, dry_now, dry_now_years, erode_dry_now_with, paleo_water_m3,
-};
+use super::super::branches::{DryNow, dry_now, dry_now_years, erode_dry_now_with, paleo_water_m3};
 use super::super::erodibility::Erodibility;
 use super::super::multigrid::{Options, Outcome, Start};
 use super::super::run;
@@ -106,6 +107,8 @@ struct Ceiling<'a> {
     z0: &'a [f64],
     omega: &'a [f64],
     radius_m: f64,
+    /// The grid's level, from its cell count 6 · 4^level.
+    level: u8,
     /// The eroded cells: not bound, of equivalent area above zero, of exposure above zero.
     eroded: Vec<usize>,
 }
@@ -134,11 +137,15 @@ impl<'a> Ceiling<'a> {
                     && dry.exposure[c] > 0.0
             })
             .collect();
+        let level = (0_u8..=12)
+            .find(|&l| 6_usize << (2 * l) == z0.len())
+            .expect("a grid of 6 · 4^level cells");
         Self {
             dry,
             z0,
             omega,
             radius_m,
+            level,
             eroded,
         }
     }
@@ -163,9 +170,15 @@ impl<'a> Ceiling<'a> {
         TRUNK_INCISION_M.1 * CEILING_WIDTH_M / self.width(c)
     }
 
-    /// The closure's `f_w` at `c`, (`w_bf` + 5d) ÷ w, uncapped ([`WALL_RUN_PER_DEPTH`]).
+    /// The closure's `f_w` at `c`, (`w_bf` + W) ÷ w with W = min(5G, T6.b's wall) for the drawn
+    /// valley's depth G, uncapped ([`WALL_RUN_PER_DEPTH`]; R09.T6.c).
     fn f_w(&self, c: usize) -> f64 {
-        (self.dry.floor_m[c] + WALL_RUN_PER_DEPTH * self.incision(c)) / self.width(c)
+        let g = self.dry.valley_m[c];
+        let wall = num::min(
+            WALL_RUN_PER_DEPTH * g,
+            VALLEY_WALL_SHARE * mean_cell_width(self.radius_m, self.level),
+        );
+        (self.dry.floor_m[c] + wall) / self.width(c)
     }
 
     /// The trunk cells' channel incisions: the eroded cells draining at least 10⁴ km².
@@ -561,7 +574,9 @@ fn grooves(cell: &SynthesisCell, body: ChannelBody) -> Vec<Groove> {
     if cell.flow.edge().is_none() {
         return out;
     }
-    let channels = cell.steepness != LogSteepness::ZERO && !cell.is_under_water();
+    let channels = cell.steepness != LogSteepness::ZERO
+        && !cell.is_under_water()
+        && cell.catchment_runoff != LogRunoff::NONE;
     let tributaries = (channels && cell.runoff != LogRunoff::NONE)
         .then(|| {
             tributary_steepness_m0_9(
@@ -578,6 +593,25 @@ fn grooves(cell: &SynthesisCell, body: ChannelBody) -> Vec<Groove> {
         cell.drainage.area().value(),
         body.gravity,
     );
+    // A world dry now's trunk is its epoch's valley alone (R09.T6.c): T6.b's depth no deeper than
+    // the coded incision, its walls running 5 G each, held to T6.b's.
+    if let Some(incision) = cell.epoch_incision.incision() {
+        let steepness =
+            channels.then(|| tributaries.unwrap_or_else(|| cell.steepness.index_m0_9()));
+        let valley = steepness.map_or(0.0, |k| valley_depth(k, body.radius, level).value());
+        let g = num::min(num::min(num::max(valley, depth), cap), incision.value());
+        if g > 0.0 && cell.catchment_runoff != LogRunoff::NONE {
+            out.push(Groove {
+                level,
+                density: MEAN_TRUNK_LENGTH / mean_cell_width(r, level),
+                depth: g,
+                floor: 0.5 * width,
+                wall: num::min(WALL_RUN_PER_DEPTH * g, wall),
+                trunk: true,
+            });
+        }
+        return out;
+    }
     let valley = tributaries.map_or(0.0, |k| valley_depth(k, body.radius, level).value());
     let g = num::min(num::max(valley, depth), cap);
     if g > 0.0 {
@@ -622,8 +656,9 @@ fn grooves(cell: &SynthesisCell, body: ChannelBody) -> Vec<Groove> {
 }
 
 /// The synthesis's `channel_variance` of `grooves` in wavelengths shorter than `finer_than_m`,
-/// rebuilt: each level's variance in its band share, summed, at [`WHOLE_VARIANCE_SHARE`].
-fn rebuilt_variance(grooves: &[Groove], radius_m: f64, finer_than_m: f64) -> f64 {
+/// rebuilt: each level's variance in its band share, summed, at `whole`, [`WHOLE_VARIANCE_SHARE`]
+/// or, on a world dry now's cell, 1.
+fn rebuilt_variance(grooves: &[Groove], radius_m: f64, finer_than_m: f64, whole: f64) -> f64 {
     let sum: f64 = grooves
         .iter()
         .map(|g| {
@@ -637,7 +672,7 @@ fn rebuilt_variance(grooves: &[Groove], radius_m: f64, finer_than_m: f64) -> f64
             share * g.variance_m2()
         })
         .sum();
-    WHOLE_VARIANCE_SHARE * sum
+    whole * sum
 }
 
 /// F1 and the ceiling on the reference Mars (decision-r09-t14-choices F1;
@@ -660,8 +695,9 @@ fn rebuilt_variance(grooves: &[Groove], radius_m: f64, finer_than_m: f64) -> f64
 /// - (A0), recorded: the coarse volume plus the synthesis's sub-cell term, the trunks' mean depth
 ///   of T6.b's closed form over each channelled cell, its port pinned by rebuilding
 ///   `channel_variance` on every channelled cell to 10⁻⁹;
-/// - (A2), recorded: the coarse volume against Luo et al.'s 1.2 m, a finding above 6.1 m (2.226
-///   m as built); beside it, the paleo-water floods 46.4% of the lid's area under the reference
+/// - (A2), asserted since R09.T6.c: the coarse volume, the drawn valleys' void, at least Luo et
+///   al.'s 1.2 m, a finding above 6.1 m (2.226 m with T14's trunk closure; R09.T6.c's figure in
+///   [`the_reference_mars_s_valleys_are_its_epoch_s`]); beside it, the paleo-water floods 46.4% of the lid's area under the reference
 ///   Mars's 156 m of global layer, Q2's static fill, an upper bound on the paleo-lakes' extent,
 ///   labelled: 46% of the cells are bounds during the epoch (the "T14.c follow-up" item 6);
 /// - (B), asserted: the area p99 of the eroded cells' coarse lowering over 350 m × 10 km ÷ each
@@ -686,14 +722,20 @@ fn the_reference_mars_s_trunk_incision_is_black_et_al_s() {
         gravity: pass.inputs().craters().gravity(),
     };
     let (mut sub_cell, mut channelled, mut worst) = (0.0, 0_usize, 0.0_f64);
-    for (c, record) in budget::records(&working).enumerate() {
+    for (c, record) in budget::records(pass.inputs(), &working).enumerate() {
         let terms = grooves(&record, body);
         if terms.is_empty() {
             continue;
         }
         channelled += 1;
         let expected = channel_variance(&record, body, Metres::new(PIN_FINER_THAN_M)).value();
-        let rebuilt = rebuilt_variance(&terms, r, PIN_FINER_THAN_M);
+        // A world dry now's one level, its epoch's trunk, is taken whole (R09.T6.c).
+        let whole = if record.epoch_incision.is_epoch() {
+            1.0
+        } else {
+            WHOLE_VARIANCE_SHARE
+        };
+        let rebuilt = rebuilt_variance(&terms, r, PIN_FINER_THAN_M, whole);
         let error = if expected > 0.0 {
             (rebuilt / expected - 1.0).abs()
         } else {
@@ -727,6 +769,159 @@ fn the_reference_mars_s_trunk_incision_is_black_et_al_s() {
     assert!(
         ceiling.ceiling_holds(),
         "(B): the area p99 of the eroded cells' lowering is {p99} m, {ratio} of its bound"
+    );
+    let layer = ceiling.layer_m(coarse);
+    assert!(
+        layer >= VALLEY_LAYER_M,
+        "(A2): the coarse volume is {layer} m of global layer, under Luo et al.'s 1.2 m"
+    );
+}
+
+/// Hynek, Beach and Hoke 2010's drainage density of Noachian units, km⁻¹: 0.0115 (JGR 115,
+/// E09008, doi:10.1029/2009JE003548, Table 1 and text, as decision-r09-t14-mars-ceiling §1.1 read
+/// it in full; R09.T6.c's science check reached only the abstract, so Table 1 is not re-read
+/// here), against Hesperian 0.00261 and Amazonian 0.00146. Printed beside, never asserted.
+const NOACHIAN_DENSITY_PER_KM: f64 = 0.0115;
+
+/// Prints the drawn valleys' depths by drainage class ([`DRAINAGE_CLASSES_M2`]): each
+/// `(drainage m², depth m)` class's count, share deeper than 350 m, median, p90 and maximum.
+fn print_valleys_by_class(valleys: &[(f64, f64)]) {
+    for (lo, hi, class) in DRAINAGE_CLASSES_M2 {
+        let depths: Vec<f64> = valleys
+            .iter()
+            .filter(|(a, _)| (lo..hi).contains(a))
+            .map(|&(_, g)| g)
+            .collect();
+        let share = deep_share(&depths);
+        if let Some(q) = quantiles(depths.clone()) {
+            eprintln!(
+                "R09.T6.c: drawn valleys draining {class}: {} cells, {:.2}% deeper than 350 m, \
+                 median {:.1} m, p90 {:.1} m, max {:.1} m",
+                depths.len(),
+                100.0 * share,
+                q[3],
+                q[5],
+                q[6]
+            );
+        }
+    }
+}
+
+/// R09.T6.c on the reference Mars, its whole pass (plan R09's T6.c Tests; decision-r09-t14-choices
+/// F2; decision-r09-t14-mars-ceiling §5; main's ruling, option A):
+///
+/// - every cell carries an epoch's code, none [`LogIncision::NONE`]; every cell inside a waiting
+///   crater's rim and every renewed `Province` cell is [`LogIncision::UNCUT`]; and the cells that
+///   draw a valley on one side alone, the branch's or the final field's, are counted;
+/// - the coarse lowering is the void of the valley the synthesis draws, its closed form on the
+///   final field's codes ([`epoch_valley`]): the two differ only where the final routing moves a
+///   cell's steepness, drainage or catchment runoff, recorded, with (A2) both ways;
+/// - (A2) on the drawn valleys' void at least 1.2 m (Luo, Cang and Howard 2017), and above 6.1 m a
+///   finding (printed);
+/// - the drawn valleys' density over the eroded `Lid` cells recorded against Hynek et al.'s 0.0115
+///   km⁻¹ for Noachian units (one trunk a cell of 38 km is already 0.026 km⁻¹);
+/// - the drawn valleys' depth by drainage class recorded, the share deeper than 350 m, the p90 and
+///   the maximum: G is the solver's incision wherever T6.b's steady state does not bind, so the
+///   tail is T14's (18.2%, 30.8% and 35.7%), a finding for a depth relation by drainage, not in K t;
+/// - every drawn valley's link, its coarse slope `k_s` A^−θ, at most [`DEBRIS_FLOW_SLOPE`] (0.06
+///   at most as built), and no wall steeper than 0.3, under [`VALLEY_WALL_GRADIENT`].
+#[test]
+fn the_reference_mars_s_valleys_are_its_epoch_s() {
+    let (staged, z0, dry) = eroded(reference::mars_like());
+    let pass = staged.pass();
+    let omega = pass.grid().solid_angles_sr();
+    let r = pass.inputs().radius().value();
+    let ceiling = Ceiling::new(&dry, &z0, omega, r);
+    let mut working = staged.working.clone();
+    run(&pass, &mut working);
+    let records: Vec<SynthesisCell> = budget::records(pass.inputs(), &working).collect();
+    let body = ChannelBody {
+        radius: pass.inputs().radius(),
+        level: pass.level().get(),
+        gravity: pass.inputs().craters().gravity(),
+    };
+    let sphere: f64 = omega.iter().sum();
+    let (mut synthesised, mut lid_area, mut lid_length) = (0.0, 0.0, 0.0);
+    let (mut differences, mut slopes, mut valleys) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut drawn, mut steep, mut unmatched) = (0_usize, 0_usize, 0_usize);
+    for (c, record) in records.iter().enumerate() {
+        assert_ne!(record.epoch_incision, LogIncision::NONE, "cell {c}");
+        let renewed = working.cells[c].crust == Crust::Province;
+        if dry.young[c] || renewed {
+            assert_eq!(record.epoch_incision, LogIncision::UNCUT, "cell {c}");
+        }
+        let valley = epoch_valley(record, body).filter(|v| v.depth().value() > 0.0);
+        let width = ceiling.width(c);
+        let lid = working.cells[c].crust == Crust::Lid && ceiling.eroded.contains(&c);
+        if lid {
+            lid_area += omega[c];
+        }
+        if valley.is_some() != (dry.valley_m[c] > 0.0) {
+            unmatched += 1;
+        }
+        let Some(valley) = valley else {
+            continue;
+        };
+        drawn += 1;
+        let g = valley.depth().value();
+        assert!(
+            1.5 * g / valley.wall().value() <= 0.3 + 1e-12,
+            "cell {c}: a wall steeper than 0.3"
+        );
+        let lowering = num::min(
+            ceiling.incision(c),
+            MEAN_TRUNK_LENGTH * valley.void_m2() / width,
+        );
+        synthesised += omega[c] * lowering;
+        if dry.lowering_m[c] > 0.0 {
+            differences.push(lowering / dry.lowering_m[c] - 1.0);
+        }
+        let slope = record.steepness.index_m0_9()
+            * math::powf(record.drainage.area().value(), -LogSteepness::THETA);
+        if slope > DEBRIS_FLOW_SLOPE {
+            steep += 1;
+        }
+        slopes.push(slope);
+        valleys.push((record.drainage.area().value(), g));
+        if lid {
+            lid_length += omega[c] * MEAN_TRUNK_LENGTH / width;
+        }
+    }
+    assert!(drawn > 0);
+    let layer = ceiling.layer_m(ceiling.volume_m3());
+    let from_codes = synthesised / sphere;
+    let density = 1e3 * lid_length / lid_area;
+    eprintln!(
+        "R09.T6.c: {drawn} cells draw an epoch valley; (A2) {layer:.4} m of global layer from the \
+         branch's closure, {from_codes:.4} m from the synthesis's closed form on the final codes{}",
+        if layer > VALLEY_LAYER_FINDING_M {
+            ", FINDING: above 6.1 m"
+        } else {
+            ""
+        }
+    );
+    print_distribution(
+        "R09.T6.c: the closed form on the final codes over the closure, less 1 (dimensionless)",
+        differences,
+    );
+    eprintln!(
+        "R09.T6.c: {unmatched} cells draw a valley on one side alone (the branch's or the final \
+         field's), where the final routing moves a cell's flow or catchment"
+    );
+    eprintln!(
+        "R09.T6.c: the drawn valleys' density over the eroded Lid cells {density:.4} km⁻¹ against \
+         Hynek et al.'s {NOACHIAN_DENSITY_PER_KM} km⁻¹ for Noachian units ({:.2} times)",
+        density / NOACHIAN_DENSITY_PER_KM
+    );
+    print_distribution("R09.T6.c: the drawn valleys' coarse slope (m m⁻¹)", slopes);
+    eprintln!(
+        "R09.T6.c: {steep} drawn valleys' coarse slopes above DEBRIS_FLOW_SLOPE {DEBRIS_FLOW_SLOPE}"
+    );
+    print_valleys_by_class(&valleys);
+    assert_eq!(steep, 0, "drawn valleys steeper than the debris-flow slope");
+    assert!(
+        layer >= VALLEY_LAYER_M,
+        "(A2): the drawn valleys' void is {layer} m of global layer, under Luo et al.'s 1.2 m"
     );
 }
 
@@ -881,12 +1076,15 @@ fn measure_the_level_starts_on_the_reference_mars() {
 ///
 /// **The dependence on resolution, a finding for R09.T6.c and the `w_v` check**
 /// (decision-r09-t14-choices, "T14.c follow-up" item 6): at level 8 (cells of about 19 km), (B)'s
-/// p99 is 1.94 times its bound and (A2) is 5.64 m, against 0.97 and 2.226 m at level 7. Every
+/// p99 is 1.94 times its bound and (A2) is 5.64 m, against 0.97 and 2.226 m at level 7, with
+/// T14's trunk closure (R09.T6.c's figures in the plan's "Deviations in T6.c, as built"). Every
 /// coarse cell carries a trunk, so a finer level carries four times the valley length and the void
 /// per area grows with resolution. Not a blocker, since a Mars-sized body is always level 7; but
 /// any world needs the closure and the network invariant with the level: a cell carries a valley,
 /// and the closure, only where its drainage exceeds the epoch's channel-initiation area, which a
-/// larger world dry now, at level 8, depends on.
+/// larger world dry now, at level 8, depends on. R09.T6.c draws each cell's trunk alone and its
+/// closure takes the drawn valley (main's ruling, option A); a sourced channel-initiation area
+/// independent of the grid is a later item, with no owner until a source exists.
 #[test]
 #[ignore = "slow: the reference Mars at levels 7 and 8 and two more epochs, R09.T14.c"]
 fn the_reference_mars_s_slow_record() {

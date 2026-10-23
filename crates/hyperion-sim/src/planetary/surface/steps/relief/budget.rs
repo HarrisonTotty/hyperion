@@ -79,6 +79,7 @@ use super::super::craters::{Phase, each_lift, smoothed_in_by, spheroid_area_m2, 
 use super::super::plates::slot;
 use super::super::{Pass, Working};
 use super::quadrature::{self, Moments, NODES, Values};
+use crate::planetary::surface::inputs::CoarseInputs;
 use crate::planetary::surface::quantise::synthesis_record;
 use crate::units::{Metres, SquareMetres};
 
@@ -222,16 +223,19 @@ pub(crate) struct Booked {
     pub(crate) channels_finer_m2: f64,
 }
 
-/// Each cell's record as the quantiser makes it, in cell-index order, so that the styles and
-/// channels read the field's codes bit for bit.
+/// Each cell's record as the quantiser makes it on the body of `inputs`, in cell-index order, so
+/// that the styles and channels read the field's codes bit for bit.
 ///
 /// # Panics
 ///
 /// If a cell's state has no code: a fault of the step that wrote it, which the quantiser would
 /// name.
-pub(crate) fn records(working: &Working) -> impl Iterator<Item = SynthesisCell> + '_ {
-    (0_u32..).zip(&working.cells).map(|(n, cell)| {
-        synthesis_record(n, cell)
+pub(crate) fn records<'a>(
+    inputs: &'a CoarseInputs,
+    working: &'a Working,
+) -> impl Iterator<Item = SynthesisCell> + 'a {
+    (0_u32..).zip(&working.cells).map(move |(n, cell)| {
+        synthesis_record(inputs, n, cell)
             .unwrap_or_else(|e| panic!("the pass's state quantises, but {e} ({e:?})"))
     })
 }
@@ -249,7 +253,7 @@ pub(crate) fn book(pass: &Pass<'_>, working: &Working, body: &Body) -> Booked {
     let count = working.cells.len();
     let (mut amplitude, mut belt) = (Vec::with_capacity(count), Vec::with_capacity(count));
     let (mut total, mut whole, mut finer) = (0.0, 0.0, 0.0);
-    for (record, &w) in records(working).zip(omega) {
+    for (record, &w) in records(pass.inputs(), working).zip(omega) {
         let style = ReliefStyle::of(&record);
         amplitude.push(style.amplitude());
         belt.push(style.belt());

@@ -378,10 +378,10 @@ impl SurfaceClass {
     }
 }
 
-/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 25 bytes
+/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 26 bytes
 /// in the payload (Design note 17's 21, the substance byte of decision-composition §1.7, the sea
-/// floor's byte of `decision-r09-t5.md` item 5 and the two runoff bytes of
-/// science-r09-drainage.md §1).
+/// floor's byte of `decision-r09-t5.md` item 5, the two runoff bytes of science-r09-drainage.md §1
+/// and the epoch incision's byte of R09.T6.c).
 ///
 /// Plain data with public fields, each an integer code whose step and meaning its documentation
 /// gives; the methods read them in SI units. Heights are along the normal of the header's
@@ -422,6 +422,14 @@ pub struct SynthesisCell {
     /// included: r̄. Hergarten's equivalent area is r̄ × `drainage` ÷ (1 m a⁻¹), and the cell's mean
     /// discharge r̄ × `drainage`. A trunk's width reads it.
     pub catchment_runoff: LogRunoff,
+    /// The channel incision of the cell's past wet epoch on a world dry now: the coarse pass's
+    /// erosion solver's unscaled incision, z0 less the solved channel at the full erodibility K
+    /// (R09.T6.c; decision-r09-t14-choices F2), whose valleys the synthesis draws in place of
+    /// R09.T6.b's steady state. [`LogIncision::UNCUT`] where the epoch cut nothing (a surface
+    /// younger than its end, a renewed province, a cell inside a waiting crater's rim, a
+    /// paleo-lake's or sea's bed), and [`LogIncision::NONE`] on every cell of a world wet now, a
+    /// world never wet or one with no fluvial step, where the synthesis draws the steady state.
+    pub epoch_incision: LogIncision,
     /// The height of the water surface over the cell above the datum, millimetres: the sea's or a
     /// lake's level where the cell is under water, and the ground's, `elevation_mm`, where it is
     /// dry. Never below the ground.
@@ -882,6 +890,107 @@ impl LogRunoff {
     }
 }
 
+/// The channel incision of a world's past wet epoch at a cell, on a logarithmic scale, one byte
+/// (R09.T6.c; decision-r09-t14-choices F2): on a world dry now, the coarse pass's erosion solver's
+/// unscaled incision, the ground before the epoch, z0, less its solved channel at the full
+/// erodibility K (R09.T14's `CellState::channel_incision`), metres.
+///
+/// Code 0, [`NONE`](Self::NONE), is no epoch's valleys at all: a world wet now, a world never wet
+/// or a world with no fluvial step, where the synthesis draws R09.T6.b's steady state. Code 1,
+/// [`UNCUT`](Self::UNCUT), is a cell of a world dry now that its epoch cut nothing: a surface
+/// younger than the epoch's end, a renewed province, a cell inside a waiting crater's rim, a
+/// paleo-lake's or sea's bed, or an incision under 0.5 m × 2^(−1/32), half a step below code 2;
+/// the synthesis draws no valley there. Code c ≥ 2 is 0.5 m × 2^((c − 2) ÷ 16), 16 codes an octave,
+/// a step of 4.4%, from 0.5 m to about 28.8 km at code 255, above the reference Mars's
+/// construction's 22.5 km of relief; a deeper incision, possible only on a small world's tall
+/// edifice, takes code 255, so that no world's pass is refused, and the synthesis's valleys, at
+/// most a fifth of a coarse cell deep (R09.T6.b's cap), never read past it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct LogIncision(u8);
+
+/// [`LogIncision`]'s codes an octave.
+const INCISION_PER_OCTAVE: f64 = 16.0;
+
+/// The incision of [`LogIncision`]'s code 2, metres: 0.5 m.
+const INCISION_UNIT_M: f64 = 0.5;
+
+/// The code of [`LogIncision`]'s unit, [`INCISION_UNIT_M`]: codes 0 and 1 hold no length.
+const INCISION_UNIT_CODE: f64 = 2.0;
+
+impl LogIncision {
+    /// No epoch's valleys at the cell: its world is wet now, was never wet or has no fluvial step.
+    pub const NONE: Self = Self(0);
+
+    /// A cell of a world dry now that its wet epoch cut nothing.
+    pub const UNCUT: Self = Self(1);
+
+    /// The incision of code `code`.
+    #[must_use]
+    pub const fn new(code: u8) -> Self {
+        Self(code)
+    }
+
+    /// The code.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// The code of a cell of a world dry now whose epoch incised it by `incision`, rounded to the
+    /// nearest step: [`UNCUT`](Self::UNCUT) for zero and for an incision that rounds below code 2,
+    /// under 0.5 m × 2^(−1/32), and the last code, about 28.8 km, for any incision past it.
+    ///
+    /// # Errors
+    ///
+    /// [`QuantiseValueError`] if the incision is not finite or is negative.
+    pub fn from_metres(incision: Metres) -> Result<Self, QuantiseValueError> {
+        let m = incision.value();
+        if !m.is_finite() {
+            return Err(QuantiseValueError::NotFinite(m));
+        }
+        if m < 0.0 {
+            return Err(QuantiseValueError::OutOfRange(m));
+        }
+        let held = crate::num::min(m, Self(u8::MAX).metres().value());
+        let code = log_code_u8(
+            held / INCISION_UNIT_M,
+            INCISION_PER_OCTAVE,
+            INCISION_UNIT_CODE,
+        )
+        .map_err(|e| match e {
+            QuantiseValueError::NotFinite(_) => QuantiseValueError::NotFinite(m),
+            QuantiseValueError::OutOfRange(_) => QuantiseValueError::OutOfRange(m),
+        })?;
+        Ok(Self(code.max(Self::UNCUT.0)))
+    }
+
+    /// The length of a code of 2 or more, by its scale.
+    #[must_use]
+    fn metres(self) -> Metres {
+        Metres::new(
+            INCISION_UNIT_M * log_value(u32::from(self.0), INCISION_PER_OCTAVE, INCISION_UNIT_CODE),
+        )
+    }
+
+    /// The incision: `None` for [`NONE`](Self::NONE), zero for [`UNCUT`](Self::UNCUT), else the
+    /// code's length.
+    #[must_use]
+    pub fn incision(self) -> Option<Metres> {
+        match self.0 {
+            0 => None,
+            1 => Some(Metres::ZERO),
+            _ => Some(self.metres()),
+        }
+    }
+
+    /// Whether the cell's world had a wet epoch whose valleys the synthesis draws: every code but
+    /// [`NONE`](Self::NONE).
+    #[must_use]
+    pub const fn is_epoch(self) -> bool {
+        self.0 != Self::NONE.0
+    }
+}
+
 /// A month's prevailing wind 10 m above the ground, two bytes: where the air moves and how fast
 /// (Design note 8).
 ///
@@ -1173,6 +1282,83 @@ mod tests {
         );
     }
 
+    /// Every incision code from `UNCUT` up comes back from its value as itself, an incision
+    /// returns within half a step (2.2%), the pinned incisions take their codes, what rounds below
+    /// code 2 is `UNCUT`, what lies past the last code takes it, and a negative or non-finite
+    /// incision is refused.
+    #[test]
+    fn field_incision_codes_round_trip() {
+        assert_eq!(LogIncision::NONE.incision(), None);
+        assert!(!LogIncision::NONE.is_epoch());
+        for code in 1..=u8::MAX {
+            let incision = LogIncision::new(code);
+            assert!(incision.is_epoch(), "code {code}");
+            let metres = incision.incision().expect("a code past 0 has a length");
+            assert_eq!(
+                LogIncision::from_metres(metres),
+                Ok(incision),
+                "code {code}"
+            );
+        }
+        for m in [0.5, 3.0, 50.0, 188.0, 350.0, 2_300.0, 22_500.0] {
+            let back = LogIncision::from_metres(Metres::new(m))
+                .unwrap()
+                .incision()
+                .unwrap();
+            assert!(relative(back.value(), m) <= 0.022, "{m} m");
+        }
+        assert_eq!(LogIncision::UNCUT.incision(), Some(Metres::ZERO));
+        assert_same_bits(LogIncision::new(2).incision().unwrap().value(), 0.5);
+        // 16 log₂(188 ÷ 0.5) = 136.87, so 188 m is code 139, 189.0 m.
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(0.5)),
+            Ok(LogIncision::new(2))
+        );
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(188.0)),
+            Ok(LogIncision::new(139))
+        );
+        assert_eq!(
+            LogIncision::from_metres(Metres::ZERO),
+            Ok(LogIncision::UNCUT)
+        );
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(-0.0)),
+            Ok(LogIncision::UNCUT)
+        );
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(0.2)),
+            Ok(LogIncision::UNCUT)
+        );
+        // Code 1 is 0.5 m × 2^(−1/16), which holds no length: it rounds to UNCUT.
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(0.5 * math::exp2(-1.0 / 16.0))),
+            Ok(LogIncision::UNCUT)
+        );
+        // The last code is about 28.8 km, and an incision past it takes it.
+        let last = LogIncision::new(u8::MAX).incision().unwrap().value();
+        assert!((28_700.0..28_800.0).contains(&last), "{last} m");
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(30_000.0)),
+            Ok(LogIncision::new(u8::MAX))
+        );
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(f64::MAX)),
+            Ok(LogIncision::new(u8::MAX))
+        );
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(-1.0)),
+            Err(QuantiseValueError::OutOfRange(-1.0))
+        );
+        assert_eq!(
+            LogIncision::from_metres(Metres::new(f64::INFINITY)),
+            Err(QuantiseValueError::NotFinite(f64::INFINITY))
+        );
+        assert!(refuses_nan(&LogIncision::from_metres(Metres::new(
+            f64::NAN
+        ))));
+    }
+
     /// Whether `result` refuses a NaN as not finite.
     fn refuses_nan<T>(result: &Result<T, QuantiseValueError>) -> bool {
         matches!(result, Err(QuantiseValueError::NotFinite(v)) if v.is_nan())
@@ -1262,6 +1448,7 @@ mod tests {
             steepness: LogSteepness::ZERO,
             runoff: LogRunoff::NONE,
             catchment_runoff: LogRunoff::NONE,
+            epoch_incision: LogIncision::NONE,
             water_surface_mm: 0,
             ice: 255,
             substances: 0x23,
@@ -1382,6 +1569,7 @@ mod tests {
             steepness: LogSteepness::ZERO,
             runoff: LogRunoff::NONE,
             catchment_runoff: LogRunoff::NONE,
+            epoch_incision: LogIncision::NONE,
             water_surface_mm: 0,
             ice: 0,
             substances: SynthesisCell::NO_SUBSTANCES,
@@ -1417,6 +1605,7 @@ mod tests {
                 steepness: LogSteepness::ZERO,
                 runoff: LogRunoff::NONE,
                 catchment_runoff: LogRunoff::NONE,
+                epoch_incision: LogIncision::NONE,
                 water_surface_mm: 0,
                 ice: 0,
                 substances: byte,

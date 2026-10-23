@@ -16,7 +16,8 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 use super::*;
 use crate::cube::unit_dir;
 use crate::field::{
-    ClimateCell, CoarseCrater, CoarseField, FlowDirection, LogArea, LogRunoff, LogSteepness,
+    ClimateCell, CoarseCrater, CoarseField, FlowDirection, LogArea, LogIncision, LogRunoff,
+    LogSteepness,
 };
 use crate::field::{SurfaceClass, cell_index};
 use crate::synth::{
@@ -1547,6 +1548,7 @@ fn cell(crust: Crust, boundary: BoundaryKind, distance_km: i16, obliquity: u8) -
         steepness: LogSteepness::ZERO,
         runoff: LogRunoff::NONE,
         catchment_runoff: LogRunoff::NONE,
+        epoch_incision: LogIncision::NONE,
         water_surface_mm: 0,
         ice: 0,
         substances: SynthesisCell::NO_SUBSTANCES,

@@ -361,7 +361,7 @@ fn assert_the_codes_hold(what: &str, through: &Through) {
     let drainage = accumulated(&pass, working, &area);
     let flux = accumulated(&pass, working, &discharge);
     let (area_step, runoff_step, steep_step) = half_steps();
-    let records: Vec<SynthesisCell> = budget::records(working).collect();
+    let records: Vec<SynthesisCell> = budget::records(pass.inputs(), working).collect();
     let (mut worst_area, mut worst_flux, mut worst_slope) = (0.0_f64, 0.0_f64, 0.0_f64);
     let mut slopes = 0_usize;
     for (n, record) in (0_u32..).zip(&records) {

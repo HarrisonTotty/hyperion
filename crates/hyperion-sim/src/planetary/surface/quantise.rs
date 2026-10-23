@@ -15,11 +15,12 @@ use std::fmt;
 use hyperion_surface::cube::PatchKey;
 use hyperion_surface::field::{
     BuildFieldError, BuildFieldHeaderError, ClimateCell, CoarseCrater, CoarseField, FieldHeader,
-    FieldHeaderParts, LogArea, LogPrecipitation, LogRunoff, LogSteepness, NO_ENTRY,
+    FieldHeaderParts, LogArea, LogIncision, LogPrecipitation, LogRunoff, LogSteepness, NO_ENTRY,
     PrecipitationSource, QuantiseValueError, SynthesisCell, Wind, cell_index,
 };
 
 use super::inputs::CoarseInputs;
+use super::steps::erosion::Branch;
 use super::steps::{CellState, ClimateState, Working};
 use crate::planetary::derive::atmosphere::SurfaceState;
 use crate::units::{Metres, Pascals};
@@ -215,7 +216,7 @@ pub fn quantise(
     )?;
     let synthesis = (0_u32..)
         .zip(&working.cells)
-        .map(|(n, cell)| synthesis_record(n, cell))
+        .map(|(n, cell)| synthesis_record(inputs, n, cell))
         .collect::<Result<Vec<_>, _>>()?;
     let climate = (0_u32..)
         .zip(&working.climate)
@@ -265,9 +266,11 @@ fn check_count(part: &'static str, expected: u32, found: usize) -> Result<(), Qu
     }
 }
 
-/// The synthesis record of cell `n` in state `cell`: the field's own codes, which R09.T12.e reads
-/// mid-pass so that the styles and channels it books are the field's bit for bit.
+/// The synthesis record of cell `n` in state `cell` on the body of `inputs`: the field's own codes,
+/// which R09.T12.e reads mid-pass so that the styles and channels it books are the field's bit for
+/// bit.
 pub(crate) fn synthesis_record(
+    inputs: &CoarseInputs,
     n: u32,
     cell: &CellState,
 ) -> Result<SynthesisCell, QuantiseFieldError> {
@@ -294,6 +297,7 @@ pub(crate) fn synthesis_record(
         runoff: LogRunoff::from_metres_per_year(cell.runoff_m_per_year).map_err(at("runoff"))?,
         catchment_runoff: LogRunoff::from_metres_per_year(cell.catchment_runoff_m_per_year)
             .map_err(at("catchment runoff"))?,
+        epoch_incision: epoch_incision_code(inputs, cell).map_err(at("epoch incision"))?,
         water_surface_mm: SynthesisCell::quantise_height(cell.water_surface)
             .map_err(at("water surface"))?,
         ice: SynthesisCell::quantise_ice(cell.ice_fraction).map_err(at("ice"))?,
@@ -302,6 +306,25 @@ pub(crate) fn synthesis_record(
         crater_state: cell.crater_state,
         seafloor: seafloor_byte(cell).map_err(at("sea floor"))?,
     })
+}
+
+/// The epoch-incision code of a cell in state `cell` on the body of `inputs` (R09.T6.c;
+/// decision-r09-t14-choices F2): on a world dry now ([`Branch::DryNow`]), its wet epoch's channel
+/// incision ([`CellState::channel_incision`], [`LogIncision::UNCUT`] where the epoch cut nothing);
+/// on a world wet now or never wet, [`LogIncision::NONE`], whose synthesis draws the steady state.
+///
+/// # Errors
+///
+/// [`QuantiseValueError`] if a world dry now's incision is not finite, is negative or is beyond
+/// the last code.
+fn epoch_incision_code(
+    inputs: &CoarseInputs,
+    cell: &CellState,
+) -> Result<LogIncision, QuantiseValueError> {
+    match Branch::of(inputs) {
+        Branch::DryNow => LogIncision::from_metres(cell.channel_incision),
+        Branch::NeverWet | Branch::WetNow => Ok(LogIncision::NONE),
+    }
 }
 
 /// The sea floor byte of a cell in state `cell` (`decision-r09-t5.md` item 5): its hill relief's
@@ -552,6 +575,46 @@ mod tests {
             quantise(&inputs, short),
             Err(QuantiseFieldError::Counts { part: "cells", .. })
         ));
+    }
+
+    /// A world dry now carries its wet epoch's channel incision, `UNCUT` where the epoch cut
+    /// nothing, and a world wet now or never wet carries `NONE` whatever its cells hold
+    /// (R09.T6.c); an incision no code holds is named.
+    #[test]
+    fn only_a_world_dry_now_carries_its_epoch_s_incision() {
+        let (mars, grid, climate) = working_of(reference::mars_like());
+        assert_eq!(Branch::of(&mars), Branch::DryNow);
+        let pass = Pass::new(SurfaceSeed::new(1), &mars, &grid, &climate);
+        let mut working = Working::initial(&pass);
+        working.cells[7].channel_incision = Metres::new(188.0);
+        let field = quantise(&mars, working.clone()).unwrap();
+        assert_eq!(field.synthesis()[7].epoch_incision, LogIncision::new(139));
+        assert_eq!(field.synthesis()[8].epoch_incision, LogIncision::UNCUT);
+        working.cells[9].channel_incision = Metres::new(-1.0);
+        let error = quantise(&mars, working).unwrap_err();
+        assert_eq!(
+            error,
+            QuantiseFieldError::Cell {
+                cell: 9,
+                part: "epoch incision",
+                error: QuantiseValueError::OutOfRange(-1.0),
+            }
+        );
+        assert_eq!(error.to_string(), "cell 9's epoch incision has no code");
+        for inputs in [reference::moon_like(), reference::small_earth()] {
+            let (inputs, grid, climate) = working_of(inputs);
+            assert_ne!(Branch::of(&inputs), Branch::DryNow);
+            let pass = Pass::new(SurfaceSeed::new(1), &inputs, &grid, &climate);
+            let mut working = Working::initial(&pass);
+            working.cells[7].channel_incision = Metres::new(188.0);
+            let field = quantise(&inputs, working).unwrap();
+            assert!(
+                field
+                    .synthesis()
+                    .iter()
+                    .all(|c| c.epoch_incision == LogIncision::NONE)
+            );
+        }
     }
 
     #[test]

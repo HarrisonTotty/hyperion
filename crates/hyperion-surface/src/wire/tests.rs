@@ -19,9 +19,9 @@ use crate::craters::{Screening, TargetClass};
 use crate::field::{
     BoundaryKind, BuildPaletteError, ClimateModelKind, CraterState, Crust, FieldView,
     FlowDirection, InsertBlockError, KoppenGeiger, LIQUID_BINS, LiquidBasis, LiquidProperties,
-    LogArea, LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily, NO_ENTRY,
-    PaletteEntry, PaletteRole, PartialField, PrecipitationSource, SurfaceClass, SurfaceForm, Wind,
-    cell_at_index, crater_key_order,
+    LogArea, LogIncision, LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette,
+    MechanicsFamily, NO_ENTRY, PaletteEntry, PaletteRole, PartialField, PrecipitationSource,
+    SurfaceClass, SurfaceForm, Wind, cell_at_index, crater_key_order,
 };
 use crate::material::{PhaseLaw, UNASSIGNED_PHASE_ROW};
 use crate::substance_key::{ParseSubstanceKeyError, SubstanceKey};
@@ -508,17 +508,19 @@ fn wire_payloads_merged_in_any_order_give_the_whole_cover_s_field() {
     }
 }
 
-/// The Earth-like world's whole payload is 10–15 MB (about 14.75 MB: Design note 17's 21 bytes a
-/// cell with the substance and sea floor bytes and the two runoff bytes, 25, and 50 per four
-/// cells, with each block's header, the field header with its palette, and the craters), and no
-/// block of it, or of any payload here, exceeds 1 MiB.
+/// The Earth-like world's whole payload is 10 MB to R03's 15 MiB, 15,728,640 bytes, the wire's
+/// binding budget, 61 frames of R03's bulk transfer (`hyperion-protocol`'s `bulk.rs`): about
+/// 15.14 MB (Design note 17's 21 bytes a cell with the substance and sea floor bytes, the two
+/// runoff bytes and the epoch incision's, 26, and 50 per four cells, with each block's header,
+/// the field header with its palette, and the craters), about 0.59 MB (3.7%) inside 15 MiB, 58 of
+/// the 61 frames; and no block of it, or of any payload here, exceeds 1 MiB.
 #[test]
-fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
+fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_mb_to_15_mib() {
     let field = earth();
     let bytes = encode_payload(field, &whole(field), None);
     let records = 393_216 * SynthesisCell::BYTES + 98_304 * ClimateCell::BYTES;
     assert!(
-        (10_000_000..=15_000_000).contains(&bytes.len()),
+        (10_000_000..=15_728_640).contains(&bytes.len()),
         "{} bytes",
         bytes.len()
     );
@@ -928,15 +930,15 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         damaged(at[1] + 41, &6_145_u32.to_le_bytes()),
         block(1, outside)
     );
-    // The record's water surface, after its 16 bytes from the elevation to the two runoffs.
+    // The record's water surface, after its 17 bytes from the elevation to the epoch incision.
     let dry = DecodeBlockError::Record(BuildFieldError::WaterBelowGround { cell: start });
     assert_eq!(
-        damaged(at[1] + 46 + 16, &i32::MIN.to_le_bytes()),
+        damaged(at[1] + 46 + 17, &i32::MIN.to_le_bytes()),
         block(1, dry)
     );
     // The record's last byte, its sea floor: a lid has none.
     let seafloor = DecodeBlockError::Record(BuildFieldError::Seafloor { cell: start });
-    assert_eq!(damaged(at[1] + 46 + 24, &[0x10]), block(1, seafloor));
+    assert_eq!(damaged(at[1] + 46 + 25, &[0x10]), block(1, seafloor));
     let one = &bytes[at[1]..at[2]];
     assert_eq!(
         decode_block(&split_first_range(one)),
@@ -1308,10 +1310,10 @@ where
 
 /// The golden file `tests/golden/wire/codes.golden`: every code a payload carries, decoded. Each
 /// one-byte enum's codes and variants, and the layout's own tags; the value of every code of every
-/// one-byte scale (the steepness index, the precipitation rate, the runoff, the wind's speed and
-/// azimuth, the resolution, the boundary obliquity, the ice share, the crater degradation and the
-/// crater state's density); the assigned surface-class codes; a
-/// sample of the two-byte drainage area's; the header's temperature and anomaly steps for every
+/// one-byte scale (the steepness index, the precipitation rate, the runoff, the epoch incision in
+/// metres, `incision_m`, 0 for codes 0 and 1, which hold no length, the wind's speed and azimuth,
+/// the resolution, the boundary obliquity, the ice share, the crater degradation and the crater
+/// state's density); the assigned surface-class codes; a sample of the two-byte drainage area's; the header's temperature and anomaly steps for every
 /// exponent and its temperatures at pinned codes; the cells' heights and distances at pinned
 /// codes; and the sea floor's two nibbles, every code. A code renumbered fails it; a code appended
 /// only extends it (`SURFACE_PAYLOAD_FORMAT`'s rule).
@@ -1359,6 +1361,7 @@ const PLAIN_CELL: SynthesisCell = SynthesisCell {
     steepness: LogSteepness::ZERO,
     runoff: LogRunoff::NONE,
     catchment_runoff: LogRunoff::NONE,
+    epoch_incision: LogIncision::NONE,
     water_surface_mm: 0,
     ice: 0,
     substances: SynthesisCell::NO_SUBSTANCES,
@@ -1442,6 +1445,12 @@ fn write_byte_scales(w: &mut GoldenWriter) {
         w.f64(
             &format!("runoff_m_a[{code}]"),
             LogRunoff::new(code).metres_per_year(),
+        );
+    }
+    for code in 0..=u8::MAX {
+        w.f64(
+            &format!("incision_m[{code}]"),
+            LogIncision::new(code).incision().map_or(0.0, Metres::value),
         );
     }
     for code in 0..=u8::MAX {

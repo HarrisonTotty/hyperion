@@ -210,9 +210,10 @@ pub mod field {
         plate: u8, crust: Crust, boundary: BoundaryKind, boundary_obliquity: u8,
         flow: FlowDirection, drainage: LogArea (geometric), steepness: LogSteepness (k_s on it),
         runoff: LogRunoff, catchment_runoff: LogRunoff (follow-up C),
+        epoch_incision: LogIncision (R09.T6.c; 0 no epoch, 1 uncut, else 0.5 m × 2^((c − 2) ÷ 16)),
         water_surface_mm: i32, ice: u8, substances: u8 (ice and liquid entries),
         class: SurfaceClass, crater_state: u8, seafloor: u8 (hill relief | ponded sediment,
-        decision-r09-t5 item 5) */ }                    // 25 bytes in the payload
+        decision-r09-t5 item 5) */ }                    // 26 bytes in the payload
     pub struct ClimateCell { /* at level − 1: sea_level_temperature: i16 (0.01 K),
         month_anomaly: [i8; 12] (header's step), month_precipitation: [u8; 12] (log rate),
         wind: [Wind; 12] (each month's 10 m wind) */ }    // 50 bytes, one per four cells
@@ -1362,11 +1363,12 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     confidence for Mars and high obliquity), so no anomaly saturates and no cell grows. The climate
     layer is at level L − 1, because it is interpolated from the energy-balance grid and carries
     nothing finer except the lapse term, which the synthesis re-applies from the header's rate and
-    the cell's elevation. That gives about 25 B a cell (21 B, T2's follow-up B's substance byte,
-    `decision-r09-t5.md`'s sea-floor byte and follow-up C's two runoff bytes) plus 50 B per four
-    (twelve months of anomaly, precipitation and wind): some 14.7 MB for an Earth at level 8,
-    3.7 MB for a Mars at 7 and 0.94 MB for the Moon, inside the brainstorm's "roughly 2 to 15 MB"
-    and R03's 15 MiB check.
+    the cell's elevation. That gives about 26 B a cell (21 B, T2's follow-up B's substance byte,
+    `decision-r09-t5.md`'s sea-floor byte, follow-up C's two runoff bytes and R09.T6.c's
+    epoch-incision byte) plus 50 B per four
+    (twelve months of anomaly, precipitation and wind): some 15.1 MB for an Earth at level 8,
+    3.8 MB for a Mars at 7 and 0.96 MB for the Moon, at the top of the brainstorm's "roughly 2 to
+    15 MB" and inside R03's 15 MiB check, the binding wire budget (main's ruling for R09.T6.c).
     Heights, elevations and sea level are measured along the normal of the body's
     rotational spheroid, R07's reference body (a = R_vol (1 − f)^(−⅓), c = a (1 − f), with plan 14's
     flattening f, which P14.T46 sends in the record's `figure()`), the one datum R07's Design note
@@ -1859,6 +1861,19 @@ and T9).
     synthesised as T6.b builds it, to the bit. Acceptance:
     `cargo test -p hyperion-surface synth::channels` and
     `cargo test -p hyperion-sim planetary::surface::steps::erosion`.
+  - _Built 2026-10-22_ (lane r09-valleys, from `e1a44211`; Risks, "Deviations in T6.c, as built",
+    and "Deferred findings (2026-10-13 rule) (R09.T6.c)"). Main's ruling, option A: a world dry now
+    draws its trunks alone, each its epoch's valley, since F2's tributary factor is identically 1
+    on T6.b's profiles and the tributaries the epoch's knickpoints reach fail (B) 3.3 times. The
+    input is `SynthesisCell::epoch_incision`, a `LogIncision` byte (0 no epoch, 1 uncut, else
+    0.5 m × 2^((c − 2) ÷ 16), saturating at 255), the record 26 bytes at
+    `SURFACE_PAYLOAD_FORMAT` 1 and `GENERATOR_VERSION` 23 (main's ruling of 2026-10-22, before the
+    gate). On the reference Mars: (A2) 1.961 m, asserted; (B) p99 75.8 m; density 0.0247 km⁻¹
+    over the eroded Lid; no drawn valley's coarse slope above 0.06; the whole pass's σ_h within
+    8.5 × 10⁻⁸. Acceptance as built, beside the two above: `cargo test -p hyperion-surface
+field::`, `wire::` and `synth::height_golden` (the codec, the stride and size, and the wet-now
+    synthesis to the bit in the Earth-like goldens), `--test panics`, and `cargo test -p
+hyperion-sim planetary::surface::quantise`.
 
 Acceptance: `cargo test -p hyperion-surface synth::channels`.
 
@@ -3473,7 +3488,8 @@ per climate record (`decision-r09-t2.md` item 1), and every code's scale (Risks,
 T2, as built"), the spectrum's break fields, the sea-floor byte's two scales
 (`decision-r09-t5.md`) and `LogRunoff`'s scale for follow-up C's two runoff bytes,
 `LogPrecipitation`'s in volume: code 0 none, below 0.1 mm a⁻¹, and code c ≥ 1
-0.1 mm a⁻¹ × 2^((c − 1) ÷ 12) (science-r09-drainage.md §1); and T2's follow-up E's palette
+0.1 mm a⁻¹ × 2^((c − 1) ÷ 12) (science-r09-drainage.md §1); R09.T6.c's `LogIncision`, after
+`catchment_runoff`: 0 none, 1 uncut, c ≥ 2 0.5 m × 2^((c − 2) ÷ 16), saturating at 255; and T2's follow-up E's palette
 liquid record (its eight members in order, each optional member's presence byte, and the
 record's own), `LIQUID_BINS`' fifteen bake bins, `LiquidBasis`'s codes 0–2, and the header's
 `maturity` and `organic_cover`, dimensionless in [0, 1] and absent until P14.T54.b
@@ -3669,9 +3685,16 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
 - **Field size.** Design note 17's layout gives about 14.7 MB for an Earth, about 1.0 MB inside
   R03's 15 MiB check: 13.96 MB with `decision-r09-t5.md`'s sea-floor byte, and about 14.75 MB
   since follow-up C's two runoff bytes (science-r09-drainage.md §1.3, whose 14.4 MB and 1.4 MB
-  predate the sea-floor byte). The transfer budget's margin is now about 0.98 MB, 6.2% of the
-  check, so any further per-cell byte (0.39 MB on an Earth at level 8) needs R03's check re-run
-  first. If the climate layer at L − 1 proves too coarse for
+  predate the sea-floor byte). The transfer budget's margin was then about 0.98 MB, 6.2% of the
+  check. _R09.T6.c (2026-10-22):_ its epoch-incision byte makes the record 26 bytes and the Earth
+  at level 8 15,141,470 bytes (`wire/payloads.golden`), 587,170 bytes, about 0.59 MB and 3.7%,
+  inside R03's 15 MiB (15,728,640 B), 58 of its 61 frames and still 15 blocks; the wire test is
+  bound at R03's 15 MiB, the binding wire budget, where it read the brainstorm's decimal 15 MB
+  (main's ruling). **The next per-cell byte needs a field-size ruling before it is built** (main's
+  ruling): at 26 bytes the Earth at level 8 has about 1.5 bytes a cell of headroom (0.39 MB a
+  byte), so one more byte fits with 0.19 MB (1.2%) to spare at 60 of the 61 frames, and a second
+  does not. If the climate layer at L − 1 proves
+  too coarse for
   R11's clouds, sending it at level L costs about 2.1× (about 28 MB on an Earth), past R03's
   15 MiB check.
 - **Dependencies.** Plan 14 calling the surface crate's crater density is a new edge that R04's
@@ -13169,6 +13192,115 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     chronology evaluation at its draw (beside the 64 of its age's bisection) and one comparison in
     its relief factor; the closed form adds a bisection of 64 chronology evaluations at each node of
     an octave whose κ and closure cross.
+- **Deviations in T6.c, as built** (2026-10-22; lane r09-valleys, from `e1a44211`; built to
+  decision-r09-t14-choices F2 with its T14.c and T14.d follow-ups, decision-r09-t14-mars-ceiling §2
+  and §5, and main's rulings of 2026-10-22 on the payload, the size test and the tributaries).
+  - _Trunks alone (main's ruling, option A)._ On a world dry now the epoch's level cut is the coarse
+    level: `deepest_level` is L, `ChannelNetwork::tributary` heads no segment below a dry-now cell,
+    and the closed forms carry the trunk's one term. The ruled tributary incision, the cell's at
+    the same K t in the short-time regime, (`r_t` `A_t`)^m `S_t` ÷ (r̄ A)^m S, is identically 1 on
+    T6.b's tributary profiles: `S_t` = `k_s` (r̄ ÷ `r_t`)^θ `A_t`^−θ and m = θ give
+    (`r_t` `A_t`)^θ `S_t` = r̄^θ `k_s` = (r̄ A)^θ S, and it exceeds 1 only where the 10⁻⁵ minimum slope
+    binds, so it cuts no level. The alternative measured, the tributaries T6.b's inherited valley
+    top keeps below the top (which is the epoch's headward knickpoint reach: the steady-state rise
+    from a key point to its join at most the trunk's incision, Ψ = K t r̄^m = d ÷ `k_s`, median
+    1.99 m^0.1, median two levels, up to T6.b's own cut at L + 4), gave the reference Mars 0.177
+    km⁻¹ of valleys over the eroded Lid (15 times Hynek et al.'s 0.0115), (A2) 6.14 m and (B)'s p99
+    304 m, 3.3 times its bound, each finer level adding about 1.0 m of layer (closed forms on the
+    final records; the lane's scratch measurement). A depth cut on the short-time incision at the
+    construction's slope, I_t = d (`A_t` ÷ A)^0.45, needs an unsourced figure and was not built.
+  - _The valley._ `EpochValley::of` (public, `synth/channels/incision.rs`): G = min(T6.b's groove
+    min(max(`valley_depth`, `d_bf`), `G_max`), the coded incision), with no floor at the bankfull
+    depth, so a valley the epoch cut less deep than its channel is as shallow as its incision; the
+    floor the bankfull channel; each wall W = min(5 G, T6.b's ½-cell wall) (`WALL_RUN_PER_DEPTH`,
+    moved here from the sim's branch). The cap keeps each groove inside the 5 × 5 search's reach and
+    binds only where G exceeds a tenth of the cell (3.8 km on the reference Mars); the steepest wall
+    is then 1.5 G ÷ W ≤ 0.6 by T6.b's cap, and 0.3 elsewhere. `epoch_valley(cell, body)` reads it
+    from a record; the trunk's `below_top` is G. A dry-now cell with channels but no runoff of its
+    own (a cell renewed after part of the epoch) takes `valley_depth` at its own `k_s`, where T6.b's
+    would give no valley. The closed forms take a dry-now cell's one level whole: its variance and
+    structure function without `WHOLE_VARIANCE_SHARE` (whose 0.52 is the levels'
+    anticorrelation): on the epoch Mars-like world the realised over the closed form was 1.2–2.7 at
+    0.52, within T6.b's factor of two at 1.
+  - _The code._ `LogIncision`, one byte after `catchment_runoff` (the sea floor's byte stays last):
+    0 `NONE`, no epoch (worlds wet now or never wet: T6.b as built); 1 `UNCUT`, a world dry now's
+    cell the epoch did not cut (a renewed province, inside a waiting crater's rim, a bound, an
+    incision under about 0.49 m); c ≥ 2, 0.5 m × 2^((c − 2) ÷ 16), 4.4% steps to 28.8 km, above the
+    reference Mars's 22.5 km construction (main accepted 0.25 m to 14 km; the start moved to 0.5 m
+    for that range and was reported to main). An incision past the last code takes it, so that no
+    world's pass is refused: the sim's edifice cap, `TALLEST_EDIFICE_RELIEF` × (3.71 ÷ g), can pass
+    28.8 km below about 2.8 m s⁻², and a synthesised valley, at most a fifth of a cell deep, never
+    reads past the code (the review's must-fix). `BuildFieldError::IncisionWithoutAir` refuses any
+    other code than `NONE` on an airless body, as its runoffs are. A field mixing `NONE` with epoch
+    codes is not refused (the coarse pass makes none; deferred).
+    The record is 26 bytes; `SURFACE_PAYLOAD_FORMAT` stays 1 and `GENERATOR_VERSION` 23 (main: the
+    layout freezes at the gate, and the sea-floor and runoff bytes set the precedent; the format's
+    documentation now says so); `wire/`'s,
+    `worker/`'s and the Mars-like world's goldens re-blessed at 23. The Earth-like payload is
+    15,141,470 bytes (`payloads.golden`), and the size test is bound at R03's 15 MiB (Risks, "Field
+    size"). The client's `sessionContacts.test.ts` reads the 26-byte stride.
+  - _The quantiser and the rims._ `quantise::synthesis_record` takes the inputs: `UNCUT` or the
+    incision on a world dry now (`Branch::DryNow`), `NONE` otherwise. `CellState::channel_incision`
+    is zero inside a waiting crater's rim (1,216 of the reference Mars's 98,304 cells), whose ground
+    formed after the epoch, so no valley is drawn there under a late crater; the solver's own
+    `DryNow::incision_m` is unchanged, and (A1) reads it.
+  - _The closure._ `dry_now_lowering_m` is min(d, `MEAN_TRUNK_LENGTH` G (`w_bf` + W) ÷ w) for the
+    valley the synthesis draws (`drawn_valley`, through `EpochValley::of`), and zero inside a
+    waiting rim (`DryNow::{young, valley_m}`). The branch runs before the final routing, so it reads
+    the coded incision but the construction's `k_s` on the solve's last routing, the epoch's runoff
+    and the solve's drainage, where the synthesis reads the final field's codes. On the reference
+    Mars the closed form on the final codes gives (A2) 2.068 m against the closure's 1.961 m, the
+    per-cell ratio within −5% and +3% at p10 and p90, and 14 cells draw a valley on one side alone
+    (the final routing moving a flow or a catchment). On the Mars-like world the realised first
+    level's void is 1.19 times the closure's (its trunks run 1.12 cells against
+    `MEAN_TRUNK_LENGTH`'s 1.0, R09.T6.b's, and each groove's ends add their caps), so its upland
+    stands about a fifth of a cell's lowering above its construction.
+  - _`has_channels` and the trunks._ `has_channels` needs a catchment runoff above `NONE` (T14.d
+    follow-up C), and `ChannelNetwork::trunk` heads no trunk where no water reaches a cell, on every
+    world. No Earth-like golden moved, so the wet-now synthesis is T6.b's to the bit wherever every
+    channelled cell's catchment sheds runoff, as on the Earth-like world; on a generated world wet
+    now a hyperarid cell's catchment under 0.1 mm a⁻¹ loses its zero-depth trunk, a join target
+    the less for its neighbours' tributaries (ruled, and pinned by no golden).
+  - _The test worlds._ The Mars-like world has an epoch, `FieldBuilder::epoch(Ψ)` with Ψ 2.0
+    m^0.1, the reference Mars's median d ÷ `k_s`: each routed dry cell with a channel was cut Ψ
+    `k_s` deep, the short-time regime's K t (r̄ A)^m S. `testing::mars_like_without_its_epoch` keeps
+    T6.b's steady state on a dry world for T6.b's own tests, whose `mars()` it now is. The height
+    golden's "with channels" cells take a dry world's epoch-valley cells. The panics tests' flowing
+    field has 610 Pa and a catchment runoff, since a cell no water reaches heads no trunk.
+  - _The WebAssembly determinism review_ (the review's determinism auditor, read-only, on the
+    uncommitted tree): no new tag or draw (key points stay keyed by cell on `surface.channel`, so
+    skipping tributaries shifts no other draw); every new min and max is `num`'s, signed zeros and
+    NaN fixed; `EpochValley::of` asserts finite non-negative inputs; no division by a zero wall (a
+    zero depth has no groove); no `f32`, `usize` or hash order on an authoritative path; the
+    airless refusal on both decode paths. Every moved golden is explained: the Earth-like
+    synthesis goldens unmoved, the payloads grown by a byte a cell (the multi-block ones by small
+    re-splits), the Mars-like world's by its epoch. The sim's own new outputs (the codes, the
+    closure) are pinned by no golden until R09.T16's coarse goldens, this lane's next task.
+  - _The parent-cell test._ The epoch Mars-like world joins
+    `each_level_s_mean_over_every_parent_cell_is_zero` with 6 parent cells, its first level's
+    alone; the Earth-like world and the steady Mars keep "over 60". The network's order and
+    same-seed tests run on the epoch world too, and their bits include `below_top`.
+  - _Plan 04's row._ Galaxy plan 04's `surface_field` row reads 15.1 MB at the 26-byte record,
+    3.7% inside R03's 15 MiB; only the figure changed.
+  - _Cost._ `the_reference_mars_s_valleys_are_its_epoch_s` runs the whole erosion step, about 7 s
+    as its sibling does.
+  - _Tests._ `synth::channels`: `a_world_dry_now_draws_its_epoch_s_trunks_alone`,
+    `an_epoch_valley_is_ten_times_as_wide_as_deep`, `a_cell_the_epoch_did_not_cut_or_no_water_reaches_draws_nothing`
+    and `the_drawn_valleys_void_is_the_closure_s`, with the epoch Mars-like world added to T6.b's
+    mean, cache, continuity, reads, closed-form and cap tests. `steps::erosion`:
+    `the_reference_mars_s_valleys_are_its_epoch_s` (every cell an epoch's code, rims and provinces
+    `UNCUT`, no drawn valley's coarse slope above `DEBRIS_FLOW_SLOPE`, (A2) ≥ 1.2 m, the density and
+    the depths by class recorded), (A2) asserted in `the_reference_mars_s_trunk_incision_is_black_et_al_s`,
+    and the (A0) pin's port of the epoch trunk; `quantise`'s
+    `only_a_world_dry_now_carries_its_epoch_s_incision`; `field`'s `field_incision_codes_round_trip`
+    and the airless refusal.
+  - _Figures, the reference Mars (level 7)._ (A1) unchanged, 187.81 m. (B) p99 75.81 m (0.826 of
+    its bound; 88.28 m with T14's closure), its maximum 609.2 m (1,250.6), 0.730% of the eroded area
+    above (242 cells; 311). (A2) 1.9605 m (2.2258). (A0) 1.96 + 2.04 = 4.00 m (2.23 + 190.07 = 192.3
+    m with T6.b's valleys). The whole pass's σ_h 2,899.99975 m against 2,900 m, −8.5 × 10⁻⁸ (+1.754 ×
+    10⁻⁴ before): the channels' booked variance fell with T6.b's valleys, and with it most of the
+    gap the late craters' re-routing left. The Mars-like world's cube-corner cell: the channels'
+    omitted variance at L0 1.179 × 10⁶ → 5.32 × 10⁴ m².
 - **Deviations in T14, as built** (2026-10-20; lane r09-erosion, from `6fa6a405`, merged with
   `origin/rendering-and-planets` at `a6565a7a` before the fixes and in `9ddb2f55` and `be163ce5`
   before T14.d's commit (_The merges_); built to decision-r09-t14-choices, all of it, and
@@ -13547,6 +13679,39 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       `coarse/erosion_l8`.
     - R10: the wet-now hypsometry rule; unrouted worlds keep every cell `Terminal`, so no channels
       on a Moon; no runoff at pressure 0.
+- **Deferred findings (2026-10-13 rule) (R09.T6.c)** (recorded, not ruled unless stated; each for
+  "main"'s list).
+  - _The density._ 0.0247 km⁻¹ of drawn valleys over the eroded Lid of the reference Mars, 2.15
+    times Hynek, Beach and Hoke 2010's 0.0115 km⁻¹ for Noachian units: one trunk a 38 km cell.
+  - _A channel-initiation area._ One sourced and independent of the grid, so that a cell carries a
+    valley and the closure only above it, is a later item, with no owner until a source exists
+    (main's ruling); without it level 8's dependence on resolution stands (T14's (B) 1.94 times its
+    bound and (A2) 5.64 m at level 8), and a larger world dry now at level 8 draws twice the
+    density.
+  - _The depth tail: the plan's trigger is met._ The drawn valleys draining 10⁴–10⁵ km² on the
+    final field: 14.66% deeper than 350 m, about three times the 4.6% of a log-normal of Williams
+    and Phillips 2001's depths, p90 412.3 m, maximum 2,435.5 m. So the drawn valleys show T14's
+    tail, and by T6.c's Tests a depth relation by drainage belongs here, not in K t (Williams and
+    Phillips's walls steepening with depth the candidate). Deferred under the 2026-10-13 rule, for
+    main's list.
+  - _The final drainage._ No drawn valley drains more than 10⁵ km² on the final field, where 235
+    of the solve's trunk cells drained above 10⁶: the final routing's dry playas end the networks
+    the solve integrated (T14.d), so a trunk's floor reads a smaller catchment than cut it (T14's
+    labelled beheading).
+  - _A mixed field._ `CoarseField::new` and the decoder accept a field mixing `NONE` with epoch
+    codes, which describes no world; the coarse pass makes none (the review's should-fix,
+    deferred).
+  - _The brainstorm, drafted for main's sign-off agent:_ its "Channels below the coarse cell" reads
+    as one network to the band limit on every world, where a world dry now now draws its trunks
+    alone (option A); and its "roughly 2 to 15 MB" and its 15 MB client field, where the Earth at
+    level 8 is 15.14 MB inside R03's 15 MiB.
+  - _The closure against the synthesis_, 5.5% in (A2) and 1.19 in the realised void (_The closure_
+    above): the branch's inputs before the final routing, and the trunks' length and caps.
+  - _The trunks' look._ Each trunk is two straight chords from key point to key point, its valley
+    about ten times as wide as deep (each wall 5:1); a by-hand look on R10's terrain, pending for the
+    owner's screen.
+  - _T6.b's bankfull note_ (channels 1.5–2 times narrow on Mars) stays deferred; the floors are
+    T6.b's.
 - **Deferred findings (2026-10-13 rule) (R09.T14)** (recorded, not ruled unless stated; each for
   "main"'s list).
   - _The receiver-flip floor._ Random receivers' fixed point settles on a band where receivers flip,
@@ -13592,7 +13757,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     R09.T16's performance list.
   - _F2 and `has_channels`._ T6.b's steady-state valleys over-dissect every dry-now world: ruled to
     a new R09.T6.c before the gate, and `has_channels` to need a catchment runoff above NONE (F2;
-    T14.d follow-up C). Main's, for the plan and T6.c's brief. _Entered as R09.T6.c, under R09.T6._
+    T14.d follow-up C). Main's, for the plan and T6.c's brief. _Entered as R09.T6.c, under R09.T6._ _Built in R09.T6.c (2026-10-22): a dry-now world draws its epoch's trunks alone, and
+    `has_channels` needs a catchment runoff._
   - _The balance lakes' extent._ Q3's lakes on the reference Earth's final field covered 14.1% of
     its land off the ocean (the small Earth 11.9%), against Earth's about 2–4% (from memory;
     Verpoorter et al. 2014's about 3.7%). Sent to main for a quick ruling and ruled a blocker
@@ -13615,7 +13781,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     `coarse/erosion_l8` gives 10.504 s per `erosion::run` (_The bench_), the solve about 2 s of it
     and the re-match, T12.e's machinery, most of the rest; after the first merge the slow test's
     step takes 12.68 s and its whole pass 54.80 s on a loaded machine.
-  - _The reference Mars's σ_h gap_, 1.754 × 10⁻⁴ above plan 14's after the whole pass, against
+  - _The reference Mars's σ_h gap_ (after R09.T6.c −8.5 × 10⁻⁸: its channels' booked variance fell
+    with T6.b's valleys), 1.754 × 10⁻⁴ above plan 14's after the whole pass, against
     T12.e's 10⁻⁶ and follow-up C's fallback of 10⁻⁴: the re-match books C_c before `route_final`
     re-routes the field after the late craters (108,176 against 111,126 m²). Asserted at 2 × 10⁻⁴
     under the owner's FEATURES FIRST of 2026-10-20, the ruled predicted-record iteration (follow-up

@@ -13,7 +13,7 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::*;
 use crate::field::{ClimateCell, CoarseCrater, CoarseField, FlowDirection, cell_at_index};
-use crate::testing::{SyntheticWorld, synthetic_field};
+use crate::testing::{SyntheticWorld, mars_like_without_its_epoch, synthetic_field};
 
 /// The detail seed the tests draw from.
 const SEED: DetailSeed = DetailSeed::new(0x6368_616e_6e65_6c73);
@@ -41,8 +41,12 @@ fn earth() -> &'static CoarseField {
     world(SyntheticWorld::EarthLike)
 }
 
+/// The Mars-like world without its epoch's incision: R09.T6.b's steady state on a dry world of
+/// uniform runoff, which these tests are of (a world dry now draws its epoch's trunks alone,
+/// R09.T6.c).
 fn mars() -> &'static CoarseField {
-    world(SyntheticWorld::MarsLike)
+    static FIELD: OnceLock<CoarseField> = OnceLock::new();
+    FIELD.get_or_init(mars_like_without_its_epoch)
 }
 
 /// Every cell of `field`'s level, in cell-index order.
@@ -127,6 +131,7 @@ fn segment_bits(s: &Segment) -> Vec<u64> {
             bits(s.area_at(t).value()),
             bits(s.main_stream_at(t).value()),
             bits(s.slope_at(t)),
+            bits(s.below_top(t).value()),
         ]);
     }
     out
@@ -602,75 +607,78 @@ fn a_key_point_next_to_a_face_edge_gives_the_same_segments_from_either_face() {
 
 #[test]
 fn the_network_does_not_depend_on_the_order_it_is_built_in() {
-    let field = earth();
-    let channels = Channels::new(field.header(), SEED);
-    let coarse = channelled(field, 3);
-    let cells: Vec<PatchKey> = coarse
-        .iter()
-        .flat_map(|&c| std::iter::once(c).chain(cells_below(c, DEPTH)))
-        .collect();
-    // Each cell alone, in a fresh network.
-    let alone: Vec<Option<Vec<u64>>> = cells
-        .iter()
-        .map(|&cell| {
-            channels
-                .network(field)
+    // The epoch Mars-like world's trunks are its epoch's valleys (R09.T6.c).
+    for field in [earth(), world(SyntheticWorld::MarsLike)] {
+        let channels = Channels::new(field.header(), SEED);
+        let coarse = channelled(field, 3);
+        let cells: Vec<PatchKey> = coarse
+            .iter()
+            .flat_map(|&c| std::iter::once(c).chain(cells_below(c, DEPTH)))
+            .collect();
+        // Each cell alone, in a fresh network.
+        let alone: Vec<Option<Vec<u64>>> = cells
+            .iter()
+            .map(|&cell| {
+                channels
+                    .network(field)
+                    .segment(cell)
+                    .unwrap()
+                    .map(|s| segment_bits(&s))
+            })
+            .collect();
+        // All of them in one fresh network, in four orders: forwards, backwards, finest level first,
+        // and a fixed shuffle.
+        let mut finest_first: Vec<usize> = (0..cells.len()).collect();
+        finest_first.sort_by_key(|&k| std::cmp::Reverse(cells[k].level()));
+        let mut shuffled: Vec<usize> = (0..cells.len()).collect();
+        let mut rng = hyperion_testkit::lcg::Lcg::new(0x006f_7264_6572);
+        for k in (1..shuffled.len()).rev() {
+            let pick = usize::try_from(rng.next_below(u64::try_from(k + 1).unwrap())).unwrap();
+            shuffled.swap(k, pick);
+        }
+        let orders = [
+            (0..cells.len()).collect::<Vec<usize>>(),
+            (0..cells.len()).rev().collect(),
+            finest_first,
+            shuffled,
+        ];
+        for order in orders {
+            let mut network = channels.network(field);
+            let mut built = vec![None; cells.len()];
+            for k in order {
+                built[k] = Some(network.segment(cells[k]).unwrap().map(|s| segment_bits(&s)));
+            }
+            let built: Vec<Option<Vec<u64>>> = built.into_iter().map(Option::unwrap).collect();
+            assert_eq!(built, alone);
+        }
+        // And through one warm network shared by every pass.
+        let shared = RefCell::new(channels.network(field));
+        assert_order_independent(&cells, |&cell| {
+            shared
+                .borrow_mut()
                 .segment(cell)
                 .unwrap()
                 .map(|s| segment_bits(&s))
-        })
-        .collect();
-    // All of them in one fresh network, in four orders: forwards, backwards, finest level first,
-    // and a fixed shuffle.
-    let mut finest_first: Vec<usize> = (0..cells.len()).collect();
-    finest_first.sort_by_key(|&k| std::cmp::Reverse(cells[k].level()));
-    let mut shuffled: Vec<usize> = (0..cells.len()).collect();
-    let mut rng = hyperion_testkit::lcg::Lcg::new(0x006f_7264_6572);
-    for k in (1..shuffled.len()).rev() {
-        let pick = usize::try_from(rng.next_below(u64::try_from(k + 1).unwrap())).unwrap();
-        shuffled.swap(k, pick);
+        });
     }
-    let orders = [
-        (0..cells.len()).collect::<Vec<usize>>(),
-        (0..cells.len()).rev().collect(),
-        finest_first,
-        shuffled,
-    ];
-    for order in orders {
-        let mut network = channels.network(field);
-        let mut built = vec![None; cells.len()];
-        for k in order {
-            built[k] = Some(network.segment(cells[k]).unwrap().map(|s| segment_bits(&s)));
-        }
-        let built: Vec<Option<Vec<u64>>> = built.into_iter().map(Option::unwrap).collect();
-        assert_eq!(built, alone);
-    }
-    // And through one warm network shared by every pass.
-    let shared = RefCell::new(channels.network(field));
-    assert_order_independent(&cells, |&cell| {
-        shared
-            .borrow_mut()
-            .segment(cell)
-            .unwrap()
-            .map(|s| segment_bits(&s))
-    });
 }
 
 #[test]
 fn the_same_seed_draws_the_same_network_and_another_seed_another() {
-    let field = earth();
-    let c = channelled(field, 1)[0];
-    let once = Channels::new(field.header(), SEED);
-    let twice = Channels::new(field.header(), SEED);
-    assert_eq!(
-        network_bits(&mut once.network(field), c),
-        network_bits(&mut twice.network(field), c)
-    );
-    let other = Channels::new(field.header(), DetailSeed::new(SEED.get() ^ 1));
-    assert_ne!(
-        once.network(field).key_point(c),
-        other.network(field).key_point(c)
-    );
+    for field in [earth(), world(SyntheticWorld::MarsLike)] {
+        let c = channelled(field, 1)[0];
+        let once = Channels::new(field.header(), SEED);
+        let twice = Channels::new(field.header(), SEED);
+        assert_eq!(
+            network_bits(&mut once.network(field), c),
+            network_bits(&mut twice.network(field), c)
+        );
+        let other = Channels::new(field.header(), DetailSeed::new(SEED.get() ^ 1));
+        assert_ne!(
+            once.network(field).key_point(c),
+            other.network(field).key_point(c)
+        );
+    }
 }
 
 /// A view of `inner` that records every cell it is asked for.

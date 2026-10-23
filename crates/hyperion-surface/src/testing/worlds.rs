@@ -67,7 +67,7 @@ pub enum SyntheticWorld {
     EarthLike,
     /// A Mars-sized stagnant lid with a northern lowland, Tharsis and its shield, three great
     /// basins and twenty other coarse craters, a dry seasonal climate and drainage from a past
-    /// wet epoch: level 7.
+    /// wet epoch, whose valleys are that epoch's (R09.T6.c): level 7.
     MarsLike,
     /// A Moon-sized airless lid with highland and mare crust, five great basins and forty other
     /// coarse craters: level 6.
@@ -952,7 +952,27 @@ fn mars_climate(dir: [f64; 3]) -> ClimateSample {
 /// §1.5 (f); a simplification, since Tharsis's and the caps' surfaces are younger).
 const MARS_EPOCH_RUNOFF_M_PER_YEAR: f64 = 0.1;
 
+/// The Mars-like world's epoch, Ψ = K t (r̄ ÷ 1 m a⁻¹)^m, m^0.1: 2.0, the reference Mars's median of
+/// its solver's channel incision over its steepness index, d ÷ `k_s`, 1.99 m^0.1 over its eroded
+/// cells (R09.T6.c's measurement; plan R09, Risks, "Deviations in T6.c, as built", _Trunks
+/// alone_), so that each channel was cut 2 `k_s` deep ([`FieldBuilder::epoch`]).
+const MARS_EPOCH_PSI_M0_1: f64 = 2.0;
+
 fn mars_like() -> CoarseField {
+    mars_like_builder().epoch(MARS_EPOCH_PSI_M0_1).build()
+}
+
+/// The Mars-like world as it was before R09.T6.c, with no epoch's incision ([`LogIncision::NONE`]
+/// on every cell), so that its synthesis draws R09.T6.b's steady state on a dry world of uniform
+/// runoff: for the steady network's own tests, not a world the coarse pass makes.
+///
+/// [`LogIncision::NONE`]: crate::field::LogIncision::NONE
+#[must_use]
+pub fn mars_like_without_its_epoch() -> CoarseField {
+    mars_like_builder().build()
+}
+
+fn mars_like_builder() -> FieldBuilder {
     // The crust is iron-rich (science-composition-crusts.md §2). The northern cap's water ice is at
     // the coldest zone, the pole's annual mean, 180 K: 928.15 kg m⁻³ (§3.2; IAPWS R10-06 gives
     // 928.151 at 1 atm and 928.141 at the world's 610 Pa). That is below the ice's frost point
@@ -1040,7 +1060,7 @@ fn mars_like() -> CoarseField {
             Gigayears::new(3.9),
             100,
         );
-    spiral_craters(builder, 20, (100e3, 500e3), (3.5, 4.0)).build()
+    spiral_craters(builder, 20, (100e3, 500e3), (3.5, 4.0))
 }
 
 /// The Moon's great basins and its broadest mare.

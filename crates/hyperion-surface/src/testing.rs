@@ -35,7 +35,10 @@ pub use liquids::{
 pub(crate) use worlds::pluto_like;
 // R10.T1.c's tests and the bake's bench weather and vary the Moon-like world
 // (`material/maturity.rs`, `material/golden.rs`, `bake/tests.rs`, `benches/bake.rs`).
-pub use worlds::{SyntheticWorld, moon_like_builder, moon_like_crater_params, synthetic_field};
+pub use worlds::{
+    SyntheticWorld, mars_like_without_its_epoch, moon_like_builder, moon_like_crater_params,
+    synthetic_field,
+};
 #[cfg(test)]
 pub(crate) use worlds::{one_crater_builder, one_crater_centre};
 
@@ -52,9 +55,9 @@ use crate::craters::{
 use crate::cube::{Edge, PatchKey, st_to_uv};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseCrater, CoarseField, CoarseLevel,
-    Cover, Crust, FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogPrecipitation,
-    LogRunoff, LogSteepness, MaterialPalette, PaletteRole, PrecipitationSource, SurfaceClass,
-    SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
+    Cover, Crust, FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogIncision,
+    LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, PaletteRole, PrecipitationSource,
+    SurfaceClass, SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
 };
 use crate::spheroid::Spheroid;
 use crate::synth::craters::CraterProfile;
@@ -210,6 +213,7 @@ pub struct FieldBuilder {
     seafloor: SiteFn<SeafloorSample>,
     routing: Routing,
     runoff_m_per_year: DirFn<f64>,
+    epoch_m0_1: Option<f64>,
     craters: Vec<CraterSpec>,
 }
 
@@ -276,6 +280,7 @@ impl FieldBuilder {
             seafloor: Box::new(|_| SeafloorSample::REFERENCE),
             routing: Routing::None,
             runoff_m_per_year: Box::new(|_| 0.0),
+            epoch_m0_1: None,
             craters: Vec::new(),
         }
     }
@@ -479,6 +484,28 @@ impl FieldBuilder {
         self
     }
 
+    /// A world dry now's past wet epoch, as the coarse pass's erosion leaves its cells' channel
+    /// incision ([`SynthesisCell::epoch_incision`]; R09.T6.c): `psi_m0_1` Ψ = K t (r̄ ÷ 1 m a⁻¹)^m,
+    /// m^0.1, finite and positive, so that each routed dry cell with a channel was cut Ψ `k_s`
+    /// deep, the short-time regime's K t (r̄ A)^m S with m = θ (`k_s` its steepness code's value),
+    /// and every other cell, under liquid or without a channel, [`LogIncision::UNCUT`]. None by
+    /// default: every cell [`LogIncision::NONE`], R09.T6.b's steady state.
+    ///
+    /// # Panics
+    ///
+    /// If `psi_m0_1` is not finite and positive; and [`build`](Self::build) panics if the body is
+    /// airless (a surface pressure of 0 Pa, the default), since an airless body has no wet epoch
+    /// (`BuildFieldError::IncisionWithoutAir`).
+    #[must_use]
+    pub fn epoch(mut self, psi_m0_1: f64) -> Self {
+        assert!(
+            psi_m0_1.is_finite() && psi_m0_1 > 0.0,
+            "an epoch's K t r^m must be finite and positive, got {psi_m0_1} m^0.1"
+        );
+        self.epoch_m0_1 = Some(psi_m0_1);
+        self
+    }
+
     /// A crater of `diameter` (at least the field's boundary diameter) centred on the unit vector
     /// `centre`, formed `age` ago, of degradation code `degradation` (255ths of its relief lost).
     /// Its morphology and fresh shape are [`crater_shape`]'s for its diameter on the builder's
@@ -528,7 +555,8 @@ impl FieldBuilder {
     ///   entry to name (none in the palette, or [`ice_entry`](Self::ice_entry)'s not an `Ice`
     ///   entry), or a cell under water and no main liquid;
     /// - a surface age above the crater contract's system age
-    ///   ([`CraterParams::system_age`]).
+    ///   ([`CraterParams::system_age`]);
+    /// - an [`epoch`](Self::epoch), or a routed world's runoff, on an airless body.
     #[must_use]
     pub fn build(self) -> CoarseField {
         self.check_plates();
@@ -696,6 +724,7 @@ impl FieldBuilder {
             steepness: route.steepness,
             runoff: route.runoff,
             catchment_runoff: route.catchment_runoff,
+            epoch_incision: self.epoch_incision(route, water_mm > elevation_mm),
             water_surface_mm: water_mm,
             ice,
             substances: SynthesisCell::pack_substances(ice_entry, liquid_entry)
@@ -703,6 +732,18 @@ impl FieldBuilder {
             class: SurfaceClass::UNCLASSIFIED,
             crater_state: 0,
             seafloor: self.seafloor_at(site),
+        }
+    }
+
+    /// The epoch's incision code of a cell of `route`, `wet` where it is under liquid
+    /// ([`epoch`](Self::epoch)).
+    #[must_use]
+    fn epoch_incision(&self, route: Route, wet: bool) -> LogIncision {
+        match self.epoch_m0_1 {
+            None => LogIncision::NONE,
+            Some(_) if wet || route.steepness == LogSteepness::ZERO => LogIncision::UNCUT,
+            Some(psi) => LogIncision::from_metres(Metres::new(psi * route.steepness.index_m0_9()))
+                .expect("a finite, non-negative incision has a code, the last saturating"),
         }
     }
 

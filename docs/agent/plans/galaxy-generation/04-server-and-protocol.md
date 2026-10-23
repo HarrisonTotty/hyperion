@@ -460,8 +460,8 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   Row R09 is the rendering plan R09's (the surface generator), drafted by R09.T0.a (2026-10-09) for
   this plan's owner and accepted with amendments 2026-10-10 by the sign-off agent (owner's
   delegation, `signoff-3.md`). `surface_field` answers a body's coarse field: the surveyed cells
-  with their margin, as one bulk payload on R03's binary frames. That is about 14.7 MB for an Earth
-  at R09's 25-byte synthesis cell, about 6% inside R03's 15 MiB check. The payload is announced by
+  with their margin, as one bulk payload on R03's binary frames. That is about 15.1 MB for an Earth
+  at R09's 26-byte synthesis cell (R09.T6.c's byte), about 3.7% inside R03's 15 MiB check. The payload is announced by
   R03's `BulkManifestDto` in the terminal response's `Ready` arm, and a `NotModelled` answer carries
   no bulk. So the kind is in the large size class, and `is_large` returns true for it before the
   kind is built. It is answered whole, never in parts.

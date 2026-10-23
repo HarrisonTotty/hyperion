@@ -91,7 +91,8 @@
 //!   follow-ups 2 and 3 and "T14.d lakes").
 //! - `outputs`: the elevation, the water surfaces, the final elevation's routing, flow, geometric
 //!   drainage and steepness index on the filled surface, the own and catchment runoffs, a world
-//!   dry now's channel incision (F2), and the marker that the field is routed.
+//!   dry now's channel incision (F2), zero inside the waiting craters' rims (R09.T6.c), and the
+//!   marker that the field is routed.
 //!
 //! R09.T14.d builds the rest, in the fixed order of decision-r09-t14-choices Q7 and its "T14.d
 //! follow-up" ([`run`]), the climate's runoff read live and the construction's lakes held by their
@@ -143,7 +144,7 @@ const _: () = assert!(
 );
 
 use super::{Pass, Working};
-use branches::Branch;
+pub(crate) use branches::Branch;
 use outputs::{Provisional, Record};
 
 /// Runs the step on `working` as the climate step left it (see the module documentation): by the
@@ -216,8 +217,8 @@ fn dry_now(pass: &Pass<'_>, working: &mut Working) -> Option<Provisional> {
         .inputs()
         .wet_epoch()
         .expect("a world dry now has a wet epoch");
-    let young = branches::inside_waiting_rims(pass, working);
-    let runoff = eroded.output_runoff_m_per_year(epoch, &young);
+    let runoff = eroded.output_runoff_m_per_year(epoch, &eroded.young);
+    let incision = eroded.output_incision_m();
     let sea = branches::sea_cells(working);
     let sea_level_m = working.sea_level.value();
     // Routed as the final field will be, with no paleo-lake (Q7's step 5 on a world dry now).
@@ -229,7 +230,7 @@ fn dry_now(pass: &Pass<'_>, working: &mut Working) -> Option<Provisional> {
             elevation_m: &eroded.elevation_m,
             sea: &sea,
             runoff_m_per_year: &runoff,
-            channel_incision_m: Some(&eroded.incision_m),
+            channel_incision_m: Some(&incision),
         },
         outputs::ProvisionalWater::DryPlayas,
     );

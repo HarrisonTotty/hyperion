@@ -717,8 +717,9 @@ impl FieldHeader {
     /// `hooks/figures/wet_epoch.rs`), which is the *present* state's, not `Airless`, since "the
     /// atmosphere's own history" is not modelled; and the pass writes a pressure of exactly 0 for an
     /// `Airless` state (`surface_pressure_of`), while a melt surface is no solid one. The field's
-    /// records are held to it ([`BuildFieldError::RunoffWithoutAir`](super::BuildFieldError::RunoffWithoutAir)) and
-    /// the level bound counts on it. A model that lets such a body carry runoff (an atmosphere lost
+    /// records are held to it ([`BuildFieldError::RunoffWithoutAir`](super::BuildFieldError::RunoffWithoutAir),
+    /// and for an epoch's incision [`BuildFieldError::IncisionWithoutAir`](super::BuildFieldError::IncisionWithoutAir))
+    /// and the level bound counts on it. A model that lets such a body carry runoff (an atmosphere lost
     /// since a wet epoch, lava channels) must replace this certificate with a header figure.
     #[must_use]
     pub(crate) fn is_airless(&self) -> bool {

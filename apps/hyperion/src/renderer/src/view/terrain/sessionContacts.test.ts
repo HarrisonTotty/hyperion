@@ -682,7 +682,7 @@ describe("the held ground as the datum's bit for bit where no surveyed bake is r
  * The highest elevation of any cell the terrain golden's payloads carry, m above the datum: each
  * block's synthesis records' `elevation_mm` (`crates/hyperion-surface/src/wire.rs`' layout,
  * format 1: a 33-byte header, block 0's field header behind its `u16` length, the cover's ranges
- * of 9 bytes behind their `u32` count, then 25 bytes a cell, `elevation_mm` an `i32` first).
+ * of 9 bytes behind their `u32` count, then 26 bytes a cell, `elevation_mm` an `i32` first).
  *
  * @throws Error for a block of another format, or a block whose cells do not add up to its
  *   payload's coverage, either of which this reader would misread.
@@ -709,7 +709,7 @@ function highestHeldCellM(golden: TerrainGolden): number {
         at += 9;
       }
       for (let n = 0; n < blockCells; n += 1) {
-        highestMm = Math.max(highestMm, view.getInt32(at + 25 * n, true));
+        highestMm = Math.max(highestMm, view.getInt32(at + 26 * n, true));
       }
       cells += blockCells;
     }

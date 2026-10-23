@@ -18,7 +18,7 @@ use crate::synth::channels::{
     BANKFULL_RATIO, MINIMUM_SLOPE, Outlet, bankfull_depth, bankfull_width,
     channel_forming_discharge_m3_s, mean_discharge_m3_s, tributary_steepness_m0_9,
 };
-use crate::testing::{SyntheticWorld, synthetic_field};
+use crate::testing::{SyntheticWorld, mars_like_without_its_epoch, synthetic_field};
 
 /// The detail seed the tests draw from.
 const SEED: DetailSeed = DetailSeed::new(0x6368_616e_6e65_6c73);
@@ -46,7 +46,16 @@ fn earth() -> &'static CoarseField {
     world(SyntheticWorld::EarthLike)
 }
 
+/// The Mars-like world without its epoch's incision: R09.T6.b's steady state on a dry world of
+/// uniform runoff, which these tests are of (a world dry now draws its epoch's trunks alone,
+/// R09.T6.c).
 fn mars() -> &'static CoarseField {
+    static FIELD: OnceLock<CoarseField> = OnceLock::new();
+    FIELD.get_or_init(mars_like_without_its_epoch)
+}
+
+/// The Mars-like world as it is, its valleys its epoch's (R09.T6.c).
+fn mars_epoch() -> &'static CoarseField {
     world(SyntheticWorld::MarsLike)
 }
 
@@ -242,7 +251,8 @@ fn parents(coarse: PatchKey, level: u8) -> Vec<PatchKey> {
 
 #[test]
 fn each_level_s_mean_over_every_parent_cell_is_zero() {
-    for field in [earth(), mars()] {
+    // The epoch Mars draws its trunks alone, so its six cells are its first level's parents.
+    for (field, least) in [(earth(), 61), (mars(), 61), (mars_epoch(), 6)] {
         let header = field.header();
         let first = header.level().get();
         let channels = Channels::new(header, SEED);
@@ -276,7 +286,7 @@ fn each_level_s_mean_over_every_parent_cell_is_zero() {
                 }
             }
         }
-        assert!(checked > 60, "only {checked} parent cells checked");
+        assert!(checked >= least, "only {checked} parent cells checked");
     }
 }
 
@@ -341,7 +351,7 @@ fn the_mean_holds_on_a_finer_grid_to_its_quadrature_error() {
 
 #[test]
 fn the_cached_build_equals_the_single_point_query_bit_for_bit() {
-    for field in [earth(), mars()] {
+    for field in [earth(), mars(), mars_epoch()] {
         let header = field.header();
         let first = header.level().get();
         let channels = Channels::new(header, SEED);
@@ -728,7 +738,7 @@ fn a_trunk_s_valley_is_the_relief_from_its_channel_heads() {
 
 #[test]
 fn the_incision_is_continuous_across_cell_edges() {
-    for field in [earth(), mars()] {
+    for field in [earth(), mars(), mars_epoch()] {
         let header = field.header();
         let first = header.level().get();
         let channels = Channels::new(header, SEED);
@@ -883,7 +893,7 @@ fn farthest_read(field: &CoarseField, channels: &Channels, coarse: PatchKey) -> 
 
 #[test]
 fn the_incision_reads_four_king_moves_inside_the_margin() {
-    for field in [earth(), mars()] {
+    for field in [earth(), mars(), mars_epoch()] {
         let channels = Channels::new(field.header(), SEED);
         let cells = with_tributaries(field, 3)
             .into_iter()
@@ -981,7 +991,7 @@ fn realised_variance(
 
 #[test]
 fn the_closed_form_variance_is_within_a_factor_of_two_of_the_realised() {
-    for field in [earth(), mars()] {
+    for field in [earth(), mars(), mars_epoch()] {
         let channels = Channels::new(field.header(), SEED);
         let body = ChannelBody::of(field.header());
         let mut cache = SynthCache::new();
@@ -1176,7 +1186,7 @@ fn the_bubble_s_weighted_mean_stays_above_its_floor() {
 
 #[test]
 fn every_groove_is_within_its_level_s_cap() {
-    for field in [earth(), mars()] {
+    for field in [earth(), mars(), mars_epoch()] {
         let channels = Channels::new(field.header(), SEED);
         let radius_m = channels.body().radius.value();
         let deepest = deepest_possible_level(radius_m, channels.first_level());
@@ -1198,4 +1208,219 @@ fn every_groove_is_within_its_level_s_cap() {
             }
         }
     }
+}
+
+/// About `count` of the epoch Mars's cells whose trunk cuts a valley ([`epoch_valley`]), spread
+/// through cell-index order.
+fn with_epoch_valleys(field: &impl FieldView, count: usize) -> Vec<PatchKey> {
+    let body = ChannelBody::of(field.header());
+    let level = field.header().level();
+    let all: Vec<PatchKey> = (0..level.cell_count())
+        .map(|n| cell_at_index(level.get(), n).unwrap())
+        .filter(|&c| {
+            epoch_valley(field.cell(c).unwrap(), body).is_some_and(|v| v.depth().value() > 0.0)
+        })
+        .collect();
+    let step = (all.len() / count).max(1);
+    all.into_iter().step_by(step).take(count).collect()
+}
+
+/// R09.T6.c (main's ruling, option A): on a world dry now, each coarse cell's trunk cuts its
+/// epoch's valley, of depth G = min(T6.b's steady-state groove, the coded incision), its floor the
+/// bankfull channel and each wall 5 G wide at most T6.b's; no segment heads a finer cell below it;
+/// the cut ends at the coarse level; and the closed form's one term is that valley's.
+#[test]
+fn a_world_dry_now_draws_its_epoch_s_trunks_alone() {
+    let field = mars_epoch();
+    let header = field.header();
+    let first = header.level().get();
+    let channels = Channels::new(header, SEED);
+    let body = channels.body();
+    let radius_m = body.radius.value();
+    let mut network = channels.network(field);
+    let mut capped = 0;
+    let cells = with_epoch_valleys(field, 24);
+    assert!(cells.len() >= 20, "only {} cells", cells.len());
+    for &coarse in &cells {
+        let record = field.cell(coarse).unwrap();
+        let incision = record.epoch_incision.incision().unwrap().value();
+        let valley = epoch_valley(record, body).unwrap();
+        let g = valley.depth().value();
+        // T6.b's groove on the same cell, which the epoch's incision caps.
+        let segment = network.segment(coarse).unwrap().expect("a trunk");
+        let k = epoch_valley_steepness(record).unwrap();
+        let steady = num::min(
+            num::max(
+                valley_depth(k, body.radius, first).value(),
+                segment.bankfull_depth().value(),
+            ),
+            groove_cap_m(radius_m, first),
+        );
+        assert_eq!(bits(g), bits(num::min(steady, incision)), "{coarse:?}");
+        if incision < steady {
+            capped += 1;
+        }
+        let wall_cap = VALLEY_WALL_SHARE * mean_cell_width(radius_m, first);
+        assert_eq!(
+            bits(valley.wall().value()),
+            bits(num::min(WALL_RUN_PER_DEPTH * g, wall_cap))
+        );
+        assert_eq!(
+            bits(valley.floor_width().value()),
+            bits(segment.bankfull_width().value())
+        );
+        assert!(1.5 * g / valley.wall().value() <= 0.3 + 1e-12, "{coarse:?}");
+        assert_eq!(bits(segment.below_top(0.5).value()), bits(g));
+        let groove = Groove::of(&segment, radius_m).expect("a valley");
+        assert_eq!(groove.depth, Depth::Constant(g));
+        assert_eq!(bits(groove.wall_m), bits(valley.wall().value()));
+        assert_eq!(
+            bits(groove.floor_m),
+            bits(0.5 * valley.floor_width().value())
+        );
+        assert_eq!(deepest_level(record, body), first);
+        for level in first + 1..=first + 2 {
+            for cell in below(coarse, level) {
+                assert_eq!(network.segment(cell).unwrap(), None, "{cell:?}");
+            }
+        }
+        let terms = level_terms(record, body);
+        let expected = level_term(
+            first,
+            MEAN_TRUNK_LENGTH / mean_cell_width(radius_m, first),
+            g,
+            0.5 * valley.floor_width().value(),
+            valley.wall().value(),
+        );
+        assert_eq!(terms, vec![expected], "{coarse:?}");
+    }
+    // The epoch, not the steady state, sets most of the Mars-like world's valleys.
+    assert!(
+        capped * 2 > cells.len(),
+        "{capped} of {} capped",
+        cells.len()
+    );
+}
+
+/// R09.T6.c's cross-section (decision-r09-t14-mars-ceiling §5): across an epoch trunk's chord its
+/// groove is G on its floor, half the bankfull width either side, falls as T6.b's smoothstep over
+/// the wall W to zero at the floor's edge plus W, its analytic gradient across is the depth's
+/// central difference, and no wall is steeper than 1.5 G ÷ W, at most 0.3.
+#[test]
+fn an_epoch_valley_is_ten_times_as_wide_as_deep() {
+    let field = mars_epoch();
+    let header = field.header();
+    let channels = Channels::new(header, SEED);
+    let radius_m = channels.body().radius.value();
+    let mut network = channels.network(field);
+    for coarse in with_epoch_valleys(field, 6) {
+        let segment = network.segment(coarse).unwrap().unwrap();
+        let groove = Groove::of(&segment, radius_m).unwrap();
+        let Depth::Constant(g) = groove.depth else {
+            panic!("a trunk's groove is constant along it");
+        };
+        let [chord, _] = groove.chords;
+        // The chord's middle, and the unit direction across it along the surface.
+        let middle = [0, 1, 2].map(|k| f64::midpoint(chord.from[k], chord.to[k]));
+        let along = [0, 1, 2].map(|k| chord.to[k] - chord.from[k]);
+        let across = {
+            let c = cross(along, middle);
+            let n = dot(c, c).sqrt();
+            c.map(|x| x / n)
+        };
+        let point = |x: f64| [0, 1, 2].map(|k| middle[k] + x * across[k]);
+        let (floor, wall) = (groove.floor_m, groove.wall_m);
+        assert_eq!(bits(groove.at(point(0.0)).value), bits(g));
+        assert_eq!(bits(groove.at(point(0.5 * floor)).value), bits(g));
+        assert_eq!(groove.at(point(floor + wall * 1.001)).value, 0.0);
+        let mut steepest = 0.0_f64;
+        for n in 1..200 {
+            let x = floor + wall * f64::from(n) / 200.0;
+            let h = 1e-3 * wall;
+            let slope = (groove.at(point(x + h)).value - groove.at(point(x - h)).value) / (2.0 * h);
+            let analytic = dot(groove.at(point(x)).gradient, across);
+            assert!(
+                (slope - analytic).abs() <= 1e-6 * (1.0 + slope.abs()),
+                "{coarse:?} at {x} m: {slope} against {analytic}"
+            );
+            steepest = steepest.max(slope.abs());
+        }
+        assert!(
+            steepest <= 1.5 * g / wall * (1.0 + 1e-6),
+            "{coarse:?}: {steepest}"
+        );
+        assert!(steepest <= 0.3 * (1.0 + 1e-6), "{coarse:?}: {steepest}");
+    }
+}
+
+/// A cell the epoch did not cut ([`LogIncision::UNCUT`]) carries no valley, and a cell no water
+/// reaches, its catchment shedding none, carries no trunk and no channels, on any world
+/// (R09.T6.c; decision-r09-t14-choices, "T14.d follow-up" C).
+#[test]
+fn a_cell_the_epoch_did_not_cut_or_no_water_reaches_draws_nothing() {
+    use crate::field::LogIncision;
+    let field = mars_epoch();
+    let channels = Channels::new(field.header(), SEED);
+    let body = channels.body();
+    let c = with_epoch_valleys(field, 3)[1];
+    let mut uncut = *field.cell(c).unwrap();
+    uncut.epoch_incision = LogIncision::UNCUT;
+    assert_eq!(epoch_valley(&uncut, body).unwrap().depth, Metres::ZERO);
+    assert_eq!(level_terms(&uncut, body), vec![]);
+    let view = Patched {
+        inner: field,
+        cells: BTreeMap::from([(c, uncut)]),
+    };
+    let mut network = channels.network(&view);
+    let trunk = network.segment(c).unwrap().expect("a trunk");
+    assert_eq!(trunk.below_top(0.5), Metres::ZERO);
+    assert_eq!(Groove::of(&trunk, body.radius.value()), None);
+    for (world, cell) in [(earth(), with_tributaries(earth(), 3)[1]), (field, c)] {
+        let mut dry = *world.cell(cell).unwrap();
+        dry.runoff = LogRunoff::NONE;
+        dry.catchment_runoff = LogRunoff::NONE;
+        assert!(!super::super::has_channels(&dry));
+        assert_eq!(epoch_valley(&dry, body), None);
+        assert_eq!(level_terms(&dry, ChannelBody::of(world.header())), vec![]);
+        let view = Patched {
+            inner: world,
+            cells: BTreeMap::from([(cell, dry)]),
+        };
+        let channels = Channels::new(world.header(), SEED);
+        assert_eq!(channels.network(&view).segment(cell).unwrap(), None);
+    }
+}
+
+/// R09.T6.c's closure is the drawn valleys' void: over the epoch Mars's cells with a valley, the
+/// realised first level's mean incision over each coarse cell, the void the synthesis adds back to
+/// the upland, summed by area, against the closed form's `MEAN_TRUNK_LENGTH` G (`w_bf` + W) ÷ w²
+/// that the coarse pass's width closure takes from each cell, within a quarter; recorded: 1.19
+/// as built (the Mars-like world's trunks run 1.12 coarse cells, against the closed form's
+/// [`MEAN_TRUNK_LENGTH`] of 1.0, R09.T6.b's measurement, and each groove's ends add their caps), so
+/// that the upland stands about a fifth of the cell's lowering above its construction.
+#[test]
+fn the_drawn_valleys_void_is_the_closure_s() {
+    let field = mars_epoch();
+    let header = field.header();
+    let first = header.level().get();
+    let channels = Channels::new(header, SEED);
+    let body = channels.body();
+    let radius_m = body.radius.value();
+    let mut cache = SynthCache::new();
+    let (mut realised, mut closed) = (0.0, 0.0);
+    for c in with_epoch_valleys(field, 120) {
+        let valley = epoch_valley(field.cell(c).unwrap(), body).unwrap();
+        let mean = channels.incision(field, &mut cache).mean(first, c).unwrap();
+        let width = mean_cell_width(radius_m, first);
+        realised += -mean;
+        closed += MEAN_TRUNK_LENGTH * valley.void_m2() / width;
+    }
+    eprintln!(
+        "the realised first level's void {realised:.4} m against the closure's {closed:.4} m"
+    );
+    assert!(
+        (realised / closed - 1.0).abs() < 0.25,
+        "the realised void is {} of the closure's",
+        realised / closed
+    );
 }
