@@ -5029,9 +5029,9 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _The channel floor repeats the groove's geometry._ `Groove::floor_holds` repeats `Groove::at`'s
     nearest point on a chord, and `on_floor` the incision's level range. A change to either should
     move both; a shared helper in R09's file would keep them one.
-- **Deviations in T1.d, as built** (2026-10-19; lane r10-weathering, after R09.T2.f at `7d279126`;
-  decision-p14-t51d-weathering §1, its addendum of 2026-10-19 "Λ's fit inputs", and
-  decision-r10-t1d-anchor-colour). Pure at 22: nothing on the record reads the law, and
+- **Deviations in T1.d, as built** (2026-10-19; lane r10-weathering, after R09.T2.f at `7d279126`,
+  landed as `490f0e94`; decision-p14-t51d-weathering §1, its addendum of 2026-10-19 "Λ's fit
+  inputs", and decision-r10-t1d-anchor-colour). Pure at 22: nothing on the record reads the law, and
   `field_albedo_scale` weathers only a header that carries a maturity, which none does before
   P14.T54.b, so no golden but the new `weathering.golden` moves and `GENERATOR_VERSION` stays 22.
   - _Files beyond the list:_ `material/weathering/tests.rs`, `material/{mod,golden}.rs` (the golden
@@ -5412,13 +5412,14 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   golden-diff script shows only `tests/golden/worker/maturity_layer.golden` and
   `tests/golden/worker/terrain_test_weathered.golden` new, written at 22 and re-blessed at 23 in
   their own commit; `GENERATOR_VERSION` and `PROTOCOL_VERSION` are unchanged.
-  - _Commits:_ `e262769b` (the browser split: `material::weights::` a part of its own),
-    `b566f140` (the layer and its gather), `256a7298` (the unresolved mix, the nodes and the two
-    goldens) and `80ef7142` (the terrain's data path and shader); then, on the gated tree, subtask
-    4's (the class map, the disc, the point, the fixture's check, the look's results and this
-    record), the review's fix commit (`fix(surface)`, the Rust review's items) and the re-bless of the
-    two goldens at 23 (`test(surface)`), after the merge of 23 (`797343c6`); their hashes are in the
-    lane's handoff.
+  - _Commits,_ as landed: `6b7de6fd` (the browser split: `material::weights::` a part of its own),
+    `9eeb269d` (the layer and its gather), `363c30b3` (the unresolved mix, the nodes and the two
+    goldens) and `de531030` (the terrain's data path and shader); then, on the gated tree, subtask
+    4's `d6394dd2` (the class map, the disc, the point, the fixture's check, the look's results and
+    this record), the review's fix commit `9f7e78c1` (`fix(surface)`, the Rust review's items) and
+    the re-bless of the two goldens at 23, `aa8e63e8` (`test(surface)`), after the merge of 23
+    (`797343c6`). On the lane they were `e262769b`, `b566f140`, `256a7298`, `80ef7142`, `a2e39de5`,
+    `4166b3d7` and `4c3e7b70`, in that order.
   - _Files beyond the brief's:_ the surface crate's `testing.rs` and `testing/worlds.rs`
     (`moon_like_builder` and `moon_like_crater_params` public under `testing`, for the bench); new
     `view/terrain/maturityNodes.ts` and `view/shaders/maturityNodes.wgsl` (the nodes' grading and
@@ -9260,7 +9261,7 @@ hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and Pret
     tripod while the fault stands, not the em dash._); the survey line's state for a refused field
     is T12's, its T16.d draft going to the sign-off queue.
 - **Deviations in T16.b, as built** (2026-10-19; lane r10-live, on `rendering-and-planets` at
-  `b021342b`, after T16.a's `63e31fe4`).
+  `b021342b`, after T16.a's `63e31fe4`, landed as `962594fe`).
   - _Files._ New: `view/terrain/surveyLookup.ts` (`SurveyedCells`) with `surveyLookup.test.ts` and
     `surveyLookup.wasm.test.ts`; `view/terrain/terrainPassShared.test.ts`;
     `view/terrain/sessionPasses.test.ts` (joins `vitest.config.mts`' `DOM_TESTS`);
@@ -9483,7 +9484,7 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     patches a view): unmeasured, small beside a selection.
   - _A wireframe view hands nothing over until T11_, so it shows no terrain fault line either.
 - **Deviations in T16.c, as built** (2026-10-19; lane r10-live, on `rendering-and-planets` at
-  `b021342b`, after T16.a's `63e31fe4` and T16.b's `9097c51a`).
+  `b021342b`, after T16.a's `63e31fe4` and T16.b's `9097c51a`, landed as `962594fe` and `5b88006f`).
   - _Files._ New: `view/terrain/frameTerrain.ts` (`terrainLightingOf`, `TerrainLightingFrame`,
     `terrainViewOf`, `morePressingAnnunciation`, `LiveFrameTerrain`, `LiveFrameTerrainInput`,
     `FrameTerrainSource`, `FrameTerrainPass`, `ViewTerrainSource`, `ViewTerrainInput`,
@@ -9729,9 +9730,9 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     over the reference surface.
 - **Deviations in T16.d, as built (part 1)** (2026-10-19; lane r10-live, on `rendering-and-planets`
   at `b021342b`, after T16.a's `63e31fe4`, T16.b's `9097c51a`, T16.c's `346948a7` and the merge
-  `062dd79c`). Part 1 of 2: the golden, the server's agreement, the fixture and the scene,
-  `place-ship --survey` and the guide; part 2 builds the views check's terrain run and the hidden
-  and by-hand runs.
+  `062dd79c`; the three commits landed as `962594fe`, `5b88006f` and `ac92390c`). Part 1 of 2: the
+  golden, the server's agreement, the fixture and the scene, `place-ship --survey` and the guide;
+  part 2 builds the views check's terrain run and the hidden and by-hand runs.
   - _Files._ New: `crates/hyperion-surface/tests/golden/worker/terrain_test.golden` (108,570 B);
     `view/scenes/terrainGolden.ts` (`parseTerrainGolden`, `blockBytes`, `TerrainGolden`,
     `TerrainGoldenPayload`, `TerrainGoldenChange`), `view/scenes/terrainFixture.ts`
@@ -9974,9 +9975,9 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     on `TERRAIN TEST`._
 - **Deviations in T16.d, as built (part 2)** (2026-10-19; lane r10-live, on `rendering-and-planets`
   at `b021342b`, after T16.a's `63e31fe4`, T16.b's `9097c51a`, T16.c's `346948a7` and the merge
-  `062dd79c`, beside part 1's uncommitted work). Part 2 of 2: the views check's terrain run
-  (decision-r10-t16-contracts §6), its tests, the hidden runs on the development machine and the
-  by-hand looks.
+  `062dd79c`, beside part 1's uncommitted work; the three commits landed as `962594fe`, `5b88006f`
+  and `ac92390c`). Part 2 of 2: the views check's terrain run (decision-r10-t16-contracts §6), its
+  tests, the hidden runs on the development machine and the by-hand looks.
   - _Files._ New, in the main process: `main/terrainCheckResults.ts` (`buildTerrainCheckResults`,
     `terrainFaultsVerdict`, `terrainFailures`, `terrainCheckMarkdown`, `writeTerrainResults`,
     `TERRAIN_PHASES`, `TERRAIN_DELAY_LIMIT_MS`, `BOTH_SURFACES_HELD_BY`, `TERRAIN_CHECK_SCHEMA`

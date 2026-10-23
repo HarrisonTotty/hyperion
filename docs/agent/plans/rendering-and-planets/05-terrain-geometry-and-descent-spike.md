@@ -6166,9 +6166,9 @@ medium, sizes, figure)`.
       17.4% (the 80 km limb). As built: 51.5% and 83.7%.
     - _The run's other checks._ One FAIL: R07.T8.a's "a photorealistic frame tones a lit planet
       onto the canvas over a black sky" (`smoke/bodies.ts`). It touches no atmosphere code, and it
-      failed the same way on lane C's RTX runs at 0c57be5, before and after. _Fixed in 6673319f
-      (f11d4b9a on the shading lane's branch): the check read the canvas back after its texture
-      was destroyed (R07's Risks, "T8.a's canvas check on the RTX 3080, fixed")._
+      failed the same way on lane C's RTX runs at 0c57be5 (landed as 28479b9), before and after.
+      _Fixed in 6673319f (f11d4b9a on the shading lane's branch): the check read the canvas back
+      after its texture was destroyed (R07's Risks, "T8.a's canvas check on the RTX 3080, fixed")._
   - _Option 1's largest difference_ (the same run).
     - _The variant._ 28479b9's even steps and step form, with the densities once, against 28479b9's
       kernels as built.
@@ -6183,9 +6183,9 @@ medium, sizes, figure)`.
       inside both locks, at a load of 2.0–2.7 (at most 3.2 during a run) with 28–29 GB free. The
       telemetry sampler (`crash-telemetry`, every 2 s) was active throughout.
     - _The builds._ Before is 28479b9's instrumented build (`laneC/t14diag/out-instrumented/`).
-      After is the head's (12023f3), with lane D's two instruments (`t12e/out-after/`). The order
-      was high and low before, then high and low after. Figures are after the 10 s warm-up, from
-      `t12e/timing/analyse2.py`.
+      After is the head's (12023f3, landed as 657c1091), with lane D's two instruments
+      (`t12e/out-after/`). The order was high and low before, then high and low after. Figures are
+      after the 10 s warm-up, from `t12e/timing/analyse2.py`.
 
     | ms, p50 / p95        | High, before  | High, after   | Low, before   | Low, after    |
     | -------------------- | ------------- | ------------- | ------------- | ------------- |
