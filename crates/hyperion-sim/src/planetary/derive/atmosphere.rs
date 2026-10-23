@@ -55,6 +55,7 @@
 //! told apart (ruling 112.7).
 
 mod escaping;
+mod supercritical;
 mod surface_mix;
 
 pub(crate) use escaping::helium_left;
@@ -66,6 +67,9 @@ pub(crate) use escaping::{
     THERMOSTAT_SET_POINT, Thermostat, ThermostatCounts, WaterPhase, water_phase,
     with_resolve_check, with_thermostat,
 };
+pub(crate) use supercritical::has_surface_section;
+#[cfg(test)]
+pub(crate) use supercritical::{SupercriticalReservoir, supercritical_section_in_force};
 #[cfg(test)]
 pub(crate) use surface_mix::floor_read;
 #[cfg(test)]

@@ -28377,3 +28377,48 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     0.547 now; maximum ratio 2.11): a decked runaway at 934.6 K under 414.8 bar of CO₂ under
     T53.a's batch, now `Temperate` at 1,221.6 K, A 0.30. R4.2's serve-gate line names arm (c) for
     it, whose `RunawayGreenhouse` would lie outside the present limit that (a) asserts.
+- **Deviations in P14.T53.b part 2, as built (`p14-escape`, 2026-10-23).** The supercritical
+  envelope's section, behind P14.T53.a's hold (`ESCAPE_VERSION` 24; `supercritical_section_in_force`),
+  tested with every landed 24 hold in force (`planetary::testing::with_every_24_hold`). Version 23
+  is unchanged to the bit; no golden moved.
+  - _The line._ `PhaseDiagram::critical_slope_pa_per_k` (−a₁ p_c ÷ T_c for a Wagner form whose first
+    exponent is 1: CH₄ 1.4568, CO₂ 1.7126, N₂ 1.6481 and H₂O 2.6799 × 10⁵ Pa K⁻¹) and
+    `PhaseDiagram::critical_isochore_pressure` (`None` below T_c), on the critical T_c and p_c
+    (equal to the Wagner equations' reducing points for CH₄, CO₂, N₂ and H₂O). **Deviation:** `None`
+    for the six fitted ancillaries whose first exponent is not 1 (Kr, Xe, N₂O, CO, H₂S and C₂H₆,
+    whose slope at T_c is 0 or unbounded, an artefact of the fit). None is a `Gas` row, so no body
+    reads them at 24; part 3's cap needs a rule for them if it reaches beyond the air's condensables
+    (the lane's lean: the tangent at 0.999 T_c, 5.9–6.5 p_c ÷ T_c by hand).
+  - _The predicate._ `derive/atmosphere/supercritical.rs`: `SupercriticalReservoir` (the gas, T ÷
+    T_c, p_i, p*, the melting pressure and the share, 4π G Δp ÷ g²), `Atmosphere::supercritical_reservoir(g)`
+    (the largest share of at least `THIN_ENVELOPE_FRACTION`, the first in `Gas::ALL`'s order on a
+    tie; `None` under the hold and below each T_c), at the atmosphere's mean T_s. **Deviation:** the
+    three tags read it through one helper, `has_surface_section(class, air, g)`, so that they cannot
+    drift apart: `BodyRecordBuilder::derived` with the derivation's gravity, `primary_record` and
+    `satellite_record` with the bulk's. The figure's datum, the photometry and the internal state are
+    unchanged (part 3). The client reads the sections by their tags: no `SURFACE`, then
+    `ATMOSPHERE NOT YET MODELLED`.
+  - _Tests._ `for_body`'s invariant gains a 24 arm in
+    `a_surface_holds_a_solid_state_and_its_conditions_regime`. `assert_surface_or_envelope`, the
+    goldens' split test and the server's exactly-one test accept a solid class tagged not applicable
+    and not modelled (the tag pair, from 24 only, since the record does not carry the atmosphere; the
+    predicate itself is checked against the derivation in the invariant's 24 arm). R4.3's
+    `isochore_cases` reads `SupercriticalReservoir::of`, its figures unchanged.
+  - _The census_ (part 1's set: 102 systems, 1,706 bodies; `under_every_24_hold_part_two_s_movers_are_stated`,
+    run by name, over every surface tag): 372 columns at or above their T_c, 14 above their
+    isochores, one mover, the census's 02001b2ca0000000.0400 (CH₄ at 1.0105 T_c, 192.559 K; p_i
+    8,781 bar against p* 48.9 bar; melting pressure 5,437.5 bar; share 1.393 × 10⁻³; g 18.01 m s⁻²;
+    `Ok` under the hold, at 209.1 K under 12,883 bar). None beyond 2.5 T_c. Near misses (10⁻⁴–10⁻³):
+    02001b2c9ffe0000.0500 (N₂, 1.62 T_c, 3.24 × 10⁻⁴), 01ffeb2c1ffe0000.0200 (O₂, 6.03 T_c, beyond
+    the isochore's checked range, with no melting curve; p_i ÷ p* 1.49, 2.28 × 10⁻⁴), LOOK72's
+    020e56ef60080003.0600 (N₂, 1.61 T_c, 2.99 × 10⁻⁴) and 0400's own N₂ (2.90 × 10⁻⁴).
+  - _Kept._ LOOK72's methane `Snowball`s: 0900 holds 26.9 bar of CH₄ at 190.88 K against p* 46.5 bar;
+    0500 and 0600 hold none. Its N₂ `Snowball`s at 78–313 bar: p_i ÷ p* 0.98–2.81, shares under
+    7.1 × 10⁻⁵. The table's Venus: 57.2 bar of CO₂ at 618.9 K against p* 612.9 bar; the measured
+    Venus: 90.4 bar at 737.0 K against 815.1 bar. Titan lies below N₂'s T_c.
+  - _Recorded for p14-wire-24 and part 3:_ the server's "no solid surface: it is a giant, …" refusal
+    (`hyperion-server` `convert/surface.rs`) and `SurfaceInputsError::NoSolidSurface`'s doc do not
+    name a supercritical envelope.
+  - _Accept, as built:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`, with
+    `planetary::system`, `substance::diagram` and `planetary::record`; the census by name with
+    `-- --ignored`.

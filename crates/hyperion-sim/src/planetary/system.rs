@@ -107,7 +107,9 @@ use crate::planetary::chem::inventory::ElementInventory;
 use crate::planetary::chem::partition::{Condensates, CrustWater, Partition};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{SystemContext, XuvHistory};
-use crate::planetary::derive::atmosphere::{Atmosphere, SurfaceMaterial, VolatileDraws};
+use crate::planetary::derive::atmosphere::{
+    Atmosphere, SurfaceMaterial, VolatileDraws, has_surface_section,
+};
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
 use crate::planetary::derive::pass_record::{
@@ -177,8 +179,8 @@ use crate::planetary::placement::{
     Neighbour, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs, place,
 };
 use crate::planetary::record::{
-    BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, HaloRecord, Hooks,
-    MoonOrigin, Population, Section, Surface, SurfaceBasis, SystemSnapshot,
+    BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, Envelope,
+    HaloRecord, Hooks, MoonOrigin, Population, Section, Surface, SurfaceBasis, SystemSnapshot,
 };
 use crate::planetary::rings::{Ring, RingParent};
 use crate::planetary::satellites::{
@@ -2435,6 +2437,25 @@ impl PlanetarySystem {
         Ok(Some(BodyHooks::new(seed, bulk, surface, figures)))
     }
 
+    /// The surface section and the envelope's tag of a present body whose bulk is `bulk` and whose
+    /// air is `air`: where its class has a solid surface and, from generator version 24, no
+    /// supercritical envelope hides it ([`has_surface_section`]; P14.T53.b part 2), its surface
+    /// ([`surface_section`](Self::surface_section)) and the envelope not applicable; otherwise
+    /// the envelope's section, not modelled, and no surface (P14.T48.e).
+    fn surface_or_envelope(
+        &self,
+        body: &Body,
+        of: SurfaceOf<'_>,
+        spun: BodySpin<'_>,
+        (bulk, air): (&BulkProperties, &Atmosphere),
+    ) -> (Section<Surface>, Section<Envelope>) {
+        if has_surface_section(bulk.class(), air, bulk.surface_gravity()) {
+            (self.surface_section(body, of, spun), Section::NotApplicable)
+        } else {
+            (Section::NotApplicable, Section::NotModelled)
+        }
+    }
+
     /// The surface section of the planet, member or moon `body` at the epoch's time
     /// (P14.T24.a–b, T48.a–d, P14.T48.e), read as `of` describes it ([`published_surface`]), under
     /// the spin `spun` its record computed once for its passes and its surface, with its insolation
@@ -2508,8 +2529,9 @@ impl PlanetarySystem {
         };
         let surface = published_surface(&time, &case);
         // Its callers ask only for a class with a solid surface, which is never in the
-        // gas-envelope state (both read the one envelope fraction), so that exactly one of the
-        // surface and the envelope applies.
+        // gas-envelope state (both read the one envelope fraction), and not under a supercritical
+        // envelope (P14.T53.b part 2, which they test first), so that exactly one of the surface
+        // and the envelope applies.
         debug_assert!(
             !matches!(surface, Section::NotApplicable),
             "{:?}'s solid surface is not applicable",
@@ -3467,19 +3489,14 @@ impl PlanetarySystem {
                 let bulk = icy_member_bulk(body, &derived)
                     .unwrap_or_else(|| BulkProperties::from(&derived));
                 // P14.T48.e: the surface section of a body with a solid surface, and the envelope
-                // of one without.
-                let (surface, envelope) = if bulk.class().has_solid_surface() {
-                    let of = SurfaceOf::Body {
-                        derived: &derived,
-                        bulk: &bulk,
-                    };
-                    (
-                        self.surface_section(body, of, body_spin),
-                        Section::NotApplicable,
-                    )
-                } else {
-                    (Section::NotApplicable, Section::NotModelled)
+                // of one without, or, from 24, of one under a supercritical envelope (P14.T53.b
+                // part 2), whose surface section is then never built.
+                let of = SurfaceOf::Body {
+                    derived: &derived,
+                    bulk: &bulk,
                 };
+                let (surface, envelope) =
+                    self.surface_or_envelope(body, of, body_spin, (&bulk, derived.atmosphere()));
                 builder
                     .derived(&derived)
                     .bulk(Section::Ok(bulk))
@@ -3815,21 +3832,18 @@ impl PlanetarySystem {
                     ))
                 });
                 // P14.T48.e: a moon's surface section, and its envelope's tag, as a planet's. A
-                // moon's fractions hold no envelope, so its class always has a solid surface.
+                // moon's fractions hold no envelope, so its class always has a solid surface; from
+                // 24 a supercritical envelope may hide it (P14.T53.b part 2), as a planet's.
                 let (surface, envelope) = bulk.map_or(
                     (Section::NotModelled, Section::NotApplicable),
                     |(bulk, derived)| {
-                        if bulk.class().has_solid_surface() {
-                            let of = SurfaceOf::Moon {
-                                moon,
-                                derived,
-                                bulk: &bulk,
-                                orbit: &orbit,
-                            };
-                            (self.surface_section(body, of, spun), Section::NotApplicable)
-                        } else {
-                            (Section::NotApplicable, Section::NotModelled)
-                        }
+                        let of = SurfaceOf::Moon {
+                            moon,
+                            derived,
+                            bulk: &bulk,
+                            orbit: &orbit,
+                        };
+                        self.surface_or_envelope(body, of, spun, (&bulk, derived.atmosphere()))
                     },
                 );
                 let bulk = bulk.map_or(Section::NotModelled, |(bulk, _)| Section::Ok(bulk));

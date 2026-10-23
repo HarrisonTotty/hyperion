@@ -17,11 +17,15 @@ fn the_escape_is_held_only_until_the_24_bump() {
          `in_force` then gives `BATCH` alone, and the tests that pin version 23's figures under \
          `FITTED` move to the batch's), the tests' `with_rules`, and this test. From P14.T53.b \
          part 1: delete the tests' `with_present_state` and `PresentState` (its `Present` arm \
-         stands), so that `present_state_in_force` reads the batch alone"
+         stands), so that `present_state_in_force` reads the batch alone. From P14.T53.b part 2: \
+         keep the supercritical envelope's test (`Atmosphere::supercritical_reservoir`, read by \
+         `has_surface_section` at the record's three section tags) and delete only its hold, \
+         `supercritical_section_in_force`, so that it reads the batch alone"
     );
     assert_eq!(EscapeRules::in_force(), EscapeRules::Held);
     assert_eq!(GreenhouseConstants::in_force(), GreenhouseConstants::FITTED);
     assert!(!crate::planetary::derive::atmosphere::present_state_in_force());
+    assert!(!crate::planetary::derive::atmosphere::supercritical_section_in_force());
 }
 
 /// A test's rules hold on its thread inside [`with_rules`], nested or not, and the rules before

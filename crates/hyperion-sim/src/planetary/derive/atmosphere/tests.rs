@@ -5665,3 +5665,72 @@ fn under_every_24_hold_part_one_leaves_venus_earth_mars_and_titan_to_the_bit() {
         }
     });
 }
+
+/// P14.T53.b part 2 (decision-absurd-states-24 R2.3): with every landed 24 hold in force, no body
+/// of the table and not the measured Venus lies under a supercritical envelope, so each with a
+/// solid surface keeps its surface section. Venus's carbon dioxide, above its critical
+/// temperature, lies far under its critical isochore (about 815 bar at 737 K, against its 92
+/// bar; Lebonnois and Schubert 2017, Nat. Geosci. 10, 473, describe its deep atmosphere as a
+/// supercritical fluid over the rock), and Titan's nitrogen lies below its critical temperature.
+/// Every column at or above its critical temperature is printed with its margin.
+#[test]
+fn under_every_24_hold_venus_titan_and_the_table_keep_their_surfaces() {
+    use crate::planetary::testing::with_every_24_hold;
+    with_every_24_hold(|| {
+        let table = table();
+        let measured = measured_venus();
+        for (name, body) in table
+            .iter()
+            .map(|(name, body)| (*name, body))
+            .chain(core::iter::once(("the measured Venus", &measured)))
+        {
+            let (air, g) = (body.atmosphere(), body.surface_gravity());
+            let columns: Vec<String> = air
+                .critical_columns(g)
+                .map(|c| {
+                    format!(
+                        "{:?} T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar, share {:.3e}",
+                        c.gas(),
+                        c.temperature_ratio(),
+                        c.partial_pressure().value() / PASCALS_PER_BAR,
+                        c.isochore_pressure().value() / PASCALS_PER_BAR,
+                        c.share()
+                    )
+                })
+                .collect();
+            eprintln!(
+                "{name}: {:?} at {:.2} K; [{}]",
+                air.state(),
+                air.surface_temperature().value(),
+                columns.join("; ")
+            );
+            assert_eq!(air.supercritical_reservoir(g), None, "{name}");
+            assert_eq!(
+                has_surface_section(body.class(), air, g),
+                body.class().has_solid_surface(),
+                "{name}"
+            );
+        }
+        for venus in [found(&table, "Venus"), &measured] {
+            let (air, g) = (venus.atmosphere(), venus.surface_gravity());
+            let co2 = air
+                .critical_columns(g)
+                .find(|c| c.gas() == Gas::CarbonDioxide)
+                .expect("Venus's carbon dioxide lies above its critical temperature");
+            assert!(
+                co2.partial_pressure().value() < 0.2 * co2.isochore_pressure().value(),
+                "{co2:?}"
+            );
+            assert_same_bits(co2.share(), 0.0);
+        }
+        let titan = found(&table, "Titan");
+        let nitrogen = titan
+            .atmosphere()
+            .critical_columns(titan.surface_gravity())
+            .find(|c| c.gas() == Gas::Nitrogen);
+        assert_eq!(
+            nitrogen, None,
+            "Titan's nitrogen lies below its critical temperature"
+        );
+    });
+}

@@ -7,7 +7,10 @@
 //! section and an envelope `not_applicable`; a body in the gas-envelope state (a gas or ice giant,
 //! a sub-Neptune) has its envelope and a surface `not_applicable`, since within the model it has no
 //! surface: no surface pressure, its heights from the 1-bar level, and its envelope's base at
-//! kilobars. A ring, a belt or the halo has neither.
+//! kilobars. So, from generator version 24, does a solid body under a supercritical envelope
+//! (P14.T53.b part 2), where a condensable above its critical temperature holds a liquid-like
+//! layer of at least a thousandth of the body's mass over its ground, which then is no surface. A
+//! ring, a belt or the halo has neither.
 //!
 //! # Substances are keys
 //!
@@ -703,9 +706,10 @@ pub enum SilicateVapourDto {}
 /// P14.T48.e and P14.T35.e).
 ///
 /// The section is `ok` for a present body with a solid surface whose spin and derivation this
-/// generator version computes, `not_applicable` for a body in the gas-envelope state, whose air is
-/// its [`BodyEnvelopeDto`], and for a ring, a belt or the halo. Every quantity's name carries its
-/// unit. The module documentation says what `null` and an absent member mean.
+/// generator version computes, `not_applicable` for a body in the gas-envelope state, or, from
+/// generator version 24, a solid body under a supercritical envelope (P14.T53.b part 2), whose
+/// air is its [`BodyEnvelopeDto`], and for a ring, a belt or the halo. Every quantity's name
+/// carries its unit. The module documentation says what `null` and an absent member mean.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodySurfaceDto {
@@ -868,9 +872,10 @@ pub struct GuillotProfileDto {
 /// A gas-envelope body's visible atmosphere: its profile, composition and decks (plan 14,
 /// P14.T24.d with T52.d; the simulation's `record::Envelope`).
 ///
-/// The section is `not_modelled` for every gas-envelope body until P14.T24.d, which may give these
-/// members their final shape before a build first sends one, and `not_applicable` for every other
-/// body, whose surface section is the applicable one.
+/// The section is `not_modelled` for every gas-envelope body, and from generator version 24 for a
+/// solid body under a supercritical envelope (P14.T53.b part 2), until P14.T24.d, which may give
+/// these members their final shape before a build first sends one, and `not_applicable` for every
+/// other body, whose surface section is the applicable one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyEnvelopeDto {

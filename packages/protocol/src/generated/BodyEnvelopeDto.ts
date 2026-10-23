@@ -8,9 +8,10 @@ import type { ProfileNodeDto } from "./ProfileNodeDto";
  * A gas-envelope body's visible atmosphere: its profile, composition and decks (plan 14,
  * P14.T24.d with T52.d; the simulation's `record::Envelope`).
  *
- * The section is `not_modelled` for every gas-envelope body until P14.T24.d, which may give these
- * members their final shape before a build first sends one, and `not_applicable` for every other
- * body, whose surface section is the applicable one.
+ * The section is `not_modelled` for every gas-envelope body, and from generator version 24 for a
+ * solid body under a supercritical envelope (P14.T53.b part 2), until P14.T24.d, which may give
+ * these members their final shape before a build first sends one, and `not_applicable` for every
+ * other body, whose surface section is the applicable one.
  */
 export type BodyEnvelopeDto = { 
 /**

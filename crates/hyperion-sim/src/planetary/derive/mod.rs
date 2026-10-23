@@ -775,7 +775,11 @@ impl PlanetClass {
     /// The record's surface section is [`Section::Ok`](crate::planetary::record::Section::Ok) for
     /// a present body of such a class, and [`Section::NotApplicable`](crate::planetary::record::Section::NotApplicable)
     /// for the others, the sub-Neptunes and the giants, whose air is their `envelope` section's
-    /// (P14.T48.e). Readers decide from the record's tag, not from this predicate.
+    /// (P14.T48.e), or, from generator version 24, a body of such a class under a supercritical
+    /// envelope (P14.T53.b part 2: a condensable above its critical temperature whose liquid-like
+    /// column over its critical isochore holds at least [`THIN_ENVELOPE_FRACTION`] of the mass),
+    /// which the record tags as it tags them. Readers decide from the record's tag, not from this
+    /// predicate.
     #[must_use]
     pub const fn has_solid_surface(self) -> bool {
         match self {

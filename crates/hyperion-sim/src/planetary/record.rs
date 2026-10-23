@@ -25,7 +25,8 @@
 //! halo's. A planet's moons and rings and a system's belts and halo are [`Section::Ok`] lists
 //! (P14.T34). A present body with a solid surface has its surface section [`Section::Ok`]
 //! (P14.T48.e) and its envelope [`Section::NotApplicable`]; a body in the gas-envelope state, a
-//! sub-Neptune or a giant, the other way round, its envelope [`Section::NotModelled`] until
+//! sub-Neptune or a giant, or, from generator version 24, a solid body under a supercritical
+//! envelope (P14.T53.b part 2), the other way round, its envelope [`Section::NotModelled`] until
 //! P14.T24.d (decision-p14-t35e-wire). The hooks section, [`Hooks`], holds the body's detail seed
 //! (R09.T1.b): [`Section::Ok`] for a planet, moon or dwarf planet present at the record's time,
 //! and [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
@@ -601,9 +602,11 @@ impl BulkProperties {
 /// surface is [`Section::Ok`] for a present body with a solid surface
 /// ([`PlanetClass::has_solid_surface`]) whose spin and derivation this version computes, and
 /// [`Section::NotApplicable`] for a body in the gas-envelope state, a sub-Neptune or a giant,
-/// whose air is its [`Envelope`] section's, so that no surface section is `Ok` with no surface
-/// behind it (decision-p14-t35e-wire §2). It is never in the state
-/// [`SurfaceState::GasEnvelope`].
+/// or, from generator version 24, a solid body under a supercritical envelope (P14.T53.b part 2:
+/// a condensable above its critical temperature whose liquid-like column over its critical
+/// isochore holds at least a thousandth of the mass), whose air is its [`Envelope`] section's, so
+/// that no surface section is `Ok` with no surface behind it (decision-p14-t35e-wire §2). It is
+/// never in the state [`SurfaceState::GasEnvelope`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
     state: SurfaceState,
@@ -1285,6 +1288,7 @@ impl BodyRecord {
     /// The surface (P14.T48.e): [`Section::Ok`] for a present body with a solid surface, a planet,
     /// a dwarf planet or a moon, whose spin and derivation this version computes;
     /// [`Section::NotApplicable`] for a body in the gas-envelope state (a sub-Neptune or a giant),
+    /// from generator version 24 a solid body under a supercritical envelope (P14.T53.b part 2),
     /// a population and a body not present; and [`Section::NotModelled`] for a body with no
     /// rotation law (every body of [`generate_planets`](crate::planetary::generate_planets)) or
     /// whose derivation this version does not compute.
@@ -1522,11 +1526,20 @@ impl BodyRecordBuilder {
     /// envelope tags of its class (P14.T48.e's gas-envelope split, decision-p14-t35e-wire): for a
     /// class with a solid surface ([`PlanetClass::has_solid_surface`]) the surface
     /// [`Section::NotModelled`], until the generator sets what it computes, and the envelope
-    /// [`Section::NotApplicable`]; for a sub-Neptune or a giant the surface
-    /// [`Section::NotApplicable`] and the envelope [`Section::NotModelled`], until P14.T24.d.
+    /// [`Section::NotApplicable`]; for a sub-Neptune or a giant, or, from generator version 24, a
+    /// solid body under a supercritical envelope (P14.T53.b part 2: a condensable above its
+    /// critical temperature whose liquid-like column over its critical isochore holds at least
+    /// [`THIN_ENVELOPE_FRACTION`](crate::planetary::params::THIN_ENVELOPE_FRACTION) of the mass,
+    /// under its surface gravity), the surface [`Section::NotApplicable`] and the envelope
+    /// [`Section::NotModelled`], until P14.T24.d.
     #[must_use]
     pub fn derived(self, derived: &DerivedBody) -> Self {
-        let (surface, envelope) = if derived.class().has_solid_surface() {
+        let solid = crate::planetary::derive::atmosphere::has_surface_section(
+            derived.class(),
+            derived.atmosphere(),
+            derived.surface_gravity(),
+        );
+        let (surface, envelope) = if solid {
             (Section::NotModelled, Section::NotApplicable)
         } else {
             (Section::NotApplicable, Section::NotModelled)

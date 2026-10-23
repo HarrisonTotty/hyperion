@@ -1402,9 +1402,11 @@ fn golden_systems_are_pinned() {
 }
 
 /// P14.T48.e's gas-envelope split on the golden systems: a present planet's surface is `Ok`
-/// exactly when its class has a solid surface, and then never in the gas-envelope state; its
-/// envelope is not modelled exactly when it has none, and not applicable otherwise; and degrading
-/// below `Surface` withholds the envelope.
+/// exactly when its class has a solid surface, and then never in the gas-envelope state, or, from
+/// generator version 24, its class has a solid surface under a supercritical envelope (P14.T53.b
+/// part 2), when its surface is not applicable and its envelope not modelled; its envelope is not
+/// modelled exactly when its surface does not apply, and not applicable otherwise, so that exactly
+/// one of the two applies; and degrading below `Surface` withholds the envelope.
 #[test]
 fn the_golden_systems_split_surfaces_from_envelopes() {
     let galaxy = fixture();
@@ -1422,9 +1424,15 @@ fn the_golden_systems_split_surfaces_from_envelopes() {
             }
             let name = format!("{} {:04x}", golden.name, record.index().get());
             let has_solid_surface = bulk.class().has_solid_surface();
+            // A solid class under a supercritical envelope, from 24 (P14.T53.b part 2): the test
+            // that decides it is the crate's own, so the tag pair alone stands for it here.
+            let hidden = has_solid_surface
+                && record.surface() == &Section::NotApplicable
+                && record.envelope() == &Section::NotModelled;
+            assert!(!hidden || GENERATOR_VERSION.get() >= 24, "{name}");
             assert_eq!(
                 matches!(record.surface(), Section::Ok(_)),
-                has_solid_surface,
+                has_solid_surface && !hidden,
                 "{name}: a {:?}",
                 bulk.class()
             );
@@ -1435,7 +1443,7 @@ fn the_golden_systems_split_surfaces_from_envelopes() {
                 assert_eq!(record.surface(), &Section::NotApplicable, "{name}");
                 enveloped += 1;
             }
-            let expected = if has_solid_surface {
+            let expected = if has_solid_surface && !hidden {
                 Section::NotApplicable
             } else {
                 Section::NotModelled

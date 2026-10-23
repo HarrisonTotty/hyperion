@@ -622,6 +622,13 @@ fn a_record_tags_what_the_generator_does_not_compute() {
 /// conditions' own and its condensates (P14.T54.a) the published ones it was built with, and
 /// `Surface::new` refuses the gas-envelope state and conditions before their second stage, which
 /// have no regime.
+///
+/// From generator version 24 (P14.T53.b part 2), the invariant `CoarseInputs::for_body` relies
+/// on, that no `Ok` surface lies where there is none (decision-p14-t35e-wire §2.4), also holds
+/// under a supercritical envelope: with every landed 24 hold in force, over the same systems and
+/// the census body's ([`SUPERCRITICAL_METHANE_BODY`]) generated afresh, no `Ok` surface lies under
+/// one, and every solid class whose surface is not applicable lies under one, its envelope not
+/// modelled ([`assert_envelope_tags`]).
 #[test]
 fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
     let mut checked = 0;
@@ -673,6 +680,25 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
         }
     }
     assert!(checked > 20, "{checked}");
+
+    let census_body = supercritical_methane_context();
+    let sets: Vec<(&str, Seed, &SystemContext)> = whole()
+        .iter()
+        .take(10)
+        .map(|(ctx, _)| ("sample", SEED, ctx))
+        .chain(core::iter::once(("sample", SEED, census_body)))
+        .collect();
+    let bodies = crate::planetary::testing::with_every_24_hold(|| envelope_census(&sets));
+    let (mut surfaces, mut hidden) = (0_u32, 0_u32);
+    for body in &bodies {
+        assert_envelope_tags(body);
+        surfaces += u32::from(body.surface == SectionState::Ok);
+        hidden += u32::from(body.hidden.is_some());
+    }
+    assert!(
+        surfaces > 20 && hidden >= 1,
+        "{surfaces} surfaces, {hidden} hidden"
+    );
 }
 
 /// P14.T54.a: a record's surface section holds P14.T51.a's published condensates, the ones its
@@ -1306,15 +1332,32 @@ fn check_record_condensates<'a>(
 
 /// P14.T48.e's gas-envelope split on a present body's record with a bulk section: a body with a
 /// solid surface has its surface section `Ok`, from `DetailLevel::Surface` and not below, and its
-/// envelope not applicable; every other its surface not applicable and its envelope not modelled
-/// until P14.T24.d. Whether the body has a solid surface.
+/// envelope not applicable, or, under the escape's batch rules alone (from generator version 24),
+/// its surface not applicable and its envelope not modelled under a supercritical envelope
+/// (P14.T53.b part 2, whose test the record does not carry: the 24 arm of
+/// `a_surface_holds_a_solid_state_and_its_conditions_regime` checks it on the derivation); every
+/// other its surface not applicable and its envelope not modelled until P14.T24.d, so that exactly
+/// one of the two applies. Whether the body's class has a solid surface.
 fn assert_surface_or_envelope(record: &BodyRecord) -> bool {
+    use crate::planetary::derive::atmosphere::supercritical_section_in_force;
     let index = record.index();
     let bulk = record.bulk().ok().unwrap();
     let surface = record.section_state(RecordSection::Surface);
     let envelope = record.section_state(RecordSection::Envelope);
     let solid = bulk.class().has_solid_surface();
-    if solid {
+    if solid && surface == SectionState::NotApplicable {
+        assert!(
+            supercritical_section_in_force(),
+            "{index:?}: a solid surface hidden under the hold"
+        );
+        assert_eq!(envelope, SectionState::NotModelled, "{index:?}");
+        let at = |level| record.degrade(level).section_state(RecordSection::Surface);
+        assert_eq!(
+            at(DetailLevel::Surface),
+            SectionState::NotApplicable,
+            "{index:?}"
+        );
+    } else if solid {
         assert_eq!(surface, SectionState::Ok, "{index:?}");
         assert_eq!(envelope, SectionState::NotApplicable, "{index:?}");
         let at = |level| record.degrade(level).section_state(RecordSection::Surface);
@@ -7358,6 +7401,50 @@ fn census_walk(
     }
 }
 
+/// Every present planet, member and moon of `system` with a derivation and a bulk section at the
+/// epoch, whatever its surface's tag, in body order, each given to `visit` with its kind
+/// ("planets", "members" or "moons"), its record and its derivation: P14.T53.b part 2's walk,
+/// since [`census_walk`] visits only the `Ok` surfaces.
+fn envelope_walk(
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    visit: &mut dyn FnMut(&str, &BodyRecord, &DerivedBody),
+) {
+    let t = UniverseTime::EPOCH;
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return;
+    }
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    for body in system.bodies() {
+        let kind = match body.part {
+            Part::Planet(_) => "planets",
+            Part::Member(_) => "members",
+            Part::Moon(_) | Part::Ring(_) => continue,
+        };
+        let host = fate_host(ctx, system.zone_of(body));
+        let fate = system.fate_of(body, &host);
+        let label = label::label(system, body.index).unwrap();
+        let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+        if let (Section::Ok(_), Some(derived)) = (record.bulk(), now.derived.as_ref()) {
+            visit(kind, &record, derived);
+        }
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let label = label::label(system, child.index).unwrap();
+            let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+            if record.bulk().ok().is_none() {
+                continue;
+            }
+            if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                visit("moons", &record, moon.body());
+            }
+        }
+    }
+}
+
 /// What the census tallies and lists ([`the_states_and_the_dark_thick_airs_are_recorded`]).
 #[derive(Default)]
 struct Census {
@@ -10344,11 +10431,12 @@ fn look72_triaged_contexts() -> Vec<SystemContext> {
         .collect()
 }
 
-/// A condensable's critical isochore at `t_s` against its column (decision-absurd-states-24 R2.3,
-/// a census's own arithmetic): its own partial pressure `p_i`, p* = `p_c` + `s_c` (`T_s` − `T_c`)
-/// with `s_c` the slope of the registry's vapour-pressure curve at its critical point, its melting
-/// pressure at `T_s`, and the reservoir's share of the body's mass, 4π G Δp ÷ g², Δp the column
-/// between p* and the lesser of `p_i` and the melting pressure.
+/// A condensable's critical isochore at `t_s` against its column (decision-absurd-states-24 R2.3),
+/// [`SupercriticalReservoir::of`](crate::planetary::derive::atmosphere::SupercriticalReservoir::of)'s
+/// figures at the record's `T_s` and the derivation's gravity: its own partial pressure `p_i`,
+/// p* = `p_c` + `s_c` (`T_s` − `T_c`) with `s_c` the slope of the registry's vapour-pressure curve
+/// at its critical point, its melting pressure at `T_s`, and the reservoir's share of the body's
+/// mass, 4π G Δp ÷ g², Δp the column between p* and the lesser of `p_i` and the melting pressure.
 struct IsochoreCase {
     gas: Gas,
     t_ratio: f64,
@@ -10360,37 +10448,20 @@ struct IsochoreCase {
 
 /// [`IsochoreCase`] for each gas of `derived`'s air at or above its critical temperature at `t_s`.
 fn isochore_cases(derived: &DerivedBody, t_s: f64) -> Vec<IsochoreCase> {
+    use crate::planetary::derive::atmosphere::SupercriticalReservoir;
     let partials = derived.atmosphere().partial_pressures();
-    let g = derived.surface_gravity().value();
+    let g = derived.surface_gravity();
     Gas::ALL
         .into_iter()
         .filter_map(|gas| {
-            let p_i = partials.of(gas).value();
-            let diagram = gas.substance().substance().phase_diagram()?;
-            let curve = diagram.vapour_pressure();
-            let (t_c, p_c) = (
-                curve.reducing_temperature().value(),
-                curve.reducing_pressure().value(),
-            );
-            if p_i <= 0.0 || t_s < t_c {
-                return None;
-            }
-            let slope = -p_c * curve.slope_k(Kelvin::new(t_c)) / (t_c * t_c);
-            let p_star = p_c + slope * (t_s - t_c);
-            let p_melt = diagram
-                .melting_pressure(Kelvin::new(t_s))
-                .map(Pascals::value);
-            let top = p_melt.map_or(p_i, |m| m.min(p_i));
-            let fraction =
-                4.0 * PI * crate::units::consts::GRAVITATIONAL_CONSTANT * (top - p_star).max(0.0)
-                    / (g * g);
+            let column = SupercriticalReservoir::of(gas, Kelvin::new(t_s), partials.of(gas), g)?;
             Some(IsochoreCase {
                 gas,
-                t_ratio: t_s / t_c,
-                p_i,
-                p_star,
-                p_melt,
-                fraction,
+                t_ratio: column.temperature_ratio(),
+                p_i: column.partial_pressure().value(),
+                p_star: column.isochore_pressure().value(),
+                p_melt: column.melting_pressure().map(Pascals::value),
+                fraction: column.share(),
             })
         })
         .collect()
@@ -12163,4 +12234,336 @@ fn under_every_24_hold_no_runaway_lies_outside_the_present_limit_or_under_too_co
         Vec::<String>::new(),
         "a present ratio above the peak's"
     );
+}
+
+// P14.T53.b part 2: the supercritical envelope's section (decision-absurd-states-24 R2), with every
+// landed 24 hold in force (decision-t24i-airless-state D3.3).
+
+/// The census's sample body under kilobars of supercritical methane (decision-absurd-states-24
+/// R2.1): a `Snowball` at 12.9 kbar and 209.1 K under the hold, and about 10 kbar, 8.78 of CH₄
+/// and 1.27 of N₂, at 192.6 K under the escape's batch, 2 K above methane's critical point.
+const SUPERCRITICAL_METHANE_BODY: &str = "02001b2ca0000000.0400";
+
+/// LOOK72's three methane `Snowball`s above methane's critical temperature at 23
+/// (decision-absurd-states-24 R2.1–R2.2; R4.3's census).
+const LOOK72_METHANE_SNOWBALLS: [&str; 3] = [
+    "020e56ef20080000.0900",
+    "020e56ef60090005.0500",
+    "020e56ef60080003.0600",
+];
+
+/// LOOK72's nitrogen `Snowball`s at 81–313 bar (decision-absurd-states-24 R2.3).
+const LOOK72_NITROGEN_SNOWBALLS: [&str; 4] = [
+    "020e56ef20090004.0600",
+    "020e66efa007000b.0900",
+    "020e66efa007000b.0a00",
+    "020e56ef20080006.0300",
+];
+
+/// The sample's context of [`SUPERCRITICAL_METHANE_BODY`]'s system.
+fn supercritical_methane_context() -> &'static SystemContext {
+    let (system, _) = SUPERCRITICAL_METHANE_BODY
+        .split_once('.')
+        .expect("a body ID");
+    sample()
+        .iter()
+        .find(|ctx| ctx.id().to_string() == system)
+        .expect("the census body's system is in the sample")
+}
+
+/// One present planet, member or moon of [`envelope_walk`] at the epoch: its record's section
+/// tags, and each condensable of its derivation's air at or above its critical temperature
+/// against its critical isochore under its bulk's gravity (P14.T53.b part 2).
+struct EnvelopeBody {
+    /// Its set ("sample", the golden system's name, or "look72"), its ID and its kind.
+    label: String,
+    /// Its ID, as its record gives it.
+    id: String,
+    /// Its bulk's class.
+    class: PlanetClass,
+    /// Its record's surface section's tag.
+    surface: SectionState,
+    /// Its record's envelope section's tag.
+    envelope: SectionState,
+    /// Its derivation's surface state.
+    state: SurfaceState,
+    /// Its atmosphere's mean surface temperature, K.
+    t_s: f64,
+    /// Its atmosphere's surface pressure, Pa.
+    p_s: f64,
+    /// Its bulk's surface gravity, m s⁻².
+    g: f64,
+    /// Its condensables at or above their critical temperatures, whatever their shares.
+    columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    /// The reservoir that hides its surface, as the record reads it.
+    hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+}
+
+impl EnvelopeBody {
+    /// The body `record` of the set `set` and kind `kind`, derived as `derived`, under the rules in
+    /// force.
+    fn of(set: &str, kind: &str, record: &BodyRecord, derived: &DerivedBody) -> Self {
+        let bulk = record.bulk().ok().expect("a walked body has its bulk");
+        let gravity = bulk.surface_gravity();
+        let air = derived.atmosphere();
+        let id = record.identity().id().to_string();
+        Self {
+            label: format!("{set} {id} {kind}"),
+            id,
+            class: bulk.class(),
+            surface: record.section_state(RecordSection::Surface),
+            envelope: record.section_state(RecordSection::Envelope),
+            state: air.state(),
+            t_s: air.surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            g: gravity.value(),
+            columns: air.critical_columns(gravity).collect(),
+            hidden: air.supercritical_reservoir(gravity),
+        }
+    }
+
+    /// A column's figures, for a census line: its gas, `T_s` ÷ `T_c`, `p_i`, p*, the melting
+    /// pressure, the share and the margins `p_i` ÷ p* and share ÷ [`THIN_ENVELOPE_FRACTION`].
+    ///
+    /// [`THIN_ENVELOPE_FRACTION`]: crate::planetary::params::THIN_ENVELOPE_FRACTION
+    fn column_line(
+        column: &crate::planetary::derive::atmosphere::SupercriticalReservoir,
+    ) -> String {
+        format!(
+            "{:?} T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar (p_i/p* {:.4}), p_melt {}, share \
+             {:.4e} (of the line {:.4})",
+            column.gas(),
+            column.temperature_ratio(),
+            column.partial_pressure().value() / 1e5,
+            column.isochore_pressure().value() / 1e5,
+            column.partial_pressure().value() / column.isochore_pressure().value(),
+            column.melting_pressure().map_or_else(
+                || "none".to_owned(),
+                |m| format!("{:.4e} bar", m.value() / 1e5)
+            ),
+            column.share(),
+            column.share() / crate::planetary::params::THIN_ENVELOPE_FRACTION,
+        )
+    }
+
+    /// Its tags, state, `T_s`, `p_s`, g and columns, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} {:?}, T_s {:.3} K, p_s {:.4e} bar, g {:.4} m s⁻²; surface {:?}, envelope {:?}; \
+             [{}]",
+            self.class,
+            self.state,
+            self.t_s,
+            self.p_s / 1e5,
+            self.g,
+            self.surface,
+            self.envelope,
+            self.columns
+                .iter()
+                .map(Self::column_line)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    }
+}
+
+/// Every body of [`envelope_walk`] over the systems `sets`, each generated afresh at its seed
+/// under the rules in force on the calling thread, in order.
+fn envelope_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<EnvelopeBody> {
+    let mut bodies = Vec::new();
+    for &(set, seed, ctx) in sets {
+        let system = generate(seed, ctx);
+        envelope_walk(ctx, &system, &mut |kind, record, derived| {
+            bodies.push(EnvelopeBody::of(set, kind, record, derived));
+        });
+    }
+    bodies
+}
+
+/// P14.T53.b part 2's tags on `body`: a solid class has its surface `Ok` and its envelope not
+/// applicable exactly where no supercritical envelope hides its surface, and its surface not
+/// applicable and its envelope not modelled where one does; every other class its surface not
+/// applicable and its envelope not modelled. So no `Ok` surface lies under a supercritical
+/// envelope, and exactly one of the two applies.
+fn assert_envelope_tags(body: &EnvelopeBody) {
+    let at = || format!("{}: {}", body.label, body.line());
+    if body.class.has_solid_surface() && body.hidden.is_none() {
+        assert_eq!(body.surface, SectionState::Ok, "{}", at());
+        assert_eq!(body.envelope, SectionState::NotApplicable, "{}", at());
+    } else {
+        assert_eq!(body.surface, SectionState::NotApplicable, "{}", at());
+        assert_eq!(body.envelope, SectionState::NotModelled, "{}", at());
+    }
+    if let Some(hidden) = &body.hidden {
+        assert!(hidden.hides_the_surface(), "{}", at());
+        let largest = body
+            .columns
+            .iter()
+            .map(crate::planetary::derive::atmosphere::SupercriticalReservoir::share)
+            .fold(0.0, f64::max);
+        assert_same_bits(hidden.share(), largest);
+    }
+}
+
+/// P14.T53.b part 2 (decision-absurd-states-24 R2.1): with every landed 24 hold in force, the
+/// census's [`SUPERCRITICAL_METHANE_BODY`], a solid body under kilobars of methane 2 K above its
+/// critical point, takes the envelope section, its surface not applicable and its envelope not
+/// modelled, under methane's reservoir; under the escape's hold, to version 23, it keeps its
+/// surface. Its figures are printed: `T_s`, `p_i`, p*, the melting pressure, the share and g.
+#[test]
+fn under_every_24_hold_the_census_s_methane_snowball_takes_the_envelope_section() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    let sets = [("sample", SEED, supercritical_methane_context())];
+    let find = |bodies: Vec<EnvelopeBody>| {
+        bodies
+            .into_iter()
+            .find(|body| body.id == SUPERCRITICAL_METHANE_BODY)
+            .expect("the census body is present at the epoch")
+    };
+    let held = find(with_rules(EscapeRules::Held, || envelope_census(&sets)));
+    let batch = find(crate::planetary::testing::with_every_24_hold(|| {
+        envelope_census(&sets)
+    }));
+    eprintln!(
+        "{SUPERCRITICAL_METHANE_BODY}\n  held  {}\n  batch {}",
+        held.line(),
+        batch.line()
+    );
+    assert_envelope_tags(&held);
+    assert_eq!(held.surface, SectionState::Ok);
+    assert!(held.hidden.is_none());
+    assert_envelope_tags(&batch);
+    assert!(batch.class.has_solid_surface(), "{}", batch.line());
+    assert_eq!(batch.surface, SectionState::NotApplicable);
+    assert_eq!(batch.envelope, SectionState::NotModelled);
+    let hidden = batch.hidden.expect("methane's reservoir hides the surface");
+    eprintln!("  hidden by {}", EnvelopeBody::column_line(&hidden));
+    assert_eq!(hidden.gas(), Gas::Methane);
+    assert!(hidden.temperature_ratio() >= 1.0);
+}
+
+/// P14.T53.b part 2 (decision-absurd-states-24 R2.3, R4.3): with every landed 24 hold in force,
+/// LOOK72's three methane `Snowball`s and its nitrogen `Snowball`s at 81–313 bar keep their
+/// surfaces, none under a supercritical envelope, their margins printed: 0900 keeps about 27 bar
+/// of methane at 190.9 K against its isochore's 46.5 bar, 0500 and 0600 keep no methane (T53.a's
+/// methane route), and the nitrogen bodies' columns above their isochores hold far less than a
+/// thousandth of their mass.
+#[test]
+fn under_every_24_hold_look72_s_snowballs_keep_their_surfaces() {
+    let galaxy = look72_galaxy();
+    let systems: std::collections::BTreeSet<&str> = LOOK72_METHANE_SNOWBALLS
+        .iter()
+        .chain(&LOOK72_NITROGEN_SNOWBALLS)
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    let contexts: Vec<SystemContext> = systems
+        .into_iter()
+        .map(|id| {
+            SystemContext::for_system(galaxy, id.parse().expect("a system ID"))
+                .expect("a system of LOOK72")
+        })
+        .collect();
+    let sets: Vec<(&str, Seed, &SystemContext)> = contexts
+        .iter()
+        .map(|ctx| ("look72", galaxy.seed(), ctx))
+        .collect();
+    let bodies = crate::planetary::testing::with_every_24_hold(|| envelope_census(&sets));
+    for body in &bodies {
+        assert_envelope_tags(body);
+    }
+    for (group, ids) in [
+        ("methane", &LOOK72_METHANE_SNOWBALLS[..]),
+        ("nitrogen", &LOOK72_NITROGEN_SNOWBALLS[..]),
+    ] {
+        for id in ids {
+            let body = bodies
+                .iter()
+                .find(|body| body.id == *id)
+                .unwrap_or_else(|| panic!("{id} is present at the epoch"));
+            eprintln!("LOOK72's {group} Snowball {}: {}", body.label, body.line());
+            assert_eq!(body.surface, SectionState::Ok, "{}", body.line());
+            assert!(body.hidden.is_none(), "{}", body.line());
+        }
+    }
+}
+
+/// P14.T53.b part 2's census, a measurement for the record (decision-absurd-states-24 R2.3), run
+/// by name over part 1's census set ([`present_census`]'s: the first 60 sample systems, the
+/// golden systems and the 27 systems of LOOK72's triaged bodies), each generated afresh with
+/// every landed 24 hold in force: every body whose surface a supercritical envelope hides, by
+/// name, substance, `T_s` ÷ `T_c` and share of its mass; those beyond 2.5 `T_c`, past the line's
+/// checked range, with their margins; the near misses, a column of 10⁻⁴ to 10⁻³ of the mass; and
+/// the count of columns above their isochores. Every body's tags are checked
+/// ([`assert_envelope_tags`]).
+#[test]
+#[ignore = "a measurement for P14.T53.b part 2's record, run by name"]
+fn under_every_24_hold_part_two_s_movers_are_stated() {
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let bodies = crate::planetary::testing::with_every_24_hold(|| envelope_census(&sets));
+    for body in &bodies {
+        assert_envelope_tags(body);
+    }
+    let columns: usize = bodies.iter().map(|body| body.columns.len()).sum();
+    let above: Vec<(
+        &EnvelopeBody,
+        &crate::planetary::derive::atmosphere::SupercriticalReservoir,
+    )> = bodies
+        .iter()
+        .flat_map(|body| body.columns.iter().map(move |column| (body, column)))
+        .filter(|(_, column)| column.share() > 0.0)
+        .collect();
+    let movers: Vec<&EnvelopeBody> = bodies.iter().filter(|b| b.hidden.is_some()).collect();
+    eprintln!(
+        "{} bodies of {} systems; {columns} columns at or above T_c, {} above their isochores; {} \
+         movers",
+        bodies.len(),
+        sets.len(),
+        above.len(),
+        movers.len()
+    );
+    eprintln!("MOVERS:");
+    for body in &movers {
+        let hidden = body.hidden.as_ref().expect("a mover's reservoir");
+        eprintln!(
+            "  {} by {}\n    {}",
+            body.label,
+            EnvelopeBody::column_line(hidden),
+            body.line()
+        );
+    }
+    eprintln!("MOVERS BEYOND 2.5 T_c:");
+    for body in &movers {
+        for column in body.columns.iter().filter(|c| c.hides_the_surface()) {
+            if column.temperature_ratio() > 2.5 {
+                eprintln!("  {}: {}", body.label, EnvelopeBody::column_line(column));
+            }
+        }
+    }
+    eprintln!("NEAR MISSES (a column of 1e-4 to 1e-3 of the mass):");
+    for (body, column) in &above {
+        if (1e-4..crate::planetary::params::THIN_ENVELOPE_FRACTION).contains(&column.share()) {
+            eprintln!(
+                "  {} (hidden {}): {}",
+                body.label,
+                body.hidden.is_some(),
+                EnvelopeBody::column_line(column)
+            );
+        }
+    }
+    eprintln!("EVERY COLUMN ABOVE ITS ISOCHORE:");
+    for (body, column) in &above {
+        eprintln!("  {}: {}", body.label, EnvelopeBody::column_line(column));
+    }
 }
