@@ -613,7 +613,13 @@ fn nothing_on_the_record_calls_the_inventory_yet() {
         "hooks::sulphur",
         "sulphur::",
     ];
-    let declarations = ["pub mod aerosols;", "pub mod sulphur;"];
+    // The atmosphere re-exports the acid's cycling temperature for P14.T53.b part 1 (b)'s deckless
+    // re-solve and its docs (`RunawayDeck`): a constant, which calls nothing of the inventory.
+    let declarations = [
+        "pub mod aerosols;",
+        "pub mod sulphur;",
+        "pub use crate::planetary::hooks::sulphur::ACID_CYCLING_TEMPERATURE;",
+    ];
     let mut found = Vec::new();
     for path in &files {
         let relative = path

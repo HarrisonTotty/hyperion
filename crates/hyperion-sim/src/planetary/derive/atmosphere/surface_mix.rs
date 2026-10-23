@@ -31,7 +31,8 @@
 //! pass a host at the hottest host's temperature ([`PassLight`]).
 
 use super::{
-    Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, SurfaceMaterial, SurfaceState,
+    Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, RunawayDeck, SurfaceMaterial,
+    SurfaceState,
 };
 use crate::planetary::chem::partition::{
     Basins, ClimateSpan, Condensates, Cover, CrustWater, Ground, Partition, WaterCover, partition,
@@ -96,6 +97,11 @@ pub(crate) struct PassSurface<'a> {
     /// pass under the body's own climate that takes a lid reads its row instead
     /// ([`Regolith::with_lid`]), until P14.T54.b weathers it ([`Regolith::weathered`]).
     pub(crate) regolith: &'a RegolithOf<'a>,
+    /// Whether a runaway's cloud is Venus's deck or, solved without it, the water cloud's
+    /// (P14.T53.b part 1 (b)): [`RunawayDeck::Kept`] from both constructors, and
+    /// [`RunawayDeck::Deckless`] for the passes of a runaway solved again without the deck
+    /// ([`with_deck`](Self::with_deck)).
+    pub(crate) deck: RunawayDeck,
 }
 
 /// The climate a pass reads ([`PassSurface::climate`]).
@@ -168,6 +174,7 @@ impl<'a> PassSurface<'a> {
             water_at_surface: 1.0,
             light,
             regolith: &Regolith::of_material,
+            deck: RunawayDeck::Kept,
         }
     }
 
@@ -182,7 +189,14 @@ impl<'a> PassSurface<'a> {
             climate: PassClimate::Spun(spun),
             light,
             regolith: &Regolith::of_material,
+            deck: RunawayDeck::Kept,
         }
+    }
+
+    /// The same surface with a runaway's cloud `deck` (P14.T53.b part 1 (b)).
+    #[must_use]
+    pub(crate) const fn with_deck(self, deck: RunawayDeck) -> Self {
+        Self { deck, ..self }
     }
 }
 
@@ -216,28 +230,30 @@ pub(crate) fn linear_cold_area(span: &ClimateSpan, t: Kelvin) -> f64 {
 }
 
 /// The passes' stand-in for water's cover, for a body with no rotation law, over the partition
-/// `solved` of a body in the state `state` whose bulk is of `material`, on the surface `surface`
-/// over the climate `climate`: P14.T24.b's rules with no hypsometry, the cold area linear across
-/// it. A body whose record holds its law takes the record's cover instead ([`SpunClimate`]).
+/// `solved` of a body in the state `state`, its water following `water_state`
+/// ([`Atmosphere::water_state`]), whose bulk is of `material`, on the surface `surface` over the
+/// climate `climate`: P14.T24.b's rules with no hypsometry, the cold area linear across it. A body
+/// whose record holds its law takes the record's cover instead ([`SpunClimate`]).
 ///
 /// - The surface water is the partition's condensed water times the ground's surface share,
-///   under T24.b's gate (a temperate world or a snowball; decision-p14-t51a-part2 §4.2).
+///   under T24.b's gate (a temperate world or a snowball by its water's state;
+///   decision-p14-t51a-part2 §4.2).
 /// - The potential ocean is the share its layer fills of the surface's basins, none where no
 ///   basins are known ([`Basins::area_filled`]): in the stand-in no pass's water covers any area as
 ///   a sea (labelled).
-/// - The ice is the cold area below T24.b's threshold ([`cover::ice_threshold`]), a `Snowball`'s
-///   and an icy crust's uncapped, a silicate crust's capped by its surface water at
-///   [`cover::ICE_SHEET_THICKNESS`] of ice Ih at the mean ([`cover::ice_fraction`]'s rule).
+/// - The ice is the cold area below T24.b's threshold of the state ([`cover::ice_threshold`]), a
+///   `Snowball`'s water and an icy crust's uncapped, a silicate crust's capped by its surface water
+///   at [`cover::ICE_SHEET_THICKNESS`] of ice Ih at the mean ([`cover::ice_fraction`]'s rule).
 /// - No crust is listed ([`WaterCover::crust_water`]): the area mix reads an ice bulk's crust as
 ///   its regolith.
 #[must_use]
 fn pass_water_cover(
     solved: &Partition,
-    (state, material): (SurfaceState, SurfaceMaterial),
+    (state, water_state, material): (SurfaceState, SurfaceState, SurfaceMaterial),
     surface: &PassSurface<'_>,
     climate: &ClimateSpan,
 ) -> WaterCover {
-    let holds = match state {
+    let holds = match water_state {
         SurfaceState::Temperate | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
@@ -255,7 +271,7 @@ fn pass_water_cover(
     let layer = cover::water_layer(KilogramsPerSquareMetre::new(sigma));
     let ice_density = ice_ih_density(climate.mean());
     let cold = linear_cold_area(climate, cover::ice_threshold(state));
-    let ice_fraction = match (state, material) {
+    let ice_fraction = match (water_state, material) {
         (SurfaceState::Snowball, _) | (_, SurfaceMaterial::Ice) => cold,
         (_, SurfaceMaterial::Rock) => {
             let cap = sigma / (ice_density.value() * cover::ICE_SHEET_THICKNESS.value());
@@ -294,7 +310,12 @@ fn given_partition(
     let climate = climate_of(air.surface_temperature, &air.partials);
     let ground = Ground::new(gravity, surface.basins, surface.water_at_surface);
     let solved = partition(&climate, &ground, &air.column_inventory());
-    let water = pass_water_cover(&solved, (air.state, inputs.material), surface, &climate);
+    let water = pass_water_cover(
+        &solved,
+        (air.state, air.water_state, inputs.material),
+        surface,
+        &climate,
+    );
     let cold_area = |t: Kelvin| linear_cold_area(&climate, t);
     let published = solved.publish(&Cover {
         cold_area: &cold_area,
@@ -474,7 +495,9 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 /// - a magma ocean the melt's 0.10 ([`area_mix::melt_bond`]), cloudless, whatever its lid;
 /// - every other state the area mix over the condensates its pass publishes and its regolith, its
 ///   lid's row where it takes one, with the cloud fraction of its state and condensable at its
-///   cloud's albedo ([`area_mix::under_cloud`]);
+///   cloud's albedo ([`area_mix::under_cloud`]), a runaway's Venus's deck or, solved without it,
+///   the water cloud's (the surface's [`deck`](PassSurface::deck), P14.T53.b part 1 (b)), which
+///   the atmosphere then publishes ([`Atmosphere::runaway_deck`]: kept for every other state);
 /// - and every state but a gas envelope floored at its air's own Rayleigh layer's, from
 ///   [`RAYLEIGH_FLOOR_VERSION`](area_mix::RAYLEIGH_FLOOR_VERSION) (P14.T24.h.a; [`floored`]).
 #[must_use]
@@ -514,9 +537,18 @@ pub(super) fn area_mixed(
         spun_read::trace(lid.as_ref());
     }
     let albedo = floored(albedo, air, inputs, shade);
+    let runaway_deck = match air.state {
+        SurfaceState::RunawayGreenhouse => surface.deck,
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::Airless
+        | SurfaceState::Temperate
+        | SurfaceState::Snowball => RunawayDeck::Kept,
+    };
     let air = Atmosphere {
         albedo: bond_albedo(albedo, air.state, inputs.material),
         cloud_fraction,
+        runaway_deck,
         ..*air
     };
     (air, lid)
@@ -694,7 +726,8 @@ pub(crate) mod floor_read {
 
 /// The area-mix Bond albedo and cloud fraction of a body with a surface, the atmosphere `air` of
 /// the body `inputs` describe on the surface `surface` under the light `shade` ([`area_mixed`]),
-/// and the lid its pass takes under the body's own climate, whose row its regolith is.
+/// its cloud a runaway's by the surface's deck, and the lid its pass takes under the body's own
+/// climate, whose row its regolith is.
 #[must_use]
 fn surface_and_cloud(
     air: &Atmosphere,
@@ -734,8 +767,13 @@ fn surface_and_cloud(
     };
     let regolith = regolith_of(lid.as_ref());
     let ground = area_mix::surface_bond(&published, &solved, regolith, shade);
-    let cloud = area_mix::cloud_fraction(air.state, &solved, shade);
-    let albedo = area_mix::under_cloud(ground, cloud, area_mix::cloud_albedo(air.state, shade));
+    let deck = surface.deck;
+    let cloud = area_mix::cloud_fraction((air.state, deck), &solved, shade);
+    let albedo = area_mix::under_cloud(
+        ground,
+        cloud,
+        area_mix::cloud_albedo((air.state, deck), shade),
+    );
     (albedo, cloud, lid)
 }
 
@@ -820,6 +858,16 @@ pub(crate) mod spun_read {
                 deferred: Vec::new(),
             });
         });
+    }
+
+    /// Forgets the lids, and the deferred warmest beside them, of the spun passes a capture has
+    /// recorded so far: a body solved once more without its deck (P14.T53.b part 1 (b)) lists its
+    /// published solve's passes alone, as it counts them.
+    pub(crate) fn restart() {
+        if ON.with(Cell::get) {
+            LIDS.with(|lids| lids.borrow_mut().clear());
+            DEFERREDS.with(|all| all.borrow_mut().clear());
+        }
     }
 
     /// `run`'s result and the last spun pass it published, if any, with the lids of every spun

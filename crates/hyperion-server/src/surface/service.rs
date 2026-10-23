@@ -865,7 +865,7 @@ mod tests {
     use hyperion_sim::galaxy::Galaxy;
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
     use hyperion_sim::id::{BodyId, Layer, SystemId};
-    use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+    use hyperion_sim::planetary::derive::atmosphere::{RunawayDeck, SurfaceMaterial, SurfaceState};
     use hyperion_sim::planetary::derive::photometry::{PhaseTemplate, PhotometryInputs};
     use hyperion_sim::planetary::placement::OrbitHost;
     use hyperion_sim::planetary::record::{BodyKind, BodyRecord};
@@ -2069,6 +2069,7 @@ mod tests {
         let material = SurfaceMaterial::Rock;
         BodyPhotometry::derive(&PhotometryInputs {
             state,
+            runaway_deck: RunawayDeck::Kept,
             material,
             surface_pressure: Some(pressure),
             cloud_fraction: 0.0,

@@ -49,6 +49,11 @@
 //!    follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of step 2 read
 //!    too. Under 100 Pa of its partial pressures the body is airless at that base.
 //! 8. **The outcome** ([`EscapeOutcome`]): each element's, mass-conserving (tested).
+//! 9. **The state published** (P14.T53.b part 1 (a), `present_state`): a world inside the
+//!    runaway limit at its hosts' largest past luminosity publishes its present class, a runaway
+//!    only while it is inside the limit now, while every step above (its water's loss, its oxygen,
+//!    its carbon airborne, the thermostat's and the cold trap's gates and the steps' surface
+//!    water) reads the division's runaway, which its water follows ([`Atmosphere::water_state`]).
 
 use core::f64::consts::PI;
 
@@ -72,9 +77,9 @@ use crate::units::{
 use super::{
     AIRLESS_PRESSURE, Airborne, Atmosphere, AtmosphereInputs, CarbonCarrier, Crust,
     EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, IceHeld, Insolation,
-    PartialPressures, PassSurface, Retention, SILICATE_SOLIDUS, StepClimate, SurfaceState,
-    TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature, mole_fraction_of,
-    partitioned_greenhouse, retained, surface_mix,
+    PartialPressures, PassSurface, Retention, RunawayDeck, SILICATE_SOLIDUS, StepClimate,
+    SurfaceState, TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature,
+    mole_fraction_of, partitioned_greenhouse, present_state_in_force, retained, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -1141,6 +1146,8 @@ impl<'a> Body<'a> {
     ) -> Atmosphere {
         Atmosphere {
             state,
+            water_state: state,
+            runaway_deck: RunawayDeck::Kept,
             surface_temperature: self.saturate(t),
             surface_pressure: Some(partials.total()),
             partials,
@@ -1725,11 +1732,43 @@ pub(super) fn state_and_greenhouse(
     )
 }
 
+/// The state a body the atmosphere's inputs `inputs` describe publishes in place of the state
+/// `state` of its climate's division (P14.T53.b part 1 (a); decision-absurd-states-24 R4.1): a
+/// [`SurfaceState::RunawayGreenhouse`], a world inside the runaway limit at its hosts' largest
+/// past luminosity, publishes its present class
+/// ([`AtmosphereInputs::present_insolation`]): a runaway still inside the limit now, `Temperate`
+/// between the limits now, `Snowball` beyond the maximum-greenhouse limit now, its water lost and
+/// its carbon airborne all the same (the division's). Every other state is its own, `Airless` and
+/// `MagmaOcean` by their own tests, and so is every state where part 1 is not in force
+/// ([`present_state_in_force`]). The present class comes from the hosts' luminosities alone, not
+/// from the passes' figures: no feedback.
+#[must_use]
+fn present_state(state: SurfaceState, inputs: &AtmosphereInputs) -> SurfaceState {
+    match state {
+        SurfaceState::RunawayGreenhouse if present_state_in_force() => {
+            match inputs.present_insolation {
+                Insolation::InsideRunaway => SurfaceState::RunawayGreenhouse,
+                Insolation::Habitable => SurfaceState::Temperate,
+                Insolation::BeyondMaximumGreenhouse => SurfaceState::Snowball,
+            }
+        }
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::Airless
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Temperate
+        | SurfaceState::Snowball => state,
+    }
+}
+
 /// The atmosphere of the body `body` from the solve that stands, `solved`, in the state of its
 /// climate's division at surface gravity `gravity`: its airborne gases counted to `ledger`, Gao et
 /// al.'s carbon monoxide (step 6) and the outcome `recorded` (step 8) with it. Under
 /// [`AIRLESS_PRESSURE`] of the solve's partial pressures it is airless at the body's base
-/// temperature, the airless mean (decision-t24i-airless-state D1.3).
+/// temperature, the airless mean (decision-t24i-airless-state D1.3). Otherwise it publishes the
+/// present class of a world inside the runaway limit at its hosts' peak alone (`present_state`,
+/// P14.T53.b part 1 (a)), its water following the division's state
+/// ([`Atmosphere::water_state`]).
 #[must_use]
 fn finish(
     body: &Body<'_>,
@@ -1817,8 +1856,14 @@ fn finish(
     } else {
         state
     };
+    // P14.T53.b part 1 (a): the state the water follows is the division's, and the published one
+    // the present insolation's.
+    let water_state = state;
+    let state = present_state(state, inputs);
     Atmosphere {
         state,
+        water_state,
+        runaway_deck: RunawayDeck::Kept,
         surface_temperature: body.saturate(t),
         surface_pressure: Some(total),
         partials,

@@ -28301,3 +28301,79 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       (the ε-average hides it); the mode's own mean density, 2,981 kg m⁻³, gives 1.838 vol% of
       graphite; for P14.T54.b, its Mercury allowance's edges, 0.070–0.114, mix bases (0.088 ÷
       1.25 = 0.0704 but 0.091 × 1.25 = 0.114; from 0.085 the lower edge is 0.068).
+- **Deviations in P14.T53.b part 1, as built (`p14-escape`, 2026-10-23).** Arms (a) and (b), behind
+  P14.T53.a's hold (`ESCAPE_VERSION` 24; `present_state_in_force`), tested with every landed 24
+  hold in force (`planetary::testing::with_every_24_hold`, decision-t24i-airless-state D3.3).
+  Version 23 is unchanged to the bit; no golden moved. Arm (c) is not built: decision-absurd-states-24
+  R4.3's LOOK72 census (every 24 hold in force) showed no dry `Temperate` still hot there (both of
+  its dry Temperates, 020e66efa0070007.0500 and 020e56ef20080004.0400, are `Airless` at 24), and
+  the census below found one elsewhere, its ruling pending (below).
+  - _R4.3's census_ (`under_every_24_hold_look72_s_triaged_bodies_are_stated`, run by name; the
+    triage's 62 bodies in their 27 systems): the nine hot `Snowball`s none above the cap (six at
+    the 273.15 K cap, 220e4dde80200008.0d00 and 020e56ef20080005.0400 cold at 166.8 and 181.1 K,
+    220e6dde8020000d.0201 `Airless`); the three methane `Snowball`s none above CH₄'s isochore
+    (0900 keeps 26.9 bar at 190.88 K against p* 46.5 bar; 0500 and 0600 keep no CH₄, T53.a's
+    methane route taking 40.8 and 4.2 kbar, while the sample's 02001b2ca0000000.0400 keeps all its
+    8.78 kbar: recorded, counted at the gate); the 106 K runaway's present ratios 0.0405 (runaway)
+    and 0.1152 (maximum greenhouse). The same with the escape's rules alone, to the printed digit.
+  - _(a)_ `Sky::of` sums the present runaway ratio in an accumulator of its own and carries the
+    present class (`AtmosphereInputs::present_insolation`). The batch's `finish` publishes a
+    peak-only runaway's present class (`present_state`), after the `Airless` and `MagmaOcean`
+    overrides. The inventory and the solver's gates (the thermostat, the cold trap, the steps'
+    water gate) read the division's runaway; `Atmosphere::water_state` carries the state the water
+    follows, read by `WaterGate::of_air`, `cover::surface_water`, `pass_water_cover`, the ice's
+    `Snowball` arm and the tectonic regime's wet lid. **Deviation:** the regime and the ice arm read
+    the water state, not the published one, since their only state test is "holds water": read
+    from the published state, a past runaway would take a mobile lid or full H₂O ice from water it
+    lost (LOOK72's 106 K body would list 100% ice).
+  - _(b)_ `derive::atmosphere::RunawayDeck` (`Kept`, the default, and `Deckless`, with the docs
+    relayed from p14-chem's `hooks::sulphur`, which reads it through `SulphurCycle::case_of`; the
+    second of the two to land leaves a `pub use` in `sulphur.rs`), `Atmosphere::runaway_deck`, and a
+    local `ACID_CYCLING_TEMPERATURE` (430 K, public so that the docs link it; to be replaced by
+    `hooks::sulphur`'s at the merge). `PassBody::passes` solves once more with `PassSurface::deck`
+    `Deckless` where the published runaway's T_s is below 430 K, on the stand-in and the record,
+    planets and moons; the cloud is 0.67 × the water cloud's availability at its albedo, and
+    `choose` gives Mars when thin, else Earth (`PhotometryInputs::runaway_deck`, a public field the
+    server's test sets). The NaN albedo fallback keeps the runaway's table 0.76 (never reached).
+  - _Docs:_ `SurfaceState`'s and `SurfaceStateDto`'s runaway, temperate and snowball (23's meaning
+    kept for the wire below 24), then `just gen-protocol`; the guide's state row by the UX sign-off
+    (signoff-t53b-state-meanings, its three clauses pasted verbatim). `SurfaceMaterial`'s variants
+    name a heated ice bulk's rock lag (for P14.T56.g, decision-p14-t56g §7.4; doc text only).
+  - _The census_ (the first 60 sample systems, the goldens and LOOK72's 27 systems; 1,600 bodies;
+    `under_every_24_hold_part_one_s_moved_bodies_are_stated`, run by name; asserted in
+    `under_every_24_hold_no_runaway_lies_outside_the_present_limit_or_under_too_cold_a_deck`): 27
+    moved, the other 1,573 unchanged to the bit; no present ratio above its peak's.
+    - 16 past-only runaways publish their present class (15 about substellar hosts, 1 about a
+      remnant): 13 `Snowball`, 2 `Temperate`, and item 33's world (identified as
+      02000b2ca0000001.1100, the bless note's 100 Pa state edge about a 1,184 K substellar host;
+      peak 1.51, now 0.0029), `Airless` at 99.96 Pa → `Snowball` at 100.03 Pa and 56.64 K, a state
+      edge bracketed at a residual of 0.13. Their water stays lost: surface water, potential ocean,
+      H₂O liquid and the H₂O entries T53.a's to the bit, no H₂O ice where T53.a had none; an
+      ice-rich crust's own ice moves with the climate (LOOK72's 820e6ee00000008d.0900 0.8976 →
+      0.8969; several 0.5 → 0 where T_s reaches the cap).
+    - LOOK72's 820e6ee00000008d.0900: `RunawayGreenhouse` 106.51 K → `Snowball` 120.07 K, A 0.760
+      → 0.591, p_s 5.33 → 11.37 bar (its O₂ evaporating at O₂'s saturation), now bracketed at 58
+      passes.
+    - Four past-only `Snowball`s sit at the 273.15 K cap: 01ffeb2c20000000.0200, .0300 and .0500,
+      and 02001b2cdfff0000.0100 (6.5 → 306 bar). Newly bracketed: 820e6ee00000008d.0900,
+      01ffeb2c5ffe0000.0400 (58 passes, a jump at a residual of 0.076) and 02001b2cdfff0000.0200
+      (47).
+    - 11 runaways about M dwarfs solved deckless, the census's five (present ratio; T_s under the
+      deck → without it; A; p_s): 220016587ff80000.0900 (4.943; 281.1 → 351.9 K; 0.410;
+      1.21 mbar), 02001b2c9ffe0000.0200 (1.679; 272.9 → 341.1 K; 0.412; 1.131 bar),
+      01fffb2c20000001.0200 (2.681; 327.3 → 413.2 K; 0.387; 2.352 bar), 01ffeb2ce0000000.0100
+      (4.693; 357.1 → 453.9 K; 0.373; 1.451 bar) and 01ffeb2ca0000000.0100 (4.806; 360.2 → 402.5 K;
+      0.410; 0.417 bar; bracketed at 38 passes under the deck, converging in 5 without it), and six
+      of LOOK72's.
+    - Deckless at or above 430 K (a partial deck, not modelled; P14.T53.e and the gate's count
+      (ii)): 3, 01ffeb2ce0000000.0100 at 453.9 K, 020e56ef20090004.0200 at 477.1 K and
+      220e4dde8020000b.0600 at 559.8 K.
+  - _Cost:_ 11 of the 1,600 bodies re-solve (0.69%; the decision's estimate 0.4%), in 54 passes
+    (4–5 each) against 114 for their decked first solves: 0.65% of the walk's 8,335 passes (8,299
+    under T53.a's batch). Generating the systems adds 19 re-solves. No input of decision-24-cost
+    moves.
+  - _Pending a ruling_ (decision-t53b-arm-c, main): part 1 (a) makes one hot dry `Temperate`, the
+    sample's 01ffeb2c5ffe0000.0100 about a 2,456 K substellar host (runaway ratio 61.9 at the peak,
+    0.547 now; maximum ratio 2.11): a decked runaway at 934.6 K under 414.8 bar of CO₂ under
+    T53.a's batch, now `Temperate` at 1,221.6 K, A 0.30. R4.2's serve-gate line names arm (c) for
+    it, whose `RunawayGreenhouse` would lie outside the present limit that (a) asserts.

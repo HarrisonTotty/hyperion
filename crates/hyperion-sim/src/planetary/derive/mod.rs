@@ -120,8 +120,9 @@ use crate::planetary::chem::escape::{moon_impact_speed, planet_impact_speed};
 use crate::planetary::chem::inventory::{ElementInventory, InventoryInputs, element_inventory};
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, EnvelopeHistory, Gas, Insolation, PassLight,
-    PassSurface, SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    PassSurface, RunawayDeck, SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory,
     atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
+    solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -1470,6 +1471,7 @@ pub(crate) fn derive_body_driven(
         impact_speed: impact_speed(placed, hosts, (bulk.mass, bulk.radius)),
         envelope_history: history,
         envelope_helium: helium_before_passes(history, &bulk, &sky, age_now),
+        deck: RunawayDeck::Kept,
     }
     .passes(driver, record);
     let (passes, regolith_albedo) = passes;
@@ -1797,7 +1799,7 @@ pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
 /// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, its age,
 /// the side of the snow line it formed on (which its crust's basis reads, P14.T54.a), and what
 /// P14.T53.a's escape reads under its batch rules: its mean impact speed and its envelope's
-/// history.
+/// history; and the deck a runaway's cloud takes (P14.T53.b part 1 (b)).
 #[derive(Debug, Clone, Copy)]
 struct PassBody<'a> {
     placed: &'a PlacedBody,
@@ -1815,6 +1817,10 @@ struct PassBody<'a> {
     /// The helium its envelope's escape left, taken once before the passes under the escape's
     /// batch rules ([`AtmosphereInputs::envelope_helium`]); `None` under its hold, which reads none.
     envelope_helium: Option<crate::planetary::chem::escape::EnvelopeHelium>,
+    /// The deck a runaway's cloud takes in every pass ([`PassSurface::deck`]): Venus's
+    /// ([`RunawayDeck::Kept`]) for the passes' first solve, and [`RunawayDeck::Deckless`] for a
+    /// runaway's second ([`passes`](Self::passes), P14.T53.b part 1 (b)).
+    deck: RunawayDeck,
 }
 
 /// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
@@ -1902,6 +1908,7 @@ impl PassBody<'_> {
             xuv_fluence: sky.xuv_fluence,
             saturated_xuv_flux: sky.saturated_xuv_flux,
             insolation: sky.insolation,
+            present_insolation: sky.present_insolation,
             crust: self.crust,
             molten_for: self.placed.molten_until.unwrap_or(Years::ZERO),
             age: self.age,
@@ -1982,6 +1989,13 @@ impl PassBody<'_> {
     ///   labelled C₀ ([`PassContext::NONE`]), so a pass is a function of the albedo and the context
     ///   it reads ([`passes::solve_in_context`]).
     ///
+    /// A published runaway under Venus's deck whose mean surface temperature is below the acid's
+    /// cycling temperature is solved once more, every pass without the deck, and that second solve
+    /// is published ([`solved_without_the_deck`]; P14.T53.b part 1 (b), decision-absurd-states-24
+    /// R3.2): it reads only the first solve's temperature, so there is no feedback, and nothing
+    /// returns to the decked branch. It covers the stand-in and the record alike, planets and
+    /// moons, with the driver given.
+    ///
     /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the published
     /// pass's regolith on the airless state under the hosts' light, its lid's row where it took
     /// one and the passes' regolith provider's otherwise.
@@ -1989,9 +2003,30 @@ impl PassBody<'_> {
     fn passes(&self, driver: PassDriver, record: PassRecord<'_>) -> (Passes, f64) {
         let shade = &self.sky.shade;
         let surface = PassSurface::stand_in(PassLight::Shade(shade));
-        let ended = match record {
-            PassRecord::StandIn => self.stand_in_passes(driver, &surface),
-            PassRecord::Record(of) => self.record_passes(driver, of),
+        let solve = |body: &Self| match record {
+            PassRecord::StandIn => body.stand_in_passes(driver, &surface.with_deck(body.deck)),
+            PassRecord::Record(of) => body.record_passes(driver, of),
+        };
+        let first = solve(self);
+        let ended = if solved_without_the_deck(&first.air) {
+            // The tests' traces and captured lids list the published solve, the second, a pass
+            // for each it counts.
+            #[cfg(test)]
+            {
+                if driver == PassDriver::Traced {
+                    PASS_TRACE.with(|trace| trace.borrow_mut().clear());
+                }
+                crate::planetary::derive::atmosphere::spun_read::restart();
+            }
+            let deckless = solve(&Self {
+                deck: RunawayDeck::Deckless,
+                ..*self
+            });
+            #[cfg(test)]
+            crate::planetary::derive::atmosphere::count_deckless(first.count, deckless.count);
+            deckless
+        } else {
+            first
         };
         // The bare regolith the cold traps read (P14.T51.i): the published pass's row on an
         // airless body, under the hosts' light, by the area mix's one predicate.
@@ -2081,6 +2116,23 @@ impl PassBody<'_> {
         }
     }
 
+    /// The pass surface over the spun climate `spun` under the light `shade`, with this
+    /// derivation's deck (P14.T53.b part 1 (b); `with_deck`).
+    #[must_use]
+    fn spun_surface<'s>(&self, spun: &'s SpunClimate<'s>, shade: &'s HostShade) -> PassSurface<'s> {
+        PassSurface::spun(spun, PassLight::Shade(shade)).with_deck(self.deck)
+    }
+
+    /// That the record's figure bulk `record` shows its derivation's surface material (P14.T56.g;
+    /// decision-p14-t56g §8): its fractions' under the derivation's own lag, as its air reads.
+    fn debug_assert_record_material(&self, record: &pass_record::RecordSpin<'_>) {
+        debug_assert_eq!(
+            record.material,
+            surface_material(&self.bulk.fractions, self.bulk.lag),
+            "a record's figure bulk's surface material is its derivation's"
+        );
+    }
+
     /// The passes over the record `of`, as `driver` drives them ([`passes`](Self::passes)): each
     /// pass's surface the body's own climate under its record's spin over the context it reads,
     /// with its lid at its own climate from the body's crust's basis, built once here before any
@@ -2096,13 +2148,7 @@ impl PassBody<'_> {
     #[must_use]
     fn record_passes(&self, driver: PassDriver, of: &dyn PassRecordOf) -> Passes {
         let record = of.spin(self.pass_bulk);
-        // The record's figure bulk shows its derivation's surface material (P14.T56.g;
-        // decision-p14-t56g §8): its fractions' under the derivation's own lag, as its air reads.
-        debug_assert_eq!(
-            record.material,
-            surface_material(&self.bulk.fractions, self.bulk.lag),
-            "a record's figure bulk's surface material is its derivation's"
-        );
+        self.debug_assert_record_material(&record);
         let shade = &self.sky.shade;
         // The crust's basis, once a body before any pass, whatever the tide (item 17's
         // constraint 2): `body.formation`'s word 0 is read here, once a derivation.
@@ -2121,7 +2167,7 @@ impl PassBody<'_> {
         };
         let pass = |albedo: BondAlbedo, context: &PassContext| {
             let spun = surface(context);
-            self.pass(&PassSurface::spun(&spun, PassLight::Shade(shade)), albedo)
+            self.pass(&self.spun_surface(&spun, shade), albedo)
         };
         let next = |&(irradiated, _, air, lid): &PassOut| {
             let context = of.context(self.pass_bulk, &air, irradiated);
@@ -2382,8 +2428,12 @@ struct Sky {
     /// fluence, Σ `F_s,i` `t_sat,i`, and its whole history's, 3 Σ `F_s,i` `t_sat,i`, are the hosts'
     /// sums exactly.
     xuv_saturation_time: Years,
-    /// Where the body lies against the hosts' habitable zone.
+    /// Where the body lies against the hosts' habitable zone, the runaway limit at the hosts'
+    /// largest past luminosities.
     insolation: Insolation,
+    /// Where the body lies against the hosts' habitable zone now, the runaway limit at the hosts'
+    /// present luminosities (P14.T53.b part 1 (a), [`AtmosphereInputs::present_insolation`]).
+    present_insolation: Insolation,
     /// Σ Fᵢ ÷ `S_eff,max`(`T_eff,i`) now, the sum the insolation's maximum-greenhouse limit reads:
     /// beyond it below 1 ([`AtmosphereInputs::maximum_greenhouse_flux_ratio`]).
     maximum_greenhouse_flux_ratio: f64,
@@ -2400,7 +2450,11 @@ impl Sky {
     ///
     /// The zone is judged as Kopparapu et al.'s limits are in a multiple system (P14.T12.b): the
     /// body is inside the runaway limit when Σ Fᵢ ÷ `S_eff,i` reaches 1 at the hosts' largest past
-    /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now.
+    /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now. Its
+    /// present class reads the runaway limit's sum at their luminosities now too, in a sum of its
+    /// own (P14.T53.b part 1 (a)): inside the runaway limit now where it reaches 1, else beyond the
+    /// maximum-greenhouse limit where that sum falls below 1, else between them. A host's peak
+    /// luminosity includes its present, so the present runaway sum is at most the peak's.
     ///
     /// It also sums the luminous hosts' light by band, each weighted by its flux now
     /// ([`HostShadeSum`]), for the area mix (P14.T51.b): once per body, before its passes, each
@@ -2441,7 +2495,7 @@ impl Sky {
             hottest: Kelvin::ZERO,
             shade: HostShadeSum::EMPTY,
         };
-        let (mut runaway, mut maximum) = (0.0, 0.0);
+        let (mut runaway, mut maximum, mut runaway_now) = (0.0, 0.0, 0.0);
         let mut add = |host: &HostLight, (a, e): (Metres, f64), (xuv_a, xuv_e): (Metres, f64)| {
             let flux = luminosity_flux(host.luminosity(), a, e);
             let peak = luminosity_flux(host.peak_luminosity(), a, e);
@@ -2461,6 +2515,7 @@ impl Sky {
                 let t_eff = host.effective_temperature();
                 runaway += peak.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
                 maximum += flux.value() / HabitableLimit::MaximumGreenhouse.flux(t_eff).value();
+                runaway_now += flux.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
                 if t_eff > sums.hottest {
                     sums.hottest = t_eff;
                 }
@@ -2474,13 +2529,16 @@ impl Sky {
             let orbit = (companion.semi_major_axis(), companion.eccentricity());
             add(companion.host(), orbit, orbit);
         }
-        let insolation = if runaway >= 1.0 {
-            Insolation::InsideRunaway
-        } else if maximum < 1.0 {
-            Insolation::BeyondMaximumGreenhouse
-        } else {
-            Insolation::Habitable
+        let class = |runaway: f64| {
+            if runaway >= 1.0 {
+                Insolation::InsideRunaway
+            } else if maximum < 1.0 {
+                Insolation::BeyondMaximumGreenhouse
+            } else {
+                Insolation::Habitable
+            }
         };
+        let (insolation, present_insolation) = (class(runaway), class(runaway_now));
         Self {
             flux: sums.flux,
             irradiation: equilibrium_temperature(sums.peak_flux, BondAlbedo::from_fraction(0.0)),
@@ -2489,6 +2547,7 @@ impl Sky {
             saturated_xuv_flux: sums.saturated_xuv_flux,
             xuv_saturation_time: sums.saturation_time(),
             insolation,
+            present_insolation,
             maximum_greenhouse_flux_ratio: maximum,
             hottest: sums.hottest,
             shade: sums.shade.finish_from(book),

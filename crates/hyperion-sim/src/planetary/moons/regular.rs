@@ -1900,7 +1900,7 @@ pub(crate) fn derive_moon_under(
         &tide_of,
         &TideAt {
             inventory_water: body.inventory().water(),
-            state: body.atmosphere().state(),
+            state: body.atmosphere().water_state(),
             equilibrium: body.equilibrium_temperature(),
             fractions: body.fractions(),
         },
@@ -1959,7 +1959,7 @@ impl PassRecordOf for MoonPassRecord<'_> {
             &self.tide,
             &TideAt {
                 inventory_water: bulk.inventory_water,
-                state: air.state(),
+                state: air.water_state(),
                 equilibrium,
                 fractions: bulk.fractions,
             },
@@ -2000,6 +2000,8 @@ struct TideOf<'a> {
 #[derive(Debug, Clone, Copy)]
 struct TideAt {
     inventory_water: Kilograms,
+    /// The state the pass's water follows (`Atmosphere::water_state`), whose wet lid the
+    /// non-tidal heat's regime reads (P14.T53.b part 1 (a)).
     state: SurfaceState,
     equilibrium: Kelvin,
     fractions: MassFractions,

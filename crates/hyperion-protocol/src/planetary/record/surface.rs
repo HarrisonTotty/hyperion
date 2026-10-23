@@ -47,7 +47,11 @@ use crate::surface::ClimateModelDto;
 /// `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
 /// hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
 /// temperature, the ice and ocean fractions and the condensates for that, as the climate regime
-/// does (decision-p14-t54a-states). P14.T53.b makes the state follow the present climate.
+/// does (decision-p14-t54a-states). Below generator version 24 the runaway limit is read at the
+/// hosts' largest past luminosity. From 24 (P14.T53.b part 1) the class is the present
+/// insolation's, both limits read at the hosts' luminosities now, and only the water's loss, with
+/// its oxygen and the carbon left airborne, reads the largest past luminosity: a world inside the
+/// runaway limit at its hosts' peak alone is `Temperate` or `Snowball` with its water lost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -57,18 +61,29 @@ pub enum SurfaceStateDto {
     MagmaOcean,
     /// A surface pressure below the airless limit: bare rock or ice.
     Airless,
-    /// Inside the runaway-greenhouse limit at the hosts' largest past luminosity when water was
-    /// present: the oceans lost, a thick carbon-dioxide air, as on Venus. About an evolved host its
-    /// present climate can be cold (decision-pre-23-review item 33).
+    /// Inside the runaway-greenhouse limit when water was present: the oceans lost, a
+    /// carbon-dioxide air, as on Venus. Below generator version 24 the limit is read at the hosts'
+    /// largest past luminosity, so that about an evolved host the present climate can be cold
+    /// (decision-pre-23-review item 33), and every runaway keeps Venus's cloud deck. From 24
+    /// (P14.T53.b part 1) it is inside the runaway limit now, its water lost, under whatever air
+    /// escape left it, with Venus's deck only where the air beneath can cycle it: a runaway whose
+    /// climate under the deck is colder than about 430 K is solved without it, its cloud the water
+    /// cloud's. Only the water's loss, with its oxygen and the carbon left airborne, reads the
+    /// hosts' largest past luminosity.
     RunawayGreenhouse,
-    /// Between the runaway limit, at the hosts' largest past luminosity, and the maximum-greenhouse
-    /// limit now, as on Earth and Mars. A world here can be ice-covered, on the cold side of the
-    /// ice-albedo bistability (decision-pre-23-review item 26).
+    /// Between the runaway limit and the maximum-greenhouse limit now, as on Earth and Mars. Below
+    /// generator version 24 the runaway limit is read at the hosts' largest past luminosity; from
+    /// 24 now, so that a world inside it at its hosts' peak alone is `Temperate` here, its water
+    /// lost and its carbon airborne (P14.T53.b part 1). A world here can be ice-covered, on the
+    /// cold side of the ice-albedo bistability (decision-pre-23-review item 26).
     Temperate,
     /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
-    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. Until P14.T53.a's
-    /// carbon-dioxide form, a dry carbon-dioxide world here can be published above melting with no
-    /// ice (P14.T13.c's finding "No maximum-greenhouse ceiling"; decision-p14-t51a-partition §1).
+    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. From generator
+    /// version 24 a world inside the runaway limit at its hosts' largest past luminosity alone is
+    /// `Snowball` here, its water lost and its carbon airborne (P14.T53.b part 1). Until
+    /// P14.T53.a's carbon-dioxide form, a dry carbon-dioxide world here can be published above
+    /// melting with no ice (P14.T13.c's finding "No maximum-greenhouse ceiling";
+    /// decision-p14-t51a-partition §1).
     Snowball,
     /// A steam envelope over a magma ocean (P14.T53.b): produced by no rule until that task.
     SteamEnvelope,

@@ -509,6 +509,7 @@ fn no_surface_is_hotter_than_its_hottest_host() {
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
         insolation: Insolation::InsideRunaway,
+        present_insolation: Insolation::InsideRunaway,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: SOLAR_AGE,
@@ -844,6 +845,7 @@ fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) -> Atmosphere
         xuv_fluence: earth_xuv_fluence(),
         saturated_xuv_flux: WattsPerSquareMetre::new(xuv),
         insolation: Insolation::InsideRunaway,
+        present_insolation: Insolation::InsideRunaway,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: Years::new(age),
@@ -1188,6 +1190,7 @@ fn cold_moon(carbon: f64, equilibrium: f64, formed: SnowLineSide, crust: Crust) 
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
         insolation: Insolation::BeyondMaximumGreenhouse,
+        present_insolation: Insolation::BeyondMaximumGreenhouse,
         crust,
         molten_for: Years::ZERO,
         age: SOLAR_AGE,
@@ -1262,6 +1265,7 @@ fn a_gas_envelope_and_a_body_of_no_mass_have_no_carbon_carrier() {
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
         insolation: Insolation::BeyondMaximumGreenhouse,
+        present_insolation: Insolation::BeyondMaximumGreenhouse,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: SOLAR_AGE,
@@ -2070,6 +2074,7 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
         xuv_fluence: earth_xuv_fluence(),
         saturated_xuv_flux: WattsPerSquareMetre::new(0.3),
         insolation,
+        present_insolation: insolation,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: SOLAR_AGE,
@@ -3725,6 +3730,7 @@ fn a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed() 
         xuv_fluence: earth_xuv_fluence(),
         saturated_xuv_flux: WattsPerSquareMetre::new(xuv),
         insolation: Insolation::InsideRunaway,
+        present_insolation: Insolation::InsideRunaway,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: Years::new(age),
@@ -3873,6 +3879,7 @@ fn a_500_km_body_at_40_k_keeps_no_nitrogen() {
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
         insolation: Insolation::BeyondMaximumGreenhouse,
+        present_insolation: Insolation::BeyondMaximumGreenhouse,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: SOLAR_AGE,
@@ -3933,6 +3940,7 @@ fn remnant_ice_bulk(equilibrium: f64) -> AtmosphereInputs {
         xuv_fluence: earth_xuv_fluence(),
         saturated_xuv_flux: WattsPerSquareMetre::new(1.0),
         insolation: Insolation::InsideRunaway,
+        present_insolation: Insolation::InsideRunaway,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: Years::new(5e9),
@@ -4405,6 +4413,7 @@ fn table_mars_inputs(mars: &DerivedBody) -> AtmosphereInputs {
         xuv_fluence: mars.xuv_fluence(),
         saturated_xuv_flux: sun.xuv().saturated_flux(a, e),
         insolation: Insolation::Habitable,
+        present_insolation: Insolation::Habitable,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: SOLAR_AGE,
@@ -4606,6 +4615,7 @@ fn m_dwarf_planet(
         xuv_fluence: history.fluence(age, a, 0.0),
         saturated_xuv_flux: history.saturated_flux(a, 0.0),
         insolation: Insolation::InsideRunaway,
+        present_insolation: Insolation::InsideRunaway,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age,
@@ -4736,6 +4746,7 @@ fn dry_mars_at(years: f64) -> AtmosphereInputs {
         xuv_fluence: sun.xuv().fluence(age, a, 0.0),
         saturated_xuv_flux: sun.xuv().saturated_flux(a, 0.0),
         insolation: Insolation::Habitable,
+        present_insolation: Insolation::Habitable,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age,
@@ -5367,4 +5378,290 @@ fn under_the_escape_batch_the_speciated_atmosphere_is_the_same_twice() {
         EscapeRules::Batch,
         the_speciated_atmosphere_is_the_same_twice,
     );
+}
+
+// P14.T53.b part 1: the state from the present insolation, and the runaway's deck
+// (decision-absurd-states-24 R3–R4; decision-pre-23-review item 33).
+
+/// What part 1 (a) leaves of a runaway's inventory: the greenhouse, its partial pressures, its
+/// column, its escape, its carbon's carrier and the state its water follows, to the bit.
+fn same_inventory(now: &Atmosphere, peak: &Atmosphere, at: &str) {
+    assert_same_bits(
+        now.surface_temperature().value(),
+        peak.surface_temperature().value(),
+    );
+    assert_same_bits(now.optical_depth(), peak.optical_depth());
+    for gas in Gas::ALL {
+        assert_same_bits(
+            now.partial_pressures().of(gas).value(),
+            peak.partial_pressures().of(gas).value(),
+        );
+        assert_same_bits(
+            now.inventory_weights().of(gas).value(),
+            peak.inventory_weights().of(gas).value(),
+        );
+    }
+    assert_eq!(now.escape(), peak.escape(), "{at}");
+    assert_eq!(now.carbon_carrier(), peak.carbon_carrier(), "{at}");
+    assert_eq!(now.water_state(), peak.water_state(), "{at}");
+    assert_eq!(now.retention(), peak.retention(), "{at}");
+}
+
+/// P14.T53.b part 1 (a) on hand inputs, with every 24 hold in force: an Earth inside the runaway
+/// limit at its hosts' largest past luminosity alone publishes its present class, `Temperate`
+/// between the limits now (at an equilibrium temperature of 255 K) and `Snowball` beyond the
+/// maximum-greenhouse limit now (at 150 K), and a runaway only while it is inside the limit now.
+/// Its water stays lost and its carbon airborne: its greenhouse, partial pressures, column, escape
+/// and carrier are P14.T53.a's runaway's to the bit (`with_present_state(PresentState::Peak, ..)`),
+/// its water follows the runaway (`water_state`), and it holds no surface water, where the same
+/// Earth in its present class at its peak too holds some. A body whose peak class is not a
+/// runaway keeps its peak class's state whatever its present class reads, and under the hold the
+/// present class moves nothing.
+#[test]
+fn under_every_24_hold_a_past_only_runaway_publishes_its_present_class() {
+    use crate::planetary::hooks::figures::cover;
+    use crate::planetary::testing::with_every_24_hold;
+    let surface_water = |inputs: &AtmosphereInputs, air: &Atmosphere| {
+        cover::surface_water(
+            air,
+            inputs.inventory.water(),
+            inputs.radius,
+            MetresPerSecondSquared::new(9.82),
+            1.0,
+        )
+        .value()
+    };
+    for (t_eq, present, published) in [
+        (255.0, Insolation::Habitable, SurfaceState::Temperate),
+        (
+            150.0,
+            Insolation::BeyondMaximumGreenhouse,
+            SurfaceState::Snowball,
+        ),
+        (
+            255.0,
+            Insolation::InsideRunaway,
+            SurfaceState::RunawayGreenhouse,
+        ),
+    ] {
+        let inputs = AtmosphereInputs {
+            present_insolation: present,
+            ..earth_inputs(t_eq, Insolation::InsideRunaway)
+        };
+        // The same Earth in its present class at its peak too.
+        let always_inputs = AtmosphereInputs {
+            insolation: present,
+            ..inputs
+        };
+        let (now, peak, always) = with_every_24_hold(|| {
+            (
+                atmosphere(&inputs),
+                with_present_state(PresentState::Peak, || atmosphere(&inputs)),
+                atmosphere(&always_inputs),
+            )
+        });
+        let at = format!("{t_eq} K, {present:?} now: {now:?}");
+        eprintln!(
+            "a past runaway at T_eq {t_eq} K, {present:?} now: {:?} (was {:?}), T_s {:.3} K, \
+             p_s {:.4} bar, A {:.4}, cloud {:.4}; its surface water {:.4e} kg m⁻², the same Earth \
+             {present:?} at its peak too {:?} with {:.4e}",
+            now.state(),
+            peak.state(),
+            now.surface_temperature().value(),
+            now.surface_pressure()
+                .map_or(0.0, |p| p.value() / PASCALS_PER_BAR),
+            now.albedo().value(),
+            now.cloud_fraction(),
+            surface_water(&inputs, &now),
+            always.state(),
+            surface_water(&always_inputs, &always),
+        );
+        assert_eq!(peak.state(), SurfaceState::RunawayGreenhouse, "{at}");
+        assert_eq!(now.state(), published, "{at}");
+        assert_eq!(now.water_state(), SurfaceState::RunawayGreenhouse, "{at}");
+        assert_eq!(now.runaway_deck(), RunawayDeck::Kept, "{at}");
+        same_inventory(&now, &peak, &at);
+        assert_same_bits(surface_water(&inputs, &now), 0.0);
+        if published == SurfaceState::RunawayGreenhouse {
+            assert_eq!(now, peak, "{at}");
+        } else {
+            assert_eq!(always.state(), published, "{at}");
+            assert!(surface_water(&always_inputs, &always) > 0.0, "{at}");
+        }
+        // Under the hold the present class moves nothing.
+        assert_eq!(
+            atmosphere(&inputs),
+            atmosphere(&earth_inputs(t_eq, Insolation::InsideRunaway)),
+            "{at}"
+        );
+    }
+    // A body outside the runaway limit at its peak keeps its peak class's state.
+    for insolation in [Insolation::Habitable, Insolation::BeyondMaximumGreenhouse] {
+        let t_eq = match insolation {
+            Insolation::BeyondMaximumGreenhouse => 150.0,
+            Insolation::InsideRunaway | Insolation::Habitable => 255.0,
+        };
+        let inputs = earth_inputs(t_eq, insolation);
+        let inside_now = AtmosphereInputs {
+            present_insolation: Insolation::InsideRunaway,
+            ..inputs
+        };
+        with_every_24_hold(|| assert_eq!(atmosphere(&inside_now), atmosphere(&inputs)));
+    }
+}
+
+/// P14.T53.b part 1 (b)'s test, on hand-built atmospheres with every 24 hold in force: a published
+/// runaway under Venus's deck is solved again without it only below
+/// [`ACID_CYCLING_TEMPERATURE`] (430 K), never at or above it, nor from any other state, from a
+/// deckless runaway or at a temperature that is not a number, and never under P14.T53.a's batch as
+/// built (`with_present_state(PresentState::Peak, ..)`) or under the hold.
+#[test]
+fn under_every_24_hold_only_a_runaway_under_its_deck_below_430_k_is_solved_again() {
+    use crate::planetary::testing::with_every_24_hold;
+    assert_same_bits(ACID_CYCLING_TEMPERATURE.value(), 430.0);
+    let air = with_every_24_hold(|| atmosphere(&earth_inputs(255.0, Insolation::InsideRunaway)));
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
+    let at = |t: f64| Atmosphere {
+        surface_temperature: Kelvin::new(t),
+        ..air
+    };
+    with_every_24_hold(|| {
+        for t in [45.8, 273.0, 360.2, 429.999, 430.0_f64.next_down()] {
+            assert!(solved_without_the_deck(&at(t)), "{t} K");
+        }
+        for t in [430.0, 430.0_f64.next_up(), 737.0, 1_031.0, f64::NAN] {
+            assert!(!solved_without_the_deck(&at(t)), "{t} K");
+        }
+        let deckless = Atmosphere {
+            runaway_deck: RunawayDeck::Deckless,
+            ..at(300.0)
+        };
+        assert!(!solved_without_the_deck(&deckless));
+        for state in [
+            SurfaceState::GasEnvelope,
+            SurfaceState::MagmaOcean,
+            SurfaceState::Airless,
+            SurfaceState::Temperate,
+            SurfaceState::Snowball,
+        ] {
+            assert!(
+                !solved_without_the_deck(&Atmosphere { state, ..at(300.0) }),
+                "{state:?}"
+            );
+        }
+        assert!(!with_present_state(PresentState::Peak, || {
+            solved_without_the_deck(&at(300.0))
+        }));
+    });
+    assert!(!solved_without_the_deck(&at(300.0)), "under the hold");
+}
+
+/// P14.T53.b part 1 (b) through the passes, with every 24 hold in force: a Venus at Venus's orbit
+/// about the Sun with its history, its carbon and nitrogen drawn low (ranks 10⁻⁹ to the median),
+/// is a runaway inside the present limit. Where its passes under Venus's deck end below 430 K
+/// (P14.T53.a's batch as built, `with_present_state(PresentState::Peak, ..)`, whose solve is the
+/// first one about a main-sequence host) it is solved once more without the deck and published so:
+/// its state a runaway, its deck `Deckless`, its cloud a temperate world's water cloud at its
+/// availability, under 0.67 for its dry air, and one re-solve counted with both solves' passes.
+/// At or above 430 K it publishes the decked solve to the bit, and counts none.
+#[test]
+fn under_every_24_hold_a_cold_runaway_is_solved_again_without_its_deck() {
+    use crate::planetary::testing::with_every_24_hold;
+    let disc = solar_disc();
+    let &(_, kg, km, a, e) = table_bodies().find(|(name, ..)| *name == "Venus").unwrap();
+    let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+    let body = |rank: f64| {
+        let rank = UnitUniform::new(rank).unwrap();
+        let draws = VolatileDraws {
+            carbon: rank,
+            nitrogen: rank,
+            ..VolatileDraws::MEDIAN
+        };
+        derived(&placed.with_volatiles(draws), &disc)
+    };
+    let (mut kept, mut deckless) = (0, 0);
+    with_every_24_hold(|| {
+        for rank in [1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 0.1, 0.5] {
+            let peak = with_present_state(PresentState::Peak, || body(rank));
+            let (now, counts) = with_deck_counts(|| body(rank));
+            let (was, air) = (peak.atmosphere(), now.atmosphere());
+            let bar = |air: &Atmosphere| {
+                air.surface_pressure()
+                    .map_or(0.0, |p| p.value() / PASCALS_PER_BAR)
+            };
+            eprintln!(
+                "a Venus at carbon rank {rank:e}: under the deck {:?} {:.3} K, {:.4e} bar, A {:.4} \
+                 in {} passes; published {:?} {:?} {:.3} K, {:.4e} bar, A {:.4}, cloud {:.4} in {} \
+                 passes; {counts:?}",
+                was.state(),
+                was.surface_temperature().value(),
+                bar(was),
+                peak.albedo().value(),
+                peak.atmosphere_passes(),
+                air.state(),
+                air.runaway_deck(),
+                air.surface_temperature().value(),
+                bar(air),
+                now.albedo().value(),
+                air.cloud_fraction(),
+                now.atmosphere_passes(),
+            );
+            assert_eq!(was.state(), SurfaceState::RunawayGreenhouse, "{rank:e}");
+            if was.surface_temperature().value() < ACID_CYCLING_TEMPERATURE.value() {
+                assert_eq!(air.state(), SurfaceState::RunawayGreenhouse, "{rank:e}");
+                assert_eq!(air.runaway_deck(), RunawayDeck::Deckless, "{rank:e}");
+                assert!(air.cloud_fraction() < 0.67, "{rank:e}");
+                assert_eq!(
+                    counts,
+                    DeckCounts {
+                        resolves: 1,
+                        decked_passes: u64::from(peak.atmosphere_passes()),
+                        deckless_passes: u64::from(now.atmosphere_passes()),
+                    },
+                    "{rank:e}"
+                );
+                deckless += 1;
+            } else {
+                assert_eq!(now, peak, "{rank:e}");
+                assert_eq!(air.runaway_deck(), RunawayDeck::Kept, "{rank:e}");
+                assert_eq!(counts, DeckCounts::default(), "{rank:e}");
+                kept += 1;
+            }
+        }
+    });
+    assert!(kept > 0 && deckless > 0, "kept {kept}, deckless {deckless}");
+}
+
+/// P14.T53.b part 1 leaves the table's Venus (the median Venus), Earth, Mars and Titan and the
+/// measured Venus ([`measured_venus`]) to the bit, with every 24 hold in force: each derivation
+/// is P14.T53.a's batch's as built (`with_present_state(PresentState::Peak, ..)`), both Venuses
+/// runaways inside the present limit under Venus's deck, well above the acid's 430 K.
+#[test]
+fn under_every_24_hold_part_one_leaves_venus_earth_mars_and_titan_to_the_bit() {
+    use crate::planetary::testing::with_every_24_hold;
+    with_every_24_hold(|| {
+        let (now, peak) = (table(), with_present_state(PresentState::Peak, table));
+        for name in ["Venus", "Earth", "Mars", "Titan"] {
+            let body = found(&now, name);
+            eprintln!(
+                "the table's {name}: {:?} {:?} {:.3} K",
+                body.atmosphere().state(),
+                body.atmosphere().runaway_deck(),
+                body.atmosphere().surface_temperature().value()
+            );
+            assert_eq!(body, found(&peak, name), "{name}");
+        }
+        let (measured, measured_peak) = (
+            measured_venus(),
+            with_present_state(PresentState::Peak, measured_venus),
+        );
+        assert_eq!(measured, measured_peak);
+        for venus in [found(&now, "Venus"), &measured] {
+            let air = venus.atmosphere();
+            assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+            assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
+            assert!(air.surface_temperature().value() > ACID_CYCLING_TEMPERATURE.value());
+        }
+    });
 }

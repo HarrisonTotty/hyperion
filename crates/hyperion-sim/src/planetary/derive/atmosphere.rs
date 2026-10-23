@@ -1985,7 +1985,12 @@ pub const GREENHOUSE_STEPS: u32 = 32;
 /// `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
 /// hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
 /// temperature, the ice and ocean fractions and the condensates for that, as the climate regime
-/// does (decision-p14-t54a-states). P14.T53.b makes the state follow the present climate.
+/// does (decision-p14-t54a-states). To generator version 23 the runaway limit is read at the
+/// hosts' largest past luminosity. From 24 (P14.T53.b part 1, behind the escape's hold) the class
+/// is the present insolation's, both limits read at the hosts' luminosities now, and only the
+/// water's loss, with its oxygen and the carbon left airborne, reads the largest past luminosity:
+/// a world inside the runaway limit at its hosts' peak alone keeps its water lost under
+/// `Temperate` or `Snowball` (its atmosphere's `water_state` gates its surface water).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SurfaceState {
     /// A hydrogen and helium envelope of at least 0.1% of the mass: no solid surface (a gas giant,
@@ -1996,27 +2001,61 @@ pub enum SurfaceState {
     MagmaOcean,
     /// A surface pressure below [`AIRLESS_PRESSURE`]: bare rock or ice.
     Airless,
-    /// Inside the runaway-greenhouse limit at the hosts' largest past luminosity when water was
-    /// present: the oceans lost, a thick carbon-dioxide air, as on Venus. About an evolved host its
-    /// present climate can be cold (decision-pre-23-review item 33).
+    /// Inside the runaway-greenhouse limit when water was present: the oceans lost, a
+    /// carbon-dioxide air, as on Venus.
+    ///
+    /// - To generator version 23 the limit is read at the hosts' largest past luminosity, so that
+    ///   about an evolved host the present climate can be cold (decision-pre-23-review item 33),
+    ///   and every runaway takes Venus's deck.
+    /// - From 24 (P14.T53.b part 1) the limit is the present one: inside it now, its water lost,
+    ///   under whatever air escape left it, with Venus's deck only where the air beneath can cycle
+    ///   it ([`Atmosphere::runaway_deck`]). Only the water's loss, with its oxygen and the carbon
+    ///   left airborne, reads the hosts' largest past luminosity.
     RunawayGreenhouse,
-    /// Between the runaway limit, at the hosts' largest past luminosity, and the maximum-greenhouse
-    /// limit now, as on Earth and Mars. A world here can be ice-covered, on the cold side of the
+    /// Between the runaway limit and the maximum-greenhouse limit now, as on Earth and Mars. To
+    /// version 23 the runaway limit is read at the hosts' largest past luminosity; from 24 now, so
+    /// that a world inside it at its hosts' peak alone is `Temperate` here, its water lost and its
+    /// carbon airborne (P14.T53.b part 1). A world here can be ice-covered, on the cold side of the
     /// ice-albedo bistability (decision-pre-23-review item 26).
     Temperate,
     /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
-    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. Until P14.T53.a's
+    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. From version 24 a
+    /// world inside the runaway limit at its hosts' largest past luminosity alone is `Snowball`
+    /// here, its water lost and its carbon airborne (P14.T53.b part 1). Until P14.T53.a's
     /// carbon-dioxide form, a dry carbon-dioxide world here can be published above melting with no
     /// ice (P14.T13.c's finding "No maximum-greenhouse ceiling"; decision-p14-t51a-partition §1).
     Snowball,
 }
 
+/// Whether a published [`SurfaceState::RunawayGreenhouse`] keeps Venus's sulphuric acid deck
+/// (P14.T53.b part 1 (b); decision-absurd-states-24 R3), [`Atmosphere::runaway_deck`].
+///
+/// [`hooks::sulphur`](crate::planetary::hooks::sulphur) reads it through
+/// [`SulphurCycle::case_of`](crate::planetary::hooks::sulphur::SulphurCycle::case_of)
+/// (decision-absurd-states-24 R3.3), and re-exports it: a deckless runaway takes P14.T24.g's dry
+/// once-through case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum RunawayDeck {
+    /// The climate is solved under the deck: a runaway's sulphur cycles. Every runaway at
+    /// generator version 23, and Venus's.
+    #[default]
+    Kept,
+    /// The climate under the deck is colder than [`ACID_CYCLING_TEMPERATURE`], so it is solved
+    /// without it: a runaway's sulphur passes once through, as a dry world's.
+    Deckless,
+}
+
+/// The temperature below which a runaway greenhouse's air cannot cycle its sulphuric acid deck:
+/// P14.T24.g's constant, read by P14.T53.b part 1 (b)'s deckless re-solve under the escape's batch
+/// rules ([`RunawayDeck::Deckless`]; decision-absurd-states-24 R3.2).
+pub use crate::planetary::hooks::sulphur::ACID_CYCLING_TEMPERATURE;
+
 /// What an airless surface is made of, which sets its albedo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SurfaceMaterial {
-    /// Rock and dust.
+    /// Rock and dust: a rock bulk's, or a heated ice bulk's rock lag (P14.T56.g).
     Rock,
-    /// Ice: a body of at least [`ICY_WATER_FRACTION`] water.
+    /// Ice: a body of at least [`ICY_WATER_FRACTION`] water, an ice bulk with no lag.
     Ice,
 }
 
@@ -2073,13 +2112,16 @@ impl SurfaceState {
     }
 }
 
-/// Where a body lies against its hosts' habitable zone (P14.T12.b), which sets its climate.
+/// Where a body lies against its hosts' habitable zone (P14.T12.b), which sets its climate: as
+/// [`AtmosphereInputs::insolation`], the runaway limit at the hosts' largest past luminosity, and
+/// as [`AtmosphereInputs::present_insolation`], at their luminosities now (P14.T53.b part 1); the
+/// maximum-greenhouse limit is read now in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Insolation {
-    /// Inside the runaway-greenhouse limit at the hosts' largest past luminosity: any ocean it had
-    /// is lost.
+    /// Inside the runaway-greenhouse limit (at the hosts' largest past luminosity, or now): any
+    /// ocean it had is lost.
     InsideRunaway,
-    /// Between the runaway limit (at the worst) and the maximum-greenhouse limit (now).
+    /// Between the runaway limit and the maximum-greenhouse limit (now).
     Habitable,
     /// Beyond the maximum-greenhouse limit now.
     BeyondMaximumGreenhouse,
@@ -2135,9 +2177,20 @@ pub struct AtmosphereInputs {
     /// The X-ray and ultraviolet flux it received while its hosts' activity was saturated, the
     /// one under which a runaway world loses its water (P14.T24.f, [`runaway_oxygen`]).
     pub saturated_xuv_flux: WattsPerSquareMetre,
-    /// Where it lies against its hosts' habitable zone, which also sets its carbon's carrier
-    /// (P14.T24.f).
+    /// Where it lies against its hosts' habitable zone, the runaway limit read at their largest
+    /// past luminosity, which also sets its carbon's carrier (P14.T24.f). Under the escape's batch
+    /// rules it keeps only the inventory (P14.T53.b part 1 (a)): the water lost, its oxygen and the
+    /// carbon airborne; the published state reads
+    /// [`present_insolation`](Self::present_insolation).
     pub insolation: Insolation,
+    /// Where it lies against its hosts' habitable zone now: the runaway limit's sum Σ Fᵢ ÷
+    /// `S_eff,i` and the maximum-greenhouse limit's at the hosts' present luminosities, summed as
+    /// Kopparapu et al.'s limits are in a multiple system (P14.T12.b). Read only under the escape's
+    /// batch rules, by the published state's runaway arm (P14.T53.b part 1 (a)): a body whose
+    /// [`insolation`](Self::insolation) is inside the runaway limit publishes its present class,
+    /// its water lost all the same. It is the `insolation` itself about a host whose peak is its
+    /// present, a main-sequence one.
+    pub present_insolation: Insolation,
     /// Whether its crust has formed.
     pub crust: Crust,
     /// How long its young magma ocean lasted from its formation: P14.T28.a's `molten_until`,
@@ -2216,6 +2269,10 @@ impl EnvelopeHistory {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Atmosphere {
     state: SurfaceState,
+    /// The state its water follows ([`Atmosphere::water_state`]).
+    water_state: SurfaceState,
+    /// Whether a runaway keeps Venus's deck ([`Atmosphere::runaway_deck`]).
+    runaway_deck: RunawayDeck,
     surface_temperature: Kelvin,
     surface_pressure: Option<Pascals>,
     partials: PartialPressures,
@@ -2258,10 +2315,37 @@ impl Atmosphere {
         &self.column
     }
 
-    /// The surface state.
+    /// The surface state, which the state's branches read: the cloud and its deck, the cover's
+    /// thresholds, the ocean under a `Snowball`'s ice, the phase template, the lid and the
+    /// record's surface section. From generator version 24 its runaway arm is the present
+    /// insolation's (P14.T53.b part 1 (a)); the water the body holds follows its `water_state`,
+    /// the division's.
     #[must_use]
     pub const fn state(&self) -> SurfaceState {
         self.state
+    }
+
+    /// The state its water follows, what gates its surface water (decision-p14-t54a-passes §3.1),
+    /// its water ice's cap and the wet lid of its tectonic regime: [`state`](Self::state) but for
+    /// a world inside the runaway limit at its hosts' largest past luminosity alone (P14.T53.b
+    /// part 1 (a), from generator version 24), published `Temperate` or `Snowball`, whose water is
+    /// a runaway's, lost, so that this reads [`SurfaceState::RunawayGreenhouse`]. It is the state
+    /// of the climate's division that the greenhouse's steps read, so that their θ, the pass's
+    /// published partition and the record's agree to the bit.
+    #[must_use]
+    pub(crate) const fn water_state(&self) -> SurfaceState {
+        self.water_state
+    }
+
+    /// Whether a runaway keeps Venus's sulphuric acid deck (P14.T53.b part 1 (b),
+    /// decision-absurd-states-24 R3): [`RunawayDeck::Deckless`] for a published
+    /// [`SurfaceState::RunawayGreenhouse`] whose climate under the deck was colder than
+    /// [`ACID_CYCLING_TEMPERATURE`] (from generator version 24), solved without it, its cloud the
+    /// water cloud's availability; [`RunawayDeck::Kept`] for every other body, every runaway to
+    /// version 23 and Venus among them.
+    #[must_use]
+    pub const fn runaway_deck(&self) -> RunawayDeck {
+        self.runaway_deck
     }
 
     /// The mean surface temperature: for a gas envelope, the temperature it radiates at.
@@ -3071,6 +3155,7 @@ impl<'a> StepClimate<'a> {
 ///     xuv_fluence: earth_xuv_fluence(),
 ///     saturated_xuv_flux: WattsPerSquareMetre::new(0.3),
 ///     insolation: Insolation::Habitable,
+///     present_insolation: Insolation::Habitable,
 ///     crust: Crust::Solid,
 ///     molten_for: Years::ZERO,
 ///     age: Years::new(4.57e9),
@@ -3188,6 +3273,8 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
     let ice_held = held.retention();
     let airless = |state: SurfaceState, partials: PartialPressures, t: f64, carrier| Atmosphere {
         state,
+        water_state: state,
+        runaway_deck: RunawayDeck::Kept,
         surface_temperature: saturate(t),
         surface_pressure: Some(partials.total()),
         partials,
@@ -3272,6 +3359,8 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
     };
     Atmosphere {
         state,
+        water_state: state,
+        runaway_deck: RunawayDeck::Kept,
         surface_temperature: saturate(t),
         surface_pressure: Some(total),
         partials,
@@ -3286,6 +3375,129 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
         escape: None,
         ceiling: GreenhouseCeiling::None,
     }
+}
+
+/// Whether a body's published state follows its present insolation and a runaway's deck its
+/// cycling (P14.T53.b part 1): under the escape's batch rules ([`EscapeRules::Batch`], from its
+/// hold's version 24), and in the tests unless a test's switch gives P14.T53.a's batch as built
+/// ([`with_present_state`]). Never under the hold, to generator version 23.
+#[must_use]
+pub(crate) fn present_state_in_force() -> bool {
+    #[cfg(test)]
+    if PRESENT_STATE.with(core::cell::Cell::get) == PresentState::Peak {
+        return false;
+    }
+    EscapeRules::in_force() == EscapeRules::Batch
+}
+
+/// Whether a body whose passes published the atmosphere `air` is solved once more without
+/// Venus's deck (P14.T53.b part 1 (b); decision-absurd-states-24 R3.2): a published
+/// [`SurfaceState::RunawayGreenhouse`] under the deck whose mean surface temperature is below
+/// [`ACID_CYCLING_TEMPERATURE`], where part 1 is in force ([`present_state_in_force`]). It reads
+/// that first solve's temperature alone, so that the second solve, whose deck is fixed, is
+/// published as it ends: no feedback, nothing returns to the decked branch, and a temperature
+/// that is not a number keeps the deck.
+#[must_use]
+pub(crate) fn solved_without_the_deck(air: &Atmosphere) -> bool {
+    air.state == SurfaceState::RunawayGreenhouse
+        && air.runaway_deck == RunawayDeck::Kept
+        && air.surface_temperature.value() < ACID_CYCLING_TEMPERATURE.value()
+        && present_state_in_force()
+}
+
+/// Which state the escape's batch publishes on a test's thread ([`with_present_state`]), so that a
+/// test can hold what P14.T53.b part 1 leaves to the bit.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PresentState {
+    /// As the generator runs it from 24: the state's runaway arm the present insolation's, and
+    /// Venus's deck only where a runaway's climate under it can cycle the acid (P14.T53.b part 1).
+    Present,
+    /// P14.T53.a's batch as built: the state's runaway arm the hosts' largest past luminosity's,
+    /// and every runaway under Venus's deck.
+    Peak,
+}
+
+/// What P14.T53.b part 1 (b)'s solves without the deck cost on a test thread
+/// ([`with_deck_counts`]), as [`ThermostatCounts`] counts the thermostat's.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct DeckCounts {
+    /// The bodies' passes solved again without the deck.
+    pub(crate) resolves: u64,
+    /// The passes of their first solves, under the deck.
+    pub(crate) decked_passes: u64,
+    /// The passes of their second solves, without it, which they publish.
+    pub(crate) deckless_passes: u64,
+}
+
+#[cfg(test)]
+impl DeckCounts {
+    /// None counted.
+    const ZERO: Self = Self {
+        resolves: 0,
+        decked_passes: 0,
+        deckless_passes: 0,
+    };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The state the batch publishes on this thread, a test's own.
+    static PRESENT_STATE: core::cell::Cell<PresentState> =
+        const { core::cell::Cell::new(PresentState::Present) };
+    /// The solves without the deck counted on this thread.
+    static DECK_COUNTS: core::cell::Cell<DeckCounts> =
+        const { core::cell::Cell::new(DeckCounts::ZERO) };
+}
+
+/// `run`'s result with the escape's batch publishing the state `state` on this thread: under
+/// [`PresentState::Peak`] P14.T53.a's batch as built, both arms of P14.T53.b part 1 off, for the
+/// tests that hold what part 1 leaves to the bit. The switch before is set back after, a panic
+/// in `run` included, as [`with_rules`](crate::planetary::chem::escape::with_rules) sets its rules
+/// back. P14.T54.b deletes it with the escape's hold.
+#[cfg(test)]
+pub(crate) fn with_present_state<R>(state: PresentState, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's switch back as it drops.
+    struct Restore(PresentState);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PRESENT_STATE.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(PRESENT_STATE.with(|cell| cell.replace(state)));
+    run()
+}
+
+/// `run`'s result and the solves without the deck it took on this thread (P14.T53.b part 1 (b)'s
+/// cost); the counts before are set back after.
+#[cfg(test)]
+pub(crate) fn with_deck_counts<R>(run: impl FnOnce() -> R) -> (R, DeckCounts) {
+    /// Sets the thread's counts back as it drops.
+    struct Restore(DeckCounts);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DECK_COUNTS.with(|cell| cell.set(self.0));
+        }
+    }
+    let restore = Restore(DECK_COUNTS.with(|cell| cell.replace(DeckCounts::ZERO)));
+    let result = run();
+    let counts = DECK_COUNTS.with(core::cell::Cell::get);
+    drop(restore);
+    (result, counts)
+}
+
+/// Counts on this test thread one body's passes solved again without the deck, `decked` passes
+/// under it and `deckless` without.
+#[cfg(test)]
+pub(crate) fn count_deckless(decked: u32, deckless: u32) {
+    DECK_COUNTS.with(|cell| {
+        let mut counts = cell.get();
+        counts.resolves += 1;
+        counts.decked_passes += u64::from(decked);
+        counts.deckless_passes += u64::from(deckless);
+        cell.set(counts);
+    });
 }
 
 #[cfg(test)]

@@ -157,7 +157,9 @@ pub fn liquid_water_density() -> KilogramsPerCubicMetre {
 /// decision-p14-t54a-ganymede's C0 follow-up), a runaway greenhouse, which has lost its oceans
 /// (P14.T13.c), and a molten or enveloped one, which has no solid surface (the lane's readings of
 /// "T13.a's water", plan 14's Risks). It reads O and T13.c's state, not the climate, so the order
-/// has no loop.
+/// has no loop: the state its water follows (`Atmosphere::water_state`), which from generator
+/// version 24 is a runaway's for a world inside the runaway limit at its hosts' largest past
+/// luminosity alone, published `Temperate` or `Snowball`, its water lost (P14.T53.b part 1 (a)).
 ///
 /// # Examples
 ///
@@ -208,7 +210,7 @@ pub fn surface_water(
     outgassing: f64,
 ) -> KilogramsPerSquareMetre {
     surface_water_of(&SurfaceWaterInputs {
-        state: atmosphere.state(),
+        state: atmosphere.water_state(),
         retained: atmosphere.retains_against_escape(Gas::Water),
         water,
         radius,
@@ -222,7 +224,8 @@ pub fn surface_water(
 /// passes give them from a greenhouse step's partition, the record from its atmosphere.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SurfaceWaterInputs {
-    /// The surface state that gates the water: only a temperate world or a snowball holds it.
+    /// The surface state that gates the water, the one its water follows
+    /// ([`Atmosphere::water_state`]): only a temperate world or a snowball holds it.
     pub(crate) state: SurfaceState,
     /// Whether the body keeps its water against escape ([`Atmosphere::retains_against_escape`]).
     pub(crate) retained: bool,
@@ -580,7 +583,10 @@ pub struct IceInputs<'a> {
     /// and night, and its mean surface temperature.
     pub conditions: &'a SurfaceConditions,
     /// Its surface state (P14.T13.c's): a `Snowball` is wholly iced, and an airless body's ice
-    /// lasts below [`AIRLESS_ICE_TEMPERATURE`].
+    /// lasts below [`AIRLESS_ICE_TEMPERATURE`]. The record and the passes give the state its water
+    /// follows (`Atmosphere::water_state`, P14.T53.b part 1 (a)), so that a world that was a
+    /// runaway at its hosts' peak alone, published a `Snowball`, is not iced by water it lost; they
+    /// read the threshold of its published state.
     pub state: SurfaceState,
     /// Its crust: a silicate one's ice is capped by its surface water.
     pub crust: Crust,

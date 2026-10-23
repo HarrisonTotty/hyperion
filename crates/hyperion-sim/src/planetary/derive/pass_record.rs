@@ -625,7 +625,10 @@ impl Context for PassContext {
 /// against escape, its volatile inventory's water, and its record's bulk's radius and gravity.
 ///
 /// At a greenhouse step the state is step 3's, the climate's division, which the step's partition
-/// cannot move; at the pass's published partition, and on the record, its air's.
+/// cannot move; at the pass's published partition, and on the record, the state its air's water
+/// follows ([`Atmosphere::water_state`]), which is the division's but for the `Airless` and
+/// `MagmaOcean` overrides (P14.T53.b part 1 (a): a world that was a runaway at its hosts' peak
+/// alone publishes its present class, its water a runaway's).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct WaterGate {
     /// The state that gates the water: only a temperate world or a snowball holds it.
@@ -662,7 +665,8 @@ impl WaterGate {
         }
     }
 
-    /// The gate of the atmosphere `air`, its own state and retention
+    /// The gate of the atmosphere `air`, the state its water follows
+    /// ([`Atmosphere::water_state`]) and its retention
     /// ([`Atmosphere::retains_against_escape`]), of a body whose inventory's water is `water`, of
     /// its record's bulk's radius and gravity `bulk` ([`RecordSpin::bulk`]): a pass's published
     /// partition's and the record's.
@@ -673,7 +677,7 @@ impl WaterGate {
         bulk: (Metres, MetresPerSecondSquared),
     ) -> Self {
         Self::new(
-            air.state(),
+            air.water_state(),
             air.retains_against_escape(Gas::Water),
             water,
             bulk,

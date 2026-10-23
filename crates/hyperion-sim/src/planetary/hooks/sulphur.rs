@@ -298,17 +298,10 @@ pub enum SulphurCycle {
 }
 
 /// Whether a runaway greenhouse's climate keeps Venus's acid deck (P14.T53.b part 1 (b),
-/// decision-absurd-states-24 R3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub enum RunawayDeck {
-    /// The climate is solved under the deck: a runaway's sulphur cycles. Every runaway at
-    /// generator version 23, and Venus's.
-    #[default]
-    Kept,
-    /// The climate under the deck is colder than [`ACID_CYCLING_TEMPERATURE`], so it is solved
-    /// without it: a runaway's sulphur passes once through, as a dry world's.
-    Deckless,
-}
+/// decision-absurd-states-24 R3): the derivation decides it and publishes it on its atmosphere
+/// (`Atmosphere::runaway_deck`), so it lives beside `SurfaceState`; re-exported here, so that this
+/// module's and its callers' paths read it as before.
+pub use crate::planetary::derive::atmosphere::RunawayDeck;
 
 impl SulphurCycle {
     /// The case of a body in P14.T13.c's state `state` whose climate keeps or drops the acid deck

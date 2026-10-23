@@ -687,6 +687,7 @@ fn photometry_of(
     let fractions = bulk.fractions();
     BodyPhotometry::derive(&PhotometryInputs {
         state: atmosphere.state(),
+        runaway_deck: atmosphere.runaway_deck(),
         material: surface_material(&fractions, lag),
         surface_pressure: atmosphere.surface_pressure(),
         cloud_fraction: atmosphere.cloud_fraction(),

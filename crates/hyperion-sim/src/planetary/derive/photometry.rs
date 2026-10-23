@@ -51,7 +51,7 @@ use core::f64::consts::PI;
 
 use crate::math;
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{Gas, RunawayDeck, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::composition::MassFractions;
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{JUPITER_HEAVY_ELEMENT_FRACTION, SATURN_HEAVY_ELEMENT_FRACTION};
@@ -683,6 +683,11 @@ pub fn exponent_for(template: PhaseTemplate, l: f64, q: f64) -> f64 {
 pub struct PhotometryInputs {
     /// The surface state.
     pub state: SurfaceState,
+    /// Whether a runaway greenhouse keeps Venus's deck
+    /// ([`Atmosphere::runaway_deck`](crate::planetary::derive::Atmosphere::runaway_deck),
+    /// P14.T53.b part 1 (b)): a deckless one takes a dry temperate world's template. Every other
+    /// state's is [`RunawayDeck::Kept`], which the template does not read.
+    pub runaway_deck: RunawayDeck,
     /// What an airless surface is made of, by the record's composition.
     pub material: SurfaceMaterial,
     /// The surface pressure; `None` for a gas envelope.
@@ -797,6 +802,11 @@ impl BodyPhotometry {
 }
 
 /// The template of the body `inputs` describe, by its surface state (P14.T47.b).
+///
+/// A runaway greenhouse solved without Venus's deck ([`RunawayDeck::Deckless`], P14.T53.b part 1
+/// (b)) takes what a dry `Temperate` of the same cover takes: Mars's when its air is thin, else
+/// Earth's (decision-absurd-states-24 R3.2's lean), its cloud the water cloud's availability, none
+/// on a dry world, over the ground a dry world's.
 fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
     let thin = inputs
         .surface_pressure
@@ -815,8 +825,15 @@ fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
             | PlanetClass::IceGiant => PhaseTemplate::Neptune,
         },
         SurfaceState::MagmaOcean if thin => PhaseTemplate::Magma,
-        // A runaway greenhouse, and a magma ocean under a thick atmosphere (unlabelled: it has no
-        // analogue either).
+        SurfaceState::RunawayGreenhouse if inputs.runaway_deck == RunawayDeck::Deckless => {
+            if thin {
+                PhaseTemplate::Mars
+            } else {
+                PhaseTemplate::Earth
+            }
+        }
+        // A runaway greenhouse under its deck, and a magma ocean under a thick atmosphere
+        // (unlabelled: it has no analogue either).
         SurfaceState::RunawayGreenhouse | SurfaceState::MagmaOcean => PhaseTemplate::Venus,
         SurfaceState::Snowball => PhaseTemplate::Snowball,
         SurfaceState::Airless => match inputs.material {
@@ -844,6 +861,7 @@ mod tests {
         let material = SurfaceMaterial::of(&d.fractions());
         PhotometryInputs {
             state: atmosphere.state(),
+            runaway_deck: atmosphere.runaway_deck(),
             material,
             surface_pressure: atmosphere.surface_pressure(),
             cloud_fraction: atmosphere.cloud_fraction(),
@@ -1099,6 +1117,7 @@ mod tests {
     fn airless(material: SurfaceMaterial, state: SurfaceState, bond: f64) -> PhotometryInputs {
         PhotometryInputs {
             state,
+            runaway_deck: RunawayDeck::Kept,
             material,
             surface_pressure: None,
             cloud_fraction: 0.0,
@@ -1157,6 +1176,24 @@ mod tests {
         };
         assert_eq!(temperate(29_999.0), PhaseTemplate::Mars);
         assert_eq!(temperate(30_000.0), PhaseTemplate::Earth);
+        // P14.T53.b part 1 (b): a runaway solved without its deck takes a dry temperate world's
+        // template, and one under it Venus's at any pressure.
+        let runaway = |pressure: f64, runaway_deck: RunawayDeck| {
+            BodyPhotometry::derive(&PhotometryInputs {
+                surface_pressure: Some(Pascals::new(pressure)),
+                runaway_deck,
+                ..airless(SurfaceMaterial::Rock, SurfaceState::RunawayGreenhouse, 0.2)
+            })
+            .template()
+        };
+        for pressure in [121.0, 29_999.0, 30_000.0, 1.13e5, 9.2e6] {
+            assert_eq!(
+                runaway(pressure, RunawayDeck::Deckless),
+                temperate(pressure),
+                "{pressure} Pa"
+            );
+            assert_eq!(runaway(pressure, RunawayDeck::Kept), PhaseTemplate::Venus);
+        }
         let rock = airless(SurfaceMaterial::Rock, SurfaceState::Airless, 0.11);
         let a = BodyPhotometry::derive(&rock);
         let b = BodyPhotometry::derive(&rock);

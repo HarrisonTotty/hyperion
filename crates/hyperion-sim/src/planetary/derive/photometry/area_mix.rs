@@ -96,7 +96,9 @@ use crate::planetary::chem::partition::{
     Condensate, CondensateEntry, CondensatePhase, Condensates, Partition, WATER_SURFACE_HUMIDITY,
 };
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::{Gas, PartialPressures, SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{
+    Gas, PartialPressures, RunawayDeck, SurfaceMaterial, SurfaceState,
+};
 use crate::planetary::hooks::surface::regime::climate_condensable;
 use crate::substance::optics::{SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS};
 use crate::substance::rayleigh::{RAYLEIGH_REFERENCE_WAVELENGTH_NM, gas_cross_section};
@@ -1475,34 +1477,47 @@ pub(crate) fn cloud_availability(partition: &Partition, shade: &HostShade) -> f6
     }
 }
 
-/// The cloud fraction of a body in the state `state` whose partition is `partition`, under the
-/// light `shade`: its state's share ([`cloud_share_of_state`]) times its condensable's
-/// availability ([`cloud_availability`]), the whole for a runaway greenhouse, which keeps its deck
-/// with or without sulphur, and a gas envelope (the plan: "never from the Surface path's decks").
+/// The cloud fraction of a body in the state `state` whose runaway's deck is `deck`, whose
+/// partition is `partition`, under the light `shade`: its state's share ([`cloud_share_of_state`])
+/// times its condensable's availability ([`cloud_availability`]), the whole for a runaway
+/// greenhouse under its deck, which keeps it with or without sulphur, and a gas envelope (the plan:
+/// "never from the Surface path's decks"). A runaway solved without its deck
+/// ([`RunawayDeck::Deckless`], P14.T53.b part 1 (b); decision-absurd-states-24 R3.2) takes a
+/// temperate world's share times its availability, the water cloud's, none on a dry world.
 #[must_use]
-pub(crate) fn cloud_fraction(state: SurfaceState, partition: &Partition, shade: &HostShade) -> f64 {
-    let of_state = cloud_share_of_state(state);
-    match state {
-        SurfaceState::RunawayGreenhouse | SurfaceState::GasEnvelope => of_state,
-        SurfaceState::Temperate | SurfaceState::Snowball => {
-            of_state * cloud_availability(partition, shade)
+pub(crate) fn cloud_fraction(
+    (state, deck): (SurfaceState, RunawayDeck),
+    partition: &Partition,
+    shade: &HostShade,
+) -> f64 {
+    match (state, deck) {
+        (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) | (SurfaceState::GasEnvelope, _) => {
+            cloud_share_of_state(state)
         }
-        SurfaceState::Airless | SurfaceState::MagmaOcean => 0.0,
+        (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless) => {
+            cloud_share_of_state(SurfaceState::Temperate) * cloud_availability(partition, shade)
+        }
+        (SurfaceState::Temperate | SurfaceState::Snowball, _) => {
+            cloud_share_of_state(state) * cloud_availability(partition, shade)
+        }
+        (SurfaceState::Airless | SurfaceState::MagmaOcean, _) => 0.0,
     }
 }
 
-/// The Bond albedo of the cloud of a body in the state `state` under the light of `shade`: a
-/// runaway greenhouse's Venus's 0.76 (Haus et al. 2016, Icarus 272, 178, T13.c's table), so that
-/// Venus keeps it exactly at its full cover; a temperate world's and a snowball's the water cloud
-/// calibrated on Earth ([`water_cloud_albedo`]); none for the rest.
+/// The Bond albedo of the cloud of a body in the state `state` whose runaway's deck is `deck`,
+/// under the light of `shade`: a runaway greenhouse's under its deck Venus's 0.76 (Haus et al.
+/// 2016, Icarus 272, 178, T13.c's table), so that Venus keeps it exactly at its full cover; a
+/// temperate world's, a snowball's and a runaway's solved without its deck (P14.T53.b part 1 (b))
+/// the water cloud calibrated on Earth ([`water_cloud_albedo`]); none for the rest.
 #[must_use]
-pub(crate) fn cloud_albedo(state: SurfaceState, shade: &HostShade) -> f64 {
-    match state {
-        SurfaceState::RunawayGreenhouse => SurfaceState::RunawayGreenhouse
+pub(crate) fn cloud_albedo((state, deck): (SurfaceState, RunawayDeck), shade: &HostShade) -> f64 {
+    match (state, deck) {
+        (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) => SurfaceState::RunawayGreenhouse
             .albedo(SurfaceMaterial::Rock)
             .value(),
-        SurfaceState::Temperate | SurfaceState::Snowball => shade.water_cloud,
-        SurfaceState::GasEnvelope | SurfaceState::Airless | SurfaceState::MagmaOcean => 0.0,
+        (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless)
+        | (SurfaceState::Temperate | SurfaceState::Snowball, _) => shade.water_cloud,
+        (SurfaceState::GasEnvelope | SurfaceState::Airless | SurfaceState::MagmaOcean, _) => 0.0,
     }
 }
 
