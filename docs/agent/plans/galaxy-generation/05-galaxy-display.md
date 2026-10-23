@@ -1673,9 +1673,10 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   - _stated limits: a ring that is a point on screen keeps its label across a stalk at the last
     resort (`PLANE 0.01 ly SET`), and D4 drops labels in a crowd, which the list still names._
   - _Narrowed for annulus labels by P14.T42.d (plan 14; decision-zone-labels): an annulus's label
-    is placed after the marks' labels, 0.5 rem from every label and the furniture, 0.25 rem
-    outside every mark's bracket's box and 0.125 rem from every stalk, prefers a place that no
-    orbit, annulus edge or tick crosses, and is not drawn where it has no such place. The marks'
+    is placed after the marks' labels, 0.5 rem from every label and the furniture, 0.25 rem outside
+    every mark's bracket's box but, for a ring's label, its own planet's while no reticle is drawn
+    about it (P14.T42.g), and 0.125 rem from every stalk, prefers a place that no orbit, annulus
+    edge or tick crosses, and is not drawn where it has no such place. The marks'
     labels no longer give way to it, but a selected annulus's label, the selection's, is placed
     before them, and they give way to it (P14.T42.e). Spheres, plane rings, paths and the observer
     keep R07.T16.j's last resort._

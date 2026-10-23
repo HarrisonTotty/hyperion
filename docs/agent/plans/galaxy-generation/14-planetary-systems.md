@@ -759,10 +759,8 @@ rate) is always shown. The display time is labelled as the display's (`DISPLAY T
 not the ship's clock, which does not exist yet; when it does, a display time that differs from it
 falls under the guide's rule for simulation modes and takes that banner. Step sizes reach down to an
 hour, which plan 05's `UT +12.50 yr` cannot show, so the time reads as years, then days, hours,
-minutes and seconds in the guide's `MET` form (`UT +12 yr 183/14:08:33`). This format needs the
-owner's confirmation, as plan 05's `UT` does. By ruling 33 of 2026-09-22 it is drafted for the owner
-with the rest of T38.a's guide entries, and the client is built to the draft and marked for the
-owner's confirmation.
+minutes and seconds in the guide's `MET` form (`UT +12 yr 183/14:08:33`). The format is in the guide
+(`DISPLAY TIME`), accepted with T38.a's entries on 2026-09-25 (`UX-GUIDE-DRAFTS-r9.md`).
 
 ## Tasks
 
@@ -1536,9 +1534,10 @@ Solar System values without a generator.
     its primary at every pericentre; `body_fixed_at` is a rotation (orthonormal to 10⁻¹²) at every
     time.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::rotation planetary::frames`.
-  - _Drafted for the owner (R07.T1, 2026-10-02):_ P14.T46.a would replace "I = 0.33–0.4 M R² by
-    class" with one moment of inertia per body that serves locking and flattening, and P14.T46.b
-    would put the body-fixed frame in the record at `Bulk` and on the wire. See Phase J.
+  - _Decided 2026-10-02 (decision-p14-phase-j; R07.T1):_ P14.T46.a would replace
+    "I = 0.33–0.4 M R² by class" with one moment of inertia per body that serves locking and
+    flattening, and P14.T46.b would put the body-fixed frame in the record at `Bulk` and on the
+    wire. See Phase J.
 - **P14.T14.d Tides under a gas envelope** (decision-backlog-1, 2026-10-09; amends T14.b and T15
   for `SubNeptune` and `IceGiant`). A body under a hydrogen and helium envelope raises its tide
   on its core, seen from the envelope's top, and dissipates as the ice giants do, not as a solid
@@ -1938,10 +1937,11 @@ next to a belt has one or two kilometre-scale captured moons with probability 0.
     re-checked source; Agnor and Hamilton (2006) give the mechanism, not a rate. (5) "10–250 km"
     is ambiguous: as diameters it fits Himalia, Phoebe and Sycorax but not Nereid (340 km). Each
     is built as the plan says and marked provisional.
-  - _T19, for the owner._ P14.T22.b asks the moons of one planet to satisfy T10.a's non-overlap rule
-    about the planet. The regular moons do, and the Triton-like capture's pruning keeps them clear
-    of it, but the irregulars cannot: at e = 0.1–0.6 over 0.1–0.45 R_H they cross one another, and
-    their pericentres reach 0.04 R_H, inside the regular moons' 0.05, as the real ones' do:
+  - _T19 (ruled: ruling 83.8, T22.b's amendment)._ P14.T22.b asks the moons of one planet to satisfy
+    T10.a's non-overlap rule about the planet. The regular moons do, and the Triton-like capture's
+    pruning keeps them clear of it, but the irregulars cannot: at e = 0.1–0.6 over 0.1–0.45 R_H they
+    cross one another, and their pericentres reach 0.04 R_H, inside the regular moons' 0.05, as the
+    real ones' do:
     Jupiter's retrograde groups overlap in their ranges of distance. T22.b needs the rule restricted to the regular
     moons, or the irregulars' orbits changed.
 
@@ -2740,8 +2740,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
   - Abiotic O₂ comes from water loss in the runaway state (Luger and Barnes 2015): the oxygen of
     the water lost, less what escapes with the hydrogen and what the crust takes up, by sinks the
     builder takes from the paper.
-  - Biotic O₂ is a gap for the owner: no plan produces life, so a generated Earth has no O₂ and no
-    ozone.
+  - Biotic O₂ is a recorded gap until a biosphere plan (`signoff-3.md` item 1.14): no plan produces
+    life, so a generated Earth has no O₂ and no ozone.
   - _Tests:_ the table's Titan carries CH₄ at 5.65% of its surface gas to 10% (the Titan figure is
     a mole fraction, (p_CH₄ ÷ μ_CH₄) ÷ Σ(p_j ÷ μ_j)); Earth, Venus and
     Mars keep their carbon as CO₂; no body inside the snow line or inside the maximum-greenhouse
@@ -5085,9 +5085,11 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
   every sampled body;
   two calls agree bit for bit. (c) The section's states by kind and level. (d) A wire-form test per
   DTO and per section state; `golden_diff.py` reports extensions only.
-- _Two checks for the owner_ (R07.T1's): (i) airless rock's Bond albedo of 0.11 against the Moon's
-  p_V 0.12 and a Mercury-like q of 0.48 gives a spherical albedo in V of 0.06, a ratio of about 0.5
-  (Lane and Irvine 1973, AJ 78, 267, to be read for the Moon's own q); (ii) resolved by
+- _Two checks_ (R07.T1's; (i) closed 2026-10-19, `signoff-12.md` item 46): (i) airless rock's Bond
+  albedo of 0.11 against the Moon's V-band p 0.113, q 0.611 and A 0.069, and its radiometric albedo
+  0.123 ± 0.002 (Lane and Irvine 1973, AJ 78, 267, Table VIII and eq. 6): a ratio A_V ÷ A of 0.63,
+  the Moon's own, its reflectance rising into the near infrared; closed 2026-10-19, no defect
+  (`signoff-12.md`, item 46); (ii) resolved by
   decision-r07-earth-albedo (P14.T47.e). Robinson 2026's p_V 0.215 and q_V 1.312 give A_V 0.282.
   Against them stand CERES's Bond albedo of 0.2915 (Loeb et al. 2018, J. Climate 31, 895, Table 5)
   and earthshine's 0.297 ± 0.005 (Goode et al. 2001, GRL 28, 1671). Mallama et al. 2017's 0.434 came
@@ -5500,7 +5502,7 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-sim planetary::derive`;
     `cargo test -p hyperion-sim planetary::surface`; `cargo test -p hyperion-server convert`.
 
-#### Open questions of Phase K, for the owner (R09's leans)
+#### Open questions of Phase K (R09's leans; ruled in `signoff-3.md`, items 1.16–1.18)
 
 1. **Open question 20** of the rendering brainstorm (still **Open**, a physics ruling): σ_h as
    T48.a drafts it, with no gravity term in the structural share. Lean: accept, labelled empirical,
@@ -7849,7 +7851,9 @@ Each is labelled "not yet modelled" where a console could show it:
 - **P14.T55.j** moons' thermal-orbital equilibrium: a Maxwell or Andrade body whose viscosity
   balances tidal heat against convective loss (Fischer and Spohn 1990; Moore 2003; both from
   memory), giving Im k₂ continuously in place of T56.d's two branches, with the moons' eccentricity
-  damping (decision-p14-moons §5).
+  damping (decision-p14-moons §5). Its first inputs are P14.T56.d's thin-shell moons
+  (decision-p14-t56d-membrane §7.1): a resonance's energy budget caps the heat that a forced
+  eccentricity can sustain, and T17.a's forced e is drawn without that damping.
 - **P14.T55.k** ice shells beyond P14.T51.g's conductive steady state
   (science-p14-subsurface-ocean):
   - stagnant-lid convection, which freezes oceans the conductive shell keeps (Solomatov 1995;
@@ -8377,9 +8381,9 @@ it:
   block `0x0400`–`0x04FF` staying free for later body events. Surface seeds depend on `body.surface`
   and the `BodyId` alone, so the map generator's output survives any change to derivation.
 - `DetailLevel` as an ordered enum with room between levels on the wire (string names, not numbers).
-- Drafted for the owner (R07.T1, Phase J): P14.T46 makes one bump for the moment of inertia, the
-  rotation and figure sections and their pins, and one additive protocol change; P14.T47's
-  photometry rides in it (decision-p14-phase-j). Neither adds a draw or a domain tag.
+- Decided 2026-10-02 (decision-p14-phase-j; R07.T1, Phase J): P14.T46 makes one bump for the moment
+  of inertia, the rotation and figure sections and their pins, and one additive protocol change;
+  P14.T47's photometry rides in it (decision-p14-phase-j). Neither adds a draw or a domain tag.
 - Accepted with amendments 2026-10-10 (`signoff-3.md`; drafted by R08.T1 and R09.T0.a,
   2026-10-09): P14.T24.a–f and T48.a–e fill the
   record's surface section and add an `envelope` section, and every one moves output. T24.f moves
@@ -9354,9 +9358,10 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     Pascucci et al. (2018) find the typical mass inside the snow line linear in the host's mass,
     and their G-star law's median is 5.1 M⊕ at 1 M☉ extended to the smallest masses, 6.5 M⊕
     inside their fitted range; Mulders et al.'s de-biased median is about 5 M⊕. The plan's 4 M⊕,
-    20–40% under, at the edge of their errors, is kept (for the owner). The rocky groups' 0.5 M⊕
-    (`ROCKY_CHARACTERISTIC_MASS`: the Solar System's mean; Kokubo and Genda 2010) is this lane's
-    choice, where the plan gives none, and the dial of ruling 48 (f)'s η⊕.
+    20–40% under, at the edge of their errors, is kept (signed off 2026-10-19,
+    `signoff-12.md`, item 47). The rocky groups' 0.5 M⊕ (`ROCKY_CHARACTERISTIC_MASS`: the Solar
+    System's mean; Kokubo and Genda 2010) is this lane's choice, where the plan gives none, and the
+    dial of ruling 48 (f)'s η⊕.
   - _T7.c._ Giants take Cumming et al.'s law by inversion (KS against it) and are held together to
     the disc's gas mass. "Within the disc lifetime" is Lambrechts and Johansen's (2014, eq. 35)
     pebble growth at the snow line, seeded with the local isolation mass there (ruling 38's use for
@@ -9446,14 +9451,14 @@ KeplerElements, formation_distance, radius_rank: UnitUniform)` stands in for T8'
     fraction is 0.24 instead of 0.56. The alternative is to remap only the dry part below the
     Earth-like curve there, which keeps every water world but leaves dry bodies beyond the snow
     line at 0.325 and over.
-  - _For the owner: design note 8's reading._ The brainstorm's "radius from mass (Chen and Kipping
-    2017), refined by composition with Zeng et al." is read, for rocky bodies, as composition
-    refining the radius: the one drawn quantile picks the composition from the observed spread,
-    and the radius follows from Zeng's curves, since Chen and Kipping's 0.040 dex at low mass
-    mixes measurement error and sub-Neptunes into a spread wider than all of iron to rock. For
-    everything above the rock curve the quantile still places the body within Chen and Kipping's
-    scatter and the composition is solved from that radius. Radius, composition and envelope are
-    never drawn apart (ruling 53).
+  - _Design note 8's reading (signed off 2026-10-19, `signoff-12.md`, item 47)._ The brainstorm's
+    "radius from mass (Chen and Kipping 2017), refined by composition with Zeng et al." is read, for
+    rocky bodies, as composition refining the radius: the one drawn quantile picks the composition
+    from the observed spread, and the radius follows from Zeng's curves, since Chen and Kipping's
+    0.040 dex at low mass mixes measurement error and sub-Neptunes into a spread wider than all of
+    iron to rock. For everything above the rock curve the quantile still places the body within Chen
+    and Kipping's scatter and the composition is solved from that radius. Radius, composition and
+    envelope are never drawn apart (ruling 53).
   - _T16.a, classes and tides (for the orchestrator)._ `PlanetClass { Rocky, Icy, SubNeptune,
 IceGiant, GasGiant }`, in `derive`, with its thresholds in `params.rs`: an envelope from 0.1% of
     the mass
@@ -10660,8 +10665,8 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - _Keys and words._ `RUN` is `G` and `HOLD` `H`, a congruent pair in that order with the one in
     force pressed; the rates are on `7`–`0`, after the steps' `1`–`6`. A `MODE` output reads `HOLD`
     or `RUN 1 d/s`. `RUN` is held back at `+H`, described by `CLOCK WINDOW LIMIT`, and while the
-    link is down, described by the link's state. **For the owner:** `RUN`, `HOLD`, `MODE`, the rate
-    labels and the two keys join the draft nomenclature.
+    link is down, described by the link's state. `RUN`, `HOLD`, `MODE`, the rate labels and the two
+    keys are in the guide's nomenclature (`RUN`, `HOLD`).
   - _Frames and readouts._ While running, one animation frame asks for the next. Each frame's time,
     whole seconds from the run's start by the frame's own timestamp, goes to the orbit map alone
     through an external store (`FrameTime`, `useFrameTime`), and `useSystemView` gains `sceneAt(time)`
@@ -10679,9 +10684,8 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - _By eye_ (headless Chromium over the built renderer, since `xvfb-run` is not installed): at
     1 d/s the innermost planet of a 0.1 M☉ dwarf, at 4.7 Gm, moves about 40° a second while the
     outer ones barely move, and nothing moves in `HOLD`.
-  - **For the owner:** the guide's 3D rule "redraws on demand only, never on a loop" and `RUN`'s
-    per-frame redraw, which D24 and this risk's "Time control and the guide" bullet allow, need one
-    wording.
+  - _Worded since: the guide's 3D rule redraws on demand and at frame rate while the operator runs
+    time ("Graphs, schematics and spatial displays")._
 - **T28.c's zero kick lifted (round 9, `kick`, with P06.T19).** The transform had applied
   `StarModel::natal_kick` since T28.c; the law now returns one, so no code of the transform
   changed. The kick is along the galactic axes, which the system frame's are parallel to. A white
@@ -11071,7 +11075,8 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
     is used for every star, and `ActivityLevel` is not read, since a
     time set from the level at the time is not monotone in time (design note 9). A saturation time
     from the star's own rotation rank, fixed at birth, would be monotone and keep each star's
-    scatter; that is a choice for the owner.
+    scatter; ruled 2026-10-19 the model's next revision, at the next bump that touches escape
+    (`signoff-12.md`, item 45).
   - _Choices the plan leaves open, each provisional._ The exobase multiple of 5 (window 4.6–5.5
     between Ganymede and Titan; Jeans escape stands in for sputtering, which is why it exceeds a
     real exobase's 2–4), raised by the square root of the X-ray fluence above Earth's; carbon
@@ -11274,9 +11279,8 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     `-67192088818403264` s, about −2.1 Gyr, past 2⁵³) and `.0501` (−185 Myr); `close_binary` has
     none. The tests read every frame of the three golden systems and the decision's figure on the
     slice fixture. R03.T13's `withSafeEventTime` in `test/inSystemGolden.ts`, which replaced such
-    times by `MIN_SAFE_INTEGER`, is removed. **For the owner:** the guide has no sentence for an
-    event time outside the clock window on a display that steps finer than 0.01 yr; the years form
-    is built to the decision and waits on the owner's confirmation.
+    times by `MIN_SAFE_INTEGER`, is removed. The years form outside the clock window is signed off
+    as built (2026-10-19, `signoff-12.md`, item 42), with the guide's sentence.
 - **P14.T45.a–c, as built (G14 and G15, 2026-10-02). `GENERATOR_VERSION` 16 → 17.**
   - _Files._ `planetary/drift.rs`: `OrbitDrift` (rates named with their units, as
     `semi_major_axis_rate_m_per_s`, `eccentricity_rate_per_s` and `mean_motion_rate_rad_per_s2`),
@@ -11704,9 +11708,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       - the row's comment gives CERES's 0.2915 in full (EBAF Ed4.0, 99.1 ÷ 340.0 W m⁻²);
       - the test's eq. 14 is written as eq. 5's P_HG at Θ = 180° − α, so it no longer shares the
         template's substitution of cos Θ.
-  - _Open, for the owner (not changed here)._ The temperate state's Bond albedo of 0.306
-    (`atmosphere.rs`) is cited to NASA's Earth fact sheet. Since its update of 15 November 2024
-    the fact sheet gives 0.294, the figure `irradiation.rs` cites from it. Earth's drawn p does
+  - _Was open (not changed in this task); resolved below._ The temperate state's Bond albedo of
+    0.306 (`atmosphere.rs`) is cited to NASA's Earth fact sheet. Since its update of 15 November
+    2024 the fact sheet gives 0.294, the figure `irradiation.rs` cites from it. Earth's drawn p does
     not change, because A_ref cancels by ruling 9. The temperate Bond albedo and the stated ratio
     would change: 0.282 ÷ 0.294 = 0.959. Against CERES the ratio is 0.967, not the ruling's 0.96.
     The choice is to re-cite 0.306 as the fact sheet's value before 2024, or to move the state to
@@ -11864,7 +11868,7 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
      - On the table's Venus the deck lies at 1.34–0.04 bar with τ 33, so R08 classes it
        `cloudDeck` (τ > 10, cloud fraction 1) and R11's boundary leaves it to R08.
      - Until it is accepted and built, the material stays in the enum and no rule produces it.
-     - Its assumptions, for the owner:
+     - Its assumptions (accepted with T24.g's amendments, `signoff-3.md` item 1.6):
        - water is never limiting on a runaway world, though T13.c removes its water;
        - t_dry, ε_v and σ_d are fixed on Venus;
        - Hu et al.'s law is applied on cold, dry worlds and off 1 bar;
