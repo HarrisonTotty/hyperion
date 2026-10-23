@@ -2168,6 +2168,22 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     line meets the furniture's last with a hint or a summary on two lines, with no space or
     hairline between the two groups (the guide's § Layout, "Separate groups with space first and a
     hairline second"), since at 13.25 rem the stage has nothing left to give: a 1 px rule would
-    leave 211 px (ux-reviewer; main's call); and P05.T14's sanctioned
+    leave 211 px (ux-reviewer; main ruled against it, below); and P05.T14's sanctioned
     unkept census marks lose one of their two reasons in compact, since the toggle no longer
     wraps.
+  - _Main's rulings on the review (2026-10-22)._ (a) No hairline between the furniture and the
+    census: the 212 px floor binds, and the comment's reason stands. (b) `CENSUS BY LAYER` stays
+    1 rem after the summary, as the decision's §14.4 gives it; the toggle shifting about 90 px as
+    the summary wraps (to x 651 from x 562) is a finding for a later pass, where pinning it at the
+    row's end (`minmax(0, 1fr)`) keeps it still (ux-reviewer). (c) The hint is never announced,
+    as before this task: an accessibility follow-up, the hint's own `role="status"` beside the
+    `Census` region. (d) With a `RETRY` on show `LARGE VOLUME` has 1.1 px to spare (1.7 px at
+    150%), measured on Linux. B612 is bundled, so its metrics are the same on every platform, and
+    the owner's macOS run will confirm it; the fallback, if it ever wraps, is the decision's
+    2 / 1 / 3 / 3 span with `contain: inline-size` on the hint, so that its width sizes no column
+    (plan-conformance reviewer; untested). (e) With the census table shown, a 0 px foot with
+    nothing overlapping meets "the column's foot above the stage's foot".
+  - _Not checked._ Keyboard focus on `CENSUS BY LAYER` in the hint states, whose 2 px ring
+    reaches 3 px over the furniture's foot and the legend's first line, and its hover and pressed
+    fills over the two-line box; the interface scales of 80% and 125%; the orbit map on the
+    galactic axis, whose note now runs beside the scale bar; a screen reader over the census row.
