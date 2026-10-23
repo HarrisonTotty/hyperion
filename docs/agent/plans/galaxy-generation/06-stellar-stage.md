@@ -195,8 +195,9 @@ Table shapes fixed by this plan and filled by plan 15, which restates them in it
 - `tables::kick_rank`: `SCORE_QUANTILES: [f64; 257]`, the ordinary kick score at ranks i ÷ 256 over
   the reference population, strictly increasing; and the law's four defaults as constants that
   `KickLawParams::default` reads, `LOW_RAMP: (f64, f64)` (2.0, 3.0 M☉ of carbon–oxygen core),
-  `BH_FACTOR` (0.75), `EC_WINDOW_SINGLE` (0.1 M☉) and `EC_WINDOW_STRIPPED` (1.0 M☉). Plan 15 adds
-  plan 11's `CLUSTER_MERGED_BINARY_FATE` beside them.
+  `BH_FACTOR` (0.75), `EC_WINDOW_SINGLE` (0.1 M☉) and `EC_WINDOW_STRIPPED` (1.0 M☉). Plan 11's
+  `CLUSTER_MERGED_BINARY_FATE`, the default P15.T5.c reviews, is not among them: it stays in
+  `stellar::binary` (plan 11's design note 14).
 - `tables::helium`: `LIFETIME_SLOPE`, the coefficients of s(m, Z), a quadratic in log mass at four
   metallicities, interpolated in log Z; and `HB_TEMPERATURE_SHIFT`, linear in envelope mass. Every
   coefficient zero is the identity.
@@ -3687,9 +3688,12 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
     M☉), so a marked star of m_cc − 1 to 8 M☉ is stripped here with no interacting companion there.
     **For P15.T5.b:** the track reads the defaults, not a caller's `KickLawParams`, so a changed
     `stripped_share` or `ec_window_*` passed to `kick_observables` moves the kick stage's mark
-    but not the track's window; vary them through the constants. **Design note 11** ("it does
-    not change the track") no longer holds for the wide window, and is the orchestrator's to
-    amend.
+    but not the track's window; vary them through the constants. Superseded (2026-10-23,
+    decision-p15-revalidation Q1): P15.T5.d makes the windows and the reference population's
+    membership run-time inputs that default to the constants. **Design note 11** ("it does not
+    change the track") no longer holds for the wide window, and is the orchestrator's to amend.
+    _Settled since: ruling 93.1 amended design note 11, which now says that the mark changes the
+    track in the wide window._
   - _The table_ is written by a new `hyperion-fit run kick_rank` from `score_quantiles` with 10⁶
     scores of seed `0x0619b00000000000`. The fit took 13 min 56 s single-threaded (0.45 ms a
     track; load 7.5). The task's test compares the committed file with the rendering of its
@@ -4330,9 +4334,10 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
   Retention 0.2740 / 0.2783 / 0.3232, low mode 0.2740; test 5 0.771; test 6 0.711 unkicked,
   light 0.670 and 0.136; under 100 km/s 0.0903.
   - Isolated pulsars under 50 km/s on the sky 0.0708, against 3–7% (expected about 0.04): held at
-    the measured value (provisional; ruling deferred).
+    the measured value. Ruled 2026-10-23 (decision-p15-revalidation Q2): a finding, accepted and
+    deferred, its window unchanged; P06.T19.e re-pins it at its re-measured value.
   - Neutron stars above the escape speed 0.1159, against 12–20% (expected about 0.15): held at the
-    measured value (provisional; ruling deferred).
+    measured value, and ruled as the line above.
 - **`absolute_v_mag`, added by rendering plan R02 (R02.T5, by agreement,
   `8dfe57b`, now `3f5b34d4`; recorded in RM1 validation, 2026-10-02).** P06.T33's
   `StellarBriefDto` gains `absolute_v_mag: Option<f32>`, M_V in mag (Johnson V
@@ -5400,3 +5405,13 @@ R06.
 
     The moved white-dwarf nodes reach none of them. Since the refit, `check --rerun-fast` reports
     no stale table.
+
+- **Deferred findings (2026-10-13 rule) (P11's F13; decision-p15-revalidation Q5, 2026-10-23).**
+  Recorded and deferred, with no task and no bump: the remnant law should read the stripped mark,
+  as the kick law does. Binary-stripped stars have smaller carbon–oxygen cores, and Schneider,
+  Podsiadlowski and Müller (2021, A&A 645, A5, Table 1) move black-hole formation for case B
+  strips from about 34 to about 67.5 M☉. Today a pinned primary stripped by its binary keeps this
+  plan's single-star remnant, capped at its mass (plan 11's design note 16): a documented
+  simplification, not a wrong class. If a ruling schedules it, it takes P06.T40, rides the first
+  galaxy train after its gate, and reruns P06.T19.d, P09.T9.b's retention test and the
+  `cluster_retention` fit.

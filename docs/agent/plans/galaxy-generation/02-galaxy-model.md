@@ -353,7 +353,10 @@ other way round, so M1 ships a first cut:
   azimuthal average of the long bar's surface density at its nominal shape.
 - The potential is axisymmetric, as the (R, z) tables imply. The boxy bulge enters as the spheroidal
   exponential with the same mass and the same second moments ⟨R²⟩ and ⟨z²⟩, found by one quadrature
-  per galaxy. Plan 15 supplies a true two-dimensional expansion of exp(−m) per boxiness exponent.
+  per galaxy. Plan 15 supplies a true two-dimensional expansion of exp(−m) per boxiness exponent,
+  for the bulge made axisymmetric in the plane, its in-plane scales a and b replaced by
+  √((a² + b²) ÷ 2), which keeps its mass and both second moments exactly (P15.T3.c, version 25;
+  decision-p15-revalidation Q8, 2026-10-23).
 - The old thin disc and the young disc enter the potential as one double exponential with the drawn
   mean height, with the thin discs' central hole since P02.T12.b (`MGE_HOLED_EXP`, whose signed
   weights make the holed disc the exponential one less a disc of negative mass). The discs' vertical profiles are then solved in that potential in one pass, with no
@@ -1193,8 +1196,9 @@ component order and the map's quadrature scheme belong to the version as well.
   off. More or re-placed widths and relative weighting do not help, so the table stands. The 3% is
   read against the central value (2.9%), the mass is met (0.2%), and the mass inside a radius, which
   the rotation curve reads, is off by up to 6.6% just beyond the half-length (4.4% at best with the
-  other two held), bounded at 7% by the test. P15.T3.a's 2% for the bar meets the same limit unless
-  it allows negative weights or off-centre terms.
+  other two held), bounded at 7% by the test. P15.T3.a asks of the bar 3% of its central value and
+  its cumulative mass within 5%, which these limits allow; a local 2% would meet the same limit
+  unless it allowed negative weights or off-centre terms (P15.T3.a's acceptance).
 - **R15. Other as-built points (P02.T6).** `PotentialTables::full` takes 2.7 s against 2 s (R9):
   4,096 points × 767 Gaussians × 32 nodes. 44% of the evaluations regenerate their nodes, 32%
   because the point lies beyond the Gaussian's cut; sharing the other 12% along a column would save

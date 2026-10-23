@@ -614,7 +614,8 @@ multi-Gaussian expansion (Emsellem, Monnet and Bacon 1994; Cappellari 2002; neit
 brainstorm's list, so re-check when coding). The closed form used for acceptance is Freeman (1970).
 
 **Consumer.** Plan 02, `galaxy::potential` (it runs in M1 on P02.T6.a's first cut, and this replaces
-it at the start of M2); plan 08's Jeans tables read the same expansions as tracers.
+it at the start of M2); plan 08's Jeans tables read the same bodies as tracers, the bar's through
+`MGE_BAR` and the bulge's in closed form (ruled 2026-10-23, P15.T3.c).
 
 **Format** (`tables::mge`, lengths in units of the profile's own scale). `MGE_EXP` and `MGE_BAR`
 keep plan 02's shape, `[(f64, f64); N]` of (weight, width). New:
@@ -674,11 +675,12 @@ and T3.b's scratch output names it there.
   rms relative density error under 3%; enclosed mass within spheres of 0.5, 1, 2 and 4 scale lengths
   within 1% of a direct integral of the profile; midplane radial force within 2% of a brute-force
   integral at six radii; at Milky Way values the rotation curve changes by under 3% anywhere and
-  plan 02's enclosed-mass test from 1 pc to 2 kpc still passes. (Re-validated: the last two read
-  the expansion in plan 02's potential, which T3.c puts there. Before it, the task's tests can
-  compute the curve's change from the sim's public `potential::mge::Gaussian` (`new`,
-  `v_circ_sq`); plan 02's test, `the_fixture_s_enclosed_masses_are_the_milky_ways`
-  (`tests/galaxy_milky_way.rs`, slow), runs at the swap.)
+  plan 02's enclosed-mass test from 1 pc to 2 kpc still passes. (Re-validated, and ruled in
+  decision-p15-revalidation on 2026-10-23: the last two read the expansion in plan 02's potential,
+  which T3.c puts there, and they run at T3.c, beside plan 02's
+  `the_fixture_s_enclosed_masses_are_the_milky_ways` (`tests/galaxy_milky_way.rs`, slow). The
+  curve's change is measured from the crate-private `bulge_spheroid`, so T3.b's own tests, in
+  `hyperion-fit`, hold the first three checks, and T3.a–b touch no file of the sim.)
 - **P15.T3.c Swap in.** A held checkpoint of version 25 (S1; decision-bump-plan-after-22,
   2026-10-14; updated 2026-10-15): one commit with the table at `--since 25` and plan 02's
   `MassModel` reading `MGE_BOXY` in place of its moment-matched spheroid, its goldens blessed at
@@ -695,14 +697,28 @@ and T3.b's scratch output names it there.
   `galaxy/potential/model.rs` from `bulge_spheroid` and `potential::mge::spheroidal_exponential`;
   plan 08's kinematics read `bulge_spheroid` too, for the bulge's tracer
   (`kinematics::spheroid::bulge_tracer_axes`), and `MGE_BAR` for the bar's
-  (`kinematics::ln_bar_surface_density`). Whether the bulge's tracer follows the potential, and how
-  the triaxial bulge's two in-plane lengths give the expansion's R, are open points: Risks,
-  "Re-validated at 898a3c94".)
+  (`kinematics::ln_bar_surface_density`). Ruled 2026-10-23 (decision-p15-revalidation Q8): the
+  body the potential expands is the bulge's own profile made axisymmetric in the plane,
+  exp(−((R ÷ s)^c + (|z| ÷ h)^c)^(1 ÷ c)), with c its boxiness, h its vertical scale and
+  s = √((a² + b²) ÷ 2) of its in-plane scales. Its unit body is the bulge's, so it has the bulge's
+  mass, both its second moments and its boxiness exactly, with no fit (D6's rule, ⟨R²⟩ matched).
+  `MGE_BOXY`'s terms are in units of s and h, so a term's flattening is q h ÷ s in physical units.
+  The bulge's tracer follows in the same commit, as plan 08's design note 10 asks:
+  `bulge_tracer_axes` returns (s, h) and the boxiness, and the bulge's `JeansTable` and
+  `bulge_projected_sigma` read that body's closed-form ln-density in place of the spheroidal
+  exponential's, not `MGE_BOXY`'s Gaussians; `bulge_spheroid` goes with its last reader. T3.c
+  states σ_e and the fixture's black-hole mass before and after (P08.T4.d), and sets the fixture's
+  offset again to keep Sgr A*'s mass if it must, as P15.T4.b did. Plan 02's
+  `the_expansions_have_non_negative_weights_and_ascending_widths` gains `MGE_BOXY`, since a reader
+  through `nonzero` drops a negative weight silently. Plan 08's bulge tests and the σ_e doctest run
+  at the swap; a miss that is no blocker is recorded, and T3.c lands.)
 
 **Files.** `src/optimise.rs`, `src/tasks/mge.rs`, `manifests/mge.toml`, `tables/mge.rs`,
 `galaxy/potential/model.rs` (T3.c's swap). Re-validated: also T3.a–b's own manifest, and
-`galaxy/potential/mge.rs` (T3.c's `BoxyTerm` and its Gaussians). The tests stay in the crate's
-`tests/mge.rs`, with `tests/common`'s `assert_reproduced` (since 7696bdbe).
+`galaxy/potential/mge.rs` (T3.c's `BoxyTerm` and its Gaussians). Ruled 2026-10-23: also
+`galaxy/kinematics/spheroid.rs` and `kinematics/mod.rs`, for T3.c's tracer, with plan 08's tests.
+The tests stay in the crate's `tests/mge.rs`, with `tests/common`'s `assert_reproduced` (since
+the commit 7696bdbe).
 
 **Acceptance.** `just ci` and `just test-slow` green; the task is `Fast` (under ten seconds) and is
 rerun by `--rerun-fast`.
@@ -845,14 +861,15 @@ windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRI
   owned by plan 06.
 - **P15.T5.b Defaults review.** The four defaults are fields of plan 06's `KickLawParams` (the ramp
   over core masses of 2–3 M☉, the black holes' 0.75, the two electron-capture window widths) and
-  plan 11's fate of merged binaries in clusters. The harness evaluates plan 06's six test
-  observables on a grid of each default about its value (one at a time, the rest held) and emits a
-  sensitivity table into `tables.lock` as acceptance figures. A default moves only if an observable
-  fails at the brainstorm's value, in the order ramp, windows, factor, and the move is a change to
-  `KickLawParams::default` with a bump. **Acceptance:** at the committed defaults all six
-  observables of P06.T19.d pass; for each default the harness reports the interval over which they
-  keep passing, and the default lies inside it and not within a tenth of its width from an edge.
-  Re-validated at 898a3c94:
+  plan 11's fate of merged binaries in clusters, which P15.T5.c reviews. The harness evaluates
+  plan 06's test observables on a grid of each default about its value (one at a time, the rest
+  held) and emits a sensitivity table, the acceptance figures of a registered table of its own. No
+  default moves in this task (ruled 2026-10-23, decision-p15-revalidation Q2). **Acceptance:** at
+  the committed defaults every observable of P06.T19.d passes, but the two that ruling 147.2 holds
+  at measured values, which the harness reports as held; for each default the harness reports the
+  interval over which each passing observable keeps passing, and whether the default lies inside
+  it and not within a tenth of its width from an edge. A default at or near an edge is a finding,
+  recorded with the table, and is not moved here. Re-validated at 898a3c94, and ruled 2026-10-23:
   - The harness cannot vary the windows through `kick_observables`: the track reads `collapse`'s
     constants, and the `ec_window_*` fields only record them (P06's "Deviations in T19.a–d", "For
     P15.T5.b"). Nor can it vary the rank table's population, which `ReferencePopulation::score`
@@ -860,15 +877,29 @@ windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRI
     meets a table built at the defaults. P15.T5.d adds both seams first.
   - Plan 06's six observables are seven tests since ruling 96.3 added the escape share
     (`tests/stellar_kick.rs`, slow: `kick_observables` over 20,000 stars with
-    `KickLawParams::default()` and `KickRankTable::generator()`). Ruling 147.2 holds two of them at
-    measured values outside their windows, its ruling deferred: isolated pulsars under 50 km/s on
-    the sky, 0.0708 against 3–7%, and the escape share, 0.1159 against 12–20%. So the first
-    acceptance criterion waits on that ruling (an open point in Risks).
-  - A move changes the table's constant, which the `kick_rank` task then emits from its manifest
-    rather than by copying the sim's constant, and for a window `collapse`'s copy too, with a bump.
-  - Whether a grid point of the ramp or a window rebuilds the rank table, and where the
-    sensitivity table's lock entry lives, are open points. The smoke run's item check uses
-    `tests/common`'s `declared`.
+    `KickLawParams::default()` and `KickRankTable::generator()`). Ruling 147.2 held two of them at
+    measured values outside their windows: isolated pulsars under 50 km/s on the sky, 0.0708
+    against 3–7%, and the escape share, 0.1159 against 12–20%. Both are accepted as findings and
+    stay held (decision-p15-revalidation Q2): each misses by under one and a half of its binomial
+    errors at 20,000 stars, and neither is a wrong state or an absurd value.
+  - _The rank table at a grid point_ (Q1). Each grid point of the ramp or of a window, the centre
+    included, rebuilds the table at that point's membership through P15.T5.d's seam, by
+    `score_quantiles` on the committed table's seed. The production manifest takes a score count
+    of 10⁵, about 1.4 CPU-minutes a point, or up to 10⁶ if the builder finds that too coarse,
+    stated. The black-hole factor's points hold the centre's rebuild, since the membership never
+    reads the factor. The ramp's two ends move together. The header states the harness's
+    resolution, the centre's observables on its own rebuild against those on the committed table.
+  - _The table_ (Q3). A registered task, `kick_defaults` (slow, revision 0, with
+    `manifests/kick_defaults.toml` and `kick_defaults.smoke.toml`), writes
+    `tables/kick_defaults.rs`: each default's value, the grid, and the interval of each passing
+    observable. No generator code reads it. Its fingerprint is `kick_rank`'s probes and the four
+    defaults, not the committed rank table, whose rebuilds it makes itself. It is `@generated`,
+    emitted at the version in force through the first-emission path, and moves nothing, so it
+    takes no bump; `tables/kick_rank.rs` keeps its body until P06.T19.e. The smoke run's item check
+    uses `tests/common`'s `declared`.
+  - A default that a later ruling moves changes the table's constant, which the `kick_rank` task
+    then emits from its manifest rather than by copying the sim's constant, and for a window
+    `collapse`'s copy too, with a bump on the first galaxy train after its lane's gate.
 - **P15.T5.c Fate of merged binaries in clusters (M4).** With plan 09's cluster retention and plan
   11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 15–25% at 50
   and 5–17% at 20 (ruling 126.3, amending 106.4 and 96.3 for clusters: the low mode is judged on
@@ -876,19 +907,31 @@ windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRI
   11 (the merged object stays a member and is judged on the pair's velocity) and under the
   alternative. **Acceptance:**
   the default passes all four bands; if only the alternative does, the finding goes to plan 11.
-  Re-validated at 898a3c94:
+  Re-validated at 898a3c94, and ruled 2026-10-23 (decision-p15-revalidation Q4 and Q5):
   - Nothing reads `CLUSTER_MERGED_BINARY_FATE` (`stellar/binary/mod.rs`). P09.T9.b's retention,
     `features::interior::retention` (`retention`, and `retention_tabulated` over
     `tables::cluster_retention`, which plan 09's slow `cluster_retention` task fits), is a
-    closed-form quadrature over plan 08's kick bins. It judges the low mode on the pair's systemic
-    speed (`PAIR_SYSTEMIC_SIGMA`, 12 km/s) and never runs plan 11's engine. So neither branch has a
-    reader to measure, an open point that comes before T5.c can run.
+    closed-form quadrature over plan 08's kick bins. It judges every low-mode neutron star on its
+    pair's systemic speed (`PAIR_SYSTEMIC_SIGMA`, 12 km/s), merged or not, and never runs the
+    engine of plan 11. That is the default's reading, `StaysJudgedOnPairVelocity`, applied to every
+    low-mode neutron star, so retention as built is the default's measurement.
   - Ruling 137.3 (P09's Risks, "Ruling 137.3, as applied") states ruling 126.3's windows at a
-    low-mode share w of 0.181 and shifts them with the measured w. At the fixture's 0.2675 the code
-    asserts 26–34%, 24–34% and 10–22%, and under 1% in the open cluster
-    (`neutron_stars_are_retained_as_the_brainstorm_says`, `retention.rs`).
+    low-mode share w of 0.181 and shifts them with the measured w. At the fixture's w of 0.2675
+    they are 26–34%, 24–34% and 10–22%, and under 1% in the open cluster, and the code measures
+    the four as 31.4%, 28.6%, 16.2% and 0.43% (`neutron_stars_are_retained_as_the_brainstorm_says`,
+    `retention.rs`). These windows replace ruling 126.3's above. So the default passes all four
+    bands, the acceptance's first clause; the alternatives are consulted only if it fails, and are
+    not measured.
+  - What T5.c builds: a `const` assertion in `retention.rs` that `CLUSTER_MERGED_BINARY_FATE` is
+    `MergedBinaryFate::StaysJudgedOnPairVelocity`, the one reading the quadrature applies, so that
+    changing the default fails to build until a reader of the other branches exists; and its
+    record. No output moves, so it takes no bump. A plan 11 task that models merged products in
+    clusters explicitly adds the other branches.
   - P11's finding F13 ("P11.T4.k as built": plan 06's remnant law should read the stripped mark,
-    as its kick law does) is routed here, with its own bump: an open point.
+    as its kick law does) leaves this plan, whose Scope keeps plan 06's law out. It is a science
+    refinement of which binary-stripped stars make black holes, not a wrong class under the
+    documented single-star law (P11's design note 16), so it is a deferred correction, with no
+    task and no bump. T5.c does not wait on it.
 - **P15.T5.d The kick law's seams for the defaults review** (re-validated at 898a3c94; new, and
   before P15.T5.b). In plan 06's module, with plan 06's tests, as P15.T5.a allowed for
   `score_quantiles`. The track's two electron-capture windows become a run-time option that
@@ -905,8 +948,10 @@ windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRI
   golden moved. Half a day.
 
 **Files.** `src/tasks/kick_rank.rs`, `src/tasks/kick_defaults.rs`, `manifests/kick_*.toml` with
-their smoke manifests, `tables/kick_rank.rs`. All three are `Slow`: 10⁷ tracks are tens of minutes
-on one core, so CI never reruns them and relies on the hash, the fingerprint and the smoke run.
+their smoke manifests, `tables/kick_rank.rs`, and `tables/kick_defaults.rs` with its `MANIFEST` row
+(P15.T5.b, ruled 2026-10-23); P15.T5.d's three files of plan 06; and P15.T5.c's guard in the sim's
+`galaxy/features/interior/retention.rs`. The fits are `Slow`: 10⁷ tracks are tens of minutes on
+one core, so CI never reruns them and relies on the hash, the fingerprint and the smoke run.
 
 **As built, P15.T5.a (round 9, lane `fit15`).**
 
@@ -1493,12 +1538,13 @@ registers it.)
 
 - **P15.T7.a Select and record the source** and its terms, as a _committed_ or _fetched_ dataset.
 - **P15.T7.b Fit.** Least squares on the grid's turn-off ages and zero-age horizontal-branch
-  temperatures relative to plan 06's tracks at ΔY = 0. **Acceptance:** lifetime ratio reproduced to
-  3% for 0.6–0.9 M☉, ΔY up to 0.18 and [Fe/H] from −2.2 to −0.5; every correction exactly the
-  identity at ΔY = 0 by its form, so grid stars stay bit-identical (plan 06's golden); ΔY = 0.1
-  shortens the lifetime of a 0.8 M☉ star by about a third (0.25–0.4), the sign plan 06 documents; a
-  synthetic cluster of 10⁶ M☉ with ΔY up to 0.18 shows a horizontal branch whose blue end is hotter
-  than its first population's by the grid's amount to 10%. Re-validated at 898a3c94:
+  temperatures relative to plan 06's tracks at ΔY = 0. **Acceptance:** lifetime ratio reproduced
+  to 3% for 0.6–0.9 M☉, ΔY up to the grid's reach (about 0.15; "The grid's reach" below) and
+  [Fe/H] from −2.2 to −0.5; every correction exactly the identity at ΔY = 0 by its form, so grid
+  stars stay bit-identical (plan 06's golden); ΔY = 0.1 shortens the lifetime of a 0.8 M☉ star by
+  about a third (0.25–0.4), the sign plan 06 documents; a synthetic cluster of 10⁶ M☉ with ΔY up
+  to 0.18 shows a horizontal branch whose blue end, at the grid's top ΔY, is hotter than its first
+  population's by the grid's amount to 10%. Re-validated at 898a3c94:
   - _The data._ `data/basti_helium/` holds only `PROVENANCE.toml` and `urls.txt`, though the
     provenance says the reduction script and its output are committed, and the T7.a record's
     research notes are not in the repository. So T7.b first writes the script and its reduced
@@ -1507,27 +1553,54 @@ registers it.)
     the zero-age horizontal branch's temperatures by envelope mass, at each Z and Y. With that
     output committed the task runs where the raw files are absent, so `--rerun-fast` reruns it
     (the Schedule's `fast`), unlike `wd_cooling`.
-  - _The grid's reach._ Y = 0.30, 0.35 and 0.40 (0.35 and 0.40 only at Z = 0.0198) against a
-    canonical Y of 0.245–0.256 over Z = 10⁻⁴ to 0.008 (`urls.txt`'s `zahbz104y245aes` to
-    `zahbz803y256aes`): ΔY reaches about 0.15, short of the acceptance's 0.18, an open point.
+  - _The grid's reach_ (ruled 2026-10-23, decision-p15-revalidation Q6). Y = 0.30, 0.35 and 0.40
+    (at Z = 0.0198, 0.35 and 0.40 only) against a canonical Y of 0.245–0.256 over Z from 10⁻⁴ to
+    the value 0.008 (`urls.txt`'s `zahbz104y245aes` to `zahbz803y256aes`): ΔY reaches about 0.15,
+    while the generator draws up to 0.18 (`features::interior::abundances::HELIUM_EXCESS_MAX`). The
+    acceptance asserts to the grid's reach. The correction is not clamped: both forms are smooth
+    in ΔY, so 0.15–0.18 is a 20% extrapolation, and the header's acceptance line states the
+    fitted lifetime factor and shift at 0.18 beside the trend of the grid's own ratios.
   - _The hook._ `HeliumTable`, `HeliumHook` and `Track::build_with_helium` are crate-private, so
     `hyperion-fit` cannot build a track under a candidate table, which the synthetic cluster's
     figure for the header needs. T7.b first exposes such a builder behind the sim's `testing`
     feature, which `hyperion-fit` enables, as P06.T31 does for `stellar::testing`; no output
     moves.
-  - _Other fitted tables._ Rendering plan R06 builds `sky_envelope` and `sky_phase_envelope` at
-    ΔY = 0, and both must be refitted with helium-excess nodes when this table is fitted (R06's
-    "T6.b's fitted envelope, as built" and "Deviations in T8.m, as built"); the phase envelope's
-    larger table needs a ruling on its storage before P15.T7 lands. Their fingerprints probe
-    ΔY = 0 alone, so `just fit-check` will not flag them, and which lane refits them is an open
-    point.
+  - _Other fitted tables_ (ruled 2026-10-23, decision-p15-revalidation Q7). Rendering plan R06
+    builds `sky_envelope` and `sky_phase_envelope` at ΔY = 0 (R06's "T6.b's fitted envelope, as
+    built" and "Deviations in T8.m, as built"), and their fingerprints probe ΔY = 0 alone, so
+    `just fit-check` will not flag them. T7.b refits neither, and the phase envelope gains no
+    helium axis, so its storage needs no ruling:
+    - no star the sky's census reads has a helium excess until R06.T16.a brings feature members
+      in: a grid record's metallicity draw has none (`explosion_site` asserts it), and feature
+      members are `not_modelled` in every sky reply;
+    - the phase envelope's reader gives a star with a helium excess the table's brightest value,
+      which skips nothing, so it stays a bound under any `tables::helium`;
+    - the brightness envelope reads no composition, so whichever of T7.b's swap and R06.T16.a
+      lands second refits `sky_envelope` with helium-excess nodes in its build, up to
+      `HELIUM_EXCESS_MAX`, in its same 198 × 193 storage, bumps that task's revision and adds a
+      ΔY > 0 probe to its fingerprint.
+
+    T7.b's swap states every fitted table built at ΔY = 0 that a helium-rich star can reach, with
+    its guard: the fates, plan 11's reach and pair light, plan 08's lifetime bracket, and the two
+    sky tables, as above.
+
+  - _Landing_ (decision-p15-revalidation Q9). The fitted body moves the tracks of every cluster
+    member with a helium excess, so it is a held swap. T7.b first lands what moves nothing: the
+    reduction script and its output, the `testing` builder, and the task `helium` (fast, at
+    revision 0) on `manifests/helium.toml`, which emits P06.T17's identity as a provisional table,
+    its body bit for bit (only its header is rewritten to Design note 5's grammar), while
+    `manifests/helium.production.toml` makes the fit with `--manifest` and `--out`, its figures in
+    the record. The swap moves the fit's parameters into `helium.toml`, takes revision 1, is
+    emitted at the train's version with the goldens, and rides the first galaxy train after its
+    gate: version 25 (S1) if ready when bump-25's wiring starts, else the next.
   - The reproduction test uses `tests/common`'s `assert_reproduced`.
 
-**Files.** `src/tasks/helium.rs`, `manifests/helium.toml`, `data/<grid>/`, `tables/helium.rs`. Bumps
-the version when it lands, although no grid star changes, because members with a helium excess do.
+**Files.** `src/tasks/helium.rs`, `manifests/helium.toml`, `data/<grid>/`, `tables/helium.rs`. The
+swap bumps the version, although no grid star changes, because members with a helium excess do.
 Re-validated: the grid is `data/basti_helium/` (T7.a), and T7.b's builder adds the sim's
 `stellar/sse/track/excess.rs` (or `track.rs`); registering the table adds its task to
-`task::REGISTRY` and the table's row to `tables::MANIFEST` (P15.T1's "Adding a task").
+`task::REGISTRY` and the table's row to `tables::MANIFEST` (P15.T1's "Adding a task"). As ruled
+on 2026-10-23, the fit has its own `manifests/helium.production.toml` until the swap.
 
 ### P15.T8 Cluster dynamics constants
 
@@ -1708,11 +1781,13 @@ Only the displaced table has no scratch stand-in, because its consumer cannot do
 without it. Everything else lets its consumer proceed on a scratch value and costs one version bump
 when the fit lands.
 
-Re-validated at 898a3c94, the Needs column by task: P15.T5.b runs after T5.d; T5.c also needs a
-reader of the merged binaries' fate, which nothing is yet (T5.c's text); P15.T9.b needs P11.T6,
-and T10.b P11.T8; T10.a needs P09.T43, its consumer; T11.b needs P10.T5–T6. T3.c rides version 25
-(S1), and T6's production run starts from 25's commit and lands with 26 (S2). Built: T1, T2, T4,
-T5.a (its production run is P06.T19.e's), T6.a–g, T7.a, T8.a–c (provisional) and T9.a.
+Re-validated at 898a3c94, the Needs column by task: P15.T5.b runs after T5.d; T5.c needs nothing
+more, since P09.T9.b's retention is the default fate's reading, and it moves nothing, so its row's
+M4 and slow no longer hold (decision-p15-revalidation Q4); P15.T9.b needs P11.T6, and T10.b
+P11.T8; T10.a needs P09.T43, its consumer; T11.b needs P10.T5–T6. T3.c rides version 25 (S1), and
+T6's production run starts from 25's commit and lands with 26 (S2). T7.b's swap rides the first
+galaxy train after its gate. Built: T1, T2, T4, T5.a (its production run is P06.T19.e's), T6.a–g,
+T7.a, T8.a–c (provisional) and T9.a.
 
 ## Verification
 
@@ -1739,12 +1814,22 @@ commit until 26 lands, nothing may change plan 02's potential tables or the birt
 run samples (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). P15.T6.g's re-emission
 landed with the 21 → 22 batch ("Landed in the 21 → 22 batch", T6.g as built; re-validated).
 
-Re-validated at 898a3c94, at version 23. P15.T4.b's bump is taken (its table says since 14).
-P15.T9.a moved no wired output and took no bump (its record), so P15.T9's is T9.b's. P15.T8's
-waits on the deferred ruling on its blocks. P15.T5.a's rides P06.T19.e at version 25 (S1, plan
-06's Generator version). P15.T5.d, T7.b's builder and T11.a move nothing. The trains of the rest
-(a moved default of T5.b, T5.c's verdict and P11's finding F13, T7.b, T9.b, T10 and T11.b) are
-open (Risks, "Re-validated at 898a3c94").
+Re-validated at 898a3c94, at version 23, and ruled 2026-10-23 (decision-p15-revalidation Q9).
+P15.T4.b's bump is taken (its table says since 14). P15.T9.a moved no wired output and took no
+bump (its record), so P15.T9's is T9.b's. P15.T5.a's rides P06.T19.e at version 25 (S1, as the
+Generator version of plan 06 says). P15.T5.b, T5.c, T5.d, T7.b's first landing and T11.a move
+nothing and take no bump. Each held swap rides the first galaxy train after its lane's gate, as
+decision-bump-plan-after-22 does for its own:
+
+- T3.c, at 25 (S1), as an anchor;
+- T7.b's swap, at 25 as a rider if ready when its wiring starts, else the next train;
+- T8's adoption, at the first train after its deferred ruling, if that ruling moves a value;
+- T10.a, at the first train after P09.T43 and its own gate (the bump plan lists 28);
+- T9.b and T10.b, with P11.T15, whose swap they are, at 28;
+- T11.b, if its value moves, at the first train after P10.T5–T6 and its gate (expected 28);
+- a default of T5.b that a later ruling moves, at the first train after its gate.
+
+P11's finding F13 is a deferred correction, with no train (decision-p15-revalidation Q5).
 
 Reserved so that later tables move nothing they need not: table paths and item names are final from
 the scratch stage on; the node arrays of `displaced_forms`, so that a finer dependence on the halo
@@ -1945,34 +2030,31 @@ fit-check`; review-changes on this lane's diff.
     - This section's first bullet: plan 02 did not put the discs' cored vertical profiles into the
       potential (its D6 keeps every disc exponential in height there), so T3 gains no expansion of
       them.
-  - _Pending re-validation._ T3.c waits on T3.a–b and rides S1 (25). T5.b waits on T5.d and on
-    open point 2. T5.c waits on a reader of the merged binaries' fate (open point 4). T6's
+  - _Pending re-validation._ T3.c waits on T3.a–b and rides S1 (25). T5.b waits on T5.d. T6's
     production run waits on version 25's commit, and T6.c–f's production fits on it. T9.b waits on
-    P11.T6, T10.a on P09.T43, T10.b on P11.T8, T11.b on P10.T5–T6, and T12 on all of them.
-    Executable now: T3.a, T3.b, T5.d, T7.b and T11.a.
+    P11.T6, T10.a on P09.T43, T10.b on P11.T8, T11.b on P10.T5–T6, and T12 on all of them and on
+    the deferred ruling on T8.a–c's blocks. Executable now (ruled 2026-10-23): T3.a and T3.b;
+    T5.d, then T5.b, with T5.c's guard; T7.b's first landing, its swap held for a train; and T11.a.
   - _Awaiting a ruling, unchanged:_ the three cluster blocks of T8.a–c, provisional, their fitted
     values and misses in their acceptance lines.
-  - _Open points, for a ruling; the plan's text on each stands._
-    1. T5.b: whether a grid point of the ramp or of a window rebuilds the rank table, whose
-       population both enter, or holds the committed table, as P06.T19.d's tests do.
-    2. T5.b: its first acceptance criterion, every observable passing at the committed defaults,
-       cannot pass while ruling 147.2 holds two of P06.T19.d's seven tests outside their windows:
-       isolated pulsars slow on the sky, 0.0708 against 3–7%, and the escape share, 0.1159 against
-       the window of 12–20%.
-    3. T5.b: where its sensitivity table's lock entry lives. The defaults are `kick_rank`'s items,
-       so a `kick_defaults` task needs a table of its own, or a block of `kick_rank.rs`, which
-       rewrites that table's body.
-    4. T5.c: which code reads `CLUSTER_MERGED_BINARY_FATE`, and so what its two branches measure,
-       since P09.T9.b's retention never meets a merged binary.
-    5. T5.c: P11's finding F13, plan 06's remnant law reading the stripped mark, is routed here
-       with its own bump, but it changes plan 06's remnant law, which this plan's Scope keeps out.
-    6. T7.b: the grid reaches a ΔY of about 0.15, and the acceptance asks for 0.18.
-    7. T7.b: the storage of R06's phase envelope with helium-excess nodes, which R06 says needs a
-       ruling before P15.T7 lands, and which lane refits `sky_envelope` and `sky_phase_envelope`.
-    8. T3.c: whether plan 08's bulge tracer (`bulge_tracer_axes`) moves to `MGE_BOXY` with the
-       potential, and how the triaxial bulge's two in-plane lengths set the expansion's R.
-    9. The trains of the bumps the plan leaves open: a moved default of T5.b, T5.c's verdict and
-       F13, T7.b, T8's adoption, T9.b, T10 and T11.b.
+  - _Open points, ruled 2026-10-23_ (decision-p15-revalidation, one ruling each; the texts above
+    carry them):
+    1. T5.b's grid points of the ramp and the windows rebuild the rank table, the centre included,
+       at 10⁵ scores; the black-hole factor's hold the centre's rebuild.
+    2. Ruling 147.2's two held figures are accepted as findings and stay held; T5.b moves no
+       default.
+    3. T5.b's sensitivity table is a registered `kick_defaults` table that nothing reads, with no
+       bump.
+    4. Retention as built is the default fate's reading and passes; T5.c adds a guard, measures no
+       alternative, and takes no bump.
+    5. F13 is a deferred correction outside this plan, with no task and no bump.
+    6. T7.b asserts to the grid's reach (ΔY about 0.15) and states its extrapolation to 0.18.
+    7. T7.b refits neither sky table: the phase envelope keeps its read-side rule, and
+       `sky_envelope` gains helium-excess nodes with whichever of T7.b's swap and R06.T16.a lands
+       second.
+    8. The bulge's tracer follows the potential to the axisymmetrised boxy body, whose in-plane
+       scale is √((a² + b²) ÷ 2), in T3.c.
+    9. Each held swap rides the first galaxy train after its lane's gate (Generator version).
   - _Merges._ The sweep was made at the lane's base, 898a3c94, three commits past the brief's
     607346de. The lane then merged `origin/rendering-and-planets` at 93396d5f, two R08.T8.e commits
     in the client's atmosphere code and plan R08. None of these touches what this plan consumes,
