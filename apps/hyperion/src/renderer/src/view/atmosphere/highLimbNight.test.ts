@@ -8,6 +8,7 @@ import {
   errorOf,
   errors,
   failures,
+  gateMarchSamples,
   type Gate,
   type GateRay,
   HIGH,
@@ -24,7 +25,7 @@ import {
 } from "../../test/atmosphereGate";
 import { memoised } from "../../test/memo";
 import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES, R05_EARTH_REFERENCE } from "./earth";
-import { LOW_TWIN_WORST, type MarchStep } from "./marchSteps";
+import { LOW_TWIN_WORST, type MarchDepthSteps, type MarchStep } from "./marchSteps";
 import type { AtmosphereMedium } from "./medium";
 import type { AbsorberCurveSlots } from "./tables";
 import {
@@ -116,13 +117,15 @@ type Kernel = "sky view" | "march";
  * A ray's pixel through the twin of `medium`, as `tablesCpu.test.ts`'s `twinPixel` and
  * `marchGate.test.ts`'s `pixelOf` take it: the references' R05.T12.e placement, and the kernel's
  * for the schemes, the sky view's V1 (the camera side toward the camera) or the ray march's sky
- * (the sun-aware warp), each cut at the medium's layer edges.
+ * (the sun-aware warp), each cut at the medium's layer edges, the ray march's count on the bare
+ * ground scaled by its optical depth where its scheme gives a rule (R08.T8.e; these sky rays keep
+ * theirs).
  *
  * @throws Error for even steps, which no scheme here takes.
  */
 function pixelOf(medium: AtmosphereMedium, sources: TwinSources, kernel: Kernel) {
   const edges = mediumMarchEdgesM(medium);
-  return (ray: GateRay, placement: Placement, n: number): Rgb3 => {
+  return (ray: GateRay, placement: Placement, n: number, rule: MarchDepthSteps | null): Rgb3 => {
     const twinRay: TwinRay = {
       originM: ray.o,
       direction: ray.d,
@@ -141,7 +144,9 @@ function pixelOf(medium: AtmosphereMedium, sources: TwinSources, kernel: Kernel)
           kernel === "sky view"
             ? { ...twinRay, skySegment: false }
             : { ...twinRay, fromCamera: false, skySegment: true },
-          n,
+          kernel === "march"
+            ? gateMarchSamples(ray, n, rule, edges.length, sources.sunTransmittance)
+            : n,
           edges,
           GATE_SPHERE,
         );
@@ -154,8 +159,15 @@ function pixelOf(medium: AtmosphereMedium, sources: TwinSources, kernel: Kernel)
   };
 }
 
-/** A setting's counts as the ray march takes them: its march count for every ray here. */
-const marchScheme = (scheme: Scheme): Scheme => ({ ...scheme, skySteps: scheme.marchSteps });
+/**
+ * A setting's counts as the ray march takes them: its march count for every ray here, under the
+ * setting's rule for the bare ground (R08.T8.e).
+ */
+const marchScheme = (scheme: Scheme): Scheme => ({
+  ...scheme,
+  skySteps: scheme.marchSteps,
+  skyDepthSteps: scheme.marchDepthSteps,
+});
 
 /**
  * Each kernel's schemes at high's and low's counts, and the bound of `LOW_TWIN_WORST` its low
@@ -274,15 +286,19 @@ for (const { name, medium, curves, record } of MEDIA) {
       // Both kernels' references are the same placed march, taken once.
       const placed = memoised(
         ({ ray, n }: { readonly ray: GateRay; readonly n: number }) =>
-          pixelOf(medium, sources, "sky view")(ray, "placed", n),
+          pixelOf(medium, sources, "sky view")(ray, "placed", n, null),
         ({ ray, n }) => `${ray.name} ${n}`,
       );
       const rays = nightRays();
       for (const kernel of KERNELS) {
         const own = pixelOf(medium, sources, kernel);
         const { high, low } = SCHEMES[kernel];
-        const pixel = (ray: GateRay, placement: Placement, n: number): Rgb3 =>
-          placement === "placed" ? placed({ ray, n }) : own(ray, placement, n);
+        const pixel = (
+          ray: GateRay,
+          placement: Placement,
+          n: number,
+          rule: MarchDepthSteps | null,
+        ): Rgb3 => (placement === "placed" ? placed({ ray, n }) : own(ray, placement, n, rule));
         gates.set(kernel, runGate(rays, pixel, [high, low]));
       }
     }, 120_000);

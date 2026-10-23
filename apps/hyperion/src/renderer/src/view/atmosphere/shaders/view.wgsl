@@ -75,6 +75,12 @@ struct AtmosphereView {
   // taken; z s = g(phi) / g_ref at its latitude; w the sky view's atmosphere, the medium's top over
   // that s.
   curvature : vec4f,
+  // The ray march's count by optical depth on the bare ground (plan R08, R08.T8.e, lever 3 of
+  // `decision-r08-t8-leans.md` sections 8 and 9; `marchSteps.ts`'s MarchDepthSteps): x the ground's
+  // floor at no layer edge, 0 where every ray takes `figure.w` (the low setting); y what each layer
+  // edge adds to it; z and w the green optical depths, absorbers included, between which the
+  // ground's count climbs back from its floor to `figure.w` (`rayMarch.wgsl`'s rayMarchSamplesOf).
+  marchGround : vec4f,
   // The drawn sources, the first `sky.x` of them (R08.T7).
   sources : array<SkySource, MAX_SKY_SOURCES>,
 }

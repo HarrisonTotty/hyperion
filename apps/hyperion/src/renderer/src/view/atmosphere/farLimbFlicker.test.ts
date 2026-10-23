@@ -238,7 +238,8 @@ describe("the far limb swept across a texel (R08.T8.c)", () => {
   // 7 times (all of a column's light on one step of eight, none on another) and falls to 0; on low
   // the least share drawn is 0.66 (the measured Earth from 10⁹ m, a half-resolution texel 107 H
   // tall), where the centre ray's falls to 0. The Saturn-class figure from 10⁸ m (s 0.96, w_L 0.91)
-  // holds within 0.8% with the centre ray alone too.
+  // holds within 0.8% with the centre ray alone too; since R08.T8.e's count on the bare ground (its
+  // face in the footprint, high) 0.76% drawn and 0.81% centre, from 0.75% and 0.79% (2026-10-22).
   it("records each place's worst spread and least share, drawn and of the centre ray alone", () => {
     const record = Object.fromEntries(
       [...sweeps.entries()].flatMap(([key, columns]) => {
@@ -279,10 +280,10 @@ describe("the far limb swept across a texel (R08.T8.c)", () => {
         "R05's Earth, 10⁹ m, low, drawn, least": 0.79238,
         "R05's Earth, 10⁹ m, low, drawn, worst": 0.33403,
         "R05's Earth, 10⁹ m, low, drawn, worst on the limb": 0.11907,
-        "Saturn-class, 10⁸ m, high, centre, least": 0.99212,
-        "Saturn-class, 10⁸ m, high, centre, worst": 0.00788,
-        "Saturn-class, 10⁸ m, high, drawn, least": 0.99253,
-        "Saturn-class, 10⁸ m, high, drawn, worst": 0.00747,
+        "Saturn-class, 10⁸ m, high, centre, least": 0.99195,
+        "Saturn-class, 10⁸ m, high, centre, worst": 0.00805,
+        "Saturn-class, 10⁸ m, high, drawn, least": 0.99239,
+        "Saturn-class, 10⁸ m, high, drawn, worst": 0.00761,
         "Saturn-class, 10⁸ m, high, drawn, worst on the limb": 0.00034,
         "Saturn-class, 10⁸ m, low, centre, least": 0.80898,
         "Saturn-class, 10⁸ m, low, centre, worst": 0.19592,

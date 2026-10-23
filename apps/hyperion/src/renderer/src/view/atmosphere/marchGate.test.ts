@@ -32,7 +32,10 @@ describeMarchGate({
   sources: () => tableSources(planetTwin(R05_EARTH_REFERENCE, BOTTOM_M)),
   // At one source on high the night limb sets the march's twilight worst (4.69%, from 400 km at
   // 0.1 H, sun 100°/180°; 4.79% in even steps alone) and the high limb from 99.999 km the sky's
-  // (4.32%); the last light's is 0.79%, where even steps put it at 12.47%. On low the high limb
+  // (4.32%); the last light's is 0.79%, where even steps put it at 12.47%. Since R08.T8.e high's
+  // count on the bare ground is scaled by its optical depth: the march's ordinary worst is the disc
+  // at 20 steps, ground zenith 60°, sun 80°/0° (1.43%; 0.45% at 36 steps throughout), measured
+  // 2026-10-22. On low the high limb
   // from 80 km at tangent 0.84 km, sun 90°/0°, sets the sky's (24.00%, against even steps' 46.37%
   // on the band from 50 km), and no ray stands over `LOW_TWIN_WORST`: the two band rays from 50 km
   // that stood over the sky view's bound in even steps (19.44% and 46.37%) fall under it.
@@ -41,7 +44,7 @@ describeMarchGate({
     high: [
       {
         kernel: {
-          march: 0.00447,
+          march: 0.01429,
           marchTwilight: 0.04687,
           sky: 0.00593,
           skyTwilight: 0.04317,
@@ -57,7 +60,7 @@ describeMarchGate({
       },
       {
         kernel: {
-          march: 0.00332,
+          march: 0.01076,
           marchTwilight: 0.00597,
           sky: 0.00074,
           skyTwilight: 0.00634,

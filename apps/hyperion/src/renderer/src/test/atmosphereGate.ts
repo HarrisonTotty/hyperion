@@ -18,6 +18,12 @@
  * night-side and terminator limb (`night limb`, {@link marchRays}), and the sky's the camera's last
  * light (`last light`, {@link skyRays}), which the ray march draws from the band's cameras and the
  * gate holds as the ray march's ({@link kernelOf}).
+ *
+ * Since R08.T8.e (`decision-r08-t8-leans.md` §8, lever 3) a scheme carries the ray march's count by
+ * the bare ground's optical depth ({@link Scheme}'s `marchDepthSteps`, high's `TableSizes` rule),
+ * and its ray-march families' pixels under the kernel's rule take the count the kernel takes
+ * ({@link gateMarchSamples}); the sky view's families keep the sky view's own count, and the
+ * references and even steps take theirs throughout.
  */
 
 import { add, cross, dot, normalise, scale, type Vec3 } from "../geometry/vec3";
@@ -27,7 +33,10 @@ import {
   grazingTwilight,
   LOW_TWIN_WORST,
   MARCH_TOLERANCE,
+  type MarchDepthSteps,
   marchEvenStep,
+  marchSamplesOf,
+  type MarchSegmentKind,
   marchSplit,
   marchStep,
   type MarchStep,
@@ -41,6 +50,7 @@ import {
   transmittanceRMuToUv,
   transmittanceUvToRMu,
 } from "../view/atmosphere/opticalDepth";
+import { sphereBareGroundDepthG, type TwinSources } from "../view/atmosphere/tablesCpu";
 
 /** WGS 84's equatorial radius a, m (NIMA TR8350.2): the twin's sphere. */
 export const BOTTOM_M = 6_378_137;
@@ -324,6 +334,53 @@ export const kernelOf = (ray: GateRay): "rayMarch" | "skyView" =>
  * lowest point, one-sided, and the inside and near-level rays end on drawn terrain.
  */
 export const skySegmentOf = (ray: GateRay): boolean => kernelOf(ray) === "rayMarch" && !ray.ground;
+
+/**
+ * What a gate ray's segment ends on, as the ray march tells it (plan R08, R08.T8.e;
+ * `marchSteps.ts`'s `MarchSegmentKind`): the inside and near-level families' drawn terrain
+ * (`surface`); the bare ground, nothing drawn along the ray (`ground`: the disc from orbit, and the
+ * sky families' rays that meet the ground and end there); otherwise the sky.
+ */
+export function marchKindOf(ray: GateRay): MarchSegmentKind {
+  if (ray.ground && ray.tStartM <= 0) {
+    return "surface";
+  }
+  const ground = sphereHits(ray.o, ray.d, BOTTOM_M);
+  return ground !== null && ground[0] > 0 && ground[0] <= ray.tEndM ? "ground" : "sky";
+}
+
+/**
+ * A gate ray's count as the ray march takes it under `rule` (plan R08, R08.T8.e;
+ * `marchSteps.ts`'s `marchSamplesOf`): `n` with no rule, on the sky or on a drawn surface; on the
+ * bare ground scaled by its green optical depth on the gate's sphere through `transmittanceAt`
+ * (light slot 0, the twin's own transmittance read) from its ground point along −d
+ * (`tablesCpu.ts`'s `sphereBareGroundDepthG`), on a medium with `edges` march edges.
+ */
+export function gateMarchSamples(
+  ray: GateRay,
+  n: number,
+  rule: MarchDepthSteps | null,
+  edges: number,
+  transmittanceAt: TwinSources["sunTransmittance"],
+): number {
+  const kind = marchKindOf(ray);
+  if (rule === null || kind !== "ground") {
+    return n;
+  }
+  const segment = {
+    originM: ray.o,
+    direction: ray.d,
+    tStartM: ray.tStartM,
+    tEndM: ray.tEndM,
+    fromCamera: ray.tStartM <= 0,
+  };
+  const depthG = sphereBareGroundDepthG(
+    transmittanceAt,
+    { kind: "sphere", bottomRadiusM: BOTTOM_M },
+    segment,
+  );
+  return marchSamplesOf(kind, depthG, n, edges, rule);
+}
 
 /**
  * A sun at a zenith angle and an azimuth from the ray's own, at a point `q`, azimuth 0 ahead along
@@ -677,8 +734,17 @@ export const twilight = (ray: GateRay): boolean =>
  * A ray's pixel in R05's twin: the march's in-scattering, plus the lit ground through its
  * transmittance.
  */
-export function singleScatteringPixel(ray: GateRay, placement: Placement, n: number): Rgb3 {
-  const { l, t } = march(ray.o, ray.d, ray.s, stepsFor(placement, ray, n));
+export function singleScatteringPixel(
+  ray: GateRay,
+  placement: Placement,
+  n: number,
+  rule: MarchDepthSteps | null,
+): Rgb3 {
+  // R05's Earth has no march edge; its count by optical depth reads the twin's own sun grid.
+  const samples = gateMarchSamples(ray, n, rule, 0, (heightM, mu, out) => {
+    sunTransmittance(BOTTOM_M + heightM, mu, out);
+  });
+  const { l, t } = march(ray.o, ray.d, ray.s, stepsFor(placement, ray, samples));
   if (!ray.ground) {
     return l;
   }
@@ -698,11 +764,19 @@ export function errorOf(l: Rgb3, ref: Rgb3, lMax: Rgb3): number {
   return e;
 }
 
-/** A scheme: a placement at a count for the march and one for the sky view. */
+/**
+ * A scheme: a placement at a count for the march and one for the sky view, and each count's scaling
+ * by the segment's optical depth (plan R08, R08.T8.e; `marchSteps.ts`'s `MarchDepthSteps`), `null`
+ * where every ray takes the count.
+ */
 export interface Scheme {
   readonly placement: Placement;
   readonly marchSteps: number;
   readonly skySteps: number;
+  /** The ray march's rule for its families' rays: `TableSizes`' `marchDepthSteps`. */
+  readonly marchDepthSteps: MarchDepthSteps | null;
+  /** The rule for the sky view's families' rays: `null` but where the ray march draws them. */
+  readonly skyDepthSteps: MarchDepthSteps | null;
 }
 
 /** One ray's reference, its confirmation and its pixel under each scheme. */
@@ -716,7 +790,9 @@ export interface RayResult {
   readonly pixels: ReadonlyMap<string, Rgb3>;
 }
 
-const keyOf = (s: Scheme): string => `${s.placement} ${s.marchSteps}/${s.skySteps}`;
+const byDepth = (rule: MarchDepthSteps | null): string => (rule === null ? "" : " by depth");
+const keyOf = (s: Scheme): string =>
+  `${s.placement} ${s.marchSteps}${byDepth(s.marchDepthSteps)}/${s.skySteps}${byDepth(s.skyDepthSteps)}`;
 /**
  * The high setting's counts under the kernels' rule (since R08.T8 the ray march's two-sided sky
  * segments under the sun-aware warp; the references keep R05.T12.e's placed steps).
@@ -725,18 +801,35 @@ export const HIGH: Scheme = {
   placement: "kernel",
   marchSteps: TABLE_SIZES.high.rayMarchSamples,
   skySteps: TABLE_SIZES.high.skyViewSamples,
+  marchDepthSteps: TABLE_SIZES.high.marchDepthSteps,
+  skyDepthSteps: null,
 };
 /** The low setting's counts under the kernels' rule, as {@link HIGH}'s. */
 export const LOW: Scheme = {
   placement: "kernel",
   marchSteps: TABLE_SIZES.low.rayMarchSamples,
   skySteps: TABLE_SIZES.low.skyViewSamples,
+  marchDepthSteps: TABLE_SIZES.low.marchDepthSteps,
+  skyDepthSteps: null,
 };
-/** A scheme's counts with even steps. */
-export const evenAt = (s: Scheme): Scheme => ({ ...s, placement: "even" });
+/** A scheme's counts with even steps, every ray at its count. */
+export const evenAt = (s: Scheme): Scheme => ({
+  ...s,
+  placement: "even",
+  marchDepthSteps: null,
+  skyDepthSteps: null,
+});
 
-/** A ray's pixel under a placement at a count of steps. */
-export type PixelOf = (ray: GateRay, placement: Placement, n: number) => Rgb3;
+/**
+ * A ray's pixel under a placement at a count of steps, scaled under placement `kernel` by the
+ * segment's optical depth where `rule` is given (plan R08, R08.T8.e; {@link gateMarchSamples}).
+ */
+export type PixelOf = (
+  ray: GateRay,
+  placement: Placement,
+  n: number,
+  rule: MarchDepthSteps | null,
+) => Rgb3;
 
 /** The gate's results: each ray's, and each kernel's brightest reference pixel per channel. */
 export interface Gate {
@@ -778,13 +871,15 @@ export function runGate(
   schemes: readonly Scheme[],
 ): Gate {
   let results: readonly RayResult[] = rays.map((ray) => {
-    const steps = (s: Scheme): number => (kernelOf(ray) === "skyView" ? s.skySteps : s.marchSteps);
+    const sky = kernelOf(ray) === "skyView";
+    const steps = (s: Scheme): number => (sky ? s.skySteps : s.marchSteps);
+    const rule = (s: Scheme): MarchDepthSteps | null => (sky ? s.skyDepthSteps : s.marchDepthSteps);
     return {
       ray,
       referenceSteps: REFERENCE_STEPS,
-      reference: pixelOf(ray, "placed", REFERENCE_STEPS),
-      confirm: pixelOf(ray, "placed", 2 * REFERENCE_STEPS),
-      pixels: new Map(schemes.map((s) => [keyOf(s), pixelOf(ray, s.placement, steps(s))])),
+      reference: pixelOf(ray, "placed", REFERENCE_STEPS, null),
+      confirm: pixelOf(ray, "placed", 2 * REFERENCE_STEPS, null),
+      pixels: new Map(schemes.map((s) => [keyOf(s), pixelOf(ray, s.placement, steps(s), rule(s))])),
     };
   });
   // One level a doubling up to the most: 2,048 to 4,096, then 4,096 to 8,192.
@@ -803,7 +898,7 @@ export function runGate(
         ray: result.ray,
         referenceSteps: doubled,
         reference: result.confirm,
-        confirm: pixelOf(result.ray, "placed", 2 * doubled),
+        confirm: pixelOf(result.ray, "placed", 2 * doubled, null),
         pixels: result.pixels,
       };
     });

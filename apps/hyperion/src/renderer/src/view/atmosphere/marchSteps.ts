@@ -207,6 +207,85 @@ export function marchStep(split: MarchSplit, i: number): MarchStep {
   return { tM: split.lowestM + unitM * (k * k + k + 0.5), dtM: unitM * (2 * k + 1) };
 }
 
+// --- The ray march's count by a segment's optical depth (plan R08, R08.T8.e) ---------------------
+
+/**
+ * The ray march's count scaled by a segment's optical depth (plan R08, R08.T8.e; lever 3 of
+ * `decision-r08-t8-leans.md` §8, taken by §9, Ruling 2, item 3), on the bare ground alone: at most
+ * the setting's count, down to the floors R05.T12.e's gate sets, at no wider tolerance, the shader
+ * and the twin alike ({@link marchSamplesOf}).
+ *
+ * @remarks
+ * Measured against the gate at one source and at six on R05's Earth, `earth.ts`'s `EARTH_REFERENCE`
+ * and the slab Earth (2026-10-22). The bare ground's error does not follow its optical depth: its
+ * worst rays are the low suns, 80° from the zenith ahead of the ray and 95° behind it, at depths of
+ * 0.45–1.3, where the ground's least passing count is 18 on the two media without a march edge and
+ * 28 on the slab Earth, whose ozone slab's two edges cut each ray into three pieces. Grazing bare
+ * ground under a twilight sun behind the camera (the gate's `past` family from 50 km, depth 6–10)
+ * needs 22–28 even on R05's Earth, so the ground's count climbs back to the setting's over
+ * {@link MarchDepthSteps.groundRampDepths}. A sky segment and a drawn surface keep the setting's
+ * count. A thin sky segment's error follows its depth in the gate (every one under 0.05 in green
+ * held at 8–12 steps), but 12 steps there put the far limb of a Saturn-class body at 10⁹ m over
+ * its 5% flicker bound (5.42%) and its quadrature on the limb set to 14.6%, the camera's last light
+ * from 50–100 km 4–10 codes off, and a seam of 3.5 codes at the horizontal from 40 km, where a thin
+ * ray up meets a thick one down; and it saved about 6% of the march's steps from orbit. So the sky
+ * takes no rule (R08.T8.e, 2026-10-22).
+ */
+export interface MarchDepthSteps {
+  /** The bare ground's count on a medium with no march edge, before its ramp. */
+  readonly groundFloor: number;
+  /** What each of the medium's march edges ({@link marchEdgesM}) adds to the ground's floor. */
+  readonly groundFloorPerEdge: number;
+  /**
+   * The green optical depths [d₀, d₁] of the bare ground's segment over which its count climbs from
+   * its floor to the setting's, in even steps: the floor at d₀ and below, the setting's at d₁ and
+   * above.
+   */
+  readonly groundRampDepths: readonly [number, number];
+}
+
+/**
+ * What a ray-march segment ends on, as `rayMarch.wgsl`'s `marchRay` tells it (plan R08, R08.T8.e):
+ * the bare ground with nothing drawn (`ground`), the sky with nothing drawn and the ground not
+ * reached (`sky`), or a drawn surface (`surface`).
+ */
+export type MarchSegmentKind = "ground" | "sky" | "surface";
+
+/**
+ * The ray march's count for one segment (plan R08, R08.T8.e; `decision-r08-t8-leans.md` §8, lever 3):
+ * the setting's `samples` with no rule, on the sky, on a drawn surface, or where the depth is not
+ * finite; on the bare ground the floor F₀ = min(`samples`, `groundFloor` + `groundFloorPerEdge` ×
+ * `edges`) up to d₀, the setting's from d₁, and between them F₀ + 2⌈(`samples` − F₀)(d − d₀) ÷
+ * (2 (d₁ − d₀))⌉, held to [F₀, `samples`]. The kernel forms the same in `f32` (`rayMarch.wgsl`).
+ *
+ * @param depthG - The bare ground's green optical depth, absorbers included: the light's from the
+ *   ground point along −d (`tablesCpu.ts`'s `rayMarchTexelInto`).
+ * @param samples - The setting's count (`TableSizes`' `rayMarchSamples`).
+ * @param edges - The medium's march edges, as many as the kernel's `layerEdges.count.x`.
+ * @param rule - The setting's {@link MarchDepthSteps}, or `null` for the setting's count everywhere.
+ */
+export function marchSamplesOf(
+  kind: MarchSegmentKind,
+  depthG: number,
+  samples: number,
+  edges: number,
+  rule: MarchDepthSteps | null,
+): number {
+  if (rule === null || kind !== "ground" || !Number.isFinite(depthG)) {
+    return samples;
+  }
+  const floor = Math.min(samples, rule.groundFloor + rule.groundFloorPerEdge * edges);
+  const [d0, d1] = rule.groundRampDepths;
+  if (depthG <= d0) {
+    return floor;
+  }
+  if (depthG >= d1) {
+    return samples;
+  }
+  const climb = 2 * Math.ceil(((samples - floor) * (depthG - d0)) / (2 * (d1 - d0)));
+  return Math.min(Math.max(floor + climb, floor), samples);
+}
+
 // --- Layer edges (plan R08, R08.T6.i) ------------------------------------------------------------
 
 /**

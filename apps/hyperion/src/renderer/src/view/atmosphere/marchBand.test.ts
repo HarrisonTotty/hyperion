@@ -16,12 +16,14 @@ import {
 import {
   type AtmosphereCamera,
   type MarchBand,
+  marchSourcesOf,
   marchWeightOf,
   type SpheroidFigure,
   type SunState,
   TABLE_SIZES,
 } from "./hillaire";
 import {
+  frameTwinView,
   type PlanetTwin,
   planetTwin,
   type RayMarchRay,
@@ -127,7 +129,7 @@ function placedMarch(
   samples: number,
 ): Rgb {
   const ray = { ...marched.ray, fromCamera: marched.ray.tStartM <= 0, skySegment: false };
-  const settings = { ...TABLE_SIZES.high, rayMarchSamples: samples };
+  const settings = { ...TABLE_SIZES.high, rayMarchSamples: samples, marchDepthSteps: null };
   return rgbOf(rayMarchTexelTwin(planet, view, settings, { ...marched, ray }));
 }
 
@@ -249,6 +251,94 @@ function texelsAgainstMarch(planet: PlanetTwin, setting: QualitySetting, heightM
             continue;
           }
           const march = rgbOf(rayMarchTexelTwin(planet, view, sizes, marched));
+          pairs.push({ read: texelAt(column, row), march, reference: march, confirm: march });
+        }
+      }
+      return worstOver(
+        pairs,
+        (p) => p.read,
+        (p) => p.march,
+        GATE_FLOOR,
+      );
+    }),
+  );
+}
+
+/**
+ * The sources a setting's frame carries beside each of {@link FRAME_SUNS}' Sun at the band's edges
+ * (plan R08, R08.T8.e; `decision-r08-t8-leans.md` §9, Ruling 2), elevation, azimuth and share of the
+ * Sun's light: high's 2 + 2, a companion star at 0.1 and two planetshine sources at 3% and 1%;
+ * low's 2 + 1, the companion and the brighter planetshine. Under `marchSourceCap` (2) the march
+ * keeps the Sun and the companion, so the planetshine is the light past the cap, bright enough
+ * that its fade shows.
+ */
+const MORE_SOURCES: Readonly<
+  Record<QualitySetting, ReadonlyArray<readonly [number, number, number]>>
+> = {
+  high: [
+    [20, 120, 0.1],
+    [45, 240, 0.03],
+    [10, 300, 0.01],
+  ],
+  low: [
+    [20, 120, 0.1],
+    [45, 240, 0.03],
+  ],
+};
+
+/** A frame's Sun with the setting's other sources ({@link MORE_SOURCES}). */
+function sourcesBeside(sun: SunState, setting: QualitySetting): SunState[] {
+  return [
+    sun,
+    ...MORE_SOURCES[setting].map(([elevationDeg, azimuthDeg, share]): SunState => ({
+      directionBodyFixed: sunAtCamera(elevationDeg, azimuthDeg).directionBodyFixed,
+      illuminanceLx: [share, share, share],
+      angularRadiusRad: sun.angularRadiusRad,
+    })),
+  ];
+}
+
+/**
+ * {@link texelsAgainstMarch} at the setting's count of sources (plan R08, R08.T8.e): the sky view's
+ * texels over every source of {@link sourcesBeside} against the march along each texel's direction
+ * over the brightest `marchSourceCap` of them (`marchSourcesOf`), as the composite blends them in
+ * the band, or over every source where `capped` is false.
+ */
+function texelsAgainstCountedMarch(
+  planet: PlanetTwin,
+  setting: QualitySetting,
+  heightM: number,
+  capped: boolean,
+): number {
+  const sizes = TABLE_SIZES[setting];
+  return Math.max(
+    ...FRAME_SUNS.map(([elevationDeg, azimuthDeg]) => {
+      const camera = columnCamera(heightM, -1, 1);
+      const suns = sourcesBeside(sunAtCamera(elevationDeg, azimuthDeg), setting);
+      const marched = capped ? marchSourcesOf(suns, sizes.marchSourceCap) : suns;
+      const view = frameTwinView(camera, suns, SPHERE, 0.1, 1, false, 1);
+      const marchView = frameTwinView(camera, marched, SPHERE, 0.1, 1, false, 1);
+      const texelAt = skyViewTexelsTwin(planet, view, sizes.skyView, sizes.skyViewSamples);
+      const n = view.normal;
+      const x = view.skyAxis;
+      const y = cross(n, x);
+      const width = sizes.skyView.widthTexels;
+      const pairs: FramePixel[] = [];
+      for (const column of [0, Math.floor(width / 4), Math.floor(width / 2)]) {
+        for (let row = 0; row < sizes.skyView.heightTexels; row += 1) {
+          const local = skyViewRayTwin(planet.medium, view, column, row, sizes.skyView).direction;
+          const d = add(add(scale(x, local.x), scale(y, local.y)), scale(n, local.z));
+          const ray = rayMarchRayAlongTwin(
+            planet.medium,
+            marchView,
+            marchView.cameraM,
+            d,
+            Number.POSITIVE_INFINITY,
+          );
+          if (ray === null || ray.bareGroundM !== null) {
+            continue;
+          }
+          const march = rgbOf(rayMarchTexelTwin(planet, marchView, sizes, ray));
           pairs.push({ read: texelAt(column, row), march, reference: march, confirm: march });
         }
       }
@@ -426,6 +516,27 @@ describe("the sky view against the ray march, from 20 km to the top (R08.T8)", (
       return [lowerM, upperM].map((heightM) => texelsAgainstMarch(earthTwin(), setting, heightM));
     });
     expect(figures).toEqual(asRecorded([0.00334, 0.0043, 0.03486, 0.03573]));
+  });
+
+  // R08.T8.e (`decision-r08-t8-leans.md` §9, Ruling 2: "inside the band, and at the aerial
+  // volume's 32 km, a third source fades; that is recorded beside §3's band figure"): the same at
+  // the setting's count, high's 2 + 2 and low's 2 + 1 sources, the march over its two brightest and
+  // the sky view over every one, and beside it the march over every one. A recorded figure, not
+  // held. Measured 2026-10-22, the worst over the three suns: on high at 30 and 50 km 7.67% and
+  // 8.00% (0.33% and 0.41% with every source marched), the planetshine's 3% and 1% past the cap; on
+  // low at 20 and 30 km 5.95% and 7.26% (3.42% and 3.46%), its 3%.
+  it("records the band's edges at the setting's count, the march over its two brightest sources and the sky view over every one", () => {
+    const figures = QUALITY_SETTINGS.flatMap((setting) => {
+      const { lowerM, upperM } = edgesM(TABLE_SIZES[setting].marchBand);
+      return [true, false].flatMap((capped) =>
+        [lowerM, upperM].map((heightM) =>
+          texelsAgainstCountedMarch(earthTwin(), setting, heightM, capped),
+        ),
+      );
+    });
+    expect(figures).toEqual(
+      asRecorded([0.07671, 0.08005, 0.00328, 0.00405, 0.05952, 0.07258, 0.0342, 0.03457]),
+    );
   });
 
   // The same frames' read against the march at its pixels, at Design note 10's floor: on high at 30
@@ -793,10 +904,11 @@ describe("the ray march across the top, and the limb outside it (R08.T8)", () =>
   // Measured 2026-10-21 under the sun-aware warp, for the suns in order, the last two set behind
   // the camera, each within 5 × 10⁻⁷; under §4's even steps they were 0.0244, 0.0247, 0.0238,
   // 0.0529, 0.0559, 0.0207 and 0.0260% on high, and 0.0250, 0.0248, 0.0238, 0.0543, 0.0571, 0.0415
-  // and 0.0547% on low.
+  // and 0.0547% on low. Since R08.T8.e's count on the bare ground (high, 2026-10-22) the last sun's
+  // step on high is 0.02621%, from 0.02603%.
   it("records the step across the top by sun, on both settings", () => {
     expect({ high: stepsOn("high"), low: stepsOn("low") }).toEqual({
-      high: [2.44e-4, 2.48e-4, 2.384e-4, 5.288e-4, 5.588e-4, 2.056e-4, 2.603e-4].map((step) =>
+      high: [2.44e-4, 2.48e-4, 2.384e-4, 5.288e-4, 5.588e-4, 2.056e-4, 2.621e-4].map((step) =>
         expect.closeTo(step, 6),
       ),
       low: [2.499e-4, 2.476e-4, 2.383e-4, 5.428e-4, 5.715e-4, 4.152e-4, 5.474e-4].map((step) =>

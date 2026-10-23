@@ -13,12 +13,15 @@ describeMarchGate({
   name: "the measured Earth",
   medium: EARTH_REFERENCE,
   sources: () => tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES)),
+  // Since R08.T8.e high's count on the bare ground is scaled by its optical depth: at one source the
+  // march's ordinary worst is the disc at 20 steps (1.35%; 0.53% at 36 steps throughout), measured
+  // 2026-10-22.
   record: {
     highMisses: [[], []],
     high: [
       {
         kernel: {
-          march: 0.00528,
+          march: 0.0135,
           marchTwilight: 0.03239,
           sky: 0.00529,
           skyTwilight: 0.03295,
@@ -34,7 +37,7 @@ describeMarchGate({
       },
       {
         kernel: {
-          march: 0.00293,
+          march: 0.00983,
           marchTwilight: 0.00396,
           sky: 0.00073,
           skyTwilight: 0.00434,

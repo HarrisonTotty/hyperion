@@ -73,6 +73,7 @@ import {
   frameSourcesOf,
   HillaireAtmosphere,
   type MarchBand,
+  marchSourcesOf,
   marchWeightOf,
   skyViewHeight,
   type SpheroidFigure,
@@ -891,10 +892,16 @@ export async function checkAtmosphereSteps(engine: RenderEngine, checks: Checks)
     const reduced = reducedSizes(sizes);
     // R05.T12.e's GPU agreement, on the medium its bounds were measured on (plan R08, R08.T6.d).
     const shipped = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, reduced, WGS84);
+    // The converged march takes its count on every ray, the bare ground's rule off (R08.T8.e).
     const converged = new HillaireAtmosphere(
       engine,
       R05_EARTH_REFERENCE,
-      { ...reduced, skyViewSamples: CONVERGED_STEPS, rayMarchSamples: CONVERGED_STEPS },
+      {
+        ...reduced,
+        skyViewSamples: CONVERGED_STEPS,
+        rayMarchSamples: CONVERGED_STEPS,
+        marchDepthSteps: null,
+      },
       WGS84,
     );
     const marchWidthTexels = Math.ceil(FRAME_SIZE.widthPx * sizes.rayMarchScale);
@@ -1838,12 +1845,15 @@ interface FrameTwins {
 
 /**
  * Begins a frame's per-view twins on the twin workers: a sphere's (R08.T6.b) or an oblate body's
- * (R08.T6.e's, since R08.T6.f), over a scene of one reversed-Z depth.
+ * (R08.T6.e's, since R08.T6.f), over a scene of one reversed-Z depth; the ray march's on
+ * `marchView`, the frame's view with the march's sources (`hillaire.ts`'s `marchSourcesOf`,
+ * R08.T8.e), `view` itself where the frame draws no more than its cap.
  */
 function frameTwinsOf(
   twins: TwinPool,
   planet: SmokePlanet,
   view: TwinView,
+  marchView: TwinView,
   sizes: TableSizes,
   depth: number,
 ): FrameTwins {
@@ -1856,14 +1866,14 @@ function frameTwinsOf(
       begun = {
         skyView: twins.skyView(planet.twin, view, sizes.skyView, sizes.skyViewSamples),
         aerial: twins.aerialPerspective(planet.twin, view, volume, perSlice, reachM),
-        rayMarch: twins.rayMarch(planet.twin, view, sizes, depth),
+        rayMarch: twins.rayMarch(planet.twin, marchView, sizes, depth),
       };
       break;
     case "oblate":
       begun = {
         skyView: twins.oblateSkyView(planet.twin, view, sizes.skyView, sizes.skyViewSamples),
         aerial: twins.oblateAerialPerspective(planet.twin, view, volume, perSlice, reachM),
-        rayMarch: twins.oblateRayMarch(planet.twin, view, sizes, depth),
+        rayMarch: twins.oblateRayMarch(planet.twin, marchView, sizes, depth),
       };
       break;
   }
@@ -1896,8 +1906,11 @@ async function frameAgreements(
 ): Promise<() => Promise<FrameAgreements>> {
   const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
   const view = frameViewOf(atmosphere, camera, frame.suns, figure);
+  const marched = marchSourcesOf(frame.suns, sizes.marchSourceCap);
+  const marchView =
+    marched.length === frame.suns.length ? view : frameViewOf(atmosphere, camera, marched, figure);
   const surfaceDepth = frame.surfaceM === null ? 0 : NEAR_M / frame.surfaceM;
-  const frameTwins = frameTwinsOf(twins, planet, view, sizes, surfaceDepth);
+  const frameTwins = frameTwinsOf(twins, planet, view, marchView, sizes, surfaceDepth);
   const composite = await compositeFrame(engine, atmosphere, camera, frame.suns, frame.surfaceM);
   const gpu = await readFrameOutputs(engine, atmosphere);
   return async () => {
@@ -2030,9 +2043,23 @@ function companionAt(elevationDeg: number): SunState {
 const BINARY_PLANETSHINE = skySourceAt(45, 250, [0.3, 0.32, 0.33], 0, false);
 
 /**
+ * Two bright planetshine sources on slot 0, drawing no disc, each under the companion's photopic
+ * illuminance: a giant's light on its moon, 1.7% and 0.9% of the primary's, so that the march's cap
+ * of two (R08.T8.e) leaves both out of the march, and a march that took them would stand about 3%
+ * off its twin.
+ */
+const BRIGHT_PLANETSHINE: readonly SunState[] = [
+  skySourceAt(30, 200, [1.5e3, 1.4e3, 1.2e3], 0, false),
+  skySourceAt(15, 300, [0.8e3, 0.75e3, 0.7e3], 0, false),
+];
+
+/**
  * The binary's frames from 2 m over a surface 60 km ahead (the ray march's): by day, the primary
  * 20° up, the companion 5° and a planetshine source; and at twilight, the primary 8° and the
- * companion 3° below the horizon, feeding the sky through the planet's shadow in the tables.
+ * companion 3° below the horizon, feeding the sky through the planet's shadow in the tables. From
+ * 400 km, where the march draws every pixel, the binary up and {@link BRIGHT_PLANETSHINE}: the
+ * sky view and the aerial perspective take all four sources, the march the two brightest
+ * (R08.T8.e, `hillaire.ts`'s `marchSourcesOf`), each against its twin on the same list.
  */
 const BINARY_FRAMES: readonly TwinFrame[] = [
   {
@@ -2046,6 +2073,12 @@ const BINARY_FRAMES: readonly TwinFrame[] = [
     heightM: 2,
     suns: [primaryAt(-8), companionAt(-3)],
     surfaceM: 60_000,
+  },
+  {
+    name: "400 km, the binary and two bright planetshine sources up, the march at its cap",
+    heightM: 400_000,
+    suns: [primaryAt(20), companionAt(5), ...BRIGHT_PLANETSHINE],
+    surfaceM: null,
   },
 ];
 
@@ -2175,16 +2208,18 @@ async function checkBinaryFrames(
       void ordered.later(async (checks) => {
         const result = await agreements();
         const label = `${medium.name}, ${setting}, ${frame.name}`;
-        const record = (what: string, held: TwinAgreement): void => {
+        const record = (what: string, sources: number, held: TwinAgreement): void => {
           checks.check(
-            `R08.T7 ${label}: the ${what}, summed over ${frame.suns.length} sources, agrees with the CPU twin to 10⁻³`,
+            `R08.T7 ${label}: the ${what}, summed over ${sources} sources, agrees with the CPU twin to 10⁻³`,
             held.worst <= 1 && held.above > 0,
             `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
           );
         };
-        record("sky view", result.skyView);
-        record("aerial perspective", result.aerial);
-        record("ray march", result.rayMarch);
+        // The march takes the brightest `marchSourceCap` of them (R08.T8.e), its twin the same.
+        const marched = marchSourcesOf(frame.suns, sizes.marchSourceCap).length;
+        record("sky view", frame.suns.length, result.skyView);
+        record("aerial perspective", frame.suns.length, result.aerial);
+        record("ray march", marched, result.rayMarch);
         checks.check(
           `R08.T7 ${label}: the composite is finite and within rgba16float's range`,
           result.compositeWithinRange,
@@ -3542,10 +3577,11 @@ async function checkViewArms(
   view: HeightsView,
   twins: TwinPool,
 ): Promise<ViewArms> {
-  // The view's twins begin on the twin workers, and the frame draws while they run.
+  // The view's twins begin on the twin workers, and the frame draws while they run; one source,
+  // which the march takes too.
   const twin = frameViewOf(atmosphere, view.camera, [view.sun], body.figure);
   const surfaceDepth = view.surfaceM === null ? 0 : NEAR_M / view.surfaceM;
-  const frameTwins = frameTwinsOf(twins, planet, twin, sizes, surfaceDepth);
+  const frameTwins = frameTwinsOf(twins, planet, twin, twin, sizes, surfaceDepth);
   const frame = await drawArms(engine, atmosphere, view, setting === "high");
   const record = async (checks: Checks): Promise<readonly MarchArm[]> => {
     const held: MarchArm[] = [];

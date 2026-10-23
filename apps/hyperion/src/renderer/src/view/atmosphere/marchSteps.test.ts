@@ -27,7 +27,7 @@ import {
   sunZenithAtDeg,
   twilight,
 } from "../../test/atmosphereGate";
-import { RAY_MARCH_KERNEL, SKY_VIEW_KERNEL } from "./hillaire";
+import { RAY_MARCH_KERNEL, SKY_VIEW_KERNEL, TABLE_SIZES } from "./hillaire";
 import {
   grazingTwilight,
   marchEdgesM,
@@ -35,6 +35,9 @@ import {
   marchEvenSteps,
   marchPieces,
   marchPiecesSteps,
+  type MarchDepthSteps,
+  marchSamplesOf,
+  type MarchSegmentKind,
   marchSplit,
   marchStep,
   type MarchStep,
@@ -696,5 +699,69 @@ describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
 
   it("keeps the twin within the bounds low's GPU agreement check holds low to, but the limb's one named miss (R08.T8)", () => {
     expect(describeFailures(overLowBounds(gate, LOW))).toEqual([...R05_TWIN_LOW_MISS]);
+  });
+});
+
+// --- The ray march's count by a segment's optical depth (plan R08, R08.T8.e) ---------------------
+
+describe("the ray march's count by the bare ground's optical depth (R08.T8.e)", () => {
+  const rule: MarchDepthSteps = {
+    groundFloor: 20,
+    groundFloorPerEdge: 4,
+    groundRampDepths: [2, 8],
+  };
+  const KINDS: readonly MarchSegmentKind[] = ["ground", "sky", "surface"];
+
+  it("scales high's 36 steps by the rule `decision-r08-t8-leans.md` §8's lever 3 asks, and leaves low's 16", () => {
+    expect(TABLE_SIZES.high.marchDepthSteps).toEqual(rule);
+    expect(TABLE_SIZES.high.rayMarchSamples).toBe(36);
+    expect(TABLE_SIZES.low.marchDepthSteps).toBeNull();
+  });
+
+  it("takes the setting's count with no rule, on the sky, on a drawn surface, and at a depth that is not finite", () => {
+    for (const kind of KINDS) {
+      for (const depth of [0, 0.01, 1, 5, 100]) {
+        expect(marchSamplesOf(kind, depth, 36, 0, null)).toBe(36);
+      }
+      for (const depth of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        expect(marchSamplesOf(kind, depth, 36, 2, rule)).toBe(36);
+      }
+    }
+    for (const kind of ["sky", "surface"] as const) {
+      for (const depth of [0, 0.001, 0.01, 0.0499, 1, 5, 100]) {
+        expect(marchSamplesOf(kind, depth, 36, 2, rule)).toBe(36);
+      }
+    }
+  });
+
+  it("gives the bare ground its floor up to the ramp's start, 4 more for each march edge, and never more than the setting's", () => {
+    expect([0, 0.2, 1, 2].map((d) => marchSamplesOf("ground", d, 36, 0, rule))).toEqual([
+      20, 20, 20, 20,
+    ]);
+    expect([0, 1, 2, 3, 4].map((edges) => marchSamplesOf("ground", 0.5, 36, edges, rule))).toEqual([
+      20, 24, 28, 32, 36,
+    ]);
+    expect(marchSamplesOf("ground", 0.5, 36, 9, rule)).toBe(36);
+    expect(marchSamplesOf("ground", 0.5, 16, 0, rule)).toBe(16);
+    expect(marchSamplesOf("ground", 0.5, 16, 2, rule)).toBe(16);
+  });
+
+  it("climbs the bare ground's count to the setting's in even steps from a depth of 2 to 8", () => {
+    for (const edges of [0, 2]) {
+      const floor = 20 + 4 * edges;
+      const counts = Array.from({ length: 601 }, (_, i) =>
+        marchSamplesOf("ground", 2 + i / 100, 36, edges, rule),
+      );
+      expect(counts[0]).toBe(floor);
+      expect(counts.at(-1)).toBe(36);
+      expect(counts.every((n) => n % 2 === 0 && n >= floor && n <= 36)).toBe(true);
+      expect(counts.every((n, i) => i === 0 || n >= (counts[i - 1] ?? Number.NaN))).toBe(true);
+    }
+    // Just past the ramp's start the count takes its first even step, and from 8 the setting's.
+    expect(marchSamplesOf("ground", 2.001, 36, 0, rule)).toBe(22);
+    expect(marchSamplesOf("ground", 5, 36, 0, rule)).toBe(28);
+    expect(marchSamplesOf("ground", 7.999, 36, 0, rule)).toBe(36);
+    expect(marchSamplesOf("ground", 8, 36, 0, rule)).toBe(36);
+    expect(marchSamplesOf("ground", 50, 36, 2, rule)).toBe(36);
   });
 });

@@ -41,6 +41,7 @@ import {
   RAY_MARCH_KERNEL,
   SKY_VIEW_KERNEL,
   localScaleHeightM,
+  marchSourcesOf,
   marchWeightOf,
   skyAzimuthOrigin,
   skyViewColumnOf,
@@ -683,6 +684,119 @@ describe("HillaireAtmosphere", () => {
   });
 });
 
+/** A view block's member, its four floats, by its place in `hillaire.ts`'s `VIEW_MEMBERS`. */
+function memberOf(block: unknown, index: number): number[] {
+  if (!(block instanceof Float32Array)) {
+    throw new Error("a dispatch's view is a block of floats");
+  }
+  return [...block.subarray(index * 4, index * 4 + 4)];
+}
+
+/** The view's members before its sources: camera, up, sky, skyAxis, …, curvature, marchGround. */
+const VIEW_HEAD_MEMBERS = 13;
+
+/** The place of the view's `sky` member. */
+const SKY_MEMBER = 2;
+
+/** The place of source `i`'s weight among the view's members, after its direction. */
+function weightMemberOf(i: number): number {
+  return VIEW_HEAD_MEMBERS + 1 + 3 * i;
+}
+
+describe("the march's sources (R08.T8.e, decision-r08-t8-leans.md §9)", () => {
+  // Four sources left by the skips: the Sun, a companion on light slot 1, a full Moon and a bright
+  // neighbour, the second brightest, after the companion in the list.
+  const companion: SunState = {
+    directionBodyFixed: { x: 0.6, y: 0.8, z: 0 },
+    illuminanceLx: [900, 1_000, 1_100],
+    angularRadiusRad: 0,
+    curveSlot: 1,
+  };
+  const moon: SunState = {
+    directionBodyFixed: { x: 0.6, y: 0, z: 0.8 },
+    illuminanceLx: [0.3, 0.32, 0.33],
+    angularRadiusRad: 0.004_5,
+    drawsDisc: false,
+  };
+  const neighbour: SunState = {
+    directionBodyFixed: { x: 0.8, y: -0.6, z: 0 },
+    illuminanceLx: [2_000, 2_000, 2_000],
+    angularRadiusRad: 0.01,
+    drawsDisc: false,
+  };
+  const four: readonly SunState[] = Object.freeze([NOON, companion, moon, neighbour]);
+
+  it("takes the two brightest at the camera, in their order, and leaves the list as given", () => {
+    expect(marchSourcesOf(four, 2)).toEqual([NOON, neighbour]);
+    expect(marchSourcesOf(four, 2)[1]).toBe(neighbour);
+    expect(four).toEqual([NOON, companion, moon, neighbour]);
+  });
+
+  it("takes every source as given at or under the cap, and the earlier of two alike", () => {
+    expect(marchSourcesOf([moon, NOON], 2)).toEqual([moon, NOON]);
+    expect(marchSourcesOf([], 2)).toEqual([]);
+    const twin: SunState = { ...companion, curveSlot: 0 };
+    expect(marchSourcesOf([moon, companion, twin], 2)).toEqual([companion, twin]);
+    expect(marchSourcesOf([companion, twin, NOON], 1)).toEqual([NOON]);
+  });
+
+  it("refuses a cap that is not a whole number of at least 1", () => {
+    for (const cap of [0, 1.5, Number.NaN, -2]) {
+      expect(() => marchSourcesOf(four, cap)).toThrow(RangeError);
+    }
+  });
+
+  it("refuses such a cap where the sizes are given", async () => {
+    const engine = await countingRenderEngine();
+    const sizes = { ...TABLE_SIZES.high, marchSourceCap: 0 };
+    expect(() => new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, WGS84)).toThrow(
+      /source cap/u,
+    );
+  });
+
+  it("marches the two brightest of four, where the sky view, the aerial perspective and the composite take all four", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    engine.dispatched.length = 0;
+    const draw = atmosphere.drawFrame(CAMERA, four, SCENE);
+    const [sky, aerial, march] = engine.dispatched;
+    expect([sky?.kernel, aerial?.kernel, march?.kernel]).toEqual([
+      "atmosphere sky view",
+      "atmosphere aerial perspective",
+      "atmosphere ray march",
+    ]);
+    expect(memberOf(sky?.bindings.uniforms["view"], SKY_MEMBER)[0]).toBe(4);
+    expect(memberOf(aerial?.bindings.uniforms["view"], SKY_MEMBER)[0]).toBe(4);
+    expect(draw.uniforms["sky"]?.[0]).toBe(4);
+    const view = march?.bindings.uniforms["view"];
+    expect(memberOf(view, SKY_MEMBER).slice(0, 2)).toEqual([2, 1]);
+    const marched = frameSourcesOf([NOON, neighbour], SCENE.exposureScale, false, 0);
+    for (const [i, source] of marched.entries()) {
+      expect(memberOf(view, weightMemberOf(i))).toEqual(source.weight.map((w) => Math.fround(w)));
+    }
+    for (let i = 2; i < MAX_SKY_SOURCES; i += 1) {
+      expect(memberOf(view, weightMemberOf(i))).toEqual([0, 0, 0, 0]);
+    }
+    // Every other member is the frame's own.
+    const own = sky?.bindings.uniforms["view"];
+    const others = Array.from({ length: VIEW_HEAD_MEMBERS }, (_, m) => m).filter(
+      (m) => m !== SKY_MEMBER,
+    );
+    for (const member of others) {
+      expect(memberOf(view, member)).toEqual(memberOf(own, member));
+    }
+  });
+
+  it("marches the frame's own view where it draws no more than the cap", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, [NOON, moon], SCENE);
+    const [sky, , march] = engine.dispatched;
+    expect(march?.bindings.uniforms["view"]).toBe(sky?.bindings.uniforms["view"]);
+  });
+});
+
 describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T9.a)", () => {
   it("touches the terrain alone on the low setting: no volume is published, and only the composite over the given scene reads it", async () => {
     const engine = await countingRenderEngine();
@@ -1278,7 +1392,7 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
 
   it("gives the view's members in one order to the kernels and the composite, the sources last (R08.T7)", () => {
     const view = vec4Members(viewWgsl, "AtmosphereView");
-    expect(view.slice(-2)).toEqual(["exact", "curvature"]);
+    expect(view.slice(-3)).toEqual(["exact", "curvature", "marchGround"]);
     expect(vec4Members(viewWgsl, "SkySource")).toEqual(["direction", "weight", "disc"]);
     expect(viewWgsl).toMatch(/sources : array<SkySource, MAX_SKY_SOURCES>,\s*\}/u);
     const sources = Array.from({ length: MAX_SKY_SOURCES }, (_, i) =>
@@ -1378,12 +1492,20 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     expect([...(draw.uniforms["exact"] ?? [])]).toEqual(expected);
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 0, 0, 0]);
     // The kernels' view block: the members in order, `exact` the eleventh, `curvature` the twelfth
-    // (R08.T6.f), the sources after them.
+    // (R08.T6.f), `marchGround` the thirteenth (R08.T8.e), the sources after them.
     const block = engine.dispatched.find((d) => d.kernel === "atmosphere sky view")?.bindings
       .uniforms["view"];
     expect(Array.from(block ?? []).slice(40, 44)).toEqual(expected);
     expect(Array.from(block ?? []).slice(44, 48)).toEqual([...(draw.uniforms["curvature"] ?? [])]);
-    expect(block).toHaveLength((12 + 3 * 6) * 4);
+    expect(Array.from(block ?? []).slice(48, 52)).toEqual([20, 4, 2, 8]);
+    expect(block).toHaveLength((13 + 3 * 6) * 4);
+  });
+
+  it("gives the march no ground rule on low, so every ray takes its 16 steps (R08.T8.e)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    expect([...(draw.uniforms["marchGround"] ?? [])]).toEqual([0, 0, 0, 0]);
   });
 
   it.each(["high", "low"] as const)(

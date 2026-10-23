@@ -30,6 +30,7 @@ import {
   farLimbFootprintTwin,
   farLimbShellsOf,
   kernelOpticalDepth,
+  mediumMarchEdgesM,
   MULTI_SCATTERING_GROUND_OFFSET_M,
   MULTI_SCATTERING_KERNEL_OPTIONS,
   type MultiScatteringOptions,
@@ -47,6 +48,8 @@ import {
   OBLATE_KERNEL_SIZES,
   multiScatteringTwin,
   type PlanetTwin,
+  type RayMarchRay,
+  type RayMarchSettings,
   rayMarchTwin,
   type SlicedRay,
   slicedStoredOpticalDepth,
@@ -749,6 +752,13 @@ function saturnSun(latitudeRad: number): SunState {
   };
 }
 
+/** High's ray-march settings at a fixed count, no segment's count scaled by its optical depth. */
+const highAtFixedCount = (n: number): RayMarchSettings => ({
+  ...TABLE_SIZES.high,
+  rayMarchSamples: n,
+  marchDepthSteps: null,
+});
+
 describe("the oblate ray march and aerial perspective on a Saturn-class figure (R08.T6.e)", () => {
   const top = SATURN_MEDIUM.topHeightM;
   const scaledHeightOf = (p: Vec3): number => {
@@ -804,7 +814,7 @@ describe("the oblate ray march and aerial perspective on a Saturn-class figure (
     if (marched === null) {
       throw new Error("the limb ray enters the air");
     }
-    const settings = { ...TABLE_SIZES.high, rayMarchSamples: 8_192 };
+    const settings = { ...TABLE_SIZES.high, rayMarchSamples: 8_192, marchDepthSteps: null };
     const [, , , transmittance] = oblateRayMarchTexelTwin(planet, view, settings, marched);
     const start = marched.ray.tStartM;
     const entry = {
@@ -817,6 +827,49 @@ describe("the oblate ray march and aerial perspective on a Saturn-class figure (
     // Recorded: τ 0.773, 1.55 and 3.97, and the two within 2.2 × 10⁻⁸.
     expect(tau[1]).toBeGreaterThan(0.5);
     expect(Math.abs(transmittance / truth - 1)).toBeLessThan(1e-4);
+  });
+
+  // R08.T8.e: high's count by the bare ground's optical depth, its light read through the slices.
+  it("marches the bare ground at 20 steps on high, and a drawn surface and the sky at 36", () => {
+    const planet = saturnSlicesPlanet();
+    const phi = 45 * DEG;
+    const view = twinView(northCamera(phi, 2 * top), saturnSun(phi), SATURN, 0.1);
+    // The medium has no march edge, so the ground's floor is 20; steeply down, its depth is near
+    // the vertical's 0.285 in green, under the ramp's 2.
+    expect(mediumMarchEdgesM(SATURN_MEDIUM)).toEqual([]);
+    const down = directionAt(phi, 0, -0.9);
+    const limb = directionAt(phi, 0, -0.22);
+    const along = (d: Vec3, tSurfaceM: number): RayMarchRay => {
+      const marched = oblateRayMarchRayAlongTwin(planet, view, view.cameraM, d, tSurfaceM);
+      if (marched === null) {
+        throw new Error("the ray enters the air");
+      }
+      return marched;
+    };
+    const ground = along(down, Number.POSITIVE_INFINITY);
+    const cases = [
+      { what: "bare ground", marched: ground, n: 20 },
+      { what: "a drawn surface", marched: along(down, 0.99 * ground.ray.tEndM), n: 36 },
+      { what: "sky", marched: along(limb, Number.POSITIVE_INFINITY), n: 36 },
+    ];
+    const drawn = cases.map(({ what, marched }) => {
+      const shipped = oblateRayMarchTexelTwin(planet, view, TABLE_SIZES.high, marched);
+      const at36 = oblateRayMarchTexelTwin(planet, view, highAtFixedCount(36), marched);
+      return {
+        what,
+        bareGround: marched.bareGroundM !== null,
+        atItsCount: shipped,
+        at36: shipped.every((value, i) => value === at36[i]),
+      };
+    });
+    expect(drawn).toEqual(
+      cases.map(({ what, marched, n }) => ({
+        what,
+        bareGround: what === "bare ground",
+        atItsCount: oblateRayMarchTexelTwin(planet, view, highAtFixedCount(n), marched),
+        at36: n === 36,
+      })),
+    );
   });
 
   it("gives an aerial-perspective column's transmittance as the true spheroid's over its reach", () => {

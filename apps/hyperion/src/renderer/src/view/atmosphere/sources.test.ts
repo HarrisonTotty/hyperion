@@ -26,7 +26,7 @@ import {
 import { SETTINGS } from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
 import { geodeticOf, type SpheroidFigure } from "./hillaire";
-import { skySources, skySourcesWithSkips, twilightLimitRad } from "./sources";
+import { horizonDipRad, skySources, skySourcesWithSkips, twilightLimitRad } from "./sources";
 
 const RAD = Math.PI / 180;
 
@@ -95,7 +95,8 @@ function r07Arrays(): {
 }
 
 describe("the sky's sources: R07's one list for the body (R08.T7)", () => {
-  // A camera above Earth's air, where nothing is skipped, its body-fixed axes turned from the
+  // A camera above Earth's air, where neither skip takes a source (no source stands above every
+  // ground point's horizon, nor below the twilight limit), its body-fixed axes turned from the
   // lights' by 30° about an inclined axis.
   const toBodyFixed = quaternionFromAxisAngle(normalise(vec3(1, 2, 3)), 30 * RAD);
   const cameraLightsM = vec3(0, 0, 7_000_000);
@@ -288,17 +289,100 @@ describe("the sky's two skips inside the air (R08.T7, Design note 7)", () => {
     expect(listed.map(({ skip }) => skip)).toEqual([null, null]);
   });
 
-  it("skips nothing from above the air", () => {
-    const orbit = { positionM: vec3(WGS84.equatorialRadiusM + 400_000, 0, 0) };
-    expect(geodeticOf(orbit.positionM, WGS84).heightM).toBeGreaterThan(top.topHeightM);
-    const listed = skySourcesWithSkips(
-      [sunAt(-60)],
-      [moonAt(45)],
-      orbit,
-      WGS84,
-      top,
-      IDENTITY_QUATERNION,
-    );
-    expect(listed.map(({ skip }) => skip)).toEqual([null, null]);
+  it("counts a Sun as above the ground's horizon from its centre's elevation of acos(R ÷ r_c)", () => {
+    // From 2 m the horizon dips 0.0455°: a Sun at 0.03° is under it and does not skip the Moon.
+    expect(horizonDipRad(WGS84, 2) / RAD).toBeCloseTo(0.0455, 3);
+    const skips = (sunDeg: number): ReturnType<typeof skySourcesWithSkips> =>
+      skySourcesWithSkips([sunAt(sunDeg)], [moonAt(45)], GROUND, WGS84, top, IDENTITY_QUATERNION);
+    expect(skips(0.03).map(({ skip }) => skip)).toEqual([null, null]);
+    expect(skips(0.06).map(({ skip }) => skip)).toEqual([null, "negligible"]);
+  });
+});
+
+/**
+ * A camera on the equator at longitude 0, `distanceM` from the centre; its normal is +x, so that
+ * {@link sunAt}'s and {@link moonAt}'s elevations are its own, less the Moon's parallax.
+ */
+function above(distanceM: number): { readonly positionM: Vec3 } {
+  return { positionM: vec3(distanceM, 0, 0) };
+}
+
+describe("the sky's two skips outside the air (R08.T8.e, decision-r08-t8-leans.md §9)", () => {
+  const top = { topHeightM: 100_000 };
+  const places = [
+    ["400 km", WGS84.equatorialRadiusM + 400_000],
+    ["10⁷ m", 1e7],
+  ] as const;
+
+  it("puts the horizon's dip at 19.8° and the twilight limit at 40.1° from 400 km", () => {
+    expect(horizonDipRad(WGS84, 0)).toBe(0);
+    expect(horizonDipRad(WGS84, 400_000) / RAD).toBeCloseTo(19.85, 2);
+    expect(twilightLimitRad(WGS84, 400_000, top.topHeightM) / RAD).toBeCloseTo(40.07, 2);
+  });
+
+  for (const [name, distanceM] of places) {
+    const camera = above(distanceM);
+    const heightM = geodeticOf(camera.positionM, WGS84).heightM;
+    const limitDeg = twilightLimitRad(WGS84, heightM, top.topHeightM) / RAD;
+    const dipDeg = horizonDipRad(WGS84, heightM) / RAD;
+
+    it(`skips the Sun 1° beyond the twilight limit from ${name}, and keeps a full Moon at 45°`, () => {
+      expect(heightM).toBeGreaterThan(top.topHeightM);
+      const listed = skySourcesWithSkips(
+        [sunAt(-limitDeg - 1)],
+        [moonAt(45)],
+        camera,
+        WGS84,
+        top,
+        IDENTITY_QUATERNION,
+      );
+      expect(listed.map(({ skip }) => skip)).toEqual(["below twilight limit", null]);
+      // Its upper limb still above the limit, it is kept.
+      const kept = skySourcesWithSkips(
+        [sunAt(-limitDeg + 0.2)],
+        [moonAt(45)],
+        camera,
+        WGS84,
+        top,
+        IDENTITY_QUATERNION,
+      );
+      expect(kept.map(({ skip }) => skip)).toEqual([null, null]);
+    });
+
+    it(`skips a full Moon from ${name} with the Sun 1° above acos(R ÷ r_c), and keeps it 1° below`, () => {
+      const skips = (sunDeg: number): ReturnType<typeof skySourcesWithSkips> =>
+        skySourcesWithSkips([sunAt(sunDeg)], [moonAt(45)], camera, WGS84, top, IDENTITY_QUATERNION);
+      expect(skips(dipDeg + 1).map(({ skip }) => skip)).toEqual([null, "negligible"]);
+      // Under the dip some ground the camera sees has the Sun below its horizon.
+      expect(skips(dipDeg - 1).map(({ skip }) => skip)).toEqual([null, null]);
+    });
+  }
+
+  it("lists the same sources just below the medium's top and just above it", () => {
+    const below = above(WGS84.equatorialRadiusM + top.topHeightM - 1);
+    const over = above(WGS84.equatorialRadiusM + top.topHeightM + 1);
+    // Each side of both rules' edges at the top, 0.05° off: the Sun's upper limb at the twilight
+    // limit, and its centre at the horizon's dip.
+    const limitDeg = twilightLimitRad(WGS84, top.topHeightM, top.topHeightM) / RAD;
+    const dipDeg = horizonDipRad(WGS84, top.topHeightM) / RAD;
+    const radiusDeg = Math.asin(aHostDisc().radius_m / AU_M) / RAD;
+    const edge = -limitDeg - radiusDeg;
+    for (const sunDeg of [
+      -90,
+      edge - 0.05,
+      edge + 0.05,
+      -10,
+      0,
+      dipDeg - 0.05,
+      dipDeg + 0.05,
+      90,
+    ]) {
+      const at = (camera: { readonly positionM: Vec3 }): ReturnType<typeof skySourcesWithSkips> =>
+        skySourcesWithSkips([sunAt(sunDeg)], [moonAt(45)], camera, WGS84, top, IDENTITY_QUATERNION);
+      expect(
+        at(below).map(({ skip }) => skip),
+        `the Sun at ${sunDeg}°`,
+      ).toEqual(at(over).map(({ skip }) => skip));
+    }
   });
 });
