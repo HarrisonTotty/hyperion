@@ -1676,8 +1676,9 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
     is placed after the marks' labels, 0.5 rem from every label and the furniture, 0.25 rem
     outside every mark's bracket's box and 0.125 rem from every stalk, prefers a place that no
     orbit, annulus edge or tick crosses, and is not drawn where it has no such place. The marks'
-    labels no longer give way to it, and spheres, plane rings, paths and the observer keep
-    R07.T16.j's last resort._
+    labels no longer give way to it, but a selected annulus's label, the selection's, is placed
+    before them, and they give way to it (P14.T42.e). Spheres, plane rings, paths and the observer
+    keep R07.T16.j's last resort._
 
 - **P05.T13, as built (lane `gg-port-p05-t13`, 2026-10-16, at version 22).** Built on
   `rendering-and-planets` 93a0e0fd under decision-gg-port-a2 §7 and signoff-11 item 24, as

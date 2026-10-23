@@ -10,8 +10,9 @@
  * (decision-r07-quality-and-destination, Q6 (b) to (d); R07.T16.j): the triad's labels keep clear
  * of the other axes' symbols and lines, the core arrow's label of its own arrow, and the curve
  * labels of the marks' stalks and symbols, each giving up that clearance only as its last resort.
- * An annulus's label has no last resort: it is placed after the marks' labels, apart from every
- * label and off every mark's bracket's box, or not at all (plan 14, P14.T42.d).
+ * An annulus's label has no last resort: it is placed after the marks' labels, or, a selected
+ * annulus's, before them (plan 14, P14.T42.e), apart from every label and off every mark's
+ * bracket's box, or not at all (plan 14, P14.T42.d).
  */
 
 import {
@@ -1259,9 +1260,11 @@ export function curveInksPx(
  * inside it, where they fit. A ring's label stands below and to the right of the ring's coreward
  * point, or on another side of it; else beside the first point along its ring, either way from
  * there, where it fits (`RingLabel.alongPx`). A label is dropped only when nowhere fits, as when its
- * circle is out of the view. An annulus's label, which gives way to the marks' labels
- * (`RingLabel.yieldsToMarks`), is not placed here but by {@link placeAnnulusLabels}, after them,
- * and is dropped wherever no place keeps its clearances.
+ * circle is out of the view. An annulus's label (`RingLabel.yieldsToMarks`) is not placed here but
+ * by {@link placeAnnulusLabels}, after the marks' labels, which it gives way to, or, for a selected
+ * annulus's label (`RingLabel.selected`), after the furniture and the other curve labels and
+ * before the marks' labels (plan 14, P14.T42.e), and is dropped wherever no place keeps its
+ * clearances.
  *
  * Each place a label tries must also stand 0.125 rem clear of every mark's stalk and symbol, since
  * a stalk carries meaning where the `--line` grid does not (decision-r07-quality-and-destination,
@@ -1355,8 +1358,8 @@ export interface AnnulusLabelSurroundings {
   /**
    * Every box placed before them, which each stands at least
    * {@link LABEL_NEIGHBOUR_CLEARANCE_REM} from: the triad's footprint, the core arrow and its
-   * label, the other curve labels, and the marks' labels, the selection's and the destination's
-   * included.
+   * label, the other curve labels, and the marks' labels where they are placed before them, the
+   * selection's and the destination's included.
    */
   readonly standing: ReadonlyArray<BoxPx>;
   /** The marks' stalks and symbols and the observer's eye, as {@link markInksPx} gives them. */
@@ -1373,7 +1376,9 @@ export interface AnnulusLabelSurroundings {
 /**
  * Sets the annuli's labels (plan 14, P14.T42.d): the zones', the belts', the scattered disc's, the
  * halo's and a planet's rings', those flagged `RingLabel.yieldsToMarks`, after every other label,
- * each apart from all of them and off every mark, or not at all.
+ * or, for a selected annulus's label (`RingLabel.selected`), after the furniture and the other
+ * curve labels and before the marks' labels (plan 14, P14.T42.e), each apart from every label
+ * placed before it and off every mark, or not at all.
  *
  * @remarks
  * A label tries its four places beside its outer edge's point (its rimward point, or its spinward

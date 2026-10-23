@@ -27022,15 +27022,19 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     `furniture.ts` unchanged. The lean, in each: "or, for a selected annulus's label
     (`RingLabel.selected`), after the furniture and the other curve labels and before the marks'
     labels (plan 14, P14.T42.e)", and in `standing`, "the marks' labels where they are placed
-    before them".
+    before them". _Applied in
+    `docs(spatial): P14.T42.e The annulus labels' docs after the selected pass`, and in the module's
+    summary._
   - _Plan 05's T42.d note_ (the UX and plan-conformance reviews), "Narrowed for annulus labels by
     P14.T42.d", says an annulus's label "is placed after the marks' labels" and "The marks' labels
     no longer give way to it", which no longer holds for a selected annulus's. The brief leaves
     the note to main. The lean: "but a selected annulus's label, the selection's, is placed before
-    them, and they give way to it (P14.T42.e)".
+    them, and they give way to it (P14.T42.e)". _Applied in
+    `docs(spatial): P14.T42.e The annulus labels' docs after the selected pass`._
   - _The guide's order and the scattered disc_ (the UX review, against main's text). The order
     names "the scattered disc's" among the other annuli's labels and nothing says that a belt's
     scattered disc is selected with it, so a reader of the guide could take a selected belt's
     disc, which the code places with it, before the bodies' labels, for a fault. The reviewer's
     sentence, after the order: "A belt's scattered disc is selected with its belt: its edges are
-    drawn, and its label placed, with the belt's."
+    drawn, and its label placed, with the belt's." _Applied in
+    `docs(spatial): P14.T42.e The annulus labels' docs after the selected pass`._
