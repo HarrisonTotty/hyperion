@@ -4149,6 +4149,33 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
     `just smart-ci origin/rendering-and-planets` and a hidden look: `BELT 1` selected from the
     list on GDG 76DY08 A-11 at `ALL` at 1280 × 720, 1920 × 1080 and 150%, its label drawn where a
     place qualifies, and a lesser body's label beside it given way.
+- **P14.T42.f No tick across an annulus's label** (added 2026-10-23 by main's UX decision on the
+  landing look of T42.d and T42.e, decision-zone-labels, follow-up 2). T42.d took a place that no
+  orbit, annulus edge or tick crosses as a preference, so where none had one a label still stood
+  across a belt's or the optimistic zone's ticks, which in its own `--text-muted` took letters
+  out: on GDG 76DY08 A-11 at `ALL`, `SNOW LINE` at 1280 × 720 and `HABITABLE ZONE` (four ticks)
+  and `SNOW LINE` at 1920 × 1080 and 150%; on GDG 75DX08 A-7 at `INNER`, `OPTIMISTIC` at
+  1280 × 720 and 150%. A tick is short, straight and in the label's colour, so through a word it
+  reads as a letter's stroke, while an orbit or an edge is a long curve the eye follows through
+  it. So no tick may cross an annulus's label: `tickInksPx` gives the `ticks` ops at a line's
+  weight (a belt's, a ring's, the optimistic zone's edges' and the chart's data edge's) at the
+  line scale, apart from `curveInksPx`, whose orbits and edges stay preferred, and a place a tick
+  crosses, touching included, does not qualify in either of the annuli's passes. Where none
+  qualifies the label is left out, as T42.d rules: at `ALL` on A-11 the look found all three zone
+  labels clear of the ticks at 1920 × 1080, and left out at 1280 × 720 and 150%.
+  - _Files:_ under `apps/hyperion/src/renderer/src/`: `spatial/furniture.ts` (`tickInksPx`,
+    `AnnulusLabelSurroundings.ticks`), `spatial/SpatialView.tsx`, their tests; the guide's
+    annulus-label bullet (decision-zone-labels, follow-up 2, G4).
+  - _Tests:_ in `spatial/furniture.test.ts`: `tickInksPx` takes each line tick at the line scale
+    and no mark's tick, and `curveInksPx` no tick, at 1.5; an annulus's label with ticks across
+    every place is left out; one whose first places two ticks cross moves along its edge to a
+    place no tick crosses, though an orbit crosses every place; T42.d's crowd (f) given the ticks.
+    In `spatial/SpatialView.test.tsx`: a zone's label whose every place a belt's ticks cross is
+    not drawn, and is with the belt switched off. T42.d's and T42.e's tests unchanged and passing.
+  - _Accept:_ `pnpm typecheck`, `pnpm lint`, `pnpm --filter hyperion exec vitest run
+src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displays/galaxy`,
+    the console-ux skill's lint, `just smart-ci origin/rendering-and-planets`; the look is
+    look-92-93's fix runs, made on this change before its review's amendments to docs and tests.
 
 #### P14.T43 Body list and readouts
 
@@ -26792,7 +26819,9 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     T42.d's look finds one unreadable there, the follow-up is for a ruling between counting those
     curves as obstacles (more labels left out) and a `1px` `--surface-0` casing round the curve
     labels' glyphs (the lines cut under the letters, against R07's Q6 (d), which keeps lines
-    whole).
+    whole). _Seen at T42.d's and T42.e's look and ruled in direction (decision-zone-labels,
+    follow-up 2): the ticks became a rule (P14.T42.f); for the orbits and edges, the casing. See
+    the deferred findings from that look._
   - _R4, a multiple's zones labelled without their host_ (GDG 0W1Q01 D-116: three `STABLE ZONE`
     and three `SNOW LINE` labels set as a grid that does not say whose each is). T42.d's 0.5 rem
     thins the grid but names no host. For a later ruling; the lean is the host's name after the
@@ -27038,3 +27067,22 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     sentence, after the order: "A belt's scattered disc is selected with its belt: its edges are
     drawn, and its label placed, with the belt's." _Applied in
     `docs(spatial): P14.T42.e The annulus labels' docs after the selected pass`._
+- **Deferred findings (2026-10-13 rule)**, from the landing look of P14.T42.d and T42.e
+  (look-92-93, 2026-10-23) and decision-zone-labels, follow-up 2:
+  - _Orbits and edges across drawn labels_ (R2's residue): at `INNER` on GDG 75DX08 A-3 at
+    1280 × 720 `HABITABLE ZONE`'s `ZONE` is hard to read, and at 1920 × 1080 the `BODY` frame's
+    `A j RING 1` loses its `j` to an orbit. Not a blocker (no false reading), and not P14.T42.f's,
+    which makes the ticks alone a rule. Ruled in direction: when briefed, the remedy is a `1px`
+    `--surface-0` casing round an annulus label's glyphs, not the orbits and edges as obstacles,
+    which would leave out nearly every inner zone at every zoom. Clear of every stalk, symbol,
+    other bracket and tick since T42.d, T42.f and T42.g, an annulus's label's casing can cut only
+    orbits, annulus edges and the `--line` grid, by a pixel round its letters; R07's Q6 (d), which
+    keeps stalks whole, is untouched. It needs guide text, a contrast check and a look of its own,
+    and waits behind the critical path.
+  - _Zone labels at `ALL` mostly left out, as ruled._ On the 1214 × 625 stage the habitable zone's
+    outer edge spans 5.6 px on A-7, 159 on A-11, 2.6 on A-3 and 0.2 on D-116, and the zone labels
+    drawn are A-7 0 of 3, A-11 1–3 of 3, A-3 0 of 3 and D-116 3–5 of 22, fewer at 1280 × 720 and
+    150%. decision-zone-labels' "inner system about 500 px across" took A-11's belt for the inner
+    system. The zones are dots at `ALL` in three of the four systems, so W1 stands as recorded.
+  - _A selected belt's scattered disc at `BELTS`_ (A-7, A-11) is left out: `BELTS` fits the belt
+    proper, and the disc's edges lie beyond the view, so its label has no place inside, as ruled.
