@@ -223,10 +223,19 @@ export interface RingLabel extends CurveLabelBase {
   /**
    * Whether the label is an annulus's, which gives way to the marks' labels: it is placed after
    * them, 0.5 rem clear of every label, 0.25 rem outside every mark's bracket's box, and is not
-   * drawn where it has no such place (plan 14, P14.T42.d; `placeAnnulusLabels`). Only an annulus's
-   * label has it; a plane ring's, a path's and the observer's do not.
+   * drawn where it has no such place (plan 14, P14.T42.d; `placeAnnulusLabels`). A selected
+   * annulus's label keeps those rules but is placed before them, and they give way to it
+   * ({@link RingLabel.selected}). Only an annulus's label has it; a plane ring's, a path's and the
+   * observer's do not.
    */
   readonly yieldsToMarks?: true;
+  /**
+   * Whether the label is a selected annulus's, a selected belt's, ring's or halo's: the selection's
+   * label, placed as the selection's is, after the curve labels that do not give way and before the
+   * marks' labels, which give way to it (plan 14, P14.T42.e). Only an annulus's label has it, beside
+   * {@link RingLabel.yieldsToMarks}, while its annulus is selected.
+   */
+  readonly selected?: true;
 }
 
 /** Where to put the DOM label of a sphere, a ring, an annulus or a path. */
@@ -793,7 +802,8 @@ function ringLabels(
 /**
  * The labels of the annuli, each at its outer edge's rimward point, or its spinward point where it
  * asks, away from the rings' labels at their coreward points, and each giving way to the marks'
- * labels (`yieldsToMarks`; plan 14, P14.T42.d); then those of the paths, each at its anchor.
+ * labels (`yieldsToMarks`; plan 14, P14.T42.d) but a selected annulus's, the selection's, to which
+ * they give way (`selected`; P14.T42.e); then those of the paths, each at its anchor.
  */
 function markCurveLabels(
   scene: SpatialScene,
@@ -819,6 +829,7 @@ function markCurveLabels(
       stack: 0,
       alongPx: ringPointsPx(band, annulus.outerRadius, fromDeg, toScreen),
       yieldsToMarks: true,
+      ...(annulus.selected === true ? { selected: true as const } : {}),
     });
   }
   for (const path of scene.paths ?? []) {
