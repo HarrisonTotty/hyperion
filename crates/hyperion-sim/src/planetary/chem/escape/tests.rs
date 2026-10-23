@@ -17,8 +17,26 @@ fn the_escape_is_held_only_until_the_24_bump() {
          `in_force` then gives `BATCH` alone, and the tests that pin version 23's figures under \
          `FITTED` move to the batch's), the tests' `with_rules`, and this test. From P14.T53.b \
          part 1: delete the tests' `with_present_state` and `PresentState` (its `Present` arm \
-         stands), so that `present_state_in_force` reads the batch alone. From P14.T53.b part 2: \
-         keep the supercritical envelope's test (`Atmosphere::supercritical_reservoir`, read by \
+         stands), so that `present_state_in_force` reads the batch alone, and settle the tests \
+         that compare part 1 against P14.T53.a's batch as built (`PresentState::Peak`): \
+         `under_every_24_hold_a_past_only_runaway_publishes_its_present_class`, \
+         `under_every_24_hold_only_a_runaway_under_its_deck_below_430_k_is_solved_again`, \
+         `under_every_24_hold_a_cold_runaway_is_solved_again_without_its_deck` and \
+         `under_every_24_hold_part_one_leaves_venus_earth_mars_and_titan_to_the_bit` \
+         (derive/atmosphere/tests.rs), and `present_census`'s `peak` run, read by \
+         `under_every_24_hold_part_one_s_moved_bodies_are_stated` and \
+         `under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_on_a_cold_deck` \
+         (system/tests.rs), each keeping its present half. Part 1 (c)'s rule stays: the hothouse \
+         between the limits (`solved_as_a_hothouse`, `water_saturation_temperature`, \
+         `PublishedState` and its re-solve in `PassBody::passes`); only its test-only switch \
+         goes, `PresentState::WithoutHothouse` (so that `hothouse_in_force` reads \
+         `present_state_in_force` alone), with the tests that state (c)'s first solve by it: \
+         `under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is_a_hothouse` \
+         (derive/atmosphere/tests.rs), \
+         `under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck` and \
+         `PresentBody::first_solve` (system/tests.rs), each keeping its present half. From \
+         P14.T53.b part 2: keep the \
+         supercritical envelope's test (`Atmosphere::supercritical_reservoir`, read by \
          `has_surface_section` at the record's three section tags) and delete only its hold, \
          `supercritical_section_in_force`, so that it reads the batch alone"
     );

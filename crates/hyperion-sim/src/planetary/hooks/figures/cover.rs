@@ -582,12 +582,17 @@ pub struct IceInputs<'a> {
     /// Its surface conditions (P14.T24.a's, at its θ): the zonal profile, or a locked world's day
     /// and night, and its mean surface temperature.
     pub conditions: &'a SurfaceConditions,
-    /// Its surface state (P14.T13.c's): a `Snowball` is wholly iced, and an airless body's ice
-    /// lasts below [`AIRLESS_ICE_TEMPERATURE`]. The record and the passes give the state its water
-    /// follows (`Atmosphere::water_state`, P14.T53.b part 1 (a)), so that a world that was a
-    /// runaway at its hosts' peak alone, published a `Snowball`, is not iced by water it lost; they
-    /// read the threshold of its published state.
+    /// Its published surface state (P14.T13.c's, [`Atmosphere::state`]), whose threshold sets
+    /// the cold area ([`ice_threshold`]): a `Snowball`'s the melting point, and an airless body's
+    /// ice lasts below [`AIRLESS_ICE_TEMPERATURE`].
     pub state: SurfaceState,
+    /// The state its water follows ([`Atmosphere::water_state`], P14.T53.b part 1 (a)), which
+    /// decides the cap, a `Snowball`'s water wholly iced over its cold area.
+    ///
+    /// It is [`state`](Self::state) but for a world that was a runaway at its hosts' peak alone,
+    /// published `Temperate` or `Snowball` and so read at that state's threshold, whose water is a
+    /// runaway's, lost: its ice is capped by its surface water, so that no water it lost ices it.
+    pub water_state: SurfaceState,
     /// Its crust: a silicate one's ice is capped by its surface water.
     pub crust: Crust,
     /// Its surface water `σ_s` ([`surface_water`]).
@@ -600,7 +605,9 @@ pub struct IceInputs<'a> {
 /// - a `Snowball`'s cold area below the melting point ([`melting_point`]; science-p14-t24b-laws
 ///   §4.x.2), uncapped, as T13.c's 0.50 albedo takes it: a `Snowball`'s ice lasts until its
 ///   warmest zone reaches melting, so a correctly labelled one is wholly iced, and one T13.c's
-///   flux labels a `Snowball` above melting (a 516 K world) holds none;
+///   flux labels a `Snowball` above melting (a 516 K world) holds none. A `Snowball` whose water
+///   follows a runaway ([`IceInputs::water_state`], P14.T53.b part 1 (a)) takes the same cold
+///   area, capped as below, since the water that would ice it was lost;
 /// - otherwise the area where the climate lies below [`ice_temperature`]: the annual-mean zonal
 ///   profile's cold area, or a world locked 1:1's eyeball cap
 ///   ([`SurfaceConditions::cold_area`]);
@@ -609,7 +616,9 @@ pub struct IceInputs<'a> {
 ///   generated Mars's 20 m of water gives 0.011, against its residual caps' 0.007, and Earth's 2.6
 ///   km does not bind. An ice-rich crust is its own ice, uncapped.
 ///
-/// Each threshold is [`ice_threshold`]'s. The climate regime (P14.T48.d,
+/// Each threshold is [`ice_threshold`]'s, of the published [`state`](IceInputs::state), and the
+/// cap is decided by the [`water_state`](IceInputs::water_state), as the record's water cover
+/// takes them, to the bit. The climate regime (P14.T48.d,
 /// [`regime`](crate::planetary::hooks::surface::regime)) reads this cover, and the cover reads no
 /// regime: the regime's condensable is water here, which P14.T51.a widens, and an
 /// [`IceBelt`](crate::planetary::hooks::surface::Forcing::IceBelt)'s band is the profile's own cold
@@ -630,7 +639,7 @@ pub fn ice_fraction(inputs: &IceInputs<'_>) -> f64 {
 /// profile built once (decision-p14-t51a-part2 §3.5): [`ice_fraction`] to the bit.
 #[must_use]
 pub(crate) fn ice_fraction_over(inputs: &IceInputs<'_>, cold: f64) -> f64 {
-    match inputs.state {
+    match inputs.water_state {
         SurfaceState::Snowball => return cold,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean

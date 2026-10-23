@@ -103,7 +103,14 @@ impl WagnerEquation {
     }
 
     /// d ln p ÷ d(1 ÷ T) at `temperature`, kelvin: `T_r` Σ aᵢ θ^tᵢ + T Σ aᵢ tᵢ θ^(tᵢ − 1), for
-    /// 0 < T < `T_r`.
+    /// 0 < T ≤ `T_r`.
+    ///
+    /// At `T_r` itself, θ = 0, every term of the first sum vanishes, and of the second only those
+    /// with tᵢ = 1 remain: the slope there is `T_r` a₁ for a published Wagner equation, whose
+    /// first exponent is 1 and whose others exceed it (P14.T53.b part 2's critical slope,
+    /// [`PhaseDiagram::critical_slope_pa_per_k`]), zero where every exponent exceeds 1, and not
+    /// finite where one lies below 1 (CoolProp's fitted ancillaries among them), whose θ^(tᵢ − 1)
+    /// is unbounded there.
     #[must_use]
     pub fn slope_k(&self, temperature: Kelvin) -> f64 {
         let reducing = self.reducing_temperature.value();
@@ -976,12 +983,14 @@ impl PhaseDiagram {
     /// first exponent is 1 is −a₁ `p_c` ÷ `T_c`, every other term's slope vanishing there
     /// (decision-p14-t51a-partition §5).
     ///
-    /// It is methane's 1.4568 × 10⁵ (a₁ = −6.036 219, Setzmann and Wagner 1991), carbon dioxide's
-    /// 1.7126 × 10⁵ (a₁ = −7.060 208 7, Span and Wagner 1996), nitrogen's 1.6481 × 10⁵
-    /// (a₁ = −6.124 452 84, Span et al. 2000) and water's 2.6799 × 10⁵ (a₁ = −7.859 517 83,
-    /// IAPWS-95's saturation release). NIST's secants over the last 1–2 K below `T_c`, 0.141,
-    /// 0.167, 0.158 and 0.264 MPa K⁻¹ (decision-p14-t51a-partition §5), lie a little under them,
-    /// as a chord of a curve that steepens toward its end lies under its tangent there.
+    /// It is methane's 1.4568 × 10⁵ (a₁ = −6.036 219, Setzmann and Wagner 1991, JPCRD 20, 1061,
+    /// Eq. (3.2)), carbon dioxide's 1.7126 × 10⁵ (a₁ = −7.060 208 7, Span and Wagner 1996, JPCRD
+    /// 25, 1509, Eq. (3.13)), nitrogen's 1.6481 × 10⁵ (a₁ = −6.124 452 84, Span et al. 2000,
+    /// JPCRD 29, 1361, Eq. (4)) and water's 2.6799 × 10⁵ (a₁ = −7.859 517 83, IAPWS SR1-86(1992),
+    /// Eq. (1), Wagner and Pruss 1993, JPCRD 22, 783), each its registry row's saturation curve.
+    /// NIST's secants over the last 1–2 K below `T_c`, 0.141, 0.167, 0.158 and 0.264 MPa K⁻¹
+    /// (decision-p14-t51a-partition §5), lie a little under them, as a chord of a curve that
+    /// steepens toward its end lies under its tangent there.
     ///
     /// `None` where the equation gives no finite positive slope at the critical point: CoolProp's
     /// fitted ancillaries whose first exponent is not 1 (krypton's, xenon's, nitrous oxide's,
@@ -1006,14 +1015,18 @@ impl PhaseDiagram {
     /// (decision-p14-t51a-partition §5; plan 14, P14.T53.b part 2).
     ///
     /// It divides a fluid above its critical temperature into the gas-like air below it and a
-    /// liquid-like supercritical layer above it (Simeoni et al. 2010, Nat. Phys. 6, 503: the two
-    /// regimes are not divided by a first-order singularity, and the line between them leaves the
-    /// critical point along the saturation curve's continuation). NIST's critical isochores
-    /// (the density at `ρ_c`) of methane, carbon dioxide, nitrogen and water lie within 6% of it
-    /// up to 1.6–2.5 `T_c`: the line ÷ NIST runs from 1.000 at `T_c` to 0.950 at 2.05 `T_c` for
-    /// methane, from 1.000 to 0.960 and 0.976 at 2.45 `T_c` for carbon dioxide, from 0.998 to 0.941
-    /// at 1.96 `T_c` for nitrogen and from 1.000 to 0.945 at 1.62 `T_c` for water
-    /// (decision-p14-t51a-partition §5). Beyond those it is extrapolated.
+    /// liquid-like supercritical layer above it. The two regimes are divided by no first-order
+    /// singularity, and the line between them leaves the critical point along the saturation
+    /// curve's continuation: the critical isochore approximates the Widom line (Simeoni, Bryk,
+    /// Gorelli, Krisch, Ruocco, Santoro and Scopigno 2010, Nat. Phys. 6, 503–507).
+    ///
+    /// NIST's critical isochores (Chemistry WebBook, SRD 69, isochoric data at `ρ_c`) of methane,
+    /// carbon dioxide, nitrogen and water lie within 6% of this line up to 2–2.5 `T_c`, its worst
+    /// 4.3% for water: the line ÷ NIST is 1.000 at 1.008 `T_c` for methane, lowest 0.974 near
+    /// 1.68 `T_c`, and 0.976 at 2.10 `T_c`; for carbon dioxide lowest 0.981 near 1.45 `T_c` and
+    /// 1.001 at 2.43 `T_c`; for nitrogen lowest 0.975 at 1.65 `T_c` and 0.985 at 2.54 `T_c`; and
+    /// for water lowest 0.957 at 1.38 `T_c`, 0.964 at 1.62 `T_c` and 0.983 at 1.96 `T_c`. Beyond
+    /// those it is extrapolated.
     ///
     /// `None` below the critical temperature, where the saturation curve bounds the vapour, for a
     /// temperature that is not a number, and where the critical slope is `None`.
@@ -1035,14 +1048,14 @@ impl PhaseDiagram {
     /// # fn example() -> Option<()> {
     /// let methane = by_key("CH4")?.substance().phase_diagram()?;
     /// let critical = methane.critical_temperature();
-    /// assert_eq!(
-    ///     methane.critical_isochore_pressure(critical),
-    ///     Some(methane.critical_pressure())
-    /// );
+    /// let at_critical = methane.critical_isochore_pressure(critical)?.value();
+    /// let p_c = methane.critical_pressure().value();
+    /// assert!((at_critical - p_c).abs() <= 1e-12 * p_c);
     /// let at_200 = methane.critical_isochore_pressure(Kelvin::new(200.0))?.value();
     /// assert!((59e5..61e5).contains(&at_200));
     /// // Below the critical temperature the saturation curve bounds the vapour instead.
-    /// assert_eq!(methane.critical_isochore_pressure(Kelvin::new(190.0)), None);
+    /// let below = methane.critical_isochore_pressure(Kelvin::new(190.0));
+    /// assert!(below.is_none(), "{below:?}");
     /// let carbon_dioxide = by_key("CO2")?.substance().phase_diagram()?;
     /// let venus = carbon_dioxide.critical_isochore_pressure(Kelvin::new(737.0))?.value();
     /// assert!((800e5..830e5).contains(&venus));
@@ -1188,7 +1201,7 @@ pub fn condensables() -> impl Iterator<Item = SubstanceId> {
 
 #[cfg(test)]
 mod tests {
-    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::float::{assert_same_bits, bits};
 
     use super::*;
     use crate::substance::by_key;
@@ -2008,6 +2021,75 @@ mod tests {
         }
     }
 
+    /// P14.T53.b part 2: the critical isochore leaves the critical point along the saturation
+    /// curve (decision-p14-t51a-partition §5). For methane, carbon dioxide, nitrogen and water,
+    /// p* is `p_c` at `T_c` to the bit, its slope −a₁ `p_c` ÷ `T_c`, which the curve's own secant
+    /// over its last 0.1 mK meets; it is continuous and rising above `T_c`, and `None` below it
+    /// or at a temperature that is not a number. Every row of a gas of the air has it, and sulphur
+    /// dioxide; the six fitted ancillaries whose first exponent is not 1 have none.
+    #[test]
+    fn diagram_the_critical_isochore_leaves_the_critical_point_along_the_curve() {
+        for (key, a_1, slope) in [
+            ("CH4", -6.036_219, 1.4568e5),
+            ("CO2", -7.060_208_7, 1.7126e5),
+            ("N2", -6.124_452_84, 1.6481e5),
+            ("H2O", -7.859_517_83, 2.6799e5),
+        ] {
+            let d = diagram(key);
+            let (t_c, p_c) = (d.critical_temperature(), d.critical_pressure());
+            assert_eq!(
+                bits(d.critical_isochore_pressure(t_c).unwrap().value()),
+                bits(p_c.value()),
+                "{key}"
+            );
+            let s_c = d.critical_slope_pa_per_k().unwrap();
+            assert!(
+                relative(s_c, -a_1 * p_c.value() / t_c.value()) < 1e-12,
+                "{key}: {s_c}"
+            );
+            assert!(relative(s_c, slope) < 1e-4, "{key}: {s_c}");
+            let step = 1e-4;
+            let below = d.saturation_pressure(Kelvin::new(t_c.value() - step));
+            let secant = (p_c.value() - below.value()) / step;
+            assert!(
+                relative(secant, s_c) < 1e-3,
+                "{key}: the secant {secant} against {s_c}"
+            );
+            let mut last = p_c.value();
+            for above in [1e-9, 1e-3, 1.0, 10.0, 100.0, t_c.value()] {
+                let p = d
+                    .critical_isochore_pressure(Kelvin::new(t_c.value() + above))
+                    .unwrap()
+                    .value();
+                assert!(p > last, "{key} at T_c + {above} K: {p} after {last}");
+                assert!(
+                    relative(p, p_c.value() + s_c * above) < 1e-12,
+                    "{key} at T_c + {above} K"
+                );
+                last = p;
+            }
+            let near = d.critical_isochore_pressure(Kelvin::new(t_c.value() + 1e-9));
+            assert!(relative(near.unwrap().value(), p_c.value()) < 1e-9, "{key}");
+            let under = Kelvin::new(t_c.value() - 1e-9);
+            let below = d.critical_isochore_pressure(under);
+            assert!(below.is_none(), "{key}: {below:?}");
+            let nan = Kelvin::new(f64::NAN);
+            let unread = d.critical_isochore_pressure(nan);
+            assert!(unread.is_none(), "{key}: {unread:?}");
+        }
+        for key in ["H2O", "CH4", "NH3", "N2", "O2", "CO2", "Ar", "SO2"] {
+            assert!(diagram(key).critical_slope_pa_per_k().is_some(), "{key}");
+        }
+        for key in ["Kr", "Xe", "N2O", "CO", "H2S", "C2H6"] {
+            let d = diagram(key);
+            let slope = d.critical_slope_pa_per_k();
+            assert!(slope.is_none(), "{key}: {slope:?}");
+            let above = Kelvin::new(d.critical_temperature().value() + 10.0);
+            let isochore = d.critical_isochore_pressure(above);
+            assert!(isochore.is_none(), "{key}: {isochore:?}");
+        }
+    }
+
     /// `WagnerEquation::ln_pressure` as it was before R09.T16.a: each power its own `math::powf`.
     fn powf_loop_wagner_ln_pressure(equation: &WagnerEquation, temperature: Kelvin) -> f64 {
         let reducing = equation.reducing_temperature.value();
@@ -2296,66 +2378,5 @@ mod tests {
         }
         // 14 condensables of at least three equations each, at 8,001 temperatures an equation.
         assert!(finite > 300_000, "{finite} finite values compared");
-    }
-
-    /// P14.T53.b part 2: the critical isochore leaves the critical point along the saturation
-    /// curve (decision-p14-t51a-partition §5). For methane, carbon dioxide, nitrogen and water,
-    /// p* is `p_c` at `T_c` to the bit, its slope −a₁ `p_c` ÷ `T_c`, which the curve's own secant
-    /// over its last 0.1 mK meets; it is continuous and rising above `T_c`, and `None` below it
-    /// or at a temperature that is not a number. Every row of a gas of the air has it, and sulphur
-    /// dioxide; the six fitted ancillaries whose first exponent is not 1 have none.
-    #[test]
-    fn diagram_the_critical_isochore_leaves_the_critical_point_along_the_curve() {
-        for (key, a_1, slope) in [
-            ("CH4", -6.036_219, 1.4568e5),
-            ("CO2", -7.060_208_7, 1.7126e5),
-            ("N2", -6.124_452_84, 1.6481e5),
-            ("H2O", -7.859_517_83, 2.6799e5),
-        ] {
-            let d = diagram(key);
-            let (t_c, p_c) = (d.critical_temperature(), d.critical_pressure());
-            assert_eq!(d.critical_isochore_pressure(t_c), Some(p_c), "{key}");
-            let s_c = d.critical_slope_pa_per_k().unwrap();
-            assert!(
-                relative(s_c, -a_1 * p_c.value() / t_c.value()) < 1e-12,
-                "{key}: {s_c}"
-            );
-            assert!(relative(s_c, slope) < 1e-4, "{key}: {s_c}");
-            let step = 1e-4;
-            let below = d.saturation_pressure(Kelvin::new(t_c.value() - step));
-            let secant = (p_c.value() - below.value()) / step;
-            assert!(
-                relative(secant, s_c) < 1e-3,
-                "{key}: the secant {secant} against {s_c}"
-            );
-            let mut last = p_c.value();
-            for above in [1e-9, 1e-3, 1.0, 10.0, 100.0, t_c.value()] {
-                let p = d
-                    .critical_isochore_pressure(Kelvin::new(t_c.value() + above))
-                    .unwrap()
-                    .value();
-                assert!(p > last, "{key} at T_c + {above} K: {p} after {last}");
-                assert!(
-                    relative(p, p_c.value() + s_c * above) < 1e-12,
-                    "{key} at T_c + {above} K"
-                );
-                last = p;
-            }
-            let near = d.critical_isochore_pressure(Kelvin::new(t_c.value() + 1e-9));
-            assert!(relative(near.unwrap().value(), p_c.value()) < 1e-9, "{key}");
-            let under = Kelvin::new(t_c.value() - 1e-9);
-            assert_eq!(d.critical_isochore_pressure(under), None, "{key}");
-            let nan = Kelvin::new(f64::NAN);
-            assert_eq!(d.critical_isochore_pressure(nan), None, "{key}");
-        }
-        for key in ["H2O", "CH4", "NH3", "N2", "O2", "CO2", "Ar", "SO2"] {
-            assert!(diagram(key).critical_slope_pa_per_k().is_some(), "{key}");
-        }
-        for key in ["Kr", "Xe", "N2O", "CO", "H2S", "C2H6"] {
-            let d = diagram(key);
-            assert_eq!(d.critical_slope_pa_per_k(), None, "{key}");
-            let above = Kelvin::new(d.critical_temperature().value() + 10.0);
-            assert_eq!(d.critical_isochore_pressure(above), None, "{key}");
-        }
     }
 }

@@ -31,11 +31,12 @@
 //! pass a host at the hottest host's temperature ([`PassLight`]).
 
 use super::{
-    Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, RunawayDeck, SurfaceMaterial,
-    SurfaceState,
+    Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, PublishedState, RunawayDeck,
+    SurfaceMaterial, SurfaceState,
 };
 use crate::planetary::chem::partition::{
-    Basins, ClimateSpan, Condensates, Cover, CrustWater, Ground, Partition, WaterCover, partition,
+    Basins, ClimateSpan, CondensatePhase, Condensates, Cover, CrustWater, Ground, Partition,
+    WaterCover, partition,
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
@@ -102,6 +103,10 @@ pub(crate) struct PassSurface<'a> {
     /// [`RunawayDeck::Deckless`] for the passes of a runaway solved again without the deck
     /// ([`with_deck`](Self::with_deck)).
     pub(crate) deck: RunawayDeck,
+    /// The state the pass publishes (P14.T53.b part 1 (c)): [`PublishedState::Climate`] from both
+    /// constructors, and [`PublishedState::Hothouse`] for the passes of a body solved again as a
+    /// hothouse between the limits ([`with_published`](Self::with_published)).
+    pub(crate) published: PublishedState,
 }
 
 /// The climate a pass reads ([`PassSurface::climate`]).
@@ -175,6 +180,7 @@ impl<'a> PassSurface<'a> {
             light,
             regolith: &Regolith::of_material,
             deck: RunawayDeck::Kept,
+            published: PublishedState::Climate,
         }
     }
 
@@ -190,6 +196,7 @@ impl<'a> PassSurface<'a> {
             light,
             regolith: &Regolith::of_material,
             deck: RunawayDeck::Kept,
+            published: PublishedState::Climate,
         }
     }
 
@@ -197,6 +204,12 @@ impl<'a> PassSurface<'a> {
     #[must_use]
     pub(crate) const fn with_deck(self, deck: RunawayDeck) -> Self {
         Self { deck, ..self }
+    }
+
+    /// The same surface with the published state `published` (P14.T53.b part 1 (c)).
+    #[must_use]
+    pub(crate) const fn with_published(self, published: PublishedState) -> Self {
+        Self { published, ..self }
     }
 }
 
@@ -500,6 +513,12 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 ///   the atmosphere then publishes ([`Atmosphere::runaway_deck`]: kept for every other state);
 /// - and every state but a gas envelope floored at its air's own Rayleigh layer's, from
 ///   [`RAYLEIGH_FLOOR_VERSION`](area_mix::RAYLEIGH_FLOOR_VERSION) (P14.T24.h.a; [`floored`]).
+///
+/// The atmosphere also carries whether the condensates the pass published list liquid water,
+/// which P14.T53.b part 1 (c)'s test reads ([`solved_as_a_hothouse`]): none for a gas envelope
+/// and a magma ocean, which publish none.
+///
+/// [`solved_as_a_hothouse`]: super::solved_as_a_hothouse
 #[must_use]
 pub(super) fn area_mixed(
     air: &Atmosphere,
@@ -514,18 +533,19 @@ pub(super) fn area_mixed(
             &hottest
         }
     };
-    let (albedo, cloud_fraction, lid) = match air.state {
+    let (albedo, cloud_fraction, lid, liquid_water) = match air.state {
         SurfaceState::GasEnvelope => (
             area_mix::giant_bond(shade, inputs.heated, inputs.class),
             area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
             None,
+            false,
         ),
         SurfaceState::MagmaOcean => {
             let lid = match surface.climate {
                 PassClimate::Spun(spun) => spun_lid(air, inputs, spun, None),
                 PassClimate::Given(_) => None,
             };
-            (area_mix::melt_bond(), 0.0, lid)
+            (area_mix::melt_bond(), 0.0, lid, false)
         }
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
@@ -549,6 +569,7 @@ pub(super) fn area_mixed(
         albedo: bond_albedo(albedo, air.state, inputs.material),
         cloud_fraction,
         runaway_deck,
+        liquid_water,
         ..*air
     };
     (air, lid)
@@ -726,15 +747,16 @@ pub(crate) mod floor_read {
 
 /// The area-mix Bond albedo and cloud fraction of a body with a surface, the atmosphere `air` of
 /// the body `inputs` describe on the surface `surface` under the light `shade` ([`area_mixed`]),
-/// its cloud a runaway's by the surface's deck, and the lid its pass takes under the body's own
-/// climate, whose row its regolith is.
+/// its cloud a runaway's by the surface's deck, the lid its pass takes under the body's own
+/// climate, whose row its regolith is, and whether the condensates it publishes list liquid water
+/// (P14.T53.b part 1 (c)).
 #[must_use]
 fn surface_and_cloud(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
     shade: &HostShade,
-) -> (f64, f64, Option<CrustLid>) {
+) -> (f64, f64, Option<CrustLid>, bool) {
     let regolith_of = |lid: Option<&CrustLid>| {
         lid.map_or_else(
             || (surface.regolith)(inputs.material),
@@ -745,7 +767,7 @@ fn surface_and_cloud(
     };
     let Some(gravity) = surface_gravity(inputs) else {
         // A body of no mass or radius holds nothing, and takes no lid.
-        return (regolith_of(None), 0.0, None);
+        return (regolith_of(None), 0.0, None, false);
     };
     let ((solved, published, _), lid) = match surface.climate {
         PassClimate::Given(climate_of) => (
@@ -774,7 +796,10 @@ fn surface_and_cloud(
         cloud,
         area_mix::cloud_albedo((air.state, deck), shade),
     );
-    (albedo, cloud, lid)
+    let liquid_water = published
+        .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+        .is_some();
+    (albedo, cloud, lid, liquid_water)
 }
 
 /// What the last spun pass on a thread published (P14.T54.a's rule (f) tests): its conditions, if
@@ -860,14 +885,20 @@ pub(crate) mod spun_read {
         });
     }
 
-    /// Forgets the lids, and the deferred warmest beside them, of the spun passes a capture has
-    /// recorded so far: a body solved once more without its deck (P14.T53.b part 1 (b)) lists its
-    /// published solve's passes alone, as it counts them.
-    pub(crate) fn restart() {
-        if ON.with(Cell::get) {
-            LIDS.with(|lids| lids.borrow_mut().clear());
-            DEFERREDS.with(|all| all.borrow_mut().clear());
-        }
+    /// How many lids, each with the deferred warmest beside it, the capture has recorded so far:
+    /// the mark [`rewind`] goes back to.
+    #[must_use]
+    pub(crate) fn mark() -> usize {
+        LIDS.with(|lids| lids.borrow().len())
+    }
+
+    /// Forgets the lids, and the deferred warmest beside each, of the spun passes recorded since
+    /// `mark` ([`mark`]): a body solved once more without its deck or as a hothouse (P14.T53.b
+    /// part 1 (b) and (c)) lists its published solve's passes alone, as it counts them, and every
+    /// earlier body's stay.
+    pub(crate) fn rewind(mark: usize) {
+        LIDS.with(|lids| lids.borrow_mut().truncate(mark));
+        DEFERREDS.with(|all| all.borrow_mut().truncate(mark));
     }
 
     /// `run`'s result and the last spun pass it published, if any, with the lids of every spun

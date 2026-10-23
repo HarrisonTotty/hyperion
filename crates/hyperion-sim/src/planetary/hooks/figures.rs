@@ -2293,7 +2293,8 @@ impl GlobalFigures {
             cover::ice_fraction_over(
                 &cover::IceInputs {
                     conditions,
-                    state: self.water_state,
+                    state: self.state,
+                    water_state: self.water_state,
                     crust,
                     surface_water,
                 },
@@ -2649,6 +2650,14 @@ impl GlobalFigures {
         &self.relief
     }
 
+    /// The state the air's water follows ([`Atmosphere::water_state`]), which the tests read
+    /// beside the record's published state to rebuild its water ice ([`cover::IceInputs`]).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn water_state(&self) -> SurfaceState {
+        self.water_state
+    }
+
     /// The surface water `σ_s`, kg m⁻² ([`cover::surface_water`]): P14.T13.a's water over the
     /// surface while the volcanic greenhouse runs, and 2% of it after.
     #[must_use]
@@ -2816,7 +2825,8 @@ pub(crate) fn water_cover_over(
     let ice = cover::ice_fraction_over(
         &cover::IceInputs {
             conditions,
-            state: water_state,
+            state,
+            water_state,
             crust: ground.crust,
             surface_water: ground.surface_water,
         },

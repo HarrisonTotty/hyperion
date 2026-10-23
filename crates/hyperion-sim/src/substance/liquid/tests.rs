@@ -2664,7 +2664,8 @@ fn the_compressed_liquids_are_held_only_until_the_24_bump() {
          `under_compression_the_area_mix_s_sea_reads_its_layer_s_density` and \
          `under_compression_the_area_mix_s_sea_reads_the_palette_s_density` \
          (derive/photometry/area_mix/tests.rs) and \
-         `the_record_at_a_pressure_reads_the_compressed_density` (liquid/tests.rs)"
+         `the_record_at_a_pressure_reads_the_compressed_density` (liquid/tests.rs). Delete this \
+         hold's switch from `planetary::testing::with_every_24_hold`"
     );
     assert_eq!(
         CompressedLiquidsRules::in_force(),

@@ -1898,12 +1898,12 @@ pub(crate) fn derive_moon_under(
     .map_err(DeriveMoonError::Body)?;
     let tide = own_tides(
         &tide_of,
-        &TideAt {
-            inventory_water: body.inventory().water(),
-            state: body.atmosphere().water_state(),
-            equilibrium: body.equilibrium_temperature(),
-            fractions: body.fractions(),
-        },
+        &TideAt::of(
+            body.inventory().water(),
+            body.atmosphere(),
+            body.equilibrium_temperature(),
+            body.fractions(),
+        ),
     );
     Ok(DerivedMoon {
         body,
@@ -1957,12 +1957,7 @@ impl PassRecordOf for MoonPassRecord<'_> {
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext {
         let tide = own_tides(
             &self.tide,
-            &TideAt {
-                inventory_water: bulk.inventory_water,
-                state: air.water_state(),
-                equilibrium,
-                fractions: bulk.fractions,
-            },
+            &TideAt::of(bulk.inventory_water, air, equilibrium, bulk.fractions),
         );
         let at = MoonTideAt {
             heat_flux: tide.heat_flux,
@@ -2005,6 +2000,29 @@ struct TideAt {
     state: SurfaceState,
     equilibrium: Kelvin,
     fractions: MassFractions,
+}
+
+impl TideAt {
+    /// What a moon's tide reads of a pass whose atmosphere is `air`, at its inventory's water
+    /// `inventory_water`, its equilibrium temperature `equilibrium` and its solids' fractions
+    /// `fractions`: its state the one its water follows ([`Atmosphere::water_state`]), so that a
+    /// moon inside the runaway limit at its hosts' largest past luminosity alone, published
+    /// `Temperate` or `Snowball`, takes the runaway's dry lid in its non-tidal heat (P14.T53.b part
+    /// 1 (a)). Its derivation and its passes' contexts both read a pass by it.
+    #[must_use]
+    fn of(
+        inventory_water: Kilograms,
+        air: &Atmosphere,
+        equilibrium: Kelvin,
+        fractions: MassFractions,
+    ) -> Self {
+        Self {
+            inventory_water,
+            state: air.water_state(),
+            equilibrium,
+            fractions,
+        }
+    }
 }
 
 /// A moon's orbit as its eccentricity tide reads it ([`TideOf::elements`]).
@@ -3466,6 +3484,7 @@ mod tests {
                 let ice = cover::ice_fraction(&cover::IceInputs {
                     conditions: &conditions,
                     state: air.state(),
+                    water_state: air.water_state(),
                     crust: figures.impactors().crust(),
                     surface_water: figures.surface_water(),
                 });
@@ -4361,6 +4380,66 @@ mod tests {
             orbit: *p.orbit(),
             host_mass: p.host_mass(),
             maximum_moon_mass: p.maximum_moon_mass(),
+        }
+    }
+
+    /// P14.T53.b part 1 (a) at the moons' tide (the batch review's fixes): a pass's tide reads the
+    /// state its air's water follows ([`TideAt::of`]), so that an Earth-mass moon of the table's
+    /// Jupiter under [`past_only_runaways`]' atmospheres, every 24 hold in force, inside the
+    /// runaway limit at its hosts' largest past luminosity alone and published `Temperate` or
+    /// `Snowball`, takes the runaway's dry lid in its non-tidal heat: its tides are the runaway's
+    /// to the bit, where its control, whose water is its own, takes the wet one.
+    ///
+    /// [`past_only_runaways`]: crate::planetary::derive::atmosphere::tests::past_only_runaways
+    #[test]
+    fn under_every_24_hold_a_past_only_runaway_moon_s_tide_reads_its_water_s_runaway() {
+        use crate::planetary::derive::atmosphere::tests::past_only_runaways;
+        let jupiter = table_giant("Jupiter", 5, None);
+        let orbit = about(&jupiter.0, 1_070_400.0, 0.01);
+        let fractions = MassFractions::solid(0.325, 0.675, 0.0);
+        let radius = Metres::new(crate::units::consts::EARTH_RADIUS_M);
+        let tide_of = TideOf {
+            planet: Kilograms::from(jupiter.0.mass()),
+            mass: EarthMasses::new(1.0),
+            orbit: &orbit,
+            radius,
+            ice_fraction: 0.0,
+            bulk: MoonBulk::Stated {
+                radius,
+                fractions,
+                lag: crate::planetary::derive::SurfaceLag::Bare,
+            },
+            fe_h: Dex::new(0.0),
+            age: SOLAR_AGE,
+        };
+        for case in past_only_runaways() {
+            let water = case.inputs.inventory.water();
+            let at = |air: &Atmosphere| TideAt::of(water, air, case.inputs.equilibrium, fractions);
+            let (now, control, runaway) = (at(&case.air), at(&case.control), at(&case.runaway));
+            assert_eq!(now.state, SurfaceState::RunawayGreenhouse);
+            assert_eq!(control.state, case.published);
+            let tides = |pass: &TideAt| own_tides(&tide_of, pass);
+            let (now, control, runaway) = (tides(&now), tides(&control), tides(&runaway));
+            eprintln!(
+                "an Earth-mass moon of Jupiter under a past-only runaway published {:?}: its tide's \
+                 heat flow {:.4} mW m⁻² (its control's {:.4}, the runaway's {:.4})",
+                case.published,
+                now.ocean_heat_flow.value() * 1e3,
+                control.ocean_heat_flow.value() * 1e3,
+                runaway.ocean_heat_flow.value() * 1e3,
+            );
+            assert_eq!(
+                format!("{now:?}"),
+                format!("{runaway:?}"),
+                "{:?}",
+                case.published
+            );
+            assert_ne!(
+                format!("{now:?}"),
+                format!("{control:?}"),
+                "{:?}",
+                case.published
+            );
         }
     }
 }

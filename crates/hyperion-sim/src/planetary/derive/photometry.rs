@@ -685,8 +685,9 @@ pub struct PhotometryInputs {
     pub state: SurfaceState,
     /// Whether a runaway greenhouse keeps Venus's deck
     /// ([`Atmosphere::runaway_deck`](crate::planetary::derive::Atmosphere::runaway_deck),
-    /// P14.T53.b part 1 (b)): a deckless one takes a dry temperate world's template. Every other
-    /// state's is [`RunawayDeck::Kept`], which the template does not read.
+    /// P14.T53.b part 1 (b)), a deckless one taking a dry temperate world's template.
+    ///
+    /// Every other state's is [`RunawayDeck::Kept`], which the template does not read.
     pub runaway_deck: RunawayDeck,
     /// What an airless surface is made of, by the record's composition.
     pub material: SurfaceMaterial,

@@ -713,11 +713,15 @@ mod tests {
              argon arm) with `under_24_s_densities_the_argon_ice_body_reads` (surface/inputs.rs), \
              `the_radiative_model_reads_its_record_s_inertia_on_every_body` with \
              `under_24_s_densities_the_radiative_model_reads_its_record_s_inertia_on_every_body` \
-             (airless.rs), and `the_golden_systems_unlit_records_read_their_night_floor`, \
-             `the_sample_s_unlit_records_read_their_night_floor` and `unlit_moves` with \
-             `under_24_s_densities_the_golden_systems_unlit_records_all_read`, \
-             `under_24_s_densities_the_sample_s_unlit_records_all_read` and \
-             `the_sample_s_argon_ices_under_24_s_rules` (system/tests.rs)"
+             (airless.rs), and `the_sample_s_argon_ices_under_24_s_rules` and the unlit records' \
+             tests in the 24 combination, \
+             `under_24_s_densities_the_golden_systems_unlit_records_all_read` and \
+             `under_24_s_densities_the_sample_s_unlit_records_all_read`, each losing its run with \
+             23's densities (system/tests.rs, whose \
+             `under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor` and \
+             `under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor` read 24's \
+             densities through `planetary::testing::with_every_24_hold`). Delete this hold's \
+             switch from that helper"
         );
         assert_eq!(ReadDensitiesRules::in_force(), ReadDensitiesRules::Held);
         assert_eq!(

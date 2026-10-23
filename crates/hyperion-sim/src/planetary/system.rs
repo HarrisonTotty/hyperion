@@ -3497,6 +3497,9 @@ impl PlanetarySystem {
                 };
                 let (surface, envelope) =
                     self.surface_or_envelope(body, of, body_spin, (&bulk, derived.atmosphere()));
+                // `derived` tags the surface and the envelope by the derivation's gravity; the
+                // published bulk's tags, set after it, decide (an icy member's gravity is its ruling
+                // 112.8 bulk's, not its derivation's).
                 builder
                     .derived(&derived)
                     .bulk(Section::Ok(bulk))

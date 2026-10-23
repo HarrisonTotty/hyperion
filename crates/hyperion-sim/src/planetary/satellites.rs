@@ -196,6 +196,14 @@ impl Satellite {
         &self.volatiles
     }
 
+    /// The same moon with the volatile ranks `volatiles`, for a test that builds a moon by hand
+    /// from a generated one (P14.T53.b part 2's moon under a supercritical envelope).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn with_volatiles(self, volatiles: VolatileDraws) -> Self {
+        Self { volatiles, ..self }
+    }
+
     /// Where its volatiles formed (P14.T56.c): a regular moon's in its planet's nursery, a captured
     /// or giant-impact moon's in its parent's zone of the star's disc.
     #[must_use]

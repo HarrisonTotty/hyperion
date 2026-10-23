@@ -2199,7 +2199,8 @@ mod tests {
              sources renamed to the rows' own, 23's parts, mode and labels deleted), and delete \
              `ROW_DARKENING_VERSION`, `RowDarkeningRules` with its `Held` arm, \
              `with_row_darkening` and its thread's rules (and the switch in every test that sets \
-             it), `DARKENED` and `darkened_rows`, this test and \
+             it, `planetary::testing::with_every_24_hold`'s among them), `DARKENED` and \
+             `darkened_rows`, this test and \
              `a_panic_inside_the_row_darkening_switch_sets_the_rules_back`. In hyperion-fit's \
              `substance_albedos`, drop the superseded items `BASALT_REDUCED_ALBEDO` and \
              `FERRIC_ALBEDO`, fit the swapped rows as their own items (ITEMS back to 55, the fit's \

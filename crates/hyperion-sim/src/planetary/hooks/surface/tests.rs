@@ -3315,6 +3315,7 @@ fn the_batch_publishes_the_table_s_condensates() {
             let t24b = cover::ice_fraction(&cover::IceInputs {
                 conditions: &conditions,
                 state: atmosphere.state(),
+                water_state: atmosphere.water_state(),
                 crust: batch.impactors().crust(),
                 surface_water: batch.surface_water(),
             });
@@ -3338,6 +3339,7 @@ fn the_batch_publishes_the_table_s_condensates() {
             let t24b = cover::ice_fraction(&cover::IceInputs {
                 conditions: &conditions,
                 state: atmosphere.state(),
+                water_state: atmosphere.water_state(),
                 crust: batch.impactors().crust(),
                 surface_water: batch.surface_water(),
             });

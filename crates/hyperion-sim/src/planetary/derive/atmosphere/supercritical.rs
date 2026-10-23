@@ -4,11 +4,12 @@
 //! [`THIN_ENVELOPE_FRACTION`] of the body's mass over its ground.
 //!
 //! - **The line.** Above its critical temperature `T_c` a fluid has no interface, and its
-//!   gas-like and liquid-like regimes are divided by no first-order singularity (Simeoni et al.
-//!   2010, Nat. Phys. 6, 503). Their line here is the critical isochore,
-//!   p* = `p_c` + `s_c` (`T_s` − `T_c`), the saturation curve's tangent at its critical point
-//!   continued above it ([`PhaseDiagram::critical_isochore_pressure`]), at the published mean
-//!   surface temperature `T_s` (decision-p14-t51a-partition §5).
+//!   gas-like and liquid-like regimes are divided by no first-order singularity. Their line here
+//!   is the critical isochore, which approximates the Widom line (Simeoni, Bryk, Gorelli, Krisch,
+//!   Ruocco, Santoro and Scopigno 2010, Nat. Phys. 6, 503–507): p* = `p_c` + `s_c` (`T_s` − `T_c`),
+//!   the saturation curve's tangent at its critical point continued above it
+//!   ([`PhaseDiagram::critical_isochore_pressure`]), at the published mean surface temperature
+//!   `T_s` (decision-p14-t51a-partition §5).
 //! - **The reservoir.** A condensable whose own partial pressure `p_i` exceeds p* holds a
 //!   liquid-like column between p* and the lesser of `p_i` and its melting pressure at `T_s`
 //!   ([`PhaseDiagram::melting_pressure`], where the reference gives a rising branch there; else
@@ -246,7 +247,7 @@ impl Atmosphere {
 
 #[cfg(test)]
 mod tests {
-    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::float::{assert_same_bits, bits};
 
     use super::*;
     use crate::planetary::chem::escape::with_rules;
@@ -283,14 +284,16 @@ mod tests {
         let column = critical_columns(t, &under, G).next().unwrap();
         assert_eq!(column.gas(), Gas::Methane);
         assert_same_bits(column.share(), 0.0);
-        assert_eq!(hiding_reservoir(t, &under, G), None);
+        let hidden = hiding_reservoir(t, &under, G);
+        assert!(hidden.is_none(), "{hidden:?}");
         let just_under = alone(Gas::Methane, at_share(Gas::Methane, t, 0.999_999e-3));
         let column = critical_columns(t, &just_under, G).next().unwrap();
         assert!(
             column.share() > 0.99e-3 && !column.hides_the_surface(),
             "{column:?}"
         );
-        assert_eq!(hiding_reservoir(t, &just_under, G), None);
+        let hidden = hiding_reservoir(t, &just_under, G);
+        assert!(hidden.is_none(), "{hidden:?}");
         let just_over = alone(Gas::Methane, at_share(Gas::Methane, t, 1.000_001e-3));
         let hiding = hiding_reservoir(t, &just_over, G).unwrap();
         assert_eq!(hiding.gas(), Gas::Methane);
@@ -323,11 +326,11 @@ mod tests {
             }
             let at = critical_columns(t_c, &alone(gas, 1e11), G).next().unwrap();
             assert_eq!(
-                at.isochore_pressure(),
-                diagram.critical_pressure(),
+                bits(at.isochore_pressure().value()),
+                bits(diagram.critical_pressure().value()),
                 "{gas:?}"
             );
-            assert_same_bits(at.temperature_ratio(), 1.0);
+            assert_eq!(bits(at.temperature_ratio()), bits(1.0), "{gas:?}");
         }
     }
 
@@ -350,12 +353,16 @@ mod tests {
         assert_eq!(hiding_reservoir(t, &air, G).unwrap().gas(), Gas::Methane);
         for gravity in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let gravity = MetresPerSecondSquared::new(gravity);
-            assert_eq!(hiding_reservoir(t, &air, gravity), None, "{gravity:?}");
+            let hidden = hiding_reservoir(t, &air, gravity);
+            assert!(hidden.is_none(), "{gravity:?}: {hidden:?}");
         }
-        assert_eq!(hiding_reservoir(Kelvin::new(f64::NAN), &air, G), None);
+        let hidden = hiding_reservoir(Kelvin::new(f64::NAN), &air, G);
+        assert!(hidden.is_none(), "{hidden:?}");
         let odd = PartialPressures::from_fn(|_| Pascals::new(f64::NAN));
-        assert_eq!(hiding_reservoir(t, &odd, G), None);
-        assert_eq!(hiding_reservoir(t, &PartialPressures::default(), G), None);
+        let hidden = hiding_reservoir(t, &odd, G);
+        assert!(hidden.is_none(), "{hidden:?}");
+        let hidden = hiding_reservoir(t, &PartialPressures::default(), G);
+        assert!(hidden.is_none(), "{hidden:?}");
     }
 
     /// The record's test is in force under the escape's batch rules alone.

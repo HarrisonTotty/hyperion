@@ -120,9 +120,9 @@ use crate::planetary::chem::escape::{moon_impact_speed, planet_impact_speed};
 use crate::planetary::chem::inventory::{ElementInventory, InventoryInputs, element_inventory};
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, EnvelopeHistory, Gas, Insolation, PassLight,
-    PassSurface, RunawayDeck, SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory,
-    atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
-    solved_without_the_deck,
+    PassSurface, PublishedState, RunawayDeck, SpunClimate, SurfaceMaterial, VolatileDraws,
+    VolatileInventory, atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left,
+    nitrogen_boosted, solved_as_a_hothouse, solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -1476,6 +1476,7 @@ pub(crate) fn derive_body_driven(
         envelope_history: history,
         envelope_helium: helium_before_passes(history, &bulk, &sky, age_now),
         deck: RunawayDeck::Kept,
+        published: PublishedState::Climate,
     }
     .passes(driver, record);
     let (passes, regolith_albedo) = passes;
@@ -1803,7 +1804,8 @@ pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
 /// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, its age,
 /// the side of the snow line it formed on (which its crust's basis reads, P14.T54.a), and what
 /// P14.T53.a's escape reads under its batch rules: its mean impact speed and its envelope's
-/// history; and the deck a runaway's cloud takes (P14.T53.b part 1 (b)).
+/// history; the deck a runaway's cloud takes (P14.T53.b part 1 (b)); and the state its passes
+/// publish (P14.T53.b part 1 (c)).
 #[derive(Debug, Clone, Copy)]
 struct PassBody<'a> {
     placed: &'a PlacedBody,
@@ -1825,6 +1827,11 @@ struct PassBody<'a> {
     /// ([`RunawayDeck::Kept`]) for the passes' first solve, and [`RunawayDeck::Deckless`] for a
     /// runaway's second ([`passes`](Self::passes), P14.T53.b part 1 (b)).
     deck: RunawayDeck,
+    /// The state its passes publish in every pass ([`PassSurface::published`]): the climate's
+    /// ([`PublishedState::Climate`]) for the passes' first solve, and a hothouse's
+    /// ([`PublishedState::Hothouse`]) for the solves after a first one judged a hothouse between
+    /// the limits ([`passes`](Self::passes), P14.T53.b part 1 (c)).
+    published: PublishedState,
 }
 
 /// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
@@ -1997,8 +2004,18 @@ impl PassBody<'_> {
     /// cycling temperature is solved once more, every pass without the deck, and that second solve
     /// is published ([`solved_without_the_deck`]; P14.T53.b part 1 (b), decision-absurd-states-24
     /// R3.2): it reads only the first solve's temperature, so there is no feedback, and nothing
-    /// returns to the decked branch. It covers the stand-in and the record alike, planets and
-    /// moons, with the driver given.
+    /// returns to the decked branch.
+    ///
+    /// Beside it, a published `Temperate` that is a hothouse between the limits (a dry one at or
+    /// above water's saturation temperature at its surface pressure, [`solved_as_a_hothouse`];
+    /// P14.T53.b part 1 (c), decision-t53b-arm-c) is solved once more, every pass a
+    /// `RunawayGreenhouse` under Venus's deck ([`PublishedState::Hothouse`]), and that solve
+    /// takes (b)'s test: below the cycling temperature it is solved a third time without the deck.
+    /// That is at most two solves more, each reading only the solve before's temperature, its
+    /// state and deck fixed within it, and none judges (c) again: no feedback, and nothing returns
+    /// to `Temperate`.
+    ///
+    /// Both cover the stand-in and the record alike, planets and moons, with the driver given.
     ///
     /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the published
     /// pass's regolith on the airless state under the hosts' light, its lid's row where it took
@@ -2008,27 +2025,57 @@ impl PassBody<'_> {
         let shade = &self.sky.shade;
         let surface = PassSurface::stand_in(PassLight::Shade(shade));
         let solve = |body: &Self| match record {
-            PassRecord::StandIn => body.stand_in_passes(driver, &surface.with_deck(body.deck)),
+            PassRecord::StandIn => body.stand_in_passes(
+                driver,
+                &surface.with_deck(body.deck).with_published(body.published),
+            ),
             PassRecord::Record(of) => body.record_passes(driver, of),
+        };
+        // Where the tests' traces and captured lids stood before this body's first solve.
+        #[cfg(test)]
+        let marks = (
+            PASS_TRACE.with(|trace| trace.borrow().len()),
+            crate::planetary::derive::atmosphere::spun_read::mark(),
+        );
+        // A solve after the first: the tests' traces and captured lids list the published solve,
+        // the last, a pass for each it counts. The earlier solves' entries alone are dropped, and
+        // what was collected before the first stays.
+        let solve_again = |body: &Self| {
+            #[cfg(test)]
+            {
+                PASS_TRACE.with(|trace| trace.borrow_mut().truncate(marks.0));
+                crate::planetary::derive::atmosphere::spun_read::rewind(marks.1);
+            }
+            solve(body)
         };
         let first = solve(self);
         let ended = if solved_without_the_deck(&first.air) {
-            // The tests' traces and captured lids list the published solve, the second, a pass
-            // for each it counts.
-            #[cfg(test)]
-            {
-                if driver == PassDriver::Traced {
-                    PASS_TRACE.with(|trace| trace.borrow_mut().clear());
-                }
-                crate::planetary::derive::atmosphere::spun_read::restart();
-            }
-            let deckless = solve(&Self {
+            let deckless = solve_again(&Self {
                 deck: RunawayDeck::Deckless,
                 ..*self
             });
             #[cfg(test)]
             crate::planetary::derive::atmosphere::count_deckless(first.count, deckless.count);
             deckless
+        } else if solved_as_a_hothouse(&first.air) {
+            let hothouse = Self {
+                published: PublishedState::Hothouse,
+                ..*self
+            };
+            let decked = solve_again(&hothouse);
+            let deckless = solved_without_the_deck(&decked.air).then(|| {
+                solve_again(&Self {
+                    deck: RunawayDeck::Deckless,
+                    ..hothouse
+                })
+            });
+            #[cfg(test)]
+            crate::planetary::derive::atmosphere::count_hothouse(
+                first.count,
+                decked.count,
+                deckless.map(|deckless| deckless.count),
+            );
+            deckless.unwrap_or(decked)
         } else {
             first
         };
@@ -2121,10 +2168,13 @@ impl PassBody<'_> {
     }
 
     /// The pass surface over the spun climate `spun` under the light `shade`, with this
-    /// derivation's deck (P14.T53.b part 1 (b); `with_deck`).
+    /// derivation's deck and published state (P14.T53.b part 1 (b) and (c); `with_deck`,
+    /// `with_published`).
     #[must_use]
     fn spun_surface<'s>(&self, spun: &'s SpunClimate<'s>, shade: &'s HostShade) -> PassSurface<'s> {
-        PassSurface::spun(spun, PassLight::Shade(shade)).with_deck(self.deck)
+        PassSurface::spun(spun, PassLight::Shade(shade))
+            .with_deck(self.deck)
+            .with_published(self.published)
     }
 
     /// That the record's figure bulk `record` shows its derivation's surface material (P14.T56.g;
@@ -2517,9 +2567,11 @@ impl Sky {
                 saturated.value() * host.xuv().saturation_time().value();
             if host.luminosity().value() > 0.0 {
                 let t_eff = host.effective_temperature();
-                runaway += peak.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
+                // One runaway limit a host for both sums: the same bits as two calls.
+                let runaway_limit = HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
+                runaway += peak.value() / runaway_limit;
                 maximum += flux.value() / HabitableLimit::MaximumGreenhouse.flux(t_eff).value();
-                runaway_now += flux.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
+                runaway_now += flux.value() / runaway_limit;
                 if t_eff > sums.hottest {
                     sums.hottest = t_eff;
                 }

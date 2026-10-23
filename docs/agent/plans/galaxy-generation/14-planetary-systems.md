@@ -3081,7 +3081,10 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - _Tests_ (with every landed 24 hold in force together, through one helper that later 24
       tests use):
       - 01ffeb2b9ffc0000.0700 keeps its Ar air at its floor, in its division's state; the other
-        three publish their floored mean's partial pressures, `Airless`;
+        three publish their floored mean's partial pressures, `Airless`. **Amended** (main,
+        2026-10-23, accepting the follow-up's record): with every 24 hold their N₂ sublimes at the
+        floor too, so .0700, 01ffdb2c1fff0001.0d00 and 01fffb2c20040000.0300 publish `Snowball`
+        N₂ airs at or above it, and 02000b2b60020000.0a00 alone stays `Airless`, at its floor;
       - over the sample, the goldens and LOOK72's 62: no surface body's mean below its night
         floor; no `Airless` record whose published partition holds at least `AIRLESS_PRESSURE`
         airborne; the 18 unlit records at their floor, and `for_body` `Ok` on them (with
@@ -7478,7 +7481,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
         own tests. Its water stays lost and its carbon airborne.
       - The state's branches (the cloud and its deck, the cover's threshold, the under-ice ocean,
         the phase template) read the published state. There is no feedback: the state comes from
-        the luminosities, not from the passes' figures.
+        the luminosities, not from the passes' figures, but for (c)'s one test on the solve the
+        passes publish.
       - About a main-sequence host the peak is the present, so nothing moves there. S_eff below
         2,600 K stays held at Kopparapu et al.'s end, stated: no verdict depends on it (the top
         ratio is 0.547, or 0.638 extrapolated).
@@ -7495,17 +7499,39 @@ feeding back into p_s, T_s, the albedo or the bulk.
       re-solve at most, reading only the first solve's T_s: no feedback. Where the deckless T_s is
       at or above the cycling temperature (a partial deck, not modelled), it is counted and
       recorded for P14.T53.e. About 0.4% of bodies re-solve; its cost is stated.
-    - _(c) Only if the LOOK72 census at 24 shows a dry `Temperate` above water's saturation
-      temperature at its p_s_ (decision-absurd-states-24 R4.2): a `Temperate` whose divide stores
-      no carbon for want of water, and whose solve holds no liquid water at T_s at or above
-      water's saturation temperature at p_s, publishes `RunawayGreenhouse`, re-solved once with
-      that state's branches and (b)'s test; its inventory unchanged.
-    - Docs (sim, DTO; the guide's `RUNAWAY GREENHOUSE` meaning through the UX sign-off): inside the
-      runaway limit now, its water lost, under whatever air escape left it, with Venus's deck only
-      where the air beneath can cycle it; then `just gen-protocol`.
+    - _(c) The hothouse between the limits_ (built: decision-t53b-arm-c; decision-absurd-states-24
+      R4.2; decision-p14-t54a-states §3.4's rule 6, its test taken at 24 for this case alone).
+      R4.3's census left LOOK72's two dry `Temperate`s airless, but (a) makes one, between the
+      limits now: the census's 01ffeb2c5ffe0000.0100, about a 2,456 K substellar host.
+      - A published `Temperate` whose divide stores no carbon for want of water (a past
+        runaway's, or a dry world's), and whose solve holds no liquid water at a T_s at or above
+        water's saturation temperature at its p_s, publishes `RunawayGreenhouse`, its inventory
+        and its division's state unchanged. `Airless` and `MagmaOcean` keep their own tests.
+      - Water's saturation temperature is the registry's liquid–vapour curve (T49.b's), and its
+        critical temperature, 647.096 K, at or above its critical pressure, 22.064 MPa. Below
+        its triple-point pressure, 611.657 Pa, no liquid stands at any temperature and the test
+        does not apply: such a world is a desert, as Mars is (rule 7). The frost branch of
+        `saturation_temperature` is not read.
+      - The body is solved once more with the runaway's branches, Venus's deck among them, and
+        that solve takes (b)'s test: at most two solves more, each reading only the solve
+        before's T_s, the state and the deck fixed within each, and none judges (c) again. No
+        feedback. It sits beside (b)'s branch in `PassBody::passes` (`derive/mod.rs`), so the
+        stand-in, the record, planets and moons take it alike.
+      - Such a world keeps its hothouse as its hosts' light crosses the runaway limit, as its
+        air does. Under (a) alone its deck would go at the crossing, with nothing changed in its
+        air: for 01ffeb2c5ffe0000.0100, T_s 934.6 → 1,221.6 K and A 0.76 → 0.30.
+    - Docs (sim, DTO; the guide's `RUNAWAY GREENHOUSE` and `TEMPERATE` meanings through the UX
+      sign-off, signoff-t53b-state-meanings as decision-t53b-arm-c amends it): inside the
+      runaway limit now, or between the limits now with its surface too hot for liquid water at
+      its p_s, by (c); its water lost, under whatever air escape left it, with Venus's deck only
+      where the air beneath can cycle it. `Temperate`'s and the state's own docs say that (c)
+      takes such a world. Then `just gen-protocol`.
     - _Tests:_
-      - over the sample, no `RunawayGreenhouse` outside the present runaway limit (the states
-        census's line 4, bless-note-23, becomes an assertion);
+      - over the sample, the goldens and LOOK72, no `RunawayGreenhouse` beyond the
+        maximum-greenhouse limit now, and none between the limits now but (c)'s, each by name
+        with its present ratios, both solves' T_s, A and p_s, and water's saturation temperature
+        there (at 24 the census's 01ffeb2c5ffe0000.0100 alone; the states census's line 4,
+        bless-note-23, becomes this assertion; decision-t53b-arm-c);
       - decision-pre-23-review item 33's 46 K world is not `RunawayGreenhouse`;
       - Venus, Earth, Mars and Titan unchanged to the bit;
       - a past-only runaway's water stays lost;
@@ -7518,6 +7544,14 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - over the sample, the goldens and LOOK72, no `RunawayGreenhouse` with Venus's deck whose
         T_s is below the cycling temperature (an assertion); the deckless bodies at or above it
         counted; the re-solve's count and cost stated.
+      - for (c): over the sample, the goldens and LOOK72, no `Temperate` at or above water's
+        saturation temperature at its p_s (decision-absurd-states-24 R4.2's serve-gate test, an
+        assertion); 01ffeb2c5ffe0000.0100 publishes `RunawayGreenhouse` under Venus's deck in
+        P14.T24.g's cycling case, its T_s, A and p_s stated against T53.a's batch's 934.6 K, 0.76
+        and 414.8 bar; stubs: a dry `Temperate` just under the saturation temperature stays, one
+        at it moves, a wet one and one under 611.657 Pa stay, and one above 22.064 MPa is judged
+        at 647.096 K; a (c) body that ends deckless, or whose published T_s lies under water's
+        saturation temperature, listed by name (none at 24); (c)'s count and cost stated.
   - **Part 2, the supercritical envelope's section** (a member of 24 and a must-fix of its serve
     gate, no waiver; decision-absurd-states-24 R2; R1.1's section, judged; behind
     `ESCAPE_VERSION`; it lands before p14-wire-24's envelope wiring, which re-cuts its linear series
@@ -7562,10 +7596,11 @@ feeding back into p_s, T_s, the albedo or the bulk.
       (science-p14-t24f §5's 1,600–3,100 bar) holds about p*(T_s) of methane airborne; the cap is
       continuous across each T_c; the four Jeans-retaining ice-bulk planets' water
       (decision-p14-t54a-ganymede, "Remnant ice-bulk bodies' water"), stated.
-  - Not this task's: decision-p14-t54a-states §3.4's rules 5–7, item 26's history and the frozen
-    Temperates' label (P14.T53.e, after 24); the frozen Temperates' climate (P14.T53.a's weathering
-    thermostat); the hot ice bulks (P14.T56.f's retention arm); a past peak's ice loss (P14.T56.g,
-    recorded); the hot Snowballs (P14.T53.a's CO₂ form and P14.T24.h.a).
+  - Not this task's: decision-p14-t54a-states §3.4's rules 5–7 (but rule 6's test on a dry
+    `Temperate`, which is part 1 (c)), item 26's history and the frozen Temperates' label
+    (P14.T53.e, after 24); the frozen Temperates' climate (P14.T53.a's weathering thermostat); the
+    hot ice bulks (P14.T56.f's retention arm); a past peak's ice loss (P14.T56.g, recorded); the hot
+    Snowballs (P14.T53.a's CO₂ form and P14.T24.h.a).
   - _Files:_ `planetary/derive/mod.rs` (`Sky::of`), `planetary/derive/atmosphere.rs`,
     `planetary/record.rs`, `planetary/system.rs`, `planetary/derive/figure.rs`,
     `planetary/chem/partition.rs` (the isochore, part 3), `planetary/chem/escape.rs`,
@@ -26673,8 +26708,22 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     02003b2be0000000.0700), argon-ice means 7.8–1,154.7 K (were to 451 K) and 7 airs raised. Some of
     its moons reach 1,000 K (42002cae0000000a.0201, 70 → 1,000 K); with every 24 hold the same moon
     is `Airless` at its 381.8 K floor.
-  - _Waiting for P14.T49.n's landing:_ the 18 unlit records' `for_body` `Ok` assertion, and the move
-    of T24.i's and T49.n's record tests to the 24 combination.
+  - _After P14.T49.n's landing_ (merged, 134514b2): the helper takes T49.n's two holds
+    (`READ_DENSITIES_VERSION` at `Read`, `COMPRESSED_LIQUIDS_VERSION` at `Compressed`), so all
+    seven holds at 24 are in it. They flip no state: the floor census's classes are unchanged, its
+    held run moving 86 bodies' partial pressures in the fourth digit and two bodies' passes
+    (020e56ef60090005.0700 40 → 43, 620059680000000b.0400 4 → 5). The record tests move to the 24
+    combination (D1.4), T24.i's two renamed `under_every_24_hold_…_unlit_records_read_their_night_floor`:
+    - the goldens' unlit records (19, 15, 4) → (19, 19, 0), raised 10 → 11, the raised airs
+      [0503, 0504] → [0504] (subgiant's moon 0503 is `Airless` at its 117.7 K floor under the
+      batch);
+    - the 400's 18 unlit records (18, 10, 8) → (18, 18, 0): each at least at its floor, `for_body`
+      `Ok` on every one (the must-fix, asserted, run by name); raised, cover, read, argon and
+      re-settled 1,405 / 1,144 / 3 / 622 / 3 → 1,403 / 1,127 / 0 / 383 / 4, argon-ice means
+      7.79–69.69 K, 7 airs raised;
+    - T49.n's two unlit-record tests run with every 24 hold and with every 24 hold but 24's
+      densities, and give the same counts both ways: under the escape's batch no unlit record holds
+      an argon ice.
   - _Deferred findings (2026-10-13 rule):_ the floor's heat flow moves with the air between runs
     (01fffb2c20040000.0300's floor 47.16 → 54.50 K), every such body converging in 4–6 passes, no
     2-cycle seen; the escape census's `cap` statistic still reads `T_eq`, not the base (a
@@ -28304,10 +28353,10 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
 - **Deviations in P14.T53.b part 1, as built (`p14-escape`, 2026-10-23).** Arms (a) and (b), behind
   P14.T53.a's hold (`ESCAPE_VERSION` 24; `present_state_in_force`), tested with every landed 24
   hold in force (`planetary::testing::with_every_24_hold`, decision-t24i-airless-state D3.3).
-  Version 23 is unchanged to the bit; no golden moved. Arm (c) is not built: decision-absurd-states-24
-  R4.3's LOOK72 census (every 24 hold in force) showed no dry `Temperate` still hot there (both of
-  its dry Temperates, 020e66efa0070007.0500 and 020e56ef20080004.0400, are `Airless` at 24), and
-  the census below found one elsewhere, its ruling pending (below).
+  Version 23 is unchanged to the bit; no golden moved. decision-absurd-states-24 R4.3's LOOK72
+  census (every 24 hold in force) showed no dry `Temperate` still hot there (both of its dry
+  Temperates, 020e66efa0070007.0500 and 020e56ef20080004.0400, are `Airless` at 24), but (a) made
+  one elsewhere, so arm (c) is built too (decision-t53b-arm-c; below).
   - _R4.3's census_ (`under_every_24_hold_look72_s_triaged_bodies_are_stated`, run by name; the
     triage's 62 bodies in their 27 systems): the nine hot `Snowball`s none above the cap (six at
     the 273.15 K cap, 220e4dde80200008.0d00 and 020e56ef20080005.0400 cold at 166.8 and 181.1 K,
@@ -28341,10 +28390,11 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     name a heated ice bulk's rock lag (for P14.T56.g, decision-p14-t56g §7.4; doc text only).
   - _The census_ (the first 60 sample systems, the goldens and LOOK72's 27 systems; 1,600 bodies;
     `under_every_24_hold_part_one_s_moved_bodies_are_stated`, run by name; asserted in
-    `under_every_24_hold_no_runaway_lies_outside_the_present_limit_or_under_too_cold_a_deck`): 27
-    moved, the other 1,573 unchanged to the bit; no present ratio above its peak's.
-    - 16 past-only runaways publish their present class (15 about substellar hosts, 1 about a
-      remnant): 13 `Snowball`, 2 `Temperate`, and item 33's world (identified as
+    `under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_on_a_cold_deck`): 27
+    moved before arm (c) (26 after it, below), the other bodies unchanged to the bit; no present
+    ratio above its peak's.
+    - 16 past-only runaways publish their present class before (c) (15 about substellar hosts, 1
+      about a remnant): 13 `Snowball`, 2 `Temperate` (one of them (c)'s hothouse), and item 33's world (identified as
       02000b2ca0000001.1100, the bless note's 100 Pa state edge about a 1,184 K substellar host;
       peak 1.51, now 0.0029), `Airless` at 99.96 Pa → `Snowball` at 100.03 Pa and 56.64 K, a state
       edge bracketed at a residual of 0.13. Their water stays lost: surface water, potential ocean,
@@ -28372,11 +28422,103 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     (4–5 each) against 114 for their decked first solves: 0.65% of the walk's 8,335 passes (8,299
     under T53.a's batch). Generating the systems adds 19 re-solves. No input of decision-24-cost
     moves.
-  - _Pending a ruling_ (decision-t53b-arm-c, main): part 1 (a) makes one hot dry `Temperate`, the
-    sample's 01ffeb2c5ffe0000.0100 about a 2,456 K substellar host (runaway ratio 61.9 at the peak,
-    0.547 now; maximum ratio 2.11): a decked runaway at 934.6 K under 414.8 bar of CO₂ under
-    T53.a's batch, now `Temperate` at 1,221.6 K, A 0.30. R4.2's serve-gate line names arm (c) for
-    it, whose `RunawayGreenhouse` would lie outside the present limit that (a) asserts.
+  - _At the merge with p14-chem's T24.g R3_ (it landed first): `RunawayDeck` stays in
+    `derive::atmosphere`, with p14-chem's variant docs, and `hooks::sulphur` re-exports it; the local
+    430 K gave way to `hooks::sulphur::ACID_CYCLING_TEMPERATURE` (VIRA's 432.5 K at 38 km, Jenkins et
+    al. 1994 and Dai et al. 2022 §2.3, its pressure dependence recorded there), which
+    `derive::atmosphere` re-exports. The aerosols' tripwire
+    (`nothing_on_the_record_calls_the_inventory_yet`, p14-chem's test) allows that re-export: a
+    constant, which calls nothing.
+  - _The batch review's fixes:_ the deckless re-solve is the passes' alone (the public `atmosphere()`
+    can return a runaway under 430 K that keeps its deck), and `atmosphere()`'s "From version 24"
+    lists the arms; `IceInputs` gains `water_state`, which decides the ice cap, `state` keeping the
+    threshold, so that the public ice fraction equals the record's to the bit (`Atmosphere::water_state`
+    is public for it); `TideAt::of`; one runaway limit per host in `Sky::of`; the greenhouse's
+    temperature parameters named `base`; the re-solve's test-only trace and lids truncated to marks,
+    not cleared. Tests: a past-only runaway's stand-in cover holds no water or ice; its lid
+    (`Episodic`, as the runaway's) and its ice follow its water; a moon's tide reads its water's
+    runaway; a re-solve keeps what was traced before it.
+  - _S_eff beyond its fit_ (Kopparapu et al. 2013's 2,600–7,200 K): 9 of the 16 movers orbit hosts of
+    1,184–2,469 K. With the polynomial unheld below 2,600 K their maximum-greenhouse ratio rises by
+    up to ×1.287 and their runaway ratio by up to ×1.166; nothing flips, state or ceiling, among the
+    1,599 bodies (the closest to 1, 01ffeb2c20000000.0200's 0.9934, orbits a 2,811 K host inside
+    the fit). The top present runaway ratio is 0.5469, 0.5495 unheld (the plan's "0.638
+    extrapolated" applied the 1,184 K host's factor to a 2,456 K one's body). `present_insolation`'s
+    doc labels the dependence.
+  - _C0b's five past-only runaways_ (decision-p14-t54a-ganymede C0b): 01ffeb2c20000000.0400, .0500 and
+    .0600, 01ffeb2c5ffe0000.0300 and 02001b2cdfff0000.0200, all among the 16, each
+    `RunawayGreenhouse` → `Snowball`.
+  - _With T49.n's two holds in the helper:_ part 1's census unchanged in its 27 movers (of 1,599
+    bodies); its walk 8,295 → 8,296 passes (8,259 → 8,260 under T53.a's batch);
+    02001b2cdfff0000.0100's A 0.2770 → 0.2788; 01ffeb2c5ffe0000.0400's ocean 0.3679 → 0.3370.
+  - _Accept, as built:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`, with
+    `planetary::system`, `planetary::derive::photometry` and `planetary::hooks`; the censuses by
+    name with `-- --ignored`.
+  - _Arm (c), built (decision-t53b-arm-c, 2026-10-23)._ R4.3's census left LOOK72's two dry
+    `Temperate`s airless, but (a) itself made one hot dry `Temperate`: the census's
+    01ffeb2c5ffe0000.0100, about a 2,456 K substellar host. Its runaway ratio is 61.87 at the peak
+    and 0.547 now (0.550 with S_eff unheld below 2,600 K; the decision's 0.638 applied another
+    host's factor), and its maximum-greenhouse ratio 2.11 now. T53.a's batch gave it
+    `RunawayGreenhouse` under Venus's deck at 934.6 K and A 0.76, under 414.8 bar of CO₂; (a) alone
+    gave `Temperate`, a cloudless A 0.30 and 1,221.6 K.
+    - Its water lost at the peak and its CO₂ left with no water to weather it, it is a desiccated
+      hothouse, Venus's state, whatever its present insolation (Barnes and Heller 2013 for a brown
+      dwarf's habitable zone; Luger and Barnes 2015). (c) publishes it so, under the deck: 934.59 K,
+      A 0.7600, 414.82 bar, P14.T24.g's cycling case, its record and derivation T53.a's batch's to
+      the bit; its first solve, (c) off, `Temperate` at 1,221.59 K and A 0.2993. Both lie above
+      water's critical pressure (41.5 MPa), where its saturation temperature is 647.096 K.
+    - As built: `solved_as_a_hothouse` (`derive/atmosphere.rs`) on the published solve: a
+      `Temperate`, a division storing no carbon for want of water (`Atmosphere::dry_division`: the
+      runaway arm, or the `Habitable` arm with no water, the thermostat's own skip), no liquid H₂O
+      in the pass's published condensates (`Atmosphere::liquid_water`, from the area mix), and T_s
+      at or above `water_saturation_temperature(p_s)` (the registry's liquid–vapour curve; 647.096 K
+      at or above 22.064 MPa; none below 611.657 Pa). `PassBody::passes` solves once more with
+      `PublishedState::Hothouse` on the pass surface (`with_published`, beside `with_deck`), read by
+      `present_state`, then (b)'s test. **Deviation:** the T24.g case is asserted as
+      (`RunawayGreenhouse`, `Kept`), `SulphurCycle::case_of`'s cycling arm (pinned by its own
+      doctest), since `nothing_on_the_record_calls_the_inventory_yet` keeps the record's tests off
+      the hook.
+    - The decked solve holds itself: 934.6 K is above the 430 K cycling temperature, and above
+      decision-thick-acid-decks' T_½ of 534 K at 415 bar. The deckless one would not, since an air
+      at 1,221.6 K sends the falling acid back up, and a deck forms. The state hangs neither on the
+      deck's albedo (a lower one makes it hotter) nor on the saturation curve (both solves lie far
+      above water's 647.096 K).
+    - (a)'s assertion reads: no `RunawayGreenhouse` beyond the maximum-greenhouse limit now, and
+      none between the limits now but (c)'s, by name; and no `Temperate` at or above water's
+      saturation temperature at its p_s (none; one under (a) alone)
+      (`under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_on_a_cold_deck`,
+      the assertion renamed). Count (xi): none deckless, none under the saturation temperature.
+      Stubs: a dry `Temperate` just under the saturation temperature stays and one at it moves; a
+      wet one and one under 611.657 Pa stay; one above 22.064 MPa is judged at 647.096 K; a dry
+      Earth at T_eq 255 K (728 K under 70.9 bar) is one (c) catches.
+    - The third solve, `under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_time`
+      (a hand-built past runaway of a 0.3 M☉ host at 0.826 S⊕ now, its carbon at rank 0.2): first
+      solve `Temperate` at 495.96 K (T_sat 485.09 K) under 19.83 bar, A 0.176; decked
+      `RunawayGreenhouse` at 364.60 K, A 0.76; published deckless at 495.96 K, A 0.176. A dry
+      deckless runaway has no water cloud, so its climate is its first solve's, at or above water's
+      saturation temperature (about 471 K and more wherever (c) fires; a dry `Temperate` of a few
+      kPa lies 25–45 K under it): every reachable third solve is a partial deck at or above 430 K, for
+      P14.T53.e and the gate's count (ii).
+    - Cost: 1 of the 1,599 bodies re-solves, in 4 passes after 4 in its first solve, 0.048% of the
+      walk's 8,296 passes (beside (b)'s 11 re-solves, 54 passes after 114); generating the systems
+      adds 1 (3 passes after 3). Part 1's moved count is 26 (27 before (c)): the hothouse publishes
+      T53.a's batch's figures again, so 15 past-only runaways publish their present class (13
+      `Snowball`, 1 `Temperate`, and item 33's world), and no hot `Temperate` is left.
+    - Recorded: the deck's 0.76 is Venus's under the Sun's light, and a 2,456 K host's would lower
+      it (T24.g's deck-albedo route; a figure, not a state).
+  - _Deferred findings (2026-10-13 rule), from the batch's review:_
+    - the tests' system caches (`generated`, `whole`, `golden_systems`) fill on first use under the
+      escape's rule alone, the other holds as the first caller's thread has them: no test fills one
+      inside `with_every_24_hold`, but one that did would mix 23's and 24's rules (a
+      `with_every_23_hold` counterpart would pin them; determinism review);
+    - the guide's state row reads its clauses in order ("a body takes the first that fits") without
+      saying so, and (c)'s branch names `SURFACE PRESSURE` but not `T SURF` (UX review; for a later
+      sign-off);
+    - the night floor's emissivity puts an unlit air's base about 1.3% above its internal
+      temperature, and a lit body's flux sum (`T_eq`⁴ + `T_int`⁴)^¼ lies above the max (.0700: 59.4 K
+      against 57.15 K), both with T24.i's recorded refinement; T24.g's 430 K is Venus's at 4.3 bar,
+      lower in a thinner air (recorded in `hooks::sulphur`), for P14.T53.e (science review);
+    - Kopparapu et al.'s S_eff,max held at its 2,600 K end decides no verdict at 24 (above).
 - **Deviations in P14.T53.b part 2, as built (`p14-escape`, 2026-10-23).** The supercritical
   envelope's section, behind P14.T53.a's hold (`ESCAPE_VERSION` 24; `supercritical_section_in_force`),
   tested with every landed 24 hold in force (`planetary::testing::with_every_24_hold`). Version 23
@@ -28416,6 +28558,20 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     0500 and 0600 hold none. Its N₂ `Snowball`s at 78–313 bar: p_i ÷ p* 0.98–2.81, shares under
     7.1 × 10⁻⁵. The table's Venus: 57.2 bar of CO₂ at 618.9 K against p* 612.9 bar; the measured
     Venus: 90.4 bar at 737.0 K against 815.1 bar. Titan lies below N₂'s T_c.
+  - _The batch review's fixes:_ the isochore's values compared by bits (a relative tolerance in the
+    doctest); `BodyRecordBuilder::derived`'s doc says that a generator publishing another bulk sets
+    its own tags after it, tested through `.derived()` on 02001b2ca0000000.0400 under the batch and
+    the hold; a moon under a supercritical envelope takes the envelope's tags through
+    `satellite_record` (hand-built: 02001b2ca0000000.0401, the 400's closest moon at p_i ÷ p* 0.367,
+    its N₂ rank raised to 1 − 10⁻⁶, 1,084.5 bar at 1.51 T_c, share 1.35 × 10⁻²; no moon of the
+    400's 1,060 lies above its isochore); `slope_k`'s doc covers T_r; the line ÷ NIST figures are the
+    coded tangent's (NIST Chemistry WebBook, SRD 69, at ρ_c: CH₄ lowest 0.974 near 1.68 T_c; CO₂
+    0.981 near 1.45 T_c; N₂ 0.975 at 1.65 T_c; H₂O 0.957 at 1.38 T_c, the worst 4.3% to 1.96 T_c);
+    the slopes cited to their equations (IAPWS SR1-86(1992) Eq. (1); Setzmann and Wagner 1991,
+    Span and Wagner 1996 and Span et al. 2000 in JPCRD 20, 25 and 29); the isochore approximating
+    the Widom line (Simeoni, Bryk, Gorelli, Krisch, Ruocco, Santoro and Scopigno 2010). Recorded for
+    part 3: a mixed air's column mass is Δp_i (μ_i ÷ μ̄) ÷ g (0400's share 1.28 × 10⁻³ by it, still a
+    mover), and evaluating p* and p_m at T_s bounds the fluid column from above.
   - _Recorded for p14-wire-24 and part 3:_ the server's "no solid surface: it is a giant, …" refusal
     (`hyperion-server` `convert/surface.rs`) and `SurfaceInputsError::NoSolidSurface`'s doc do not
     name a supercritical envelope.
