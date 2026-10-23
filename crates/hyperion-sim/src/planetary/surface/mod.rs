@@ -103,6 +103,8 @@
 //! | 14 | the crust, the condensates and the palette's sources | [`Surface`](crate::planetary::record::Surface)'s `crust` and `condensates` (P14.T54.a), and the registry's rows of the substances they name ([`resolve_palette_entry`](crate::substance::resolve_palette_entry), [`liquid_properties`](crate::substance::liquid_properties)), read by [`CoarseInputs::for_body`]; builder arguments, and [`CoarseInputs::from_record`]'s, for the tests' own |
 //! | 14 | the ground's thermal inertia | the record's [`SurfaceConditions`](crate::planetary::hooks::surface::SurfaceConditions)' ground (P14.T54.a), [`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`] |
 
+#[cfg(test)]
+mod coarse_golden;
 pub mod grid;
 pub mod inputs;
 mod palette;
@@ -244,6 +246,38 @@ use steps::{Pass, Working};
 /// ```
 #[must_use]
 pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField {
+    pass_with(seed, inputs, steps::climate::run)
+}
+
+/// [`coarse_pass`], with each month's orographic solve of its climate step, in month order
+/// ([`steps::climate::run_with_solves`]), for the tests that assert the solve's convergence on the
+/// sample worlds (R09.T16; decision-r09-t13e-lfpm-convergence's E-L8).
+///
+/// The field is [`coarse_pass`]'s to the bit by construction: both run the one step sequence of
+/// `pass_with`, and the climate step's entry here is the step's own [`steps::climate::run`] with
+/// its diagnostics kept rather than dropped.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn coarse_pass_with_solves(
+    seed: SurfaceSeed,
+    inputs: &CoarseInputs,
+) -> (CoarseField, Vec<Option<steps::climate::OrographicSolve>>) {
+    let mut solves = Vec::new();
+    let field = pass_with(seed, inputs, |pass, working| {
+        solves = steps::climate::run_with_solves(pass, working);
+    });
+    (field, solves)
+}
+
+/// The coarse pass's one step sequence ([`coarse_pass`]), its climate step `climate`: the step's
+/// own entry, or one that also returns what the step did that is no output (its tests'), so that
+/// the order of the steps is written once.
+#[must_use]
+fn pass_with(
+    seed: SurfaceSeed,
+    inputs: &CoarseInputs,
+    climate: impl FnOnce(&Pass<'_>, &mut Working),
+) -> CoarseField {
     let level = coarse_level(inputs.radius());
     let grid = CellGraph::for_field(level);
     let climate_grid = CellGraph::for_climate(level);
@@ -253,7 +287,7 @@ pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField {
     steps::relief::run(&pass, &mut working);
     steps::craters::run(&pass, &mut working);
     steps::relief::run_after_craters(&pass, &mut working);
-    steps::climate::run(&pass, &mut working);
+    climate(&pass, &mut working);
     steps::erosion::run(&pass, &mut working);
     // The coarse craters younger than a wet epoch's end, placed on the eroded surface (Design
     // note 5).
@@ -327,8 +361,8 @@ mod tests {
         encode_payload(field, &cover, None)
     }
 
-    /// Each world's pass, run twice, yields the same field and the same payload, its header
-    /// carrying the inputs; and the small Earth's field keeps reaching the steps only the Earth
+    /// Each world's pass, run twice (the second through [`coarse_pass_with_solves`]), yields the
+    /// same field and the same payload, its header carrying the inputs; and the small Earth's field keeps reaching the steps only the Earth
     /// reaches: a sea and land, a plate boundary that is not a transform, the energy-balance model,
     /// a main liquid and rain (decision-r09-t13-test-cost §3.2). The reference Earth's level 8
     /// is held by `reference`'s `the_reference_worlds_are_the_bodies_they_name`.
@@ -342,7 +376,10 @@ mod tests {
             ("small Earth", small_earth(), 5),
         ] {
             let first = coarse_pass(reference::SEED, &inputs);
-            let second = coarse_pass(reference::SEED, &inputs);
+            // The second through the solves' entry, so that the fast tier also holds the two
+            // entries of the one step sequence to the same bits (R09.T16; the small Earth's
+            // climate has a water cycle, whose solves that entry keeps).
+            let (second, _) = coarse_pass_with_solves(reference::SEED, &inputs);
             assert_eq!(first.header().level().get(), level, "{name}");
             assert_eq!(first, second, "{name}");
             assert_eq!(bytes(&first), bytes(&second), "{name}");

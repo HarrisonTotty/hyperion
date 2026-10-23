@@ -97,7 +97,7 @@ pub(crate) mod sea;
 mod seafloor;
 
 #[cfg(test)]
-mod tests;
+pub(in crate::planetary::surface) mod tests;
 
 // The draws' instances on `surface.coarse.relief` are pairwise distinct, so that no two of the
 // step's draws share a stream (the determinism audit's hardening).

@@ -946,25 +946,7 @@ fn assert_earth_hypsometry() {
         .iter()
         .map(|c| c.elevation.value() - sea)
         .collect();
-    let omega = f.grid().solid_angles_sr();
-    let bins = histogram(&z, omega);
-    let land = modal_centre(&bins, |k| k >= -8);
-    let ocean = modal_centre(&bins, |k| k < -8);
-    let (mut area, mut sum) = (0.0, 0.0);
-    for (&e, &w) in z.iter().zip(omega) {
-        if e < -2_000.0 {
-            area += w;
-            sum += e * w;
-        }
-    }
-    let deep_mean = sum / area;
-    eprintln!("land mode {land} m, ocean modal bin {ocean} m, mean below −2 km {deep_mean:.0} m");
-    assert!((land - 125.0).abs() <= 300.0, "land mode {land} m");
-    assert!(
-        (-5_125.0..=-4_125.0).contains(&ocean),
-        "ocean mode {ocean} m"
-    );
-    assert!((-4_731.0..=-3_981.0).contains(&deep_mean), "{deep_mean} m");
+    Bands::of(&z, f.grid().solid_angles_sr()).assert_earth2014_s("the scaled reference Earth");
 }
 
 /// A small Earth-like world, 500 km across a sphere, its ocean fraction `fraction` of water.

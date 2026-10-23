@@ -214,14 +214,18 @@ pub fn quantise(
         level.climate_cell_count(),
         working.climate.len(),
     )?;
-    let synthesis = (0_u32..)
-        .zip(&working.cells)
-        .map(|(n, cell)| synthesis_record(inputs, n, cell))
-        .collect::<Result<Vec<_>, _>>()?;
-    let climate = (0_u32..)
-        .zip(&working.climate)
-        .map(|(n, cell)| climate_record(&header, n, cell))
-        .collect::<Result<Vec<_>, _>>()?;
+    // Sized exactly: collecting through `Result` grows a vector by doubling, from no size hint,
+    // which left a level-8 field 5.3 MB of spare capacity that the server's cache charges
+    // (`CoarseField::heap_bytes`; plan 09, R09.T17's deferred finding "The quantiser's spare
+    // capacity"; R09.T16, whose `coarse/pass` bench prints each field's heap).
+    let mut synthesis = Vec::with_capacity(working.cells.len());
+    for (n, cell) in (0_u32..).zip(&working.cells) {
+        synthesis.push(synthesis_record(inputs, n, cell)?);
+    }
+    let mut climate = Vec::with_capacity(working.climate.len());
+    for (n, cell) in (0_u32..).zip(&working.climate) {
+        climate.push(climate_record(&header, n, cell)?);
+    }
     let craters = sorted_craters(level.get(), working.craters);
     CoarseField::new(header, synthesis, climate, craters).map_err(QuantiseFieldError::Field)
 }
@@ -487,6 +491,24 @@ mod tests {
         );
         assert_eq!(field.header().temperature_step(), 0);
         assert_eq!(field.header().months(), 12);
+    }
+
+    /// The quantiser sizes the records' vectors exactly: its field's heap is that of a field built
+    /// from exact copies of its parts (R09.T17's deferred "spare capacity": collecting through
+    /// `Result` doubled them, 5.3 MB on a level-8 field; R09.T16).
+    #[test]
+    fn the_quantiser_leaves_no_spare_capacity() {
+        let (inputs, grid, climate) = moon_working();
+        let pass = Pass::new(SurfaceSeed::new(1), &inputs, &grid, &climate);
+        let field = quantise(&inputs, Working::initial(&pass)).unwrap();
+        let exact = CoarseField::new(
+            field.header().clone(),
+            field.synthesis().to_vec(),
+            field.climate_layer().to_vec(),
+            field.craters().to_vec(),
+        )
+        .unwrap();
+        assert_eq!(field.heap_bytes(), exact.heap_bytes());
     }
 
     #[test]

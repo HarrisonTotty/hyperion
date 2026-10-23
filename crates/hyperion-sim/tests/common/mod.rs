@@ -7,9 +7,12 @@
 //! It also holds the search for plan 14's golden systems (P14.T32.a, [`find_system`]) and the
 //! helpers plan 13's substellar tests share ([`reference_density_point`], [`WarmCellCache`],
 //! [`objects_in_block`], [`usize_as_f64`]), and, in [`sky`], the sky census's oracle (rendering
-//! plan R06, R06.T8.e).
+//! plan R06, R06.T8.e), and, in `surface_worlds` (with the `testing` feature), R10's sample worlds
+//! (rendering plan R09, R09.T16).
 
 pub mod sky;
+#[cfg(feature = "testing")]
+pub mod surface_worlds;
 
 use std::cell::OnceCell;
 use std::collections::BTreeMap;

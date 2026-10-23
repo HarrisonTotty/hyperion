@@ -1012,4 +1012,16 @@ mod cost {
     fn pass_ceres() {
         pass_on(&reference::ceres_like());
     }
+
+    #[test]
+    #[ignore = "cost: the pass on the reference Europa, timed by hand"]
+    fn pass_europa() {
+        pass_on(&reference::europa_like());
+    }
+
+    #[test]
+    #[ignore = "cost: the pass on the reference locked Earth, timed by hand"]
+    fn pass_locked_earth() {
+        pass_on(&reference::locked_earth_like());
+    }
 }

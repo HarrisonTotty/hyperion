@@ -336,6 +336,65 @@ fn modal_centre(bins: &std::collections::BTreeMap<i64, f64>, keep: impl Fn(i64) 
     centre
 }
 
+/// R09.T12.a's three bands of a hypsometry (`decision-r09-t12-coarse.md` item 1): the centre of
+/// the modal 250 m bin at or above −2 km, the land's; the centre of the modal bin below it, the
+/// ocean's; and the area-weighted mean below −2 km. The relief's tests and R09.T16's coarse
+/// goldens read them, the goldens on the finished field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::planetary::surface) struct Bands {
+    /// The land's modal bin's centre.
+    pub(in crate::planetary::surface) land_mode: crate::units::Metres,
+    /// The ocean's modal bin's centre.
+    pub(in crate::planetary::surface) ocean_mode: crate::units::Metres,
+    /// The area-weighted mean elevation below −2 km.
+    pub(in crate::planetary::surface) deep_mean: crate::units::Metres,
+}
+
+impl Bands {
+    /// The bands of the elevations `z`, metres (relative to the sea, or to the datum where the sea
+    /// is not yet placed), under the cells' solid angles `omega`.
+    pub(in crate::planetary::surface) fn of(z: &[f64], omega: &[f64]) -> Self {
+        let bins = histogram(z, omega);
+        let (mut area, mut sum) = (0.0, 0.0);
+        for (&e, &w) in z.iter().zip(omega) {
+            if e < -2_000.0 {
+                area += w;
+                sum += e * w;
+            }
+        }
+        Self {
+            land_mode: crate::units::Metres::new(modal_centre(&bins, |k| k >= -8)),
+            ocean_mode: crate::units::Metres::new(modal_centre(&bins, |k| k < -8)),
+            deep_mean: crate::units::Metres::new(sum / area),
+        }
+    }
+
+    /// Prints the bands under `label` and asserts the reference Earth's
+    /// ([`the_reference_earth_s_hypsometry_is_earth2014_s`] gives the bands' reasons): the land
+    /// mode within 300 m of +125 m, the ocean's modal bin among the centres −5,125 to −4,125 m,
+    /// and the mean below −2 km from −4,731 to −3,981 m.
+    pub(in crate::planetary::surface) fn assert_earth2014_s(self, label: &str) {
+        let (land, ocean, deep_mean) = (
+            self.land_mode.value(),
+            self.ocean_mode.value(),
+            self.deep_mean.value(),
+        );
+        eprintln!(
+            "{label}: land mode {land} m, ocean modal bin {ocean} m, mean below −2 km \
+             {deep_mean:.0} m"
+        );
+        assert!((land - 125.0).abs() <= 300.0, "{label}: land mode {land} m");
+        assert!(
+            (-5_125.0..=-4_125.0).contains(&ocean),
+            "{label}: ocean mode {ocean} m"
+        );
+        assert!(
+            (-4_731.0..=-3_981.0).contains(&deep_mean),
+            "{label}: {deep_mean} m"
+        );
+    }
+}
+
 /// The reference Earth's hypsometry is bimodal as Earth2014's is (`decision-r09-t12-coarse.md`
 /// item 1, replacing `09`'s mode and mean clauses): the land mode within 300 m of +125 m; the
 /// ocean's modal bin among the centres −5,125 to −4,125 m, Earth2014's bins within 10% of its
@@ -354,25 +413,7 @@ fn the_reference_earth_s_hypsometry_is_earth2014_s() {
         .iter()
         .map(|c| c.elevation.value())
         .collect();
-    let omega = earth.world.grid.solid_angles_sr();
-    let bins = histogram(&z, omega);
-    let land = modal_centre(&bins, |k| k >= -8);
-    let ocean = modal_centre(&bins, |k| k < -8);
-    let (mut area, mut sum) = (0.0, 0.0);
-    for (&e, &w) in z.iter().zip(omega) {
-        if e < -2_000.0 {
-            area += w;
-            sum += e * w;
-        }
-    }
-    let deep_mean = sum / area;
-    eprintln!("land mode {land} m, ocean modal bin {ocean} m, mean below −2 km {deep_mean:.0} m");
-    assert!((land - 125.0).abs() <= 300.0, "land mode {land} m");
-    assert!(
-        (-5_125.0..=-4_125.0).contains(&ocean),
-        "ocean mode {ocean} m"
-    );
-    assert!((-4_731.0..=-3_981.0).contains(&deep_mean), "{deep_mean} m");
+    Bands::of(&z, earth.world.grid.solid_angles_sr()).assert_earth2014_s("the reference Earth");
 }
 
 /// On the reference Earth, oceanic cells whose style amplitude is at most 0.2 cover 25–40% of the

@@ -1,5 +1,7 @@
 //! The reference worlds: Earth-, Mars-, Moon- and Ceres-like inputs to the coarse pass, which
-//! R09.T11–T16 and R10's world tests run it on (plan R09, T10; the crate's `testing` feature).
+//! R09.T11–T16 and R10's world tests run it on (plan R09, T10; the crate's `testing` feature),
+//! with R09.T16's two sample worlds beside them, a Europa-like icy moon and the reference Earth
+//! locked 1:1 to an M dwarf.
 //!
 //! These are test inputs, not generated worlds: each figure is the real body's, or what plan 14's
 //! own rules would state for it, written as the builder argument plan 14 will one day supply
@@ -9,11 +11,13 @@
 //! at the airless Bond albedo, as `derive::atmosphere` sets it. Each figure carries its source,
 //! checked by a science review of 2026-10-09; one with none is marked a placeholder, standing for
 //! the plan-14 figure that has no rule yet (P14.T24.a's contrasts, P14.T24.b's ages and heat
-//! flows, P14.T48.a's V), and a task that tests against one treats it as such. `σ_h` is Design
-//! note 3's: measured for Earth and Mars, and from the fit for the Moon and Ceres, whose constants
-//! they calibrate (R09.T0.b: "T10's reference worlds may take `σ_h` from the fit"). An area is the
-//! cover all year, and a reservoir a mass per square metre of the whole surface
-//! ([`Condensate`]).
+//! flows, P14.T48.a's V), and a task that tests against one treats it as such. The icy moon,
+//! built later, takes plan 14's rule wherever one is built: its heat flow, surface age, relief,
+//! crater contract and equator–pole contrast are plan 14's for the measured Europa. `σ_h` is
+//! Design note 3's: measured for Earth and Mars, from the fit for the Moon and Ceres, whose
+//! constants they calibrate (R09.T0.b: "T10's reference worlds may take `σ_h` from the fit"), and
+//! for the icy moon plan 14's relief at its own crater density (P14.T48.a). An area is the cover
+//! all year, and a reservoir a mass per square metre of the whole surface ([`Condensate`]).
 //!
 //! The substances are plan 14's registry keys ([`SubstanceKey`], decision-composition §1.1), and
 //! a test holds every key these worlds and R09's synthetic ones use to a registry row, and each
@@ -61,26 +65,31 @@ use hyperion_surface::field::{
 use hyperion_surface::spheroid::Spheroid;
 use hyperion_surface::substance_key::SubstanceKey;
 
-#[cfg(test)]
-use super::inputs::CoarseInputsBuilder;
 use super::inputs::{
-    AreaShare, ClimateRegime, CoarseInputs, Condensate, CondensatePhase, CrustInputs, Forcing,
-    GasShare, LidCrust, Persistence, SeasonalOrbit, Spin, TectonicRegime, ThermalRegime, WetEpoch,
+    AreaShare, ClimateRegime, CoarseInputs, CoarseInputsBuilder, Condensate, CondensatePhase,
+    CrustInputs, Forcing, GasShare, LidCrust, Persistence, SeasonalOrbit, Spin, TectonicRegime,
+    ThermalRegime, WetEpoch,
 };
 use super::steps::relief::convergent::EARTH_GRAVITY;
+use crate::galaxy::consts::YEARS_PER_GIGAYEAR;
 use crate::math;
 use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::irradiation;
 use crate::planetary::hooks::SurfaceSeed;
+use crate::planetary::hooks::figures::relief::{Relief, ReliefInputs};
+use crate::planetary::hooks::figures::surface_age::{ICE_RESURFACING_HEAT_FLOW, resurfacing_time};
 use crate::planetary::hooks::figures::wet_epoch::{
     MARS_EFFECTIVE_FLOW, PAST_EPOCH_RUNOFF_M_PER_YEAR, WET_WORLD_RUNOFF_M_PER_YEAR,
 };
+use crate::planetary::hooks::figures::{Crust as CrustClass, ICY_PROJECTILE_DENSITY};
+use crate::planetary::hooks::surface::annual_insolation_at;
 use crate::substance::{self, resolve_palette_entry};
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2};
 use crate::units::{
     EarthFluxes, Gigayears, Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres,
-    MetresPerSecond, MetresPerSecondSquared, Pascals, Radians, Seconds, WattsPerSquareMetre, Years,
+    MetresPerSecond, MetresPerSecondSquared, Pascals, Radians, Seconds, SolarMasses,
+    WattsPerSquareMetre, Years,
 };
 
 /// The surface seed the reference worlds' tests run under.
@@ -614,15 +623,64 @@ const CERES_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(5_600.0);
 /// re-derives it.
 const MARS_IMPACT_RATE: f64 = 1.92;
 
+/// Europa's mean impact velocity under P14.T48.f's model: 24.2 km/s (24.21), the giants' comets at
+/// Jupiter's orbit with Europa's own orbital speed about it, as plan 14's impactors give the
+/// measured Europa (a test holds it to them), against Brasser, Wong and Werner 2025's 24.9 km/s
+/// (A&A 695, A276, Table 5, as plan 14's figures tests read it): 2.8% under it.
+const EUROPA_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(24_200.0);
+
+/// Europa's impact rate per projectile size over the Moon's, `R_b` = 5.73 (5.729): plan 14's own
+/// rate for the measured Europa about the Solar System's sources, Ψ × V ÷ V☾, the giants' comets'
+/// abundance at Jupiter's orbit over the Moon's projectiles' times its encounter speed over the
+/// Moon's (P14.T48.c; science-p14-t24b-laws §2.2 and §2.7, whose comets keep Ganymede's 3.7, after
+/// Zahnle et al. 2003), which a test holds. Unlike the four worlds above, the icy moon takes plan
+/// 14's rate: its 60 Myr surface age is calibrated on the comets' rate (Zahnle et al. 2003), and
+/// the lunar chronology alone would leave it some 5.7 times too sparsely cratered.
+const EUROPA_IMPACT_RATE: f64 = 5.73;
+
+/// The reference locked Earth's equator–pole contrast, K: 32.9 (32.88), plan 14's for its Solar
+/// System table's Earth under the lock's spin (P14.T24.a's `SurfaceConditions::derive`, its
+/// transport at the slow rotation and no obliquity), which a test holds to 1 K; the table's Earth
+/// takes 43.6 K under its own spin, against the reference Earth's 42 K.
+const LOCKED_EARTH_EQUATOR_POLE_K: f64 = 32.9;
+
+/// The reference locked Earth's day–night contrast about its substellar axis, K: 59.8 (59.80),
+/// plan 14's for its table's Earth under the lock's spin, Cowan and Agol's day and night at Koll's
+/// redistribution of its air (P14.T24.a), which a test holds to 1 K; the table's Earth takes 1.1 K
+/// under its own spin, against the reference Earth's placeholder of 3 K.
+const LOCKED_EARTH_DAY_NIGHT_K: f64 = 59.8;
+
+/// The reference locked Earth's host's luminosity, log₁₀ of L☉: −2.03, an M3.5V dwarf's (3,270 K,
+/// 0.300 R☉), from Mamajek's online main-sequence table, "A Modern Mean Dwarf Stellar Color and
+/// Effective Temperature Sequence" (version 2022.04.16, read 2026-10-22), the updated form of
+/// Pecaut and Mamajek 2013's (ApJS 208, 9), whose Table 5 gave no luminosities.
+const LOCKED_HOST_LOG_LUMINOSITY: f64 = -2.03;
+
+/// The reference locked Earth's host's mass, M☉: 0.27, the M3.5V dwarf's in the same table, whose
+/// masses its author calls tentative.
+const LOCKED_HOST_MASS: SolarMasses = SolarMasses::new(0.27);
+
 /// What a reference world's crater contract takes beyond its age, gravity and screening: its
-/// target factor, P14.T48.f's impactors, and its impact rate per projectile size over the Moon's,
-/// which multiplies the lunar chronology into the lunar-equivalent density.
+/// target factor, P14.T48.f's impactors (their velocity and density) and target, and its impact
+/// rate per projectile size over the Moon's, which multiplies the lunar chronology into the
+/// lunar-equivalent density.
 struct Impactors {
     k_target: f64,
     velocity: MetresPerSecond,
+    projectile_density: KilogramsPerCubicMetre,
     target: CraterTarget,
     rate: f64,
 }
+
+/// The reference Mars's impactors: a silicate crust's target factor and target, struck at
+/// [`MARS_IMPACT_VELOCITY`] by stony projectiles at [`MARS_IMPACT_RATE`].
+const MARS_IMPACTORS: Impactors = Impactors {
+    k_target: 1.0,
+    velocity: MARS_IMPACT_VELOCITY,
+    projectile_density: PROJECTILE_DENSITY,
+    target: SILICATE_TARGET,
+    rate: MARS_IMPACT_RATE,
+};
 
 /// The sidereal year, days (NASA's Earth fact sheet: 365.256 d).
 const SIDEREAL_YEAR_DAYS: f64 = 365.256;
@@ -643,6 +701,30 @@ fn airless_rock_temperature(flux: WattsPerSquareMetre) -> Kelvin {
         EarthFluxes::from(flux),
         SurfaceState::Airless.albedo(SurfaceMaterial::Rock),
     )
+}
+
+/// The mean surface temperature plan 14 gives an airless icy body under `flux`: its equilibrium
+/// temperature at the airless ice's Bond albedo, 0.35, as [`airless_rock_temperature`] takes the
+/// rock's (P14.T13.c).
+#[must_use]
+fn airless_ice_temperature(flux: WattsPerSquareMetre) -> Kelvin {
+    irradiation::equilibrium_temperature(
+        EarthFluxes::from(flux),
+        SurfaceState::Airless.albedo(SurfaceMaterial::Ice),
+    )
+}
+
+/// The equator–pole contrast plan 14 gives an airless body of mean surface temperature `mean` at
+/// obliquity `obliquity`, K: the ends of its no-transport zonal profile `T_s` q(x)^¼,
+/// `T_s` (q(0)^¼ − q(1)^¼), with q the annual-mean insolation over S ÷ 4 at x = sin φ
+/// ([`annual_insolation_at`]), read in the radiative model's brightness kind
+/// (decision-r09-t13d-normalisation §2.2: "Its zonal ends are `T_s` q^¼"), as the climate tests'
+/// `with_airless_contrasts` takes it. The orbit's eccentricity does not enter, plan 14's profile
+/// being symmetric.
+#[must_use]
+fn airless_equator_pole_contrast_k(mean: Kelvin, obliquity: Radians) -> f64 {
+    let end = |x: f64| mean.value() * annual_insolation_at(obliquity, x).sqrt().sqrt();
+    end(0.0) - end(1.0)
 }
 
 /// The mean solar day of a prograde rotation of sidereal period `rotation` on an orbit of period
@@ -676,7 +758,7 @@ fn crater_params(
         gravity,
         k_target: impactors.k_target,
         impact_velocity: Some(impactors.velocity),
-        projectile_density: PROJECTILE_DENSITY,
+        projectile_density: impactors.projectile_density,
         target: impactors.target,
         system_age: craters::SOLAR_SYSTEM_AGE,
     })
@@ -781,6 +863,7 @@ pub fn earth_like() -> CoarseInputs {
             &Impactors {
                 k_target: 1.0,
                 velocity: EARTH_IMPACT_VELOCITY,
+                projectile_density: PROJECTILE_DENSITY,
                 target: SILICATE_TARGET,
                 rate: 1.0,
             },
@@ -914,12 +997,7 @@ pub fn mars_like() -> CoarseInputs {
             surface_age,
             gravity,
             atmosphere_screening(pressure, gravity),
-            &Impactors {
-                k_target: 1.0,
-                velocity: MARS_IMPACT_VELOCITY,
-                target: SILICATE_TARGET,
-                rate: MARS_IMPACT_RATE,
-            },
+            &MARS_IMPACTORS,
         ))
         .wet_epoch(WetEpoch {
             liquid: Gas::Water.substance(),
@@ -1033,6 +1111,7 @@ pub fn moon_like() -> CoarseInputs {
             &Impactors {
                 k_target: 1.0,
                 velocity: craters::LUNAR_IMPACT_VELOCITY,
+                projectile_density: PROJECTILE_DENSITY,
                 target: SILICATE_TARGET,
                 rate: 1.0,
             },
@@ -1124,6 +1203,7 @@ pub fn ceres_like() -> CoarseInputs {
             &Impactors {
                 k_target: 0.12,
                 velocity: CERES_IMPACT_VELOCITY,
+                projectile_density: PROJECTILE_DENSITY,
                 target: CERES_TARGET,
                 rate: 1.0,
             },
@@ -1150,6 +1230,176 @@ pub fn ceres_like() -> CoarseInputs {
         ]))
         .build()
         .expect("the reference Ceres's inputs are valid")
+}
+
+/// A Europa-like world: an airless moon of a Jupiter whose ice shell over an ocean is its surface,
+/// young and lightly cratered, its seasons its planet's orbit about the Sun (R09.T16's icy moon).
+///
+/// Its figures are plan 14's for the measured Europa wherever plan 14 has a rule, so that it is
+/// what a generated Europa analogue's record would give as far as the generator reaches one: plan
+/// 14 forms a Europa of 8% water inside its planet's ice line, dry and rocky (`ICY_WATER_FRACTION`;
+/// decision-p14-moons F2), so its own Europa has no ice shell, and these figures are its rules'
+/// for the measured body, its ice crust and ocean given.
+///
+/// | Figure | Value | Source |
+/// | --- | --- | --- |
+/// | radius, flattening | 1,560.8 km, 0.001 25 | JPL's satellite physical parameters (NASA's Jovian satellite fact sheet); (a + b) ÷ 2 against c of the IAU working group's ellipsoid, 1,562.6 × 1,560.3 × 1,559.5 km (Archinal et al. 2018, CMDA 130, 22, as NAIF's pck00011 carries it) |
+/// | gravity | GM ÷ R², GM = 3,202.712 1 km³ s⁻² | JPL's "Planetary Satellite Physical Parameters", as plan 14's figures tests read it (2026-10-12) |
+/// | `σ_h` | about 0.90 km: an ice shell's structural 0.9 km, the ice-rich basin share 2.05 km × (1.62 ÷ g) × 0.16 × √(N☾ ÷ 0.018) at its crater density, about 0.05 km, and no constructional share | plan 14's relief (P14.T48.a, `Relief::of`; Design note 3's fit) |
+/// | mean temperature | the equilibrium temperature at the airless ice's Bond albedo 0.35, about 110 K | plan 14's airless rule (P14.T13.c), a radiative mean; Europa's measured Bond albedo, 0.64 ± 0.06 (decision-p14-t54a-ganymede §1.5), would give about 95 K, and the generator's fresh-frost area mix at version 23 about 78 K, both P14.T49.m's to mend |
+/// | equator–pole contrast | about 60 K | plan 14's airless no-transport profile's ends at the obliquity (P14.T24.a; decision-r09-t13d-normalisation §2.2) |
+/// | day–night contrast | 40 K | a placeholder for P14.T24.a's, which the pass does not impose on a rotator (decision-r09-t13d-normalisation §2.3): under the swing of Galileo PPR's "diurnal brightness temperatures in the range of 86 to 132 kelvin" (Spencer et al. 1999, Science 284, 1514, abstract), low confidence |
+/// | spin | obliquity 3.13°, sidereal day 3.551 181 d, synchronous with its orbit about its planet; equinox phase not taken | its planet's obliquity, its spin following its orbit in its planet's equator, as plan 14's surface tests take a Galilean moon's (NASA's Jupiter fact sheet); NASA's Jovian satellite fact sheet, as plan 14's figures tests read it (2026-10-16) |
+/// | orbit | its planet's: 5.2038 au, e 0.0489, 4,332.59 d; the Sun's light alone, its planet's not added, as the reference Moon's | plan 14's Solar System table (`derive`), whose eccentricity is an older edition's of NASA's Jupiter fact sheet: the sheet now gives 0.0487 and its J2000 elements 0.048 39, a change in the mean flux of about 10⁻⁵ |
+/// | regime | ice shell, no constructional volcanism, airless | plan 14's figures of the measured Europa (P14.T24.b, `TectonicRegime::IceShell`); V is zero on an ice-rich crust, whose cryovolcanic constructs are not modelled (P14.T48.a); its O₂ exosphere, of the order of 1 µPa ("about 10⁻¹¹ that of the Earth's atmosphere at sea level": Hall et al. 1995, Nature 373, 677, abstract), is no air |
+/// | heat flow | 0.019 24 W m⁻² | plan 14's measured Europa at its own tides (P14.T56.d, `ICE_RESURFACING_HEAT_FLOW`), under the 20–50 mW m⁻² of the estimates (decision-p14-moons) |
+/// | surface age | 60 Myr | plan 14's resurfacing time of an ice-rich crust at that heat flow (P14.T24.b, `resurfacing_time`): Zahnle, Schenk, Levison and Dones 2003's nominal age (Icarus 163, 263, §5), inside Bierhaus et al. 2009's 40–90 Myr |
+/// | craters | lunar-equivalent: the lunar chronology at that age times `R_b` = 5.73, unscreened, N☾(>1 km) about 2.9 × 10⁻⁴ km⁻²; struck at 24.2 km/s by cometary projectiles of 500 kg m⁻³, on an ice-rich target (`k_target` 0.12), non-porous at ice Ih's density at the mean temperature, 932.7 kg m⁻³ | P14.T48.f's and P14.T48.c's model for the measured Europa, which a test holds (science-r09-craters.md items 1, 2 and 4); Design note 12 |
+/// | crust | water ice (primary crust: its frozen ocean's shell), the lid; no secondary crust named, its rock's lying under its ocean; the provinces the ice's (V = 0 builds none) | P14.T51.c's ice crusts: `H2O` "where … its rock differentiated beneath the ocean (Europa)", the lid always an ice crust's |
+/// | palette | water ice (primary crust), its density at the mean temperature, 932.7 kg m⁻³ | decision-composition §1.7; the row's figures; a crust lies at the mean surface temperature (the `palette` module). Its non-ice hydrated material, the trailing hemisphere's sulphuric acid hydrate and salts (Carlson et al. 1999; McCord et al. 1998; from memory), is not modelled, and no row stands in for it (P14.T49.m's icy regolith; P14.T51.d's radiolysis) |
+/// | ices, condensates | none | the lid is itself the ice. Plan 14's cover would also list the ice-rich crust's own ice where its profile lies under 110 K (P14.T24.b's `ice_fraction`), about 0.4 of the surface at this mean, which is left out |
+///
+/// # Panics
+///
+/// Never: its figures are valid, as a test builds it.
+#[must_use]
+pub fn europa_like() -> CoarseInputs {
+    let radius_m = 1_560.8e3;
+    let gravity = MetresPerSecondSquared::new(3.202_712_1e12 / (radius_m * radius_m));
+    let rotation = Seconds::new(3.551_181 * SECONDS_PER_DAY);
+    let year = Seconds::new(4_332.59 * SECONDS_PER_DAY);
+    let (a_au, e) = (5.2038, 0.0489);
+    let flux = orbit_mean_flux(a_au, e);
+    let mean = airless_ice_temperature(flux);
+    let obliquity = degrees(3.13);
+    let heat_flow = ICE_RESURFACING_HEAT_FLOW;
+    let surface_age = Gigayears::new(
+        resurfacing_time(CrustClass::IceRich, heat_flow).value() / YEARS_PER_GIGAYEAR,
+    );
+    let craters = crater_params(
+        surface_age,
+        gravity,
+        Screening::None,
+        &Impactors {
+            k_target: CrustClass::IceRich.k_target(),
+            velocity: EUROPA_IMPACT_VELOCITY,
+            projectile_density: ICY_PROJECTILE_DENSITY,
+            target: CraterTarget {
+                class: TargetClass::NonPorous,
+                density: CrustClass::IceRich.non_porous_density(mean),
+            },
+            rate: EUROPA_IMPACT_RATE,
+        },
+    );
+    let relief = Relief::of(&ReliefInputs {
+        regime: TectonicRegime::IceShell,
+        continental_fraction: 0.0,
+        crust: CrustClass::IceRich,
+        surface_gravity: gravity,
+        radius: Metres::new(radius_m),
+        crater_density: craters.n_1km(),
+        volcanism: 0.0,
+        // With no volcanism the constructional share reads no lithosphere.
+        lithosphere: Metres::ZERO,
+    });
+    CoarseInputs::builder()
+        .body(BodyRef::new(0, 5))
+        .figure(figure(radius_m, 0.001_25))
+        .gravity(gravity)
+        .sigma_h(relief.sigma_h())
+        .mean_surface_temperature(mean)
+        .equator_pole_contrast_k(airless_equator_pole_contrast_k(mean, obliquity))
+        .day_night_contrast_k(40.0)
+        .spin(Spin {
+            obliquity,
+            rotation_period: rotation,
+            solar_day: Some(solar_day(rotation, year)),
+            equinox_true_anomaly: Radians::ZERO,
+        })
+        .host_flux(flux)
+        .seasonal_orbit(SeasonalOrbit {
+            eccentricity: e,
+            period: year,
+        })
+        .surface_pressure(Pascals::ZERO)
+        .surface(SurfaceState::Airless, SurfaceMaterial::Ice)
+        .tectonics(TectonicRegime::IceShell, 0.0)
+        .volcanism(0.0)
+        .heat_flow(heat_flow)
+        .surface_age(surface_age)
+        .province_surface_age(surface_age)
+        .craters(craters)
+        .climate(ClimateRegime {
+            thermal: ThermalRegime::AirlessLike,
+            forcing: Forcing::Seasonal,
+            condensable: None,
+            model: ClimateModelKind::RadiativeEquilibrium,
+        })
+        .crust(CrustInputs {
+            primary: Some(H2O),
+            secondary: None,
+            tertiary: None,
+            bulk: None,
+            lid: LidCrust::Primary,
+            provinces: H2O,
+            melt_area_fraction: 0.0,
+        })
+        .palette(palette(vec![
+            WATER_ICE.entry(PaletteRole::PrimaryCrust, mean),
+        ]))
+        .build()
+        .expect("the reference Europa's inputs are valid")
+}
+
+/// The reference Earth locked 1:1 to an M dwarf on a circular orbit at the reference Earth's mean
+/// flux (R09.T16's locked world), as the climate tests' locked Earth is built
+/// (`steps::climate::tests`' `locked_earth(0.0, 0.0)`), but about a host whose figures are a
+/// table's and under plan 14's own contrasts for a locked Earth.
+///
+/// | Figure | Value | Source |
+/// | --- | --- | --- |
+/// | host | an M3.5V dwarf of 0.27 M☉ and 10^−2.03 L☉, 0.009 33 L☉ (3,270 K, 0.300 R☉) | Mamajek's online main-sequence table (version 2022.04.16, read 2026-10-22), the updated form of Pecaut and Mamajek 2013's (ApJS 208, 9), which calls its masses tentative |
+/// | orbit | e 0, a = √(L S☉ ÷ F) au = 0.0966 au, F the reference Earth's mean flux, its year a^1.5 ÷ √(M ÷ M☉) sidereal years, 21.10 d | Kepler's third law, the planet's mass (10⁻⁵ of the host's) neglected; the climate tests' locked Earth takes 24 d about an illustrative dwarf of 0.3 M☉ and 0.012 L☉ |
+/// | spin | locked 1:1: its rotation its year, no solar day, no obliquity, no equinox phase | a tidally locked world (P14.T48.d's `Forcing::Locked`), its obliquity damped, as the climate tests' locked Earth |
+/// | climate | locked forcing, the locked energy-balance model, the Earth's thermal regime and condensable | Design note 8; P14.T48.d |
+/// | contrasts | 32.9 K equator–pole, 59.8 K day–night about the substellar axis | plan 14's for its Solar System table's Earth under the lock's spin (P14.T24.a's `SurfaceConditions::derive`), which a test holds to 1 K; the climate tests' locked Earth keeps the reference Earth's 42 and 3 K, a rotator's |
+/// | everything else | the reference Earth's ([`earth_like`]'s table): its figure, mean temperature, air, ocean, ice, crust, palette, regime, heat flow, ages, crater contract and wet epoch | as the climate tests' locked Earth; plan 14's mean is the same under the lock (290.6 K for its table's Earth under either spin); its crater contract stands for the dwarf's own system's, and its ice's density, at the Earth's coldest zone, for its night's (918.6 kg m⁻³ at 260 K) |
+///
+/// # Panics
+///
+/// Never: its figures are valid, as a test builds it.
+#[must_use]
+pub fn locked_earth_like() -> CoarseInputs {
+    let earth = earth_like();
+    let luminosity_solar = math::powf(10.0, LOCKED_HOST_LOG_LUMINOSITY);
+    // Where the host's L ÷ a² is the reference Earth's mean flux.
+    let a_au = (luminosity_solar * SOLAR_CONSTANT_W_PER_M2 / earth.host_flux().value()).sqrt();
+    let year = Seconds::new(
+        math::powf(a_au, 1.5) / LOCKED_HOST_MASS.value().sqrt()
+            * SIDEREAL_YEAR_DAYS
+            * SECONDS_PER_DAY,
+    );
+    builder_of(&earth)
+        .body(BodyRef::new(0, 6))
+        .equator_pole_contrast_k(LOCKED_EARTH_EQUATOR_POLE_K)
+        .day_night_contrast_k(LOCKED_EARTH_DAY_NIGHT_K)
+        .spin(Spin {
+            obliquity: Radians::ZERO,
+            rotation_period: year,
+            solar_day: None,
+            equinox_true_anomaly: Radians::ZERO,
+        })
+        .seasonal_orbit(SeasonalOrbit {
+            eccentricity: 0.0,
+            period: year,
+        })
+        .climate(ClimateRegime {
+            forcing: Forcing::Locked,
+            model: ClimateModelKind::LockedEnergyBalance,
+            ..*earth.climate()
+        })
+        .build()
+        .expect("the reference locked Earth's inputs are valid")
 }
 
 /// The gas of key `key` at mole fraction `x`, called in a `const` item so that a malformed key
@@ -1181,8 +1431,9 @@ const fn condensate(
 }
 
 /// The builder values of `inputs`, as a builder to vary: the one copy that the inputs', the steps'
-/// and the pass's tests vary a reference world through (decision-r09-t13-test-cost §3.1).
-#[cfg(test)]
+/// and the pass's tests vary a reference world through (decision-r09-t13-test-cost §3.1), and
+/// [`locked_earth_like`] builds on.
+#[must_use]
 pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
     let mut builder = CoarseInputs::builder()
         .body(inputs.body())
@@ -1249,6 +1500,12 @@ mod tests {
     use super::*;
     use hyperion_surface::field::coarse_level;
 
+    /// The lunar chronology's N☾(>1 km) at the surface age of `inputs`, per km², in a system of
+    /// the Solar System's age, which each world's impact rate multiplies.
+    fn chronology_of(inputs: &CoarseInputs) -> f64 {
+        craters::lunar_chronology(inputs.surface_age(), craters::SOLAR_SYSTEM_AGE).value()
+    }
+
     /// The surface crate's liquid bins are the sky's bake bins to the bit, so that a liquid
     /// record's bin means and a client's interpolation of them share one grid with each star's
     /// bake spectrum (decision-r11-palette-liquids §1.2).
@@ -1263,6 +1520,7 @@ mod tests {
 
     #[test]
     fn the_reference_worlds_are_the_bodies_they_name() {
+        use hyperion_testkit::float::assert_same_bits;
         let earth = earth_like();
         assert_eq!(coarse_level(earth.radius()).get(), 8);
         assert!((earth.gravity().value() - 9.82).abs() < 0.01);
@@ -1303,6 +1561,77 @@ mod tests {
         assert!((ceres.gravity().value() - 0.284).abs() < 0.001);
         let t = ceres.mean_surface_temperature().value();
         assert!((160.0..166.0).contains(&t), "{t} K");
+
+        let europa = europa_like();
+        assert_eq!(coarse_level(europa.radius()).get(), 6);
+        assert_eq!(europa.body(), BodyRef::new(0, 5));
+        assert!((europa.gravity().value() - 1.315).abs() < 0.001);
+        assert_eq!(
+            (europa.surface_state(), europa.surface_material()),
+            (SurfaceState::Airless, SurfaceMaterial::Ice)
+        );
+        assert_eq!(europa.surface_pressure(), Pascals::ZERO);
+        assert_eq!(europa.tectonics(), TectonicRegime::IceShell);
+        assert_same_bits(europa.volcanism(), 0.0);
+        // At the airless ice's 0.35 under the Sun's light at Jupiter, about 110 K, its profile's
+        // ends some 60 K apart at its 3.13° to Jupiter's orbit.
+        let t = europa.mean_surface_temperature().value();
+        assert!((109.0..110.5).contains(&t), "{t} K");
+        let contrast = europa.equator_pole_contrast_k();
+        assert!((59.0..61.5).contains(&contrast), "{contrast} K");
+        // Its seasons are Jupiter's year, its solar day 3.554 d against its 3.551 d spin.
+        assert_eq!(europa.months(), 12);
+        let day = europa.spin().solar_day.unwrap().value() / SECONDS_PER_DAY;
+        assert!((day - 3.554).abs() < 0.001, "{day} d");
+        // A young surface, 60 Myr, under 0.019 W m⁻², whose basins add some 50 m to the shell's
+        // 0.9 km: N☾(>1 km) about 2.9 × 10⁻⁴ km⁻², far under saturation's 0.018.
+        assert!((europa.surface_age().value() - 0.06).abs() < 1e-12);
+        let n = europa.craters().n_1km().value();
+        assert!((2.8e-4..3.0e-4).contains(&n), "{n} km⁻²");
+        let sigma = europa.sigma_h().value();
+        assert!((900.0..903.0).contains(&sigma), "{sigma} m");
+        assert_eq!(europa.condensates(), []);
+        assert_eq!(europa.ices(), []);
+        assert_eq!(europa.wet_epoch(), None);
+
+        let locked = locked_earth_like();
+        assert_eq!(coarse_level(locked.radius()).get(), 8);
+        assert_eq!(locked.body(), BodyRef::new(0, 6));
+        // Locked 1:1 on a circular, untilted orbit: one month, no solar day, its rotation its
+        // year, 21.10 d about the M3.5V dwarf at 0.0966 au.
+        assert_eq!(locked.months(), 1);
+        let spin = locked.spin();
+        assert_eq!(spin.solar_day, None);
+        let orbit = locked.seasonal_orbit().unwrap();
+        assert_eq!(orbit.period, spin.rotation_period);
+        assert_same_bits(orbit.eccentricity, 0.0);
+        let year = orbit.period.value() / SECONDS_PER_DAY;
+        assert!((year - 21.10).abs() < 0.01, "{year} d");
+        // Kepler's third law gives its period back from the host's mass and its orbit, where the
+        // host's light is the reference Earth's mean flux.
+        let a_au =
+            math::powf(year / SIDEREAL_YEAR_DAYS, 2.0 / 3.0) * math::cbrt(LOCKED_HOST_MASS.value());
+        assert!((a_au - 0.0966).abs() < 1e-4, "{a_au} au");
+        let flux =
+            SOLAR_CONSTANT_W_PER_M2 * math::powf(10.0, LOCKED_HOST_LOG_LUMINOSITY) / (a_au * a_au);
+        assert!(
+            (flux / earth.host_flux().value() - 1.0).abs() < 1e-9,
+            "{flux} W m⁻²"
+        );
+        assert_eq!(locked.host_flux(), earth.host_flux());
+        assert_eq!(
+            (locked.climate().forcing, locked.climate().model),
+            (Forcing::Locked, ClimateModelKind::LockedEnergyBalance)
+        );
+        // The rest is the reference Earth's.
+        assert_eq!(
+            locked.mean_surface_temperature(),
+            earth.mean_surface_temperature()
+        );
+        assert_eq!(locked.palette(), earth.palette());
+        assert_eq!(locked.crust(), earth.crust());
+        assert_eq!(locked.condensates(), earth.condensates());
+        assert_eq!(locked.craters(), earth.craters());
     }
 
     /// Each world's crater contract is lunar-equivalent and carries P14.T48.f's impactors
@@ -1311,14 +1640,63 @@ mod tests {
     #[test]
     fn the_reference_crater_contracts_carry_their_impactors() {
         use hyperion_testkit::float::assert_same_bits;
-        let chronology = |inputs: &CoarseInputs| {
-            craters::lunar_chronology(inputs.surface_age(), craters::SOLAR_SYSTEM_AGE).value()
+        let chronology = chronology_of;
+        // The icy moon's target is non-porous ice Ih at its mean temperature, 932.7 kg m⁻³, and
+        // its projectiles the giants' comets (P14.T48.f).
+        let europa = europa_like();
+        let ice = CraterTarget {
+            class: TargetClass::NonPorous,
+            density: substance::ice_ih_density(europa.mean_surface_temperature()),
         };
-        for (name, world, velocity, target, rate) in [
-            ("Earth", earth_like(), 19_900.0, SILICATE_TARGET, 1.0),
-            ("Mars", mars_like(), 10_600.0, SILICATE_TARGET, 1.92),
-            ("the Moon", moon_like(), 16_700.0, SILICATE_TARGET, 1.0),
-            ("Ceres", ceres_like(), 5_600.0, CERES_TARGET, 1.0),
+        assert!((ice.density.value() - 932.7).abs() < 0.05, "{ice:?}");
+        let (rock, comets) = (PROJECTILE_DENSITY, ICY_PROJECTILE_DENSITY);
+        for (name, world, velocity, target, projectiles, k_target, rate) in [
+            (
+                "Earth",
+                earth_like(),
+                19_900.0,
+                SILICATE_TARGET,
+                rock,
+                1.0,
+                1.0,
+            ),
+            (
+                "Mars",
+                mars_like(),
+                10_600.0,
+                SILICATE_TARGET,
+                rock,
+                1.0,
+                1.92,
+            ),
+            (
+                "the Moon",
+                moon_like(),
+                16_700.0,
+                SILICATE_TARGET,
+                rock,
+                1.0,
+                1.0,
+            ),
+            (
+                "Ceres",
+                ceres_like(),
+                5_600.0,
+                CERES_TARGET,
+                rock,
+                0.12,
+                1.0,
+            ),
+            ("Europa", europa, 24_200.0, ice, comets, 0.12, 5.73),
+            (
+                "the locked Earth",
+                locked_earth_like(),
+                19_900.0,
+                SILICATE_TARGET,
+                rock,
+                1.0,
+                1.0,
+            ),
         ] {
             let c = world.craters();
             assert_eq!(
@@ -1327,7 +1705,8 @@ mod tests {
                 "{name}"
             );
             assert_eq!(c.target(), target, "{name}");
-            assert_eq!(c.projectile_density(), PROJECTILE_DENSITY, "{name}");
+            assert_eq!(c.projectile_density(), projectiles, "{name}");
+            assert_same_bits(c.k_target(), k_target);
             assert_eq!(c.system_age(), craters::SOLAR_SYSTEM_AGE, "{name}");
             assert_same_bits(c.n_1km().value(), chronology(&world) * rate);
         }
@@ -1397,9 +1776,13 @@ mod tests {
                 (Deposit, "Na2CO3"),
             ])
         );
+        // The icy moon's palette is its ice crust alone: its non-ice material is not modelled.
+        assert_eq!(entries(&europa_like()), expect(&[(PrimaryCrust, "H2O")]));
+        // The locked Earth's is the reference Earth's.
+        assert_eq!(entries(&locked_earth_like()), entries(&earth_like()));
         // The Moon's cold-trapped water ice and Ceres's are entries no share names yet
-        // (science-r09-drainage.md §4).
-        for world in [moon_like(), ceres_like()] {
+        // (science-r09-drainage.md §4), and the icy moon's ice is its lid.
+        for world in [moon_like(), ceres_like(), europa_like()] {
             assert_eq!(world.ices(), []);
             assert_eq!(world.condensates(), []);
         }
@@ -1424,8 +1807,11 @@ mod tests {
         {
             assert!((held - fresnel).abs() < 5e-5, "{held} against {fresnel}");
         }
+        // The locked Earth's sea is the reference Earth's.
+        let locked = locked_earth_like();
+        assert_eq!(locked.main_liquid(), earth.main_liquid());
         // No other world's entry carries a record: none has a sea or a melting crust.
-        for world in [mars_like(), moon_like(), ceres_like()] {
+        for world in [mars_like(), moon_like(), ceres_like(), europa_like()] {
             assert!(world.palette().entries().iter().all(|e| e.liquid.is_none()));
         }
     }
@@ -1473,10 +1859,22 @@ mod tests {
         let (lid, rho) = density(&mars, mars.lid_entry());
         assert_eq!(lid, BASALT_FE_KEY);
         assert!((rho - 3_310.0).abs() < 1e-9);
+        // The icy moon's lid is its ice shell, ice Ih at its mean temperature (the `palette`
+        // module's crust rule), its provinces the same entry.
+        let europa = europa_like();
+        let (lid, rho) = density(&europa, europa.lid_entry());
+        assert_eq!(lid, H2O);
+        let at_mean = substance::ice_ih_density(europa.mean_surface_temperature()).value();
+        assert!(
+            (rho - at_mean).abs() < 1e-9,
+            "{rho} against {at_mean} kg m⁻³"
+        );
+        assert_eq!(europa.crust_palette()[3], Some(europa.lid_entry()));
     }
 
     /// Each world's surface shows the crust science-composition-crusts.md §5.2 gives it: Earth's
-    /// and Mars's lids their secondary crusts, the Moon's and Ceres's their primary ones; none is
+    /// and Mars's lids their secondary crusts, the Moon's, Ceres's and the icy moon's their
+    /// primary ones (an ice crust's always, P14.T51.c); none is
     /// an undifferentiated body, and the iron-rich basalt is the Moon's and Mars's, the tholeiite
     /// Earth's (§2).
     #[test]
@@ -1496,6 +1894,13 @@ mod tests {
                 Some(BASALT_FE_KEY),
             ),
             ("Ceres", ceres_like(), LidCrust::Primary, None),
+            ("Europa", europa_like(), LidCrust::Primary, None),
+            (
+                "the locked Earth",
+                locked_earth_like(),
+                LidCrust::Secondary,
+                Some(BASALT_KEY),
+            ),
         ] {
             let crust = world.crust();
             assert_eq!(crust.lid, lid, "{name}");
@@ -1504,6 +1909,10 @@ mod tests {
         }
         assert_eq!(moon_like().crust().primary, Some(FELDSPATHIC_KEY));
         assert_eq!(mars_like().crust().primary, None);
+        // The icy moon's primary crust is its frozen ocean's shell, water ice (P14.T51.c).
+        let europa = europa_like();
+        assert_eq!(europa.crust().primary, Some(H2O));
+        assert_eq!(europa.crust().provinces, H2O);
     }
 
     /// Each world's ice entry takes ice Ih's density ([`substance::ice_ih_density`], whose
@@ -1520,6 +1929,7 @@ mod tests {
             ("Mars", mars_like(), 928.4),
             ("the Moon", moon_like(), 932.7),
             ("Ceres", ceres_like(), 932.7),
+            ("the locked Earth", locked_earth_like(), 918.6),
         ] {
             let got = ice(&world);
             assert!((got - rho).abs() < 0.1, "{name}'s ice: {got} kg m⁻³");
@@ -1531,7 +1941,14 @@ mod tests {
     #[test]
     fn every_key_the_reference_worlds_use_is_a_substance_row() {
         let mut keys = std::collections::BTreeSet::new();
-        for world in [earth_like(), mars_like(), moon_like(), ceres_like()] {
+        for world in [
+            earth_like(),
+            mars_like(),
+            moon_like(),
+            ceres_like(),
+            europa_like(),
+            locked_earth_like(),
+        ] {
             keys.extend(world.gases().iter().map(|gas| gas.substance));
             keys.extend(world.condensates().iter().map(|c| c.substance));
             keys.extend(
@@ -1689,7 +2106,14 @@ mod tests {
             ("CO2", 0.955, 0.6, false),
         ];
         let mut seen = std::collections::BTreeSet::new();
-        for world in [earth_like(), mars_like(), moon_like(), ceres_like()] {
+        for world in [
+            earth_like(),
+            mars_like(),
+            moon_like(),
+            ceres_like(),
+            europa_like(),
+            locked_earth_like(),
+        ] {
             for entry in world.palette().entries() {
                 let key = entry.substance.as_str();
                 let row = substance::by_key(key).unwrap().substance();
@@ -1756,6 +2180,124 @@ mod tests {
         let ceres = ceres_like();
         let fitted = sigma(ceres.gravity().value(), 0.16);
         assert!((fitted - ceres.sigma_h().value()).abs() < 1.0, "{fitted} m");
+        // The icy moon's: the ice shell's 0.9 km with the ice-rich basin share at its own crater
+        // density, far from saturation, √(N☾ ÷ 0.018) of it (P14.T48.a).
+        let europa = europa_like();
+        let share = (europa.craters().n_1km().value() / 0.018).sqrt();
+        let fitted = sigma(europa.gravity().value(), 0.16 * share);
+        assert!(
+            (fitted - europa.sigma_h().value()).abs() < 1.0,
+            "{fitted} m"
+        );
+    }
+
+    /// The reference Europa's impactors are plan 14's for the measured Europa (P14.T48.f and
+    /// P14.T48.c): its rate, velocity, projectile density, target factor and target, of a regular
+    /// moon of Jupiter at 671,100 km, 3,202.712 1 km³ s⁻² and 1,560.8 km with 8% water, about the
+    /// Solar System's sources, on JPL's elements of Jupiter, as plan 14's figures tests build the
+    /// measured Europa.
+    #[test]
+    fn the_reference_europa_s_impactors_are_plan_14_s() {
+        use crate::planetary::derive::SnowLineSide;
+        use crate::planetary::hooks::figures::{
+            HostOrbit, HostOrbiter, ImpactorBody, ImpactorOrbit, impactors,
+        };
+        use crate::units::consts::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT, METRES_PER_AU};
+        use crate::units::{EarthMasses, Kilograms};
+        use hyperion_testkit::float::assert_same_bits;
+        let europa = europa_like();
+        // JPL's J2000 elements of Jupiter (its Table 1) and its mass, as plan 14's figures tests
+        // read them.
+        let jupiter = HostOrbiter {
+            orbit: HostOrbit {
+                semi_major_axis: Metres::new(5.202_887 * METRES_PER_AU),
+                eccentricity: 0.048_386_24,
+                inclination: degrees(1.304_396_95),
+            },
+            mass: EarthMasses::new(1_898.125e24 / EARTH_MASS_KG),
+            belt: None,
+        };
+        let r = europa.radius().value();
+        let kg = 3.202_712_1e12 / GRAVITATIONAL_CONSTANT;
+        let body = ImpactorBody {
+            orbit: ImpactorOrbit::Moon {
+                parent: jupiter,
+                semi_major_axis: Metres::new(671_100e3),
+                formed: SnowLineSide::Beyond,
+            },
+            radius: Metres::new(r),
+            density: KilogramsPerCubicMetre::new(
+                kg / (4.0 / 3.0 * core::f64::consts::PI * r * r * r),
+            ),
+            surface_gravity: europa.gravity(),
+            surface_temperature: europa.mean_surface_temperature(),
+            water: Kilograms::new(0.08 * kg),
+            sources: crate::planetary::hooks::figures::tests::solar_sources(),
+        };
+        let plan14 = impactors(&body).unwrap();
+        let c = europa.craters();
+        let velocity = c.impact_velocity().unwrap().value();
+        assert!(
+            (velocity / plan14.velocity().value() - 1.0).abs() < 0.005,
+            "{velocity} against {:?}",
+            plan14.velocity()
+        );
+        let rate = c.n_1km().value() / chronology_of(&europa);
+        assert!(
+            (rate / plan14.rate() - 1.0).abs() < 0.005,
+            "{rate} against {}",
+            plan14.rate()
+        );
+        assert_eq!(plan14.crust(), CrustClass::IceRich);
+        assert_eq!(c.projectile_density(), plan14.projectile_density());
+        assert_same_bits(c.k_target(), plan14.k_target());
+        assert_eq!(c.target(), plan14.target());
+        // Its heat flow is plan 14's for the measured Europa, so its surface is the calibration's
+        // 60 Myr.
+        assert_same_bits(europa.surface_age().value(), 0.06);
+    }
+
+    /// The reference locked Earth's contrasts are plan 14's to 1 K: P14.T24.a's conditions of its
+    /// Solar System table's Earth under the lock's spin, with no obliquity and no solar day; and
+    /// plan 14's mean is the same under the lock as under the Earth's own spin.
+    #[test]
+    fn the_locked_earth_s_contrasts_are_plan_14_s() {
+        use crate::planetary::hooks::surface::SeasonalSpin;
+        use crate::planetary::hooks::surface::tests::{conditions_of, spin_of};
+        let earth = crate::planetary::derive::solar::historic("Earth");
+        let locked = locked_earth_like();
+        let spin = SeasonalSpin {
+            obliquity: Radians::ZERO,
+            rotation_period: locked.spin().rotation_period,
+            solar_day: None,
+        };
+        let plan14 = conditions_of(&earth, spin).unwrap();
+        let own = conditions_of(&earth, spin_of("Earth")).unwrap();
+        for (name, held, theirs) in [
+            (
+                "equator–pole",
+                locked.equator_pole_contrast_k(),
+                plan14.equator_pole_contrast_k(),
+            ),
+            (
+                "day–night",
+                locked.day_night_contrast_k(),
+                plan14.day_night_contrast_k(),
+            ),
+        ] {
+            assert!(
+                (held - theirs).abs() < 1.0,
+                "{name}: {held} K against {theirs} K"
+            );
+        }
+        let (mean, own_mean) = (
+            plan14.mean_surface_temperature().value(),
+            own.mean_surface_temperature().value(),
+        );
+        assert!(
+            (mean - own_mean).abs() < 1e-9,
+            "{mean} K against {own_mean} K"
+        );
     }
 
     /// The reference Earth's water carries the registry's scattering, to the bit: its copy, as

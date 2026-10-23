@@ -1,0 +1,111 @@
+# generator_version = 23
+world ceres_like level 5 cells 6144 climate cells 1536 craters 75
+header body system 0 index 4
+header radius m = 0x411cab1000000000  # 469700.0
+header figure equatorial radius m = 0x411d6c48a78869ce  # 482066.16360631294
+header figure polar radius m = 0x411b375cce2afb79  # 445911.2013358395
+header boundary diameter m = 0x40e8702c68feeb1b  # 50049.387816867056
+header sea level m = 0xc0bc45aee1097b92  # -7237.683121292752
+header lapse rate K m-1 = 0x0000000000000000  # 0.0
+header spectrum exponent = 0x4000000000000000  # 2.0
+header spectrum unit degree variance m2 = 0x41020be25743c316  # 147836.2926097146
+header spectrum break degree = 0x40970e6c9d7457f8  # 1475.6060693911259
+header spectrum small-scale exponent = 0x4008000000000000  # 3.0
+header craters N(>1 km) km-2 = 0x3fb014999e0a45de  # 0.0628143320884855
+header craters screening none
+header craters gravity m s-2 = 0x3fd22b0a684d1aae  # 0.2838769930425923
+header craters k target = 0x3fbeb851eb851eb8  # 0.12
+header craters impact velocity m s-1 = 0x40b5e00000000000  # 5600.0
+header craters projectile density kg m-3 = 0x40a7700000000000  # 3000.0
+header craters target class 0 (NonPorous)
+header craters target density kg m-3 = 0x40941c0000000000  # 1287.0
+header craters system age Gyr = 0x4012449ba5e353f8  # 4.567
+header climate model 2 (RadiativeEquilibrium)
+header precipitation 0 (Heuristic)
+header realised sigma_h m = 0x40a039fffffffffe  # 2076.999999999999
+header realised relief m = 0x40cb2a4f8772a446  # 13908.621321039402
+header months 12
+header season eccentricity = 0x3fb367a0f9096bba  # 0.0758
+header reference temperature K = 0x406453de76ea8194  # 162.62090631296144
+header temperature step 0
+header anomaly step 1
+header surface age Gyr = 0x4010000000000000  # 4.0
+header surface pressure Pa = 0x0000000000000000  # 0.0
+header albedo scale none
+header palette entries 3 (below)
+header crust palette none,none,0,0
+header main liquid none
+header maturity none
+header organic cover none
+header weathering rate none
+palette[0] substance phyllosilicate role 0 (PrimaryCrust)
+palette[0] normal albedo B = 0x3fdfb56df5b4194d  # 0.4954485797355986
+palette[0] normal albedo V = 0x3fe8a4b5dad51951  # 0.7701062463827758
+palette[0] normal albedo R = 0x3fead3a4e3928f8a  # 0.8383354611182636
+palette[0] phase row 1
+palette[0] grain density kg m-3 = 0x40a3880000000000  # 2500.0
+palette[0] transition K = 0x40963c999999999a  # 1423.15
+palette[0] mechanics 0 (Silicate)
+palette[0] liquid none
+palette[0] FeO mass fraction none
+palette[1] substance H2O role 4 (Ice)
+palette[1] normal albedo B = 0x3feea44f2b756484  # 0.9575572823333833
+palette[1] normal albedo V = 0x3fee61d8f974ce91  # 0.9494442817871961
+palette[1] normal albedo R = 0x3fee0644e47840c7  # 0.9382652723598078
+palette[1] phase row 2
+palette[1] grain density kg m-3 = 0x408d25c4532d98df  # 932.7208617746618
+palette[1] transition K = 0x4071128f5c28f5c3  # 273.16
+palette[1] mechanics 2 (WaterIce)
+palette[1] liquid none
+palette[1] FeO mass fraction none
+palette[2] substance Na2CO3 role 7 (Deposit)
+palette[2] normal albedo B = 0x3ff06bbc1af23e3c  # 1.0263024380291332
+palette[2] normal albedo V = 0x3ff179dcc3c5a078  # 1.0922515532820665
+palette[2] normal albedo R = 0x3ff1dedb5dfd9c0e  # 1.116908423567796
+palette[2] phase row 1
+palette[2] grain density kg m-3 = 0x40a3d80000000000  # 2540.0
+palette[2] transition K = 0x40918c999999999a  # 1123.15
+palette[2] mechanics 4 (Salt)
+palette[2] liquid none
+palette[2] FeO mass fraction none
+cells elevation_mm digest = 0x71a027ccea9302ed
+cells boundary_distance_km digest = 0xdb40649be1ae2325
+cells plate digest = 0x68c00ea49d512325
+cells crust digest = 0xd0f8ab24c1512325
+cells boundary digest = 0x68c00ea49d512325
+cells boundary_obliquity digest = 0x68c00ea49d512325
+cells flow digest = 0x68c00ea49d512325
+cells drainage digest = 0x68c00ea49d512325
+cells steepness digest = 0x68c00ea49d512325
+cells runoff digest = 0x68c00ea49d512325
+cells catchment_runoff digest = 0x68c00ea49d512325
+cells epoch_incision digest = 0x68c00ea49d512325
+cells water_surface_mm digest = 0x71a027ccea9302ed
+cells ice digest = 0x68c00ea49d512325
+cells substances digest = 0x0684510c6254a325
+cells class digest = 0x426825791cb3a325
+cells crater_state digest = 0x5c1a51bfcd421965
+cells seafloor digest = 0x68c00ea49d512325
+cells elevation mm min -7237683 max 6670938
+cells by crust Continental 0 Oceanic 0 Lid 6144 Province 0
+cells by boundary Absent 6144 Subduction 0 Collision 0 Divergent 0 Transform 0
+cells under water 0
+cells with ice 0
+cells by class 71:6144
+cells crater state min 130 median 184 max 184; at code 1 0
+cells epoch incision NONE 6144 UNCUT 0 cut 0; cut codes none
+climate sea_level_temperature digest = 0x118580d3d5e6eb85
+climate month_anomaly digest = 0xbf595254027e9f15
+climate month_precipitation digest = 0x01a2728bcfaf2325
+climate wind azimuth digest = 0x01a2728bcfaf2325
+climate wind speed digest = 0x01a2728bcfaf2325
+craters count 75
+craters centre digest = 0x3adc88b38b6d8d10
+craters diameter digest = 0x50bcfe028e5a2582
+craters morphology digest = 0x1ac5c121a319f07d
+craters age digest = 0xe8c3a66dcf9f08cb
+craters degradation digest = 0x32aaee8f72236fe3
+craters reach digest = 0xaa818a9f0afbd4a4
+craters degradation min 7 max 198
+payload blocks 1 bytes 249603 lengths 249603
+payload digest = 0x5013a83a293d3a46

@@ -176,6 +176,43 @@ pub fn run(pass: &Pass<'_>, working: &mut Working) {
     let _diagnostics = run_diagnosed(pass, working);
 }
 
+/// One month's orographic solve, as the sample worlds' tests read it (R09.T16): the GMRES
+/// restarts it took and whether it met its stop test within the cap ([`lfpm`]'s diagnostics;
+/// decision-r09-t13e-lfpm-convergence, E-L8: at most 20 restarts a month on the sample).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OrographicSolve {
+    /// The GMRES restarts the solve took, at most the cap, `lfpm::MAX_RESTARTS`.
+    pub(crate) restarts: u32,
+    /// Whether the solve met its stop test within the cap.
+    pub(crate) converged: bool,
+}
+
+/// [`run`], returning each month's orographic solve in month order, `None` for a month where none
+/// ran (nothing evaporated, or no land); empty on a model with no water cycle (the radiative and
+/// isothermal ones). The same run as [`run`]'s, its diagnostics read rather than dropped.
+#[cfg(test)]
+pub(crate) fn run_with_solves(
+    pass: &Pass<'_>,
+    working: &mut Working,
+) -> Vec<Option<OrographicSolve>> {
+    run_diagnosed(pass, working)
+        .water
+        .map(|water| {
+            water
+                .months
+                .iter()
+                .map(|month| {
+                    month.orographic.as_ref().map(|solve| OrographicSolve {
+                        restarts: solve.restarts,
+                        converged: solve.converged,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// What a run did that is no output, for its tests: the guard's counts, the corrections and the
 /// ices, their cold-trapped parts and the liquids placed (decision-r09-t13d-normalisation §1.2,
 /// §2.4; decision-r09-t13f-cold-traps §5.3).
