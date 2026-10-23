@@ -1,7 +1,8 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T48.a–d, T48.f; the rendering plans' R09.T1.b):
+//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T48.a–d, T48.f, T52.d; the rendering plans'
+//! R09.T1.b):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -24,10 +25,12 @@
 //!   ([`EnvelopeProfile`], P14.T24.d), Guillot's grey profile joined to its dry adiabat. It is
 //!   pure until P14.T54.b, the 23 → 24 bump, puts it in the record's surface and envelope
 //!   sections.
-//! - [`envelope_atmosphere`]: a gas envelope's visible atmosphere (P14.T24.d with P14.T52.d), so
-//!   far its internal temperature, the record's giant cooling blended with a stated cooling law
-//!   ([`envelope_internal_temperature`]). It is pure until P14.T54.b puts it in the record's
-//!   envelope section.
+//! - [`envelope_atmosphere`]: a gas envelope's visible atmosphere (P14.T24.d with P14.T52.d): its
+//!   internal temperature, the record's giant cooling blended with a stated cooling law
+//!   ([`envelope_internal_temperature`]), and its [`EnvelopeAtmosphere`], Guillot's profile on the
+//!   envelope's own gas, its quenched and cold-trapped composition at 1 bar, its decks, its
+//!   photochemical hazes and its absorbers at 10 mbar. It is pure until P14.T54.b puts it in the
+//!   record's envelope section.
 //! - [`modifiers`]: a solid surface's [`SurfaceModifiers`] (P14.T51.d), its space-weathering rate
 //!   and maturity, organic cover, resurfacing rate and an Io's volcanic deposits. It is pure until
 //!   P14.T54.b, the 23 → 24 bump, puts it in the record's surface section in the place of the
@@ -71,7 +74,10 @@ pub mod sulphur;
 pub mod surface;
 
 pub use crust::{CrustComposition, CrustCompositionInputs, CrustLithology, DeriveCrustError};
-pub use envelope_atmosphere::envelope_internal_temperature;
+pub use envelope_atmosphere::{
+    DeckKind, DeriveEnvelopeAtmosphereError, DeriveInternalTemperatureError, EnvelopeAtmosphere,
+    EnvelopeAtmosphereInputs, envelope_internal_temperature,
+};
 pub use figures::{
     GlobalFigures, Impactors, MagneticField, OceanFloor, Subsurface, SubsurfaceOcean,
     TectonicRegime, impactors,

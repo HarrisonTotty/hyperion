@@ -26,7 +26,7 @@ fn effective_temperature(body: &DerivedBody) -> Kelvin {
 
 /// The table's giant `name`, derived about the present Sun at its own distance, and its
 /// envelope's inputs about a host of `host`'s ratios at solar metallicity.
-fn table_giant(name: &str, host: HostAbundances) -> (DerivedBody, EnvelopeInputs) {
+pub(crate) fn table_giant(name: &str, host: HostAbundances) -> (DerivedBody, EnvelopeInputs) {
     let &(_, _, _, a, _) = PLANETS
         .iter()
         .find(|(n, ..)| *n == name)
@@ -55,7 +55,7 @@ fn table_giant(name: &str, host: HostAbundances) -> (DerivedBody, EnvelopeInputs
 /// formed where its disc was at `formation` (a snow line of 2.255 au), about a host of `fe_h` and
 /// `alpha_fe` at the median ranks, at an effective temperature of `t_eff`, Jupiter's surface
 /// gravity and the Sun's age, with protosolar helium.
-fn synthetic(
+pub(crate) fn synthetic(
     earths: f64,
     envelope: f64,
     formation: f64,

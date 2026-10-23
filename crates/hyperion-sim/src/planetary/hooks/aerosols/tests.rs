@@ -601,7 +601,11 @@ fn nothing_on_the_record_calls_the_inventory_yet() {
     let mut files = Vec::new();
     walk(&src, &mut files);
     assert!(files.len() > 100, "the walk found the crate's sources");
-    let own = ["planetary/hooks/aerosols", "planetary/hooks/sulphur"];
+    let own = [
+        "planetary/hooks/aerosols",
+        "planetary/hooks/sulphur",
+        "planetary/hooks/envelope_atmosphere",
+    ];
     // The record's own `AerosolInventory` is its placeholder, which P14.T54.b replaces with this.
     let patterns = [
         "hooks::aerosols",

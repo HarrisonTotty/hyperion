@@ -29,8 +29,8 @@
 //!   Solar System) … so that n = 2"; their 2014 Table 1 takes it for all four giants; Mollière et
 //!   al. 2020, A&A 640, A131, §2.3, take τ = δPᵅ with α between 1 and 2). A constant opacity
 //!   never joins (below).
-//! - **γ = 0.4** ([`OPACITY_RATIO`]): Guillot's fiducial for HD 209458 b (§2.5, after his Eq. 30;
-//!   `κ_v` 4 × 10⁻³ against `κ_th` 10⁻² cm² g⁻¹). Below 1 it draws no inversion, and the gradient's
+//! - **γ = 0.4** ([`OPACITY_RATIO`]): Guillot's fiducial for HD 209458 b (his §3, after his Eq. 30;
+//!   `κ_v` 4 × 10⁻³ against `κ_th` 10⁻² cm² g⁻¹, his §2.5). Below 1 it draws no inversion, and the gradient's
 //!   one local peak before its rise stays under 0.19, below every H₂–He R ÷ `c_p`, so the first
 //!   crossing is unique and the join moves continuously with its inputs.
 //! - **f = ¼** ([`MEAN_REDISTRIBUTION`]), the whole planet's mean.
@@ -133,12 +133,15 @@ pub const MEAN_REDISTRIBUTION: f64 = 0.25;
 pub const OPTICAL_DEPTH_EXPONENT: f64 = 2.0;
 
 /// The envelope's γ, its visible opacity over its thermal one: 0.4, Guillot 2010's fiducial for HD
-/// 209458 b ("With the fiducial opacity coefficients for `HD209458b` γ = 0.4", §2.5;
-/// decision-p14-t24d-profile §1.3).
+/// 209458 b ("With the fiducial opacity coefficients for `HD209458b` γ = 0.4", his §3, after his
+/// Eq. 30; its `κ_th` and `κ_v` in his §2.5; decision-p14-t24d-profile §1.3).
 pub const OPACITY_RATIO: f64 = 0.4;
 
-/// The envelope's thermal opacity at 1 bar, κ₁, m² kg⁻¹: FITTED, fitted through this module on the
-/// Solar System table's Jupiter.
+/// The envelope's thermal opacity at 1 bar, κ₁, m² kg⁻¹: 2.87 × 10⁻³, fitted through this module on
+/// the Solar System table's Jupiter (its hydrogen and helium at P14.T50.b's He ÷ H₂, the record's
+/// `T_int` and `T_eq`) to the Galileo probe's 166.1 K at 1 bar (Seiff et al. 1998), at 2.8709 × 10⁻³
+/// (decision-p14-t24d-profile §1.3, its check 2.866 × 10⁻³; Robinson and Catling 2012 give
+/// 2.46 × 10⁻³ and their 2014 Table 1 3.12 × 10⁻³).
 pub const THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG: f64 = 2.87e-3;
 
 /// The deepest level of the published adiabat, `p_bottom`: 100 bar (10⁷ Pa; science-r08-gases-2.md
