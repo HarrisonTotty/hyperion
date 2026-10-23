@@ -1744,9 +1744,9 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
     P07.T11.d's map hook extended with the held-back reasons probed in both forms, a `chart` and a
     `form` scenario, and R07.T19.d's `VIEW` hook extended; each line `StatusText` sets is measured
     as set and, its parts unwrapped in a stand-in, as before). The map runs ran against
-    `hyperion-server` built at 68376d11 (after the 07:22 reboot) with seed 0x4d2's universe, as
-    T11.d's did; default shell and the graphics safe mode's banner (in brackets). Widths in CSS
-    px, before → after:
+    `hyperion-server` built at 68376d11 (after the 07:22 reboot; it landed as 93a0e0fd) with seed
+    0x4d2's universe, as T11.d's did; default shell and the graphics safe mode's banner (in
+    brackets). Widths in CSS px, before → after:
     - _The galaxy map, compact, at 1280 × 720._ `OVERLAY_NO_ROOM`, as shown: two lines in its
       279.7 px (280.2) box, 237.3 + 195 → 266.7 + 195. `OVERLAY_DENSITY_ONLY`, probed: two lines,
       274.4 + 29.4 → 242.2 + 91. The controls' row 120 px (content 112) in both forms, as T11.d;

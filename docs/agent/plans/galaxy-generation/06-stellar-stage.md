@@ -5372,10 +5372,10 @@ R06.
     5.9 × 10⁻⁴ in `a` and 3.1 × 10⁻⁴ in `b` in `_low` (the files' acceptance lines). The moves
     sit far inside it.
 
-  - _The cause: P11.T4.h alone_ (ee47311, the early AGB's core and small-envelope remnant at SSE's
-    τ), which the AGB cores of `FateNode::of`'s full tracks read. Both reruns were made in scratch
-    worktrees. At 97c969c (version 20) the rerun reproduces both committed bodies. At ee47311 it
-    gives version 21's bodies bit for bit.
+  - _The cause: P11.T4.h alone_ (ee47311, landed as c07edb86; the early AGB's core and
+    small-envelope remnant at SSE's τ), which the AGB cores of `FateNode::of`'s full tracks read.
+    Both reruns were made in scratch worktrees. At 97c969c (version 20) the rerun reproduces both
+    committed bodies. At ee47311 it gives version 21's bodies bit for bit.
   - _The ruling, changed the same day_ (the orchestrator, `status.md`, 2026-10-07). It first kept
     both tables as committed for 21, with a refit in the version-22 batch. It changed that to a
     refit at 21, before the batch lands, for four reasons:

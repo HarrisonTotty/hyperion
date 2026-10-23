@@ -5911,10 +5911,11 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
 - **Deviations in T9.e, as built (2026-10-06; amended the same day to the band ruling's
   addendum).** `StarColour::reddened` and the band's five reddened sums, as
   `decision-r06-t9b-band.md`'s item 3 and its addendum rule them, with these differences. T9.e's
-  first build (62e2074: four columns at revision 0, A_P ÷ A_V and A_S ÷ A_V at effective
-  wavelengths, the camera's at A_V → 0 and 2) never reached the integration branch; the amendment
-  replaced it in one regeneration, as the addendum asked, and took the node at A_V 7.5 the same
-  day (the ruling's "Amendment, 2026-10-06: test 3's reference and the node at 7.5").
+  first build (62e2074 on the lane, landed as 280443ac: four columns at revision 0, A_P ÷ A_V and
+  A_S ÷ A_V at effective wavelengths, the camera's at A_V → 0 and 2) reached the integration
+  branch just before the amendment (b606d326), which replaced it in one regeneration, as the
+  addendum asked; the node at A_V 7.5 followed the same day (ba125179; the ruling's "Amendment,
+  2026-10-06: test 3's reference and the node at 7.5").
   - **Five companion tables, split by node.** `tables::star_colour_reddening` holds the curves at
     A_V → 0 (`NORMAL_REDDENING`, `WHITE_DWARF_REDDENING`, `[[f64; 15]; N]`: the six parts' values
     at unit luminance, r⁺, r⁻, g⁺, g⁻, b⁺ and b⁻, then the nine bands' moments).
@@ -7050,11 +7051,11 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       - The census could therefore drop such a star from a sky within reach of it. T17.c's tables
         widen; the test does not (the census handoff). A P11 lane diagnoses it, widens the bound
         at version 21 and re-runs the test. T8.g lands after that fix.
-      - _Resolved 2026-10-08 by P11.T17.c's fix (66c59b29, plan 11's T17.c as built)._ The pair
-        is F15's: it reaches the engine's 64-segment cap at 78 Myr, and its last segment holds
-        both helium stars alive at every later age. The fix is a read-side floor, the brightest
-        hydrogen or helium main-sequence star of at most the pair's mass, for any pair that may
-        have interacted by the window's end. It keeps inclusion monotonicity and moves no
+      - _Resolved 2026-10-08 by P11.T17.c's fix (66c59b29, landed as 38ca80a3; plan 11's T17.c as
+        built)._ The pair is F15's: it reaches the engine's 64-segment cap at 78 Myr, and its last
+        segment holds both helium stars alive at every later age. The fix is a read-side floor, the
+        brightest hydrogen or helium main-sequence star of at most the pair's mass, for any pair
+        that may have interacted by the window's end. It keeps inclusion monotonicity and moves no
         generated system. With it, `the_star_bound_holds_for_realised_systems` passes over
         1.2 × 10⁶ systems, the bulge D case included, under the heavy-test lock. The floor costs
         generation near the Sun: D 48.98% → 52.55% and E 69.37% → 84.06% of records, C
@@ -7931,9 +7932,9 @@ CensusCost)`.
     - `--lib -- sky::`: 248 passed;
     - `--test sky_census` 6/6, and the sky doctests 31/31;
     - the server's `--test sky` 11/11 and `compute::sky` 17/17;
-    - `just test-slow caps_converge_in_rays` passed on 9c84ca04 (640 s, under the heavy lock;
-      2026-10-08). Every one of its 144 recounts at 3,072 rays is under 1.0, the worst 0.996 (A,
-      above the Sun at 8.54).
+    - `just test-slow caps_converge_in_rays` passed on 9c84ca04, landed as 51abb8e7 (640 s, under
+      the heavy lock; 2026-10-08). Every one of its 144 recounts at 3,072 rays is under 1.0, the
+      worst 0.996 (A, above the Sun at 8.54).
   - **`caps_converge_in_rays`'s figures** (recounted at 3,072 rays and 48 steps a decade): the
     worst layer at each point, for the uniform caps at 7.95, 8.54 and 10.06, and for the caps by
     the eye's visibility at the point's own eye cut.
@@ -8213,15 +8214,15 @@ CensusCost)`.
 - **Generator version 21 (the galaxy plans' Phase J lane, 2026-10-06 and 07; R06's code is
   unchanged; its three pair-light tables are refitted at 21, twice, their young probe cells move,
   and two of its test pins move).** The 20 → 21 bump lands plan 11's P11.T4.h–k, 9a0950e's
-  protostar and build-age fixes, and plan 14's P14.T47.e and T13.c (galaxy plan 11's Risks, "The
-  20 → 21 bump, as built"). Two of this plan's pins move with them. Each was bisected on
-  `rendering-and-planets` (a50d8a73), with each held commit's code applied in turn:
+  protostar and build-age fixes (landed as ff65e543), and plan 14's P14.T47.e and T13.c (galaxy plan
+  11's Risks, "The 20 → 21 bump, as built"). Two of this plan's pins move with them. Each was
+  bisected on `rendering-and-planets` (a50d8a73), with each held commit's code applied in turn:
   - `sky::luminosity`'s `SERIAL_FINGERPRINT`, `FULL_SERIAL_FINGERPRINT` and
     `PAIR_SERIAL_FINGERPRINT` moved in the bump with P11.T4.h alone: the early AGB's core and
-    small-envelope remnant at SSE's τ, which the single-star tracks read. 2ecdeb4a pinned them at
-    `0x5c11_7d93_64a9_5339`, `0xb581_e39e_74e3_414c` and `0xffe0_8298_a09d_eb2e`. The refit below
-    moved them again, to `0x9d13_13d6_2725_9e79`, `0xd063_b6fb_cde6_ee63` and
-    `0xc6c9_59ed_9001_fd37`.
+    small-envelope remnant at SSE's τ, which the single-star tracks read. The bump (2ecdeb4a, landed
+    as a1110def) pinned them at `0x5c11_7d93_64a9_5339`, `0xb581_e39e_74e3_414c` and
+    `0xffe0_8298_a09d_eb2e`. The refit below moved them again, to `0x9d13_13d6_2725_9e79`,
+    `0xd063_b6fb_cde6_ee63` and `0xc6c9_59ed_9001_fd37`.
   - `sky_census`'s `the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them` moves
     with P11.T4.i alone, which starts a pair at its first arrival:
     - 0x4204_6c99_ff00_000a's pair merges at 58.4 Myr, not 144.2 Myr. At the census time
@@ -9007,8 +9008,9 @@ CensusCost)`.
 - **Deviations in T11.g, as built (2026-10-09).** The first sky within its budget, as the ruling
   (`decision-r06-t11d-first-sky.md` §1.4 and §2) sets it out. Built on `rendering-and-planets`
   4dec82b4, merged by name (73098c08; the one conflict, the protocol's version note, took this
-  branch's 28efea9d). No golden moves and no bump (determinism audit, `golden_diff` 0;
-  GENERATOR_VERSION 21); `PROTOCOL_VERSION` stays 2, its note corrected in 28efea9d.
+  branch's 28efea9d, landed as 82b1ca80). No golden moves and no bump (determinism audit,
+  `golden_diff` 0; GENERATOR_VERSION 21); `PROTOCOL_VERSION` stays 2, its note corrected in
+  28efea9d.
   - **The edges.** `SHELL_EDGES_LY` is `[u32; 11]`, 125 to 128,000 ly. `delivery_steps` defers a C
     shell whose inner edge is at or beyond `C_DEFERRED_BEYOND_LY` (2,000 ly). Near the Sun that is
     10 steps, least edges 125, 250, 500, 1,000, 2,000, 2,000, 4,000, 8,000 and 32,000 ly, then
@@ -9735,12 +9737,12 @@ CensusCost)`.
     points end near V 9.7 (_estimate_). That is for the N_max ruling.
 - **Deviations in T11.h, as built (2026-10-13).** E's far shell first, as the ruling
   (`decision-r06-t17-findings.md` §1 and §10.3) sets it out. Built, benched and recorded on
-  `rendering-and-planets` 13c4be40 with docs-batch-11's 2f273e59 and fd650d54 merged by name, then
-  ea127bc5 merged by name before the commit (c9138be2). The merge's conflicts, all in this plan,
-  took integration's side, which holds docs-batch-11 as cherry-picks; this record follows the
-  camera budget's ruling at the Risks' end. No golden moves and no bump
-  (determinism audit; `golden_diff` against `rendering-and-planets`: no golden file changed;
-  GENERATOR_VERSION 21). `PROTOCOL_VERSION` stays 2, and no wire type changes.
+  `rendering-and-planets` 13c4be40 with docs-batch-11's 2f273e59 and fd650d54 (landed as 5e79ceb5
+  and 81f2b175) merged by name, then ea127bc5 merged by name before the commit (c9138be2). The
+  merge's conflicts, all in this plan, took integration's side, which holds docs-batch-11 as
+  cherry-picks; this record follows the camera budget's ruling at the Risks' end. No golden moves
+  and no bump (determinism audit; `golden_diff` against `rendering-and-planets`: no golden file
+  changed; GENERATOR_VERSION 21). `PROTOCOL_VERSION` stays 2, and no wire type changes.
   - **The order.** `delivery_steps(plan, DeliveryOrder)` defers by the shell's inner edge, as
     T11.g's deferral does. A shell of any layer but `FAR_FIRST_LAYERS`' (E alone) whose inner edge
     is at or beyond `FAR_FIRST_FROM_LY` (1,000 ly) comes a step later. C's shells from

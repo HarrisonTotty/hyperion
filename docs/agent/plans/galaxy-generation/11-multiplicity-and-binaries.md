@@ -2001,13 +2001,13 @@ This plan changes generated output in T1.d, T2.c, T2.d, T6, T7, T8, T10 and T15,
 bump and regenerated goldens. T11 moves output too, as built: a paired star's summary is its pair's
 state (round 9c, `bin5b`, whose T2.d, T7 and T11 take one bump in the orchestrator's version 16
 batch). T4.g and T4.h move output too, as built: T4.g in P14 Phase J's version 20 batch. T4.h
-(the early AGB's core radius and remnant at SSE's τ), 9a0950e's protostar and build-age fixes,
-T4.i, T4.j and T4.k (rulings p11-channels, p11-supernova-pins and p11-t4k-faults) took version 21
-together, with P14.T47.e and P14.T13.c's Bond albedo, in one bump (Phase J lane, 2026-10-06; Risks,
-"The 20 → 21 bump, as built"). Each was committed with its goldens blessed at 20, and the bump
-re-blessed them at 21 without moving a value. The batch also staled four fitted tables, which
-were refitted at `--since 21` on the same branch and land with it, so that (seed, 21) names one
-output:
+(the early AGB's core radius and remnant at SSE's τ), 9a0950e's protostar and build-age fixes
+(landed as ff65e543), T4.i, T4.j and T4.k (rulings p11-channels, p11-supernova-pins and
+p11-t4k-faults) took version 21 together, with P14.T47.e and P14.T13.c's Bond albedo, in one bump
+(Phase J lane, 2026-10-06; Risks, "The 20 → 21 bump, as built"). Each was committed with its goldens
+blessed at 20, and the bump re-blessed them at 21 without moving a value. The batch also staled four
+fitted tables, which were refitted at `--since 21` on the same branch and land with it, so that
+(seed, 21) names one output:
 
 - plan 06's `stellar_fates_low` and `_mid`, which T4.h left stale by rerun, by a unit in about the
   eighth significant digit (plan 06's Risks), with every golden re-blessed at 21 after them;
@@ -4247,6 +4247,12 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     | f7b6b4eb, P14.T13.c | 56 values: `derive_body` and five planetary systems                                                                                                                                                                                                    |
     | 1845d20, cdebae44   | none                                                                                                                                                                                                                                                   |
     | fates refit at 21   | none: the refit commit re-blesses every golden after refitting `stellar_fates_low` and `_mid` (P11.T4.h's early-AGB core, through the fates), and no golden moves                                                                                      |
+
+    The hashes in this table, in the Phase J records above and in the T4.i and T4.k entries are
+    the lane's. Each landed with a hash of its own: ee47311 as c07edb86, 9a0950e as ff65e543,
+    3a52ca8 as 156a75fb, ce69992 as 0dd535f7, 1e47d16 as 0c115993, 3b55013d as 809235d6, f7b6b4eb
+    as 0eeb6fca, 1845d20 as 5babf55b and cdebae44 as 6804c059. The bump below, 2ecdeb4a, landed as
+    a1110def.
 
     In all, `binary_timelines` moves all 1,000 digests: 372 in place, and 628 with a new segment
     count in their label. `summaries` moves 29 values and one relabelled death. T47.e and the

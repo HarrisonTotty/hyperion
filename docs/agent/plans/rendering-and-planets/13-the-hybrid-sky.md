@@ -612,13 +612,13 @@ at V_P alone), `sky/caps.rs` (`CapCount::cap_with_budget`, test-only),
 `just test-slow the_capped_boundary_is_recorded`, `cargo bench -p hyperion-sim --no-run`, the bench
 recorded, the guard's verdict reported to the orchestrator, `just ci`.
 
-**Done (e098c6eb), and its guard tripped** on its first count. Near the Sun at 2,000 ly, 75.4 stars
-brighter than V 4.5 lie beyond R(u) at V_P 4.5, and 74.8 at 5.0, against 60. The other two counts
-held: 0.093 are brighter than V 1.0, and the cost is 0.85–1.10 times the estimate. **The owner kept
-the limit on 2026-10-09** (`decision-r13-t1b-guard.md`, option A, as recommended). The measured
-figures replace the estimates in Design notes 3, 4, 15 and 16. That record composes one more
-boundary exactly from T1.b's rows: a reach past the limit by yield for D and E, its option C. Risks
-keep it for the limit's lifting.
+**Done (e098c6eb, landed as c39b6338), and its guard tripped** on its first count. Near the Sun at
+2,000 ly, 75.4 stars brighter than V 4.5 lie beyond R(u) at V_P 4.5, and 74.8 at 5.0, against 60.
+The other two counts held: 0.093 are brighter than V 1.0, and the cost is 0.85–1.10 times the
+estimate. **The owner kept the limit on 2026-10-09** (`decision-r13-t1b-guard.md`, option A, as
+recommended). The measured figures replace the estimates in Design notes 3, 4, 15 and 16. That
+record composes one more boundary exactly from T1.b's rows: a reach past the limit by yield for D
+and E, its option C. Risks keep it for the limit's lifting.
 
 ### R13.T2 The real tier at the ceiling (RM3's interim)
 
@@ -1355,12 +1355,13 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
       2,000 ly" on its promise, and nine in ten still holding at about 92–97%) are a draft for the
       owner, marked at the end of its subsection "The hybrid sky".
 - **Deviations in T1.b, as built, and its measurements (2026-10-09).** Measured at
-  `rendering-and-planets` f569fb08, on the fixture (`milky_way_like`, seed 0x0926_0000) and, for
-  the bench, the server's galaxy (seed 0x4d2 with its full potential), both at the epoch. Every
-  count is the caps' count's expectation, at the 3,072-ray recount unless marked "at the caps'
-  count", with no census; every cost is a sampled census. **The guard has tripped** on its first
-  count: near the Sun at 2,000 ly, 75.4 stars brighter than V 4.5 lie beyond R(u) at
-  V<sub>P</sub> 4.5 and 74.8 at 5.0, C to E together, against the guard's 60. The other two hold:
+  `rendering-and-planets` bce2aef5 (f569fb08 on the lane, the same tree), on the fixture
+  (`milky_way_like`, seed 0x0926_0000) and, for the bench, the server's galaxy (seed 0x4d2 with its
+  full potential), both at the epoch. Every count is the caps' count's expectation, at the 3,072-ray
+  recount unless marked "at the caps' count", with no census; every cost is a sampled census. **The
+  guard has tripped** on its first count: near the Sun at 2,000 ly, 75.4 stars brighter than V 4.5
+  lie beyond R(u) at V<sub>P</sub> 4.5 and 74.8 at 5.0, C to E together, against the guard's 60. The
+  other two hold:
   0.093 are expected brighter than V 1.0 (against 0.5), and the capped tier costs 0.85–1.10 times
   `decision-r13-guard-trip.md` §2.3's estimate (against 2). T2 waited for the owner, who kept the
   limit on 2026-10-09 (`decision-r13-t1b-guard.md`); its text is unchanged.
@@ -1594,8 +1595,8 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
     - **Answered by the owner on 2026-10-09** (`decision-r13-t1b-guard.md`, option A, "Keep
       2,000 ly"): the limit is kept. The measured figures replace the estimates in Design notes 3,
       4, 15 and 16 and in the brainstorm's draft.
-- **Deviations in T2.a, as built (2026-10-09).** Built on the lane at 19605fa0, with
-  `rendering-and-planets` merged at 1d7a6bd7 and dd71c4eb, whose changes touch no sky path, on
+- **Deviations in T2.a, as built (2026-10-09).** Built on the lane at 19605fa0 (landed as d2d5074b),
+  with `rendering-and-planets` merged at 1d7a6bd7 and dd71c4eb, whose changes touch no sky path, on
   the fixture (`milky_way_like`, seed 0x0926_0000), at the epoch. No
   generated output moves and `GENERATOR_VERSION` stays 21. One golden is new,
   `sky/real_boundary.golden`.

@@ -2007,7 +2007,8 @@ src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src
   Every kind T16.d reads still passes at its floor.
   **By hand, hidden:** T16.d's `VIEW` harness (`.git/rm23-scratch/r07-views/t16d/shots/`) at
   0.78125 and 2, the field of view set so that a planet stands 8 to 16 device px across (its limb
-  alone) and 64 to 128 px across (its 30° graticule), against f57f2b1 and 924b06a.
+  alone) and 64 to 128 px across (its 30° graticule), against f57f2b1 (landed as 4560dd25) and
+  924b06a.
   **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/wireframe
 src/renderer/src/displays/view src/renderer/src/smoke src/renderer/src/lib`, `just test-render`,
   the console-ux skill's scripts, `just ci`.
@@ -5192,9 +5193,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     at least 8: they read 12 over the image at 0.78125.
   - **Captures.** decision-thin-line-contrast retires the brief's "captures at 0.78125 do not move":
     every line at a ratio under 2 is now at least 2 device px.
-    - **`just test-render --captures`.** Before (at f57f2b1) and after, 98 of the 110 captures are
-      byte-identical. The 12 that move are R05 spike's `craft` and `orbit` instruments, at its
-      three shots on both variants. They are the only captures drawn through
+    - **`just test-render --captures`.** Before (at f57f2b1, landed as 4560dd25) and after, 98 of
+      the 110 captures are byte-identical. The 12 that move are R05 spike's `craft` and `orbit`
+      instruments, at its three shots on both variants. They are the only captures drawn through
       `buildWireframeDrawList`: their lines go from 1 to 2 device px, and their outlines from 1.5 to
       2.
     - **Hidden captures of `VIEW`'s canvas** (`.git/rm23-scratch/r07-views/t16d/shots/`): PRECISION
@@ -5535,8 +5536,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - with the narrower exclusion more of each stroke is read: the target's ticks 16 points at
       0.78125 where T16.d read 12, now that the craft's hull no longer blocks their inner ends.
   - **Captures.**
-    - **`just test-render --captures`**, on the merged base (65fdb004) and after: all 110 are
-      byte-identical. No capture holds a planet at a graticule threshold, or a destination.
+    - **`just test-render --captures`**, on the merged base (65fdb004, landed as 8d43709c) and
+      after: all 110 are byte-identical. No capture holds a planet at a graticule threshold, or a
+      destination.
     - **Hidden captures of `VIEW`'s canvas** (`.git/rm23-scratch/r07-views/t16g/canvas/`, T16.d's
       harness with its own flow), at 0.78125 and 2:
       - `PRECISION TEST` from `CHASE` at 60°, its planet about 29 and 35 device px across:
@@ -5549,9 +5551,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         and about 134 px at 2, from 128 up, byte-identical.
     - **The two builds the subtask names** are stood in for, not built: the merged base (T16.d and
       T16.e as built, 924b06a's graticule rule), and the base with the view's strokes at 1 CSS px
-      in `viewFrameDrawer.ts` (f57f2b1's lines and thresholds). T16.e changes only the craft, not
-      the planets these captures compare. Against the second, every capture moves at its strokes,
-      0.14% to 1.43% of the pixels, as T16.d's did.
+      in `viewFrameDrawer.ts` (f57f2b1's lines and thresholds; it landed as 4560dd25). T16.e changes
+      only the craft, not the planets these captures compare. Against the second, every capture
+      moves at its strokes, 0.14% to 1.43% of the pixels, as T16.d's did.
   - **For T16.c** (the UX review's considers): the view-label sentence could say that a view's
     marks and their labels cut, never eased; and the destination's cue above waits on its ruling.
   - **Gate.** No `just ci` (the Day 2 protocol).
@@ -9111,9 +9113,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - T8.b's per-class law evaluations, since no class map is drawn before R10;
       - the UHD 620 (the owner's, by hand: RESUME, "Owner by hand: R07.T17 UHD 620 benchmarks",
         with the kit in `.git/rm23-scratch/r07-shading/t17/owner-uhd620/`).
-    - **The RTX smoke run's failure** (lane C, at 0c57be5 and after). `smoke/bodies.ts`'
-      "T8.a a photorealistic frame tones a lit planet onto the canvas over a black sky" fails
-      on the hidden RTX run: "planned true; lit side 0, sky 0 (green codes)".
+    - **The RTX smoke run's failure** (lane C, at 0c57be5, which landed as 28479b9, and after).
+      `smoke/bodies.ts`' "T8.a a photorealistic frame tones a lit planet onto the canvas over a
+      black sky" fails on the hidden RTX run: "planned true; lit side 0, sky 0 (green codes)".
       - The frame was planned, and the canvas read back zero everywhere.
       - It does not touch these figures: the app's own frames on the RTX draw the lit planets and
         their glare (offscreen captures, `page-r1-*.png`).
@@ -9149,7 +9151,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 - **T8.a's canvas check on the RTX 3080, fixed** (2026-10-07; the shading lane, after T17, from
   lane C's report). `smoke/bodies.ts`' "T8.a a photorealistic frame tones a lit planet onto the
   canvas over a black sky" read 0 everywhere on every hidden RTX smoke run lane C made (before
-  and after its 0c57be5, and for R05.T12.e), and passed on SwiftShader.
+  and after its 0c57be5, which landed as 28479b9, and for R05.T12.e), and passed on SwiftShader.
   - **The cause is the check, not the renderer.**
     - The check read the canvas back only after its wait for the histogram (`pause(25)` polls,
       about 50 ms on the RTX). `WebGpuView.readBack` asks for a read in the task that drew the
@@ -9470,7 +9472,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `photorealFrame.test.ts` (the lit bodies' sections and labels; no note with every lit body's
     section `ok`, one flagged, as the ruling asks), `ViewDisplay.test.tsx` (the
     loop reports a finding once), `bodyAppearance.test.ts`.
-  - **Gate**, on the committed code (b66fce86, b70a170b, on the merge 3df09359).
+  - **Gate**, on the committed code (b66fce86 and b70a170b on the merge 3df09359; they landed as
+    f4c5a898 and 9594eef0).
     - The app's vitest: 7,967 tests in 341 files, all passing (84 s at 4 workers). Two earlier
       runs each failed only `SystemDisplay.test.tsx`'s "starts afresh at the chart's time", a
       `waitFor` timing out under load, which passes alone and which the views lane records as a
@@ -9529,7 +9532,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     _Signed off 2026-10-09 by the sign-off agent (owner's delegation): the convention stays in the
     guide, whose row calls a star's graticule a reference grid about `NORTH` rather than the star's
     own axis; `ROTATION` gains its own row (`signoff-ux-guide.md`)._
-  - **Gate**, on the committed code (7047ea34, 486ca64f, on the merge 78b9ea26).
+  - **Gate**, on the committed code (7047ea34 and 486ca64f on the merge 78b9ea26; they landed as
+    9fa70720 and eb115709).
     - The app's vitest: 8,009 tests in 341 files, all passing (149 s at 4 workers);
       `src/renderer/src/displays/view` with `view/coords` beforehand, 428.
     - `just check lint` from a clean tsc cache, Prettier on the guide, this plan and the roadmap,
