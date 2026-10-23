@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { reticleStrokesCssPx } from "../lib/strokes";
+import { minReticleGapDevicePx, reticleStrokesCssPx } from "../lib/strokes";
 import { type CameraAngles, PRESETS, project, viewBasis, type Viewport } from "./camera";
-import type { Anchor, CircleLabel, CurveLabel, DrawOp, RingLabel, ScreenPoint } from "./drawList";
+import {
+  type Anchor,
+  buildDrawList,
+  type CircleLabel,
+  type CurveLabel,
+  type DrawOp,
+  type RingLabel,
+  type ScreenPoint,
+} from "./drawList";
 import { type LocalFrame, localFrameAt, planeFrame } from "../geometry/frame";
 import {
   type BoxPx,
@@ -32,6 +40,7 @@ import {
   triadShiftRem,
 } from "./furniture";
 import { bracketBoxPx, textSizeRem } from "./labels";
+import type { SpatialScene } from "./marks";
 import { boxGapPx } from "./symbols";
 import { add, scale, vec3 } from "../geometry/vec3";
 
@@ -1102,7 +1111,15 @@ describe("curveInksPx", () => {
 
 /** What the annuli's labels are placed among: nothing, but what is given. */
 function amid(surroundings: Partial<AnnulusLabelSurroundings> = {}): AnnulusLabelSurroundings {
-  return { standing: [], marks: [], brackets: [], curves: [], ticks: [], ...surroundings };
+  return {
+    standing: [],
+    marks: [],
+    brackets: [],
+    reticledIds: new Set(),
+    curves: [],
+    ticks: [],
+    ...surroundings,
+  };
 }
 
 /** An annulus's label beside a point, giving way to the marks', with the points it may move to. */
@@ -1295,7 +1312,11 @@ describe("placeAnnulusLabels (plan 14, P14.T42.d)", () => {
     (_, gapPx, keeps) => {
       const { marks, bracket } = planetBelow(gapPx);
 
-      const [placed] = placeAnnulusLabels([SNOW], NARROW, amid({ marks, brackets: [bracket] }));
+      const [placed] = placeAnnulusLabels(
+        [SNOW],
+        NARROW,
+        amid({ marks, brackets: [{ id: "p", box: bracket }] }),
+      );
 
       expect([
         boxGapPx(SNOW_BOX, bracket),
@@ -1600,9 +1621,10 @@ describe("placeAnnulusLabels on the orbit map's crowd at its three stages (plan 
     "keeps every annulus label drawn 0.5 rem from every label, 0.25 rem outside every bracket's box, 0.125 rem from every stalk and 0.25 rem inside the stage at $name",
     (stage) => {
       const { labels, ops, anchors, selectionLabel } = orbitCrowd(stage);
-      const brackets = anchors.map((anchor) =>
-        bracketBoxPx(anchor, stage.viewport.remPx, reticleStrokesCssPx(stage.ratio)),
-      );
+      const brackets = anchors.map((anchor) => ({
+        id: anchor.id,
+        box: bracketBoxPx(anchor, stage.viewport.remPx, reticleStrokesCssPx(stage.ratio)),
+      }));
       const stalks = markInksPx(
         ops.filter((op) => op.kind === "line"),
         stage.ratio,
@@ -1612,6 +1634,8 @@ describe("placeAnnulusLabels on the orbit map's crowd at its three stages (plan 
         standing: [selectionLabel],
         marks: markInksPx(ops, stage.ratio),
         brackets,
+        // The selection's bracket is drawn about the last mark.
+        reticledIds: new Set(anchors.slice(-1).map((anchor) => anchor.id)),
         curves: curveInksPx(ops, stage.ratio),
         ticks: tickInksPx(ops, stage.ratio),
       });
@@ -1628,7 +1652,7 @@ describe("placeAnnulusLabels on the orbit map's crowd at its three stages (plan 
         if (labelsDrawn.some((other) => other !== label && boxGapPx(label, other) < 8 - 1e-9)) {
           faults.push(`${label.text} within 0.5 rem of a label`);
         }
-        if (brackets.some((box) => boxGapPx(label, box) < 4 - 1e-9)) {
+        if (brackets.some(({ box }) => boxGapPx(label, box) < 4 - 1e-9)) {
           faults.push(`${label.text} within 0.25 rem of a bracket's box`);
         }
         if (nearestInkPx(label, stalks) < 2 - 1e-9) {
@@ -1639,6 +1663,235 @@ describe("placeAnnulusLabels on the orbit map's crowd at its three stages (plan 
         }
       }
       expect(faults).toEqual([]);
+    },
+  );
+});
+
+/**
+ * A body's mark of radius `radiusPx` at a point, as the draw list gives it at a ratio of 1: its
+ * symbol's ink, and the box of the selection's bracket's place about it with the mark's ID.
+ */
+function markAt(
+  id: string,
+  centre: ScreenPoint,
+  radiusPx: number,
+): { marks: ReadonlyArray<InkPx>; bracket: { id: string; box: BoxPx } } {
+  const anchor: Anchor = { id, ...centre, depth: 0, radiusPx };
+  const symbol: DrawOp = {
+    kind: "symbol",
+    id,
+    centre: anchor,
+    shape: "triangle-down",
+    radiusPx: radiusPx - 0.75,
+    stroke: "text",
+    fill: null,
+    widthPx: 1.5,
+  };
+  return {
+    marks: markInksPx([symbol], 1),
+    bracket: { id, box: bracketBoxPx(anchor, 16, reticleStrokesCssPx(1)) },
+  };
+}
+
+/** Every place a ring's or an annulus's label tries, beside its point and each along its edge. */
+function everyPlace(label: RingLabel): BoxPx[] {
+  const { widthPx, heightPx } = firstPlace(label);
+  return [{ xPx: label.xPx, yPx: label.yPx }, ...(label.alongPx ?? [])].flatMap((point) =>
+    [point.xPx + 8, point.xPx - 8 - widthPx].flatMap((leftPx) =>
+      [point.yPx + 4, point.yPx - 4 - heightPx].map((topPx) => ({
+        leftPx,
+        topPx,
+        widthPx,
+        heightPx,
+      })),
+    ),
+  );
+}
+
+describe("placeAnnulusLabels about a ring's own planet (plan 14, P14.T42.g)", () => {
+  // A class-3 planet's mark, 0.875 rem across, at (120, 150): its bracket's box 13 px about its
+  // centre.
+  const PLANET = markAt("planet", { xPx: 120, yPx: 150 }, 7);
+  // Its ring, 12 px across on the screen, lies inside that box, labelled at its right-hand point.
+  const RING = annulusLabelAlong({ xPx: 120, yPx: 150 }, 6, "A j RING 1");
+  const ABOUT: RingLabel = { ...RING, aboutMarkId: "planet" };
+
+  it("sets a ring's label about its own planet, every place within 0.25 rem of the planet's bracket's box, 0.125 rem clear of its symbol", () => {
+    const places = everyPlace(ABOUT);
+
+    const placed = placeAnnulusLabels(
+      [ABOUT],
+      NARROW,
+      amid({ marks: PLANET.marks, brackets: [PLANET.bracket] }),
+    );
+
+    expect([
+      places.length,
+      places.every((box) => boxGapPx(box, PLANET.bracket.box) < 4 - 1e-9),
+      placed.length,
+      placed.every((label) => nearestInkPx(boxOf(label), PLANET.marks) >= 2 - 1e-9),
+    ]).toEqual([96, true, 1, true]);
+  });
+
+  it("leaves out a ring's label with no planet named, every place within 0.25 rem of that bracket's box", () => {
+    expect(
+      placeAnnulusLabels([RING], NARROW, amid({ marks: PLANET.marks, brackets: [PLANET.bracket] })),
+    ).toEqual([]);
+  });
+
+  it("sets a ring's label about its own planet 0.25 rem outside a second mark's bracket's box at its first place", () => {
+    // A class-2 moon below the first place, its bracket's box, 12 px about its centre, touching
+    // that place, its symbol 0.125 rem or more clear of it: only the moon's bracket refuses it.
+    const first = firstPlace(ABOUT);
+    const moon = markAt(
+      "moon",
+      { xPx: first.leftPx + first.widthPx / 2, yPx: first.topPx + first.heightPx + 12 },
+      6,
+    );
+
+    const placed = placeAnnulusLabels(
+      [ABOUT],
+      NARROW,
+      amid({
+        marks: [...PLANET.marks, ...moon.marks],
+        brackets: [PLANET.bracket, moon.bracket],
+      }),
+    );
+
+    const [label] = placed;
+    expect([
+      boxGapPx(first, moon.bracket.box),
+      nearestInkPx(first, moon.marks) >= 2 - 1e-9,
+      placed.length,
+      standsAt(label, first),
+      label !== undefined && boxGapPx(boxOf(label), moon.bracket.box) >= 4 - 1e-9,
+    ]).toEqual([expect.closeTo(0, 9), true, 1, false, true]);
+  });
+
+  it("moves a ring's label about its own planet off the planet's symbol, still inside the planet's bracket's box", () => {
+    // The ring labelled at its left-hand point, 6 px left of the planet's centre: its first place,
+    // 0.5 rem right of that point and 0.25 rem below it, stands on the planet's symbol.
+    const left: RingLabel = {
+      ...annulusLabelAlong({ xPx: 120, yPx: 150 }, 6, "A j RING 1", 180),
+      aboutMarkId: "planet",
+    };
+
+    const placed = placeAnnulusLabels(
+      [left],
+      NARROW,
+      amid({ marks: PLANET.marks, brackets: [PLANET.bracket] }),
+    );
+
+    const [label] = placed;
+    expect([
+      nearestInkPx(firstPlace(left), PLANET.marks) < 2,
+      placed.length,
+      standsAt(label, firstPlace(left)),
+      label !== undefined && nearestInkPx(boxOf(label), PLANET.marks) >= 2 - 1e-9,
+      label !== undefined && boxGapPx(boxOf(label), PLANET.bracket.box) < 4,
+    ]).toEqual([true, 1, false, true, true]);
+  });
+
+  it("leaves out a ring's label about its own planet where a tick crosses every place", () => {
+    expect(
+      placeAnnulusLabels(
+        [ABOUT],
+        NARROW,
+        amid({
+          marks: PLANET.marks,
+          brackets: [PLANET.bracket],
+          ticks: stalksAcross(NARROW, 10),
+        }),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("placeAnnulusLabels about a ring's planet with a reticle drawn about it (plan 14, P14.T42.g; main's ruling on issue #96)", () => {
+  // The scene of the look's probe, as the draw list gives it at a ratio of 1: a class-2 planet at
+  // the centre of a 1200 × 900 stage at the default camera's fit, `OBLIQUE` at 8.36 px a unit, and
+  // its ring 0.3 to 0.6 units about it, its outer edge 5.02 px or less from the centre, inside the
+  // planet's bracket's box, 12 px about its centre.
+  const STAGE: Viewport = { widthPx: 1200, heightPx: 900, remPx: 16 };
+  const CAMERA = { ...PRESETS.oblique, pxPerUnit: (450 - 32) / 50 };
+  const PROBE: SpatialScene = {
+    frame: FRAME,
+    points: [
+      {
+        id: "p",
+        position: vec3(0, 0, 0),
+        shape: "triangle-down",
+        sizeClass: 2,
+        status: "plain",
+        label: "A-11",
+        labelPriority: Number.MAX_VALUE,
+      },
+    ],
+    spheres: [],
+    plane: { spacing: 1, extent: 0, rings: [] },
+    annuli: [
+      {
+        id: "ring:r",
+        innerRadius: 0.3,
+        outerRadius: 0.6,
+        ticks: true,
+        label: "A j RING 1",
+        aboutId: "p",
+      },
+    ],
+    selectedId: null,
+    destinationId: null,
+  };
+
+  /** The ring's label placed as the view places it, among what is given a reticle. */
+  function probe(reticledIds: ReadonlySet<string>): {
+    readonly placed: ReadonlyArray<PlacedCurveLabel>;
+    readonly bracket: BoxPx;
+  } {
+    const drawList = buildDrawList(PROBE, CAMERA, STAGE, minReticleGapDevicePx(1));
+    const brackets = drawList.anchors.map((anchor) => ({
+      id: anchor.id,
+      box: bracketBoxPx(anchor, 16, reticleStrokesCssPx(1)),
+    }));
+    const [bracket] = brackets;
+    if (bracket === undefined) {
+      throw new Error("the probe draws its planet");
+    }
+    // The planet's label, as `placeLabels` sets it: 0.25 rem right of the bracket's box, on its
+    // centre's line.
+    const planetLabel: BoxPx = {
+      leftPx: bracket.box.leftPx + bracket.box.widthPx + 4,
+      topPx: 450 - 17.5 / 2,
+      widthPx: textSizeRem("A-11").widthRem * 16,
+      heightPx: 17.5,
+    };
+    const placed = placeAnnulusLabels(drawList.curveLabels, STAGE, {
+      standing: [planetLabel],
+      marks: markInksPx(drawList.ops, 1),
+      brackets,
+      reticledIds,
+      curves: curveInksPx(drawList.ops, 1),
+      ticks: tickInksPx(drawList.ops, 1),
+    });
+    return { placed, bracket: bracket.box };
+  }
+
+  it("keeps a ring's label 0.25 rem outside its planet's bracket's box while a reticle is drawn about the planet: here, every place within it, it is left out", () => {
+    expect(probe(new Set(["p"])).placed).toEqual([]);
+  });
+
+  it.each([
+    ["no reticle is drawn", new Set<string>()],
+    ["a reticle is drawn about another mark only", new Set(["moon"])],
+  ])(
+    "sets a ring's label inside its planet's bracket's box while %s, from 491.2 to 592 px across",
+    (_, reticledIds) => {
+      const { placed, bracket } = probe(reticledIds);
+
+      const boxes = placed.map((label) => boxOf(label));
+      expect(
+        boxes.map((box) => [box.leftPx, box.leftPx + box.widthPx, boxGapPx(box, bracket)]),
+      ).toEqual([[expect.closeTo(491.2, 6), expect.closeTo(592, 6), 0]]);
     },
   );
 });

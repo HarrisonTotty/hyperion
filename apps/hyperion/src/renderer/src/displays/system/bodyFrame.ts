@@ -255,10 +255,11 @@ export interface BodySceneInput {
  * The orbit map in a focused body's frame at the display time: the body at the centre, its moons
  * on their orbits, each orbit a path, the selected moon's `selected`, and its rings as annuli,
  * each in its own plane, labelled, their two edges joined by radial ticks every 10° as the guide
- * draws a belt and a ring, the selected ring's drawn as a selected orbit is (plan 14, P14.T42.a–b).
- * A ring's plane is the one its normal gives, close to the equatorial plane well inside the
- * planet's Laplace radius (P14.T56.a), or the planet's orbital plane where an older server sends
- * no normal, so that each is drawn where the server places it.
+ * draws a belt and a ring, the selected ring's drawn as a selected orbit is (plan 14, P14.T42.a–b),
+ * each drawn about the body, whose bracket's box its label need not keep outside while the body is
+ * not the selection (P14.T42.g). A ring's plane is the one its normal gives, close to the
+ * equatorial plane well inside the planet's Laplace radius (P14.T56.a), or the planet's orbital
+ * plane where an older server sends no normal, so that each is drawn where the server places it.
  *
  * @remarks
  * A moon or ring not present is not drawn; it stays in the list. Nothing beyond the body's own
@@ -320,6 +321,9 @@ export function bodyScene(input: BodySceneInput): SpatialScene {
         // A second ring lies about the first, whose label stands rimward.
         labelSpinward: annuli.length % 2 === 1,
         selected: satellite.id === selectedId,
+        // Its label names a ring (`populationName`), never the planet, which is why it may stand
+        // inside the planet's bracket's box while no bracket is drawn there (plan 14, P14.T42.g).
+        aboutId: body.id,
       });
     }
   }
