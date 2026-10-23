@@ -662,9 +662,9 @@ Four classes, shared by the whole ship:
     every other label, the axis triad and the core arrow; at least `0.25rem` outside the place of
     a selection's bracket about every mark, whether or not it is drawn, so that it never stands
     nearer a body than the body's own label and is never read as its name (a ring's label may
-    stand inside the place of its own planet's bracket while no bracket is drawn there, since it
-    names the ring drawn about that planet, and keeps `0.125rem` from the planet's symbol); and
-    `0.125rem` clear of every stalk. No tick crosses it, since a belt's, a ring's or the
+    stand inside the place of its own planet's bracket while no reticle is drawn about the planet,
+    since it names the ring drawn about that planet, and keeps `0.125rem` from the planet's symbol);
+    and `0.125rem` clear of every stalk. No tick crosses it, since a belt's, a ring's or the
     optimistic zone's ticks, in its own colour, would take its letters out. Of those places it
     takes one that no orbit or annulus edge crosses, where there is one. The selection's label is
     placed first, a selected belt's, ring's or halo's as a selected body's is; then the other

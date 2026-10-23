@@ -4575,7 +4575,7 @@ must answer is under [Requests to the earlier layers](#requests-to-the-earlier-l
 24. **Whether the life state is sent.** **Closed** by the technical ruling of 2026-10-10: computed
     on both sides, because R09's Earth field is already about 14.7 MB of R03's 15 MiB. **Lean:** if
     the client's cost forbids it, the server sends the state at level L − 1, 6 bytes per four cells
-    and 15.3 MB in all, over the rendering brainstorm's "roughly 2 to 15 MB" ([The per-cell
+    and 15.3 MB in all, over the rendering brainstorm's "about 4 to 15 MB" ([The per-cell
     state](#the-per-cell-state-the-material-and-the-instances)).
 25. **Pinned worlds (owner, with the civilisations brainstorm).** **Lean:** generated homeworlds,
     the human homeworld if there is one, and the starting system are found by selection; overrides

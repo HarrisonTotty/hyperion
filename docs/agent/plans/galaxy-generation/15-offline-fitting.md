@@ -210,6 +210,9 @@ their plans own: plan 06's `stellar_fates_high`, `_low` and `_mid` and `wd_cooli
 `giant_cooling`; plan 14's `liquid_optics`; R06's `limb_darkening`, `sky_binary_light_c` to `_e`,
 `sky_envelope`, `sky_phase_envelope`, `star_colour` and its five `star_colour_reddening` tables;
 and the surface crate's `bowl_permanent_shadow` (R09) and `space_weathering` (R10).
+_Since P15.T11.a (2026-10-23; Risks, "T11.a as built"), `streams` is registered, provisional, with
+its `MANIFEST` row and lock entry, and `task::REGISTRY` holds 48 tasks, this plan's nine with
+`streams`._
 
 ### Recipes and CI
 
@@ -1723,8 +1726,9 @@ and `check` support this from the start, and a test covers two toy tasks sharing
 
 ### P15.T11 Orphan streams per globular cluster
 
-**Source.** The census of thin streams: over 120 known (Bonaca and Price-Whelan 2025; Mateu 2023)
-and far from complete. **Consumer.** Plan 10 (M3). **Format** (`tables::streams`):
+**Source.** The census of known streams: over 120 reported, wide and thin together, and far from
+complete (Bonaca and Price-Whelan 2025, §2.2; Mateu 2023 lists 95); P15.T11.b counts the thin,
+globular-like ones among them. **Consumer.** Plan 10 (M3). **Format** (`tables::streams`):
 `ORPHAN_STREAMS_PER_GLOBULAR: f64`, the brainstorm's 1.5, uncertain threefold.
 
 - **P15.T11.a Move plan 10** to the table, unchanged. Re-validated at 898a3c94: P10.T3.b already
