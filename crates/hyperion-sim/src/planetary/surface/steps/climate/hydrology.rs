@@ -23,7 +23,9 @@
 //!    surface, T − Γ `z̄_w` (decision-r09-t13ge §2.11), the point the cell's centre lies in, as the
 //!    sea shares bin it; `Q_O` that point's ocean heat convergence per unit of its sea; the
 //!    storage the sea's heat capacity times the centred change of the cell's record over the
-//!    neighbouring months' mid-times, none in a one-month year.
+//!    neighbouring months' mid-times, none in a one-month year. The field cells of a climate cell
+//!    at one water surface share their months' coefficient, storage and `q_s`, to the bit
+//!    ([`ClimateCellTerms`]; R09.T16.a).
 //! 3. **The sea's rate and the land's source** ([`SeaBands`]; decision-r09-t13e-revision §4.1,
 //!    §4.2). Each band's evaporation per unit of its sea's solid angle, `e_b` = Σ Ω E over its
 //!    cells ÷ Σ Ω over its sea cells (`seas::under_sea`'s, every liquid), and its sea share `s_b`,
@@ -72,6 +74,8 @@ use hyperion_surface::field::{PaletteRole, Wind};
 
 use super::coordinates::Coordinates;
 use super::ebm::{EnergyBalance, Freezing, Moisture};
+use super::evaporation::ClimateCellTerms;
+#[cfg(test)]
 use super::evaporation::OpenMonth;
 use super::grid::{BandStencil, LATITUDE_BANDS, ModelGrid};
 use super::lfpm::{self, CellWind, Cover, GroundState, Mesh, Month, Parameters};
@@ -388,17 +392,26 @@ impl SeaBands {
 /// liquid's surface and the frozen ground's test reads at the land's.
 #[must_use]
 fn surface_temperature_k(working: &Working, cell: u32, m: usize) -> f64 {
-    let field_cell = &working.cells[slot(cell)];
     let state = &working.climate[slot(parent_index(cell))];
-    let surface = state.sea_level_temperature.value()
-        - working.lapse_rate_k_per_m
-            * (field_cell.water_surface.value() - working.sea_level.value());
+    let surface = annual_surface_k(working, cell);
     let anomaly = if working.months == 12 {
         state.month_anomaly_k[m]
     } else {
         0.0
     };
     surface + anomaly
+}
+
+/// Field cell `cell`'s annual mean temperature at its surface in `working`, K: its climate cell's
+/// at its water surface (the ground, where it is dry), `T_sl` − Γ (`z_w` − `z_sea`); a month's is
+/// this plus its anomaly ([`surface_temperature_k`]).
+#[must_use]
+fn annual_surface_k(working: &Working, cell: u32) -> f64 {
+    let field_cell = &working.cells[slot(cell)];
+    let state = &working.climate[slot(parent_index(cell))];
+    state.sea_level_temperature.value()
+        - working.lapse_rate_k_per_m
+            * (field_cell.water_surface.value() - working.sea_level.value())
 }
 
 /// Field cell `cell`'s ground in month `m` of `working`, where the model's ice forms as `freezing`
@@ -520,11 +533,15 @@ impl Evaporation {
     /// humidity at that temperature, times (1 − its ice fraction); `S_abs` and `Q_O` its grid
     /// point's.
     ///
+    /// The oracle of [`each_open_cell`](Self::each_open_cell), which the water cycle runs: this
+    /// cell alone, its month terms its own (R09.T16.a).
+    ///
     /// # Panics
     ///
     /// If `rates` does not hold one value for each of `working`'s months: the storage term reads
     /// a twelve-month year from `rates` and the surface temperature from `working`, which must
     /// agree.
+    #[cfg(test)]
     pub(super) fn rates(
         &self,
         pass: &Pass<'_>,
@@ -593,6 +610,214 @@ impl Evaporation {
         }
         true
     }
+
+    /// Each field cell of `working` under the condensable's own liquid, in cell-index order, given
+    /// to `each` with its evaporation rate each month, kg m⁻² s⁻¹, one a month, on `grid` in
+    /// `coordinates`; the other cells are skipped. Each cell's rates are those of `rates`, the
+    /// tests' oracle, to the bit: the field cells of one climate cell at one water surface share
+    /// their months' coefficient, storage and `q_s` ([`ClimateCellTerms`]; R09.T16.a), and each
+    /// cell's energy and open share stay its own.
+    ///
+    /// # Panics
+    ///
+    /// As [`each_open_cell_sharing`](Self::each_open_cell_sharing).
+    fn each_open_cell(
+        &self,
+        pass: &Pass<'_>,
+        working: &Working,
+        grid: &ModelGrid,
+        coordinates: Coordinates,
+        each: impl FnMut(u32, &[f64]),
+    ) {
+        self.each_open_cell_sharing(
+            pass,
+            working,
+            grid,
+            coordinates,
+            &mut ClimateCellTerms::default(),
+            each,
+        );
+    }
+
+    /// [`each_open_cell`](Self::each_open_cell) with the month terms kept in `terms`, a memo made
+    /// fresh for this one loop over `working`. Private to this module, so that its callers are
+    /// `each_open_cell` and the tests' `assert_the_sea_rates_share_their_month_terms` alone, each
+    /// with a fresh memo, which the tests read: none carries one across loops or working states,
+    /// which its key does not tell apart.
+    ///
+    /// # Panics
+    ///
+    /// If `working` has more months than the model's records (`Evaporation::new`'s).
+    fn each_open_cell_sharing(
+        &self,
+        pass: &Pass<'_>,
+        working: &Working,
+        grid: &ModelGrid,
+        coordinates: Coordinates,
+        terms: &mut ClimateCellTerms,
+        mut each: impl FnMut(u32, &[f64]),
+    ) {
+        let months = usize::from(working.months);
+        let latent = self.moisture.latent_heat_j_per_kg;
+        let mut year = [0.0; 12];
+        let rates = &mut year[..months];
+        for (cell, field_cell) in (0_u32..).zip(&working.cells) {
+            if !seas::under_sea(field_cell) || field_cell.liquid_entry != Some(self.entry) {
+                continue;
+            }
+            let point = grid.point_of(coordinates.to_model(pass.grid().centre(cell)));
+            let parent = parent_index(cell);
+            let anomaly_k = &working.climate[slot(parent)].month_anomaly_k;
+            let surface_k = annual_surface_k(working, cell);
+            let month_terms = terms.get_or_insert_with(parent, surface_k, || {
+                super::evaporation::month_terms(
+                    &self.model,
+                    &self.moisture,
+                    self.freezing_k,
+                    &self.spans_s,
+                    anomaly_k,
+                    months,
+                    surface_k,
+                )
+            });
+            let open_months = super::evaporation::open_months(
+                month_terms,
+                &self.shares,
+                &self.energy_w_m2,
+                point,
+            );
+            super::evaporation::year_rates_kg_m2_s(&open_months[..months], latent, rates);
+            let open = 1.0 - field_cell.ice_fraction;
+            for rate in rates.iter_mut() {
+                *rate *= open;
+            }
+            each(cell, rates);
+        }
+    }
+}
+
+/// Asserts R09.T16.a's sharing of the water cycle's sea rates over `working` on `pass`'s world,
+/// whose sea evaporates, from the climate records `working` holds, and prints what it found under
+/// `what`. `working` may read those records as a one-month year (its `months` 1), so that
+/// [`month_terms`](super::evaporation::month_terms)' one-month branch meets the oracle's:
+///
+/// - **To the bit:** the water cycle's loop (`Evaporation::each_open_cell`, its memo a fresh one)
+///   visits exactly the cells the oracle ([`Evaporation::rates`]) opens, in cell-index order, each
+///   month's rate the oracle's.
+/// - **Shared:** its memo's hits are the oracle's count
+///   ([`expected_hits`](super::evaporation::expected_hits)) over the cells visited at their
+///   surface temperatures, `T_sl` − Γ (`z_w` − ℓ).
+/// - **A floor:** that is at least three hits for each climate cell whose four field cells stand
+///   at one water surface, and such climate cells are half of them at least (on the small Earth
+///   after its climate step 957 of 1,536, with 3,150 hits over 4,362 sea cells, as built), so that
+///   a loss of the sharing, or of the sea's one surface, shows.
+///
+/// The memo's hits.
+///
+/// # Panics
+///
+/// If `working` holds no records of the model's own, its sea evaporates nothing, or an assertion
+/// above fails.
+#[cfg(test)]
+pub(crate) fn assert_the_sea_rates_share_their_month_terms(
+    pass: &Pass<'_>,
+    working: &Working,
+    what: &str,
+) -> u32 {
+    use hyperion_testkit::float::bits;
+    let model = &working
+        .climate_records
+        .as_ref()
+        .expect("the climate step keeps its records")
+        .model;
+    let own = model
+        .water
+        .as_ref()
+        .expect("the energy-balance model's own");
+    let sea = Evaporation::new(
+        pass,
+        working,
+        &EnergyBalance::for_inputs(pass.inputs()),
+        own,
+    )
+    .expect("the sea evaporates");
+    let mut terms = ClimateCellTerms::default();
+    let mut oracle = vec![0.0; usize::from(working.months)];
+    let mut visits = Vec::new();
+    sea.each_open_cell_sharing(
+        pass,
+        working,
+        &model.grid,
+        model.coordinates,
+        &mut terms,
+        |cell, rates| {
+            assert!(
+                sea.rates(
+                    pass,
+                    working,
+                    &model.grid,
+                    model.coordinates,
+                    cell,
+                    &mut oracle
+                ),
+                "{what}, cell {cell}: the oracle's sea cell too"
+            );
+            assert_eq!(
+                rates.len(),
+                oracle.len(),
+                "{what}, cell {cell}: one rate a month"
+            );
+            for (m, (&shared, &alone)) in rates.iter().zip(&oracle).enumerate() {
+                assert_eq!(
+                    bits(shared),
+                    bits(alone),
+                    "{what}, cell {cell}, month {m}: the sea's rate against the oracle's"
+                );
+            }
+            let state = &working.cells[slot(cell)];
+            let climate = &working.climate[slot(parent_index(cell))];
+            visits.push((
+                cell,
+                climate.sea_level_temperature.value()
+                    - working.lapse_rate_k_per_m
+                        * (state.water_surface.value() - working.sea_level.value()),
+            ));
+        },
+    );
+    let mut visited = visits.iter().map(|&(cell, _)| cell).peekable();
+    for cell in 0..pass.grid().len() {
+        let open = sea.rates(
+            pass,
+            working,
+            &model.grid,
+            model.coordinates,
+            cell,
+            &mut oracle,
+        );
+        assert_eq!(
+            open,
+            visited.next_if_eq(&cell).is_some(),
+            "{what}, cell {cell}: visited exactly where the oracle opens it"
+        );
+    }
+    assert!(
+        visited.next().is_none(),
+        "{what}: every visit is a cell, in order"
+    );
+    let (expected, whole) = super::evaporation::expected_hits(&visits);
+    let climate_cells = u32::try_from(working.climate.len()).expect("the climate cells fit a u32");
+    let hits = terms.hits();
+    eprintln!(
+        "{what}: the sea's rates at {} cells to the bit; the month terms shared {hits} times \
+         ({expected} expected), {whole} of {climate_cells} climate cells at one water surface",
+        visits.len()
+    );
+    assert_eq!(hits, expected, "{what}: the water cycle's memo's hits");
+    assert!(
+        hits >= 3 * whole && 2 * whole >= climate_cells,
+        "{what}: {hits} hits, {whole} of {climate_cells} climate cells at one water surface"
+    );
+    hits
 }
 
 /// The precipitation heuristic's water cycle on `grid` in `coordinates` over the model's own
@@ -646,16 +871,14 @@ fn water_cycle(
     let mut band_evaporation = vec![vec![0.0; LATITUDE_BANDS]; months];
     let mut liquid_evaporation = vec![0.0; months];
     if let Some(evaporation) = Evaporation::new(pass, working, &model, own) {
-        let mut rates = vec![0.0; months];
-        for (n, &omega) in (0_u32..).zip(field.solid_angles_sr()) {
-            if !evaporation.rates(pass, working, grid, coordinates, n, &mut rates) {
-                continue;
-            }
+        let omegas = field.solid_angles_sr();
+        evaporation.each_open_cell(pass, working, grid, coordinates, |n, rates| {
+            let omega = omegas[slot(n)];
             for (m, &e) in rates.iter().enumerate() {
                 band_evaporation[m][cell_band[slot(n)]] += omega * e;
                 liquid_evaporation[m] += omega * e;
             }
-        }
+        });
     }
 
     // 3–7, month by month.

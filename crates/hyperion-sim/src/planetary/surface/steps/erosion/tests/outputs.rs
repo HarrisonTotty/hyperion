@@ -33,6 +33,7 @@ use hyperion_surface::field::{Crust, FlowDirection, LogSteepness, SynthesisCell}
 use hyperion_surface::synth::craters::rims::{CoarseRims, kept_relief};
 use hyperion_testkit::float::{assert_same_bits, bits};
 
+use super::super::super::climate::after_erosion::{self, NetLoss};
 use super::super::super::climate::seas::under_sea;
 use super::super::branches::{Branch, WaterBalance, inside_waiting_rims};
 use super::super::outputs::Record;
@@ -433,6 +434,24 @@ const WET_NOW_SIGMA_H_TOLERANCE: f64 = 1e-4;
 /// lakes are level, on the small Earth (decision-r09-t14-choices Q6(b) and Q3; the reference
 /// Earth's are the slow [`the_reference_earth_s_final_field_holds_r09_t14d`]'s). Its realised
 /// `σ_h` is plan 14's to [`WET_NOW_SIGMA_H_TOLERANCE`], relative.
+///
+/// It also holds R09.T16.a's shared month terms to their oracles (in this test so that they take
+/// no climate pass of their own: under nextest each test is a process, and the small Earth's
+/// climate is most of a fast test's minute), in the states the step's balances read, each its
+/// oracle's to the bit at every field cell, its memo's hits the oracle's count, at least three for
+/// each climate cell at one water surface, and those half of the climate cells at least:
+///
+/// - **After the climate**, the state the erosion's solve balances: the lakes' net loss
+///   (`after_erosion::assert_the_net_loss_shares_its_month_terms`) and the water cycle's sea rates
+///   (`climate::assert_the_sea_rates_share_their_month_terms`) (957 of 1,536 climate cells, with
+///   3,150 hits over 4,362 sea cells, as built).
+/// - **Read as a one-month year**, the same state with its `months` 1 under the same records: both
+///   again, so that `month_terms`' one-month branch, which takes no anomaly, storage or `q_s`,
+///   meets the oracles' (the slow `locked_earth_like` golden runs a one-month world through the
+///   whole pass).
+/// - **After the step**, its sea placed again and its lakes on the final field, the state the
+///   final balance's (`WaterBalance::of` in `outputs`' `final_bodies`) is made from: the lakes'
+///   net loss again.
 #[test]
 fn the_small_earth_s_mean_and_lakes_hold_after_the_whole_pass() {
     let through = Through::of(Staged::of(small_earth()));
@@ -444,6 +463,33 @@ fn the_small_earth_s_mean_and_lakes_hold_after_the_whole_pass() {
     assert!(
         miss.abs() <= WET_NOW_SIGMA_H_TOLERANCE,
         "the small Earth's realised σ_h misses plan 14's by {miss:.3e}, relative"
+    );
+    assert_the_month_terms_are_shared_to_the_bit(&through);
+}
+
+/// R09.T16.a's shared month terms against their oracles, in the states
+/// [`the_small_earth_s_mean_and_lakes_hold_after_the_whole_pass`] lists.
+fn assert_the_month_terms_are_shared_to_the_bit(through: &Through) {
+    let pass = through.pass();
+    let after_climate = &through.staged.working;
+    let net = NetLoss::new(&pass, after_climate);
+    let what = "small Earth after the climate";
+    let _hits =
+        after_erosion::assert_the_net_loss_shares_its_month_terms(&pass, &net, after_climate, what);
+    let _hits = climate::assert_the_sea_rates_share_their_month_terms(&pass, after_climate, what);
+
+    let mut one_month = after_climate.clone();
+    one_month.months = 1;
+    let what = "small Earth after the climate, read as a one-month year";
+    let _hits =
+        after_erosion::assert_the_net_loss_shares_its_month_terms(&pass, &net, &one_month, what);
+    let _hits = climate::assert_the_sea_rates_share_their_month_terms(&pass, &one_month, what);
+
+    let _hits = after_erosion::assert_the_net_loss_shares_its_month_terms(
+        &pass,
+        &NetLoss::new(&pass, &through.eroded),
+        &through.eroded,
+        "small Earth after the step",
     );
 }
 

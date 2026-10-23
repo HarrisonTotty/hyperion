@@ -603,12 +603,12 @@ pub(crate) const fn wet_now_threshold() -> Threshold {
 /// - **The inflow** is the cell's own runoff r times its area, its solid angle times R², m³ a⁻¹:
 ///   the catchment's runoff, with what upstream bodies spill, is Fill–Spill–Merge's to gather.
 /// - **The net loss** is (E − P) + r, metres of the main liquid a Julian year. E − P is the
-///   climate's ([`NetLoss::at`]): E the Priestley–Taylor evaporation of the climate condensable's
-///   own open liquid were it to stand at the cell's water surface (its ground where it is dry, the
-///   sea's level over the sea: the level the fill reaches is not known before it, so a lake's cell
-///   is taken at its ground, a labelled error of Γ times the lake's depth, under a kelvin on the
-///   coarse cells), none where it is frozen, and P its climate cell's precipitation. It may be
-///   negative, where the cell gains more than it loses.
+///   climate's ([`NetLoss::at_water_surfaces`]): E the Priestley–Taylor evaporation of the
+///   climate condensable's own open liquid were it to stand at the cell's water surface (its
+///   ground where it is dry, the sea's level over the sea: the level the fill reaches is not known
+///   before it, so a lake's cell is taken at its ground, a labelled error of Γ times the lake's
+///   depth, under a kelvin on the coarse cells), none where it is frozen, and P its climate cell's
+///   precipitation. It may be negative, where the cell gains more than it loses.
 /// - **The cell's own runoff in the loss** takes back, from a cell the lake floods, the runoff the
 ///   inflow counted on it, exactly when the lake floods it: a flooded cell sheds no runoff, its
 ///   precipitation falling on the lake, where E − P counts it. So a lake's inflow is the runoff
@@ -621,8 +621,6 @@ pub(crate) const fn wet_now_threshold() -> Threshold {
 ///   `A_L` ÷ `A_B` = r ÷ (E − P), 1 ÷ X, not 1 ÷ (1 + X).
 ///
 /// A world with no main liquid has no lake, and its balance is none ([`WaterBalance::of`]).
-///
-/// [`NetLoss::at`]: super::super::climate::after_erosion::NetLoss::at
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WaterBalance {
     /// Each cell's own inflow, its runoff times its area, m³ a⁻¹, finite and non-negative.
@@ -640,11 +638,8 @@ impl WaterBalance {
     ///
     /// # Panics
     ///
-    /// If `runoff_m_per_year` is not one a cell, or as [`NetLoss::new`], [`NetLoss::at`] and
-    /// [`from_rates`](Self::from_rates).
-    ///
-    /// [`NetLoss::new`]: super::super::climate::after_erosion::NetLoss::new
-    /// [`NetLoss::at`]: super::super::climate::after_erosion::NetLoss::at
+    /// If `runoff_m_per_year` is not one a cell, or as [`NetLoss::new`],
+    /// [`NetLoss::at_water_surfaces`] and [`from_rates`](Self::from_rates).
     #[must_use]
     pub(crate) fn of(
         pass: &Pass<'_>,
@@ -665,11 +660,7 @@ impl WaterBalance {
             .iter()
             .map(|&w| w * r2)
             .collect();
-        let net = NetLoss::new(pass, working);
-        let open_liquid_m_per_year: Vec<f64> = (0_u32..)
-            .zip(&working.cells)
-            .map(|(cell, state)| net.at(pass, working, cell, state.water_surface.value()))
-            .collect();
+        let open_liquid_m_per_year = NetLoss::new(pass, working).at_water_surfaces(pass, working);
         Some(Self::from_rates(
             &areas_m2,
             runoff_m_per_year,

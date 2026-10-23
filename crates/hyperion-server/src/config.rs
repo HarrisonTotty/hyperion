@@ -823,6 +823,7 @@ const MOST_DEFAULT_SURFACE_PASSES: usize = 4;
 /// on a pool of two or more, for the interactive jobs that the displays' requests wait on, which a
 /// pass on every worker would hold back by a whole pass. A one-worker pool still runs its passes,
 /// one at a time.
+#[must_use]
 fn default_surface_passes(workers: NonZeroUsize) -> NonZeroUsize {
     NonZeroUsize::new(
         workers

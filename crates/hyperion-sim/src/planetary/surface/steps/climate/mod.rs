@@ -143,6 +143,10 @@ mod tests;
 /// hold to the record's conditions' to the bit.
 #[cfg(test)]
 pub(crate) use airless::regolith_inertia_of;
+/// R09.T16.a's check of the water cycle's shared month terms, which the erosion's tests run beside
+/// the lakes' (`after_erosion::assert_the_net_loss_shares_its_month_terms`) on one climate pass.
+#[cfg(test)]
+pub(crate) use hydrology::assert_the_sea_rates_share_their_month_terms;
 mod transport;
 mod wind;
 

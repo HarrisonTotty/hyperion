@@ -31,6 +31,15 @@
 //! [`mul_add`]'s and falls back to it outside the range where Dekker's is exact. Some wrappers
 //! have no `f64` method to stand in for, such as [`erf`] and [`j0`], the Bessel function the
 //! rendering plans' terrain uncertainty needs.
+//!
+//! [`PowBase`] raises one base to several real powers, each bit for bit [`powf`]'s, with `libm`'s
+//! logarithm of the base taken once: `libm`'s `pow` transcribed line for line and split where its
+//! logarithm stage ends, which reads the base alone (R09.T16.a). Every input outside the shared
+//! stage's domain is `libm`'s `pow` itself.
+
+mod pow_base;
+
+pub use pow_base::PowBase;
 
 /// The sine of `x` radians.
 #[inline]
@@ -187,6 +196,8 @@ pub fn ln_1p(x: f64) -> f64 {
 }
 
 /// `x` raised to the real power `y`.
+///
+/// For one `x` raised to several powers, [`PowBase`] gives the same bits for less.
 #[inline]
 #[must_use]
 pub fn powf(x: f64, y: f64) -> f64 {

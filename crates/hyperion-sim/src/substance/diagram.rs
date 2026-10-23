@@ -38,6 +38,11 @@
 //!
 //! The arithmetic is the crate's deterministic `math`, in fixed term order, and every inversion a
 //! fixed number of bisections, so that a value is the same bits on every target (sim-determinism).
+//! An equation's powers of one base share that base's logarithm through `math::PowBase`, each power
+//! bit for bit `math::powf`'s. Why (R09.T16.a): the climate's τ fit alone took 140 M of water's
+//! saturation pressures on the reference Earth at level 8, which with `powf` cost 196–337 ns a call
+//! by temperature band (312–337 ns over 273–310 K; R09.T16.a's probe, test profile, 2026-10-23),
+//! against 25–30 ns for the held curve before `032a8c5f`.
 
 use super::condensed::ReadDensitiesRules;
 use super::phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};
@@ -89,9 +94,10 @@ impl WagnerEquation {
         let reducing = self.reducing_temperature.value();
         let t = temperature.value();
         let theta = 1.0 - t / reducing;
+        let base = math::PowBase::new(theta);
         let mut sum = 0.0;
         for &(a, exponent) in self.terms {
-            sum += a * math::powf(theta, exponent);
+            sum += a * base.powf(exponent);
         }
         math::ln(self.reducing_pressure.value()) + reducing / t * sum
     }
@@ -103,10 +109,11 @@ impl WagnerEquation {
         let reducing = self.reducing_temperature.value();
         let t = temperature.value();
         let theta = 1.0 - t / reducing;
+        let base = math::PowBase::new(theta);
         let (mut sum, mut derivative) = (0.0, 0.0);
         for &(a, exponent) in self.terms {
-            sum += a * math::powf(theta, exponent);
-            derivative += a * exponent * math::powf(theta, exponent - 1.0);
+            sum += a * base.powf(exponent);
+            derivative += a * exponent * base.powf(exponent - 1.0);
         }
         reducing * sum + t * derivative
     }
@@ -158,9 +165,10 @@ impl SublimationEquation {
             } => {
                 let reducing = reducing.value();
                 let ratio = t / reducing;
+                let base = math::PowBase::new(ratio);
                 let mut sum = 0.0;
                 for &(a, exponent) in terms {
-                    sum += a * math::powf(ratio, exponent);
+                    sum += a * base.powf(exponent);
                 }
                 math::ln(pressure.value()) + reducing / t * sum
             }
@@ -190,9 +198,10 @@ impl SublimationEquation {
                 ..
             } => {
                 let ratio = t / reducing.value();
+                let base = math::PowBase::new(ratio);
                 let mut sum = 0.0;
                 for &(a, exponent) in terms {
-                    sum += a * (exponent - 1.0) * math::powf(ratio, exponent - 1.0);
+                    sum += a * (exponent - 1.0) * base.powf(exponent - 1.0);
                 }
                 -t * sum
             }
@@ -252,9 +261,10 @@ impl DensityEquation {
     #[must_use]
     pub fn density(&self, temperature: Kelvin) -> KilogramsPerCubicMetre {
         let theta = 1.0 - temperature.value() / self.reducing_temperature.value();
+        let base = math::PowBase::new(theta);
         let mut sum = 0.0;
         for &(b, exponent) in self.terms {
-            sum += b * math::powf(theta, exponent);
+            sum += b * base.powf(exponent);
         }
         let ratio = match self.form {
             DensityForm::Linear => 1.0 + sum,
@@ -336,9 +346,10 @@ impl MeltingEquation {
                 terms,
             } => {
                 let ratio = t / reducing.value();
+                let base = math::PowBase::new(ratio);
                 let mut sum = 0.0;
                 for &(a, exponent) in terms {
-                    sum += a * (math::powf(ratio, exponent) - 1.0);
+                    sum += a * (base.powf(exponent) - 1.0);
                 }
                 pressure * (1.0 + sum)
             }
@@ -348,9 +359,10 @@ impl MeltingEquation {
                 terms,
             } => {
                 let ratio = t / reducing.value();
+                let base = math::PowBase::new(ratio);
                 let mut sum = pressure.value();
                 for &(a, exponent) in terms {
-                    sum += a * (math::powf(ratio, exponent) - 1.0);
+                    sum += a * (base.powf(exponent) - 1.0);
                 }
                 Pascals::new(sum)
             }
@@ -360,9 +372,10 @@ impl MeltingEquation {
                 terms,
             } => {
                 let excess = t / reducing.value() - 1.0;
+                let base = math::PowBase::new(excess);
                 let mut sum = 0.0;
                 for &(a, exponent) in terms {
-                    sum += a * math::powf(excess, exponent);
+                    sum += a * base.powf(exponent);
                 }
                 pressure * (1.0 + sum)
             }
@@ -372,9 +385,10 @@ impl MeltingEquation {
                 terms,
             } => {
                 let ratio = t / reducing.value();
+                let base = math::PowBase::new(ratio);
                 let mut sum = 0.0;
                 for &(a, exponent) in terms {
-                    sum += a * (1.0 - math::powf(ratio, exponent));
+                    sum += a * (1.0 - base.powf(exponent));
                 }
                 pressure * (1.0 + sum)
             }
@@ -384,9 +398,10 @@ impl MeltingEquation {
                 terms,
             } => {
                 let ratio = t / reducing.value();
+                let base = math::PowBase::new(ratio);
                 let mut sum = 0.0;
                 for &(a, exponent) in terms {
-                    sum += a * (1.0 - math::powf(ratio, exponent));
+                    sum += a * (1.0 - base.powf(exponent));
                 }
                 pressure * math::exp(sum)
             }
@@ -1903,5 +1918,295 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `WagnerEquation::ln_pressure` as it was before R09.T16.a: each power its own `math::powf`.
+    fn powf_loop_wagner_ln_pressure(equation: &WagnerEquation, temperature: Kelvin) -> f64 {
+        let reducing = equation.reducing_temperature.value();
+        let t = temperature.value();
+        let theta = 1.0 - t / reducing;
+        let mut sum = 0.0;
+        for &(a, exponent) in equation.terms {
+            sum += a * math::powf(theta, exponent);
+        }
+        math::ln(equation.reducing_pressure.value()) + reducing / t * sum
+    }
+
+    /// `WagnerEquation::slope_k` as it was before R09.T16.a.
+    fn powf_loop_wagner_slope_k(equation: &WagnerEquation, temperature: Kelvin) -> f64 {
+        let reducing = equation.reducing_temperature.value();
+        let t = temperature.value();
+        let theta = 1.0 - t / reducing;
+        let (mut sum, mut derivative) = (0.0, 0.0);
+        for &(a, exponent) in equation.terms {
+            sum += a * math::powf(theta, exponent);
+            derivative += a * exponent * math::powf(theta, exponent - 1.0);
+        }
+        reducing * sum + t * derivative
+    }
+
+    /// `SublimationEquation::ln_pressure` as it was before R09.T16.a (its `InversePowers` arm,
+    /// which raises no power, is the method's own).
+    fn powf_loop_sublimation_ln_pressure(
+        equation: &SublimationEquation,
+        temperature: Kelvin,
+    ) -> f64 {
+        let t = temperature.value();
+        match *equation {
+            SublimationEquation::InversePowers { .. } => equation.ln_pressure(temperature),
+            SublimationEquation::Reduced(reduced) => {
+                powf_loop_wagner_ln_pressure(&reduced, temperature)
+            }
+            SublimationEquation::ScaledPowers {
+                temperature: reducing,
+                pressure,
+                terms,
+            } => {
+                let reducing = reducing.value();
+                let ratio = t / reducing;
+                let mut sum = 0.0;
+                for &(a, exponent) in terms {
+                    sum += a * math::powf(ratio, exponent);
+                }
+                math::ln(pressure.value()) + reducing / t * sum
+            }
+        }
+    }
+
+    /// `SublimationEquation::slope_k` as it was before R09.T16.a (its `InversePowers` arm the
+    /// method's own).
+    fn powf_loop_sublimation_slope_k(equation: &SublimationEquation, temperature: Kelvin) -> f64 {
+        let t = temperature.value();
+        match *equation {
+            SublimationEquation::InversePowers { .. } => equation.slope_k(temperature),
+            SublimationEquation::Reduced(reduced) => {
+                powf_loop_wagner_slope_k(&reduced, temperature)
+            }
+            SublimationEquation::ScaledPowers {
+                temperature: reducing,
+                terms,
+                ..
+            } => {
+                let ratio = t / reducing.value();
+                let mut sum = 0.0;
+                for &(a, exponent) in terms {
+                    sum += a * (exponent - 1.0) * math::powf(ratio, exponent - 1.0);
+                }
+                -t * sum
+            }
+        }
+    }
+
+    /// `DensityEquation::density` as it was before R09.T16.a.
+    fn powf_loop_density(equation: &DensityEquation, temperature: Kelvin) -> f64 {
+        let theta = 1.0 - temperature.value() / equation.reducing_temperature.value();
+        let mut sum = 0.0;
+        for &(b, exponent) in equation.terms {
+            sum += b * math::powf(theta, exponent);
+        }
+        let ratio = match equation.form {
+            DensityForm::Linear => 1.0 + sum,
+            DensityForm::Logarithmic => math::exp(sum),
+        };
+        (equation.reducing_density * ratio).value()
+    }
+
+    /// `MeltingEquation::pressure` as it was before R09.T16.a.
+    fn powf_loop_melting_pressure(equation: &MeltingEquation, temperature: Kelvin) -> f64 {
+        let t = temperature.value();
+        let pressure = match *equation {
+            MeltingEquation::Simon {
+                temperature: reducing,
+                pressure,
+                terms,
+            } => {
+                let ratio = t / reducing.value();
+                let mut sum = 0.0;
+                for &(a, exponent) in terms {
+                    sum += a * (math::powf(ratio, exponent) - 1.0);
+                }
+                pressure * (1.0 + sum)
+            }
+            MeltingEquation::SimonGlatzel {
+                temperature: reducing,
+                pressure,
+                terms,
+            } => {
+                let ratio = t / reducing.value();
+                let mut sum = pressure.value();
+                for &(a, exponent) in terms {
+                    sum += a * (math::powf(ratio, exponent) - 1.0);
+                }
+                Pascals::new(sum)
+            }
+            MeltingEquation::Polynomial {
+                temperature: reducing,
+                pressure,
+                terms,
+            } => {
+                let excess = t / reducing.value() - 1.0;
+                let mut sum = 0.0;
+                for &(a, exponent) in terms {
+                    sum += a * math::powf(excess, exponent);
+                }
+                pressure * (1.0 + sum)
+            }
+            MeltingEquation::IceIh {
+                temperature: reducing,
+                pressure,
+                terms,
+            } => {
+                let ratio = t / reducing.value();
+                let mut sum = 0.0;
+                for &(a, exponent) in terms {
+                    sum += a * (1.0 - math::powf(ratio, exponent));
+                }
+                pressure * (1.0 + sum)
+            }
+            MeltingEquation::Logarithmic {
+                temperature: reducing,
+                pressure,
+                terms,
+            } => {
+                let ratio = t / reducing.value();
+                let mut sum = 0.0;
+                for &(a, exponent) in terms {
+                    sum += a * (1.0 - math::powf(ratio, exponent));
+                }
+                pressure * math::exp(sum)
+            }
+        };
+        pressure.value()
+    }
+
+    /// A melting equation's reducing temperature.
+    fn melting_reducing_temperature(equation: &MeltingEquation) -> Kelvin {
+        match *equation {
+            MeltingEquation::Simon { temperature, .. }
+            | MeltingEquation::SimonGlatzel { temperature, .. }
+            | MeltingEquation::Polynomial { temperature, .. }
+            | MeltingEquation::IceIh { temperature, .. }
+            | MeltingEquation::Logarithmic { temperature, .. } => temperature,
+        }
+    }
+
+    /// A sublimation equation's reducing temperature, or the triple point's for one in inverse
+    /// powers of T, which has none.
+    fn sublimation_reducing_temperature(equation: &SublimationEquation, triple: Kelvin) -> Kelvin {
+        match *equation {
+            SublimationEquation::InversePowers { .. } => triple,
+            SublimationEquation::Reduced(reduced) => reduced.reducing_temperature,
+            SublimationEquation::ScaledPowers { temperature, .. } => temperature,
+        }
+    }
+
+    /// The temperatures an equation reduced by `reducing` is checked at: 0 to 3 `T_r` in steps of
+    /// `T_r` ÷ 2,000 (`T_r` itself among them), and 2,000 random ones below `T_r`.
+    fn sweep(reducing: Kelvin, g: &mut hyperion_testkit::lcg::Lcg) -> Vec<Kelvin> {
+        let r = reducing.value();
+        (0..=6_000_u32)
+            .map(|k| r * f64::from(k) / 2_000.0)
+            .chain((0..2_000).map(|_| r * g.next_f64()))
+            .map(Kelvin::new)
+            .collect()
+    }
+
+    /// The same bits, or both NaN, whose bits Rust leaves unspecified; true if finite.
+    #[track_caller]
+    fn same_or_both_nan(
+        ours: f64,
+        before: f64,
+        what: core::fmt::Arguments<'_>,
+        temperature: Kelvin,
+    ) -> bool {
+        if ours.is_nan() || before.is_nan() {
+            assert!(
+                ours.is_nan() && before.is_nan(),
+                "{what} at {} K: {ours:e} against {before:e} before",
+                temperature.value()
+            );
+            return false;
+        }
+        assert_eq!(
+            hyperion_testkit::float::bits(ours),
+            hyperion_testkit::float::bits(before),
+            "{what} at {} K: {ours:e} against {before:e} before",
+            temperature.value()
+        );
+        ours.is_finite()
+    }
+
+    /// R09.T16.a: every equation whose terms raise one base to several powers, now through
+    /// `math::PowBase`, is the same bits as its loop of `math::powf` was, for every condensable's
+    /// vapour-pressure, liquid-density, sublimation and melting equations, from 0 to 3 times each
+    /// one's reducing temperature and at random temperatures below it.
+    #[test]
+    fn diagram_equations_sharing_one_logarithm_are_their_powf_loops_to_the_bit() {
+        let mut g = hyperion_testkit::lcg::Lcg::new(0x0916_a010);
+        let mut finite = 0_u64;
+        for id in condensables() {
+            let d = id.substance().phase_diagram().unwrap();
+            let key = id.substance().key();
+            let vapour = d.vapour_pressure();
+            for t in sweep(vapour.reducing_temperature(), &mut g) {
+                let checks = [
+                    (
+                        vapour.ln_pressure(t),
+                        powf_loop_wagner_ln_pressure(vapour, t),
+                        "the vapour pressure",
+                    ),
+                    (
+                        vapour.slope_k(t),
+                        powf_loop_wagner_slope_k(vapour, t),
+                        "the vapour pressure's slope",
+                    ),
+                ];
+                for (ours, before, what) in checks {
+                    let what = format_args!("{key}'s {what}");
+                    finite += u64::from(same_or_both_nan(ours, before, what, t));
+                }
+            }
+            let density = d.liquid_density_equation();
+            for t in sweep(density.reducing_temperature, &mut g) {
+                let ours = density.density(t).value();
+                let before = powf_loop_density(density, t);
+                let what = format_args!("{key}'s liquid density");
+                finite += u64::from(same_or_both_nan(ours, before, what, t));
+            }
+            for piece in d.sublimation() {
+                let equation = piece.equation();
+                let reducing = sublimation_reducing_temperature(equation, d.triple_temperature());
+                for t in sweep(reducing, &mut g) {
+                    let phase = piece.phase();
+                    let ours = equation.ln_pressure(t);
+                    let before = powf_loop_sublimation_ln_pressure(equation, t);
+                    let what = format_args!("{key}'s {phase} sublimation");
+                    finite += u64::from(same_or_both_nan(ours, before, what, t));
+                    let ours = equation.slope_k(t);
+                    let before = powf_loop_sublimation_slope_k(equation, t);
+                    let what = format_args!("{key}'s {phase} sublimation's slope");
+                    finite += u64::from(same_or_both_nan(ours, before, what, t));
+                }
+            }
+            let melting: Vec<&MeltingEquation> = match d.melting() {
+                None => Vec::new(),
+                Some(MeltingCurve::Rising(pieces)) => pieces.iter().map(|p| &p.equation).collect(),
+                Some(MeltingCurve::Falling {
+                    equation, rising, ..
+                }) => core::iter::once(equation)
+                    .chain(rising.iter().map(|p| &p.equation))
+                    .collect(),
+            };
+            for equation in melting {
+                for t in sweep(melting_reducing_temperature(equation), &mut g) {
+                    let ours = equation.pressure(t).value();
+                    let before = powf_loop_melting_pressure(equation, t);
+                    let what = format_args!("{key}'s melting");
+                    finite += u64::from(same_or_both_nan(ours, before, what, t));
+                }
+            }
+        }
+        // 14 condensables of at least three equations each, at 8,001 temperatures an equation.
+        assert!(finite > 300_000, "{finite} finite values compared");
     }
 }

@@ -67,8 +67,20 @@
 //! None evaporates from frozen liquid (below the model's freezing point) or from any liquid but the
 //! condensable's own: R09.T13.d's other liquids (a Titan's ethane) give the air no vapour of the
 //! condensable.
+//!
+//! # The month terms, shared within a climate cell (R09.T16.a)
+//!
+//! A month's coefficient, storage and `q_s` read only the climate cell's anomalies and the
+//! liquid's temperature, the climate cell's sea-level temperature at the liquid's surface plus the
+//! month's anomaly ([`month_terms`]). The water cycle's sea rates and the lakes' net loss ask at
+//! every field cell in cell-index order, and a climate cell's four field cells are consecutive,
+//! so a loop keeps each climate cell's terms by the surface temperatures asked
+//! ([`ClimateCellTerms`]) and computes them once for the field cells of one climate cell at one
+//! surface temperature, to the bit. A sea's cells stand at the sea level, so under the sea three
+//! of four field cells ask again. Each cell's energy and ice share and every sum stay its own, in
+//! their order.
 
-use super::ebm::{ENERGY_SLOPE_STEP_K, Moisture};
+use super::ebm::{ENERGY_SLOPE_STEP_K, EnergyBalance, Moisture};
 use crate::substance::saturation_pressure;
 use crate::units::{Kelvin, Pascals};
 
@@ -236,12 +248,216 @@ pub(super) fn year_rates_kg_m2_s(
     }
 }
 
+/// The terms of one open month of a liquid's year that the liquid's temperature sets
+/// ([`month_terms`]): its [`OpenMonth`] but for the month's share and the cell's energy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct MonthTerms {
+    /// `c_PT` at the liquid's temperature ([`coefficient`]).
+    coefficient: f64,
+    /// G, the sea's storage, W m⁻², of either sign; none in a one-month year.
+    storage_w_m2: f64,
+    /// `q_s` at the liquid's temperature, kg kg⁻¹; none in a one-month year.
+    saturation_kg_per_kg: f64,
+}
+
+/// Each month's terms of an open liquid's year, one a month, `None` where it is frozen or past
+/// the year's `months` (one, or twelve): the liquid's temperature `T_w` = `surface_k` + `a_m`, K,
+/// its climate cell's anomaly `a_m` from `anomaly_k`, none in a one-month year; frozen below
+/// `freezing_k`; else the coefficient ([`coefficient`]) of `moisture` in the air of `model`, the
+/// storage `C_sea`(`T_w`) times the anomaly's centred change over the month's span from
+/// `spans_s`, s, and `q_s`(`T_w`), neither of the last two in a one-month year.
+///
+/// It is the month loop of the water cycle's sea rates and the lakes' net loss
+/// (`hydrology::Evaporation::rates`, `after_erosion::OpenLiquid::year_rates_kg_m2_s`), moved here
+/// verbatim and less each cell's energy, so that a loop computes it once for the field cells of a
+/// climate cell at one surface temperature ([`ClimateCellTerms`]; R09.T16.a).
+///
+/// # Panics
+///
+/// If `spans_s` holds fewer than twelve spans in a twelve-month year.
+#[must_use]
+pub(super) fn month_terms(
+    model: &EnergyBalance,
+    moisture: &Moisture,
+    freezing_k: Option<f64>,
+    spans_s: &[f64],
+    anomaly_k: &[f64; 12],
+    months: usize,
+    surface_k: f64,
+) -> [Option<MonthTerms>; 12] {
+    let twelve = months == 12;
+    let anomaly = |m: usize| {
+        if twelve { anomaly_k[m] } else { 0.0 }
+    };
+    let mut terms = [None; 12];
+    for (m, month) in terms.iter_mut().enumerate().take(months) {
+        let t_w = surface_k + anomaly(m);
+        if freezing_k.is_some_and(|f| t_w < f) {
+            continue;
+        }
+        let c_pt = coefficient(moisture, model.specific_heat_j_per_kg_k, t_w);
+        // A one-month year has no storage, and takes Priestley and Taylor's rate on its energy,
+        // which reads no saturation.
+        let (storage_w_m2, saturation_kg_per_kg) = if twelve {
+            let (before, after) = ((m + 11) % 12, (m + 1) % 12);
+            (
+                model.heat_capacity(t_w, 1.0) * (anomaly(after) - anomaly(before)) / spans_s[m],
+                moisture.saturation_specific_humidity(t_w),
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        *month = Some(MonthTerms {
+            coefficient: c_pt,
+            storage_w_m2,
+            saturation_kg_per_kg,
+        });
+    }
+    terms
+}
+
+/// Each month of an open liquid's year at a cell, from its month terms `terms` ([`month_terms`]):
+/// the month's share from `shares` and the energy of the cell's grid point `point` from
+/// `energy_w_m2` (one a month, each one a grid point) beside the terms; `None` where the terms
+/// are.
+///
+/// # Panics
+///
+/// If a month that has terms is past `shares` or `energy_w_m2`, or `point` past its month's
+/// energies.
+#[must_use]
+pub(super) fn open_months(
+    terms: &[Option<MonthTerms>; 12],
+    shares: &[f64],
+    energy_w_m2: &[Vec<f64>],
+    point: usize,
+) -> [Option<OpenMonth>; 12] {
+    let mut months = [None; 12];
+    for (m, (month, kept)) in months.iter_mut().zip(terms).enumerate() {
+        *month = kept.map(|t| OpenMonth {
+            share: shares[m],
+            coefficient: t.coefficient,
+            energy_w_m2: energy_w_m2[m][point],
+            storage_w_m2: t.storage_w_m2,
+            saturation_kg_per_kg: t.saturation_kg_per_kg,
+        });
+    }
+    months
+}
+
+/// A climate cell's field cells, consecutive in the field's cell-index order (`parent_index`).
+const FIELD_CELLS_A_CLIMATE_CELL: usize = 4;
+
+/// One climate cell's month terms ([`month_terms`]) by the surface temperatures its field cells
+/// asked at, so that a loop over the field in cell-index order computes them once for the field
+/// cells of one climate cell at one surface temperature (R09.T16.a; the [module
+/// documentation](self)).
+///
+/// - **Why:** since the phase-data switch water's saturation pressure, IAPWS SR1-86's Wagner sum,
+///   costs 196–337 ns a call by temperature band (312–337 ns over 273–310 K; R09.T16.a's probe,
+///   test profile, 2026-10-23), against 25–30 ns for the held curve before `032a8c5f`, three calls
+///   an open month. The reference Earth's erosion step makes 24.87 million of them in its two
+///   balances, which rose from 0.9–1.3 s to 8.2–8.4 s, and the water cycle's sea rates rose from
+///   0.4 s to 3.1–3.2 s (R09.T16.a's attribution, the test profile at level 8).
+/// - **Exact:** within one loop over one working state, nothing changes, so a month's terms are
+///   the same function of the same operands at the same climate cell and the same surface
+///   temperature, to the bit: the surfaces are compared by their bits (`total_cmp`), so −0 and +0
+///   are two, and a NaN matches only its own bits.
+/// - **Owned by its loop:** each loop makes one and drops it after, and it forgets a climate cell
+///   when the next begins. Its key holds only what varies within one loop, so no memo outlives
+///   its loop: the entry points (`hydrology`'s `Evaporation::each_open_cell`,
+///   `after_erosion`'s `NetLoss::at_water_surfaces`) each make a fresh one, and the functions
+///   that take one are private to their modules, called by those entry points and the tests'
+///   assertions alone, each with a fresh memo. It holds no map and nothing global, and no order
+///   of its own reaches output.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ClimateCellTerms {
+    /// The climate cell whose terms it holds; `None` before the first ask.
+    parent: Option<u32>,
+    /// The slots held, at most [`FIELD_CELLS_A_CLIMATE_CELL`].
+    len: usize,
+    /// Each slot's surface temperature, K.
+    surfaces_k: [f64; FIELD_CELLS_A_CLIMATE_CELL],
+    /// Each slot's month terms.
+    terms: [[Option<MonthTerms>; 12]; FIELD_CELLS_A_CLIMATE_CELL],
+    /// The asks answered from a slot, which the tests count so that a lost sharing shows.
+    #[cfg(test)]
+    hits: u32,
+}
+
+impl ClimateCellTerms {
+    /// The month terms at a field cell of climate cell `parent` whose surface temperature is
+    /// `surface_k`, K: a slot's, where a field cell of `parent` asked at the same bits since
+    /// `parent` began, else `compute`'s, which it keeps.
+    pub(super) fn get_or_insert_with(
+        &mut self,
+        parent: u32,
+        surface_k: f64,
+        compute: impl FnOnce() -> [Option<MonthTerms>; 12],
+    ) -> &[Option<MonthTerms>; 12] {
+        if self.parent != Some(parent) {
+            self.parent = Some(parent);
+            self.len = 0;
+        }
+        let held = self.surfaces_k[..self.len]
+            .iter()
+            .position(|k| k.total_cmp(&surface_k).is_eq());
+        let slot = if let Some(slot) = held {
+            #[cfg(test)]
+            {
+                self.hits += 1;
+            }
+            slot
+        } else {
+            // A fifth surface comes only from a loop that asks at a field cell twice, and takes
+            // the last slot.
+            let slot = self.len.min(FIELD_CELLS_A_CLIMATE_CELL - 1);
+            self.surfaces_k[slot] = surface_k;
+            self.terms[slot] = compute();
+            self.len = slot + 1;
+            slot
+        };
+        &self.terms[slot]
+    }
+
+    /// The asks answered from a slot since it was made.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn hits(&self) -> u32 {
+        self.hits
+    }
+}
+
+/// The oracle of [`ClimateCellTerms`]' hits over a loop that asks at the field cells `visits` in
+/// turn, each with its surface temperature, K: the visits whose climate cell's run of visits
+/// asked at the same bits before; and the climate cells whose four field cells are all visited at
+/// one surface temperature, each of which gives three.
+#[cfg(test)]
+#[must_use]
+pub(super) fn expected_hits(visits: &[(u32, f64)]) -> (u32, u32) {
+    use crate::planetary::surface::grid::parent_index;
+    let (mut hits, mut whole) = (0_u32, 0_u32);
+    for run in visits.chunk_by(|a, b| parent_index(a.0) == parent_index(b.0)) {
+        for (i, &(_, surface_k)) in run.iter().enumerate() {
+            hits += u32::from(
+                run[..i]
+                    .iter()
+                    .any(|&(_, k)| k.total_cmp(&surface_k).is_eq()),
+            );
+        }
+        whole += u32::from(
+            run.len() == FIELD_CELLS_A_CLIMATE_CELL
+                && run.iter().all(|&(_, k)| k.total_cmp(&run[0].1).is_eq()),
+        );
+    }
+    (hits, whole)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::planetary::hooks::surface::EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K;
     use crate::planetary::surface::reference;
-    use crate::planetary::surface::steps::climate::ebm::EnergyBalance;
 
     /// Over the reference Earth's water, α s ÷ (s + γ) is the lane's exact form's (scratch
     /// `e/pt-ratios.txt`, Murray's saturation curve at 1,013 hPa, `c_p` 1,005 and L 2.465 MJ kg⁻¹):
@@ -474,5 +690,76 @@ mod tests {
         }
         let boiling = moisture.saturation_specific_humidity(400.0);
         assert!((boiling - 1.0).abs() < 1e-12, "{boiling}");
+    }
+
+    /// R09.T16.a's memo answers from a slot exactly where a field cell of the same climate cell
+    /// asked at the same bits since that climate cell began, and otherwise computes and keeps: it
+    /// tells −0 from +0, matches a NaN to its own bits, forgets a climate cell when the next
+    /// begins, and gives a fifth surface the last slot. Each ask's terms are tagged by the ask
+    /// that computed them, so the test sees which ask's terms come back.
+    #[test]
+    fn the_memo_answers_from_a_slot_only_within_a_climate_cell_at_the_same_bits() {
+        let mut memo = ClimateCellTerms::default();
+        let mut computed = 0_u32;
+        let mut ask = |parent: u32, surface_k: f64, tag: f64| -> f64 {
+            let terms = memo.get_or_insert_with(parent, surface_k, || {
+                computed += 1;
+                let mut terms = [None; 12];
+                terms[0] = Some(MonthTerms {
+                    coefficient: tag,
+                    storage_w_m2: 0.0,
+                    saturation_kg_per_kg: 0.0,
+                });
+                terms
+            });
+            terms[0]
+                .expect("every ask's first month is open")
+                .coefficient
+        };
+        // Each ask: its climate cell, its surface temperature, its tag, and the tag it gets back.
+        let asks = [
+            (7, 288.0, 1.0, 1.0),
+            (7, 288.0, 2.0, 1.0),
+            (7, 287.5, 3.0, 3.0),
+            (7, 288.0, 4.0, 1.0),
+            (8, 288.0, 5.0, 5.0),
+            (8, 0.0, 6.0, 6.0),
+            (8, -0.0, 7.0, 7.0),
+            (8, 1.0, 8.0, 8.0),
+            (8, 2.0, 9.0, 9.0),
+            (8, 2.0, 10.0, 9.0),
+            (8, 1.0, 11.0, 11.0),
+            (8, 288.0, 12.0, 5.0),
+            (7, 288.0, 13.0, 13.0),
+            (9, f64::NAN, 14.0, 14.0),
+            (9, f64::NAN, 15.0, 14.0),
+        ];
+        for (n, &(parent, surface_k, tag, expected)) in asks.iter().enumerate() {
+            let got = ask(parent, surface_k, tag);
+            assert_eq!(
+                hyperion_testkit::float::bits(got),
+                hyperion_testkit::float::bits(expected),
+                "ask {n}: {got} against {expected}"
+            );
+        }
+        assert_eq!(computed, 10, "the asks that computed");
+        assert_eq!(memo.hits(), 5, "the asks answered from a slot");
+        let visits = [
+            (28, 288.0),
+            (29, 288.0),
+            (30, 287.5),
+            (31, 288.0),
+            (32, 288.0),
+            (33, 0.0),
+            (34, -0.0),
+            (36, f64::NAN),
+            (37, f64::NAN),
+        ];
+        assert_eq!(expected_hits(&visits), (3, 0), "the oracle's count");
+        assert_eq!(
+            expected_hits(&[(4, 300.0), (5, 300.0), (6, 300.0), (7, 300.0)]),
+            (3, 1),
+            "a whole climate cell at one surface"
+        );
     }
 }

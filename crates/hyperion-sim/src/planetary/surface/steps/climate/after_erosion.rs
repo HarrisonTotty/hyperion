@@ -79,6 +79,13 @@
 //!   density, its palette entry's. A world with no main liquid has no lake, and its net loss is
 //!   zero.
 //!
+//! A balance takes it at every field cell at its own water surface, in cell-index order
+//! (`NetLoss::at_water_surfaces`), where the field cells of one climate cell at one water surface
+//! (under the sea, all four) share their months' coefficient, storage and `q_s`, to the bit
+//! (`evaporation::ClimateCellTerms`; R09.T16.a: since the phase-data switch the reference Earth's
+//! two balances in its erosion step took 8.2–8.4 s, against 0.9–1.3 s before, nearly all of it
+//! water's saturation pressure).
+//!
 //! **Labelled:**
 //! - The cell's ice share is not applied, where the sea's evaporation takes its open share, 1 −
 //!   its ice fraction: a lake candidate's ice is the climate step's placement at the old heights,
@@ -95,6 +102,8 @@ use hyperion_surface::field::PaletteRole;
 
 use super::coordinates::Coordinates;
 use super::ebm::{EnergyBalance, Freezing, Moisture};
+use super::evaporation::ClimateCellTerms;
+#[cfg(test)]
 use super::evaporation::OpenMonth;
 use super::grid::ModelGrid;
 use super::{
@@ -176,7 +185,7 @@ pub(crate) fn reapply_after_erosion(pass: &Pass<'_>, working: &mut Working) {
 /// loses more than it gains.
 ///
 /// It builds a `NetLoss` for the one call. A caller that asks at many cells builds one and asks
-/// it (`NetLoss::at`).
+/// it (`NetLoss::at`, or at every cell `NetLoss::at_water_surfaces`).
 ///
 /// # Panics
 ///
@@ -234,14 +243,84 @@ impl NetLoss {
         }
     }
 
+    /// E − P at every field cell of `working`, its liquid at the cell's own water surface, metres
+    /// of the main liquid a Julian year, one a cell in cell-index order (the [module
+    /// documentation](self)); zero on a world with no main liquid.
+    ///
+    /// Each cell's is `at`'s there, the tests' oracle, to the bit: the field cells of one climate
+    /// cell at one water surface share their months' coefficient, storage and `q_s`
+    /// ([`ClimateCellTerms`]; R09.T16.a), and each cell's energy, precipitation and sums stay its
+    /// own, in their order.
+    ///
+    /// # Panics
+    ///
+    /// If a loss is not finite (a fault of the climate, or a water surface that is not finite).
+    #[must_use]
+    pub(crate) fn at_water_surfaces(&self, pass: &Pass<'_>, working: &Working) -> Vec<f64> {
+        self.at_water_surfaces_sharing(pass, working, &mut ClimateCellTerms::default())
+    }
+
+    /// [`at_water_surfaces`](Self::at_water_surfaces) with the month terms kept in `terms`, a
+    /// memo made fresh for this one loop over `working`. Private to this module, so that its
+    /// callers are `at_water_surfaces` and the tests' `assert_the_net_loss_shares_its_month_terms`
+    /// alone, each with a fresh memo, which the tests read: none carries one across loops or
+    /// working states, which its key does not tell apart.
+    ///
+    /// # Panics
+    ///
+    /// As [`at_water_surfaces`](Self::at_water_surfaces).
+    #[must_use]
+    fn at_water_surfaces_sharing(
+        &self,
+        pass: &Pass<'_>,
+        working: &Working,
+        terms: &mut ClimateCellTerms,
+    ) -> Vec<f64> {
+        let Some(scale) = self.scale else {
+            return vec![0.0; working.cells.len()];
+        };
+        (0_u32..)
+            .zip(&working.cells)
+            .map(|(cell, state)| {
+                let evaporated = self.evaporation.as_ref().map_or(0.0, |open| {
+                    let point = open.point_of(pass, cell);
+                    let mut year = [0.0; 12];
+                    let rates = &mut year[..usize::from(working.months)];
+                    open.year_rates_sharing(
+                        working,
+                        cell,
+                        point,
+                        state.water_surface.value(),
+                        rates,
+                        terms,
+                    );
+                    self.shares
+                        .iter()
+                        .zip(rates.iter())
+                        .fold(0.0, |sum, (&share, &rate)| sum + share * rate)
+                });
+                let loss = (evaporated - self.precipitation_kg_m2_s(working, cell)) * scale;
+                assert!(
+                    loss.is_finite(),
+                    "an open liquid's net loss must be finite, got {loss} m a⁻¹ at cell {cell}"
+                );
+                loss
+            })
+            .collect()
+    }
+
     /// E − P at field cell `cell` of `working`, its liquid at the surface `surface_m` above the
     /// datum, metres of the main liquid a Julian year (`open_liquid_net_loss_m_per_year`); zero
     /// on a world with no main liquid.
+    ///
+    /// The oracle of [`at_water_surfaces`](Self::at_water_surfaces): this cell alone, its month
+    /// terms its own (R09.T16.a).
     ///
     /// # Panics
     ///
     /// If `cell` is not one of the field's cells, or the loss is not finite (a fault of the
     /// climate, or a `surface_m` that is not finite).
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn at(&self, pass: &Pass<'_>, working: &Working, cell: u32, surface_m: f64) -> f64 {
         let Some(scale) = self.scale else {
@@ -264,6 +343,7 @@ impl NetLoss {
     /// # Panics
     ///
     /// As `OpenLiquid::year_rates_kg_m2_s`.
+    #[cfg(test)]
     #[must_use]
     fn evaporation_kg_m2_s(
         &self,
@@ -415,10 +495,14 @@ impl OpenLiquid {
     /// the saturation specific humidity at that temperature, none of the last two in a one-month
     /// year.
     ///
+    /// The oracle of [`year_rates_sharing`](Self::year_rates_sharing): this cell alone, its month
+    /// terms its own (R09.T16.a).
+    ///
     /// # Panics
     ///
     /// If `rates` does not hold one value for each of `working`'s months, or `working` has more
     /// months than the model.
+    #[cfg(test)]
     fn year_rates_kg_m2_s(
         &self,
         working: &Working,
@@ -477,6 +561,119 @@ impl OpenLiquid {
             rates,
         );
     }
+
+    /// The open liquid's evaporation rate each month at field cell `cell` of `working`, its
+    /// surface at `surface_m` above the datum and its centre in grid point `point`, kg m⁻² s⁻¹,
+    /// into `rates` (one a month): `year_rates_kg_m2_s`'s, the tests' oracle, to the bit, with the
+    /// month terms ([`evaporation::month_terms`]) from `terms`, where a field cell of the same
+    /// climate cell asked at the same surface temperature (R09.T16.a): the memo of the one loop
+    /// that calls it, [`NetLoss::at_water_surfaces_sharing`]'s over `working`'s cells.
+    ///
+    /// # Panics
+    ///
+    /// If `rates` does not hold one value for each of `working`'s months, or `working` has more
+    /// months than the model.
+    fn year_rates_sharing(
+        &self,
+        working: &Working,
+        cell: u32,
+        point: usize,
+        surface_m: f64,
+        rates: &mut [f64],
+        terms: &mut ClimateCellTerms,
+    ) {
+        let months = rates.len();
+        assert_eq!(
+            months,
+            usize::from(working.months),
+            "the open liquid's rates hold one value for each of the working state's months"
+        );
+        let parent = parent_index(cell);
+        let state = &working.climate[slot(parent)];
+        let surface_k = state.sea_level_temperature.value()
+            - working.lapse_rate_k_per_m * (surface_m - working.sea_level.value());
+        let month_terms = terms.get_or_insert_with(parent, surface_k, || {
+            evaporation::month_terms(
+                &self.model,
+                &self.moisture,
+                self.freezing_k,
+                &self.spans_s,
+                &state.month_anomaly_k,
+                months,
+                surface_k,
+            )
+        });
+        let open_months =
+            evaporation::open_months(month_terms, &self.shares, &self.energy_w_m2, point);
+        evaporation::year_rates_kg_m2_s(
+            &open_months[..months],
+            self.moisture.latent_heat_j_per_kg,
+            rates,
+        );
+    }
+}
+
+/// Asserts R09.T16.a's sharing of the lakes' net loss `net` over `working` on `pass`'s world,
+/// whose open liquid evaporates, and prints what it found under `what`. `net` is
+/// [`NetLoss::new`]'s over `working`, or over the twelve-month state whose climate records
+/// `working` reads as a one-month year (its `months` 1), which `NetLoss::new` refuses, so that
+/// [`evaporation::month_terms`]' one-month branch meets the oracle's:
+///
+/// - **To the bit:** at every field cell, [`NetLoss::at_water_surfaces`] is [`NetLoss::at`] at the
+///   cell's water surface, the oracle.
+/// - **Shared:** its memo's hits are the oracle's count ([`evaporation::expected_hits`]) over every
+///   cell at its surface temperature, `T_sl` − Γ (`z_w` − ℓ).
+/// - **A floor:** that is at least three hits for each climate cell whose four field cells stand
+///   at one surface temperature, and such climate cells, the sea's, are half of them at least
+///   (on the small Earth 957 of 1,536 after its climate step and 955 in its final balance, with
+///   3,150 and 3,153 hits), so that a loss of the sharing, or of the sea's one surface, shows.
+///
+/// The memo's hits.
+#[cfg(test)]
+pub(crate) fn assert_the_net_loss_shares_its_month_terms(
+    pass: &Pass<'_>,
+    net: &NetLoss,
+    working: &Working,
+    what: &str,
+) -> u32 {
+    use hyperion_testkit::float::bits;
+    assert!(
+        net.evaporation.is_some() && net.scale.is_some(),
+        "{what}: the open liquid evaporates"
+    );
+    let mut terms = ClimateCellTerms::default();
+    let shared = net.at_water_surfaces_sharing(pass, working, &mut terms);
+    assert_eq!(shared.len(), working.cells.len(), "{what}: one loss a cell");
+    let mut visits = Vec::with_capacity(shared.len());
+    for ((cell, state), &loss) in (0_u32..).zip(&working.cells).zip(&shared) {
+        let surface_m = state.water_surface.value();
+        assert_eq!(
+            bits(loss),
+            bits(net.at(pass, working, cell, surface_m)),
+            "{what}: cell {cell}'s net loss against the oracle's"
+        );
+        let climate = &working.climate[slot(parent_index(cell))];
+        visits.push((
+            cell,
+            climate.sea_level_temperature.value()
+                - working.lapse_rate_k_per_m * (surface_m - working.sea_level.value()),
+        ));
+    }
+    let (expected, whole) = evaporation::expected_hits(&visits);
+    let climate_cells = u32::try_from(working.climate.len()).expect("the climate cells fit a u32");
+    let hits = terms.hits();
+    eprintln!(
+        "{what}: the net loss at {} field cells to the bit; the month terms shared {hits} times \
+         ({expected} expected), {whole} of {climate_cells} climate cells at one surface \
+         temperature",
+        shared.len()
+    );
+    assert_eq!(hits, expected, "{what}: the memo's hits");
+    assert!(
+        hits >= 3 * whole && 2 * whole >= climate_cells,
+        "{what}: {hits} hits, {whole} of {climate_cells} climate cells at one surface temperature"
+    );
+    hits
 }
 
 /// The index into a vector of cell `cell`.

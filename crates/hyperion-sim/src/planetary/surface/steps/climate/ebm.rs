@@ -1154,14 +1154,130 @@ impl Moisture {
     /// `relative_humidity` of the saturation pressure but at most the surface pressure.
     #[must_use]
     fn humidity_at(&self, t_k: f64, relative_humidity: f64) -> f64 {
-        let saturation = saturation_pressure(self.condensable, Kelvin::new(t_k))
-            .map_or(0.0, crate::units::Pascals::value);
-        let wanted = relative_humidity * saturation;
+        self.humidity_from(saturation_pa(self.condensable, t_k), relative_humidity)
+    }
+
+    /// [`humidity_at`](Self::humidity_at) where the condensable's saturation pressure is
+    /// `saturation_pa`, Pa.
+    #[must_use]
+    fn humidity_from(&self, saturation_pa: f64, relative_humidity: f64) -> f64 {
+        let wanted = relative_humidity * saturation_pa;
         let p = self.surface_pressure_pa;
         let e = if wanted < p { wanted } else { p };
         let epsilon = self.mass_ratio;
         epsilon * e / (p - (1.0 - epsilon) * e)
     }
+
+    /// h's latent part L q at [`RELATIVE_HUMIDITY`] and its slope in T by the centred difference
+    /// of [`ENERGY_SLOPE_STEP_K`], a seasonal table's node ([`Tabulated::new`]), from the
+    /// condensable's saturation pressures `saturations` at a node and either side of it.
+    #[must_use]
+    fn latent_from(&self, saturations: &Saturations) -> [f64; 2] {
+        let part = |saturation_pa: f64| {
+            self.latent_heat_j_per_kg * self.humidity_from(saturation_pa, RELATIVE_HUMIDITY)
+        };
+        [
+            part(saturations.at),
+            (part(saturations.above) - part(saturations.below)) / (2.0 * ENERGY_SLOPE_STEP_K),
+        ]
+    }
+}
+
+/// The saturation pressure of the registry's row `id` at `t_k`, K, Pa: zero where the registry
+/// has none there. Every saturation pressure the model reads comes through here, so that the tests
+/// can count them (their `with_saturation_reads`).
+#[must_use]
+fn saturation_pa(id: SubstanceId, t_k: f64) -> f64 {
+    #[cfg(test)]
+    SATURATION_CALLS.with(|calls| calls.set(calls.get() + 1));
+    saturation_pressure(id, Kelvin::new(t_k)).map_or(0.0, Pascals::value)
+}
+
+/// One row's saturation pressures, Pa, at a temperature T and at T ± [`ENERGY_SLOPE_STEP_K`]: what
+/// h and its slope read of the climate condensable, and `τ_w` and its slope of water, directly.
+///
+/// Why (R09.T16.a, B3): the curve is a pure function of the row and T's bits, and h and `τ_w` take
+/// their slopes by the same centred difference, at T + δ and T − δ written alike, so on a world
+/// whose condensable is the water term's own row the two read the same three values. τ's fit reads
+/// every function directly, and on the reference Earth at level 8 it made 140 M saturation calls in
+/// 69,571 relax sweeps (R09.T16.a's attribution), about 2,016 a sweep, at 196–337 ns a call by
+/// temperature band (312–337 ns over 273–310 K; R09.T16.a's probe, test profile, 2026-10-23),
+/// against 25–30 ns for the held curve before `032a8c5f`: shared, they are read once, to the bit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Saturations {
+    /// At T.
+    at: f64,
+    /// At T + δ.
+    above: f64,
+    /// At T − δ.
+    below: f64,
+}
+
+impl Saturations {
+    /// Row `id`'s at `t_k`, K, and at `t_k` ± δ, at the very temperatures h's and `τ_w`'s
+    /// centred differences read ([`EnergyBalance::energy_slope`], [`WaterVapour::depth_and_slope`]).
+    #[must_use]
+    fn of(id: SubstanceId, t_k: f64) -> Self {
+        Self {
+            at: saturation_pa(id, t_k),
+            above: saturation_pa(id, t_k + ENERGY_SLOPE_STEP_K),
+            below: saturation_pa(id, t_k - ENERGY_SLOPE_STEP_K),
+        }
+    }
+}
+
+/// Whether h's condensable `moisture` and the water term `water` read the same saturation curve,
+/// the same row (water, on every world whose climate condensable is water), so that a direct read
+/// of both at one temperature takes one set of [`Saturations`] (R09.T16.a, B3). A world whose
+/// condensable is another row (methane) reads each its own.
+#[must_use]
+fn shares(moisture: &Moisture, water: &WaterVapour) -> bool {
+    sharing() && moisture.condensable == water.water
+}
+
+/// Whether the direct reads share what they read at one temperature (R09.T16.a, B3 and B9):
+/// always, but in a test that switches it off for the per-read path, the oracle (the tests'
+/// `with_saturation_reads`).
+#[must_use]
+fn sharing() -> bool {
+    #[cfg(test)]
+    if SATURATION_READS.with(core::cell::Cell::get) == SaturationReads::PerRead {
+        return false;
+    }
+    true
+}
+
+/// How the model's direct reads take their saturation pressures, a test-only switch of R09.T16.a's
+/// levers B3 and B9 ([`with_saturation_reads`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SaturationReads {
+    /// Shared where they read the same values, as the generator reads them.
+    Shared,
+    /// Each read its own, as before R09.T16.a: the oracle.
+    PerRead,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The switch on this thread, a test's own: tests run on threads of one process.
+    static SATURATION_READS: core::cell::Cell<SaturationReads> = const {
+        core::cell::Cell::new(SaturationReads::Shared)
+    };
+    /// The saturation pressures [`saturation_pa`] has read on this thread.
+    static SATURATION_CALLS: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// `run`'s result with the model's direct reads taking their saturation pressures as `reads`
+/// says, and the saturation pressures it read. The switch is set back after.
+#[cfg(test)]
+#[must_use]
+fn with_saturation_reads<R>(reads: SaturationReads, run: impl FnOnce() -> R) -> (R, u64) {
+    let before = SATURATION_READS.with(|cell| cell.replace(reads));
+    SATURATION_CALLS.with(|cell| cell.set(0));
+    let result = run();
+    SATURATION_READS.with(|cell| cell.set(before));
+    (result, SATURATION_CALLS.with(core::cell::Cell::take))
 }
 
 /// The column weight of the gas `gas`, of mole fraction `mole_fraction` in the air `air` under the
@@ -1241,9 +1357,13 @@ impl WaterVapour {
     /// `τ_w` at `t_k`, K: zero where the registry has no saturation pressure there.
     #[must_use]
     pub(super) fn depth(&self, t_k: f64) -> f64 {
-        let saturation =
-            saturation_pressure(self.water, Kelvin::new(t_k)).map_or(0.0, Pascals::value);
-        let saturated = self.humidity * saturation;
+        self.depth_from(saturation_pa(self.water, t_k))
+    }
+
+    /// [`depth`](Self::depth) where water's saturation pressure is `saturation_pa`, Pa.
+    #[must_use]
+    fn depth_from(&self, saturation_pa: f64) -> f64 {
+        let saturated = self.humidity * saturation_pa;
         let pressure = match self.reservoir {
             Reservoir::Surface => saturated,
             // By comparison, so that a NaN stays one.
@@ -1272,6 +1392,49 @@ impl WaterVapour {
             (self.depth(t_k + ENERGY_SLOPE_STEP_K) - self.depth(t_k - ENERGY_SLOPE_STEP_K))
                 / (2.0 * ENERGY_SLOPE_STEP_K),
         ]
+    }
+
+    /// [`depth_and_slope`](Self::depth_and_slope) at a temperature where water's saturation
+    /// pressures there and either side are `saturations`: the same expressions on the same values.
+    #[must_use]
+    fn depth_and_slope_from(&self, saturations: &Saturations) -> [f64; 2] {
+        [
+            self.depth_from(saturations.at),
+            (self.depth_from(saturations.above) - self.depth_from(saturations.below))
+                / (2.0 * ENERGY_SLOPE_STEP_K),
+        ]
+    }
+}
+
+/// The column's `τ_w` and its slope at a point's sea-level temperature, as a step read them: from
+/// the run's table, or directly, which a quantile whose ground stands at that very temperature may
+/// take for its own direct read (R09.T16.a, B9; [`emission_and_sea`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ColumnWater {
+    /// Read directly ([`WaterVapour::depth_and_slope`], or from shared saturation pressures to the
+    /// bit, [`EnergyBalance::direct_reads`]).
+    Direct([f64; 2]),
+    /// Read from the table ([`Tabulated::water_at`]).
+    Table([f64; 2]),
+}
+
+impl ColumnWater {
+    /// `water`'s at `t_k`, K, from `table` where it holds them and directly otherwise, as the
+    /// tests' oracle `water_terms` reads them.
+    #[must_use]
+    fn read(water: &WaterVapour, t_k: f64, table: Option<&Tabulated>) -> Self {
+        match table.and_then(|table| table.water_at(t_k)) {
+            Some(terms) => Self::Table(terms),
+            None => Self::Direct(water.depth_and_slope(t_k)),
+        }
+    }
+
+    /// `τ_w` and its slope.
+    #[must_use]
+    fn terms(self) -> [f64; 2] {
+        match self {
+            Self::Direct(terms) | Self::Table(terms) => terms,
+        }
     }
 }
 
@@ -1453,6 +1616,15 @@ impl Radiation {
                 dry_depth,
                 ..
             } => multiplier * dry_depth,
+        }
+    }
+
+    /// The water term's `τ_w`, or `None` under one τ.
+    #[must_use]
+    fn water(&self) -> Option<WaterVapour> {
+        match *self {
+            Self::Grey { .. } => None,
+            Self::Vapour { water, .. } => Some(water),
         }
     }
 
@@ -1911,6 +2083,9 @@ struct Work {
     /// in the run's table, computed once a step for the albedo and the emission alike (the first
     /// quantile's alone at a level point).
     quantiles: Vec<[Quantile; QUANTILES]>,
+    /// Each point's column water term at the step's start under the water term, read with its h
+    /// ([`EnergyBalance::column_reads`]) for its emission; none under one τ.
+    column_water: Vec<Option<ColumnWater>>,
 }
 
 /// One quantile's ground at a step's start: its temperature, K, its slope in T (1, or 0 where the
@@ -1969,6 +2144,7 @@ impl Work {
                 }; QUANTILES];
                 grid.points()
             ],
+            column_water: vec![None; grid.points()],
         }
     }
 }
@@ -2018,6 +2194,9 @@ struct Tabulated {
     smooth: Vec<bool>,
 }
 
+/// A table's nodes, each a value and its slope per kelvin.
+type Nodes = Vec<[f64; 2]>;
+
 impl Tabulated {
     /// The table of `model`'s functions under `radiation` over the nodes from `low_k` −
     /// [`TABLE_MARGIN_K`] (but not below 1 K) to `high_k` + [`TABLE_MARGIN_K`].
@@ -2036,19 +2215,14 @@ impl Tabulated {
         let temperatures: Vec<f64> = (0..count)
             .map(|i| (first_node + super::grid::index(i)) * TABLE_SPACING_K)
             .collect();
-        let latent = model.moisture.as_ref().map(|moisture| {
-            let part = |t: f64| moisture.latent_heat_j_per_kg * moisture.specific_humidity(t);
-            temperatures
-                .iter()
-                .map(|&t| {
-                    [
-                        part(t),
-                        (part(t + ENERGY_SLOPE_STEP_K) - part(t - ENERGY_SLOPE_STEP_K))
-                            / (2.0 * ENERGY_SLOPE_STEP_K),
-                    ]
-                })
-                .collect()
-        });
+        let vapour = match *radiation {
+            Radiation::Vapour {
+                multiplier, water, ..
+            } => Some((multiplier, water)),
+            Radiation::Grey { .. } => None,
+        };
+        let water_term = vapour.map(|(_, water)| water);
+        let (latent, water) = Self::nodes(model, water_term.as_ref(), &temperatures);
         let albedo: Vec<[f64; 2]> = temperatures
             .iter()
             .map(|&t| {
@@ -2056,18 +2230,6 @@ impl Tabulated {
                 [at.albedo, at.slope_per_k]
             })
             .collect();
-        let vapour = match *radiation {
-            Radiation::Vapour {
-                multiplier, water, ..
-            } => Some((multiplier, water)),
-            Radiation::Grey { .. } => None,
-        };
-        let water: Option<Vec<[f64; 2]>> = vapour.map(|(_, water)| {
-            temperatures
-                .iter()
-                .map(|&t| water.depth_and_slope(t))
-                .collect()
-        });
         let wet = vapour.zip(water.as_ref()).map(|((multiplier, _), water)| {
             (
                 multiplier,
@@ -2086,30 +2248,84 @@ impl Tabulated {
             .map(|i| {
                 [0.25, 0.5, 0.75].into_iter().all(|f| {
                     let t = temperatures[i] + f * TABLE_SPACING_K;
-                    let (read, direct) = (table.read(model, i, f), model.functions(t, None));
+                    // The direct functions, h and τ_w sharing their saturation pressures (B3).
+                    let ([energy, slope], direct_water) =
+                        model.direct_reads(t, water_term.as_ref());
+                    let albedo = model.albedo_and_slope(t);
+                    let direct = [energy, slope, albedo.albedo, albedo.slope_per_k];
+                    let read = table.read(model, i, f);
                     let scale = [direct[0].abs(), direct[1].abs(), 1.0, 1.0];
                     let functions = (0..4)
                         .all(|k| (read[k] - direct[k]).abs() <= TABLE_TOLERANCES[k] * scale[k]);
-                    let vapour = vapour.is_none_or(|(multiplier, water)| {
-                        let direct_water = water.depth_and_slope(t);
-                        let direct_wet = wet_of(multiplier, direct_water);
-                        let read = table.read_water(i, f);
-                        let direct = [
-                            direct_water[0],
-                            direct_water[1],
-                            direct_wet[0],
-                            direct_wet[1],
-                        ];
-                        read.is_some_and(|read| {
-                            (0..4).all(|k| (read[k] - direct[k]).abs() <= WATER_TABLE_TOLERANCES[k])
-                        })
-                    });
+                    // Under the water term, `direct_reads` read its τ_w.
+                    let vapour = match vapour.zip(direct_water) {
+                        Some(((multiplier, _), direct_water)) => {
+                            let direct_wet = wet_of(multiplier, direct_water);
+                            let read = table.read_water(i, f);
+                            let direct = [
+                                direct_water[0],
+                                direct_water[1],
+                                direct_wet[0],
+                                direct_wet[1],
+                            ];
+                            read.is_some_and(|read| {
+                                (0..4).all(|k| {
+                                    (read[k] - direct[k]).abs() <= WATER_TABLE_TOLERANCES[k]
+                                })
+                            })
+                        }
+                        None => true,
+                    };
                     functions && vapour
                 })
             })
             .collect();
         table.smooth = smooth;
         table
+    }
+
+    /// The nodes at `temperatures`, K, of h's latent part L q and its slope under `model`'s
+    /// moisture, and of `τ_w` and its slope under the water term `water`, each where the model
+    /// holds it. Where h's condensable is the water term's row, both read one set of saturation
+    /// pressures a node, to the bit (R09.T16.a, B3: with the smoothness test's direct functions, 24
+    /// saturation calls a node become 12).
+    #[must_use]
+    fn nodes(
+        model: &EnergyBalance,
+        water: Option<&WaterVapour>,
+        temperatures: &[f64],
+    ) -> (Option<Nodes>, Option<Nodes>) {
+        let shared: Option<Vec<Saturations>> = water
+            .filter(|water| {
+                model
+                    .moisture
+                    .as_ref()
+                    .is_some_and(|moisture| shares(moisture, water))
+            })
+            .map(|water| {
+                temperatures
+                    .iter()
+                    .map(|&t| Saturations::of(water.water, t))
+                    .collect()
+            });
+        let latent = model.moisture.as_ref().map(|moisture| match &shared {
+            Some(shared) => shared.iter().map(|at| moisture.latent_from(at)).collect(),
+            None => temperatures
+                .iter()
+                .map(|&t| moisture.latent_from(&Saturations::of(moisture.condensable, t)))
+                .collect(),
+        });
+        let water = water.map(|water| match &shared {
+            Some(shared) => shared
+                .iter()
+                .map(|at| water.depth_and_slope_from(at))
+                .collect(),
+            None => temperatures
+                .iter()
+                .map(|&t| water.depth_and_slope(t))
+                .collect(),
+        });
+        (latent, water)
     }
 
     /// `τ_w`, its slope, the water transmission and its slope read from the table in interval `i` at
@@ -2120,6 +2336,21 @@ impl Tabulated {
         let (depth, slope) = hermite(water, i, f);
         let (transmission, transmission_slope) = hermite(wet, i, f);
         Some([depth, slope, transmission, transmission_slope])
+    }
+
+    /// h of `model` and its slope read from the table in interval `i` at fraction `f`
+    /// ([`EnergyBalance::energies`]).
+    #[must_use]
+    fn energies(&self, model: &EnergyBalance, i: usize, f: f64) -> [f64; 2] {
+        let t = (self.first_node + super::grid::index(i) + f) * TABLE_SPACING_K;
+        let sensible = model.specific_heat_j_per_kg_k * t;
+        match &self.latent {
+            Some(latent) => {
+                let (value, slope) = hermite(latent, i, f);
+                [sensible + value, model.specific_heat_j_per_kg_k + slope]
+            }
+            None => [sensible, model.specific_heat_j_per_kg_k],
+        }
     }
 
     /// `τ_w` and its slope at `t_k`, K, from the table where it holds `t_k` and a water term.
@@ -2212,7 +2443,9 @@ fn wet_of(multiplier: f64, water: [f64; 2]) -> [f64; 2] {
 }
 
 /// `τ_w` of `water` and its slope at `t_k`, K, from `table` where it holds `t_k`, and directly
-/// otherwise.
+/// otherwise: the tests' oracle for the step's own reads ([`ColumnWater::read`],
+/// [`EnergyBalance::column_reads`]).
+#[cfg(test)]
 #[must_use]
 fn water_terms(water: &WaterVapour, t_k: f64, table: Option<&Tabulated>) -> [f64; 2] {
     table
@@ -2331,7 +2564,10 @@ impl EnergyBalance {
 
     /// h at `t_k`, K, its slope, the albedo and its slope, from `table` where it holds `t_k` and
     /// directly otherwise ([`energy`](Self::energy), [`energy_slope`](Self::energy_slope),
-    /// [`albedo_and_slope`](Self::albedo_and_slope)).
+    /// [`albedo_and_slope`](Self::albedo_and_slope)): what a step read at a point at the sea level
+    /// before R09.T16.a, the tests' oracle for its reads now ([`column_reads`](Self::column_reads)
+    /// and [`ground_albedo`](Self::ground_albedo)).
+    #[cfg(test)]
     #[must_use]
     fn functions(&self, t_k: f64, table: Option<&Tabulated>) -> [f64; 4] {
         if let Some((table, (i, f))) = table.and_then(|table| Some((table, table.locate(t_k)?))) {
@@ -2347,27 +2583,86 @@ impl EnergyBalance {
     }
 
     /// h at `t_k`, K, and its slope, from `table` where it holds `t_k` and directly otherwise:
-    /// [`functions`](Self::functions)' first two, to the bit.
+    /// the tests' oracle `functions`' first two, to the bit.
     #[must_use]
     fn energies(&self, t_k: f64, table: Option<&Tabulated>) -> [f64; 2] {
         if let Some((table, (i, f))) = table.and_then(|table| Some((table, table.locate(t_k)?))) {
-            let t = (table.first_node + super::grid::index(i) + f) * TABLE_SPACING_K;
-            let sensible = self.specific_heat_j_per_kg_k * t;
-            return match &table.latent {
-                Some(latent) => {
-                    let (value, slope) = hermite(latent, i, f);
-                    [sensible + value, self.specific_heat_j_per_kg_k + slope]
-                }
-                None => [sensible, self.specific_heat_j_per_kg_k],
-            };
+            return table.energies(self, i, f);
         }
         [self.energy(t_k), self.energy_slope(t_k)]
     }
 
+    /// h and its slope at `t_k`, K, and the water term `water`'s `τ_w` and its slope there, read
+    /// directly: [`energy`](Self::energy) and [`energy_slope`](Self::energy_slope), and
+    /// [`WaterVapour::depth_and_slope`], the same expressions on the same values, to the bit. Each
+    /// reads its row's saturation pressures at T and T ± δ, so where h's condensable is the water
+    /// term's row ([`shares`]) the two read one set of three ([`Saturations`]; R09.T16.a, B3),
+    /// and otherwise each its own.
+    #[must_use]
+    fn direct_reads(&self, t_k: f64, water: Option<&WaterVapour>) -> ([f64; 2], Option<[f64; 2]>) {
+        let wet = water.map(|water| (water, Saturations::of(water.water, t_k)));
+        let energies = match &self.moisture {
+            Some(moisture) => {
+                let saturations = match wet {
+                    Some((water, saturations)) if shares(moisture, water) => saturations,
+                    Some(_) | None => Saturations::of(moisture.condensable, t_k),
+                };
+                let energy = |t: f64, saturation_pa: f64| {
+                    self.specific_heat_j_per_kg_k * t
+                        + moisture.latent_heat_j_per_kg
+                            * moisture.humidity_from(saturation_pa, RELATIVE_HUMIDITY)
+                };
+                [
+                    energy(t_k, saturations.at),
+                    (energy(t_k + ENERGY_SLOPE_STEP_K, saturations.above)
+                        - energy(t_k - ENERGY_SLOPE_STEP_K, saturations.below))
+                        / (2.0 * ENERGY_SLOPE_STEP_K),
+                ]
+            }
+            None => [
+                self.specific_heat_j_per_kg_k * t_k,
+                self.specific_heat_j_per_kg_k,
+            ],
+        };
+        (
+            energies,
+            wet.map(|(water, saturations)| water.depth_and_slope_from(&saturations)),
+        )
+    }
+
+    /// h and its slope at a point's sea-level temperature `t_k`, K, and under `radiation`'s water
+    /// term the column's `τ_w` and its slope there, which its emission reads, each from `table`
+    /// where it holds `t_k` and directly otherwise, `t_k` located once: [`energies`](Self::energies)'
+    /// and the tests' oracle `water_terms`' values, to the bit. Where neither is in the table, as
+    /// at every point of τ's fit, they are read together ([`direct_reads`](Self::direct_reads)),
+    /// sharing their saturation pressures (R09.T16.a, B3).
+    #[must_use]
+    fn column_reads(
+        &self,
+        radiation: &Radiation,
+        t_k: f64,
+        table: Option<&Tabulated>,
+    ) -> ([f64; 2], Option<ColumnWater>) {
+        let water = radiation.water();
+        if let Some((table, (i, f))) = table.and_then(|table| Some((table, table.locate(t_k)?))) {
+            // τ_w from the table where it holds the water term ([`Tabulated::water_at`]).
+            let water = water.map(|water| match &table.water {
+                Some(nodes) => {
+                    let (depth, slope) = hermite(nodes, i, f);
+                    ColumnWater::Table([depth, slope])
+                }
+                None => ColumnWater::Direct(water.depth_and_slope(t_k)),
+            });
+            return (table.energies(self, i, f), water);
+        }
+        let (energies, water) = self.direct_reads(t_k, water.as_ref());
+        (energies, water.map(ColumnWater::Direct))
+    }
+
     /// The albedo at the ground's temperature `ground_k`, K, and its slope, from `table` where it
     /// holds `ground_k` and directly otherwise (the nodes lie on one lattice, so the value does
-    /// not depend on the table's span).
-    #[cfg(test)]
+    /// not depend on the table's span); at a point at the sea level, whose ground is at T, what a
+    /// step read there with h before R09.T16.a (the tests' oracle `functions`).
     #[must_use]
     fn ground_albedo(&self, ground_k: f64, table: Option<&Tabulated>) -> AlbedoAt {
         match table.and_then(|table| Some((table, table.locate(ground_k)?))) {
@@ -2542,20 +2837,22 @@ impl EnergyBalance {
         let columns = grid.columns();
         let raised = |p: usize| ground.raised(p);
         for (p, &v) in t_k.iter().enumerate() {
-            let [energy, slope, albedo, albedo_slope] = match raised(p) {
+            // h and the column's water term at T, read together so that directly they share
+            // their saturation pressures (R09.T16.a, B3); the emission reads the water term below.
+            let ([energy, slope], column_water) = self.column_reads(radiation, v, table);
+            let albedo = match raised(p) {
                 // At the sea level, T13.a's arithmetic to the bit.
-                None => self.functions(v, table),
+                None => self.ground_albedo(v, table),
                 Some((relief, (heights, _))) => {
-                    let [energy, slope] = self.energies(v, table);
                     work.quantiles[p] = relief.quantiles_at(v, heights, table);
-                    let ground = self.located_albedo(heights.shape, &work.quantiles[p], table);
-                    [energy, slope, ground.albedo, ground.slope_per_k]
+                    self.located_albedo(heights.shape, &work.quantiles[p], table)
                 }
             };
             work.energy[p] = energy;
             work.slope[p] = slope;
-            work.albedo[p] = albedo;
-            work.albedo_slope[p] = albedo_slope;
+            work.albedo[p] = albedo.albedo;
+            work.albedo_slope[p] = albedo.slope_per_k;
+            work.column_water[p] = column_water;
         }
         for k in 0..LATITUDE_BANDS {
             let (below, above, w) = (
@@ -2576,7 +2873,14 @@ impl EnergyBalance {
                         fixed_slope_w_m2_k: fixed_slope,
                     },
                     sea_k,
-                ) = emission_and_sea(radiation, t_k[p], raised(p), &work.quantiles[p], table);
+                ) = emission_and_sea(
+                    radiation,
+                    t_k[p],
+                    raised(p),
+                    &work.quantiles[p],
+                    table,
+                    work.column_water[p],
+                );
                 // The pseudo-capacity reads the slope at a fixed τ, so that the relaxation stays
                 // conditioned as R09.T13.a built it where the water term weakens the restoring
                 // (decision-r09-t13i §2.2); under one τ the two are the same.
@@ -4885,7 +5189,8 @@ fn emission(t_k: f64, emission_factor: f64) -> Emission {
 
 /// The outgoing radiation at the sea level at `t_k`, K, under `radiation`, its water term read
 /// from `table` where it holds it: [`emission`] under one τ, [`Column::vapour`]'s under the water
-/// term.
+/// term. The step's own reads it with its h ([`emission_and_sea`]); the tests read it here.
+#[cfg(test)]
 #[must_use]
 fn sea_level_emission(radiation: &Radiation, t_k: f64, table: Option<&Tabulated>) -> Emission {
     match *radiation {
@@ -5070,7 +5375,7 @@ fn point_emission(
 /// The mean over a point's quantiles of `at`'s emission, quantile by quantile in order, or the
 /// first quantile's alone where the point is level (`shape`).
 #[must_use]
-fn quantile_mean(shape: Shape, at: impl Fn(usize) -> Emission) -> Emission {
+fn quantile_mean(shape: Shape, mut at: impl FnMut(usize) -> Emission) -> Emission {
     match shape {
         Shape::SeaLevel | Shape::Level => at(0),
         Shape::Varied => {
@@ -5314,7 +5619,9 @@ pub(super) fn solve_locked(
 /// A point's outgoing radiation at `t_k`, K, under `radiation`, at the sea level where `raised` is
 /// `None` (T13.a's arithmetic to the bit) and otherwise over its relief, heights and
 /// transmissions, its quantiles' grounds and table places `quantiles` the step's own; and the
-/// temperature its sea's capacity reads, its water surface's, K.
+/// temperature its sea's capacity reads, its water surface's, K. Under the water term the column's
+/// `τ_w` at `t_k` is `column`, where the step read it with h ([`EnergyBalance::column_reads`]),
+/// and is read here otherwise ([`ColumnWater::read`]): the same values.
 #[must_use]
 fn emission_and_sea(
     radiation: &Radiation,
@@ -5322,9 +5629,10 @@ fn emission_and_sea(
     raised: Option<(&Relief, (&PointHeights, &[f64; QUANTILES]))>,
     quantiles: &[Quantile; QUANTILES],
     table: Option<&Tabulated>,
+    column: Option<ColumnWater>,
 ) -> (Emission, f64) {
     match (*radiation, raised) {
-        (_, None) => (sea_level_emission(radiation, t_k, table), t_k),
+        (Radiation::Grey { emission_factor }, None) => (emission(t_k, emission_factor), t_k),
         (Radiation::Grey { emission_factor }, Some((relief, (heights, transmission)))) => {
             let column = Column::at(t_k, emission_factor);
             let at = |q: usize| {
@@ -5342,10 +5650,13 @@ fn emission_and_sea(
                 dry_depth,
                 water,
             },
-            Some((relief, (heights, transmission))),
+            raised,
         ) => {
-            let column =
-                Column::vapour(t_k, multiplier, dry_depth, water_terms(&water, t_k, table));
+            let column_water = column.unwrap_or_else(|| ColumnWater::read(&water, t_k, table));
+            let column = Column::vapour(t_k, multiplier, dry_depth, column_water.terms());
+            let Some((relief, (heights, transmission))) = raised else {
+                return (column.emission, t_k);
+            };
             // The table's water transmission holds only at its own multiplier, to the bit.
             let wet_table = table.and_then(|table| {
                 table
@@ -5354,6 +5665,15 @@ fn emission_and_sea(
                     .filter(|(held, _)| held.total_cmp(&multiplier).is_eq())
                     .map(|(_, wet)| wet)
             });
+            let mut direct = DirectWets {
+                water: &water,
+                multiplier,
+                column: match column_water {
+                    ColumnWater::Direct(terms) => Some((t_k, terms)),
+                    ColumnWater::Table(_) => None,
+                },
+                last: None,
+            };
             let at = |q: usize| {
                 let quantile = quantiles[q];
                 let wet = match wet_table.zip(quantile.located) {
@@ -5361,7 +5681,7 @@ fn emission_and_sea(
                         let (transmission, slope) = hermite(wet, i, f);
                         [transmission, slope]
                     }
-                    None => wet_of(multiplier, water.depth_and_slope(quantile.ground_k)),
+                    None => direct.at(quantile.ground_k),
                 };
                 vapour_quantile_emission(
                     &column,
@@ -5376,6 +5696,47 @@ fn emission_and_sea(
                 relief.water_k(t_k, heights),
             )
         }
+    }
+}
+
+/// A raised point's direct water transmissions at its quantiles' grounds under the water term
+/// `water` at the multiplier `multiplier`, `wet_of(multiplier, water.depth_and_slope(ground))`
+/// ([`emission_and_sea`]'s quantiles that the table does not hold), each a function of its
+/// ground's bits alone.
+///
+/// Why (R09.T16.a, B9): the quantiles ascend, so equal grounds stand side by side (a run of equal
+/// heights, or of grounds held at the floor), and a quantile at height zero, as every one over
+/// R09.T12.e's ocean is, stands at T − Γ·0, the column's own temperature to the bit. Such a
+/// quantile reads its neighbour's transmission, or its `τ_w` from the column's where the column
+/// read it directly, never a table's read in place of a direct one: three saturation calls saved
+/// each, of the 30 a varied point of τ's fit made (R09.T16.a's attribution: 140 M in the reference
+/// Earth's fit at level 8). Bits are compared by `total_cmp`, so −0 and +0 are two.
+#[derive(Debug)]
+struct DirectWets<'a> {
+    water: &'a WaterVapour,
+    multiplier: f64,
+    /// The column's temperature, K, and its `τ_w` and slope there, where it read them directly.
+    column: Option<(f64, [f64; 2])>,
+    /// The last ground read here, K, and its transmission.
+    last: Option<(f64, [f64; 2])>,
+}
+
+impl DirectWets<'_> {
+    /// The transmission and its slope at the ground `ground_k`, K.
+    fn at(&mut self, ground_k: f64) -> [f64; 2] {
+        let same = |k: f64| sharing() && k.total_cmp(&ground_k).is_eq();
+        if let Some((k, wet)) = self.last
+            && same(k)
+        {
+            return wet;
+        }
+        let terms = match self.column {
+            Some((k, terms)) if same(k) => terms,
+            Some(_) | None => self.water.depth_and_slope(ground_k),
+        };
+        let wet = wet_of(self.multiplier, terms);
+        self.last = Some((ground_k, wet));
+        wet
     }
 }
 
@@ -5420,10 +5781,13 @@ fn positive(x: f64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::float::{assert_same_bits, bits};
+    use hyperion_testkit::lcg::Lcg;
 
     use super::*;
+    use crate::planetary::surface::grid::CellGraph;
     use crate::planetary::surface::reference;
+    use crate::planetary::surface::steps::{Pass, Working};
 
     fn earth() -> (EnergyBalance, Sunlight, ModelGrid) {
         let inputs = reference::earth_like();
@@ -5756,7 +6120,7 @@ mod tests {
                         assert_same_bits(shared.slope_per_k, direct.slope_per_k);
                         let raised = Some((&relief, (heights, &transmissions[point])));
                         let (emission, sea) =
-                            emission_and_sea(&radiation, t, raised, &quantiles, table);
+                            emission_and_sea(&radiation, t, raised, &quantiles, table, None);
                         let reference = match radiation {
                             Radiation::Grey { emission_factor } => point_emission(
                                 t,
@@ -7072,5 +7436,709 @@ mod tests {
                 assert!(water.depth(ground) < water.depth(t));
             }
         }
+    }
+
+    /// `Moisture::humidity_at` as it was before R09.T16.a's split ([`Moisture::humidity_from`]).
+    fn head_humidity_at(moisture: &Moisture, t_k: f64, relative_humidity: f64) -> f64 {
+        let saturation = saturation_pressure(moisture.condensable, Kelvin::new(t_k))
+            .map_or(0.0, crate::units::Pascals::value);
+        let wanted = relative_humidity * saturation;
+        let p = moisture.surface_pressure_pa;
+        let e = if wanted < p { wanted } else { p };
+        let epsilon = moisture.mass_ratio;
+        epsilon * e / (p - (1.0 - epsilon) * e)
+    }
+
+    /// `WaterVapour::depth` as it was before R09.T16.a's split ([`WaterVapour::depth_from`]).
+    fn head_depth(water: &WaterVapour, t_k: f64) -> f64 {
+        let saturation =
+            saturation_pressure(water.water, Kelvin::new(t_k)).map_or(0.0, Pascals::value);
+        let saturated = water.humidity * saturation;
+        let pressure = match water.reservoir {
+            Reservoir::Surface => saturated,
+            Reservoir::Air { inventory_pa } => {
+                if saturated > inventory_pa {
+                    inventory_pa
+                } else {
+                    saturated
+                }
+            }
+        };
+        if pressure > 0.0 {
+            water.constant * (pressure / BAR_PA).sqrt()
+        } else {
+            0.0
+        }
+    }
+
+    /// `Tabulated::new` as it was before R09.T16.a, each function read on its own: the oracle of
+    /// the table's shared reads.
+    fn head_table(
+        model: &EnergyBalance,
+        radiation: &Radiation,
+        low_k: f64,
+        high_k: f64,
+    ) -> Tabulated {
+        let lowest = ((low_k - TABLE_MARGIN_K) / TABLE_SPACING_K).floor();
+        let floor = (1.0 / TABLE_SPACING_K).round();
+        let first_node = if lowest > floor { lowest } else { floor };
+        let last_node = ((high_k + TABLE_MARGIN_K) / TABLE_SPACING_K).ceil();
+        let last_node = if last_node > first_node + 1.0 {
+            last_node
+        } else {
+            first_node + 1.0
+        };
+        let count = finite_count(last_node - first_node) + 1;
+        let temperatures: Vec<f64> = (0..count)
+            .map(|i| (first_node + super::super::grid::index(i)) * TABLE_SPACING_K)
+            .collect();
+        let latent = model.moisture.as_ref().map(|moisture| {
+            let part = |t: f64| moisture.latent_heat_j_per_kg * moisture.specific_humidity(t);
+            temperatures
+                .iter()
+                .map(|&t| {
+                    [
+                        part(t),
+                        (part(t + ENERGY_SLOPE_STEP_K) - part(t - ENERGY_SLOPE_STEP_K))
+                            / (2.0 * ENERGY_SLOPE_STEP_K),
+                    ]
+                })
+                .collect()
+        });
+        let albedo: Vec<[f64; 2]> = temperatures
+            .iter()
+            .map(|&t| {
+                let at = model.albedo_and_slope(t);
+                [at.albedo, at.slope_per_k]
+            })
+            .collect();
+        let vapour = match *radiation {
+            Radiation::Vapour {
+                multiplier, water, ..
+            } => Some((multiplier, water)),
+            Radiation::Grey { .. } => None,
+        };
+        let water: Option<Vec<[f64; 2]>> = vapour.map(|(_, water)| {
+            temperatures
+                .iter()
+                .map(|&t| water.depth_and_slope(t))
+                .collect()
+        });
+        let wet = vapour.zip(water.as_ref()).map(|((multiplier, _), water)| {
+            (
+                multiplier,
+                water.iter().map(|&w| wet_of(multiplier, w)).collect(),
+            )
+        });
+        let mut table = Tabulated {
+            first_node,
+            latent,
+            albedo,
+            water,
+            wet,
+            smooth: vec![true; count - 1],
+        };
+        let smooth = (0..count - 1)
+            .map(|i| {
+                [0.25, 0.5, 0.75].into_iter().all(|f| {
+                    let t = temperatures[i] + f * TABLE_SPACING_K;
+                    let (read, direct) = (table.read(model, i, f), model.functions(t, None));
+                    let scale = [direct[0].abs(), direct[1].abs(), 1.0, 1.0];
+                    let functions = (0..4)
+                        .all(|k| (read[k] - direct[k]).abs() <= TABLE_TOLERANCES[k] * scale[k]);
+                    let vapour = vapour.is_none_or(|(multiplier, water)| {
+                        let direct_water = water.depth_and_slope(t);
+                        let direct_wet = wet_of(multiplier, direct_water);
+                        let read = table.read_water(i, f);
+                        let direct = [
+                            direct_water[0],
+                            direct_water[1],
+                            direct_wet[0],
+                            direct_wet[1],
+                        ];
+                        read.is_some_and(|read| {
+                            (0..4).all(|k| (read[k] - direct[k]).abs() <= WATER_TABLE_TOLERANCES[k])
+                        })
+                    });
+                    functions && vapour
+                })
+            })
+            .collect();
+        table.smooth = smooth;
+        table
+    }
+
+    /// Asserts two tables are the same, every value to the bit.
+    fn assert_same_table(table: &Tabulated, oracle: &Tabulated, what: &str) {
+        let nodes = |a: &[[f64; 2]], b: &[[f64; 2]], which: &str| {
+            assert_eq!(a.len(), b.len(), "{what}: {which}'s nodes");
+            for (i, (x, y)) in a.iter().zip(b).enumerate() {
+                for (k, (&a, &b)) in x.iter().zip(y).enumerate() {
+                    assert_eq!(bits(a), bits(b), "{what}: {which} node {i}, {k}");
+                }
+            }
+        };
+        assert_eq!(bits(table.first_node), bits(oracle.first_node), "{what}");
+        assert_eq!(table.latent.is_some(), oracle.latent.is_some(), "{what}");
+        if let (Some(a), Some(b)) = (&table.latent, &oracle.latent) {
+            nodes(a, b, "the latent part");
+        }
+        nodes(&table.albedo, &oracle.albedo, "the albedo");
+        assert_eq!(table.water.is_some(), oracle.water.is_some(), "{what}");
+        if let (Some(a), Some(b)) = (&table.water, &oracle.water) {
+            nodes(a, b, "τ_w");
+        }
+        assert_eq!(table.wet.is_some(), oracle.wet.is_some(), "{what}");
+        if let (Some((m, a)), Some((n, b))) = (&table.wet, &oracle.wet) {
+            assert_eq!(bits(*m), bits(*n), "{what}: the multiplier");
+            nodes(a, b, "the water transmission");
+        }
+        assert_eq!(table.smooth, oracle.smooth, "{what}: the smooth intervals");
+    }
+
+    /// The reference Earth's model with its h on methane's saturation curve in place of water's,
+    /// its water term water's: a world whose climate condensable is not the water term's row, on
+    /// which R09.T16.a's shared reads must fall back. Methane's latent heat is Watson's at its
+    /// normal boiling point, 111.67 K (Setzmann and Wagner 1991), over its molar mass.
+    fn methane_model(inputs: &CoarseInputs) -> EnergyBalance {
+        let earth = EnergyBalance::for_inputs(inputs);
+        let methane = by_key("CH4").expect("the registry holds methane");
+        let row = methane.substance();
+        let latent = latent_heat_j_per_mol(
+            row.phase_diagram().expect("methane has a phase diagram"),
+            Kelvin::new(111.67),
+        )
+        .expect("methane boils below its critical point");
+        let molar_mass = row
+            .molar_mass_g_per_mol()
+            .expect("methane has a molar mass");
+        let water = earth.moisture.expect("the reference Earth is moist");
+        let mut model = earth;
+        model.moisture = Some(Moisture {
+            condensable: methane,
+            latent_heat_j_per_kg: latent / (molar_mass * 1e-3),
+            mass_ratio: molar_mass / Air::of(inputs).molar_mass_g_per_mol,
+            ..water
+        });
+        model
+    }
+
+    /// A relief of every shape and every run of grounds a step's reads can share (R09.T16.a, B9):
+    /// at the sea level; level at the sea level under a lake's surface 120 m up, and level 1.5 km
+    /// up; varied over an ocean (zero heights) and land; below the sea level, at it (of either
+    /// sign) and above, with runs of equal heights; runs of equal heights off the sea level; and
+    /// high grounds held at the night floor, one run of them alone.
+    fn shared_reads_relief(inputs: &CoarseInputs) -> Relief {
+        Relief::of(
+            inputs,
+            Hypsometry::new(vec![
+                PointHeights::new([0.0; QUANTILES], 0.0),
+                PointHeights::new([0.0; QUANTILES], 120.0),
+                PointHeights::level(1_500.0, 0.0),
+                PointHeights::new([0.0, 0.0, 0.0, 0.0, 0.0, 120.0, 900.0, 3_000.0], 0.0),
+                PointHeights::new([-400.0, -400.0, -0.0, 0.0, 0.0, 250.0, 250.0, 1_800.0], 0.0),
+                PointHeights::new(
+                    [300.0, 300.0, 300.0, 700.0, 700.0, 2_000.0, 2_000.0, 2_000.0],
+                    0.0,
+                ),
+                PointHeights::new(
+                    [0.0, 0.0, 0.0, 0.0, 9_000.0, 12_000.0, 15_000.0, 20_000.0],
+                    0.0,
+                ),
+                PointHeights::new(
+                    [
+                        0.0, 30_000.0, 30_000.0, 40_000.0, 40_000.0, 40_000.0, 50_000.0, 60_000.0,
+                    ],
+                    0.0,
+                ),
+            ]),
+        )
+    }
+
+    /// The small Earth before its climate step under the reference seed (the plates, the relief,
+    /// the craters and the relief's second entry, as the pass runs them): its inputs, its reliefs
+    /// on the geographic grid and on the zonal grid τ's fit reads (`climate::reliefs`), its
+    /// geographic points' sea shares and its sea's transport, as the climate step reads them.
+    struct SmallEarth {
+        inputs: CoarseInputs,
+        geographic: Relief,
+        zonal: Relief,
+        sea_share: Vec<f64>,
+        transport: OceanTransport,
+    }
+
+    impl SmallEarth {
+        fn new() -> Self {
+            use crate::planetary::surface::steps::{craters, plates, relief as relief_step};
+            let inputs = reference::small_earth();
+            let level = hyperion_surface::field::coarse_level(inputs.radius());
+            let (field, climate) = (CellGraph::for_field(level), CellGraph::for_climate(level));
+            let grid = ModelGrid::geographic();
+            let ((geographic, zonal), sea_share, transport) = {
+                let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+                let mut working = Working::initial(&pass);
+                plates::run(&pass, &mut working);
+                relief_step::run(&pass, &mut working);
+                craters::run(&pass, &mut working);
+                relief_step::run_after_craters(&pass, &mut working);
+                (
+                    super::super::reliefs(&pass, &working, &grid, Coordinates::Geographic),
+                    super::super::point_sea_shares(&pass, &working, &grid, Coordinates::Geographic),
+                    super::super::sea_transport(&pass, &working),
+                )
+            };
+            Self {
+                inputs,
+                geographic,
+                zonal,
+                sea_share,
+                transport,
+            }
+        }
+    }
+
+    /// The temperatures the shared reads are checked at, K: 150 to 350 K every 0.37 K, the triple
+    /// point and the albedo's freezing point, and 200 drawn from 150 to 350 K, whose low bits are
+    /// any.
+    fn shared_reads_sweep() -> Vec<f64> {
+        let mut g = Lcg::new(0x5eed_b3b9);
+        (0..=540)
+            .map(|k| 150.0 + 0.37 * f64::from(k))
+            .chain([273.16, WATER_FREEZING_POINT_K])
+            .chain((0..200).map(|_| 150.0 + 200.0 * g.next_f64()))
+            .collect()
+    }
+
+    /// What a step reads at one point at `t`, K, the step's own way ([`EnergyBalance::advance`]):
+    /// h, its slope, the albedo, its slope, the emission's flux, slope and fixed slope, and the
+    /// sea's temperature; with the column's water term as it read it.
+    fn step_reads(
+        model: &EnergyBalance,
+        radiation: &Radiation,
+        t: f64,
+        raised: Option<(&Relief, (&PointHeights, &[f64; QUANTILES]))>,
+        table: Option<&Tabulated>,
+    ) -> ([f64; 8], Option<ColumnWater>, [Quantile; QUANTILES]) {
+        let ([energy, slope], column) = model.column_reads(radiation, t, table);
+        let mut quantiles = [Quantile {
+            ground_k: 0.0,
+            rate: 0.0,
+            located: None,
+        }; QUANTILES];
+        let albedo = match raised {
+            None => model.ground_albedo(t, table),
+            Some((relief, (heights, _))) => {
+                quantiles = relief.quantiles_at(t, heights, table);
+                model.located_albedo(heights.shape, &quantiles, table)
+            }
+        };
+        let (e, sea) = emission_and_sea(radiation, t, raised, &quantiles, table, column);
+        (
+            [
+                energy,
+                slope,
+                albedo.albedo,
+                albedo.slope_per_k,
+                e.flux_w_m2,
+                e.slope_w_m2_k,
+                e.fixed_slope_w_m2_k,
+                sea,
+            ],
+            column,
+            quantiles,
+        )
+    }
+
+    /// [`step_reads`]' values as a step read them before R09.T16.a, each by its own function:
+    /// the oracle.
+    fn per_read_reads(
+        model: &EnergyBalance,
+        radiation: &Radiation,
+        t: f64,
+        raised: Option<(&Relief, (&PointHeights, &[f64; QUANTILES]))>,
+        table: Option<&Tabulated>,
+    ) -> [f64; 8] {
+        let ([energy, slope, albedo, albedo_slope], e, sea) = match raised {
+            None => (
+                model.functions(t, table),
+                sea_level_emission(radiation, t, table),
+                t,
+            ),
+            Some((relief, (heights, transmission))) => {
+                let [energy, slope] = model.energies(t, table);
+                let albedo = model.point_albedo(t, heights, relief, table);
+                let e = match *radiation {
+                    Radiation::Grey { emission_factor } => {
+                        point_emission(t, emission_factor, heights, transmission, relief)
+                    }
+                    Radiation::Vapour {
+                        multiplier,
+                        dry_depth,
+                        water,
+                    } => vapour_point_emission(
+                        t,
+                        multiplier,
+                        dry_depth,
+                        &water,
+                        heights,
+                        transmission,
+                        relief,
+                        table,
+                    ),
+                };
+                (
+                    [energy, slope, albedo.albedo, albedo.slope_per_k],
+                    e,
+                    relief.water_k(t, heights),
+                )
+            }
+        };
+        [
+            energy,
+            slope,
+            albedo,
+            albedo_slope,
+            e.flux_w_m2,
+            e.slope_w_m2_k,
+            e.fixed_slope_w_m2_k,
+            sea,
+        ]
+    }
+
+    /// R09.T16.a's split of the saturation pressure out of q and `τ_w` (B3) leaves both as they
+    /// were to the bit: q at 80% and at saturation, and `τ_w` with liquid water at the surface and
+    /// with none (its vapour capped at the air's water), from below 0 K past water's critical point.
+    #[test]
+    fn the_split_saturation_reads_are_the_functions_as_they_were_to_the_bit() {
+        let inputs = reference::earth_like();
+        let model = EnergyBalance::for_inputs(&inputs);
+        let moisture = model.moisture.expect("the reference Earth is moist");
+        let desert = reference::builder_of(&inputs)
+            .liquids([])
+            .condensates([])
+            .build()
+            .unwrap();
+        let waters =
+            [&inputs, &desert].map(
+                |inputs| match EnergyBalance::for_inputs(inputs).greenhouse {
+                    Greenhouse::Vapour { water, .. } => water,
+                    Greenhouse::Grey => panic!("the reference Earth's air holds water"),
+                },
+            );
+        assert_ne!(waters[0].reservoir, waters[1].reservoir);
+        let temperatures = shared_reads_sweep()
+            .into_iter()
+            .chain([-5.0, 0.0, 1e-3, 30.0, 100.0, 373.124, 400.0, 600.0, 647.0]);
+        for t in temperatures {
+            for rh in [RELATIVE_HUMIDITY, 1.0] {
+                assert_same_bits(
+                    moisture.humidity_at(t, rh),
+                    head_humidity_at(&moisture, t, rh),
+                );
+            }
+            for water in &waters {
+                assert_same_bits(water.depth(t), head_depth(water, t));
+                let [depth, slope] = water.depth_and_slope_from(&Saturations::of(water.water, t));
+                let [head, head_slope] = water.depth_and_slope(t);
+                assert_same_bits(depth, head);
+                assert_same_bits(slope, head_slope);
+            }
+        }
+    }
+
+    /// The cases [`check_step_reads`] met, which the sweep must reach: a quantile at the column's
+    /// T beside the column's direct `τ_w`, and beside another multiplier's table, which it must
+    /// read directly; a run of equal grounds off T; and grounds held at the floor side by side.
+    #[derive(Debug, Default)]
+    struct Cases {
+        seeded: u32,
+        unseeded: u32,
+        runs: u32,
+        floored: u32,
+    }
+
+    /// Checks what a step reads at point `p` of `relief` (its transmissions `transmissions` under
+    /// `radiation`) at `t`, K, from `table`: the step's reads ([`step_reads`]) under the shared
+    /// and the per-read path are the oracle's ([`per_read_reads`]) to the bit; and read directly
+    /// under the water term, the per-read path reads the curve as each function did and the shared
+    /// one as R09.T16.a's levers rule, `b3` whether h's condensable is water. `what` names the case.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a model, a radiation, a table, a point of a relief, a temperature, the lever's \
+                  case and the tally; bundling them would only rename them"
+    )]
+    fn check_step_reads(
+        model: &EnergyBalance,
+        (radiation, table): (&Radiation, Option<&Tabulated>),
+        (relief, transmissions): (&Relief, &[[f64; QUANTILES]]),
+        p: usize,
+        t: f64,
+        b3: bool,
+        cases: &mut Cases,
+        what: &dyn Fn() -> String,
+    ) {
+        let raised = GridGround::Relief(relief).at(transmissions).raised(p);
+        let oracle = per_read_reads(model, radiation, t, raised, table);
+        let ((shared, column, quantiles), shared_calls) =
+            with_saturation_reads(SaturationReads::Shared, || {
+                step_reads(model, radiation, t, raised, table)
+            });
+        let ((per_read, ..), per_read_calls) =
+            with_saturation_reads(SaturationReads::PerRead, || {
+                step_reads(model, radiation, t, raised, table)
+            });
+        for (k, ((&a, &b), &o)) in shared.iter().zip(&per_read).zip(&oracle).enumerate() {
+            assert_eq!(bits(a), bits(o), "{}: {k}", what());
+            assert_eq!(bits(b), bits(o), "{}: {k}, per read", what());
+        }
+        assert!(shared_calls <= per_read_calls, "{}", what());
+        let count = match relief.hypsometry().point(p).shape {
+            Shape::SeaLevel => 0,
+            Shape::Level => 1,
+            Shape::Varied => QUANTILES,
+        };
+        let grounds = || quantiles.iter().take(count).map(|q| q.ground_k);
+        let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        let water = radiation.water().is_some();
+        if water && grounds().any(|g| same(g, t)) {
+            let another = table
+                .and_then(|table| table.wet.as_ref())
+                .zip(radiation.multiplier())
+                .is_some_and(|((held, _), multiplier)| !same(*held, multiplier));
+            match column {
+                Some(ColumnWater::Direct(_)) => cases.seeded += 1,
+                Some(ColumnWater::Table(_)) if another => cases.unseeded += 1,
+                Some(ColumnWater::Table(_)) | None => {}
+            }
+        }
+        cases.floored += u32::from(grounds().filter(|&g| same(g, relief.floor_k)).count() > 1);
+        if !water || table.is_some() {
+            return;
+        }
+        // Read directly: h and the column's τ_w at T and T ± δ, 3 calls each, and 3 at each
+        // quantile's ground; shared, the column's three serve h where it reads water (B3), and a
+        // quantile whose ground has its neighbour's bits or T's reads none (B9).
+        let moist = if model.moisture.is_some() { 3 } else { 0 };
+        let quantiles = 3 * u64::try_from(count).expect("eight quantiles");
+        assert_eq!(
+            per_read_calls,
+            moist + 3 + quantiles,
+            "{}: per read",
+            what()
+        );
+        let (mut previous, mut quantile_calls) = (None::<f64>, 0);
+        for ground in grounds() {
+            let repeat = previous.is_some_and(|g| same(g, ground));
+            cases.runs += u32::from(repeat && !same(ground, t));
+            if !repeat && !same(ground, t) {
+                quantile_calls += 3;
+            }
+            previous = Some(ground);
+        }
+        let column_calls = if b3 { 3 } else { moist + 3 };
+        assert_eq!(
+            shared_calls,
+            column_calls + quantile_calls,
+            "{}: shared",
+            what()
+        );
+    }
+
+    /// R09.T16.a's levers B3 and B9: what a step reads at a point, its h and its slope, its albedo
+    /// and its slope, its emission's flux, slope and fixed slope and its sea's temperature, is to
+    /// the bit what each function read on its own before them (the oracle, [`per_read_reads`]),
+    /// and under the switch's per-read path the same; and read directly, it reads the saturation
+    /// curve as the levers rule, which a counter holds (so that the sharing cannot silently stop):
+    ///
+    /// - before, 6 calls at a point at the sea level, 9 at a level one and 30 at a varied one (h at
+    ///   T and T ± δ, the column's `τ_w` there, and each quantile's `τ_w` at its ground);
+    /// - after, h and the column's `τ_w` share their three where the condensable is water (B3),
+    ///   and a quantile whose ground has its neighbour's bits or the column's T reads none (B9).
+    ///
+    /// The relief is every shape and run of grounds ([`shared_reads_relief`]) and the small Earth's
+    /// own, its zonal grid's every band and its geographic grid's every point, at temperatures
+    /// from 150 to 350 K ([`shared_reads_sweep`]; a band at every third, a geographic point at a
+    /// few), under the water term with no table, with its own run's table and with a table of
+    /// another multiplier, and under one τ with no table and with one; on the reference Earth, on
+    /// it dry, whose h reads no curve, and on it with methane for its condensable, where B3 falls
+    /// back (B9 holding all the same).
+    #[test]
+    fn a_step_s_shared_saturation_reads_are_each_function_s_own_to_the_bit() {
+        let SmallEarth {
+            inputs,
+            geographic,
+            zonal,
+            ..
+        } = SmallEarth::new();
+        let earth = EnergyBalance::for_inputs(&inputs);
+        let mut dry = earth;
+        dry.moisture = None;
+        let methane = methane_model(&inputs);
+        let special = shared_reads_relief(&inputs);
+        let sweep = shared_reads_sweep();
+        let mut cases = Cases::default();
+        for (name, model, b3) in [
+            ("the reference Earth", &earth, true),
+            ("the dry Earth", &dry, false),
+            ("the methane Earth", &methane, false),
+        ] {
+            let vapour = Radiation::at(model.greenhouse, 1.65, 288.0);
+            let other = Radiation::at(model.greenhouse, 1.8, 288.0);
+            let grey = Radiation::Grey {
+                emission_factor: 1.65,
+            };
+            let own = Tabulated::new(model, &vapour, 180.0, 330.0);
+            let another = Tabulated::new(model, &other, 180.0, 330.0);
+            let grey_table = Tabulated::new(model, &grey, 180.0, 330.0);
+            let mut reliefs = vec![("the shared reads' relief", &special, 1)];
+            if b3 {
+                reliefs.push(("the small Earth's zonal relief", &zonal, 3));
+                reliefs.push(("the small Earth's geographic relief", &geographic, 251));
+            }
+            let readings = [
+                (&vapour, None),
+                (&vapour, Some(&own)),
+                (&vapour, Some(&another)),
+                (&grey, None),
+                (&grey, Some(&grey_table)),
+            ];
+            for (relief_name, relief, stride) in reliefs {
+                for (which, (radiation, table)) in readings.into_iter().enumerate() {
+                    let transmissions = GridGround::Relief(relief).transmissions(radiation);
+                    for p in 0..relief.hypsometry().all().len() {
+                        for &t in sweep.iter().skip(p % stride).step_by(stride) {
+                            let what =
+                                || format!("{name}, {relief_name}, point {p}, {t} K, {which}");
+                            check_step_reads(
+                                model,
+                                (radiation, table),
+                                (relief, &transmissions),
+                                p,
+                                t,
+                                b3,
+                                &mut cases,
+                                &what,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("the sweep's cases: {cases:?}");
+        assert!(cases.seeded > 0 && cases.unseeded > 0 && cases.runs > 0 && cases.floored > 0);
+    }
+
+    /// R09.T16.a's lever B3 in a run's table: on the reference Earth, its nodes' latent part and
+    /// `τ_w`, and its smoothness test's direct functions, read one set of saturation pressures,
+    /// half the calls; the table is the one built before (each function read on its own,
+    /// [`head_table`]) to the bit, as under the switch's per-read path, which reads what that
+    /// one did. On the Earth dry and with methane for its condensable, and under one τ, it reads
+    /// what it did.
+    #[test]
+    fn a_run_s_table_shares_its_saturation_reads_to_the_bit() {
+        let inputs = reference::earth_like();
+        let earth = EnergyBalance::for_inputs(&inputs);
+        let mut dry = earth;
+        dry.moisture = None;
+        let methane = methane_model(&inputs);
+        for (name, model, b3) in [
+            ("the reference Earth", &earth, true),
+            ("the dry Earth", &dry, false),
+            ("the methane Earth", &methane, false),
+        ] {
+            for radiation in [
+                Radiation::at(model.greenhouse, 1.65, 288.0),
+                Radiation::Grey {
+                    emission_factor: 1.65,
+                },
+            ] {
+                let what = format!("{name}, {radiation:?}");
+                let (oracle, head_calls) = with_saturation_reads(SaturationReads::PerRead, || {
+                    head_table(model, &radiation, 250.0, 300.0)
+                });
+                let (shared, shared_calls) = with_saturation_reads(SaturationReads::Shared, || {
+                    Tabulated::new(model, &radiation, 250.0, 300.0)
+                });
+                let (per_read, per_read_calls) =
+                    with_saturation_reads(SaturationReads::PerRead, || {
+                        Tabulated::new(model, &radiation, 250.0, 300.0)
+                    });
+                assert_same_table(&shared, &oracle, &what);
+                assert_same_table(&per_read, &oracle, &what);
+                assert_eq!(per_read_calls, head_calls, "{what}");
+                let vapour = radiation.water().is_some();
+                let expected = if b3 && vapour {
+                    head_calls / 2
+                } else {
+                    head_calls
+                };
+                eprintln!("{what}: {head_calls} saturation calls before, {shared_calls} after");
+                assert_eq!(shared_calls, expected, "{what}");
+            }
+        }
+    }
+
+    /// R09.T16.a's levers B3 and B9 through τ's whole fit, the small Earth's on its zonal set-up as
+    /// the climate step makes it (the geographic grid's band means of its sunlight and sea shares,
+    /// the zonal relief and the zonal ocean; `run`): its `Fitted` is the switch's per-read path's
+    /// to the bit, the emission factor, the steady state, its surface mean, the label and the fold
+    /// guard's candidates; and it reads at most half of that path's saturation calls, a floor on
+    /// the saving that B3 alone does not reach (as built, 31,918,131 calls before and 12,019,203
+    /// after, 37.7%).
+    #[test]
+    fn the_small_earth_s_fit_shares_its_saturation_reads_to_the_bit() {
+        let earth = SmallEarth::new();
+        let inputs = &earth.inputs;
+        let model = EnergyBalance::for_inputs(inputs);
+        let geographic = ModelGrid::geographic();
+        let sunlight = Sunlight::of(inputs, &geographic, super::super::sun::NOMINAL_STEP);
+        let zonal = ModelGrid::zonal();
+        let annual = geographic.band_means(sunlight.annual());
+        let zonal_sea = geographic.band_means(&earth.sea_share);
+        let currents = currents_of(inputs, &model, earth.transport, Turning::Rotating);
+        let zonal_ocean =
+            currents.map(|currents| OceanGrid::new(&zonal, zonal_sea.clone(), &currents));
+        let mean = inputs.mean_surface_temperature().value();
+        let fit = |reads| {
+            with_saturation_reads(reads, || {
+                model.fit(
+                    &zonal,
+                    &annual,
+                    mean,
+                    GridGround::Relief(&earth.zonal),
+                    zonal_ocean.as_ref(),
+                )
+            })
+        };
+        let (shared, shared_calls) = fit(SaturationReads::Shared);
+        let (per_read, per_read_calls) = fit(SaturationReads::PerRead);
+        eprintln!(
+            "the small Earth's fit: {:?}, x {}, converged {}; {per_read_calls} saturation calls \
+             before, {shared_calls} after ({}‰ of them)",
+            shared.optical_depth,
+            shared.emission_factor,
+            shared.steady.converged,
+            1000 * shared_calls / per_read_calls
+        );
+        assert_same_bits(shared.emission_factor, per_read.emission_factor);
+        assert_same_bits(shared.surface_mean_k, per_read.surface_mean_k);
+        assert_eq!(shared.optical_depth, per_read.optical_depth);
+        assert_eq!(shared.steady.converged, per_read.steady.converged);
+        assert_eq!(shared.steady.t_k.len(), per_read.steady.t_k.len());
+        for (a, b) in shared.steady.t_k.iter().zip(&per_read.steady.t_k) {
+            assert_same_bits(*a, *b);
+        }
+        for (a, b) in shared.candidates.iter().zip(&per_read.candidates) {
+            assert_eq!(a.is_some(), b.is_some());
+            if let (Some(a), Some(b)) = (a, b) {
+                assert_same_bits(a.emission_factor, b.emission_factor);
+                assert_same_bits(a.surface_mean_k, b.surface_mean_k);
+                assert_same_bits(a.ice_share, b.ice_share);
+            }
+        }
+        assert!(
+            2 * shared_calls <= per_read_calls,
+            "{shared_calls} against {per_read_calls}"
+        );
     }
 }

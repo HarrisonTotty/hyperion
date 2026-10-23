@@ -293,6 +293,53 @@ Changes: only the selection of records. Their coefficients are re-emitted interv
 unmodified, into crates/hyperion-sim/src/tables/thermo.rs, and the reference states' switches to
 their gases are computed from them there.
 
+--------------------------------------------------------------------------------
+libm (pure-Rust maths library, the port of musl's and FreeBSD's)
+https://github.com/rust-lang/compiler-builtins
+
+rust-lang/libm as a whole is available for use under the MIT license:
+
+Copyright (c) 2018 Jorge Aparicio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Its src/math/pow.rs carries the notice of the FreeBSD source it ports
+(origin: FreeBSD /usr/src/lib/msun/src/e_pow.c), which the ported file keeps:
+
+  ====================================================
+  Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+
+  Permission to use, copy, modify, and distribute this
+  software is freely granted, provided that this notice
+  is preserved.
+  ====================================================
+
+Ported from src/math/pow.rs (pow) and src/math/mod.rs (the word helpers get_high_word,
+get_low_word, with_set_high_word and with_set_low_word), libm 0.2.16 as published on crates.io,
+the version the workspace pins, into:
+
+  crates/hyperion-base/src/math/pow_base.rs
+
+Changes: pow is split where its logarithm stage ends, so that the stage, which reads the base alone,
+runs once for a base raised to several powers, and the rest of pow once a power; every input
+outside the shared stage's domain is passed to libm's pow itself. Otherwise line for line: the
+same constants, the same operations in the same order and the same reinterpretations of the bits,
+written with Rust's cast_signed, cast_unsigned and From in place of `as` where those give the same
+value.
+
 ================================================================================
 Data
 
