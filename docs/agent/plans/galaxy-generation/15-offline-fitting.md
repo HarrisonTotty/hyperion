@@ -112,7 +112,11 @@ hyperion_fit::emit::{RustTable, TableItem, Header, HeaderKind, Workspace, Destin
                      write_table, EmitTableError}
 hyperion_fit::parallel::map_reduce_chunks                      // deterministic reduction
 hyperion_fit::optimise::{golden_section, nelder_mead}          // P15.T8.a's
-hyperion_fit::optimise::{nnls, levenberg_marquardt}            // not built: P15.T3.a adds them
+hyperion_fit::optimise::{nnls, levenberg_marquardt, LeastSquaresFit}  // P15.T3.a's, as built:
+    // nnls<R: AsRef<[f64]>>(rows: &[R], rhs: &[f64]) -> Vec<f64>
+    // levenberg_marquardt(model: impl FnMut(&[f64], &mut [f64], Option<&mut [f64]>),
+    //     start: &[f64], lower: &[f64], residuals: usize, iterations: u32) -> LeastSquaresFit
+    // LeastSquaresFit { params: Vec<f64>, sum_of_squares: f64, steps: u32 }
 hyperion_fit::data::{Dataset, Provenance, load_dataset, LoadDatasetError}
 hyperion_fit::check::{check, CheckReport}
 hyperion_fit::pipeline::{prepare, rerender}
@@ -2059,3 +2063,88 @@ fit-check`; review-changes on this lane's diff.
     607346de. The lane then merged `origin/rendering-and-planets` at 93396d5f, two R08.T8.e commits
     in the client's atmosphere code and plan R08. None of these touches what this plan consumes,
     and the versions stay 23 and 3, so the sweep stands.
+- **T3.a–b as built (lane `lane/94-p15-t3`, 2026-10-23, at `GENERATOR_VERSION` 23; no table
+  moved, no bump).** Fit-crate code and tests only, by main's ruling of 2026-10-23 on P15.T3's
+  brief (issue #94). The refit runs from a manifest of its own, `manifests/mge.refit.toml`
+  (`method = "free_widths"`), with `--manifest` and `--out` to a scratch path. `mge.toml`, the
+  task's revision 1 and its three `items()` still make the committed first cut, whose code path
+  is unchanged. `MgeTask::run` sends a manifest that names `method` to `tasks::mge::refit::run`,
+  which refuses any other method, a key it does not read, or a value its tables fix, with a
+  `ManifestParamError`. A manifest without `method` goes through `expect_params` as before.
+  - _Method (T3.a)._
+    - `optimise::nnls`: Lawson and Hanson's (1974, ch. 23) active-set NNLS, its free columns
+      solved by Householder QR; a column under 2⁻⁴⁰ of its norm once the others are taken out
+      counts as dependent. Their subroutine gives up after 3n inner passes; here 3n outer steps
+      of at most n inner passes bound the work, and the last feasible point is returned.
+      `optimise::levenberg_marquardt`: Marquardt's (1963) scaling kept as Moré (1978) keeps it
+      and MINPACK's `lmder` implements it, the damped step by QR of `[J; √λ D]` (λ from 10⁻³, ×10
+      or ÷10, within 10⁻¹² to 10¹²), lower bounds by a projected step that holds a bound
+      parameter whose descent direction points out (Bertsekas's 1982 set I⁺, without his
+      ε-enlargement). It stops when no step lowers the sum even at 10¹², which changes no bit,
+      since every later iteration would repeat the failed trial. Both are public, with unit tests
+      against known solutions. Bounds are met by explicit comparisons, not `f64::max`, so a
+      signed zero cannot reach a table.
+    - `MGE_EXP`: variable projection (Golub and Pereyra 1973). Levenberg–Marquardt moves the 14
+      ln widths from the first cut's log-spaced 0.04–3.5. At every evaluation the weights are
+      re-solved by `nnls` on 400 log-spaced `s` on [10⁻³, 12], each row over `e^(−s)`. The
+      Jacobian is by forward differences of 10⁻⁷ in ln width. At the end the widths are sorted
+      and the weights solved once more. The manifest's 300 iterations are not reached: the
+      body at 1,000 is the same, and at 100 it differed in the seventh digit.
+    - `MGE_HOLED_EXP`: P02.T12.b's construction on the refit's widths, samples and weighting.
+  - _Figures (T3.a), on the refit; all pass._ Against plan 15: `MGE_EXP` within 0.010% of
+    `e^(−s)` on 0.05–10 (0.5%), its spherical mass within 0.0014% (0.05%); the thin disc from it
+    within 0.016% of Freeman's (1970) speed on 0.2–8 scale lengths, worst at 0.25 (0.5%);
+    `MGE_BAR` within 2.96% of its central value, worst at u = 0.89 (3%), its mass within 0.295%
+    (0.3%), and its cumulative mass within 4.93%, worst at the edge u = 1.06 (5%). Against plan
+    02's table tests: `MGE_EXP` within 1% on 0.05–8 and its mass within 0.1%; `MGE_HOLED_EXP`
+    within 0.083% of `e^(−s)` on 0.05–8 (1%), its mass fraction within 2.8 × 10⁻⁶ (10⁻⁵), its
+    widths `MGE_EXP`'s bit for bit, some weight negative; `MGE_BAR` within 0.03, 0.5% and the 7%
+    cumulative check; non-negative weights and strictly ascending widths for both.
+  - _Deviations (T3.a)._
+    1. **The bar's method.** Least squares on the profile and its mass row alone gave 2.83%,
+       0.307% and 6.91%, and with rows added for the mass inside each edge of plan 02's
+       cumulative test (0.06–2.5, in relative error) no fixed weighting met all three: the best
+       was 2.90%, 0.64% and 5.07%. So the bar runs in six rounds. Each polishes the widths in
+       least squares, then solves the weights for the least largest error by Lawson's algorithm
+       (1961; Rice and Usow 1968, Math. Comp. 22, 118), 300 non-negative solves with each row
+       scaled by its figure's tolerance (0.03, 0.003, 0.05). The next round's polish weights its
+       rows by the last minimax solve's weights, and the round with the least largest scaled
+       error is kept. The worst scaled error is 0.987, so the three figures pass with about 1%
+       of their tolerances to spare: R14's bound at work. This is the "Hand-written optimisers"
+       risk's licence; the basis is unchanged.
+    2. **Fixed keys.** The refit reads `widths`, `bar_width`, `bar_level` and `bar_end` from its
+       manifest and refuses any value but 14 and the bar's nominal shape, which `bar_profile`
+       is written for. It does not generalise the profile, so the first cut's code is untouched.
+    3. **Freeman's check** is in `tests/mge.rs`, with the Bessel functions by series below y = 9
+       and asymptotic series from there (twelve digits where the disc reads them, y ≤ 4; the
+       reference values are mpmath's at 30 digits). The disc's height is 10⁻⁵ of its scale
+       length: a tenth of that moves the speed by 1.9 × 10⁻⁵ at most. The plan puts the Bessel
+       functions in the task's tests, so the run's acceptance line leaves Freeman's figure out
+       and `refit::passes` does not read it; the acceptance line says the test holds it.
+    4. **The cumulative mass's edges.** Plan 15's "within 5% everywhere" is measured at plan 02's
+       edges, u = 0.06, 0.08, …, 2.5 half-lengths, the profile's mass by Simpson's rule at 0.01,
+       as the brief directs. Inside 0.06 the error is bounded by the central-value figure, and
+       beyond 2.5 it settles to the mass figure. The fit's own cumulative rows read their step,
+       their number and their first edge from the manifest (`bar_cumulative_step`,
+       `bar_cumulative_pairs`, `bar_cumulative_from`), set to the same edges.
+    5. **Freeman's disc** is built in `tests/mge.rs` by `double_exponential`'s term rule (positive
+       terms, mass ∝ wᵢsᵢ²wⱼsⱼ, width sᵢL, axis ratio sⱼH ÷ sᵢL) on the refit's `MGE_EXP`, not by
+       `double_exponential` itself, which reads the committed table; T3.a touches no file of the
+       sim. Its speed is the sim's `Gaussian::v_circ_sq`.
+  - _The run (T3.a)._ `run mge --manifest crates/hyperion-fit/manifests/mge.refit.toml`, with
+    `--out` to a scratch path, takes 3.7 s in the dev profile (an 8-thread laptop at load 6.3,
+    shared), so the task stays `Fast`.
+  - _Tests (T3.a)._ Unit tests in `optimise.rs`: NNLS (the free solution, a held variable, all
+    held, an overlapping Gaussian basis, Kuhn–Tucker and determinism) and Levenberg–Marquardt
+    (Rosenbrock, a lower bound, a non-finite trial, determinism), with both optimisers' bits
+    pinned by `the_optimisers_keep_their_bits`. In `tasks::mge::refit`: Lawson's minimax
+    constant and its non-negative weights, the NaN rule of the figures' maxima, and
+    `log_points` against the first cut's spacing bit for bit. In `tests/mge.rs`:
+    `the_refit_meets_plan_fifteen_s_figures` (which also holds that the polish of `MGE_EXP`
+    stops before its cap), `the_refit_passes_plan_two_s_table_tests`,
+    `the_refit_disc_s_circular_speed_follows_freeman`, `the_refit_is_deterministic`,
+    `the_refit_manifest_runs_end_to_end`, `a_manifest_that_is_neither_cut_nor_refit_is_refused`,
+    `the_refit_refuses_values_out_of_range` and
+    `the_bessel_functions_match_their_tables_and_their_wronskian`. All are fast, under nextest in
+    the dev profile on 4 test threads at load 4–6: the four that refit take 4.0–4.6 s, the
+    determinism test 8.2 s (two refits), the others under 0.2 s.

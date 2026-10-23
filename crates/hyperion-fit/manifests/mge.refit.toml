@@ -1,0 +1,30 @@
+# The refit of the Gaussian expansions with free widths (plan 15, P15.T3.a): `MGE_EXP`,
+# `MGE_HOLED_EXP` and `MGE_BAR`, their widths polished by Levenberg–Marquardt and their weights by
+# non-negative least squares (`src/tasks/mge/refit.rs`). Run with `--manifest` and `--out` to a
+# scratch path; plan 15's P15.T3.c swaps it in, moving these parameters into `mge.toml` and bumping
+# the task's revision. `widths` and the bar's shape are fixed by the tables and the profile; the
+# task refuses other values.
+task = "mge"
+
+[params]
+method = "free_widths"
+widths = 14
+exp_range = [0.001, 12.0]
+exp_samples = 400
+exp_start_widths = [0.04, 3.5]
+iterations = 300
+difference_step = 1e-7
+bar_width = 0.1
+bar_level = 0.85
+bar_end = 0.15
+bar_reach = 2.0
+bar_samples = 321
+bar_mass_weight = 20.0
+bar_cumulative_weight = 3.0
+bar_cumulative_step = 0.01
+bar_cumulative_pairs = 125
+bar_cumulative_from = 0.05
+bar_start_widths = [0.04, 0.8]
+bar_minimax_scales = [0.03, 0.003, 0.05]
+minimax_iterations = 300
+bar_rounds = 6
