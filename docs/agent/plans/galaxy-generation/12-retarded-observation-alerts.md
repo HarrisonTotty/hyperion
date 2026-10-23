@@ -757,6 +757,27 @@ summary.
   `styles.css`, tests. Tests: Vitest for the reading's four forms, the type's refusal of the old
   pair, and the shared class wherever a test read the old one. Acceptance: `pnpm test` and
   `just smart-ci`; no look, since nothing on screen changes.
+- **P12.T11.g The compact chart's state lines share the census's room** (added 2026-10-22 by
+  main's UX decision on the landing look of #79–#81; built in
+  `fix/p12-t11g-compact-state-lines`, a desktop fix by the look agent, recorded at the end of
+  Risks). At 1280 × 720 in `OBSERVED`, a census hint (`DENSE REGION`) and a filtered census long
+  enough to put `CENSUS BY LAYER` on a line of its own each took a line from the stage, and
+  together left it 188 px, so that the column's mode row stood over the furniture's first line. On
+  the compact page the census row is now a grid: `CENSUS BY LAYER` keeps the row's first line in a
+  column of its own, the summary wraps beside it, and the hint, moved into the row after the
+  toggle, stands under the summary, the census's lines at 1 rem; and the furniture sets the
+  galactic axis's note after the scale bar and before the mode, so that observed mode keeps three
+  lines on the axis. The stage keeps 14 rem in every state but a hint with the summary on two
+  lines, where it keeps 13.25 rem, and the column ends above its foot in every state. Two measured
+  deviations from §14.4 (the hint in the summary's column alone, and the census line one 1 rem
+  line high) are recorded at the end of Risks. Files: under
+  `apps/hyperion/src/renderer/src/`: `displays/galaxy/CensusReadout.tsx`,
+  `spatial/SpatialView.tsx`, `styles.css`, tests. Tests: Vitest for the hint's place in the row
+  and outside the census's region in both layouts, the furniture's order on the axis with and
+  without a mode, and the stylesheet's compact census grid, its 1 rem lines, the template with no
+  hint row, the stacked hint's own line and the axis note's rules. Acceptance: `pnpm test`,
+  `just smart-ci origin/rendering-and-planets`, and the hidden look at 1280 × 720 and 150%, live
+  and stale, in both modes, with 0 overlaps.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -2086,3 +2107,51 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     review). (2) Plan 05's P05.T14 text and record say `.spatial-reading__stale-slot` stays, true
     as built then; a note there could point to this task (plan-conformance review; the brief keeps
     plan 05's record as written).
+- **P12.T11.g as built (`fix/p12-t11g-compact-state-lines`, 2026-10-22, at `GENERATOR_VERSION` 23).**
+  A desktop fix by main's look agent, on 7723013b, by main's UX decision
+  (decision-p12-t11-look-followups §14). Client and plan only: no Rust, protocol, binding,
+  server, sim, GPU, golden or guide change.
+  - _As built._ `CensusReadout` sets the hint in `.census-readout__row` after `CENSUS BY LAYER`,
+    outside the `Census` region, and gives `RETRY` the class `census-readout__retry`. On the
+    stacked page `.census-readout__row > .census-readout__hint` is `flex: 0 0 100%`, a line of its
+    own under the row as before. The compact template has six rows, with no `hint` row, and the
+    compact census row is §14.4's grid: the summary at 1 / 1 in `minmax(0, max-content)`, `RETRY`
+    and the toggle in `max-content` columns 1 rem after it by margin, `gap: 0`, the summary's and
+    the hint's lines 1 rem, the toggle spanning both lines from the top where a hint stands.
+    `SpatialView` sets the axis note after the scale bar and before the mode's `dl`; it lost its
+    `flex-basis: 100%`, and in compact it is `inline-block`, `nowrap`, 0.75 rem before what
+    follows. This amends §11.3's "the axis note stays last".
+  - _Deviations from §14.4, measured and accepted by main._ (1) The hint stands in the summary's
+    column alone, `grid-area: 2 / 1 / 3 / 2`, not across `RETRY`'s too: spanning it, the grid put
+    the hint's width into `RETRY`'s empty column, whose minimum is its content, and left the
+    summary 203 px on three lines (DENSE REGION at 50 ly, 1280 × 720). (2) The compact census line
+    is one 1 rem line high (`height: 1rem`): its `M☉`'s drawn sun, set as a subscript, hung 0.8 px
+    below a 1 rem line and made the census row 0.8 px taller, which left the state with both lines
+    211.2 px, under its 212 px floor. The sun overhangs the next line's leading alone: whole, not
+    clipped, and clear of the glyphs under it in 3× crops.
+  - _Measured_ (look-79-81, hidden, 14 runs, 122 captures, every one passing; CSS px at
+    1280 × 720 and, after the slash, at 150%). In `OBSERVED`: nothing standing 228 / 232; the hint
+    228 / 232; the summary on two lines (`REMNANTS`, `LIVING`) 228 / 232; both (the finding,
+    50 ly, `REMNANTS`, and `LIVING` with the hint, and `PENDING` under `ALL` with four-figure
+    counts and the hint) 212 / 216, the column 2.5 / 6.5 px above the stage's foot; the census
+    table shown in that state 212 / 216; on the galactic axis 228 / 232, with `REMNANTS` 228 /
+    232, with the hint 228 / 232, with both 212 / 216, the note on the furniture's second line
+    (396.8 to 733.9 px), three furniture lines. In `NOW` each 34 px more: 262 / 266, both 246 /
+    250, the axis 246 / 250 and with both 230 / 234. One refusal and two changed nothing. Live and
+    stale alike. 0 overlapping boxes in every capture, `NO CHART` included; no page scroll; no
+    row's `scrollWidth` past its `clientWidth`; the legend inside the page. The `LARGE VOLUME`
+    hint, by probe, is 515.2 px on one line, and 1.1 px inside its column with a `RETRY` on show.
+    The stacked page at 1920 × 1080: 509 px in `NOW` and 491 with the hint (491 and 473 in
+    `OBSERVED`), the hint on its own line under the row, and on the axis the note after the scale
+    bar, `NOW` on two furniture lines and `OBSERVED` on three.
+  - _Tests._ `CensusReadout.test.tsx`: the hint in the census row after the toggle and outside
+    the region, and `RETRY`'s class. `LocalChartPanel.compact.test.tsx` (its header names this
+    look): the template's six rows with no `hint` area; the row's grid, columns, `gap` and
+    alignment; the 1 rem lines; `RETRY`'s and the toggle's columns and margins; the hint's area
+    and the toggle's span under `:has`; the stacked hint's own line; the axis note's base and
+    compact rules; and the furniture's order on the axis, the time, the scale bar, the note and
+    the mode, and the note last with no mode.
+  - _Recorded, not changed_ (§14.10): a `REJECTED:` reason long enough to set the summary on
+    three lines beside a hint would leave 196 px and overrun (§14.6); and P05.T14's sanctioned
+    unkept census marks lose one of their two reasons in compact, since the toggle no longer
+    wraps.

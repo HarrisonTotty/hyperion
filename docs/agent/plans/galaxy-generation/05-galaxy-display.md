@@ -1867,6 +1867,8 @@ text-align: right`) stands beside `.stale, .stale-mark`; `.hr-diagram__count-slo
       `ok` answer stays `ok` through a link loss (`useServerRequest`), so no `PENDING` or link
       state stands beside it. Five-digit counts would add 36.4 px under `ALL`, 801.5 px, and put
       the toggle on a second line while stale; they are beyond the census limit of 4,000.
+      _Mended in compact by P12.T11.g (plan 12): the toggle keeps the row's first line, and the
+      summary wraps beside it._
     - _The readout._ `ID`'s 16 figures, 145.6 px, and its slot are 163.8 px of about 217 px in
       the first `dl`. A long designation still wraps at its spaces:
       `STREAM 4095 E-16383-63.63-8191`'s last line, `E-16383-63.63-8191`, is 163.8 px, 182 px

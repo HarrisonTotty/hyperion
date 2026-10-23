@@ -254,9 +254,12 @@ interface CensusReadoutProps {
  * The summary is a live region holding text only — the census line, the request's state in words
  * and the counts — read as a whole when it changes, so that a query given from the keyboard
  * announces that it started and then what came back. `RETRY` and `CENSUS BY LAYER` stand beside it,
- * outside it. The camera's readouts are deliberately silent; `CHART DATA INVALID`, the
- * selected-system readout and the cursor line announce from their own places, each being a region
- * in its own right. `RETRY` goes as it is pressed, since the query is then pending, so it hands the
+ * outside it, and the hint after them, in the same row and outside the region too: on a line of
+ * its own under the row on the stacked page; on the compact page under the summary, the toggle
+ * keeping the row's first line in a column of its own, so that a hint and a summary on two lines
+ * take one line from the chart's stage between them, not two (plan 12, P12.T11.g). The camera's
+ * readouts are deliberately silent; `CHART DATA INVALID`, the selected-system readout and the
+ * cursor line announce from their own places, each being a region in its own right. `RETRY` goes as it is pressed, since the query is then pending, so it hands the
  * focus to `CENSUS BY LAYER` beside it, or, before the first answer, when there is no toggle, to
  * the page's tab: never to the document's body (the orchestrator's ruling 18).
  */
@@ -362,7 +365,7 @@ export function CensusReadout({
           // words, so that it says which failure it retries wherever it is reached from.
           <button
             type="button"
-            className="control"
+            className="control census-readout__retry"
             aria-describedby={stateId}
             onClick={() => {
               // The query goes pending and RETRY with it, so the focus goes to a control that
@@ -397,12 +400,18 @@ export function CensusReadout({
             CENSUS BY LAYER
           </button>
         )}
+        {/*
+         * In the row, after the toggle and outside the region, so that it is read after the
+         * census and its controls, as it stands: on a line of its own under the row on the
+         * stacked page, and under the summary, beside the toggle, on the compact one, where the
+         * census's lines share the room the chart's state lines take (plan 12, P12.T11.g).
+         */}
+        {hint === null ? null : (
+          <p className="census-readout__hint">
+            <StatusText text={hint} />
+          </p>
+        )}
       </div>
-      {hint === null ? null : (
-        <p className="census-readout__hint">
-          <StatusText text={hint} />
-        </p>
-      )}
       {result === null ? null : (
         <CensusByLayer layers={result.layers} id={tableId} hidden={!tableShown} />
       )}

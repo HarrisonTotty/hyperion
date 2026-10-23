@@ -4,15 +4,18 @@
  * the stage's foot in `NOW` and in `OBSERVED`, or its last rows are drawn over the chart's
  * furniture, and the stage keeps 14rem (ruling 134.9, as lowered on 2026-10-21). jsdom lays nothing
  * out, so these tests hold the stylesheet's rules the fit rests on, and the order the view's parts
- * stand in; the fit itself was measured on the real client, hidden, at landing (look-72), and again
- * for the stripped helium star's entry (stripped-class's look on look-72's harness; the figures are
+ * stand in; the fit itself was measured on the real client, hidden, at landing (look-72), again
+ * for the stripped helium star's entry (stripped-class's look on look-72's harness), and again at
+ * the landing look of #79 to #81 (look-79-81), whose two state lines at once, a census hint and a
+ * summary on two lines, moved the census's hint into its row (plan 12, P12.T11.g; the figures are
  * in `styles.css` above `.local-chart--compact`).
  */
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { localFrameAt } from "../../geometry/frame";
+import { localFrameAt, type LocalFrame } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
+import type { SpatialMode } from "../../spatial/ModeReading";
 import { SpatialView } from "../../spatial/SpatialView";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { stylesheetRule } from "../../test/stylesheet";
@@ -30,12 +33,15 @@ const CIRCLE_KINDS = [
 ];
 
 /** A spatial view as the chart draws it, with one system, for the order of its parts. */
-function renderView(): void {
+function renderView(
+  frame: LocalFrame = localFrameAt(vec3(26_000, 0, 0)),
+  mode?: SpatialMode,
+): HTMLElement {
   stubCanvas();
-  render(
+  const { container } = render(
     <SpatialView
       scene={{
-        frame: localFrameAt(vec3(26_000, 0, 0)),
+        frame,
         points: [],
         spheres: [{ radius: 10, role: "data_edge", label: "QUERY EDGE 10 ly" }],
         plane: { spacing: 5, extent: 10, rings: [] },
@@ -51,7 +57,16 @@ function renderView(): void {
       accessibleName="Local chart"
       stale={false}
       onSelect={() => undefined}
+      {...(mode === undefined ? {} : { mode })}
     />,
+  );
+  return container;
+}
+
+/** Lays every element out at 400 by 300 px, so that the view has a viewport and draws its scale bar. */
+function stubLayout(): void {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    DOMRect.fromRect({ x: 0, y: 0, width: 400, height: 300 }),
   );
 }
 
@@ -67,8 +82,9 @@ describe("the compact LOCAL CHART page's room", () => {
     expect(page).toMatch(/"stage\s+controls"/u);
     expect(page).not.toMatch(/"stage\s+angles"/u);
     expect(page).not.toMatch(/"stage\s+keys"/u);
-    // Seven rows, of which the stage's gives way.
-    expect(page).toMatch(/grid-template-rows: auto auto minmax\(0, 1fr\) auto auto auto auto;/u);
+    // Six rows, of which the stage's gives way; the census's hint has none of its own (P12.T11.g).
+    expect(page).toMatch(/grid-template-rows: auto auto minmax\(0, 1fr\) auto auto auto;/u);
+    expect(page).not.toMatch(/"hint\s+hint"/u);
   });
 
   it("stands the camera's angles and keys at the end of the presets' row, in their order, as the stacked page does", () => {
@@ -225,5 +241,92 @@ describe("the compact LOCAL CHART page's mode row (plan 12, P12.T11.c)", () => {
   it("leaves the controls' own padding and letter spacing alone, every station's", () => {
     expect(stylesheetRule(".control")).toMatch(/padding: 0 0\.5rem;/u);
     expect(stylesheetRule(".control")).toMatch(/letter-spacing: 0\.15em;/u);
+  });
+});
+
+describe("the compact LOCAL CHART page's state lines in the census's room (plan 12, P12.T11.g)", () => {
+  it("sets the census row as a grid, the summary's column as wide as it is up to what its controls leave", () => {
+    const row = stylesheetRule(".local-chart--compact .census-readout__row");
+    expect(row).toMatch(/display: grid;/u);
+    expect(row).toMatch(/grid-area: census;/u);
+    expect(row).toMatch(
+      /grid-template-columns: minmax\(0, max-content\) max-content max-content;/u,
+    );
+    expect(row).toMatch(/align-items: center;/u);
+    expect(row).toMatch(/gap: 0;/u);
+  });
+
+  it("sets the summary and the hint 1rem a line, as the furniture's lines are", () => {
+    expect(
+      stylesheetRule(".local-chart--compact :is(.census-readout__summary, .census-readout__hint)"),
+    ).toMatch(/line-height: 1rem;/u);
+  });
+
+  it("stands RETRY and CENSUS BY LAYER in columns of their own, 1rem after the summary by margin", () => {
+    expect(stylesheetRule(".local-chart--compact .census-readout__summary")).toMatch(
+      /grid-area: 1 \/ 1;/u,
+    );
+    const retry = stylesheetRule(".local-chart--compact .census-readout__retry");
+    expect(retry).toMatch(/grid-area: 1 \/ 2;/u);
+    expect(retry).toMatch(/margin-left: 1rem;/u);
+    const toggle = stylesheetRule(".local-chart--compact .census-readout__toggle");
+    expect(toggle).toMatch(/grid-area: 1 \/ 3;/u);
+    expect(toggle).toMatch(/margin-left: 1rem;/u);
+  });
+
+  it("sets a hint under the summary, the toggle spanning both of its lines from the top", () => {
+    expect(stylesheetRule(".local-chart--compact .census-readout__hint")).toMatch(
+      /grid-area: 2 \/ 1 \/ 3 \/ 2;/u,
+    );
+    const toggle = stylesheetRule(
+      ".local-chart--compact .census-readout__row:has(> .census-readout__hint) > .census-readout__toggle",
+    );
+    expect(toggle).toMatch(/grid-row: 1 \/ span 2;/u);
+    expect(toggle).toMatch(/align-self: start;/u);
+  });
+
+  it("keeps the stacked page's hint on a line of its own under the census row", () => {
+    expect(stylesheetRule(".census-readout__row > .census-readout__hint")).toMatch(
+      /flex: 0 0 100%;/u,
+    );
+  });
+
+  it("runs the axis note on in the furniture's line, whole, the readings' 0.75rem before what follows", () => {
+    expect(stylesheetRule(".spatial-view__axis-note")).not.toMatch(/flex-basis/u);
+    const note = stylesheetRule(".local-chart--compact .spatial-view__axis-note");
+    expect(note).toMatch(/display: inline-block;/u);
+    expect(note).toMatch(/margin-right: 0\.75rem;/u);
+    expect(note).toMatch(/white-space: nowrap;/u);
+  });
+
+  it("sets the axis note after the time and the scale bar and before the mode", () => {
+    stubLayout();
+    const view = renderView(localFrameAt(vec3(0, 0, 3000)), { name: "NOW", from: [] });
+    const time = screen.getByText("UT", { selector: "dt" });
+    const bar = view.querySelector(".spatial-view__furniture > .scale-bar");
+    const note = view.querySelector(".spatial-view__axis-note");
+    const mode = screen.getByText("MODE", { selector: "dt" });
+    if (bar === null || note === null) {
+      throw new Error("the furniture has no scale bar or no axis note on the axis");
+    }
+
+    expect([follows(time, bar), follows(bar, note), follows(note, mode)]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("sets the axis note last, after the scale bar, on a view with no mode", () => {
+    stubLayout();
+    const view = renderView(localFrameAt(vec3(0, 0, 3000)));
+    const furniture = view.querySelector(".spatial-view__furniture");
+    const bar = view.querySelector(".spatial-view__furniture > .scale-bar");
+    const note = view.querySelector(".spatial-view__axis-note");
+    if (furniture === null || bar === null || note === null) {
+      throw new Error("the furniture has no scale bar or no axis note on the axis");
+    }
+
+    expect([follows(bar, note), furniture.lastElementChild]).toEqual([true, note]);
   });
 });

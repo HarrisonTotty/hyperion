@@ -642,19 +642,22 @@ export function SpatialView({
             units={scaleUnits}
           />
         )}
-        {/* After the scale bar, so that on the compact chart the time and the bar share a line,
-            which observed mode's long reading then follows on a line of its own (plan 12,
-            P12.T11.d's ruling). */}
-        {mode === undefined ? null : (
-          <dl className="spatial-view__readings">
-            <ModeReading mode={mode} state={sourceState(stale)} />
-          </dl>
-        )}
+        {/* Why the centre's directions are undefined, beside the centre's readings, after the scale
+            bar and before the mode, so that on the compact chart it shares the time's and the
+            bar's line and observed mode keeps three lines on the axis (plan 12, P12.T11.g). */}
         {shownAxes.onAxis ? (
           <p className="spatial-view__axis-note">
             <StatusText text={AXIS_FALLBACK_MESSAGE} />
           </p>
         ) : null}
+        {/* After the scale bar, and the axis note where there is one, so that on the compact chart
+            the time and the bar share a line, which observed mode's long reading then follows on a
+            line of its own (plan 12, P12.T11.d's ruling; P12.T11.g). */}
+        {mode === undefined ? null : (
+          <dl className="spatial-view__readings">
+            <ModeReading mode={mode} state={sourceState(stale)} />
+          </dl>
+        )}
       </div>
     </div>
   );

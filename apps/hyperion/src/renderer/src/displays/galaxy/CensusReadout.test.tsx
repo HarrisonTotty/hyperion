@@ -133,6 +133,31 @@ describe("CensusReadout", () => {
     ).toBeInTheDocument();
   });
 
+  it("stands the hint in the census row after CENSUS BY LAYER, outside the announced region (P12.T11.g)", () => {
+    renderReadout(aChart({ overLimit: ["a"] }));
+    const hint = screen.getByText(
+      statusLine("DENSE REGION: reduce radius before raising MIN MASS"),
+    );
+    const toggle = screen.getByRole("button", { name: "CENSUS BY LAYER" });
+    const row = toggle.closest(".census-readout__row");
+
+    expect([
+      row !== null && hint.closest(".census-readout__row") === row,
+      (toggle.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      summary().contains(hint),
+    ]).toEqual([true, true, false]);
+  });
+
+  it("gives RETRY its own class, for the compact census row's column (P12.T11.g)", () => {
+    renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "queue_full",
+      reason: "the queue is full",
+    });
+
+    expect(screen.getByRole("button", { name: "RETRY" })).toHaveClass("census-readout__retry");
+  });
+
   it("folds the census table, and shows a line for every layer once asked", async () => {
     const user = userEvent.setup();
     renderReadout(aChart({ minLayer: "c", systems: [{ relLy: [1, 0, 0], layer: "c" }] }));

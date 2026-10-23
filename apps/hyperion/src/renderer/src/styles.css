@@ -1604,8 +1604,9 @@ body {
  * A page too short to stack them (the orchestrator's rulings 134.9 and 149.1, at 1280 x 720): the
  * preset views across the page, with the camera's angles and keys on the presets' row, as the
  * stacked page sets them, here at its end; the chart, with what the chart is asked for in a column
- * beside it; then, across the page, the chart's frame, centre, time and scale, the census line and
- * its toggle, the census's hint, and the legend, which is on show in every state.
+ * beside it; then, across the page, the chart's frame, centre, time and scale (and on the galactic
+ * axis the axis note), the census line with its toggle and its hint, and the legend, which is on
+ * show in every state.
  * Shown, the census table takes the place of the query controls in the column, which keeps one
  * width, the table's, so that nothing but the two moves when the toggle is pressed. The spatial
  * view, its row of controls and the census are no boxes of their own here, so that their parts take
@@ -1629,9 +1630,14 @@ body {
  * the legend's seventh line (decision-stripped-star-class.md, 2026-10-21). Measured hidden at
  * 1280 x 720, 100%, at P06.T24.c's landing: in `NOW` the stage is 262 px tall and the column ends
  * 52 px above its foot; in `OBSERVED` 228 px and 18 px, the same with one refused entry or two.
- * A line that stands only in some states takes its room from the stage, measured and recorded
- * there: the census's hint leaves `OBSERVED` 206 px, its mode row 3.5 px past the stage's foot and
- * 0.5 px above the furniture, over no text; the galactic axis's note leaves 212 px, 2.5 px clear.
+ * A line that stands only in some states took its room from the stage: the census's hint, 22 px,
+ * the census summary on two lines under a `STARS` filter, 18 px, and the galactic axis's note,
+ * 16 px. Two at once ran the column's mode row onto the furniture's first line (188 px in
+ * `OBSERVED`, at the landing look of #79 to #81). So the hint now stands in the census row under
+ * the summary, which wraps beside `CENSUS BY LAYER` at 1rem a line, and the axis note in the
+ * furniture's run after the scale bar (plan 12, P12.T11.g): the stage keeps 14rem in every state
+ * with at most one of the hint and the summary's second line, and 13.25rem with both, the column
+ * ending above its foot in every state (decision-p12-t11-look-followups §14).
  */
 .local-chart--compact {
   /*
@@ -1656,10 +1662,9 @@ body {
     "stage   controls"
     "furn    furn"
     "census  census"
-    "hint    hint"
     "legend  legend";
   grid-template-columns: minmax(0, 1fr) max(24rem, var(--census-table-width));
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   gap: 0 1rem;
 }
 
@@ -1749,6 +1754,17 @@ body {
   vertical-align: bottom;
 }
 
+/*
+ * On the galactic axis, why the centre's directions are undefined, after the scale bar in the
+ * furniture's run, so that it shares the time's and the bar's line (396.9 to 734 px of 831 at
+ * 1280 x 720, reckoned) and observed mode keeps three lines (plan 12, P12.T11.g).
+ */
+.local-chart--compact .spatial-view__axis-note {
+  display: inline-block;
+  margin-right: 0.75rem;
+  white-space: nowrap;
+}
+
 .local-chart--compact > .chart-controls {
   grid-area: controls;
   align-content: flex-start;
@@ -1830,15 +1846,65 @@ body {
   display: none;
 }
 
-/* No margin above: its toggle's 2rem target already leaves room about its text. */
+/*
+ * The census row as a grid (plan 12, P12.T11.g): the summary in a column as wide as it is, up to
+ * what `RETRY` and `CENSUS BY LAYER` leave, its parts wrapping inside it; `RETRY` and the toggle in
+ * columns of their own, 1rem after it by margin, so that an empty `RETRY` column adds no space; and
+ * a hint under the summary, in its column, the toggle spanning both lines from the top. So a hint and a summary on two lines take one line from the stage between them, beside
+ * the toggle's 2rem: the stage keeps 14rem in every state with at most one of them, and 13.25rem
+ * with both. The census's lines are 1rem, as the furniture's are. No margin above: the toggle's
+ * 2rem target already leaves room about its text.
+ */
 .local-chart--compact .census-readout__row {
+  display: grid;
   grid-area: census;
+  grid-template-columns: minmax(0, max-content) max-content max-content;
+  justify-content: start;
+  align-items: center;
+  gap: 0;
   margin-top: 0;
 }
 
+.local-chart--compact :is(.census-readout__summary, .census-readout__hint) {
+  line-height: 1rem;
+}
+
+/*
+ * The census line one 1rem line high: the drawn sun of its `M☉`, set as a subscript, hangs 0.8 px
+ * below a 1rem line's box and would make the line 16.8 px, and the summary on two lines with a
+ * hint 0.8 px short of its 13.25rem floor (measured, look-79-81). It overhangs the next line's
+ * leading alone, clear of its glyphs.
+ */
+.local-chart--compact .census-readout__line {
+  height: 1rem;
+}
+
+.local-chart--compact .census-readout__summary {
+  grid-area: 1 / 1;
+}
+
+.local-chart--compact .census-readout__retry {
+  grid-area: 1 / 2;
+  margin-left: 1rem;
+}
+
+.local-chart--compact .census-readout__toggle {
+  grid-area: 1 / 3;
+  margin-left: 1rem;
+}
+
+.local-chart--compact .census-readout__row:has(> .census-readout__hint) > .census-readout__toggle {
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+
+/*
+ * Under the summary, in the summary's column alone: across `RETRY`'s too, the grid sized the hint
+ * into `RETRY`'s column, whose minimum is its content, so that the column took the hint's width
+ * even with no `RETRY` on show and left the summary some 203 px (measured, look-79-81).
+ */
 .local-chart--compact .census-readout__hint {
-  grid-area: hint;
-  margin-top: 0.25rem;
+  grid-area: 2 / 1 / 3 / 2;
 }
 
 /* Shown, the table takes the controls' area and its height, about nine rows at 1280 x 720. */
@@ -2277,9 +2343,10 @@ body {
 
 /*
  * What the range query returned: the census line, the request's state and the counts, then RETRY
- * after a failure and the control that shows the census layer by layer, all on one row, then the
- * hint and the table on rows of their own. A column, so that the table is the part that gives way
- * when the page is short.
+ * after a failure and the control that shows the census layer by layer, all on one row, the hint
+ * after them in the same row on a line of its own (under the summary on the compact page, plan 12,
+ * P12.T11.g), then the table on a row of its own. A column, so that the table is the part that
+ * gives way when the page is short.
  */
 .census-readout {
   display: flex;
@@ -2339,8 +2406,9 @@ body {
   padding-left: 0;
 }
 
-.census-readout__hint {
-  flex: none;
+/* A line of its own under the row's controls, where it stood before it joined the row (P12.T11.g). */
+.census-readout__row > .census-readout__hint {
+  flex: 0 0 100%;
 }
 
 /* The table gives way to the chart and scrolls in what is left; its position line never does. */
@@ -3016,8 +3084,8 @@ body {
 
 /*
  * Below the view, in the same place on every spatial display: the frame, the centre and the time,
- * the scale bar, the mode where the display has one, and on the galactic axis why the directions
- * are undefined.
+ * the scale bar, on the galactic axis why the directions are undefined, and the mode where the
+ * display has one (plan 12, P12.T11.g).
  */
 .spatial-view__furniture {
   display: flex;
@@ -3030,10 +3098,10 @@ body {
  * Why the named directions are undefined, in the create form's plain-text voice: not an alert, a
  * limit nor a failed system. Through StatusText, DIRECTIONS UNDEFINED: is tracked as an annunciation
  * and the sentence in mixed case after it is not (P05.T13, superseding plan 05's T10 ruling (8) for
- * the head).
+ * the head). It stands in the furniture's run, after the scale bar and before the mode (plan 12,
+ * P12.T11.g).
  */
 .spatial-view__axis-note {
-  flex-basis: 100%;
   margin: 0;
 }
 
