@@ -4119,6 +4119,37 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
     the console-ux skill's lint on the changed renderer files; at landing, main's
     `just smart-ci origin/rendering-and-planets` and hidden look (decision-zone-labels §6.5).
 
+- **P14.T42.e A selected belt's, ring's or halo's label first** (added 2026-10-23 by main's UX
+  decision on T42.d's UX review, decision-zone-labels, follow-up). Since T42.d an annulus's label
+  is placed after every body's, so a selected belt, ring or halo, drawn as the selected orbit is,
+  can lose its label to the zones' and the bodies' lesser labels, while the guide sends the
+  operator to the list to select a belt whose label was left out. A selected annulus's label is
+  now the selection's label: placed after the curve labels that do not yield and before the
+  marks' labels, which give way to it by D4 against the other text as they do to a range
+  sphere's, and before the other annuli's, which keep 0.5 rem from it. It keeps T42.d's rules
+  (0.5 rem from what is placed before it, 0.25 rem outside every mark's bracket's box, 0.125 rem
+  from every stalk, the curves preferred) and has no last resort, as the selection's own label
+  has none since P12.T11.e. A selected belt's scattered disc, selected with it, is placed with it,
+  in the scene's order. A scene that selects an annulus selects no mark, so the two never compete.
+  - _Files:_ under `apps/hyperion/src/renderer/src/`: `spatial/drawList.ts` (`RingLabel.selected`,
+    set by `markCurveLabels` from `AnnulusMark.selected`), `spatial/SpatialView.tsx` (the selected
+    annuli's pass before `placeLabels`, its labels among `texts` and `standing`), tests; the
+    guide's annulus-label bullet (decision-zone-labels, follow-up, G3, verbatim).
+  - _Tests:_ in `spatial/SpatialView.test.tsx`: a selected belt whose label's first place a
+    lesser mark's label would take keeps that place, and the mark's label is not drawn;
+    unselected, the mark's label is drawn and the belt's stands 0.5 rem off or is not drawn, as
+    T42.d built; a selected belt keeps its first place where a zone's label would take it, the
+    zone's moving or left out; a selected belt whose every place stands within 0.25 rem of a
+    bracket's box is not drawn; a selected belt's scattered disc is placed with it. In
+    `spatial/drawList.test.ts`: a selected annulus's label carries `selected`, an unselected one's
+    does not. Unchanged and passing: T42.d's tests, `labels.test.ts`, the `displays/galaxy` tests.
+  - _Accept:_ `pnpm typecheck`, `pnpm lint`, `pnpm --filter hyperion exec vitest run
+src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displays/galaxy`,
+    the console-ux skill's lint on the changed renderer files; at landing, main's
+    `just smart-ci origin/rendering-and-planets` and a hidden look: `BELT 1` selected from the
+    list on GDG 76DY08 A-11 at `ALL` at 1280 × 720, 1920 × 1080 and 150%, its label drawn where a
+    place qualifies, and a lesser body's label beside it given way.
+
 #### P14.T43 Body list and readouts
 
 `displays/system/{BodyList, BodyReadout}.tsx`.
@@ -26908,3 +26939,98 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     order, so for a ruling; the lean is a selected annulus's label first among the annuli.
     _Ruled (decision-zone-labels, follow-up, 2026-10-23): beyond the lean, a selected annulus's
     label is the selection's, placed before the marks' labels, which give way to it; P14.T42.e._
+- **Deviations in P14.T42.e, as built (`lane/95-p14-t42e-selected-annulus`, 2026-10-23).** A
+  selected belt's, ring's or halo's label placed as the selection's (decision-zone-labels,
+  follow-up), in the client, the guide and this plan only: no Rust, protocol, binding, server, sim,
+  GPU, golden, `styles.css`, `furniture.ts` or `labels.ts` change. The lane started from
+  acf7409d and merged `rendering-and-planets` at 134514b2 (P14.T49.n: Rust and this plan, none of
+  this task's files) before its last gate; after the merge `GENERATOR_VERSION` is 23 and
+  `PROTOCOL_VERSION` 3, as at the base.
+  - _The names_, as the brief suggests: `RingLabel.selected?: true`, set by `markCurveLabels`'
+    annulus branch beside `yieldsToMarks`, by a conditional spread, where `AnnulusMark.selected`
+    is `true` alone, so that an unselected annulus's label, `selected` false or absent, gains no
+    field and the exact rimward test is unchanged; and `selectedAnnulusLabels`, the selected
+    pass's labels, in `SpatialView.tsx`. Added there: a module-level predicate, `isAnnulusLabel`
+    (a ring label with `yieldsToMarks`), and `annulusInks`, the `marks`, `brackets` and `curves`
+    both passes share, measured once and only where an annulus is labelled. Each pass is given its
+    own labels, the selected or the others, where T42.d gave `placeAnnulusLabels` every curve
+    label; its own filter is unchanged. A pass with no labels is skipped, so a view with no
+    selected annulus measures nothing for it.
+  - _The ruling, point by point._
+    - The order (§2.4): the furniture and `placeCurveLabels`' labels; the selected annuli's, with
+      `standing: [...furniture, ...curveLabels]`; `placeLabels`; the other annuli's, the zones'
+      first as T42.d built. The overlay sets the curve labels as
+      `[...curveLabels, ...selectedAnnulusLabels, ...annulusLabels]`. Pinned by the tests below
+      together, and by "keeps a selected belt's label 0.5 rem from a curve label placed before
+      it", the plane ring's label on the belt's first place.
+    - The marks' labels give way by D4: `selectedAnnulusLabels` join `placeLabels`' `texts`; "keeps
+      a selected belt's label at its first place, where a lesser mark's label gives way", with
+      "still draws a lesser mark's label over an unselected belt's first place, as T42.d built".
+    - The other annuli 0.5 rem off it: `selectedAnnulusLabels` join T42.d's pass's `standing`;
+      "keeps a selected belt's label at its first place, which a zone's label earlier in the scene
+      would take".
+    - T42.d's rules kept: the same `placeAnnulusLabels`, unchanged, given the same `marks`,
+      `brackets` and `curves`; the bracket's 0.25 rem pinned by "leaves out a selected belt's label
+      whose every place stands within 0.25 rem of a mark's bracket's box", whose places all start
+      inside the bracket's box, and the rest by T42.d's `furniture.test.ts`.
+    - No last resort: the same test, in which the belt's label is not drawn and the mark's is.
+    - The scattered disc with its belt: both carry the belt's `selected` (`populationAnnuli`), so
+      both go to the selected pass, in the scene's order; "places a selected belt's scattered
+      disc's label with the belt's, before the marks' labels", the disc at its first place under
+      the lesser mark's label and 0.5 rem from the belt's.
+    - A scene with a selected annulus and a selected mark: nothing built and nothing tested, as
+      ruled. A destination's label, which `placeLabels` also sets against `texts`, keeps off a
+      selected annulus's label too; no display that draws an annulus sets a destination.
+
+    Every point is built as ruled.
+
+  - _Tests._ `SpatialView.test.tsx`: 6 new, 155 in the file, in "SpatialView's selected
+    annulus's label, placed as the selection's (plan 14, P14.T42.e)", with `ZONE`, `RIMWARD` and
+    `FIRST` lifted out of T42.d's describe to share them and a helper, `labelOrNull`, for a lesser
+    label that is not drawn. Three fail on the base (against the lesser mark's label, against the
+    zone's, the scattered disc); three pin what the base already does and the change must keep
+    (the unselected belt, the bracket's box with no last resort, the curve label before it).
+    `drawList.test.ts`: 1 new, 76 in the file: a selected annulus's label carries `selected: true`
+    and `yieldsToMarks: true`, an unselected one's (`selected: false`) no `selected`, and a
+    sphere's, a plane ring's, a path's and the observer's neither. No existing assertion changed.
+    Unchanged and passing: `labels.test.ts` and `furniture.test.ts`, byte for byte; T42.d's tests;
+    R07.T16.j's curve-label tests; every `displays/system` and `displays/galaxy` test.
+  - _The lint._ The console-ux lint on the changed renderer files: 0 errors and 0 checks, in the
+    two source files it reads.
+  - _Reviews._ TypeScript, UX and plan conformance; no must-fix.
+    - TypeScript: no must-fix or should-fix. Two considers: `furniture.ts`' docs (deferred below);
+      and an annulus's label as a variant of its own, so that `selected` cannot stand without
+      `yieldsToMarks`, not taken, since the brief names the optional flag, as with T42.d's.
+    - UX: no finding in the code. Against main's guide text, for main and not applied: a
+      should-fix, that the order it gives names the scattered disc's label among the other
+      annuli's and never says that a belt's scattered disc is selected with it, while the code
+      places a selected belt's disc with it, before the bodies' labels (deferred below). Two
+      considers: plan 05's and `furniture.ts`' texts (deferred below); and a test of the selected
+      pass against what stands before it, done: the plane ring's label.
+    - Plan conformance: no must-fix, and every item of the task built. Two should-fix outside the
+      scope, deferred below: plan 05's T42.d note and `furniture.ts`' docs. One consider, done: the
+      scattered disc's test pins it 0.5 rem from the belt's label.
+  - _Pending:_ main's look at 1280 × 720, 1920 × 1080 and 1920 × 1080 at 150 %: `BELT 1` selected
+    from the list on GDG 76DY08 A-11 at `ALL`, its label drawn where a place qualifies and a
+    lesser body's label beside it given way.
+- **Deferred findings (2026-10-13 rule)**, from P14.T42.e:
+  - _`furniture.ts`' docs describe T42.d's pass alone_ (the three reviews). `placeAnnulusLabels`'
+    summary places the annuli's labels "after every other label", `AnnulusLabelSurroundings`'
+    `standing` lists "the marks' labels, the selection's and the destination's included", and
+    `placeCurveLabels`' remarks place them "after" the marks' labels; the selected pass runs
+    before the marks' labels, with the furniture and the curve labels standing. The brief keeps
+    `furniture.ts` unchanged. The lean, in each: "or, for a selected annulus's label
+    (`RingLabel.selected`), after the furniture and the other curve labels and before the marks'
+    labels (plan 14, P14.T42.e)", and in `standing`, "the marks' labels where they are placed
+    before them".
+  - _Plan 05's T42.d note_ (the UX and plan-conformance reviews), "Narrowed for annulus labels by
+    P14.T42.d", says an annulus's label "is placed after the marks' labels" and "The marks' labels
+    no longer give way to it", which no longer holds for a selected annulus's. The brief leaves
+    the note to main. The lean: "but a selected annulus's label, the selection's, is placed before
+    them, and they give way to it (P14.T42.e)".
+  - _The guide's order and the scattered disc_ (the UX review, against main's text). The order
+    names "the scattered disc's" among the other annuli's labels and nothing says that a belt's
+    scattered disc is selected with it, so a reader of the guide could take a selected belt's
+    disc, which the code places with it, before the bodies' labels, for a fault. The reviewer's
+    sentence, after the order: "A belt's scattered disc is selected with its belt: its edges are
+    drawn, and its label placed, with the belt's."
