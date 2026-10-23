@@ -29,6 +29,13 @@
 //! The task is [`MgeTask`], fast and provisional: its manifest `manifests/mge.toml` records the
 //! parameters above, which are constants of this module, and a manifest that disagrees with them
 //! is refused.
+//!
+//! Plan 15's refit ([`refit`], P15.T3.a) runs from a manifest of its own, `manifests/mge.refit.toml`,
+//! which names `method = "free_widths"` and every parameter of the refit. Until P15.T3.c swaps it
+//! in, it runs only with `--manifest` and `--out` to a scratch path, and `mge.toml` and
+//! [`VERSION`] still make the committed first cut, whose code here it leaves untouched.
+
+pub mod refit;
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
@@ -435,7 +442,12 @@ impl FitTask for MgeTask {
         )])
     }
 
+    /// The refit if the manifest names a `method` (`refit::run`, which refuses any but
+    /// `"free_widths"`), else the first cut, whose manifest must hold exactly its constants.
     fn run(&self, manifest: &Manifest, _threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
+        if manifest.params().contains_key(refit::METHOD_KEY) {
+            return refit::run(manifest);
+        }
         manifest.expect_params(&parameters())?;
         let tables = fit();
         let r = residuals(&tables);
