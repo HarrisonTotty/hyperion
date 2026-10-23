@@ -4068,18 +4068,19 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   - takes, of the places that meet those, the first that no orbit, annulus edge or tick crosses
     (the paths' and annuli's polylines and `ticks` ops at the line scale; the `--line` grid and
     rings excepted), else the first that meets them;
-  - tries its four places beside its outer edge's point (the optimistic zone's spinward one), then
-    beside each point along that edge every 15° either way, nearest first, as built; where none
-    meets them it is not drawn: no last resort.
+  - tries its four places beside its outer edge's point, its rimward one or, as built, its
+    spinward one for the optimistic zone, a belt and every second ring of a planet, then beside
+    each point along that edge every 15° either way, nearest first, as built; where none meets
+    them it is not drawn: no last resort.
 
   The zones' labels come before the populations' (belts, the scattered disc, the halo, and a
   planet's rings in the `BODY` frame), and within a zone `HABITABLE ZONE` comes first, then
   `STABLE ZONE`, `SNOW LINE` and `OPTIMISTIC` as built (`zoneAnnuli`'s order). Spheres, plane
   rings, paths and the observer keep R07.T16.j's search and last resort. The selection's ink band
   (P12.T11.e, `INK_INSET_EM`) still sets its label against the text that does not yield, and
-  `labels.test.ts` is unchanged. A dropped zone is named in its host's readout and on its switch,
-  and `INNER` labels it; a dropped belt, ring or halo is named in the list. Closes look-90's
-  finding and its record R1 (the selection's label 0–2 px from the zone labels).
+  `labels.test.ts` is unchanged. A dropped zone is named in its host's readout and on its switch;
+  a dropped belt, ring or halo is named in the list. Closes look-90's finding and its record R1
+  (the selection's label 0–2 px from the zone labels).
   - _Files:_ under `apps/hyperion/src/renderer/src/`: `spatial/drawList.ts`, `spatial/furniture.ts`
     (an annulus pass beside `placeCurveLabels`, which leaves annulus labels to it, and the curves'
     inks beside `markInksPx`), `spatial/labels.ts` (the bracket's box, exported for that pass),
@@ -26641,9 +26642,10 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
   - _W1, an unlabelled zone reads as an orbit._ After T42.d most inner zones are unlabelled at
     `ALL` at 1280 × 720 and 150%, and a zone's edge is a solid `--text-muted` line, as an orbit is,
     which the legend names (`ORBIT`) while it names no zone. A zone is still named in its host's
-    readout and on its switch, `INNER` labels it, and a circle about a host with no body on it is a
-    zone. If a look finds one taken for an orbit, the lean is a legend entry for the zones' edges,
-    for a ruling.
+    readout and on its switch, and a circle about a host with no body on it is a zone; `INNER`
+    fits the nearer of the habitable zone's outer edge and the fifth body, so it labels the inner
+    zones only where it draws them large enough. If a look finds one taken for an orbit, the lean
+    is a legend entry for the zones' edges, for a ruling.
   - _W2, no hysteresis._ P05's labels have none (R07.T16.j's open point), and an annulus's label
     now gives way to the marks' labels, which move with their bodies, so while the display time
     runs or the camera turns a zone's label can hop along its edge or come and go. Watched at
@@ -26777,3 +26779,5 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     drawn as the selected orbit is, but its label waits behind the zones' (main's order) and is
     left out where no place qualifies; the list and its readout still name it. A change to the
     order, so for a ruling; the lean is a selected annulus's label first among the annuli.
+    _Ruled (decision-zone-labels, follow-up, 2026-10-23): beyond the lean, a selected annulus's
+    label is the selection's, placed before the marks' labels, which give way to it; P14.T42.e._

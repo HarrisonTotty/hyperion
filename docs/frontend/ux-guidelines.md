@@ -649,25 +649,26 @@ Four classes, shared by the whole ship:
   - Stable zones, the snow line and the habitable zone are labelled annuli, drawn as their two
     edges in solid `--text-muted`, and each can be switched off. The optimistic habitable zone's
     edges carry short ticks every 10° pointing into the band, so that it differs from the
-    conservative zone by shape.
+    conservative zone by shape. An annulus's label that has no room is not shown (below).
   - A belt, and a planet's rings in the `BODY` frame, are annuli whose two edges are joined by
     short radial ticks every 10°. The cometary halo is a shell, drawn as the two circles of its
     edges on the plane, without ticks, and labelled `COMETARY HALO`. When its outer edge lies
     beyond the view its inner edge is drawn alone, labelled `COMETARY HALO INNER EDGE`, and when its
     inner edge does too nothing of it is drawn. No annulus is filled, hatched or dotted.
-  - An annulus's label stands beside its outer edge, at its rimward point (the optimistic zone's
-    at its spinward point), or where that has no room at the first point along the edge, every
-    15° either way, that has. It stands at least `0.5rem` from every other label, the axis triad
-    and the core arrow; at least `0.25rem` outside the place of a selection's bracket about every
-    mark, whether or not it is drawn, so that it never stands nearer a body than the body's own
-    label and is never read as its name; and `0.125rem` clear of every stalk. Of those places it
-    takes one that no orbit, annulus edge or tick crosses, where there is one. The bodies' labels
-    are placed first, the selection's among them; then the zones', the habitable zone's before
-    the others'; then the belts', the scattered disc's, the halo's and a planet's rings'. Where an
-    annulus has no such place, its label is not shown: it is never drawn over a mark. The zone is
-    still named, with its distances, in its host's readout and on its switch, and `INNER` draws
-    the inner zones large enough for their labels; a belt, ring or halo is named in the list, and
-    selecting it there draws its edges and ticks as the selected orbit is.
+  - An annulus's label stands beside its outer edge, at its rimward point, or at its spinward
+    point for the optimistic zone, a belt and every second ring of a planet, so that the labels of
+    annuli side by side do not start on one ray; where that point has no room, it stands at the
+    first point along the edge, every 15° either way, that has. It stands at least `0.5rem` from
+    every other label, the axis triad and the core arrow; at least `0.25rem` outside the place of
+    a selection's bracket about every mark, whether or not it is drawn, so that it never stands
+    nearer a body than the body's own label and is never read as its name; and `0.125rem` clear
+    of every stalk. Of those places it takes one that no orbit, annulus edge or tick crosses,
+    where there is one. The bodies' labels are placed first, the selection's among them; then the
+    zones', the habitable zone's before the others'; then the belts', the scattered disc's, the
+    halo's and a planet's rings'. Where an annulus has no such place, its label is not shown: it
+    is never drawn over a mark. The zone is still named, with its distances, in its host's readout
+    and on its switch; a belt, ring or halo is named in the list, and selecting it there draws its
+    edges and ticks as the selected orbit is.
   - `--line` is for the reference plane's grid and scale rings only.
   - Distances are true to scale, with a 1-2-5 scale bar. Bodies are not, and the display says
     `BODIES NOT TO SCALE` once, in place of the legend's `SYMBOLS NOT TO SCALE`.
