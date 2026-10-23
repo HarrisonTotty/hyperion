@@ -87,9 +87,9 @@ fn the_grey_profile_is_guillot_s_eq_29() {
         Kelvin::new(99.0),
         irradiation_temperature(Kelvin::new(102.0)),
     );
-    for gamma in [0.1, 0.4, 1.0, 2.5] {
+    for gamma in [0.1, 0.4, 0.7, 1.0] {
         let grey = GreyProfile::new(1e-3, 1.0, gamma, MEAN_REDISTRIBUTION).unwrap();
-        let skin = grey.fourth_power(0.0, internal, irradiation);
+        let skin = grey.temperature_fourth_power(0.0, internal, irradiation);
         let expected = math::powi(99.0, 4) / 2.0
             + MEAN_REDISTRIBUTION
                 * math::powi(irradiation.value(), 4)
@@ -98,14 +98,14 @@ fn the_grey_profile_is_guillot_s_eq_29() {
             (skin / expected - 1.0).abs() < 1e-13,
             "γ {gamma}: {skin} against {expected}"
         );
-        let deep = grey.fourth_power(1e9, internal, irradiation) / 1e9;
+        let deep = grey.temperature_fourth_power(1e9, internal, irradiation) / 1e9;
         assert!(
             (deep / (0.75 * math::powi(99.0, 4)) - 1.0).abs() < 1e-8,
             "γ {gamma}"
         );
     }
     let flat = GreyProfile::new(1e-3, 1.0, 1.0, MEAN_REDISTRIBUTION).unwrap();
-    let starlight = |tau: f64| flat.fourth_power(tau, Kelvin::new(0.0), irradiation);
+    let starlight = |tau: f64| flat.temperature_fourth_power(tau, Kelvin::new(0.0), irradiation);
     for tau in [0.0, 0.3, 3.0, 300.0] {
         assert!(
             (starlight(tau) / starlight(0.0) - 1.0).abs() < 1e-14,
@@ -330,13 +330,12 @@ fn what_is_not_an_envelope_is_refused() {
         profile(&[], 99.0, 102.0, 24.79, grey()),
         Err(DeriveEnvelopeProfileError::Mixture)
     );
-    let iron = [(row("Mg2SiO4"), 1.0)];
-    if row("Mg2SiO4").substance().gas().is_none() {
-        assert_eq!(
-            profile(&iron, 99.0, 102.0, 24.79, grey()),
-            Err(DeriveEnvelopeProfileError::NoHeatCapacity(row("Mg2SiO4")))
-        );
-    }
+    let basalt = row("basalt");
+    let rock = [(row("H2"), 0.5), (basalt, 0.5)];
+    assert_eq!(
+        profile(&rock, 99.0, 102.0, 24.79, grey()),
+        Err(DeriveEnvelopeProfileError::NoHeatCapacity(basalt))
+    );
     assert!(matches!(
         profile(&gases, -1.0, 102.0, 24.79, grey()),
         Err(DeriveEnvelopeProfileError::InternalTemperature(_))
@@ -357,14 +356,24 @@ fn what_is_not_an_envelope_is_refused() {
         GreyProfile::new(0.0, 1.0, 0.4, 0.25),
         Err(BuildGreyProfileError::ThermalOpacity(_))
     ));
-    assert!(matches!(
-        GreyProfile::new(1e-3, -1.0, 0.4, 0.25),
-        Err(BuildGreyProfileError::OpticalDepthExponent(_))
-    ));
-    assert!(matches!(
-        GreyProfile::new(1e-3, 1.0, 0.0, 0.25),
-        Err(BuildGreyProfileError::OpacityRatio(_))
-    ));
+    for n in [-1.0, 0.5, 2.5, f64::NAN] {
+        assert!(
+            matches!(
+                GreyProfile::new(1e-3, n, 0.4, 0.25),
+                Err(BuildGreyProfileError::OpticalDepthExponent(_))
+            ),
+            "n {n}"
+        );
+    }
+    for gamma in [0.0, 1.5, f64::INFINITY] {
+        assert!(
+            matches!(
+                GreyProfile::new(1e-3, 1.0, gamma, 0.25),
+                Err(BuildGreyProfileError::OpacityRatio(_))
+            ),
+            "γ {gamma}"
+        );
+    }
     assert!(matches!(
         GreyProfile::new(1e-3, 1.0, 0.4, 1.5),
         Err(BuildGreyProfileError::Redistribution(_))
@@ -410,7 +419,7 @@ fn the_profile_is_the_same_bits_twice() {
 #[test]
 fn the_radiative_gradient_stays_below_n_over_four() {
     for n in [1.0, 2.0] {
-        for gamma in [0.1, 0.4, 1.0, 3.0] {
+        for gamma in [0.1, 0.4, 0.7, 1.0] {
             let grey = GreyProfile::new(3e-3, n, gamma, MEAN_REDISTRIBUTION).unwrap();
             for (t_int, t_eq) in [
                 (99.0, 102.0),

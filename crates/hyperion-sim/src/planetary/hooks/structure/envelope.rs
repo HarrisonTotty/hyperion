@@ -34,7 +34,7 @@
 //!   one local peak before its rise stays under 0.19, below every H₂–He R ÷ `c_p`, so the first
 //!   crossing is unique and the join moves continuously with its inputs.
 //! - **f = ¼** ([`MEAN_REDISTRIBUTION`]), the whole planet's mean.
-//! - **κ₁** ([`THERMAL_OPACITY_AT_ONE_BAR`]), fitted through this module on the Solar System
+//! - **κ₁** ([`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`]), fitted through this module on the Solar System
 //!   table's Jupiter to its measured 166.1 K at 1 bar (Seiff et al. 1998), the own-model rule.
 //!
 //! `T_irr` is Guillot's T* (R* ÷ D)^½ (his Eq. 1, with `T_eq`⁴ = `T_irr`⁴ ÷ 4 for no albedo, Eq.
@@ -139,7 +139,7 @@ pub const OPACITY_RATIO: f64 = 0.4;
 
 /// The envelope's thermal opacity at 1 bar, κ₁, m² kg⁻¹: FITTED, fitted through this module on the
 /// Solar System table's Jupiter.
-pub const THERMAL_OPACITY_AT_ONE_BAR: f64 = 2.87e-3;
+pub const THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG: f64 = 2.87e-3;
 
 /// The deepest level of the published adiabat, `p_bottom`: 100 bar (10⁷ Pa; science-r08-gases-2.md
 /// §1.7.3). Deeper, [`EnvelopeProfile::temperature_at`] takes the last segment's exponent.
@@ -168,7 +168,7 @@ pub fn irradiation_temperature(equilibrium: Kelvin) -> Kelvin {
 /// ratio γ and the redistribution factor f.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct GreyProfile {
-    thermal_opacity: f64,
+    thermal_opacity_m2_per_kg: f64,
     optical_depth_exponent: f64,
     opacity_ratio: f64,
     redistribution: f64,
@@ -177,11 +177,11 @@ pub struct GreyProfile {
 /// [`GreyProfile::new`] refused a parameter.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BuildGreyProfileError {
-    /// The thermal opacity is not finite and positive, m² kg⁻¹.
+    /// The thermal opacity, m² kg⁻¹, is not finite and positive.
     ThermalOpacity(f64),
-    /// The opacity's exponent in pressure is not finite and positive.
+    /// The optical depth's exponent in pressure n lies outside [1, 2].
     OpticalDepthExponent(f64),
-    /// γ is not finite and positive.
+    /// γ lies outside (0, 1].
     OpacityRatio(f64),
     /// f is not in (0, 1].
     Redistribution(f64),
@@ -198,10 +198,10 @@ impl fmt::Display for BuildGreyProfileError {
             }
             Self::OpticalDepthExponent(value) => write!(
                 f,
-                "an opacity's exponent in pressure is finite and positive, got {value}"
+                "an optical depth's exponent in pressure lies in [1, 2], got {value}"
             ),
             Self::OpacityRatio(value) => {
-                write!(f, "an opacity ratio is finite and positive, got {value}")
+                write!(f, "an opacity ratio lies in (0, 1], got {value}")
             }
             Self::Redistribution(value) => {
                 write!(f, "a redistribution factor lies in (0, 1], got {value}")
@@ -214,55 +214,59 @@ impl Error for BuildGreyProfileError {}
 
 impl GreyProfile {
     /// Every envelope's parameters (the [module](self)'s documentation): κ₁
-    /// [`THERMAL_OPACITY_AT_ONE_BAR`], n [`OPTICAL_DEPTH_EXPONENT`], γ [`OPACITY_RATIO`] and f
+    /// [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`], n [`OPTICAL_DEPTH_EXPONENT`], γ [`OPACITY_RATIO`] and f
     /// [`MEAN_REDISTRIBUTION`].
     pub const ADOPTED: Self = Self {
-        thermal_opacity: THERMAL_OPACITY_AT_ONE_BAR,
+        thermal_opacity_m2_per_kg: THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG,
         optical_depth_exponent: OPTICAL_DEPTH_EXPONENT,
         opacity_ratio: OPACITY_RATIO,
         redistribution: MEAN_REDISTRIBUTION,
     };
 
-    /// The parameters: `thermal_opacity` `κ_ref`, m² kg⁻¹, at [`REFERENCE_PRESSURE`];
-    /// `optical_depth_exponent` n, τ ∝ pⁿ (1 for a constant opacity); `opacity_ratio` γ; and
+    /// The parameters: `thermal_opacity_m2_per_kg` κ₁, m² kg⁻¹, at [`REFERENCE_PRESSURE`];
+    /// `optical_depth_exponent` n, τ ∝ pⁿ, from 1 (a constant opacity, which never joins) to 2
+    /// (the envelope's); `opacity_ratio` γ, above 0 and at most 1, so that the profile has no
+    /// inversion and [`EnvelopeProfile::temperature_at`] never rises with height; and
     /// `redistribution` f.
     ///
     /// # Errors
     ///
-    /// [`BuildGreyProfileError`] for an opacity, exponent or ratio that is not finite and positive,
-    /// or an f outside (0, 1].
+    /// [`BuildGreyProfileError`] for an opacity that is not finite and positive, an n outside
+    /// [1, 2], a γ outside (0, 1] or an f outside (0, 1].
     pub fn new(
-        thermal_opacity: f64,
+        thermal_opacity_m2_per_kg: f64,
         optical_depth_exponent: f64,
         opacity_ratio: f64,
         redistribution: f64,
     ) -> Result<Self, BuildGreyProfileError> {
-        if !is_positive(thermal_opacity) {
-            return Err(BuildGreyProfileError::ThermalOpacity(thermal_opacity));
+        if !is_positive(thermal_opacity_m2_per_kg) {
+            return Err(BuildGreyProfileError::ThermalOpacity(
+                thermal_opacity_m2_per_kg,
+            ));
         }
-        if !is_positive(optical_depth_exponent) {
+        if !(1.0..=2.0).contains(&optical_depth_exponent) {
             return Err(BuildGreyProfileError::OpticalDepthExponent(
                 optical_depth_exponent,
             ));
         }
-        if !is_positive(opacity_ratio) {
+        if !(is_positive(opacity_ratio) && opacity_ratio <= 1.0) {
             return Err(BuildGreyProfileError::OpacityRatio(opacity_ratio));
         }
         if !(is_positive(redistribution) && redistribution <= 1.0) {
             return Err(BuildGreyProfileError::Redistribution(redistribution));
         }
         Ok(Self {
-            thermal_opacity,
+            thermal_opacity_m2_per_kg,
             optical_depth_exponent,
             opacity_ratio,
             redistribution,
         })
     }
 
-    /// The thermal opacity `κ_ref` at [`REFERENCE_PRESSURE`], m² kg⁻¹.
+    /// The thermal opacity κ₁ at [`REFERENCE_PRESSURE`], m² kg⁻¹.
     #[must_use]
-    pub const fn thermal_opacity(&self) -> f64 {
-        self.thermal_opacity
+    pub const fn thermal_opacity_m2_per_kg(&self) -> f64 {
+        self.thermal_opacity_m2_per_kg
     }
 
     /// The opacity's exponent in pressure n: τ ∝ pⁿ, 1 for a constant opacity.
@@ -283,8 +287,9 @@ impl GreyProfile {
         self.redistribution
     }
 
-    /// The thermal optical depth τ at pressure `p` under gravity `gravity`: `κ_ref` `p_ref` (p ÷
-    /// `p_ref`)ⁿ ÷ (n g); 0 at and above p = 0.
+    /// The thermal optical depth τ at pressure `p` under gravity `gravity` (finite and positive):
+    /// κ₁ p₁ (p ÷ p₁)ⁿ ÷ (n g); 0 at and above p = 0, NaN for a NaN p. A gravity of 0 gives +∞ and
+    /// a negative one a negative τ.
     #[must_use]
     pub fn optical_depth(&self, p: Pascals, gravity: MetresPerSecondSquared) -> f64 {
         let p = p.value();
@@ -296,11 +301,12 @@ impl GreyProfile {
         }
         let n = self.optical_depth_exponent;
         let p_ref = REFERENCE_PRESSURE.value();
-        self.thermal_opacity * p_ref * math::powf(p / p_ref, n) / (n * gravity.value())
+        self.thermal_opacity_m2_per_kg * p_ref * math::powf(p / p_ref, n) / (n * gravity.value())
     }
 
-    /// The pressure at which the thermal optical depth is `tau` under gravity `gravity`, the
-    /// inverse of [`optical_depth`](Self::optical_depth).
+    /// The pressure at which the thermal optical depth is `tau` (at least 0) under gravity
+    /// `gravity` (finite and positive), the inverse of [`optical_depth`](Self::optical_depth); 0 at
+    /// τ = 0 and NaN for a negative τ.
     #[must_use]
     pub fn pressure_at_depth(&self, tau: f64, gravity: MetresPerSecondSquared) -> Pascals {
         let n = self.optical_depth_exponent;
@@ -308,16 +314,21 @@ impl GreyProfile {
         Pascals::new(
             p_ref
                 * math::powf(
-                    tau * n * gravity.value() / (self.thermal_opacity * p_ref),
+                    tau * n * gravity.value() / (self.thermal_opacity_m2_per_kg * p_ref),
                     1.0 / n,
                 ),
         )
     }
 
-    /// Guillot's T⁴ at thermal optical depth `tau` of an envelope of internal temperature
-    /// `internal` and irradiation temperature `irradiation`, K⁴ (Eq. 29).
+    /// Guillot's T⁴, K⁴, at thermal optical depth `tau` of an envelope of internal temperature
+    /// `internal` and irradiation temperature `irradiation` (Eq. 29).
     #[must_use]
-    pub fn fourth_power(&self, tau: f64, internal: Kelvin, irradiation: Kelvin) -> f64 {
+    pub(crate) fn temperature_fourth_power(
+        &self,
+        tau: f64,
+        internal: Kelvin,
+        irradiation: Kelvin,
+    ) -> f64 {
         let gamma = self.opacity_ratio;
         let int4 = math::powi(internal.value(), 4);
         let irr4 = self.redistribution * math::powi(irradiation.value(), 4);
@@ -330,11 +341,12 @@ impl GreyProfile {
                     + (gamma / SQRT_3 - inverse) * math::exp(-gamma * tau * SQRT_3))
     }
 
-    /// Guillot's temperature at thermal optical depth `tau` (Eq. 29; [`fourth_power`](Self::fourth_power)).
+    /// Guillot's temperature at thermal optical depth `tau`, at least 0 (Eq. 29), of an envelope of
+    /// internal temperature `internal` and irradiation temperature `irradiation`.
     #[must_use]
     pub fn temperature(&self, tau: f64, internal: Kelvin, irradiation: Kelvin) -> Kelvin {
         Kelvin::new(math::powf(
-            self.fourth_power(tau, internal, irradiation),
+            self.temperature_fourth_power(tau, internal, irradiation),
             0.25,
         ))
     }
@@ -348,14 +360,16 @@ impl GreyProfile {
         let irr4 = self.redistribution * math::powi(irradiation.value(), 4);
         let slope = 0.75 * (int4 + irr4 * (1.0 - gamma * gamma) * math::exp(-gamma * tau * SQRT_3));
         self.optical_depth_exponent * tau * slope
-            / (4.0 * self.fourth_power(tau, internal, irradiation))
+            / (4.0 * self.temperature_fourth_power(tau, internal, irradiation))
     }
 
     /// The optical depth above which an envelope of internal temperature `internal` and
-    /// irradiation temperature `irradiation` has joined its adiabat, for γ ≤ 1 and n = 2: `τ_max` =
+    /// irradiation temperature `irradiation` has joined its adiabat at n = 2 (and at any γ in (0,
+    /// 1]): `τ_max` =
     /// 4 (⅔ + `c₀` f `T_irr`⁴ ÷ `T_int`⁴), `c₀` = ⅔ + 1 ÷ (γ√3), where the gradient is at least ⅖, every
     /// ideal gas's largest R ÷ `c_p` (decision-p14-t24d-profile §1.2, checked over (`T_eq` ÷
-    /// `T_int`)⁴ from 10⁻⁸ to 10¹² at γ 0.1–1); infinite where `T_int` is 0.
+    /// `T_int`)⁴ from 10⁻⁸ to 10¹² at γ 0.1–1); infinite where `T_int` is 0. Below n = 2 it bounds
+    /// no join: [`EnvelopeProfile::derive`] seeks none deeper than it.
     #[must_use]
     pub fn join_bracket_optical_depth(&self, internal: Kelvin, irradiation: Kelvin) -> f64 {
         let int4 = math::powi(internal.value(), 4);
@@ -403,11 +417,11 @@ pub enum DeriveEnvelopeProfileError {
     IrradiationTemperature(Kelvin),
     /// Neither an internal flux nor starlight heats the envelope.
     Unheated,
-    /// The gravity is not finite and positive, m s⁻².
-    Gravity(f64),
+    /// The gravity is not finite and positive.
+    Gravity(MetresPerSecondSquared),
     /// The radiative gradient exceeds no adiabat's above the join's bracket
     /// ([`GreyProfile::join_bracket_optical_depth`]): a constant opacity's, an envelope's with no
-    /// internal heat, or one past the bracket's γ ≤ 1.
+    /// internal heat, or one below n = 2 whose join would lie deeper.
     NoJoin,
     /// The adiabat would need more than P14.T24.e's most segments.
     TooDeep,
@@ -416,27 +430,31 @@ pub enum DeriveEnvelopeProfileError {
 impl fmt::Display for DeriveEnvelopeProfileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Mixture => write!(f, "an envelope's mole fractions do not sum to one"),
+            Self::Mixture => write!(
+                f,
+                "the mixture is empty, a mole fraction is not finite and non-negative, or the \
+                 fractions do not sum to 1"
+            ),
             Self::NoHeatCapacity(id) => write!(
                 f,
                 "{} has no gas columns, so no heat capacity",
                 id.substance().key().as_str()
             ),
-            Self::InternalTemperature(t) => {
-                write!(
-                    f,
-                    "an internal temperature is finite and not negative, got {t:?}"
-                )
-            }
+            Self::InternalTemperature(t) => write!(
+                f,
+                "internal temperature {} K is not finite and non-negative",
+                t.value()
+            ),
             Self::IrradiationTemperature(t) => write!(
                 f,
-                "an irradiation temperature is finite and not negative, got {t:?}"
+                "irradiation temperature {} K is not finite and non-negative",
+                t.value()
             ),
             Self::Unheated => write!(f, "an envelope with neither internal heat nor starlight"),
-            Self::Gravity(g) => write!(f, "a gravity is finite and positive, got {g} m/s2"),
+            Self::Gravity(g) => write!(f, "gravity {} m/s2 is not finite and positive", g.value()),
             Self::NoJoin => write!(
                 f,
-                "the grey profile's gradient never exceeds the adiabat's above 100 kbar"
+                "the grey profile's gradient exceeds the adiabat's nowhere above its join's bracket"
             ),
             Self::TooDeep => write!(f, "the adiabat needs too many segments"),
         }
@@ -466,6 +484,38 @@ impl EnvelopeProfile {
     /// As [`DeriveEnvelopeProfileError`]'s variants: a mixture that is not one or holds a row with
     /// no gas columns, a temperature or gravity out of its range, an envelope neither heated from
     /// below nor lit, no join above its bracket, or an adiabat too deep.
+    ///
+    /// # Examples
+    ///
+    /// A Jupiter by hand, the record's internal and equilibrium temperatures and its hydrogen and
+    /// helium, on every envelope's parameters: its join lies near a bar, and the one
+    /// `temperature_at` gives the Galileo probe's 166 K at 1 bar:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::hooks::structure::envelope::{
+    ///     EnvelopeProfile, EnvelopeProfileInputs, GreyProfile, irradiation_temperature,
+    /// };
+    /// use hyperion_sim::planetary::hooks::structure::{VerticalStructure, temperature_at};
+    /// use hyperion_sim::substance::by_key;
+    /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let [h2, he] = ["H2", "He"].map(|k| by_key(k).ok_or("a row"));
+    /// let gases = [(h2?, 0.8671), (he?, 0.1329)];
+    /// let jupiter = EnvelopeProfile::derive(&EnvelopeProfileInputs {
+    ///     internal_temperature: Kelvin::new(104.8),
+    ///     irradiation_temperature: irradiation_temperature(Kelvin::new(103.6)),
+    ///     gravity: MetresPerSecondSquared::new(24.79),
+    ///     gases: &gases,
+    ///     grey: GreyProfile::ADOPTED,
+    /// })?;
+    /// let join = jupiter.join_pressure().value() / 1e5;
+    /// let air = VerticalStructure::Envelope(jupiter);
+    /// let one_bar = temperature_at(&air, Pascals::new(1e5)).value();
+    /// assert!((0.5..1.5).contains(&join) && (one_bar - 166.1).abs() < 3.0);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn derive(inputs: &EnvelopeProfileInputs<'_>) -> Result<Self, DeriveEnvelopeProfileError> {
         check(inputs)?;
         let gases = inputs.gases;
@@ -566,7 +616,8 @@ impl EnvelopeProfile {
         &self.nodes
     }
 
-    /// The temperature at τ = 0, the grey profile's skin: `T_int`⁴ ÷ 2 + f `T_irr`⁴ (½ + √3 γ ÷ 4).
+    /// The temperature at τ = 0, the grey profile's skin: `T_skin`⁴ = `T_int`⁴ ÷ 2 + f `T_irr`⁴ (½ +
+    /// √3 γ ÷ 4).
     #[must_use]
     pub fn skin_temperature(&self) -> Kelvin {
         self.grey
@@ -598,8 +649,10 @@ impl EnvelopeProfile {
                 self.irradiation_temperature,
             );
         }
-        // The first node deeper than p, so that a node's own pressure takes the segment it starts;
-        // below the deepest node, its own segment's power law, anchored at it.
+        // At least MIN_SEGMENTS + 1 nodes (`segment_count`), and `deeper` is at least 1 since p is
+        // at or below the join's, the first node's. The first node deeper than p, so that a node's
+        // own pressure takes the segment it starts; below the deepest node, its own segment's
+        // power law, anchored at it.
         let deeper = self
             .nodes
             .partition_point(|node| node.pressure().value() <= value);
@@ -697,7 +750,7 @@ fn check(inputs: &EnvelopeProfileInputs<'_>) -> Result<(), DeriveEnvelopeProfile
     }
     let g = inputs.gravity.value();
     if !is_positive(g) {
-        return Err(DeriveEnvelopeProfileError::Gravity(g));
+        return Err(DeriveEnvelopeProfileError::Gravity(inputs.gravity));
     }
     Ok(())
 }

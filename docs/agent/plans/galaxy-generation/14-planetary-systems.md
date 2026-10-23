@@ -27224,8 +27224,11 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     proper, and the disc's edges lie beyond the view, so its label has no place inside, as ruled.
 - **Deviations in P14.T24.d, as built (`p14-chem`, 2026-10-23).** `GENERATOR_VERSION` stays 23.
   The profile and the internal temperature are pure: nothing on the record calls them until
-  P14.T54.b. No draw, no domain tag, no hold at 24, no golden. `planetary/record.rs`, the protocol
-  and the server are not touched: `record::Envelope` and `GuillotProfileDto`'s new
+  P14.T54.b. No draw, no domain tag, no hold at 24. One golden is new at 23, an extension:
+  `planetary/envelope_profile`, the table's four giants, a sub-Neptune joining below 100 bar and a
+  hot Jupiter by hand, each one's inputs, parameters, join, nodes and `temperature_at` at stated
+  levels, for R08's copy of the envelope's arm (it moves at 24 by its header alone).
+  `planetary/record.rs`, the protocol and the server are not touched: `record::Envelope` and `GuillotProfileDto`'s new
   `optical_depth_exponent` are p14-wire-24's (decision-p14-t24d-profile §2, §9), and the record
   carries κ₁, n, γ, f, T_int and T_irr from the profile's getters.
   - _The rulings applied:_ decision-p14-t24d-profile (2026-10-23), on the lane's finding that a
@@ -27240,23 +27243,30 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     `temperature_at` arm and a crate constructor `ProfileNode::new`; its `temperature_at` doctest
     reads the tropopause before wrapping the profile, rather than matching the enum.
   - _The interface:_
-    - `EnvelopeProfile::derive(&EnvelopeProfileInputs { internal_temperature,
-irradiation_temperature, gravity, gases, grey })`, with `join_pressure`, `nodes` (the
+    - `EnvelopeProfile::derive` over `EnvelopeProfileInputs` (`internal_temperature`,
+      `irradiation_temperature`, `gravity`, `gases` and `grey`), with `join_pressure`, `nodes` (the
       pressures ascending from the join), `temperature_at`, `skin_temperature`,
       `photosphere_pressure` (τ = ⅔), `grey`, `gravity`, `internal_temperature` and
       `irradiation_temperature`; `DeriveEnvelopeProfileError` (mixture, no gas columns,
       temperatures, unheated, gravity, no join, too deep).
-    - `GreyProfile::{new, ADOPTED}` with `optical_depth`, `pressure_at_depth`, `fourth_power`,
+    - `GreyProfile::{new, ADOPTED}`, its κ₁ `thermal_opacity_m2_per_kg`, n in [1, 2] (1 a
+      constant opacity, which never joins) and γ in (0, 1] (so that no profile has an inversion,
+      and `temperature_at` never rises with height), with `optical_depth`, `pressure_at_depth`,
       `temperature`, `radiative_gradient` and `join_bracket_optical_depth`;
       `irradiation_temperature(T_eq)`, T_irr⁴ = 4 T_eq⁴, so that f T_irr⁴ = T_eq⁴ at f ¼; and
       `dry_adiabat_temperature`, the dry adiabat through a point.
     - `envelope_internal_temperature(L_int, R, M, t)` and `cooling_law_temperature(M, t)`, with
       `COOLING_LAW_{TEMPERATURE, MASS, MASS_INDEX, AGE_INDEX, AGE}`.
-  - _The constants:_ κ₁ 2.87 × 10⁻³ m² kg⁻¹, fitted at 2.8709 × 10⁻³ on the table's Jupiter's
+  - _The constants:_ κ₁ 2.87 × 10⁻³ m² kg⁻¹ (`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`), fitted at 2.8709 × 10⁻³ on the table's Jupiter's
     hydrogen and helium (T50.b's He ÷ H₂ 0.1533 about a protosolar host), its record's T_int
     104.81 K and T_eq 103.64 K (the ruling's own check, 2.866 × 10⁻³); n 2; γ 0.4; f ¼. The join
     is sought from τ 10⁻⁶ down in steps of 0.05 in ln p to the ruling's bracket, then refined by
-    50 bisections.
+    50 bisections; the scan ends one step past the bracket, where a gas whose c_p ÷ R is exactly
+    5/2 (a 1 K unlit envelope's) meets it.
+  - _Review (2026-10-23):_ units in the opacity's names and a typed gravity error; n and γ held to
+    the ranges the bracket and the monotone profile need; the internal temperature NaN for a
+    luminosity, radius, mass or age out of its range (a signed zero's luminosity explicitly +0);
+    `derive`'s example; the golden.
   - _Figures,_ on the adopted constants over each giant's hydrogen and helium alone (T52.d's
     mixture adds its heavy gases):
 
@@ -27283,8 +27293,9 @@ irradiation_temperature, gravity, gases, grey })`, with `join_pressure`, `nodes`
       et al. 1998's abstract, against the plan's 427.7 K: it moves the 1-bar test by about 0.5 K
       (the science check, 2026-10-23).
   - _Tests_ (`cargo test -p hyperion-sim planetary::hooks::structure::envelope`, 14;
-    `planetary::hooks::envelope_atmosphere`, 7; and three doctests, the Galileo adiabat and the
-    law's and the blend's Saturn):
+    `planetary::hooks::envelope_atmosphere`, 8, the golden `the_envelope_profiles_are_pinned`
+    among them; and four doctests, a Jupiter by hand, the Galileo adiabat, and the law's and the
+    blend's Saturn):
     - Eq. 29 as written (the skin, the deep limit, γ = 1's flat starlight); T_irr's mean; τ's
       inverse;
     - the gradient below n ÷ 4 at every depth, a constant opacity's NoJoin on Jupiter over κ

@@ -217,10 +217,13 @@ impl VerticalStructure {
 /// The temperature of the air of `structure` at pressure `p`, the one function both the flight
 /// model's drag and rendering plan R08's client read (P14.T24.e).
 ///
-/// So the picture and the drag read the same air: R08's `temperatureAt` copies it, held to this
-/// module's golden at 10⁻¹². It is continuous in p and never rises with height (with falling p). For a
-/// [`RadiativeConvective`] structure it is [`RadiativeConvective::temperature_at`], and for an
-/// [`EnvelopeProfile`] [`EnvelopeProfile::temperature_at`] (no inversion at its γ below 1).
+/// So the picture and the drag read the same air: R08's `temperatureAt` copies it, held at 10⁻¹²
+/// to this module's golden (`planetary/vertical_structure`) for a surface's air and to
+/// `planetary/envelope_profile` for an envelope's. It is continuous in p and never rises with
+/// height (with falling p). For a [`RadiativeConvective`] structure it is
+/// [`RadiativeConvective::temperature_at`], and for an [`EnvelopeProfile`]
+/// [`EnvelopeProfile::temperature_at`] (no inversion at a γ of at most 1, the range of
+/// [`GreyProfile::new`](envelope::GreyProfile::new)).
 ///
 /// # Examples
 ///

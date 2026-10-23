@@ -82,10 +82,12 @@ pub const COOLING_LAW_AGE_INDEX: f64 = 0.32;
 /// The cooling law's reference age: 4.57 Gyr, the Solar System table's.
 pub const COOLING_LAW_AGE: Years = Years::new(4.57e9);
 
-/// The cooling law's internal temperature of an envelope of mass `mass` at age `age` (the
-/// [module](self)'s documentation): 84.13 K (M ÷ 95.161 M⊕)^0.2744 (max(t, 1 Myr) ÷ 4.57 Gyr)^−0.32,
-/// positive and finite for every positive mass and every age; NaN for a mass that is not finite
-/// and positive.
+/// The cooling law's internal temperature of an envelope of mass `mass` at age `age`.
+///
+/// It is 84.13 K (M ÷ 95.161 M⊕)^0.2744 (max(t, 1 Myr) ÷ 4.57 Gyr)^−0.32 (the [module](self)'s
+/// documentation): positive and finite for every finite positive mass and every finite age, an
+/// age under 1 Myr (a negative one too) taking a 1 Myr envelope's; NaN for a mass that is not
+/// finite and positive, or an age that is not finite.
 ///
 /// # Examples
 ///
@@ -101,11 +103,15 @@ pub const COOLING_LAW_AGE: Years = Years::new(4.57e9);
 /// ```
 #[must_use]
 pub fn cooling_law_temperature(mass: EarthMasses, age: Years) -> Kelvin {
-    let m = mass.value();
-    if !(m.is_finite() && m > 0.0) {
+    let (m, t) = (mass.value(), age.value());
+    if !(m.is_finite() && m > 0.0 && t.is_finite()) {
         return Kelvin::new(f64::NAN);
     }
-    let t = age.value().max(MIN_AGE.value());
+    let t = if t > MIN_AGE.value() {
+        t
+    } else {
+        MIN_AGE.value()
+    };
     Kelvin::new(
         COOLING_LAW_TEMPERATURE.value()
             * math::powf(m / COOLING_LAW_MASS.value(), COOLING_LAW_MASS_INDEX)
@@ -113,12 +119,15 @@ pub fn cooling_law_temperature(mass: EarthMasses, age: Years) -> Kelvin {
     )
 }
 
-/// The internal temperature of a gas envelope of mass `mass` and radius `radius` (positive) at age
-/// `age`,
-/// whose record radiates `internal_luminosity` of its own (the record's, already times
-/// [`giant_share`]): (`L_int` ÷ (4π R² σ) + (1 − s) `T_law`⁴)^¼ with s = [`giant_share`] of M and
-/// `T_law` [`cooling_law_temperature`] (the [module](self)'s documentation). Positive for every
-/// envelope; the record's alone from 0.414 Jupiter masses and the law's alone below 0.3.
+/// The internal temperature of a gas envelope, the record's heat blended with the cooling law.
+///
+/// For an envelope of mass `mass`, radius `radius` and age `age` whose record radiates
+/// `internal_luminosity` of its own (the record's, already times [`giant_share`]), it is
+/// (`L_int` ÷ (4π R² σ) + (1 − s) `T_law`⁴)^¼, with s = [`giant_share`] of M and `T_law`
+/// [`cooling_law_temperature`] (the [module](self)'s documentation): the record's alone from
+/// 0.414 Jupiter masses and the law's alone below 0.3, positive for every envelope. NaN for a
+/// luminosity that is not finite and non-negative, a radius that is not finite and positive, or a
+/// mass or age [`cooling_law_temperature`] refuses.
 ///
 /// # Examples
 ///
@@ -146,9 +155,13 @@ pub fn envelope_internal_temperature(
     mass: EarthMasses,
     age: Years,
 ) -> Kelvin {
-    let r = radius.value();
-    let record = internal_luminosity.value().max(0.0)
-        / (4.0 * core::f64::consts::PI * r * r * STEFAN_BOLTZMANN);
+    let (luminosity, r) = (internal_luminosity.value(), radius.value());
+    if !(luminosity.is_finite() && luminosity >= 0.0 && r.is_finite() && r > 0.0) {
+        return Kelvin::new(f64::NAN);
+    }
+    // A signed zero's sign is not portable through max; the luminosity is +0 or positive here.
+    let luminosity = if luminosity > 0.0 { luminosity } else { 0.0 };
+    let record = luminosity / (4.0 * core::f64::consts::PI * r * r * STEFAN_BOLTZMANN);
     let law = math::powi(cooling_law_temperature(mass, age).value(), 4);
     Kelvin::new(math::powf(record + (1.0 - giant_share(mass)) * law, 0.25))
 }
