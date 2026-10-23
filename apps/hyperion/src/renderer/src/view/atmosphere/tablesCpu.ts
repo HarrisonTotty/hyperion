@@ -3588,11 +3588,17 @@ export function farLimbBlend(span: number): number {
  * same.
  */
 export const FAR_LIMB_GAUSS_LEGENDRE: Readonly<
-  Record<2 | 8, ReadonlyArray<readonly [number, number]>>
+  Record<FarLimbNodeCount, ReadonlyArray<readonly [number, number]>>
 > = {
   2: [
     [0.211_324_865_405_187, 0.5],
     [0.788_675_134_594_813, 0.5],
+  ],
+  4: [
+    [0.069_431_844_202_974, 0.173_927_422_568_727],
+    [0.330_009_478_207_572, 0.326_072_577_431_273],
+    [0.669_990_521_792_428, 0.326_072_577_431_273],
+    [0.930_568_155_797_026, 0.173_927_422_568_727],
   ],
   8: [
     [0.019_855_071_751_232, 0.050_614_268_145_188],
@@ -3609,18 +3615,82 @@ export const FAR_LIMB_GAUSS_LEGENDRE: Readonly<
 /** The nodes the footprint's ground piece takes (§6.1). */
 const FAR_LIMB_GROUND_NODES = 2;
 
-/**
- * The nodes the footprint's shell piece takes for a piece `scaleHeights` local scale heights tall:
- * up to 8 (§6.1), and 2 where the lane's schedule takes fewer.
- */
-export type FarLimbSchedule = (scaleHeights: number) => 2 | 8;
+/** The Gauss–Legendre rules a far-limb piece takes: 2, 4 or 8 nodes. */
+export type FarLimbNodeCount = 2 | 4 | 8;
 
 /**
- * The shell piece's schedule as built: 8 nodes at every span (§6.1's ceiling). 2 nodes under one
- * local scale height put the Saturn-class figure's 1 H pixel from 10⁸ m at 10.9% of its converged
- * footprint, where 8 hold it at 5.0% (plan R08's Risks, "Deviations in T8.c, as built").
+ * What a footprint's shell piece is scheduled by (plan R08, R08.T8.e; `decision-r08-t8-leans.md`
+ * §11, Ruling 3), each a quantity the kernel holds per texel (`farLimb.wgsl`'s
+ * `farLimbFootprintOf`).
  */
-export const FAR_LIMB_SCHEDULE: FarLimbSchedule = () => 8;
+export interface FarLimbShellPiece {
+  /**
+   * The piece's extent in tangent height over the local scale height at the tangent point: its
+   * geometric extent over the table's H, which is in h\*, so the extent's count of scale heights in
+   * h\* over s (s ≈ 1 on the Earths the schedule was measured on).
+   */
+  readonly scaleHeights: number;
+  /** h\* at the centre ray's tangent point, s max(h, 0), m. */
+  readonly scaledHeightM: number;
+  /** The local scale height there, in h\*, m (the body's table, floored at 1 km). */
+  readonly scaleHeightM: number;
+  /** The medium's top, m of h\*. */
+  readonly topM: number;
+}
+
+/** The nodes the footprint's shell piece takes: up to 8 (§6.1). */
+export type FarLimbSchedule = (piece: FarLimbShellPiece) => FarLimbNodeCount;
+
+/**
+ * How far over the local scale height the room left above a tangent point may stand for the shell
+ * piece to count as lying where H is held to that room (`localScaleHeightM`'s hold near the top, or
+ * its 1 km floor): 1.01, a margin over the table's linear read, which equals the room there.
+ */
+export const FAR_LIMB_ROOM_SHARE = 1.01;
+
+/** The near-top shell piece's extent, local scale heights, up to which it takes 2 nodes, not 4. */
+export const FAR_LIMB_TWO_NODE_SCALE_HEIGHTS = 2;
+
+/** The near-top shell piece's extent, local scale heights, up to which it takes 4 nodes, not 8. */
+export const FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS = 4;
+
+/**
+ * The shell piece's schedule (plan R08, R08.T8.e; `decision-r08-t8-leans.md` §11, Ruling 3): 8
+ * nodes (§6.1's ceiling) but where the piece lies where H is held to the room left to the top,
+ * top − h\* ≤ {@link FAR_LIMB_ROOM_SHARE} × H at the centre's tangent point: there 2 nodes for a
+ * piece up to {@link FAR_LIMB_TWO_NODE_SCALE_HEIGHTS} local scale heights tall and 4 for one up to
+ * {@link FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS}. `farLimb.wgsl`'s `farLimbFootprintOf` takes the same.
+ *
+ * @remarks
+ * Near the top the light across the piece follows the chord's √(top − h), cut at the top, which
+ * Gauss–Legendre's 2 nodes integrate to about 1.1% and 4 to 0.2% (§11). Measured 2026-10-23 against
+ * each texel's converged footprint (its pieces in 8 sub-pieces of 8 nodes; 16 to check it) on
+ * every eighth column of T8.c's timing frames from 400 km, 10⁷, 1.54 × 10⁷, 2.55 × 10⁷ and 10⁸ m,
+ * and from 1.2 × 10⁷ m, over `test/farLimb.ts`'s seven suns, on R05's Earth, the measured Earth and
+ * the slab Earth, both settings: every texel it thins within 2.97% (R05's Earth from 1.2 × 10⁷ m on
+ * high, 4 nodes at 3.3 H, the Sun 100° from the zenith; 0.71% at 8), against 5%, and within 1.55%
+ * from T8.c's five. Four nodes under 1 H everywhere failed: 13.4% at the datum's edge from 10⁷ m on
+ * R05's Earth (7.4% at 8) and 12.7% inside the slab Earth's ozone slab, its layer edges unseen by
+ * H. Near the top, 2 nodes at any extent reached 10.8% at 7.2 H from 10⁷ m on low (R05's Earth);
+ * 4 at any extent spread `farLimbFlicker.test.ts`'s swept columns from 10⁹ m by 13.5%, over its
+ * 5%; and 4 up to 8 H thinned within 4.2% (6.7 H from 2.55 × 10⁷ m), rising with the camera's
+ * distance. T8.c's 2 nodes under 1 H put the Saturn-class 1 H pixel from 10⁸ m at 10.9% (plan
+ * R08's Risks, "Deviations in T8.c, as built").
+ */
+export const FAR_LIMB_SCHEDULE: FarLimbSchedule = ({
+  scaleHeights,
+  scaledHeightM,
+  scaleHeightM,
+  topM,
+}) => {
+  if (!(topM - scaledHeightM <= FAR_LIMB_ROOM_SHARE * scaleHeightM)) {
+    return 8;
+  }
+  if (scaleHeights <= FAR_LIMB_TWO_NODE_SCALE_HEIGHTS) {
+    return 2;
+  }
+  return scaleHeights <= FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS ? 4 : 8;
+};
 
 /** What a view's far-limb footprints are formed from (R08.T8.c), once a frame. */
 export interface FarLimbShells {
@@ -3806,7 +3876,7 @@ function pieceNodes(
   projection: FootprintProjection,
   from: number,
   to: number,
-  count: 2 | 8,
+  count: FarLimbNodeCount,
 ): PieceNode[] {
   const share = projection.shareBelow(to) - projection.shareBelow(from);
   if (!(to > from) || !(share > 0)) {
@@ -3839,11 +3909,12 @@ function pieceNodes(
  * holding it in h\*. The footprint is projected on ĝ, the
  * screen direction in which h rises (a trapezoid: {@link footprintProjection}), and cut where h
  * meets the datum's edge and the top: its ground piece takes 2 Gauss–Legendre nodes, its shell
- * piece those of `schedule` by the piece's span in local scale heights, and space none, each
+ * piece the 2, 4 or 8 `schedule` gives it by its {@link FarLimbShellPiece} (its extent in local
+ * scale heights, h\* at the centre's tangent point, H there and the top), and space none, each
  * piece weighted by its share and each node by the projection's density there.
  *
- * @param schedule - The shell piece's node count by its span, local scale heights: the built
- *   schedule, or another for the schedule's own measurement.
+ * @param schedule - The shell piece's node count: the built {@link FAR_LIMB_SCHEDULE}, or another
+ *   for the schedule's own measurement.
  */
 export function farLimbFootprintTwin(
   shells: FarLimbShells,
@@ -3911,7 +3982,17 @@ export function farLimbFootprintTwin(
     blend > 0
       ? [
           ...pieceNodes(projection, -halfWidth, groundXi, FAR_LIMB_GROUND_NODES).map(toNode),
-          ...pieceNodes(projection, groundXi, topXi, schedule(shellScaleHeights)).map(toNode),
+          ...pieceNodes(
+            projection,
+            groundXi,
+            topXi,
+            schedule({
+              scaleHeights: shellScaleHeights,
+              scaledHeightM: s * Math.max(centre.heightM, 0),
+              scaleHeightM,
+              topM: shells.topM,
+            }),
+          ).map(toNode),
         ]
       : [];
   return { span, blend, groundShare, shellShare, spaceShare, shellScaleHeights, nodes };

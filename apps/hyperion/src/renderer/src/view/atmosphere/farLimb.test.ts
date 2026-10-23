@@ -44,7 +44,11 @@ import {
   compositeTransmittanceTwin,
   FAR_LIMB_BLEND_FROM,
   FAR_LIMB_BLEND_WIDTH,
+  FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS,
   FAR_LIMB_GAUSS_LEGENDRE,
+  FAR_LIMB_ROOM_SHARE,
+  FAR_LIMB_SCHEDULE,
+  FAR_LIMB_TWO_NODE_SCALE_HEIGHTS,
   farLimbBlend,
   farLimbFootprintTwin,
   farLimbShellsOf,
@@ -224,6 +228,15 @@ const wgslRule = (name: string): number[][] => {
     Number(m[2]),
   ]);
 };
+
+/** The shell piece's nodes `roomM` under a 100 km top, H held at 1 km. */
+const scheduledAt = (roomM: number, scaleHeights: number): number =>
+  FAR_LIMB_SCHEDULE({
+    scaleHeights,
+    scaledHeightM: 100_000 - roomM,
+    scaleHeightM: 1_000,
+    topM: 100_000,
+  });
 
 /** Each value as recorded to about 10⁻⁹ of itself. */
 const toRounding = (values: readonly number[]): unknown =>
@@ -433,18 +446,50 @@ describe("the far limb's blend (R08.T8.c)", () => {
 
   it("holds the same Gauss–Legendre rules and blend as farLimb.wgsl", () => {
     expect(wgslRule("FAR_LIMB_GAUSS_2")).toEqual(FAR_LIMB_GAUSS_LEGENDRE[2]);
+    expect(wgslRule("FAR_LIMB_GAUSS_4")).toEqual(FAR_LIMB_GAUSS_LEGENDRE[4]);
     expect(wgslRule("FAR_LIMB_GAUSS_8")).toEqual(FAR_LIMB_GAUSS_LEGENDRE[8]);
     expect(farLimbWgsl).toContain(`const FAR_LIMB_BLEND_FROM : f32 = ${FAR_LIMB_BLEND_FROM};`);
     expect(farLimbWgsl).toContain(`const FAR_LIMB_BLEND_WIDTH : f32 = ${FAR_LIMB_BLEND_WIDTH};`);
+    // The shell piece's schedule (R08.T8.e, lever 4), written as the kernel holds it.
+    expect(farLimbWgsl).toContain(`const FAR_LIMB_ROOM_SHARE : f32 = ${FAR_LIMB_ROOM_SHARE};`);
+    expect(farLimbWgsl).toContain(
+      `const FAR_LIMB_TWO_NODE_SCALE_HEIGHTS : f32 = ${FAR_LIMB_TWO_NODE_SCALE_HEIGHTS.toFixed(1)};`,
+    );
+    expect(farLimbWgsl).toContain(
+      `const FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS : f32 = ${FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS.toFixed(1)};`,
+    );
   });
 
   it("takes Gauss–Legendre rules exact to degree 2n − 1", () => {
-    for (const n of [2, 8] as const) {
+    for (const n of [2, 4, 8] as const) {
       const moments = Array.from({ length: 2 * n }, (_, k) =>
         FAR_LIMB_GAUSS_LEGENDRE[n].reduce((sum, [x, w]) => sum + w * x ** k, 0),
       );
       expect(moments).toEqual(moments.map((_, k) => expect.closeTo(1 / (k + 1), 13)));
     }
+  });
+
+  // R08.T8.e (`decision-r08-t8-leans.md` §11, Ruling 3): fewer shell nodes only where the piece
+  // lies where H is held to the room left to the top.
+  it("schedules 2 shell nodes near the top to 2 local scale heights, 4 to 4, and 8 elsewhere", () => {
+    expect([
+      FAR_LIMB_ROOM_SHARE,
+      FAR_LIMB_TWO_NODE_SCALE_HEIGHTS,
+      FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS,
+    ]).toEqual([1.01, 2, 4]);
+    // Within the room held, at its margin, and in space over the top.
+    expect([0.5, 2, 2.01, 4, 4.01, 30].map((n) => scheduledAt(800, n))).toEqual([2, 2, 4, 4, 8, 8]);
+    expect([scheduledAt(1_010, 1), scheduledAt(-500, 1)]).toEqual([2, 2]);
+    // H no longer held to the room: §6.1's 8 at every extent.
+    expect([0.1, 1, 2, 8].map((n) => scheduledAt(1_011, n))).toEqual([8, 8, 8, 8]);
+    expect(
+      FAR_LIMB_SCHEDULE({
+        scaleHeights: 0.5,
+        scaledHeightM: 50_000,
+        scaleHeightM: 8_000,
+        topM: 100_000,
+      }),
+    ).toBe(8);
   });
 
   // s of each limb-set ray's high pixel, by the local scale height at its tangent point.
