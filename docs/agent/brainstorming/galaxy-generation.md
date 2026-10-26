@@ -2308,7 +2308,7 @@ says. The text has been brought into line:
 1. **Light cluster members fall as r⁻² to r⁻²·⁵ outside the half-mass radius**, not r⁻³ or faster
    (ruling 139.1 and 139.3). Reason: in a multimass lowered-isothermal model every component tends
    to the same polytrope `r^−(g + 3/2)` in the Keplerian outskirts (Gieles and Zocchi 2015, eqs. 20
-   and 29), with g between 0.5 and 1 in real clusters (Hénault-Brunet et al. 2019 fit 0.57 at 47
+   and 29), with g between 0.5 and 1 in real clusters (Hénault-Brunet et al. 2020 fit 0.57 at 47
    Tucanae; Peuten et al. 2017 find about 0.73 late in N-body models). Their counts per cell rise
    gently outward, and the grid's width, not the profile, keeps the index. See [Dense
    features](#dense-features-clusters-and-the-galactic-centre).
@@ -2691,7 +2691,7 @@ Figures above are rounded and should be re-checked against these when they becom
 - Heinke et al. 2005, ApJ 625; Baumgardt and Sollima 2017, MNRAS 472; Trager, King and Djorgovski
   1995, AJ 109; Bahramian et al. 2013, ApJ 766.
 - Gieles and Zocchi 2015, _A family of lowered isothermal models_, MNRAS 454, 576; Peuten et al.
-  2017, MNRAS 470, 2736; Hénault-Brunet et al. 2019, MNRAS 491, 113 (multimass models and mass
+  2017, MNRAS 470, 2736; Hénault-Brunet et al. 2020, MNRAS 491, 113 (multimass models and mass
   segregation).
 - Küpper, Macleod and Heggie 2008, _On the structure of tidal tails_, MNRAS 387, 1248; Bovy 2017,
   _Galactic rotation in Gaia DR1_, MNRAS 468, L63 (the Oort constants; from memory, not re-read).

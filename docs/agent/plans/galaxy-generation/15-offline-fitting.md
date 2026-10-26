@@ -304,7 +304,7 @@ its `MANIFEST` row and lock entry, and `task::REGISTRY` holds 48 tasks, this pla
 - **Plan 11:** the shapes `IaYieldTable`, `ClassSamplerTable`, `ClassShareTable` and `IaPoolChannel`
   and the scratch contents at `tables/binary.rs` (`IA_YIELD`, `AWD_SAMPLER`, `XRB_SAMPLER`,
   `MERGER_SAMPLER`, `NSM_SAMPLER`, `CLASS_SHARES`);
-  `stellar::binary::{MergedBinaryFate, CLUSTER_MERGED_BINARY_FATE}`, the default P15.T5.c reviews;
+  `stellar::binary::{MergedBinaryFate, CLUSTER_MERGED_BINARY_FATE}`, the default P15.T5.c reviewed;
   the binary engine run forward; `multiplicity::stripped_share` and the all-stars mass-function
   quadrature that P15.T4 fits against; `stellar::binary::testing::brute_force_class_members`, which
   plan 11 exports behind `hyperion-sim`'s `testing` feature because a file under the sim's
@@ -911,6 +911,9 @@ windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRI
   - A default that a later ruling moves changes the table's constant, which the `kick_rank` task
     then emits from its manifest rather than by copying the sim's constant, and for a window
     `collapse`'s copy too, with a bump on the first galaxy train after its lane's gate.
+  - _Its criteria_ are plan 06's slow tests' own comparisons (`Observable::criterion`), so a ruling
+    that changes a test's window changes this task too, with a new revision ("T5.d, T5.b and T5.c
+    as built").
 - **P15.T5.c Fate of merged binaries in clusters (M4).** With plan 09's cluster retention and plan
   11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 15–25% at 50
   and 5–17% at 20 (ruling 126.3, amending 106.4 and 96.3 for clusters: the low mode is judged on
@@ -958,8 +961,9 @@ windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRI
   **Acceptance:** `just ci` green, and `golden_diff.py` (the sim-determinism skill's) finds no
   golden moved. Half a day.
 
-**Files.** `src/tasks/kick_rank.rs`, `src/tasks/kick_defaults.rs`, `manifests/kick_*.toml` with
-their smoke manifests, `tables/kick_rank.rs`, and `tables/kick_defaults.rs` with its `MANIFEST` row
+**Files.** `src/tasks/kick_rank.rs`, `src/tasks/kick_defaults.rs`, `tests/kick_defaults.rs`,
+`manifests/kick_*.toml` with their smoke manifests, `tables/kick_rank.rs`, and
+`tables/kick_defaults.rs` with its `MANIFEST` row
 (P15.T5.b, ruled 2026-10-23); P15.T5.d's three files of plan 06; and P15.T5.c's guard in the sim's
 `galaxy/features/interior/retention.rs`. The fits are `Slow`: 10⁷ tracks are tens of minutes on
 one core, so CI never reruns them and relies on the hash, the fingerprint and the smoke run.
@@ -1643,7 +1647,7 @@ count at 47 Tucanae's Γ), whatever plan 09 has called them.
   = 1 above. η = 2δ, δ the models' velocity-scale exponent (Gieles and Zocchi 2015, MNRAS 454,
   576, eqs. 24–29), and η = 1 is δ = ½, not velocity equipartition (ruling 139.2). **Acceptance:**
   half-mass radius of each class below the turn-off reproduced to 10%; η between 0.8 and 1.0
-  (ruling 139.2: Peuten et al. 2017 find δ ≃ 0.5 in N-body models, Hénault-Brunet et al. 2019 fit
+  (ruling 139.2: Peuten et al. 2017 find δ ≃ 0.5 in N-body models, Hénault-Brunet et al. 2020 fit
   0.44 at 47 Tucanae).
 - **P15.T8.c Pulsars against encounter rate.** Datasets: Bahramian et al. (2013) for Γ, the
   Baumgardt–Hilker tables for ρ_c and r_c, and a census of pulsars per cluster (the brainstorm cites

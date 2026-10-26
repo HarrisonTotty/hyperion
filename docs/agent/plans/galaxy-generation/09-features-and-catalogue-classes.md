@@ -369,10 +369,11 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
 9. **Profiles.** A class's profile is (1 + r² ÷ r_c²)^(−3q′ ÷ 2) × (1 − r² ÷ r_t²)² inside the tidal
    radius r_t and zero outside, normalised by a fixed 64-node quadrature when the cluster model is
    built. q′ = q^η for q below 1 and q above, with η =
-   `tables::cluster_dynamics::EQUIPARTITION_EXPONENT`, provisionally 1 (the brainstorm's full
-   equipartition), which is the partial-equipartition constant "Open questions" lists for an offline
-   fit. Core-collapsed clusters replace the core by a cusp of drawn slope, softened at 10⁻³ ly so it
-   stays integrable and bounded. Internal dispersions use the Plummer form with a = r_h ÷ 1.305.
+   `tables::cluster_dynamics::EQUIPARTITION_EXPONENT`, 1, which is δ = ½ mass segregation and not
+   velocity equipartition (ruling 139.2), kept as production by plan 15's ruling
+   (decision-p15-t8-blocks). Core-collapsed clusters replace the core by a cusp of drawn slope,
+   softened at 10⁻³ ly so it stays integrable and bounded. Internal dispersions use the Plummer
+   form with a = r_h ÷ 1.305.
 10. **The tail's bound.** A tail is a Gaussian tube about a straight line, which rises and falls
     along the axes. Its cell bound is the axis density at the point of the cell's bounding sphere
     nearest the line, which is a true bound because the Gaussian falls with distance.
@@ -689,14 +690,16 @@ except that P09.T9.d needs P09.T9.c.
 - **P09.T9.c Black holes.** Retained at birth from the kick law with complete fallback unkicked
   (about four fifths). Mass fraction today f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ k t ÷ t★) − 1] ÷ ψ₁, floored
   at zero, with the clock factor k = `BH_CLOCK_FACTOR` = 2.5 for the cluster's denser past (ruling
-  126.4; scratch, fitted by P15.T8.a with the rest), f₀ = 0.06 × retention (Breen and Heggie 2013;
+  126.4; kept by P15.T8.a's ruling), f₀ = 0.06 × retention (Breen and Heggie 2013;
   Antonini and Gieles 2020). It is the solution, at constant mass and radius, of df ÷ dt = −β (1 + ψ₁ f) ÷ t★: black-hole mass is lost at
   β cluster masses per relaxation time, and the relaxation time shortens by 1 + ψ₁ f while black
   holes remain. β = 2.8 × 10⁻³ and ψ₁ = 147 are `BH_LOSS_BETA` and `BH_LOSS_PSI_SLOPE` of
   `tables::cluster_dynamics`, read from there and never written as literals, and with
   `BH_RELAXATION_PREFACTOR` in t★ they are the three constants plan 15's P15.T8.a fits against the
-  CMC catalogue (Kremer and others 2020); these are the scratch values until then. The decay rate β
-  ψ₁ = 0.41 is derived, not a constant of its own, and with f₀ near 0.05 the black holes are gone
+  CMC catalogue (Kremer and others 2020); plan 15 kept them as production (decision-p15-t8-blocks):
+  they are Antonini and Gieles's (2020) own fit, β 2.80 × 10⁻³ and a₁ 1.47 (ψ₁ = a₁ ÷ 0.01). The
+  decay rate β ψ₁ = 0.41 is derived, not a constant of its own, and with f₀ near 0.05 the black
+  holes are gone
   after about five relaxation times, inside the brainstorm's four to six (on the clock k t ÷ t★, so
   1.6–2.4 of today's t★ at k = 2.5; ruling 126.4). Black holes are a compact
   Plummer class of scale 0.1–0.3 r_h, and the drawn core radius is correlated with f. Tests: none in
@@ -1556,8 +1559,11 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
 - **Grid systems inside the influence radius** are not drawn from the distribution function, so
   their density is not exactly stationary. They are about one in a hundred of the systems there and
   the effect is confined to the inner 1.5 ly over the clock window.
-- **Scratch constants** (black-hole loss, equipartition, pulsar counts, Type Ia samplers, helium)
-  ship as defaults and change with plan 15's tables, each a version bump.
+- **Scratch constants** (helium) ship as defaults and change with plan 15's tables, each a version
+  bump. The cluster-dynamics three (black-hole loss, equipartition, pulsar counts) are production
+  at their scratch values (decision-p15-t8-blocks, no bump), with plan 15's findings on the closed
+  form, the profile's form and Γ's scale recorded there. The Type Ia samplers are P15.T9.a's
+  fitted `tables::type_ia_delay` since version 15.
 - **Retention at 50 km/s (ruling 106.4, plan text only).** P09.T9.b's window at 50 km/s was
   13–19%, but plan 06's kick law as built (ruling 96: Disberg and Mandel's log-normal truncated at
   1,000 km/s, with a low mode of σ 5 km/s and a share of about 19%) retains 19.6% there, nearly
