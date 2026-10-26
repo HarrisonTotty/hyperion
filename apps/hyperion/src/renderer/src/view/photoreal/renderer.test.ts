@@ -545,6 +545,25 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     tables.dispose();
   });
 
+  it("releases the atmospheres' composite and its triangle with the view", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const materials = vi.spyOn(engine, "releaseMaterial");
+    const meshes = vi.spyOn(engine, "releaseMesh");
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    renderer.dispose();
+    tables.dispose();
+    expect([
+      materials.mock.calls.filter(([material]) => material.name === "atmosphere composite").length,
+      meshes.mock.calls.filter(([mesh]) => mesh.name === "atmosphere composite triangle").length,
+    ]).toEqual([1, 1]);
+  });
+
   describe("a body's air that throws as it is drawn (decision-r08-t10b-leans §2)", () => {
     it("reports the body once over several frames, and draws the other body's air and the frame's passes", async () => {
       const { engine, view, renderer } = await preparedRenderer();

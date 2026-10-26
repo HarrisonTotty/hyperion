@@ -636,7 +636,7 @@ export class PhotorealRenderer {
     // its composite lays the air over its ground (R08.T10.b).
     const atmospheres = frame.atmospheres ?? [];
     const bodies = withAtmospheres(frame.bodies, atmospheres);
-    const shells = new Map(atmospheres.map((each) => [each.id, airShellRadiusM(each.tables)]));
+    const shellRadiiM = new Map(atmospheres.map((each) => [each.id, airShellRadiusM(each.tables)]));
     const planned = planLitBodies(
       bodies,
       frame.lights,
@@ -648,7 +648,7 @@ export class PhotorealRenderer {
         annuli: settings.discAnnuli,
         planetshine: settings.planetshineSources,
         depthWriters: frame.depthWriters,
-        depthBodies: shells,
+        depthBodyShellRadiiM: shellRadiiM,
         setting: frame.setting,
       },
       frame.previousRegimes,
@@ -706,7 +706,7 @@ export class PhotorealRenderer {
       resources,
       frame,
       plan,
-      { bodies, shells },
+      { bodies, shellRadiiM },
       {
         viewRotation,
         projection,
@@ -827,7 +827,7 @@ export class PhotorealRenderer {
     plan: BodyFramePlan,
     lit: {
       readonly bodies: ReadonlyArray<LitBodyInput>;
-      readonly shells: ReadonlyMap<BodyIdHex, number>;
+      readonly shellRadiiM: ReadonlyMap<BodyIdHex, number>;
     },
     pass: { readonly viewRotation: Float32Array; readonly projection: Float32Array },
   ): TextureHandle {
@@ -837,7 +837,7 @@ export class PhotorealRenderer {
     for (const air of frame.atmospheres ?? []) {
       const sources = plan.sources.get(air.id);
       const centreM = byId.get(air.id)?.centreM;
-      const shellM = lit.shells.get(air.id);
+      const shellM = lit.shellRadiiM.get(air.id);
       const shellSeen =
         centreM !== undefined &&
         shellM !== undefined &&

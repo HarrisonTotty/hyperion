@@ -7,6 +7,7 @@
 
 import type {
   AtmosphereCheckCapture,
+  AtmosphereCheckCaptureTaken,
   AtmosphereCheckFrames,
   AtmosphereCheckRecord,
   HandoverAngles,
@@ -977,26 +978,17 @@ function atmosphereFrames(value: unknown): AtmosphereCheckFrames | null {
     : null;
 }
 
-/** One capture of the atmosphere run (R08.T10.b). */
-function atmosphereCapture(value: unknown): AtmosphereCheckCapture | null {
-  if (!isRecord(value)) {
-    return null;
-  }
+/** What every capture of the atmosphere run records, whichever its kind (R08.T10.b). */
+function atmosphereCaptureTaken(value: Rec): AtmosphereCheckCaptureTaken | null {
   const frames = atmosphereFrames(value["frames"]);
   const statements = strings(value["statements"]);
   const faults = strings(value["faults"]);
-  const rangeM = finiteOrNull(value["rangeM"]);
-  const phaseDeg = finiteOrNull(value["phaseDeg"]);
-  const { label, designation, camera, exposure, atMs } = value;
+  const { label, camera, exposure, exposureSettleMs, atMs } = value;
   if (
     !isCaptureLabel(label) ||
-    !isTextOrNull(designation) ||
     !isTextOrNull(camera) ||
     !isTextOrNull(exposure) ||
-    rangeM === undefined ||
-    (rangeM !== null && !(rangeM > 0)) ||
-    phaseDeg === undefined ||
-    (phaseDeg !== null && !(phaseDeg >= 0 && phaseDeg <= 180)) ||
+    !isNonNegative(exposureSettleMs) ||
     !isFiniteNumber(atMs) ||
     frames === null ||
     statements === null ||
@@ -1004,18 +996,38 @@ function atmosphereCapture(value: unknown): AtmosphereCheckCapture | null {
   ) {
     return null;
   }
-  return {
-    label,
-    designation,
-    camera,
-    rangeM,
-    phaseDeg,
-    exposure,
-    atMs,
-    frames,
-    statements,
-    faults,
-  };
+  return { label, camera, exposure, exposureSettleMs, atMs, frames, statements, faults };
+}
+
+/** A fixture capture's own fields, which the night's capture never carries. */
+const FIXTURE_CAPTURE_FIELDS = ["designation", "rangeM", "phaseDeg"] as const;
+
+/**
+ * One capture of the atmosphere run (R08.T10.b), by its `kind`: a fixture's, with its designation,
+ * a range above zero and a phase from 0° to 180°, or the night's, with none of them.
+ */
+function atmosphereCapture(value: unknown): AtmosphereCheckCapture | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const taken = atmosphereCaptureTaken(value);
+  if (taken === null) {
+    return null;
+  }
+  const { kind, designation, rangeM, phaseDeg } = value;
+  if (kind === "night") {
+    return FIXTURE_CAPTURE_FIELDS.some((field) => field in value) ? null : { kind, ...taken };
+  }
+  return kind === "fixture" &&
+    typeof designation === "string" &&
+    designation.length > 0 &&
+    isFiniteNumber(rangeM) &&
+    rangeM > 0 &&
+    isFiniteNumber(phaseDeg) &&
+    phaseDeg >= 0 &&
+    phaseDeg <= 180
+    ? { kind, designation, rangeM, phaseDeg, ...taken }
+    : null;
 }
 
 /** `value` as the atmosphere run's record (plan R08, R08.T10.b), or `null` if it is not one. */

@@ -73,7 +73,7 @@ import { NO_WIREFRAME_TERRAIN, WireframeRenderer } from "../../view/wireframe/su
 import { photorealFrame } from "./photorealFrame";
 import { atmosphereFrameOf, type ViewAtmosphereInput } from "./viewAtmosphere";
 import { bakeInputOf, type DrawnSky } from "./useViewSky";
-import { runPose, type ViewRun } from "./viewRun";
+import { runPose, sceneStarsStandIn, type ViewRun } from "./viewRun";
 
 /** What one frame of a view draws from. */
 export interface ViewFrameInputs {
@@ -157,6 +157,12 @@ export interface ViewFrameDrawn {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in: the wireframe while the photorealistic pipelines compile. */
   readonly drawnStyle: RenderStyle;
+  /**
+   * Whether its stars were the kept scene's own field, standing in for the interim field
+   * ({@link sceneStarsStandIn}), so that its `STARS` line reads `SCENE TEST FIELD` (plan R08,
+   * R08.T10.b; `decision-r08-t10b-ux.md`, item 1).
+   */
+  readonly sceneStars: boolean;
   /**
    * The terrain's annunciation of the bodies the frame hands over, for the view's label block
    * (`labelStatements(run, terrain)`, plan R10, R10.T16.c), in either style (the wireframe's from
@@ -395,11 +401,12 @@ export class ViewFrameDrawer {
       inputs.style === "photorealistic" &&
       inputs.availability.photorealistic &&
       this.#photoreal.status !== "failed";
+    // Offline (no server) the interim field is empty, and a kept scene's own stars, as
+    // `ATMOSPHERE TEST` carries (plan R08, R08.T10.b), stand in for the field where no sky is drawn
+    // either; R06's star layer is the server's. Every other kept scene has none.
+    const sceneStars = sceneStarsStandIn(run.scene.stars, inputs.stars, inputs.sky !== null);
     const list = buildWireframeDrawList(
-      // Offline (no server) the interim field is empty, and a kept scene's own stars, as
-      // `ATMOSPHERE TEST` carries (plan R08, R08.T10.b), stand in for the field; R06's star layer
-      // is the server's. Every other kept scene has none, so nothing else changes.
-      { ...run.scene, stars: inputs.stars.length === 0 ? run.scene.stars : inputs.stars },
+      { ...run.scene, stars: sceneStars ? run.scene.stars : inputs.stars },
       camera,
       viewport,
       tokens,
@@ -490,6 +497,7 @@ export class ViewFrameDrawer {
     return {
       anchors: list.anchors,
       drawnStyle: drawn ? "photorealistic" : "wireframe",
+      sceneStars,
       terrain,
       contourIntervalM,
       surveyEdges: list.surveyEdges,

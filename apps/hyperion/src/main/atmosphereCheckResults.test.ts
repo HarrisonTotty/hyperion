@@ -87,7 +87,7 @@ describe("the atmosphere run's pass rule", () => {
 
   it("fails a capture that showed a graphics fault, as a graphics fault", () => {
     const line = "GRAPHICS FAULT: device lost, reopen VIEW to retry";
-    expect(atmosphereCaptureFailures(withFaults(4, [line]), true)).toEqual([
+    expect(atmosphereCaptureFailures(withFaults(0, [line]), true)).toEqual([
       `moonlit-night: graphics fault: ${line}`,
     ]);
   });
@@ -108,7 +108,7 @@ describe("the atmosphere run's results", () => {
   it("pass the fixture's record", () => {
     const results = buildAtmosphereCheckResults(input());
     expect([results.schema, results.version, results.overall, atmosphereFailures(results)]).toEqual(
-      [ATMOSPHERE_CHECK_SCHEMA, 1, "pass", ""],
+      [ATMOSPHERE_CHECK_SCHEMA, 2, "pass", ""],
     );
   });
 
@@ -222,13 +222,13 @@ describe("the atmosphere run's summary", () => {
     }
   });
 
-  it("lists each capture with its camera, range, phase, exposure, frames and statements", () => {
+  it("lists each capture with its camera, range, phase, exposure, AUTO's settling, frames and statements", () => {
     const text = summary();
     expect(text).toContain(
-      "| fixture-test-earth | TEST EARTH | FREE · RATE 1.00 Mm/s | 25.0 Mm | 60.0° | EV100 12.0 AUTO | 898 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · TARGET TEST EARTH | — |",
+      "| fixture-test-earth | TEST EARTH | FREE · RATE 316 km/s | 51.0 Mm | 45.0° | EV100 12.0 AUTO | 2.0 | 1078 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · TARGET TEST EARTH | — |",
     );
     expect(text).toContain(
-      "| moonlit-night | — | SEAT | — | — | EV100 -1.0 AUTO | 1078 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · NIGHT SIDE | — |",
+      "| moonlit-night | — | SEAT | — | — | EV100 -3.0 AUTO | 22.0 | 898 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · NIGHT SIDE | — |",
     );
     expect(text).toContain(`| atmosphere: ${NOT_AVAILABLE} |`);
   });
@@ -304,7 +304,7 @@ describe("the atmosphere run's files", () => {
     );
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.atmosphere-results",
-      version: 1,
+      version: 2,
       overall: "pass",
       mediaReadyMs: 4200,
     });

@@ -52,10 +52,10 @@
  * and its results are named `…-terrain-weathered` or `…-handover-weathered`; `--weathered` is
  * refused without `--terrain`, as `--handover` is. With `--atmosphere` instead (plan R08,
  * R08.T10.b) it runs the atmosphere run on `ATMOSPHERE TEST`, at its `--setting`: the primary
- * photorealistic, its atmosphere media awaited, a scripted free-camera flight to a few radii of each
- * air fixture, each captured, then the moonlit night from the seat. `--atmosphere` is refused
- * without `--views-check`, and with `--terrain`, a separate run (`--handover` and `--weathered`
- * beside it are refused first, as options of a `--terrain` that was not given).
+ * photorealistic, its atmosphere media awaited, the moonlit night captured from the seat, then a
+ * scripted free-camera flight to a few radii of each air fixture, each captured. `--atmosphere` is
+ * refused without `--views-check`, and with `--terrain`, a separate run (`--handover` and
+ * `--weathered` beside it are refused first, as options of a `--terrain` that was not given).
  *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
@@ -241,7 +241,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--atmosphere",
-        "the check's atmosphere run on ATMOSPHERE TEST (plan R08): a hand flight past each air fixture, then the moonlit night",
+        "the check's atmosphere run on ATMOSPHERE TEST (plan R08): the moonlit night, then a hand flight past each air fixture",
       ),
     )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))

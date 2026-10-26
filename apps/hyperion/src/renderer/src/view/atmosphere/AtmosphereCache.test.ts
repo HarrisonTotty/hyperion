@@ -1059,6 +1059,22 @@ describe("a kept scene's bodies", () => {
     expect(h.seam.asked.length).toBe(0);
   });
 
+  it("holds a body whose scene's load failed as loadFailed, not pending and unlabelled, logging nothing (R08.T10.b)", () => {
+    const h = harness();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    note(h, [kept(A, { kind: "medium", built: keptEarth(), labels: [] })], 0, null);
+    const report = note(h, [kept(A, { kind: "failed" })], 0, null);
+    expect([
+      report.problems.get(A),
+      report.pending,
+      report.labels,
+      h.cache.entryOf(A),
+      h.made[0]?.disposed,
+      errors.mock.calls.length,
+      h.seam.asked.length,
+    ]).toEqual([{ kind: "loadFailed" }, false, [], null, true, 0, 0]);
+  });
+
   it("makes a kept body's tables again for another medium, disposing the last", () => {
     const h = harness();
     note(h, [kept(A, { kind: "medium", built: keptEarth(), labels: [] })], 0, null);

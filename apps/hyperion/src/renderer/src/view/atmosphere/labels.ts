@@ -127,13 +127,16 @@ export const ATMOSPHERE_LABELS: ReadonlyArray<AtmosphereLabel> = [
 /**
  * Why a body has no atmosphere drawn and none of its {@link AtmosphereLabel}s, though the view
  * draws it larger than a point (`decision-r08-t10a-leans.md`, item 6 and its follow-up): its
- * medium or its tables failed to build (`failed`), the server refused its `body_detail`
+ * medium or its tables failed to build (`failed`), a kept scene's media, loaded once a page,
+ * failed to load (`loadFailed`, R08.T10.b; `decision-r08-t10b-ux.md`, item 4), the server refused
+ * its `body_detail`
  * (`rejected`, with the server's code and reason, and whether it refused what was asked,
  * `lib/refusal.ts`'s `isRefusal`), or the console could not take the answer (`invalid`, with the
  * check that failed). {@link atmosphereProblemLines} words them.
  */
 export type AtmosphereProblem =
   | { readonly kind: "failed" }
+  | { readonly kind: "loadFailed" }
   | {
       readonly kind: "rejected";
       readonly code: string;
@@ -147,6 +150,13 @@ export type AtmosphereProblem =
  * it afresh (`decision-r08-t10a-leans.md`, item 6 and its follow-up).
  */
 const ATMOSPHERE_RETRY_REMEDY = "reopen VIEW to retry";
+
+/**
+ * What the operator can do about a kept scene's atmospheres whose load failed, which a page loads
+ * once and cannot retry, as the descent spike's terrain is made once a run (`decision-r08-t10b-ux.md`,
+ * item 4).
+ */
+const ATMOSPHERE_RELAUNCH_REMEDY = "relaunch to retry";
 
 /**
  * Designations as one line names several things: `A`, `A and B`, `A, B and C`, in the order given
@@ -179,10 +189,20 @@ function namesOf(designations: ReadonlyArray<string>): string {
  * `ATMOSPHERE: APPROXIMATE`'s (R08.T14.c). It clears when the body's atmosphere is computed anew:
  * at the body's next trigger, or when `VIEW` is shown again and the cache forgets its failures.
  *
+ * On `ATMOSPHERE TEST`, whose atmospheres load once a run, a failed load is this fault for every
+ * body with air, `relaunch to retry` in place of `reopen VIEW to retry` (`decision-r08-t10b-ux.md`,
+ * item 4), and it does not clear when `VIEW` is shown again.
+ *
  * @param designations - Every body it holds for, in designation order; at least one.
+ * @param remedy - `reopen` for a computation the console tries anew, `relaunch` for a kept
+ *   scene's load, which a page cannot retry.
  */
-export function atmosphereNotAvailable(designations: ReadonlyArray<string>): string {
-  return `ATMOSPHERE NOT AVAILABLE: computation failed for ${namesOf(designations)}, ${ATMOSPHERE_RETRY_REMEDY}`;
+export function atmosphereNotAvailable(
+  designations: ReadonlyArray<string>,
+  remedy: "reopen" | "relaunch" = "reopen",
+): string {
+  const words = remedy === "reopen" ? ATMOSPHERE_RETRY_REMEDY : ATMOSPHERE_RELAUNCH_REMEDY;
+  return `ATMOSPHERE NOT AVAILABLE: computation failed for ${namesOf(designations)}, ${words}`;
 }
 
 /**
@@ -273,12 +293,16 @@ export function atmosphereProblemLines(
   bodies: ReadonlyArray<BodyAtmosphereProblem>,
 ): AtmosphereProblemLines {
   const failed = new Set<string>();
+  const loadFailed = new Set<string>();
   const rejected = new Map<string, { reason: string; refusal: boolean; names: Set<string> }>();
   const invalid = new Map<string, Set<string>>();
   for (const { designation, problem } of bodies) {
     switch (problem.kind) {
       case "failed":
         failed.add(designation);
+        break;
+      case "loadFailed":
+        loadFailed.add(designation);
         break;
       case "rejected": {
         const reason = problem.message.trim();
@@ -315,7 +339,10 @@ export function atmosphereProblemLines(
   const checks = byFirst(
     [...invalid.entries()].map(([check, names]) => ({ check, names: ordered(names) })),
   ).map((held) => atmosphereDataInvalid(held.names, held.check));
-  const notAvailable = failed.size > 0 ? [atmosphereNotAvailable(ordered(failed))] : [];
+  const notAvailable = [
+    ...(failed.size > 0 ? [atmosphereNotAvailable(ordered(failed))] : []),
+    ...(loadFailed.size > 0 ? [atmosphereNotAvailable(ordered(loadFailed), "relaunch")] : []),
+  ];
   return { plate, fault: [...notAvailable, ...checks] };
 }
 

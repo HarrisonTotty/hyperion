@@ -67,9 +67,14 @@ import {
   type ViewBody,
   type ViewBodyKind,
   type ViewScene,
+  type ViewStar,
 } from "../../view/scene/model";
 import { ECLIPSE_SCENE_NAME, eclipseScene } from "../../view/scenes/eclipseScene";
-import { ATMOSPHERE_SCENE_NAME, atmosphereScene } from "../../view/scenes/atmosphereScene";
+import {
+  ATMOSPHERE_SCENE_NAME,
+  atmosphereScene,
+  prepareAtmosphereScene,
+} from "../../view/scenes/atmosphereScene";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
@@ -104,12 +109,18 @@ export interface SceneOption {
    * has no terrain session.
    */
   readonly terrain?: TerrainFixture;
+  /**
+   * Starts what the scene loads for itself, called from `VIEW`'s effect when the scene is chosen,
+   * never as it is made, which is in render: `ATMOSPHERE TEST`'s media (plan R08, R08.T10.b;
+   * `prepareAtmosphereScene`). Absent, the scene loads nothing.
+   */
+  readonly prepare?: () => void;
 }
 
 /**
  * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a),
  * `ECLIPSE TEST` (R07.T10.c), `TERRAIN TEST` (R10.T16.d), the one with a terrain fixture, and
- * `ATMOSPHERE TEST` (R08.T10.b), whose media load lazily as it is made.
+ * `ATMOSPHERE TEST` (R08.T10.b), whose media load lazily once `VIEW` chooses it (`prepare`).
  */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
@@ -117,7 +128,13 @@ export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PHASE_SCENE_NAME, make: phaseScene },
   { name: ECLIPSE_SCENE_NAME, make: eclipseScene },
   { name: TERRAIN_SCENE_NAME, make: terrainScene, terrain: terrainSceneFixture() },
-  { name: ATMOSPHERE_SCENE_NAME, make: () => atmosphereScene() },
+  {
+    name: ATMOSPHERE_SCENE_NAME,
+    make: () => atmosphereScene(),
+    prepare: () => {
+      prepareAtmosphereScene();
+    },
+  },
 ];
 
 /** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */
@@ -506,6 +523,43 @@ export function slantRangeFromCamera(camera: CameraState, scene: ViewScene): boo
 
 /** The star source's reading until R06's sky (Design note 16). */
 export const STAR_SOURCE = "RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION";
+
+/**
+ * The `STARS` line's reading while a kept scene's own star field is drawn in the interim field's
+ * place, as `ATMOSPHERE TEST`'s is with no server: `STARS: SCENE TEST FIELD`, a fixed test pattern,
+ * not a sky, with no count line (plan R08, R08.T10.b; `decision-r08-t10b-ux.md`, item 1; the
+ * guide's row).
+ */
+export const SCENE_TEST_FIELD = "SCENE TEST FIELD";
+
+/**
+ * Whether a frame draws the kept scene's own stars in the interim field's place: where the scene
+ * carries some, the interim field is empty (no server, or before its answer) and no sky is drawn
+ * (plan R08, R08.T10.b; `decision-r08-t10b-ux.md`, item 1).
+ */
+export function sceneStarsStandIn(
+  sceneStars: ReadonlyArray<ViewStar>,
+  interim: ReadonlyArray<ViewStar>,
+  skyDrawn: boolean,
+): boolean {
+  return sceneStars.length > 0 && interim.length === 0 && !skyDrawn;
+}
+
+/**
+ * `lines` with the `STARS` line reading {@link SCENE_TEST_FIELD} where the frame drew the kept
+ * scene's own stars ({@link sceneStarsStandIn}), in place of any other reading; as they are
+ * otherwise.
+ */
+export function withSceneStarsLine(
+  lines: ReadonlyArray<LabelLine>,
+  sceneStars: boolean,
+): ReadonlyArray<LabelLine> {
+  return sceneStars
+    ? lines.map((line) =>
+        line.label === "STARS" ? { label: "STARS", value: SCENE_TEST_FIELD } : line,
+      )
+    : lines;
+}
 
 /**
  * The star source's reading where the scene's system has no known position (a server scene's

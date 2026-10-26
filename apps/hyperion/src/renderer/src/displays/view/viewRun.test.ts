@@ -14,6 +14,7 @@ import {
 } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
+import { ATMOSPHERE_STARS } from "../../view/scenes/atmosphereScene";
 import type { SystemIdHex, UniverseTime } from "@hyperion/protocol";
 import { type SceneFrame, sceneAt, shipObserver } from "../../lib/scene/apparent";
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
@@ -55,13 +56,16 @@ import {
   ROTATION_NOT_RESOLVED,
   SCENE_OPTIONS,
   sceneClockReading,
+  sceneStarsStandIn,
   slantRangeFromCamera,
+  STAR_SOURCE,
   type ViewRun,
   startInstrumentRun,
   startRun,
   startServerRun,
   stepRun,
   surveyEdgeNotes,
+  withSceneStarsLine,
 } from "./viewRun";
 
 const STILL = { serverScene: null, dtS: 0, held: new Set<string>(), reducedMotion: false };
@@ -285,6 +289,24 @@ describe("the label block", () => {
       "STARS",
       "SCENE",
     ]);
+  });
+
+  it("reads STARS as SCENE TEST FIELD while the scene's own field is drawn, the source otherwise (decision-r08-t10b-ux §1)", () => {
+    const lines = labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE);
+    const stars = (sceneStars: boolean): string | undefined =>
+      withSceneStarsLine(lines, sceneStars).find((line) => line.label === "STARS")?.value;
+    expect([stars(true), stars(false)]).toEqual(["SCENE TEST FIELD", STAR_SOURCE]);
+  });
+
+  it("stands the scene's own stars in only with no interim field and no sky drawn", () => {
+    const own = ATMOSPHERE_STARS;
+    const interim = own.slice(0, 1);
+    expect([
+      sceneStarsStandIn(own, [], false),
+      sceneStarsStandIn(own, interim, false),
+      sceneStarsStandIn(own, [], true),
+      sceneStarsStandIn([], [], false),
+    ]).toEqual([true, false, false, false]);
   });
 
   it("reads the camera's preset, and in FREE its rate after a middle dot (R07.T19.b)", () => {

@@ -597,7 +597,7 @@ describe("the plan", () => {
     const plan = planLitBodies(
       [body],
       hosts,
-      { ...OPTIONS, depthBodies: new Map([[body.id, body.figure.equatorialRadiusM]]) },
+      { ...OPTIONS, depthBodyShellRadiiM: new Map([[body.id, body.figure.equatorialRadiusM]]) },
       new Map([[body.id, "disc"]]),
     );
     expect(plan.regimes.get(body.id)).toBe("mesh");
@@ -629,7 +629,10 @@ describe("the plan", () => {
       const plan = planLitBodies(
         [airBody, near, clear],
         hosts,
-        { ...OPTIONS, depthBodies: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]) },
+        {
+          ...OPTIONS,
+          depthBodyShellRadiiM: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
+        },
         new Map([
           [airBody.id, "disc"],
           [near.id, "disc"],
@@ -658,7 +661,7 @@ describe("the plan", () => {
         planLitBodies(
           [airBody, moon],
           hosts,
-          { ...OPTIONS, depthBodies: new Map([[airBody.id, shellM]]) },
+          { ...OPTIONS, depthBodyShellRadiiM: new Map([[airBody.id, shellM]]) },
           new Map([
             [airBody.id, "disc"],
             [moon.id, "disc"],
@@ -676,7 +679,10 @@ describe("the plan", () => {
       const plan = planLitBodies(
         [airBody],
         hosts,
-        { ...OPTIONS, depthBodies: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]) },
+        {
+          ...OPTIONS,
+          depthBodyShellRadiiM: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
+        },
         new Map(),
       );
       expect([plan.regimes.get(airBody.id), plan.sources.has(airBody.id)]).toEqual([
@@ -692,7 +698,7 @@ describe("the plan", () => {
       const other = bodyAt("0200080020000000.0301", vec3(3e9, 0, -atDiameterPx(40)));
       const options = {
         ...OPTIONS,
-        depthBodies: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
+        depthBodyShellRadiiM: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
       };
       const previous = new Map<BodyIdHex, LitRegime>([
         [airBody.id, "mesh"],
@@ -708,7 +714,12 @@ describe("the plan", () => {
       const { body, hosts } = scene(atDiameterPx(40), 30);
       const previous = new Map<BodyIdHex, LitRegime>([[body.id, "disc"]]);
       const without = planLitBodies([body], hosts, OPTIONS, previous);
-      const empty = planLitBodies([body], hosts, { ...OPTIONS, depthBodies: new Map() }, previous);
+      const empty = planLitBodies(
+        [body],
+        hosts,
+        { ...OPTIONS, depthBodyShellRadiiM: new Map() },
+        previous,
+      );
       expect(empty).toEqual(without);
     });
   });

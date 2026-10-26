@@ -40,9 +40,10 @@
 #
 # --atmosphere runs the atmosphere run instead (plan R08, R08.T10.b), on the kept `ATMOSPHERE TEST`
 # scene: the primary photorealistic, its atmosphere media awaited, the moonlit night captured from
-# the seat on TEST EARTH's night side, then a scripted free-camera flight to a few radii of each air
-# fixture, TEST EARTH SLAB, TEST MARS, TEST SATURN and TEST EARTH, each captured (a smoke flies to
-# TEST EARTH SLAB alone). Both settings by default, as --terrain; it writes
+# the seat on TEST EARTH's night side once AUTO has settled, then a scripted free-camera flight, a
+# climb towards TEST MOON first, to a few radii of each air fixture, TEST EARTH O3 SLAB, TEST MARS,
+# TEST SATURN and TEST EARTH, each captured (a smoke flies the climb and TEST EARTH O3 SLAB alone).
+# Both settings by default, as --terrain; it writes
 # <date>-<machine>-<setting>-atmosphere.json and .md
 # under target/views-check/atmosphere/ for a smoke and docs/measurements/atmosphere-flight/
 # otherwise, and exits 1 when a capture shows an ATMOSPHERE NOT AVAILABLE, ATMOSPHERE DATA INVALID

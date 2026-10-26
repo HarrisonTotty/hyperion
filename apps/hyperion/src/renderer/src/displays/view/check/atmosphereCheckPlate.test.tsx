@@ -54,7 +54,7 @@ describe("the atmosphere run's reading of the primary's label block (R08.T10.b)"
   });
 
   it("reads a request's status as a statement, though it is set as a status line", () => {
-    const rejected = "ATMOSPHERE REJECTED: for TEST MARS, server busy, reopen VIEW to retry";
+    const rejected = "ATMOSPHERE REJECTED: for TEST MARS, internal error, reopen VIEW to retry";
     primaryWith(["ATMOSPHERE: NOT RESOLVED", { text: rejected, standing: "fault" }], []);
     const plate = primaryPlate(document);
     expect([plate?.statements, plate?.faults]).toEqual([

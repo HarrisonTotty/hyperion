@@ -30,6 +30,7 @@ import {
   PRESET_NAMES,
   statementText,
   targetKey,
+  withSceneStarsLine,
 } from "./viewRun";
 
 /** Props of {@link InstrumentView}. */
@@ -238,10 +239,13 @@ export function InstrumentView({
           {run === null ? null : (
             <ViewLabelBlock
               id={labelId}
-              lines={instrumentLines(
-                labelLines(run, exposure, stale, shown?.contourIntervalM ?? null),
-                drawn,
-                instrument.skyLabel ?? (skyAwaiting ? { value: SKY_PENDING } : null),
+              lines={withSceneStarsLine(
+                instrumentLines(
+                  labelLines(run, exposure, stale, shown?.contourIntervalM ?? null),
+                  drawn,
+                  instrument.skyLabel ?? (skyAwaiting ? { value: SKY_PENDING } : null),
+                ),
+                shown?.sceneStars === true,
               )}
               statements={[]}
               countLine={null}

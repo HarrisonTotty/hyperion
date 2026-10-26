@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { dot, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
+import { add, dot, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
 import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
 import type { KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
 import { tableRadiusM } from "../atmosphere/hillaire";
@@ -8,6 +8,7 @@ import * as cases from "../atmosphere/reference/cases";
 import { twilightLimitRad } from "../atmosphere/sources";
 import { rotate } from "../camera/quaternion";
 import { SUN_RADIUS_M } from "../lighting/hostDisc";
+import { TEST_HULL } from "../scene/hull";
 import type { ViewBody, ViewScene } from "../scene/model";
 import {
   ATMOSPHERE_EARTH,
@@ -24,8 +25,11 @@ import {
   AtmosphereFixtures,
   atmosphereScene,
   atmosphereSeatM,
+  ATMOSPHERE_SHIP_ATTITUDE,
+  ATMOSPHERE_SHIP_BODY_FIXED_M,
   builtFigureOf,
   phaseAngleDeg,
+  prepareAtmosphereScene,
 } from "./atmosphereScene";
 import { AU_M } from "./kept";
 
@@ -67,9 +71,22 @@ function settingKinds(scene: ViewScene): ReadonlyArray<readonly [string, string 
 async function loadedScene(): Promise<ViewScene> {
   const { fixtures, land } = heldLoad();
   const scene = atmosphereScene(fixtures);
+  prepareAtmosphereScene(fixtures);
   land();
   await fixtures.ready();
   return scene.sceneAt(0);
+}
+
+/**
+ * A Lambert sphere's illuminance at TEST EARTH, relative: p (R ÷ Δ)² Φ(α) ÷ r², its sunlight
+ * falling as 1 ÷ r², Φ(α) = (sin α + (π − α) cos α) ÷ π.
+ */
+function lightAtEarth(body: ViewBody): number {
+  const toEarthM = sub(ATMOSPHERE_EARTH_CENTRE_M, body.centreM);
+  const alphaRad = (phaseAngleDeg(body.centreM, ATMOSPHERE_EARTH_CENTRE_M) * Math.PI) / 180;
+  const phase = (Math.sin(alphaRad) + (Math.PI - alphaRad) * Math.cos(alphaRad)) / Math.PI;
+  const p = body.appearance?.photometry.geometricAlbedo[1] ?? 0;
+  return (p * (body.radiusM / norm(toEarthM)) ** 2 * phase) / norm(body.centreM) ** 2;
 }
 
 /** A built medium of a setting, or a failure naming the body. */
@@ -87,7 +104,7 @@ describe("ATMOSPHERE TEST's bodies", () => {
     expect(scene.bodies.map((body) => [body.designation, body.kind])).toEqual([
       ["TEST STAR", "star"],
       ["TEST EARTH", "planet"],
-      ["TEST EARTH SLAB", "planet"],
+      ["TEST EARTH O3 SLAB", "planet"],
       ["TEST MARS", "planet"],
       ["TEST SATURN", "planet"],
       ["TEST MOON", "moon"],
@@ -117,14 +134,18 @@ describe("ATMOSPHERE TEST's bodies", () => {
     ]).toEqual([{ kind: "airless" }, ATMOSPHERE_MOON_RADIUS_M, true]);
   });
 
-  it("lays the fixtures out about 1 au from the star, a few 10⁸ to 10⁹ m apart", () => {
+  it("lays the fixtures out about 1 au from the star, TEST EARTH a quarter round from the rest", () => {
     const centres = [...ATMOSPHERE_FIXTURES.map((each) => each.centreM), ATMOSPHERE_MOON_CENTRE_M];
     const fromStar = centres.map((centre) => norm(centre) / AU_M);
-    const apart = centres.flatMap((a, i) => centres.slice(i + 1).map((b) => norm(sub(a, b))));
+    const others = ATMOSPHERE_FIXTURES.filter((each) => each.id !== ATMOSPHERE_EARTH);
+    const apart = others.flatMap((a, i) =>
+      others.slice(i + 1).map((b) => norm(sub(a.centreM, b.centreM))),
+    );
+    const fromEarth = others.map((each) => norm(sub(each.centreM, ATMOSPHERE_EARTH_CENTRE_M)));
     expect([
       fromStar.every((au) => au > 0.99 && au < 1.03),
-      Math.min(...apart) >= 3e8,
-      Math.max(...apart) <= 4e9,
+      Math.min(...apart) >= 9.9e8 && Math.max(...apart) <= 2e9,
+      fromEarth.every((m) => m > 1.4 * AU_M),
     ]).toEqual([true, true, true]);
   });
 
@@ -150,6 +171,7 @@ describe("ATMOSPHERE TEST's media", () => {
     const { fixtures, land } = heldLoad();
     const scene = atmosphereScene(fixtures);
     const before = settingKinds(scene.sceneAt(0));
+    prepareAtmosphereScene(fixtures);
     land();
     await fixtures.ready();
     expect([before, settingKinds(scene.sceneAt(1))]).toEqual([
@@ -161,6 +183,7 @@ describe("ATMOSPHERE TEST's media", () => {
   it("holds each built medium from frame to frame, so the cache makes its tables once", async () => {
     const { fixtures, land } = heldLoad();
     const scene = atmosphereScene(fixtures);
+    prepareAtmosphereScene(fixtures);
     land();
     await fixtures.ready();
     const [first, later] = [scene.sceneAt(0), scene.sceneAt(30)].map((frame) =>
@@ -251,16 +274,56 @@ describe("ATMOSPHERE TEST's media", () => {
     ]);
   });
 
-  it("leaves the bodies unset and logs once when the import fails", async () => {
+  it("states each air body failed, never unset, and logs once, when the import fails", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const fixtures = new AtmosphereFixtures(() => Promise.reject(new Error("no optics")));
+    const load = vi.fn<() => Promise<AtmosphereFixtureCases>>(() =>
+      Promise.reject(new Error("no optics")),
+    );
+    const fixtures = new AtmosphereFixtures(load);
     const scene = atmosphereScene(fixtures);
-    atmosphereScene(fixtures);
+    prepareAtmosphereScene(fixtures);
     await fixtures.ready();
-    expect([settingKinds(scene.sceneAt(0)), error.mock.calls.length]).toEqual([
-      ATMOSPHERE_FIXTURES.map(({ designation }) => [designation, "unset"]),
-      1,
+    // The page's load is once: VIEW shown again does not retry it (decision-r08-t10b-ux §4).
+    prepareAtmosphereScene(fixtures);
+    await fixtures.ready();
+    expect([
+      settingKinds(scene.sceneAt(0)),
+      error.mock.calls.length,
+      load.mock.calls.length,
+    ]).toEqual([ATMOSPHERE_FIXTURES.map(({ designation }) => [designation, "failed"]), 1, 1]);
+  });
+
+  it("starts nothing as the scene is made, its load from prepare alone", async () => {
+    const { fixtures, land } = heldLoad();
+    const scene = atmosphereScene(fixtures);
+    const before = fixtures.media.kind;
+    expect(() => {
+      land();
+    }).toThrow("the load was never asked for");
+    prepareAtmosphereScene(fixtures);
+    land();
+    await fixtures.ready();
+    expect([before, settingKinds(scene.sceneAt(0))[0]]).toEqual([
+      "loading",
+      ["TEST EARTH", "medium"],
     ]);
+  });
+
+  it("shades each air body as its medium's ground, provisional, BODY PHOTOMETRY stated", async () => {
+    const scene = await loadedScene();
+    // A Lambert sphere's Bond albedo is p q, q = 3 ÷ 2: the ground the march draws at the limb.
+    const shaded = ATMOSPHERE_FIXTURES.map(({ designation }) => {
+      const body = bodyNamed(scene, designation);
+      const ground = builtOf(body.atmosphere, designation).medium.groundAlbedo;
+      const p = body.appearance?.photometry.geometricAlbedo ?? [0, 0, 0];
+      return [
+        p.every((each, i) => Math.abs(each * 1.5 - (ground[i] ?? Number.NaN)) < 1e-12),
+        body.appearance?.labels,
+      ];
+    });
+    expect(shaded).toEqual(
+      ATMOSPHERE_FIXTURES.map(() => [true, ["BODY PHOTOMETRY: NOT YET MODELLED"]]),
+    );
   });
 });
 
@@ -271,6 +334,35 @@ describe("ATMOSPHERE TEST's moonlit night", () => {
   /** The elevation of `towardM`'s direction from the seat over its local horizontal, deg. */
   const elevationDeg = (towardM: typeof seatM): number =>
     (Math.asin(dot(normalise(sub(towardM, seatM)), ATMOSPHERE_SHIP_UP)) * 180) / Math.PI;
+
+  it("stands the hull, pitched up at the moon, clear of the ground", () => {
+    const lowestM = Math.min(
+      ...TEST_HULL.vertices.map(
+        (vertex) =>
+          norm(add(ATMOSPHERE_SHIP_BODY_FIXED_M, rotate(ATMOSPHERE_SHIP_ATTITUDE, vertex))) -
+          cases.EARTH_REFERENCE_RADIUS_M,
+      ),
+    );
+    expect([lowestM > 0.5, lowestM < 2]).toEqual([true, true]);
+  });
+
+  it("is lit by TEST MOON alone: each other body under 1% of its light, below the horizon", () => {
+    const scene = atmosphereScene(heldLoad().fixtures).sceneAt(0);
+    const moon = lightAtEarth(bodyNamed(scene, "TEST MOON"));
+    const others = ATMOSPHERE_FIXTURES.filter((each) => each.id !== ATMOSPHERE_EARTH).map(
+      ({ designation }) => {
+        const body = bodyNamed(scene, designation);
+        return [designation, lightAtEarth(body) / moon < 0.01, elevationDeg(body.centreM) < 0];
+      },
+    );
+    expect(others).toEqual(
+      ATMOSPHERE_FIXTURES.filter((each) => each.id !== ATMOSPHERE_EARTH).map(({ designation }) => [
+        designation,
+        true,
+        true,
+      ]),
+    );
+  });
 
   it("shows TEST MOON full from the seat: under 5° of phase", () => {
     expect(phaseAngleDeg(ATMOSPHERE_MOON_CENTRE_M, seatM)).toBeLessThan(5);
@@ -312,7 +404,7 @@ describe("ATMOSPHERE TEST's moonlit night", () => {
         180) /
       Math.PI;
     const depressionDeg = -elevationDeg(vec3(0, 0, 0));
-    expect([heightM > 0 && heightM < 10, depressionDeg > limitDeg, depressionDeg >= 25]).toEqual([
+    expect([heightM > 10 && heightM < 20, depressionDeg > limitDeg, depressionDeg >= 25]).toEqual([
       true,
       true,
       true,

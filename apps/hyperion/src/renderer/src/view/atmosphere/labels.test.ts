@@ -151,6 +151,19 @@ describe("atmosphereProblemLines", () => {
     ]);
   });
 
+  it("gives a kept scene's failed load relaunch to retry, naming every body with air (decision-r08-t10b-ux §4)", () => {
+    const lines = atmosphereProblemLines(
+      ["TEST SATURN", "TEST EARTH", "TEST MARS", "TEST EARTH O3 SLAB"].map((designation) => ({
+        designation,
+        problem: { kind: "loadFailed" } as const,
+      })),
+    );
+    expect(lines.fault).toEqual([
+      "ATMOSPHERE NOT AVAILABLE: computation failed for TEST EARTH, TEST EARTH O3 SLAB, TEST MARS " +
+        "and TEST SATURN, relaunch to retry",
+    ]);
+  });
+
   it("states nothing for a view with no problems", () => {
     expect(atmosphereProblemLines([])).toEqual({ plate: [], fault: [] });
   });

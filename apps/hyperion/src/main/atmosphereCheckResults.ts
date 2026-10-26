@@ -1,7 +1,7 @@
 /**
  * The atmosphere run's results file and its summary (plan R08, R08.T10.b): what the renderer
- * recorded of its hand flight on `ATMOSPHERE TEST`, each air fixture captured from a few radii and
- * then the moonlit night from the seat, judged by its captures.
+ * recorded of its hand flight on `ATMOSPHERE TEST`, the moonlit night captured from the seat and
+ * then each air fixture from a few radii, judged by its captures.
  *
  * @remarks
  * The verdict is the captures' alone ({@link atmosphereCaptureFailures}): the run passes when it
@@ -23,8 +23,9 @@ import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type {
-  AtmosphereCheckCapture,
   AtmosphereCheckRecord,
+  AtmosphereFixtureCapture,
+  AtmosphereNightCapture,
   SpikePassTimer,
   ViewsCheckCanvas,
 } from "../preload/api";
@@ -41,8 +42,12 @@ import type { TerrainCheckRunInput } from "./terrainCheckResults";
 /** The file's schema name. */
 export const ATMOSPHERE_CHECK_SCHEMA = "hyperion.views-check.atmosphere-results";
 
-/** The schema's version; bumped with any change to the file's shape. */
-export const ATMOSPHERE_CHECK_VERSION = 1;
+/**
+ * The schema's version; bumped with any change to the file's shape: 2 with each capture's `kind`
+ * (a fixture's or the night's, the night's with no designation, range or phase) and its
+ * `exposureSettleMs`.
+ */
+export const ATMOSPHERE_CHECK_VERSION = 2;
 
 /**
  * The run, as the main process describes it at its start: the terrain run's description, without
@@ -80,12 +85,17 @@ export function atmosphereFaultKind(line: string): AtmosphereFaultKind {
   return ATMOSPHERE_FAULT.test(line) ? "atmosphere" : "graphics";
 }
 
-/** One capture's figures: its record, its fault lines classed, and its verdict. */
-export interface AtmosphereCaptureFigures extends Omit<AtmosphereCheckCapture, "faults"> {
+/** A capture's judgement: its fault lines classed, and its verdict. */
+export interface AtmosphereCaptureJudgement {
   readonly faults: ReadonlyArray<AtmosphereFaultLine>;
   /** `pass` when its fault line held no line. */
   readonly verdict: Verdict;
 }
+
+/** One capture's figures, of either kind: its record, its fault lines classed, and its verdict. */
+export type AtmosphereCaptureFigures =
+  | (Omit<AtmosphereFixtureCapture, "faults"> & AtmosphereCaptureJudgement)
+  | (Omit<AtmosphereNightCapture, "faults"> & AtmosphereCaptureJudgement);
 
 /** A results file of the atmosphere run. */
 export interface AtmosphereCheckResults {
@@ -246,6 +256,24 @@ export function rangeText(rangeM: number | null): string {
   return rangeM < 1e7 ? `${(rangeM / 1000).toFixed(0)} km` : `${(rangeM / 1e6).toFixed(1)} Mm`;
 }
 
+/** A capture's designation, range and phase cells: the fixture's, or `—` for the night. */
+function placeCells(capture: AtmosphereCaptureFigures): readonly [string, string, string] {
+  let cells: readonly [string, string, string];
+  switch (capture.kind) {
+    case "fixture":
+      cells = [
+        cell(capture.designation),
+        rangeText(capture.rangeM),
+        `${capture.phaseDeg.toFixed(1)}°`,
+      ];
+      break;
+    case "night":
+      cells = ["—", "—", "—"];
+      break;
+  }
+  return cells;
+}
+
 /** The results' summary, for a person reading the record. */
 export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string {
   const { run, findings } = results;
@@ -255,7 +283,8 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
       capture.faults.length === 0
         ? "—"
         : capture.faults.map((each) => `${each.kind}: ${each.line}`).join("; ");
-    return `| ${cell(capture.label)} | ${cell(capture.designation ?? "—")} | ${cell(capture.camera ?? "—")} | ${rangeText(capture.rangeM)} | ${capture.phaseDeg === null ? "—" : `${capture.phaseDeg.toFixed(1)}°`} | ${cell(capture.exposure ?? "—")} | ${String(frames.draws)} | ${msText(frames.intervalMedianMs, 1)} / ${msText(frames.intervalP95Ms, 1)} | ${msText(frames.gpuMedianMs, 2)} / ${msText(frames.gpuP95Ms, 2)} | ${cell(capture.statements.length === 0 ? "—" : capture.statements.join(" · "))} | ${cell(faults)} |`;
+    const [designation, range, phase] = placeCells(capture);
+    return `| ${cell(capture.label)} | ${designation} | ${cell(capture.camera ?? "—")} | ${range} | ${phase} | ${cell(capture.exposure ?? "—")} | ${(capture.exposureSettleMs / 1000).toFixed(1)} | ${String(frames.draws)} | ${msText(frames.intervalMedianMs, 1)} / ${msText(frames.intervalP95Ms, 1)} | ${msText(frames.gpuMedianMs, 2)} / ${msText(frames.gpuP95Ms, 2)} | ${cell(capture.statements.length === 0 ? "—" : capture.statements.join(" · "))} | ${cell(faults)} |`;
   });
   const errors = findings.consoleErrors;
   return [
@@ -271,8 +300,8 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
     "",
     "## Captures (provisional times)",
     "",
-    "| Capture | Designation | Camera | Range | Phase | Exposure | Draws | Frame interval median / p95 (ms) | GPU median / p95 (ms) | Statements | Fault lines |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Capture | Designation | Camera | Range | Phase | Exposure | AUTO settled (s) | Draws | Frame interval median / p95 (ms) | GPU median / p95 (ms) | Statements | Fault lines |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
     "",
     "## Reasons",

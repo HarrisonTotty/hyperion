@@ -7,27 +7,34 @@
  * - **Its bodies.** A Sun-like star, `TEST STAR`, at the barycentre, lit by the scene's own host disc
  *   (`sunLikeHostDisc`, as `PHASE TEST`'s); four air fixtures about 1 au out, each carrying a
  *   reference case's medium (`reference/cases.ts`): `TEST EARTH` (`earth`, the measured Earth),
- *   `TEST EARTH SLAB` (`earth-ozone-slab`, T6.d's 300 DU slab), `TEST MARS` (`mars`, with its hand
+ *   `TEST EARTH O3 SLAB` (`earth-ozone-slab`, T6.d's 300 DU slab), `TEST MARS` (`mars`, with its hand
  *   dust) and `TEST SATURN` (`saturn-oblate`, the Saturn-class air on Saturn's level spheroid, its
  *   pole +z); and `TEST MOON`, airless, of the Moon's radius, full in `TEST EARTH`'s night sky.
  *   R08.T12.b.2's thick cases, Venus at 92 and 58 bar, Titan and the giant's deck, do not exist yet
  *   and are left out.
- * - **Its layout** ({@link ATMOSPHERE_FIXTURES}): each air fixture after `TEST EARTH` lies
- *   {@link ATMOSPHERE_LEG_M} from the one before, half of it farther from the star and the rest
- *   across its light, each leg turned a quarter from the last about the star's direction, so that a
- *   camera flown from one to the next at a few radii sees each at about 60° of phase, passing none
- *   on its way, and no fixture stands in another's shadow.
+ * - **Its layout** ({@link ATMOSPHERE_FIXTURES}): `TEST EARTH` 1 au out along +x, and the other air
+ *   fixtures a quarter of the way round the star, 1.41 au from it, so that its night is lit by its
+ *   moon alone; there each after `TEST EARTH O3 SLAB` lies {@link ATMOSPHERE_LEG_M} from the one before,
+ *   half of it farther from the star and the rest across its light, each leg turned a quarter from
+ *   the last about the star's direction, so that a camera flown from one to the next at a few radii
+ *   sees each at about 60° of phase, passing none on its way, and no fixture stands in another's
+ *   shadow. The legs between `TEST EARTH` and the others come on each at 45°.
  * - **Its media** are the cases' own, loaded lazily: importing `reference/cases.ts` pulls
- *   `hillaire.ts` and the optics' data, which no other kept scene needs, so the scene starts the
- *   import as it is made ({@link AtmosphereFixtures.ready}) and states each air body `loading`
+ *   `hillaire.ts` and the optics' data, which no other kept scene needs, so the import starts when
+ *   `VIEW` chooses the scene (its `SceneOption`'s `prepare`, from an effect;
+ *   {@link prepareAtmosphereScene}), never as the scene is made, and each air body is stated `loading`
  *   (`ATMOSPHERE: PENDING`) until it lands, then its case's medium, built once and held, since the
- *   atmosphere cache compares a kept medium by identity. A failed import is logged once and leaves
- *   the bodies unset (`ATMOSPHERE: NOT YET MODELLED`). Each air body is drawn on its medium's own
- *   figure, the one its tables take (`hillaire.ts`'s `tablesFigureOf`): a sphere of the case's
- *   ground radius, or Saturn's spheroid; before the import lands, on the same figures restated here,
- *   which the test holds to the cases'.
+ *   atmosphere cache compares a kept medium by identity. A failed import is logged once and states
+ *   each air body `failed`, item 6's failure, which a page cannot retry: `ATMOSPHERE NOT AVAILABLE:
+ *   computation failed for <designations>, relaunch to retry` (`decision-r08-t10b-ux.md`, item 4),
+ *   standing when `VIEW` is shown again. Each air body is drawn on its medium's own figure, the one its tables take
+ *   (`hillaire.ts`'s `tablesFigureOf`): a sphere of the case's ground radius, or Saturn's spheroid;
+ *   before the import lands, on the same figures restated here, which the test holds to the cases'.
+ *   Its disc is a grey Lambert sphere of its medium's ground albedo, provisional
+ *   (`BODY PHOTOMETRY: NOT YET MODELLED`), so that the ground the composite's march draws at the limb
+ *   is the disc's (`decision-r08-t10b-depth.md`, text B).
  * - **The moonlit night.** The own ship, `TEST HULL`, stands body-fixed {@link ATMOSPHERE_SHIP_HEIGHT_M}
- *   over `TEST EARTH`'s ground on its night side, the star {@link ATMOSPHERE_SUN_DEPRESSION_DEG}
+ *   over `TEST EARTH`'s ground on its night side, pitched up at the moon and clear of the ground, the star {@link ATMOSPHERE_SUN_DEPRESSION_DEG}
  *   below the horizon there, beyond the measured Earth's twilight limit (about 20°, `sources.ts`'s
  *   `twilightLimitRad`), and its seat looks at `TEST MOON`, near the anti-solar point, out of
  *   `TEST EARTH`'s shadow and high in the sky. The stage starts at the seat.
@@ -41,7 +48,11 @@
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import type { BodyPhotometry, WireAppearance } from "../appearance/fromWire";
+import {
+  type BodyPhotometry,
+  PROVISIONAL_LABELS,
+  type WireAppearance,
+} from "../appearance/fromWire";
 import { lawFor } from "../appearance/phase";
 import type { BuiltAtmosphere, KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
 import type { ReferenceCase } from "../atmosphere/reference/cases";
@@ -85,7 +96,7 @@ const BODY_INDEX_BASE = 0x40;
 /** `TEST EARTH`. */
 export const ATMOSPHERE_EARTH = keptBody(BODY_INDEX_BASE + 1);
 
-/** `TEST EARTH SLAB`. */
+/** `TEST EARTH O3 SLAB`. */
 export const ATMOSPHERE_EARTH_SLAB = keptBody(BODY_INDEX_BASE + 2);
 
 /** `TEST MARS`. */
@@ -121,6 +132,11 @@ export interface AtmosphereFixture {
   readonly figure: AtmosphereFixtureFigure;
   /** Whether it has no surface for a survey line: the giant. */
   readonly surfaceless: boolean;
+  /**
+   * Its medium's ground albedo, grey, restated from its case as its figure is (the test holds the
+   * two equal): its disc's Lambert sphere is shaded with p = A ÷ 1.5, its Bond albedo A.
+   */
+  readonly groundAlbedo: number;
 }
 
 /** The distance from each air fixture to the next, m. */
@@ -129,27 +145,32 @@ export const ATMOSPHERE_LEG_M = 1e9;
 /** `TEST EARTH`'s centre: 1 au out along +x, at rest. */
 export const ATMOSPHERE_EARTH_CENTRE_M: Vec3 = vec3(AU_M, 0, 0);
 
+/**
+ * `TEST EARTH O3 SLAB`'s centre, where the other air fixtures' legs start: 1 au out along +y, a
+ * quarter of the way round the star from `TEST EARTH` and 1.41 au from it, so that the moonlit
+ * night is lit by `TEST MOON` alone. Seen from `TEST EARTH` the others stand 45° from the star,
+ * below the night horizon, and the brightest, `TEST SATURN`, gives it about 1% of the Moon's light
+ * (at 1.7 × 10⁹ m, as the legs first had it, 127 times: the flight of 2026-10-26).
+ */
+const FIXTURES_START_M: Vec3 = vec3(0, AU_M, 0);
+
 /** √3 ÷ 2 of a leg: its part across the star's light. */
 const ACROSS_M = (Math.sqrt(3) / 2) * ATMOSPHERE_LEG_M;
 
 /**
- * The legs from one air fixture to the next, in order: each half away from the star (+x) and the
- * rest across its light, so that the next is seen at 60° of phase from the one before, turning a
- * quarter about the star's direction each time (+y, +z, −y), so that no leg runs on through the
- * fixture it leaves, and no fixture stands behind another, in its shadow.
+ * The legs from one air fixture to the next after `TEST EARTH O3 SLAB`, in order: each half away
+ * from the star (+y) and the rest across its light, so that the next is seen at 60° of phase from
+ * the one before, turning a quarter about the star's direction (+z, then +x), so that no leg runs
+ * on through the fixture it leaves, and no fixture stands behind another, in its shadow.
  */
 const LEG_STEPS: ReadonlyArray<Vec3> = [
-  vec3(0.5 * ATMOSPHERE_LEG_M, ACROSS_M, 0),
-  vec3(0.5 * ATMOSPHERE_LEG_M, 0, ACROSS_M),
-  vec3(0.5 * ATMOSPHERE_LEG_M, -ACROSS_M, 0),
+  vec3(0, 0.5 * ATMOSPHERE_LEG_M, ACROSS_M),
+  vec3(ACROSS_M, 0.5 * ATMOSPHERE_LEG_M, 0),
 ];
 
-/** The air fixture `legs` legs on from `TEST EARTH`. */
+/** The air fixture `legs` legs on from `TEST EARTH O3 SLAB`. */
 function legsOn(legs: number): Vec3 {
-  return LEG_STEPS.slice(0, legs).reduce(
-    (atM, stepM) => add(atM, stepM),
-    ATMOSPHERE_EARTH_CENTRE_M,
-  );
+  return LEG_STEPS.slice(0, legs).reduce((atM, stepM) => add(atM, stepM), FIXTURES_START_M);
 }
 
 /**
@@ -167,6 +188,15 @@ const SATURN_FIGURE: AtmosphereFixtureFigure = {
   polarRadiusM: 54_364e3,
 };
 
+/** Earth's ground albedo in `earth` and `earth-ozone-slab`: 0.1 (`earth.ts`'s, Bruneton 2017's). */
+const EARTH_GROUND_ALBEDO = 0.1;
+
+/** Mars's ground albedo in `mars`: 0.25 (`reference/cases.ts`' `MARS_GROUND_ALBEDO`). */
+const MARS_GROUND_ALBEDO = 0.25;
+
+/** The Saturn-class ground in `saturn-oblate`: 0.3 (`SATURN_OBLATE_GROUND_ALBEDO`). */
+const SATURN_GROUND_ALBEDO = 0.3;
+
 /** A sphere of `radiusM`. */
 function sphere(radiusM: number): AtmosphereFixtureFigure {
   return { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
@@ -181,30 +211,34 @@ export const ATMOSPHERE_FIXTURES: ReadonlyArray<AtmosphereFixture> = [
     centreM: ATMOSPHERE_EARTH_CENTRE_M,
     figure: sphere(EARTH_SPHERE_M),
     surfaceless: false,
+    groundAlbedo: EARTH_GROUND_ALBEDO,
   },
   {
     id: ATMOSPHERE_EARTH_SLAB,
-    designation: "TEST EARTH SLAB",
+    designation: "TEST EARTH O3 SLAB",
     caseName: "earth-ozone-slab",
-    centreM: legsOn(1),
+    centreM: legsOn(0),
     figure: sphere(EARTH_SPHERE_M),
     surfaceless: false,
+    groundAlbedo: EARTH_GROUND_ALBEDO,
   },
   {
     id: ATMOSPHERE_MARS,
     designation: "TEST MARS",
     caseName: "mars",
-    centreM: legsOn(2),
+    centreM: legsOn(1),
     figure: sphere(MARS_SPHERE_M),
     surfaceless: false,
+    groundAlbedo: MARS_GROUND_ALBEDO,
   },
   {
     id: ATMOSPHERE_SATURN,
     designation: "TEST SATURN",
     caseName: "saturn-oblate",
-    centreM: legsOn(3),
+    centreM: legsOn(2),
     figure: SATURN_FIGURE,
     surfaceless: true,
+    groundAlbedo: SATURN_GROUND_ALBEDO,
   },
 ];
 
@@ -233,8 +267,13 @@ export const ATMOSPHERE_MOON_CENTRE_M: Vec3 = add(
 /** The own ship, the seat camera's. */
 export const ATMOSPHERE_SHIP = "atmosphere-test-ship";
 
-/** The ship's height over `TEST EARTH`'s ground, m. */
-export const ATMOSPHERE_SHIP_HEIGHT_M = 2;
+/**
+ * The ship's height over `TEST EARTH`'s ground, m: its origin's, 10 m, so that the hull, 20 m long
+ * and pitched up some 47° at the moon, stands clear of the ground, its stern's lowest corner about
+ * 1 m up (`TEST_HULL`'s stern at z = +10 m, its keel at y = −2.5 m); the seat's eye stands about
+ * 14.6 m up.
+ */
+export const ATMOSPHERE_SHIP_HEIGHT_M = 10;
 
 /**
  * The star's depression below the horizon at the ship, degrees: 45°, well beyond the measured
@@ -304,10 +343,12 @@ function lambertPhotometry(p: number): BodyPhotometry {
 }
 
 /**
- * The air fixtures' photometry: a Lambert sphere of p 0.3, a hand value standing for a ground under
- * its air, which the scene's media light and veil.
+ * An air fixture's photometry: a Lambert sphere of its medium's ground albedo A, p = A ÷ 1.5 in
+ * every channel (q = 3 ÷ 2), the ground the scene's media light and veil.
  */
-const AIR_PHOTOMETRY = lambertPhotometry(0.3);
+function airPhotometry(fixture: AtmosphereFixture): BodyPhotometry {
+  return lambertPhotometry(fixture.groundAlbedo / 1.5);
+}
 
 /**
  * `TEST MOON`'s photometry: a Lambert sphere of the Moon's visual geometric albedo, 0.12 (NASA Moon
@@ -404,6 +445,7 @@ export type AtmosphereFixtureMedia =
 
 /** No medium in force on a kept body: the setting before an import lands, and after one fails. */
 const LOADING: KeptBodyAtmosphere = { kind: "loading" };
+const FAILED: KeptBodyAtmosphere = { kind: "failed" };
 const UNSET: KeptBodyAtmosphere = { kind: "unset" };
 const AIRLESS: KeptBodyAtmosphere = { kind: "airless" };
 
@@ -432,7 +474,8 @@ export class AtmosphereFixtures {
 
   /**
    * Starts the load where it has not started, and returns what settles once it has landed or
-   * failed; it never rejects, a failure being the media's `failed`.
+   * failed; it never rejects, a failure being the media's `failed`, held for the page: a dynamic
+   * import that failed stays failed in it (`decision-r08-t10b-ux.md`, item 4).
    */
   ready(): Promise<void> {
     this.#ready ??= this.#landed();
@@ -461,6 +504,18 @@ export class AtmosphereFixtures {
 
 /** The page's media, from the lazy import of `reference/cases.ts`, shared by every scene made. */
 const PAGE_FIXTURES = new AtmosphereFixtures(() => import("../atmosphere/reference/cases"));
+
+/**
+ * Starts the loading of `ATMOSPHERE TEST`'s media on the page where it has not started (its
+ * `SceneOption`'s `prepare`): called from `VIEW`'s effect when the scene is chosen, never as the
+ * scene is made.
+ */
+export function prepareAtmosphereScene(fixtures: AtmosphereFixtures = PAGE_FIXTURES): void {
+  fixtures.ready().catch((error: unknown) => {
+    // `ready` holds a failure as the media's `failed`; anything else reaching here is a bug.
+    console.error("ATMOSPHERE TEST: the fixtures' media could not be started:", error);
+  });
+}
 
 /**
  * The page's fixtures' media (`ATMOSPHERE TEST`'s as `SCENE_OPTIONS` makes it), for a run that
@@ -494,7 +549,11 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-/** The stars' temperatures, K, in turn: M, K, G, F and A dwarfs' about, for their colours. */
+/**
+ * The stars' temperatures, K, in turn, for their colours: about an M2.5, K4, G1, F1 and A0 dwarf's
+ * (Pecaut & Mamajek 2013, ApJS 208, 9, Table 5, Mamajek's update of 2022.04.16: 3,470, 4,600,
+ * 5,860, 7,020 and 9,700 K).
+ */
 const STAR_TEMPERATURES_K = [3_500, 4_500, 5_800, 7_000, 9_500] as const;
 
 /**
@@ -540,7 +599,7 @@ function airBody(fixture: AtmosphereFixture, media: AtmosphereFixtureMedia): Vie
       setting = LOADING;
       break;
     case "failed":
-      setting = UNSET;
+      setting = FAILED;
       break;
     case "ready":
       held = media.media.get(fixture.id);
@@ -549,9 +608,10 @@ function airBody(fixture: AtmosphereFixture, media: AtmosphereFixtureMedia): Vie
   }
   const figure = held?.figure ?? fixture.figure;
   const appearance: WireAppearance = {
-    photometry: AIR_PHOTOMETRY,
+    photometry: airPhotometry(fixture),
     figure: { ...figure, pole: POLE },
-    labels: [],
+    // A hand grey Lambert sphere, provisional, as `PHASE TEST`'s bodies are.
+    labels: PROVISIONAL_LABELS,
     bondRatioFinding: null,
   };
   return {
@@ -608,7 +668,7 @@ function bodiesOf(media: AtmosphereFixtureMedia): ReadonlyArray<ViewBody> {
           polarRadiusM: ATMOSPHERE_MOON_RADIUS_M,
           pole: POLE,
         },
-        labels: [],
+        labels: PROVISIONAL_LABELS,
         bondRatioFinding: null,
       },
       symbol: bodyKindSymbol("moon"),
@@ -620,14 +680,13 @@ function bodiesOf(media: AtmosphereFixtureMedia): ReadonlyArray<ViewBody> {
 
 /**
  * The atmosphere test scene: the air fixtures and the moonlit night, the seat camera on the own
- * ship standing on `TEST EARTH`'s night side; it starts its media's load as it is made.
+ * ship standing on `TEST EARTH`'s night side. Making it starts nothing: its media load from
+ * {@link prepareAtmosphereScene}, which `VIEW` calls from an effect when it chooses the scene.
  *
  * @param fixtures - Where its media come from: the page's, from the lazy import of the reference
  *   cases, unless a test gives its own.
  */
 export function atmosphereScene(fixtures: AtmosphereFixtures = PAGE_FIXTURES): KeptScene {
-  // It never rejects: a failed load is logged there and held as the media's `failed`.
-  void fixtures.ready();
   // The bodies made again only when the media change, so that a frame's settings and figures are
   // the ones the frame before held.
   let shown: { readonly media: AtmosphereFixtureMedia; readonly bodies: ReadonlyArray<ViewBody> } =

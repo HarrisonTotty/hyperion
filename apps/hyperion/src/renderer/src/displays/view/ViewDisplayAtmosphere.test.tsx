@@ -94,7 +94,7 @@ describe("the atmosphere on a live VIEW (R08.T10.b)", () => {
     view.advance(600);
     await settle();
     const rejected = within(primaryLabelBlock())
-      .queryAllByRole("status")
+      .getAllByRole("status")
       .map((output) => output.textContent)
       .filter((text) => text.startsWith("ATMOSPHERE REJECTED"));
     expect(rejected).toEqual([

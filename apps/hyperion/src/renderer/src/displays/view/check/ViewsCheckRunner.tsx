@@ -108,6 +108,11 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
               api,
               views: probe,
               fixtures: pageAtmosphereFixtures(),
+              // Through the probe's frame clock, which stamps VIEW's own callbacks the same.
+              frame: () =>
+                new Promise<number>((resolve) => {
+                  window.requestAnimationFrame(resolve);
+                }),
               timing: api.launch.smoke
                 ? ATMOSPHERE_CHECK_TIMING.smoke
                 : ATMOSPHERE_CHECK_TIMING.full,

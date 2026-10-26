@@ -224,6 +224,7 @@ import {
   surveyEdgeNotes,
   targetKey,
   type ViewRun,
+  withSceneStarsLine,
 } from "./viewRun";
 
 /** The shortest time between two changes of the view's readouts: 4 Hz (Design note 18). */
@@ -523,6 +524,11 @@ interface Published {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style the frame was drawn in, which the label block states (R07.T8.a). */
   readonly drawnStyle: RenderStyle;
+  /**
+   * Whether the frame drew the kept scene's own stars (`ViewFrameDrawn.sceneStars`), which the
+   * `STARS` line then states as `SCENE TEST FIELD`, with no count line (R08.T10.b).
+   */
+  readonly sceneStars: boolean;
   /** The photorealistic view's standing (`PhotorealRenderer.status`). */
   readonly photoreal: PhotorealStatus;
   /**
@@ -754,6 +760,7 @@ function ViewStage({
     run: initial,
     anchors: [],
     drawnStyle: initial.camera.style,
+    sceneStars: false,
     photoreal: "idle",
     terrain: null,
     surveyEdges: NO_SURVEY_EDGES,
@@ -1075,6 +1082,7 @@ function ViewStage({
     let animationFrame = -1;
     let primaryMs: number | null = null;
     let drawnStyle: RenderStyle = "wireframe";
+    let sceneStars = false;
     // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
     // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
     // applied to it when the display's control changes to one the controller did not publish.
@@ -1295,6 +1303,7 @@ function ViewStage({
           atmosphereReport = drawn.atmosphere;
           // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
           drawnStyle = drawn.drawnStyle;
+          sceneStars = drawn.sceneStars;
           placeMarkLabels(
             labelsRef.current,
             anchors,
@@ -1346,6 +1355,7 @@ function ViewStage({
           run,
           anchors,
           drawnStyle,
+          sceneStars,
           photoreal: drawer?.photorealStatus ?? "idle",
           terrain: terrainAnnunciation,
           surveyEdges,
@@ -1574,7 +1584,10 @@ function ViewStage({
     withMeterLine(
       withQualityLine(
         withDrawnStyle(
-          withSkyLine(labelLines(shown.run, exposure, stale, shown.contourIntervalM), skyLine),
+          withSceneStarsLine(
+            withSkyLine(labelLines(shown.run, exposure, stale, shown.contourIntervalM), skyLine),
+            shown.sceneStars,
+          ),
           shown.drawnStyle,
         ),
         setting,
@@ -1583,7 +1596,8 @@ function ViewStage({
     ),
     placeLines(place, stale),
   );
-  const primaryCount = viewSky.drawn === null ? countLine : null;
+  // The count line counts the range query's rows: none while the scene's own field is drawn.
+  const primaryCount = viewSky.drawn === null && !shown.sceneStars ? countLine : null;
 
   // The plates as laid out after each render, for the room's next decision (R10.T12.b): read from
   // the DOM, an external system, and kept only where they changed.
@@ -2207,6 +2221,12 @@ function ViewPanels({
   // from here, above the stage that a new scene remounts, so that a scene in the same system asks
   // nothing again (Design note 19).
   const keptStart = useMemo(() => option.make().sceneAt(0), [option]);
+  // What the chosen scene loads for itself, started here and not as it is made, in render
+  // (`ATMOSPHERE TEST`'s media, R08.T10.b). The load is the page's, shared by every stage that
+  // chooses the scene, so leaving the scene stops nothing.
+  useEffect(() => {
+    option.prepare?.();
+  }, [option]);
   const interim = useInterimStars(
     server === null
       ? {

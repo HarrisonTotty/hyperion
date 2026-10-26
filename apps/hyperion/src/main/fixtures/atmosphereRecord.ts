@@ -4,9 +4,10 @@
  * thing each.
  */
 import type {
-  AtmosphereCheckCapture,
   AtmosphereCheckFrames,
   AtmosphereCheckRecord,
+  AtmosphereFixtureCapture,
+  AtmosphereNightCapture,
 } from "../../preload/api";
 
 /** The primary's frames over a capture's window, ending at `toMs`. */
@@ -29,14 +30,16 @@ export function fixtureCapture(
   phaseDeg: number,
   fromMs: number,
   atMs: number,
-): AtmosphereCheckCapture {
+): AtmosphereFixtureCapture {
   return {
+    kind: "fixture",
     label: `fixture-${designation.toLowerCase().replaceAll(" ", "-")}`,
     designation,
-    camera: "FREE · RATE 1.00 Mm/s",
+    camera: "FREE · RATE 316 km/s",
     rangeM,
     phaseDeg,
     exposure: "EV100 12.0 AUTO",
+    exposureSettleMs: 2_000,
     atMs,
     frames: frames(fromMs, atMs),
     statements: ["PHOTOREALISTIC", `TARGET ${designation}`],
@@ -44,32 +47,31 @@ export function fixtureCapture(
   };
 }
 
-/** The moonlit night from the seat on TEST EARTH's night side. */
-export const MOONLIT_NIGHT: AtmosphereCheckCapture = {
+/** The moonlit night from the seat on TEST EARTH's night side, the run's first capture. */
+export const MOONLIT_NIGHT: AtmosphereNightCapture = {
+  kind: "night",
   label: "moonlit-night",
-  designation: null,
   camera: "SEAT",
-  rangeM: null,
-  phaseDeg: null,
-  exposure: "EV100 -1.0 AUTO",
-  atMs: 98_000,
-  frames: frames(80_000, 98_000),
+  exposure: "EV100 -3.0 AUTO",
+  exposureSettleMs: 22_000,
+  atMs: 20_000,
+  frames: frames(5_000, 20_000),
   statements: ["PHOTOREALISTIC", "NIGHT SIDE"],
   faults: [],
 };
 
-/** The passing record: four air fixtures, then the night. */
+/** The passing record: the night, then the four air fixtures in the tour's order. */
 export const ATMOSPHERE_RECORD: AtmosphereCheckRecord = {
   timer: "full",
   devicePixelRatio: 1,
   canvas: { widthPx: 1126, heightPx: 906 },
   mediaReadyMs: 4_200,
   captures: [
-    fixtureCapture("TEST EARTH", 2.5e7, 60, 5_000, 20_000),
-    fixtureCapture("TEST EARTH SLAB", 2.5e7, 60, 20_000, 40_000),
-    fixtureCapture("TEST MARS", 1.4e7, 45, 40_000, 60_000),
-    fixtureCapture("TEST SATURN", 3.0e8, 30, 60_000, 80_000),
     MOONLIT_NIGHT,
+    fixtureCapture("TEST EARTH O3 SLAB", 5.1e7, 45, 20_000, 40_000),
+    fixtureCapture("TEST MARS", 2.7e7, 60, 40_000, 60_000),
+    fixtureCapture("TEST SATURN", 4.8e8, 60, 60_000, 80_000),
+    fixtureCapture("TEST EARTH", 5.1e7, 45, 80_000, 98_000),
   ],
   faults: [],
 };

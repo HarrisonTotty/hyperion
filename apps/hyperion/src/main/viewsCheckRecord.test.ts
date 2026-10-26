@@ -328,13 +328,22 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
     [["captures", 0, "label"], "../escape"],
     [["captures", 0, "label"], "x".repeat(49)],
     [["captures", 1, "label"], "fixture-test-earth"],
-    [["captures", 0, "designation"], 3],
+    [["captures", 0, "kind"], "dusk"],
+    [["captures", 0, "kind"], "fixture"],
+    [["captures", 1, "kind"], null],
+    [["captures", 1, "designation"], 3],
+    [["captures", 1, "designation"], ""],
+    [["captures", 1, "designation"], null],
     [["captures", 0, "camera"], false],
-    [["captures", 0, "rangeM"], 0],
-    [["captures", 0, "rangeM"], "far"],
-    [["captures", 0, "phaseDeg"], 181],
-    [["captures", 0, "phaseDeg"], -1],
+    [["captures", 1, "rangeM"], 0],
+    [["captures", 1, "rangeM"], "far"],
+    [["captures", 1, "rangeM"], null],
+    [["captures", 1, "phaseDeg"], 181],
+    [["captures", 1, "phaseDeg"], -1],
+    [["captures", 1, "phaseDeg"], null],
     [["captures", 0, "exposure"], 12],
+    [["captures", 0, "exposureSettleMs"], -1],
+    [["captures", 1, "exposureSettleMs"], null],
     [["captures", 0, "atMs"], Number.POSITIVE_INFINITY],
     [["captures", 0, "frames"], null],
     [["captures", 0, "frames", "toMs"], 0],
@@ -349,8 +358,17 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
     expect(readAtmosphereCheckRecord(replaced(ATMOSPHERE_RECORD, path, value))).toBeNull();
   });
 
+  it.each([
+    ["designation", "TEST EARTH"],
+    ["rangeM", 5.1e7],
+    ["phaseDeg", null],
+  ])("refuses a night's capture that carries a fixture's %s", (field, value) => {
+    const night = { ...MOONLIT_NIGHT, [field]: value };
+    expect(readAtmosphereCheckRecord({ ...ATMOSPHERE_RECORD, captures: [night] })).toBeNull();
+  });
+
   it("takes the labels the capture's channel takes, and no other", () => {
-    expect([isCaptureLabel("fixture-test-earth-slab"), isCaptureLabel("A/B")]).toEqual([
+    expect([isCaptureLabel("fixture-test-earth-o3-slab"), isCaptureLabel("A/B")]).toEqual([
       true,
       false,
     ]);

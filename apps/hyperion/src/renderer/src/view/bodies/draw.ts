@@ -232,7 +232,7 @@ export interface BodyFrameOptions {
    * overlaps as a mesh does, its footprint its shell's circle, over which its composite draws
    * (`decision-r08-t10b-leans.md` §3). Absent, none.
    */
-  readonly depthBodies?: ReadonlyMap<BodyIdHex, number>;
+  readonly depthBodyShellRadiiM?: ReadonlyMap<BodyIdHex, number>;
   /** The view's quality setting, which a mesh body's selection takes. */
   readonly setting: QualitySetting;
 }
@@ -349,7 +349,7 @@ export function bodyLightSources(
 }
 
 /** No body drawn with depth for its air. */
-const NO_DEPTH_BODIES: ReadonlyMap<BodyIdHex, number> = new Map();
+const NO_DEPTH_BODY_SHELLS: ReadonlyMap<BodyIdHex, number> = new Map();
 
 /** A body whose centre is within this fraction of its radius is seen from inside, and not drawn. */
 const INSIDE_MARGIN = 1e-9;
@@ -629,12 +629,12 @@ export function planLitBodies(
   const { camera, viewport } = options;
   // A body whose air is drawn is drawn with depth (R08.T10.b), a disc of it as a mesh, and its
   // footprint is its air's shell, which its composite draws over.
-  const depthBodies = options.depthBodies ?? NO_DEPTH_BODIES;
+  const depthBodyShellRadiiM = options.depthBodyShellRadiiM ?? NO_DEPTH_BODY_SHELLS;
   const footprints = new Map<BodyIdHex, ScreenCircle>();
   for (const sphere of spheres) {
     const footprint = sphereFootprint(
       sphere.centreM,
-      Math.max(sphere.radiusM, depthBodies.get(sphere.id) ?? 0),
+      Math.max(sphere.radiusM, depthBodyShellRadiiM.get(sphere.id) ?? 0),
       options.camera,
       options.viewport,
     );
@@ -654,7 +654,7 @@ export function planLitBodies(
   const meshed = new Map<BodyIdHex, LitRegime>(
     [...handed].map(([id, regime]) => [
       id,
-      regime === "disc" && depthBodies.has(id) ? "mesh" : regime,
+      regime === "disc" && depthBodyShellRadiiM.has(id) ? "mesh" : regime,
     ]),
   );
   const regimes = promoteOverlapping(meshed, footprints, options.depthWriters ?? []);

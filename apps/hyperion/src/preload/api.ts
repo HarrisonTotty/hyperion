@@ -1624,28 +1624,24 @@ export interface AtmosphereCheckFrames {
 }
 
 /**
- * One capture of the atmosphere run (plan R08, R08.T10.b): a fixture seen from a few radii, or the
- * moonlit night from the seat, with what the primary's label block said as it was taken.
+ * What every capture of the atmosphere run records (plan R08, R08.T10.b), whichever its kind: its
+ * label, what the primary's label block said as it was taken, and its frames.
  */
-export interface AtmosphereCheckCapture {
+export interface AtmosphereCheckCaptureTaken {
   /**
    * Its label, which names its picture among the run's captures: `fixture-<designation in lower
    * kebab case>`, or `moonlit-night`.
    */
   readonly label: string;
-  /** The fixture's designation (`TEST EARTH`); `null` for the seat's look at the night. */
-  readonly designation: string | null;
   /** The camera's preset as the label block's `CAMERA` line read it (`SEAT`, `FREE · RATE …`). */
   readonly camera: string | null;
-  /**
-   * The camera's distance from the fixture's centre as the run flew it, m, dead-reckoned from the
-   * scene's geometry and the free camera's rate; `null` for the seat.
-   */
-  readonly rangeM: number | null;
-  /** The phase angle at the fixture between the star and the camera as flown, deg; `null` for the seat. */
-  readonly phaseDeg: number | null;
   /** The `EXPOSURE` line's reading as it was taken; `null` where none was shown. */
   readonly exposure: string | null;
+  /**
+   * How long the run waited before it, from the camera's arrival (or the night's meter chosen)
+   * until the `EXPOSURE` line's EV held steady, `AUTO` settled, ms.
+   */
+  readonly exposureSettleMs: number;
   /** When it was taken, `performance.now()` ms. */
   readonly atMs: number;
   readonly frames: AtmosphereCheckFrames;
@@ -1654,6 +1650,31 @@ export interface AtmosphereCheckCapture {
   /** The primary label block's fault lines as it was taken: graphics, terrain, then atmosphere. */
   readonly faults: ReadonlyArray<string>;
 }
+
+/** A capture of an air fixture, seen from the free camera at a few radii. */
+export interface AtmosphereFixtureCapture extends AtmosphereCheckCaptureTaken {
+  readonly kind: "fixture";
+  /** The fixture's designation (`TEST EARTH`). */
+  readonly designation: string;
+  /**
+   * The camera's distance from the fixture's centre as the run flew it, m, dead-reckoned from the
+   * scene's geometry, the free camera's rate and the primary's frames.
+   */
+  readonly rangeM: number;
+  /** The phase angle at the fixture between the star and the camera as flown, deg. */
+  readonly phaseDeg: number;
+}
+
+/** The capture of the moonlit night, the seat's look at `TEST MOON`. */
+export interface AtmosphereNightCapture extends AtmosphereCheckCaptureTaken {
+  readonly kind: "night";
+}
+
+/**
+ * One capture of the atmosphere run (plan R08, R08.T10.b): a fixture seen from a few radii, or the
+ * moonlit night from the seat, with what the primary's label block said as it was taken.
+ */
+export type AtmosphereCheckCapture = AtmosphereFixtureCapture | AtmosphereNightCapture;
 
 /** What the atmosphere run's renderer reports at the end of a run, for its results file. */
 export interface AtmosphereCheckRecord {

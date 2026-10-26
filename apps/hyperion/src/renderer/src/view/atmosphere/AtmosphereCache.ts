@@ -37,7 +37,9 @@
  * reports it to the cache ({@link AtmosphereView.reportDrawFailure}), which holds the body
  * `failed`, logs once, and raises `ATMOSPHERE NOT AVAILABLE: computation failed for
  * <designations>, reopen VIEW to retry` on every view that draws it larger than a point. It is
- * retried at the next trigger and when `VIEW` is shown again. `EngineUnavailable`
+ * retried at the next trigger and when `VIEW` is shown again. A kept scene whose media's load, once
+ * a page, failed sets its bodies `failed`, held as `loadFailed`, whose line reads `relaunch to
+ * retry` and stands when `VIEW` is shown again (`decision-r08-t10b-ux.md`, item 4). `EngineUnavailable`
  * raises nothing, and the tables are made again at a later frame, after the restore. A body with a
  * problem draws no atmosphere and carries no atmosphere label.
  *
@@ -168,7 +170,13 @@ export type KeptBodyAtmosphere =
    * A medium the scene is still building, its fixtures' optics loading lazily (R08.T10.b): nothing
    * drawn, and `ATMOSPHERE: PENDING` under the view's hold, as a server body's asked record.
    */
-  | { readonly kind: "loading" };
+  | { readonly kind: "loading" }
+  /**
+   * A medium the scene could not build, its media's load, once a page, having failed (R08.T10.b;
+   * `decision-r08-t10b-ux.md`, item 4): item 6's fault, held as `loadFailed` with the scene's own
+   * one log, `relaunch to retry`, and standing when `VIEW` is shown again; never `unset`.
+   */
+  | { readonly kind: "failed" };
 
 /** The scene a view's frame shows, as its requests take it. */
 export interface AtmosphereScene {
@@ -366,6 +374,7 @@ interface HeldBody<T> {
 const IDLE: Fetch = { kind: "idle" };
 const WAITING: Fetch = { kind: "waiting" };
 const FAILED: AtmosphereProblem = { kind: "failed" };
+const LOAD_FAILED: AtmosphereProblem = { kind: "loadFailed" };
 
 /** A report of nothing: a closed view's, or a disposed cache's. */
 const NO_REPORT: AtmosphereViewReport = { labels: [], problems: new Map(), pending: false };
@@ -736,6 +745,12 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       case "loading":
         held.build = null;
         this.#dropDrawn(held);
+        return;
+      case "failed":
+        // The scene logged its failed load once; the cache holds item 6's fault and its line.
+        held.build = null;
+        this.#dropDrawn(held);
+        held.problem = LOAD_FAILED;
         return;
       case "medium":
         entry = {

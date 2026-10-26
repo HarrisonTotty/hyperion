@@ -1109,11 +1109,19 @@ describe("a kept scene's own stars, offline (R08.T10.b)", () => {
     own: ReadonlyArray<ViewStar>,
     interim: ReadonlyArray<ViewStar>,
   ): Promise<number> {
+    return (await framesStars(own, interim)).sprites;
+  }
+
+  /** The star sprites a frame drew, as {@link spritesDrawn}, and whether it says they were the scene's. */
+  async function framesStars(
+    own: ReadonlyArray<ViewStar>,
+    interim: ReadonlyArray<ViewStar>,
+  ): Promise<{ readonly sprites: number; readonly sceneStars: boolean | undefined }> {
     const engine = await countingRenderEngine();
     const view = new RecordingView("view");
     const drawer = new ViewFrameDrawer(engine, view, "view");
     const run = phaseRun(false);
-    drawer.draw({
+    const drawn = drawer.draw({
       run: { ...run, scene: { ...run.scene, stars: own } },
       size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
       tokens: TOKENS,
@@ -1129,8 +1137,20 @@ describe("a kept scene's own stars, offline (R08.T10.b)", () => {
     });
     drawer.dispose();
     const draws = view.frames.at(-1)?.draws ?? [];
-    return draws.find((draw) => draw.material.name === "wireframe:starSprite")?.instanceCount ?? 0;
+    return {
+      sprites:
+        draws.find((draw) => draw.material.name === "wireframe:starSprite")?.instanceCount ?? 0,
+      sceneStars: drawn?.sceneStars,
+    };
   }
+
+  it("says which stars it drew: the scene's own field where it stands in, else none of its own", async () => {
+    expect([
+      (await framesStars(ATMOSPHERE_STARS, [])).sceneStars,
+      (await framesStars(ATMOSPHERE_STARS, [INTERIM_STAR])).sceneStars,
+      (await framesStars([], [])).sceneStars,
+    ]).toEqual([true, false, false]);
+  });
 
   it("draws a kept scene's own stars where the interim field is empty", async () => {
     expect([await spritesDrawn([], []), (await spritesDrawn(ATMOSPHERE_STARS, [])) > 0]).toEqual([

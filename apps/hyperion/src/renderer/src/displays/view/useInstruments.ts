@@ -105,6 +105,8 @@ export interface InstrumentShown {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in, which its label block states. */
   readonly drawnStyle: RenderStyle;
+  /** Whether it drew the kept scene's own stars, its `STARS` line `SCENE TEST FIELD` (R08.T10.b). */
+  readonly sceneStars: boolean;
   /** Its photorealistic renderer's standing. */
   readonly photoreal: PhotorealStatus;
   /**
@@ -315,6 +317,8 @@ interface SlotLoop {
   lastMs: number | null;
   anchors: ReadonlyArray<DrawAnchor>;
   drawnStyle: RenderStyle;
+  /** Whether its last frame drew the kept scene's own stars (R08.T10.b). */
+  sceneStars: boolean;
   /** The terrain's annunciation of its last frame drawn (R10.T16.c). */
   terrain: TerrainAnnunciation | null;
   /** The survey edges its last frame drawn marked (R10.T16.c). */
@@ -378,6 +382,7 @@ function useSlotDrawer(
         lastMs: null,
         anchors: [],
         drawnStyle: "wireframe",
+        sceneStars: false,
         terrain: null,
         surveyEdges: [],
         reportedTo: null,
@@ -536,6 +541,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             run,
             anchors: [],
             drawnStyle: "wireframe",
+            sceneStars: false,
             photoreal: "idle",
             terrain: null,
             surveyEdges: [],
@@ -717,6 +723,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       if (drawn !== null) {
         loop.anchors = drawn.anchors;
         loop.drawnStyle = drawn.drawnStyle;
+        loop.sceneStars = drawn.sceneStars;
         loop.surveyEdges = drawn.surveyEdges;
         // What it drew, for the terrain session's next step (R10.T16.a).
         if (loop.reportedTo !== session) {
@@ -741,6 +748,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           run: next,
           anchors: loop.anchors,
           drawnStyle: loop.drawnStyle,
+          sceneStars: loop.sceneStars,
           photoreal: loop.drawer.photorealStatus,
           terrain: loop.terrain,
           surveyEdges: loop.surveyEdges,
