@@ -208,6 +208,7 @@ use modifiers::{
     record_modifiers,
 };
 use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water, shell_lag};
+use small_bodies::{SmallBodyRules, SmallBodyTypes};
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
 /// seven reserved.
@@ -1006,21 +1007,26 @@ pub struct PlanetarySystem {
     satellites: Vec<Satellites>,
     belts: Vec<Belt>,
     halo: Option<SystemHalo>,
-    /// Which rules its records' cold traps (P14.T51.f) and air's sections (P14.T54.b) follow: those
-    /// in force, which the tests may change ([`with_record_rules`](Self::with_record_rules)).
+    /// Which rules its records' cold traps (P14.T51.f), air's sections (P14.T54.b) and small bodies'
+    /// taxonomic classes (P14.T51.e) follow: those in force, which the tests may change
+    /// ([`with_record_rules`](Self::with_record_rules)).
     record: RecordRules,
 }
 
-/// The rules a system's records' cold traps (P14.T51.f) and air's sections (P14.T24.e's vertical
+/// The rules a system's records' cold traps (P14.T51.f), air's sections (P14.T24.e's vertical
 /// structure, P14.T24.c's aerosol inventory and, under the same hold, P14.T51.d's modifiers,
-/// P14.T54.b) follow: the generator version's, and for the tests the batch's ahead of its bump.
-/// P14.T54.b deletes it with the holds.
+/// P14.T54.b) and small bodies' taxonomic classes (P14.T51.e, behind their own hold) follow: the
+/// generator version's, and for the tests the batch's ahead of its bump. P14.T54.b deletes it with
+/// the holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RecordRules {
     /// Its cold traps: their hold at 24.
     pub(crate) cold_traps: ColdTrapRules,
     /// Its air's sections: their hold at 24 (`air::AIR_SECTIONS_VERSION`).
     pub(crate) air: AirRules,
+    /// Its small bodies' taxonomic classes (P14.T51.e): their hold at 24
+    /// (`small_bodies::SMALL_BODY_TYPES_VERSION`).
+    pub(crate) small_bodies: SmallBodyRules,
 }
 
 impl RecordRules {
@@ -1030,6 +1036,7 @@ impl RecordRules {
         Self {
             cold_traps: ColdTrapRules::in_force(),
             air: AirRules::in_force(),
+            small_bodies: SmallBodyRules::in_force(),
         }
     }
 }
@@ -1907,7 +1914,9 @@ impl PlanetarySystem {
     /// ([`StarModel::state_at`](crate::stellar::system::StarModel::state_at)).
     #[must_use]
     pub fn snapshot_at(&self, ctx: &SystemContext, t: UniverseTime) -> SystemSnapshot {
-        let epoch = Epoch::new(self, ctx, t).with_shades();
+        let epoch = Epoch::new(self, ctx, t)
+            .with_shades()
+            .with_small_bodies(self.record.small_bodies);
         // Once for the whole snapshot, every body's zonal profiles reading them (lever (h)).
         let cosines = HourCosines::new();
         let labels: Vec<(BodyIndex, BodyLabel)> = label::labels(self);
@@ -2178,7 +2187,9 @@ impl PlanetarySystem {
             return Ok(self.halo_record(&epoch, halo, label));
         }
         // A planet's, member's or satellite's record derives its bodies: their shades' book.
-        let epoch = epoch.with_shades();
+        let epoch = epoch
+            .with_shades()
+            .with_small_bodies(self.record.small_bodies);
         let cosines = HourCosines::new();
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
         match body.host {
@@ -2379,7 +2390,9 @@ impl PlanetarySystem {
             return Ok(None);
         };
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
-        let epoch = Epoch::new(self, ctx, t).with_shades();
+        let epoch = Epoch::new(self, ctx, t)
+            .with_shades()
+            .with_small_bodies(self.record.small_bodies);
         let primary = match body.host {
             OrbitHost::Body(parent) => self
                 .body(parent)
@@ -3547,6 +3560,13 @@ impl PlanetarySystem {
                 };
                 let (surface, envelope) =
                     self.surface_or_envelope(body, of, body_spin, (&bulk, derived.atmosphere()));
+                // P14.T51.e: its taxonomic class, from its built surface, behind its hold.
+                let surface = small_bodies::with_class(
+                    epoch.small_bodies,
+                    (self, body),
+                    Some(&bulk),
+                    surface,
+                );
                 // `derived` tags the surface and the envelope by the derivation's gravity; the
                 // published bulk's tags, set after it, decide (an icy member's gravity is its ruling
                 // 112.8 bulk's, not its derivation's).
@@ -3903,6 +3923,9 @@ impl PlanetarySystem {
                     },
                 );
                 let bulk = bulk.map_or(Section::NotModelled, |(bulk, _)| Section::Ok(bulk));
+                // P14.T51.e: its taxonomic class, from its built surface, behind its hold.
+                let surface =
+                    small_bodies::with_class(epoch.small_bodies, (self, body), bulk.ok(), surface);
                 builder
                     .orbit(Section::Ok(
                         BodyOrbit::new(*trajectory.elements(), valid_until)
@@ -6087,6 +6110,11 @@ struct Epoch<'c> {
     /// ([`with_shades`](Self::with_shades)); `None` for the others, whose bodies' shades, if any,
     /// are computed body by body, to the same bits.
     shades: Option<ShadeBook>,
+    /// What its records' taxonomic classes share (P14.T51.e): built by the queries that build
+    /// records ([`with_small_bodies`](Self::with_small_bodies)), under the batch's rules the
+    /// reference wind term, derived once for the query and never once a body; held for the
+    /// others, which derive nothing of it.
+    small_bodies: SmallBodyTypes,
 }
 
 impl<'c> Epoch<'c> {
@@ -6115,6 +6143,7 @@ impl<'c> Epoch<'c> {
             states: ctx.stars().iter().map(|star| star.state_at(t)).collect(),
             xuv: ctx.xuv_histories(),
             shades: None,
+            small_bodies: SmallBodyTypes::Held,
         }
     }
 
@@ -6132,6 +6161,18 @@ impl<'c> Epoch<'c> {
         );
         Self {
             shades: Some(shades),
+            ..self
+        }
+    }
+
+    /// The same queries, with what their records' taxonomic classes share under the rules `rules`
+    /// (P14.T51.e, `small_bodies::SmallBodyTypes::under`): the reference wind term under the
+    /// batch's, derived here once for the query, and nothing under the hold. Only the queries that
+    /// build records call it.
+    #[must_use]
+    fn with_small_bodies(self, rules: SmallBodyRules) -> Self {
+        Self {
+            small_bodies: SmallBodyTypes::under(rules),
             ..self
         }
     }
@@ -6328,5 +6369,6 @@ impl<'c> Epoch<'c> {
 mod air;
 mod modifiers;
 pub(crate) mod moon_ice;
+pub(crate) mod small_bodies;
 #[cfg(test)]
 pub(crate) mod tests;

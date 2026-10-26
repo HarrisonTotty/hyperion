@@ -29626,3 +29626,59 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   which observers would class as a heated C rather than an anhydrous CV. A heated-carbonaceous row
   and the class C are a later bump's. T51.e's map follows the lithology, so K matches the CV row's
   optics meanwhile. Only moons under 200 km carry it.
+- **Deviations in P14.T51.e, as built (`p14-modifiers`, 2026-10-26), the wiring.**
+  `GENERATOR_VERSION` stays 23 and no golden moves (`planetary_golden` byte-identical): below
+  `SMALL_BODY_TYPES_VERSION` = 24 every record's `taxonomic_class` is not modelled and nothing of
+  it is computed. `planetary/system/small_bodies.rs` holds the hold (`SmallBodyRules`, held or
+  batch, a `small_bodies` field on `RecordRules`, the test switch `with_small_body_rules` and the
+  tripwire `the_small_body_types_are_held_only_until_the_24_bump`) and the wiring (`with_class`,
+  called once in `primary_record` and once in `satellite_record` on the built surface).
+  - _The reference wind term_ (main's ruling, 2026-10-26): `w_ref` is T51.d's unshielded wind term
+    of a stated reference body (`ModifierHost::sun()`, a circular orbit at
+    `Q_TYPE_ANCHOR_DISTANCE`, `Primary::Star`, no field, no air, its other inputs stated and
+    unread by the wind term), derived by `SurfaceModifiers::derive` and read through the same
+    getter, so that no second item enters `hooks/modifiers.rs`. It is derived once a query, and
+    only by the queries that build records (`Epoch::with_small_bodies`, beside `with_shades`, in
+    `snapshot_at`, `body_at` and `hooks_at`), and kept on `Epoch` (one field), never once a body;
+    the position, state and habitable-zone queries and the generation derive nothing, nor does
+    anything under the hold. A test pins it at 0.15998 against decision-p14-t51e-qs's table and by
+    its bits (0.1599776872441904).
+  - _The getter._ `SurfaceModifiers::unshielded_wind_term()`, the wind term at an unshielded share
+    of 1 from the same exposure (`Exposure`'s unshielded flux beside its shielded one). It moves
+    nothing: it equals `weathering().wind()` to the bit on the sample's 4,098 unshielded bodies.
+  - _Files beyond the contract's hunks:_ `system/small_bodies` is `pub(crate) mod`, so that
+    `testing.rs`'s `with_every_24_hold` reaches its switch, and the helper gains its arm; `Epoch`
+    carries `w_ref`; one call `small_bodies::with_class(…)` stands at each builder, since inlining
+    it pushed `satellite_record` past Clippy's line limit, and gravity comes from the bulk
+    section; one line in P14.T54.b's `system/air/tests.rs` (`..RecordRules::in_force()` in
+    `every_record_batch()`); the modifiers scan's `HELD` list names the wiring file and its tests.
+  - _The scans._ The module's own scan now matches only its entry points (`TaxonomicClass::of`,
+    the inputs' constructors and types, the module's paths and its four constants), so that
+    `record.rs` and `hooks/mod.rs` name the type (`pub use` in both); its `HELD` list is (file,
+    `SmallBodyRules`) pairs, each file asserted to name the hold. P14.T54.b.l deletes both scans'
+    lines with the hold.
+  - _The census_ (the 400 sample systems, every 24 hold in force with the air's sections, 5,963
+    bodies with a surface): planets all `Ok(None)` (1,152); asteroid-belt members V 244, S 25,
+    Xc 9, C 1, P 1 and 390 not classed; Kuiper-belt members red 627 and neutral 2,454, their moons
+    red 17 and neutral 161; other moons P 107, not classed 675, V 26, C 24, K 18, S 17, Xc 14 and
+    A 1. Q: none of the 42 ordinary-chondrite bodies, at T_Q and at 6.25 T_Q. By flux-equivalent
+    distance (inner below 2.5 au, outer from 2.82 au; DeMeo and Carry 2013), counted by classed
+    member: inner 107, V 85 (79%), the S complex 17, C 1; outer V 92%, the S complex 8, C 0,
+    printed and not asserted (the plan's outer C-type test is not met: below). The inner V share,
+    a count of members of 400 km and more, is recorded beside DeMeo and Carry 2013's Table 6
+    inner-belt shares, which are by mass (V 69%, S 21%, C 6%): the two are not the same measure,
+    and the difference is recorded, not fitted. The cometary bodies are 108, all dry P, the nearest the flux of 4 au at
+    3.88 au (`42002cadffc00003.0504`); none lies under a published water-ice cover, so that case
+    stays on the pure module's hand-built test. 234 moons inside a magnetopause read their
+    planet's orbit's unshielded term. No sampled member lacks a crust, so the not-modelled case is
+    shown on a member whose crust is stripped by hand. `body_at`'s class equals the snapshot's in
+    any order of asking (three systems with moons and Kuiper-belt members).
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.e's wiring:
+  - the outer belt is not C-type: members of 400 km and more are differentiated, so the icy ones
+    take T51.c's frozen-ocean `H2O` lid, which the closed set leaves unclassed (a Ceres reads
+    unclassed, not C; T51.c's `phyllosilicate` shell, and so C, comes only from bodies under
+    200 km), and the rocky ones are V; for T51.c's owner and the composition audit;
+  - every cometary body is P: under a `cometary` lid the crust's frozen water is unlisted among
+    the condensates (decision-p14-t54a-ganymede §C3.1: the lid's row is the surface the albedo
+    reads), so no sampled cometary body carries the water-ice veneer that would leave it
+    unclassed, and P matches the record's own dark surface.

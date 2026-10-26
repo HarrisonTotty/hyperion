@@ -50,10 +50,9 @@
 //! - `ocean`: a body's subsurface ocean beyond its flag (P14.T51.g), so far the floor of a regular
 //!   moon's ocean at the liquidus of its base (P14.T51.g.a), which its figures'
 //!   [`SubsurfaceOcean`] takes behind a hold at generator version 24, until P14.T54.b's bump.
-//! - [`small_bodies`]: a small body's [`TaxonomicClass`](small_bodies::TaxonomicClass)
-//!   (P14.T51.e), a label and not a substance, from its kind, its lid's lithology, its veneer and
-//!   its weathering clocks. It is pure; its wiring puts it on the record behind a hold at
-//!   generator version 24.
+//! - [`small_bodies`]: a small body's [`TaxonomicClass`] (P14.T51.e), a label and not a substance,
+//!   from its kind, its lid's lithology, its veneer and its weathering clocks. It is pure; its
+//!   wiring puts it on the record behind a hold at generator version 24.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
@@ -95,6 +94,7 @@ pub use figures::{
 };
 pub use modifiers::{DeriveModifiersError, ModifierInputs, SurfaceModifiers};
 pub use seed::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
+pub use small_bodies::TaxonomicClass;
 pub use structure::envelope::{EnvelopeProfile, GreyProfile};
 pub use structure::{ProfileNode, RadiativeConvective, VerticalStructure};
 pub use surface::{ClimateRegime, RadiationClass, SurfaceConditions};

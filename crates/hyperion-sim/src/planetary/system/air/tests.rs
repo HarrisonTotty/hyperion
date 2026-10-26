@@ -1158,6 +1158,7 @@ fn every_record_batch() -> RecordRules {
     RecordRules {
         cold_traps: ColdTrapRules::Batch,
         air: AirRules::Batch,
+        ..RecordRules::in_force()
     }
 }
 

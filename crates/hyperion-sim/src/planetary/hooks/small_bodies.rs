@@ -9,8 +9,7 @@
 //! - **The body's kind** ([`TaxonomyBodyKind`]): a planet, an asteroid belt's member, a Kuiper-belt
 //!   body (a Kuiper-like belt's member or a moon of one), or another moon.
 //! - **Its lid's lithology**, a P14.T51.c [`CrustLithology`], which a Kuiper-belt body need not
-//!   give. The wiring reads it through `CrustComposition::lid_lithology`, P14.T54.b.c's getter,
-//!   which lands with the wiring.
+//!   give. The wiring reads it through `CrustComposition::lid_lithology`, P14.T54.b.c's getter.
 //! - **Its veneer** ([`Veneer`]): the tholin-covered share of its surface, `s_t`, T51.d's organic
 //!   ground times its organic cover, and the uncovered perennial ice share, `s_i`.
 //! - **Its weathering clocks** ([`WeatheringClocks`]), which only an ordinary chondrite's split
@@ -108,13 +107,15 @@
 //!   the one function that holds the cover rule (`cover_class`).
 //! - Xe for an aubrite lid, which has no registry row.
 //!
-//! # Not on the record yet
+//! # On the record
 //!
-//! Nothing on the record calls this module at generator version 23. P14.T51.e's wiring,
-//! `planetary/system/small_bodies.rs`, fills the record's class behind its hold,
-//! `SMALL_BODY_TYPES_VERSION` = 24, as a P14.T54.b.j rider, and the tripwire test
-//! (`small_bodies_nothing_on_the_record_reads_the_types_yet`) holds every other file off it until
-//! P14.T54.b.l deletes it (decision-p14-t51e-contract §1.4, §3.7 and §4).
+//! P14.T51.e's wiring, `planetary/system/small_bodies.rs`, fills the record's class
+//! ([`record::Surface::taxonomic_class`](crate::planetary::record::Surface::taxonomic_class)) from
+//! each planet's, member's and moon's built surface, behind its hold, `SMALL_BODY_TYPES_VERSION` =
+//! 24, as a P14.T54.b.j rider, so that nothing on the record moves at generator version 23. The
+//! tripwire test (`small_bodies_nothing_on_the_record_reads_the_types_yet`) holds every other file
+//! off this module's entry points until P14.T54.b.l deletes it (decision-p14-t51e-contract §1.4,
+//! §3.7 and §4).
 //!
 //! # Determinism
 //!
@@ -742,8 +743,8 @@ impl TaxonomyInputs {
     /// weathering clocks `clocks`.
     ///
     /// - `lid`: its lid's P14.T51.c lithology, which the wiring reads through
-    ///   `CrustComposition::lid_lithology`, P14.T54.b.c's getter, landing with the wiring; `None`
-    ///   where the record gives no crust.
+    ///   `CrustComposition::lid_lithology`, P14.T54.b.c's getter; `None` where the record gives
+    ///   no crust.
     /// - `veneer`: `None` where the record's modifiers are not modelled.
     /// - `clocks`: `None` where the record lacks what the Q/S split reads.
     #[must_use]

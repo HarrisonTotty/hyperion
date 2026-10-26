@@ -903,11 +903,15 @@ fn scanned_code(text: &str) -> String {
 /// The files outside this module whose code reaches the modifiers behind a named hold, each with
 /// the name of its hold, which its code (outside an inline test module, comments left out) must
 /// name: P14.T54.b.c's wiring of the record's modifiers (`system/modifiers.rs`, behind the air's
-/// sections' hold, `AirRules`) and its tests (decision-p14-t54b-open §1.2 item 6 and §3.3).
-/// **P14.T54.b.l deletes this list** with the tripwire below.
-const HELD: [(&str, &str); 2] = [
+/// sections' hold, `AirRules`) and its tests (decision-p14-t54b-open §1.2 item 6 and §3.3); and
+/// P14.T51.e's wiring of the record's taxonomic class, which reads the record's modifiers
+/// (`system/small_bodies.rs`, behind its own hold, `SmallBodyRules`), and its tests
+/// (decision-p14-t51e-contract §3.7). **P14.T54.b.l deletes this list** with the tripwire below.
+const HELD: [(&str, &str); 4] = [
     ("planetary/system/modifiers.rs", "AirRules"),
     ("planetary/system/modifiers/tests.rs", "AirRules"),
+    ("planetary/system/small_bodies.rs", "SmallBodyRules"),
+    ("planetary/system/small_bodies/tests.rs", "SmallBodyRules"),
 ];
 
 /// Whether the code of `text` as the tripwire scans it ([`scanned_code`]) names `hold`.

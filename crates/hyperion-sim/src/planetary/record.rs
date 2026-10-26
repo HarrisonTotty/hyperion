@@ -50,6 +50,7 @@ use crate::planetary::frames::BodyFixedFrame;
 pub use crate::planetary::hooks::AerosolInventory;
 use crate::planetary::hooks::DetailSeed;
 pub use crate::planetary::hooks::SurfaceModifiers;
+pub use crate::planetary::hooks::TaxonomicClass;
 use crate::planetary::hooks::cold_traps::ColdTrapRules;
 pub use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::crust::CrustLithology;
@@ -614,6 +615,11 @@ impl BulkProperties {
 /// isochore holds at least a thousandth of the mass), whose air is its [`Envelope`] section's, so
 /// that no surface section is `Ok` with no surface behind it (decision-p14-t35e-wire §2). It is
 /// never in the state [`SurfaceState::GasEnvelope`].
+///
+/// It also carries the body's taxonomic class (P14.T51.e, [`TaxonomicClass`]), a label of its
+/// surface's spectrum read from its built crust, condensates, modifiers and figures, held off the
+/// record until generator version 24 behind its own hold
+/// ([`taxonomic_class`](Self::taxonomic_class)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
     state: SurfaceState,
@@ -627,6 +633,7 @@ pub struct Surface {
     crust: Modelled<CrustComposition>,
     modifiers: Modelled<SurfaceModifiers>,
     biosphere: Modelled<Biosphere>,
+    taxonomic_class: Modelled<Option<TaxonomicClass>>,
     basis: Option<SurfaceBasis>,
 }
 
@@ -680,6 +687,7 @@ impl Surface {
             crust: Modelled::NotModelled,
             modifiers: Modelled::NotModelled,
             biosphere: Modelled::NotModelled,
+            taxonomic_class: Modelled::NotModelled,
             basis: None,
         })
     }
@@ -731,6 +739,17 @@ impl Surface {
     #[must_use]
     pub(crate) fn with_modifiers(self, modifiers: Modelled<SurfaceModifiers>) -> Self {
         Self { modifiers, ..self }
+    }
+
+    /// The surface with its taxonomic class `class` (P14.T51.e), from the built surface where the
+    /// record is built: not modelled while its hold keeps it off the record, and where the record
+    /// lacks what the body's rule reads (`system::small_bodies::record_taxonomic_class`).
+    #[must_use]
+    pub(crate) fn with_taxonomic_class(self, class: Modelled<Option<TaxonomicClass>>) -> Self {
+        Self {
+            taxonomic_class: class,
+            ..self
+        }
     }
 
     /// What its conditions and condensates were built on (rule (f)); `None` for a surface built
@@ -875,6 +894,23 @@ impl Surface {
     #[must_use]
     pub const fn biosphere(&self) -> Modelled<&Biosphere> {
         self.biosphere.as_ref()
+    }
+
+    /// The body's taxonomic class (P14.T51.e, [`TaxonomicClass`]): a label of its surface's
+    /// spectrum, not a substance, by its kind, its crust's lid, its veneer (its modifiers' tholin
+    /// cover and its condensates' perennial ice) and, for an ordinary chondrite, its surface age,
+    /// its maturity and its wind (the
+    /// [`small_bodies`](crate::planetary::hooks::small_bodies) module's rules).
+    ///
+    /// - Not modelled below generator version 24, which holds it off the record until P14.T54.b's
+    ///   bump; for a body whose rule reads a member the record does not give (its crust, a
+    ///   Kuiper-belt body's excepted, or its modifiers); never to be read as none.
+    /// - `Ok(None)`, computed as none: a planet, and a member or moon left unclassed by a majority
+    ///   of uncovered ice or by a lid of the closed not-classed set.
+    /// - `Ok(Some(class))` otherwise.
+    #[must_use]
+    pub const fn taxonomic_class(&self) -> Modelled<Option<TaxonomicClass>> {
+        self.taxonomic_class
     }
 }
 

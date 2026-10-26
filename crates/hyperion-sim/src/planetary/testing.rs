@@ -337,7 +337,12 @@ impl Error for SampleContextsError {
 ///   (`basalt_reduced`'s graphite, `ferric`'s nanophase oxide);
 /// - the ocean floor's, `OCEAN_FLOOR_VERSION` (P14.T51.g.a), at `OceanFloorRules::Floored`
 ///   through `with_ocean_floor`: a regular moon's published ocean ends at the shallower of its
-///   rock and ice V's melting pressure at its 273 K base.
+///   rock and ice V's melting pressure at its 273 K base;
+/// - the small bodies' types', `SMALL_BODY_TYPES_VERSION` (P14.T51.e), at
+///   `SmallBodyRules::Batch` through `with_small_body_rules`, which a system reads as it is
+///   generated (its `RecordRules`): every planet's, member's and moon's taxonomic class, not
+///   modelled where the record's modifiers are, which the air's sections' hold (`AirRules`, set
+///   through `PlanetarySystem::with_record_rules` alone) keeps off the record.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
@@ -350,6 +355,7 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, with_cold_trap_rules};
     use crate::planetary::hooks::ocean::{OceanFloorRules, with_ocean_floor};
     use crate::planetary::system::moon_ice::{MoonBulkRules, with_moon_bulk};
+    use crate::planetary::system::small_bodies::{SmallBodyRules, with_small_body_rules};
     use crate::substance::optics::{RowDarkeningRules, with_row_darkening};
     use crate::substance::{
         CompressedLiquidsRules, ReadDensitiesRules, with_compressed_liquids, with_read_densities,
@@ -361,7 +367,9 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
                     with_read_densities(ReadDensitiesRules::Read, || {
                         with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
                             with_row_darkening(RowDarkeningRules::Darkened, || {
-                                with_ocean_floor(OceanFloorRules::Floored, run)
+                                with_ocean_floor(OceanFloorRules::Floored, || {
+                                    with_small_body_rules(SmallBodyRules::Batch, run)
+                                })
                             })
                         })
                     })

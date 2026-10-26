@@ -2,7 +2,7 @@
 //! and decision-p14-t51e-qs §3.2): the closed set and its names, the constants, every lithology
 //! placed, the planet, the Kuiper-belt colours, the veneer, what is not given, the anchor of the
 //! wind's clock, the clock at the anchor, its edges, the inputs' ranges, determinism, and the
-//! tripwire that keeps the module off the record until its wiring.
+//! tripwire that keeps the module off the record but through its wiring's hold.
 //!
 //! The anchor and scaling tests here hold by construction, since their wind terms are stated by
 //! hand: `w_ref` is the ruling's 0.15998, and a body's w₀ about the same host is scaled from it as
@@ -699,38 +699,80 @@ fn scanned_code(text: &str) -> String {
         .join("\n")
 }
 
-/// Nothing on the record reads a small body's taxonomic class at generator version 23
-/// (decision-p14-t51e-contract §3.7). P14.T51.e's wiring, `planetary/system/small_bodies.rs` behind
-/// `SMALL_BODY_TYPES_VERSION` = 24, joins the exempt files below with its tests, and P14.T54.b.l
-/// deletes this test with the other source scans.
+/// The files outside this module whose code reaches its entry points behind a named hold, each
+/// with the name of its hold, which its code (outside an inline test module, comments left out)
+/// must name: P14.T51.e's wiring of the record's taxonomic class (`system/small_bodies.rs`, behind
+/// `SMALL_BODY_TYPES_VERSION`, `SmallBodyRules`) and its tests (decision-p14-t51e-contract §1.4 and
+/// §3.7). **P14.T54.b.l deletes this list** with the tripwire below.
+const HELD: [(&str, &str); 2] = [
+    ("planetary/system/small_bodies.rs", "SmallBodyRules"),
+    ("planetary/system/small_bodies/tests.rs", "SmallBodyRules"),
+];
+
+/// Whether the code of `text` as the tripwire scans it ([`scanned_code`]) names `hold`.
+fn names_its_hold(text: &str, hold: &str) -> bool {
+    scanned_code(text).lines().any(|code| code.contains(hold))
+}
+
+/// The hold check reads the code alone: a comment naming the hold, or code inside an inline test
+/// module, does not count.
+#[test]
+fn the_small_bodies_hold_check_reads_the_code_alone() {
+    assert!(names_its_hold(
+        "match rules { SmallBodyRules::Held => 0 }\n",
+        "SmallBodyRules"
+    ));
+    assert!(!names_its_hold(
+        "// SmallBodyRules\nfn f() {}\n",
+        "SmallBodyRules"
+    ));
+    assert!(!names_its_hold(
+        "fn f() {}\n#[cfg(test)]\nmod tests {\n    use super::SmallBodyRules;\n}\n",
+        "SmallBodyRules"
+    ));
+}
+
+/// Nothing on the record reaches a small body's taxonomic class but through its hold until the
+/// 23 → 24 bump (decision-p14-t51e-contract §3.7): P14.T51.e's wiring,
+/// `planetary/system/small_bodies.rs` behind `SMALL_BODY_TYPES_VERSION` = 24, and its tests are
+/// [`HELD`]'s files, and P14.T54.b.l deletes this test with the other source scans.
 ///
-/// It walks the sim's `src/` outside `planetary/hooks/small_bodies*`, in sorted order, and fails
-/// on a path or public name of the module in each file's code (the file less its comment lines
-/// and its inline test module). `hooks/mod.rs`'s `pub mod small_bodies;` names neither. The bare
-/// `small_bodies::` is not matched, since the galaxy's `substellar` module has a private module of
-/// that name. `TaxonomyInput` also matches `TaxonomyInputs`, `MissingTaxonomyInput` and
-/// `BuildTaxonomyInputsError`.
+/// It walks the sim's `src/` outside `planetary/hooks/small_bodies*` and [`HELD`]'s files, in
+/// sorted order, and fails on an entry point of the module in each file's code (the file less its
+/// comment lines and its inline test module): its paths, its rule (`TaxonomicClass::of`), the
+/// inputs it is built from and its constants. Each of [`HELD`]'s files must be a source file whose
+/// code names its hold, so that a caller in any other file fails, and so does a listed file that
+/// drops its hold. The class's type itself, `TaxonomicClass`, is not matched: the record's member
+/// names it (`record.rs`, re-exported through `hooks/mod.rs`'s one `pub use
+/// small_bodies::TaxonomicClass;`), holding what its wiring computed and computing nothing. The
+/// bare `small_bodies::` is not matched, since the galaxy's `substellar` module has a private
+/// module of that name, and the record's builders call the wiring by it. `TaxonomyInputs` also
+/// matches `BuildTaxonomyInputsError`.
 #[test]
 fn small_bodies_nothing_on_the_record_reads_the_types_yet() {
-    const PATTERNS: [&str; 14] = [
+    const PATTERNS: [&str; 11] = [
         "hooks::small_bodies",
         "super::small_bodies",
-        "TaxonomicClass",
-        "TaxonomyInput",
-        "TaxonomyBodyKind",
+        "TaxonomicClass::of",
+        "TaxonomyInputs",
+        "Veneer",
         "WindTerms",
         "WeatheringClocks",
-        "ClassifyTaxonomyError",
-        "Veneer",
-        "AirShield",
         "Q_TYPE_WEATHERING_TIME",
         "Q_TYPE_ANCHOR_DISTANCE",
         "IMMATURE_MATURITY",
         "VENEER_SHARE",
     ];
-    // Files allowed to match: the wiring and its tests, once they exist; none yet.
-    const EXEMPT: [&str; 1] = ["planetary/hooks/small_bodies"];
+    const OWN: &str = "planetary/hooks/small_bodies";
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for (held, hold) in HELD {
+        let text = std::fs::read_to_string(src.join(held))
+            .unwrap_or_else(|e| panic!("{held} is a source file: {e}"));
+        assert!(
+            names_its_hold(&text, hold),
+            "{held} reaches the taxonomic class behind {hold}, which its code no longer names"
+        );
+    }
     let mut files = Vec::new();
     source_files(&src, &mut files);
     assert!(files.len() > 100, "the walk found the sim's sources");
@@ -741,7 +783,7 @@ fn small_bodies_nothing_on_the_record_reads_the_types_yet() {
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        if EXEMPT.iter().any(|prefix| relative.starts_with(prefix)) {
+        if relative.starts_with(OWN) || HELD.iter().any(|(file, _)| *file == relative) {
             continue;
         }
         let code = scanned_code(&std::fs::read_to_string(&path).unwrap());
@@ -756,9 +798,16 @@ fn small_bodies_nothing_on_the_record_reads_the_types_yet() {
     assert_eq!(
         readers,
         Vec::<String>::new(),
-        "a small body's taxonomic class is read outside its module before P14.T51.e's wiring, \
-         which joins this scan's exempt files"
+        "a small body's taxonomic class is reached on the record outside its hold before \
+         P14.T54.b's bump"
     );
+    // The allowed declarations are there, once each.
     let hooks = std::fs::read_to_string(src.join("planetary/hooks/mod.rs")).unwrap();
     assert_eq!(hooks.matches("pub mod small_bodies;").count(), 1);
+    assert_eq!(
+        hooks
+            .matches("pub use small_bodies::TaxonomicClass;")
+            .count(),
+        1
+    );
 }

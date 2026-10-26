@@ -623,6 +623,7 @@ impl WeatheringDeposit {
 pub struct SurfaceModifiers {
     maturity: f64,
     weathering: WeatheringRate,
+    unshielded_wind: f64,
     organic_ground: f64,
     organic_cover: f64,
     resurfacing_m_per_yr: f64,
@@ -729,6 +730,9 @@ impl SurfaceModifiers {
         Ok(Self {
             maturity,
             weathering,
+            // The wind's term before its shield, over the same lunar reference, whose own share
+            // is 1 (P14.T51.e's Q/S split, decision-p14-t51e-qs §1.2).
+            unshielded_wind: exposure.unshielded_wind_mass_flux / moon.wind_mass_flux,
             organic_ground,
             organic_cover,
             resurfacing_m_per_yr: RESURFACING_DEPTH.value() * resurfacing_per_yr,
@@ -756,6 +760,21 @@ impl SurfaceModifiers {
     #[must_use]
     pub const fn weathering(&self) -> WeatheringRate {
         self.weathering
+    }
+
+    /// The wind's term at an unshielded share `S_w` of 1, `Φ_w` ÷ `Φ_w,Moon` before any shield,
+    /// dimensionless, at least +0: the host's wind mass flux Ṁ ÷ (4π a² √(1 − e²)) at the body's
+    /// heliocentric orbit (a moon's planet's) over the Moon's, whatever its air, its own field or
+    /// its planet's magnetopause.
+    ///
+    /// It is [`WeatheringRate::wind`] to the bit wherever the shielded share is 1, from the same
+    /// exposure, and reads nothing else: no value of k, the maturity or the cover moves with it.
+    /// P14.T51.e's Q/S split reads it, a moon inside its planet's magnetopause taking its planet's
+    /// orbit's flux as the stand-in for the planet's plasma, labelled (decision-p14-t51e-qs §1.2;
+    /// decision-p14-t51e-contract §3.7).
+    #[must_use]
+    pub const fn unshielded_wind_term(&self) -> f64 {
+        self.unshielded_wind
     }
 
     /// The share of the surface that can take an organic cover ([`organic_ground`]),
@@ -1091,6 +1110,9 @@ struct ExposureInputs<'a> {
 struct Exposure {
     /// The wind's orbit-mean mass flux at the ground, kg m⁻² s⁻¹: `Φ_w`.
     wind_mass_flux: f64,
+    /// The wind's orbit-mean mass flux at the body's orbit before any shield, kg m⁻² s⁻¹: `Φ_w`
+    /// at `S_w` = 1 (P14.T51.e).
+    unshielded_wind_mass_flux: f64,
     /// The micrometeoroids' n v³ at the ground, relative to 1 at 1 au from the Sun: `Φ_d`.
     dust: f64,
     /// The dose flux of the host's X-ray and ultraviolet light and the wind's ions' kinetic energy
@@ -1138,6 +1160,7 @@ impl Exposure {
         let ions = 0.5 * wind_mass_flux * WIND_SPEED.value() * WIND_SPEED.value();
         Self {
             wind_mass_flux,
+            unshielded_wind_mass_flux: wind_flux,
             dust,
             dose_flux: (light + ions) / 4.0,
         }
