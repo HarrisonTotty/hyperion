@@ -6,6 +6,7 @@
 import type {
   AtmosphereCheckFrames,
   AtmosphereCheckRecord,
+  AtmosphereCheckStage,
   AtmosphereFixtureCapture,
   AtmosphereNightCapture,
 } from "../../preload/api";
@@ -60,6 +61,54 @@ export const MOONLIT_NIGHT: AtmosphereNightCapture = {
   faults: [],
 };
 
+/** The climb's stage, and the first fixture's three: the full tour's first legs as flown. */
+export const FIRST_STAGES: ReadonlyArray<AtmosphereCheckStage> = [
+  {
+    target: "TEST MOON",
+    stage: 1,
+    rateStep: 13,
+    askedM: 5e7,
+    holdMs: 15_811,
+    heldMs: 15_817,
+    longestStepMs: 17,
+    flownM: 5.002e7,
+    shortOfCentreM: 3.3e8,
+  },
+  {
+    target: "TEST EARTH O3 SLAB",
+    stage: 1,
+    rateStep: 20,
+    askedM: 1.995e11,
+    holdMs: 19_950,
+    heldMs: 19_942,
+    longestStepMs: 17,
+    flownM: 1.9942e11,
+    shortOfCentreM: 1.058e10,
+  },
+  {
+    target: "TEST EARTH O3 SLAB",
+    stage: 2,
+    rateStep: 18,
+    askedM: 1.0055e10,
+    holdMs: 10_055,
+    heldMs: 10_050,
+    longestStepMs: 17,
+    flownM: 1.005e10,
+    shortOfCentreM: 5.3e8,
+  },
+  {
+    target: "TEST EARTH O3 SLAB",
+    stage: 3,
+    rateStep: 15,
+    askedM: 4.79e8,
+    holdMs: 15_148,
+    heldMs: 15_150,
+    longestStepMs: 17,
+    flownM: 4.7905e8,
+    shortOfCentreM: 5.095e7,
+  },
+];
+
 /** The passing record: the night, then the four air fixtures in the tour's order. */
 export const ATMOSPHERE_RECORD: AtmosphereCheckRecord = {
   timer: "full",
@@ -73,5 +122,6 @@ export const ATMOSPHERE_RECORD: AtmosphereCheckRecord = {
     fixtureCapture("TEST SATURN", 4.8e8, 60, 60_000, 80_000),
     fixtureCapture("TEST EARTH", 5.1e7, 45, 80_000, 98_000),
   ],
+  stages: FIRST_STAGES,
   faults: [],
 };

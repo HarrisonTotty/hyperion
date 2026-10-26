@@ -293,6 +293,26 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
     );
   });
 
+  it("is read back with a stage flown back, past the centre", () => {
+    const back = {
+      ...ATMOSPHERE_RECORD,
+      stages: [
+        {
+          target: "TEST MARS",
+          stage: 3,
+          rateStep: 0,
+          askedM: -2.5e6,
+          holdMs: 0,
+          heldMs: 0,
+          longestStepMs: 0,
+          flownM: -1,
+          shortOfCentreM: -4e6,
+        },
+      ],
+    };
+    expect(readAtmosphereCheckRecord(structuredClone(back))).toEqual(back);
+  });
+
   it("is read back with fault lines, no capture and no frame times", () => {
     const night = {
       ...MOONLIT_NIGHT,
@@ -309,7 +329,7 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
       faults: ["ATMOSPHERE NOT AVAILABLE: computation failed for TEST EARTH, reopen VIEW to retry"],
     };
     const faulted = { ...ATMOSPHERE_RECORD, captures: [night], faults: ["device-lost: unknown"] };
-    const empty = { ...ATMOSPHERE_RECORD, captures: [] };
+    const empty = { ...ATMOSPHERE_RECORD, captures: [], stages: [] };
     expect([
       readAtmosphereCheckRecord(structuredClone(faulted)),
       readAtmosphereCheckRecord(structuredClone(empty)),
@@ -353,6 +373,17 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
     [["captures", 0, "statements"], [1]],
     [["captures", 0, "faults"], null],
     [["captures", 0, "faults"], [{ line: "a fault" }]],
+    [["stages"], null],
+    [["stages", 0, "target"], ""],
+    [["stages", 0, "stage"], 0],
+    [["stages", 0, "rateStep"], 32],
+    [["stages", 0, "rateStep"], 1.5],
+    [["stages", 0, "askedM"], Number.NaN],
+    [["stages", 0, "holdMs"], -1],
+    [["stages", 0, "heldMs"], -1],
+    [["stages", 0, "longestStepMs"], -1],
+    [["stages", 0, "flownM"], "far"],
+    [["stages", 0, "shortOfCentreM"], null],
     [["faults"], [3]],
   ])("refuses a record whose %j is %j", (path, value) => {
     expect(readAtmosphereCheckRecord(replaced(ATMOSPHERE_RECORD, path, value))).toBeNull();

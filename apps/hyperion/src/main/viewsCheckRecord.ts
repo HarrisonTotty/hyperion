@@ -10,6 +10,7 @@ import type {
   AtmosphereCheckCaptureTaken,
   AtmosphereCheckFrames,
   AtmosphereCheckRecord,
+  AtmosphereCheckStage,
   HandoverAngles,
   HandoverCheckRecord,
   HandoverComparisonRecord,
@@ -1030,6 +1031,33 @@ function atmosphereCapture(value: unknown): AtmosphereCheckCapture | null {
     : null;
 }
 
+/**
+ * One stage of the atmosphere run's flight as flown (R08.T10.b): its target, its place from 1, a
+ * rate step the free camera has (0 to 31), finite distances asked, flown and short of the centre
+ * (below zero back, or past it), and holds planned and held and a longest step of zero or more.
+ */
+function atmosphereStage(value: unknown): AtmosphereCheckStage | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { target, stage, rateStep, askedM, holdMs, heldMs, longestStepMs, flownM, shortOfCentreM } =
+    value;
+  return typeof target === "string" &&
+    target.length > 0 &&
+    isCount(stage) &&
+    stage >= 1 &&
+    isCount(rateStep) &&
+    rateStep <= 31 &&
+    isFiniteNumber(askedM) &&
+    isNonNegative(holdMs) &&
+    isNonNegative(heldMs) &&
+    isNonNegative(longestStepMs) &&
+    isFiniteNumber(flownM) &&
+    isFiniteNumber(shortOfCentreM)
+    ? { target, stage, rateStep, askedM, holdMs, heldMs, longestStepMs, flownM, shortOfCentreM }
+    : null;
+}
+
 /** `value` as the atmosphere run's record (plan R08, R08.T10.b), or `null` if it is not one. */
 export function readAtmosphereCheckRecord(value: unknown): AtmosphereCheckRecord | null {
   if (!isRecord(value)) {
@@ -1038,6 +1066,7 @@ export function readAtmosphereCheckRecord(value: unknown): AtmosphereCheckRecord
   const { timer, devicePixelRatio, mediaReadyMs } = value;
   const size = canvas(value["canvas"]);
   const captures = listOf(value["captures"], atmosphereCapture);
+  const stages = listOf(value["stages"], atmosphereStage);
   const faults = strings(value["faults"]);
   if (
     (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
@@ -1046,11 +1075,12 @@ export function readAtmosphereCheckRecord(value: unknown): AtmosphereCheckRecord
     size === null ||
     !isNonNegative(mediaReadyMs) ||
     captures === null ||
+    stages === null ||
     faults === null ||
     // Each label at most once: a second would save its picture over the first's.
     new Set(captures.map((each) => each.label)).size !== captures.length
   ) {
     return null;
   }
-  return { timer, devicePixelRatio, canvas: size, mediaReadyMs, captures, faults };
+  return { timer, devicePixelRatio, canvas: size, mediaReadyMs, captures, stages, faults };
 }

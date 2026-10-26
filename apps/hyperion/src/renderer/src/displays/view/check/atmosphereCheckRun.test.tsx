@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AtmosphereCheckRecord, ViewsCheckApi } from "../../../../../preload/api";
 import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
-import { freeRateMPerS } from "../../../view/camera/freeCamera";
+import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import { STYLE_TOGGLE_KEY } from "../../../view/photoreal/style";
 import {
   ATMOSPHERE_FIXTURES,
@@ -18,6 +18,7 @@ import { ViewLabelBlock } from "../ViewLabelBlock";
 import { freeRateReading } from "../viewRun";
 import {
   ATMOSPHERE_CHECK_TIMING,
+  ATMOSPHERE_END_TOLERANCE,
   ATMOSPHERE_GOAL_RADII,
   ATMOSPHERE_SMOKE_TOUR,
   ATMOSPHERE_STAGE_FRACTION,
@@ -229,7 +230,7 @@ describe("the atmosphere run's legs' rates", () => {
 });
 
 describe("the atmosphere run's reckoning", () => {
-  it("counts the primary's steps from the press's frame to the release's, each at most a quarter second", () => {
+  it("counts the primary's steps from its draw before the press to its last with the key held, each at most a quarter second", () => {
     expect([heldMs([1_000, 1_016, 1_032, 1_400, 1_416]), heldMs([5]), heldMs([])]).toEqual([
       298, 0, 0,
     ]);
@@ -295,6 +296,7 @@ const RECORD: AtmosphereCheckRecord = {
   canvas: { widthPx: 1920, heightPx: 1080 },
   mediaReadyMs: 1_000,
   captures: [],
+  stages: [],
   faults: [],
 };
 
@@ -391,9 +393,20 @@ interface AutoSpeeds {
 }
 
 /**
+ * A frame that comes late, once: in the `hold`-th hold of a flight key (from 1), the first frame
+ * `afterMs` or more into it is followed by the next only `forMs` later.
+ */
+interface Stall {
+  readonly hold: number;
+  readonly afterMs: number;
+  readonly forMs: number;
+}
+
+/**
  * `VIEW`'s controls, canvas and primary label block as the run finds them, drawn into the page,
- * with the state they set: a free camera flown by `W` at its rate step in every frame, cut to look
- * at a target's centre by the target keys, and an `AUTO` that moves the exposure each frame.
+ * with the state they set: a free camera flown by `W` (or back by `S`) at its rate step in every
+ * frame, each step at most `MAX_FREE_STEP_S` as `VIEW`'s, cut to look at a target's centre by the
+ * target keys, and an `AUTO` that moves the exposure each frame.
  */
 class FakeView {
   scene = "SERVER";
@@ -407,10 +420,11 @@ class FakeView {
   positionM: Vec3 = atmosphereSeatM();
   forward: Vec3 = normalise(sub(ATMOSPHERE_MOON_CENTRE_M, atmosphereSeatM()));
   selected: number | null = null;
-  held = false;
-  /** Every press and release of `W`, in order. */
+  /** The flight key held, or `null`. */
+  held: "w" | "s" | null = null;
+  /** Every press and release of a flight key, in order. */
   readonly flightKeys: string[] = [];
-  /** Called as `W` is pressed. */
+  /** Called as a flight key is pressed. */
   onHold: () => void = () => undefined;
   readonly #clock: () => number;
   readonly #media: () => AtmosphereFixtureMedia;
@@ -418,14 +432,25 @@ class FakeView {
   readonly #canvas: HTMLCanvasElement;
   readonly #marks: HTMLElement;
   readonly #plate: RenderResult;
+  /** The frames run so far, ms of the test's clock: every one a draw of the primary. */
+  readonly #frames: number[] = [];
   #lastFrameMs = 0;
+  #holds = 0;
+  #pressedAtMs = 0;
+  #stall: Stall | null;
   /** The plate's readings and statements as last drawn. */
   #shown = "";
 
-  constructor(clock: () => number, media: () => AtmosphereFixtureMedia, speeds: AutoSpeeds) {
+  constructor(
+    clock: () => number,
+    media: () => AtmosphereFixtureMedia,
+    speeds: AutoSpeeds,
+    stall: Stall | null,
+  ) {
     this.#clock = clock;
     this.#media = media;
     this.#speeds = speeds;
+    this.#stall = stall;
     const scenes = this.#fieldset("Scene", ["SERVER", ATMOSPHERE_SCENE_NAME]);
     scenes.setAttribute("aria-label", "Scene");
     this.#fieldset("CONTROLS", ["PRIMARY", "INSTRUMENT 1", "INSTRUMENT 2"]);
@@ -492,15 +517,31 @@ class FakeView {
     return norm(sub(mark.centreM, this.positionM));
   }
 
+  /** When the page's next frame comes: a frame on, or the stall's length on where it falls due. */
+  nextFrameMs(): number {
+    const stall = this.#stall;
+    return stall !== null &&
+      this.held !== null &&
+      this.#holds === stall.hold &&
+      this.#lastFrameMs - this.#pressedAtMs >= stall.afterMs
+      ? this.#lastFrameMs + stall.forMs
+      : this.#lastFrameMs + FRAME_MS;
+  }
+
   /** `VIEW`'s loop in each of the page's frames up to `toMs`: the camera flown, `AUTO` stepped. */
   runFramesTo(toMs: number): void {
-    for (let atMs = this.#lastFrameMs + FRAME_MS; atMs <= toMs; atMs += FRAME_MS) {
-      const dtS = (atMs - this.#lastFrameMs) / 1000;
+    for (let atMs = this.nextFrameMs(); atMs <= toMs; atMs = this.nextFrameMs()) {
+      if (atMs - this.#lastFrameMs > FRAME_MS) {
+        this.#stall = null;
+      }
+      const dtS = Math.min(atMs - this.#lastFrameMs, 1000 * MAX_FREE_STEP_S) / 1000;
       this.#lastFrameMs = atMs;
-      if (this.held && this.preset === "FREE") {
+      this.#frames.push(atMs);
+      if (this.held !== null && this.preset === "FREE") {
+        const sign = this.held === "w" ? 1 : -1;
         this.positionM = add(
           this.positionM,
-          scale(this.forward, freeRateMPerS(this.rateStep) * dtS),
+          scale(this.forward, sign * freeRateMPerS(this.rateStep) * dtS),
         );
       }
       if (this.auto) {
@@ -517,17 +558,7 @@ class FakeView {
 
   /** The animation frames drawn from `startMs` up to `endMs`, by now. */
   drawTimes(startMs: number, endMs: number): number[] {
-    const times: number[] = [];
-    for (
-      let atMs = Math.ceil(startMs / FRAME_MS) * FRAME_MS;
-      atMs <= this.#lastFrameMs;
-      atMs += FRAME_MS
-    ) {
-      if (atMs < endMs) {
-        times.push(atMs);
-      }
-    }
-    return times;
+    return this.#frames.filter((atMs) => atMs >= startMs && atMs < endMs);
   }
 
   #statements(): ReadonlyArray<string> {
@@ -601,10 +632,12 @@ class FakeView {
   }
 
   #canvasKey(event: KeyboardEvent, down: boolean): void {
-    if (event.key === "w") {
-      this.held = down;
-      this.flightKeys.push(down ? "W down" : "W up");
+    if (event.key === "w" || event.key === "s") {
+      this.held = down ? event.key : null;
+      this.flightKeys.push(`${event.key.toUpperCase()} ${down ? "down" : "up"}`);
       if (down) {
+        this.#holds += 1;
+        this.#pressedAtMs = this.#lastFrameMs;
         this.onHold();
       }
     } else if (down && event.key === "PageUp") {
@@ -657,6 +690,12 @@ function fakeRun(
   options: {
     readonly media?: AtmosphereFixtureMedia;
     readonly speeds?: AutoSpeeds;
+    readonly stall?: Stall;
+    /**
+     * Whether the run's frame callback comes before `VIEW`'s in each frame, rather than after it:
+     * `VIEW`'s then runs once the run's has acted.
+     */
+    readonly runFirst?: boolean;
   } = {},
 ): FakeRun {
   let now = 0;
@@ -664,11 +703,22 @@ function fakeRun(
   let made: FakeView | null = null;
   const given = options.media;
   const media = given === undefined ? landing(() => made, clock) : () => given;
-  const view = new FakeView(clock, media, options.speeds ?? { brightenEvPerS: 3, darkenEvPerS: 1 });
+  const view = new FakeView(
+    clock,
+    media,
+    options.speeds ?? { brightenEvPerS: 3, darkenEvPerS: 1 },
+    options.stall ?? null,
+  );
   made = view;
   const captured: string[] = [];
   const controller = new AbortController();
+  /** A frame the run has been called back in whose `VIEW` callback is still to come. */
+  let pendingMs: number | null = null;
   const advanceTo = (toMs: number): void => {
+    if (pendingMs !== null) {
+      view.runFramesTo(pendingMs);
+      pendingMs = null;
+    }
     now = toMs;
     view.runFramesTo(toMs);
   };
@@ -724,8 +774,14 @@ function fakeRun(
       return Promise.resolve();
     },
     frame: () => {
-      const atMs = (Math.floor(now / FRAME_MS) + 1) * FRAME_MS;
-      advanceTo(atMs);
+      advanceTo(now);
+      const atMs = view.nextFrameMs();
+      if (options.runFirst === true) {
+        now = atMs;
+        pendingMs = atMs;
+      } else {
+        advanceTo(atMs);
+      }
       return Promise.resolve(atMs);
     },
     signal: controller.signal,
@@ -811,9 +867,57 @@ describe("the atmosphere run's script (R08.T10.b)", () => {
   it("lets W go after each hold, ending with it released", async () => {
     const { run } = await smoke();
     expect([run.view.held, run.view.flightKeys]).toEqual([
-      false,
+      null,
       ["W down", "W up", "W down", "W up", "W down", "W up", "W down", "W up"],
     ]);
+  });
+
+  it("records each stage as flown, at the rate step it asks for, held to half a frame of its plan", async () => {
+    const { record } = await smoke();
+    expect(
+      record.stages.map((each) => [
+        each.target,
+        each.stage,
+        each.rateStep ===
+          legRateStep(Math.abs(each.askedM), ATMOSPHERE_CHECK_TIMING.smoke.legMaxS, 31),
+        Math.abs(each.heldMs - each.holdMs) <= FRAME_MS / 2,
+      ]),
+    ).toEqual([
+      ["TEST MOON", 1, true, true],
+      ["TEST EARTH O3 SLAB", 1, true, true],
+      ["TEST EARTH O3 SLAB", 2, true, true],
+      ["TEST EARTH O3 SLAB", 3, true, true],
+    ]);
+  });
+
+  it("flies back with S where a late frame overran the last stage, to its goal", async () => {
+    // The fourth hold, the first fixture's last stage, about 4.7 s long, overruns by 0.1 s.
+    const run = fakeRun({ stall: { hold: 4, afterMs: 4_600, forMs: 1_000 } });
+    const record = await runAtmosphereCheck(run.deps);
+    const slab = record.captures[1];
+    if (slab?.kind !== "fixture") {
+      throw new Error("the run took no fixture capture");
+    }
+    expect([
+      run.view.flightKeys.slice(-4),
+      record.stages.filter((each) => each.longestStepMs >= 1_000).map((each) => each.stage),
+      (record.stages.at(-1)?.askedM ?? 0) < 0,
+      Math.abs(slab.rangeM / SLAB_GOAL_M - 1) < ATMOSPHERE_END_TOLERANCE,
+      Math.abs(slab.rangeM - run.view.rangeTo("TEST EARTH O3 SLAB")) < 1,
+    ]).toEqual([["W down", "W up", "S down", "S up"], [3], true, true, true]);
+  });
+
+  it("reckons the camera's true range where the run's frame callback comes before VIEW's", async () => {
+    const run = fakeRun({ runFirst: true });
+    const record = await runAtmosphereCheck(run.deps);
+    const slab = record.captures[1];
+    if (slab?.kind !== "fixture") {
+      throw new Error("the run took no fixture capture");
+    }
+    expect([
+      Math.abs(slab.rangeM / SLAB_GOAL_M - 1) < ATMOSPHERE_END_TOLERANCE,
+      Math.abs(slab.rangeM - run.view.rangeTo("TEST EARTH O3 SLAB")) < 1,
+    ]).toEqual([true, true]);
   });
 
   it("lets W go when it is stopped mid-hold", async () => {
@@ -822,6 +926,6 @@ describe("the atmosphere run's script (R08.T10.b)", () => {
       controller.abort();
     };
     await expect(runAtmosphereCheck(deps)).rejects.toThrow(STOPPED);
-    expect([view.held, view.flightKeys]).toEqual([false, ["W down", "W up"]]);
+    expect([view.held, view.flightKeys]).toEqual([null, ["W down", "W up"]]);
   });
 });

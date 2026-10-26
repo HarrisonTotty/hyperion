@@ -28,26 +28,30 @@
  *
  * **`AUTO` settled.** Before each capture the run reads the `EXPOSURE` line's EV every
  * {@link AtmosphereCheckTiming.settleStepMs} until two readings in a row agree within
- * {@link AtmosphereCheckTiming.settleToleranceEv}: from `VIEW`'s opening exposure to a moonlit sky
- * is some 19 stops, which `AUTO` darkens at 1 EV/s. The wait is recorded with the capture
- * (`exposureSettleMs`); one past {@link AtmosphereCheckTiming.settleMaxMs} fails the run.
+ * {@link AtmosphereCheckTiming.settleToleranceEv}, since `AUTO` moves the exposure at 3 EV/s
+ * brightening and 1 EV/s darkening. The wait is recorded with the capture (`exposureSettleMs`);
+ * one past {@link AtmosphereCheckTiming.settleMaxMs} fails the run.
  *
  * **Staged legs, dead-reckoned.** Nothing on the page reads the free camera's range (the list's
  * ranges are the own ship's), so the run reckons it from the scene's geometry, the free camera's
- * rate and the primary's frames. Each hold of `W` is pressed and let go inside an animation frame
- * in which the primary has drawn (`AtmosphereCheckDeps.frame`), and the free camera, which steps
- * once in each of the primary's frames over the time since the one before (at most
- * `MAX_FREE_STEP_S`), and whose ramp and coast together fly its rate times its hold, so flies the
- * rate times the time between those two frames, its steps capped as it caps them
- * ({@link heldMs}): the run knows how far each hold flew, to a tick of the camera's integration.
+ * rate and the primary's frames. Each hold of a flight key is pressed and let go in animation
+ * frames (`AtmosphereCheckDeps.frame`), timed by the frames alone, never by the page's timers,
+ * which lag them under load; the free camera steps once in each of the primary's draws over the
+ * time since the one before (at most `MAX_FREE_STEP_S`), and its ramp and coast together fly its
+ * rate times its hold, so it flies the rate times the time from the primary's last draw as the
+ * key is pressed to its last as it is let go, its steps capped as it caps them ({@link heldMs}),
+ * whichever of `VIEW`'s callback and the run's comes first in a frame: the run knows how far each
+ * hold flew, to a tick of the camera's integration.
  * What it cannot do is let go at the planned instant: the hold ends at the primary's frame
- * nearest it, half a frame either way at the hold's rate, which on a leg of 2 × 10¹¹ m, at
- * 10¹⁰ m/s, is some 10⁸ m, past the goal itself. So each leg is flown in stages along its line,
- * each ending at {@link ATMOSPHERE_STAGE_FRACTION} of its range from the target's centre or at
- * the goal, whichever is farther, each at its own rate step and flown from where the stage before
- * it was reckoned to end: a stage's error, a few percent of the range left after it, is taken up
- * by the next, and only the last, the slowest, leaves its own, a few percent of the goal at worst,
- * in the capture, whose range and phase are recorded as reckoned.
+ * nearest it, half a frame either way at the hold's rate, more where a frame is late, which on a
+ * leg of 2 × 10¹¹ m, at 10¹⁰ m/s, is some 10⁸ m, past the goal itself. So each leg is flown in
+ * stages along its line, each ending at {@link ATMOSPHERE_STAGE_FRACTION} of its range from the
+ * target's centre or at the goal, whichever is farther, each at its own rate step and flown from
+ * where the stage before it was reckoned to end, along the line the camera looks along, ahead
+ * (`W`) or, where the one before overran it, back (`S`); and up to {@link ATMOSPHERE_CORRECTIONS}
+ * more stages bring the camera within {@link ATMOSPHERE_END_TOLERANCE} of the leg's end. A stage's
+ * error, a few percent of the range left after it, is so taken up by the next; the capture's range
+ * and phase are recorded as reckoned, and every stage as flown (`AtmosphereCheckRecord.stages`).
  *
  * Each capture records the primary's frame times since the capture before (the views probe's),
  * its label block's statements and its fault lines. The main process fails the run on any fault
@@ -58,6 +62,7 @@ import type {
   AtmosphereCheckCapture,
   AtmosphereCheckFrames,
   AtmosphereCheckRecord,
+  AtmosphereCheckStage,
   ViewsCheckApi,
 } from "../../../../../preload/api";
 import { add, norm, normalise, scale, sub, type Vec3 } from "../../../geometry/vec3";
@@ -310,10 +315,22 @@ export function legRateStep(distanceM: number, legMaxS: number, maxStep: number)
 /** The highest rate step the run asks for: the kept system's own limit (`maxFreeRateStep`), 31. */
 const MAX_RATE_STEP = 31;
 
+/** How near a hold's planned end the run starts reading the primary's draws each frame, ms. */
+const NEAR_END_MS = 250;
+
 /**
- * How long the free camera flew with its key held, ms, from the primary's draws from the frame
- * the key was pressed in to the frame it was let go in, both among them: the camera steps once a
- * draw, over the time since the one before, each step at most `MAX_FREE_STEP_S`.
+ * How near a leg's end the camera must be reckoned to stand, as a fraction of its range from the
+ * target's centre there, before the run stops correcting it: 5%.
+ */
+export const ATMOSPHERE_END_TOLERANCE = 0.05;
+
+/** The most stages the run flies after a leg's planned ones to bring it within that: two. */
+export const ATMOSPHERE_CORRECTIONS = 2;
+
+/**
+ * How long the free camera flew with its key held, ms, from the primary's draws from its last
+ * before the key was pressed to its last with the key held, both among them: the camera steps once
+ * a draw, over the time since the one before, each step at most `MAX_FREE_STEP_S`.
  */
 export function heldMs(drawTimesMs: ReadonlyArray<number>): number {
   const maxStepMs = 1000 * MAX_FREE_STEP_S;
@@ -448,8 +465,6 @@ export interface AtmosphereCheckTiming {
   readonly coastMs: number;
   /** The longest a stage's hold may be, s: its rate is the slowest that flies it within this. */
   readonly legMaxS: number;
-  /** How long before a hold's planned end the run looks for its release frame by frame, ms. */
-  readonly releaseLeadMs: number;
   /** The primary's draws waited for before each capture. */
   readonly framesBeforeCapture: number;
   /** The tour flown. */
@@ -472,7 +487,6 @@ export const ATMOSPHERE_CHECK_TIMING: {
     settleMaxMs: 60_000,
     coastMs: 3_000,
     legMaxS: 30,
-    releaseLeadMs: 250,
     framesBeforeCapture: 5,
     tour: ATMOSPHERE_TOUR,
   },
@@ -484,7 +498,6 @@ export const ATMOSPHERE_CHECK_TIMING: {
     settleMaxMs: 45_000,
     coastMs: 2_000,
     legMaxS: 10,
-    releaseLeadMs: 250,
     framesBeforeCapture: 3,
     tour: ATMOSPHERE_SMOKE_TOUR,
   },
@@ -502,8 +515,8 @@ export interface AtmosphereCheckDeps {
   readonly nowMs: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   /**
-   * Settles in the page's next animation frame with its timestamp, after `VIEW`'s own callbacks
-   * in it: `requestAnimationFrame` through the probe's frame clock, asked from a task.
+   * Settles in the page's next animation frame with its timestamp: `requestAnimationFrame` through
+   * the probe's frame clock, before or after `VIEW`'s own callback in it.
    */
   readonly frame: () => Promise<number>;
   /** Stops the run: before its next step, wait or call it throws `STOPPED` (`viewsCheckRun.ts`). */
@@ -514,6 +527,19 @@ export interface AtmosphereCheckDeps {
 /** A key's press and release, dispatched on `target` as a keyboard would. */
 function keyEvent(target: EventTarget, type: "keydown" | "keyup", key: string): void {
   target.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true }));
+}
+
+/**
+ * A hold of a flight key as flown: its rate step read back, its hold planned and held, the
+ * primary's longest step over it, and its distance.
+ */
+interface FlownHold {
+  readonly rateStep: number;
+  readonly holdMs: number;
+  readonly heldMs: number;
+  readonly longestStepMs: number;
+  /** As reckoned, m: below zero for a hold of `S`, back along the line of sight. */
+  readonly flownM: number;
 }
 
 /** A fixture capture's place as the run reckoned it: its fixture, range and phase. */
@@ -568,35 +594,43 @@ export async function runAtmosphereCheck(
       () => views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >= count,
     );
   };
+  /** The primary's draws recorded by now from `sinceMs`, ms: its free camera's steps. */
+  const drawsSince = (sinceMs: number): number[] =>
+    views.drawTimes(PRIMARY_VIEW_NAME, sinceMs, Number.POSITIVE_INFINITY);
   /**
-   * Waits for the first animation frame in which the primary has drawn and `ready` holds of its
-   * timestamp and the primary's draw before it (within a second, else `null`), acts in it, and
-   * returns its timestamp.
+   * Holds a flight key from frame to frame, on the page's animation frames alone, until the
+   * primary's draw nearest `endMs`, and lets it go there (`release`): returns the last draw
+   * recorded as it was let go, the free camera's last step with it held.
+   *
+   * @remarks
+   * Never on the page's timers: under load they lag the frames by most of a second (the smoke of
+   * 2026-10-26, a stage of which held 0.7 s long at 10⁹ m/s), and a hold timed by them ends late.
+   * Whichever of `VIEW`'s callback and the run's comes first in a frame, the draws recorded as the
+   * key is let go are those its camera stepped in with it held.
+   *
+   * @throws Error once the frames pass `giveUpAtMs` with the key still held.
    */
-  const inPrimaryFrame = async (
-    act: () => void,
-    ready: (atMs: number, previousMs: number | null) => boolean,
+  const releaseNear = async (
+    release: () => void,
+    endMs: number,
+    giveUpAtMs: number,
   ): Promise<number> => {
-    const deadline = deps.nowMs() + timing.waitMs;
-    const look = async (): Promise<number> => {
-      // From a task, so that VIEW's own callback for the frame comes before the run's.
-      await wait(0);
-      const atMs = await deps.frame();
-      stopped();
-      const drawn = views.drawTimes(PRIMARY_VIEW_NAME, atMs, Number.POSITIVE_INFINITY)[0] === atMs;
-      const previousMs = views.drawTimes(PRIMARY_VIEW_NAME, atMs - 1000, atMs).at(-1) ?? null;
-      if (drawn && ready(atMs, previousMs)) {
-        act();
-        return atMs;
+    const atMs = await deps.frame();
+    stopped();
+    // Most frames stand well short of the end, and the draws need not be read in them.
+    if (atMs + NEAR_END_MS >= endMs) {
+      const draws = drawsSince(atMs - 1000);
+      const lastMs = draws.at(-1);
+      // The next draw is taken to come an interval after the last.
+      if (lastMs !== undefined && lastMs + (lastMs - (draws.at(-2) ?? lastMs)) / 2 >= endMs) {
+        release();
+        return lastMs;
       }
-      if (deps.nowMs() > deadline) {
-        throw new Error(
-          `views check: the primary drew no frame to act in within ${String(timing.waitMs / 1000)} s`,
-        );
-      }
-      return look();
-    };
-    return look();
+    }
+    if (atMs > giveUpAtMs) {
+      throw new Error("views check: the primary drew no frame to end a hold in");
+    }
+    return releaseNear(release, endMs, giveUpAtMs);
   };
   /**
    * Waits until `AUTO` has settled before the capture `label`, the `EXPOSURE` line's EV read every
@@ -730,40 +764,57 @@ export async function runAtmosphereCheck(
     await step();
   };
   /**
-   * Flies `distanceM` straight ahead: the rate set, `W` held from one of the primary's frames to
-   * the one nearest the hold's planned end, and the coast; returns how far it flew as reckoned, m.
+   * Flies `distanceM` along the camera's line of sight, ahead (`W`) or, below zero, back (`S`):
+   * the rate set and read back, the key pressed in an animation frame and held from the primary's
+   * last draw then to the one nearest the hold's planned end, and the coast; returns the hold as
+   * flown, its distance as reckoned from the draws between.
    */
-  const fly = async (distanceM: number): Promise<number> => {
-    const rateStep = legRateStep(distanceM, timing.legMaxS, MAX_RATE_STEP);
-    await setRate(rateStep);
+  const fly = async (distanceM: number): Promise<FlownHold> => {
+    const lengthM = Math.abs(distanceM);
+    const wanted = legRateStep(lengthM, timing.legMaxS, MAX_RATE_STEP);
+    await setRate(wanted);
+    const rateStep = rateStepOfCameraLine(plate().line("CAMERA"));
+    if (rateStep !== wanted) {
+      throw new Error(
+        `views check: the CAMERA line read rate step ${String(rateStep)} once ${String(wanted)} was set`,
+      );
+    }
     const rateMPerS = freeRateMPerS(rateStep);
-    const holdMs = (1000 * distanceM) / rateMPerS;
+    const holdMs = (1000 * lengthM) / rateMPerS;
+    const key = distanceM > 0 ? "w" : "s";
     const target = canvas();
-    let releasedAtMs: number | null = null;
-    const pressedAtMs = await inPrimaryFrame(
-      () => {
-        keyEvent(target, "keydown", "w");
-      },
-      () => true,
-    );
+    const pressedAtMs = await deps.frame();
+    stopped();
+    // The camera's steps with the key held come after its last as the key is pressed.
+    const fromMs = drawsSince(0).at(-1) ?? pressedAtMs;
+    let lastHeldMs: number | null = null;
+    keyEvent(target, "keydown", key);
     try {
-      await wait(Math.max(0, holdMs - timing.releaseLeadMs));
-      const endMs = pressedAtMs + holdMs;
-      releasedAtMs = await inPrimaryFrame(
+      lastHeldMs = await releaseNear(
         () => {
-          keyEvent(target, "keyup", "w");
+          keyEvent(target, "keyup", key);
         },
-        // The frame nearest the planned end: the next is taken to come an interval later.
-        (atMs, previousMs) => atMs + (atMs - (previousMs ?? atMs)) / 2 >= endMs,
+        fromMs + holdMs,
+        pressedAtMs + holdMs + timing.waitMs,
       );
     } finally {
-      if (releasedAtMs === null) {
-        keyEvent(target, "keyup", "w");
+      if (lastHeldMs === null) {
+        keyEvent(target, "keyup", key);
       }
     }
-    const held = heldMs(views.drawTimes(PRIMARY_VIEW_NAME, pressedAtMs, releasedAtMs + 1e-3));
+    const draws = views.drawTimes(PRIMARY_VIEW_NAME, fromMs, lastHeldMs + 1e-3);
+    const held = heldMs(draws);
     await wait(timing.coastMs);
-    return (rateMPerS * held) / 1000;
+    return {
+      rateStep,
+      holdMs,
+      heldMs: held,
+      longestStepMs: draws.reduce(
+        (longest, atMs, i) => Math.max(longest, atMs - (draws[i - 1] ?? atMs)),
+        0,
+      ),
+      flownM: (Math.sign(distanceM) * rateMPerS * held) / 1000,
+    };
   };
 
   await until("VIEW did not show its primary view", () => controls.styleOf(PRIMARY_NAME) !== null);
@@ -788,31 +839,64 @@ export async function runAtmosphereCheck(
   pressSingle("3");
   await until("FREE was not taken", () => plate().line("CAMERA")?.startsWith("FREE") === true);
   const legs = atmosphereLegs(atmosphereSeatM(), timing.tour);
+  const stages: AtmosphereCheckStage[] = [];
   let reckonedM = atmosphereSeatM();
-  /** Flies `leg`'s stages from `index` on, each from where the camera is reckoned to be. */
-  const stages = async (leg: AtmosphereLeg, index: number): Promise<void> => {
-    const stage = leg.stages[index];
-    if (stage === undefined) {
-      return;
-    }
-    const towardM = sub(leg.centreM, reckonedM);
-    const distanceM = norm(towardM) - stage.endRangeM;
-    if (!(distanceM > 0)) {
+  /**
+   * Flies `leg` in its stages along its line, from where the camera is reckoned to stand as its
+   * target is cut to: each stage from where the one before was reckoned to end, ahead or back,
+   * then as many as {@link ATMOSPHERE_CORRECTIONS} more to its end until within
+   * {@link ATMOSPHERE_END_TOLERANCE} of its range from the centre.
+   *
+   * @throws Error where the camera is reckoned past the target's centre at the leg's end.
+   */
+  const flyLeg = async (leg: AtmosphereLeg): Promise<void> => {
+    await selectTarget(leg.target);
+    const fromM = reckonedM;
+    const towardM = sub(leg.centreM, fromM);
+    const startRangeM = norm(towardM);
+    const direction = normalise(towardM);
+    const endRangeM = leg.stages.at(-1)?.endRangeM ?? startRangeM;
+    /** Flies stage `index` on from `alongM` along the line, and returns how far along it ends. */
+    const stage = async (index: number, alongM: number): Promise<number> => {
+      const planned = leg.stages[index];
+      const offM = startRangeM - alongM - endRangeM;
+      const corrected =
+        planned === undefined &&
+        index < leg.stages.length + ATMOSPHERE_CORRECTIONS &&
+        Math.abs(offM) > ATMOSPHERE_END_TOLERANCE * endRangeM;
+      if (planned === undefined && !corrected) {
+        return alongM;
+      }
+      const askedM = startRangeM - alongM - (planned?.endRangeM ?? endRangeM);
+      const hold = await fly(askedM);
+      const nextM = alongM + hold.flownM;
+      stages.push({
+        target: leg.target,
+        stage: index + 1,
+        rateStep: hold.rateStep,
+        askedM,
+        holdMs: hold.holdMs,
+        heldMs: hold.heldMs,
+        longestStepMs: hold.longestStepMs,
+        flownM: hold.flownM,
+        shortOfCentreM: startRangeM - nextM,
+      });
+      return stage(index + 1, nextM);
+    };
+    const alongM = await stage(0, 0);
+    reckonedM = add(fromM, scale(direction, alongM));
+    if (!(startRangeM - alongM > 0)) {
       throw new Error(
-        `views check: the camera was reckoned ${(-distanceM / 1000).toFixed(0)} km past the end of stage ${String(index + 1)} towards ${leg.target}`,
+        `views check: the camera was reckoned ${((alongM - startRangeM) / 1000).toFixed(0)} km past ${leg.target}'s centre`,
       );
     }
-    const flownM = await fly(distanceM);
-    reckonedM = add(reckonedM, scale(normalise(towardM), flownM));
-    await stages(leg, index + 1);
   };
   const tour = async (index: number): Promise<void> => {
     const leg = legs[index];
     if (leg === undefined) {
       return;
     }
-    await selectTarget(leg.target);
-    await stages(leg, 0);
+    await flyLeg(leg);
     if (leg.capture !== null) {
       await capture(leg.capture.label, {
         designation: leg.capture.designation,
@@ -830,6 +914,7 @@ export async function runAtmosphereCheck(
     canvas: views.canvasOf(PRIMARY_VIEW_NAME),
     mediaReadyMs,
     captures,
+    stages,
     faults: views.faults(),
   };
 }

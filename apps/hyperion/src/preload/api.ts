@@ -1676,6 +1676,40 @@ export interface AtmosphereNightCapture extends AtmosphereCheckCaptureTaken {
  */
 export type AtmosphereCheckCapture = AtmosphereFixtureCapture | AtmosphereNightCapture;
 
+/**
+ * One stage of the atmosphere run's flight as flown (plan R08, R08.T10.b): a hold of `W` along its
+ * leg's line, with the rate it was flown at and how far it was reckoned to fly.
+ */
+export interface AtmosphereCheckStage {
+  /** Its leg's target, which the camera looked at: a fixture, or `TEST MOON` for the climb. */
+  readonly target: string;
+  /** Its place in its leg, from 1. */
+  readonly stage: number;
+  /** The free camera's rate step as the `CAMERA` line read it back once set. */
+  readonly rateStep: number;
+  /**
+   * The distance asked of it, m: from where the camera was reckoned to stand to its end, ahead
+   * along the line of sight (`W`), or below zero back along it (`S`).
+   */
+  readonly askedM: number;
+  /** The hold planned for that distance at that rate, ms. */
+  readonly holdMs: number;
+  /** The hold as the primary's frames show it, from the press's frame to the release's, ms. */
+  readonly heldMs: number;
+  /**
+   * The longest of the primary's steps over the hold, ms, uncapped: a stalled frame, whose step
+   * the free camera caps at `MAX_FREE_STEP_S` and the release waits out.
+   */
+  readonly longestStepMs: number;
+  /** How far it flew as reckoned, m: the rate times the hold as held, below zero back. */
+  readonly flownM: number;
+  /**
+   * How far short of the target's centre, along the leg's line, the camera was reckoned to stand
+   * after it, m: below zero past the centre.
+   */
+  readonly shortOfCentreM: number;
+}
+
 /** What the atmosphere run's renderer reports at the end of a run, for its results file. */
 export interface AtmosphereCheckRecord {
   /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
@@ -1690,6 +1724,8 @@ export interface AtmosphereCheckRecord {
   readonly mediaReadyMs: number;
   /** The captures, in the order taken. */
   readonly captures: ReadonlyArray<AtmosphereCheckCapture>;
+  /** The flight's stages, in the order flown, the climb's first. */
+  readonly stages: ReadonlyArray<AtmosphereCheckStage>;
   /** The engine's faults over the run, each as a line, as T20's record gives them. */
   readonly faults: ReadonlyArray<string>;
 }

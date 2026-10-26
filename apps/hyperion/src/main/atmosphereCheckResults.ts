@@ -24,6 +24,7 @@ import { join } from "node:path";
 
 import type {
   AtmosphereCheckRecord,
+  AtmosphereCheckStage,
   AtmosphereFixtureCapture,
   AtmosphereNightCapture,
   SpikePassTimer,
@@ -45,9 +46,9 @@ export const ATMOSPHERE_CHECK_SCHEMA = "hyperion.views-check.atmosphere-results"
 /**
  * The schema's version; bumped with any change to the file's shape: 2 with each capture's `kind`
  * (a fixture's or the night's, the night's with no designation, range or phase) and its
- * `exposureSettleMs`.
+ * `exposureSettleMs`; 3 with the flight's `stages`.
  */
-export const ATMOSPHERE_CHECK_VERSION = 2;
+export const ATMOSPHERE_CHECK_VERSION = 3;
 
 /**
  * The run, as the main process describes it at its start: the terrain run's description, without
@@ -125,6 +126,8 @@ export interface AtmosphereCheckResults {
   readonly mediaReadyMs: number;
   /** The captures, in the order taken. */
   readonly captures: ReadonlyArray<AtmosphereCaptureFigures>;
+  /** The flight's stages as flown, in order, recorded, not judged. */
+  readonly stages: ReadonlyArray<AtmosphereCheckStage>;
   readonly findings: {
     /** The run's rule: a capture taken and saved, and no capture's fault line holding a line. */
     readonly captures: {
@@ -214,6 +217,7 @@ export function buildAtmosphereCheckResults(input: AtmosphereCheckInput): Atmosp
     canvas: record.canvas,
     mediaReadyMs: record.mediaReadyMs,
     captures,
+    stages: record.stages,
     findings: {
       captures: {
         verdict,
@@ -274,6 +278,24 @@ function placeCells(capture: AtmosphereCaptureFigures): readonly [string, string
   return cells;
 }
 
+/** A stage's row of the summary's table. */
+function stageRow(stage: AtmosphereCheckStage): string {
+  return [
+    "",
+    cell(stage.target),
+    String(stage.stage),
+    String(stage.rateStep),
+    stage.askedM.toExponential(3),
+    `${(stage.holdMs / 1000).toFixed(3)} / ${(stage.heldMs / 1000).toFixed(3)}`,
+    stage.longestStepMs.toFixed(0),
+    stage.flownM.toExponential(3),
+    stage.shortOfCentreM.toExponential(3),
+    "",
+  ]
+    .join(" | ")
+    .trim();
+}
+
 /** The results' summary, for a person reading the record. */
 export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string {
   const { run, findings } = results;
@@ -303,6 +325,16 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
     "| Capture | Designation | Camera | Range | Phase | Exposure | AUTO settled (s) | Draws | Frame interval median / p95 (ms) | GPU median / p95 (ms) | Statements | Fault lines |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
+    "",
+    "## Stages (as reckoned)",
+    "",
+    ...(results.stages.length === 0
+      ? ["None."]
+      : [
+          "| Target | Stage | Rate step | Asked (m) | Hold planned / held (s) | Longest step (ms) | Flown (m) | Short of centre (m) |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- |",
+          ...results.stages.map(stageRow),
+        ]),
     "",
     "## Reasons",
     "",

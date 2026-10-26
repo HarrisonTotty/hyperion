@@ -108,7 +108,7 @@ describe("the atmosphere run's results", () => {
   it("pass the fixture's record", () => {
     const results = buildAtmosphereCheckResults(input());
     expect([results.schema, results.version, results.overall, atmosphereFailures(results)]).toEqual(
-      [ATMOSPHERE_CHECK_SCHEMA, 2, "pass", ""],
+      [ATMOSPHERE_CHECK_SCHEMA, 3, "pass", ""],
     );
   });
 
@@ -233,6 +233,20 @@ describe("the atmosphere run's summary", () => {
     expect(text).toContain(`| atmosphere: ${NOT_AVAILABLE} |`);
   });
 
+  it("lists each stage as flown, with its rate step read back, its hold planned and held and its longest step", () => {
+    expect(summary()).toContain(
+      "| TEST EARTH O3 SLAB | 2 | 18 | 1.006e+10 | 10.055 / 10.050 | 17 | 1.005e+10 | 5.300e+8 |",
+    );
+  });
+
+  it("states no stage where none was flown", () => {
+    expect(
+      atmosphereCheckMarkdown(
+        buildAtmosphereCheckResults(input({ ...ATMOSPHERE_RECORD, stages: [] })),
+      ),
+    ).toContain("## Stages (as reckoned)\n\nNone.\n");
+  });
+
   it("lists the reasons, or none", () => {
     expect(summary()).toContain(
       `## Reasons\n\n- fixture-test-mars: atmosphere fault: ${NOT_AVAILABLE}\n`,
@@ -304,7 +318,7 @@ describe("the atmosphere run's files", () => {
     );
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.atmosphere-results",
-      version: 2,
+      version: 3,
       overall: "pass",
       mediaReadyMs: 4200,
     });
