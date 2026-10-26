@@ -133,6 +133,7 @@ use crate::planetary::chem::partition::{
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
+use crate::planetary::hooks::ocean;
 use crate::planetary::hooks::surface::{
     ColdProfile, OceanWeight, SurfaceConditions, ZonalInsolation,
 };
@@ -1607,13 +1608,19 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
 
 /// What a subsurface ocean rests on (P14.T24.b's `subsurface_ocean`): rock, or the high-pressure
 /// ice whose liquidus meets the ocean's temperature (P14.T51.g, 23 → 24).
+///
+/// From P14.T51.g.a's bump a regular moon's ocean rests on `Rock` or `IceV`, the ice whose
+/// melting curve holds its 273 K base. The others wait for P14.T51.g.b's liquidus (`IceIii`) and
+/// P14.T55.k's warm oceans under high-pressure ice (`IceVi`, `IceVii`): an ocean at most 273.16 K
+/// lies below the V–VI–liquid point, 273.31 K (IAPWS R14-08(2011), Table 1; decision-p14-t51g Q6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OceanFloor {
     /// The rock core or mantle.
     Rock,
     /// Ice III.
     IceIii,
-    /// Ice V.
+    /// Ice V: from P14.T51.g.a's bump, the floor of a regular moon's ocean whose layer reaches ice
+    /// V's melting pressure at its 273 K base.
     IceV,
     /// Ice VI.
     IceVi,
@@ -1637,17 +1644,23 @@ impl SubsurfaceOcean {
     /// The ocean of a regular moon of radius `radius`, density `density` and water mass fraction
     /// `water`, with a surface at `surface` and a tidal heat flux `flux` (P14.T17.b's flag,
     /// [`has_subsurface_ocean`](crate::planetary::moons::regular::has_subsurface_ocean), with the
-    /// inputs its derivation gives it); `None` where the flag says there is none.
+    /// inputs its derivation gives it), as [`Subsurface::of_regular_moon`] gives it; `None` where
+    /// the flag says there is none, and where the ocean is not modelled
+    /// ([`Subsurface::NotComputed`]: its shell's base lies at or beyond ice V's melting pressure,
+    /// from P14.T51.g.a's bump). So `None` does not mean "no ocean":
+    /// [`Subsurface::of_regular_moon`] tells the two apart.
     ///
-    /// Its shell is the flag's own, 651 ln(273 K ÷ `T_s`) ÷ F, and its depth the moon's water layer
-    /// less that shell. It is pure water on rock, at 273 K at its base
-    /// ([`ICE_MELTING_POINT`]): the flag's model, until P14.T51.g's liquidus, solutes and floor
-    /// (23 → 24).
+    /// Its shell is the flag's own, 651 ln(273 K ÷ `T_s`) ÷ F. It is pure water at 273 K at its base
+    /// ([`ICE_MELTING_POINT`]), the flag's model, until P14.T51.g.b's liquidus and solutes. To
+    /// version 23 its depth is the moon's water layer less that shell, on rock; from P14.T51.g.a's
+    /// bump (23 → 24) the layer ends at the shallower of the rock and ice V's melting pressure at
+    /// 273 K, 626.09 MPa, on [`OceanFloor::IceV`] there.
     ///
     /// # Examples
     ///
     /// Europa, 8% water under a surface at 102 K, with 50 mW m⁻² from below, keeps an ocean about
-    /// 13 km under its ice and some 124 km deep to its rock:
+    /// 13 km under its ice and some 124 km deep to its rock, at 189 MPa there, under ice V's
+    /// liquidus:
     ///
     /// ```
     /// use hyperion_sim::planetary::hooks::figures::{OceanFloor, SubsurfaceOcean};
@@ -1673,15 +1686,24 @@ impl SubsurfaceOcean {
         surface: Kelvin,
         flux: WattsPerSquareMetre,
     ) -> Option<Self> {
-        let layers = ocean_layers(radius, density, water, surface, flux)?;
-        (layers.shell_thickness < layers.water_depth).then(|| Self {
-            shell_thickness: layers.shell_thickness,
-            thickness: Metres::new(layers.water_depth.value() - layers.shell_thickness.value()),
-            floor: OceanFloor::Rock,
+        match Subsurface::of_regular_moon(radius, density, water, surface, flux) {
+            Subsurface::Ocean(ocean) => Some(ocean),
+            Subsurface::NoOcean | Subsurface::NotComputed => None,
+        }
+    }
+
+    /// The flag's pure water at 273 K under the shell `shell_thickness`, `thickness` deep on
+    /// `floor`.
+    #[must_use]
+    fn of_the_flag(shell_thickness: Metres, thickness: Metres, floor: OceanFloor) -> Self {
+        Self {
+            shell_thickness,
+            thickness,
+            floor,
             liquid: Gas::Water.substance(),
             solute_mass_fraction: 0.0,
             base_temperature: ICE_MELTING_POINT,
-        })
+        }
     }
 
     /// The ice shell over it, m.
@@ -1725,8 +1747,10 @@ impl SubsurfaceOcean {
 /// `subsurface_ocean`: none for a body computed to have none, and absent for one no rule computes).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Subsurface {
-    /// No rule computes it for this body: until P14.T51.g's bump (23 → 24), every body but a
-    /// regular moon. It must never be read as "no ocean".
+    /// No rule computes it for this body: until P14.T51.g.b's bump, every body but a regular
+    /// moon; and, from P14.T51.g.a's (23 → 24), a regular moon whose flag holds an ocean but whose
+    /// shell's base lies at or beyond ice V's melting pressure, so that any liquid lies under
+    /// high-pressure ice (P14.T55.k's). It must never be read as "no ocean".
     NotComputed,
     /// A rule computes that the body holds none.
     NoOcean,
@@ -1735,8 +1759,24 @@ pub enum Subsurface {
 }
 
 impl Subsurface {
-    /// A regular moon's, by P14.T17.b's flag ([`SubsurfaceOcean::of_regular_moon`], with its
-    /// inputs).
+    /// A regular moon's, by P14.T17.b's flag, with the inputs [`SubsurfaceOcean::of_regular_moon`]
+    /// takes: [`NoOcean`](Self::NoOcean) where the flag's shell is at least the moon's water layer,
+    /// or the flag has no layers (no water, no heat from below, or a surface at or above 273 K),
+    /// and otherwise its ocean under the flag's shell.
+    ///
+    /// To version 23 the ocean is the whole layer below the shell, on rock. From P14.T51.g.a's
+    /// bump (23 → 24; decision-p14-t51g Q9) it ends at the shallower of the rock and the radius at
+    /// which the layer's pressure, P(r) over the flag's water at [`WATER_DENSITY`] with M = (4π/3)
+    /// R³ ρ̄, reaches ice V's melting pressure at its 273 K base, 626.09 MPa from the registry's
+    /// water row (IAPWS R14-08): on [`OceanFloor::Rock`] with 23's depth where the rock lies at
+    /// or under it, else on [`OceanFloor::IceV`] there. Where the shell's base itself lies at or
+    /// beyond it the ocean is [`NotComputed`](Self::NotComputed). The flag and the shell are 23's
+    /// either way. An absent member gives the tectonic regime no shell, which leaves it the
+    /// branch's wherever its shell is beyond the 60 km an ice shell's regime needs
+    /// ([`ICE_SHELL_LIMIT`](interior::ICE_SHELL_LIMIT)): at a gravity in the shell under 10.4 m
+    /// s⁻², every icy regular moon short of some 4–6 M⊕.
+    ///
+    /// [`WATER_DENSITY`]: crate::planetary::moons::regular::WATER_DENSITY
     #[must_use]
     pub fn of_regular_moon(
         radius: Metres,
@@ -1745,8 +1785,34 @@ impl Subsurface {
         surface: Kelvin,
         flux: WattsPerSquareMetre,
     ) -> Self {
-        SubsurfaceOcean::of_regular_moon(radius, density, water, surface, flux)
-            .map_or(Self::NoOcean, Self::Ocean)
+        let Some(layers) = ocean_layers(radius, density, water, surface, flux) else {
+            return Self::NoOcean;
+        };
+        let shell = layers.shell_thickness;
+        // The flag's comparison, as 23's: a shell that is not a number holds none.
+        let flagged = shell < layers.water_depth;
+        if !flagged {
+            return Self::NoOcean;
+        }
+        let whole = Metres::new(layers.water_depth.value() - shell.value());
+        let flag =
+            |thickness, floor| Self::Ocean(SubsurfaceOcean::of_the_flag(shell, thickness, floor));
+        match ocean::OceanFloorRules::in_force() {
+            ocean::OceanFloorRules::Held => flag(whole, OceanFloor::Rock),
+            ocean::OceanFloorRules::Floored => {
+                let column = ocean::WaterColumn::new(radius, density, layers.water_depth);
+                let shell_base = Metres::new(radius.value() - shell.value());
+                let liquidus = ocean::base_liquidus(ICE_MELTING_POINT);
+                match ocean::ocean_end(&column, shell_base, liquidus) {
+                    ocean::OceanEnd::Rock => flag(whole, OceanFloor::Rock),
+                    ocean::OceanEnd::Ice(floor) => flag(
+                        Metres::new(shell_base.value() - floor.value()),
+                        OceanFloor::IceV,
+                    ),
+                    ocean::OceanEnd::Beyond => Self::NotComputed,
+                }
+            }
+        }
     }
 }
 

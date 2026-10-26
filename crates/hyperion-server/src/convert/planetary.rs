@@ -1514,13 +1514,16 @@ mod tests {
 
     /// P14.T35.e: the members of later tasks are absent, as the record holds them, with
     /// P14.T35.f's `silicate_vapour`, which the record does not hold, and a subsurface ocean is
-    /// computed for a regular moon alone, an object or `null`, until P14.T51.g. The condensates
+    /// computed for a regular moon alone, an object or `null`, until P14.T51.g.b. From P14.T51.g.a's
+    /// bump (23 → 24) a regular moon's is absent where its record's is not computed, its shell's
+    /// base lying at or beyond ice V's melting pressure (liquid under high-pressure ice, P14.T55.k's),
+    /// and none is below it; an ocean rests on rock or, from that bump, on ice V. The condensates
     /// and the crust are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`,
     /// `every_solid_surface_sends_its_record_s_crust`).
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
-        let mut moons = 0;
-        for (_, dto, wire) in ok_surfaces() {
+        let (mut moons, mut absent) = (0, Vec::new());
+        for (sim, dto, wire) in ok_surfaces() {
             assert_eq!(
                 [
                     dto.vertical_structure.is_not_modelled(),
@@ -1537,22 +1540,32 @@ mod tests {
                 == BodyKindDto::Moon {
                     origin: MoonOriginDto::Regular,
                 };
+            let not_computed = matches!(sim.figures().subsurface_ocean(), Subsurface::NotComputed);
             assert_eq!(
-                !dto.subsurface_ocean.is_not_modelled(),
-                regular,
+                dto.subsurface_ocean.is_not_modelled(),
+                !regular || not_computed,
                 "{}",
                 wire.id
             );
+            if regular && not_computed {
+                absent.push(wire.id.to_string());
+            }
             if let Modelled::Value(ocean) = &dto.subsurface_ocean {
                 assert!(
-                    ocean.thickness_m > 0.0 && ocean.shell_thickness_m >= 0.0,
-                    "{}",
+                    ocean.thickness_m > 0.0
+                        && ocean.shell_thickness_m >= 0.0
+                        && matches!(ocean.floor, OceanFloorDto::Rock | OceanFloorDto::IceV),
+                    "{}: {ocean:?}",
                     wire.id
                 );
             }
             moons += usize::from(regular);
         }
         assert!(moons > 0, "no regular moon's ocean was checked");
+        // Version 23 holds P14.T51.g.a's floor: every regular moon's ocean is computed.
+        if hyperion_sim::GENERATOR_VERSION < hyperion_sim::GeneratorVersion::new(24) {
+            assert_eq!(absent, Vec::<String>::new(), "absent at 23");
+        }
     }
 
     /// P14.T54.a: every `ok` surface sends its record's published condensates (P14.T51.a), a

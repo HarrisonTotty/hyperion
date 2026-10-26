@@ -106,6 +106,7 @@ use crate::planetary::derive::{
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
 use crate::planetary::hooks::figures::{HeatInputs, PassFigures, Subsurface, non_tidal_heat_flow};
+use crate::planetary::hooks::ocean::OceanFloorRules;
 use crate::planetary::moons::tides::{
     MoonTides, TidalBranch, TidalMaterial, TideInputs, mean_density, tidal_forcing,
 };
@@ -114,6 +115,7 @@ use crate::planetary::placement::spacing::{
     MAX_SPACING_REDRAWS, Neighbour, PAIR_SPACING_SIGMA, mutual_hill_factor, next_semi_major_axis,
     satisfies_floor, spacing_floor,
 };
+use crate::planetary::system::moon_ice::MoonBulkRules;
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::Composition;
 use crate::stellar::draws::UnitUniform;
@@ -1265,16 +1267,20 @@ impl DerivedMoon {
 
     /// Whether it holds liquid water under its ice: whether its tides are on the ocean branch,
     /// where [`has_subsurface_ocean`] holds at its whole heat flow
-    /// ([`ocean_heat_flow`](Self::ocean_heat_flow)).
+    /// ([`ocean_heat_flow`](Self::ocean_heat_flow)), which a moon whose heated shell is a rock lag
+    /// never takes (P14.T51.g.a). It reads the branch, not the published ocean, which from
+    /// P14.T51.g.a's bump is not modelled where the ocean lies under high-pressure ice.
     #[must_use]
     pub const fn subsurface_ocean(&self) -> bool {
-        matches!(self.tide.subsurface, Subsurface::Ocean(_))
+        matches!(self.tide.tides.branch(), TidalBranch::Ocean)
     }
 
     /// Its subsurface ocean as P14.T24.b's figures read it ([`Subsurface::of_regular_moon`]),
     /// from the very layers its flag was decided on: the ice and water of the bulk its tides read
     /// under its surface at its equilibrium temperature, with the heat flow its flag reads; none
-    /// where its flag holds none.
+    /// where its flag holds none. From P14.T51.g.a's bump it ends at ice V's liquidus, and is
+    /// [`Subsurface::NotComputed`] where its shell's base lies beyond it, though its flag holds an
+    /// ocean.
     #[must_use]
     pub(crate) const fn subsurface(&self) -> Subsurface {
         self.tide.subsurface
@@ -1967,7 +1973,9 @@ impl PassRecordOf for MoonPassRecord<'_> {
             self.record.figures(&self.shape, bulk, air, &at).as_ref(),
             ContextTide::Moon(PassTide {
                 branch: tide.tides.branch(),
-                ocean: matches!(tide.subsurface, Subsurface::Ocean(_)),
+                // The branch's, not the published ocean's, so that an ocean not modelled under
+                // high-pressure ice moves no pass (P14.T51.g.a).
+                ocean: tide.tides.branch() == TidalBranch::Ocean,
                 heat_flux: tide.heat_flux,
             }),
         )
@@ -2099,7 +2107,7 @@ fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
     // A moon's class is rocky or icy, so it always has one; none is a body with no solid heat.
     .unwrap_or(WattsPerSquareMetre::new(0.0));
     let surface = pass.equilibrium;
-    let tides = MoonTides::of(&TideInputs {
+    let inputs = TideInputs {
         material: TidalMaterial::of_water(fractions.water()),
         moment_factor: moment_of_inertia_factor(class, &fractions),
         mass: kilograms,
@@ -2109,7 +2117,14 @@ fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
         non_tidal_heat_flow: non_tidal,
         forcing: tidal_forcing(at.planet, radius, a, e, n),
         mean_motion_rad_per_s: n,
-    });
+    };
+    // A heated shell's rock lag holds no ice to float on an ocean (P14.T51.g.a; decision-p14-t56g
+    // §1): the lag exists only under the moon bulk's batch rules, so this rides its hold.
+    let tides = if ocean_branch_open(at.bulk) {
+        MoonTides::of(&inputs)
+    } else {
+        MoonTides::without_an_ocean(&inputs)
+    };
     let heat = tidal_heating(at.planet, radius, tides.loss(), a, e, n);
     let area = 4.0 * core::f64::consts::PI * r * r;
     let flux = WattsPerSquareMetre::new(heat.value() / area);
@@ -2125,10 +2140,13 @@ fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
     } else {
         Subsurface::NoOcean
     };
-    debug_assert_eq!(
-        matches!(subsurface, Subsurface::Ocean(_)),
-        ocean,
-        "an ocean-branch moon's layers are those its branch was decided on"
+    debug_assert!(
+        match OceanFloorRules::in_force() {
+            OceanFloorRules::Held => matches!(subsurface, Subsurface::Ocean(_)) == ocean,
+            OceanFloorRules::Floored => matches!(subsurface, Subsurface::NoOcean) != ocean,
+        },
+        "an ocean-branch moon's layers are those its branch was decided on: an ocean, or from \
+         P14.T51.g.a's floor one not modelled under high-pressure ice"
     );
     TideState {
         tidal_heating: heat,
@@ -2147,6 +2165,55 @@ fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
         ),
         tides,
     }
+}
+
+/// Whether a moon of own bulk `bulk` may take the ocean branch (P14.T51.g.a; decision-p14-t51g
+/// Q4): not where its bulk carries P14.T56.g's rock lag ([`SurfaceLag::Lagged`], a capture's or a
+/// giant-impact moon's stated bulk or a regular moon's kept one), whose heated shell holds no ice
+/// over an ocean, so that its published ocean is none and its regime never an ice shell's.
+///
+/// The gate rides the lag's own hold, `MOON_BULK_VERSION`: it closes only where the moon bulk's
+/// rules lag ([`MoonBulkRules::lags`], the batch's), so that below the bump every moon's tides are
+/// version 23's, a lag a caller of [`derive_moon`] states itself included. In the tests a switch
+/// opens it on a lagged moon too ([`with_ocean_under_a_lag`]), to count the moons it moves off the
+/// branch.
+#[must_use]
+fn ocean_branch_open(bulk: MoonBulk) -> bool {
+    let lag = match bulk {
+        MoonBulk::Derived => SurfaceLag::Bare,
+        MoonBulk::Stated { lag, .. } | MoonBulk::Kept { lag, .. } => lag,
+    };
+    #[cfg(test)]
+    if OCEAN_UNDER_A_LAG.with(core::cell::Cell::get) {
+        return true;
+    }
+    match lag {
+        SurfaceLag::Bare => true,
+        SurfaceLag::Lagged => !MoonBulkRules::in_force().lags(),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether a test opened the ocean branch to lagged moons on its thread
+    /// ([`with_ocean_under_a_lag`]).
+    static OCEAN_UNDER_A_LAG: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with the ocean branch open to lagged moons on this thread, as before P14.T51.g.a,
+/// for the tests to count the lagged moons its gate moves off the branch; the thread's setting is
+/// set back after, a panic in `run` included. P14.T54.b keeps the gate and may delete the switch.
+#[cfg(test)]
+pub(crate) fn with_ocean_under_a_lag<R>(run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's setting back as it drops.
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            OCEAN_UNDER_A_LAG.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(OCEAN_UNDER_A_LAG.with(|cell| cell.replace(true)));
+    run()
 }
 
 /// A moon could not be derived.
@@ -3664,6 +3731,54 @@ mod tests {
         }
     }
 
+    /// P14.T51.g.a (decision-p14-t51g Q4; decision-p14-t56g §1): a moon whose heated shell is a
+    /// rock lag takes no ocean branch, under the moon bulk's batch rules, whose hold the gate
+    /// rides. The table's Ganymede, on the ocean branch from its radiogenic heat alone, keeps its
+    /// ocean bare, and under a lag below the bump; with the same water under a lag and the batch's
+    /// rules its tides are the cold branch's, its flag and its ocean none; and with the gate opened
+    /// by the tests'
+    /// switch it is back on the ocean branch, which is what the gate moves.
+    #[test]
+    fn a_lagged_moon_takes_no_ocean_branch() {
+        use crate::planetary::system::moon_ice::with_moon_bulk;
+        let jupiter = table_giant("Jupiter", 5, None);
+        let ((kg, rank), orbit) = table_moon(GANYMEDE, &jupiter);
+        let shared = MoonVolatiles::SHARED;
+        let bare = own_moon((kg, rank), &orbit, &jupiter, &shared, MoonBulk::Derived);
+        assert_eq!(bare.tides().branch(), TidalBranch::Ocean);
+        assert!(bare.subsurface_ocean());
+        assert!(matches!(bare.subsurface(), Subsurface::Ocean(_)));
+        let lagged = MoonBulk::Kept {
+            water: bare.ice_fraction(),
+            lag: SurfaceLag::Lagged,
+        };
+        let lagged_moon = || own_moon((kg, rank), &orbit, &jupiter, &shared, lagged);
+        // Below the bump the gate is open: the lag rides the moon bulk's hold.
+        assert_eq!(lagged_moon().tides().branch(), TidalBranch::Ocean);
+        let batch = |run: &dyn Fn() -> DerivedMoon| with_moon_bulk(MoonBulkRules::Batch, run);
+        let gated = batch(&lagged_moon);
+        assert_eq!(gated.surface_lag(), SurfaceLag::Lagged);
+        assert_eq!(
+            gated.tides().branch(),
+            TidalBranch::Cold,
+            "{:?}",
+            gated.tides()
+        );
+        assert!(!gated.subsurface_ocean());
+        assert_eq!(gated.subsurface(), Subsurface::NoOcean);
+        let open = batch(&|| with_ocean_under_a_lag(lagged_moon));
+        assert_eq!(
+            open.tides().branch(),
+            TidalBranch::Ocean,
+            "{:?}",
+            open.tides()
+        );
+        assert!(open.subsurface_ocean());
+        // Its bulk is the same either way: the gate moves its tides alone.
+        assert_same_bits(gated.radius().value(), open.radius().value());
+        assert_eq!(gated.body().fractions(), open.body().fractions());
+    }
+
     /// P14.T56.c's follow-up: a Triton-like capture inside the generated Jupiter's circumplanetary
     /// ice line (T56.c's case, at 10 Jupiter radii) takes carbon's and nitrogen's boosts from
     /// Jupiter's zone, and its water from its own icy bulk, Triton's measured radius and the ice
@@ -3915,7 +4030,8 @@ mod tests {
                 let planet = Kilograms::from(p.mass());
                 let own = regular_derived(moon, &p, &jupiter, rank, SOLAR_AGE);
                 let tides = own.tides();
-                let ocean = matches!(own.subsurface(), Subsurface::Ocean(_));
+                // An ocean, or from P14.T51.g.a's bump one not modelled under high-pressure ice.
+                let ocean = !matches!(own.subsurface(), Subsurface::NoOcean);
                 assert_eq!(ocean, own.subsurface_ocean());
                 let heat = tidal_heating(planet, own.radius(), tides.loss(), a, e, n);
                 assert_same_bits(own.tidal_heating().value(), heat.value());

@@ -44,11 +44,14 @@
 //!    [`COLD_ICE_TIDAL_Q`]).
 //!
 //! The ocean test needs only the water a moon holds, so a rocky moon with some water (Europa, 8%
-//! by mass) may take it; an icy moon that fails it is cold. The full thermal-orbital equilibrium,
-//! a Maxwell or Andrade body whose viscosity balances tidal heat against convective loss, would
-//! give Im k₂ continuously in place of the branches: P14.T55.j. A porous rock core's dissipation,
-//! which Enceladus needs, is P14.T56.e's: a conductive shell alone keeps no Enceladus ocean, as
-//! the literature finds (decision-p14-t56d-membrane §2.4).
+//! by mass) may take it; an icy moon that fails it is cold. A moon whose heated shell is a rock
+//! lag (P14.T56.g) takes no ocean branch at all (`MoonTides::without_an_ocean`, P14.T51.g.a): the
+//! lag holds no ice to float on an ocean (decision-p14-t56g §1), so its branch falls to the heated
+//! or the cold one, as an icy moon's that fails the test does. The full thermal-orbital
+//! equilibrium, a Maxwell or Andrade body whose viscosity balances tidal heat against convective
+//! loss, would give Im k₂ continuously in place of the branches: P14.T55.j. A porous rock core's
+//! dissipation, which Enceladus needs, is P14.T56.e's: a conductive shell alone keeps no Enceladus
+//! ocean, as the literature finds (decision-p14-t56d-membrane §2.4).
 //!
 //! Every function here is pure and deterministic: the shell's modulus is a fixed midpoint sum
 //! ([`SHELL_QUADRATURE_NODES`]) and the root is refined by a fixed count of bisections
@@ -689,12 +692,40 @@ impl MoonTides {
     /// ```
     #[must_use]
     pub fn of(inputs: &TideInputs) -> Self {
+        let (density, gravity) = Self::bulk(inputs);
+        Self::on_an_ocean(inputs, density, gravity)
+            .unwrap_or_else(|| Self::off_an_ocean(inputs, density, gravity))
+    }
+
+    /// The tides of a moon `inputs` describe that takes no ocean branch, whatever its water and
+    /// heat: one whose heated shell is a rock lag (P14.T56.g's `SurfaceLag::Lagged`), which holds
+    /// no ice to float on an ocean (decision-p14-t56g §1; decision-p14-t51g Q4). Its branch is the
+    /// heated or the cold one, as [`of`](Self::of) gives a moon that fails the ocean test.
+    #[must_use]
+    pub(crate) fn without_an_ocean(inputs: &TideInputs) -> Self {
+        let (density, gravity) = Self::bulk(inputs);
+        Self::off_an_ocean(inputs, density, gravity)
+    }
+
+    /// The mean density and surface gravity of the moon `inputs` describe.
+    #[must_use]
+    fn bulk(inputs: &TideInputs) -> (KilogramsPerCubicMetre, MetresPerSecondSquared) {
         let (m, r) = (inputs.mass.value(), inputs.radius.value());
-        let density = mean_density(inputs.mass, inputs.radius);
-        let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
-        if let Some(ocean) = Self::on_an_ocean(inputs, density, gravity) {
-            return ocean;
-        }
+        (
+            mean_density(inputs.mass, inputs.radius),
+            MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r)),
+        )
+    }
+
+    /// The heated or the cold branch's tides of the moon of `inputs`, of mean density `density`
+    /// and surface gravity `gravity`: the heated branch for a rocky moon whose `F_nt` and tidal
+    /// flux at Io's Im k₂ reach `F_c`, else the cold branch.
+    #[must_use]
+    fn off_an_ocean(
+        inputs: &TideInputs,
+        density: KilogramsPerCubicMetre,
+        gravity: MetresPerSecondSquared,
+    ) -> Self {
         let fluid = fluid_love_number(inputs.moment_factor);
         let (f_nt, forcing) = (inputs.non_tidal_heat_flow.value(), inputs.forcing.value());
         let heated = f_nt + forcing * MOON_TIDAL_RESPONSE;

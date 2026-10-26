@@ -322,7 +322,10 @@ impl Error for SampleContextsError {
 ///   record reads compressed to its body's surface pressure.
 /// - the row darkening's, `ROW_DARKENING_VERSION` (P14.T49.k), at `RowDarkeningRules::Darkened`
 ///   through `with_row_darkening`: the crystalline rows darkened by their cited fine phases
-///   (`basalt_reduced`'s graphite, `ferric`'s nanophase oxide).
+///   (`basalt_reduced`'s graphite, `ferric`'s nanophase oxide);
+/// - the ocean floor's, `OCEAN_FLOOR_VERSION` (P14.T51.g.a), at `OceanFloorRules::Floored`
+///   through `with_ocean_floor`: a regular moon's published ocean ends at the shallower of its
+///   rock and ice V's melting pressure at its 273 K base.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
@@ -333,6 +336,7 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::chem::escape::{EscapeRules, with_rules};
     use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, with_cold_trap_rules};
+    use crate::planetary::hooks::ocean::{OceanFloorRules, with_ocean_floor};
     use crate::planetary::system::moon_ice::{MoonBulkRules, with_moon_bulk};
     use crate::substance::optics::{RowDarkeningRules, with_row_darkening};
     use crate::substance::{
@@ -344,7 +348,9 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
                 with_cold_trap_rules(ColdTrapRules::Batch, || {
                     with_read_densities(ReadDensitiesRules::Read, || {
                         with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
-                            with_row_darkening(RowDarkeningRules::Darkened, run)
+                            with_row_darkening(RowDarkeningRules::Darkened, || {
+                                with_ocean_floor(OceanFloorRules::Floored, run)
+                            })
                         })
                     })
                 })
@@ -532,6 +538,7 @@ mod tests {
         use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
         use crate::planetary::derive::photometry::area_mix::RayleighFloorRules;
         use crate::planetary::hooks::cold_traps::ColdTrapRules;
+        use crate::planetary::hooks::ocean::OceanFloorRules;
         use crate::planetary::system::moon_ice::MoonBulkRules;
         use crate::substance::optics::RowDarkeningRules;
         use crate::substance::{CompressedLiquidsRules, ReadDensitiesRules, with_read_densities};
@@ -545,6 +552,7 @@ mod tests {
                 ReadDensitiesRules::in_force(),
                 CompressedLiquidsRules::in_force(),
                 RowDarkeningRules::in_force(),
+                OceanFloorRules::in_force(),
             )
         };
         let at_24 = (
@@ -556,6 +564,7 @@ mod tests {
             ReadDensitiesRules::Read,
             CompressedLiquidsRules::Compressed,
             RowDarkeningRules::Darkened,
+            OceanFloorRules::Floored,
         );
         let at_23 = (
             EscapeRules::Held,
@@ -566,6 +575,7 @@ mod tests {
             ReadDensitiesRules::Held,
             CompressedLiquidsRules::Saturated,
             RowDarkeningRules::Held,
+            OceanFloorRules::Held,
         );
         assert_eq!(rules(), at_23, "the version's, outside the helper");
         assert_eq!(with_every_24_hold(rules), at_24);
@@ -580,6 +590,7 @@ mod tests {
                 ReadDensitiesRules::Read,
                 CompressedLiquidsRules::Compressed,
                 RowDarkeningRules::Darkened,
+                OceanFloorRules::Floored,
             ),
             "every 24 hold but the unlit mean's"
         );
@@ -594,6 +605,7 @@ mod tests {
                 ReadDensitiesRules::Held,
                 CompressedLiquidsRules::Compressed,
                 RowDarkeningRules::Darkened,
+                OceanFloorRules::Floored,
             ),
             "every 24 hold but the read densities'"
         );
