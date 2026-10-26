@@ -7,7 +7,10 @@
 //! section and an envelope `not_applicable`; a body in the gas-envelope state (a gas or ice giant,
 //! a sub-Neptune) has its envelope and a surface `not_applicable`, since within the model it has no
 //! surface: no surface pressure, its heights from the 1-bar level, and its envelope's base at
-//! kilobars. A ring, a belt or the halo has neither.
+//! kilobars. So, from generator version 24, does a solid body under a supercritical envelope
+//! (P14.T53.b part 2), where a condensable above its critical temperature holds a liquid-like
+//! layer of at least a thousandth of the body's mass over its ground, which then is no surface. A
+//! ring, a belt or the halo has neither.
 //!
 //! # Substances are keys
 //!
@@ -47,7 +50,13 @@ use crate::surface::ClimateModelDto;
 /// `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
 /// hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
 /// temperature, the ice and ocean fractions and the condensates for that, as the climate regime
-/// does (decision-p14-t54a-states). P14.T53.b makes the state follow the present climate.
+/// does (decision-p14-t54a-states). Below generator version 24 the runaway limit is read at the
+/// hosts' largest past luminosity. From 24 (P14.T53.b part 1) the class is the present
+/// insolation's but for part 1 (c)'s hothouse, both limits read at the hosts' luminosities now,
+/// and only the water's loss, with its oxygen and the carbon left airborne, reads the largest past
+/// luminosity: a world inside the runaway limit at its hosts' peak alone is `Temperate` or
+/// `Snowball` with its water lost, and a dry world between the limits too hot for liquid water at
+/// its surface pressure is `RunawayGreenhouse`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -57,18 +66,36 @@ pub enum SurfaceStateDto {
     MagmaOcean,
     /// A surface pressure below the airless limit: bare rock or ice.
     Airless,
-    /// Inside the runaway-greenhouse limit at the hosts' largest past luminosity when water was
-    /// present: the oceans lost, a thick carbon-dioxide air, as on Venus. About an evolved host its
-    /// present climate can be cold (decision-pre-23-review item 33).
+    /// Inside the runaway-greenhouse limit when water was present: the oceans lost, a
+    /// carbon-dioxide air, as on Venus. Below generator version 24 the limit is read at the hosts'
+    /// largest past luminosity, so that about an evolved host the present climate can be cold
+    /// (decision-pre-23-review item 33), and every runaway keeps Venus's cloud deck. From 24
+    /// (P14.T53.b part 1) it is inside the runaway limit now, its water lost, under whatever air
+    /// escape left it, with Venus's deck only where the air beneath can cycle it: a runaway whose
+    /// climate under the deck is colder than about 430 K is solved without it, its cloud the water
+    /// cloud's. Only the water's loss, with its oxygen and the carbon left airborne, reads the
+    /// hosts' largest past luminosity. From 24 it is also a world between the limits now that
+    /// stores no carbon for want of water and holds no liquid water, its mean surface temperature
+    /// at or above water's saturation temperature at its surface pressure (647.096 K at or above
+    /// 22.064 megapascals; not judged below 611.657 Pa): a desiccated hothouse, Venus's state,
+    /// whatever its present insolation, with Venus's deck where the air beneath can cycle it
+    /// (P14.T53.b part 1 (c)).
     RunawayGreenhouse,
-    /// Between the runaway limit, at the hosts' largest past luminosity, and the maximum-greenhouse
-    /// limit now, as on Earth and Mars. A world here can be ice-covered, on the cold side of the
-    /// ice-albedo bistability (decision-pre-23-review item 26).
+    /// Between the runaway limit and the maximum-greenhouse limit now, as on Earth and Mars. Below
+    /// generator version 24 the runaway limit is read at the hosts' largest past luminosity; from
+    /// 24 now, so that a world inside it at its hosts' peak alone is `Temperate` here, its water
+    /// lost and its carbon airborne (P14.T53.b part 1). A world here can be ice-covered, on the
+    /// cold side of the ice-albedo bistability (decision-pre-23-review item 26). From 24 a dry
+    /// world here too hot for liquid water at its surface pressure is sent as `runaway_greenhouse`
+    /// instead (P14.T53.b part 1 (c)).
     Temperate,
     /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
-    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. Until P14.T53.a's
-    /// carbon-dioxide form, a dry carbon-dioxide world here can be published above melting with no
-    /// ice (P14.T13.c's finding "No maximum-greenhouse ceiling"; decision-p14-t51a-partition §1).
+    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. From generator
+    /// version 24 a world inside the runaway limit at its hosts' largest past luminosity alone is
+    /// `Snowball` here, its water lost and its carbon airborne (P14.T53.b part 1). Until
+    /// P14.T53.a's carbon-dioxide form, a dry carbon-dioxide world here can be published above
+    /// melting with no ice (P14.T13.c's finding "No maximum-greenhouse ceiling";
+    /// decision-p14-t51a-partition §1).
     Snowball,
     /// A steam envelope over a magma ocean (P14.T53.b): produced by no rule until that task.
     SteamEnvelope,
@@ -688,9 +715,10 @@ pub enum SilicateVapourDto {}
 /// P14.T48.e and P14.T35.e).
 ///
 /// The section is `ok` for a present body with a solid surface whose spin and derivation this
-/// generator version computes, `not_applicable` for a body in the gas-envelope state, whose air is
-/// its [`BodyEnvelopeDto`], and for a ring, a belt or the halo. Every quantity's name carries its
-/// unit. The module documentation says what `null` and an absent member mean.
+/// generator version computes, `not_applicable` for a body in the gas-envelope state, or, from
+/// generator version 24, a solid body under a supercritical envelope (P14.T53.b part 2), whose
+/// air is its [`BodyEnvelopeDto`], and for a ring, a belt or the halo. Every quantity's name
+/// carries its unit. The module documentation says what `null` and an absent member mean.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodySurfaceDto {
@@ -853,9 +881,10 @@ pub struct GuillotProfileDto {
 /// A gas-envelope body's visible atmosphere: its profile, composition and decks (plan 14,
 /// P14.T24.d with T52.d; the simulation's `record::Envelope`).
 ///
-/// The section is `not_modelled` for every gas-envelope body until P14.T24.d, which may give these
-/// members their final shape before a build first sends one, and `not_applicable` for every other
-/// body, whose surface section is the applicable one.
+/// The section is `not_modelled` for every gas-envelope body, and from generator version 24 for a
+/// solid body under a supercritical envelope (P14.T53.b part 2), until P14.T24.d, which may give
+/// these members their final shape before a build first sends one, and `not_applicable` for every
+/// other body, whose surface section is the applicable one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyEnvelopeDto {

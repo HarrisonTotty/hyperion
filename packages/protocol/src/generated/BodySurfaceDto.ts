@@ -24,9 +24,10 @@ import type { WetEpochDto } from "./WetEpochDto";
  * P14.T48.e and P14.T35.e).
  *
  * The section is `ok` for a present body with a solid surface whose spin and derivation this
- * generator version computes, `not_applicable` for a body in the gas-envelope state, whose air is
- * its [`BodyEnvelopeDto`], and for a ring, a belt or the halo. Every quantity's name carries its
- * unit. The module documentation says what `null` and an absent member mean.
+ * generator version computes, `not_applicable` for a body in the gas-envelope state, or, from
+ * generator version 24, a solid body under a supercritical envelope (P14.T53.b part 2), whose
+ * air is its [`BodyEnvelopeDto`], and for a ring, a belt or the halo. Every quantity's name
+ * carries its unit. The module documentation says what `null` and an absent member mean.
  */
 export type BodySurfaceDto = { 
 /**

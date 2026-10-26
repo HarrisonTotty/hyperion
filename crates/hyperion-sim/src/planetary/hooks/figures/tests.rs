@@ -2907,3 +2907,117 @@ fn the_figures_first_stage_is_the_record_s_to_the_bit() {
     assert!(compared > 40, "{compared}");
     assert!(refused > 10, "{refused}");
 }
+
+/// P14.T53.b part 1 (a)'s readers in the figures (the batch review's fixes), on the table's Earth
+/// under each of [`past_only_runaways`]' atmospheres, every 24 hold in force:
+///
+/// - the tectonic regime's wet lid (`heat_at`, through `pass_figures`) reads the state the air's
+///   water follows: an Earth inside the runaway limit at its hosts' largest past luminosity alone,
+///   published `Temperate` or `Snowball`, takes the runaway's dry lid and its heat flow to the bit,
+///   where its control, whose water is its own, keeps Earth's mobile lid;
+/// - T24.b's public water ice ([`cover::ice_fraction`]) is the record's water cover's
+///   (`water_cover_over`, [`GlobalFigures::water_cover`]) to the bit, its cold area at the
+///   published state's threshold and its cap by the water's state: the past-only `Snowball`, which
+///   holds no surface water, holds no ice, where its control is iced over its whole cold area, as
+///   one state read for both would have iced the past-only one.
+///
+/// [`past_only_runaways`]: crate::planetary::derive::atmosphere::tests::past_only_runaways
+#[test]
+fn under_every_24_hold_a_past_only_runaway_s_lid_and_ice_follow_its_water() {
+    use crate::planetary::derive::atmosphere::tests::past_only_runaways;
+    use crate::planetary::hooks::surface::tests::spin_of;
+    use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs};
+    use crate::planetary::testing::with_every_24_hold;
+    use crate::units::consts::STEFAN_BOLTZMANN;
+    let table = figures_table();
+    let earth = body_of(&table, "Earth");
+    assert_eq!(
+        figures_of(&table, "Earth").tectonic_regime(),
+        TectonicRegime::MobileLid
+    );
+    for case in past_only_runaways() {
+        with_every_24_hold(|| {
+            let figures = |air: &Atmosphere| {
+                figures_from(&FiguresInputs {
+                    atmosphere: air,
+                    ..inputs_of(earth, "Earth")
+                })
+                .expect("an Earth has figures")
+            };
+            let (now, control, runaway) = (
+                figures(&case.air),
+                figures(&case.control),
+                figures(&case.runaway),
+            );
+            let at = format!(
+                "a past-only runaway published {:?}: {:?} at {:.2} mW m⁻², its control {:?} at \
+                 {:.2}, the runaway {:?} at {:.2}",
+                case.published,
+                now.tectonic_regime(),
+                now.heat_flow().value() * 1e3,
+                control.tectonic_regime(),
+                control.heat_flow().value() * 1e3,
+                runaway.tectonic_regime(),
+                runaway.heat_flow().value() * 1e3,
+            );
+            eprintln!("{at}");
+            assert_eq!(control.tectonic_regime(), TectonicRegime::MobileLid, "{at}");
+            assert_eq!(now.tectonic_regime(), runaway.tectonic_regime(), "{at}");
+            assert_eq!(now.tectonic_regime(), TectonicRegime::Episodic, "{at}");
+            assert_same_bits(now.heat_flow().value(), runaway.heat_flow().value());
+            assert_same_bits(now.surface_water().value(), 0.0);
+
+            // T24.b's water ice, public and the record's, over the same conditions.
+            let ice = |air: &Atmosphere, figures: &GlobalFigures| {
+                let albedo = air.albedo().value();
+                let t_eq = case.inputs.equilibrium.value();
+                let flux = 4.0 * STEFAN_BOLTZMANN * crate::math::powi(t_eq, 4) / (1.0 - albedo);
+                let conditions = SurfaceConditions::derive(&SurfaceInputs {
+                    atmosphere: air,
+                    equilibrium_temperature: case.inputs.equilibrium,
+                    surface_gravity: earth.surface_gravity(),
+                    radius: Metres::from(earth.radius()),
+                    material: SurfaceMaterial::Rock,
+                    lid: None,
+                    stellar_flux: WattsPerSquareMetre::new(flux),
+                    xuv_flux: WattsPerSquareMetre::ZERO,
+                    spin: spin_of("Earth"),
+                    heat_flow: figures.heat_flow(),
+                    ocean_weight: figures.ocean_weight(),
+                })
+                .expect("an Earth has a surface");
+                let inputs = cover::IceInputs {
+                    conditions: &conditions,
+                    state: air.state(),
+                    water_state: air.water_state(),
+                    crust: figures.impactors().crust(),
+                    surface_water: figures.surface_water(),
+                };
+                let public = cover::ice_fraction(&inputs);
+                let record = figures
+                    .water_cover(&conditions, &conditions.cold_profile())
+                    .ice_fraction;
+                assert_same_bits(public, record);
+                let one_state = cover::ice_fraction(&cover::IceInputs {
+                    water_state: air.state(),
+                    ..inputs
+                });
+                let cold = conditions.cold_area(cover::ice_threshold(air.state()));
+                (public, one_state, cold)
+            };
+            let (ice_now, one_state, cold) = ice(&case.air, &now);
+            let (ice_control, _, cold_control) = ice(&case.control, &control);
+            eprintln!(
+                "  its water ice {ice_now:.6} (one state read for both {one_state:.6}, its cold \
+                 area {cold:.6}); its control's {ice_control:.6} of {cold_control:.6}"
+            );
+            assert_same_bits(ice_now, 0.0);
+            if case.published == SurfaceState::Snowball {
+                assert!(cold > 0.0, "{at}");
+                assert_same_bits(one_state, cold);
+                assert_same_bits(ice_control, cold_control);
+                assert!(ice_control > 0.0, "{at}");
+            }
+        });
+    }
+}

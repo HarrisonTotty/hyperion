@@ -7,6 +7,12 @@
  * `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
  * hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
  * temperature, the ice and ocean fractions and the condensates for that, as the climate regime
- * does (decision-p14-t54a-states). P14.T53.b makes the state follow the present climate.
+ * does (decision-p14-t54a-states). Below generator version 24 the runaway limit is read at the
+ * hosts' largest past luminosity. From 24 (P14.T53.b part 1) the class is the present
+ * insolation's but for part 1 (c)'s hothouse, both limits read at the hosts' luminosities now,
+ * and only the water's loss, with its oxygen and the carbon left airborne, reads the largest past
+ * luminosity: a world inside the runaway limit at its hosts' peak alone is `Temperate` or
+ * `Snowball` with its water lost, and a dry world between the limits too hot for liquid water at
+ * its surface pressure is `RunawayGreenhouse`.
  */
 export type SurfaceStateDto = "magma_ocean" | "airless" | "runaway_greenhouse" | "temperate" | "snowball" | "steam_envelope" | "tenuous";

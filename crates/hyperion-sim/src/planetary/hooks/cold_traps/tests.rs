@@ -155,7 +155,9 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
          airless branch and its cold-trapped ices. Delete `COLD_TRAPS_VERSION`, `ColdTrapRules` \
          and its `Held` arm, `RecordColdTraps::rules` and `condensates_under`'s `Held` branch, \
          `RecordRules` with `SurfaceCase::record` and `PlanetarySystem::with_record_rules` (the \
-         record's partition then follows the snapshot's hold, deleted at 23), and this test. \
+         record's partition then follows the snapshot's hold, deleted at 23), the tests' switch \
+         `with_cold_trap_rules` and its thread's rules (and its place in \
+         `planetary::testing::with_every_24_hold`), and this test. \
          Settle too that T13.c's passes (`surface_mix::pass_condensates`) keep P14.T51.a's \
          airless branch: give them `cold_traps::publish_over` over one `ColdTrapField` a body \
          (P14.T51.i), with the record's sky and these rules, or the Bond albedo reads other areas \

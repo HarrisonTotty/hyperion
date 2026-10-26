@@ -9,6 +9,9 @@
 //! - [`sample_contexts`] draws real systems from a galaxy of the Milky Way's parameters: the
 //!   systems nearest a Sun-like point that pass a [`SampleFilter`], for the statistical tests
 //!   (design note 20).
+//! - For this crate's tests alone, `with_every_24_hold` runs a closure with every landed hold at
+//!   generator version 24 in force together, so that a test of a 24 figure reads 24 as it will
+//!   ship (decision-t24i-airless-state D3.3).
 
 use std::error::Error;
 use std::fmt;
@@ -294,6 +297,62 @@ impl Error for SampleContextsError {
     }
 }
 
+/// `run`'s result with every landed hold at generator version 24 in force together on this
+/// thread, for a test that asserts a 24 figure (decision-t24i-airless-state D3.3, from P14.T24.i's
+/// follow-up): T53.a's census set the escape's rules alone, and T24.i's and T49.n's tests the unlit
+/// mean's alone, so the floor's absence on the escape's batch path fell between them. Each switch
+/// sets its rules back as it returns, a panic in `run` included, and a test may set one hold back
+/// inside it (`with_unlit_mean(UnlitMeanRules::Held, ..)`, say) to compare 24 with and without it.
+///
+/// The holds, each with its switch:
+///
+/// - the escape's, `ESCAPE_VERSION` (P14.T53.a), at `EscapeRules::Batch` through `with_rules`,
+///   which switches the Rayleigh floor's, `RAYLEIGH_FLOOR_VERSION` (P14.T24.h.a), with it;
+/// - the unlit mean's, `UNLIT_MEAN_VERSION` (P14.T24.i), at `UnlitMeanRules::Floored` through
+///   `with_unlit_mean`;
+/// - the moon bulk's, `MOON_BULK_VERSION` (P14.T56.f), at `MoonBulkRules::Batch` through
+///   `with_moon_bulk`;
+/// - the cold traps', `COLD_TRAPS_VERSION` (P14.T51.f), at `ColdTrapRules::Batch` through
+///   `with_cold_trap_rules`, which a system reads as it is generated (its `RecordRules`);
+/// - the read densities', `READ_DENSITIES_VERSION` (P14.T49.n), at `ReadDensitiesRules::Read`
+///   through `with_read_densities`: solid argon's and the other phases P14.T49.n read, and the
+///   liquids by temperature;
+/// - the compressed liquids', `COMPRESSED_LIQUIDS_VERSION` (P14.T49.n), at
+///   `CompressedLiquidsRules::Compressed` through `with_compressed_liquids`: every liquid the
+///   record reads compressed to its body's surface pressure.
+/// - the row darkening's, `ROW_DARKENING_VERSION` (P14.T49.k), at `RowDarkeningRules::Darkened`
+///   through `with_row_darkening`: the crystalline rows darkened by their cited fine phases
+///   (`basalt_reduced`'s graphite, `ferric`'s nanophase oxide).
+///
+/// A system or a record is read under the rules in force when it is generated: one generated
+/// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
+/// 24's, so a test generates afresh inside it. A later hold at 24 adds its switch here, and every
+/// 24 test then reads it. P14.T54.b deletes this helper with the holds.
+#[cfg(test)]
+pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, with_cold_trap_rules};
+    use crate::planetary::system::moon_ice::{MoonBulkRules, with_moon_bulk};
+    use crate::substance::optics::{RowDarkeningRules, with_row_darkening};
+    use crate::substance::{
+        CompressedLiquidsRules, ReadDensitiesRules, with_compressed_liquids, with_read_densities,
+    };
+    with_rules(EscapeRules::Batch, || {
+        with_unlit_mean(UnlitMeanRules::Floored, || {
+            with_moon_bulk(MoonBulkRules::Batch, || {
+                with_cold_trap_rules(ColdTrapRules::Batch, || {
+                    with_read_densities(ReadDensitiesRules::Read, || {
+                        with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+                            with_row_darkening(RowDarkeningRules::Darkened, run)
+                        })
+                    })
+                })
+            })
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,6 +521,83 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
+    }
+
+    /// Inside [`with_every_24_hold`] every landed hold at 24 gives its 24 rules, one set back
+    /// inside it gives its hold's alone, and outside it each gives the version's, 23's (P14.T24.i's
+    /// follow-up, decision-t24i-airless-state D3.3).
+    #[test]
+    fn every_24_hold_is_in_force_inside_the_helper() {
+        use crate::planetary::chem::escape::EscapeRules;
+        use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+        use crate::planetary::derive::photometry::area_mix::RayleighFloorRules;
+        use crate::planetary::hooks::cold_traps::ColdTrapRules;
+        use crate::planetary::system::moon_ice::MoonBulkRules;
+        use crate::substance::optics::RowDarkeningRules;
+        use crate::substance::{CompressedLiquidsRules, ReadDensitiesRules, with_read_densities};
+        let rules = || {
+            (
+                EscapeRules::in_force(),
+                RayleighFloorRules::in_force(),
+                UnlitMeanRules::in_force(),
+                MoonBulkRules::in_force(),
+                ColdTrapRules::in_force(),
+                ReadDensitiesRules::in_force(),
+                CompressedLiquidsRules::in_force(),
+                RowDarkeningRules::in_force(),
+            )
+        };
+        let at_24 = (
+            EscapeRules::Batch,
+            RayleighFloorRules::Floored,
+            UnlitMeanRules::Floored,
+            MoonBulkRules::Batch,
+            ColdTrapRules::Batch,
+            ReadDensitiesRules::Read,
+            CompressedLiquidsRules::Compressed,
+            RowDarkeningRules::Darkened,
+        );
+        let at_23 = (
+            EscapeRules::Held,
+            RayleighFloorRules::Held,
+            UnlitMeanRules::Held,
+            MoonBulkRules::Held,
+            ColdTrapRules::Held,
+            ReadDensitiesRules::Held,
+            CompressedLiquidsRules::Saturated,
+            RowDarkeningRules::Held,
+        );
+        assert_eq!(rules(), at_23, "the version's, outside the helper");
+        assert_eq!(with_every_24_hold(rules), at_24);
+        assert_eq!(
+            with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, rules)),
+            (
+                EscapeRules::Batch,
+                RayleighFloorRules::Floored,
+                UnlitMeanRules::Held,
+                MoonBulkRules::Batch,
+                ColdTrapRules::Batch,
+                ReadDensitiesRules::Read,
+                CompressedLiquidsRules::Compressed,
+                RowDarkeningRules::Darkened,
+            ),
+            "every 24 hold but the unlit mean's"
+        );
+        assert_eq!(
+            with_every_24_hold(|| with_read_densities(ReadDensitiesRules::Held, rules)),
+            (
+                EscapeRules::Batch,
+                RayleighFloorRules::Floored,
+                UnlitMeanRules::Floored,
+                MoonBulkRules::Batch,
+                ColdTrapRules::Batch,
+                ReadDensitiesRules::Held,
+                CompressedLiquidsRules::Compressed,
+                RowDarkeningRules::Darkened,
+            ),
+            "every 24 hold but the read densities'"
+        );
+        assert_eq!(rules(), at_23, "set back after");
     }
 
     #[test]

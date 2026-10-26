@@ -25,7 +25,8 @@
 //! halo's. A planet's moons and rings and a system's belts and halo are [`Section::Ok`] lists
 //! (P14.T34). A present body with a solid surface has its surface section [`Section::Ok`]
 //! (P14.T48.e) and its envelope [`Section::NotApplicable`]; a body in the gas-envelope state, a
-//! sub-Neptune or a giant, the other way round, its envelope [`Section::NotModelled`] until
+//! sub-Neptune or a giant, or, from generator version 24, a solid body under a supercritical
+//! envelope (P14.T53.b part 2), the other way round, its envelope [`Section::NotModelled`] until
 //! P14.T24.d (decision-p14-t35e-wire). The hooks section, [`Hooks`], holds the body's detail seed
 //! (R09.T1.b): [`Section::Ok`] for a planet, moon or dwarf planet present at the record's time,
 //! and [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
@@ -601,9 +602,11 @@ impl BulkProperties {
 /// surface is [`Section::Ok`] for a present body with a solid surface
 /// ([`PlanetClass::has_solid_surface`]) whose spin and derivation this version computes, and
 /// [`Section::NotApplicable`] for a body in the gas-envelope state, a sub-Neptune or a giant,
-/// whose air is its [`Envelope`] section's, so that no surface section is `Ok` with no surface
-/// behind it (decision-p14-t35e-wire §2). It is never in the state
-/// [`SurfaceState::GasEnvelope`].
+/// or, from generator version 24, a solid body under a supercritical envelope (P14.T53.b part 2:
+/// a condensable above its critical temperature whose liquid-like column over its critical
+/// isochore holds at least a thousandth of the mass), whose air is its [`Envelope`] section's, so
+/// that no surface section is `Ok` with no surface behind it (decision-p14-t35e-wire §2). It is
+/// never in the state [`SurfaceState::GasEnvelope`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
     state: SurfaceState,
@@ -1285,6 +1288,7 @@ impl BodyRecord {
     /// The surface (P14.T48.e): [`Section::Ok`] for a present body with a solid surface, a planet,
     /// a dwarf planet or a moon, whose spin and derivation this version computes;
     /// [`Section::NotApplicable`] for a body in the gas-envelope state (a sub-Neptune or a giant),
+    /// from generator version 24 a solid body under a supercritical envelope (P14.T53.b part 2),
     /// a population and a body not present; and [`Section::NotModelled`] for a body with no
     /// rotation law (every body of [`generate_planets`](crate::planetary::generate_planets)) or
     /// whose derivation this version does not compute.
@@ -1522,11 +1526,27 @@ impl BodyRecordBuilder {
     /// envelope tags of its class (P14.T48.e's gas-envelope split, decision-p14-t35e-wire): for a
     /// class with a solid surface ([`PlanetClass::has_solid_surface`]) the surface
     /// [`Section::NotModelled`], until the generator sets what it computes, and the envelope
-    /// [`Section::NotApplicable`]; for a sub-Neptune or a giant the surface
-    /// [`Section::NotApplicable`] and the envelope [`Section::NotModelled`], until P14.T24.d.
+    /// [`Section::NotApplicable`]; for a sub-Neptune or a giant, or, from generator version 24, a
+    /// solid body under a supercritical envelope (P14.T53.b part 2: a condensable above its
+    /// critical temperature whose liquid-like column over its critical isochore holds at least
+    /// [`THIN_ENVELOPE_FRACTION`](crate::planetary::params::THIN_ENVELOPE_FRACTION) of the mass,
+    /// under its surface gravity), the surface [`Section::NotApplicable`] and the envelope
+    /// [`Section::NotModelled`], until P14.T24.d.
+    ///
+    /// The tags read the derivation's own class and surface gravity
+    /// ([`DerivedBody::surface_gravity`]). A generator that publishes another bulk than the
+    /// derivation's sets its own tags after this, from that bulk: the system's records
+    /// ([`generate`](crate::planetary::generate)) decide a planet's or a member's on its published
+    /// bulk's class and gravity, an icy belt member's ruling 112.8 bulk among them, whose radius,
+    /// and so gravity, are not its derivation's, and a moon's on its record's bulk.
     #[must_use]
     pub fn derived(self, derived: &DerivedBody) -> Self {
-        let (surface, envelope) = if derived.class().has_solid_surface() {
+        let solid = crate::planetary::derive::atmosphere::has_surface_section(
+            derived.class(),
+            derived.atmosphere(),
+            derived.surface_gravity(),
+        );
+        let (surface, envelope) = if solid {
             (Section::NotModelled, Section::NotApplicable)
         } else {
             (Section::NotApplicable, Section::NotModelled)
@@ -2099,6 +2119,54 @@ mod tests {
         assert_eq!(
             snapshot.body(planet(6)).unwrap().surface(),
             &Section::NotApplicable
+        );
+    }
+
+    /// P14.T53.b part 2 through the builder (the batch review's fixes): the census's methane
+    /// snowball 02001b2ca0000000.0400, a solid body under kilobars of supercritical methane,
+    /// takes the envelope's tags from [`BodyRecordBuilder::derived`], its surface not applicable
+    /// and its envelope not modelled, under the escape's batch (every 24 hold in force), as its
+    /// generated record does; under the escape's hold, to version 23, its derivation leaves its
+    /// surface to the generator, which publishes it, and its envelope not applicable; and the
+    /// batch's derivation read under the hold is tagged as the hold's. Its bulk's gravity is its
+    /// derivation's, to the bit, so that the builder and the generator decide alike.
+    #[test]
+    fn under_every_24_hold_a_supercritical_envelope_takes_the_envelope_s_tags_from_the_builder() {
+        use crate::planetary::chem::escape::{EscapeRules, with_rules};
+        use crate::planetary::system::tests::supercritical_methane_body;
+        use crate::planetary::testing::with_every_24_hold;
+        let tags = |record: &BodyRecord| {
+            (
+                record.section_state(RecordSection::Surface),
+                record.section_state(RecordSection::Envelope),
+            )
+        };
+        let built = |derived: &DerivedBody| planet_record(4, derived, 0.1);
+        let enveloped = (SectionState::NotApplicable, SectionState::NotModelled);
+        let (batch_record, batch) = with_every_24_hold(supercritical_methane_body);
+        let (held_record, held) = with_rules(EscapeRules::Held, supercritical_methane_body);
+        for (record, derived) in [(&batch_record, &batch), (&held_record, &held)] {
+            let bulk = record.bulk().ok().expect("a present body's bulk");
+            hyperion_testkit::float::assert_same_bits(
+                bulk.surface_gravity().value(),
+                derived.surface_gravity().value(),
+            );
+            assert!(bulk.class().has_solid_surface(), "{:?}", bulk.class());
+        }
+        assert_eq!(tags(&batch_record), enveloped);
+        assert_eq!(with_every_24_hold(|| tags(&built(&batch))), enveloped);
+        assert_eq!(
+            tags(&held_record),
+            (SectionState::Ok, SectionState::NotApplicable)
+        );
+        let leaves = (SectionState::NotModelled, SectionState::NotApplicable);
+        assert_eq!(
+            with_rules(EscapeRules::Held, || tags(&built(&held))),
+            leaves
+        );
+        assert_eq!(
+            with_rules(EscapeRules::Held, || tags(&built(&batch))),
+            leaves
         );
     }
 

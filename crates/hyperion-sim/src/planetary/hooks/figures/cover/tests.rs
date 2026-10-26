@@ -271,6 +271,7 @@ fn the_table_s_ices_are_the_ruling_s() {
                 let ice = ice_fraction(&IceInputs {
                     conditions,
                     state: SurfaceState::Snowball,
+                    water_state: SurfaceState::Snowball,
                     crust,
                     surface_water: KilogramsPerSquareMetre::new(water),
                 });
@@ -1006,6 +1007,7 @@ fn the_table_s_mars_over_its_record_takes_the_record_s_ice_in_its_passes() {
     let record = ice_fraction(&IceInputs {
         conditions: &conditions,
         state: air.state(),
+        water_state: air.water_state(),
         crust: ground.crust,
         surface_water: ground.surface_water,
     });

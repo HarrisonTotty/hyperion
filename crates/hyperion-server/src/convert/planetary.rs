@@ -1400,7 +1400,8 @@ mod tests {
 
     /// P14.T35.e: a present planet has exactly one of its surface and its envelope other than
     /// `not_applicable`; a giant's and a sub-Neptune's surface is not applicable and its envelope
-    /// not modelled until P14.T24.d; and every record carries the envelope.
+    /// not modelled until P14.T24.d, as, from generator version 24, a solid planet's under a
+    /// supercritical envelope (P14.T53.b part 2); and every record carries the envelope.
     #[test]
     fn every_present_planet_has_exactly_one_of_a_surface_and_an_envelope() {
         let (mut solid, mut sub_neptunes, mut giants) = (0, 0, 0);
@@ -1419,7 +1420,21 @@ mod tests {
                 "{}",
                 wire.id
             );
-            if class.has_solid_surface() {
+            // From generator version 24 a solid class under a supercritical envelope (P14.T53.b
+            // part 2) has its surface not applicable and its envelope not modelled, as a gas
+            // envelope's: the test that decides it is the simulation's own, so the tag pair alone
+            // stands for it here.
+            let hidden = class.has_solid_surface()
+                && wire.surface == SectionDto::NotApplicable
+                && *envelope == SectionDto::NotModelled;
+            assert!(
+                !hidden || hyperion_sim::GENERATOR_VERSION.get() >= 24,
+                "{}",
+                wire.id
+            );
+            if hidden {
+                assert_eq!(sim.envelope(), &Section::NotModelled, "{}", wire.id);
+            } else if class.has_solid_surface() {
                 assert!(matches!(wire.surface, SectionDto::Ok(_)), "{}", wire.id);
                 solid += 1;
             } else {

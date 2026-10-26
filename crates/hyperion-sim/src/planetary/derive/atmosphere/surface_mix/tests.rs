@@ -125,6 +125,59 @@ fn a_lit_body_keeps_its_mean_to_the_bit_under_the_unlit_floor() {
     }
 }
 
+/// P14.T24.i's follow-up on the escape's batch path, every 24 hold in force
+/// (decision-t24i-airless-state D1.1, D1.3): the unlit airless body publishes its night floor there
+/// too, the passes' stand-in's cosmic background, where the batch's airless arms once published
+/// its `T_eq` of 0 K; with the unlit mean held it is 0 K, as at 23.
+#[test]
+fn under_every_24_hold_an_unlit_airless_body_takes_its_night_floor() {
+    use crate::planetary::derive::atmosphere::{SurfaceState, UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::hooks::surface::COSMIC_BACKGROUND_TEMPERATURE;
+    use crate::planetary::testing::with_every_24_hold;
+
+    let held = with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, dark_body));
+    assert_eq!(held.atmosphere().state(), SurfaceState::Airless);
+    assert_same_bits(held.atmosphere().surface_temperature().value(), 0.0);
+    let floored = with_every_24_hold(dark_body);
+    assert_eq!(floored.atmosphere().state(), SurfaceState::Airless);
+    assert_same_bits(
+        floored.atmosphere().surface_temperature().value(),
+        COSMIC_BACKGROUND_TEMPERATURE.value(),
+    );
+    assert_same_bits(
+        floored.equilibrium_temperature().value(),
+        held.equilibrium_temperature().value(),
+    );
+}
+
+/// P14.T24.i's follow-up over the table, every 24 hold in force (decision-t24i-airless-state
+/// D1.4): every body, each lit above its floor, Venus, Earth, Mars and Titan among them, is the
+/// same to the bit, its whole derivation, with the unlit mean's rules floored as held, since its
+/// base temperature, the greenhouse's start and the ice-held stand-in's temperature, is then its
+/// `T_eq`.
+#[test]
+fn under_every_24_hold_a_lit_body_keeps_its_air_to_the_bit_under_the_unlit_floor() {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::testing::with_every_24_hold;
+    let held = with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, historic_table));
+    let floored = with_every_24_hold(historic_table);
+    assert_eq!(held.len(), floored.len());
+    for ((name, before), (again, after)) in held.iter().zip(&floored) {
+        assert_eq!(name, again);
+        assert!(
+            before.equilibrium_temperature().value() > 30.0,
+            "{name} is lit"
+        );
+        assert_eq!(format!("{before:?}"), format!("{after:?}"), "{name}");
+    }
+    for name in ["Venus", "Earth", "Mars", "Titan"] {
+        assert!(
+            held.iter().any(|(n, _)| *n == name),
+            "{name} is a table body"
+        );
+    }
+}
+
 /// The unlit mean is held until P14.T54.b's bump: below it every airless mean is its equilibrium
 /// temperature, and the tests' switch reaches the floor ahead of it.
 #[test]
@@ -143,7 +196,23 @@ fn the_unlit_mean_is_held_only_until_the_24_bump() {
          `under_the_batch_the_photometry_states_the_derivation_s_albedo` (an airless mean is its \
          T_eq only where it is lit), `a_surface_the_registry_or_the_record_does_not_model_answers_\
          not_modelled` and `every_generated_solid_body_reads_into_inputs_the_builder_takes` (no \
-         unlit refusal), and `the_radiative_model_reads_its_record_s_inertia_on_every_body`"
+         unlit refusal), and `the_radiative_model_reads_its_record_s_inertia_on_every_body`. \
+         The base temperature reads it on both paths (P14.T24.i's follow-up, \
+         decision-t24i-airless-state D1.3): delete its switch from \
+         `planetary::testing::with_every_24_hold`, and settle the follow-up's tests, which compare \
+         every 24 hold with every 24 hold but this one: \
+         `under_every_24_hold_an_unlit_airless_body_takes_its_night_floor`, \
+         `under_every_24_hold_a_lit_body_keeps_its_air_to_the_bit_under_the_unlit_floor`, and in \
+         `planetary::system`'s tests `under_every_24_hold_no_surface_lies_below_its_night_floor`, \
+         `under_every_24_hold_a_body_above_its_floor_is_unchanged_by_it`, \
+         `under_every_24_hold_the_four_split_bodies_read_their_floor` and \
+         `under_every_24_hold_the_floor_s_moved_bodies_are_stated` (their `FloorCensus` then needs \
+         no held run), and T24.i's and P14.T49.n's record tests in the 24 combination, \
+         `under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor`, \
+         `under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor`, \
+         `under_24_s_densities_the_golden_systems_unlit_records_all_read` and \
+         `under_24_s_densities_the_sample_s_unlit_records_all_read`, with their `unlit_moves` and \
+         `unlit_moves_of` (each then compares its records with 23's, or states them alone)"
     );
     assert_eq!(UnlitMeanRules::in_force(), UnlitMeanRules::Held);
     assert_eq!(
@@ -151,4 +220,91 @@ fn the_unlit_mean_is_held_only_until_the_24_bump() {
         UnlitMeanRules::Floored
     );
     assert_eq!(UnlitMeanRules::in_force(), UnlitMeanRules::Held);
+}
+
+/// P14.T53.b part 1 (a) at the passes' stand-in cover (the batch review's fixes): the stand-in's
+/// partition (`given_partition`) gives its water's cover (`pass_water_cover`) the state the air's
+/// water follows. Over [`past_only_runaways`]' cases, every 24 hold in force:
+///
+/// - each past-only runaway, published `Temperate` or `Snowball`, holds no surface water and no
+///   ice in its pass's cover, and its published condensates no `H2O`;
+/// - over its control's own partition and climate a runaway's water state alone takes the water
+///   away: no surface water, no potential ocean and no ice, where the control, whose water is its
+///   own, holds its surface water and, as a `Snowball`, its uncapped cold area as ice; so the
+///   stand-in's partition of the control's air under a runaway's water publishes no `H2O`, where
+///   the control's publishes its liquid.
+///
+/// [`past_only_runaways`]: crate::planetary::derive::atmosphere::tests::past_only_runaways
+#[test]
+fn under_every_24_hold_a_past_only_runaway_s_stand_in_cover_holds_no_water_or_ice() {
+    use super::super::{Atmosphere, ClimateOf, Gas, SurfaceState};
+    use super::{PassLight, PassSurface, given_partition, isothermal_climate, pass_water_cover};
+    use crate::planetary::chem::partition::{CondensatePhase, Ground, partition};
+    use crate::planetary::derive::atmosphere::tests::past_only_runaways;
+    use crate::planetary::testing::with_every_24_hold;
+    use crate::units::MetresPerSecondSquared;
+    use crate::units::consts::GRAVITATIONAL_CONSTANT;
+    let surface = PassSurface::stand_in(PassLight::HottestHost);
+    let climate_of: &ClimateOf<'_> = &isothermal_climate;
+    let water = Gas::Water.substance();
+    for case in past_only_runaways() {
+        with_every_24_hold(|| {
+            let (m, r) = (case.inputs.mass.value(), case.inputs.radius.value());
+            let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
+            // The cover of the partition of `air`'s column at its climate, under `water_state`.
+            let cover_of = |air: &Atmosphere, water_state: SurfaceState| {
+                let climate = climate_of(air.surface_temperature, &air.partials);
+                let ground = Ground::new(gravity, surface.basins, surface.water_at_surface);
+                let solved = partition(&climate, &ground, &air.column_inventory());
+                pass_water_cover(
+                    &solved,
+                    (air.state, water_state, case.inputs.material),
+                    &surface,
+                    &climate,
+                )
+            };
+            let published = |air: &Atmosphere| {
+                given_partition(air, &case.inputs, &surface, (climate_of, gravity)).1
+            };
+            let h2o = |air: &Atmosphere| {
+                let condensates = published(air);
+                let area = |phase| {
+                    condensates
+                        .entry(water, phase)
+                        .map(crate::planetary::chem::partition::CondensateEntry::area_fraction)
+                };
+                (area(CondensatePhase::Solid), area(CondensatePhase::Liquid))
+            };
+            let now = cover_of(&case.air, case.air.water_state);
+            let gated = cover_of(&case.control, SurfaceState::RunawayGreenhouse);
+            let control = cover_of(&case.control, case.control.water_state);
+            let dried = Atmosphere {
+                water_state: SurfaceState::RunawayGreenhouse,
+                ..case.control
+            };
+            eprintln!(
+                "a past-only runaway published {:?}: its cover {now:?}, its H2O {:?}; over its \
+                 control's partition under a runaway's water {gated:?}, its H2O {:?}; the \
+                 control's {control:?}, its H2O {:?}",
+                case.published,
+                h2o(&case.air),
+                h2o(&dried),
+                h2o(&case.control),
+            );
+            for cover in [&now, &gated] {
+                assert_same_bits(cover.surface_water.value(), 0.0);
+                assert_same_bits(cover.potential_ocean, 0.0);
+                assert_same_bits(cover.ice_fraction, 0.0);
+            }
+            assert_eq!(h2o(&case.air), (None, None), "{:?}", case.published);
+            assert!(control.surface_water.value() > 0.0, "{control:?}");
+            // The control publishes its water (a liquid entry, covering no area in the stand-in,
+            // which knows no basins); under a runaway's water the same air publishes none.
+            assert!(h2o(&case.control).1.is_some(), "{:?}", case.published);
+            assert_eq!(h2o(&dried), (None, None), "{:?}", case.published);
+            if case.published == SurfaceState::Snowball {
+                assert_same_bits(control.ice_fraction, 1.0);
+            }
+        });
+    }
 }

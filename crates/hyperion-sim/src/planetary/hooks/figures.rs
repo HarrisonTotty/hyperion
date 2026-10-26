@@ -1865,7 +1865,11 @@ const YEARS_PER_GIGAYEAR: f64 = 1e9;
 /// continents and relief (P14.T48.a), and its surface water, oceans, ices and cloud.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalFigures {
+    /// The air's published state, whose ice threshold and ocean under ice the figures read.
     state: SurfaceState,
+    /// The state the air's water follows (`Atmosphere::water_state`, P14.T53.b part 1 (a)), which
+    /// gates its water ice's cap.
+    water_state: SurfaceState,
     /// The material of the fractions the figures were derived at ([`SurfaceMaterial::of`]), which
     /// the tests' partition on the figures alone reads ([`water_cover`](Self::water_cover),
     /// [`condensates_and_ice_under`](Self::condensates_and_ice_under)). The generator's figures
@@ -2066,6 +2070,7 @@ impl GlobalFigures {
         let potential_ocean = cover::potential_ocean(relief.hypsometry(), surface_water);
         Self {
             state: air.state(),
+            water_state: air.water_state(),
             #[cfg(test)]
             stand_in_material: SurfaceMaterial::of(&inputs.fractions),
             radiogenic_heat_flow: heat.radiogenic,
@@ -2289,6 +2294,7 @@ impl GlobalFigures {
                 &cover::IceInputs {
                     conditions,
                     state: self.state,
+                    water_state: self.water_state,
                     crust,
                     surface_water,
                 },
@@ -2503,7 +2509,7 @@ impl GlobalFigures {
     ) -> WaterCover {
         water_cover_over(
             &self.partition_ground(MetresPerSecondSquared::new(0.0), self.stand_in_material),
-            self.state,
+            (self.state, self.water_state),
             conditions,
             profile,
         )
@@ -2644,6 +2650,14 @@ impl GlobalFigures {
         &self.relief
     }
 
+    /// The state the air's water follows ([`Atmosphere::water_state`]), which the tests read
+    /// beside the record's published state to rebuild its water ice ([`cover::IceInputs`]).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn water_state(&self) -> SurfaceState {
+        self.water_state
+    }
+
     /// The surface water `σ_s`, kg m⁻² ([`cover::surface_water`]): P14.T13.a's water over the
     /// surface while the volcanic greenhouse runs, and 2% of it after.
     #[must_use]
@@ -2778,7 +2792,12 @@ pub(crate) fn partition_over(
     let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
     let solved = partition(&climate, &ground.ground, inventory);
     let profile = conditions.cold_profile_over(table);
-    let water = water_cover_over(ground, atmosphere.state(), conditions, &profile);
+    let water = water_cover_over(
+        ground,
+        (atmosphere.state(), atmosphere.water_state()),
+        conditions,
+        &profile,
+    );
     PartitionOver {
         partition: solved,
         profile,
@@ -2786,10 +2805,12 @@ pub(crate) fn partition_over(
     }
 }
 
-/// Water's cover on the ground `ground` of a body in the state `state` under the conditions
+/// Water's cover on the ground `ground` of a body in the state `state`, its water following
+/// `water_state` (`Atmosphere::water_state`, P14.T53.b part 1 (a)), under the conditions
 /// `conditions`, whose cold profile is `profile`: P14.T24.b's surface water, potential ocean and
-/// ice, the ice's area read off the profile at its edge ([`cover::ice_fraction`]'s rule over the
-/// ground's crust and surface water), and ice Ih's density at the mean surface temperature
+/// ice, the ice's area read off the profile at the state's edge ([`cover::ice_fraction`]'s rule
+/// over the ground's crust and surface water, a `Snowball`'s water uncapped by its water's state),
+/// and ice Ih's density at the mean surface temperature
 /// ([`WaterCover`]). On a body whose bulk is ice its crust is listed where the ground says so
 /// ([`WaterCover::crust_water`]): the partition's whole frozen water at that ice's area
 /// (decision-p14-t54a-ganymede, C1 follow-up §C1.4), while the surface water stays T24.b's, on
@@ -2797,7 +2818,7 @@ pub(crate) fn partition_over(
 #[must_use]
 pub(crate) fn water_cover_over(
     ground: &PartitionGround,
-    state: SurfaceState,
+    (state, water_state): (SurfaceState, SurfaceState),
     conditions: &SurfaceConditions,
     profile: &ColdProfile,
 ) -> WaterCover {
@@ -2805,6 +2826,7 @@ pub(crate) fn water_cover_over(
         &cover::IceInputs {
             conditions,
             state,
+            water_state,
             crust: ground.crust,
             surface_water: ground.surface_water,
         },
@@ -2913,7 +2935,8 @@ pub(crate) fn pass_figures(
     if !non_negative(age.value()) {
         return Err(DeriveFiguresError::Age(age));
     }
-    let heat = heat_at(&heat_inputs, (interior, rock_core), age, air.state());
+    // The regime's wet lid reads the state the air's water follows (P14.T53.b part 1 (a)).
+    let heat = heat_at(&heat_inputs, (interior, rock_core), age, air.water_state());
     let (surface_age, impactors, craters) = crater_contract(inputs, heat.water, heat.heat_flow)?;
     let outgassing = outgassing(heat.heat_flow);
     let crust = impactors.crust();
@@ -2929,7 +2952,7 @@ pub(crate) fn pass_figures(
         radius: inputs.radius,
         iron_share: heat.iron_share,
         heat_flow_at: |t: Years| {
-            heat_at(&heat_inputs, (interior, rock_core), t, air.state()).heat_flow
+            heat_at(&heat_inputs, (interior, rock_core), t, air.water_state()).heat_flow
         },
     });
     // Steps 4 and 5: the continents, by the regime and T48.b's start condition, and the relief.

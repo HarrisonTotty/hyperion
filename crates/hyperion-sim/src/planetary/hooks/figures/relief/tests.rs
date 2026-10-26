@@ -36,7 +36,8 @@ fn volcanism_of<'a>(
     let air = inputs.atmosphere;
     let heat = inputs.heat();
     let interior = interior_of(&heat).expect("a body with figures has an interior");
-    let state = air.state();
+    // The regime's wet lid reads the state the air's water follows, as `pass_figures`'s does.
+    let state = air.water_state();
     VolcanismInputs {
         crust: figures.impactors().crust(),
         surface_age: figures.surface_age(),

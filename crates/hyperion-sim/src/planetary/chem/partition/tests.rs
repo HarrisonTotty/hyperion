@@ -1870,7 +1870,7 @@ fn under_24_s_densities_an_argon_ice_has_its_solid_s_cap_and_layer() {
 
 // P14.T51.b: the area-mix Bond albedo over the published condensates of T51.a's bodies by hand.
 
-use crate::planetary::derive::atmosphere::SurfaceMaterial;
+use crate::planetary::derive::atmosphere::{RunawayDeck, SurfaceMaterial};
 use crate::planetary::derive::photometry::area_mix::{
     HostShade, OPTICS_BANDS, Regolith, cloud_albedo, cloud_fraction, solid_bond, surface_bond,
     under_cloud,
@@ -1886,8 +1886,12 @@ fn area_mix(p: &Partition, cover: &Cover<'_>, material: SurfaceMaterial) -> (f64
         .bond(cover.state, sun.bands())
         .bond;
     let ground = surface_bond(&published, p, regolith, &sun);
-    let cloud = cloud_fraction(cover.state, p, &sun);
-    let bond = under_cloud(ground, cloud, cloud_albedo(cover.state, &sun));
+    let cloud = cloud_fraction((cover.state, RunawayDeck::Kept), p, &sun);
+    let bond = under_cloud(
+        ground,
+        cloud,
+        cloud_albedo((cover.state, RunawayDeck::Kept), &sun),
+    );
     (bond, cloud)
 }
 

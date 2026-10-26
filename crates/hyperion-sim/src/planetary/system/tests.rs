@@ -622,6 +622,13 @@ fn a_record_tags_what_the_generator_does_not_compute() {
 /// conditions' own and its condensates (P14.T54.a) the published ones it was built with, and
 /// `Surface::new` refuses the gas-envelope state and conditions before their second stage, which
 /// have no regime.
+///
+/// From generator version 24 (P14.T53.b part 2), the invariant `CoarseInputs::for_body` relies
+/// on, that no `Ok` surface lies where there is none (decision-p14-t35e-wire §2.4), also holds
+/// under a supercritical envelope: with every landed 24 hold in force, over the same systems and
+/// the census body's ([`SUPERCRITICAL_METHANE_BODY`]) generated afresh, no `Ok` surface lies under
+/// one, and every solid class whose surface is not applicable lies under one, its envelope not
+/// modelled ([`assert_envelope_tags`]).
 #[test]
 fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
     let mut checked = 0;
@@ -673,6 +680,25 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
         }
     }
     assert!(checked > 20, "{checked}");
+
+    let census_body = supercritical_methane_context();
+    let sets: Vec<(&str, Seed, &SystemContext)> = whole()
+        .iter()
+        .take(10)
+        .map(|(ctx, _)| ("sample", SEED, ctx))
+        .chain(core::iter::once(("sample", SEED, census_body)))
+        .collect();
+    let bodies = crate::planetary::testing::with_every_24_hold(|| envelope_census(&sets));
+    let (mut surfaces, mut hidden) = (0_u32, 0_u32);
+    for body in &bodies {
+        assert_envelope_tags(body);
+        surfaces += u32::from(body.surface == SectionState::Ok);
+        hidden += u32::from(body.hidden.is_some());
+    }
+    assert!(
+        surfaces > 20 && hidden >= 1,
+        "{surfaces} surfaces, {hidden} hidden"
+    );
 }
 
 /// P14.T54.a: a record's surface section holds P14.T51.a's published condensates, the ones its
@@ -842,6 +868,7 @@ fn check_ice_bulk(id: crate::id::BodyId, surface: &Surface, tally: &mut IceBulkT
     let ice = cover::ice_fraction(&cover::IceInputs {
         conditions,
         state: surface.state(),
+        water_state: figures.water_state(),
         crust: ground.crust,
         surface_water: ground.surface_water,
     });
@@ -914,6 +941,7 @@ fn check_cover_rule(
         let ice = cover::ice_fraction(&cover::IceInputs {
             conditions,
             state: surface.state(),
+            water_state: figures.water_state(),
             crust,
             surface_water: ground.surface_water,
         });
@@ -1306,15 +1334,32 @@ fn check_record_condensates<'a>(
 
 /// P14.T48.e's gas-envelope split on a present body's record with a bulk section: a body with a
 /// solid surface has its surface section `Ok`, from `DetailLevel::Surface` and not below, and its
-/// envelope not applicable; every other its surface not applicable and its envelope not modelled
-/// until P14.T24.d. Whether the body has a solid surface.
+/// envelope not applicable, or, under the escape's batch rules alone (from generator version 24),
+/// its surface not applicable and its envelope not modelled under a supercritical envelope
+/// (P14.T53.b part 2, whose test the record does not carry: the 24 arm of
+/// `a_surface_holds_a_solid_state_and_its_conditions_regime` checks it on the derivation); every
+/// other its surface not applicable and its envelope not modelled until P14.T24.d, so that exactly
+/// one of the two applies. Whether the body's class has a solid surface.
 fn assert_surface_or_envelope(record: &BodyRecord) -> bool {
+    use crate::planetary::derive::atmosphere::supercritical_section_in_force;
     let index = record.index();
     let bulk = record.bulk().ok().unwrap();
     let surface = record.section_state(RecordSection::Surface);
     let envelope = record.section_state(RecordSection::Envelope);
     let solid = bulk.class().has_solid_surface();
-    if solid {
+    if solid && surface == SectionState::NotApplicable {
+        assert!(
+            supercritical_section_in_force(),
+            "{index:?}: a solid surface hidden under the hold"
+        );
+        assert_eq!(envelope, SectionState::NotModelled, "{index:?}");
+        let at = |level| record.degrade(level).section_state(RecordSection::Surface);
+        assert_eq!(
+            at(DetailLevel::Surface),
+            SectionState::NotApplicable,
+            "{index:?}"
+        );
+    } else if solid {
         assert_eq!(surface, SectionState::Ok, "{index:?}");
         assert_eq!(envelope, SectionState::NotApplicable, "{index:?}");
         let at = |level| record.degrade(level).section_state(RecordSection::Surface);
@@ -7155,6 +7200,16 @@ struct CensusCase<'a> {
     /// Σ Fᵢ ÷ `S_eff,i` at the runaway-greenhouse limit at the hosts' present luminosities
     /// ([`runaway_now`]): 1 or more inside the present runaway limit.
     runaway_now: f64,
+    /// The same at the hosts' largest past luminosities ([`runaway_at_peak`]), `Sky::of`'s sum:
+    /// 1 or more inside the runaway limit at the peak.
+    runaway_peak: f64,
+    /// Σ Fᵢ ÷ `S_eff,i` at the maximum-greenhouse limit at the hosts' present luminosities
+    /// ([`limit_now`]): below 1 beyond it.
+    maximum_now: f64,
+    /// [`runaway_now`], [`runaway_peak`](Self::runaway_peak) and [`maximum_now`](Self::maximum_now)
+    /// with each `S_eff` unheld below the fit's 2,600 K ([`unheld_flux`]), in that order: P14.T53.b
+    /// part 1's dependence on the hold beyond Kopparapu et al.'s fit.
+    unheld: [f64; 3],
     /// It derived again under a driver.
     again: DerivedAgain<'a>,
 }
@@ -7196,6 +7251,48 @@ fn runaway_now(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f
     )
 }
 
+/// The flux `S_eff` of the limit `limit` about a host at `t_eff`, as the generator reads it:
+/// [`HabitableLimit::flux`], held to the fit's 2,600–7,200 K.
+///
+/// [`HabitableLimit::flux`]: crate::planetary::derive::habitable_zone::HabitableLimit::flux
+fn held_flux(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    t_eff: Kelvin,
+) -> f64 {
+    limit.flux(t_eff).value()
+}
+
+/// [`held_flux`] unheld below the fit's 2,600 K: Kopparapu et al.'s quartic (2013, ApJ 765, 131,
+/// eq. 2, the erratum's coefficients, ApJ 770, 82, Table 3) extrapolated to a cooler host, and held
+/// above 7,200 K as the generator holds it, so that it is [`held_flux`]'s to the bit from 2,600 K
+/// up. For P14.T53.b part 1's census of the present class's dependence on the hold (the batch
+/// review's item 8): the fit is not valid below 2,600 K, so neither value is the true limit there.
+fn unheld_flux(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    t_eff: Kelvin,
+) -> f64 {
+    use crate::planetary::derive::habitable_zone::{FIT_CENTRE, FIT_HOTTEST};
+    let [at_centre, linear, quadratic, cubic, quartic] = limit.coefficients();
+    let offset = t_eff.value().min(FIT_HOTTEST.value()) - FIT_CENTRE.value();
+    at_centre
+        + linear * offset
+        + quadratic * offset * offset
+        + cubic * offset * offset * offset
+        + quartic * crate::math::powi(offset, 4)
+}
+
+/// Σ Fᵢ ÷ `S_eff,i` at the runaway-greenhouse limit at the largest past luminosities of the
+/// stars `zone`'s bodies orbit, along `orbit`, and of the companions, along their pairs' orbits:
+/// `Sky::of`'s sum for the insolation the inventory reads (P14.T53.b part 1 (a)). 1 or more inside
+/// the runaway limit at the hosts' peak.
+fn runaway_at_peak(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
+    limit_at(
+        crate::planetary::derive::habitable_zone::HabitableLimit::RunawayGreenhouse,
+        (HostLight::peak_luminosity, held_flux),
+        (epoch, zone, orbit),
+    )
+}
+
 /// Σ Fᵢ ÷ `S_eff,i` at the habitable zone's limit `limit` at the present luminosities of the stars
 /// `zone`'s bodies orbit, along `orbit`, and of the companions, along their pairs' orbits
 /// ([`runaway_now`]; at the maximum-greenhouse limit `Sky::of`'s sum now, the ceiling's: below 1
@@ -7206,10 +7303,43 @@ fn limit_now(
     zone: &OrbitZone,
     orbit: &KeplerElements,
 ) -> f64 {
+    limit_at(
+        limit,
+        (HostLight::luminosity, held_flux),
+        (epoch, zone, orbit),
+    )
+}
+
+/// The runaway ratio now, at the peak and the maximum-greenhouse ratio now of a body of `zone`
+/// along `orbit` with each `S_eff` unheld below 2,600 K ([`unheld_flux`]; [`CensusCase::unheld`]).
+fn unheld_ratios(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> [f64; 3] {
+    use crate::planetary::derive::habitable_zone::HabitableLimit;
+    let at = |limit, luminosity| limit_at(limit, (luminosity, unheld_flux), (epoch, zone, orbit));
+    [
+        at(HabitableLimit::RunawayGreenhouse, HostLight::luminosity),
+        at(
+            HabitableLimit::RunawayGreenhouse,
+            HostLight::peak_luminosity,
+        ),
+        at(HabitableLimit::MaximumGreenhouse, HostLight::luminosity),
+    ]
+}
+
+/// The limits' fluxes `S_eff`(`T_eff`) as a census reads them: [`held_flux`] or [`unheld_flux`].
+type LimitFlux = fn(crate::planetary::derive::habitable_zone::HabitableLimit, Kelvin) -> f64;
+
+/// [`limit_now`] at each host's luminosity as `luminosity` reads it, its present one or its
+/// largest past ([`runaway_at_peak`]), over the limit's flux as `s_eff` reads it, held or not. A
+/// host counts where it shines now, as `Sky::of` counts it.
+fn limit_at(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    (luminosity, s_eff): (fn(&HostLight) -> crate::units::SolarLuminosities, LimitFlux),
+    (epoch, zone, orbit): (&Epoch<'_>, &OrbitZone, &KeplerElements),
+) -> f64 {
     let share = |light: &HostLight, (a, e): (crate::units::Metres, f64)| {
         if light.luminosity().value() > 0.0 {
-            luminosity_flux(light.luminosity(), a, e).value()
-                / limit.flux(light.effective_temperature()).value()
+            luminosity_flux(luminosity(light), a, e).value()
+                / s_eff(limit, light.effective_temperature())
         } else {
             0.0
         }
@@ -7259,6 +7389,20 @@ fn census_walk(
         let runaway = at
             .orbit()
             .map_or(f64::NAN, |orbit| runaway_now(&epoch, zone, orbit));
+        let runaway_peak = at
+            .orbit()
+            .map_or(f64::NAN, |orbit| runaway_at_peak(&epoch, zone, orbit));
+        let maximum = at.orbit().map_or(f64::NAN, |orbit| {
+            limit_now(
+                habitable_zone::HabitableLimit::MaximumGreenhouse,
+                &epoch,
+                zone,
+                orbit,
+            )
+        });
+        let unheld = at
+            .orbit()
+            .map_or([f64::NAN; 3], |orbit| unheld_ratios(&epoch, zone, orbit));
         let label = label::label(system, body.index).unwrap();
         let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
         if let (Section::Ok(surface), Some(derived)) = (record.surface(), now.derived.as_ref()) {
@@ -7278,6 +7422,9 @@ fn census_walk(
                 hosts: hosts.clone(),
                 phases: phases.clone(),
                 runaway_now: runaway,
+                runaway_peak,
+                maximum_now: maximum,
+                unheld,
                 again: &again,
             });
         }
@@ -7309,8 +7456,55 @@ fn census_walk(
                 hosts: hosts.clone(),
                 phases: phases.clone(),
                 runaway_now: runaway,
+                runaway_peak,
+                maximum_now: maximum,
+                unheld,
                 again: &again,
             });
+        }
+    }
+}
+
+/// Every present planet, member and moon of `system` with a derivation and a bulk section at the
+/// epoch, whatever its surface's tag, in body order, each given to `visit` with its kind
+/// ("planets", "members" or "moons"), its record and its derivation: P14.T53.b part 2's walk,
+/// since [`census_walk`] visits only the `Ok` surfaces.
+fn envelope_walk(
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    visit: &mut dyn FnMut(&str, &BodyRecord, &DerivedBody),
+) {
+    let t = UniverseTime::EPOCH;
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return;
+    }
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    for body in system.bodies() {
+        let kind = match body.part {
+            Part::Planet(_) => "planets",
+            Part::Member(_) => "members",
+            Part::Moon(_) | Part::Ring(_) => continue,
+        };
+        let host = fate_host(ctx, system.zone_of(body));
+        let fate = system.fate_of(body, &host);
+        let label = label::label(system, body.index).unwrap();
+        let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+        if let (Section::Ok(_), Some(derived)) = (record.bulk(), now.derived.as_ref()) {
+            visit(kind, &record, derived);
+        }
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let label = label::label(system, child.index).unwrap();
+            let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+            if record.bulk().ok().is_none() {
+                continue;
+            }
+            if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                visit("moons", &record, moon.body());
+            }
         }
     }
 }
@@ -8026,6 +8220,10 @@ struct UnlitMoves {
     /// The records above their floor whose passes reached it on their way, settled again within
     /// [`RESETTLED`]: their state unchanged, and their `T_eq` and mean within it.
     resettled: Vec<String>,
+    /// The records with an air whose `T_eq` lies under their night floor, which the base
+    /// temperature raises (P14.T24.i's follow-up, decision-t24i-airless-state D1.3: the greenhouse
+    /// starts from the floored mean), with their state and mean held and floored.
+    raised_airs: Vec<String>,
     /// Any other record that moved, with its first difference.
     moved: Vec<String>,
 }
@@ -8049,8 +8247,9 @@ fn holds_argon_ice(record: &BodyRecord) -> bool {
 
 /// What P14.T24.i moves over the systems `held` and the same systems generated under the unlit
 /// mean's rules, `floored`, in order: their records at
-/// [`RECORD_TIME`](crate::planetary::surface::RECORD_TIME), each floored record derived under those
-/// rules.
+/// [`RECORD_TIME`](crate::planetary::surface::RECORD_TIME), each held record derived under the
+/// unlit mean's hold and each floored one under its rules, every other rule the caller's (every 24
+/// hold, `planetary::testing::with_every_24_hold`, for the tests of a 24 figure).
 ///
 /// - Each record with a surface whose mean surface temperature is not positive held (an unlit
 ///   one) reads, floored, at least its conditions' coldest temperature, its night floor, above
@@ -8061,6 +8260,9 @@ fn holds_argon_ice(record: &BodyRecord) -> bool {
 ///   rises to it, as the rule says: counted, with what else moves on it.
 /// - A record above its floor whose passes reached it on their way may move its `T_eq` and mean by
 ///   [`RESETTLED`] of them, its state unchanged: listed.
+/// - A record with an air, held or floored, whose `T_eq` lies under its night floor (`night_floor`
+///   at the heat flow its conditions read) rises with its greenhouse's base (P14.T24.i's follow-up,
+///   decision-t24i-airless-state D1.3): listed.
 /// - Every other record is unchanged to the bit, its whole `Debug` text, or it is listed.
 #[expect(
     clippy::too_many_lines,
@@ -8079,8 +8281,11 @@ fn unlit_moves(
         })
     };
     for ((name, ctx, before), (_, _, after)) in held.iter().zip(floored) {
-        let before = before.snapshot_at(ctx, RECORD_TIME);
-        // The records derive at the snapshot, so the floored ones under the floor's rules.
+        // The records derive at the snapshot, so the held ones under the floor's hold and the
+        // floored ones under its rules.
+        let before = with_unlit_mean(UnlitMeanRules::Held, || {
+            before.snapshot_at(ctx, RECORD_TIME)
+        });
         let after = with_unlit_mean(UnlitMeanRules::Floored, || {
             after.snapshot_at(ctx, RECORD_TIME)
         });
@@ -8180,6 +8385,25 @@ fn unlit_moves(
                 ));
                 continue;
             }
+            // An air whose `T_eq` lies under its floor: its greenhouse starts from the floor.
+            let under_floor = |record: &BodyRecord| {
+                record.surface().ok().is_some_and(|surface| {
+                    let heat_flow = surface
+                        .basis()
+                        .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
+                    surface.state() != SurfaceState::Airless
+                        && t_eq(record)
+                            < crate::planetary::hooks::surface::night_floor(heat_flow).value()
+                })
+            };
+            if under_floor(old) || under_floor(new) {
+                moves.raised_airs.push(format!(
+                    "{id}: {:?} → {:?}, mean {mean_held} → {mean} K",
+                    state(old),
+                    state(new)
+                ));
+                continue;
+            }
             let (a, b) = (format!("{old:?}"), format!("{new:?}"));
             let at = a
                 .char_indices()
@@ -8202,79 +8426,55 @@ fn unlit_moves(
 /// early pass reached the floor and the passes settled again at the same fixed point.
 const RESETTLED: f64 = 1e-8;
 
-/// P14.T24.i's tests over the golden systems (decision-bump-plan-after-22, "Version-24 lanes after
-/// 23", V3.3, with main's ruling on its reach, 2026-10-22): `fallback_black_hole`'s 19 unlit
-/// bodies, whose records publish a mean surface temperature of 0 K at 23, read at least their
-/// night floor under the unlit mean's rules, and `for_body` reads 13 of them, refusing 6 for their
-/// argon ice (P14.T49.n's, whose tests take over "`Ok` on them":
-/// `under_24_s_densities_the_golden_systems_unlit_records_all_read`); 10 lit airless records under
-/// their floor rise to it; and every other record of the fifteen systems is unchanged to the bit.
-#[test]
-fn the_golden_systems_unlit_records_read_their_night_floor() {
+/// The held and the floored systems of `systems`, each generated afresh under the rules in force
+/// but for the unlit mean's, held and floored, for [`unlit_moves`]: inside
+/// `planetary::testing::with_every_24_hold`, every 24 hold but the unlit mean's against all of
+/// them (P14.T24.i's follow-up, decision-t24i-airless-state D1.4).
+fn unlit_moves_of(
+    systems: &dyn Fn() -> Vec<(&'static str, SystemContext, PlanetarySystem)>,
+) -> UnlitMoves {
     use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-    let floored = with_unlit_mean(UnlitMeanRules::Floored, golden_systems_afresh);
-    let moves = unlit_moves(golden_systems(), &floored);
-    eprintln!("the golden systems under the unlit mean: {moves:#?}");
-    assert!(
-        moves
-            .unlit
-            .iter()
-            .all(|line| line.starts_with("fallback_black_hole")),
-        "{:#?}",
-        moves.unlit
-    );
-    assert_eq!(
-        (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
-        (19, 13, 6)
-    );
-    assert_eq!(moves.raised, 10);
-    assert_eq!(moves.resettled, Vec::<String>::new());
-    assert_eq!(moves.moved, Vec::<String>::new());
-}
-
-/// P14.T24.i's tests over the 400 whole systems, a measurement run by name: their 18 unlit records
-/// (bless-note-23's) read at least their night floor, and `for_body` reads 10, refusing 8 for
-/// their argon ice; the lit airless records raised to their floor are counted, with what else
-/// moves on them and their overlap with the argon-ice bodies (for P14.T49.n's science check);
-/// the records that settle again within [`RESETTLED`] are listed; and no other record moves.
-#[test]
-#[ignore = "a measurement for the bless note, run by name"]
-fn the_sample_s_unlit_records_read_their_night_floor() {
-    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-    let systems = || -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
-        sample()
-            .iter()
-            .map(|ctx| ("sample", ctx.clone(), generate(SEED, ctx)))
-            .collect()
-    };
-    let held = systems();
+    let held = with_unlit_mean(UnlitMeanRules::Held, systems);
     let floored = with_unlit_mean(UnlitMeanRules::Floored, systems);
-    let moves = unlit_moves(&held, &floored);
-    eprintln!("the sample under the unlit mean: {moves:#?}");
-    assert_eq!(
-        (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
-        (18, 10, 8)
-    );
-    assert_eq!(moves.moved, Vec::<String>::new());
+    unlit_moves(&held, &floored)
 }
 
-/// P14.T49.n's case of T24.i's golden-systems test (main moved T24.i's "`for_body` answers `Ok` on
-/// them" here, 2026-10-22): generated, derived and read under 24's densities
-/// (`READ_DENSITIES_VERSION`, solid argon's fcc read), the held and the floored records alike,
-/// `fallback_black_hole`'s 19 unlit records read at least their night floor and `for_body` reads
-/// all 19, none refused for its argon ice; T24.i's other moves are as under 23's densities, 10 lit
-/// airless records under their floor rising to it, none settling again and no other record
-/// moving.
+/// The 400 whole systems of the sample, each generated afresh under the rules in force.
+fn sample_afresh() -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+    sample()
+        .iter()
+        .map(|ctx| ("sample", ctx.clone(), generate(SEED, ctx)))
+        .collect()
+}
+
+/// The names of the records `lines` lists, each line's text to its first colon.
+fn named(lines: &[String]) -> Vec<&str> {
+    lines
+        .iter()
+        .map(|line| line.split(':').next().unwrap_or_default())
+        .collect()
+}
+
+/// P14.T24.i's tests over the golden systems (decision-bump-plan-after-22, "Version-24 lanes after
+/// 23", V3.3, with main's ruling on its reach, 2026-10-22), with every landed 24 hold in force
+/// (P14.T24.i's follow-up, decision-t24i-airless-state D1.4: the 24 combination, every 24 hold
+/// but the unlit mean's against all of them): `fallback_black_hole`'s 19 unlit bodies, whose
+/// records publish a mean surface temperature of 0 K at 23, read at least their night floor, and
+/// `for_body` reads all 19, none refused for an argon ice (under the escape's batch none of them
+/// holds one); 11 lit airless records under their floor rise to it, 8 of them changing their ices
+/// or condensates, none their `for_body` answer, one holding an argon ice, now at 30.17 K; the air
+/// whose `T_eq` lies under its floor, subgiant's moon 0504, rises with its greenhouse's base; no
+/// record settles again; and every other record of the fifteen systems is unchanged to the bit.
+///
+/// Restated from the held escape's (T24.i's follow-up's held path, 23's densities): the unlit
+/// records' (19, 15, 4) became (19, 19, 0); the raised airless records 10 → 11, subgiant's moon
+/// 0503, an air on the held path (64.2 → 128.1 K), being airless at its 117.7 K floor under the
+/// escape's batch; the raised airs [0503, 0504] → [0504].
 #[test]
-fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
-    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-    use crate::substance::{ReadDensitiesRules, with_read_densities};
-    let moves = with_read_densities(ReadDensitiesRules::Read, || {
-        let held = golden_systems_afresh();
-        let floored = with_unlit_mean(UnlitMeanRules::Floored, golden_systems_afresh);
-        unlit_moves(&held, &floored)
-    });
-    eprintln!("the golden systems under the unlit mean and 24's densities: {moves:#?}");
+fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor() {
+    let moves =
+        crate::planetary::testing::with_every_24_hold(|| unlit_moves_of(&golden_systems_afresh));
+    eprintln!("the golden systems under the unlit mean, every 24 hold in force: {moves:#?}");
     assert!(
         moves
             .unlit
@@ -8287,37 +8487,165 @@ fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
         (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
         (19, 19, 0)
     );
-    assert_eq!(moves.raised, 10);
+    assert_eq!(
+        (
+            moves.raised,
+            moves.raised_cover,
+            moves.raised_read,
+            moves.raised_argon
+        ),
+        (11, 8, 0, 1)
+    );
     assert_eq!(moves.resettled, Vec::<String>::new());
+    assert_eq!(
+        named(&moves.raised_airs),
+        ["subgiant 42006c9a00000004.0504"]
+    );
     assert_eq!(moves.moved, Vec::<String>::new());
 }
 
-/// P14.T49.n's case of T24.i's test over the 400 whole systems, a measurement run by name:
-/// generated, derived and read under 24's densities, the held and the floored records alike, the
-/// 18 unlit records read their night floor and `for_body` reads all 18, none refused for its argon
-/// ice; no other record moves.
+/// P14.T24.i's tests over the 400 whole systems with every landed 24 hold in force, a measurement
+/// run by name (P14.T24.i's follow-up, decision-t24i-airless-state D1.4, the conformance review's
+/// must-fix): their 18 unlit records (bless-note-23's) each read at least their night floor (the
+/// walk asserts it on each) and `for_body` answers `Ok` on all 18, none refused for its argon ice;
+/// the lit airless records raised to their floor are counted, with what else moves on them and
+/// their overlap with the argon-ice bodies; the airs whose `T_eq` lies under their floor, which
+/// rise with their greenhouse's base (the follow-up's D1.3), are listed; the records that settle
+/// again within [`RESETTLED`] are listed; and no other record moves.
+///
+/// Restated from T24.i's (the escape held, 23's densities): the unlit records' (18, 10, 8) became
+/// (18, 18, 0), under the escape's batch none of them holding an argon ice; the raised, their cover
+/// changes, their `for_body` changes, their argon ices and the re-settled went
+/// 1,405 / 1,144 / 3 / 622 / 3 to 1,403 / 1,127 / 0 / 383 / 4 (the argon ices' means 7.79–69.69
+/// K, were 7.8–451 K; 02003b2be0000000.0700 the fourth to re-settle, as on the follow-up's held
+/// path); and the airs raised with their greenhouse's base are 7.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
-fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
-    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-    use crate::substance::{ReadDensitiesRules, with_read_densities};
-    let systems = || -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
-        sample()
-            .iter()
-            .map(|ctx| ("sample", ctx.clone(), generate(SEED, ctx)))
-            .collect()
-    };
-    let moves = with_read_densities(ReadDensitiesRules::Read, || {
-        let held = systems();
-        let floored = with_unlit_mean(UnlitMeanRules::Floored, systems);
-        unlit_moves(&held, &floored)
-    });
-    eprintln!("the sample under the unlit mean and 24's densities: {moves:#?}");
+fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
+    let moves = crate::planetary::testing::with_every_24_hold(|| unlit_moves_of(&sample_afresh));
+    eprintln!("the sample under the unlit mean, every 24 hold in force: {moves:#?}");
     assert_eq!(
         (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
         (18, 18, 0)
     );
+    assert!(
+        moves.unlit.iter().all(|line| line.ends_with("for_body Ok")),
+        "{:#?}",
+        moves.unlit
+    );
+    assert_eq!(
+        (
+            moves.raised,
+            moves.raised_cover,
+            moves.raised_read,
+            moves.raised_argon
+        ),
+        (1_403, 1_127, 0, 383)
+    );
+    assert_eq!(
+        named(&moves.resettled),
+        [
+            "sample 01ffdb2c60020000.0700",
+            "sample 01fffb2d60010000.0601",
+            "sample 02003b2be0000000.0700",
+            "sample 41ffecb1ff800000.e486"
+        ]
+    );
+    assert_eq!(moves.raised_airs.len(), 7, "{:#?}", moves.raised_airs);
+    eprintln!(
+        "raised {}, their cover moved {}, their for_body {}, argon ices {} (means {:?}); \
+         re-settled {}; airs raised {}",
+        moves.raised,
+        moves.raised_cover,
+        moves.raised_read,
+        moves.raised_argon,
+        moves.raised_argon_means,
+        moves.resettled.len(),
+        moves.raised_airs.len()
+    );
     assert_eq!(moves.moved, Vec::<String>::new());
+}
+
+/// P14.T49.n's case of T24.i's golden-systems test (main moved T24.i's "`for_body` answers `Ok` on
+/// them" here, 2026-10-22), in the 24 combination (P14.T24.i's follow-up, decision-t24i-airless-
+/// state D1.4): with every landed 24 hold in force, 24's densities among them
+/// (`READ_DENSITIES_VERSION`, solid argon's fcc read), `fallback_black_hole`'s 19 unlit records
+/// read at least their night floor and `for_body` reads all 19, and so it does with every 24 hold
+/// but 24's densities: under the escape's batch none of the 19 holds an argon ice (P14.T49.n's
+/// science check: the unlit bodies lose theirs under 24's rules), so none needs solid argon's
+/// density.
+///
+/// Restated from the held escape's (19, 19, 0) under 24's densities and (19, 15, 4) under 23's: (19,
+/// 19, 0) under both.
+#[test]
+fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
+    use crate::substance::{ReadDensitiesRules, with_read_densities};
+    let (read, held) = crate::planetary::testing::with_every_24_hold(|| {
+        (
+            unlit_moves_of(&golden_systems_afresh),
+            with_read_densities(ReadDensitiesRules::Held, || {
+                unlit_moves_of(&golden_systems_afresh)
+            }),
+        )
+    });
+    eprintln!(
+        "the golden systems' unlit records, every 24 hold in force: {:#?}; with 23's densities: \
+         {:#?}",
+        read.unlit, held.unlit
+    );
+    for moves in [&read, &held] {
+        assert_eq!(
+            (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
+            (19, 19, 0)
+        );
+        assert!(
+            moves
+                .unlit
+                .iter()
+                .all(|line| line.contains("argon ice false")),
+            "{:#?}",
+            moves.unlit
+        );
+    }
+}
+
+/// P14.T49.n's case of T24.i's test over the 400 whole systems, a measurement run by name, in the
+/// 24 combination (as [`under_24_s_densities_the_golden_systems_unlit_records_all_read`]'s): with
+/// every landed 24 hold in force the 18 unlit records read their night floor and `for_body` reads
+/// all 18, and so it does with every 24 hold but 24's densities: under the escape's batch the 8
+/// unlit 22–24 K members that held an argon ice under the hold (81ffb2dff0000019.e201–e208) hold
+/// none.
+///
+/// Restated from the held escape's (18, 18, 0) under 24's densities and (18, 10, 8) under 23's: (18,
+/// 18, 0) under both.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
+    use crate::substance::{ReadDensitiesRules, with_read_densities};
+    let (read, held) = crate::planetary::testing::with_every_24_hold(|| {
+        (
+            unlit_moves_of(&sample_afresh),
+            with_read_densities(ReadDensitiesRules::Held, || unlit_moves_of(&sample_afresh)),
+        )
+    });
+    eprintln!(
+        "the sample's unlit records, every 24 hold in force: {:#?}; with 23's densities: {:#?}",
+        read.unlit, held.unlit
+    );
+    for moves in [&read, &held] {
+        assert_eq!(
+            (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
+            (18, 18, 0)
+        );
+        assert!(
+            moves
+                .unlit
+                .iter()
+                .all(|line| line.contains("argon ice false")),
+            "{:#?}",
+            moves.unlit
+        );
+    }
 }
 
 /// What `for_body` answers on the record `record` of a system of records `records` and context
@@ -10164,6 +10492,783 @@ fn under_the_escape_batch_the_census_is_compared_body_by_body() {
     );
 }
 
+/// The seed of look-72's universe, LOOK72 (`tests/observe_brief.rs`'s).
+const LOOK72: u64 = 0xa49f_649b_ef43_4b20;
+
+/// The 62 bodies of LOOK72 whose surface state the triage of 2026-10-22 found at odds with their
+/// temperature or phases (triage-absurd-states; decision-absurd-states-24 R4.3), in its order.
+const LOOK72_TRIAGED: [&str; 62] = [
+    "820e6ee00000008d.0900",
+    "020e56ef60080004.0200",
+    "020e56ef60080007.0200",
+    "020e56ef60080007.0400",
+    "020e56ef60080003.0400",
+    "020e56ef60080003.0500",
+    "020e56ef60080003.0600",
+    "020e56ef60080003.0700",
+    "220e4dde80200008.0b00",
+    "220e4dde80200008.0c00",
+    "220e4dde80200008.0d00",
+    "020e56ef60080000.0200",
+    "620e377802000074.0703",
+    "020e56ef60070001.0400",
+    "020e56efa0080003.0100",
+    "020e56ef60090005.0200",
+    "020e56ef60090005.0300",
+    "020e56ef60090005.0400",
+    "020e56ef60090005.0500",
+    "020e66ef60070004.0200",
+    "020e66ef60070004.0300",
+    "020e66ef60070004.0400",
+    "020e56ef20080001.0300",
+    "020e56ef60090006.0300",
+    "020e66efa0080003.0200",
+    "020e66efa0080003.0300",
+    "020e66efa0080003.0400",
+    "220e6dde8020000d.0201",
+    "020e56ef60070005.0100",
+    "020e56ef20080005.0300",
+    "020e56ef20080005.0400",
+    "020e66efa0070007.0500",
+    "020e66efa0070007.0600",
+    "020e56ef20080000.0500",
+    "020e56ef20080000.0600",
+    "020e56ef20080000.0700",
+    "020e56ef20080000.0900",
+    "220e4dde8020000b.0700",
+    "220e4dde8020000b.0800",
+    "220e4dde8020000b.0900",
+    "220e6dde80180002.0200",
+    "020e66efa007000b.0300",
+    "020e66efa007000b.0400",
+    "020e66efa007000b.0500",
+    "020e66efa007000b.0700",
+    "020e66efa007000b.0800",
+    "020e66efa007000b.0900",
+    "020e66efa007000b.0a00",
+    "020e56efa0080000.0100",
+    "020e56efa0080000.0200",
+    "020e56ef20090004.0400",
+    "020e56ef20090004.0600",
+    "020e56ef20080004.0400",
+    "020e56ef20080004.0500",
+    "020e56ef20080004.0600",
+    "020e66efa007000c.0500",
+    "020e66efa007000c.0600",
+    "020e66efa007000c.0800",
+    "020e56ef20080006.0100",
+    "020e56ef20080006.0200",
+    "020e56ef20080006.0300",
+    "020e56ef20080006.0400",
+];
+
+/// LOOK72's galaxy, as the server builds it, once per process.
+fn look72_galaxy() -> &'static crate::galaxy::Galaxy {
+    static GALAXY: OnceLock<crate::galaxy::Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| crate::galaxy::Galaxy::new(Seed::new(LOOK72)).with_full_potential())
+}
+
+/// The contexts of the systems of [`LOOK72_TRIAGED`]'s bodies, each once, in ID order.
+fn look72_triaged_contexts() -> Vec<SystemContext> {
+    let galaxy = look72_galaxy();
+    let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
+        .iter()
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    ids.into_iter()
+        .map(|id| {
+            SystemContext::for_system(galaxy, id.parse().expect("a system ID"))
+                .expect("a system of LOOK72")
+        })
+        .collect()
+}
+
+/// A condensable's critical isochore at `t_s` against its column (decision-absurd-states-24 R2.3),
+/// [`SupercriticalReservoir::of`](crate::planetary::derive::atmosphere::SupercriticalReservoir::of)'s
+/// figures at the record's `T_s` and the derivation's gravity: its own partial pressure `p_i`,
+/// p* = `p_c` + `s_c` (`T_s` − `T_c`) with `s_c` the slope of the registry's vapour-pressure curve
+/// at its critical point, its melting pressure at `T_s`, and the reservoir's share of the body's
+/// mass, 4π G Δp ÷ g², Δp the column between p* and the lesser of `p_i` and the melting pressure.
+struct IsochoreCase {
+    gas: Gas,
+    t_ratio: f64,
+    p_i: f64,
+    p_star: f64,
+    p_melt: Option<f64>,
+    fraction: f64,
+}
+
+/// [`IsochoreCase`] for each gas of `derived`'s air at or above its critical temperature at `t_s`.
+fn isochore_cases(derived: &DerivedBody, t_s: f64) -> Vec<IsochoreCase> {
+    use crate::planetary::derive::atmosphere::SupercriticalReservoir;
+    let partials = derived.atmosphere().partial_pressures();
+    let g = derived.surface_gravity();
+    Gas::ALL
+        .into_iter()
+        .filter_map(|gas| {
+            let column = SupercriticalReservoir::of(gas, Kelvin::new(t_s), partials.of(gas), g)?;
+            Some(IsochoreCase {
+                gas,
+                t_ratio: column.temperature_ratio(),
+                p_i: column.partial_pressure().value(),
+                p_star: column.isochore_pressure().value(),
+                p_melt: column.melting_pressure().map(Pascals::value),
+                fraction: column.share(),
+            })
+        })
+        .collect()
+}
+
+/// decision-absurd-states-24 R4.3's evidence run: LOOK72's 62 triaged bodies ([`LOOK72_TRIAGED`])
+/// generated and derived afresh under version 23's rules and with every landed 24 hold in force
+/// ([`with_every_24_hold`](crate::planetary::testing::with_every_24_hold);
+/// decision-t24i-airless-state D2–D3.3), stated by the decision's four groups:
+///
+/// - the nine hot `Snowball`s against the maximum-greenhouse ceiling's cap, max(273.15 K,
+///   `T_rest`);
+/// - the two dry `Temperate`s against water's saturation temperature at their surface pressure;
+/// - the three methane `Snowball`s against the critical isochore ([`isochore_cases`]);
+/// - the 106 K runaway's present ratios at the runaway and maximum-greenhouse limits.
+///
+/// Every triaged body's state, `T_s` and `p_s` under each rules follow, and any not found; then
+/// every body of the 27 systems whose state, `T_s` or `p_s` differs between the escape's batch
+/// rules alone (the census's first run) and every 24 hold.
+#[test]
+#[ignore = "a measurement for decision-absurd-states-24 R4.3, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census's four groups and its body list, each stated"
+)]
+fn under_every_24_hold_look72_s_triaged_bodies_are_stated() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+
+    struct Row {
+        body: EscapeCensusBody,
+        runaway_now: f64,
+        maximum_now: f64,
+        isochore: Vec<IsochoreCase>,
+    }
+    let contexts = look72_triaged_contexts();
+    let seed = look72_galaxy().seed();
+    let collect = || {
+        let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+        for ctx in &contexts {
+            let system = generate(seed, ctx);
+            census_walk("look72", ctx, &system, &mut |case| {
+                let body = EscapeCensusBody::of(case);
+                let isochore = isochore_cases(case.derived, body.t_s);
+                rows.insert(
+                    body.id.clone(),
+                    Row {
+                        body,
+                        runaway_now: case.runaway_now,
+                        maximum_now: case.maximum_now,
+                        isochore,
+                    },
+                );
+            });
+        }
+        rows
+    };
+    let held = with_rules(EscapeRules::Held, collect);
+    let escape_alone = with_rules(EscapeRules::Batch, collect);
+    let batch = crate::planetary::testing::with_every_24_hold(collect);
+    let water = Gas::Water
+        .substance()
+        .substance()
+        .phase_diagram()
+        .expect("water's diagram");
+    let line = |row: &Row| {
+        let b = &row.body;
+        format!(
+            "{:?} T_s {:.2} K, p_s {:.4e} bar, T_eq {:.2} K, cap {:.2} K, {:?}, air [{}]",
+            b.state,
+            b.t_s,
+            b.p / 1e5,
+            b.t_eq,
+            b.cap,
+            b.ceiling,
+            b.air
+        )
+    };
+    let missing: Vec<&str> = LOOK72_TRIAGED
+        .iter()
+        .copied()
+        .filter(|id| !held.contains_key(*id) || !batch.contains_key(*id))
+        .collect();
+    let groups: [(&str, &[&str]); 4] = [
+        ("A, the 106 K runaway", &["820e6ee00000008d.0900"]),
+        (
+            "B, the nine hot Snowballs",
+            &[
+                "220e6dde8020000d.0201",
+                "220e4dde80200008.0d00",
+                "020e66efa0080003.0300",
+                "020e56ef20080000.0700",
+                "020e56ef20080006.0100",
+                "020e66ef60070004.0300",
+                "220e4dde8020000b.0900",
+                "020e66efa007000b.0500",
+                "020e56ef20080005.0400",
+            ],
+        ),
+        (
+            "D, the two dry Temperates",
+            &["020e66efa0070007.0500", "020e56ef20080004.0400"],
+        ),
+        (
+            "C, the three methane Snowballs",
+            &[
+                "020e56ef20080000.0900",
+                "020e56ef60090005.0500",
+                "020e56ef60080003.0600",
+            ],
+        ),
+    ];
+    for (name, ids) in groups {
+        eprintln!("GROUP {name}");
+        for id in ids {
+            let (Some(h), Some(b)) = (held.get(*id), batch.get(*id)) else {
+                eprintln!(
+                    "  {id}: not found (held {}, batch {})",
+                    held.contains_key(*id),
+                    batch.contains_key(*id)
+                );
+                continue;
+            };
+            eprintln!("  {id}\n    held  {}\n    batch {}", line(h), line(b));
+            let bb = &b.body;
+            let saturation = water
+                .saturation_temperature(Pascals::new(bb.p))
+                .map_or(f64::NAN, Kelvin::value);
+            eprintln!(
+                "    batch: runaway now {:.4}, maximum now {:.4}; above the cap {}; T_sat(H2O, p_s) {:.2} K, above it {}; airless {}",
+                b.runaway_now,
+                b.maximum_now,
+                bb.t_s > bb.cap,
+                saturation,
+                bb.t_s > saturation,
+                bb.airless(),
+            );
+            for (rules, row) in [("held", h), ("batch", b)] {
+                for case in &row.isochore {
+                    eprintln!(
+                        "    {rules} isochore {:?}: T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar, p_melt {}, above {}, fraction {:.3e} (mover {})",
+                        case.gas,
+                        case.t_ratio,
+                        case.p_i / 1e5,
+                        case.p_star / 1e5,
+                        case.p_melt
+                            .map_or_else(|| "none".to_owned(), |m| format!("{:.4e} bar", m / 1e5)),
+                        case.p_i > case.p_star,
+                        case.fraction,
+                        case.fraction >= crate::planetary::params::THIN_ENVELOPE_FRACTION,
+                    );
+                }
+            }
+        }
+    }
+    eprintln!(
+        "ALL {} triaged bodies (held -> batch):",
+        LOOK72_TRIAGED.len()
+    );
+    for id in LOOK72_TRIAGED {
+        if let (Some(h), Some(b)) = (held.get(id), batch.get(id)) {
+            eprintln!(
+                "  {id}: {:?} {:.1} K {:.4e} bar -> {:?} {:.1} K {:.4e} bar (runaway now {:.3}, maximum now {:.3})",
+                h.body.state,
+                h.body.t_s,
+                h.body.p / 1e5,
+                b.body.state,
+                b.body.t_s,
+                b.body.p / 1e5,
+                b.runaway_now,
+                b.maximum_now,
+            );
+        }
+    }
+    eprintln!("MISSING {missing:?}");
+    eprintln!("CHANGED between the escape's batch alone and every 24 hold:");
+    for (id, row) in &batch {
+        let Some(alone) = escape_alone.get(id) else {
+            eprintln!("  {id}: only under every 24 hold");
+            continue;
+        };
+        let (a, b) = (&alone.body, &row.body);
+        if a.state != b.state || a.t_s.total_cmp(&b.t_s).is_ne() || a.p.total_cmp(&b.p).is_ne() {
+            eprintln!(
+                "  {id}: {:?} {:.2} K {:.4e} bar -> {:?} {:.2} K {:.4e} bar",
+                a.state,
+                a.t_s,
+                a.p / 1e5,
+                b.state,
+                b.t_s,
+                b.p / 1e5
+            );
+        }
+    }
+    eprintln!(
+        "MOVERS (batch, any gas above its isochore with fraction >= THIN_ENVELOPE_FRACTION) over all {} bodies of the 27 systems:",
+        batch.len()
+    );
+    for (id, row) in &batch {
+        for case in &row.isochore {
+            if case.p_i > case.p_star
+                && case.fraction >= crate::planetary::params::THIN_ENVELOPE_FRACTION
+            {
+                eprintln!(
+                    "  {id} {:?} {:?}: T/T_c {:.4}, fraction {:.3e}",
+                    row.body.state, case.gas, case.t_ratio, case.fraction
+                );
+            }
+        }
+    }
+}
+
+// P14.T24.i's follow-up: the floored mean on the escape's batch path, and the state read at it
+// (decision-t24i-airless-state D1.4), with every landed 24 hold in force together (D3.3,
+// `planetary::testing::with_every_24_hold`).
+
+/// One body of [`FloorCensus`]: its figures at the epoch under one set of rules.
+#[derive(Debug, Clone)]
+struct FloorBody {
+    /// Its name: its set ("sample", the golden system's name, or "look72"), its ID and its kind.
+    label: String,
+    /// Its ID, as its record gives it.
+    id: String,
+    /// Its record's surface state.
+    state: SurfaceState,
+    /// Its record's mean surface temperature, K.
+    t_s: f64,
+    /// Its derivation's surface pressure, Pa.
+    p_s: f64,
+    /// Its derivation's equilibrium temperature, K.
+    t_eq: f64,
+    /// Its night floor, K: `night_floor` at the heat flow its record's conditions read, its
+    /// published pass's context's, the one that pass's base temperature read.
+    floor: f64,
+    /// Its derivation's partial pressures, Pa, of each gas with any.
+    partials: String,
+    /// Its derivation's argon partial pressure, Pa.
+    argon: f64,
+    /// The airborne total of its published pass's partition, Pa, and its argon's, for an
+    /// `Airless` record: the published pass repeated under the context it read
+    /// (`PassDriver::Again(Under::Read)`), to the bit.
+    airborne: Option<(f64, f64)>,
+    /// The species its ice holds, not Jeans's test (`Atmosphere::ice_held`).
+    ice_held: crate::planetary::derive::atmosphere::Retention,
+    /// Its derivation's atmosphere passes.
+    passes: u32,
+    /// A hash of its record's and its derivation's whole `Debug` text: the same, or moved.
+    bits: u64,
+}
+
+impl FloorBody {
+    /// The figures of the body `case`, under the rules in force.
+    fn of(case: &CensusCase<'_>) -> Self {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        use crate::planetary::derive::{PassDriver, Under};
+        use crate::planetary::hooks::surface::night_floor;
+        let (surface, derived) = (case.surface, case.derived);
+        let air = derived.atmosphere();
+        let heat_flow = surface
+            .basis()
+            .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
+        let airborne = (surface.state() == SurfaceState::Airless).then(|| {
+            let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+            read.map_or((f64::NAN, f64::NAN), |read| {
+                let species = read.partition.species();
+                let total = species
+                    .iter()
+                    .fold(0.0, |sum, s| sum + s.partial_pressure().value());
+                let argon = read
+                    .partition
+                    .of(Gas::Argon.substance())
+                    .map_or(0.0, |s| s.partial_pressure().value());
+                (total, argon)
+            })
+        });
+        let mut hasher = DefaultHasher::new();
+        format!("{:?} {:?}", case.record, derived).hash(&mut hasher);
+        let partials = air.partial_pressures();
+        let id = case.record.identity().id().to_string();
+        Self {
+            label: format!("{} {id} {}", case.set, case.kind),
+            id,
+            state: surface.state(),
+            t_s: surface.conditions().mean_surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            t_eq: derived.equilibrium_temperature().value(),
+            floor: night_floor(heat_flow).value(),
+            partials: Gas::ALL
+                .into_iter()
+                .filter(|&gas| partials.of(gas).value() > 0.0)
+                .map(|gas| format!("{gas:?} {:.4e}", partials.of(gas).value()))
+                .collect::<Vec<_>>()
+                .join(", "),
+            argon: partials.of(Gas::Argon).value(),
+            airborne,
+            ice_held: air.ice_held(),
+            passes: derived.atmosphere_passes(),
+            bits: hasher.finish(),
+        }
+    }
+
+    /// Whether its equilibrium temperature lies under its night floor.
+    fn under_its_floor(&self) -> bool {
+        self.t_eq < self.floor
+    }
+
+    /// Its state, `T_s`, `T_eq`, floor, `p_s` and passes, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} T_s {:.3} K (T_eq {:.3} K, floor {:.3} K), p_s {:.4e} Pa [{}], {} passes",
+            self.state, self.t_s, self.t_eq, self.floor, self.p_s, self.partials, self.passes
+        )
+    }
+}
+
+/// P14.T24.i's follow-up's census (decision-t24i-airless-state D1.4): every present planet, member
+/// and moon with a surface at the epoch ([`census_walk`]) of the first 60 sample systems, the 15
+/// golden systems (the escape batch's census's set,
+/// [`under_the_escape_batch_the_census_is_compared_body_by_body`]) and the 27 systems of LOOK72's
+/// 62 triaged bodies ([`look72_triaged_contexts`]), each system generated and derived afresh,
+/// since the tests' caches are version 23's: with every 24 hold in force (`floored`), and with
+/// every 24 hold but the unlit mean's (`held`), body by body in the same order. Built once a
+/// process, for the tests that read it.
+struct FloorCensus {
+    floored: Vec<FloorBody>,
+    held: Vec<FloorBody>,
+}
+
+/// The [`FloorCensus`], built once.
+fn floor_census() -> &'static FloorCensus {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::testing::with_every_24_hold;
+    static CENSUS: OnceLock<FloorCensus> = OnceLock::new();
+    CENSUS.get_or_init(|| {
+        let look72 = look72_triaged_contexts();
+        let look72_seed = look72_galaxy().seed();
+        let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+            .iter()
+            .take(60)
+            .map(|ctx| ("sample", SEED, ctx))
+            .chain(
+                golden_systems()
+                    .iter()
+                    .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+            )
+            .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+            .collect();
+        let walk = || {
+            let mut bodies = Vec::new();
+            for &(set, seed, ctx) in &sets {
+                let system = generate(seed, ctx);
+                census_walk(set, ctx, &system, &mut |case| {
+                    bodies.push(FloorBody::of(case));
+                });
+            }
+            bodies
+        };
+        let floored = with_every_24_hold(walk);
+        let held = with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, walk));
+        let labels =
+            |bodies: &[FloorBody]| bodies.iter().map(|b| b.label.clone()).collect::<Vec<_>>();
+        assert_eq!(labels(&floored), labels(&held), "the same bodies, in order");
+        FloorCensus { floored, held }
+    })
+}
+
+/// P14.T24.i's follow-up over the census's set and LOOK72's systems, every 24 hold in force
+/// (decision-t24i-airless-state D1.4): no surface body's mean surface temperature lies below its
+/// night floor, and no `Airless` record's published partition holds
+/// [`AIRLESS_PRESSURE`](crate::planetary::derive::atmosphere::AIRLESS_PRESSURE) or more airborne;
+/// LOOK72's 62 triaged bodies are among them. The 18 unlit records' `for_body` answer waits for
+/// P14.T49.n's solid argon (D2).
+#[test]
+fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
+    use crate::planetary::derive::atmosphere::AIRLESS_PRESSURE;
+    let census = floor_census();
+    let bodies = &census.floored;
+    let below: Vec<String> = bodies
+        .iter()
+        .filter(|b| b.t_s.is_nan() || b.t_s < b.floor * (1.0 - 1e-12))
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    assert_eq!(below, Vec::<String>::new(), "a mean below its night floor");
+    let airborne: Vec<String> = bodies
+        .iter()
+        .filter(|b| {
+            b.airborne
+                .is_some_and(|(total, _)| total.is_nan() || total >= AIRLESS_PRESSURE.value())
+        })
+        .map(|b| format!("{}: {}, airborne {:?}", b.label, b.line(), b.airborne))
+        .collect();
+    assert_eq!(
+        airborne,
+        Vec::<String>::new(),
+        "an Airless record whose partition holds 100 Pa or more airborne"
+    );
+    let missing: Vec<&str> = LOOK72_TRIAGED
+        .iter()
+        .copied()
+        .filter(|id| {
+            !bodies
+                .iter()
+                .any(|b| b.label.starts_with("look72") && b.id == *id)
+        })
+        .collect();
+    assert_eq!(missing, Vec::<&str>::new(), "LOOK72's triaged bodies");
+    let airless = bodies.iter().filter(|b| b.airborne.is_some()).count();
+    let under = bodies.iter().filter(|b| b.under_its_floor()).count();
+    eprintln!(
+        "the floor's census under every 24 hold: {} bodies, {airless} Airless, {under} with T_eq \
+         under their floor",
+        bodies.len()
+    );
+}
+
+/// P14.T24.i's follow-up, to the bit (decision-t24i-airless-state D1.3–D1.4): over the census's set
+/// and LOOK72's systems, every body whose equilibrium temperature is at or above its night floor
+/// under both rules is the same, its whole record and derivation, with every 24 hold in force as
+/// with every 24 hold but the unlit mean's, since the base is then its `T_eq`.
+#[test]
+fn under_every_24_hold_a_body_above_its_floor_is_unchanged_by_it() {
+    let census = floor_census();
+    let moved: Vec<String> = census
+        .floored
+        .iter()
+        .zip(&census.held)
+        .filter(|(floored, held)| {
+            !floored.under_its_floor() && !held.under_its_floor() && floored.bits != held.bits
+        })
+        .map(|(floored, held)| format!("{}: {} → {}", floored.label, held.line(), floored.line()))
+        .collect();
+    assert_eq!(moved, Vec::<String>::new());
+    let above = census
+        .floored
+        .iter()
+        .filter(|b| !b.under_its_floor())
+        .count();
+    eprintln!(
+        "{above} of {} bodies at or above their floor, unchanged",
+        census.floored.len()
+    );
+}
+
+/// The four bodies of decision-t24i-airless-state D1.1, with every 24 hold in force: their state
+/// and greenhouse read the floored mean, as their published mean and partition do (D1.3). With
+/// every 24 hold but the unlit mean's, the escape batch's greenhouse from `T_eq` (P14.T53.a), each
+/// is `Airless` at its `T_eq` with mPa to a few Pa of nitrogen and argon, while its night floor
+/// lies 12–28 K above it.
+///
+/// From the floor its nitrogen ice, the bulk of its airborne inventory, sublimes as its argon does
+/// (nitrogen's vapour is some kPa at 54–57 K), and its √p greenhouse warms the surface above the
+/// floor, so three of the four flip from `Airless` to their division's state (D1.4's "a state
+/// flipped"); the ruling's expectation of argon alone (331 Pa, and 2.5–9.1 Pa) counted no nitrogen:
+///
+/// - 01ffeb2b9ffc0000.0700, published `Airless` at 3.6 Pa from its `T_eq`, is a `Snowball` at
+///   69.69 K over its 57.15 K floor with 40.9 kPa of air: nitrogen 35.4 kPa, argon 5.35 kPa (above
+///   the 331 Pa of D1.1's partition at the floor), methane 64.6 Pa;
+/// - 01ffdb2c1fff0001.0d00 is a `Snowball` at 46.82 K over its 45.77 K floor at 100.67 Pa, a state
+///   edge (nitrogen 89.8 Pa, argon 10.9 Pa);
+/// - 01fffb2c20040000.0300 is a `Snowball` at 62.35 K over its 54.50 K floor with 11.5 kPa
+///   (nitrogen 10.2 kPa, argon 1.29 kPa);
+/// - 02000b2b60020000.0a00 stays `Airless`, at its 44.36 K floor to the bit, publishing its floored
+///   mean's partial pressures, 55.8 Pa (nitrogen 50.7 Pa, argon 5.14 Pa), its published partition
+///   holding 54.6 Pa airborne (argon 2.49 Pa).
+#[test]
+fn under_every_24_hold_the_four_split_bodies_read_their_floor() {
+    use crate::planetary::derive::atmosphere::{AIRLESS_PRESSURE, UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::testing::with_every_24_hold;
+    const FLIPPED: [&str; 3] = [
+        "01ffeb2b9ffc0000.0700",
+        "01ffdb2c1fff0001.0d00",
+        "01fffb2c20040000.0300",
+    ];
+    const AIRLESS: &str = "02000b2b60020000.0a00";
+    let ids = || FLIPPED.into_iter().chain([AIRLESS]);
+    let systems: std::collections::BTreeSet<SystemId> = ids()
+        .map(|id| {
+            id.split_once('.')
+                .expect("a body ID")
+                .0
+                .parse()
+                .expect("a system ID")
+        })
+        .collect();
+    let walk = || {
+        let mut bodies = std::collections::BTreeMap::new();
+        for id in &systems {
+            let ctx = sample()
+                .iter()
+                .find(|ctx| ctx.id() == *id)
+                .expect("a system of the sample");
+            let system = generate(SEED, ctx);
+            census_walk("sample", ctx, &system, &mut |case| {
+                let body = FloorBody::of(case);
+                bodies.insert(body.id.clone(), body);
+            });
+        }
+        bodies
+    };
+    let held = with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, walk));
+    let floored = with_every_24_hold(walk);
+    for id in ids() {
+        eprintln!(
+            "{id}:\n  held    {}, airborne {:?}\n  floored {}, airborne {:?}",
+            held[id].line(),
+            held[id].airborne,
+            floored[id].line(),
+            floored[id].airborne
+        );
+        let (before, after) = (&held[id], &floored[id]);
+        // The split: published at `T_eq` under a floor that lies above it.
+        assert_eq!(
+            before.state,
+            SurfaceState::Airless,
+            "{id}: {}",
+            before.line()
+        );
+        assert!(
+            (before.t_s - before.t_eq).abs() <= RESETTLED * before.t_eq,
+            "{id}: {}",
+            before.line()
+        );
+        assert!(
+            before.under_its_floor() && after.under_its_floor(),
+            "{id}: {} → {}",
+            before.line(),
+            after.line()
+        );
+        assert!(after.t_s >= after.floor, "{id}: {}", after.line());
+    }
+    for id in FLIPPED {
+        let body = &floored[id];
+        assert_eq!(body.state, SurfaceState::Snowball, "{id}: {}", body.line());
+        assert!(
+            body.p_s >= AIRLESS_PRESSURE.value(),
+            "{id}: {}",
+            body.line()
+        );
+        assert!(body.t_s > body.floor, "{id}: {}", body.line());
+    }
+    assert!(
+        floored[FLIPPED[0]].argon >= 331.0,
+        "{}: {}",
+        FLIPPED[0],
+        floored[FLIPPED[0]].line()
+    );
+    let body = &floored[AIRLESS];
+    assert_eq!(
+        body.state,
+        SurfaceState::Airless,
+        "{AIRLESS}: {}",
+        body.line()
+    );
+    assert_same_bits(body.t_s, body.floor);
+    assert!(body.p_s > 1.0, "{AIRLESS}: {}", body.line());
+    let (total, argon) = body.airborne.expect("an Airless record's partition");
+    assert!(
+        total < AIRLESS_PRESSURE.value(),
+        "{AIRLESS}: {total} Pa airborne"
+    );
+    assert!(
+        (2.0..10.0).contains(&body.argon) && (2.0..10.0).contains(&argon),
+        "{AIRLESS}: argon {} Pa published, {argon} Pa in its partition",
+        body.argon
+    );
+}
+
+/// P14.T24.i's follow-up's stated census, a measurement for its record, run by name
+/// (decision-t24i-airless-state D1.4): over the census's set and LOOK72's systems ([`FloorCensus`]),
+/// the bodies the floored mean moves between every 24 hold and every 24 hold but the unlit mean's,
+/// by class, each with its passes under both:
+///
+/// - the unlit records (`T_eq` of 0 K), at their floor;
+/// - the airless partials: `Airless` under both, their published partial pressures moved, and the
+///   airless means raised alone, their partial pressures the same;
+/// - the airs whose `T_eq` lies under their floor: an air under either, moved;
+/// - the ice-held verdicts changed;
+/// - the states flipped, each by name;
+/// - any other body moved (none at or above its floor, asserted by
+///   [`under_every_24_hold_a_body_above_its_floor_is_unchanged_by_it`]).
+#[test]
+#[ignore = "a measurement for P14.T24.i's follow-up's record, run by name"]
+fn under_every_24_hold_the_floor_s_moved_bodies_are_stated() {
+    let census = floor_census();
+    let pairs: Vec<(&FloorBody, &FloorBody)> = census.floored.iter().zip(&census.held).collect();
+    let line = |(floored, held): &(&FloorBody, &FloorBody)| {
+        format!(
+            "  {}:\n    held    {}\n    floored {}",
+            floored.label,
+            held.line(),
+            floored.line()
+        )
+    };
+    let state = |pick: &dyn Fn(&(&FloorBody, &FloorBody)) -> bool| {
+        pairs
+            .iter()
+            .filter(|pair| pick(pair))
+            .map(line)
+            .collect::<Vec<_>>()
+    };
+    let airless = |(f, h): &(&FloorBody, &FloorBody)| {
+        f.state == SurfaceState::Airless && h.state == SurfaceState::Airless && f.bits != h.bits
+    };
+    let classes: [(&str, Vec<String>); 7] = [
+        (
+            "the unlit records",
+            state(&|(f, _)| f.t_eq.is_nan() || f.t_eq <= 0.0),
+        ),
+        (
+            "the airless partials moved",
+            state(&|pair| airless(pair) && pair.0.p_s.total_cmp(&pair.1.p_s).is_ne()),
+        ),
+        (
+            "the airless means raised alone, their partials the same",
+            state(&|pair| airless(pair) && pair.0.p_s.total_cmp(&pair.1.p_s).is_eq()),
+        ),
+        (
+            "the airs whose T_eq lies under their floor, moved",
+            state(&|(f, h)| {
+                (f.state != SurfaceState::Airless || h.state != SurfaceState::Airless)
+                    && (f.under_its_floor() || h.under_its_floor())
+                    && f.bits != h.bits
+            }),
+        ),
+        (
+            "the ice-held verdicts changed",
+            state(&|(f, h)| f.ice_held != h.ice_held),
+        ),
+        ("the states flipped", state(&|(f, h)| f.state != h.state)),
+        (
+            "any other body moved",
+            state(&|(f, h)| f.bits != h.bits && !(f.under_its_floor() || h.under_its_floor())),
+        ),
+    ];
+    let moved = pairs.iter().filter(|(f, h)| f.bits != h.bits).count();
+    let passes = |pick: fn(&(&FloorBody, &FloorBody)) -> u32| {
+        pairs
+            .iter()
+            .filter(|(f, h)| f.bits != h.bits)
+            .map(pick)
+            .sum::<u32>()
+    };
+    eprintln!(
+        "the floor's census: {} bodies, {moved} moved, their passes {} held → {} floored",
+        pairs.len(),
+        passes(|(_, h)| h.passes),
+        passes(|(f, _)| f.passes),
+    );
+    for (name, lines) in &classes {
+        eprintln!("CLASS {name}: {}\n{}", lines.len(), lines.join("\n"));
+    }
+}
+
 /// The bistability re-check's driver from the generator's own first albedo, 0.3, is the solve to
 /// the bit (`PassDriver::From`; decision-pre-23-review item 26): over the first 5 whole systems'
 /// present planets, members and moons with a surface, over their records at the epoch.
@@ -10668,4 +11773,1576 @@ fn under_the_escape_batch_the_golden_envelopes_helium_is_stated() {
         });
     });
     eprintln!("the batch's extra solves over the goldens: {counts:?}");
+}
+
+// P14.T53.b part 1: the state from the present insolation, and the runaway's deck
+// (decision-absurd-states-24 R3–R4; decision-pre-23-review item 33).
+
+/// How [`PresentBody::class`] reads the limits' `S_eff` below Kopparapu et al.'s fit's 2,600 K.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SEffFit {
+    /// Held at its 2,600 K value, as the generator holds it ([`held_flux`]).
+    Held,
+    /// Extrapolated below 2,600 K ([`unheld_flux`]).
+    Unheld,
+}
+
+/// One body of P14.T53.b part 1's census ([`present_census`]), under the rules in force.
+#[derive(Debug, Clone, PartialEq)]
+struct PresentBody {
+    /// Its set ("sample", the golden system's name, or "look72"), its ID and its kind.
+    label: String,
+    /// Its ID, as its record gives it.
+    id: String,
+    /// Its zone's stars at the epoch: each one's phase and effective temperature.
+    hosts: String,
+    /// Its record's surface state.
+    state: SurfaceState,
+    /// The state its water follows (`Atmosphere::water_state`).
+    water_state: SurfaceState,
+    /// Whether a runaway keeps Venus's deck (`Atmosphere::runaway_deck`).
+    deck: crate::planetary::derive::atmosphere::RunawayDeck,
+    /// Its record's mean surface temperature, K.
+    t_s: f64,
+    /// Its derivation's mean surface temperature, the passes', K: the one P14.T53.b part 1 (c)'s
+    /// test reads.
+    air_t_s: f64,
+    /// Its derivation's surface pressure, Pa.
+    p_s: f64,
+    /// Its derivation's Bond albedo.
+    bond: f64,
+    /// Its derivation's cloud fraction.
+    cloud: f64,
+    /// For a runaway outside the present runaway limit in part 1's census run
+    /// ([`PresentState::Present`]), its derivation again with (c) off
+    /// ([`PresentState::WithoutHothouse`]): a hothouse's first solve, which (c) judged; `None` for
+    /// every other body.
+    ///
+    /// [`PresentState::Present`]: crate::planetary::derive::atmosphere::PresentState::Present
+    /// [`PresentState::WithoutHothouse`]: crate::planetary::derive::atmosphere::PresentState::WithoutHothouse
+    first_solve: Option<DerivedBody>,
+    /// Σ Fᵢ ÷ `S_eff,runaway` at its hosts' present luminosities ([`runaway_now`]).
+    runaway_now: f64,
+    /// The same at their largest past luminosities ([`runaway_at_peak`]).
+    runaway_peak: f64,
+    /// Σ Fᵢ ÷ `S_eff,max` now ([`limit_now`]).
+    maximum_now: f64,
+    /// The runaway ratio now, at the peak and the maximum-greenhouse ratio now with `S_eff` unheld
+    /// below 2,600 K ([`CensusCase::unheld`]).
+    unheld: [f64; 3],
+    /// Its record's surface water, kg m⁻².
+    surface_water: f64,
+    /// Its record's potential ocean, 0 to 1.
+    potential_ocean: f64,
+    /// Its record's ocean fraction, 0 to 1.
+    ocean: f64,
+    /// The `H2O` areas of its record's ices and liquids, the ocean under a `Snowball`'s ice among
+    /// them.
+    h2o: (f64, f64),
+    /// Whether its record's condensates hold an `H2O` solid and an `H2O` liquid entry.
+    h2o_entries: (bool, bool),
+    /// Its derivation's atmosphere passes.
+    passes: u32,
+    /// How its derivation's passes ended.
+    convergence: crate::planetary::derive::passes::Convergence,
+    /// A hash of its record's and its derivation's whole `Debug` text: the same, or moved.
+    bits: u64,
+}
+
+impl PresentBody {
+    /// The figures of the body `case`, under the rules in force, which are `run`'s: under
+    /// [`PresentState::Present`](crate::planetary::derive::atmosphere::PresentState::Present) a
+    /// runaway outside the present runaway limit is derived again with (c) off for its first
+    /// solve ([`first_solve`](Self::first_solve)).
+    fn of(case: &CensusCase<'_>, run: crate::planetary::derive::atmosphere::PresentState) -> Self {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::atmosphere::{PresentState, with_present_state};
+        let (surface, derived) = (case.surface, case.derived);
+        let first_solve = (run == PresentState::Present
+            && surface.state() == SurfaceState::RunawayGreenhouse
+            && (case.runaway_now.is_nan() || case.runaway_now < 1.0))
+            .then(|| {
+                with_present_state(PresentState::WithoutHothouse, || {
+                    (case.again)(PassDriver::Solve).0
+                })
+            });
+        let (air, figures) = (derived.atmosphere(), surface.figures());
+        let water = Gas::Water.substance();
+        let area = |list: &[(crate::substance::SubstanceId, f64)]| {
+            list.iter()
+                .filter(|(id, _)| *id == water)
+                .fold(0.0, |sum, &(_, area)| sum + area)
+        };
+        let mut hasher = DefaultHasher::new();
+        format!("{:?} {:?}", case.record, derived).hash(&mut hasher);
+        let id = case.record.identity().id().to_string();
+        let condensates = surface.condensates();
+        Self {
+            label: format!("{} {id} {}", case.set, case.kind),
+            id,
+            hosts: case.hosts.clone(),
+            state: surface.state(),
+            water_state: air.water_state(),
+            deck: air.runaway_deck(),
+            t_s: surface.conditions().mean_surface_temperature().value(),
+            air_t_s: air.surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            bond: derived.albedo().value(),
+            cloud: air.cloud_fraction(),
+            first_solve,
+            runaway_now: case.runaway_now,
+            runaway_peak: case.runaway_peak,
+            maximum_now: case.maximum_now,
+            unheld: case.unheld,
+            surface_water: figures.surface_water().value(),
+            potential_ocean: figures.potential_ocean(),
+            ocean: figures.ocean_fraction(),
+            h2o: (
+                area(figures.surface_ices()),
+                area(figures.surface_liquids()),
+            ),
+            h2o_entries: (
+                condensates.entry(water, CondensatePhase::Solid).is_some(),
+                condensates.entry(water, CondensatePhase::Liquid).is_some(),
+            ),
+            passes: derived.atmosphere_passes(),
+            convergence: derived.convergence(),
+            bits: hasher.finish(),
+        }
+    }
+
+    /// Its state, deck, `T_s`, A, `p_s` and ratios, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} ({:?}, water {:?}) T_s {:.2} K, A {:.4}, cloud {:.4}, p_s {:.4e} bar; runaway \
+             now {:.4}, at the peak {:.4}, maximum now {:.4}; {} passes, {:?}",
+            self.state,
+            self.deck,
+            self.water_state,
+            self.t_s,
+            self.bond,
+            self.cloud,
+            self.p_s / 1e5,
+            self.runaway_now,
+            self.runaway_peak,
+            self.maximum_now,
+            self.passes,
+            self.convergence
+        )
+    }
+
+    /// A hothouse's figures, for a census line (P14.T53.b part 1 (c); decision-t53b-arm-c): its
+    /// present ratios, its first solve's ([`first_solve`](Self::first_solve)) and its published
+    /// solve's state, deck, `T_s`, Bond albedo, `p_s` and passes, and water's saturation
+    /// temperature at each `p_s` by (c)'s convention.
+    fn hothouse_line(&self) -> String {
+        use crate::planetary::derive::atmosphere::water_saturation_temperature;
+        let saturation =
+            |p: f64| water_saturation_temperature(Pascals::new(p)).map_or(f64::NAN, Kelvin::value);
+        let first = self.first_solve.as_ref().map_or_else(
+            || "none".to_owned(),
+            |first| {
+                let air = first.atmosphere();
+                let p = air.surface_pressure().map_or(f64::NAN, Pascals::value);
+                format!(
+                    "{:?} {:?} T_s {:.2} K, A {:.4}, p_s {:.4e} bar (water's T_sat {:.3} K), {} \
+                     passes",
+                    air.state(),
+                    air.runaway_deck(),
+                    air.surface_temperature().value(),
+                    first.albedo().value(),
+                    p / 1e5,
+                    saturation(p),
+                    first.atmosphere_passes()
+                )
+            },
+        );
+        format!(
+            "runaway now {:.4}, at the peak {:.4}, maximum now {:.4} | first solve {first} | \
+             published {:?} {:?} T_s {:.2} K (the record's {:.2} K), A {:.4}, p_s {:.4e} bar \
+             (water's T_sat {:.3} K), {} passes",
+            self.runaway_now,
+            self.runaway_peak,
+            self.maximum_now,
+            self.state,
+            self.deck,
+            self.air_t_s,
+            self.t_s,
+            self.bond,
+            self.p_s / 1e5,
+            saturation(self.p_s),
+            self.passes
+        )
+    }
+
+    /// Its water's figures, for a census line.
+    fn water_line(&self) -> String {
+        format!(
+            "surface water {:.4e} kg m⁻², potential ocean {:.4}, ocean {:.4}, H2O ice {:.4} and \
+             liquid {:.4}, entries {:?}",
+            self.surface_water,
+            self.potential_ocean,
+            self.ocean,
+            self.h2o.0,
+            self.h2o.1,
+            self.h2o_entries
+        )
+    }
+
+    /// The class its ratios give, `(runaway at the peak, runaway now, maximum now)` read with
+    /// `S_eff` as `fit` reads it below 2,600 K: inside the runaway limit at the peak and now, a
+    /// runaway; at the peak alone, its present class (P14.T53.b part 1 (a)); otherwise its peak
+    /// class. For the census of the dependence on the hold, as `Sky::of`'s sums read them.
+    fn class(&self, fit: SEffFit) -> &'static str {
+        let (peak, now, maximum) = match fit {
+            SEffFit::Held => (self.runaway_peak, self.runaway_now, self.maximum_now),
+            SEffFit::Unheld => (self.unheld[1], self.unheld[0], self.unheld[2]),
+        };
+        if peak >= 1.0 && now >= 1.0 {
+            "RunawayGreenhouse"
+        } else if maximum < 1.0 {
+            "Snowball"
+        } else {
+            "Temperate"
+        }
+    }
+
+    /// Whether its water holds no more than `other`'s: its surface water, potential ocean, `H2O`
+    /// liquid area (the ocean under a `Snowball`'s ice among it) and the condensates' `H2O`
+    /// entries `other`'s to the bit, and no `H2O` ice where `other` holds none. An ice-rich
+    /// crust's own ice, which the cover lists at the state's threshold over the climate, may move
+    /// with them.
+    fn holds_no_more_water(&self, other: &Self) -> bool {
+        let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        same(self.surface_water, other.surface_water)
+            && same(self.potential_ocean, other.potential_ocean)
+            && same(self.h2o.1, other.h2o.1)
+            && self.h2o_entries == other.h2o_entries
+            && (other.h2o.0 > 0.0 || same(self.h2o.0, other.h2o.0))
+    }
+}
+
+/// P14.T53.b part 1's census (decision-absurd-states-24 R3–R4): every present planet, member and
+/// moon with a surface at the epoch ([`census_walk`]) of the first 60 sample systems, the 15
+/// golden systems and the 27 systems of LOOK72's 62 triaged bodies ([`look72_triaged_contexts`]),
+/// the floor census's set ([`floor_census`]), each system generated and derived afresh with every
+/// 24 hold in force, since the tests' caches are version 23's: with part 1 (`present`), each
+/// runaway outside the present runaway limit with its first solve, (c) off, beside it
+/// ([`PresentBody::first_solve`]), and as P14.T53.a's batch built it (`peak`,
+/// `with_present_state(PresentState::Peak, ..)`), body by body in the same order; with the solves
+/// without the deck and as a hothouse that generating and walking the `present` systems took
+/// ([`with_deck_counts`](crate::planetary::derive::atmosphere::with_deck_counts)). Built once a
+/// process, for the tests that read it.
+struct PresentCensus {
+    present: Vec<PresentBody>,
+    peak: Vec<PresentBody>,
+    generated: crate::planetary::derive::atmosphere::DeckCounts,
+    walked: crate::planetary::derive::atmosphere::DeckCounts,
+}
+
+/// The [`PresentCensus`], built once.
+fn present_census() -> &'static PresentCensus {
+    use crate::planetary::derive::atmosphere::{
+        PresentState, with_deck_counts, with_present_state,
+    };
+    use crate::planetary::testing::with_every_24_hold;
+    static CENSUS: OnceLock<PresentCensus> = OnceLock::new();
+    CENSUS.get_or_init(|| {
+        let look72 = look72_triaged_contexts();
+        let look72_seed = look72_galaxy().seed();
+        let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+            .iter()
+            .take(60)
+            .map(|ctx| ("sample", SEED, ctx))
+            .chain(
+                golden_systems()
+                    .iter()
+                    .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+            )
+            .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+            .collect();
+        let run = |run: PresentState| {
+            let (systems, generated) = with_deck_counts(|| {
+                sets.iter()
+                    .map(|&(_, seed, ctx)| generate(seed, ctx))
+                    .collect::<Vec<_>>()
+            });
+            let (bodies, walked) = with_deck_counts(|| {
+                let mut bodies = Vec::new();
+                for (&(set, _, ctx), system) in sets.iter().zip(&systems) {
+                    census_walk(set, ctx, system, &mut |case| {
+                        bodies.push(PresentBody::of(case, run));
+                    });
+                }
+                bodies
+            });
+            (bodies, generated, walked)
+        };
+        let (present, generated, walked) = with_every_24_hold(|| run(PresentState::Present));
+        let (peak, ..) = with_every_24_hold(|| {
+            with_present_state(PresentState::Peak, || run(PresentState::Peak))
+        });
+        let labels =
+            |bodies: &[PresentBody]| bodies.iter().map(|b| b.label.clone()).collect::<Vec<_>>();
+        assert_eq!(labels(&present), labels(&peak), "the same bodies, in order");
+        PresentCensus {
+            present,
+            peak,
+            generated,
+            walked,
+        }
+    })
+}
+
+/// The census's five decked runaways about M dwarfs (decision-absurd-states-24 R3.1), each
+/// published under Venus's deck at 273–360 K by P14.T53.a's batch.
+const DECKED_FIVE: [&str; 5] = [
+    "220016587ff80000.0900",
+    "02001b2c9ffe0000.0200",
+    "01fffb2c20000001.0200",
+    "01ffeb2ce0000000.0100",
+    "01ffeb2ca0000000.0100",
+];
+
+/// P14.T53.b part 1's moved count, a measurement for the record (decision-absurd-states-24
+/// R3–R4), run by name over [`present_census`]'s set: every body whose state or deck part 1 moves,
+/// by name, with its peak and present runaway ratios and its maximum-greenhouse ratio, its state,
+/// deck, `T_s`, Bond albedo and `p_s` before (P14.T53.a's batch as built) and after, by its hosts'
+/// class; the past-only runaways' water before and after; the bodies part 1 moves in any other
+/// figure (none expected); the runaways solved without the deck whose deckless `T_s` is at or above
+/// the cycling temperature (a partial deck, not modelled, for P14.T53.e); the bodies whose present
+/// runaway ratio exceeds their peak's; the re-solve's count, its share of the bodies and its
+/// passes; the `Temperate`s at or above water's saturation temperature at their `p_s` (R4.2's
+/// test, none expected); (c)'s hothouses between the limits, each with its present ratios, both
+/// solves' `T_s`, Bond albedo and `p_s`, water's saturation temperature there and P14.T53.a's
+/// batch's figures, and (c)'s count and cost beside (b)'s (decision-t53b-arm-c); and (the batch
+/// review's item 8) each body whose state part 1 moves with its present
+/// runaway and maximum-greenhouse ratios, `S_eff` held at its 2,600 K value below Kopparapu et
+/// al.'s fit and unheld ([`unheld_flux`]), their distances from 1 and its class both ways, with
+/// every census body whose class or ceiling the extrapolation would flip.
+#[test]
+#[ignore = "a measurement for P14.T53.b part 1's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census's moved bodies and its cost, each listed"
+)]
+fn under_every_24_hold_part_one_s_moved_bodies_are_stated() {
+    use crate::planetary::derive::atmosphere::{ACID_CYCLING_TEMPERATURE, RunawayDeck};
+    let census = present_census();
+    let pairs: Vec<(&PresentBody, &PresentBody)> =
+        census.peak.iter().zip(&census.present).collect();
+    let moved: Vec<&(&PresentBody, &PresentBody)> = pairs
+        .iter()
+        .filter(|(peak, now)| peak.state != now.state || peak.deck != now.deck)
+        .collect();
+    eprintln!(
+        "bodies with a surface: {}; moved by part 1: {}",
+        pairs.len(),
+        moved.len()
+    );
+    let mut by_class: std::collections::BTreeMap<(String, String), u32> =
+        std::collections::BTreeMap::new();
+    for (peak, now) in &moved {
+        *by_class
+            .entry((
+                host_class(&now.hosts),
+                format!(
+                    "{:?} {:?} → {:?} {:?}",
+                    peak.state, peak.deck, now.state, now.deck
+                ),
+            ))
+            .or_default() += 1;
+        eprintln!(
+            "MOVED | {} | {} | {} | {:?} {:?} → {:?} {:?} | runaway peak {:.4}, now {:.4}, \
+             maximum now {:.4} | T_s {:.2} → {:.2} K | A {:.4} → {:.4} | p_s {:.4e} → {:.4e} bar \
+             | passes {} → {}",
+            now.label,
+            host_class(&now.hosts),
+            now.hosts,
+            peak.state,
+            peak.deck,
+            now.state,
+            now.deck,
+            now.runaway_peak,
+            now.runaway_now,
+            now.maximum_now,
+            peak.t_s,
+            now.t_s,
+            peak.bond,
+            now.bond,
+            peak.p_s / 1e5,
+            now.p_s / 1e5,
+            peak.passes,
+            now.passes,
+        );
+        if peak.state != now.state {
+            eprintln!(
+                "  its water: {}\n         was {}; the same {}",
+                now.water_line(),
+                peak.water_line(),
+                now.holds_no_more_water(peak)
+            );
+        }
+    }
+    eprintln!("moved by host class and move: {by_class:?}");
+    // The batch review's item 8: the present class's dependence on `S_eff` beyond Kopparapu et
+    // al.'s fit, which `HabitableLimit::flux` holds at its 2,600 K value below it. Each body whose
+    // state part 1 moves, with its present ratios held and unheld and their distances from 1: a
+    // hothouse (c) publishes as before among them, whose first solve (a) moved.
+    eprintln!(
+        "S_EFF BEYOND THE FIT | body | hosts | runaway now held → unheld (1 − r) | maximum now \
+         held → unheld (r − 1) | class held → unheld"
+    );
+    let first_moved = |(peak, now): &(&PresentBody, &PresentBody)| {
+        now.first_solve
+            .as_ref()
+            .is_some_and(|first| first.atmosphere().state() != peak.state)
+    };
+    for (peak, now) in pairs
+        .iter()
+        .filter(|pair| pair.0.state != pair.1.state || first_moved(pair))
+    {
+        eprintln!(
+            "S_EFF | {} | {} | {:.4} → {:.4} ({:.4} → {:.4}) | {:.4} → {:.4} ({:+.4} → {:+.4}) | \
+             {} → {} (published {:?}, was {:?})",
+            now.label,
+            now.hosts,
+            now.runaway_now,
+            now.unheld[0],
+            1.0 - now.runaway_now,
+            1.0 - now.unheld[0],
+            now.maximum_now,
+            now.unheld[2],
+            now.maximum_now - 1.0,
+            now.unheld[2] - 1.0,
+            now.class(SEffFit::Held),
+            now.class(SEffFit::Unheld),
+            now.state,
+            peak.state,
+        );
+    }
+    let flips: Vec<String> = census
+        .present
+        .iter()
+        .filter(|b| b.class(SEffFit::Held) != b.class(SEffFit::Unheld))
+        .map(|b| {
+            format!(
+                "{}: {} → {} (peak {:.4} → {:.4}, now {:.4} → {:.4}, maximum {:.4} → {:.4}; {})",
+                b.label,
+                b.class(SEffFit::Held),
+                b.class(SEffFit::Unheld),
+                b.runaway_peak,
+                b.unheld[1],
+                b.runaway_now,
+                b.unheld[0],
+                b.maximum_now,
+                b.unheld[2],
+                b.hosts
+            )
+        })
+        .collect();
+    eprintln!(
+        "verdicts the extrapolation below 2,600 K flips, of {} bodies: {}:\n  {}",
+        census.present.len(),
+        flips.len(),
+        flips.join("\n  ")
+    );
+    let ceiling_flips = census
+        .present
+        .iter()
+        .filter(|b| (b.maximum_now < 1.0) != (b.unheld[2] < 1.0))
+        .count();
+    eprintln!(
+        "maximum-greenhouse ceilings (ratio below 1) the extrapolation flips: {ceiling_flips}"
+    );
+    let past_only: Vec<String> = pairs
+        .iter()
+        .filter(|(_, now)| now.runaway_peak >= 1.0 && now.runaway_now < 1.0)
+        .map(|(peak, now)| {
+            format!(
+                "{} [{}; {}]: {}
+      was {}",
+                now.label,
+                host_class(&now.hosts),
+                now.hosts,
+                now.line(),
+                peak.line()
+            )
+        })
+        .collect();
+    eprintln!(
+        "inside the runaway limit at the hosts' peak alone: {}:\n  {}",
+        past_only.len(),
+        past_only.join("\n  ")
+    );
+    let elsewhere: Vec<String> = pairs
+        .iter()
+        .filter(|(peak, now)| {
+            peak.state == now.state && peak.deck == now.deck && peak.bits != now.bits
+        })
+        .map(|(peak, now)| format!("{}: {} → {}", now.label, peak.line(), now.line()))
+        .collect();
+    eprintln!(
+        "moved in another figure alone: {}:\n  {}",
+        elsewhere.len(),
+        elsewhere.join("\n  ")
+    );
+    let deckless: Vec<&&(&PresentBody, &PresentBody)> = moved
+        .iter()
+        .filter(|(_, now)| now.deck == RunawayDeck::Deckless)
+        .collect();
+    let partial: Vec<String> = deckless
+        .iter()
+        .filter(|(_, now)| now.t_s >= ACID_CYCLING_TEMPERATURE.value())
+        .map(|(peak, now)| {
+            format!(
+                "{}: {} (under the deck {:.2} K)",
+                now.label,
+                now.line(),
+                peak.t_s
+            )
+        })
+        .collect();
+    eprintln!(
+        "solved without the deck: {} of {} bodies ({:.3}%), their passes {} under the deck and {} \
+         without (the walk's counts {:?}; the generation's, every derivation of the systems, \
+         {:?}); deckless at or above {} K: {}:\n  {}",
+        deckless.len(),
+        pairs.len(),
+        100.0 * f64::from(u32::try_from(deckless.len()).unwrap())
+            / f64::from(u32::try_from(pairs.len()).unwrap()),
+        deckless.iter().map(|(peak, _)| peak.passes).sum::<u32>(),
+        deckless.iter().map(|(_, now)| now.passes).sum::<u32>(),
+        census.walked,
+        census.generated,
+        ACID_CYCLING_TEMPERATURE.value(),
+        partial.len(),
+        partial.join("\n  ")
+    );
+    let passes = |bodies: &[PresentBody]| bodies.iter().map(|b| u64::from(b.passes)).sum::<u64>();
+    eprintln!(
+        "the walk's passes: {} with part 1, {} under P14.T53.a's batch as built; the re-solves' \
+         {} passes are {:.3}% of part 1's",
+        passes(&census.present),
+        passes(&census.peak),
+        census.walked.deckless_passes,
+        100.0 * f64::from(u32::try_from(census.walked.deckless_passes).unwrap())
+            / f64::from(u32::try_from(passes(&census.present)).unwrap()),
+    );
+    let hothouse_passes = census.walked.hothouse_passes + census.walked.hothouse_deckless_passes;
+    eprintln!(
+        "(c)'s re-solves: {} passes after {} in the first solves they replace, {:.3}% and {:.3}% \
+         of part 1's walk",
+        hothouse_passes,
+        census.walked.temperate_passes,
+        100.0 * f64::from(u32::try_from(hothouse_passes).unwrap())
+            / f64::from(u32::try_from(passes(&census.present)).unwrap()),
+        100.0 * f64::from(u32::try_from(census.walked.temperate_passes).unwrap())
+            / f64::from(u32::try_from(passes(&census.present)).unwrap()),
+    );
+    let above_peak: Vec<String> = census
+        .present
+        .iter()
+        .filter(|b| b.runaway_now > b.runaway_peak)
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    eprintln!(
+        "present runaway ratio above the peak's: {}:\n  {}",
+        above_peak.len(),
+        above_peak.join("\n  ")
+    );
+    // decision-absurd-states-24 R4.2's test of arm (c): a `Temperate` at or above water's
+    // saturation temperature at its p_s, by (c)'s convention (the liquid–vapour curve, 647.096 K at
+    // or above 22.064 MPa, not judged below 611.657 Pa; decision-t53b-arm-c §2).
+    let hot_temperate = |b: &PresentBody| {
+        b.state == SurfaceState::Temperate
+            && crate::planetary::derive::atmosphere::water_saturation_temperature(Pascals::new(
+                b.p_s,
+            ))
+            .is_some_and(|t| b.air_t_s >= t.value())
+    };
+    let hot: Vec<String> = pairs
+        .iter()
+        .filter(|(_, now)| hot_temperate(now))
+        .map(|(peak, now)| format!("{}: {}\n      was {}", now.label, now.line(), peak.line()))
+        .collect();
+    eprintln!(
+        "Temperates at or above water's saturation temperature at their p_s (arm (c)'s test): \
+         {}, under P14.T53.a's batch {}:\n  {}",
+        hot.len(),
+        census.peak.iter().filter(|b| hot_temperate(b)).count(),
+        hot.join("\n  ")
+    );
+    // Arm (c): each hothouse between the limits, with both solves and P14.T53.a's batch's, and its
+    // cost beside (b)'s.
+    let hothouses: Vec<&(&PresentBody, &PresentBody)> = pairs
+        .iter()
+        .filter(|(_, now)| {
+            now.first_solve.is_some() && now.state == SurfaceState::RunawayGreenhouse
+        })
+        .collect();
+    for (peak, now) in &hothouses {
+        eprintln!(
+            "HOTHOUSE | {} | {} | {} | {}\n  under P14.T53.a's batch {}; the same to the bit: {}",
+            now.label,
+            host_class(&now.hosts),
+            now.hosts,
+            now.hothouse_line(),
+            peak.line(),
+            peak.bits == now.bits
+        );
+    }
+    eprintln!(
+        "(c)'s hothouses: {} of {} bodies, {} of them deckless; the walk's {} re-solves took {} \
+         passes under the deck after {} in their first solves ({} third solves without it, {} \
+         passes); the generation's {:?}",
+        hothouses.len(),
+        pairs.len(),
+        hothouses
+            .iter()
+            .filter(|(_, now)| now.deck == RunawayDeck::Deckless)
+            .count(),
+        census.walked.hothouses,
+        census.walked.hothouse_passes,
+        census.walked.temperate_passes,
+        census.walked.hothouse_deckless,
+        census.walked.hothouse_deckless_passes,
+        census.generated,
+    );
+    for name in DECKED_FIVE {
+        for (peak, now) in pairs.iter().filter(|(_, now)| now.id == name) {
+            eprintln!(
+                "DECKED FIVE | {} | {} | was {}",
+                now.label,
+                now.line(),
+                peak.line()
+            );
+        }
+    }
+}
+
+/// P14.T53.b part 1 (b)'s re-solve in the tests' trace (the batch review's fixes): a runaway solved
+/// once more without its deck drops its first solve's traced passes alone, not what was traced
+/// before it. With every 24 hold in force, the census's decked runaway
+/// [`DECKED_FIVE`]'s 01ffeb2ca0000000.0100 is published deckless, and its traced solve lists one
+/// pass for each it counts; two of them traced together list both.
+#[test]
+fn under_every_24_hold_a_re_solve_keeps_what_was_traced_before_it() {
+    use crate::planetary::derive::atmosphere::RunawayDeck;
+    use crate::planetary::derive::{PassDriver, traced};
+    use crate::planetary::testing::with_every_24_hold;
+    let body = DECKED_FIVE[4];
+    let (system_id, _) = body.split_once('.').expect("a body ID");
+    let ctx = sample()
+        .iter()
+        .find(|ctx| ctx.id().to_string() == system_id)
+        .expect("the decked runaway's system is in the sample");
+    let mut found = 0;
+    with_every_24_hold(|| {
+        let system = generate(SEED, ctx);
+        census_walk("sample", ctx, &system, &mut |case| {
+            if case.record.identity().id().to_string() != body {
+                return;
+            }
+            found += 1;
+            let passes = usize::try_from(case.derived.atmosphere_passes()).unwrap();
+            assert_eq!(
+                case.derived.atmosphere().runaway_deck(),
+                RunawayDeck::Deckless,
+                "{body}"
+            );
+            let (_, alone) = traced(|| (case.again)(PassDriver::Traced));
+            assert_eq!(alone.len(), passes, "{body}");
+            let (_, both) = traced(|| {
+                (case.again)(PassDriver::Traced);
+                (case.again)(PassDriver::Traced)
+            });
+            assert_eq!(both.len(), 2 * passes, "{body}");
+        });
+    });
+    assert_eq!(found, 1, "{body} is present at the epoch");
+}
+
+/// decision-pre-23-review item 33's world: the sample's planet at the airless threshold whose
+/// other side was a `RunawayGreenhouse` under Venus's deck, at a `T_s` of 45.8 K by P14.T51.h's
+/// census at 23's stand-ins (plan 14's deferred findings: "one rocky member about an evolved
+/// host") and at 100.01 Pa and 56.6 K at 23 (bless-note-23, "across the diagonal": published
+/// `Airless` at 99.86 Pa), inside the runaway limit only at its substellar host's largest past
+/// luminosity (a runaway ratio of 1.51 then, 0.0029 now).
+const ITEM_33_WORLD: &str = "02000b2ca0000001.1100";
+
+/// LOOK72's 106 K runaway (decision-absurd-states-24 R4.1, item 1): at 23 a `RunawayGreenhouse`
+/// at 106.5 K under 5.33 bar, mostly O₂, its present runaway ratio 0.0405 and its
+/// maximum-greenhouse ratio 0.1152.
+const LOOK72_106_K_RUNAWAY: &str = "820e6ee00000008d.0900";
+
+/// The census's hothouse between the limits (decision-t53b-arm-c §1): about a 2,456 K substellar
+/// host, its runaway ratio 61.9 at the peak and 0.547 now, its maximum-greenhouse ratio 2.11 now;
+/// under P14.T53.a's batch a `RunawayGreenhouse` under Venus's deck at 934.6 K, A 0.76 and 414.8
+/// bar of carbon dioxide, and under P14.T53.b part 1 (a) alone a `Temperate` at 1,221.6 K and A
+/// 0.30.
+const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
+
+/// P14.T53.b part 1's assertions over [`present_census`]'s set, with every 24 hold in force
+/// (decision-absurd-states-24 R3.4, R4.1 and R4.2; decision-t53b-arm-c §5.4–5.5; bless-note-23's
+/// states census, line 4, made an assertion):
+///
+/// - no `RunawayGreenhouse` lies beyond the maximum-greenhouse limit now ([`limit_now`] below 1),
+///   and none between the limits now ([`runaway_now`] below 1) but (c)'s hothouses, each listed by
+///   name with its present ratios, both solves' state, `T_s`, Bond albedo and `p_s`, and water's
+///   saturation temperature there: its first solve, with (c) off, a `Temperate` that (c) judges a
+///   hothouse (`solved_as_a_hothouse`), and at 24 the census's [`HOTHOUSE_BODY`] alone;
+/// - no `Temperate` lies at or above water's saturation temperature at its `p_s` by (c)'s
+///   convention (`water_saturation_temperature`: the liquid–vapour curve, 647.096 K at or above
+///   22.064 MPa, not judged below 611.657 Pa; R4.2's serve-gate test);
+/// - none keeps Venus's deck below the acid's cycling temperature, 430 K;
+/// - every runaway P14.T53.a's batch published outside the present limit but (c)'s now publishes
+///   its present class, `Snowball` beyond the maximum-greenhouse limit now and `Temperate` within
+///   it, its water still a runaway's (`water_state`) and its water's figures (surface water,
+///   potential ocean, ocean, `H2O` ice and liquid and the condensates' `H2O` entries) P14.T53.a's
+///   batch's, to the bit: its water stays lost, LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`]) a
+///   `Snowball` among them;
+/// - decision-pre-23-review item 33's world ([`ITEM_33_WORLD`]) is not a runaway;
+/// - the census's five decked runaways ([`DECKED_FIVE`]) are solved without the deck, inside the
+///   present limit, each stated with its present ratio, `T_s`, Bond albedo and `p_s`;
+/// - every body whose state and deck part 1 does not move is P14.T53.a's batch's to the bit, its
+///   whole record and derivation: a past runaway (c) publishes under the deck is its decked solve
+///   again;
+/// - no present runaway ratio exceeds its peak's.
+///
+/// The bodies solved without the deck whose deckless `T_s` is at or above the cycling temperature
+/// (a partial deck, not modelled, for P14.T53.e) are counted, not failed; and so (count (xi),
+/// brief-notes-24) are (c)'s bodies that end deckless or whose published `T_s` lies under water's
+/// saturation temperature, by name (none at 24).
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "part 1's assertions over one census, each stated"
+)]
+fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_on_a_cold_deck() {
+    use crate::planetary::derive::atmosphere::{
+        ACID_CYCLING_TEMPERATURE, RunawayDeck, solved_as_a_hothouse, water_saturation_temperature,
+    };
+    use crate::planetary::testing::with_every_24_hold;
+    let census = present_census();
+    let cycling = ACID_CYCLING_TEMPERATURE.value();
+    let runaways = |bodies: &[PresentBody], test: &dyn Fn(&PresentBody) -> bool| -> Vec<String> {
+        bodies
+            .iter()
+            .filter(|b| b.state == SurfaceState::RunawayGreenhouse && test(b))
+            .map(|b| format!("{}: {}", b.label, b.line()))
+            .collect()
+    };
+    let outside = |b: &PresentBody| b.runaway_now.is_nan() || b.runaway_now < 1.0;
+    let beyond = |b: &PresentBody| b.maximum_now.is_nan() || b.maximum_now < 1.0;
+    let between = |b: &PresentBody| outside(b) && !beyond(b);
+    let too_cold = |b: &PresentBody| b.deck == RunawayDeck::Kept && b.t_s < cycling;
+    let was_outside = runaways(&census.peak, &outside);
+    let was_too_cold = runaways(&census.peak, &too_cold);
+    eprintln!(
+        "under P14.T53.a's batch: runaways outside the present limit {}, under the deck below {} \
+         K {}",
+        was_outside.len(),
+        cycling,
+        was_too_cold.len()
+    );
+    assert_eq!(
+        runaways(&census.present, &beyond),
+        Vec::<String>::new(),
+        "a runaway beyond the maximum-greenhouse limit now"
+    );
+    assert_eq!(
+        runaways(&census.present, &too_cold),
+        Vec::<String>::new(),
+        "a runaway under Venus's deck below the cycling temperature"
+    );
+    assert!(
+        !was_outside.is_empty() && !was_too_cold.is_empty(),
+        "the census holds P14.T53.a's cases"
+    );
+
+    // Arm (c): every runaway between the limits now is a hothouse, its first solve (c)'s case.
+    let hothouses: Vec<&PresentBody> = census
+        .present
+        .iter()
+        .filter(|b| b.state == SurfaceState::RunawayGreenhouse && between(b))
+        .collect();
+    eprintln!(
+        "runaways between the limits now, (c)'s hothouses: {}",
+        hothouses.len()
+    );
+    for hothouse in &hothouses {
+        eprintln!(
+            "HOTHOUSE | {} | {}",
+            hothouse.label,
+            hothouse.hothouse_line()
+        );
+        let first = hothouse
+            .first_solve
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: no first solve", hothouse.label));
+        let air = first.atmosphere();
+        assert_eq!(air.state(), SurfaceState::Temperate, "{}", hothouse.label);
+        assert!(
+            with_every_24_hold(|| solved_as_a_hothouse(air)),
+            "{}: its first solve is not (c)'s: {}",
+            hothouse.label,
+            hothouse.hothouse_line()
+        );
+    }
+    assert_eq!(
+        hothouses
+            .iter()
+            .map(|b| b.label.clone())
+            .collect::<Vec<_>>(),
+        vec![format!("sample {HOTHOUSE_BODY} planets")],
+        "(c)'s hothouses at 24"
+    );
+    // Count (xi): a hothouse that ends deckless, or whose published `T_s` lies under water's
+    // saturation temperature, is named to main.
+    let saturation =
+        |p: f64| water_saturation_temperature(Pascals::new(p)).map_or(f64::NAN, Kelvin::value);
+    let named: Vec<String> = hothouses
+        .iter()
+        .filter(|b| b.deck == RunawayDeck::Deckless || b.air_t_s < saturation(b.p_s))
+        .map(|b| format!("{}: {}", b.label, b.hothouse_line()))
+        .collect();
+    eprintln!(
+        "count (xi): hothouses deckless or under water's saturation temperature: {}:\n  {}",
+        named.len(),
+        named.join("\n  ")
+    );
+    // R4.2's test: no `Temperate` at or above water's saturation temperature at its `p_s`.
+    let hot_temperate = |b: &PresentBody| {
+        b.state == SurfaceState::Temperate
+            && water_saturation_temperature(Pascals::new(b.p_s))
+                .is_some_and(|t| b.air_t_s >= t.value())
+    };
+    assert_eq!(
+        census
+            .present
+            .iter()
+            .filter(|b| hot_temperate(b))
+            .map(|b| format!("{}: {}", b.label, b.line()))
+            .collect::<Vec<_>>(),
+        Vec::<String>::new(),
+        "a Temperate at or above water's saturation temperature at its p_s"
+    );
+    eprintln!(
+        "Temperates at or above water's saturation temperature at their p_s: none, under \
+         P14.T53.a's batch {}",
+        census.peak.iter().filter(|b| hot_temperate(b)).count()
+    );
+
+    let pairs: Vec<(&PresentBody, &PresentBody)> =
+        census.peak.iter().zip(&census.present).collect();
+    let mut past_only = 0;
+    for (peak, now) in &pairs {
+        let moved = peak.state != now.state || peak.deck != now.deck;
+        if !moved {
+            assert_eq!(peak.bits, now.bits, "{}: {}", now.label, now.line());
+            continue;
+        }
+        if now.water_state == SurfaceState::RunawayGreenhouse
+            && now.state != SurfaceState::RunawayGreenhouse
+        {
+            assert!(
+                now.runaway_peak >= 1.0 && outside(now),
+                "{}: {}",
+                now.label,
+                now.line()
+            );
+            let class = if now.maximum_now < 1.0 {
+                SurfaceState::Snowball
+            } else {
+                SurfaceState::Temperate
+            };
+            let at = format!("{}: {} (was {})", now.label, now.line(), peak.line());
+            assert_eq!(now.state, class, "{at}");
+            assert_eq!(now.water_state, SurfaceState::RunawayGreenhouse, "{at}");
+            assert!(
+                now.holds_no_more_water(peak),
+                "{at}: its water {} against {}",
+                now.water_line(),
+                peak.water_line()
+            );
+            past_only += 1;
+        } else if now.state == SurfaceState::RunawayGreenhouse && between(now) {
+            // A hothouse (c) moves: a dry `Temperate` under P14.T53.a's batch, or one solved
+            // without the deck after its decked solve.
+            let at = format!(
+                "{}: {} (was {})",
+                now.label,
+                now.hothouse_line(),
+                peak.line()
+            );
+            assert!(
+                peak.state == SurfaceState::Temperate
+                    || (peak.state == SurfaceState::RunawayGreenhouse
+                        && now.deck == RunawayDeck::Deckless),
+                "{at}"
+            );
+        } else {
+            assert_eq!(peak.state, now.state, "{}: {}", now.label, now.line());
+            assert_eq!(now.deck, RunawayDeck::Deckless, "{}", now.label);
+            assert!(peak.t_s < cycling, "{}: {}", now.label, peak.line());
+        }
+    }
+    let runaway_106_k: Vec<&(&PresentBody, &PresentBody)> = pairs
+        .iter()
+        .filter(|(_, now)| now.label.starts_with("look72") && now.id == LOOK72_106_K_RUNAWAY)
+        .collect();
+    assert_eq!(runaway_106_k.len(), 1, "{LOOK72_106_K_RUNAWAY}");
+    for (peak, now) in runaway_106_k {
+        eprintln!(
+            "LOOK72's 106 K runaway {}: {}; its water {}\n  was {}; its water {}",
+            now.label,
+            now.line(),
+            now.water_line(),
+            peak.line(),
+            peak.water_line()
+        );
+        assert_eq!(peak.state, SurfaceState::RunawayGreenhouse);
+        assert_eq!(now.state, SurfaceState::Snowball);
+        assert!(now.holds_no_more_water(peak));
+    }
+    let item_33: Vec<&PresentBody> = census
+        .present
+        .iter()
+        .filter(|b| b.label.starts_with("sample") && b.id == ITEM_33_WORLD)
+        .collect();
+    assert_eq!(item_33.len(), 1, "{ITEM_33_WORLD}");
+    for world in item_33 {
+        eprintln!("item 33's world {}: {}", world.label, world.line());
+        assert_ne!(world.state, SurfaceState::RunawayGreenhouse);
+    }
+    for name in DECKED_FIVE {
+        let found: Vec<&(&PresentBody, &PresentBody)> = pairs
+            .iter()
+            .filter(|(_, now)| now.label.starts_with("sample") && now.id == name)
+            .collect();
+        assert_eq!(found.len(), 1, "{name}");
+        for (peak, now) in found {
+            eprintln!("{name}: {}; under the deck {}", now.line(), peak.line());
+            assert_eq!(now.state, SurfaceState::RunawayGreenhouse, "{name}");
+            assert_eq!(now.deck, RunawayDeck::Deckless, "{name}");
+            assert!(now.runaway_now >= 1.0, "{name}");
+        }
+    }
+    let partial: Vec<String> = census
+        .present
+        .iter()
+        .filter(|b| b.deck == RunawayDeck::Deckless && b.t_s >= cycling)
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    let deckless = census
+        .present
+        .iter()
+        .filter(|b| b.deck == RunawayDeck::Deckless)
+        .count();
+    eprintln!(
+        "{past_only} past-only runaways publish their present class; {} hothouses publish a \
+         runaway; {deckless} runaways are solved without the deck ({:?} in the walk), {} of them \
+         at or above {cycling} K without it (a partial deck, for P14.T53.e):\n  {}",
+        hothouses.len(),
+        census.walked,
+        partial.len(),
+        partial.join("\n  ")
+    );
+    let above_peak: Vec<String> = census
+        .present
+        .iter()
+        .filter(|b| b.runaway_now > b.runaway_peak)
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    assert_eq!(
+        above_peak,
+        Vec::<String>::new(),
+        "a present ratio above the peak's"
+    );
+}
+
+/// P14.T53.b part 1 (c) through the passes, with every 24 hold in force (decision-t53b-arm-c §3,
+/// §5.5): the census's hothouse between the limits, [`HOTHOUSE_BODY`], publishes a
+/// `RunawayGreenhouse` under Venus's deck, P14.T24.g's cycling case (`SulphurCycle::case_of`'s
+/// first arm, which `hooks/sulphur.rs`'s own example pins: the record's tests do not call the hook
+/// before P14.T54.b, `nothing_on_the_record_calls_the_inventory_yet`), its record and derivation
+/// P14.T53.a's batch's to the bit (its solve
+/// under the runaway's branches is that batch's decked solve again), its `T_s`, A and `p_s` stated
+/// against T53.a's batch's 934.6 K, 0.76 and 414.8 bar. Its first solve, with (c) off
+/// (`PresentState::WithoutHothouse`), is a `Temperate` at about 1,221.6 K and A 0.30, which (c)
+/// judges a hothouse; both lie above water's critical pressure, so its saturation temperature is
+/// 647.096 K. Its passes are counted as one hothouse re-solve, with no third solve.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one body's two solves and its counts, each stated"
+)]
+fn under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck() {
+    use crate::planetary::derive::atmosphere::{
+        PresentState, RunawayDeck, solved_as_a_hothouse, water_saturation_temperature,
+        with_deck_counts, with_present_state,
+    };
+    use crate::planetary::testing::with_every_24_hold;
+    /// The hothouse as one run publishes it: its record's and derivation's `Debug` text, its
+    /// record's state and mean `T_s`, its derivation, and under part 1 its first solve with (c)
+    /// off.
+    type Found = (String, SurfaceState, f64, DerivedBody, Option<DerivedBody>);
+    let (system_id, _) = HOTHOUSE_BODY.split_once('.').expect("a body ID");
+    let ctx = sample()
+        .iter()
+        .find(|ctx| ctx.id().to_string() == system_id)
+        .expect("the hothouse's system is in the sample");
+    let walk = |run: PresentState| {
+        let system = generate(SEED, ctx);
+        let mut found: Vec<Found> = Vec::new();
+        let ((), counts) = with_deck_counts(|| {
+            census_walk("sample", ctx, &system, &mut |case| {
+                if case.record.identity().id().to_string() != HOTHOUSE_BODY {
+                    return;
+                }
+                let first = (run == PresentState::Present).then(|| {
+                    with_present_state(PresentState::WithoutHothouse, || {
+                        (case.again)(PassDriver::Solve).0
+                    })
+                });
+                found.push((
+                    format!("{:?} {:?}", case.record, case.derived),
+                    case.surface.state(),
+                    case.surface.conditions().mean_surface_temperature().value(),
+                    *case.derived,
+                    first,
+                ));
+            });
+        });
+        (found, counts)
+    };
+    with_every_24_hold(|| {
+        let (now, counts) = walk(PresentState::Present);
+        let (peak, _) = with_present_state(PresentState::Peak, || walk(PresentState::Peak));
+        assert_eq!(
+            (now.len(), peak.len()),
+            (1, 1),
+            "{HOTHOUSE_BODY} is present at the epoch"
+        );
+        let (bits, state, t_s, derived, first) = &now[0];
+        let air = derived.atmosphere();
+        let first = first.as_ref().expect("part 1's run takes the first solve");
+        let first_air = first.atmosphere();
+        let bar = |air: &crate::planetary::derive::atmosphere::Atmosphere| {
+            air.surface_pressure().map_or(f64::NAN, |p| p.value() / 1e5)
+        };
+        let saturation = |air: &crate::planetary::derive::atmosphere::Atmosphere| {
+            air.surface_pressure()
+                .and_then(water_saturation_temperature)
+                .map_or(f64::NAN, Kelvin::value)
+        };
+        eprintln!(
+            "{HOTHOUSE_BODY}: first solve {:?} {:?} T_s {:.3} K, A {:.4}, p_s {:.4} bar (water's \
+             T_sat {:.3} K), {} passes; published {:?} {:?} T_s {:.3} K (the record's {:.3} K), \
+             A {:.4}, p_s {:.4} bar (water's T_sat {:.3} K), {} passes (T53.a's batch: 934.6 K, \
+             A 0.76, 414.8 bar); counts {counts:?}",
+            first_air.state(),
+            first_air.runaway_deck(),
+            first_air.surface_temperature().value(),
+            first.albedo().value(),
+            bar(first_air),
+            saturation(first_air),
+            first.atmosphere_passes(),
+            air.state(),
+            air.runaway_deck(),
+            air.surface_temperature().value(),
+            t_s,
+            derived.albedo().value(),
+            bar(air),
+            saturation(air),
+            derived.atmosphere_passes(),
+        );
+        assert_eq!(*state, SurfaceState::RunawayGreenhouse);
+        assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+        // A runaway under Venus's deck: P14.T24.g's cycling case.
+        assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
+        assert_eq!(
+            bits, &peak[0].0,
+            "P14.T53.a's batch's decked solve, to the bit"
+        );
+        assert!((t_s - 934.6).abs() < 0.1, "{t_s} K");
+        assert!((derived.albedo().value() - 0.76).abs() < 0.005);
+        assert!((bar(air) - 414.8).abs() < 0.1, "{} bar", bar(air));
+        assert_same_bits(saturation(air), 647.096);
+        assert!(air.surface_temperature().value() >= saturation(air));
+        assert_eq!(first_air.state(), SurfaceState::Temperate);
+        assert_eq!(first_air.water_state(), SurfaceState::RunawayGreenhouse);
+        assert!((first_air.surface_temperature().value() - 1_221.6).abs() < 0.5);
+        assert!((first.albedo().value() - 0.30).abs() < 0.005);
+        assert_same_bits(saturation(first_air), 647.096);
+        assert!(solved_as_a_hothouse(first_air));
+        assert_eq!(
+            (
+                counts.hothouses,
+                counts.temperate_passes,
+                counts.hothouse_passes,
+                counts.hothouse_deckless,
+            ),
+            (
+                1,
+                u64::from(first.atmosphere_passes()),
+                u64::from(derived.atmosphere_passes()),
+                0
+            ),
+            "{counts:?}"
+        );
+    });
+}
+
+// P14.T53.b part 2: the supercritical envelope's section (decision-absurd-states-24 R2), with every
+// landed 24 hold in force (decision-t24i-airless-state D3.3).
+
+/// The census's sample body under kilobars of supercritical methane (decision-absurd-states-24
+/// R2.1): a `Snowball` at 12.9 kbar and 209.1 K under the hold, and about 10 kbar, 8.78 of CH₄
+/// and 1.27 of N₂, at 192.6 K under the escape's batch, 2 K above methane's critical point.
+const SUPERCRITICAL_METHANE_BODY: &str = "02001b2ca0000000.0400";
+
+/// LOOK72's three methane `Snowball`s above methane's critical temperature at 23
+/// (decision-absurd-states-24 R2.1–R2.2; R4.3's census).
+const LOOK72_METHANE_SNOWBALLS: [&str; 3] = [
+    "020e56ef20080000.0900",
+    "020e56ef60090005.0500",
+    "020e56ef60080003.0600",
+];
+
+/// LOOK72's nitrogen `Snowball`s at 81–313 bar (decision-absurd-states-24 R2.3).
+const LOOK72_NITROGEN_SNOWBALLS: [&str; 4] = [
+    "020e56ef20090004.0600",
+    "020e66efa007000b.0900",
+    "020e66efa007000b.0a00",
+    "020e56ef20080006.0300",
+];
+
+/// The sample's context of [`SUPERCRITICAL_METHANE_BODY`]'s system.
+fn supercritical_methane_context() -> &'static SystemContext {
+    let (system, _) = SUPERCRITICAL_METHANE_BODY
+        .split_once('.')
+        .expect("a body ID");
+    sample()
+        .iter()
+        .find(|ctx| ctx.id().to_string() == system)
+        .expect("the census body's system is in the sample")
+}
+
+/// One present planet, member or moon of [`envelope_walk`] at the epoch: its record's section
+/// tags, and each condensable of its derivation's air at or above its critical temperature
+/// against its critical isochore under its bulk's gravity (P14.T53.b part 2).
+struct EnvelopeBody {
+    /// Its set ("sample", the golden system's name, or "look72"), its ID and its kind.
+    label: String,
+    /// Its ID, as its record gives it.
+    id: String,
+    /// Its bulk's class.
+    class: PlanetClass,
+    /// Its record's surface section's tag.
+    surface: SectionState,
+    /// Its record's envelope section's tag.
+    envelope: SectionState,
+    /// Its derivation's surface state.
+    state: SurfaceState,
+    /// Its atmosphere's mean surface temperature, K.
+    t_s: f64,
+    /// Its atmosphere's surface pressure, Pa.
+    p_s: f64,
+    /// Its bulk's surface gravity, m s⁻².
+    g: f64,
+    /// Its condensables at or above their critical temperatures, whatever their shares.
+    columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    /// The reservoir that hides its surface, as the record reads it.
+    hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+}
+
+impl EnvelopeBody {
+    /// The body `record` of the set `set` and kind `kind`, derived as `derived`, under the rules in
+    /// force.
+    fn of(set: &str, kind: &str, record: &BodyRecord, derived: &DerivedBody) -> Self {
+        let bulk = record.bulk().ok().expect("a walked body has its bulk");
+        let gravity = bulk.surface_gravity();
+        let air = derived.atmosphere();
+        let id = record.identity().id().to_string();
+        Self {
+            label: format!("{set} {id} {kind}"),
+            id,
+            class: bulk.class(),
+            surface: record.section_state(RecordSection::Surface),
+            envelope: record.section_state(RecordSection::Envelope),
+            state: air.state(),
+            t_s: air.surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            g: gravity.value(),
+            columns: air.critical_columns(gravity).collect(),
+            hidden: air.supercritical_reservoir(gravity),
+        }
+    }
+
+    /// A column's figures, for a census line: its gas, `T_s` ÷ `T_c`, `p_i`, p*, the melting
+    /// pressure, the share and the margins `p_i` ÷ p* and share ÷ [`THIN_ENVELOPE_FRACTION`].
+    ///
+    /// [`THIN_ENVELOPE_FRACTION`]: crate::planetary::params::THIN_ENVELOPE_FRACTION
+    fn column_line(
+        column: &crate::planetary::derive::atmosphere::SupercriticalReservoir,
+    ) -> String {
+        format!(
+            "{:?} T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar (p_i/p* {:.4}), p_melt {}, share \
+             {:.4e} (of the line {:.4})",
+            column.gas(),
+            column.temperature_ratio(),
+            column.partial_pressure().value() / 1e5,
+            column.isochore_pressure().value() / 1e5,
+            column.partial_pressure().value() / column.isochore_pressure().value(),
+            column.melting_pressure().map_or_else(
+                || "none".to_owned(),
+                |m| format!("{:.4e} bar", m.value() / 1e5)
+            ),
+            column.share(),
+            column.share() / crate::planetary::params::THIN_ENVELOPE_FRACTION,
+        )
+    }
+
+    /// Its tags, state, `T_s`, `p_s`, g and columns, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} {:?}, T_s {:.3} K, p_s {:.4e} bar, g {:.4} m s⁻²; surface {:?}, envelope {:?}; \
+             [{}]",
+            self.class,
+            self.state,
+            self.t_s,
+            self.p_s / 1e5,
+            self.g,
+            self.surface,
+            self.envelope,
+            self.columns
+                .iter()
+                .map(Self::column_line)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    }
+}
+
+/// Every body of [`envelope_walk`] over the systems `sets`, each generated afresh at its seed
+/// under the rules in force on the calling thread, in order.
+fn envelope_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<EnvelopeBody> {
+    let mut bodies = Vec::new();
+    for &(set, seed, ctx) in sets {
+        let system = generate(seed, ctx);
+        envelope_walk(ctx, &system, &mut |kind, record, derived| {
+            bodies.push(EnvelopeBody::of(set, kind, record, derived));
+        });
+    }
+    bodies
+}
+
+/// The census's [`SUPERCRITICAL_METHANE_BODY`]'s record and derivation at the epoch, its system
+/// generated afresh under the rules in force on the calling thread (P14.T53.b part 2), for the
+/// record builder's test.
+pub(crate) fn supercritical_methane_body() -> (BodyRecord, DerivedBody) {
+    let ctx = supercritical_methane_context();
+    let system = generate(SEED, ctx);
+    let mut found = None;
+    envelope_walk(ctx, &system, &mut |_, record, derived| {
+        if record.identity().id().to_string() == SUPERCRITICAL_METHANE_BODY {
+            found = Some((record.clone(), *derived));
+        }
+    });
+    found.expect("the census body is present at the epoch")
+}
+
+/// The census body's moon, which a hand-built nitrogen rank puts under a supercritical envelope
+/// ([`under_every_24_hold_a_moon_under_a_supercritical_envelope_takes_the_envelope_s_tags`]): at
+/// its own ranks a `Snowball` holding 18.3 bar of N₂ at 135.9 K, 1.08 N₂'s `T_c`, against its
+/// isochore's 49.9 bar, the sample's moon nearest the line (P14.T53.b part 2's moons' census).
+const SUPERCRITICAL_MOON: &str = "02001b2ca0000000.0401";
+
+/// P14.T53.b part 2 through a moon's record (the batch review's fixes): no moon of the 400 lies
+/// under a supercritical envelope (`under_every_24_hold_the_sample_s_moons_supercritical_columns_
+/// are_stated`), so one is built by hand from the sample's nearest, [`SUPERCRITICAL_MOON`], its
+/// nitrogen rank raised to 1 − 10⁻⁶ in its generated system, every landed 24 hold in force. Its
+/// record (`satellite_record`) then takes the envelope's tags, its surface not applicable and its
+/// envelope not modelled, under its nitrogen's reservoir above N₂'s critical isochore; at its own
+/// ranks its surface stays.
+#[test]
+fn under_every_24_hold_a_moon_under_a_supercritical_envelope_takes_the_envelope_s_tags() {
+    use crate::stellar::draws::UnitUniform;
+    let ctx = supercritical_methane_context();
+    let (_, sub) = SUPERCRITICAL_MOON.split_once('.').expect("a body ID");
+    let index = u16::from_str_radix(sub, 16).expect("a hexadecimal index");
+    let moon_of = |system: &PlanetarySystem| {
+        let mut found = Vec::new();
+        envelope_walk(ctx, system, &mut |kind, record, derived| {
+            if record.identity().id().to_string() == SUPERCRITICAL_MOON {
+                found.push(EnvelopeBody::of("sample", kind, record, derived));
+            }
+        });
+        assert_eq!(
+            found.len(),
+            1,
+            "{SUPERCRITICAL_MOON} is present at the epoch"
+        );
+        found.pop().expect("one body")
+    };
+    let (own, raised) = crate::planetary::testing::with_every_24_hold(|| {
+        let mut system = generate(SEED, ctx);
+        let own = moon_of(&system);
+        let moon = system
+            .bodies
+            .iter_mut()
+            .find(|body| body.index.get() == index)
+            .expect("the moon is a body of its system");
+        let Part::Moon(part) = &mut moon.part else {
+            panic!("{SUPERCRITICAL_MOON} is a moon")
+        };
+        let draws = crate::planetary::derive::atmosphere::VolatileDraws {
+            nitrogen: UnitUniform::new(1.0 - 1e-6).expect("a rank in (0, 1)"),
+            ..*part.satellite.volatiles()
+        };
+        part.satellite = part.satellite.with_volatiles(draws);
+        (own, moon_of(&system))
+    });
+    eprintln!(
+        "{SUPERCRITICAL_MOON}\n  at its own ranks {}\n  its nitrogen raised {}",
+        own.line(),
+        raised.line()
+    );
+    assert_envelope_tags(&own);
+    assert_eq!(own.surface, SectionState::Ok);
+    assert!(own.hidden.is_none());
+    assert_envelope_tags(&raised);
+    assert!(raised.label.ends_with("moons"), "{}", raised.label);
+    assert!(raised.class.has_solid_surface(), "{}", raised.line());
+    assert_eq!(raised.surface, SectionState::NotApplicable);
+    assert_eq!(raised.envelope, SectionState::NotModelled);
+    let hidden = raised
+        .hidden
+        .expect("its nitrogen's reservoir hides the surface");
+    eprintln!("  hidden by {}", EnvelopeBody::column_line(&hidden));
+    assert_eq!(hidden.gas(), Gas::Nitrogen);
+}
+
+/// P14.T53.b part 2's moons over the 400 whole systems, a measurement run by name (the batch
+/// review's fixes, item 2): with every landed 24 hold in force, every moon with a condensable at
+/// or above its critical temperature, its margins, and every moon a supercritical envelope hides,
+/// each with its tags checked ([`assert_envelope_tags`]).
+#[test]
+#[ignore = "a measurement for P14.T53.b part 2's record, run by name"]
+fn under_every_24_hold_the_sample_s_moons_supercritical_columns_are_stated() {
+    let sets: Vec<(&str, Seed, &SystemContext)> =
+        sample().iter().map(|ctx| ("sample", SEED, ctx)).collect();
+    let bodies = crate::planetary::testing::with_every_24_hold(|| envelope_census(&sets));
+    let moons: Vec<&EnvelopeBody> = bodies
+        .iter()
+        .filter(|b| b.label.ends_with("moons"))
+        .collect();
+    let (mut columns, mut above, mut hidden) = (0, 0, 0);
+    for body in &moons {
+        assert_envelope_tags(body);
+        columns += body.columns.len();
+        above += body.columns.iter().filter(|c| c.share() > 0.0).count();
+        hidden += usize::from(body.hidden.is_some());
+        if !body.columns.is_empty() {
+            eprintln!("MOON {}: {}", body.label, body.line());
+        }
+    }
+    eprintln!(
+        "{} moons of {} bodies; {columns} columns at or above T_c, {above} above their isochores; \
+         {hidden} hidden",
+        moons.len(),
+        bodies.len()
+    );
+}
+
+/// P14.T53.b part 2's tags on `body`: a solid class has its surface `Ok` and its envelope not
+/// applicable exactly where no supercritical envelope hides its surface, and its surface not
+/// applicable and its envelope not modelled where one does; every other class its surface not
+/// applicable and its envelope not modelled. So no `Ok` surface lies under a supercritical
+/// envelope, and exactly one of the two applies.
+fn assert_envelope_tags(body: &EnvelopeBody) {
+    let at = || format!("{}: {}", body.label, body.line());
+    if body.class.has_solid_surface() && body.hidden.is_none() {
+        assert_eq!(body.surface, SectionState::Ok, "{}", at());
+        assert_eq!(body.envelope, SectionState::NotApplicable, "{}", at());
+    } else {
+        assert_eq!(body.surface, SectionState::NotApplicable, "{}", at());
+        assert_eq!(body.envelope, SectionState::NotModelled, "{}", at());
+    }
+    if let Some(hidden) = &body.hidden {
+        assert!(hidden.hides_the_surface(), "{}", at());
+        let largest = body
+            .columns
+            .iter()
+            .map(crate::planetary::derive::atmosphere::SupercriticalReservoir::share)
+            .fold(0.0, f64::max);
+        assert_same_bits(hidden.share(), largest);
+    }
+}
+
+/// P14.T53.b part 2 (decision-absurd-states-24 R2.1): with every landed 24 hold in force, the
+/// census's [`SUPERCRITICAL_METHANE_BODY`], a solid body under kilobars of methane 2 K above its
+/// critical point, takes the envelope section, its surface not applicable and its envelope not
+/// modelled, under methane's reservoir; under the escape's hold, to version 23, it keeps its
+/// surface. Its figures are printed: `T_s`, `p_i`, p*, the melting pressure, the share and g.
+#[test]
+fn under_every_24_hold_the_census_s_methane_snowball_takes_the_envelope_section() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    let sets = [("sample", SEED, supercritical_methane_context())];
+    let find = |bodies: Vec<EnvelopeBody>| {
+        bodies
+            .into_iter()
+            .find(|body| body.id == SUPERCRITICAL_METHANE_BODY)
+            .expect("the census body is present at the epoch")
+    };
+    let held = find(with_rules(EscapeRules::Held, || envelope_census(&sets)));
+    let batch = find(crate::planetary::testing::with_every_24_hold(|| {
+        envelope_census(&sets)
+    }));
+    eprintln!(
+        "{SUPERCRITICAL_METHANE_BODY}\n  held  {}\n  batch {}",
+        held.line(),
+        batch.line()
+    );
+    assert_envelope_tags(&held);
+    assert_eq!(held.surface, SectionState::Ok);
+    assert!(held.hidden.is_none());
+    assert_envelope_tags(&batch);
+    assert!(batch.class.has_solid_surface(), "{}", batch.line());
+    assert_eq!(batch.surface, SectionState::NotApplicable);
+    assert_eq!(batch.envelope, SectionState::NotModelled);
+    let hidden = batch.hidden.expect("methane's reservoir hides the surface");
+    eprintln!("  hidden by {}", EnvelopeBody::column_line(&hidden));
+    assert_eq!(hidden.gas(), Gas::Methane);
+    assert!(hidden.temperature_ratio() >= 1.0);
+}
+
+/// P14.T53.b part 2 (decision-absurd-states-24 R2.3, R4.3): with every landed 24 hold in force,
+/// LOOK72's three methane `Snowball`s and its nitrogen `Snowball`s at 81–313 bar keep their
+/// surfaces, none under a supercritical envelope, their margins printed: 0900 keeps about 27 bar
+/// of methane at 190.9 K against its isochore's 46.5 bar, 0500 and 0600 keep no methane (T53.a's
+/// methane route), and the nitrogen bodies' columns above their isochores hold far less than a
+/// thousandth of their mass.
+#[test]
+fn under_every_24_hold_look72_s_snowballs_keep_their_surfaces() {
+    let galaxy = look72_galaxy();
+    let systems: std::collections::BTreeSet<&str> = LOOK72_METHANE_SNOWBALLS
+        .iter()
+        .chain(&LOOK72_NITROGEN_SNOWBALLS)
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    let contexts: Vec<SystemContext> = systems
+        .into_iter()
+        .map(|id| {
+            SystemContext::for_system(galaxy, id.parse().expect("a system ID"))
+                .expect("a system of LOOK72")
+        })
+        .collect();
+    let sets: Vec<(&str, Seed, &SystemContext)> = contexts
+        .iter()
+        .map(|ctx| ("look72", galaxy.seed(), ctx))
+        .collect();
+    let bodies = crate::planetary::testing::with_every_24_hold(|| envelope_census(&sets));
+    for body in &bodies {
+        assert_envelope_tags(body);
+    }
+    for (group, ids) in [
+        ("methane", &LOOK72_METHANE_SNOWBALLS[..]),
+        ("nitrogen", &LOOK72_NITROGEN_SNOWBALLS[..]),
+    ] {
+        for id in ids {
+            let body = bodies
+                .iter()
+                .find(|body| body.id == *id)
+                .unwrap_or_else(|| panic!("{id} is present at the epoch"));
+            eprintln!("LOOK72's {group} Snowball {}: {}", body.label, body.line());
+            assert_eq!(body.surface, SectionState::Ok, "{}", body.line());
+            assert!(body.hidden.is_none(), "{}", body.line());
+        }
+    }
+}
+
+/// P14.T53.b part 2's census, a measurement for the record (decision-absurd-states-24 R2.3), run
+/// by name over part 1's census set ([`present_census`]'s: the first 60 sample systems, the
+/// golden systems and the 27 systems of LOOK72's triaged bodies), each generated afresh with
+/// every landed 24 hold in force: every body whose surface a supercritical envelope hides, by
+/// name, substance, `T_s` ÷ `T_c` and share of its mass; those beyond 2.5 `T_c`, past the line's
+/// checked range, with their margins; the near misses, a column of 10⁻⁴ to 10⁻³ of the mass; and
+/// the count of columns above their isochores. Every body's tags are checked
+/// ([`assert_envelope_tags`]).
+#[test]
+#[ignore = "a measurement for P14.T53.b part 2's record, run by name"]
+fn under_every_24_hold_part_two_s_movers_are_stated() {
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let bodies = crate::planetary::testing::with_every_24_hold(|| envelope_census(&sets));
+    for body in &bodies {
+        assert_envelope_tags(body);
+    }
+    let columns: usize = bodies.iter().map(|body| body.columns.len()).sum();
+    let above: Vec<(
+        &EnvelopeBody,
+        &crate::planetary::derive::atmosphere::SupercriticalReservoir,
+    )> = bodies
+        .iter()
+        .flat_map(|body| body.columns.iter().map(move |column| (body, column)))
+        .filter(|(_, column)| column.share() > 0.0)
+        .collect();
+    let movers: Vec<&EnvelopeBody> = bodies.iter().filter(|b| b.hidden.is_some()).collect();
+    eprintln!(
+        "{} bodies of {} systems; {columns} columns at or above T_c, {} above their isochores; {} \
+         movers",
+        bodies.len(),
+        sets.len(),
+        above.len(),
+        movers.len()
+    );
+    eprintln!("MOVERS:");
+    for body in &movers {
+        let hidden = body.hidden.as_ref().expect("a mover's reservoir");
+        eprintln!(
+            "  {} by {}\n    {}",
+            body.label,
+            EnvelopeBody::column_line(hidden),
+            body.line()
+        );
+    }
+    eprintln!("MOVERS BEYOND 2.5 T_c:");
+    for body in &movers {
+        for column in body.columns.iter().filter(|c| c.hides_the_surface()) {
+            if column.temperature_ratio() > 2.5 {
+                eprintln!("  {}: {}", body.label, EnvelopeBody::column_line(column));
+            }
+        }
+    }
+    eprintln!("NEAR MISSES (a column of 1e-4 to 1e-3 of the mass):");
+    for (body, column) in &above {
+        if (1e-4..crate::planetary::params::THIN_ENVELOPE_FRACTION).contains(&column.share()) {
+            eprintln!(
+                "  {} (hidden {}): {}",
+                body.label,
+                body.hidden.is_some(),
+                EnvelopeBody::column_line(column)
+            );
+        }
+    }
+    eprintln!("EVERY COLUMN ABOVE ITS ISOCHORE:");
+    for (body, column) in &above {
+        eprintln!("  {}: {}", body.label, EnvelopeBody::column_line(column));
+    }
 }

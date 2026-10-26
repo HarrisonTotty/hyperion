@@ -237,15 +237,48 @@ pub(crate) enum ColdTrapRules {
 
 impl ColdTrapRules {
     /// The rules this generator version gives: the batch's from [`COLD_TRAPS_VERSION`], and P14.T51.a's
-    /// below it.
+    /// below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_cold_trap_rules`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = COLD_TRAP_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
         if GENERATOR_VERSION >= COLD_TRAPS_VERSION {
             Self::Batch
         } else {
             Self::Held
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The cold traps' rules a test sets on its thread, `None` for the version's.
+    static COLD_TRAP_RULES: core::cell::Cell<Option<ColdTrapRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the cold traps' rules `rules` on this thread, for the tests to reach 24's
+/// record path ahead of the bump (P14.T24.i's follow-up, decision-t24i-airless-state D3.3: every 24
+/// hold in force together, `planetary::testing::with_every_24_hold`); the version's rules are set
+/// back after, a panic in `run` included. A system reads them as it is generated
+/// (`RecordRules::in_force`), and a record's [`cold_traps_modelled`] as it is read.
+/// P14.T54.b deletes it with the hold.
+///
+/// [`cold_traps_modelled`]: crate::planetary::record::Surface::cold_traps_modelled
+#[cfg(test)]
+pub(crate) fn with_cold_trap_rules<R>(rules: ColdTrapRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<ColdTrapRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COLD_TRAP_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(COLD_TRAP_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
 }
 
 /// The collision cross-section `σ_c` whose inverse bounds a collisional column's number density:

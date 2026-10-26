@@ -826,7 +826,9 @@ fn partitioned(span: (f64, f64, f64), weights: Vec<(SubstanceId, Pascals)>, g: f
 /// The cloud: Earth's 0.67, its water's column well above the reference's 47.9 kg m⁻²; Venus's
 /// whole disc; a dry, thin-aired Mars-like world near none, its water its condensable at a tiny
 /// column; airless and molten surfaces none. (A Mars with its carbon dioxide caps is T51.a's
-/// partition fixture's: `a_mars_with_its_caps_takes_almost_no_cloud`.)
+/// partition fixture's: `a_mars_with_its_caps_takes_almost_no_cloud`.) A runaway solved without
+/// its deck (P14.T53.b part 1 (b)) takes a temperate world's cloud over the same partition, at the
+/// water cloud's albedo, and one under its deck Venus's 0.76 whatever the partition.
 #[test]
 fn the_cloud_follows_the_state_and_the_condensable_s_availability() {
     let reference = reference_cloud_column().value();
@@ -844,23 +846,33 @@ fn the_cloud_follows_the_state_and_the_condensable_s_availability() {
         ],
         9.82,
     );
-    let temperate = SurfaceState::Temperate;
+    let temperate = (SurfaceState::Temperate, RunawayDeck::Kept);
+    let runaway = (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept);
+    let deckless = (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless);
     assert_same_bits(
         cloud_fraction(temperate, &earth, &sun),
         SurfaceState::Temperate.cloud_fraction(),
     );
+    assert_same_bits(cloud_fraction(runaway, &earth, &sun), 1.0);
     assert_same_bits(
-        cloud_fraction(SurfaceState::RunawayGreenhouse, &earth, &sun),
-        1.0,
+        cloud_fraction(deckless, &earth, &sun),
+        cloud_fraction(temperate, &earth, &sun),
     );
     for state in [SurfaceState::Airless, SurfaceState::MagmaOcean] {
-        assert_same_bits(cloud_fraction(state, &earth, &sun), 0.0);
+        for deck in [RunawayDeck::Kept, RunawayDeck::Deckless] {
+            assert_same_bits(cloud_fraction((state, deck), &earth, &sun), 0.0);
+        }
     }
     let mut dry = weights_of(600.0, &[("N2", 0.98), ("Ar", 0.02)]);
     dry.push((id("H2O"), Pascals::new(2e4)));
     let dry = partitioned((150.0, 210.0, 240.0), dry, 3.72);
     let thin = cloud_fraction(temperate, &dry, &sun);
     assert!(thin < 0.02, "{thin}");
+    assert_same_bits(cloud_fraction(deckless, &dry, &sun), thin);
+    assert_same_bits(cloud_fraction(runaway, &dry, &sun), 1.0);
+    assert_same_bits(cloud_albedo(runaway, &sun), 0.76);
+    assert_same_bits(cloud_albedo(deckless, &sun), sun.water_cloud);
+    assert_same_bits(cloud_albedo(deckless, &sun), cloud_albedo(temperate, &sun));
     eprintln!(
         "cloud: Earth {:.3}; a dry Mars-like world {thin:.2e}",
         cloud_fraction(temperate, &earth, &sun)
