@@ -46,10 +46,9 @@
  * this frame by any view is never evicted. Eviction disposes the tables and keeps the assembled
  * medium and the reply, so that a body wanted again has its tables made at once, with no request.
  * A new arrival lets go every body no view wants, its reply belonging to the scene left.
- *
- * `AtmosphereTables.dispose` stops following the engine's restores and leaves its textures to the
- * engine, so an eviction releases no texture memory until `tables.ts` gains a release (recorded
- * for R08.T10.b).
+ * `AtmosphereTables.dispose` releases the tables' buffer and textures (R08.T10.b), so an eviction
+ * frees the body's per-planet memory; each view takes a body's tables afresh every frame
+ * (`PhotorealFrame.atmospheres`), so none draws with tables disposed.
  */
 
 import type {

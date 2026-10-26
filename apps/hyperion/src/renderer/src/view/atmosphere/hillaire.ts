@@ -803,6 +803,19 @@ function kernel(name: string, wgsl: string): KernelPair {
   };
 }
 
+/**
+ * The pass a frame's sky view, aerial perspective and ray march dispatch under: the photorealistic
+ * style's `atmosphere` slot names it among its passes' labels (plan R08, R08.T10.b), and the
+ * spike's rows read it.
+ */
+export const ATMOSPHERE_VIEW_PASS = "atmosphere view";
+
+/**
+ * The pass a photorealistic frame draws each body's composite in, over the scene target into the
+ * next of its atmosphere targets (plan R08, R08.T10.b), the spike's label for its own.
+ */
+export const ATMOSPHERE_COMPOSITE_PASS = "atmosphere composite";
+
 /** The sky-view kernel. */
 export const SKY_VIEW_KERNEL = kernel("atmosphere sky view", skyViewWgsl);
 /** The aerial-perspective kernel. */
@@ -929,6 +942,82 @@ interface FrameKernels {
    * hold the slot layers (R08.T8.e).
    */
   readonly rayMarchSlots: () => ComputeHandle;
+}
+
+/**
+ * A device's per-frame kernels and composite, shared by every {@link HillaireAtmosphere} a view
+ * draws on it (plan R08, R08.T10.b): made once, asynchronously, with the view's other pipelines
+ * ({@link createAtmosphereFrameKernels}), so that a body coming into the view compiles nothing on
+ * its frame and no kernel is made a body, since kernels have no release. They belong to the device
+ * they were made on: after a restore the owner makes them, and its atmospheres, again.
+ */
+export interface AtmosphereFrameKernels extends FrameKernels {
+  /** The composite, its pipeline made for an `rgba16float` target without depth. */
+  readonly composite: MaterialHandle;
+  /** The composite's full-screen triangle. */
+  readonly triangle: MeshHandle;
+}
+
+/** The composite's full-screen triangle on `engine`. */
+function compositeTriangle(engine: RenderEngine): MeshHandle {
+  return engine.createMesh({
+    name: "atmosphere composite triangle",
+    positions: new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]),
+    indices: null,
+    topology: "triangle-list",
+    attributes: {},
+  });
+}
+
+/**
+ * Makes a device's {@link AtmosphereFrameKernels}: each kernel by `createComputeAsync` and the
+ * composite's pipeline into an `rgba16float` target, as a photorealistic frame's atmosphere targets
+ * are, by `createMaterialAsync`, so that no frame waits on a compile (plan R08, R08.T10.b).
+ *
+ * @throws Error, as a rejection, as the engine's async creations reject, `EngineUnavailable`
+ *   among them during a loss.
+ */
+export async function createAtmosphereFrameKernels(
+  engine: RenderEngine,
+): Promise<AtmosphereFrameKernels> {
+  const triangle = compositeTriangle(engine);
+  const [skyView, aerial, rayMarch, rayMarchSlots, composite] = await Promise.all([
+    engine.createComputeAsync(SKY_VIEW_KERNEL),
+    engine.createComputeAsync(AERIAL_PERSPECTIVE_KERNEL),
+    engine.createComputeAsync(RAY_MARCH_KERNEL),
+    engine.createComputeAsync(RAY_MARCH_SLOTS_KERNEL),
+    engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"], [triangle]),
+  ]);
+  return { skyView, aerial, rayMarch, rayMarchSlots: () => rayMarchSlots, composite, triangle };
+}
+
+/**
+ * Per-planet tables a {@link HillaireAtmosphere} draws with and does not own: the atmosphere
+ * cache's (plan R08, R08.T10.b; `decision-r08-t10a-leans.md` item 3), which the cache builds,
+ * holds and disposes, its body's figure and gravity their own ({@link HillaireAtmosphere.over}).
+ */
+export interface HeldTables {
+  readonly kind: "held";
+  readonly tables: AtmosphereTables;
+  /** The device's shared kernels; the atmosphere makes its own where absent. */
+  readonly kernels: AtmosphereFrameKernels | null;
+}
+
+/**
+ * Whether a {@link HillaireAtmosphere}'s source is {@link HeldTables} rather than a medium, which has
+ * no `kind`.
+ */
+function isHeld(source: AtmosphereMedium | HeldTables): source is HeldTables {
+  return "kind" in source;
+}
+
+/**
+ * The figure a body's per-planet tables were built on: their body's datum spheroid, or for tables
+ * of one slice and one band, the sphere of their ground's radius.
+ */
+export function tablesFigureOf(tables: AtmosphereTables): SpheroidFigure {
+  const radiusM = tables.bottomRadiusM;
+  return tables.body?.figure ?? { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
 }
 
 /** The per-frame tables a frame writes: the sky view, the aerial-perspective volume, the march. */
@@ -1233,7 +1322,15 @@ interface UnreadTables {
 
 const NO_UNREAD_TABLES: UnreadTables = { skyView: null, aerial: null };
 
-function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameResources {
+/**
+ * A frame's GPU objects on `engine`: its own textures, and `shared`'s kernels and composite where
+ * given, else its own, made synchronously.
+ */
+function createFrameResources(
+  engine: RenderEngine,
+  sizes: TableSizes,
+  shared: AtmosphereFrameKernels | null = null,
+): FrameResources {
   let rayMarchSlots: ComputeHandle | null = null;
   return {
     skyView: frameTexture(
@@ -1252,20 +1349,14 @@ function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameRes
       ],
       "rgba16float",
     ),
-    kernels: {
+    kernels: shared ?? {
       skyView: engine.createCompute(SKY_VIEW_KERNEL),
       aerial: engine.createCompute(AERIAL_PERSPECTIVE_KERNEL),
       rayMarch: engine.createCompute(RAY_MARCH_KERNEL),
       rayMarchSlots: () => (rayMarchSlots ??= engine.createCompute(RAY_MARCH_SLOTS_KERNEL)),
     },
-    composite: engine.createMaterial(COMPOSITE_MATERIAL),
-    triangle: engine.createMesh({
-      name: "atmosphere composite triangle",
-      positions: new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]),
-      indices: null,
-      topology: "triangle-list",
-      attributes: {},
-    }),
+    composite: shared?.composite ?? engine.createMaterial(COMPOSITE_MATERIAL),
+    triangle: shared?.triangle ?? compositeTriangle(engine),
     rayMarch: null,
     rayMarchSize: null,
   };
@@ -1314,10 +1405,17 @@ function groups8(width: number, height: number): readonly [number, number, numbe
 export class HillaireAtmosphere {
   readonly #engine: RenderEngine;
   readonly #sizes: TableSizes;
-  readonly #figure: SpheroidFigure;
+  #figure: SpheroidFigure;
   /** The body's gravity (R08.T3.d), or `null` for s ≡ 1 and one slice and one band. */
-  readonly #gravity: BodyGravity | null;
-  readonly #tables: AtmosphereTables;
+  #gravity: BodyGravity | null;
+  #tables: AtmosphereTables;
+  /** Whether it built its tables and disposes them; `false` for {@link HeldTables}. */
+  readonly #ownsTables: boolean;
+  /** The device's shared kernels it draws with, or `null` where it made its own. */
+  readonly #shared: AtmosphereFrameKernels | null;
+  /** Set by a restore where it drew with shared kernels, which died with the device. */
+  #retired = false;
+  #disposed = false;
   readonly #offRestored: () => void;
   #frame: FrameResources;
   /** The smoke's kernel arm (R08.T6.g), made at its first frame. */
@@ -1337,11 +1435,13 @@ export class HillaireAtmosphere {
   #unread: UnreadTables = NO_UNREAD_TABLES;
 
   /**
-   * Makes the tables and the per-frame resources for `medium` on `figure`.
+   * Makes the tables and the per-frame resources for `medium` on `figure`, or the per-frame
+   * resources alone over {@link HeldTables}, on their own figure and gravity (use
+   * {@link HillaireAtmosphere.over}, which passes them).
    *
    * @param tables - The setting's sizes, `SETTINGS[s].atmosphere`.
    * @param curves - Each light's curves of growth for the medium's absorbers, light slot 0 the
-   *   drawn sun's (R08.T6.c); none for a medium with no absorber.
+   *   drawn sun's (R08.T6.c); none for a medium with no absorber. Held tables keep their own.
    * @param gravity - The body's gravity (R08.T3.d's `bodyGravity` on `figure`), whose slicing the
    *   tables are built in and whose s the lookups take (Design note 17; R08.T6.f); none for s ≡ 1,
    *   one slice and one band. R08.T10.a gives a body's.
@@ -1350,7 +1450,7 @@ export class HillaireAtmosphere {
    */
   constructor(
     engine: RenderEngine,
-    medium: AtmosphereMedium,
+    medium: AtmosphereMedium | HeldTables,
     tables: TableSizes,
     figure: SpheroidFigure,
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
@@ -1360,24 +1460,91 @@ export class HillaireAtmosphere {
     marchSourceIndices([], tables.marchSourceCap);
     this.#engine = engine;
     this.#sizes = tables;
-    this.#figure = figure;
-    this.#gravity = gravity;
-    this.#tables = new AtmosphereTables(engine, medium, tableRadiusM(figure), curves, this.#body());
-    this.#frame = createFrameResources(engine, tables);
+    if (isHeld(medium)) {
+      this.#ownsTables = false;
+      this.#shared = medium.kernels;
+      this.#tables = medium.tables;
+      this.#figure = tablesFigureOf(medium.tables);
+      this.#gravity = medium.tables.body?.gravity ?? null;
+    } else {
+      this.#ownsTables = true;
+      this.#shared = null;
+      this.#figure = figure;
+      this.#gravity = gravity;
+      this.#tables = new AtmosphereTables(
+        engine,
+        medium,
+        tableRadiusM(figure),
+        curves,
+        this.#body(),
+      );
+    }
+    this.#frame = createFrameResources(engine, tables, this.#shared);
     this.#uniforms = Object.fromEntries(
       [...VIEW_MEMBERS, "shell"].map((name) => [name, new Float32Array(4)]),
     );
     this.#offRestored = engine.onRestored(() => {
-      this.#frame = createFrameResources(engine, tables);
       this.#arm = null;
       this.#drawn = null;
       this.#unread = NO_UNREAD_TABLES;
+      if (this.#shared !== null) {
+        // The shared kernels died with the device; their owner makes them, and this, again.
+        this.#retired = true;
+        return;
+      }
+      this.#frame = createFrameResources(engine, tables);
     });
   }
 
-  /** The per-planet tables, rebuilt when the medium changes. */
+  /**
+   * A view's atmosphere of one body over the atmosphere cache's per-planet tables, which it takes
+   * in place of building its own and never disposes (plan R08, R08.T10.b;
+   * `decision-r08-t10a-leans.md` item 3): its figure and gravity the tables' body's
+   * ({@link tablesFigureOf}), its kernels the device's shared ones.
+   *
+   * @throws RangeError for a march source cap that is not an integer of at least 1.
+   */
+  static over(
+    engine: RenderEngine,
+    tables: AtmosphereTables,
+    sizes: TableSizes,
+    kernels: AtmosphereFrameKernels | null,
+  ): HillaireAtmosphere {
+    return new HillaireAtmosphere(
+      engine,
+      { kind: "held", tables, kernels },
+      sizes,
+      tablesFigureOf(tables),
+      tables.curves,
+      tables.body?.gravity ?? null,
+    );
+  }
+
+  /** The per-planet tables, rebuilt when the medium changes, or the cache's where held. */
   get tables(): AtmosphereTables {
     return this.#tables;
+  }
+
+  /**
+   * Draws from here on over another set of held tables, the cache's after it rebuilt or remade the
+   * body's (plan R08, R08.T10.b), on their figure and gravity. The latest frame's publication is
+   * withdrawn until the next frame, as {@link HillaireAtmosphere.setMedium}'s is.
+   *
+   * @throws Error for an atmosphere that owns its tables, whose medium {@link HillaireAtmosphere.setMedium}
+   *   sets.
+   */
+  setTables(tables: AtmosphereTables): void {
+    if (this.#ownsTables) {
+      throw new Error("an atmosphere that built its own tables takes a medium, not tables");
+    }
+    if (tables === this.#tables) {
+      return;
+    }
+    this.#tables = tables;
+    this.#figure = tablesFigureOf(tables);
+    this.#gravity = tables.body?.gravity ?? null;
+    this.#drawn = null;
+    this.#unread = NO_UNREAD_TABLES;
   }
 
   /**
@@ -1482,9 +1649,13 @@ export class HillaireAtmosphere {
    * is withdrawn until the next frame, since its tables may have been remade.
    *
    * @param curves - Each light's curves for the medium's absorbers, light slot 0 the drawn sun's.
-   * @throws Error, RangeError or `EngineUnavailable` as {@link AtmosphereTables.setMedium}.
+   * @throws Error, RangeError or `EngineUnavailable` as {@link AtmosphereTables.setMedium}; Error
+   *   over held tables, whose medium their owner sets ({@link HillaireAtmosphere.setTables}).
    */
   setMedium(medium: AtmosphereMedium, curves: AbsorberCurveSlots = NO_ABSORBER_CURVES): void {
+    if (!this.#ownsTables) {
+      throw new Error("an atmosphere over held tables takes new tables, not a medium");
+    }
     this.#drawn = null;
     this.#unread = NO_UNREAD_TABLES;
     this.#tables.setMedium(medium, tableRadiusM(this.#figure), curves, this.#body());
@@ -1531,6 +1702,11 @@ export class HillaireAtmosphere {
     suns: ReadonlyArray<SunState>,
     scene: AtmosphereScene,
   ): DrawItem {
+    if (this.#retired) {
+      throw new Error(
+        "an atmosphere drawn with a lost device's shared kernels is made again by its owner",
+      );
+    }
     const frame = this.#frame;
     const rayMarch = this.#rayMarchTexture(view.viewport);
     const { inputs, curvature } = this.#dispatchFrame(
@@ -1611,14 +1787,31 @@ export class HillaireAtmosphere {
 
   /**
    * Stops following the engine's restores, drops the latest frame's publication and any table it
-   * left unread (R08.T8.d), and releases the kernel arm's targets if it drew one (the smoke's,
-   * R08.T6.g). The frame's own textures are left to the engine, as before.
+   * left unread (R08.T8.d), and releases the frame's own textures and the kernel arm's targets if
+   * it drew one (the smoke's, R08.T6.g), and the per-planet tables it built (held tables stay their
+   * owner's; plan R08, R08.T10.b). Called again, it does nothing.
    */
   dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
     this.#offRestored();
     this.#unread = NO_UNREAD_TABLES;
     this.#drawn = null;
-    this.#tables.dispose();
+    if (this.#ownsTables) {
+      this.#tables.dispose();
+    }
+    // Its own frame's textures: a view makes one of these a body, and lets it go as the body leaves
+    // its picture (R08.T10.b). Its kernels and composite stay, the shared ones their owner's.
+    const frame = this.#frame;
+    for (const texture of [frame.skyView, frame.aerial, frame.rayMarch]) {
+      if (texture !== null) {
+        this.#engine.releaseTexture(texture);
+      }
+    }
+    frame.rayMarch = null;
+    frame.rayMarchSize = null;
     const arm = this.#arm;
     if (arm !== null) {
       for (const texture of [arm.skyView, arm.aerial, arm.rayMarch]) {
@@ -1737,7 +1930,7 @@ export class HillaireAtmosphere {
           storage: { skyViewOut: { texture: outputs.skyView, level: 0 } },
         },
         groups8(sizes.skyView.widthTexels, sizes.skyView.heightTexels),
-        "atmosphere view",
+        ATMOSPHERE_VIEW_PASS,
       );
     };
     const aerial = (): void => {
@@ -1749,7 +1942,7 @@ export class HillaireAtmosphere {
           storage: { aerialOut: { texture: outputs.aerial, level: 0 } },
         },
         groups8(sizes.aerialPerspective.widthTexels, sizes.aerialPerspective.heightTexels),
-        "atmosphere view",
+        ATMOSPHERE_VIEW_PASS,
       );
     };
     // From the march band's upper edge up the composite reads neither the sky view nor the aerial
@@ -1784,7 +1977,7 @@ export class HillaireAtmosphere {
         Math.ceil(view.viewport.widthPx * sizes.rayMarchScale),
         Math.ceil(view.viewport.heightPx * sizes.rayMarchScale),
       ),
-      "atmosphere view",
+      ATMOSPHERE_VIEW_PASS,
     );
     return { inputs, curvature };
   }

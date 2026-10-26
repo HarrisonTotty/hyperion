@@ -39,6 +39,7 @@ import { hostAnnuli, type PlacedLight } from "../lighting/hostLights";
 import {
   type BodyFrameOptions,
   type BodyFramePlan,
+  bodyLightSources,
   LitBodyRenderer,
   type LitBodyInput,
   planLitBodies,
@@ -565,6 +566,41 @@ describe("the plan", () => {
     const planet = plan.discs.find((record) => record.radiusOverDistance > 1e-3);
     expect(planet?.occluders).toHaveLength(1);
     expect(planet?.occluders[0]?.radius).toBeCloseTo(1.737e6 / 6.371e6, 9);
+  });
+
+  it("gives each drawn body's stars and planetshine, the arrays its record shades with (R08.T10.b)", () => {
+    const { body, hosts } = scene(6.371e6 / Math.sin(40 / PX_PER_RAD), 30);
+    const star = hosts[0]?.centreM ?? vec3(0, 0, 0);
+    const towards = scale(add(star, scale(body.centreM, -1)), 1 / AU_M);
+    const moon: LitBodyInput = {
+      ...body,
+      id: "0200080020000000.0301",
+      centreM: add(body.centreM, scale(towards, -3.844e8)),
+      figure: { equatorialRadiusM: 1.737e6, polarRadiusM: 1.737e6, pole: null },
+    };
+    const plan = planLitBodies([body, moon], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+    const sources = plan.sources.get(body.id);
+    const record = plan.discs.find((each) => each.body === body.id);
+    expect(sources?.stars.map((light) => light.illuminance)).toEqual(
+      record?.lights.map((light) => light.illuminance),
+    );
+    expect(sources?.planetshine.map((source) => source.illuminance)).toEqual(
+      record?.secondaries.map((source) => source.illuminance),
+    );
+    // A body the plan holds no record of takes its sources as the plan would.
+    expect(bodyLightSources(body, [body, moon], hosts, OPTIONS)).toEqual(sources);
+  });
+
+  it("draws a disc whose air is drawn as a mesh, with depth (R08.T10.b)", () => {
+    const { body, hosts } = scene(6.371e6 / Math.sin(40 / PX_PER_RAD), 0);
+    const plan = planLitBodies(
+      [body],
+      hosts,
+      { ...OPTIONS, depthBodies: new Set([body.id]) },
+      new Map([[body.id, "disc"]]),
+    );
+    expect(plan.regimes.get(body.id)).toBe("mesh");
+    expect(plan.meshes).toHaveLength(1);
   });
 
   it("does not draw a body seen from inside it", () => {

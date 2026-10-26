@@ -51,8 +51,24 @@ describe("photorealisticPasses", () => {
 
   it("leaves the slots of plans not yet built empty, R06's sky built (R07.T8.a)", () => {
     const empty = photorealisticPasses("high").passes.filter((pass) => !pass.built);
-    expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R08", "R11"]));
+    expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R11"]));
   });
+
+  it.each(QUALITY_SETTINGS)(
+    "builds R08's atmosphere after the discs and before R11's rings, with its passes' labels, on %s (R08.T10.b)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf("atmosphere");
+      expect(passes[at]).toEqual({
+        label: "atmosphere",
+        owner: "R08",
+        built: true,
+        labels: ["atmosphere tables", "atmosphere view", "atmosphere composite"],
+      });
+      expect(labels.slice(at - 1, at + 2)).toEqual(["discs", "atmosphere", "rings"]);
+    },
+  );
 });
 
 describe("sceneTargetSpec", () => {

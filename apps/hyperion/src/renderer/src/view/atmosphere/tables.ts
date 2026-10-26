@@ -1743,6 +1743,13 @@ interface TableResources {
   readonly multiScatteringKernel: ComputeHandle;
 }
 
+/**
+ * The pass every per-planet table build dispatches under (the transmittance, the multiple
+ * scattering, the slot layers and the sky's irradiance): the photorealistic style's `atmosphere`
+ * slot names it among its passes' labels (plan R08, R08.T10.b; `photoreal/passes.ts`).
+ */
+export const ATMOSPHERE_TABLES_PASS = "atmosphere tables";
+
 /** The density tables' texture format: one float a level. */
 const DENSITY_FORMAT: GPUTextureFormat = "r32float";
 /** The phase tables' texture format: the three channels and an unused alpha. */
@@ -2046,6 +2053,8 @@ export class AtmosphereTables {
   #layerEdges: Float32Array = new Float32Array(LAYER_EDGES_FLOATS);
   #key: string | null = null;
   #builds = 0;
+  /** Whether {@link AtmosphereTables.dispose} has released the resources. */
+  #disposed = false;
   /** The kernel arm's kernels ({@link AtmosphereTables.buildKernelArm}), made at its first call. */
   #armKernels: PlanetTableKernels | null = null;
   /** Whether the sky's irradiance holds the last build's ({@link AtmosphereTables.irradiance}). */
@@ -2237,6 +2246,11 @@ export class AtmosphereTables {
     return this.#body;
   }
 
+  /** The ground's radius on the tables' sphere, m: R_ref, the slices' scale, as last built. */
+  get bottomRadiusM(): number {
+    return this.#bottomRadiusM;
+  }
+
   /** The medium's terms, {@link packMedium}'s, for the kernels' `terms` binding. */
   get terms(): BufferHandle {
     return this.#resources.terms;
@@ -2295,7 +2309,7 @@ export class AtmosphereTables {
    * @throws Error or RangeError as {@link packMedium}, {@link packAbsorberCurves} and
    *   {@link tablesPlanOf}, and the tables keep what they held and follow; or `EngineUnavailable`
    *   while the engine has no device (a loss), and the tables follow `medium` from then on, so that
-   *   the engine's restore builds it.
+   *   the engine's restore builds it; or Error once they are disposed.
    */
   setMedium(
     medium: AtmosphereMedium,
@@ -2303,6 +2317,11 @@ export class AtmosphereTables {
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
     body: AtmosphereBody | null = null,
   ): boolean {
+    if (this.#disposed) {
+      throw new Error(
+        "the atmosphere's tables were disposed: a caller holds them past their release",
+      );
+    }
     const key = keyOf(medium, bottomRadiusM, curves, body);
     if (key === this.#key) {
       return false;
@@ -2548,7 +2567,7 @@ export class AtmosphereTables {
         },
       },
       groupsOf(TRANSMITTANCE_SIZE),
-      "atmosphere tables",
+      ATMOSPHERE_TABLES_PASS,
     );
   }
 
@@ -2592,7 +2611,7 @@ export class AtmosphereTables {
           Math.ceil(TRANSMITTANCE_SIZE.heightTexels / 8),
           plan.kappa.length * slots,
         ],
-        "atmosphere tables",
+        ATMOSPHERE_TABLES_PASS,
       );
     }
     let own: TransmittanceTextures | null = null;
@@ -2640,7 +2659,7 @@ export class AtmosphereTables {
               storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
             },
             [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
-            "atmosphere tables",
+            ATMOSPHERE_TABLES_PASS,
           );
         }
       }
@@ -2708,7 +2727,7 @@ export class AtmosphereTables {
               storage: { irradianceOut: { texture: r.irradiance.texture, level: 0 } },
             },
             [IRRADIANCE_SIZE.widthTexels, IRRADIANCE_SIZE.heightTexels, 1],
-            "atmosphere tables",
+            ATMOSPHERE_TABLES_PASS,
           );
         }
       }
@@ -2720,11 +2739,19 @@ export class AtmosphereTables {
   }
 
   /**
-   * Stops following the engine's restores. The engine owns the buffer and the textures it holds
-   * then and frees them; the ones an earlier medium's shape left were released when it changed.
+   * Stops following the engine's restores and releases the buffer and the textures it holds, so
+   * that the atmosphere cache's eviction frees a body's per-planet memory (plan R08, R08.T10.b;
+   * `decision-r08-t10a-leans.md` item 10). Called again, it does nothing. The kernels have no
+   * release, and the engine drops the release of a lost device's handles. Nothing may read the
+   * tables after it: a reader takes the cache's tables afresh each frame.
    */
   dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
     this.#offRestored();
+    releaseResources(this.#engine, this.#resources);
   }
 
   /**

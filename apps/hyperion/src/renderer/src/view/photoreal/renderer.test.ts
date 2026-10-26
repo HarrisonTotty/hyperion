@@ -22,7 +22,15 @@ import { histogramParams, histogramWorkgroups } from "../post/histogram";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import type { SurveyedDatumFrame } from "../wireframe/submit";
-import { type PhotorealFrame, type PhotorealOverlay, PhotorealRenderer } from "./renderer";
+import { ATMOSPHERE_COMPOSITE_PASS } from "../atmosphere/hillaire";
+import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
+import { AtmosphereTables } from "../atmosphere/tables";
+import {
+  type FrameAtmosphere,
+  type PhotorealFrame,
+  type PhotorealOverlay,
+  PhotorealRenderer,
+} from "./renderer";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
 const VIEWPORT = { widthPx: 64, heightPx: 36 };
@@ -274,6 +282,152 @@ describe("the photorealistic renderer", () => {
         "test view blue noise",
       ]),
     );
+  });
+});
+
+/** Earth's mean radius, m: R05's spherical Earth, on which R05's medium's tables are built. */
+const EARTH_RADIUS_M = 6.371e6;
+
+/** A body of the frame at `centreM` from the camera, with `id`. */
+function bodyAt(id: string, centreM: ReturnType<typeof vec3>): LitBodyInput {
+  const lit = aLitBody();
+  return { id, centreM, figure: lit.figure, photometry: lit.photometry, lighting: undefined };
+}
+
+/**
+ * A body's atmosphere in the frame over `tables`, its camera from the body's centre along the
+ * galactic axes, which are its body-fixed ones here.
+ */
+function airOf(body: LitBodyInput, tables: AtmosphereTables): FrameAtmosphere {
+  return {
+    id: body.id,
+    tables,
+    camera: {
+      positionM: vec3(-body.centreM.x, -body.centreM.y, -body.centreM.z),
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+      viewport: VIEWPORT,
+    },
+    toBodyFixed: IDENTITY_QUATERNION,
+  };
+}
+
+/** A prepared renderer on the counting engine, with a view recording its canvas frames. */
+async function preparedRenderer(): Promise<{
+  readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+  readonly view: RecordingView;
+  readonly renderer: PhotorealRenderer;
+}> {
+  const engine = await countingRenderEngine();
+  const view = new RecordingView();
+  const renderer = new PhotorealRenderer(engine, "test view");
+  await renderer.prepare(VIEWPORT, "high", "eye", {
+    orientation: IDENTITY_QUATERNION,
+    fovXRad: Math.PI / 3,
+  });
+  return { engine, view, renderer };
+}
+
+describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
+  it("submits no atmosphere for a view whose bodies have no medium", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    renderer.render(view, frameWith([]));
+    expect(engine.targetFrames.map((f) => f.label)).not.toContain(ATMOSPHERE_COMPOSITE_PASS);
+    expect(engine.dispatched.map((d) => d.kernel)).not.toContain("atmosphere ray march");
+    renderer.dispose();
+  });
+
+  it("draws a body's composite after the discs, over the scene target, for the passes after to read", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const labels = engine.targetFrames.map((f) => f.label);
+    const at = labels.indexOf(ATMOSPHERE_COMPOSITE_PASS);
+    expect(labels.slice(at - 1, at + 1)).toEqual([
+      PHOTOREAL_PASS_LABELS.discs,
+      ATMOSPHERE_COMPOSITE_PASS,
+    ]);
+    const composite = engine.targetFrames[at]?.draws[0];
+    const scene = engine.targetFrames[0]?.draws;
+    expect(composite?.material.name).toBe("atmosphere composite");
+    expect(scene).toBeDefined();
+    // The tone-mapping pass reads the composite's target, not the scene target the sky drew in.
+    const tonemapped = view.frames[0]?.draws[0]?.textures["hdrColour"];
+    expect(tonemapped).not.toBe(composite?.textures["sceneColour"]);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("lights a body with air through its tables and draws it with depth, as a mesh", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const plan = renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    expect(plan?.regimes.get(planet.id)).toBe("mesh");
+    expect(plan?.discs[0]?.atmosphere?.transmittance).toBe(tables.transmittance);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws two bodies' composites farthest first, the nearer over the farther", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const near = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));
+    const far = bodyAt("0200080020000000.0400", vec3(2e7, 0, -8e7));
+    const nearTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const farTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [near, far],
+      atmospheres: [airOf(near, nearTables), airOf(far, farTables)],
+    });
+    const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(composites).toHaveLength(2);
+    const [first, second] = composites;
+    expect(first?.draws[0]?.textures["transmittance"]).toBe(farTables.transmittance);
+    expect(second?.draws[0]?.textures["transmittance"]).toBe(nearTables.transmittance);
+    // The nearer composite reads what the farther one drew.
+    expect(second?.draws[0]?.textures["sceneColour"]).not.toBe(
+      first?.draws[0]?.textures["sceneColour"],
+    );
+    renderer.dispose();
+    nearTables.dispose();
+    farTables.dispose();
+  });
+
+  it("lets a body's atmosphere go when the frame no longer draws it, and never disposes the cache's tables", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const released: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        released.push(event.name);
+      }
+    });
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    renderer.render(view, { ...frameWith([]), bodies: [planet] });
+    expect(released).toEqual(
+      expect.arrayContaining(["atmosphere sky view", "atmosphere aerial perspective"]),
+    );
+    renderer.dispose();
+    expect(released).not.toContain(tables.transmittance.name);
+    expect(() => {
+      tables.setMedium(R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    }).not.toThrow();
+    tables.dispose();
   });
 });
 

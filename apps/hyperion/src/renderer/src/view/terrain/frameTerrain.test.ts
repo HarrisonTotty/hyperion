@@ -21,6 +21,7 @@ import { SESSION_SCENE } from "../../test/terrainSessionFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import { lawFor } from "../appearance/phase";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
+import type { SurfaceLightingTables } from "../atmosphere/surfaceLighting";
 import {
   type BodyFrameOptions,
   type BodyFramePlan,
@@ -217,6 +218,11 @@ function handed(extra: Partial<LitBodyInput> = {}): {
   return { plan, body };
 }
 
+/** A texture's handle by its name alone. */
+function texture(name: string): TextureHandle {
+  return { kind: "texture", name };
+}
+
 describe("a body's terrain lights from its disc record (R10.T16.c; decision D5)", () => {
   const record: DiscRecord = {
     ...recordOf(bodyAt(3 * A)),
@@ -257,6 +263,20 @@ describe("a body's terrain lights from its disc record (R10.T16.c; decision D5)"
       EXPOSURE,
     ]);
     expect(uniform.atmosphere).toBeUndefined();
+  });
+
+  it("takes the record's atmosphere tables where its air is drawn, for the terrain's light (R08.T10.b)", () => {
+    const atmosphere: SurfaceLightingTables = {
+      body: texture("body"),
+      transmittance: texture("transmittance"),
+      absorberColumns: texture("absorber columns"),
+      absorberPressureColumns: texture("absorber pressure columns"),
+      lastAbsorberPressureColumn: texture("last absorber pressure column"),
+      absorberCurves: texture("absorber curves"),
+      irradiance: texture("irradiance"),
+    };
+    const { lighting } = terrainLightingOf({ ...record, atmosphere }, ROTATION, EXPOSURE);
+    expect(lighting.atmosphere).toBe(atmosphere);
   });
 
   it("takes the brightest light as the sun, and none without a light", () => {

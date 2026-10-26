@@ -29,9 +29,25 @@
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
+import { norm } from "../../geometry/vec3";
+import {
+  ATMOSPHERE_COMPOSITE_PASS,
+  type AtmosphereCamera,
+  type AtmosphereFrameKernels,
+  createAtmosphereFrameKernels,
+  geodeticOf,
+  HillaireAtmosphere,
+  type SunState,
+  tablesFigureOf,
+} from "../atmosphere/hillaire";
+import { skySources } from "../atmosphere/sources";
+import { surfaceLightingTablesOf } from "../atmosphere/surfaceLighting";
+import { absorberCount, type AtmosphereTables } from "../atmosphere/tables";
 import {
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
+  type BodyLightSources,
+  bodyLightSources,
   type LitBodyInput,
   LitBodyRenderer,
   planLitBodies,
@@ -44,6 +60,7 @@ import {
   type Viewport,
   viewRotation4,
 } from "../camera/projection";
+import type { Quaternion } from "../camera/pose";
 import type { ViewRole } from "../camera/state";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type {
@@ -73,6 +90,7 @@ import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histo
 import type { MeterMode } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
 import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
+import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
 import { toHalfArray } from "../sky/half";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
@@ -123,6 +141,24 @@ export interface FrameTerrain {
    * hides it in the image (plan R10, R10.T16.c).
    */
   symbologyDepth(): ReadonlyArray<DrawItem>;
+}
+
+/**
+ * One body's atmosphere in a photorealistic frame (plan R08, R08.T10.b): the atmosphere cache's
+ * per-planet tables, which the frame draws with and never disposes, taken afresh each frame, and
+ * the body's atmosphere camera.
+ */
+export interface FrameAtmosphere {
+  readonly id: BodyIdHex;
+  /** Its per-planet tables (`AtmosphereCache.entryOf(id).tables`), its figure and gravity theirs. */
+  readonly tables: AtmosphereTables;
+  /**
+   * Its atmosphere's camera (`bodyAtmosphereCamera`): from its drawn centre, in its body-fixed
+   * axes, at the frame's own viewport.
+   */
+  readonly camera: AtmosphereCamera;
+  /** The rotation from the frame's galactic axes into its body-fixed ones (`skySources`'). */
+  readonly toBodyFixed: Quaternion;
 }
 
 /**
@@ -194,6 +230,12 @@ export interface PhotorealFrame {
    * a view that is not the exposure's source, whose frame takes no histogram (Design note 11).
    */
   readonly meter: MeterMode | null;
+  /**
+   * The atmospheres of the frame's lit bodies that have them drawn (plan R08, R08.T10.b): each
+   * body's tables lighting its surface through the air, and its composite over everything opaque
+   * drawn before it; none, or absent, draws no atmosphere.
+   */
+  readonly atmospheres?: ReadonlyArray<FrameAtmosphere> | undefined;
 }
 
 /** Where a {@link PhotorealRenderer} stands. */
@@ -233,6 +275,13 @@ interface Resources {
   readonly histograms: HistogramReader;
   /** The `disc cells` kernel, which shades the small discs' cells in parallel (R07.T8.d). */
   readonly discCells: ComputeHandle;
+  /** The atmospheres' shared per-frame kernels and composite (R08.T10.b), made with the rest. */
+  readonly atmosphere: AtmosphereFrameKernels;
+  /**
+   * The targets the bodies' composites draw into in turn, the first reading the scene target and
+   * each after it the one before (R08.T10.b): made at the first frame that draws an atmosphere.
+   */
+  readonly airTargets: RenderTarget[];
   glare: BufferHandle;
   glareCapacity: number;
   stars: BufferHandle;
@@ -244,6 +293,30 @@ interface Resources {
 /** The pixel's angle at the view's centre, rad. */
 function radPerPx(camera: ProjectionCamera, viewport: Viewport): number {
   return (2 * Math.tan(camera.fovXRad / 2)) / viewport.widthPx;
+}
+
+/**
+ * The frame's lit bodies with their atmospheres' tables, through which each one's surface is lit
+ * (plan R08, R08.T9.b's `surfaceLighting.wgsl`; R08.T10.b).
+ */
+function withAtmospheres(
+  bodies: ReadonlyArray<LitBodyInput>,
+  atmospheres: ReadonlyArray<FrameAtmosphere>,
+): ReadonlyArray<LitBodyInput> {
+  if (atmospheres.length === 0) {
+    return bodies;
+  }
+  const tables = new Map(atmospheres.map((each) => [each.id, each.tables]));
+  return bodies.map((body) => {
+    const own = tables.get(body.id);
+    return own === undefined ? body : { ...body, atmosphere: surfaceLightingTablesOf(own) };
+  });
+}
+
+/** Whether a body's atmosphere camera lies inside its air: under its medium's top over the datum. */
+function insideAir(air: FrameAtmosphere): boolean {
+  const { heightM } = geodeticOf(air.camera.positionM, tablesFigureOf(air.tables));
+  return heightM < air.tables.medium.topHeightM;
 }
 
 /** A view's photorealistic frames on one engine (plan R07, T8.a). */
@@ -259,6 +332,16 @@ export class PhotorealRenderer {
   /** Bumped by each restore, so that a making from before it is abandoned. */
   #generation = 0;
   #disposed = false;
+  /**
+   * Each body's atmosphere on this view, over the cache's tables (R08.T10.b), made at the first
+   * frame that draws it and let go at the first that does not, with the setting it was made at.
+   */
+  readonly #atmospheres = new Map<
+    BodyIdHex,
+    { readonly atmosphere: HillaireAtmosphere; readonly setting: QualitySetting }
+  >();
+  /** The bodies whose composite failed, each said once until it draws again. */
+  readonly #airFailed = new Set<BodyIdHex>();
   readonly #unsubscribe: () => void;
 
   constructor(engine: RenderEngine, viewName: string) {
@@ -272,6 +355,8 @@ export class PhotorealRenderer {
       this.#generation += 1;
       this.#resources?.histograms.dispose();
       this.#resources = null;
+      // Their shared kernels died with the device; each is made again at its next frame.
+      this.#releaseAtmospheres();
       this.#histogram = undefined;
       this.#making = null;
       this.#status = "idle";
@@ -327,12 +412,14 @@ export class PhotorealRenderer {
     let sprite: MaterialHandle;
     let kernel: ComputeHandle;
     let discCells: ComputeHandle;
+    let atmosphere: AtmosphereFrameKernels;
     try {
-      [tonemap, sprite, kernel, discCells] = await Promise.all([
+      [tonemap, sprite, kernel, discCells, atmosphere] = await Promise.all([
         engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
         engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
         engine.createComputeAsync(HISTOGRAM_KERNEL),
         engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+        createAtmosphereFrameKernels(engine),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it.
@@ -379,6 +466,8 @@ export class PhotorealRenderer {
         }
       }),
       discCells,
+      atmosphere,
+      airTargets: [],
       glare: this.#glareBuffer(GLARE_CAPACITY),
       glareCapacity: GLARE_CAPACITY,
       stars: this.#spriteBuffer(MIN_SPRITE_BYTES),
@@ -412,6 +501,9 @@ export class PhotorealRenderer {
     if (size.widthPx !== resources.size.widthPx || size.heightPx !== resources.size.heightPx) {
       resources.target.resize(size);
       resources.bloom.resize(size);
+      for (const target of resources.airTargets) {
+        target.resize(size);
+      }
       resources.size = size;
     }
     const radPx = radPerPx(frame.camera, frame.viewport);
@@ -482,8 +574,12 @@ export class PhotorealRenderer {
       NEAR_PLANE_M,
     );
     const viewRotation = viewRotation4(camera.orientation);
+    // Each body whose air is drawn lights its surface through it, and is drawn with depth, so that
+    // its composite lays the air over its ground (R08.T10.b).
+    const atmospheres = frame.atmospheres ?? [];
+    const bodies = withAtmospheres(frame.bodies, atmospheres);
     const plan = planLitBodies(
-      frame.bodies,
+      bodies,
       frame.lights,
       {
         camera,
@@ -493,6 +589,7 @@ export class PhotorealRenderer {
         annuli: settings.discAnnuli,
         planetshine: settings.planetshineSources,
         depthWriters: frame.depthWriters,
+        depthBodies: new Set(atmospheres.map((each) => each.id)),
         setting: frame.setting,
       },
       frame.previousRegimes,
@@ -518,10 +615,7 @@ export class PhotorealRenderer {
     // draws submit the view's shadow cascades first (R10.T9.b's `terrain shadows`), whose times
     // ride this pass's resolve: nothing is rendered between them and it. A frame whose terrain
     // draws nothing submits none, so the pass always follows them.
-    const meshes = [
-      ...this.#bodies.meshDraws(plan),
-      ...(frame.terrain?.draws(plan, frame.bodies) ?? []),
-    ];
+    const meshes = [...this.#bodies.meshDraws(plan), ...(frame.terrain?.draws(plan, bodies) ?? [])];
     if (meshes.length > 0) {
       resources.target.render({
         label: PHOTOREAL_PASS_LABELS.bodies,
@@ -540,9 +634,15 @@ export class PhotorealRenderer {
       postProcesses: [],
       colourLoad: "load",
     });
+    // Each body's air over everything drawn before it, farthest first (R08.T10.b), into the air
+    // targets in turn; the passes after read the last.
+    const hdrColour = this.#drawAtmospheres(resources, frame, plan, bodies, {
+      viewRotation,
+      projection,
+    });
     if (frame.meter !== null) {
       resources.histograms.measure({
-        hdrColour: resources.target.colour,
+        hdrColour,
         size: resources.size,
         mode: frame.meter,
         stride: settings.histogramStride,
@@ -551,7 +651,7 @@ export class PhotorealRenderer {
     }
     // The pre-exposure is this frame's own exposure, so the pass's exposure over it is 1.
     const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);
-    resources.bloom.run(resources.target.colour, threshold);
+    resources.bloom.run(hdrColour, threshold);
     if (frame.glareSources.length > resources.glareCapacity) {
       this.#engine.releaseBuffer(resources.glare);
       resources.glareCapacity = frame.glareSources.length;
@@ -571,7 +671,7 @@ export class PhotorealRenderer {
         tonemapDraw({
           mesh: resources.triangle,
           material: resources.tonemap,
-          hdrColour: resources.target.colour,
+          hdrColour,
           bloomUp: resources.bloom.levelOne,
           blueNoise: resources.blueNoise,
           glareSources: resources.glare,
@@ -614,15 +714,172 @@ export class PhotorealRenderer {
     return histogram;
   }
 
+  /**
+   * Draws each body's composite over the scene target, the farthest first, each into the next air
+   * target over the one before (plan R08, R08.T10.b), and lets go of the atmospheres of the bodies
+   * it draws none for.
+   *
+   * @remarks
+   * A body's sky takes the sources its record was shaded from (`BodyFramePlan.sources`, Design note
+   * 7's one list), less Design note 7's skips (`skySources`), a star past the light slots its tables
+   * hold left out until the cache builds them for it; the camera's local body, which the plan holds
+   * no record of while terrain draws it from inside its figure's sphere, takes them as the plan
+   * would (`bodyLightSources`). A composite that throws, a bug, is said once and its body drawn
+   * without its air, so that the view draws on.
+   *
+   * @returns The colour the frame's later passes read: the last composite's, or the scene target's
+   *   where none was drawn.
+   */
+  #drawAtmospheres(
+    resources: Resources,
+    frame: PhotorealFrame,
+    plan: BodyFramePlan,
+    bodies: ReadonlyArray<LitBodyInput>,
+    pass: { readonly viewRotation: Float32Array; readonly projection: Float32Array },
+  ): TextureHandle {
+    const settings = SETTINGS[frame.setting].photoreal;
+    const byId = new Map(bodies.map((body) => [body.id, body]));
+    const drawn: Array<{ readonly air: FrameAtmosphere; readonly sources: BodyLightSources }> = [];
+    for (const air of frame.atmospheres ?? []) {
+      const own = plan.sources.get(air.id);
+      const body = byId.get(air.id);
+      if (own !== undefined) {
+        drawn.push({ air, sources: own });
+      } else if (body !== undefined && insideAir(air)) {
+        drawn.push({
+          air,
+          sources: bodyLightSources(body, bodies, frame.lights, {
+            annuli: settings.discAnnuli,
+            planetshine: settings.planetshineSources,
+          }),
+        });
+      }
+    }
+    const order = drawn.toSorted(
+      (a, b) => norm(b.air.camera.positionM) - norm(a.air.camera.positionM),
+    );
+    const depth = resources.target.depth;
+    let colour = resources.target.colour;
+    const kept = new Set<BodyIdHex>();
+    for (const { air, sources } of order) {
+      kept.add(air.id);
+      if (depth === null) {
+        break;
+      }
+      const atmosphere = this.#atmosphereOf(resources, air, frame.setting);
+      const tables = air.tables;
+      const lightSlots = absorberCount(tables.medium) > 0 ? tables.curves.length : Infinity;
+      let suns: ReadonlyArray<SunState>;
+      let composite: DrawItem;
+      try {
+        suns = skySources(
+          sources.stars,
+          sources.planetshine,
+          air.camera,
+          tablesFigureOf(tables),
+          tables.medium,
+          air.toBodyFixed,
+        ).filter((sun) => sun.curveSlot < lightSlots);
+        composite = atmosphere.drawFrame(air.camera, suns, {
+          colour,
+          depth,
+          nearM: NEAR_PLANE_M,
+          exposureScale: frame.exposureScale,
+        });
+      } catch (error: unknown) {
+        if (!this.#airFailed.has(air.id)) {
+          this.#airFailed.add(air.id);
+          console.error(`the atmosphere of ${air.id} could not be drawn in ${this.#name}:`, error);
+        }
+        continue;
+      }
+      this.#airFailed.delete(air.id);
+      const target = this.#airTarget(resources, colour === resources.target.colour ? 0 : 1);
+      target.render({
+        label: ATMOSPHERE_COMPOSITE_PASS,
+        viewRotation: pass.viewRotation,
+        projection: pass.projection,
+        draws: [composite],
+        postProcesses: [],
+      });
+      colour = target.colour;
+    }
+    for (const [id, held] of this.#atmospheres) {
+      if (!kept.has(id)) {
+        held.atmosphere.dispose();
+        this.#atmospheres.delete(id);
+      }
+    }
+    return colour;
+  }
+
+  /**
+   * A body's atmosphere on this view over `air`'s tables, made at the setting's sizes the first
+   * time, or again on a new setting, and following the cache's tables as they are remade.
+   */
+  #atmosphereOf(
+    resources: Resources,
+    air: FrameAtmosphere,
+    setting: QualitySetting,
+  ): HillaireAtmosphere {
+    const held = this.#atmospheres.get(air.id);
+    if (held !== undefined && held.setting === setting) {
+      held.atmosphere.setTables(air.tables);
+      return held.atmosphere;
+    }
+    held?.atmosphere.dispose();
+    const atmosphere = HillaireAtmosphere.over(
+      this.#engine,
+      air.tables,
+      SETTINGS[setting].atmosphere,
+      resources.atmosphere,
+    );
+    this.#atmospheres.set(air.id, { atmosphere, setting });
+    return atmosphere;
+  }
+
+  /**
+   * The air target `index` (0 or 1), made at the frame's size where it has not been: a colour
+   * target without depth, so that a composite may read the scene target's depth as it draws.
+   */
+  #airTarget(resources: Resources, index: 0 | 1): RenderTarget {
+    let target = resources.airTargets[index];
+    while (target === undefined) {
+      const made = this.#engine.createRenderTarget({
+        name: `${this.#name}:air ${resources.airTargets.length}`,
+        size: resources.size,
+        format: HDR_COLOUR_FORMAT,
+        mips: 1,
+        depth: false,
+        category: "render-targets",
+      });
+      resources.airTargets.push(made);
+      target = resources.airTargets[index];
+    }
+    return target;
+  }
+
+  /** Lets go of every body's atmosphere on this view. */
+  #releaseAtmospheres(): void {
+    for (const { atmosphere } of this.#atmospheres.values()) {
+      atmosphere.dispose();
+    }
+    this.#atmospheres.clear();
+  }
+
   /** Stops following restores and releases the view's targets, buffers and textures. */
   dispose(): void {
     this.#disposed = true;
     this.#unsubscribe();
     this.#bodies.dispose();
+    this.#releaseAtmospheres();
     const resources = this.#resources;
     if (resources !== null) {
       resources.histograms.dispose();
       resources.target.dispose();
+      for (const target of resources.airTargets) {
+        target.dispose();
+      }
       resources.bloom.dispose();
       this.#engine.releaseBuffer(resources.glare);
       this.#engine.releaseBuffer(resources.stars);

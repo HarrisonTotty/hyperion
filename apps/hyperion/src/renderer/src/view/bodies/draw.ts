@@ -224,6 +224,13 @@ export interface BodyFrameOptions {
    * disc overlapping one, or a mesh body, is drawn as a mesh (Design note 2). Absent, none.
    */
   readonly depthWriters?: ReadonlyArray<ScreenCircle>;
+  /**
+   * The bodies drawn with depth whenever they are drawn larger than a point: those whose atmosphere
+   * the frame draws (plan R08, R08.T10.b), whose composite lays the air over the ground by its depth
+   * and would otherwise draw its own bare ground over a disc's pixels. A disc among them is drawn as
+   * a mesh, and promotes the discs it overlaps as a mesh does. Absent, none.
+   */
+  readonly depthBodies?: ReadonlySet<BodyIdHex>;
   /** The view's quality setting, which a mesh body's selection takes. */
   readonly setting: QualitySetting;
 }
@@ -296,7 +303,51 @@ export interface BodyFramePlan {
   /** The phase table's rows, the frame's distinct laws in first use, a class map's included. */
   readonly laws: ReadonlyArray<PhotometricLaw>;
   readonly steps: ReadonlyArray<BodyStep>;
+  /**
+   * The sources that light each body drawn as a disc or a mesh, by body: the arrays its record was
+   * shaded from, which its atmosphere's sky takes as they are (plan R08, Design note 7's one list;
+   * R08.T10.b), never ranked again.
+   */
+  readonly sources: ReadonlyMap<BodyIdHex, BodyLightSources>;
 }
+
+/**
+ * The sources that light a body in a frame (plan R08, Design note 7's one list): its stars, R07's
+ * `lightsAt` past `STAR_CUT_RELATIVE`, brightest first, at most {@link MAX_DISC_LIGHTS}, each
+ * `toStarM` from its centre; and its planetshine sources (`planetshineSources`, at the setting's
+ * count), their directions along the same axes.
+ */
+export interface BodyLightSources {
+  readonly stars: ReadonlyArray<LightAtPoint>;
+  readonly planetshine: ReadonlyArray<SecondarySource>;
+}
+
+/**
+ * The sources that light `body` in a frame of `bodies`, as {@link planLitBodies} builds them for a
+ * body it draws: for one it holds no record of, the camera's local body while terrain draws it
+ * from inside its figure's sphere (plan R08, R08.T10.b), so that its air is lit as its surface is.
+ *
+ * @param bodies - The frame's lit bodies, which light it by planetshine.
+ * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
+ */
+export function bodyLightSources(
+  body: LitBodyInput,
+  bodies: ReadonlyArray<LitBodyInput>,
+  hosts: ReadonlyArray<PlacedLight>,
+  options: Pick<BodyFrameOptions, "annuli" | "planetshine">,
+): BodyLightSources {
+  return {
+    stars: lightsOf(body, hosts),
+    planetshine: planetshineSources(
+      body,
+      litNeighbours(bodies, hosts, options.annuli),
+      options.planetshine,
+    ),
+  };
+}
+
+/** No body drawn with depth for its air. */
+const NO_DEPTH_BODIES: ReadonlySet<BodyIdHex> = new Set();
 
 /** A body whose centre is within this fraction of its radius is seen from inside, and not drawn. */
 const INSIDE_MARGIN = 1e-9;
@@ -436,9 +487,8 @@ function drawnSurface(body: LitBodyInput): DrawnDiscSurface {
 function discRecordOf(
   body: LitBodyInput,
   surface: DrawnDiscSurface,
-  hosts: ReadonlyArray<PlacedLight>,
+  sources: BodyLightSources,
   occluders: ReadonlyArray<LightingBody>,
-  neighbours: ReadonlyArray<LitNeighbour>,
   tableRows: ReadonlyArray<number>,
   options: BodyFrameOptions,
 ): DiscRecord | null {
@@ -464,7 +514,7 @@ function discRecordOf(
       : figurePole(body.figure);
   const aOverD = a / distanceM;
   const samples = discSamples(angularDiameterPx(body.centreM, a, options.camera, options.viewport));
-  const lights: DiscLight[] = lightsOf(body, hosts).map((light) => {
+  const lights: DiscLight[] = sources.stars.map((light) => {
     const d = norm(light.toStarM);
     return {
       direction: scale(light.toStarM, 1 / d),
@@ -478,8 +528,7 @@ function discRecordOf(
     centre: scale(sub(occluder.centreM, body.centreM), 1 / a),
     radius: occluder.radiusM / a,
   }));
-  const secondaries = planetshineSources(body, neighbours, options.planetshine);
-  const shine: DiscSecondary[] = secondaries.map((source) => ({
+  const shine: DiscSecondary[] = sources.planetshine.map((source) => ({
     direction: source.direction,
     distance: source.distanceM / a,
     radius: source.radiusM / a,
@@ -597,7 +646,15 @@ export function planLitBodies(
     pixelAngleRad(camera, options.presentedPx),
     previous,
   );
-  const regimes = promoteOverlapping(handed, footprints, options.depthWriters ?? []);
+  // A body whose air is drawn is drawn with depth (R08.T10.b), a disc of it as a mesh.
+  const depthBodies = options.depthBodies ?? NO_DEPTH_BODIES;
+  const meshed = new Map<BodyIdHex, LitRegime>(
+    [...handed].map(([id, regime]) => [
+      id,
+      regime === "disc" && depthBodies.has(id) ? "mesh" : regime,
+    ]),
+  );
+  const regimes = promoteOverlapping(meshed, footprints, options.depthWriters ?? []);
   const hostSpheres: HostSphere[] = hosts.map((host) => ({
     star: host.disc.star,
     centreM: host.centreM,
@@ -620,6 +677,7 @@ export function planLitBodies(
   const discs: DiscRecord[] = [];
   const meshes: MeshBodyPlan[] = [];
   const steps: BodyStep[] = [];
+  const sources = new Map<BodyIdHex, BodyLightSources>();
   let run: PointSprite[] = [];
   const closeRun = (): void => {
     if (run.length > 0) {
@@ -654,10 +712,15 @@ export function planLitBodies(
       }
       return row;
     });
-    const record = discRecordOf(body, drawn, hosts, occluders, neighbours, rows, options);
+    const lit: BodyLightSources = {
+      stars: lightsOf(body, hosts),
+      planetshine: planetshineSources(body, neighbours, options.planetshine),
+    };
+    const record = discRecordOf(body, drawn, lit, occluders, rows, options);
     if (record === null) {
       continue;
     }
+    sources.set(body.id, lit);
     closeRun();
     const regime = regimes.get(body.id);
     if (drawnAsMesh(regime)) {
@@ -694,7 +757,7 @@ export function planLitBodies(
     discs.push(record);
   }
   closeRun();
-  return { regimes, order, discs, meshes, laws, steps };
+  return { regimes, order, discs, meshes, laws, steps, sources };
 }
 
 /**

@@ -17,11 +17,11 @@
  *   while the view's draw set of the body leaves nothing missing (`TerrainPass.maskReadyFor`, read
  *   before the plan takes it), so that the reference surface stays whole until the terrain draws
  *   all the surveyed ground the mask would discard.
- * - **The air** (D9). The terrain takes the tables of no air: `TerrainFrameLighting.atmosphere` is
- *   absent, since R08.T10.b, which draws a body's atmosphere in the view, is not built. The binding
- *   point is {@link terrainLightingOf}: whichever of R10.T16.c and R08.T10.b lands second gives it
- *   the record's `atmosphere`, R08.T10.a's medium's tables, and tests the composite over the
- *   terrain.
+ * - **The air** (D9; plan R08, R08.T10.b). The terrain takes its body's atmosphere tables, the
+ *   record's `atmosphere` (`TerrainFrameLighting.atmosphere`, R08.T10.a's medium's, through
+ *   `surfaceLightingTablesOf`), in {@link terrainLightingOf}: each light crosses the air to the
+ *   ground and the sky lights it, and the photorealistic frame's composite lays the air over it
+ *   after. A body with no air takes the tables of no air.
  * - **The shadow cascades** (plan R10, R10.T9.b; decision-r10-t9b-design D3). One set serves one
  *   body a view-frame: of the bodies handed over, the one over whose datum the camera stands lowest
  *   takes the view's cascades ({@link cascadeBodyIndex}), ties going to the first in the plan's
@@ -85,8 +85,8 @@ import { poseInterval, type PoseIntervals } from "./poseInterval";
 export interface TerrainLightingFrame {
   /**
    * What lights the terrain: the record's stars, occluders and planetshine sources along the
-   * body-fixed axes, its uniform law (`elsewhere`) and the frame's pre-exposure; no atmosphere's
-   * tables, so the tables of no air (R08.T10.b's binding point).
+   * body-fixed axes, its uniform law (`elsewhere`), the frame's pre-exposure, and the record's
+   * atmosphere tables where its body's air is drawn (R08.T10.b), else none: the tables of no air.
    */
   readonly lighting: TerrainFrameLighting;
   /** The brightest star's unit direction from the body's centre, body-fixed; +z with no star. */
@@ -107,8 +107,8 @@ const NO_SUN = vec3(0, 0, 1);
  * body-fixed ones by the inverse of `rotation` (Rᵀ, `rotateToBodyFixed`), each light's and source's
  * distance, radius, illuminance and annuli and each occluder's radius as they stand; its uniform
  * law, `elsewhere` (the record's surface's first law, `discSurfaceLaws`: its uniform law, or its
- * class map's unsurveyed ground's), whose A the terrain scales for the figure as the disc does; and
- * the frame's pre-exposure. The sun is the brightest light's, the record's first (`lightsAt` puts
+ * class map's unsurveyed ground's), whose A the terrain scales for the figure as the disc does;
+ * the frame's pre-exposure; and the record's atmosphere tables, where it has them (R08.T10.b). The sun is the brightest light's, the record's first (`lightsAt` puts
  * the brightest first).
  *
  * @param rotation - The rotation the plan drew the body's figure with, body-fixed to galactic.
@@ -137,8 +137,15 @@ export function terrainLightingOf(
   }
   const brightest = lights[0];
   return {
-    // R08.T10.b's binding point: the record's `atmosphere` joins here, with its composite's test.
-    lighting: { lights, occluders, secondaries, elsewhere, exposureScale },
+    // The record's air, where the frame draws its atmosphere (R08.T10.b).
+    lighting: {
+      lights,
+      occluders,
+      secondaries,
+      elsewhere,
+      exposureScale,
+      ...(record.atmosphere === undefined ? {} : { atmosphere: record.atmosphere }),
+    },
     sunDirectionBodyFixed: brightest?.direction ?? NO_SUN,
     sunIlluminanceLx: brightest === undefined ? [0, 0, 0] : [...brightest.illuminance],
   };

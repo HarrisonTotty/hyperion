@@ -38,6 +38,7 @@ import {
   bodyOfFigure,
   FIT_SCALE_FLOOR_M,
   COMPOSITE_MATERIAL,
+  createAtmosphereFrameKernels,
   frameSourcesOf,
   geodeticOf,
   HillaireAtmosphere,
@@ -66,6 +67,7 @@ import rayMarchCurvesWgsl from "./shaders/rayMarchCurves.wgsl?raw";
 import rayMarchSlotsWgsl from "./shaders/rayMarchSlots.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
+  AtmosphereTables,
   KERNEL_ARM_FORMAT,
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
@@ -1705,7 +1707,7 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
     expect(after.rayMarch).not.toBe(before.rayMarch);
   });
 
-  it("releases its three targets when the atmosphere is disposed", async () => {
+  it("releases its three targets, with its frame's and its own tables, when the atmosphere is disposed (R08.T10.b)", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     atmosphere.drawKernelArm(CAMERA, [NOON], SCENE);
@@ -1716,11 +1718,83 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
       }
     });
     atmosphere.dispose();
-    expect(destroyed.toSorted()).toEqual([
-      "atmosphere aerial perspective (kernel arm)",
-      "atmosphere ray march (kernel arm)",
-      "atmosphere sky view (kernel arm)",
-    ]);
+    expect(destroyed).toEqual(
+      expect.arrayContaining([
+        "atmosphere aerial perspective (kernel arm)",
+        "atmosphere ray march (kernel arm)",
+        "atmosphere sky view (kernel arm)",
+        "atmosphere sky view",
+        "atmosphere aerial perspective",
+        "atmosphere transmittance",
+        "atmosphere terms",
+      ]),
+    );
+  });
+});
+
+describe("HillaireAtmosphere over held tables (R08.T10.b)", () => {
+  it("draws with the tables it is given, on their figure, and never disposes them", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const atmosphere = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, null);
+    const composite = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    expect(composite.textures["transmittance"]).toBe(tables.transmittance);
+    expect(atmosphere.tables).toBe(tables);
+    const destroyed: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        destroyed.push(event.name);
+      }
+    });
+    atmosphere.dispose();
+    expect(destroyed).toContain("atmosphere sky view");
+    expect(destroyed).not.toContain("atmosphere transmittance");
+    tables.dispose();
+    expect(destroyed).toContain("atmosphere transmittance");
+  });
+
+  it("follows another set of held tables, and refuses a medium of its own", async () => {
+    const engine = await countingRenderEngine();
+    const radiusM = tableRadiusM(WGS84);
+    const first = new AtmosphereTables(engine, R05_EARTH_REFERENCE, radiusM);
+    const second = new AtmosphereTables(engine, R05_EARTH_REFERENCE, radiusM);
+    const atmosphere = HillaireAtmosphere.over(engine, first, TABLE_SIZES.high, null);
+    atmosphere.setTables(second);
+    const composite = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    expect(composite.textures["transmittance"]).toBe(second.transmittance);
+    expect(() => {
+      atmosphere.setMedium(R05_EARTH_REFERENCE);
+    }).toThrow(/held tables/);
+    atmosphere.dispose();
+  });
+
+  it("refuses a frame after a restore of the device its shared kernels were made on", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const atmosphere = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    engine.restore();
+    expect(() => atmosphere.drawFrame(CAMERA, [NOON], SCENE)).toThrow(/made again by its owner/);
+    atmosphere.dispose();
+  });
+});
+
+describe("AtmosphereTables' release (R08.T10.b)", () => {
+  it("releases its buffer and textures when disposed, once, and refuses a medium after", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const destroyed: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        destroyed.push(event.name);
+      }
+    });
+    tables.dispose();
+    tables.dispose();
+    expect(destroyed.filter((name) => name === "atmosphere transmittance")).toHaveLength(1);
+    expect(destroyed).toContain("atmosphere terms");
+    expect(() => tables.setMedium(R05_EARTH_REFERENCE, tableRadiusM(WGS84))).toThrow(/disposed/);
   });
 });
 
