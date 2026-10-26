@@ -103,6 +103,14 @@ export interface KDistributionTable {
   /** The cells with lines, ascending, each once. */
   readonly cells: ReadonlyArray<KDistributionCell>;
   /**
+   * `[t × P + p]`: at each node the largest share over the cells and variants of a Lorentz line's
+   * strength 3–25 cm⁻¹ from its centre, (2 ÷ π)[arctan(25 ÷ γ_L) − arctan(3 ÷ γ_L)], γ_L the cell's
+   * intensity-weighted Lorentz half-width, to two significant figures, as the reduction records it
+   * (`src/tools/kDistributions.ts`'s `nearWingShare`); absent for a sidecar that records none.
+   * R08.T10.a recovers γ_L from it for the held-χ bound (`negligible.ts`).
+   */
+  readonly nearWingShare?: Float64Array;
+  /**
    * A two-variant table's fixed-g mix record ({@link MixLimits}; `decision-r08-t4d-kdist-chain.md`
    * §16), absent for a table of one variant or one reduced before §16.
    */
@@ -154,6 +162,8 @@ export interface KDistributionFile {
   readonly broadeningExponents: Readonly<Record<string, number>>;
   readonly variants: ReadonlyArray<string>;
   readonly chiHeld: ReadonlyArray<ReadonlyArray<boolean>>;
+  /** Each node's largest near-wing share, `[t × P + p]` ({@link KDistributionTable.nearWingShare}). */
+  readonly nearWingShare?: ReadonlyArray<number>;
   /** A two-variant table's fixed-g mix record, its columns cm⁻² and null for none (§16). */
   readonly mixing?: {
     readonly shares: ReadonlyArray<number>;
@@ -262,7 +272,7 @@ const WEIGHT_SUM_TOLERANCE = 1e-6;
  * temperatures; finite broadening ratios above 0, and a finite exponent offset for listed gases
  * alone; each part's header its sidecar's; each cell
  * inside the bake range, once, ascending, with weights above 0 that sum to 1, a finite step above 0
- * and a code at every node and g-point.
+ * and a code at every node and g-point; and near-wing shares, where recorded, one a node in [0, 1].
  *
  * @throws Error naming the file and the check it fails.
  */
@@ -387,6 +397,14 @@ export function readKDistribution(
     return { cellNm: cell.nm, weights, lnOffset: cell.lnOffset, lnStep: cell.lnStep, codes };
   });
   const mixLimits = readMixLimits(first, read.length, twoVariants, where);
+  const nearWingShare = first.nearWingShare;
+  if (
+    nearWingShare !== undefined &&
+    (nearWingShare.length !== first.temperaturesK.length * first.pressuresPa.length ||
+      !nearWingShare.every((s) => Number.isFinite(s) && s >= 0 && s <= 1))
+  ) {
+    throw new Error(`${where}'s near-wing shares are not one a node, each in [0, 1]`);
+  }
   return {
     species: first.species,
     source: `${first.source}. ${first.reduction}`,
@@ -402,6 +420,7 @@ export function readKDistribution(
     broadening,
     broadeningExponents,
     cells: read,
+    ...(nearWingShare === undefined ? {} : { nearWingShare: Float64Array.from(nearWingShare) }),
     ...(mixLimits === undefined ? {} : { mixLimits }),
   };
 }

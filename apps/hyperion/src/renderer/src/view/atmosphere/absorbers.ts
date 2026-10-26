@@ -1415,6 +1415,45 @@ function layerTemperatureK(layer: LayerOnColumn, power: 1 | 2): number {
   return sum / weight;
 }
 
+/**
+ * A layer as {@link absorberSpecs} lays it on its column, for R08.T10.a's bound (`negligible.ts`):
+ * its base and top clamped to the column, and ∫ρᵖ dz and the ρᵖ-weighted mean temperature over it.
+ */
+export interface LayerMoments {
+  /** The base, Pa, clamped to the column's datum. */
+  readonly basePa: number;
+  /** The top, Pa, clamped to the column's top. */
+  readonly topPa: number;
+  /** ∫ρᵖ dz by the trapezoid rule on its levels, m, ρ the column's relative density. */
+  readonly integralM: number;
+  /** ∫ρᵖ T dz ÷ ∫ρᵖ dz, K. */
+  readonly temperatureK: number;
+}
+
+/**
+ * {@link LayerMoments} of a layer between two pressures on a column, its profile's mixing ratio
+ * folded in where it has one, by the rules {@link absorberSpecs} takes a profile's temperature and a
+ * pair member's density by: p = 1 for a species' column (its column-weighted temperature), 2 for a
+ * pair's (its pair-weighted temperature and ∫ρ² dz).
+ *
+ * @throws RangeError for a base that does not lie below its top, or a layer outside its column.
+ */
+export function layerMoments(
+  column: AtmosphereColumn,
+  basePa: number,
+  topPa: number,
+  power: 1 | 2,
+  profile?: ReadonlyArray<AbsorberProfileNode>,
+): LayerMoments {
+  const clamped = clampedLayer(column, basePa, topPa);
+  const layer = layerOnColumn(column, clamped.basePa, clamped.topPa, profile);
+  return {
+    ...clamped,
+    integralM: layerIntegralM(layer, power),
+    temperatureK: layerTemperatureK(layer, power),
+  };
+}
+
 /** A listed layer with a column, clamped to the column, at its place in the list. */
 interface ListedLayer {
   readonly index: number;
@@ -1603,9 +1642,31 @@ export interface AbsorberSpecsOptions {
 }
 
 /**
+ * The mixture a species' lines are broadened in on a layer (R08.T4.d), as {@link absorberSpecs}
+ * takes it and R08.T10.a's bound reads it (`negligible.ts`): the species' own mole fraction xₛ, its
+ * column over the layer's number column clamped to [0, 1], and the bulk's other gases the rest,
+ * 1 − xₛ, in their proportions, or air if no bulk is given.
+ */
+export function lineBroadeningMixture(
+  species: string,
+  ownFraction: number,
+  bulk: ReadonlyMap<string, number> | undefined,
+): ReadonlyMap<string, number> {
+  const x = Math.min(Math.max(ownFraction, 0), 1);
+  const others = [...(bulk ?? new Map([["air", 1]]))].filter(([gas]) => gas !== species);
+  const total = others.reduce((sum, [, f]) => sum + f, 0);
+  const mixture = new Map<string, number>(
+    total > 0 ? others.map(([gas, f]) => [gas, ((1 - x) * f) / total]) : [["air", 1 - x]],
+  );
+  mixture.set(species, x);
+  return mixture;
+}
+
+/**
  * A species' lines in a layer: its k-distributions at the layer's temperature and its broadening
  * factor, its own mole fraction xₛ (its column over the layer's number column) taking `self` and
- * the bulk's gases the rest, 1 − xₛ, in their proportions, or air's ratio if no bulk is given.
+ * the bulk's gases the rest, 1 − xₛ, in their proportions, or air's ratio if no bulk is given
+ * ({@link lineBroadeningMixture}).
  */
 function speciesLines(
   table: KDistributionTable,
@@ -1614,13 +1675,7 @@ function speciesLines(
   bulk: ReadonlyMap<string, number> | undefined,
   basePa: number,
 ): SpeciesLines {
-  const x = Math.min(Math.max(ownFraction, 0), 1);
-  const others = [...(bulk ?? new Map([["air", 1]]))].filter(([gas]) => gas !== table.species);
-  const total = others.reduce((sum, [, f]) => sum + f, 0);
-  const mixture = new Map<string, number>(
-    total > 0 ? others.map(([gas, f]) => [gas, ((1 - x) * f) / total]) : [["air", 1 - x]],
-  );
-  mixture.set(table.species, x);
+  const mixture = lineBroadeningMixture(table.species, ownFraction, bulk);
   const broadening = broadeningFactor(table, mixture, temperatureK);
   const kDistribution = kDistributionAt(table, temperatureK, broadening.selfShare);
   const deepestPa = basePa * broadening.factor;
