@@ -108,7 +108,8 @@ use crate::planetary::chem::partition::{CondensatePhase, Condensates, CrustWater
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{HostKind, SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, Gas, SurfaceMaterial, SurfaceState, VolatileDraws, has_surface_section,
+    Atmosphere, Gas, NoMaturity, PassWeathered, SurfaceMaterial, SurfaceState, VolatileDraws,
+    WeatheringCase, has_surface_section,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
@@ -141,10 +142,10 @@ use crate::planetary::hooks::crust::{
     ParentSurface, formation_time,
 };
 use crate::planetary::hooks::figures::{
-    BeltMembership, Continents, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
-    ImpactorSources, MoonBirth, PartitionGround, PassFigures, SourceBelt, VolatileHistory,
-    VolatileHistoryInputs, WaterIce, WindowAt, WindowEntryInputs, pass_figures, past_outgassing,
-    relief, window_entry,
+    BeltMembership, Continents, CraterInputs, FieldBody, FiguresInputs, HostOrbit, HostOrbiter,
+    ImpactorOrbit, ImpactorSources, MoonBirth, PartitionGround, PassFigures, SourceBelt,
+    VolatileHistory, VolatileHistoryInputs, WaterIce, WetEpoch, WindowAt, WindowEntryInputs,
+    pass_figures, past_outgassing, relief, window_entry,
 };
 use crate::planetary::hooks::ocean::{OceanInputs, OceanRules, OceanSolutes, subsurface_ocean};
 use crate::planetary::hooks::surface::{
@@ -206,7 +207,7 @@ use crate::units::{
 use air::{AirRules, AirSurface, record_aerosols, record_structure};
 use modifiers::{
     ModifierCase, ModifierStar, ModifierSurface, PlanetField, RecordPrimary, planet_field,
-    record_modifiers,
+    planet_field_rules, reads_modifier_star, record_modifiers, weathering_case,
 };
 use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water, shell_lag};
 use small_bodies::{SmallBodyRules, SmallBodyTypes};
@@ -2621,17 +2622,19 @@ impl PlanetarySystem {
                 star_radius: brightest.map(|(_, state)| state.radius()),
             },
             // The air's photochemistry and the modifiers read the star on the record only under
-            // the batch's rules: under the hold neither is computed.
+            // the batch's rules, and the passes' maturity under the weathered area mix's
+            // (P14.T54.b.e): under both holds neither is computed.
             star_temperature: match self.record.air {
                 AirRules::Held => None,
                 AirRules::Batch => epoch.photochemistry_temperature(brightest),
             },
-            modifier_star: match self.record.air {
-                AirRules::Held => None,
-                AirRules::Batch => brightest.map(|(member, state)| ModifierStar {
+            modifier_star: if reads_modifier_star(self.record.air) {
+                brightest.map(|(member, state)| ModifierStar {
                     radius: state.radius(),
                     xuv: epoch.xuv[usize::from(member)],
-                }),
+                })
+            } else {
+                None
             },
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
@@ -3601,8 +3604,9 @@ impl PlanetarySystem {
         let record = builder
             .build()
             .expect("a generated record withholds no section and has a known kind");
-        // What its moons' modifiers read of its magnetosphere, from the record it is (P14.T54.b.c).
-        now.planet_field = planet_field(self.record.air, &record);
+        // What its moons' modifiers read of its magnetosphere, from the record it is (P14.T54.b.c),
+        // and their passes' maturity under the weathered area mix (P14.T54.b.e).
+        now.planet_field = planet_field(planet_field_rules(self.record.air), &record);
         (record, now)
     }
 
@@ -4759,6 +4763,25 @@ impl FiguresOf<'_> {
         }
     }
 
+    /// The volatile history (P14.T48.b) of the body whose figures' inputs are `inputs`, its air's
+    /// liquid-water flag `liquid_water`: its inventory's water over its record's bulk's radius,
+    /// its magma ocean's end, the hosts' light over its primary's past and its outgassing then
+    /// ([`past_outgassing`]), the system's age now. The one call its record's figures and its
+    /// passes' wet epoch read (P14.T54.b.e).
+    #[must_use]
+    fn volatile_history(&self, inputs: &FiguresInputs<'_>, liquid_water: bool) -> VolatileHistory {
+        VolatileHistory::derive(&VolatileHistoryInputs {
+            atmosphere: inputs.atmosphere,
+            water: self.inventory_water,
+            radius: Metres::from(self.bulk.radius),
+            liquid_water,
+            molten_until: self.craters.molten_until,
+            age: self.age,
+            window: |age: Years| self.past.window_at(age),
+            outgassing: |age: Years| past_outgassing(inputs, age),
+        })
+    }
+
     /// The figures' first stage of the atmosphere `air` with the tide `tide`
     /// ([`pass_figures`]): `None` for a body with no solid surface or a stage refused, which a
     /// pass's context reads as no figures, C₀'s.
@@ -4856,6 +4879,40 @@ impl PassRecordOf for PrimaryPasses<'_> {
         });
         PassContext::of(figures.as_ref(), ContextTide::Untided)
     }
+
+    fn weathering(&self, bulk: &PassBulk) -> Result<WeatheringCase, NoMaturity> {
+        let frame = self.frame;
+        weathering_case(
+            (frame.modifier_star, frame.seasonal.as_ref(), frame.age),
+            RecordPrimary::Star,
+            FieldBody {
+                class: FigureBulk::of_primary(self.body, bulk).class,
+                mass: bulk.mass,
+                age: frame.age,
+                rotation_period: self.spin.rotation_period,
+            },
+        )
+    }
+
+    fn wet_epoch(&self, bulk: &PassBulk, air: &Atmosphere, _: Kelvin) -> Option<WetEpoch> {
+        let figures_of = self.frame.figures_of(
+            (
+                bulk.mass,
+                FigureBulk::of_primary(self.body, bulk),
+                bulk.inventory_water,
+            ),
+            self.spin.rotation_period,
+            self.craters?,
+        )?;
+        let inputs = figures_of.inputs(
+            air,
+            (WattsPerSquareMetre::new(0.0), Subsurface::NotComputed),
+        );
+        figures_of
+            .volatile_history(&inputs, false)
+            .wet_epoch()
+            .copied()
+    }
 }
 
 /// A moon at the epoch's time as its derivation reads it: the body, its part, its orbit about its
@@ -4937,6 +4994,64 @@ impl MoonRecordOf for SatellitePasses<'_> {
                 craters,
             )?
             .first_stage(air, (tide.heat_flux, subsurface))
+    }
+
+    fn weathering(&self, shape: &MoonShape, bulk: &PassBulk) -> Result<WeatheringCase, NoMaturity> {
+        let MoonNow {
+            moon,
+            parent,
+            orbit,
+            ..
+        } = *self.now;
+        let frame = self.frame;
+        let figure = PlanetarySystem::moon_figure_of_shape(moon, shape, &bulk.fractions, parent);
+        weathering_case(
+            (frame.modifier_star, frame.seasonal.as_ref(), frame.age),
+            RecordPrimary::Planet {
+                field: parent.planet_field,
+                semi_major_axis: orbit.semi_major_axis(),
+            },
+            FieldBody {
+                class: figure.class,
+                mass: moon.satellite.mass(),
+                age: frame.age,
+                rotation_period: self.spin.rotation_period,
+            },
+        )
+    }
+
+    fn wet_epoch(
+        &self,
+        shape: &MoonShape,
+        bulk: &PassBulk,
+        air: &Atmosphere,
+        tide: &MoonTideAt,
+    ) -> Option<WetEpoch> {
+        let MoonNow {
+            moon,
+            parent,
+            orbit,
+            ..
+        } = *self.now;
+        let craters =
+            self.system
+                .moon_craters(self.frame.primary, moon, shape.ice_fraction, &orbit)?;
+        let figure = PlanetarySystem::moon_figure_of_shape(moon, shape, &bulk.fractions, parent);
+        // As its figures: a regular moon's ocean is its flag's.
+        let subsurface = match moon.satellite.moon() {
+            SatelliteMoon::Regular(_) => tide.subsurface,
+            SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => Subsurface::NotComputed,
+        };
+        let figures_of = self.frame.figures_of(
+            (moon.satellite.mass(), figure, bulk.inventory_water),
+            self.spin.rotation_period,
+            craters,
+        )?;
+        let inputs = figures_of.inputs(air, (tide.heat_flux, subsurface));
+        figures_of
+            .volatile_history(&inputs, false)
+            .wet_epoch()
+            .copied()
     }
 }
 
@@ -5169,6 +5284,9 @@ struct SurfaceSky<'a> {
     /// Its published pass's lid, whose row its regolith read (P14.T54.a), from which its record's
     /// crust is built; `None` where its passes took none.
     crust_lid: Option<&'a CrustLid>,
+    /// What its published pass's maturity carries (P14.T54.b.e), which its record's modifiers
+    /// read; `None` where it took none, and under the weathered area mix's hold.
+    weathered: Option<&'a PassWeathered>,
     /// Its surface lag (P14.T56.g), its derivation's, which its surface material reads.
     lag: SurfaceLag,
 }
@@ -5198,6 +5316,7 @@ impl SurfaceSky<'_> {
             regolith_albedo: derived.regolith_albedo(),
             spun: derived.spun(),
             crust_lid: derived.crust_lid(),
+            weathered: derived.weathered().as_ref().ok(),
             lag: derived.surface_lag(),
         }
     }
@@ -5213,6 +5332,7 @@ impl SurfaceSky<'_> {
             regolith_albedo: derived.regolith_albedo(),
             spun: derived.spun(),
             crust_lid: derived.crust_lid(),
+            weathered: derived.weathered().as_ref().ok(),
             lag: derived.surface_lag(),
         }
     }
@@ -5582,7 +5702,6 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     let (sky, bulk, interior) = (&case.sky, case.bulk, &case.interior);
     let air = sky.atmosphere;
     let spin = time.spin;
-    let window = |age: Years| past.window_at(age);
     let figures_of = FiguresOf {
         mass: interior.mass,
         bulk: FigureBulk::of_record(bulk),
@@ -5646,16 +5765,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
     // read the conditions (science-p14-t24b-laws §4.6, steps 8–12).
-    let history = VolatileHistory::derive(&VolatileHistoryInputs {
-        atmosphere: air,
-        water: interior.inventory_water,
-        radius: Metres::from(bulk.radius()),
-        liquid_water: conditions.liquid_water(),
-        molten_until: craters.molten_until,
-        age: time.age,
-        window,
-        outgassing: |age: Years| past_outgassing(&figure_inputs, age),
-    });
+    let history = figures_of.volatile_history(&figure_inputs, conditions.liquid_water());
     // T24.b's ice is the partition's cover's, read off the profile it built (lever (a)).
     let figures = figures.with_surface_under(&conditions, history, Some(&published), table, ice);
     // P14.T51.g.b's ocean, the record's own, in place of the tidal branch's its regime read.
@@ -5723,6 +5833,7 @@ fn with_held_members(
             condensates: surface.condensates(),
             crust,
             gases: case.sky.atmosphere.partial_pressures(),
+            weathered: case.sky.weathered,
         },
     );
     surface

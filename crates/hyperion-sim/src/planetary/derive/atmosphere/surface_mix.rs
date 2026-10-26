@@ -29,6 +29,17 @@
 //! airless rocky body takes the Moon's 0.11, any other a row by the material of the bulk its air
 //! reads. Its light is the body's hosts', built once per body before its passes, or for a single
 //! pass a host at the hottest host's temperature ([`PassLight`]).
+//!
+//! **The weathered regolith** (P14.T54.b.e, held at 24, `area_mix::WEATHERED_AREA_MIX_VERSION`):
+//! under the body's own climate each pass takes its maturity from the context it reads, P14.T51.d's
+//! law over that context's field, surface age, resurfacing time and heat flow, its own air and lid,
+//! and what its record gives once a body ([`PassWeathering`]), before it publishes its condensates
+//! ([`pass_maturity`]); its regolith is its lid's row weathered at that maturity ([`pass_regolith`],
+//! the one function its area mix and its bare regolith read). After it publishes, the modifiers
+//! over its condensates and its water give `ferric`'s deposit, which joins the area mix. The
+//! published pass's parts ride to the record ([`PassWeathered`]), whose modifiers read them, so
+//! that they are that pass's to the bit. Where a pass takes no maturity, its regolith is the
+//! stand-in's, with why ([`NoMaturity`]).
 
 use super::{
     Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, PublishedState, RunawayDeck,
@@ -41,14 +52,21 @@ use crate::planetary::chem::partition::{
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
 use crate::planetary::derive::photometry::area_mix::{
-    self, HostShade, RayleighFloorRules, Regolith,
+    self, AreaMixWeathering, HostShade, RayleighFloorRules, Regolith,
 };
 use crate::planetary::hooks::crust::{CrustBasis, CrustLid, LidAt};
-use crate::planetary::hooks::figures::{PartitionGround, PartitionOver, cover, partition_over};
-use crate::planetary::hooks::surface::{
-    OceanWeight, SurfaceConditions, SurfaceInputs, night_floor,
+use crate::planetary::hooks::figures::{
+    FieldBody, PartitionGround, PartitionOver, WetEpoch, cover, partition_over,
 };
-use crate::substance::ice_ih_density;
+use crate::planetary::hooks::modifiers::{
+    DeriveModifiersError, HeliocentricOrbit, ModifierHost, ModifierParts, Primary,
+    SurfaceModifiers, SurfaceWeathering, WaterHistory, oxidisable, surface_weathering,
+};
+use crate::planetary::hooks::surface::{
+    ColdProfile, OceanWeight, SurfaceConditions, SurfaceInputs, night_floor,
+    published_surface_pressure,
+};
+use crate::substance::{SubstanceId, ice_ih_density};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, MetresPerSecondSquared, WattsPerSquareMetre,
@@ -96,7 +114,8 @@ pub(crate) struct PassSurface<'a> {
     /// The pass's regolith provider where its lid is not known, on the material of the bulk its
     /// air reads ([`Regolith::of_material`], which takes the stand-ins of [`Regolith::bond`]): a
     /// pass under the body's own climate that takes a lid reads its row instead
-    /// ([`Regolith::with_lid`]), until P14.T54.b weathers it ([`Regolith::weathered`]).
+    /// ([`Regolith::with_lid`]), weathered at its maturity under the weathered area mix
+    /// (P14.T54.b.e; [`Regolith::weathered_lid`], [`pass_regolith`]).
     pub(crate) regolith: &'a RegolithOf<'a>,
     /// Whether a runaway's cloud is Venus's deck or, solved without it, the water cloud's
     /// (P14.T53.b part 1 (b)): [`RunawayDeck::Kept`] from both constructors, and
@@ -162,7 +181,179 @@ pub(crate) struct SpunClimate<'a> {
     /// Its crust's basis (P14.T51.c's first stage), once a body before its passes: `None` for a
     /// body with no crust, whose passes take no lid.
     pub(crate) basis: Option<CrustBasis>,
+    /// What its passes' maturity reads beyond each pass, once a body before them (P14.T54.b.e;
+    /// [`PassWeathering::in_force`]), or why it takes none.
+    pub(crate) weathering: Result<PassWeathering<'a>, NoMaturity>,
 }
+
+/// What a body's passes' maturity reads of its record beyond each pass, once a body before them
+/// (P14.T54.b.e; `PassRecordOf::weathering`): the record's modifiers read the same parts of its
+/// system (`system::modifiers`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct WeatheringCase {
+    /// Its host star's wind and light at the time: the zone's brightest star's radius and X-ray and
+    /// ultraviolet luminosity at the system's age, and the seasonal orbit's G M.
+    pub(crate) host: ModifierHost,
+    /// Its orbit about its host, a moon's planet's: the seasonal orbit's a and e.
+    pub(crate) orbit: HeliocentricOrbit,
+    /// What it orbits: its star, or a moon's planet's magnetosphere from that planet's record.
+    pub(crate) primary: Primary,
+    /// What its field's dynamo law reads beyond the figures' first stage of the context a pass
+    /// reads.
+    pub(crate) field: FieldBody,
+}
+
+/// Why a pass takes no maturity, so that its regolith is the stand-in's (P14.T54.b.e), each
+/// labelled and counted (the weathered area mix's census).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum NoMaturity {
+    /// The weathered area mix's hold, [`AreaMixWeathering::Held`]: nothing of it is computed.
+    Held,
+    /// The passes' stand-in, with no rotation law, or a pass whose area mix reads no regolith (a
+    /// gas envelope, a magma ocean, a body of no mass or radius).
+    NoRegolith,
+    /// No star of its zone at the time, or no orbit about its host then.
+    NoHost,
+    /// A moon whose planet's record gives no field (`system::modifiers::planet_field`).
+    NoPlanetField,
+    /// The context the pass read holds no figures: C₀, or a first stage refused.
+    NoFigures,
+    /// The pass took no lid: a body with no crust's basis.
+    NoLid,
+    /// The modifiers refused the pass's parts.
+    Refused(DeriveModifiersError),
+}
+
+impl NoMaturity {
+    /// Why a pass whose area mix reads no regolith takes no maturity: [`NoMaturity::NoRegolith`],
+    /// or under the hold [`NoMaturity::Held`], as every pass's is there.
+    #[must_use]
+    fn no_regolith() -> Self {
+        match AreaMixWeathering::in_force() {
+            AreaMixWeathering::Held => Self::Held,
+            AreaMixWeathering::Weathered => Self::NoRegolith,
+        }
+    }
+
+    /// The label a reader states.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "P14.T54.b.l's bless note and census state the labels"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Held => "the weathered area mix is held",
+            Self::NoRegolith => {
+                "no regolith in the area mix (the passes' stand-in, a gas envelope, a \
+                 magma ocean)"
+            }
+            Self::NoHost => "no star of its zone, or no orbit about it, at the time",
+            Self::NoPlanetField => "a moon whose planet's record gives no field",
+            Self::NoFigures => "the context the pass read holds no figures (C0, a stage refused)",
+            Self::NoLid => "the pass took no lid (no crust's basis)",
+            Self::Refused(_) => "the modifiers refused the pass's parts",
+        }
+    }
+}
+
+/// A pass's wet epoch of its air at its equilibrium temperature with no liquid water at its surface
+/// (`PassRecordOf::wet_epoch`), which an oxidised surface's deposit reads.
+pub(crate) type WetEpochOf<'a> = dyn Fn(&Atmosphere, Kelvin) -> Option<WetEpoch> + 'a;
+
+/// What a body's passes' maturity reads of the body beyond each pass, once a body before them
+/// (P14.T54.b.e): its record's case ([`WeatheringCase`]), its record's bulk's gravity, its mantle's
+/// sulphur (P14.T50.a's element inventory's, the record's) and its wet epoch at a pass.
+#[derive(Clone, Copy)]
+pub(crate) struct PassWeathering<'a> {
+    /// Its record's case.
+    pub(crate) case: WeatheringCase,
+    /// Its record's bulk's mean surface gravity ([`RecordSpin`]'s).
+    pub(crate) gravity: MetresPerSecondSquared,
+    /// Its mantle's sulphur, which an Io's deposits read.
+    pub(crate) mantle_sulphur: Kilograms,
+    /// Its wet epoch at a pass, read only where an oxidised deposit's other conditions hold
+    /// ([`oxidisable`]).
+    pub(crate) wet_epoch: &'a WetEpochOf<'a>,
+}
+
+impl PassWeathering<'_> {
+    /// What the passes' maturity reads under the weathered area mix's rules in force: `of()` under
+    /// [`AreaMixWeathering::Weathered`], and nothing computed under [`AreaMixWeathering::Held`]
+    /// ([`NoMaturity::Held`]). The one place the passes read the hold.
+    ///
+    /// # Errors
+    ///
+    /// [`NoMaturity::Held`] under the hold, and `of`'s error otherwise.
+    pub(crate) fn in_force(
+        of: impl FnOnce() -> Result<Self, NoMaturity>,
+    ) -> Result<Self, NoMaturity> {
+        match AreaMixWeathering::in_force() {
+            AreaMixWeathering::Held => Err(NoMaturity::Held),
+            AreaMixWeathering::Weathered => of(),
+        }
+    }
+}
+
+/// What a pass's maturity gave (P14.T54.b.e), which the published pass's carries to the record
+/// (rule (f): the record's modifiers read its context's parts, so that they are its own to the
+/// bit): its modifiers' parts, its water, its weathering and its weathered regolith.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PassWeathered {
+    parts: ModifierParts,
+    water: WaterHistory,
+    weathering: SurfaceWeathering,
+    regolith: Regolith,
+}
+
+impl PassWeathered {
+    /// Its modifiers' parts: its record's case, its context's field, surface age, resurfacing
+    /// time and heat flow, and its own air, lid and sulphur.
+    #[must_use]
+    pub(crate) const fn parts(&self) -> &ModifierParts {
+        &self.parts
+    }
+
+    /// Its water: wet now by its published condensates' liquid water, else dry since its wet
+    /// epoch where an oxidised deposit reads it, else never wet.
+    #[must_use]
+    pub(crate) const fn water(&self) -> WaterHistory {
+        self.water
+    }
+
+    /// Its maturity m, dimensionless in [+0, 1].
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the census and the record's tests read it")
+    )]
+    #[must_use]
+    pub(crate) const fn maturity(&self) -> f64 {
+        self.weathering.maturity()
+    }
+
+    /// Its weathering rate's two terms.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the census and the record's tests read it")
+    )]
+    #[must_use]
+    pub(crate) const fn weathering(&self) -> SurfaceWeathering {
+        self.weathering
+    }
+
+    /// The regolith its area mix read ([`pass_regolith`] at its maturity).
+    #[must_use]
+    pub(crate) const fn regolith(&self) -> Regolith {
+        self.regolith
+    }
+}
+
+/// What a pass's area mix gives beside its albedo: its maturity's outcome ([`PassWeathered`]), or
+/// why it took none.
+pub(crate) type PassMaturity = Result<PassWeathered, NoMaturity>;
 
 impl<'a> PassSurface<'a> {
     /// The passes' stand-in surface, under the light `light`: a climate with no contrast at each
@@ -379,9 +570,69 @@ fn spun_conditions(
     })
 }
 
+/// A spun pass's partition before it publishes its condensates ([`spun_partition`]): its partition,
+/// the cover it publishes over, and the conditions it read, `None` where nothing condenses. A pass
+/// takes its lid and its maturity between the two (P14.T54.b.e), which read no condensate.
+struct SpunPartition {
+    /// The partition, solved.
+    solved: Partition,
+    /// The cover its condensates are published over.
+    cover: SpunCover,
+    /// The state its cover reads.
+    state: SurfaceState,
+    /// The record's conditions it read, `None` where nothing condenses.
+    conditions: Option<SurfaceConditions>,
+}
+
+/// The cover a spun pass publishes its condensates over ([`SpunPartition`]).
+enum SpunCover {
+    /// Nothing condenses (L2): the mean's isothermal span, which no part of the cover reads.
+    Isothermal {
+        /// The span.
+        climate: ClimateSpan,
+        /// Water's cover, with no ice.
+        water: WaterCover,
+    },
+    /// The conditions' cold profile and water's cover ([`partition_over`]).
+    Profiled {
+        /// The profile.
+        profile: ColdProfile,
+        /// Water's cover.
+        water: WaterCover,
+    },
+}
+
+impl SpunPartition {
+    /// Its condensates published over its cover, with the partition and the conditions it read: the
+    /// record's computation, to the bit.
+    #[must_use]
+    fn publish(self) -> PassPartition {
+        let published = match self.cover {
+            SpunCover::Isothermal { climate, water } => {
+                let cold_area = |t: Kelvin| linear_cold_area(&climate, t);
+                self.solved.publish(&Cover {
+                    cold_area: &cold_area,
+                    state: self.state,
+                    water,
+                })
+            }
+            SpunCover::Profiled { profile, water } => {
+                let cold_area = |t: Kelvin| profile.area_below(t);
+                self.solved.publish(&Cover {
+                    cold_area: &cold_area,
+                    state: self.state,
+                    water,
+                })
+            }
+        };
+        (self.solved, published, self.conditions)
+    }
+}
+
 /// What a pass under its body's own climate `spun` publishes of the atmosphere `air` of the body
-/// `inputs` describe (P14.T54.a; rule (f)): the record's computation of its condensates, to the
-/// bit ([`SpunClimate`]), with the conditions it read.
+/// `inputs` describe (P14.T54.a; rule (f)), before it publishes ([`SpunPartition::publish`]): the
+/// record's computation of its condensates, to the bit ([`SpunClimate`]), with the conditions it
+/// read.
 ///
 /// The ground is the context's ([`spun_ground`]). The conditions are the record's of the air
 /// ([`spun_conditions`]), and the partition and its cover are [`partition_over`]'s. A column with
@@ -393,7 +644,7 @@ fn spun_partition(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     spun: &SpunClimate<'_>,
-) -> PassPartition {
+) -> SpunPartition {
     let ground = spun_ground(air, spun);
     let inventory = air.column_inventory();
     let conditions = inventory
@@ -404,32 +655,33 @@ fn spun_partition(
         // Nothing condenses (L2): no climate is read, and the mean's isothermal span stands in.
         let climate = ClimateSpan::isothermal(air.surface_temperature);
         let solved = partition(&climate, &ground.ground, &inventory);
-        let cold_area = |t: Kelvin| linear_cold_area(&climate, t);
-        let published = solved.publish(&Cover {
-            cold_area: &cold_area,
-            state: air.state,
-            water: WaterCover {
-                surface_water: ground.surface_water,
-                potential_ocean: ground.potential_ocean,
-                ice_fraction: 0.0,
-                ice_density: ice_ih_density(air.surface_temperature),
-                crust_water: ground.crust_water,
+        return SpunPartition {
+            solved,
+            cover: SpunCover::Isothermal {
+                climate,
+                water: WaterCover {
+                    surface_water: ground.surface_water,
+                    potential_ocean: ground.potential_ocean,
+                    ice_fraction: 0.0,
+                    ice_density: ice_ih_density(air.surface_temperature),
+                    crust_water: ground.crust_water,
+                },
             },
-        });
-        return (solved, published, None);
+            state: air.state,
+            conditions: None,
+        };
     };
     let PartitionOver {
         partition: solved,
         profile,
         water,
     } = partition_over((air, &inventory), &conditions, &ground, spun.record.table);
-    let cold_area = |t: Kelvin| profile.area_below(t);
-    let published = solved.publish(&Cover {
-        cold_area: &cold_area,
+    SpunPartition {
+        solved,
+        cover: SpunCover::Profiled { profile, water },
         state: air.state,
-        water,
-    });
-    (solved, published, Some(conditions))
+        conditions: Some(conditions),
+    }
 }
 
 /// The lid a pass under its body's own climate `spun` takes (P14.T54.a; decision-pre-23-review
@@ -517,15 +769,15 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 ///
 /// The atmosphere also carries whether the condensates the pass published list liquid water,
 /// which P14.T53.b part 1 (c)'s test reads ([`solved_as_a_hothouse`]): none for a gas envelope
-/// and a magma ocean, which publish none.
+/// and a magma ocean, which publish none. Beside the atmosphere and the lid it gives its
+/// maturity's outcome (P14.T54.b.e; [`PassMaturity`]).
 ///
 /// [`solved_as_a_hothouse`]: super::solved_as_a_hothouse
-#[must_use]
 pub(super) fn area_mixed(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
-) -> (Atmosphere, Option<CrustLid>) {
+) -> (Atmosphere, Option<CrustLid>, PassMaturity) {
     let hottest;
     let shade = match surface.light {
         PassLight::Shade(shade) => shade,
@@ -534,19 +786,32 @@ pub(super) fn area_mixed(
             &hottest
         }
     };
-    let (albedo, cloud_fraction, lid, liquid_water) = match air.state {
-        SurfaceState::GasEnvelope => (
-            area_mix::giant_bond(shade, inputs.heated, inputs.class),
-            area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
-            None,
-            false,
-        ),
+    let SurfaceMix {
+        albedo,
+        cloud_fraction,
+        lid,
+        liquid_water,
+        maturity,
+    } = match air.state {
+        SurfaceState::GasEnvelope => SurfaceMix {
+            albedo: area_mix::giant_bond(shade, inputs.heated, inputs.class),
+            cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
+            lid: None,
+            liquid_water: false,
+            maturity: Err(NoMaturity::no_regolith()),
+        },
         SurfaceState::MagmaOcean => {
             let lid = match surface.climate {
                 PassClimate::Spun(spun) => spun_lid(air, inputs, spun, None),
                 PassClimate::Given(_) => None,
             };
-            (area_mix::melt_bond(), 0.0, lid, false)
+            SurfaceMix {
+                albedo: area_mix::melt_bond(),
+                cloud_fraction: 0.0,
+                lid,
+                liquid_water: false,
+                maturity: Err(NoMaturity::no_regolith()),
+            }
         }
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
@@ -575,7 +840,18 @@ pub(super) fn area_mixed(
         liquid_water,
         ..*air
     };
-    (air, lid)
+    (air, lid, maturity)
+}
+
+/// What a pass's area mix gives ([`area_mixed`]): its Bond albedo before its floor, its cloud
+/// fraction, the lid it took, whether its condensates list liquid water, and its maturity's
+/// outcome.
+struct SurfaceMix {
+    albedo: f64,
+    cloud_fraction: f64,
+    lid: Option<CrustLid>,
+    liquid_water: bool,
+    maturity: PassMaturity,
 }
 
 /// The generator version from which an airless body's mean surface temperature is at least its
@@ -756,38 +1032,194 @@ pub(crate) mod floor_read {
     }
 }
 
+/// The regolith a pass's area mix reads on the surface its condensates leave, the one function
+/// its area mix and its bare regolith read (P14.T51.b, P14.T54.a, P14.T54.b.e; the cold traps'
+/// bare regolith is its [`Regolith::bond`] in the airless state): with no lid, the passes'
+/// regolith provider's on the material `material` (`of_material`, the material's rule); with a
+/// lid `lid` and no maturity, its row by the stand-in ([`Regolith::with_lid`]); and with a lid and
+/// the maturity m and mean surface temperature of `weathered`, its row weathered at m where it
+/// lies ([`Regolith::weathered_lid`]). A pass computes it before it publishes its condensates.
+#[must_use]
+pub(crate) fn pass_regolith(
+    of_material: &RegolithOf<'_>,
+    material: SurfaceMaterial,
+    lid: Option<&CrustLid>,
+    weathered: Option<(f64, Kelvin)>,
+) -> Regolith {
+    match (lid, weathered) {
+        (None, _) => of_material(material),
+        (Some(lid), None) => Regolith::with_lid(lid.row(), material),
+        (Some(lid), Some((maturity, temperature))) => {
+            Regolith::weathered_lid(lid.row(), material, maturity, temperature)
+        }
+    }
+}
+
+/// The maturity of the pass of the atmosphere `air` under its body's own climate `spun`, whose lid
+/// is `lid` (P14.T54.b.e), before it publishes its condensates: P14.T51.d's weathering law
+/// ([`surface_weathering`]) over its modifiers' parts, each the record's member to the bit where
+/// the record has it:
+///
+/// - **from its record, once a body** ([`PassWeathering`]): the host, the orbit, what it orbits,
+///   the record's bulk's gravity and the mantle's sulphur;
+/// - **from the context it reads** (its figures' first stage, K of the pass before): the field by
+///   its dynamo law over the record's class, mass, age and rotation period (`PassFigures`'s
+///   `magnetic_field`, the record's figures' one function), the surface age, the resurfacing time
+///   at that stage's heat flow, and the heat flow;
+/// - **from itself:** its air's surface pressure as its conditions publish it (none in the airless
+///   state, [`published_surface_pressure`]) and mean surface temperature, its lid's row and its
+///   air's partial pressures, the record's conditions' and gases' to the bit.
+///
+/// It reads no condensate and no water. `Err` with why where it takes none: the hold, the
+/// record's case, no figures in the context it reads (C₀), no lid, or the parts refused.
+fn pass_maturity<'a>(
+    air: &Atmosphere,
+    spun: &SpunClimate<'a>,
+    lid: Option<&CrustLid>,
+) -> Result<Maturing<'a>, NoMaturity> {
+    let weathering = spun.weathering?;
+    let figures = spun.context.figures().ok_or(NoMaturity::NoFigures)?;
+    let lid = lid.ok_or(NoMaturity::NoLid)?;
+    let case = &weathering.case;
+    let parts = ModifierParts {
+        host: case.host,
+        orbit: case.orbit,
+        primary: case.primary,
+        gravity: weathering.gravity,
+        surface_pressure: published_surface_pressure(air),
+        field: figures.magnetic_field(&case.field),
+        surface_age: figures.surface_age(),
+        resurfacing_time: figures.resurfacing_time(),
+        heat_flow: figures.heat_flow(),
+        surface_temperature: air.surface_temperature,
+        mantle_sulphur: weathering.mantle_sulphur,
+        lid: lid.row(),
+        gases: air.partials,
+    };
+    let weathered = surface_weathering(&parts).map_err(NoMaturity::Refused)?;
+    Ok(Maturing {
+        parts,
+        weathering: weathered,
+        record: weathering,
+    })
+}
+
+/// A pass's maturity before it publishes ([`pass_maturity`]): its modifiers' parts, its weathering
+/// and what its record gives its maturity.
+#[derive(Clone, Copy)]
+struct Maturing<'a> {
+    parts: ModifierParts,
+    weathering: SurfaceWeathering,
+    record: PassWeathering<'a>,
+}
+
+/// The weathering deposits of a pass whose maturity is `maturity`, which published `published`
+/// (P14.T51.j's `ferric`; P14.T54.b.e), each a row and its area, with the maturity's outcome its
+/// published pass carries: the modifiers over its parts, its published condensates and its water
+/// ([`SurfaceModifiers::derive`]), whose maturity is the one its regolith took (asserted in the
+/// debug builds), its regolith `regolith`. The water is wet now where its condensates list liquid
+/// water (the record's conditions' flag, `with_condensates`), else, where an oxidised deposit's
+/// other conditions hold ([`oxidisable`]), dry since its wet epoch at the pass, else never wet,
+/// which the deposit then does not read. No deposit where the modifiers refuse (the water's dry
+/// time alone, which a wet epoch's end never makes), and none at all without a maturity.
+fn pass_deposits(
+    air: &Atmosphere,
+    inputs: &AtmosphereInputs,
+    (maturity, regolith): (Result<Maturing<'_>, NoMaturity>, Regolith),
+    published: &Condensates,
+) -> (Vec<(SubstanceId, f64)>, PassMaturity) {
+    let Maturing {
+        parts,
+        weathering,
+        record,
+    } = match maturity {
+        Ok(maturity) => maturity,
+        Err(none) => return (Vec::new(), Err(none)),
+    };
+    let wet_now = published
+        .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+        .is_some();
+    let water = if wet_now {
+        WaterHistory::WetNow
+    } else if oxidisable(&parts) {
+        (record.wet_epoch)(air, inputs.equilibrium).map_or(WaterHistory::NeverWet, |epoch| {
+            WaterHistory::DrySince(epoch.end())
+        })
+    } else {
+        // The deposit, the water's one reader, does not read it here (`oxidisable`).
+        WaterHistory::NeverWet
+    };
+    let derived = SurfaceModifiers::derive(&parts.with_published(published, water));
+    debug_assert!(
+        derived
+            .as_ref()
+            .is_ok_and(|m| m.maturity().total_cmp(&weathering.maturity()).is_eq()),
+        "the modifiers' maturity is the pass's own: {derived:?}"
+    );
+    let deposits = derived.map_or_else(
+        |_| Vec::new(),
+        |modifiers| {
+            modifiers
+                .weathering_deposits()
+                .iter()
+                .map(|deposit| (deposit.substance(), deposit.area_fraction()))
+                .collect()
+        },
+    );
+    let weathered = PassWeathered {
+        parts,
+        water,
+        weathering,
+        regolith,
+    };
+    (deposits, Ok(weathered))
+}
+
 /// The area-mix Bond albedo and cloud fraction of a body with a surface, the atmosphere `air` of
 /// the body `inputs` describe on the surface `surface` under the light `shade` ([`area_mixed`]),
 /// its cloud a runaway's by the surface's deck, the lid its pass takes under the body's own
-/// climate, whose row its regolith is, and whether the condensates it publishes list liquid water
-/// (P14.T53.b part 1 (c)).
+/// climate, whose row its regolith is, whether the condensates it publishes list liquid water
+/// (P14.T53.b part 1 (c)), and its maturity's outcome (P14.T54.b.e).
+///
+/// Under the body's own climate a pass partitions and takes its conditions, its lid, its maturity
+/// ([`pass_maturity`]) and its regolith ([`pass_regolith`]), and then publishes its condensates,
+/// over which its modifiers give `ferric`'s deposit ([`pass_deposits`]); the area mix then reads
+/// the condensates, the deposit and the regolith on the rest.
 #[must_use]
 fn surface_and_cloud(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
     shade: &HostShade,
-) -> (f64, f64, Option<CrustLid>, bool) {
-    let regolith_of = |lid: Option<&CrustLid>| {
-        lid.map_or_else(
-            || (surface.regolith)(inputs.material),
-            |lid| Regolith::with_lid(lid.row(), inputs.material),
-        )
-        .bond(air.state, shade.bands())
-        .bond
-    };
+) -> SurfaceMix {
     let Some(gravity) = surface_gravity(inputs) else {
         // A body of no mass or radius holds nothing, and takes no lid.
-        return (regolith_of(None), 0.0, None, false);
+        let regolith = pass_regolith(surface.regolith, inputs.material, None, None);
+        return SurfaceMix {
+            albedo: regolith.bond(air.state, shade.bands()).bond,
+            cloud_fraction: 0.0,
+            lid: None,
+            liquid_water: false,
+            maturity: Err(NoMaturity::no_regolith()),
+        };
     };
-    let ((solved, published, _), lid) = match surface.climate {
+    let ((solved, published, _), lid, (deposits, maturity), regolith) = match surface.climate {
         PassClimate::Given(climate_of) => (
             given_partition(air, inputs, surface, (climate_of, gravity)),
             None,
+            (Vec::new(), Err(NoMaturity::no_regolith())),
+            pass_regolith(surface.regolith, inputs.material, None, None),
         ),
         PassClimate::Spun(spun) => {
-            let partition = spun_partition(air, inputs, spun);
-            let lid = spun_lid(air, inputs, spun, partition.2.as_ref());
+            let pending = spun_partition(air, inputs, spun);
+            let lid = spun_lid(air, inputs, spun, pending.conditions.as_ref());
+            let maturity = pass_maturity(air, spun, lid.as_ref());
+            let at = maturity
+                .as_ref()
+                .ok()
+                .map(|maturing| (maturing.weathering.maturity(), air.surface_temperature));
+            let regolith = pass_regolith(surface.regolith, inputs.material, lid.as_ref(), at);
+            let partition = pending.publish();
             #[cfg(test)]
             spun_read::record(
                 partition.2.as_ref(),
@@ -795,11 +1227,16 @@ fn surface_and_cloud(
                 &partition.1,
                 lid.as_ref(),
             );
-            (partition, lid)
+            let deposits = pass_deposits(air, inputs, (maturity, regolith), &partition.1);
+            (partition, lid, deposits, regolith)
         }
     };
-    let regolith = regolith_of(lid.as_ref());
-    let ground = area_mix::surface_bond(&published, &solved, regolith, shade);
+    let ground = area_mix::surface_bond(
+        &published,
+        &solved,
+        (regolith.bond(air.state, shade.bands()).bond, &deposits),
+        shade,
+    );
     let deck = surface.deck;
     let cloud = area_mix::cloud_fraction((air.state, deck), &solved, shade);
     let albedo = area_mix::under_cloud(
@@ -810,7 +1247,13 @@ fn surface_and_cloud(
     let liquid_water = published
         .entry(Gas::Water.substance(), CondensatePhase::Liquid)
         .is_some();
-    (albedo, cloud, lid, liquid_water)
+    SurfaceMix {
+        albedo,
+        cloud_fraction: cloud,
+        lid,
+        liquid_water,
+        maturity,
+    }
 }
 
 /// What the last spun pass on a thread published (P14.T54.a's rule (f) tests): its conditions, if

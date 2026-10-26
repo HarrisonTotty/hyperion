@@ -17,7 +17,12 @@ use super::*;
 use crate::id::BodyId;
 use crate::planetary::chem::inventory::Reservoir;
 use crate::planetary::chem::partition::CondensatePhase;
-use crate::planetary::derive::atmosphere::Gas;
+use crate::planetary::derive::atmosphere::{
+    Gas, NoMaturity, PassMaturity, PassWeathered, SurfaceMaterial, SurfaceState,
+};
+use crate::planetary::derive::photometry::area_mix::{
+    AreaMixWeathering, CAPPED_ROWS, Regolith, sun_bands,
+};
 use crate::planetary::fate::BodyFate;
 use crate::planetary::hooks::crust::LidCrust;
 use crate::planetary::hooks::modifiers::{
@@ -67,6 +72,10 @@ struct BatchBody {
     moon_axis: Option<Metres>,
     sulphur: Kilograms,
     gases: PartialPressures,
+    /// Its derivation's published pass's maturity's outcome (P14.T54.b.e).
+    weathered: PassMaturity,
+    /// Its derivation's Bond albedo, its equilibrium temperature, K, and its state.
+    published: (f64, f64, SurfaceState),
 }
 
 impl BatchBody {
@@ -138,6 +147,12 @@ fn bodies_of(ctx: &'static SystemContext, system: &PlanetarySystem) -> Vec<Batch
                         moon_axis: None,
                         sulphur: sulphur(derived.element_inventory()),
                         gases: *derived.atmosphere().partial_pressures(),
+                        weathered: *derived.weathered(),
+                        published: (
+                            derived.albedo().value(),
+                            derived.equilibrium_temperature().value(),
+                            derived.atmosphere().state(),
+                        ),
                     });
                 }
                 parents.push((body.index, record, now, fate));
@@ -168,6 +183,12 @@ fn bodies_of(ctx: &'static SystemContext, system: &PlanetarySystem) -> Vec<Batch
                         ),
                         sulphur: sulphur(derived.element_inventory()),
                         gases: *derived.atmosphere().partial_pressures(),
+                        weathered: *derived.weathered(),
+                        published: (
+                            derived.albedo().value(),
+                            derived.equilibrium_temperature().value(),
+                            derived.atmosphere().state(),
+                        ),
                     });
                 }
             }
@@ -343,6 +364,7 @@ fn the_held_record_computes_no_modifiers() {
         condensates: surface.condensates(),
         crust: surface.crust().ok().copied(),
         gases: &body.gases,
+        weathered: None,
     };
     assert!(matches!(
         record_modifiers(AirRules::Batch, &case, &read),
@@ -426,6 +448,7 @@ fn the_table_s_moon_mercury_mars_and_titan_take_their_shapes_under_the_switch() 
                 condensates: &none,
                 crust: Some(crust),
                 gases: body.atmosphere().partial_pressures(),
+                weathered: None,
             },
         );
         let Modelled::Ok(m) = modifiers else {
@@ -1065,4 +1088,417 @@ fn the_registry_s_feo_t_is_its_composition_s() {
             }
         }
     }
+}
+
+// P14.T54.b.e: the weathered area mix, every 24 hold in force, the air's sections under the batch.
+
+/// The batch bodies of the first `count` sample systems, generated afresh under every 24 hold
+/// with the weathered area mix at `rules` and the air's sections under the batch's rules: a
+/// system's records derive lazily, so each is built inside the switches.
+fn bodies_at_24(count: usize, rules: AreaMixWeathering) -> Vec<BatchBody> {
+    use crate::planetary::derive::photometry::area_mix::with_area_mix_weathering;
+    use crate::planetary::system::tests::sample;
+    use crate::planetary::testing::with_every_24_hold;
+
+    with_every_24_hold(|| {
+        with_area_mix_weathering(rules, || {
+            sample()
+                .iter()
+                .take(count)
+                .flat_map(|ctx| {
+                    let system = generate(SEED, ctx).with_record_rules(air_batch());
+                    bodies_of(ctx, &system)
+                })
+                .collect()
+        })
+    })
+}
+
+/// The first [`MODIFIER_SAMPLE`] systems' batch bodies under the weathered area mix, built once.
+fn weathered_bodies() -> &'static [BatchBody] {
+    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
+    BODIES.get_or_init(|| bodies_at_24(MODIFIER_SAMPLE, AreaMixWeathering::Weathered))
+}
+
+/// The same under every 24 hold but the weathered area mix's, built once.
+fn held_bodies_at_24() -> &'static [BatchBody] {
+    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
+    BODIES.get_or_init(|| bodies_at_24(MODIFIER_SAMPLE, AreaMixWeathering::Held))
+}
+
+/// The golden systems' batch bodies under every 24 hold and the weathered area mix, generated
+/// afresh, built once.
+fn golden_weathered_bodies() -> &'static [BatchBody] {
+    use crate::planetary::derive::photometry::area_mix::with_area_mix_weathering;
+    use crate::planetary::system::tests::golden_systems_afresh;
+    use crate::planetary::testing::with_every_24_hold;
+
+    static SYSTEMS: OnceLock<Vec<(&'static str, SystemContext, PlanetarySystem)>> = OnceLock::new();
+    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
+    let weathered = |run: &dyn Fn() -> Vec<BatchBody>| {
+        with_every_24_hold(|| with_area_mix_weathering(AreaMixWeathering::Weathered, run))
+    };
+    let systems = SYSTEMS.get_or_init(|| {
+        with_every_24_hold(|| {
+            with_area_mix_weathering(AreaMixWeathering::Weathered, golden_systems_afresh)
+        })
+    });
+    BODIES.get_or_init(|| {
+        weathered(&|| {
+            systems
+                .iter()
+                .flat_map(|(_, ctx, system)| {
+                    bodies_of(ctx, &system.clone().with_record_rules(air_batch()))
+                })
+                .collect()
+        })
+    })
+}
+
+/// The Bond albedo about a Sun of the regolith `regolith`, airless: what its bins, or the
+/// stand-in's arm, give under one light, for comparing two regoliths to the bit.
+fn regolith_bond(regolith: &Regolith) -> f64 {
+    regolith.bond(SurfaceState::Airless, &sun_bands()).bond
+}
+
+/// Rule (f) under the weathered area mix (P14.T54.b.e), over the first [`MODIFIER_SAMPLE`] sample
+/// systems and the golden systems, every 24 hold in force and the air's sections under the batch:
+/// every record whose published pass took a maturity carries its modifiers, and they are that
+/// pass's to the bit, the modifiers over its parts, the record's condensates (the pass's, rule (f))
+/// and its water; their maturity is the pass's; the pass's parts that the record publishes too
+/// (the host, the orbit, what it orbits, the bulk section's gravity, the conditions' surface
+/// pressure and mean temperature, the mantle's sulphur, the crust's lid and the air's gases) are
+/// the record's own to the bit, and its field the figures'; the regolith its area mix read is the
+/// record's lid weathered at that maturity (or capped, `basalt_reduced`), to the bit; and the
+/// `ferric` deposit its area mix read is the record's. The context's surface age and heat flow,
+/// which the figures (K(P*)) read from the published pass's own air, are stated against the
+/// figures'.
+///
+/// R09's field header (`CoarseInputs::for_body`) carries that maturity to the bit, and its lid
+/// entry the `FeO_T` the area mix's weathering read, so that the server's albedo scale
+/// (`surface/service.rs::field_albedo_scale`, whose own test holds it to the albedos weathered at
+/// its header's maturity) is solved on the albedos weathered at the maturity the area mix read
+/// (P14.T54.b's "the server's albedo scale solved on the weathered albedos").
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "rule (f), member by member, with the header's half of the albedo scale's test"
+)]
+fn under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_s() {
+    let (mut checked, mut capped, mut ferric, mut headers) = (0_usize, 0_usize, 0_usize, 0_usize);
+    let mut none: BTreeMap<String, usize> = BTreeMap::new();
+    let (mut age_moved, mut heat_moved) = (0.0_f64, 0.0_f64);
+    let mut mismatches = Vec::new();
+    for body in weathered_bodies().iter().chain(golden_weathered_bodies()) {
+        let id = body.record.identity().id();
+        let surface = body.surface();
+        let pass = match &body.weathered {
+            Ok(pass) => pass,
+            Err(why) => {
+                *none.entry(format!("{why:?}")).or_default() += 1;
+                continue;
+            }
+        };
+        let Modelled::Ok(record) = surface.modifiers() else {
+            panic!("{id}: its pass took a maturity, and its record carries no modifiers");
+        };
+        let rebuilt = rebuilt_inputs(body).expect("a record with modifiers gives its inputs");
+        let parts = pass.parts();
+        let members = [
+            (
+                "host",
+                format!("{:?}", parts.host),
+                format!("{:?}", rebuilt.host),
+            ),
+            (
+                "orbit",
+                format!("{:?}", parts.orbit),
+                format!("{:?}", rebuilt.orbit),
+            ),
+            (
+                "primary",
+                format!("{:?}", parts.primary),
+                format!("{:?}", rebuilt.primary),
+            ),
+            (
+                "gravity",
+                format!("{:?}", parts.gravity),
+                format!("{:?}", rebuilt.gravity),
+            ),
+            (
+                "surface pressure",
+                format!("{:?}", parts.surface_pressure),
+                format!("{:?}", rebuilt.surface_pressure),
+            ),
+            (
+                "surface temperature",
+                format!("{:?}", parts.surface_temperature),
+                format!("{:?}", rebuilt.surface_temperature),
+            ),
+            (
+                "mantle sulphur",
+                format!("{:?}", parts.mantle_sulphur),
+                format!("{:?}", rebuilt.mantle_sulphur),
+            ),
+            (
+                "lid",
+                format!("{:?}", parts.lid),
+                format!("{:?}", rebuilt.lid),
+            ),
+            (
+                "gases",
+                format!("{:?}", parts.gases),
+                format!("{:?}", rebuilt.gases),
+            ),
+        ];
+        for (member, pass_s, record_s) in members {
+            if pass_s != record_s {
+                mismatches.push(format!(
+                    "{id} ({}): {member} {pass_s} against the record's {record_s}",
+                    if body.planet.is_some() {
+                        "moon"
+                    } else {
+                        "primary"
+                    }
+                ));
+            }
+        }
+        let own = SurfaceModifiers::derive(
+            &pass
+                .parts()
+                .with_published(surface.condensates(), pass.water()),
+        )
+        .unwrap_or_else(|e| panic!("{id}: {e}"));
+        if format!("{record:?}") != format!("{own:?}") {
+            mismatches.push(format!(
+                "{id}: the modifiers {record:?} against the pass's {own:?}"
+            ));
+        }
+        if record.maturity().total_cmp(&pass.maturity()).is_ne() {
+            mismatches.push(format!(
+                "{id}: the maturity {} against the pass's {}",
+                record.maturity(),
+                pass.maturity()
+            ));
+        }
+        assert_eq!(parts.field, rebuilt.field, "{id}");
+        let relative = |a: f64, b: f64| {
+            if b > 0.0 {
+                (a / b - 1.0).abs()
+            } else {
+                a.abs()
+            }
+        };
+        age_moved = age_moved.max(relative(
+            parts.surface_age.value(),
+            rebuilt.surface_age.value(),
+        ));
+        heat_moved = heat_moved.max(relative(parts.heat_flow.value(), rebuilt.heat_flow.value()));
+        let regolith = Regolith::weathered_lid(
+            rebuilt.lid,
+            surface.material(),
+            pass.maturity(),
+            surface.conditions().mean_surface_temperature(),
+        );
+        assert_eq!(
+            regolith.is_weathered(),
+            pass.regolith().is_weathered(),
+            "{id}"
+        );
+        assert_same_bits(regolith_bond(&regolith), regolith_bond(&pass.regolith()));
+        capped += usize::from(!regolith.is_weathered());
+        ferric += usize::from(!record.weathering_deposits().is_empty());
+        checked += 1;
+        // The field header carries the maturity, and the lid's entry the FeO_T the law read.
+        if let Ok(inputs) = CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx) {
+            let header = inputs
+                .weathering()
+                .expect("a record with modifiers gives its header's");
+            assert_same_bits(header.maturity, pass.maturity());
+            let key = rebuilt.lid.substance().key();
+            let entry = inputs
+                .palette()
+                .entries()
+                .iter()
+                .find(|entry| entry.substance == key)
+                .unwrap_or_else(|| panic!("{id}: its lid's entry"));
+            assert_eq!(
+                entry.feo_mass_fraction,
+                palette_feo_mass_fraction(rebuilt.lid),
+                "{id}"
+            );
+            headers += 1;
+        }
+    }
+    eprintln!(
+        "rule (f) under the weathered area mix: {checked} records their published pass's to the \
+         bit ({capped} on the stand-in's arm, {ferric} with ferric, {headers} field headers at \
+         its maturity); the context's surface age \
+         and heat flow against the figures' (K(P*)) at most {age_moved:.2e} and {heat_moved:.2e} \
+         apart, relative; no maturity {none:?}"
+    );
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert!(checked > 100, "{checked}");
+}
+
+/// The same seed twice under the weathered area mix gives the same records and the same published
+/// passes' maturities, to the bit (their renderings), over the first six sample systems.
+#[test]
+fn under_the_weathered_area_mix_the_same_seed_twice_gives_the_same_records() {
+    let again = bodies_at_24(6, AreaMixWeathering::Weathered);
+    let first: Vec<_> = weathered_bodies()
+        .iter()
+        .take(again.len())
+        .map(|body| format!("{:?} {:?}", body.record, body.weathered))
+        .collect();
+    let twice: Vec<_> = again
+        .iter()
+        .map(|body| format!("{:?} {:?}", body.record, body.weathered))
+        .collect();
+    assert_eq!(first, twice);
+    let weathered = again.iter().filter(|body| body.weathered.is_ok()).count();
+    eprintln!(
+        "the same seed twice: {} records, {weathered} weathered",
+        again.len()
+    );
+    assert!(weathered > 0);
+}
+
+/// The weathered area mix's census (P14.T54.b.e), every 24 hold in force and the air's sections
+/// under the batch, over the first [`MODIFIER_SAMPLE`] sample systems, printed for the record and
+/// the bless note: the published passes' regoliths weathered, capped (`basalt_reduced`) or on the
+/// stand-in's arm for want of a modelled `FeO_T`, an optics row or a density (each lid counted),
+/// the passes that took no maturity by
+/// why, the bodies with `ferric`, and against the same systems under the weathered area mix's hold
+/// the largest moves of the Bond albedo and the equilibrium temperature, the bodies that moved
+/// though they took no maturity, and every state flip by name. Under the hold every pass took
+/// none.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census: each count and move stated beside its basis"
+)]
+fn the_weathered_area_mix_s_census() {
+    let (weathered, held) = (weathered_bodies(), held_bodies_at_24());
+    assert_eq!(weathered.len(), held.len());
+    assert!(
+        held.iter()
+            .all(|body| body.weathered == Err(NoMaturity::Held))
+    );
+    let mut outcomes: BTreeMap<String, usize> = BTreeMap::new();
+    let mut lids: BTreeMap<String, usize> = BTreeMap::new();
+    let mut ferric = Vec::new();
+    let mut flips = Vec::new();
+    let mut moved_without = Vec::new();
+    let mut largest_albedo = (0.0_f64, String::new());
+    let mut largest_t_eq = (0.0_f64, String::new());
+    // The airless weathered regoliths by maturity (below 10⁻³, to 0.5, above), and those that rose
+    // above the cap's 0.11 with the brightest.
+    let mut airless_by_maturity = [0_usize; 3];
+    let mut above_the_cap = (0_usize, 0.0_f64, String::new());
+    let lid_of = |body: &BatchBody| {
+        body.surface().crust().ok().map_or_else(
+            || "none".to_owned(),
+            |crust| crust.lid_lithology().substance().key().as_str().to_owned(),
+        )
+    };
+    for (body, before) in weathered.iter().zip(held) {
+        let id = body.record.identity().id();
+        assert_eq!(id, before.record.identity().id());
+        let lid = lid_of(body);
+        let outcome = match &body.weathered {
+            Ok(pass) if pass.regolith().is_weathered() => "weathered".to_owned(),
+            Ok(_) if CAPPED_ROWS.contains(&lid.as_str()) => "capped (basalt_reduced)".to_owned(),
+            Ok(_) => "the stand-in's arm (FeO_T not modelled, no optics or no density)".to_owned(),
+            Err(why) => format!("no maturity: {}", why.label()),
+        };
+        *outcomes.entry(outcome).or_default() += 1;
+        if body.weathered.is_ok() {
+            *lids.entry(lid.clone()).or_default() += 1;
+        }
+        if let Modelled::Ok(m) = body.surface().modifiers()
+            && let Some(deposit) = m.weathering_deposits().first()
+        {
+            ferric.push(format!(
+                "{id} ({lid}, {:?}) over {:.3}: {:.4} → {:.4}, held its lid {} ({:?})",
+                body.published.2,
+                deposit.area_fraction(),
+                before.published.0,
+                body.published.0,
+                lid_of(before),
+                before.published.2,
+            ));
+        }
+        let (albedo, t_eq, state) = body.published;
+        if let Ok(pass) = &body.weathered
+            && pass.regolith().is_weathered()
+            && state == SurfaceState::Airless
+        {
+            let m = pass.maturity();
+            airless_by_maturity[usize::from(m >= 1e-3) + usize::from(m > 0.5)] += 1;
+            let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+            if albedo > moon {
+                above_the_cap.0 += 1;
+                if albedo > above_the_cap.1 {
+                    above_the_cap.1 = albedo;
+                    above_the_cap.2 = format!("{id} ({lid}, m {m:.3e})");
+                }
+            }
+        }
+        let (was, t_was, state_was) = before.published;
+        let describe = || {
+            let pass = body.weathered.as_ref().ok();
+            format!(
+                "{id} ({lid}, {state:?}, m {:?}, k {:?}): {was:.4} → {albedo:.4}, T_eq \
+                 {t_was:.2} → {t_eq:.2} K",
+                pass.map(PassWeathered::maturity),
+                pass.map(|pass| pass.weathering().weathering().value()),
+            )
+        };
+        if (albedo - was).abs() > largest_albedo.0 {
+            largest_albedo = ((albedo - was).abs(), describe());
+        }
+        if (t_eq - t_was).abs() > largest_t_eq.0 {
+            largest_t_eq = ((t_eq - t_was).abs(), describe());
+        }
+        if body.weathered.is_err() && (albedo - was).abs() > 0.0 {
+            moved_without.push(describe());
+        }
+        if state != state_was {
+            flips.push(format!("{} {state_was:?} → {state:?}", describe()));
+        }
+    }
+    let shown = |list: &[String]| {
+        list.iter()
+            .take(12)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n    ")
+    };
+    eprintln!(
+        "the weathered area mix's census over {} surfaces of {MODIFIER_SAMPLE} systems:\n  \
+         outcomes {outcomes:#?}\n  lids of the passes with a maturity {lids:?}\n  ferric on {} \
+         bodies:\n    {}\n  the largest albedo move {:.4}: {}\n  the largest T_eq move {:.3} K: \
+         {}\n  moved with no maturity of their own: {}\n    {}\n  state flips: {}\n    {}\n  \
+         airless weathered regoliths by maturity (below 10⁻³, to 0.5, above) {airless_by_maturity:?}, \
+         {} above the cap's 0.11, the brightest {:.4}: {}",
+        weathered.len(),
+        ferric.len(),
+        shown(&ferric),
+        largest_albedo.0,
+        largest_albedo.1,
+        largest_t_eq.0,
+        largest_t_eq.1,
+        moved_without.len(),
+        shown(&moved_without),
+        flips.len(),
+        shown(&flips),
+        above_the_cap.0,
+        above_the_cap.1,
+        above_the_cap.2,
+    );
+    assert!(
+        outcomes.get("weathered").copied().unwrap_or(0) > 0,
+        "{outcomes:?}"
+    );
 }

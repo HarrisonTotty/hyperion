@@ -1919,6 +1919,25 @@ struct StepColumn<'a> {
     ceiling: GreenhouseCeiling,
 }
 
+/// The surface pressure the conditions of the air `air` publish
+/// ([`SurfaceConditions::surface_pressure`]): none in the airless state, whose column holds no air
+/// whatever residue its partial pressures hold ([`StepColumn::column`]'s rule), and otherwise its
+/// own, none where it has none: a tenuous air's own under 100 Pa among them, as its conditions
+/// publish it (P14.T53.c's `Surface::of`). A pass's maturity reads it so (P14.T54.b.e), as the
+/// record's modifiers read its conditions'.
+#[must_use]
+pub(crate) fn published_surface_pressure(air: &Atmosphere) -> Pascals {
+    match air.state() {
+        SurfaceState::Airless => Pascals::ZERO,
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Temperate
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => air.surface_pressure().unwrap_or(Pascals::ZERO),
+    }
+}
+
 impl StepColumn<'_> {
     /// The column, with its gases' mole fractions and mean molar mass; its specific heat takes
     /// their `c_p` ÷ R at its mean surface temperature ([`GasFractions::heat_capacity_over_r_at`]).

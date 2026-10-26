@@ -17,15 +17,26 @@
 //! `hooks::modifiers` is in this file, behind the hold, so that the held arm computes nothing (the
 //! source scan's `HELD` list, `modifiers_nothing_on_the_record_reads_the_modifiers_yet`,
 //! decision-p14-t54b-open §3.3).
+//!
+//! **The weathered area mix** (P14.T54.b.e, behind its own hold, [`AreaMixWeathering`]): a body's
+//! passes take their maturity from the same parts of its system ([`weathering_case`], once a body
+//! before them), and from the context each reads; the published pass carries its context's field,
+//! surface age, resurfacing time and heat flow and its water to the record
+//! ([`PassWeathered`]), whose modifiers read them in place of the figures' (K(P*)), so that they
+//! are that pass's to the bit (rule (f)). Under [`AreaMixWeathering::Held`] no pass carries any,
+//! and the record reads its figures' as before.
 
 use crate::orbit::KeplerElements;
 use crate::planetary::chem::partition::Condensates;
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::PartialPressures;
+use crate::planetary::derive::atmosphere::{
+    NoMaturity, PartialPressures, PassWeathered, WeatheringCase,
+};
+use crate::planetary::derive::photometry::area_mix::AreaMixWeathering;
 use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::figures::surface_age::resurfacing_time;
-use crate::planetary::hooks::figures::{GlobalFigures, MagneticField};
+use crate::planetary::hooks::figures::{FieldBody, GlobalFigures, MagneticField};
 use crate::planetary::hooks::modifiers::{
     HeliocentricOrbit, ModifierHost, ModifierInputs, PlanetMagnetosphere, Primary,
     SurfaceModifiers, WaterHistory,
@@ -107,6 +118,10 @@ pub(super) struct ModifierSurface<'a> {
     pub(super) crust: Option<&'a CrustComposition>,
     /// The air's partial pressures at the surface (P14.T13).
     pub(super) gases: &'a PartialPressures,
+    /// What the published pass's maturity carries (P14.T54.b.e; rule (f)), its context's field,
+    /// surface age, resurfacing time and heat flow and its water, which the modifiers read in
+    /// place of the figures'; `None` where it took none, and under the weathered area mix's hold.
+    pub(super) weathered: Option<&'a PassWeathered>,
 }
 
 /// The planet's magnetosphere its moons' records read, from its record `record` under the rules
@@ -116,7 +131,8 @@ pub(super) struct ModifierSurface<'a> {
 ///
 /// `None` under [`AirRules::Held`], which computes nothing, and where the record gives neither: a
 /// planet with no bulk section, or of a solid class whose surface section is not modelled or not
-/// applicable.
+/// applicable. Its moons' passes read it too under the weathered area mix (P14.T54.b.e), which
+/// asks for it under [`AirRules::Batch`] ([`planet_field_rules`]).
 #[must_use]
 pub(super) fn planet_field(rules: AirRules, record: &BodyRecord) -> Option<PlanetField> {
     match rules {
@@ -141,6 +157,92 @@ pub(super) fn planet_field(rules: AirRules, record: &BodyRecord) -> Option<Plane
                 field,
             })
         }
+    }
+}
+
+/// The rules [`planet_field`] is asked under for a planet whose air's sections are under `rules`:
+/// [`AirRules::Batch`] where the weathered area mix is in force too (P14.T54.b.e), whose moons'
+/// passes read their planet's magnetosphere, and `rules` otherwise.
+#[must_use]
+pub(super) fn planet_field_rules(rules: AirRules) -> AirRules {
+    match (rules, AreaMixWeathering::in_force()) {
+        (AirRules::Held, AreaMixWeathering::Held) => AirRules::Held,
+        (AirRules::Batch, _) | (AirRules::Held, AreaMixWeathering::Weathered) => AirRules::Batch,
+    }
+}
+
+/// Whether a body's frame computes the star its modifiers read, under its air's sections' rules
+/// `rules`: under [`AirRules::Batch`], whose record's modifiers read it, and under the weathered
+/// area mix (P14.T54.b.e), whose passes do; under both holds nothing of it is computed.
+#[must_use]
+pub(super) fn reads_modifier_star(rules: AirRules) -> bool {
+    planet_field_rules(rules) == AirRules::Batch
+}
+
+/// What a body's passes' maturity reads of its system, once a body before them (P14.T54.b.e;
+/// `PassRecordOf::weathering`), as the record's modifiers read it ([`modifier_inputs`]): its host
+/// from the star `star` and the orbit `seasonal` about it at the system's age `age`, that orbit,
+/// what it orbits, `primary`, and what its field's dynamo law reads beyond the figures' first
+/// stage, `field`.
+///
+/// # Errors
+///
+/// [`NoMaturity::NoHost`] with no star or no orbit, and [`NoMaturity::NoPlanetField`] for a moon
+/// whose planet's record gives no field.
+pub(super) fn weathering_case(
+    (star, seasonal, age): (Option<ModifierStar>, Option<&KeplerElements>, Years),
+    primary: RecordPrimary,
+    field: FieldBody,
+) -> Result<WeatheringCase, NoMaturity> {
+    let (Some(star), Some(seasonal)) = (star, seasonal) else {
+        return Err(NoMaturity::NoHost);
+    };
+    Ok(WeatheringCase {
+        host: modifier_host(&star, seasonal, age),
+        orbit: heliocentric_orbit(seasonal),
+        primary: primary_of(primary).ok_or(NoMaturity::NoPlanetField)?,
+        field,
+    })
+}
+
+/// The host a body's modifiers read: the star `star`'s radius and its X-ray and ultraviolet
+/// luminosity at the system's age `age` ([`XuvHistory::luminosity`], as the derivation reads its
+/// flux), and the zone's G M from the orbit `seasonal`.
+#[must_use]
+fn modifier_host(star: &ModifierStar, seasonal: &KeplerElements, age: Years) -> ModifierHost {
+    ModifierHost {
+        radius: Metres::from(star.radius),
+        xuv_luminosity: star.xuv.luminosity(age),
+        gravitational_parameter: seasonal.gravitational_parameter(),
+    }
+}
+
+/// The orbit a body's modifiers read: `seasonal`'s semi-major axis and eccentricity.
+#[must_use]
+fn heliocentric_orbit(seasonal: &KeplerElements) -> HeliocentricOrbit {
+    HeliocentricOrbit {
+        semi_major_axis: seasonal.semi_major_axis(),
+        eccentricity: seasonal.eccentricity().value(),
+    }
+}
+
+/// What a body's modifiers read of what it orbits, `primary`: its star, or a moon's planet's
+/// magnetosphere with the moon's semi-major axis about it; `None` where the planet's record gives
+/// no field.
+#[must_use]
+fn primary_of(primary: RecordPrimary) -> Option<Primary> {
+    match primary {
+        RecordPrimary::Star => Some(Primary::Star),
+        RecordPrimary::Planet {
+            field,
+            semi_major_axis,
+        } => field.map(|planet| {
+            Primary::Planet(PlanetMagnetosphere {
+                radius: planet.radius,
+                field: planet.field,
+                semi_major_axis,
+            })
+        }),
     }
 }
 
@@ -189,6 +291,11 @@ pub(super) fn record_modifiers(
 ///   ([`CrustComposition::lid_lithology`]), the air's partial pressures, and the water: wet now
 ///   where the conditions' liquid-water flag holds (P14.T24.a), else dry since the figures' wet
 ///   epoch's end (P14.T48.b's `WetEpoch::end`), else never wet.
+///
+/// Where the published pass carries its maturity's parts (P14.T54.b.e; [`PassWeathered`]), the
+/// field, surface age, resurfacing time, heat flow and water are its, those of the context it read
+/// and of its own published condensates, in place of the figures' (K(P*), which differ from them
+/// by the solve's context residual), so that the record's modifiers are its own to the bit.
 #[must_use]
 fn modifier_inputs<'a>(
     case: &ModifierCase,
@@ -196,45 +303,44 @@ fn modifier_inputs<'a>(
 ) -> Option<ModifierInputs<'a>> {
     let star = case.star?;
     let lid = surface.crust?.lid_lithology();
-    let primary = match case.primary {
-        RecordPrimary::Star => Primary::Star,
-        RecordPrimary::Planet {
-            field,
-            semi_major_axis,
-        } => {
-            let planet = field?;
-            Primary::Planet(PlanetMagnetosphere {
-                radius: planet.radius,
-                field: planet.field,
-                semi_major_axis,
-            })
-        }
-    };
+    let primary = primary_of(case.primary)?;
     let (conditions, figures, seasonal) = (surface.conditions, surface.figures, surface.seasonal);
-    let water = if conditions.liquid_water() {
-        WaterHistory::WetNow
+    let (field, surface_age, resurfacing, heat_flow, water) = if let Some(pass) = surface.weathered
+    {
+        let parts = pass.parts();
+        (
+            parts.field,
+            parts.surface_age,
+            parts.resurfacing_time,
+            parts.heat_flow,
+            pass.water(),
+        )
     } else {
-        figures.wet_epoch().map_or(WaterHistory::NeverWet, |epoch| {
-            WaterHistory::DrySince(epoch.end())
-        })
+        let water = if conditions.liquid_water() {
+            WaterHistory::WetNow
+        } else {
+            figures.wet_epoch().map_or(WaterHistory::NeverWet, |epoch| {
+                WaterHistory::DrySince(epoch.end())
+            })
+        };
+        (
+            figures.magnetic_field(),
+            figures.surface_age(),
+            resurfacing_time(figures.impactors().crust(), figures.heat_flow()),
+            figures.heat_flow(),
+            water,
+        )
     };
     Some(ModifierInputs {
-        host: ModifierHost {
-            radius: Metres::from(star.radius),
-            xuv_luminosity: star.xuv.luminosity(surface.age),
-            gravitational_parameter: seasonal.gravitational_parameter(),
-        },
-        orbit: HeliocentricOrbit {
-            semi_major_axis: seasonal.semi_major_axis(),
-            eccentricity: seasonal.eccentricity().value(),
-        },
+        host: modifier_host(&star, seasonal, surface.age),
+        orbit: heliocentric_orbit(seasonal),
         primary,
         gravity: surface.gravity,
         surface_pressure: conditions.surface_pressure(),
-        field: figures.magnetic_field(),
-        surface_age: figures.surface_age(),
-        resurfacing_time: resurfacing_time(figures.impactors().crust(), figures.heat_flow()),
-        heat_flow: figures.heat_flow(),
+        field,
+        surface_age,
+        resurfacing_time: resurfacing,
+        heat_flow,
         surface_temperature: conditions.mean_surface_temperature(),
         mantle_sulphur: case.mantle_sulphur?,
         condensates: surface.condensates,

@@ -34,7 +34,9 @@ use core::cmp::Ordering;
 use core::fmt;
 
 use crate::planetary::chem::partition::{Basins, CrustWater, Ground};
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{
+    Atmosphere, Gas, NoMaturity, SurfaceMaterial, SurfaceState, WeatheringCase,
+};
 use crate::planetary::derive::passes::{Context, floats_agree};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide, SurfaceLag};
 use crate::planetary::hooks::crust::{
@@ -42,7 +44,9 @@ use crate::planetary::hooks::crust::{
 };
 use crate::planetary::hooks::figures::cover::{self, SurfaceWaterInputs};
 use crate::planetary::hooks::figures::relief::Hypsometry;
-use crate::planetary::hooks::figures::{Crust, PartitionGround, PassFigures, TectonicRegime};
+use crate::planetary::hooks::figures::{
+    Crust, PartitionGround, PassFigures, TectonicRegime, WetEpoch,
+};
 use crate::planetary::hooks::ocean::OceanSolutes;
 use crate::planetary::hooks::surface::{OceanWeight, SeasonalSpin, ZonalInsolation};
 use crate::planetary::moons::tides::TidalBranch;
@@ -128,6 +132,25 @@ pub(crate) trait PassRecordOf {
     /// no crust for it (an origin with no formation window, a parent with no formation time).
     #[must_use]
     fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust>;
+
+    /// What the body's record gives its passes' maturity beyond each pass (P14.T54.b.e;
+    /// [`WeatheringCase`]), its bulk before its passes `bulk`, once a body before them, as the
+    /// record's modifiers read it: `Err` with why where the record gives none
+    /// ([`NoMaturity::NoHost`], [`NoMaturity::NoPlanetField`]).
+    ///
+    /// # Errors
+    ///
+    /// As above.
+    fn weathering(&self, bulk: &PassBulk) -> Result<WeatheringCase, NoMaturity>;
+
+    /// The wet epoch of a pass whose atmosphere is `air` at the equilibrium temperature
+    /// `equilibrium` and holds no liquid water at its surface, its bulk before its passes `bulk`:
+    /// P14.T48.b's volatile history over that pass's figures' inputs, as the record's figures
+    /// take it, which an oxidised surface's deposit reads (P14.T54.b.e); `None` for none, and
+    /// where the record computes no figures.
+    #[must_use]
+    fn wet_epoch(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin)
+    -> Option<WetEpoch>;
 }
 
 /// What a body's record gives its crust's basis (P14.T54.a; P14.T51.c's `CrustBasisInputs`), the

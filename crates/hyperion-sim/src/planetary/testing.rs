@@ -351,7 +351,11 @@ impl Error for SampleContextsError {
 ///   its spherical shell's (it supersedes the ocean floor's arm where both are in force);
 /// - the belt population's, `BELT_POPULATION_VERSION` (P14.T48.g), at `PopulationRules::Laws`
 ///   through `with_population_rules`: every belt's recorded mean eccentricity its laws' mean, and
-///   the impactors' `U_b`² Öpik's mean over the crossers, with rule 3's refitted approach.
+///   the impactors' `U_b`² Öpik's mean over the crossers, with rule 3's refitted approach;
+/// - the weathered area mix's, `WEATHERED_AREA_MIX_VERSION` (P14.T54.b.e), at
+///   `AreaMixWeathering::Weathered` through `with_area_mix_weathering`: every pass's regolith
+///   weathered at its body's maturity, but `basalt_reduced`'s, which keeps the cap, and `ferric`'s
+///   deposit in the area mix.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
@@ -363,6 +367,9 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::chem::escape::{EscapeRules, with_rules};
     use crate::planetary::chem::tenuous::{TenuousRules, with_tenuous};
     use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::derive::photometry::area_mix::{
+        AreaMixWeathering, with_area_mix_weathering,
+    };
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, with_cold_trap_rules};
     use crate::planetary::hooks::ocean::{
         OceanFloorRules, OceanRules, with_ocean_floor, with_ocean_rules,
@@ -384,7 +391,12 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
                                     with_small_body_rules(SmallBodyRules::Batch, || {
                                         with_tenuous(TenuousRules::Tenuous, || {
                                             with_ocean_rules(OceanRules::Solved, || {
-                                                with_population_rules(PopulationRules::Laws, run)
+                                                with_population_rules(PopulationRules::Laws, || {
+                                                    with_area_mix_weathering(
+                                                        AreaMixWeathering::Weathered,
+                                                        run,
+                                                    )
+                                                })
                                             })
                                         })
                                     })

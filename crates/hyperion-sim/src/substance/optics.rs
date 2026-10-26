@@ -1449,6 +1449,21 @@ pub(crate) fn palette_feo_mass_fraction(id: SubstanceId) -> Option<f64> {
     }
 }
 
+/// `temperature` held at most the first melt of `id`'s row, its condensed columns' transition,
+/// where its solid's grain density ends; `temperature` itself for a row with none. The
+/// temperature at which a record's palette resolves a solid entry's grain density
+/// (`planetary::surface::palette`), and a pass's weathered regolith its lid's (P14.T54.b.e), so
+/// that the two read one density.
+#[must_use]
+pub(crate) fn held_at_first_melt(id: SubstanceId, temperature: Kelvin) -> Kelvin {
+    match id.substance().condensed() {
+        Some(condensed) if temperature > condensed.transition().temperature() => {
+            condensed.transition().temperature()
+        }
+        Some(_) | None => temperature,
+    }
+}
+
 /// Every row with condensed optics, in registry order, with its optics: the rules' in force
 /// (`ROW_DARKENING_VERSION`).
 pub fn rows() -> impl Iterator<Item = (SubstanceId, &'static CondensedOptics)> {

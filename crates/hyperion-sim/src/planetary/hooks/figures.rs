@@ -2326,14 +2326,9 @@ impl GlobalFigures {
             relief,
         } = *first;
         let air = inputs.atmosphere;
-        let field = magnetic_field(&interior::FieldInputs {
+        let field = first.magnetic_field(&FieldBody {
             class: inputs.class,
-            interior,
             mass: inputs.mass,
-            iron_share: heat.iron_share,
-            regime: heat.regime,
-            radiogenic: heat.radiogenic,
-            tidal: heat.tidal,
             age: inputs.age,
             rotation_period: inputs.rotation_period,
         });
@@ -3213,6 +3208,47 @@ impl PassFigures {
     pub(crate) fn volcanic_greenhouse(&self) -> bool {
         self.outgassing >= wet_epoch::VOLCANIC_GREENHOUSE_OUTGASSING
     }
+
+    /// The global field of a body `body` describes on this first stage, [`magnetic_field`] over
+    /// its interior and heat: [`GlobalFigures::magnetic_field`]'s, which
+    /// [`GlobalFigures::of_first_stage`] reads through this one function, to the bit
+    /// (P14.T54.b.e: a pass's maturity reads the field of the stage it reads).
+    #[must_use]
+    pub(crate) fn magnetic_field(&self, body: &FieldBody) -> MagneticField {
+        magnetic_field(&interior::FieldInputs {
+            class: body.class,
+            interior: self.interior,
+            mass: body.mass,
+            iron_share: self.heat.iron_share,
+            regime: self.heat.regime,
+            radiogenic: self.heat.radiogenic,
+            tidal: self.heat.tidal,
+            age: body.age,
+            rotation_period: body.rotation_period,
+        })
+    }
+
+    /// The resurfacing time at this stage's heat flow ([`surface_age::resurfacing_time`] of its
+    /// craters' crust class), the one its surface age read.
+    #[must_use]
+    pub(crate) fn resurfacing_time(&self) -> Years {
+        surface_age::resurfacing_time(self.impactors.crust(), self.heat.heat_flow)
+    }
+}
+
+/// What a body's field reads beyond its figures' first stage ([`PassFigures::magnetic_field`]):
+/// its class, its mass, its age and its sidereal rotation period, [`FiguresInputs`]' own, which no
+/// pass moves.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FieldBody {
+    /// [`FiguresInputs::class`].
+    pub(crate) class: PlanetClass,
+    /// [`FiguresInputs::mass`].
+    pub(crate) mass: EarthMasses,
+    /// [`FiguresInputs::age`].
+    pub(crate) age: Years,
+    /// [`FiguresInputs::rotation_period`].
+    pub(crate) rotation_period: Seconds,
 }
 
 /// The figures' first stage of the body `inputs` describe ([`PassFigures`]), with

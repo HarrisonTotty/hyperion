@@ -75,8 +75,9 @@
 //! mantle holds sulphur and whose surface is below SO₂'s frost point at [`IO_SO2_PRESSURE`], is
 //! resurfaced with SO₂ frost and sulphur in Io's measured shares ([`IO_SO2_FROST_SHARE`],
 //! [`IO_SULPHUR_SHARE`]), labelled as Io's until P14.T24.g's outgassing gives the deposits. The
-//! rest is its lid's own silicate. Neither registry row has optics yet: their albedo waits for
-//! P14.T49.i.
+//! rest is its lid's own silicate. Both registry rows have condensed optics now (P14.T49.i), but
+//! the weathered area mix (P14.T54.b.e) leaves their area to the regolith until P14.T24.g gives
+//! the deposits, putting `ferric`'s alone in the mix (recorded).
 //!
 //! # The oxidised surface (P14.T51.j)
 //!
@@ -116,8 +117,12 @@
 //! hold at generator version 24 (`AIR_SECTIONS_VERSION`), so that no value on the record moves
 //! before the bump; with it R09's field header takes its `maturity`, `weathering_rate` and
 //! `organic_cover`, and the palette its entries' `FeO_T`, the `ferric` deposit and the `tholin`
-//! cover. The source scan `modifiers_nothing_on_the_record_reads_the_modifiers_yet` holds the
-//! wiring's files to the hold until the bump, P14.T54.b.l, deletes it with the hold.
+//! cover. P14.T54.b.e's weathered area mix, behind its own hold (`WEATHERED_AREA_MIX_VERSION`),
+//! has each pass take its maturity before it publishes its condensates, by the condensate-free
+//! law [`SurfaceModifiers::derive`] reads (`surface_weathering` over `ModifierParts`), and its
+//! `ferric` deposit after, and the record read the published pass's parts. The source scan
+//! `modifiers_nothing_on_the_record_reads_the_modifiers_yet` holds the wiring's files to their
+//! holds until the bump, P14.T54.b.l, deletes it with the holds.
 //!
 //! # Determinism
 //!
@@ -438,6 +443,192 @@ pub struct ModifierInputs<'a> {
     pub water: WaterHistory,
 }
 
+impl ModifierInputs<'_> {
+    /// Its inputs but its condensates and its water ([`ModifierParts`]).
+    #[must_use]
+    pub(crate) const fn parts(&self) -> ModifierParts {
+        ModifierParts {
+            host: self.host,
+            orbit: self.orbit,
+            primary: self.primary,
+            gravity: self.gravity,
+            surface_pressure: self.surface_pressure,
+            field: self.field,
+            surface_age: self.surface_age,
+            resurfacing_time: self.resurfacing_time,
+            heat_flow: self.heat_flow,
+            surface_temperature: self.surface_temperature,
+            mantle_sulphur: self.mantle_sulphur,
+            lid: self.lid,
+            gases: self.gases,
+        }
+    }
+}
+
+/// Every input of [`ModifierInputs`] but the two a pass knows only once it has published its
+/// condensates: the condensates themselves and the water, whose liquid-water flag the record reads
+/// off them (P14.T54.b.e). Each member is [`ModifierInputs`]' own, with its range.
+///
+/// The maturity reads none of the two ([`surface_weathering`]), so that a pass weathers its
+/// regolith before it publishes, and the rest of the modifiers then read the published
+/// condensates and the water ([`with_published`](Self::with_published)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ModifierParts {
+    /// [`ModifierInputs::host`].
+    pub(crate) host: ModifierHost,
+    /// [`ModifierInputs::orbit`].
+    pub(crate) orbit: HeliocentricOrbit,
+    /// [`ModifierInputs::primary`].
+    pub(crate) primary: Primary,
+    /// [`ModifierInputs::gravity`].
+    pub(crate) gravity: MetresPerSecondSquared,
+    /// [`ModifierInputs::surface_pressure`].
+    pub(crate) surface_pressure: Pascals,
+    /// [`ModifierInputs::field`].
+    pub(crate) field: MagneticField,
+    /// [`ModifierInputs::surface_age`].
+    pub(crate) surface_age: Years,
+    /// [`ModifierInputs::resurfacing_time`].
+    pub(crate) resurfacing_time: Years,
+    /// [`ModifierInputs::heat_flow`].
+    pub(crate) heat_flow: WattsPerSquareMetre,
+    /// [`ModifierInputs::surface_temperature`].
+    pub(crate) surface_temperature: Kelvin,
+    /// [`ModifierInputs::mantle_sulphur`].
+    pub(crate) mantle_sulphur: Kilograms,
+    /// [`ModifierInputs::lid`].
+    pub(crate) lid: SubstanceId,
+    /// [`ModifierInputs::gases`].
+    pub(crate) gases: PartialPressures,
+}
+
+impl ModifierParts {
+    /// The modifiers' inputs of these parts with the published condensates `condensates` and the
+    /// water `water`.
+    #[must_use]
+    pub(crate) const fn with_published(
+        self,
+        condensates: &Condensates,
+        water: WaterHistory,
+    ) -> ModifierInputs<'_> {
+        ModifierInputs {
+            host: self.host,
+            orbit: self.orbit,
+            primary: self.primary,
+            gravity: self.gravity,
+            surface_pressure: self.surface_pressure,
+            field: self.field,
+            surface_age: self.surface_age,
+            resurfacing_time: self.resurfacing_time,
+            heat_flow: self.heat_flow,
+            surface_temperature: self.surface_temperature,
+            mantle_sulphur: self.mantle_sulphur,
+            condensates,
+            lid: self.lid,
+            gases: self.gases,
+            water,
+        }
+    }
+}
+
+/// A surface's weathering rate and maturity, with the dose flux its organic cover reads
+/// ([`surface_weathering`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SurfaceWeathering {
+    weathering: WeatheringRate,
+    maturity: f64,
+    /// [`Exposure::dose_flux`], W m⁻².
+    dose_flux: f64,
+    /// The wind's term before its shield, over the lunar reference
+    /// ([`SurfaceModifiers::unshielded_wind_term`], P14.T51.e).
+    unshielded_wind: f64,
+}
+
+impl SurfaceWeathering {
+    /// The maturity m, dimensionless in [+0, 1] ([`SurfaceModifiers::maturity`]).
+    #[must_use]
+    pub(crate) const fn maturity(&self) -> f64 {
+        self.maturity
+    }
+
+    /// The weathering rate's two terms ([`SurfaceModifiers::weathering`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the weathered area mix's census reads it")
+    )]
+    #[must_use]
+    pub(crate) const fn weathering(&self) -> WeatheringRate {
+        self.weathering
+    }
+}
+
+/// The weathering rate and the maturity of the surface `parts` describe (the [module](self)'s "The
+/// weathering rate" and "The maturity"): the one law [`SurfaceModifiers::derive`] reads, which
+/// reads no condensate and no water, so that a pass takes its maturity before it publishes
+/// (P14.T54.b.e).
+///
+/// # Errors
+///
+/// As [`SurfaceModifiers::derive`], but for the water's [`ModifierInput::DryTime`], which it does
+/// not read: an input of `parts` that is not finite or lies outside its range, in
+/// [`SurfaceModifiers::derive`]'s order, and then a rate that is not finite.
+pub(crate) fn surface_weathering(
+    parts: &ModifierParts,
+) -> Result<SurfaceWeathering, DeriveModifiersError> {
+    validate_parts(parts, None)?;
+    let column =
+        KilogramsPerSquareMetre::new(parts.surface_pressure.value() / parts.gravity.value());
+    let exposure = Exposure::of(&ExposureInputs {
+        host: &parts.host,
+        orbit: parts.orbit,
+        primary: parts.primary,
+        field: parts.field,
+        column,
+    });
+    let moon = Exposure::lunar_reference();
+    let weathering = WeatheringRate {
+        wind: exposure.wind_mass_flux / moon.wind_mass_flux,
+        dust: exposure.dust / moon.dust,
+    };
+    let rate = weathering.value();
+    // `body_maturity` panics on a rate that is not finite; validated inputs can still give one
+    // through an exposure that overflows.
+    if !rate.is_finite() {
+        return Err(DeriveModifiersError::RateNotFinite);
+    }
+    Ok(SurfaceWeathering {
+        weathering,
+        maturity: body_maturity(Gigayears::from(parts.surface_age), rate),
+        dose_flux: exposure.dose_flux,
+        // The wind's term before its shield, over the same lunar reference, whose own share is 1
+        // (P14.T51.e's Q/S split, decision-p14-t51e-qs §1.2).
+        unshielded_wind: exposure.unshielded_wind_mass_flux / moon.wind_mass_flux,
+    })
+}
+
+/// Whether the surface `parts` describe may take an oxidised surface's `ferric` deposit by all but
+/// its water (P14.T51.j; the [module](self)'s "The oxidised surface", conditions 1 and 2): its lid
+/// is `basalt_fe` and its air is collisional at the ground and oxidising. The one predicate
+/// [`SurfaceModifiers::derive`]'s deposit reads, and a pass's reads to decide whether it needs the
+/// water's history at all (P14.T54.b.e): where it fails, the deposit reads no water.
+///
+/// An air of no surface pressure is not collisional, whatever its gases: an airless body's
+/// conditions publish none beside the residue its partial pressures hold, at which the test's
+/// p ≥ m̄ g ÷ `σ_c` would hold as 0 ≥ 0 (m̄ = p ÷ Σ moles), so that two airless sample bodies took
+/// `ferric` on the record (P14.T54.b.e's census; recorded).
+///
+/// # Panics
+///
+/// Never: the registry holds `basalt_fe`.
+#[must_use]
+pub(crate) fn oxidisable(parts: &ModifierParts) -> bool {
+    let basalt_fe = substance::by_key("basalt_fe").expect("basalt_fe is a registry row");
+    parts.lid == basalt_fe
+        && parts.surface_pressure.value() > 0.0
+        && is_collisional_air(parts.surface_pressure, &parts.gases, parts.gravity)
+        && oxidising(&parts.gases)
+}
+
 /// A surface's water, now and since its wet epoch, as P14.T51.j's oxidised surface reads it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WaterHistory {
@@ -692,48 +883,27 @@ impl SurfaceModifiers {
     /// # Ok::<(), hyperion_sim::planetary::hooks::modifiers::DeriveModifiersError>(())
     /// ```
     pub fn derive(inputs: &ModifierInputs<'_>) -> Result<Self, DeriveModifiersError> {
-        validate(inputs)?;
-        let column =
-            KilogramsPerSquareMetre::new(inputs.surface_pressure.value() / inputs.gravity.value());
-        let exposure = Exposure::of(&ExposureInputs {
-            host: &inputs.host,
-            orbit: inputs.orbit,
-            primary: inputs.primary,
-            field: inputs.field,
-            column,
-        });
-        let moon = Exposure::lunar_reference();
-        let weathering = WeatheringRate {
-            wind: exposure.wind_mass_flux / moon.wind_mass_flux,
-            dust: exposure.dust / moon.dust,
-        };
-        let rate = weathering.value();
-        // `body_maturity` panics on a rate that is not finite; validated inputs can still give one
-        // through an exposure that overflows.
-        if !rate.is_finite() {
-            return Err(DeriveModifiersError::RateNotFinite);
-        }
-        let maturity = body_maturity(Gigayears::from(inputs.surface_age), rate);
+        validate_parts(&inputs.parts(), Some(&inputs.water))?;
+        let SurfaceWeathering {
+            weathering,
+            maturity,
+            dose_flux,
+            unshielded_wind,
+        } = surface_weathering(&inputs.parts())?;
         let volcanic = volcanic_deposits(inputs);
         let tau = inputs.resurfacing_time.value();
         // An infinite resurfacing time renews nothing: +0.
         let resurfacing_per_yr = 1.0 / tau;
         let organic_ground = organic_ground(inputs.condensates);
         let organic_cover = if organic_ground > 0.0 {
-            organic_cover(
-                exposure.dose_flux,
-                resurfacing_per_yr,
-                inputs.surface_age.value(),
-            )
+            organic_cover(dose_flux, resurfacing_per_yr, inputs.surface_age.value())
         } else {
             0.0
         };
         Ok(Self {
             maturity,
             weathering,
-            // The wind's term before its shield, over the same lunar reference, whose own share
-            // is 1 (P14.T51.e's Q/S split, decision-p14-t51e-qs §1.2).
-            unshielded_wind: exposure.unshielded_wind_mass_flux / moon.wind_mass_flux,
+            unshielded_wind,
             organic_ground,
             organic_cover,
             resurfacing_m_per_yr: RESURFACING_DEPTH.value() * resurfacing_per_yr,
@@ -833,7 +1003,6 @@ fn weathering_deposits(
     inputs: &ModifierInputs<'_>,
     volcanic: &[VolcanicDeposit],
 ) -> Vec<WeatheringDeposit> {
-    let basalt_fe = substance::by_key("basalt_fe").expect("basalt_fe is a registry row");
     let ferric = substance::by_key("ferric").expect("ferric is a registry row");
     let age = Gigayears::from(inputs.surface_age).value();
     let dry_for = match inputs.water {
@@ -847,10 +1016,7 @@ fn weathering_deposits(
         }
         WaterHistory::NeverWet => age,
     };
-    let oxidised = inputs.lid == basalt_fe
-        && is_collisional_air(inputs.surface_pressure, &inputs.gases, inputs.gravity)
-        && oxidising(&inputs.gases)
-        && dry_for >= OXIDISED_DRY_TIME.value();
+    let oxidised = oxidisable(&inputs.parts()) && dry_for >= OXIDISED_DRY_TIME.value();
     if !oxidised {
         return Vec::new();
     }
@@ -1013,8 +1179,13 @@ fn volcanic_deposits(inputs: &ModifierInputs<'_>) -> Vec<VolcanicDeposit> {
     }
 }
 
-/// Refuses an input that is not finite or lies outside the range [`ModifierInputs`] states.
-fn validate(inputs: &ModifierInputs<'_>) -> Result<(), DeriveModifiersError> {
+/// Refuses an input of `inputs`, the parts and, where it is given, the water `water`, that is not
+/// finite or lies outside the range [`ModifierInputs`] states, in one order whether or not the
+/// water is given ([`surface_weathering`] reads none).
+fn validate_parts(
+    inputs: &ModifierParts,
+    water: Option<&WaterHistory>,
+) -> Result<(), DeriveModifiersError> {
     let positive = |v: f64| v.is_finite() && v > 0.0;
     let non_negative = |v: f64| v.is_finite() && v >= 0.0;
     let body = [
@@ -1071,9 +1242,9 @@ fn validate(inputs: &ModifierInputs<'_>) -> Result<(), DeriveModifiersError> {
             ModifierInput::Gases,
         ),
         (
-            match inputs.water {
-                WaterHistory::DrySince(end) => non_negative(end.value()),
-                WaterHistory::WetNow | WaterHistory::NeverWet => true,
+            match water {
+                Some(WaterHistory::DrySince(end)) => non_negative(end.value()),
+                Some(WaterHistory::WetNow | WaterHistory::NeverWet) | None => true,
             },
             ModifierInput::DryTime,
         ),

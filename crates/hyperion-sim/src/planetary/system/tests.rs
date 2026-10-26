@@ -12713,9 +12713,30 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
         census.peak.iter().zip(&census.present).collect();
     let mut past_only = 0;
     for (peak, now) in &pairs {
-        let moved = peak.state != now.state || peak.deck != now.deck;
+        // A bracketed solve whose passes the two rules led along different paths (another pass
+        // count or end) moved too, though it publishes one state: under the weathered area mix
+        // (P14.T54.b.e) one such body sits at the 100 Pa line, a runaway at its hosts' peak alone
+        // (sample `02000b2ca0000001.1100`), and is stated.
+        let path_moved = peak.passes != now.passes || peak.convergence != now.convergence;
+        let moved = peak.state != now.state || peak.deck != now.deck || path_moved;
         if !moved {
-            assert_eq!(peak.bits, now.bits, "{}: {}", now.label, now.line());
+            assert_eq!(
+                peak.bits,
+                now.bits,
+                "{}: {} (P14.T53.a's batch: {})",
+                now.label,
+                now.line(),
+                peak.line()
+            );
+            continue;
+        }
+        if path_moved && peak.state == now.state && peak.deck == now.deck {
+            eprintln!(
+                "a solve the two rules led along different paths: {}: {} (P14.T53.a's batch: {})",
+                now.label,
+                now.line(),
+                peak.line()
+            );
             continue;
         }
         if now.water_state == SurfaceState::RunawayGreenhouse

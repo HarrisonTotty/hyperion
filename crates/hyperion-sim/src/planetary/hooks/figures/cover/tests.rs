@@ -8,8 +8,8 @@ use crate::planetary::chem::partition::Basins;
 use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::DerivedBody;
 use crate::planetary::derive::MassFractions;
-use crate::planetary::derive::atmosphere::SurfaceMaterial;
 use crate::planetary::derive::atmosphere::spun_read::{self, SpunRead};
+use crate::planetary::derive::atmosphere::{NoMaturity, SurfaceMaterial, WeatheringCase};
 use crate::planetary::derive::pass_record::{
     ContextTide, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, RecordSpin,
 };
@@ -26,7 +26,7 @@ use crate::planetary::hooks::figures::relief::{
 use crate::planetary::hooks::figures::tests::{
     europa, figures_from, figures_table, inputs_of, measured_europa,
 };
-use crate::planetary::hooks::figures::{CraterInputs, pass_figures};
+use crate::planetary::hooks::figures::{CraterInputs, WetEpoch, pass_figures};
 use crate::planetary::hooks::figures::{
     FiguresInputs, GlobalFigures, TectonicRegime, VolatileHistory,
 };
@@ -812,6 +812,15 @@ impl PassRecordOf for TableRecord<'_> {
             mass: bulk.mass,
             fractions: bulk.fractions,
         })
+    }
+
+    fn weathering(&self, _: &PassBulk) -> Result<WeatheringCase, NoMaturity> {
+        // The table's bodies take no maturity: their regolith is the stand-in's.
+        Err(NoMaturity::NoHost)
+    }
+
+    fn wet_epoch(&self, _: &PassBulk, _: &Atmosphere, _: Kelvin) -> Option<WetEpoch> {
+        None
     }
 }
 

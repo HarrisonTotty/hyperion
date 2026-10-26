@@ -88,7 +88,9 @@ use std::fmt;
 use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::planetary::derive::atmosphere::{Atmosphere, SurfaceState, VolatileDraws};
+use crate::planetary::derive::atmosphere::{
+    Atmosphere, NoMaturity, SurfaceState, VolatileDraws, WeatheringCase,
+};
 #[cfg(doc)]
 use crate::planetary::derive::derive_body;
 use crate::planetary::derive::pass_record::{
@@ -105,7 +107,9 @@ use crate::planetary::derive::{
     derive_body_driven, derive_bulk,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
-use crate::planetary::hooks::figures::{HeatInputs, PassFigures, Subsurface, non_tidal_heat_flow};
+use crate::planetary::hooks::figures::{
+    HeatInputs, PassFigures, Subsurface, WetEpoch, non_tidal_heat_flow,
+};
 use crate::planetary::hooks::ocean::{OceanFloorRules, OceanRules, OceanSolutes};
 use crate::planetary::moons::tides::{
     MoonTides, TidalBranch, TidalMaterial, TideInputs, mean_density, tidal_forcing,
@@ -1148,6 +1152,12 @@ impl DerivedMoon {
         self.body.crust_lid()
     }
 
+    /// Its published pass's maturity's outcome (P14.T54.b.e; [`DerivedBody::weathered`]).
+    #[must_use]
+    pub(crate) const fn weathered(&self) -> &crate::planetary::derive::atmosphere::PassMaturity {
+        self.body.weathered()
+    }
+
     /// Its surface lag (P14.T56.g; [`DerivedBody::surface_lag`]): its given bulk's.
     #[must_use]
     pub(crate) const fn surface_lag(&self) -> SurfaceLag {
@@ -1694,6 +1704,28 @@ pub(crate) trait MoonRecordOf {
     /// this version computes no crust for it.
     #[must_use]
     fn crust(&self, shape: &MoonShape, bulk: &PassBulk) -> Option<RecordCrust>;
+
+    /// What the moon's record gives its passes' maturity beyond each pass (P14.T54.b.e;
+    /// `PassRecordOf::weathering`), for its shape `shape` and its bulk before its passes `bulk`.
+    ///
+    /// # Errors
+    ///
+    /// As `PassRecordOf::weathering`: no host at the time, or a planet whose record gives no
+    /// field.
+    fn weathering(&self, shape: &MoonShape, bulk: &PassBulk) -> Result<WeatheringCase, NoMaturity>;
+
+    /// The wet epoch of a pass whose atmosphere is `air`, with the tide `tide` raises in it then
+    /// and no liquid water at its surface, for the moon's shape `shape` and its bulk before its
+    /// passes `bulk` (P14.T54.b.e; `PassRecordOf::wet_epoch`): `None` for none, and where its
+    /// record computes no figures.
+    #[must_use]
+    fn wet_epoch(
+        &self,
+        shape: &MoonShape,
+        bulk: &PassBulk,
+        air: &Atmosphere,
+        tide: &MoonTideAt,
+    ) -> Option<WetEpoch>;
 }
 
 /// The shape a moon's derivation gives it before its passes, which no pass moves: its ice
@@ -1964,6 +1996,32 @@ impl PassRecordOf for MoonPassRecord<'_> {
 
     fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust> {
         self.record.crust(&self.shape, bulk)
+    }
+
+    fn weathering(&self, bulk: &PassBulk) -> Result<WeatheringCase, NoMaturity> {
+        self.record.weathering(&self.shape, bulk)
+    }
+
+    fn wet_epoch(
+        &self,
+        bulk: &PassBulk,
+        air: &Atmosphere,
+        equilibrium: Kelvin,
+    ) -> Option<WetEpoch> {
+        let tide = own_tides(
+            &self.tide,
+            &TideAt::of(
+                bulk.inventory_water,
+                air,
+                equilibrium,
+                (bulk.fractions, bulk.ocean_solutes),
+            ),
+        );
+        let at = MoonTideAt {
+            heat_flux: tide.heat_flux,
+            subsurface: tide.subsurface,
+        };
+        self.record.wet_epoch(&self.shape, bulk, air, &at)
     }
 
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext {

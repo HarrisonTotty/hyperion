@@ -5943,11 +5943,13 @@ fn under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is
 )]
 fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_time() {
     use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+    use crate::planetary::derive::atmosphere::{NoMaturity, WeatheringCase};
     use crate::planetary::derive::pass_record::{
         PassBulk, PassRecord, PassRecordOf, RecordCrust, RecordSpin,
     };
     use crate::planetary::derive::solar::disc_of;
     use crate::planetary::derive::{PassDriver, derive_body_driven, traced};
+    use crate::planetary::hooks::figures::WetEpoch;
     use crate::planetary::hooks::surface::{HourCosines, SeasonalSpin, ZonalInsolation};
     use crate::planetary::testing::with_every_24_hold;
     use crate::stellar::sse::{ZCoeffs, zams};
@@ -5978,6 +5980,14 @@ fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_t
         }
 
         fn crust(&self, _: &PassBulk) -> Option<RecordCrust> {
+            None
+        }
+
+        fn weathering(&self, _: &PassBulk) -> Result<WeatheringCase, NoMaturity> {
+            Err(NoMaturity::NoHost)
+        }
+
+        fn wet_epoch(&self, _: &PassBulk, _: &Atmosphere, _: Kelvin) -> Option<WetEpoch> {
             None
         }
     }

@@ -1885,7 +1885,7 @@ fn area_mix(p: &Partition, cover: &Cover<'_>, material: SurfaceMaterial) -> (f64
     let regolith = Regolith::of_material(material)
         .bond(cover.state, sun.bands())
         .bond;
-    let ground = surface_bond(&published, p, regolith, &sun);
+    let ground = surface_bond(&published, p, (regolith, &[]), &sun);
     let cloud = cloud_fraction((cover.state, RunawayDeck::Kept), p, &sun);
     let bond = under_cloud(
         ground,

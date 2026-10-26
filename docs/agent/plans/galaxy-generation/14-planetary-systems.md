@@ -29528,6 +29528,22 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       primary (`planet_field`), where Jupiter's equatorial field is 417 µT, so its magnetopause
       comes out 16.7 R_J against an observed 45–100 and Callisto sits in the solar wind; one
       star, the zone's brightest, stands for a pair's zone in the modifiers' host.
+      - _The gas-envelope field and the moons' magnetopause_ (decision-p14-magnetosphere,
+        2026-10-26). Not a blocker; recorded. `planet_field` gives every gas-envelope primary
+        `Strong`, whose 30 µT stand-in puts the model's subsolar magnetopause for Jupiter about a
+        Sun at 16.7 R_J. Jupiter's 417–430 µT (JRM09; GSFC O6) would give 40–41 R_J by the same
+        pure-dipole law, Khurana 2004's "at most 42 R_J" without Io's plasma, against 45–100
+        observed. Saturn's, Uranus's and Neptune's stand-in standoffs lie within about 1.4× of the
+        observed. Of the Galilean analogues only Callisto (26.3 R_J) falls outside and takes the
+        solar wind at 5.2 au (k 0.0234, m about 0.25 at 4 Gyr). Inside, it would take wind 0 under
+        the labelled omission of the planet's plasma, whose flux at Callisto is at least the wind's
+        (Cooper et al. 2001, _from memory_). Correcting the field alone would lower its k about
+        fivefold, away from a weathered Callisto, so the field waits for the planet's plasma
+        weathering, and the two land together: a Christensen et al. 2009 energy-flux dipole read
+        from T_int, and a corotating plasma dose. No published state or class depends on the
+        switch: only `weathering_rate`, `maturity` and the ion part of `organic_cover`, for
+        airless moons of Jupiter-class primaries between the model's r_mp and about 2.4 r_mp.
+        Owner not assigned (plan 14's Space weathering list, "a moon's magnetospheric plasma").
     - _Plan conformance_ (the B1 review's drafts):
       - the tripwire: a–c check the three surface members on every golden surface; d adds no
         envelope check, its member being on a DTO no build sends, and i adds the envelope;
@@ -29548,6 +29564,100 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `golden_systems` keeps the escape's hold and T56.g's `pub(super)`; T49.n's `RecordRules`
     literal takes `..RecordRules::in_force()`; and `satellite_record` binds `t` and `ctx` on one
     line, to stay under Clippy's line limit with T56.g's lines.
+  - _P14.T54.b.e, the weathered area mix_ (B2, 2026-10-26). `GENERATOR_VERSION` stays 23 and no
+    golden moves (`planetary_golden` passes unchanged).
+    - _The hold:_ `WEATHERED_AREA_MIX_VERSION` = 24 with `AreaMixWeathering { Held, Weathered }`
+      (`derive/photometry/area_mix.rs`), its switch `with_area_mix_weathering` in
+      `planetary::testing::with_every_24_hold`, its tripwire
+      `the_weathered_area_mix_is_held_only_until_the_24_bump`. Under `Held` the passes compute no
+      maturity and no modifiers, and every area mix is 23's to the bit.
+    - _The regolith:_ `Regolith::weathered_lid` weathers a known lid's row by R10.T1.d's law
+      (`weathered_spherical_albedo`) in each of the optics' twelve bins, read at the bin's midpoint
+      (`bin_wavelength_nm`, 345–4,250 nm; the first and last bins stand for the light outside
+      them), under the row's `phase_law`, at its palette grain density (held at its first melt) and
+      its palette `FeO_T`, at the pass's maturity. `CAPPED_ROWS` = `basalt_reduced` alone keeps the
+      0.11 cap, one darkening (decision-p14-t49k Q5); `basalt_fe` is darkened once, never capped; a
+      row of `FeO_T` 0 (an ice) or an observed, weathered row (`mars_dust`) takes its own bins to the
+      bit; an airless rocky body whose lid is not known keeps the Moon's 0.11.
+    - _The maturity per pass:_ each spun pass takes P14.T51.d's maturity from the context it reads
+      (its first stage's field, `PassFigures::magnetic_field` over `FieldBody`, which
+      `of_first_stage` now reads too; its surface age, resurfacing time and heat flow), its own air
+      (the conditions' published pressure, 0 when airless: `published_surface_pressure`), its lid,
+      and what the record gives once a body (`PassRecordOf::weathering`: the zone's brightest star,
+      the seasonal orbit, the primary with a moon's planet's field, the mantle's sulphur, the
+      bulk's gravity). Its order: partition and conditions, lid, maturity
+      (`hooks::modifiers::surface_weathering`, the condensate-free law `derive` calls too),
+      regolith (`atmosphere::pass_regolith`, the one function the area mix and the bare regolith
+      read), publish, the full modifiers for `ferric`'s deposit, the area mix. The water is read
+      only where `oxidisable` (the oxidised deposit's one gate) holds, through
+      `PassRecordOf::wet_epoch` (`FiguresOf::volatile_history`, the record's one call). A pass with
+      no maturity keeps the stand-in, its reason labelled (`NoMaturity`).
+    - _The record:_ the published pass's parts (`PassWeathered`) ride `PassOut` → `Passes` →
+      `DerivedBody::weathered`; under the air's batch and `Weathered` the record's modifiers read
+      them in place of the figures' (K(P*)) field, surface age, resurfacing time, heat flow and
+      water, so that they are the published pass's to the bit (930 records over the first 40
+      sample systems and the golden systems; 867 field headers carry that maturity).
+      `DerivedBody::regolith_albedo` is the published pass's weathered regolith. The frame's star,
+      the mantle's sulphur and a moon's planet field are computed under the air's batch or
+      `Weathered` (`reads_modifier_star`, `planet_field_rules`); `planet_field` itself, `Strong` and
+      the magnetopause are unchanged (decision-p14-magnetosphere).
+    - _`ferric`:_ `surface_bond` takes the weathering deposits beside the condensates, each at its
+      row's `solid_bond`, scaled with them; with none it is the condensates' and the regolith's
+      to the bit.
+    - _Deviations:_
+      - a lid whose `FeO_T` is not modelled (the chondrites, `phyllosilicate`, `cometary`: 49
+        bodies) keeps the stand-in's arm, not the identity: the law weathers only a row that carries
+        its darkening agent (decision-pre-23-review item 16), and no such row is an observed,
+        weathered one (closed set, for the composition audit);
+      - `oxidisable` refuses an air of no published pressure: B1's batch record gave `ferric` to two
+        airless bodies, since `is_collisional_air` of a zero pressure over residual partials takes a
+        mean molar mass of 0 and tests 0 ≥ 0 (held at 23; a case added to c's test);
+      - an Io's SO₂ frost and sulphur stay out of the area mix: both rows have optics (P14.T49.i;
+        the modifiers' "waits for P14.T49.i" corrected), but the deposits are Io's measured shares
+        standing in for P14.T24.g's outgassing, and the plan wires `ferric` alone;
+      - the server's albedo-scale test is its existing one (`field_albedo_scale` on a header's
+        maturity); the sim states that the header's maturity and the lid's `FeO_T` are the
+        published pass's, since the server cannot reach the sim's switches;
+      - Mercury's checks are taken at the area mix (no Mercury-like body in the sample);
+      - `under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_…` counts a bracketed
+        solve whose passes the two rules lead along different paths as moved, and prints it:
+        `02000b2ca0000001.1100` (42 and 39 passes).
+    - _Figures under every 24 hold and the air's batch:_
+      - Mercury (`basalt_reduced`, about a Sun): 0.1100 by the cap, within the allowance of 1.25
+        of 0.088 ± 0.003 (Mallama 2017, a preprint; 0.0704–0.1138), Domingue et al. 2011's 0.081
+        over 0.43–1.01 µm beside it, its fresh row 0.194 over the twelve bins, 0.3–5 µm; its V-band
+        spherical albedo beside 0.068 (p_V q_V, 0.142 × 0.478): fresh 0.196, at the cap's scale
+        0.111, by the law uncapped at m = 1 0.078, stated;
+      - the table's Moon 0.1100 exactly (its lid not known);
+      - Europa (an `H2O` lid): Bond 0.832, its normal reflectances `H2O`'s 0.958/0.949/0.938,
+        which the identity cannot bring into 0.48–0.85: a stated miss, P14.T49.m's;
+      - Mars by item 13's terms 0.2993, stated (P14.T49.k's row swap and the assertion are
+        P14.T54.b.l's);
+      - the Moon's recorded miss at m = 1, stated: highlands (`feldspathic`) 0.092/0.130/0.145,
+        Bond 0.1326, maria (`basalt_fe`) 0.051/0.054/0.056, Bond 0.0514, their B/R 0.921 against
+        0.733, the V contrast 2.42 against 1.58;
+      - the census over 599 surfaces of the first 40 systems: 475 weathered, 71 capped
+        (`basalt_reduced`), 49 on the stand-in's arm (`FeO_T` not modelled), 3 with no regolith and
+        1 moon whose planet's record gives no field, 5 with `ferric`. The largest moves are young lava worlds (below); one state
+        flips, `02000b2ca0000001.1100`, Snowball → Airless at the same albedo and T_eq, on the
+        100 Pa line (k 121, the M dwarf's uncapped wind, already recorded).
+    - _Deferred findings (2026-10-13 rule):_
+      - _The cap on `basalt_reduced`._ It stays past P14.T49.k (decision-p14-t49k Q5). Its deletion
+        needs the weathering of an Fe-poor, carbon-bearing regolith, which darkens without npFe
+        (Shackelford et al. 2025) and matures 2–4 times faster than the Moon's (Braden and Robinson
+        2013). Owner not assigned.
+      - _No halo term in the area mix._ The area mix weathers at m_body, so p leaves out a real
+        body's young-crater haloes, a few per cent in V (R10's `halo_excess_v`); R10's
+        `haloed_albedo_scale` makes the drawn mean equal the record's p, so the picture is
+        self-consistent. The expectation (decision-r10-t1c-maturity item 5 and §6;
+        decision-r10-t1c-halo §1.8) needs the surface crate's crater expectation each pass and a
+        bump of its own: R10.T1.c's follow-up, after 24.
+      - _Young lava worlds show their fresh rows._ Without the cap a freshly resurfaced lid takes
+        its fresh row, m ≈ 0 at a surface age near 0: 63 airless weathered regoliths lie below
+        m = 10⁻³, `komatiite` up to 0.5217 (`42002cb1ffc00009.0301`, T_eq 31.16 → 26.68 K) and the
+        largest T_eq move −10.26 K (`42002cae0000000a.0101`, 0.110 → 0.342). A lava flow's glassy
+        texture is not modelled, and the rows carry the method's known overstatement of
+        crystalline rows (decision-p14-t49k §2.6). For the composition audit.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

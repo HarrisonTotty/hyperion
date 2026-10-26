@@ -131,7 +131,7 @@ use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
 use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::surface::{ColdProfile, SurfaceConditions};
 use crate::planetary::record::{Modelled, Surface, SurfaceModifiers};
-use crate::substance::optics::palette_feo_mass_fraction;
+use crate::substance::optics::{held_at_first_melt, palette_feo_mass_fraction};
 use crate::substance::{
     self, Composition, ResolveLiquidError, ResolvePaletteEntryError, SubstanceId,
     liquid_properties_at_pressure, resolve_palette_entry,
@@ -357,18 +357,6 @@ fn mean_temperature(conditions: &SurfaceConditions) -> Kelvin {
         mean
     } else {
         conditions.climate_range().1
-    }
-}
-
-/// `temperature` held at most the first melt of `id`'s row, its condensed columns' transition,
-/// where its solid's grain density ends; `temperature` itself for a row with none.
-#[must_use]
-fn held_at_first_melt(id: SubstanceId, temperature: Kelvin) -> Kelvin {
-    match id.substance().condensed() {
-        Some(condensed) if temperature > condensed.transition().temperature() => {
-            condensed.transition().temperature()
-        }
-        Some(_) | None => temperature,
     }
 }
 

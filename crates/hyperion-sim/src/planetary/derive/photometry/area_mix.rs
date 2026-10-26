@@ -44,7 +44,10 @@
 //!   §2).
 //! - **The regolith** ([`Regolith`]) on the surface the condensates leave: its lid's row, or while
 //!   the passes do not know the lid a stand-in, on an airless rocky body the Moon's 0.11 exactly
-//!   and a known lid's row at most 0.11 ([`airless_silicate_stand_in`]).
+//!   and a known lid's row at most 0.11 ([`airless_silicate_stand_in`]); from generator version 24
+//!   a known lid's row weathered at the body's maturity ([`Regolith::weathered_lid`]).
+//! - **A weathering deposit** (P14.T51.j's `ferric`, from 24): its area at its row's optics, a
+//!   solid's ([`surface_bond`]'s `deposits`).
 //! - **The cloud's condensable** weighs by 1 − d, its dominance ([`cloud_availability`]).
 //! - **The cloud** ([`cloud_fraction`], [`cloud_albedo`]): the state's cloud fraction times the
 //!   condensable's availability, at the state's cloud albedo.
@@ -74,6 +77,22 @@
 //! regolith at most 0.11, any other lid not known a row by its material; a body with no luminous
 //! host a Sun's light.
 //!
+//! # The weathered area mix (P14.T54.b.e; held at 24, [`WEATHERED_AREA_MIX_VERSION`])
+//!
+//! R10.T1.d's law ([`weathered_spherical_albedo`]) weathers a known lid's row at the body's
+//! maturity m (P14.T51.d's, which a pass computes from the context it reads), each of the optics'
+//! twelve bins in their order, at the bin's midpoint wavelength ([`bin_wavelength_nm`]), under the
+//! row's own law (`CondensedColumns::phase_law`), at the grain density and `FeO_T` its palette
+//! entry carries ([`Regolith::weathered_lid`]). A row whose `FeO_T` is not modelled, or whose albedo
+//! is an observed, weathered value (`mars_dust`), is not weathered again: nothing darkens twice
+//! (decision-p14-t51d-weathering §1.5). T51.b's space-weathering cap is deleted with it, but on
+//! `basalt_reduced` ([`CAPPED_ROWS`]), which keeps it (decision-p14-t49k Q5): its graphite-bearing
+//! row lies above 0.11, and the law, npFe⁰ per `FeO_T`, does not weather an Fe-poor, carbon-bearing
+//! regolith (Shackelford et al. 2025, PSJ 6, 254, a deferred finding), so that it takes one
+//! darkening, the cap's. An airless rocky body whose lid is not known keeps the Moon's 0.11, and a
+//! body whose maturity is not modelled its stand-in, each labelled. `ferric`'s weathering deposit
+//! joins the area mix at its row's optics ([`surface_bond`]).
+//!
 //! # The Rayleigh floor (P14.T24.h.a; decision-p14-t54a-passes §G3.5)
 //!
 //! The area mix has no Rayleigh term, so a thick air's Bond albedo is its surface's alone, which
@@ -90,6 +109,7 @@
 //! [`liquid_properties`]: crate::substance::liquid_properties
 
 use hyperion_surface::field::{LIQUID_BINS, LiquidProperties, MechanicsFamily};
+use hyperion_surface::material::weathered_spherical_albedo;
 
 use crate::math;
 use crate::planetary::chem::partition::{
@@ -100,11 +120,13 @@ use crate::planetary::derive::atmosphere::{
     Gas, PartialPressures, RunawayDeck, SurfaceMaterial, SurfaceState,
 };
 use crate::planetary::hooks::surface::regime::climate_condensable;
-use crate::substance::optics::{SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS};
+use crate::substance::optics::{
+    SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS, held_at_first_melt, palette_feo_mass_fraction,
+};
 use crate::substance::rayleigh::{RAYLEIGH_REFERENCE_WAVELENGTH_NM, gas_cross_section};
 use crate::substance::{
-    Composition, LIQUID_BIN_EDGES_NM, ResolveLiquidError, SubstanceId, by_key, diagram,
-    liquid_properties_at_pressure,
+    Composition, CondensedPhase, LIQUID_BIN_EDGES_NM, ResolveLiquidError, SubstanceId, by_key,
+    diagram, liquid_properties_at_pressure,
 };
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
@@ -881,7 +903,9 @@ pub(crate) enum StandIn {
     RecordAtItsFirstMelt,
     /// An airless regolith of a known lid whose row is of the `Silicate` family takes at most the
     /// Moon's 0.11: space weathering's stand-in until P14.T54.b weathers the area mix
-    /// ([`airless_silicate_stand_in`], [`capped_lid`]).
+    /// ([`airless_silicate_stand_in`], [`capped_lid`]). Under the weathered area mix
+    /// ([`AreaMixWeathering::Weathered`]) only [`CAPPED_ROWS`]' `basalt_reduced` keeps it, and a
+    /// known lid whose maturity is not modelled.
     SpaceWeathering,
     /// An airless rocky body whose lid is not known (the passes' first pass, the passes' stand-in
     /// with no rotation law, a body with no crust) takes the Moon's 0.11 exactly (NASA's fact
@@ -1173,12 +1197,12 @@ fn moon_bond() -> f64 {
 /// (NASA's fact sheet; T13.c's present value). A reference form is a fresh surface, and a fresh
 /// lithology would make an airless rocky body far too bright; so it never brightens an airless
 /// silicate body against today's value, and it lets an intrinsically dark row go darker. Labelled
-/// ([`StandIn::SpaceWeathering`]); P14.T54.b deletes it and weathers the area mix with R10.T1.d's
-/// law over P14.T51.d's maturity and rate, through [`Regolith::weathered`]
-/// (decision-p14-t51d-weathering), but only for the lids whose rows carry their darkening agent
-/// (decision-pre-23-review item 16), and not on `basalt_reduced` before P14.T49.k's graphite-bearing
-/// reduced basalt lands (item 3: its fresh row, 0.53 about a Sun, weathered alone would leave a
-/// Mercury about five times too bright).
+/// ([`StandIn::SpaceWeathering`]). P14.T54.b.e weathers the area mix with R10.T1.d's law over
+/// P14.T51.d's maturity instead ([`Regolith::weathered_lid`], behind
+/// [`WEATHERED_AREA_MIX_VERSION`]; decision-p14-t51d-weathering), and keeps this cap on
+/// `basalt_reduced` alone ([`CAPPED_ROWS`]; decision-p14-t49k Q5: the law, npFe⁰ per `FeO_T`, does
+/// not weather its Fe-poor, graphite-bearing row, which would leave a Mercury too bright), and on a
+/// known lid whose maturity is not modelled.
 #[must_use]
 pub(crate) fn airless_silicate_stand_in(row: f64) -> f64 {
     let cap = moon_bond();
@@ -1196,17 +1220,9 @@ pub(crate) enum RegolithWeathering {
     /// ([`Regolith::bond`]). P14.T54.b deletes this arm when it weathers the area mix with
     /// R10.T1.d's law.
     StandIn,
-    /// Weathered: its spherical albedos by bin, `spherical_bins`, which P14.T54.b computes from the
-    /// row by R10.T1.d's law at P14.T51.d's maturity and rate, and which weigh by the host's bins
-    /// as any solid's do ([`Regolith::weathered`]). T51.d's tests reach the area mix through it
-    /// with no wiring.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "P14.T54.b's weathering constructs it; P14.T51.d's tests and these do now"
-        )
-    )]
+    /// Weathered: its spherical albedos by bin, `spherical_bins`, which P14.T54.b.e computes from
+    /// the lid's row by R10.T1.d's law at P14.T51.d's maturity ([`Regolith::weathered_lid`]), and
+    /// which weigh by the host's bins as any solid's do ([`Regolith::weathered`]). Never capped.
     Weathered {
         /// The weathered spherical albedos in the optics' bins ([`OPTICS_BANDS`]).
         spherical_bins: [f64; OPTICS_BANDS],
@@ -1257,15 +1273,8 @@ impl Regolith {
     }
 
     /// A weathered regolith on a body of `material`, of spherical albedos by bin `spherical_bins`
-    /// ([`RegolithWeathering::Weathered`]): P14.T54.b's, which computes them from the lid's row,
-    /// so that it holds no row of its own.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "P14.T54.b's weathering builds it; P14.T51.d's tests and these reach it now"
-        )
-    )]
+    /// ([`RegolithWeathering::Weathered`]): P14.T54.b.e's, which computes them from the lid's row
+    /// ([`weathered_lid`](Self::weathered_lid)), so that it holds no row of its own.
     #[must_use]
     pub(crate) const fn weathered(
         material: SurfaceMaterial,
@@ -1276,6 +1285,90 @@ impl Regolith {
             material,
             weathering: RegolithWeathering::Weathered { spherical_bins },
         }
+    }
+
+    /// The regolith of a known lid's row `row` on a body of `material`, weathered at the body's
+    /// maturity `maturity` (P14.T51.d's m, dimensionless in [0, 1]) where it lies at `temperature`
+    /// (the pass's mean surface temperature), P14.T54.b.e's ([module](self) documentation, "The
+    /// weathered area mix"):
+    ///
+    /// - [`CAPPED_ROWS`]' `basalt_reduced` keeps the stand-in's cap ([`with_lid`](Self::with_lid),
+    ///   [`StandIn::SpaceWeathering`] on an airless body), one darkening, never weathered as well;
+    /// - every other row with condensed optics is weathered ([`Regolith::weathered`]): each of its
+    ///   spherical albedos by bin (`CondensedOptics::spherical_albedo_bins`), in bin order, by
+    ///   [`weathered_spherical_albedo`] at the bin's midpoint ([`bin_wavelength_nm`]), under its
+    ///   law (`CondensedColumns::phase_law`), at its solid's grain density at `temperature` held at
+    ///   its first melt ([`held_at_first_melt`], its palette entry's) and its palette `FeO_T`
+    ///   ([`palette_feo_mass_fraction`]); never capped, so that `basalt_fe`'s row is darkened
+    ///   once;
+    /// - a row whose albedo is an observed, weathered value (`mars_dust`'s: its palette `FeO_T` is
+    ///   `None` though its composition carries iron) takes its own bins to the bit, nothing
+    ///   darkening twice (decision-p14-t51d-weathering §1.5), as does one of `FeO_T` 0 (an ice:
+    ///   Europa's), and one at m = 0 (an air above the ion column: k and m +0);
+    /// - a row whose `FeO_T` is not modelled (the chondrites, `phyllosilicate`, `cometary`), one
+    ///   with no condensed optics, and one whose `FeO_T` is above 0 but whose solid has no grain
+    ///   density at `temperature` keep the stand-in (`with_lid`, capped where airless and
+    ///   silicate): the law weathers only a row that carries its darkening agent
+    ///   (decision-pre-23-review item 16), and there is nothing it can read.
+    ///
+    /// # Panics
+    ///
+    /// If `maturity` is not in [0, 1] (as [`weathered_spherical_albedo`]): P14.T51.d's maturity
+    /// lies there.
+    #[must_use]
+    pub(crate) fn weathered_lid(
+        row: SubstanceId,
+        material: SurfaceMaterial,
+        maturity: f64,
+        temperature: Kelvin,
+    ) -> Self {
+        let substance = row.substance();
+        let capped = CAPPED_ROWS.contains(&substance.key().as_str());
+        let (Some(optics), Some(condensed), false) =
+            (substance.condensed_optics(), substance.condensed(), capped)
+        else {
+            return Self::with_lid(row, material);
+        };
+        let fresh = optics.spherical_albedo_bins();
+        let feo = match (
+            palette_feo_mass_fraction(row),
+            substance.feo_mass_fraction(),
+        ) {
+            (Some(feo), _) if feo > 0.0 => feo,
+            // Nothing to darken (an iron-free row), or darkened already (an observed, weathered
+            // albedo, whose registry composition carries iron): the row's own bins, to the bit.
+            (Some(_), _) | (None, Some(_)) => return Self::weathered(material, fresh),
+            // No darkening agent the law can read: the stand-in's arm.
+            (None, None) => return Self::with_lid(row, material),
+        };
+        let held = held_at_first_melt(row, temperature);
+        let Some(density) = substance.grain_density(CondensedPhase::Solid, held) else {
+            return Self::with_lid(row, material);
+        };
+        let law = condensed.phase_law();
+        let mut spherical_bins = fresh;
+        for (bin, albedo) in spherical_bins.iter_mut().enumerate() {
+            *albedo = weathered_spherical_albedo(
+                *albedo,
+                bin_wavelength_nm(bin),
+                law,
+                density.value(),
+                feo,
+                maturity,
+            );
+        }
+        Self::weathered(material, spherical_bins)
+    }
+
+    /// Whether it is weathered at a maturity ([`RegolithWeathering::Weathered`]), not on the
+    /// stand-in's arm.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the weathered area mix's census reads it")
+    )]
+    #[must_use]
+    pub(crate) const fn is_weathered(&self) -> bool {
+        matches!(self.weathering, RegolithWeathering::Weathered { .. })
     }
 
     /// The row a regolith of `material` whose lid is not known takes on a body that is not an
@@ -1354,29 +1447,62 @@ pub(crate) fn capped_lid(row: SubstanceId, state: SurfaceState) -> bool {
             .is_some_and(|condensed| condensed.mechanics() == MechanicsFamily::Silicate)
 }
 
+/// The lids whose rows keep the space-weathering stand-in's cap under the weathered area mix
+/// ([`Regolith::weathered_lid`]): `basalt_reduced` alone, a closed list for the composition audit
+/// (decision-p14-t49k Q5; P14.T54.b's plan text). R10.T1.d's law darkens by npFe⁰ per unit of
+/// `FeO_T`, and Mercury's darkening agent is its carbon, which the law does not read (Shackelford et
+/// al. 2025, PSJ 6, 254, a deferred finding), so that its graphite-bearing row, above the Moon's
+/// 0.11 about a Sun, takes the cap and only the cap.
+pub(crate) const CAPPED_ROWS: [&str; 1] = ["basalt_reduced"];
+
+/// The wavelength, nm, at which the weathering law reads optics bin `bin`
+/// ([`Regolith::weathered_lid`]): the midpoint of its edges ([`SPECTRAL_BIN_EDGES_NM`]), 345 nm to
+/// 4,250 nm. The law's τ falls with λ, and one wavelength stands for each bin (labelled): the
+/// first bin's 345 nm for all the light below 390 nm and the last's 4,250 nm for all the light
+/// above 3,500 nm, as their albedos do (`substance::optics`'s module documentation), and the law's
+/// own table of iron's z ends at 5,000 nm.
+///
+/// # Panics
+///
+/// If `bin` is not one of the [`OPTICS_BANDS`] bins.
+#[must_use]
+pub(crate) fn bin_wavelength_nm(bin: usize) -> f64 {
+    f64::midpoint(SPECTRAL_BIN_EDGES_NM[bin], SPECTRAL_BIN_EDGES_NM[bin + 1])
+}
+
 /// The surface's Bond albedo, beneath any cloud: Σ over the published condensates `condensates`
 /// of each entry's area × its Bond albedo (a solid's [`solid_bond`], a liquid's
 /// [`liquid_entry_bond`] at its condensate's temperature in `partition`; a supercritical entry has
-/// no interface and takes no area), plus the regolith's albedo `regolith` on the rest, max(0, 1 −
-/// Σ areas), under the light of `shade`. Where the areas sum above 1 (ices that overlap, or an ice
-/// over a sea, as R09's cover convention allows) they are scaled to 1, as T51.a's cover is.
+/// no interface and takes no area), then over the weathering deposits `deposits` (each a row and
+/// its area, P14.T51.j's `ferric` from the weathered area mix, P14.T54.b.e) each at its row's
+/// [`solid_bond`], plus the regolith's albedo `regolith` on the rest, max(0, 1 − Σ areas), under
+/// the light of `shade`. Where the areas sum above 1 (ices that overlap, or an ice over a sea, as
+/// R09's cover convention allows) they are scaled to 1, as T51.a's cover is. With no deposits it
+/// is the condensates' and the regolith's alone, to the bit.
+///
+/// An Io's volcanic deposits (SO₂ frost and sulphur) are not among them, and the regolith takes
+/// their area (recorded): both rows have condensed optics (P14.T49.i: `SO2`'s a stand-in on Nash,
+/// Fanale and Nelson 1980's levels, `S8`'s measured), but the deposits are Io's measured shares
+/// standing in, on every body of extreme volcanism, for the deposits P14.T24.g's outgassing will
+/// give, and the plan's wiring (P14.T54.b, from P14.T51.j) puts `ferric`'s area alone in the mix.
 #[must_use]
 pub(crate) fn surface_bond(
     condensates: &Condensates,
     partition: &Partition,
-    regolith: f64,
+    (regolith, deposits): (f64, &[(SubstanceId, f64)]),
     shade: &HostShade,
 ) -> f64 {
-    let areas = condensates.entries().iter().fold(0.0, |sum, entry| {
+    let entries = condensates.entries().iter().fold(0.0, |sum, entry| {
         sum + match entry.phase() {
             CondensatePhase::Solid | CondensatePhase::Liquid => entry.area_fraction(),
             CondensatePhase::Supercritical => 0.0,
         }
     });
+    let areas = deposits.iter().fold(entries, |sum, &(_, area)| sum + area);
     let scale = if areas > 1.0 { 1.0 / areas } else { 1.0 };
     let covered = areas * scale;
     let rest = if covered < 1.0 { 1.0 - covered } else { 0.0 };
-    condensates
+    let ground = condensates
         .entries()
         .iter()
         .fold(rest * regolith, |sum, entry| match entry.phase() {
@@ -1390,7 +1516,75 @@ pub(crate) fn surface_bond(
                 sum + entry.area_fraction() * scale * bond
             }
             CondensatePhase::Supercritical => sum,
-        })
+        });
+    deposits.iter().fold(ground, |sum, &(row, area)| {
+        sum + area * scale * solid_bond(row, &shade.bands).bond
+    })
+}
+
+/// The generator version from which the area mix weathers its regolith at the body's maturity and
+/// adds `ferric`'s deposit (P14.T54.b.e; the [module](self)'s "The weathered area mix"): 24, the
+/// 23 → 24 batch's bump, P14.T54.b, its own hold (decision-p14-t54b-open §1.2), so that it moves
+/// the published albedos alone.
+///
+/// Below it [`AreaMixWeathering::in_force`] is [`AreaMixWeathering::Held`], so that every area mix
+/// is 23's bit for bit and nothing of the weathering is computed. P14.T54.b.l deletes this hold,
+/// [`AreaMixWeathering`] with its `Held` arm, the tests' switch ([`with_area_mix_weathering`]) and
+/// its tripwire (`the_weathered_area_mix_is_held_only_until_the_24_bump`).
+pub(crate) const WEATHERED_AREA_MIX_VERSION: GeneratorVersion = GeneratorVersion::new(24);
+
+/// Whether the area mix weathers its regolith and adds `ferric` (the hold,
+/// [`WEATHERED_AREA_MIX_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum AreaMixWeathering {
+    /// Versions 23's and before: T51.b's stand-in on every regolith and no deposit; the passes
+    /// compute no maturity and no modifiers.
+    Held,
+    /// The 23 → 24 batch's: the regolith weathered at its body's maturity and `ferric`'s area in
+    /// the mix.
+    Weathered,
+}
+
+impl AreaMixWeathering {
+    /// The rules this generator version gives: the weathered area mix from
+    /// [`WEATHERED_AREA_MIX_VERSION`], held below it; in the tests, the rules a test's switch sets
+    /// on its thread ([`with_area_mix_weathering`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = WEATHERING_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= WEATHERED_AREA_MIX_VERSION {
+            Self::Weathered
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The weathered area mix's rules a test sets on its thread, `None` for the version's.
+    static WEATHERING_RULES: core::cell::Cell<Option<AreaMixWeathering>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the weathered area mix's rules `rules` on this thread, for the tests to
+/// reach 24's area mix ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. P14.T54.b.l deletes it
+/// with the hold.
+#[cfg(test)]
+pub(crate) fn with_area_mix_weathering<R>(rules: AreaMixWeathering, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<AreaMixWeathering>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WEATHERING_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(WEATHERING_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
 }
 
 /// The share of the disc under cloud of a body in the state `state` before its condensable's
