@@ -234,6 +234,9 @@ fn member_lines(w: &mut GoldenWriter) {
     for slot in [
         MemberSlot::FeatureLevel { index: 0 },
         MemberSlot::FeatureLevel { index: 1 },
+        // The centre's list index is 16 bits (P11.T8.e.b).
+        MemberSlot::FeatureLevel { index: 8_192 },
+        MemberSlot::FeatureLevel { index: 65_535 },
         MemberSlot::InCell {
             band: Layer::A,
             level: 9,

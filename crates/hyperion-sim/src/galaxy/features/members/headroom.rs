@@ -1,12 +1,16 @@
-//! The galactic centre's feature-level list against its 13-bit index: what plan 11's carved binary
-//! classes will put there, and the check that it fits (plan 11, P11.T8.e).
+//! The galactic centre's feature-level list against its 16-bit index: what plan 11's carved binary
+//! classes will put there, and the check that it fits (plan 11, P11.T8.e; the index widened by
+//! P11.T8.e.b).
 //!
 //! P11.T8.f lists the five carved classes, the fast and the slow accreting white dwarfs, the X-ray
 //! binaries, the stellar mergers and the neutron-star mergers, on plan 09's [`FeatureLevelList`],
 //! the centre's among them, each with a count of the feature's budget times its class's row of
-//! [`CLASS_SHARES`]. The list's index is 13 bits, 8,192 members with index 0 the centre's black
-//! hole, and a nuclear cluster of tens of millions of systems at the galaxy-wide share of about
-//! 10⁻⁴ expects thousands of hosts. This module says whether they fit, before T8.f lists any.
+//! [`CLASS_SHARES`]. A nuclear cluster of tens of millions of systems at the galaxy-wide share of
+//! about 10⁻⁴ expects thousands of hosts, and up to about 18,000 candidates at plan 02's cap. The
+//! centre's list index is 16 bits ([`ListIndex::Centre`]), 65,536 members with index 0 the centre's
+//! black hole: this check found 13 bits too few, and the owner's ruling of 2026-10-26 widened the
+//! centre's index alone (plan 11's Risks, "The centre's feature-level index, ruled"). This module
+//! says whether they fit, before T8.f lists any.
 //!
 //! # The forecast ([`centre_list_forecast`])
 //!
@@ -29,9 +33,10 @@
 //! # The bound
 //!
 //! The list's own: the candidates plus eight standard deviations of their Poisson count, plus
-//! index 0, under 8,192, which [`FeatureLevelList::with_classes`] asserts through the same
-//! function. A centre that passed a looser bound could panic as soon as T8.f built its list, so
-//! the plan's five standard deviations are reported ([`CentreListForecast::margin`]), not checked.
+//! index 0, under the centre's 65,536, which [`FeatureLevelList::with_classes`] asserts through the
+//! same function. It holds up to 63,518.8 candidates. A centre that passed a looser bound could
+//! panic as soon as T8.f built its list, so the plan's five standard deviations are reported
+//! ([`CentreListForecast::margin`]), not checked.
 //!
 //! # What it leaves out
 //!
@@ -42,23 +47,27 @@
 //! - **Catalogue features** are not walked. A nursery's or an open cluster's initial mass is at
 //!   most [`NURSERY_MASS_MAX`], 10⁵ M☉, about 11 candidates at these rates. A globular's count is
 //!   P09.T9.e's encounter law under T8.f, which this module cannot forecast; T8.f brings it in.
-//!   [`FeatureLevelList::with_classes`] asserts the bound on every list it builds.
+//!   [`FeatureLevelList::with_classes`] asserts the bound, at their 13-bit index, on every list it
+//!   builds.
 //!
 //! # Not yet called
 //!
 //! The plan has the check called beside plan 03's [`check_index_headroom`], which the server calls
 //! when it builds a galaxy for play. Nothing calls this one yet: no list holds these classes until
-//! T8.f, and a refusal now would refuse galaxies over members that no list holds. T8.f wires it
-//! there, or the brainstorm owner's ruling on the centre's index changes what it checks.
+//! T8.f, which lists them at the 16-bit limit and wires the check there.
 //!
 //! # As measured
 //!
-//! At `GENERATOR_VERSION` 23 the Milky Way fixture's centre fits, at 7,145 candidates with 370
-//! indices to spare, but a cluster 5% heavier does not, nor does either mass function's capped
-//! cluster, and 393 of the first 10³ of plan 02's seeds fail (`tests/galaxy_sweeps.rs`). Counted
-//! with the primaries' mass alone, 207 still fail. Plan 11's Risks record the finding for the
-//! brainstorm's owner ("The centre's feature-level index, as measured (P11.T8.e)"), and P11.T8.f
-//! waits on the ruling.
+//! At `GENERATOR_VERSION` 23, against the 16-bit index, the Milky Way fixture's centre fits, at
+//! 7,145.0 candidates with 57,713.8 indices to spare at eight standard deviations, and so do both
+//! mass functions' capped clusters, the heaviest plan 02 draws, at 18,311.6 and 12,174.9
+//! candidates (46,140.9 and 52,477.4 to spare), and every one of the first 10³ of plan 02's seeds
+//! (`tests/galaxy_sweeps.rs`). The cap bounds every drawn cluster, so no seed fails while it holds.
+//! Twice either cap's candidates still fit, which a test keeps as the tripwire for the ruling's
+//! fallback: a refit or a new class that brings the capped forecast within a factor of two of the
+//! bound is the point to widen the centre's index, by the same rule, to `[31:0]` (plan 11's Risks,
+//! "P11.T8.e.b as built", after "The centre's feature-level index, ruled"). Against 13 bits, 393
+//! of the 10³ seeds failed (P11.T8.e, "as measured").
 
 use crate::galaxy::features::centre::{BuildCentreError, CentreClasses, CentreProfile};
 #[cfg(doc)]
@@ -70,7 +79,6 @@ use crate::galaxy::params::GalaxyParams;
 #[cfg(doc)]
 use crate::galaxy::placement::check_index_headroom;
 use crate::galaxy::{Galaxy, POPULATIONS};
-use crate::id::MemberSlot;
 use crate::stellar::binary::CarvedClass;
 use crate::tables::binary::{CLASS_SHARES, ClassShareRow};
 use crate::units::SolarMasses;
@@ -79,7 +87,7 @@ use crate::units::SolarMasses;
 use super::FeatureLevelList;
 #[cfg(doc)]
 use super::level_list::registered_classes;
-use super::level_list::{fits_list_index, list_index_margin};
+use super::level_list::{ListIndex, fits_list_index, list_index_margin};
 
 /// The least share of a carved class's candidates that pass its test: 0.9.
 ///
@@ -196,18 +204,19 @@ impl CentreListForecast {
         self.candidates
     }
 
-    /// Whether the candidates fit the list's index: plus eight standard deviations and index 0,
-    /// under 8,192 (module documentation).
+    /// Whether the candidates fit the centre's list index: plus eight standard deviations and
+    /// index 0, under 65,536 ([`ListIndex::Centre`]; module documentation).
     #[must_use]
     pub fn fits(&self) -> bool {
-        fits_list_index(self.candidates)
+        fits_list_index(self.candidates, ListIndex::Centre.limit())
     }
 
-    /// The indices left free under 8,192 once the candidates, `sigmas` standard deviations of their
-    /// count and index 0 are counted: positive at eight exactly where [`fits`](Self::fits) holds.
+    /// The indices left free under the centre's 65,536 once the candidates, `sigmas` standard
+    /// deviations of their count and index 0 are counted: positive at eight exactly where
+    /// [`fits`](Self::fits) holds.
     #[must_use]
     pub fn margin(&self, sigmas: f64) -> f64 {
-        list_index_margin(self.candidates, sigmas)
+        list_index_margin(self.candidates, sigmas, ListIndex::Centre.limit())
     }
 
     /// The check's verdict on the forecast.
@@ -240,7 +249,7 @@ fn largest_rate(row: &ClassShareRow) -> f64 {
 }
 
 /// A feature's feature-level list cannot keep its expected candidates, plus eight standard
-/// deviations and index 0, under its 8,192 index (module documentation).
+/// deviations and index 0, under its index's limit, 65,536 at the centre (module documentation).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExceedFeatureListError {
     /// The galactic centre's list: plan 11's carved classes expect `candidates` there.
@@ -257,7 +266,7 @@ impl core::fmt::Display for ExceedFeatureListError {
                 f,
                 "the galactic centre's feature-level list expects {candidates:.0} candidates, \
                  within eight standard deviations of its index's {}",
-                MemberSlot::INDEX_LIMIT
+                ListIndex::Centre.limit()
             ),
         }
     }
@@ -309,8 +318,8 @@ fn galaxy_centre_forecast(galaxy: &Galaxy) -> Result<CentreListForecast, BuildCe
 /// Checks that `galaxy`'s centre has room on its feature-level list for plan 11's carved classes:
 /// their expected candidates ([`CentreListForecast::candidates`]: the centre's formed mass times
 /// [`CLASS_SHARES`]' rates, over [`CLASS_ACCEPTANCE_FLOOR`]) plus eight standard deviations of
-/// their Poisson count (plan 03, Design note 6) and index 0 stay under the 8,192 index (module
-/// documentation).
+/// their Poisson count (plan 03, Design note 6) and index 0 stay under the centre's 16-bit index,
+/// 65,536 (module documentation).
 ///
 /// It reads the galaxy's mass model and mass function, and builds the centre's classes but no
 /// distribution function. Nothing calls it yet (module documentation, "Not yet called").
@@ -334,11 +343,11 @@ fn galaxy_centre_forecast(galaxy: &Galaxy) -> Result<CentreListForecast, BuildCe
 /// };
 ///
 /// // Whether P11.T8.f may list the carved classes at this galaxy's centre, and if not, by how
-/// // much they overflow the 13-bit index.
+/// // much they overflow the 16-bit index.
 /// match check_feature_list_headroom(&Galaxy::new(Seed::new(1))) {
 ///     Ok(()) => {}
 ///     Err(ExceedFeatureListError::CentreListTooFull { candidates }) => {
-///         assert!(candidates + 8.0 * candidates.sqrt() + 1.0 >= 8_192.0);
+///         assert!(candidates + 8.0 * candidates.sqrt() + 1.0 >= 65_536.0);
 ///     }
 /// }
 /// ```
@@ -364,10 +373,13 @@ mod tests {
     use crate::units::Dex;
     use hyperion_testkit::float::assert_same_bits;
 
-    /// The largest expectation the list's bound keeps: the root of `c + 8√c + 1 = 8,192`,
-    /// `(√(16 + 8,191) − 4)²`, 7,498.2.
+    /// The centre's index's exclusive bound, 65,536, as a double.
+    const LIMIT: f64 = 65_536.0;
+
+    /// The largest expectation the centre's list's bound keeps: the root of `c + 8√c + 1 =
+    /// 65,536`, `(√(16 + 65,535) − 4)²`, 63,518.8.
     fn largest_fitting() -> f64 {
-        let root = (16.0_f64 + 8_191.0).sqrt() - 4.0;
+        let root = (16.0_f64 + 65_535.0).sqrt() - 4.0;
         root * root
     }
 
@@ -395,9 +407,9 @@ mod tests {
             f.hosts(CarvedClass::StellarMerger),
             f.hosts(CarvedClass::NeutronStarMerger),
             f.candidates(),
-            8_192.0 - f.margin(8.0),
+            LIMIT - f.margin(8.0),
             f.margin(8.0),
-            8_192.0 - f.margin(5.0),
+            LIMIT - f.margin(5.0),
             f.margin(5.0),
         );
     }
@@ -412,7 +424,8 @@ mod tests {
             .unwrap()
     }
 
-    /// A centre's list (member zero present) whose one class expects `expected` members.
+    /// A centre's list (member zero present, the 16-bit index) whose one class expects `expected`
+    /// members.
     fn list_expecting(expected: f64) -> FeatureLevelList {
         let profile = ClassProfile::new(ProfileShape::Plummer { scale: 3.0 }, 60.0, 1.0);
         // Any feature word: the bound is what is tested, not the draws.
@@ -421,6 +434,7 @@ mod tests {
             0,
             &GalacticPosition::ORIGIN,
             MemberZero::Present,
+            ListIndex::Centre,
             vec![ListClass::new(
                 ClassId::ACCRETING_WHITE_DWARF,
                 expected,
@@ -520,89 +534,73 @@ mod tests {
         );
     }
 
-    /// The check at the Milky Way fixture: its centre's 7,145.0 candidates fit, with 369.8 indices
-    /// to spare at eight standard deviations and 623.4 at five, as measured at `GENERATOR_VERSION`
-    /// 23 and pinned, the candidates to 10⁻⁵ and the margins to 10⁻³, until the brainstorm's owner
-    /// rules on the centre's index (plan 11's Risks, "The centre's feature-level index, as measured
-    /// (P11.T8.e)").
+    /// The check at the Milky Way fixture, under either mass function, against the centre's 16-bit
+    /// index: the default function's centre, 7,145.0 candidates, fits with 57,713.8 indices to
+    /// spare at eight standard deviations, and Kroupa's, 6,468.0, with 58,423.6, as measured at
+    /// `GENERATOR_VERSION` 23 and pinned to 10⁻⁵, with the primaries' share of `m̄_f` (module
+    /// documentation) to 10⁻⁴.
     #[test]
-    fn the_milky_way_s_centre_list_fits() {
+    fn the_milky_way_s_centre_list_fits_under_either_mass_function() {
         let galaxy = milky_way_galaxy();
         assert_eq!(check_feature_list_headroom(galaxy), Ok(()));
-        let f = galaxy_centre_forecast(galaxy).unwrap();
-        assert_near(f.candidates(), 7_144.99, 1e-5, "candidates");
-        assert_near(
-            f.margin(8.0),
-            369.8,
-            1e-3,
-            "margin at eight standard deviations",
-        );
-        assert_near(f.margin(5.0), 623.4, 1e-3, "margin at five");
-    }
-
-    /// The cluster's mass at which the check first fails, under either mass function: the
-    /// fixture's cluster scaled to the largest candidates that fit, which the forecast confirms
-    /// a part in 500 to either side. Measured at `GENERATOR_VERSION` 23 (pinned as
-    /// `the_milky_way_s_centre_list_fits` says): 1.0494 times the fixture's 2.4747 × 10⁷ M☉
-    /// under Chabrier's function, 2.597 × 10⁷ M☉, and 1.1593 times its 2.4843 × 10⁷ M☉ under
-    /// Kroupa's, 2.880 × 10⁷ M☉, against caps of 6.4 and 4.7 × 10⁷ M☉.
-    #[test]
-    fn the_check_first_fails_just_above_the_milky_way_s_cluster() {
-        for (kind, want, want_share) in [
-            (MassFunctionKind::Chabrier, 1.049_44, 0.703_48),
-            (MassFunctionKind::Kroupa, 1.159_28, 0.713_27),
+        // The fixture's galaxy is the default function's fixture below, bit for bit.
+        let fixture = centre_list_forecast(&scattered(MassFunctionKind::Chabrier, 0.0)).unwrap();
+        let built = galaxy_centre_forecast(galaxy).unwrap();
+        for (a, b) in figures(&built).into_iter().zip(figures(&fixture)) {
+            assert_same_bits(a, b);
+        }
+        for (kind, candidates, at_eight, at_five, want_share) in [
+            (
+                MassFunctionKind::Chabrier,
+                7_144.99,
+                57_713.79,
+                57_967.37,
+                0.703_48,
+            ),
+            (
+                MassFunctionKind::Kroupa,
+                6_468.04,
+                58_423.57,
+                58_664.84,
+                0.713_27,
+            ),
         ] {
             let fixture = scattered(kind, 0.0);
             let f = centre_list_forecast(&fixture).unwrap();
             print(&format!("{kind:?} Milky Way"), &f);
-            let ratio = largest_fitting() / f.candidates();
-            let mass = fixture.nuclear_cluster().mass().value() * ratio;
-            let at = |factor: f64| {
-                let params = scattered(kind, crate::math::log10(ratio * factor));
-                centre_list_forecast(&params).unwrap()
-            };
-            let (below, above) = (at(1.0 - 2e-3), at(1.0 + 2e-3));
-            eprintln!(
-                "{kind:?}: the check first fails at about {mass:.4e} M_sun, {ratio:.5} times the \
-                 fixture's cluster: {:.1} candidates a part in 500 below, {:.1} above",
-                below.candidates(),
-                above.candidates()
-            );
-            assert!(below.fits(), "{kind:?}: {}", below.candidates());
-            assert!(!above.fits(), "{kind:?}: {}", above.candidates());
-            assert_near(ratio, want, 1e-5, &format!("{kind:?}'s first failing mass"));
+            assert_eq!(f.verdict(), Ok(()), "{kind:?}");
+            let what = |figure: &str| format!("{kind:?}'s {figure}");
+            assert_near(f.candidates(), candidates, 1e-5, &what("candidates"));
+            assert_near(f.margin(8.0), at_eight, 1e-5, &what("margin at eight"));
+            assert_near(f.margin(5.0), at_five, 1e-5, &what("margin at five"));
             let share = primaries_share(&fixture);
             eprintln!(
                 "{kind:?} without companions: primaries form {share:.5} of m_f, so the fixture's \
-                 centre expects {:.1} and first fails near {:.4} times its cluster",
-                f.candidates() * share,
-                ratio / share
+                 centre expects {:.1}",
+                f.candidates() * share
             );
-            assert_near(
-                share,
-                want_share,
-                1e-4,
-                &format!("{kind:?}'s primaries' share"),
-            );
+            assert_near(share, want_share, 1e-4, &what("primaries' share"));
         }
     }
 
     /// The check at plan 02's cap on the cluster's mass, under either mass function: a capped
-    /// centre overflows the list, by 11,203 indices under Chabrier's function and 4,867 under
-    /// Kroupa's at eight standard deviations, as measured at `GENERATOR_VERSION` 23 (pinned to
-    /// 10⁻⁵ as `the_milky_way_s_centre_list_fits` says).
+    /// centre fits the 16-bit index, with 46,140.9 indices to spare under Chabrier's function and
+    /// 52,477.4 under Kroupa's at eight standard deviations, as measured at `GENERATOR_VERSION` 23
+    /// and pinned to 10⁻⁵ with the candidates. The cap bounds every drawn cluster.
     #[test]
-    fn the_cap_s_centre_list_overflows_under_either_mass_function() {
-        for (kind, seed, want) in [
+    fn the_cap_s_centre_list_fits_under_either_mass_function() {
+        for (kind, seed, want, at_eight) in [
             (
                 MassFunctionKind::Chabrier,
                 0x1108_e000,
                 18_311.574_542_824_812,
+                46_140.86,
             ),
             (
                 MassFunctionKind::Kroupa,
                 0x1108_e001,
                 12_174.902_962_021_803,
+                52_477.38,
             ),
         ] {
             let params = scattered(kind, 1.0);
@@ -610,26 +608,43 @@ mod tests {
             assert_eq!(params.nuclear_cluster().mass(), cap);
             let share = primaries_share(&params);
             let galaxy = Galaxy::from_params(Seed::new(seed), params).unwrap();
-            print(
-                &format!("{kind:?} at the cap"),
-                &galaxy_centre_forecast(&galaxy).unwrap(),
-            );
-            let outcome = check_feature_list_headroom(&galaxy);
+            let f = galaxy_centre_forecast(&galaxy).unwrap();
+            print(&format!("{kind:?} at the cap"), &f);
+            assert_eq!(check_feature_list_headroom(&galaxy), Ok(()), "{kind:?}");
+            assert_near(f.candidates(), want, 1e-5, &format!("{kind:?} at the cap"));
+            assert_near(f.margin(8.0), at_eight, 1e-5, &format!("{kind:?}'s margin"));
             eprintln!(
-                "{kind:?} at the cap of {:.3e} M_sun: {outcome:?}",
-                cap.value()
+                "{kind:?} at the cap of {:.3e} M_sun without companions: {:.1} candidates",
+                cap.value(),
+                f.candidates() * share
             );
-            let Err(ExceedFeatureListError::CentreListTooFull { candidates }) = outcome else {
-                panic!("{kind:?}: the cap's centre list fits: {outcome:?}");
-            };
-            assert_near(candidates, want, 1e-5, &format!("{kind:?} at the cap"));
+        }
+    }
+
+    /// The tripwire for the ruling's 32-bit fallback (plan 11's Risks, "P11.T8.e.b as built"):
+    /// twice either mass function's capped-cluster candidates still fit the centre's 65,536.
+    /// Failing it is the point at which the fallback is due: a refit of `CLASS_SHARES`, a new
+    /// class on the centre's list or a higher cap has brought the heaviest centre within a factor
+    /// of two of the bound, and the ruling's next step is the same rule with the index at
+    /// `[31:0]`. Measured at `GENERATOR_VERSION` 23: 27,380.9 indices to spare at eight standard
+    /// deviations under Chabrier's function and 39,936.8 under Kroupa's.
+    #[test]
+    fn twice_either_cap_s_candidates_fit_the_centre_s_index() {
+        let limit = ListIndex::Centre.limit();
+        for kind in [MassFunctionKind::Chabrier, MassFunctionKind::Kroupa] {
+            let f = centre_list_forecast(&scattered(kind, 1.0)).unwrap();
+            let twice = 2.0 * f.candidates();
             eprintln!(
-                "{kind:?} at the cap without companions: {:.1} candidates",
-                candidates * share
+                "{kind:?}: twice the cap's candidates, {twice:.1}, leave {:.1} at eight standard \
+                 deviations and {:.1} at five",
+                list_index_margin(twice, 8.0, limit),
+                list_index_margin(twice, 5.0, limit)
             );
             assert!(
-                !fits_list_index(candidates * share),
-                "{kind:?}: the cap's centre fits without companions"
+                fits_list_index(twice, limit),
+                "{kind:?}: twice the cap's {} candidates no longer fit 16 bits, so the 32-bit \
+                 fallback is due",
+                f.candidates()
             );
         }
     }
@@ -646,7 +661,7 @@ mod tests {
         assert!(f.margin(8.0) > 0.0, "{}", f.margin(8.0));
         assert_eq!(f.verdict(), Ok(()));
         let list = list_expecting(under);
-        assert!(list.len() > 7_000, "{}", list.len());
+        assert!(list.len() > 60_000, "{}", list.len());
         f.candidates = over;
         assert!(!f.fits());
         assert!(f.margin(8.0) < 0.0, "{}", f.margin(8.0));
@@ -678,8 +693,8 @@ mod tests {
 
     /// The check of a built galaxy, which reads the galaxy's own mass model and mass function,
     /// forecasts what its parameters do, bit for bit, in every figure: the Milky Way fixture and
-    /// two drawn seeds (the first of which overflows the list, at 11,351 candidates, and the
-    /// second fits).
+    /// two drawn seeds, both of which fit the centre's 16-bit index (the first, at 11,351
+    /// candidates, overflowed the 13-bit one, which the second fits).
     #[test]
     fn a_galaxy_s_check_reads_what_its_parameters_forecast() {
         let drawn = [
@@ -696,20 +711,26 @@ mod tests {
             }
             assert_eq!(check_feature_list_headroom(galaxy), from_params.verdict());
         }
-        assert!(!centre_list_forecast(drawn[0].params()).unwrap().fits());
-        assert!(centre_list_forecast(drawn[1].params()).unwrap().fits());
+        let [first, second] = drawn
+            .each_ref()
+            .map(|g| centre_list_forecast(g.params()).unwrap());
+        assert!(first.fits(), "{}", first.candidates());
+        assert!(second.fits(), "{}", second.candidates());
+        let thirteen_bits = ListIndex::Feature.limit();
+        assert!(!fits_list_index(first.candidates(), thirteen_bits));
+        assert!(fits_list_index(second.candidates(), thirteen_bits));
     }
 
     #[test]
     fn the_error_s_message_is_lower_case_without_trailing_punctuation() {
         let message = ExceedFeatureListError::CentreListTooFull {
-            candidates: 9_000.0,
+            candidates: 64_000.0,
         }
         .to_string();
         assert_eq!(
             message,
-            "the galactic centre's feature-level list expects 9000 candidates, within eight \
-             standard deviations of its index's 8192"
+            "the galactic centre's feature-level list expects 64000 candidates, within eight \
+             standard deviations of its index's 65536"
         );
         assert!(!message.ends_with(['.', '!', '?']), "{message}");
     }

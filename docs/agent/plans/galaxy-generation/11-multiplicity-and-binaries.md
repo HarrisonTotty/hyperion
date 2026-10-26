@@ -1379,6 +1379,16 @@ tables must keep that under one in ten, which a test counts.
   09's alternative, list at the centre only hosts above a brightness floor, which leaves the dim
   hosts as ordinary members that alerts cannot find from afar. Acceptance: the check passes for
   every seed of the sweep, or the finding is recorded in this plan's Risks with the figures.
+  - **P11.T8.e.b The centre's list index widened to 16 bits** (new, 2026-10-26; no output moves, no
+    bump; before T8.f). Under band 7 the centre's index is `[15:0]` and `[31:16]` must be zero
+    (`FeatureLevelFieldsSet`), so its list holds 65,536 entries, while catalogue features, dwarf
+    cores and every index in a cell keep 13 bits, and every existing ID keeps its value. The shared
+    bound, `c + 8√c + 1` under the list's own limit, moves with it, so `FeatureLevelList` and
+    `check_feature_list_headroom` hold the centre up to 63,519 expected candidates, 3.47 times
+    plan 02's worst seed. Tests cover the layout's rule, `cell_word` and designations at the new
+    limit, two added lines of `id/layouts.golden`, the re-pinned headroom figures, a tripwire at
+    twice either cap, and the sweep with no failing seed; the record is "P11.T8.e.b as built", in
+    Risks.
 - **P11.T8.f Inside features.** The same classes on plan 09's `FeatureLevelList`, appended after
   plan 09's own in the order `ACCRETING_WHITE_DWARF`, `ACCRETING_WHITE_DWARF_SLOW`, `XRAY_BINARY`,
   `STELLAR_MERGER`, `NEUTRON_STAR_MERGER` (plan 09's design note 16 and `FEATURE_LEVEL_LIST_ORDER`,
@@ -1393,7 +1403,9 @@ tables must keep that under one in ten, which a test counts.
   first- and second-population values, re-checked and cited (Milone et al. 2012). Test: a 47
   Tucanae-like cluster (`features::testing::named_cluster`) shows its marked pulsars as recycled
   binaries or isolated recycled pulsars, none as young pulsars; registering these classes leaves
-  every supernova entry's index unchanged.
+  every supernova entry's index unchanged. At the centre the list's index is 16 bits (T8.e.b), so
+  T8.f lists the classes there at that limit and wires `check_feature_list_headroom` beside
+  `check_index_headroom` in `crates/hyperion-server/src/compute/galaxies.rs`.
 
 Files: `galaxy/catalogue_classes/binary/{mod,awd,xrb,merger,nsm,feature}.rs`,
 `galaxy/catalogue_classes/mod.rs` (the new `ClassId`), `stellar/binary/scan.rs`,
@@ -2057,7 +2069,9 @@ that brown-dwarf companions can be retuned without touching a star; the shapes o
   centre's accreting white dwarfs, and plan 09 has reported it to the brainstorm's owner. Neither
   way out is this plan's to choose. P11.T8.e measured it: the Milky Way fixture's centre fits, but
   a cluster 5% heavier does not, nor do 393 of the first 10³ of plan 02's seeds ("The centre's
-  feature-level index, as measured (P11.T8.e)", at the end of this section).
+  feature-level index, as measured (P11.T8.e)", at the end of this section). Ruled 2026-10-26: the
+  centre's index alone is widened to 16 bits, built by P11.T8.e.b ("The centre's feature-level
+  index, ruled", at the end of this section).
 - **Engine size.** Hurley, Tout and Pols's algorithm is large. T4 is six days as written and may be
   ten. Its subtasks each leave `just ci` green, so it can be paused.
 - **Circular dependency with plan 15**, resolved by scratch values in shapes this plan owns (Design
@@ -5694,3 +5708,119 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - T8.f waits on the ruling. Whichever way it goes, T8.f also decides whether the centre's
     budget counts companions (ruling 144.4), which sets how far this forecast's 30% allowance for
     them overstates.
+- **The centre's feature-level index, ruled** (2026-10-26, main's ruling
+  `decision-p11-centre-index`; built by P11.T8.e.b; no output moves, no bump). The finding above
+  is closed by widening the galactic centre's list index alone, from 13 bits to 16.
+  - **The rule.** Under band 7 at the centre, the index is `[15:0]` and `[31:16]` must be zero, so
+    the list holds 65,536 entries, with index 0 the black hole. Catalogue features and dwarf cores
+    keep 13 bits, with level and cell zero.
+  - **The contract.** It is an extension of the layout. Every existing ID keeps its value and
+    meaning, and the only centre list ID in use is M0. The wire's 16 hexadecimal digits and the
+    designation `CENTRE M<index>` keep their form, and `PROTOCOL_VERSION` is unchanged.
+  - **The bound.** It stays eight standard deviations plus index 0, now at the list's own limit.
+    At 16 bits it holds up to 63,519 expected candidates. That is 3.47 times the worst seed
+    (`0x02005ee900000339`, 18,321) and the capped cluster (18,312), so no seed of plan 02 can fail
+    while the cap holds. The brainstorm's ID sketch, plan 01's Design note 17 and plan 09's P09.T22
+    are revised to match.
+  - **Rejected:**
+    - a brightness floor or a weighted sample, which would drop real accreting white dwarfs (the
+      Galactic Centre's thousands of X-ray point sources) and the novae alerts must find;
+    - moving them to the nested cells, where alerts could not find them from the list and the
+      cells refuse the carved classes;
+    - splitting the list, which is the same layout change with more machinery;
+    - a cap of about 2.6 × 10⁷ M☉, which would truncate 39% of seeds' clusters at the Milky Way's
+      own.
+  - **T8.f** lists the classes at the 16-bit limit and wires `check_feature_list_headroom` in the
+    server.
+- **P11.T8.e.b as built** (lane `lane/109-p11-t8eb`, 2026-10-26; at version 23, nothing generated
+  moves, no bump).
+  - _The layout_ (`id/nested.rs`). `NestedSlotLayout` gains `list_index_bits`, 13 in
+    `FEATURE_SLOT` and 16 in `CENTRE_SLOT`, with `list_index()` (`[12:0]`, `[15:0]`),
+    `list_padding()` (the bits between it and the band, `[27:13]`, `[31:16]`) and
+    `list_index_limit()`. `validate` tests band 7 first and rejects any bit of `list_padding` with
+    `FeatureLevelFieldsSet`; `slot` reads a band-7 index through `list_index`; `with_slot` writes
+    the zero bits and refuses a feature-level index at or past the list's limit with
+    `IndexTooLarge`, which only `FEATURE_SLOT` can reach. `CentreMemberId::LIST_INDEX_LIMIT` is
+    tied to `CENTRE_SLOT.list_index_limit()` by a compile-time assertion beside a second tiling,
+    band 7's view of the centre. `MemberSlot::INDEX_LIMIT` stays 8,192 and `FeatureLevel`'s index
+    `u16`. `DecodeSystemIdError::FeatureLevelFieldsSet` keeps its name; its doc and its `Display`
+    now say "a bit set between its index and its band".
+  - _The names._ The brief's leans are all kept: `CentreMemberId::LIST_INDEX_LIMIT: u32 = 1 << 16`,
+    `fits_list_index(expected, limit: u32)`, `list_index_margin(expected, sigmas, limit: u32)`,
+    `pub enum ListIndex { Feature, Centre }` with `limit()`, re-exported from `members`. Added, all
+    private to `id`: `NestedSlotLayout::{list_index, list_padding, list_index_limit}` and
+    `CentreMemberId::index_field`.
+  - _`cell_word`_, through `CentreMemberId::index_field()`: a centre list member's `[15:0]` is
+    zeroed, so every entry shares the black hole's word, `0xF000_0007_0000_0000`; a member of a
+    centre cell has `[12:0]` zeroed only, since `[15:13]` are its cell's z, which a test checks
+    with z at 31. Every other kind is unchanged.
+  - _Designations._ `parse_slot` takes the list's limit from its caller: `CENTRE M<index>` below
+    65,536, a catalogue feature's or a dwarf core's `M<index>` and every in-cell index below 8,192.
+    The formatter is unchanged.
+  - _Deviation: `FeatureLevelList::with_classes` gains `index: ListIndex` after `member_zero`._
+    Plan 09's "Phase 5 as built" names five arguments; T8.f calls it with six. The Rust review
+    asked for one enum in place of `MemberZero` and `ListIndex`, which move together at every call
+    today; they are kept apart, as the brief's lean, since a dwarf core's list could have a member
+    zero under the 13-bit index. The assertion's message keeps "eight standard deviations" and names
+    the limit ("under its 8192 index", "under its 65536 index"); the clamp's room is the limit less
+    one.
+  - _The `entries()` fix._ A centre list's `len()` can reach 65,536, which is no `u16`, so
+    `entries()` iterates the indices as `u32` and converts each, at most 65,535. A test fills a
+    centre list by hand (65,535 counted) and walks its entries to 65,535.
+  - _The brief's correction to the ruling's tests._ `with_slot` cannot be handed 65,536 at the
+    centre, since the index is a `u16`: `u16::MAX` builds and round-trips there, and 65,536 is
+    tested where it can be written, as bit 16 of a raw ID (`FeatureLevelFieldsSet`) and as
+    `CENTRE M65536` (`NumberOutOfRange`).
+  - _The fuzz test_ (`every_raw_is_rejected_or_decodes_to_the_one_kind_that_rebuilds_it`) gains a
+    seventh zero region, `[31:16]`, and counts the centre list entries past 8,191 it accepts: 40 of
+    the 200,000, against a floor of 20. Its expected errors are unchanged. `random_valid_id`'s
+    centre-list recipe now leaves `[15:0]` random.
+  - _Re-pinned at 65,536_ (to 10⁻⁵, measured at version 23): the default fixture's 7,144.99
+    candidates leave 57,713.79 indices at eight σ and 57,967.37 at five, Kroupa's 6,468.04 leave
+    58,423.57 and 58,664.84, and the caps' 18,311.57 and 12,174.90 leave 46,140.86 and 52,477.38.
+    The bound holds up to (√65,551 − 4)² = 63,518.77 candidates, and (√8,207 − 4)² = 7,498.26 at
+    8,192. The primaries' shares of `m̄_f`, 0.70348 and 0.71327, are pinned in the fixture's test.
+  - _Tests turned._ `the_check_first_fails_just_above_the_milky_way_s_cluster` is removed: nothing
+    fails below either cap. `the_cap_s_centre_list_overflows_under_either_mass_function` becomes
+    `the_cap_s_centre_list_fits_under_either_mass_function`, without its "fits without companions"
+    assertion (the caps expect 12,881.7 and 8,684.0 with the primaries' mass alone, printed).
+    `the_milky_way_s_centre_list_fits` becomes `…_under_either_mass_function`, Kroupa's fixture
+    pinned too. In `a_galaxy_s_check_reads_what_its_parameters_forecast` both drawn seeds fit; the
+    first, at 11,350.8 candidates, would not fit 13 bits. The list's tests add each limit's root
+    from either side, a centre list of 9,000 numbering its entries past 8,191, and, from the
+    determinism review, `the_index_s_width_moves_no_draw`: below the clamp both widths draw the same
+    counts and entries, bit for bit.
+  - _The tripwire_, `twice_either_cap_s_candidates_fit_the_centre_s_index` in headroom: twice the
+    caps' candidates, 36,623.1 and 24,349.8, leave 27,380.9 and 39,936.8 indices at eight σ. It
+    marks the ruling's fallback, which `decision-p11-centre-index` states and the record above does
+    not: widening all 32 bits now was rejected as an M task of about 30 call sites and kept as the
+    fallback, so if a refit or new centre classes bring the capped forecast within a factor of two
+    of 63,519, the next step is the same rule at `[31:0]`. The ruling also rejected a sub-kind of
+    the centre's list's own, which would move M0's ID.
+  - _The sweep._ `the_centre_s_feature_level_list_over_a_thousand_seeds` (slow) asserts that no seed
+    fails at eight σ or five and that none expects 65,535 candidates or more. Over the first 10³
+    of plan 02's seeds none fails at either and none expects 65,535; 41 clusters sit at the cap,
+    and the worst seed, `0x02005ee900000339`, a cluster of 6.4 × 10⁷ M☉, expects 18,321.3
+    candidates and leaves 46,130.90 indices at eight σ (46,536.97 at five). This meets T8.e's
+    acceptance, "the check passes for every seed of the sweep". It took 204.5 s in the slow-test
+    profile on an 8-thread laptop, the test on one thread, at a 1-minute load of 3.5 falling to
+    1.1. The primaries-only count, its helper and the worst seed's regression bound are dropped:
+    nothing fails either way, and the caps' pins and the tripwire watch the forecast.
+  - _Goldens._ `id/layouts.golden` alone gains two lines, blessed by its own test at 23:
+    `centre FeatureLevel { index: 8192 } -> 0xf000000700002000 -> CENTRE M8192` and
+    `centre FeatureLevel { index: 65535 } -> 0xf00000070000ffff -> CENTRE M65535`. No other golden
+    changes. `golden_diff.py --base origin/rendering-and-planets`, after the lane's last merge
+    (`f39782da`), reports version 23 to 23 and `id/layouts.golden` "extended only", two new labels
+    and every pinned value unchanged. Its check, whether a new label's value existed at the base,
+    holds: there both indices were refused with `IndexTooLarge`.
+  - _Acceptance:_ `cargo test -p hyperion-sim id::`, `cargo test -p hyperion-sim
+galaxy::features::members`, `cargo test -p hyperion-sim --test foundation_golden`, and the
+    sweep by nextest with `--cargo-profile slow-test --profile slow --run-ignored only --test
+galaxy_sweeps`.
+  - **Deferred findings (2026-10-13 rule)**, from P11.T8.e.b:
+    - `FeatureLevelList::with_classes` takes its `ListIndex` from the caller and the list does not
+      keep it, so two call paths that built the centre's list with different widths would agree
+      only below the 8,191 clamp (the determinism review). T8.f, which builds the centre's list,
+      should take the width from the feature in one place, or assert it.
+    - Plan 09's "Phase 5 as built" keeps `with_classes`'s five arguments, as records keep their
+      text; this record names the sixth.

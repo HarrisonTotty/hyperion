@@ -61,7 +61,7 @@ pub use headroom::{
     CLASS_ACCEPTANCE_FLOOR, CentreListForecast, ExceedFeatureListError, centre_list_forecast,
     check_feature_list_headroom,
 };
-pub use level_list::{FeatureLevelList, ListClass, ListEntry, MemberZero};
+pub use level_list::{FeatureLevelList, ListClass, ListEntry, ListIndex, MemberZero};
 pub use placement::{FeatureInterior, resolve_member};
 pub use source::{FeatureInteriorCache, FeatureMemberSource, KeepInteriors, NoInteriorCache};
 

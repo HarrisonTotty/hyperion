@@ -55,6 +55,8 @@ dwarf core 3 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 819
 
 centre FeatureLevel { index: 0 } -> 0xf000000700000000 -> CENTRE M0
 centre FeatureLevel { index: 1 } -> 0xf000000700000001 -> CENTRE M1
+centre FeatureLevel { index: 8192 } -> 0xf000000700002000 -> CENTRE M8192
+centre FeatureLevel { index: 65535 } -> 0xf00000070000ffff -> CENTRE M65535
 centre InCell { band: A, level: 9, cell: [2, 17, 18], index: 12 } -> 0xf00000009146400c -> CENTRE A9-2HJ-12
 centre InCell { band: E, level: 11, cell: [31, 0, 31], index: 8191 } -> 0xf0000004bf83ffff -> CENTRE EB-Z0Z-8191
 
