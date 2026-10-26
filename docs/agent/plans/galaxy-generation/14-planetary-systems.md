@@ -26709,8 +26709,12 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     its moons reach 1,000 K (42002cae0000000a.0201, 70 → 1,000 K); with every 24 hold the same moon
     is `Airless` at its 381.8 K floor.
   - _After P14.T49.n's landing_ (merged, 134514b2): the helper takes T49.n's two holds
-    (`READ_DENSITIES_VERSION` at `Read`, `COMPRESSED_LIQUIDS_VERSION` at `Compressed`), so all
-    seven holds at 24 are in it. They flip no state: the floor census's classes are unchanged, its
+    (`READ_DENSITIES_VERSION` at `Read`, `COMPRESSED_LIQUIDS_VERSION` at `Compressed`), and after
+    P14.T49.k's (merged, 21f8e063) its `ROW_DARKENING_VERSION` at `Darkened`, so all eight holds at
+    24 are in it. T49.k's darkened rows (`basalt_reduced`'s graphite, `ferric`'s nanophase oxide)
+    move none of the batch's six censuses (R4.3's, the floor's, the 400's unlit records, part 1's,
+    part 2's, the moons' supercritical columns) to the printed digit: `basalt_reduced`'s lids take
+    the area mix's cap, and `ferric` is the dust modifier's. They flip no state: the floor census's classes are unchanged, its
     held run moving 86 bodies' partial pressures in the fourth digit and two bodies' passes
     (020e56ef60090005.0700 40 → 43, 620059680000000b.0400 4 → 5). The record tests move to the 24
     combination (D1.4), T24.i's two renamed `under_every_24_hold_…_unlit_records_read_their_night_floor`:
