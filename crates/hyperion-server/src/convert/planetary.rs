@@ -2531,7 +2531,16 @@ mod tests {
             Kelvin::new(100.0),
         )
         .expect("a rule's mode");
-        assert!(mode.optical_depth().is_err(), "{mode:?}");
+        // Krypton is no aerosol material (a noble gas's optics are its Rayleigh scattering alone).
+        assert!(
+            matches!(
+                mode.optical_depth(),
+                Err(ResolveOpticalDepthError::Aerosol(
+                    ResolveAerosolError::NotModelled { .. }
+                ))
+            ),
+            "{mode:?}"
+        );
         let sent = aerosol_mode(&mode, &[]);
         assert_eq!(
             (
@@ -2559,8 +2568,8 @@ mod tests {
         }
     }
 
-    /// P14.T54.b.b: the empty inventory, a surface with no air's or a magma ocean's, is sent as
-    /// the empty object of four empty lists, never `null`.
+    /// P14.T54.b.b: the empty inventory, a surface with no air's (an airless body's, or a melt's
+    /// whose volatiles are gone), is sent as the empty object of four empty lists, never `null`.
     #[test]
     fn the_empty_inventory_is_sent_as_four_empty_lists() {
         let empty = AerosolInventory::empty();

@@ -83,8 +83,9 @@ pub(super) struct ModifierCase {
     pub(super) star: Option<ModifierStar>,
     /// What it orbits.
     pub(super) primary: RecordPrimary,
-    /// Its mantle's sulphur, P14.T50.a's element inventory's, which an Io's deposits read.
-    pub(super) mantle_sulphur: Kilograms,
+    /// Its mantle's sulphur, P14.T50.a's element inventory's, which an Io's deposits read; `None`
+    /// under [`AirRules::Held`], which computes nothing of the modifiers.
+    pub(super) mantle_sulphur: Option<Kilograms>,
 }
 
 /// What a body's record's modifiers read of its published surface and its orbit then.
@@ -235,7 +236,7 @@ fn modifier_inputs<'a>(
         resurfacing_time: resurfacing_time(figures.impactors().crust(), figures.heat_flow()),
         heat_flow: figures.heat_flow(),
         surface_temperature: conditions.mean_surface_temperature(),
-        mantle_sulphur: case.mantle_sulphur,
+        mantle_sulphur: case.mantle_sulphur?,
         condensates: surface.condensates,
         lid,
         gases: *surface.gases,

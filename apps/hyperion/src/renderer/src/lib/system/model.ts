@@ -650,10 +650,11 @@ export type AerosolPhase = Extract<SubstancePhaseDto, "solid" | "liquid">;
  * which says which of its members are.
  *
  * @remarks
- * `no_grain_density` carries the phase and temperature the generator asked for. A size's reason
- * (`no_collision_constants`, `no_condensate`, `no_size_distribution`) leaves the size and the
- * optical depth not modelled, `optics_not_modelled` the optical depth (and a rule's column mass),
- * and `no_mass_extinction` an aggregate's column mass and temperature.
+ * `no_grain_density` carries the phase and temperature the generator asked for, that temperature
+ * the mode's own {@link AerosolMode.temperatureK} (R08's review of P14.T54.b.b, S6). A size's
+ * reason (`no_collision_constants`, `no_condensate`, `no_size_distribution`) leaves the size and
+ * the optical depth not modelled, `optics_not_modelled` the optical depth (and a rule's column
+ * mass), and `no_mass_extinction` an aggregate's column mass and temperature.
  */
 export type AerosolNotModelled =
   | {
@@ -724,9 +725,13 @@ export interface CondensateDeck {
   readonly basePa: number;
   readonly baseTemperatureK: number;
   readonly topPa: number;
-  /** In `[0, 1]`. */
+  /**
+   * In `[0, 1]`: the limiting vapour's, by the condensate's law, as the protocol's
+   * `CondensateDeckDto` says (its own gas, a product law's scarcer reactant, or an element's atoms
+   * per molecule of gas).
+   */
   readonly vapourMoleFractionBelow: number;
-  /** In `[0, 1]`. */
+  /** In `[0, 1]`: the same vapour's, above the deck. */
   readonly vapourMoleFractionAbove: number;
   /** Ackerman and Marley's f_sed, dimensionless; 0 for a deck of well-mixed modes. */
   readonly fSed: number;
@@ -767,10 +772,11 @@ export interface Absorber {
 
 /**
  * A surface air's aerosol and absorber inventory (plan 14's P14.T24.c): every list empty for a
- * surface with no air or a magma ocean.
+ * surface with no air; not modelled for a magma ocean that holds an air.
  */
 export interface AerosolInventory {
   readonly modes: ReadonlyArray<AerosolMode>;
+  /** At most one a condensate, so that a mode's `deck` names one. */
   readonly decks: ReadonlyArray<CondensateDeck>;
   readonly absorbers: ReadonlyArray<Absorber>;
   readonly notFormed: ReadonlyArray<NotFormedCondensate>;

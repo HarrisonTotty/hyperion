@@ -2525,7 +2525,7 @@ impl PlanetarySystem {
                 modifiers: ModifierCase {
                     star: frame.modifier_star,
                     primary: RecordPrimary::Star,
-                    mantle_sulphur: mantle_sulphur(derived.element_inventory()),
+                    mantle_sulphur: mantle_sulphur(self.record.air, derived.element_inventory()),
                 },
                 record: self.record,
             },
@@ -2550,7 +2550,7 @@ impl PlanetarySystem {
                         field: planet,
                         semi_major_axis: orbit.semi_major_axis(),
                     },
-                    mantle_sulphur: mantle_sulphur(derived.element_inventory()),
+                    mantle_sulphur: mantle_sulphur(self.record.air, derived.element_inventory()),
                 },
                 record: self.record,
             },
@@ -2606,11 +2606,19 @@ impl PlanetarySystem {
                 exposed_fraction: cold_traps::exposed_fraction(self.seed, id),
                 star_radius: brightest.map(|(_, state)| state.radius()),
             },
-            star_temperature: epoch.photochemistry_temperature(brightest),
-            modifier_star: brightest.map(|(member, state)| ModifierStar {
-                radius: state.radius(),
-                xuv: epoch.xuv[usize::from(member)],
-            }),
+            // The air's photochemistry and the modifiers read the star on the record only under
+            // the batch's rules: under the hold neither is computed.
+            star_temperature: match self.record.air {
+                AirRules::Held => None,
+                AirRules::Batch => epoch.photochemistry_temperature(brightest),
+            },
+            modifier_star: match self.record.air {
+                AirRules::Held => None,
+                AirRules::Batch => brightest.map(|(member, state)| ModifierStar {
+                    radius: state.radius(),
+                    xuv: epoch.xuv[usize::from(member)],
+                }),
+            },
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
         }
@@ -4621,10 +4629,11 @@ struct SurfaceFrame<'a> {
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
     /// The effective temperature of the star its air's photochemistry reads, its primary's
-    /// brightest host's; `None` for a brown dwarf or no star (`Epoch::photochemistry_temperature`).
+    /// brightest host's; `None` for a brown dwarf or no star (`Epoch::photochemistry_temperature`),
+    /// and under the air's hold (`AirRules::Held`), which computes none.
     star_temperature: Option<Kelvin>,
     /// The star its modifiers read, its primary's brightest host with its X-ray and ultraviolet
-    /// history; `None` before any forms (`modifiers::ModifierStar`).
+    /// history; `None` before any forms (`modifiers::ModifierStar`), and under the air's hold.
     modifier_star: Option<ModifierStar>,
     /// The system's \[Fe/H\].
     fe_h: Dex,
@@ -5630,10 +5639,14 @@ fn with_held_members(
 }
 
 /// The mass of sulphur in the mantle of a body whose element inventory is `elements` (P14.T50.a),
-/// which an Io's volcanic deposits read (P14.T51.d's `ModifierInputs::mantle_sulphur`).
+/// which an Io's volcanic deposits read (P14.T51.d's `ModifierInputs::mantle_sulphur`), under the
+/// rules `rules`: `None` under [`AirRules::Held`], which computes nothing of the modifiers.
 #[must_use]
-fn mantle_sulphur(elements: &ElementInventory) -> Kilograms {
-    elements.mass(Element::S, Reservoir::Mantle)
+fn mantle_sulphur(rules: AirRules, elements: &ElementInventory) -> Option<Kilograms> {
+    match rules {
+        AirRules::Held => None,
+        AirRules::Batch => Some(elements.mass(Element::S, Reservoir::Mantle)),
+    }
 }
 
 /// The record's air's sections of the body `case` describes, whose surface is in the state `state`

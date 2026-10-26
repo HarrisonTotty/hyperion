@@ -8214,6 +8214,9 @@ feeding back into p_s, T_s, the albedo or the bulk.
         τ whose top lies above 10 bar; the largest envelope deck τ, for R08). A deck below the join
         at τ 1 or more above 1 bar, and a mode with no τ whose top lies above 10 bar, go to main
         by name.
+      - Count (xii) (decision-n2-critical-decks): every row labelled `supercritical` and every deck
+        based above 0.99 T_c (F4's refused), by body, key, x P ÷ p_c at T_c and the bulk; every
+        `Bottom` base with x P ≥ p_c. At 24, none expected. To main by name: any.
       - Each hold's cost share (D5).
       - §C.7's splits, listed.
       - Per-hold attribution of every moved value: `golden_diff` after each hold's deletion, in a
@@ -29065,7 +29068,11 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       members; the inventory `notFormed`. `bodiesWire.ts` refuses ("aerosol mode unusable") a mode
       whose absent members are not its reason's, a τ without its basis, a coverage outside 0–1,
       and a mode naming a deck the inventory does not list; a member sent `null` reads as not
-      modelled.
+      modelled. R08.T10.a's medium (`view/atmosphere/assemble.ts`, landed in 6e649031 after b was
+      first cut) reads the reshaped mode by a minimal type-level adaptation: a modelled mode
+      exactly as before, a mode whose size or optical depth is not modelled taken by its existing
+      "not drawn" path with that reason; its fixtures (`test/atmosphereRecords.ts`,
+      `assembleAerosols.test.ts`) in the new DTO shape.
     - _The scans_ (decision-p14-t54b-open §3.3): `nothing_on_the_record_calls_the_inventory_yet`
       holds `HELD` = `system/air.rs` and `system/air/tests.rs` (each must name
       `AIR_SECTIONS_VERSION` in code), its patterns adding `AerosolInventory::derive` and
@@ -29244,3 +29251,93 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       rocky record with the pair decoded; the console's rocky planet with no `SURFACE` and
       `ATMOSPHERE NOT YET MODELLED` (`earthUnderASupercriticalEnvelope`, in the shared test
       fixture).
+  - _B1's fix commit_ (one commit, after B1's reviews). `GENERATOR_VERSION` stays 23 and
+    `PROTOCOL_VERSION` 3; no golden moves.
+    - _R08's shape review of P14.T54.b.b, first pass_ (`review-r08-shapes-b`, 2026-10-23,
+      SIGNED for b): no must-fix, every member R08's planned tasks read present with its unit and
+      meaning, nothing already sent changed, and the lane's three choices accepted (an
+      aggregate's `temperature_k` absent, the client's refusal of an unlisted deck, one reason a
+      mode). Its six should-fixes are in:
+      - S1: `AerosolNotModelledDto`'s closing sentence says a rule's mode whose optics fail is
+        sent without its τ(550) or its column mass (the rule set the τ, which the generator
+        refuses with the optics);
+      - S2: `CondensateDeckDto`'s two vapour fractions name their vapour: the condensate's own
+        gas for a one-species law (sulphuric acid's the share `ε_v` of the SO₂), the scarcer
+        reactant for a product law, the element's atoms per molecule of gas for an element's;
+      - S3: `decks` holds at most one deck a condensate, so that a mode's `deck` names one; the
+        client refuses a second ("condensate deck unusable");
+      - S4: a client refuses a mode whose absent members are not its reason's row, the table
+        part of the shape from the first send;
+      - S5, a record rule: `record_aerosols` sends `NotModelled` for a magma ocean whose gases
+        are not empty, and the empty inventory only where its volatiles are gone, since steam
+        over a melt clouds at its top and the empty inventory would claim a cloud-free air
+        computed as such; `BodySurfaceDto.aerosols`' and `AerosolInventoryDto`'s docs follow.
+        It supersedes P14.T54.b.b's "a magma ocean's is the empty inventory": over the first 40
+        whole systems three magma oceans hold an air, now not modelled (`02001b2c5ffe0001.0400`
+        at 212 bar, `.0500` at 374 bar and `02001b2c5ffe0000.0200` at 1,587 bar), so 527
+        surfaces carry the empty inventory where b counted 530;
+      - S6: `NoGrainDensity.temperature_k` is the mode's `temperature_k`;
+      - recorded: C1 (send a rule's τ when its optics fail) declined, since no generated mode
+        hits it at 24 (every rule material has an index file; only the hand krypton test does);
+        C2 (a `vapour` member naming the limiting vapour) weighed at P14.T54.b.i, where the
+        envelope's decks are not single-species; C3–C5 are R08's.
+    - _The client_ (typescript-dev.md): the union of `model.ts`'s `AerosolMode` on `kind` by the
+      reason table's rows (the typescript review's should-fix 1) is deferred, owned jointly by
+      R08.T10.b, which owns `view/atmosphere/assemble.ts`'s reads and adopts it with them, and
+      T54.b's later batch; the client keeps the flat shape R08's review signed (`Pending`
+      members, the `AerosolNotModelled` reason, `membersFitReason`'s check), with S3's refusal of
+      a second deck of a condensate in `toAerosols`. New tests: a deck refused for the vapour and
+      the supercritical phase (rows of the deck `it.each`), two decks of one condensate, a decoded
+      `displaced` entry, a `no_grain_density` mode with a τ sent, an `optics_not_modelled` mode
+      with no size, and a `no_grain_density` reason in the vapour phase; the deck's reading is a
+      test of its own.
+    - _Rust:_ `tally_liquids` asserts F4's `SizeModeError::NoDensity { phase: Liquid, .. }` and
+      `ResolveOpticalDepthError::Size(NoDensity { .. })`, and the server's krypton precondition
+      `ResolveOpticalDepthError::Aerosol(ResolveAerosolError::NotModelled { .. })` (a noble
+      gas is no aerosol material); `under_the_batch_the_inputs_carry_the_record_s_modifiers`
+      asserts that every body `for_body` reads under the rules in force reads under the batch,
+      so that the new `Deposit` and `Cover` entries push no palette past its entries unseen;
+      `organic_ground_entries` is a lazy iterator, the carbon-bearing ices then nitrogen's where
+      one is listed, so `organic_ground` sums the same areas in the same order with nothing
+      collected.
+    - _Determinism:_ under the batch, on the first three sample systems with moons, a snapshot
+      is `body_at` body by body by `Debug`, and `body_at` is order-independent
+      (`assert_order_independent`), in
+      `under_the_batch_a_snapshot_is_body_at_and_body_at_keeps_no_order`. `surface_frame` now
+      computes the photochemistry's star temperature and the modifiers' star,
+      and `surface_section` the mantle's sulphur (`ModifierCase::mantle_sulphur` an `Option`),
+      only under `AirRules::Batch`, so that the record's "under `Held` nothing is computed" holds
+      as written (bit for bit at 23: no held reader). The modifiers' scan's `SIM_PATTERNS` gain
+      `organic_ground_entries(` and `bears_organic_cover(`.
+    - _`ferric`'s `FeO_T`_ is its own mode's by weight (`WEIGHED_MODES`, a closed list of one,
+      for the composition audit): 90.4 wt% `basalt_fe` at its 0.202, Rocknest's hematite 1.0 and
+      magnetite 1.8 wt% (Achilles et al. 2017, JGR Planets 122, 2344, Table 1) and the nanophase
+      ferric oxide 6.8 wt% (Morris et al. 2013, LPSC 44, 1653, Table 3), the oxides' iron as FeO
+      by their formulae from the registry's molar masses (`Fe₂O₃` 0.8998, `Fe₃O₄` 0.9309), the
+      nanophase oxide counted as `Fe₂O₃` (an assumption: a hydrated oxide would carry less iron
+      a gram): 0.2695, where c's stand-in gave 0.202 (decision-p14-t51d-weathering §1.2). It
+      replaces c's recorded "about 0.26 with them".
+    - _Deferred findings (2026-10-13 rule):_ the `Strong` 30 µT field stands for a gas-envelope
+      primary (`planet_field`), where Jupiter's equatorial field is 417 µT, so its magnetopause
+      comes out 16.7 R_J against an observed 45–100 and Callisto sits in the solar wind; one
+      star, the zone's brightest, stands for a pair's zone in the modifiers' host.
+    - _Plan conformance_ (the B1 review's drafts):
+      - the tripwire: a–c check the three surface members on every golden surface; d adds no
+        envelope check, its member being on a DTO no build sends, and i adds the envelope;
+      - the H₂SO₄ decks' check (four modes inside each deck) runs in the sim's sample test, not
+        the conversion's: the server cannot reach the batch (`with_record_rules` is the sim's);
+      - the lid: the plan's `CrustComposition::lid()` names the member (`LidCrust`), and
+        `lid_lithology`, new, its row, which `ModifierInputs::lid` and the palette's lid read;
+      - the modifiers' hold check names `AirRules`, not `AIR_SECTIONS_VERSION`: the file takes
+        the rules as an argument;
+      - `FeO_T` follows the record's modifiers (none on a palette whose body's modifiers are not
+        modelled, under the batch as under the hold), not only the hold, and R10.T1.c's Rust half
+        (the palette's `feo_mass_fraction`) has landed;
+      - the cover rule asserts inclusion, not equality: every ice `organic_ground` counts is
+        marked, and the palette marks beyond them 114 seasonal ices (deferred finding 5) and 2
+        ices of no area, a gap of their own.
+  - _Re-cuts:_ the lane's commits were re-cut onto bdae2715 (P14.T53.a), 16291ed8 (R3, P14.T24.d,
+    T52.d, T49.n and R09.T16) and deb01729 (P14.T56.g). Their folds beyond those a and b state:
+    `golden_systems` keeps the escape's hold and T56.g's `pub(super)`; T49.n's `RecordRules`
+    literal takes `..RecordRules::in_force()`; and `satellite_record` binds `t` and `ctx` on one
+    line, to stay under Clippy's line limit with T56.g's lines.

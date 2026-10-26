@@ -14,8 +14,12 @@ import type { SubstancePhaseDto } from "./SubstancePhaseDto";
  * | `optics_not_modelled` | present | either | absent | present |
  * | `no_mass_extinction` | present | absent | present | absent |
  *
- * A rule's mode whose optics are not modelled has no column mass either: its τ(550) is the rule's
- * and its column that τ over a mass extinction it does not have.
+ * A rule's mode whose optics are not modelled (the dust's, a sulphate layer's, the acid's) is sent
+ * without its τ(550) or its column mass: the rule set the τ, but the generator refuses it with the
+ * optics, and the column would be that τ over a mass extinction it does not have.
+ *
+ * A client refuses a mode whose absent members are not its reason's row; the table is part of
+ * the shape from the first send.
  */
 export type AerosolNotModelledDto = { "type": "no_grain_density", 
 /**
@@ -23,6 +27,6 @@ export type AerosolNotModelledDto = { "type": "no_grain_density",
  */
 phase: SubstancePhaseDto, 
 /**
- * The temperature asked for, K, positive.
+ * The temperature asked for, K, positive: the mode's `temperature_k`.
  */
 temperature_k: number, } | { "type": "no_collision_constants" } | { "type": "no_condensate" } | { "type": "no_size_distribution" } | { "type": "optics_not_modelled" } | { "type": "no_mass_extinction" };

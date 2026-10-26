@@ -901,7 +901,6 @@ fn dry_ice_free_land(condensates: &Condensates) -> f64 {
 #[must_use]
 pub fn organic_ground(condensates: &Condensates) -> f64 {
     let ground = organic_ground_entries(condensates)
-        .iter()
         .fold(0.0, |ground, entry| ground + entry.area_fraction());
     if ground > 1.0 { 1.0 } else { ground }
 }
@@ -911,21 +910,23 @@ pub fn organic_ground(condensates: &Condensates) -> f64 {
 /// carbon, CO₂ excepted, and then, where any is listed, nitrogen's. The surface crate's
 /// `takes_organic_cover` reads the same rule off a palette's keys (decision-r10-t1c-maturity §3.2),
 /// which P14.T54.b.c's test holds against this one on every generated body.
-#[must_use]
-pub(crate) fn organic_ground_entries(condensates: &Condensates) -> Vec<&CondensateEntry> {
+///
+/// It walks the entries lazily, collecting nothing: the carbon-bearing ices, then nitrogen's where
+/// one of them is listed, so that a sum over it adds the same areas in the same order.
+pub(crate) fn organic_ground_entries(
+    condensates: &Condensates,
+) -> impl Iterator<Item = &CondensateEntry> {
     let nitrogen = Gas::Nitrogen.substance();
-    let perennial_ices = || {
+    let perennial_ices = move || {
         condensates.entries().iter().filter(|e| {
             e.phase() == CondensatePhase::Solid && !e.is_seasonal() && e.area_fraction() > 0.0
         })
     };
-    let mut entries: Vec<&CondensateEntry> = perennial_ices()
-        .filter(|e| bears_organic_cover(e.substance()))
-        .collect();
-    if !entries.is_empty() {
-        entries.extend(perennial_ices().filter(|e| e.substance() == nitrogen));
-    }
-    entries
+    let bearing = |e: &&CondensateEntry| bears_organic_cover(e.substance());
+    let any_bearing = perennial_ices().any(|e| bearing(&e));
+    perennial_ices()
+        .filter(bearing)
+        .chain(perennial_ices().filter(move |e| any_bearing && e.substance() == nitrogen))
 }
 
 /// Whether an ice of the row `id` takes an organic cover by itself ([`organic_ground`]'s first

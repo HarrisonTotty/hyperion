@@ -46,8 +46,8 @@ pub(crate) enum AirRules {
     Held,
     /// The 23 → 24 batch's: the surface carries its air's vertical structure, computed as none for
     /// a surface with no air ([`record_structure`]), its aerosol and absorber inventory, the
-    /// empty inventory for a surface with no air or a magma ocean ([`record_aerosols`]), and its
-    /// modifiers (`system::modifiers::record_modifiers`).
+    /// empty inventory for a surface with no air, not modelled for a magma ocean's air
+    /// ([`record_aerosols`]), and its modifiers (`system::modifiers::record_modifiers`).
     Batch,
 }
 
@@ -124,7 +124,8 @@ pub(crate) fn record_structure(
 /// the inventory `case_of(state, deck)`, which joins these members as one more.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AirSurface<'a> {
-    /// The surface's state (P14.T13.c): an airless body's and a magma ocean's inventory is empty.
+    /// The surface's state (P14.T13.c): an airless body's inventory is empty, and a magma ocean's
+    /// is not modelled while it holds an air ([`record_aerosols`]).
     pub(crate) state: SurfaceState,
     /// Its conditions (P14.T24.a): the surface pressure, the gases and their mean molar mass, and
     /// the liquid-water flag P14.T24.g's SO₂ reads.
@@ -149,8 +150,13 @@ pub(crate) struct AirSurface<'a> {
 /// [`AirRules::Batch`] it is `AerosolInventory::derive` over [`aerosol_inputs`]:
 ///
 /// - a surface computed to hold no air (its structure `Ok(None)`: an airless body, a melt whose
-///   volatiles are gone) has the empty inventory, as does a magma ocean (the inventory's own
-///   rule), never none, as the condensates are an empty list;
+///   volatiles are gone) has the empty inventory, never none, as the condensates are an empty
+///   list;
+/// - a magma ocean that holds an air (its gases not empty: a young ocean's steam and CO₂) is not
+///   modelled. The inventory's own rule gives it none (`holds_air`), but steam over a magma ocean
+///   clouds at its top, so the empty inventory would claim a cloud-free air computed as such
+///   (R08's review of P14.T54.b.b, S5; the wire's "absent means not modelled, `null` or empty
+///   means computed none", decision-p14-t54b-open §2.1);
 /// - a structure not modelled leaves the inventory not modelled;
 /// - an air the inventory refuses is not modelled: its error carries nothing a reader could act
 ///   on, and the generated sample gives none (this module's tests, which re-derive and print any).
@@ -163,6 +169,9 @@ pub(crate) fn record_aerosols(
     match rules {
         AirRules::Held => Modelled::NotModelled,
         AirRules::Batch => {
+            if surface.state == SurfaceState::MagmaOcean && !surface.conditions.gases().is_empty() {
+                return Modelled::NotModelled;
+            }
             let profile = match structure {
                 // A gas envelope's profile (P14.T24.d) is the envelope section's, never a
                 // surface's: `record_structure` builds none, so no surface holds one.

@@ -7,8 +7,9 @@ import type { NotFormedCondensateDto } from "./NotFormedCondensateDto";
 /**
  * A surface air's aerosol and absorber inventory (plan 14, P14.T24.c with T24.g). Sent from
  * P14.T54.b's bump at generator version 24, and absent from a server whose generator does not
- * model it; its shape is P14.T54.b.b's (decision-p14-t54b-open §2). A surface with no air, and a
- * magma ocean, has the empty inventory: every list empty, never `null`.
+ * model it; its shape is P14.T54.b.b's (decision-p14-t54b-open §2). A surface with no air (an
+ * airless body's, a melt's whose volatiles are gone) has the empty inventory: every list empty,
+ * never `null`. A magma ocean that holds an air has none sent, as not modelled.
  */
 export type AerosolInventoryDto = { 
 /**
@@ -17,7 +18,8 @@ export type AerosolInventoryDto = {
  */
 modes: Array<AerosolModeDto>, 
 /**
- * The condensate decks, hottest base first, which the modes name.
+ * The condensate decks, hottest base first, which the modes name: at most one deck a
+ * condensate, so that a mode's `deck` names one.
  */
 decks: Array<CondensateDeckDto>, 
 /**

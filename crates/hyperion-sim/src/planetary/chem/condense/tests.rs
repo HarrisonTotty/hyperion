@@ -724,9 +724,13 @@ fn a_rule_s_mode_takes_its_optics_as_the_loop_s() {
 /// The files outside the two modules and P14.T24.c's and T24.g's rules through which the record
 /// reaches the loop behind a named hold, each with the name of its hold, which its code must name:
 /// P14.T54.b.b's wiring of the record's aerosol inventory, whose `Batch` arm alone calls
-/// `hooks::aerosols` and so the loop (decision-p14-t54b-open §3.3). **P14.T54.b.l deletes this
-/// list** with the tripwire below.
-const HELD: [(&str, &str); 1] = [("planetary/system/air.rs", "AIR_SECTIONS_VERSION")];
+/// `hooks::aerosols` and so the loop (decision-p14-t54b-open §3.3), and its tests, which read the
+/// loop's errors and labels (B1's fix, P14.T52.f). **P14.T54.b.l deletes this list** with the
+/// tripwire below.
+const HELD: [(&str, &str); 2] = [
+    ("planetary/system/air.rs", "AIR_SECTIONS_VERSION"),
+    ("planetary/system/air/tests.rs", "AIR_SECTIONS_VERSION"),
+];
 
 /// Nothing on the record reaches the loop or the laws aloft before P14.T54.b's bump
 /// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside the two modules,

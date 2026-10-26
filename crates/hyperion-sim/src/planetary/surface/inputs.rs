@@ -495,7 +495,8 @@ pub struct CoarseInputs {
 pub enum SurfaceInputsError {
     /// The body has no solid surface: its record's surface section is
     /// [`Section::NotApplicable`], as a gas giant's, an ice giant's or (from P14.T48.e) a
-    /// sub-Neptune's is.
+    /// sub-Neptune's is, and from generator version 24 a solid body's under a supercritical
+    /// envelope (P14.T53.b part 2).
     NoSolidSurface,
     /// A section the pass reads is not modelled by this generator version.
     NotModelled(RecordSection),

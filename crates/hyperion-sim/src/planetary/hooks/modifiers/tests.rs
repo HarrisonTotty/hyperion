@@ -951,7 +951,7 @@ fn the_modifiers_hold_check_reads_the_code_alone() {
 #[test]
 fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
     // `modifiers::{` alone would match the galaxy's gas modifiers.
-    const SIM_PATTERNS: [&str; 10] = [
+    const SIM_PATTERNS: [&str; 12] = [
         "SurfaceModifiers::derive(",
         "ModifierInputs",
         "hooks::modifiers",
@@ -959,6 +959,8 @@ fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
         "solar_xuv_luminosity",
         "wind_mass_loss_kg_per_s",
         "organic_ground(",
+        "organic_ground_entries(",
+        "bears_organic_cover(",
         "body_maturity",
         "maturity_after",
         "LUNAR_MATURATION_TIME",

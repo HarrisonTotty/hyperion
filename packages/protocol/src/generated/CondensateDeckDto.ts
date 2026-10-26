@@ -30,10 +30,19 @@ top_pa: number,
 /**
  * Its limiting vapour's mole fraction below the deck, in `[0, 1]`: the air's at the ground,
  * less what a deck below takes of it.
+ *
+ * Whose vapour it is follows the condensate's saturation law: the condensate's own gas for a
+ * law that reads one species (a volatile's own curve, as every deck of the generated sample's
+ * surface airs has; for sulphuric acid, the share `ε_v` of the sulphur dioxide that is its
+ * vapour); for a product law (NH₄SH's), the scarcer reactant; and for an element's law
+ * (forsterite's magnesium), the element's atoms per molecule of gas, which is not one gas's
+ * mole fraction.
  */
 vapour_mole_fraction_below: number, 
 /**
- * The vapour's mole fraction above the deck, the cold trap's, in `[0, 1]`.
+ * The same vapour's mole fraction above the deck, the cold trap's, in `[0, 1]`: as
+ * `vapour_mole_fraction_below`'s, the condensate's own gas, the scarcer reactant, or the
+ * element's atoms per molecule of gas, by its law.
  */
 vapour_mole_fraction_above: number, 
 /**

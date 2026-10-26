@@ -516,8 +516,12 @@ pub enum AerosolTauBasisDto {
 /// | `optics_not_modelled` | present | either | absent | present |
 /// | `no_mass_extinction` | present | absent | present | absent |
 ///
-/// A rule's mode whose optics are not modelled has no column mass either: its τ(550) is the rule's
-/// and its column that τ over a mass extinction it does not have.
+/// A rule's mode whose optics are not modelled (the dust's, a sulphate layer's, the acid's) is sent
+/// without its τ(550) or its column mass: the rule set the τ, but the generator refuses it with the
+/// optics, and the column would be that τ over a mass extinction it does not have.
+///
+/// A client refuses a mode whose absent members are not its reason's row; the table is part of
+/// the shape from the first send.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
@@ -527,7 +531,7 @@ pub enum AerosolNotModelledDto {
     NoGrainDensity {
         /// The phase asked for: `solid` or `liquid`.
         phase: SubstancePhaseDto,
-        /// The temperature asked for, K, positive.
+        /// The temperature asked for, K, positive: the mode's `temperature_k`.
         temperature_k: f64,
     },
     /// The air's most abundant gas has no collision constants, so its viscosity, and the deck's
@@ -628,8 +632,17 @@ pub struct CondensateDeckDto {
     pub top_pa: f64,
     /// Its limiting vapour's mole fraction below the deck, in `[0, 1]`: the air's at the ground,
     /// less what a deck below takes of it.
+    ///
+    /// Whose vapour it is follows the condensate's saturation law: the condensate's own gas for a
+    /// law that reads one species (a volatile's own curve, as every deck of the generated sample's
+    /// surface airs has; for sulphuric acid, the share `ε_v` of the sulphur dioxide that is its
+    /// vapour); for a product law (NH₄SH's), the scarcer reactant; and for an element's law
+    /// (forsterite's magnesium), the element's atoms per molecule of gas, which is not one gas's
+    /// mole fraction.
     pub vapour_mole_fraction_below: f64,
-    /// The vapour's mole fraction above the deck, the cold trap's, in `[0, 1]`.
+    /// The same vapour's mole fraction above the deck, the cold trap's, in `[0, 1]`: as
+    /// `vapour_mole_fraction_below`'s, the condensate's own gas, the scarcer reactant, or the
+    /// element's atoms per molecule of gas, by its law.
     pub vapour_mole_fraction_above: f64,
     /// Its `f_sed` (Ackerman and Marley 2001), its modes' exponent, not negative: 0 for a deck of
     /// well-mixed modes (P14.T24.g's acid).
@@ -698,15 +711,17 @@ pub struct AbsorberDto {
 
 /// A surface air's aerosol and absorber inventory (plan 14, P14.T24.c with T24.g). Sent from
 /// P14.T54.b's bump at generator version 24, and absent from a server whose generator does not
-/// model it; its shape is P14.T54.b.b's (decision-p14-t54b-open §2). A surface with no air, and a
-/// magma ocean, has the empty inventory: every list empty, never `null`.
+/// model it; its shape is P14.T54.b.b's (decision-p14-t54b-open §2). A surface with no air (an
+/// airless body's, a melt's whose volatiles are gone) has the empty inventory: every list empty,
+/// never `null`. A magma ocean that holds an air has none sent, as not modelled.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AerosolInventoryDto {
     /// The modes, every cloud's, haze's and dust layer's: each deck's, in the decks' order, then
     /// the sulphate layer's, the haze's and the dust's.
     pub modes: Vec<AerosolModeDto>,
-    /// The condensate decks, hottest base first, which the modes name.
+    /// The condensate decks, hottest base first, which the modes name: at most one deck a
+    /// condensate, so that a mode's `deck` names one.
     pub decks: Vec<CondensateDeckDto>,
     /// The absorbers, in registry order.
     pub absorbers: Vec<AbsorberDto>,
@@ -977,8 +992,9 @@ pub struct BodySurfaceDto {
     pub vertical_structure: Modelled<VerticalStructureDto>,
     /// The aerosol and absorber inventory of the surface's air (P14.T24.c with T24.g): the empty
     /// inventory, never `null`, for a surface with no air (an airless body's, a melt's whose
-    /// volatiles are gone) and for a magma ocean, and absent from a server whose generator does not
-    /// model it, every one before P14.T54.b's bump at generator version 24.
+    /// volatiles are gone), and absent from a server whose generator does not model it, every one
+    /// before P14.T54.b's bump at generator version 24, and from a magma ocean that holds an air,
+    /// whose clouds the generator does not model.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<AerosolInventoryDto>>", optional)]
     pub aerosols: Modelled<AerosolInventoryDto>,

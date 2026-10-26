@@ -1337,13 +1337,17 @@ function toNotFormed(entry: NotFormedCondensateDto): NotFormedCondensate {
 }
 
 /**
- * A surface air's inventory, checked: its modes and decks each as above, and every mode's deck,
- * where it names one, one of the inventory's decks, which is what a mode's `deck` means
- * (decision-p14-t54b-open §2.2).
+ * A surface air's inventory, checked: its modes and decks each as above, at most one deck a
+ * condensate, and every mode's deck, where it names one, one of the inventory's decks, which is
+ * what a mode's `deck` means (decision-p14-t54b-open §2.2; R08's review of P14.T54.b.b, S3).
  */
 function toAerosols(inventory: AerosolInventoryDto): AerosolInventory {
   const decks = inventory.decks.map(toCondensateDeck);
   const modes = inventory.modes.map(toAerosolMode);
+  check(
+    new Set(decks.map((deck) => deck.condensate)).size === decks.length,
+    "condensate deck unusable",
+  );
   check(
     modes.every(
       (mode) => mode.deck === null || decks.some((deck) => deck.condensate === mode.deck),

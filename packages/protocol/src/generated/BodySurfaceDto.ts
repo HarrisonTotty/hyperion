@@ -185,8 +185,9 @@ vertical_structure?: VerticalStructureDto | null,
 /**
  * The aerosol and absorber inventory of the surface's air (P14.T24.c with T24.g): the empty
  * inventory, never `null`, for a surface with no air (an airless body's, a melt's whose
- * volatiles are gone) and for a magma ocean, and absent from a server whose generator does not
- * model it, every one before P14.T54.b's bump at generator version 24.
+ * volatiles are gone), and absent from a server whose generator does not model it, every one
+ * before P14.T54.b's bump at generator version 24, and from a magma ocean that holds an air,
+ * whose clouds the generator does not model.
  */
 aerosols?: AerosolInventoryDto | null, 
 /**

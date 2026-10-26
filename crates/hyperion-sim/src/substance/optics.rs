@@ -1328,11 +1328,12 @@ impl Substance {
     ///   iron-free ice, salt or mineral and 0.8173 for troilite, `FeS`;
     /// - an atom: +0, its solid its element's own, so that iron's is metal;
     /// - an organic material with no formula (`tholin`, `soot`): +0, iron-free;
+    /// - a lithology whose mode by weight the registry states ([`WEIGHED_MODES`], `ferric`
+    ///   alone): its parts' `FeO_T` weighed by their shares (`ferric` 0.2695);
     /// - a lithology with a melt row (P14.T49.h's step 4): its major oxides' FeO(T) over 100
-    ///   (`basalt` and `lava_glass` 0.1097, `basalt_fe`, `mars_dust` and `ferric` 0.202,
-    ///   `feldspathic` 0.051, `anorthosite` 0.0127, `komatiite` 0.129, `basalt_reduced` 0.0337,
-    ///   `granite` 0.0185, `ultramafic` 0.0805); `ferric`'s oxides are `basalt_fe`'s, a stated
-    ///   stand-in that leaves its few weight per cent of ferric phases out;
+    ///   (`basalt` and `lava_glass` 0.1097, `basalt_fe` and `mars_dust` 0.202, `feldspathic`
+    ///   0.051, `anorthosite` 0.0127, `komatiite` 0.129, `basalt_reduced` 0.0337, `granite`
+    ///   0.0185, `ultramafic` 0.0805);
     /// - a lithology of metal (its mechanics family `Metal`, `iron_nickel`): +0;
     /// - `None` for every other lithology, whose oxides the registry does not carry (the
     ///   chondrites, `phyllosilicate`, `cometary` and `ca_al_residue`), and for a solution, which
@@ -1355,6 +1356,14 @@ impl Substance {
             }
             SubstanceKind::Atom | SubstanceKind::Organic => Some(0.0),
             SubstanceKind::Lithology => {
+                if let Some(&(_, parts)) = WEIGHED_MODES
+                    .iter()
+                    .find(|(key, _)| *key == self.key.as_str())
+                {
+                    return parts.iter().try_fold(0.0, |sum, &(part, share)| {
+                        Some(sum + share * part.feo_mass_fraction()?)
+                    });
+                }
                 if let Some(feo) = self
                     .liquid()
                     .and_then(LiquidColumns::melt_feo_mass_fraction)
@@ -1367,6 +1376,55 @@ impl Substance {
         }
     }
 }
+
+/// A part of a lithology's mode by weight, for its `FeO_T` ([`WEIGHED_MODES`]): another row, or an
+/// iron oxide by its formula, each counting its iron as `FeO` (decision-p14-t51d-weathering §1.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IronPart {
+    /// A registry row, by its key, at its own `FeO_T` ([`Substance::feo_mass_fraction`]).
+    Row(&'static str),
+    /// A ferric oxide, `Fe₂O₃` (hematite, and a nanophase ferric oxide counted as it): two `FeO`
+    /// a formula unit, 2 M(`FeO`) ÷ M(`Fe₂O₃`), 0.8998.
+    FerricOxide,
+    /// Magnetite, `Fe₃O₄`, which is `FeO`·`Fe₂O₃`: three `FeO` a formula unit,
+    /// 3 M(`FeO`) ÷ (M(`FeO`) + M(`Fe₂O₃`)), 0.9309.
+    Magnetite,
+}
+
+impl IronPart {
+    /// Its `FeO_T`, its iron as `FeO` over its mass, from the registry's molar masses (the melt
+    /// oxides', IUPAC 2021's abridged atomic weights); `None` for a row the registry does not
+    /// give one.
+    #[must_use]
+    fn feo_mass_fraction(self) -> Option<f64> {
+        let ferrous = Oxide::Ferrous.molar_mass_g_per_mol();
+        let ferric = Oxide::Ferric.molar_mass_g_per_mol();
+        match self {
+            Self::Row(key) => super::by_key(key)?.substance().feo_mass_fraction(),
+            Self::FerricOxide => Some(2.0 * ferrous / ferric),
+            Self::Magnetite => Some(3.0 * ferrous / (ferrous + ferric)),
+        }
+    }
+}
+
+/// The lithologies whose `FeO_T` is their mode's by weight, each part at its own `FeO_T`, rather
+/// than a melt row's oxides: a closed list, for the composition audit (P14.T54.b's B1 review).
+///
+/// `ferric`, the registry's ferric soil (`rows/optics/lab.rs`'s `FERRIC_MODE`): 90.4 wt%
+/// `basalt_fe`; Rocknest's hematite 1.0 and magnetite 1.8 wt% (Achilles et al. 2017, JGR Planets
+/// 122, 2344, Table 1); and its nanophase ferric oxide 6.8 wt% (Morris et al. 2013, LPSC 44, 1653,
+/// Table 3), counted as `Fe₂O₃`, an assumption: its iron all ferric, and a hydrated oxide (the
+/// optics' stand-in is ferrihydrite) would carry less iron a gram. So 0.904 × 0.202 + 0.078 ×
+/// 0.8998 + 0.018 × 0.9309 = 0.2695, where its melt row, `basalt_fe`'s, gives 0.202.
+const WEIGHED_MODES: [(&str, &[(IronPart, f64)]); 1] = [(
+    "ferric",
+    &[
+        (IronPart::Row("basalt_fe"), 0.904),
+        (IronPart::FerricOxide, 0.010),
+        (IronPart::Magnetite, 0.018),
+        (IronPart::FerricOxide, 0.068),
+    ],
+)];
 
 /// The rows whose condensed optics hold an observed body's albedo, weathered where it lies, so
 /// that a palette carries no `FeO_T` for them and R10.T1.d's law does not darken them a second

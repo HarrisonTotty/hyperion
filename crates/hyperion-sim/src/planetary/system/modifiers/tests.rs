@@ -14,6 +14,7 @@ use hyperion_surface::substance_key::SubstanceKey;
 use hyperion_testkit::float::{assert_same_bits, bits};
 
 use super::*;
+use crate::id::BodyId;
 use crate::planetary::chem::inventory::Reservoir;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::derive::atmosphere::Gas;
@@ -328,7 +329,7 @@ fn the_held_record_computes_no_modifiers() {
     let case = ModifierCase {
         star: body.star,
         primary: RecordPrimary::Star,
-        mantle_sulphur: body.sulphur,
+        mantle_sulphur: Some(body.sulphur),
     };
     let Section::Ok(bulk) = body.record.bulk() else {
         panic!("a surface has a bulk section");
@@ -414,7 +415,7 @@ fn the_table_s_moon_mercury_mars_and_titan_take_their_shapes_under_the_switch() 
             &ModifierCase {
                 star: Some(star),
                 primary: RecordPrimary::Star,
-                mantle_sulphur: body.element_inventory().mass(Element::S, Reservoir::Mantle),
+                mantle_sulphur: Some(body.element_inventory().mass(Element::S, Reservoir::Mantle)),
             },
             &ModifierSurface {
                 seasonal: &seasonal,
@@ -652,12 +653,16 @@ fn check_ferric(body: &BatchBody, m: &SurfaceModifiers, area: f64) {
 /// modelled; each palette entry's `FeO_T` is the registry's for a solid
 /// ([`palette_feo_mass_fraction`]) and none for a liquid; its `Deposit` entries are the weathering
 /// deposits' and its `Cover` entry the `tholin` exactly where the cover is above 0; and no palette
-/// holds more than [`MaterialPalette::MAX_ENTRIES`], so that every body `for_body` read held
-/// reads under the batch. The generated Moon-like bodies' highlands and maria are printed.
+/// holds more than [`MaterialPalette::MAX_ENTRIES`]; and every body `for_body` reads under the
+/// rules in force reads under the batch too, so that the batch's new `Deposit` and `Cover` entries
+/// push no palette past its entries unseen (a refusal by the palette or a modifier's entry would
+/// drop the body from the batch's read). The generated Moon-like bodies' highlands and maria are
+/// printed.
 #[test]
 fn under_the_batch_the_inputs_carry_the_record_s_modifiers() {
     let (mut read, mut weathered, mut covered, mut ferric) = (0_usize, 0_usize, 0_usize, 0_usize);
     let mut unread: BTreeMap<String, usize> = BTreeMap::new();
+    let mut read_ids = BTreeSet::new();
     for body in batch_bodies() {
         let id = body.record.identity().id();
         let inputs = match CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx) {
@@ -668,6 +673,7 @@ fn under_the_batch_the_inputs_carry_the_record_s_modifiers() {
             }
         };
         read += 1;
+        read_ids.insert(id);
         let modifiers = body.surface().modifiers();
         match modifiers {
             Modelled::Ok(m) => {
@@ -699,7 +705,36 @@ fn under_the_batch_the_inputs_carry_the_record_s_modifiers() {
          {covered} with the `tholin` cover; not read {unread:?}"
     );
     assert!(read > 100 && weathered > 100, "{read} {weathered}");
+    let in_force = read_under_the_rules_in_force();
+    let lost: Vec<_> = in_force.difference(&read_ids).collect();
+    assert!(
+        lost.is_empty(),
+        "{} of {} bodies read under the rules in force are not read under the batch: {lost:?}",
+        lost.len(),
+        in_force.len()
+    );
     print_moon_like_palettes();
+}
+
+/// The bodies of the first [`MODIFIER_SAMPLE`] whole systems that `for_body` reads at the epoch
+/// under the rules in force, each with its planet's record from the same snapshot.
+fn read_under_the_rules_in_force() -> BTreeSet<BodyId> {
+    whole()
+        .iter()
+        .take(MODIFIER_SAMPLE)
+        .flat_map(|(ctx, system)| {
+            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            snapshot
+                .bodies()
+                .iter()
+                .filter(|record| {
+                    let planet = CoarseInputs::planet_of(record).and_then(|i| snapshot.body(i));
+                    CoarseInputs::for_body(record, planet, ctx).is_ok()
+                })
+                .map(|record| record.identity().id())
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Asserts `palette`'s `FeO_T`, deposits and cover against the record's modifiers `modifiers` for
@@ -810,7 +845,6 @@ fn the_cover_rule_marks_the_sim_s_organic_ground_on_every_generated_body() {
             .collect();
         let condensates = body.surface().condensates();
         let counted: BTreeSet<SubstanceKey> = organic_ground_entries(condensates)
-            .iter()
             .map(|e| e.substance().substance().key())
             .collect();
         assert!(
@@ -942,7 +976,8 @@ fn the_held_inputs_carry_no_modifiers() {
 }
 
 /// The rows' `FeO_T` (`Substance::feo_mass_fraction`) and the palette's: the melt rows' FeO(T)
-/// over 100, troilite's by its formula, the iron-free and metallic rows +0, the rows of no
+/// over 100, `ferric`'s by its mode by weight, troilite's by its formula, the iron-free and
+/// metallic rows +0, the rows of no
 /// modelled composition none, and `mars_dust`'s observed albedo none in the palette; every value
 /// in [+0, 1].
 #[test]
@@ -953,7 +988,7 @@ fn the_registry_s_feo_t_is_its_composition_s() {
         ("lava_glass", 0.109_698),
         ("basalt_fe", 0.202),
         ("mars_dust", 0.202),
-        ("ferric", 0.202),
+        ("ferric", 0.269_55),
         ("komatiite", 0.129),
         ("basalt_reduced", 0.0337),
         ("granite", 0.018_458),
@@ -966,6 +1001,22 @@ fn the_registry_s_feo_t_is_its_composition_s() {
         assert!((value - expected).abs() < 5e-5, "{key}: {value}");
         eprintln!("{key}: FeO_T {value:.6}");
     }
+    // `ferric`'s is its mode's by weight: 90.4 wt% `basalt_fe`, 1.0 hematite, 1.8 magnetite and
+    // 6.8 nanophase ferric oxide as Fe₂O₃, each part's iron as FeO by its formula (IUPAC 2021's
+    // abridged Fe 55.845 and O 15.999).
+    let (ferrous, ferric_oxide): (f64, f64) = (55.845 + 15.999, 2.0 * 55.845 + 3.0 * 15.999);
+    let (hematite, magnetite) = (
+        2.0 * ferrous / ferric_oxide,
+        3.0 * ferrous / (ferrous + ferric_oxide),
+    );
+    assert!((hematite - 0.8998).abs() < 5e-5 && (magnetite - 0.9309).abs() < 5e-5);
+    let basalt_fe = feo("basalt_fe").expect("basalt_fe's FeO_T");
+    let mode = 0.904 * basalt_fe + 0.010 * hematite + 0.018 * magnetite + 0.068 * hematite;
+    let ferric = feo("ferric").expect("ferric's FeO_T");
+    assert!(
+        (ferric - mode).abs() < 1e-12,
+        "ferric: {ferric} against {mode}"
+    );
     let zero = bits(0.0);
     for key in [
         "H2O",
