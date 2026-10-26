@@ -2053,7 +2053,9 @@ that brown-dwarf companions can be retuned without touching a star; the shapes o
   supernova class for companions), it is a change to plan 09's `DeathMarks`.
 - **The centre's feature-level index** (T8.e). Scratch arithmetic says 13 bits are tight for the
   centre's accreting white dwarfs, and plan 09 has reported it to the brainstorm's owner. Neither
-  way out is this plan's to choose.
+  way out is this plan's to choose. P11.T8.e measured it: the Milky Way fixture's centre fits, but
+  a cluster 5% heavier does not, nor do 393 of the first 10³ of plan 02's seeds ("The centre's
+  feature-level index, as measured (P11.T8.e)", at the end of this section).
 - **Engine size.** Hurley, Tout and Pols's algorithm is large. T4 is six days as written and may be
   ten. Its subtasks each leave `just ci` green, so it can be paused.
 - **Circular dependency with plan 15**, resolved by scratch values in shapes this plan owns (Design
@@ -5566,3 +5568,126 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     (the science check). The CO or ONe white dwarf + HeMS → HeGB row is the exception, whose only
     carbon is the white dwarf's core, and which would turn WC too early; it needs a white dwarf
     beside a helium star in the Wolf-Rayet range, which is rare. Recorded, not a blocker.
+- **P11.T8.e as built** (lane `lane/106-p11-t8e`, 2026-10-26; at version 23, nothing generated
+  moves).
+  - _The forecast._ `galaxy/features/members/headroom.rs` (new; `members.rs` re-exports it):
+    `centre_list_forecast(params) -> Result<CentreListForecast, BuildCentreError>` builds the
+    centre's classes as `CentreModel::from_params` does (`CentreProfile::from_params`, the
+    parameters' mass function, `CentreClasses::new`; no distribution function) and takes the
+    formed mass as `primaries_formed()` × `GalaxyParams::mean_formed_mass()`, each carved class's
+    hosts as the formed mass × its `CLASS_SHARES` row's largest `hosts_per_formed_mass` over
+    `POPULATIONS`, and the candidates as each class's hosts ÷ `CLASS_ACCEPTANCE_FLOOR` (0.9),
+    summed in the rows' order. `CentreListForecast` has getters for each figure, `fits()` and
+    `margin(sigmas)`. `check_feature_list_headroom(galaxy) -> Result<(), ExceedFeatureListError>`
+    refuses a centre whose candidates do not fit, with
+    `ExceedFeatureListError::CentreListTooFull { candidates }`.
+  - _Deviation: the formed mass is the share matrix's_ (`r m̄_f` of every system born, P11.T7).
+    `m̄_f` counts companions, which the centre's members do not have (ruling 144.4), so the
+    forecast errs high.
+  - _Deviation: the largest rate over the seven populations._ The centre is none of them. While
+    the scratch rows are equal this is exact; after P15.T10.b it is an upper bound.
+  - _Deviation: the thinning allowance_ is T8's floor on a class's acceptance, "under one in ten",
+    as the constant `CLASS_ACCEPTANCE_FLOOR` = 0.9.
+  - _Deviation: eight standard deviations, not five._ The bound is the list's own,
+    `c + 8√c + 1 < 8,192`, index 0 spared: a centre that passed at five and failed at eight would
+    panic in `FeatureLevelList::with_classes` as soon as T8.f built its list. The predicate moved
+    out of `with_classes` into `level_list::fits_list_index` (with `list_index_margin` and
+    `LIST_HEADROOM_SIGMAS`, all crate-private), which both call; the assertion's expression,
+    message and behaviour are unchanged. The five-sigma margin is reported beside the eight.
+  - _Deviation: the galaxy's own mass model._ The check builds the centre's profile from the
+    built galaxy's mass model and held mass function, as `CentreModel::new` does, not by
+    rebuilding them from `galaxy.params()`; a test holds the two paths equal bit for bit in every
+    figure, for the fixture and two drawn seeds (`0x1108_e100`, which overflows, and
+    `0x1108_e101`, which fits).
+  - _Deviation: no `BuildCentreError` variant._ A built galaxy's black hole and cluster have
+    finite, non-negative masses (its parameters' builder sees to it), so the check `expect`s the
+    profile with that reason.
+  - _Deviation: only the centre._ Plan 09's classes on its list (P09.T30.b's victims, T36's
+    supernovae, T43's variables) register nothing yet and add nothing; each must join the
+    candidates when it registers. Catalogue features are not walked: a nursery or open cluster
+    forms at most `NURSERY_MASS_MAX`, 10⁵ M☉, about 11 candidates at these rates; a globular's
+    count is P09.T9.e's encounter law under T8.f, which T8.f brings into the check;
+    `with_classes` asserts the bound on every list it builds.
+  - _Deviation: not called by the server._ No list holds these classes until T8.f, and a refusal
+    now would refuse galaxies over members that no list holds. T8.f wires it beside plan 03's
+    `check_index_headroom` in `hyperion-server`'s `compute/galaxies.rs`, or the owner's ruling
+    changes what it checks.
+  - _Deviation: the file._ `members/headroom.rs`, since `members.rs` became a module with
+    children; the plan's Files names `members.rs`.
+  - _Measured at the Milky Way fixture_ (default mass function, cluster 2.4747 × 10⁷ M☉):
+    `primaries_formed()` 6.0454 × 10⁷, `systems()` 6.0173 × 10⁷ (ruling 144.4's "about 5.8 ×
+    10⁷"), `m̄_f` 1.0961 M☉, formed mass 6.6261 × 10⁷ M☉. Hosts: 3,179.9 fast and 3,179.9 slow
+    accreting white dwarfs, 7.07 X-ray binaries, 63.60 stellar mergers, 0.0071 neutron-star
+    mergers. Candidates 7,145.0; plus eight σ and 1, 7,822.2 (369.8 to spare); plus five σ and 1,
+    7,568.6 (623.4). Under Kroupa's function (cluster 2.4843 × 10⁷ M☉, `m̄_f` 0.8215 M☉):
+    candidates 6,468.0, 1,079.6 to spare at eight σ.
+  - _Measured at the cap_: Chabrier's 6.4 × 10⁷ M☉ expects 18,311.6 (19,395.1 with eight σ, 11,203
+    over; 1.5493 × 10⁸ primaries formed); Kroupa's 4.7 × 10⁷ M☉ expects 12,174.9 (13,058.6, 4,867
+    over). The check first fails at 2.597 × 10⁷ M☉ under the default function, 1.0494 times the
+    fixture's cluster, and at 2.880 × 10⁷ M☉ under Kroupa's, 1.1593 times. The candidates are
+    linear in the cluster's mass to 0.7% over a factor of two (the deeper cluster keeps more
+    remnants).
+  - _How high the formed mass errs._ The primaries alone form 0.70348 of `m̄_f` under the default
+    function and 0.71327 under Kroupa's, so the companions are 30% of it. Counted with the
+    primaries' mass alone, the fixture's centre expects 5,026.3 (4,613.5 under Kroupa's) and first
+    fails near 1.49 times its cluster (1.63), and the caps still overflow, at 12,881.7 and 8,684.0
+    candidates.
+  - _The sweep._ `tests/galaxy_sweeps.rs`'s `the_centre_s_feature_level_list_over_a_thousand_seeds`
+    (slow), over the first 10³ of plan 02's seeds, not the 10⁴: 100 seeds took 27.4 s in the
+    slow-test profile, so the 10⁴ would have taken over half an hour against the brief's 5
+    minutes. The 10³ took 205.9 s on an 8-thread laptop, the test on one thread, at a 1-minute
+    load of 1.4–2.8 with no other build running. 393 of the 10³ fail at eight σ and 378 at five;
+    344 expect 8,191 candidates or more outright, so their lists would clamp; 207 fail with the
+    primaries' mass alone; 41 clusters sit at plan 02's cap. The least failing cluster holds
+    2.603 × 10⁷ M☉. The worst seed, `0x02005ee900000339`, a cluster at the cap of 6.4 × 10⁷ M☉,
+    expects 18,321.3. The test prints every failing seed and pins the counts as regression bounds.
+  - _Main's arithmetic, replaced._ The brief's rough figures (about 6,000 candidates at the
+    fixture, failing from about 1.25 times its cluster) took `m̄_f` as 0.957 M☉ and the centre as
+    5.8 × 10⁷ primaries; at version 23 they are 1.0961 M☉ and 6.045 × 10⁷, which give 7,145
+    candidates and a failure from 1.049 times.
+  - _Verdict: a finding_ (the next bullet). The task stops there: it lands the check, its tests
+    and these figures, and changes neither the ID layout, nor the list, nor any count.
+  - _Tests_ (`galaxy::features::members::headroom`): the fixture's arithmetic to 10⁻¹² and its
+    hosts in the rows' proportion; linearity within 1%; the fixture's check `Ok(())` with its
+    candidates and margins pinned; the first failing mass under each function, pinned to 10⁻⁵ and
+    confirmed a part in 500 to either side; the caps' `CentreListTooFull` with their candidates
+    pinned to 10⁻⁵; the shared bound, just under it the check passes and the list builds, just
+    over it the check fails and the list panics; the two paths bit for bit; the error's text.
+    The pins hold until the owner rules on the centre's index (below).
+  - _Acceptance_, since the shared `catalogue_classes::binary` filter selects none of this task's
+    tests: `cargo test -p hyperion-sim galaxy::features::members`, and the sweep by nextest with
+    `--cargo-profile slow-test --profile slow --run-ignored only --test galaxy_sweeps`, which
+    `just test-slow` runs.
+  - **Deferred findings (2026-10-13 rule)**, from P11.T8.e:
+    - `Galaxy::mean_formed_mass`'s doc gives 0.957 M☉ under the default mass function and
+      0.836 M☉ under Kroupa's, and "Deviations in P11.T7, as built" above quotes 0.957 M☉ for
+      `MILKY_WAY_FORMED_MASS`. At version 23 the value is 1.0961 and 0.8215 M☉ (ruling 141.6's
+      1.096), and `MILKY_WAY_FORMED_MASS` holds at 1.0961 M☉ times about 8.55 × 10¹⁰ born
+      systems. The doc is outside this task's files; a one-line fix for whoever next edits
+      `galaxy/mod.rs`.
+    - P11.T8.f's text lists plan 11's classes on the list as `STELLAR_MERGER`,
+      `NEUTRON_STAR_MERGER`, `XRAY_BINARY`, `ACCRETING_WHITE_DWARF`, `ACCRETING_WHITE_DWARF_SLOW`
+      and cites plan 09's design note 16, which (as `FEATURE_LEVEL_LIST_ORDER` and its golden do)
+      lists them the other way round, the accreting white dwarfs first. Under the clamp the later
+      classes lose members first, so the order decides which class a full list shortens. For
+      T8.f to reconcile.
+- **The centre's feature-level index, as measured (P11.T8.e)** (lane `lane/106-p11-t8e`,
+  2026-10-26; for the brainstorm's owner; nothing changed). The centre's feature-level list cannot
+  hold plan 11's carved classes for a large share of galaxies.
+  - _Failing:_ 393 of the first 10³ of plan 02's seeds at eight standard deviations (378 at five,
+    344 expecting 8,191 candidates or more outright), 207 even with the primaries' mass alone.
+  - _The worst:_ seed `0x02005ee900000339`, a cluster at the cap of 6.4 × 10⁷ M☉, expects
+    18,321.3 candidates, 2.2 times the index.
+  - _Where it first fails:_ at 2.597 × 10⁷ M☉ under the default mass function, 1.049 times the
+    fixture's 2.4747 × 10⁷ M☉ (the Milky Way's 2.5 × 10⁷ M☉), against a cap of 6.4 × 10⁷; at
+    2.880 × 10⁷ M☉ under Kroupa's, against its cap of 4.7 × 10⁷. The capped clusters overflow by
+    11,203 and 4,867 indices at eight σ. With the primaries' mass alone it first fails near 1.49
+    times the fixture's cluster, and both caps still overflow.
+  - _The two ways out_, neither chosen: widen the index into the level and cell bits, which are
+    zero under the spare band value (every existing ID keeps its value, but it contradicts the
+    brainstorm's "under it the level and cell are zero" and plan 01's canonical rule); or list at
+    the centre only the hosts above a brightness floor, leaving the dim hosts as ordinary members
+    that alerts cannot find from afar.
+  - T8.f waits on the ruling. Whichever way it goes, T8.f also decides whether the centre's
+    budget counts companions (ruling 144.4), which sets how far this forecast's 30% allowance for
+    them overstates.

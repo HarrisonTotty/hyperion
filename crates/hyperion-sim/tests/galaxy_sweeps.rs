@@ -8,21 +8,22 @@ mod common;
 use common::{assert_derived_consistent, assert_params_in_ranges, assert_within};
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
+use hyperion_sim::galaxy::features::members::centre_list_forecast;
 use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS, Shape};
-use hyperion_sim::galaxy::imf::MassFunctionKind;
-use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO, MassFunctionKind};
+use hyperion_sim::galaxy::params::{GalaxyParams, NuclearClusterParams};
 use hyperion_sim::galaxy::potential::MassModel;
+use hyperion_sim::galaxy::quad::gl32_log;
 use hyperion_sim::galaxy::{PointLy, Population};
 use hyperion_sim::math;
 use hyperion_sim::units::LightYears;
 
+/// The seed of the sweep's galaxy `n` is this with `n` in its low bits.
+const SWEEP_SEED: u64 = 0x0200_5ee9_0000_0000;
+
 fn sweep() -> impl Iterator<Item = GalaxyParams> {
-    (0..10_000_u64).map(|n| {
-        GalaxyParams::from_seed(
-            Seed::new(0x0200_5ee9_0000_0000 | n),
-            MassFunctionKind::default(),
-        )
-    })
+    (0..10_000_u64)
+        .map(|n| GalaxyParams::from_seed(Seed::new(SWEEP_SEED | n), MassFunctionKind::default()))
 }
 
 /// Two checks over the same 10⁴ seeds, in one test so that the parameters are built once.
@@ -490,5 +491,123 @@ fn the_densities_over_a_thousand_seeds() {
         centres[999] < 60.0,
         "the densest centre holds {} per ly³",
         centres[999]
+    );
+}
+
+/// The share of `params`' formed mass per system that its primary forms alone: `∫ m φ ÷ ∫ φ` over
+/// the stellar range, by 32-node Gauss–Legendre in ln m between the mass function's breaks, over
+/// the mean formed mass, which counts companions.
+fn primaries_share(params: &GalaxyParams) -> f64 {
+    let f = params.mass_function().to_mass_function();
+    let mut edges = vec![MASS_LIMIT_LO];
+    edges.extend(
+        f.breaks()
+            .iter()
+            .copied()
+            .filter(|&b| b > MASS_LIMIT_LO && b < MASS_LIMIT_HI),
+    );
+    edges.push(MASS_LIMIT_HI);
+    let (mut count, mut mass) = (0.0, 0.0);
+    for panel in edges.windows(2) {
+        count += gl32_log(|m| f.pdf(m), panel[0], panel[1]);
+        mass += gl32_log(|m| m * f.pdf(m), panel[0], panel[1]);
+    }
+    mass / count / params.mean_formed_mass().value()
+}
+
+/// P11.T8.e: whether the galactic centre's feature-level list has room for plan 11's carved binary
+/// classes, over the first 10³ of plan 02's seeds. Each seed's centre is forecast by
+/// `centre_list_forecast` (its formed mass at `CLASS_SHARES`' rates, over P11.T8's acceptance
+/// floor), and the check asks that its candidates plus eight standard deviations and index 0 stay
+/// under the 13-bit index's 8,192.
+///
+/// The first 10³ seeds, as plan 02's costlier sweeps take: a centre's classes cost about a fifth
+/// of a second in the slow-test profile (10³ seeds in 206 s), so the 10⁴ would take over half an
+/// hour.
+///
+/// Printed: each failing seed (its cluster's mass, its candidates and those plus eight standard
+/// deviations), and the seeds run, how many fail at eight standard deviations and at the plan's
+/// five, how many expect 8,191 candidates or more outright, how many would still fail if the
+/// centre formed its primaries' mass alone (the forecast's formed mass counts companions, which
+/// the centre's members do not have), how many clusters sit at plan 02's cap, the least cluster
+/// that fails, and the worst seed.
+///
+/// **The check fails for many seeds.** Measured at `GENERATOR_VERSION` 23: 393 of the 10³ fail at
+/// eight standard deviations and 378 at five, 344 expect 8,191 candidates or more, 207 fail with
+/// the primaries' mass alone, and 41 clusters sit at the cap; the least failing cluster holds
+/// 2.603 × 10⁷ M☉, and the worst seed, `0x02005ee900000339`, a cluster at the cap of 6.4 × 10⁷ M☉,
+/// expects 18,321.3. P11.T8.e stops there and does not choose (plan 11's Risks, "The centre's
+/// feature-level index, as measured (P11.T8.e)"). The counts are pinned as regression bounds until
+/// the brainstorm's owner rules on the centre's index, as `interior::checks` keeps its measured
+/// bounds.
+#[test]
+#[ignore = "slow: the centre's classes of 10³ galaxies, about 3½ minutes in the slow-test profile"]
+fn the_centre_s_feature_level_list_over_a_thousand_seeds() {
+    const SEEDS: usize = 1_000;
+    let (mut n, mut failing, mut failing_at_five, mut clamping, mut capped) =
+        (0_u32, 0_u32, 0_u32, 0_u32, 0_u32);
+    let mut failing_alone = 0_u32;
+    let mut worst = (0_u64, 0.0_f64, 0.0_f64);
+    let mut least_failing = f64::INFINITY;
+    let mut share = None;
+    for (s, params) in (0_u64..).zip(sweep().take(SEEDS)) {
+        let seed = SWEEP_SEED | s;
+        // The mean formed mass is the mass function's alone, which every seed shares.
+        let share = *share.get_or_insert_with(|| primaries_share(&params));
+        let forecast = centre_list_forecast(&params).unwrap();
+        let cluster = params.nuclear_cluster().mass();
+        let candidates = forecast.candidates();
+        let alone = candidates * share;
+        failing_alone += u32::from(alone + 8.0 * alone.sqrt() + 1.0 >= 8_192.0);
+        if !forecast.fits() {
+            eprintln!(
+                "seed {seed:#018x}: cluster {:.4e} M_sun, {candidates:.1} candidates, +8 sigma \
+                 {:.1}",
+                cluster.value(),
+                candidates + 8.0 * candidates.sqrt()
+            );
+            least_failing = least_failing.min(cluster.value());
+        }
+        n += 1;
+        failing += u32::from(!forecast.fits());
+        failing_at_five += u32::from(forecast.margin(5.0) <= 0.0);
+        clamping += u32::from(candidates >= 8_191.0);
+        capped += u32::from(
+            cluster.value() >= NuclearClusterParams::mass_cap(params.mass_function()).value(),
+        );
+        if candidates > worst.2 {
+            worst = (seed, cluster.value(), candidates);
+        }
+    }
+    eprintln!(
+        "{n} seeds: {failing} fail at eight standard deviations, {failing_at_five} at five, \
+         {clamping} expect 8,191 candidates or more, {failing_alone} fail with the primaries' \
+         mass alone ({:.5} of it), {capped} clusters at the cap; the least failing cluster \
+         {least_failing:.4e} M_sun; the worst, seed {:#018x}, a cluster of {:.4e} M_sun, expects \
+         {:.1}",
+        share.unwrap_or(f64::NAN),
+        worst.0,
+        worst.1,
+        worst.2
+    );
+    // Regression bounds, measured at version 23, pinned until the owner rules (the doc above).
+    assert_eq!(n, 1_000);
+    assert!(
+        failing <= 393,
+        "{failing} fail at eight standard deviations"
+    );
+    assert!(failing_at_five <= 378, "{failing_at_five} fail at five");
+    assert!(
+        clamping <= 344,
+        "{clamping} expect 8,191 candidates or more"
+    );
+    assert!(
+        failing_alone <= 207,
+        "{failing_alone} fail with the primaries' mass alone"
+    );
+    assert!(
+        worst.2 <= 18_321.3 * (1.0 + 1e-4),
+        "the worst seed expects {}",
+        worst.2
     );
 }
