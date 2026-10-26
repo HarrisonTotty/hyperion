@@ -181,6 +181,15 @@ export interface MaterialIndexFile {
   readonly reduction: string;
   /** For a stand-in file, what stands in and why. */
   readonly standIn: string | undefined;
+  /**
+   * For a file whose colour rests on no measurement of the material though its index does, a
+   * statement of what its absorption is (the file's optional `absorptionStandIn`; `signoff-12.md`,
+   * item 38(c)): liquid O₂'s, its gas's O₂–O₂ pair absorption carried to the liquid. Player text,
+   * which the stand-in label's reasons read under the same optical-depth rule
+   * ({@link materialApproximations}), and which leaves the file's `provenance` as it is: the fit
+   * (`hyperion-fit`'s `materials.rs`) reads none of it.
+   */
+  readonly absorptionStandIn: string | undefined;
   /** For a derived file, its parameterisation. */
   readonly fit: DerivedFit | undefined;
   /**
@@ -378,6 +387,11 @@ export function parseMaterialFile(raw: unknown, file: string): MaterialIndexFile
     throw new Error(`${file}: n must be > 0 and k ≥ 0`);
   }
   const standIn = optionalText(raw, "standIn", file);
+  // Optional in the files, unlike `standIn`: only a file with a statement carries the field.
+  const absorptionStandIn =
+    raw["absorptionStandIn"] === undefined
+      ? undefined
+      : optionalText(raw, "absorptionStandIn", file);
   const fit = fitOf(raw["fit"], file);
   if ((provenance === "standIn") !== (standIn !== undefined)) {
     throw new Error(`${file}: a stand-in file, and only one, states its stand-in`);
@@ -398,6 +412,7 @@ export function parseMaterialFile(raw: unknown, file: string): MaterialIndexFile
     licence: text(raw, "licence", file),
     reduction: text(raw, "reduction", file),
     standIn,
+    absorptionStandIn,
     fit,
     wavelengthsNm: grid,
     n,
@@ -530,6 +545,66 @@ export interface ResolvedMaterial {
 }
 
 /**
+ * The volatile ices, whose solid planetary science names an ice (`CO2 ice`, `SO2 ice`): every key
+ * of `nonSpherical.ts`'s `ICE_KEYS` (held to contain it by `materials.test.ts`, kept apart here
+ * since `nonSpherical.ts` imports this module), and the volatiles whose files are liquids alone,
+ * SO₂, N₂O, C₂H₆, Kr and Xe (`signoff-12.md`, item 39(c)).
+ *
+ * @remarks
+ * Closed set, for the composition audit: a volatile the registry adds a file of belongs here. Its
+ * atomic solids ({@link ATOMIC_SOLID_KEYS}) take `solid`, as the guide's Voice and nomenclature
+ * has "ice" name a molecular solid.
+ */
+export const VOLATILE_ICE_KEYS: ReadonlySet<string> = new Set([
+  "H2O",
+  "NH3",
+  "CH4",
+  "CO2",
+  "NH4SH",
+  "H2S",
+  "N2",
+  "CO",
+  "O2",
+  "Ar",
+  "SO2",
+  "N2O",
+  "C2H6",
+  "Kr",
+  "Xe",
+]);
+
+/**
+ * The volatile ices that are atomic solids, whose solid a note names `solid Ar`, not `Ar ice`
+ * (`nonSpherical.ts`'s phase notes; the guide, Voice and nomenclature).
+ */
+export const ATOMIC_SOLID_KEYS: ReadonlySet<string> = new Set(["Ar", "Kr", "Xe"]);
+
+/**
+ * A material's name with its phase word, as a stand-in's note writes it (`signoff-12.md`, item
+ * 39(c)): `SO2 ice` for a volatile molecular solid, `solid Kr` for an atomic one and `solid Fe`
+ * for a refractory, `liquid SO2` for a liquid, and the name alone with no phase.
+ */
+function phasedName(material: string, phase: MaterialPhase | undefined): string {
+  const name = substanceName(material);
+  if (phase === undefined) {
+    return name;
+  }
+  let phased: string;
+  switch (phase) {
+    case "liquid":
+      phased = `liquid ${name}`;
+      break;
+    case "solid":
+      phased =
+        VOLATILE_ICE_KEYS.has(material) && !ATOMIC_SOLID_KEYS.has(material)
+          ? `${name} ice`
+          : `solid ${name}`;
+      break;
+  }
+  return phased;
+}
+
+/**
  * The file a material key and form are drawn with.
  *
  * @remarks
@@ -557,7 +632,7 @@ export function resolveMaterial(material: string, form?: MaterialForm): Resolved
       material,
       file: first,
       provenance: "standIn",
-      standIn: `no ${phase ?? ""} ${substanceName(material)} on file: ${first.name} stands in, a named analogue`,
+      standIn: `no ${phasedName(material, phase)} on file: ${first.name} stands in, a named analogue`,
     };
   }
   const variant = form?.variant;
@@ -654,6 +729,11 @@ export interface MaterialApproximation {
  * {@link CLOUD_DECK_SPLIT_OPTICAL_DEPTH} at 550 nm: the reasons R08.T10.a's `atmosphereApproximate`
  * collects (Design note 12). A deeper mode does not reach the picture, so it is not reported.
  *
+ * @remarks
+ * A file drawn whose colour rests on its gas's absorption (its
+ * {@link MaterialIndexFile.absorptionStandIn}, liquid O₂'s) gives a reason of its own under the same
+ * rule, its phase and name first (`signoff-12.md`, item 38(c)), whatever its provenance.
+ *
  * @throws RangeError for an optical depth that is not finite and ≥ 0.
  */
 export function materialApproximations(
@@ -665,9 +745,19 @@ export function materialApproximations(
     if (!(depth >= 0 && Number.isFinite(depth))) {
       throw new RangeError(`optical depth ${depth} above a mode must be finite and ≥ 0`);
     }
+    if (!(depth < CLOUD_DECK_SPLIT_OPTICAL_DEPTH)) {
+      continue;
+    }
     const resolved = resolveMaterial(layer.material, layer.form);
-    if (resolved.provenance === "standIn" && depth < CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
+    if (resolved.provenance === "standIn") {
       out.push({ material: layer.material, reason: resolved.standIn ?? "a stand-in" });
+    }
+    const drawn = resolved.file;
+    if (drawn?.absorptionStandIn !== undefined) {
+      out.push({
+        material: layer.material,
+        reason: `${phasedName(drawn.key, drawn.phase)}: ${drawn.absorptionStandIn}`,
+      });
     }
   }
   return out;

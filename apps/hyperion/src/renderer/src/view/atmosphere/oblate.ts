@@ -64,7 +64,19 @@
 import type { FigureLawDto } from "@hyperion/protocol";
 
 import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../lib/system/constants";
-import type { SpheroidFigure } from "./hillaire";
+
+/**
+ * The datum spheroid a body's gravity is found on: `hillaire.ts`'s `SpheroidFigure`, written here
+ * rather than imported so that this module's import graph stays free of the engine, as the optics
+ * worker's program (`tsconfig.worker.json`, no DOM) needs it (plan R08, R08.T10.a). The two are
+ * held equal, each assignable to the other, by `oblate.test.ts`.
+ */
+export interface SpheroidFigure {
+  /** a, m. */
+  readonly equatorialRadiusM: number;
+  /** c, m, at most a. */
+  readonly polarRadiusM: number;
+}
 
 /**
  * A body's level spheroid: the ellipsoid of revolution (a, a, c) about its spin axis that is a

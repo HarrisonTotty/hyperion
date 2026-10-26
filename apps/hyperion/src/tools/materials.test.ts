@@ -1961,6 +1961,7 @@ describe("R08.T5.k's liquids (decision-p14-t49h-gas-index)", () => {
       "licence",
       "reduction",
       "standIn",
+      "absorptionStandIn",
       "fit",
     ] as const;
     const read = (field: (typeof fields)[number]): unknown =>

@@ -26,7 +26,10 @@
  *    for a gas this client does not measure, or differs from its `rayleighCrossSectionM2` at
  *    550 nm by more than 10⁻³ of it, or is null for a gas it measures (decision-bump-plan-after-22,
  *    "p14-gate-24's questions" Q1). The sim reduces each from `rayleigh.ts`'s formula, reference
- *    state and King factor, so the bound covers the constant's printed digits alone.
+ *    state and King factor, so the bound covers the constant's printed digits alone;
+ * 7. `registryFlags.ts`' table, which the optics worker reads at run time (R08.T10.a,
+ *    `decision-r08-t10a-leans.md` item 7), lacks a row, holds one the fixture does not, or differs
+ *    from a row's `absorber` or `rayleigh` flag.
  *
  * R08.T19's fifth row, the client's τ(550) against the record's within 1%, is held
  * (decision-bump-plan-after-22): see its tripwire below.
@@ -51,6 +54,7 @@ import {
   rayleighCrossSectionM2,
   rayleighOf,
 } from "./rayleigh";
+import { REGISTRY_OPTICS_FLAGS } from "./registryFlags";
 
 /**
  * A fixture row as this check reads it: its key, its molar mass, its three optics flags and its
@@ -133,6 +137,23 @@ describe("the registry's absorbers", () => {
   it("each have cross-sections, a line table, a pending entry with its cell means, or a stated none", () => {
     const keys = flagged("absorber");
     expect([keys.length > 0, unanswered(keys)]).toEqual([true, []]);
+  });
+});
+
+describe("the client's table of the registry's optics flags (R08.T10.a)", () => {
+  it("holds every row of the fixture, in its order, with its absorber and rayleigh flags", () => {
+    expect([...REGISTRY_OPTICS_FLAGS]).toEqual(
+      ROWS.map((row) => [row.key, { absorber: row.absorber, rayleigh: row.rayleigh }]),
+    );
+  });
+
+  it("holds 115 rows at registry version 23, 54 of them absorbers and 43 Rayleigh scatterers", () => {
+    const flags = [...REGISTRY_OPTICS_FLAGS.values()];
+    expect([
+      flags.length,
+      flags.filter((f) => f.absorber).length,
+      flags.filter((f) => f.rayleigh).length,
+    ]).toEqual([115, 54, 43]);
   });
 });
 

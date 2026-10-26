@@ -1,11 +1,12 @@
 /**
- * What a photorealistic view says about the atmospheres it draws (plan R08, Design note 12): seven
+ * What a photorealistic view says about the atmospheres it draws (plan R08, Design note 12): eight
  * statements for its label block, rows of the guide's nomenclature list
  * (`docs/frontend/ux-guidelines.md`; drafted by R08.T2, signed off 2026-10-09; the exosphere's
- * signed off 2026-10-10, `signoff-2.md` item 6).
+ * signed off 2026-10-10, `signoff-2.md` item 6; the silicate vapour's from decision-backlog-2 §2.5,
+ * signed off with P14.T43.e's console row, `signoff-12.md` item 27).
  *
  * @remarks
- * The four labels follow the guide's grammar for a withheld or unmodelled section, as
+ * The five labels follow the guide's grammar for a withheld or unmodelled section, as
  * `BODY PHOTOMETRY: NOT YET MODELLED` does. The three annunciations concern the view's own drawing
  * (the rendering brainstorm's "What the guide must gain", item 7), as `TERRAIN: STREAMING` and
  * `LIGHTING: PENDING` do: steady, in `--text`, on the label block's plate, neither a data state nor
@@ -25,12 +26,15 @@
  *   the `surface` level although it is `not_applicable`; or, once P14.T35.e puts it on the wire, a
  *   gas envelope's `envelope` section. No atmosphere is drawn, since any atmosphere drawn in its
  *   place would be invented.
- * - `atmosphereNotYetModelled`: the surface section is `not_modelled`, every generated body's until
- *   P14.T24.a's figures are on the wire (R08.T1's P14.T35.e); or the body's atmosphere is a gas
- *   envelope (a gas or ice giant, whose surface section is `not_applicable`, or a sub-Neptune) and
- *   its envelope (P14.T24.d) is absent from the wire, which reads `not_modelled` as every absent
- *   section does (`lib/system/bodiesWire.ts`); or a kept scene leaves the body's atmosphere unset.
- *   No atmosphere is drawn (decision-r08-giant-label).
+ * - `atmosphereNotYetModelled`: the surface section is `not_modelled`, as an older server's is,
+ *   or a stand-in spin's (P14.T35.e put P14.T24.a's figures on the wire); or the body's atmosphere
+ *   is a gas envelope (a gas or ice giant, whose surface section is `not_applicable`, or a
+ *   sub-Neptune) and its envelope (P14.T24.d) is absent from the wire, which reads `not_modelled`
+ *   as every absent section does (`lib/system/bodiesWire.ts`), or is computed and not yet drawn by
+ *   this console, until R08.T16.a draws an envelope (`decision-r08-t10a-leans.md`, item 5); or a
+ *   kept scene leaves the body's atmosphere unset. No atmosphere is drawn
+ *   (decision-r08-giant-label). It clears when the generator computes the body's atmosphere and
+ *   the console draws it, or the scene sets one.
  * - `aerosolsNotYetModelled`: plan 14 publishes no aerosol or absorber inventory, so the air is
  *   drawn with its gases' scattering alone. Its statement names the absorbers too: ozone and
  *   methane, like the aerosols, are drawn only from the inventory.
@@ -40,6 +44,13 @@
  *   too faint to see, but its resonance light, a Mercury-class body's sodium above its limb, is
  *   not drawn either. The note is never read as "none", and a kept scene's body set airless
  *   carries none (`signoff-2.md` item 6).
+ * - `silicateVapourNotYetModelled`: a generated body's surface holds melt (its state
+ *   `magma_ocean`, or a crust whose `melt_area_fraction` is above 0) and its `silicate_vapour`
+ *   member is absent (P14.T35.f; every server until P14.T55.b): the melt's own vapour, chiefly Na,
+ *   O₂, O and SiO over a melt with no volatiles (Schaefer and Fegley 2009), is not drawn, nor its
+ *   sodium's resonance light. Any air the surface section computes is drawn as computed beside it.
+ *   It stands on its own line, beside `exosphereNotYetModelled` where an airless body holds a pool
+ *   of melt (decision-backlog-2 §2.5; `signoff-12.md` item 27).
  * - `atmospherePending`: the body's surface or envelope section has been asked of the server
  *   (`body_detail`) and its reply is not yet drawn. No atmosphere is drawn meanwhile, and the note
  *   clears by itself (decision-r08-giant-label).
@@ -66,13 +77,15 @@
  * is drawn; at most one of `atmosphereComputing` and `atmosphereApproximate`, the first while a
  * gated bake runs (decision-r08-giant-label; the guide's rows); and for a generated airless body
  * `exosphereNotYetModelled` alone (a kept scene's, none), never beside the other two
- * `NOT YET MODELLED` notes for the same body (`signoff-2.md` item 6).
+ * `NOT YET MODELLED` notes for the same body (`signoff-2.md` item 6), but for
+ * `silicateVapourNotYetModelled` where it holds a pool of melt.
  */
 export type AtmosphereLabel =
   | "atmosphereNotResolved"
   | "atmosphereNotYetModelled"
   | "aerosolsNotYetModelled"
   | "exosphereNotYetModelled"
+  | "silicateVapourNotYetModelled"
   | "atmospherePending"
   | "atmosphereComputing"
   | "atmosphereApproximate";
@@ -83,13 +96,14 @@ export const ATMOSPHERE_STATEMENTS: Readonly<Record<AtmosphereLabel, string>> = 
   atmosphereNotYetModelled: "ATMOSPHERE: NOT YET MODELLED",
   aerosolsNotYetModelled: "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
   exosphereNotYetModelled: "EXOSPHERE: NOT YET MODELLED",
+  silicateVapourNotYetModelled: "SILICATE VAPOUR: NOT YET MODELLED",
   atmospherePending: "ATMOSPHERE: PENDING",
   atmosphereComputing: "ATMOSPHERE: COMPUTING",
   atmosphereApproximate: "ATMOSPHERE: APPROXIMATE",
 };
 
 /**
- * Every label, in the order the seven stand among themselves on the label block: the three
+ * Every label, in the order the eight stand among themselves on the label block: the four
  * `NOT YET MODELLED` notes, then `ATMOSPHERE: NOT RESOLVED` after them as the guide's "Data states"
  * places a `NOT RESOLVED` note, then the three annunciations (decision-r08-giant-label;
  * `signoff-2.md`, "Client strings").
@@ -103,11 +117,77 @@ export const ATMOSPHERE_LABELS: ReadonlyArray<AtmosphereLabel> = [
   "atmosphereNotYetModelled",
   "aerosolsNotYetModelled",
   "exosphereNotYetModelled",
+  "silicateVapourNotYetModelled",
   "atmosphereNotResolved",
   "atmospherePending",
   "atmosphereComputing",
   "atmosphereApproximate",
 ];
+
+/**
+ * The fault a body's atmosphere raises when the console fails to compute it
+ * (`decision-r08-t10a-leans.md`, item 6; the guide's `ATMOSPHERE NOT AVAILABLE` row, ruled under
+ * the owner's delegation as the terrain's was).
+ *
+ * @remarks
+ * A fault, not a ninth {@link AtmosphereLabel}: the body draws no atmosphere and carries none of
+ * the labels, and R08.T10.b sets this on the label block's fault line in `--status-caution`, after
+ * any graphics fault and the terrain's (`view/terrain/annunciation.ts`'s `TERRAIN_NOT_AVAILABLE`),
+ * never among the steady statements and never debounced. It is raised by a throw from the medium's
+ * assembly or the tables' factory other than the engine's loss, which is the graphics fault's. It
+ * clears when the body's atmosphere is computed anew: at the body's next trigger, or when `VIEW` is
+ * shown again and the cache forgets its failures.
+ */
+export const ATMOSPHERE_NOT_AVAILABLE =
+  "ATMOSPHERE NOT AVAILABLE: computation failed, reopen VIEW to retry";
+
+/**
+ * What the operator can do about a body's refused or unreadable record, which asks it afresh
+ * (`decision-r08-t10a-leans.md`, follow-up to item 6).
+ */
+const ATMOSPHERE_RETRY_REMEDY = "reopen VIEW to retry";
+
+/**
+ * The check an answer of another kind than the request's fails (`protocol_violation`), in
+ * {@link atmosphereDataInvalid}'s place for `toBodyDetail`'s fault (`decision-r08-t10a-leans.md`,
+ * follow-up to item 6).
+ */
+export const ATMOSPHERE_ANSWER_UNREADABLE = "answer unreadable";
+
+/**
+ * The note a body carries when the server refuses its `body_detail`, in place of its atmosphere's
+ * notes: `ATMOSPHERE REJECTED: <the server's reason>, reopen VIEW to retry`
+ * (`decision-r08-t10a-leans.md`, follow-up to item 6; the guide's `ATMOSPHERE REJECTED` row).
+ *
+ * @remarks
+ * Steady, on the label block's plate after `ATMOSPHERE: NOT RESOLVED` and before the
+ * annunciations, in `--text` for a refusal of what was asked (`lib/refusal.ts`'s `isRefusal`) and
+ * in `--status-caution` for the server's own failure; R08.T10.b places and colours it. A server
+ * too busy to answer refuses nothing, and raises none. As the survey line's
+ * `SURVEY COVERAGE REJECTED` does, a reason of white space alone leaves the remedy alone.
+ *
+ * @param reason - The server's own reason, as its error's message carries it.
+ */
+export function atmosphereRejected(reason: string): string {
+  const said = reason.trim();
+  return `ATMOSPHERE REJECTED: ${said.length > 0 ? `${said}, ` : ""}${ATMOSPHERE_RETRY_REMEDY}`;
+}
+
+/**
+ * The fault a body raises when the console cannot take its `body_detail`'s answer:
+ * `ATMOSPHERE DATA INVALID: <the check that failed>, reopen VIEW to retry`
+ * (`decision-r08-t10a-leans.md`, follow-up to item 6; the guide's `DATA INVALID` row).
+ *
+ * @remarks
+ * On the label block's fault line in `--status-caution`, after {@link ATMOSPHERE_NOT_AVAILABLE};
+ * R08.T10.b places it. No atmosphere is drawn for the body, which is never read as airless.
+ *
+ * @param check - `toBodyDetail`'s fault string, or {@link ATMOSPHERE_ANSWER_UNREADABLE} for an
+ *   answer of another kind.
+ */
+export function atmosphereDataInvalid(check: string): string {
+  return `ATMOSPHERE DATA INVALID: ${check}, ${ATMOSPHERE_RETRY_REMEDY}`;
+}
 
 /**
  * The statements of the labels the view's bodies carry, each once, in {@link ATMOSPHERE_LABELS}'

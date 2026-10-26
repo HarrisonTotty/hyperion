@@ -124,6 +124,13 @@ export interface MaterialHeader {
   readonly reduction: string;
   /** For a stand-in, what stands in and why; otherwise null. */
   readonly standIn: string | null;
+  /**
+   * For a file whose colour rests on no measurement of the material though its index does, what its
+   * absorption is, as player text (`signoff-12.md`, item 38(c)); absent for every other file. The
+   * client's stand-in reasons read it (`materials.ts`'s `materialApproximations`), and the fit
+   * reads none of it, so the file's provenance stays as it is.
+   */
+  readonly absorptionStandIn?: string;
   /** For a derived file, the parameterisation its values are computed from; otherwise null. */
   readonly fit: DerivedFit | null;
 }
@@ -5228,6 +5235,9 @@ const LIQUID_TABLE_MATERIALS: ReadonlyArray<CombinedSpec> = [
         `${liquidOxygenKText()}.`,
       ),
       standIn: null,
+      // Ruled 2026-10-19 (signoff-12.md, item 38(c)): its colour rests on no measurement of the
+      // liquid, so it raises the stand-in label where it shows, its provenance staying derived.
+      absorptionStandIn: `its absorption is the gas's O2–O2 pair absorption at ${OXYGEN_PAIR_COLDEST_K} K carried to the liquid's density; no measurement of the liquid's is read`,
       fit: {
         form: "scaledMolarRefraction",
         molarDensityMolPerL: O2_LIQUID_DENSITY.molPerL,

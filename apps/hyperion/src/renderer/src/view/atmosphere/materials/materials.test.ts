@@ -4,12 +4,15 @@ import registry from "../../../../../../../../packages/protocol/fixtures/substan
 import { substanceName, UNLISTED_MATERIAL } from "../../../lib/substances";
 import { aerosolModeOptics } from "../aerosol";
 import { mieSphere } from "../mie";
+import { ICE_KEYS } from "../nonSpherical";
 import { type Dispersion, ESTIMATED_RAYLEIGH, GAS_DISPERSION, GASES } from "../rayleigh";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "../thick/regime";
 import {
+  ATOMIC_SOLID_KEYS,
   GENERIC_STAND_IN_INDEX,
   MATERIAL_FILES,
   MATERIAL_WAVELENGTHS_NM,
+  type MaterialForm,
   materialApproximations,
   materialLabels,
   parseMaterialFile,
@@ -17,6 +20,7 @@ import {
   resolveMaterial,
   type ScaledMolarRefractionFit,
   variantWords,
+  VOLATILE_ICE_KEYS,
 } from "./materials";
 import waterFile from "./water.json" with { type: "json" };
 
@@ -797,6 +801,66 @@ describe("the stand-in label", () => {
   });
 });
 
+describe("liquid O₂'s colour (signoff-12.md, item 38(c))", () => {
+  const LIQUID: MaterialForm = { phase: "liquid" };
+
+  it("gives its own reason where it shows: its gas's pair absorption, no measurement of the liquid's", () => {
+    expect(
+      materialApproximations([{ material: "O2", form: LIQUID, opticalDepthAbove550: 1 }]),
+    ).toEqual([
+      {
+        material: "O2",
+        reason:
+          "liquid O2: its absorption is the gas's O2–O2 pair absorption at 203 K carried to the liquid's density; no measurement of the liquid's is read",
+      },
+    ]);
+  });
+
+  it("keeps its file derived, as ruled", () => {
+    expect(resolveMaterial("O2", LIQUID).provenance).toBe("derived");
+  });
+
+  it("gives no reason beneath a deck at the split's depth", () => {
+    expect(
+      materialApproximations([
+        { material: "O2", form: LIQUID, opticalDepthAbove550: CLOUD_DECK_SPLIT_OPTICAL_DEPTH },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("is liquid O₂'s alone: liquid N₂ gives no reason", () => {
+    expect(
+      materialApproximations([{ material: "N2", form: LIQUID, opticalDepthAbove550: 1 }]),
+    ).toEqual([]);
+  });
+});
+
+describe("a named analogue's phase word (signoff-12.md, item 39(c))", () => {
+  const SOLID: MaterialForm = { phase: "solid" };
+
+  it("calls a volatile molecular solid an ice: no SO2 ice on file", () => {
+    expect(resolveMaterial("SO2", SOLID).standIn).toBe(
+      "no SO2 ice on file: liquid SO2 at 198 K stands in, a named analogue",
+    );
+  });
+
+  it("calls an atomic volatile's solid a solid, not an ice: no solid Kr on file", () => {
+    expect(resolveMaterial("Kr", SOLID).standIn).toMatch(/^no solid Kr on file: /u);
+  });
+
+  it("calls a refractory's solid a solid: no solid H2SO4 on file", () => {
+    expect(resolveMaterial("H2SO4", SOLID).standIn).toMatch(/^no solid H2SO4 on file: /u);
+  });
+
+  it("knows every ice nonSpherical.ts draws on water ice's table as a volatile ice", () => {
+    expect([...ICE_KEYS].filter((key) => !VOLATILE_ICE_KEYS.has(key))).toEqual([]);
+  });
+
+  it("names Ar, an ice of that table, an atomic solid, as nonSpherical.ts's phase notes do", () => {
+    expect(ATOMIC_SOLID_KEYS.has("Ar")).toBe(true);
+  });
+});
+
 describe("the registry's aerosol materials (R08.T5.d)", () => {
   // That every aerosol-material row has a file of its own, and every file's key is a row, is
   // R08.T19's parity check (`../parity.test.ts`).
@@ -1437,14 +1501,15 @@ describe("the liquids from their gases and their measurements (R08.T5.k)", () =>
     expect(oxygen.reduction).toContain("k = 0 from 655 nm");
   });
 
-  it("draw a deck of each of the seven measured or derived liquids at τ 0 with no label", () => {
+  it("draw a deck of each of the seven measured or derived liquids at τ 0 with no label but liquid O2's", () => {
+    // Liquid O2's colour raises its own reason, its file staying derived (signoff-12.md, 38(c)).
     const decks = T5K_LIQUIDS.filter(([, provenance]) => provenance !== "standIn").map(([key]) => ({
       material: key,
       form: { phase: "liquid" as const },
       opticalDepthAbove550: 0,
     }));
     expect(decks).toHaveLength(7);
-    expect(materialLabels(decks)).toEqual([]);
+    expect(materialApproximations(decks).map(({ material }) => material)).toEqual(["O2"]);
   });
 
   it.each(["CO", "H2S"])(

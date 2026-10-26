@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { EARTH_MASS_KG } from "../../lib/system/bodiesWire";
 import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../lib/system/constants";
@@ -22,6 +22,7 @@ import {
   ONE_SLICE_BELOW,
   principalRadiiM,
   referenceGravity,
+  type SpheroidFigure as OblateSpheroidFigure,
 } from "./oblate";
 
 const DEG = Math.PI / 180;
@@ -1007,5 +1008,11 @@ describe("bandLatitudeRad (R08.T6.e)", () => {
     expect(bandLatitudeRad(gravity, 0.5)).toBeLessThan(1e-12);
     expect(Math.abs(bandLatitudeRad(gravity, 2) - Math.PI / 2)).toBeLessThan(1e-12);
     expect(bandLatitudeRad(bodyGravity(NO_ROTATION_INPUT, tableRadiusM(STILL_SPHERE)), 1)).toBe(0);
+  });
+});
+
+describe("the figure oblate.ts writes for itself (R08.T10.a)", () => {
+  it("is hillaire.ts's SpheroidFigure, each assignable to the other", () => {
+    expectTypeOf<OblateSpheroidFigure>().toEqualTypeOf<SpheroidFigure>();
   });
 });
