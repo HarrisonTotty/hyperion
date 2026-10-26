@@ -20,12 +20,27 @@
 //! Spitzer's 0.138 (a relaxation time, not a free constant) and `k` at 2.5 (ruling 126.4), and fits
 //! β and ψ₁ by Nelder and Mead on the squared error of `log₁₀(1 + N)`.
 //!
-//! Acceptance (the plan): rms error in `log₁₀` of the count under 0.3 dex over the models that
-//! retain any; at least 85% of models predicted empty are empty; and on the Baumgardt–Hilker
-//! catalogue at 12 Gyr (plan 09's `testing::catalogue_parameters`) none in dynamically old
-//! clusters, tens to a few hundred in a typical massive one, thousands in ω Centauri and 15–25%
-//! of the catalogue beyond the core-collapse line of 14 relaxation times with none (Trager et al.
-//! 1995).
+//! Revision 1 (P15.T8.d; decision-p15-t8-blocks) emits the adopted constants, [`SCRATCH`], as
+//! production, whatever the fit finds: the fit's optimum is degenerate (ψ₁ unbounded, a pure
+//! exponential), and no (β, ψ₁) follows the CMC models to 0.3 dex, because the closed form holds
+//! mass and radius constant.
+//!
+//! Gates, at the adopted constants (the block is `@generated` when all pass, else `@provisional`
+//! by P15.T8.a): on the Baumgardt–Hilker catalogue at 12 Gyr (plan 09's
+//! `testing::catalogue_parameters`), read through the sim's own `ClusterModel` as plan 09's checks
+//! read it, none in a cluster past the core-collapse line of 14 relaxation times (the most under
+//! one), 20–400 in 47 Tucanae, 3,000–20,000 in ω Centauri (ruling 126.4's reading of
+//! "thousands"), 10⁴–10⁵ over the catalogue, and 15–25% of the catalogue past the line with none
+//! (Trager et al. 1995).
+//!
+//! Reported, not gated: the CMC fit's rms error in `log₁₀(1 + N)` over the models that retain any
+//! (the plan's 0.3 dex) and the share of the models predicted empty that are empty (the plan's
+//! 85%), each at the adopted constants and at the best fit; the best fit's ψ₁ and β ψ₁; and the
+//! median over 3 × 10⁵ M☉ at the adopted constants, against the plan's "tens to a few hundred in a
+//! typical massive one", for which the 47 Tucanae gate stands.
+//!
+//! The fit's records (`CmcModel`, `ClusterBhFit`, `CatalogueFigures`) are plain data with public
+//! fields: the task's acceptance line and tests read them field by field.
 
 use std::num::NonZeroUsize;
 
@@ -36,13 +51,15 @@ use hyperion_sim::galaxy::features::cluster::{
     ClusterModel, ClusterParameters, MEAN_BLACK_HOLE_MASS,
 };
 use hyperion_sim::galaxy::features::testing::{
-    OMEGA_CEN, catalogue_parameters, milky_way_globulars,
+    OMEGA_CEN, TUC_47, catalogue_parameters, milky_way_globulars,
 };
 use hyperion_sim::galaxy::imf::{Kroupa, MassFunction};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::{Galaxy, PointLy, Population};
 use hyperion_sim::math;
-use hyperion_sim::tables::cluster_dynamics::BH_RELAXATION_PREFACTOR;
+use hyperion_sim::tables::cluster_dynamics::{
+    BH_CLOCK_FACTOR, BH_LOSS_BETA, BH_LOSS_PSI_SLOPE, BH_RELAXATION_PREFACTOR,
+};
 use hyperion_sim::units::{Dex, LightYears, SolarMasses, Years};
 
 use crate::emit::{RustTable, TableItem};
@@ -50,14 +67,35 @@ use crate::manifest::{Manifest, SimFingerprint};
 use crate::optimise::nelder_mead;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-/// The task's revision.
-pub const VERSION: u32 = 0;
+/// The task's revision: 1 adopts [`SCRATCH`] as production (P15.T8.d).
+pub const VERSION: u32 = 1;
 
 /// The dataset's name.
 pub const DATASET: &str = "cmc";
 
-/// Plan 09's scratch values, which the table keeps while the fit misses its acceptance.
+/// The adopted constants (β, ψ₁, k, c), production by decision-p15-t8-blocks: Antonini and
+/// Gieles's (2020, MNRAS 492, 2936) β = 2.80 × 10⁻³ (their eq. 14, `Ṁ_BH = −β M_cl ÷ t_rh`) and
+/// a₁ = 1.47 (eq. 12, `ψ = 1 + a₁ f_BH ÷ 0.01`), so ψ₁ = a₁ ÷ 0.01 = 147, their §2.4 fit to eight
+/// isolated N-body clusters of 10⁵ stars at Z = 0.0006, extrapolated here to the Milky Way's
+/// globulars; Spitzer's 0.138 of their eq. 10 (§2.3.2, ln Λ = 10); and ruling 126.4's k 2.5.
 pub const SCRATCH: [f64; 4] = [2.8e-3, 147.0, 2.5, 0.138];
+
+/// The compiled table's constants (β, ψ₁, k, c), which `ClusterModel` reads.
+const COMPILED: [f64; 4] = [
+    BH_LOSS_BETA,
+    BH_LOSS_PSI_SLOPE,
+    BH_CLOCK_FACTOR,
+    BH_RELAXATION_PREFACTOR,
+];
+
+/// Whether `table` holds the adopted constants, [`SCRATCH`], bit for bit.
+#[must_use]
+fn holds_adopted(table: &[f64; 4]) -> bool {
+    table
+        .iter()
+        .zip(&SCRATCH)
+        .all(|(value, adopted)| value.total_cmp(adopted).is_eq())
+}
 
 /// The models' age at the end of their runs, years (Kremer et al. 2020, §2).
 pub const CMC_AGE: f64 = 14e9;
@@ -155,13 +193,6 @@ impl LawInput {
         let f = (((1.0 + psi * self.f0) * math::exp(-beta * psi * x) - 1.0) / psi).max(0.0);
         f * self.mass / MEAN_BLACK_HOLE_MASS
     }
-
-    /// Whether the cluster is past the core-collapse line with none left, under the law.
-    #[must_use]
-    pub fn core_collapsed(&self, beta: f64, psi: f64, k: f64, c: f64) -> bool {
-        self.black_holes(beta, psi, k, c) <= 0.0
-            && self.clock * 0.138 / c > CORE_COLLAPSE_RELAXATION_TIMES
-    }
 }
 
 /// The mean mass, M☉, of Kroupa's (2001) function over 0.08–150 M☉.
@@ -216,52 +247,94 @@ pub fn cmc_cluster(galaxy: &Galaxy, model: &CmcModel, mean_birth_mass: f64) -> C
     ClusterModel::new(galaxy, &parameters)
 }
 
-/// The fit's figures.
+/// The CMC fit's figures, reported in the acceptance line and gated on none of them (revision 1).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClusterBhFit {
-    /// β, ψ₁, k, c.
+    /// The best fit's β, ψ₁, k, c.
     pub constants: [f64; 4],
-    /// The rms error in `log₁₀` of the count over the models that retain any, dex.
+    /// The rms error in `log₁₀(1 + N)` over the models that retain any at the best fit, dex.
     pub rms_dex: f64,
-    /// The same at the scratch constants.
-    pub rms_dex_scratch: f64,
-    /// Models predicted empty (under one black hole), and how many of them are.
+    /// The same at the adopted constants, [`SCRATCH`].
+    pub rms_dex_adopted: f64,
+    /// At the best fit: the models predicted empty (under one black hole), and how many of them
+    /// are.
     pub predicted_empty: (usize, usize),
+    /// The same at the adopted constants.
+    pub predicted_empty_adopted: (usize, usize),
     /// Models that retain any.
     pub retaining: usize,
-    /// On the Baumgardt–Hilker catalogue at 12 Gyr: the most in a cluster past 14 `t★`, the
-    /// median in clusters over 3 × 10⁵ M☉ not past it, ω Centauri's count, and the share past
-    /// the core-collapse line with none.
-    pub catalogue: CatalogueFigures,
 }
 
-/// The fit's figures on the Baumgardt–Hilker catalogue.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// The Baumgardt–Hilker catalogue's black holes at 12 Gyr ([`catalogue_parameters`]), read
+/// through the sim's own [`ClusterModel`], as plan 09's checks read them.
+///
+/// `ClusterModel` reads the compiled table, which holds [`SCRATCH`] bit for bit (the tests pin
+/// both, and the task's `run` checks it), so these are the adopted constants' figures, the
+/// revision's gates.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CatalogueFigures {
-    /// The most black holes in a cluster past 14 `t★`.
+    /// The most black holes in a cluster past the core-collapse line, older than
+    /// [`CORE_COLLAPSE_RELAXATION_TIMES`] relaxation times.
     pub most_in_old: f64,
-    /// The median in clusters over 3 × 10⁵ M☉ that are not.
-    pub median_massive: f64,
+    /// 47 Tucanae's black holes.
+    pub tuc_47: f64,
     /// ω Centauri's.
     pub omega_cen: f64,
-    /// The share past the core-collapse line with none.
+    /// The black holes over the catalogue.
+    pub total: f64,
+    /// The share of the catalogue core-collapsed: past the line with none
+    /// ([`ClusterModel::is_core_collapsed`]).
     pub collapsed_share: f64,
+    /// The median over the clusters above 3 × 10⁵ M☉ that are not past the line: reported, not
+    /// gated.
+    pub median_massive: f64,
 }
 
-impl ClusterBhFit {
-    /// Whether each check passes: the rms, the empty ones, none in old clusters, tens to a few
-    /// hundred in massive ones, thousands in ω Centauri, a fifth collapsed.
+impl CatalogueFigures {
+    /// The catalogue's figures in `galaxy`.
     #[must_use]
-    pub fn passed(&self) -> [bool; 6] {
-        let (predicted, empty) = self.predicted_empty;
-        let c = self.catalogue;
+    pub fn of(galaxy: &Galaxy) -> Self {
+        let mut massive = Vec::new();
+        let mut figures = Self::default();
+        let (mut collapsed, mut n) = (0_u32, 0_u32);
+        for g in milky_way_globulars() {
+            let model = ClusterModel::new(galaxy, &catalogue_parameters(g));
+            let count = model.black_hole_count();
+            // The line as `ClusterModel::is_core_collapsed` draws it.
+            let old = model.age().value()
+                > CORE_COLLAPSE_RELAXATION_TIMES * model.relaxation_time().value();
+            if old {
+                figures.most_in_old = figures.most_in_old.max(count);
+            } else if g.mass > 3e5 {
+                massive.push(count);
+            }
+            if g.name == TUC_47 {
+                figures.tuc_47 = count;
+            }
+            if g.name == OMEGA_CEN {
+                figures.omega_cen = count;
+            }
+            figures.total += count;
+            collapsed += u32::from(model.is_core_collapsed());
+            n += 1;
+        }
+        massive.sort_by(f64::total_cmp);
+        figures.median_massive = massive.get(massive.len() / 2).copied().unwrap_or(0.0);
+        figures.collapsed_share = f64::from(collapsed) / f64::from(n.max(1));
+        figures
+    }
+
+    /// Whether each gate passes (ruling 126.4's windows, P09.T9.c–d): none in a cluster past the
+    /// line (the most under one), 47 Tucanae 20–400, ω Centauri 3,000–20,000, 10⁴–10⁵ over the
+    /// catalogue, and 15–25% core-collapsed (Trager et al. 1995).
+    #[must_use]
+    pub fn passed(&self) -> [bool; 5] {
         [
-            self.rms_dex < 0.3,
-            predicted == 0 || usize_f64(empty) >= 0.85 * usize_f64(predicted),
-            c.most_in_old < 1.0,
-            (10.0..=500.0).contains(&c.median_massive),
-            (1_000.0..=10_000.0).contains(&c.omega_cen),
-            (0.15..=0.25).contains(&c.collapsed_share),
+            self.most_in_old < 1.0,
+            (20.0..=400.0).contains(&self.tuc_47),
+            (3_000.0..=20_000.0).contains(&self.omega_cen),
+            (1e4..=1e5).contains(&self.total),
+            (0.15..=0.25).contains(&self.collapsed_share),
         ]
     }
 }
@@ -288,34 +361,16 @@ fn rms_dex(inputs: &[(LawInput, f64)], beta: f64, psi: f64) -> f64 {
     (sum / usize_f64(n.max(1))).sqrt()
 }
 
-/// The catalogue figures at `beta` and `psi`.
-fn catalogue(galaxy: &Galaxy, beta: f64, psi: f64) -> CatalogueFigures {
-    let (k, c) = (SCRATCH[2], SCRATCH[3]);
-    let mut massive = Vec::new();
-    let (mut most_in_old, mut omega_cen, mut collapsed, mut n) = (0.0_f64, 0.0, 0_u32, 0_u32);
-    for g in milky_way_globulars() {
-        let model = ClusterModel::new(galaxy, &catalogue_parameters(g));
-        let input = LawInput::of(&model);
-        let count = input.black_holes(beta, psi, k, c);
-        let old = input.clock * 0.138 / c > CORE_COLLAPSE_RELAXATION_TIMES;
-        if old {
-            most_in_old = most_in_old.max(count);
-        } else if g.mass > 3e5 {
-            massive.push(count);
-        }
-        if g.name == OMEGA_CEN {
-            omega_cen = count;
-        }
-        collapsed += u32::from(input.core_collapsed(beta, psi, k, c));
-        n += 1;
-    }
-    massive.sort_by(f64::total_cmp);
-    CatalogueFigures {
-        most_in_old,
-        median_massive: massive.get(massive.len() / 2).copied().unwrap_or(0.0),
-        omega_cen,
-        collapsed_share: f64::from(collapsed) / f64::from(n.max(1)),
-    }
+/// The models predicted empty (under one black hole) at `beta` and `psi`, and how many of them
+/// are.
+#[must_use]
+fn predicted_empty(inputs: &[(LawInput, f64)], beta: f64, psi: f64) -> (usize, usize) {
+    inputs
+        .iter()
+        .filter(|(input, _)| input.black_holes(beta, psi, SCRATCH[2], SCRATCH[3]) < 1.0)
+        .fold((0, 0), |(predicted, empty), (_, observed)| {
+            (predicted + 1, empty + usize::from(*observed < 1.0))
+        })
 }
 
 /// Fits β and ψ₁ to `models` in `galaxy`.
@@ -340,26 +395,13 @@ pub fn fit(galaxy: &Galaxy, models: &[CmcModel]) -> ClusterBhFit {
         400,
     );
     let (beta, psi) = (math::exp(best[0]), math::exp(best[1]));
-    let predicted: Vec<(f64, f64)> = inputs
-        .iter()
-        .map(|(input, observed)| {
-            (
-                input.black_holes(beta, psi, SCRATCH[2], SCRATCH[3]),
-                *observed,
-            )
-        })
-        .collect();
-    let empty = predicted.iter().filter(|(p, _)| *p < 1.0);
     ClusterBhFit {
         constants: [beta, psi, SCRATCH[2], SCRATCH[3]],
         rms_dex: rms_dex(&inputs, beta, psi),
-        rms_dex_scratch: rms_dex(&inputs, SCRATCH[0], SCRATCH[1]),
-        predicted_empty: (
-            empty.clone().count(),
-            empty.filter(|(_, o)| *o < 1.0).count(),
-        ),
-        retaining: predicted.iter().filter(|(_, o)| *o > 0.0).count(),
-        catalogue: catalogue(galaxy, beta, psi),
+        rms_dex_adopted: rms_dex(&inputs, SCRATCH[0], SCRATCH[1]),
+        predicted_empty: predicted_empty(&inputs, beta, psi),
+        predicted_empty_adopted: predicted_empty(&inputs, SCRATCH[0], SCRATCH[1]),
+        retaining: inputs.iter().filter(|(_, o)| *o > 0.0).count(),
     }
 }
 
@@ -478,53 +520,64 @@ impl FitTask for ClusterBhTask {
         let galaxy = Galaxy::from_params(seed, GalaxyParams::milky_way_like())
             .map_err(|e| input_error(Box::new(e)))?;
         let fit = fit(&galaxy, &models);
-        let passed = fit.passed();
-        let all = passed.iter().all(|&ok| ok);
+        let catalogue = CatalogueFigures::of(&galaxy);
+        let passed = catalogue.passed();
+        // The gates read the compiled table through `ClusterModel`: they are the emitted
+        // constants' only while the table holds them, so a run after `SCRATCH` moves is
+        // provisional until the next run reads the table it wrote.
+        let read_at_adopted = holds_adopted(&COMPILED);
+        let all = passed.iter().all(|&ok| ok) && read_at_adopted;
         let verdict = |ok: bool| if ok { "passes" } else { "FAILS" };
-        let c = fit.catalogue;
-        let [beta, psi, k, prefactor] = fit.constants;
+        let [beta, psi, k, prefactor] = SCRATCH;
+        let [best_beta, best_psi, _, _] = fit.constants;
         let acceptance = format!(
-            "fitted β = {beta:.4e}, ψ₁ = {psi:.2} (β ψ₁ = {:.4}) at k = {k} and c = {prefactor} \
-             (β and c enter only as β ÷ c) over {} CMC models at 14 Gyr ({} of them dissolved to \
-             under 500 M☉ and left out), {} retaining any: rms \
-             {:.3} dex in log₁₀(1 + N) over those (under 0.3; {}; {:.3} at the scratch \
-             constants); {} of {} predicted empty are empty ({}); on the Baumgardt–Hilker \
-             catalogue at 12 Gyr, the most in a cluster past 14 t★ {:.2} ({}), the median over \
-             3 × 10⁵ M☉ {:.0} (tens to a few hundred; {}), ω Centauri {:.0} (thousands; {}), \
-             {:.3} past the core-collapse line with none (0.15–0.25; {}){}",
-            beta * psi,
+            "adopted β = {beta}, ψ₁ = {psi}, k = {k} and c = {prefactor} (Antonini and Gieles \
+             2020; ruling 126.4; decision-p15-t8-blocks); on the Baumgardt–Hilker catalogue at \
+             12 Gyr through the sim's ClusterModel, the most in a cluster past 14 t★ {:.2} (under \
+             1; {}), 47 Tucanae {:.0} (20–400; {}), ω Centauri {:.0} (3,000–20,000; {}), {:.0} \
+             over the catalogue (10⁴–10⁵; {}), {:.3} past the core-collapse line with none \
+             (0.15–0.25; {}). Reported: the median over 3 × 10⁵ M☉ {:.0} (tens to a few hundred); the CMC \
+             fit over {} models at 14 Gyr ({} of them dissolved to under 500 M☉ and left out), \
+             {} retaining any, rms {:.3} dex in log₁₀(1 + N) over those at the adopted constants \
+             and {:.3} at the best fit (under 0.3), {} of {} and {} of {} predicted empty are \
+             empty (at least 85%), the best fit's ψ₁ = {best_psi:.2e} and β ψ₁ = {:.4} (β and c \
+             enter only as β ÷ c){}",
+            catalogue.most_in_old,
+            verdict(passed[0]),
+            catalogue.tuc_47,
+            verdict(passed[1]),
+            catalogue.omega_cen,
+            verdict(passed[2]),
+            catalogue.total,
+            verdict(passed[3]),
+            catalogue.collapsed_share,
+            verdict(passed[4]),
+            catalogue.median_massive,
             models.len(),
             models.iter().filter(|m| m.mass <= 0.0).count(),
             fit.retaining,
+            fit.rms_dex_adopted,
             fit.rms_dex,
-            verdict(passed[0]),
-            fit.rms_dex_scratch,
+            fit.predicted_empty_adopted.1,
+            fit.predicted_empty_adopted.0,
             fit.predicted_empty.1,
             fit.predicted_empty.0,
-            verdict(passed[1]),
-            c.most_in_old,
-            verdict(passed[2]),
-            c.median_massive,
-            verdict(passed[3]),
-            c.omega_cen,
-            verdict(passed[4]),
-            c.collapsed_share,
-            verdict(passed[5]),
+            best_beta * best_psi,
             if all {
-                String::new()
+                ""
+            } else if read_at_adopted {
+                "; provisional until a ruling on the failed gates"
             } else {
-                format!(
-                    "; the table keeps plan 09's scratch β {}, ψ₁ {} until a ruling",
-                    SCRATCH[0], SCRATCH[1]
-                )
+                "; provisional: the gates read the compiled table, not the constants emitted, so \
+                 the task runs again"
             },
         );
-        let constants = if all { fit.constants } else { SCRATCH };
         Ok(TaskOutput {
-            table: render(constants),
-            source: "Kremer et al. (2020, ApJS 247, 48), Table A1; Breen and Heggie (2013, MNRAS \
-                     432, 2779); Antonini and Gieles (2020, MNRAS 492, 2936); Spitzer (1987); \
-                     Kroupa (2001); the Baumgardt–Hilker catalogue as plan 09's tests hold it"
+            table: render(SCRATCH),
+            source: "Antonini and Gieles (2020, MNRAS 492, 2936), §2.4's fit and §2.3.2's eqs. \
+                     10, 12 and 14, for the constants; Kremer et al. (2020, ApJS 247, 48), Table \
+                     A1; Breen and Heggie (2013, MNRAS 432, 2779); Spitzer (1987); Kroupa (2001); \
+                     the Baumgardt–Hilker catalogue as plan 09's tests hold it"
                 .to_owned(),
             acceptance,
             provisional: (!all).then_some("P15.T8.a"),
@@ -577,6 +630,59 @@ mod tests {
             ..input
         };
         assert!(kept.black_holes(SCRATCH[0], SCRATCH[1], 2.5, 0.138) > 0.0);
+    }
+
+    /// The gates count only while the compiled table holds the adopted constants: it does today,
+    /// and a moved constant would not.
+    #[test]
+    fn the_gates_are_the_adopted_constants_only_while_the_table_holds_them() {
+        assert!(holds_adopted(&COMPILED));
+        for k in 0..4 {
+            let mut moved = SCRATCH;
+            moved[k] *= 1.0 + f64::EPSILON;
+            assert!(!holds_adopted(&moved), "{moved:?}");
+        }
+    }
+
+    /// Each catalogue gate fails just outside its window and passes just inside it.
+    #[test]
+    fn each_catalogue_gate_fails_outside_its_window() {
+        let inside = CatalogueFigures {
+            most_in_old: 0.99,
+            tuc_47: 20.0,
+            omega_cen: 20_000.0,
+            total: 1e4,
+            collapsed_share: 0.25,
+            median_massive: 0.0,
+        };
+        assert_eq!(inside.passed(), [true; 5]);
+        let outside = [
+            CatalogueFigures {
+                most_in_old: 1.0,
+                ..inside
+            },
+            CatalogueFigures {
+                tuc_47: 401.0,
+                ..inside
+            },
+            CatalogueFigures {
+                omega_cen: 2_999.0,
+                ..inside
+            },
+            CatalogueFigures {
+                total: 1.01e5,
+                ..inside
+            },
+            CatalogueFigures {
+                collapsed_share: 0.149,
+                ..inside
+            },
+        ];
+        for (k, figures) in outside.iter().enumerate() {
+            let mut expected = [true; 5];
+            expected[k] = false;
+            assert_eq!(figures.passed(), expected, "{figures:?}");
+        }
     }
 
     #[test]

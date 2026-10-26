@@ -1650,6 +1650,26 @@ count at 47 Tucanae's Γ), whatever plan 09 has called them.
   none; the task records the one it uses). Poisson regression of count on Γ with a completeness term
   in distance. **Acceptance:** exponent within 0.5–0.9; about 40 (30–50) at 47 Tucanae's Γ; the
   implied total over the catalogue within 2,000–8,000.
+- **P15.T8.d The blocks adopted as production** (no bump). Each of the three tasks moves to
+  revision 1, gates on its adopted values (the note below) and emits plan 09's values bit for
+  bit, `@generated` when its gates pass; the fit's own figures stay in its acceptance line,
+  reported and not gated. A block whose gate fails stays `@provisional` by its subtask and goes
+  back for a ruling. **Acceptance:** `just fit-check` shows the three blocks fresh at revision
+  1; only comment lines of `tables/cluster_dynamics.rs` change; no golden moves.
+
+_Ruled 2026-10-26 (decision-p15-t8-blocks; the deferred ruling of "T7.a, T8.a–c, T9.a as built").
+Each block keeps its committed values as production, with no bump and no train, and its task
+moves to revision 1 to clear `provisional`. **T8.a:** β 2.8 × 10⁻³, ψ₁ 147 (a₁ 1.47 ÷ 0.01),
+c 0.138 and k 2.5 are Antonini and Gieles's (2020, §2.4) fit with ruling 126.4's clock; the gate is
+ruling 126.4's catalogue windows at those constants (none past 14 t★, 47 Tucanae 20–400, ω
+Centauri 3,000–20,000, 10⁴–10⁵ in all) and 15–25% core-collapsed; the CMC figures and the median
+over 3 × 10⁵ M☉ are reported, since the closed form cannot follow the CMC models (best 0.476 dex,
+ψ₁ unbounded). **T8.b:** η = 1 (δ = ½; ruling 139.2; Peuten et al. 2017's δ ≃ 0.5); the gate is
+ruling 139.2's window and the models' convergence; the half-mass radii, which the class profile's
+form misses at any η (best 28%, 92% at η 1), are reported. **T8.c:** A 40, γ 0.7 and cap 40; the
+gate is the fit's γ and A in their windows and the committed law inside the census's 95% joint
+region (2Δln L 4.41 of 5.99); the census-implied total, 1,560 at the committed law and 1,539 at
+the fit, is reported, since it measures Γ's scale and not the law._
 
 **Files.** `src/tasks/{cluster_bh,equipartition,pulsars}.rs`, `manifests/cluster_*.toml`,
 `data/{baumgardt_hilker,cmc,bahramian_2013,gc_pulsars}/`, `tables/cluster_dynamics.rs`. The
@@ -1767,7 +1787,9 @@ acceptance for every table, pasted into the pull request. **Acceptance:** `just 
 `just test-slow` green with zero provisional tables. (Re-validated at 898a3c94: `check` sees only
 registered tables, so the hand-made `binary`, `helium` and `streams` must be registered first, by
 P15.T9.b and T10.b (with P11.T15), T7.b and T11.a. The registry also runs other plans' tasks,
-Provides' "Built at 898a3c94", whose provisional tables, if any remain, this error catches too.)
+Provides' "Built at 898a3c94", whose provisional tables, if any remain, this error catches too.
+T8.a–c's blocks leave the provisional set with their adoption lane, which moves no value
+(decision-p15-t8-blocks).)
 
 ### Schedule
 
@@ -1799,7 +1821,8 @@ M4 and slow no longer hold (decision-p15-revalidation Q4); P15.T9.b needs P11.T6
 P11.T8; T10.a needs P09.T43, its consumer; T11.b needs P10.T5–T6. T3.c rides version 25 (S1), and
 T6's production run starts from 25's commit and lands with 26 (S2). T7.b's swap rides the first
 galaxy train after its gate. Built: T1, T2, T4, T5.a (its production run is P06.T19.e's), T6.a–g,
-T7.a, T8.a–c (provisional) and T9.a.
+T7.a, T8.a–c (production at their committed values by decision-p15-t8-blocks, adopted by T8.d;
+no bump), T8.d and T9.a.
 
 ## Verification
 
@@ -1829,13 +1852,12 @@ landed with the 21 → 22 batch ("Landed in the 21 → 22 batch", T6.g as built;
 Re-validated at 898a3c94, at version 23, and ruled 2026-10-23 (decision-p15-revalidation Q9).
 P15.T4.b's bump is taken (its table says since 14). P15.T9.a moved no wired output and took no
 bump (its record), so P15.T9's is T9.b's. P15.T5.a's rides P06.T19.e at version 25 (S1, as the
-Generator version of plan 06 says). P15.T5.b, T5.c, T5.d, T7.b's first landing and T11.a move
-nothing and take no bump. Each held swap rides the first galaxy train after its lane's gate, as
-decision-bump-plan-after-22 does for its own:
+Generator version of plan 06 says). P15.T5.b, T5.c, T5.d, T7.b's first landing, T8's adoption
+(decision-p15-t8-blocks) and T11.a move nothing and take no bump. Each held swap rides the first
+galaxy train after its lane's gate, as decision-bump-plan-after-22 does for its own:
 
 - T3.c, at 25 (S1), as an anchor;
 - T7.b's swap, at 25 as a rider if ready when its wiring starts, else the next train;
-- T8's adoption, at the first train after its deferred ruling, if that ruling moves a value;
 - T10.a, at the first train after P09.T43 and its own gate (the bump plan lists 28);
 - T9.b and T10.b, with P11.T15, whose swap they are, at 28;
 - T11.b, if its value moves, at the first train after P10.T5–T6 and its gate (expected 28);
@@ -2071,6 +2093,19 @@ fit-check`; review-changes on this lane's diff.
     607346de. The lane then merged `origin/rendering-and-planets` at 93396d5f, two R08.T8.e commits
     in the client's atmosphere code and plan R08. None of these touches what this plan consumes,
     and the versions stay 23 and 3, so the sweep stands.
+- **T8.a–c's deferred ruling (2026-10-26; decision-p15-t8-blocks).** It closes the re-validation's
+  "Awaiting a ruling" item. All three blocks keep plan 09's values as production, with no bump
+  and no train (T8's entry). Findings recorded and deferred, with no train:
+  - _The black holes' closed form against CMC._ No (β, ψ₁) reaches 0.3 dex (best 0.476, ψ₁
+    unbounded; 1.716 at the committed constants). The law holds mass and radius constant, so a
+    match needs plan 09 to change the law, with a bump.
+  - _The class profile against multimass King models._ The light classes' half-mass radii miss
+    by 28% at the best η and 92% at η 1, so this is a matter of the form (plan 09's Design
+    note 9), not of η. The grid spans concentrations 0.81–2.08, not 0.7–2.3.
+  - _Γ's scale._ Plan 09's Γ, from the Baumgardt–Hilker core radii through the cored profile,
+    runs a median 1.9 times Bahramian et al.'s over 128 clusters, and NGC 5694 runs 1,760 times
+    (a 0.02 pc catalogue core). The law then gives 6,974 over the sim's 165 clusters against
+    1,506 on Bahramian's Γ over the matched 128. The galaxy's total passes P09.T9.e.
 - **T3.a–b as built (lane `lane/94-p15-t3`, 2026-10-23, at `GENERATOR_VERSION` 23; no table
   moved, no bump).** Fit-crate code and tests only, by main's ruling of 2026-10-23 on P15.T3's
   brief (issue #94). The refit runs from a manifest of its own, `manifests/mge.refit.toml`
@@ -2347,6 +2382,139 @@ fit-check`; review-changes on this lane's diff.
     - `provisional` becomes `None`, or `Some("P15.T11.b")` while the acceptance misses.
     - `data/stream_census/` should mark each stream globular-like or not, explicitly: Bonaca and
       Price-Whelan's census includes dwarf-galaxy streams, and mass alone does not split them.
+- **T8.d as built (lane `lane/105-p15-t8d`, 2026-10-26, at `GENERATOR_VERSION` 23; no value
+  moved, no bump).** The three cluster-dynamics blocks adopted as production at plan 09's values,
+  by main's ruling of 2026-10-26 (decision-p15-t8-blocks; issue #105). Every gate passed, so no
+  block stayed provisional under the brief's stop rule.
+  - _What changed._ `cluster_bh`, `equipartition` and `pulsars` are at revision 1 (`VERSION`).
+    Each `run` always emits its adopted values (`SCRATCH`, `SCRATCH_ETA`), with `provisional`
+    `None` when its gates pass and its subtask otherwise. The fits still run, and their figures
+    are reported in the acceptance line, not gated. The four manifests are unchanged; the
+    revision alone moves the inputs hash.
+    - `cluster_bh`: `CatalogueFigures::of(galaxy)` reads the Baumgardt–Hilker catalogue through
+      `ClusterModel::black_hole_count` and `is_core_collapsed`, as plan 09's checks do, and
+      `CatalogueFigures::passed` holds the five gates. `ClusterBhFit` keeps the CMC fit, with the
+      rms and the predicted-empty counts at both the adopted constants and the best fit. Its
+      `passed` and `catalogue` field, the law-based `catalogue` function and
+      `LawInput::core_collapsed` are gone. `source` opens with Antonini and Gieles (2020). The
+      block is also provisional unless the compiled table holds `SCRATCH` bit for bit
+      (`holds_adopted`), which it does (deviation 5).
+    - `equipartition`: `gates(eta, models)` returns the two gates, `ETA_WINDOW` (0.8–1.0) on
+      `SCRATCH_ETA` and `NORMALISATION_TOLERANCE` (10⁻⁶) on each model's `normalisation_miss`,
+      which now counts a class that is not a number as an infinite miss (deviation 6). `source`
+      adds Peuten et al. (2017) and Hénault-Brunet et al. (2020).
+    - `pulsars`: the profile likelihood. `profile_d0` searches `ln d₀` over [ln 0.5, ln 50] kpc
+      (`PROFILE_D0_KPC`) by `optimise::golden_section` in 60 iterations (`PROFILE_ITERATIONS`, as
+      `equipartition`'s search of η; the bracket of 4.6 narrows to about 1.3 × 10⁻¹²).
+      `PulsarFit::test_law` returns a `LawTest` (d̂₀ and 2Δln L against the fit),
+      `PulsarFit::passed(&LawTest)` the three gates against `JOINT_95` (5.99), and
+      `implied_total` the census-implied total.
+    - Outside the fit crate, besides the emitted files: the table file's module docs (`//!`
+      lines) and plan 09's pulsar-cap comment in `interior/checks.rs` (deviation 7).
+  - _The acceptance lines, as emitted._ Main's figures, from plan 09's slow test at its seed
+    `0x0909_0000`, are in brackets; the task builds its galaxy at the manifest's `0x0918_0001`.
+    - `cluster_bh`: at β 0.0028, ψ₁ 147, k 2.5 and c 0.138, the most in a cluster past 14 t★ 0.00
+      (under 1; [none in M4]), 47 Tucanae 144 (20–400; [142]), ω Centauri 8,374 (3,000–20,000;
+      [8,314]), 12,695 over the catalogue (10⁴–10⁵; [12,616, then 12,631]) and 0.218
+      core-collapsed (0.15–0.25; [0.218]), all passing. Reported: the median over 3 × 10⁵ M☉ 0
+      (tens to a few hundred); over the 124 CMC models (1 left out), 97 retaining any, rms 1.716
+      dex at the adopted constants and 0.476 at the best fit (under 0.3), 26 of 113 and 19 of 34
+      predicted empty are empty (at least 85%); the best fit's ψ₁ 6.48 × 10¹⁹ and β ψ₁ 0.1012.
+    - `equipartition`: η 1 in 0.8–1.0, and the 40 models solved, their mass fractions within
+      8.7 × 10⁻¹² (10⁻⁶), both passing. Reported: W₀ 3–10 and slopes −1.5 to 0.5,
+      concentrations 0.81–2.08; the living classes' half-mass radii within 0.921 at η 1 and 0.282
+      at the best η, 0.1675 (10%).
+    - `pulsars`: γ̂ 0.632 (0.5–0.9), Â 38.0 (30–50), and at (40, 0.7) d̂₀ 4.71 kpc and 2Δln L 4.41
+      (at most 5.99; [4.41]), all passing; the fit's d₀ 4.8 kpc. Reported: the implied total
+      over the 126 clusters 1,560 at the adopted law and 1,539 at the fit (2,000–8,000; [1,560,
+      1,539]).
+  - _The emission._ `cargo run -q -p hyperion-fit -- run cluster_bh --since 23`, then `pulsars`
+    and `equipartition` the same way, in the dev profile: 1.1 s, 9.8 s and 25.0 s, the last two
+    with the rebuild that the previous write caused, at load 1.8–4.4. Each reported "body
+    unchanged" and kept `since-generator-version: 15`. The body SHA-256s stay `96458654…`
+    (`cluster_bh`), `9a2e9fbe…` (`equipartition`) and `f24767a9…` (`pulsars`). The new inputs
+    SHA-256s are `757274b1…`, `87e967f4…` and `b0831901…`. Each `MANIFEST` row and lock entry is
+    at revision 1 and not provisional. Only the lock's `revision`, `inputs_sha256`, `provisional`
+    and `acceptance` lines changed, and of the table file only comment lines.
+  - `just fit-check` gives `41 fresh, 7 warnings, 0 failures` at the base (19e44f30) and
+    `44 fresh, 4 warnings, 0 failures` at the head.
+  - _Tests_, under nextest in the dev profile on an 8-thread laptop at load 1.5–3.4, four test
+    threads (a shared machine, so provisional). In `tests/cluster_dynamics.rs`:
+    `the_committed_blocks_are_generated_at_the_adopted_values` (renamed from
+    `the_committed_blocks_hold_plan_nines_scratch_values`; 0.005 s) keeps its bit-for-bit pins
+    and body comparison and expects `@generated` at revision 1; the smoke test now expects
+    `@generated` (1.7 s); `cluster_bh_block_is_reproduced` (0.9 s), `pulsars_block_is_reproduced`
+    (0.1 s) and the ignored `equipartition_block_is_reproduced` (16.3 s) pass on the emitted file
+    unchanged. In `tasks::pulsars`:
+    `the_profile_likelihood_keeps_the_true_law_and_rejects_a_far_one` (0.07 s), on
+    `the_fit_recovers_expected_counts`'s fixture, now a shared `expected_counts`:
+    the fixture's own law at 2Δln L within 0.1 of zero, with d₀ profiled back to 12 kpc, and
+    (10, 1.2) over ten times 5.99. In `tasks::equipartition`:
+    `the_gates_pass_the_adopted_eta_and_fail_a_model_that_does_not_solve` (one model solved at
+    W₀ 6 passes, η 0.1675 fails the window, and W₀ 0 gives an infinite miss and fails). In
+    `tasks::cluster_bh`: `each_catalogue_gate_fails_outside_its_window` (each of the five just
+    inside and just outside) and
+    `the_gates_are_the_adopted_constants_only_while_the_table_holds_them` (the compiled table
+    holds `SCRATCH`; each constant moved by one part in 2⁵² does not).
+    `the_committed_tables_are_fresh` (12.0 s) and `every_committed_table_declares_its_tasks_items`
+    pass.
+  - _Deviations._
+    1. **Antonini and Gieles's sections.** Their eqs. 10, 12 and 14 are in §2.3.2 and the fitted
+       values in §2.4 (checked against arXiv:1906.11855), so `source` names "§2.4's fit and
+       §2.3.2's eqs. 10, 12 and 14" where the brief wrote "§2.4, eqs. 10, 12 and 14".
+       `SCRATCH`'s doc also states what they fitted, eight isolated N-body clusters of 10⁵ stars at
+       Z 0.0006, which the constants extrapolate to the Milky Way's globulars.
+    2. **Hénault-Brunet et al. is 2020** (MNRAS 491, 113, the January 2020 issue; online in
+       2019). The new texts cite 2020, and so does the table file's module docs (a `//!` line).
+    3. **The core-collapse line** in `CatalogueFigures::of` is `age > 14 t★`, as
+       `is_core_collapsed` draws it, which is the brief's `age ÷ t★` over 14 multiplied out.
+    4. **`JOINT_95` is the ruling's 5.99**, not the quantile `2 ln 20` (5.991), which its doc
+       gives.
+    5. **The compiled-table guard.** The gates read the compiled table through `ClusterModel`,
+       so a run after `SCRATCH` moved would gate the old constants and emit the new ones. The run
+       then stays `@provisional` by P15.T8.a, saying so, until a second run reads the table it
+       wrote. It does not fire today. This is a fourth way to stay provisional that the ruling
+       does not name (from the determinism review).
+    6. **A miss that is not a number counts as infinite.** `f64::max` drops a NaN, so a model
+       that cannot solve (W₀ 0, say) would have passed the convergence gate. Finite misses are
+       unchanged, so no emitted byte moves (from the Rust and determinism reviews).
+    7. **Plan 09's pulsar-cap comment** (`interior/checks.rs`, comment only): "(provisional,
+       measured at P15.T8's start; ruling deferred to P15.T8.c's fit of the law)" becomes the
+       ruling's reading. Plan 15 kept the law, the cap at the neutron stars is ruling 126.3's
+       invariant, the 1,400 bound stays as a regression bound, and NGC 5694's Γ comes from its
+       0.02 pc catalogue core. The figures are kept.
+  - _Deferred findings (2026-10-13 rule)._
+    - From P15.T8.d, on P15.T8.a's reported median: at the adopted constants the median over
+      3 × 10⁵ M☉ is 0, against "tens to a few hundred". The law empties a cluster once
+      `age ÷ t★` passes `ln(1 + ψ₁ f₀) ÷ (k β ψ₁)`, at most 2.2 (at full retention), so a massive
+      cluster past that and short of 14 t★ holds none without being core-collapsed; more than
+      half of the massive ones not past the line hold none. The 47 Tucanae and ω Centauri gates
+      stand for "a typical massive one", as ruled, and a change would be plan 09's law, with a
+      bump.
+    - From P15.T8.d: P15.T8.b's acceptance text, and plan 09's, cite "Hénault-Brunet et al.
+      2019" for MNRAS 491, 113, which is 2020 by its issue (a different 2019 paper is MNRAS 483,
+      1400). This is a wording fix for a docs batch.
+    - From P15.T8.d: `equipartition.rs`'s module docs cite Gieles and Zocchi's "eqs. 24–29" for
+      δ, which eq. 24 defines and eq. 29 puts in the densities; and its `μ_j` is referred to
+      `m_TO`, not their `m̄` (eq. 26), which only relabels W₀ (Peuten et al. 2017, eq. 8). Wording
+      only, for a lane whose scope holds those lines.
+    - From P15.T8.d, on `cluster_bh`'s fingerprint: its probes (Kroupa's mean mass and one CMC
+      probe's `f₀` and clock) do not reach what its gates now read, the catalogue's
+      `black_hole_count` and `is_core_collapsed`. A sim change that moves those (a new
+      `MEAN_BLACK_HOLE_MASS`, a retention refit) leaves plain `fit-check` fresh, and only the
+      rerender test and `--rerun-fast` see it. Probes of 47 Tucanae's and ω Centauri's counts
+      would close it; they change the lock's `fingerprint`, which this lane's brief held fixed.
+  - _Records left as written, now stale in part._ This record supersedes them.
+    - Provides' "Built at 898a3c94" (`cluster_dynamics` as three provisional blocks), and
+      Consumes' plan 09 entry, which also calls them provisional.
+    - Generator version's "Known bumps from this plan: … P15.T8", which its ruled paragraph now
+      contradicts (T8's adoption takes no bump).
+    - The T8.a–c record's "Scratch kept" and "acceptance missed (provisional; ruling deferred)".
+    - The T8 tests record's `the_committed_blocks_hold_plan_nines_scratch_values` and its smoke
+      run "`@provisional` by P15.T8.b".
+    - The re-validation's "T12 on … the deferred ruling on T8.a–c's blocks".
+    - The table's `EQUIPARTITION_EXPONENT` doc, "which P15.T8.b fits to multimass King models",
+      kept because it is part of the body; its wording waits for a lane that may move the body.
 - **T5.d, T5.b and T5.c as built (lane `lane/103-p15-t5`, 2026-10-26, at `GENERATOR_VERSION` 23;
   no output moved, no bump).** One heavy brief, issue #103, by main's ruling of 2026-10-23
   (decision-p15-revalidation Q1–Q5 and Q9), from base 19e44f30. Times are nextest's in the dev

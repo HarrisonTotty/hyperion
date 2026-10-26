@@ -385,9 +385,10 @@ fn the_milky_way_s_globulars_have_their_observed_remnants() {
          black holes {black_holes:.0}, core-collapsed {collapsed_share:.3}"
     );
     // Three clusters of 165 bind the cap. Two expect well under one pulsar; the third, NGC 5694,
-    // whose catalogue core of 0.02 pc gives it 334 times 47 Tucanae's encounter rate, expects
-    // 2,336 by the law against its 1,037 neutron stars, and the cap removes 1,299 from the total
-    // (provisional, measured at P15.T8's start; ruling deferred to P15.T8.c's fit of the law).
+    // whose catalogue core of 0.02 pc gives it 334 times 47 Tucanae's encounter rate (plan 15's
+    // finding on Γ's scale), expects 2,336 by the law against its 1,037 neutron stars, and the cap
+    // removes 1,299 from the total. Plan 15 kept the law (decision-p15-t8-blocks), the cap at the
+    // neutron stars is ruling 126.3's invariant, and the bound stays as a regression bound.
     assert!(capped <= 8, "{capped} clusters capped");
     assert!(
         law_pulsars - pulsars <= 1_400.0,
