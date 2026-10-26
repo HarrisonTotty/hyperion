@@ -1009,15 +1009,20 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     expect(envelope.profile.redistributionFactor).toBe(0.25);
   });
 
-  it("reads an envelope's supercritical condensable by its key, and an H2/He envelope's as null", () => {
-    const hydrogen = okSection(
-      recordOf(toBodyDetail(jupiterDetail(), FIXTURE_SYSTEM, DESIGNATION)).envelope,
-    );
-    const water = okSection(
+  it("reads an envelope's supercritical condensable by its key", () => {
+    const envelope = okSection(
       recordOf(jupiterWithEnvelope({ ...jupiterEnvelope(), supercritical: "H2O" })).envelope,
     );
 
-    expect([hydrogen.supercritical, water.supercritical]).toEqual([null, "H2O"]);
+    expect(envelope.supercritical).toBe("H2O");
+  });
+
+  it("reads an H2/He envelope's supercritical condensable as null", () => {
+    const envelope = okSection(
+      recordOf(toBodyDetail(jupiterDetail(), FIXTURE_SYSTEM, DESIGNATION)).envelope,
+    );
+
+    expect(envelope.supercritical).toBeNull();
   });
 
   it("reads a solid planet under a supercritical envelope, its surface not applicable and its envelope not modelled", () => {
@@ -1362,6 +1367,21 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
 
     expect(inventory.notFormed).toEqual([
       { condensate: "SiO2", reason: { kind: "displaced", by: "MgSiO3" } },
+    ]);
+  });
+
+  it("reads a condensable past its critical point as not formed, labelled supercritical (P14.T52.f)", () => {
+    const inventory = inventoryRead({
+      ...inventoryOf([]),
+      not_formed: [
+        { condensate: "CH4", reason: { type: "bulk_gas" } },
+        { condensate: "N2", reason: { type: "supercritical" } },
+      ],
+    });
+
+    expect(inventory.notFormed).toEqual([
+      { condensate: "CH4", reason: { kind: "bulk_gas" } },
+      { condensate: "N2", reason: { kind: "supercritical" } },
     ]);
   });
 

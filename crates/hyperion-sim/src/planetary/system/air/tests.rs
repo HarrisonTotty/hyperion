@@ -9,7 +9,8 @@ use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
-use crate::planetary::chem::condense::{ResolveOpticalDepthError, SizeModeError};
+use crate::math;
+use crate::planetary::chem::condense::{NotFormed, ResolveOpticalDepthError, SizeModeError};
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::hooks::aerosols::{
     Absorber, AerosolDeck, AerosolMode, MARS_DUST_OPTICAL_DEPTH, NEAR_CRITICAL_LIQUID_SHARE,
@@ -25,7 +26,8 @@ use crate::planetary::hooks::surface::tests::table;
 use crate::planetary::record::{BodyRecord, Section, Surface, SystemSnapshot};
 use crate::planetary::surface::CoarseInputs;
 use crate::planetary::system::RecordRules;
-use crate::planetary::system::tests::{SEED, golden_systems, whole};
+use crate::planetary::system::tests::{SEED, golden_systems, golden_systems_afresh, sample, whole};
+use crate::planetary::testing::with_every_24_hold;
 use crate::planetary::{PlanetarySystem, SystemContext, generate};
 use crate::substance::{CondensedPhase, SubstanceId, by_key};
 use crate::time::{ClockWindow, UniverseTime};
@@ -136,12 +138,13 @@ fn the_air_sections_are_held_only_until_the_24_bump() {
         "the 23 → 24 bump (P14.T54.b.l) puts the air's sections on the record: every surface's \
          vertical structure (P14.T24.e), `null` for one with no air, its aerosol and absorber \
          inventory (P14.T24.c with T24.g), the empty inventory for one with no air and not \
-         modelled for a magma ocean's air, and its modifiers (P14.T51.d with T51.j, P14.T54.b.c), with the members \
-         P14.T54.b's later subtasks hold here. Delete `AIR_SECTIONS_VERSION`, `AirRules` with its \
-         `Held` arm, `record_structure`'s, `record_aerosols`', `record_modifiers`' and \
-         `planet_field`'s rules, `RecordRules::air` (and `RecordRules` with \
-         `PlanetarySystem::with_record_rules` once the cold traps' hold goes too); the four source \
-         scans with their `HELD` lists (`nothing_on_the_record_calls_the_inventory_yet`, \
+         modelled for a magma ocean's air, and its modifiers (P14.T51.d with T51.j, \
+         P14.T54.b.c), with the members P14.T54.b's later subtasks hold here. Delete \
+         `AIR_SECTIONS_VERSION`, `AirRules` with its `Held` arm, `record_structure`'s, \
+         `record_aerosols`', `record_modifiers`' and `planet_field`'s rules, `RecordRules::air` \
+         (and `RecordRules` with `PlanetarySystem::with_record_rules` once the cold traps' hold \
+         goes too); the four source scans with their `HELD` lists \
+         (`nothing_on_the_record_calls_the_inventory_yet`, \
          `nothing_on_the_record_calls_the_condensation_yet`, \
          `substance_aerosol_nothing_on_the_record_reads_the_extinction_yet`, \
          `modifiers_nothing_on_the_record_reads_the_modifiers_yet`); \
@@ -1146,14 +1149,176 @@ fn tally_liquids(
     }
 }
 
-/// F4 and F1 of decision-p14-t54a-grain-density §6, over the same sample under the batch's rules
-/// and the Solar System table under the switch:
+/// The record's rules at 24: the cold traps' and the air's sections' batches, which a system takes
+/// with [`PlanetarySystem::with_record_rules`] beside the thread's holds
+/// (`planetary::testing::with_every_24_hold`).
+fn every_record_batch() -> RecordRules {
+    use crate::planetary::hooks::cold_traps::ColdTrapRules;
+
+    RecordRules {
+        cold_traps: ColdTrapRules::Batch,
+        air: AirRules::Batch,
+    }
+}
+
+/// What P14.T52.f's count (xii) lists of the records it walks (decision-n2-critical-decks §5):
+/// the condensables labelled `Supercritical`, each by body and key with its x P ÷ `p_c` where the
+/// structure cools through its critical temperature and the air's bulk gas, and the decks based
+/// at the ground (a [`chem::condense`](crate::planetary::chem::condense) `Bottom` base) whose
+/// vapour's x P there is at or above its critical pressure.
+#[derive(Debug, Default)]
+struct CriticalTally {
+    labelled: Vec<String>,
+    deep: Vec<String>,
+}
+
+impl CriticalTally {
+    /// Adds the inventory `inventory` of the body `id`, whose surface is `surface` and whose air's
+    /// structure is `structure`.
+    fn add(
+        &mut self,
+        id: &str,
+        surface: &Surface,
+        structure: &VerticalStructure,
+        inventory: &AerosolInventory,
+    ) {
+        let gases = surface.conditions().gases();
+        let share = |of: SubstanceId| {
+            gases
+                .iter()
+                .find(|&&(gas, _)| gas == of)
+                .map_or(0.0, |&(_, x)| x)
+        };
+        let bulk = gases
+            .iter()
+            .fold(None::<(SubstanceId, f64)>, |best, &(gas, x)| match best {
+                Some((_, most)) if most >= x => best,
+                _ => Some((gas, x)),
+            })
+            .map_or_else(
+                || "none".to_owned(),
+                |(gas, _)| gas.substance().key().to_string(),
+            );
+        let ground = surface.conditions().surface_pressure().value();
+        for &(row, why) in inventory.not_formed() {
+            if why != NotFormed::Supercritical {
+                continue;
+            }
+            let key = row.substance().key();
+            let diagram = row.substance().phase_diagram().expect("a row's own curve");
+            let level = pressure_at(structure, ground, diagram.critical_temperature().value());
+            let ratio = share(row) * level / diagram.critical_pressure().value();
+            self.labelled.push(format!(
+                "{id}: {key} at x P {ratio:.3} p_c, its bulk {bulk}"
+            ));
+        }
+        for deck in inventory.decks() {
+            let Some(diagram) = deck.condensate().substance().phase_diagram() else {
+                continue;
+            };
+            let at_ground = (deck.base().value() - ground).abs() <= 1e-9 * ground;
+            let x_p = share(deck.condensate()) * ground;
+            if at_ground && x_p >= diagram.critical_pressure().value() {
+                self.deep.push(format!(
+                    "{id}: {} at the ground, x P {:.3} p_c",
+                    deck.condensate().substance().key(),
+                    x_p / diagram.critical_pressure().value()
+                ));
+            }
+        }
+    }
+}
+
+/// The pressure, Pa, at which `structure`, from the ground pressure `ground` up, first cools to
+/// `temperature` kelvin, by bisection in ln p between the scan's levels a tenth of an e-fold
+/// apart; NaN where it never does over 30 e-folds.
+fn pressure_at(structure: &VerticalStructure, ground: f64, temperature: f64) -> f64 {
+    let at = |u: f64| structure.temperature_at(Pascals::new(math::exp(u))).value();
+    let top = math::ln(ground);
+    if at(top) <= temperature {
+        return ground;
+    }
+    let mut deep = top;
+    for step in 1..=300_u32 {
+        let shallow = top - 0.1 * f64::from(step);
+        if at(shallow) <= temperature {
+            let (mut warm, mut cold) = (deep, shallow);
+            for _ in 0..60 {
+                let mid = f64::midpoint(warm, cold);
+                if at(mid) <= temperature {
+                    cold = mid;
+                } else {
+                    warm = mid;
+                }
+            }
+            return math::exp(f64::midpoint(warm, cold));
+        }
+        deep = shallow;
+    }
+    f64::NAN
+}
+
+/// The F4, F1 and count (xii) tallies of the first [`AIR_SAMPLE`] whole systems and the golden
+/// systems at the epoch with every hold at 24 in force ([`with_every_24_hold`] and
+/// [`every_record_batch`]), each system generated and read inside the switches.
+fn every_hold_tallies() -> (LiquidTally, CriticalTally) {
+    with_every_24_hold(|| {
+        let mut tallies = (LiquidTally::default(), CriticalTally::default());
+        let samples = sample()
+            .iter()
+            .take(AIR_SAMPLE)
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)));
+        let goldens = golden_systems_afresh()
+            .into_iter()
+            .map(|(_, ctx, system)| (ctx, system));
+        for (ctx, system) in samples.chain(goldens) {
+            let snapshot = system
+                .with_record_rules(every_record_batch())
+                .snapshot_at(&ctx, UniverseTime::EPOCH);
+            tally_snapshot(&snapshot, &mut tallies);
+        }
+        tallies
+    })
+}
+
+/// Adds every surface of `snapshot` that carries its structure and its inventory to `tallies`.
+fn tally_snapshot(
+    snapshot: &SystemSnapshot,
+    (liquids, critical): &mut (LiquidTally, CriticalTally),
+) {
+    for record in snapshot.bodies() {
+        let Section::Ok(surface) = record.surface() else {
+            continue;
+        };
+        let (Modelled::Ok(Some(structure)), Modelled::Ok(inventory)) =
+            (surface.vertical_structure(), surface.aerosols())
+        else {
+            continue;
+        };
+        let id = record.identity().id().to_string();
+        tally_liquids(&id, inventory, structure, liquids);
+        critical.add(&id, surface, structure, inventory);
+    }
+}
+
+/// F4 and F1 of decision-p14-t54a-grain-density §6, and P14.T52.f's count (xii), over the first
+/// [`AIR_SAMPLE`] whole systems and the golden systems with every hold at 24 in force
+/// ([`every_hold_tallies`]; decision-t24i-airless-state D3.3, decision-n2-critical-decks §4), over
+/// the same sample under the air's batch alone (23's states and every other hold), and over the
+/// Solar System table under the switch:
 ///
 /// - **F4:** no liquid mode published with a size or a τ lies above 0.99 of its material's
 ///   critical temperature, where the grain-density mirror holds no liquid, so that every liquid
 ///   the record publishes is one the client can evaluate: the inventory refuses those there their
-///   size and τ (`AerosolMode::of_mode`). The sample holds two, nitrogen decks whose base lies at
-///   nitrogen's critical point, counted and printed;
+///   size and τ (`AerosolMode::of_mode`), each counted and printed. Under the air's batch alone
+///   it refuses none: the two nitrogen decks it once refused (`02001b2ca0000000.0400` and
+///   `02001b2c9ffe0000.0500`, based at nitrogen's critical point under kilobar methane airs) are
+///   P14.T52.f's, labelled `supercritical`, which is asserted. With every hold, printed, 0500's
+///   nitrogen is its bulk, and 0400's is still labelled in this tree, P14.T53.b part 2 (under
+///   whose supercritical envelope its surface does not apply) not having landed here;
+/// - **Count (xii)**, printed: every condensable labelled `supercritical`, with x P ÷ `p_c`
+///   where the structure cools through its critical temperature and the air's bulk, and every
+///   deck based at the ground with x P ≥ `p_c` there;
 /// - **F1:** no liquid water mode lies below water's triple point. The choice is the loop's
 ///   (`chem::condense`'s phase rule): a deck takes the phase of its base, liquid at or above its
 ///   condensate's first melt and ice below, so that a supercooled droplet forms as an ice crystal
@@ -1162,12 +1327,47 @@ fn tally_liquids(
 ///   temperature on the structure below the triple point, and printed for the plan's record.
 #[test]
 fn no_liquid_mode_lies_near_its_critical_point_or_below_water_s_triple_point() {
-    let mut tally = LiquidTally::default();
-    for (_, record, surface, inventory) in batch_inventories() {
-        if let Modelled::Ok(Some(structure)) = surface.vertical_structure() {
-            let id = record.identity().id().to_string();
-            tally_liquids(&id, inventory, structure, &mut tally);
-        }
+    let (mut tally, critical) = every_hold_tallies();
+    eprintln!(
+        "every 24 hold: {} liquid modes, {} refused near their critical point: {:?}; {} labelled \
+         supercritical: {:?}; {} decks at the ground past p_c: {:?}",
+        tally.modes,
+        tally.refused.len(),
+        tally.refused,
+        critical.labelled.len(),
+        critical.labelled,
+        critical.deep.len(),
+        critical.deep
+    );
+    let mut alone = (LiquidTally::default(), CriticalTally::default());
+    for snapshot in batch_snapshots() {
+        tally_snapshot(snapshot, &mut alone);
+    }
+    let (alone_liquids, alone_critical) = alone;
+    eprintln!(
+        "the air's batch alone: {} refused: {:?}; {} labelled supercritical: {:?}; {} decks at \
+         the ground past p_c: {:?}",
+        alone_liquids.refused.len(),
+        alone_liquids.refused,
+        alone_critical.labelled.len(),
+        alone_critical.labelled,
+        alone_critical.deep.len(),
+        alone_critical.deep
+    );
+    assert!(
+        alone_liquids.refused.is_empty(),
+        "{:?}",
+        alone_liquids.refused
+    );
+    for body in ["02001b2ca0000000.0400", "02001b2c9ffe0000.0500"] {
+        assert!(
+            alone_critical
+                .labelled
+                .iter()
+                .any(|line| line.starts_with(&format!("{body}: N2 "))),
+            "{body}'s N2 is labelled supercritical under the air's batch alone: {:?}",
+            alone_critical.labelled
+        );
     }
     for air in table_under_the_switch() {
         if let (Modelled::Ok(Some(structure)), Modelled::Ok(inventory)) =

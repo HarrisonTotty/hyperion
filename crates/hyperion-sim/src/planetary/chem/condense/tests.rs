@@ -457,6 +457,162 @@ fn each_base_lies_on_its_saturation_curve() {
     assert!(checked >= 30, "{checked} bases checked");
 }
 
+/// The critical point of `key`'s phase diagram: its temperature, K, and its pressure, Pa.
+fn critical_point(key: &str) -> (f64, f64) {
+    let diagram = row(key)
+        .substance()
+        .phase_diagram()
+        .unwrap_or_else(|| panic!("{key}'s phase diagram"));
+    (
+        diagram.critical_temperature().value(),
+        diagram.critical_pressure().value(),
+    )
+}
+
+/// A kilobar methane air (P14.T52.f's case, the kind of 02001b2ca0000000.0400 under the air's
+/// batch alone): a power law T = 200 K (p ÷ 10 kbar)^¼ from 10 kbar up, held at 60 K above, a
+/// test profile that cools through N₂'s critical 126.192 K near 1.59 kbar.
+fn kilobar_methane(p: Pascals) -> Kelvin {
+    Kelvin::new((200.0 * math::powf(p.value() / bar(1e4).value(), 0.25)).max(60.0))
+}
+
+/// The pressure, Pa, at which [`kilobar_methane`] reaches `t` kelvin, below its 60 K hold.
+fn kilobar_methane_pressure(t: f64) -> f64 {
+    bar(1e4).value() * math::powf(t / 200.0, 4.0)
+}
+
+/// The condensation under [`kilobar_methane`]'s profile of an air holding N₂ at the mole fraction
+/// `nitrogen`, the rest the row `bulk` of molar mass `bulk_molar_mass` g mol⁻¹, from 10 kbar up
+/// to 1 bar.
+fn kilobar_clouds(bulk: &str, bulk_molar_mass: f64, nitrogen: f64) -> Condensation {
+    let gas = [(row(bulk), 1.0 - nitrogen), (row("N2"), nitrogen)];
+    let molar_mass = (1.0 - nitrogen) * bulk_molar_mass + nitrogen * 28.014;
+    let column = column(9.8, molar_mass, 1e3, 1.0, 1.0, 1e4);
+    Condensation::derive(gas, kilobar_methane, &column, baseline, 1.0)
+        .expect("the kilobar air's clouds")
+}
+
+/// The condensation of [`kilobar_methane`]'s air holding N₂ at the mole fraction `nitrogen`, the
+/// rest CH₄, from 10 kbar up to 1 bar.
+fn kilobar_methane_clouds(nitrogen: f64) -> Condensation {
+    kilobar_clouds("CH4", 16.043, nitrogen)
+}
+
+/// P14.T52.f (decision-n2-critical-decks §3.2): in a CH₄ air of kilobars whose N₂, 8% by mole,
+/// holds x P about 3.7 times its critical pressure where the profile cools through its critical
+/// temperature, the N₂ crosses no saturation curve: no N₂ deck forms, the row is labelled
+/// `Supercritical` beside the CH₄'s `BulkGas`, in registry order, and the gas above that level
+/// keeps all of its N₂, to the bit.
+#[test]
+fn a_vapour_past_its_critical_point_forms_no_deck_and_is_labelled_supercritical() {
+    let (t_c, p_c) = critical_point("N2");
+    let level = kilobar_methane_pressure(t_c);
+    let nitrogen = 0.08;
+    assert!(
+        nitrogen * level > 3.0 * p_c,
+        "{} p_c",
+        nitrogen * level / p_c
+    );
+    let clouds = kilobar_methane_clouds(nitrogen);
+    assert!(clouds.decks().is_empty(), "{:?}", clouds.decks());
+    let mut expected = vec![
+        (row("CH4"), NotFormed::BulkGas),
+        (row("N2"), NotFormed::Supercritical),
+    ];
+    expected.sort_by_key(|&(id, _)| id);
+    assert_eq!(clouds.not_formed(), expected.as_slice());
+    let vapour = Vapour::Species(row("N2").substance().key());
+    for above in [level, level / 10.0, bar(1.0).value()] {
+        assert_same_bits(left(&clouds, vapour, Pascals::new(above)), nitrogen);
+    }
+}
+
+/// P14.T52.f (decision-n2-critical-decks §3.2): the labels are listed in registry order, not in
+/// the order they are found. In an argon air under the same profile (200 K at its bottom, above
+/// Ar's critical 150.687 K as above CH₄'s 190.564 K), the bulk Ar, a later row than N₂, is
+/// labelled before the loop, and the N₂, 8% by mole as in the methane air, only once the loop
+/// takes its base; the list still reads N₂ first.
+#[test]
+fn a_supercritical_row_is_listed_before_a_later_row_s_bulk_gas() {
+    let clouds = kilobar_clouds("Ar", 39.95, 0.08);
+    assert!(clouds.decks().is_empty(), "{:?}", clouds.decks());
+    assert_eq!(
+        clouds.not_formed(),
+        &[
+            (row("N2"), NotFormed::Supercritical),
+            (row("Ar"), NotFormed::BulkGas),
+        ]
+    );
+}
+
+/// P14.T52.f: the same air with its N₂ trimmed until x P lies just under its critical pressure
+/// where the profile cools through its critical temperature, 0.99 of it, forms an N₂ deck whose
+/// base crosses below that temperature, on its saturation curve to 10⁻⁶, with x P there under
+/// the critical pressure.
+#[test]
+fn a_vapour_just_under_its_critical_pressure_crosses_below_its_critical_temperature() {
+    let (t_c, p_c) = critical_point("N2");
+    let nitrogen = 0.99 * p_c / kilobar_methane_pressure(t_c);
+    let clouds = kilobar_methane_clouds(nitrogen);
+    let n2 = deck(&clouds, "N2");
+    assert_eq!(n2.bound(), DeckBound::Crossing);
+    let t = n2.base_temperature().value();
+    assert!(t < t_c, "{t} K at T_c {t_c} K");
+    let law = law_aloft(row("N2")).expect("N2's law");
+    let ln_sat = law
+        .ln_saturation_pressure(n2.base_temperature(), n2.base(), 0.0)
+        .expect("it condenses below its critical temperature");
+    let x_p = n2.vapour_below() * n2.base().value();
+    assert!(
+        (math::ln(x_p) - ln_sat).abs() < 1e-6,
+        "{x_p} Pa against {ln_sat}"
+    );
+    assert!(x_p < p_c, "{x_p} Pa at {p_c}");
+    assert_eq!(clouds.not_formed(), &[(row("CH4"), NotFormed::BulkGas)]);
+    eprintln!(
+        "x_N2 {nitrogen:.5}: an N2 deck based at {t:.3} K ({:.4} T_c), {:.1} bar, x P {:.4} p_c",
+        t / t_c,
+        n2.base().value() / PASCALS_PER_BAR,
+        x_p / p_c
+    );
+}
+
+/// P14.T52.f: every base the module's test columns place on a row's own curve crosses it under
+/// its critical pressure, x P at the base below `p_c`, so that the new label touches none of
+/// them.
+#[test]
+fn every_base_placed_on_a_row_s_curve_lies_under_its_critical_pressure() {
+    let mut checked = 0;
+    for (name, clouds, _) in &cases() {
+        for d in clouds.decks() {
+            let law = law_aloft(d.condensate()).expect("a law");
+            let Some(p_c) = law.critical_pressure() else {
+                continue;
+            };
+            assert_eq!(law.law(), SaturationLaw::Diagram);
+            if d.bound() == DeckBound::Crossing {
+                let x_p = d.vapour_below() * d.base().value();
+                assert!(
+                    x_p < p_c.value(),
+                    "{name} {}: x P {x_p} Pa at p_c {}",
+                    d.condensate().substance().key().as_str(),
+                    p_c.value()
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            !clouds
+                .not_formed()
+                .iter()
+                .any(|&(_, why)| why == NotFormed::Supercritical),
+            "{name}: {:?}",
+            clouds.not_formed()
+        );
+    }
+    assert!(checked >= 5, "{checked} bases on a row's curve checked");
+}
+
 /// The traps conserve what they draw on: at every level, for each vapour a deck draws (an
 /// element's atoms, or a species), the gas's amount with what the decks have drawn of it is the
 /// deep gas's, and lies between none and all of it. Each deck's draws are recomputed here from its

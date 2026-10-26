@@ -1332,6 +1332,9 @@ function toNotFormed(entry: NotFormedCondensateDto): NotFormedCondensate {
     case "displaced":
       reason = { kind: "displaced", by: why.by };
       break;
+    case "supercritical":
+      reason = { kind: "supercritical" };
+      break;
   }
   return { condensate: entry.condensate, reason };
 }

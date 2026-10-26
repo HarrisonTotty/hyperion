@@ -7461,6 +7461,54 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `tests/golden/planetary/equilibrium.golden`, and `packages/protocol/fixtures/substances.json`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::equilibrium`;
     `cargo test -p hyperion-sim substance::`; `just fit-check`.
+- **P14.T52.f A base at its condensable's critical point** (a rider of 24's shape, holding
+  nothing; decision-n2-critical-decks, 2026-10-23; built by p14-wire-24 as one fix commit in its
+  B1 fix or B2's first commit, before P14.T54.b.i, else 25 with `PROTOCOL_VERSION` 4).
+  - _The finding_: where a row's vapour holds x P above its critical pressure p_c as the profile
+    cools through its critical temperature T_c, the supersaturation steps from −∞ (no curve at or
+    above T_c) to ln(x P ÷ p_c) > 0. The base's bracket then converges on the curve's end, not
+    on a crossing. On the sample under the air's batch alone (23's states), two liquid N₂ decks
+    were based at 126.192 K under kilobar CH₄ airs: 02001b2ca0000000.0400 and
+    02001b2c9ffe0000.0500. With every 24 hold neither is published: 0400 is P14.T53.b part 2's,
+    and 0500's N₂ is its bulk.
+  - `chem/condense.rs`: a `Crossing` base of a row's own curve (`SaturationLaw::Diagram`) whose
+    x P is at or above the diagram's p_c is not a deck. The vapour passes from supercritical
+    fluid to compressed liquid around the critical point, with no interface.
+    - When the loop takes that base (its hottest-first turn), the row leaves as the new
+      `NotFormed::Supercritical` and draws nothing. Its vapour stays in the gas above, labelled
+      and never trapped, as a bulk gas's. No other base is re-found.
+    - `not_formed()` stays in registry order. The module's "What is not modelled" gains the
+      case: its dense fluid is the surface partition's (P14.T51.a, with P14.T53.b part 3's cap)
+      or the supercritical envelope's.
+    - Unchanged: a crossing below T_c (within 0.99 T_c it keeps P14.T54.b.b's F4 cut); every
+      `Bottom` base.
+    - Refused: clamping the base below T_c (the excess condensing at T_c⁻ is the same deck one
+      step colder).
+  - _The wire_: `NotFormedReasonDto::Supercritical` (`supercritical`, a unit variant), in the
+    closed enum before 24's first send (`PROTOCOL_VERSION` stays 3). It gets the conversion's
+    arm, the client's decoder and model, and `assert_wire_strings`. R08's second pass at
+    P14.T54.b.i reads it.
+  - _Tests:_
+    - a CH₄-dominated column whose N₂ (about 8% by mole) holds x P above p_c where it cools
+      through 126.192 K: no N₂ deck; `not_formed` lists (CH₄, BulkGas) and (N₂, Supercritical);
+      `remaining(N₂, p)` above its T_c level is the deep N₂;
+    - the same column with N₂ trimmed until x P lies just under p_c at T_c: an N₂ `Crossing`
+      below T_c, on its curve to 10⁻⁶;
+    - every base placed in the module's tests has x P under its p_c;
+    - `planetary/condense`, `planetary/envelope_atmosphere` and `planetary/aerosols` unchanged
+      to the byte;
+    - the wire form of `supercritical`, and the client decoder's vitest case;
+    - printed, not asserted: over the sample, the goldens and LOOK72 with every 24 hold in
+      force (decision-t24i-airless-state D3.3), the rows labelled `supercritical` by body, with
+      x P ÷ p_c at T_c and the bulk, and every `Bottom` base with x P ≥ p_c. Under the air's
+      batch alone, 0400's and 0500's N₂ are labelled, and P14.T54.b.b's F4 tally refuses none.
+  - _Files:_ `planetary/chem/condense.rs`; `substance/aloft.rs` (a getter for the law's p_c);
+    `hyperion-protocol`'s `planetary/record/surface.rs` and the generated bindings; the server's
+    `convert/planetary.rs`; the client's `bodiesWire.ts`, `model.ts` and their tests;
+    `planetary/system/air/tests.rs` (the F4 test's doc and its holds).
+  - _Accept:_ `cargo test -p hyperion-sim planetary::chem::condense`;
+    `cargo test -p hyperion-sim planetary::system::air`; `cargo test -p hyperion-protocol`;
+    `cargo test -p hyperion-server convert`; the client's vitest; `just gen-protocol` clean.
 
 #### P14.T53 Escape, special states and life
 
@@ -8217,14 +8265,19 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - Count (xii) (decision-n2-critical-decks): every row labelled `supercritical` and every deck
         based above 0.99 T_c (F4's refused), by body, key, x P ÷ p_c at T_c and the bulk; every
         `Bottom` base with x P ≥ p_c. At 24, none expected. To main by name: any.
+      - Count (xiii) (decision-p14-t51g Q9): the regular moons whose whole hydrosphere is liquid on
+        rock under a thin shell (as 420e5bbe00800032.0701: 30.2 mW m⁻² under 18.5 km, 519.5 km to
+        rock at 429 MPa), with F, e, shell and depth; the members P14.T51.g.a leaves absent; the
+        lagged moons it moves off the ocean branch, by name. The heat is P14.T55.j's.
       - Each hold's cost share (D5).
       - §C.7's splits, listed.
       - Per-hold attribution of every moved value: `golden_diff` after each hold's deletion, in a
-        fixed order, in scratch.
+        fixed order that includes P14.T51.g.a's `OCEAN_FLOOR_VERSION`, in scratch.
       - R09's coarse field's move through `ebm.rs`'s greenhouse constants, listed.
     - **P14.T54.b.l The bump** (B4, alone; after B3's gate and R08's sign-off).
-      - It deletes every hold at 24 with its tripwire, the four source scans with their `HELD`
-        lists, and `OCEAN_VERSION`.
+      - It deletes every hold at 24 with its tripwire (P14.T51.g.a's `OCEAN_FLOOR_VERSION`, a
+        MUST-FIX member, among them), the four source scans with their `HELD` lists, and
+        `OCEAN_VERSION`.
       - It restamps `thermo_equilibrium`, `condensate_extinction` ×7 and the surface crate's
         `space_weathering` `--since 24`, with whatever `fit-check` flags. No stellar table may be
         stale.
@@ -29341,3 +29394,55 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `golden_systems` keeps the escape's hold and T56.g's `pub(super)`; T49.n's `RecordRules`
     literal takes `..RecordRules::in_force()`; and `satellite_record` binds `t` and `ctx` on one
     line, to stay under Clippy's line limit with T56.g's lines.
+- **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
+  critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
+  3, with no hold. The three goldens hold to the byte (`planetary/condense`,
+  `planetary/envelope_atmosphere` and `planetary/aerosols`: `the_condensation_is_pinned`,
+  `the_envelope_atmosphere_is_pinned` and `the_inventory_is_pinned` pass unchanged).
+  - _The rule_, as §3.2: when the loop takes its hottest base, `past_its_critical_point` asks
+    whether a `Crossing` base of a `SaturationLaw::Diagram` law has x P (the vapour the decks
+    below leave there, times p) at or above `LawAloft::critical_pressure`, new in
+    `substance/aloft.rs` (the diagram's p_c; `None` for a closed form). If so the row leaves as
+    `NotFormed::Supercritical`, draws nothing and moves no other candidate's base. `not_formed()`
+    is sorted by row once at the end; the labels before it were in registry order already, so
+    their order is unchanged. The variant carries §3.2's doc, and the module's "What is not
+    modelled" gains the case.
+  - _The wire_: `NotFormedReasonDto::Supercritical`, a unit variant tagged `supercritical`; the
+    conversion's arm; the client's `NotFormedCondensate.reason` gains `supercritical`, decoded in
+    `toNotFormed`'s switch. The enum is tagged by `type`, so its strings are pinned by the wire
+    form (`not_formed_wire_forms`), not `assert_wire_strings`, which takes plain strings.
+    Bindings regenerated.
+  - _Tests_, as §5:
+    - the kilobar methane column, a test profile T = 200 K (p ÷ 10 kbar)^¼ held at 60 K, its N₂
+      8% by mole, x P 3.7 p_c where it cools through 126.192 K near 1.59 kbar: no deck, (CH₄,
+      BulkGas) and (N₂, Supercritical) in registry order, and the deep N₂ above, to the bit;
+    - the same profile through an argon air, its N₂ 8% by mole
+      (`a_supercritical_row_is_listed_before_a_later_row_s_bulk_gas`): the bulk Ar, a later row
+      than N₂, is labelled before the loop and the N₂ only as the loop takes its base, so the list
+      reads (N₂, Supercritical) then (Ar, BulkGas), asserted as written, only through the sort;
+    - trimmed to x P = 0.99 p_c at T_c (x_N₂ 0.02121): an N₂ `Crossing` at 125.575 K (0.9951
+      T_c) and 1,554 bar, x P 0.9708 p_c, on its curve to 10⁻⁶;
+    - every base the module's seven test columns place on a row's curve lies under its p_c,
+      and none is labelled;
+    - the protocol's wire form and the client's decoding.
+  - _The F4 tally_ (`no_liquid_mode_lies_near_its_critical_point_or_below_water_s_triple_point`)
+    runs over the first 40 whole systems and the golden systems with every hold at 24 in force:
+    the shared `planetary::testing::with_every_24_hold` (P14.T53.b's batch; the escape's with the
+    Rayleigh floor's, the unlit mean's, the moons' bulks', the cold traps', the read densities',
+    the compressed liquids' and the rows' darkening), with the record's batch (`with_record_rules`:
+    the cold traps' and the air's), each system generated and read inside the switches. "The
+    sample holds two" goes. Printed with every hold, P14.T53.b part 2 in the tree (517194df):
+    130 liquid modes, none refused, none labelled `supercritical`, no deck at the ground past
+    its p_c. Under the air's batch alone, asserted: none refused, and 0400's and 0500's N₂
+    labelled (x P 2.269 and 2.852 p_c, CH₄ their bulk), so P14.T54.b.b's sample figures under
+    that batch read 102 decks, 239 modes and 72 not formed (104, 241 and 70 before).
+  - _Count (xii) at 24_: none labelled with every hold, as decision-n2-critical-decks expected:
+    part 2 takes 0400's surface off the record, and 0500's N₂ is its air's bulk. LOOK72 is not
+    walked here (a census's walk, not a lib test's): it is count (xii)'s at P14.T54.b.k.
+  - _`Bottom` bases_: the tally takes a deck based at the ground for §3.2's `Bottom` base, since
+    the inventory's deck carries no bound, and its x P as the ground's mole fraction times p_s.
+  - _The scan_: the loop's source scan (`nothing_on_the_record_calls_the_condensation_yet`)
+    holds `system/air/tests.rs` in its `HELD` list beside `system/air.rs`, naming
+    `AIR_SECTIONS_VERSION`, as the inventory's scan does. The entry is B1's fix commit's
+    (2d1df743), which named the loop's errors there; P14.T52.f's F4 tally names `NotFormed` in the
+    same file under it, and changes no scan.

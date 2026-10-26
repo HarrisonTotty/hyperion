@@ -101,6 +101,16 @@
 //! - **A displaced law** ([`NotFormed::Displaced`]): quartz, where enstatite can take its silicon
 //!   (where the gas holds magnesium), and titanium dioxide, where perovskite takes its titanium
 //!   (where it holds calcium; [`substance::aloft`](crate::substance::aloft)).
+//! - **A vapour past its critical point** ([`NotFormed::Supercritical`], P14.T52.f): a row's own
+//!   curve ends at its critical point, so a vapour whose partial pressure x P is at or above the
+//!   critical pressure `p_c` where the profile cools through its critical temperature is
+//!   saturated at the first level colder than that, with no crossing: the base's bracket would
+//!   converge on the curve's end. When the loop takes such a `Crossing` base, the row leaves as
+//!   not formed and draws nothing, its vapour labelled in the gas above and never trapped, as a
+//!   bulk gas's. Its dense fluid is the surface partition's (P14.T51.a, with P14.T53.b part 3's
+//!   cap) or a supercritical envelope's. A crossing below the critical temperature, and every
+//!   [`DeckBound::Bottom`] base, is unchanged; clamping the base below `T_c` is refused, since the
+//!   excess would condense at once, the same deck one step colder (decision-n2-critical-decks).
 //! - **One phase a deck**, its base's: a deck that rises through its condensate's melting point
 //!   (a water deck through 273 K) keeps the phase it formed in, and the grain density of its
 //!   base's temperature.
@@ -339,6 +349,12 @@ pub enum NotFormed {
         /// The condensate that displaces it.
         by: SubstanceKey,
     },
+    /// Its vapour's partial pressure reaches its critical pressure where the profile cools through
+    /// its critical temperature. It passes from supercritical fluid to compressed liquid around
+    /// the critical point, crossing no saturation curve, so no deck has a base. The dense fluid is
+    /// not modelled here: it is the surface partition's, or a supercritical envelope's (P14.T53.b;
+    /// P14.T52.f, decision-n2-critical-decks §3.2).
+    Supercritical,
 }
 
 /// What a mode's τ(550) rests on.
@@ -1240,6 +1256,12 @@ impl Condensation {
                 break;
             };
             let c = candidates.remove(i);
+            if past_its_critical_point(&c, base, &pool, &placed) {
+                // P14.T52.f: the vapour crosses no saturation curve, so the row forms no deck and
+                // draws nothing, and no other candidate's base moves.
+                not_formed.push((c.id, NotFormed::Supercritical));
+                continue;
+            }
             let deck = place(&c, base, &pool, &placed, &context);
             let touched: Vec<usize> = c.draws.iter().map(|&(j, _)| j).collect();
             placed.push(Placed {
@@ -1256,6 +1278,9 @@ impl Condensation {
             .iter()
             .map(|p| p.draws.iter().map(|&(j, r)| (pool.vapours[j], r)).collect())
             .collect();
+        // The candidates' labels are in registry order already; a row past its critical point
+        // joins them as the loop takes its base, hottest first.
+        not_formed.sort_by_key(|&(id, _)| id);
         Ok(Self {
             gas: mixture,
             decks: placed.into_iter().map(|p| p.deck).collect(),
@@ -1520,6 +1545,26 @@ fn find_base(
         bound: DeckBound::Crossing,
         order: temperature,
     })
+}
+
+/// Whether the candidate `c`'s base `base`, in the gas the decks `placed` leave, is the end of its
+/// row's own curve rather than a crossing of it (P14.T52.f; the [module](self)'s "What is not
+/// modelled"): a [`DeckBound::Crossing`] base of a [`SaturationLaw::Diagram`] law whose vapour's
+/// partial pressure x P there is at or above the diagram's critical pressure, which the curve
+/// reaches only at its critical point, so that no genuine crossing meets it. A closed-form law
+/// has no such end, and a [`DeckBound::Bottom`] base is left as it is.
+#[must_use]
+fn past_its_critical_point(c: &Candidate, base: Base, pool: &Pool, placed: &[Placed]) -> bool {
+    let Some(critical) = c.law.critical_pressure() else {
+        return false;
+    };
+    match base.bound {
+        DeckBound::Bottom => false,
+        DeckBound::Crossing => {
+            let (vapour, _) = available(c, base.u, pool, placed);
+            vapour * math::exp(base.u) >= critical.value()
+        }
+    }
 }
 
 /// The step in ln p of the base's Newton slopes, by central difference.

@@ -1252,6 +1252,7 @@ fn aerosol_inventory(inventory: &AerosolInventory) -> AerosolInventoryDto {
                     NotFormed::Displaced { by } => NotFormedReasonDto::Displaced {
                         by: by.as_str().to_owned(),
                     },
+                    NotFormed::Supercritical => NotFormedReasonDto::Supercritical,
                 },
             })
             .collect(),

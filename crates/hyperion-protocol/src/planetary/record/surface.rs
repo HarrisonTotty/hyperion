@@ -668,6 +668,11 @@ pub enum NotFormedReasonDto {
         /// The condensate that displaces it: a key of the substance registry.
         by: String,
     },
+    /// Its vapour's partial pressure reaches its critical pressure where the air's profile cools
+    /// through its critical temperature (P14.T52.f): it passes from supercritical fluid to
+    /// compressed liquid around the critical point, crossing no saturation curve, so no deck has
+    /// a base. Its dense fluid is not a cloud; the vapour stays in the air above, as a bulk gas's.
+    Supercritical,
 }
 
 /// A condensable the inventory labels rather than traps as a deck, with why (plan 14,
@@ -2523,8 +2528,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// P14.T54.b.b: a condensable not formed is sent with its reason, `bulk_gas` or `displaced`
-    /// with the condensate that displaces it.
+    /// P14.T54.b.b: a condensable not formed is sent with its reason, `bulk_gas`, `displaced` with
+    /// the condensate that displaces it, or (P14.T52.f) `supercritical`.
     #[test]
     fn not_formed_wire_forms() {
         assert_wire_form(
@@ -2539,6 +2544,13 @@ pub(crate) mod tests {
                 by: "CaTiO3".to_owned(),
             },
             json!({ "type": "displaced", "by": "CaTiO3" }),
+        );
+        assert_wire_form(
+            &NotFormedCondensateDto {
+                condensate: "N2".to_owned(),
+                reason: NotFormedReasonDto::Supercritical,
+            },
+            json!({ "condensate": "N2", "reason": { "type": "supercritical" } }),
         );
     }
 

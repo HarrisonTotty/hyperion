@@ -9,4 +9,4 @@ export type NotFormedReasonDto = { "type": "bulk_gas" } | { "type": "displaced",
 /**
  * The condensate that displaces it: a key of the substance registry.
  */
-by: string, };
+by: string, } | { "type": "supercritical" };

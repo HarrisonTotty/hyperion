@@ -298,6 +298,20 @@ impl LawAloft {
         self.vapour_share
     }
 
+    /// The critical pressure at which the row's own curve ([`SaturationLaw::Diagram`]) ends, its
+    /// phase diagram's (P14.T52.f: a vapour whose partial pressure reaches it where the profile
+    /// cools through the critical temperature crosses no saturation curve); `None` for a closed
+    /// form (the vapour, product and Kulmala and Laaksonen laws), which has no such cut.
+    #[must_use]
+    pub fn critical_pressure(&self) -> Option<Pascals> {
+        match self.law {
+            SaturationLaw::Diagram => self.diagram.map(PhaseDiagram::critical_pressure),
+            SaturationLaw::Vapour { .. }
+            | SaturationLaw::Product { .. }
+            | SaturationLaw::KulmalaLaaksonen => None,
+        }
+    }
+
     /// The condensate whose deck takes this one's limiting vapour wherever it can form, so that
     /// this law gives no deck of a gas that also holds that one's: quartz's enstatite and titanium
     /// dioxide's perovskite (the [module](self)'s documentation).

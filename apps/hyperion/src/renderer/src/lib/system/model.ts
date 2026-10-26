@@ -745,10 +745,14 @@ export interface NotFormedCondensate {
   readonly condensate: string;
   /**
    * `bulk_gas` for a vapour holding at least half the air; `displaced` by the condensate, by its
-   * registry key, that takes its limiting vapour first.
+   * registry key, that takes its limiting vapour first; `supercritical` for a vapour whose partial
+   * pressure reaches its critical pressure where the profile cools through its critical
+   * temperature, so that it crosses no saturation curve (plan 14's P14.T52.f).
    */
   readonly reason:
-    { readonly kind: "bulk_gas" } | { readonly kind: "displaced"; readonly by: string };
+    | { readonly kind: "bulk_gas" }
+    | { readonly kind: "displaced"; readonly by: string }
+    | { readonly kind: "supercritical" };
 }
 
 /** One node of an absorber's profile. */
