@@ -4642,7 +4642,9 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
   line, in `--status-caution`, after any graphics fault and the terrain's, and forgets the cache's
   failures when `VIEW` is shown again. It feeds `ATMOSPHERE: PENDING`'s debounce each frame. The
   flight records no atmosphere fault. It sets `ATMOSPHERE REJECTED` among the atmosphere's notes
-  and `ATMOSPHERE DATA INVALID` on the fault line. The flight records neither.
+  and `ATMOSPHERE DATA INVALID` on the fault line. The flight records neither. _Built 2026-10-26_
+  (Risks, "Deviations in T10.b, as built" and its "Deferred findings (2026-10-13 rule)"
+  (R08.T10.b); `decision-r08-t10b-depth.md`).
   Acceptance: `pnpm test` and `just test-render` pass, and by hand a flight past every fixture, on
   a kept test scene that carries them (`view/scenes/`), is recorded here, with the moonlit night on
   the Earth fixture (the Sun beyond the twilight limit, a full Moon), whose sky over R06's star
@@ -7480,7 +7482,11 @@ it rides a bump.
       depth. On low the composite would also lay the march over a mesh body there, which is the sky
       in front of it. That reads the brainstorm's low row, "aerial perspective on terrain only", as
       the passes after the composite taking none. Lean: keep it, since a body seen through the air
-      without it would stand undimmed against the sky.
+      without it would stand undimmed against the sky. _Ruled_ (`decision-r08-t10b-leans.md` §1):
+      kept. On both settings the composite lays the air over every opaque pass in the scene target,
+      R07's mesh bodies and R10's terrain alike. Low's terrain-only scope is the volume's: it is
+      published to no later pass, and it reaches no other body's face, which the march draws on both
+      settings.
     - _For R11_ (raised with R11's re-validation, as T6.c's note is). A pass drawn after the
       composite takes the volume within its reach only. Beyond the reach the march serves the
       scene's own depth alone: `aerialPerspectiveAt` holds the last slice there, about T 0.6 in
@@ -10018,10 +10024,10 @@ it rides a bump.
     refuses past x = 20,000 and the iron table past its largest size (a solid-iron mode of r_eff
     about 2 µm or more at v_eff 0.3, at 380 nm), and `aerosolTerm`'s throw would raise the
     computation fault, which ruling 6 keeps for bugs. Drop such a mode with a reason before 24's
-    inventory reaches the cache.
+    inventory reaches the cache. _Closed by R08.T10.b._
   - _Eviction frees no texture_ (item 10). `AtmosphereTables.dispose` stops following restores
     and frees nothing, so an evicted body's textures stay until the engine is disposed. For
-    R08.T10.b, with a release in `tables.ts` under `just test-render`.
+    R08.T10.b, with a release in `tables.ts` under `just test-render`. _Closed by R08.T10.b._
   - _Arrival._ Each worker forms a lined body's specs itself, about 0.5 s a worker on Earth, which
     is why the three later shares took about 1.0 s against the first's 0.53 s; sending the specs
     instead would serialise about 3 MB a worker on the render thread. For R08.T11's line-arrival
@@ -10029,6 +10035,191 @@ it rides a bump.
   - _Liquid methane_ (:12950–12955) was routed here beside 38(c), its sign-off question (does
     38(a) cover a liquid whose red bands are its own measurement?) is open, and nothing is built:
     it stays unlabelled meanwhile.
+- **Deviations in T10.b, as built** (2026-10-26; `decision-r08-t10a-leans.md` items 3, 4, 6 and 9
+  with its follow-up and UX review, `decision-r08-t10b-depth.md` and
+  `decision-r08-t10b-leans.md`). New: `view/atmosphere/`'s `bodyDetailShare.ts`;
+  `view/scenes/atmosphereScene.ts`; `displays/view/`'s `useAtmosphereCache.ts`,
+  `viewAtmosphere.ts`, `LabelStatementLine.tsx` and `check/atmosphereCheckRun.ts`;
+  `main/atmosphereCheckResults.ts` and `main/fixtures/atmosphereRecord.ts`;
+  `smoke/atmosphereFrame.ts`; `test/silentOpticsWorker.ts`; their tests, with
+  `ViewDisplayAtmosphere.test.tsx` and `atmosphereCheckPlate.test.tsx`. Edited: `assemble.ts`,
+  `aerosol.ts`, `sizeDistribution.ts`, `nonSpherical.ts`, `aggregate.ts`, `tables.ts`,
+  `hillaire.ts`, `AtmosphereCache.ts`, `labels.ts`, `bodyCamera.ts`, `bodies/draw.ts`,
+  `photoreal/passes.ts`, `photoreal/renderer.ts`, `terrain/frameTerrain.ts`, `scene/model.ts`;
+  `displays/view/`'s `ViewDisplay.tsx`, `InstrumentView.tsx`, `ViewLabelBlock.tsx`,
+  `photorealFrame.ts`, `viewFrameDrawer.ts`, `viewFaults.ts`, `viewRun.ts`, `useInstruments.ts`,
+  `useTerrainSession.ts` and `check/ViewsCheckRunner.tsx`; `App.tsx`; the views check's
+  `main/cli.ts`, `main/index.ts`, `main/viewsCheck.ts`, `main/viewsCheckRecord.ts`, the preload's
+  `viewsCheckApi.ts`, `viewsCheckLaunch.ts` and `api.ts`, and `scripts/viewsCheck.sh`; the comments
+  of `terrain/session.ts`; `smoke/page.ts`; `test/viewDisplayHarness.tsx`.
+  - _An aerosol mode outside its optics' range_ (T10.a's deferred finding, for the 24 serve gate).
+    `modesOf` drops it, before the term limit ranks the modes, for `assembleMedium` and
+    `absorberSpecsOf` alike, with `<phased name> particles: their sizes lie outside the optics on
+file, not drawn` under the τ rule (`their fractal dimension lies …` for an aggregate's shape).
+    Each bound is the refusal's own: `sizeDistribution.ts`'s `sizesInRange` and
+    `sphereModeInRange`, `nonSpherical.ts`'s `tableReaches` and `particlesInRange` (the routing
+    of `opticsOfParticles`; a mineral past `KERNEL_TRANSPARENT_N_MAX` also asks Mie's, since its
+    floor's fallback is known only from its optics), `aggregate.ts`'s `aggregateShapeInRange` and
+    `aggregateInRange`, routed by shape in `aerosol.ts`'s `aerosolModeInRange` at every wavelength
+    the term draws (`AEROSOL_TERM_WAVELENGTHS_NM`: the channels and 550 nm). The shortest is the
+    blue channel's 433.625 nm, not 380 nm: a solid-iron mode of r_eff 2 µm at v_eff 0.3 reaches
+    19.2 µm against the iron table's 18.1 µm there, and is dropped; one of 1 µm is drawn. Two
+    more legal records reach a refusal, and are dropped too: a gamma of v_eff 0.5 or more, which
+    the wire takes (`bodiesWire.ts`'s `positive`) and the law refuses; and an aggregate of
+    fractal dimension 1, which the wire takes ([1, 2.5]) and the MMF refuses ((1, 2.5]). For P14:
+    the wire's checks and the optics' ranges differ there (reported to main). The screen reads the
+    term's wavelengths alone: a spectral bake that reads a mode at 380 nm (R08.T14), where the iron
+    table ends at 15.9 µm, must screen it there too. The reasons' wording ("outside", not the
+    handoff's "past", since a distribution below Mie's smallest size is screened too) passed the
+    UX review.
+  - _The tables handed over_ (item 3). `HillaireAtmosphere.over(engine, tables, sizes, kernels)`
+    takes the cache's `AtmosphereTables` (`HeldTables`), never disposes them, takes its figure and
+    gravity from them (`tablesFigureOf`: the body's, or a sphere of `bottomRadiusM`, a new
+    getter), and follows the cache's next set (`setTables`); `setMedium` refuses held tables. Its
+    gravity is no longer fixed at construction. The per-frame kernels and the composite are the
+    device's, shared by every view's atmospheres (`createAtmosphereFrameKernels`, made
+    asynchronously with the renderer's other pipelines), since the engine caches no pipeline and
+    a kernel has no release; an atmosphere over shared kernels refuses a frame after a restore,
+    and its owner makes it again. `dispose` now releases the frame's own textures (sky view,
+    aerial volume, ray march) and the tables it built. The forward-lobe tables stay where they
+    are built; moving them into the optics worker was optional and is not done.
+  - _Eviction frees its textures_ (T10.a's deferred finding). `AtmosphereTables.dispose`
+    releases the buffer and every texture once, and `setMedium` refuses after it. Each view takes
+    a body's tables afresh every frame, so none draws with released ones.
+  - _The passes._ `photorealisticPasses`' `atmosphere` slot is built, with
+    `PassEntry.labels` (`ATMOSPHERE_PASS_LABELS`: `atmosphere tables`, `atmosphere view`,
+    `atmosphere composite`, the constants `ATMOSPHERE_TABLES_PASS`, `ATMOSPHERE_VIEW_PASS` and
+    `ATMOSPHERE_COMPOSITE_PASS`). `PhotorealFrame.atmospheres` names each body's tables, its
+    `bodyAtmosphereCamera` at the frame's own viewport (not the presented size) and its
+    `toBodyFixed` (`atmosphereToBodyFixed`). After the discs, each body's composite is drawn,
+    farthest first, into two air targets in turn (`rgba16float`, no depth, so that a composite
+    reads the scene's depth), the next over the last; the histogram, bloom and the tone map read
+    the last (`frameColours`, a probe for the smoke page). Memory for R08.T11 and R12.T10: two
+    full-size air targets a photorealistic view, made at its first air, and one sky view, aerial
+    volume and ray-march target a body whose air the view draws, let go when it no longer does.
+  - _A composite that throws_ (`decision-r08-t10b-leans.md` §2, ruled on the lane's lean). A throw
+    from a view's drawing of a body's atmosphere (`HillaireAtmosphere.over`, `skySources`,
+    `drawFrame`), other than a lost device's, is item 6's failure (`decision-r08-t10b-leans.md`
+    §2). The renderer reports it to the cache, which holds the body `failed`, logs once, and raises
+    `ATMOSPHERE NOT AVAILABLE: computation failed for <designations>, reopen VIEW to retry` on every
+    view that draws it larger than a point. It is retried at the next trigger and when `VIEW` is
+    shown again. As built: `#drawAtmospheres` catches in one place, `#atmosphereOf` inside its `try`, and
+    passes the body, the error and its view's name to `PhotorealFrame.onAtmosphereFailed`, the
+    view's `AtmosphereView.reportDrawFailure`, which moves the body to `failed`, cancels its build
+    and lets its tables go, with one `console.error` naming the view; a report for a body already
+    failed, or from a closed view, does nothing. A lost device's throw is told by its type
+    (`EngineUnavailable`, and the new `AtmosphereRetired` that an atmosphere over shared kernels
+    throws after a restore; `lostDevice`) and reports nothing. The renderer's `#airFailed` is gone;
+    with no handler (the smoke page, a test) it logs the throw itself.
+  - _One list of sources_ (Design note 7). `BodyFramePlan.sources` holds the arrays each record
+    was shaded from, which the sky takes as they are; `bodyLightSources` gives a body the plan
+    holds no record of the same arrays (the camera's local body seen from inside its figure's
+    sphere; the renderer gives every such body drawn larger than a point its sources, and draws
+    its air only where its camera is inside it). A star past the light slots its tables hold is
+    left out of its sky until the cache builds them for it: the cache takes the lights of the
+    view's last plan, a frame behind.
+  - _An air body drawn with depth_ (`decision-r08-t10b-depth.md`). A body whose air the frame
+    draws (`PhotorealFrame.atmospheres`) and that `planLitBodies` would draw as a disc is drawn
+    as a mesh (`BodyFrameOptions.depthBodies`), and promotes the discs it overlaps, as a mesh body
+    does (R07 Design note 2). Without depth the composite reads its pixels as nothing drawn and
+    puts the march's bare p q ground over R07's disc. This adds a third case to R07 Design note
+    1's mesh regime. There is no pixel threshold, since a point draws no air and R07's mesh holds
+    down to the 3 px switch. Its costs are recorded for R08.T11: one smooth mesh per air body; the
+    face's pixels at the drawn surface's 36 steps on high, not lever 3's 20–28; and small air
+    bodies' cells shaded serially, T9.b's per-tables `disc cells` dispatch deferred.
+  - _The scope on low_ (T9.a's question "For R08.T10.b", :7480; ruled, `decision-r08-t10b-leans.md`
+    §1). The composite takes the scene target's depth on both settings, so on low it lays the air
+    over every air body's face as well as the terrain, not "the terrain alone": without it, an air
+    body seen from orbit would show air at its limb over a bare face. T9.a's own lean, kept.
+  - _The air beyond an unseen figure_ (`decision-r08-t10b-leans.md` §3): an air body's composite is
+    drawn while its shell, a + H ÷ s_e, meets the view, its figure off it or not. Its promotion
+    footprint is the shell's circle. As built: `airShellRadiusM` takes the larger semi-axis of the
+    march's top shell, (a + H ÷ s_e, c + H ÷ s_p) (`viewExactOf`), a + H ÷ s_e on every oblate body;
+    `#drawAtmospheres` draws a body whose shell is not `sphereOutsideView`, its sources those
+    `withRecordlessSources` builds; `BodyFrameOptions.depthBodies` is now a map of each body's shell
+    radius, its footprint for `promoteOverlapping` that circle. The figure's record stays culled at
+    a.
+  - _Every view compiles the atmosphere's kernels_ (the four per-frame kernels and the composite)
+    with its other pipelines, with air or without: their compile time is for R08.T11, and a failed
+    compile fails the photorealistic style as any of its pipelines does.
+  - _The surfaces lit through the air._ Each air body's `LitBodyInput.atmosphere` is
+    `surfaceLightingTablesOf(tables)`, and a body handed over passes its record's to its terrain
+    (`terrainLightingOf`, R10.T16.c's binding point), the composite then laid over the terrain.
+  - _The fetch joined_ (item 4). `BodyDetailShare` sits between the link's request client and
+    both askers. The cache's asks are its triggers: sent, or joined to a request for the body in
+    flight; its reply is kept. The terrain session's `body_detail` joins one in flight or takes
+    the latest reply kept (the latest 64 bodies'), at once, so that one request a body serves
+    both; every other request, `surface_field`'s bulk with its options among them, passes
+    through. `useTerrainSession`'s server stage gains `requests`, the share's; `session.ts`'s
+    comments name the share in place of "R08.T10.a's shares".
+  - _The frame noted._ Each view's drawer notes its frame with the cache through its own handle
+    (`ViewAtmosphereHandle`, opened anew when the stage's cache is remade, closed with the view):
+    each lit body at its regime on the view's last photorealistic plan, its lights as `BodyLight`s
+    from that plan's sources (the star's scene body, R06's bake spectrum), and a kept scene's
+    body with its `ViewBody.atmosphere` (new; absent is `unset`, so R07's `TEST GIANT` and every
+    kept body left unset carry `ATMOSPHERE: NOT YET MODELLED`). A wireframe frame notes none
+    wanted. The camera's local body where terrain draws it is noted at its plan's regime, not as
+    `terrain`, since it is wanted either way. `AtmosphereScene`: the system's place and
+    designation, the scene's time, one arrival object a system the stage draws (made anew when
+    the scene's system changes; a stage remounts across a system's loss), the grants as
+    `SceneSystem.grants`' levels, and the link's state.
+  - _The lines_ (item 6, its follow-up and UX review). `photorealStatements` appends the
+    atmosphere's notes after the others (`labels.ts`'s `atmosphereNotes`), the `ATMOSPHERE
+REJECTED` lines after `ATMOSPHERE: NOT RESOLVED` and before the annunciations; a statement
+    may be a request's status (`LabelStatement`, `LabelStatementLine`), the server's own failure in
+    `--status-caution`.
+    `faultsFor` appends `ATMOSPHERE NOT AVAILABLE` and the `DATA INVALID` lines after the
+    graphics fault and the terrain's. An instrument states its own. Each names its bodies by
+    designation (`atmosphereShownOf`), published at the readout rate; a problem of a body the
+    scene no longer holds says nothing. On the UX review, a `REJECTED` line is a request's status
+    (`StatusStatement`, set through `StatusLine` as the survey line's `REJECTED` is): `refused` in
+    `--text`, `fault` in `--status-caution`.
+  - _The seams narrowed._ `AtmosphereRequests` and R10's `TerrainRequests` take `body_detail` alone
+    (`request(body: RequestOf<"body_detail">)`), the one kind either asks of its own, which the
+    link's request client takes as it is; the share hands each request back under its own kind,
+    with no cast.
+  - _Failures forgotten._ The cache lives as long as its engine, which `Activity` disposes when
+    `VIEW` is hidden, so `VIEW` shown again makes a cache that holds no failure: the rule is met
+    by the cache's lifetime, and `forgetFailures` is not called.
+  - _Kept media loading._ `KeptBodyAtmosphere` gains `loading`, pending as a server body's
+    asked record is, for a kept scene whose fixtures' optics load lazily.
+  - _VIEW's tests_ take `test/silentOpticsWorker.ts`'s workers (`ViewDisplay`'s new
+    `opticsWorkers`), which answer nothing, so that no test frame waits on the optics.
+  - _The smoke page_ (part 11, `R08.T10.b the air over a drawn ground`; the ruling's §6): an
+    Earth from outside its air, 40 px across, drawn twice under one set of tables with its albedo
+    halved; the scene's depth above 0 at the disc's centre, (out A − B) ÷ (ground A − B) in (0, 1]
+    in every channel, and every texel finite; the ring of pixels at depth 0 recorded. Measured
+    (`just test-render --part=11`, both variants, 2026-10-26): the shares 0.789, 0.789 and 0.790
+    (r, g, b), 40 of the disc's 1,264 pixels at depth 0; the group 30.2 and 30.4 s, part 11
+    101.6 and 102.7 s of its 180 s watchdog, at a 1-minute load of 0.14 when it started. The shares
+    are grey: the face seen from above the top takes the march's mean transmittance (T8.b's
+    deferred finding, now on every air body's face; `decision-r08-t10b-depth.md` §5). The ruling's
+    51 s for part 11 predates T8.c's footprint group, 42.9 s of it here.
+- **Deferred findings (2026-10-13 rule)** (R08.T10.b). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The limb under the air_: on the limb pixels whose centre ray meets the ground (about 44, 19,
+    6 and 2% of a disc's ground pixels at 4, 10, 32 and 100 px), the march's p q Lambert ground
+    stands in for R07's law and class map, the colour per channel kept. A point in front of an air
+    body's face takes the face's depth, and its air column is laid over it. Both are R08.T16.b's.
+    The candidate is a disc-ground input to the composite and the march, through R05.T12.e's gate.
+  - _The face's lost lever 3 and the serial cells_ (`decision-r08-t10b-depth.md` §5, §7): for
+    R08.T11's measured frame, and to R12.T10 only if its rows miss (lever 3's count for a drawn
+    surface on the reference spheroid, through R05.T12.e's gate, and one `disc cells` dispatch
+    per set of tables, against T9.b's note that gave it to T10.b).
+  - _The band on each drawn body_ (T8.a's lean: `marchBand.test.ts`'s read, march and blend frames
+    on each body T10.b draws) and _each drawn body's low e_q_ beside `LOW_TWIN_WORST` (T8.b): not
+    run; figure-matching, for R08.T11's frame or R08.T17.
+  - _Several bands on the GPU_ (T8.b's record, :8616, "R08.T10.b checks it on the Saturn-class
+    figure"): the flight draws the Saturn-class fixture, by eye only; a measured check is R08.T11's
+    or R08.T17's.
+  - _The label block's room_ (T2's record, "For R08.T10.b"): every kept scene's body left unset now
+    adds `ATMOSPHERE: NOT YET MODELLED` (`PRECISION TEST` had 6 px to spare). Not measured here;
+    for R08.T11's frame or R12.
+  - _The `APPROXIMATE` row and a mode out of range_ (the UX review): the guide's row names no cloud
+    or haze left out for its optics' range, nor when that clears. A clause for the sign-off.
+  - _Generated worlds on screen._ T10.a's _trace broadeners' widths_ now show:
+    `ATMOSPHERE: APPROXIMATE` stands on every Earth-, Mars- and Saturn-class generated world that
+    draws. For main's revisit, as T10.a's record asked.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
