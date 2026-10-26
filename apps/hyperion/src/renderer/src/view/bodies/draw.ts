@@ -225,12 +225,14 @@ export interface BodyFrameOptions {
    */
   readonly depthWriters?: ReadonlyArray<ScreenCircle>;
   /**
-   * The bodies drawn with depth whenever they are drawn larger than a point: those whose atmosphere
-   * the frame draws (plan R08, R08.T10.b), whose composite lays the air over the ground by its depth
-   * and would otherwise draw its own bare ground over a disc's pixels. A disc among them is drawn as
-   * a mesh, and promotes the discs it overlaps as a mesh does. Absent, none.
+   * The bodies drawn with depth whenever they are drawn larger than a point, each with the radius
+   * of its air's shell, m: those whose atmosphere the frame draws (plan R08, R08.T10.b), whose
+   * composite lays the air over the ground by its depth and would otherwise draw its own bare
+   * ground over a disc's pixels. A disc among them is drawn as a mesh, and promotes the discs it
+   * overlaps as a mesh does, its footprint its shell's circle, over which its composite draws
+   * (`decision-r08-t10b-leans.md` §3). Absent, none.
    */
-  readonly depthBodies?: ReadonlySet<BodyIdHex>;
+  readonly depthBodies?: ReadonlyMap<BodyIdHex, number>;
   /** The view's quality setting, which a mesh body's selection takes. */
   readonly setting: QualitySetting;
 }
@@ -347,7 +349,7 @@ export function bodyLightSources(
 }
 
 /** No body drawn with depth for its air. */
-const NO_DEPTH_BODIES: ReadonlySet<BodyIdHex> = new Set();
+const NO_DEPTH_BODIES: ReadonlyMap<BodyIdHex, number> = new Map();
 
 /** A body whose centre is within this fraction of its radius is seen from inside, and not drawn. */
 const INSIDE_MARGIN = 1e-9;
@@ -625,11 +627,14 @@ export function planLitBodies(
     reliefM: body.handoverReliefM,
   }));
   const { camera, viewport } = options;
+  // A body whose air is drawn is drawn with depth (R08.T10.b), a disc of it as a mesh, and its
+  // footprint is its air's shell, which its composite draws over.
+  const depthBodies = options.depthBodies ?? NO_DEPTH_BODIES;
   const footprints = new Map<BodyIdHex, ScreenCircle>();
   for (const sphere of spheres) {
     const footprint = sphereFootprint(
       sphere.centreM,
-      sphere.radiusM,
+      Math.max(sphere.radiusM, depthBodies.get(sphere.id) ?? 0),
       options.camera,
       options.viewport,
     );
@@ -646,8 +651,6 @@ export function planLitBodies(
     pixelAngleRad(camera, options.presentedPx),
     previous,
   );
-  // A body whose air is drawn is drawn with depth (R08.T10.b), a disc of it as a mesh.
-  const depthBodies = options.depthBodies ?? NO_DEPTH_BODIES;
   const meshed = new Map<BodyIdHex, LitRegime>(
     [...handed].map(([id, regime]) => [
       id,

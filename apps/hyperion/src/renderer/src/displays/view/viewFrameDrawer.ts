@@ -545,6 +545,13 @@ export class ViewFrameDrawer {
     exposed: number,
   ): { readonly drawn: boolean; readonly terrain: TerrainAnnunciation | null } {
     const { sky, run } = inputs;
+    const airView = inputs.atmosphere?.view;
+    const reportAirFailure =
+      airView === undefined
+        ? undefined
+        : (body: BodyIdHex, error: unknown, viewName: string): void => {
+            airView.reportDrawFailure(body, error, viewName);
+          };
     // The view's own terrain of the session's passes, for this frame alone (R10.T16.c).
     const terrain =
       inputs.terrain === undefined
@@ -596,6 +603,9 @@ export class ViewFrameDrawer {
           overlay: (surveyed) =>
             overlaySubmission(this.#wireframe, list, tokens, camera, viewport, surveyed),
           atmospheres: inputs.atmosphere?.tablesOf,
+          // A body's air that throws as it is drawn is the cache's to hold failed (R08.T10.b;
+          // decision-r08-t10b-leans §2).
+          atmosphereFailed: reportAirFailure,
         }),
       );
       if (plan === null) {

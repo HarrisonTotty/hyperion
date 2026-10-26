@@ -7,7 +7,16 @@
  * on in-process workers.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  onTestFinished,
+  vi,
+} from "vitest";
 
 import { toBodyDetail } from "../../lib/system/bodiesWire";
 import { earthBody, venusClassMedium } from "../../test/atmosphereFixtures";
@@ -823,6 +832,80 @@ describe("a build that fails", () => {
       [null, null, ["atmospherePending"]],
       1,
       h.made[0],
+      0,
+    ]);
+  });
+});
+
+describe("a body whose air throws as it is drawn (decision-r08-t10b-leans §2)", () => {
+  /** A cache with A drawn, then its draw reported failed by its view and by another. */
+  async function drawFailed(): Promise<{
+    readonly h: Harness;
+    readonly other: AtmosphereView;
+    readonly errors: MockInstance<typeof console.error>;
+  }> {
+    const h = harness();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    await drawn(h, [lit(A)]);
+    const other = h.cache.openView();
+    h.view.reportDrawFailure(A, new Error("a bug in the draw"), "VIEW 1");
+    other.reportDrawFailure(A, new Error("the same bug"), "VIEW 2");
+    return { h, other, errors };
+  }
+
+  it("holds it failed for every view, its tables let go, with one console.error naming the view", async () => {
+    const { h, other, errors } = await drawFailed();
+    const report = note(h, [lit(A)]);
+    const seen = other.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
+    expect([
+      h.cache.entryOf(A),
+      h.made[0]?.disposed,
+      report.problems.get(A),
+      seen.problems.get(A),
+      report.labels,
+      errors.mock.calls.map(([text]) => text),
+    ]).toEqual([
+      null,
+      true,
+      { kind: "failed" },
+      { kind: "failed" },
+      [],
+      [`the atmosphere of ${A} could not be drawn in VIEW 1:`],
+    ]);
+  });
+
+  it("is drawn again once its retry at the next trigger lands", async () => {
+    const { h } = await drawFailed();
+    const arrived = sceneOf({ arrival: {} });
+    note(h, [lit(A)], 0, arrived);
+    h.seam.answer(h.seam.latestFor(A).id, answerFor(A));
+    await microtasks();
+    await land(h, A, { kind: "built", assembled: earthAssembly() });
+    note(h, [lit(A)], 0, arrived);
+    expect([h.seam.askedFor(A), h.cache.problemOf(A), h.cache.entryOf(A)?.tables]).toEqual([
+      2,
+      null,
+      h.made.at(-1),
+    ]);
+  });
+
+  it("is drawn by a new cache, VIEW shown again", async () => {
+    await drawFailed();
+    const again = harness();
+    expect((await drawn(again, [lit(A)])).problems.get(A)).toBeUndefined();
+  });
+
+  it("takes no report from a closed view, or of a body it does not hold", async () => {
+    const h = harness();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    await drawn(h, [lit(A)]);
+    const closed = h.cache.openView();
+    closed.close();
+    closed.reportDrawFailure(A, new Error("a closed view's"), "VIEW 2");
+    h.view.reportDrawFailure(bodyId(9), new Error("no such body"), "VIEW 1");
+    expect([h.cache.problemOf(A), h.cache.problemOf(bodyId(9)), errors.mock.calls.length]).toEqual([
+      null,
+      null,
       0,
     ]);
   });

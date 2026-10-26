@@ -33,6 +33,7 @@ import { norm } from "../../geometry/vec3";
 import {
   ATMOSPHERE_COMPOSITE_PASS,
   type AtmosphereCamera,
+  AtmosphereRetired,
   type AtmosphereFrameKernels,
   createAtmosphereFrameKernels,
   geodeticOf,
@@ -40,6 +41,7 @@ import {
   type SunState,
   tablesFigureOf,
 } from "../atmosphere/hillaire";
+import { gravityRatio } from "../atmosphere/oblate";
 import { skySources } from "../atmosphere/sources";
 import { surfaceLightingTablesOf } from "../atmosphere/surfaceLighting";
 import { absorberCount, type AtmosphereTables } from "../atmosphere/tables";
@@ -63,6 +65,7 @@ import {
 import type { Quaternion } from "../camera/pose";
 import type { ViewRole } from "../camera/state";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
+import { EngineUnavailable } from "../engine/resilientEngine";
 import type {
   BufferHandle,
   ComputeHandle,
@@ -95,7 +98,7 @@ import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
 import { toHalfArray } from "../sky/half";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import type { SpriteRecord } from "../wireframe/drawList";
-import { type SurveyedDatumFrame, WIREFRAME_MESHES } from "../wireframe/submit";
+import { sphereOutsideView, type SurveyedDatumFrame, WIREFRAME_MESHES } from "../wireframe/submit";
 import { surveyedDatumsOf } from "./overlay";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 import { createSceneTarget } from "./sceneTarget";
@@ -236,6 +239,14 @@ export interface PhotorealFrame {
    * drawn before it; none, or absent, draws no atmosphere.
    */
   readonly atmospheres?: ReadonlyArray<FrameAtmosphere> | undefined;
+  /**
+   * Takes a throw from the drawing of a body's atmosphere, other than a lost device's
+   * (`decision-r08-t10b-leans.md` §2), with the view's name: the view's handle on the cache, which
+   * holds the body failed and logs it (`AtmosphereView.reportDrawFailure`). Absent, the renderer
+   * logs it itself.
+   */
+  readonly onAtmosphereFailed?:
+    ((body: BodyIdHex, error: unknown, viewName: string) => void) | undefined;
 }
 
 /** Where a {@link PhotorealRenderer} stands. */
@@ -337,6 +348,28 @@ function withRecordlessSources(
   return { ...plan, sources };
 }
 
+/**
+ * The radius of a body's air's shell, m: the bounding sphere of its medium's top, a + H ÷ s_e
+ * (`decision-r08-t10b-leans.md` §3), the larger semi-axis of the march's top shell, (a + H ÷ s_e,
+ * c + H ÷ s_p) (`hillaire.ts`' `viewExactOf`), s_e and s_p its gravity's ratios at the equator and
+ * the pole.
+ *
+ * @throws RangeError as `oblate.ts`'s `gravityRatio`, which the tables' build met first.
+ */
+export function airShellRadiusM(tables: AtmosphereTables): number {
+  const figure = tablesFigureOf(tables);
+  const gravity = tables.body?.gravity ?? null;
+  const topM = tables.medium.topHeightM;
+  const atEquator = gravity === null ? 1 : gravityRatio(gravity, 0);
+  const atPole = gravity === null ? 1 : gravityRatio(gravity, Math.PI / 2);
+  return Math.max(figure.equatorialRadiusM + topM / atEquator, figure.polarRadiusM + topM / atPole);
+}
+
+/** Whether a throw is a lost device's, which the graphics fault covers and no cache holds. */
+export function lostDevice(error: unknown): boolean {
+  return error instanceof EngineUnavailable || error instanceof AtmosphereRetired;
+}
+
 /** Whether a body's atmosphere camera lies inside its air: under its medium's top over the datum. */
 function insideAir(air: FrameAtmosphere): boolean {
   const { heightM } = geodeticOf(air.camera.positionM, tablesFigureOf(air.tables));
@@ -364,8 +397,6 @@ export class PhotorealRenderer {
     BodyIdHex,
     { readonly atmosphere: HillaireAtmosphere; readonly setting: QualitySetting }
   >();
-  /** The bodies whose composite failed, each said once until it draws again. */
-  readonly #airFailed = new Set<BodyIdHex>();
   /** The colour the latest frame's later passes read: its last composite's, or the scene's. */
   #drawnColour: TextureHandle | null = null;
   readonly #unsubscribe: () => void;
@@ -605,6 +636,7 @@ export class PhotorealRenderer {
     // its composite lays the air over its ground (R08.T10.b).
     const atmospheres = frame.atmospheres ?? [];
     const bodies = withAtmospheres(frame.bodies, atmospheres);
+    const shells = new Map(atmospheres.map((each) => [each.id, airShellRadiusM(each.tables)]));
     const planned = planLitBodies(
       bodies,
       frame.lights,
@@ -616,7 +648,7 @@ export class PhotorealRenderer {
         annuli: settings.discAnnuli,
         planetshine: settings.planetshineSources,
         depthWriters: frame.depthWriters,
-        depthBodies: new Set(atmospheres.map((each) => each.id)),
+        depthBodies: shells,
         setting: frame.setting,
       },
       frame.previousRegimes,
@@ -670,10 +702,16 @@ export class PhotorealRenderer {
     });
     // Each body's air over everything drawn before it, farthest first (R08.T10.b), into the air
     // targets in turn; the passes after read the last.
-    const hdrColour = this.#drawAtmospheres(resources, frame, plan, {
-      viewRotation,
-      projection,
-    });
+    const hdrColour = this.#drawAtmospheres(
+      resources,
+      frame,
+      plan,
+      { bodies, shells },
+      {
+        viewRotation,
+        projection,
+      },
+    );
     this.#drawnColour = hdrColour;
     if (frame.meter !== null) {
       resources.histograms.measure({
@@ -766,12 +804,19 @@ export class PhotorealRenderer {
    * it draws none for.
    *
    * @remarks
-   * A body's sky takes the sources its record was shaded from (`BodyFramePlan.sources`, Design note
-   * 7's one list), less Design note 7's skips (`skySources`), a star past the light slots its tables
-   * hold left out until the cache builds them for it; the camera's local body, which the plan holds
-   * no record of while terrain draws it from inside its figure's sphere, takes them as the plan
-   * would (`bodyLightSources`). A composite that throws, a bug, is said once and its body drawn
-   * without its air, so that the view draws on.
+   * A body's air is drawn where the plan holds its record, where the camera is inside its air,
+   * and where its shell, a + H ÷ s_e, meets the view though its figure does not
+   * (`decision-r08-t10b-leans.md` §3), its limb's glow then still in the picture. Its sky takes the
+   * sources its record was shaded from (`BodyFramePlan.sources`, Design note 7's one list), less
+   * Design note 7's skips (`skySources`), a star past the light slots its tables hold left out
+   * until the cache builds them for it; a body the plan holds no record of takes them as the plan
+   * would (`bodyLightSources`).
+   *
+   * A throw from a body's atmosphere (`HillaireAtmosphere.over`, `skySources`, `drawFrame`) is item
+   * 6's failure (`decision-r08-t10b-leans.md` §2): reported through
+   * {@link PhotorealFrame.onAtmosphereFailed}, whose cache holds the body failed and states the
+   * fault, and the frame drawn on without the body's air. A lost device's throw
+   * (`EngineUnavailable`, `AtmosphereRetired`) is not reported: the graphics fault covers it.
    *
    * @returns The colour the frame's later passes read: the last composite's, or the scene target's
    *   where none was drawn.
@@ -780,14 +825,25 @@ export class PhotorealRenderer {
     resources: Resources,
     frame: PhotorealFrame,
     plan: BodyFramePlan,
+    lit: {
+      readonly bodies: ReadonlyArray<LitBodyInput>;
+      readonly shells: ReadonlyMap<BodyIdHex, number>;
+    },
     pass: { readonly viewRotation: Float32Array; readonly projection: Float32Array },
   ): TextureHandle {
     const recorded = new Set(plan.discs.map((record) => record.body));
+    const byId = new Map(lit.bodies.map((body) => [body.id, body]));
     const drawn: Array<{ readonly air: FrameAtmosphere; readonly sources: BodyLightSources }> = [];
     for (const air of frame.atmospheres ?? []) {
       const sources = plan.sources.get(air.id);
-      // A body drawn by its record, or the camera's local body inside its air.
-      if (sources !== undefined && (recorded.has(air.id) || insideAir(air))) {
+      const centreM = byId.get(air.id)?.centreM;
+      const shellM = lit.shells.get(air.id);
+      const shellSeen =
+        centreM !== undefined &&
+        shellM !== undefined &&
+        !sphereOutsideView(centreM, shellM, frame.camera, frame.viewport);
+      // A body drawn by its record, one whose air's shell is in view, or the camera's own inside it.
+      if (sources !== undefined && (recorded.has(air.id) || shellSeen || insideAir(air))) {
         drawn.push({ air, sources });
       }
     }
@@ -802,13 +858,12 @@ export class PhotorealRenderer {
       if (depth === null) {
         break;
       }
-      const atmosphere = this.#atmosphereOf(resources, air, frame.setting);
       const tables = air.tables;
       const lightSlots = absorberCount(tables.medium) > 0 ? tables.curves.length : Infinity;
-      let suns: ReadonlyArray<SunState>;
       let composite: DrawItem;
       try {
-        suns = skySources(
+        const atmosphere = this.#atmosphereOf(resources, air, frame.setting);
+        const suns: ReadonlyArray<SunState> = skySources(
           sources.stars,
           sources.planetshine,
           air.camera,
@@ -823,15 +878,19 @@ export class PhotorealRenderer {
           exposureScale: frame.exposureScale,
         });
       } catch (error: unknown) {
-        // The one place a draw-time failure is taken: logged once and the body drawn bare,
-        // pending `decision-r08-t10b-leans.md`, which may route it to the cache's fault.
-        if (!this.#airFailed.has(air.id)) {
-          this.#airFailed.add(air.id);
-          console.error(`the atmosphere of ${air.id} could not be drawn in ${this.#name}:`, error);
+        // The one place a body's drawing fails: item 6's failure, the cache's to hold and state.
+        if (!lostDevice(error)) {
+          if (frame.onAtmosphereFailed === undefined) {
+            console.error(
+              `the atmosphere of ${air.id} could not be drawn in ${this.#name}:`,
+              error,
+            );
+          } else {
+            frame.onAtmosphereFailed(air.id, error, this.#name);
+          }
         }
         continue;
       }
-      this.#airFailed.delete(air.id);
       // The air target the last composite did not draw into: the first after the scene's.
       const target = this.#airTarget(resources, colour === resources.airTargets[0]?.colour ? 1 : 0);
       target.render({

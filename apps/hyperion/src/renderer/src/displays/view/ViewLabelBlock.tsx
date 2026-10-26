@@ -19,9 +19,9 @@ export interface ViewLabelBlockProps {
   /** The readings, refreshed at 4 Hz (`useThrottledValue` upstream). */
   readonly lines: ReadonlyArray<LabelLine>;
   /**
-   * Steady statements while their conditions hold: `POSITIONS AS SEEN FROM SHIP` and the rest, a
-   * server's own failure among them in `--status-caution` (`CautionStatement`, plan R08,
-   * R08.T10.b).
+   * Steady statements while their conditions hold: `POSITIONS AS SEEN FROM SHIP` and the rest,
+   * and a request's status among them (`StatusStatement`, `ATMOSPHERE REJECTED`'s, plan R08,
+   * R08.T10.b), a server's own failure in `--status-caution`.
    */
   readonly statements: ReadonlyArray<LabelStatement>;
   /** The interim stars' count line (`STARS 1,204 DRAWN · …`), or `null` before an answer. */

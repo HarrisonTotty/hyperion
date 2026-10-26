@@ -111,6 +111,12 @@ export interface PhotorealInputs {
    * the frame draws no atmosphere.
    */
   readonly atmospheres?: ((body: BodyIdHex) => AtmosphereTables | null) | undefined;
+  /**
+   * Takes a throw from the drawing of a body's atmosphere (`PhotorealFrame.onAtmosphereFailed`):
+   * the view's handle on the cache (`AtmosphereView.reportDrawFailure`).
+   */
+  readonly atmosphereFailed?:
+    ((body: BodyIdHex, error: unknown, viewName: string) => void) | undefined;
 }
 
 /** What the lit bodies take of a view's terrain (plan R10, R10.T10.e). */
@@ -299,5 +305,6 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     overlay: inputs.overlay,
     meter: inputs.meter,
     atmospheres,
+    onAtmosphereFailed: inputs.atmosphereFailed,
   };
 }

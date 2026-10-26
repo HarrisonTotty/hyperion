@@ -21,16 +21,19 @@ import { BloomChain } from "../post/bloomChain";
 import { histogramParams, histogramWorkgroups } from "../post/histogram";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
-import type { SurveyedDatumFrame } from "../wireframe/submit";
-import { ATMOSPHERE_COMPOSITE_PASS } from "../atmosphere/hillaire";
+import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/submit";
+import { ATMOSPHERE_COMPOSITE_PASS, AtmosphereRetired } from "../atmosphere/hillaire";
+import { EngineUnavailable } from "../engine/resilientEngine";
 import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
 import { AtmosphereTables } from "../atmosphere/tables";
 import {
   type FrameAtmosphere,
   type PhotorealFrame,
+  lostDevice,
   type PhotorealOverlay,
   PhotorealRenderer,
 } from "./renderer";
+import { TONEMAP_PASS } from "../post/tonemap";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
 const VIEWPORT = { widthPx: 64, heightPx: 36 };
@@ -540,6 +543,131 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
       tables.setMedium(R05_EARTH_REFERENCE, EARTH_RADIUS_M);
     }).not.toThrow();
     tables.dispose();
+  });
+
+  describe("a body's air that throws as it is drawn (decision-r08-t10b-leans §2)", () => {
+    it("reports the body once over several frames, and draws the other body's air and the frame's passes", async () => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const broken = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));
+      const sound = bodyAt("0200080020000000.0400", vec3(2e7, 0, -8e7));
+      const brokenTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const soundTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      // A view wider than the device's textures: its ray march's target cannot be made.
+      const tooWide = airOf(broken, brokenTables);
+      const wide = {
+        ...tooWide,
+        camera: { ...tooWide.camera, viewport: { widthPx: 1e6, heightPx: 36 } },
+      };
+      const reported: Array<readonly [string, boolean, string]> = [];
+      for (let frame = 0; frame < 3; frame += 1) {
+        // The frame's tables are the cache's, which holds a reported body failed and hands none.
+        const failed = new Set(reported.map(([body]) => body));
+        renderer.render(view, {
+          ...frameWith([]),
+          bodies: [broken, sound],
+          atmospheres: [wide, airOf(sound, soundTables)].filter((air) => !failed.has(air.id)),
+          onAtmosphereFailed: (body, error, viewName) => {
+            reported.push([body, error instanceof Error, viewName]);
+          },
+        });
+      }
+      expect(reported).toEqual([[broken.id, true, "test view"]]);
+      const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+      expect(composites.map((f) => f.draws[0]?.textures["transmittance"])).toEqual(
+        Array.from({ length: 3 }, () => soundTables.transmittance),
+      );
+      // Each frame is still tone-mapped onto the canvas.
+      expect(view.frames.filter((f) => f.label === TONEMAP_PASS)).toHaveLength(3);
+      renderer.dispose();
+      brokenTables.dispose();
+      soundTables.dispose();
+    });
+
+    it("reports nothing for a lost device's throw, which the graphics fault covers", async () => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const seen = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));
+      const next = bodyAt("0200080020000000.0400", vec3(2e7, 0, -8e7));
+      const seenTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const nextTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const failed = vi.fn<(body: string, error: unknown, viewName: string) => void>();
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      // The first frame makes everything the second takes but the next body's ray march target,
+      // whose view is too wide for the device's textures.
+      const tooWide = airOf(next, nextTables);
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [seen, next],
+        atmospheres: [
+          airOf(seen, seenTables),
+          { ...tooWide, camera: { ...tooWide.camera, viewport: { widthPx: 1e6, heightPx: 36 } } },
+        ],
+        onAtmosphereFailed: failed,
+      });
+      const before = failed.mock.calls.length;
+      // That target is made inside the loss's window, where every creation throws.
+      engine.loseDevice();
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [seen, next],
+        atmospheres: [airOf(seen, seenTables), airOf(next, nextTables)],
+        onAtmosphereFailed: failed,
+      });
+      expect([before, failed.mock.calls.length, logged.mock.calls.length]).toEqual([1, 1, 0]);
+      engine.restore();
+      renderer.dispose();
+      seenTables.dispose();
+      nextTables.dispose();
+    });
+
+    it("tells a lost device's throws by their type", () => {
+      expect([
+        lostDevice(new EngineUnavailable("createTexture")),
+        lostDevice(new AtmosphereRetired()),
+        lostDevice(new RangeError("the device has no device")),
+      ]).toEqual([true, true, false]);
+    });
+  });
+
+  describe("a body's air whose figure is off the view (decision-r08-t10b-leans §3)", () => {
+    /**
+     * A body beside the view's right edge at 3 × 10⁷ m ahead, its centre `beyondM` past the edge's
+     * plane, the margin `sphereOutsideView` allows included.
+     */
+    function besideView(beyondM: number): LitBodyInput {
+      const tanHalf = Math.tan(Math.PI / 6);
+      const tanX = tanHalf + (OUTSIDE_VIEW_MARGIN_PX * 2 * tanHalf) / VIEWPORT.widthPx;
+      const aheadM = 3e7;
+      return bodyAt(
+        "0200080020000000.0300",
+        vec3(tanX * aheadM + beyondM * Math.hypot(1, tanX), 0, -aheadM),
+      );
+    }
+
+    /** The composites drawn for a body `beyondM` past the view's edge. */
+    async function compositesBeside(beyondM: number): Promise<number> {
+      const { engine, view, renderer } = await preparedRenderer();
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const planet = besideView(beyondM);
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      const count = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS).length;
+      renderer.dispose();
+      tables.dispose();
+      return count;
+    }
+
+    it("draws its composite while its shell meets the view", async () => {
+      const topM = R05_EARTH_REFERENCE.topHeightM;
+      expect(await compositesBeside(EARTH_RADIUS_M + topM / 2)).toBe(1);
+    });
+
+    it("draws none once its shell is off the view too", async () => {
+      const topM = R05_EARTH_REFERENCE.topHeightM;
+      expect(await compositesBeside(EARTH_RADIUS_M + 2 * topM)).toBe(0);
+    });
   });
 });
 

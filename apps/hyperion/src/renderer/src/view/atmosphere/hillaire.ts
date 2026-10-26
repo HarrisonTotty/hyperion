@@ -992,6 +992,19 @@ export async function createAtmosphereFrameKernels(
 }
 
 /**
+ * Thrown by {@link HillaireAtmosphere.drawFrame} of an atmosphere drawn with shared kernels after a
+ * restore of the device they were made on (plan R08, R08.T10.b): a lost device's throw, as
+ * `EngineUnavailable` is, which its owner answers by making the atmosphere again and which raises
+ * no fault (`decision-r08-t10b-leans.md` §2).
+ */
+export class AtmosphereRetired extends Error {
+  constructor() {
+    super("an atmosphere drawn with a lost device's shared kernels is made again by its owner");
+    this.name = "AtmosphereRetired";
+  }
+}
+
+/**
  * Per-planet tables a {@link HillaireAtmosphere} draws with and does not own: the atmosphere
  * cache's (plan R08, R08.T10.b; `decision-r08-t10a-leans.md` item 3), which the cache builds,
  * holds and disposes, its body's figure and gravity their own ({@link HillaireAtmosphere.over}).
@@ -1695,7 +1708,8 @@ export class HillaireAtmosphere {
    * @param suns - The drawn sources, at most {@link MAX_SKY_SOURCES}: `sources.ts`'s `skySources`
    *   for a body, or a caller's own; none draws a sky of nothing but what lies behind it.
    * @throws RangeError as {@link frameSourcesOf}: too many sources, a light slot the medium's
-   *   curves do not hold, or a pre-exposure that is not finite and above 0.
+   *   curves do not hold, or a pre-exposure that is not finite and above 0;
+   *   {@link AtmosphereRetired} over shared kernels after a restore.
    */
   drawFrame(
     view: AtmosphereCamera,
@@ -1703,9 +1717,7 @@ export class HillaireAtmosphere {
     scene: AtmosphereScene,
   ): DrawItem {
     if (this.#retired) {
-      throw new Error(
-        "an atmosphere drawn with a lost device's shared kernels is made again by its owner",
-      );
+      throw new AtmosphereRetired();
     }
     const frame = this.#frame;
     const rayMarch = this.#rayMarchTexture(view.viewport);

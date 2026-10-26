@@ -70,7 +70,7 @@ function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
 }
 
 async function frameOfPhaseScene(
-  sources: Pick<PhotorealInputs, "classMaps" | "reliefs" | "terrain"> = {},
+  sources: Pick<PhotorealInputs, "classMaps" | "reliefs" | "terrain" | "atmosphereFailed"> = {},
   rotated = false,
   presentedPx: Viewport = VIEWPORT,
 ): Promise<ReturnType<typeof photorealFrame>> {
@@ -190,6 +190,17 @@ describe("a photorealistic frame of the phase scene", () => {
   it("carries the view's terrain, which draws the bodies handed over (R10.T10.e)", async () => {
     const terrain = { surveyCoverage: () => null, draws: () => [], symbologyDepth: () => [] };
     expect((await frameOfPhaseScene({ terrain })).terrain).toBe(terrain);
+  });
+
+  it("hands a throw from a body's air to the view's cache (R08.T10.b; decision-r08-t10b-leans §2)", async () => {
+    const reported: Array<readonly [string, string]> = [];
+    const frame = await frameOfPhaseScene({
+      atmosphereFailed: (body, _error, viewName) => {
+        reported.push([body, viewName]);
+      },
+    });
+    frame.onAtmosphereFailed?.(PHASE_GIANT, new Error("a bug"), "VIEW 1");
+    expect(reported).toEqual([[PHASE_GIANT, "VIEW 1"]]);
   });
 
   it("draws no sky without one, and takes the camera's role and field", async () => {

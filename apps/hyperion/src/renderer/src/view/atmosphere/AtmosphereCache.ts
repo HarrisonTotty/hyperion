@@ -31,7 +31,13 @@
  *
  * **A failed build** (item 6), a throw from the assembly or from the tables' factory other than
  * `EngineUnavailable`, is held as `failed`, with one `console.error`; it is retried at the next
- * trigger and once failures are forgotten, and cleared by a build that lands. `EngineUnavailable`
+ * trigger and once failures are forgotten, and cleared by a build that lands. A throw from a
+ * view's drawing of a body's atmosphere (`HillaireAtmosphere.over`, `skySources`, `drawFrame`),
+ * other than a lost device's, is item 6's failure (`decision-r08-t10b-leans.md` §2). The renderer
+ * reports it to the cache ({@link AtmosphereView.reportDrawFailure}), which holds the body
+ * `failed`, logs once, and raises `ATMOSPHERE NOT AVAILABLE: computation failed for
+ * <designations>, reopen VIEW to retry` on every view that draws it larger than a point. It is
+ * retried at the next trigger and when `VIEW` is shown again. `EngineUnavailable`
  * raises nothing, and the tables are made again at a later frame, after the restore. A body with a
  * problem draws no atmosphere and carries no atmosphere label.
  *
@@ -240,6 +246,12 @@ export interface AtmosphereView {
    * of them. Does nothing once the view is closed or the cache disposed.
    */
   noteFrame(frame: AtmosphereFrame): AtmosphereViewReport;
+  /**
+   * Reports that the view's drawing of `body`'s atmosphere threw (`decision-r08-t10b-leans.md`
+   * §2): item 6's failure, which holds the body `failed` for every view, with one `console.error`
+   * naming `viewName`, and none for a body already failed. A lost device's throw is not reported.
+   */
+  reportDrawFailure(body: BodyIdHex, error: unknown, viewName: string): void;
   /** Lets the view's bodies go, as no longer wanted by it. */
   close(): void;
 }
@@ -544,6 +556,11 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     return {
       noteFrame: (frame) =>
         closed || this.#disposed ? NO_REPORT : this.#noteFrame(view, hold, frame),
+      reportDrawFailure: (body, error, viewName) => {
+        if (!closed && !this.#disposed) {
+          this.#drawFailed(body, error, viewName);
+        }
+      },
       close: () => {
         if (closed) {
           return;
@@ -973,6 +990,21 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       this.#fail(held, error);
       return "failed";
     }
+  }
+
+  /**
+   * Holds a body whose drawing threw in a view (`decision-r08-t10b-leans.md` §2) as a failed
+   * build is held, logged once: a body already failed, or not held, takes nothing.
+   */
+  #drawFailed(body: BodyIdHex, error: unknown, viewName: string): void {
+    const held = this.#bodies.get(body);
+    if (held === undefined || held.problem !== null) {
+      return;
+    }
+    console.error(`the atmosphere of ${body} could not be drawn in ${viewName}:`, error);
+    held.problem = FAILED;
+    this.#cancelBuild(held);
+    this.#dropDrawn(held);
   }
 
   /** Holds a failed build (item 6): one `console.error`, nothing drawn, no label. */

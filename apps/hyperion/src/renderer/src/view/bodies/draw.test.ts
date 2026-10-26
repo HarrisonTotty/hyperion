@@ -597,7 +597,7 @@ describe("the plan", () => {
     const plan = planLitBodies(
       [body],
       hosts,
-      { ...OPTIONS, depthBodies: new Set([body.id]) },
+      { ...OPTIONS, depthBodies: new Map([[body.id, body.figure.equatorialRadiusM]]) },
       new Map([[body.id, "disc"]]),
     );
     expect(plan.regimes.get(body.id)).toBe("mesh");
@@ -629,7 +629,7 @@ describe("the plan", () => {
       const plan = planLitBodies(
         [airBody, near, clear],
         hosts,
-        { ...OPTIONS, depthBodies: new Set([airBody.id]) },
+        { ...OPTIONS, depthBodies: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]) },
         new Map([
           [airBody.id, "disc"],
           [near.id, "disc"],
@@ -643,13 +643,40 @@ describe("the plan", () => {
       ]);
     });
 
+    it("promotes a disc clear of its figure but over its air's shell (decision-r08-t10b-leans §3)", () => {
+      const { hosts } = scene(1e8, 0);
+      const d = atDiameterPx(40);
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -d));
+      // 50 px off the air body's centre: clear of its figure's footprint, about 31 px, and the
+      // moon's, about 11 px, but within its shell's at 1.5 a, about 45 px.
+      const moon = bodyAt(
+        "0200080020000000.0301",
+        vec3(d * Math.tan(50 / PX_PER_RAD), 0, -d),
+        1.737e6,
+      );
+      const regimeOf = (shellM: number): LitRegime | undefined =>
+        planLitBodies(
+          [airBody, moon],
+          hosts,
+          { ...OPTIONS, depthBodies: new Map([[airBody.id, shellM]]) },
+          new Map([
+            [airBody.id, "disc"],
+            [moon.id, "disc"],
+          ]),
+        ).regimes.get(moon.id);
+      expect([regimeOf(airBody.figure.equatorialRadiusM), regimeOf(1.5 * 6.371e6)]).toEqual([
+        "disc",
+        "mesh",
+      ]);
+    });
+
     it("leaves one under the 3 px switch a point, with no sources", () => {
       const { hosts } = scene(1e8, 0);
       const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2)));
       const plan = planLitBodies(
         [airBody],
         hosts,
-        { ...OPTIONS, depthBodies: new Set([airBody.id]) },
+        { ...OPTIONS, depthBodies: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]) },
         new Map(),
       );
       expect([plan.regimes.get(airBody.id), plan.sources.has(airBody.id)]).toEqual([
@@ -663,7 +690,10 @@ describe("the plan", () => {
       // Just above the 2.7 px the hysteresis holds a disc's side down to.
       const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2.75)));
       const other = bodyAt("0200080020000000.0301", vec3(3e9, 0, -atDiameterPx(40)));
-      const options = { ...OPTIONS, depthBodies: new Set([airBody.id]) };
+      const options = {
+        ...OPTIONS,
+        depthBodies: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
+      };
       const previous = new Map<BodyIdHex, LitRegime>([
         [airBody.id, "mesh"],
         [other.id, "disc"],
@@ -678,7 +708,7 @@ describe("the plan", () => {
       const { body, hosts } = scene(atDiameterPx(40), 30);
       const previous = new Map<BodyIdHex, LitRegime>([[body.id, "disc"]]);
       const without = planLitBodies([body], hosts, OPTIONS, previous);
-      const empty = planLitBodies([body], hosts, { ...OPTIONS, depthBodies: new Set() }, previous);
+      const empty = planLitBodies([body], hosts, { ...OPTIONS, depthBodies: new Map() }, previous);
       expect(empty).toEqual(without);
     });
   });
