@@ -460,7 +460,9 @@ module R12 reads for this plan's ladder entries.
   - `setMedium(medium)` builds the per-planet tables, shared by every view on the device, one
     transmittance layer per κ slice and one multiple-scattering and irradiance layer per band of
     `medium.slicing`. Sharing moves the per-planet `AtmosphereTables` out of the per-view class
-    into `AtmosphereCache` (R08.T10.a), which hands them to each view's `HillaireAtmosphere`;
+    into `AtmosphereCache`: R08.T10.a builds and holds them, and R08.T10.b hands them to each
+    view's `HillaireAtmosphere`, which takes them in place of building its own and does not
+    dispose them (`decision-r08-t10a-leans.md`, item 3);
   - `drawFrame(view, suns: ReadonlyArray<SunState>, scene)` builds the per-view tables, summed over
     the drawn suns (Design note 7), and returns R05's composite `DrawItem`. `SunState` gains each
     sun's per-channel illuminance, R07's `starIlluminance` (R08.T6.d);
@@ -1526,7 +1528,10 @@ Names are those the owning plans give; the owning plan is authoritative.
       atmosphere is drawn. A body whose atmosphere is a gas envelope takes it from its envelope
       instead: a giant or a sub-Neptune, whose surface section is `not_applicable`, while its
       `envelope` section (P14.T24.d, on the wire by P14.T35.e) is `not_modelled` or absent
-      (decision-p14-t35e-wire; a sub-Neptune's surface from P14.T48.e). A kept scene's body with no
+      (decision-p14-t35e-wire; a sub-Neptune's surface from P14.T48.e). From the first server
+      that sends a gas envelope's section `ok` until R08.T16.a draws an envelope, such a body
+      draws no atmosphere and keeps this note: its envelope is computed, and this console does
+      not yet draw it (`decision-r08-t10a-leans.md`, item 5). A kept scene's body with no
       atmosphere set shows it too (decision-r08-giant-label).
     - `AEROSOLS AND ABSORBERS: NOT YET MODELLED` while plan 14 publishes no aerosol or absorber
       inventory: ozone and methane, like the aerosols, are drawn only from the inventory.
@@ -1564,6 +1569,17 @@ Names are those the owning plans give; the owning plan is authoritative.
       analogue's phase function or the Henyey–Greenstein fallback (R08.T5.c), under the same τ
       rule, whatever its estimated bias (`signoff-2.md`, item 5). It clears when a published model
       for that material replaces it.
+
+    A body whose medium the console fails to build draws no atmosphere and carries none of these
+    notes. That is a fault, not a ninth state: the label block's fault line shows
+    `ATMOSPHERE NOT AVAILABLE: computation failed for <designations>, reopen VIEW to retry` in
+    `--status-caution`, after any graphics fault and the terrain's (`decision-r08-t10a-leans.md`,
+    item 6). A body whose `body_detail` the server refuses carries, in place of these notes,
+    `ATMOSPHERE REJECTED: for <designations>, <the server's reason>, reopen VIEW to retry`; one
+    whose answer the console cannot take raises
+    `ATMOSPHERE DATA INVALID: <the check that failed> for <designations>, reopen VIEW to retry` on
+    the fault line, after `ATMOSPHERE NOT AVAILABLE` (follow-up to item 6). Each names every body it holds for, in designation order, one line for
+    each distinct phrase or reason (its UX review, item 2).
 
     The provisional profile is recorded in the plan and the code, not on the display. The phrases
     are R08.T2's, signed off 2026-10-09 by the sign-off agent (owner's delegation).
@@ -4607,7 +4623,8 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
 
 - **R08.T10.a The medium and its cache.** Described below, with its tests. Acceptance:
   `pnpm --filter hyperion exec vitest run view/atmosphere/assemble view/atmosphere/AtmosphereCache`
-  and `pnpm test` pass.
+  and `pnpm test` pass. _Built 2026-10-26_ (Risks, "Deviations in T10.a, as built", and its
+  "Deferred findings (2026-10-13 rule)" (R08.T10.a)).
 - **R08.T10.b In the photorealistic view.** It needs T10.a, T7 and T8.e, and forms each body's
   atmosphere camera with R08.T8.b's `bodyAtmosphereCamera` (`view/atmosphere/bodyCamera.ts`). The
   paragraph "This task also
@@ -4616,7 +4633,16 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
   view whose bodies have no medium (R05's counting fake, `test/countingRenderEngine.ts`); a
   withheld, unmodelled or approximate body's label reaches `photorealStatements`, after its other
   notes (`atmosphereStatements`, `labels.ts`); a kept scene's body with no atmosphere set, such as
-  R07's `TEST GIANT`, carries `ATMOSPHERE: NOT YET MODELLED` (decision-r08-giant-label).
+  R07's `TEST GIANT`, carries `ATMOSPHERE: NOT YET MODELLED` (decision-r08-giant-label). From
+  T10.a's rulings (`decision-r08-t10a-leans.md`, items 3, 4, 6 and 9) T10.b also hands each body's
+  `AtmosphereTables` from `AtmosphereCache` to each view's `HillaireAtmosphere`, which takes them
+  in place of building its own and does not dispose them; the forward-lobe tables may then be
+  built in the optics worker. It joins the cache's `body_detail` with R10.T16.a's for the detail
+  seed, one request a body per trigger. It sets the atmosphere's fault on the label block's fault
+  line, in `--status-caution`, after any graphics fault and the terrain's, and forgets the cache's
+  failures when `VIEW` is shown again. It feeds `ATMOSPHERE: PENDING`'s debounce each frame. The
+  flight records no atmosphere fault. It sets `ATMOSPHERE REJECTED` among the atmosphere's notes
+  and `ATMOSPHERE DATA INVALID` on the fault line. The flight records neither.
   Acceptance: `pnpm test` and `just test-render` pass, and by hand a flight past every fixture, on
   a kept test scene that carries them (`view/scenes/`), is recorded here, with the moonlit night on
   the Earth fixture (the Sun beyond the twilight limit, a full Moon), whose sky over R06's star
@@ -4636,11 +4662,12 @@ figure's `law` and `momentOfInertiaFactor`, read from the record's `SystemBodyFi
 `bodyGravity` applies Design note 17's ω_fig; R07's `BodyAppearance` is not built in production.
 The surface section comes from `body_detail`, requested through
 `toBodyDetailRequest` (`lib/system/bodiesWire.ts`), which nothing in `view/` calls yet.
-`AtmosphereCache` requests it when a photorealistic view first draws a body in the disc or mesh
-regime (R07's `litRegimes`, decided in `planLitBodies`), again when the scene's arrival or the
-granted detail changes, and again when `body_events` reports an event on the body (P14.T31, once
-it exists; today it answers `unsupported`). The section's state decides the label. The build
-produces:
+`AtmosphereCache` requests it when a photorealistic view first draws a body in the disc, mesh or
+terrain regime (R07's `litRegimes`, decided in `planLitBodies`; `terrain` is R10.T10.e's
+hand-over), or as the camera's local body where terrain draws it (T10.b), again when the scene's
+arrival or the granted detail changes, and again when `body_events` reports an event on the body
+(P14.T31, once it exists; today it answers `unsupported`). The section's state decides the label.
+The build produces:
 
 - the column;
 - the molecular, absorber and aerosol terms, an absorber on its record's profile where it carries
@@ -4790,14 +4817,91 @@ Tests (T10.a):
 - a flyby that brings many bodies into the disc regime does not make `ATMOSPHERE: PENDING` flash
   more than three times a second (the guide's flash threshold; decision-r08-giant-label, §4). If
   it would, the scene's lit bodies are asked for on arrival, or the line is held as R05's terrain
-  annunciation holds its own (`view/terrain/annunciation.ts`);
+  annunciation holds its own (`view/terrain/annunciation.ts`), the form ruled
+  (`decision-r08-t10a-leans.md`, item 9);
 - the same inputs give the same key and a changed inventory another;
 - a `rotational_and_tidal` record's medium is built at ω_fig = √2.5 ω (its g_ref includes ω²R),
   and a `capped` one builds where its true ω would put γ_e ≤ 0;
 - results transfer, and the cache evicts least recently used within its stated size;
 - each fixture's optics time is recorded, on a quiet machine;
 - a record with an unknown key in each keyed member draws without a fault and carries
-  `atmosphereApproximate`; a `Tenuous` Pluto-like record draws its haze.
+  `atmosphereApproximate`; a `Tenuous` Pluto-like record draws its haze;
+- the provisional thick line: the measured Earth and the Mars fixture take no
+  `atmosphereApproximate` from it, Venus at 58 and 92 bar take it, and an Earth-class column
+  raised to τ 1 on its worst channel takes it;
+- a generated body's ground is p q per channel from its photometry, clamped to 1;
+- a gas envelope sent `ok` gives no medium and `atmosphereNotYetModelled`;
+- a build that throws gives no medium, no label, one `console.error` and the fault naming the
+  body, and is retried at the body's next trigger and once failures are forgotten; one that
+  throws `EngineUnavailable` gives no fault;
+- two bodies failing alike give one line naming both, in designation order;
+- a `body_detail` answered `too_many_requests`, `queue_full` or `cancelled` raises no line,
+  logs nothing, keeps `ATMOSPHERE: PENDING` and is asked again after 2 s, doubling to 32 s;
+  any other refusal gives no medium and
+  `ATMOSPHERE REJECTED: for <designations>, <the server's reason>, reopen VIEW to retry`, in
+  `--text` where the server refused what was asked and in `--status-caution` otherwise, with no
+  `console.error`; an answer `toBodyDetail` cannot take, or one of another kind, gives no medium,
+  `ATMOSPHERE DATA INVALID: <the check that failed> for <designations>, reopen VIEW to retry` and
+  one `console.error`; each of the last two is held, asked afresh at the body's next trigger and once failures are forgotten, and cleared
+  by an answer taken;
+- a request answered within 250 ms shows no `ATMOSPHERE: PENDING`, and the line comes on at
+  most once in any 1.25 s, whatever the replies' timing;
+- the cache's bytes are its entries' `rowBytes`, a wanted body is never evicted, and an evicted
+  body wanted again sends no request;
+- a record absorber layer that straddles the column lays its whole column inside it; one wholly
+  above the column's top is dropped with `atmosphereApproximate`, and one wholly below its datum
+  with no label;
+- a mode of τ 0 or of base equal to top is skipped without a fault;
+- every row of `substances.json` has the client table's `absorber` and `rayleigh` flags, both
+  ways (`parity.test.ts`).
+
+As ruled before the build (`decision-r08-t10a-leans.md`, 2026-10-26):
+
+- **Thick, before R08.T13.** Until `classifyRegime` exists, a medium whose vertical optical
+  depth from the ground to the top over every term but the absorbers (`opticalDepthToTop` at
+  μ = 1) reaches `PROVISIONAL_THICK_OPTICAL_DEPTH` (1, `thick/regime.ts`) on its worst channel
+  is drawn by the analytic term with `atmosphereApproximate` (Design note 9's routing). It
+  covers every medium the cache builds, kept fixtures included. Earth (about 0.3 at 434 nm) and
+  Mars take no label from it; Venus at 58 and 92 bar and a Titan-class column do.
+- **The ground.** A generated body's ground albedo is its spherical albedo, p q per channel
+  from R07's `BodyPhotometry`, clamped to [0, 1]; a kept fixture keeps its own (Risks,
+  "Deferred findings (2026-10-13 rule)" (R08.T10.a), _The ground's albedo_).
+- **The tables and the request.** `AtmosphereCache` builds and holds each body's
+  `AtmosphereTables` through an injected factory, and asks for `body_detail` through a seam
+  shaped as `Pick<RequestClient, "request">`. T10.a changes neither `tables.ts` nor
+  `hillaire.ts`; T10.b hands the tables over and joins the fetch with R10.T16.a's.
+- **A gas envelope sent `ok`** gives no medium and `atmosphereNotYetModelled` until R08.T16.a
+  builds its medium (Design note 12).
+- **A build that fails**, by a throw from the assembly or the tables' factory other than
+  `EngineUnavailable`, gives no medium and no atmosphere label for the body, one
+  `console.error`, and the label block's fault (Design note 12). It is retried at the body's
+  next trigger and when `VIEW` is shown again. `EngineUnavailable` raises nothing and is retried
+  after the restore. A legal record never reaches it: a mode of τ 0 or of base equal to top is
+  skipped (`review-r08-shapes-b.md`, C3), and an absorber layer wholly outside the column is
+  dropped (below).
+- **A `body_detail` not answered** (`decision-r08-t10a-leans.md`, follow-up to item 6). A
+  server too busy refuses nothing: the body is asked again by itself, as the survey's field
+  is. Any other refusal is `ATMOSPHERE REJECTED` and an answer the console cannot take
+  `ATMOSPHERE DATA INVALID`, each with its reason and `reopen VIEW to retry`, held until the
+  body is asked afresh.
+- **The registry's flags.** `absorber` and `rayleigh` come from a client table that
+  `parity.test.ts` holds to `substances.json` for every row, both ways. A task that appends a
+  row or changes a flag updates the table in the same commit.
+- **`ATMOSPHERE: PENDING`** is held as the terrain's line is, by one debounce per view over its
+  wanted bodies: it shows once a request has stood `ANNUNCIATION_ONSET_MS` (250 ms) and goes
+  once none has for `ANNUNCIATION_CLEAR_MS` (1 s).
+- **The size.** `ATMOSPHERE_CACHE_BYTES` is 32 MB (decimal), counted by each entry's `rowBytes`
+  as built. A body wanted this frame is never evicted, so only the wanted set can take the cache
+  past it. Eviction releases the tables and keeps the body's reply for the scene, so a body
+  wanted again is rebuilt without a request.
+- **Record absorber layers.** One that straddles the column passes as it is: `absorberSpecs`
+  clamps it to the column's datum and top and lays its whole column inside. One wholly outside
+  the column is dropped before `absorberSpecs`, which refuses it. Wholly above the column's top
+  it carries `atmosphereApproximate` under Design note 12's τ rule; wholly below the datum,
+  hidden by the ground, it carries none.
+- **The negligible-absorber bounds** were written before R08.T4.d–T4.h. T10.a re-derives each
+  test's expectation on the tables as built, and records each change with its Δ_c in
+  "Deviations in T10.a, as built". A change to a kept fixture's labels goes to "main" first.
 
 Acceptance: T10.a's and T10.b's, above.
 
@@ -5233,6 +5337,11 @@ cloud fraction 1). Tests:
   three-channel transmittance more than 0.01 off at low sun, while its scattered light, past the
   boundary, is the spectral bakes' (Design note 5).
 
+R08.T10.a's provisional thick line retires here. `classifyRegime` replaces
+`PROVISIONAL_THICK_OPTICAL_DEPTH` (vertical τ of at least 1 on the worst channel, over every term
+but the absorbers), and each fixture and reference case whose label changes is recorded
+(`decision-r08-t10a-leans.md`, item 1).
+
 Acceptance: `cargo test -p hyperion-fit atmosphere` (the sweep's `--smoke` mode) and `pnpm test`
 pass, and the full sweep is recorded here.
 
@@ -5266,8 +5375,10 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   latitude. `TABLE_SIZES` gains the thick size, and the table is cached per world.
   `ATMOSPHERE: COMPUTING` shows while a gated bake runs, in `ATMOSPHERE: APPROXIMATE`'s place and
   never beside it for one body, and `ATMOSPHERE: APPROXIMATE` takes its place if the bake fails,
-  until the body's atmosphere is next computed, and after a bake that succeeds only where something
-  else, such as an NH₄SH stand-in, still holds it (the guide's rows, R08.T2).
+  until the body's atmosphere is next computed, never `ATMOSPHERE NOT AVAILABLE`, which is the
+  medium's and its tables' alone (decision-r08-t10a-leans, UX review, item 1), and after a bake
+  that succeeds only where something else, such as an NH₄SH stand-in, still holds it (the
+  guide's rows, R08.T2).
 
   Until a thick world's bake lands, its analytic multiple-scattering table stays finite by
   R08.T6.d's accumulated escape (`decision-r08-t6b-floor.md` §9.3), under
@@ -9668,6 +9779,256 @@ it rides a bump.
       from 400 km, 10⁷ m and 10⁸ m on the three media, by §5's visibility line, by T8.c's flicker
       sweep, and by the step at the switch.
 
+- **Deviations in T10.a, as built** (2026-10-26; `decision-r08-t10a-leans.md` items 1–12, its
+  follow-up to item 6 and its UX review). New in `view/atmosphere/`: `assemble.ts`,
+  `atmosphereInput.ts`, `negligible.ts`, `registryFlags.ts`, `AtmosphereCache.ts`,
+  `optics.worker.ts`, `opticsJobs.ts`, `opticsMessages.ts` and `opticsPool.ts`, with their tests
+  and `test/`'s `atmosphereRecords.ts`, `bodyDetailSeam.ts`, `inProcessOpticsWorker.ts`,
+  `scriptedOpticsWorker.ts`, `opticsFakes.ts` and `runTimeGraph.ts`, and the bench
+  `opticsTimes.bench.ts`. Edited:
+  `labels.ts`, `thick/regime.ts`, `oblate.ts`, `absorbers.ts`, `absorbers/kDistribution.ts`,
+  `materials/materials.ts`, `materials/oxygen-liquid.json`, `src/tools/materials.ts`,
+  `parity.test.ts` and `tsconfig.worker.json`. Neither `tables.ts` nor `hillaire.ts` (item 3), so
+  the gate ran no `just test-render`.
+  - _The Provides, widened._
+    - `assembleMedium(input, options?)` (:306) takes `AssembleOptions.kDistributions`, the line
+      tables the worker loads for `lineSpeciesOf(input)`; without them a line species reports
+      `noCrossSections`.
+    - `AssembledMedium` (:307–310) is a union on `medium`. It adds `drawn` (`body` {figure,
+      gravity}, `bottomRadiusM` = (2a + c) ÷ 3, `absorbers` in term order, `spectra` in
+      `lightsAt`'s order, `curves`, empty until `withCurves`), `reasons` (player text) and
+      `negligible` (the keys the bound clears). "The medium names it `negligible`" (:4752) is the
+      assembly's list.
+    - `atmosphereInput.ts` holds `BodyAtmosphereInput` (`record` or `kept`), `BodyLight`,
+      `KeptAtmosphere`, `clampedGroundAlbedo`, `atmosphereKey` and `ATMOSPHERE_OPTICS_VERSION` (1),
+      re-exported by `assemble.ts`: the render thread keys a reply without the optics data (the
+      Provides put the version beside `column.ts`, :194). The key hashes the surface, envelope and
+      figure sections, the spin rate at the record's time, the mass and bulk sections, the ground's
+      albedo and each light's star and spectrum, never the time itself.
+    - `registryFlags.ts`'s `REGISTRY_OPTICS_FLAGS`: 115 rows at 23 (54 `absorber`, 43
+      `rayleigh`), held both ways in `parity.test.ts` (item 7).
+    - `labels.ts`: eight `AtmosphereLabel`s (the sketch at :311–319 has six), `AtmosphereProblem`
+      (`failed`, `rejected` {code, message, refusal}, `invalid` {check}), the builders
+      `atmosphereNotAvailable`, `atmosphereRejected` and `atmosphereDataInvalid`, each taking the
+      designations, `ATMOSPHERE_ANSWER_UNREADABLE` and `atmosphereProblemLines` (one line a cause,
+      its bodies in designation order, `Intl.Collator("en", { numeric: true })`).
+    - `AtmosphereCache<T extends CachedTables = AtmosphereTables>` (:320–324), made with
+      `{ requests, builder, tables, schedule? }`. Each view takes `openView()` (`noteFrame`,
+      `close`), which holds its wanted bodies and its own `PendingLineHold` (item 9); beside it
+      `entryOf`, `labelsOf`, `problemOf`, `noteBodyEvent`, `forgetFailures`, `dispose`, `size` and
+      `bytes`; `ATMOSPHERE_CACHE_BYTES`, `atmosphereTablesOn(engine)`, `KeptBodyAtmosphere` (a kept
+      scene's prebuilt medium with its labels).
+    - Workers: `optics.worker.ts` is a shell over `opticsJobs.ts` (`OPTICS_MEDIA_KEPT` 2);
+      `opticsPool.ts` holds `OpticsWorkerPool`, `AtmosphereBuilder`, `defaultOpticsWorkers` =
+      clamp(⌊threads ÷ 2⌋, 1, 4) and `MAX_CONSECUTIVE_OPTICS_FAILURES` 3; `opticsMessages.ts`
+      holds `transferablesOf`.
+    - Beside them: `thick/regime.ts`'s `PROVISIONAL_THICK_OPTICAL_DEPTH`, `verticalOpticalDepth`
+      (closed form over `medium.ts`, held to `opticalDepthToTop(medium, R, R, 1)` to 10⁻⁶, so the
+      render thread loads no optics data) and `provisionalThick(medium)`, with no radius;
+      `assemble.ts`'s `MEDIUM_TERM_LIMIT` 8 and `LIGHT_SLOT_LIMIT` 2 (held to `MAX_TERMS` and
+      `MAX_BODY_LIGHTS` by tests, not imported), `mediumTableRadiusM`, `absorberSpecsOf` (the
+      specs alone, no Mie, for a curve share on a worker that has not assembled the body),
+      `absorberCurveSlots`, `curveSlotsOf`, `withCurves` and `sizeConvergenceReasons`;
+      `oblate.ts`'s own `SpheroidFigure`, so that the worker's graph never reaches `hillaire.ts`;
+      `absorbers.ts`'s `layerMoments` and `lineBroadeningMixture`, exported unchanged;
+      `materials.ts`'s `VOLATILE_ICE_KEYS`, `ATOMIC_SOLID_KEYS` and `phasedName`.
+  - _The bound, re-derived_ (item 12; :4754–4771), each Δ_c the largest over the Sun and the
+    2,500 K and 30,000 K Planck suns and the three channels.
+    - Earth's O₂–N₂ is not tested: it is measured over 206–346 K. Earth's O₂–CO₂ (held off
+      296 K) is 2.9 × 10⁻⁶, its N₂O (drawn, `estimated` everywhere since T4.g) 4.2 × 10⁻⁷ at
+      k = 100, and Mars's CO the pending overtones only (its 7–0 band is drawn): 1.4 × 10⁻⁸.
+    - Uranus-class H₂ quadrupole lines are drawn, measured at 1 bar, and not tested there. To a
+      3.7 bar deck (300 km-amagat) their shape is estimated and they label: 0.10 at k = 100,
+      3.3 × 10⁻³ at k = 1. H₂–He is 0.16 at 1 bar (76 K, below the table's 200 K).
+    - Venus-class CO₂ stays non-negligible until R08.T4.f, not T4.d: held at 500 K past 10 MPa,
+      0.58.
+    - Earth's held χ: the strongest cell is 5.0 × 10⁻⁶, not "about 3 × 10⁻⁶" (the full chord and
+      the fixture's 330 ppm), f₃ 0.019, Δ_c,χ 3.1 × 10⁻⁸. The body past 10⁻³ is a snowball at
+      10 bar, 4.9 × 10⁻³ (3 bar: 4.5 × 10⁻⁴). The mix: w ≈ 0.57, ratio 0.027 at 3 bar and 1.37 at
+      150 bar; raising the CO₂ alone takes w to 1, where no u_mix is recorded.
+    - The single-lower-level interpolation is the Boltzmann law to 10⁻⁹; the f64 reference test
+      holds |1 − T_c| ≤ Δ_c on Earth's held O₂–CO₂ and N₂O lines at 1, 10 and 100 u_max and four
+      pressures, under all three suns.
+    - No kept fixture's labels change: kept media come prebuilt with their own labels, and only
+      the provisional thick line reads them (main, 2026-10-26).
+  - _The bound's form._ u_max is the whole grazing chord, both halves, tangent at each level and
+    break (Chapman's √(2πR/H) to 0.2%), not the one-sided ray of :4730–4731, and it sits inside
+    the sum, one per entry in its own unit (:4733). Entries of one share (a drawn table and its hot
+    list) take the larger cell by cell; parts (CO's overtones, a species' lines and its
+    cross-sections) add. A hot list holds only above the drawn table's measured range. Cell weights
+    are the colour pipeline's own 1 nm rows. Line cell means are the largest over the stored
+    pressure rows to the body's largest p_eff. γ_L for f₃ comes from the sidecars' near-wing share
+    (`kDistribution.ts` now reads `nearWingShare`), s = (2/π) atan(22γ ÷ (γ² + 75)), each value
+    at the top of its two-figure rounding: Earth's 0.090 cm⁻¹, inside §14's 0.075–0.091 (the
+    T4.d record's "γ_L = 12.5π × share", :15639–15641, is wrong for CO₂'s χ wing). The air
+    partners' 2% trace share is re-implemented to tell which part of H₂O's continuum is estimated.
+  - _The assembly._
+    - Every gas of `gases` is listed as an absorber layer (:15632's "the bulk gases are listed as
+      layers", over :15035's "the gases the registry flags"); one the registry flags no absorber
+      (Ar, Ne, Kr, Xe) gives no reason. An inventory absorber of a gas's species replaces its layer.
+    - The column is isothermal at the mean surface temperature even where `verticalStructure` is
+      sent, until R08.T3.a's follow-up reads P14.T24.e's nodes (:4788–4800).
+    - The bound clears reasons, never layers: a key whose every verdict is negligible keeps its
+      layer (absorberSpecs gives a wholly pending one no column), drops its `noCrossSections`,
+      `estimatedOptics` or `temperatureOutsideTable` reason and is listed in `negligible`. As first
+      built a negligible pending part dropped the whole layer, the measured bands and the pairs
+      with it (the science check's blocker, fixed before the gate).
+    - A key the bound does not clear and no approximation names takes a reason from its verdict
+      ("part of its absorption has no data on file, not drawn", or "its absorption estimated, not
+      measured" for a held χ or the fixed-g mix).
+    - A deck's condensate vapour is cut at the deck's top (its modes' least `topPa`); above it the
+      vapour is not drawn and gives "<name>: its vapour above its cloud deck, not drawn" under the
+      τ rule (:10920–10922 asked the vapour's column there; a profile would have lost its pairs).
+    - The eight terms: the molecular term, then the deepest seven of Thomson (σ_T U), the absorbers
+      (`absorberRankingDepth`) and the modes (the inventory's own τ(550), so that the specs-only
+      path needs no Mie), earlier first on a tie; the rest are left out with "left out, the
+      console can draw no more layers" (of absorbing gas, for a gas or a pair).
+    - Record layers and modes (item 11): straddling, passed as they are; wholly above the column's
+      top, dropped with a reason; wholly below the datum, dropped silently. A record absorber of
+      column 0 or base = top, and a profiled layer whose mixing ratio is 0 throughout the column,
+      are skipped (absorberSpecs refuses both); a mode of τ 0 or base = top too.
+    - The τ rule's τ above, at 550 nm, counts the molecular term, Thomson and the aerosols, not gas
+      absorption. `sizeConvergence` is read in the three channels and at 550 nm; no bake bin is
+      drawn yet (:4713's "or bake bin drawn", R08.T14's).
+    - Reasons, one a key: a `noColumnFree` or "left out" replaces an estimated reason for the same
+      key; a phase reason is prefixed with its substance's name (decision-substance-names §7);
+      particles are named with their phase words through `phasedName` ("H2O ice particles",
+      "liquid H2SO4 particles").
+    - A withheld or unmodelled bulk section under an `ok` surface labels by its own state and
+      draws no medium. An airless body that holds melt also carries `SILICATE VAPOUR` (Design
+      note 12), so "its one label" (:4691) is stale.
+    - Inputs: GM is G × `massMearth` × `EARTH_MASS_KG` (:4658 says `mass_kg`); with no `ok`
+      figure section the body is a sphere of its bulk radius with `figureLaw` null; the medium's
+      name is the record's designation; more than two lights is a `RangeError`, none is allowed
+      (no curve slots); a size distribution sent with shape `aggregate` takes its file's shape.
+    - Sign-off 12: 38(c) is built (liquid O₂'s `absorptionStandIn`, a prose member the fit
+      ignores, so no table's data hash moves: "liquid O2: its absorption is the gas's O2–O2 pair
+      absorption at 203 K carried to the liquid's density; no measurement of the liquid's is
+      read"), and 39(c) (`no SO2 ice on file: liquid SO2 at 198 K stands in, a named analogue`;
+      an atomic solid reads `no solid Kr on file`, which the sign-off's test names without its
+      text). One T5.k test, "seven liquids at τ 0 with no label", now expects liquid O₂'s reason.
+  - _The cache._
+    - Triggers (:4664–4668): the first want in the disc, mesh or terrain regime, an arrival (an
+      opaque token compared by identity), a body's granted level, a body event, and the link's
+      return. A changed light set rebuilds from the held reply with no request; a reply whose key
+      equals the drawn entry's builds nothing.
+    - Answers, classified in one exhaustive switch (`detailAnswerOf`): busy, asked again after 2 s
+      doubling to 32 s (`coarseFieldStore.ts`'s constants); `rejected` and `invalid` held;
+      `isBulkAssemblyFailure` reads as `answer unreadable`. A problem stands through a light
+      change until a trigger.
+    - A failed build, a factory throw or a landing that throws is `failed`, one `console.error`;
+      `EngineUnavailable` raises nothing and the tables are tried again each frame.
+    - Eviction keeps the reply, the assembled medium and its curves, so a body wanted again is
+      drawn in that frame with no request and no `PENDING`; only `rowBytes` count. An arrival not
+      seen before lets every body no view wants go, so a scene's views share one arrival token.
+    - The pool: workers start at the first build. Each light set's curves are split into one share
+      a worker, the brightest light's set first and alone, and joined in a worker (0.13–0.23 s on
+      Earth, too long for the render thread). Only the channels come back; the bake bins' curves
+      (about 1 MB an absorber and sun) are dropped until R08.T14 needs them. Each worker forms
+      the specs itself. A join whose worker is lost asks its shares again, at most three times.
+      Replies are cloned in the worker and their buffers transferred.
+  - _Tests._ Venus at 58 and 92 bar are hand records (NSSDCA), since R08.T12.b.2's cases are not
+    built; the Titan-class column is `titanClassMethaneMedium`. Beyond the list: six absorber
+    profiles (:15047), the term limit, H₂⁻'s free–free pair, a Mars-like CO kept, silicate
+    vapour, a deck's vapour, size convergence, liquid O₂'s reason, the phase words, cancelling a
+    build in flight, disposal, and the run-time import-graph guards (`atmosphereInput.ts` free of
+    optics data; `assemble.ts`, the cache and the pool free of the engine, `tables.ts` and
+    `hillaire.ts` as each needs).
+  - _Acceptance._ `vitest run view/atmosphere/assemble view/atmosphere/AtmosphereCache` selects
+    `assemble{,Aerosols,Earth,Key,Thick}` and `AtmosphereCache{,Optics}`; `negligible`, `labels`,
+    `parity`, `oblate` and the materials tests run under `pnpm test` and the gate.
+  - _Figures_ (provisional, under load 4–10, `CPUQuota` 400%, one vitest worker). The generated
+    Earth assembles in 471–516 ms; one sun's curves on one thread take 1.23 s, or four shares of
+    0.53–1.03 s and a join of 27 ms. Each held entry keeps 2.72 MB of medium (its k-tables) and
+    0.24 MB of curves on the render thread; Venus 0.35 and 0.35 MB.
+  - _Optics times on a quiet machine_ (`opticsTimes.bench.ts`, run by
+    `vitest bench --project "logic (bench)"`, outside every test run, so that no test reads the
+    clock). QW25 (2026-10-26, main's quiet window; load 0.98 at the start and 1.04 at the end,
+    `schedutil`, under `just _locked` at `CPUQuota` 400%, three runs each, their means, ms; one
+    sun, four shares), on the development machine's Ryzen 7 3700X:
+
+    | Record fixture                  | Line tables' load | Assembly | A share, forming its specs | A share, specs held | Join of four |
+    | ------------------------------- | ----------------- | -------- | -------------------------- | ------------------- | ------------ |
+    | Generated Earth (`earthDetail`) | 221               | 499      | 963                        | 475                 | 22           |
+    | Earth-class with O₂             | 252               | 573      | 1,171                      | 603                 | 22           |
+    | Venus at 92 bar                 | 63                | 131      | 260                        | 131                 | 29           |
+    | Venus at 58 bar                 | 68                | 131      | 256                        | 125                 | 28           |
+    | Generated Titan (`titanDetail`) | 0                 | 17       | 18                         | 1.4                 | 1.6          |
+    | A Tenuous Pluto with haze       | 0                 | 24       | 20                         | 1.3                 | 1.5          |
+
+    So a generated Earth's arrival on four workers is about 1.7 s (load, assembly, the shares
+    side by side, the join), where the shares' specs, formed again on each worker, are half a
+    share's time. These are the record fixtures. Design note 16's prebuilt media (Earth with its
+    ozone, Mars with dust, the hand Titan and giant) are built by `reference/cases.ts` at load and
+    are not timed here. The 5 s line-arrival budget is the UHD 620's, R08.T11's.
+- **Deferred findings (2026-10-13 rule)** (R08.T10.a). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The ground's albedo_ (`decision-r08-t10a-leans.md`, item 2). A generated body's ground is
+    its spherical albedo p q per channel from R07's photometry: the Lambert albedo that gives its
+    disc's own integrated light, to which R10 scales its class albedos too (R10 Design note 8).
+    It includes the clouds and the air's own reflection, so a cloudy world's ground reads
+    bright: about 0.3 on an Earth-class world against the Earth fixture's 0.1, and the deck's
+    0.76 on a Venus-class world, which the provisional thick line labels anyway. No cloud-free
+    figure is on the wire, since the photometry is the sim's area mix and the server does not
+    send its cloud albedo. It is replaced when R11 draws clouds inside the medium, which would
+    otherwise count them twice, or when the ground's own albedo is on the wire.
+  - _The provisional thick line_ (item 1). τ of at least 1 is the column's optical thickness,
+    not a measured boundary. For Rayleigh air, the only scattering a generated body has at 23,
+    it falls at about 3.5 Earth columns: inside the fifty times Earth's density Hillaire tested
+    to, and past the 3 Earth columns at which R08.T4.a measured the thin path's three-channel
+    transmittance 0.0151 off in u′v′. A forward-scattering aerosol under τ 1 that fails the
+    metric would go unlabelled until R08.T13; aerosols reach generated bodies only at 24. As
+    built the line falls at about 3.9 Earth columns (Earth's τ_R about 0.26 at 433.6 nm). The
+    kept fixtures' worst channels: earth 0.394, earth-ozone-slab 0.394, mars 0.508,
+    saturn-oblate 0.728; Venus at 58 and 92 bar 27.3 and 43.3.
+  - _The cache's size_ (item 10). 32 MB of per-planet rows: about 56 measured Earths with one
+    star (570,264 B), or 16 bodies at the 2 MB row. The brainstorm's memory table gives the
+    cache no total. For R08.T11 and R12.T10.
+  - _Trace broadeners' widths_ (item 12; main, 2026-10-26). A line table that holds no width for
+    a trace broadener marks the whole species `estimated`, so generated worlds carry
+    `ATMOSPHERE: APPROXIMATE`: Earth-class H₂O by its CO₂ (Δ_c 1.96), Mars-class O₂ by its CO
+    (1.35 × 10⁻³), Saturn-class H₂ by its CH₄ (0.060). Lean: the 2% trace-share tolerance the air
+    partners already take. Revisited when R08.T10.b or R08.T11 puts generated worlds on screen.
+    `MARS_REFERENCE`'s comment ("CO₂, CO and O₂ bands are negligible", `reference/cases.ts:217`)
+    no longer holds of the bound; correct it when `cases.ts` is next touched (R08.T12.b.2).
+  - _Mars's 214 K_ lies inside CO₂'s estimated 212.5–225 K interval (Δ_c 2.0 × 10⁻³ at k = 100):
+    whether k = 100 belongs on a chain-interpolation interval (its error about 4 × 10⁻³) is
+    main's.
+  - _H₂–He below 200 K_ is held for every cold giant (Saturn-class 0.026, Uranus-class 0.16);
+    for R08.T4.f or a colder data set.
+  - _The bound's reach_ (the science check). It is per key and per straight path: keys negligible
+    on one body add, each up to 10⁻³. On an oblate body the chord is taken on the R_ref sphere,
+    about 9% low on a Saturn-class figure, 5% on a Jupiter-class one (until R08.T16.a draws a
+    giant's medium). The chord's maximum is sampled at the levels and breaks, 13% low at worst for
+    a tent tangent only at its ends and peak, 1.2% for a 1 km tent at Earth's level spacing. The
+    held χ's form is §14's as ruled (min(1, ·) at the source cell, ⟨σ⟩ already reduced), which
+    may run low by 1.7% on Earth, 5.6% on a snowball at a few bar and up to 5× at Venus's
+    pressure. ln σ linear in 1/T runs low for a cell of low-E″ lines: 1.9–2.9% over 200–296 K,
+    19–31% over ExoMol's 296–1,000 K. A node held at 0 past the data bounds nothing where hot bands
+    appear. None flips a plausible verdict today; each is for the owner's ruling through main.
+  - _Atom tables below 10 Pa_ take k = 100 on the whole chord, which is conservative; to be
+    restricted to the chord above the 10 Pa level only if a body is labelled by that alone.
+  - _The isothermal seam's artefacts._ An Earth-class record with O₂ takes "O2–O2 pairs: their
+    absorption held at the nearest temperature on file" at 287.9 K, past the CIA's 287 K. And
+    the column is unbound, a `RangeError` and the computation fault, where
+    k T_s ln 10⁷ ≥ μ m_u g_ref R_ref (16.1 scale heights at least R_ref): 300 K of H₂ at
+    g 0.5 m s⁻² on any body under about 40,000 km. No Solar System fixture comes near it (Titan's
+    H is about 20 km). Both go with P14.T24.e's profile.
+  - _An aerosol mode outside its optics' range_ (from 24, when the inventory is sent): Mie
+    refuses past x = 20,000 and the iron table past its largest size (a solid-iron mode of r_eff
+    about 2 µm or more at v_eff 0.3, at 380 nm), and `aerosolTerm`'s throw would raise the
+    computation fault, which ruling 6 keeps for bugs. Drop such a mode with a reason before 24's
+    inventory reaches the cache.
+  - _Eviction frees no texture_ (item 10). `AtmosphereTables.dispose` stops following restores
+    and frees nothing, so an evicted body's textures stay until the engine is disposed. For
+    R08.T10.b, with a release in `tables.ts` under `just test-render`.
+  - _Arrival._ Each worker forms a lined body's specs itself, about 0.5 s a worker on Earth, which
+    is why the three later shares took about 1.0 s against the first's 0.53 s; sending the specs
+    instead would serialise about 3 MB a worker on the render thread. For R08.T11's line-arrival
+    budget (5 s a world on the UHD 620).
+  - _Liquid methane_ (:12950–12955) was routed here beside 38(c), its sign-off question (does
+    38(a) cover a liquid whose red bands are its own measurement?) is open, and nothing is built:
+    it stays unlabelled meanwhile.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
