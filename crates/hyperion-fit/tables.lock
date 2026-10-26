@@ -229,6 +229,17 @@ provisional = false
 acceptance = "over the 455 rows, fit minus grid, log₁₀ L within 0.046 dex (rms 0.008) and R within 0.60% (rms 0.12%)"
 
 [[table]]
+name = "helium"
+path = "helium.rs"
+task = "helium"
+revision = 0
+inputs_sha256 = "5121b2fc5d53445cbe322d3588b391c1d62a3b734a85f55dfcd60513f2891003"
+body_sha256 = "6889bf3b74753c7c71be191a7b9c88836833078c5cb4005011f6d5f3d7c1dc31"
+since_generator_version = 23
+provisional = true
+acceptance = "the identity: every coefficient zero, so no star moves; P15.T7.b's fit to the helium-enhanced models of Pietrinferni et al. (2006) is held for the swap"
+
+[[table]]
 name = "kick_defaults"
 path = "kick_defaults.rs"
 task = "kick_defaults"

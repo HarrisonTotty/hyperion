@@ -1,0 +1,49 @@
+# The helium-excess correction fitted to BaSTI's helium-enhanced models (plan 15, P15.T7.b): least
+# squares on the grid's ages at the end of the main sequence and its zero-age horizontal branches
+# (`data/basti_helium/`, reduced by its `reduce.py`), each helium-enhanced set against the
+# canonical sequence at its own Z, with the figures measured on plan 06's tracks under the fitted
+# table, a synthetic cluster's horizontal branch among them. Run with `--manifest` and `--out` to
+# a scratch path; the swap moves these parameters and the dataset into `helium.toml`, takes the
+# task's revision 1 with its fingerprint, and is emitted with a generator-version bump.
+task = "helium"
+datasets = ["basti_helium"]
+
+[params]
+method = "basti_least_squares"
+# The slope's terms at each node: 2, s = c₀ + c₁ log₁₀ m with c₂ held at zero, so that s stays
+# negative at every mass a track takes (ruled 2026-10-26, decision-p15-t7b-leans L2).
+lifetime_terms = 2
+# The grid's points fitted: the 0.6–0.9 M☉ tracks, the sets from [Fe/H] −2.5 to −0.3 (the rows
+# Z = 0.0001 to 0.008, which bracket the acceptance's range; the solar row is left out), and the
+# branches' envelopes up to 0.2 M☉.
+mass_min = 0.6
+mass_max = 0.9
+fit_fe_h_min = -2.5
+fit_fe_h_max = -0.3
+hb_envelope_min = 0.0
+hb_envelope_max = 0.2
+# The acceptance (plan 15, P15.T7.b, as ruled on 2026-10-23 and 2026-10-26): the lifetime ratio
+# to 3% over [Fe/H] −2.2 to −0.5; ΔY = 0.1 shortening a 0.8 M☉ life by about a half, 0.42–0.55
+# (decision-p15-t7b-leans L3); the extrapolation stated at plan 09's HELIUM_EXCESS_MAX.
+acceptance_fe_h_min = -2.2
+acceptance_fe_h_max = -0.5
+lifetime_tolerance = 0.03
+shortening_delta_y = 0.1
+shortening_mass = 0.8
+shortening_min = 0.42
+shortening_max = 0.55
+extrapolation_delta_y = 0.18
+# The synthetic cluster: 10⁶ M☉ of stars at 12 Gyr and Z = 0.0008, the grid's Y = 0.40 set of the
+# Z = 0.001 row, so that its top ΔY is that set's; plan 09's populations at 10⁶ M☉ (a first of
+# 0.32, ΔY up to 0.18); the blue end the 0.95 quantile of log T_eff, which must be hotter at the
+# grid's top ΔY than the first population's, beside the grid's amount; and the fitted branch shift
+# held to 10% of the grid's at that Y (decision-p15-t7b-leans L4).
+cluster_mass = 1e6
+cluster_age = 12e9
+cluster_z = 0.0008
+cluster_delta_y_max = 0.18
+cluster_first_population = 0.32
+cluster_window_margin = 0.5
+cluster_window_bisections = 30
+blue_end_quantile = 0.95
+hb_tolerance = 0.1

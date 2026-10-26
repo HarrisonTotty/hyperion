@@ -1556,10 +1556,16 @@ registers it.)
   temperatures relative to plan 06's tracks at ΔY = 0. **Acceptance:** lifetime ratio reproduced
   to 3% for 0.6–0.9 M☉, ΔY up to the grid's reach (about 0.15; "The grid's reach" below) and
   [Fe/H] from −2.2 to −0.5; every correction exactly the identity at ΔY = 0 by its form, so grid
-  stars stay bit-identical (plan 06's golden); ΔY = 0.1 shortens the lifetime of a 0.8 M☉ star by
-  about a third (0.25–0.4), the sign plan 06 documents; a synthetic cluster of 10⁶ M☉ with ΔY up
-  to 0.18 shows a horizontal branch whose blue end, at the grid's top ΔY, is hotter than its first
-  population's by the grid's amount to 10%. Re-validated at 898a3c94:
+  stars stay bit-identical (plan 06's golden); s(m, Z) negative at every mass a track takes,
+  0.1–150 M☉ ("The form in mass" below); ΔY = 0.1 shortens the lifetime of a 0.8 M☉ star by
+  about a half (0.42–0.55, s from −5.4 to −8.0), the sign plan 06 documents (ruled 2026-10-26,
+  decision-p15-t7b-leans L3: the grid gives 0.48–0.52, Dartmouth's tracks 0.48, Chantereau,
+  Charbonnel and Decressin 2015 0.49, Valcarce, Catelan and Sweigart 2012 0.48–0.50); the fitted
+  horizontal-branch shift reproduces the grid's zero-age shift of log T_eff at fixed envelope mass,
+  at the grid's top ΔY, to 10%; and a synthetic cluster of 10⁶ M☉ with ΔY up to 0.18 shows a
+  horizontal branch whose blue end, at the grid's top ΔY, is hotter than its first population's,
+  its figure stated beside the grid's amount (ruled 2026-10-26, decision-p15-t7b-leans L4: the
+  excess over the grid is plan 06's branch, a recorded finding). Re-validated at 898a3c94:
   - _The data._ `data/basti_helium/` holds only `PROVENANCE.toml` and `urls.txt`, though the
     provenance says the reduction script and its output are committed, and the T7.a record's
     research notes are not in the repository. So T7.b first writes the script and its reduced
@@ -1580,6 +1586,17 @@ registers it.)
     figure for the header needs. T7.b first exposes such a builder behind the sim's `testing`
     feature, which `hyperion-fit` enables, as P06.T31 does for `stellar::testing`; no output
     moves.
+  - _The form in mass_ (ruled 2026-10-26, decision-p15-t7b-leans L2). The hook evaluates s(m, Z)
+    at every mass a track takes, 0.1–150 M☉ (`MIN_INITIAL_MASS` to `MAX_INITIAL_MASS`), but the
+    grid's turn-offs cover 0.6–0.9 M☉. A free quadratic (c₂ of 3.8–12) turns s positive outside
+    that range, up to about +49 at 100 M☉: the wrong sign, and at ΔY 0.15–0.18 a factor of
+    thousands on the timescales, which keeps a 100–150 M☉ member alive past 12 Gyr and lets
+    `evolve::turn_off_mass` answer 150 M☉. So the fit holds c₂ = 0, a parameter of
+    `helium.production.toml`: s is linear in log₁₀ m, with eight fitted coefficients and the
+    table's c₂ at 0.0. A test holds s < 0 at 0.1 and 150 M☉ at each node, which bounds every mass
+    between and, through the linear interpolation in log₁₀ Z, every Z. The hook and the table's
+    shape stay plan 06's as built (x is not held at the fitted range). Outside 0.6–0.9 M☉ s is
+    the linear form's extrapolation, a recorded finding.
   - _Other fitted tables_ (ruled 2026-10-23, decision-p15-revalidation Q7). Rendering plan R06
     builds `sky_envelope` and `sky_phase_envelope` at ΔY = 0 (R06's "T6.b's fitted envelope, as
     built" and "Deviations in T8.m, as built"), and their fingerprints probe ΔY = 0 alone, so
@@ -2752,3 +2769,311 @@ fit-check`; review-changes on this lane's diff.
       retention bands the default changes there with a bump; with the guard, a change needs a
       reader of the other branches first, and the default passes. Plan 06's Provides (199) and
       plan 11 (208, 549) can say the default was reviewed, not that P15.T5.c reviews it.
+- **T7.b as built (lane `lane/104-p15-t7b`, 2026-10-26, at `GENERATOR_VERSION` 23; no table
+  moved, no bump).** The first landing of P15.T7.b, by main's ruling of 2026-10-23 on its brief
+  (issue #104; decision-p15-revalidation Q6, Q7 and Q9), and the desktop's ruling of 2026-10-26
+  on the lane's four leans (decision-p15-t7b-leans L1–L4), from base 6e649031, brought up to
+  `origin/rendering-and-planets` at 87274510 before its first commit. The table's body is P06.T17's
+  identity byte for byte; the fit went only to a scratch path. The ruling's two edits to this plan
+  are made: T7.b's acceptance text, and the bullet "_The form in mass_". Times are in the
+  dev profile on an 8-thread laptop, four build jobs and four test threads, load 0.4–2.8 unless
+  stated.
+  - _The data._ No download. The site's previous-release archive answered 404 for all 88 URLs
+    on 2026-10-23, so T7.a's cache, in the old lane worktree `target/lanes/srvbodies/`, was
+    copied with `cp -a` (nothing there changed) into the lane's git-ignored
+    `data/cache/basti_helium/`. All 88 files matched their recorded SHA-256s.
+    - `data/basti_helium/` is now a _committed_ dataset of the reduced output, as `cmc` is. Its
+      `files` are `turnoff.csv` (4,223 B, `a001d5cc…`) and `zahb.csv` (56,226 B, `c36641d4…`);
+      its recorded hash is `339588b7dbb2…`. Committed beside them: `urls.txt` (unchanged);
+      `raw.sha256`, the 88 raw files' names and SHA-256s moved verbatim from the fetched
+      provenance, one `<name> <sha256>` line each (9,601 B); and `reduce.py`.
+    - `release` names `raw.sha256` with its SHA-256, `367c515f809da2525dc6ccc63b623b094bb93bfeb1951a1f189fb1ec563b7644`:
+      the recorded hash of its 88 lines, which is the fetched provenance's own. `citation`,
+      `url`, `retrieved` and `licence` are kept. The header comment says what is committed,
+      where the raw files go, and that the archive answered 404.
+    - `every_recorded_provenance_parses` now checks the committed class, the two files, and the
+      raw list: 88 lines in name order, each with a 64-digit hash, its SHA-256 named in
+      `release`.
+  - _`reduce.py`_ (standard library, Decimal arithmetic, LF line ends, rows sorted) checks each
+    raw file against `raw.sha256` before reading it. Its docstring condenses what it reads from
+    the extension's and the canonical tracks' readmes; nothing of the readmes or of T7.a's notes
+    is committed. A rerun takes 1.5 s and gives the committed bytes.
+    - _The turn-off_ is the readme's key point 4, row 320 of every track (Pietrinferni et al.
+      2004, ApJ 612, 168, Table 2): central hydrogen exhausted for these masses, none of which
+      grows a convective core. It stands for plan 06's end of the main sequence, HPT's t_MS =
+      x t_BGB (their eqs. 5–6, x 0.95–0.99), which falls 0.5–2% later in age in these tracks
+      with the same sensitivity to helium (the science check: s within 0.24 of key point 5's, at
+      most 1.3% in the ratio). It is also the one point every 0.6–0.9 M☉ track has: canonical
+      0.6 M☉ tracks, and 0.7 M☉ at the higher Z, end there.
+    - _Z and Y_ come from each member's name (`z924y300`: Z 9.2 × 10⁻⁴, Y 0.300), not from the
+      headers, which print Z to four decimals and give Y = 0.300 throughout
+      `HE_EN/Z13/msz13y350aes_c04ae.tar.gz`. The solar row's canonical Z 0.0198 and Y 0.2734
+      come from its summary table's header.
+    - _The core mass_ of a canonical branch is the summary table's "Mc_He" at the tip of the
+      branch's progenitor, whose mass the HB tracks' names give (0.8 M☉; 0.9 at Z 0.008, 1.0 at
+      0.0198). The helium-enhanced sets have no summary table, so theirs is the branch's lowest
+      mass less 0.0007 M☉: the median, over the seven canonical sets, of the lowest mass less the
+      tip core mass (0.0005–0.0012), good to about ±0.0004 M☉.
+    - _The output._ `turnoff.csv`: `z_row,z,y,mass,log_age_ms_end`, 113 rows over the 27 sets
+      (seven canonical, twenty helium-enhanced, the solar row at Y = 0.35 and 0.40 only).
+      `zahb.csv`: `z_row,z,y,core_mass,hb_mass,envelope_mass,log_l,log_teff`, 943 rows, as the
+      files give them: four points repeated exactly, which `Grid::branch` reads once.
+  - _The builder_ (new items only; no existing item changed). In `stellar/sse/track/excess.rs`,
+    behind `#[cfg(any(test, feature = "testing"))]`:
+    - `pub struct CandidateHeliumTable`, its fields private. It has `const fn
+new(lifetime_slope, hb_temperature_shift)`, the getters `lifetime_slope()` and
+      `hb_temperature_shift()`, and `log_z_nodes()`, which always returns the committed nodes:
+      no candidate can hold nodes the hook cannot use. With it come `COMMITTED`, a `Default`
+      that is the committed table, and the derives `Debug`, `Clone`, `Copy` and `PartialEq`.
+    - `pub fn track_with_helium_table(m0, composition, draws, table) -> Track`: `Track::full`'s
+      build (`TrackOptions::default()`, `Resolution::GENERATOR`, in full) with the candidate's
+      hook.
+    - Both are re-exported by cfg'd `pub use` lines in `track.rs` (after the crate-private
+      `excess` line) and `sse/mod.rs` (after `RemnantRecipe`), as
+      `stellar::sse::{CandidateHeliumTable, track_with_helium_table}`.
+    - smart-ci planned 7 of the sim's tests, 3 on wasip1, 1 of the surface crate's, and the
+      doctests of `track.rs`, as main's mock did.
+  - _Registered._ The task `helium` (`tasks::helium::HeliumTask`, with `grid`, `fit`, `figures`
+    and `cluster` modules under `tasks/helium/`): revision 0 (`VERSION`), `TaskClass::Fast`,
+    `helium.rs`, the three items, and an empty fingerprint.
+    - `run` dispatches on the manifest's `method`: `"identity"` emits P06.T17's body verbatim as
+      one `TableItem::Source` (`IDENTITY_BODY`) and refuses any other key, and
+      `"basti_least_squares"` makes the fit. Any other method is refused with a
+      `ManifestParamError` naming both.
+    - `manifests/helium.toml` holds `method = "identity"` alone. `task::REGISTRY` holds 50
+      tasks, `helium` between `giant_cooling` and `kick_defaults`.
+    - Emitted with `cargo run -q -p hyperion-fit -- run helium --since 23` ("body unchanged").
+      The header is ``@provisional by hyperion-fit 0.1.0, task `helium` revision 0
+(P06.T17)``, `data: none`, `sim-fingerprint: none`, `since-generator-version: 23`: the
+      hand-written header's `inputs: none` does not parse, so the table took the current
+      version, not P06.T17's 13.
+    - The lock entry's body SHA-256 is
+      `6889bf3b74753c7c71be191a7b9c88836833078c5cb4005011f6d5f3d7c1dc31`, the same body at the
+      base; its inputs SHA-256 is `5121b2fc…`. Only `//!` lines of the table changed, and the
+      lock and `MANIFEST` only gained `helium`'s entry and row.
+  - _The fit's method_ (`tasks/helium/fit.rs`), from `manifests/helium.production.toml`. Every
+    parameter is the manifest's, and a key the fit does not read is refused.
+    - Every helium-enhanced set from [Fe/H] −2.5 to −0.3 (the rows Z = 10⁻⁴ to 0.008) is
+      compared with the canonical sequence carried to the set's own Z: ln t and Y₀ linear in
+      log₁₀ Z between the two neighbouring canonical rows, or extrapolated from the nearest two.
+    - Each set is placed at its total Z after Salaris, Chieffi and Straniero (1993): the sim's
+      [Fe/H] = log₁₀(Z ÷ 0.02), and the hook's log₁₀ `z_fit`. That equivalence holds to Z ≈
+      0.002 (Pietrinferni et al. 2006, §1), so the rows at 0.004 and 0.008 and the [Fe/H] −0.5
+      node extrapolate it, though both models of each ratio share the mixture.
+    - `LIFETIME_SLOPE`: least squares in ln r = s(m, Z) ΔY, the hook's node weights and the
+      table's quadratic in x = log₁₀ m with c₂ held at zero (`lifetime_terms = 2`, L2), on the
+      0.6, 0.7, 0.8 and 0.9 M☉ tracks: 72 points, eight coefficients, the table's c₂ exactly 0.0.
+      The residual is in ln r, which is the brief's fit on ln r ÷ ΔY weighted by ΔY.
+      `lifetime_terms = 3` fits the free quadratic, which the ruling refuses for the swap.
+    - `HB_TEMPERATURE_SHIFT`: least squares in Δ log₁₀ `T_eff` = (a + b `M_env`) ΔY, unweighted,
+      on 515 zero-age branch points with envelopes of 0–0.2 M☉, against the canonical branch at
+      the same envelope mass and Z. The grid's branches also change in luminosity; the hook
+      holds it.
+    - `LOG_Z_NODES` are read from the sim's table and kept bit for bit. The fitted body keeps
+      their committed text.
+  - _The coefficients._
+    - `LIFETIME_SLOPE` = [−6.482357, 0.043167, 0], [−6.668074, 0.749754, 0], [−6.939453,
+      0.148338, 0], [−7.452242, −0.750817, 0]. At 0.8 M☉, s is −6.49, −6.74, −6.95 and −7.38 at
+      the four nodes; at 0.1 M☉ −6.53, −7.42, −7.09 and −6.70; at 150 M☉ −6.39, −5.04, −6.62 and
+      −9.09. (The free quadratic, before the ruling, had c₂ of 3.8–12.0 and s up to +49 at
+      100 M☉.)
+    - `HB_TEMPERATURE_SHIFT` = (0.377023, −1.867206): +0.38 per unit ΔY at no envelope, falling
+      to zero at 0.20 M☉. The grid's own shift per unit ΔY is a hump: about 0 below 0.002 M☉,
+      0.18 at 0.005, 0.6 near 0.06, and about 0 again past 0.18 M☉.
+  - _The figures, against the acceptance as ruled_ (plan 15's T7.b text, as amended), measured on
+    plan 06's tracks under the fitted table (`tasks/helium/figures.rs`). Every gate passes.
+    1. **Lifetime ratio: passes.** On the main sequence's duration from arrival to its end
+       (BaSTI's ages run from the zero-age main sequence), against the grid's ratio, at all 72
+       fitted points. Since each set sits at its own Z, they lie at [Fe/H] −2.40 to −0.42: the
+       rows bracketing −2.2 to −0.5, inside which the grid has no helium-enhanced set between
+       −2.33 and −1.92, or between −0.73 and −0.49. Within 2.44% (3%), the worst −2.44% at Z 9.3
+       × 10⁻⁵, Y 0.30 and 0.6 M☉; the 48 points inside −2.2 to −0.5 within 1.88%.
+    2. **The identity at ΔY = 0: passes.** Six probes from 0.6 M☉ at [Fe/H] −2.0 to 20 M☉ at
+       +0.2, at 120 ages, are `Track::full`'s bit for bit under the fitted table.
+    3. **s negative at every mass: passes.** s at 0.1 and 150 M☉ at the four nodes runs from
+       −9.09 to −5.04, which bounds every mass between and every Z.
+    4. **The shortening: passes.** ΔY = 0.1 shortens a 0.8 M☉ star's whole life by 0.472,
+       0.486, 0.497 and 0.518 at [Fe/H] −2.2, −1.6, −1.0 and −0.5 (0.42–0.55, L3). The grid's
+       own ratios give the same, s of −6.5 to −7.4. Independent checks agree: T7.a's Dartmouth
+       cross-check gave −6.5 at [Fe/H] −1.5; Chantereau, Charbonnel and Decressin (2015, A&A
+       578, A117, §4.1) give −6.76 at Z 5 × 10⁻⁴; and homology with L ∝ μ^7.3 gives about −7.0.
+    5. **The branch's shift: passes.** At the grid's top Y, 0.40 (ΔY 0.152 on average), over its
+       164 fitted points at fixed envelope mass, the fitted shift (a + b `M_env`) ΔY is 0.0367 dex
+       on average against the grid's 0.0354, within 3.7% (10%, L4).
+    6. **The synthetic cluster: passes.** 10⁶ M☉ of stars at 12 Gyr and Z = 0.0008 ([Fe/H]
+       −1.40), the grid's Y = 0.40 set of the Z = 0.001 row, so that its top ΔY, 0.154, is that
+       set's.
+       - _Its mass function_ is the galaxy's default, `MassFunctionKind::default()` (Chabrier's
+         system function at the provisional high-mass scale), as `stellar::testing` draws it.
+         Its mean mass is 0.771 M☉ over 0.08–150 M☉.
+       - _Its populations_ are plan 09's at 10⁶ M☉: a first of 0.32, and ΔY = 0.18 e² with e
+         uniform. The second is split into components at the grid's ΔY (0.054, 0.104 and 0.154)
+         and at 0.18, each with the share whose ΔY lies nearest it: 0.451, 0.125, 0.079 and
+         0.025.
+       - _Only stars near the branch are built._ Each component's window is the initial masses
+         whose branch spans 12 Gyr at the median η, by 30 bisections in 0.5–1.5 M☉, widened by
+         half its width on each side. A bracket that the age does not cross gives no window.
+         Masses sit at even ranks of the mass function there, and each η is the normal quantile
+         of a golden-ratio rank. That is 1,714 stars, with 249, 378, 116, 84 and 26 on the
+         branch, and 300 tracks for the windows, in about 2 s.
+       - _The blue end_ is the 0.95 quantile of log₁₀ `T_eff` among a component's
+         core-helium-burning stars. _The grid's amount_ is the same quantile with each star on
+         BaSTI's zero-age branch of its component's Y at the cluster's Z, at its own envelope
+         mass, held at the branch's ends beyond them.
+       - The cluster's blue end at ΔY 0.154 is 0.422 dex hotter than the first population's, so
+         the gate passes; the grid's amount for the same envelopes is 0.308 dex. The excess is
+         plan 06's branch, which heats more steeply than BaSTI's as its envelope thins (L4: a
+         recorded finding). Under no shift the cluster's rise is still 0.372 dex, 21% over the
+         grid's. At 0.018 M☉ of envelope under no shift, plan 06's branch is at log₁₀ `T_eff`
+         4.52 against BaSTI's 4.41 at Y = 0.40. The shift fitted over other envelopes (0–0.1,
+         0–0.06 or 0–0.3 M☉) and other quantiles (0.9, 0.99 or 1.0) all give a hotter blue end,
+         by 0.34–0.43 dex.
+       - _The core masses_ (L4). At helium ignition on plan 06's tracks, at the window's middle
+         and the median η: 0.4975 M☉ at ΔY 0 and 0.5003 at ΔY 0.154. The grid's zero-age
+         branches give 0.4917 (canonical, carried to Z 0.0008) and 0.4623 (Y 0.40). They differ,
+         which is §4.5's tip-core-mass finding for plan 06 (below), with nothing changed.
+    7. **The extrapolation to ΔY = 0.18** (the ruling's point 6 of 2026-10-23). A 0.8 M☉ star's
+       timescales at Z = 0.0008 scale by 0.293 (s −6.812), beside the grid's ratios there of
+       0.694, 0.495 and 0.346 at ΔY 0.054, 0.104 and 0.154 (s −6.767, −6.760, −6.885). The
+       branch's shift is 0.068 dex at no envelope and 0.034 dex at 0.1 M☉.
+  - _The production run._ `cargo run -q -p hyperion-fit -- run helium --manifest
+crates/hyperion-fit/manifests/helium.production.toml --out target/p15t7b/helium.production.rs`
+    takes 2.3 s, and two runs give the same bytes. Every gate passes, so the header is
+    ``@generated by hyperion-fit 0.1.0, task `helium` revision 0``, with `data:
+basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 bytes, SHA-256
+    `9bbd40f4939ef311e2e82cb2dee0fbd4eb0a2e64b75729815cb0e577f1c95c3e`. Its acceptance line
+    states figures 1–7 above.
+  - `just fit-check` gives `45 fresh, 4 warnings, 0 failures` at the base (8fe83fa3, run from an
+    export of it) and `45 fresh, 5 warnings, 0 failures` at the head. The fifth warning is
+    `helium`, provisional since 23. Each run takes 11–12 s.
+  - _Tests_, all fast, under nextest.
+    - In `tests/helium.rs`:
+      - `helium_table_is_reproduced` (0.005 s);
+      - `the_committed_table_is_p06_t17s_identity` (0.005 s), with the nodes and zeros as the
+        test's own literals, by `assert_same_bits`;
+      - `the_reduced_grid_holds_every_set_and_is_the_provenances` (0.004 s);
+      - `the_builder_is_the_generators_track_where_the_table_cannot_act` (0.04 s): the
+        committed table at ΔY 0 and 0.1, and the fitted one at ΔY 0, against `Track::full` bit
+        for bit;
+      - `the_fit_is_deterministic` (4.8 s): the coefficients bit for bit, and the acceptance
+        line character for character, over two full runs;
+      - `the_fit_meets_every_figure_as_ruled` (2.5 s): each of the six gates, and the run
+        `@generated`;
+      - `the_production_slope_is_linear_and_negative_at_every_mass` (0.005 s): every c₂ 0.0 bit
+        for bit, and s < 0 at 0.1 and 150 M☉ at each node (L2);
+      - `the_production_manifest_runs_end_to_end` (2.5 s), `@generated`, the dataset's hash
+        prefix included;
+      - `a_manifest_of_another_method_is_refused` (0.005 s).
+    - 21 unit tests, each under 0.01 s:
+      - in `tasks::helium`: the identity, its refusals, a method that is neither, and another
+        task's manifest;
+      - in `tasks::helium::fit`: the hook's weights and slope, known slopes and shifts
+        recovered, the two-term fit's c₂ held at 0.0, the manifest's refusals, the nodes' text,
+        and the fitted rendering;
+      - in `tasks::helium::grid`: parsing, carrying a family in log Z, a repeated point read
+        once with no 0 ÷ 0, and each refusal by its fault;
+      - in `tasks::helium::cluster`: the quantile, the mean mass against the exact integral of
+        the count (to 10⁻⁹), the components' shares, a window the search does not bracket, and
+        that the manifest's cluster is plan 09's at 10⁶ M☉.
+    - `the_committed_tables_are_fresh` (11.7 s) and the registry's pinning test pass. None
+      needed the slow tier.
+  - _Deviations._
+    1. **The turn-off is the main sequence's end**, key point 4, not the readme's "turn off
+       point" (key point 3, the hottest point): it is what the hook's timescale scales. The
+       lifetime figure compares durations from the arrival on the main sequence, not ages
+       since collapse, since BaSTI's ages start at the zero-age main sequence.
+    2. **The reduction reads the core mass too.** Besides log age, mass, log L and log T_eff,
+       `reduce.py` reads the canonical summary tables' Mc_He at the RGB tip, for the progenitor
+       that the HB archives' member names give. The helium-enhanced sets have no summary table,
+       so their branches take their lowest mass less 0.0007 M☉. The reason: the envelope mass is
+       M_HB − M_c, and the ZAHB files give only M_HB.
+    3. **The lifetime figure's reach in [Fe/H].** It is held at all 72 fitted points, whose rows
+       bracket −2.2 to −0.5, and stated inside that range too (figure 1).
+    4. **Names in the emitted text.** Clippy's `doc_markdown` takes "BaSTI" for an identifier,
+       and the brief's scope holds neither crate's `clippy.toml`. So the table's text names the
+       grid by its authors, and the fit crate's docs write `` `BaSTI` ``.
+    5. **The cluster is discrete** in ΔY, at the grid's three values and 0.18, with plan 09's
+       shares, so that a component sits at the grid's top ΔY exactly.
+    6. **The identity's notes** drop P06.T17's "about −4 at 0.8 M☉" and "about a third", which
+       the grid contradicts (figure 3). They keep its expected signs. The body is untouched.
+    7. **Fixed measurement settings.** Figure 2's probes, the cluster's search settings (the
+       0.5–1.5 M☉ bracket, 60 bisections of a phase boundary, the golden-ratio ranks) and the
+       extrapolation's reference envelope, 0.1 M☉, are the task's code, not the manifest's: a
+       change to them is a change of the task, which takes a revision.
+  - _Deferred findings (2026-10-13 rule)._
+    - From P15.T7.b, for plan 06's `Composition` (L1: the same-Z mapping accepted): at one [M/H]
+      BaSTI holds Z ÷ X, so a real second-population star of its cluster's [Fe/H] has a lower Z,
+      by 0.06–0.12 dex at ΔY 0.1–0.18, while `Composition` keeps Z. Ratios at the same [M/H]
+      would make s more negative by 0.03 at Z 10⁻⁴, 0.08 at 0.001, 0.29 at 0.004 and 0.44 at
+      0.008 (0.8 M☉, Y 0.40), and would double-count if `Composition` ever lowers Z. No refit
+      would follow.
+    - From P15.T7.b (L2): outside 0.6–0.9 M☉ s is the linear form's extrapolation, unchecked
+      against models.
+    - From P15.T7.b, on the tip's core mass (§4.5; L4): BaSTI's falls with Y. In the [M/H] −1.27
+      row (Z 0.001 to 0.0008), the branches' core masses are 0.4906, 0.4813, 0.4703 and
+      0.4623 M☉ at Y 0.246, 0.30, 0.35 and 0.40, and D'Antona et al. (2002, A&A 395, 69) give
+      the same trend. Plan 06's tracks keep HPT's, whose core mass at helium ignition in the
+      synthetic cluster is 0.4975 M☉ at ΔY 0 and 0.5003 at ΔY 0.154, rising slightly with the
+      progenitor's lower mass, against the grid's 0.4917 and 0.4623 there. That is a change of
+      shape, so plan 06 owns it; nothing here moved.
+    - From P15.T7.b, on plan 09's helium spread: `HELIUM_EXCESS_MAX`, 0.18 at 10⁶ M☉ and above,
+      is NGC 2419's, the largest variation known (Milone and Marino 2022, Universe 8, 359,
+      §5.1). The other massive clusters span 0.049–0.124 (Milone et al. 2018, Table 4). Plan
+      09's first-population share of 0.32 at 10⁶ M☉ could not be checked against the text.
+      Here they set only the synthetic cluster and the extrapolation's ΔY.
+    - From P15.T7.b: `crates/hyperion-fit/Cargo.toml` says the sim's `testing` feature serves
+      plan 09's Baumgardt–Hilker copy; it now also serves `CandidateHeliumTable` and
+      `track_with_helium_table`. That is a wording fix for a lane whose scope holds the file.
+  - _Records left as written, now stale in part._ This record supersedes them:
+    - Provides' "Built at 898a3c94" (`helium` hand-made, `REGISTRY` at 47 tasks);
+    - Consumes' plan 06 entry ("crate-private `HeliumTable` and `HeliumHook`", which now have a
+      public builder behind the `testing` feature);
+    - P15.T7's "keeps P06.T17's hand-written header" and T7.b's "_The data._" paragraph;
+    - the T7.a record's "fetched … (88 files, 38.4 MB)" and "T7.b not started", and its "Not
+      done: T7.b";
+    - the re-validation's "Executable now … T7.b's first landing".
+  - **For the swap:**
+    1. _The parameters._ Move `helium.production.toml`'s `method`, parameters and `datasets`
+       into `helium.toml`, take `VERSION` = 1, and make `the_committed_table_is_p06_t17s_identity`
+       pin the fitted values, renamed.
+    2. _The linear form_ (L2). `lifetime_terms = 2` moves with the rest, so the committed table's
+       c₂ is 0.0 at every node, and `the_production_slope_is_linear_and_negative_at_every_mass`
+       becomes the committed table's test (every c₂ 0.0 bit for bit, s < 0 at 0.1 and 150 M☉ at
+       each node). The hook and the table's shape stay as built.
+    3. _The shift's reach in envelope mass._ (0.3770, −1.8672) is negative past 0.20 M☉, where
+       the grid's own shift is about 0 and P06.T17 expects a positive one. The hook applies it
+       to every core-helium-burning star, so a helium-rich star with a thick envelope moves by
+       tenths of a dex (−0.45 dex for a 2.6 M☉ envelope at ΔY 0.1). It is also +0.38 per unit
+       ΔY at no envelope, where the grid's is about 0. Lean: hold `M_env` at the fitted
+       0–0.2 M☉ and floor the shift at zero, or give the shift a form with a peak; both are plan
+       06's shape.
+    4. _The fingerprint_ (Design note 7, `lifetime_bracket`'s as the model). The coefficients
+       read only the grid, the sim's `LOG_Z_NODES` and `Composition::z_fit`'s clamp; the
+       figures read plan 06's tracks. Probes:
+       - `z_fit` at the grid's lowest Z (7.9 × 10⁻⁵);
+       - the main sequence's duration at 0.6, 0.8 and 0.9 M☉ and [Fe/H] −1.40, at ΔY 0 and,
+         under a fixed candidate, at ΔY 0.15;
+       - the branch's start age and zero-age log₁₀ `T_eff` of 0.84 M☉ there at the median η,
+         and of 0.64 M☉ at ΔY 0.154;
+       - `mean_mass_msun` of `MassFunctionKind::default()`;
+       - plan 09's `first_population_share` and `helium_excess_max` at 10⁶ M☉.
+    5. _The emission._ `just fit helium` at the train's version, with the goldens re-blessed:
+       every member with ΔY > 0 moves. `@generated` if every gate as ruled still passes there.
+    6. _The tables a helium-rich star reaches, as checked in the code._
+       - The fates: `stellar/fates.rs` 582, `interpolate` returns `None` for any ΔY ≠ 0.
+       - Plan 11's reach: `has_helium_excess` (`stellar/binary/reach.rs` 241), read at 709.
+       - Plan 11's pair light: the same guard, `binary/light.rs` 396.
+       - Plan 08's lifetime bracket: `helium_free` (`galaxy/displaced/site.rs` 289, 297 and 361).
+       - Plan 08's stripping table, found here and not in the ruling's list:
+         `StrippingTable::at` returns `None` for a helium excess (`galaxy/displaced/binarity.rs`
+         593).
+       - The phase envelope: its reader gives such a star the table's brightest value
+         (`sky/phase.rs` 1049).
+       - `sky_envelope` has no guard. `sky/envelope.rs` 74–78 says it must be rebuilt with
+         helium-excess nodes, and whichever of the swap and R06.T16.a lands second refits it,
+         with a ΔY > 0 probe.
+       - `cluster_retention` and the cluster model's turn-off mass read the cluster's own
+         composition, ΔY 0 (`galaxy/features/cluster.rs` 259–269), so the swap moves neither.
+         `equipartition` builds at ΔY 0 for its fixed [Fe/H].
+    7. _The ruled gates_ (L3, L4) are in plan 15's T7.b text: the shortening window 0.42–0.55,
+       and the cluster's two-part gate. `figures.rs` holds them, with the manifest's window.

@@ -259,7 +259,10 @@ mod tests {
     }
 
     /// Every dataset the repository records has a well-formed provenance naming its directory,
-    /// with its files in name order; the fetched helium grid of P15.T7.a lists its 88 files.
+    /// with its files in name order. The helium grid of P15.T7.a is committed as P15.T7.b's
+    /// reduced output, two files, and its `release` names the list of the 88 raw files it was
+    /// reduced from, `raw.sha256`, by its SHA-256: the recorded hash of its `<name> <sha256>`
+    /// lines.
     #[test]
     fn every_recorded_provenance_parses() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
@@ -275,7 +278,24 @@ mod tests {
             assert!(!provenance.files.is_empty(), "{name}");
         }
         let helium = Provenance::load(&data, "basti_helium").unwrap();
-        assert_eq!(helium.class, DatasetClass::Fetched);
-        assert_eq!(helium.files.len(), 88);
+        assert_eq!(helium.class, DatasetClass::Committed);
+        let names: Vec<&str> = helium.files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["turnoff.csv", "zahb.csv"]);
+        let raw = fs::read_to_string(data.join("basti_helium/raw.sha256")).unwrap();
+        let lines: Vec<&str> = raw.lines().collect();
+        assert_eq!(lines.len(), 88);
+        assert!(
+            lines.windows(2).all(|w| w[0] < w[1]),
+            "the raw list is in name order"
+        );
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.split(' ').nth(1).is_some_and(|h| h.len() == 64))
+        );
+        assert!(
+            helium.release.contains(&sha256_hex(raw.as_bytes())),
+            "`release` names the raw list's SHA-256"
+        );
     }
 }
