@@ -3373,6 +3373,92 @@ and R09.T7.j's degradation bytes among them; `tests/common/surface_worlds.rs` gi
     level 8 (94.9 s at T16), its climate step 37.3 s and `coarse/erosion_l8` 12.08 s. τ's fit on a
     table, the one bit-moving lever ruled in, is R09.T16.b (decision-r09-climate-levers), behind
     version 24, for the lane's next agent.
+- **R09.T16.b τ's fit on a table** (a T16 follow-up, after R09.T16.a and before R09.T20; a rider
+  of version 24 if its commit lands before P14.T54.b.i's, else of 25; decision-r09-climate-levers).
+  R09.T16.a found the climate's rise in τ's fit, whose steady states evaluate h, the albedo and
+  the water term directly. R09.T13.a's record kept that path ("The steady states that set τ
+  evaluate directly") so that T13.a's τ moved no bit. Each such state now takes about 1,300
+  sweeps at 23's air, against 375 before. With this task the fit's 51 probes, and the zonal
+  search's two slope probes on the fit's set-up, read one table built once a climate, as the
+  seasonal runs read theirs.
+  - _The table._ `Tabulated`'s lattice, spacing, Hermite reads and check, spanning the fit's
+    start T\* by the relief's reach and `TABLE_MARGIN_K`, as `orbits` spans its own. It holds
+    h's latent part, the albedo and `τ_w`, each with its slope, none of which depends on a
+    probe's multiplier m. Where the table holds no transmission at a probe's m, the probe takes
+    e^(−(3/2) m `τ_w`) and its slope from the read `τ_w` by `wet_of`. An interval is read only
+    where every value read from it meets `TABLE_TOLERANCES` and `WATER_TABLE_TOLERANCES` at its
+    quarter points. Outside the span, or in an interval that misses, the probe evaluates
+    directly, as now. The table is a value of the fit's call, built in one order, not a cache.
+  - _Unchanged:_ the isothermal start at T\*, `STEADY_TOLERANCE_K` (10⁻⁹ K) and
+    `STEADY_ITERATIONS` (2,000); the 48 bisections, the fold guard, `FOLD_MISS_K` and
+    `Radiation::at`. Also unchanged are the seasonal runs' tables and reads, which hold their own
+    multiplier's transmission. The test helpers `steady_state` and `steady_state_over` keep the
+    direct path, so Kaspi and Showman's sweeps and the transport tables' fit stay to the bit.
+  - _The hold:_ `FIT_TABLE_VERSION` = 24 in `ebm.rs`, with its tripwire and the tests' switch,
+    in the 24 holds' pattern (`UNLIT_MEAN_VERSION`'s). At 23 the fit evaluates directly, and
+    `golden_diff` shows nothing. P14.T54.b.l deletes the hold with the others, and P14.T54.b.k
+    attributes its moved values apart from P14.T53.a's water term's. If its commit misses
+    P14.T54.b.i's, the hold is renumbered 25 and it rides 25. It holds nothing and is not a
+    serve-gate item.
+  - _Checks before the commit._ The table's arm against the direct one, both with every
+    landed 24 hold in force (the 24 holds' helper). They are recorded in this plan and not
+    kept, since the bump deletes the direct arm.
+    - The fit, on the reference Earth, `small_earth`, `locked_earth_like`, E-L8's four seeds, and
+      R09.T13.i's relief Earth, sea-level Earth and continent aquaplanet (`Folded` there):
+      - each probe's side of T\* and its convergence are equal, except a `Solved` fit's probes
+        within 10⁻⁵ K of T\*;
+      - the label and the kept candidate's side are equal;
+      - u₀ is within 10⁻⁷, and to the bit where the decisions agree, the probes being the
+        bracket's midpoints;
+      - the steady state's surface mean is within 10⁻⁵ K, and every band within 10⁻⁴ K;
+      - each probe's sweeps are printed.
+    - The table's worst departures of the transmission and its slope from the direct ones over
+      the reference Earth's probes, printed, within `WATER_TABLE_TOLERANCES`.
+    - The pass, on the reference Earth at level 8 and `small_earth`:
+      - every discrete decision of the climate is equal: the zonal search's runs with their
+        orbits, jumps, rejects and convergence; G1's and G2's orbits; the kept run; and each
+        month's orographic restarts;
+      - every climate record before quantisation lies within 10⁻⁵ K, and each of its rates
+        within 10⁻⁶ of itself;
+      - where the payload's climate records differ (the temperature, anomalies, precipitation
+        and winds), each lies within one code, and those cells are counted;
+      - the other layers' differing cells are counted by layer.
+  - _Outcomes, ruled in advance._ A discrete decision that flips is listed with the largest move
+    it causes, which must lie within its own bound: the search's stop of 0.01 K, the climate's
+    stop of 0.1 K, and the orographic solve's 1%. A differing convergence or kept candidate, or
+    a move beyond its bound, takes the fallback. In it, a probe whose relax on the table ends at
+    or after its sweep 1,800, converged or not, is solved again directly and that answer is
+    kept, and the checks are re-run. The lever lands if the reference Earth's fit at the holds
+    of 24 takes at most half its direct time, timed in both arms by a probe as R09.T16.a's
+    (inserted, built and deleted; one thread, under the heavy lock). Otherwise, or if the
+    fallback still misses, it is dropped and its figures are recorded here, with no further
+    ruling.
+  - _Tests kept:_
+    - two fits on the table's arm, equal to the bit;
+    - a fast test that pins that arm's u₀ and steady surface mean to the bit on a small world of
+      the climate's unit tests with the water term, relief and a sea, in both the native and the
+      wasip1 suites (the pass runs on the server only, so wasip1 is R04's cross-target guard);
+    - the hold's tripwire.
+  - _Reference figures_ (recorded, not gates; the ruling's estimates): the fit about 13–14 s after
+    R09.T16.a's levers and about 3–4 s on the table; the climate step about 30–35 s, back in
+    R09.T13.i's landed band; and `coarse/pass_l8` about 50–55 s. The probe measures the fit, the
+    climate step and the pass in both arms.
+  - _Acceptance:_ `cargo test -p hyperion-sim --lib planetary::surface::`,
+    `cargo test -p hyperion-sim --features testing --test surface_coarse_golden`, the surface
+    module's slow tests by name, and the probe under the heavy lock.
+  - _Dropped 2026-10-26_ (lane r09-t16b, on `1c27ebac`; Risks, "R09.T16.b's checks, as run", and
+    "Deferred findings (2026-10-13 rule) (R09.T16.b)"). The lever was built behind its hold and
+    checked in both arms, with every landed 24 hold in force. It met E2's fit checks but missed
+    its pass checks. On the reference Earth at level 8, the zonal search's Z2 took 16 orbits
+    directly and 17 on the table. The kept climate's records then moved by up to 2.4 × 10⁻³ K,
+    and 174 of the payload's climate codes by more than one code. On `small_earth`, Z3 took 7
+    orbits against 11, and its mean moved 1.075 × 10⁻² K, past the search's stop. E2's fallback
+    cleared the fit's checks, but it left both passes' misses as they were, and it took the
+    saving with it. So, by the outcomes ruled in advance (main's word, 2026-10-26: §3 as ruled,
+    no re-ruling), the lever is dropped. No code lands and `FIT_TABLE_VERSION` is not added. At
+    24, R09's fields move by P14.T53.a's water term alone. The timing was not run. The lever as
+    built, its checks and their logs are kept outside the tree, in the lane's scratch
+    (`r09-t16b/`).
 
 ### R09.T17 The surface service
 
@@ -14222,6 +14308,43 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     unsplit and uncut. decision-p14-t54a-passes §C.7's pre-authorised split excludes determinism
     and order tests, and decision-r09-t13-test-cost keeps their coverage first. The cost stays
     I13's. R09.T16.a times both on a quiet machine.
+- **Main's ruling on R09.T16.a's bit-moving proposals** (decision-r09-climate-levers, 2026-10-23;
+  one ruling for the figure, its outcomes ruled in advance). The climate's rise is τ's fit:
+  `840e319a`'s partition greenhouse under P14.T57.a's constants slows its relaxation from 19,910
+  to 69,128 sweeps over the climate's 53 steady states (the fit's 51 probes and the zonal
+  search's two slope probes), about 375 to 1,300 each against the cap of 2,000. At the head, 35 s
+  of the fit's 37.5 s are calls of the saturation curve, which its probes evaluate directly. The
+  zonal search's runs and G1 take a few more orbits, I13's as before. After R09.T16.a's levers,
+  bit for bit (B4, the shared-log power, and B3 with B9), the fit should take about 13–14 s, the
+  climate step about 40–45 s and the pass about 60–65 s (the ruling's estimates from the lane's
+  figures, not timed).
+  - _Taken: τ's fit on a table_ (R09.T16.b; a rider of version 24 if its commit lands before
+    P14.T54.b.i's, else of 25). It removes the fit's remaining curve calls and keeps its start,
+    stop, cap, bisection and fold guard. Estimated: the fit about 3–4 s, the climate step
+    about 30–35 s (back in R09.T13.i's landed band), and the pass about 50–55 s.
+  - _Refused: a warm start._ The fit solves annual-mean steady states on the whole zonal grid, so
+    the only warm start is the previous probe. Continuing from it follows a branch past its fold,
+    where the isothermal start at T\* falls into the other basin. That changes the fold guard's
+    candidates and the branch kept (R09.T13.i's relief and sea-level Earths are `Folded`, a
+    snowball or capped state against a warm one).
+  - _Refused: loosening the 10⁻⁹ K stop._ At a ratio of about 0.985 a sweep, a state lies within
+    about 70 times its last change of its fixed point: about 7 × 10⁻⁸ K at 10⁻⁹ K and 7 × 10⁻⁵ K
+    at 10⁻⁶ K. Through the warm branch's slope (about 200 K per unit of u), either moves u₀ by
+    under 10⁻⁶. That is far inside the search's 0.01 K stop, the climate's 0.1 K and the
+    field's step of 0.01 K, and R09.T13.d imposes the mean exactly, so the published fields
+    cannot tell the two apart. The stop's work is the fold guard's. A transient lingering in a
+    fold's bottleneck meets the stop over a band of u in proportion to the tolerance, so 10⁻⁶ K
+    would widen that band about a thousandfold (decision-r09-t13i's prototype fitted 288.000 K
+    from such a transient). The saving is only logarithmic, about 470 of 1,300 sweeps
+    (ln 1,000 ÷ 0.0146), and about 1 s on the table. The stop and the cap stay.
+  - _Deferred: an accelerated relax_ (Aitken or Anderson on the relaxation, or a smaller
+    `RELAXATION`). On the table the sweeps cost about 3 s, and an extrapolated or mixed step can
+    cross the separatrix between branches, as the seasonal runs' jumps needed a reject rule to
+    avoid. It joins I13's candidates after 24, only where a measured world's fit dominates its
+    climate step.
+  - _Refused: a shared saturation table, or τ's fit tabulated._ A table held across calls is a
+    cache. It would move every caller of the registry's curve beyond R09's fit (the erosion's
+    balances, the water cycle and plan 14's partition), and a tabulated fit is a surrogate model.
 - **Deviations in T16.a, as built** (2026-10-23; lane r09-t17a, built on `71532a17` and gated
   merged with `762073e7`, one batch and one gate with R09.T17.a; decision-r09-climate-levers §7).
   No contract, golden or version moves: every lever is bit for bit, each held to the path it
@@ -14316,3 +14439,98 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     Earth 650 s (109.2 s under `SEED`, 53.3 s under `0x0dd5`; 89%), Mars 57.6 s (7.4 and 7.0 s;
     8%), the Moon 4.6 s and Ceres 2.6 s. The small Earth's pass under `SEED` takes twice its pass
     under the other seed. For main's ruling under §D.
+- **R09.T16.b's checks, as run** (2026-10-23 and 2026-10-26; lane r09-t16b, on `e16ee90e` and
+  `1c27ebac`; decision-r09-climate-levers §3 and §7; the lever dropped). The lever was built as E2
+  has it, behind `FIT_TABLE_VERSION` = 24. `Tabulated::for_fit` was the seasonal tables' builder
+  with no transmission, built once a climate in `run` and carried to the fit's probes and the
+  slope probes by `ZonalFit`. Each raised quantile that the table held took e^(−(3/2) m `τ_w`)
+  from the read `τ_w` by `wet_of`. Its checks ran in probes inserted, run and deleted, both arms
+  with every landed 24 hold in force (the row darkening, the read densities, the compressed
+  liquids, the unlit mean, and the escape's batch with its Rayleigh floor). They ran untimed,
+  through `build-slot` at `CPUQuota` 400%.
+  - _The fit_, on E2's ten worlds. The reference Earth, `small_earth`, `locked_earth_like` and
+    E-L8's four seeds were set up as the climate step sets them, at their levels. R09.T13.i's
+    relief Earth, sea-level Earth and continent aquaplanet were set up as their tests do.
+    - Every label and kept candidate is equal. Eight fits are `Folded` (the reference Earth, E-L8's
+      four seeds, the relief and sea-level Earths and the continent aquaplanet), all keeping
+      their warm candidate but E-L8's seed 2, which keeps its cold one. Two are `Solved`
+      (`small_earth` and `locked_earth_like`).
+    - u₀ is the same to the bit on every `Folded` fit, and within 1.5 × 10⁻¹³ on the `Solved`
+      ones. The steady surface mean is within 4.5 × 10⁻⁹ K, and every band within 3.3 × 10⁻⁸ K.
+    - Every probe's convergence is equal where the two arms probe the same x.
+    - The sweeps: the reference Earth 68,659 in both arms, E-L8's 61,429–74,495 directly and
+      62,717–75,862 on the table, `small_earth` 15,291, and `locked_earth_like` 1,824 against
+      2,077. The probes after a fit's first flip differ.
+    - Each fit has one side flip where the arms probe the same x. On the two `Solved` fits it is
+      a converged probe within 10⁻¹⁰ K of T\*, which E2 allows. On each `Folded` fit it is the first
+      probe whose mean sits on T\* (probes 42–47), a transient in the fold's bottleneck. It is
+      unconverged at the 2,000 cap in both arms, and the arms' means lie either side of T\*, 6.9 ×
+      10⁻⁶ K (the reference Earth) to 1.9 × 10⁻³ K (the relief Earth) apart. §2.1 expected a
+      fold's last probes to lie far from T\*.
+    - The curve calls: the reference Earth's table arm made 9.07 M against 51.5 M, and
+      `small_earth`'s 8.75 M against 11.06 M.
+  - _The transmission's departures._ Over the fit table's span, at fractions off its quarter
+    points, `τ_w` departs at most 5.6 × 10⁻¹³ and its slope 1.9 × 10⁻¹⁰. At the multipliers of the
+    probes whose steady states lie within 100 K of T\*, the transmission departs at most 6.5 ×
+    10⁻¹³ and its slope 2.2 × 10⁻¹⁰, inside `WATER_TABLE_TOLERANCES`. At the opaque probe's
+    multiplier (x 10⁶, m 1.59 × 10⁶) they reach 1.4 × 10⁻¹⁰ and 4.9 × 10⁻⁸, past them, at
+    temperatures its state (above 600 K) never reads. At x 10³ they are 1.9 × 10⁻¹¹ and
+    6.3 × 10⁻⁹.
+  - _The pass, on the reference Earth at level 8._ The fit is as above.
+    - Z₀, at the same u₀, moves its mean by 1.5 × 10⁻⁷ K, and Z₁'s by 3.3 × 10⁻⁶ K.
+    - Z₂, the secant, takes 16 orbits directly and 17 on the table. Its u moves 2.8 × 10⁻⁸ and
+      its mean 1.15 × 10⁻³ K, inside the search's stop.
+    - Z₃, the answer in both arms, G1 (7 orbits, 2 jumps) and G2 (3 orbits, kept in both) keep
+      their records. Their means move by up to 8.8 × 10⁻⁴ K, and the defect is −0.4044 against
+      −0.4042 K.
+    - Each month's orographic restarts are equal (8–11). The guard clamps 6,140 values against
+      6,137.
+    - Before quantisation the records move by up to 2.4 × 10⁻³ K (the sea-level temperature) and
+      7.0 × 10⁻³ K (the anomalies). Some cell's precipitation rate moves by its whole value, and a
+      wind speed by 73% of itself.
+    - The payload's climate cells (98,304) differ: 3,863 in the sea-level temperature, 928 in the
+      anomalies, 2,113 in the precipitation and 3,268 in the winds, each temperature and anomaly by
+      one code. Beyond one code are 2 precipitation codes (up to 9 codes) and 172 winds (up to 30
+      codes, their azimuth).
+    - The payload's synthesis cells (393,216) differ: the elevation in 29,133 cells and the water
+      surface in 22,850 (each up to 10.49 m), the flow in 7, the drainage in 78, the steepness in
+      162, the runoff in 130, the catchment runoff in 123, the ice in 4, the substances in 2, the
+      class in 19 and the crater state in 2. The craters are equal.
+    - The header's sea level moves 2.8 × 10⁻⁵ m, and its realised `σ_h` and relief 2.4 and
+      2.2 × 10⁻⁴ m.
+  - _The pass, on `small_earth`._ Z₀ to Z₂ keep their records (Z₂'s mean moves 6.7 × 10⁻⁵ K). Z₃
+    takes 7 orbits against 11, its mean moving 1.075 × 10⁻² K. Z₄ takes 7 against 3. The search
+    makes 6 runs against 5, its answer Z₅ against Z₄. G1 reaches its 40th orbit unconverged in
+    both arms (its mean 3.6 × 10⁻² K apart), so in both G2 is run A at u₀, kept, its mean 6.6 ×
+    10⁻⁷ K apart. The records lie within 1.4 × 10⁻⁶ K (the temperature), 3.9 × 10⁻⁶ K (the
+    anomalies) and 1.0 × 10⁻⁶ of themselves (the precipitation). The payload is the same to the
+    bit, every layer and the header.
+  - _The outcome._ The orbit flips are the misses: Z₃'s move on `small_earth` lies past the search's
+    stop, and the reference Earth's records move past E2's 10⁻⁵ K and the payload past one code.
+    So E2's fallback was taken: a probe whose relax on the table ends at or after its sweep 1,800
+    is solved again directly. Then every fit check held (26–35 probes solved again on each
+    `Folded` world, 6 on `small_earth`, none on `locked_earth_like`). Both passes missed as
+    before, to the same figures, since the flips start from the kept converged candidate and the
+    slope probes, which the fallback leaves on the table. And the fallback's re-solves cost more
+    than the table saves: the reference Earth's table arm made 54.0 M curve calls against 51.5 M
+    directly. So the lever is dropped, with no further ruling (main, 2026-10-26).
+- **Deferred findings (2026-10-13 rule) (R09.T16.b)** (recorded, not ruled; each for "main"'s
+  list).
+  - _The zonal search's orbit counts flip on differences of about 10⁻⁸ K_ (for R09's climate
+    owner; main, 2026-10-26). The fit's steady states agree to 10⁻⁸ K, but the search's stop
+    takes another orbit (16 against 17 on the reference Earth at level 8, and 7 against 11 on
+    `small_earth`). That moves the search's runs and the kept climate by about 10⁻³ K, and the
+    payload's codes and elevations downstream. Any climate lever that is not bit for bit will
+    meet this. The search's stop rule (`SEARCH_STOP`, `settled_after` and the extrapolation's
+    jumps) is where a later task would look.
+  - _The fit's hot probes run away beyond any table's span._ The opaque probe and the
+    bisection's first probes run away to 600–1,430 K, unconverged at the 2,000 cap, beyond T\* ±
+    `TABLE_MARGIN_K` and the relief's reach (x 10³, 31.6, 5.6, 2.4 and 1.9 on the reference
+    Earth: some 12,000 of its 68,659 sweeps). Between the two arms their 2,000-sweep means differ
+    by up to 143 K (the sea-level Earth's probe 3). Every one is warm in both arms, so no side
+    changes. They are transients under the step limit, not steady states.
+  - _A fold's probes near its jump end at the cap at 24's holds._ On the eight `Folded` worlds,
+    23–29 of the bisection's probes end unconverged at the 2,000 cap, transients in the fold's
+    bottleneck whose means straddle T\*. On the reference Earth there are 23, from its probe 24
+    on, taking 46,000 of its 68,659 sweeps, and 58,000 with its six hot probes. The fold guard
+    keeps the last converged candidate, as ruled. For I13's accelerated relax after 24.
