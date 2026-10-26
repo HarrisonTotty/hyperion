@@ -313,6 +313,30 @@ function withAtmospheres(
   });
 }
 
+/**
+ * `plan` with the sources of each body it draws larger than a point and holds no record of, as
+ * `planLitBodies` builds a recorded body's (`bodyLightSources`).
+ */
+function withRecordlessSources(
+  plan: BodyFramePlan,
+  bodies: ReadonlyArray<LitBodyInput>,
+  hosts: PhotorealFrame["lights"],
+  options: { readonly annuli: number; readonly planetshine: number },
+): BodyFramePlan {
+  const recordless = bodies.filter((body) => {
+    const regime = plan.regimes.get(body.id);
+    return regime !== undefined && regime !== "point" && !plan.sources.has(body.id);
+  });
+  if (recordless.length === 0) {
+    return plan;
+  }
+  const sources = new Map(plan.sources);
+  for (const body of recordless) {
+    sources.set(body.id, bodyLightSources(body, bodies, hosts, options));
+  }
+  return { ...plan, sources };
+}
+
 /** Whether a body's atmosphere camera lies inside its air: under its medium's top over the datum. */
 function insideAir(air: FrameAtmosphere): boolean {
   const { heightM } = geodeticOf(air.camera.positionM, tablesFigureOf(air.tables));
@@ -342,6 +366,8 @@ export class PhotorealRenderer {
   >();
   /** The bodies whose composite failed, each said once until it draws again. */
   readonly #airFailed = new Set<BodyIdHex>();
+  /** The colour the latest frame's later passes read: its last composite's, or the scene's. */
+  #drawnColour: TextureHandle | null = null;
   readonly #unsubscribe: () => void;
 
   constructor(engine: RenderEngine, viewName: string) {
@@ -355,6 +381,7 @@ export class PhotorealRenderer {
       this.#generation += 1;
       this.#resources?.histograms.dispose();
       this.#resources = null;
+      this.#drawnColour = null;
       // Their shared kernels died with the device; each is made again at its next frame.
       this.#releaseAtmospheres();
       this.#histogram = undefined;
@@ -578,7 +605,7 @@ export class PhotorealRenderer {
     // its composite lays the air over its ground (R08.T10.b).
     const atmospheres = frame.atmospheres ?? [];
     const bodies = withAtmospheres(frame.bodies, atmospheres);
-    const plan = planLitBodies(
+    const planned = planLitBodies(
       bodies,
       frame.lights,
       {
@@ -594,6 +621,13 @@ export class PhotorealRenderer {
       },
       frame.previousRegimes,
     );
+    // A body drawn larger than a point with no record, the camera's local body seen from inside
+    // its figure's sphere above all, takes its sources as the plan would build them, so that its
+    // atmosphere's lights and sky are its surface's (R08.T10.b).
+    const plan = withRecordlessSources(planned, bodies, frame.lights, {
+      annuli: settings.discAnnuli,
+      planetshine: settings.planetshineSources,
+    });
     const stars = this.#starDraw(resources, frame.starSprites);
     // R06's sky at infinity, timed as its own pass, then the painter's sequence over it.
     resources.target.render({
@@ -636,10 +670,11 @@ export class PhotorealRenderer {
     });
     // Each body's air over everything drawn before it, farthest first (R08.T10.b), into the air
     // targets in turn; the passes after read the last.
-    const hdrColour = this.#drawAtmospheres(resources, frame, plan, bodies, {
+    const hdrColour = this.#drawAtmospheres(resources, frame, plan, {
       viewRotation,
       projection,
     });
+    this.#drawnColour = hdrColour;
     if (frame.meter !== null) {
       resources.histograms.measure({
         hdrColour,
@@ -705,6 +740,17 @@ export class PhotorealRenderer {
   }
 
   /**
+   * The latest frame's scene target, its colour and depth as the opaque passes left them, and the
+   * colour its later passes read, its last composite's (R08.T10.b), for the smoke page's
+   * read-backs; `null` before the first frame, or while the resources are being made again.
+   */
+  get frameColours(): { readonly scene: RenderTarget; readonly drawn: TextureHandle } | null {
+    const resources = this.#resources;
+    const drawn = this.#drawnColour;
+    return resources === null || drawn === null ? null : { scene: resources.target, drawn };
+  }
+
+  /**
    * The latest histogram read back since the last call, for the view's `AutoExposure`, or
    * `undefined` where none has arrived.
    */
@@ -734,25 +780,15 @@ export class PhotorealRenderer {
     resources: Resources,
     frame: PhotorealFrame,
     plan: BodyFramePlan,
-    bodies: ReadonlyArray<LitBodyInput>,
     pass: { readonly viewRotation: Float32Array; readonly projection: Float32Array },
   ): TextureHandle {
-    const settings = SETTINGS[frame.setting].photoreal;
-    const byId = new Map(bodies.map((body) => [body.id, body]));
+    const recorded = new Set(plan.discs.map((record) => record.body));
     const drawn: Array<{ readonly air: FrameAtmosphere; readonly sources: BodyLightSources }> = [];
     for (const air of frame.atmospheres ?? []) {
-      const own = plan.sources.get(air.id);
-      const body = byId.get(air.id);
-      if (own !== undefined) {
-        drawn.push({ air, sources: own });
-      } else if (body !== undefined && insideAir(air)) {
-        drawn.push({
-          air,
-          sources: bodyLightSources(body, bodies, frame.lights, {
-            annuli: settings.discAnnuli,
-            planetshine: settings.planetshineSources,
-          }),
-        });
+      const sources = plan.sources.get(air.id);
+      // A body drawn by its record, or the camera's local body inside its air.
+      if (sources !== undefined && (recorded.has(air.id) || insideAir(air))) {
+        drawn.push({ air, sources });
       }
     }
     const order = drawn.toSorted(

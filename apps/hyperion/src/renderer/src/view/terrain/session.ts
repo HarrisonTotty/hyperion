@@ -19,8 +19,9 @@
  *   a wireframe view (4 px) and a photorealistic one (1 px) each have their own range.
  * - **The detail seed** of a server body is asked of its record, one `body_detail` a want; a kept
  *   scene's body carries its own (`ViewBody.detailSeed`). A body whose hooks are not modelled is
- *   wanted for its coverage alone: no class map. R08.T10.a reads `body_detail` too, and whichever
- *   of it and this lands second takes the other's fetch ({@link TerrainSession}'s `#askSeed`).
+ *   wanted for its coverage alone: no class map. The atmosphere cache reads `body_detail` too:
+ *   `VIEW` gives the session its requests through the `BodyDetailShare` it shares with the cache
+ *   (plan R08, R08.T10.b), so that one request serves both ({@link TerrainSession}'s `#askSeed`).
  * - **The scene and the link.** {@link TerrainSession.noteSurfaceRevisions} takes a push's
  *   `surface_revisions`, {@link TerrainSession.resync} the scene topic opened again, and
  *   {@link TerrainSession.setLinkUp} the link's state: each asks the store for the new cells with the
@@ -1734,7 +1735,9 @@ export class TerrainSession {
 
   /**
    * Asks `body`'s record for its detail seed, one `body_detail` at the scene's time, or waits for
-   * the link: the session's one fetch of the hooks, which R08.T10.a's shares. The same record gives
+   * the link: the session's one fetch of the hooks, which `VIEW`'s `BodyDetailShare` joins with the
+   * atmosphere cache's, answering it from the cache's reply where it holds one (plan R08,
+   * R08.T10.b). The same record gives
    * the orbit that sets the body's seasons (R10.T12), or names a moon's planet, whose record is then
    * asked once ({@link TerrainSession}'s `#askSeason`).
    */

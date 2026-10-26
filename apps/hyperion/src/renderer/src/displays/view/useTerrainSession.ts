@@ -67,6 +67,12 @@ export type TerrainStage =
       readonly link: ServerLink;
       /** The scene subscription's surface events (`SceneView.onSurface`). */
       readonly onSurface: SurfaceEvents;
+      /**
+       * The requests the session asks through in place of the link's: `VIEW`'s `body_detail` share
+       * with the atmosphere cache (plan R08, R08.T10.b; `BodyDetailShare.terrain`), which passes
+       * every other request to the link's; the link's where absent.
+       */
+      readonly requests?: TerrainRequests;
     };
 
 /** Where a session's fields come from: the server's scene of a universe, or a kept fixture. */
@@ -95,7 +101,7 @@ export function terrainSessionSource(stage: TerrainStage): TerrainSessionSource 
           : {
               kind: "server",
               universe: stage.universe,
-              requests: stage.link.requests,
+              requests: stage.requests ?? stage.link.requests,
               linkUp: stage.link.status === "connected",
               onSurface: stage.onSurface,
             };

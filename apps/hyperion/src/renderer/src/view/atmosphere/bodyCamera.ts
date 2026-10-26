@@ -13,11 +13,12 @@
  * mesh place it: the atmosphere's figure is a spheroid of revolution, so only its pole orients it.
  * A contact, which has no position the view may draw an atmosphere at, has none.
  *
- * Nothing calls it yet: R08.T10.b draws each body's atmosphere in the photorealistic view with it.
+ * R08.T10.b draws each body's atmosphere in the photorealistic view with it
+ * (`displays/view/photorealFrame.ts`).
  */
 
 import { scale } from "../../geometry/vec3";
-import type { CameraPose } from "../camera/pose";
+import type { CameraPose, Quaternion } from "../camera/pose";
 import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
 import { type CameraOrigins, relativeToCamera } from "../coords/relative";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
@@ -48,6 +49,15 @@ export function atmosphereAxesOf(body: ViewBody): Rotation3 {
 }
 
 /**
+ * The rotation from the galactic axes into `body`'s body-fixed ones that its atmosphere is drawn
+ * in ({@link atmosphereAxesOf}'s inverse), as `sources.ts`'s `skySources` takes it to turn the
+ * body's lights into its sky (plan R08, R08.T10.b).
+ */
+export function atmosphereToBodyFixed(body: ViewBody): Quaternion {
+  return conjugate(quaternionFromRows(atmosphereAxesOf(body).rows));
+}
+
+/**
  * The camera of `body`'s atmosphere for the view at `pose` (Design note 13): its position from the
  * body's drawn centre, `f64`, and its orientation, each in the body-fixed axes; `null` for a
  * contact (`ViewBody.retarded` is `null`).
@@ -72,7 +82,7 @@ export function bodyAtmosphereCamera(
   const axes = atmosphereAxesOf(body);
   return {
     positionM: rotateToBodyFixed(axes, scale(centreM, -1)),
-    orientation: multiply(conjugate(quaternionFromRows(axes.rows)), pose.orientation),
+    orientation: multiply(atmosphereToBodyFixed(body), pose.orientation),
     fovXRad: projection.fovXRad,
     viewport: projection.viewport,
   };

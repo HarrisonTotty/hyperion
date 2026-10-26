@@ -43,8 +43,10 @@ import { FakeWebSocket } from "./FakeWebSocket";
 import { anOpenedUniverse, aUniverseList } from "./galaxyFixtures";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, shipInSystem, sliceSceneSystem } from "./sceneFixture";
 import { ScriptedHeightWorker } from "./scriptedHeightWorker";
+import { SilentOpticsWorker } from "./silentOpticsWorker";
 import { ServerLinkHarness } from "./ServerLinkHarness";
 import type { WorkerLike } from "../view/terrain/workers/pool";
+import type { OpticsWorkerLike } from "../view/atmosphere/opticsPool";
 import type { TerrainSession } from "../view/terrain/session";
 import type { SceneOption } from "../displays/view/viewRun";
 
@@ -433,6 +435,14 @@ export interface ViewDisplayHarness {
   readonly heightWorkers: ReadonlyArray<ScriptedHeightWorker>;
 }
 
+/**
+ * Starts one of the atmosphere cache's optics workers, which answers nothing, so that no frame
+ * waits on the optics (R08.T10.b).
+ */
+function startOpticsWorker(): OpticsWorkerLike {
+  return new SilentOpticsWorker();
+}
+
 /** Renders `VIEW` in its providers with fake frames, layout, engine and height workers. */
 export function renderViewDisplay(options: {
   readonly store: GraphicsStatusStore;
@@ -470,6 +480,7 @@ export function renderViewDisplay(options: {
     heightWorkers.push(worker);
     return worker;
   };
+
   render(
     <ServerLinkHarness>
       <UniverseProvider>
@@ -484,6 +495,7 @@ export function renderViewDisplay(options: {
                     engineSource={options.source}
                     setting={options.setting}
                     heightWorkers={startHeightWorker}
+                    opticsWorkers={startOpticsWorker}
                     sceneOptions={options.sceneOptions}
                     watchTerrain={options.watchTerrain}
                   />

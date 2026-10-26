@@ -949,6 +949,33 @@ describe("a kept scene's bodies", () => {
     ]).toEqual([[], ["aerosolsNotYetModelled", "atmosphereApproximate"], [earth, thick], 0]);
   });
 
+  it("holds a body whose scene is still building its medium pending, then draws it (R08.T10.b)", () => {
+    const h = harness();
+    const view = h.cache.openView();
+    const loading = view.noteFrame({
+      nowMs: 0,
+      scene: null,
+      bodies: [kept(A, { kind: "loading" })],
+    });
+    const held = view.noteFrame({
+      nowMs: ANNUNCIATION_ONSET_MS,
+      scene: null,
+      bodies: [kept(A, { kind: "loading" })],
+    });
+    const built = view.noteFrame({
+      nowMs: ANNUNCIATION_ONSET_MS + 1,
+      scene: null,
+      bodies: [kept(A, { kind: "medium", built: keptEarth(), labels: [] })],
+    });
+    expect([
+      loading.pending,
+      held.labels,
+      built.pending,
+      h.cache.entryOf(A)?.tables !== null,
+    ]).toEqual([true, ["atmospherePending"], false, true]);
+    expect(h.seam.asked.length).toBe(0);
+  });
+
   it("makes a kept body's tables again for another medium, disposing the last", () => {
     const h = harness();
     note(h, [kept(A, { kind: "medium", built: keptEarth(), labels: [] })], 0, null);

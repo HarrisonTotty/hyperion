@@ -64,6 +64,7 @@ import {
   checkSurfaceLightingSaturn,
   timeFarLimb,
 } from "./atmosphere";
+import { checkAtmosphereFrame } from "./atmosphereFrame";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
@@ -426,6 +427,9 @@ async function run(
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
   await group(11, "R08.T8.c the far limb's footprint", () =>
     checkFarLimbFootprint(engine, checks, twins),
+  );
+  await group(11, "R08.T10.b the air over a drawn ground", () =>
+    checkAtmosphereFrame(engine, checks),
   );
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));
   await group(1, "R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));

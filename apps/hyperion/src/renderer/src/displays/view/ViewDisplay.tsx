@@ -1,4 +1,4 @@
-import type { UniverseIdHex, UniverseTime } from "@hyperion/protocol";
+import type { BodyIdHex, DetailLevelDto, UniverseIdHex, UniverseTime } from "@hyperion/protocol";
 import {
   type FocusEvent,
   type KeyboardEvent,
@@ -19,7 +19,7 @@ import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
 import type { BodyDistanceUnit } from "../../lib/format";
 import type { SceneFrame } from "../../lib/scene/apparent";
-import type { SceneKinematics, SceneModel, SystemPlace } from "../../lib/scene/model";
+import type { SceneKinematics, SceneModel, SceneSystem, SystemPlace } from "../../lib/scene/model";
 import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { useUniverse } from "../../lib/universe";
 import { usePrefersReducedMotion } from "../../lib/usePrefersReducedMotion";
@@ -161,6 +161,19 @@ import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import { useServerLink } from "../../lib/serverLink";
 import { faultsFor } from "./viewFaults";
+import type {
+  AtmosphereCache,
+  AtmosphereScene,
+  AtmosphereViewReport,
+} from "../../view/atmosphere/AtmosphereCache";
+import { type OpticsWorkerLike, startOpticsWorker } from "../../view/atmosphere/opticsPool";
+import { useAtmosphereCache, useBodyDetailShare } from "./useAtmosphereCache";
+import {
+  atmosphereShownOf,
+  NO_ATMOSPHERE_SHOWN,
+  ViewAtmosphereHandle,
+  type ViewAtmosphereShown,
+} from "./viewAtmosphere";
 import {
   browserHeightWorker,
   stepTerrainSession,
@@ -191,6 +204,7 @@ import {
   commandRun,
   EASED_MOVES_STATEMENT,
   type LabelLine,
+  type LabelStatement,
   photorealStatements,
   WIREFRAME_ONLY,
   labelLines,
@@ -335,6 +349,11 @@ interface ViewDisplayProps {
    * with each session made, its returned function when `VIEW` lets the session go.
    */
   readonly watchTerrain?: ((session: TerrainSession) => () => void) | undefined;
+  /**
+   * Starts one of the atmosphere cache's optics workers (plan R08, R08.T10.b), stable in identity:
+   * the renderer's module worker by default (`startOpticsWorker`), a fake in a test.
+   */
+  readonly opticsWorkers?: (() => OpticsWorkerLike) | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -391,6 +410,14 @@ interface ViewStageProps {
    * and none hands over.
    */
   readonly terrain: TerrainSession | null;
+  /**
+   * The stage's atmosphere cache (plan R08, R08.T10.b), made above the stage over `engineState`'s
+   * engine, or `null` with none: every view notes its frame with it through its own handle and
+   * draws the air of the bodies it holds tables for.
+   */
+  readonly atmosphere: AtmosphereCache | null;
+  /** Whether the link to the server is up: the atmosphere cache asks nothing while it is down. */
+  readonly linkUp: boolean;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -462,6 +489,12 @@ interface LoopInputs {
   readonly onExposureChange: (exposure: ExposureControl) => void;
   /** The stage's terrain session (R10.T16.a), or `null`. */
   readonly terrain: TerrainSession | null;
+  /** The stage's atmosphere cache (R08.T10.b), or `null`. */
+  readonly atmosphere: AtmosphereCache | null;
+  /** Whether the link is up, which the cache's requests read (R08.T10.b). */
+  readonly linkUp: boolean;
+  /** The open universe, in which the cache asks a server body's record (R08.T10.b), or `null`. */
+  readonly universe: UniverseIdHex | null;
   /**
    * A kept scene's terrain fixture's follower of its script (`TerrainFixture.notePlayed`,
    * R10.T16.d), told the script's time each primary frame; `null` for any other stage.
@@ -512,6 +545,11 @@ interface Published {
    * readout's latest answer (plan R10, R10.T12; `GroundReadouts`); `null` where it states none.
    */
   readonly ground: GroundSnapshot | null;
+  /**
+   * What its last frame said of its bodies' atmospheres (plan R08, R08.T10.b), for its label
+   * block's notes and fault lines.
+   */
+  readonly atmosphere: ViewAtmosphereShown;
 }
 
 /** The survey edges before the loop's first frame: none. */
@@ -702,6 +740,8 @@ function ViewStage({
   setting,
   modifier,
   terrain,
+  atmosphere,
+  linkUp,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
@@ -719,6 +759,7 @@ function ViewStage({
     surveyEdges: NO_SURVEY_EDGES,
     contourIntervalM: null,
     ground: null,
+    atmosphere: NO_ATMOSPHERE_SHOWN,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
@@ -753,6 +794,9 @@ function ViewStage({
     meter: "average",
     onExposureChange,
     terrain,
+    atmosphere,
+    linkUp,
+    universe,
     notePlayed,
     lineOfSightPoint: undefined,
     slopeBaselineM,
@@ -846,7 +890,14 @@ function ViewStage({
       refusals: slotRefusals,
       availability: availabilityOf(slotRefusals),
       budgetStyle: budgets.get(slot.id)?.style ?? "wireframe",
-      faults: faultsFor(graphics, annunciation, slot.id, slot.id, terrainFaults),
+      faults: faultsFor(
+        graphics,
+        annunciation,
+        slot.id,
+        slot.id,
+        terrainFaults,
+        slot.shown?.atmosphere.fault ?? [],
+      ),
     };
   });
   // The CONTROLS view: the side column's list and controls, and the single keys pressed off a
@@ -860,7 +911,15 @@ function ViewStage({
     : null;
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
   const controlledShown = operatedView?.slot.shown ?? null;
-  const faults = faultsFor(graphics, annunciation, VIEW_NAME, VIEW_ID, terrainFaults);
+  // The atmosphere's fault lines after the terrain's, as the loop last published them (R08.T10.b).
+  const faults = faultsFor(
+    graphics,
+    annunciation,
+    VIEW_NAME,
+    VIEW_ID,
+    terrainFaults,
+    shown.atmosphere.fault,
+  );
   // The primary's terrain lines (R10.T12): its survey line, DATUM and readout, from the loop's
   // latest publish, on the lower plate; the tripod and the list's note only while the plate states
   // the readout (decision-r10-view-block-room §3).
@@ -906,6 +965,9 @@ function ViewStage({
       meter,
       onExposureChange,
       terrain,
+      atmosphere,
+      linkUp,
+      universe,
       notePlayed,
       lineOfSightPoint: hasPoint === undefined ? undefined : { hasPoint, rangeM: pointRangeM },
       slopeBaselineM,
@@ -922,6 +984,9 @@ function ViewStage({
     meter,
     onExposureChange,
     terrain,
+    atmosphere,
+    linkUp,
+    universe,
     notePlayed,
     hasPoint,
     pointRangeM,
@@ -1033,6 +1098,17 @@ function ViewStage({
     const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
     // The terrain session the view last told what it drew, which forgets it when it goes.
     let reportedTo: TerrainSession | null = null;
+    // The view's handle on the stage's atmosphere cache, and what the cache said of its last frame
+    // drawn (R08.T10.b).
+    const air = new ViewAtmosphereHandle();
+    let atmosphereReport: AtmosphereViewReport | null = null;
+    // The arrival the stage's views share (R08.T10.b): one object a system the stage draws, so that
+    // the cache asks every wanted body afresh, and lets the left system's go, on a new arrival.
+    let arrival: object = {};
+    let arrivalSystem: string | null = null;
+    // Each body's granted detail, made again when the scene's system is.
+    let grantsFor: SceneSystem | null = null;
+    let grants: ReadonlyMap<BodyIdHex, DetailLevelDto> = new Map();
     // The terrain's annunciation of the last frame drawn (R10.T16.c), for the label block.
     let terrainAnnunciation: TerrainAnnunciation | null = null;
     // The survey edges the last frame drawn marked, for the list's notes (R10.T16.c).
@@ -1131,6 +1207,28 @@ function ViewStage({
         stepGuard = new TerrainFailureGuard();
       }
       terrainAnnunciation = null;
+      if (run.scene.system !== arrivalSystem) {
+        arrivalSystem = run.scene.system;
+        arrival = {};
+      }
+      const sceneSystem = current?.model.system ?? null;
+      if (sceneSystem !== grantsFor) {
+        grantsFor = sceneSystem;
+        grants = grantLevelsOf(sceneSystem);
+      }
+      // The server's scene as the atmosphere cache's requests take it; none for a kept scene.
+      const airScene: AtmosphereScene | null =
+        current === null || inputs.universe === null
+          ? null
+          : {
+              universe: inputs.universe,
+              system: current.place.system,
+              designation: current.place.designation,
+              time: run.scene.time,
+              arrival,
+              grants,
+              linkUp: inputs.linkUp,
+            };
       let frameInputs: ViewFrameInputs | null = null;
       if (drawer !== null) {
         if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
@@ -1164,6 +1262,8 @@ function ViewStage({
               : { source: session, view: VIEW_ID, nowMs, intervals: poseIntervals },
           // The tripod, while the plate states the readout with its point (R10.T12).
           lineOfSightPoint: inputs.lineOfSightPoint,
+          // Its bodies' air, through its handle on the stage's cache (R08.T10.b).
+          atmosphere: air.inputFor(inputs.atmosphere, airScene, nowMs),
         };
         // What it draws now, in the style it last drew in (S8), for the step below.
         const report =
@@ -1192,6 +1292,7 @@ function ViewStage({
           terrainAnnunciation = drawn.terrain;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
+          atmosphereReport = drawn.atmosphere;
           // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
           drawnStyle = drawn.drawnStyle;
           placeMarkLabels(
@@ -1229,6 +1330,7 @@ function ViewStage({
           run.source.kind === "server" && current !== null ? current.reportCamera : null,
         terrain: session,
         intervals: poseIntervals,
+        atmosphere: { cache: inputs.atmosphere, scene: airScene },
       });
       if (publish) {
         publishedMs = nowMs;
@@ -1249,6 +1351,10 @@ function ViewStage({
           surveyEdges,
           contourIntervalM,
           ground: grounds.publish(session, run, nowMs, inputs.slopeBaselineM),
+          atmosphere:
+            atmosphereReport === null
+              ? NO_ATMOSPHERE_SHOWN
+              : atmosphereShownOf(atmosphereReport, run.scene),
         });
       }
       frame = requestAnimationFrame(tick);
@@ -1259,6 +1365,7 @@ function ViewStage({
       unsubscribeTimes();
       unsubscribeTimesRestored();
       reportedTo?.forgetView(VIEW_ID);
+      air.close();
       // The drawer disposes of the view with itself.
       releaseDrawer();
     };
@@ -1451,8 +1558,14 @@ function ViewStage({
   // The meter as the panels show it: a meter's own status goes at once with the meter that found
   // nothing, in the render of the operator's choice (R07.T16.b).
   const meterShown = meteringFor(metering, meter);
-  const primaryPhotoreal = photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels);
-  const primaryStatements = [
+  const primaryPhotoreal = photorealStatements(
+    shown.run,
+    lighting,
+    shown.drawnStyle,
+    litLabels,
+    shown.atmosphere,
+  );
+  const primaryStatements: ReadonlyArray<LabelStatement> = [
     ...labelStatements(shown.run, primaryTerrain),
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
@@ -2010,6 +2123,15 @@ function withSkyLine(
     : lines.map((line) => (line.label === "STARS" ? { ...line, ...sky } : line));
 }
 
+/** Each body's granted detail level in the scene's system, as the atmosphere cache asks by it. */
+function grantLevelsOf(system: SceneSystem | null): ReadonlyMap<BodyIdHex, DetailLevelDto> {
+  const levels = new Map<BodyIdHex, DetailLevelDto>();
+  for (const [id, grant] of system?.grants ?? []) {
+    levels.set(id, grant.level);
+  }
+  return levels;
+}
+
 /**
  * Where the interim stars of a server scene are asked: a stated place's own barycentre and time,
  * as the scene stated them, asked once per arrival and never carried per frame (R03.T16); a charted
@@ -2042,6 +2164,7 @@ function ViewPanels({
   heightWorkers = browserHeightWorker,
   sceneOptions = SCENE_OPTIONS,
   watchTerrain,
+  opticsWorkers = startOpticsWorker,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -2098,15 +2221,30 @@ function ViewPanels({
   // source keeps its fields (R10.T16.a): the server's scene's over the link, a kept scene's over
   // its terrain fixture, and none for any other kept scene.
   const link = useServerLink();
+  // One body_detail fetch for the terrain session and the atmosphere cache (R08.T10.b).
+  const share = useBodyDetailShare(link.requests);
   const terrain = useTerrainSession({
     engineState,
     source: terrainSessionSource(
       server === null
         ? { kind: "kept", option }
-        : { kind: "server", universe, link, onSurface: scene.onSurface },
+        : {
+            kind: "server",
+            universe,
+            link,
+            onSurface: scene.onSurface,
+            requests: share.terrain,
+          },
     ),
     createWorker: heightWorkers,
     setting,
+  });
+  // The atmosphere cache of the stage's device (R08.T10.b), which asks a server scene's bodies'
+  // records through the share; a kept scene's bodies bring their own settings.
+  const atmosphere = useAtmosphereCache({
+    engineState,
+    requests: server === null ? null : share.atmosphere,
+    createWorker: opticsWorkers,
   });
   // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
   useEffect(
@@ -2172,6 +2310,8 @@ function ViewPanels({
         setting={setting}
         modifier={primaryModifierOf(platform)}
         terrain={terrain}
+        atmosphere={atmosphere}
+        linkUp={link.status === "connected"}
       />
     </div>
   );

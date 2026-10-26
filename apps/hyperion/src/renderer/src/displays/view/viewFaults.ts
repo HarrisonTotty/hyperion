@@ -1,7 +1,8 @@
 /**
- * The faults a view's plate shows (plan R07, R07.T19; plan R10, R10.T16.b and R10.T16.e): its
- * graphics fault, then the terrain's, each its own fault line in `--status-caution`
- * (decision-r10-t16-contracts §7; decision-r10-t16-leans §8).
+ * The faults a view's plate shows (plan R07, R07.T19; plan R10, R10.T16.b and R10.T16.e; plan R08,
+ * R08.T10.b): its graphics fault, then the terrain's, then the atmosphere's, each its own fault line
+ * in `--status-caution` (decision-r10-t16-contracts §7; decision-r10-t16-leans §8;
+ * `decision-r08-t10a-leans.md`, item 6 and its follow-up).
  */
 
 import type { ViewId } from "../../view/camera/state";
@@ -29,10 +30,14 @@ export function faultFor(
  * The faults to show on a view's plate, each its own fault line, in order: its graphics fault
  * ({@link faultFor}), then the terrain's, its text by its cause, while the view hands a body over
  * once every height worker is lost or a guarded computation has kept failing
- * (`TerrainSession.terrainFaults`), so that a device loss never hides it.
+ * (`TerrainSession.terrainFaults`), so that a device loss never hides it; then the atmosphere's,
+ * `ATMOSPHERE NOT AVAILABLE` and then each `ATMOSPHERE DATA INVALID` (plan R08, R08.T10.b;
+ * `atmosphereProblemLines`' `fault`), as the view's last frame said them.
  *
  * @param viewName - The view's name, as a `view-refused` fault carries it.
  * @param view - The view's ID, as the terrain session knows it.
+ * @param atmosphereFaults - The view's atmosphere fault lines (`ViewAtmosphereShown.fault`); none
+ *   where absent.
  */
 export function faultsFor(
   graphics: GraphicsStatus,
@@ -40,11 +45,15 @@ export function faultsFor(
   viewName: string,
   view: ViewId,
   terrainFaults: ReadonlyMap<ViewId, TerrainFault>,
+  atmosphereFaults: ReadonlyArray<string> = [],
 ): ReadonlyArray<string> {
   const graphicsFault = faultFor(graphics, annunciation, viewName);
-  const faults = graphicsFault === null ? [] : [graphicsFault];
   const terrain = terrainFaults.get(view);
-  return terrain === undefined ? faults : [...faults, terrain];
+  return [
+    ...(graphicsFault === null ? [] : [graphicsFault]),
+    ...(terrain === undefined ? [] : [terrain]),
+    ...atmosphereFaults,
+  ];
 }
 
 /**

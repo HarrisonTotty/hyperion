@@ -378,6 +378,44 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     tables.dispose();
   });
 
+  it("draws an air body's mesh in the bodies pass before its composite (decision-r08-t10b-depth §6)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const passes = engine.targetFrames.map((f) => [
+      f.label,
+      f.draws.map((draw) => draw.material.name),
+    ]);
+    const bodies = passes.findIndex(([label]) => label === PHOTOREAL_PASS_LABELS.bodies);
+    const composite = passes.findIndex(([label]) => label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(passes[bodies]?.[1]).toContain("bodies:smoothMesh");
+    expect(bodies).toBeGreaterThanOrEqual(0);
+    expect(bodies).toBeLessThan(composite);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("submits no composite for an air body drawn as a point", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // 6,371 km at 1.5 × 10¹¹ m spans well under 3 px of a 64 px view.
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1.5e11));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const plan = renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    expect(plan?.regimes.get(planet.id)).toBe("point");
+    expect(engine.targetFrames.map((f) => f.label)).not.toContain(ATMOSPHERE_COMPOSITE_PASS);
+    renderer.dispose();
+    tables.dispose();
+  });
+
   it("draws two bodies' composites farthest first, the nearer over the farther", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     const near = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));

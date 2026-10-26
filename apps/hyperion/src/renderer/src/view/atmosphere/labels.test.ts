@@ -8,6 +8,7 @@ import {
   type AtmosphereLabel,
   atmosphereNotAvailable,
   atmosphereProblemLines,
+  atmosphereNotes,
   atmosphereRejected,
   atmosphereStatements,
 } from "./labels";
@@ -64,6 +65,43 @@ describe("the atmosphere labels", () => {
   it("list every label once", () => {
     expect(new Set(ATMOSPHERE_LABELS).size).toBe(ATMOSPHERE_LABELS.length);
     expect(ATMOSPHERE_LABELS.toSorted()).toEqual(Object.keys(ATMOSPHERE_STATEMENTS).toSorted());
+  });
+});
+
+describe("atmosphereNotes (R08.T10.b)", () => {
+  it("sets the REJECTED lines after NOT RESOLVED and before the annunciations, a failure in caution", () => {
+    const refused = {
+      statement: "ATMOSPHERE REJECTED: for A, refused, reopen VIEW to retry",
+      refusal: true,
+    };
+    const failed = {
+      statement: "ATMOSPHERE REJECTED: for B, failed, reopen VIEW to retry",
+      refusal: false,
+    };
+    expect(
+      atmosphereNotes(
+        [
+          "atmosphereApproximate",
+          "atmosphereNotResolved",
+          "atmosphereNotYetModelled",
+          "atmospherePending",
+        ],
+        [refused, failed],
+      ),
+    ).toEqual([
+      { statement: "ATMOSPHERE: NOT YET MODELLED", caution: false },
+      { statement: "ATMOSPHERE: NOT RESOLVED", caution: false },
+      { statement: refused.statement, caution: false },
+      { statement: failed.statement, caution: true },
+      { statement: "ATMOSPHERE: PENDING", caution: false },
+      { statement: "ATMOSPHERE: APPROXIMATE", caution: false },
+    ]);
+  });
+
+  it("gives the labels' statements alone where nothing is refused", () => {
+    expect(atmosphereNotes(["aerosolsNotYetModelled"], []).map((note) => note.statement)).toEqual(
+      atmosphereStatements(["aerosolsNotYetModelled"]),
+    );
   });
 });
 

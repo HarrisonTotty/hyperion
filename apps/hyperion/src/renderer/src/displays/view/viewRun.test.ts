@@ -684,6 +684,38 @@ describe("the style", () => {
     ]);
   });
 
+  it("states the atmosphere's notes after the bodies' labels, a server's failure in caution (R08.T10.b)", () => {
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    const failed = "ATMOSPHERE REJECTED: for TEST GIANT, internal error, reopen VIEW to retry";
+    expect(
+      photorealStatements(photoreal, "lit", "photorealistic", albedo, {
+        labels: ["atmosphereNotYetModelled", "atmosphereNotResolved", "atmosphereApproximate"],
+        plate: [{ statement: failed, refusal: false }],
+        fault: [],
+      }),
+    ).toEqual([
+      ...albedo,
+      "ATMOSPHERE: NOT YET MODELLED",
+      "ATMOSPHERE: NOT RESOLVED",
+      { text: failed, caution: true },
+      "ATMOSPHERE: APPROXIMATE",
+    ]);
+  });
+
+  it("states no atmosphere note in the wireframe", () => {
+    const run = startRun(phaseScene());
+    expect(
+      photorealStatements(run, "lit", "wireframe", [], {
+        labels: ["atmosphereNotYetModelled"],
+        plate: [],
+        fault: [],
+      }),
+    ).toEqual([]);
+  });
+
   it("states the craft's photometry with a craft, composed with the bodies' note (R07.T16.e)", () => {
     // PRECISION TEST: a planet and its moon, and the own ship.
     const wireframe = startRun(precisionScene());

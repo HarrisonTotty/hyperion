@@ -319,6 +319,39 @@ export function atmosphereProblemLines(
   return { plate, fault: [...notAvailable, ...checks] };
 }
 
+/** One of a view's atmosphere notes on its label block's plate, and its colour. */
+export interface AtmosphereNote {
+  readonly statement: string;
+  /** `--status-caution` where true (a server's own failure); `--text` otherwise. */
+  readonly caution: boolean;
+}
+
+/**
+ * A view's atmosphere notes in their place on the plate (plan R08, R08.T10.b): the statements of
+ * its bodies' labels in {@link ATMOSPHERE_LABELS}' order, with its `ATMOSPHERE REJECTED` lines after
+ * `ATMOSPHERE: NOT RESOLVED` and before the annunciations (`decision-r08-t10a-leans.md`, follow-up
+ * to item 6), each in `--status-caution` where the server failed on its side.
+ *
+ * @param rejected - {@link atmosphereProblemLines}' `plate`.
+ */
+export function atmosphereNotes(
+  labels: Iterable<AtmosphereLabel>,
+  rejected: ReadonlyArray<AtmosphereRejectedLine>,
+): ReadonlyArray<AtmosphereNote> {
+  const held = new Set(labels);
+  const notes: AtmosphereNote[] = [];
+  const refusals = rejected.map((line) => ({ statement: line.statement, caution: !line.refusal }));
+  for (const label of ATMOSPHERE_LABELS) {
+    if (label === "atmospherePending") {
+      notes.push(...refusals);
+    }
+    if (held.has(label)) {
+      notes.push({ statement: ATMOSPHERE_STATEMENTS[label], caution: false });
+    }
+  }
+  return notes;
+}
+
 /**
  * The statements of the labels the view's bodies carry, each once, in {@link ATMOSPHERE_LABELS}'
  * order.

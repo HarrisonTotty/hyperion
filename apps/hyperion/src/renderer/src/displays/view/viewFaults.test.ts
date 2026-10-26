@@ -33,6 +33,17 @@ function graphics(lost: boolean): GraphicsStatusStore {
 }
 
 describe("a view's faults (R10.T16.b and R10.T16.e; decision-r10-t16-contracts §7)", () => {
+  it("sets the atmosphere's lines after the graphics fault and the terrain's (R08.T10.b)", () => {
+    const status = graphics(true).getSnapshot();
+    const air = [
+      "ATMOSPHERE NOT AVAILABLE: computation failed for A, reopen VIEW to retry",
+      "ATMOSPHERE DATA INVALID: answer unreadable for B, reopen VIEW to retry",
+    ];
+    expect(
+      faultsFor(status, graphicsAnnunciation(status), "view", PRIMARY, primaryFault(), air),
+    ).toEqual(["GRAPHICS DEVICE LOST: re-creating", TERRAIN_NOT_AVAILABLE, ...air]);
+  });
+
   it("sets the graphics fault first, then the terrain's, on a view that hands a body over", () => {
     const status = graphics(true).getSnapshot();
     expect(

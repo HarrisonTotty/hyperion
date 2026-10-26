@@ -10,6 +10,7 @@ import type {
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
 import type { WireAppearance } from "../appearance/fromWire";
+import type { KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
 import {
   BODY_MIN_SIZE_CLASS,
   CONTACT_SIZE_CLASS,
@@ -144,6 +145,14 @@ export interface ViewBody {
    * that a view whose `FRAME` is its states no terrain lines; absent for every other body.
    */
   readonly surfaceless?: true;
+  /**
+   * A kept scene's setting of the body's atmosphere (plan R08, R08.T10.b; `AtmosphereCache`'s
+   * `KeptBodyAtmosphere`): airless, a medium the scene built, or one it is still building. Absent on
+   * a kept scene's body, none is set, which the view states as `ATMOSPHERE: NOT YET MODELLED`, as
+   * R07's `TEST GIANT` carries it (decision-r08-giant-label). A server body never carries one: its
+   * record is asked of the server.
+   */
+  readonly atmosphere?: KeptBodyAtmosphere;
 }
 
 /** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */

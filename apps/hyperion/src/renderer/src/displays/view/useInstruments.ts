@@ -67,6 +67,17 @@ import {
 import type { ViewEngineState } from "./useViewEngine";
 import { type DragKind, dragKindOf } from "./useViewDrag";
 import {
+  atmosphereShownOf,
+  NO_ATMOSPHERE_SHOWN,
+  ViewAtmosphereHandle,
+  type ViewAtmosphereShown,
+} from "./viewAtmosphere";
+import type {
+  AtmosphereCache,
+  AtmosphereScene,
+  AtmosphereViewReport,
+} from "../../view/atmosphere/AtmosphereCache";
+import {
   makeViewFrameDrawer,
   terrainReportOf,
   type ViewFrameDrawer,
@@ -111,6 +122,11 @@ export interface InstrumentShown {
    * `CONTOUR INTERVAL` (plan R10, R10.T12.b); `null` while it draws none.
    */
   readonly contourIntervalM: number | null;
+  /**
+   * What its last frame said of its bodies' atmospheres (plan R08, R08.T10.b), its own, for its
+   * label block's notes and fault lines.
+   */
+  readonly atmosphere: ViewAtmosphereShown;
 }
 
 /** One slot's standing, as the display renders it. */
@@ -178,6 +194,15 @@ export interface InstrumentsFrame {
    * which an instrument at a pose another view has stated this frame states the same interval.
    */
   readonly intervals: PoseIntervals;
+  /**
+   * The stage's atmosphere cache and the server's scene as its requests take it, `null` for a kept
+   * scene's (plan R08, R08.T10.b): each instrument notes its own frame with it through its own
+   * handle and draws the air of the bodies it holds tables for.
+   */
+  readonly atmosphere: {
+    readonly cache: AtmosphereCache | null;
+    readonly scene: AtmosphereScene | null;
+  };
 }
 
 /** What `useInstruments` reads. */
@@ -300,6 +325,10 @@ interface SlotLoop {
   contourIntervalM: number | null;
   /** The interval holder it last stated its interval through, which forgets it when it goes. */
   intervals: PoseIntervals | null;
+  /** Its handle on the stage's atmosphere cache (R08.T10.b), closed when it goes. */
+  readonly air: ViewAtmosphereHandle;
+  /** What the cache said of its last frame drawn (R08.T10.b), or `null`. */
+  atmosphere: AtmosphereViewReport | null;
 }
 
 /** Has the terrain session and the interval holder `loop` last told of slot `slot`'s view forget it. */
@@ -311,6 +340,8 @@ function forgetSlot(loop: SlotLoop | undefined, slot: InstrumentSlot): void {
   loop.reportedTo = null;
   loop.intervals?.forget(instrumentViewId(slot));
   loop.intervals = null;
+  loop.air.close();
+  loop.atmosphere = null;
 }
 
 /**
@@ -352,6 +383,8 @@ function useSlotDrawer(
         reportedTo: null,
         contourIntervalM: null,
         intervals: null,
+        air: new ViewAtmosphereHandle(),
+        atmosphere: null,
       });
     });
     return () => {
@@ -507,6 +540,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             terrain: null,
             surveyEdges: [],
             contourIntervalM: null,
+            atmosphere: NO_ATMOSPHERE_SHOWN,
           },
           refused: false,
         })),
@@ -672,9 +706,12 @@ export function useInstruments(input: InstrumentsInput): Instruments {
                 nowMs: each.nowMs,
                 intervals: each.intervals,
               },
+        // Its own handle on the stage's atmosphere cache (R08.T10.b).
+        atmosphere: loop.air.inputFor(each.atmosphere.cache, each.atmosphere.scene, each.nowMs),
       };
       loop.intervals = each.intervals;
       const drawn = loop.drawer.draw(frameInputs);
+      loop.atmosphere = drawn?.atmosphere ?? null;
       loop.terrain = drawn?.terrain ?? null;
       loop.contourIntervalM = drawn?.contourIntervalM ?? null;
       if (drawn !== null) {
@@ -708,6 +745,10 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           terrain: loop.terrain,
           surveyEdges: loop.surveyEdges,
           contourIntervalM: loop.contourIntervalM,
+          atmosphere:
+            loop.atmosphere === null
+              ? NO_ATMOSPHERE_SHOWN
+              : atmosphereShownOf(loop.atmosphere, next.scene),
         };
         setSlots((previous) =>
           withSlot(previous, slot, (state) =>

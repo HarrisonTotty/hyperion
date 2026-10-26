@@ -152,7 +152,12 @@ export type KeptBodyAtmosphere =
       /** Compared by identity: another object makes the body's tables again. */
       readonly built: BuiltAtmosphere;
       readonly labels: ReadonlyArray<AtmosphereLabel>;
-    };
+    }
+  /**
+   * A medium the scene is still building, its fixtures' optics loading lazily (R08.T10.b): nothing
+   * drawn, and `ATMOSPHERE: PENDING` under the view's hold, as a server body's asked record.
+   */
+  | { readonly kind: "loading" };
 
 /** The scene a view's frame shows, as its requests take it. */
 export interface AtmosphereScene {
@@ -706,6 +711,10 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           built: null,
         };
         break;
+      case "loading":
+        held.build = null;
+        this.#dropDrawn(held);
+        return;
       case "medium":
         entry = {
           key: `kept/medium/v${ATMOSPHERE_OPTICS_VERSION}`,
@@ -1064,12 +1073,15 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   }
 }
 
-/** Whether a server body is pending: asked, waiting or building, with nothing drawn and no problem. */
+/**
+ * Whether a body is pending, with nothing drawn and no problem: a server body asked, waiting or
+ * building; a kept one whose scene is still building its medium (R08.T10.b).
+ */
 function isPending(held: HeldBody<unknown>): boolean {
-  return (
-    !held.kept &&
-    held.problem === null &&
-    held.drawn === null &&
-    (held.fetch.kind !== "idle" || held.build !== null)
-  );
+  if (held.problem !== null || held.drawn !== null) {
+    return false;
+  }
+  return held.kept
+    ? held.keptSetting?.kind === "loading"
+    : held.fetch.kind !== "idle" || held.build !== null;
 }

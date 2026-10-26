@@ -52,6 +52,7 @@ import {
   turnLook,
 } from "../../view/camera/state";
 import type { AppearanceLabel } from "../../view/appearance/fromWire";
+import { atmosphereNotes } from "../../view/atmosphere/labels";
 import { relativeToCamera } from "../../view/coords/relative";
 import { differenceM, type ViewPosition } from "../../view/coords/position";
 import {
@@ -90,6 +91,7 @@ import { type LightingState, lightingStatement } from "../../view/lighting/hostL
 import type { DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
 import type { TerrainFixture } from "./useTerrainSession";
+import { NO_ATMOSPHERE_SHOWN, type ViewAtmosphereShown } from "./viewAtmosphere";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
 export interface SceneOption {
@@ -752,6 +754,24 @@ export function labelStatements(
   return statements;
 }
 
+/**
+ * A statement of the label block set in `--status-caution` rather than `--text`: the server's own
+ * failure to answer for a body's atmosphere (`ATMOSPHERE REJECTED`'s, plan R08, R08.T10.b; the
+ * guide's row).
+ */
+export interface CautionStatement {
+  readonly text: string;
+  readonly caution: true;
+}
+
+/** A statement of the label block: its text in `--text`, or in `--status-caution`. */
+export type LabelStatement = string | CautionStatement;
+
+/** A statement's text. */
+export function statementText(statement: LabelStatement): string {
+  return typeof statement === "string" ? statement : statement.text;
+}
+
 /** The statement while the photorealistic style is chosen and its image is not yet drawn. */
 export const PHOTOREAL_PREPARING = "PHOTOREALISTIC: PREPARING";
 
@@ -784,15 +804,24 @@ const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLE
  * Scene-level, as the bodies' labels are (`litLabelsOf`): a craft's note stands with the scene's
  * craft, whether or not one is in the picture, and with no lit body as well.
  *
+ * The atmosphere's notes come after the others, the lit bodies' labels among them (plan R08,
+ * R08.T10.b; `labels.ts`'s `atmosphereNotes`), so that `ATMOSPHERE: NOT RESOLVED` stands after
+ * every `NOT YET MODELLED` note: its bodies' labels in their order, with each `ATMOSPHERE REJECTED`
+ * line after `ATMOSPHERE: NOT RESOLVED` and before the annunciations, the server's own failure in
+ * `--status-caution` ({@link CautionStatement}).
+ *
  * @param drawn - The style the view's last frame was drawn in.
  * @param labels - The appearance labels of the bodies the photorealistic frame lights.
+ * @param atmosphere - What the view's last frame said of its bodies' atmospheres
+ *   (`atmosphereShownOf`); none where absent.
  */
 export function photorealStatements(
   run: ViewRun,
   lighting: LightingState,
   drawn: RenderStyle,
   labels: ReadonlyArray<AppearanceLabel>,
-): ReadonlyArray<string> {
+  atmosphere: ViewAtmosphereShown = NO_ATMOSPHERE_SHOWN,
+): ReadonlyArray<LabelStatement> {
   if (run.camera.style !== "photorealistic") {
     return [];
   }
@@ -813,7 +842,11 @@ export function photorealStatements(
         )
       : [...bodyNotes, CRAFT_PHOTOMETRY_STATEMENT];
   }
-  return [...(line === null ? [] : [line]), ...notes];
+  const air: ReadonlyArray<LabelStatement> = atmosphereNotes(
+    atmosphere.labels,
+    atmosphere.plate,
+  ).map((note) => (note.caution ? { text: note.statement, caution: true } : note.statement));
+  return [...(line === null ? [] : [line]), ...notes, ...air];
 }
 
 /**

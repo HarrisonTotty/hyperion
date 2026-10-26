@@ -1,3 +1,4 @@
+import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
@@ -601,6 +602,84 @@ describe("the plan", () => {
     );
     expect(plan.regimes.get(body.id)).toBe("mesh");
     expect(plan.meshes).toHaveLength(1);
+  });
+
+  describe("a body whose air is drawn (decision-r08-t10b-depth §6)", () => {
+    /** A body of the frame at `centreM`, as `scene`'s. */
+    function bodyAt(id: string, centreM: Vec3, radiusM = 6.371e6): LitBodyInput {
+      const { body } = scene(1e8, 0);
+      return {
+        ...body,
+        id,
+        centreM,
+        figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
+      };
+    }
+    /** The distance at which a body of `radiusM` spans `diameterPx` at the centre. */
+    function atDiameterPx(diameterPx: number, radiusM = 6.371e6): number {
+      return radiusM / Math.sin(diameterPx / 2 / PX_PER_RAD);
+    }
+
+    it("promotes an airless disc overlapping its footprint, and leaves one clear of it", () => {
+      const { hosts } = scene(1e8, 0);
+      const d = atDiameterPx(40);
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -d));
+      const near = bodyAt("0200080020000000.0301", vec3(0, 0, -d / 2), 1.737e6);
+      const clear = bodyAt("0200080020000000.0302", vec3(0.4 * d, 0, -d), 1.737e6);
+      const plan = planLitBodies(
+        [airBody, near, clear],
+        hosts,
+        { ...OPTIONS, depthBodies: new Set([airBody.id]) },
+        new Map([
+          [airBody.id, "disc"],
+          [near.id, "disc"],
+          [clear.id, "disc"],
+        ]),
+      );
+      expect([airBody, near, clear].map((body) => plan.regimes.get(body.id))).toEqual([
+        "mesh",
+        "mesh",
+        "disc",
+      ]);
+    });
+
+    it("leaves one under the 3 px switch a point, with no sources", () => {
+      const { hosts } = scene(1e8, 0);
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2)));
+      const plan = planLitBodies(
+        [airBody],
+        hosts,
+        { ...OPTIONS, depthBodies: new Set([airBody.id]) },
+        new Map(),
+      );
+      expect([plan.regimes.get(airBody.id), plan.sources.has(airBody.id)]).toEqual([
+        "point",
+        false,
+      ]);
+    });
+
+    it("keeps the regimes independent of the bodies' order, and a mesh the disc side at 2.9 px", () => {
+      const { hosts } = scene(1e8, 0);
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2.9)));
+      const other = bodyAt("0200080020000000.0301", vec3(3e9, 0, -atDiameterPx(40)));
+      const options = { ...OPTIONS, depthBodies: new Set([airBody.id]) };
+      const previous = new Map<BodyIdHex, LitRegime>([
+        [airBody.id, "mesh"],
+        [other.id, "disc"],
+      ]);
+      const one = planLitBodies([airBody, other], hosts, options, previous);
+      const two = planLitBodies([other, airBody], hosts, options, previous);
+      expect(one.regimes.get(airBody.id)).toBe("mesh");
+      expect(new Map(one.regimes)).toEqual(new Map(two.regimes));
+    });
+
+    it("changes nothing in a frame that draws no atmosphere", () => {
+      const { body, hosts } = scene(atDiameterPx(40), 30);
+      const previous = new Map<BodyIdHex, LitRegime>([[body.id, "disc"]]);
+      const without = planLitBodies([body], hosts, OPTIONS, previous);
+      const empty = planLitBodies([body], hosts, { ...OPTIONS, depthBodies: new Set() }, previous);
+      expect(empty).toEqual(without);
+    });
   });
 
   it("does not draw a body seen from inside it", () => {

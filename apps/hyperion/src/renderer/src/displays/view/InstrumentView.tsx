@@ -1,7 +1,6 @@
 import { type KeyboardEvent, useId } from "react";
 
 import { StatusLine } from "../../components/StatusLine";
-import { StatusText } from "../../components/StatusText";
 import { pick } from "../../spatial/pick";
 import type { AppearanceLabel } from "../../view/appearance/fromWire";
 import type { ViewTurn } from "../../view/camera/look";
@@ -18,15 +17,18 @@ import { ViewCanvas } from "./ViewCanvas";
 import { terrainStatementOf } from "./viewFaults";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
+import { LabelStatementLine } from "./LabelStatementLine";
 import {
   CONTOUR_INTERVAL_LABEL,
   type LabelLine,
+  type LabelStatement,
   labelLines,
   labelStatements,
   photorealStatements,
   PHOTOREAL_PREPARING,
   POSITIONS_FROM_SHIP,
   PRESET_NAMES,
+  statementText,
   targetKey,
 } from "./viewRun";
 
@@ -46,7 +48,7 @@ export interface InstrumentViewProps {
    * The photorealistic style's statements the `PRIMARY` view's block shows, which the instrument
    * does not repeat (decision-r07-t19-layout, item 5).
    */
-  readonly primaryPhotorealStatements: ReadonlyArray<string>;
+  readonly primaryPhotorealStatements: ReadonlyArray<LabelStatement>;
   /**
    * Whether the display's sky is asked and none of its replies is held, so that the `STARS` line
    * reads `PENDING` until its first (R06.T11.f), as the primary's does.
@@ -173,7 +175,8 @@ export function InstrumentView({
   const { shown, name, panelRef } = instrument;
   const drawn = shown?.drawnStyle ?? "wireframe";
   const run = shown?.run ?? null;
-  const statements =
+  const primaryTexts = new Set(primaryPhotorealStatements.map(statementText));
+  const statements: ReadonlyArray<LabelStatement> =
     run === null
       ? []
       : [
@@ -183,14 +186,16 @@ export function InstrumentView({
           ),
           // Its own preparing, and the photorealistic style's statements about its picture that
           // the primary's block does not show already.
+          // Its own atmospheres' notes among them (R08.T10.b), where the primary's differ.
           ...photorealStatements(
             { ...run, camera: { ...run.camera, style: budgetStyle } },
             lighting,
             drawn,
             litLabels,
+            shown?.atmosphere,
           ).filter(
             (statement) =>
-              statement === PHOTOREAL_PREPARING || !primaryPhotorealStatements.includes(statement),
+              statement === PHOTOREAL_PREPARING || !primaryTexts.has(statementText(statement)),
           ),
         ];
   const describedBy = [
@@ -273,9 +278,7 @@ export function InstrumentView({
       {statements.length === 0 ? null : (
         <div className="view-instrument__statements" id={statementsId}>
           {statements.map((statement) => (
-            <p className="view-label__statement" key={statement}>
-              <StatusText text={statement} />
-            </p>
+            <LabelStatementLine statement={statement} key={statementText(statement)} />
           ))}
         </div>
       )}

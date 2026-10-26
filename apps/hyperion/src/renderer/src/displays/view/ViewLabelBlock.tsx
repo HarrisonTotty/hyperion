@@ -2,18 +2,28 @@ import { type ReactNode, type Ref, useCallback, useLayoutEffect, useRef } from "
 
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
-import { StatusText } from "../../components/StatusText";
 import { formatListPosition } from "../../lib/format";
 import { type ItemsInView, useItemsInView } from "../../lib/itemsInView";
+import { LabelStatementLine } from "./LabelStatementLine";
 import type { UpperRoom } from "./viewRoom";
-import { type LabelField, type LabelLine, MISSING_READING } from "./viewRun";
+import {
+  type LabelField,
+  type LabelLine,
+  type LabelStatement,
+  MISSING_READING,
+  statementText,
+} from "./viewRun";
 
 /** Props of {@link ViewLabelBlock}. */
 export interface ViewLabelBlockProps {
   /** The readings, refreshed at 4 Hz (`useThrottledValue` upstream). */
   readonly lines: ReadonlyArray<LabelLine>;
-  /** Steady statements while their conditions hold: `POSITIONS AS SEEN FROM SHIP` and the rest. */
-  readonly statements: ReadonlyArray<string>;
+  /**
+   * Steady statements while their conditions hold: `POSITIONS AS SEEN FROM SHIP` and the rest, a
+   * server's own failure among them in `--status-caution` (`CautionStatement`, plan R08,
+   * R08.T10.b).
+   */
+  readonly statements: ReadonlyArray<LabelStatement>;
   /** The interim stars' count line (`STARS 1,204 DRAWN · …`), or `null` before an answer. */
   readonly countLine: string | null;
   /**
@@ -344,7 +354,7 @@ export function ViewLabelBlock({
   // Measured afresh whenever what the block holds may have changed.
   const contentKey = [
     ...lines.map((line) => `${line.label} ${line.value}`),
-    ...statements,
+    ...statements.map(statementText),
     countLine ?? "",
     ...faults,
   ].join("\n");
@@ -428,9 +438,7 @@ export function ViewLabelBlock({
           </>
         )}
         {statements.map((statement) => (
-          <p className="view-label__statement" key={statement}>
-            <StatusText text={statement} />
-          </p>
+          <LabelStatementLine statement={statement} key={statementText(statement)} />
         ))}
         {countLine === null ? null : (
           <p className="view-label__count">

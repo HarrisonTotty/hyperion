@@ -16,6 +16,9 @@
  */
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
+import { atmosphereToBodyFixed, bodyAtmosphereCamera } from "../../view/atmosphere/bodyCamera";
+import type { AtmosphereTables } from "../../view/atmosphere/tables";
+
 import { rotateToBody } from "../../view/coords/rotation";
 import { relativeToCamera } from "../../view/coords/relative";
 import type { Vec3 } from "../../geometry/vec3";
@@ -31,7 +34,12 @@ import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem } from "../../view/engine/types";
 import { hostLights, placeLights, sceneHostDiscs } from "../../view/lighting/hostLights";
 import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
-import type { FrameTerrain, PhotorealFrame, PhotorealOverlay } from "../../view/photoreal/renderer";
+import type {
+  FrameAtmosphere,
+  FrameTerrain,
+  PhotorealFrame,
+  PhotorealOverlay,
+} from "../../view/photoreal/renderer";
 import type { MeterMode } from "../../view/post/meter";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
@@ -97,6 +105,12 @@ export interface PhotorealInputs {
    * when a body handed over is drawn as a mesh body is, its figure whole.
    */
   readonly terrain?: FrameTerrain | undefined;
+  /**
+   * A lit body's atmosphere tables as the view's atmosphere cache holds them this frame (plan R08,
+   * R08.T10.b; `AtmosphereCache.entryOf(id).tables`), `null` for one it draws no air for; absent,
+   * the frame draws no atmosphere.
+   */
+  readonly atmospheres?: ((body: BodyIdHex) => AtmosphereTables | null) | undefined;
 }
 
 /** What the lit bodies take of a view's terrain (plan R10, R10.T10.e). */
@@ -237,6 +251,30 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
       : [];
   });
   const band = inputs.band?.draw(exposureScale) ?? null;
+  // Each lit body whose tables the cache holds, with its atmosphere's camera from its drawn centre
+  // at the frame's own viewport, where its composite is drawn (R08.T10.b).
+  const atmospheres: FrameAtmosphere[] = [];
+  const tablesOf = inputs.atmospheres;
+  if (tablesOf !== undefined) {
+    for (const body of scene.bodies.filter(isLitBody)) {
+      const tables = tablesOf(body.id);
+      const air =
+        tables === null
+          ? null
+          : bodyAtmosphereCamera(scene, body, pose, origins, {
+              fovXRad: camera.fovXRad,
+              viewport,
+            });
+      if (tables !== null && air !== null) {
+        atmospheres.push({
+          id: body.id,
+          tables,
+          camera: air,
+          toBodyFixed: atmosphereToBodyFixed(body),
+        });
+      }
+    }
+  }
   return {
     camera,
     viewport,
@@ -260,5 +298,6 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     terrain: inputs.terrain,
     overlay: inputs.overlay,
     meter: inputs.meter,
+    atmospheres,
   };
 }

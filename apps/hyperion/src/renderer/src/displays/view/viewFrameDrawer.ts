@@ -17,6 +17,8 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import type { ElementSize } from "../../lib/useElementSize";
+import type { AtmosphereViewReport } from "../../view/atmosphere/AtmosphereCache";
+import type { BodyLightSources } from "../../view/bodies/draw";
 import type { ColourTokens } from "../../spatial/paint";
 import type { LitRegime } from "../../view/bodies/regime";
 import type { CameraPose } from "../../view/camera/pose";
@@ -69,6 +71,7 @@ import {
 } from "../../view/wireframe/drawList";
 import { NO_WIREFRAME_TERRAIN, WireframeRenderer } from "../../view/wireframe/submit";
 import { photorealFrame } from "./photorealFrame";
+import { atmosphereFrameOf, type ViewAtmosphereInput } from "./viewAtmosphere";
 import { bakeInputOf, type DrawnSky } from "./useViewSky";
 import { runPose, type ViewRun } from "./viewRun";
 
@@ -138,6 +141,14 @@ export interface ViewFrameInputs {
    * given.
    */
   readonly lineOfSightPoint?: LineOfSightPoint | undefined;
+  /**
+   * The view's atmospheres this frame (plan R08, R08.T10.b): its handle on the device's cache, the
+   * scene its requests take and the frame's time. The drawer notes the frame's lit bodies with the
+   * cache before it draws, each at its regime on the last photorealistic plan, and draws each
+   * body's air the cache holds tables for; a wireframe frame notes none wanted, and draws none.
+   * Absent, no atmosphere is noted or drawn.
+   */
+  readonly atmosphere?: ViewAtmosphereInput | undefined;
 }
 
 /** What a frame drew. */
@@ -169,6 +180,11 @@ export interface ViewFrameDrawn {
    * given no line of sight.
    */
   readonly lineOfSight: DrawnLineOfSight | null;
+  /**
+   * What the atmosphere cache said of the frame's bodies (`AtmosphereView.noteFrame`'s report, plan
+   * R08, R08.T10.b), for its label block; `null` without {@link ViewFrameInputs.atmosphere}.
+   */
+  readonly atmosphere: AtmosphereViewReport | null;
 }
 
 /**
@@ -286,6 +302,11 @@ export class ViewFrameDrawer {
   /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
   #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+  /**
+   * Each body's sources on its last photorealistic plan (`BodyFramePlan.sources`), the lights the
+   * atmosphere cache builds its medium for (R08.T10.b); none before such a frame.
+   */
+  #sources: ReadonlyMap<BodyIdHex, BodyLightSources> = new Map();
   /**
    * Whether the view's tripod gave way in its last frame drawn (plan R10, R10.T12), the give-way's
    * hysteresis, which its next frame's draw list starts from (`LineOfSightOptions.yielded`); `false`
@@ -409,6 +430,15 @@ export class ViewFrameDrawer {
       },
     );
     this.#lineOfSightYielded = list.lineOfSight?.yielded ?? false;
+    // The frame's bodies noted with the atmosphere cache before the draw, which takes the tables
+    // the cache holds after it (R08.T10.b).
+    const air = inputs.atmosphere;
+    const atmosphere =
+      air === undefined
+        ? null
+        : air.view.noteFrame(
+            atmosphereFrameOf(run.scene, this.#regimes, this.#sources, air, triesPhotoreal),
+          );
     const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
@@ -461,6 +491,7 @@ export class ViewFrameDrawer {
       contourIntervalM,
       surveyEdges: list.surveyEdges,
       lineOfSight: list.lineOfSight,
+      atmosphere,
     };
   }
 
@@ -561,12 +592,14 @@ export class ViewFrameDrawer {
           // over its surveyed ground, built once the renderer has the plan (R10.T16.f).
           overlay: (surveyed) =>
             overlaySubmission(this.#wireframe, list, tokens, camera, viewport, surveyed),
+          atmospheres: inputs.atmosphere?.tablesOf,
         }),
       );
       if (plan === null) {
         return { drawn: false, terrain: null };
       }
       this.#regimes = plan.regimes;
+      this.#sources = plan.sources;
       this.#frameFailed = false;
       return { drawn: true, terrain: terrain?.annunciation ?? null };
     } catch (error: unknown) {
