@@ -4442,8 +4442,13 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
      since no floor from 20 to 26 passed both the gate and that ray's neighbourhood (§14);
   9. if a row still misses and the twin's census of the footprint's node work shows a warp's
      slowest lane doing at least 1.5 times its mean, the node rays shared out exactly, the same
-     rays summed in the same order (§12); otherwise the lane reports to "main", which weighs only
-     half resolution above the band.
+     rays summed in the same order (§12): withdrawn after QW3, since on top of item 6 the
+     census's own step model takes at most 8–13% off the four rows that miss, short of the
+     slab's need at 400 km and 10⁷ m even at no cost of its own, and the smallest cross-lane
+     form already costs 6–11% there (§16); then half resolution above the band, which main
+     weighed and did not take: it would take about 60–72% off those rows, but through low's
+     pick it steps the limb from orbit by about a quarter between pairs of pixels, a visibly
+     wrong picture (§16).
 
   It is accepted when, in the smoke's timing frames on the RTX 3080, hidden, with `nvidia-smi`
   clocks at 100 ms, the atmosphere's sum is at most 10.0 ms p95 at 400 km and at every far-limb
@@ -4452,13 +4457,18 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   a star and planetshine on one slot recorded beside it, its p95s from frames that leave the GPU
   no idle gap between rounds and with per-frame times kept (§10) (R05 Design note 21's 0.8 T, less
   terrain from orbit and the frame's other passes). One source and `MAX_SKY_SOURCES` are recorded
-  beside it, and low with the UHD 620 estimate. `pnpm test` and `just test-render` pass. It
+  beside it, and low with the UHD 620 estimate. Since `decision-r08-t8-leans.md` §16 the 10.0 ms
+  is a recorded target, not a hold, at the four rows QW3 left over it, its ordered levers spent;
+  the frame there is R08.T11's to judge, measured, once R08.T10.b draws it. `pnpm test` and
+  `just test-render` pass. It
   follows T8.d and precedes R08.T10.b. _Items 1–5 built and landed 2026-10-23 (levers 1–3, E2 and
   E3, lever 4); QW2 timed them, and the hold misses at x2 on 8 rows, the measured and slab Earths
   from 400 km to 2.55 × 10⁷ m. Item 6 (E1′, E4) and item 7's lever 5 built 2026-10-23; item 7's
   view path and item 8 left out (§14). QW3 timed them (2026-10-26), and the hold misses at x2 on 4
-  rows, the slab Earth from 400 km to 1.54 × 10⁷ m and the measured Earth at 10⁷ m; open for item
-  9_ (Risks, "Deviations in T8.e, as built", _QW2_, _QW3_).
+  rows, the slab Earth from 400 km to 1.54 × 10⁷ m and the measured Earth at 10⁷ m; item 9
+  withdrawn and half resolution above the band not taken. Closed 2026-10-26 with those 4 rows'
+  miss recorded (`decision-r08-t8-leans.md` §16)_ (Risks, "Deviations in T8.e, as built", _QW2_,
+  _QW3_; "Deferred findings (2026-10-13 rule)" (R08.T8.e), _The hold's four rows_).
 
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
 and its planetshine sources), with no source skipped outside the air (since R08.T8.e both of
@@ -4611,7 +4621,11 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
   a kept test scene that carries them (`view/scenes/`), is recorded here, with the moonlit night on
   the Earth fixture (the Sun beyond the twilight limit, a full Moon), whose sky over R06's star
   layer shows the fainter stars washed out (R08.T7's acceptance, which its record, "Deviations in
-  T7, as built", leaves to this task, since the smoke's frames draw no star layer).
+  T7, as built", leaves to this task, since the smoke's frames draw no star layer). R08.T8.e closed
+  with its hold missed at four rows (`decision-r08-t8-leans.md` §16; Risks, "Deferred findings
+  (2026-10-13 rule)" (R08.T8.e), _The hold's four rows_). The flight's frame times at high on the
+  RTX 3080 are recorded beside them. They are no verdict on the frame; R08.T11's measured rows
+  are.
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
@@ -4834,7 +4848,17 @@ on the RTX 3080: one slice against WGS 84 costs about 1% (W1, 7.73 against 7.80 
 Earth costs what `EARTH_REFERENCE` does (W2, 10.17 against 10.15 ms; W5, 11.07 against 11.07 ms).
 §8's 4.0 / 4.5 ms target for high at 400 km and one source stands there against the measured 7.14
 / 7.20 ms. R05's `just descent-spike` runs with the generalised atmosphere, and its percentiles are
-recorded against R05's. Where the low setting misses, `TABLE_SIZES` changes here. Acceptance: the
+recorded against R05's. R08.T8.e's four rows (`decision-r08-t8-leans.md` §16) are judged here,
+once R08.T10.b draws the atmosphere in the photorealistic view. The measure is the frame's GPU pass
+sum at high, 1920 × 1080, on the RTX 3080, hidden, with `nvidia-smi` clocks and per-frame times from
+frames that leave the GPU no idle gap, at T8.c's cameras from 400 km to 1.54 × 10⁷ m on the measured
+and slab Earths, at x2, x2p and x4. A p95 over 16.67 ms goes to "main" as a blocker. One over R05's
+0.8 T (13.33 ms) goes to "main" with the figures and R12.T10's candidate rungs. The slab's rows have
+one recorded path: the edged ground's split at crossings (R08.T8.e, item 8), once a step boundary at
+the first source's shadow cures its erratic ray. QW3 puts the slab's centre-ray excess over the
+measured Earth's at 1.75, 1.47 and 1.03 ms at x2 from 400 km to 1.54 × 10⁷ m, so that path would
+bring those rows to about the measured Earth's (estimates). Where the low setting misses,
+`TABLE_SIZES` changes here. Acceptance: the
 record is here, and `pnpm test` passes.
 
 ### R08.T12 The reference path tracer
@@ -9534,10 +9558,17 @@ it rides a bump.
       0.63–0.84 on R05's Earth and 0.08–0.42 on the slab; the nodes' work 2.4 at 400 km, 5.1–5.4 at
       10⁷ m and 1.54 × 10⁷ m, 3.9–4.1 at 2.55 × 10⁷ m.
     - _(b)'s test._ The subgroup-uniform count, each lane marching its warp's largest count at zero
-      weight past its own, costs 6–14% over today's kernel (0.4–1.1 ms), past the run's noise: today
-      does not already pay each warp's slowest lane, and the node rays cost their own throughput.
-      The census's D licenses (b) at the slab's 400 km and 1.54 × 10⁷ m rows (4.43, 1.62) and not at
-      10⁷ m (1.31 and 1.32), where both absorbing media miss.
+      weight past its own, costs 6–14% over today's kernel (0.4–1.1 ms), past the run's noise. Its
+      excess is 14–30% of the nodes' work at every camera and medium, whether D is 1.3 or 4.9:
+      0.58 ms at 400 km and 0.37 ms at 10⁸ m on the measured Earth, where its zero-weight lanes at
+      their own cost would add 2.6–5.7 and 1.8–3.9 ms. So the warp already waits on its slowest
+      lane, as the census reads at 400 km and lever 4's 8.6 ns a ray showed, and the excess is the
+      variant's own cross-lane code (`decision-r08-t8-leans.md` §16). The census's D licenses (b)
+      at the slab's 400 km and 1.54 × 10⁷ m rows (4.43, 1.62) and not at 10⁷ m (1.31 and 1.32),
+      where both absorbing media miss. (b) is withdrawn (§16): on top of E1′ and E4 the census's
+      step model cuts the four rows' warp time by 10.3, 9.6, 8.0 and 12.7% (the slab at 400 km,
+      the measured and slab Earths at 10⁷ m, the slab at 1.54 × 10⁷ m), against needs of 12.7,
+      8.7, 19.2 and 10.1%, before any cost of its own.
     - _Low_ at 1280 × 720, one source | x2, R05's Earth, measured, slab, from 400 km: 0.94 | 1.31,
       1.18 | 1.70, 1.23 | 1.72 (QW2's x2 2.40 on the measured Earth).
     - _The tails_ (a frame over 1.2 times its median, high): 2.0% of today's frames and 1.8–2.4% of
@@ -9600,6 +9631,42 @@ it rides a bump.
     tolerance over 224,910 lookups. Candidates for R08.T11 or R12.T10, each counted in the row: a
     layer a band as well as a slice, or the curve's log-slope n stored beside the depth, with the
     read taking s^(1−n).
+  - _The hold's four rows_ (2026-10-26, `decision-r08-t8-leans.md` §16).
+    - T8.e closed with its hold missed at x2 on four rows, at p95 in QW3: the slab Earth at 400 km
+      (11.46 ms), 10⁷ m (12.37) and 1.54 × 10⁷ m (11.12), and the measured Earth at 10⁷ m (10.95).
+      x2p misses on the same rows (10.78–12.41). At one source every row meets (8.68 at most), and
+      R05's Earth, and every medium from 2.55 × 10⁷ m out, meet at x2.
+    - With terrain from orbit (about 1.5, 1.3 and 1.0 ms) and the other passes (at most 1.7 ms),
+      both estimates, the frame at x2 comes to about 13.8–15.4 ms at those rows. That is inside the
+      60 Hz frame, and over R05's 0.8 T row (13.33 ms) by about 0.5–2.0 ms. With the same
+      estimates, the tails (2.0% of frames over 1.2 times the median) put x4's p95 on the slab at
+      1.54 × 10⁷ m at about 17.5 ms, and x6's at 10⁷ m at about 18.2 ms.
+    - The 10.0 ms stays the recorded target there. No lever left in T8.e closes those rows without
+      a visibly wrong picture (_Half resolution above the band_, below).
+    - For R08.T11, which measures the frame in the photorealistic view once R08.T10.b draws it. A
+      p95 over 16.67 ms there goes to "main" as a blocker, and one over 13.33 ms goes to "main"
+      with R12.T10's candidate rungs.
+  - _The node rays shared out, withdrawn_ (2026-10-26, `decision-r08-t8-leans.md` §16).
+    - The census licensed it at the slab's 400 km and 1.54 × 10⁷ m rows (D 4.43, 1.62), and not at
+      10⁷ m (1.31, 1.32).
+    - Its own step model gives it 8.0–12.7% of the warp time on top of E1′ and E4, which leaves
+      the slab at 400 km and 10⁷ m over even at no cost. QW3's subgroup-uniform variant, the
+      smallest cross-lane form, costs 6.0–10.7% of the march at those rows.
+    - For R12.T10, with the census (`.git/rm45-scratch/r08-t8e/census/`) and QW3's split.
+  - _Half resolution above the band_ (§16).
+    - High's march at `rayMarchScale` 0.5 from the band's upper edge up, read through low's
+      depth-nearest pick. It would take about 60–72% off the four rows (to 3.1–4.5 ms;
+      estimates).
+    - On the hold's 60° frame at 1,920 px, a pixel spans 1.38 km of tangent height from 400 km and
+      4.6 km from 10⁷ m, against the limb's 9–10 km e-folding. So pairs of pixels step by about
+      25% and 60%, each pixel about 7% and 22% off the full-resolution limb: a seam every second
+      row by `decision-r08-t8-leans.md` §5's line. R05 measured low's pick on high's frames at p99
+      79.2%.
+    - A smoother pick would be a new design, and would still halve the far limb's resolution.
+    - Not taken on high. For R12.T10's ladder, as a trade for a rung below high. It would be judged
+      by Design note 10's metric per pixel against the full-resolution composite over the limb set
+      from 400 km, 10⁷ m and 10⁸ m on the three media, by §5's visibility line, by T8.c's flicker
+      sweep, and by the step at the switch.
 
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
