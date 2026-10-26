@@ -27,7 +27,7 @@
  */
 
 import { substanceName } from "../../lib/substances";
-import { type AggregateMode, aggregateOptics } from "./aggregate";
+import { type AggregateMode, aggregateInRange, aggregateOptics } from "./aggregate";
 import type { AtmosphereColumn } from "./column";
 import {
   FORWARD_PEAK_COSINE,
@@ -50,6 +50,7 @@ import {
   ELEMENT_INDICES,
   forwardPeakSplit,
   ICE_ANALOGUE_ASYMMETRY_BIAS,
+  nonSphericalModeInRange,
   nonSphericalModeOptics,
 } from "./nonSpherical";
 import {
@@ -62,6 +63,7 @@ import {
   PHASE_TABLE_MU,
   PHASE_TABLE_U,
   resolveModeMaterial,
+  sphereModeInRange,
 } from "./sizeDistribution";
 import type { Rgb } from "../photometry/toneCurve";
 
@@ -93,6 +95,59 @@ export function aerosolModeOptics(
       break;
   }
   return optics;
+}
+
+/**
+ * Every wavelength {@link aerosolTerm} computes a mode's optics at, nm: the three channels', and
+ * 550 nm, at which the column's scale is set.
+ */
+export const AEROSOL_TERM_WAVELENGTHS_NM: ReadonlyArray<number> = [
+  ...new Set([...CHANNEL_WAVELENGTHS_NM, 550]),
+];
+
+/**
+ * Whether {@link aerosolModeOptics} takes a mode's particles at a wavelength rather than refusing
+ * their sizes (plan R08, R08.T10.b): routed by shape as it routes them, to Mie's range
+ * (`sphereModeInRange`), the non-spherical tables' (`nonSphericalModeInRange`) or the MMF's
+ * (`aggregateInRange`), each the bound its own refusal takes. A distribution whose shape resolves
+ * to an aggregate is refused whatever its sizes.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
+ */
+export function aerosolModeInRange(particles: AerosolParticles, wavelengthNm: number): boolean {
+  let inRange: boolean;
+  switch (particles.kind) {
+    case "aggregate":
+      inRange = aggregateInRange(particles.mode, wavelengthNm);
+      break;
+    case "distribution": {
+      const { mode } = particles;
+      const shape = modeShape(mode, resolveModeMaterial(mode));
+      switch (shape) {
+        case "sphere":
+          inRange = sphereModeInRange(mode.sizes, wavelengthNm);
+          break;
+        case "nonSphericalMineral":
+        case "crystal":
+          inRange = nonSphericalModeInRange({ ...mode, shape }, wavelengthNm);
+          break;
+        case "aggregate":
+          inRange = false;
+          break;
+      }
+      break;
+    }
+  }
+  return inRange;
+}
+
+/**
+ * Whether {@link aerosolTerm} draws a mode's particles at every wavelength it computes them at
+ * ({@link AEROSOL_TERM_WAVELENGTHS_NM}), where a mode outside its optics' range would make it throw:
+ * the screen R08.T10.b's assembly drops such a mode by, with a reason.
+ */
+export function aerosolTermInRange(particles: AerosolParticles): boolean {
+  return AEROSOL_TERM_WAVELENGTHS_NM.every((nm) => aerosolModeInRange(particles, nm));
 }
 
 /** A size distribution's optics by its shape: a liquid is a sphere whatever its file says. */

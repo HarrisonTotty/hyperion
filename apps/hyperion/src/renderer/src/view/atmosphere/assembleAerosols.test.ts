@@ -19,7 +19,19 @@ import {
   withSurface,
 } from "../../test/atmosphereRecords";
 import { earthDetail } from "../../test/planetaryFixture";
-import { type AssembledMedium, assembleMedium, sizeConvergenceReasons } from "./assemble";
+import {
+  AEROSOL_TERM_WAVELENGTHS_NM,
+  aerosolModeInRange,
+  aerosolModeOptics,
+  type AerosolParticles,
+  aerosolTermInRange,
+} from "./aerosol";
+import {
+  type AssembledMedium,
+  absorberSpecsOf,
+  assembleMedium,
+  sizeConvergenceReasons,
+} from "./assemble";
 import { modeOptics } from "./sizeDistribution";
 
 /** The generated Earth with an inventory, assembled with no line tables. */
@@ -307,6 +319,120 @@ describe("the inventory's layers against the column", () => {
     expect(result.reasons).toContain("H2O ice particles lie above the air drawn, not drawn");
   });
 });
+
+/** A haze of solid iron grains, gamma at v_eff 0.3, from 200 to 50 hPa: an iron-rain world's. */
+function ironHaze(effectiveRadiusM: number): AerosolModeDto {
+  return {
+    ...gammaMode({
+      material: "Fe",
+      phase: "solid",
+      shape: "non_spherical_mineral",
+      effectiveRadiusM,
+      tau550: 0.1,
+      basePa: 20_000,
+      topPa: 5_000,
+    }),
+    size_distribution: {
+      type: "gamma",
+      effective_radius_m: effectiveRadiusM,
+      effective_variance: 0.3,
+    },
+  };
+}
+
+/** A haze of tholin aggregates of 10 nm monomers at a fractal dimension, the wire's range [1, 2.5]. */
+function tholinAggregates(fractalDimension: number): AerosolModeDto {
+  return {
+    ...gammaMode({
+      material: "tholin",
+      phase: "solid",
+      shape: "aggregate",
+      effectiveRadiusM: 1e-8,
+      tau550: 0.1,
+      basePa: 20_000,
+      topPa: 5_000,
+    }),
+    size_distribution: {
+      type: "aggregate",
+      monomer_radius_m: 1e-8,
+      monomer_count: 1_000,
+      fractal_dimension: fractalDimension,
+      fractal_prefactor: (5 / 3) ** (fractalDimension / 2),
+    },
+  };
+}
+
+const IRON_REASON = "solid Fe particles: their sizes lie outside the optics on file, not drawn";
+
+describe("a mode outside its optics' range (R08.T10.b)", () => {
+  it("drops solid iron grains of r_eff 2 µm, past the iron table at the blue channel, and says so", () => {
+    const result = earthWith(modes(ironHaze(2e-6)));
+    expect(aerosolTerms(result)).toEqual([]);
+    expect(result.reasons).toContain(IRON_REASON);
+  });
+
+  it("draws solid iron grains of r_eff 1 µm, inside it, with no such reason", () => {
+    const result = earthWith(modes(ironHaze(1e-6)));
+    expect(aerosolTerms(result)).toEqual(["aerosol:Fe"]);
+    expect(result.reasons).not.toContain(IRON_REASON);
+  });
+
+  it("gives the absorber specs of a record holding one without a throw", () => {
+    const input = recordInput(detailOf(withInventory(earthDetail(), modes(ironHaze(2e-6)))));
+    expect(() => absorberSpecsOf(input)).not.toThrow();
+  });
+
+  it("takes its bound from the optics' own refusal at each wavelength drawn", () => {
+    const outside = particlesOfMode(ironHaze(2e-6));
+    const inside = particlesOfMode(ironHaze(1e-6));
+    for (const nm of AEROSOL_TERM_WAVELENGTHS_NM) {
+      const refused = (() => {
+        try {
+          aerosolModeOptics(outside, nm);
+          return false;
+        } catch (error: unknown) {
+          return error instanceof RangeError;
+        }
+      })();
+      expect(aerosolModeInRange(outside, nm)).toBe(!refused);
+      expect(aerosolModeInRange(inside, nm)).toBe(true);
+    }
+    expect(aerosolTermInRange(outside)).toBe(false);
+  });
+
+  it("drops aggregates of fractal dimension 1, which the wire takes and the MMF does not", () => {
+    const result = earthWith(modes(tholinAggregates(1)));
+    expect(aerosolTerms(result)).toEqual([]);
+    expect(result.reasons).toContain(
+      "solid tholin particles: their fractal dimension lies outside the optics on file, not drawn",
+    );
+  });
+
+  it("draws aggregates of fractal dimension 2", () => {
+    expect(aerosolTerms(earthWith(modes(tholinAggregates(2))))).toEqual(["aerosol:tholin"]);
+  });
+});
+
+/** A mode's particles as the assembly forms them, through its drawn medium's term. */
+function particlesOfMode(mode: AerosolModeDto): AerosolParticles {
+  const sizes = mode.size_distribution;
+  if (sizes?.type !== "gamma") {
+    throw new Error("a gamma mode is expected");
+  }
+  return {
+    kind: "distribution",
+    mode: {
+      material: mode.material,
+      form: { phase: "solid" },
+      shape: "nonSphericalMineral",
+      sizes: {
+        kind: "gamma",
+        effectiveRadiusUm: sizes.effective_radius_m * 1e6,
+        effectiveVariance: sizes.effective_variance,
+      },
+    },
+  };
+}
 
 describe("a deck's vapour", () => {
   it("is cut at the deck's top", () => {

@@ -175,24 +175,75 @@ interface Aggregate {
   readonly kf: number;
 }
 
-function checkAggregate(mode: Omit<AggregateMode, "material" | "form">): Aggregate {
+/** An aggregate's fractal prefactor k_f: its own, or (5 ÷ 3)^(D_f ÷ 2) where it gives none. */
+function prefactorOf(mode: Omit<AggregateMode, "material" | "form">): number {
+  return mode.fractalPrefactor ?? (5 / 3) ** (mode.fractalDimension / 2);
+}
+
+/** Why the MMF refuses an aggregate's shape, as `checkAggregate`'s throw says it, or `null`. */
+function aggregateRefusal(mode: Omit<AggregateMode, "material" | "form">): string | null {
   const { monomerRadiusUm: a0, monomerCount: count, fractalDimension: df } = mode;
   if (!(a0 > 0 && Number.isFinite(a0))) {
-    throw new RangeError(`monomer radius ${a0} µm must be finite and > 0`);
+    return `monomer radius ${a0} µm must be finite and > 0`;
   }
   if (!(count >= 1 && Number.isFinite(count))) {
-    throw new RangeError(`monomer count ${count} must be finite and ≥ 1`);
+    return `monomer count ${count} must be finite and ≥ 1`;
   }
   if (!(df > 1 && df <= MMF_FRACTAL_DIMENSION_MAX)) {
-    throw new RangeError(
-      `fractal dimension ${df} must lie in (1, ${MMF_FRACTAL_DIMENSION_MAX}], the MMF's range here`,
-    );
+    return `fractal dimension ${df} must lie in (1, ${MMF_FRACTAL_DIMENSION_MAX}], the MMF's range here`;
   }
-  const kf = mode.fractalPrefactor ?? (5 / 3) ** (df / 2);
+  const kf = prefactorOf(mode);
   if (!(kf > 0 && Number.isFinite(kf))) {
-    throw new RangeError(`fractal prefactor ${kf} must be finite and > 0`);
+    return `fractal prefactor ${kf} must be finite and > 0`;
   }
-  return { a0, count, df, kf };
+  return null;
+}
+
+function checkAggregate(mode: Omit<AggregateMode, "material" | "form">): Aggregate {
+  const refusal = aggregateRefusal(mode);
+  if (refusal !== null) {
+    throw new RangeError(refusal);
+  }
+  return {
+    a0: mode.monomerRadiusUm,
+    count: mode.monomerCount,
+    df: mode.fractalDimension,
+    kf: prefactorOf(mode),
+  };
+}
+
+/**
+ * Whether the MMF takes an aggregate's shape, whatever the wavelength: its monomers' radius and
+ * count, its prefactor and its fractal dimension within (1, {@link MMF_FRACTAL_DIMENSION_MAX}], the
+ * bounds `checkAggregate`'s throws take (plan R08, R08.T10.b).
+ */
+export function aggregateShapeInRange(mode: Omit<AggregateMode, "material" | "form">): boolean {
+  return aggregateRefusal(mode) === null;
+}
+
+/** A monomer's size parameter x₀ = 2πa₀ ÷ λ at a wavelength. */
+function monomerSizeParameter(monomerRadiusUm: number, wavelengthNm: number): number {
+  return ((2 * Math.PI * 1000) / wavelengthNm) * monomerRadiusUm;
+}
+
+/**
+ * Whether the MMF ({@link mmfAggregate}) takes an aggregate at a wavelength rather than refusing it
+ * (plan R08, R08.T10.b): its shape within the MMF's ranges (a fractal dimension in
+ * (1, {@link MMF_FRACTAL_DIMENSION_MAX}]) and its monomer's x₀ = 2πa₀ ÷ λ at most
+ * {@link MMF_MONOMER_SIZE_PARAMETER_MAX}, the bounds its throws take, so that a screen on it and
+ * the throws cannot drift. The wire takes a fractal dimension of 1 (`lib/system/bodiesWire.ts`),
+ * which the MMF does not, and a monomer of a₀ above about 0.6 µm passes x₀ 10 at 380 nm.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0.
+ */
+export function aggregateInRange(
+  mode: Omit<AggregateMode, "material" | "form">,
+  wavelengthNm: number,
+): boolean {
+  return (
+    aggregateShapeInRange(mode) &&
+    monomerSizeParameter(mode.monomerRadiusUm, wavelengthNm) <= MMF_MONOMER_SIZE_PARAMETER_MAX
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -735,7 +786,7 @@ export function mmfAggregate(
   }
   const k = (2 * Math.PI * 1000) / wavelengthNm;
   const { a0, count, df, kf } = aggregate;
-  const x0 = k * a0;
+  const x0 = monomerSizeParameter(a0, wavelengthNm);
   if (x0 > MMF_MONOMER_SIZE_PARAMETER_MAX) {
     throw new RangeError(
       `monomer size parameter ${x0} exceeds the MMF's ${MMF_MONOMER_SIZE_PARAMETER_MAX} here`,

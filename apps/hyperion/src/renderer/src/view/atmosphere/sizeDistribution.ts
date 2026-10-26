@@ -318,23 +318,83 @@ const LOG_FLOOR = -Math.log(SIZE_WEIGHT_FLOOR);
 /** No scattering angles: Mie then sums the efficiencies alone. */
 const NO_ANGLES = new Float64Array(0);
 
-function checkSizes(sizes: SizeDistribution): void {
+/** Why a distribution's law cannot take its effective radius or variance, or `null` where it can. */
+function sizesRefusal(sizes: SizeDistribution): string | null {
   const { effectiveRadiusUm: a, effectiveVariance: b } = sizes;
   if (!(a > 0 && Number.isFinite(a))) {
-    throw new RangeError(`effective radius ${a} µm must be finite and > 0`);
+    return `effective radius ${a} µm must be finite and > 0`;
   }
+  let refusal: string | null;
   switch (sizes.kind) {
     case "gamma":
-      if (!(b > 0 && b < 0.5)) {
-        throw new RangeError(`a gamma distribution's effective variance ${b} must lie in (0, 0.5)`);
-      }
-      return;
+      refusal =
+        b > 0 && b < 0.5
+          ? null
+          : `a gamma distribution's effective variance ${b} must lie in (0, 0.5)`;
+      break;
     case "logNormal":
-      if (!(b > 0 && Number.isFinite(b))) {
-        throw new RangeError(`a log-normal's effective variance ${b} must be finite and > 0`);
-      }
-      return;
+      refusal =
+        b > 0 && Number.isFinite(b)
+          ? null
+          : `a log-normal's effective variance ${b} must be finite and > 0`;
+      break;
   }
+  return refusal;
+}
+
+function checkSizes(sizes: SizeDistribution): void {
+  const refusal = sizesRefusal(sizes);
+  if (refusal !== null) {
+    throw new RangeError(refusal);
+  }
+}
+
+/**
+ * Whether a distribution's law takes its effective radius and variance: a radius finite and above
+ * 0, and a gamma's variance in (0, 0.5) or a log-normal's finite and above 0, where
+ * {@link sizeRange} and every optics over the distribution throw otherwise. The wire takes any
+ * positive variance (`lib/system/bodiesWire.ts`), so a gamma's at 0.5 or more reaches here legally
+ * (R08.T10.b).
+ */
+export function sizesInRange(sizes: SizeDistribution): boolean {
+  return sizesRefusal(sizes) === null;
+}
+
+/**
+ * Why {@link sphereModeOptics} refuses a distribution at a wavelength, as its `RangeError` says it,
+ * or `null` where it takes it: its law refusing its sizes, its reach past Mie's x =
+ * {@link MIE_MAX_SIZE_PARAMETER}, or the whole of it below {@link MIE_MIN_SIZE_PARAMETER}.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0.
+ */
+function sphereRangeRefusal(sizes: SizeDistribution, wavelengthNm: number): string | null {
+  const bad = sizesRefusal(sizes);
+  if (bad !== null) {
+    return bad;
+  }
+  const wavelengthUm = wavelengthNm / 1000;
+  const full = sizeRange(sizes);
+  const smallestUm = (MIE_MIN_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
+  const largestUm = (MIE_MAX_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
+  if (full.toUm > largestUm) {
+    return `the distribution reaches ${full.toUm} µm, past Mie's x = ${MIE_MAX_SIZE_PARAMETER} at ${wavelengthNm} nm`;
+  }
+  if (full.toUm <= smallestUm) {
+    return `the distribution lies below Mie's x = ${MIE_MIN_SIZE_PARAMETER} at ${wavelengthNm} nm`;
+  }
+  return null;
+}
+
+/**
+ * Whether {@link sphereModeOptics} takes a distribution at a wavelength rather than throwing for its
+ * sizes (plan R08, R08.T10.b): the bound its refusal takes, so that a screen on it and the throw
+ * cannot drift. A geometric-optics particle, past Mie's x = {@link MIE_MAX_SIZE_PARAMETER} at the
+ * wavelength, is out of range: at 380 nm that is a reach past about 1.2 mm.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0.
+ */
+export function sphereModeInRange(sizes: SizeDistribution, wavelengthNm: number): boolean {
+  return sphereRangeRefusal(sizes, wavelengthNm) === null;
 }
 
 /**
@@ -668,20 +728,13 @@ export function sphereModeOptics(
   if (!(Number.isInteger(nodesMax) && nodesMax > 0)) {
     throw new RangeError(`node cap ${nodesMax} must be a positive integer`);
   }
+  const refusal = sphereRangeRefusal(sizes, wavelengthNm);
+  if (refusal !== null) {
+    throw new RangeError(refusal);
+  }
   const wavelengthUm = wavelengthNm / 1000;
   const full = sizeRange(sizes);
   const smallestUm = (MIE_MIN_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
-  const largestUm = (MIE_MAX_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
-  if (full.toUm > largestUm) {
-    throw new RangeError(
-      `the distribution reaches ${full.toUm} µm, past Mie's x = ${MIE_MAX_SIZE_PARAMETER} at ${wavelengthNm} nm`,
-    );
-  }
-  if (full.toUm <= smallestUm) {
-    throw new RangeError(
-      `the distribution lies below Mie's x = ${MIE_MIN_SIZE_PARAMETER} at ${wavelengthNm} nm`,
-    );
-  }
   const range = { fromUm: Math.max(full.fromUm, smallestUm), toUm: full.toUm };
   const wavenumberPerUm = (2 * Math.PI) / wavelengthUm;
   // The coarsest level is always taken, so a cap below its node count gives it, unconverged.

@@ -85,8 +85,10 @@ import {
   type AerosolModeSpec,
   type AerosolParticles,
   aerosolTerm,
+  aerosolTermInRange,
   phaseApproximations,
 } from "./aerosol";
+import { aggregateShapeInRange } from "./aggregate";
 import { type BodyAtmosphereInput, type BodyLight, clampedGroundAlbedo } from "./atmosphereInput";
 import { type AtmosphereColumn, columnPressureBar, hydrostaticColumn } from "./column";
 import { ATMOSPHERE_LABELS, type AtmosphereLabel } from "./labels";
@@ -825,10 +827,29 @@ interface PlannedMode {
 }
 
 /**
- * The inventory's modes to draw: each of τ above 0 and base below its top, inside the column. A
- * mode of τ 0 or of base equal to top is skipped (review-r08-shapes-b C3: legal on the wire); one
- * wholly below the datum is hidden by the ground; one wholly above the column's top is dropped and
- * reported.
+ * The note of a mode whose particles lie outside the optics on file (`aerosol.ts`'s
+ * `aerosolTermInRange`): sizes past Mie's reach, a non-spherical table's largest size or the MMF's
+ * monomer, or an aggregate's fractal dimension outside the MMF's range.
+ */
+function outsideOpticsReason(mode: RecordAerosolMode, particles: AerosolParticles): string {
+  const name = particlesName(mode.material, mode.phase);
+  return particles.kind === "aggregate" && !aggregateShapeInRange(particles.mode)
+    ? `${name}: their fractal dimension lies outside the optics on file, not drawn`
+    : `${name}: their sizes lie outside the optics on file, not drawn`;
+}
+
+/**
+ * The inventory's modes to draw: each of τ above 0 and base below its top, inside the column,
+ * whose particles the optics on file take. A mode of τ 0 or of base equal to top is skipped
+ * (review-r08-shapes-b C3: legal on the wire); one wholly below the datum is hidden by the ground;
+ * one wholly above the column's top is dropped and reported; one whose sizes or optical depth the
+ * generator does not model is dropped and reported (P14.T54.b); and one whose modelled particles
+ * lie outside its optics' range at a wavelength the term is drawn at (`aerosolTermInRange`: Mie's reach, a
+ * non-spherical table's largest size, the MMF's monomer and fractal dimension), which a legal
+ * record may hold and which `aerosolTerm` would refuse, is dropped and reported under the τ rule
+ * (R08.T10.b), so that only a bug raises the computation's fault (`decision-r08-t10a-leans.md`
+ * item 6). {@link assembleMedium} and {@link absorberSpecsOf} both take the modes from here, before
+ * the term limit ranks them.
  */
 function modesOf(
   inventory: AerosolInventory | undefined,
@@ -853,13 +874,20 @@ function modesOf(
       );
       continue;
     }
+    const topPa = Math.max(mode.topPa, columnTopPa);
     // The optics need both, and a member the generator does not model is labelled, never stood in.
     if (sizes.kind === "not_modelled" || tau550 === undefined) {
       reasons.add(
         `mode:${index}`,
         `${particlesName(mode.material, mode.phase)}: their ${sizes.kind === "not_modelled" ? "sizes" : "optical depth"} not modelled, not drawn`,
-        Math.max(mode.topPa, columnTopPa),
+        topPa,
       );
+      continue;
+    }
+    // A modelled distribution outside its optics' range is dropped under the τ rule (R08.T10.b).
+    const particles = particlesOf(mode, sizes.value);
+    if (!aerosolTermInRange(particles)) {
+      reasons.add(`mode:${index}`, outsideOpticsReason(mode, particles), topPa);
       continue;
     }
     const seen = (names.get(mode.material) ?? 0) + 1;
@@ -869,10 +897,10 @@ function modesOf(
       mode,
       spec: {
         name: seen === 1 ? `aerosol:${mode.material}` : `aerosol:${mode.material}:${seen}`,
-        particles: particlesOf(mode, sizes.value),
+        particles,
         opticalDepth550: tau550,
         basePa: mode.basePa,
-        topPa: Math.max(mode.topPa, columnTopPa),
+        topPa,
         mixingExponent: mode.fSed,
       },
     });

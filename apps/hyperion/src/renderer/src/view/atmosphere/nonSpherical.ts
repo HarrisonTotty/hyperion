@@ -88,6 +88,8 @@ import {
   modeShape,
   resolveModeMaterial,
   sizeRange,
+  sizesInRange,
+  sphereModeInRange,
   sphereModeOptics,
 } from "./sizeDistribution";
 
@@ -661,25 +663,44 @@ interface TableIntegral {
   readonly tailSphere: "volume" | "volumeToArea";
 }
 
+/** A node's volume-to-area radii r̃ = 3Ṽ ÷ 4Ã at each size, in units of λ ÷ 2π. */
+function radiiOverLength(node: PhaseTableNode): Float64Array {
+  return Float64Array.from(
+    { length: node.sizeParameters.length },
+    (_, s) => (0.75 * (node.volumes[s] ?? 0)) / (node.areas[s] ?? 1),
+  );
+}
+
+/**
+ * Why a node's table at a wavelength cannot take a distribution, as {@link tableModeOptics}' throw
+ * says it, or `null` where it can: its reach past the node's largest size there.
+ */
+function nodeReachRefusal(
+  table: PhaseFileTable,
+  node: PhaseTableNode,
+  wavelengthNm: number,
+  distribution: RadiusDistribution,
+): string | null {
+  const lengthUm = wavelengthNm / 1000 / (2 * Math.PI);
+  const rTilde = radiiOverLength(node);
+  const top = Math.log((rTilde[rTilde.length - 1] ?? Number.NaN) * lengthUm);
+  return Math.log(distribution.toUm) > top + 1e-9
+    ? `the distribution reaches ${distribution.toUm} µm, past the ${table.material} table's ${Math.exp(top)} µm at ${wavelengthNm} nm`
+    : null;
+}
+
 /** Sums of a mode over one node's table at a wavelength (the module's remarks). */
 function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution): NodeSums {
   const { table, node, wavelengthNm, index } = integral;
+  const refusal = nodeReachRefusal(table, node, wavelengthNm, distribution);
+  if (refusal !== null) {
+    throw new RangeError(refusal);
+  }
   const lengthUm = wavelengthNm / 1000 / (2 * Math.PI);
-  const sizes = node.sizeParameters.length;
-  // r̃ = 3Ṽ ÷ 4Ã at each node, in units of λ ÷ 2π.
-  const rTilde = Float64Array.from(
-    { length: sizes },
-    (_, s) => (0.75 * (node.volumes[s] ?? 0)) / (node.areas[s] ?? 1),
-  );
+  const rTilde = radiiOverLength(node);
   const lnR = rTilde.map((r) => Math.log(r * lengthUm));
-  const top = lnR[sizes - 1] ?? Number.NaN;
   const lnFrom = Math.log(distribution.fromUm);
   const lnTo = Math.log(distribution.toUm);
-  if (lnTo > top + 1e-9) {
-    throw new RangeError(
-      `the distribution reaches ${distribution.toUm} µm, past the ${table.material} table's ${Math.exp(top)} µm at ${wavelengthNm} nm`,
-    );
-  }
   const phaseCount = table.phaseAnglesDeg.length;
   const matrixCount = table.matrixAnglesDeg.length;
   const { phaseU, matrixU, tailMu } = anglesOf(table);
@@ -962,22 +983,16 @@ export interface TableOptics {
   readonly tailShare: number;
 }
 
-/**
- * A mode's optics from a phase table at one wavelength: its sums over the two wavelength nodes
- * that bracket λ, linear in λ between them (the nearest node's beyond them), with the particles'
- * own k scaling the absorption on a floor's table and on Yang et al.'s table.
- *
- * @param index - The particles' own index at λ: the floor's scaling and the tail's Mie read it.
- * @param mu - The cosines to give the matrix at; the phase tables' by default.
- * @throws RangeError if the distribution reaches past the table's largest size.
- */
-export function tableModeOptics(
-  table: PhaseFileTable,
-  distribution: RadiusDistribution,
-  index: ComplexIndex,
-  wavelengthNm: number,
-  mu: Float64Array = PHASE_TABLE_MU,
-): TableOptics {
+/** The two wavelength nodes of a table that bracket λ, and λ's share of the way between them. */
+interface Bracket {
+  readonly lower: PhaseTableNode;
+  readonly upper: PhaseTableNode;
+  /** In [0, 1]: 0 at `lower`, and beyond the nodes; only `lower` is read where it is 0. */
+  readonly t: number;
+}
+
+/** The nodes {@link tableModeOptics} reads at λ: the bracketing pair, the nearest node's beyond. */
+function bracketOf(table: PhaseFileTable, wavelengthNm: number): Bracket {
   const nodes = table.nodes;
   const last = nodes.length - 1;
   let i = 0;
@@ -999,6 +1014,45 @@ export function tableModeOptics(
           ),
           1,
         );
+  return { lower, upper, t };
+}
+
+/**
+ * Whether {@link tableModeOptics} takes a distribution on a table at λ rather than refusing it
+ * (plan R08, R08.T10.b): its reach within the largest size of each node it reads there, the bound
+ * its throw takes, so that a screen on it and the throw cannot drift. The largest size is a size
+ * parameter, so it is shortest at the shortest wavelength: the iron table's ends at r = 15.9 µm at
+ * 380 nm.
+ */
+export function tableReaches(
+  table: PhaseFileTable,
+  distribution: RadiusDistribution,
+  wavelengthNm: number,
+): boolean {
+  const { lower, upper, t } = bracketOf(table, wavelengthNm);
+  return (
+    nodeReachRefusal(table, lower, wavelengthNm, distribution) === null &&
+    (t === 0 || nodeReachRefusal(table, upper, wavelengthNm, distribution) === null)
+  );
+}
+
+/**
+ * A mode's optics from a phase table at one wavelength: its sums over the two wavelength nodes
+ * that bracket λ, linear in λ between them (the nearest node's beyond them), with the particles'
+ * own k scaling the absorption on a floor's table and on Yang et al.'s table.
+ *
+ * @param index - The particles' own index at λ: the floor's scaling and the tail's Mie read it.
+ * @param mu - The cosines to give the matrix at; the phase tables' by default.
+ * @throws RangeError if the distribution reaches past the table's largest size.
+ */
+export function tableModeOptics(
+  table: PhaseFileTable,
+  distribution: RadiusDistribution,
+  index: ComplexIndex,
+  wavelengthNm: number,
+  mu: Float64Array = PHASE_TABLE_MU,
+): TableOptics {
+  const { lower, upper, t } = bracketOf(table, wavelengthNm);
   const tailSphere = table.model === "yang2013" ? "volumeToArea" : "volume";
   const sumsOf = (node: PhaseTableNode): { readonly raw: NodeSums; readonly scaled: NodeSums } => {
     const raw = perParticle(
@@ -1328,6 +1382,70 @@ export function opticsOfParticles(
     );
   }
   return fromTable(optics, particles, "model", "tamudust2020", undefined);
+}
+
+/**
+ * Whether {@link opticsOfParticles} takes a mode's sizes at a wavelength rather than refusing them
+ * (plan R08, R08.T10.b): every table its rules read there reaches the distribution
+ * ({@link tableReaches}), and every Mie it calls takes it (`sphereModeInRange`), following the
+ * same rules, so that a screen on it and the throws cannot drift.
+ *
+ * @remarks
+ * A mineral whose index lies past {@link KERNEL_TRANSPARENT_N_MAX} may fall back to Mie when its
+ * table's floor is exceeded, which only its optics tell; Mie's range is asked of it as well. Mie's
+ * reach, x = 20,000, lies past every table's largest size (the shortwave kernel's x = 11,810), so
+ * the check only adds the distribution's own law and Mie's smallest size.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
+ */
+export function particlesInRange(
+  particles: NonSphericalParticles,
+  sizes: SizeDistribution,
+  wavelengthNm: number,
+): boolean {
+  if (!sizesInRange(sizes)) {
+    return false;
+  }
+  const index = particles.index(wavelengthNm);
+  const distribution = radiusDistribution(sizes);
+  const water = waterIceTable();
+  if (particles.shape === "crystal" && isIce(particles.material)) {
+    if (water === undefined) {
+      return sphereModeInRange(sizes, wavelengthNm);
+    }
+    const tables =
+      tableReaches(water, distribution, wavelengthNm) &&
+      (wavelengthNm === 550 || tableReaches(water, distribution, 550));
+    return tables && (particles.table === water || sphereModeInRange(sizes, wavelengthNm));
+  }
+  const table = particles.table;
+  if (
+    table === undefined ||
+    table.model !== "tamudust2020" ||
+    kernelEdgeRule(index).basis === "fallback"
+  ) {
+    return sphereModeInRange(sizes, wavelengthNm);
+  }
+  return (
+    tableReaches(table, distribution, wavelengthNm) &&
+    (index.n <= KERNEL_TRANSPARENT_N_MAX || sphereModeInRange(sizes, wavelengthNm))
+  );
+}
+
+/**
+ * Whether {@link nonSphericalModeOptics} takes a mode's sizes at a wavelength rather than refusing
+ * them ({@link particlesInRange}); `true` for a mode it would refuse for its shape, which is not a
+ * range of its optics but a caller's routing.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
+ */
+export function nonSphericalModeInRange(mode: AerosolMode, wavelengthNm: number): boolean {
+  const shape = modeShape(mode, resolveModeMaterial(mode));
+  if (shape !== "nonSphericalMineral" && shape !== "crystal") {
+    return true;
+  }
+  const material = resolveModeMaterial({ ...mode, shape });
+  return particlesInRange(particlesOf(mode, material, shape), mode.sizes, wavelengthNm);
 }
 
 /**
