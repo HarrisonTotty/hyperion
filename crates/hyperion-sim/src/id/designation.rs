@@ -26,7 +26,8 @@
 //! `<xx>` is the remaining `9 − k` bits (10 for rogue planets) of that axis as two digits. In a
 //! catalogue system's, the sector is the top five bits of each 8-bit coordinate and `<x>` the low
 //! three as one digit. A feature member's sector is its feature cell. Levels and nested cells are
-//! one digit each. A body appends ` /<body index>`.
+//! one digit each. An index in a nested cell is below 8,192, as is a feature-level `M<index>`,
+//! except the centre's, below 65,536 (P11.T8.e.b). A body appends ` /<body index>`.
 
 use std::error::Error;
 use std::fmt::{self, Write as _};
@@ -352,14 +353,14 @@ fn parse_system(text: &str) -> Result<SystemIdKind, ParseDesignationError> {
     }
     let kind = match (first, second, third) {
         ("CENTRE", Some(slot), None) => {
-            let slot = parse_slot(slot, 12, 32)?;
+            let slot = parse_slot(slot, 12, 32, CentreMemberId::LIST_INDEX_LIMIT)?;
             SystemIdKind::Centre(CentreMemberId::new(slot).map_err(from_build)?)
         }
         ("STREAM", Some(number), Some(rest)) => SystemIdKind::Stream(parse_stream(number, rest)?),
         ("DWARF", Some(number), Some(slot)) => {
             let number = decimal(number, u64::from(DwarfCoreMemberId::NUMBER_LIMIT))?;
             let number = u8::try_from(number).expect("the bound keeps the number in u8");
-            let slot = parse_slot(slot, 8, 16)?;
+            let slot = parse_slot(slot, 8, 16, u32::from(MemberSlot::INDEX_LIMIT))?;
             SystemIdKind::DwarfCore(DwarfCoreMemberId::new(number, slot).map_err(from_build)?)
         }
         ("PIN", Some(number), None) => {
@@ -473,16 +474,24 @@ fn parse_grid(sector: [u8; 3], cell: &str, tail: &str) -> Result<GridId, ParseDe
     .map_err(from_build)
 }
 
-/// Parses `<band><level>-<x><y><z>-<index>` or `M<index>`, with levels below `levels` and cell
-/// coordinates below `cells`.
-fn parse_slot(text: &str, levels: u8, cells: u8) -> Result<MemberSlot, ParseDesignationError> {
-    let index_of = |text: &str| {
-        decimal(text, u64::from(MemberSlot::INDEX_LIMIT))
-            .map(|i| u16::try_from(i).expect("the bound keeps the index in u16"))
+/// Parses `<band><level>-<x><y><z>-<index>` or `M<index>`, with levels below `levels`, cell
+/// coordinates below `cells`, an index in a cell below [`MemberSlot::INDEX_LIMIT`] and a
+/// feature-level index below `list_limit`: 8,192, or at the centre 65,536
+/// ([`CentreMemberId::LIST_INDEX_LIMIT`]).
+fn parse_slot(
+    text: &str,
+    levels: u8,
+    cells: u8,
+    list_limit: u32,
+) -> Result<MemberSlot, ParseDesignationError> {
+    let index_below = |text: &str, limit: u32| {
+        decimal(text, u64::from(limit)).map(|i| {
+            u16::try_from(i).expect("every index limit is at most 65,536, keeping it in u16")
+        })
     };
     if let Some(index) = text.strip_prefix('M') {
         return Ok(MemberSlot::FeatureLevel {
-            index: index_of(index)?,
+            index: index_below(index, list_limit)?,
         });
     }
     let mut parts = text.split('-');
@@ -504,7 +513,7 @@ fn parse_slot(text: &str, levels: u8, cells: u8) -> Result<MemberSlot, ParseDesi
         band,
         level,
         cell: digits_below(cell, cells)?,
-        index: index_of(index)?,
+        index: index_below(index, u32::from(MemberSlot::INDEX_LIMIT))?,
     })
 }
 
@@ -524,7 +533,8 @@ fn parse_feature_member(
         u16::try_from(index).expect("the bound keeps the index in u16"),
     )
     .map_err(from_build)?;
-    FeatureMemberId::new(feature, parse_slot(slot, 8, 16)?).map_err(from_build)
+    let slot = parse_slot(slot, 8, 16, u32::from(MemberSlot::INDEX_LIMIT))?;
+    FeatureMemberId::new(feature, slot).map_err(from_build)
 }
 
 /// Parses `<number>` and `<band>-<along>-<a>.<b>-<index>`.
@@ -684,6 +694,11 @@ mod tests {
             ids.push(DwarfCoreMemberId::new(3, slot).unwrap().into());
         }
         ids.push(CentreMemberId::CENTRAL_BLACK_HOLE.into());
+        ids.push(
+            CentreMemberId::new(MemberSlot::FeatureLevel { index: u16::MAX })
+                .unwrap()
+                .into(),
+        );
         ids.push(
             CentreMemberId::new(MemberSlot::InCell {
                 band: Layer::E,
@@ -847,6 +862,37 @@ mod tests {
         for (text, error) in cases {
             assert_eq!(parse(text), Err(error), "{text:?}");
         }
+    }
+
+    /// The centre's list numbers its members to 65,535, a catalogue feature's and a dwarf core's
+    /// to 8,191, and every index in a cell stays below 8,192 (P11.T8.e.b).
+    #[test]
+    fn only_the_centre_s_list_numbers_past_8191() {
+        for (text, raw) in [
+            ("CENTRE M8191", 0xF000_0007_0000_1FFF),
+            ("CENTRE M8192", 0xF000_0007_0000_2000),
+            ("CENTRE M65535", 0xF000_0007_0000_FFFF),
+        ] {
+            assert_eq!(id(raw).designation().to_string(), text);
+            assert_eq!(parse(text), Ok(Designation::of_system(id(raw))), "{text}");
+        }
+        for text in [
+            "CENTRE M65536",
+            "CENTRE A9-2HJ-8192",
+            "GGG F1 M8192",
+            "GGG F1 A0-000-8192",
+            "DWARF 0 M8192",
+        ] {
+            assert_eq!(
+                parse(text),
+                Err(ParseDesignationError::NumberOutOfRange),
+                "{text}"
+            );
+        }
+        assert_eq!(
+            parse("DWARF 0 M8191"),
+            Ok(Designation::of_system(id(0xF400_0000_7000_1FFF)))
+        );
     }
 
     #[test]

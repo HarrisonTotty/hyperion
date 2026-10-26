@@ -50,21 +50,23 @@
 //! | Index           | `[12:0]`  | Candidate number in the cell and band, or member number  |
 //!
 //! Band 7 requires level and cell to be zero, and its index counts feature-level members from 0
-//! ("member zero"). At level 1 and above a cell whose three coordinates all lie in 4–11 is
-//! rejected: the level below owns that volume.
+//! ("member zero"), 8,192 of them. At level 1 and above a cell whose three coordinates all lie in
+//! 4–11 is rejected: the level below owns that volume.
 //!
 //! Prefix `10`, a member of a feature on the global list; the sub-kind is `[58:57]` and `11` is
 //! rejected. Padding bits are zero.
 //!
-//! | Sub-kind              | Padding   | Fields, high to low                                                                                             |
-//! | --------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
-//! | `00` centre           | `[56:35]` | band `[34:32]`, level `[31:28]` (0–11), cell x `[27:23]`, y `[22:18]`, z `[17:13]` (0–31), index `[12:0]`       |
-//! | `01` stream           | `[56:54]` | number `[53:42]`, band `[41:39]` (0–6), along `[38:25]`, across a `[24:19]`, across b `[18:13]`, index `[12:0]` |
-//! | `10` dwarf core       | `[56:33]` | number `[32:31]`, then band, level, cell and index exactly as a catalogue feature's, `[30:0]`                   |
+//! | Sub-kind              | Padding   | Fields, high to low                                                                                                                                         |
+//! | --------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+//! | `00` centre           | `[56:35]` | band `[34:32]`, level `[31:28]` (0–11), cell x `[27:23]`, y `[22:18]`, z `[17:13]` (0–31), index `[12:0]`; under band 7, zero `[31:16]` and index `[15:0]`  |
+//! | `01` stream           | `[56:54]` | number `[53:42]`, band `[41:39]` (0–6), along `[38:25]`, across a `[24:19]`, across b `[18:13]`, index `[12:0]`                                             |
+//! | `10` dwarf core       | `[56:33]` | number `[32:31]`, then band, level, cell and index exactly as a catalogue feature's, `[30:0]`                                                               |
 //!
 //! The centre's band 7 is its feature-level list, whose member 0 is the central black hole,
-//! `0xF000_0007_0000_0000` ([`CentreMemberId::CENTRAL_BLACK_HOLE`]); its inner-cell rule uses
-//! 8–23. A stream has no band 7.
+//! `0xF000_0007_0000_0000` ([`CentreMemberId::CENTRAL_BLACK_HOLE`]). Its index is 16 bits,
+//! `[15:0]`, and the 16 bits above it, `[31:16]`, must be zero, so the list holds 65,536 entries
+//! ([`CentreMemberId::LIST_INDEX_LIMIT`]; ruled 2026-10-26, P11.T8.e.b, an extension that changes
+//! no earlier ID). The centre's inner-cell rule uses 8–23. A stream has no band 7.
 //!
 //! Prefix `110`, pinned content ([`PinnedId`]): `[57:0]` is an opaque 58-bit number.
 //!
@@ -178,12 +180,12 @@ pub(crate) mod testing {
             (0b1110 << 60) | (7 << 28),
             (0b1111 << 60) | (((1 << 18) - 1) << 13),
         ),
-        // Prefix 10: the centre, in a cell and at feature level; a stream; a dwarf core, in a
-        // cell and at feature level. Padding fixed at zero.
+        // Prefix 10: the centre, in a cell and at feature level (a 16-bit index, `[31:16]`
+        // zero); a stream; a dwarf core, in a cell and at feature level. Padding fixed at zero.
         (0b111_1000 << 57, HEAD_7 | (((1 << 22) - 1) << 35)),
         (
             (0b111_1000 << 57) | (7 << 32),
-            HEAD_7 | (((1 << 44) - 1) << 13),
+            HEAD_7 | (((1 << 41) - 1) << 16),
         ),
         (0b111_1001 << 57, HEAD_7 | (0b111 << 54)),
         (0b111_1010 << 57, HEAD_7 | (((1 << 24) - 1) << 33)),

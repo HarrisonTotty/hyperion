@@ -654,20 +654,21 @@ A member ID must carry all of that. As a sketch, under the reserved layer value:
 
 That is all 64 bits. The band field's spare value marks members drawn at feature level and not in a
 cell: a Poisson count on the feature's stream, with positions by inverse transform of the profile,
-which is exact. Under it the level and cell are zero and the index counts the members. Index 0 is
-member zero, such as a central black hole, and 1 upward are the feature's members of the
-[catalogue classes](#events-in-time), such as its recently dead. A chart then finds every shell in
-an association from the feature catalogue alone, where walking band E of each young feature would
-cost tens of thousands of cell draws apiece.
+which is exact. Under it the level and cell are zero and the index counts the members. At the
+galactic centre, whose list is the longest, the index takes 16 bits and the bits above it are zero
+(the prefix table below; ruled 2026-10-26). Index 0 is member zero, such as a central black hole,
+and 1 upward are the feature's members of the [catalogue classes](#events-in-time), such as its
+recently dead. A chart then finds every shell in an association from the feature catalogue alone,
+where walking band E of each young feature would cost tens of thousands of cell draws apiece.
 
 The kind field is a prefix:
 
-| Prefix | Meaning                                | Rest of the ID                                                                                                                                                                                                                                                                                                             |
-| ------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`    | Member of a catalogue feature          | As above                                                                                                                                                                                                                                                                                                                   |
-| `10`   | Member of a feature on the global list | Sub-kind (2): centre, stream or dwarf core. Then for the centre band (3), level (4), cell (15, at 5 bits per axis) and index (13); for a stream its number (12), band (3), cell along (14) and across (6 + 6), and index (13); for a dwarf core its number (2), then band, level, cell and index as in a catalogue feature |
-| `110`  | Pinned content                         |                                                                                                                                                                                                                                                                                                                            |
-| `111`  | Catalogue system                       | Class (6), cell (24, at 8 bits per axis of 512 ly; coarser classes zero the low bits), index (24), member (4)                                                                                                                                                                                                              |
+| Prefix | Meaning                                | Rest of the ID                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0`    | Member of a catalogue feature          | As above                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `10`   | Member of a feature on the global list | Sub-kind (2): centre, stream or dwarf core. Then for the centre band (3), level (4), cell (15, at 5 bits per axis) and index (13), or under the spare band value an index of 16 bits with the 16 bits above it zero; for a stream its number (12), band (3), cell along (14) and across (6 + 6), and index (13); for a dwarf core its number (2), then band, level, cell and index as in a catalogue feature |
+| `110`  | Pinned content                         |                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `111`  | Catalogue system                       | Class (6), cell (24, at 8 bits per axis of 512 ly; coarser classes zero the low bits), index (24), member (4)                                                                                                                                                                                                                                                                                                |
 
 The galactic centre is the first entry of the global list. Its central black hole is member zero.
 

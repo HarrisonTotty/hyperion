@@ -962,8 +962,9 @@ Index 0 is member zero where the kind has one. From 1, classes in the list order
 each a Poisson count on the feature's stream with positions by inverse transform of the class
 profile's cumulative distribution, which is exact. This task builds the list and its resolution with
 no class registered; P09.T30.b, T36 and T43 register theirs. The list's summed expected count plus
-eight standard deviations must stay under 8,192, asserted when the list is built, and the count is
-clamped. Tests: resolution, canonical IDs (level and cell bits zero), and that registering a second
+eight standard deviations must stay under its list's limit, 8,192, or 65,536 at the centre
+(P11.T8.e.b), asserted when the list is built, and the count is clamped. Tests: resolution,
+canonical IDs (the bits between the list's index and the band zero), and that registering a second
 class leaves the first's indices unchanged.
 
 #### P09.T23 Feature members in the range query
@@ -1526,7 +1527,9 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   spare band value. That contradicts the brainstorm's "under it the level and cell are zero" and
   plan 01's canonical rule, so it needs the brainstorm revised first; the alternative within the
   brainstorm is to list at feature level only the centre's hosts above a brightness floor. Reported
-  to the brainstorm's owner.
+  to the brainstorm's owner. **Ruled 2026-10-26:** the centre's list index alone is widened to 16
+  bits (`[15:0]` under band 7, `[31:16]` zero), an extension that moves no existing ID, built by
+  plan 11's P11.T8.e.b (plan 11's Risks, "The centre's feature-level index, ruled").
 - **The nuclear cluster's budget** is not in the brainstorm's list of populations (design note 5).
   Plan 02 draws its mass for the potential; this plan treats it as a budget of its own, about 0.05%
   on top of the drawn stellar mass. The brainstorm should say so or name the population it comes out

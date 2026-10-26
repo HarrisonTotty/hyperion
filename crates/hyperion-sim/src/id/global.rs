@@ -51,6 +51,18 @@ const _: () = {
         CENTRE_SLOT.cell(2),
         MEMBER_INDEX,
     ]);
+    // Band 7's view of the centre, an overlay of the in-cell one: the band, the zero bits and the
+    // list's 16-bit index (P11.T8.e.b).
+    assert_tiles_64(&[
+        LAYER,
+        PREFIX_2,
+        SUB_KIND,
+        CENTRE_PADDING,
+        CENTRE_SLOT.band(),
+        CENTRE_SLOT.list_padding(),
+        CENTRE_SLOT.list_index(),
+    ]);
+    assert!(CentreMemberId::LIST_INDEX_LIMIT == CENTRE_SLOT.list_index_limit());
     assert_tiles_64(&[
         LAYER,
         PREFIX_2,
@@ -107,8 +119,10 @@ pub(super) fn kind(raw: u64) -> SystemIdKind {
 ///
 /// The centre's nested grid has twelve levels of 32 cells per axis, from cells of 1 ÷ 256 ly up
 /// to 8 ly and a reach of 128 ly (brainstorm, "Dense features"), so a level fills four bits and
-/// levels 12–15 are rejected. Band 7 is the centre's feature-level list, whose member 0 is the
-/// central black hole.
+/// levels 12–15 are rejected. In a cell the index is 13 bits, `[12:0]`, as in every nested
+/// layout. Band 7 is the centre's feature-level list, whose member 0 is the central black hole:
+/// its index is 16 bits, `[15:0]`, and `[31:16]` must be zero, so the list holds
+/// [`LIST_INDEX_LIMIT`](Self::LIST_INDEX_LIMIT) entries (ruled 2026-10-26, P11.T8.e.b).
 ///
 /// # Examples
 ///
@@ -118,6 +132,9 @@ pub(super) fn kind(raw: u64) -> SystemIdKind {
 /// let black_hole = CentreMemberId::new(MemberSlot::FeatureLevel { index: 0 })?;
 /// assert_eq!(black_hole, CentreMemberId::CENTRAL_BLACK_HOLE);
 /// assert_eq!(SystemId::from(black_hole).raw(), 0xF000_0007_0000_0000);
+/// // The centre's list is longer than a catalogue feature's 8,192.
+/// let last = CentreMemberId::new(MemberSlot::FeatureLevel { index: u16::MAX })?;
+/// assert_eq!(SystemId::from(last).raw(), 0xF000_0007_0000_FFFF);
 /// # Ok::<(), hyperion_sim::id::BuildSystemIdError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -128,12 +145,26 @@ impl CentreMemberId {
     pub const CENTRAL_BLACK_HOLE: Self =
         Self(CENTRE_SLOT.band().with(base(CENTRE), FEATURE_LEVEL_BAND));
 
+    /// The exclusive bound of the centre's feature-level list's index: 65,536 entries, index 0
+    /// the central black hole.
+    ///
+    /// Under band 7 the centre's index is `[15:0]` and `[31:16]` must be zero (plan 01, Design
+    /// note 17, ruled 2026-10-26 and built by P11.T8.e.b), so that the list holds plan 11's
+    /// carved binary classes: at 13 bits, 393 of the first 10³ of plan 02's seeds could not
+    /// (plan 11's Risks, "The centre's feature-level index, ruled"). Every `u16` index fits.
+    /// Catalogue features and dwarf cores keep [`MemberSlot::INDEX_LIMIT`], as does every index
+    /// in a cell.
+    pub const LIST_INDEX_LIMIT: u32 = 1 << 16;
+
     /// The member of the centre in `slot`.
     ///
     /// # Errors
     ///
-    /// [`BuildSystemIdError::IndexTooLarge`] or [`BuildSystemIdError::FieldOutOfRange`] for a slot
-    /// field beyond its range (levels 0–11, cells 0–31); [`BuildSystemIdError::NotCanonical`] with
+    /// [`BuildSystemIdError::IndexTooLarge`] for an index in a cell of 8,192 or more
+    /// ([`MemberSlot::INDEX_LIMIT`]; a feature-level index is any `u16`, below
+    /// [`LIST_INDEX_LIMIT`](Self::LIST_INDEX_LIMIT)); [`BuildSystemIdError::FieldOutOfRange`]
+    /// for a level or cell beyond its range (levels 0–11, cells 0–31);
+    /// [`BuildSystemIdError::NotCanonical`] with
     /// [`DecodeSystemIdError::InnerCellOwnedByLowerLevel`] for a cell the level below owns.
     pub fn new(slot: MemberSlot) -> Result<Self, BuildSystemIdError> {
         let raw = CENTRE_SLOT.with_slot(base(CENTRE), slot)?;
@@ -147,6 +178,16 @@ impl CentreMemberId {
     #[must_use]
     pub(super) const fn raw(self) -> u64 {
         self.0
+    }
+
+    /// The field of the member's index: the list's 16 bits, `[15:0]`, under band 7, and
+    /// [`MEMBER_INDEX`], `[12:0]`, in a cell, where `[15:13]` are the low bits of the cell's z.
+    #[must_use]
+    pub(super) fn index_field(self) -> Field {
+        match self.slot() {
+            MemberSlot::FeatureLevel { .. } => CENTRE_SLOT.list_index(),
+            MemberSlot::InCell { .. } => MEMBER_INDEX,
+        }
     }
 
     /// Where the member sits in the centre.
@@ -441,6 +482,47 @@ mod tests {
         assert_eq!(
             SystemId::from_raw(dwarf_inner),
             Err(DecodeSystemIdError::InnerCellOwnedByLowerLevel)
+        );
+    }
+
+    /// The centre's list index is `[15:0]` under band 7, with `[31:16]` zero; a dwarf core's stays
+    /// 13 bits, its level and cell zero (P11.T8.e.b).
+    #[test]
+    fn the_centre_s_list_index_is_sixteen_bits() {
+        assert_eq!(CentreMemberId::LIST_INDEX_LIMIT, 65_536);
+        let black_hole = CentreMemberId::CENTRAL_BLACK_HOLE.raw();
+        for index in [0, 1, 8_191, 8_192, 40_000, u16::MAX] {
+            let slot = MemberSlot::FeatureLevel { index };
+            let centre = CentreMemberId::new(slot).unwrap();
+            assert_eq!(centre.raw(), black_hole | u64::from(index));
+            assert_eq!(
+                SystemId::from_raw(centre.raw()).unwrap().kind(),
+                SystemIdKind::Centre(centre)
+            );
+            assert_eq!(centre.slot(), slot);
+        }
+        for bit in 16..32 {
+            assert_eq!(
+                SystemId::from_raw(black_hole | (1 << bit)),
+                Err(DecodeSystemIdError::FeatureLevelFieldsSet),
+                "bit {bit}"
+            );
+        }
+        // 65,536, the first index past the list, would set bit 16.
+        assert_eq!(
+            SystemId::from_raw(black_hole + u64::from(CentreMemberId::LIST_INDEX_LIMIT)),
+            Err(DecodeSystemIdError::FeatureLevelFieldsSet)
+        );
+        assert_eq!(
+            DwarfCoreMemberId::new(0, MemberSlot::FeatureLevel { index: 8_192 }),
+            Err(BuildSystemIdError::IndexTooLarge)
+        );
+        let dwarf = DwarfCoreMemberId::new(0, MemberSlot::FeatureLevel { index: 0 })
+            .unwrap()
+            .raw();
+        assert_eq!(
+            SystemId::from_raw(dwarf | (1 << 13)),
+            Err(DecodeSystemIdError::FeatureLevelFieldsSet)
         );
     }
 

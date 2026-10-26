@@ -24,7 +24,9 @@ pub enum DecodeSystemIdError {
     PaddingBitsSet,
     /// The global-list sub-kind is `11`, which names nothing.
     UnknownSubKind,
-    /// A feature-level member (mass band 7) has a non-zero level or cell.
+    /// A feature-level member (mass band 7) has a bit set between its list's index and the band:
+    /// a non-zero level or cell for a catalogue feature or a dwarf core (`[27:13]`), a bit of
+    /// `[31:16]` at the galactic centre, whose index is 16 bits.
     FeatureLevelFieldsSet,
     /// A nested cell of level 1 or more lies wholly in the inner half of its level, whose volume
     /// the level below owns.
@@ -41,7 +43,9 @@ impl fmt::Display for DecodeSystemIdError {
             Self::SpareBitsSet => "spare bits 60 to 58 of a grid system id are set",
             Self::PaddingBitsSet => "padding bits of a global-list system id are set",
             Self::UnknownSubKind => "global-list sub-kind 11 names nothing",
-            Self::FeatureLevelFieldsSet => "a feature-level member has a non-zero level or cell",
+            Self::FeatureLevelFieldsSet => {
+                "a feature-level member has a bit set between its index and its band"
+            }
             Self::InnerCellOwnedByLowerLevel => {
                 "an inner cell of a nested level belongs to the level below"
             }
@@ -178,16 +182,18 @@ impl SystemId {
     /// The ID with its index zeroed: the `ObjectKey` word of the cell the system was drawn in.
     ///
     /// For a grid ID it is the ID of the generation cell's candidate 0. For a member of a feature,
-    /// the centre, a stream or a dwarf core the 13-bit index is zeroed, which leaves the nested cell
-    /// and band (or, in band 7, the feature-level list). For a catalogue system the index and
-    /// member are zeroed, leaving class and catalogue cell. A pinned ID has no cell and no index,
-    /// and its word is the ID itself.
+    /// a stream or a dwarf core the 13-bit index, `[12:0]`, is zeroed, which leaves the nested cell
+    /// and band (or, in band 7, the feature-level list). For a member of the centre's list (band
+    /// 7) the list's 16-bit index, `[15:0]`, is zeroed, so that every entry shares the list's word,
+    /// the black hole's; for a member of a centre cell only `[12:0]` is, since `[15:13]` are its
+    /// cell's z. For a catalogue system the index and member are zeroed, leaving class and
+    /// catalogue cell. A pinned ID has no cell and no index, and its word is the ID itself.
     #[must_use]
     pub fn cell_word(self) -> u64 {
         let index = match self.kind() {
             SystemIdKind::Grid(id) => id.index_field(),
+            SystemIdKind::Centre(id) => id.index_field(),
             SystemIdKind::FeatureMember(_)
-            | SystemIdKind::Centre(_)
             | SystemIdKind::Stream(_)
             | SystemIdKind::DwarfCore(_) => MEMBER_INDEX,
             SystemIdKind::Pinned(_) => return self.0,
@@ -276,7 +282,7 @@ mod tests {
     use super::*;
     use crate::coords::CellSize;
     use crate::id::testing::random_valid_id;
-    use crate::id::{FeatureCell, FeatureRef};
+    use crate::id::{FeatureCell, FeatureRef, MemberSlot};
 
     fn cell(size: CellSize, c: [i32; 3]) -> GenCell {
         GenCell::new(size, c).unwrap()
@@ -472,6 +478,32 @@ mod tests {
         }
     }
 
+    /// Every entry of the centre's list shares the list's word, the black hole's, its 16-bit index
+    /// zeroed; a member of a centre cell keeps its cell's z in `[15:13]` (P11.T8.e.b).
+    #[test]
+    fn a_centre_list_entry_s_cell_word_is_the_black_hole_s() {
+        let black_hole = SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE);
+        for index in [0, 1, 8_192, 40_000, u16::MAX] {
+            let entry = CentreMemberId::new(MemberSlot::FeatureLevel { index }).unwrap();
+            assert_eq!(SystemId::from(entry).cell_word(), 0xF000_0007_0000_0000);
+            assert_eq!(SystemId::from(entry).cell_word(), black_hole.raw());
+        }
+        let in_cell = |index| {
+            SystemId::from(
+                CentreMemberId::new(MemberSlot::InCell {
+                    band: Layer::A,
+                    level: 9,
+                    cell: [2, 17, 31],
+                    index,
+                })
+                .unwrap(),
+            )
+        };
+        let word = in_cell(8_191).cell_word();
+        assert_eq!(word, in_cell(0).raw());
+        assert_eq!(word & 0xE000, 0xE000, "{word:#x}: the cell's z is 31");
+    }
+
     /// What the head bits alone say a raw ID is, read with plain shifts and independently of the
     /// decoder: the layer `[63:61]`, then under layer 7 the prefix and sub-kind bits `[60:57]`.
     fn kind_from_head(raw: u64) -> &'static str {
@@ -531,20 +563,26 @@ mod tests {
     #[test]
     fn every_raw_is_rejected_or_decodes_to_the_one_kind_that_rebuilds_it() {
         use DecodeSystemIdError as E;
-        // Zero regions of the layouts: spare bits, the three paddings, and the level and cell of
-        // the feature and centre slots. Clearing a random choice of them, and sometimes writing
-        // band 7, makes every kind well-formed often and every rule fail often.
-        const ZERO_REGIONS: [u64; 6] = [
+        // Zero regions of the layouts: spare bits, the three paddings, the level and cell of the
+        // feature and centre slots, and the centre's band-7 zero bits `[31:16]`, above its 16-bit
+        // list index. Clearing a random choice of them, and sometimes writing band 7, makes every
+        // kind well-formed often and every rule fail often.
+        const ZERO_REGIONS: [u64; 7] = [
             0b111 << 58,
             ((1 << 22) - 1) << 35,
             0b111 << 54,
             ((1 << 24) - 1) << 33,
             ((1 << 15) - 1) << 13,
             ((1 << 19) - 1) << 13,
+            ((1 << 16) - 1) << 16,
         ];
         let mut lcg = Lcg::new(0xb175);
         let mut accepted: BTreeMap<&str, u32> = BTreeMap::new();
         let mut rejected: BTreeMap<String, u32> = BTreeMap::new();
+        // Centre list entries past a 13-bit index, which only the 16-bit index accepts: 40 of the
+        // 200,000 (P11.T8.e.b), since one needs the centre's head, band 7, zero padding, `[31:16]`
+        // cleared without `[31:13]` and a non-zero `[15:13]`.
+        let mut wide_list_entries = 0_u32;
         for i in 0..200_000 {
             let mut raw = lcg.next_u64();
             if i % 2 == 1 {
@@ -574,6 +612,11 @@ mod tests {
                     assert_eq!(kind_name(cell.kind()), head, "cell word of {raw:#018x}");
                     assert_eq!(cell.cell_word(), word);
                     *accepted.entry(head).or_default() += 1;
+                    if let SystemIdKind::Centre(m) = id.kind()
+                        && let MemberSlot::FeatureLevel { index } = m.slot()
+                    {
+                        wide_list_entries += u32::from(index >= MemberSlot::INDEX_LIMIT);
+                    }
                 }
                 Err(e) => {
                     let possible: &[E] = match head {
@@ -607,6 +650,7 @@ mod tests {
         assert!(accepted.values().all(|&n| n >= 1_000), "{accepted:?}");
         assert_eq!(rejected.len(), 7, "{rejected:?}");
         assert!(rejected.values().all(|&n| n >= 100), "{rejected:?}");
+        assert!(wide_list_entries >= 20, "{wide_list_entries}");
     }
 
     #[test]
