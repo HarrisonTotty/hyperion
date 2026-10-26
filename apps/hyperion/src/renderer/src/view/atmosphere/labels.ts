@@ -125,27 +125,65 @@ export const ATMOSPHERE_LABELS: ReadonlyArray<AtmosphereLabel> = [
 ];
 
 /**
- * The fault a body's atmosphere raises when the console fails to compute it
- * (`decision-r08-t10a-leans.md`, item 6; the guide's `ATMOSPHERE NOT AVAILABLE` row, ruled under
- * the owner's delegation as the terrain's was).
+ * Why a body has no atmosphere drawn and none of its {@link AtmosphereLabel}s, though the view
+ * draws it larger than a point (`decision-r08-t10a-leans.md`, item 6 and its follow-up): its
+ * medium or its tables failed to build (`failed`), the server refused its `body_detail`
+ * (`rejected`, with the server's code and reason, and whether it refused what was asked,
+ * `lib/refusal.ts`'s `isRefusal`), or the console could not take the answer (`invalid`, with the
+ * check that failed). {@link atmosphereProblemLines} words them.
+ */
+export type AtmosphereProblem =
+  | { readonly kind: "failed" }
+  | {
+      readonly kind: "rejected";
+      readonly code: string;
+      readonly message: string;
+      readonly refusal: boolean;
+    }
+  | { readonly kind: "invalid"; readonly check: string };
+
+/**
+ * What the operator can do about a body's failed, refused or unreadable atmosphere, which asks for
+ * it afresh (`decision-r08-t10a-leans.md`, item 6 and its follow-up).
+ */
+const ATMOSPHERE_RETRY_REMEDY = "reopen VIEW to retry";
+
+/**
+ * Designations as one line names several things: `A`, `A and B`, `A, B and C`, in the order given
+ * (the guide's `NOT AVAILABLE: no room for SURVEY COVERAGE, DATUM or GROUND AT LINE OF SIGHT …`;
+ * `decision-r08-t10a-leans.md`, UX review, item 2).
+ *
+ * @throws RangeError for an empty list: a line names at least one body.
+ */
+function namesOf(designations: ReadonlyArray<string>): string {
+  const last = designations.at(-1);
+  if (last === undefined) {
+    throw new RangeError("an atmosphere's fault or refusal names at least one body");
+  }
+  return designations.length === 1 ? last : `${designations.slice(0, -1).join(", ")} and ${last}`;
+}
+
+/**
+ * The fault bodies' atmospheres raise when the console fails to compute them:
+ * `ATMOSPHERE NOT AVAILABLE: computation failed for <designations>, reopen VIEW to retry`
+ * (`decision-r08-t10a-leans.md`, item 6 and its UX review; the guide's `ATMOSPHERE NOT AVAILABLE`
+ * row, ruled under the owner's delegation as the terrain's was).
  *
  * @remarks
- * A fault, not a ninth {@link AtmosphereLabel}: the body draws no atmosphere and carries none of
+ * A fault, not a ninth {@link AtmosphereLabel}: each body draws no atmosphere and carries none of
  * the labels, and R08.T10.b sets this on the label block's fault line in `--status-caution`, after
  * any graphics fault and the terrain's (`view/terrain/annunciation.ts`'s `TERRAIN_NOT_AVAILABLE`),
  * never among the steady statements and never debounced. It is raised by a throw from the medium's
- * assembly or the tables' factory other than the engine's loss, which is the graphics fault's. It
- * clears when the body's atmosphere is computed anew: at the body's next trigger, or when `VIEW` is
- * shown again and the cache forgets its failures.
+ * assembly or the tables' factory other than the engine's loss, which is the graphics fault's;
+ * never by a computation that `ATMOSPHERE: COMPUTING` announces, whose failure is
+ * `ATMOSPHERE: APPROXIMATE`'s (R08.T14.c). It clears when the body's atmosphere is computed anew:
+ * at the body's next trigger, or when `VIEW` is shown again and the cache forgets its failures.
+ *
+ * @param designations - Every body it holds for, in designation order; at least one.
  */
-export const ATMOSPHERE_NOT_AVAILABLE =
-  "ATMOSPHERE NOT AVAILABLE: computation failed, reopen VIEW to retry";
-
-/**
- * What the operator can do about a body's refused or unreadable record, which asks it afresh
- * (`decision-r08-t10a-leans.md`, follow-up to item 6).
- */
-const ATMOSPHERE_RETRY_REMEDY = "reopen VIEW to retry";
+export function atmosphereNotAvailable(designations: ReadonlyArray<string>): string {
+  return `ATMOSPHERE NOT AVAILABLE: computation failed for ${namesOf(designations)}, ${ATMOSPHERE_RETRY_REMEDY}`;
+}
 
 /**
  * The check an answer of another kind than the request's fails (`protocol_violation`), in
@@ -155,38 +193,130 @@ const ATMOSPHERE_RETRY_REMEDY = "reopen VIEW to retry";
 export const ATMOSPHERE_ANSWER_UNREADABLE = "answer unreadable";
 
 /**
- * The note a body carries when the server refuses its `body_detail`, in place of its atmosphere's
- * notes: `ATMOSPHERE REJECTED: <the server's reason>, reopen VIEW to retry`
- * (`decision-r08-t10a-leans.md`, follow-up to item 6; the guide's `ATMOSPHERE REJECTED` row).
+ * The note bodies carry when the server refuses their `body_detail`, in place of their
+ * atmospheres' notes: `ATMOSPHERE REJECTED: for <designations>, <the server's reason>, reopen VIEW
+ * to retry` (`decision-r08-t10a-leans.md`, follow-up to item 6 and its UX review; the guide's
+ * `ATMOSPHERE REJECTED` row).
  *
  * @remarks
  * Steady, on the label block's plate after `ATMOSPHERE: NOT RESOLVED` and before the
  * annunciations, in `--text` for a refusal of what was asked (`lib/refusal.ts`'s `isRefusal`) and
  * in `--status-caution` for the server's own failure; R08.T10.b places and colours it. A server
- * too busy to answer refuses nothing, and raises none. As the survey line's
- * `SURVEY COVERAGE REJECTED` does, a reason of white space alone leaves the remedy alone.
+ * too busy to answer refuses nothing, and raises none. The designations lead the server's reason,
+ * free text the console does not extend. As the survey line's `SURVEY COVERAGE REJECTED` does, a
+ * reason of white space alone leaves the remedy alone.
  *
+ * @param designations - Every body the reason holds for, in designation order; at least one.
  * @param reason - The server's own reason, as its error's message carries it.
  */
-export function atmosphereRejected(reason: string): string {
+export function atmosphereRejected(designations: ReadonlyArray<string>, reason: string): string {
   const said = reason.trim();
-  return `ATMOSPHERE REJECTED: ${said.length > 0 ? `${said}, ` : ""}${ATMOSPHERE_RETRY_REMEDY}`;
+  const words = said.length > 0 ? `${said}, ${ATMOSPHERE_RETRY_REMEDY}` : ATMOSPHERE_RETRY_REMEDY;
+  return `ATMOSPHERE REJECTED: for ${namesOf(designations)}, ${words}`;
 }
 
 /**
- * The fault a body raises when the console cannot take its `body_detail`'s answer:
- * `ATMOSPHERE DATA INVALID: <the check that failed>, reopen VIEW to retry`
- * (`decision-r08-t10a-leans.md`, follow-up to item 6; the guide's `DATA INVALID` row).
+ * The fault bodies raise when the console cannot take their `body_detail`'s answers:
+ * `ATMOSPHERE DATA INVALID: <the check that failed> for <designations>, reopen VIEW to retry`
+ * (`decision-r08-t10a-leans.md`, follow-up to item 6 and its UX review; the guide's `DATA INVALID`
+ * row).
  *
  * @remarks
- * On the label block's fault line in `--status-caution`, after {@link ATMOSPHERE_NOT_AVAILABLE};
- * R08.T10.b places it. No atmosphere is drawn for the body, which is never read as airless.
+ * On the label block's fault line in `--status-caution`, after {@link atmosphereNotAvailable}'s
+ * lines; R08.T10.b places it. No atmosphere is drawn for the body, which is never read as airless.
  *
+ * @param designations - Every body the check failed for, in designation order; at least one.
  * @param check - `toBodyDetail`'s fault string, or {@link ATMOSPHERE_ANSWER_UNREADABLE} for an
  *   answer of another kind.
  */
-export function atmosphereDataInvalid(check: string): string {
-  return `ATMOSPHERE DATA INVALID: ${check}, ${ATMOSPHERE_RETRY_REMEDY}`;
+export function atmosphereDataInvalid(designations: ReadonlyArray<string>, check: string): string {
+  return `ATMOSPHERE DATA INVALID: ${check} for ${namesOf(designations)}, ${ATMOSPHERE_RETRY_REMEDY}`;
+}
+
+/** An `ATMOSPHERE REJECTED` line, and whether the server refused what was asked (`--text`). */
+export interface AtmosphereRejectedLine {
+  readonly statement: string;
+  /** `--text` where true, `--status-caution` where the server failed on its side. */
+  readonly refusal: boolean;
+}
+
+/** The view's atmosphere problems, worded: the plate's lines and the fault line's. */
+export interface AtmosphereProblemLines {
+  /** `ATMOSPHERE REJECTED` lines, one for each reason. */
+  readonly plate: ReadonlyArray<AtmosphereRejectedLine>;
+  /** `ATMOSPHERE NOT AVAILABLE`'s line, then `ATMOSPHERE DATA INVALID`'s, one for each check. */
+  readonly fault: ReadonlyArray<string>;
+}
+
+/** A body drawn larger than a point that has an {@link AtmosphereProblem}, by its designation. */
+export interface BodyAtmosphereProblem {
+  readonly designation: string;
+  readonly problem: AtmosphereProblem;
+}
+
+/**
+ * Designation order: a stable order that never moves as the camera does, numbers by their value
+ * (`… /2` before `… /10`), fixed to one locale so that it never varies between machines.
+ */
+const DESIGNATION_ORDER = new Intl.Collator("en", { numeric: true });
+
+/**
+ * A view's atmosphere problems as its label block states them (`decision-r08-t10a-leans.md`, UX
+ * review, item 2): one line for each distinct phrase or reason, naming every body it holds for in
+ * designation order, the lines of each kind in the order of their first bodies.
+ *
+ * @remarks
+ * A body listed twice is named once. `ATMOSPHERE REJECTED`'s lines are told apart by the server's
+ * reason, trimmed, and by whether it refused what was asked, which sets the line's colour.
+ */
+export function atmosphereProblemLines(
+  bodies: ReadonlyArray<BodyAtmosphereProblem>,
+): AtmosphereProblemLines {
+  const failed = new Set<string>();
+  const rejected = new Map<string, { reason: string; refusal: boolean; names: Set<string> }>();
+  const invalid = new Map<string, Set<string>>();
+  for (const { designation, problem } of bodies) {
+    switch (problem.kind) {
+      case "failed":
+        failed.add(designation);
+        break;
+      case "rejected": {
+        const reason = problem.message.trim();
+        const key = JSON.stringify([problem.refusal, reason]);
+        const held = rejected.get(key) ?? { reason, refusal: problem.refusal, names: new Set() };
+        held.names.add(designation);
+        rejected.set(key, held);
+        break;
+      }
+      case "invalid": {
+        const names = invalid.get(problem.check) ?? new Set();
+        names.add(designation);
+        invalid.set(problem.check, names);
+        break;
+      }
+    }
+  }
+  const ordered = (names: Iterable<string>): ReadonlyArray<string> =>
+    [...names].toSorted((a, b) => DESIGNATION_ORDER.compare(a, b));
+  const byFirst = <T extends { readonly names: ReadonlyArray<string> }>(
+    lines: ReadonlyArray<T>,
+  ): ReadonlyArray<T> =>
+    lines.toSorted((a, b) => DESIGNATION_ORDER.compare(a.names[0] ?? "", b.names[0] ?? ""));
+  const plate = byFirst(
+    [...rejected.values()].map((held) => ({
+      reason: held.reason,
+      refusal: held.refusal,
+      names: ordered(held.names),
+    })),
+  ).map((held) => ({
+    statement: atmosphereRejected(held.names, held.reason),
+    refusal: held.refusal,
+  }));
+  const checks = byFirst(
+    [...invalid.entries()].map(([check, names]) => ({ check, names: ordered(names) })),
+  ).map((held) => atmosphereDataInvalid(held.names, held.check));
+  const notAvailable = failed.size > 0 ? [atmosphereNotAvailable(ordered(failed))] : [];
+  return { plate, fault: [...notAvailable, ...checks] };
 }
 
 /**
