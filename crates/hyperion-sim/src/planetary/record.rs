@@ -47,6 +47,7 @@ use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
+pub use crate::planetary::hooks::AerosolInventory;
 use crate::planetary::hooks::DetailSeed;
 use crate::planetary::hooks::cold_traps::ColdTrapRules;
 pub use crate::planetary::hooks::crust::CrustComposition;
@@ -595,8 +596,9 @@ impl BulkProperties {
 /// material, its surface conditions with their climate regime (P14.T24.a, T48.d), its global
 /// figures (P14.T24.b, T48.a–c), its condensates (P14.T51.a, from P14.T54.a) and its crust
 /// (P14.T51.c, from P14.T54.a, not modelled for a body whose passes took no lid), its air's
-/// vertical structure (P14.T24.e, held off the record until P14.T54.b's bump at generator version
-/// 24), every substance in them a [`SubstanceId`](crate::substance::SubstanceId), and the members
+/// vertical structure (P14.T24.e) and its aerosol and absorber inventory (P14.T24.c with T24.g),
+/// both held off the record until P14.T54.b's bump at generator version 24, every substance in
+/// them a [`SubstanceId`](crate::substance::SubstanceId), and the members
 /// whose tasks land later, each [`Modelled::NotModelled`] until they do (decision-composition
 /// §1.10).
 ///
@@ -713,6 +715,14 @@ impl Surface {
         }
     }
 
+    /// The surface with its air's aerosol and absorber inventory `aerosols` (P14.T24.c with T24.g,
+    /// wired by P14.T54.b): the empty inventory for a surface with no air or a magma ocean, and not
+    /// modelled while the air's sections are held off the record (`system::air::record_aerosols`).
+    #[must_use]
+    pub(crate) fn with_aerosols(self, aerosols: Modelled<AerosolInventory>) -> Self {
+        Self { aerosols, ..self }
+    }
+
     /// What its conditions and condensates were built on (rule (f)); `None` for a surface built
     /// apart from a record. The tests of rule (f) read it.
     #[cfg(test)]
@@ -783,7 +793,15 @@ impl Surface {
         }
     }
 
-    /// The aerosol and absorber inventory (P14.T24.c), not modelled until it lands.
+    /// The aerosol and absorber inventory of the surface's air (P14.T24.c with T24.g's sulphur,
+    /// [`AerosolInventory`]): its condensate decks, its modes of particles (the decks', the
+    /// sulphate layer's, the methane haze's and the dust's) and its absorbers, from the published
+    /// surface and its vertical structure. The empty inventory, never none, for a surface with no
+    /// air (an airless body, a melt whose volatiles are gone) and for a magma ocean.
+    ///
+    /// It is not modelled below generator version 24, which holds it off the record until
+    /// P14.T54.b's bump, where the vertical structure is not, and for an air the inventory refuses,
+    /// which no generated body gives (`system::air::record_aerosols`).
     #[must_use]
     pub const fn aerosols(&self) -> Modelled<&AerosolInventory> {
         self.aerosols.as_ref()
@@ -874,11 +892,6 @@ impl<T> Modelled<T> {
         }
     }
 }
-
-/// A surface air's aerosol and absorber inventory (P14.T24.c: its modes, decks and absorbers),
-/// which no task builds yet, so the type has no value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum AerosolInventory {}
 
 /// A surface's modifiers (P14.T51.d: its maturity, organic cover and resurfacing), which no task
 /// builds yet, so the type has no value.

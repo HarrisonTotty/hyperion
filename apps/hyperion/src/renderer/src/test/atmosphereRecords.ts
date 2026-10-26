@@ -112,9 +112,17 @@ export function withFigureLaw(answer: DetailAnswer, law: FigureLawDto): DetailAn
 }
 
 /** An inventory with nothing in it. */
-export const EMPTY_INVENTORY: AerosolInventoryDto = { modes: [], decks: [], absorbers: [] };
+export const EMPTY_INVENTORY: AerosolInventoryDto = {
+  modes: [],
+  decks: [],
+  absorbers: [],
+  not_formed: [],
+};
 
-/** A mode of spheres or crystals on a gamma distribution, its column mass a placeholder. */
+/**
+ * A mode of spheres or crystals on a gamma distribution covering the whole sky, its τ(550) on the
+ * sphere basis, its column mass and temperature placeholders that the medium does not read.
+ */
 export function gammaMode(mode: {
   readonly material: string;
   readonly phase: AerosolModeDto["phase"];
@@ -137,9 +145,12 @@ export function gammaMode(mode: {
     },
     column_mass_kg_m2: 1e-3,
     tau_550: mode.tau550,
+    tau_basis: "sphere",
     base_pa: mode.basePa,
     top_pa: mode.topPa,
     f_sed: 0,
+    coverage: 1,
+    temperature_k: 250,
   };
 }
 
@@ -293,13 +304,17 @@ export function plutoHazeDetail(): BodyDetail {
           },
           column_mass_kg_m2: 1e-6,
           tau_550: 0.01,
+          tau_basis: "rule",
           base_pa: 1,
           top_pa: 1e-3,
           f_sed: 0,
+          coverage: 1,
+          temperature_k: 40,
         },
       ],
       decks: [],
       absorbers: [],
+      not_formed: [],
     }),
   );
 }
@@ -333,8 +348,22 @@ export function unknownKeysDetail(): BodyDetail {
           topPa: 20_000,
         }),
       ],
-      decks: [{ condensate: "newdeck", vapour_mole_fraction_above: 0 }],
+      decks: [
+        {
+          condensate: "newdeck",
+          phase: "solid",
+          base_pa: 50_000,
+          // About the US Standard Atmosphere's (1976) at 500 hPa.
+          base_temperature_k: 252,
+          top_pa: 20_000,
+          vapour_mole_fraction_below: 0,
+          vapour_mole_fraction_above: 0,
+          f_sed: 0,
+          extrapolated: false,
+        },
+      ],
       absorbers: [layerAbsorber("Zq2", 1e20, 50_000, 10_000)],
+      not_formed: [],
     }),
   );
 }
@@ -376,6 +405,7 @@ export function sixProfilesInventory(): AerosolInventoryDto {
       layerAbsorber("H2", 1e26, 50_000, 10_000),
       layerAbsorber("He", 1e26, 50_000, 10_000),
     ],
+    not_formed: [],
   };
 }
 

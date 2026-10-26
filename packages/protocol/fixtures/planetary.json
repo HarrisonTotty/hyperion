@@ -1374,9 +1374,12 @@
                 },
                 "column_mass_kg_m2": 0.012,
                 "tau_550": 8.0,
+                "tau_basis": "phase_table",
                 "base_pa": 70000.0,
                 "top_pa": 45000.0,
-                "f_sed": 2.0
+                "f_sed": 2.0,
+                "coverage": 1.0,
+                "temperature_k": 149.1
               }
             ],
             "haze_tau_550": 0.5

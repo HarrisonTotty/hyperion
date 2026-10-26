@@ -14,6 +14,7 @@ import {
   type AbsorberDto,
   type AerosolInventoryDto,
   type AerosolModeDto,
+  type AerosolNotModelledDto,
   type BandsDto,
   type BiosphereDto,
   type BodyDetailDto,
@@ -30,6 +31,7 @@ import {
   type BodySurfaceDto,
   type BulkPropertiesDto,
   type ClimateRegimeDto,
+  type CondensateDeckDto,
   type CraterContractDto,
   type CraterScreeningDto,
   type CrustCompositionDto,
@@ -37,6 +39,7 @@ import {
   type GasShareDto,
   type HabitableZoneDto,
   isBodyId,
+  type NotFormedCondensateDto,
   type OrbitDriftDto,
   type OrbitHostDto,
   parseBodyId,
@@ -69,6 +72,7 @@ import type {
   Absorber,
   AerosolInventory,
   AerosolMode,
+  AerosolNotModelled,
   AerosolPhase,
   Biosphere,
   BodyDetail,
@@ -80,6 +84,7 @@ import type {
   BodySurface,
   BulkProperties,
   ClimateRegime,
+  CondensateDeck,
   CondensatePhase,
   CraterContract,
   CraterScreening,
@@ -88,6 +93,7 @@ import type {
   HabitableZone,
   HierarchyNode,
   JohnsonBands,
+  NotFormedCondensate,
   OrbitHost,
   Population,
   ProfileNode,
@@ -1141,12 +1147,103 @@ function toAerosolPhase(phase: SubstancePhaseDto): AerosolPhase {
   return result;
 }
 
+/** Which of an aerosol mode's members that may be left out the wire sends. */
+interface ModeMembers {
+  readonly size: boolean;
+  readonly column: boolean;
+  readonly tau: boolean;
+  readonly temperature: boolean;
+}
+
+/**
+ * Whether a mode's members are the ones its not-modelled reason leaves (plan 14's P14.T54.b.b;
+ * decision-p14-t54b-open §2.2): with no reason, every one; a grain density's, no optical depth;
+ * a size's, no size or optical depth over a column; the optics', no optical depth over a size; and
+ * no mass extinction, an aggregate's, no column mass or temperature beside its size and optical
+ * depth. Every reason keeps the temperature but the last.
+ */
+function membersFitReason(
+  sent: ModeMembers,
+  reason: AerosolNotModelledDto["type"] | null,
+): boolean {
+  let fits: boolean;
+  switch (reason) {
+    case null:
+      fits = sent.size && sent.column && sent.tau && sent.temperature;
+      break;
+    case "no_grain_density":
+      fits = !sent.tau && sent.temperature;
+      break;
+    case "no_collision_constants":
+    case "no_condensate":
+    case "no_size_distribution":
+      fits = !sent.size && sent.column && !sent.tau && sent.temperature;
+      break;
+    case "optics_not_modelled":
+      fits = sent.size && !sent.tau && sent.temperature;
+      break;
+    case "no_mass_extinction":
+      fits = sent.size && !sent.column && sent.tau && !sent.temperature;
+      break;
+  }
+  return fits;
+}
+
+/** A mode's not-modelled reason in the model, its temperature checked. */
+function toNotModelled(reason: AerosolNotModelledDto): AerosolNotModelled {
+  let result: AerosolNotModelled;
+  switch (reason.type) {
+    case "no_grain_density":
+      check(positive(reason.temperature_k), "aerosol mode unusable");
+      result = {
+        kind: "no_grain_density",
+        phase: toAerosolPhase(reason.phase),
+        temperatureK: reason.temperature_k,
+      };
+      break;
+    case "no_collision_constants":
+    case "no_condensate":
+    case "no_size_distribution":
+    case "optics_not_modelled":
+    case "no_mass_extinction":
+      result = { kind: reason.type };
+      break;
+  }
+  return result;
+}
+
+/**
+ * An aerosol mode, checked: its column mass and optical depth, where sent, not negative, the
+ * optical depth sent with its basis, its temperature, where sent, positive, its coverage a
+ * fraction, its layer usable, its exponent not negative, and the members it leaves out the ones
+ * its not-modelled reason names ({@link membersFitReason}).
+ *
+ * @remarks
+ * A member the server's generator does not model is absent, never `null` (decision-p14-t54b-open
+ * §2.2), and reads as not modelled, as one an older or hand-written frame sends as `null` does.
+ */
 function toAerosolMode(mode: AerosolModeDto): AerosolMode {
+  const size = absentIfNull(mode.size_distribution);
+  const column = absentIfNull(mode.column_mass_kg_m2);
+  const tau = absentIfNull(mode.tau_550);
+  const basis = absentIfNull(mode.tau_basis);
+  const temperature = absentIfNull(mode.temperature_k);
+  const reason = absentIfNull(mode.not_modelled);
+  const sent = {
+    size: size !== undefined,
+    column: column !== undefined,
+    tau: tau !== undefined,
+    temperature: temperature !== undefined,
+  };
   check(
-    atLeastZero(mode.column_mass_kg_m2) &&
-      atLeastZero(mode.tau_550) &&
+    (column === undefined || atLeastZero(column)) &&
+      (tau === undefined || atLeastZero(tau)) &&
+      (tau === undefined) === (basis === undefined) &&
+      (temperature === undefined || positive(temperature)) &&
+      fraction(mode.coverage) &&
       layerUsable(mode.base_pa, mode.top_pa) &&
-      atLeastZero(mode.f_sed),
+      atLeastZero(mode.f_sed) &&
+      membersFitReason(sent, reason?.type ?? null),
     "aerosol mode unusable",
   );
   return {
@@ -1154,12 +1251,18 @@ function toAerosolMode(mode: AerosolModeDto): AerosolMode {
     phase: toAerosolPhase(mode.phase),
     deck: mode.deck,
     shape: mode.shape,
-    sizeDistribution: toSizeDistribution(mode.size_distribution),
-    columnMassKgM2: mode.column_mass_kg_m2,
-    tau550: mode.tau_550,
+    sizeDistribution: pending(size, toSizeDistribution),
+    columnMassKgM2: pending(column, (kilograms) => kilograms),
+    opticalDepth:
+      tau === undefined || basis === undefined
+        ? { kind: "not_modelled" }
+        : { kind: "value", value: { tau550: tau, basis } },
     basePa: mode.base_pa,
     topPa: mode.top_pa,
     fSed: mode.f_sed,
+    coverage: mode.coverage,
+    temperatureK: pending(temperature, (kelvin) => kelvin),
+    notModelled: reason === undefined ? null : toNotModelled(reason),
   };
 }
 
@@ -1192,18 +1295,66 @@ function toAbsorber(absorber: AbsorberDto): Absorber {
   };
 }
 
-function toAerosols(inventory: AerosolInventoryDto): AerosolInventory {
+/**
+ * A condensate deck, checked: its vapours fractions, its layer usable, its base's temperature
+ * positive and its exponent not negative.
+ */
+function toCondensateDeck(deck: CondensateDeckDto): CondensateDeck {
   check(
-    inventory.decks.every((deck) => fraction(deck.vapour_mole_fraction_above)),
+    fraction(deck.vapour_mole_fraction_below) &&
+      fraction(deck.vapour_mole_fraction_above) &&
+      layerUsable(deck.base_pa, deck.top_pa) &&
+      positive(deck.base_temperature_k) &&
+      atLeastZero(deck.f_sed),
     "condensate deck unusable",
   );
   return {
-    modes: inventory.modes.map(toAerosolMode),
-    decks: inventory.decks.map((deck) => ({
-      condensate: deck.condensate,
-      vapourMoleFractionAbove: deck.vapour_mole_fraction_above,
-    })),
+    condensate: deck.condensate,
+    phase: toAerosolPhase(deck.phase),
+    basePa: deck.base_pa,
+    baseTemperatureK: deck.base_temperature_k,
+    topPa: deck.top_pa,
+    vapourMoleFractionBelow: deck.vapour_mole_fraction_below,
+    vapourMoleFractionAbove: deck.vapour_mole_fraction_above,
+    fSed: deck.f_sed,
+    extrapolated: deck.extrapolated,
+  };
+}
+
+/** A condensable not formed, with its reason. */
+function toNotFormed(entry: NotFormedCondensateDto): NotFormedCondensate {
+  const why = entry.reason;
+  let reason: NotFormedCondensate["reason"];
+  switch (why.type) {
+    case "bulk_gas":
+      reason = { kind: "bulk_gas" };
+      break;
+    case "displaced":
+      reason = { kind: "displaced", by: why.by };
+      break;
+  }
+  return { condensate: entry.condensate, reason };
+}
+
+/**
+ * A surface air's inventory, checked: its modes and decks each as above, and every mode's deck,
+ * where it names one, one of the inventory's decks, which is what a mode's `deck` means
+ * (decision-p14-t54b-open §2.2).
+ */
+function toAerosols(inventory: AerosolInventoryDto): AerosolInventory {
+  const decks = inventory.decks.map(toCondensateDeck);
+  const modes = inventory.modes.map(toAerosolMode);
+  check(
+    modes.every(
+      (mode) => mode.deck === null || decks.some((deck) => deck.condensate === mode.deck),
+    ),
+    "aerosol mode unusable",
+  );
+  return {
+    modes,
+    decks,
     absorbers: inventory.absorbers.map(toAbsorber),
+    notFormed: inventory.not_formed.map(toNotFormed),
   };
 }
 
@@ -1226,7 +1377,7 @@ function toCondensatePhase(phase: SubstancePhaseDto): CondensatePhase {
  * An optional wire member as absent where a frame sends `null` for it, as the server's own reader
  * takes it: the type leaves the key out, but an older or hand-written frame may send `null`.
  */
-function absentIfNull(value: number | null | undefined): number | undefined {
+function absentIfNull<T>(value: T | null | undefined): T | undefined {
   return value ?? undefined;
 }
 

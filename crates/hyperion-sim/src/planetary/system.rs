@@ -106,9 +106,9 @@ use crate::planetary::belts::{
 use crate::planetary::chem::inventory::ElementInventory;
 use crate::planetary::chem::partition::{Condensates, CrustWater, Partition};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
-use crate::planetary::context::{SystemContext, XuvHistory};
+use crate::planetary::context::{HostKind, SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, SurfaceMaterial, VolatileDraws, has_surface_section,
+    Atmosphere, SurfaceMaterial, SurfaceState, VolatileDraws, has_surface_section,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
@@ -179,8 +179,9 @@ use crate::planetary::placement::{
     Neighbour, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs, place,
 };
 use crate::planetary::record::{
-    BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, Envelope,
-    HaloRecord, Hooks, MoonOrigin, Population, Section, Surface, SurfaceBasis, SystemSnapshot,
+    AerosolInventory, BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties,
+    Envelope, HaloRecord, Hooks, Modelled, MoonOrigin, Population, Section, Surface, SurfaceBasis,
+    SystemSnapshot, VerticalStructure,
 };
 use crate::planetary::rings::{Ring, RingParent};
 use crate::planetary::satellites::{
@@ -188,7 +189,7 @@ use crate::planetary::satellites::{
 };
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
-use crate::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
+use crate::stellar::multiplicity::{HierarchyNode, SlotKind, SystemHierarchy};
 use crate::stellar::system::StarModel;
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, Span, UniverseTime};
@@ -200,7 +201,7 @@ use crate::units::{
     KilogramsPerCubicMetre, Megayears, Metres, MetresPerSecondSquared, Radians, Seconds,
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
-use air::{AirRules, record_structure};
+use air::{AirRules, AirSurface, record_aerosols, record_structure};
 use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water, shell_lag};
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
@@ -1006,8 +1007,8 @@ pub struct PlanetarySystem {
 }
 
 /// The rules a system's records' cold traps (P14.T51.f) and air's sections (P14.T24.e's vertical
-/// structure, P14.T54.b) follow: the generator version's, and for the tests the batch's ahead of
-/// its bump. P14.T54.b deletes it with the holds.
+/// structure and P14.T24.c's aerosol inventory, P14.T54.b) follow: the generator version's, and for
+/// the tests the batch's ahead of its bump. P14.T54.b deletes it with the holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RecordRules {
     /// Its cold traps: their hold at 24.
@@ -2514,6 +2515,7 @@ impl PlanetarySystem {
                 sources: frame.sources.as_ref(),
                 continental_asymptote: frame.continental_asymptote,
                 cold_traps: frame.cold_traps,
+                star_temperature: frame.star_temperature,
                 record: self.record,
             },
             SurfaceOf::Moon {
@@ -2529,6 +2531,7 @@ impl PlanetarySystem {
                 sources: frame.sources.as_ref(),
                 continental_asymptote: frame.continental_asymptote,
                 cold_traps: frame.cold_traps,
+                star_temperature: frame.star_temperature,
                 record: self.record,
             },
         };
@@ -2550,7 +2553,8 @@ impl PlanetarySystem {
     /// spin, its passes' and its record's alike (P14.T54.a): its primary, the hosts' light over
     /// the primary's past ([`PastSky`]), the primary's orbit then, which sets its seasons, its
     /// host's impactor sources (P14.T48.f), its continental asymptote (P14.T48.a), its cold traps'
-    /// case (P14.T51.f), and the system's \[Fe/H\] and age then.
+    /// case (P14.T51.f), the effective temperature of the star its air's photochemistry reads
+    /// (P14.T24.c, wired by P14.T54.b.b), and the system's \[Fe/H\] and age then.
     #[must_use]
     fn surface_frame<'s>(
         &'s self,
@@ -2566,6 +2570,7 @@ impl PlanetarySystem {
             OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => body,
         };
         let id = body.index.body_id(self.system);
+        let brightest = epoch.brightest(self.zone_of(primary));
         SurfaceFrame {
             primary,
             past: PastSky::new(ctx, self.zone_of(primary), fate, t),
@@ -2577,8 +2582,9 @@ impl PlanetarySystem {
             continental_asymptote: relief::continental_asymptote(self.seed, id),
             cold_traps: ColdTrapCase {
                 exposed_fraction: cold_traps::exposed_fraction(self.seed, id),
-                star_radius: epoch.brightest_radius(self.zone_of(primary)),
+                star_radius: brightest.map(|(_, state)| state.radius()),
             },
+            star_temperature: epoch.photochemistry_temperature(brightest),
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
         }
@@ -4580,6 +4586,9 @@ struct SurfaceFrame<'a> {
     continental_asymptote: f64,
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
+    /// The effective temperature of the star its air's photochemistry reads, its primary's
+    /// brightest host's; `None` for a brown dwarf or no star (`Epoch::photochemistry_temperature`).
+    star_temperature: Option<Kelvin>,
     /// The system's \[Fe/H\].
     fe_h: Dex,
     /// The system's age at the time.
@@ -5259,6 +5268,9 @@ struct SurfaceCase<'a> {
     continental_asymptote: f64,
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
+    /// The effective temperature of the star its air's photochemistry reads (P14.T24.c's
+    /// `star_temperature`), its frame's.
+    star_temperature: Option<Kelvin>,
     /// The rules its cold traps and its air's sections follow.
     record: RecordRules,
 }
@@ -5402,6 +5414,13 @@ struct SurfaceCraters {
 /// conditions with their regime, the bulk section's equilibrium temperature and the figures' heat
 /// flow, as plan 14's T54.b names them; computed as none for a surface with no air. Not modelled
 /// while the air's sections are held, below generator version 24 (`air::AIR_SECTIONS_VERSION`).
+///
+/// **The aerosol and absorber inventory** (P14.T24.c with T24.g, wired by P14.T54.b.b;
+/// `air::record_aerosols`): from the state, the conditions' pressure, gases, molar mass and
+/// liquid-water flag, the bulk section's gravity, the vertical structure, the figures' cloud
+/// fraction, liquids' cover and outgassing, and the photochemistry's star; the empty inventory for
+/// a surface with no air and for a magma ocean. Not modelled while the air's sections are held, and
+/// nothing of it is computed then.
 #[must_use]
 fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<Surface> {
     let Some(seasonal) = time.seasonal else {
@@ -5502,12 +5521,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         ice_threshold: figures.ice_threshold(),
     });
     let crust = record_crust(sky.crust_lid, &figures, &conditions);
-    let structure = record_structure(
-        case.record.air,
-        &conditions,
-        bulk.equilibrium_temperature(),
-        figures.heat_flow(),
-    );
+    let (structure, aerosols) = record_air_sections(case, air.state(), &conditions, &figures);
     Section::Ok(
         Surface::new(air.state(), material, conditions, figures, published)
             .expect(
@@ -5516,8 +5530,43 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
             )
             .with_basis(basis)
             .with_crust(crust)
-            .with_vertical_structure(structure),
+            .with_vertical_structure(structure)
+            .with_aerosols(aerosols),
     )
+}
+
+/// The record's air's sections of the body `case` describes, whose surface is in the state `state`
+/// with the conditions `conditions` and the figures `figures` (P14.T54.b; `air`): its vertical
+/// structure (`air::record_structure`), from the conditions, the bulk section's equilibrium
+/// temperature and the figures' heat flow, and its aerosol and absorber inventory
+/// (`air::record_aerosols`), from that structure, the published surface, the bulk section's
+/// gravity and the photochemistry's star. Neither is computed while the air's sections are held.
+#[must_use]
+fn record_air_sections(
+    case: &SurfaceCase<'_>,
+    state: SurfaceState,
+    conditions: &SurfaceConditions,
+    figures: &GlobalFigures,
+) -> (
+    Modelled<Option<VerticalStructure>>,
+    Modelled<AerosolInventory>,
+) {
+    let (rules, bulk) = (case.record.air, case.bulk);
+    let structure = record_structure(
+        rules,
+        conditions,
+        bulk.equilibrium_temperature(),
+        figures.heat_flow(),
+    );
+    let surface = AirSurface {
+        state,
+        conditions,
+        figures,
+        gravity: bulk.surface_gravity(),
+        star_temperature: case.star_temperature,
+    };
+    let aerosols = record_aerosols(rules, &surface, &structure);
+    (structure, aerosols)
 }
 
 /// The record's crust of a body whose published pass took the lid `lid`, of figures `figures`
@@ -6002,20 +6051,45 @@ impl<'c> Epoch<'c> {
         )
     }
 
-    /// The radius of the most luminous of the stars `zone`'s bodies orbit at the time, the first of
-    /// equals in the zone's order, or `None` before any forms (P14.T51.f's star's angular radius).
+    /// The most luminous of the stars `zone`'s bodies orbit at the time, by its star index with
+    /// its state then, the first of equals in the zone's order, or `None` before any forms: the
+    /// star whose angular radius P14.T51.f's cold traps read, and whose ultraviolet drives the
+    /// air's photochemistry ([`photochemistry_temperature`](Self::photochemistry_temperature)).
     #[must_use]
-    fn brightest_radius(&self, zone: &OrbitZone) -> Option<SolarRadii> {
+    fn brightest(&self, zone: &OrbitZone) -> Option<(u8, StarState)> {
         zone.members()
-            .filter_map(|member| self.states[usize::from(member)])
+            .filter_map(|member| self.states[usize::from(member)].map(|state| (member, state)))
             .fold(
                 None,
-                |brightest: Option<StarState>, state| match brightest {
-                    Some(b) if b.luminosity() >= state.luminosity() => Some(b),
-                    Some(_) | None => Some(state),
+                |brightest: Option<(u8, StarState)>, (member, state)| match brightest {
+                    Some((m, b)) if b.luminosity() >= state.luminosity() => Some((m, b)),
+                    Some(_) | None => Some((member, state)),
                 },
             )
-            .map(|state| state.radius())
+    }
+
+    /// The effective temperature of the star whose ultraviolet drives the photochemistry of the
+    /// air of a body that orbits `brightest` ([`brightest`](Self::brightest)), the aerosol
+    /// inventory's `star_temperature` (P14.T24.c, wired by P14.T54.b.b): the brightest star's,
+    /// and `None`, which makes no ozone, haze or acid, before any star forms, for a brown dwarf
+    /// (a companion's slot, or a system whose host is not a star, which no context builds yet)
+    /// and for a star that gives no light.
+    #[must_use]
+    fn photochemistry_temperature(&self, brightest: Option<(u8, StarState)>) -> Option<Kelvin> {
+        match self.ctx.host_kind() {
+            HostKind::Stellar => {}
+            HostKind::BrownDwarf | HostKind::RoguePlanet => return None,
+        }
+        let (member, state) = brightest?;
+        let slot = self.ctx.hierarchy().stars().get(usize::from(member))?;
+        let temperature = state.effective_temperature();
+        let shines = temperature.value().is_finite()
+            && temperature.value() > 0.0
+            && state.luminosity().value() > 0.0;
+        match slot.kind() {
+            SlotKind::Star => shines.then_some(temperature),
+            SlotKind::BrownDwarf => None,
+        }
     }
 
     /// The light of the stars `zone`'s bodies orbit, in body order, or `None` before they form.

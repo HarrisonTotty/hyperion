@@ -429,6 +429,70 @@ fn bad_absorbers_modes_and_sedimentation_are_refused() {
     ));
 }
 
+/// A liquid mode above [`NEAR_CRITICAL_LIQUID_SHARE`] of its condensate's critical temperature
+/// has its size and τ(550) not modelled for want of its grain density, its column kept, so that
+/// the inventory publishes no liquid the grain-density mirror cannot evaluate
+/// (decision-p14-t54a-grain-density F4): liquid nitrogen at its critical 126.19 K, against the same
+/// droplets at 100 K, which keep both.
+#[test]
+fn a_near_critical_liquid_mode_s_size_is_not_modelled() {
+    let nitrogen = row("N2");
+    let critical = nitrogen
+        .substance()
+        .phase_diagram()
+        .expect("nitrogen's phase diagram")
+        .critical_temperature()
+        .value();
+    let size = SizeDistribution::log_normal(Metres::new(1.0e-5), 0.2).unwrap();
+    let profile = ModeProfile::new(Pascals::new(4.0e6), Pascals::new(1.0e6), 1.0).unwrap();
+    let mass = KilogramsPerSquareMetre::new(0.1);
+    let droplets = |t: f64| {
+        let mode = Mode::new(
+            nitrogen,
+            CondensedPhase::Liquid,
+            nitrogen,
+            size,
+            mass,
+            profile,
+            1.0,
+            Kelvin::new(t),
+        )
+        .unwrap();
+        AerosolMode::of_settling(&mode, Kelvin::new(t)).unwrap()
+    };
+    let cold = droplets(100.0);
+    assert!(
+        cold.size().is_ok() && cold.optical_depth().is_ok(),
+        "{cold:?}"
+    );
+    let near = droplets(critical);
+    assert!(
+        critical > 100.0 / NEAR_CRITICAL_LIQUID_SHARE,
+        "the cold droplets lie below the cut"
+    );
+    assert!(
+        matches!(
+            near.size(),
+            Err(SizeModeError::NoDensity {
+                phase: CondensedPhase::Liquid,
+                ..
+            })
+        ),
+        "{near:?}"
+    );
+    assert!(
+        matches!(
+            near.optical_depth(),
+            Err(ResolveOpticalDepthError::Size(
+                SizeModeError::NoDensity { .. }
+            ))
+        ),
+        "{near:?}"
+    );
+    assert_eq!(near.column_mass(), Some(mass));
+    assert_eq!(near.temperature(), Some(Kelvin::new(critical)));
+}
+
 /// A mode from the loop is converted from its settling radius to its volume-to-area radius by its
 /// shape class, r = Ψ `r_V`, its variance kept and its τ(550) taken at r: Mars's dust's mineral
 /// grains at 0.71, a liquid's droplets at 1.
@@ -578,9 +642,48 @@ fn the_inventory_is_deterministic_and_continuous() {
     assert!((two / one - 1.0).abs() < 1e-3, "{one} against {two}");
 }
 
-/// Nothing on the record reaches the inventory before P14.T54.b wires it (decision-bump-plan-after-22
-/// §1.3): no code of the crate's `src/` outside this module and its tests names it, comments and
-/// its own declaration left out. **P14.T54.b deletes this tripwire.**
+/// The files outside this module and P14.T24.g's whose code names the inventory behind a named
+/// hold, each with the name of its hold, which its code (outside an inline test module) must name:
+/// P14.T54.b.b's wiring of the record's inventory, and the hold's own tests (decision-p14-t54b-open
+/// §3.3). **P14.T54.b.l deletes this list** with the tripwire below.
+const HELD: [(&str, &str); 2] = [
+    ("planetary/system/air.rs", "AIR_SECTIONS_VERSION"),
+    ("planetary/system/air/tests.rs", "AIR_SECTIONS_VERSION"),
+];
+
+/// Whether the code of `text` (its lines before an inline `mod tests {`, comments left out) names
+/// `hold`.
+fn names_its_hold(text: &str, hold: &str) -> bool {
+    text.lines()
+        .map(str::trim_start)
+        .take_while(|code| !code.starts_with("mod tests {"))
+        .filter(|code| !code.starts_with("//"))
+        .any(|code| code.contains(hold))
+}
+
+/// The hold check reads the code alone: a comment naming the hold, or code inside an inline test
+/// module, does not count.
+#[test]
+fn the_held_files_hold_check_reads_the_code_alone() {
+    let hold = "AIR_SECTIONS_VERSION";
+    assert!(names_its_hold("if v >= AIR_SECTIONS_VERSION {\n", hold));
+    assert!(!names_its_hold(
+        "// AIR_SECTIONS_VERSION\nfn f() {}\n",
+        hold
+    ));
+    assert!(!names_its_hold(
+        "fn f() {}\n#[cfg(test)]\nmod tests {\n    const A: u32 = AIR_SECTIONS_VERSION;\n}\n",
+        hold
+    ));
+}
+
+/// Nothing on the record reaches the inventory before P14.T54.b's bump (decision-bump-plan-after-22
+/// §1.3): no code of the crate's `src/` outside this module, P14.T24.g's, their tests and
+/// [`HELD`]'s files names it, comments and the modules' own declarations (with the inventory's
+/// re-export from `hooks`) left out; each of [`HELD`]'s files is a source file whose code names its
+/// hold, so that a caller in any other file fails, and so does a listed file that drops its hold
+/// (decision-p14-t54b-open §3.3). Under the hold's `Held` arm the record calls nothing here
+/// (`the_air_sections_are_held_only_until_the_24_bump`). **P14.T54.b.l deletes this tripwire.**
 #[test]
 fn nothing_on_the_record_calls_the_inventory_yet() {
     fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
@@ -606,12 +709,16 @@ fn nothing_on_the_record_calls_the_inventory_yet() {
         "planetary/hooks/sulphur",
         "planetary/hooks/envelope_atmosphere",
     ];
-    // The record's own `AerosolInventory` is its placeholder, which P14.T54.b replaces with this.
+    // The record's `AerosolInventory` is this module's, re-exported from `hooks`: a file that names
+    // the type through it stores the member, and the calls and the inputs it would build one with
+    // are caught by name.
     let patterns = [
         "hooks::aerosols",
         "aerosols::",
         "hooks::sulphur",
         "sulphur::",
+        "AerosolInventory::derive",
+        "AerosolInputs",
     ];
     // The atmosphere re-exports the acid's cycling temperature for P14.T53.b part 1 (b)'s deckless
     // re-solve and its docs (`RunawayDeck`): a constant, which calls nothing of the inventory.
@@ -619,15 +726,31 @@ fn nothing_on_the_record_calls_the_inventory_yet() {
         "pub mod aerosols;",
         "pub mod sulphur;",
         "pub use crate::planetary::hooks::sulphur::ACID_CYCLING_TEMPERATURE;",
+        "pub use aerosols::AerosolInventory;",
     ];
-    let mut found = Vec::new();
-    for path in &files {
-        let relative = path
-            .strip_prefix(&src)
+    let relative_of = |path: &std::path::Path| {
+        path.strip_prefix(&src)
             .expect("under src")
             .to_string_lossy()
-            .replace('\\', "/");
-        if own.iter().any(|o| relative.starts_with(o)) {
+            .replace('\\', "/")
+    };
+    for (held, hold) in HELD {
+        let path = files
+            .iter()
+            .find(|path| relative_of(path.as_path()) == held)
+            .unwrap_or_else(|| panic!("{held} is a source file"));
+        let text = std::fs::read_to_string(path).expect("a readable source");
+        assert!(
+            names_its_hold(&text, hold),
+            "{held} reads the inventory behind {hold}, which its code no longer names"
+        );
+    }
+    let mut found = Vec::new();
+    for path in &files {
+        let relative = relative_of(path);
+        if own.iter().any(|o| relative.starts_with(o))
+            || HELD.iter().any(|(held, _)| *held == relative)
+        {
             continue;
         }
         let text = std::fs::read_to_string(path).expect("a readable source");

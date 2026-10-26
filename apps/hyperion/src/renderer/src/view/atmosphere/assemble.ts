@@ -59,6 +59,7 @@ import type {
   BodySurface,
   BulkProperties,
   AerosolMode as RecordAerosolMode,
+  SizeDistribution as RecordSizeDistribution,
   Section,
 } from "../../lib/system/model";
 import { spinRateAt } from "../../lib/system/rotation";
@@ -776,9 +777,8 @@ const UM_PER_M = 1e6;
  * of its material and shape. A distribution sent with the `aggregate` shape takes its file's
  * shape, since its sizes are no aggregate's.
  */
-function particlesOf(mode: RecordAerosolMode): AerosolParticles {
+function particlesOf(mode: RecordAerosolMode, sizes: RecordSizeDistribution): AerosolParticles {
   const form = { phase: mode.phase };
-  const sizes = mode.sizeDistribution;
   let particles: AerosolParticles;
   switch (sizes.kind) {
     case "aggregate":
@@ -839,7 +839,10 @@ function modesOf(
   const planned: PlannedMode[] = [];
   const names = new Map<string, number>();
   for (const [index, mode] of (inventory?.modes ?? []).entries()) {
-    if (mode.tau550 === 0 || mode.basePa === mode.topPa || mode.topPa >= datumPa) {
+    const sizes = mode.sizeDistribution;
+    const depth = mode.opticalDepth;
+    const tau550 = depth.kind === "value" ? depth.value.tau550 : undefined;
+    if (tau550 === 0 || mode.basePa === mode.topPa || mode.topPa >= datumPa) {
       continue;
     }
     if (mode.basePa <= columnTopPa) {
@@ -850,6 +853,15 @@ function modesOf(
       );
       continue;
     }
+    // The optics need both, and a member the generator does not model is labelled, never stood in.
+    if (sizes.kind === "not_modelled" || tau550 === undefined) {
+      reasons.add(
+        `mode:${index}`,
+        `${particlesName(mode.material, mode.phase)}: their ${sizes.kind === "not_modelled" ? "sizes" : "optical depth"} not modelled, not drawn`,
+        Math.max(mode.topPa, columnTopPa),
+      );
+      continue;
+    }
     const seen = (names.get(mode.material) ?? 0) + 1;
     names.set(mode.material, seen);
     planned.push({
@@ -857,8 +869,8 @@ function modesOf(
       mode,
       spec: {
         name: seen === 1 ? `aerosol:${mode.material}` : `aerosol:${mode.material}:${seen}`,
-        particles: particlesOf(mode),
-        opticalDepth550: mode.tau550,
+        particles: particlesOf(mode, sizes.value),
+        opticalDepth550: tau550,
         basePa: mode.basePa,
         topPa: Math.max(mode.topPa, columnTopPa),
         mixingExponent: mode.fSed,
@@ -888,7 +900,7 @@ function candidateDepth(candidate: Candidate): number {
       depth = absorberRankingDepth(candidate.spec);
       break;
     case "mode":
-      depth = candidate.planned.mode.tau550;
+      depth = candidate.planned.spec.opticalDepth550;
       break;
   }
   return depth;
@@ -1176,7 +1188,8 @@ export function assembleMedium(
       : [{ density: thomson.density, extinctionPerM: thomson.scattering[1] }]),
     ...aerosols.map(({ planned, term }) => ({
       density: term.term.density,
-      extinctionPerM: planned.mode.tau550 / columnLengthM(term.term.density, column.topHeightM),
+      extinctionPerM:
+        planned.spec.opticalDepth550 / columnLengthM(term.term.density, column.topHeightM),
     })),
   ]);
   const shown: string[] = [];

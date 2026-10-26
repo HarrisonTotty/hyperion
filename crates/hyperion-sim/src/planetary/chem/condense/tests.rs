@@ -721,11 +721,21 @@ fn a_rule_s_mode_takes_its_optics_as_the_loop_s() {
     assert_eq!(bad, Err(BuildModeError::ColumnMass { column_mass: mass }));
 }
 
-/// Nothing on the record reaches the loop or the laws aloft before P14.T54.b wires them
+/// The files outside the two modules and P14.T24.c's and T24.g's rules through which the record
+/// reaches the loop behind a named hold, each with the name of its hold, which its code must name:
+/// P14.T54.b.b's wiring of the record's aerosol inventory, whose `Batch` arm alone calls
+/// `hooks::aerosols` and so the loop (decision-p14-t54b-open §3.3). **P14.T54.b.l deletes this
+/// list** with the tripwire below.
+const HELD: [(&str, &str); 1] = [("planetary/system/air.rs", "AIR_SECTIONS_VERSION")];
+
+/// Nothing on the record reaches the loop or the laws aloft before P14.T54.b's bump
 /// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside the two modules,
-/// their tests and P14.T24.c's and T24.g's rules (`hooks/aerosols` and `hooks/sulphur`, pure
-/// themselves until P14.T54.b) names them, comments and the modules' own declarations left out.
-/// **P14.T54.b deletes this tripwire** with `substance::aerosol`'s.
+/// their tests, P14.T24.c's and T24.g's rules (`hooks/aerosols` and `hooks/sulphur`, pure
+/// themselves, which the record calls only behind P14.T54.b's hold) and [`HELD`]'s files names
+/// them, comments and the modules' own declarations left out; each of [`HELD`]'s files is a source
+/// file whose code names its hold (comments left out), so that a caller in any other file fails,
+/// and so does a listed file that drops its hold (decision-p14-t54b-open §3.3). **P14.T54.b.l
+/// deletes this tripwire** with `substance::aerosol`'s.
 #[test]
 fn nothing_on_the_record_calls_the_condensation_yet() {
     fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
@@ -760,14 +770,35 @@ fn nothing_on_the_record_calls_the_condensation_yet() {
         "aloft::",
     ];
     let declarations = ["pub mod condense;", "pub mod aloft;"];
-    let mut found = Vec::new();
-    for path in &files {
-        let relative = path
-            .strip_prefix(&src)
+    let relative_of = |path: &std::path::Path| {
+        path.strip_prefix(&src)
             .expect("under src")
             .to_string_lossy()
-            .replace('\\', "/");
-        if own.iter().any(|o| relative.starts_with(o)) {
+            .replace('\\', "/")
+    };
+    for (held, hold) in HELD {
+        let path = files
+            .iter()
+            .find(|path| relative_of(path.as_path()) == held)
+            .unwrap_or_else(|| panic!("{held} is a source file"));
+        let text = std::fs::read_to_string(path).expect("a readable source");
+        let named = text
+            .lines()
+            .map(str::trim_start)
+            .take_while(|code| !code.starts_with("mod tests {"))
+            .filter(|code| !code.starts_with("//"))
+            .any(|code| code.contains(hold));
+        assert!(
+            named,
+            "{held} reaches the loop behind {hold}, which its code no longer names"
+        );
+    }
+    let mut found = Vec::new();
+    for path in &files {
+        let relative = relative_of(path);
+        if own.iter().any(|o| relative.starts_with(o))
+            || HELD.iter().any(|(held, _)| *held == relative)
+        {
             continue;
         }
         let text = std::fs::read_to_string(path).expect("a readable source");

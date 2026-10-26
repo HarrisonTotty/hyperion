@@ -23,14 +23,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub use surface::{
-    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolShapeDto, BiosphereDto,
-    BiosphereFluxDto, BodyEnvelopeDto, BodySurfaceDto, ClimateForcingDto, ClimateRegimeDto,
-    CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
-    CrustCompositionDto, CrustLidDto, GasShareDto, GuillotProfileDto, MagneticFieldClassDto,
-    MixingRatioNodeDto, OceanFloorDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto,
-    SilicateVapourDto, SizeDistributionDto, SubstanceAreaDto, SubstancePhaseDto,
-    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
-    SurfaceStateDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolNotModelledDto, AerosolShapeDto,
+    AerosolTauBasisDto, BiosphereDto, BiosphereFluxDto, BodyEnvelopeDto, BodySurfaceDto,
+    ClimateForcingDto, ClimateRegimeDto, CondensateDeckDto, CraterContractDto, CraterScreeningDto,
+    CraterTargetClassDto, CrustCompositionDto, CrustLidDto, GasShareDto, GuillotProfileDto,
+    MagneticFieldClassDto, MixingRatioNodeDto, NotFormedCondensateDto, NotFormedReasonDto,
+    OceanFloorDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, SilicateVapourDto,
+    SizeDistributionDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
+    TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
 };
 
 use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, PopulationDto, SectionDto};

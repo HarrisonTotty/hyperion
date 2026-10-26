@@ -36,10 +36,10 @@
 //!   and maturity, organic cover, resurfacing rate and an Io's volcanic deposits. It is pure until
 //!   P14.T54.b, the 23 → 24 bump, puts it in the record's surface section in the place of the
 //!   record's placeholder of the same name.
-//! - [`aerosols`]: a surface's [`AerosolInventory`](aerosols::AerosolInventory) (P14.T24.c), its
-//!   condensate decks from P14.T52.c's loop, its hazes and dust as modes of particles and its
-//!   absorbers. It is pure until P14.T54.b, the 23 → 24 bump, puts it in the record's surface
-//!   section.
+//! - [`aerosols`]: a surface's [`AerosolInventory`] (P14.T24.c), its condensate decks from
+//!   P14.T52.c's loop, its hazes and dust as modes of particles and its absorbers. It is pure:
+//!   P14.T54.b's wiring puts it in the record's surface section, held off the record until the
+//!   23 → 24 bump.
 //! - [`sulphur`]: a body's sulphur (P14.T24.g), the acid deck of a runaway greenhouse, the
 //!   sulphate layer of a temperate or snowball world and SO₂ as an absorber, which
 //!   [`aerosols`] calls. It is pure until P14.T54.b.
@@ -78,6 +78,7 @@ pub mod structure;
 pub mod sulphur;
 pub mod surface;
 
+pub use aerosols::AerosolInventory;
 pub use crust::{CrustComposition, CrustCompositionInputs, CrustLithology, DeriveCrustError};
 pub use envelope_atmosphere::{
     DeckKind, DeriveEnvelopeAtmosphereError, DeriveInternalTemperatureError, EnvelopeAtmosphere,

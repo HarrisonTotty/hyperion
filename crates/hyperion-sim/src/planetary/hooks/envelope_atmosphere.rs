@@ -1609,7 +1609,7 @@ fn haze_mode(
                 1.0,
                 temperature,
             )?;
-            Ok(AerosolMode::of_mode(&mode, shape))
+            Ok(AerosolMode::of_mode(&mode, shape, temperature))
         }
         HazeAmount::OpticalDepth { optical_depth, .. } => AerosolMode::of_rule(
             material,

@@ -9,19 +9,21 @@
 //! level asked for.
 
 use hyperion_protocol::{
-    ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto,
-    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEnvelopeDto, BodyFigureDto,
-    BodyGrantDto, BodyHooksDto, BodyIdHex, BodyKindDto, BodyOrbitDto, BodyPhotometryDto,
-    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
-    BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto, CraterContractDto,
-    CraterScreeningDto, CraterTargetClassDto, CrustCompositionDto, CrustLidDto,
-    DestructionCauseDto, DetailLevelDto, DetailSeedHex, ErrorCode, FigureDatumDto, FigureLawDto,
-    GasShareDto, HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto, Modelled,
-    MoonOriginDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto, PlanetClassDto,
-    PopulationDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto,
-    RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
-    SeenPositionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
-    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceStateDto, SystemBodiesDto,
+    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolNotModelledDto, AerosolShapeDto,
+    AerosolTauBasisDto, ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto,
+    BeltDto, BeltGapDto, BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest,
+    BodyEnvelopeDto, BodyFigureDto, BodyGrantDto, BodyHooksDto, BodyIdHex, BodyKindDto,
+    BodyOrbitDto, BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
+    BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto,
+    CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
+    CrustCompositionDto, CrustLidDto, DestructionCauseDto, DetailLevelDto, DetailSeedHex,
+    ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, HabitableZoneDto, MagneticFieldClassDto,
+    MassFractionsDto, MixingRatioNodeDto, Modelled, MoonOriginDto, NotFormedCondensateDto,
+    NotFormedReasonDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto,
+    PlanetClassDto, PopulationDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, RequestError,
+    RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
+    SeenPositionDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
+    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceStateDto, SystemBodiesDto,
     SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TectonicRegimeDto,
     ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
 };
@@ -30,6 +32,7 @@ use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
 use hyperion_sim::planetary::belts::{BeltComposition, BeltSite};
+use hyperion_sim::planetary::chem::condense::{NotFormed, ResolveOpticalDepthError, SizeModeError};
 use hyperion_sim::planetary::chem::partition::{CondensatePhase, Condensates};
 use hyperion_sim::planetary::chem::redox::RedoxClass;
 use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
@@ -40,12 +43,16 @@ use hyperion_sim::planetary::derive::{HabitableZone, PlanetClass};
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
+use hyperion_sim::planetary::hooks::aerosols::{
+    Absorber, AbsorberLayer, AbsorberNode, AerosolDeck, AerosolMode, DepthBasis, ModeDepth,
+    ParticleSize, ShapeClass,
+};
 use hyperion_sim::planetary::hooks::crust::{CrustComposition, LidCrust};
 use hyperion_sim::planetary::hooks::figures::WetEpoch;
 use hyperion_sim::planetary::hooks::surface::regime::{Forcing, ThermalRegime};
 use hyperion_sim::planetary::hooks::{
-    ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface, SubsurfaceOcean,
-    TectonicRegime, VerticalStructure,
+    AerosolInventory, ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface,
+    SubsurfaceOcean, TectonicRegime, VerticalStructure,
 };
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
@@ -57,9 +64,13 @@ use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
 use hyperion_sim::planetary::{
     BodyIndex, BodySub, PlanetarySystem, ResolveBodyError, SystemContext,
 };
-use hyperion_sim::substance::SubstanceId;
+use hyperion_sim::substance::{
+    CondensedPhase, ExtinctionBasis, ResolveAerosolError, SizeDistributionKind, SubstanceId,
+};
 use hyperion_sim::time::{ClockWindow, UniverseTime};
-use hyperion_sim::units::{Kelvin, Kilograms, Metres, MetresPerSecond, Seconds};
+use hyperion_sim::units::{
+    Kelvin, Kilograms, KilogramsPerSquareMetre, Metres, MetresPerSecond, Seconds,
+};
 use hyperion_surface::craters::{CraterParams, Screening, TargetClass};
 
 use super::query_time;
@@ -1003,8 +1014,9 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 /// The members of later tasks are absent, as the record holds them not modelled; each task fills
 /// its own here when it lands, as P14.T54.a fills the condensates and the crust, which is absent
 /// only where the record holds none (a body whose passes took no lid), and P14.T54.b the vertical
-/// structure ([`vertical_structure_member`]), absent while the record holds the air's sections
-/// off, below generator version 24. The melt's own vapour,
+/// structure ([`vertical_structure_member`]) and the aerosol inventory ([`aerosol_inventory`],
+/// never `null`: the empty inventory for a surface with no air), both absent while the record
+/// holds the air's sections off, below generator version 24. The melt's own vapour,
 /// `silicate_vapour`, has no member in the record and is sent absent from every surface until
 /// P14.T55.b.
 #[must_use]
@@ -1054,7 +1066,9 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         craters: crater_contract(figures.craters()),
         wet_epoch: figures.wet_epoch().map(wet_epoch),
         vertical_structure: vertical_structure_member(surface.vertical_structure()),
-        aerosols: later(surface.aerosols(), |aerosols| match *aerosols {}),
+        aerosols: later(surface.aerosols(), |inventory| {
+            Some(aerosol_inventory(inventory))
+        }),
         condensates: Modelled::Value(condensates(surface.condensates())),
         crust: later(surface.crust(), |composition| Some(crust(composition))),
         modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
@@ -1172,6 +1186,249 @@ fn vertical_structure(structure: &VerticalStructure) -> VerticalStructureDto {
         VerticalStructure::Envelope(_) => {
             unreachable!("a record's surface never carries a gas envelope's profile")
         }
+    }
+}
+
+/// A surface air's aerosol and absorber inventory as the wire carries it (P14.T24.c with T24.g,
+/// wired by P14.T54.b.b; decision-p14-t54b-open §2): its modes ([`aerosol_mode`]), its decks
+/// ([`condensate_deck`]), its absorbers ([`absorber`]) and its condensates not formed, each in the
+/// record's order and each substance by its registry key. A surface with no air's, or a magma
+/// ocean's, is every list empty.
+#[must_use]
+fn aerosol_inventory(inventory: &AerosolInventory) -> AerosolInventoryDto {
+    let decks = inventory.decks();
+    AerosolInventoryDto {
+        modes: inventory
+            .modes()
+            .iter()
+            .map(|mode| aerosol_mode(mode, decks))
+            .collect(),
+        decks: decks.iter().map(condensate_deck).collect(),
+        absorbers: inventory.absorbers().iter().map(absorber).collect(),
+        not_formed: inventory
+            .not_formed()
+            .iter()
+            .map(|&(condensate, why)| NotFormedCondensateDto {
+                condensate: key(condensate),
+                reason: match why {
+                    NotFormed::BulkGas => NotFormedReasonDto::BulkGas,
+                    NotFormed::Displaced { by } => NotFormedReasonDto::Displaced {
+                        by: by.as_str().to_owned(),
+                    },
+                },
+            })
+            .collect(),
+    }
+}
+
+/// A condensed phase as an aerosol mode's or a deck's wire names it: `solid` or `liquid`.
+#[must_use]
+fn aerosol_phase(phase: CondensedPhase) -> SubstancePhaseDto {
+    match phase {
+        CondensedPhase::Solid => SubstancePhaseDto::Solid,
+        CondensedPhase::Liquid => SubstancePhaseDto::Liquid,
+    }
+}
+
+/// An aerosol mode of an inventory whose decks are `decks`, as the wire carries it
+/// (decision-p14-t54b-open §2.2), each value the record's to the bit:
+///
+/// - its `deck` is its deck's condensate where `decks` holds a deck of it, and `null` for a mode
+///   of no deck, a rule's (the dust, the haze, a sulphate layer), whose own material the sim names
+///   as its deck: never that material, since an acid deck and a sulphate layer never share
+///   `H2SO4` on one body (P14.T24.g's case is the body's);
+/// - a member the sim does not model (its size, its column mass, its τ(550) with its basis, its
+///   temperature) is absent, never `null` or 0, and `not_modelled` gives the one reason
+///   ([`mode_not_modelled`]);
+/// - its τ(550) is in-cloud, over its coverage, as the sim computes it before the coverage applies.
+#[must_use]
+fn aerosol_mode(mode: &AerosolMode, decks: &[AerosolDeck]) -> AerosolModeDto {
+    let profile = mode.profile();
+    let depth = mode.optical_depth().ok();
+    AerosolModeDto {
+        material: key(mode.material()),
+        phase: aerosol_phase(mode.phase()),
+        deck: decks
+            .iter()
+            .any(|deck| deck.condensate() == mode.deck())
+            .then(|| key(mode.deck())),
+        shape: match mode.shape() {
+            ShapeClass::Sphere => AerosolShapeDto::Sphere,
+            ShapeClass::NonSphericalMineral => AerosolShapeDto::NonSphericalMineral,
+            ShapeClass::Crystal => AerosolShapeDto::Crystal,
+            ShapeClass::Aggregate => AerosolShapeDto::Aggregate,
+        },
+        size_distribution: mode.size().ok().map(size_distribution),
+        column_mass_kg_m2: mode.column_mass().map(KilogramsPerSquareMetre::value),
+        tau_550: depth.as_ref().map(ModeDepth::value),
+        tau_basis: depth.map(|depth| tau_basis(depth.basis())),
+        base_pa: profile.base().value(),
+        top_pa: profile.top().value(),
+        f_sed: profile.exponent(),
+        coverage: mode.coverage(),
+        temperature_k: mode.temperature().map(Kelvin::value),
+        not_modelled: mode_not_modelled(mode),
+    }
+}
+
+/// A mode's particle sizes as the wire carries them: a distribution of the volume-to-area radius
+/// by its family, or an aggregate's monomers with its prefactor.
+#[must_use]
+fn size_distribution(size: ParticleSize) -> SizeDistributionDto {
+    match size {
+        ParticleSize::Distribution(size) => {
+            let effective_radius_m = size.effective_radius().value();
+            let effective_variance = size.effective_variance();
+            match size.kind() {
+                SizeDistributionKind::Gamma => SizeDistributionDto::Gamma {
+                    effective_radius_m,
+                    effective_variance,
+                },
+                SizeDistributionKind::LogNormal => SizeDistributionDto::LogNormal {
+                    effective_radius_m,
+                    effective_variance,
+                },
+            }
+        }
+        ParticleSize::Aggregate(aggregate) => SizeDistributionDto::Aggregate {
+            monomer_radius_m: aggregate.monomer_radius().value(),
+            monomer_count: aggregate.monomers(),
+            fractal_dimension: aggregate.fractal_dimension(),
+            fractal_prefactor: aggregate.prefactor(),
+        },
+    }
+}
+
+/// What a mode's τ(550) rests on, as the wire names it: P14.T49.e's table on its basis, the
+/// geometric limit, or a rule's own column.
+#[must_use]
+fn tau_basis(basis: DepthBasis) -> AerosolTauBasisDto {
+    match basis {
+        DepthBasis::Table(ExtinctionBasis::Sphere) => AerosolTauBasisDto::Sphere,
+        DepthBasis::Table(ExtinctionBasis::PhaseTable) => AerosolTauBasisDto::PhaseTable,
+        DepthBasis::Table(ExtinctionBasis::SpheresOutsidePhaseTable) => {
+            AerosolTauBasisDto::SpheresOutsidePhaseTable
+        }
+        DepthBasis::Table(ExtinctionBasis::SphereFallback) => AerosolTauBasisDto::SphereFallback,
+        DepthBasis::GeometricLimit => AerosolTauBasisDto::GeometricLimit,
+        DepthBasis::Rule => AerosolTauBasisDto::Rule,
+    }
+}
+
+/// Why a mode's absent members are not modelled, `None` where every one is (decision-p14-t54b-open
+/// §2.2): one reason a mode, since the sim's members fail together. A τ(550) needs its size, so a
+/// size's reason is the τ's too; a rule's column mass is its τ over its mass extinction, so the
+/// optics' reason is the column's too; and an aggregate's column mass and temperature are absent
+/// for want of an aggregate's mass extinction, its τ a rule's.
+#[must_use]
+fn mode_not_modelled(mode: &AerosolMode) -> Option<AerosolNotModelledDto> {
+    if let Err(error) = mode.size() {
+        return Some(size_not_modelled(error));
+    }
+    if let Err(error) = mode.optical_depth() {
+        return Some(match error {
+            ResolveOpticalDepthError::Size(error) => size_not_modelled(error),
+            ResolveOpticalDepthError::Aerosol(error) => optics_not_modelled(error),
+        });
+    }
+    (mode.column_mass().is_none() || mode.temperature().is_none())
+        .then_some(AerosolNotModelledDto::NoMassExtinction)
+}
+
+/// Why a mode's sizes are not modelled, as the wire names it.
+#[must_use]
+fn size_not_modelled(error: SizeModeError) -> AerosolNotModelledDto {
+    match error {
+        SizeModeError::NoDensity {
+            phase, temperature, ..
+        } => AerosolNotModelledDto::NoGrainDensity {
+            phase: aerosol_phase(phase),
+            temperature_k: temperature.value(),
+        },
+        SizeModeError::NoCollisionConstants { .. } => AerosolNotModelledDto::NoCollisionConstants,
+        SizeModeError::NoCondensate => AerosolNotModelledDto::NoCondensate,
+        SizeModeError::Distribution(_) => AerosolNotModelledDto::NoSizeDistribution,
+    }
+}
+
+/// Why a mode's optics are not modelled (P14.T49.e's refusal), as the wire names it: a grain
+/// density it lacks, or optics the table does not hold (no index file in that phase and variant,
+/// a material that is not an aerosol's, a size off the grid).
+#[must_use]
+fn optics_not_modelled(error: ResolveAerosolError) -> AerosolNotModelledDto {
+    match error {
+        ResolveAerosolError::NoDensity {
+            phase, temperature, ..
+        } => AerosolNotModelledDto::NoGrainDensity {
+            phase: aerosol_phase(phase),
+            temperature_k: temperature.value(),
+        },
+        ResolveAerosolError::NotModelled { .. }
+        | ResolveAerosolError::NoFile { .. }
+        | ResolveAerosolError::OffGrid { .. }
+        | ResolveAerosolError::NonFiniteTemperature { .. } => {
+            AerosolNotModelledDto::OpticsNotModelled
+        }
+    }
+}
+
+/// A condensate deck as the wire carries it, each value the record's to the bit.
+#[must_use]
+fn condensate_deck(deck: &AerosolDeck) -> CondensateDeckDto {
+    CondensateDeckDto {
+        condensate: key(deck.condensate()),
+        phase: aerosol_phase(deck.phase()),
+        base_pa: deck.base().value(),
+        base_temperature_k: deck.base_temperature().value(),
+        top_pa: deck.top().value(),
+        vapour_mole_fraction_below: deck.vapour_below(),
+        vapour_mole_fraction_above: deck.vapour_above(),
+        f_sed: deck.sedimentation(),
+        extrapolated: deck.extrapolated(),
+    }
+}
+
+/// An absorber as the wire carries it: its column and layer, a slab's between its base and top,
+/// and a profile's from its first node to its last, each node's mixing ratio over the profile's
+/// peak, so that the peak's is 1 (the sim's nodes are relative to one another: ozone's are the
+/// AFGL template's ppmv), which the column scales.
+///
+/// # Panics
+///
+/// Never: a profile holds at least two nodes, each of a positive mixing ratio (`Absorber::profile`).
+#[must_use]
+fn absorber(absorber: &Absorber) -> AbsorberDto {
+    let (base_pa, top_pa, profile) = match absorber.layer() {
+        AbsorberLayer::Slab { base, top } => (base.value(), top.value(), None),
+        AbsorberLayer::Profile(nodes) => {
+            let (first, last) = (
+                nodes.first().expect("a profile holds at least two nodes"),
+                nodes.last().expect("a profile holds at least two nodes"),
+            );
+            let peak = nodes
+                .iter()
+                .map(AbsorberNode::relative_mixing_ratio)
+                .fold(0.0_f64, f64::max);
+            let relative = nodes
+                .iter()
+                .map(|node| MixingRatioNodeDto {
+                    pressure_pa: node.pressure().value(),
+                    relative_mixing_ratio: node.relative_mixing_ratio() / peak,
+                })
+                .collect();
+            (
+                first.pressure().value(),
+                last.pressure().value(),
+                Some(relative),
+            )
+        }
+    };
+    AbsorberDto {
+        species: key(absorber.species()),
+        column_m2: absorber.column_per_m2(),
+        base_pa,
+        top_pa,
+        profile,
     }
 }
 
@@ -1564,19 +1821,21 @@ mod tests {
     /// base lying at or beyond ice V's melting pressure (liquid under high-pressure ice, P14.T55.k's),
     /// and none is below it; an ocean rests on rock or, from that bump, on ice V. The condensates
     /// and the crust are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`,
-    /// `every_solid_surface_sends_its_record_s_crust`). The vertical structure is not modelled on
-    /// every golden body's record and absent on the wire while the sim holds the air's sections off
-    /// the record, below generator version 24 (`AIR_SECTIONS_VERSION`, whose tripwire
-    /// `the_air_sections_are_held_only_until_the_24_bump` this is the wire's half of; at the bump,
-    /// P14.T54.b.l, it is present here, `null` on an airless surface;
-    /// `a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat` tests its conversion).
+    /// `every_solid_surface_sends_its_record_s_crust`). The vertical structure and the aerosol
+    /// inventory are not modelled on every golden body's record and absent on the wire while the
+    /// sim holds the air's sections off the record, below generator version 24
+    /// (`AIR_SECTIONS_VERSION`, whose tripwire `the_air_sections_are_held_only_until_the_24_bump`
+    /// this is the wire's half of; at the bump, P14.T54.b.l, both are present here, the structure
+    /// `null` and the inventory the empty object on an airless surface;
+    /// `a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat` and
+    /// `an_aerosol_inventory_is_sent_as_the_record_holds_it` test their conversions).
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let (mut moons, mut absent) = (0, Vec::new());
         for (sim, dto, wire) in ok_surfaces() {
             assert_eq!(
-                sim.vertical_structure(),
-                RecordModelled::NotModelled,
+                (sim.vertical_structure(), sim.aerosols()),
+                (RecordModelled::NotModelled, RecordModelled::NotModelled),
                 "{}: the air's sections are held",
                 wire.id
             );
@@ -1685,6 +1944,447 @@ mod tests {
         assert_eq!(
             vertical_structure_member(RecordModelled::NotModelled),
             Modelled::NotModelled
+        );
+    }
+
+    /// An air by hand, as the record's inventory reads one (P14.T54.b.b), built through the sim's
+    /// public API since no record carries an inventory while the sim holds the air's sections off
+    /// it: its gases by registry key, surface temperature and pressure, skin, condensable,
+    /// gravity, state, outgassing and liquid-water flag, its decks covering two-thirds of the sky
+    /// and its liquids half the ground, under a Sun of 5,772 K.
+    struct HandAir {
+        gases: &'static [(&'static str, f64)],
+        surface_temperature_k: f64,
+        surface_pressure_pa: f64,
+        skin_temperature_k: f64,
+        condensable: Option<&'static str>,
+        gravity_m_s2: f64,
+        state: SurfaceState,
+        outgassing: f64,
+        liquid_water: bool,
+    }
+
+    impl HandAir {
+        /// Its inventory, `AerosolInventory::derive`'s.
+        fn inventory(&self) -> AerosolInventory {
+            use hyperion_sim::planetary::hooks::aerosols::AerosolInputs;
+            use hyperion_sim::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
+            use hyperion_sim::planetary::hooks::sulphur::RunawayDeck;
+            use hyperion_sim::units::{MetresPerSecondSquared, Pascals};
+
+            let row = |key: &str| substance::by_key(key).expect("a registry row");
+            let gases: Vec<(SubstanceId, f64)> =
+                self.gases.iter().map(|&(key, x)| (row(key), x)).collect();
+            let structure = RadiativeConvective::derive(&StructureInputs {
+                surface_temperature: Kelvin::new(self.surface_temperature_k),
+                surface_pressure: Pascals::new(self.surface_pressure_pa),
+                gases: &gases,
+                condensable: self.condensable.map(row),
+                skin_temperature: Kelvin::new(self.skin_temperature_k),
+            })
+            .expect("an air");
+            let molar_mass = gases.iter().fold(0.0, |sum, &(id, x)| {
+                sum + x * id.substance().molar_mass_g_per_mol().expect("a molar mass")
+            });
+            AerosolInventory::derive(&AerosolInputs {
+                state: self.state,
+                surface_pressure: Pascals::new(self.surface_pressure_pa),
+                gases: &gases,
+                mean_molar_mass_g_per_mol: molar_mass,
+                gravity: MetresPerSecondSquared::new(self.gravity_m_s2),
+                structure: &structure,
+                cloud_fraction: 0.67,
+                star_temperature: Some(Kelvin::new(5_772.0)),
+                surface_liquid_cover: 0.5,
+                outgassing: self.outgassing,
+                liquid_water: self.liquid_water,
+                runaway_deck: RunawayDeck::Kept,
+            })
+            .expect("an inventory")
+        }
+    }
+
+    /// An oxygenated Earth by hand: 1 bar of nitrogen and oxygen with 1.3% water at 288 K under a
+    /// 214 K skin, outgassing at Earth's rate over liquid water (a water deck, P14.T24.g's sulphate
+    /// layer, its SO₂ and ozone).
+    const EARTH_AIR: HandAir = HandAir {
+        gases: &[("N2", 0.776), ("O2", 0.21), ("H2O", 0.013), ("Ar", 0.001)],
+        surface_temperature_k: 288.0,
+        surface_pressure_pa: 1.0e5,
+        skin_temperature_k: 214.0,
+        condensable: Some("H2O"),
+        gravity_m_s2: 9.81,
+        state: SurfaceState::Temperate,
+        outgassing: 1.0,
+        liquid_water: true,
+    };
+
+    /// A Venus by hand: 92 bar of carbon dioxide with 3.5% nitrogen at 735 K under a 190 K skin,
+    /// a runaway greenhouse at P14.T24.g's Venus outgassing (its acid deck of four modes).
+    const VENUS_AIR: HandAir = HandAir {
+        gases: &[("CO2", 0.965), ("N2", 0.035)],
+        surface_temperature_k: 735.0,
+        surface_pressure_pa: 92.0e5,
+        skin_temperature_k: 190.0,
+        condensable: None,
+        gravity_m_s2: 8.87,
+        state: SurfaceState::RunawayGreenhouse,
+        outgassing: 0.363_47,
+        liquid_water: false,
+    };
+
+    /// A Titan by hand: Huygens's 1.467 bar of nitrogen with 5.65% methane at 93.65 K under a 70 K
+    /// skin (its methane haze, an aggregate).
+    const TITAN_AIR: HandAir = HandAir {
+        gases: &[("N2", 0.9435), ("CH4", 0.0565)],
+        surface_temperature_k: 93.65,
+        surface_pressure_pa: 1.467e5,
+        skin_temperature_k: 70.0,
+        condensable: Some("CH4"),
+        gravity_m_s2: 1.352,
+        state: SurfaceState::Snowball,
+        outgassing: 0.0,
+        liquid_water: false,
+    };
+
+    /// What [`assert_modes_sent`] counts: the sulphate layers, the acid deck's modes and the
+    /// hazes it met.
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct ModesSent {
+        layers: usize,
+        acid_modes: usize,
+        hazes: usize,
+    }
+
+    /// Asserts that the wire's modes `sent` are `inventory`'s, of the air `name`, each value to
+    /// the bit, `deck` by the inventory's decks, and `not_modelled` present exactly where a member
+    /// is absent; counted into `counts`.
+    fn assert_modes_sent(
+        name: &str,
+        inventory: &AerosolInventory,
+        sent: &[AerosolModeDto],
+        counts: &mut ModesSent,
+    ) {
+        let acid = substance::by_key("H2SO4").expect("a registry row");
+        let bits = |value: Option<f64>| value.map(f64::to_bits);
+        assert_eq!(sent.len(), inventory.modes().len(), "{name}");
+        for (sent, mode) in sent.iter().zip(inventory.modes()) {
+            assert_eq!(sent.material, key(mode.material()), "{name}");
+            let listed = inventory
+                .decks()
+                .iter()
+                .any(|deck| deck.condensate() == mode.deck());
+            assert_eq!(sent.deck, listed.then(|| key(mode.deck())), "{name}");
+            assert_eq!(
+                bits(sent.column_mass_kg_m2),
+                bits(mode.column_mass().map(KilogramsPerSquareMetre::value)),
+                "{name}"
+            );
+            assert_eq!(
+                bits(sent.tau_550),
+                bits(mode.optical_depth().ok().as_ref().map(ModeDepth::value)),
+                "{name}"
+            );
+            assert_eq!(sent.tau_550.is_some(), sent.tau_basis.is_some(), "{name}");
+            assert_eq!(
+                bits(sent.temperature_k),
+                bits(mode.temperature().map(Kelvin::value)),
+                "{name}"
+            );
+            assert_eq!(sent.coverage.to_bits(), mode.coverage().to_bits(), "{name}");
+            let profile = mode.profile();
+            assert_eq!(
+                (
+                    sent.base_pa.to_bits(),
+                    sent.top_pa.to_bits(),
+                    sent.f_sed.to_bits()
+                ),
+                (
+                    profile.base().value().to_bits(),
+                    profile.top().value().to_bits(),
+                    profile.exponent().to_bits()
+                ),
+                "{name}"
+            );
+            let all = sent.size_distribution.is_some()
+                && sent.column_mass_kg_m2.is_some()
+                && sent.tau_550.is_some()
+                && sent.temperature_k.is_some();
+            assert_eq!(sent.not_modelled.is_none(), all, "{name}: {sent:?}");
+            if mode.deck() == acid {
+                if listed {
+                    counts.acid_modes += 1;
+                } else {
+                    counts.layers += 1;
+                }
+            }
+            if sent.shape == AerosolShapeDto::Aggregate {
+                assert_eq!(
+                    (sent.deck.as_ref(), sent.tau_basis, sent.not_modelled),
+                    (
+                        None,
+                        Some(AerosolTauBasisDto::Rule),
+                        Some(AerosolNotModelledDto::NoMassExtinction)
+                    ),
+                    "{name}"
+                );
+                counts.hazes += 1;
+            }
+        }
+    }
+
+    /// Asserts that the wire's absorbers `sent` are `absorbers`, of the air `name`: each column to
+    /// the bit, a slab's layer, and a profile's nodes at their pressures, each mixing ratio over
+    /// the peak's, the peak's 1, the layer from the first node to the last.
+    fn assert_absorbers_sent(name: &str, absorbers: &[Absorber], sent: &[AbsorberDto]) {
+        assert_eq!(sent.len(), absorbers.len(), "{name}");
+        for (sent, absorber) in sent.iter().zip(absorbers) {
+            assert_eq!(sent.species, key(absorber.species()), "{name}");
+            assert_eq!(sent.column_m2.to_bits(), absorber.column_per_m2().to_bits());
+            match (absorber.layer(), &sent.profile) {
+                (AbsorberLayer::Slab { base, top }, None) => assert_eq!(
+                    (sent.base_pa.to_bits(), sent.top_pa.to_bits()),
+                    (base.value().to_bits(), top.value().to_bits())
+                ),
+                (AbsorberLayer::Profile(nodes), Some(profile)) => {
+                    assert_eq!(profile.len(), nodes.len(), "{name}");
+                    let peak = profile
+                        .iter()
+                        .map(|node| node.relative_mixing_ratio)
+                        .fold(0.0_f64, f64::max);
+                    assert_eq!(peak.to_bits(), 1.0_f64.to_bits(), "{name}");
+                    for (node, held) in profile.iter().zip(nodes) {
+                        assert_eq!(
+                            node.pressure_pa.to_bits(),
+                            held.pressure().value().to_bits()
+                        );
+                        assert!(
+                            node.relative_mixing_ratio > 0.0 && node.relative_mixing_ratio <= 1.0,
+                            "{name}: {node:?}"
+                        );
+                    }
+                    assert_eq!(
+                        (sent.base_pa, sent.top_pa),
+                        (
+                            profile[0].pressure_pa,
+                            profile[profile.len() - 1].pressure_pa
+                        )
+                    );
+                }
+                (layer, profile) => panic!("{name}: {layer:?} sent as {profile:?}"),
+            }
+        }
+    }
+
+    /// P14.T54.b.b (decision-p14-t54b-open §2.2): an inventory is sent as the record holds it, each
+    /// value to the bit and every list in the record's order: an oxygenated Earth's, a Venus's and
+    /// a Titan's by hand. A mode's `deck` is its deck's condensate where the inventory lists a deck
+    /// of it, and `null` for a rule's mode (the sulphate layer, the haze), never the material the
+    /// sim names as its deck; a member not modelled is absent with the one reason (the haze's
+    /// column and temperature, `no_mass_extinction`); a profile's mixing ratios are over its peak,
+    /// 1 at the peak; the condensables not formed carry their reasons (the bulk N₂ and CO₂).
+    #[test]
+    fn an_aerosol_inventory_is_sent_as_the_record_holds_it() {
+        let mut counts = ModesSent::default();
+        for (name, air) in [
+            ("Earth", &EARTH_AIR),
+            ("Venus", &VENUS_AIR),
+            ("Titan", &TITAN_AIR),
+        ] {
+            let inventory = air.inventory();
+            let dto = aerosol_inventory(&inventory);
+            assert_modes_sent(name, &inventory, &dto.modes, &mut counts);
+            assert_absorbers_sent(name, inventory.absorbers(), &dto.absorbers);
+            assert_eq!(dto.decks.len(), inventory.decks().len(), "{name}");
+            for (sent, deck) in dto.decks.iter().zip(inventory.decks()) {
+                assert_eq!(
+                    (
+                        sent.condensate.as_str(),
+                        sent.base_pa.to_bits(),
+                        sent.base_temperature_k.to_bits(),
+                        sent.top_pa.to_bits(),
+                        sent.vapour_mole_fraction_below.to_bits(),
+                        sent.vapour_mole_fraction_above.to_bits(),
+                        sent.f_sed.to_bits(),
+                        sent.extrapolated,
+                    ),
+                    (
+                        key(deck.condensate()).as_str(),
+                        deck.base().value().to_bits(),
+                        deck.base_temperature().value().to_bits(),
+                        deck.top().value().to_bits(),
+                        deck.vapour_below().to_bits(),
+                        deck.vapour_above().to_bits(),
+                        deck.sedimentation().to_bits(),
+                        deck.extrapolated(),
+                    ),
+                    "{name}"
+                );
+            }
+            let not_formed: Vec<(&str, &NotFormedReasonDto)> = dto
+                .not_formed
+                .iter()
+                .map(|entry| (entry.condensate.as_str(), &entry.reason))
+                .collect();
+            let bulk = match name {
+                "Venus" => "CO2",
+                _ => "N2",
+            };
+            assert!(
+                not_formed.contains(&(bulk, &NotFormedReasonDto::BulkGas)),
+                "{name}: {not_formed:?}"
+            );
+        }
+        assert_eq!(
+            counts,
+            ModesSent {
+                layers: 1,
+                acid_modes: 4,
+                hazes: 1
+            },
+            "the Earth's sulphate layer, the Venus's acid modes and the Titan's haze"
+        );
+    }
+
+    /// P14.T54.b.b: each of the sim's reasons a mode's size or optics are not modelled is sent as
+    /// one of the closed reason's six (decision-p14-t54b-open §2.2), a grain density's with its
+    /// phase and temperature.
+    #[test]
+    fn the_sim_s_refusals_are_sent_as_the_closed_reason() {
+        use hyperion_sim::substance::BuildSizeDistributionError;
+
+        let water = substance::by_key("H2O").expect("a registry row");
+        let key_of = water.substance().key();
+        let t = Kelvin::new(250.0);
+        assert_eq!(
+            size_not_modelled(SizeModeError::NoDensity {
+                key: key_of,
+                phase: CondensedPhase::Liquid,
+                temperature: t,
+            }),
+            AerosolNotModelledDto::NoGrainDensity {
+                phase: SubstancePhaseDto::Liquid,
+                temperature_k: 250.0,
+            }
+        );
+        assert_eq!(
+            size_not_modelled(SizeModeError::NoCollisionConstants { key: key_of }),
+            AerosolNotModelledDto::NoCollisionConstants
+        );
+        assert_eq!(
+            size_not_modelled(SizeModeError::NoCondensate),
+            AerosolNotModelledDto::NoCondensate
+        );
+        assert_eq!(
+            size_not_modelled(SizeModeError::Distribution(
+                BuildSizeDistributionError::Radius { radius_m: -1.0 }
+            )),
+            AerosolNotModelledDto::NoSizeDistribution
+        );
+        assert_eq!(
+            optics_not_modelled(ResolveAerosolError::NoDensity {
+                key: key_of,
+                phase: CondensedPhase::Solid,
+                temperature: t,
+            }),
+            AerosolNotModelledDto::NoGrainDensity {
+                phase: SubstancePhaseDto::Solid,
+                temperature_k: 250.0,
+            }
+        );
+        for refusal in [
+            ResolveAerosolError::NotModelled { key: key_of },
+            ResolveAerosolError::NoFile {
+                key: key_of,
+                phase: CondensedPhase::Solid,
+            },
+            ResolveAerosolError::OffGrid {
+                kind: SizeDistributionKind::Gamma,
+                effective_radius: Metres::new(1e-10),
+                effective_variance: 0.1,
+            },
+            ResolveAerosolError::NonFiniteTemperature {
+                temperature: Kelvin::new(f64::NAN),
+            },
+        ] {
+            assert_eq!(
+                optics_not_modelled(refusal),
+                AerosolNotModelledDto::OpticsNotModelled,
+                "{refusal:?}"
+            );
+        }
+    }
+
+    /// P14.T54.b.b: a rule's mode whose optics are not modelled (solid krypton's, which no index
+    /// file serves) is sent with neither its column mass nor its τ(550), never 0
+    /// (decision-p14-t54b-open §2.2: `of_rule`'s column is not modelled with its optics), and
+    /// with its size and temperature and the optics' reason.
+    #[test]
+    fn a_rule_s_mode_without_optics_is_sent_without_its_column_or_tau() {
+        use hyperion_sim::planetary::chem::condense::ModeProfile;
+        use hyperion_sim::substance::SizeDistribution;
+        use hyperion_sim::units::Pascals;
+
+        let krypton = substance::by_key("Kr").expect("a registry row");
+        let mode = AerosolMode::of_rule(
+            krypton,
+            CondensedPhase::Solid,
+            ShapeClass::Crystal,
+            krypton,
+            SizeDistribution::gamma(Metres::new(1e-6), 0.1).expect("a gamma distribution"),
+            0.5,
+            ModeProfile::new(Pascals::new(1e4), Pascals::new(1e3), 0.0).expect("a profile"),
+            1.0,
+            Kelvin::new(100.0),
+        )
+        .expect("a rule's mode");
+        assert!(mode.optical_depth().is_err(), "{mode:?}");
+        let sent = aerosol_mode(&mode, &[]);
+        assert_eq!(
+            (
+                sent.deck.as_ref(),
+                sent.size_distribution.is_some(),
+                sent.column_mass_kg_m2,
+                sent.tau_550,
+                sent.tau_basis,
+                sent.temperature_k,
+                sent.not_modelled,
+            ),
+            (
+                None,
+                true,
+                None,
+                None,
+                None,
+                Some(100.0),
+                Some(AerosolNotModelledDto::OpticsNotModelled)
+            )
+        );
+        let wire = serde_json::to_value(&sent).expect("a mode serialises");
+        for member in ["column_mass_kg_m2", "tau_550", "tau_basis"] {
+            assert!(wire.get(member).is_none(), "{member}: {wire}");
+        }
+    }
+
+    /// P14.T54.b.b: the empty inventory, a surface with no air's or a magma ocean's, is sent as
+    /// the empty object of four empty lists, never `null`.
+    #[test]
+    fn the_empty_inventory_is_sent_as_four_empty_lists() {
+        let empty = AerosolInventory::empty();
+        assert_eq!(
+            later(RecordModelled::Ok(&empty), |inventory| Some(
+                aerosol_inventory(inventory)
+            )),
+            Modelled::Value(AerosolInventoryDto {
+                modes: Vec::new(),
+                decks: Vec::new(),
+                absorbers: Vec::new(),
+                not_formed: Vec::new(),
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(aerosol_inventory(&empty)).expect("an inventory serialises"),
+            json!({ "modes": [], "decks": [], "absorbers": [], "not_formed": [] })
         );
     }
 

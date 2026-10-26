@@ -43,7 +43,9 @@ import type { SpinResonanceDto } from "./generated/SpinResonanceDto";
 import type { AbsorberDto } from "./generated/AbsorberDto";
 import type { AerosolInventoryDto } from "./generated/AerosolInventoryDto";
 import type { AerosolModeDto } from "./generated/AerosolModeDto";
+import type { AerosolNotModelledDto } from "./generated/AerosolNotModelledDto";
 import type { AerosolShapeDto } from "./generated/AerosolShapeDto";
+import type { AerosolTauBasisDto } from "./generated/AerosolTauBasisDto";
 import type { BiosphereDto } from "./generated/BiosphereDto";
 import type { BiosphereFluxDto } from "./generated/BiosphereFluxDto";
 import type { BodyEnvelopeDto } from "./generated/BodyEnvelopeDto";
@@ -59,6 +61,8 @@ import type { GasShareDto } from "./generated/GasShareDto";
 import type { GuillotProfileDto } from "./generated/GuillotProfileDto";
 import type { MagneticFieldClassDto } from "./generated/MagneticFieldClassDto";
 import type { MixingRatioNodeDto } from "./generated/MixingRatioNodeDto";
+import type { NotFormedCondensateDto } from "./generated/NotFormedCondensateDto";
+import type { NotFormedReasonDto } from "./generated/NotFormedReasonDto";
 import type { OceanFloorDto } from "./generated/OceanFloorDto";
 import type { ProfileNodeDto } from "./generated/ProfileNodeDto";
 import type { RadiationClassDto } from "./generated/RadiationClassDto";
@@ -252,7 +256,9 @@ export type {
   AbsorberDto,
   AerosolInventoryDto,
   AerosolModeDto,
+  AerosolNotModelledDto,
   AerosolShapeDto,
+  AerosolTauBasisDto,
   BiosphereDto,
   BiosphereFluxDto,
   BodyEnvelopeDto,
@@ -268,6 +274,8 @@ export type {
   GuillotProfileDto,
   MagneticFieldClassDto,
   MixingRatioNodeDto,
+  NotFormedCondensateDto,
+  NotFormedReasonDto,
   OceanFloorDto,
   ProfileNodeDto,
   RadiationClassDto,

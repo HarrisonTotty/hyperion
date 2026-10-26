@@ -7,9 +7,10 @@
 //! - **Modes** ([`AerosolMode`]): a material (a registry row), its phase (solid or liquid, never a
 //!   vapour), its [`ShapeClass`], the deck it belongs to by the deck's condensate, its size (a
 //!   log-normal or gamma distribution of the volume-to-area radius r = 3V ÷ 4A, or a fractal
-//!   aggregate's monomers), its column mass, its τ(550) and its vertical profile, a base and a top
-//!   pressure between which its mixing ratio goes as (p ÷ `p_base`)^f, f its deck's `f_sed` or 0
-//!   for a well-mixed layer.
+//!   aggregate's monomers), its column mass, its τ(550) (in-cloud, over its coverage) and its
+//!   vertical profile, a base and a top pressure between which its mixing ratio goes as
+//!   (p ÷ `p_base`)^f, f its deck's `f_sed` or 0 for a well-mixed layer, its coverage and the
+//!   temperature its optics were taken at.
 //! - **Decks** ([`AerosolDeck`]): each condensate's deck, its base, top, vapour below and above
 //!   (the cold trap's, which R08 reads for the vapour's column there), its `f_sed` and its τ(550),
 //!   the sum of its modes'.
@@ -86,8 +87,10 @@
 //! # Not on the record yet
 //!
 //! This module is pure: nothing on the record calls it at generator version 23
-//! (decision-bump-plan-after-22 §1.3). P14.T54.b, the 23 → 24 bump, puts its value in the record's
-//! surface section and on the wire.
+//! (decision-bump-plan-after-22 §1.3). P14.T54.b's wiring (`system/air.rs`, P14.T54.b.b) builds
+//! the record's inventory from the published surface behind its hold, `AIR_SECTIONS_VERSION`,
+//! whose held arm calls nothing here, so that the record and the wire carry it from the 23 → 24
+//! bump.
 
 use std::error::Error;
 use std::fmt;
@@ -723,6 +726,13 @@ impl fmt::Display for BuildAggregateError {
 
 impl Error for BuildAggregateError {}
 
+/// The share of its condensate's critical temperature above which a liquid mode's size and τ(550)
+/// are not modelled ([`AerosolMode::of_mode`]): 0.99, the cut to which the registry's grain-density
+/// mirror (`packages/protocol/fixtures/substances.json`) holds a phase diagram's saturated liquid,
+/// above which no table of nodes follows its fall to the critical density within 10⁻⁴
+/// (decision-p14-t54a-grain-density §2.3 and F4).
+pub const NEAR_CRITICAL_LIQUID_SHARE: f64 = 0.99;
+
 /// A mode's particle sizes.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum ParticleSize {
@@ -790,12 +800,14 @@ pub struct AerosolMode {
     optical_depth: Result<ModeDepth, ResolveOpticalDepthError>,
     profile: ModeProfile,
     coverage: f64,
+    temperature: Option<Kelvin>,
 }
 
 impl AerosolMode {
     /// The inventory's mode of a deck's or a rule's mode `mode` (P14.T52.c's), its size converted
     /// from the settling radius to the volume-to-area radius by its shape class, r = Ψ `r_V`, and
-    /// its τ(550) taken again at r at `temperature`.
+    /// its τ(550) taken again at r at `temperature`, the temperature the loop took the mode's
+    /// phase and grain density at (its deck's base's).
     ///
     /// # Errors
     ///
@@ -819,23 +831,54 @@ impl AerosolMode {
             }
             Err(_) => *mode,
         };
-        Ok(Self::of_mode(&converted, shape))
+        Ok(Self::of_mode(&converted, shape, temperature))
     }
 
     /// The inventory's mode of a mode `mode` whose size is already the volume-to-area radius (a
-    /// rule's: P14.T24.g's acid, the dust), of shape `shape`.
+    /// rule's: P14.T24.g's acid, the dust), of shape `shape`, whose phase, grain density and τ(550)
+    /// were taken at `temperature` (the caller's, the one `mode` was built at).
+    ///
+    /// A liquid mode above [`NEAR_CRITICAL_LIQUID_SHARE`] of its condensate's critical temperature
+    /// has its size and τ(550) not modelled, for want of its grain density there
+    /// ([`SizeModeError::NoDensity`]): the registry's mirror, which a client evaluates the
+    /// density from, holds no liquid above it, so the inventory publishes none it could not
+    /// (decision-p14-t54a-grain-density F4). Its column mass stays the loop's.
     #[must_use]
-    pub fn of_mode(mode: &Mode, shape: ShapeClass) -> Self {
+    pub fn of_mode(mode: &Mode, shape: ShapeClass, temperature: Kelvin) -> Self {
+        let near_critical = matches!(mode.phase(), CondensedPhase::Liquid)
+            && mode.size().is_ok()
+            && mode
+                .material()
+                .substance()
+                .phase_diagram()
+                .is_some_and(|diagram| {
+                    temperature.value()
+                        > NEAR_CRITICAL_LIQUID_SHARE * diagram.critical_temperature().value()
+                });
+        let (size, optical_depth) = if near_critical {
+            let refused = SizeModeError::NoDensity {
+                key: mode.material().substance().key(),
+                phase: mode.phase(),
+                temperature,
+            };
+            (Err(refused), Err(ResolveOpticalDepthError::Size(refused)))
+        } else {
+            (
+                mode.size().map(ParticleSize::Distribution),
+                mode.optical_depth().map(ModeDepth::from),
+            )
+        };
         Self {
             material: mode.material(),
             phase: mode.phase(),
             shape,
             deck: mode.deck(),
-            size: mode.size().map(ParticleSize::Distribution),
+            size,
             column_mass: Some(mode.column_mass()),
-            optical_depth: mode.optical_depth().map(ModeDepth::from),
+            optical_depth,
             profile: mode.profile(),
             coverage: mode.coverage(),
+            temperature: Some(temperature),
         }
     }
 
@@ -843,7 +886,8 @@ impl AerosolMode {
     /// (of the volume-to-area radius), whose τ(550) is the rule's `optical_depth`: its column mass
     /// that τ over its mass extinction at `temperature` (P14.T49.e's), so that its own τ is the
     /// rule's to rounding, between its `profile`'s base and top, covering `coverage` of the sky.
-    /// Where its optics are not modelled its column is 0 and its τ the optics' error.
+    /// Where its optics are not modelled its column mass is not modelled either (`None`, never a
+    /// placeholder 0; decision-p14-t54b-open §2.2) and its τ is the optics' error.
     ///
     /// # Errors
     ///
@@ -879,7 +923,8 @@ impl AerosolMode {
             temperature,
         )?;
         let per_kilogram = unit.optical_depth().map_or(f64::NAN, |d| d.value());
-        let mass = if per_kilogram.is_finite() && per_kilogram > 0.0 {
+        let modelled = per_kilogram.is_finite() && per_kilogram > 0.0;
+        let mass = if modelled {
             optical_depth / per_kilogram
         } else {
             0.0
@@ -894,12 +939,21 @@ impl AerosolMode {
             coverage,
             temperature,
         )?;
-        Ok(Self::of_mode(&mode, shape))
+        let built = Self::of_mode(&mode, shape, temperature);
+        Ok(if modelled {
+            built
+        } else {
+            Self {
+                column_mass: None,
+                ..built
+            }
+        })
     }
 
     /// An aggregate mode of `material`, of deck `deck`, whose τ(550) is a rule's `optical_depth`,
-    /// its column mass not modelled (P14.T49.e holds no aggregate's mass extinction), between its
-    /// `profile`'s base and top, covering `coverage` of the sky.
+    /// its column mass not modelled (P14.T49.e holds no aggregate's mass extinction), and so no
+    /// temperature its optics were taken at, between its `profile`'s base and top, covering
+    /// `coverage` of the sky.
     ///
     /// # Errors
     ///
@@ -932,6 +986,7 @@ impl AerosolMode {
             }),
             profile,
             coverage,
+            temperature: None,
         })
     }
 
@@ -970,7 +1025,9 @@ impl AerosolMode {
         self.size
     }
 
-    /// Its column mass, kg m⁻²; `None` for an aggregate, whose mass extinction is not modelled.
+    /// Its column mass, kg m⁻²; `None` where it is not modelled: for an aggregate, whose mass
+    /// extinction is not modelled, and for a rule's mode whose optics are not
+    /// ([`optical_depth`](Self::optical_depth) says why), whose τ the rule sets.
     #[must_use]
     pub const fn column_mass(&self) -> Option<KilogramsPerSquareMetre> {
         self.column_mass
@@ -991,10 +1048,20 @@ impl AerosolMode {
         self.profile
     }
 
-    /// The share of the sky it covers, 0 to 1.
+    /// The share of the sky it covers, 0 to 1. Its [`optical_depth`](Self::optical_depth) is its
+    /// column's where it lies, over the covered share (in-cloud), before the coverage applies.
     #[must_use]
     pub const fn coverage(&self) -> f64 {
         self.coverage
+    }
+
+    /// The temperature its phase, grain density and τ(550) were taken at, P14.T49.e's
+    /// `aerosol_optics`' (decision-p14-t54a-grain-density §3): a loop deck's base's, the acid
+    /// deck's base's for P14.T24.g's acid modes, the skin's for a sulphate layer and the ground's
+    /// for the dust. `None` for an aggregate, whose τ is a rule's and whose optics no table holds.
+    #[must_use]
+    pub const fn temperature(&self) -> Option<Kelvin> {
+        self.temperature
     }
 }
 

@@ -8206,9 +8206,14 @@ feeding back into p_s, T_s, the albedo or the bulk.
       switchable).
       - The MUST-FIX asserts of `brief-notes-24`, over the sample, the goldens and LOOK72, with the
         holds off in scratch.
-      - The counts (i)–(v) of decision-absurd-states-24 and decision-24-cost, and (vi) of
+      - The counts (i)–(v) of decision-absurd-states-24 and decision-24-cost, (vi) of
         decision-thick-acid-decks (every case-1 acid deck with its p_s, g, x_SO₂, Δp ÷ p_s, τ(550)
-        and column mass; the bodies at the SO₂ cap; the largest deck τ, for R08).
+        and column mass; the bodies at the SO₂ cap; the largest deck τ, for R08), and (x) of
+        decision-deep-decks-split (every envelope's refractory and salt decks below its join, with
+        τ(550), base and the τ their profiles put above 10 bar and above 1 bar; its modes with no
+        τ whose top lies above 10 bar; the largest envelope deck τ, for R08). A deck below the join
+        at τ 1 or more above 1 bar, and a mode with no τ whose top lies above 10 bar, go to main
+        by name.
       - Each hold's cost share (D5).
       - §C.7's splits, listed.
       - Per-hold attribution of every moved value: `golden_diff` after each hold's deletion, in a
@@ -29008,3 +29013,104 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       `RecordRules::air`, the Venus tripwire, `the_held_record_carries_no_structure` and the
       hold's tripwire; the server's absent-members test flips to present, `null` on an airless
       surface.
+  - _P14.T54.b.b, the aerosol and absorber inventory on the record and the wire._
+    `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3; no golden moves (`planetary_golden`,
+    `observe_in_system_golden`, `the_inventory_is_pinned` and the server's `system_bodies` and
+    `scene` pass unchanged). The rulings are decision-p14-t54b-open §2 and §3.
+    - _The member_ is `Modelled<AerosolInventory>`, `record::AerosolInventory` now the re-export of
+      `hooks::aerosols::AerosolInventory` (re-exported from `hooks`). `air::record_aerosols` builds
+      it in `published_surface`, beside the structure (`record_air_sections`, which keeps that
+      function under Clippy's line limit), behind `AIR_SECTIONS_VERSION`: `Held` computes nothing
+      and gives `NotModelled`; under `Batch` a structure computed as none (no air) gives the empty
+      inventory, a structure not modelled leaves it not modelled, and otherwise it is
+      `AerosolInventory::derive` over the published surface (`AirSurface`): the state, the
+      conditions' p_s, gases, μ and liquid-water flag, the bulk section's gravity, P14.T54.b.a's
+      structure, the figures' cloud fraction, ocean fraction (the liquids' cover, held at 1) and
+      outgassing, and the photochemistry's star. A magma ocean's is the empty inventory (the
+      inventory's own rule), never `null`, as the condensates are an empty list. A refusal is
+      `NotModelled` (none over the sample). T24.g's case is the state's until P14.T54.b.g, whose
+      `case_of` joins `AirSurface` as one more member.
+    - _The star:_ `Epoch::brightest` is the cold traps' fold with its tie rule, so their radius
+      keeps its bits; `photochemistry_temperature` gives its T_eff, `None` for a brown-dwarf slot,
+      a host kind other than `Stellar` and a star with no light (no ozone, haze or acid there).
+    - _In the pure module_ (no golden case moves): `AerosolMode` keeps `temperature()`, the
+      temperature its phase, ρ and τ were taken at (a deck's base's, the acid deck's base's, the
+      skin's for a sulphate layer, the ground's for the dust), `None` for an aggregate;
+      `of_mode` takes it. `of_rule`'s column is `None`, not 0, where its optics are not modelled.
+      **F4 refused:** a liquid mode above `NEAR_CRITICAL_LIQUID_SHARE` (0.99, the mirror's cut) of
+      its critical temperature has its size and τ `NoDensity`, its column kept.
+    - _Re-cut onto P14.T24.d with T52.d and T24.g's R3_ (16291ed8; decision-bump-plan-after-22
+      V3.7): the record passes `runaway_deck: RunawayDeck::Kept`, T24.g's case by the state as
+      before, until P14.T54.b.g; a structure of the `Envelope` variant, which no surface holds,
+      leaves the inventory not modelled; T52.d's envelope haze takes `of_mode` at the profile's
+      temperature at its base, the same it built the mode at, so F4 reaches the envelope's modes
+      too (`planetary/envelope_atmosphere` unchanged); the inventory's scan keeps T52.d's
+      `envelope_atmosphere` among its own files.
+    - _The wire_ (shapes final, no type already sent touched, no unknown-key refusal):
+      `AerosolModeDto` gains `coverage`, `tau_basis` (`AerosolTauBasisDto`'s six strings),
+      `temperature_k` and `not_modelled` (`AerosolNotModelledDto`, tagged by `type`: the six
+      reasons, `no_grain_density` with its phase and temperature); `size_distribution`,
+      `column_mass_kg_m2`, `tau_550`, `tau_basis` and `temperature_k` are absent, never `null` or
+      0, where not modelled, one reason a mode (the DTO's table says which members each reason
+      leaves out); `tau_550` is stated in-cloud, over the covered share; `f_sed`'s doc carries
+      decision-deep-decks-split §4's sentence. `deck` is the mode's deck's condensate only where
+      `decks()` lists a deck of it, else `null` (the dust, the haze, a sulphate layer).
+      `CondensateDeckDto` gains its phase, base, base temperature, top, vapour below, `f_sed` and
+      `extrapolated`; `AerosolInventoryDto` gains `not_formed` (`NotFormedCondensateDto`,
+      `bulk_gas` or `displaced { by }`). An absorber's profile is sent over its peak, 1 there. The
+      fixture's Jupiter deck (an envelope mode) gains `tau_basis`, `coverage` and
+      `temperature_k`; no `aerosols` key, so R08.T19's held τ row stands.
+    - _The client:_ `model.ts`'s mode holds its size, column, optical depth (with its basis) and
+      temperature as `Pending`, its coverage and its `AerosolNotModelled` reason; decks their new
+      members; the inventory `notFormed`. `bodiesWire.ts` refuses ("aerosol mode unusable") a mode
+      whose absent members are not its reason's, a τ without its basis, a coverage outside 0–1,
+      and a mode naming a deck the inventory does not list; a member sent `null` reads as not
+      modelled.
+    - _The scans_ (decision-p14-t54b-open §3.3): `nothing_on_the_record_calls_the_inventory_yet`
+      holds `HELD` = `system/air.rs` and `system/air/tests.rs` (each must name
+      `AIR_SECTIONS_VERSION` in code), its patterns adding `AerosolInventory::derive` and
+      `AerosolInputs` and its declarations the `hooks` re-export;
+      `nothing_on_the_record_calls_the_condensation_yet` holds `HELD` = `system/air.rs`;
+      `substance::aerosol`'s is unchanged (no record file names its API) but its `HELD` text.
+    - _Figures under the batch_ (the first 40 whole systems at the epoch): 70 airs carry 104
+      decks, 241 modes, 73 absorbers and 70 condensables not formed; 530 surfaces the empty
+      inventory; none refused. 29 acid decks (four modes each, inside their decks), 31 sulphate
+      layers, never an acid deck and a layer on one body; 15 hazes; 4 dusts, τ 0.0043–0.50 at
+      0.0010–0.080 bar, each the rule's to 10⁻¹². Modes by deck: Ar 4, CH₄ 9, CO₂ 14, H₂O 31,
+      H₂SO₄ 147, N₂ 2, O₂ 3, SO₂ 12, `mars_dust` 4, `tholin` 15.
+    - _F4 and F1:_ 165 liquid modes (152 of rows with no phase diagram, the acid's); two refused,
+      nitrogen decks whose base lies at nitrogen's critical 126.192 K (`02001b2ca0000000.0400`,
+      `02001b2c9ffe0000.0500`), the modelled nearest O₂ at 0.867 T_c. F1's choice is the loop's
+      phase rule: a deck takes its base's phase, so a supercooled droplet forms as ice and a liquid
+      deck that rises through its freezing level stays liquid at its base's ρ. The sample holds no
+      liquid water mode; the table's Earth's one has its top below the triple point; 33 water-ice
+      modes.
+    - _The table under the switch:_ Venus (O 0.363, SO₂ 209 ppm) an acid deck from 1.2559 bar at
+      371.7 K to 0.0507 bar, four modes, τ(550) 52.88; Earth a water deck whose vapour below is its
+      air's water to 10⁻¹², and a sulphate layer; Mars (0.1099 bar of N₂) no dust (P14.T53.c's);
+      Titan the haze, an aggregate at τ(550) 8.016 with no column or temperature, and a methane
+      deck of in-cloud τ 1.464 over the stand-in cover 0.670: a disc mean of 0.981, against
+      Huygens's "no optically thick cloud" (Tomasko et al. 2005) and a cover of about 1% (a disc
+      mean of 0.015), T24.c's recorded stand-in.
+    - _Continuity:_ in time, 129 surfaces over the clock window's 1,000 years keep their decks,
+      modes and absorbers, their largest move 6.5 × 10⁻⁵ against the inputs' 1.2 × 10⁻⁵; across
+      state changes, 23 airs flipped between temperate and snowball keep every non-sulphur member
+      to the bit, and as runaways their decks and every mode's column and profile, the sizes of one
+      (`02000b2ca0000001.0d02`, a 0.0014-bar, 47 K air whose cycling SO₂ becomes its most abundant
+      gas) moving with the viscosity. The same seed twice: 23 structures and 26 decks to the bit.
+    - _Cost,_ not measured (D5's probe at the bless): two loop derivations an air, about 0.1 ms
+      with no deck to 2–3 ms for deep decks (the design's estimate). `hooks_at` pays it again for
+      the body and its primary, whose records it builds and drops; nothing under `Held`.
+    - _Recorded, not built:_ the near-critical nitrogen decks (the loop's law at its critical
+      point, P14.T52.c's); a runaway flipped onto a thin air resizes through its SO₂ (bounded by
+      T24.g's SO₂ cap with P14.T24.d's batch, and P14.T54.b.g's `case_of`).
+    - _Tests:_ the tripwire with the aerosols `NotModelled` on every golden surface and the
+      table's Venus's `Held` arm; the table's inventories the derivation's, empty without air
+      and for a magma ocean; the table's Venus, Earth, Mars and Titan; every air's inventory over
+      the sample the derivation's of its record's own members; the modes' decks, coverage and
+      temperatures; the dust's rule; F4 and F1; continuity in time and across state changes; the
+      held record carries neither member; the same seed twice; a near-critical liquid's refusal;
+      the scans' hold check. The protocol's wire forms of each new type and enum string and
+      absent members; the server's conversion of an Earth's, a Venus's and a Titan's inventory by
+      hand to the bit, the reasons' mapping, a rule's mode without optics, the empty inventory, and
+      the aerosols absent on every golden surface; the client's decoding and its refusals.

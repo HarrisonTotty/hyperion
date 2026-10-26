@@ -478,8 +478,80 @@ pub enum SizeDistributionDto {
     },
 }
 
+/// What an aerosol mode's `tau_550` rests on (plan 14, P14.T24.c's `DepthBasis` with P14.T49.e's
+/// extinction basis). Closed: every variant is in the type from the first build that sends a mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AerosolTauBasisDto {
+    /// P14.T49.e's mass extinction times the column mass, of Mie spheres at the index file's
+    /// refractive index: a `sphere` file, its own shape class.
+    Sphere,
+    /// P14.T49.e's mass extinction from the index file's own phase table (rendering plan R08.T5.c's
+    /// or T5.d's), the mode's effective radius within the table's sizes.
+    PhaseTable,
+    /// P14.T49.e's mass extinction for a phase-table file's mode whose effective radius lies
+    /// outside its table's sizes, where the particles are taken as spheres.
+    SpheresOutsidePhaseTable,
+    /// P14.T49.e's mass extinction for a `nonSphericalMineral` or `crystal` file with no phase table
+    /// of its own: the spheres of its volume-to-area radius, a labelled fallback.
+    SphereFallback,
+    /// Ackerman and Marley's (2001) geometric scatterers, `Q_ext` = 2, for a mode larger than the
+    /// extinction table's grid.
+    GeometricLimit,
+    /// A rule's own column, calibrated on a measured one (the methane haze's on Titan's), with no
+    /// mass extinction behind it.
+    Rule,
+}
+
+/// Why members of an aerosol mode are not modelled (plan 14, P14.T24.c with P14.T52.c's sizes and
+/// P14.T49.e's optics; decision-p14-t54b-open §2.2): one reason a mode, which says which members
+/// are absent. Tagged by `type`. Closed: every variant is in the type from the first build that
+/// sends a mode.
+///
+/// | Reason | `size_distribution` | `column_mass_kg_m2` | `tau_550` | `temperature_k` |
+/// | --- | --- | --- | --- | --- |
+/// | `no_grain_density` | either | either | absent | present |
+/// | `no_collision_constants`, `no_condensate`, `no_size_distribution` | absent | present | absent | present |
+/// | `optics_not_modelled` | present | either | absent | present |
+/// | `no_mass_extinction` | present | absent | present | absent |
+///
+/// A rule's mode whose optics are not modelled has no column mass either: its τ(550) is the rule's
+/// and its column that τ over a mass extinction it does not have.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum AerosolNotModelledDto {
+    /// The material has no grain density in the mode's phase at the temperature the generator took
+    /// it at, so its sizes (a deck's settling) or its optics are not modelled.
+    NoGrainDensity {
+        /// The phase asked for: `solid` or `liquid`.
+        phase: SubstancePhaseDto,
+        /// The temperature asked for, K, positive.
+        temperature_k: f64,
+    },
+    /// The air's most abundant gas has no collision constants, so its viscosity, and the deck's
+    /// fall speed and sizes, are not modelled.
+    NoCollisionConstants,
+    /// The deck's column holds no condensate at any level of the generator's scan (a deck thinner
+    /// than a step), so its sizes are not modelled.
+    NoCondensate,
+    /// The deck's levels give no size distribution: an effective radius that is not finite and
+    /// positive.
+    NoSizeDistribution,
+    /// The generator's optics (P14.T49.e) do not cover the mode's material, phase, variant or size:
+    /// no index file, or a size off the extinction table's grid.
+    OpticsNotModelled,
+    /// P14.T49.e holds no aggregate's mass extinction: an aggregate's column mass is not modelled,
+    /// and no optics were taken at a temperature, its τ(550) being a rule's.
+    NoMassExtinction,
+}
+
 /// One aerosol mode: a cloud's, a haze's or a dust layer's particles of one material and phase
 /// (plan 14, P14.T24.c).
+///
+/// A member the generator does not model is absent, never `null` and never 0, and
+/// `not_modelled` says why ([`AerosolNotModelledDto`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AerosolModeDto {
@@ -488,35 +560,112 @@ pub struct AerosolModeDto {
     /// Its phase: `solid` or `liquid`, never `vapour` or `supercritical`.
     pub phase: SubstancePhaseDto,
     /// The deck it belongs to, by the deck's condensate key, so that a deck of several modes is
-    /// one deck to its readers; `null` for a mode of no deck, as dust or a haze.
+    /// one deck to its readers: in a surface's inventory, one of its `decks`. `null` for a mode of
+    /// no deck: the dust, a haze, and a sulphate layer, which names no deck though its material,
+    /// sulphuric acid, condenses as a deck on another world.
     pub deck: Option<String>,
     /// Its shape class.
     pub shape: AerosolShapeDto,
-    /// Its size distribution.
-    pub size_distribution: SizeDistributionDto,
-    /// Its column mass, kg m⁻², not negative.
-    pub column_mass_kg_m2: f64,
-    /// Its column optical depth at 550 nm, dimensionless and not negative.
-    pub tau_550: f64,
+    /// Its size distribution; absent where it is not modelled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub size_distribution: Option<SizeDistributionDto>,
+    /// Its column mass, kg m⁻², not negative; absent where it is not modelled (an aggregate's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub column_mass_kg_m2: Option<f64>,
+    /// Its vertical column optical depth at 550 nm where it lies, over the share of the sky it
+    /// covers (in-cloud, `coverage` not applied), dimensionless and not negative; absent where it
+    /// is not modelled, with `tau_basis`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tau_550: Option<f64>,
+    /// What `tau_550` rests on, present exactly when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tau_basis: Option<AerosolTauBasisDto>,
     /// The pressure of its base, Pa, positive and at least `top_pa`.
     pub base_pa: f64,
     /// The pressure of its top, Pa, positive.
     pub top_pa: f64,
     /// The exponent f of its mixing ratio, which goes as (p ÷ `p_base`)^f between its base and
     /// top: its deck's `f_sed` (Ackerman and Marley 2001), or 0 for a well-mixed layer; not
-    /// negative.
+    /// negative. Its `tau_550` is spread by the same profile, so that the share of it above a
+    /// level p between its top and base is ((p ÷ `base_pa`)^(f+1) − (`top_pa` ÷
+    /// `base_pa`)^(f+1)) ÷ (1 − (`top_pa` ÷ `base_pa`)^(f+1)): plan 08 cuts a mode at a gas
+    /// envelope's floor by it.
     pub f_sed: f64,
+    /// The share of the sky it covers, in `[0, 1]`: a deck's mode the body's cloud fraction
+    /// (P14.T51.b's), a rule's mode (the dust, a haze, a sulphate layer) the whole sky.
+    pub coverage: f64,
+    /// The temperature its phase, grain density and τ(550) were taken at, K, positive
+    /// (decision-p14-t54a-grain-density §3): a deck's base's, a sulphate layer's at the skin, the
+    /// dust's at the ground. Absent where no optics were taken (an aggregate's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub temperature_k: Option<f64>,
+    /// Why its absent members are not modelled; absent where every member is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub not_modelled: Option<AerosolNotModelledDto>,
 }
 
-/// A condensate deck: the condensate whose modes it holds, and its vapour above it (plan 14,
-/// P14.T24.c).
+/// A condensate deck: the condensate whose modes it holds, where it lies, and its vapour below
+/// and above it (plan 14, P14.T24.c with P14.T52.c's loop and P14.T24.g's acid).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CondensateDeckDto {
     /// The condensate: a key of the substance registry, which its modes' `deck` names.
     pub condensate: String,
+    /// Its phase at its base: `solid` or `liquid`. A deck keeps the phase it forms in, so that a
+    /// liquid deck that rises above its freezing level stays liquid.
+    pub phase: SubstancePhaseDto,
+    /// The pressure of its base, Pa, positive and at least `top_pa`.
+    pub base_pa: f64,
+    /// The temperature at its base on the air's vertical structure, K, positive.
+    pub base_temperature_k: f64,
+    /// The pressure of its top, Pa, positive.
+    pub top_pa: f64,
+    /// Its limiting vapour's mole fraction below the deck, in `[0, 1]`: the air's at the ground,
+    /// less what a deck below takes of it.
+    pub vapour_mole_fraction_below: f64,
     /// The vapour's mole fraction above the deck, the cold trap's, in `[0, 1]`.
     pub vapour_mole_fraction_above: f64,
+    /// Its `f_sed` (Ackerman and Marley 2001), its modes' exponent, not negative: 0 for a deck of
+    /// well-mixed modes (P14.T24.g's acid).
+    pub f_sed: f64,
+    /// Whether the saturation law that placed its base is applied outside what it was fitted over.
+    pub extrapolated: bool,
+}
+
+/// Why a condensable whose vapour the air holds forms no deck (plan 14, P14.T52.c's
+/// `NotFormed`). Tagged by `type`. Closed: every variant is in the type from the first build that
+/// sends one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NotFormedReasonDto {
+    /// Its vapour holds at least half of the air (a Mars's or a Venus's carbon dioxide, a Triton's
+    /// nitrogen): its condensation sets the air's own profile, which the decks' trace balance does
+    /// not model.
+    BulkGas,
+    /// Its law gives no deck of an air that holds the vapour of the condensate `by`, which takes
+    /// its limiting vapour first (quartz where enstatite can take its silicon).
+    Displaced {
+        /// The condensate that displaces it: a key of the substance registry.
+        by: String,
+    },
+}
+
+/// A condensable the inventory labels rather than traps as a deck, with why (plan 14,
+/// P14.T52.c).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NotFormedCondensateDto {
+    /// The condensate: a key of the substance registry.
+    pub condensate: String,
+    /// Why it forms no deck.
+    pub reason: NotFormedReasonDto,
 }
 
 /// One node of an absorber's profile.
@@ -547,17 +696,23 @@ pub struct AbsorberDto {
     pub profile: Option<Vec<MixingRatioNodeDto>>,
 }
 
-/// A surface air's aerosol and absorber inventory (plan 14, P14.T24.c with T24.g). Absent from the
-/// wire until P14.T24.c, which may reshape it.
+/// A surface air's aerosol and absorber inventory (plan 14, P14.T24.c with T24.g). Sent from
+/// P14.T54.b's bump at generator version 24, and absent from a server whose generator does not
+/// model it; its shape is P14.T54.b.b's (decision-p14-t54b-open §2). A surface with no air, and a
+/// magma ocean, has the empty inventory: every list empty, never `null`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AerosolInventoryDto {
-    /// The modes, every cloud's, haze's and dust layer's.
+    /// The modes, every cloud's, haze's and dust layer's: each deck's, in the decks' order, then
+    /// the sulphate layer's, the haze's and the dust's.
     pub modes: Vec<AerosolModeDto>,
-    /// The condensate decks, which the modes name.
+    /// The condensate decks, hottest base first, which the modes name.
     pub decks: Vec<CondensateDeckDto>,
     /// The absorbers, in registry order.
     pub absorbers: Vec<AbsorberDto>,
+    /// The condensables whose vapour the air holds that form no deck, each with why, in registry
+    /// order.
+    pub not_formed: Vec<NotFormedCondensateDto>,
 }
 
 /// One condensate at a surface (plan 14, P14.T51.a's partition): a substance in one phase, with
@@ -819,7 +974,10 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<VerticalStructureDto>>", optional)]
     pub vertical_structure: Modelled<VerticalStructureDto>,
-    /// The aerosol and absorber inventory (P14.T24.c); absent until that task.
+    /// The aerosol and absorber inventory of the surface's air (P14.T24.c with T24.g): the empty
+    /// inventory, never `null`, for a surface with no air (an airless body's, a melt's whose
+    /// volatiles are gone) and for a magma ocean, and absent from a server whose generator does not
+    /// model it, every one before P14.T54.b's bump at generator version 24.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<AerosolInventoryDto>>", optional)]
     pub aerosols: Modelled<AerosolInventoryDto>,
@@ -1242,22 +1400,27 @@ pub(crate) mod tests {
         }
     }
 
-    /// The ammonia-ice deck of [`jupiter_envelope`].
+    /// The ammonia-ice deck of [`jupiter_envelope`], illustrative, over the whole sky at its base's
+    /// temperature on the envelope's adiabat (about 149 K at 0.7 bar).
     pub(crate) fn ammonia_deck() -> AerosolModeDto {
         AerosolModeDto {
             material: "NH3".to_owned(),
             phase: SubstancePhaseDto::Solid,
             deck: Some("NH3".to_owned()),
             shape: AerosolShapeDto::Crystal,
-            size_distribution: SizeDistributionDto::Gamma {
+            size_distribution: Some(SizeDistributionDto::Gamma {
                 effective_radius_m: 1e-6,
                 effective_variance: 0.1,
-            },
-            column_mass_kg_m2: 0.012,
-            tau_550: 8.0,
+            }),
+            column_mass_kg_m2: Some(0.012),
+            tau_550: Some(8.0),
+            tau_basis: Some(AerosolTauBasisDto::PhaseTable),
             base_pa: 7e4,
             top_pa: 4.5e4,
             f_sed: 2.0,
+            coverage: 1.0,
+            temperature_k: Some(149.1),
+            not_modelled: None,
         }
     }
 
@@ -1274,9 +1437,12 @@ pub(crate) mod tests {
             },
             "column_mass_kg_m2": 0.012,
             "tau_550": 8.0,
+            "tau_basis": "phase_table",
             "base_pa": 7e4,
             "top_pa": 4.5e4,
             "f_sed": 2.0,
+            "coverage": 1.0,
+            "temperature_k": 149.1,
         })
     }
 
@@ -1417,48 +1583,25 @@ pub(crate) mod tests {
         })
     }
 
-    /// An aerosol inventory, illustrative: a water cloud of droplets and crystals, a Titan-like
-    /// haze of aggregates, and ozone on a profile beside a sulphur-dioxide slab.
+    /// An aerosol inventory, illustrative: its modes ([`inventory_modes`]) over its decks
+    /// ([`inventory_decks`]), ozone on a profile beside a sulphur-dioxide slab, and two
+    /// condensables not formed.
     fn inventory() -> AerosolInventoryDto {
         AerosolInventoryDto {
-            modes: vec![
-                AerosolModeDto {
-                    material: "H2O".to_owned(),
-                    phase: SubstancePhaseDto::Liquid,
-                    deck: Some("H2O".to_owned()),
-                    shape: AerosolShapeDto::Sphere,
-                    size_distribution: SizeDistributionDto::LogNormal {
-                        effective_radius_m: 1e-5,
-                        effective_variance: 0.1,
-                    },
-                    column_mass_kg_m2: 0.05,
-                    tau_550: 7.5,
-                    base_pa: 85_000.0,
-                    top_pa: 60_000.0,
-                    f_sed: 1.0,
+            modes: inventory_modes(),
+            decks: inventory_decks(),
+            not_formed: vec![
+                NotFormedCondensateDto {
+                    condensate: "CO2".to_owned(),
+                    reason: NotFormedReasonDto::BulkGas,
                 },
-                AerosolModeDto {
-                    material: "tholin".to_owned(),
-                    phase: SubstancePhaseDto::Solid,
-                    deck: None,
-                    shape: AerosolShapeDto::Aggregate,
-                    size_distribution: SizeDistributionDto::Aggregate {
-                        monomer_radius_m: 5e-8,
-                        monomer_count: 3_000.0,
-                        fractal_dimension: 2.0,
-                        fractal_prefactor: 1.666_666_666_666_666_7,
+                NotFormedCondensateDto {
+                    condensate: "SiO2".to_owned(),
+                    reason: NotFormedReasonDto::Displaced {
+                        by: "MgSiO3".to_owned(),
                     },
-                    column_mass_kg_m2: 0.003,
-                    tau_550: 0.4,
-                    base_pa: 20_000.0,
-                    top_pa: 10.0,
-                    f_sed: 0.0,
                 },
             ],
-            decks: vec![CondensateDeckDto {
-                condensate: "H2O".to_owned(),
-                vapour_mole_fraction_above: 3e-6,
-            }],
             absorbers: vec![
                 AbsorberDto {
                     species: "O3".to_owned(),
@@ -1491,45 +1634,132 @@ pub(crate) mod tests {
         }
     }
 
+    /// The modes of [`inventory`]: a water cloud of droplets, a Titan-like haze of aggregates (its
+    /// column mass and temperature not modelled) and a hydrogen sulphide ice deck whose size and τ
+    /// are not modelled for want of its solid's grain density.
+    fn inventory_modes() -> Vec<AerosolModeDto> {
+        vec![
+            AerosolModeDto {
+                material: "H2O".to_owned(),
+                phase: SubstancePhaseDto::Liquid,
+                deck: Some("H2O".to_owned()),
+                shape: AerosolShapeDto::Sphere,
+                size_distribution: Some(SizeDistributionDto::LogNormal {
+                    effective_radius_m: 1e-5,
+                    effective_variance: 0.1,
+                }),
+                column_mass_kg_m2: Some(0.05),
+                tau_550: Some(7.5),
+                tau_basis: Some(AerosolTauBasisDto::Sphere),
+                base_pa: 85_000.0,
+                top_pa: 60_000.0,
+                f_sed: 1.0,
+                coverage: 0.67,
+                temperature_k: Some(281.5),
+                not_modelled: None,
+            },
+            AerosolModeDto {
+                material: "tholin".to_owned(),
+                phase: SubstancePhaseDto::Solid,
+                deck: None,
+                shape: AerosolShapeDto::Aggregate,
+                size_distribution: Some(SizeDistributionDto::Aggregate {
+                    monomer_radius_m: 5e-8,
+                    monomer_count: 3_000.0,
+                    fractal_dimension: 2.0,
+                    fractal_prefactor: 1.666_666_666_666_666_7,
+                }),
+                column_mass_kg_m2: None,
+                tau_550: Some(0.4),
+                tau_basis: Some(AerosolTauBasisDto::Rule),
+                base_pa: 20_000.0,
+                top_pa: 10.0,
+                f_sed: 0.0,
+                coverage: 1.0,
+                temperature_k: None,
+                not_modelled: Some(AerosolNotModelledDto::NoMassExtinction),
+            },
+            AerosolModeDto {
+                material: "H2S".to_owned(),
+                phase: SubstancePhaseDto::Solid,
+                deck: Some("H2S".to_owned()),
+                shape: AerosolShapeDto::Crystal,
+                size_distribution: None,
+                column_mass_kg_m2: Some(1e-4),
+                tau_550: None,
+                tau_basis: None,
+                base_pa: 9_000.0,
+                top_pa: 4_000.0,
+                f_sed: 0.5,
+                coverage: 0.67,
+                temperature_k: Some(180.0),
+                not_modelled: Some(AerosolNotModelledDto::NoGrainDensity {
+                    phase: SubstancePhaseDto::Solid,
+                    temperature_k: 180.0,
+                }),
+            },
+        ]
+    }
+
+    /// The decks of [`inventory`], which its modes name.
+    fn inventory_decks() -> Vec<CondensateDeckDto> {
+        vec![
+            CondensateDeckDto {
+                condensate: "H2O".to_owned(),
+                phase: SubstancePhaseDto::Liquid,
+                base_pa: 85_000.0,
+                base_temperature_k: 281.5,
+                top_pa: 60_000.0,
+                vapour_mole_fraction_below: 0.0131,
+                vapour_mole_fraction_above: 3e-6,
+                f_sed: 1.0,
+                extrapolated: false,
+            },
+            CondensateDeckDto {
+                condensate: "H2S".to_owned(),
+                phase: SubstancePhaseDto::Solid,
+                base_pa: 9_000.0,
+                base_temperature_k: 180.0,
+                top_pa: 4_000.0,
+                vapour_mole_fraction_below: 2e-6,
+                vapour_mole_fraction_above: 1e-8,
+                f_sed: 0.5,
+                extrapolated: true,
+            },
+        ]
+    }
+
     fn inventory_json() -> Value {
         json!({
-            "modes": [
+            "modes": inventory_modes_json(),
+            "decks": [
                 {
-                    "material": "H2O",
+                    "condensate": "H2O",
                     "phase": "liquid",
-                    "deck": "H2O",
-                    "shape": "sphere",
-                    "size_distribution": {
-                        "type": "log_normal",
-                        "effective_radius_m": 1e-5,
-                        "effective_variance": 0.1,
-                    },
-                    "column_mass_kg_m2": 0.05,
-                    "tau_550": 7.5,
                     "base_pa": 85_000.0,
+                    "base_temperature_k": 281.5,
                     "top_pa": 60_000.0,
+                    "vapour_mole_fraction_below": 0.0131,
+                    "vapour_mole_fraction_above": 3e-6,
                     "f_sed": 1.0,
+                    "extrapolated": false,
                 },
                 {
-                    "material": "tholin",
+                    "condensate": "H2S",
                     "phase": "solid",
-                    "deck": null,
-                    "shape": "aggregate",
-                    "size_distribution": {
-                        "type": "aggregate",
-                        "monomer_radius_m": 5e-8,
-                        "monomer_count": 3_000.0,
-                        "fractal_dimension": 2.0,
-                        "fractal_prefactor": 1.666_666_666_666_666_7,
-                    },
-                    "column_mass_kg_m2": 0.003,
-                    "tau_550": 0.4,
-                    "base_pa": 20_000.0,
-                    "top_pa": 10.0,
-                    "f_sed": 0.0,
+                    "base_pa": 9_000.0,
+                    "base_temperature_k": 180.0,
+                    "top_pa": 4_000.0,
+                    "vapour_mole_fraction_below": 2e-6,
+                    "vapour_mole_fraction_above": 1e-8,
+                    "f_sed": 0.5,
+                    "extrapolated": true,
                 },
             ],
-            "decks": [{ "condensate": "H2O", "vapour_mole_fraction_above": 3e-6 }],
+            "not_formed": [
+                { "condensate": "CO2", "reason": { "type": "bulk_gas" } },
+                { "condensate": "SiO2", "reason": { "type": "displaced", "by": "MgSiO3" } },
+            ],
             "absorbers": [
                 {
                     "species": "O3",
@@ -1551,6 +1781,68 @@ pub(crate) mod tests {
                 },
             ],
         })
+    }
+
+    /// The wire form of [`inventory_modes`].
+    fn inventory_modes_json() -> Value {
+        json!([
+                {
+                    "material": "H2O",
+                    "phase": "liquid",
+                    "deck": "H2O",
+                    "shape": "sphere",
+                    "size_distribution": {
+                        "type": "log_normal",
+                        "effective_radius_m": 1e-5,
+                        "effective_variance": 0.1,
+                    },
+                    "column_mass_kg_m2": 0.05,
+                    "tau_550": 7.5,
+                    "tau_basis": "sphere",
+                    "base_pa": 85_000.0,
+                    "top_pa": 60_000.0,
+                    "f_sed": 1.0,
+                    "coverage": 0.67,
+                    "temperature_k": 281.5,
+                },
+                {
+                    "material": "tholin",
+                    "phase": "solid",
+                    "deck": null,
+                    "shape": "aggregate",
+                    "size_distribution": {
+                        "type": "aggregate",
+                        "monomer_radius_m": 5e-8,
+                        "monomer_count": 3_000.0,
+                        "fractal_dimension": 2.0,
+                        "fractal_prefactor": 1.666_666_666_666_666_7,
+                    },
+                    "tau_550": 0.4,
+                    "tau_basis": "rule",
+                    "base_pa": 20_000.0,
+                    "top_pa": 10.0,
+                    "f_sed": 0.0,
+                    "coverage": 1.0,
+                    "not_modelled": { "type": "no_mass_extinction" },
+                },
+                {
+                    "material": "H2S",
+                    "phase": "solid",
+                    "deck": "H2S",
+                    "shape": "crystal",
+                    "column_mass_kg_m2": 1e-4,
+                    "base_pa": 9_000.0,
+                    "top_pa": 4_000.0,
+                    "f_sed": 0.5,
+                    "coverage": 0.67,
+                    "temperature_k": 180.0,
+                    "not_modelled": {
+                        "type": "no_grain_density",
+                        "phase": "solid",
+                        "temperature_k": 180.0,
+                    },
+                },
+        ])
     }
 
     fn condensates() -> Vec<SurfaceCondensateDto> {
@@ -1924,18 +2216,26 @@ pub(crate) mod tests {
             mode.material = key();
             mode.deck = Some(key());
         }
-        aerosols.decks[0].condensate = key();
+        for deck in &mut aerosols.decks {
+            deck.condensate = key();
+        }
         for absorber in &mut aerosols.absorbers {
             absorber.species = key();
         }
+        aerosols.not_formed[0].condensate = key();
+        aerosols.not_formed[1].reason = NotFormedReasonDto::Displaced { by: key() };
         surface.aerosols = Modelled::Value(aerosols);
         let mut aerosols = inventory_json();
-        for mode in 0..2 {
+        for mode in 0..3 {
             aerosols["modes"][mode]["material"] = json!(unknown);
             aerosols["modes"][mode]["deck"] = json!(unknown);
-            aerosols["absorbers"][mode]["species"] = json!(unknown);
         }
-        aerosols["decks"][0]["condensate"] = json!(unknown);
+        for listed in 0..2 {
+            aerosols["decks"][listed]["condensate"] = json!(unknown);
+            aerosols["absorbers"][listed]["species"] = json!(unknown);
+        }
+        aerosols["not_formed"][0]["condensate"] = json!(unknown);
+        aerosols["not_formed"][1]["reason"]["by"] = json!(unknown);
         wire["aerosols"] = aerosols;
         surface.condensates = Modelled::Value(vec![SurfaceCondensateDto {
             substance: key(),
@@ -2126,6 +2426,106 @@ pub(crate) mod tests {
         ]);
     }
 
+    /// P14.T54.b.b: the τ(550) basis's six strings, closed from the first send
+    /// (decision-p14-t54b-open §2.2).
+    #[test]
+    fn aerosol_tau_basis_strings() {
+        assert_wire_strings(&[
+            (AerosolTauBasisDto::Sphere, "sphere"),
+            (AerosolTauBasisDto::PhaseTable, "phase_table"),
+            (
+                AerosolTauBasisDto::SpheresOutsidePhaseTable,
+                "spheres_outside_phase_table",
+            ),
+            (AerosolTauBasisDto::SphereFallback, "sphere_fallback"),
+            (AerosolTauBasisDto::GeometricLimit, "geometric_limit"),
+            (AerosolTauBasisDto::Rule, "rule"),
+        ]);
+    }
+
+    /// P14.T54.b.b: a mode's not-modelled reason, one closed enum tagged by `type`, each of its six
+    /// variants' wire form (decision-p14-t54b-open §2.2).
+    #[test]
+    fn aerosol_not_modelled_wire_forms() {
+        assert_wire_form(
+            &AerosolNotModelledDto::NoGrainDensity {
+                phase: SubstancePhaseDto::Liquid,
+                temperature_k: 250.0,
+            },
+            json!({ "type": "no_grain_density", "phase": "liquid", "temperature_k": 250.0 }),
+        );
+        for (reason, tag) in [
+            (
+                AerosolNotModelledDto::NoCollisionConstants,
+                "no_collision_constants",
+            ),
+            (AerosolNotModelledDto::NoCondensate, "no_condensate"),
+            (
+                AerosolNotModelledDto::NoSizeDistribution,
+                "no_size_distribution",
+            ),
+            (
+                AerosolNotModelledDto::OpticsNotModelled,
+                "optics_not_modelled",
+            ),
+            (
+                AerosolNotModelledDto::NoMassExtinction,
+                "no_mass_extinction",
+            ),
+        ] {
+            assert_wire_form(&reason, json!({ "type": tag }));
+        }
+    }
+
+    /// P14.T54.b.b: a condensable not formed is sent with its reason, `bulk_gas` or `displaced`
+    /// with the condensate that displaces it.
+    #[test]
+    fn not_formed_wire_forms() {
+        assert_wire_form(
+            &NotFormedCondensateDto {
+                condensate: "CO2".to_owned(),
+                reason: NotFormedReasonDto::BulkGas,
+            },
+            json!({ "condensate": "CO2", "reason": { "type": "bulk_gas" } }),
+        );
+        assert_wire_form(
+            &NotFormedReasonDto::Displaced {
+                by: "CaTiO3".to_owned(),
+            },
+            json!({ "type": "displaced", "by": "CaTiO3" }),
+        );
+    }
+
+    /// P14.T54.b.b (decision-p14-t54b-open §2.2): a mode's member the generator does not model is
+    /// absent, written with no key and never `null` or 0, and a mode read without one holds none;
+    /// the empty inventory is every list empty.
+    #[test]
+    fn a_mode_s_unmodelled_members_are_absent_on_the_wire() {
+        let fixture = inventory();
+        let wire = serde_json::to_value(&fixture.modes[1]).unwrap();
+        for member in ["column_mass_kg_m2", "temperature_k"] {
+            assert!(wire.get(member).is_none(), "the haze's {member}: {wire}");
+        }
+        let wire = serde_json::to_value(&fixture.modes[2]).unwrap();
+        for member in ["size_distribution", "tau_550", "tau_basis"] {
+            assert!(
+                wire.get(member).is_none(),
+                "the H2S deck's {member}: {wire}"
+            );
+        }
+        let wire = serde_json::to_value(&fixture.modes[0]).unwrap();
+        assert!(wire.get("not_modelled").is_none(), "{wire}");
+        assert_wire_form(
+            &AerosolInventoryDto {
+                modes: Vec::new(),
+                decks: Vec::new(),
+                absorbers: Vec::new(),
+                not_formed: Vec::new(),
+            },
+            json!({ "modes": [], "decks": [], "absorbers": [], "not_formed": [] }),
+        );
+    }
+
     #[test]
     fn crust_lid_strings() {
         assert_wire_strings(&[
@@ -2211,7 +2611,7 @@ pub(crate) mod tests {
     /// ends in a unit, or is a dimensionless quantity named as one.
     #[test]
     fn every_quantity_s_name_carries_its_unit() {
-        const DIMENSIONLESS: [&str; 25] = [
+        const DIMENSIONLESS: [&str; 27] = [
             "mole_fraction",
             "area_fraction",
             "heat_capacity_over_r",
@@ -2231,6 +2631,8 @@ pub(crate) mod tests {
             "tau_550",
             "f_sed",
             "vapour_mole_fraction_above",
+            "vapour_mole_fraction_below",
+            "coverage",
             "relative_mixing_ratio",
             "opacity_ratio",
             "redistribution_factor",

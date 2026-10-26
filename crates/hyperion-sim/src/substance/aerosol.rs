@@ -881,7 +881,8 @@ mod tests {
     /// the tripwire below.
     const HELD: [(&str, &str); 1] = [(
         "planetary/chem/condense.rs",
-        "P14.T52.c's condensation loop, which nothing on the record calls before P14.T54.b",
+        "P14.T52.c's condensation loop, which the record calls only through P14.T24.c's \
+         inventory behind P14.T54.b's hold, AIR_SECTIONS_VERSION (planetary/system/air.rs)",
     )];
 
     /// The forms by which other code would read this module's extinction or its tables: its calls,

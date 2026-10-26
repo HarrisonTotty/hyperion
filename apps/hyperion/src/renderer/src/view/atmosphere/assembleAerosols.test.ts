@@ -156,8 +156,23 @@ function waterDeck(vapourAbove: number): AerosolInventoryDto {
         topPa: 60_000,
       }),
     ],
-    decks: [{ condensate: "H2O", vapour_mole_fraction_above: vapourAbove }],
+    decks: [
+      {
+        condensate: "H2O",
+        phase: "liquid",
+        base_pa: 80_000,
+        // About the US Standard Atmosphere's (1976) at 800 hPa.
+        base_temperature_k: 275,
+        top_pa: 60_000,
+        // The generated Earth's H2O at the ground (`planetary.json`).
+        vapour_mole_fraction_below: 0.0102,
+        vapour_mole_fraction_above: vapourAbove,
+        f_sed: 0,
+        extrapolated: false,
+      },
+    ],
     absorbers: [],
+    not_formed: [],
   };
 }
 

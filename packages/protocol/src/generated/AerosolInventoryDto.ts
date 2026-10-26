@@ -2,21 +2,30 @@
 import type { AbsorberDto } from "./AbsorberDto";
 import type { AerosolModeDto } from "./AerosolModeDto";
 import type { CondensateDeckDto } from "./CondensateDeckDto";
+import type { NotFormedCondensateDto } from "./NotFormedCondensateDto";
 
 /**
- * A surface air's aerosol and absorber inventory (plan 14, P14.T24.c with T24.g). Absent from the
- * wire until P14.T24.c, which may reshape it.
+ * A surface air's aerosol and absorber inventory (plan 14, P14.T24.c with T24.g). Sent from
+ * P14.T54.b's bump at generator version 24, and absent from a server whose generator does not
+ * model it; its shape is P14.T54.b.b's (decision-p14-t54b-open §2). A surface with no air, and a
+ * magma ocean, has the empty inventory: every list empty, never `null`.
  */
 export type AerosolInventoryDto = { 
 /**
- * The modes, every cloud's, haze's and dust layer's.
+ * The modes, every cloud's, haze's and dust layer's: each deck's, in the decks' order, then
+ * the sulphate layer's, the haze's and the dust's.
  */
 modes: Array<AerosolModeDto>, 
 /**
- * The condensate decks, which the modes name.
+ * The condensate decks, hottest base first, which the modes name.
  */
 decks: Array<CondensateDeckDto>, 
 /**
  * The absorbers, in registry order.
  */
-absorbers: Array<AbsorberDto>, };
+absorbers: Array<AbsorberDto>, 
+/**
+ * The condensables whose vapour the air holds that form no deck, each with why, in registry
+ * order.
+ */
+not_formed: Array<NotFormedCondensateDto>, };

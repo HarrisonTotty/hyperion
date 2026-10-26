@@ -12,6 +12,7 @@
  */
 import type {
   AerosolShapeDto,
+  AerosolTauBasisDto,
   ArchitectureClassDto,
   BeltCompositionDto,
   BinaryClassDto,
@@ -644,30 +645,105 @@ export type SizeDistribution =
 /** The phases an aerosol mode can hold. */
 export type AerosolPhase = Extract<SubstancePhaseDto, "solid" | "liquid">;
 
-/** One aerosol mode: a cloud's, a haze's or a dust layer's particles of one material and phase. */
+/**
+ * Why members of an aerosol mode are not modelled (plan 14's P14.T54.b.b): one reason a mode,
+ * which says which of its members are.
+ *
+ * @remarks
+ * `no_grain_density` carries the phase and temperature the generator asked for. A size's reason
+ * (`no_collision_constants`, `no_condensate`, `no_size_distribution`) leaves the size and the
+ * optical depth not modelled, `optics_not_modelled` the optical depth (and a rule's column mass),
+ * and `no_mass_extinction` an aggregate's column mass and temperature.
+ */
+export type AerosolNotModelled =
+  | {
+      readonly kind: "no_grain_density";
+      readonly phase: AerosolPhase;
+      readonly temperatureK: number;
+    }
+  | {
+      readonly kind:
+        | "no_collision_constants"
+        | "no_condensate"
+        | "no_size_distribution"
+        | "optics_not_modelled"
+        | "no_mass_extinction";
+    };
+
+/** A mode's column optical depth at 550 nm and what it rests on. */
+export interface AerosolOpticalDepth {
+  /**
+   * Dimensionless: the column where the mode lies, over the share of the sky it covers (in-cloud,
+   * {@link AerosolMode.coverage} not applied).
+   */
+  readonly tau550: number;
+  readonly basis: AerosolTauBasisDto;
+}
+
+/**
+ * One aerosol mode: a cloud's, a haze's or a dust layer's particles of one material and phase.
+ *
+ * @remarks
+ * A member the server's generator does not model is not modelled, never none, and
+ * {@link AerosolMode.notModelled} says why.
+ */
 export interface AerosolMode {
   /** Its material, by its registry key. */
   readonly material: string;
   readonly phase: AerosolPhase;
-  /** The deck it belongs to, by its condensate's key; `null` for a mode of no deck. */
+  /**
+   * The deck it belongs to, by its condensate's key; `null` for a mode of no deck (the dust, a
+   * haze, a sulphate layer).
+   */
   readonly deck: string | null;
   readonly shape: AerosolShapeDto;
-  readonly sizeDistribution: SizeDistribution;
-  readonly columnMassKgM2: number;
-  /** The column optical depth at 550 nm, dimensionless. */
-  readonly tau550: number;
+  readonly sizeDistribution: Pending<SizeDistribution>;
+  readonly columnMassKgM2: Pending<number>;
+  readonly opticalDepth: Pending<AerosolOpticalDepth>;
   readonly basePa: number;
   readonly topPa: number;
-  /** The exponent of its mixing ratio's (p ÷ p_base) law, dimensionless; 0 when well mixed. */
+  /**
+   * The exponent of its mixing ratio's (p ÷ p_base) law, dimensionless; 0 when well mixed. Its
+   * optical depth is spread by the same profile.
+   */
   readonly fSed: number;
+  /** The share of the sky it covers, in `[0, 1]`. */
+  readonly coverage: number;
+  /** The temperature its phase, grain density and optical depth were taken at. */
+  readonly temperatureK: Pending<number>;
+  /** Why its members that are not modelled are not; `null` where every one is. */
+  readonly notModelled: AerosolNotModelled | null;
 }
 
-/** A condensate deck and its vapour above it. */
+/** A condensate deck: where it lies, and its vapour below and above it. */
 export interface CondensateDeck {
   /** The condensate, by its registry key, which its modes' `deck` names. */
   readonly condensate: string;
+  /** Its phase at its base, which it keeps throughout. */
+  readonly phase: AerosolPhase;
+  readonly basePa: number;
+  readonly baseTemperatureK: number;
+  readonly topPa: number;
+  /** In `[0, 1]`. */
+  readonly vapourMoleFractionBelow: number;
   /** In `[0, 1]`. */
   readonly vapourMoleFractionAbove: number;
+  /** Ackerman and Marley's f_sed, dimensionless; 0 for a deck of well-mixed modes. */
+  readonly fSed: number;
+  /** Whether the law that placed its base is applied outside what it was fitted over. */
+  readonly extrapolated: boolean;
+}
+
+/** A condensable whose vapour an air holds that forms no deck, with why. */
+export interface NotFormedCondensate {
+  /** By its registry key. */
+  readonly condensate: string;
+  /**
+   * `bulk_gas` for a vapour holding at least half the air; `displaced` by the condensate, by its
+   * registry key, that takes its limiting vapour first.
+   */
+  readonly reason:
+    { readonly kind: "bulk_gas" } | { readonly kind: "displaced"; readonly by: string };
 }
 
 /** One node of an absorber's profile. */
@@ -689,11 +765,15 @@ export interface Absorber {
   readonly profile: ReadonlyArray<MixingRatioNode> | null;
 }
 
-/** A surface air's aerosol and absorber inventory (plan 14's P14.T24.c). */
+/**
+ * A surface air's aerosol and absorber inventory (plan 14's P14.T24.c): every list empty for a
+ * surface with no air or a magma ocean.
+ */
 export interface AerosolInventory {
   readonly modes: ReadonlyArray<AerosolMode>;
   readonly decks: ReadonlyArray<CondensateDeck>;
   readonly absorbers: ReadonlyArray<Absorber>;
+  readonly notFormed: ReadonlyArray<NotFormedCondensate>;
 }
 
 /** The phases a surface condensate can hold. */

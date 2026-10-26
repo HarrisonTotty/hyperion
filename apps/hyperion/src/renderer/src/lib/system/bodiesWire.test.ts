@@ -1,5 +1,6 @@
 import type {
   AbsorberDto,
+  AerosolInventoryDto,
   AerosolModeDto,
   BodyEnvelopeDto,
   BodyFigureDto,
@@ -9,6 +10,7 @@ import type {
   BodyStateDto,
   BodySummaryDto,
   BodySurfaceDto,
+  CondensateDeckDto,
   OrbitDriftDto,
   ResponseFor,
   SectionDto,
@@ -582,7 +584,7 @@ function recordOf(result: ReturnType<typeof toBodyDetail>) {
   return result.detail.record;
 }
 
-/** A water cloud's droplets, illustrative, as a mode of an aerosol inventory. */
+/** A water cloud's droplets, illustrative, as a mode of an aerosol inventory, every member modelled. */
 const DROPLETS: AerosolModeDto = {
   material: "H2O",
   phase: "liquid",
@@ -591,12 +593,31 @@ const DROPLETS: AerosolModeDto = {
   size_distribution: { type: "gamma", effective_radius_m: 1e-5, effective_variance: 0.1 },
   column_mass_kg_m2: 0.05,
   tau_550: 7.5,
+  tau_basis: "sphere",
   base_pa: 85_000,
   top_pa: 60_000,
   f_sed: 1,
+  coverage: 0.67,
+  temperature_k: 281.5,
 };
 
-/** A Titan-like haze of fractal aggregates, illustrative. */
+/** The water deck {@link DROPLETS} belong to, illustrative. */
+const WATER_DECK: CondensateDeckDto = {
+  condensate: "H2O",
+  phase: "liquid",
+  base_pa: 85_000,
+  base_temperature_k: 281.5,
+  top_pa: 60_000,
+  vapour_mole_fraction_below: 0.0131,
+  vapour_mole_fraction_above: 3e-6,
+  f_sed: 1,
+  extrapolated: false,
+};
+
+/**
+ * A Titan-like haze of fractal aggregates, illustrative: its τ(550) a rule's, its column mass and
+ * temperature not modelled.
+ */
 const HAZE: AerosolModeDto = {
   material: "tholin",
   phase: "solid",
@@ -609,12 +630,24 @@ const HAZE: AerosolModeDto = {
     fractal_dimension: 2,
     fractal_prefactor: 1.6666666666666667,
   },
-  column_mass_kg_m2: 0.003,
   tau_550: 0.4,
+  tau_basis: "rule",
   base_pa: 20_000,
   top_pa: 10,
   f_sed: 0,
+  coverage: 1,
+  not_modelled: { type: "no_mass_extinction" },
 };
+
+const { not_modelled: _hazeReason, ...HAZE_WITHOUT_REASON } = HAZE;
+const { tau_basis: _dropletsBasis, ...DROPLETS_WITHOUT_BASIS } = DROPLETS;
+const { tau_550: _dropletsDepth, ...DROPLETS_WITHOUT_DEPTH } = DROPLETS;
+const { tau_550: _depth, tau_basis: _basis, ...DROPLETS_WITHOUT_OPTICS } = DROPLETS;
+
+/** A surface's inventory of the modes `modes` over the water deck, with no absorber. */
+function inventoryOf(modes: ReadonlyArray<AerosolModeDto>): AerosolInventoryDto {
+  return { modes: [...modes], decks: [WATER_DECK], absorbers: [], not_formed: [] };
+}
 
 /** Earth's ozone on a profile of three nodes, illustrative. */
 const OZONE: AbsorberDto = {
@@ -881,7 +914,12 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
           ...earthSurface(),
           subsurface_ocean: EUROPA_OCEAN,
           vertical_structure: EARTH_STRUCTURE,
-          aerosols: { modes: [DROPLETS, HAZE], decks: [], absorbers: [OZONE] },
+          aerosols: {
+            modes: [DROPLETS, HAZE],
+            decks: [WATER_DECK],
+            absorbers: [OZONE],
+            not_formed: [{ condensate: "N2", reason: { type: "bulk_gas" } }],
+          },
           modifiers: {
             maturity: 0.8,
             weathering_rate: 1,
@@ -917,11 +955,13 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       },
     });
     const aerosols = valued.aerosols.kind === "value" ? valued.aerosols.value : null;
-    expect(aerosols?.modes.map((mode) => mode.sizeDistribution.kind)).toEqual([
-      "gamma",
-      "aggregate",
-    ]);
+    expect(
+      aerosols?.modes.map((mode) =>
+        mode.sizeDistribution.kind === "value" ? mode.sizeDistribution.value.kind : null,
+      ),
+    ).toEqual(["gamma", "aggregate"]);
     expect(aerosols?.absorbers[0]?.columnPerM2).toBe(8.06e22);
+    expect(aerosols?.notFormed).toEqual([{ condensate: "N2", reason: { kind: "bulk_gas" } }]);
     expect(valued.modifiers).toEqual({
       kind: "value",
       value: {
@@ -1001,9 +1041,13 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       subsurface_ocean: { ...EUROPA_OCEAN, liquid: unknown },
       aerosols: {
         modes: [{ ...DROPLETS, material: unknown, deck: unknown }],
-        decks: [{ condensate: unknown, vapour_mole_fraction_above: 3e-6 }],
+        decks: [{ ...WATER_DECK, condensate: unknown }],
         absorbers: [
           { species: unknown, column_m2: 1e19, base_pa: 5_000, top_pa: 1_000, profile: null },
+        ],
+        not_formed: [
+          { condensate: unknown, reason: { type: "displaced", by: unknown } },
+          { condensate: unknown, reason: { type: "bulk_gas" } },
         ],
       },
       condensates: [
@@ -1053,7 +1097,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       expect(
         earthWithSurface({
           ...earthSurface(),
-          aerosols: { modes: [mode], decks: [], absorbers: [] },
+          aerosols: inventoryOf([mode]),
         }),
       ).toEqual({ kind: "fault", fault: "aerosol phase unusable" });
       expect(jupiterWithEnvelope({ ...jupiterEnvelope(), decks: [mode] })).toEqual({
@@ -1158,15 +1202,13 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       },
     };
 
-    expect(surfaceFault({ aerosols: { modes: [haze], decks: [], absorbers: [] } })).toBe(
-      "aerosol mode unusable",
-    );
+    expect(surfaceFault({ aerosols: inventoryOf([haze]) })).toBe("aerosol mode unusable");
   });
 
   it("refuses an aerosol mode whose base lies above its top", () => {
     expect(
       surfaceFault({
-        aerosols: { modes: [{ ...DROPLETS, base_pa: 50_000 }], decks: [], absorbers: [] },
+        aerosols: inventoryOf([{ ...DROPLETS, base_pa: 50_000 }]),
       }),
     ).toBe("aerosol mode unusable");
   });
@@ -1175,20 +1217,145 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     const profile = OZONE.profile?.toReversed() ?? null;
 
     expect(
-      surfaceFault({ aerosols: { modes: [], decks: [], absorbers: [{ ...OZONE, profile }] } }),
+      surfaceFault({
+        aerosols: { modes: [], decks: [], absorbers: [{ ...OZONE, profile }], not_formed: [] },
+      }),
     ).toBe("absorber unusable");
   });
 
-  it("refuses a condensate deck whose vapour is not a fraction", () => {
-    expect(
-      surfaceFault({
-        aerosols: {
-          modes: [],
-          decks: [{ condensate: "H2O", vapour_mole_fraction_above: 2 }],
-          absorbers: [],
-        },
-      }),
-    ).toBe("condensate deck unusable");
+  it.each([
+    ["a vapour below that is not a fraction", { vapour_mole_fraction_below: 1.5 }],
+    ["a vapour above that is not a fraction", { vapour_mole_fraction_above: 2 }],
+    ["a base above its top", { base_pa: 50_000 }],
+    ["a base of no temperature", { base_temperature_k: 0 }],
+    ["a negative f_sed", { f_sed: -1 }],
+  ] satisfies ReadonlyArray<[string, Partial<CondensateDeckDto>]>)(
+    "refuses a condensate deck with %s",
+    (_, change) => {
+      expect(surfaceFault({ aerosols: inventoryOf([]) })).toBe("no fault");
+      expect(
+        surfaceFault({
+          aerosols: { ...inventoryOf([]), decks: [{ ...WATER_DECK, ...change }] },
+        }),
+      ).toBe("condensate deck unusable");
+    },
+  );
+
+  it("reads an aerosol mode's coverage, temperature and optical depth with its basis (P14.T54.b.b)", () => {
+    const surface = okSection(
+      recordOf(earthWithSurface({ ...earthSurface(), aerosols: inventoryOf([DROPLETS, HAZE]) }))
+        .surface,
+    );
+    const aerosols = surface.aerosols.kind === "value" ? surface.aerosols.value : null;
+    const [droplets, haze] = aerosols?.modes ?? [];
+
+    expect([droplets?.coverage, droplets?.temperatureK, droplets?.opticalDepth]).toEqual([
+      0.67,
+      { kind: "value", value: 281.5 },
+      { kind: "value", value: { tau550: 7.5, basis: "sphere" } },
+    ]);
+    expect(droplets?.notModelled).toBeNull();
+    expect(aerosols?.decks).toEqual([
+      {
+        condensate: "H2O",
+        phase: "liquid",
+        basePa: 85_000,
+        baseTemperatureK: 281.5,
+        topPa: 60_000,
+        vapourMoleFractionBelow: 0.0131,
+        vapourMoleFractionAbove: 3e-6,
+        fSed: 1,
+        extrapolated: false,
+      },
+    ]);
+    expect([haze?.columnMassKgM2, haze?.temperatureK, haze?.notModelled]).toEqual([
+      { kind: "not_modelled" },
+      { kind: "not_modelled" },
+      { kind: "no_mass_extinction" },
+    ]);
+    expect(haze?.opticalDepth).toEqual({ kind: "value", value: { tau550: 0.4, basis: "rule" } });
+  });
+
+  it("reads a deck's mode whose size is not modelled for want of a grain density, with its phase and temperature", () => {
+    const { size_distribution: _size, ...sizeless } = DROPLETS_WITHOUT_OPTICS;
+    const undensed: AerosolModeDto = {
+      ...sizeless,
+      not_modelled: { type: "no_grain_density", phase: "liquid", temperature_k: 281.5 },
+    };
+    const surface = okSection(
+      recordOf(earthWithSurface({ ...earthSurface(), aerosols: inventoryOf([undensed]) })).surface,
+    );
+    const mode = surface.aerosols.kind === "value" ? surface.aerosols.value.modes[0] : undefined;
+
+    expect([mode?.sizeDistribution, mode?.opticalDepth, mode?.columnMassKgM2]).toEqual([
+      { kind: "not_modelled" },
+      { kind: "not_modelled" },
+      { kind: "value", value: 0.05 },
+    ]);
+    expect(mode?.notModelled).toEqual({
+      kind: "no_grain_density",
+      phase: "liquid",
+      temperatureK: 281.5,
+    });
+  });
+
+  it("reads an aerosol mode's member sent as null as not modelled, as the server reads it", () => {
+    const surface = okSection(
+      recordOf(
+        earthWithSurface({
+          ...earthSurface(),
+          aerosols: inventoryOf([
+            {
+              ...HAZE,
+              // @ts-expect-error -- the binding leaves an absent member out, but the server reads null as absent, and an older or hand-written frame may send it.
+              column_mass_kg_m2: null,
+            },
+          ]),
+        }),
+      ).surface,
+    );
+    const mode = surface.aerosols.kind === "value" ? surface.aerosols.value.modes[0] : undefined;
+
+    expect(mode?.columnMassKgM2).toEqual({ kind: "not_modelled" });
+  });
+
+  it.each([
+    ["no reason for its absent column mass", HAZE_WITHOUT_REASON],
+    [
+      "a reason with every member present",
+      { ...DROPLETS, not_modelled: { type: "no_condensate" } },
+    ],
+    ["an optical depth with no basis", DROPLETS_WITHOUT_BASIS],
+    [
+      "a basis with no optical depth",
+      { ...DROPLETS_WITHOUT_DEPTH, not_modelled: { type: "optics_not_modelled" } },
+    ],
+    ["an aggregate's reason beside a temperature", { ...HAZE, temperature_k: 150 }],
+    [
+      "a size's reason beside a size",
+      { ...DROPLETS_WITHOUT_OPTICS, not_modelled: { type: "no_size_distribution" } },
+    ],
+    ["a coverage beyond the sky", { ...DROPLETS, coverage: 1.5 }],
+    ["a temperature of 0 K", { ...DROPLETS, temperature_k: 0 }],
+    [
+      "a grain density's reason of no temperature",
+      {
+        ...DROPLETS_WITHOUT_OPTICS,
+        not_modelled: { type: "no_grain_density", phase: "liquid", temperature_k: 0 },
+      },
+    ],
+  ] satisfies ReadonlyArray<[string, AerosolModeDto]>)(
+    "refuses an aerosol mode with %s (P14.T54.b.b)",
+    (_, mode) => {
+      expect(surfaceFault({ aerosols: inventoryOf([mode]) })).toBe("aerosol mode unusable");
+    },
+  );
+
+  it("refuses an aerosol mode whose deck the inventory does not list", () => {
+    expect(surfaceFault({ aerosols: inventoryOf([{ ...DROPLETS, deck: "NH3" }]) })).toBe(
+      "aerosol mode unusable",
+    );
+    expect(surfaceFault({ aerosols: inventoryOf([DROPLETS, HAZE]) })).toBe("no fault");
   });
 
   it("refuses a surface condensate that is a vapour", () => {
