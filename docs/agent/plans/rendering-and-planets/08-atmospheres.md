@@ -4456,8 +4456,9 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   follows T8.d and precedes R08.T10.b. _Items 1–5 built and landed 2026-10-23 (levers 1–3, E2 and
   E3, lever 4); QW2 timed them, and the hold misses at x2 on 8 rows, the measured and slab Earths
   from 400 km to 2.55 × 10⁷ m. Item 6 (E1′, E4) and item 7's lever 5 built 2026-10-23; item 7's
-  view path and item 8 left out (§14); open for QW3 and item 9_ (Risks, "Deviations in T8.e, as
-  built", _QW2_).
+  view path and item 8 left out (§14). QW3 timed them (2026-10-26), and the hold misses at x2 on 4
+  rows, the slab Earth from 400 km to 1.54 × 10⁷ m and the measured Earth at 10⁷ m; open for item
+  9_ (Risks, "Deviations in T8.e, as built", _QW2_, _QW3_).
 
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
 and its planetshine sources), with no source skipped outside the air (since R08.T8.e both of
@@ -9321,8 +9322,9 @@ it rides a bump.
     0.91 ms at one source (23–62 ms on the laptop) and 1.30 at two (32–88 ms); `EARTH_REFERENCE`
     1.57 (39–107 ms), 2.54 at a binary's two slots (64–173 ms) and 2.25 at x2p (56–153 ms). QW2's,
     after items 1–5: 0.90 (23–61 ms) and 1.29 (32–88 ms) on R05's Earth, and 1.56 (39–106 ms), 2.40
-    (60–163 ms) and 2.24 (56–152 ms) on `EARTH_REFERENCE`. Low misses its laptop rows at every count
-    until R08.T11's knobs move.
+    (60–163 ms) and 2.24 (56–152 ms) on `EARTH_REFERENCE`. QW3's, after items 6 and 7: 0.94 (24–64
+    ms) and 1.31 (33–89 ms) on R05's Earth, and 1.18 (30–80 ms), 1.70 (43–116 ms) and 1.58 (40–107
+    ms) on `EARTH_REFERENCE`. Low misses its laptop rows at every count until R08.T11's knobs move.
   - _E1′ and E4, which move no pixel_ (2026-10-23, `decision-r08-t8-leans.md` §11, §12 Ruling 1,
     §14 Ruling 3).
     - `rayMarch.wgsl`'s `main` forms the texel's footprint again for each ray of its loop, from the
@@ -9503,6 +9505,45 @@ it rides a bump.
       fails, the disc at ground zenith 80°, sun 95°/180°, at 2.47% against its 2%; at 24 and 26 the
       neighbourhood fails, 5.72% and 5.68% at sun 97°. Its form at 22, per edge, leaves rays of one
       crossing and of three or more untested. `.git/rm45-scratch/r08-t8e/edged/` holds the round.
+  - _QW3_ (RTX 3080, hidden, 2026-10-26 09:00, load 4.05 falling to 0.8; P0 at a median 1,965 of
+    2,115 MHz busy, 27 of 1,474 busy samples under 90% in dips of half a second, 56–66 °C). Items 6
+    and 7 as built, in QW2's form: 420 combinations of 60 frames, none dropped, every hold row's
+    two sweeps agreeing. The atmosphere's sum on high at 1920 × 1080 at x2, p95 (median) in ms, with
+    QW2's p95:
+
+    | Camera       | R05's Earth            | `EARTH_REFERENCE`         | The slab Earth            |
+    | ------------ | ---------------------- | ------------------------- | ------------------------- |
+    | 400 km       | 7.62 (7.54), from 7.49 | 9.66 (9.56), from 12.96   | 11.46 (11.30), from 14.50 |
+    | 10⁷ m        | 9.05 (8.98), from 9.09 | 10.95 (10.86), from 15.02 | 12.37 (12.27), from 15.97 |
+    | 1.54 × 10⁷ m | 8.28 (8.10), from 8.31 | 9.83 (9.71), from 16.79   | 11.12 (10.91), from 16.92 |
+    | 2.55 × 10⁷ m | 6.10 (5.98), from 6.27 | 7.42 (7.25), from 15.02   | 8.24 (8.07), from 11.12   |
+    | 10⁸ m        | 3.00 (2.94), from 3.12 | 3.46 (3.38), from 4.94    | 3.58 (3.49), from 4.90    |
+
+    So the hold misses on 4 rows, by 0.95–2.37 ms: the slab Earth from 400 km to 1.54 × 10⁷ m and
+    the measured Earth at 10⁷ m. x2p misses on the same rows, at 10.78–12.41 ms.
+    - _The landing rules_ (§12, §14 Ruling 3), at the hold's x2 rows. E1′ and E4 against the loop
+      before them: at worst +1.4% (R05's Earth at 400 km), elsewhere −0.1% to −8.7%; E4 alone −1.6%
+      to −6.8% from 10⁷ m out. Low's one row over 2%, R05's Earth at 400 km at +2.7% (0.03 ms), is
+      not a hold row. Lever 5 against the shared read: −21.7% to −25.0% on the absorbing media
+      (−2.3 to −3.6 ms), R05's Earth, which takes no layer, moving by noise (+0.01–0.03 ms); on low
+      −20% to −25%.
+    - _E1′ and E4 on the RTX 3080._ At full size 28 of 42 read-backs are byte-identical to e1eda5ba's
+      loop; the other 14 differ in 1–4 half floats a frame, each by 1 ulp, in the march and the
+      output alone: within T8.d's fused-multiply-add ulp, and accepted as such (main, 2026-10-26).
+    - _The splits_, x2, the march, ms: Kn − K0 0.42–0.51 on the measured Earth (from 0.56–0.68),
+      0.63–0.84 on R05's Earth and 0.08–0.42 on the slab; the nodes' work 2.4 at 400 km, 5.1–5.4 at
+      10⁷ m and 1.54 × 10⁷ m, 3.9–4.1 at 2.55 × 10⁷ m.
+    - _(b)'s test._ The subgroup-uniform count, each lane marching its warp's largest count at zero
+      weight past its own, costs 6–14% over today's kernel (0.4–1.1 ms), past the run's noise: today
+      does not already pay each warp's slowest lane, and the node rays cost their own throughput.
+      The census's D licenses (b) at the slab's 400 km and 1.54 × 10⁷ m rows (4.43, 1.62) and not at
+      10⁷ m (1.31 and 1.32), where both absorbing media miss.
+    - _Low_ at 1280 × 720, one source | x2, R05's Earth, measured, slab, from 400 km: 0.94 | 1.31,
+      1.18 | 1.70, 1.23 | 1.72 (QW2's x2 2.40 on the measured Earth).
+    - _The tails_ (a frame over 1.2 times its median, high): 2.0% of today's frames and 1.8–2.4% of
+      the other kernels that march nodes, against 0.33% for K0 and 0.22% for Kn, as in QW2 (§12).
+    - The logs: `.git/rm45-scratch/r08-t8e/rtx-q3.log` with its clocks, `qw3-tables.txt`,
+      `qw3-sweeps.txt` and `rtx-q3-e1p.log`.
 - **Deferred findings (2026-10-13 rule)** (R08.T8.e).
   - _The kept Sun's light from 10⁷ m._ With the Sun 1° beyond the twilight limit kept after a full
     Moon, the Moon's march moves by 2.86 × 10⁻⁵ of its largest from 10⁷ m against R08.T7's 10⁻⁶
