@@ -2,9 +2,10 @@
 //! R09.T17): the coarse pass's reference worlds as the service's inputs, and the generated systems
 //! whose bodies the service computes fields for; and, for the Knowledge-bound test (R09.T19.c), a
 //! field asked for over the socket ([`field_via_wire`]) and decoded as a client decodes it
-//! ([`decode_all`], [`partial_field`], [`insert_all`]); and the checks that a frame carries no
-//! surface seed ([`Secret`], [`check_no_seed_key`], [`has_key`]; R09.T1.b); and the field the
-//! service serves from a reference world, with its albedo scale ([`served_field`], R10.T10.a).
+//! ([`decode_all`], [`partial_field`], [`insert_all`]); and the checks that a frame or a payload
+//! carries no surface seed ([`Secret`], [`check_no_seed_key`], [`has_key`]; R09.T1.b); and the
+//! field the service serves from a reference world, with its albedo scale ([`served_field`],
+//! R10.T10.a).
 //!
 //! Plan 14's surface section is not inhabited yet, so the production source answers every body
 //! `NotModelled`; these tests give the service a reference world's inputs instead, through its
@@ -356,14 +357,16 @@ pub fn insert_all(field: &mut PartialField, blocks: &[DecodedBlock]) {
     }
 }
 
-/// What must never reach a client: a body's surface seed, by its key or by its value (rendering
-/// plan R09.T1.b, after R09.T19.c's own copy in `surface_knowledge.rs`).
+/// What must never reach a client: a body's surface seed, by its key or by its value, in a text
+/// frame or in a payload's bytes (rendering plan R09.T1.b, from R09.T19.c's checks).
 #[derive(Debug, Clone)]
 pub struct Secret {
     /// The seed as sixteen lowercase hexadecimal digits, as the crate prints 64-bit identifiers.
     hex: String,
     /// The seed in decimal.
     decimal: String,
+    /// The seed's eight bytes, little-endian and big-endian.
+    bytes: [[u8; 8]; 2],
 }
 
 impl Secret {
@@ -373,6 +376,7 @@ impl Secret {
         Self {
             hex: format!("{value:016x}"),
             decimal: value.to_string(),
+            bytes: [value.to_le_bytes(), value.to_be_bytes()],
         }
     }
 
@@ -398,6 +402,20 @@ impl Secret {
             !text.contains(&self.hex) && !text.contains(&self.decimal),
             "a frame holds the surface seed's value: {text}"
         );
+    }
+
+    /// Checks a payload's bytes: they do not hold the seed's value, in either byte order.
+    ///
+    /// # Panics
+    ///
+    /// If they do.
+    pub fn check_binary(&self, payload: &[u8]) {
+        for bytes in &self.bytes {
+            assert!(
+                !payload.windows(8).any(|window| window == bytes),
+                "a payload holds the surface seed's value"
+            );
+        }
     }
 }
 

@@ -6079,6 +6079,86 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     checks that the hooks section carries `detail_seed` and no `surface_seed`. _T1.b, as built
     (2026-10-14):_ the wire's checks are in `tests/system_bodies.rs`, and this test's switch is left
     for its follow-up ("Deviations in T1.b, as built").
+- **T19.c's follow-up, as built** (2026-10-26, lane r09-t19c-wire, built on `e3d4423e`, after
+  B1's P14.T54.b, and gated on `87274510`). It answers R09.T20's deferred finding "The channels
+  have not been compared across the wire", a check due before `GENERATED_SURFACES_FROM = 24`
+  serves, and T1.b's "For T19.c's follow-up". **The result: the server's and the client's
+  heights, gradients and channels agree bit for bit over the wire on the Mars-like and Earth-like
+  worlds; no channel mismatches, and the contract holds.**
+  - _Files._ `crates/hyperion-server/tests/surface_knowledge.rs` and `tests/common/surface.rs`.
+    No server, sim, surface or protocol code changes and no output moves, so there is no golden and
+    no version bump.
+  - _The detail seed from the wire._ `Session::start` requires `body_detail`'s hooks section to be
+    `ok`, holding `detail_seed` `ok` and nothing else, and keeps that seed as the client's
+    (`DetailSeeds { server, client }`). The server's is the sim's
+    `detail_seed(Seed::new(SEED), surface_system().solid)`, the seed the service also sets the
+    albedo scale from. The two are asserted equal, and each side synthesises from its own. The
+    stand-in `DETAIL_SEED` is gone. That closes the deferred finding "The detail seed's source",
+    above.
+  - _The shared checks._ The test's private `Secret` and `has_key` give way to
+    `tests/common/surface.rs`'s. `check_binary`, which looks for the seed's eight bytes in either
+    order, moves into the shared `Secret`, as T1.b planned.
+  - _The channels compared._ For every cell a heights check samples, both sides now:
+    - draw the trunk the cell heads and the tributaries its four children head, the two
+      segments required alike by their `Debug` text (every value a segment holds, each float
+      at its shortest exact form);
+    - compare the heights and gradients at t = 0, ¼, ½, ¾ and 1 along each segment where
+      the point lies in a surveyed cell, on the channel's axis;
+    - at every point and band level, require the client's `channels_through` to be the server's,
+      and `Channels::incision_at` to agree bit for bit, so that a mismatch of the heights would
+      point to the channels or away from them.
+
+    `Sampled` counts the channel points, the trunks, the tributaries and the comparisons the
+    server's channels incise.
+
+  - _Two cases in the slow tier_ (`#[ignore = "slow: …"]`), each running the whole
+    `knowledge_bound` check of the Ceres-like world's test: its two passes, blocks, cover codes,
+    delta, no `surface_seed`, edge points and refusal.
+    - `the_mars_like_world_s_heights_and_channels_from_the_wire_are_the_server_s`, level 7.
+    - `the_earth_like_world_s_heights_and_tributaries_from_the_wire_are_the_server_s`, level 8.
+      It goes beyond the brief: the Mars-like world is dry now and draws its epoch's trunks alone
+      (R09.T6.c, main's option A), with no tributary, so tributaries need a world wet now.
+  - _The comparison, world by world and channel by channel._ Every comparison is bit for bit, at
+    band levels 0, L, L + 4 and 24; "incised" counts point-level comparisons where the server's
+    incision is not zero.
+
+    | World, pass             | Points (on the edge) | On the channels                           | Trunks | Tributaries             | Incised | Mismatches |
+    | ----------------------- | -------------------- | ----------------------------------------- | ------ | ----------------------- | ------- | ---------- |
+    | Mars-like, orbital      | 4,478 (2,346)        | 449                                       | 102    | 0 (none drawn, by T6.c) | 4,464   | 0          |
+    | Mars-like, close range  | 1,544 (476)          | 348                                       | 75     | 0                       | 729     | 0          |
+    | Earth-like, orbital     | 4,348 (2,176)        | 489                                       | 25     | 75                      | 4,206   | 0          |
+    | Earth-like, close range | 1,196 (476)          | 0 (face 0's cells 48–127 hold no channel) | 0      | 0                       | 0       | 0          |
+
+  - _The worlds._ The server test's own `ReferenceWorld`, on the same `reference::*_like` inputs as
+    R10's `sample_worlds()`, which is the sim's test helper and not reachable from the server's
+    tests. The field is the pass of the body's surface seed, the served one, not
+    `reference::SEED`'s golden field.
+  - _The albedo scale._ `check_blocks` asserted that every reference world's field has a scale.
+    It now asserts one exactly where the field's surface pressure is below
+    `THIN_ATMOSPHERE_PRESSURE` (30 kPa), as R10.T10.a's `field_albedo_scale` gives it. The
+    Earth-like field (98.55 kPa) has none. The answer's and block 0's scale still equal the
+    server's.
+  - _The module's documentation_ drops its paragraph on uniform records (T11–T15 have landed),
+    names the slow cases and says where the client's seed comes from.
+  - _Acceptance, by name._ The four tests ran under the `slow-test` profile, through nextest at
+    4 test threads and a 400% quota, at a load from 4.6 to 3.1, in a scope whose peak was 818 MB:
+    - the Ceres-like world's test passed in 15.1 s;
+    - the fast Mars-like payload test passed in 44.2 s;
+    - the Mars-like slow case passed in 138.0 s;
+    - the Earth-like slow case passed in 164.6 s.
+
+    The command was `cargo nextest run -p hyperion-server --test surface_knowledge` with
+    `--cargo-profile slow-test --profile slow --run-ignored all`. Re-run on `87274510` (P14.T51.e's
+    record change, held at 24, and three more commits, none in these files), at a load of 7.4 to
+    9.3, the counts were the same, and the times were 15.1, 44.9, 143.4 and 172.3 s.
+    `cargo test -p hyperion-server --test surface_knowledge` still runs only the two fast tests.
+
+  - _Deferred findings (2026-10-13 rule)._
+    - _The Earth-like case's waits are near the harness's patience._ It makes two level-8 passes
+      one after another, the test's own and the server's, each waited for within the 180 s
+      `DEFAULT_PATIENCE`. At these loads the whole case took 164.6 s and 172.3 s. A slow pass
+      heavily loaded could time a wait out. Lean: if it does, raise `HYPERION_TEST_PATIENCE_SECS`
+      for the slow pass, or give the case a `[[profile.slow.overrides]]` entry of its own.
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`

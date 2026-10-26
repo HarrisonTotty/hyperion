@@ -5,9 +5,9 @@
 //! A server takes a reference world's inputs for every solid body (`reference_inputs`), since plan
 //! 14's surface section is not inhabited yet. One orbital pass surveys a region of a generated
 //! body: a block of cells at a cube corner, across two face edges; a ragged run at a face's
-//! centre; and ragged runs about the field's widest crater and its largest drainage, once the
-//! coarse pass places them (R09.T12.d and T14; the reference fields hold neither yet). Its payload
-//! is then asked for over the socket, decoded as a client decodes it, and checked:
+//! centre; and ragged runs about the field's widest crater and its largest drainage, where the
+//! field has them. Its payload is then asked for over the socket, decoded as a client decodes it,
+//! and checked:
 //!
 //! - no block carries a cell outside the region and its margin of `SYNTHESIS_MARGIN_CELLS`, a
 //!   climate record over another cell or a crater that reaches none of its cells, and every
@@ -17,28 +17,34 @@
 //! - the cover's resolution codes are the pass's, and after a second pass, finer and overlapping
 //!   the first's edge, each cell's finest, in the delta and the whole field alike;
 //! - the client's synthesis over its `PartialField` gives the server's own heights and gradients,
-//!   bit for bit, on a lattice over every surveyed cell and along the surveyed region's edge, at
-//!   band levels from 0 to the deepest, and refuses a point where it holds nothing;
+//!   bit for bit, on a lattice over every surveyed cell, along the surveyed region's edge and along
+//!   the channels the surveyed cells head, at band levels from 0 to the deepest, the channels'
+//!   incision on its own as well; it draws those trunks and tributaries as the server does; and it
+//!   refuses a point where it holds nothing;
 //! - no response or notification, read as it arrived, has a key named `surface_seed`, and no frame,
 //!   text or binary, holds the body's surface seed's value;
 //! - the answer's header and block 0 carry the server's albedo scale, which an airless or
-//!   thin-aired body's field has (R10.T10.a).
+//!   thin-aired body's field has and a thick-aired one's has not (R10.T10.a).
 //!
 //! Those payloads, on the Ceres-like world, are one block in one bulk frame each, so a second case
 //! surveys two whole faces of the Mars-like world, whose payload is several blocks in several
-//! frames, and checks it block by block.
+//! frames, and checks it block by block. The Ceres-like world's field has no channels, so two
+//! cases in the slow tier run the whole check on the Mars-like world, whose coarse pass drains it
+//! and whose heights carry its epoch's trunks, and on the Earth-like world, wet now, whose
+//! channels have tributaries as well (R09.T20's deferred finding, a check before
+//! `GENERATED_SURFACES_FROM` serves). The worlds take the same `reference` inputs as R10's
+//! `sample_worlds()`, under the body's surface seed rather than `reference::SEED`.
 //!
 //! The server's heights are the synthesis over the coarse pass of the body's surface seed on the
 //! same inputs, with the albedo scale the service sets, which `surface_service.rs` shows is the
 //! field the server serves, bit for bit; every
-//! record the client holds is checked against it as well. The detail seed is a stand-in shared by
-//! both sides: R09.T1.b puts the body's own on the wire.
+//! record the client holds is checked against it as well. The client synthesises from the detail
+//! seed that `body_detail`'s hooks section carried (R09.T1.b), and the server from the sim's own
+//! of the body, which the test checks are one.
 //!
-//! Until the coarse pass's steps fill the records (R09.T11 to T15), every cell of a reference
-//! field holds the same record, so the record checks bind which cells are held and at what codes
-//! rather than which record sits where, and the heights compared vary only by the small craters,
-//! though every read the synthesis makes must still find its cell held. The checks tighten by
-//! themselves as the steps land (R09's Risks, T19.c's deferred findings).
+//! The coarse pass's steps (R09.T11 to T15) fill the records cell by cell, so the record checks
+//! bind which record sits where as well as which cells are held and at what codes, and every read
+//! the synthesis makes must find its cell held.
 //!
 //! The heights' points are few because each is dear: the first query at a new point at a deep band
 //! level took about 1 ms on the Ceres-like world in the test profile, at a load near 13, and about
@@ -56,38 +62,35 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use common::surface::{
-    FieldViaWire, ReferenceWorld, SEED, decode_all, field_via_wire, insert_all, partial_field,
-    reference_inputs, served_field, surface_system,
+    FieldViaWire, ReferenceWorld, SEED, Secret, decode_all, field_via_wire, insert_all,
+    partial_field, reference_inputs, served_field, surface_system,
 };
 use common::{TestClient, TestServer, patiently};
 use hyperion_protocol::{
-    BodyDetailRequest, BodyIdHex, CellRangeDto, ClientMessage, CoverDto, CoverRangeDto,
-    CreateUniverseRequest, DetailLevelDto, FramePositionDto, KinematicsDto, NotificationBody,
-    RequestBody, ResponseBody, SceneShipRequest, SceneSubscribeRequest, SeedHex, ServerMessage,
-    SubscribeRequest, SubscriptionTopic, SurfaceFieldRequest, SurveyPassDto, SurveyPassRequest,
-    SurveySourceDto, SystemBodiesRequest, SystemIdHex, UniverseIdHex, UniverseTime,
+    BodyDetailRequest, BodyHooksDto, BodyIdHex, CellRangeDto, ClientMessage, CoverDto,
+    CoverRangeDto, CreateUniverseRequest, DetailLevelDto, FramePositionDto, KinematicsDto,
+    NotificationBody, RequestBody, ResponseBody, SceneShipRequest, SceneSubscribeRequest,
+    SectionDto, SeedHex, ServerMessage, SubscribeRequest, SubscriptionTopic, SurfaceFieldRequest,
+    SurveyPassDto, SurveyPassRequest, SurveySourceDto, SystemBodiesRequest, SystemIdHex,
+    UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::id::BodyId;
-use hyperion_sim::planetary::hooks::{SurfaceSeed, surface_seed};
+use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
 use hyperion_sim::rng::DetailSeed;
 use hyperion_sim::units::Metres;
-use hyperion_surface::cube::{Edge, Face, MAX_LEVEL, PATCH_QUADS, PatchKey, SampleGrid};
+use hyperion_surface::cube::{Edge, Face, MAX_LEVEL, PATCH_QUADS, PatchKey, SampleGrid, unit_dir};
 use hyperion_surface::field::{
     CoarseField, CoarseLevel, Cover, CoverRange, FieldView, PartialField, ResolutionCode,
     SYNTHESIS_MARGIN_CELLS, cell_at_index, cell_index,
 };
 use hyperion_surface::height::HeightSample;
+use hyperion_surface::material::THIN_ATMOSPHERE_PRESSURE;
+use hyperion_surface::synth::channels::ChannelNetwork;
 use hyperion_surface::synth::{BandLevel, QueryHeightError, SynthCache, Synthesiser};
 use hyperion_surface::wire::DecodedBlock;
-use serde_json::Value;
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
-
-/// The detail seed both sides synthesise from: a stand-in for the body's own, which R09.T1.b puts
-/// on the wire (`body_detail`'s hooks section). The check is that the two sides agree given the
-/// field and one seed, which any seed shows.
-const DETAIL_SEED: DetailSeed = DetailSeed::new(0x0919_c19c_5eed_0001);
 
 /// The first pass's resolution, metres: an orbital survey's.
 const ORBITAL_M: f64 = 120.0;
@@ -111,64 +114,6 @@ const TIME: UniverseTime = UniverseTime {
     seconds: 3_600,
     nanos: 0,
 };
-
-/// What must never reach a client: the body's surface seed, by its key or by its value.
-#[derive(Debug, Clone)]
-struct Secret {
-    /// The seed as sixteen lowercase hexadecimal digits, as the crate prints 64-bit identifiers.
-    hex: String,
-    /// The seed in decimal.
-    decimal: String,
-    /// The seed's eight bytes, little-endian and big-endian.
-    bytes: [[u8; 8]; 2],
-}
-
-impl Secret {
-    fn of(seed: SurfaceSeed) -> Self {
-        let value = seed.get();
-        Self {
-            hex: format!("{value:016x}"),
-            decimal: value.to_string(),
-            bytes: [value.to_le_bytes(), value.to_be_bytes()],
-        }
-    }
-
-    /// Checks a text frame as it arrived, and returns its message: no object in its JSON has a
-    /// key named `surface_seed`, and its text does not hold the seed's value.
-    fn check_text(&self, text: &str) -> ServerMessage {
-        let json: Value = serde_json::from_str(text).expect("the server sends JSON");
-        assert!(
-            !has_key(&json, "surface_seed"),
-            "a frame carries a key named `surface_seed`: {text}"
-        );
-        assert!(
-            !text.contains(&self.hex) && !text.contains(&self.decimal),
-            "a frame holds the surface seed's value: {text}"
-        );
-        serde_json::from_value(json).expect("the server sends valid messages")
-    }
-
-    /// Checks a payload's bytes: they do not hold the seed's value, in either byte order.
-    fn check_binary(&self, payload: &[u8]) {
-        for bytes in &self.bytes {
-            assert!(
-                !payload.windows(8).any(|window| window == bytes),
-                "a payload holds the surface seed's value"
-            );
-        }
-    }
-}
-
-/// Whether any object within `value` has a key named `key`.
-fn has_key(value: &Value, key: &str) -> bool {
-    match value {
-        Value::Object(members) => members
-            .iter()
-            .any(|(name, member)| name == key || has_key(member, key)),
-        Value::Array(items) => items.iter().any(|item| has_key(item, key)),
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
-    }
-}
 
 /// Says hello on a fresh connection, its answer checked.
 async fn hello(client: &mut TestClient, secret: &Secret) {
@@ -491,12 +436,15 @@ fn check_blocks(
     );
     assert_eq!(answer.header.level, level.get());
     assert_eq!(header.body(), server.header().body());
-    // The albedo scale R10.T10.a sets on an airless or thin-aired body's field, in the answer and
-    // in block 0, is the server's (the module's documentation).
+    // The albedo scale R10.T10.a sets on an airless or thin-aired body's field, below
+    // `THIN_ATMOSPHERE_PRESSURE`, and on no other, in the answer and in block 0, is the server's
+    // (the module's documentation).
     let scale = server.header().albedo_scale().map(f64::to_bits);
-    assert!(
+    let thin = server.header().surface_pressure().value() < THIN_ATMOSPHERE_PRESSURE.value();
+    assert_eq!(
         scale.is_some(),
-        "a reference world's field has an albedo scale"
+        thin,
+        "a reference world's field has an albedo scale if, and only if, its air is thin"
     );
     assert_eq!(
         answer.header.albedo_scale.map(f64::to_bits),
@@ -616,13 +564,21 @@ fn bits(sample: HeightSample) -> (u64, [u64; 3]) {
     (sample.height_m.to_bits(), sample.gradient.map(f64::to_bits))
 }
 
-/// The points the heights were compared at.
+/// The points the heights were compared at, and the channels compared with them.
 #[derive(Debug, Default, Clone, Copy)]
 struct Sampled {
     /// Points over the surveyed cells.
     points: usize,
     /// Of them, points on the surveyed region's edge.
     on_edge: usize,
+    /// Of them, points along a channel's segment.
+    on_channels: usize,
+    /// Trunks, the coarse cells' segments, that both sides drew alike.
+    trunks: usize,
+    /// Tributaries, the segments of the cells one level finer, that both sides drew alike.
+    tributaries: usize,
+    /// Comparisons, a point at a band level, where the server's channels cut the ground.
+    incised: usize,
 }
 
 /// What a heights check samples: `cells`, surveyed, of the surveyed cells `surveyed`, and a
@@ -634,55 +590,125 @@ struct Sampling {
     held: Cover,
 }
 
-/// Checks that the client's synthesis gives the server's heights and gradients, bit for bit, at
-/// every point of a lattice over each of the sampling's cells and along every edge such a cell
-/// shares with a cell not surveyed, at each of [`band_levels`]; and that it refuses a point in a
-/// cell it does not hold, which the server answers.
-fn check_heights(server: &CoarseField, client: &PartialField, sampling: &Sampling) -> Sampled {
-    let level = server.header().level();
-    let levels = band_levels(level);
-    let (ours, theirs) = (
-        Synthesiser::new(server, DETAIL_SEED),
-        Synthesiser::new(client, DETAIL_SEED),
-    );
-    let (mut our_cache, mut their_cache) = (SynthCache::default(), SynthCache::default());
-    let mut compare = |index: u32, dir: [f64; 3]| {
-        for &band in &levels {
-            let own = ours
-                .height_at(&mut our_cache, dir, band)
+/// The detail seeds the two sides synthesise from: the server's, the sim's `detail_seed` of the
+/// body, from which the service also sets the field's albedo scale (R10.T10.a); and the client's,
+/// as `body_detail`'s hooks section carried it (R09.T1.b).
+#[derive(Debug, Clone, Copy)]
+struct DetailSeeds {
+    server: DetailSeed,
+    client: DetailSeed,
+}
+
+/// The points along a segment the channels are compared at, by its parameter: its key point, its
+/// outlet and three between.
+const ALONG_SEGMENT: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+/// The unit direction of the spheroid point `p`, metres, of `field`'s body: the direction whose
+/// spheroid point it is.
+fn dir_of(field: &CoarseField, p: [f64; 3]) -> [f64; 3] {
+    let figure = field.header().figure();
+    unit_dir([
+        p[0] / figure.equatorial_radius_m,
+        p[1] / figure.equatorial_radius_m,
+        p[2] / figure.polar_radius_m,
+    ])
+}
+
+/// The two sides' synthesis, compared point by point: the server's over its whole field and the
+/// client's over its part of it, each with its own cache, at each of [`band_levels`].
+#[derive(Debug)]
+struct Sides<'a> {
+    server: &'a CoarseField,
+    client: &'a PartialField,
+    ours: Synthesiser<'a, CoarseField>,
+    theirs: Synthesiser<'a, PartialField>,
+    our_cache: SynthCache,
+    their_cache: SynthCache,
+    levels: [BandLevel; 4],
+}
+
+impl<'a> Sides<'a> {
+    /// The server's synthesis over `server` and the client's over `client`, each from its own seed.
+    fn new(server: &'a CoarseField, client: &'a PartialField, seeds: DetailSeeds) -> Self {
+        Self {
+            server,
+            client,
+            ours: Synthesiser::new(server, seeds.server),
+            theirs: Synthesiser::new(client, seeds.client),
+            our_cache: SynthCache::default(),
+            their_cache: SynthCache::default(),
+            levels: band_levels(server.header().level()),
+        }
+    }
+
+    /// Checks that the client gives the server's height and gradient at `dir`, in cell `index`, at
+    /// each band level, bit for bit, and the channels' incision on its own as well, which a
+    /// mismatch of the heights would point to. Returns the comparisons the server's channels
+    /// incise.
+    fn compare(&mut self, index: u32, dir: [f64; 3]) -> usize {
+        let mut incised = 0;
+        for band in self.levels {
+            let at = || format!("cell {index}, at {dir:?}, band level {}", band.get());
+            let own = self
+                .ours
+                .height_at(&mut self.our_cache, dir, band)
                 .expect("the server holds the whole field");
-            let sent = theirs
-                .height_at(&mut their_cache, dir, band)
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "cell {index}, at {dir:?}, band level {}: a surveyed point is refused: \
-                         {error}",
-                        band.get()
-                    )
-                });
+            let sent = self
+                .theirs
+                .height_at(&mut self.their_cache, dir, band)
+                .unwrap_or_else(|error| panic!("{}: a surveyed point is refused: {error}", at()));
             assert_eq!(
                 bits(sent),
                 bits(own),
-                "cell {index}, at {dir:?}, band level {}: {sent:?} against the server's {own:?}",
-                band.get()
+                "{}: {sent:?} against the server's {own:?}",
+                at()
             );
+            let through = self.ours.level_set(band).channels_through();
+            assert_eq!(
+                self.theirs.level_set(band).channels_through(),
+                through,
+                "{}",
+                at()
+            );
+            let Some(through) = through else {
+                continue;
+            };
+            let own = self
+                .ours
+                .channels()
+                .incision_at(self.server, dir, through, &mut self.our_cache)
+                .expect("the server holds the whole field");
+            let sent = self
+                .theirs
+                .channels()
+                .incision_at(self.client, dir, through, &mut self.their_cache)
+                .unwrap_or_else(|error| panic!("{}: the channels are refused: {error}", at()));
+            assert_eq!(
+                bits(sent),
+                bits(own),
+                "{}: the channels' incision {sent:?} against the server's {own:?}",
+                at()
+            );
+            if own.height_m.abs() > 0.0 {
+                incised += 1;
+            }
         }
-    };
-    let mut sampled = Sampled::default();
-    let lattice = slot(PATCH_QUADS / (LATTICE_POINTS - 1));
-    for &index in &sampling.cells {
-        let cell = cell_of(level, index);
+        incised
+    }
+
+    /// Compares the heights at a lattice over the surveyed cell `index` and along every edge it
+    /// shares with a cell not surveyed.
+    fn over_cell(&mut self, index: u32, surveyed: &Surveyed, sampled: &mut Sampled) {
+        let cell = cell_of(self.server.header().level(), index);
+        let lattice = slot(PATCH_QUADS / (LATTICE_POINTS - 1));
         for x in (0..=PATCH_QUADS).step_by(lattice) {
             for y in (0..=PATCH_QUADS).step_by(lattice) {
-                compare(index, cell.sample_dir(x, y, SampleGrid::Mesh));
+                sampled.incised += self.compare(index, cell.sample_dir(x, y, SampleGrid::Mesh));
                 sampled.points += 1;
             }
         }
         for edge in Edge::ALL {
-            if sampling
-                .surveyed
-                .contains_key(&cell_index(cell.edge_neighbour(edge)))
-            {
+            if surveyed.contains_key(&cell_index(cell.edge_neighbour(edge))) {
                 continue;
             }
             for along in (0..=PATCH_QUADS).step_by(slot(EDGE_STEP)) {
@@ -692,23 +718,112 @@ fn check_heights(server: &CoarseField, client: &PartialField, sampling: &Samplin
                     Edge::VMin => (along, 0),
                     Edge::VMax => (along, PATCH_QUADS),
                 };
-                compare(index, cell.sample_dir(x, y, SampleGrid::Mesh));
+                sampled.incised += self.compare(index, cell.sample_dir(x, y, SampleGrid::Mesh));
                 sampled.points += 1;
                 sampled.on_edge += 1;
             }
         }
     }
+
+    /// Checks that the client draws the trunk the surveyed cell `index` heads, and the tributaries
+    /// its children head, as the server's networks do, and compares the heights along each at
+    /// [`ALONG_SEGMENT`], where a point lies in a surveyed cell.
+    fn along_channels(
+        &mut self,
+        index: u32,
+        surveyed: &Surveyed,
+        networks: &mut Networks<'_>,
+        sampled: &mut Sampled,
+    ) {
+        let level = self.server.header().level();
+        let cell = cell_of(level, index);
+        for heads in std::iter::once(cell).chain(cell.children()) {
+            let own = networks
+                .ours
+                .segment(heads)
+                .expect("the server holds the whole field");
+            let sent = networks.theirs.segment(heads).unwrap_or_else(|error| {
+                panic!("cell {index}: the segment {heads:?} heads is refused: {error}")
+            });
+            assert_eq!(
+                format!("{sent:?}"),
+                format!("{own:?}"),
+                "cell {index}: the segment {heads:?} heads"
+            );
+            let Some(segment) = own else {
+                continue;
+            };
+            if segment.is_trunk() {
+                sampled.trunks += 1;
+            } else {
+                sampled.tributaries += 1;
+            }
+            for t in ALONG_SEGMENT {
+                let dir = dir_of(self.server, segment.point_m(t));
+                let lies_in = PatchKey::containing(level.get(), dir).expect("a coarse level");
+                if !surveyed.contains_key(&cell_index(lies_in)) {
+                    continue;
+                }
+                sampled.incised += self.compare(index, dir);
+                sampled.points += 1;
+                sampled.on_channels += 1;
+            }
+        }
+    }
+}
+
+/// The two sides' channel networks, each over its own field and from its own seed.
+#[derive(Debug)]
+struct Networks<'a> {
+    ours: ChannelNetwork<'a, CoarseField>,
+    theirs: ChannelNetwork<'a, PartialField>,
+}
+
+/// Checks that the client's synthesis gives the server's heights and gradients, bit for bit, at
+/// every point of a lattice over each of the sampling's cells, along every edge such a cell shares
+/// with a cell not surveyed, and along its channels, at each of [`band_levels`], the channels'
+/// incision on its own as well; that the client draws each such cell's trunk and its children's
+/// tributaries as the server does; and that it refuses a point in a cell it does not hold, which
+/// the server answers.
+///
+/// A channel's points are its segment's at [`ALONG_SEGMENT`] that lie in a surveyed cell, on its
+/// axis, where its incision is deepest. Two segments are compared by their `Debug` text, which
+/// prints every value a segment holds, each float as its shortest exact form.
+fn check_heights(
+    server: &CoarseField,
+    client: &PartialField,
+    seeds: DetailSeeds,
+    sampling: &Sampling,
+) -> Sampled {
+    let mut sides = Sides::new(server, client, seeds);
+    // Each side's channels, copied out so that their networks borrow neither synthesiser.
+    let (our_channels, their_channels) = (*sides.ours.channels(), *sides.theirs.channels());
+    let mut networks = Networks {
+        ours: our_channels.network(server),
+        theirs: their_channels.network(client),
+    };
+    let mut sampled = Sampled::default();
+    for &index in &sampling.cells {
+        sides.over_cell(index, &sampling.surveyed, &mut sampled);
+        sides.along_channels(index, &sampling.surveyed, &mut networks, &mut sampled);
+    }
     // A cell the client does not hold: the last in index order.
+    let level = server.header().level();
     let far = (0..level.cell_count())
         .rev()
         .find(|&index| sampling.held.code(index).is_none())
         .expect("the passes leave cells unsurveyed");
     let dir = cell_of(level, far).vertex_dir(32, 32);
-    ours.height_at(&mut our_cache, dir, levels[0])
+    let coarsest = sides.levels[0];
+    sides
+        .ours
+        .height_at(&mut sides.our_cache, dir, coarsest)
         .expect("the server holds the whole field");
     assert!(
         matches!(
-            theirs.height_at(&mut their_cache, dir, levels[0]),
+            sides
+                .theirs
+                .height_at(&mut sides.their_cache, dir, coarsest),
             Err(QueryHeightError::NotSurveyed(_))
         ),
         "the client cannot synthesise where it holds nothing"
@@ -747,11 +862,12 @@ async fn on_a_thread<T: Send + 'static>(
 async fn heights_checked(
     server: &Arc<CoarseField>,
     client: PartialField,
+    seeds: DetailSeeds,
     sampling: Sampling,
 ) -> (PartialField, Sampled) {
     let server = Arc::clone(server);
     on_a_thread("the heights to be compared", move || {
-        let sampled = check_heights(&server, &client, &sampling);
+        let sampled = check_heights(&server, &client, seeds, &sampling);
         (client, sampled)
     })
     .await
@@ -759,7 +875,8 @@ async fn heights_checked(
 
 /// A server serving a reference world's inputs; a universe of [`SEED`] with the stand-in ship in
 /// the surveyed body's system; a client on a connection with no subscription, and a watcher of the
-/// universe's scene on another; and the field the server computes for the body, computed here.
+/// universe's scene on another; the field the server computes for the body, computed here; and the
+/// detail seeds each side synthesises from, the client's as the wire carried it.
 #[derive(Debug)]
 struct Session {
     server: TestServer,
@@ -771,12 +888,13 @@ struct Session {
     universe: UniverseIdHex,
     body: BodyId,
     field: Arc<CoarseField>,
+    seeds: DetailSeeds,
 }
 
 impl Session {
     /// Starts a server that gives every solid body `world`'s inputs, and reads the records where a
     /// body's seeds would travel if any did, the body's hooks section among them, every answer
-    /// checked as it arrives.
+    /// checked as it arrives; the client's detail seed is the one that section carries.
     async fn start(world: ReferenceWorld) -> Self {
         let body = surface_system().solid;
         let seed = surface_seed(Seed::new(SEED), body);
@@ -825,11 +943,27 @@ impl Session {
             time: TIME,
             detail: DetailLevelDto::Full,
         });
-        let answer = ask(&mut client, &secret, detail).await;
-        let json = serde_json::to_value(&answer).expect("an answer serialises");
-        assert!(
-            has_key(&json, "hooks"),
-            "the body's record has its hooks section"
+        let ResponseBody::BodyDetail(answer) = ask(&mut client, &secret, detail).await else {
+            panic!("body_detail answers with the body's record");
+        };
+        // The hooks section, the place a seed would travel, carries the detail seed alone, from
+        // which the client synthesises (R09.T1.b).
+        let SectionDto::Ok(BodyHooksDto {
+            detail_seed: SectionDto::Ok(sent),
+        }) = &answer.record.hooks
+        else {
+            panic!(
+                "the body's record carries its detail seed: {:?}",
+                answer.record.hooks
+            );
+        };
+        let seeds = DetailSeeds {
+            server: detail_seed(Seed::new(SEED), body),
+            client: DetailSeed::new(sent.to_u64()),
+        };
+        assert_eq!(
+            seeds.client, seeds.server,
+            "the wire's detail seed is the body's"
         );
         let bodies = RequestBody::SystemBodies(SystemBodiesRequest {
             universe: universe.clone(),
@@ -851,6 +985,7 @@ impl Session {
             universe,
             body,
             field: Arc::new(field),
+            seeds,
         }
     }
 
@@ -910,8 +1045,8 @@ impl Session {
 
 /// Surveys a generated body of a server serving `world`'s inputs, and checks that what a client is
 /// sent of its field, and what the client makes of it, is bounded by the surveys (the module's
-/// documentation).
-async fn knowledge_bound(world: ReferenceWorld) {
+/// documentation). Returns what each pass's heights check compared.
+async fn knowledge_bound(world: ReferenceWorld) -> [Sampled; 2] {
     let mut session = Session::start(world).await;
     let field = Arc::clone(&session.field);
     let level = field.header().level();
@@ -933,10 +1068,10 @@ async fn knowledge_bound(world: ReferenceWorld) {
         surveyed: surveyed.clone(),
         held: first_held.clone(),
     };
-    let (mut known, sampled) = heights_checked(&field, known, sampling).await;
+    let (mut known, first_sampled) = heights_checked(&field, known, session.seeds, sampling).await;
     assert!(
-        sampled.on_edge > 0 && sampled.points > sampled.on_edge,
-        "{sampled:?}"
+        first_sampled.on_edge > 0 && first_sampled.points > first_sampled.on_edge,
+        "{first_sampled:?}"
     );
 
     // A finer pass over the corner block's edge: the delta since the first revision carries only
@@ -962,9 +1097,21 @@ async fn knowledge_bound(world: ReferenceWorld) {
         surveyed,
         held: second_held,
     };
-    let (_, sampled) = heights_checked(&field, known, sampling).await;
-    assert!(sampled.on_edge > 0, "{sampled:?}");
+    let (_, second_sampled) = heights_checked(&field, known, session.seeds, sampling).await;
+    assert!(second_sampled.on_edge > 0, "{second_sampled:?}");
     session.stop(2).await;
+    [first_sampled, second_sampled]
+}
+
+/// Prints what a slow case compared, pass by pass, for its plan record (R09.T19.c's follow-up),
+/// which `--success-output immediate` or `--nocapture` shows.
+#[expect(
+    clippy::print_stderr,
+    reason = "the slow cases' counts are figures for the plan's record, read with --nocapture"
+)]
+fn report(world: &str, passes: [Sampled; 2]) {
+    let [first, second] = passes;
+    eprintln!("the {world} world compared: the first pass {first:?}; the second {second:?}");
 }
 
 /// On the Ceres-like world, a level-5 field and the quickest: what a client is sent and what it
@@ -972,6 +1119,39 @@ async fn knowledge_bound(world: ReferenceWorld) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_client_holds_only_the_surveyed_field_and_synthesises_the_server_s_heights() {
     knowledge_bound(ReferenceWorld::Ceres).await;
+}
+
+/// On the Mars-like world, a level-7 field whose coarse pass drains it, so that its heights carry
+/// the channels' incision (R09.T6), which the Ceres-like world's have none of: the whole check of
+/// the Ceres-like world's test, the channels compared with the heights, the first pass's run about
+/// the field's largest drainage drawing trunks that cut the ground at the points compared
+/// (R09.T20's deferred finding; a check before `GENERATED_SURFACES_FROM` serves). A world dry now
+/// has its epoch's trunks alone (R09.T6.c), so the Earth-like world's test compares tributaries.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "slow: the Mars-like world's coarse pass, and its heights at deep band levels"]
+async fn the_mars_like_world_s_heights_and_channels_from_the_wire_are_the_server_s() {
+    let [first, second] = knowledge_bound(ReferenceWorld::Mars).await;
+    assert!(
+        first.trunks > 0 && first.on_channels > 0 && first.incised > 0,
+        "the first pass compares channels that cut the ground: {first:?}; the second {second:?}"
+    );
+    report("Mars-like", [first, second]);
+}
+
+/// On the Earth-like world, a level-8 field wet now, whose channels have tributaries below the
+/// coarse cells' trunks (R09.T6.a and T6.b): the whole check of the Ceres-like world's test, the
+/// first pass's run about the field's largest drainage drawing trunks and tributaries that cut the
+/// ground at the points compared. Its air is thick, so its field has no albedo scale (R10.T10.a).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "slow: the Earth-like world's level-8 coarse pass with its water cycle"]
+async fn the_earth_like_world_s_heights_and_tributaries_from_the_wire_are_the_server_s() {
+    let [first, second] = knowledge_bound(ReferenceWorld::Earth).await;
+    assert!(
+        first.trunks > 0 && first.tributaries > 0 && first.on_channels > 0 && first.incised > 0,
+        "the first pass compares trunks and tributaries that cut the ground: {first:?}; the \
+         second {second:?}"
+    );
+    report("Earth-like", [first, second]);
 }
 
 /// On the Mars-like world, a level-7 field: one orbital pass over two whole faces gives a payload
