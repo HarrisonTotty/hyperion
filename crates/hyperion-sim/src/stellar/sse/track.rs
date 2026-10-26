@@ -279,7 +279,10 @@ impl Error for BuildCaptureWindowWidthsError {}
 /// published SSE code's, for the validation of P06.T12.b; its remnant recipe reads no window.
 ///
 /// The options are not `Eq`, `Ord` or `Hash`, since the windows' widths are floats, which the sim
-/// never hashes (P15.T5.d).
+/// never hashes (P15.T5.d). Their `Debug` names the windows only where they are not the
+/// generator's, [`CaptureWindowWidths::DEFAULT`], so that a track's `Debug`, which the binary
+/// timelines' golden digests (`stellar::binary`'s `a_thousand_timelines_are_pinned`), reads as it
+/// did before the windows became an option.
 ///
 /// # Examples
 ///
@@ -292,12 +295,26 @@ impl Error for BuildCaptureWindowWidthsError {}
 /// assert_eq!(sse.bridges(), Bridges::Instant);
 /// assert_eq!(TrackOptions::default().with_bridges(Bridges::Instant).wind(), WindRecipe::Modern);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct TrackOptions {
     wind: WindRecipe,
     remnant: RemnantRecipe,
     bridges: Bridges,
     capture_windows: CaptureWindowWidths,
+}
+
+impl fmt::Debug for TrackOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut options = f.debug_struct("TrackOptions");
+        options
+            .field("wind", &self.wind)
+            .field("remnant", &self.remnant)
+            .field("bridges", &self.bridges);
+        if self.capture_windows != CaptureWindowWidths::DEFAULT {
+            options.field("capture_windows", &self.capture_windows);
+        }
+        options.finish()
+    }
 }
 
 impl Default for TrackOptions {

@@ -1248,3 +1248,24 @@ fn capture_window_widths_are_finite_and_positive() {
         "a single star's electron-capture window width is not finite and positive"
     );
 }
+
+/// The options' `Debug` at the generator's windows is the text it had before they became an option
+/// (P15.T5.d), which the binary timelines' golden digests through a track's `Debug`; other windows
+/// are named.
+#[test]
+fn the_default_options_debug_as_they_did_before_the_windows() {
+    assert_eq!(
+        format!("{:?}", TrackOptions::default()),
+        "TrackOptions { wind: Modern, remnant: MandelMuller2020, bridges: Physical }"
+    );
+    assert_eq!(
+        format!("{:?}", TrackOptions::hurley2000()),
+        "TrackOptions { wind: Hurley2000, remnant: Hurley2000, bridges: Instant }"
+    );
+    let narrow = CaptureWindowWidths::new(SolarMasses::new(0.05), SolarMasses::new(1.0)).unwrap();
+    let text = format!("{:?}", TrackOptions::default().with_capture_windows(narrow));
+    assert!(
+        text.contains("capture_windows: CaptureWindowWidths"),
+        "{text}"
+    );
+}

@@ -2536,6 +2536,14 @@ fit-check`; review-changes on this lane's diff.
       since keeping them would mean hashing float bits, which the sim's `clippy.toml` bans
       (`f64::to_bits`). `Default` is written by hand; `PartialEq` and `PartialOrd` stay derived.
       `CaptureWindowWidths` derives `Debug`, `Clone`, `Copy`, `PartialEq` and `PartialOrd`.
+    - _`TrackOptions`' `Debug`, the gate's fix._ The gate's first run failed one golden,
+      `stellar::binary`'s `a_thousand_timelines_are_pinned` (`binary_timelines.golden` from line
+      2), whose digest hashes each track's `Debug`: the derived `Debug` now printed the new field.
+      No value moved. `Debug` is written by hand: the derived text, with `capture_windows` added
+      only where the widths are not `CaptureWindowWidths::DEFAULT`, so that at the defaults it reads
+      as before. `the_default_options_debug_as_they_did_before_the_windows` (`track/tests.rs`,
+      fast) pins both texts, and the golden passes unchanged. No other digest prints a track or
+      its options (searched). The determinism review had missed it.
     - _The population._ `ReferencePopulation::new(score_scatter: f64) -> Self` became
       `new(params: KickLawParams) -> Result<Self, BuildCaptureWindowWidthsError>`: it holds the
       params, whose ramp `takes_low_mode` and whose scatter `score_factor` read, and
