@@ -165,9 +165,9 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "cluster_bh",
-        revision: 0,
+        revision: 1,
         since_generator_version: 15,
-        provisional: true,
+        provisional: false,
     },
     TableInfo {
         name: "cluster_retention",
@@ -225,9 +225,9 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "equipartition",
-        revision: 0,
+        revision: 1,
         since_generator_version: 15,
-        provisional: true,
+        provisional: false,
     },
     TableInfo {
         name: "giant_cooling",
@@ -273,9 +273,9 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "pulsars",
-        revision: 0,
+        revision: 1,
         since_generator_version: 15,
-        provisional: true,
+        provisional: false,
     },
     TableInfo {
         name: "saturation_curves",
