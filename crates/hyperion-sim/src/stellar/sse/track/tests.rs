@@ -1216,3 +1216,35 @@ fn a_track_built_short_of_its_main_sequence_knows_its_arrival() {
         assert_eq!(helium.main_sequence_arrival(), None);
     }
 }
+
+/// The electron-capture windows' widths are validated once, finite and positive (P15.T5.d), and
+/// the builder method changes the windows alone.
+#[test]
+fn capture_window_widths_are_finite_and_positive() {
+    let ok = SolarMasses::new(0.1);
+    for bad in [0.0, -0.1, f64::NAN, f64::INFINITY] {
+        let bad = SolarMasses::new(bad);
+        assert_eq!(
+            CaptureWindowWidths::new(bad, ok),
+            Err(BuildCaptureWindowWidthsError::Single),
+            "{bad:?}"
+        );
+        assert_eq!(
+            CaptureWindowWidths::new(ok, bad),
+            Err(BuildCaptureWindowWidthsError::CompanionStripped),
+            "{bad:?}"
+        );
+    }
+    let narrow = CaptureWindowWidths::new(SolarMasses::new(0.05), SolarMasses::new(0.4)).unwrap();
+    assert_eq!(narrow.single(), SolarMasses::new(0.05));
+    assert_eq!(narrow.companion_stripped(), SolarMasses::new(0.4));
+    let options = TrackOptions::default().with_capture_windows(narrow);
+    assert_eq!(options.capture_windows(), narrow);
+    assert_eq!(options.wind(), TrackOptions::default().wind());
+    assert_eq!(options.remnant(), TrackOptions::default().remnant());
+    assert_eq!(options.bridges(), TrackOptions::default().bridges());
+    assert_eq!(
+        BuildCaptureWindowWidthsError::Single.to_string(),
+        "a single star's electron-capture window width is not finite and positive"
+    );
+}

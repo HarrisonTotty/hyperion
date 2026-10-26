@@ -87,8 +87,13 @@ mod model;
 mod phases;
 mod post_agb;
 
+use core::error::Error;
+use core::fmt;
+
 use crate::stellar::draws::{StarDraws, UnitUniform};
-use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::remnant::collapse::{
+    COMPANION_STRIPPED_WINDOW, RemnantDraws, SINGLE_STAR_WINDOW,
+};
 use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe, SupernovaType};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{
@@ -150,11 +155,131 @@ pub enum Bridges {
     Instant,
 }
 
-/// The choices a track is built with: the wind and remnant recipes and the bridges.
+/// The widths of the two electron-capture windows of [`RemnantRecipe::MandelMuller2020`], M☉ of
+/// the mass the early AGB's `m_c_bagb` reads (plan 06, design note 12; P15.T5.d): a single star's,
+/// and that of a star whose companion-stripped mark is set. Each is finite and positive.
 ///
-/// The default is the generator's: [`WindRecipe::Modern`], [`RemnantRecipe::MandelMuller2020`]
-/// and [`Bridges::Physical`]. [`TrackOptions::hurley2000`] is the published SSE code's, for the
-/// validation of P06.T12.b.
+/// The window of width w is [`m_cc` − w, `m_cc`), below the lowest initial mass that makes an iron
+/// core ([`ElectronCaptureWindows::window`](crate::stellar::remnant::collapse::ElectronCaptureWindows::window)).
+/// The default, [`CaptureWindowWidths::DEFAULT`], is the generator's:
+/// [`SINGLE_STAR_WINDOW`](crate::stellar::remnant::collapse::SINGLE_STAR_WINDOW), 0.1 M☉, and
+/// [`COMPANION_STRIPPED_WINDOW`](crate::stellar::remnant::collapse::COMPANION_STRIPPED_WINDOW),
+/// 1.0 M☉. Other widths are for plan 15's review of the kick law's defaults (P15.T5.b), through the
+/// kick-law tests' reference population; the generator builds every track at the default.
+///
+/// # Examples
+///
+/// A track whose single-star window is half the generator's:
+///
+/// ```
+/// use hyperion_sim::stellar::remnant::collapse::{COMPANION_STRIPPED_WINDOW, SINGLE_STAR_WINDOW};
+/// use hyperion_sim::stellar::sse::{
+///     BuildCaptureWindowWidthsError, CaptureWindowWidths, TrackOptions,
+/// };
+/// use hyperion_sim::units::SolarMasses;
+///
+/// let narrow = CaptureWindowWidths::new(SolarMasses::new(0.05), COMPANION_STRIPPED_WINDOW)?;
+/// let options = TrackOptions::default().with_capture_windows(narrow);
+/// assert_eq!(options.capture_windows().single(), SolarMasses::new(0.05));
+/// assert_eq!(TrackOptions::default().capture_windows().single(), SINGLE_STAR_WINDOW);
+/// let zero = CaptureWindowWidths::new(SolarMasses::new(0.0), COMPANION_STRIPPED_WINDOW);
+/// assert_eq!(zero, Err(BuildCaptureWindowWidthsError::Single));
+/// # Ok::<(), hyperion_sim::stellar::sse::BuildCaptureWindowWidthsError>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct CaptureWindowWidths {
+    single: SolarMasses,
+    companion_stripped: SolarMasses,
+}
+
+impl CaptureWindowWidths {
+    /// The generator's widths: `collapse`'s
+    /// [`SINGLE_STAR_WINDOW`](crate::stellar::remnant::collapse::SINGLE_STAR_WINDOW) and
+    /// [`COMPANION_STRIPPED_WINDOW`](crate::stellar::remnant::collapse::COMPANION_STRIPPED_WINDOW).
+    pub const DEFAULT: Self = Self {
+        single: SINGLE_STAR_WINDOW,
+        companion_stripped: COMPANION_STRIPPED_WINDOW,
+    };
+
+    /// The widths `single` for a single star's window and `companion_stripped` for a
+    /// companion-stripped star's, M☉ of the mass `m_c_bagb` reads.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildCaptureWindowWidthsError::Single`] or
+    /// [`BuildCaptureWindowWidthsError::CompanionStripped`] for a width that is not finite and
+    /// positive, the single star's checked first.
+    pub const fn new(
+        single: SolarMasses,
+        companion_stripped: SolarMasses,
+    ) -> Result<Self, BuildCaptureWindowWidthsError> {
+        const fn valid(width: SolarMasses) -> bool {
+            width.value().is_finite() && width.value() > 0.0
+        }
+        if !valid(single) {
+            return Err(BuildCaptureWindowWidthsError::Single);
+        }
+        if !valid(companion_stripped) {
+            return Err(BuildCaptureWindowWidthsError::CompanionStripped);
+        }
+        Ok(Self {
+            single,
+            companion_stripped,
+        })
+    }
+
+    /// A single star's window width, M☉. A star whose own wind stripped it counts as single.
+    #[must_use]
+    pub const fn single(&self) -> SolarMasses {
+        self.single
+    }
+
+    /// A companion-stripped star's window width, M☉.
+    #[must_use]
+    pub const fn companion_stripped(&self) -> SolarMasses {
+        self.companion_stripped
+    }
+}
+
+impl Default for CaptureWindowWidths {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Why [`CaptureWindowWidths::new`] refused its widths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BuildCaptureWindowWidthsError {
+    /// The single star's width is not finite and positive.
+    Single,
+    /// The companion-stripped star's width is not finite and positive.
+    CompanionStripped,
+}
+
+impl fmt::Display for BuildCaptureWindowWidthsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let which = match self {
+            Self::Single => "a single star's",
+            Self::CompanionStripped => "a companion-stripped star's",
+        };
+        write!(
+            f,
+            "{which} electron-capture window width is not finite and positive"
+        )
+    }
+}
+
+impl Error for BuildCaptureWindowWidthsError {}
+
+/// The choices a track is built with: the wind and remnant recipes, the bridges, and the widths of
+/// the electron-capture windows the remnant recipe reads.
+///
+/// The default is the generator's: [`WindRecipe::Modern`], [`RemnantRecipe::MandelMuller2020`],
+/// [`Bridges::Physical`] and [`CaptureWindowWidths::DEFAULT`]. [`TrackOptions::hurley2000`] is the
+/// published SSE code's, for the validation of P06.T12.b; its remnant recipe reads no window.
+///
+/// The options are not `Eq`, `Ord` or `Hash`, since the windows' widths are floats, which the sim
+/// never hashes (P15.T5.d).
 ///
 /// # Examples
 ///
@@ -167,21 +292,35 @@ pub enum Bridges {
 /// assert_eq!(sse.bridges(), Bridges::Instant);
 /// assert_eq!(TrackOptions::default().with_bridges(Bridges::Instant).wind(), WindRecipe::Modern);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct TrackOptions {
     wind: WindRecipe,
     remnant: RemnantRecipe,
     bridges: Bridges,
+    capture_windows: CaptureWindowWidths,
+}
+
+impl Default for TrackOptions {
+    fn default() -> Self {
+        Self {
+            wind: WindRecipe::default(),
+            remnant: RemnantRecipe::default(),
+            bridges: Bridges::default(),
+            capture_windows: CaptureWindowWidths::DEFAULT,
+        }
+    }
 }
 
 impl TrackOptions {
-    /// The recipes of HPT and the published SSE code, with no bridges.
+    /// The recipes of HPT and the published SSE code, with no bridges. The windows' widths are the
+    /// generator's, which HPT's remnant recipe never reads.
     #[must_use]
     pub const fn hurley2000() -> Self {
         Self {
             wind: WindRecipe::Hurley2000,
             remnant: RemnantRecipe::Hurley2000,
             bridges: Bridges::Instant,
+            capture_windows: CaptureWindowWidths::DEFAULT,
         }
     }
 
@@ -203,6 +342,15 @@ impl TrackOptions {
         Self { bridges, ..self }
     }
 
+    /// These options with the electron-capture windows' widths `capture_windows`.
+    #[must_use]
+    pub const fn with_capture_windows(self, capture_windows: CaptureWindowWidths) -> Self {
+        Self {
+            capture_windows,
+            ..self
+        }
+    }
+
     /// The wind recipe.
     #[must_use]
     pub const fn wind(&self) -> WindRecipe {
@@ -219,6 +367,12 @@ impl TrackOptions {
     #[must_use]
     pub const fn bridges(&self) -> Bridges {
         self.bridges
+    }
+
+    /// The electron-capture windows' widths.
+    #[must_use]
+    pub const fn capture_windows(&self) -> CaptureWindowWidths {
+        self.capture_windows
     }
 }
 

@@ -2346,3 +2346,88 @@ fit-check`; review-changes on this lane's diff.
     - `provisional` becomes `None`, or `Some("P15.T11.b")` while the acceptance misses.
     - `data/stream_census/` should mark each stream globular-like or not, explicitly: Bonaca and
       Price-Whelan's census includes dwarf-galaxy streams, and mass alone does not split them.
+- **T5.d, T5.b and T5.c as built (lane `lane/103-p15-t5`, 2026-10-26, at `GENERATOR_VERSION` 23;
+  no output moved, no bump).** One heavy brief, issue #103, by main's ruling of 2026-10-23
+  (decision-p15-revalidation Q1–Q5 and Q9), from base 19e44f30. Times are nextest's in the dev
+  profile on an 8-thread laptop with four test threads and four build jobs, nothing else running.
+  - **T5.d, the seams** (plan 06's module, with plan 06's tests).
+    - _The windows._ A new public `stellar::sse::CaptureWindowWidths` (in `track.rs`, re-exported
+      from `sse/mod.rs` with `BuildCaptureWindowWidthsError`, whose variants are `Single` and
+      `CompanionStripped`; the file's only change) carries the two widths, M☉ of the mass
+      `m_c_bagb` reads. `CaptureWindowWidths::new(single, companion_stripped) -> Result<Self, _>`
+      checks once that each is finite and positive; `DEFAULT`, and `Default`, are `collapse`'s
+      `SINGLE_STAR_WINDOW` and `COMPANION_STRIPPED_WINDOW` themselves; getters `single()` and
+      `companion_stripped()`. `TrackOptions` gains the field, `with_capture_windows(widths)` and
+      `capture_windows()`. `TrackOptions::default()` and `hurley2000()` carry `DEFAULT`; HPT's
+      remnant recipe reads no window. `Builder::captures_electrons` (`track/phases.rs`) takes the
+      width from the builder's options, root bracket included. Nothing else in the track changed:
+      `stripped_mark_min_mass` and `fates::STRIPPED_WINDOW` still read the constants.
+    - _`TrackOptions`' derives._ `Eq`, `Hash` and `Ord` are dropped, nothing having used them (no
+      map key, sort or enclosing derive; the sim's and the server's Clippy, all targets, agree),
+      since keeping them would mean hashing float bits, which the sim's `clippy.toml` bans
+      (`f64::to_bits`). `Default` is written by hand; `PartialEq` and `PartialOrd` stay derived.
+      `CaptureWindowWidths` derives `Debug`, `Clone`, `Copy`, `PartialEq` and `PartialOrd`.
+    - _The population._ `ReferencePopulation::new(score_scatter: f64) -> Self` became
+      `new(params: KickLawParams) -> Result<Self, BuildCaptureWindowWidthsError>`: it holds the
+      params, whose ramp `takes_low_mode` and whose scatter `score_factor` read, and
+      `TrackOptions::default().with_capture_windows(..)` of their two widths, which `fate` builds
+      every track with. New getters `params()` and `track_options()`. `Default` is
+      `new(KickLawParams::default())`. `sampled_kick` builds its population from `law.params()`
+      whole; `kick_observables` builds one before its loop and samples through the private
+      `sampled_kick_from`. Both keep plan 06's signatures and panic, as their `# Panics` say, on a
+      width that is not finite and positive: the fields' documented precondition, a caller's bug.
+      A caller that builds its own population gets the error.
+    - _Docs._ The `ec_window_*` fields (the generator's track reads `collapse`'s constants;
+      `ReferencePopulation` and `kick_observables` pass the fields to their tracks), the
+      population's (with a second example, a lowered ramp), `TrackOptions`', the new type's (with
+      an example), `captures_electrons`', `with_stripped_mark`'s and the module's.
+    - _Bit-identity._ `golden_diff.py --base origin/rendering-and-planets`: "GENERATOR_VERSION: 23
+      at origin/rendering-and-planets -> 23 in the working tree … No golden files changed …
+      Nothing to reconcile." `just fit-check`: `41 fresh, 7 warnings, 0 failures` at the base, and
+      the same 50 lines byte for byte on T5.d's tree (`kick_rank` fresh). A throwaway test, run at
+      the base and on T5.d's tree and deleted, printed two values with `{:?}`, each the same bytes
+      at both:
+      - the quantiles of the default population's first 2,000 scores of seed 0x0619b00000000000
+        (`score_quantiles`), SHA-256
+        `086346b758d81405fb30290f8e27c1f0684472bb65a9393c621114856bccb06c`;
+      - `kick_observables` of the default law and the committed table over 2,000 stars of seed
+        0x0619d00000000001, SHA-256
+        `cb3702151afa8a8a4678e7745be170db30e3eaad1ad08a1e455f1ad62312628f`.
+
+      P06.T19.d's seven slow tests pass by name with ruling 147.2's figures: 9,131
+      ordinary-mode neutron stars at ln v 5.5574 and 0.6307, K–S p 0.8729; the sky share 0.0708
+      and 0.0903 under 100 km/s; the escape share 0.1159; the low mode 0.2740; retention 0.2740 /
+      0.2783 / 0.3232; 0.7714 of 10,085 survivors with e < 0.3; 0.7110 of 7,013 black holes
+      unkicked, the 6,148 light ones 0.6703 unkicked and 0.1363 above 100 km/s. Each took 19.5 s;
+      the command, with `ranks_of_fresh_reference_scores_are_uniform` (208.8 s, p 0.5238) and
+      `kick_distributions_against_their_sources`, 228.5 s, at a 1-minute load of 3.1 (at most 4.6).
+
+    - _Tests_, all fast. `a_narrower_single_star_window_moves_the_captures_at_its_edge_in_the_population_only`
+      (0.34 s) and its twin for the stripped window (0.38 s; not asked for, added at review), in
+      `reference.rs`, through one helper: on a 0.01 M☉ grid of an unmarked (marked) star's initial
+      masses, the default population's captures run from the window's edge, 8.20 (7.26) M☉, to its
+      top, 8.30 M☉, below the iron cores; at half the width (0.05 and 0.5 M☉) the edge leaves a white dwarf
+      by envelope loss and the top still captures; `Track::full` still captures at the edge.
+      `the_default_track_options_carry_the_collapse_windows_bit_for_bit` (`kick.rs`, beside
+      `the_defaults_are_the_brainstorms_and_the_tracks`, 0.03 s): `assert_same_bits` of
+      `TrackOptions::default()`'s and `hurley2000()`'s widths and `KickLawParams::default()`'s
+      against `collapse`'s, and the default population's `track_options()` equal to
+      `TrackOptions::default()` whole (a determinism-review addition).
+      `capture_window_widths_are_finite_and_positive` (`track/tests.rs`, 0.02 s) and
+      `a_population_refuses_a_window_that_is_not_positive` (0.02 s) check the variants.
+      `two_runs_give_the_same_table_bit_for_bit` (0.26 s) and the fit's
+      `the_committed_body_is_the_rendering_of_its_quantiles` (0.005 s) pass.
+    - _Deviations._ (1) The windows ride a new type rather than two fields of `TrackOptions`, so
+      that they are validated once where they are carried. (2) `ReferencePopulation::new` returns a
+      `Result`, since a `KickLawParams`' widths are plain `f64` fields. (3) The stripped window's
+      seam test, beyond the brief.
+    - _Deferred findings (2026-10-13 rule)_, from P15.T5.d: `Builder::stripped_by_companion`'s doc
+      (`track/build.rs`, outside the lane) still gives the windows as 1 and 0.1 M☉, true now only
+      at the default options; a wording fix for a lane whose scope holds the file.
+    - _For main_ (T5.d). Plan 06's Provides (180–190) can name the population's constructor,
+      `ReferencePopulation::new(params)`, which returns a `Result` with
+      `BuildCaptureWindowWidthsError`, and `TrackOptions`' `with_capture_windows` with
+      `stellar::sse::CaptureWindowWidths`. Design note 12 can say that
+      the widths are a track option, the generator's being `collapse`'s constants. The "For
+      P15.T5.b" note of P06's "Deviations in T19.a–d, as built" ("vary them through the
+      constants") is superseded: the review varies them through these seams.

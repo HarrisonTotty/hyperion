@@ -4,9 +4,8 @@
 use crate::stellar::Phase;
 use crate::stellar::premain::{self, Contraction, PROTOSTAR_YEARS, Protostar};
 use crate::stellar::remnant::collapse::{
-    COMPANION_STRIPPED_WINDOW, CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB,
-    OXYGEN_NEON_CAPTURE_MASS, RemnantDraws, SINGLE_STAR_WINDOW, core_collapse,
-    electron_capture_remnant,
+    CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB, OXYGEN_NEON_CAPTURE_MASS,
+    RemnantDraws, core_collapse, electron_capture_remnant,
 };
 use crate::stellar::remnant::structure::{
     DegenerateCore, OXYGEN_NEON_MC_BAGB, hurley_supernova_remnant, white_dwarf_kind,
@@ -1092,10 +1091,17 @@ impl Builder<'_> {
     /// Whether a star whose early AGB had the initial mass `m0` dies by electron capture under
     /// the track's remnant recipe whatever its thermal pulses do: never under
     /// [`RemnantRecipe::Hurley2000`], and under [`RemnantRecipe::MandelMuller2020`] inside the
-    /// electron-capture window [`m_cc` − w, `m_cc`), w being 0.1 M☉ for a single star
-    /// ([`ElectronCaptureWindows::single`]) and 1 M☉ for one whose provisional companion-stripped
-    /// mark is set ([`ElectronCaptureWindows::companion_stripped`]; plan 06, design notes 11 and
-    /// 12, P06.T19.c).
+    /// electron-capture window [`m_cc` − w, `m_cc`), w being the track's options' single-star
+    /// width for a single star and their companion-stripped width for one whose provisional
+    /// companion-stripped mark is set ([`TrackOptions::capture_windows`]; plan 06, design notes 11
+    /// and 12, P06.T19.c). The generator's widths are 0.1 and 1 M☉, `collapse`'s
+    /// [`SINGLE_STAR_WINDOW`] and [`COMPANION_STRIPPED_WINDOW`], which the default options carry;
+    /// other widths are for plan 15's review of the kick law's defaults (P15.T5.b), through
+    /// P15.T5.d's seam.
+    ///
+    /// [`TrackOptions::capture_windows`]: super::TrackOptions::capture_windows
+    /// [`SINGLE_STAR_WINDOW`]: crate::stellar::remnant::collapse::SINGLE_STAR_WINDOW
+    /// [`COMPANION_STRIPPED_WINDOW`]: crate::stellar::remnant::collapse::COMPANION_STRIPPED_WINDOW
     ///
     /// The window is tested in `m0`, the mass the early AGB's `m_c_bagb` reads, which the main
     /// sequence's wind has lowered from the star's initial mass (HPT section 7.1), because
@@ -1115,10 +1121,11 @@ impl Builder<'_> {
         match self.options.remnant() {
             RemnantRecipe::Hurley2000 => false,
             RemnantRecipe::MandelMuller2020 => {
+                let widths = self.options.capture_windows();
                 let width = if self.companion_stripped {
-                    COMPANION_STRIPPED_WINDOW
+                    widths.companion_stripped()
                 } else {
-                    SINGLE_STAR_WINDOW
+                    widths.single()
                 };
                 let c = self.phys.coeffs;
                 let makes_iron = |m: f64| m_c_bagb(SolarMasses::new(m), c) >= IRON_CORE_MC_BAGB;

@@ -50,7 +50,8 @@ pub(crate) use track::{
 };
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
 pub use track::{
-    AgeInterval, Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, PhasePredicate, Track, TrackOptions,
+    AgeInterval, Bridges, BuildCaptureWindowWidthsError, CaptureWindowWidths, MAX_INITIAL_MASS,
+    MIN_INITIAL_MASS, PhasePredicate, Track, TrackOptions,
 };
 pub(crate) use track::{
     CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
