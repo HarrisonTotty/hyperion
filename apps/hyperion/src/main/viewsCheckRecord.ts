@@ -1,10 +1,14 @@
 /**
  * The check of what the several-views check's renderer sends the main process (plan R07, T20):
  * its record, which the IPC handler treats as `unknown` until it passes; and the terrain run's
- * (plan R10, R10.T16.d) and the hand-over check's (R10.T10.g), checked the same way.
+ * (plan R10, R10.T16.d), the hand-over check's (R10.T10.g) and the atmosphere run's (plan R08,
+ * R08.T10.b), checked the same way.
  */
 
 import type {
+  AtmosphereCheckCapture,
+  AtmosphereCheckFrames,
+  AtmosphereCheckRecord,
   HandoverAngles,
   HandoverCheckRecord,
   HandoverComparisonRecord,
@@ -925,4 +929,116 @@ export function readHandoverCheckRecord(value: unknown): HandoverCheckRecord | n
     looks,
     faults,
   };
+}
+
+/**
+ * A capture's label: lower case letters, digits and hyphens, 1 to 48 of them (the session's
+ * `capture`, the capture channel's check and the atmosphere run's record share it).
+ */
+export const CAPTURE_LABEL = /^[a-z0-9-]{1,48}$/u;
+
+/**
+ * Whether `value` is a label a capture may be named by (`ViewsCheckApi.capture`), and so a label an
+ * atmosphere run's record may name a capture by (R08.T10.b).
+ */
+export function isCaptureLabel(value: unknown): value is string {
+  return typeof value === "string" && CAPTURE_LABEL.test(value);
+}
+
+/** A string or `null`. */
+function isTextOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+/** A finite number of zero or more, or `null`; `undefined` where it is neither. */
+function nonNegativeOrNull(value: unknown): number | null | undefined {
+  return value === null ? null : isNonNegative(value) ? value : undefined;
+}
+
+/** The primary's frames over an atmosphere-run capture's window (R08.T10.b). */
+function atmosphereFrames(value: unknown): AtmosphereCheckFrames | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { fromMs, toMs, draws } = value;
+  const intervalMedianMs = nonNegativeOrNull(value["intervalMedianMs"]);
+  const intervalP95Ms = nonNegativeOrNull(value["intervalP95Ms"]);
+  const gpuMedianMs = nonNegativeOrNull(value["gpuMedianMs"]);
+  const gpuP95Ms = nonNegativeOrNull(value["gpuP95Ms"]);
+  return isFiniteNumber(fromMs) &&
+    isFiniteNumber(toMs) &&
+    toMs >= fromMs &&
+    isCount(draws) &&
+    intervalMedianMs !== undefined &&
+    intervalP95Ms !== undefined &&
+    gpuMedianMs !== undefined &&
+    gpuP95Ms !== undefined
+    ? { fromMs, toMs, draws, intervalMedianMs, intervalP95Ms, gpuMedianMs, gpuP95Ms }
+    : null;
+}
+
+/** One capture of the atmosphere run (R08.T10.b). */
+function atmosphereCapture(value: unknown): AtmosphereCheckCapture | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const frames = atmosphereFrames(value["frames"]);
+  const statements = strings(value["statements"]);
+  const faults = strings(value["faults"]);
+  const rangeM = finiteOrNull(value["rangeM"]);
+  const phaseDeg = finiteOrNull(value["phaseDeg"]);
+  const { label, designation, camera, exposure, atMs } = value;
+  if (
+    !isCaptureLabel(label) ||
+    !isTextOrNull(designation) ||
+    !isTextOrNull(camera) ||
+    !isTextOrNull(exposure) ||
+    rangeM === undefined ||
+    (rangeM !== null && !(rangeM > 0)) ||
+    phaseDeg === undefined ||
+    (phaseDeg !== null && !(phaseDeg >= 0 && phaseDeg <= 180)) ||
+    !isFiniteNumber(atMs) ||
+    frames === null ||
+    statements === null ||
+    faults === null
+  ) {
+    return null;
+  }
+  return {
+    label,
+    designation,
+    camera,
+    rangeM,
+    phaseDeg,
+    exposure,
+    atMs,
+    frames,
+    statements,
+    faults,
+  };
+}
+
+/** `value` as the atmosphere run's record (plan R08, R08.T10.b), or `null` if it is not one. */
+export function readAtmosphereCheckRecord(value: unknown): AtmosphereCheckRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { timer, devicePixelRatio, mediaReadyMs } = value;
+  const size = canvas(value["canvas"]);
+  const captures = listOf(value["captures"], atmosphereCapture);
+  const faults = strings(value["faults"]);
+  if (
+    (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
+    !isFiniteNumber(devicePixelRatio) ||
+    !(devicePixelRatio > 0) ||
+    size === null ||
+    !isNonNegative(mediaReadyMs) ||
+    captures === null ||
+    faults === null ||
+    // Each label at most once: a second would save its picture over the first's.
+    new Set(captures.map((each) => each.label)).size !== captures.length
+  ) {
+    return null;
+  }
+  return { timer, devicePixelRatio, canvas: size, mediaReadyMs, captures, faults };
 }

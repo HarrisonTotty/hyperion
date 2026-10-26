@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { ViewsCheckRecord } from "../preload/api";
+import { ATMOSPHERE_RECORD, MOONLIT_NIGHT } from "./fixtures/atmosphereRecord";
 import { HANDOVER_RECORD, passingLook } from "./fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
 import {
+  isCaptureLabel,
+  readAtmosphereCheckRecord,
   readHandoverCheckRecord,
   readTerrainCheckRecord,
   readViewsCheckRecord,
@@ -280,5 +283,87 @@ describe("the hand-over check's record (R10.T10.g)", () => {
 
   it("is refused by the terrain run's reader", () => {
     expect(readTerrainCheckRecord(HANDOVER_RECORD)).toBeNull();
+  });
+});
+
+describe("the atmosphere run's record (R08.T10.b)", () => {
+  it("is read back whole", () => {
+    expect(readAtmosphereCheckRecord(structuredClone(ATMOSPHERE_RECORD))).toEqual(
+      ATMOSPHERE_RECORD,
+    );
+  });
+
+  it("is read back with fault lines, no capture and no frame times", () => {
+    const night = {
+      ...MOONLIT_NIGHT,
+      exposure: null,
+      camera: null,
+      frames: {
+        ...MOONLIT_NIGHT.frames,
+        draws: 1,
+        intervalMedianMs: null,
+        intervalP95Ms: null,
+        gpuMedianMs: null,
+        gpuP95Ms: null,
+      },
+      faults: ["ATMOSPHERE NOT AVAILABLE: computation failed for TEST EARTH, reopen VIEW to retry"],
+    };
+    const faulted = { ...ATMOSPHERE_RECORD, captures: [night], faults: ["device-lost: unknown"] };
+    const empty = { ...ATMOSPHERE_RECORD, captures: [] };
+    expect([
+      readAtmosphereCheckRecord(structuredClone(faulted)),
+      readAtmosphereCheckRecord(structuredClone(empty)),
+    ]).toEqual([faulted, empty]);
+  });
+
+  it.each([
+    [["timer"], "fast"],
+    [["devicePixelRatio"], 0],
+    [["canvas"], null],
+    [["canvas", "widthPx"], -1],
+    [["mediaReadyMs"], -1],
+    [["mediaReadyMs"], Number.NaN],
+    [["captures"], null],
+    [["captures", 0, "label"], "Fixture TEST EARTH"],
+    [["captures", 0, "label"], "../escape"],
+    [["captures", 0, "label"], "x".repeat(49)],
+    [["captures", 1, "label"], "fixture-test-earth"],
+    [["captures", 0, "designation"], 3],
+    [["captures", 0, "camera"], false],
+    [["captures", 0, "rangeM"], 0],
+    [["captures", 0, "rangeM"], "far"],
+    [["captures", 0, "phaseDeg"], 181],
+    [["captures", 0, "phaseDeg"], -1],
+    [["captures", 0, "exposure"], 12],
+    [["captures", 0, "atMs"], Number.POSITIVE_INFINITY],
+    [["captures", 0, "frames"], null],
+    [["captures", 0, "frames", "toMs"], 0],
+    [["captures", 0, "frames", "draws"], 1.5],
+    [["captures", 0, "frames", "intervalMedianMs"], -1],
+    [["captures", 0, "frames", "gpuP95Ms"], "slow"],
+    [["captures", 0, "statements"], [1]],
+    [["captures", 0, "faults"], null],
+    [["captures", 0, "faults"], [{ line: "a fault" }]],
+    [["faults"], [3]],
+  ])("refuses a record whose %j is %j", (path, value) => {
+    expect(readAtmosphereCheckRecord(replaced(ATMOSPHERE_RECORD, path, value))).toBeNull();
+  });
+
+  it("takes the labels the capture's channel takes, and no other", () => {
+    expect([isCaptureLabel("fixture-test-earth-slab"), isCaptureLabel("A/B")]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("refuses the other runs' records, and their readers refuse it", () => {
+    expect([
+      readAtmosphereCheckRecord(RECORD),
+      readAtmosphereCheckRecord(TERRAIN_RECORD),
+      readAtmosphereCheckRecord(HANDOVER_RECORD),
+      readViewsCheckRecord(ATMOSPHERE_RECORD),
+      readTerrainCheckRecord(ATMOSPHERE_RECORD),
+      readHandoverCheckRecord(ATMOSPHERE_RECORD),
+    ]).toEqual([null, null, null, null, null, null]);
   });
 });

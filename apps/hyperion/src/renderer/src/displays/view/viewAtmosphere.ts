@@ -139,18 +139,22 @@ export const NO_ATMOSPHERE_SHOWN: ViewAtmosphereShown = { labels: [], plate: [],
 
 /**
  * What a view's report from the cache says on its label block: its labels, and its bodies'
- * problems worded with their designations (`atmosphereProblemLines`), a body the scene no longer
- * holds named by its ID.
+ * problems worded with their designations (`atmosphereProblemLines`). A problem of a body the scene
+ * no longer holds, a report the scene has moved on from, says nothing: no line names a body the
+ * view does not draw.
  */
 export function atmosphereShownOf(
   report: AtmosphereViewReport,
   scene: ViewScene,
 ): ViewAtmosphereShown {
   const designations = new Map(scene.bodies.map((body) => [body.id, body.designation]));
-  const problems: BodyAtmosphereProblem[] = [...report.problems].map(([id, problem]) => ({
-    designation: designations.get(id) ?? id,
-    problem,
-  }));
+  const problems: BodyAtmosphereProblem[] = [];
+  for (const [id, problem] of report.problems) {
+    const designation = designations.get(id);
+    if (designation !== undefined) {
+      problems.push({ designation, problem });
+    }
+  }
   const lines = atmosphereProblemLines(problems);
   return { labels: report.labels, plate: lines.plate, fault: lines.fault };
 }

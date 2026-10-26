@@ -684,7 +684,7 @@ describe("the style", () => {
     ]);
   });
 
-  it("states the atmosphere's notes after the bodies' labels, a server's failure in caution (R08.T10.b)", () => {
+  it("states the atmosphere's notes after the bodies' labels, a server's failure as a fault's status (R08.T10.b)", () => {
     const photoreal = done(
       commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
     );
@@ -700,7 +700,7 @@ describe("the style", () => {
       ...albedo,
       "ATMOSPHERE: NOT YET MODELLED",
       "ATMOSPHERE: NOT RESOLVED",
-      { text: failed, caution: true },
+      { text: failed, standing: "fault" },
       "ATMOSPHERE: APPROXIMATE",
     ]);
   });

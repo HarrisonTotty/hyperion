@@ -1,5 +1,6 @@
+import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
-import { type LabelStatement, statementText } from "./viewRun";
+import type { LabelStatement } from "./viewRun";
 
 /** Props of {@link LabelStatementLine}. */
 export interface LabelStatementLineProps {
@@ -7,20 +8,19 @@ export interface LabelStatementLineProps {
 }
 
 /**
- * One steady statement under a view's label block (plan R02, R02.T15.c): set through `StatusText`,
- * in `--text`, or in `--status-caution` for a `CautionStatement` (a server's own failure,
- * `ATMOSPHERE REJECTED`'s, plan R08, R08.T10.b), whose words say what it is as well, so that its
- * state is never told by colour alone.
+ * One steady statement under a view's label block (plan R02, R02.T15.c): a note set through
+ * `StatusText`, in `--text`; or a request's status (`StatusStatement`, `ATMOSPHERE REJECTED`'s,
+ * plan R08, R08.T10.b), set as every request's `REJECTED` is, through `StatusLine`: `refused` in
+ * `--text`, `fault` in `--status-caution`, its words saying which, so that its state is never told
+ * by colour alone.
  */
 export function LabelStatementLine({ statement }: LabelStatementLineProps) {
-  const caution = typeof statement !== "string";
-  return (
-    <p
-      className={
-        caution ? "view-label__statement view-label__statement--caution" : "view-label__statement"
-      }
-    >
-      <StatusText text={statementText(statement)} />
-    </p>
-  );
+  if (typeof statement === "string") {
+    return (
+      <p className="view-label__statement">
+        <StatusText text={statement} />
+      </p>
+    );
+  }
+  return <StatusLine text={statement.text} standing={statement.standing} />;
 }

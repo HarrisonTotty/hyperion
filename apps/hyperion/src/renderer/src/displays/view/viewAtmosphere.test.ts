@@ -131,6 +131,19 @@ describe("a view's atmosphere shown (R08.T10.b)", () => {
     ]);
     expect(shown.fault).toEqual([]);
   });
+
+  it("says nothing of a body the scene no longer holds", () => {
+    const { scene } = phaseBody("TEST GIANT");
+    const shown = atmosphereShownOf(
+      {
+        labels: [],
+        problems: new Map([["0300080020000000.0300", { kind: "failed" }]]),
+        pending: false,
+      },
+      scene,
+    );
+    expect([shown.plate, shown.fault]).toEqual([[], []]);
+  });
 });
 
 describe("a view's handle on the atmosphere cache (R08.T10.b)", () => {

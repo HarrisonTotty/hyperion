@@ -50,7 +50,12 @@
  * weathered's field (`terrain_test_weathered.golden`: the moon on a 1 Gyr surface, its young
  * craters ringed by haloes of fresh regolith) in `TERRAIN TEST`'s place (`ViewsCheckLaunch.fixture`),
  * and its results are named `…-terrain-weathered` or `…-handover-weathered`; `--weathered` is
- * refused without `--terrain`, as `--handover` is.
+ * refused without `--terrain`, as `--handover` is. With `--atmosphere` instead (plan R08,
+ * R08.T10.b) it runs the atmosphere run on `ATMOSPHERE TEST`, at its `--setting`: the primary
+ * photorealistic, its atmosphere media awaited, a scripted free-camera flight to a few radii of each
+ * air fixture, each captured, then the moonlit night from the seat. `--atmosphere` is refused
+ * without `--views-check`, and with `--terrain`, a separate run (`--handover` and `--weathered`
+ * beside it are refused first, as options of a `--terrain` that was not given).
  *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
@@ -233,6 +238,12 @@ export function buildCommand(version: string): Command {
         "the terrain run, or its hand-over check, on TEST MOON weathered (plan R10): haloed young craters",
       ),
     )
+    .addOption(
+      new Option(
+        "--atmosphere",
+        "the check's atmosphere run on ATMOSPHERE TEST (plan R08): a hand flight past each air fixture, then the moonlit night",
+      ),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -305,8 +316,14 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (options["weathered"] === true && options["terrain"] !== true) {
     command.error("error: --weathered is an option of --terrain, which was not given");
   }
+  if (options["atmosphere"] === true && options["terrain"] === true) {
+    command.error("error: --atmosphere and --terrain are separate runs; give one");
+  }
   if (options["terrain"] === true && options["viewsCheck"] !== true) {
     command.error("error: --terrain is an option of --views-check, which was not given");
+  }
+  if (options["atmosphere"] === true && options["viewsCheck"] !== true) {
+    command.error("error: --atmosphere is an option of --views-check, which was not given");
   }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
@@ -395,13 +412,16 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     setting: settingOf(options),
     smoke: options["smoke"] === true,
     out: typeof out === "string" ? out : null,
-    // `--handover` and `--weathered` are refused without `--terrain` before this is reached.
+    // `--handover` and `--weathered` are refused without `--terrain` before this is reached, and
+    // `--atmosphere` with it, so an atmosphere launch names `TERRAIN TEST`'s field, the default.
     run:
-      options["terrain"] !== true
-        ? "several-views"
-        : options["handover"] === true
-          ? "handover"
-          : "terrain",
+      options["atmosphere"] === true
+        ? "atmosphere"
+        : options["terrain"] !== true
+          ? "several-views"
+          : options["handover"] === true
+            ? "handover"
+            : "terrain",
     fixture: options["weathered"] === true ? "terrain-test-weathered" : "terrain-test",
   };
 }

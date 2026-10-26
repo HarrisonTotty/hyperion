@@ -396,7 +396,10 @@ export class ViewFrameDrawer {
       inputs.availability.photorealistic &&
       this.#photoreal.status !== "failed";
     const list = buildWireframeDrawList(
-      { ...run.scene, stars: inputs.stars },
+      // Offline (no server) the interim field is empty, and a kept scene's own stars, as
+      // `ATMOSPHERE TEST` carries (plan R08, R08.T10.b), stand in for the field; R06's star layer
+      // is the server's. Every other kept scene has none, so nothing else changes.
+      { ...run.scene, stars: inputs.stars.length === 0 ? run.scene.stars : inputs.stars },
       camera,
       viewport,
       tokens,

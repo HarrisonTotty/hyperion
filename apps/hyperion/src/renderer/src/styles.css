@@ -3978,11 +3978,6 @@ body {
   letter-spacing: 0.15em;
 }
 
-/* A server's own failure to answer for a body's atmosphere, a failed system, so caution (R08.T10.b). */
-.view-label__statement--caution {
-  color: var(--status-caution);
-}
-
 /* The stars' count line: numbers, in B612 Mono with tabular figures. */
 .view-label__count {
   margin: 0.25rem 0 0;

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { VIEWS_CHECK_CHANNELS } from "../main/viewsCheck";
+import { ATMOSPHERE_RECORD } from "../main/fixtures/atmosphereRecord";
 import { HANDOVER_RECORD } from "../main/fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "../main/fixtures/terrainRecord";
 import type { ViewsCheckRecord } from "./api";
@@ -86,6 +87,35 @@ describe("the preload's views-check functions", () => {
     expect(invoke.mock.calls).toEqual([
       [VIEWS_CHECK_CHANNEL_NAMES.writeHandoverResults, HANDOVER_RECORD],
     ]);
+  });
+
+  it("send an atmosphere run's captures and record on their own channels (R08.T10.b)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>((channel) =>
+      Promise.resolve(
+        channel === VIEWS_CHECK_CHANNEL_NAMES.writeAtmosphereResults
+          ? { json: "a", markdown: "b" }
+          : null,
+      ),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "atmosphere" }, { invoke });
+    await api.capture("fixture-test-earth");
+    expect(await api.writeAtmosphereResults(ATMOSPHERE_RECORD)).toEqual({
+      json: "a",
+      markdown: "b",
+    });
+    await api.end({ status: "pass" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.capture, "fixture-test-earth"],
+      [VIEWS_CHECK_CHANNEL_NAMES.writeAtmosphereResults, ATMOSPHERE_RECORD],
+      [VIEWS_CHECK_CHANNEL_NAMES.end, { status: "pass" }],
+    ]);
+  });
+
+  it("refuses an atmosphere results answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(api.writeAtmosphereResults(ATMOSPHERE_RECORD)).rejects.toThrow(
+      "the main process wrote no atmosphere results file",
+    );
   });
 
   it("refuses a hand-over results answer of the wrong shape", async () => {

@@ -20,8 +20,8 @@ describe("the views check's launch switch", () => {
     expect(viewsCheckLaunchFromArgv(["--other", viewsCheckSwitch(LAUNCH)])).toEqual(LAUNCH);
   });
 
-  it.each([["terrain"], ["handover"]] as const)(
-    "carries a %s run's launch (R10.T16.d, R10.T10.g)",
+  it.each([["terrain"], ["handover"], ["atmosphere"]] as const)(
+    "carries a %s run's launch (R10.T16.d, R10.T10.g, R08.T10.b)",
     (run) => {
       const launch = { ...LAUNCH, run };
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
@@ -43,6 +43,12 @@ describe("the views check's launch switch", () => {
         viewsCheckSwitch({ ...LAUNCH, fixture: "terrain-test-weathered" }),
       ]),
     ).toThrow(/does not hold/);
+  });
+
+  it("refuses the weathered fixture on the atmosphere run, which serves no field (R08.T10.b)", () => {
+    const launch = { ...LAUNCH, run: "atmosphere", fixture: "terrain-test-weathered" } as const;
+    expect(readViewsCheckLaunch(launch)).toBeNull();
+    expect(() => viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toThrow(/does not hold/);
   });
 
   it("is absent on any other launch", () => {

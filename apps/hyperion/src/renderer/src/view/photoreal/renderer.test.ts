@@ -416,6 +416,80 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     tables.dispose();
   });
 
+  it("lays a handed-over body's air over its terrain, which takes its record's tables (R10.T16.c's binding)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    const planet = {
+      ...bodyAt("0200080020000000.0300", vec3(0, 0, -1e8)),
+      handoverReliefM: 4 * limbDistanceM(1e8, 6.371e6) * pixelAngleRad(camera, VIEWPORT),
+    };
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const terrainDraw: DrawItem = {
+      mesh: { kind: "mesh", name: "terrain patches" },
+      material: { kind: "material", name: "terrain-lit-baked-offsets" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    };
+    const lit: BodyFramePlan[] = [];
+    const terrain = {
+      surveyCoverage: () => null,
+      draws: (plan: BodyFramePlan) => {
+        lit.push(plan);
+        return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
+      },
+      symbologyDepth: () => [],
+    };
+    const air = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
+    const first = renderer.render(view, air);
+    const from = engine.targetFrames.length;
+    renderer.render(view, { ...air, previousRegimes: first?.regimes ?? new Map(), terrain });
+    const labels = engine.targetFrames.slice(from).map((f) => f.label);
+    const bodiesAt = labels.indexOf(PHOTOREAL_PASS_LABELS.bodies);
+    expect(engine.targetFrames[from + bodiesAt]?.draws.map((d) => d.material.name)).toContain(
+      "terrain-lit-baked-offsets",
+    );
+    expect(bodiesAt).toBeLessThan(labels.indexOf(ATMOSPHERE_COMPOSITE_PASS));
+    const record = lit.at(-1)?.discs.find((each) => each.body === planet.id);
+    expect(record?.atmosphere?.transmittance).toBe(tables.transmittance);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws three bodies' composites, none into the target it reads", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const bodies = [
+      bodyAt("0200080020000000.0300", vec3(-3e7, 0, -6e7)),
+      bodyAt("0200080020000000.0400", vec3(0, 0, -8e7)),
+      bodyAt("0200080020000000.0500", vec3(3e7, 0, -1e8)),
+    ];
+    const tables = bodies.map(
+      () => new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M),
+    );
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies,
+      atmospheres: bodies.map((body, i) => {
+        const own = tables[i];
+        if (own === undefined) {
+          throw new Error("a body without its tables");
+        }
+        return airOf(body, own);
+      }),
+    });
+    const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(composites).toHaveLength(3);
+    // Each composite reads the colour the one before it drew, the first the scene's.
+    const reads = composites.map((f) => f.draws[0]?.textures["sceneColour"]?.name);
+    expect(new Set(reads.slice(1)).size).toBe(2);
+    expect(reads[1]).not.toBe(reads[0]);
+    expect(reads[2]).not.toBe(reads[1]);
+    renderer.dispose();
+    for (const each of tables) {
+      each.dispose();
+    }
+  });
+
   it("draws two bodies' composites farthest first, the nearer over the farther", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     const near = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));

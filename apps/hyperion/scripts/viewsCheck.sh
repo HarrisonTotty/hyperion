@@ -7,7 +7,7 @@
 # summary. No server is needed.
 #
 #   viewsCheck.sh [--hidden] [--setting high|low] [--smoke] [--out <dir>]
-#                 [--terrain [--handover] [--weathered]]
+#                 [--terrain [--handover] [--weathered] | --atmosphere]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --hidden never shows the window (offscreen rendering): no presentation times and no question,
@@ -38,10 +38,21 @@
 # <date>-<machine>-<setting>-terrain-weathered and -handover-weathered, and the run block names
 # the fixture. --weathered without --terrain is refused by the client; the script passes it on.
 #
+# --atmosphere runs the atmosphere run instead (plan R08, R08.T10.b), on the kept `ATMOSPHERE TEST`
+# scene: the primary photorealistic, its atmosphere media awaited, the moonlit night captured from
+# the seat on TEST EARTH's night side, then a scripted free-camera flight to a few radii of each air
+# fixture, TEST EARTH SLAB, TEST MARS, TEST SATURN and TEST EARTH, each captured (a smoke flies to
+# TEST EARTH SLAB alone). Both settings by default, as --terrain; it writes
+# <date>-<machine>-<setting>-atmosphere.json and .md
+# under target/views-check/atmosphere/ for a smoke and docs/measurements/atmosphere-flight/
+# otherwise, and exits 1 when a capture shows an ATMOSPHERE NOT AVAILABLE, ATMOSPHERE DATA INVALID
+# or graphics fault line, or no capture was taken. --atmosphere with --terrain is refused by the
+# client.
+#
 # Each launch gets a fresh `--user-data-dir`, removed afterwards; Electron runs in a process group
 # of its own under `timeout`, killed when the launch ends or the script ends for any reason. The
-# exit status is the client's: 0 the run is recorded (and, for the terrain run, passes), 1 it could
-# not finish or a terrain check failed, 3 the watchdog.
+# exit status is the client's: 0 the run is recorded (and, for the terrain and atmosphere runs,
+# passes), 1 it could not finish or a terrain check or an atmosphere capture failed, 3 the watchdog.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,6 +63,7 @@ electron="${HYPERION_VIEWS_CHECK_ELECTRON:-$here/node_modules/.bin/electron}"
 hidden=0
 smoke=0
 terrain=0
+atmosphere=0
 setting=""
 check_args=()
 while [[ $# -gt 0 ]]; do
@@ -60,6 +72,7 @@ while [[ $# -gt 0 ]]; do
         --smoke) smoke=1; check_args+=("$1"); shift ;;
         --terrain) terrain=1; check_args+=("$1"); shift ;;
         --handover) check_args+=("$1"); shift ;;
+        --atmosphere) atmosphere=1; check_args+=("$1"); shift ;;
         --setting)
             if [[ $# -lt 2 ]]; then
                 echo "views check: --setting needs high or low" >&2
@@ -71,12 +84,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# The settings to launch: the one given, or for the terrain run with none, high then low (a
-# setting holds for a launch); T20's run with none takes the client's default, high.
+# The settings to launch: the one given, or for the terrain or the atmosphere run with none, high
+# then low (a setting holds for a launch); T20's run with none takes the client's default, high.
 settings=()
 if [[ -n "$setting" ]]; then
     settings=("$setting")
-elif [[ $terrain -eq 1 ]]; then
+elif [[ $terrain -eq 1 || $atmosphere -eq 1 ]]; then
     settings=(high low)
 else
     settings=("")
@@ -111,9 +124,12 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
     x11=(--ozone-platform=x11)
 fi
 # Each launch's limit: T20's smoke 5 minutes and its full run 25; the terrain run's 10 and 40, above
-# the client's own watchdogs (8 and 30 minutes).
+# the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
+# 15). Given both, the client refuses the launch at once, so the terrain run's limit stands.
 if [[ $terrain -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : 2400 ))
+elif [[ $atmosphere -eq 1 ]]; then
+    limit=$(( smoke == 1 ? 600 : 1200 ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi

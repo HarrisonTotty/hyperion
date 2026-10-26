@@ -69,7 +69,7 @@ describe("the atmosphere labels", () => {
 });
 
 describe("atmosphereNotes (R08.T10.b)", () => {
-  it("sets the REJECTED lines after NOT RESOLVED and before the annunciations, a failure in caution", () => {
+  it("sets the REJECTED lines after NOT RESOLVED and before the annunciations, each with its standing", () => {
     const refused = {
       statement: "ATMOSPHERE REJECTED: for A, refused, reopen VIEW to retry",
       refusal: true,
@@ -89,12 +89,12 @@ describe("atmosphereNotes (R08.T10.b)", () => {
         [refused, failed],
       ),
     ).toEqual([
-      { statement: "ATMOSPHERE: NOT YET MODELLED", caution: false },
-      { statement: "ATMOSPHERE: NOT RESOLVED", caution: false },
-      { statement: refused.statement, caution: false },
-      { statement: failed.statement, caution: true },
-      { statement: "ATMOSPHERE: PENDING", caution: false },
-      { statement: "ATMOSPHERE: APPROXIMATE", caution: false },
+      { statement: "ATMOSPHERE: NOT YET MODELLED", standing: "note" },
+      { statement: "ATMOSPHERE: NOT RESOLVED", standing: "note" },
+      { statement: refused.statement, standing: "refused" },
+      { statement: failed.statement, standing: "fault" },
+      { statement: "ATMOSPHERE: PENDING", standing: "note" },
+      { statement: "ATMOSPHERE: APPROXIMATE", standing: "note" },
     ]);
   });
 

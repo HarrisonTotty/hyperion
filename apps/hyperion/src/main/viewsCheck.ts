@@ -21,11 +21,18 @@
  * a writer of its own (`handoverCheckResults.ts`), the terrain run's refused; it ends with 1 unless
  * that record was written and its verdict passes. Either run's results take the launch's field
  * (`ViewsCheckLaunch.fixture`), which a `--weathered` launch's record and name (R10.T1.c).
+ *
+ * An `--atmosphere` launch (plan R08, R08.T10.b) runs the atmosphere run on `ATMOSPHERE TEST`, as
+ * the hand-over check runs: no phases (a start or end of one refused), its captures named for its
+ * fixtures and the night, and its record through a writer of its own
+ * (`atmosphereCheckResults.ts`), every other run's refused; it ends with 1 unless that record was
+ * written and its captures pass.
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
 
 import type {
+  AtmosphereCheckRecord,
   CheckPhaseName,
   HandoverCheckRecord,
   SpikeResultsPaths,
@@ -37,6 +44,12 @@ import type {
   ViewsCheckRunKind,
   ViewsCheckWindow,
 } from "../preload/api";
+import {
+  type AtmosphereCheckResults,
+  atmosphereFailures,
+  buildAtmosphereCheckResults,
+  writeAtmosphereResults,
+} from "./atmosphereCheckResults";
 import {
   buildHandoverCheckResults,
   type HandoverCheckResults,
@@ -53,6 +66,9 @@ import {
   writeTerrainResults,
 } from "./terrainCheckResults";
 import {
+  CAPTURE_LABEL,
+  isCaptureLabel,
+  readAtmosphereCheckRecord,
   readHandoverCheckRecord,
   readTerrainCheckRecord,
   readViewsCheckRecord,
@@ -75,6 +91,7 @@ export const VIEWS_CHECK_CHANNELS = {
   writeResults: "hyperion:views-check:write-results",
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
   writeHandoverResults: "hyperion:views-check:write-handover-results",
+  writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
   capture: "hyperion:views-check:capture",
   end: "hyperion:views-check:end",
 } as const;
@@ -299,9 +316,9 @@ export interface ViewsCheckSessionDeps {
   /** Where the captures go, or `null` for none. */
   readonly capturesDir: string | null;
   /**
-   * The captures' directory as a terrain run's results record it, from the repository's root, so
-   * that no committed results file names a checkout's own path (the batch review's D-C); the
-   * directory itself where absent.
+   * The captures' directory as a terrain run's, a hand-over check's or an atmosphere run's results
+   * record it, from the repository's root, so that no committed results file names a checkout's
+   * own path (the batch review's D-C); the directory itself where absent.
    */
   readonly capturesRecordedAs?: string;
   /** Saves the page as a PNG at `path`. */
@@ -324,6 +341,11 @@ export interface ViewsCheckSessionDeps {
     dir: string,
     results: HandoverCheckResults,
   ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /** Writes an atmosphere run's results: {@link writeAtmosphereResults} by default (R08.T10.b). */
+  readonly writeAtmosphere?: (
+    dir: string,
+    results: AtmosphereCheckResults,
+  ) => Promise<{ readonly json: string; readonly markdown: string }>;
   readonly exit: (code: number) => void;
   readonly log: (line: string) => void;
 }
@@ -341,14 +363,6 @@ function isTerrainPhase(name: CheckPhaseName): name is TerrainCheckPhaseName {
   return TERRAIN_PHASE_NAMES.some((each) => each === name);
 }
 
-/** A capture's label: lower case letters, digits and hyphens, 1 to 48 of them. */
-const CAPTURE_LABEL = /^[a-z0-9-]{1,48}$/u;
-
-/** Whether `value` is a label a capture may be named by (`ViewsCheckApi.capture`). */
-export function isCaptureLabel(value: unknown): value is string {
-  return typeof value === "string" && CAPTURE_LABEL.test(value);
-}
-
 /** One run's state in the main process, from its start to its results. */
 export class ViewsCheckSession {
   readonly #deps: ViewsCheckSessionDeps;
@@ -361,6 +375,8 @@ export class ViewsCheckSession {
   #terrainResults: TerrainCheckResults | null = null;
   /** A hand-over check's results once written, judged (R10.T10.g). */
   #handoverResults: HandoverCheckResults | null = null;
+  /** An atmosphere run's results once written, judged (R08.T10.b). */
+  #atmosphereResults: AtmosphereCheckResults | null = null;
   #rightWayUp: Measured<"yes" | "no">;
   #passTimerDrops = 0;
   #untimedPasses = 0;
@@ -442,7 +458,8 @@ export class ViewsCheckSession {
 
   /**
    * Saves a picture of the page as `<phase>-<label>.png` among the captures, `<phase>` the phase
-   * recording or `between` (a terrain run's looks at moments of its script, R10.T16.d).
+   * recording or `between` (a terrain run's looks at moments of its script, R10.T16.d; the
+   * hand-over check's and the atmosphere run's, which have no phases, all `between`).
    *
    * @throws Error for a label {@link isCaptureLabel} refuses.
    */
@@ -545,6 +562,35 @@ export class ViewsCheckSession {
     return paths;
   }
 
+  /**
+   * Builds an atmosphere run's results from its renderer's record (R08.T10.b), judges them by its
+   * captures and writes them.
+   */
+  async writeAtmosphereResults(record: AtmosphereCheckRecord): Promise<SpikeResultsPaths> {
+    const run = await this.#run;
+    const dir = this.#deps.capturesDir;
+    const results = buildAtmosphereCheckResults({
+      run: {
+        ...run,
+        window: this.#deps.windowSize(),
+        captures:
+          dir === null
+            ? missing("no capture directory")
+            : this.#captured
+              ? measured(this.#deps.capturesRecordedAs ?? dir)
+              : missing("no capture was saved"),
+      },
+      record,
+      gpuProcessExits: this.#gpuProcessExits,
+      consoleErrors: this.#consoleErrors,
+    });
+    const write = this.#deps.writeAtmosphere ?? writeAtmosphereResults;
+    const paths = await write(this.#deps.outDir, results);
+    this.#atmosphereResults = results;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
+  }
+
   /** Builds a terrain run's results from its renderer's record, judges and writes them. */
   async writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths> {
     const run = await this.#run;
@@ -573,8 +619,9 @@ export class ViewsCheckSession {
   }
 
   /**
-   * Ends the run with an exit status, and a reason for a failure; a terrain run or a hand-over
-   * check that would end with 0 ends with 1 unless its results were written and pass.
+   * Ends the run with an exit status, and a reason for a failure; a terrain run, a hand-over
+   * check or an atmosphere run that would end with 0 ends with 1 unless its results were written
+   * and pass.
    */
   end(code: number, reason: string | null): void {
     // Why a run that would end with 0 fails: no results written, or results that fail.
@@ -601,6 +648,16 @@ export class ViewsCheckSession {
               : results.overall === "pass"
                 ? null
                 : `the hand-over check's verdict failed: ${handoverFailures(results)}`;
+          break;
+        }
+        case "atmosphere": {
+          const results = this.#atmosphereResults;
+          failure =
+            results === null
+              ? "the atmosphere run ended with no results written"
+              : results.overall === "pass"
+                ? null
+                : `the atmosphere run's captures failed: ${atmosphereFailures(results)}`;
           break;
         }
       }
@@ -641,12 +698,14 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
     | "writeResults"
     | "writeTerrainResults"
     | "writeHandoverResults"
+    | "writeAtmosphereResults"
     | "capture"
     | "end"
   >;
   /**
    * The launch's run (`ViewsCheckLaunch.run`): its handlers take its phases, its record and, for
-   * the terrain run and its hand-over check, its captures alone, and refuse every other run's.
+   * the terrain run, its hand-over check and the atmosphere run, its captures alone, and refuse
+   * every other run's.
    */
   readonly run: ViewsCheckRunKind;
 }
@@ -659,7 +718,7 @@ const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
   "wireframe-alone",
 ];
 
-/** The phases of each run: the hand-over check has none (R10.T10.g). */
+/** The phases of each run: the hand-over check (R10.T10.g) and the atmosphere run (R08.T10.b) have none. */
 function phasesOf(run: ViewsCheckRunKind): ReadonlyArray<CheckPhaseName> {
   let phases: ReadonlyArray<CheckPhaseName>;
   switch (run) {
@@ -670,6 +729,7 @@ function phasesOf(run: ViewsCheckRunKind): ReadonlyArray<CheckPhaseName> {
       phases = TERRAIN_PHASE_NAMES;
       break;
     case "handover":
+    case "atmosphere":
       phases = [];
       break;
   }
@@ -688,6 +748,9 @@ function runWords(run: ViewsCheckRunKind): string {
       break;
     case "handover":
       words = "the hand-over check";
+      break;
+    case "atmosphere":
+      words = "the atmosphere run";
       break;
   }
   return words;
@@ -778,6 +841,15 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
       );
     }
     return deps.session.writeHandoverResults(record);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeAtmosphereResults, async ([value]) => {
+    const record = deps.run === "atmosphere" ? readAtmosphereCheckRecord(value) : null;
+    if (record === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeAtmosphereResults} refused: not the atmosphere run's record`,
+      );
+    }
+    return deps.session.writeAtmosphereResults(record);
   });
   guarded(VIEWS_CHECK_CHANNELS.capture, async ([value]) => {
     if (deps.run === "several-views" || !isCaptureLabel(value)) {

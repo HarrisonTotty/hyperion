@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type {
+  AtmosphereCheckRecord,
   HandoverCheckRecord,
   TerrainCheckRecord,
   ViewsCheckRecord,
   ViewsCheckRunKind,
 } from "../preload/api";
+import type { AtmosphereCheckResults } from "./atmosphereCheckResults";
+import { ATMOSPHERE_RECORD } from "./fixtures/atmosphereRecord";
 import { HANDOVER_RECORD } from "./fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
 import type { HandoverCheckResults } from "./handoverCheckResults";
@@ -89,10 +92,12 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
   readonly written: ViewsCheckResults[];
   readonly terrainWritten: TerrainCheckResults[];
   readonly handoverWritten: HandoverCheckResults[];
+  readonly atmosphereWritten: AtmosphereCheckResults[];
 } {
   const written: ViewsCheckResults[] = [];
   const terrainWritten: TerrainCheckResults[] = [];
   const handoverWritten: HandoverCheckResults[] = [];
+  const atmosphereWritten: AtmosphereCheckResults[] = [];
   const deps: ViewsCheckSessionDeps = {
     launch: {
       setting: "high",
@@ -150,11 +155,22 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
       handoverWritten.push(results);
       return Promise.resolve({ json: "/out/h.json", markdown: "/out/h.md" });
     },
+    writeAtmosphere: (_dir, results) => {
+      atmosphereWritten.push(results);
+      return Promise.resolve({ json: "/out/a.json", markdown: "/out/a.md" });
+    },
     exit: vi.fn<(code: number) => void>(),
     log: () => undefined,
     ...overrides,
   };
-  return { session: new ViewsCheckSession(deps), deps, written, terrainWritten, handoverWritten };
+  return {
+    session: new ViewsCheckSession(deps),
+    deps,
+    written,
+    terrainWritten,
+    handoverWritten,
+    atmosphereWritten,
+  };
 }
 
 /** A terrain launch's session (R10.T16.d). */
@@ -173,6 +189,22 @@ function handoverSession(
 ): ReturnType<typeof session> {
   return session({
     launch: { setting: "high", smoke: false, out: null, run: "handover", fixture: "terrain-test" },
+    ...overrides,
+  });
+}
+
+/** An atmosphere run's session (R08.T10.b). */
+function atmosphereSession(
+  overrides: Partial<ViewsCheckSessionDeps> = {},
+): ReturnType<typeof session> {
+  return session({
+    launch: {
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "atmosphere",
+      fixture: "terrain-test",
+    },
     ...overrides,
   });
 }
@@ -515,6 +547,116 @@ describe("a hand-over check's session (R10.T10.g)", () => {
   });
 });
 
+describe("an atmosphere run's session (R08.T10.b)", () => {
+  /** The fault line of TEST MARS's air, as the renderer writes it. */
+  const NOT_AVAILABLE =
+    "ATMOSPHERE NOT AVAILABLE: computation failed for TEST MARS, reopen VIEW to retry";
+
+  it("names its captures between phases, since it has none", async () => {
+    const { session: run, deps } = atmosphereSession();
+    await run.capture("fixture-test-earth");
+    await run.capture("moonlit-night");
+    expect(deps.capture).toHaveBeenCalledWith("/captures/between-fixture-test-earth.png");
+    expect(deps.capture).toHaveBeenCalledWith("/captures/between-moonlit-night.png");
+  });
+
+  it("judges the record it writes, its captures recorded from the repository's root", async () => {
+    const lines: string[] = [];
+    const { session: run, atmosphereWritten } = atmosphereSession({
+      capturesRecordedAs: "target/views-check/atmosphere/captures-x",
+      log: (line) => lines.push(line),
+    });
+    await run.capture("fixture-test-earth");
+    expect(await run.writeAtmosphereResults(ATMOSPHERE_RECORD)).toEqual({
+      json: "/out/a.json",
+      markdown: "/out/a.md",
+    });
+    expect([
+      atmosphereWritten[0]?.overall,
+      atmosphereWritten[0]?.run.captures.value,
+      lines,
+    ]).toEqual([
+      "pass",
+      "target/views-check/atmosphere/captures-x",
+      ["views check: wrote /out/a.json and /out/a.md"],
+    ]);
+  });
+
+  it("records the GPU process's exits and the console's errors without judging them", async () => {
+    const { session: run, atmosphereWritten } = atmosphereSession();
+    run.gpuProcessGone();
+    run.consoleError("a pass timer's read-back failed");
+    await run.capture("fixture-test-earth");
+    await run.writeAtmosphereResults(ATMOSPHERE_RECORD);
+    expect([
+      atmosphereWritten[0]?.overall,
+      atmosphereWritten[0]?.findings.faults.gpuProcessExits,
+      atmosphereWritten[0]?.findings.consoleErrors.count,
+    ]).toEqual(["pass", 1, 1]);
+  });
+
+  it("ends with 0 when its captures pass", async () => {
+    const { session: run, deps } = atmosphereSession();
+    await run.capture("fixture-test-earth");
+    await run.writeAtmosphereResults(ATMOSPHERE_RECORD);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("ends with 1 when a capture showed a fault line, whatever its end says", async () => {
+    const failing: AtmosphereCheckRecord = {
+      ...ATMOSPHERE_RECORD,
+      captures: ATMOSPHERE_RECORD.captures.map((capture) =>
+        capture.label === "fixture-test-mars" ? { ...capture, faults: [NOT_AVAILABLE] } : capture,
+      ),
+    };
+    const lines: string[] = [];
+    const { session: run, deps } = atmosphereSession({ log: (line) => lines.push(line) });
+    await run.capture("fixture-test-mars");
+    await run.writeAtmosphereResults(failing);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toBe(
+      `views check: FAIL the atmosphere run's captures failed: fixture-test-mars: atmosphere fault: ${NOT_AVAILABLE}`,
+    );
+  });
+
+  it("ends with 1 when no capture was saved", async () => {
+    const lines: string[] = [];
+    const { session: run, deps } = atmosphereSession({ log: (line) => lines.push(line) });
+    await run.writeAtmosphereResults(ATMOSPHERE_RECORD);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toBe(
+      "views check: FAIL the atmosphere run's captures failed: the main process saved no capture",
+    );
+  });
+
+  it("ends with 1 when it ends with no results written", () => {
+    const lines: string[] = [];
+    const { session: run, deps } = atmosphereSession({ log: (line) => lines.push(line) });
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toBe("views check: FAIL the atmosphere run ended with no results written");
+  });
+
+  it("ends with 1 when it wrote only the hand-over check's results", async () => {
+    const lines: string[] = [];
+    const { session: run } = atmosphereSession({ log: (line) => lines.push(line) });
+    await run.writeHandoverResults(HANDOVER_RECORD);
+    run.end(0, null);
+    expect(lines.at(-1)).toBe("views check: FAIL the atmosphere run ended with no results written");
+  });
+
+  it("keeps the renderer's failure as its reason", () => {
+    const lines: string[] = [];
+    const { session: run, deps } = atmosphereSession({ log: (line) => lines.push(line) });
+    run.end(1, "the media did not come ready");
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toBe("views check: FAIL the media did not come ready");
+  });
+});
+
 describe("the views check's handlers", () => {
   type Listener = (event: { own: boolean }, ...args: unknown[]) => Promise<unknown>;
 
@@ -552,6 +694,10 @@ describe("the views check's handlers", () => {
         },
         writeHandoverResults: () => {
           calls.push("write handover");
+          return Promise.resolve({ json: "a", markdown: "b" });
+        },
+        writeAtmosphereResults: () => {
+          calls.push("write atmosphere");
           return Promise.resolve({ json: "a", markdown: "b" });
         },
         capture: (label) => {
@@ -728,6 +874,70 @@ describe("the views check's handlers", () => {
     await expect(
       call(VIEWS_CHECK_CHANNELS.writeHandoverResults, true, { ...HANDOVER_RECORD, looks: null }),
     ).rejects.toThrow(/hand-over check's record/);
+    expect(calls).toEqual([]);
+  });
+
+  it("carry out an atmosphere run's operations on an atmosphere launch (R08.T10.b)", async () => {
+    const { call, calls } = handlers("atmosphere");
+    await call(VIEWS_CHECK_CHANNELS.capture, true, "fixture-test-earth");
+    await call(VIEWS_CHECK_CHANNELS.capture, true, "moonlit-night");
+    await call(VIEWS_CHECK_CHANNELS.writeAtmosphereResults, true, ATMOSPHERE_RECORD);
+    await call(VIEWS_CHECK_CHANNELS.end, true, { status: "pass" });
+    expect(calls).toEqual([
+      "capture fixture-test-earth",
+      "capture moonlit-night",
+      "write atmosphere",
+      "exit 0 null",
+    ]);
+  });
+
+  it.each([["several-views"], ["terrain"], ["handover"]] as const)(
+    "refuse an atmosphere record on a %s launch",
+    async (run) => {
+      const { call, calls } = handlers(run);
+      await expect(
+        call(VIEWS_CHECK_CHANNELS.writeAtmosphereResults, true, ATMOSPHERE_RECORD),
+      ).rejects.toThrow(/not the atmosphere run's record/);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it.each([
+    [VIEWS_CHECK_CHANNELS.writeResults, RECORD, /not the check's record/],
+    [VIEWS_CHECK_CHANNELS.writeTerrainResults, TERRAIN_RECORD, /terrain run's record/],
+    [VIEWS_CHECK_CHANNELS.writeHandoverResults, HANDOVER_RECORD, /hand-over check's record/],
+  ] as const)("refuse %s's record on an atmosphere launch", async (channel, record, error) => {
+    const { call, calls } = handlers("atmosphere");
+    await expect(call(channel, true, record)).rejects.toThrow(error);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    [VIEWS_CHECK_CHANNELS.startPhase, ["photoreal-alone"]],
+    [VIEWS_CHECK_CHANNELS.endPhase, ["photoreal-alone", SPAN]],
+    [VIEWS_CHECK_CHANNELS.startPhase, ["terrain-alone"]],
+  ] as const)(
+    "refuse every phase on %s on an atmosphere launch, which has none",
+    async (channel, args) => {
+      const { call, calls } = handlers("atmosphere");
+      await expect(call(channel, true, ...args)).rejects.toThrow(
+        /not a phase of the atmosphere run/,
+      );
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("refuse an atmosphere record that does not check, and one from another page", async () => {
+    const { call, calls } = handlers("atmosphere");
+    await expect(
+      call(VIEWS_CHECK_CHANNELS.writeAtmosphereResults, true, {
+        ...ATMOSPHERE_RECORD,
+        captures: null,
+      }),
+    ).rejects.toThrow(/not the atmosphere run's record/);
+    await expect(
+      call(VIEWS_CHECK_CHANNELS.writeAtmosphereResults, false, ATMOSPHERE_RECORD),
+    ).rejects.toThrow(/own page/);
     expect(calls).toEqual([]);
   });
 

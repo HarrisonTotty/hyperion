@@ -69,6 +69,7 @@ import {
   type ViewScene,
 } from "../../view/scene/model";
 import { ECLIPSE_SCENE_NAME, eclipseScene } from "../../view/scenes/eclipseScene";
+import { ATMOSPHERE_SCENE_NAME, atmosphereScene } from "../../view/scenes/atmosphereScene";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
@@ -107,7 +108,8 @@ export interface SceneOption {
 
 /**
  * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a),
- * `ECLIPSE TEST` (R07.T10.c) and `TERRAIN TEST` (R10.T16.d), the one with a terrain fixture.
+ * `ECLIPSE TEST` (R07.T10.c), `TERRAIN TEST` (R10.T16.d), the one with a terrain fixture, and
+ * `ATMOSPHERE TEST` (R08.T10.b), whose media load lazily as it is made.
  */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
@@ -115,6 +117,7 @@ export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PHASE_SCENE_NAME, make: phaseScene },
   { name: ECLIPSE_SCENE_NAME, make: eclipseScene },
   { name: TERRAIN_SCENE_NAME, make: terrainScene, terrain: terrainSceneFixture() },
+  { name: ATMOSPHERE_SCENE_NAME, make: () => atmosphereScene() },
 ];
 
 /** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */
@@ -755,17 +758,18 @@ export function labelStatements(
 }
 
 /**
- * A statement of the label block set in `--status-caution` rather than `--text`: the server's own
- * failure to answer for a body's atmosphere (`ATMOSPHERE REJECTED`'s, plan R08, R08.T10.b; the
- * guide's row).
+ * A statement of the label block that is a request's status, set as every request's `REJECTED` is
+ * (the guide's survey line; `StatusLine`): `refused` in `--text` where the server refused what
+ * was asked, `fault` in `--status-caution` for its own failure (`ATMOSPHERE REJECTED`'s, plan R08,
+ * R08.T10.b).
  */
-export interface CautionStatement {
+export interface StatusStatement {
   readonly text: string;
-  readonly caution: true;
+  readonly standing: "refused" | "fault";
 }
 
-/** A statement of the label block: its text in `--text`, or in `--status-caution`. */
-export type LabelStatement = string | CautionStatement;
+/** A statement of the label block: a steady note's text, or a request's {@link StatusStatement}. */
+export type LabelStatement = string | StatusStatement;
 
 /** A statement's text. */
 export function statementText(statement: LabelStatement): string {
@@ -807,8 +811,8 @@ const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLE
  * The atmosphere's notes come after the others, the lit bodies' labels among them (plan R08,
  * R08.T10.b; `labels.ts`'s `atmosphereNotes`), so that `ATMOSPHERE: NOT RESOLVED` stands after
  * every `NOT YET MODELLED` note: its bodies' labels in their order, with each `ATMOSPHERE REJECTED`
- * line after `ATMOSPHERE: NOT RESOLVED` and before the annunciations, the server's own failure in
- * `--status-caution` ({@link CautionStatement}).
+ * line after `ATMOSPHERE: NOT RESOLVED` and before the annunciations, a {@link StatusStatement}
+ * standing as every request's `REJECTED` does.
  *
  * @param drawn - The style the view's last frame was drawn in.
  * @param labels - The appearance labels of the bodies the photorealistic frame lights.
@@ -845,7 +849,19 @@ export function photorealStatements(
   const air: ReadonlyArray<LabelStatement> = atmosphereNotes(
     atmosphere.labels,
     atmosphere.plate,
-  ).map((note) => (note.caution ? { text: note.statement, caution: true } : note.statement));
+  ).map((note): LabelStatement => {
+    let statement: LabelStatement;
+    switch (note.standing) {
+      case "note":
+        statement = note.statement;
+        break;
+      case "refused":
+      case "fault":
+        statement = { text: note.statement, standing: note.standing };
+        break;
+    }
+    return statement;
+  });
   return [...(line === null ? [] : [line]), ...notes, ...air];
 }
 

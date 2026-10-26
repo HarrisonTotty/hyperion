@@ -30,6 +30,7 @@ function checkApi(): ViewsCheckApi & {
     askRightWayUp: () => Promise.resolve(),
     writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeAtmosphereResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     capture: () => Promise.resolve(),
     writeResults: vi.fn<ViewsCheckApi["writeResults"]>(() =>
       Promise.resolve({ json: "a", markdown: "b" }),
@@ -89,5 +90,20 @@ describe("ViewsCheckRunner", () => {
     await vi.advanceTimersByTimeAsync(61_000);
 
     expect(failed.mock.calls[0]?.[0]).toBe("views check: the hand-over check failed:");
+  });
+
+  it("runs the atmosphere run on an atmosphere launch (R08.T10.b)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const failed = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { ...checkApi(), launch: { ...checkApi().launch, run: "atmosphere" as const } };
+    render(<ViewsCheckRunner api={api} probe={new ViewsProbe()} run={{ kind: "atmosphere" }} />);
+
+    // jsdom draws no VIEW, so the run's first wait runs out.
+    await vi.advanceTimersByTimeAsync(61_000);
+
+    expect([failed.mock.calls[0]?.[0], api.end.mock.calls]).toEqual([
+      "views check: the atmosphere run failed:",
+      [[{ status: "fail", reason: "views check: VIEW did not show its primary view within 60 s" }]],
+    ]);
   });
 });

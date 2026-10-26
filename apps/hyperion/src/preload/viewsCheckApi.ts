@@ -8,6 +8,7 @@
  */
 
 import type {
+  AtmosphereCheckRecord,
   CheckPhaseName,
   HandoverCheckRecord,
   SpikeEnd,
@@ -28,6 +29,7 @@ export const VIEWS_CHECK_CHANNEL_NAMES = {
   writeResults: "hyperion:views-check:write-results",
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
   writeHandoverResults: "hyperion:views-check:write-handover-results",
+  writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
   capture: "hyperion:views-check:capture",
   end: "hyperion:views-check:end",
 } as const;
@@ -78,6 +80,13 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
       const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeHandoverResults, record);
       if (!isPaths(paths)) {
         throw new Error("the main process wrote no hand-over results file");
+      }
+      return paths;
+    },
+    writeAtmosphereResults: async (record: AtmosphereCheckRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeAtmosphereResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no atmosphere results file");
       }
       return paths;
     },

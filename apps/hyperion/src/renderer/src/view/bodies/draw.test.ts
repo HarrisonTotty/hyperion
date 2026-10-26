@@ -658,9 +658,10 @@ describe("the plan", () => {
       ]);
     });
 
-    it("keeps the regimes independent of the bodies' order, and a mesh the disc side at 2.9 px", () => {
+    it("keeps the regimes independent of the bodies' order, and a mesh the disc side at 2.75 px", () => {
       const { hosts } = scene(1e8, 0);
-      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2.9)));
+      // Just above the 2.7 px the hysteresis holds a disc's side down to.
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2.75)));
       const other = bodyAt("0200080020000000.0301", vec3(3e9, 0, -atDiameterPx(40)));
       const options = { ...OPTIONS, depthBodies: new Set([airBody.id]) };
       const previous = new Map<BodyIdHex, LitRegime>([

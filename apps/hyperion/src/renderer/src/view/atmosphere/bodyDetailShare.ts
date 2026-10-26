@@ -13,7 +13,9 @@
  * - **The terrain's asks** ({@link BodyDetailShare.terrain}) join a request in flight for the body,
  *   or take the latest reply kept for it, at once, or else are sent: the session asks once a want,
  *   and the cache has as a rule asked first, the body being lit in a view before its field is
- *   wanted. Every other request, `surface_field` among them, passes through.
+ *   wanted. Its fields' bulk requests (`surface_field`) pass through whole.
+ * - Both seams take `body_detail` alone, the one kind either asks of its own (`AtmosphereRequests`,
+ *   `TerrainRequests`), so that the share hands back each request under its own kind.
  * - **A joined request** settles with the one it joined. Cancelling it leaves the request to its
  *   other askers; the last to cancel cancels it at the client, which then settles every asker's.
  * - **The replies kept** are the latest {@link BODY_DETAIL_SHARE_REPLIES} bodies' answered `ok`, the
@@ -29,7 +31,6 @@ import type {
   BulkRequestOptions,
   PendingBulkRequest,
   PendingRequest,
-  RequestClient,
   RequestKind,
   RequestOf,
   RequestOutcome,
@@ -37,8 +38,14 @@ import type {
   UniverseIdHex,
 } from "@hyperion/protocol";
 
-/** The share's client: the link's request client, or a kept scene's terrain fixture's. */
-export type BodyDetailClient = Pick<RequestClient, "request" | "requestBulk">;
+import type { TerrainRequests } from "../terrain/session";
+import type { AtmosphereRequests } from "./AtmosphereCache";
+
+/**
+ * The share's client: the link's request client, or a fixture's, as the terrain session takes one
+ * (`TerrainRequests`: `body_detail` and the fields' bulk requests).
+ */
+export type BodyDetailClient = TerrainRequests;
 
 /** The most bodies whose latest reply the share keeps for the terrain's asks. */
 export const BODY_DETAIL_SHARE_REPLIES = 64;
@@ -52,25 +59,6 @@ interface InFlight {
 /** A request's key: its universe and body. */
 function keyOf(universe: UniverseIdHex, body: BodyIdHex): string {
   return `${universe}/${body}`;
-}
-
-/** Whether a request is a `body_detail`. */
-function isBodyDetail(body: RequestOf<RequestKind>): body is RequestOf<"body_detail"> {
-  return body.kind === "body_detail";
-}
-
-/**
- * A `body_detail`'s pending request as the generic `request` returns it: `K` is `"body_detail"`
- * wherever it is called, {@link isBodyDetail} having narrowed the request, which TypeScript does not
- * carry to `K`; the one cast of the module.
- */
-function asRequested<K extends RequestKind>(
-  pending: PendingRequest<"body_detail">,
-): PendingRequest<K> {
-  // The protocol's generic `request` cannot see its kind's narrowing through `K`; the one place a
-  // body_detail's request is handed back under the caller's own `K`.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  return pending as unknown as PendingRequest<K>;
 }
 
 /** An outcome already settled, as a pending request that cancels nothing. */
@@ -89,30 +77,27 @@ export class BodyDetailShare {
     this.#client = client;
   }
 
-  /** The atmosphere cache's requests: each ask a trigger's (the module's remarks). */
-  readonly atmosphere: Pick<RequestClient, "request"> = {
-    request: <K extends RequestKind>(body: RequestOf<K>): PendingRequest<K> => {
-      if (!isBodyDetail(body)) {
-        return this.#client.request(body);
-      }
+  /** The atmosphere cache's requests (`AtmosphereRequests`): each ask a trigger's. */
+  readonly atmosphere: AtmosphereRequests = {
+    request: (body: RequestOf<"body_detail">): PendingRequest<"body_detail"> => {
       const key = keyOf(body.universe, body.body);
       this.#replies.delete(key);
-      return asRequested(this.#ask(key, body));
+      return this.#ask(key, body);
     },
   };
 
-  /** The terrain session's requests: a body's record taken from the cache's where it can be. */
-  readonly terrain: BodyDetailClient = {
-    request: <K extends RequestKind>(body: RequestOf<K>): PendingRequest<K> => {
-      if (!isBodyDetail(body)) {
-        return this.#client.request(body);
-      }
+  /**
+   * The terrain session's requests (`TerrainRequests`): a body's record taken from the cache's
+   * where it can be, and its fields' bulk requests passed to the client whole.
+   */
+  readonly terrain: TerrainRequests = {
+    request: (body: RequestOf<"body_detail">): PendingRequest<"body_detail"> => {
       const key = keyOf(body.universe, body.body);
       const kept = this.#replies.get(key);
       if (kept !== undefined && !this.#inFlight.has(key)) {
-        return asRequested(settled(kept));
+        return settled(kept);
       }
-      return asRequested(this.#ask(key, body));
+      return this.#ask(key, body);
     },
     requestBulk: <K extends RequestKind>(
       body: RequestOf<K>,

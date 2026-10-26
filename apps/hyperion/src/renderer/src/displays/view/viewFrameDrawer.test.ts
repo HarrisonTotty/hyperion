@@ -13,7 +13,8 @@ import { relativeToCamera } from "../../view/coords/relative";
 import { IDENTITY_ROTATION, rotateToBodyFixed } from "../../view/coords/rotation";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
-import { sceneOrigins } from "../../view/scene/model";
+import { sceneOrigins, type ViewStar } from "../../view/scene/model";
+import { ATMOSPHERE_STARS } from "../../view/scenes/atmosphereScene";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
 import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
 import { ANNUNCIATION_ONSET_MS } from "../../view/terrain/annunciation";
@@ -1087,5 +1088,58 @@ describe("a view's line-of-sight mark across its frames (R10.T12)", () => {
       beyond: beyond?.boxPx !== null && beyond?.yielded === false,
       fresh: fresh?.boxPx !== null && fresh?.yielded === false,
     }).toEqual({ near: null, between: null, beyond: true, fresh: true });
+  });
+});
+
+describe("a kept scene's own stars, offline (R08.T10.b)", () => {
+  /** One star of an interim field, dead ahead of the phase scene's camera. */
+  const INTERIM_STAR: ViewStar = {
+    id: "0000000000000001",
+    direction: vec3(0, 0, -1),
+    distanceM: 3e17,
+    absoluteV: 0,
+    tEffK: 5_800,
+  };
+
+  /**
+   * The star sprites a wireframe frame of the phase scene draws, the scene carrying `own` stars and
+   * the view given the interim field `interim`.
+   */
+  async function spritesDrawn(
+    own: ReadonlyArray<ViewStar>,
+    interim: ReadonlyArray<ViewStar>,
+  ): Promise<number> {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    const run = phaseRun(false);
+    drawer.draw({
+      run: { ...run, scene: { ...run.scene, stars: own } },
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: interim,
+      sky: null,
+      selection: null,
+      style: "wireframe",
+      setting: "high",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    });
+    drawer.dispose();
+    const draws = view.frames.at(-1)?.draws ?? [];
+    return draws.find((draw) => draw.material.name === "wireframe:starSprite")?.instanceCount ?? 0;
+  }
+
+  it("draws a kept scene's own stars where the interim field is empty", async () => {
+    expect([await spritesDrawn([], []), (await spritesDrawn(ATMOSPHERE_STARS, [])) > 0]).toEqual([
+      0,
+      true,
+    ]);
+  });
+
+  it("draws the interim field, not the scene's own stars, where it has stars", async () => {
+    expect(await spritesDrawn(ATMOSPHERE_STARS, [INTERIM_STAR])).toBe(1);
   });
 });

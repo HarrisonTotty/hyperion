@@ -823,6 +823,8 @@ export class PhotorealRenderer {
           exposureScale: frame.exposureScale,
         });
       } catch (error: unknown) {
+        // The one place a draw-time failure is taken: logged once and the body drawn bare,
+        // pending `decision-r08-t10b-leans.md`, which may route it to the cache's fault.
         if (!this.#airFailed.has(air.id)) {
           this.#airFailed.add(air.id);
           console.error(`the atmosphere of ${air.id} could not be drawn in ${this.#name}:`, error);
@@ -830,7 +832,8 @@ export class PhotorealRenderer {
         continue;
       }
       this.#airFailed.delete(air.id);
-      const target = this.#airTarget(resources, colour === resources.target.colour ? 0 : 1);
+      // The air target the last composite did not draw into: the first after the scene's.
+      const target = this.#airTarget(resources, colour === resources.airTargets[0]?.colour ? 1 : 0);
       target.render({
         label: ATMOSPHERE_COMPOSITE_PASS,
         viewRotation: pass.viewRotation,
@@ -916,6 +919,10 @@ export class PhotorealRenderer {
       for (const target of resources.airTargets) {
         target.dispose();
       }
+      // The atmospheres' composite and its triangle, made with the view's pipelines; their
+      // kernels have no release.
+      this.#engine.releaseMaterial(resources.atmosphere.composite);
+      this.#engine.releaseMesh(resources.atmosphere.triangle);
       resources.bloom.dispose();
       this.#engine.releaseBuffer(resources.glare);
       this.#engine.releaseBuffer(resources.stars);

@@ -387,8 +387,9 @@ const RIGHT_WAY_UP_TIMEOUT_MS = 180_000;
  * Where a views check writes, from the repository's root: T20's under `target/views-check/` for a
  * smoke and `docs/measurements/several-views/` otherwise, the terrain run's (R10.T16.d;
  * decision-r10-t16-contracts §6), and its hand-over check's beside it (R10.T10.g), under
- * `target/views-check/terrain/` and `docs/measurements/terrain-check/`; the captures under the
- * smoke's directory either way.
+ * `target/views-check/terrain/` and `docs/measurements/terrain-check/`, and the atmosphere run's
+ * (plan R08, R08.T10.b) under `target/views-check/atmosphere/` and
+ * `docs/measurements/atmosphere-flight/`; the captures under the smoke's directory either way.
  */
 function viewsCheckDirs(launch: ViewsCheckLaunch): {
   readonly out: string;
@@ -403,6 +404,12 @@ function viewsCheckDirs(launch: ViewsCheckLaunch): {
     case "handover":
       dirs = { smoke: "target/views-check/terrain", full: "docs/measurements/terrain-check" };
       break;
+    case "atmosphere":
+      dirs = {
+        smoke: "target/views-check/atmosphere",
+        full: "docs/measurements/atmosphere-flight",
+      };
+      break;
   }
   return { out: launch.smoke ? dirs.smoke : dirs.full, captures: dirs.smoke };
 }
@@ -412,7 +419,8 @@ function viewsCheckDirs(launch: ViewsCheckLaunch): {
  * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
  * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
  * each, 30; its hand-over check (R10.T10.g), three looks of about 3.5 minutes (a smoke's about one),
- * takes the same.
+ * takes the same; the atmosphere run's (plan R08, R08.T10.b), its media awaited and a flight to
+ * four air fixtures and the seat's night, 8 and 15.
  */
 function viewsCheckWatchdogMs(launch: ViewsCheckLaunch): number {
   let ms: number;
@@ -423,6 +431,9 @@ function viewsCheckWatchdogMs(launch: ViewsCheckLaunch): number {
     case "terrain":
     case "handover":
       ms = launch.smoke ? 8 * 60_000 : 30 * 60_000;
+      break;
+    case "atmosphere":
+      ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
       break;
   }
   return ms;

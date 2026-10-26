@@ -946,7 +946,8 @@ export interface ViewsCheckLaunch {
   readonly run: ViewsCheckRunKind;
   /**
    * The field the terrain run or its hand-over check is served ({@link ViewsCheckTerrainFixture}):
-   * `terrain-test` on every launch but a `--terrain --weathered` one; T20's run serves none.
+   * `terrain-test` on every launch but a `--terrain --weathered` one; T20's run and the atmosphere
+   * run serve none.
    */
   readonly fixture: ViewsCheckTerrainFixture;
 }
@@ -965,9 +966,11 @@ export type ViewsCheckTerrainFixture = "terrain-test" | "terrain-test-weathered"
  * T20); the terrain run on `TERRAIN TEST` (`terrain`, `--terrain`, plan R10, R10.T16.d;
  * decision-r10-t16-contracts §6); or the terrain run's check-only hand-over variant in its place
  * (`handover`, `--terrain --handover`, plan R10, R10.T10.g; decision-r10-t16-leans §1), the three
- * hand-over looks on `TERRAIN TEST`'s world ({@link HandoverCheckRecord}).
+ * hand-over looks on `TERRAIN TEST`'s world ({@link HandoverCheckRecord}); or the atmosphere's
+ * scripted hand flight on `ATMOSPHERE TEST` (`atmosphere`, `--atmosphere`, plan R08, R08.T10.b;
+ * {@link AtmosphereCheckRecord}).
  */
-export type ViewsCheckRunKind = "several-views" | "terrain" | "handover";
+export type ViewsCheckRunKind = "several-views" | "terrain" | "handover" | "atmosphere";
 
 /**
  * The check's phases, each a configuration of `VIEW` held while it is measured (R07.T20): the
@@ -1603,6 +1606,74 @@ export interface HandoverCheckRecord {
 }
 
 /**
+ * The primary's frames over an atmosphere-run capture's window (plan R08, R08.T10.b): from the
+ * capture before it, or the run's start, to it.
+ */
+export interface AtmosphereCheckFrames {
+  /** The window, `performance.now()` ms. */
+  readonly fromMs: number;
+  readonly toMs: number;
+  /** The animation frames in which the primary drew. */
+  readonly draws: number;
+  /** The intervals between those frames, ms: median and 95th percentile; `null` under two draws. */
+  readonly intervalMedianMs: number | null;
+  readonly intervalP95Ms: number | null;
+  /** Its timed GPU time in each draw whose resolves all arrived, ms; `null` where none did. */
+  readonly gpuMedianMs: number | null;
+  readonly gpuP95Ms: number | null;
+}
+
+/**
+ * One capture of the atmosphere run (plan R08, R08.T10.b): a fixture seen from a few radii, or the
+ * moonlit night from the seat, with what the primary's label block said as it was taken.
+ */
+export interface AtmosphereCheckCapture {
+  /**
+   * Its label, which names its picture among the run's captures: `fixture-<designation in lower
+   * kebab case>`, or `moonlit-night`.
+   */
+  readonly label: string;
+  /** The fixture's designation (`TEST EARTH`); `null` for the seat's look at the night. */
+  readonly designation: string | null;
+  /** The camera's preset as the label block's `CAMERA` line read it (`SEAT`, `FREE · RATE …`). */
+  readonly camera: string | null;
+  /**
+   * The camera's distance from the fixture's centre as the run flew it, m, dead-reckoned from the
+   * scene's geometry and the free camera's rate; `null` for the seat.
+   */
+  readonly rangeM: number | null;
+  /** The phase angle at the fixture between the star and the camera as flown, deg; `null` for the seat. */
+  readonly phaseDeg: number | null;
+  /** The `EXPOSURE` line's reading as it was taken; `null` where none was shown. */
+  readonly exposure: string | null;
+  /** When it was taken, `performance.now()` ms. */
+  readonly atMs: number;
+  readonly frames: AtmosphereCheckFrames;
+  /** The primary label block's statements as it was taken, in order. */
+  readonly statements: ReadonlyArray<string>;
+  /** The primary label block's fault lines as it was taken: graphics, terrain, then atmosphere. */
+  readonly faults: ReadonlyArray<string>;
+}
+
+/** What the atmosphere run's renderer reports at the end of a run, for its results file. */
+export interface AtmosphereCheckRecord {
+  /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  /** The primary's canvas as the run ended, px (the presented size). */
+  readonly canvas: ViewsCheckCanvas;
+  /**
+   * From the scene's choice to its fixtures' media built and no `ATMOSPHERE: PENDING` standing on
+   * the primary's label block, ms.
+   */
+  readonly mediaReadyMs: number;
+  /** The captures, in the order taken. */
+  readonly captures: ReadonlyArray<AtmosphereCheckCapture>;
+  /** The engine's faults over the run, each as a line, as T20's record gives them. */
+  readonly faults: ReadonlyArray<string>;
+}
+
+/**
  * The views check's narrow functions (plan R07, T20), present only when the client was launched
  * with `--views-check`; the main process checks each call's sender and arguments.
  */
@@ -1634,9 +1705,16 @@ export interface ViewsCheckApi {
    */
   writeHandoverResults(record: HandoverCheckRecord): Promise<SpikeResultsPaths>;
   /**
+   * Writes an atmosphere run's results file and its summary (plan R08, R08.T10.b) from its
+   * renderer's record, refused on any other launch; the main process judges it, and a run whose
+   * captures fail ends with 1 whatever its end says.
+   */
+  writeAtmosphereResults(record: AtmosphereCheckRecord): Promise<SpikeResultsPaths>;
+  /**
    * Saves a picture of the page under the run's captures, named for the phase recording and
    * `label` (lower case letters, digits and hyphens, at most 48): a terrain run's look at a moment
-   * of its script, for the looks by eye (R10.T16.d).
+   * of its script, for the looks by eye (R10.T16.d), or an atmosphere run's fixture or night
+   * (R08.T10.b).
    */
   capture(label: string): Promise<void>;
   /**

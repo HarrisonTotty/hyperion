@@ -319,18 +319,21 @@ export function atmosphereProblemLines(
   return { plate, fault: [...notAvailable, ...checks] };
 }
 
-/** One of a view's atmosphere notes on its label block's plate, and its colour. */
+/**
+ * One of a view's atmosphere notes on its label block's plate: a steady `note`, or an `ATMOSPHERE
+ * REJECTED` line with its standing as every request's `REJECTED` takes one, `refused` (in `--text`)
+ * where the server refused what was asked and `fault` (in `--status-caution`) for its own failure.
+ */
 export interface AtmosphereNote {
   readonly statement: string;
-  /** `--status-caution` where true (a server's own failure); `--text` otherwise. */
-  readonly caution: boolean;
+  readonly standing: "note" | "refused" | "fault";
 }
 
 /**
  * A view's atmosphere notes in their place on the plate (plan R08, R08.T10.b): the statements of
  * its bodies' labels in {@link ATMOSPHERE_LABELS}' order, with its `ATMOSPHERE REJECTED` lines after
  * `ATMOSPHERE: NOT RESOLVED` and before the annunciations (`decision-r08-t10a-leans.md`, follow-up
- * to item 6), each in `--status-caution` where the server failed on its side.
+ * to item 6), each standing `refused` or `fault` as the server refused what was asked or failed.
  *
  * @param rejected - {@link atmosphereProblemLines}' `plate`.
  */
@@ -340,13 +343,16 @@ export function atmosphereNotes(
 ): ReadonlyArray<AtmosphereNote> {
   const held = new Set(labels);
   const notes: AtmosphereNote[] = [];
-  const refusals = rejected.map((line) => ({ statement: line.statement, caution: !line.refusal }));
+  const refusals = rejected.map((line): AtmosphereNote => ({
+    statement: line.statement,
+    standing: line.refusal ? "refused" : "fault",
+  }));
   for (const label of ATMOSPHERE_LABELS) {
     if (label === "atmospherePending") {
       notes.push(...refusals);
     }
     if (held.has(label)) {
-      notes.push({ statement: ATMOSPHERE_STATEMENTS[label], caution: false });
+      notes.push({ statement: ATMOSPHERE_STATEMENTS[label], standing: "note" });
     }
   }
   return notes;

@@ -10,9 +10,13 @@
  * retry" do.
  */
 import type { RequestClient } from "@hyperion/protocol";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
-import { atmosphereTablesOn, AtmosphereCache } from "../../view/atmosphere/AtmosphereCache";
+import {
+  type AtmosphereRequests,
+  atmosphereTablesOn,
+  AtmosphereCache,
+} from "../../view/atmosphere/AtmosphereCache";
 import { BodyDetailShare } from "../../view/atmosphere/bodyDetailShare";
 import {
   defaultOpticsWorkers,
@@ -25,7 +29,7 @@ import type { ViewEngineState } from "./useViewEngine";
  * The requests of a cache whose scene is kept: its bodies bring their own settings and are never
  * asked, so an ask is a bug.
  */
-const KEPT_SCENE_REQUESTS: Pick<RequestClient, "request"> = {
+const KEPT_SCENE_REQUESTS: AtmosphereRequests = {
   request: () => {
     throw new Error("a kept scene's atmosphere cache asks the server for nothing");
   },
@@ -35,9 +39,34 @@ const KEPT_SCENE_REQUESTS: Pick<RequestClient, "request"> = {
 export interface AtmosphereCacheInput {
   readonly engineState: ViewEngineState;
   /** The cache's requests: the share's (`BodyDetailShare.atmosphere`), or `null` for a kept scene. */
-  readonly requests: Pick<RequestClient, "request"> | null;
+  readonly requests: AtmosphereRequests | null;
   /** Starts one optics worker, stable in identity: `startOpticsWorker` in the app. */
   readonly createWorker: () => OpticsWorkerLike;
+}
+
+/** The cache the hook holds, outside React, so that its making is an effect's and renders it. */
+class CacheHolder {
+  readonly #listeners = new Set<() => void>();
+  #cache: AtmosphereCache | null = null;
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
+
+  readonly get = (): AtmosphereCache | null => this.#cache;
+
+  set(cache: AtmosphereCache | null): void {
+    if (cache === this.#cache) {
+      return;
+    }
+    this.#cache = cache;
+    for (const listener of this.#listeners) {
+      listener();
+    }
+  }
 }
 
 /**
@@ -48,7 +77,8 @@ export interface AtmosphereCacheInput {
 export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache | null {
   const { engineState, requests, createWorker } = input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
-  const [cache, setCache] = useState<AtmosphereCache | null>(null);
+  const [holder] = useState(() => new CacheHolder());
+  const cache = useSyncExternalStore(holder.subscribe, holder.get);
   useEffect(() => {
     if (engine === null) {
       return undefined;
@@ -61,14 +91,12 @@ export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache
       }),
       tables: atmosphereTablesOn(engine),
     });
-    // The cache is the external system's handle, made where the engine is.
-    // oxlint-disable-next-line react/set-state-in-effect
-    setCache(made);
+    holder.set(made);
     return () => {
-      setCache(null);
+      holder.set(null);
       made.dispose();
     };
-  }, [engine, requests, createWorker]);
+  }, [engine, requests, createWorker, holder]);
   return cache;
 }
 

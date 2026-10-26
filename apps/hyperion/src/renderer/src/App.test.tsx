@@ -55,6 +55,7 @@ function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["en
     askRightWayUp: () => Promise.resolve(),
     writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeAtmosphereResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     capture: () => Promise.resolve(),
     writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     end: vi.fn<ViewsCheckApi["end"]>(() => Promise.resolve()),
@@ -232,6 +233,7 @@ describe("App", () => {
         .map((button) => button.textContent);
       expect(scenes.slice(scenes.indexOf("TERRAIN TEST"))).toEqual([
         "TERRAIN TEST",
+        "ATMOSPHERE TEST",
         ...LOOK_SCENES,
       ]);
     });

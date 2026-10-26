@@ -26,7 +26,12 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 /** The runs a launch may make. */
-const RUN_KINDS: ReadonlyArray<ViewsCheckRunKind> = ["several-views", "terrain", "handover"];
+const RUN_KINDS: ReadonlyArray<ViewsCheckRunKind> = [
+  "several-views",
+  "terrain",
+  "handover",
+  "atmosphere",
+];
 
 /** The fields a terrain run may be served. */
 const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
@@ -36,8 +41,9 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
 
 /**
  * `value` as the check's options, or `null` if it is not one: every field present and of its type,
- * and the weathered fixture on a terrain run or its hand-over check alone (T20's run serves no
- * field, so its launch names `TERRAIN TEST`'s, the default).
+ * and the weathered fixture on a terrain run or its hand-over check alone (T20's run and the
+ * atmosphere run, plan R08, R08.T10.b, serve no field, so their launches name `TERRAIN TEST`'s, the
+ * default).
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
@@ -52,7 +58,7 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
     !(out === null || (typeof out === "string" && out.length > 0)) ||
     run === null ||
     fixture === null ||
-    (run === "several-views" && fixture !== "terrain-test")
+    ((run === "several-views" || run === "atmosphere") && fixture !== "terrain-test")
   ) {
     return null;
   }

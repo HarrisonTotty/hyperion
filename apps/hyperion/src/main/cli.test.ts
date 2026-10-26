@@ -125,6 +125,7 @@ describe("the client's command line", () => {
       ENV_SERVER_ADDR,
       ENV_SERVER_PORT,
       "--weathered",
+      "--atmosphere",
     ]) {
       expect(text).toContain(mention);
     }
@@ -427,6 +428,65 @@ describe("the several-views check's options", () => {
       expect(error.message).toContain("--terrain is an option of --views-check");
     },
   );
+
+  it("takes --atmosphere, the atmosphere run (R08.T10.b), at its setting", () => {
+    expect(
+      parse(["--views-check", "--atmosphere", "--setting", "low", "--smoke"]).viewsCheck,
+    ).toEqual({
+      setting: "low",
+      smoke: true,
+      out: null,
+      run: "atmosphere",
+      fixture: "terrain-test",
+    });
+  });
+
+  it("gives an --atmosphere launch its own setting", () => {
+    expect(parse(["--views-check", "--atmosphere", "--setting", "low"]).setting).toBe("low");
+  });
+
+  it.each([
+    [["--atmosphere"]],
+    [["--atmosphere", "--smoke"]],
+    [["--descent-spike", "--atmosphere"]],
+  ])("refuses --atmosphere without --views-check: %j", (args) => {
+    const error = refusal(args);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --atmosphere is an option of --views-check, which was not given",
+    ]);
+  });
+
+  it.each([
+    [["--views-check", "--atmosphere", "--terrain"]],
+    [["--views-check", "--atmosphere", "--terrain", "--handover"]],
+    [["--views-check", "--atmosphere", "--terrain", "--weathered"]],
+    [["--atmosphere", "--terrain"]],
+  ])("refuses --atmosphere with --terrain, a separate run: %j", (args) => {
+    const error = refusal(args);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --atmosphere and --terrain are separate runs; give one",
+    ]);
+  });
+
+  it.each([
+    [["--views-check", "--atmosphere", "--handover"], "--handover"],
+    [["--views-check", "--atmosphere", "--weathered"], "--weathered"],
+  ] as const)("refuses %j as an option of a --terrain that was not given", (args, option) => {
+    const error = refusal(args);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      `error: ${option} is an option of --terrain, which was not given`,
+    ]);
+  });
+
+  it("refuses --atmosphere with the descent spike as separate runs", () => {
+    const error = refusal(["--views-check", "--atmosphere", "--descent-spike"]);
+    expect(error.message).toBe(
+      "error: --views-check and --descent-spike are separate runs; give one",
+    );
+  });
 
   it("refuses to run with the descent spike", () => {
     const error = refusal(["--views-check", "--descent-spike"]);

@@ -72,7 +72,8 @@ interface CheckedView {
 /**
  * The probes of a `--views-check` launch: the views probe, and its run's own (`CheckedRun`): the
  * terrain run's probe on a `--terrain` one, and on a `--handover` one also the hand-over check's
- * looks (R10.T10.g), offered among the terrain probe's kept scenes on that launch alone.
+ * looks (R10.T10.g), offered among the terrain probe's kept scenes on that launch alone; none of its
+ * own on an `--atmosphere` one (R08.T10.b).
  */
 interface CheckProbes {
   readonly views: ViewsProbe;
@@ -93,6 +94,9 @@ function checkProbesOf(launch: ViewsCheckLaunch): CheckProbes {
   switch (launch.run) {
     case "several-views":
       run = { kind: "several-views" };
+      break;
+    case "atmosphere":
+      run = { kind: "atmosphere" };
       break;
     case "terrain":
       run = { kind: "terrain", terrain: terrainProbe([]) };
@@ -117,7 +121,8 @@ function checkProbesOf(launch: ViewsCheckLaunch): CheckProbes {
 /** The view a check launch hands `VIEW`, from its probes. */
 function checkedViewOf(probes: CheckProbes): CheckedView {
   const { run } = probes;
-  if (run.kind === "several-views") {
+  // T20's run and the atmosphere run (R08.T10.b) draw through the views probe alone.
+  if (run.kind === "several-views" || run.kind === "atmosphere") {
     return { engineSource: probes.views.source, terrain: null };
   }
   const { terrain } = run;

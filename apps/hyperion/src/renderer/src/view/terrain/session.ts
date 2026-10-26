@@ -92,7 +92,9 @@ import {
   type BodyIdHex,
   type DetailSeedHex,
   parseBodyId,
+  type PendingRequest,
   type RequestClient,
+  type RequestOf,
   type SurfaceHeaderDto,
   type SurfaceRevisionDto,
   type UniverseIdHex,
@@ -182,7 +184,15 @@ import type { WeightsLayerSetting } from "./workers/messages";
  * What a session asks of its server: R09's `surface_field` for the fields and `body_detail` for
  * the detail seeds, through the link's request client or a kept scene's fixture (R10.T16.d).
  */
-export type TerrainRequests = Pick<RequestClient, "request" | "requestBulk">;
+export interface TerrainRequests {
+  /**
+   * Asks a body's record (`body_detail`), the session's one request of its own kind: the link's
+   * request client, or `VIEW`'s `BodyDetailShare` (plan R08, R08.T10.b).
+   */
+  request(body: RequestOf<"body_detail">): PendingRequest<"body_detail">;
+  /** Asks a field in bulk (`surface_field`), through its coarse-field store. */
+  readonly requestBulk: RequestClient["requestBulk"];
+}
 
 /** What makes a session. */
 export interface TerrainSessionOptions {

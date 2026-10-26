@@ -148,6 +148,27 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
     ]).toEqual([0, ["high", "low"], true]);
   });
 
+  it("makes two launches of the atmosphere run, high then low, for --atmosphere (R08.T10.b)", () => {
+    const run = runScript(["--hidden", "--smoke", "--atmosphere"]);
+    expect([
+      run.status,
+      run.launches.map((launch) => valueOf(launch, "--setting")),
+      run.launches.every((launch) =>
+        ["--views-check", "--smoke", "--atmosphere"].every((flag) => launch.includes(flag)),
+      ),
+      run.launches.some((launch) => launch.includes("--terrain")),
+      readdirSync(run.profiles),
+    ]).toEqual([0, ["high", "low"], true, false, []]);
+  });
+
+  it("makes one launch of the atmosphere run at the setting given", () => {
+    const run = runScript(["--atmosphere", "--setting=low"]);
+    expect([
+      run.launches.map((launch) => valueOf(launch, "--setting")),
+      run.launches[0]?.includes("--atmosphere"),
+    ]).toEqual([["low"], true]);
+  });
+
   it("makes one launch at the setting given", () => {
     const run = runScript(["--terrain", "--setting", "low"]);
     expect(run.launches.map((launch) => valueOf(launch, "--setting"))).toEqual(["low"]);

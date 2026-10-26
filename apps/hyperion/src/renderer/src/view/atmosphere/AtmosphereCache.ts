@@ -54,7 +54,8 @@
 import type {
   BodyIdHex,
   DetailLevelDto,
-  RequestClient,
+  PendingRequest,
+  RequestOf,
   RequestOutcome,
   SystemIdHex,
   UniverseIdHex,
@@ -102,9 +103,13 @@ export const ATMOSPHERE_CACHE_BYTES = 32_000_000;
 
 /**
  * Where `body_detail` is asked: shaped as the terrain session's `TerrainRequests`
- * (`decision-r08-t10a-leans.md` item 4); R08.T10.b joins the fetch with R10.T16.a's.
+ * (`decision-r08-t10a-leans.md` item 4), the one kind the cache asks, which the link's request
+ * client takes as it is; R08.T10.b joins the fetch with R10.T16.a's (`BodyDetailShare`).
  */
-export type AtmosphereRequests = Pick<RequestClient, "request">;
+export interface AtmosphereRequests {
+  /** Asks a body's record; the link's request client, or the `body_detail` share's (R08.T10.b). */
+  request(body: RequestOf<"body_detail">): PendingRequest<"body_detail">;
+}
 
 /** What the cache needs of a body's per-planet tables (item 3): `AtmosphereTables`' own. */
 export type CachedTables = Pick<AtmosphereTables, "rowBytes" | "dispose">;

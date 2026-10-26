@@ -1,6 +1,12 @@
 import { useEffect } from "react";
 
 import type { ViewsCheckApi } from "../../../../../preload/api";
+import { pageAtmosphereFixtures } from "../../../view/scenes/atmosphereScene";
+import {
+  ATMOSPHERE_CHECK_TIMING,
+  recordAtmosphereCheck,
+  runAtmosphereCheck,
+} from "./atmosphereCheckRun";
 import { HANDOVER_CHECK_TIMING, recordHandoverCheck, runHandoverCheck } from "./handoverCheckRun";
 import type { HandoverScenes } from "./handoverScenes";
 import { recordTerrainCheck, runTerrainCheck, TERRAIN_CHECK_TIMING } from "./terrainCheckRun";
@@ -12,10 +18,12 @@ import type { ViewsProbe } from "./viewsProbe";
  * A views-check launch's run (`ViewsCheckLaunch.run`) with what it runs on: T20's needs the views
  * probe alone; the terrain run (plan R10, R10.T16.d) its terrain probe, whose engine source,
  * workers and kept scenes `VIEW` takes; the hand-over check (plan R10, R10.T10.g) that probe and
- * its looks, which `VIEW` offers through the terrain probe's kept scenes.
+ * its looks, which `VIEW` offers through the terrain probe's kept scenes; the atmosphere run (plan
+ * R08, R08.T10.b) the views probe alone, as T20's.
  */
 export type CheckedRun =
   | { readonly kind: "several-views" }
+  | { readonly kind: "atmosphere" }
   | { readonly kind: "terrain"; readonly terrain: TerrainProbe }
   | {
       readonly kind: "handover";
@@ -53,10 +61,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Runs the launch's run once the app mounts: the several-views check (plan R07, T20), the terrain
- * run (plan R10, R10.T16.d) or the hand-over check (plan R10, R10.T10.g), and ends the app with
- * it: the probe times the page's animation frames, the script drives `VIEW`, and the main process
+ * run (plan R10, R10.T16.d), the hand-over check (plan R10, R10.T10.g) or the atmosphere run (plan
+ * R08, R08.T10.b), and ends the app with it: the probe times the page's animation frames, the script drives `VIEW`, and the main process
  * writes the record and exits with 0, or with 1 and the reason when the script could not finish
- * (or a terrain check or the hand-over's verdict failed).
+ * (or a terrain check, the hand-over's verdict or an atmosphere capture failed).
  *
  * @remarks
  * Renders nothing. Mounted only on a `--views-check` launch, beside the consoles.
@@ -87,6 +95,22 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
               api,
               probe,
               timing: api.launch.smoke ? VIEWS_CHECK_TIMING.smoke : VIEWS_CHECK_TIMING.full,
+            }),
+          controller.signal,
+        );
+        break;
+      case "atmosphere":
+        ended = recordAtmosphereCheck(
+          api,
+          () =>
+            runAtmosphereCheck({
+              ...shared,
+              api,
+              views: probe,
+              fixtures: pageAtmosphereFixtures(),
+              timing: api.launch.smoke
+                ? ATMOSPHERE_CHECK_TIMING.smoke
+                : ATMOSPHERE_CHECK_TIMING.full,
             }),
           controller.signal,
         );

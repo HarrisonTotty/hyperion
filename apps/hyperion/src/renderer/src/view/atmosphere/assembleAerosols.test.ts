@@ -408,6 +408,31 @@ describe("a mode outside its optics' range (R08.T10.b)", () => {
     );
   });
 
+  it("drops a gamma of effective variance 0.5, which the wire takes and the law does not", () => {
+    const wide: AerosolModeDto = {
+      ...ironHaze(1e-6),
+      size_distribution: { type: "gamma", effective_radius_m: 1e-6, effective_variance: 0.5 },
+    };
+    const result = earthWith(modes(wide));
+    expect([aerosolTerms(result), result.reasons.includes(IRON_REASON)]).toEqual([[], true]);
+  });
+
+  it("drops aggregates of monomers past the MMF's size parameter 10 at the blue channel", () => {
+    const coarse = tholinAggregates(2);
+    const sizes = coarse.size_distribution;
+    if (sizes?.type !== "aggregate") {
+      throw new Error("an aggregate mode is expected");
+    }
+    // x₀ = 2πa₀ ÷ λ is 10 at 433.625 nm for a₀ of about 0.69 µm.
+    const result = earthWith(
+      modes({ ...coarse, size_distribution: { ...sizes, monomer_radius_m: 1e-6 } }),
+    );
+    expect(aerosolTerms(result)).toEqual([]);
+    expect(result.reasons).toContain(
+      "solid tholin particles: their sizes lie outside the optics on file, not drawn",
+    );
+  });
+
   it("draws aggregates of fractal dimension 2", () => {
     expect(aerosolTerms(earthWith(modes(tholinAggregates(2))))).toEqual(["aerosol:tholin"]);
   });

@@ -42,23 +42,29 @@ describe("the view's label block", () => {
     expect(screen.queryAllByRole("status").some((s) => s.contains(line))).toBe(false);
   });
 
-  it("sets a server's own failure among the statements in --status-caution, in words (R08.T10.b)", () => {
+  it("sets ATMOSPHERE REJECTED among the statements as every request's REJECTED (R08.T10.b)", () => {
     const failed = "ATMOSPHERE REJECTED: for TEST GIANT, internal error, reopen VIEW to retry";
+    const refused = "ATMOSPHERE REJECTED: for TEST MOON, no such body, reopen VIEW to retry";
     render(
       <ViewLabelBlock
         lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
-        statements={["ATMOSPHERE: NOT RESOLVED", { text: failed, caution: true }]}
+        statements={[
+          "ATMOSPHERE: NOT RESOLVED",
+          { text: refused, standing: "refused" },
+          { text: failed, standing: "fault" },
+        ]}
         countLine={null}
         faults={[]}
       />,
     );
-    const line = screen.getByText(
-      (_, element) => element?.textContent === failed && element.tagName === "P",
-    );
-    expect(line.className).toBe("view-label__statement view-label__statement--caution");
-    expect(STYLES).toMatch(
-      /\.view-label__statement--caution\s*\{\s*color: var\(--status-caution\);\s*\}/u,
-    );
+    const statuses = screen.getAllByRole("status");
+    const of = (text: string): HTMLElement | undefined =>
+      statuses.find((output) => output.textContent === text);
+    // The server's own failure in --status-caution, as a fault; a refusal of what was asked plain.
+    expect([
+      of(failed)?.classList.contains("request-status__text--fault"),
+      of(refused)?.classList.contains("request-status__text--fault"),
+    ]).toEqual([true, false]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
