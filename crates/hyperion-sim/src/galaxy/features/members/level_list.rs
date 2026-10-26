@@ -24,6 +24,11 @@
 //! under 8,192 ([`FeatureLevelList::with_classes`] asserts it), and the count is clamped there, the
 //! later classes losing members first.
 //!
+//! The bound, `expected + 8√expected + 1 < 8,192` with index 0 spared whether or not it is a
+//! member, is one function, which plan 11's
+//! [`check_feature_list_headroom`](super::check_feature_list_headroom) shares (P11.T8.e), so that
+//! a centre the check passes cannot fail the assertion when P11.T8.f builds its list.
+//!
 //! This task registers no class: [`FeatureLevelList::of`] lists none, and the classes' tasks
 //! (P09.T30.b, T36 and T43) register theirs in [`registered_classes`].
 
@@ -41,6 +46,31 @@ use super::MemberRecord;
 
 /// The words each class owns on the list's streams: 2³², far beyond any count's draws.
 const CLASS_WORDS: u64 = 1 << 32;
+
+/// Standard deviations of a list's Poisson count that its index must spare: eight, plan 03's rule
+/// for its cells (its Design note 6), which P09.T22 takes for the list.
+pub(crate) const LIST_HEADROOM_SIGMAS: f64 = 8.0;
+
+/// Whether a list expecting `expected` members in all keeps [`LIST_HEADROOM_SIGMAS`] standard
+/// deviations and index 0 under its 8,192 index: `expected + 8√expected + 1 < 8,192`, the bound
+/// [`FeatureLevelList::with_classes`] asserts (module documentation).
+///
+/// A count that is NaN fits nothing.
+#[must_use]
+pub(crate) fn fits_list_index(expected: f64) -> bool {
+    expected + LIST_HEADROOM_SIGMAS * expected.sqrt() + 1.0 < f64::from(MemberSlot::INDEX_LIMIT)
+}
+
+/// The indices a list expecting `expected` members in all leaves free under its 8,192 once
+/// `sigmas` standard deviations and index 0 are spared: `8,192 − (expected + sigmas √expected +
+/// 1)`, positive where it fits.
+///
+/// At [`LIST_HEADROOM_SIGMAS`] it is positive exactly where [`fits_list_index`] holds, for a
+/// finite count: the difference of two finite doubles is zero only where they are equal.
+#[must_use]
+pub(crate) fn list_index_margin(expected: f64, sigmas: f64) -> f64 {
+    f64::from(MemberSlot::INDEX_LIMIT) - (expected + sigmas * expected.sqrt() + 1.0)
+}
 
 /// A class on a feature's list: its expected members and its profile about the feature's centre.
 #[derive(Debug, Clone, PartialEq)]
@@ -188,9 +218,8 @@ impl FeatureLevelList {
             "a list's classes must be distinct and in the list order"
         );
         let expected: f64 = classes.iter().map(|c| c.expected).sum();
-        let limit = f64::from(MemberSlot::INDEX_LIMIT);
         assert!(
-            expected + 8.0 * expected.sqrt() + 1.0 < limit,
+            fits_list_index(expected),
             "a feature-level list expecting {expected} members cannot keep eight standard \
              deviations under its 8,192 index"
         );
