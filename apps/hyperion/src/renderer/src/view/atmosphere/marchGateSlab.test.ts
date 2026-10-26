@@ -1,7 +1,7 @@
 import { BOTTOM_M } from "../../test/atmosphereGate";
 import { describeMarchGate } from "../../test/marchGate";
 import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "./earth";
-import { planetTwin, tableSources } from "./tablesCpu";
+import { planetTwin } from "./tablesCpu";
 
 /**
  * R05.T12.e's quadrature gate for the widened march (R08.T8) on the slab Earth, a file of its own
@@ -12,8 +12,7 @@ import { planetTwin, tableSources } from "./tablesCpu";
 describeMarchGate({
   name: "the slab Earth",
   medium: EARTH_SLAB_REFERENCE,
-  sources: () =>
-    tableSources(planetTwin(EARTH_SLAB_REFERENCE, BOTTOM_M, EARTH_SLAB_REFERENCE_CURVES)),
+  planet: () => planetTwin(EARTH_SLAB_REFERENCE, BOTTOM_M, EARTH_SLAB_REFERENCE_CURVES),
   // At one source high misses the limb's and night limb's rays `tablesCpu.test.ts`'s
   // `SLAB_HIGH_MISS` names, and two of the sky's from 99.999 km that the ray march draws there:
   // the high band at view zenith 99.879°, sun 90°/180° (6.44% under the warp, a = 1; 6.74% in
@@ -25,7 +24,13 @@ describeMarchGate({
   // high's count on the bare ground is scaled by its optical depth, the named misses' sky chords at
   // 36: at one source the march's ordinary worst is the disc at 28 steps, 20 and 4 for each of the
   // slab's two edges (1.59%; 1.12% at 36 steps throughout), measured 2026-10-22; the thin sky at 28
-  // steps puts the sky's ordinary worst at six sources at 0.12% (0.07%), measured 2026-10-23.
+  // steps puts the sky's ordinary worst at six sources at 0.12% (0.07%), measured 2026-10-23. Since
+  // R08.T8.e's lever 5 (2026-10-23, the ray march's slot read; `decision-r08-t8-leans.md` §15): low's
+  // band ray from 50 km over `LOW_TWIN_WORST`, view zenith 97.008°, sun 90°/180°, 18.23421% →
+  // 18.26658% (18.23 → 18.27), all of it the interpolation of the slot layer's −ln T_c(u) between
+  // texels, §10's second-order effect; s ≡ 1, and the GPU's `rgba16float` layers move it about
+  // −0.004 points the other way (18.2626%, an estimate). Low's even-step sky twilight 0.49632 →
+  // 0.49657.
   record: {
     highMisses: [
       [
@@ -85,7 +90,7 @@ describeMarchGate({
           march: 0.30338,
           marchTwilight: 0.44193,
           sky: 0.30292,
-          skyTwilight: 0.49632,
+          skyTwilight: 0.49657,
           lastLight: 0.35863,
         },
       },
@@ -118,7 +123,7 @@ describeMarchGate({
         "night limb, 101 km, 0.1 H, sun 90°/0°: 28.56%",
         "night limb, 101 km, 0.1 H, sun 95°/180°: 27.51%",
         "night limb, 101 km, 0.3 H, sun 95°/180°: 24.12%",
-        "band, 50000 m, view zenith 97.008°, sun 90°/180°: 18.23%",
+        "band, 50000 m, view zenith 97.008°, sun 90°/180°: 18.27%",
       ],
       ["limb, 0.3 H, sun 30°/180°: 3.95%", "limb, 1 H, sun 30°/180°: 4.12%"],
     ],

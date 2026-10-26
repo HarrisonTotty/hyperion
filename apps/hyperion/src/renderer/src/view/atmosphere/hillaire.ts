@@ -81,6 +81,8 @@ import farLimbWgsl from "./shaders/farLimb.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
+import rayMarchCurvesWgsl from "./shaders/rayMarchCurves.wgsl?raw";
+import rayMarchSlotsWgsl from "./shaders/rayMarchSlots.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
@@ -808,8 +810,27 @@ export const AERIAL_PERSPECTIVE_KERNEL = kernel(
   "atmosphere aerial perspective",
   aerialPerspectiveWgsl,
 );
-/** The per-pixel ray-march kernel, after the far limb's footprint (`farLimb.wgsl`, R08.T8.c). */
-export const RAY_MARCH_KERNEL = kernel("atmosphere ray march", `${farLimbWgsl}\n${rayMarchWgsl}`);
+/**
+ * The per-pixel ray-march kernel, after the far limb's footprint (`farLimb.wgsl`, R08.T8.c), each
+ * source's light read through the shared tables with its slot's curves applied on read
+ * (`rayMarchCurves.wgsl`): the march of every body whose tables hold no slot layers
+ * (`tables.ts`'s `slotDepthsRefusal`; R08.T8.e).
+ */
+export const RAY_MARCH_KERNEL = kernel(
+  "atmosphere ray march",
+  `${farLimbWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}`,
+);
+/**
+ * The per-pixel ray-march kernel of a body whose tables hold the slot layers (plan R08, R08.T8.e,
+ * lever 5; `decision-r08-t8-leans.md` §10 and §13; `AtmosphereTables.slotDepths`): the same march,
+ * each source's light at each step and the bare ground's one read of its light slot's layer
+ * (`rayMarchSlots.wgsl`), which only this kernel declares. Chosen when the body's pipeline is made,
+ * so that neither form pays for the other's registers.
+ */
+export const RAY_MARCH_SLOTS_KERNEL = kernel(
+  "atmosphere ray march by slot",
+  `${farLimbWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}`,
+);
 
 /**
  * The sources' members, `view.wgsl`'s `AtmosphereView.sources`: each source's direction, weight
@@ -903,6 +924,11 @@ interface FrameKernels {
   readonly skyView: ComputeHandle;
   readonly aerial: ComputeHandle;
   readonly rayMarch: ComputeHandle;
+  /**
+   * The ray march by slot ({@link RAY_MARCH_SLOTS_KERNEL}), made at the first frame of tables that
+   * hold the slot layers (R08.T8.e).
+   */
+  readonly rayMarchSlots: () => ComputeHandle;
 }
 
 /** The per-frame tables a frame writes: the sky view, the aerial-perspective volume, the march. */
@@ -1208,6 +1234,7 @@ interface UnreadTables {
 const NO_UNREAD_TABLES: UnreadTables = { skyView: null, aerial: null };
 
 function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameResources {
+  let rayMarchSlots: ComputeHandle | null = null;
   return {
     skyView: frameTexture(
       engine,
@@ -1229,6 +1256,7 @@ function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameRes
       skyView: engine.createCompute(SKY_VIEW_KERNEL),
       aerial: engine.createCompute(AERIAL_PERSPECTIVE_KERNEL),
       rayMarch: engine.createCompute(RAY_MARCH_KERNEL),
+      rayMarchSlots: () => (rayMarchSlots ??= engine.createCompute(RAY_MARCH_SLOTS_KERNEL)),
     },
     composite: engine.createMaterial(COMPOSITE_MATERIAL),
     triangle: engine.createMesh({
@@ -1244,11 +1272,14 @@ function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameRes
 }
 
 function createKernelArmResources(engine: RenderEngine, sizes: TableSizes): KernelArmResources {
+  let rayMarchSlots: ComputeHandle | null = null;
   return {
     kernels: {
       skyView: engine.createCompute(withKernelArmFormat(SKY_VIEW_KERNEL)),
       aerial: engine.createCompute(withKernelArmFormat(AERIAL_PERSPECTIVE_KERNEL)),
       rayMarch: engine.createCompute(withKernelArmFormat(RAY_MARCH_KERNEL)),
+      rayMarchSlots: () =>
+        (rayMarchSlots ??= engine.createCompute(withKernelArmFormat(RAY_MARCH_SLOTS_KERNEL))),
     },
     skyView: frameTexture(
       engine,
@@ -1734,11 +1765,18 @@ export class HillaireAtmosphere {
       skyView();
       aerial();
     }
+    // A body whose tables hold the slot layers marches by slot, each source's light one read of
+    // its slot's layer (R08.T8.e, lever 5); every other the shared read.
+    const slotDepths = tables.slotDepths;
     engine.dispatch(
-      kernels.rayMarch,
+      slotDepths === null ? kernels.rayMarch : kernels.rayMarchSlots(),
       {
         buffers: common.buffers,
-        sampled: { ...common.sampled, sceneDepth: scene.depth },
+        sampled: {
+          ...common.sampled,
+          sceneDepth: scene.depth,
+          ...(slotDepths === null ? {} : { slotDepths }),
+        },
         uniforms: { medium: perFrameMedium, view: marchUniforms, layerEdges: tables.layerEdges },
         storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
       },

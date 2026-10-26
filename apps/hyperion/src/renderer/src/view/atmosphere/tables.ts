@@ -45,7 +45,9 @@
 
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
+import { bytesPerTexel } from "../engine/memory";
 import type { BufferHandle, ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
+import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
 import type { AbsorberAmount, AbsorberCurve } from "./absorbers";
 import {
   FORWARD_LOBE_X_NODES,
@@ -85,6 +87,7 @@ import irradianceWgsl from "./shaders/irradiance.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
+import slotDepthsWgsl from "./shaders/slotDepths.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
 
 /**
@@ -784,10 +787,13 @@ export const KERNEL_ARM_FORMAT = "rgba32float";
  * ones ({@link KERNEL_ARM_FORMAT}). The transmittance kernel writes the transmittance table and the
  * absorber-column table beside it (R08.T6.c), and the pressure-weighted column tables (R08.T4.d),
  * each a 2D array of one layer a κ slice (R08.T6.f); the multiple-scattering kernel one layer of its
- * 2D array a latitude band and light slot ({@link multiScatteringLayersOf}, R08.T7, R08.T6.f).
+ * 2D array a latitude band and light slot ({@link multiScatteringLayersOf}, R08.T7, R08.T6.f); and,
+ * where the body takes them, the slot-depth kernel one layer a κ slice and light slot (R08.T8.e,
+ * {@link AtmosphereTables.slotDepths}), `null` where it does not.
  */
 export interface PlanetTableTextures extends TransmittanceTextures {
   readonly multiScattering: TextureHandle;
+  readonly slotDepths: TextureHandle | null;
 }
 
 /**
@@ -806,10 +812,200 @@ export function multiScatteringLayersOf(
   return absorberCount(medium) > 0 ? Math.max(1, curves.length) : 1;
 }
 
-/** The two per-planet kernels, as built or as the kernel arm assembles them. */
+/**
+ * The slot-depth kernel (plan R08, R08.T8.e, lever 5; `decision-r08-t8-leans.md` §10 and §13):
+ * `view/shaders/preciseTrig.wgsl`, `common.wgsl`, then `slotDepths.wgsl`, which writes each light
+ * slot's optical depth to the top, its curves applied at each texel of the stored transmittance
+ * tables ({@link AtmosphereTables.slotDepths}).
+ */
+export const SLOT_DEPTHS_KERNEL: KernelPair = {
+  name: "atmosphere slot depths",
+  reference: `${preciseTrigWgsl}\n${commonWgsl}\n${slotDepthsWgsl}`,
+  subgroup: null,
+  readback: "presentation-only",
+};
+
+/**
+ * The per-planet row, B, decimal: 2 MB (10⁶ B), Design note 11's "under 2 MB a planet" as
+ * `decision-r08-t8-leans.md` §13, point 2 reads it.
+ */
+export const PER_PLANET_ROW_BYTES = 2_000_000;
+
+/**
+ * Every per-planet allocation a body's {@link AtmosphereTables} makes, as built, at its allocated
+ * size, B (plan R08, Design note 11; `decision-r08-t8-leans.md` §13, point 2): what the 2 MB row
+ * counts. The per-view tables have a line of their own and the smoke's kernel arm is not drawn, so
+ * neither counts; nor do a band's own transmittance tables, which a build makes for its multiple
+ * scattering and releases after it.
+ */
+export interface PerPlanetRow {
+  /**
+   * The transmittance kernel's four tables in every κ slice, used or not: the optical depth, the
+   * absorber columns and the pressure-weighted columns at {@link TRANSMITTANCE_SIZE}, and the fifth
+   * pressure channel's at its own size ({@link lastPressureColumnSize}).
+   */
+  readonly transmittanceBytes: number;
+  /** The lights' curves of growth ({@link packAbsorberCurves}), Design note 11's row's since R08.T4.d. */
+  readonly curvesBytes: number;
+  /** The multiple-scattering and sky-irradiance layers, a band and light slot each. */
+  readonly bandLayerBytes: number;
+  /** The body's table ({@link packOblateBody}) and the terms buffer ({@link TERMS_BUFFER_BYTES}). */
+  readonly bodyAndTermsBytes: number;
+  /** The density, phase and forward-lobe tables, or their one-texel placeholders. */
+  readonly mediumTableBytes: number;
+  /** The row before the slot layers: every part above. */
+  readonly baseBytes: number;
+  /**
+   * What the slot layers ({@link AtmosphereTables.slotDepths}) take: 131 KB a κ slice and light slot
+   * under an absorber, built or not; 0 for a medium with none.
+   */
+  readonly slotDepthBytes: number;
+}
+
+/** A texture's bytes at `format`: its texels times the format's (`engine/memory.ts`'s rule). */
+function bytesOf(format: GPUTextureFormat, ...extent: readonly number[]): number {
+  return extent.reduce((product, n) => product * n, bytesPerTexel(format));
+}
+
+/**
+ * The per-planet row of a medium, its lights' curves and a plan, as {@link AtmosphereTables} builds
+ * them (`decision-r08-t8-leans.md` §13, point 2): every allocation at its allocated size, B, from the
+ * shapes the packers give, which `tables.test.ts` holds to the engine's own allocations.
+ *
+ * @remarks
+ * Design note 11's estimates count the tables a medium reads; as built, the depth, absorber-column
+ * and pressure-column tables are made at full size in every slice even where the medium leaves them
+ * unused, so an absorbing body comes to more (R08.T11's, `decision-r08-t8-leans.md` §13, text F).
+ */
+export function perPlanetRowOf(
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+  plan: TablesPlan,
+): PerPlanetRow {
+  const slices = plan.kappa.length;
+  const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
+  const last = lastPressureColumnSize(medium);
+  const transmittanceBytes =
+    slices *
+    (3 * bytesOf("rgba16float", w, h) +
+      bytesOf("rgba16float", last.widthTexels, last.heightTexels));
+  const slots = absorberSlots(medium);
+  const lead = curves[0] ?? [];
+  const block = slots.reduce((sum, _, k) => sum + (lead[k]?.logPressures.length ?? 1), 0);
+  const curvesBytes =
+    slots.length === 0
+      ? bytesOf(CURVES_FORMAT, 1, 1)
+      : bytesOf(CURVES_FORMAT, ABSORBER_CURVE_NODES, 1 + curves.length * block);
+  const layersPerBand = multiScatteringLayersOf(medium, curves);
+  const bandLayers = plan.bands.length * layersPerBand;
+  const bandLayerBytes =
+    bytesOf("rgba16float", MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels) *
+      bandLayers +
+    bytesOf(IRRADIANCE_FORMAT, IRRADIANCE_SIZE.widthTexels, IRRADIANCE_SIZE.heightTexels) *
+      bandLayers;
+  const bodyAndTermsBytes = bytesOf(OBLATE_BODY_FORMAT, OBLATE_BODY_TEXELS) + TERMS_BUFFER_BYTES;
+  const terms = medium.terms.length;
+  const tabulatedDensities =
+    medium.terms.some((term) => term.density.kind === "tabulated") ||
+    medium.pressureBar !== undefined;
+  const tabulatedPhases = medium.terms.some((term) => term.phase.kind === "tabulated");
+  const densityLayers = terms + (medium.pressureBar === undefined ? 0 : 1);
+  const mediumTableBytes =
+    (tabulatedDensities
+      ? bytesOf(DENSITY_FORMAT, DENSITY_TABLE_LEVELS, densityLayers)
+      : bytesOf(DENSITY_FORMAT, 1)) +
+    (tabulatedPhases
+      ? bytesOf(PHASE_FORMAT, PHASE_TABLE_ENTRIES, terms) +
+        bytesOf(LOBE_FORMAT, FORWARD_ORDERS_ENTRIES, FORWARD_LOBE_X_NODES, terms)
+      : bytesOf(PHASE_FORMAT, 1) + bytesOf(LOBE_FORMAT, 1));
+  const baseBytes =
+    transmittanceBytes + curvesBytes + bandLayerBytes + bodyAndTermsBytes + mediumTableBytes;
+  const slotDepthBytes =
+    slots.length === 0 ? 0 : slices * layersPerBand * bytesOf(SLOT_DEPTHS_FORMAT, w, h);
+  return {
+    transmittanceBytes,
+    curvesBytes,
+    bandLayerBytes,
+    bodyAndTermsBytes,
+    mediumTableBytes,
+    baseBytes,
+    slotDepthBytes,
+  };
+}
+
+/**
+ * Why a body's tables hold no slot layers, so that its ray march keeps the shared table's read with
+ * the curves applied on read (`decision-r08-t8-leans.md` §10, amendments 2 and 4, and §13, points 1–3),
+ * each with what decided it, for R08.T11 to record:
+ *
+ * - `noAbsorber`: the medium has none, and the shared table's rgb is already the whole depth;
+ * - `severalBands`: the body has two or more latitude bands, ln(s_max ÷ s_min) over
+ *   `oblate.ts`'s `ONE_BAND_BELOW`, where a layer's depth divided by s takes s^(n − 1) of the
+ *   absorber depth today's read takes, about 1.2% on the ice giants and 7% on Saturn (§13, point 1);
+ * - `lightSlots`: the curves take more light slots than R07's `MAX_BODY_LIGHTS`, which no body's stars
+ *   do (`settings.ts`'s `SKY_SUN_CAP`), only a test's or the smoke's;
+ * - `row`: the per-planet row, as built, with the layers would pass {@link PER_PLANET_ROW_BYTES}.
+ */
+export type SlotDepthsRefusal =
+  | { readonly kind: "noAbsorber" }
+  | { readonly kind: "severalBands"; readonly bands: number }
+  | { readonly kind: "lightSlots"; readonly slots: number; readonly most: number }
+  | { readonly kind: "row"; readonly rowBytes: number; readonly mostBytes: number };
+
+/**
+ * Whether a body's tables build the slot layers ({@link AtmosphereTables.slotDepths}): `null` where
+ * they do, or why not ({@link SlotDepthsRefusal}), decided from what `setMedium` knows, the medium,
+ * the lights' curves and the plan, so that the body's ray march takes its read when its pipeline is
+ * made (`decision-r08-t8-leans.md` §13, point 2). The layers never widen `KAPPA_STEP` or
+ * `BAND_STEP`: the row is the plan's as it stands, with them.
+ */
+export function slotDepthsRefusal(
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+  plan: TablesPlan,
+): SlotDepthsRefusal | null {
+  if (absorberCount(medium) === 0) {
+    return { kind: "noAbsorber" };
+  }
+  if (plan.bands.length > 1) {
+    return { kind: "severalBands", bands: plan.bands.length };
+  }
+  if (curves.length > MAX_BODY_LIGHTS) {
+    return { kind: "lightSlots", slots: curves.length, most: MAX_BODY_LIGHTS };
+  }
+  const row = perPlanetRowOf(medium, curves, plan);
+  const rowBytes = row.baseBytes + row.slotDepthBytes;
+  return rowBytes > PER_PLANET_ROW_BYTES
+    ? { kind: "row", rowBytes, mostBytes: PER_PLANET_ROW_BYTES }
+    : null;
+}
+
+/**
+ * The slot layers' format: `rgba16float`, the shared table's, whose stored optical depth keeps
+ * Design note 8's 10⁻³; the kernel arm's {@link KERNEL_ARM_FORMAT}.
+ */
+const SLOT_DEPTHS_FORMAT: GPUTextureFormat = "rgba16float";
+
+/** The slot layers' texture name. */
+const SLOT_DEPTHS_NAME = "atmosphere slot depths";
+
+/** A row of nothing, the tables' before their first build. */
+const EMPTY_ROW: PerPlanetRow = {
+  transmittanceBytes: 0,
+  curvesBytes: 0,
+  bandLayerBytes: 0,
+  bodyAndTermsBytes: 0,
+  mediumTableBytes: 0,
+  baseBytes: 0,
+  slotDepthBytes: 0,
+};
+
+/** The per-planet kernels, as built or as the kernel arm assembles them. */
 interface PlanetTableKernels {
   readonly transmittance: ComputeHandle;
   readonly multiScattering: ComputeHandle;
+  /** The slot layers' kernel, made at the first build that takes it. */
+  readonly slotDepths: () => ComputeHandle;
 }
 
 /** A kernel's `rgba16float` storage-texture declaration, its format between the two groups. */
@@ -1538,6 +1734,11 @@ interface TableResources {
   /** The terms' forward-lobe tables ({@link packLobeTables}), with their shape. */
   lobeTables: PlanesTexture;
   absorberCurves: UploadedTexture;
+  /**
+   * Each light slot's optical depth to the top, one layer a κ slice and light slot (R08.T8.e,
+   * {@link AtmosphereTables.slotDepths}), or `null` for a body that keeps the shared read.
+   */
+  slotDepths: LayeredTexture | null;
   readonly transmittanceKernel: ComputeHandle;
   readonly multiScatteringKernel: ComputeHandle;
 }
@@ -1684,6 +1885,9 @@ function releaseResources(engine: RenderEngine, resources: TableResources): void
   ]) {
     engine.releaseTexture(texture);
   }
+  if (resources.slotDepths !== null) {
+    engine.releaseTexture(resources.slotDepths.texture);
+  }
 }
 
 /**
@@ -1797,6 +2001,7 @@ function createResources(engine: RenderEngine): TableResources {
       widthTexels: 1,
       heightTexels: 1,
     }),
+    slotDepths: null,
     transmittanceKernel: engine.createCompute(TRANSMITTANCE_KERNEL),
     multiScatteringKernel: engine.createCompute(MULTI_SCATTERING_KERNEL),
   };
@@ -1847,6 +2052,14 @@ export class AtmosphereTables {
   #irradianceBuilt = false;
   /** The sky-irradiance kernel, made at the irradiance's first build on a device. */
   #irradianceKernel: ComputeHandle | null = null;
+  /** The slot-depth kernel, made at the first build on a device that takes the layers (R08.T8.e). */
+  #slotDepthsKernel: ComputeHandle | null = null;
+  /** The kernel arm's slot-depth kernel, made at the first arm that takes the layers. */
+  #armSlotDepthsKernel: ComputeHandle | null = null;
+  /** Why the last build made no slot layers, or `null` where it made them (R08.T8.e). */
+  #slotDepthsRefusal: SlotDepthsRefusal | null = { kind: "noAbsorber" };
+  /** The last build's per-planet row (R08.T8.e, `decision-r08-t8-leans.md` §13, point 2). */
+  #row: PerPlanetRow = EMPTY_ROW;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -1884,6 +2097,8 @@ export class AtmosphereTables {
       this.#resources = createResources(engine);
       this.#armKernels = null;
       this.#irradianceKernel = null;
+      this.#slotDepthsKernel = null;
+      this.#armSlotDepthsKernel = null;
       this.#key = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
     });
@@ -1975,6 +2190,41 @@ export class AtmosphereTables {
   /** The body's table ({@link packOblateBody}), `rgba32float`, which the per-frame kernels read. */
   get oblateBody(): TextureHandle {
     return this.#resources.oblateBody;
+  }
+
+  /**
+   * Each light slot's optical depth to the top, `rgba16float` at {@link TRANSMITTANCE_SIZE}, a 2D
+   * array of one layer a κ slice and light slot, slice k's slot p at layer k ×
+   * {@link AtmosphereTables.layersPerBand} + p (plan R08, R08.T8.e, lever 5;
+   * `decision-r08-t8-leans.md` §10 and §13): each texel the shared table's stored optical depth plus
+   * that slot's curves of growth at the texel's own stored columns, so that the ray march reads a
+   * source's light, and the bare ground's, in one read. `null` for a body that keeps the shared
+   * read ({@link AtmosphereTables.slotDepthsRefusal}); a new handle after a restore or a build of
+   * another layer count.
+   */
+  get slotDepths(): TextureHandle | null {
+    return this.#resources.slotDepths?.texture ?? null;
+  }
+
+  /**
+   * Why the tables hold no slot layers ({@link slotDepthsRefusal}), for R08.T11 to record each body
+   * kept off, or `null` where they hold them.
+   */
+  get slotDepthsRefusal(): SlotDepthsRefusal | null {
+    return this.#slotDepthsRefusal;
+  }
+
+  /**
+   * The per-planet row of the last build ({@link perPlanetRowOf}): every allocation the tables
+   * make, the slot layers' bytes whether or not they are made.
+   */
+  get row(): PerPlanetRow {
+    return this.#row;
+  }
+
+  /** The bytes the tables allocate, B: the row's base, and the slot layers where they are made. */
+  get rowBytes(): number {
+    return this.#row.baseBytes + (this.#slotDepthsRefusal === null ? this.#row.slotDepthBytes : 0);
   }
 
   /** The slices and bands the tables are built in ({@link tablesPlanOf}). */
@@ -2076,12 +2326,19 @@ export class AtmosphereTables {
       medium,
       layersPerBand,
     );
+    // Whether the body takes the slot layers (R08.T8.e, `decision-r08-t8-leans.md` §13): decided
+    // here, from what the build knows, so that its ray march takes its read when its pipeline is
+    // made; the key above already holds all of it, so the choice sets off no rebuild of its own.
+    const refusal = slotDepthsRefusal(medium, curves, plan);
+    const row = perPlanetRowOf(medium, curves, plan);
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;
     this.#body = body;
     this.#plan = plan;
     this.#layerEdges = layerEdges;
+    this.#slotDepthsRefusal = refusal;
+    this.#row = row;
     this.#key = null;
     this.#irradianceBuilt = false;
     const engine = this.#engine;
@@ -2128,9 +2385,41 @@ export class AtmosphereTables {
       engine.releaseTexture(r.irradiance.texture);
       r.irradiance = made;
     }
+    const slotLayers = refusal === null ? sliceCount * layersPerBand : 0;
+    const heldSlots = r.slotDepths;
+    if (slotLayers === 0) {
+      if (heldSlots !== null) {
+        engine.releaseTexture(heldSlots.texture);
+        r.slotDepths = null;
+      }
+    } else if (heldSlots?.layers !== slotLayers) {
+      const made = storedTable(
+        engine,
+        SLOT_DEPTHS_NAME,
+        TRANSMITTANCE_SIZE,
+        slotLayers,
+        SLOT_DEPTHS_FORMAT,
+      );
+      if (heldSlots !== null) {
+        engine.releaseTexture(heldSlots.texture);
+      }
+      r.slotDepths = {
+        texture: made,
+        widthTexels: TRANSMITTANCE_SIZE.widthTexels,
+        layers: slotLayers,
+      };
+    }
     this.#dispatchTables(
-      { transmittance: r.transmittanceKernel, multiScattering: r.multiScatteringKernel },
-      { ...r.slices, multiScattering: r.multiScattering.texture },
+      {
+        transmittance: r.transmittanceKernel,
+        multiScattering: r.multiScatteringKernel,
+        slotDepths: () => (this.#slotDepthsKernel ??= engine.createCompute(SLOT_DEPTHS_KERNEL)),
+      },
+      {
+        ...r.slices,
+        multiScattering: r.multiScattering.texture,
+        slotDepths: r.slotDepths?.texture ?? null,
+      },
     );
     this.#key = key;
     this.#builds += 1;
@@ -2145,8 +2434,11 @@ export class AtmosphereTables {
    * scattering over the stored `rgba16float` ones, a band's own built anew where it has them
    * (R08.T6.f), as the stored table's twin takes them, so that each holds its kernel's own `f32`
    * output. The sky's irradiance needs no arm: its stored table is its kernel's `f32` (R08.T9.b).
+   * Where the body takes the slot layers (R08.T8.e, {@link AtmosphereTables.slotDepths}) a sixth
+   * holds them in `rgba32float`, built as the stored layers are, over the stored tables
+   * (`decision-r08-t8-leans.md` §13, point 9).
    *
-   * @returns The five textures, which the caller releases.
+   * @returns The five textures, and the sixth or `null`, which the caller releases.
    * @throws `EngineUnavailable` while the engine has no device (a loss).
    */
   buildKernelArm(): PlanetTableTextures {
@@ -2154,8 +2446,13 @@ export class AtmosphereTables {
     this.#armKernels ??= {
       transmittance: engine.createCompute(withKernelArmFormat(TRANSMITTANCE_KERNEL)),
       multiScattering: engine.createCompute(withKernelArmFormat(MULTI_SCATTERING_KERNEL)),
+      slotDepths: () =>
+        (this.#armSlotDepthsKernel ??= engine.createCompute(
+          withKernelArmFormat(SLOT_DEPTHS_KERNEL),
+        )),
     };
     const r = this.#resources;
+    const slots = r.slotDepths;
     const tables: PlanetTableTextures = {
       ...createTransmittance(
         engine,
@@ -2171,6 +2468,16 @@ export class AtmosphereTables {
         r.multiScattering.layers,
         KERNEL_ARM_FORMAT,
       ),
+      slotDepths:
+        slots === null
+          ? null
+          : storedTable(
+              engine,
+              `${SLOT_DEPTHS_NAME} (kernel arm)`,
+              TRANSMITTANCE_SIZE,
+              slots.layers,
+              KERNEL_ARM_FORMAT,
+            ),
     };
     this.#dispatchTables(this.#armKernels, tables);
     return tables;
@@ -2247,7 +2554,9 @@ export class AtmosphereTables {
 
   /**
    * Builds the tables for the medium, ground and body the tables follow: the transmittance kernel
-   * into `outputs`' four tables, one layer a κ slice, then, band by band, the multiple-scattering
+   * into `outputs`' four tables, one layer a κ slice, then, where `outputs` has them, the slot-depth
+   * kernel into the slot layers over the stored tables, one dispatch (R08.T8.e), then, band by band,
+   * the multiple-scattering
    * kernel into `outputs.multiScattering`, layer band × light slots + k with light slot k's curves
    * (R08.T7), reading the stored tables: the slice's where the one band shares it, and otherwise
    * the band's own, built first into textures made for the build and released after it (R08.T6.f).
@@ -2261,6 +2570,31 @@ export class AtmosphereTables {
       this.#dispatchTransmittance(kernels.transmittance, outputs, radiusM, 1, k);
     }
     const slots = multiScatteringLayersOf(medium, this.#curves);
+    // The slot layers, after the slices and before the multiple scattering, from the stored tables
+    // (R08.T8.e): one dispatch, a workgroup layer a κ slice and light slot.
+    if (outputs.slotDepths !== null) {
+      engine.dispatch(
+        kernels.slotDepths(),
+        {
+          uniforms: { medium: packMediumUniform(medium, this.#bottomRadiusM, 1) },
+          buffers: {},
+          sampled: {
+            transmittance: r.slices.transmittance,
+            absorberColumns: r.slices.absorberColumns,
+            absorberPressureColumns: r.slices.absorberPressureColumns,
+            lastAbsorberPressureColumn: r.slices.lastAbsorberPressureColumn,
+            absorberCurves: r.absorberCurves.texture,
+          },
+          storage: { slotDepthsOut: { texture: outputs.slotDepths, level: 0 } },
+        },
+        [
+          Math.ceil(TRANSMITTANCE_SIZE.widthTexels / 8),
+          Math.ceil(TRANSMITTANCE_SIZE.heightTexels / 8),
+          plan.kappa.length * slots,
+        ],
+        "atmosphere tables",
+      );
+    }
     let own: TransmittanceTextures | null = null;
     try {
       for (const [b, band] of plan.bands.entries()) {

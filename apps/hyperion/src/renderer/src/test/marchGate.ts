@@ -37,6 +37,9 @@ import {
   marchTwin,
   mediumMarchEdgesM,
   piecedSteps,
+  type PlanetTwin,
+  rayMarchSunReadOf,
+  tableSources,
   type TwinRay,
   type TwinRaySource,
   type TwinSources,
@@ -137,11 +140,22 @@ const marchedAsSky = (ray: GateRay): boolean => kernelOf(ray) === "skyView" || s
  * lit ground through the ray's transmittance, each source's light on it. Under the kernel's rule the
  * bare ground's and the thin sky's count is scaled by its optical depth where the scheme gives a rule (R08.T8.e;
  * `gateMarchSamples`), read through the twin's own transmittance.
+ *
+ * Since R08.T8.e (lever 5, `decision-r08-t8-leans.md` §10 and §13, point 7) both schemes, `kernel`
+ * and `even`, take the ray march's read of each source's light and the lit ground's, `slotSources`
+ * (by slot where the kernel's tables hold the slot layers), while the `placed` references keep the
+ * curves' read, `sources` (§4.2's rule), and the count keeps it in both.
  */
-function pixelOf(medium: AtmosphereMedium, sources: TwinSources, count: SourceCount) {
+function pixelOf(
+  medium: AtmosphereMedium,
+  sources: TwinSources,
+  slotSources: TwinSources,
+  count: SourceCount,
+) {
   const edges = mediumMarchEdgesM(medium);
   return (ray: GateRay, placement: Placement, n: number, rule: MarchDepthSteps | null): Rgb3 => {
     const lights = lightsOf(ray, count);
+    const read = placement === "placed" ? sources : slotSources;
     const sky = marchedAsSky(ray);
     const twinRay: TwinRay = {
       originM: ray.o,
@@ -169,13 +183,7 @@ function pixelOf(medium: AtmosphereMedium, sources: TwinSources, count: SourceCo
         steps = stepsFor(placement, ray, n);
         break;
     }
-    const { luminance: l, transmittance: t } = marchTwin(
-      medium,
-      sources,
-      GATE_SPHERE,
-      twinRay,
-      steps,
-    );
+    const { luminance: l, transmittance: t } = marchTwin(medium, read, GATE_SPHERE, twinRay, steps);
     const out: Rgb3 = [l[0], l[1], l[2]];
     if (!ray.ground) {
       return out;
@@ -184,7 +192,7 @@ function pixelOf(medium: AtmosphereMedium, sources: TwinSources, count: SourceCo
     const toSun: Rgb3 = [0, 0, 0];
     for (const light of lights) {
       const mu = dot(end, light.direction);
-      sources.sunTransmittance(0, mu, toSun, light.slot);
+      read.sunTransmittance(0, mu, toSun, light.slot);
       for (const c of [0, 1, 2] as const) {
         out[c] += t[c] * light.weight[c] * (GROUND_ALBEDO / Math.PI) * Math.max(mu, 0) * toSun[c];
       }
@@ -295,11 +303,14 @@ export interface MediumRecord {
   readonly overLow: readonly [readonly string[], readonly string[]];
 }
 
-/** A medium the widened march is held on, its twin's sources, and what it records. */
+/**
+ * A medium the widened march is held on, its twin's per-planet tables, whose sources the gate reads
+ * under the curves and the ray march's read (R08.T8.e), and what it records.
+ */
 export interface MarchGateMedium {
   readonly name: string;
   readonly medium: AtmosphereMedium;
-  readonly sources: () => TwinSources;
+  readonly planet: () => PlanetTwin;
   readonly record: MediumRecord;
 }
 
@@ -312,7 +323,7 @@ export interface MarchGateMedium {
  * Each test file calls it once, at its top level, for its own medium, so that Vitest runs each
  * medium's gate on a worker of its own.
  */
-export function describeMarchGate({ name, medium, sources, record }: MarchGateMedium): void {
+export function describeMarchGate({ name, medium, planet, record }: MarchGateMedium): void {
   describe(`R05.T12.e's quadrature gate for the widened march on ${name} (R08.T8)`, () => {
     const gates = new Map<SourceCount, Gate>();
     const gateAt = (count: SourceCount, setting: QualitySetting): Gate => {
@@ -324,7 +335,9 @@ export function describeMarchGate({ name, medium, sources, record }: MarchGateMe
     };
 
     beforeAll(() => {
-      const twinSources = sources();
+      const twin = planet();
+      const twinSources = tableSources(twin);
+      const slotSources = tableSources(twin, rayMarchSunReadOf(twin));
       const schemes = [
         marchScheme("high"),
         evenAt(marchScheme("high")),
@@ -332,7 +345,10 @@ export function describeMarchGate({ name, medium, sources, record }: MarchGateMe
         evenAt(marchScheme("low")),
       ];
       for (const count of COUNTS) {
-        gates.set(count, runGate(raysOf("low"), pixelOf(medium, twinSources, count), schemes));
+        gates.set(
+          count,
+          runGate(raysOf("low"), pixelOf(medium, twinSources, slotSources, count), schemes),
+        );
       }
     }, 600_000);
 

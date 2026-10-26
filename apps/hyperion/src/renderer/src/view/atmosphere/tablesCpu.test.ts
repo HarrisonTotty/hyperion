@@ -134,6 +134,7 @@ import {
   rayPieces,
   skyViewRayTwin,
   skyViewTwin,
+  rayMarchSunReadOf,
   tableSources,
   type TwinRay,
   type TwinSegment,
@@ -223,11 +224,16 @@ function kernelRayOf(ray: GateRay): TwinRay {
  * kernels' are (R08.T6.i; on a medium with no edge, R05.T12.e's to the bit), plus the gate's lit
  * ground through the ray's transmittance. Under the kernel's placement the ray march's count on the
  * bare ground is scaled by its optical depth where the scheme gives a rule (R08.T8.e).
+ *
+ * Since R08.T8.e (lever 5) the schemes, `kernel` and `even`, march the ray march's rays and light
+ * their ground through `slotSources`, the ray march's read (by slot where its tables hold the slot
+ * layers); the references, the count and the sky view's rays keep `sources`, the curves' read.
  */
-function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
+function twinPixel(medium: AtmosphereMedium, sources: TwinSources, slotSources: TwinSources) {
   const edges = mediumMarchEdgesM(medium);
   return (ray: GateRay, placement: Placement, n: number, rule: MarchDepthSteps | null): Rgb3 => {
     const twinRay = twinRayOf(ray);
+    const read = placement !== "placed" && kernelOf(ray) === "rayMarch" ? slotSources : sources;
     let steps: MarchStep[];
     switch (placement) {
       case "placed":
@@ -245,13 +251,7 @@ function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
         steps = stepsFor(placement, ray, n);
         break;
     }
-    const { luminance: l, transmittance: t } = marchTwin(
-      medium,
-      sources,
-      GATE_SPHERE,
-      twinRay,
-      steps,
-    );
+    const { luminance: l, transmittance: t } = marchTwin(medium, read, GATE_SPHERE, twinRay, steps);
     if (!ray.ground) {
       return [l[0], l[1], l[2]];
     }
@@ -262,7 +262,7 @@ function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
     });
     const mu = dot(end, ray.s);
     const toSun: Rgb3 = [0, 0, 0];
-    sources.sunTransmittance(0, mu, toSun, 0);
+    read.sunTransmittance(0, mu, toSun, 0);
     const lit = (c: 0 | 1 | 2): number => (mu > 0 ? (GROUND_ALBEDO / Math.PI) * mu * toSun[c] : 0);
     return [l[0] + t[0] * lit(0), l[1] + t[1] * lit(1), l[2] + t[2] * lit(2)];
   };
@@ -338,7 +338,7 @@ describe("R05's constants as a medium", () => {
   });
 
   it("give R05.T12.e's twin's pixels on its 1,641 rays to 10⁻⁶, with its sun and no multiple scattering", () => {
-    const pixelOf = twinPixel(R05_EARTH_REFERENCE, R05_SOURCES);
+    const pixelOf = twinPixel(R05_EARTH_REFERENCE, R05_SOURCES, R05_SOURCES);
     const off: string[] = [];
     for (const ray of gateRays()) {
       for (const scheme of [HIGH, evenAt(HIGH), LOW, evenAt(LOW)]) {
@@ -403,15 +403,21 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
   let singleOnly = new Map<string, Rgb3>();
 
   beforeAll(() => {
-    const sources = tableSources(planetTwin(R05_EARTH_REFERENCE, BOTTOM_M));
+    const planet = planetTwin(R05_EARTH_REFERENCE, BOTTOM_M);
+    const sources = tableSources(planet);
     const rays = gateRays();
-    gate = runGate(rays, twinPixel(R05_EARTH_REFERENCE, sources), [HIGH, LOW]);
-    const noMultiple = twinPixel(R05_EARTH_REFERENCE, {
+    gate = runGate(
+      rays,
+      twinPixel(R05_EARTH_REFERENCE, sources, tableSources(planet, rayMarchSunReadOf(planet))),
+      [HIGH, LOW],
+    );
+    const single: TwinSources = {
       ...sources,
       multiScattering: (_heightM, _muSun, out) => {
         out.fill(0);
       },
-    });
+    };
+    const noMultiple = twinPixel(R05_EARTH_REFERENCE, single, single);
     singleOnly = new Map(
       rays
         .filter((ray) => ray.family === "sky" && ray.sunZenithDeg < 80)
@@ -1987,8 +1993,13 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
   let gate: Gate = { results: [], lMax: new Map() };
 
   beforeAll(() => {
-    const sources = tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES));
-    gate = runGate(gateRays(), twinPixel(EARTH_REFERENCE, sources), [HIGH, LOW, evenAt(LOW)]);
+    const planet = planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES);
+    const pixel = twinPixel(
+      EARTH_REFERENCE,
+      tableSources(planet),
+      tableSources(planet, rayMarchSunReadOf(planet)),
+    );
+    gate = runGate(gateRays(), pixel, [HIGH, LOW, evenAt(LOW)]);
   }, 600_000);
 
   it("has a reference of 2,048, 4,096 or 8,192 placed steps within 0.05% of twice its steps", () => {
@@ -2134,14 +2145,22 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
  * So the rule at 32 does not hold every ray on the slab (nor on R05's Earth, whose limb at 0.1 H,
  * sun 90°/0°, a sun-ahead ray the warp does not move, takes 5.77%): it is no candidate to return
  * high's march to 32.
+ *
+ * Re-pinned 2026-10-23 under R08.T8.e's lever 5, the ray march's slot read (`decision-r08-t8-leans.md`
+ * §15): the night limb at 1 H, sun 100°/180°, from both cameras, 5.62285% → 5.62565% (+0.0028
+ * points, 5.62 → 5.63), all of it the interpolation of the slot layer's −ln T_c(u) between texels
+ * where the curves' read interpolates u, the second-order effect §10 predicted on a saturated band
+ * near the sun's horizon; s ≡ 1 on the sphere. The GPU's `rgba16float` layers move it about −0.004
+ * points the other way, to about 5.6216% (an estimate, the twin's layers rounded alone). At high's
+ * 36 steps the slab's misses hold or improve (`SLAB_HIGH_MISS`).
  */
 const SLAB_R05_MISS = [
   "limb, 0.1 H, sun 90°/0°: 5.15%",
   "night limb, 400 km, 0.3 H, sun 100°/180°: 5.89%",
-  "night limb, 400 km, 1 H, sun 100°/180°: 5.62%",
+  "night limb, 400 km, 1 H, sun 100°/180°: 5.63%",
   "night limb, 101 km, 0.1 H, sun 90°/0°: 5.15%",
   "night limb, 101 km, 0.3 H, sun 100°/180°: 5.89%",
-  "night limb, 101 km, 1 H, sun 100°/180°: 5.62%",
+  "night limb, 101 km, 1 H, sun 100°/180°: 5.63%",
 ] as const;
 
 /**
@@ -2172,15 +2191,13 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
   const r05High = { ...HIGH, marchSteps: R05_HIGH_MARCH_STEPS, marchDepthSteps: null };
 
   beforeAll(() => {
-    const sources = tableSources(
-      planetTwin(EARTH_SLAB_REFERENCE, BOTTOM_M, EARTH_SLAB_REFERENCE_CURVES),
+    const planet = planetTwin(EARTH_SLAB_REFERENCE, BOTTOM_M, EARTH_SLAB_REFERENCE_CURVES);
+    const pixel = twinPixel(
+      EARTH_SLAB_REFERENCE,
+      tableSources(planet),
+      tableSources(planet, rayMarchSunReadOf(planet)),
     );
-    gate = runGate(gateRays(), twinPixel(EARTH_SLAB_REFERENCE, sources), [
-      HIGH,
-      r05High,
-      LOW,
-      evenAt(LOW),
-    ]);
+    gate = runGate(gateRays(), pixel, [HIGH, r05High, LOW, evenAt(LOW)]);
   }, 600_000);
 
   it("has a reference of 2,048, 4,096 or 8,192 placed steps within 0.05% of twice its steps", () => {
@@ -2213,14 +2230,16 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
 
   // Measured 2026-10-21 under the sun-aware warp, as R05's Earth's; `LOW_TWIN_WORST` is not
   // re-pinned on a test medium. Since R08.T8.e (2026-10-22) the disc at 28 steps, 20 and 4 for each
-  // of the slab's two edges, 1.59% and 1.09% (1.12% and 0.99% at 36).
+  // of the slab's two edges, 1.59% and 1.09% (1.12% and 0.99% at 36). Since R08.T8.e's lever 5
+  // (2026-10-23, the ray march's slot read; `decision-r08-t8-leans.md` §15) the disc's twilight on
+  // high 1.087% → 1.181%.
   it("records the twin's worst by family and class at high's and low's counts", () => {
     expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
       high: asRecordedFigures({
         "band ordinary": 0.0058,
         "band twilight": 0.01658,
         "disc ordinary": 0.01589,
-        "disc twilight": 0.01087,
+        "disc twilight": 0.01181,
         "high band ordinary": 0.00605,
         "high band twilight": 0.0161,
         "high limb ordinary": 0.00367,

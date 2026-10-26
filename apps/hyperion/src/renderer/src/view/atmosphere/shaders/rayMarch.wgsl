@@ -95,6 +95,15 @@
 // side, is under 0.05 takes 28 on high (`view.marchSky`). A drawn surface keeps the setting's
 // count. From orbit the face is most of the march's step work; R05.T12.e's gate holds every ray at
 // the rule on all three media at 1 and 6 sources, at no wider tolerance.
+//
+// Changes (plan R08, R08.T8.e; lever 5 of `decision-r08-t8-leans.md` sections 10 and 13): two kernels
+// are made from this module, each with a file of its own appended that gives the step its sources'
+// light and the bare ground its light (`rayMarchSourcesAt`, `rayMarchGroundLightAt`):
+// `rayMarchCurves.wgsl`, the shared table's read with each slot's curves applied on read, as before;
+// and `rayMarchSlots.wgsl`, one read a source a step of its light slot's layer of the per-planet slot
+// layers, for a body whose tables hold them (`tables.ts`'s slotDepthsRefusal), chosen when its
+// pipeline is made. The ray's count (lever 3, `rayMarchDepthAlong`), the forward lobes' depth, the
+// view's own path and every other kernel keep the shared read.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -200,7 +209,7 @@ fn rayMarchStep(
   let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
   let local = sampleMediumAt(s * datum.heightM);
   let start = sampleStartOf(body, p, bigQ, datum.heightM, datum.normal, datum.normal, s, local);
-  let shares = viewSourcesAt(body, start, datum.normal, ray.dir, lobes, local);
+  let shares = rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, local);
   viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
@@ -448,7 +457,7 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   // The bare ground under the atmosphere, seen from above it where nothing is drawn: each source's
   // light on it through the sliced lookup from its own place (R08.T6.f), weighted as the sky is,
   // through its own slot's throughput (R08.T7), and the source's cosine against the datum's normal
-  // there.
+  // there; its light the kernel's read (`rayMarchGroundLightAt`, R08.T8.e).
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     let p = origin + ground.x * dir;
     let datum = datumPointOf(body, p, 0.0);
@@ -459,8 +468,8 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
       let source = view.sources[k];
       let slot = skySlotOf(source);
       let muSun = dot(source.direction.xyz, datum.normal);
-      let light = sourceLightAt(body, start, source.direction.xyz, slot);
-      luminance += viewThroughputOf(&march, slot) * source.weight.rgb * light.toSun
+      let toSun = rayMarchGroundLightAt(body, start, source.direction.xyz, slot);
+      luminance += viewThroughputOf(&march, slot) * source.weight.rgb * toSun
         * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;
     }
   }
@@ -498,32 +507,44 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   // From above the top, a texel whose footprint meets the shell takes its mean across the limb,
   // blended in by its span (R08.T8.c, `farLimb.wgsl`); the camera's h* against the top is the same
   // for every texel, so the branch is uniform.
-  var footprint = farLimbNone();
-  if (view.camera.w * view.curvature.z >= medium.topHeightM) {
-    footprint = farLimbFootprintOf(
-      farLimbRaysOf(view), oblateBodyOf(oblateBody), oblateBody, uv, vec2f(size)
-    );
-  }
-  // The centre ray first, then each node where the footprint blends, through one call of the march
-  // (R08.T8.d), each node formed as it is marched (`farLimbNodeOf`). One call site is a constraint,
-  // not a style: SwiftShader inlines every call, and with the march's steps emitted twice in one
-  // entry point its GPU process segfaults (a write to 0x18 in `libvk_swiftshader.so`, R08.T8.d).
-  let nodes = select(0u, footprint.count, footprint.blend > 0.0);
+  let above = view.camera.w * view.curvature.z >= medium.topHeightM;
+  // Ray j is the centre ray (j = 0) or node j − 1, each through one call of the march (R08.T8.d).
+  // One call site is a constraint, not a style: SwiftShader inlines every call, and with the
+  // march's steps emitted twice in one entry point its GPU process segfaults (a write to 0x18 in
+  // `libvk_swiftshader.so`, R08.T8.d). The footprint is formed again for each ray, from the texel's
+  // centre alone, and gives the count and w_L at the first and the ray's own node (`farLimbNodeOf`)
+  // after; so none of it is held across a march, only the count, w_L and the sums (R08.T8.e, E1′).
+  // Where w_L is 1 the mean reads none of the centre ray, so the loop starts at the first node (E4).
+  var nodes = 0u;
+  var blend = 0.0;
   var marched = vec4f(0.0);
-  var mean = vec4f(0.0, 0.0, 0.0, footprint.spaceShare);
+  var mean = vec4f(0.0);
   for (var j = 0u; j <= nodes; j++) {
     var rayUv = uv;
     var rayDepth = depth;
     var weight = 0.0;
-    if (j > 0u) {
-      let node = farLimbNodeOf(&footprint, j - 1u);
-      // Each node at the scene's depth under its own point, so that a drawn surface's edge across
-      // the footprint cuts only the nodes on it.
-      let nodeUv = clamp(node.xy, vec2f(0.0), vec2f(1.0));
-      let nodeTexel = min(vec2u(nodeUv * vec2f(full)), full - 1u);
-      rayUv = node.xy;
-      rayDepth = textureLoad(sceneDepth, nodeTexel, 0);
-      weight = node.z;
+    if (above) {
+      var footprint = farLimbFootprintOf(
+        farLimbRaysOf(view), oblateBodyOf(oblateBody), oblateBody, uv, vec2f(size)
+      );
+      if (j == 0u) {
+        blend = footprint.blend;
+        nodes = select(0u, footprint.count, footprint.blend > 0.0);
+        mean = vec4f(0.0, 0.0, 0.0, footprint.spaceShare);
+        if (blend >= 1.0) {
+          j = 1u;
+        }
+      }
+      if (j > 0u) {
+        let node = farLimbNodeOf(&footprint, j - 1u);
+        // Each node at the scene's depth under its own point, so that a drawn surface's edge across
+        // the footprint cuts only the nodes on it.
+        let nodeUv = clamp(node.xy, vec2f(0.0), vec2f(1.0));
+        let nodeTexel = min(vec2u(nodeUv * vec2f(full)), full - 1u);
+        rayUv = node.xy;
+        rayDepth = textureLoad(sceneDepth, nodeTexel, 0);
+        weight = node.z;
+      }
     }
     let one = marchRay(rayUv, rayDepth);
     if (j == 0u) {
@@ -532,11 +553,11 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       mean += weight * one;
     }
   }
-  if (footprint.blend > 0.0) {
-    if (footprint.blend >= 1.0) {
+  if (blend > 0.0) {
+    if (blend >= 1.0) {
       marched = mean;
     } else {
-      marched = mix(marched, mean, footprint.blend);
+      marched = mix(marched, mean, blend);
     }
   }
   textureStore(rayMarchOut, id.xy, marched);

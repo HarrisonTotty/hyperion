@@ -10,6 +10,8 @@ import { QUALITY_SETTINGS, type QualitySetting } from "../quality/qualitySetting
 import {
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
   R05_EARTH_REFERENCE,
   RAYLEIGH_SCALE_HEIGHT_M,
 } from "./earth";
@@ -774,20 +776,26 @@ describe("the sky view against the ray march on the drawn Earth (R08.T8)", () =>
 const TOP_SUNS = [...FRAME_SUNS, [5, 0], [-3, 0], [0, 180], [-5, 180]] as const;
 
 /**
- * Each row of the frame through the horizon of the top, from `heightM` up, the ray march at the
- * setting's steps under the kernel's rule, every row (the bare ground's included).
+ * Each row of the frame through the horizon of the top of the sphere's `twin`, from `heightM` up,
+ * the ray march at the setting's steps under the kernel's rule and read (by slot where the twin's
+ * tables would hold the slot layers, R08.T8.e), every row (the bare ground's included).
  */
-function topFrameOf(setting: QualitySetting, heightM: number, sun: SunState): Rgb[] {
-  const dip = dipDeg(TOP_M);
+function topFrameOf(
+  twin: PlanetTwin,
+  setting: QualitySetting,
+  heightM: number,
+  sun: SunState,
+): Rgb[] {
+  const dip = dipDeg(twin.medium.topHeightM);
   const view = twinView(columnCamera(heightM, -dip - 0.2, -dip + 4.5), sun, SPHERE, 0.1);
   return Array.from({ length: ROWS }, (_, row) =>
     rgbOf(
       rayMarchTexelTwin(
-        earthTwin(),
+        twin,
         view,
         TABLE_SIZES[setting],
         rayMarchRayAlongTwin(
-          R05_EARTH_REFERENCE,
+          twin.medium,
           view,
           view.cameraM,
           rowDirection(view, row),
@@ -856,12 +864,16 @@ function limbTexels(setting: QualitySetting, cameraM: number): Rgb[] {
   );
 }
 
-/** The step across the top on a setting for each of {@link TOP_SUNS}: the march 1 m under it against 1 m over it. */
-function topSteps(setting: QualitySetting): number[] {
+/**
+ * The step across the top of the sphere's `twin` on a setting for each of {@link TOP_SUNS}: the march
+ * 1 m under it against 1 m over it.
+ */
+function topSteps(twin: PlanetTwin, setting: QualitySetting): number[] {
+  const topM = twin.medium.topHeightM;
   return TOP_SUNS.map(([elevationDeg, azimuthDeg]) => {
     const sun = sunAtCamera(elevationDeg, azimuthDeg);
-    const under = topFrameOf(setting, TOP_M - 1, sun);
-    const over = topFrameOf(setting, TOP_M + 1, sun);
+    const under = topFrameOf(twin, setting, topM - 1, sun);
+    const over = topFrameOf(twin, setting, topM + 1, sun);
     const pixels = under.map((read, i) => {
       const march = over[i] ?? read;
       return { read, march, reference: march, confirm: march };
@@ -888,7 +900,7 @@ describe("the ray march across the top, and the limb outside it (R08.T8)", () =>
 
   beforeAll(() => {
     for (const setting of QUALITY_SETTINGS) {
-      steps.set(setting, topSteps(setting));
+      steps.set(setting, topSteps(earthTwin(), setting));
     }
   }, 120_000);
 
@@ -1436,3 +1448,97 @@ describe.each(WINDOW_MEDIA)(
     });
   },
 );
+
+// --- The top's step on the absorbing Earths, by slot (R08.T8.e) ----------------------------------
+
+/**
+ * The absorbing Earths on the sphere, whose ray march reads its sources by slot (R08.T8.e, lever 5):
+ * the top's step binds lever 5 at 0.2% on them (`decision-r08-t8-leans.md` §10, amendment 6; §13,
+ * point 6; §14).
+ */
+const ABSORBING_EARTHS = [
+  { name: "the measured Earth", medium: EARTH_REFERENCE, curves: EARTH_REFERENCE_CURVES },
+  { name: "the slab Earth", medium: EARTH_SLAB_REFERENCE, curves: EARTH_SLAB_REFERENCE_CURVES },
+] as const;
+
+/** A step at or over `bound` as a named miss: its sun and its figure to the 0.01 point. */
+function namedSteps(steps: readonly number[], bound: number): string[] {
+  return steps.flatMap((step, i) => {
+    const [elevationDeg, azimuthDeg] = TOP_SUNS[i] ?? [Number.NaN, Number.NaN];
+    return step < bound ? [] : [`sun ${elevationDeg}°/${azimuthDeg}°: ${(100 * step).toFixed(2)}%`];
+  });
+}
+
+/**
+ * The slab Earth's step at the top on low over 0.2% (§14, Ruling 1): today's own, 2.646 × 10⁻³ at
+ * the sun 5° set behind before lever 5 (row 44, red; the ray's lowest point about 86 m under the
+ * slab's upper edge), 2.617 × 10⁻³ with its slot read (2026-10-23). A named miss for R08.T11, pinned
+ * to the 0.01 point both ways: worse fails, better re-pins down.
+ */
+const SLAB_LOW_TOP_MISS = ["sun -5°/180°: 0.26%"] as const;
+
+/**
+ * The step across the top on the absorbing Earths by {@link TOP_SUNS}, the ray march by slot,
+ * measured 2026-10-23 (lever 5): at worst 4.56 × 10⁻⁴ (the measured Earth) and 9.01 × 10⁻⁴ (the
+ * slab) on high, and 4.50 × 10⁻⁴ and the slab's named miss on low, its other suns at most
+ * 1.67 × 10⁻³.
+ */
+const ABSORBING_TOP_STEPS: Readonly<Record<string, readonly number[]>> = {
+  "the measured Earth high": [
+    0.00031038, 0.000311282, 0.000311866, 0.000420136, 0.000456381, 0.00027137, 0.000289209,
+  ],
+  "the measured Earth low": [
+    0.000309656, 0.000310186, 0.00031197, 0.000417018, 0.00043411, 0.000397198, 0.000450074,
+  ],
+  "the slab Earth high": [
+    0.000813951, 0.000807915, 0.000329201, 0.000790974, 0.0007652, 0.000661077, 0.000901023,
+  ],
+  "the slab Earth low": [
+    0.00083144, 0.000827336, 0.000520273, 0.000808655, 0.000782083, 0.00167457, 0.00261694,
+  ],
+};
+
+describe("the ray march across the top of the absorbing Earths, by slot (R08.T8.e; §10 amendment 6, §13 point 6, §14)", () => {
+  const steps = new Map<string, number[]>();
+  const stepsOf = (name: string, setting: QualitySetting): number[] => {
+    const found = steps.get(`${name} ${setting}`);
+    if (found === undefined) {
+      throw new Error(`no steps across the top of ${name} on ${setting}`);
+    }
+    return found;
+  };
+
+  beforeAll(() => {
+    for (const { name, medium, curves } of ABSORBING_EARTHS) {
+      const twin = planetTwin(medium, A_M, curves);
+      for (const setting of QUALITY_SETTINGS) {
+        steps.set(`${name} ${setting}`, topSteps(twin, setting));
+      }
+    }
+  }, 600_000);
+
+  it.each(QUALITY_SETTINGS)(
+    "steps by under 0.2% across the top on %s, the march 1 m under it against 1 m over it, but the slab's named miss on low",
+    (setting) => {
+      expect(ABSORBING_EARTHS.map(({ name }) => namedSteps(stepsOf(name, setting), 0.002))).toEqual(
+        [[], setting === "low" ? [...SLAB_LOW_TOP_MISS] : []],
+      );
+    },
+  );
+
+  it("records the step across the top by sun, on both Earths and settings", () => {
+    const recorded = Object.fromEntries(
+      ABSORBING_EARTHS.flatMap(({ name }) =>
+        QUALITY_SETTINGS.map((setting) => [`${name} ${setting}`, stepsOf(name, setting)]),
+      ),
+    );
+    expect(recorded).toEqual(
+      Object.fromEntries(
+        Object.entries(ABSORBING_TOP_STEPS).map(([key, values]) => [
+          key,
+          values.map((x) => expect.closeTo(x, 6)),
+        ]),
+      ),
+    );
+  });
+});

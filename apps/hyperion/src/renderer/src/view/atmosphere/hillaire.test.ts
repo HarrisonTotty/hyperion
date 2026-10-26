@@ -11,11 +11,14 @@ import {
   forbiddenIn,
   wgslCode,
   wgslFunctions,
+  wgslReached,
   wgslStructs,
 } from "../../test/atmosphereWgsl";
-import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { boundNames, countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
+import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { TextureHandle } from "../engine/types";
+import { kernelBindings } from "../engine/webgpu/compute";
 import { SETTINGS } from "../quality/qualitySetting";
 import {
   EARTH_REFERENCE,
@@ -39,6 +42,7 @@ import {
   geodeticOf,
   HillaireAtmosphere,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
   SKY_VIEW_KERNEL,
   localScaleHeightM,
   marchSourcesOf,
@@ -58,6 +62,8 @@ import { opticalDepth } from "./opticalDepth";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
+import rayMarchCurvesWgsl from "./shaders/rayMarchCurves.wgsl?raw";
+import rayMarchSlotsWgsl from "./shaders/rayMarchSlots.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   KERNEL_ARM_FORMAT,
@@ -1080,6 +1086,7 @@ describe("the atmosphere's WGSL", () => {
     ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
     ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
   ])("%s holds no Medium or terms by value", (_name, source) => {
     // A Medium held by value and indexed by a loop variable is copied whole into each invocation,
@@ -1095,6 +1102,7 @@ describe("the atmosphere's WGSL", () => {
     ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
   ])("%s reads the terms, their densities and their phases (R08.T6.b)", (_name, source) => {
     expect(source).toMatch(/var<storage, read> terms : array<Term, MAX_TERMS>;/);
     expect(source).toMatch(/var densityTables : texture_2d_array<f32>;/);
@@ -1123,7 +1131,21 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
     [
       "the ray-march kernel",
       RAY_MARCH_KERNEL.reference,
-      ["rayMarchStep", "rayMarchStepOf", "rayMarchWalkStepOf"],
+      ["rayMarchStep", "rayMarchStepOf", "rayMarchWalkStepOf", "rayMarchGroundLightAt"],
+    ],
+    // The ray march by slot (R08.T8.e, lever 5): its step's sources and its bare ground's light, each
+    // read from its slot's layer, return a matrix, no struct.
+    [
+      "the ray march by slot",
+      RAY_MARCH_SLOTS_KERNEL.reference,
+      [
+        "rayMarchStep",
+        "rayMarchStepOf",
+        "rayMarchWalkStepOf",
+        "rayMarchSourcesAt",
+        "slicedSlotDepthsOf",
+        "rayMarchGroundLightAt",
+      ],
     ],
     [
       "the sky-view kernel",
@@ -1184,9 +1206,30 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
 
   // SwiftShader inlines every call, and with the march's steps emitted twice in one entry point its
   // GPU process segfaults (R08.T8.d): the centre ray and the footprint's nodes share one call.
-  it("calls the march from one place in the ray-march kernel's entry point", () => {
-    const main = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main");
+  it.each([
+    ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
+  ])("calls the march from one place in %s's entry point", (_name, source) => {
+    const main = wgslFunctions(source).get("main");
     expect(main?.body.match(/\bmarchRay\(/gu)).toHaveLength(1);
+  });
+
+  // The footprint's state held across the march cost its shape 0.56–0.86 ms from orbit on the RTX
+  // 3080 (R08.T8.e, QW2): it is formed again for each ray inside the loop, and gives that ray, so
+  // that none of it is live across a march (E1′).
+  it("forms the far limb's footprint once, inside the ray-march kernel's loop", () => {
+    const body = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main")?.body ?? "";
+    const loop = body.search(/\bfor \(/u);
+    const formed = [...body.matchAll(/\bfarLimbFootprintOf\(/gu)].map((call) => call.index);
+    expect({ loop: loop >= 0, formed: formed.length }).toEqual({ loop: true, formed: 1 });
+    expect(formed[0]).toBeGreaterThan(loop);
+  });
+
+  // Where w_L is 1 the mean reads none of the centre ray, so the loop starts at the first node
+  // (R08.T8.e, E4).
+  it("starts the ray-march kernel's loop at the first node where the footprint's blend is 1", () => {
+    const body = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main")?.body ?? "";
+    expect(body).toMatch(/if \(blend >= 1\.0\) \{\s*j = 1u;\s*\}/u);
   });
 });
 
@@ -1214,6 +1257,7 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
     ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
   ])(
     "%s reads the slices only through the sliced lookup, exponentiated in f32 (R08.T6.f)",
@@ -1264,6 +1308,7 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
     ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
   ])(
     "%s declares the absorber-column table, its pressure tables and the lights' curves",
@@ -1386,6 +1431,7 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
     ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
   ])("%s calls no builtin trigonometry, R05 radius form or sebh remap", (_name, source) => {
     expect(forbiddenIn(source)).toEqual([]);
@@ -1585,6 +1631,7 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
       SKY_VIEW_KERNEL.reference,
       AERIAL_PERSPECTIVE_KERNEL.reference,
       RAY_MARCH_KERNEL.reference,
+      RAY_MARCH_SLOTS_KERNEL.reference,
       COMPOSITE_MATERIAL.fragmentWgsl,
     ]) {
       expect(source.indexOf("fn preciseSinCos")).toBeLessThan(source.indexOf("struct Term"));
@@ -1674,5 +1721,180 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
       "atmosphere ray march (kernel arm)",
       "atmosphere sky view (kernel arm)",
     ]);
+  });
+});
+
+/** The bindings `wgsl` declares that neither its entry point nor any function it reaches names. */
+function unreachedBindings(wgsl: string): string[] {
+  const functions = wgslFunctions(wgsl);
+  const bodies = [...wgslReached(wgsl, ["main"])].map((name) => functions.get(name)?.body ?? "");
+  return [...kernelBindings(wgsl).keys()].filter(
+    (name) => !bodies.some((body) => new RegExp(`\\b${name}\\b`, "u").test(body)),
+  );
+}
+
+describe("the ray march by slot (R08.T8.e, lever 5; decision-r08-t8-leans.md §10 and §13)", () => {
+  const slots = RAY_MARCH_SLOTS_KERNEL.reference;
+  const functions = wgslFunctions(slots);
+
+  it("is the ray-march kernel's own march, the hook appended after it apart", () => {
+    expect(slots.replace(rayMarchSlotsWgsl, rayMarchCurvesWgsl)).toBe(RAY_MARCH_KERNEL.reference);
+  });
+
+  // SwiftShader inlines every call, and its GPU process crashed on more copies of a read's code
+  // (R08.T8.d, R08.T8.e): one sliced ray and one slot read in the step's source loop.
+  it("reads each source's light at a step from one sliced ray and one slot read, in its source loop", () => {
+    const body = functions.get("rayMarchSourcesAt")?.body ?? "";
+    const loop = body.search(/\bfor \(/u);
+    const sliced = [...body.matchAll(/\bslicedRayOf\(/gu)].map((call) => call.index);
+    const read = [...body.matchAll(/\bslicedSlotDepthsOf\(/gu)].map((call) => call.index);
+    expect({
+      sliced: sliced.length,
+      read: read.length,
+      inLoop: loop >= 0 && [...sliced, ...read].every((at) => at > loop),
+      curves: /\bsourceLightAt\(/u.test(body),
+    }).toEqual({ sliced: 1, read: 1, inLoop: true, curves: false });
+  });
+
+  it("returns the slot read as a matrix of the slot's depth and the extinction, no struct", () => {
+    expect(functions.get("slicedSlotDepthsOf")?.returns).toBe("mat2x3f");
+  });
+
+  it("keeps the forward lobes on the shared table's stored depth, the read's second column", () => {
+    const body = functions.get("rayMarchSourcesAt")?.body ?? "";
+    expect([
+      /slicedSlotDepthsOf\(sliced, body, slot, lobes\)/u.test(body),
+      /SourceLight\(select\(1\.0, 0\.0, sliced\.shadowed\), exp\(-read\[0\]\), read\[1\]\)/u.test(
+        body,
+      ),
+      /lobeOrdersOf\(local, angle, light\.depth\)/u.test(body),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("lights the bare ground by the slot read too (§13, point 4)", () => {
+    const body = functions.get("rayMarchGroundLightAt")?.body ?? "";
+    expect([/\bslicedSlotDepthsOf\(/u.test(body), /\bsourceLightAt\(/u.test(body)]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it.each([
+    ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
+  ])("keeps the curves' read for the ray's count in %s (§13, point 4)", (_name, source) => {
+    expect(wgslFunctions(source).get("rayMarchDepthAlong")?.body).toMatch(/\bsourceLightAt\(/u);
+  });
+
+  it("declares the slot layers in the ray march by slot alone", () => {
+    expect(
+      [
+        SKY_VIEW_KERNEL.reference,
+        AERIAL_PERSPECTIVE_KERNEL.reference,
+        RAY_MARCH_KERNEL.reference,
+        RAY_MARCH_SLOTS_KERNEL.reference,
+        COMPOSITE_MATERIAL.fragmentWgsl,
+      ].map((source) => /var slotDepths : texture_2d_array<f32>;/u.test(source)),
+    ).toEqual([false, false, false, true, false]);
+  });
+
+  // The engine's compute layouts are "auto": a declared binding the entry point never reaches drops
+  // out of the layout, and the bind group, which takes every declared binding, fails.
+  it.each([
+    ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
+  ])("reaches every binding %s declares from its entry point", (_name, source) => {
+    expect(unreachedBindings(source)).toEqual([]);
+  });
+
+  it("is catalogued beside the ray-march kernel, with the slot-depth kernel", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "atmosphere ray march",
+        "atmosphere ray march by slot",
+        "atmosphere slot depths",
+      ]),
+    );
+  });
+});
+
+describe("HillaireAtmosphere's march by slot (R08.T8.e, lever 5)", () => {
+  const absorbing = fourAbsorberMedium();
+
+  it("marches by slot a body whose tables hold the slot layers, binding them", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    const march = engine.dispatched.at(-1);
+    expect([march?.kernel, march?.bindings.sampled["slotDepths"]]).toEqual([
+      "atmosphere ray march by slot",
+      atmosphere.tables.slotDepths,
+    ]);
+  });
+
+  it("marches with the shared read a body that keeps it, and binds it no layers", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    const march = engine.dispatched.at(-1);
+    expect([march?.kernel, Object.hasOwn(march?.bindings.sampled ?? {}, "slotDepths")]).toEqual([
+      "atmosphere ray march",
+      false,
+    ]);
+  });
+
+  it.each([
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL, absorbing.medium, absorbing.curves],
+    ["the ray-march kernel", RAY_MARCH_KERNEL, R05_EARTH_REFERENCE, NO_ABSORBER_CURVES],
+  ] as const)(
+    "gives %s every binding it declares, and no other",
+    async (_name, kernel, medium, curves) => {
+      const engine = await countingRenderEngine();
+      const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+      engine.dispatched.length = 0;
+      atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+      const march = engine.dispatched.find((d) => d.kernel === kernel.name);
+      expect(march === undefined ? [] : boundNames(march.bindings)).toEqual(
+        [...kernelBindings(kernel.reference).keys()].toSorted(),
+      );
+    },
+  );
+
+  it("makes the march by slot at the first frame that takes it, and once", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    const before = engine.counts.kernels;
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
+    expect(engine.counts.kernels - before).toBe(1);
+  });
+
+  it("returns to the shared march for a new medium that keeps the shared read", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    atmosphere.setMedium(R05_EARTH_REFERENCE);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    expect(engine.dispatched.at(-1)?.kernel).toBe("atmosphere ray march");
+  });
+
+  it("marches by slot in the kernel arm too, in rgba32float", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    engine.dispatched.length = 0;
+    atmosphere.drawKernelArm(CAMERA, [NOON], SCENE);
+    expect(engine.dispatched.at(-1)?.kernel).toBe(
+      `atmosphere ray march by slot (${KERNEL_ARM_FORMAT})`,
+    );
   });
 });

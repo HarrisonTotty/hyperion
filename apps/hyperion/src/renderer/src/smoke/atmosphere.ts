@@ -108,6 +108,7 @@ import {
   NO_ABSORBER_CURVES,
   packedScaleHeightsM,
   PHASE_TABLE_ENTRIES,
+  type PlanetTableTextures,
   type TableSize,
   type TablesBand,
   tablesPlanOf,
@@ -138,6 +139,7 @@ import {
   rayMarchTargetTexelTwin,
   rayMarchTexelTwin,
   skyViewRayTwin,
+  slotDepthTablesTwin,
   surfaceLightingTwin,
   tableSources,
   type TwinBand,
@@ -1335,16 +1337,19 @@ interface TwinFrame {
  * recorded in the order they were in sequence (`ordered.ts`): each medium's own twins, which read
  * nothing of the GPU's, begin with the group, and each twin over the GPU's tables as soon as they
  * are read back.
+ *
+ * The medium of four absorbers is held in a group of its own
+ * ({@link checkAtmosphereTwinsFourAbsorbers}), in another part of the page, since R08.T8.e's slot
+ * layers and the ray march's kernel by slot took this group past the smoke's 180 s watchdog.
  */
 export async function checkAtmosphereTwins(
   engine: RenderEngine,
   checks: Checks,
   twins: TwinPool,
 ): Promise<void> {
-  const absorbing = fourAbsorberMedium();
   const venus = venusClassMedium();
   const lines = lineAbsorberMedium();
-  const media: ReadonlyArray<TwinMedium> = [
+  await checkTwinMedia(engine, checks, twins, [
     { ...EARTH_REBUILT, scope: "everything" },
     {
       medium: smokeTabulatedMedium(),
@@ -1352,7 +1357,6 @@ export async function checkAtmosphereTwins(
       radiusM: EARTH_MEAN_RADIUS_M,
       scope: "everything",
     },
-    { ...absorbing, radiusM: EARTH_MEAN_RADIUS_M, scope: "everything" },
     {
       medium: venus.medium,
       curves: NO_ABSORBER_CURVES,
@@ -1362,7 +1366,36 @@ export async function checkAtmosphereTwins(
     // The per-planet tables alone, for the smoke's watchdog: the multiple-scattering kernel reads
     // the pressure-weighted columns and the curve's rows as the per-frame kernels do (R08.T4.d).
     { ...lines, radiusM: EARTH_MEAN_RADIUS_M, scope: "tables" },
-  ];
+  ]);
+}
+
+/**
+ * R08.T6.b's and R08.T6.c's checks ({@link checkAtmosphereTwins}) on the medium of four absorbers,
+ * one a molecule pair, under their curves of growth: its per-planet tables and its per-frame
+ * kernels against their twins, a group of its own since R08.T8.e (the page's part 6), whose slot
+ * layers and the ray march's kernel by slot took R08.T6.b's group past the smoke's watchdog.
+ */
+export async function checkAtmosphereTwinsFourAbsorbers(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const absorbing = fourAbsorberMedium();
+  await checkTwinMedia(engine, checks, twins, [
+    { ...absorbing, radiusM: EARTH_MEAN_RADIUS_M, scope: "everything" },
+  ]);
+}
+
+/**
+ * R08.T6.b's checks over `media`, in order ({@link checkAtmosphereTwins}): each medium's own twins
+ * begun at once, its tables and then its frames on both settings checked in its turn.
+ */
+async function checkTwinMedia(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+  media: ReadonlyArray<TwinMedium>,
+): Promise<void> {
   const begun = media.map((entry) => {
     const read = attempt(() => kernelMedium(entry.medium));
     return { entry, read, own: handled(ownTwins(twins, entry, read)) };
@@ -1444,6 +1477,11 @@ interface PlanetReadback {
   readonly absorberPressureColumns: Float32Array;
   readonly lastAbsorberPressureColumn: Float32Array;
   readonly multiScattering: Float32Array;
+  /**
+   * Each light slot's optical depth to the top, a layer a κ slice and light slot (R08.T8.e,
+   * `AtmosphereTables.slotDepths`), or `null` where the tables hold none.
+   */
+  readonly slotDepths: Float32Array | null;
 }
 
 /** Reads a planet's tables back with the harness's tolerance access. */
@@ -1459,12 +1497,30 @@ async function readPlanetTables(
     absorberPressureColumns: await read(tables.absorberPressureColumns),
     lastAbsorberPressureColumn: await read(tables.lastAbsorberPressureColumn),
     multiScattering: await read(tables.multiScattering),
+    slotDepths: tables.slotDepths === null ? null : await read(tables.slotDepths),
   };
 }
 
 /**
+ * Slice `slice`'s slot layers of a readback of `slices` slices of `slots` light slots each (R08.T8.e):
+ * slice k's slot p at layer k × slots + p, as twin tables.
+ */
+function slotLayersOfReadback(
+  texels: Float32Array,
+  slices: number,
+  slice: number,
+  slots: number,
+): TwinTable[] {
+  return Array.from({ length: slots }, (_, p) =>
+    asTwinTable(layerOf(texels, slices * slots, slice * slots + p), TRANSMITTANCE_SIZE),
+  );
+}
+
+/**
  * The GPU's stored transmittance tables as the twins read them, with the lights' curves, the fifth
- * pressure channel's table at its size for the medium (`lastPressureColumnSize`).
+ * pressure channel's table at its size for the medium (`lastPressureColumnSize`), and the stored slot
+ * layers where the tables hold them, which the ray march's twin then reads as the kernel does
+ * (R08.T8.e).
  */
 function storedTransmittance(
   gpu: PlanetReadback,
@@ -1472,6 +1528,9 @@ function storedTransmittance(
   curves: AbsorberCurveSlots,
 ): TwinTransmittance {
   return {
+    ...(gpu.slotDepths === null
+      ? {}
+      : { slotDepths: slotLayersOfReadback(gpu.slotDepths, 1, 0, curves.length) }),
     transmittance: asTwinTable(gpu.transmittance, TRANSMITTANCE_SIZE),
     absorberColumns: asTwinTable(gpu.absorberColumns, TRANSMITTANCE_SIZE),
     absorberPressureColumns: asTwinTable(gpu.absorberPressureColumns, TRANSMITTANCE_SIZE),
@@ -1499,7 +1558,11 @@ function storedSlices(
   curves: AbsorberCurveSlots,
   slices: number,
 ): TwinTransmittance[] {
+  const slotDepths = gpu.slotDepths;
   return Array.from({ length: slices }, (_, k) => ({
+    ...(slotDepths === null
+      ? {}
+      : { slotDepths: slotLayersOfReadback(slotDepths, slices, k, curves.length) }),
     transmittance: asTwinTable(layerOf(gpu.transmittance, slices, k), TRANSMITTANCE_SIZE),
     absorberColumns: asTwinTable(layerOf(gpu.absorberColumns, slices, k), TRANSMITTANCE_SIZE),
     absorberPressureColumns: asTwinTable(
@@ -1570,15 +1633,13 @@ async function checkPlanetTwins(
   const tables = new AtmosphereTables(engine, medium, radiusM, curves);
   try {
     const gpu = await readPlanetTables(engine, tables);
-    const overGpuTwin = twins.multiScattering(
-      read,
-      radiusM,
-      storedTransmittance(gpu, read, curves),
-    );
-    // The per-planet tables alone are held in both arms (R08.T6.d): the kernel arm is drawn and read
-    // back while the twin is computed, and its check reads it after the checks that came before it.
+    const stored = storedTransmittance(gpu, read, curves);
+    const overGpuTwin = twins.multiScattering(read, radiusM, stored);
+    // The per-planet tables alone are held in both arms (R08.T6.d), their slot layers among them
+    // (R08.T8.e): the kernel arm is drawn and read back while the twin is computed, and its check
+    // reads it after the checks that came before it.
     const kernelArm =
-      entry.scope === "tables" ? handled(readMultiScatteringArm(engine, tables)) : null;
+      entry.scope === "tables" ? handled(readKernelArmTables(engine, tables)) : null;
     void ordered.later(async (checks) => {
       // The per-planet tables alone are held over the GPU's transmittance, in both arms: their own
       // multiple-scattering twin, end to end, is not formed (R08.T6.d, for the smoke's watchdog).
@@ -1612,6 +1673,17 @@ async function checkPlanetTwins(
           { arm: "stored", amountChannels: [0, 1, 2, 3] },
         );
       }
+      // Each light slot's optical-depth layer where the tables hold them (R08.T8.e): the stored
+      // arm's on every such medium, the kernel arm's where the group reads the arm.
+      checkSlotLayers(
+        checks,
+        "R08.T8.e",
+        `${medium.name}: the per-planet`,
+        read,
+        [stored],
+        gpu.slotDepths,
+        kernelArm === null ? null : (await kernelArm).slotDepths,
+      );
       const deep = deepChannels(gpu.transmittance, twin.transmittance);
       checks.check(
         `R08.T6.c ${medium.name}: the channels whose transmittance was under 2⁻¹⁴ hold their optical depth to 10⁻³`,
@@ -1631,7 +1703,7 @@ async function checkPlanetTwins(
         `over the GPU's transmittance, worst ${own.at}; ${own.above} channels above 10⁻⁶ of the largest (${show([own.largest])}), ${own.over} over the bound, ${own.floorCarried} carried by the floor; ${inRange ? "finite and within rgba16float" : "a channel is not finite or is past rgba16float"}; L₂ alone in ${secondOrderAlone(gpu.multiScattering)} channels (the twin ${secondOrderAlone(overGpu.texels)}); ${endToEnd}`,
       );
       if (kernelArm !== null) {
-        checkMultiScatteringArm(checks, medium, await kernelArm, overGpu);
+        checkMultiScatteringArm(checks, medium, (await kernelArm).multiScattering, overGpu);
       }
     });
     // The kernel arm is read back before the tables go and the next GPU work begins.
@@ -1661,29 +1733,7 @@ function secondOrderAlone(texels: Float32Array | Float64Array): number {
 }
 
 /**
- * A medium's multiple-scattering table in the kernel arm (`AtmosphereTables.buildKernelArm`), its
- * kernel's own `rgba32float` output over the stored transmittance, read back.
- */
-async function readMultiScatteringArm(
-  engine: RenderEngine,
-  tables: AtmosphereTables,
-): Promise<Float32Array> {
-  const arm = tables.buildKernelArm();
-  try {
-    return new Float32Array(
-      await engine.readTexture(arm.multiScattering, 0, undefined, "tolerance"),
-    );
-  } finally {
-    engine.releaseTexture(arm.transmittance);
-    engine.releaseTexture(arm.absorberColumns);
-    engine.releaseTexture(arm.absorberPressureColumns);
-    engine.releaseTexture(arm.lastAbsorberPressureColumn);
-    engine.releaseTexture(arm.multiScattering);
-  }
-}
-
-/**
- * The kernel arm's multiple-scattering table (`readMultiScatteringArm`) against `twin`, the twin
+ * The kernel arm's multiple-scattering table (`readKernelArmTables`) against `twin`, the twin
  * over the same stored transmittance: R08.T6.d's check of the Venus-class table, held to its twin
  * in both arms (`decision-r08-t6b-floor.md` §9.3), with its channels stored as L₂ alone.
  */
@@ -2151,6 +2201,49 @@ async function checkLightLayers(
         `largest relative difference ${apart.toExponential(2)}`,
       );
     });
+  } finally {
+    tables.dispose();
+  }
+}
+
+/** How many transmittance-sized layers a slot layers' readback holds, or `none` for none. */
+function describeLayers(texels: Float32Array | null): string {
+  if (texels === null) {
+    return "none";
+  }
+  const layer = 4 * TRANSMITTANCE_SIZE.widthTexels * TRANSMITTANCE_SIZE.heightTexels;
+  return `${texels.length / layer} layers`;
+}
+
+/**
+ * R08.T8.e's slot layers on R08.T7's binary ({@link checkSeveralSuns}), in both arms, slot 1 under
+ * the M3 companion's curves (`decision-r08-t8-leans.md` §13, point 9): its per-planet tables built
+ * and read back, then the kernel arm's, each light slot's layer against its twin over the GPU's
+ * stored tables: a group of its own beside R08.T7's, both in the page's part 10, which in R08.T7's
+ * group took its part to 160 s of the smoke's 180 s watchdog; and a check that both arms hold the
+ * layers, so that the texel checks cannot pass by being skipped.
+ */
+export async function checkBinarySlotLayers(engine: RenderEngine, checks: Checks): Promise<void> {
+  const { medium, curves } = fourAbsorberMedium(BINARY_LIGHTS_K);
+  const read = await attempt(() => kernelMedium(medium));
+  const tables = new AtmosphereTables(engine, medium, EARTH_MEAN_RADIUS_M, curves);
+  try {
+    const gpu = await readPlanetTables(engine, tables);
+    const arm = await readKernelArmTables(engine, tables);
+    checks.check(
+      `R08.T8.e ${medium.name}: the binary's per-planet tables hold a slot layer a light, in both arms`,
+      gpu.slotDepths !== null && arm.slotDepths !== null,
+      `stored ${describeLayers(gpu.slotDepths)}, kernel arm ${describeLayers(arm.slotDepths)}, for ${BINARY_LIGHTS_K.length} lights`,
+    );
+    checkSlotLayers(
+      checks,
+      "R08.T8.e",
+      `${medium.name}: the per-planet`,
+      read,
+      [storedTransmittance(gpu, read, curves)],
+      gpu.slotDepths,
+      arm.slotDepths,
+    );
   } finally {
     tables.dispose();
   }
@@ -3301,11 +3394,28 @@ function recordHeights(
   );
 }
 
+/** Releases the kernel arm's tables (`AtmosphereTables.buildKernelArm`), its slot layers among them. */
+function releaseKernelArm(engine: RenderEngine, arm: PlanetTableTextures): void {
+  engine.releaseTexture(arm.transmittance);
+  engine.releaseTexture(arm.absorberColumns);
+  engine.releaseTexture(arm.absorberPressureColumns);
+  engine.releaseTexture(arm.lastAbsorberPressureColumn);
+  engine.releaseTexture(arm.multiScattering);
+  if (arm.slotDepths !== null) {
+    engine.releaseTexture(arm.slotDepths);
+  }
+}
+
 /** The per-planet tables in the kernel arm (`AtmosphereTables.buildKernelArm`), read back. */
 async function readKernelArmTables(
   engine: RenderEngine,
   tables: AtmosphereTables,
-): Promise<{ readonly transmittance: Float32Array; readonly multiScattering: Float32Array }> {
+): Promise<{
+  readonly transmittance: Float32Array;
+  readonly multiScattering: Float32Array;
+  /** The arm's slot layers (R08.T8.e), or `null` where the tables hold none. */
+  readonly slotDepths: Float32Array | null;
+}> {
   const arm = tables.buildKernelArm();
   try {
     return {
@@ -3315,13 +3425,60 @@ async function readKernelArmTables(
       multiScattering: new Float32Array(
         await engine.readTexture(arm.multiScattering, 0, undefined, "tolerance"),
       ),
+      slotDepths:
+        arm.slotDepths === null
+          ? null
+          : new Float32Array(await engine.readTexture(arm.slotDepths, 0, undefined, "tolerance")),
     };
   } finally {
-    engine.releaseTexture(arm.transmittance);
-    engine.releaseTexture(arm.absorberColumns);
-    engine.releaseTexture(arm.absorberPressureColumns);
-    engine.releaseTexture(arm.lastAbsorberPressureColumn);
-    engine.releaseTexture(arm.multiScattering);
+    releaseKernelArm(engine, arm);
+  }
+}
+
+/**
+ * The slot layers of both arms against their twin over the GPU's stored tables, texel by texel
+ * (R08.T8.e; `decision-r08-t8-leans.md` §13, point 9): each layer of each κ slice and light slot is
+ * the stored optical depth there plus that slot's curves at the stored columns, which
+ * `slotDepthTablesTwin` builds from the tables read back, to the stored format's rounding and to the
+ * kernel arm's `f32`; slot 1 is a second star's wherever the body takes two. The stored arm's alone
+ * where `arm` is `null`, a group that does not read the kernel arm; none where the tables hold none.
+ */
+function checkSlotLayers(
+  checks: Checks,
+  task: string,
+  label: string,
+  read: AtmosphereMedium,
+  slices: ReadonlyArray<TwinTransmittance>,
+  stored: Float32Array | null,
+  arm: Float32Array | null,
+): void {
+  if (stored === null) {
+    return;
+  }
+  for (const [k, tables] of slices.entries()) {
+    const { slotDepths: _given, ...overGpu } = tables;
+    const twins = slotDepthTablesTwin(read, overGpu);
+    for (const [p, twin] of twins.entries()) {
+      const layer = k * twins.length + p;
+      const layers = slices.length * twins.length;
+      const name = `${label} slot ${p}'s optical-depth layer of slice ${k}, over the GPU's tables`;
+      recordHeights(
+        checks,
+        task,
+        name,
+        twinAgreement(layerOf(stored, layers, layer), twin, false),
+        "stored",
+      );
+      if (arm !== null) {
+        recordHeights(
+          checks,
+          task,
+          name,
+          twinAgreement(layerOf(arm, layers, layer), twin, false, { arm: "kernel" }),
+          "kernel",
+        );
+      }
+    }
   }
 }
 
@@ -3351,9 +3508,13 @@ async function checkPlanetArms(
   void ordered.later(async (checks) => {
     const transmittance = await transmittanceOfMedium;
     const multiScattering = await multiScatteringOverGpu;
-    const { transmittance: armTransmittance, multiScattering: armMultiScattering } =
-      await armReadback;
+    const {
+      transmittance: armTransmittance,
+      multiScattering: armMultiScattering,
+      slotDepths: armSlotDepths,
+    } = await armReadback;
     const label = `${body.name}: the per-planet`;
+    checkSlotLayers(checks, body.task, label, read, [stored], gpu.slotDepths, armSlotDepths);
     recordHeights(
       checks,
       body.task,
@@ -3426,6 +3587,7 @@ async function readBandTransmittance(
       absorberPressureColumns: await read(made.absorberPressureColumns),
       lastAbsorberPressureColumn: await read(made.lastAbsorberPressureColumn),
       multiScattering: new Float32Array(0),
+      slotDepths: null,
     };
   } finally {
     engine.releaseTexture(made.transmittance);
@@ -3487,6 +3649,15 @@ async function checkOblatePlanetArms(
     const arm = await armReadback;
     const label = `${body.name}: the per-planet`;
     const slices = plan.kappa.length;
+    checkSlotLayers(
+      checks,
+      body.task,
+      label,
+      read,
+      storedSlices(gpu, read, curves, slices),
+      gpu.slotDepths,
+      arm.slotDepths,
+    );
     for (const [k, ofMedium] of slicesOfMedium.entries()) {
       // The slices' twins are awaited in order, each after the one before it.
       // oxlint-disable-next-line no-await-in-loop

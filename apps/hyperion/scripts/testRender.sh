@@ -8,11 +8,12 @@
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
 #                 [--drop-adapter-switches] [--captures=DIR]
 #
-# The page's groups are in nine parts (`src/renderer/src/smoke/page.ts`), each a run of its own
-# under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6, 8 and
-# 9 hold the atmosphere's CPU-twin groups (2 R08.T6.b, 3 R08.T6.g, 4 R08.T8.b's far limb, 5
-# R08.T6.f's Saturn-class figure and R08.T6.i, 6 R08.T9.b's two, 8 R08.T6.f's Earth and R08.T8.c's
-# far limb's footprint, 9 R08.T8.a's march band and R08.T7), part 4 also R05.T12.e's marches and
+# The page's groups are in eleven parts (`src/renderer/src/smoke/page.ts`), each a run of its own
+# under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6 and 8
+# to 11 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3 R08.T6.g, 4
+# R08.T8.b's far limb, 5 R08.T6.f's Saturn-class figure and R08.T6.i, 6 R08.T6.b's four absorbers,
+# 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7 and R08.T8.e's slot layers on its binary,
+# 11 R08.T9.b's two and R08.T8.c's far limb's footprint), part 4 also R05.T12.e's marches and
 # part 6 R05.T12.c's frames, each first, part 7 R10's terrain groups, and part 1 every other group.
 # SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
 # (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
@@ -25,7 +26,17 @@
 # from above the top, took part 4 past its 180 s watchdog and parts 2, 3, 5 and 6 to 149 to 159 s
 # (2026-10-22), so there are nine: R08.T6.i, R08.T6.f's Earth, R08.T8.a's march band and R08.T7
 # moved to parts 5, 8 and 9, and R08.T8.c's footprint took part 8, every part about 130 s at most
-# at those figures but part 2, R08.T6.b's alone at 149 s.
+# at those figures but part 2, R08.T6.b's alone at 149 s. R08.T8.e's slot layers took part 2 past
+# the watchdog (175 s at 100bee27's gate), so R08.T6.b's four absorbers moved to part 6 and
+# R08.T9.b's Saturn-class figure to part 2: 140 s and 122 to 124 s at a load of 7 to 12
+# (2026-10-23); with R08.T8.e's slot-layer texel checks part 2 holds 141 s, part 6 133 to 137 and
+# part 9 158 to 160 at a load of 7 to 14, and with R08.T7's binary's in part 1 instead part 9
+# held 152 to 154 s and part 1 122 to 123 at a load of 8 to 11; no group of part 9 fitted another
+# part whole, so there are ten, R08.T7 and the binary's slot layers in part 10 (part 9 88 s and part
+# 10 98 s on the whole render at a load of median 14, each part's start 1 to 7 s); and part 8 stood
+# at 151 to 153 s, so there are eleven, R08.T8.c's footprint in part 11 (51 s; part 8 93 s). The
+# whole render took 1,281 s at a load of median 14, its longest parts 6 (154 s) and 2 (149 s); the
+# two parts' starts and their twins set up again cost it about 30 s (2026-10-23).
 # --part=N runs that part alone (every part by default).
 #
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R08.T8.b's
@@ -65,7 +76,7 @@ captures=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=1 | --part=2 | --part=3 | --part=4 | --part=5 | --part=6 | --part=7 | --part=8 | --part=9) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[01]) parts+=("${arg#--part=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -76,7 +87,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9)
+    parts=(1 2 3 4 5 6 7 8 9 10 11)
 fi
 
 # Each run's outer limit, s: 120 s over its watchdog (`src/smoke/result.ts`'s
