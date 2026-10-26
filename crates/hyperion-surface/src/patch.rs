@@ -606,7 +606,8 @@ mod tests {
             for y in (0..=per).step_by(7) {
                 for x in (0..=per).step_by(5) {
                     let dir = key.sample_dir(x, y, scale.grid());
-                    let s = TEST_PLANET.height(dir, key.level(), &mut cache);
+                    let s =
+                        HeightSource::height(&TEST_PLANET, &mut cache, dir, key.level()).unwrap();
                     let expected =
                         normals::surface_normal(&TEST_PLANET.figure(), dir, s.height_m, s.gradient);
                     let n = usize::try_from(y).unwrap() * side + usize::try_from(x).unwrap();

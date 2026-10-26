@@ -30,6 +30,58 @@
 //! runner, `cargo bench --target wasm32-unknown-unknown -p hyperion-surface --features testing
 //! --bench synth`. It takes 20 samples a part, since a sample is a whole patch; the program's
 //! `main` is empty there, and the runner calls the benchmark itself.
+//!
+//! Measured 2026-10-26 (R09.T20), **provisional**, its quiet re-run pending (main's schedule): no
+//! quiet window (main's ruling), under the heavy-test lock at `CPUQuota` 1200%, one thread, the
+//! schedutil governor, on this machine (a Ryzen 7 3700X, 16 threads), with the 1-minute load and
+//! `/proc/pressure/io`'s "full" avg10 over each world's IDs. Natively, per point (a patch's time
+//! ÷ 4,225, from a warm cache), and per patch:
+//!
+//! | Part | Earth-like, 12 | Earth-like, 19 | Moon-like, 10 | Moon-like, 17 |
+//! | ---- | -------------: | -------------: | ------------: | ------------: |
+//! | `base` | 3.18 µs | 2.73 µs | 0.30 µs | 0.28 µs |
+//! | `relief` | 7.99 µs | 8.73 µs | 2.60 µs | 3.25 µs |
+//! | `channels` | 1.02 µs | 0.95 µs | 0.21 µs | 0.21 µs |
+//! | `craters` | 3.05 µs | 5.79 µs | 5.00 µs | 6.99 µs |
+//! | `craters-uncached` | 81.4 µs | 168.7 µs | 1,170 µs | 2,905 µs |
+//! | `rims` | 0.06 µs | 0.04 µs | 0.46 µs | 0.46 µs |
+//! | `height` | 6.70 µs | 11.35 µs | 5.92 µs | 10.93 µs |
+//! | `patch`, warm | 35.06 ms | 56.80 ms | 30.87 ms | 56.22 ms |
+//! | `patch`, cold | 40.65 ms | 81.17 ms | 32.34 ms | 59.72 ms |
+//! | Load; I/O full | 4.4–15.7; ≤ 43 | 6.6–10.1; ≤ 52 | 3.6–13.3; ≤ 52 | 1.3–12.3; ≤ 24 |
+//!
+//! The parts are each evaluated alone, so they sum to more than `height`, whose fused
+//! interpolation evaluates the field once. At the coarse level plus four the whole meets the
+//! brainstorm's 10 µs a point, and a warm patch its 40 ms (a cold Earth-like one takes 40.65 ms);
+//! at the band limit's level both miss. The channels' incision through each level
+//! (`surface/channels/through-<k>`, k from 8 to 12; load 5.5–15.8, I/O full ≤ 32) takes 0.38,
+//! 0.50, 0.62, 0.78 and 0.92 µs a point from a warm cache, and 0.44, 0.91, 1.28, 1.73 and 2.19 µs
+//! as a bake.
+//!
+//! In WebAssembly (`browser::point`, 20 samples a part, on Electron 44.4.3's V8 15.2 through the
+//! shim, in a hold of its own: a 1-minute load of 1.1 to 2.7 on the Earth-like world and the
+//! Moon-like one at 10, 2.4 to 13.7 at 17; I/O full ≤ 38), per point:
+//!
+//! | Part | Earth-like, 12 | Earth-like, 19 | Moon-like, 10 | Moon-like, 17 |
+//! | ---- | -------------: | -------------: | ------------: | ------------: |
+//! | `base` | 2.00 µs | 2.00 µs | 0.27 µs | 0.27 µs |
+//! | `relief` | 5.71 µs | 7.02 µs | 2.34 µs | 3.85 µs |
+//! | `channels` | 1.01 µs | 1.03 µs | 0.28 µs | 0.30 µs |
+//! | `craters` | 3.71 µs | 7.65 µs | 4.68 µs | 10.08 µs |
+//! | `craters-uncached` | 98.0 µs | 202.4 µs | 1,144 µs | 2,900 µs |
+//! | `rims` | 0.08 µs | 0.08 µs | 0.53 µs | 0.52 µs |
+//! | `height` | 8.80 µs | 14.08 µs | 7.89 µs | 14.14 µs |
+//! | `height`, a patch's 4,225 | 37.17 ms | 59.50 ms | 33.32 ms | 59.74 ms |
+//!
+//! Against Design note 14's targets in WebAssembly the channels meet theirs (3.5 µs); the base
+//! elevation (0.2 µs), the relief (1.5 µs) and the small craters (2 µs) miss. At the coarse level
+//! plus four the whole meets the brainstorm's 10 µs a point, and a patch's height sweep its 40 ms;
+//! at the band limit's level both miss, by about 1.4 to 1.5 times. R05's test planet took 4.1 µs a
+//! point cached natively at R05.T3.c (2.82 µs in R09.T20's hold): R09's whole height in
+//! WebAssembly is about 2.1 and 3.4 times T3.c's figure on the Earth-like world at 12 and 19. The
+//! native Earth-like figures at 12 ran at the native hold's highest load (12 to 16, I/O full up
+//! to 35) and look inflated: their base elevation, whose cost does not depend on the level, took
+//! 3.18 µs against 2.73 µs at 19 in the same hold.
 
 /// What the benches of both targets share: the seed, the patches and their parts.
 mod shared {

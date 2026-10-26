@@ -3584,6 +3584,19 @@ Acceptance: `just ci`, `just ci-slow`, `just bench` complete (the orchestrator r
 `just ci-slow`; a lane runs only the slow tests and benches this plan created, the timed ones under
 the heavy lock or recorded provisional).
 
+_Built 2026-10-26_ (lane r09-t20, on `e36c29fd`, gated on `8fe83fa3`; Risks, "Verification and
+hand-over, as run (R09.T20)" and "Deferred findings (2026-10-13 rule) (R09.T20)"). R05's
+`TestPlanet::height` is deprecated, its note pointing at `Synthesiser::height_at`, which R10's
+client path reads. The spike's `HeightSource` path is kept, and no output moves. Every slow test
+the plan created passes by name: the sim's 51 and the surface crate's 13. The benches ran under the
+heavy lock at the day's load, so they are provisional, and their quiet re-run is pending on main's
+schedule. In WebAssembly the whole height takes 8.80 µs a point on the Earth-like world at the
+coarse level plus four, inside the brainstorm's 10 µs, and 14.08 µs at the band limit's level,
+1.41 times it. Those are 2.1 and 3.4 times R05.T3.c's test planet (4.1 µs, natively). The reference
+Earth's pass takes 59.9 s at level 8, T16.a's 57.1 s within the load's spread. The record maps
+each Verification item to its tests, and names what R09 hands to R10, galaxy plan 14, R11, R12,
+the owner and main.
+
 ## Verification
 
 - **Agreement:** golden heights equal on native, wasip1 and the browser target (T9); the server's
@@ -3606,6 +3619,10 @@ the heavy lock or recorded provisional).
 - **By eye:** the reference Earth's field rendered to equirectangular images by T15's
   `surface_map` example, belts along convergent boundaries and rivers to the sea, compared with a
   person looking and recorded in T15's entry.
+
+_As verified (R09.T20, 2026-10-26):_ item by item in Risks, "Verification and hand-over, as run
+(R09.T20)". The by-eye look stays pending for the owner. The channels have not been compared
+across the wire (a deferred finding there), and the benches are provisional.
 
 ## Generator version
 
@@ -3695,7 +3712,11 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   coarse pass at level 8 may take tens of seconds with the climate model, which the brainstorm
   accepts if it starts on approach; until sessions exist it starts on first request.
   R09.T16 measured it: 94.9 s for the reference Earth's pass at level 8, its climate step 68.9 s
-  (decision-r09-pass-cost; R09.T16.a).
+  (decision-r09-pass-cost; R09.T16.a). R09.T16.a's bit-identical levers brought it to 57.1 s, the
+  climate step 37.3 s. R09.T20 re-ran every bench of the plan under the heavy lock, at the day's
+  load: the pass took 59.9 s, and the whole height 8.80 µs a point in WebAssembly at the coarse
+  level plus four and 14.08 µs at the band limit's level. All are provisional, with the quiet re-run
+  pending (Risks, "Verification and hand-over, as run (R09.T20)").
 - **Plan 14's asks may not land in time.** The pass runs on builder inputs meanwhile, and `for_body`
   says `NotModelled(RecordSection::Surface)`; no generated world gets a surface until plan 14
   inhabits the record's surface section (P14.T24.a–b, unbuilt) and carries σ_h with f_c, the
@@ -14534,3 +14555,216 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     bottleneck whose means straddle T\*. On the reference Earth there are 23, from its probe 24
     on, taking 46,000 of its 68,659 sweeps, and 58,000 with its six hot probes. The fold guard
     keeps the last converged candidate, as ruled. For I13's accelerated relax after 24.
+- **Verification and hand-over, as run (R09.T20)** (2026-10-26; lane r09-t20, on `e36c29fd`, its
+  runs there and its gate on `8fe83fa3`, which touches none of its files; main's rulings of that
+  day: the plan's slow tests by name under the heavy lock, and the benches under it at the load of
+  the day, one thread, provisional, their quiet re-run pending on main's schedule).
+  - _R05's provisional function._ `TestPlanet::height` (`test_planet.rs`) is deprecated. Its note
+    and its doc point at `Synthesiser::height_at`, which R10's client path reads. Only the inherent
+    method is deprecated. The type, the module, `TEST_PLANET` and the module's WebAssembly exports
+    (`bakePatch`, `levelTable`, `surfaceHeightM`, `omittedSigmaM`) stay as they are, since the
+    descent spike keeps the test planet for its own reproducibility (R10's Design note 4). R10
+    has already switched the client: bodies through `SurfaceFields` (R10.T6.b) and
+    `HeightSourceSetting` `"body"` (R10.T16.b–c). The test planet stays the spike's and the smoke
+    runs'.
+    - The spike's `HeightSource` impl now calls the method's own body, so the library carries no
+      suppression and its heights are the same to the bit. R05's golden, its level-bound check and
+      its patch-normals test read the test planet through that impl, the path the spike keeps.
+    - R05's seven unit tests of the method, its T3.c bench and R09's shared-cache relief test keep
+      the method, each under `#[expect(deprecated, reason = …)]`.
+    - No golden, version or generated file moves.
+  - _The slow tests_, plan 09's own, by name, at the gate's test build (the dev profile at
+    opt-level 2), four threads, in one hold of the heavy lock (1,077 s, from a 1-minute load of
+    1.93), with the deprecation in the tree. All pass.
+    - The sim: `planetary::surface::`'s ignored tests and `surface_coarse_golden`'s two, 51 in
+      804.3 s (R09.T17.a: 851.3 s). The slowest are the reference Earth's order test (628.8 s;
+      620.3 s at T17.a), the water cycle against GPCP (72.2 s), T14.d's final field (71.1 s), the
+      Earth-like golden (63.9 s), the main groups' areas (63.4 s), the craters' cost on the Earth
+      (63.2 s) and the sample world's golden (63.0 s).
+    - The surface crate: `synth::`'s ignored tests and T7.a's Venus inversion, 13 in 271.2 s. The
+      slowest are T7.h's measurement of the kept octaves' sharpening (271.2 s, run beside the
+      rest), the level bound and the reach at 10⁴ points (157.5 s) and the Venus inversion
+      (28.0 s).
+    - The slow tests the deprecation's edits reach (smart-ci's plan) pass too, through
+      `build-slot` at 400%: R05's six slow `test_planet::tests`, its `level_bound` (84.8 s) and
+      the testkit's one. The first run's `level_bound` was stopped by the lane at 59 s (SIGTERM,
+      for main's quiet window QW25), not a failure, and passed when run again alone.
+    - Their logs are in the lane's scratch (`r09-t20/logs/s1-*` to `s4-*`). The measurement tests'
+      printed figures were not kept, since nextest captures a passing test's output. Their
+      figures stand as their own records have them.
+  - _The benches_, provisional: under the heavy lock at `CPUQuota` 1200%, one thread, the schedutil
+    governor, at the day's load, each figure with the 1-minute load and `/proc/pressure/io`'s
+    "full" avg10 over its own samples. Each group took a hold of its own, so that other lanes'
+    gates could run between them. The figures are in the doc comments that own them
+    (`benches/synth.rs`, `crates/hyperion-sim/benches/surface.rs`, and `test_planet.rs`'s T3.c
+    paragraph).
+    - _Native, per point_ (a patch's time ÷ 4,225, warm), the whole `height`: 6.70 µs on the
+      Earth-like world at 12 and 11.35 µs at 19, and 5.92 and 10.93 µs on the Moon-like world at
+      10 and 17. The fused pass's figures (2026-10-15) were 6.49, 10.48, 5.87 and 10.57 µs. The
+      warm patches take 35.06, 56.80, 30.87 and 56.22 ms (34.0, 55.3, 30.5 and 55.4), and the cold
+      ones 40.65, 81.17, 32.34 and 59.72 ms. The load was 1.3 to 15.8, and the I/O full up to 52.
+    - _The uncached small craters natively_, pending since T8: 81.4 and 168.7 µs a point on the
+      Earth-like world, and 1,170 and 2,905 µs on the Moon-like one (T9's WebAssembly figures: 98,
+      204, 1,140 and 2,809 µs).
+    - _The channels by level_ (`surface/channels/through-8` to `-12`, warm): 0.38, 0.50, 0.62,
+      0.78 and 0.92 µs a point, and 0.44, 0.91, 1.28, 1.73 and 2.19 µs as a bake. T6.b's were
+      0.36–0.82 µs warm and 0.43–2.09 µs as a bake.
+    - _R05's test planet_, in the same hold as the comparison: 2.82 µs a point cached and 4.73 µs
+      uncached (R05.T3.c, 2026-10-03: 4.1 and 4.6 µs; R09.T5: 2.8 and 4.5–4.7 µs).
+    - _WebAssembly_ (`browser::point`, 20 samples a part; the hold of 657 s): the parts and the
+      whole, as `benches/synth.rs` tabulates them, the whole as above. The uncached small craters
+      take 98.0, 202.4, 1,144 and 2,900 µs a point, as at T9.
+    - _The native figures at the Earth-like world's level 12_ ran at that hold's highest load (12
+      to 16, with the I/O full up to 35), and they look inflated. Their base elevation, whose cost
+      does not depend on the level, took 3.18 µs, against 2.73 µs at 19 in the same hold and the
+      fused pass's 2.79 µs.
+    - _The coarse pass_ (`coarse/pass_l5` to `l8` and `coarse/erosion_l8`, then
+      `HYPERION_COARSE_STEPS`'s breakdown, in a hold of 1,877 s):
+      - The pass takes 284.77 ms on Ceres at level 5, 466.40 ms on the Moon at 6 and 5.821 s on
+        Mars at 7.
+      - On the reference Earth at level 8 it takes 59.926 s (55.253–65.709), at a load of 1.7
+        to 21.0. R09.T16.a had 57.089 s (55.815–58.702).
+      - `coarse/erosion_l8` takes 13.114 s at a load of 9.8 to 13.5 (T16.a: 12.082 s).
+      - By step the Earth's 58.64 s is the climate's 37.53 s (T16.a: 37.28 s) and the erosion's
+        12.07 s (12.16 s), so the steps are T16.a's within the load's spread.
+      - The fields' heaps are unchanged, and the Earth's peak resident set is 407.1 MB.
+  - _Per point in WebAssembly_, R09.T20's own figure. It was taken on Electron 44.4.3's V8 (15.2)
+    through the shim, in its own hold, at a 1-minute load of 1.1 to 2.0 on the Earth-like world.
+    The whole height takes 8.80 µs a point on the Earth-like world at 12 and 14.08 µs at 19, and
+    7.89 and 14.14 µs on the Moon-like world at 10 and 17. T9 had 19.98, 25.61, 9.20 and 15.76 µs,
+    and the fused pass 9.08, 14.57, 7.87 and 14.25 µs.
+    - _Against the budget._ The brainstorm's 10 µs a point is met at the coarse level plus four and
+      missed by 1.41 times at the band limit's level. The patch's height sweep takes 37.17 ms and
+      59.50 ms against its 40 ms. A whole bake adds the parent band and the gradients: natively a
+      warm patch takes 1.24 times its height sweep, so a WebAssembly bake would take about 46 ms at
+      the coarse level plus four (an estimate; no WebAssembly bake is timed), over the 40 ms.
+      Design note 14's estimate of 4–8 µs a point is missed at both levels (8.80 and 14.08 µs).
+    - _Against Design note 14's targets._ The channels meet theirs (1.01 µs against 3.5 µs). The
+      base elevation (2.00 µs against 0.2 µs), the relief (5.71–7.02 µs against 1.5 µs) and the
+      small craters (3.71–7.65 µs against 2 µs) miss, as T9 found.
+    - _Against R05.T3.c's test planet_ (4.1 µs a point cached, natively; R05 took no WebAssembly
+      figure): R09's whole height is 2.1 times that at 12 and 3.4 times at 19. Against the test
+      planet as re-measured in the same session (2.82 µs natively), it is 3.1 and 5.0 times, and
+      natively against natively 2.4 and 4.0 times (6.70 and 11.35 µs).
+    - The whole height in WebAssembly runs 1.24–1.33 times this session's native figures, inside
+      T8's assumed 1.2–1.5. The parts alone run 0.63–1.44 times theirs.
+  - _Verification, item by item._ Each test named runs in `just ci` unless marked slow.
+    - _Agreement._ T9's golden heights are equal on native, wasip1 and the browser target
+      (`synth/height_golden.rs`, a module of the crate as T9 built it). The interpolant agrees
+      bit for bit along every face edge and at every corner (`synth/interp.rs`, T4). The server's
+      heights equal a client's from the wire, edges included
+      (`a_client_holds_only_the_surveyed_field_and_synthesises_the_server_s_heights`, T19.c), on
+      the Ceres-like world, whose records vary cell by cell since T11–T15 landed. The Mars-like
+      test (`a_payload_of_several_blocks_and_frames_holds_only_the_surveyed_cells`) checks its
+      records, not its heights. So the channels have not been compared across the wire, which is
+      T19.c's own lean (deferred, below).
+    - _Knowledge._ The whole height function reads within the synthesis margin
+      (`the_whole_height_function_reads_within_the_synthesis_margin`, T8: at most four king moves
+      against five at the sampled points; T4 found no slack at the ends of face edges, in
+      `synth/interp.rs`). No unsurveyed cell beyond the margin is sent, and no response or
+      notification carries a `surface_seed` (both `surface_knowledge` tests, T19.c).
+    - _Consistency._
+      - The level bound holds for every level pair: at 10³ points in `just ci`, and at 10⁴ in
+        the slow tier (`synth::levels`).
+      - A baked patch is its vertices' point queries, bit for bit.
+      - Neither the build order nor the patch order moves a height (`synth/tests.rs`).
+      - Every crater integrates to zero at every level, the coarse craters' sharpening per
+        crater (T7.c's ruling: per crater, not per coarse cell).
+    - _Constraints to plan 14._ Plan 14's `σ_h` is matched on Mars, the Moon and Ceres in
+      `just ci`, and on the Earth in the slow tier, after the whole pass with the erosion. Mars's
+      whole pass is within 2 × 10⁻⁴, 8.5 × 10⁻⁸ off since T6.c. The ocean fraction is matched by
+      T12.e's placement (the Earth 0.7095, slow). The ice fraction and the mean temperature are
+      matched by the climate's normalisation (the Earth 288 K to 0.1 K, its ice 0.041 to one
+      cell), and after the whole pass on the small Earth to 10⁻⁹.
+    - _Physics checks_, each as its record has it:
+      - hypsometric modes against Earth2014, the mean band widened 150 m on its deep side;
+      - crater counts against Trask's saturation cap;
+      - the zonal climate against ERA-Interim through Siler et al., south of 58.75° S to
+        `SOUTHERN_BOUND_K`;
+      - Hack's law on the network's procedural path lengths (T6.a);
+      - the Mars valley-network volume, (A2) at 1.961 m, at least 1.2 m (T6.c).
+    - _Benches_: above.
+    - _By eye_: pending by hand for the owner. T15's agent read the images; a person's look is
+      not yet recorded. The images come from
+      `cargo run -p hyperion-sim --features testing --example surface_map [-- <dir>]`, which
+      writes `elevation.ppm`, `class.ppm` and `flow.ppm` at 1,440 × 720.
+  - _Deviations._
+    - The benches are provisional, taken at the day's load (main's ruling). Their quiet re-run is
+      pending on main's schedule, with the commands of the lane's handoff
+      (`handoff-r09-t20.md`).
+    - There is no WebAssembly `surface/patch` or `surface/channels/through-*` ID. The browser
+      target's `surface/point` (T9) times each part, and the whole height, over a whole patch's
+      4,225 vertices, so the per-point cost and the patch's height sweep are measured in
+      WebAssembly. The bake's parent band and gradients, and the channels' per-level breakdown,
+      are native only.
+    - The acceptance's `just ci` and `just ci-slow` (the wasip1 slow suite among them) are the
+      orchestrator's, as the entry says, and the whole workspace's `just bench` is left to main.
+      The lane ran smart-ci, the plan's own slow tests natively, and the plan's benches.
+  - _What R09 hands over._
+    - _To R10:_
+      - `Synthesiser` and the coarse field, with the deprecated `TestPlanet::height` pointing
+        at it;
+      - `sample_worlds()` (`tests/common/surface_worlds.rs`) and the coarse goldens;
+      - R03.T15's 61-chunk check in the real renderer, owned by R10.T15.b's served-world pass,
+        once the serve gate opens and R10's page asks for a served field;
+      - T6.c's trunks' look on R10's terrain, pending for the owner's screen;
+      - the descent's re-run on R09's function, which R05's Risks ("The test planet is not the real
+        function") leave to R09's benchmarks, through R05's kept scripted path and harness: with
+        R10.T15.b's served-world pass, or a descent look on a generated body.
+    - _To galaxy plan 14_ (P14.T54.b, version 24):
+      - the serve gate, `GENERATED_SURFACES_FROM` (24) with its tripwire, in
+        `crates/hyperion-server/src/surface/inputs.rs`. Every R09 condition of it has landed
+        (T2.e, T2.f, T6.c, T16), and none of R09's work is on the serve-gate list;
+      - R09's coarse fields, which move at 24 by P14.T53.a's water term alone (R09.T16.b was
+        dropped). P14.T54.b re-blesses R09's coarse goldens with that move.
+    - _To R11:_ `Synthesiser`, `DetailSeed`, the `surface.scatter` tag, the header's
+      `surface_age` and `surface_pressure`, and the rest of what R11's Consumes takes from this
+      plan, built. Its ask for the terrain-independent zonal
+      precipitation function ("Asked by R11, not yet designed here") stays open, for main to
+      place.
+    - _To R12:_ the benches' figures and their commands, for its budget table.
+    - _To the owner:_ the by-eye look at T15's maps.
+    - _To main:_
+      - R09.T7.g, the plains from ray-traced surfaces: after RM5's close, through a new
+        `hyperion-fit` task (`rough_plains_cold_traps`), riding a generator bump;
+      - the benches' quiet re-run;
+      - T19.c's follow-up, left by T1.b: `surface_knowledge.rs` still synthesises from its
+        stand-in `DETAIL_SEED` rather than the client's seed from `body_detail`, and keeps its own
+        copies of `Secret`'s checks ("Deviations in T1.b, as built");
+      - plan 09's deferred findings: 34 records and this one. T8.d's, whose owner was R09, pass to
+        main with their triggers.
+    - R09.T7.k was built by P14.T51.i, and R09.T16.b was dropped. No other task of plan 09's Tasks
+      is open.
+- **Deferred findings (2026-10-13 rule) (R09.T20)** (recorded, not ruled; each for "main"'s list).
+  - _The channels have not been compared across the wire_ (T19.c's lean, now due). The server's
+    heights are checked against a client's on the Ceres-like world alone, which has no channels.
+    Lean: add the Mars-like world's heights to `surface_knowledge`, in the slow tier if its cost
+    holds, before the first served payload, which carries channels. It is not on the serve-gate
+    list; main may place it there as a count.
+  - _R05 asked R09 to stay within T3.c's cost_ (R05's Risks, "The test planet is not the real
+    function": "T3.c's measured cost and the headroom row are what R09 must stay within"). R09's
+    whole height takes 2.1 to 3.4 times T3.c's figure in WebAssembly, and 2.4 to 4.0 times the test
+    planet's natively in the same session. The descent's re-run on R09's function (handed to R10,
+    above) is where the headroom is judged.
+  - _A WebAssembly bake is not timed._ The browser bench times the height sweep alone. A whole
+    bake is estimated at about 46 ms at the coarse level plus four, from the native ratio of a warm
+    patch to its sweep (1.24), over the brainstorm's 40 ms. Lean: a WebAssembly `bake_patch` ID in
+    `browser::point`'s pattern, with the quiet re-run.
+  - _The cold Earth-like patch at 19 rose by 35%_ (81.17 ms against the fused pass's 60.1 ms),
+    where its warm patch rose 2.7% (56.80 ms against 55.3 ms) in the same hold. It is not
+    attributed. R09.T7.i–j's crater wear landed in between, and a cold patch fills the crater
+    cache. To be looked at with the quiet re-run.
+  - _The whole height misses at the band limit's level in WebAssembly_ (T9's deferred finding,
+    smaller since the fused pass). It takes 14.08 µs a point on the Earth-like world at 19, 1.41
+    times the brainstorm's 10 µs, and its patch's height sweep takes 59.50 ms against 40 ms. The
+    base elevation (2.00 µs), the relief (5.71–7.02 µs) and the small craters (3.71–7.65 µs) still
+    miss Design note 14's targets of 0.2, 1.5 and 2 µs. These are provisional, taken under load,
+    and are for R10's budget and R12's table. The levers are those of "Timings are provisional"
+    (the channel search and level cut, then the hash fallbacks); the band limit does not move.
+  - _The level-8 pass sits at the edge of its target, and its climate step over its own_ (T16's
+    and T16.a's findings, re-measured). The pass takes 59.9 s against the brainstorm's "tens of
+    seconds … rather than minutes". Its climate step takes 37.5 s, against R09.T13.e's 30 s and
+    R09.T13.i's landed band of at most 35 s. The route is I13's, under its own ruling (R09.T16.b's
+    lever was dropped).
+  - _The benches' quiet re-run_ is pending on main's schedule. The native figures at the Earth-like
+    world's level 12 look inflated by the hold's load (above).

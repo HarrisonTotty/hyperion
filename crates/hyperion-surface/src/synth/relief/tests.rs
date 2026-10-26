@@ -1365,6 +1365,10 @@ fn the_same_seed_gives_the_same_relief_and_another_another() {
 /// One cache passed between two bodies' seeds and the test planet, back and forth, gives each its
 /// own heights, as a fresh cache does.
 #[test]
+#[expect(
+    deprecated,
+    reason = "R09's relief cache checked against R05's provisional height"
+)]
 fn a_cache_shared_by_two_seeds_and_the_test_planet_gives_each_its_own_heights() {
     use crate::test_planet::TEST_PLANET;
     let field = earth();

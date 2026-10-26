@@ -56,6 +56,30 @@
 //! over the target's tens of seconds, its climate step over the 30 s that R09.T13.e's ruling set
 //! for the reference Earth, and its erosion over T14's 10.50 s: findings for plan 09's R09.T16
 //! records, not CI failures.
+//!
+//! After R09.T16.a's bit-identical levers (2026-10-23, the same conditions, a load of 1.95–9.06):
+//! `coarse/pass_l8` 57.089 s (55.815–58.702), its climate 37.28 s and its erosion 12.16 s, and
+//! `coarse/erosion_l8` 12.082 s (11.905–12.263); levels 5 to 7 unchanged.
+//!
+//! Measured 2026-10-26 (R09.T20), **provisional**, its quiet re-run pending (main's schedule): no
+//! quiet window (main's ruling), under the heavy-test lock at `CPUQuota` 1200%, one thread a pass,
+//! the schedutil governor, with the 1-minute load and the I/O full over each bench's samples:
+//!
+//! | Bench | Time | Field heap | Peak resident set | Load; I/O full |
+//! | ----- | ---- | ---------- | ----------------- | -------------- |
+//! | `coarse/pass_l5` (Ceres) | 284.77 ms (281.77–288.38) | 351,476 B | 23.6 MB, the process's floor | 4.6–5.4; ≤ 12.4 |
+//! | `coarse/pass_l6` (the Moon) | 466.40 ms (463.50–469.66) | 1,467,156 B | 23.6 MB | 5.4–6.7; ≤ 15.9 |
+//! | `coarse/pass_l7` (Mars) | 5.821 s (5.790–5.854) | 5,019,132 B | 80.7 MB | 2.3–5.9; ≤ 19.6 |
+//! | `coarse/pass_l8` (the Earth) | 59.926 s (55.253–65.709) | 19,073,448 B | 407.1 MB | 1.7–21.0; ≤ 28.0 |
+//! | `coarse/erosion_l8` | 13.114 s (12.686–13.544) | | | 9.8–13.5; ≤ 18.3 |
+//!
+//! By step (one pass each, load 6.4–13.5, I/O full ≤ 17.8), the Earth's 58.64 s is the climate's
+//! 37.53 s, the erosion's 12.07 s, the relief after the craters' 5.57 s, the plates' 1.76 s, the
+//! relief's 1.21 s and 0.50 s for the rest; Mars's 6.90 s the erosion's 2.68 s, the relief after
+//! the craters' 2.60 s and the late craters' 1.01 s. The steps are T16.a's within the load's
+//! spread: no lever has landed since. The Earth's pass, about a minute, sits at the edge of the
+//! target's "tens of seconds … rather than minutes", and its climate step stays over the 30 s of
+//! R09.T13.e's ruling, as T16.a recorded.
 
 use std::time::{Duration, Instant};
 

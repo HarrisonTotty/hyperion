@@ -51,7 +51,11 @@
 //! against the research estimate of about 2 and 6 µs and the budget of 10 µs (before the table,
 //! 5.5 and 6.1 µs under the same load). It is re-measured in a quiet window the
 //! orchestrator schedules (no other lanes' tests or builds, load average recorded;
-//! decisions-r05.md item 7).
+//! decisions-r05.md item 7). Re-measured 2026-10-26 by R09.T20 beside R09's synthesis, still under
+//! load and so still **provisional**, its quiet re-run pending (main's schedule; no quiet window;
+//! the heavy-test lock, `CPUQuota` 1200%, one thread, schedutil, a 1-minute load of 3.1 to 4.5 and
+//! `/proc/pressure/io`'s "full" up to 23): **2.82 µs a point cached, 4.73 µs uncached** (11.93
+//! and 19.99 ms a patch).
 //!
 //! # Ridges
 //!
@@ -308,10 +312,22 @@ impl TestPlanet {
     ///
     /// `cache` is the caller's, one per bake; the result is independent of what it holds.
     ///
+    /// Deprecated by R09.T20: this is R05's provisional height function. A generated world's
+    /// height is R09's [`crate::synth::Synthesiser`]
+    /// ([`height_at`](crate::synth::Synthesiser::height_at)), which R10's client path reads. The
+    /// descent spike keeps the test planet for its own reproducibility, through its
+    /// [`HeightSource`](crate::patch::HeightSource) impl, which is not deprecated.
+    ///
     /// # Panics
     ///
     /// If `dir` is not finite, `level` is above [`crate::cube::MAX_LEVEL`], or a height is not
     /// finite (a bug).
+    #[deprecated(
+        note = "R05's provisional test-planet height (R09.T20): a generated world's height is \
+                `hyperion_surface::synth::Synthesiser::height_at`, which R10's client path reads; \
+                the descent spike keeps the test planet through its \
+                `hyperion_surface::patch::HeightSource` impl"
+    )]
     #[must_use]
     pub fn height(&self, dir: [f64; 3], level: u8, cache: &mut LatticeCache) -> HeightSample {
         self.sum_octaves(dir, self.octaves_at(level).count(), cache)
@@ -418,7 +434,9 @@ impl crate::patch::HeightSource for TestPlanet {
         dir: [f64; 3],
         level: u8,
     ) -> Result<HeightSample, Self::Error> {
-        Ok(TestPlanet::height(self, dir, level, cache))
+        // The deprecated inherent `height`'s own body, so that the spike's path, which R10 keeps,
+        // does not go through it.
+        Ok(self.sum_octaves(dir, self.octaves_at(level).count(), cache))
     }
 
     fn level_bound_m(&self, level: u8) -> f64 {
@@ -501,6 +519,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(deprecated, reason = "R05's test of its own provisional height")]
     fn the_gradient_agrees_with_a_central_difference() {
         let mut rng = Lcg::new(0x6772_6164);
         let mut cache = LatticeCache::new();
@@ -528,6 +547,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(deprecated, reason = "R05's test of its own provisional height")]
     fn heights_lie_in_their_levels_range() {
         let mut rng = Lcg::new(0x7261_6e67);
         let mut cache = LatticeCache::new();
@@ -548,6 +568,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(deprecated, reason = "R05's test of its own provisional height")]
     fn heights_are_independent_of_the_cache_and_repeatable() {
         let key = PatchKey::new(Face::NegY, 12, 1_234, 3_210).unwrap();
         let dirs: Vec<[f64; 3]> = (0..=64)
@@ -572,6 +593,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(deprecated, reason = "R05's test of its own provisional height")]
     fn a_cache_shared_by_two_seeds_gives_each_its_own_heights() {
         let other = TestPlanet {
             seed: Seed::new(42),
@@ -591,6 +613,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(deprecated, reason = "R05's test of its own provisional height")]
     fn ridges_change_only_octaves_8_to_12() {
         let ridged = TEST_PLANET.with_ridges(Ridges::On);
         let mut rng = Lcg::new(0x7269_6467);
@@ -718,6 +741,7 @@ mod tests {
 
     #[test]
     #[ignore = "slow: heights and gradients at 10^5 points, both ridge settings"]
+    #[expect(deprecated, reason = "R05's test of its own provisional height")]
     fn heights_and_gradients_are_finite() {
         let mut rng = Lcg::new(0x6669_6e69);
         let mut cache = LatticeCache::new();
@@ -772,6 +796,7 @@ mod tests {
 
     #[test]
     #[ignore = "slow: the spectral leakage above the band limit, along 1,000 profiles"]
+    #[expect(deprecated, reason = "R05's test of its own provisional height")]
     fn the_leakage_above_the_band_limit_is_measured() {
         // 1,000 profiles of 1,024 samples at 0.125 m (128 m each) along random directions, at
         // the finest level; each is detrended, Hann-windowed and transformed, and the power at

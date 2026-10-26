@@ -27,6 +27,7 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 use hyperion_surface::cube::{Face, FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::LatticeCache;
+use hyperion_surface::patch::HeightSource;
 use hyperion_surface::patch::collision::{finest_surface_height, mesh_height};
 use hyperion_surface::test_planet::{Ridges, TEST_PLANET, TestPlanet};
 use hyperion_testkit::lcg::Lcg;
@@ -52,15 +53,20 @@ fn random_patch(level: u8, rng: &mut Lcg) -> PatchKey {
     PatchKey::new(face, level, i, j).unwrap()
 }
 
-/// The largest `|F_n − F_f|` over the 65 × 65 vertices of `key`, metres.
+/// The largest `|F_n − F_f|` over the 65 × 65 vertices of `key`, metres, through the test planet's
+/// `HeightSource` impl, the path the descent spike keeps.
 fn vertex_maximum(planet: &TestPlanet, key: PatchKey, finest: u8) -> f64 {
     let mut cache = LatticeCache::new();
     let mut worst = 0.0_f64;
     for y in 0..=64_u8 {
         for x in 0..=64_u8 {
             let dir = key.vertex_dir(x, y);
-            let coarse = planet.height(dir, key.level(), &mut cache).height_m;
-            let fine = planet.height(dir, finest, &mut cache).height_m;
+            let coarse = HeightSource::height(planet, &mut cache, dir, key.level())
+                .unwrap()
+                .height_m;
+            let fine = HeightSource::height(planet, &mut cache, dir, finest)
+                .unwrap()
+                .height_m;
             worst = worst.max((fine - coarse).abs());
         }
     }
