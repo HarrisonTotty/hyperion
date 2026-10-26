@@ -1,0 +1,13 @@
+# The defaults review's smoke run: three points of each default about it, 64 scores a rebuild and
+# 200 stars a point; a few seconds, for the crate's tests.
+task = "kick_defaults"
+
+[params]
+rebuild_scores = 64
+rebuild_seed = 0x0619_b000_0000_0000
+stars = 200
+stars_seed = 0x0619_d000_0000_0001
+low_ramp_lower_grid = [1.875, 2.0, 2.125]
+bh_factor_grid = [0.6875, 0.75, 0.8125]
+ec_window_single_grid = [0.075, 0.1, 0.125]
+ec_window_stripped_grid = [0.8, 1.0, 1.2]

@@ -229,6 +229,18 @@ provisional = false
 acceptance = "over the 455 rows, fit minus grid, log₁₀ L within 0.046 dex (rms 0.008) and R within 0.60% (rms 0.12%)"
 
 [[table]]
+name = "kick_defaults"
+path = "kick_defaults.rs"
+task = "kick_defaults"
+revision = 0
+inputs_sha256 = "7b6481cc2abe295203ef521c333320d9048f62dc43cf60de8dc49a4fbce15dd0"
+body_sha256 = "e62302ed9e906d96c0a1e1895bed49cbb8a17e40efdea7e39085a4fc31df712b"
+fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322, 2.0, 3.0, 0.75, 0.1, 1.0]
+since_generator_version = 23
+provisional = false
+acceptance = "at the committed defaults on the committed table every observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0708 against 0.03–0.07, escape share 0.1159 against 0.12–0.20); resolution: the centre on its rebuild of 100000 scores within 0.0019 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (escape share) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: none"
+
+[[table]]
 name = "kick_rank"
 path = "kick_rank.rs"
 task = "kick_rank"

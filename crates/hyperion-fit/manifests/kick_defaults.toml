@@ -1,0 +1,23 @@
+# The kick law's defaults review (plan 15, P15.T5.b): the kick-law tests' observables on a grid of
+# each of the four defaults about its value, one at a time, the rest held (decision-p15-revalidation
+# Q1 to Q3). Every point of the ramp's and the windows' grids, the centre included, rebuilds the
+# rank table at its membership from 10⁵ scores on the committed table's seed; the black-hole
+# factor's points use the centre's rebuild. The observables are the slow tests' sample, 20,000 stars
+# on their seed. The ramp's grid is of its lower end, the upper end at the committed width above
+# it, and reaches down to 1.25 M☉ so that retention's lower edges, which a reduced run put near
+# 1.4 M☉, fall inside it. The black-hole factor's grid starts at Mandel and Müller's (2020) 0.5.
+# The single-star window's grid runs to 0.325 M☉, past the 0.3 M☉ or so at which the window
+# reaches the sample's 8 M☉ floor. No default moves, and nothing in the generator reads the table.
+task = "kick_defaults"
+
+[params]
+rebuild_scores = 100_000
+rebuild_seed = 0x0619_b000_0000_0000
+stars = 20_000
+stars_seed = 0x0619_d000_0000_0001
+low_ramp_lower_grid = [1.25, 1.375, 1.5, 1.625, 1.75, 1.875, 2.0, 2.125, 2.25, 2.375, 2.5]
+bh_factor_grid = [0.5, 0.5625, 0.625, 0.6875, 0.75, 0.8125, 0.875, 0.9375, 1.0]
+ec_window_single_grid = [
+    0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225, 0.25, 0.275, 0.3, 0.325,
+]
+ec_window_stripped_grid = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8]
