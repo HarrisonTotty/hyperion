@@ -13,6 +13,7 @@ pub mod condensate_extinction;
 pub mod displaced_forms;
 pub mod equipartition;
 pub mod giant_cooling;
+pub mod kick_defaults;
 pub mod kick_rank;
 pub mod lifetime_bracket;
 pub mod limb_darkening;

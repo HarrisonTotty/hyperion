@@ -169,6 +169,7 @@ which lists the sim's and the surface crate's (re-validated).
 | `tables::mge`                   | plan 02        | 02, 08      | `MGE_EXP`, `MGE_BAR`; this plan adds `MGE_BOXY`           |
 | `tables::chabrier`              | this plan      | 02, 11      | `HIGH_MASS_BRANCH_SCALE`                                  |
 | `tables::kick_rank`             | plan 06        | 06 (08, 09) | `SCORE_QUANTILES: [f64; 257]`, four defaults              |
+| `tables::kick_defaults`         | this plan      | none        | P15.T5.b's review of the four defaults; nothing reads it  |
 | `tables::helium`                | plan 06        | 06, 09      | `LIFETIME_SLOPE`, `HB_TEMPERATURE_SHIFT`                  |
 | `tables::displaced_forms`       | this plan      | 08          | see P15.T6                                                |
 | `tables::cluster_dynamics`      | this plan      | 09          | `BH_LOSS_*`, equipartition, `PULSAR*`                     |
@@ -2599,3 +2600,121 @@ fit-check`; review-changes on this lane's diff.
       the widths are a track option, the generator's being `collapse`'s constants. The "For
       P15.T5.b" note of P06's "Deviations in T19.a–d, as built" ("vary them through the
       constants") is superseded: the review varies them through these seams.
+  - **T5.b, the defaults review** (the fit crate, two manifests and the table; no sim code).
+    - _The task._ `tasks::kick_defaults::KickDefaultsTask`: `kick_defaults`, slow, revision 0
+      (`VERSION`), the sim's `kick_defaults.rs`, 24 items. Its fingerprint is `KickRankTask`'s 22
+      probes, then `kick_rank::LOW_RAMP`'s two ends, `BH_FACTOR`, `EC_WINDOW_SINGLE` and
+      `EC_WINDOW_STRIPPED`. `run` checks the manifest and reads `Settings::from_manifest`: the
+      counts and seeds through `Manifest::u64`, the grids as arrays of `params()`, each refused
+      with a `ManifestParamError` naming its key unless it is increasing, finite, holds its
+      default exactly and, for a window, is positive. `review` rebuilds the rank table, the centre
+      first, one rebuild at a time on every thread (`kick_rank::scores_parallel`, then
+      `quantiles_of`), then evaluates every point's `kick_observables` through
+      `map_reduce_chunks`, one job a chunk, joined in job order. The K–S test of test 1
+      (`ks_one_sample`, `ordinary_ks`) is the task's own, bit for bit the testkit's.
+    - _Manifests._ `kick_defaults.toml`: 10⁵ scores on 0x0619_b000_0000_0000, 20,000 stars on
+      0x0619_d000_0000_0001, and the grids: the ramp's lower end 1.25–2.5 by 0.125 (11 points),
+      the black-hole factor 0.5–1.0 by 0.0625 (9), the single window 0.025–0.325 by 0.025 (13) and
+      the stripped window 0.2–1.8 by 0.2 (9), so 31 rebuilds and 40 samples.
+      `kick_defaults.smoke.toml`: three points a default, 64 scores and 200 stars.
+    - _The emission._ `just fit kick_defaults --threads 4`, after merging origin at 1c27ebac:
+      1,059 s, 34 s of them the fit crate's release build, on four threads at a 1-minute load of
+      4.0 (at most 4.7). The header is `@generated` by task `kick_defaults` revision 0,
+      `since-generator-version: 23`, `data: none`, inputs SHA-256 `7b6481cc…`, sim fingerprint
+      `ff1bb6b1…`; the body's SHA-256 is
+      `e62302ed9e906d96c0a1e1895bed49cbb8a17e40efdea7e39085a4fc31df712b`. The lock entry carries
+      both and the fingerprint's 27 values, and the `MANIFEST` row is revision 0, since 23, not
+      provisional. The acceptance line: "at the committed defaults on the committed table every
+      observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50
+      km/s 0.0708 against 0.03–0.07, escape share 0.1159 against 0.12–0.20); resolution: the
+      centre on its rebuild of 100000 scores within 0.0019 in ln(v ÷ km/s) (ordinary ln v sd) and
+      0.0008 in a share (escape share) of the committed table; rebuilds: the low-mode ramp, 0 of
+      10 equal to the centre's bit for bit; the single-star window, 12 of 12 …; the
+      companion-stripped window, 8 of 8 …; findings: none". `just fit-check` gives
+      `42 fresh, 7 warnings, 0 failures`, the base's lines and one more.
+    - _The sensitivity table_, condensed (intervals to one grid step; "open" where the grid's end
+      passes; every verdict "inside"):
+      - _The ramp_ (its lower end, 2.0): the low-mode share 1.25 (open) to 2.125 (0.3036 at 2.25);
+        retained under 20 km/s 1.5 to 2.125, under 50 km/s 1.5 to 2.25, under 100 km/s 1.5 to
+        2.125 (at 1.375 they are 0.1667, 0.1711 and 0.2238; above, 0.3036 at 2.25, 0.3201 at 2.375
+        and 0.3506 at 2.25); the other eight open at both ends, double neutron stars falling to
+        0.5395 at 1.25.
+      - _The black-hole factor_ (0.75): light black holes above 100 km/s from 0.6875 (0.1209; 0.1023
+        at 0.625) to 1.0 (open); the other eleven never move along it, the unkicked shares included.
+      - _The single window_ (0.1): all twelve open at both ends; the share under 100 km/s runs
+        0.0729–0.1279 and the low mode 0.2641–0.2969, rising until they stop at 0.3 M☉.
+      - _The stripped window_ (1.0): all twelve open; only its 0.2 M☉ point moves anything (the low
+        mode 0.2676 against 0.2740).
+      - _The held figures._ The sky share runs 0.0670–0.0725 along the ramp, inside 3–7% for lower
+        ends up to 1.875, and 0.0534–0.1095 along the single window, inside for widths up to
+        0.075; it is 0.0705 along the factor and the stripped window. The escape share runs
+        0.1366–0.1062 along the ramp, inside 12–20% for lower ends up to 1.75, and 0.1167–0.1115
+        along the single window; 0.1152 along the factor, 0.1162–0.1152 along the stripped window.
+    - _The resolution._ The centre on its 10⁵-score rebuild against the committed table: 0.0019
+      in ln(v ÷ km/s) (the sd, 0.6289 against 0.6307) and 0.0008 in a share (the escape share,
+      0.1152 against 0.1159); K–S p 0.7706 against 0.8729.
+    - _The window rebuilds_ equal the centre's bit for bit, 12 of 12 and 8 of 8 (§3's reading 1:
+      the windows end at `m_cc` and move no member); none of the ramp's 10 does.
+    - _§3's readings._ (1) Confirmed, above. (2) Confirmed: the stripped width moves nothing above
+      0.4 M☉ and little at 0.2, and the single window is seen whole until it saturates at 0.3 M☉,
+      where it reaches the sample's 8 M☉ floor. (3) The factor's one edge is the light black holes'
+      share above 100 km/s, closed one step below the default; their unkicked share, 0.670 against
+      30–70%, does not depend on the factor at all, so it is no edge of it.
+    - _Tests._ In `tasks::kick_defaults`, fast: the interval logic
+      (`an_interval_is_the_contiguous_run_of_passing_points_about_the_default`,
+      `an_end_at_the_grids_first_or_last_point_is_open_and_never_an_edge`,
+      `a_default_within_a_tenth_of_the_width_of_an_edge_is_near_it`,
+      `a_held_figure_is_reported_against_its_window_and_has_no_interval`), `each_criterion_is_its_tests`,
+      `the_stated_bounds_are_the_criteria`, `each_default_at_its_committed_value_is_the_default_law`,
+      `the_ks_test_is_the_testkits`, `the_ordinary_ks_test_is_the_slow_tests`,
+      `the_settings_are_the_manifests`, `the_settings_refuse_a_bad_grid` and
+      `the_rendered_items_are_the_tasks`, each under 0.01 s, and
+      `a_rebuild_is_score_quantiles_of_its_population_for_any_thread_count` (2.3 s; 600 scores, two
+      chunks, one thread and four). In `tests/kick_defaults.rs`, fast:
+      `the_committed_body_is_the_rendering_of_its_constants` (0.006 s) and
+      `the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count` (2.8 s). The
+      registry's pinning test lists `kick_defaults` (49 tasks), and `the_committed_tables_are_fresh`
+      (13.2 s) and `every_committed_table_declares_its_tasks_items` pass with it.
+    - _Deviations._ (1) The grids are wider than the brief's starting ones, the ramp's down to 1.25
+      and the single window's up to 0.325, after a reduced run (20,000 scores a rebuild, not
+      committed) put retention's lower edges just below 1.5 and showed the single window still
+      moving at 0.225: 31 rebuilds and 40 samples where the ruling's cost assumed about 25, and 17
+      minutes at four threads. (2) Twelve observables: the share retained under 20 km/s passes only
+      within 0.002 of the low mode's, as the brief's table has it. (3) Items beyond the brief:
+      `CRITERIA`, `HELD_WINDOWS` and each grid's `*_OBSERVED` and `*_HELD`, so that the body
+      re-renders from its own constants. The last two are `TableItem::Nested`, a row a figure and a
+      column a grid point, since a twelve-wide tuple trips Clippy's `type_complexity` in the sim;
+      `LOW_RAMP_GRID` pairs the ramp's two ends. (4) An observable failing at its default would have
+      the default for both ends of its interval, and the notes would name it; none does. (5) The
+      resolution is stated in ln(v ÷ km/s) and in shares apart, the K–S p-value aside. (6) The smoke
+      run takes 64 scores and 200 stars, about a second. (7) On grids of up to 12 steps a default
+      a step or more from a closed end lies within a tenth of the interval's width of it only if the
+      interval spans over ten steps; none does, so "at an edge" is the one finding the grids can
+      give, and the notes say so.
+    - _Deferred findings (2026-10-13 rule)_, from P15.T5.b, none of them acted on:
+      - **A ramp lower by a quarter to a half M☉ passes everything and brings both held figures
+        inside their windows.** At lower ends of 1.5, 1.625 and 1.75 (width held) every observable
+        passes, the sky share is 0.0681–0.0693 and the escape share 0.1284–0.1209. The margins are
+        thin: the sky share's at 1.75 is 0.0007, under a third of its binomial error at 20,000
+        stars, and retention under 20 km/s clears 18% by 0.016 at 1.5. For the ruling on Q2's held
+        figures, which T5.b does not make.
+      - No default is at or within a tenth of an edge, so the acceptance finds nothing. The ramp is
+        one step (0.125 M☉) below three failures (the low mode and retention under 20 and 100 km/s
+        above 30% and 35% at 2.25), and the factor one step (0.0625) above the light black holes'
+        12% floor.
+      - The stripped window's default sits on a flat stretch: the 8–150 M☉ sample sees only the
+        window's top 0.35 M☉ or so, so nothing constrains 1.0 M☉; the single window saturates at
+        0.3 M☉ for the same reason. `MASS_RANGE` stays, as the brief says.
+      - The fingerprint is Q3's: it probes neither the committed rank table, which
+        `CENTRE_ON_COMMITTED_TABLE` reads, nor the law's other parameters (`ln_mu`, `ln_sigma`,
+        `low_sigma_km_s`, `wd_sigma_km_s`, `rank_clamp`, `max_speed_km_s`), so a change to either
+        leaves the table fresh (the determinism review's point). See "For P06.T19.e".
+    - _For main_ (T5.b). The task's criteria copy plan 06's slow tests (`Observable::criterion`): a
+      ruling that changes a test's window changes the task, with a revision. P15.T5.b's Files can
+      name `tests/kick_defaults.rs`.
+    - _For P06.T19.e._ Re-emit `kick_defaults` with the production rank table, at 25: its
+      fingerprint does not see the committed table, so `fit-check` stays fresh, but
+      `CENTRE_ON_COMMITTED_TABLE` is the slow tests' figures on that table, the two held ones
+      included, which the rerun re-pins. The production manifest takes 17 minutes at four threads
+      on this laptop. If a ruling moves a default, the grids hold their default exactly, so the
+      manifest's grids move with it.

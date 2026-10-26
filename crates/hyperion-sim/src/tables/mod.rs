@@ -77,6 +77,7 @@ pub mod displaced_forms;
 pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod helium;
+pub mod kick_defaults;
 pub mod kick_rank;
 pub mod lifetime_bracket;
 pub mod limb_darkening;
@@ -233,6 +234,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "giant_cooling",
         revision: 0,
         since_generator_version: 11,
+        provisional: false,
+    },
+    TableInfo {
+        name: "kick_defaults",
+        revision: 0,
+        since_generator_version: 23,
         provisional: false,
     },
     TableInfo {
