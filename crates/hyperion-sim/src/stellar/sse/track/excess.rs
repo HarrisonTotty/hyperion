@@ -104,3 +104,103 @@ impl HeliumHook {
         }
     }
 }
+
+/// A candidate helium-excess table in [`tables::helium`](crate::tables::helium)'s shape.
+///
+/// It is for building tracks under a table other than the committed one (plan 15, P15.T7.b): the
+/// fit of the table to the helium-enhanced stellar models of Pietrinferni et al. (2006) measures
+/// the lifetimes and horizontal branches of plan 06's tracks under each candidate. Its nodes are
+/// always the committed `LOG_Z_NODES`, plan 06's, which the fit does not move. Behind the
+/// `testing` feature; the generator builds none.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CandidateHeliumTable {
+    lifetime_slope: [[f64; 3]; 4],
+    hb_temperature_shift: [f64; 2],
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl CandidateHeliumTable {
+    /// The committed table, [`tables::helium`](crate::tables::helium), as a candidate.
+    pub const COMMITTED: Self = Self::new(helium::LIFETIME_SLOPE, helium::HB_TEMPERATURE_SHIFT);
+
+    /// A candidate of `lifetime_slope`, as `LIFETIME_SLOPE`, and `hb_temperature_shift`, as
+    /// `HB_TEMPERATURE_SHIFT`, at the committed nodes.
+    ///
+    /// `lifetime_slope` holds (c₀, c₁, c₂) of the slope s(m, Z) = c₀ + c₁ x + c₂ x², x = log₁₀(m ÷
+    /// M☉), of the log of the main-sequence and giant-branch timescales in ΔY at each node,
+    /// interpolated linearly in log₁₀ Z between the nodes and held beyond the end nodes.
+    /// `hb_temperature_shift` holds (a, b) of the horizontal branch's shift of log₁₀ `T_eff` per
+    /// unit ΔY at constant luminosity, a + b `M_env` with the envelope mass in M☉.
+    #[must_use]
+    pub const fn new(lifetime_slope: [[f64; 3]; 4], hb_temperature_shift: [f64; 2]) -> Self {
+        Self {
+            lifetime_slope,
+            hb_temperature_shift,
+        }
+    }
+
+    /// The nodes, log₁₀ Z, increasing: the committed `LOG_Z_NODES`.
+    #[must_use]
+    pub const fn log_z_nodes(&self) -> [f64; 4] {
+        helium::LOG_Z_NODES
+    }
+
+    /// (c₀, c₁, c₂) of the slope at each node, as `LIFETIME_SLOPE`.
+    #[must_use]
+    pub const fn lifetime_slope(&self) -> [[f64; 3]; 4] {
+        self.lifetime_slope
+    }
+
+    /// (a, b) of the horizontal branch's shift, as `HB_TEMPERATURE_SHIFT`.
+    #[must_use]
+    pub const fn hb_temperature_shift(&self) -> [f64; 2] {
+        self.hb_temperature_shift
+    }
+}
+
+/// The committed table: a table of zeros would be the identity too, but the committed one is the
+/// generator's.
+#[cfg(any(test, feature = "testing"))]
+impl Default for CandidateHeliumTable {
+    fn default() -> Self {
+        Self::COMMITTED
+    }
+}
+
+/// The whole track of a star of initial mass `m0`, `composition` and `draws` under the helium
+/// table `table` in place of the committed one.
+///
+/// It is [`Track::full`](super::Track::full)'s track, the generator's options and resolution,
+/// with `table`'s correction for the star's ΔY (`Composition::helium_excess`). For a star of
+/// ΔY = 0 it is [`Track::full`](super::Track::full)'s bit for bit, whatever `table` holds, since
+/// no correction is built for it; under [`CandidateHeliumTable::COMMITTED`] it is that track at
+/// any ΔY. Plan 15's P15.T7.b fits the table with it. Behind the `testing` feature; the generator
+/// never calls it.
+///
+/// # Panics
+///
+/// In debug builds, as [`Track::full`](super::Track::full).
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub fn track_with_helium_table(
+    m0: SolarMasses,
+    composition: &Composition,
+    draws: &crate::stellar::draws::StarDraws,
+    table: &CandidateHeliumTable,
+) -> super::Track {
+    let table = HeliumTable {
+        log_z_nodes: table.log_z_nodes(),
+        lifetime_slope: table.lifetime_slope,
+        hb_temperature_shift: table.hb_temperature_shift,
+    };
+    super::Track::build_with_helium(
+        m0,
+        composition,
+        draws,
+        super::TrackOptions::default(),
+        super::Resolution::GENERATOR,
+        None,
+        HeliumHook::of(composition, &table),
+    )
+}

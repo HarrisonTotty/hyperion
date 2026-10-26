@@ -97,6 +97,10 @@ pub use wind::WindRecipe;
 // with, where plan 06's Provides places both.
 pub use crate::stellar::remnant::RemnantRecipe;
 
+// Tracks under a candidate helium table (P15.T7.b's fit, in `hyperion-fit`; `track/excess.rs`).
+#[cfg(any(test, feature = "testing"))]
+pub use track::{CandidateHeliumTable, track_with_helium_table};
+
 use crate::units::{SolarLuminosities, SolarMasses, SolarRadii};
 
 /// Luminosity, radius and core mass at one age, as one phase's formulae give them for a star of

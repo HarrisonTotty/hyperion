@@ -237,6 +237,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: false,
     },
     TableInfo {
+        name: "helium",
+        revision: 0,
+        since_generator_version: 23,
+        provisional: true,
+    },
+    TableInfo {
         name: "kick_defaults",
         revision: 0,
         since_generator_version: 23,

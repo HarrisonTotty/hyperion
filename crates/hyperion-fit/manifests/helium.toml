@@ -1,0 +1,9 @@
+# The helium-excess correction of the stellar tracks (plan 06, P06.T17; plan 15, P15.T7), as
+# committed: P06.T17's identity, every coefficient zero, which P15.T7.b registers unchanged at
+# revision 0 and emits provisionally, its body byte for byte. P15.T7.b's fit to BaSTI's
+# helium-enhanced models runs from `helium.production.toml`, with `--manifest` and `--out` to a
+# scratch path; the swap moves those parameters here and takes revision 1, with a bump.
+task = "helium"
+
+[params]
+method = "identity"
