@@ -115,6 +115,9 @@ pub fn lifetime(m0: SolarMasses, comp: &Composition, draws: &StarDraws) -> Years
 pub fn turn_off_mass(age: Years, comp: &Composition) -> SolarMasses;   // inverse of t_ms; plan 09
 pub enum WindRecipe { Hurley2000, Modern }        // Modern is the generator default
 pub enum RemnantRecipe { Hurley2000, MandelMuller2020 }
+pub struct TrackOptions;                  // recipes, bridges, windows; Default is the generator's
+impl TrackOptions { pub const fn with_capture_windows(self, w: CaptureWindowWidths) -> Self; }
+pub struct CaptureWindowWidths;           // the electron-capture windows' widths (P15.T5.d)
 ```
 
 `stellar::substellar::cooling(mass, age, comp) -> StarState` is the fit below 0.1 M☉ that plan 13
@@ -182,6 +185,9 @@ pub fn ordinary_score(co_core: SolarMasses, remnant: SolarMasses, xi: f64) -> f6
 pub struct KickRankTable;                 // F_x, interpolating `tables::kick_rank`
 pub mod reference {
     pub struct ReferencePopulation;       // the population F_x is tabulated over (P06.T19.b)
+    impl ReferencePopulation {            // a law's membership and windows (P15.T5.d)
+        pub fn new(params: KickLawParams) -> Result<Self, BuildCaptureWindowWidthsError>;
+    }
     pub fn score_quantiles(pop: &ReferencePopulation, n: u64, seed: Seed) -> [f64; 257];
     pub struct KickObservables { /* the six figures of P06.T19.d */ }
     pub fn kick_observables(params: &KickLawParams, table: &KickRankTable, n: u64, seed: Seed)
@@ -196,7 +202,7 @@ Table shapes fixed by this plan and filled by plan 15, which restates them in it
   the reference population, strictly increasing; and the law's four defaults as constants that
   `KickLawParams::default` reads, `LOW_RAMP: (f64, f64)` (2.0, 3.0 M☉ of carbon–oxygen core),
   `BH_FACTOR` (0.75), `EC_WINDOW_SINGLE` (0.1 M☉) and `EC_WINDOW_STRIPPED` (1.0 M☉). Plan 11's
-  `CLUSTER_MERGED_BINARY_FATE`, the default P15.T5.c reviews, is not among them: it stays in
+  `CLUSTER_MERGED_BINARY_FATE`, the default P15.T5.c reviewed, is not among them: it stays in
   `stellar::binary` (plan 11's design note 14).
 - `tables::helium`: `LIFETIME_SLOPE`, the coefficients of s(m, Z), a quadratic in log mass at four
   metallicities, interpolated in log Z; and `HB_TEMPERATURE_SHIFT`, linear in envelope mass. Every
@@ -535,7 +541,10 @@ generation?)` with its exhaustive `ErrorCode` switch `settledState` in `lib/useS
 12. **Electron-capture windows are in initial mass** and end at the lowest initial mass that makes
     an iron core, `m_cc(Z)` (in Hurley's terms, the mass whose core at the base of the AGB is 2.25
     M☉): `[m_cc − 0.1, m_cc)` for a single star, `[m_cc − 1.0, m_cc)` for a companion-stripped one.
-    The brainstorm gives widths only; see Risks.
+    The brainstorm gives widths only; see Risks. The widths are a track option since P15.T5.d,
+    `TrackOptions::with_capture_windows` with `stellar::sse::CaptureWindowWidths`, and the
+    generator's are `collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRIPPED_WINDOW`, which
+    `TrackOptions::default()` carries.
 13. **Neutron-star birth laws.** The brainstorm says birth spin and field "are drawn" and gives no
     distribution. The field is one log-normal with decay, so magnetars are the high tail of the
     birth field and fall out of the draw, as the brainstorm's row asks, and are not a separate roll.

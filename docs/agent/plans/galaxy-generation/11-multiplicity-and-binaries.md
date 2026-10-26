@@ -205,7 +205,7 @@ pub enum CarvedClass { AccretingWdFast, AccretingWdSlow, XrayBinary, StellarMerg
 pub fn carved_class(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<CarvedClass>;
 pub use crate::stellar::multiplicity::{RedrawAttempt, MAX_REDRAWS, DRAWS_PER_ATTEMPT};
 pub enum MergedBinaryFate { StaysJudgedOnPairVelocity, StaysJudgedOnKick, Ejected }
-pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate; // the default P15.T5.c reviews
+pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate; // the default P15.T5.c reviewed
 ```
 
 The census's bound on a pair's light (P11.T17, R06's ask B, `decision-r06-census-cost.md` §7;
@@ -546,7 +546,7 @@ given; where it is not, the task that builds it is named.
 14. **Defaults of the generator version** set here: common-envelope efficiency α = 1 with the
     binding parameter of Hurley, Tout and Pols; their critical mass ratios; accretion
     Eddington-limited for white dwarfs, neutron stars and black holes (ruling 132.1). `CLUSTER_MERGED_BINARY_FATE` is the fourth of the kick law's defaults that the
-    brainstorm's "Open questions" lists, and P15.T5.c reviews it; its value is that a merged pair
+    brainstorm's "Open questions" lists, and P15.T5.c reviewed it; its value is that a merged pair
     stays a member and is judged on the pair's velocity.
 15. **Brown-dwarf companions.** The brainstorm counts brown dwarfs at "one for every four or five
     stars, companions included" and gives the free-floating ones a layer (plan 13, one for every
@@ -1380,8 +1380,9 @@ tables must keep that under one in ten, which a test counts.
   hosts as ordinary members that alerts cannot find from afar. Acceptance: the check passes for
   every seed of the sweep, or the finding is recorded in this plan's Risks with the figures.
 - **P11.T8.f Inside features.** The same classes on plan 09's `FeatureLevelList`, appended after
-  plan 09's own in the order `STELLAR_MERGER`, `NEUTRON_STAR_MERGER`, `XRAY_BINARY`,
-  `ACCRETING_WHITE_DWARF`, `ACCRETING_WHITE_DWARF_SLOW` (plan 09's design note 16), with counts from
+  plan 09's own in the order `ACCRETING_WHITE_DWARF`, `ACCRETING_WHITE_DWARF_SLOW`, `XRAY_BINARY`,
+  `STELLAR_MERGER`, `NEUTRON_STAR_MERGER` (plan 09's design note 16 and `FEATURE_LEVEL_LIST_ORDER`,
+  as P11.T8.e found), with counts from
   the feature's own parameters: the feature's budget times the class's row of `CLASS_SHARES`, and
   for globulars the encounter-rate scaling of P09.T9.e in its place. `draw_hierarchy` and a
   conditional binary draw for members that plan 09 marks millisecond pulsar, X-ray binary or blue
@@ -1597,8 +1598,9 @@ keyboard-reachable. Acceptance: `pnpm test`, `just ci`, and a check by eye again
 When P15.T9.b and P15.T10.b have landed `tables/binary.rs`: clear the `provisional` flags, bump the
 version, regenerate goldens, and re-run T6's redraw rate (now 2–4%), T8's counts and sampler
 chi-squares at the fitted tolerance, and T9's nova rate. Likewise note P15.T4.b's scale in T12's
-Chabrier window and P15.T5.c's verdict on `CLUSTER_MERGED_BINARY_FATE`; if only the alternative
-passes its four retention bands, change the default here with the bump. Acceptance: `just ci` and
+Chabrier window and P15.T5.c's verdict on `CLUSTER_MERGED_BINARY_FATE`: the default passes its four
+retention bands (2026-10-26), and T5.c's guard in `retention.rs` fails the build if it changes, so
+changing the default needs a reader of the other branches first. Acceptance: `just ci` and
 `just test-slow` green with no provisional entry for `binary` in `tables::MANIFEST`.
 
 ### P11.T16 The census's hierarchy bound (R06's ask A)
@@ -3171,7 +3173,8 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   - _`tables/binary.rs`_ holds `ClassShareTable`, `ClassShareRow` and the scratch `CLASS_SHARES`
     (Design note 13): the same hosts per solar mass formed in every population, scaled to the Milky
     Way fixture's formed mass, `MILKY_WAY_FORMED_MASS` = 9.376 × 10¹⁰ M☉ (its components' born
-    systems times 0.957 M☉), for 4.5 × 10⁶ fast and 4.5 × 10⁶ slow accreting white dwarfs, 10⁴
+    systems times 1.0961 M☉, corrected from 0.957 by P11.T8.e's deferred findings), for 4.5 × 10⁶
+    fast and 4.5 × 10⁶ slow accreting white dwarfs, 10⁴
     X-ray binaries, 9 × 10⁴ stellar mergers in the source horizon and 10 neutron-star mergers.
     Layer shares are a guess from the stars that make each class: accreting white dwarfs C 0.75, D
     0.25; X-ray binaries and neutron-star mergers E; stellar mergers A 0.1, B 0.2, C 0.5, D 0.15, E
