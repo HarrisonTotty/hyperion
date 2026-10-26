@@ -75,7 +75,11 @@ pub use timeline::{
 };
 
 /// What becomes of a merged binary in a cluster (plan 11, design note 14): the fourth of the kick
-/// law's defaults that the brainstorm's "Open questions" lists, which P15.T5.c reviews.
+/// law's defaults that the brainstorm's "Open questions" lists, which P15.T5.c reviewed.
+///
+/// Cluster retention ([`retention`](crate::galaxy::features::interior::retention)) reads only
+/// [`StaysJudgedOnPairVelocity`](Self::StaysJudgedOnPairVelocity), for every low-mode neutron
+/// star; the other branches have no reader yet (plan 11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MergedBinaryFate {
     /// The merged pair stays a member, judged on the pair's velocity.
@@ -87,6 +91,16 @@ pub enum MergedBinaryFate {
 }
 
 /// The generator's default for a merged binary in a cluster (plan 11, design note 14): it stays a
-/// member and is judged on the pair's velocity, until P15.T5.c's review.
+/// member and is judged on the pair's velocity.
+///
+/// P15.T5.c's review (decision-p15-revalidation Q4) found cluster retention as built to be this
+/// reading, applied to every low-mode neutron star, merged or not, on the pair's systemic speed
+/// (a Maxwellian of
+/// [`PAIR_SYSTEMIC_SIGMA`](crate::galaxy::features::interior::retention::PAIR_SYSTEMIC_SIGMA),
+/// 12 km/s), and that it passes all four of ruling 137.3's bands at the fixture's low-mode share
+/// of 0.2675 (31.4%, 28.6%, 16.2% and 0.43% against 26–34%, 24–34%, 10–22% and under 1%). So no
+/// alternative was measured. A `const` assertion in
+/// [`retention`](crate::galaxy::features::interior::retention) holds the default to this branch:
+/// changing it fails to build until a reader of the other branches exists.
 pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate =
     MergedBinaryFate::StaysJudgedOnPairVelocity;

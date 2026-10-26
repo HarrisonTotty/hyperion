@@ -46,6 +46,17 @@
 //! 142.4). The table is for the default kick law only. Its run-time form is not the reference's term for term: the complete fallback and the envelope loss
 //! are kept whole with their closed-form Maxwellian, where [`retention`] reads their first speed
 //! bin; the two are the same law, and an edit to either must keep the acceptance.
+//!
+//! # Merged binaries (P15.T5.c)
+//!
+//! The quadrature judges every low-mode neutron star on its pair's systemic speed, merged or not.
+//! That is plan 11's default fate of a merged binary in a cluster,
+//! [`MergedBinaryFate::StaysJudgedOnPairVelocity`] ([`CLUSTER_MERGED_BINARY_FATE`]; plan 11,
+//! design note 14), applied to every low-mode neutron star, and no other branch of the fate is
+//! read here. P15.T5.c's review found that it passes all four of ruling 137.3's bands
+//! (`neutron_stars_are_retained_as_the_brainstorm_says`), so no alternative is measured
+//! (decision-p15-revalidation Q4). A `const` assertion holds the default to that branch: a
+//! change of the default fails to build until a reader of the other branches exists (plan 11).
 
 use crate::galaxy::displaced::SPEED_EDGES;
 use crate::galaxy::displaced::kick_bins::{
@@ -54,10 +65,24 @@ use crate::galaxy::displaced::kick_bins::{
 use crate::galaxy::imf::MassFunction;
 use crate::math;
 use crate::stellar::Composition;
+use crate::stellar::binary::{CLUSTER_MERGED_BINARY_FATE, MergedBinaryFate};
 use crate::stellar::composition::{Z_FIT_MAX, Z_FIT_MIN, Z_SOLAR};
 use crate::stellar::remnant::{KickMode, RemnantKind, StandardKickLaw};
 use crate::tables::cluster_retention;
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, SolarMasses};
+
+// P15.T5.c's guard (decision-p15-revalidation Q4). The quadrature judges every low-mode neutron
+// star on its pair's systemic speed, merged or not: that is the default's reading,
+// `StaysJudgedOnPairVelocity`, and nothing here reads the other branches. So a change of the
+// default must fail to build until a reader of them exists (plan 11).
+const _: () = assert!(
+    matches!(
+        CLUSTER_MERGED_BINARY_FATE,
+        MergedBinaryFate::StaysJudgedOnPairVelocity
+    ),
+    "retention judges every low-mode neutron star on its pair's velocity: a merged binary's other \
+     fates need a reader first (plan 11)"
+);
 
 /// The effective escape speed over the central birth escape speed (module documentation): 0.7826.
 pub const EFFECTIVE_ESCAPE_FACTOR: f64 = 0.782_568_833_826_336;
