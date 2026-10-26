@@ -837,7 +837,8 @@ Order and parallelism:
       `cold_trap::fraction`), behind a hold at 24, → T51.i, its fast path and field, behind the
       same hold (with R09.T7.k; decision-p14-t51-batch §1 and §6); T51.j, the oxidised surface,
       pure (after T51.c and T51.d; §5); T51.d → T51.e → T51.g (one lane: T51.e and
-      T51.g both edit `moons/`; T51.e and T51.g after T54.a, T51.g also after T56.d, T50.c and
+      T51.g both edit the record's surface; T51.e and T51.g after T54.a, T51.e also after
+      P14.T54.b.c, behind `SMALL_BODY_TYPES_VERSION`, and T51.g also after T56.d, T50.c and
       T49.b, behind `OCEAN_VERSION`); T48.g (its own lane), at once, behind a hold at 24 in
       `belts.rs` and `hooks/figures.rs`; T53.a (after T57.a) → T53.b (after its section ruling)
       → T53.c (after T24.c); T53.d (after T24.c); and T31.a → T31.b → T31.c, whose goldens T54.b
@@ -6815,29 +6816,129 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Files:_ `planetary/hooks/modifiers.rs`; `crates/hyperion-surface/src/material/maturity.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::modifiers`;
     `cargo test -p hyperion-surface material::maturity`.
-- **P14.T51.e Small bodies' surface types** (23 → 24; amends T21's members and T17–T19's small
-  moons).
-  - `hooks/small_bodies.rs`: a taxonomic class for the record and the census, a label and not a
-    substance, derived from T51.c's lithology and T51.d's maturity and cover:
-    - S (Q where fresh) for an ordinary chondrite;
-    - C for `chondrite_ci` and `chondrite_cm`;
-    - K or L for `chondrite_cv`;
-    - Xc for `chondrite_e`;
-    - V for a `basalt_fe` crust;
-    - D for `cometary` under an organic cover, and P without;
-    - red or neutral for a Kuiper-belt body by T51.d's cover.
-
-    These pairings are from memory, to be read at build (DeMeo and Carry 2014; Nakamura et al.
-    2011 for Itokawa's LL; science-composition-crusts.md §1.2). A rubble pile or a fragment takes
-    its parent's lithology. If a zone mixes types, it draws on a tag of its own.
-
+- **P14.T51.e Small bodies' surface types** (23 → 24; amends T21's members and T17–T19's moons;
+  after P14.T54.b.c, whose record member it reads; behind `SMALL_BODY_TYPES_VERSION` = 24 with a
+  tripwire; a P14.T54.b.j rider; decision-p14-t51e-contract, 2026-10-23; the Q/S rule is
+  decision-p14-t51e-qs's).
+  - `hooks/small_bodies.rs`, pure: a taxonomic class for the record and the census, a label and
+    not a substance, from plain inputs. It names nothing of `hooks::modifiers` and draws nothing.
+    Its inputs:
+    - the body's kind: a planet; an asteroid belt's member; a Kuiper-like belt's member or a moon
+      of one; another moon;
+    - its lid's lithology (T51.c, `CrustComposition::lid_lithology`);
+    - the tholin-covered share of its surface, s_t, T51.d's `organic_ground` × `organic_cover`;
+    - the uncovered perennial ice share, s_i: the solid, non-seasonal condensates' areas (T51.a),
+      summed in their order and held to 1, less s_t, held to +0 (an upper bound, labelled);
+    - what decision-p14-t51e-qs's Q/S rule reads: T24.b's surface age, T51.d's maturity, and
+      T51.d's wind term at an unshielded share of 1 (a getter on `SurfaceModifiers` that moves
+      nothing), with the same term at the rule's anchor.
+  - **The class**, by the first rule that applies:
+    1. a planet is not classed;
+    2. a Kuiper-belt body, whatever its lid, takes a colour and never a Bus–DeMeo letter: red
+       where s_t is at least 0.5, neutral otherwise. Large and medium bodies show their present
+       surface (Brown 2012: Quaoar red, Orcus neutral); Fraser and Brown 2012's bimodality holds
+       only below about 400 km, the members' floor;
+    3. another member or moon whose lid is classed takes D where s_t is at least 0.5, and is not
+       classed where s_i is at least 0.5, an icy surface the letters do not describe. The 0.5 is
+       a majority of the disk, labelled;
+    4. otherwise its lid's class:
+       - S (Q where fresh, below) for `chondrite_h`, `chondrite_l` and `chondrite_ll`
+         (Nakamura et al. 2011, Itokawa's LL);
+       - C for `chondrite_ci` and a `phyllosilicate` lid (Ceres is C in DeMeo et al. 2009);
+       - Ch for `chondrite_cm`, whose clays carry the 0.7 µm band (DeMeo et al. 2022);
+       - K for `chondrite_cv`, a convention: K and L are continuous (Mahlke et al. 2023), and no
+         published criterion separates them;
+       - Xc for `chondrite_e` (Lutetia);
+       - V for `basalt_fe` and `basalt` (Vesta; Binzel and Xu 1993);
+       - A for `ultramafic` (DeMeo et al. 2022 §4.7), assuming an olivine-dominated lid;
+       - P for `cometary` (DeMeo and Carry 2013's low-albedo X);
+       - not classed for `H2O`, `graphite`, `feldspathic`, `komatiite`, `granite` and
+         `basalt_reduced`, a closed set, by an exhaustive match.
+  - _The Q/S split_ (decision-p14-t51e-qs §1) reads two clocks, not m alone, whose lunar
+    τ_L ÷ k (2.8 Gyr at 2.5 au) is a gardened regolith's:
+    - _the wind's_, the asteroid surface's own: it has run where t_x w₀ ≥ T_Q w_ref, with
+      t_x T24.b's surface age (the one T51.d's m reads) and T_Q `Q_TYPE_WEATHERING_TIME`, 1 Myr
+      at `Q_TYPE_ANCHOR_DISTANCE`, 2.5 au (Vernazza et al. 2009: the final colour "within 10⁶
+      years" of a catastrophic collision); w₀ is T51.d's wind term at an unshielded share of 1,
+      and w_ref the same term on a circular orbit at that distance about `ModifierHost::sun()`;
+    - _the regolith's_: T51.d's m at least `IMMATURE_MATURITY`, 0.4, Morris 1978's immature edge
+      (I_s/FeO 30) at T51.d's X of 75.
+    - The surface is S where either clock has run, a tie included, and Q otherwise. A host with
+      no wind never runs the first.
+    - A moon inside its planet's magnetopause takes w₀ unshielded: its planet's plasma, which
+      T51.d does not model, stands in at the wind's open flux, labelled. A body under air above
+      T51.d's ion floor is S. No other lithology is Q.
+    - It is a label: no substance and no albedo moves, and the albedo reads m through R10.T1.d.
+  - **On the record:** `record::Surface::taxonomic_class()`, a
+    `Modelled<Option<TaxonomicClass>>`, filled where each planet's, member's and moon's record
+    is built, from its built surface (`planetary/system/small_bodies.rs`, behind the hold):
+    - not modelled below 24, with nothing of it computed; for a classed body whose record has no
+      crust (a Kuiper-belt body excepted) or no modifiers (P14.T54.b.c); and where the record
+      lacks what the Q/S rule reads;
+    - `Ok(None)`, computed none, for a planet and for each body rule 3 or the closed set leaves
+      not classed;
+    - `Ok(Some(class))` otherwise.
+  - **The type:** `TaxonomicClass`, closed, carrying at its first send DeMeo et al. 2009's 24
+    classes, Tholen's P and the two colours, so that a later rule needs no protocol change. At 24
+    the rules give S, Q, C, Ch, K, Xc, V, A, D, P, red and neutral. L and the rest are produced by
+    no rule.
+  - _Not produced, recorded:_
+    - a rubble pile's or a fragment's parent lithology, since the generator records no parents;
+    - Trojans and Hildas, since no co-orbital population is generated. Their D share is set at
+      formation (Wong and Brown 2016, H₂S retention, with no value given), and needs a sourced
+      retention temperature against `formation_temperature`, a later value change;
+    - Xe for an aubrite lid, which has no row;
+    - a letter on a body larger than any classed asteroid is its lid's spectral analogue,
+      labelled.
   - _Tests:_
-    - inner-belt members S-type and outer C-type, in DeMeo and Carry 2014's proportion
-      qualitatively;
+    - inner-belt members S-complex and outer C-type, in DeMeo and Carry 2014's proportion
+      qualitatively, the S-complex being S and Q together, as DeMeo and Carry 2013 group them
+      (Icarus 226, 723, §6.1);
     - a large differentiated member can be V-type;
-    - a Kuiper-like member beyond the volatile line red, inside it neutral.
-  - _Files:_ `planetary/hooks/small_bodies.rs`, one call each in `belts.rs` and `moons/`.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::small_bodies`.
+    - a Kuiper-like member with perennial CH₄ ice over most of its surface under a saturated cover
+      is red, and one with none neutral, whatever its lid; a moon of each likewise;
+    - a cometary moon under a water-ice cover is not classed, and a dry one at 4 au is P;
+    - every `CrustLithology` is placed, by an exhaustive match;
+    - a planet is `Ok(None)`, and a member without a crust on the record is not modelled;
+    - the Q/S anchor: τ_Q on a circular 2.5 au orbit about `ModifierHost::sun()` is T_Q to 10⁻¹²
+      relative, and about one host τ_Q scales as a² √(1 − e²); w₀ equals T51.d's
+      `weathering().wind()` to the bit where its shielded share is 1;
+    - an ordinary chondrite on that orbit is Q at t_x = 0 and at half of τ_Q, and S at twice
+      τ_Q, at 1 Gyr (m 0.30) and at 4.567 Gyr (m 0.81);
+    - with no wind, S exactly where m ≥ 0.4; a moon inside its planet's magnetopause has the w₀
+      of its planet's orbit; under air, S; no lithology but an ordinary chondrite is ever Q;
+    - over the sample, the Q share of the ordinary-chondrite bodies is at most 0.01 of S and Q
+      together (Carry et al. 2016, Icarus 268, 340: Q-types "rare among main-belt asteroids"),
+      each Q body listed with its host, distance, t_x and τ_Q, and the share printed again at a
+      T_Q 6.25 times as long (Nesvorný et al. 2010's anchor); over the band, the list goes to
+      main;
+    - the hold: below 24 every golden record's member is not modelled, and `golden_diff.py` moves
+      nothing;
+    - with every 24 hold in force (decision-t24i-airless-state D3.3's helper), the sample's
+      classes are counted by kind and printed;
+    - deterministic, with no draw.
+  - _Sources:_ DeMeo et al. 2009; DeMeo and Carry 2013 and 2014; DeMeo et al. 2022; Mahlke et
+    al. 2023; Nakamura et al. 2011; Binzel and Xu 1993; De Sanctis et al. 2015; Brown 2012;
+    Fraser and Brown 2012; Peixinho et al. 2012; Wong and Brown 2016; Emery et al. 2011
+    (decision-p14-t51e-contract's science check, and the lane's reading). For the Q/S split:
+    Vernazza et al. 2009 (Nature 458, 993); Binzel et al. 2010 (Nature 463, 331); Nesvorný et al.
+    2010 (Icarus 209, 510); Brunetto et al. 2006 (Icarus 184, 327); Carry et al. 2016 (Icarus
+    268, 340); Morris 1978.
+  - _Files:_
+    - `planetary/hooks/small_bodies.rs` and its tests;
+    - `planetary/system/small_bodies.rs` and its tests (the wiring, the hold and its scan);
+    - in `planetary/record.rs`: the member, its setter and its getter;
+    - in `planetary/system.rs`: the module, `RecordRules`' field and the call at each record
+      builder's surface;
+    - `planetary/hooks/mod.rs`;
+    - `HELD` lines in `planetary/hooks/modifiers/tests.rs`;
+    - one getter in `planetary/hooks/modifiers.rs`, the wind term at an unshielded share of 1.
+
+    There is no call in `belts.rs` or `moons/`, which see no lithology. The wire is
+    P14.T54.b.j's.
+
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::small_bodies`;
+    `cargo test -p hyperion-sim planetary::system::small_bodies`.
 - **P14.T51.f Cold traps on airless bodies** (23 → 24; amends T51.a; science-r09-drainage.md §4;
   after rendering plan R09's R09.T7.d).
   - **Where:** `hooks/cold_traps.rs`, for a body with no collisional atmosphere.
@@ -21112,8 +21213,10 @@ tables::gauss_legendre`.
   - _Leinert et al. 1981's r^(−1.3)_ (A&A 103, 177, Summary, read) is measured over 0.3–1.0 au;
     beyond it, where the source says nothing, the law is an extrapolation: Mercury's 0.387 au lies
     inside, every belt and Kuiper-belt body outside.
-  - _For P14.T51.e:_ (**escalated**: a ruling before T51.e is briefed, decision-p14-t51-batch §7.1,
-    E4) Vernazza et al. 2009's asteroid timescale, under 10⁶ yr (Nature 458, 993,
+  - _For P14.T51.e:_ (**ruled**, decision-p14-t51e-qs: the Q/S split reads the surface's exposure
+    age against the asteroid surface's own clock, 1 Myr at 2.5 au about the Sun scaled by the
+    wind's unshielded flux, or m against Morris's immature edge, 0.4, and not m alone) Vernazza et
+    al. 2009's asteroid timescale, under 10⁶ yr (Nature 458, 993,
     _from memory_), against the lunar calibration's τ_L ÷ k, about 2.8 Gyr at 2.5 au (k about
     0.12): a gap of three orders of magnitude, for T51.e, whose Q/S threshold reads this m. Morris
     1978 (p. 2290, read) finds I_s/FeO does not saturate, the regolith's thickness setting its
@@ -29446,3 +29549,80 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `AIR_SECTIONS_VERSION`, as the inventory's scan does. The entry is B1's fix commit's
     (2d1df743), which named the loop's errors there; P14.T52.f's F4 tally names `NotFormed` in the
     same file under it, and changes no scan.
+- **Deviations in P14.T51.e, as built (`p14-modifiers`, 2026-10-26), the pure module.**
+  `GENERATOR_VERSION` stays 23 and no golden moves: `hooks/small_bodies.rs` is pure, and nothing on
+  the record calls it until its wiring (`planetary/system/small_bodies.rs`, behind
+  `SMALL_BODY_TYPES_VERSION`), T51.e's second commit on a tip holding P14.T54.b's B1.
+  - _The entry's text_ is decision-p14-t51e-contract §5.1, with decision-p14-t51e-qs §6.1's Q/S
+    split, its tests and its sources folded into the one entry, and decision-p14-t51e-qs §6.2
+    applied to T51.d's deferred finding. Where §5.1 left them to decision-p14-t51e-qs, its lines
+    are settled: the inputs read the maturity, the unshielded wind term and the anchor's term; the
+    S line says "below"; the getter is no longer conditional; the anchor test is "the Q/S anchor";
+    the inner-belt test says "S-complex", as decision-p14-t51e-qs §6.1 has it.
+  - _The pairings._ The science check (DeMeo et al. 2022, Icarus 380, 114971; DeMeo and Carry 2013,
+    Icarus 226, 723, Tables 4–7; Mahlke et al. 2023, A&A 676, A94; Wong and Brown 2016, AJ 152, 90)
+    amended the entry's first text: `chondrite_cm` is Ch, not C (pristine CM's 0.7 µm band);
+    `chondrite_cv` is K alone, L being produced by no rule (no published criterion separates them,
+    and no lithology carries a CAI share), so no draw and no tag; `phyllosilicate` is C (Ceres);
+    `ultramafic` is A; `basalt` is V beside `basalt_fe`; `cometary` is P, and D only under a
+    majority tholin veneer; a Kuiper-belt body is red or neutral by its cover whatever its lid; a
+    majority uncovered ice veneer leaves a classed body unclassed (decision-p14-t51e-contract §3).
+  - _The inputs._ `TaxonomyInputs { kind, lid, veneer, clocks }`, with `TaxonomyBodyKind`,
+    `Veneer { s_t, s_i }` (s_t + s_i at most 1), `WindTerms { w₀, w_ref }` and
+    `WeatheringClocks { t_x, wind, m, air }`, each checked once in its constructor
+    (`BuildTaxonomyInputsError`).
+    `TaxonomicClass::of` refuses an input its rule reads and was not given
+    (`ClassifyTaxonomyError::NotGiven`, naming the lid, the veneer or the clocks), which the
+    wiring maps to not modelled, never none (decision-p14-t51e-contract §1.5).
+  - _A missing surface age is not modelled, not S._ decision-p14-t51e-qs §2 has a body with no
+    modelled figures S, labelled; decision-p14-t51e-contract §1.5, the later ruling, has a body
+    whose record lacks what the Q/S rule reads not modelled. The module follows the contract: an
+    ordinary chondrite given no clocks is refused, an air-shielded one included, since the air's
+    shield is one of the clocks' inputs.
+  - _The wind terms are the caller's._ The wiring computes w₀ by T51.d's rule at an unshielded
+    share of 1 (a getter on `SurfaceModifiers`, decision-p14-t51e-contract §3.7) and `w_ref` by
+    the same rule at `Q_TYPE_ANCHOR_DISTANCE`, so the module names nothing of `hooks::modifiers`.
+    The module's tests state `w_ref` 0.15998 and the anchor's k 0.11842 by hand
+    (decision-p14-t51e-qs §1.2–1.3), so its anchor and scaling tests hold by construction. The
+    tests by T51.d's own rule and on the record go with the wiring: the Q/S anchor about
+    `ModifierHost::sun()`, w₀ equal to `weathering().wind()` to the bit, the moon inside a
+    magnetopause, the census's Q share, DeMeo and Carry's proportion, a V-type member, a dry
+    cometary moon P at 4 au, a member without a crust not modelled, the hold and the class count.
+  - _No `pub use`_ in `hooks/mod.rs`, which decision-p14-t51e-contract §2.2 allows: it would name
+    the module's types outside the module and trip its own scan.
+  - _The constants._ `Q_TYPE_WEATHERING_TIME` 1 Myr, `Q_TYPE_ANCHOR_DISTANCE` 2.5 au,
+    `IMMATURE_MATURITY` 30 ÷ 75 = 0.4, `VENEER_SHARE` 0.5 (labelled), with their sources.
+  - _The tripwire._ `small_bodies_nothing_on_the_record_reads_the_types_yet` fails on the module's
+    paths and public names in any of the sim's source files outside `planetary/hooks/small_bodies*`.
+    The wiring turns its exempt list into (file, `SmallBodyRules`) pairs, each file checked to name
+    its hold (decision-p14-t51e-contract §3.7), and P14.T54.b.l deletes it.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.e (decision-p14-t51e-qs §5,
+  decision-p14-t51e-contract §3 and the lane's science check):
+  - the albedo still reads m: a belt body at 2.5 au aged between τ_Q and about 1.4 Gyr is labelled
+    S with a partly matured albedo (m below 0.4), for R10.T1.d and the next bump that touches m;
+  - one T_Q for H, L and LL, though Vernazza et al. 2009 find weathering depends on olivine;
+    the ordinary chondrites' subclasses (LL → Sq or Q, L → S, H → Sr; DeMeo et al. 2022) are not
+    split;
+  - a population's Q share from YORP and collisions, and near-Earth objects, are not modelled: no
+    such population is generated. A later near-Earth population must meet Carry et al. 2016's Q/S
+    of about 5–8% at H < 18 for NEAs and Mars-crossers, 20% Q/S and 8% Q overall for NEAs and 40%
+    Q/S below a kilometre, from encounters within Nesvorný et al. 2010's r* of about 5 R_pl, with
+    their t_sw, refitted there;
+  - the present wind stands for the whole exposure (conservative towards Q); the planet's plasma
+    stands in at the wind's open flux for a moon inside a magnetopause; cosmic rays and the far
+    ultraviolet are not clocks; Brunetto and Strazzulla 2005 and Brunetto et al. 2015 not read;
+  - Trojans and Hildas, and Kuiper-belt bodies under about 400 km, would take their D or P and
+    red or neutral from a formation-temperature line (Wong and Brown 2016: H₂S retention, no value
+    given), a later value change in `cover_class`;
+  - an Eris whose frost is renewed reads red under T51.d's saturated cover, which has no volatile
+    renewal (P14.T55.e's); a letter on a body larger than any classed asteroid is its lid's
+    spectral analogue, labelled; a rubble pile's or a fragment's parent lithology is not found,
+    since the generator records no parents; Xe for an aubrite lid has no row, and
+    `basalt_reduced` stays unclassed (Xe or E, _from memory_);
+  - the inner belt's edge: DeMeo et al. 2015 bound it at 2.0–2.5 au, DeMeo and Carry 2013 at
+    2.1–2.5 au; the wiring's census states which it takes.
+- **Deferred findings (2026-10-13 rule)**, for P14.T51.c's owner (decision-p14-t51e-contract §3.8,
+  from p14-modifiers): `chondrite_cv` is given to CI/CM rock heated past dehydration (about 900 K),
+  which observers would class as a heated C rather than an anhydrous CV. A heated-carbonaceous row
+  and the class C are a later bump's. T51.e's map follows the lithology, so K matches the CV row's
+  optics meanwhile. Only moons under 200 km carry it.
