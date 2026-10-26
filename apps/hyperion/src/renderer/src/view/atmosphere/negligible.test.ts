@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { EARTH_H2O_COLUMN_PER_M2, EARTH_H2O_TOP_PA } from "../../test/earthLinePaths";
-import { inlinePart } from "../../test/kDistributionFixtures";
+import { inlinePart, toyPart, toySidecar } from "../../test/kDistributionFixtures";
 import { RANGE_SUNS, THE_SUN } from "../../test/lineRanges";
 import {
   type AbsorberLayer,
@@ -20,6 +20,7 @@ import {
   type KDistributionTable,
   kDistributionAt,
   loadKDistributions,
+  readKDistribution,
 } from "./absorbers/kDistribution";
 import {
   type AbsorberBound,
@@ -44,6 +45,7 @@ import {
   type FixedGMixVerdict,
   type HeldChiVerdict,
   largestChordAmount,
+  lorentzHalfWidthPerCm,
   NEGLIGIBLE_CHANGE,
   type NegligibleBody,
   negligibleAbsorbers,
@@ -88,6 +90,16 @@ function scaled(
 ): AbsorberLayer[] {
   return layers.map((l) =>
     l.species === species ? { ...l, columnPerM2: l.columnPerM2 * factor } : l,
+  );
+}
+
+/**
+ * A Lorentz line's share 3–25 cm⁻¹ from its centre at half-width γ, cm⁻¹, (2 ÷ π) arctan(22γ ÷
+ * (γ² + 75)), to two figures as the reduction writes it (`src/tools/kDistributions.ts`).
+ */
+function nearWingShareOf(gammaPerCm: number): number {
+  return Number(
+    ((2 / Math.PI) * Math.atan((22 * gammaPerCm) / (gammaPerCm ** 2 + 75))).toPrecision(2),
   );
 }
 
@@ -386,13 +398,50 @@ describe("the bound's pieces", () => {
     );
   });
 
+  describe("γ_L from a table's near-wing shares", () => {
+    // Shares (2 ÷ π) arctan(22γ ÷ (γ² + 75)) at γ ÷ p of 1.0 and 0.8 × 10⁻⁶ cm⁻¹ Pa⁻¹ at 200 and
+    // 300 K, to two figures as the reduction writes them; the 1 MPa node's share, 0.18, is past the
+    // recovery's 0.1.
+    const temperaturesK = [200, 300];
+    const pressuresPa = [10, 100, 1e3, 1e4, 1e5, 1e6];
+    const perPa = [1e-6, 0.8e-6];
+    const cells = [{ nm: 690, weights: [1], sigmasM2: Array.from({ length: 12 }, () => 1e-30) }];
+    const table = readKDistribution(
+      toySidecar(temperaturesK, pressuresPa, 1, {
+        nearWingShare: perPa.flatMap((g) => pressuresPa.map((p) => nearWingShareOf(g * p))),
+      }),
+      [toyPart(cells, { variants: 1, temperatures: 2, pressures: 6 })],
+      "toy",
+    );
+
+    it.each([
+      [200, 101_325, 1e-6],
+      [200, 3e6, 1e-6],
+      [300, 101_325, 0.8e-6],
+      [250, 101_325, 1e-6],
+    ])(
+      "returns γ_L within its shares' two-figure rounding, never below it: %d K, %d Pa",
+      (temperatureK, broadeningPa, widestPerPa) => {
+        const gamma = lorentzHalfWidthPerCm(table, temperatureK, broadeningPa) ?? Number.NaN;
+        const exact = widestPerPa * broadeningPa;
+        expect([gamma >= exact, gamma / exact < 1.11]).toEqual([true, true]);
+      },
+    );
+  });
+
   it("weighs a channel's cells by the colour pipeline's rows, their sum the sun's colour", () => {
     const weights = boundCellWeights(THE_SUN);
     const sums = weights.cells.map((row) => row.reduce((s, w) => s + w, 0));
     expect(sums.map((s, c) => s / (weights.totals[c] ?? Number.NaN))).toEqual([1, 1, 1]);
-    // Opaque everywhere, a channel loses at most Σ|w| ÷ Σw of itself: 1 where the weights are positive.
+  });
+
+  it("bounds an opaque channel's change by Σ|w| ÷ Σw, its signed weights' own", () => {
+    const weights = boundCellWeights(THE_SUN);
     const opaque = channelChanges(weights, new Float64Array(PENDING_CELL_COUNT).fill(10));
-    expect(opaque[0]).toBeGreaterThanOrEqual(1);
+    const expected = weights.cells.map(
+      (row, c) => row.reduce((s, w) => s + Math.abs(w), 0) / (weights.totals[c] ?? Number.NaN),
+    );
+    expect(opaque).toEqual(expected.map((e) => expect.closeTo(e, 12)));
   });
 });
 
@@ -493,7 +542,17 @@ describe("the negligible-absorbers bound on an Earth-class body", () => {
     expect(o2co2?.largestChange).toBeLessThan(1e-5);
   });
 
-  it("finds its H₂O continuum below 567 nm not negligible at k = 100, from those cells alone", () => {
+  it("finds its foreign H₂O continuum below 567 nm not negligible at k = 100", () => {
+    // Recorded: 0.147 (green, the 30,000 K sun).
+    expect(absorptionOf(verdicts, "H2O+air")?.negligible).toBe(false);
+  });
+
+  it("finds its self H₂O continuum below 567 nm not negligible at k = 100", () => {
+    // Recorded: 5.0 × 10⁻³.
+    expect(absorptionOf(verdicts, "H2O+H2O")?.negligible).toBe(false);
+  });
+
+  it("takes the foreign continuum's bound from its cells below 567 nm alone, the rest measured", () => {
     const air = absorptionOf(verdicts, "H2O+air");
     const entry = air?.entries[0];
     const sigma = pairCrossSectionAt("H2O+air", entry?.temperatureK ?? Number.NaN);
@@ -505,8 +564,6 @@ describe("the negligible-absorbers bound on an Earth-class body", () => {
       380 + c < 567 ? 100 * (sigma.crossSectionsM5[c] ?? 0) * u : 0,
     );
     const expected = SUNS.map((sun) => channelChanges(boundCellWeights(sun), depths));
-    // Recorded: 0.147 (green, the 30,000 K sun), and H₂O–H₂O's 5.0 × 10⁻³.
-    expect([air.negligible, absorptionOf(verdicts, "H2O+H2O")?.negligible]).toEqual([false, false]);
     expect(air.changes.flat().map((d, i) => d / (expected.flat()[i] ?? Number.NaN))).toEqual(
       expected.flat().map(() => expect.closeTo(1, 12)),
     );
@@ -573,10 +630,10 @@ describe("the negligible-absorbers bound on a Mars-class body", () => {
   it("finds its CO's pending overtones negligible, its 7–0 band drawn measured", () => {
     const co = absorptionOf(verdicts, "CO");
     // Recorded: 1.4 × 10⁻⁸. Hot CO is not in force at 214 K, under its table's 296 K.
-    expect([co?.negligible, co?.entries.map((e) => [e.origin, e.part, e.k])]).toEqual([
-      true,
-      [["pending", "overtones", 100]],
-    ]);
+    expect([
+      co?.negligible,
+      co?.entries.map((e) => [e.origin, e.origin === "pending" ? e.part : undefined, e.k]),
+    ]).toEqual([true, [["pending", "overtones", 100]]]);
     expect(co?.largestChange).toBeLessThan(1e-6);
   });
 
@@ -653,7 +710,15 @@ describe("the negligible-absorbers bound on a Venus-class body", () => {
   it("finds its CO₂ not negligible: held at 500 K past 10 MPa, hot CO₂ pending in R08.T4.f", () => {
     const co2 = absorptionOf(negligibleAbsorbers(venusBody()), "CO2");
     // Recorded: 0.58. The drawn table and the hot list alternate in one share.
-    expect([co2?.negligible, co2?.entries.map((e) => [e.origin, e.task, e.share, e.k])]).toEqual([
+    expect([
+      co2?.negligible,
+      co2?.entries.map((e) => [
+        e.origin,
+        e.origin === "pending" ? e.task : undefined,
+        e.share,
+        e.k,
+      ]),
+    ]).toEqual([
       false,
       [
         ["drawn", undefined, "lines", 100],
@@ -710,24 +775,33 @@ describe("the negligible-absorbers bound on a hot giant's K wing", () => {
 });
 
 describe("CO₂'s held χ and fixed-g mix on a snowball-class body", () => {
-  it("takes no label from the mix at an even share at 3 bar, and does at a column past a cell's u_mix", () => {
-    const mix = fixedGMixOf(negligibleAbsorbers(snowballBody(3e5)), "CO2");
-    // The whole column raised, so that the share stays even: 150 bar, past the tables' 10 MPa,
-    // where §16 places the first mix failures a body can reach.
-    const raised = fixedGMixOf(negligibleAbsorbers(snowballBody(1.5e7)), "CO2");
-    // Recorded: w 0.570; the largest u_max ÷ u_mix 0.027 at 3 bar and 1.37 at 150 bar.
-    expect([mix?.negligible, raised?.negligible]).toEqual([true, false]);
-    expect([mix?.selfShare, raised?.selfShare]).toEqual([
-      expect.closeTo(0.57, 2),
-      expect.closeTo(0.57, 2),
-    ]);
+  it("takes no label from the mix at an even share at 3 bar", () => {
+    // Recorded: the largest u_max ÷ u_mix 0.027 (715 nm).
+    expect(fixedGMixOf(negligibleAbsorbers(snowballBody(3e5)), "CO2")?.negligible).toBe(true);
   });
 
-  it("takes no label from CO₂–N₂'s held χ at 3 bar, and does at 10 bar, past 10⁻³", () => {
-    const few = heldChiOf(negligibleAbsorbers(snowballBody(3e5)), "CO2");
-    const ten = heldChiOf(negligibleAbsorbers(snowballBody(1e6)), "CO2");
-    // Recorded: 4.5 × 10⁻⁴ (f₃ 0.065) and 4.9 × 10⁻³ (f₃ 0.21).
-    expect([few?.negligible, ten?.negligible]).toEqual([true, false]);
-    expect(ten?.largestChange).toBeGreaterThan(NEGLIGIBLE_CHANGE);
+  it("labels a column raised past a cell's u_mix at the same share, at 150 bar", () => {
+    // The whole column raised, so that the share stays even: past the tables' 10 MPa, where §16
+    // places the first mix failures a body can reach. Recorded: the largest u_max ÷ u_mix 1.37.
+    expect(fixedGMixOf(negligibleAbsorbers(snowballBody(1.5e7)), "CO2")?.negligible).toBe(false);
+  });
+
+  it("reads the mix at the body's self share, w 0.57 at an even share, whatever the column", () => {
+    const shares = [3e5, 1.5e7].map(
+      (pa) => fixedGMixOf(negligibleAbsorbers(snowballBody(pa)), "CO2")?.selfShare,
+    );
+    expect(shares).toEqual([expect.closeTo(0.57, 2), expect.closeTo(0.57, 2)]);
+  });
+
+  it("takes no label from CO₂–N₂'s held χ at 3 bar", () => {
+    // Recorded: 4.5 × 10⁻⁴ (f₃ 0.065).
+    expect(heldChiOf(negligibleAbsorbers(snowballBody(3e5)), "CO2")?.negligible).toBe(true);
+  });
+
+  it("labels CO₂–N₂'s held χ at 10 bar, past 10⁻³", () => {
+    // Recorded: 4.9 × 10⁻³ (f₃ 0.21).
+    expect(heldChiOf(negligibleAbsorbers(snowballBody(1e6)), "CO2")?.largestChange).toBeGreaterThan(
+      NEGLIGIBLE_CHANGE,
+    );
   });
 });

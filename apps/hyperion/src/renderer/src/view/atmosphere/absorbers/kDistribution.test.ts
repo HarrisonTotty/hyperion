@@ -130,6 +130,29 @@ describe("a k-distribution table", () => {
   });
 });
 
+describe("a table's near-wing shares (R08.T10.a's held-χ bound)", () => {
+  const nodes = TEMPERATURES_K.length * PRESSURES_PA.length;
+
+  it("are carried one a node where the sidecar records them", () => {
+    const shares = Array.from({ length: nodes }, (_, k) => k / 100);
+    expect(Array.from(toyTable({ nearWingShare: shares }).nearWingShare ?? [])).toEqual(shares);
+  });
+
+  it("are absent where the sidecar records none", () => {
+    expect(toyTable().nearWingShare).toBeUndefined();
+  });
+
+  it("refuse a record that is not one a node", () => {
+    const shares = Array.from({ length: nodes - 1 }, () => 0.01);
+    expect(() => toyTable({ nearWingShare: shares })).toThrow("near-wing shares");
+  });
+
+  it("refuse a share past 1", () => {
+    const shares = Array.from({ length: nodes }, (_, k) => (k === 7 ? 1.2 : 0.01));
+    expect(() => toyTable({ nearWingShare: shares })).toThrow("near-wing shares");
+  });
+});
+
 describe("a k-distribution between its nodes", () => {
   const table = toyTable();
 

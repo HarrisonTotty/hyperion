@@ -580,11 +580,12 @@ export const VOLATILE_ICE_KEYS: ReadonlySet<string> = new Set([
 export const ATOMIC_SOLID_KEYS: ReadonlySet<string> = new Set(["Ar", "Kr", "Xe"]);
 
 /**
- * A material's name with its phase word, as a stand-in's note writes it (`signoff-12.md`, item
- * 39(c)): `SO2 ice` for a volatile molecular solid, `solid Kr` for an atomic one and `solid Fe`
- * for a refractory, `liquid SO2` for a liquid, and the name alone with no phase.
+ * A material's name with its phase word, as every atmosphere note writes it (`signoff-12.md`, item
+ * 39(c); the guide, Voice and nomenclature): `SO2 ice` for a volatile molecular solid, `solid Kr`
+ * for an atomic one and `solid Fe` for a refractory, `liquid SO2` for a liquid, and the name alone
+ * with no phase. The stand-in notes here and `assemble.ts`'s particle notes take it.
  */
-function phasedName(material: string, phase: MaterialPhase | undefined): string {
+export function phasedName(material: string, phase: MaterialPhase | undefined): string {
   const name = substanceName(material);
   if (phase === undefined) {
     return name;

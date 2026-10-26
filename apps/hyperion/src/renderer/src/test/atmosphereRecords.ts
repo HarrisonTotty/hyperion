@@ -24,6 +24,7 @@ import { toBodyDetail } from "../lib/system/bodiesWire";
 import type { BodyDetail } from "../lib/system/model";
 import type { Rgb } from "../view/photometry/toneCurve";
 import type { BodyAtmosphereInput, BodyLight } from "../view/atmosphere/atmosphereInput";
+import { MARS_AIR } from "../view/atmosphere/channels";
 import { EARTH_OZONE_PROFILE, OZONE_COLUMN_DU, DOBSON_UNIT_PER_M2 } from "../view/atmosphere/earth";
 import { THE_SUN } from "./lineRanges";
 import { earthDetail, FIXTURE_SYSTEM, titanDetail } from "./planetaryFixture";
@@ -402,14 +403,21 @@ function sixProfilesAnswer(): DetailAnswer {
  * molecular term, and the mode of least depth, under any kept profile's, is left out.
  */
 export function pastTheCapDetail(): BodyDetail {
+  return detailOf(pastTheCapAnswer([]));
+}
+
+/**
+ * {@link pastTheCapDetail} with free electrons too, 10¹⁰ m⁻² through the column: Thomson's σ_T U,
+ * 6.7 × 10⁻¹⁹, the least of its terms with the thinnest haze's, so that both are left out.
+ */
+export function pastTheCapWithElectronsDetail(): BodyDetail {
+  return detailOf(pastTheCapAnswer([layerAbsorber("e-", 1e10, 101_325, 1e-3)]));
+}
+
+/** {@link pastTheCapDetail}'s answer, with these absorbers beside the six profiles'. */
+function pastTheCapAnswer(more: ReadonlyArray<AbsorberDto>): DetailAnswer {
   const answer = sixProfilesAnswer();
-  const surface = answer.record.surface;
-  const inventory =
-    surface.state === "ok" &&
-    surface.value.aerosols !== undefined &&
-    surface.value.aerosols !== null
-      ? surface.value.aerosols
-      : EMPTY_INVENTORY;
+  const inventory = sixProfilesInventory();
   const acid = (tau550: number, basePa: number, topPa: number): AerosolModeDto =>
     gammaMode({
       material: "H2SO4",
@@ -419,10 +427,61 @@ export function pastTheCapDetail(): BodyDetail {
       basePa,
       topPa,
     });
+  return withInventory(answer, {
+    ...inventory,
+    absorbers: [...inventory.absorbers, ...more],
+    modes: [acid(0.5, 30_000, 10_000), acid(0.3, 60_000, 30_000), acid(1e-12, 90_000, 60_000)],
+  });
+}
+
+/**
+ * The generated Earth with free electrons, 10²⁵ m⁻² through the column (σ_T U = 6.7 × 10⁻⁴): a
+ * Thomson term on e⁻'s layer (R08.T4.c).
+ */
+export function electronsDetail(): BodyDetail {
   return detailOf(
-    withInventory(answer, {
-      ...inventory,
-      modes: [acid(0.5, 30_000, 10_000), acid(0.3, 60_000, 30_000), acid(1e-12, 90_000, 60_000)],
+    withInventory(earthDetail(), {
+      ...EMPTY_INVENTORY,
+      absorbers: [layerAbsorber("e-", 1e25, 101_325, 1e-3)],
+    }),
+  );
+}
+
+/**
+ * Mars's air number column at the fixture's figures, molecules m⁻²: p_s ÷ (μ m_u g), 636 Pa at
+ * 43.49 g mol⁻¹ and 3.71 m s⁻² (`channels.ts`'s `MARS_FIT_COLUMN`).
+ */
+const MARS_AIR_COLUMN_PER_M2 = 636 / ((43.49 / 6.022_140_76e26) * 3.71);
+
+/**
+ * A Mars-like record: NASA's Mars Fact Sheet's figures as `channels.ts`'s `MARS_FIT_COLUMN` takes
+ * them (636 Pa, about 214 K, 43.49 g mol⁻¹, 3.71 m s⁻², 3,389.5 km) and 6.4171 × 10²³ kg, its air
+ * `channels.ts`'s {@link MARS_AIR}, no rotation or figure section and an empty inventory; its CO
+ * as a record absorber at `coColumnFactor` times the gas's column where the factor is not 1, so
+ * that its pending overtones pass their bound (the bound's own test: a million times Mars's CO).
+ */
+export function marsLikeDetail(coColumnFactor = 1): BodyDetail {
+  const body = withBody(earthDetail(), {
+    radiusM: 3_389_500,
+    gravityMS2: 3.71,
+    massKg: 6.4171e23,
+    bulk: earthBulk(),
+  });
+  const air = withAir(body, {
+    state: "temperate",
+    temperatureK: 214,
+    pressurePa: 636,
+    gases: MARS_AIR.map(({ species, moleFraction }) => [species, moleFraction] as const),
+    meanMolarMassGPerMol: 43.49,
+  });
+  const coFraction = MARS_AIR.find((g) => g.species === "CO")?.moleFraction ?? Number.NaN;
+  return detailOf(
+    withInventory(air, {
+      ...EMPTY_INVENTORY,
+      absorbers:
+        coColumnFactor === 1
+          ? []
+          : [layerAbsorber("CO", coColumnFactor * coFraction * MARS_AIR_COLUMN_PER_M2, 636, 1e-4)],
     }),
   );
 }

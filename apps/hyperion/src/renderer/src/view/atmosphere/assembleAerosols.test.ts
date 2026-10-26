@@ -56,36 +56,32 @@ function aerosolTerms(result: AssembledMedium): ReadonlyArray<string> {
 describe("a record with a key this client does not know in each keyed member", () => {
   const result = assembleMedium(recordInput(unknownKeysDetail()));
 
-  it("draws its air and its haze without a fault", () => {
-    expect([result.medium !== undefined, aerosolTerms(result)]).toEqual([
-      true,
-      ["aerosol:newhaze"],
-    ]);
+  it("draws its haze without a fault", () => {
+    expect(aerosolTerms(result)).toEqual(["aerosol:newhaze"]);
   });
 
-  it("carries APPROXIMATE for the gas, the absorber and the material it does not know", () => {
-    expect([
-      result.labels.includes("atmosphereApproximate"),
-      result.reasons.filter(
-        (reason) =>
-          reason.includes("not known to this console") || reason.includes("no index file"),
-      ),
-    ]).toEqual([
-      true,
-      [
-        "Xq: not known to this console, not drawn",
-        "Zq2: not known to this console, not drawn",
-        "no index file for unlisted material: the generic stand-in, a non-absorbing sphere of real index 1.5, a stated convention",
-      ],
-    ]);
+  it("carries APPROXIMATE", () => {
+    expect(result.labels).toContain("atmosphereApproximate");
+  });
+
+  it.each([
+    "Xq: not known to this console, not drawn",
+    "Zq2: not known to this console, not drawn",
+    "no index file for unlisted material: the generic stand-in, a non-absorbing sphere of real index 1.5, a stated convention",
+  ])("says why: %s", (reason) => {
+    expect(result.reasons).toContain(reason);
   });
 });
 
 describe("a tenuous Pluto-like record", () => {
+  const pluto = assembleMedium(recordInput(plutoHazeDetail()));
+
   it("draws its tholin haze in its thin air", () => {
-    expect(aerosolTerms(assembleMedium(recordInput(plutoHazeDetail())))).toEqual([
-      "aerosol:tholin",
-    ]);
+    expect(aerosolTerms(pluto)).toEqual(["aerosol:tholin"]);
+  });
+
+  it("holds its CH4's cross-sections at their coldest, 100 K, for its 40 K, and says so", () => {
+    expect(pluto.reasons).toEqual(["CH4: its absorption held at the nearest temperature on file"]);
   });
 });
 
@@ -165,17 +161,19 @@ function waterDeck(vapourAbove: number): AerosolInventoryDto {
   };
 }
 
+/** An ozone layer wholly below an Earth's datum, 3,000 to 2,000 hPa: the ground hides it. */
+const BELOW_GROUND = layerAbsorber("O3", 1e22, 300_000, 200_000);
+
+/** An ozone layer from 10 hPa to 10⁻⁴ Pa, past the column's top, about 0.01 Pa. */
+const STRADDLING = layerAbsorber("O3", 1e22, 1_000, 1e-4);
+
 /** Liquid O2's reason, as its file states it (signoff-12.md, item 38(c)). */
 const O2_REASON =
   "liquid O2: its absorption is the gas's O2–O2 pair absorption at 203 K carried to the liquid's density; no measurement of the liquid's is read";
 
 describe("liquid O₂'s colour (signoff-12.md, item 38(c))", () => {
-  it("raises APPROXIMATE with its own reason in a deck of τ 1", () => {
-    const result = coldAirWith(modes(liquidDeck("O2")));
-    expect([
-      result.labels.includes("atmosphereApproximate"),
-      result.reasons.includes(O2_REASON),
-    ]).toEqual([true, true]);
+  it("gives APPROXIMATE its own reason in a deck of τ 1", () => {
+    expect(coldAirWith(modes(liquidDeck("O2"))).reasons).toContain(O2_REASON);
   });
 
   it("is liquid O2's alone: a liquid N2 deck gives no reason of its material", () => {
@@ -257,30 +255,28 @@ describe("the inventory's layers against the column", () => {
     expect(result.reasons).toContain("O3: its layer lies above the air drawn, not drawn");
   });
 
-  it("drops an absorber layer wholly below the datum, which the ground hides, with no reason", () => {
-    const result = earthWith({
-      ...EMPTY_INVENTORY,
-      absorbers: [layerAbsorber("O3", 1e22, 300_000, 200_000)],
-    });
-    expect([
-      result.medium?.terms.some((term) => term.name.includes("O3")),
-      result.reasons.filter((reason) => reason.startsWith("O3")),
-    ]).toEqual([false, []]);
+  it("drops an absorber layer wholly below the datum, which the ground hides", () => {
+    const result = earthWith({ ...EMPTY_INVENTORY, absorbers: [BELOW_GROUND] });
+    expect(result.medium?.terms.some((term) => term.name.includes("O3"))).toBe(false);
+  });
+
+  it("gives an absorber layer wholly below the datum no reason", () => {
+    const result = earthWith({ ...EMPTY_INVENTORY, absorbers: [BELOW_GROUND] });
+    expect(result.reasons.filter((reason) => reason.startsWith("O3"))).toEqual([]);
   });
 
   it("lays a layer that straddles the column's top wholly inside it", () => {
-    const result = earthWith({
-      ...EMPTY_INVENTORY,
-      absorbers: [layerAbsorber("O3", 1e22, 1_000, 1e-4)],
-    });
+    const result = earthWith({ ...EMPTY_INVENTORY, absorbers: [STRADDLING] });
     const ozone = result.drawn?.absorbers.find((spec) => spec.name === "absorber:O3");
-    expect([
-      ozone?.kind === "column" ? ozone.columnPerM2 : undefined,
-      result.reasons.filter((reason) => reason.startsWith("O3")),
-    ]).toEqual([1e22, []]);
+    expect(ozone?.kind === "column" ? ozone.columnPerM2 : undefined).toBe(1e22);
   });
 
-  it("drops a mode wholly above the column's top and says so", () => {
+  it("gives a layer that straddles the column's top no reason", () => {
+    const result = earthWith({ ...EMPTY_INVENTORY, absorbers: [STRADDLING] });
+    expect(result.reasons.filter((reason) => reason.startsWith("O3"))).toEqual([]);
+  });
+
+  it("drops a mode wholly above the column's top and says so, an ice's by its phase word", () => {
     const result = earthWith(
       modes(
         gammaMode({
@@ -293,7 +289,7 @@ describe("the inventory's layers against the column", () => {
         }),
       ),
     );
-    expect(result.reasons).toContain("solid H2O particles lie above the air drawn, not drawn");
+    expect(result.reasons).toContain("H2O ice particles lie above the air drawn, not drawn");
   });
 });
 
@@ -305,7 +301,7 @@ describe("a deck's vapour", () => {
 
   it("says its vapour above the deck is not drawn, where there is some", () => {
     expect(earthWith(waterDeck(1e-5)).reasons).toContain(
-      "H2O: its vapour above its cloud deck is not drawn",
+      "H2O: its vapour above its cloud deck, not drawn",
     );
   });
 
@@ -326,17 +322,24 @@ describe("a mode's size quadrature (R08.T5.f)", () => {
     550,
   );
 
+  const unconverged = {
+    ...converged,
+    sizeConvergence: { converged: false, nodes: 1_048_576, lastChange: 3e-4 },
+  };
+
   it("gives a reason where it did not converge at a wavelength drawn", () => {
-    const unconverged = {
-      ...converged,
-      sizeConvergence: { converged: false, nodes: 1_048_576, lastChange: 3e-4 },
-    };
-    expect(sizeConvergenceReasons("H2O", [converged, unconverged])).toEqual([
-      "H2O particles: their sizes summed short of convergence at 550 nm",
+    expect(sizeConvergenceReasons("H2O", "liquid", [converged, unconverged])).toEqual([
+      "liquid H2O particles: their sizes summed short of convergence at 550 nm",
+    ]);
+  });
+
+  it("names an ice cloud's particles apart from a water cloud's", () => {
+    expect(sizeConvergenceReasons("H2O", "solid", [unconverged])).toEqual([
+      "H2O ice particles: their sizes summed short of convergence at 550 nm",
     ]);
   });
 
   it("gives none where it converged", () => {
-    expect(sizeConvergenceReasons("H2O", [converged])).toEqual([]);
+    expect(sizeConvergenceReasons("H2O", "liquid", [converged])).toEqual([]);
   });
 });

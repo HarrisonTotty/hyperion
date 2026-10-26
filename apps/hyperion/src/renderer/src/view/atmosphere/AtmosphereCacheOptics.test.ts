@@ -4,7 +4,7 @@
  * its workers (`opticsPool.ts`; `decision-r08-t4d-kdist-chain.md` §15, ruling 3). The workers here
  * are the real job logic run in process, on toy line tables, or scripted for their failures.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import {
   earthBody,
@@ -13,7 +13,7 @@ import {
 } from "../../test/atmosphereFixtures";
 import { detailOf, recordInput, SUN_LIGHT } from "../../test/atmosphereRecords";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
-import { toyPart, toySidecar } from "../../test/kDistributionFixtures";
+import { microtasks, NOT_MODELLED, toyLoader, toyTable } from "../../test/opticsFakes";
 import {
   earthDetail,
   earthDetailOfAnOlderServer,
@@ -26,10 +26,9 @@ import {
   absorberCurvesBySun,
   type AbsorberSpec,
 } from "./absorbers";
-import { type KDistributionTable, readKDistribution } from "./absorbers/kDistribution";
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput, BodyLight } from "./atmosphereInput";
-import { OpticsJobs, type OpticsJobsDeps } from "./opticsJobs";
+import { OpticsJobs } from "./opticsJobs";
 import { type OpticsRequest, transferablesOf } from "./opticsMessages";
 import {
   defaultOpticsWorkers,
@@ -37,44 +36,6 @@ import {
   type OpticsBuildOutcome,
   OpticsWorkerPool,
 } from "./opticsPool";
-
-/** The toy's grid: the stored pressures' first span, 4 a decade from 10 Pa to 10 MPa. */
-const PRESSURES_PA = Array.from({ length: 25 }, (_, k) => 10 * 10 ** (k / 4));
-const TEMPERATURES_K = [150, 200, 250, 300, 350];
-
-/** A toy σ at a node and g-point, m², strong enough to absorb in an Earth's column. */
-function toySigma(t: number, p: number, g: number): number {
-  return (g === 0 ? 2e-30 : 6e-27) * (t / 250) * (g === 0 ? 1 : 1 / Math.sqrt(1 + p / 1e3));
-}
-
-/** A toy line table for `species`: cells 690–694 nm, each a strong and a weak g-point. */
-function toyTable(species: string): KDistributionTable {
-  const sigmasM2 = TEMPERATURES_K.flatMap((t) =>
-    PRESSURES_PA.flatMap((p) => [toySigma(t, p, 0), toySigma(t, p, 1)]),
-  );
-  const cells = [690, 691, 692, 693, 694].map((nm) => ({ nm, weights: [0.8, 0.2], sigmasM2 }));
-  const sidecar = toySidecar(TEMPERATURES_K, PRESSURES_PA, cells.length, {
-    species,
-    measuredRangeK: [150, 296],
-    broadening: { self: 1.5 },
-  });
-  const part = toyPart(cells, {
-    variants: 1,
-    temperatures: TEMPERATURES_K.length,
-    pressures: PRESSURES_PA.length,
-  });
-  return readKDistribution(sidecar, [part], `toy ${species}`);
-}
-
-/** A worker's k-table reader of toy tables, counting each species it is asked for. */
-function toyLoader(asked: string[] = []): OpticsJobsDeps {
-  return {
-    loadKDistributions: async (species) => {
-      asked.push(...species);
-      return Promise.resolve(species.map((key) => toyTable(key)));
-    },
-  };
-}
 
 /** A second star, cooler than the Sun. */
 const RED_DWARF_LIGHT: BodyLight = {
@@ -109,7 +70,10 @@ function builtOf(outcome: OpticsBuildOutcome): AssembledMedium {
   return outcome.assembled;
 }
 
-/** A pool of `count` in-process workers on toy tables, logging every request posted. */
+/**
+ * A pool of `count` in-process workers on toy tables, logging every request posted, terminated
+ * when the test ends however it ends.
+ */
 function inProcessPool(count: number): {
   readonly pool: OpticsWorkerPool;
   readonly log: OpticsRequest[];
@@ -129,10 +93,16 @@ function inProcessPool(count: number): {
       return worker;
     },
   });
+  onTestFinished(() => {
+    pool.terminate();
+  });
   return { pool, log, workers, asked };
 }
 
-/** A pool of `count` scripted workers, the replacements among them. */
+/**
+ * A pool of `count` scripted workers, the replacements among them, terminated when the test ends
+ * however it ends.
+ */
 function scriptedPool(count: number): {
   readonly pool: OpticsWorkerPool;
   readonly workers: ScriptedOpticsWorker[];
@@ -145,6 +115,9 @@ function scriptedPool(count: number): {
       workers.push(worker);
       return worker;
     },
+  });
+  onTestFinished(() => {
+    pool.terminate();
   });
   return { pool, workers };
 }
@@ -168,11 +141,6 @@ function lastPosted(worker: ScriptedOpticsWorker): OpticsRequest {
     throw new Error("the worker was posted nothing");
   }
   return request;
-}
-
-/** Resolves after `hops` turns of the microtask queue. */
-async function microtasks(hops: number): Promise<void> {
-  return hops === 0 ? Promise.resolve() : Promise.resolve().then(async () => microtasks(hops - 1));
 }
 
 const KEPT_UNSET: BodyAtmosphereInput = { kind: "kept", atmosphere: { kind: "unset" } };
@@ -298,7 +266,6 @@ describe("the optics-worker pool", () => {
       const { pool } = inProcessPool(count);
       const lights = [SUN_LIGHT, RED_DWARF_LIGHT];
       const assembled = builtOf(await pool.build(earthInput(lights)).outcome);
-      pool.terminate();
       if (assembled.drawn === undefined) {
         throw new Error("the Earth drew no medium");
       }
@@ -323,7 +290,6 @@ describe("the optics-worker pool", () => {
   it("asks for the brightest light's shares first and alone, then the others', behind the assembly", async () => {
     const { pool, log } = inProcessPool(3);
     builtOf(await pool.build(earthInput([SUN_LIGHT, RED_DWARF_LIGHT])).outcome);
-    pool.terminate();
     const asked = log.map((request) =>
       request.kind === "curve-sums"
         ? `sums ${request.slots.join("+")} ${request.share.index}/${request.share.count}`
@@ -344,7 +310,6 @@ describe("the optics-worker pool", () => {
     const { pool, asked } = inProcessPool(2);
     builtOf(await pool.build(earthInput()).outcome);
     builtOf(await pool.build(earthInput([SUN_LIGHT, RED_DWARF_LIGHT])).outcome);
-    pool.terminate();
     expect([
       asked.some((species) => species.length > 0),
       asked.every((species) => species.length === new Set(species).size),
@@ -355,7 +320,6 @@ describe("the optics-worker pool", () => {
     const { pool, log } = inProcessPool(2);
     const input = recordInput(detailOf(earthDetailOfAnOlderServer()), [SUN_LIGHT, RED_DWARF_LIGHT]);
     const assembled = builtOf(await pool.build(input).outcome);
-    pool.terminate();
     expect([assembled.medium, assembled.labels, log.some((r) => r.kind === "curve-join")]).toEqual([
       undefined,
       ["atmosphereNotYetModelled"],
@@ -386,13 +350,11 @@ describe("the optics-worker pool", () => {
       },
     });
     expect(builtOf(await build.outcome).drawn?.curves).toEqual([[]]);
-    pool.terminate();
   });
 
   it("fails a build whose job throws, with the job's message", async () => {
     const { pool } = inProcessPool(2);
     const outcome = await pool.build(earthInput([SUN_LIGHT, RED_DWARF_LIGHT, SUN_LIGHT])).outcome;
-    pool.terminate();
     expect(outcome).toEqual({ kind: "failed", message: expect.stringMatching(/light/u) });
   });
 
@@ -407,24 +369,32 @@ describe("the optics-worker pool", () => {
       "assemble",
       KEPT_UNSET,
     ]);
-    replacement.reply({ kind: "assembled", id: asked.id, assembled: NO_MEDIUM });
+    replacement.reply({ kind: "assembled", id: asked.id, assembled: NOT_MODELLED });
     expect((await build.outcome).kind).toBe("built");
-    pool.terminate();
   });
 
-  it(`gives a worker's place up after ${MAX_CONSECUTIVE_OPTICS_FAILURES} failures in a row, failing every build once none runs`, async () => {
+  it(`gives a worker's place up after ${MAX_CONSECUTIVE_OPTICS_FAILURES} failures in a row, starting no other`, () => {
+    const { pool, workers } = scriptedPool(1);
+    pool.build(KEPT_UNSET);
+    failEveryTime(workers);
+    expect([workers.length, pool.lostWorkers]).toEqual([MAX_CONSECUTIVE_OPTICS_FAILURES, 1]);
+  });
+
+  it("fails the build under way once no worker runs", async () => {
     const { pool, workers } = scriptedPool(1);
     const build = pool.build(KEPT_UNSET);
-    for (let n = 0; n < MAX_CONSECUTIVE_OPTICS_FAILURES; n += 1) {
-      workerAt(workers, n).fail();
-    }
-    expect([workers.length, pool.lostWorkers, await build.outcome]).toEqual([
-      MAX_CONSECUTIVE_OPTICS_FAILURES,
-      1,
-      { kind: "failed", message: "every optics worker was given up" },
-    ]);
+    failEveryTime(workers);
+    expect(await build.outcome).toEqual({
+      kind: "failed",
+      message: "every optics worker was given up",
+    });
+  });
+
+  it("fails every later build at once when no worker runs", async () => {
+    const { pool, workers } = scriptedPool(1);
+    pool.build(KEPT_UNSET);
+    failEveryTime(workers);
     expect((await pool.build(KEPT_UNSET).outcome).kind).toBe("failed");
-    pool.terminate();
   });
 
   it("asks a light set's shares again when the join's worker fails with their sums", async () => {
@@ -453,7 +423,6 @@ describe("the optics-worker pool", () => {
     await microtasks(10);
     second.reply({ kind: "curves", id: lastPosted(second).id, curves: [[curve]] });
     expect(builtOf(await build.outcome).drawn?.curves).toEqual([[curve]]);
-    pool.terminate();
   });
 
   it("drops a cancelled build's jobs not yet sent", async () => {
@@ -462,7 +431,43 @@ describe("the optics-worker pool", () => {
     const second = pool.build(KEPT_UNSET);
     second.cancel();
     expect([pool.queuedCount, await second.outcome]).toEqual([0, { kind: "cancelled" }]);
-    pool.terminate();
+  });
+
+  describe("a build cancelled with its assembly already sent", () => {
+    /** One worker, a build cancelled during its assembly and a second queued behind it. */
+    function cancelledDuringAssembly(): {
+      readonly worker: ScriptedOpticsWorker;
+      readonly cancelled: Promise<OpticsBuildOutcome>;
+      readonly next: Promise<OpticsBuildOutcome>;
+      readonly late: OpticsRequest;
+    } {
+      const { pool, workers } = scriptedPool(1);
+      const first = pool.build(KEPT_UNSET);
+      const second = pool.build(KEPT_UNSET);
+      const worker = workerAt(workers, 0);
+      const late = lastPosted(worker);
+      first.cancel();
+      return { worker, cancelled: first.outcome, next: second.outcome, late };
+    }
+
+    it("settles cancelled at once", async () => {
+      const { cancelled } = cancelledDuringAssembly();
+      expect(await cancelled).toEqual({ kind: "cancelled" });
+    });
+
+    it("holds its worker until the late reply, then sends it the next queued job", () => {
+      const { worker, late } = cancelledDuringAssembly();
+      const before = worker.received.length;
+      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED });
+      expect([before, worker.received.length, lastPosted(worker).id]).toEqual([1, 2, late.id + 1]);
+    });
+
+    it("gives the late reply to no build, the next waiting for its own", async () => {
+      const { worker, next, late } = cancelledDuringAssembly();
+      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED });
+      const settled = await Promise.race([next, microtasks().then(() => "still waiting" as const)]);
+      expect(settled).toBe("still waiting");
+    });
   });
 
   it("terminates every worker, its builds cancelled", async () => {
@@ -478,7 +483,6 @@ describe("the optics-worker pool", () => {
   it("starts no worker before its first build", () => {
     const { pool, workers } = scriptedPool(3);
     expect([pool.workerCount, workers.length]).toEqual([3, 0]);
-    pool.terminate();
   });
 
   it.each([
@@ -493,14 +497,12 @@ describe("the optics-worker pool", () => {
   });
 });
 
-/** An assembly that draws no medium. */
-const NO_MEDIUM: AssembledMedium = {
-  medium: undefined,
-  drawn: undefined,
-  labels: ["atmosphereNotYetModelled"],
-  reasons: [],
-  negligible: [],
-};
+/** Fails the pool's one worker, and each replacement, until its place is given up. */
+function failEveryTime(workers: ReadonlyArray<ScriptedOpticsWorker>): void {
+  for (let n = 0; n < MAX_CONSECUTIVE_OPTICS_FAILURES; n += 1) {
+    workerAt(workers, n).fail();
+  }
+}
 
 /** An assembly of `medium` drawing `spec`, one light. */
 function absorbing(spec: AbsorberSpec, medium: AssembledMedium["medium"]): AssembledMedium {

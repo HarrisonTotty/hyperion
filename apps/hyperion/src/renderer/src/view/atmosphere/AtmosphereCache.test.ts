@@ -7,14 +7,14 @@
  * on in-process workers.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { toBodyDetail } from "../../lib/system/bodiesWire";
 import { earthBody, venusClassMedium } from "../../test/atmosphereFixtures";
 import { type DetailAnswer, SUN_LIGHT, withRecord } from "../../test/atmosphereRecords";
 import { BodyDetailSeam } from "../../test/bodyDetailSeam";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
-import { toyPart, toySidecar } from "../../test/kDistributionFixtures";
+import { ignore, microtasks, NOT_MODELLED, toyLoader } from "../../test/opticsFakes";
 import {
   earthDetail,
   earthDetailOfAnOlderServer,
@@ -28,7 +28,6 @@ import { heldAppearanceOf } from "../appearance/fromWire";
 import type { LitRegime } from "../bodies/regime";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import { ANNUNCIATION_CLEAR_MS, ANNUNCIATION_ONSET_MS } from "../terrain/annunciation";
-import { readKDistribution } from "./absorbers/kDistribution";
 import { type AssembledMedium, assembleMedium } from "./assemble";
 import {
   ATMOSPHERE_CACHE_BYTES,
@@ -81,9 +80,6 @@ interface ScriptedBuild {
   settled: boolean;
   readonly settle: (outcome: OpticsBuildOutcome) => void;
 }
-
-/** Takes nothing: a resolver's stand-in until its promise gives it its own. */
-function ignore(): void {}
 
 /** A builder in the optics pool's place, whose builds the test lands, fails or leaves running. */
 class ScriptedBuilder implements AtmosphereBuilder {
@@ -230,11 +226,6 @@ function answerFor(
   return withRecord(base, (record) => ({ ...record, id: body }));
 }
 
-/** Resolves after `hops` turns of the microtask queue. */
-async function microtasks(hops = 20): Promise<void> {
-  return hops === 0 ? Promise.resolve() : Promise.resolve().then(async () => microtasks(hops - 1));
-}
-
 /** Answers `body`'s latest request and lets the answer be taken. */
 async function answer(h: Harness, body: BodyIdHex, answered = answerFor(body)): Promise<void> {
   h.seam.answer(h.seam.latestFor(body).id, answered);
@@ -246,15 +237,6 @@ async function land(h: Harness, body: BodyIdHex, outcome: OpticsBuildOutcome): P
   h.builder.latestOf(body).settle(outcome);
   await microtasks();
 }
-
-/** An assembly that draws no medium, as a generated body's is until P14.T24.a. */
-const NOT_MODELLED: AssembledMedium = {
-  medium: undefined,
-  drawn: undefined,
-  labels: ["atmosphereNotYetModelled"],
-  reasons: [],
-  negligible: [],
-};
 
 /** R05's Earth as an assembly, one light and no absorber. */
 function earthAssembly(labels: ReadonlyArray<AtmosphereLabel> = []): AssembledMedium {
@@ -340,20 +322,35 @@ describe("the atmosphere cache's requests", () => {
     expect(h.seam.askedFor(A)).toBe(2);
   });
 
-  it("waits while the link is down and asks again once it is back up after a lost link", async () => {
-    const h = harness();
-    note(h, [lit(A)]);
-    h.seam.loseLink();
-    await microtasks();
-    note(h, [lit(A)], 0, sceneOf({ linkUp: false }));
-    const whileDown = h.seam.askedFor(A);
-    note(h, [lit(A)]);
-    note(h, [lit(A)]);
-    expect([whileDown, h.seam.askedFor(A), h.cache.labelsOf(A)]).toEqual([
-      1,
-      2,
-      ["atmospherePending"],
-    ]);
+  describe("after a lost link", () => {
+    /** A cache whose body's request was lost with the link. */
+    async function lostLink(): Promise<Harness> {
+      const h = harness();
+      note(h, [lit(A)]);
+      h.seam.loseLink();
+      await microtasks();
+      return h;
+    }
+
+    it("sends nothing while the link is down", async () => {
+      const h = await lostLink();
+      note(h, [lit(A)], 0, sceneOf({ linkUp: false }));
+      expect(h.seam.askedFor(A)).toBe(1);
+    });
+
+    it("asks again once when the link is back up", async () => {
+      const h = await lostLink();
+      note(h, [lit(A)], 0, sceneOf({ linkUp: false }));
+      note(h, [lit(A)]);
+      note(h, [lit(A)]);
+      expect(h.seam.askedFor(A)).toBe(2);
+    });
+
+    it("keeps the body pending while it waits", async () => {
+      const h = await lostLink();
+      note(h, [lit(A)], 0, sceneOf({ linkUp: false }));
+      expect(h.cache.labelsOf(A)).toEqual(["atmospherePending"]);
+    });
   });
 
   it("rebuilds from the reply held, with no request, when the body's lights change", async () => {
@@ -735,23 +732,57 @@ describe("a build that fails", () => {
     ]).toEqual([null, Array.from({ length: 3 }, () => [[], { kind: "failed" }, false]), 1]);
   });
 
-  it("is built again at the body's next trigger, a build that lands clearing it", async () => {
+  describe("at the body's next trigger", () => {
+    /** A cache whose body's build failed, asked again at a new arrival. */
+    async function failedThenAskedAgain(): Promise<{
+      readonly h: Harness;
+      readonly arrived: AtmosphereScene;
+    }> {
+      const h = harness();
+      vi.spyOn(console, "error").mockImplementation(ignore);
+      note(h, [lit(A)]);
+      await answer(h, A);
+      await land(h, A, { kind: "failed", message: "a bug" });
+      const arrived = sceneOf({ arrival: {} });
+      note(h, [lit(A)], 0, arrived);
+      return { h, arrived };
+    }
+
+    it("asks again, its fault standing meanwhile", async () => {
+      const { h } = await failedThenAskedAgain();
+      expect([h.seam.askedFor(A), h.cache.problemOf(A)]).toEqual([2, { kind: "failed" }]);
+    });
+
+    it("clears the fault once a retried build lands", async () => {
+      const { h, arrived } = await failedThenAskedAgain();
+      await answer(h, A);
+      await land(h, A, { kind: "built", assembled: NOT_MODELLED });
+      note(h, [lit(A)], 0, arrived);
+      expect([h.cache.problemOf(A), h.cache.labelsOf(A)]).toEqual([
+        null,
+        ["atmosphereNotYetModelled"],
+      ]);
+    });
+  });
+
+  it("holds the body failed, not pending, where taking its build throws", async () => {
     const h = harness();
-    vi.spyOn(console, "error").mockImplementation(ignore);
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
     note(h, [lit(A)]);
     await answer(h, A);
-    await land(h, A, { kind: "failed", message: "a bug" });
-    const arrived = sceneOf({ arrival: {} });
-    note(h, [lit(A)], 0, arrived);
-    const during = h.cache.problemOf(A);
-    await answer(h, A);
-    await land(h, A, { kind: "built", assembled: NOT_MODELLED });
-    note(h, [lit(A)], 0, arrived);
-    expect([during, h.cache.problemOf(A), h.cache.labelsOf(A), h.seam.askedFor(A)]).toEqual([
+    // An assembly whose labels cannot be read: a bug in taking the build, not in making it.
+    const unreadable: AssembledMedium = {
+      ...NOT_MODELLED,
+      get labels(): ReadonlyArray<AtmosphereLabel> {
+        throw new Error("a bug in taking the build");
+      },
+    };
+    await land(h, A, { kind: "built", assembled: unreadable });
+    const report = note(h, [lit(A)]);
+    expect([report.problems.get(A), report.pending, errors.mock.calls.length]).toEqual([
       { kind: "failed" },
-      null,
-      ["atmosphereNotYetModelled"],
-      2,
+      false,
+      1,
     ]);
   });
 
@@ -833,6 +864,7 @@ describe("the cache's size", () => {
   it("makes an evicted body's tables again when it is wanted, sending no request", async () => {
     const h = harness(ROW_BYTES);
     for (const id of BODIES) {
+      // One body after another, so that the first are evicted, as the size test draws them.
       // oxlint-disable-next-line no-await-in-loop
       await drawn(h, [lit(id)]);
     }
@@ -931,28 +963,44 @@ function keptEarth(): BuiltAtmosphere {
 }
 
 describe("the cache's disposal", () => {
-  it("cancels its requests and waits, terminates its builder and disposes every table", async () => {
+  /**
+   * A cache disposed with a body drawn, one asked and unanswered, and one waiting after a busy
+   * answer.
+   */
+  async function disposed(): Promise<Harness> {
     const h = harness();
     await drawn(h, [lit(A)]);
     note(h, [lit(A), lit(bodyId(1)), lit(bodyId(2))]);
     h.seam.refuse(h.seam.latestFor(bodyId(2)).id, "too_many_requests", "busy");
     await microtasks();
     h.cache.dispose();
+    return h;
+  }
+
+  it("cancels the requests in flight", async () => {
+    const h = await disposed();
+    expect(h.seam.cancelled).toEqual([h.seam.latestFor(bodyId(1)).id]);
+  });
+
+  it("stops the busy waits", async () => {
+    const h = await disposed();
     vi.advanceTimersByTime(60_000);
-    const report = note(h, [lit(A)]);
-    expect([
-      h.seam.cancelled,
-      h.builder.terminated,
-      h.made.every((tables) => tables.disposed),
-      h.seam.asked.length,
-      report,
-    ]).toEqual([
-      [h.seam.latestFor(bodyId(1)).id],
-      true,
-      true,
-      3,
-      { labels: [], problems: new Map(), pending: false },
-    ]);
+    expect(h.seam.asked.length).toBe(3);
+  });
+
+  it("terminates its builder", async () => {
+    const h = await disposed();
+    expect(h.builder.terminated).toBe(true);
+  });
+
+  it("disposes every table", async () => {
+    const h = await disposed();
+    expect([h.made.length > 0, h.made.every((tables) => tables.disposed)]).toEqual([true, true]);
+  });
+
+  it("reports nothing of a later frame", async () => {
+    const h = await disposed();
+    expect(note(h, [lit(A)])).toEqual({ labels: [], problems: new Map(), pending: false });
   });
 });
 
@@ -979,16 +1027,11 @@ describe("the cache and the pool on the render thread", () => {
 
 describe("the cache over the optics pool", () => {
   it("draws a body assembled and curved in the pool's workers, with its tables", async () => {
-    vi.useRealTimers();
     const seam = new BodyDetailSeam();
     const made: FakeTables[] = [];
     const pool = new OpticsWorkerPool({
       workers: 2,
-      createWorker: () =>
-        new InProcessOpticsWorker({
-          loadKDistributions: async (species) =>
-            Promise.resolve(species.map((key) => toyTable(key))),
-        }),
+      createWorker: () => new InProcessOpticsWorker(toyLoader()),
     });
     const cache = new AtmosphereCache<FakeTables>({
       requests: seam.client,
@@ -998,6 +1041,10 @@ describe("the cache over the optics pool", () => {
         made.push(tables);
         return tables;
       },
+    });
+    // The cache owns the pool: disposing it terminates the workers, however the test ends.
+    onTestFinished(() => {
+      cache.dispose();
     });
     const view = cache.openView();
     view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
@@ -1017,29 +1064,5 @@ describe("the cache over the optics pool", () => {
       built?.curves[0]?.length,
       cache.entryOf(A)?.tables === made[0],
     ]).toEqual([true, 1, absorbing, true]);
-    cache.dispose();
   });
 });
-
-/** The toy's grid: the stored pressures' first span, 4 a decade from 10 Pa to 10 MPa. */
-const PRESSURES_PA = Array.from({ length: 25 }, (_, k) => 10 * 10 ** (k / 4));
-const TEMPERATURES_K = [150, 200, 250, 300, 350];
-
-/** A toy line table for `species`: cells 690–692 nm, a strong and a weak g-point each. */
-function toyTable(species: string): ReturnType<typeof readKDistribution> {
-  const sigmasM2 = TEMPERATURES_K.flatMap((t) =>
-    PRESSURES_PA.flatMap((p) => [2e-30 * (t / 250), (6e-27 * (t / 250)) / Math.sqrt(1 + p / 1e3)]),
-  );
-  const cells = [690, 691, 692].map((nm) => ({ nm, weights: [0.8, 0.2], sigmasM2 }));
-  const sidecar = toySidecar(TEMPERATURES_K, PRESSURES_PA, cells.length, {
-    species,
-    measuredRangeK: [150, 296],
-    broadening: { self: 1.5 },
-  });
-  const part = toyPart(cells, {
-    variants: 1,
-    temperatures: TEMPERATURES_K.length,
-    pressures: PRESSURES_PA.length,
-  });
-  return readKDistribution(sidecar, [part], `toy ${species}`);
-}

@@ -34,10 +34,11 @@ export const CLOUD_DECK_SPLIT_OPTICAL_DEPTH = 10;
  *
  * @remarks
  * 1 is the column's optical thickness, the conventional line between thin and thick, not a
- * measured boundary. For Rayleigh air it falls at about 3.5 Earth columns (Earth's is about 0.3
- * at 434 nm), inside the fifty times Earth's density Hillaire tested to (Design note 9) and past
- * the 3 Earth columns at which R08.T4.a measured the thin path's three-channel transmittance 0.0151
- * off in u′v′ at low sun. Absorbers are left out: the analytic term fails in multiple scattering,
+ * measured boundary. For Rayleigh air it falls at about 3.9 Earth columns (Earth's Rayleigh τ is
+ * about 0.26 at 433.6 nm, `earth.ts`'s τ_R(550 nm) = 0.0969 scaled by λ^−4.08), inside the fifty
+ * times Earth's density Hillaire tested to (Design note 9) and past the 3 Earth columns at which
+ * R08.T4.a measured the thin path's three-channel transmittance 0.0151 off in u′v′ at low sun.
+ * Absorbers are left out: the analytic term fails in multiple scattering,
  * which absorption alone makes none of, and their depth is each light's curve of growth, so that
  * counting it would make the label depend on the body's stars.
  */

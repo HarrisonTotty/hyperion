@@ -29,9 +29,12 @@
  *   the inventory's absorbers on its own layer and profile; a gas the registry does not flag
  *   `absorber` reports nothing for want of optics (Ar, Ne, Kr, Xe). A deck's vapour is cut at the
  *   deck's top; its cold-trapped vapour above is not drawn, and says so;
- * - the negligible-absorbers bound (`negligible.ts`): a negligible pending species takes no layer,
- *   no curve and no reason; a negligible species drawn with estimated optics keeps its term and
- *   drops its reason; each is named in {@link AssembledMedium.negligible};
+ * - the negligible-absorbers bound (`negligible.ts`) on the layers as listed: a pending species,
+ *   which has no optics, takes no column and no curve whatever the bound finds, and no reason
+ *   where it is negligible; a negligible species drawn with estimated optics keeps its term and
+ *   drops its reason; each is named in {@link AssembledMedium.negligible}. The layers are never
+ *   filtered by the bound, so that a species with a pending part keeps its measured data and a
+ *   bulk gas its pairs;
  * - Thomson scattering on e⁻'s layer, and an aerosol term for each of the inventory's modes;
  * - at most `MAX_TERMS` (8) terms: the molecular term, then the others of greatest vertical depth
  *   (an absorber by `absorberRankingDepth`, a mode by its own τ(550), Thomson by σ_T U, the earlier
@@ -86,7 +89,12 @@ import {
 import { type BodyAtmosphereInput, type BodyLight, clampedGroundAlbedo } from "./atmosphereInput";
 import { type AtmosphereColumn, columnPressureBar, hydrostaticColumn } from "./column";
 import { ATMOSPHERE_LABELS, type AtmosphereLabel } from "./labels";
-import { type MaterialPhase, materialApproximations, type ShapeClass } from "./materials/materials";
+import {
+  type MaterialPhase,
+  materialApproximations,
+  phasedName,
+  type ShapeClass,
+} from "./materials/materials";
 import {
   type AtmosphereMedium,
   checkTabulatedTops,
@@ -245,40 +253,46 @@ function estimatedReason(key: string): string {
   return `${keyName(key)}: ${possessive(key)} absorption estimated, not measured`;
 }
 
-/** The note of an absorber left out past the stored columns or the term limit. */
+/**
+ * The note of an absorber left out past the stored columns or the term limit, in the guide's words
+ * (its `ATMOSPHERE: APPROXIMATE` row: "the console can draw no more layers of absorbing gas").
+ */
 function leftOutReason(key: string): string {
-  return isPairKey(key)
-    ? `${keyName(key)}: their absorption left out, the console draws no more layers of absorbing gas`
-    : `${keyName(key)}: an absorbing gas left out, the console draws no more layers of absorbing gas`;
+  return `${keyName(key)}: left out, the console can draw no more layers of absorbing gas`;
 }
 
 /** The note of a provisional thick medium (`thick/regime.ts`). */
 const THICK_REASON = "a thick atmosphere drawn by the thin-atmosphere method";
 
 /** The note of Thomson scattering left out past the term limit. */
-const THOMSON_LEFT_OUT_REASON = `${substanceName("e-")} scattering left out: the console draws no more layers`;
+const THOMSON_LEFT_OUT_REASON = `${substanceName("e-")} scattering: left out, the console can draw no more layers`;
 
-/** A mode's particles in a note: their phase and their material's name. */
+/**
+ * A mode's particles in a note: their material's name with its phase word (`materials.ts`'s
+ * `phasedName`), `H2O ice particles`, `liquid H2SO4 particles`, `solid Fe particles`.
+ */
 function particlesName(material: string, phase: MaterialPhase): string {
-  return `${phase} ${substanceName(material)} particles`;
+  return `${phasedName(material, phase)} particles`;
 }
 
 /**
  * The reasons of a mode whose Mie size quadrature did not converge in any channel or wavelength
  * drawn (R08.T5.f's `ModeOptics.sizeConvergence`): `atmosphereApproximate`'s, one a mode, naming
- * the first such wavelength in whole nm.
+ * its particles by their phase (a water cloud's droplets and an ice cloud's crystals read apart)
+ * and the first such wavelength in whole nm.
  *
  * @param optics - The mode's optics at every wavelength it is drawn at.
  */
 export function sizeConvergenceReasons(
   material: string,
+  phase: MaterialPhase,
   optics: ReadonlyArray<ModeOptics>,
 ): ReadonlyArray<string> {
   const unconverged = optics.find((o) => o.sizeConvergence?.converged === false);
   return unconverged === undefined
     ? []
     : [
-        `${substanceName(material)} particles: their sizes summed short of convergence at ${Math.round(unconverged.wavelengthNm)} nm`,
+        `${particlesName(material, phase)}: their sizes summed short of convergence at ${Math.round(unconverged.wavelengthNm)} nm`,
       ];
 }
 
@@ -301,7 +315,7 @@ interface Air {
 }
 
 /** The labels a section's withheld or unmodelled state gives, none for any other. */
-function sectionLabels<T>(section: Section<T>): ReadonlyArray<AtmosphereLabel> {
+function sectionLabels(section: Section<unknown>): ReadonlyArray<AtmosphereLabel> {
   let labels: ReadonlyArray<AtmosphereLabel>;
   switch (section.state) {
     case "not_resolved":
@@ -522,7 +536,7 @@ function layersOf(surface: BodySurface, column: AtmosphereColumn, reasons: Reaso
     if (cut && deck !== undefined && deck.vapourMoleFractionAbove > 0) {
       reasons.add(
         `vapour:${gas.species}`,
-        `${substanceName(gas.species)}: ${possessive(gas.species)} vapour above its cloud deck is not drawn`,
+        `${substanceName(gas.species)}: its vapour above its cloud deck, not drawn`,
         deckTop,
       );
     }
@@ -637,13 +651,6 @@ function allNegligible(verdicts: ReadonlyArray<NegligibleVerdict> | undefined): 
   return verdicts !== undefined && verdicts.length > 0 && verdicts.every((v) => v.negligible);
 }
 
-/** Whether a key's absorption is bounded by pending entries alone: undrawn data still to be built. */
-function pendingOnly(verdicts: ReadonlyArray<NegligibleVerdict>): boolean {
-  return verdicts.some(
-    (v) => v.test === "absorption" && v.entries.every((entry) => entry.origin === "pending"),
-  );
-}
-
 /** The absorber specs' approximations and the bound's verdicts as reasons. */
 function absorberReasons(
   approximations: ReadonlyArray<AbsorberApproximation>,
@@ -665,7 +672,11 @@ function absorberReasons(
     }
     switch (reason) {
       case "noCrossSections":
-        reasons.add(`absorption:${key}`, noAbsorptionReason(key), topOf(key));
+        // A wholly pending species has no optics, so `absorberSpecs` gives it no column and no
+        // curve already; the bound finds whether leaving it undrawn needs a note.
+        if (!allNegligible(byKey.get(key))) {
+          reasons.add(`absorption:${key}`, noAbsorptionReason(key), topOf(key));
+        }
         break;
       case "noColumnFree":
         reasons.replace(`absorption:${key}`, leftOutReason(key), topOf(key));
@@ -927,29 +938,26 @@ function planOf(
   const bulkMoleFractions: ReadonlyMap<string, number> = new Map(
     surface.gases.map((g) => [g.species, g.moleFraction]),
   );
-  const specsOf = (listed: ReadonlyArray<AbsorberLayer>): AbsorberSpecs =>
-    absorberSpecs(listed, column, ABSORBER_CROSS_SECTIONS, ABSORBER_PAIR_CROSS_SECTIONS, {
-      kDistributions,
-      bulkMoleFractions,
-    });
-  const first = specsOf(layers);
+  // The layers are never filtered by the bound: a wholly pending species has no optics, so it
+  // takes no column and no curve here already, and a species with a pending part keeps its
+  // measured data, a bulk gas its pairs. The medium drawn is the one the bound judged.
+  const absorbers: AbsorberSpecs = absorberSpecs(
+    layers,
+    column,
+    ABSORBER_CROSS_SECTIONS,
+    ABSORBER_PAIR_CROSS_SECTIONS,
+    { kDistributions, bulkMoleFractions },
+  );
+  const { specs, approximations } = absorbers;
   const verdicts =
     spectra.length === 0
       ? []
       : negligibleAbsorbers(
           { column, layers, bulkMoleFractions, suns: spectra, kDistributions },
-          { specs: first },
+          { specs: absorbers },
         );
   const byKey = verdictsByKey(verdicts);
   const negligible = [...byKey].filter(([, v]) => allNegligible(v)).map(([key]) => key);
-  // A negligible pending species takes no layer: no column and no curve.
-  const dropped = new Set(
-    [...byKey]
-      .filter(([key, v]) => !isPairKey(key) && allNegligible(v) && pendingOnly(v))
-      .map(([key]) => key),
-  );
-  const kept = dropped.size === 0 ? layers : layers.filter((l) => !dropped.has(l.species));
-  const { specs, approximations } = dropped.size === 0 ? first : specsOf(kept);
   absorberReasons(
     approximations,
     byKey,
@@ -957,7 +965,7 @@ function planOf(
     (key) => keyTopPa(key, topsPa, columnTopPa),
     reasons,
   );
-  const electrons = kept.find((l) => l.species === "e-" && l.columnPerM2 > 0);
+  const electrons = layers.find((l) => l.species === "e-" && l.columnPerM2 > 0);
   const inventory = surface.aerosols.kind === "value" ? surface.aerosols.value : undefined;
   const modes = modesOf(inventory, column, reasons);
 
@@ -974,7 +982,7 @@ function planOf(
       : new Set(
           candidates
             .map((candidate, index) => ({ candidate, index, depth: candidateDepth(candidate) }))
-            .toSorted((a, b) => b.depth - a.depth || a.index - b.index)
+            .toSorted((a, b) => (b.depth === a.depth ? a.index - b.index : b.depth - a.depth))
             .slice(0, places)
             .map(({ candidate }) => candidate),
         );
@@ -1001,7 +1009,7 @@ function planOf(
         const { mode, index, spec } = candidate.planned;
         reasons.add(
           `mode:${index}`,
-          `${particlesName(mode.material, mode.phase)} left out: the console draws no more layers`,
+          `${particlesName(mode.material, mode.phase)}: left out, the console can draw no more layers`,
           spec.topPa,
         );
         break;
@@ -1107,9 +1115,12 @@ function namedFirst(material: string, reason: string): string {
  * (`decision-r08-t10a-leans.md` item 6).
  *
  * @throws RangeError for more lights than {@link LIGHT_SLOT_LIMIT}, a ground albedo not finite, or
- *   a record that breaks the wire's own rules (gases that do not sum to 1, an absorber listed twice
- *   or with a base above its top, a column no hydrostatic atmosphere holds under the isothermal
- *   seam: k T_s ln 10⁷ ≥ μ m_u g_ref R_ref).
+ *   a record that breaks the wire's own rules or no body obeys: gases that do not sum to 1; a
+ *   surface with gases and no mean molar mass; an absorber listed twice, with a base above its top
+ *   or with a profile that does not run from its base to its top; a `rotational` figure spun past
+ *   its break-up, where its equator's normal gravity is not above 0 (`oblate.ts`'s
+ *   `oblateSlicing`, which the generator's `capped` law stays clear of); or a column no
+ *   hydrostatic atmosphere holds under the isothermal seam, k T_s ln 10⁷ ≥ μ m_u g_ref R_ref.
  */
 export function assembleMedium(
   input: BodyAtmosphereInput,
@@ -1188,7 +1199,7 @@ export function assembleMedium(
       shown.push(namedFirst(material, reason));
     }
     if (opticalDepthAbove550 < CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
-      shown.push(...sizeConvergenceReasons(material, [...term.channels, term.at550]));
+      shown.push(...sizeConvergenceReasons(material, phase, [...term.channels, term.at550]));
     }
   }
   if (provisionalThick(medium)) {
@@ -1217,7 +1228,10 @@ export function assembleMedium(
  * them, the term limit applied, with no aerosol optics (no Mie): for a curve-share job on an optics
  * worker that has not assembled the body.
  *
- * @throws RangeError as {@link assembleMedium}.
+ * @throws RangeError as {@link assembleMedium}: for more lights than {@link LIGHT_SLOT_LIMIT}, or a
+ *   record that breaks the wire's rules (gases that do not sum to 1, a surface with gases and no
+ *   mean molar mass, an absorber listed twice or ill-formed), a `rotational` figure spun past its
+ *   break-up, or an unbound isothermal column.
  */
 export function absorberSpecsOf(
   input: BodyAtmosphereInput,

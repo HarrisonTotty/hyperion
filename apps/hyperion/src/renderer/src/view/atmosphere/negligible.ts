@@ -102,7 +102,7 @@ export const ESTIMATE_MARGIN = 100;
 /**
  * σ₁, cm⁻¹: where the held χ sets first depart from 1, and so the inner edge of the Lorentz share
  * f₃ beyond it: 3, both of SpeCT's CO₂ sets' first break (Chaverot et al. 2025, A&A 702, A137,
- * Tables 2 and 3: CO₂–CO₂'s σ 3, 50 and 220 cm⁻¹, CO₂–N₂'s 3, 10 and 70 cm⁻¹, as CO₂'s sidecar's
+ * Table 3: CO₂–CO₂'s σ 3, 50 and 220 cm⁻¹, CO₂–N₂'s 3, 10 and 70 cm⁻¹, as CO₂'s sidecar's
  * reduction states them), `src/tools/kDistributions.ts`'s `NEAR_WING_FROM_PER_CM`.
  */
 export const CHI_FROM_PER_CM = 3;
@@ -123,12 +123,12 @@ export const CHI_REACH_PER_CM = 293;
 
 /**
  * The largest near-wing share from which γ_L is recovered: 0.1, where γ_L is about 0.5 cm⁻¹, far on
- * the share's rising branch (its peak, 0.578, is at γ_L = √75 cm⁻¹), so that the cell with the
+ * the share's rising branch (its peak, 0.575, is at γ_L = √75 cm⁻¹), so that the cell with the
  * largest share is the one with the widest lines ({@link lorentzHalfWidthPerCm}).
  */
 const NEAR_WING_RECOVERY_LIMIT = 0.1;
 
-/** cm per nm, for a cell's wavenumbers: ν = 10⁷ ÷ λ cm⁻¹ for λ in nm. */
+/** nm per cm, for a cell's wavenumbers: ν = 10⁷ ÷ λ cm⁻¹ for λ in nm. */
 const NM_PER_CM = 1e7;
 
 /** Why an entry takes its k. */
@@ -145,14 +145,8 @@ export type MarginRule =
    */
   | "unmeasuredNodes";
 
-/** One entry a bound weighs: drawn data taken as estimated, or a pending entry. */
-export interface BoundEntry {
-  /** `drawn`: data the medium draws, estimated at the body; `pending`: a `PENDING_ABSORBERS` entry. */
-  readonly origin: "drawn" | "pending";
-  /** A pending entry's task; `undefined` for drawn data. */
-  readonly task: PendingTask | undefined;
-  /** A pending entry's part, as its bound's; `undefined` for drawn data or a whole entry. */
-  readonly part: string | undefined;
+/** What every entry a bound weighs carries, drawn or pending. */
+export interface BoundEntryBase {
   /**
    * The share the entry falls in: `lines`, `cross-sections` or `pair` for drawn data and the hot
    * list that alternates with it, `whole` for a pending entry of a key the client draws nothing for,
@@ -166,6 +160,23 @@ export interface BoundEntry {
   /** u_max, the largest grazing chord's amount, in its kind's unit ({@link largestChordAmount}). */
   readonly amount: AbsorberAmount;
 }
+
+/** Data the medium draws, taken as estimated at the body. */
+export interface DrawnBoundEntry extends BoundEntryBase {
+  readonly origin: "drawn";
+}
+
+/** A `PENDING_ABSORBERS` entry, its absorption not drawn. */
+export interface PendingBoundEntry extends BoundEntryBase {
+  readonly origin: "pending";
+  /** The task that draws it. */
+  readonly task: PendingTask;
+  /** Its part, as its bound's; `undefined` for a whole entry. */
+  readonly part: string | undefined;
+}
+
+/** One entry a bound weighs: drawn data taken as estimated, or a pending entry. */
+export type BoundEntry = DrawnBoundEntry | PendingBoundEntry;
 
 /** The bound on one key's absorption (`absorption`), the plan's Δ_c. */
 export interface AbsorptionVerdict {
@@ -186,8 +197,10 @@ export interface AbsorptionVerdict {
  * The bound on a held χ's effect (`decision-r08-t4d-kdist-chain.md` §14), over a drawn two-variant
  * table's cells at a temperature where a variant the mix takes holds its χ: Δ_c,χ =
  * Σ_cells w_c,cell min(1, f₃ ⟨σ⟩_cell u_max) ÷ Σ_cells c̄_c S Δλ with k = 1, w_c,cell the largest
- * |c̄_c| S Δλ within {@link CHI_REACH_PER_CM} of the cell. The true χ lies in [0, 1], so this bounds
- * any held χ's effect from above.
+ * |c̄_c| S Δλ within {@link CHI_REACH_PER_CM} of the cell. The true χ lies in [0, 1], by which §14
+ * bounds any held χ's effect from above. The form is §14's as ruled, min(1, ·) taken at the source
+ * cell on its already reduced ⟨σ⟩, which may run low: by 1.7% on Earth and 5.6% on a snowball at a
+ * few bar, and up to 5 times at Venus's pressure, as recorded for the owner's ruling.
  */
 export interface HeldChiVerdict {
   readonly test: "heldChi";
@@ -409,19 +422,20 @@ export function boundCellMeansAt(bound: AbsorberBound, temperatureK: number): Bo
  */
 function chordSegment(
   tangentRadiusM: number,
-  x0: number,
-  x1: number,
+  x0M: number,
+  x1M: number,
   n0: number,
   n1: number,
 ): number {
-  const s = (x: number): number => Math.sqrt(x * (2 * tangentRadiusM + x));
-  const primitive = (x: number, sx: number): number =>
-    0.5 * ((tangentRadiusM + x) * sx - tangentRadiusM ** 2 * Math.log1p((x + sx) / tangentRadiusM));
-  const s0 = s(x0);
-  const s1 = s(x1);
-  const slope = (n1 - n0) / (x1 - x0);
-  const integralS = primitive(x1, s1) - primitive(x0, s0);
-  return n0 * (s1 - s0) + slope * ((x1 - x0) * s1 - integralS);
+  const s = (xM: number): number => Math.sqrt(xM * (2 * tangentRadiusM + xM));
+  const primitive = (xM: number, sM: number): number =>
+    0.5 *
+    ((tangentRadiusM + xM) * sM - tangentRadiusM ** 2 * Math.log1p((xM + sM) / tangentRadiusM));
+  const s0M = s(x0M);
+  const s1M = s(x1M);
+  const slope = (n1 - n0) / (x1M - x0M);
+  const integralS = primitive(x1M, s1M) - primitive(x0M, s0M);
+  return n0 * (s1M - s0M) + slope * ((x1M - x0M) * s1M - integralS);
 }
 
 /** The heights a profile's density is linear between, m, with the column's levels, from 0 to its top. */
@@ -480,10 +494,16 @@ function largestChordM(profile: DensityProfile, column: AtmosphereColumn): numbe
  * The plan's "horizontal ray at the medium's lowest level" is, by its sources' "the largest column
  * any table holds" (follow-up 3, ruling 4), the chord tangent at the datum from the top down, which
  * the transmittance table's deepest texel holds whole (`opticalDepth.ts`'s `opticalDepthToTop`):
- * √(2πR ÷ H) vertical columns for an isothermal layer, twice the one-sided ray from the ground. The
- * chords tangent above the datum are weighed too, so that a layer whose density peaks aloft is
- * bounded from above; for a layer from the datum whose density falls with height the datum's chord
- * is the largest.
+ * √(2πR ÷ H) vertical columns for an isothermal layer, twice the one-sided ray from the ground. For
+ * a layer from the datum whose density falls with height the datum's chord is the largest. The
+ * chords tangent above the datum are weighed too, for a layer whose density peaks aloft, but
+ * sampled at tangents on the profile's breaks and the column's levels, not bounded from above
+ * between them: a symmetric tent sampled only at its ends and peak would run 13% low, a 1 km tent
+ * at Earth's level spacing 1.2%, one at 20 km 10⁻⁴. On an oblate body the chord is taken on the
+ * R_ref sphere, about 9% low on a Saturn-class figure, until R08.T16.a.
+ *
+ * The bound is per key and per straight path: keys negligible on one body add, each up to
+ * {@link NEGLIGIBLE_CHANGE}.
  *
  * @throws Error for a term that is not an absorber's.
  */
@@ -780,8 +800,6 @@ export function negligibleAbsorbers(
             add(s.species, order, {
               entry: {
                 origin: "drawn",
-                task: undefined,
-                part: undefined,
                 share: "lines",
                 k: marginOf(rule),
                 rule,
@@ -867,10 +885,14 @@ export function negligibleAbsorbers(
     ...extra,
   ];
   return verdicts
-    .toSorted(
-      (a, b) =>
-        a.order - b.order ||
-        (a.verdict.key < b.verdict.key ? -1 : a.verdict.key > b.verdict.key ? 1 : 0),
+    .toSorted((a, b) =>
+      a.order !== b.order
+        ? a.order - b.order
+        : a.verdict.key < b.verdict.key
+          ? -1
+          : a.verdict.key > b.verdict.key
+            ? 1
+            : 0,
     )
     .map(({ verdict }) => verdict);
 }
@@ -885,8 +907,6 @@ function drawnCrossSection(
   return {
     entry: {
       origin: "drawn",
-      task: undefined,
-      part: undefined,
       share: "cross-sections",
       k: marginOf(rule),
       rule,
@@ -929,8 +949,6 @@ function drawnPair(
   return {
     entry: {
       origin: "drawn",
-      task: undefined,
-      part: undefined,
       share: "pair",
       k: marginOf(rule),
       rule,

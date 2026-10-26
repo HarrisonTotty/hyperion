@@ -51,7 +51,9 @@ export class InProcessOpticsWorker implements OpticsWorkerLike {
     this.#log.push(request);
     const timer = setTimeout(() => {
       this.#timers.delete(timer);
-      void this.#answer(request);
+      void this.#answer(request).catch((error: unknown) => {
+        console.error("the in-process optics worker could not answer:", error);
+      });
     }, 0);
     this.#timers.add(timer);
   }

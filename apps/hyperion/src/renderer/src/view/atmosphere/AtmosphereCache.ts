@@ -374,24 +374,50 @@ function detailAnswerOf(
       : { kind: "invalid", check: converted.fault, detail: converted.fault };
   }
   const { error } = outcome;
-  if (error.code === "link_lost") {
-    return { kind: "link" };
+  const rejected: DetailAnswer = { kind: "rejected", code: error.code, message: error.message };
+  // The client's own finding, an answer of another kind or of chunks not come whole: a check, not
+  // the server's word.
+  const unreadable: DetailAnswer = {
+    kind: "invalid",
+    check: ATMOSPHERE_ANSWER_UNREADABLE,
+    detail: error,
+  };
+  // Every code by name, so that a code the protocol adds is a compile error here, not a refusal.
+  let answer: DetailAnswer;
+  switch (error.code) {
+    case "link_lost":
+      answer = { kind: "link" };
+      break;
+    case "aborted":
+    case "superseded":
+      answer = { kind: "cancelled" };
+      break;
+    case "too_many_requests":
+    case "queue_full":
+    case "cancelled":
+      answer = { kind: "busy" };
+      break;
+    case "protocol_violation":
+      answer = unreadable;
+      break;
+    case "internal":
+      answer = isBulkAssemblyFailure(error) ? unreadable : rejected;
+      break;
+    case "bad_request":
+    case "unsupported":
+    case "hello_required":
+    case "unknown_universe":
+    case "unknown_system":
+    case "unknown_body":
+    case "generator_version_mismatch":
+    case "unsupported_save_format":
+    case "name_taken":
+    case "universe_limit_reached":
+    case "storage_failed":
+      answer = rejected;
+      break;
   }
-  if (error.code === "aborted" || error.code === "superseded") {
-    return { kind: "cancelled" };
-  }
-  if (
-    error.code === "too_many_requests" ||
-    error.code === "queue_full" ||
-    error.code === "cancelled"
-  ) {
-    return { kind: "busy" };
-  }
-  if (error.code === "protocol_violation" || isBulkAssemblyFailure(error)) {
-    // The client's own finding, an answer of another kind: a check, not the server's word.
-    return { kind: "invalid", check: ATMOSPHERE_ANSWER_UNREADABLE, detail: error };
-  }
-  return { kind: "rejected", code: error.code, message: error.message };
+  return answer;
 }
 
 /** A record's ground albedo: p q per channel of R07's photometry, clamped to [0, 1] (item 2). */
@@ -860,7 +886,14 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     const building: Build = { kind: "building", key, handle };
     held.build = building;
     void this.#land(held, building, handle).catch((error: unknown) => {
-      console.error(`the atmosphere of ${held.id} could not be taken:`, error);
+      // A bug in taking the build: the body is held failed, with the error in the log, rather
+      // than left pending on a build that will never land.
+      if (!this.#disposed && this.#bodies.get(held.id) === held && held.build === building) {
+        held.build = null;
+        this.#fail(held, error);
+      } else {
+        console.error(`the atmosphere of ${held.id} could not be taken:`, error);
+      }
     });
   }
 

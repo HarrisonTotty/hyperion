@@ -143,12 +143,16 @@ describe("a body's labels by the section its air comes from", () => {
     ]);
   });
 
-  it("draws an air over melt with SILICATE VAPOUR beside its other notes", () => {
-    const result = assembled(withMeltArea(earthDetail(), 0.1));
-    expect([
-      result.medium !== undefined,
-      result.labels.includes("silicateVapourNotYetModelled"),
-    ]).toEqual([true, true]);
+  it("draws an air over melt", () => {
+    expect(assembled(withMeltArea(earthDetail(), 0.1)).medium).toBeDefined();
+  });
+
+  it("gives an air over melt SILICATE VAPOUR beside its other notes", () => {
+    expect(assembled(withMeltArea(earthDetail(), 0.1)).labels).toEqual([
+      "aerosolsNotYetModelled",
+      "silicateVapourNotYetModelled",
+      "atmosphereApproximate",
+    ]);
   });
 
   it("draws no air for a melt with no volatile air, and says SILICATE VAPOUR alone", () => {
@@ -164,12 +168,14 @@ describe("a body's labels by the section its air comes from", () => {
     expect([result.medium, result.labels]).toEqual([undefined, ["silicateVapourNotYetModelled"]]);
   });
 
-  it("gives an absent inventory no aerosol term and AEROSOLS AND ABSORBERS: NOT YET MODELLED", () => {
-    const result = assembled(earthDetail());
-    expect([
-      result.medium?.terms.some((term) => term.name.startsWith("aerosol")),
-      result.labels.includes("aerosolsNotYetModelled"),
-    ]).toEqual([false, true]);
+  it("gives an absent inventory no aerosol term", () => {
+    expect(
+      assembled(earthDetail()).medium?.terms.some((term) => term.name.startsWith("aerosol")),
+    ).toBe(false);
+  });
+
+  it("gives an absent inventory AEROSOLS AND ABSORBERS: NOT YET MODELLED", () => {
+    expect(assembled(earthDetail()).labels).toContain("aerosolsNotYetModelled");
   });
 
   it("gives an inventory computed empty no AEROSOLS note", () => {
@@ -184,6 +190,61 @@ describe("a body's labels by the section its air comes from", () => {
   });
 });
 
+/**
+ * The generated Earth on N₂ 97%, SO₂ 1%, atomic S 1%, Ar 0.9%, H₂O 0.07% and CO₂ 0.03%: SO₂'s
+ * Rayleigh scattering is estimated (`rayleigh.ts`'s `ESTIMATED_RAYLEIGH`), and S has no Rayleigh
+ * row in the registry.
+ */
+function withEstimatedAndUnscatteringGases(): DetailAnswer {
+  return withSurface(earthDetail(), (surface) => ({
+    ...surface,
+    gases: [
+      { species: "N2", mole_fraction: 0.97 },
+      { species: "SO2", mole_fraction: 0.01 },
+      { species: "S", mole_fraction: 0.01 },
+      { species: "Ar", mole_fraction: 0.009 },
+      { species: "H2O", mole_fraction: 0.0007 },
+      { species: "CO2", mole_fraction: 0.0003 },
+    ],
+  }));
+}
+
+describe("the gases' reasons", () => {
+  it("say a gas's scattering is estimated", () => {
+    expect(assembled(withEstimatedAndUnscatteringGases()).reasons).toContain(
+      "SO2: its scattering estimated, not measured",
+    );
+  });
+
+  it("say a gas the registry gives no Rayleigh row scatters nothing drawn", () => {
+    expect(assembled(withEstimatedAndUnscatteringGases()).reasons).toContain(
+      "S: no scattering data on file, its scattering not drawn",
+    );
+  });
+
+  it("say a line species drawn without its tables absorbs nothing drawn", () => {
+    expect(assembled(earthDetail()).reasons).toContain(
+      "H2O: no absorption data on file, its absorption not drawn",
+    );
+  });
+
+  it("give e− and the ions, whose optics other terms draw, no scattering reason", () => {
+    const electrons = withSurface(earthDetail(), (surface) => ({
+      ...surface,
+      gases: [
+        { species: "N2", mole_fraction: 0.98 },
+        { species: "H2O", mole_fraction: 0.0102 },
+        { species: "Ar", mole_fraction: 0.009 },
+        { species: "e-", mole_fraction: 0.0005 },
+        { species: "Na+", mole_fraction: 0.0003 },
+      ],
+    }));
+    expect(assembled(electrons).reasons.filter((reason) => reason.includes("scattering"))).toEqual(
+      [],
+    );
+  });
+});
+
 describe("the key the cache holds a medium under", () => {
   it("is the same for the same inputs", () => {
     expect(earthKey()).toBe(earthKey());
@@ -195,13 +256,14 @@ describe("the key the cache holds a medium under", () => {
     ).not.toBe(atmosphereKey(recordInput(detailOf(earthDetail()))));
   });
 
-  it("changes with the lights and with the ground", () => {
-    const detail = detailOf(earthDetail());
-    const base = atmosphereKey(recordInput(detail));
-    expect([
-      atmosphereKey(recordInput(detail, [])) !== base,
-      atmosphereKey(recordInput(detail, [SUN_LIGHT], [0.31, 0.3, 0.3])) !== base,
-    ]).toEqual([true, true]);
+  it("changes with the lights", () => {
+    expect(atmosphereKey(recordInput(detailOf(earthDetail()), []))).not.toBe(earthKey());
+  });
+
+  it("changes with the ground", () => {
+    expect(
+      atmosphereKey(recordInput(detailOf(earthDetail()), [SUN_LIGHT], [0.31, 0.3, 0.3])),
+    ).not.toBe(earthKey());
   });
 
   it("stays at a later time with the same spin rate", () => {
@@ -216,38 +278,47 @@ describe("the key the cache holds a medium under", () => {
     );
   });
 
-  it("is a kept body's statement for a kept scene's body", () => {
-    expect([
-      atmosphereKey({ kind: "kept", atmosphere: { kind: "unset" } }),
-      atmosphereKey({ kind: "kept", atmosphere: { kind: "airless" } }),
-    ]).toEqual(["kept/unset/v1", "kept/airless/v1"]);
+  it.each(["unset", "airless"] as const)("is kept/%s/v1 for a kept scene's body so set", (kind) => {
+    expect(atmosphereKey({ kind: "kept", atmosphere: { kind } })).toBe(`kept/${kind}/v1`);
   });
 });
 
 describe("a body's gravity by its figure law (Design note 17)", () => {
-  it("builds a rotational_and_tidal figure at √2.5 ω, with ω²R in its reference gravity", () => {
-    const detail = detailOf(withFigureLaw(earthDetail(), "rotational_and_tidal"));
-    const { drawn } = assembleMedium(recordInput(detail));
-    const rotation = detail.record.rotation;
-    if (drawn === undefined || rotation.state !== "ok") {
-      throw new Error("the tidal Earth draws no medium, or has no rotation");
+  const tidal = detailOf(withFigureLaw(earthDetail(), "rotational_and_tidal"));
+  const tidalOmega = (): number => {
+    const rotation = tidal.record.rotation;
+    if (rotation.state !== "ok") {
+      throw new Error("the tidal Earth has no rotation");
     }
-    const omega = spinRateAt(rotation.value, detail.time);
-    const { equatorialRadiusM: a, polarRadiusM: c } = drawn.body.figure;
+    return spinRateAt(rotation.value, tidal.time);
+  };
+  const tidalBody = (): AssembledBody => {
+    const { drawn } = assembleMedium(recordInput(tidal));
+    if (drawn === undefined) {
+      throw new Error("the tidal Earth draws no medium");
+    }
+    return drawn.body;
+  };
+
+  it("builds a rotational_and_tidal figure at √2.5 ω", () => {
+    const spin = tidalBody().gravity.spheroid?.angularVelocityRadS ?? Number.NaN;
+    expect(Math.abs(spin / (Math.sqrt(2.5) * tidalOmega()) - 1)).toBeLessThan(1e-12);
+  });
+
+  it("adds ω²R, R = ∛(a²c), to a rotational_and_tidal figure's reference gravity", () => {
+    const body = tidalBody();
+    const { equatorialRadiusM: a, polarRadiusM: c } = body.figure;
+    const omega = tidalOmega();
     expect(
-      Math.abs(
-        (drawn.body.gravity.spheroid?.angularVelocityRadS ?? Number.NaN) /
-          (Math.sqrt(2.5) * omega) -
-          1,
-      ),
-    ).toBeLessThan(1e-12);
-    expect(
-      Math.abs(drawn.body.gravity.gravityOffsetMS2 / (omega * omega * Math.cbrt(a * a * c)) - 1),
+      Math.abs(body.gravity.gravityOffsetMS2 / (omega * omega * Math.cbrt(a * a * c)) - 1),
     ).toBeLessThan(1e-12);
   });
 
-  it("builds a capped figure at a spin past break-up, where the rotational law cannot", () => {
+  it("refuses a rotational figure spun past break-up, where γ_e is not above 0", () => {
     expect(() => assembled(fastEarth("rotational"))).toThrow(RangeError);
+  });
+
+  it("builds a capped figure at the same spin, past break-up", () => {
     expect(assembled(fastEarth("capped")).medium).toBeDefined();
   });
 
