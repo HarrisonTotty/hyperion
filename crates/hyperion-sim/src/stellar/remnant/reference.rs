@@ -6,18 +6,24 @@
 //! Kroupa sample of 8–150 M☉ primaries at Z = 0.02 (slope 2.3 above 1 M☉; Kroupa 2001, MNRAS 322,
 //! 231), each built into a star with no ID ([`StarDraws::from_parts`]) from the stream
 //! `stellar.reference` of its sample number ([`tags::STELLAR_REFERENCE`]) and evolved to its death
-//! on the generator's own track. The iron-core collapses to a neutron star that the kick law sends
-//! to the ordinary mode are its members: the star's companion-stripped mark is applied against
-//! plan 11's stripped share and a companion-stripped star's own mode draw decides its mode, as the
-//! law decides them (ruling 147.2), so that the ordinary-mode neutron stars follow Disberg and
-//! Mandel's (2025) log-normal. [`score_quantiles`] sorts the members' scores into the
-//! 257 quantiles at ranks i ÷ 256 of [`tables::kick_rank`](crate::tables::kick_rank). The scorer
+//! on the generator's own track (at the default law). The iron-core collapses to a neutron star
+//! that the kick law sends to the ordinary mode are its members: the star's companion-stripped mark
+//! is applied against plan 11's stripped share and a companion-stripped star's own mode draw
+//! decides its mode, as the law decides them (ruling 147.2), so that the ordinary-mode neutron
+//! stars follow Disberg and Mandel's (2025) log-normal. [`score_quantiles`] sorts the members'
+//! scores into the 257 quantiles at ranks i ÷ 256 of
+//! [`tables::kick_rank`](crate::tables::kick_rank). The scorer
 //! works on any range of sample numbers ([`ReferencePopulation::scores`]) and the quantile step on
 //! any list of scores ([`quantiles_of`]), so that plan 15's P15.T5.a can run it in chunks.
 //!
 //! [`kick_observables`] draws the same kind of sample, with the provisional companion-stripped
 //! mark (design note 11) and every kick draw, and measures the six figures of T19.d that pin the
 //! law against its sources. It is pure, and plan 15's P15.T5.b calls it too.
+//!
+//! Both take the law's parameters whole (P15.T5.d): the membership reads their low-mode ramp and
+//! the tracks their electron-capture windows, so that P15.T5.b can move a default and rebuild the
+//! table at its membership. At [`KickLawParams::default`] the windows are the generator's track's
+//! own and every output is the generator's.
 //!
 //! Tracks cover the population's whole 8–150 M☉ since P06.T14.
 
@@ -34,7 +40,9 @@ use crate::stellar::Composition;
 use crate::stellar::draws::{
     REDRAW_TRIES, StandardNormal, StarDraws, StarDrawsParts, UnitUniform, isotropic,
 };
-use crate::stellar::sse::{self, MAX_INITIAL_MASS, TrackOptions};
+use crate::stellar::sse::{
+    self, BuildCaptureWindowWidthsError, CaptureWindowWidths, MAX_INITIAL_MASS, TrackOptions,
+};
 use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M};
 use crate::units::{KilometresPerSecond, SolarMasses};
 
@@ -95,6 +103,15 @@ impl ReferenceStar {
 /// The population `F_x` is tabulated over (P06.T19.b): Kroupa primaries of 8–150 M☉ at Z = 0.02,
 /// whose iron-core collapses leave a neutron star that takes the ordinary mode (ruling 147.2).
 ///
+/// Its membership and its tracks are those of a law's parameters ([`KickLawParams`]; P15.T5.d):
+/// [`KickLawParams::takes_low_mode`] reads their low-mode ramp, [`KickLawParams::score_factor`]
+/// their score's scatter, and every star is built on [`TrackOptions::default`] with their two
+/// electron-capture windows' widths ([`KickLawParams::ec_window_single`] and
+/// [`KickLawParams::ec_window_stripped`]). [`Default`] is the generator's law,
+/// [`KickLawParams::default`], whose windows are the generator's track's own, so that its tracks
+/// are the generator's. [`ReferencePopulation::new`] takes another law's, for plan 15's review of
+/// the defaults (P15.T5.b), which rebuilds the rank table at each moved default's membership.
+///
 /// # Examples
 ///
 /// The scorer and the quantile step, as plan 15 runs them in chunks: the scores of two chunks,
@@ -112,23 +129,69 @@ impl ReferenceStar {
 /// let quantiles = quantiles_of(&mut scores);
 /// assert!(quantiles.windows(2).all(|q| q[0] < q[1]));
 /// ```
+///
+/// The population of a law whose low-mode ramp is a quarter of a solar mass lower, as plan 15's
+/// review builds it:
+///
+/// ```
+/// use hyperion_sim::stellar::remnant::KickLawParams;
+/// use hyperion_sim::stellar::remnant::reference::ReferencePopulation;
+///
+/// let defaults = KickLawParams::default();
+/// let lower = KickLawParams {
+///     low_ramp: (defaults.low_ramp.0 - 0.25, defaults.low_ramp.1 - 0.25),
+///     ..defaults
+/// };
+/// let population = ReferencePopulation::new(lower)?;
+/// assert_eq!(population.params().low_ramp, (1.75, 2.75));
+/// assert_eq!(ReferencePopulation::default().params(), &defaults);
+/// # Ok::<(), hyperion_sim::stellar::sse::BuildCaptureWindowWidthsError>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReferencePopulation {
-    score_scatter: f64,
+    params: KickLawParams,
+    options: TrackOptions,
 }
 
 impl Default for ReferencePopulation {
     fn default() -> Self {
-        Self::new(KickLawParams::default().score_scatter)
+        Self::new(KickLawParams::default())
+            .expect("the default law's windows are the generator's, finite and positive")
     }
 }
 
 impl ReferencePopulation {
-    /// The population whose scores take the factor ξ of relative scatter `score_scatter`
-    /// ([`KickLawParams::score_scatter`]).
+    /// The population of the law of `params`: its members are the collapses `params` sends to the
+    /// ordinary mode, their scores take the factor ξ of relative scatter
+    /// [`KickLawParams::score_scatter`], and its stars' tracks have `params`' electron-capture
+    /// windows.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildCaptureWindowWidthsError`] if [`KickLawParams::ec_window_single`] or
+    /// [`KickLawParams::ec_window_stripped`] is not finite and positive.
+    pub fn new(params: KickLawParams) -> Result<Self, BuildCaptureWindowWidthsError> {
+        let windows = CaptureWindowWidths::new(
+            SolarMasses::new(params.ec_window_single),
+            SolarMasses::new(params.ec_window_stripped),
+        )?;
+        Ok(Self {
+            params,
+            options: TrackOptions::default().with_capture_windows(windows),
+        })
+    }
+
+    /// The law's parameters the population is built from.
     #[must_use]
-    pub const fn new(score_scatter: f64) -> Self {
-        Self { score_scatter }
+    pub const fn params(&self) -> &KickLawParams {
+        &self.params
+    }
+
+    /// The options its stars' tracks are built with: [`TrackOptions::default`] with the law's
+    /// electron-capture windows.
+    #[must_use]
+    pub const fn track_options(&self) -> TrackOptions {
+        self.options
     }
 
     /// The composition of every star: solar, Z = 0.02.
@@ -191,7 +254,8 @@ impl ReferencePopulation {
         }
     }
 
-    /// The death and remnant of `star` on the generator's track, built in full.
+    /// The death and remnant of `star` on its track built in full under
+    /// [`track_options`](Self::track_options): the generator's track for the default population.
     #[must_use]
     pub fn fate(&self, star: &ReferenceStar) -> (Death, CompactRemnant) {
         let m0 = if star.initial_mass > MAX_INITIAL_MASS {
@@ -199,12 +263,7 @@ impl ReferencePopulation {
         } else {
             star.initial_mass
         };
-        let fate = sse::fate_of(
-            m0,
-            &self.composition(),
-            &star.draws,
-            TrackOptions::default(),
-        );
+        let fate = sse::fate_of(m0, &self.composition(), &star.draws, self.options);
         (fate.death, fate.remnant)
     }
 
@@ -213,11 +272,11 @@ impl ReferencePopulation {
     /// companion-stripped mark is applied against plan 11's stripped share at its initial mass
     /// ([`binarity::is_stripped`](crate::galaxy::displaced::binarity::is_stripped), P11.T1.d), as
     /// [`StandardKickLaw::with_stripped_mark`] applies it, and a companion-stripped star whose own
-    /// `star.kick.mode` draw sends it to the low mode ([`KickLawParams::takes_low_mode`]), as
-    /// [`StandardKickLaw`]'s kick decides it, is not a member. So the table is the distribution of
-    /// the scores of the ordinary-mode neutron stars the law draws, which is the population
-    /// Disberg and Mandel's (2025) isolated pulsars sample. The score itself reads neither the mark
-    /// nor the mode draw.
+    /// `star.kick.mode` draw sends it to the low mode under the population's law
+    /// ([`KickLawParams::takes_low_mode`]), as [`StandardKickLaw`]'s kick decides it, is not a
+    /// member. So the table is the distribution of the scores of the ordinary-mode neutron stars
+    /// the law draws, which is the population Disberg and Mandel's (2025) isolated pulsars sample.
+    /// The score itself reads neither the mark nor the mode draw.
     #[must_use]
     pub fn score(&self, seed: Seed, i: u64) -> Option<f64> {
         let star = self.star(seed, i);
@@ -227,10 +286,7 @@ impl ReferencePopulation {
         if !iron_core {
             return None;
         }
-        let params = KickLawParams {
-            score_scatter: self.score_scatter,
-            ..KickLawParams::default()
-        };
+        let params = &self.params;
         let death =
             stripped_mark_applied(death, &star.draws, star.initial_mass, &self.composition());
         if params.takes_low_mode(&death.progenitor(), star.draws.kick_mode()) {
@@ -378,10 +434,38 @@ impl SampledKick {
 }
 
 /// Sample star `i` of the universe of `seed` with its kick under `law`, as a single star's model
-/// draws it ([`StandardKickLaw::natal_kick`]).
+/// draws it ([`StandardKickLaw::natal_kick`]), its track built with the law's electron-capture
+/// windows ([`ReferencePopulation::new`] of the law's parameters; P15.T5.d).
+///
+/// # Panics
+///
+/// If the law's window widths, [`KickLawParams::ec_window_single`] and
+/// [`KickLawParams::ec_window_stripped`], are not finite and positive, as those fields require: a
+/// caller's bug, which [`ReferencePopulation::new`] reports as an error to a caller that builds
+/// its own population.
 #[must_use]
 pub fn sampled_kick(law: &StandardKickLaw, seed: Seed, i: u64) -> SampledKick {
-    let pop = ReferencePopulation::new(law.params().score_scatter);
+    sampled_kick_from(&population_of(law.params()), law, seed, i)
+}
+
+/// The population of `params`, whose windows the caller guarantees finite and positive.
+///
+/// # Panics
+///
+/// If they are not: the precondition of [`sampled_kick`] and [`kick_observables`].
+fn population_of(params: &KickLawParams) -> ReferencePopulation {
+    ReferencePopulation::new(*params).unwrap_or_else(|error| {
+        panic!("{error}: a kick law's electron-capture windows must be finite and positive")
+    })
+}
+
+/// [`sampled_kick`] from the population `pop`, built from `law`'s parameters.
+fn sampled_kick_from(
+    pop: &ReferencePopulation,
+    law: &StandardKickLaw,
+    seed: Seed,
+    i: u64,
+) -> SampledKick {
     let star = pop.star(seed, i);
     let (death, remnant) = pop.fate(&star);
     let death =
@@ -478,9 +562,16 @@ pub const LIGHT_BLACK_HOLE: SolarMasses = SolarMasses::new(12.0);
 /// 2123, find ultra-stripped supernovae eject ≲ 0.2 M☉); it loses all but the remnant at once and
 /// takes this law's kick for a companion-stripped star.
 ///
+/// Every star's track is built with the electron-capture windows of `params`
+/// ([`ReferencePopulation::new`]; P15.T5.d), so that plan 15's review of the defaults (P15.T5.b)
+/// can move a window; at the defaults they are the generator's track's own.
+///
 /// # Panics
 ///
-/// If the sample holds no ordinary-mode neutron star.
+/// If the sample holds no ordinary-mode neutron star, or if the window widths of `params`,
+/// [`KickLawParams::ec_window_single`] and [`KickLawParams::ec_window_stripped`], are not finite
+/// and positive, as those fields require (a caller's bug; plan 15's harness checks its grids
+/// first).
 #[must_use]
 pub fn kick_observables(
     params: &KickLawParams,
@@ -489,6 +580,7 @@ pub fn kick_observables(
     seed: Seed,
 ) -> KickObservables {
     let law = StandardKickLaw::new(*params, table.clone());
+    let pop = population_of(params);
     let mut ordinary = Vec::new();
     let (mut unstripped, mut stripped_ordinary) = (Vec::new(), Vec::new());
     let mut isolated = Tally::default();
@@ -501,7 +593,7 @@ pub fn kick_observables(
     let (mut black_holes, mut unkicked) = (0_u64, 0_u64);
     let (mut light, mut light_unkicked, mut light_fast) = (0_u64, 0_u64, 0_u64);
     for i in 0..n {
-        let s = sampled_kick(&law, seed, i);
+        let s = sampled_kick_from(&pop, &law, seed, i);
         let Some(kick) = s.kick else { continue };
         let v = s.speed_km_s();
         let stripped = s.death.progenitor().stripping() == Stripping::Companion;
@@ -757,6 +849,104 @@ mod tests {
         assert!((slow_on_the_sky(30.0) - 1.0).abs() < 1e-15);
         assert!((slow_on_the_sky(100.0) - (1.0 - 0.75_f64.sqrt())).abs() < 1e-15);
         assert!(slow_on_the_sky(1_000.0) < 0.002);
+    }
+
+    /// P15.T5.d's seam: a narrower single-star window moves the electron captures at its edge in
+    /// the reference population only. An unmarked star just inside the generator's 0.1 M☉ window
+    /// dies by electron capture on the generator's track and in the default population, and as a
+    /// white dwarf in a population given half the width, whose top still captures; the generator's
+    /// track still captures after it.
+    #[test]
+    fn a_narrower_single_star_window_moves_the_captures_at_its_edge_in_the_population_only() {
+        let narrow = KickLawParams {
+            ec_window_single: 0.05,
+            ..KickLawParams::default()
+        };
+        a_narrower_window_moves_the_captures_at_its_edge(u64::MAX, narrow, 7.9);
+    }
+
+    /// The same for the companion-stripped window, 1 M☉ wide, halved, for a star whose
+    /// companion-stripped mark is set.
+    #[test]
+    fn a_narrower_stripped_window_moves_the_captures_at_its_edge_in_the_population_only() {
+        let narrow = KickLawParams {
+            ec_window_stripped: 0.5,
+            ..KickLawParams::default()
+        };
+        a_narrower_window_moves_the_captures_at_its_edge(0, narrow, 6.9);
+    }
+
+    /// For a star whose companion-stripped mark is the word `mark`, on a 0.01 M☉ grid of initial
+    /// masses from `from`: the default population's electron captures run from the window's edge
+    /// to its top, just below the iron cores; in the population of `narrow` the edge leaves a
+    /// white dwarf and the top still captures; and the generator's own track still captures at
+    /// the edge.
+    fn a_narrower_window_moves_the_captures_at_its_edge(
+        mark: u64,
+        narrow: KickLawParams,
+        from: f64,
+    ) {
+        use crate::rng::Mark;
+        use crate::stellar::sse::Track;
+
+        let draws = StarDraws::from_parts(StarDrawsParts {
+            stripped: Mark::from_word(mark),
+            ..StarDrawsParts::MEDIAN
+        });
+        let star_of = |m: f64| ReferenceStar {
+            initial_mass: SolarMasses::new(m),
+            draws: draws.clone(),
+            separation_rank: UnitUniform::new(0.5).unwrap(),
+        };
+        let default = ReferencePopulation::default();
+        let narrow = ReferencePopulation::new(narrow).unwrap();
+        let death_in = |pop: &ReferencePopulation, m: f64| pop.fate(&star_of(m)).0.kind();
+        let masses: Vec<f64> = (0..=160).map(|i| from + 0.01 * f64::from(i)).collect();
+        let captures: Vec<f64> = masses
+            .iter()
+            .copied()
+            .filter(|&m| death_in(&default, m) == DeathKind::ElectronCapture)
+            .collect();
+        let (edge, top) = (captures[0], captures[captures.len() - 1]);
+        eprintln!("captures with mark {mark:#x} from {edge} to {top} M_sun");
+        assert!(edge > from, "the scan starts below the window");
+        assert!(
+            matches!(
+                death_in(&default, top + 0.01),
+                DeathKind::CoreCollapse { .. }
+            ),
+            "iron cores begin above the window"
+        );
+        let (death, remnant) = narrow.fate(&star_of(edge));
+        assert_eq!(death.kind(), DeathKind::EnvelopeLoss, "{edge} M_sun");
+        assert_eq!(remnant.kind(), RemnantKind::WhiteDwarf);
+        assert_eq!(death_in(&narrow, top), DeathKind::ElectronCapture);
+        let generator = Track::full(SolarMasses::new(edge), &Composition::SOLAR, &draws);
+        assert_eq!(
+            generator.death().map(|d| d.kind()),
+            Some(DeathKind::ElectronCapture),
+            "the generator's track at {edge} M_sun"
+        );
+    }
+
+    #[test]
+    fn a_population_refuses_a_window_that_is_not_positive() {
+        let zero = KickLawParams {
+            ec_window_single: 0.0,
+            ..KickLawParams::default()
+        };
+        assert_eq!(
+            ReferencePopulation::new(zero),
+            Err(BuildCaptureWindowWidthsError::Single)
+        );
+        let infinite = KickLawParams {
+            ec_window_stripped: f64::INFINITY,
+            ..KickLawParams::default()
+        };
+        assert_eq!(
+            ReferencePopulation::new(infinite),
+            Err(BuildCaptureWindowWidthsError::CompanionStripped)
+        );
     }
 
     #[test]

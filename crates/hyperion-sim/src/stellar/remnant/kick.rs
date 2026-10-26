@@ -183,13 +183,20 @@ pub struct KickLawParams {
     /// Müller (2020) have 0.5 (ruling 96.4).
     pub bh_factor: f64,
     /// The single-star electron-capture window's width, M☉ of the mass `m_c_bagb` reads: 0.1
-    /// ([`kick_rank::EC_WINDOW_SINGLE`]). The track reads its own copy,
-    /// [`SINGLE_STAR_WINDOW`](super::collapse::SINGLE_STAR_WINDOW), which a test holds equal; this
-    /// field records the default for plan 15's tools.
+    /// ([`kick_rank::EC_WINDOW_SINGLE`]). Finite and positive.
+    ///
+    /// The generator's track reads its own copy,
+    /// [`SINGLE_STAR_WINDOW`](super::collapse::SINGLE_STAR_WINDOW), which a test holds equal, and
+    /// no law's field. [`ReferencePopulation`](super::reference::ReferencePopulation) and
+    /// [`kick_observables`](super::reference::kick_observables) pass this field to their stars'
+    /// tracks ([`TrackOptions::with_capture_windows`](crate::stellar::sse::TrackOptions::with_capture_windows);
+    /// P15.T5.d), so that plan 15's review of the defaults can move it.
     pub ec_window_single: f64,
     /// The companion-stripped window's width, M☉ of the same mass: 1.0
-    /// ([`kick_rank::EC_WINDOW_STRIPPED`]; the track's copy is
-    /// [`COMPANION_STRIPPED_WINDOW`](super::collapse::COMPANION_STRIPPED_WINDOW)).
+    /// ([`kick_rank::EC_WINDOW_STRIPPED`]). Finite and positive. The generator's track reads its
+    /// own copy, [`COMPANION_STRIPPED_WINDOW`](super::collapse::COMPANION_STRIPPED_WINDOW), and
+    /// the reference population and the observables pass this field to their tracks, as
+    /// [`ec_window_single`](Self::ec_window_single).
     pub ec_window_stripped: f64,
     /// The white dwarfs' Maxwellian σ, km/s: 1, the brainstorm's "about 1 km/s".
     pub wd_sigma_km_s: f64,
@@ -575,10 +582,11 @@ impl StandardKickLaw {
     /// no longer read here: it stays for the tests' quadratures.
     ///
     /// Besides the kick, only the track reads the mark: a marked star's electron-capture window is
-    /// the companion-stripped one, 1 M☉ wide, and its envelope is still a single star's, as design
-    /// note 11 has it until plan 11. Every collapse is of a star above the lowest initial mass the
-    /// mark is drawn from, `m_cc(Z)` − 1 M☉ (ruling 45.2), since the widest electron-capture window
-    /// begins there and iron cores at `m_cc`.
+    /// the companion-stripped one, 1 M☉ wide in the generator's track (other widths are plan 15's
+    /// review's, P15.T5.d), and its envelope is still a single star's, as design note 11 has it
+    /// until plan 11. Every collapse is of a star above the lowest initial mass the mark is drawn
+    /// from, `m_cc(Z)` − 1 M☉ (ruling 45.2), since the widest electron-capture window begins there
+    /// and iron cores at `m_cc`.
     #[must_use]
     pub fn with_stripped_mark(
         &self,
@@ -790,6 +798,29 @@ mod tests {
             ..p
         };
         assert!((untruncated.ordinary_speed_km_s(0.5) - math::exp(5.6)).abs() < 1e-9);
+    }
+
+    /// The generator's track options carry `collapse`'s two windows bit for bit, and so do SSE's,
+    /// whose remnant recipe never reads them (P15.T5.d): the default track is the one before the
+    /// windows became an option.
+    #[test]
+    fn the_default_track_options_carry_the_collapse_windows_bit_for_bit() {
+        use crate::stellar::sse::{CaptureWindowWidths, TrackOptions};
+        let single = super::super::collapse::SINGLE_STAR_WINDOW.value();
+        let stripped = super::super::collapse::COMPANION_STRIPPED_WINDOW.value();
+        for options in [TrackOptions::default(), TrackOptions::hurley2000()] {
+            let windows = options.capture_windows();
+            assert_same_bits(windows.single().value(), single);
+            assert_same_bits(windows.companion_stripped().value(), stripped);
+        }
+        assert_eq!(CaptureWindowWidths::default(), CaptureWindowWidths::DEFAULT);
+        let p = KickLawParams::default();
+        assert_same_bits(p.ec_window_single, single);
+        assert_same_bits(p.ec_window_stripped, stripped);
+        // The default reference population builds the generator's tracks, every option included.
+        let population = super::super::reference::ReferencePopulation::default();
+        assert_eq!(population.track_options(), TrackOptions::default());
+        assert_eq!(population.params(), &p);
     }
 
     #[test]
