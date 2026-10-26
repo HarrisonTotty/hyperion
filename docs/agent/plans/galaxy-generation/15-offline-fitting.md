@@ -2550,3 +2550,25 @@ fit-check`; review-changes on this lane's diff.
       included, which the rerun re-pins. The production manifest takes 17 minutes at four threads
       on this laptop. If a ruling moves a default, the grids hold their default exactly, so the
       manifest's grids move with it.
+  - **T5.c, the guard** (decision-p15-revalidation Q4; no output moved).
+    - _The guard._ `galaxy/features/interior/retention.rs` gains, after its imports,
+      `const _: () = assert!(matches!(CLUSTER_MERGED_BINARY_FATE, MergedBinaryFate::StaysJudgedOnPairVelocity), "retention judges every low-mode neutron star on its pair's velocity: a merged binary's other fates need a reader first (plan 11)");`,
+      with a comment saying why: the quadrature is that reading for every low-mode neutron star,
+      merged or not, and nothing there reads the other branches. The module's docs gain a section,
+      "Merged binaries (P15.T5.c)", saying the same and that the default passes ruling 137.3's four
+      bands (`neutron_stars_are_retained_as_the_brainstorm_says`: 31.4%, 28.6%, 16.2% and 0.43% at
+      w = 0.2675), so no alternative was measured. In `stellar/binary/mod.rs` only the two doc
+      comments changed: `MergedBinaryFate`'s says that retention reads only the default branch, and
+      `CLUSTER_MERGED_BINARY_FATE`'s, in place of "until P15.T5.c's review", what the review found
+      and where the guard is.
+    - _Checked by hand, once, and put back:_ with the default set to `StaysJudgedOnKick`,
+      `cargo check -p hyperion-sim` fails with "error[E0080]: evaluation panicked: retention judges
+      every low-mode neutron star on its pair's velocity: a merged binary's other fates need a
+      reader first (plan 11)", at `retention.rs`'s assertion. Nothing of the check was committed.
+    - _No new test_: the assertion is checked at every build, and
+      `neutron_stars_are_retained_as_the_brainstorm_says` (fast) still holds the four figures.
+      F13 stays a deferred correction outside plan 15 (Q5).
+    - _For main_ (T5.c). Plan 11's P11.T15 still says that if only the alternative passes its four
+      retention bands the default changes there with a bump; with the guard, a change needs a
+      reader of the other branches first, and the default passes. Plan 06's Provides (199) and
+      plan 11 (208, 549) can say the default was reviewed, not that P15.T5.c reviews it.
