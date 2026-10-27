@@ -10,7 +10,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::tests::{SEED, golden_systems, golden_systems_afresh, sample};
+use super::tests::{
+    LOOK72_OCEANS, SEED, golden_systems, golden_systems_afresh, look72_audit_contexts,
+    look72_galaxy, sample,
+};
 use super::*;
 use crate::planetary::hooks::figures::interior::ICE_SHELL_LIMIT;
 use crate::planetary::hooks::figures::{OceanFloor, TectonicRegime};
@@ -604,65 +607,24 @@ fn every_solid_body_publishes_its_ocean_over_the_sample() {
     census.assert_holds();
 }
 
-/// The seed of look-72's universe, LOOK72 (`tests/observe_brief.rs`'s; as
-/// `moon_ice/lag_tests.rs` holds it).
-const LOOK72: u64 = 0xa49f_649b_ef43_4b20;
-
-/// LOOK72's three regular moons whose oceans look-92-93 read on the wire at 23 (decision-p14-t51g
-/// Q9), as `moon_ice/lag_tests.rs` holds them.
-const LOOK72_OCEANS: [&str; 3] = [
-    "020e56ef60080002.0c01",
-    "420e5bbe00800024.0306",
-    "420e5bbe00800032.0701",
-];
-
-/// The systems of the 62 bodies of LOOK72's triage (decision-absurd-states-24 R4.3), as
-/// `moon_ice/lag_tests.rs` holds them.
-const LOOK72_TRIAGED_SYSTEMS: [&str; 21] = [
-    "020e56ef20080000",
-    "020e56ef20080001",
-    "020e56ef20080004",
-    "020e56ef20080005",
-    "020e56ef20080006",
-    "020e56ef20090004",
-    "020e56ef60070001",
-    "020e56ef60070005",
-    "020e56ef60080000",
-    "020e56ef60080003",
-    "020e56ef60080004",
-    "020e56ef60080007",
-    "020e56ef60090005",
-    "020e56ef60090006",
-    "020e56efa0080000",
-    "020e56efa0080003",
-    "020e66ef60070004",
-    "020e66efa0070007",
-    "020e66efa007000b",
-    "020e66efa007000c",
-    "020e66efa0080003",
-];
-
 /// P14.T51.g.b's census over LOOK72, every 24 hold in force: the systems of its three named
-/// oceans and of the triage's 62 bodies, as the golden systems', with the three by name: the
+/// oceans (`LOOK72_OCEANS`) and the 27 of the triage's 62 bodies (`look72_audit_contexts`; the
+/// census once listed 21 of them), as the golden systems', with the three by name: the
 /// prototype's 020e56ef60080002.0c01 and 420e5bbe00800024.0306 on ice V, and
 /// 420e5bbe00800032.0701 keeping its whole hydrosphere on rock (count (xiii); decision-p14-t51g
 /// Q9).
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn look72_s_bodies_publish_their_oceans() {
-    let galaxy = crate::galaxy::Galaxy::new(Seed::new(LOOK72)).with_full_potential();
-    let mut systems: BTreeSet<&str> = LOOK72_TRIAGED_SYSTEMS.into_iter().collect();
-    systems.extend(LOOK72_OCEANS.map(|id| id.split_once('.').expect("a body ID").0));
+    let seed = look72_galaxy().seed();
     let mut census = Census::default();
     let mut held = BTreeMap::new();
-    for id in systems {
-        let ctx = SystemContext::for_system(&galaxy, id.parse().expect("a system ID"))
-            .expect("a system of LOOK72");
-        let system = with_every_24_hold(|| generate(galaxy.seed(), &ctx));
+    for ctx in look72_audit_contexts() {
+        let system = with_every_24_hold(|| generate(seed, &ctx));
         if let Some(snapshot) = snapshot_under(&system, &ctx, OceanRules::Solved) {
             census.visit("look72", &ctx, (&system, &snapshot));
         }
-        held_regimes("look72", &ctx, galaxy.seed(), &mut held);
+        held_regimes("look72", &ctx, seed, &mut held);
     }
     census.print("LOOK72");
     print_movers(&census, &held);

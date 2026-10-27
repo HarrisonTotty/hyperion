@@ -30399,6 +30399,145 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - _Declined:_ the census's `Instant` timings (`the_envelopes_are_stated`). It is an ignored
         by-name census whose timings are printed, never asserted, as the crate's other censuses
         do; D5's release measurement is l's probe.
+  - _P14.T54.b.k, the audit and the cost_ (B3, 2026-10-27). Test-only: part k-1's audit and its
+    counts, re-applied on part 3's commit (05ad5867) and the batch review's fixes, and part k-1b's
+    builds of main's rulings on it. `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3; no
+    golden moves (`golden_diff.py`: 0 moved), and no hold is added. Every run is every 24 hold
+    with the record's rules at their batch (`every_record_batch`, now `system::tests`').
+    - _The audit_ (`planetary/system/audit_tests.rs`): one walk of every present planet, member
+      and moon with a bulk section, each record as `snapshot_at` builds it (the epoch with its
+      small bodies' rules); `AuditBody` keeps each item's failures and lists only.
+      `under_every_24_hold_the_audit_s_must_fix_asserts_hold` asserts M1, M3, M4, M6, M7, M9, M10
+      and M11 over set C, each failure a `TO MAIN:` line (the walk 16.5 s, the test 21.7 s in
+      `sim_test.sh`, 4 threads). Its two by-name twins over set A share one walk
+      (`audit_set_census`, 55.9 s): `…_over_the_audit_set`, the same asserts, and
+      `under_every_24_hold_m1_s_six_hothouses_hold_over_the_audit_set`, M1's six. M3 recomputes
+      T_rest (N₂'s and H₂'s terms over the published partials from max(T_eq, the night floor at
+      the published pass's heat flow)); no accessor was added to the ceiling. M4 reads
+      `envelope_tag_faults`, `assert_envelope_tags`' rule with the air's rules a parameter (a gas
+      envelope `Ok` or not modelled under the batch) and its faults returned; it keeps part 3's
+      rules (a steam envelope's label the section's, no derivation's own state a steam envelope,
+      under part 3 the partition's reservoir's share), merged at the re-application.
+      `assert_envelope_tags` asserts it at `AirRules::Held`, as before.
+    - _Helpers in `system/tests.rs`:_ `look72_audit_contexts` (LOOK72's 27 triaged systems and
+      the three of `LOOK72_OCEANS`, which moved here from lag_tests and ocean_tests),
+      `golden_contexts` (no generation), `every_record_batch`, `envelope_tag_faults`;
+      `runaway_now`, `runaway_at_peak`, `limit_now`, `look72_galaxy`, `look72_triaged_contexts`,
+      `GOLDEN_SYSTEMS_SEED`, `HOTHOUSE_BODY` and `EnvelopeBody` (part 3's fields among them)
+      widened to `pub(super)`.
+    - _D3.3's gaps closed:_ T56.g's lag censuses (`moon_ice/lag_tests.rs`) run under every 24
+      hold, the moon bulk's Held, BulkOnly and Batch nested inside; the committed one reads the
+      goldens and LOOK72's 30 (827 records, 34 lagged, 40.8 s), the 400's by name (6,379 records,
+      124 lagged). Each moon's derivation is read from its parent's record (`primary_record`'s
+      `ParentNow`), not `parent_now` (the moon paths, below). Both LOOK72 ocean censuses
+      (`look72_s_oceans_end_at_their_liquidus`, `look72_s_bodies_publish_their_oceans`) read the
+      30 systems, not 21.
+    - _Repairs_ (stale by-name pins, each restated from the run):
+      - `hooks/aerosols/tests.rs::under_every_24_hold_t53c_s_thin_airs_are_stated`: 1100 was
+        pinned a `Snowball` at 100.0–100.1 Pa; it is `Tenuous` at 1.67–1.69 Pa (1.6796 Pa), its
+        N₂ 45–55 times its saturation over its ice (×49.18 at its 32.19 K coldest zone). P14.T54.b.e
+        moved it with T53.c (decision-p14-t54b-e-findings §B, §C). The supersaturated set [1100,
+        e101, e103] is unchanged.
+      - `system/tests.rs::under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor`:
+        raised / cover / for_body / argon, pinned 1,408 / 1,350 / 0 / 1,139 with four re-settled,
+        are 1,365 / 1,307 / 0 / 1,121 with fourteen. Holding each member in scratch: P14.T54.b.f
+        (the cold traps in the passes) 1,408 → 1,363, 1,350 → 1,306, 1,139 → 1,121 and ten
+        re-settled airless members (its last-bits path, decision-p14-t54b-f-coldtraps §11);
+        P14.T54.b.e 1,363 → 1,365 and 1,306 → 1,307; T51.g.b, T48.g and i none.
+    - _The sets as built:_ C (committed) is the first 60 sample systems, the 15 goldens and
+      LOOK72's 30 (its 27 triaged systems and `LOOK72_OCEANS`' 3): 105 systems, 1,781 bodies with
+      a bulk section, 1,665 with a surface. A (by name) is the 400, the goldens and LOOK72's 30:
+      445 systems, 7,206 bodies, 6,736 surfaces.
+    - _MUST-FIX_ (0 faults over C and over A on each asserted item):
+      - M1: no runaway beyond the maximum-greenhouse limit now, none under the deck below 430 K,
+        every one between the limits (c)'s; 166 runaways over A, 115 under the deck. (c)'s set:
+        over C 01ffeb2c5ffe0000.0100 alone (decked, above T_sat); over A the six
+        (decision-p14-t54b-k-hothouses §3, not a blocker), asserted by name with their decks and
+        sides: decked under, 02002b2ca0010000.0200, 02000b2d5ffd0000.0100 and
+        02002b2bdffd0000.0100; deckless above, 02002b2ca0030001.0300 and 02000b2d5ffd0000.0200;
+        decked above, 01ffeb2c5ffe0000.0100.
+      - M2: 0 `Temperate`s at or above T_sat(p_s) over A; LOOK72's two, 020e56ef20080004.0400
+        `Airless` at 253.94 K and 020e66efa0070007.0500 `Tenuous` at 224.80 K and 12.8 Pa.
+      - M3: 0 above max(273.15 K, T_rest); 61 at the cap over A (16 over C, each a `Snowball` at
+        273.15 K, 13–306 bar); one beyond the limit on a molten crust (41ffecb200000004.0400,
+        1,394 K).
+      - M4: 0 tag faults; 15 surfaces hidden over A (one over C, 02001b2ca0000000.0400): CH₄ ×2,
+        O₂ ×6, N₂ ×1, H₂O ×6 (the water envelopes at 1.04–1.29 T_c, shares 0.039–0.538).
+      - M5: 0 means below their night floor; 0 `Airless` or `Tenuous` partitions at or above
+        100 Pa (the largest 96.2 Pa, 01fffb2d60010000.0600); 37 unlit records over A, the sample's
+        18 at their floor and `fallback_black_hole`'s 19 at or above it, `for_body` `Ok` on all.
+      - M6: 0 faults; 158 lagged over A (68 over C), each rock, `Mercury`'s where airless, no
+        `H2O` lid; the lag censuses' lids moved, 42002cb1ff800003.0501 and `red_giant` e206.
+      - M7 (main, 2026-10-27): the floor at most T51.g.b's own bound, its ice's melting pressure at
+        T*, the solve's floor temperature (ice Ih's melting point at the shell's base's pressure),
+        to `implausibility`'s 10⁻⁶; 626.09 MPa stays T51.g.a's, under its own hold (the
+        `with_the_floor` censuses). By name: 41ffecb600000001.0200 (Rocky `Temperate`) floors on
+        ice V at 627.11 MPa, 61.4 km under 0.1 km, F 130.45 mW m⁻²: at its bound, ice V's melting
+        pressure at its T* of 273.050 K (the solve puts an ice floor on its curve), and under
+        629.34 MPa, ice V's at 273.16 K and every floor's (`implausibility`); its base 272.98 K is
+        T* less its brine's depression. Oceans over A: 736 on rock, 178 on ice V, 127 on ice III
+        (38 over C, by count), none on ice VI or VII; no lagged record with an ocean or an
+        `IceShell`.
+      - M8: 02000b2ca0000001.1100 `Tenuous` at 1.6796 Pa (54.96 K, A 0.3928), its N₂ ×49.18 over
+        its ice; runaway now 0.0029, at the peak 1.5134.
+      - M9: 0 above 0.11; 26 on the stand-in's arm over A (13 over C), all `komatiite` but
+        01ffeb2d5fff0001.0201 (`chondrite_cv`, 0.0832); the two named at 0.1100.
+      - M10: 405 `Tenuous` records over A (112 over C), each one's aerosols not modelled.
+      - M11: 0 faults (every new member finite and in range); `check_profile` 0 of 1,146
+        structures, `check_shapes` 0; gas giants' NH₃ τ 0.50–7.50 over 25, ice giants' CH₄ τ
+        1.63–14.35 over 23; the largest surface mode τ 1.00 × 10⁴ (H₂SO₄, 2200365a7ff80000.0100).
+      - M12: part k-2.
+    - _Counts_ (over A; the full lists in `b3/k-counts.md`, for the bless note):
+      - (i): 0 `Snowball`s listing a sea below its own extent, 0 an ocean under its ice.
+      - (ii): 24 deckless runaways at or above 430 K (3 over C), 431.1 K (02003b2ca0000000.0300)
+        to 956.1 K (02002b2ca0030001.0300); C's three among them.
+      - (iii): 15 movers (O₂ ×6, H₂O ×6, CH₄ ×2, N₂ ×1), two beyond 2.5 T_c, recorded (main):
+        42002cb1ffc00000.0200, O₂ at 5.77 T_c, share 1.07 × 10⁻³; 02000b2be0010000.0400, N₂ at
+        5.13 T_c, 1.58 × 10⁻³. 23 near misses.
+      - (iv): 50 `Snowball`s at the 273.15 K cap with a sea; 93 `Temperate`s with ices at 0.5 or
+        more.
+      - (v): 136 `Temperate`s the thermostat raises; 129 converged, 7 bracketed, 3 of them jumps
+        above 10⁻⁶ (01ffeb2c60020000.0400, 01ffdb2c1ffd0000.0400, 02003b2d1ffe0001.0200).
+      - (vi): 101 acid decks (4 at 23), τ(550) 0.47–25,508, 31 above R08's τ 1,000 (on
+        R08.T16.a's preconditions, main); six at the SO₂ cap of 10⁻², each a runaway; the largest
+        2200365a7ff80000.0100.
+      - (vii): 3 at 10× or more: 01ffeb2d20000000.e101 ×1,132, 02002b2d1ffe0000.e103 ×741, 1100
+        ×49.2. No new member.
+      - (viii): 0 decks based in a registry gap.
+      - (ix): 0 `Ice` surfaces at T0 above 273.15 K that are not lagged.
+      - (x): 3,352 refractory or salt decks below their join, none τ ≥ 1 above 1 bar; 355 no-τ
+        deep modes topped above 10 bar (108 over C at i); two ice giants' CH₄ τ above R08's 10,
+        01ffeb2d5fff0001.0700 13.5 and 02003b2b9fff0000.1100 14.4 (on R08.T16.a's preconditions,
+        main).
+      - (xi): (c)'s six (M1).
+      - (xii): 0 rows labelled `supercritical`, 0 `Bottom` bases past p_c; two CH₄ decks above
+        0.99 T_c, recorded (main): 01ffeb2b5fff0001.0400 at 0.9939, LOOK72's 020e56ef20080000.0900
+        at 0.9966.
+      - (xiii): 36 regular moons whose whole hydrosphere is liquid on rock (one in LOOK72's 30,
+        420e5bbe00800032.0701); 736 rock-floored oceans.
+      - (xiv): 405 `Tenuous` records; the largest haze τ by rule 8.10 (01ffdb2c60020000.0600), dust
+        0.268 (02002b2d1ffe0000.e103).
+      - (xv): at 25: P14.T53.b part 3 did not board.
+      - (xvi): 25 heated-branch moons above 22 W m⁻² (22.7 to 2,238 W m⁻², 42002cb1ffc00008.0301),
+        each a heat pipe, 23 airless; one cold-branch moon publishing an ocean,
+        42002cb1ffc00009.0303.
+      - _The magnetosphere_ (not a gate): 832 airless moons of sub-Neptune and giant primaries,
+        169 between r_mp and 2.41 r_mp, 255 inside, 408 beyond.
+      - _The taxonomic classes by kind:_ 0 against their rule. Planets 1,319 none; Kuiper bodies
+        2,797 neutral, 772 red; belt members 511 none, V 260, S 25, Xc 10, C 1, P 1; other moons
+        777 none, P 139, V 37, C 30, K 21, S 20, Xc 15, A 1; no Q.
+    - _The moon paths_ (main: k-2 measures; measured in k-2): under the air's batch with the
+      weathered area mix a moon's passes read its planet's field (`ParentNow::planet_field`),
+      which only `primary_record` sets. `parent_now` (lever (e3)) builds no record, so a moon
+      derived from it takes a different weathering case: `solar_like` 42006cba00000009.0501's T_eq
+      is 132.063 K that way against its record's 132.323 K. Generation's moon laws
+      (`moon_rotations`, `rotation_of`'s moon arm) read `parent_now`, so at 24 a moon's law may
+      read a derivation that is not its record's; `parent_now`'s test-side check nulls the field
+      "which no moon's law reads", written at c, before e.
+    - _Attribution:_ (k-2)
+    - _Cost shares:_ (k-2)
+    - _§C.7:_ (k-2)
+    - _R09's coarse field:_ (k-2)
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

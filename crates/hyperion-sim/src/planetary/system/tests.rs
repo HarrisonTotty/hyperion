@@ -7141,7 +7141,7 @@ fn generation_s_dead_derivations_move_no_bit_of_the_sample() {
 // the sample and the golden systems.
 
 /// The universe the golden systems are pinned in: `tests/planetary_golden.rs`'s `SYSTEMS_SEED`.
-const GOLDEN_SYSTEMS_SEED: u64 = 0x5eed_0000_0014_0032;
+pub(super) const GOLDEN_SYSTEMS_SEED: u64 = 0x5eed_0000_0014_0032;
 
 /// The golden systems of `tests/planetary_golden.rs` (its `GOLDEN_SYSTEMS`, P14.T32) by name and
 /// pinned ID, whose `planetary/systems` goldens pin them: the census's fixtures. A copy, since an
@@ -7178,6 +7178,19 @@ pub(super) fn golden_systems() -> &'static [(&'static str, SystemContext, Planet
 /// The golden systems ([`GOLDEN_SYSTEMS`]) generated afresh, under the rules in force on the
 /// calling thread (a test's switch among them, which a system generated once would not read).
 pub(super) fn golden_systems_afresh() -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+    golden_contexts()
+        .into_iter()
+        .map(|(name, ctx)| {
+            let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), &ctx);
+            (name, ctx, system)
+        })
+        .collect()
+}
+
+/// The golden systems' ([`GOLDEN_SYSTEMS`]) names and contexts in the Milky Way fixture at their
+/// seed, [`GOLDEN_SYSTEMS_SEED`], with no system generated: for a census that generates its own
+/// under its switches.
+pub(super) fn golden_contexts() -> Vec<(&'static str, SystemContext)> {
     let galaxy = crate::galaxy::Galaxy::from_params(
         Seed::new(GOLDEN_SYSTEMS_SEED),
         crate::galaxy::params::GalaxyParams::milky_way_like(),
@@ -7188,8 +7201,7 @@ pub(super) fn golden_systems_afresh() -> Vec<(&'static str, SystemContext, Plane
         .map(|&(name, id)| {
             let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
             let ctx = SystemContext::for_system(&galaxy, id).expect("a pinned ID names a system");
-            let system = generate(galaxy.seed(), &ctx);
-            (name, ctx, system)
+            (name, ctx)
         })
         .collect()
 }
@@ -7317,7 +7329,7 @@ fn zone_hosts(ctx: &SystemContext, zone: &OrbitZone, t: UniverseTime) -> (String
 /// present luminosities of the stars `zone`'s bodies orbit, along `orbit`, and of the companions,
 /// along their pairs' orbits: `Sky::of`'s sum, at the luminosities now rather than at their
 /// largest past (decision-pre-23-review item 33). 1 or more inside the present runaway limit.
-fn runaway_now(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
+pub(super) fn runaway_now(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
     limit_now(
         crate::planetary::derive::habitable_zone::HabitableLimit::RunawayGreenhouse,
         epoch,
@@ -7360,7 +7372,7 @@ fn unheld_flux(
 /// stars `zone`'s bodies orbit, along `orbit`, and of the companions, along their pairs' orbits:
 /// `Sky::of`'s sum for the insolation the inventory reads (P14.T53.b part 1 (a)). 1 or more inside
 /// the runaway limit at the hosts' peak.
-fn runaway_at_peak(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
+pub(super) fn runaway_at_peak(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
     limit_at(
         crate::planetary::derive::habitable_zone::HabitableLimit::RunawayGreenhouse,
         (HostLight::peak_luminosity, held_flux),
@@ -7372,7 +7384,7 @@ fn runaway_at_peak(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) 
 /// `zone`'s bodies orbit, along `orbit`, and of the companions, along their pairs' orbits
 /// ([`runaway_now`]; at the maximum-greenhouse limit `Sky::of`'s sum now, the ceiling's: below 1
 /// beyond it).
-fn limit_now(
+pub(super) fn limit_now(
     limit: crate::planetary::derive::habitable_zone::HabitableLimit,
     epoch: &Epoch<'_>,
     zone: &OrbitZone,
@@ -8615,6 +8627,23 @@ fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor()
 /// the raised records' argon ices went 383 → 1,139 and their cover changes 1,127 → 1,350 (the
 /// argon ices' means 4.88–69.69 K), and its `Tenuous` records, published at their base as the
 /// airless are and counted with them, raise five more (1,403 → 1,408).
+///
+/// Restated by P14.T54.b.k from T53.c's (1,408 / 1,350 / 0 / 1,139, four re-settled), which predates
+/// B2's members, each attributed by holding it inside the switches:
+///
+/// - P14.T54.b.f, the cold traps in the passes (the cold traps' batch, which has no switch of its
+///   own): the raised, their cover changes and their argon ices went 1,408 / 1,350 / 1,139 to
+///   1,363 / 1,306 / 1,121, and ten airless members joined the re-settled (02000b2ca0000001.e305,
+///   02001b2ca0000000.e104, 02000b2cdffe0000.e108, 01ffdb2cdffe0000.e104, 41ffecb600000001.e203,
+///   21ffd6587ff00000.e101, 02002b2bdfff0000.e103, 01fffb2ce0030000.0500, 01fffb2c20040000.e206,
+///   01ffcb2ba0010000.e105), an earlier pass under the floor moving their last bits through the
+///   cold traps' field (decision-p14-t54b-f-coldtraps §11; the floor census's
+///   `IN_THEIR_LAST_BITS`). With every 24 hold but T51.g.b's, T48.g's, e's and i's the counts are
+///   f's 1,363 / 1,306 / 1,121 and its fourteen re-settled; with the cold traps' rules held the
+///   re-settled are the four again;
+/// - P14.T54.b.e, the weathered area mix: two more raised (1,363 → 1,365), one more cover change
+///   (1,306 → 1,307);
+/// - T51.g.b, T48.g and i move none of them.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
@@ -8636,15 +8665,25 @@ fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
             moves.raised_read,
             moves.raised_argon
         ),
-        (1_408, 1_350, 0, 1_139)
+        (1_365, 1_307, 0, 1_121)
     );
     assert_eq!(
         named(&moves.resettled),
         [
+            "sample 02000b2ca0000001.e305",
+            "sample 02001b2ca0000000.e104",
+            "sample 02000b2cdffe0000.e108",
+            "sample 01ffdb2cdffe0000.e104",
+            "sample 41ffecb600000001.e203",
             "sample 01ffdb2c60020000.0700",
+            "sample 21ffd6587ff00000.e101",
+            "sample 02002b2bdfff0000.e103",
+            "sample 01fffb2ce0030000.0500",
             "sample 01fffb2d60010000.0601",
             "sample 02003b2be0000000.0700",
-            "sample 41ffecb1ff800000.e486"
+            "sample 41ffecb1ff800000.e486",
+            "sample 01fffb2c20040000.e206",
+            "sample 01ffcb2ba0010000.e105"
         ]
     );
     assert_eq!(moves.raised_airs.len(), 7, "{:#?}", moves.raised_airs);
@@ -10685,16 +10724,46 @@ const LOOK72_TRIAGED: [&str; 62] = [
 ];
 
 /// LOOK72's galaxy, as the server builds it, once per process.
-fn look72_galaxy() -> &'static crate::galaxy::Galaxy {
+pub(super) fn look72_galaxy() -> &'static crate::galaxy::Galaxy {
     static GALAXY: OnceLock<crate::galaxy::Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| crate::galaxy::Galaxy::new(Seed::new(LOOK72)).with_full_potential())
 }
 
 /// The contexts of the systems of [`LOOK72_TRIAGED`]'s bodies, each once, in ID order.
-fn look72_triaged_contexts() -> Vec<SystemContext> {
+pub(super) fn look72_triaged_contexts() -> Vec<SystemContext> {
     let galaxy = look72_galaxy();
     let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
         .iter()
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    ids.into_iter()
+        .map(|id| {
+            SystemContext::for_system(galaxy, id.parse().expect("a system ID"))
+                .expect("a system of LOOK72")
+        })
+        .collect()
+}
+
+/// LOOK72's three regular moons whose oceans look-92-93 read on the wire at 23
+/// (decision-p14-t51g Q9): 020e56ef60080002.0c01, 1,395.1 km under 51.3 km, and
+/// 420e5bbe00800024.0306, 976.1 km under 29.8 km, which end on ice V at 24 under P14.T51.g.a
+/// (about 336 and 493 km at the look's inferred bulk); and 420e5bbe00800032.0701, 519.5 km to rock
+/// at 429 MPa under 18.5 km, which keeps its whole hydrosphere on rock (count (xiii)'s example).
+/// Their systems are three of [`look72_audit_contexts`]'.
+pub(super) const LOOK72_OCEANS: [&str; 3] = [
+    "020e56ef60080002.0c01",
+    "420e5bbe00800024.0306",
+    "420e5bbe00800032.0701",
+];
+
+/// The contexts of LOOK72's systems every 24 census reads (P14.T54.b.k; design-k §0's sets): the
+/// 27 systems of [`LOOK72_TRIAGED`]'s bodies ([`look72_triaged_contexts`]) and those of
+/// [`LOOK72_OCEANS`], each once, in ID order: 30 systems.
+pub(super) fn look72_audit_contexts() -> Vec<SystemContext> {
+    let galaxy = look72_galaxy();
+    let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
+        .iter()
+        .chain(&LOOK72_OCEANS)
         .map(|id| id.split_once('.').expect("a body ID").0)
         .collect();
     ids.into_iter()
@@ -13108,7 +13177,7 @@ const LOOK72_106_K_RUNAWAY: &str = "820e6ee00000008d.0900";
 /// under P14.T53.a's batch a `RunawayGreenhouse` under Venus's deck at 934.6 K, A 0.76 and 414.8
 /// bar of carbon dioxide, and under P14.T53.b part 1 (a) alone a `Temperate` at 1,221.6 K and A
 /// 0.30.
-const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
+pub(super) const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
 
 /// P14.T53.b part 1's assertions over [`present_census`]'s set, with every 24 hold in force
 /// (decision-absurd-states-24 R3.4, R4.1 and R4.2; decision-t53b-arm-c §5.4–5.5; bless-note-23's
@@ -13727,42 +13796,42 @@ fn supercritical_methane_context() -> &'static SystemContext {
 /// One present planet, member or moon of [`envelope_walk`] at the epoch: its record's section
 /// tags, and each condensable of its derivation's air at or above its critical temperature
 /// against its critical isochore under its bulk's gravity (P14.T53.b part 2).
-struct EnvelopeBody {
+pub(super) struct EnvelopeBody {
     /// Its set ("sample", the golden system's name, or "look72"), its ID and its kind.
-    label: String,
+    pub(super) label: String,
     /// Its ID, as its record gives it.
-    id: String,
+    pub(super) id: String,
     /// Its bulk's class.
-    class: PlanetClass,
+    pub(super) class: PlanetClass,
     /// Its record's surface section's tag.
-    surface: SectionState,
+    pub(super) surface: SectionState,
     /// Its record's envelope section's tag.
-    envelope: SectionState,
+    pub(super) envelope: SectionState,
     /// Its derivation's surface state.
-    state: SurfaceState,
+    pub(super) state: SurfaceState,
     /// The state its derivation publishes, a steam envelope's label included (P14.T53.b part 3).
-    published: SurfaceState,
+    pub(super) published: SurfaceState,
     /// Its atmosphere's mean surface temperature, K.
-    t_s: f64,
+    pub(super) t_s: f64,
     /// Its atmosphere's surface pressure, Pa.
-    p_s: f64,
+    pub(super) p_s: f64,
     /// Its bulk's surface gravity, m s⁻².
-    g: f64,
+    pub(super) g: f64,
     /// Its condensables at or above their critical temperatures, whatever their shares.
-    columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    pub(super) columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
     /// The reservoir that hides its surface, as the record reads it.
-    hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    pub(super) hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
     /// Under P14.T53.b part 3, its partition's reservoir with the most liquid-like fluid under its
     /// bulk's gravity, whatever its share: the one the record reads.
-    partitioned: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    pub(super) partitioned: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
     /// Whether part 3 was in force as it was derived.
-    part_three: bool,
+    pub(super) part_three: bool,
 }
 
 impl EnvelopeBody {
     /// The body `record` of the set `set` and kind `kind`, derived as `derived`, under the rules in
     /// force.
-    fn of(set: &str, kind: &str, record: &BodyRecord, derived: &DerivedBody) -> Self {
+    pub(super) fn of(set: &str, kind: &str, record: &BodyRecord, derived: &DerivedBody) -> Self {
         let bulk = record.bulk().ok().expect("a walked body has its bulk");
         let gravity = bulk.surface_gravity();
         let air = derived.atmosphere();
@@ -13789,7 +13858,7 @@ impl EnvelopeBody {
     /// pressure, the share and the margins `p_i` ÷ p* and share ÷ [`THIN_ENVELOPE_FRACTION`].
     ///
     /// [`THIN_ENVELOPE_FRACTION`]: crate::planetary::params::THIN_ENVELOPE_FRACTION
-    fn column_line(
+    pub(super) fn column_line(
         column: &crate::planetary::derive::atmosphere::SupercriticalReservoir,
     ) -> String {
         format!(
@@ -13810,7 +13879,7 @@ impl EnvelopeBody {
     }
 
     /// Its tags, state, `T_s`, `p_s`, g and columns, for a census line.
-    fn line(&self) -> String {
+    pub(super) fn line(&self) -> String {
         format!(
             "{:?} {:?} (published {:?}), T_s {:.3} K, p_s {:.4e} bar, g {:.4} m s⁻²; surface {:?}, \
              envelope {:?}; partition's {}; [{}]",
@@ -13965,27 +14034,67 @@ fn under_every_24_hold_the_sample_s_moons_supercritical_columns_are_stated() {
     );
 }
 
-/// P14.T53.b part 2's tags on `body`: a solid class has its surface `Ok` and its envelope not
-/// applicable exactly where no supercritical envelope hides its surface, and its surface not
-/// applicable and its envelope not modelled where one does; every other class its surface not
-/// applicable and its envelope not modelled, under the air's sections' hold, which every caller's
-/// records read (P14.T54.b.i's envelope is `Ok` under the air's batch alone,
-/// `system::envelope`'s tests). So no `Ok` surface lies under a supercritical envelope, and
-/// exactly one of the two applies.
+/// P14.T53.b part 2's and part 3's tags on `body`, under the air's sections' hold, which every
+/// caller's records here read ([`envelope_tag_faults`] at [`AirRules::Held`]): none of its faults.
 fn assert_envelope_tags(body: &EnvelopeBody) {
+    assert_eq!(
+        envelope_tag_faults(body, AirRules::Held),
+        Vec::<String>::new()
+    );
+}
+
+/// P14.T53.b part 2's and part 3's tags on `body`, whose record was built under the air's sections'
+/// rules `air`, each that fails as a line by name: a solid class has its surface `Ok` and its
+/// envelope not applicable exactly where no supercritical envelope hides its surface and its
+/// published state is no steam envelope (part 3's label, the section's whatever the bulk's
+/// gravity), and its surface not applicable and its envelope not modelled where either holds;
+/// every other class its surface not applicable and its envelope not modelled under
+/// [`AirRules::Held`], and `Ok` or not modelled under [`AirRules::Batch`] (P14.T54.b.i's envelope,
+/// `system::envelope`'s tests; a supercritical envelope's section stays not modelled at 24,
+/// decision-p14-t53b-part3 §5). So no `Ok` surface lies under a supercritical envelope, and exactly
+/// one of the two applies. No derivation's own state is a steam envelope; a hidden surface's
+/// reservoir hides it, and its share is, to the bit, the air's largest column's under part 2 alone
+/// and the partition's reservoir's under part 3.
+pub(super) fn envelope_tag_faults(body: &EnvelopeBody, air: AirRules) -> Vec<String> {
     let at = || format!("{}: {}", body.label, body.line());
-    // A steam envelope's label is the section's whatever the bulk's gravity (P14.T53.b part 3).
+    let mut faults = Vec::new();
+    // A steam envelope's label is the section's whatever the bulk's gravity (P14.T53.b part 3),
+    // and only the published state carries it.
     let steam = body.published == SurfaceState::SteamEnvelope;
-    assert_ne!(body.state, SurfaceState::SteamEnvelope, "{}", at());
-    if body.class.has_solid_surface() && body.hidden.is_none() && !steam {
-        assert_eq!(body.surface, SectionState::Ok, "{}", at());
-        assert_eq!(body.envelope, SectionState::NotApplicable, "{}", at());
-    } else {
-        assert_eq!(body.surface, SectionState::NotApplicable, "{}", at());
-        assert_eq!(body.envelope, SectionState::NotModelled, "{}", at());
+    if body.state == SurfaceState::SteamEnvelope {
+        faults.push(format!(
+            "{}: a steam envelope as its derivation's state",
+            at()
+        ));
+    }
+    let solid = body.class.has_solid_surface();
+    let (surface, envelope): (SectionState, &[SectionState]) =
+        if solid && body.hidden.is_none() && !steam {
+            (SectionState::Ok, &[SectionState::NotApplicable])
+        } else if solid {
+            (SectionState::NotApplicable, &[SectionState::NotModelled])
+        } else {
+            match air {
+                AirRules::Held => (SectionState::NotApplicable, &[SectionState::NotModelled]),
+                AirRules::Batch => (
+                    SectionState::NotApplicable,
+                    &[SectionState::Ok, SectionState::NotModelled],
+                ),
+            }
+        };
+    if body.surface != surface || !envelope.contains(&body.envelope) {
+        faults.push(format!(
+            "{}: its tags against surface {surface:?} and envelope {envelope:?}",
+            at()
+        ));
     }
     if let Some(hidden) = &body.hidden {
-        assert!(hidden.hides_the_surface(), "{}", at());
+        if !hidden.hides_the_surface() {
+            faults.push(format!(
+                "{}: a hidden surface its reservoir does not hide",
+                at()
+            ));
+        }
         // Under part 3 the record reads the partition's reservoir, and the air's own partial
         // pressures lie at or under their caps; under part 2 alone, the air's largest column.
         let largest = if body.part_three {
@@ -13999,8 +14108,18 @@ fn assert_envelope_tags(body: &EnvelopeBody) {
                 .map(crate::planetary::derive::atmosphere::SupercriticalReservoir::share)
                 .fold(0.0, f64::max)
         };
-        assert_same_bits(hidden.share(), largest);
+        let share = hidden.share();
+        let same = !share.is_nan()
+            && !largest.is_nan()
+            && hyperion_testkit::float::bits(share) == hyperion_testkit::float::bits(largest);
+        if !same {
+            faults.push(format!(
+                "{}: its reservoir's share {share} not the one the record reads, {largest}",
+                at()
+            ));
+        }
     }
+    faults
 }
 
 /// P14.T53.b part 2 (decision-absurd-states-24 R2.1): with every landed 24 hold in force, the
@@ -15037,6 +15156,19 @@ impl ThinAirBody {
              [{gases}]{dominant}",
             self.state, self.t_s, self.coldest, self.p, self.column
         )
+    }
+}
+
+/// The record's rules at 24: the cold traps' and the air's sections' batches, and the small bodies'
+/// the thread's (`SmallBodyRules::Batch` inside `planetary::testing::with_every_24_hold`), which a
+/// system takes with [`PlanetarySystem::with_record_rules`] beside the thread's holds, so that
+/// every 24 member is on its records (design-k §0's "every 24 hold"): read inside the helper.
+pub(super) fn every_record_batch() -> RecordRules {
+    use crate::planetary::hooks::cold_traps::ColdTrapRules;
+    RecordRules {
+        cold_traps: ColdTrapRules::Batch,
+        air: AirRules::Batch,
+        ..RecordRules::in_force()
     }
 }
 

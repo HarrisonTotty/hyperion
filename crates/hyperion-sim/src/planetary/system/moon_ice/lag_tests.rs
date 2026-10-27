@@ -1,6 +1,8 @@
 //! P14.T56.g's tests: a hot ice bulk's surface is its heated shell's rock lag
 //! (decision-p14-t56g §4, §5, §7 and §8 (d)), under the moon bulk's batch rules
-//! ([`MoonBulkRules::Batch`]) against P14.T56.f's arms alone ([`MoonBulkRules::BulkOnly`]).
+//! ([`MoonBulkRules::Batch`]) against P14.T56.f's arms alone ([`MoonBulkRules::BulkOnly`]), every
+//! other 24 hold in force and the record's rules at their batch (P14.T54.b.k;
+//! decision-t24i-airless-state D3.3: the census once ran under the moon bulk's rules alone).
 //!
 //! And P14.T51.g.a's census (decision-p14-t51g Q9, Q4): with every 24 hold in force but
 //! P14.T51.g.b's ocean (which supersedes the floor where both are; its own census is
@@ -31,7 +33,10 @@ use crate::planetary::moons::regular::{
 use crate::planetary::moons::tides::TidalBranch;
 use crate::planetary::record::BodyRecord;
 use crate::planetary::surface::RECORD_TIME;
-use crate::planetary::system::tests::{SEED, golden_systems, golden_systems_afresh, sample};
+use crate::planetary::system::tests::{
+    GOLDEN_SYSTEMS_SEED, LOOK72_OCEANS, SEED, every_record_batch, golden_contexts,
+    golden_systems_afresh, look72_audit_contexts, look72_galaxy, sample,
+};
 use crate::planetary::system::*;
 use crate::planetary::testing::with_every_24_hold;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
@@ -187,7 +192,7 @@ impl LagCensus {
         if ctx.age_at(t).value() <= 0.0 {
             return;
         }
-        let held_snapshot = held.snapshot_at(ctx, t);
+        let held_snapshot = with_moon_bulk(MoonBulkRules::Held, || held.snapshot_at(ctx, t));
         let before = with_moon_bulk(MoonBulkRules::BulkOnly, || bulk_only.snapshot_at(ctx, t));
         with_moon_bulk(MoonBulkRules::Batch, || {
             let after = batch.snapshot_at(ctx, t);
@@ -214,7 +219,14 @@ impl LagCensus {
                         let primary = batch.body(parent).expect("a moon's parent is a body");
                         let host = fate_host(ctx, batch.zone_of(primary));
                         let fate = batch.fate_of(primary, &host);
-                        let now = batch.parent_now(&epoch, &cosines, parent, &fate);
+                        // The parent as its record builds it: under the air's batch a moon's
+                        // passes read its planet's field from the planet's record
+                        // (`ParentNow::planet_field`, P14.T54.b.c and e), which `parent_now`,
+                        // building none, leaves unread.
+                        let label = crate::planetary::label::label(batch, parent)
+                            .expect("every body has a label");
+                        let (_, now) =
+                            batch.primary_record(&epoch, &cosines, primary, label, &fate);
                         let derived = batch
                             .record_moon(&epoch, body, (&now, &fate))
                             .expect("a moon with a bulk section is derived");
@@ -471,11 +483,34 @@ impl LagCensus {
     }
 }
 
-/// P14.T56.g over the golden systems (decision-p14-t56g §4, §8 (d)): every lagged record is rock,
-/// `Mercury`'s where airless; no airless record shows ice above the melting point at T0; the
-/// verdict is the retention arm's, a member's its T0's; `subgiant` 0101, `red_giant` 0503 and 0504
-/// and the members e202 and e204 are lagged rock, their bulks' figures unchanged; against
-/// P14.T56.f's arms alone no record moves but lagged ones. Count (ix) is listed.
+/// The census of the systems `sets` (each its set's name, its seed and its context), every 24 hold
+/// in force (`with_every_24_hold`) and the record's rules at their batch (`every_record_batch`):
+/// each generated with the moon bulk's rules held, at P14.T56.f's arms alone and at the batch, the
+/// rest at 24, and walked under the same holds ([`LagCensus::visit`]).
+fn lag_census(sets: &[(&str, Seed, &SystemContext)]) -> LagCensus {
+    with_every_24_hold(|| {
+        let rules = every_record_batch();
+        let mut census = LagCensus::default();
+        for &(name, seed, ctx) in sets {
+            let under =
+                |bulk| with_moon_bulk(bulk, || generate(seed, ctx).with_record_rules(rules));
+            let (held, bulk_only, batch) = (
+                under(MoonBulkRules::Held),
+                under(MoonBulkRules::BulkOnly),
+                under(MoonBulkRules::Batch),
+            );
+            census.visit(name, ctx, (&held, &bulk_only, &batch));
+        }
+        census
+    })
+}
+
+/// P14.T56.g over the golden systems and LOOK72's 30 (`look72_audit_contexts`), every 24 hold in
+/// force and the record's rules at their batch (decision-p14-t56g §4, §8 (d); P14.T54.b.k): every
+/// lagged record is rock, `Mercury`'s where airless; no airless record shows ice above the melting
+/// point at T0; the verdict is the retention arm's, a member's its T0's; `subgiant` 0101,
+/// `red_giant` 0503 and 0504 and the members e202 and e204 are lagged rock, their bulks' figures
+/// unchanged; against P14.T56.f's arms alone no record moves but lagged ones. Count (ix) is listed.
 ///
 /// `red_giant` e206 is lagged too, by name (main, 2026-10-23): an icy member at T0 289.0 K that
 /// lay airless on the cold branch under an `H2O` lid at `T_eq` 220.2 K. The `ocean_froze` gate
@@ -483,34 +518,34 @@ impl LagCensus {
 /// `T_eq` the lag moves here.
 #[test]
 fn a_hot_ice_bulk_s_surface_is_its_heated_shell_s_rock_lag() {
-    let bulk_only = with_moon_bulk(MoonBulkRules::BulkOnly, golden_systems_afresh);
-    let batch = with_moon_bulk(MoonBulkRules::Batch, golden_systems_afresh);
-    let mut census = LagCensus::default();
-    for (((name, ctx, held), (_, _, bulk_only)), (_, _, batch)) in
-        golden_systems().iter().zip(&bulk_only).zip(&batch)
-    {
-        census.visit(name, ctx, (held, bulk_only, batch));
-    }
-    census.print("the golden systems");
+    let start = std::time::Instant::now();
+    let look72 = look72_audit_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let goldens = golden_contexts();
+    let sets: Vec<(&str, Seed, &SystemContext)> = goldens
+        .iter()
+        .map(|(name, ctx)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx))
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let census = lag_census(&sets);
+    census.print("the golden systems and LOOK72's");
+    eprintln!("in {:.1} s", start.elapsed().as_secs_f64());
     census.assert_holds();
     census.assert_lagged(&GOLDEN_MUST_FIX);
     census.assert_lagged(&[RED_GIANT_E206]);
     census.assert_lids_moved(&[RED_GIANT_E206]);
 }
 
-/// P14.T56.g's census over the 400 whole systems, by name: as the golden systems' test, with the
-/// six hot ice bulks P14.T56.f leaves `Icy` there lagged rock, and 42002cb1ff800003.0501's surface
-/// under both arms (decision-p14-t56g §5).
+/// P14.T56.g's census over the 400 whole systems, by name, every 24 hold in force and the
+/// record's rules at their batch: as the golden systems' test, with the six hot ice bulks
+/// P14.T56.f leaves `Icy` there lagged rock, and 42002cb1ff800003.0501's surface under both arms
+/// (decision-p14-t56g §5).
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn a_hot_ice_bulk_s_surface_is_its_rock_lag_over_the_sample() {
-    let mut census = LagCensus::default();
-    for ctx in sample() {
-        let held = generate(SEED, ctx);
-        let bulk_only = with_moon_bulk(MoonBulkRules::BulkOnly, || generate(SEED, ctx));
-        let batch = with_moon_bulk(MoonBulkRules::Batch, || generate(SEED, ctx));
-        census.visit("sample", ctx, (&held, &bulk_only, &batch));
-    }
+    let sets: Vec<(&str, Seed, &SystemContext)> =
+        sample().iter().map(|ctx| ("sample", SEED, ctx)).collect();
+    let census = lag_census(&sets);
     census.print("the sample");
     if let Some(line) = census
         .lagged
@@ -1007,49 +1042,9 @@ fn a_moon_s_ocean_ends_at_its_liquidus_over_the_sample() {
     census.assert_holds();
 }
 
-/// The seed of look-72's universe, LOOK72 (`tests/observe_brief.rs`'s).
-const LOOK72: u64 = 0xa49f_649b_ef43_4b20;
-
-/// LOOK72's three regular moons whose oceans look-92-93 read on the wire at 23
-/// (decision-p14-t51g Q9): 020e56ef60080002.0c01, 1,395.1 km under 51.3 km, and
-/// 420e5bbe00800024.0306, 976.1 km under 29.8 km, which end on ice V at 24 (about 336 and 493 km
-/// at the look's inferred bulk); and 420e5bbe00800032.0701, 519.5 km to rock at 429 MPa under
-/// 18.5 km, which keeps its whole hydrosphere on rock (count (xiii)'s example).
-const LOOK72_OCEANS: [&str; 3] = [
-    "020e56ef60080002.0c01",
-    "420e5bbe00800024.0306",
-    "420e5bbe00800032.0701",
-];
-
-/// The systems of the 62 bodies of LOOK72 whose surface state the triage of 2026-10-22 found at
-/// odds with their temperature or phases (triage-absurd-states; decision-absurd-states-24 R4.3),
-/// by which every 24 member's census reads LOOK72.
-const LOOK72_TRIAGED_SYSTEMS: [&str; 21] = [
-    "020e56ef20080000",
-    "020e56ef20080001",
-    "020e56ef20080004",
-    "020e56ef20080005",
-    "020e56ef20080006",
-    "020e56ef20090004",
-    "020e56ef60070001",
-    "020e56ef60070005",
-    "020e56ef60080000",
-    "020e56ef60080003",
-    "020e56ef60080004",
-    "020e56ef60080007",
-    "020e56ef60090005",
-    "020e56ef60090006",
-    "020e56efa0080000",
-    "020e56efa0080003",
-    "020e66ef60070004",
-    "020e66efa0070007",
-    "020e66efa007000b",
-    "020e66efa007000c",
-    "020e66efa0080003",
-];
-
 /// P14.T51.g.a's census over LOOK72, every 24 hold in force: the systems of its three named
-/// oceans and of the triage's 62 bodies, as the golden systems' test, with the three by name.
+/// oceans (`LOOK72_OCEANS`) and the 27 of the triage's 62 bodies (`look72_audit_contexts`; the
+/// census once listed 21 of them), as the golden systems' test, with the three by name.
 /// 020e56ef60080002.0c01 and 420e5bbe00800024.0306 end on ice V, their depths printed (the
 /// ruling's 336 and 493 km are at the look's inferred bulk), and 420e5bbe00800032.0701 keeps its
 /// whole hydrosphere on rock, 23's to the bit by the census, within 2 km of the 519.5 km the look
@@ -1057,15 +1052,10 @@ const LOOK72_TRIAGED_SYSTEMS: [&str; 21] = [
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn look72_s_oceans_end_at_their_liquidus() {
-    let galaxy = crate::galaxy::Galaxy::new(Seed::new(LOOK72)).with_full_potential();
-    let mut systems: std::collections::BTreeSet<&str> =
-        LOOK72_TRIAGED_SYSTEMS.into_iter().collect();
-    systems.extend(LOOK72_OCEANS.map(|id| id.split_once('.').expect("a body ID").0));
+    let seed = look72_galaxy().seed();
     let mut census = OceanCensus::default();
-    for id in systems {
-        let ctx = SystemContext::for_system(&galaxy, id.parse().expect("a system ID"))
-            .expect("a system of LOOK72");
-        let system = with_the_floor(|| generate(galaxy.seed(), &ctx));
+    for ctx in look72_audit_contexts() {
+        let system = with_the_floor(|| generate(seed, &ctx));
         if let Some(snapshot) = snapshot_at_24(&system, &ctx, OceanFloorRules::Floored) {
             census.visit("look72", &ctx, (&system, &snapshot));
         }
