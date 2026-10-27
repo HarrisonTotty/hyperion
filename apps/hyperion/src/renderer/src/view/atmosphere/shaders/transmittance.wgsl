@@ -172,9 +172,17 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let layer = buildTransmittanceLayer();
   let stored = min(vec4f(ray.depth, ray.columns.first), vec4f(HALF_MAX));
   textureStore(transmittanceOut, id.xy, layer, stored);
-  textureStore(absorberColumnsOut, id.xy, layer, min(ray.columns.more, vec4f(HALF_MAX)));
-  let firstFour = vec4f(ray.pressureColumns.first, ray.pressureColumns.more.xyz);
-  textureStore(absorberPressureColumnsOut, id.xy, layer, min(firstFour, vec4f(HALF_MAX)));
+  // The column tables only where the kernels read them, each otherwise one texel a layer
+  // (`tables.ts`'s columnTableSizes, R08.T11.e): slots 1 to 4's columns with two absorbers or more,
+  // the pressure-weighted columns with one or more.
+  let count = absorberCount();
+  if (count > 1u) {
+    textureStore(absorberColumnsOut, id.xy, layer, min(ray.columns.more, vec4f(HALF_MAX)));
+  }
+  if (count > 0u) {
+    let firstFour = vec4f(ray.pressureColumns.first, ray.pressureColumns.more.xyz);
+    textureStore(absorberPressureColumnsOut, id.xy, layer, min(firstFour, vec4f(HALF_MAX)));
+  }
   // A fifth pressure channel, and its table at the transmittance's size, only for five line slots
   // (`tables.ts`'s lastPressureColumnSize); the table is otherwise one texel a layer, never read.
   if (countOneBits(lineSlots()) > PRESSURE_CHANNELS_A_TABLE) {

@@ -125,6 +125,19 @@ export const KAPPA_STEP = 0.15;
 export const BAND_STEP = 0.1;
 
 /**
+ * {@link KAPPA_STEP} widened for a world whose per-planet tables would pass the 2 MB row: 0.3, a
+ * grazing interpolation error of about 0.3% (Design note 11; R08.T11.e builds the widening,
+ * `tables.ts`'s `rowBodyOf`).
+ */
+export const WIDE_KAPPA_STEP = 0.3;
+
+/**
+ * {@link BAND_STEP} widened for a world whose per-planet tables still pass the 2 MB row at
+ * {@link WIDE_KAPPA_STEP}: 0.15 (Design note 11; R08.T11.e).
+ */
+export const WIDE_BAND_STEP = 0.15;
+
+/**
  * The span of ln κ, ln(κ_max ÷ κ_min), under which one slice serves (Design note 17).
  *
  * @remarks
@@ -370,6 +383,37 @@ function logSpaced(low: number, high: number, count: number): Float64Array {
     values[i] = i === count - 1 ? high : low * Math.exp((span * i) / (count - 1));
   }
   return values;
+}
+
+/** One axis of a slicing respaced at `step` over its own extremes, by `slicingOf`'s rule. */
+function respacedAxis(values: Float64Array, step: number, oneBelow: number): Float64Array {
+  const low = values[0];
+  const high = values.at(-1);
+  if (low === undefined || high === undefined) {
+    throw new RangeError("a slicing holds at least one value an axis");
+  }
+  const span = Math.log(high / low);
+  return span <= oneBelow ? Float64Array.of(1) : logSpaced(low, high, 1 + Math.ceil(span / step));
+}
+
+/**
+ * A slicing respaced at the steps `kappaStep` and `bandStep` over its own extremes, by the rule a
+ * body's slicing is built with, 1 + ⌈ln(max ÷ min) ÷ step⌉ evenly in ln from min to max, and one
+ * below {@link ONE_SLICE_BELOW} and {@link ONE_BAND_BELOW}, which never widen (plan R08, Design note
+ * 11; R08.T11.e): at {@link KAPPA_STEP} and {@link BAND_STEP} the slicing itself, and at
+ * {@link WIDE_KAPPA_STEP} and {@link WIDE_BAND_STEP} Design note 11's widenings.
+ *
+ * @throws RangeError for a slicing with an empty axis.
+ */
+export function respacedSlicing(
+  slicing: OblateSlicing,
+  kappaStep: number,
+  bandStep: number,
+): OblateSlicing {
+  return {
+    kappa: respacedAxis(slicing.kappa, kappaStep, ONE_SLICE_BELOW),
+    bandGravityRatio: respacedAxis(slicing.bandGravityRatio, bandStep, ONE_BAND_BELOW),
+  };
 }
 
 /**

@@ -1497,7 +1497,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       memory; the 2 MB row stands. R08.T8.e's slot layers add 131 KB a slice and star slot
       (`decision-r08-t8-leans.md` §10, §13): the measured and slab Earths come to 570,264 B with
       one star and 729,768 B with two (`tables.ts`'s `perPlanetRowOf`, held to the engine's own
-      allocations). The row counts every per-planet allocation as built, in decimal MB, the curves
+      allocations); since R08.T11.e, the absorber-column table they do not read at one texel,
+      439,200 B and 598,704 B. The row counts every per-planet allocation as built, in decimal MB, the curves
       texture included. The layers never widen `KAPPA_STEP` or `BAND_STEP`; a body they would put
       over 2 MB keeps the shared read.
     - **Oblate bodies** (Design note 17, the same arithmetic). The slices multiply the per-planet
@@ -5050,7 +5051,8 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
 - **R08.T11.e The unread tables at one texel.** The absorber-column and pressure-column tables a
   medium does not read, at one texel. Design note 11's widenings are applied only above 2 MB. At
   the f 0.2 cap still over after both, fewer bands. Acceptance: the rows re-pinned, a
-  byte-identical giant read-back, `pnpm test`.
+  byte-identical giant read-back, `pnpm test`. _Built 2026-10-27_ (Risks, "Deviations in
+  R08.T11.e, as built").
 - **R08.T11.f Planetshine's nodes by the horizon,** only if an x4 row alone stays over 16.67 ms
   after QW30. Acceptance: within today's three-node error plus 0.1% on the twin's night-side set,
   and QW31.
@@ -10623,7 +10625,8 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
     - The giants' rows (`giantRows.test.ts`, the thin air; the methane air adds 15–16 KB), each as
       built, then as Design note 11's widening would give them, `KAPPA_STEP` 0.3 and then
       `BAND_STEP` 0.15 as well. That widening is not built: nothing in the client widens either
-      step, so every giant is drawn at the first figure.
+      step, so every giant is drawn at the first figure (since R08.T11.e built, `rowBodyOf`, over
+      rows with the unread tables at one texel: "Deviations in R08.T11.e, as built").
       - Jupiter: 4 slices and 3 bands, 1,648,036 B, then 1,254,812 and 1,254,812 B;
       - Saturn: 5 and 4, 2,065,836 B, then 1,279,388 and 1,254,812 B;
       - Uranus: 2 and 2, 837,012 B, unchanged by either;
@@ -10696,7 +10699,8 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
     built. _Ruled_ (`decision-r08-t11-frame.md` §5): not a blocker; R08.T11.e binds the column
     tables a medium does not read at one texel (no pixel moves), then Design note 11's widenings
     only for a row still over 2 MB, and at the f 0.2 cap still over after both, fewer bands, the
-    least count under 2 MB within Design note 10's metric, or the row left over.
+    least count under 2 MB within Design note 10's metric, or the row left over. _Built_ by
+    R08.T11.e ("Deviations in R08.T11.e, as built").
   - _The per-view bytes_: Design note 11's 0.43 MB line leaves out the full-resolution ray-march
     target and the air target, 33.2 MB a photorealistic view on high and 9.2 MB on low; small beside
     R05 Design note 21's 2 GB finding line. For R12.T10's memory rows.
@@ -10818,6 +10822,61 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
   - _Plescia 2004's 21.9 km_ (the science check, 2026-10-27): the paper could not be read (the
     publisher refused the fetch); the figure stands on the sim's constant and a secondary source,
     as plan 14's own check owes it.
+- **Deviations in R08.T11.e, as built** (2026-10-27; `decision-r08-t11-frame.md` §5). Edited:
+  `tables.ts` (`ColumnTables`, `ColumnTableSizes`, `columnTableSizes`, `RowWidening`, `RowBody`,
+  `rowBodyOf`; `perPlanetRowOf`'s `columnTables`; `AtmosphereTables`' `columnTables` argument and
+  `widening`, its `body` now the body as built in) and its test; `oblate.ts` (`WIDE_KAPPA_STEP`,
+  `WIDE_BAND_STEP`, `respacedSlicing`); `shaders/transmittance.wgsl` (each column table stored only
+  where the kernels read it); `giantRows.test.ts`; `AtmosphereCache.ts`'s size note;
+  `smoke/atmosphere.ts` (the stored tables at the medium's sizes, the pressure-column check past no
+  absorber, and the two groups `R08.T11.e the unread column table(s) at one texel`, parts 9 and 12)
+  and `smoke/page.ts`. No pixel moves.
+  - _The unread tables._ The absorber-column table is full size with two absorbers or more and the
+    pressure-column table with one or more, the kernels' own read conditions; each otherwise is one
+    texel a slice, as the fifth channel's already was. A slice is 131,096 B with no absorber,
+    262,160 B with one and 393,224 B, as before, with two or more.
+  - _The rows_ (`giantRows.test.ts`, [slices, bands, bytes]): thin Jupiter 4, 3, 599,524; Saturn 5,
+    4, 755,196; Uranus 2, 2, 312,756; the cap 10, 7, 1,484,404: none over 2 MB, none widened,
+    against R08.T11.a's 1,648,036, 2,065,836, 837,012 and 4,105,684 and Design note 11's 0.57,
+    0.72, 0.29 and 1.3–1.4 MB (its estimate leaves out the terms buffer, the body's table and the
+    curves' texel). Methane: Jupiter 1,139,664; Saturn 1,426,400; Uranus 590,768; the cap 2,810,928
+    at ten slices, the one row over 2 MB, which widens κ to 0.3: 6 slices, 7 bands, 1,762,288 B.
+    R08.T11.a's rows stay pinned beside them under `every`. The measured Earth's row is 439,200 B
+    with one star and 598,704 B with two (570,264 and 729,768 before, Design note 11's figures).
+  - _Design note 11's widenings, built._ `rowBodyOf` widens a body's slicing over the tables' own
+    row (the slot layers aside, which never widen): κ to 0.3, then the bands to 0.15, in that order,
+    the slicing respaced over its own extremes. The tables build, and their `body` carries, the
+    widened slicing; `hillaire.ts`, the smoke's twins and `tablesFigureOf` read the same figure and
+    gravity. Among the fixtures only the methane cap and the tests' four absorbers on Saturn's
+    figure (2.11 MB → 1.32 MB at three slices) widen.
+  - _Fewer bands at the cap: not built, for want of a row._ No fixture's row stays over 2 MB after
+    both widenings in a way fewer bands could mend: the excess the ruling named, the thick J_ms
+    bands (278 KB each), is not built yet, and a cap over 2 MB after both is over by its slices (two
+    absorbers or more, 393 KB a slice: four absorbers at 6 slices hold 2,359,344 B in them alone),
+    which fewer bands cannot take. Such a row is left over, flagged (`RowBody.over`), its picture not
+    coarsened, as the ruling's last clause has it; memory only, R12.T3 judges it. A row over by its
+    curves or band layers could take fewer bands, its count chosen by Design note 10's metric on the
+    twin, which a build cannot run; none exists, so the step waits for the first (the thick bake's
+    J_ms bands, R08.T14's wiring). Main told 2026-10-27.
+  - _Byte for byte_ (`R08.T11.e the unread column tables at one texel on a giant`, part 9, and
+    `… on Earth`, part 12, after R08.T11.b's face count): each body's tables and a frame from 1,000 km along its limb, built with
+    its unread column tables at one texel and again at full size (`every`) in the same slicing,
+    read back: the Saturn-class figure (no absorber, both tables at one texel; its transmittance and
+    multiple-scattering tables, sky view, aerial perspective, ray march and composite), and the
+    measured Earth (one absorber, the absorber-column table at one texel; the same and its sky's
+    irradiance). Both held byte for byte on both variants (2026-10-27), as did the ice giant (one
+    absorber) and R05's Earth with its ozone in earlier runs, left out for the watchdog: the two
+    giants' four builds took part 9 to 177.5 s of its 180, and the giant's irradiance is left out
+    likewise. In part 10 the measured Earth took the part to 164 s, so it runs in part 12.
+- **Deferred findings (2026-10-13 rule)** (R08.T11.e). Recorded and deferred: each leaves the
+  algorithm and every contract as it is.
+  - _Fewer bands at the cap_ (above): for the first row over 2 MB by its band layers, the thick
+    bake's J_ms bands among them.
+  - _The thick bake's bands_ (`thick/bake.ts`'s `thickBakeBands` reads `body.gravity.slicing`): not
+    wired into the client yet. When it is, it must take the tables' body (`AtmosphereTables.body`)
+    so that a widened body's bands match its tables'.
+  - _The one-texel tables in the twins_: `tablesCpu.ts` keeps its column tables at full size, of
+    zeros where unread; nothing reads them there.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is

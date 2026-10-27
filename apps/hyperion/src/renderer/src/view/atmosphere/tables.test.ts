@@ -68,6 +68,7 @@ import {
   absorberSlots,
   type AtmosphereBody,
   AtmosphereTables,
+  columnTableSizes,
   DENSITY_TABLE_LEVELS,
   densityTableLevelsM,
   IRRADIANCE_KERNEL,
@@ -106,6 +107,7 @@ import {
   PHASE_TABLE_ENTRIES,
   resampledDensity,
   resampledPhase,
+  rowBodyOf,
   SHARED_TABLE_CURVE_SLOT,
   SLOT_DEPTHS_KERNEL,
   slotDepthsRefusal,
@@ -761,11 +763,9 @@ describe("the tables of a sliced body (R08.T6.f)", () => {
       TRANSMITTANCE_SIZE.heightTexels,
       5,
     ]);
-    expect(sizeOf("atmosphere absorber columns")).toEqual([
-      TRANSMITTANCE_SIZE.widthTexels,
-      TRANSMITTANCE_SIZE.heightTexels,
-      5,
-    ]);
+    // Its air reads no column table, each one texel a slice (R08.T11.e).
+    expect(sizeOf("atmosphere absorber columns")).toEqual([1, 1, 5]);
+    expect(sizeOf("atmosphere absorber pressure columns")).toEqual([1, 1, 5]);
     expect(sizeOf("atmosphere multiple scattering")).toEqual([
       MULTI_SCATTERING_SIZE.widthTexels,
       MULTI_SCATTERING_SIZE.heightTexels,
@@ -2027,14 +2027,14 @@ describe("the slot layers (R08.T8.e, lever 5)", () => {
       tables.slotDepths,
       tables.slotDepthsRefusal,
       tables.row.baseBytes < PER_PLANET_ROW_BYTES,
-    ]).toEqual([null, { kind: "row", rowBytes: 2_151_048, mostBytes: 2_000_000 }, true]);
+    ]).toEqual([null, { kind: "row", rowBytes: 2_019_984, mostBytes: 2_000_000 }, true]);
   });
 
   it("are made where the per-planet row with them stays within 2 MB", async () => {
     const engine = await countingRenderEngine();
     const { medium, curves } = nearTheRow(1);
     const tables = new AtmosphereTables(engine, medium, R, curves);
-    expect([tables.slotDepthsRefusal, tables.rowBytes]).toEqual([null, 1_991_544]);
+    expect([tables.slotDepthsRefusal, tables.rowBytes]).toEqual([null, 1_860_480]);
   });
 
   it("never widen the slices or bands: a body kept off by the row keeps its own plan", async () => {
@@ -2127,6 +2127,22 @@ describe("the per-planet row (R08.T8.e, decision-r08-t8-leans.md §13, point 2)"
     },
   );
 
+  // R08.T11.e: as the tables were made before it, every column table at full size.
+  it.each(media)(
+    "counts every allocation with every column table at full size: %s",
+    async (_name, medium, radiusM, curves, body) => {
+      const engine = await countingRenderEngine();
+      const events: AllocationEvent[] = [];
+      engine.onAllocation((e) => events.push(e));
+      const tables = new AtmosphereTables(engine, medium, radiusM, curves, body, "every");
+      const row = perPlanetRowOf(medium, curves, tables.plan, "every");
+      expect([tables.rowBytes, liveTableBytes(events)]).toEqual([
+        row.baseBytes + (tables.slotDepthsRefusal === null ? row.slotDepthBytes : 0),
+        tables.rowBytes,
+      ]);
+    },
+  );
+
   it("takes 131,072 B a κ slice and light slot for the layers", () => {
     const plan = tablesPlanOf(saturnBody(), tableRadiusM(SATURN_SPHEROID));
     expect(perPlanetRowOf(binary.medium, binary.curves, plan).slotDepthBytes).toBe(
@@ -2134,14 +2150,16 @@ describe("the per-planet row (R08.T8.e, decision-r08-t8-leans.md §13, point 2)"
     );
   });
 
-  it("comes to 570,264 B on the measured Earth with one star and 729,768 B with two, the layers made", async () => {
+  // 570,264 B and 729,768 B before R08.T11.e, the absorber-column table, which one absorber does
+  // not read, at full size in its slice.
+  it("comes to 439,200 B on the measured Earth with one star and 598,704 B with two, the layers made", async () => {
     const rows = await Promise.all(
       [EARTH_REFERENCE_CURVES, [...EARTH_REFERENCE_CURVES, ...EARTH_REFERENCE_CURVES]].map(
         async (curves) =>
           new AtmosphereTables(await countingRenderEngine(), EARTH_REFERENCE, R, curves).rowBytes,
       ),
     );
-    expect(rows).toEqual([570_264, 729_768]);
+    expect(rows).toEqual([439_200, 598_704]);
   });
 
   it("refuses the layers by the row only past the base and the layers' sum over 2 MB", () => {
@@ -2311,5 +2329,181 @@ describe("the slot-depth kernel's WGSL (R08.T8.e)", () => {
       SLOT_DEPTHS_KERNEL.reference.includes(commonWgsl),
       /fn mediumAtHeight\(/u.test(SLOT_DEPTHS_KERNEL.reference),
     ]).toEqual([true, true, false]);
+  });
+});
+
+// --- The unread column tables at one texel (plan R08, R08.T11.e) ---------------------------------
+
+describe("the unread column tables at one texel (R08.T11.e)", () => {
+  const full = TRANSMITTANCE_SIZE;
+  const texel = { widthTexels: 1, heightTexels: 1 };
+
+  it("makes the absorber-column table at full size only with two absorbers and the pressure-column table only with one", () => {
+    const sizes = [
+      R05_EARTH_REFERENCE,
+      r05EarthWithOzoneAbsorber().medium,
+      fourAbsorberMedium().medium,
+    ].map((medium) => [absorberCount(medium), columnTableSizes(medium)]);
+    expect(sizes).toEqual([
+      [
+        0,
+        {
+          absorberColumns: texel,
+          absorberPressureColumns: texel,
+          lastAbsorberPressureColumn: texel,
+        },
+      ],
+      [
+        1,
+        {
+          absorberColumns: texel,
+          absorberPressureColumns: full,
+          lastAbsorberPressureColumn: texel,
+        },
+      ],
+      [
+        4,
+        { absorberColumns: full, absorberPressureColumns: full, lastAbsorberPressureColumn: texel },
+      ],
+    ]);
+  });
+
+  it("keeps the fifth channel's table to its own rule, and every other at full size under every", () => {
+    expect(columnTableSizes(fiveLineSlotMedium().medium).lastAbsorberPressureColumn).toEqual(full);
+    expect(columnTableSizes(R05_EARTH_REFERENCE, "every")).toEqual({
+      absorberColumns: full,
+      absorberPressureColumns: full,
+      lastAbsorberPressureColumn: texel,
+    });
+  });
+
+  it("makes a thin giant's column tables one texel a slice, and none anew for the same sizes", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(
+      engine,
+      saturnClassMedium(),
+      tableRadiusM(SATURN_SPHEROID),
+      NO_ABSORBER_CURVES,
+      saturnBody(),
+    );
+    const sizeOf = (name: string): GPUExtent3D[] =>
+      engine.textureSpecs.filter((spec) => spec.name === name).map((spec) => spec.size);
+    expect([
+      sizeOf("atmosphere absorber columns"),
+      sizeOf("atmosphere absorber pressure columns"),
+      sizeOf("atmosphere last absorber pressure column"),
+    ]).toEqual([
+      [
+        [1, 1, 1],
+        [1, 1, 5],
+      ],
+      [
+        [1, 1, 1],
+        [1, 1, 5],
+      ],
+      [
+        [1, 1, 1],
+        [1, 1, 5],
+      ],
+    ]);
+    expect(tables.row.transmittanceBytes).toBe(5 * (256 * 64 * 8 + 3 * 8));
+  });
+
+  it("makes the tables anew at full size for a medium that reads them, and binds them", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    const four = fourAbsorberMedium();
+    tables.setMedium(four.medium, R, four.curves);
+    const sizeOf = (name: string): GPUExtent3D | undefined =>
+      engine.textureSpecs.findLast((spec) => spec.name === name)?.size;
+    expect([
+      sizeOf("atmosphere absorber columns"),
+      sizeOf("atmosphere absorber pressure columns"),
+    ]).toEqual([
+      [full.widthTexels, full.heightTexels, 1],
+      [full.widthTexels, full.heightTexels, 1],
+    ]);
+    const transmittance = engine.dispatched.findLast(
+      (d) => d.kernel === "atmosphere transmittance",
+    );
+    expect([
+      transmittance?.bindings.storage["absorberColumnsOut"]?.texture,
+      transmittance?.bindings.storage["absorberPressureColumnsOut"]?.texture,
+    ]).toEqual([tables.absorberColumns, tables.absorberPressureColumns]);
+  });
+
+  it("makes the tables at the medium's sizes again after the engine's restore", async () => {
+    const engine = await countingRenderEngine();
+    const ozone = r05EarthWithOzoneAbsorber();
+    const tables = new AtmosphereTables(engine, ozone.medium, R, ozone.curves);
+    const before = tables.rowBytes;
+    engine.restore();
+    const sizeOf = (name: string): GPUExtent3D | undefined =>
+      engine.textureSpecs.findLast((spec) => spec.name === name)?.size;
+    expect([
+      sizeOf("atmosphere absorber columns"),
+      sizeOf("atmosphere absorber pressure columns"),
+      tables.rowBytes,
+    ]).toEqual([[1, 1, 1], [full.widthTexels, full.heightTexels, 1], before]);
+  });
+
+  it("writes each column table in the transmittance kernel only where the kernels read it", () => {
+    const code = transmittanceWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code).toMatch(
+      /let count = absorberCount\(\);\s*if \(count > 1u\) \{\s*textureStore\(absorberColumnsOut,/u,
+    );
+    expect(code).toMatch(
+      /if \(count > 0u\) \{\s*let firstFour = [^;]*;\s*textureStore\(absorberPressureColumnsOut,/u,
+    );
+    // And the kernels read the absorber-column table only past one absorber, the pressure-column
+    // table only past none.
+    for (const wgsl of [commonWgsl, oblateWgsl]) {
+      const reads = wgsl.replaceAll(/\/\/[^\n]*/gu, "");
+      expect(reads).toMatch(
+        /if \(count > 0u\) \{\s*let firstFour = tableAtUnitLayer\(pressureColumnTable, layer, unit\);/u,
+      );
+      expect(reads).toMatch(
+        /if \(count > 1u\) \{\s*columns\.more = tableAtUnitLayer\(columnTable, layer, unit\);/u,
+      );
+    }
+  });
+
+  // The smoke's byte-for-byte check (`R08.T11.e the unread column tables at one texel`) draws both
+  // in the same slicing: a thin Saturn-class row is 2.07 MB with every column table at full size.
+  it("slices the tables with every column table at full size as the tables the client draws", async () => {
+    const engine = await countingRenderEngine();
+    const radiusM = tableRadiusM(SATURN_SPHEROID);
+    const made = (columnTables: "read" | "every"): AtmosphereTables =>
+      new AtmosphereTables(
+        engine,
+        saturnClassMedium(),
+        radiusM,
+        NO_ABSORBER_CURVES,
+        saturnBody(),
+        columnTables,
+      );
+    const read = made("read");
+    const every = made("every");
+    expect([every.plan, every.widening, every.rowBytes > PER_PLANET_ROW_BYTES]).toEqual([
+      read.plan,
+      "none",
+      true,
+    ]);
+    expect(read.plan.kappa).toHaveLength(5);
+  });
+
+  it("leaves a body's slicing as it is where its row is under 2 MB", () => {
+    const giant = iceGiantMethaneBody();
+    const radiusM = tableRadiusM(giant.body.figure);
+    expect(rowBodyOf(giant.medium, giant.curves, giant.body, radiusM)).toEqual({
+      body: giant.body,
+      widening: "none",
+      over: false,
+    });
+    expect(rowBodyOf(R05_EARTH_REFERENCE, NO_ABSORBER_CURVES, null, R)).toEqual({
+      body: null,
+      widening: "none",
+      over: false,
+    });
   });
 });

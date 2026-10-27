@@ -81,6 +81,7 @@ import {
   TABLE_SIZES,
   type TableSizes,
   tableRadiusM,
+  tablesFigureOf,
 } from "../view/atmosphere/hillaire";
 import {
   grazingTwilight,
@@ -101,9 +102,10 @@ import {
   type AbsorberCurveSlots,
   type AtmosphereBody,
   AtmosphereTables,
+  type ColumnTables,
+  columnTableSizes,
   IRRADIANCE_SIZE,
   kernelMedium,
-  lastPressureColumnSize,
   MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
   packedScaleHeightsM,
@@ -1523,26 +1525,30 @@ function slotLayersOfReadback(
 }
 
 /**
- * The GPU's stored transmittance tables as the twins read them, with the lights' curves, the fifth
- * pressure channel's table at its size for the medium (`lastPressureColumnSize`), and the stored slot
- * layers where the tables hold them, which the ray march's twin then reads as the kernel does
- * (R08.T8.e).
+ * The GPU's stored transmittance tables as the twins read them, with the lights' curves, the column
+ * tables at their sizes for the medium (`columnTableSizes`, one texel where the kernels read none
+ * since R08.T11.e), and the stored slot layers where the tables hold them, which the ray march's
+ * twin then reads as the kernel does (R08.T8.e).
  */
 function storedTransmittance(
   gpu: PlanetReadback,
   medium: AtmosphereMedium,
   curves: AbsorberCurveSlots,
 ): TwinTransmittance {
+  const sizes = columnTableSizes(medium);
   return {
     ...(gpu.slotDepths === null
       ? {}
       : { slotDepths: slotLayersOfReadback(gpu.slotDepths, 1, 0, curves.length) }),
     transmittance: asTwinTable(gpu.transmittance, TRANSMITTANCE_SIZE),
-    absorberColumns: asTwinTable(gpu.absorberColumns, TRANSMITTANCE_SIZE),
-    absorberPressureColumns: asTwinTable(gpu.absorberPressureColumns, TRANSMITTANCE_SIZE),
+    absorberColumns: asTwinTable(gpu.absorberColumns, sizes.absorberColumns),
+    absorberPressureColumns: asTwinTable(
+      gpu.absorberPressureColumns,
+      sizes.absorberPressureColumns,
+    ),
     lastAbsorberPressureColumn: asTwinTable(
       gpu.lastAbsorberPressureColumn,
-      lastPressureColumnSize(medium),
+      sizes.lastAbsorberPressureColumn,
     ),
     curves,
   };
@@ -1565,19 +1571,20 @@ function storedSlices(
   slices: number,
 ): TwinTransmittance[] {
   const slotDepths = gpu.slotDepths;
+  const sizes = columnTableSizes(medium);
   return Array.from({ length: slices }, (_, k) => ({
     ...(slotDepths === null
       ? {}
       : { slotDepths: slotLayersOfReadback(slotDepths, slices, k, curves.length) }),
     transmittance: asTwinTable(layerOf(gpu.transmittance, slices, k), TRANSMITTANCE_SIZE),
-    absorberColumns: asTwinTable(layerOf(gpu.absorberColumns, slices, k), TRANSMITTANCE_SIZE),
+    absorberColumns: asTwinTable(layerOf(gpu.absorberColumns, slices, k), sizes.absorberColumns),
     absorberPressureColumns: asTwinTable(
       layerOf(gpu.absorberPressureColumns, slices, k),
-      TRANSMITTANCE_SIZE,
+      sizes.absorberPressureColumns,
     ),
     lastAbsorberPressureColumn: asTwinTable(
       layerOf(gpu.lastAbsorberPressureColumn, slices, k),
-      lastPressureColumnSize(medium),
+      sizes.lastAbsorberPressureColumn,
     ),
     curves,
   }));
@@ -1669,7 +1676,8 @@ async function checkPlanetTwins(
           { arm: "stored", amountChannels: [0, 1, 2, 3] },
         );
       }
-      if (medium.pressureBar !== undefined) {
+      // The pressure-column table is one texel a slice where the kernels read none (R08.T11.e).
+      if (medium.pressureBar !== undefined && absorberCount(medium) > 0) {
         checkTwin(
           checks,
           `${medium.name}: the pressure-column table (R08.T4.d)`,
@@ -2214,6 +2222,175 @@ export async function checkFaceCount(
     } finally {
       atmosphere.dispose();
     }
+  });
+}
+
+// --- R08.T11.e: the unread column tables at one texel ----------------------------------------------
+
+/** Whether two read-backs are the same, byte for byte. */
+function sameBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
+  if (a.byteLength !== b.byteLength) {
+    return false;
+  }
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  return x.every((byte, i) => byte === y[i]);
+}
+
+/** One body of R08.T11.e's check: its air and lights, its body, and whether its irradiance is read. */
+interface UnreadBody {
+  readonly name: string;
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+  readonly body: AtmosphereBody;
+  /**
+   * Whether the sky's irradiance is built and read too: a lit pass's table, whose build over a
+   * giant's bands is too long for its part's watchdog.
+   */
+  readonly irradiance: boolean;
+}
+
+/** A frame's read-backs of one set of tables, each its texture's bytes. */
+interface UnreadFrame {
+  readonly tables: ReadonlyArray<readonly [string, ArrayBuffer]>;
+  readonly frame: ReadonlyArray<readonly [string, ArrayBuffer]>;
+  /** The bytes the tables allocate ({@link AtmosphereTables.rowBytes}). */
+  readonly rowBytes: number;
+}
+
+/**
+ * One body's tables built with the column tables it reads (`read`) or every one at full size
+ * (`every`), and one frame of them drawn over the bare face and limb: the per-planet tables the
+ * kernels read and the frame's per-view tables and composite, read back.
+ */
+async function unreadFrameOf(
+  engine: RenderEngine,
+  unread: UnreadBody,
+  columnTables: ColumnTables,
+): Promise<UnreadFrame> {
+  const tables = new AtmosphereTables(
+    engine,
+    unread.medium,
+    tableRadiusM(unread.body.figure),
+    unread.curves,
+    unread.body,
+    columnTables,
+  );
+  try {
+    return await drawUnreadFrame(engine, tables, unread.irradiance);
+  } finally {
+    tables.dispose();
+  }
+}
+
+/** One frame of `tables` drawn and read back, with the tables themselves ({@link unreadFrameOf}). */
+async function drawUnreadFrame(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+  irradiance: boolean,
+): Promise<UnreadFrame> {
+  const figure = tablesFigureOf(tables);
+  const atmosphere = HillaireAtmosphere.over(engine, tables, twinSizes(TABLE_SIZES.high), null);
+  try {
+    const read = (texture: TextureHandle): Promise<ArrayBuffer> =>
+      engine.readTexture(texture, 0, undefined, "tolerance");
+    // From 1,000 km over the equator's datum along its limb, the sun 20° over the tangent point.
+    const distanceM = figure.equatorialRadiusM + 1_000_000;
+    const camera = limbCamera(distanceM, figure);
+    const suns = [limbSun(distanceM, figure, 20)];
+    const composite = await drawComposite(
+      engine,
+      atmosphere,
+      camera,
+      suns,
+      { label: "unread tables", surface: null, preExposure: SMOKE_EXPOSURE_SCALE },
+      (output) => engine.readTexture(output.colour),
+    );
+    const { skyView, aerial, rayMarch } = atmosphere.frameTables;
+    if (rayMarch === null) {
+      throw new Error("the ray march drew no target");
+    }
+    return {
+      tables: [
+        ["transmittance", await read(tables.transmittance)],
+        ["multiple scattering", await read(tables.multiScattering)],
+        ...(irradiance ? [["irradiance", await read(tables.irradiance())] as const] : []),
+      ],
+      frame: [
+        ["sky view", await read(skyView)],
+        ["aerial perspective", await read(aerial)],
+        ["ray march", await read(rayMarch)],
+        ["composite", composite],
+      ],
+      rowBytes: tables.rowBytes,
+    };
+  } finally {
+    atmosphere.dispose();
+  }
+}
+
+/**
+ * Builds and draws `unread` twice, its column tables at the medium's sizes and then all at full
+ * size, and records whether every read-back is the same byte for byte ({@link checkUnreadGiant}).
+ */
+async function checkUnread(
+  engine: RenderEngine,
+  checks: Checks,
+  unread: UnreadBody,
+): Promise<void> {
+  // The harness's GPU work runs in order: each build and frame is read back before the next.
+  const one = await unreadFrameOf(engine, unread, "read");
+  const every = await unreadFrameOf(engine, unread, "every");
+  const differ = [...one.tables, ...one.frame]
+    .filter(([name, bytes]) => {
+      const theirs = [...every.tables, ...every.frame].find(([other]) => other === name);
+      return theirs === undefined || !sameBytes(bytes, theirs[1]);
+    })
+    .map(([name]) => name);
+  const sizes = columnTableSizes(unread.medium);
+  checks.check(
+    `R08.T11.e ${unread.name}: the column tables its air does not read, at one texel, move no byte of its tables or its frame`,
+    differ.length === 0 && one.rowBytes < every.rowBytes,
+    `${differ.length === 0 ? "the same" : `differ: ${differ.join(", ")}`} over ${one.tables.length} tables and ${one.frame.length} frame read-backs; the absorber-column table ${sizes.absorberColumns.widthTexels} × ${sizes.absorberColumns.heightTexels} a slice, the pressure-column ${sizes.absorberPressureColumns.widthTexels} × ${sizes.absorberPressureColumns.heightTexels}; the row ${one.rowBytes} B against ${every.rowBytes} B with every one at full size`,
+  );
+}
+
+/**
+ * R08.T11.e: the unread column tables at one texel move no pixel on a giant
+ * (`decision-r08-t11-frame.md` §5). The Saturn-class figure under its thin H₂–He air, five slices
+ * and four bands, which reads neither column table: its tables and one frame from 1,000 km along
+ * its limb, built and drawn once with each column table the medium does not read at one texel a
+ * slice (`tables.ts`'s `columnTableSizes`) and once with every one at full size, as before
+ * R08.T11.e (`every`), in the same slicing, read back byte for byte: the transmittance and
+ * multiple-scattering tables, the frame's sky view, aerial perspective, ray march and composite,
+ * each the same, and the row the less. The sky's irradiance, a lit pass's, is left out for part
+ * 9's watchdog (the ice giant's two builds beside these took the group to 101.5 s on SwiftShader);
+ * {@link checkUnreadEarth} reads it on a body of one band.
+ */
+export async function checkUnreadGiant(engine: RenderEngine, checks: Checks): Promise<void> {
+  await checkUnread(engine, checks, {
+    name: "the Saturn-class figure",
+    medium: saturnClassMedium(),
+    curves: NO_ABSORBER_CURVES,
+    body: saturnBody(),
+    irradiance: false,
+  });
+}
+
+/**
+ * R08.T11.e on the measured Earth (`EARTH_REFERENCE` under the Sun's curves) on WGS 84, one slice
+ * and one band: one absorber, which reads the pressure-weighted column table and not the
+ * absorber-column one, the client's commonest case; as {@link checkUnreadGiant}, the sky's
+ * irradiance read too. It runs in part 12, after R08.T11.b's face count: in part 10 it took the
+ * part to 164 s of its 180 (60 s on SwiftShader, 2026-10-27).
+ */
+export async function checkUnreadEarth(engine: RenderEngine, checks: Checks): Promise<void> {
+  await checkUnread(engine, checks, {
+    name: "the measured Earth",
+    medium: EARTH_REFERENCE,
+    curves: EARTH_REFERENCE_CURVES,
+    body: earthBody(),
+    irradiance: true,
   });
 }
 

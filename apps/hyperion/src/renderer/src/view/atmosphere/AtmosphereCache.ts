@@ -108,7 +108,8 @@ import { provisionalThick, THICK_REASON } from "./thick/regime";
 /**
  * The cache's size, B: 32,000,000 of per-planet rows, decimal as `PER_PLANET_ROW_BYTES` is,
  * counted by each entry's tables' `rowBytes` as built (`decision-r08-t10a-leans.md` item 10):
- * about 56 measured Earths with one star (570,264 B), or 16 bodies at the 2 MB row. Only the bodies
+ * about 73 measured Earths with one star (439,200 B since R08.T11.e; 56 at 570,264 B before), or 16
+ * bodies at the 2 MB row. Only the bodies
  * wanted this frame can take it past this.
  */
 export const ATMOSPHERE_CACHE_BYTES = 32_000_000;

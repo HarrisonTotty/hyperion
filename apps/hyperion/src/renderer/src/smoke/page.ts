@@ -16,7 +16,9 @@
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
- * R08.T11.b's face count in part 12; R08.T6.b's kernels over N terms in two, its medium of four
+ * R08.T11.b's face count in part 12; R08.T11.e's unread tables in two, a giant's in part 9 after
+ * R08.T8.a's march band and Earth's in part 12 after R08.T11.b's face count; R08.T6.b's kernels
+ * over N terms in two, its medium of four
  * absorbers in part 6 and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the
  * Saturn-class figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
  * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
@@ -65,6 +67,8 @@ import {
   checkSeveralSuns,
   checkSurfaceLightingEarth,
   checkSurfaceLightingSaturn,
+  checkUnreadEarth,
+  checkUnreadGiant,
   timeFarLimb,
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
@@ -139,8 +143,8 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
  * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7's
  * several suns and R08.T8.e's slot layers on its binary, 11 R08.T9.b's Earth and Saturn-class
- * figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's face count), 7 R10's terrain groups
- * (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
+ * figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's face count and R08.T11.e's Earth), 7
+ * R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
  * joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's frames, which
  * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
  * materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
@@ -178,7 +182,7 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * parts' starts and their twins set up again cost about 30 s of the render's wall clock
  * (2026-10-23). R08.T11.b's face count (49 to 69 s) took part 8 past the watchdog beside
  * R07.T8.e–f's cell pass (185 s at a load of 13, R08.T6.f's Earth 79 s), so part 12 joined, with
- * it (2026-10-27).
+ * it (2026-10-27), and R08.T11.e's Earth (60 s), which took part 10 to 164 s, after it.
  */
 type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
@@ -418,6 +422,9 @@ async function run(
     checkSurfaceLightingSaturn(engine, checks, twins),
   );
   await group(9, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
+  await group(9, "R08.T11.e the unread column tables at one texel on a giant", () =>
+    checkUnreadGiant(engine, checks),
+  );
   await group(7, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
   await group(7, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
@@ -444,6 +451,9 @@ async function run(
     checkSeveralSuns(engine, checks, twins),
   );
   await group(10, "R08.T8.e the binary's slot layers", () => checkBinarySlotLayers(engine, checks));
+  await group(12, "R08.T11.e the unread column table at one texel on Earth", () =>
+    checkUnreadEarth(engine, checks),
+  );
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
   await group(11, "R08.T8.c the far limb's footprint", () =>
     checkFarLimbFootprint(engine, checks, twins),

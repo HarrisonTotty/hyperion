@@ -75,11 +75,15 @@ import {
   type TermAbsorber,
 } from "./medium";
 import {
+  BAND_STEP,
   bandLatitudeRad,
   type BodyGravity,
   gravityRatio,
   type OblateSlicing,
   principalRadiiM,
+  respacedSlicing,
+  WIDE_BAND_STEP,
+  WIDE_KAPPA_STEP,
 } from "./oblate";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
@@ -574,7 +578,50 @@ export const PRESSURE_CHANNELS_A_TABLE = 4;
 export function lastPressureColumnSize(medium: AtmosphereMedium): TableSize {
   return pressureChannelCount(lineSlotMask(medium)) > PRESSURE_CHANNELS_A_TABLE
     ? TRANSMITTANCE_SIZE
-    : { widthTexels: 1, heightTexels: 1 };
+    : ONE_TEXEL;
+}
+
+/** A table of one texel a layer: one the kernels never read. */
+const ONE_TEXEL: TableSize = { widthTexels: 1, heightTexels: 1 };
+
+/**
+ * Which of the transmittance kernel's column tables a body's {@link AtmosphereTables} make at full
+ * size (plan R08, R08.T11.e): those the medium's kernels read (`read`, the tables' own), or the
+ * absorber-column and pressure-column tables whatever the medium reads (`every`), as they were made
+ * before R08.T11.e, which the smoke draws beside them to show that no pixel moves.
+ */
+export type ColumnTables = "read" | "every";
+
+/** The sizes of the transmittance kernel's three column tables, one layer a slice each. */
+export interface ColumnTableSizes {
+  /** Absorber slots 1 to 4's columns. */
+  readonly absorberColumns: TableSize;
+  /** Pressure channels 0 to 3's pressure-weighted columns. */
+  readonly absorberPressureColumns: TableSize;
+  /** Pressure channel 4's ({@link lastPressureColumnSize}). */
+  readonly lastAbsorberPressureColumn: TableSize;
+}
+
+/**
+ * The sizes of a medium's column tables (plan R08, R08.T11.e; `decision-r08-t11-frame.md` §5):
+ * each at {@link TRANSMITTANCE_SIZE} where the kernels read it and one texel a layer where they
+ * read none, as the fifth pressure channel's already is (R08.T6.f's candidate). The kernels read the
+ * absorber-column table only with two absorbers or more and the pressure-column table only with one
+ * or more (`sliceStoredAt` in `oblate.wgsl`, `transmittanceThroughLayer` in `common.wgsl`,
+ * `slotDepths.wgsl`), and the transmittance kernel writes each only then, so a one-texel table moves
+ * no pixel. Under `every` the first two keep {@link TRANSMITTANCE_SIZE} whatever the medium reads.
+ */
+export function columnTableSizes(
+  medium: AtmosphereMedium,
+  columnTables: ColumnTables = "read",
+): ColumnTableSizes {
+  const count = absorberCount(medium);
+  const every = columnTables === "every";
+  return {
+    absorberColumns: every || count > 1 ? TRANSMITTANCE_SIZE : ONE_TEXEL,
+    absorberPressureColumns: every || count > 0 ? TRANSMITTANCE_SIZE : ONE_TEXEL,
+    lastAbsorberPressureColumn: lastPressureColumnSize(medium),
+  };
 }
 
 /** The relative tolerance a curve's node columns are held to on the kernels' grid. */
@@ -840,9 +887,9 @@ export const PER_PLANET_ROW_BYTES = 2_000_000;
  */
 export interface PerPlanetRow {
   /**
-   * The transmittance kernel's four tables in every κ slice, used or not: the optical depth, the
-   * absorber columns and the pressure-weighted columns at {@link TRANSMITTANCE_SIZE}, and the fifth
-   * pressure channel's at its own size ({@link lastPressureColumnSize}).
+   * The transmittance kernel's four tables in every κ slice: the optical depth at
+   * {@link TRANSMITTANCE_SIZE}, and the three column tables at their sizes for the medium
+   * ({@link columnTableSizes}; since R08.T11.e one texel a slice each where the kernels read none).
    */
   readonly transmittanceBytes: number;
   /** The lights' curves of growth ({@link packAbsorberCurves}), Design note 11's row's since R08.T4.d. */
@@ -873,22 +920,29 @@ function bytesOf(format: GPUTextureFormat, ...extent: readonly number[]): number
  * shapes the packers give, which `tables.test.ts` holds to the engine's own allocations.
  *
  * @remarks
- * Design note 11's estimates count the tables a medium reads; as built, the depth, absorber-column
- * and pressure-column tables are made at full size in every slice even where the medium leaves them
- * unused, so an absorbing body comes to more (R08.T11's, `decision-r08-t8-leans.md` §13, text F).
+ * Design note 11's estimates count the tables a medium reads. Until R08.T11.e the absorber-column
+ * and pressure-column tables were made at full size in every slice even where the medium left them
+ * unused, 393,224 B a slice with the depth's, so that a thin giant came to more
+ * (`decision-r08-t8-leans.md` §13, text F; R08.T11.a's rows); since R08.T11.e each one a medium does
+ * not read is one texel a slice ({@link columnTableSizes}), unless `columnTables` is `every`.
  */
 export function perPlanetRowOf(
   medium: AtmosphereMedium,
   curves: AbsorberCurveSlots,
   plan: TablesPlan,
+  columnTables: ColumnTables = "read",
 ): PerPlanetRow {
   const slices = plan.kappa.length;
   const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
-  const last = lastPressureColumnSize(medium);
+  const sizes = columnTableSizes(medium, columnTables);
+  const tableBytes = (size: TableSize): number =>
+    bytesOf("rgba16float", size.widthTexels, size.heightTexels);
   const transmittanceBytes =
     slices *
-    (3 * bytesOf("rgba16float", w, h) +
-      bytesOf("rgba16float", last.widthTexels, last.heightTexels));
+    (bytesOf("rgba16float", w, h) +
+      tableBytes(sizes.absorberColumns) +
+      tableBytes(sizes.absorberPressureColumns) +
+      tableBytes(sizes.lastAbsorberPressureColumn));
   const slots = absorberSlots(medium);
   const lead = curves[0] ?? [];
   const block = slots.reduce((sum, _, k) => sum + (lead[k]?.logPressures.length ?? 1), 0);
@@ -978,6 +1032,71 @@ export function slotDepthsRefusal(
   return rowBytes > PER_PLANET_ROW_BYTES
     ? { kind: "row", rowBytes, mostBytes: PER_PLANET_ROW_BYTES }
     : null;
+}
+
+/**
+ * Design note 11's widening of a body's slicing over the 2 MB row (plan R08, R08.T11.e): none
+ * (`none`); κ's step widened to `oblate.ts`'s `WIDE_KAPPA_STEP` (`kappa`); or that and the bands'
+ * to `WIDE_BAND_STEP` (`kappaAndBands`).
+ */
+export type RowWidening = "none" | "kappa" | "kappaAndBands";
+
+/** A body as its tables are sliced under the 2 MB row ({@link rowBodyOf}). */
+export interface RowBody {
+  /** The body with the slicing the tables are built in: the given one, or it widened. */
+  readonly body: AtmosphereBody | null;
+  readonly widening: RowWidening;
+  /** Whether the row, the slot layers aside, still passes {@link PER_PLANET_ROW_BYTES} at it. */
+  readonly over: boolean;
+}
+
+/**
+ * The slicing a body's tables are built in under the 2 MB row (plan R08, Design note 11; R08.T11.e,
+ * `decision-r08-t11-frame.md` §5): the body's own where its per-planet row, the slot layers aside
+ * (they never widen a step, `decision-r08-t8-leans.md` §13), is at most
+ * {@link PER_PLANET_ROW_BYTES}; past it, κ's step widened to `WIDE_KAPPA_STEP` (`oblate.ts`'s
+ * `respacedSlicing`), and still past it the bands' to `WIDE_BAND_STEP` as well, in Design note 11's
+ * order. The row is the tables' own, with the column tables the medium reads
+ * ({@link columnTableSizes}), so that tables made with every one at full size (`every`, the smoke's)
+ * are sliced as the client's.
+ *
+ * @remarks
+ * A row still past 2 MB after both is left over it, and `over` says so. The ruling's next step for
+ * the cap at f = 0.2, fewer bands and never a further κ widening (κ's slices carry the limb's colour
+ * on every grazing ray), is not built: no fixture's row takes it. The excess it was ruled for is the
+ * thick J_ms bands, which no table here holds yet, and the capped giants over 2 MB after both
+ * widenings are over by their slices (two absorbers or more, 393 KB a slice), which fewer bands
+ * cannot take, so they are left over rather than their picture coarsened. A row over by its curves
+ * or its band layers could take fewer bands, its count chosen by Design note 10's metric on the
+ * twin; none exists today (R08.T11.e's record). Memory only: R12.T3 judges it.
+ *
+ * @throws RangeError as {@link tablesPlanOf}.
+ */
+export function rowBodyOf(
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+  body: AtmosphereBody | null,
+  referenceRadiusM: number,
+): RowBody {
+  const over = (sliced: AtmosphereBody): boolean =>
+    perPlanetRowOf(medium, curves, tablesPlanOf(sliced, referenceRadiusM)).baseBytes >
+    PER_PLANET_ROW_BYTES;
+  if (body === null || !over(body)) {
+    return { body, widening: "none", over: false };
+  }
+  const widenedAt = (kappaStep: number, bandStep: number): AtmosphereBody => ({
+    ...body,
+    gravity: {
+      ...body.gravity,
+      slicing: respacedSlicing(body.gravity.slicing, kappaStep, bandStep),
+    },
+  });
+  const kappa = widenedAt(WIDE_KAPPA_STEP, BAND_STEP);
+  if (!over(kappa)) {
+    return { body: kappa, widening: "kappa", over: false };
+  }
+  const both = widenedAt(WIDE_KAPPA_STEP, WIDE_BAND_STEP);
+  return { body: both, widening: "kappaAndBands", over: over(both) };
 }
 
 /**
@@ -1707,12 +1826,12 @@ export interface TransmittanceTextures {
 }
 
 /**
- * The stored transmittance tables of one device, with the layers and the fifth channel's size they
+ * The stored transmittance tables of one device, with the layers and the column tables' sizes they
  * were made at.
  */
 interface SliceTextures extends TransmittanceTextures {
   readonly layers: number;
-  readonly lastSize: TableSize;
+  readonly sizes: ColumnTableSizes;
 }
 
 /**
@@ -1930,44 +2049,60 @@ function transmittanceNames(suffix: string): Readonly<Record<keyof Transmittance
 }
 
 /**
- * The transmittance kernel's four tables of `layers` layers, the fifth channel's at `lastSize`,
- * at `format`, named with `suffix`.
+ * The transmittance kernel's four tables of `layers` layers, the column tables at `sizes`
+ * ({@link columnTableSizes}), at `format`, named with `suffix`.
  */
 function createTransmittance(
   engine: RenderEngine,
   suffix: string,
   layers: number,
-  lastSize: TableSize,
+  sizes: ColumnTableSizes,
   format: GPUTextureFormat = "rgba16float",
 ): TransmittanceTextures {
   const names = transmittanceNames(suffix);
   return {
     transmittance: storedTable(engine, names.transmittance, TRANSMITTANCE_SIZE, layers, format),
-    absorberColumns: storedTable(engine, names.absorberColumns, TRANSMITTANCE_SIZE, layers, format),
+    absorberColumns: storedTable(
+      engine,
+      names.absorberColumns,
+      sizes.absorberColumns,
+      layers,
+      format,
+    ),
     absorberPressureColumns: storedTable(
       engine,
       names.absorberPressureColumns,
-      TRANSMITTANCE_SIZE,
+      sizes.absorberPressureColumns,
       layers,
       format,
     ),
     lastAbsorberPressureColumn: storedTable(
       engine,
       names.lastAbsorberPressureColumn,
-      lastSize,
+      sizes.lastAbsorberPressureColumn,
       layers,
       format,
     ),
   };
 }
 
-/** The one-texel size of the fifth pressure channel's table where it is not read. */
-const ONE_TEXEL: TableSize = { widthTexels: 1, heightTexels: 1 };
+/** Whether two sets of column-table sizes are the same. */
+function sameSizes(a: ColumnTableSizes, b: ColumnTableSizes): boolean {
+  const keys = [
+    "absorberColumns",
+    "absorberPressureColumns",
+    "lastAbsorberPressureColumn",
+  ] as const;
+  return keys.every(
+    (k) => a[k].widthTexels === b[k].widthTexels && a[k].heightTexels === b[k].heightTexels,
+  );
+}
 
-function createResources(engine: RenderEngine): TableResources {
+/** A device's resources, the slices' column tables made at `sizes`, the first build's. */
+function createResources(engine: RenderEngine, sizes: ColumnTableSizes): TableResources {
   const one = { widthTexels: 1, layers: 1 };
   return {
-    slices: { ...createTransmittance(engine, "", 1, ONE_TEXEL), layers: 1, lastSize: ONE_TEXEL },
+    slices: { ...createTransmittance(engine, "", 1, sizes), layers: 1, sizes },
     multiScattering: createBandLayers(
       engine,
       "atmosphere multiple scattering",
@@ -2047,7 +2182,14 @@ export class AtmosphereTables {
   #medium: AtmosphereMedium;
   #bottomRadiusM: number;
   #curves: AbsorberCurveSlots;
+  /** The body the caller gave, which the key holds and a restore builds for again. */
   #body: AtmosphereBody | null;
+  /** The body with the slicing the tables are built in ({@link rowBodyOf}, R08.T11.e). */
+  #builtBody: AtmosphereBody | null;
+  /** Design note 11's widening the last build took (R08.T11.e). */
+  #widening: RowWidening = "none";
+  /** Which column tables the tables make at full size (R08.T11.e, {@link ColumnTables}). */
+  readonly #columnTables: ColumnTables;
   #plan: TablesPlan;
   /** The medium's layer edges, {@link packLayerEdges}'s, packed once a medium. */
   #layerEdges: Float32Array = new Float32Array(LAYER_EDGES_FLOATS);
@@ -2076,8 +2218,11 @@ export class AtmosphereTables {
    * @param bottomRadiusM - The ground's radius on the tables' sphere, m: R_ref, the slices' scale.
    * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium
    *   with no absorber.
-   * @param body - The body whose slicing the tables are built in (R08.T6.f); none for one slice and
-   *   one band, R05's tables.
+   * @param body - The body whose slicing the tables are built in (R08.T6.f), widened by Design note
+   *   11's rule over the 2 MB row ({@link rowBodyOf}, R08.T11.e); none for one slice and one band,
+   *   R05's tables.
+   * @param columnTables - Which column tables are made at full size: those the medium reads, or,
+   *   for the smoke's check that one texel moves no pixel, every one (R08.T11.e).
    * @throws Error or RangeError as {@link packMedium}, {@link packAbsorberCurves} and
    *   {@link tablesPlanOf}, and `EngineUnavailable` while the engine has no device (a loss), having
    *   released the buffer and textures it made before.
@@ -2088,14 +2233,17 @@ export class AtmosphereTables {
     bottomRadiusM: number,
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
     body: AtmosphereBody | null = null,
+    columnTables: ColumnTables = "read",
   ) {
     this.#engine = engine;
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;
     this.#body = body;
+    this.#builtBody = body;
+    this.#columnTables = columnTables;
     this.#plan = tablesPlanOf(body, bottomRadiusM);
-    this.#resources = createResources(engine);
+    this.#resources = createResources(engine, columnTableSizes(medium, columnTables));
     try {
       this.setMedium(medium, bottomRadiusM, curves, body);
     } catch (error: unknown) {
@@ -2103,7 +2251,7 @@ export class AtmosphereTables {
       throw error;
     }
     this.#offRestored = engine.onRestored(() => {
-      this.#resources = createResources(engine);
+      this.#resources = createResources(engine, columnTableSizes(this.#medium, this.#columnTables));
       this.#armKernels = null;
       this.#irradianceKernel = null;
       this.#slotDepthsKernel = null;
@@ -2241,9 +2389,18 @@ export class AtmosphereTables {
     return this.#plan;
   }
 
-  /** The body the tables are sliced for, or `null` for one slice and one band. */
+  /**
+   * The body the tables are sliced for, with the slicing they are built in: the one the last build
+   * was given, its slicing widened over the 2 MB row where Design note 11's rule widens it
+   * ({@link rowBodyOf}, R08.T11.e), or `null` for one slice and one band.
+   */
   get body(): AtmosphereBody | null {
-    return this.#body;
+    return this.#builtBody;
+  }
+
+  /** Design note 11's widening the last build took over the 2 MB row ({@link rowBodyOf}, R08.T11.e). */
+  get widening(): RowWidening {
+    return this.#widening;
   }
 
   /** The ground's radius on the tables' sphere, m: R_ref, the slices' scale, as last built. */
@@ -2335,11 +2492,13 @@ export class AtmosphereTables {
     const lobeTables = packLobeTables(direct);
     const absorberCurves = packAbsorberCurves(medium, curves);
     const layerEdges = packLayerEdges(medium);
-    const plan = tablesPlanOf(body, bottomRadiusM);
+    // Design note 11's widening over the 2 MB row (R08.T11.e): the slicing the plan is built in.
+    const sliced = rowBodyOf(medium, curves, body, bottomRadiusM);
+    const plan = tablesPlanOf(sliced.body, bottomRadiusM);
     const layersPerBand = multiScatteringLayersOf(medium, curves);
     const oblateBody = packOblateBody(
-      body?.figure ?? { equatorialRadiusM: bottomRadiusM, polarRadiusM: bottomRadiusM },
-      body?.gravity ?? null,
+      sliced.body?.figure ?? { equatorialRadiusM: bottomRadiusM, polarRadiusM: bottomRadiusM },
+      sliced.body?.gravity ?? null,
       plan,
       bottomRadiusM,
       medium,
@@ -2349,11 +2508,13 @@ export class AtmosphereTables {
     // here, from what the build knows, so that its ray march takes its read when its pipeline is
     // made; the key above already holds all of it, so the choice sets off no rebuild of its own.
     const refusal = slotDepthsRefusal(medium, curves, plan);
-    const row = perPlanetRowOf(medium, curves, plan);
+    const row = perPlanetRowOf(medium, curves, plan, this.#columnTables);
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;
     this.#body = body;
+    this.#builtBody = sliced.body;
+    this.#widening = sliced.widening;
     this.#plan = plan;
     this.#layerEdges = layerEdges;
     this.#slotDepthsRefusal = refusal;
@@ -2368,18 +2529,14 @@ export class AtmosphereTables {
     r.lobeTables = this.#uploadPlanes(r.lobeTables, lobeTables);
     r.absorberCurves = this.#uploadCurves(r.absorberCurves, absorberCurves);
     engine.writeTexture(r.oblateBody, [0, 0, 0], [OBLATE_BODY_TEXELS, 1, 1], oblateBody);
-    const lastSize = lastPressureColumnSize(medium);
+    const sizes = columnTableSizes(medium, this.#columnTables);
     const sliceCount = plan.kappa.length;
     const held = r.slices;
-    if (
-      held.layers !== sliceCount ||
-      lastSize.widthTexels !== held.lastSize.widthTexels ||
-      lastSize.heightTexels !== held.lastSize.heightTexels
-    ) {
+    if (held.layers !== sliceCount || !sameSizes(sizes, held.sizes)) {
       // Made before the old ones go, so that a loss while making them leaves no released handle.
-      const made = createTransmittance(engine, "", sliceCount, lastSize);
+      const made = createTransmittance(engine, "", sliceCount, sizes);
       releaseTransmittance(engine, held);
-      r.slices = { ...made, layers: sliceCount, lastSize };
+      r.slices = { ...made, layers: sliceCount, sizes };
     }
     const layers = plan.bands.length * layersPerBand;
     if (r.multiScattering.layers !== layers) {
@@ -2477,7 +2634,7 @@ export class AtmosphereTables {
         engine,
         " (kernel arm)",
         r.slices.layers,
-        lastPressureColumnSize(this.#medium),
+        r.slices.sizes,
         KERNEL_ARM_FORMAT,
       ),
       multiScattering: storedTable(
@@ -2520,7 +2677,7 @@ export class AtmosphereTables {
       this.#engine,
       ` (band ${band})`,
       1,
-      lastPressureColumnSize(this.#medium),
+      this.#resources.slices.sizes,
     );
     this.#dispatchTransmittance(
       this.#resources.transmittanceKernel,
@@ -2619,7 +2776,7 @@ export class AtmosphereTables {
       for (const [b, band] of plan.bands.entries()) {
         let read: TransmittanceTextures = r.slices;
         if (!plan.shared) {
-          own ??= createTransmittance(engine, " (band)", 1, lastPressureColumnSize(medium));
+          own ??= createTransmittance(engine, " (band)", 1, r.slices.sizes);
           this.#dispatchTransmittance(
             r.transmittanceKernel,
             own,
@@ -2689,7 +2846,7 @@ export class AtmosphereTables {
       for (const [b, band] of plan.bands.entries()) {
         let read: TransmittanceTextures = r.slices;
         if (!plan.shared) {
-          own ??= createTransmittance(engine, " (band)", 1, lastPressureColumnSize(medium));
+          own ??= createTransmittance(engine, " (band)", 1, r.slices.sizes);
           this.#dispatchTransmittance(
             r.transmittanceKernel,
             own,
