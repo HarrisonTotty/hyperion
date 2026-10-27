@@ -1,0 +1,320 @@
+{
+  "schema": "hyperion.views-check.atmosphere-results",
+  "version": 3,
+  "run": {
+    "startedAt": "2026-10-27T00:14:30.023Z",
+    "machine": {
+      "name": "effect",
+      "cpu": "AMD Ryzen 7 3700X 8-Core Processor",
+      "logicalCores": 16,
+      "memoryBytes": 33554915328,
+      "governor": {
+        "value": "schedutil",
+        "reason": null
+      },
+      "loadAverage": [1.52, 3.3, 7.19],
+      "gpu": {
+        "value": {
+          "vendorId": 4318,
+          "deviceId": 8710,
+          "driverVersion": "615.78.08",
+          "description": null
+        },
+        "reason": null
+      }
+    },
+    "versions": {
+      "app": "0.1.0",
+      "electron": "44.4.3",
+      "chromium": "152.0.7977.130",
+      "node": "24.21.0",
+      "v8": "15.2.124.28-electron.0"
+    },
+    "platform": "linux",
+    "launchMode": "vulkan",
+    "setting": "high",
+    "smoke": false,
+    "switches": [
+      "--use-angle=vulkan",
+      "--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
+      "--enable-dawn-features=enable_subgroups_intel_gen9",
+      "--disable-dawn-features=timestamp_quantization"
+    ],
+    "shown": false,
+    "window": {
+      "widthDip": 1926,
+      "heightDip": 1086
+    },
+    "devicePixelRatio": 1,
+    "captures": {
+      "value": "target/views-check/atmosphere/captures-20261027T001430",
+      "reason": null
+    },
+    "provisional": "provisional: load average 1.52 at the start; a shared machine; a hidden run: no presentation"
+  },
+  "timer": "full",
+  "canvas": {
+    "widthPx": 1126,
+    "heightPx": 906
+  },
+  "mediaReadyMs": 1067.6999999955297,
+  "captures": [
+    {
+      "kind": "night",
+      "label": "moonlit-night",
+      "camera": "SEAT",
+      "exposure": "EV100 1.0 AUTO",
+      "exposureSettleMs": 1000.5,
+      "atMs": 3657.89999999851,
+      "frames": {
+        "fromMs": 343.8999999985099,
+        "toMs": 3657.89999999851,
+        "draws": 100,
+        "intervalMedianMs": 16.699999999999818,
+        "intervalP95Ms": 83.29999999999995,
+        "gpuMedianMs": 1.345728,
+        "gpuP95Ms": 1.35344
+      },
+      "statements": ["ROTATION: NOT YET MODELLED", "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      "faults": [],
+      "verdict": "pass"
+    },
+    {
+      "kind": "fixture",
+      "designation": "TEST EARTH O3 SLAB",
+      "rangeM": 50847131.539439015,
+      "phaseDeg": 45.01043048923304,
+      "label": "fixture-test-earth-o3-slab",
+      "camera": "FREE · RATE 31,600 km/s",
+      "exposure": "EV100 14.9 AUTO",
+      "exposureSettleMs": 1000.3000000044703,
+      "atMs": 95613.79999999702,
+      "frames": {
+        "fromMs": 4039.1999999955297,
+        "toMs": 95613.79999999702,
+        "draws": 5428,
+        "intervalMedianMs": 16.69999999999709,
+        "intervalP95Ms": 16.799999999995634,
+        "gpuMedianMs": 4.981056,
+        "gpuP95Ms": 7.522624
+      },
+      "statements": [
+        "POSITIONS AS SEEN FROM SHIP",
+        "ROTATION: NOT YET MODELLED",
+        "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"
+      ],
+      "faults": [],
+      "verdict": "pass"
+    },
+    {
+      "kind": "fixture",
+      "designation": "TEST MARS",
+      "rangeM": 27117469.01493106,
+      "phaseDeg": 57.94006604367824,
+      "label": "fixture-test-mars",
+      "camera": "FREE · RATE 1000 km/s",
+      "exposure": "EV100 15.3 AUTO",
+      "exposureSettleMs": 1000.2999999970198,
+      "atMs": 137446.29999999702,
+      "frames": {
+        "fromMs": 95969.29999999702,
+        "toMs": 137446.29999999702,
+        "draws": 2489,
+        "intervalMedianMs": 16.69999999999709,
+        "intervalP95Ms": 16.70000000001164,
+        "gpuMedianMs": 5.419328,
+        "gpuP95Ms": 6.710432
+      },
+      "statements": [
+        "POSITIONS AS SEEN FROM SHIP",
+        "ROTATION: NOT YET MODELLED",
+        "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"
+      ],
+      "faults": [],
+      "verdict": "pass"
+    },
+    {
+      "kind": "fixture",
+      "designation": "TEST SATURN",
+      "rangeM": 482256557.2391356,
+      "phaseDeg": 58.940913377513716,
+      "label": "fixture-test-saturn",
+      "camera": "FREE · RATE 31,600 km/s",
+      "exposure": "EV100 15.9 AUTO",
+      "exposureSettleMs": 1000.3999999985099,
+      "atMs": 159178.29999999702,
+      "frames": {
+        "fromMs": 137778.19999999553,
+        "toMs": 159178.29999999702,
+        "draws": 1284,
+        "intervalMedianMs": 16.699999999982538,
+        "intervalP95Ms": 16.79999999998836,
+        "gpuMedianMs": 6.758208,
+        "gpuP95Ms": 9.32144
+      },
+      "statements": [
+        "POSITIONS AS SEEN FROM SHIP",
+        "ROTATION: NOT YET MODELLED",
+        "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"
+      ],
+      "faults": [],
+      "verdict": "pass"
+    },
+    {
+      "kind": "fixture",
+      "designation": "TEST EARTH",
+      "rangeM": 51014774.055362426,
+      "phaseDeg": 45.231029359837436,
+      "label": "fixture-test-earth",
+      "camera": "FREE · RATE 31,600 km/s",
+      "exposure": "EV100 14.9 AUTO",
+      "exposureSettleMs": 1000.1999999955297,
+      "atMs": 217328,
+      "frames": {
+        "fromMs": 159472.69999999553,
+        "toMs": 217328,
+        "draws": 3469,
+        "intervalMedianMs": 16.699999999982538,
+        "intervalP95Ms": 16.70000000001164,
+        "gpuMedianMs": 1.529824,
+        "gpuP95Ms": 7.249408
+      },
+      "statements": [
+        "POSITIONS AS SEEN FROM SHIP",
+        "ROTATION: NOT YET MODELLED",
+        "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"
+      ],
+      "faults": [],
+      "verdict": "pass"
+    }
+  ],
+  "stages": [
+    {
+      "target": "TEST MOON",
+      "stage": 1,
+      "rateStep": 13,
+      "askedM": 50000000,
+      "holdMs": 15811.388300841896,
+      "heldMs": 15816,
+      "longestStepMs": 16.80000000000291,
+      "flownM": 50014583.47322309,
+      "shortOfCentreM": 329674755.76719874
+    },
+    {
+      "target": "TEST EARTH O3 SLAB",
+      "stage": 1,
+      "rateStep": 20,
+      "askedM": 201021769895.20004,
+      "holdMs": 20102.17698952,
+      "heldMs": 20099.2,
+      "longestStepMs": 50,
+      "flownM": 200992000000,
+      "shortOfCentreM": 10609862505.197693
+    },
+    {
+      "target": "TEST EARTH O3 SLAB",
+      "stage": 2,
+      "rateStep": 18,
+      "askedM": 10080857874.697811,
+      "holdMs": 10080.857874697811,
+      "heldMs": 9716.300000000003,
+      "longestStepMs": 949.8999999999942,
+      "flownM": 9716300000.000002,
+      "shortOfCentreM": 893562505.1976929
+    },
+    {
+      "target": "TEST EARTH O3 SLAB",
+      "stage": 3,
+      "rateStep": 15,
+      "askedM": 842594435.0263724,
+      "holdMs": 26645.17558466095,
+      "heldMs": 26648.999999999993,
+      "longestStepMs": 16.80000000000291,
+      "flownM": 842715373.6582711,
+      "shortOfCentreM": 50847131.53942871
+    },
+    {
+      "target": "TEST MARS",
+      "stage": 1,
+      "rateStep": 16,
+      "askedM": 968126611.1634756,
+      "holdMs": 9681.266111634755,
+      "heldMs": 9683,
+      "longestStepMs": 16.80000000000291,
+      "flownM": 968300000,
+      "shortOfCentreM": 50783169.01492858
+    },
+    {
+      "target": "TEST MARS",
+      "stage": 2,
+      "rateStep": 12,
+      "askedM": 23667169.01492858,
+      "holdMs": 23667.169014928582,
+      "heldMs": 23665.699999999997,
+      "longestStepMs": 16.800000000017462,
+      "flownM": 23665699.999999996,
+      "shortOfCentreM": 27117469.01492858
+    },
+    {
+      "target": "TEST SATURN",
+      "stage": 1,
+      "rateStep": 15,
+      "askedM": 524503574.7918706,
+      "holdMs": 16586.25937242787,
+      "heldMs": 16582.70000000001,
+      "longestStepMs": 16.800000000017462,
+      "flownM": 524391017.5527422,
+      "shortOfCentreM": 482256557.2391284
+    },
+    {
+      "target": "TEST EARTH",
+      "stage": 1,
+      "rateStep": 20,
+      "askedM": 201191334128.24243,
+      "holdMs": 20119.133412824245,
+      "heldMs": 20115.899999999994,
+      "longestStepMs": 33.39999999999418,
+      "flownM": 201158999999.99994,
+      "shortOfCentreM": 10621350233.662903
+    },
+    {
+      "target": "TEST EARTH",
+      "stage": 2,
+      "rateStep": 18,
+      "askedM": 10091899428.391882,
+      "holdMs": 10091.899428391884,
+      "heldMs": 10099.700000000012,
+      "longestStepMs": 16.800000000017462,
+      "flownM": 10099700000.000011,
+      "shortOfCentreM": 521650233.66290283
+    },
+    {
+      "target": "TEST EARTH",
+      "stage": 3,
+      "rateStep": 15,
+      "askedM": 470682163.49158233,
+      "holdMs": 14884.276906491516,
+      "heldMs": 14882.800000000017,
+      "longestStepMs": 16.800000000017462,
+      "flownM": 470635459.6075401,
+      "shortOfCentreM": 51014774.05535889
+    }
+  ],
+  "findings": {
+    "captures": {
+      "verdict": "pass",
+      "reasons": [],
+      "atmosphereFaults": 0,
+      "graphicsFaults": 0
+    },
+    "faults": {
+      "record": [],
+      "gpuProcessExits": 0
+    },
+    "consoleErrors": {
+      "count": 0,
+      "first": []
+    }
+  },
+  "overall": "pass"
+}

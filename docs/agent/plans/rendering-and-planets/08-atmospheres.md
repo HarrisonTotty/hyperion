@@ -4642,14 +4642,18 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
   line, in `--status-caution`, after any graphics fault and the terrain's, and forgets the cache's
   failures when `VIEW` is shown again. It feeds `ATMOSPHERE: PENDING`'s debounce each frame. The
   flight records no atmosphere fault. It sets `ATMOSPHERE REJECTED` among the atmosphere's notes
-  and `ATMOSPHERE DATA INVALID` on the fault line. The flight records neither. _Built 2026-10-26_
-  (Risks, "Deviations in T10.b, as built" and its "Deferred findings (2026-10-13 rule)"
-  (R08.T10.b); `decision-r08-t10b-depth.md`).
+  and `ATMOSPHERE DATA INVALID` on the fault line. The flight records neither. _Built 2026-10-26,
+  flown 2026-10-27_ (Risks, "Deviations in T10.b, as built" and its "Deferred findings
+  (2026-10-13 rule)" (R08.T10.b); `decision-r08-t10b-depth.md`).
   Acceptance: `pnpm test` and `just test-render` pass, and by hand a flight past every fixture, on
-  a kept test scene that carries them (`view/scenes/`), is recorded here, with the moonlit night on
-  the Earth fixture (the Sun beyond the twilight limit, a full Moon), whose sky over R06's star
-  layer shows the fainter stars washed out (R08.T7's acceptance, which its record, "Deviations in
-  T7, as built", leaves to this task, since the smoke's frames draw no star layer). R08.T8.e closed
+  a kept test scene that carries them (`view/scenes/`), is recorded here, for the fixtures that
+  exist: the four of R08.T12.b.1, with R08.T12.b.2's four flown by that task
+  (`decision-r08-t10b-ux.md`, item 3), with the moonlit night on the Earth fixture (the Sun beyond
+  the twilight limit, a full Moon), whose sky over the stars shows the fainter stars washed out:
+  R06's star layer, or with no server `ATMOSPHERE TEST`'s own field, drawn through R06's star
+  sprites before the air's composite (`decision-r08-t10b-ux.md`, item 1) (R08.T7's acceptance,
+  which its record, "Deviations in T7, as built", leaves to this task, since the smoke's frames
+  draw no star layer). R08.T8.e closed
   with its hold missed at four rows (`decision-r08-t8-leans.md` §16; Risks, "Deferred findings
   (2026-10-13 rule)" (R08.T8.e), _The hold's four rows_). The flight's frame times at high on the
   RTX 3080 are recorded beside them. They are no verdict on the frame; R08.T11's measured rows
@@ -5239,7 +5243,9 @@ record is here, and `pnpm test` passes.
     air's scale height, 8.45 km, tangent to about 85 km, with tangents at the slab's base and top
     for R08.T13's layer-edge checks at the limb (main, 2026-10-21 and 2026-10-22: T12.b.1's limbs
     stand at `localScaleHeightM`'s 2.10 km, the green extinction's e-folding, the air's and the
-    aerosol's together); R08.T5.e goes in it, after the Venus cases are written and before their
+    aerosol's together); it adds its cases to `ATMOSPHERE TEST`, with their designations and guide
+    rows, and records the flight past them under R08.T10.b's acceptance (`decision-r08-t10b-ux.md`,
+    item 3); R08.T5.e goes in it, after the Venus cases are written and before their
     references are traced, so that Venus is traced once, with the fitted absorber. So T12.b needs
     R08.T5 no longer as a whole, nor R08.T10's fixtures, whose media it now builds, and T5.e needs
     only T12.b.2's `venus-92bar`.
@@ -10077,10 +10083,11 @@ file, not drawn` under the τ rule (`their fractal dimension lies …` for an ag
     gravity from them (`tablesFigureOf`: the body's, or a sphere of `bottomRadiusM`, a new
     getter), and follows the cache's next set (`setTables`); `setMedium` refuses held tables. Its
     gravity is no longer fixed at construction. The per-frame kernels and the composite are the
-    device's, shared by every view's atmospheres (`createAtmosphereFrameKernels`, made
-    asynchronously with the renderer's other pipelines), since the engine caches no pipeline and
-    a kernel has no release; an atmosphere over shared kernels refuses a frame after a restore,
-    and its owner makes it again. `dispose` now releases the frame's own textures (sky view,
+    view's, made asynchronously with the renderer's other pipelines (`createAtmosphereFrameKernels`)
+    and shared by its bodies' atmospheres, since the engine caches no pipeline; the kernels have no
+    release, and the composite and its triangle are released with the view. An atmosphere over
+    shared kernels refuses a frame after a restore (`AtmosphereRetired`), and its owner makes it
+    again. `dispose` now releases the frame's own textures (sky view,
     aerial volume, ray march) and the tables it built. The forward-lobe tables stay where they
     are built; moving them into the optics worker was optional and is not done.
   - _Eviction frees its textures_ (T10.a's deferred finding). `AtmosphereTables.dispose`
@@ -10115,18 +10122,18 @@ file, not drawn` under the τ rule (`their fractal dimension lies …` for an ag
     was shaded from, which the sky takes as they are; `bodyLightSources` gives a body the plan
     holds no record of the same arrays (the camera's local body seen from inside its figure's
     sphere; the renderer gives every such body drawn larger than a point its sources, and draws
-    its air only where its camera is inside it). A star past the light slots its tables hold is
-    left out of its sky until the cache builds them for it: the cache takes the lights of the
-    view's last plan, a frame behind.
-  - _An air body drawn with depth_ (`decision-r08-t10b-depth.md`). A body whose air the frame
-    draws (`PhotorealFrame.atmospheres`) and that `planLitBodies` would draw as a disc is drawn
-    as a mesh (`BodyFrameOptions.depthBodies`), and promotes the discs it overlaps, as a mesh body
-    does (R07 Design note 2). Without depth the composite reads its pixels as nothing drawn and
-    puts the march's bare p q ground over R07's disc. This adds a third case to R07 Design note
-    1's mesh regime. There is no pixel threshold, since a point draws no air and R07's mesh holds
-    down to the 3 px switch. Its costs are recorded for R08.T11: one smooth mesh per air body; the
-    face's pixels at the drawn surface's 36 steps on high, not lever 3's 20–28; and small air
-    bodies' cells shaded serially, T9.b's per-tables `disc cells` dispatch deferred.
+    its air where its camera is inside it, or its shell meets the view, below). A star past the
+    light slots its tables hold is left out of its sky until the cache builds them for it: the
+    cache takes the lights of the view's last plan, a frame behind.
+  - _An air body drawn with depth_ (`decision-r08-t10b-depth.md`). A body whose air the frame draws
+    (`PhotorealFrame.atmospheres`) and that `planLitBodies` would draw as a disc is drawn as a mesh
+    (`BodyFrameOptions.depthBodyShellRadiiM`), and promotes the discs it overlaps, as a mesh body
+    does (R07 Design note 2). Without depth the composite reads its pixels as nothing drawn and puts
+    the march's bare p q ground over R07's disc. This adds a third case to R07 Design note 1's mesh
+    regime. There is no pixel threshold, since a point draws no air and R07's mesh holds down to the
+    3 px switch. Its costs are recorded for R08.T11: one smooth mesh per air body; the face's pixels
+    at the drawn surface's 36 steps on high, not lever 3's 20–28; and small air bodies' cells shaded
+    serially, T9.b's per-tables `disc cells` dispatch deferred.
   - _The scope on low_ (T9.a's question "For R08.T10.b", :7480; ruled, `decision-r08-t10b-leans.md`
     §1). The composite takes the scene target's depth on both settings, so on low it lays the air
     over every air body's face as well as the terrain, not "the terrain alone": without it, an air
@@ -10136,9 +10143,9 @@ file, not drawn` under the τ rule (`their fractal dimension lies …` for an ag
     footprint is the shell's circle. As built: `airShellRadiusM` takes the larger semi-axis of the
     march's top shell, (a + H ÷ s_e, c + H ÷ s_p) (`viewExactOf`), a + H ÷ s_e on every oblate body;
     `#drawAtmospheres` draws a body whose shell is not `sphereOutsideView`, its sources those
-    `withRecordlessSources` builds; `BodyFrameOptions.depthBodies` is now a map of each body's shell
-    radius, its footprint for `promoteOverlapping` that circle. The figure's record stays culled at
-    a.
+    `withRecordlessSources` builds; `BodyFrameOptions.depthBodyShellRadiiM` (renamed from
+    `depthBodies`, its unit in its name) is now a map of each body's shell radius, its footprint for
+    `promoteOverlapping` that circle. The figure's record stays culled at a.
   - _Every view compiles the atmosphere's kernels_ (the four per-frame kernels and the composite)
     with its other pipelines, with air or without: their compile time is for R08.T11, and a failed
     compile fails the photorealistic style as any of its pipelines does.
@@ -10195,6 +10202,70 @@ REJECTED` lines after `ATMOSPHERE: NOT RESOLVED` and before the annunciations; a
     are grey: the face seen from above the top takes the march's mean transmittance (T8.b's
     deferred finding, now on every air body's face; `decision-r08-t10b-depth.md` §5). The ruling's
     51 s for part 11 predates T8.c's footprint group, 42.9 s of it here.
+  - _The kept scene_ (`view/scenes/atmosphereScene.ts`, `ATMOSPHERE TEST`;
+    `decision-r08-t10b-ux.md`). Four of Design note 16's fixtures, R08.T12.b.1's cases as kept
+    media: `TEST EARTH` (`earth`), `TEST EARTH O3 SLAB` (`earth-ozone-slab`), `TEST MARS` (`mars`)
+    and `TEST SATURN` (`saturn-oblate`), each drawn on its medium's figure and shaded as a grey
+    Lambert sphere of its medium's ground albedo (p = A ÷ 1.5), provisional, under
+    `BODY PHOTOMETRY: NOT YET MODELLED`, so that the limb's march ground is the disc's.
+    R08.T12.b.2's four, `venus-92bar`, `venus-58bar`, `titan-class` and `giant-deck`, do not exist
+    yet; that task adds and flies them (ruled, item 3). The media load lazily, once a page, from
+    `reference/cases.ts`, started from `VIEW`'s effect when the scene is chosen
+    (`SceneOption.prepare`, new), never as the scene is made in render; `loading`
+    (`ATMOSPHERE: PENDING`) until they land. A failed load states each body `failed`
+    (`KeptBodyAtmosphere`'s new kind), the cache's `loadFailed` problem: `ATMOSPHERE NOT AVAILABLE:
+computation failed for TEST EARTH, TEST EARTH O3 SLAB, TEST MARS
+and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ruled, item 4).
+    The layout: `TEST EARTH` 1 au out along +x with `TEST MOON` (airless, Lambert p 0.12) 3° off
+    its anti-solar point; the other three a quarter of the way round the star, 1.41 au from it,
+    10⁹ m apart, each seen at about 60° of phase from the one before and none in another's
+    shadow. The first layout chained all four 10⁹ m apart, and the flight of 2026-10-26 found its
+    night lit by `TEST SATURN`, 1.7 × 10⁹ m off and 30° from the zenith, at about 127 times the
+    Moon (`EV100 4.1` on the `AVG` meter where a full Moon's sky meters about −3); now each other
+    body stands 30° below the seat's horizon and gives under 1% of the Moon's light (the test).
+    The ship stands 10 m up, so that the hull, pitched 47° up at the moon, clears the ground (its
+    stern was 7 m under it at the first 2 m); the seat's eye is 14.6 m up, the star 45° below the
+    horizon, beyond the measured Earth's twilight limit (20.2°).
+  - _Its stars_ (ruled, item 1). With no server the interim field is empty, and the scene's own
+    field stands in (`sceneStarsStandIn`: the scene's stars, no interim field, no sky drawn):
+    500 stars spread evenly over the sphere, V spread evenly from 0 to 6, at 10 pc, from a fixed
+    seed, drawn through R06's `POINT SPRITES HDR` before the composite. Each view's `STARS` line
+    then reads `SCENE TEST FIELD` (`ViewFrameDrawn.sceneStars`, `withSceneStarsLine`) with no count
+    line.
+  - _The flight_ (`just views-check --hidden --atmosphere`; `atmosphereCheckRun.ts`,
+    `atmosphereCheckResults.ts`). Scripted through `VIEW`'s own controls and judged by eye from its
+    captures: the seat's night under `AUTO` on `AVG`, once the exposure holds (two readings a second
+    apart within 0.1 EV, at most 60 s), then `FREE` on `LIT`, a climb of 5 × 10⁷ m towards
+    `TEST MOON` first, so that the first leg leaves the planet upwards, then to 8 equatorial radii
+    of each fixture, a long leg flown in stages, each from where the last ended, to a twentieth of
+    the range left or the goal, the distance reckoned signed along the leg from the primary's own
+    draw times, as the free camera integrates them, a stage that overruns followed by one flown back
+    (a frame stall of about 1 s, below, carried one past its fixture). Each capture, a night's or a
+    fixture's (`AtmosphereCheckCapture`'s `kind`; the record's version 3, with each stage flown),
+    records the frame interval's and the GPU's median and 95th percentile, the exposure's settling,
+    the plate's statements and fault lines; the run fails on any fault line, an exposure that never
+    settles, or no capture. High then low by default; its record in
+    `docs/measurements/atmosphere-flight/`.
+  - _The merge of B1_ (P14.T54.b). `modesOf` takes B1's guard on a mode whose sizes or τ the
+    generator does not model, then #10's screen, reading the modelled sizes and τ through B1's
+    union. The should-fix to make the client's `AerosolMode` itself a union on `kind`, with size
+    and τ only on modelled rows, is `lib/system`'s, another lane's: recorded for P14.T54.b's later
+    batch, not adopted here.
+  - _By hand_ (`just views-check --hidden --atmosphere --setting high`, 2026-10-27, on the RTX
+    3080, offscreen, at a 1-minute load of 1.5 when it started;
+    `docs/measurements/atmosphere-flight/2026-10-27-effect-high-atmosphere.md`): pass, no fault
+    line, 220 s. By eye from its captures: the moonlit night, `EV100 1.0 AUTO` on `AVG`, a dark
+    blue-grey sky under the moon's aureole, with the scene's test field, not R06's catalogue (ruled,
+    item 1), seen to about V 4 (some 17 of the 30 or so stars outside the plate and the glow);
+    `TEST EARTH O3 SLAB` and `TEST EARTH` at 51 Mm and 45° of phase, blue-grey over their grounds;
+    `TEST MARS` at 27 Mm and 58°, tan under its dust; `TEST SATURN` at 482 Mm and 59°, grey. No
+    limb haze is seen past the datum's stroke (deferred below). Frame times, provisional (a hidden
+    run, so no presentation): the interval's median 16.7 ms at every capture, its 95th percentile
+    16.7 to 16.8 ms (83.3 ms over the night's 100 draws); the GPU's median and 95th percentile
+    1.35 and 1.35 ms at the night, 4.98 and 7.52 ms at the slab, 5.42 and 6.71 ms at Mars, 6.76 and
+    9.32 ms at Saturn and 1.53 and 7.25 ms at Earth, beside T8.e's four rows, and no verdict on the
+    frame, which is R08.T11's. The flight of 2026-10-26, on the first layout, is superseded: its
+    night was lit by `TEST SATURN`.
 - **Deferred findings (2026-10-13 rule)** (R08.T10.b). Recorded and deferred: each leaves the
   algorithm and every contract as they are.
   - _The limb under the air_: on the limb pixels whose centre ray meets the ground (about 44, 19,
@@ -10217,6 +10288,14 @@ REJECTED` lines after `ATMOSPHERE: NOT RESOLVED` and before the annunciations; a
     for R08.T11's frame or R12.
   - _The `APPROXIMATE` row and a mode out of range_ (the UX review): the guide's row names no cloud
     or haze left out for its optics' range, nor when that clears. A clause for the sign-off.
+  - _A stall as a body's air is first wanted_: the flight's smokes stall `VIEW` for about 1 s at
+    about 5 × 10⁸ m from `TEST EARTH O3 SLAB`, where it turns a disc and the cache first builds
+    its tables and the view its atmosphere; the flight's reckoning absorbs it (a stage flown back).
+    Not measured; for R08.T11's frame, beside the compile cost above.
+  - _The datum over the limb_: the photorealistic view's cased datum (R10.T16.f's symbology)
+    strokes each body's limb 2 to 3 px wide, over the air's limb glow where the air is as thin on
+    screen (100 km is about 2 px at 8 radii of an Earth). Seen by eye on the flight's captures; for
+    R08.T11's look at the frame, or a symbology question for main.
   - _Generated worlds on screen._ T10.a's _trace broadeners' widths_ now show:
     `ATMOSPHERE: APPROXIMATE` stands on every Earth-, Mars- and Saturn-class generated world that
     draws. For main's revisit, as T10.a's record asked.
