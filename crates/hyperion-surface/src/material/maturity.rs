@@ -5821,7 +5821,7 @@ mod tests {
         use crate::field::{Cover, CoverRange, PartialField, ResolutionCode, cell_index};
         use crate::patch::{BakeOptions, NormalScale, VertexPath};
         use crate::wire::{decode_payload, encode_payload};
-        use crate::worker::WorkerFields;
+        use crate::worker::{SigmaSurvey, WorkerFields};
 
         /// The bench's `bake/patch_65` cases' bake: the low setting, the weights, no horizon map.
         const LOW: TerrainBakeOptions = TerrainBakeOptions {
@@ -6046,7 +6046,8 @@ mod tests {
             let body = field.header().body();
             let mut fields = WorkerFields::new();
             let blocks = blocks_of(&encode_payload(field, cover, None));
-            fields.init(body, &blocks[0]).unwrap();
+            // No σ: these tests read none, and the hard rule's workers survey none (R10.T4.c).
+            fields.init(body, &blocks[0], SigmaSurvey::Skipped).unwrap();
             for block in &blocks[1..] {
                 fields.chunk(body, block).unwrap();
             }

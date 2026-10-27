@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { keptBody } from "../../scenes/kept";
 import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
+import { SELECTION_RULE, sigmaSurveyOf } from "../levelBounds";
 import { type PatchKey, patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
 import type {
@@ -314,6 +315,21 @@ describe("the height-worker pool", () => {
     expect(pool.fieldResidentBytes).toBe(16);
     replacement.bakeOldest();
     expect(baked).toEqual([patchKeyString(keyAt(1))]);
+  });
+
+  // R10.T4.c (decision-r10-item30 §4): the workers survey σ only where the rule in force reads it.
+  it("starts every field with the σ survey of the rule in force, a replacement worker's too", () => {
+    const { pool, created } = poolOf(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    pool.fieldInit(PLANET, blockOf(4, 2), "stand-in");
+    workerAt(created, 0).fail();
+    expect(created).toHaveLength(3);
+    const surveys = created.map((w) =>
+      w.fieldMessages.flatMap((m) => (m.kind === "field-init" ? [m.sigma] : [])),
+    );
+    const rule = sigmaSurveyOf(SELECTION_RULE);
+    expect(surveys).toEqual(created.map(() => [rule, rule]));
   });
 
   it("gives a worker's place up after it fails three times in a row", () => {

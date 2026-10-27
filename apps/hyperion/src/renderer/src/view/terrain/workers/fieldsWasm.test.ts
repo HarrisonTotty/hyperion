@@ -16,6 +16,7 @@ import {
   initSync,
   LineOfSightKind,
   maturityNodeCount,
+  SigmaSurvey,
   SurfaceFields,
   testPlanetVersion,
   WeightsLayer,
@@ -50,6 +51,7 @@ import {
   WASM_HORIZON_LAYER,
   WASM_LINE_OF_SIGHT,
   WASM_NORMAL_SCALE,
+  WASM_SIGMA_SURVEY,
   WASM_VERTEX_PATH,
   WASM_WEIGHTS_LAYER,
   WorkerFields,
@@ -59,10 +61,12 @@ import {
   type BakeSettings,
   type ClassMapAnswer,
   type FacePoint,
+  type FieldBlockAnswer,
   type HeightSourceSetting,
   type HeightWorkerRequest,
   PALETTE_NONE,
   PHOTOMETRY_STRIDE,
+  type SigmaSurveySetting,
   type SurfaceGroundReadout,
   type WeightsLayerSetting,
 } from "./messages";
@@ -227,7 +231,14 @@ function heldFields(): WorkerFields {
   FIXTURE.blocks.forEach((block, n) => {
     const request: HeightWorkerRequest =
       n === 0
-        ? { kind: "field-init", id: n, body: FIXTURE.body, block, form: "payload" }
+        ? {
+            kind: "field-init",
+            id: n,
+            body: FIXTURE.body,
+            block,
+            form: "payload",
+            sigma: "surveyed",
+          }
         : { kind: "field-chunk", id: n, body: FIXTURE.body, block };
     const { reply } = answerRequest(module, request, fields);
     if (reply.kind !== "field-held") {
@@ -264,7 +275,10 @@ function directFields(): {
   const args = [BigInt(`0x${system ?? ""}`), Number.parseInt(index ?? "", 16)] as const;
   FIXTURE.blocks.forEach((block, n) => {
     const bytes = new Uint8Array(block);
-    const taken = n === 0 ? direct.fieldInit(...args, bytes) : direct.fieldChunk(...args, bytes);
+    const taken =
+      n === 0
+        ? direct.fieldInit(...args, bytes, SigmaSurvey.Surveyed)
+        : direct.fieldChunk(...args, bytes);
     taken.free();
   });
   return { direct, args, seed: BigInt(`0x${FIXTURE.seed}`) };
@@ -399,6 +413,8 @@ describe("the height worker's fields on the real module", () => {
     expect(WASM_LINE_OF_SIGHT.ground).toBe(LineOfSightKind.Ground);
     expect(WASM_LINE_OF_SIGHT["no-ground"]).toBe(LineOfSightKind.NoGround);
     expect(WASM_LINE_OF_SIGHT["not-surveyed"]).toBe(LineOfSightKind.NotSurveyed);
+    expect(WASM_SIGMA_SURVEY.surveyed).toBe(SigmaSurvey.Surveyed);
+    expect(WASM_SIGMA_SURVEY.skipped).toBe(SigmaSurvey.Skipped);
   });
 
   it("takes every block of the fixture, answering each with the native change, table and σ", () => {
@@ -408,7 +424,14 @@ describe("the height worker's fields on the real module", () => {
       const { reply, transfer } = answerRequest(
         module,
         n === 0
-          ? { kind: "field-init", id: n, body: FIXTURE.body, block, form: "payload" }
+          ? {
+              kind: "field-init",
+              id: n,
+              body: FIXTURE.body,
+              block,
+              form: "payload",
+              sigma: "surveyed",
+            }
           : { kind: "field-chunk", id: n, body: FIXTURE.body, block },
         fields,
       );
@@ -440,13 +463,48 @@ describe("the height worker's fields on the real module", () => {
     expect(fields.bodies).toEqual([FIXTURE.body]);
   });
 
+  // The hard rule's fields (R10.T4.c; decision-r10-item30 §5.2): the same blocks taken with σ
+  // skipped answer the same changes and tables bit for bit, and σ 0 at every level after each.
+  it("answers σ 0 after every block of a field that skips it, and the rest as one that surveys it", () => {
+    const answersOf = (sigma: SigmaSurveySetting): ReadonlyArray<FieldBlockAnswer> => {
+      const fields = new WorkerFields(module);
+      return FIXTURE.blocks.map((block, n) => {
+        const { reply } = answerRequest(
+          module,
+          n === 0
+            ? { kind: "field-init", id: n, body: FIXTURE.body, block, form: "payload", sigma }
+            : { kind: "field-chunk", id: n, body: FIXTURE.body, block },
+          fields,
+        );
+        if (reply.kind !== "field-held" || reply.block === null) {
+          throw new Error(`block ${String(n)} was not taken: ${JSON.stringify(reply)}`);
+        }
+        return reply.block;
+      });
+    };
+    const words = (a: FieldBlockAnswer): ReadonlyArray<ReadonlyArray<string>> => [
+      runWords(a.newlySurveyed),
+      runWords(a.newlyHeld),
+      [...a.levels].map(bitsHex),
+      [String(a.fieldLevel)],
+    ];
+    const surveyed = answersOf("surveyed");
+    const skipped = answersOf("skipped");
+    expect(skipped.map(words)).toEqual(surveyed.map(words));
+    const zero = Array.from({ length: 25 }, () => bitsHex(0));
+    expect(skipped.map((a) => [...a.sigmaM].map(bitsHex))).toEqual(skipped.map(() => zero));
+    // The surveying field's σ is the golden's, positive at the coarse levels.
+    expect([...(surveyed.at(-1)?.sigmaM ?? [])].map(bitsHex)).toEqual(FIXTURE.sigma.last);
+    expect(surveyed.at(-1)?.sigmaM[0]).toBeGreaterThan(0);
+  });
+
   it("holds no field after an init, two blocks and a release", () => {
     const fields = new WorkerFields(module);
     const [first, second, third] = FIXTURE.blocks;
     if (first === undefined || second === undefined || third === undefined) {
       throw new Error("the fixture has three blocks");
     }
-    expect(fields.init(FIXTURE.body, first, "payload").kind).toBe("taken");
+    expect(fields.init(FIXTURE.body, first, "payload", "surveyed").kind).toBe("taken");
     expect(fields.chunk(FIXTURE.body, second).kind).toBe("taken");
     expect(fields.chunk(FIXTURE.body, third).kind).toBe("taken");
     // The field keeps a slot for every cell of its level whatever it holds (R09's PartialField).
@@ -478,11 +536,11 @@ describe("the height worker's fields on the real module", () => {
       fields,
     );
     expect(reply).toMatchObject({ kind: "field-refused", id: 1, body: FIXTURE.body, heldBytes: 0 });
-    const late = fields.init(FIXTURE.body, second, "payload");
+    const late = fields.init(FIXTURE.body, second, "payload", "surveyed");
     expect(late).toMatchObject({ kind: "refused", message: expect.stringMatching(/block 0/u) });
     // A block posted for another body than its own.
     const other = `${FIXTURE.body.slice(0, -1)}${FIXTURE.body.endsWith("1") ? "2" : "1"}`;
-    expect(fields.init(other, first, "payload").kind).toBe("refused");
+    expect(fields.init(other, first, "payload", "surveyed").kind).toBe("refused");
     expect(fields.bodies).toEqual([]);
     expect(fields.heldBytes).toBe(0);
   });
@@ -494,7 +552,10 @@ describe("the height worker's fields on the real module", () => {
     const args = [BigInt(`0x${system ?? ""}`), Number.parseInt(index ?? "", 16)] as const;
     FIXTURE.blocks.forEach((block, n) => {
       const bytes = new Uint8Array(block);
-      const taken = n === 0 ? direct.fieldInit(...args, bytes) : direct.fieldChunk(...args, bytes);
+      const taken =
+        n === 0
+          ? direct.fieldInit(...args, bytes, SigmaSurvey.Surveyed)
+          : direct.fieldChunk(...args, bytes);
       taken.free();
     });
     const patches = recordsOf("patch");
@@ -1126,7 +1187,9 @@ describe("the height worker's fields on the real module", () => {
     const firstPayload = FIXTURE.payloads.filter((p) => p === 1).length;
     FIXTURE.blocks.slice(0, firstPayload).forEach((block, n) => {
       const taken =
-        n === 0 ? fields.init(FIXTURE.body, block, "payload") : fields.chunk(FIXTURE.body, block);
+        n === 0
+          ? fields.init(FIXTURE.body, block, "payload", "surveyed")
+          : fields.chunk(FIXTURE.body, block);
       expect(taken.kind).toBe("taken");
     });
     const bakeAll = (): BakedPatch[] =>
@@ -1261,7 +1324,7 @@ describe("the height worker's fields on the real module", () => {
     }
     const [, index] = FIXTURE.body.split(".");
     const bodyIndex = Number.parseInt(index ?? "", 16);
-    direct.fieldInit(id, bodyIndex, new Uint8Array(first)).free();
+    direct.fieldInit(id, bodyIndex, new Uint8Array(first), SigmaSurvey.Surveyed).free();
     const slot = (code: number, entry: number): Uint8Array =>
       Uint8Array.from([code, entry, ...empty.subarray(2)]);
     expect(direct.photometry(id, bodyIndex, empty)).toEqual(new Float32Array(40));
@@ -1275,8 +1338,10 @@ describe("the height worker's fields on the real module", () => {
     const fields = new WorkerFields(module);
     const taken = EARTH.blocks.map(
       (block, n) =>
-        (n === 0 ? fields.init(EARTH.body, block, "payload") : fields.chunk(EARTH.body, block))
-          .kind,
+        (n === 0
+          ? fields.init(EARTH.body, block, "payload", "surveyed")
+          : fields.chunk(EARTH.body, block)
+        ).kind,
     );
     expect(taken).toEqual(EARTH.blocks.map(() => "taken"));
     const source = {
@@ -1418,7 +1483,14 @@ describe("the height worker's fields on the real module", () => {
           const block = bytesOf(hex);
           const request: HeightWorkerRequest =
             n === 0
-              ? { kind: "field-init", id: n, body: WEATHERED.body, block, form: "payload" }
+              ? {
+                  kind: "field-init",
+                  id: n,
+                  body: WEATHERED.body,
+                  block,
+                  form: "payload",
+                  sigma: "surveyed",
+                }
               : { kind: "field-chunk", id: n, body: WEATHERED.body, block };
           const { reply } = answerRequest(module, request, fields);
           if (reply.kind !== "field-held") {

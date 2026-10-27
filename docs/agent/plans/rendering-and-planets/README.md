@@ -496,7 +496,11 @@ or screen and the access gaps stay the owner's.
   saving of 1.5 times or more on every sample world at τ = 1 px and T4.a's per-patch maxima exceed
   4σ in no more than one patch in three; otherwise the hard bound. T4.b applies the rule and
   records the result; a result within 10% of a threshold goes to the sign-off queue. Until then the
-  hard bound selects, with no calibration factor in R05.
+  hard bound selects, with no calibration factor in R05. _Ruled 2026-10-26
+  (`decision-r10-item30.md`): T4.b applied the rule, whose second condition fails on four of the
+  six worlds, neither figure within 10%, so the hard bound stays at RM5, with no calibration factor.
+  At the high budget it draws 1.1–1.3 times a perfect bound's error. Under it the workers read no σ
+  (R10.T4.c). R10.T15.b applies the rule again at 24._
 - **Galaxy plan amendments** drafted by R-plans, each for the galaxy plan's owner to accept.
   **Decided** (2026-09-30, delegated decisions): R04.T3.a (P14.T23), accepted as drafted, its wire
   change built in R04.T3.c (plan 14's four markers; R04's Risks); R03.T1 (plan 04's rows, a note in

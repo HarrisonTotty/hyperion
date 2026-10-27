@@ -787,7 +787,11 @@ targets at header 21 (below).
    world and level (R10.T4.a)" and its "Deferred findings"): the 99.9th percentile is 0.000–0.074
    of ε on every sample world and level, not 0.3–0.5, so the stated bound draws some 180 to 28,000
    times a perfect bound's patches at most levels; and the deviations are heavy-tailed, so 4σ is
-   no bound either (R10.T4.b's record applies item 30's rule to them)._ The reference renderers
+   no bound either (R10.T4.b's record applies item 30's rule to them)._ _decision-r10-item30
+   (2026-10-26) keeps the hard bound at RM5. At the high setting's 604 patches its drawn error is
+   1.3–3.8 px a pose (mean), 1.1–1.3 times a perfect level-wise bound's at the same budget, so the
+   budget, not the bound, limits the picture. The 38–178 px τ′ is the stated error, not the drawn
+   one (R10.T4.c's record; `levelBounds.test.ts` guards the ratio at 1.5)._ The reference renderers
    bound it the same way: chunked level of detail (Ulrich 2002) stores a hard maximum vertical error
    per chunk and refines while ρ = δ K ÷ D > τ; CDLOD (Strugar 2009) and Proland are
    distance-based; CesiumJS's geometric error for heightmap terrain is a horizontal-spacing
@@ -1594,6 +1598,29 @@ module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as buil
   per-patch maxima pass 4σ in at most one patch in three, else the hard bound.
   Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the counts
   recorded.
+- **R10.T4.c The σ survey only where the rule reads it** (added 2026-10-26 by
+  decision-r10-item30 §6; before RM5). The hard bound stays at RM5 (item 30 applied, no
+  calibration factor), so nothing reads σ, which costs some 25 s of every worker's time for a whole
+  level-8 field (T4.b's record). `field_init` carries a flag set from
+  `SELECTION_RULE === "statistical"`, false today. With it false the worker skips
+  `LevelSigma::survey` and answers σ = 0 at every level, the "no σ read" case `selectionBound`
+  already maps to ε_n. With it true, σ is computed as T4.b built it. There is no lazy or background
+  survey; a switch of rule starts the fields again with the flag. Files: `worker.rs` and `wasm.rs`
+  in `hyperion-surface`, and the client's `levelBounds.ts` and
+  `workers/{messages,heightBake,pool}.ts`. Tests:
+  - the worker's (`worker::`): with σ off, σ is 0 after every block and `omitted_variance_in` is
+    never reached; with σ on, the existing tests pass bit for bit;
+  - `fieldsWasm.test.ts` under both flags;
+  - the flag follows `SELECTION_RULE`;
+  - selection under the hard rule is identical with σ zeroed and with the fixture's σ;
+  - a guard in `levelBounds.test.ts` (Vitest, pure): on each fixture world, over R05's descent at
+    30 s steps, at 1920 × 1080 and 60°, τ = 1 px, the 604-patch budget and flat boxes, the hard
+    rule's mean drawn error is at most 1.5 times a perfect level-wise bound's (the ruling's §5.4).
+
+  Item 30's second-condition test is kept. The golden `worker/moon_like.golden` runs with σ on and
+  does not move; no bump. Acceptance: `cargo test -p hyperion-surface --lib worker::` and
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` pass, with the worker's
+  time per level-8 field recorded before and after.
 
 ### R10.T5 Surveyed readings
 
@@ -3947,7 +3974,10 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   times the patches of a perfect bound; selection by min(hard, 4σ) recovers two to three times. T4.b
   applies the rule to T4.a's recorded figures; until then selection uses the hard bound. _They fell
   at 0.000–0.074 (R10.T4.a's records, at the end of this section; Design note 5's pointer), and
-  R10.T4.b's record applies the rule._
+  R10.T4.b's record applies the rule._ _decision-r10-item30 keeps the hard bound at RM5, with no
+  calibration factor: at the high budget, on flat boxes, it draws 1.3–3.8 px a pose (mean), 1.1–1.3
+  times a perfect bound's, against a stated τ′ of 11–51 px on the same boxes (38–178 px unbaked);
+  and under it the workers read no σ (R10.T4.c's record)._
 - **The low setting's cache is at its edge.** With 16-bit horizon maps a low-setting patch is
   about 156 kB, and the sizing rule's 430 slots fill 64 MiB exactly before relief and balancing. T14
   decides between a larger low cache (inside the 1 GB ceiling), a half-resolution near-field horizon
@@ -14503,8 +14533,11 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
 
     The hard bound holds the high setting at `DETAIL LIMITED` almost throughout the descent, at a
     stated error of tens of pixels. The drawn error is some 0.03 of that (T4.a's p99.9/ε), so about
-    1–5 px. At the low and wireframe budgets the unbaked boxes give τ′ of 10³–10⁶ px under both
-    rules. That is the boxes, not the bound: an unbaked box spans the field's whole height range,
+    1–5 px. _Drawn against stated, measured by decision-r10-item30 §1 on flat boxes: the hard
+    rule draws 1.3–3.7 px a pose (mean of the per-patch maxima), 1.13–1.25 times a perfect
+    level-wise bound's at the same 604 patches, while its τ′ states 11–51 px; so `DETAIL LIMITED`
+    is a true state, and the bound is not what limits the picture (R10.T4.c's record)._ At the low
+    and wireframe budgets the unbaked boxes give τ′ of 10³–10⁶ px under both rules. That is the boxes, not the bound: an unbaked box spans the field's whole height range,
     the camera low in the descent stands inside it, and 187 or 260 patches run out before selection
     reaches the camera. The flat runs there give a τ′ mean of 2.0–4.5 px at 2 px and 4.0–4.1 px at
     4 px under min(hard, 4σ), and 16–106 px under the hard bound.
@@ -14529,7 +14562,9 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     - R05's high normal scale rests on R12.T11.b alone.
     - The roadmap's "Awaiting the owner" entry still says "Until then".
 
-    Pointers are main's.
+    Pointers are main's. _decision-r10-item30 ruled the round: the hard bound stays at RM5, so the
+    "statistical bound" trigger is dead and the re-size waits on R09's (ii) alone; the roadmap's
+    entry points to the ruling (R10.T4.c)._
 
   - _σ's cost per block._ 2–3 s of every worker's time for a full 1 MiB block of a level-8 field,
     and 25–28 s for a whole one, while the rule in force reads no σ. Bakes queue behind it. Its
@@ -14539,7 +14574,8 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     - the relief's and channels' per-octave terms could be built once a cell, not once a level;
     - σ could be read only under the statistical rule (main's call).
 
-    Small surveys cost milliseconds.
+    Small surveys cost milliseconds. _The last lever was taken by R10.T4.c (decision-r10-item30
+    §4): under the hard rule the workers read no σ._
 
   - _Callers that pass no σ._ The smoke harnesses (`sharedPass.ts`, `terrainFrame.ts`,
     `wireframeTerrain.ts`) and the spike's `bodyDescent.ts` give `planetGeometry` the table alone,
@@ -14888,3 +14924,124 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     realised. decision-r10-t2-weights §2's style cause is withdrawn for these findings, and kept as a
     small figure (relief variance 1.1–1.5 times its form at style edges), which `STYLE_GAP` still
     pins. R10's pins stand as measured; R10.T15.b re-measures them at 24 after R09's fix.
+- **Deviations in R10.T4.c, as built** (2026-10-26; lane r10-t4c, on `rendering-and-planets` at
+  `818e5136`; `GENERATOR_VERSION` 23, no bump). decision-r10-item30 §4–§6: the workers survey σ
+  only where the rule reads it, with the ruling's tests and pointers. Nothing drawn moves under the
+  rule in force, and every output the goldens pin is bit-identical.
+  - _The flag is a two-valued setting, not a bool_, named as the bake's layers are:
+    - `worker::SigmaSurvey` (`Surveyed`, `Skipped`), a new third argument of
+      `WorkerFields::init`;
+    - the module's `SigmaSurvey` enum (`Surveyed` 0, `Skipped` 1), a new fourth argument of
+      `fieldInit`;
+    - the client's `SigmaSurveySetting` (`"surveyed" | "skipped"`), a field of the `field-init`
+      message and a fourth argument of the worker's `WorkerFields.init`, with `WASM_SIGMA_SURVEY`.
+
+    `levelBounds.ts`' `sigmaSurveyOf(rule)` is `"surveyed"` for `"statistical"` alone: the ruling's
+    `SELECTION_RULE === "statistical"`. The pool sets each field's flag from
+    `sigmaSurveyOf(SELECTION_RULE)` when the field starts and keeps it with the field, so that a
+    replacement worker gets the same. A stand-in carries it and ignores it.
+
+  - _Skipped is structural._ A field started skipped holds no `LevelSigma` (an `Option`), builds no
+    small-crater shares, and answers `[0; 25]`. A thread-local counter under `cfg(test)` counts
+    `omitted_variance_in`'s calls from `LevelSigma::survey`, so the tests can hold a skipped field
+    to none.
+  - _Callers._ The worker's tests and the goldens' generators pass `Surveyed`, so they run as
+    before, bit for bit; `worker/moon_like.golden` does not move. `material::maturity`'s tests'
+    `worker_of` passes `Skipped`: they read no σ, and their slow test takes a whole cover's field,
+    whose survey it would pay for nothing (run by name, below). On the client:
+    - `fieldsWasm.test.ts` holds the module to that golden, so it posts `"surveyed"`;
+    - the wasm tests that read no σ (`handover`, `select`, `surveyEdge` and `surveyLookup`'s
+      `.wasm.test.ts`), `heightBake.test.ts` and `terrainProbe.test.tsx` post `"skipped"`;
+    - the smoke harnesses that post to a worker directly (`litTerrain.ts`, `surveyEdge.ts`) post the
+      rule's flag.
+  - _Tests._
+    - The worker (`worker::`): a field started skipped reads no σ after any block of the fixture,
+      answers 0 at all 25 levels, and answers every change, level table, field and bake as a
+      surveying field does. A switch of rule: a start surveyed reads σ, a start again skipped
+      reads none and answers 0, and a third start surveyed reads it again, to the first σ. The
+      existing σ tests pass with σ on.
+    - `fieldsWasm.test.ts`: the module's `SigmaSurvey` values, and the fixture's blocks under both
+      flags: the same changes and tables bit for bit, σ 0 after every block skipped, and the
+      golden's σ surveyed.
+    - `heightBake.test.ts`: the worker hands the module each payload's flag as its enum value.
+    - `pool.test.ts`: every field starts with `sigmaSurveyOf(SELECTION_RULE)`, a replacement
+      worker's too. The ruling named `sessionPasses.test.ts` "or the pool's test", and the pool is
+      where the flag is set. The rule's value stays pinned by item 30's test alone.
+    - `levelBounds.test.ts`: `sigmaSurveyOf` under each rule. Then two tests of the selection at
+      the high budget on flat boxes, every 30 s of the descent on all six worlds, each identical
+      (keys, limit and demand) to the hard rule's with the fixture's σ: the hard rule's with σ
+      zeroed, and the statistical rule's with σ zeroed.
+    - The guard, below. Item 30's second-condition test is kept as it was.
+  - _The guard_ (`levelBounds.test.ts`, "decision-r10-item30's guard on the hard rule's drawn
+    error"; 1.7 s). It follows the ruling's harness (`.git/rm45-scratch/r10-item30/`), at 30 s
+    steps rather than 10 s:
+    - the oracle is the statistical rule with σ′ = the per-patch maximum ÷ 4;
+    - a pose's drawn error is the most, over its seen patches above the finest level, of the
+      level's measured per-patch maximum plus the sagitta, at the distance to the patch's box;
+    - a pose where the camera stands in a seen patch's box under either rule is left out of both
+      means, so that the two are over the same poses. That is any seen patch, the finest level's
+      included, as §5.4's "a seen leaf's box" reads. The ruling's harness skipped finest-level
+      patches before it measured the distance, so on the five worlds other than the Ceres-like it
+      counted the touchdown poses, which the guard leaves out (1,200 s and 1,230 s on every world).
+
+    It fails if the ratio of the means passes 1.5 on any world, or if fewer than 70% of the poses
+    count. It reads the high setting's τ and budget (1 px and 604 today) rather than pinning them,
+    on purpose: the ruling's premise is the high setting's picture, so a re-size of the slots
+    (T14.b's, pending) moves the guard with it.
+
+  - _Acceptance_, on the final code (2026-10-26), each capped:
+    - `cargo nextest run -p hyperion-surface --lib -E 'test(/^worker::/)'`: 64 tests, exit 0;
+    - `material::maturity::tests::native_only::maturity_drawn_mean_is_the_body_s_mix_mean`, the
+      slow test whose helper changed, by name with `material::maturity`'s other tests: 101 tests,
+      exit 0 (the slow one 40.6 s);
+    - `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`: 71 files and 2,109
+      tests, exit 0.
+
+    The gate's log is named in the lane's handoff.
+
+  - _Not taken from the review:_ a union of `field-init` keyed on `form`, so that a stand-in could
+    carry no σ (the TypeScript reviewer's "consider"). The worker ignores a stand-in's flag, a test
+    holds it to that, and the union would reshape the pool's kept fields for no change in
+    behaviour.
+- **Recorded (R10.T4.c).**
+  - _The guard at 23_, over 40 of the 42 poses on every world. The two left out are the last,
+    1,200 s and 1,230 s, the touchdown, under both rules:
+
+    | World             | Hard: mean drawn px | Oracle: mean drawn px | Ratio |
+    | ----------------- | ------------------- | --------------------- | ----- |
+    | Earth-like        | 1.37                | 1.15                  | 1.19  |
+    | Mars-like         | 3.07                | 2.49                  | 1.23  |
+    | Moon-like         | 3.84                | 3.06                  | 1.26  |
+    | Ceres-like        | 1.75                | 1.32                  | 1.33  |
+    | Europa-like       | 1.34                | 1.13                  | 1.19  |
+    | locked Earth-like | 1.74                | 1.54                  | 1.13  |
+
+    The ruling measured 1.13–1.25 at 10 s steps with the Ceres-like's mean unbounded (its landing
+    poses not left out). The Ceres-like's 1.33, recorded here as the ruling asks, is the largest,
+    and still inside 1.5.
+
+  - _The worker's time per whole field_, σ surveyed (T4.b's path, the "before") against skipped (the
+    hard rule's, the "after"). It was taken by a probe appended to `worker/tests.rs` for one run and
+    removed (`.git/rm45-scratch/r10-t4c/sigma_skip_probe.rs`). The probe takes each synthetic
+    world's whole field at 50 m, in 1 MiB blocks, in one thread: native, `opt-level = 2`, capped at
+    400% CPU, on the shared machine at a 1-minute load of 6.9–7.2. The figures are provisional, one
+    run each.
+
+    | World      | Level, cells, blocks | Surveyed: total (slowest block) | Skipped: total (slowest block) |
+    | ---------- | -------------------- | ------------------------------- | ------------------------------ |
+    | Ceres-like | 5, 6,144, 1          | 0.328 s (0.328 s)               | 0.011 s (0.011 s)              |
+    | Moon-like  | 6, 24,576, 1         | 1.77 s (1.77 s)                 | 0.018 s (0.018 s)              |
+    | Mars-like  | 7, 98,304, 4         | 5.71 s (1.73 s)                 | 0.045 s (0.031 s)              |
+    | Earth-like | 8, 393,216, 15       | 24.9 s (2.64 s)                 | 0.115 s (0.040 s)              |
+
+    So a level-8 field costs each worker 0.12 s, not 25 s. It answers σ 0 at level 0 skipped,
+    against 1,170 m surveyed.
+- **Deferred findings (2026-10-13 rule) (R10.T4.c)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The guard's Ceres-like is the closest to its line._ Its ratio is 1.33 against 1.5. The ruling
+    measured no Ceres-like mean, which was unbounded until the touchdown poses were left out; its
+    p90 ratio was 1.44. R10.T15.b re-runs the guard at 24 with the re-blessed fixture (the
+    ruling's §6). T15.b's own entry does not carry that step yet (main's).
+  - _The smoke harnesses and the spike's `bodyDescent.ts` still pass no σ_ (T4.b's deferred
+    finding). The workers now answer 0 under the hard rule anyway. A switch of rule should make
+    them pass `fieldBounds(body)?.sigmaM`, as T4.b's record says.

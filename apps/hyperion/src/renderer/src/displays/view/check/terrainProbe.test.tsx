@@ -176,7 +176,14 @@ describe("the terrain probe's counted height workers (R10.T16.d)", () => {
     const worker = countedWorker(inner, traffic);
     const body = terrainTestGolden().body;
     worker.postMessage(
-      { kind: "field-init", id: 1, body, block: new ArrayBuffer(8), form: "payload" },
+      {
+        kind: "field-init",
+        id: 1,
+        body,
+        block: new ArrayBuffer(8),
+        form: "payload",
+        sigma: "skipped",
+      },
       [],
     );
     worker.postMessage({ kind: "field-chunk", id: 2, body, block: new ArrayBuffer(8) }, []);

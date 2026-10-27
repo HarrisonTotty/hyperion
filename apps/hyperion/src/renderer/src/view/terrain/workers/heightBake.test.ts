@@ -11,6 +11,7 @@ import {
   type WasmGroundReadout,
   type WasmNormalMap,
   type WasmSurfaceFields,
+  WASM_SIGMA_SURVEY,
   WorkerFields,
 } from "./heightBake";
 import type { ClassMapAnswer, GroundReadoutRequest } from "./messages";
@@ -159,9 +160,12 @@ function fakeModule(
   held: Map<string, number>;
   /** The module's class and normal maps freed, in order. */
   freed: string[];
+  /** The σ survey of each `fieldInit` the module was asked, in order. */
+  surveys: number[];
 } {
   const held = new Map<string, number>();
   const freed: string[] = [];
+  const surveys: number[] = [];
   const key = bodyKey;
   const take = (
     system: bigint,
@@ -183,7 +187,10 @@ function fakeModule(
     return emptyBlock();
   };
   const fields: WasmSurfaceFields = {
-    fieldInit: (system, body, block) => take(system, body, block, true),
+    fieldInit: (system, body, block, sigma) => {
+      surveys.push(sigma);
+      return take(system, body, block, true);
+    },
     fieldChunk: (system, body, block) => take(system, body, block, false),
     fieldRelease: (system, body) => held.delete(key(system, body)),
     get heldBytes() {
@@ -238,6 +245,7 @@ function fakeModule(
     },
     held,
     freed,
+    surveys,
   };
 }
 
@@ -254,7 +262,14 @@ function classMapAnswered(codes: Uint16Array = new Uint16Array()): {
   const fields = new WorkerFields(module);
   answerRequest(
     module,
-    { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+    {
+      kind: "field-init",
+      id: 1,
+      body: MOON,
+      block: new ArrayBuffer(8),
+      form: "payload",
+      sigma: "skipped",
+    },
     fields,
   );
   const answer = answerRequest(
@@ -286,12 +301,41 @@ describe("a height worker's stand-in fields", () => {
 });
 
 describe("a height worker's fields", () => {
+  it("hands the module each payload's σ survey as its enum value, and a stand-in's none", () => {
+    const { module, surveys } = fakeModule();
+    const fields = new WorkerFields(module);
+    const block = new ArrayBuffer(8);
+    for (const [id, sigma] of [
+      [1, "skipped"],
+      [2, "surveyed"],
+    ] as const) {
+      answerRequest(
+        module,
+        { kind: "field-init", id, body: MOON, block, form: "payload", sigma },
+        fields,
+      );
+    }
+    answerRequest(
+      module,
+      { kind: "field-init", id: 3, body: PLANET, block, form: "stand-in", sigma: "surveyed" },
+      fields,
+    );
+    expect(surveys).toEqual([WASM_SIGMA_SURVEY.skipped, WASM_SIGMA_SURVEY.surveyed]);
+  });
+
   it("decodes a payload's blocks in the module and answers with what it holds", () => {
     const { module, held } = fakeModule();
     const fields = new WorkerFields(module);
     const init = answerRequest(
       module,
-      { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+      {
+        kind: "field-init",
+        id: 1,
+        body: MOON,
+        block: new ArrayBuffer(8),
+        form: "payload",
+        sigma: "skipped",
+      },
       fields,
     );
     expect(init.reply).toMatchObject({ kind: "field-held", id: 1, body: MOON, heldBytes: 8 });
@@ -320,7 +364,14 @@ describe("a height worker's fields", () => {
     const fields = new WorkerFields(module);
     answerRequest(
       module,
-      { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(3), form: "stand-in" },
+      {
+        kind: "field-init",
+        id: 1,
+        body: MOON,
+        block: new ArrayBuffer(3),
+        form: "stand-in",
+        sigma: "skipped",
+      },
       fields,
     );
     const chunk = answerRequest(
@@ -339,7 +390,14 @@ describe("a height worker's fields", () => {
     // A payload's start replaces the stand-in.
     answerRequest(
       module,
-      { kind: "field-init", id: 3, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+      {
+        kind: "field-init",
+        id: 3,
+        body: MOON,
+        block: new ArrayBuffer(8),
+        form: "payload",
+        sigma: "skipped",
+      },
       fields,
     );
     expect(fields.heldBytes).toBe(8);
@@ -365,7 +423,7 @@ describe("a height worker's fields", () => {
   it("answers a block the module refuses as refused, the field as it was", () => {
     const { module } = fakeModule();
     const fields = new WorkerFields(module);
-    fields.init(MOON, new ArrayBuffer(8), "payload");
+    fields.init(MOON, new ArrayBuffer(8), "payload", "skipped");
     const answer = answerRequest(
       module,
       { kind: "field-chunk", id: 5, body: MOON, block: new ArrayBuffer(2) },
@@ -377,7 +435,7 @@ describe("a height worker's fields", () => {
       message: "the block does not decode",
       heldBytes: 8,
     });
-    expect(fields.init(PLANET, new ArrayBuffer(1), "payload")).toEqual({
+    expect(fields.init(PLANET, new ArrayBuffer(1), "payload", "skipped")).toEqual({
       kind: "refused",
       message: "the block does not decode",
     });
@@ -396,6 +454,7 @@ describe("a height worker's fields", () => {
           body: MOON,
           block: new Uint8Array(8).fill(255).buffer,
           form: "payload",
+          sigma: "skipped",
         },
         fields,
       ),
@@ -405,8 +464,8 @@ describe("a height worker's fields", () => {
   it("leaves no field held after a release", () => {
     const { module } = fakeModule();
     const fields = new WorkerFields(module);
-    fields.init(MOON, new ArrayBuffer(8), "payload");
-    fields.init(PLANET, new ArrayBuffer(4), "stand-in");
+    fields.init(MOON, new ArrayBuffer(8), "payload", "skipped");
+    fields.init(PLANET, new ArrayBuffer(4), "stand-in", "skipped");
     answerRequest(module, { kind: "field-release", id: 7, body: MOON }, fields);
     const answer = answerRequest(module, { kind: "field-release", id: 8, body: PLANET }, fields);
     expect(answer.reply).toEqual({
@@ -488,7 +547,14 @@ describe("a height worker's fields", () => {
     const fields = new WorkerFields(module);
     answerRequest(
       module,
-      { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+      {
+        kind: "field-init",
+        id: 1,
+        body: MOON,
+        block: new ArrayBuffer(8),
+        form: "payload",
+        sigma: "skipped",
+      },
       fields,
     );
     const answer = answerRequest(
@@ -516,7 +582,14 @@ describe("a height worker's fields", () => {
     held.forEach(([each, form], n) => {
       answerRequest(
         module,
-        { kind: "field-init", id: n + 1, body: each, block: new ArrayBuffer(8), form },
+        {
+          kind: "field-init",
+          id: n + 1,
+          body: each,
+          block: new ArrayBuffer(8),
+          form,
+          sigma: "skipped",
+        },
         fields,
       );
     });
@@ -566,7 +639,14 @@ describe("a height worker's fields", () => {
     held.forEach(([each, form], n) => {
       answerRequest(
         module,
-        { kind: "field-init", id: n + 1, body: each, block: new ArrayBuffer(8), form },
+        {
+          kind: "field-init",
+          id: n + 1,
+          body: each,
+          block: new ArrayBuffer(8),
+          form,
+          sigma: "skipped",
+        },
         fields,
       );
     });
@@ -692,7 +772,14 @@ describe("a height worker's fields", () => {
       const fields = new WorkerFields(module);
       answerRequest(
         module,
-        { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+        {
+          kind: "field-init",
+          id: 1,
+          body: MOON,
+          block: new ArrayBuffer(8),
+          form: "payload",
+          sigma: "skipped",
+        },
         fields,
       );
       const answer = answerRequest(

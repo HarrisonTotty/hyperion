@@ -12,7 +12,12 @@
  * fixture's `sigma_m`, the largest `omitted_rms` over up to 16,384 of the field's cells, the
  * worker's σ over a whole surveyed field but for that sample. Levels past the complete level take
  * its row (bound and σ 0). Each world is a sphere of its radius: the fixture holds no flattening.
- * No patch is baked, so each box takes its level's subtree range, as an unbaked patch's does.
+ * No patch is baked, so each box takes its level's subtree range, as an unbaked patch's does,
+ * except where a test bakes the boxes flat.
+ *
+ * R10.T4.c adds the workers' σ survey, which follows the rule (`sigmaSurveyOf`), selection's
+ * indifference to σ under the hard rule, and decision-r10-item30's guard on the hard rule's drawn
+ * error, the ruling's premise for keeping it.
  */
 
 import { describe, expect, it } from "vitest";
@@ -39,6 +44,7 @@ import {
   selectionBound,
   type SelectionRule,
   SIGMA_MULTIPLE,
+  sigmaSurveyOf,
 } from "./levelBounds";
 import {
   cornerNeighbours,
@@ -114,6 +120,11 @@ interface SampleWorld {
   readonly completeLevel: number;
   readonly table: Float64Array;
   readonly sigmaM: Float64Array;
+  /**
+   * T4.a's per-patch maximum deviation by level, metres: its `patch_max_over_bound` × ε_n, 0 from
+   * the complete level on, where nothing is omitted.
+   */
+  readonly patchMaxM: Float64Array;
   /** T4.a's patches sampled over every level, and those whose maximum passed 4σ_body. */
   readonly patches: number;
   readonly pastBodySigma: number;
@@ -156,9 +167,13 @@ function sampleWorld(world: FixtureWorld): SampleWorld {
   }
   let patches = 0;
   let pastBodySigma = 0;
+  const patchMaxM = new Float64Array(LEVEL_SIGMA_LENGTH);
   for (const measured of world.measured) {
     patches += measured.patches;
     pastBodySigma += measured.patches_over_4sigma_body;
+    if (measured.level < complete) {
+      patchMaxM[measured.level] = measured.patch_max_over_bound * row(measured.level).bound_m;
+    }
   }
   return {
     name: world.name,
@@ -167,6 +182,7 @@ function sampleWorld(world: FixtureWorld): SampleWorld {
     completeLevel: complete,
     table,
     sigmaM,
+    patchMaxM,
     patches,
     pastBodySigma,
   };
@@ -581,5 +597,177 @@ describe("signoff-12.md item 30's rule on T4.a's figures", () => {
     const past = WORLDS.filter((world) => world.pastBodySigma > world.patches / 3);
     expect(past.length).toBeGreaterThan(0);
     expect(SELECTION_RULE).toBe("hard");
+  });
+});
+
+/** The high setting's lit pass budget, half its slots: 604 patches. */
+const HIGH_BUDGET = Math.floor(terrainSlotLayout(SETTINGS.high.terrain, "lit").slotCount / 2);
+
+/** Boxes baked flat at ±1 m, so that τ alone sets the depth (R10.T4.b's "flat"). */
+const FLAT: HeightRangeLookup = { heightRangeM: () => [-1, 1] };
+
+/** The descent's poses the budgeted tests look from: R05's descent every 30 s, 0 s first. */
+function guardTimesS(profile: DescentProfile): number[] {
+  const times: number[] = [];
+  for (let tS = 0; tS <= profile.durationS; tS += 30) {
+    times.push(tS);
+  }
+  return times;
+}
+
+/** The high setting's selection on `planet` from `view`, at its budget, on flat boxes. */
+function highSelection(planet: PlanetGeometry, view: ViewSelectionInput): Selection {
+  return selectPatches({
+    planet,
+    views: [view],
+    setting: "high",
+    grounded: [],
+    heightRanges: FLAT,
+    maxPatches: HIGH_BUDGET,
+  });
+}
+
+/** A σ by level of zeros: what the workers answer where they skip σ. */
+const ZERO_SIGMA_M = new Float64Array(LEVEL_SIGMA_LENGTH);
+
+/** A selection's patches, limit and demand, as one string to compare. */
+function selectionWords(selection: Selection): string {
+  return JSON.stringify([
+    [...selection.patches.keys()],
+    selection.limited,
+    selection.limitExcess,
+    selection.demand.map((d) => [patchKeyString(d.key), d.priority, d.forced]),
+  ]);
+}
+
+/**
+ * The poses, over the descent every 30 s on every world, at which the high setting's selection on
+ * `planetOf(world, "hard")` and on `other(world)` differ in their patches, limit or demand, and the
+ * patches the first selected in all.
+ */
+function differingFromHard(other: (world: SampleWorld) => PlanetGeometry): {
+  readonly differing: ReadonlyArray<string>;
+  readonly patches: number;
+} {
+  const differing: string[] = [];
+  let patches = 0;
+  for (const world of WORLDS) {
+    const hard = planetOf(world, "hard");
+    const planet = other(world);
+    const profile = profileOf(world);
+    for (const tS of guardTimesS(profile)) {
+      const view = descentView(profile, tS, SETTINGS.high.terrain.tauPx);
+      const reference = highSelection(hard, view);
+      patches += reference.patches.size;
+      if (selectionWords(highSelection(planet, view)) !== selectionWords(reference)) {
+        differing.push(`${world.name} ${String(tS)} s`);
+      }
+    }
+  }
+  return { differing, patches };
+}
+
+describe("the workers' σ survey (R10.T4.c)", () => {
+  it("is surveyed only under the statistical rule, which reads it", () => {
+    expect(RULES.map(sigmaSurveyOf)).toEqual(["skipped", "surveyed"]);
+  });
+
+  // Under the hard rule σ is read nowhere, so the zeros the workers answer change no selection.
+  it("selects the same under the hard rule with σ zeroed as with the fixture's σ", () => {
+    const { differing, patches } = differingFromHard((world) =>
+      planetGeometry(world.figure, world.table, ZERO_SIGMA_M, "hard"),
+    );
+    expect(patches).toBeGreaterThan(1000);
+    expect(differing).toEqual([]);
+  });
+
+  // Zeros are the "no σ read" case, which the statistical rule charges ε_n for.
+  it("selects under the statistical rule with σ zeroed as under the hard rule", () => {
+    const { differing } = differingFromHard((world) =>
+      planetGeometry(world.figure, world.table, ZERO_SIGMA_M, "statistical"),
+    );
+    expect(differing).toEqual([]);
+  });
+});
+
+/**
+ * The oracle of decision-r10-item30 §1: each level charged its measured per-patch maximum, a
+ * perfect level-wise bound, as σ′ = maximum ÷ 4 under the statistical rule (min(ε_n, 4σ′), and
+ * ε_n where nothing is measured).
+ */
+function oraclePlanet(world: SampleWorld): PlanetGeometry {
+  const sigmaM = world.patchMaxM.map((maxM) => maxM / SIGMA_MULTIPLE);
+  return planetGeometry(world.figure, world.table, sigmaM, "statistical");
+}
+
+/**
+ * The error `selection` draws from `view`, px (decision-r10-item30 §1): the most, over its seen
+ * patches above the finest level, of its level's measured per-patch maximum plus the chord
+ * sagitta, at the distance to the patch's box; `null` where the camera stands in a seen patch's box,
+ * whose error is unbounded.
+ */
+function drawnErrorPx(
+  world: SampleWorld,
+  planet: PlanetGeometry,
+  selection: Selection,
+  view: ViewSelectionInput,
+): number | null {
+  let mostPx = 0;
+  for (const p of selection.patches.values()) {
+    if (!p.seen) {
+      continue;
+    }
+    const distanceM = distanceToBoxM(relativeBounds(p.bounds, view.camera.positionM));
+    if (!(distanceM > 0)) {
+      return null;
+    }
+    const level = p.key.level;
+    if (level < planet.finestLevel) {
+      const errorM = (world.patchMaxM[level] ?? 0) + chordSagittaM(planet, level);
+      mostPx = Math.max(mostPx, screenSpaceErrorPx(errorM, distanceM, view));
+    }
+  }
+  return mostPx;
+}
+
+describe("decision-r10-item30's guard on the hard rule's drawn error", () => {
+  // The ruling keeps the hard bound at RM5 because, at the high setting's budget, the picture it
+  // draws is 1.1 to 1.3 times a perfect level-wise bound's, the budget and not the rule
+  // limiting it: its 38–178 px τ′ is the stated error, not the drawn one. Over R05's descent every
+  // 30 s at 1920 × 1080, 60°, τ = 1 px and 604 patches on flat boxes, leaving out the poses where
+  // the camera stands in a seen patch's box under either, the hard rule's mean drawn error is at
+  // most 1.5 times the oracle's. Measured at generator version 23, over 40 of the 42 poses on every
+  // world: 1.13–1.26 on five worlds and 1.33 on the Ceres-like (R10.T4.c's record). The 24
+  // re-bless trips it if the premise fails, for the ruling to be taken up again (R10.T15.b).
+  it("draws a mean error within 1.5 times a perfect bound's on every world", () => {
+    const failing: string[] = [];
+    for (const world of WORLDS) {
+      const hard = planetOf(world, "hard");
+      const oracle = oraclePlanet(world);
+      const profile = profileOf(world);
+      const times = guardTimesS(profile);
+      let hardPx = 0;
+      let oraclePx = 0;
+      let poses = 0;
+      for (const tS of times) {
+        const view = descentView(profile, tS, SETTINGS.high.terrain.tauPx);
+        const drawn = drawnErrorPx(world, hard, highSelection(hard, view), view);
+        const perfect = drawnErrorPx(world, oracle, highSelection(oracle, view), view);
+        if (drawn === null || perfect === null) {
+          continue;
+        }
+        hardPx += drawn;
+        oraclePx += perfect;
+        poses += 1;
+      }
+      const ratio = hardPx / oraclePx;
+      // Most of the descent counts: only the landing stands in a box.
+      if (!(ratio <= 1.5) || poses < times.length * 0.7) {
+        failing.push(
+          `${world.name}: ${String(ratio)} over ${String(poses)} of ${String(times.length)} poses`,
+        );
+      }
+    }
+    expect(failing).toEqual([]);
   });
 });

@@ -12,7 +12,8 @@
 //!
 //! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
 //! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and σ by
-//! level (R10.T4.b) and each query's synthesis are here, so that the native and wasip1 tests check
+//! level (R10.T4.b; surveyed only where the field is started with [`SigmaSurvey::Surveyed`],
+//! R10.T4.c) and each query's synthesis are here, so that the native and wasip1 tests check
 //! them as the browser target runs them, and the client's worker test holds the module's answers
 //! to this module's on a fixture field (`tests/golden/worker/moon_like.golden`, `golden`).
 //!
@@ -150,8 +151,9 @@ struct BodyField {
     bounds: LevelBounds,
     /// The lowest and highest elevation of the cells held, millimetres, `None` before any.
     elevation_mm: Option<(i32, i32)>,
-    /// The body's σ by level over the cells held as surveyed (R10.T4.b).
-    sigma: LevelSigma,
+    /// The body's σ by level over the cells held as surveyed (R10.T4.b), or `None` where the field
+    /// was started with [`SigmaSurvey::Skipped`] (R10.T4.c).
+    sigma: Option<LevelSigma>,
     /// The body's synthesis cache, kept from the field's start to its release. It is correct only
     /// because the field never drops a cell ([`SynthCache`]'s rule): a change that evicts cells
     /// must start it afresh with them.
@@ -244,6 +246,38 @@ impl BodyField {
             );
         }
     }
+
+    /// Widens the body's σ by the cells a block taken surveyed anew, `change`'s, where the field
+    /// surveys σ at all ([`SigmaSurvey`]).
+    fn survey_sigma(&mut self, change: &SurveyChange) {
+        if let Some(sigma) = &mut self.sigma {
+            sigma.survey(&self.field, &self.bounds, change.runs());
+        }
+    }
+}
+
+/// Whether a body's field surveys its σ by level as it takes blocks ([`WorkerFields::init`]; plan
+/// R10, R10.T4.c; decision-r10-item30 §4).
+///
+/// Only R10's statistical selection rule reads σ (the client's `levelBounds.ts`, whose
+/// `SELECTION_RULE` sets it), and the survey costs some 50 to 70 µs a cell, 25 to 28 s of every
+/// worker's time for a whole level-8 field (R10.T4.b's record). So the hard rule starts its fields
+/// [`Skipped`](Self::Skipped), and a switch of rule starts them again. Nothing else a field answers
+/// depends on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SigmaSurvey {
+    /// Each block widens the body's σ by the cells it surveys anew, as R10.T4.b built it.
+    Surveyed,
+    /// No σ is read: [`WorkerFields::level_sigma_m`] answers 0 at every level, the "no σ read"
+    /// that the statistical rule charges `ε_n` for.
+    Skipped,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The cells' σ reads on this thread, [`omitted_variance_in`]'s calls from
+    /// [`LevelSigma::survey`], for the tests that hold a [`SigmaSurvey::Skipped`] field to none.
+    static SIGMA_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// A body's σ by level as its worker keeps it (R10.T4.b): for band level n, the largest of R09's
@@ -298,6 +332,8 @@ impl LevelSigma {
                     let Some(share) = share else {
                         continue;
                     };
+                    #[cfg(test)]
+                    SIGMA_READS.with(|reads| reads.set(reads.get() + 1));
                     let variance = omitted_variance_in(field, bounds.set(band(n)), share, cell)
                         .expect("a cell the field took as surveyed is held");
                     *largest = num::max(*largest, variance.total().value().sqrt());
@@ -1366,14 +1402,22 @@ impl WorkerFields {
     /// answers with the cells it surveys and brings ([`SurveyChange`]).
     ///
     /// It builds the body's level bounds from the header ([`LevelBounds::new`], a few to some
-    /// tens of milliseconds) with each level's small-crater share of σ, starts its cache afresh,
-    /// and reads σ over the cells the block surveys ([`level_sigma_m`](Self::level_sigma_m)).
+    /// tens of milliseconds) and starts its cache afresh. With `sigma`
+    /// [`Surveyed`](SigmaSurvey::Surveyed) it also builds each level's small-crater share of σ and
+    /// reads σ over the cells this block and each later one survey
+    /// ([`level_sigma_m`](Self::level_sigma_m)); with [`Skipped`](SigmaSurvey::Skipped) it reads
+    /// none, for the life of this start of the field (R10.T4.c).
     ///
     /// # Errors
     ///
     /// [`TakeBlockError`] if the bytes do not decode, are not a block 0, are of another body than
     /// `body`, or are refused by the new field. Any field of `body` held is then kept as it was.
-    pub fn init(&mut self, body: BodyRef, bytes: &[u8]) -> Result<SurveyChange, TakeBlockError> {
+    pub fn init(
+        &mut self,
+        body: BodyRef,
+        bytes: &[u8],
+        sigma: SigmaSurvey,
+    ) -> Result<SurveyChange, TakeBlockError> {
         let block = decode_block(bytes).map_err(TakeBlockError::Decode)?;
         check_body(body, &block)?;
         let header = block.header().ok_or(TakeBlockError::NoHeader {
@@ -1385,8 +1429,12 @@ impl WorkerFields {
         // `LevelBounds::new`'s own build, keeping its octaves for σ's small-crater shares.
         let octaves = CraterOctaves::new(field.header());
         let bounds = LevelBounds::of(field.header(), &octaves);
+        let sigma = match sigma {
+            SigmaSurvey::Surveyed => Some(LevelSigma::new(&bounds, &octaves)),
+            SigmaSurvey::Skipped => None,
+        };
         let mut held = BodyField {
-            sigma: LevelSigma::new(&bounds, &octaves),
+            sigma,
             bounds,
             field,
             elevation_mm: None,
@@ -1394,7 +1442,7 @@ impl WorkerFields {
             nodes: NodeCache::default(),
         };
         held.hold_elevations(&block);
-        held.sigma.survey(&held.field, &held.bounds, change.runs());
+        held.survey_sigma(&change);
         self.bodies.insert(body, held);
         Ok(change)
     }
@@ -1424,7 +1472,7 @@ impl WorkerFields {
         let change = survey_change(&held.field, &block);
         held.field.insert(&block).map_err(TakeBlockError::Insert)?;
         held.hold_elevations(&block);
-        held.sigma.survey(&held.field, &held.bounds, change.runs());
+        held.survey_sigma(&change);
         Ok(change)
     }
 
@@ -1499,10 +1547,16 @@ impl WorkerFields {
     /// cells, each cell read once as its block is taken (the closed forms of each level below the
     /// band limit's, the small craters' share built once a level at the field's start: about 50 to
     /// 70 µs a cell, some 2 s for a full 1 MiB block of a level-8 field), and is the same whatever
-    /// the order of the blocks. `None` if no field of `body` is held.
+    /// the order of the blocks. A field started with [`SigmaSurvey::Skipped`] reads none and
+    /// answers 0 at every level, as before any cell is surveyed (R10.T4.c). `None` if no field of
+    /// `body` is held.
     #[must_use]
     pub fn level_sigma_m(&self, body: BodyRef) -> Option<[f64; LEVEL_TABLE_ROWS]> {
-        self.bodies.get(&body).map(|held| held.sigma.largest_m)
+        self.bodies.get(&body).map(|held| {
+            held.sigma
+                .as_ref()
+                .map_or([0.0; LEVEL_TABLE_ROWS], |sigma| sigma.largest_m)
+        })
     }
 
     /// Bakes `key` over `body`'s field with the body's detail seed `seed` ([`bake_terrain`], no

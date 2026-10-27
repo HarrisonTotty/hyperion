@@ -112,7 +112,14 @@ function heldFields(): WorkerFields {
   FIXTURE.blocks.forEach((block, n) => {
     const request: HeightWorkerRequest =
       n === 0
-        ? { kind: "field-init", id: n, body: FIXTURE.body, block, form: "payload" }
+        ? {
+            kind: "field-init",
+            id: n,
+            body: FIXTURE.body,
+            block,
+            form: "payload",
+            sigma: "skipped",
+          }
         : { kind: "field-chunk", id: n, body: FIXTURE.body, block };
     const { reply } = answerRequest(module, request, fields);
     if (reply.kind !== "field-held") {

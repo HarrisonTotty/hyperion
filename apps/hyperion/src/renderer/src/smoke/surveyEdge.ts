@@ -63,6 +63,7 @@ import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/han
 import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
 import { vertexDir } from "../view/terrain/cube";
 import { ContactRecords, InstanceRecords } from "../view/terrain/gpu/uniforms";
+import { SELECTION_RULE, sigmaSurveyOf } from "../view/terrain/levelBounds";
 import type { PatchKey } from "../view/terrain/patchKey";
 import { spheroidNormal, surfacePoint } from "../view/terrain/planet";
 import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
@@ -185,7 +186,14 @@ async function bakeAcrossTheEdge(
       field.blocks.forEach((block, n) => {
         const request: HeightWorkerRequest =
           n === 0
-            ? { kind: "field-init", id: n, body: field.body, block, form: "payload" }
+            ? {
+                kind: "field-init",
+                id: n,
+                body: field.body,
+                block,
+                form: "payload",
+                sigma: sigmaSurveyOf(SELECTION_RULE),
+              }
             : { kind: "field-chunk", id: n, body: field.body, block };
         worker.postMessage(request, []);
       });

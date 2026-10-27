@@ -42,7 +42,7 @@
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
-import type { LevelBounds } from "../levelBounds";
+import { type LevelBounds, SELECTION_RULE, sigmaSurveyOf } from "../levelBounds";
 import { patchKeyString, unreachable } from "../patchKey";
 import type { PatchRequest } from "../select";
 import type {
@@ -54,6 +54,7 @@ import type {
   GroundReadoutQuery,
   HeightWorkerReply,
   HeightWorkerRequest,
+  SigmaSurveySetting,
   SurfaceGroundReadout,
   TerrainLayers,
 } from "./messages";
@@ -156,6 +157,8 @@ interface KeptField {
   readonly blocks: ArrayBuffer[];
   /** A payload's, which the workers decode, or a stand-in's, which they hold undecoded. */
   readonly form: FieldForm;
+  /** Whether the workers survey the body's σ, by the rule in force when the field was started. */
+  readonly sigma: SigmaSurveySetting;
   /** The first message ID of this start of the field: a refusal of an older one is not its. */
   readonly sinceId: number;
   /** Whether a refusal of this start has been reported. */
@@ -663,7 +666,9 @@ export class HeightWorkerPool {
    * @remarks
    * The pool keeps the body's blocks on the render thread, about 12 MB for an Earth (R09 Design
    * note 17), so that a worker started later, to replace a failed one, gets them too. Bakes of the
-   * body in flight are baked again once they arrive; requests waiting for its field are sent.
+   * body in flight are baked again once they arrive; requests waiting for its field are sent. The
+   * workers survey the body's σ by level only where the selection rule in force reads it
+   * (`sigmaSurveyOf(SELECTION_RULE)`, R10.T4.c): under the hard rule they skip it, and σ is 0.
    *
    * @throws Error if `body`'s field is already started: release it first.
    */
@@ -675,6 +680,7 @@ export class HeightWorkerPool {
     const kept: KeptField = {
       blocks: [block],
       form,
+      sigma: sigmaSurveyOf(SELECTION_RULE),
       sinceId: this.nextId,
       refused: false,
       reported: 0,
@@ -1234,7 +1240,7 @@ export class HeightWorkerPool {
     // Cloned, not transferred: the pool keeps the block for the next worker.
     slot.worker.postMessage(
       sequence === 0
-        ? { kind: "field-init", id, body, block, form: kept.form }
+        ? { kind: "field-init", id, body, block, form: kept.form, sigma: kept.sigma }
         : { kind: "field-chunk", id, body, block },
       [],
     );

@@ -98,7 +98,11 @@ impl Fixture {
         let mut fields = WorkerFields::new();
         let mut blocks = self.blocks();
         fields
-            .init(self.body, blocks.next().expect("a payload has a block 0"))
+            .init(
+                self.body,
+                blocks.next().expect("a payload has a block 0"),
+                SigmaSurvey::Surveyed,
+            )
             .unwrap();
         for block in blocks {
             fields.chunk(self.body, block).unwrap();
@@ -369,7 +373,9 @@ pub(super) fn earth_fixture() -> EarthFixture {
 /// A worker holding `f`'s blocks.
 pub(super) fn earth_worker(f: &EarthFixture) -> WorkerFields {
     let mut fields = WorkerFields::new();
-    fields.init(f.body, &f.blocks[0]).unwrap();
+    fields
+        .init(f.body, &f.blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &f.blocks[1..] {
         fields.chunk(f.body, block).unwrap();
     }
@@ -517,13 +523,17 @@ fn worker_terrain_fixture_payloads_are_the_server_s_answers_in_several_blocks() 
     // The first payload and the delta make the field the whole at revision 2 makes.
     let mut stepped = WorkerFields::new();
     let mut blocks = f.first_then_delta();
-    stepped.init(f.body, blocks.next().unwrap()).unwrap();
+    stepped
+        .init(f.body, blocks.next().unwrap(), SigmaSurvey::Surveyed)
+        .unwrap();
     for block in blocks {
         stepped.chunk(f.body, block).unwrap();
     }
     let mut whole = WorkerFields::new();
     let mut blocks = f.payloads[2].blocks.iter();
-    whole.init(f.body, blocks.next().unwrap()).unwrap();
+    whole
+        .init(f.body, blocks.next().unwrap(), SigmaSurvey::Surveyed)
+        .unwrap();
     for block in blocks {
         whole.chunk(f.body, block).unwrap();
     }
@@ -533,7 +543,9 @@ fn worker_terrain_fixture_payloads_are_the_server_s_answers_in_several_blocks() 
     let mut surveyed = Vec::new();
     let mut blocks = f.first_then_delta();
     surveyed.extend(cells_of(
-        &fields.init(f.body, blocks.next().unwrap()).unwrap(),
+        &fields
+            .init(f.body, blocks.next().unwrap(), SigmaSurvey::Surveyed)
+            .unwrap(),
     ));
     for block in blocks {
         surveyed.extend(cells_of(&fields.chunk(f.body, block).unwrap()));
@@ -593,7 +605,9 @@ fn worker_fields_take_every_block_into_the_field_a_client_builds() {
     let mut blocks = f.blocks();
     let mut surveyed = Vec::new();
     surveyed.extend(cells_of(
-        &fields.init(f.body, blocks.next().unwrap()).unwrap(),
+        &fields
+            .init(f.body, blocks.next().unwrap(), SigmaSurvey::Surveyed)
+            .unwrap(),
     ));
     for block in blocks {
         surveyed.extend(cells_of(&fields.chunk(f.body, block).unwrap()));
@@ -610,7 +624,11 @@ fn worker_fields_take_every_block_into_the_field_a_client_builds() {
 fn worker_fields_report_each_payloads_surveyed_cells_and_nothing_for_a_block_again() {
     let f = fixture();
     let mut fields = WorkerFields::new();
-    let mut first: Vec<u32> = cells_of(&fields.init(f.body, &f.first_blocks[0]).unwrap());
+    let mut first: Vec<u32> = cells_of(
+        &fields
+            .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+            .unwrap(),
+    );
     for block in &f.first_blocks[1..] {
         first.extend(cells_of(&fields.chunk(f.body, block).unwrap()));
     }
@@ -672,19 +690,19 @@ fn worker_fields_start_only_from_a_block_zero_of_the_body_posted_for() {
     let f = fixture();
     let mut fields = WorkerFields::new();
     assert_eq!(
-        fields.init(f.body, &f.first_blocks[1]),
+        fields.init(f.body, &f.first_blocks[1], SigmaSurvey::Surveyed),
         Err(TakeBlockError::NoHeader { index: 1 })
     );
     let other = BodyRef::new(f.body.raw_system_id(), f.body.body_index() ^ 1);
     assert_eq!(
-        fields.init(other, &f.first_blocks[0]),
+        fields.init(other, &f.first_blocks[0], SigmaSurvey::Surveyed),
         Err(TakeBlockError::WrongBody {
             named: other,
             found: f.body
         })
     );
     assert!(matches!(
-        fields.init(f.body, &f.first_blocks[0][..20]),
+        fields.init(f.body, &f.first_blocks[0][..20], SigmaSurvey::Surveyed),
         Err(TakeBlockError::Decode(_))
     ));
     assert_eq!(fields.bodies().count(), 0);
@@ -719,14 +737,14 @@ fn worker_fields_keep_the_field_as_it_was_after_a_refused_block() {
     assert_eq!(fields.field(f.body), Some(&held));
     // A refused start keeps the field held too.
     assert_eq!(
-        fields.init(other, &f.first_blocks[0]),
+        fields.init(other, &f.first_blocks[0], SigmaSurvey::Surveyed),
         Err(TakeBlockError::WrongBody {
             named: other,
             found: f.body
         })
     );
     assert_eq!(
-        fields.init(f.body, &f.second_blocks[1]),
+        fields.init(f.body, &f.second_blocks[1], SigmaSurvey::Surveyed),
         Err(TakeBlockError::NoHeader { index: 1 })
     );
     assert_eq!(fields.field(f.body), Some(&held));
@@ -751,7 +769,7 @@ fn worker_fields_refuse_a_block_of_the_body_at_another_level() {
         FIXTURE_BLOCK_BYTES,
     ));
     let mut fields = WorkerFields::new();
-    fields.init(body, &first[0]).unwrap();
+    fields.init(body, &first[0], SigmaSurvey::Surveyed).unwrap();
     let held = fields.field(body).unwrap().clone();
     // A later block surveying a cell of face +z, whose index at level 6 is past level 5's cells.
     let moon = split(&encode_within(
@@ -807,9 +825,16 @@ fn worker_fields_start_afresh_and_release_to_nothing() {
     assert!(whole >= slots, "{whole} < {slots}");
     // A second start replaces the field, holding the first block alone, and reports what that
     // block surveys as a first start does.
-    let change = fields.init(f.body, &f.first_blocks[0]).unwrap();
+    let change = fields
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     let mut fresh = WorkerFields::new();
-    assert_eq!(fresh.init(f.body, &f.first_blocks[0]).unwrap(), change);
+    assert_eq!(
+        fresh
+            .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+            .unwrap(),
+        change
+    );
     assert_eq!(fields.field(f.body), fresh.field(f.body));
     assert!(fields.release(f.body));
     assert!(!fields.release(f.body));
@@ -823,7 +848,9 @@ fn worker_fields_start_afresh_and_release_to_nothing() {
 fn worker_level_table_bounds_every_patch_of_its_level() {
     let f = fixture();
     let mut fields = WorkerFields::new();
-    fields.init(f.body, &f.first_blocks[0]).unwrap();
+    fields
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     let early = fields.level_table(f.body).unwrap();
     let fields = f.worker();
     let table = fields.level_table(f.body).unwrap();
@@ -868,7 +895,12 @@ fn worker_level_table_is_the_datum_before_any_cell() {
         FIXTURE_BLOCK_BYTES,
     ));
     assert_eq!(empty.len(), 1);
-    assert!(fields.init(f.body, &empty[0]).unwrap().surveys_nothing());
+    assert!(
+        fields
+            .init(f.body, &empty[0], SigmaSurvey::Surveyed)
+            .unwrap()
+            .surveys_nothing()
+    );
     assert_eq!(fields.field(f.body).unwrap().header(), &header);
     let table = fields.level_table(f.body).unwrap();
     for row in table.chunks(LEVEL_TABLE_STRIDE) {
@@ -911,7 +943,9 @@ fn worker_level_sigma_is_the_largest_omitted_rms_over_the_surveyed_cells() {
     ));
     assert_eq!(whole.len(), 1);
     let mut fields = WorkerFields::new();
-    let change = fields.init(f.body, &whole[0]).unwrap();
+    let change = fields
+        .init(f.body, &whole[0], SigmaSurvey::Surveyed)
+        .unwrap();
     assert!(!change.surveys_nothing());
     let early = fields.level_sigma_m(f.body).unwrap();
     assert_eq!(
@@ -926,7 +960,9 @@ fn worker_level_sigma_is_the_largest_omitted_rms_over_the_surveyed_cells() {
     assert_eq!(sigma.map(bits), expected.map(bits));
     let mut reversed = WorkerFields::new();
     let mut blocks: Vec<&[u8]> = f.blocks().collect();
-    reversed.init(f.body, blocks.remove(0)).unwrap();
+    reversed
+        .init(f.body, blocks.remove(0), SigmaSurvey::Surveyed)
+        .unwrap();
     for block in blocks.into_iter().rev() {
         reversed.chunk(f.body, block).unwrap();
     }
@@ -959,6 +995,117 @@ fn worker_level_sigma_is_the_largest_omitted_rms_on_an_earth_like_field() {
         largest_omitted_rms(field, &cells).map(bits)
     );
     assert!(sigma[0] > 0.0, "{sigma:?}");
+}
+
+/// `run`'s answer, and the cells' σ reads it made on this thread ([`SIGMA_READS`]).
+fn with_sigma_reads<T>(run: impl FnOnce() -> T) -> (T, u64) {
+    let before = SIGMA_READS.with(std::cell::Cell::get);
+    let answer = run();
+    (answer, SIGMA_READS.with(std::cell::Cell::get) - before)
+}
+
+/// Takes `block`, the `ordinal`th of `body`'s blocks from 0, into `fields`, block 0 starting the
+/// field with `sigma`.
+fn take(
+    fields: &mut WorkerFields,
+    body: BodyRef,
+    ordinal: usize,
+    block: &[u8],
+    sigma: SigmaSurvey,
+) -> SurveyChange {
+    if ordinal == 0 {
+        fields.init(body, block, sigma)
+    } else {
+        fields.chunk(body, block)
+    }
+    .unwrap()
+}
+
+/// A level table's values as bits, for the comparisons a float's `==` would not make.
+fn table_bits(table: Option<Vec<f64>>) -> Option<Vec<u64>> {
+    table.map(|t| t.into_iter().map(bits).collect())
+}
+
+/// The hard rule's fields (R10.T4.c; decision-r10-item30 §5.1): started with σ skipped, the
+/// worker reads no cell's σ, after any block, and answers 0 at every level, while every other
+/// answer is a σ-surveying field's, block by block and bake by bake.
+#[test]
+fn worker_skipping_sigma_reads_none_and_answers_zero_after_every_block() {
+    let f = fixture();
+    let mut surveyed = WorkerFields::new();
+    let mut skipped = WorkerFields::new();
+    let mut surveyed_reads = 0;
+    for (ordinal, block) in f.blocks().enumerate() {
+        let (on, on_reads) =
+            with_sigma_reads(|| take(&mut surveyed, f.body, ordinal, block, SigmaSurvey::Surveyed));
+        let (off, off_reads) =
+            with_sigma_reads(|| take(&mut skipped, f.body, ordinal, block, SigmaSurvey::Skipped));
+        surveyed_reads += on_reads;
+        assert_eq!(off_reads, 0, "block {ordinal}");
+        assert_eq!(off, on, "block {ordinal}'s change");
+        assert_eq!(
+            skipped.level_sigma_m(f.body).unwrap().map(bits),
+            [bits(0.0); LEVEL_TABLE_ROWS],
+            "block {ordinal}"
+        );
+        assert_eq!(
+            table_bits(skipped.level_table(f.body)),
+            table_bits(surveyed.level_table(f.body)),
+            "block {ordinal}"
+        );
+        assert_eq!(
+            skipped.field(f.body),
+            surveyed.field(f.body),
+            "block {ordinal}'s field"
+        );
+    }
+    // The surveying field read every cell it took as surveyed, at the levels whose bound is
+    // positive, and found σ there.
+    assert!(surveyed_reads > 0);
+    assert!(surveyed.level_sigma_m(f.body).unwrap()[0] > 0.0);
+    for (name, key, opts) in probes() {
+        assert_eq!(
+            skipped.bake(f.body, SEED, key, &opts),
+            surveyed.bake(f.body, SEED, key, &opts),
+            "{name}"
+        );
+    }
+}
+
+/// A switch of rule starts the field again with the other survey (decision-r10-item30 §4): a block
+/// 0 that surveys cells, started with σ surveyed, reads them; started again with σ skipped, it
+/// reads none and answers 0, the field otherwise the same; and started surveyed once more, it
+/// reads them again, to the first start's σ.
+#[test]
+fn worker_sigma_survey_follows_each_start_of_the_field() {
+    let f = fixture();
+    let whole = split(&encode_within(
+        world(WORLD),
+        &cover(&f.first, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        crate::wire::MAX_BLOCK_BYTES,
+    ));
+    let mut fields = WorkerFields::new();
+    let (on, on_reads) =
+        with_sigma_reads(|| take(&mut fields, f.body, 0, &whole[0], SigmaSurvey::Surveyed));
+    assert!(!on.surveys_nothing());
+    assert!(on_reads > 0);
+    let sigma = fields.level_sigma_m(f.body).unwrap().map(bits);
+    assert_eq!(sigma, largest_omitted_rms(&f.field(), &f.first).map(bits));
+    let surveyed_field = fields.field(f.body).cloned();
+    let (off, off_reads) =
+        with_sigma_reads(|| take(&mut fields, f.body, 0, &whole[0], SigmaSurvey::Skipped));
+    assert_eq!((&off, off_reads), (&on, 0));
+    assert_eq!(
+        fields.level_sigma_m(f.body).unwrap().map(bits),
+        [bits(0.0); LEVEL_TABLE_ROWS]
+    );
+    assert_eq!(fields.field(f.body).cloned(), surveyed_field);
+    let (again, again_reads) =
+        with_sigma_reads(|| take(&mut fields, f.body, 0, &whole[0], SigmaSurvey::Surveyed));
+    assert_eq!((again, again_reads), (on, on_reads));
+    assert_eq!(fields.level_sigma_m(f.body).unwrap().map(bits), sigma);
 }
 
 /// Patches about the two surveys: inside the first, astride the two, beside the second's far
@@ -1050,7 +1197,9 @@ fn worker_bake_of_a_survey_without_its_margin_waits_for_the_margin() {
     let mut waited = false;
     for block in &f.first_blocks[1..] {
         let mut fields = WorkerFields::new();
-        fields.init(f.body, &f.first_blocks[0]).unwrap();
+        fields
+            .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+            .unwrap();
         fields.chunk(f.body, block).unwrap();
         for (name, key, opts) in probes() {
             match fields.bake(f.body, SEED, key, &opts) {
@@ -1065,7 +1214,9 @@ fn worker_bake_of_a_survey_without_its_margin_waits_for_the_margin() {
     }
     assert!(waited, "some survey's bake reads a margin still to come");
     let mut fields = WorkerFields::new();
-    fields.init(f.body, &f.first_blocks[0]).unwrap();
+    fields
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &f.first_blocks[1..] {
         fields.chunk(f.body, block).unwrap();
     }
@@ -1078,7 +1229,9 @@ fn worker_bake_of_a_survey_without_its_margin_waits_for_the_margin() {
 fn worker_rebake_rule_misses_no_bake_a_block_changes() {
     let f = fixture();
     let mut fields = WorkerFields::new();
-    fields.init(f.body, &f.first_blocks[0]).unwrap();
+    fields
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &f.first_blocks[1..] {
         fields.chunk(f.body, block).unwrap();
     }
@@ -1130,7 +1283,9 @@ pub(super) fn lit(opts: TerrainBakeOptions) -> TerrainBakeOptions {
 /// A worker holding the fixture's first payload alone.
 fn first_survey(f: &Fixture) -> WorkerFields {
     let mut fields = WorkerFields::new();
-    fields.init(f.body, &f.first_blocks[0]).unwrap();
+    fields
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &f.first_blocks[1..] {
         fields.chunk(f.body, block).unwrap();
     }
@@ -1198,7 +1353,11 @@ fn worker_fields_report_the_cells_each_block_brings() {
     let mut held = BTreeSet::new();
     let mut blocks = f.blocks();
     let first = fields
-        .init(f.body, blocks.next().expect("a payload has a block 0"))
+        .init(
+            f.body,
+            blocks.next().expect("a payload has a block 0"),
+            SigmaSurvey::Surveyed,
+        )
         .unwrap();
     let mut changes = vec![first];
     for block in blocks {
@@ -1573,7 +1732,9 @@ fn worker_answers_are_the_same_in_any_order_from_the_body_s_cache_and_across_blo
     let f = fixture();
     let sights = sight_lines(&f.field());
     let mut first = WorkerFields::new();
-    first.init(f.body, &f.first_blocks[0]).unwrap();
+    first
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &f.first_blocks[1..] {
         first.chunk(f.body, block).unwrap();
     }
@@ -1702,7 +1863,9 @@ fn worker_photometry_is_the_palette_s_properties_under_the_field_s_scale() {
         "the fixture's header holds no scale, so its materials take c = 1"
     );
     let mut scaled = WorkerFields::new();
-    scaled.init(f.body, &header_block).unwrap();
+    scaled
+        .init(f.body, &header_block, SigmaSurvey::Surveyed)
+        .unwrap();
     let palette = field.header().palette();
     let entries = u8::try_from(palette.len()).unwrap();
     assert!(entries > 0, "the Moon-like palette names substances");
@@ -1835,7 +1998,9 @@ fn worker_class_map_needs_the_body_s_field() {
 fn worker_class_map_of_a_survey_without_its_margin_waits_for_the_margin() {
     let f = fixture();
     let mut fresh = WorkerFields::new();
-    fresh.init(f.body, &f.first_blocks[0]).unwrap();
+    fresh
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &f.first_blocks[1..] {
         fresh.chunk(f.body, block).unwrap();
     }
@@ -1847,7 +2012,9 @@ fn worker_class_map_of_a_survey_without_its_margin_waits_for_the_margin() {
     let mut waited = false;
     for (k, block) in f.first_blocks.iter().enumerate().skip(1) {
         let mut fields = WorkerFields::new();
-        fields.init(f.body, &f.first_blocks[0]).unwrap();
+        fields
+            .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+            .unwrap();
         fields.chunk(f.body, block).unwrap();
         let partial = fields.class_map(f.body, SEED).unwrap();
         if partial.is_complete() {
@@ -1899,7 +2066,9 @@ fn worker_class_map_weighs_a_partly_surveyed_texel_by_its_surveyed_cells() {
     ));
     let body = mars.header().body();
     let mut fields = WorkerFields::new();
-    fields.init(body, &blocks[0]).unwrap();
+    fields
+        .init(body, &blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &blocks[1..] {
         fields.chunk(body, block).unwrap();
     }
@@ -2178,7 +2347,9 @@ fn worker_normal_map_needs_the_body_s_field() {
 fn worker_normal_map_of_a_survey_without_its_margin_waits_for_the_margin() {
     let f = fixture();
     let mut fresh = WorkerFields::new();
-    fresh.init(f.body, &f.first_blocks[0]).unwrap();
+    fresh
+        .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &f.first_blocks[1..] {
         fresh.chunk(f.body, block).unwrap();
     }
@@ -2190,7 +2361,9 @@ fn worker_normal_map_of_a_survey_without_its_margin_waits_for_the_margin() {
     let mut waited = false;
     for (k, block) in f.first_blocks.iter().enumerate().skip(1) {
         let mut fields = WorkerFields::new();
-        fields.init(f.body, &f.first_blocks[0]).unwrap();
+        fields
+            .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+            .unwrap();
         fields.chunk(f.body, block).unwrap();
         let partial = fields.normal_map(f.body, SEED).unwrap();
         // What it holds is the whole map's, bit for bit.
@@ -2251,7 +2424,9 @@ pub(super) fn surveyed_about(
     ));
     let body = field.header().body();
     let mut fields = WorkerFields::new();
-    fields.init(body, &blocks[0]).unwrap();
+    fields
+        .init(body, &blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &blocks[1..] {
         fields.chunk(body, block).unwrap();
     }
@@ -3235,7 +3410,9 @@ fn worker_class_map_texel_maturity_is_the_point_rule_at_band_zero() {
     ));
     let body = deeper.header().body();
     let mut fields = WorkerFields::new();
-    fields.init(body, &blocks[0]).unwrap();
+    fields
+        .init(body, &blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &blocks[1..] {
         fields.chunk(body, block).unwrap();
     }

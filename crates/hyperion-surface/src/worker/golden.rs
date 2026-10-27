@@ -378,7 +378,7 @@ fn moon_text() -> String {
     let mut fields = WorkerFields::new();
     for (ordinal, block) in f.blocks().enumerate() {
         let change = if ordinal == 0 {
-            fields.init(f.body, block)
+            fields.init(f.body, block, SigmaSurvey::Surveyed)
         } else {
             fields.chunk(f.body, block)
         }
@@ -779,7 +779,7 @@ fn terrain_text_of(f: &TerrainFixture, field: &CoarseField) -> String {
     let mut fields = WorkerFields::new();
     for (ordinal, block) in f.first_then_delta().enumerate() {
         let change = if ordinal == 0 {
-            fields.init(f.body, block)
+            fields.init(f.body, block, SigmaSurvey::Surveyed)
         } else {
             fields.chunk(f.body, block)
         }

@@ -74,7 +74,7 @@ function heldSurvey(): { fields: WorkerFields; surveyed: Set<number> } {
   SURVEY.blocks.forEach((block, n) => {
     const request: HeightWorkerRequest =
       n === 0
-        ? { kind: "field-init", id: n, body: SURVEY.body, block, form: "payload" }
+        ? { kind: "field-init", id: n, body: SURVEY.body, block, form: "payload", sigma: "skipped" }
         : { kind: "field-chunk", id: n, body: SURVEY.body, block };
     const { reply } = answerRequest(module, request, fields);
     if (reply.kind !== "field-held" || reply.block === null) {

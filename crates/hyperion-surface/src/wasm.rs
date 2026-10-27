@@ -62,8 +62,10 @@
 //! origin outside 1 m to 10¹² m from the centre, a direction with no finite length, a reach past
 //! 10¹² m, or a skirt margin that is negative.
 //!
-//! - `fieldInit(system, body, block)` starts the body's field from one block 0 (a `Uint8Array`),
-//!   replacing any held, and `fieldChunk(system, body, block)` adds a later block. Each returns a
+//! - `fieldInit(system, body, block, sigma)` starts the body's field from one block 0 (a
+//!   `Uint8Array`), replacing any held, its σ by level surveyed or not by `sigma`, a `SigmaSurvey`,
+//!   `Surveyed` (0) or `Skipped` (1) ([`SigmaSurvey`], R10.T4.c), and
+//!   `fieldChunk(system, body, block)` adds a later block. Each returns a
 //!   `FieldBlock`, or throws naming why the block was refused, the field then as it was. A
 //!   `FieldBlock`'s `newlySurveyed()` is a `Uint32Array` of runs, each the first cell index and the
 //!   index past the last, at the field's level, `fieldLevel`, of the cells the block surveyed
@@ -72,7 +74,8 @@
 //!   `levelTable()` the body's level table in `levelTable(ridges)`'s layout
 //!   ([`WorkerFields::level_table`]); and its `levelSigmaM()` a `Float64Array` of 25, level n at
 //!   n, the body's `σ_n`, metres: the largest omitted RMS at the level over the cells held as
-//!   surveyed, 0 before any ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's
+//!   surveyed, 0 before any and at every level where the field skips it
+//!   ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's
 //!   hard bound makes the body's level bounds. `fieldRelease(system, body)` drops it, `true` if
 //!   one was held, and `heldBytes` is what every field holds on the heap.
 //! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon, skirtM)`
@@ -180,7 +183,7 @@ use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, GroundAtSight, GroundProperties,
     GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap, QueryBodyError, SeasonAnomaly,
-    SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
+    SigmaSurvey, SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
 };
 
 /// The generator version this module computes surfaces for, the crate's `generator_version`.
@@ -476,6 +479,17 @@ pub enum JsHorizonLayer {
     /// [`HorizonLayer::Baked`].
     Baked = 0,
     /// [`HorizonLayer::Skipped`].
+    Skipped = 1,
+}
+
+/// Whether a body's field surveys its σ by level, as the client names it (R10.T4.c's
+/// [`SigmaSurvey`]).
+#[wasm_bindgen(js_name = SigmaSurvey)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsSigmaSurvey {
+    /// [`SigmaSurvey::Surveyed`].
+    Surveyed = 0,
+    /// [`SigmaSurvey::Skipped`].
     Skipped = 1,
 }
 
@@ -1265,11 +1279,16 @@ impl JsSurfaceFields {
         system: u64,
         body: u32,
         block: &[u8],
+        sigma: JsSigmaSurvey,
     ) -> Result<FieldBlock, JsError> {
         let body = body_ref(system, body)?;
+        let sigma = match sigma {
+            JsSigmaSurvey::Surveyed => SigmaSurvey::Surveyed,
+            JsSigmaSurvey::Skipped => SigmaSurvey::Skipped,
+        };
         let change = self
             .fields
-            .init(body, block)
+            .init(body, block, sigma)
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(self.answer(body, &change))
     }

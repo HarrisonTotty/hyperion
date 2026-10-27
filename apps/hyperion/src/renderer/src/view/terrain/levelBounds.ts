@@ -23,9 +23,17 @@
  * thirds of the hard rule's patches on every sample world and T4.a's per-patch maxima pass 4σ in
  * at most one patch in three; T4.a's record fails the second on four of the six worlds, so the
  * hard bound stands (`levelBounds.test.ts` applies the rule to the fixture; R10.T4.b's record).
+ * decision-r10-item30 keeps it at RM5: at the high setting's budget its mean drawn error is 1.1 to
+ * 1.3 times a perfect level-wise bound's (`levelBounds.test.ts`' guard holds it to 1.5), and its
+ * 38–178 px τ′ is the stated error, not the drawn one.
+ *
+ * The rule also sets whether the workers survey σ at all ({@link sigmaSurveyOf}, R10.T4.c): under
+ * the hard rule nothing reads it, and they answer 0 at every level, which the statistical rule
+ * would charge ε_n for too.
  */
 
 import { MAX_LEVEL, unreachable } from "./patchKey";
+import type { SigmaSurveySetting } from "./workers/messages";
 
 /** How selection charges a level: the stated bound, or min(ε_n, 4σ_n). */
 export type SelectionRule = "hard" | "statistical";
@@ -35,6 +43,22 @@ export type SelectionRule = "hard" | "statistical";
  * T4.a's figures (R10.T4.b's record). Change it here alone.
  */
 export const SELECTION_RULE: SelectionRule = "hard";
+
+/**
+ * Whether the height workers survey a body's σ by level under `rule`, each `field_init`'s flag
+ * (decision-r10-item30 §4): only the statistical rule reads σ, and the survey costs some 25 s of
+ * every worker's time for a whole level-8 field (R10.T4.b's record). A switch of rule starts the
+ * fields again with it.
+ */
+export function sigmaSurveyOf(rule: SelectionRule): SigmaSurveySetting {
+  switch (rule) {
+    case "hard":
+      return "skipped";
+    case "statistical":
+      return "surveyed";
+  }
+  return unreachable(rule);
+}
 
 /** The multiple of σ_n the statistical rule charges: Design note 5's 4σ. */
 export const SIGMA_MULTIPLE = 4;
@@ -49,7 +73,10 @@ export interface LevelBounds {
    * and the largest vertex spacing, metres (`PlanetGeometry.levels`' layout).
    */
   readonly table: Float64Array;
-  /** σ_n by level, 25, level n at n, metres: 0 where the level omits nothing, or nothing is surveyed. */
+  /**
+   * σ_n by level, 25, level n at n, metres: 0 where the level omits nothing, nothing is surveyed,
+   * or the workers skip σ ({@link sigmaSurveyOf}).
+   */
   readonly sigmaM: Float64Array;
 }
 

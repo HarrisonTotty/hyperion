@@ -40,6 +40,7 @@ import type {
   HeightSourceSetting,
   HeightWorkerReply,
   HeightWorkerRequest,
+  SigmaSurveySetting,
   SurfaceGroundReadout,
   SurfaceLineOfSight,
   SurfaceMaterial,
@@ -79,6 +80,15 @@ export const WASM_WEIGHTS_LAYER = { baked: 0, skipped: 1 } as const satisfies Re
  */
 export const WASM_HORIZON_LAYER = { baked: 0, skipped: 1 } as const satisfies Record<
   WeightsLayerSetting,
+  number
+>;
+
+/**
+ * The module's `SigmaSurvey` enum values (`src/wasm.rs`'s `JsSigmaSurvey`): whether a field started
+ * surveys its σ by level (R10.T4.c).
+ */
+export const WASM_SIGMA_SURVEY = { surveyed: 0, skipped: 1 } as const satisfies Record<
+  SigmaSurveySetting,
   number
 >;
 
@@ -240,8 +250,12 @@ export interface WasmGroundReadout {
  * body is its system's raw ID and its index; a seed is the body's detail seed.
  */
 export interface WasmSurfaceFields {
-  /** @throws Error naming why the block was refused; the field is then as it was. */
-  fieldInit(system: bigint, body: number, block: Uint8Array): WasmFieldBlock;
+  /**
+   * `sigma` is a {@link WASM_SIGMA_SURVEY} value.
+   *
+   * @throws Error naming why the block was refused; the field is then as it was.
+   */
+  fieldInit(system: bigint, body: number, block: Uint8Array, sigma: number): WasmFieldBlock;
   /** @throws Error naming why the block was refused; the field is then as it was. */
   fieldChunk(system: bigint, body: number, block: Uint8Array): WasmFieldBlock;
   fieldRelease(system: bigint, body: number): boolean;
@@ -543,10 +557,11 @@ export class WorkerFields {
   }
 
   /**
-   * Starts `body`'s field from `block` in `form`, replacing any field of `body` held; a refused
-   * payload block keeps the field held as it was.
+   * Starts `body`'s field from `block` in `form`, replacing any field of `body` held, a payload's
+   * surveying its σ by level or not by `sigma` (a stand-in holds no σ); a refused payload block
+   * keeps the field held as it was.
    */
-  init(body: BodyIdHex, block: ArrayBuffer, form: FieldForm): FieldTake {
+  init(body: BodyIdHex, block: ArrayBuffer, form: FieldForm, sigma: SigmaSurveySetting): FieldTake {
     if (form === "stand-in") {
       this.release(body);
       this.#standIns.init(body, block);
@@ -554,7 +569,7 @@ export class WorkerFields {
       return { kind: "taken", block: null };
     }
     const taken = this.#take(() =>
-      this.#module.fieldInit(...bodyArgs(body), new Uint8Array(block)),
+      this.#module.fieldInit(...bodyArgs(body), new Uint8Array(block), WASM_SIGMA_SURVEY[sigma]),
     );
     if (taken.kind === "taken") {
       this.#standIns.release(body);
@@ -1090,7 +1105,7 @@ export function answerRequest(
         request.id,
         request.body,
         fields,
-        fields.init(request.body, request.block, request.form),
+        fields.init(request.body, request.block, request.form, request.sigma),
       );
     case "field-chunk":
       return fieldAnswer(

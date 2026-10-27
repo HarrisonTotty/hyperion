@@ -194,6 +194,14 @@ export interface BakeSettings {
  */
 export type FieldForm = "payload" | "stand-in";
 
+/**
+ * Whether a payload's field surveys the body's σ by level as it takes blocks (plan R10, R10.T4.c;
+ * decision-r10-item30 §4; `src/wasm.rs`' `SigmaSurvey`): only the statistical selection rule
+ * reads σ, so the pool sets it from `levelBounds.ts`' `SELECTION_RULE` (`sigmaSurveyOf`). A field
+ * that skips it answers {@link FieldBlockAnswer.sigmaM} 0 at every level.
+ */
+export type SigmaSurveySetting = "surveyed" | "skipped";
+
 /** What a block of a payload changed in a worker's field, and the body's level table after it. */
 export interface FieldBlockAnswer {
   /** The field's level, 5 to 8, at which the indices of {@link newlySurveyed} are. */
@@ -215,8 +223,9 @@ export interface FieldBlockAnswer {
   readonly levels: Float64Array;
   /**
    * The body's σ by level, 25, level n at n, metres: the largest omitted RMS at the level over the
-   * cells the field holds as surveyed, 0 before any (`worker::level_sigma_m`; plan R10,
-   * R10.T4.b). With {@link levels}' hard bound it makes the body's level bounds (`levelBounds.ts`).
+   * cells the field holds as surveyed, 0 before any, and 0 at every level where the field skips σ
+   * ({@link SigmaSurveySetting}; `worker::level_sigma_m`; plan R10, R10.T4.b and T4.c). With
+   * {@link levels}' hard bound it makes the body's level bounds (`levelBounds.ts`).
    */
   readonly sigmaM: Float64Array;
 }
@@ -468,7 +477,8 @@ export type HeightWorkerRequest =
     }
   /**
    * Start `body`'s field from its first block, R09's block 0, which carries the whole header,
-   * replacing any field of `body` the worker holds; or, for a stand-in, hold the blocks undecoded.
+   * replacing any field of `body` the worker holds, surveying its σ by level or not by `sigma`; or,
+   * for a stand-in, hold the blocks undecoded.
    */
   | {
       readonly kind: "field-init";
@@ -476,6 +486,7 @@ export type HeightWorkerRequest =
       readonly body: BodyIdHex;
       readonly block: ArrayBuffer;
       readonly form: FieldForm;
+      readonly sigma: SigmaSurveySetting;
     }
   /** Add one more block to `body`'s field, which a `field-init` must have started. */
   | {

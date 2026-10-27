@@ -168,7 +168,7 @@ function moonFields(): { fields: WorkerFields; levels: Float64Array } {
   for (const [n, block] of MOON.blocks.entries()) {
     const request: HeightWorkerRequest =
       n === 0
-        ? { kind: "field-init", id: n, body: MOON.body, block, form: "payload" }
+        ? { kind: "field-init", id: n, body: MOON.body, block, form: "payload", sigma: "skipped" }
         : { kind: "field-chunk", id: n, body: MOON.body, block };
     const { reply } = answerRequest(MODULE, request, fields);
     if (reply.kind !== "field-held" || reply.block === null) {
