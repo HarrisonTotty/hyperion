@@ -1306,8 +1306,12 @@ Names are those the owning plans give; the owning plan is authoritative.
    - **Routing.** Thick regimes route to their bakes only once R08.T14's and R08.T15's gates pass.
      Before then a thick world is drawn with the analytic term under its own label,
      `ATMOSPHERE: APPROXIMATE`, which clears only when the gate for its regime passes. The
-     brainstorm's "before Venus- and Titan-class atmospheres ship" is read as: no thick world is
-     presented as computed until its gate passes.
+     brainstorm's "before the atmospheres it replaces are presented as computed, Earth-class ones
+     among them" (amended 2026-10-27 from "before Venus- and Titan-class atmospheres ship",
+     `decision-r08-t13c2-classes.md` §7) is read as: no thick world is presented as computed until
+     its gate passes. As measured (R08.T13.b's sweep, tabulated by R08.T13.c2), τ* lies at 1/8–1/2
+     for g ≤ 0.3 and at √2/16–√2/4 above, so Earth-, Mars- and Saturn-class airs are
+     `thickScattering`, and only tenuous airs stay `thin`.
    - **What the label answers** (`signoff-2.md` in the RM4/RM5 orchestration directory). Signed
      off 2026-10-10 by the sign-off agent (owner's delegation). `ATMOSPHERE: APPROXIMATE` marks
      what the console draws in place of physics it lacks, never the residual of physics it has. A
@@ -5482,7 +5486,8 @@ swept τ at which some geometry fails the metric, every sweep point traced to σ
 cloud fraction 1). Tests:
 
 - Earth and Mars classify `thin` and pass the gate, or the finding is recorded and raised for a
-  ruling;
+  ruling. Ruled 2026-10-27 (`decision-r08-t13c2-classes.md`): Earth, Mars and `saturn-oblate`
+  classify `thickScattering`, as measured; T13.d moves the labels and changes no pixel;
 - Mars (`mars_dust` at τ(550) 0.5): the twin's sky radiance and its blue-over-red ratio at 3, 5,
   8 and 12° from a sun 5° and 30° up, against R08.T12's reference at points added explicitly
   (R08.T12's geometry rule). They are held to the gate's metric. A miss is recorded and raised
@@ -5592,6 +5597,28 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   are recorded here, beside the bake's J_ms at the same points, so that what the label covered is
   known.
 
+  Ruled 2026-10-27 (`decision-r08-t13c2-classes.md` §6), since Earth, Mars and `saturn-oblate`
+  classify `thickScattering`:
+  - **The kept scenes' bake.** `TEST EARTH`'s Cornette–Shanks aerosol and `TEST MARS`'s tabulated
+    dust have no particles for the spectral column's Mie. The kept path bakes such a term from its
+    channel optics and its phase's moments, carried across the bins by `binConversion.ts`'s ground
+    rule. Without it the kept bodies cannot bake, and T14.f's gate cannot run.
+  - **A source below the horizon** (μ₀ ≤ 0, outside the table, T14.b's record) reads the analytic
+    term, the seam blended over the first μ₀ cell. Earth's sunsets are on this path; T14.f's and
+    T14.d's gates judge it at `ground-s90`.
+  - **The recorded runs** (recorded, not gated), from the committed references, nothing re-traced:
+    - c1's scalar case gate on `earth`, `earth-ozone-slab`, `mars` and `saturn-oblate` through the
+      twin with the baked table in place of Ψ_ms;
+    - only if Earth's `ground-s80` and `ground-s60` views still miss there, one control: the
+      analytic twin with Ψ_ms and the sky view at four times their μ_s and near-horizon
+      resolution, on `earth` and on the (1, 0) points at τ 1/8 and ¼. If the finer analytic
+      tables pass where the bake does not, the cause is the kernels' table size, not the route,
+      and it goes to main before T14.d routes anything.
+  - **The frame**, recorded on the RTX 3080 with the measured Earth forced through the thick read
+    at QW30's binding rows (a smoke-only override; the route stays gated), against 15.67 and
+    16.67 ms, each Earth-class row's J_ms bytes beside it: 270,336 B a band and light, as
+    `rgba16float`.
+
   Acceptance: `pnpm test` and `just test-render` pass.
 
 - **R08.T14.e The polarisation correction** (Design note 10; ruled 2026-10-09,
@@ -5647,6 +5674,14 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       note 11; the UHD 620's cost is the owner's to record. If the low setting misses its
       budget, it drops the correction from the aerial-perspective volume first and m = 1
       second, recorded.
+  - Ruled 2026-10-27 (`decision-r08-t13c2-classes.md` §6):
+    - "Earth, Mars and `saturn-oblate` pass" is read through the path `classifyRegime` gives
+      them: the thick table with the correction, against vector I. The analytic path with the
+      correction is recorded beside, as the diagnostic; it cannot pass, since R08.T13.c1 measured
+      it outside the gate.
+    - The lever, if T14.c's frame is over 15.67 ms: on a `thickScattering` world the bake's E and
+      ΔJ_pol share T14.b's grid, and are stored summed in one table of m = 0..2, so that the
+      kernels make one read where a thin world makes Ψ_ms's and the correction's.
 
   Acceptance: `pnpm test` and `just test-render` pass.
 
@@ -5669,6 +5704,19 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     `ATMOSPHERE: COMPUTING` clears when the last lands.
   - When a regime's gates pass, `classifyRegime` routes its `thickScattering` worlds to the bake,
     and `ATMOSPHERE: APPROXIMATE` clears for them.
+  - Ruled 2026-10-27 (`decision-r08-t13c2-classes.md` §6), Earth's route:
+    - The `thickScattering` regime's gates gain T14.f's four kept cases beside the Venus- and
+      Titan-class ones. Design note 9 routes the regime, and clears its label, when all pass. If
+      the kept cases pass while the deep cases wait on traces (the refusals above), main rules
+      then on routing by the depth range the passing cases cover.
+    - An Earth-class body's bake time is recorded beside the Saturn-class and capped-giant
+      figures, with an aerosol mode once version 24 serves them.
+    - Mars's forward view `ground-s60-v85-a0` (8–13% dim in c1, undetermined) and
+      `saturn-oblate`'s twilight (1.2–3.9 times bright) are named findings of this gate: one that
+      still misses through the bake is the kernels' or the forward aureole's, raised with main.
+    - **The frame blocker binds here.** Routing Earth-class worlds changes their draw path, so the
+      high rows with the route meet `decision-r08-t11-frame.md`'s p95 ≤ 16.67 ms (15.67 the
+      target) before T14.d routes them.
 
   Acceptance: `pnpm test`.
 
