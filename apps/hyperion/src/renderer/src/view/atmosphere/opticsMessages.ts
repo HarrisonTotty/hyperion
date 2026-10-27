@@ -15,6 +15,7 @@ import type { AbsorberCurve, AbsorberCurveSums, CurveShare } from "./absorbers";
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import type { PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
 /**
@@ -30,6 +31,9 @@ import type { SpectralColumn } from "./thick/spectralColumn";
  *   table a light in `slots`. The column's absorber terms take the input's absorber specs of their
  *   names, which the worker forms itself (`absorberSpecsOf`, as a curve share does), and the bin
  *   curves under each light.
+ * - `polarisation-bake` (R08.T14.e): the polarisation correction's tables
+ *   (`thick/polarisation.ts`) of `column` on `body`, laid out as `thick-bake`'s and with its
+ *   absorbers formed the same way, for any world with air, thin or thick.
  *
  * `slots` index the input's lights, which are its light slots in `lightsAt`'s order.
  */
@@ -57,6 +61,15 @@ export type OpticsRequest =
       readonly bands: ReadonlyArray<number>;
       readonly column: SpectralColumn;
       readonly body: ThickBakeBody;
+    }
+  | {
+      readonly kind: "polarisation-bake";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
     };
 
 /**
@@ -72,6 +85,10 @@ export type OpticsRequest =
  *   asked. Never `failed`, which the pool reads as the medium's build failing: a failed bake is
  *   `ATMOSPHERE: APPROXIMATE`'s, never `ATMOSPHERE NOT AVAILABLE`'s (decision-r08-t10a-leans, UX
  *   review item 1).
+ * - `polarisation-baked`: a `polarisation-bake`'s tables, one a band asked in its order, their
+ *   slots the lights asked in theirs.
+ * - `polarisation-bake-failed`: a `polarisation-bake` that threw or was refused, as
+ *   `thick-bake-failed` is, never `failed`.
  * - `failed`: the job threw, a bug (`decision-r08-t10a-leans.md` item 6), with its message.
  */
 export type OpticsReply =
@@ -93,6 +110,17 @@ export type OpticsReply =
     }
   | {
       readonly kind: "thick-bake-failed";
+      readonly id: number;
+      readonly bands: ReadonlyArray<number>;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "polarisation-baked";
+      readonly id: number;
+      readonly tables: ReadonlyArray<PolarisationTable>;
+    }
+  | {
+      readonly kind: "polarisation-bake-failed";
       readonly id: number;
       readonly bands: ReadonlyArray<number>;
       readonly message: string;

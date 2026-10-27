@@ -63,6 +63,7 @@
     "src/renderer/src/view/atmosphere/thick/discreteOrdinates.ts",
     "src/renderer/src/view/atmosphere/thick/expSum.ts",
     "src/renderer/src/view/atmosphere/thick/linearAlgebra.ts",
+    "src/renderer/src/view/atmosphere/thick/polarisation.ts",
     "src/renderer/src/view/atmosphere/thick/spectralColumn.ts",
     "src/renderer/src/view/atmosphere/thick/sphericalBeam.ts",
     "src/renderer/src/view/atmosphere/irradianceQuadrature.ts",

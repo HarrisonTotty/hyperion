@@ -333,8 +333,11 @@ export interface BinTerm {
   readonly absorptionDepth: Float64Array;
 }
 
-/** A light's bin: its terms and its fits' errors. */
-interface LightBin {
+/**
+ * A light's bin: the solves its gases take, one a term of their exponential sums' random overlap,
+ * and its fits' errors.
+ */
+export interface BakeLightBin {
   readonly terms: ReadonlyArray<BinTerm>;
   readonly largestFitError: number;
   readonly readFitError: number;
@@ -365,7 +368,7 @@ function readError(fit: ExpSumFit, absorber: LaidAbsorber): number {
 
 interface PreparedLight {
   readonly conversion: BinConversion;
-  readonly bins: ReadonlyArray<LightBin>;
+  readonly bins: ReadonlyArray<BakeLightBin>;
 }
 
 /** Everything of a bake that does not depend on the band (the module's remarks). */
@@ -410,10 +413,16 @@ export function binGroundAlbedo(albedo: Rgb, wavelengthNm: number): number {
   return low[1] + ((high[1] - low[1]) * (wavelengthNm - low[0])) / (high[0] - low[0]);
 }
 
+/** A term's extinction at relative density 1 in the bin the layers are placed by, m⁻¹. */
+export interface TermExtinction {
+  readonly scatteringPerM: number;
+  readonly absorptionPerM: number;
+}
+
 /** The layer interfaces in h\*, from the top down (the module's remarks). */
 function layerInterfaces(
   column: SpectralColumn,
-  reference: ReadonlyArray<BinTermOptics>,
+  reference: ReadonlyArray<TermExtinction>,
   layers: number,
 ): Float64Array {
   const top = column.topHeightM;
@@ -543,15 +552,16 @@ function verticalBinDepth(curves: AbsorberBinCurves, bin: number, row: number): 
   return curves.opticalDepth[bin]?.[row * nodes + ((nodes - 1) >> 1)] ?? 0;
 }
 
-/** One light's bins (the module's remarks, "Spectral"). */
-function prepareLight(
+/** One light's bins `bins`, in their order (the module's remarks, "Spectral"). */
+function lightBins(
   light: ThickBakeLight,
   absorberTerms: ReadonlyArray<LaidAbsorber>,
   none: ReadonlyArray<BinTerm>,
   options: ExpSumOptions,
-): PreparedLight {
+  bins: ReadonlyArray<number>,
+): ReadonlyArray<BakeLightBin> {
   const layers = none[0]?.absorptionDepth.length ?? 0;
-  const bins = Array.from({ length: BAKE_BIN_COUNT }, (_, b): LightBin => {
+  return bins.map((b): BakeLightBin => {
     if (absorberTerms.length === 0) {
       return { terms: none, largestFitError: 0, readFitError: 0, crossedRows: 0 };
     }
@@ -613,7 +623,6 @@ function prepareLight(
       crossedRows: fits.reduce((sum, fit) => sum + fit.crossedRows, 0),
     };
   });
-  return { conversion: binConversion(light.spectrum), bins };
 }
 
 /** A layer as delta-M scales it, and the fraction it truncated. */
@@ -674,39 +683,7 @@ export function prepareBake(
   grid: ThickBakeGrid = THICK_BAKE_GRID,
   options: ExpSumOptions = EXP_SUM_OPTIONS,
 ): PreparedBake {
-  const { layers, altitudeStride } = grid;
-  if (
-    !(Number.isInteger(layers) && layers >= 1) ||
-    !(Number.isInteger(altitudeStride) && altitudeStride >= 1 && layers % altitudeStride === 0)
-  ) {
-    throw new RangeError(`a bake's ${layers} layers take whole strides, not ${altitudeStride}`);
-  }
-  for (const mu of [...grid.sunCosines, ...grid.upwardCosines]) {
-    if (!(mu > 0 && mu <= 1)) {
-      throw new RangeError(`a bake's cosines lie in (0, 1], not ${mu}`);
-    }
-  }
-  const absorberIndices = column.terms.flatMap((term, t) =>
-    term.source.kind === "absorber" ? [t] : [],
-  );
-  for (const [slot, light] of lights.entries()) {
-    if (light.absorbers.length !== absorberIndices.length) {
-      throw new RangeError(
-        `light ${slot} brings ${light.absorbers.length} absorbers' curves for ${absorberIndices.length}`,
-      );
-    }
-    for (const [a, curves] of light.absorbers.entries()) {
-      const source = column.terms[absorberIndices[a] ?? -1]?.source;
-      if (source?.kind !== "absorber" || source.amount.kind !== curves.kind) {
-        throw new RangeError(`light ${slot}'s absorber ${a} is not of its term's kind`);
-      }
-      if (curves.logPressures.length > 1 && column.pressureBar === undefined) {
-        throw new RangeError(
-          `absorber ${a}'s curves have pressure rows and the column no pressure`,
-        );
-      }
-    }
-  }
+  checkBakeInputs(column, lights, grid);
   const optics = spectralOptics(column, BAKE_WAVELENGTHS_NM);
   const order = THICK_BAKE_STREAMS;
   const binOptics = optics.map((terms) =>
@@ -717,22 +694,8 @@ export function prepareBake(
       forwardDelta: forwardDeltaShare(t.phase),
     })),
   );
-  const interfaceHeightsM = layerInterfaces(
-    column,
-    binOptics[THICK_BAKE_REFERENCE_BIN] ?? [],
-    layers,
-  );
-  const layerColumnsM = column.terms.map((term) => {
-    const totals = Float64Array.from(interfaceHeightsM, (h) => columnLengthM(term.density, h));
-    return Float64Array.from(
-      { length: layers },
-      (_, p) => (totals[p] ?? Number.NaN) - (totals[p + 1] ?? Number.NaN),
-    );
-  });
-  const altitudesM = Float64Array.from(
-    { length: layers / altitudeStride + 1 },
-    (_, a) => interfaceHeightsM[layers - a * altitudeStride] ?? Number.NaN,
-  );
+  const layering = bakeLayering(column, binOptics[THICK_BAKE_REFERENCE_BIN] ?? [], grid);
+  const { interfaceHeightsM, layerColumnsM, altitudesM } = layering;
   const pointOptics = binOptics.map((terms) =>
     Array.from(altitudesM, (h): PointOptics => {
       let scattering = 0;
@@ -772,7 +735,136 @@ export function prepareBake(
       };
     }),
   );
-  const absorbers = absorberIndices.map((t): LaidAbsorber => {
+  const everyBin = Array.from({ length: BAKE_BIN_COUNT }, (_, b) => b);
+  const bins = bakeLightBins(column, layering, lights, everyBin, options);
+  return {
+    column,
+    grid,
+    interfaceHeightsM,
+    altitudesM,
+    binOptics,
+    groundAlbedo: Float64Array.from(BAKE_WAVELENGTHS_NM, (nm) =>
+      binGroundAlbedo(column.groundAlbedo, nm),
+    ),
+    layerColumnsM,
+    pointOptics,
+    lights: lights.map((light, j): PreparedLight => ({
+      conversion: binConversion(light.spectrum),
+      bins: bins[j] ?? [],
+    })),
+  };
+}
+
+/**
+ * Checks a bake's grid and lights against its column, as {@link prepareBake} does first: whole
+ * strides, cosines in (0, 1], and each light's absorbers' curves one a column's absorber term of
+ * its kind, with pressure rows only where the column has a pressure profile.
+ *
+ * @throws RangeError as {@link prepareBake} does for them.
+ */
+export function checkBakeInputs(
+  column: SpectralColumn,
+  lights: ReadonlyArray<ThickBakeLight>,
+  grid: ThickBakeGrid,
+): void {
+  const { layers, altitudeStride } = grid;
+  if (
+    !(Number.isInteger(layers) && layers >= 1) ||
+    !(Number.isInteger(altitudeStride) && altitudeStride >= 1 && layers % altitudeStride === 0)
+  ) {
+    throw new RangeError(`a bake's ${layers} layers take whole strides, not ${altitudeStride}`);
+  }
+  for (const mu of [...grid.sunCosines, ...grid.upwardCosines]) {
+    if (!(mu > 0 && mu <= 1)) {
+      throw new RangeError(`a bake's cosines lie in (0, 1], not ${mu}`);
+    }
+  }
+  const absorberIndices = absorberTermsOf(column);
+  for (const [slot, light] of lights.entries()) {
+    if (light.absorbers.length !== absorberIndices.length) {
+      throw new RangeError(
+        `light ${slot} brings ${light.absorbers.length} absorbers' curves for ${absorberIndices.length}`,
+      );
+    }
+    for (const [a, curves] of light.absorbers.entries()) {
+      const source = column.terms[absorberIndices[a] ?? -1]?.source;
+      if (source?.kind !== "absorber" || source.amount.kind !== curves.kind) {
+        throw new RangeError(`light ${slot}'s absorber ${a} is not of its term's kind`);
+      }
+      if (curves.logPressures.length > 1 && column.pressureBar === undefined) {
+        throw new RangeError(
+          `absorber ${a}'s curves have pressure rows and the column no pressure`,
+        );
+      }
+    }
+  }
+}
+
+/** The indices of a column's absorber terms, in its order. */
+function absorberTermsOf(column: SpectralColumn): number[] {
+  return column.terms.flatMap((term, t) => (term.source.kind === "absorber" ? [t] : []));
+}
+
+/** A bake's layers: their interfaces, each term's column in each, and the table's altitudes. */
+export interface BakeLayering {
+  /** The interfaces' h\*, m, from the top down: L + 1. */
+  readonly interfaceHeightsM: Float64Array;
+  /** Per term, per layer from the top, ∫ρ dh over it, m. */
+  readonly layerColumnsM: ReadonlyArray<Float64Array>;
+  /** The table's altitudes, ascending: every `altitudeStride`-th interface from the ground. */
+  readonly altitudesM: Float64Array;
+}
+
+/**
+ * A bake's layers on `grid` (the module's remarks): the interfaces evenly in ξ by the terms'
+ * extinction in the reference bin, each term's exact column in each layer, and the table's
+ * altitudes; {@link prepareBake}'s, which R08.T14.e's correction lays the same way.
+ *
+ * @param reference - Each term's extinction at relative density 1 in
+ *   {@link THICK_BAKE_REFERENCE_BIN}, in the column's order.
+ */
+export function bakeLayering(
+  column: SpectralColumn,
+  reference: ReadonlyArray<TermExtinction>,
+  grid: ThickBakeGrid,
+): BakeLayering {
+  const { layers, altitudeStride } = grid;
+  const interfaceHeightsM = layerInterfaces(column, reference, layers);
+  const layerColumnsM = column.terms.map((term) => {
+    const totals = Float64Array.from(interfaceHeightsM, (h) => columnLengthM(term.density, h));
+    return Float64Array.from(
+      { length: layers },
+      (_, p) => (totals[p] ?? Number.NaN) - (totals[p + 1] ?? Number.NaN),
+    );
+  });
+  const altitudesM = Float64Array.from(
+    { length: layers / altitudeStride + 1 },
+    (_, a) => interfaceHeightsM[layers - a * altitudeStride] ?? Number.NaN,
+  );
+  return { interfaceHeightsM, layerColumnsM, altitudesM };
+}
+
+/**
+ * Each light's bins `bins` (the module's remarks, "Spectral"), `[light][i]` for `bins[i]`: its
+ * absorbers laid on the layers, each a Curtis–Godson pressure a layer, and their exponential sums'
+ * random overlap in each bin, one solve a term; {@link prepareBake}'s for every bin.
+ *
+ * @remarks
+ * A light's bin with no gases takes one unabsorbed term, the same object in every light's, so that
+ * a band solves it once for them all.
+ *
+ * @throws RangeError as {@link prepareBake} does for a light's curves.
+ */
+export function bakeLightBins(
+  column: SpectralColumn,
+  layering: BakeLayering,
+  lights: ReadonlyArray<ThickBakeLight>,
+  bins: ReadonlyArray<number>,
+  options: ExpSumOptions = EXP_SUM_OPTIONS,
+): ReadonlyArray<ReadonlyArray<BakeLightBin>> {
+  const { interfaceHeightsM, layerColumnsM } = layering;
+  const layers = interfaceHeightsM.length - 1;
+  const absorbers = absorberTermsOf(column).map((t): LaidAbsorber => {
     const term = column.terms[t];
     if (term === undefined || term.source.kind !== "absorber") {
       throw new Error(`term ${t} is not an absorber`);
@@ -806,19 +898,7 @@ export function prepareBake(
   });
   // One unabsorbed term, shared by every light's bins with no gases, so that a band solves it once.
   const none: ReadonlyArray<BinTerm> = [{ weight: 1, absorptionDepth: new Float64Array(layers) }];
-  return {
-    column,
-    grid,
-    interfaceHeightsM,
-    altitudesM,
-    binOptics,
-    groundAlbedo: Float64Array.from(BAKE_WAVELENGTHS_NM, (nm) =>
-      binGroundAlbedo(column.groundAlbedo, nm),
-    ),
-    layerColumnsM,
-    pointOptics,
-    lights: lights.map((light) => prepareLight(light, absorbers, none, options)),
-  };
+  return lights.map((light) => lightBins(light, absorbers, none, options, bins));
 }
 
 // ---------------------------------------------------------------------------------------------
