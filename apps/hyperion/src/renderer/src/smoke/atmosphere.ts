@@ -66,13 +66,16 @@ import {
 } from "../view/atmosphere/earth";
 import {
   type AtmosphereCamera,
+  type AtmosphereFrameKernels,
   atmosphereInputs,
   bodyOfFigure,
+  createAtmosphereFrameKernels,
   curveSlotOf,
   type FrameOutputs,
   frameSourcesOf,
   HillaireAtmosphere,
   type MarchBand,
+  type MarchCover,
   marchSourcesOf,
   marchWeightOf,
   skyViewHeight,
@@ -83,6 +86,11 @@ import {
   tableRadiusM,
   tablesFigureOf,
 } from "../view/atmosphere/hillaire";
+import {
+  MARCH_TILE_CODES,
+  MARCH_TILE_TEXELS,
+  type MarchTileKind,
+} from "../view/atmosphere/marchArea";
 import {
   grazingTwilight,
   LOW_TWIN_WORST,
@@ -2392,6 +2400,305 @@ export async function checkUnreadEarth(engine: RenderEngine, checks: Checks): Pr
     body: earthBody(),
     irradiance: true,
   });
+}
+
+// --- R08.T11.d: the march over the air's area, and the tile cull ----------------------------------
+
+/**
+ * R08.T11.d's frames' size: 16:9 at 160 × 90, 20 × 12 tiles of the march on high and 10 × 6 at
+ * low's half, small enough for SwiftShader to march both covers of each frame (at 200 × 112 the
+ * group took 57 s at a CPU quota of 400%).
+ */
+const AREA_FRAME_SIZE: ViewSize = { widthPx: 160, heightPx: 90 };
+
+/** One frame of R08.T11.d's check: its name, its setting, its camera and its surface, if any. */
+interface AreaFrame {
+  readonly name: string;
+  readonly setting: QualitySetting;
+  readonly distanceM: number;
+  /** A surface drawn this far ahead across the whole frame, m, or `null` for none. */
+  readonly surfaceM: number | null;
+}
+
+/** The bodies of R08.T11.d's check: their air and lights, and the frames each is drawn in. */
+interface AreaBody {
+  readonly name: string;
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+  /** Its figure and gravity, the tables' slicing. */
+  readonly body: () => AtmosphereBody;
+  readonly frames: ReadonlyArray<AreaFrame>;
+}
+
+/**
+ * R08.T11.d's frames: R08.T8.c's far-limb cameras (the datum's edge level across the frame at the
+ * 60° field, T8.c's timed Sun 30° from the zenith of the tangent point and 90° right) from 400 km,
+ * 10⁷ m and 10⁸ m on high, so that the area is part of the frame and holds tiles of each kind;
+ * 10⁷ m over a surface drawn across the frame beyond the body, so that every texel has a depth and
+ * the face's rays end on the datum before it; and 10⁷ m at low's half resolution, the composite's
+ * four candidates of a pixel. A frame from inside the air, whose area is the whole target, was held
+ * byte for byte once beside them and is left out for the part's time and its GPU process's memory
+ * (plan R08's "Deviations in R08.T11.d, as built").
+ */
+const AREA_FRAMES: ReadonlyArray<AreaFrame> = [
+  {
+    name: "from 400 km",
+    setting: "high",
+    distanceM: WGS84.equatorialRadiusM + 400_000,
+    surfaceM: null,
+  },
+  {
+    name: "from 10⁷ m over a surface 2 × 10⁷ m ahead",
+    setting: "high",
+    distanceM: 1e7,
+    surfaceM: 2e7,
+  },
+  { name: "from 10⁸ m", setting: "high", distanceM: 1e8, surfaceM: null },
+  { name: "from 10⁷ m", setting: "low", distanceM: 1e7, surfaceM: null },
+];
+
+/**
+ * The measured Earth, whose tables hold the slot layers (the march by slot), in every frame. The
+ * march over the shared read takes the same two entry points over another source's read
+ * (`rayMarchCurves.wgsl`), and is left out for the part's watchdog: with R05's Earth from 10⁷ m
+ * beside it the group took 50 to 52 s at a CPU quota of 400%, and part 12 149 to 166 s.
+ */
+const AREA_BODIES: ReadonlyArray<AreaBody> = [
+  {
+    name: "the measured Earth",
+    medium: EARTH_REFERENCE,
+    curves: EARTH_REFERENCE_CURVES,
+    body: earthBody,
+    frames: AREA_FRAMES,
+  },
+];
+
+/** One cover's frame read back: the composite's output, the march's whole target, and the tiles. */
+interface AreaReads {
+  readonly composite: ArrayBuffer;
+  readonly march: ArrayBuffer;
+  /** The tile cull's kinds the frame wrote, by kind, under the cull; none on the reference path. */
+  readonly kinds: Readonly<Record<MarchTileKind, number>>;
+  /** The tiles whose code is none of the kinds' (`MARCH_TILE_CODES`). */
+  readonly unknown: number;
+  readonly area: string;
+}
+
+/** How a read-back of `what` differs from its reference ({@link halvesDiffering}), in words. */
+function differenceOf(
+  what: string,
+  by: { readonly texels: number; readonly ulps: number },
+): string {
+  return by.texels === 0
+    ? `${what} the same`
+    : `${what} ${by.texels} texels differ, by ${by.ulps} ulp at most`;
+}
+
+/** A half float's bits as an integer whose order is the floats' (sign and magnitude, folded). */
+function orderedHalf(bits: number): number {
+  return (bits & 0x8000) === 0 ? bits : -(bits & 0x7fff);
+}
+
+/**
+ * How two `rgba16float` read-backs differ: in how many texels, and by how many units in the last
+ * place at most in any channel (T8.d's fused-multiply-add ulp is 1).
+ */
+function halvesDiffering(
+  a: ArrayBuffer,
+  b: ArrayBuffer,
+): { readonly texels: number; readonly ulps: number } {
+  if (a.byteLength !== b.byteLength) {
+    return { texels: Number.POSITIVE_INFINITY, ulps: Number.POSITIVE_INFINITY };
+  }
+  const x = new Uint16Array(a);
+  const y = new Uint16Array(b);
+  let texels = 0;
+  let ulps = 0;
+  for (let first = 0; first < x.length; first += 4) {
+    let differs = false;
+    for (let i = first; i < first + 4; i += 1) {
+      const step = Math.abs(orderedHalf(x[i] ?? 0) - orderedHalf(y[i] ?? 0));
+      if (step > 0) {
+        differs = true;
+        ulps = Math.max(ulps, step);
+      }
+    }
+    if (differs) {
+      texels += 1;
+    }
+  }
+  return { texels, ulps };
+}
+
+/**
+ * One frame of `tables` drawn under `cover` by an atmosphere of its own, so that its march's
+ * target starts empty, over the device's shared kernels, and read back.
+ */
+async function areaReadsOf(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+  kernels: AtmosphereFrameKernels,
+  frame: AreaFrame,
+  cover: MarchCover,
+): Promise<AreaReads> {
+  const atmosphere = HillaireAtmosphere.over(
+    engine,
+    tables,
+    twinSizes(TABLE_SIZES[frame.setting]),
+    kernels,
+  );
+  atmosphere.setMarchCover(cover);
+  // The surface's mesh and material, made once and let go with the frame.
+  const surfaceM = frame.surfaceM;
+  const drawn =
+    surfaceM === null
+      ? null
+      : {
+          mesh: fullScreenMesh(engine, "march area surface", -surfaceM),
+          material: engine.createMaterial(flatSpec("march area surface")),
+        };
+  try {
+    const figure = tablesFigureOf(tables);
+    const camera = farLimbTimingCamera(frame.distanceM, AREA_FRAME_SIZE, figure);
+    const sun = limbSunToward(
+      frame.distanceM,
+      figure,
+      FAR_LIMB_TIMING_SUN_ZENITH_DEG,
+      FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
+      FAR_LIMB_TIMING_FRAME,
+    );
+    const surface: SceneSurface | null =
+      drawn === null
+        ? null
+        : () => drawOf(drawn.mesh, drawn.material, [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1]);
+    const composite = await drawComposite(
+      engine,
+      atmosphere,
+      camera,
+      [sun],
+      { label: "march area", surface, preExposure: SMOKE_EXPOSURE_SCALE },
+      (output) => engine.readTexture(output.colour),
+    );
+    const { rayMarch, marchTiles, marchArea } = atmosphere.frameTables;
+    if (rayMarch === null || marchArea === null) {
+      throw new Error("the ray march drew no target");
+    }
+    const march = await engine.readTexture(rayMarch, 0, undefined, "tolerance");
+    const kinds = { miss: 0, centre: 0, footprint: 0 };
+    let unknown = 0;
+    const tiles = marchArea.tilesAcross * marchArea.tilesDown;
+    if (cover === "culled" && marchTiles !== null && tiles > 0) {
+      const written = new Uint32Array(await engine.readBuffer(marchTiles, "tolerance"), 0, tiles);
+      const byCode = new Map(
+        (["miss", "centre", "footprint"] as const).map(
+          (kind) => [MARCH_TILE_CODES[kind], kind] as const,
+        ),
+      );
+      for (const code of written) {
+        const kind = byCode.get(code);
+        if (kind === undefined) {
+          unknown += 1;
+        } else {
+          kinds[kind] += 1;
+        }
+      }
+    }
+    const all =
+      Math.ceil(marchArea.widthTexels / MARCH_TILE_TEXELS) *
+      Math.ceil(marchArea.heightTexels / MARCH_TILE_TEXELS);
+    return {
+      composite,
+      march,
+      kinds,
+      unknown,
+      area: `${marchArea.tilesAcross} × ${marchArea.tilesDown} tiles from (${marchArea.firstTileX}, ${marchArea.firstTileY}) of ${all}`,
+    };
+  } finally {
+    atmosphere.dispose();
+    if (drawn !== null) {
+      engine.releaseMesh(drawn.mesh);
+      engine.releaseMaterial(drawn.material);
+    }
+  }
+}
+
+/**
+ * R08.T11.d: the march over each air body's area and the tile cull (`decision-r08-t11-frame.md`
+ * §2; `decision-r08-t8-leans.md` §11, Ruling 4), both exact: each frame drawn under the cull, the
+ * centre ray's entry point and the footprint's over the air's area (`marchArea.ts`) and the
+ * composite reading no air outside it, and again on the reference path, the footprint's entry point
+ * over every texel, as the one kernel marched before them; the composite's output and the march's
+ * whole target (its rest filled as a reader asks) read back and compared half float by half float:
+ * on a fallback adapter (SwiftShader) the same byte for byte, and on hardware within T8.d's
+ * fused-multiply-add ulp, 1, where the two entry points' compiles may fuse differently (as E1′ and
+ * E4 did on the RTX 3080, R08.T8.e). Each frame names its area and the kinds its tiles took on the
+ * GPU, and the check holds that the frames met every kind.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkMarchArea(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  // The measured Earth's tables hold the slot layers: the march by slot alone, up front.
+  const kernels = await createAtmosphereFrameKernels(engine, "by slot");
+  try {
+    await checkAreaBodies(engine, checks, fallback, kernels);
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/** {@link checkMarchArea}'s bodies and frames over the device's shared kernels. */
+async function checkAreaBodies(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+  kernels: AtmosphereFrameKernels,
+): Promise<void> {
+  const met = { miss: 0, centre: 0, footprint: 0, unknown: 0 };
+  for (const body of AREA_BODIES) {
+    const sliced = body.body();
+    const tables = new AtmosphereTables(
+      engine,
+      body.medium,
+      tableRadiusM(sliced.figure),
+      body.curves,
+      sliced,
+    );
+    try {
+      for (const frame of body.frames) {
+        // The harness's GPU work runs in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const culled = await areaReadsOf(engine, tables, kernels, frame, "culled");
+        // The reference after it, in order as the culled frame: its read-backs before the next.
+        // oxlint-disable-next-line no-await-in-loop
+        const whole = await areaReadsOf(engine, tables, kernels, frame, "whole frame");
+        const composite = halvesDiffering(culled.composite, whole.composite);
+        const march = halvesDiffering(culled.march, whole.march);
+        const same = composite.texels === 0 && march.texels === 0;
+        const withinUlp = composite.ulps <= 1 && march.ulps <= 1;
+        met.miss += culled.kinds.miss;
+        met.centre += culled.kinds.centre;
+        met.footprint += culled.kinds.footprint;
+        met.unknown += culled.unknown;
+        checks.check(
+          `R08.T11.d ${body.name}, ${frame.setting}, ${frame.name}: the march over the air's area under the tile cull reads back as the march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
+          fallback ? same : withinUlp,
+          `${differenceOf("the composite's output", composite)}, ${differenceOf("the march's target", march)} (${fallback ? "SwiftShader: byte for byte" : "hardware: within T8.d's fused-multiply-add ulp"}); the area ${culled.area}; the tiles ${culled.kinds.miss} missed, ${culled.kinds.centre} at the centre ray, ${culled.kinds.footprint} over the footprint`,
+        );
+      }
+    } finally {
+      tables.dispose();
+    }
+  }
+  checks.check(
+    "R08.T11.d the tile cull's frames met each of its kinds on the GPU, and wrote no other code",
+    met.miss > 0 && met.centre > 0 && met.footprint > 0 && met.unknown === 0,
+    `${met.miss} tiles missed, ${met.centre} at the centre ray, ${met.footprint} over the footprint, ${met.unknown} of no kind`,
+  );
 }
 
 // --- R08.T7: several suns, and the sky through the air -------------------------------------------
@@ -7297,10 +7604,11 @@ export function limbSunToward(
 interface FarLimbFrameTimes {
   readonly skyViewNs: number;
   readonly aerialNs: number;
+  /** The ray march's passes, summed, ns: since R08.T11.d its two entry points (the tile cull's). */
   readonly rayMarchNs: number;
   /**
-   * Any {@link ATMOSPHERE_VIEW_PASS} passes after the ray march, summed, ns: none today; a kernel
-   * a later change adds to the frame under the same label is counted here, not lost.
+   * Any {@link ATMOSPHERE_VIEW_PASS} passes after the ray march's two, summed, ns: none today; a
+   * kernel a later change adds to the frame under the same label is counted here, not lost.
    */
   readonly moreNs: number;
   readonly morePasses: number;
@@ -7309,29 +7617,32 @@ interface FarLimbFrameTimes {
 
 /**
  * A timed frame's passes from its resolve: the {@link ATMOSPHERE_VIEW_PASS} passes by their place
- * (the sky view, the aerial perspective, the ray march, then any more; the ray march's alone where
- * the frame left the other two unread) and the composite's by its label, any other pass (an
- * `atmosphere tables` build's) left out; `null` for a resolve without the kernels' passes and
- * exactly one composite's.
+ * (the sky view, the aerial perspective, the ray march's two entry points, then any more; the ray
+ * march's alone where the frame left the other two unread) and the composite's by its label, any
+ * other pass (an `atmosphere tables` build's) left out; `null` for a resolve without the kernels'
+ * passes and exactly one composite's.
  *
  * @remarks
  * From the march band's upper edge up, where every far-limb camera stands, the frame makes the
  * ray march alone (lever 2 of `decision-r08-t8-leans.md` §8, R08.T8.d: the sky view and the aerial
- * perspective wait for a reader, and none asks here), so a resolve with one view pass holds the
- * ray march's, the other two 0.
+ * perspective wait for a reader, and none asks here), so a resolve with one or two view passes
+ * holds the ray march's, the other two 0. Since R08.T11.d's tile cull the march is two passes, the
+ * centre ray's entry point and the footprint's, summed here; over the whole frame (the reference
+ * path) the footprint's alone.
  */
 function farLimbFrameTimes(times: PassTimes): FarLimbFrameTimes | null {
   const views = times.passes.filter((pass) => pass.label === ATMOSPHERE_VIEW_PASS);
   const composites = times.passes.filter((pass) => pass.label === FAR_LIMB_TIMING_COMPOSITE_PASS);
   const unread = { label: ATMOSPHERE_VIEW_PASS, ns: 0, bracketed: false };
-  const [skyView, aerial, rayMarch, ...more] =
-    views.length === 1 ? [unread, unread, ...views] : views;
+  const [skyView, aerial, ...rest] = views.length <= 2 ? [unread, unread, ...views] : views;
+  const march = rest.slice(0, 2);
+  const more = rest.slice(2);
   const [composite] = composites;
   if (
     composites.length !== 1 ||
     skyView === undefined ||
     aerial === undefined ||
-    rayMarch === undefined ||
+    march.length === 0 ||
     composite === undefined
   ) {
     return null;
@@ -7339,7 +7650,7 @@ function farLimbFrameTimes(times: PassTimes): FarLimbFrameTimes | null {
   return {
     skyViewNs: skyView.ns,
     aerialNs: aerial.ns,
-    rayMarchNs: rayMarch.ns,
+    rayMarchNs: march.reduce((sum, pass) => sum + pass.ns, 0),
     moreNs: more.reduce((sum, pass) => sum + pass.ns, 0),
     morePasses: more.length,
     compositeNs: composite.ns,

@@ -114,6 +114,16 @@
 // before, and no bare ground is added, which stays keyed on depth 0. From orbit the face's rays
 // return to the counts R05.T12.e's gate accepted for them as bare ground before R08.T10.b drew the
 // face with depth; anything else drawn keeps the setting's count.
+//
+// Changes (plan R08, R08.T11.d; `decision-r08-t11-frame.md` section 2, `decision-r08-t8-leans.md`
+// section 11, Ruling 4): the march is dispatched over the air's area alone, the tiles its top shell
+// can reach (`marchArea.ts`), and has two entry points, each appended after the source's read and
+// each with one `marchRay` call site: `rayMarchCentre.wgsl`'s, first, which classifies each tile of
+// 8 x 8 texels by a conservative form of the footprint's own test (`marchArea.wgsl`'s kinds), writes
+// (0, 0, 0, 1) on a tile every ray misses and marches the centre ray on a tile where no footprint
+// can blend; and `rayMarchFootprint.wgsl`'s, the march over the far limb's footprint as before, on
+// the tiles that may blend. Per texel each marches what the one kernel marched. This module holds
+// the march and declares its bindings; the entry points declare the area's.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -510,86 +520,4 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
     meanTransmittance = 0.0;
   }
   return vec4f(luminance, meanTransmittance);
-}
-
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id : vec3u) {
-  // The target may be larger than this frame's output (it grows and is never remade smaller).
-  let size = vec2u(ceil(view.output.xy * view.output.z));
-  if (id.x >= size.x || id.y >= size.y) {
-    return;
-  }
-  let uv = (vec2f(id.xy) + 0.5) / vec2f(size);
-  let full = vec2u(view.output.xy);
-  let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
-  let depth = textureLoad(sceneDepth, depthTexel, 0);
-  let reach = view.tables.y;
-  var tSurface = 3.4e38;
-  if (depth > 0.0) {
-    tSurface = distanceAtDepth(view, uv, depth);
-  }
-  // Every pixel once the camera's h* reaches the march band, whose weight is 1 at and above the top
-  // (R08.T8); below it, the surfaces beyond the aerial-perspective volume's reach.
-  let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);
-  if (!needed) {
-    textureStore(rayMarchOut, id.xy, vec4f(0.0, 0.0, 0.0, 1.0));
-    return;
-  }
-  // From above the top, a texel whose footprint meets the shell takes its mean across the limb,
-  // blended in by its span (R08.T8.c, `farLimb.wgsl`); the camera's h* against the top is the same
-  // for every texel, so the branch is uniform.
-  let above = view.camera.w * view.curvature.z >= medium.topHeightM;
-  // Ray j is the centre ray (j = 0) or node j − 1, each through one call of the march (R08.T8.d).
-  // One call site is a constraint, not a style: SwiftShader inlines every call, and with the
-  // march's steps emitted twice in one entry point its GPU process segfaults (a write to 0x18 in
-  // `libvk_swiftshader.so`, R08.T8.d). The footprint is formed again for each ray, from the texel's
-  // centre alone, and gives the count and w_L at the first and the ray's own node (`farLimbNodeOf`)
-  // after; so none of it is held across a march, only the count, w_L and the sums (R08.T8.e, E1′).
-  // Where w_L is 1 the mean reads none of the centre ray, so the loop starts at the first node (E4).
-  var nodes = 0u;
-  var blend = 0.0;
-  var marched = vec4f(0.0);
-  var mean = vec4f(0.0);
-  for (var j = 0u; j <= nodes; j++) {
-    var rayUv = uv;
-    var rayDepth = depth;
-    var weight = 0.0;
-    if (above) {
-      var footprint = farLimbFootprintOf(
-        farLimbRaysOf(view), oblateBodyOf(oblateBody), oblateBody, uv, vec2f(size)
-      );
-      if (j == 0u) {
-        blend = footprint.blend;
-        nodes = select(0u, footprint.count, footprint.blend > 0.0);
-        mean = vec4f(0.0, 0.0, 0.0, footprint.spaceShare);
-        if (blend >= 1.0) {
-          j = 1u;
-        }
-      }
-      if (j > 0u) {
-        let node = farLimbNodeOf(&footprint, j - 1u);
-        // Each node at the scene's depth under its own point, so that a drawn surface's edge across
-        // the footprint cuts only the nodes on it.
-        let nodeUv = clamp(node.xy, vec2f(0.0), vec2f(1.0));
-        let nodeTexel = min(vec2u(nodeUv * vec2f(full)), full - 1u);
-        rayUv = node.xy;
-        rayDepth = textureLoad(sceneDepth, nodeTexel, 0);
-        weight = node.z;
-      }
-    }
-    let one = marchRay(rayUv, rayDepth);
-    if (j == 0u) {
-      marched = one;
-    } else {
-      mean += weight * one;
-    }
-  }
-  if (blend > 0.0) {
-    if (blend >= 1.0) {
-      marched = mean;
-    } else {
-      marched = mix(marched, mean, blend);
-    }
-  }
-  textureStore(rayMarchOut, id.xy, marched);
 }

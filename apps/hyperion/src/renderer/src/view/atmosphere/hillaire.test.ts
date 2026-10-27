@@ -15,7 +15,7 @@ import {
   wgslStructs,
 } from "../../test/atmosphereWgsl";
 import { boundNames, countingRenderEngine } from "../../test/countingRenderEngine";
-import { quaternion } from "../camera/quaternion";
+import { lookAlong, quaternion } from "../camera/quaternion";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { TextureHandle } from "../engine/types";
 import { kernelBindings } from "../engine/webgpu/compute";
@@ -42,7 +42,10 @@ import {
   frameSourcesOf,
   geodeticOf,
   HillaireAtmosphere,
+  RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   SKY_VIEW_KERNEL,
   localScaleHeightM,
@@ -56,8 +59,10 @@ import {
   type SunState,
   TABLE_SIZES,
   tableRadiusM,
+  topShellOf,
   viewExactOf,
 } from "./hillaire";
+import { marchAreaOf, marchAreaTexels } from "./marchArea";
 import { densityAt, extinction } from "./medium";
 import { opticalDepth } from "./opticalDepth";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
@@ -356,6 +361,8 @@ describe("HillaireAtmosphere", () => {
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     engine.dispatched.length = 0;
     const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    // An atmosphere's own kernels march the whole frame through the footprint's entry point
+    // (R08.T11.d).
     expect(engine.dispatched.map((d) => d.kernel)).toEqual([
       "atmosphere sky view",
       "atmosphere aerial perspective",
@@ -503,7 +510,7 @@ describe("HillaireAtmosphere", () => {
     const tables = atmosphere.tables;
     expect(engine.dispatched).toHaveLength(3);
     for (const { bindings } of engine.dispatched) {
-      expect(bindings.buffers).toEqual({ terms: tables.terms });
+      expect(bindings.buffers["terms"]).toBe(tables.terms);
       expect(bindings.sampled).toMatchObject({
         densityTables: tables.densityTables,
         phaseTables: tables.phaseTables,
@@ -691,6 +698,11 @@ describe("HillaireAtmosphere", () => {
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 1, 0, 0]);
   });
 });
+
+/** A ray-march kernel's source before its entry point's file (R08.T11.d), the march it shares. */
+function beforeEntryPoint(source: string): string {
+  return source.slice(0, source.lastIndexOf("// The ray march's entry point"));
+}
 
 /** A view block's member, its four floats, by its place in `hillaire.ts`'s `VIEW_MEMBERS`. */
 function memberOf(block: unknown, index: number): number[] {
@@ -1208,12 +1220,38 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
 
   // SwiftShader inlines every call, and with the march's steps emitted twice in one entry point its
   // GPU process segfaults (R08.T8.d): the centre ray and the footprint's nodes share one call.
+  // Since R08.T11.d's tile cull the march has two entry points, each its own kernel with one call
+  // (`decision-r08-t8-leans.md` §11, Ruling 4).
   it.each([
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
     ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
+    ["the ray march at the centre ray", RAY_MARCH_CENTRE_KERNEL.reference],
+    ["the ray march by slot at the centre ray", RAY_MARCH_SLOTS_CENTRE_KERNEL.reference],
   ])("calls the march from one place in %s's entry point", (_name, source) => {
     const main = wgslFunctions(source).get("main");
     expect(main?.body.match(/\bmarchRay\(/gu)).toHaveLength(1);
+  });
+
+  // The centre ray's entry point holds none of the footprint across its march (R08.T11.d), and the
+  // fill marches nothing.
+  it.each([
+    ["the ray march at the centre ray", RAY_MARCH_CENTRE_KERNEL.reference],
+    ["the ray march by slot at the centre ray", RAY_MARCH_SLOTS_CENTRE_KERNEL.reference],
+  ])("forms no footprint in %s's entry point", (_name, source) => {
+    const reached = [...wgslReached(source, ["main"])];
+    expect(
+      reached.filter((name) => name.startsWith("farLimbFootprint") || name === "farLimbNodeOf"),
+    ).toEqual([]);
+  });
+
+  it("makes the two entry points of each march from one source, the entry its own", () => {
+    for (const [footprint, centre] of [
+      [RAY_MARCH_KERNEL, RAY_MARCH_CENTRE_KERNEL],
+      [RAY_MARCH_SLOTS_KERNEL, RAY_MARCH_SLOTS_CENTRE_KERNEL],
+    ] as const) {
+      expect(beforeEntryPoint(centre.reference)).toBe(beforeEntryPoint(footprint.reference));
+    }
+    expect(RAY_MARCH_FILL_KERNEL.reference).not.toMatch(/\bmarchRay\(/u);
   });
 
   // The footprint's state held across the march cost its shape 0.56–0.86 ms from orbit on the RTX
@@ -1447,9 +1485,15 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     const sources = Array.from({ length: MAX_SKY_SOURCES }, (_, i) =>
       ["sourceDirection", "sourceWeight", "sourceDisc"].map((name) => name + String(i)),
     ).flat();
-    expect(COMPOSITE_MATERIAL.uniforms.map((u) => u.name)).toEqual([...view, ...sources, "shell"]);
-    // The composite's Draw: the offset (a vec3f), then the view's members in order, then shell.
-    expect(vec4Members(compositeWgsl, "Draw")).toEqual([...view, ...sources, "shell"]);
+    expect(COMPOSITE_MATERIAL.uniforms.map((u) => u.name)).toEqual([
+      ...view,
+      ...sources,
+      "shell",
+      "marchArea",
+    ]);
+    // The composite's Draw: the offset (a vec3f), then the view's members in order, then shell and
+    // the march's area (R08.T11.d).
+    expect(vec4Members(compositeWgsl, "Draw")).toEqual([...view, ...sources, "shell", "marchArea"]);
     expect(viewWgsl).toContain(`const MAX_SKY_SOURCES : u32 = ${String(MAX_SKY_SOURCES)}u;`);
     expect(viewWgsl).toContain(
       `const MAX_SKY_LIGHT_SLOTS : u32 = ${String(MAX_SKY_LIGHT_SLOTS)}u;`,
@@ -1693,7 +1737,11 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
     const wider = { ...CAMERA, viewport: { widthPx: 96, heightPx: 32 } };
     const second = atmosphere.drawKernelArm(wider, [NOON], SCENE).rayMarch;
     expect(second).not.toBe(first);
-    expect(destroyed).toEqual(["atmosphere ray march (kernel arm)"]);
+    // And the tile cull's kinds, grown with the target (R08.T11.d).
+    expect(destroyed).toEqual([
+      "atmosphere ray march (kernel arm)",
+      "atmosphere ray march's tiles",
+    ]);
     expect(engine.textureSpecs.at(-1)?.size).toEqual([96, 32]);
   });
 
@@ -1727,6 +1775,8 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
         "atmosphere aerial perspective",
         "atmosphere transmittance",
         "atmosphere terms",
+        // The tile cull's kinds, which the kernel arm's frame made (R08.T11.d).
+        "atmosphere ray march's tiles",
       ]),
     );
   });
@@ -1892,6 +1942,241 @@ describe("the ray march by slot (R08.T8.e, lever 5; decision-r08-t8-leans.md §1
         "atmosphere slot depths",
       ]),
     );
+  });
+});
+
+/** `atmosphere` with the tile cull asked for, as a view's shared kernels give it (R08.T11.d). */
+function culled(atmosphere: HillaireAtmosphere): HillaireAtmosphere {
+  atmosphere.setMarchCover("culled");
+  return atmosphere;
+}
+
+/** The ray march's dispatches among `engine`'s (R08.T11.d): its entry points' and its fill's. */
+function marchesOf(
+  engine: Awaited<ReturnType<typeof countingRenderEngine>>,
+): ReadonlyArray<(typeof engine.dispatched)[number]> {
+  return engine.dispatched.filter((d) => d.kernel.startsWith("atmosphere ray march"));
+}
+
+describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08.T11.d)", () => {
+  /** From 10⁹ m over the equator, looking at the centre: the Earth's air a few texels across. */
+  const far: AtmosphereCamera = {
+    positionM: { x: 1e9, y: 0, z: 0 },
+    orientation: lookAlong({ x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    fovXRad: Math.PI / 3,
+    viewport: { widthPx: 320, heightPx: 180 },
+  };
+  /** R05's Earth's top shell on WGS 84, s ≡ 1. */
+  const shell = {
+    equatorialM: WGS84.equatorialRadiusM + 100_000,
+    polarM: WGS84.polarRadiusM + 100_000,
+  };
+  const atmosphereOf = async (): Promise<{
+    engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    atmosphere: HillaireAtmosphere;
+  }> => {
+    const engine = await countingRenderEngine();
+    return {
+      engine,
+      atmosphere: culled(
+        new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84),
+      ),
+    };
+  };
+  it("dispatches both entry points over the area's tiles alone, the centre ray's first, and gives the composite its texels", async () => {
+    const { engine, atmosphere } = await atmosphereOf();
+    engine.dispatched.length = 0;
+    const draw = atmosphere.drawFrame(far, [NOON], SCENE);
+    const area = marchAreaOf(far, shell, 1);
+    const texels = marchAreaTexels(area);
+    expect(area.whole).toBe(false);
+    const marches = marchesOf(engine);
+    const tiles = [area.tilesAcross, area.tilesDown, 1];
+    expect(marches.map((d) => [d.kernel, d.workgroups])).toEqual([
+      ["atmosphere ray march at the centre ray", tiles],
+      ["atmosphere ray march", tiles],
+    ]);
+    // Its first tile, its tiles, the cull on, the widening, and the target's size.
+    expect([...(marches[0]?.bindings.uniforms["marchArea"] ?? [])]).toEqual([
+      area.firstTileX,
+      area.firstTileY,
+      area.tilesAcross,
+      area.tilesDown,
+      1,
+      Math.fround(area.widenM),
+      320,
+      180,
+    ]);
+    // One buffer of the tiles' kinds, which the centre ray's entry point writes and the
+    // footprint's reads.
+    const kinds = marches[0]?.bindings.buffers["marchTiles"];
+    expect(kinds).toBeDefined();
+    expect(marches[1]?.bindings.buffers["marchTiles"]).toBe(kinds);
+    expect([...(draw.uniforms["marchArea"] ?? [])]).toEqual([
+      texels.x0,
+      texels.y0,
+      texels.x1,
+      texels.y1,
+    ]);
+  });
+
+  it("marches every tile through the footprint's entry point alone on the reference path", async () => {
+    const { engine, atmosphere } = await atmosphereOf();
+    atmosphere.setMarchCover("whole frame");
+    engine.dispatched.length = 0;
+    const draw = atmosphere.drawFrame(far, [NOON], SCENE);
+    const marches = marchesOf(engine);
+    expect(marches.map((d) => [d.kernel, d.workgroups])).toEqual([
+      ["atmosphere ray march", [40, 23, 1]],
+    ]);
+    // The cull off: the entry point reads no tile's kind.
+    expect(marches[0]?.bindings.uniforms["marchArea"]?.[4]).toBe(0);
+    expect([...(draw.uniforms["marchArea"] ?? [])]).toEqual([0, 0, 320, 180]);
+    // The whole target is the march's: a reader's ask fills nothing.
+    engine.dispatched.length = 0;
+    expect(atmosphere.frameTables.rayMarch?.name).toBe("atmosphere ray march");
+    expect(marchesOf(engine)).toEqual([]);
+  });
+
+  it("fills the rest of the target for a reader of the whole, once a frame, and never for the frame", async () => {
+    const { engine, atmosphere } = await atmosphereOf();
+    atmosphere.drawFrame(far, [NOON], SCENE);
+    expect(marchesOf(engine).map((d) => d.kernel)).not.toContain("atmosphere ray march's fill");
+    engine.dispatched.length = 0;
+    const { rayMarch } = atmosphere.frameTables;
+    expect(atmosphere.frameTables.rayMarch).toBe(rayMarch);
+    const fills = marchesOf(engine);
+    expect(fills.map((d) => [d.kernel, d.workgroups])).toEqual([
+      ["atmosphere ray march's fill", [40, 23, 1]],
+    ]);
+    expect(fills[0]?.bindings.storage["rayMarchOut"]?.texture).toBe(rayMarch);
+  });
+
+  it("bounds the area by the top shell through h* = H at the equator and the poles on a body whose gravity varies with latitude", async () => {
+    const engine = await countingRenderEngine();
+    const gravity = gravityOfSpheroid(SATURN_SPHEROID);
+    const atmosphere = culled(
+      new HillaireAtmosphere(
+        engine,
+        R05_EARTH_REFERENCE,
+        TABLE_SIZES.high,
+        SATURN_SPHEROID,
+        NO_ABSORBER_CURVES,
+        gravity,
+      ),
+    );
+    // From 4 × 10⁸ m over the equator, looking at the centre: the giant's air a few tiles across.
+    const giant: AtmosphereCamera = { ...far, positionM: { x: 4e8, y: 0, z: 0 } };
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(giant, [NOON], SCENE);
+    const top = topShellOf(SATURN_SPHEROID, R05_EARTH_REFERENCE.topHeightM, gravity);
+    expect([top.equatorialM, top.polarM]).toEqual([
+      SATURN_SPHEROID.equatorialRadiusM + 100_000 / gravityRatio(gravity, 0),
+      SATURN_SPHEROID.polarRadiusM + 100_000 / gravityRatio(gravity, Math.PI / 2),
+    ]);
+    const area = marchAreaOf(giant, top, 1);
+    expect(area.whole).toBe(false);
+    const footprint = marchesOf(engine).find((d) => d.kernel === "atmosphere ray march");
+    expect([...(footprint?.bindings.uniforms["marchArea"] ?? [])].slice(0, 4)).toEqual([
+      area.firstTileX,
+      area.firstTileY,
+      area.tilesAcross,
+      area.tilesDown,
+    ]);
+    // The march's own top: the quadric viewExactOf forms is the same shell's.
+    const exact = viewExactOf(
+      giant.positionM,
+      SATURN_SPHEROID,
+      R05_EARTH_REFERENCE,
+      atmosphereInputs(giant, SATURN_SPHEROID, gravity),
+      gravity,
+    );
+    const z = (giant.positionM.z * top.equatorialM) / top.polarM;
+    expect(exact.topQuadricM2).toBe(
+      giant.positionM.x ** 2 + giant.positionM.y ** 2 + z * z - top.equatorialM ** 2,
+    );
+  });
+
+  it("makes no shared-read march for a body whose tables hold the slot layers", async () => {
+    const engine = await countingRenderEngine();
+    const made: string[] = [];
+    const create = engine.createCompute.bind(engine);
+    engine.createCompute = (pair) => {
+      made.push(pair.name);
+      return create(pair);
+    };
+    const { medium, curves } = fourAbsorberMedium();
+    const atmosphere = culled(
+      new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves),
+    );
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
+    expect(made).toContain("atmosphere ray march by slot");
+    expect(made).toContain("atmosphere ray march by slot at the centre ray");
+    expect(made).not.toContain(RAY_MARCH_KERNEL.name);
+    expect(made).not.toContain(RAY_MARCH_CENTRE_KERNEL.name);
+  });
+
+  it("culls over the device's shared kernels from its making, and over its own marches the whole frame until asked", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    engine.dispatched.length = 0;
+    view.drawFrame(far, [NOON], SCENE);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
+      "atmosphere ray march at the centre ray",
+      "atmosphere ray march",
+    ]);
+    const own = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const before = engine.counts.kernels;
+    engine.dispatched.length = 0;
+    own.drawFrame(far, [NOON], SCENE);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual(["atmosphere ray march"]);
+    // Its centre ray's kernel is made at its first culled frame, not before.
+    expect(engine.counts.kernels - before).toBe(1);
+    own.setMarchCover("culled");
+    engine.dispatched.length = 0;
+    own.drawFrame(far, [NOON], SCENE);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
+      "atmosphere ray march at the centre ray",
+      "atmosphere ray march",
+    ]);
+    expect(engine.counts.kernels - before).toBe(2);
+  });
+
+  it("makes up front only the reads asked of the device's shared kernels, the other at its first frame", async () => {
+    const engine = await countingRenderEngine();
+    const made: string[] = [];
+    const create = engine.createComputeAsync.bind(engine);
+    engine.createComputeAsync = (pair) => {
+      made.push(pair.name);
+      return create(pair);
+    };
+    const kernels = await createAtmosphereFrameKernels(engine, "by slot");
+    expect(made).toContain("atmosphere ray march by slot at the centre ray");
+    expect(made).not.toContain(RAY_MARCH_CENTRE_KERNEL.name);
+    expect(made).not.toContain(RAY_MARCH_KERNEL.name);
+    const before = engine.counts.kernels;
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    engine.dispatched.length = 0;
+    view.drawFrame(far, [NOON], SCENE);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
+      "atmosphere ray march at the centre ray",
+      "atmosphere ray march",
+    ]);
+    // The tables' own build kernels beside the pair made at the frame.
+    expect(engine.counts.kernels - before).toBeGreaterThanOrEqual(2);
+  });
+
+  it("marches nothing where the air lies behind the camera, and the composite reads none of it", async () => {
+    const { engine, atmosphere } = await atmosphereOf();
+    const away = { ...far, orientation: lookAlong({ x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }) };
+    engine.dispatched.length = 0;
+    const draw = atmosphere.drawFrame(away, [NOON], SCENE);
+    expect(marchesOf(engine)).toEqual([]);
+    expect([...(draw.uniforms["marchArea"] ?? [])]).toEqual([0, 0, 0, 0]);
   });
 });
 

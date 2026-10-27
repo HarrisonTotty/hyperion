@@ -22,9 +22,10 @@ import {
   type AbsorberCurveSlots,
   NO_ABSORBER_CURVES,
 } from "../view/atmosphere/tables";
-import { bodyLightSources } from "../view/bodies/draw";
+import { type BodyLightSources, bodyLightSources } from "../view/bodies/draw";
 import { rotate } from "../view/camera/quaternion";
 import { SUN_RADIUS_M } from "../view/lighting/hostDisc";
+import { photopicIlluminance } from "../view/lighting/illuminance";
 import { type QualitySetting, SETTINGS } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
 import { sphereOutsideView } from "../view/wireframe/submit";
@@ -47,6 +48,7 @@ import {
   NORMAL_MAP_LEVEL,
   placesScaledTo,
   planetshineShare,
+  SATURN_GIANT_DISTANCE_M,
   SMALL_TRIO,
   type SourceSet,
   smallEarthScene,
@@ -56,7 +58,6 @@ import {
   smokeNormalMapTexels,
   sourcesAsSet,
   sourceSetsOf,
-  STAR_SETS,
   trioSourceSet,
 } from "./frameTimingScene";
 
@@ -267,11 +268,55 @@ describe("TEST SATURN's frames", () => {
   const built = builtOfCase(SATURN_OBLATE_CASE, "saturn-oblate");
   const figure = built.body?.figure ?? SLICES_EARTH.figure;
   const places = placesScaledTo(figure);
+  const lightSlots = absorberCount(built.medium) > 0 ? built.curves.length : Infinity;
+  const SATURN_ID = "0200080020000000.0315";
+
+  /** Saturn's frame at `distanceM` under `set` on `setting`, its giants `giantDistanceM` off. */
+  const frameAt = (
+    setting: QualitySetting,
+    distanceM: number,
+    set: SourceSet,
+    giantDistanceM: number,
+  ): {
+    readonly scene: FrameScene;
+    readonly sources: BodyLightSources;
+    readonly listed: ListedSources;
+  } => {
+    const photoreal = SETTINGS[setting].photoreal;
+    const scene = farLimbFrameScene(distanceM, settingOutput(setting), set, figure, giantDistanceM);
+    const body = earthInput(SATURN_ID, built.medium, scene.earthCentreM, figure);
+    const sources = bodyLightSources(body, [body, ...scene.giants], scene.lights, {
+      annuli: photoreal.discAnnuli,
+      planetshine: photoreal.planetshineSources,
+    });
+    const listed = listSources(
+      sources,
+      scene.air,
+      figure,
+      built.medium,
+      lightSlots,
+      TABLE_SIZES[setting].marchSourceCap,
+    );
+    return { scene, sources, listed };
+  };
+
   const frames = SETTINGS_TIMED.flatMap((setting) =>
     places.flatMap((place) =>
-      STAR_SETS.map((set) => {
-        const scene = farLimbFrameScene(place.distanceM, settingOutput(setting), set, figure);
-        return { label: `${setting} ${place.label} ${set.name}`, setting, set, scene };
+      sourceSetsOf(setting).map((set) => {
+        const { scene, sources, listed } = frameAt(
+          setting,
+          place.distanceM,
+          set,
+          SATURN_GIANT_DISTANCE_M,
+        );
+        return {
+          label: `${setting} ${place.label} ${set.name}`,
+          setting,
+          set,
+          scene,
+          sources,
+          listed,
+        };
       }),
     ),
   );
@@ -317,7 +362,7 @@ describe("TEST SATURN's frames", () => {
   });
 
   it("gives its body Saturn's radii about the frame's +z", () => {
-    const body = earthInput("0200080020000000.0315", built.medium, vec3(0, 0, 0), figure);
+    const body = earthInput(SATURN_ID, built.medium, vec3(0, 0, 0), figure);
     expect(body.figure).toEqual({
       equatorialRadiusM: figure.equatorialRadiusM,
       polarRadiusM: figure.polarRadiusM,
@@ -334,29 +379,135 @@ describe("TEST SATURN's frames", () => {
     expect(inside).toEqual([]);
   });
 
-  it("keeps exactly the stars' sets' sources, each star on its own slot, and marches them", () => {
+  it("draws every setting's sets at every camera, giants in half of them, as the Earth's", () => {
+    expect(frames).toHaveLength(2 * 5 * 4);
+    expect(frames.filter(({ scene }) => scene.giants.length > 0)).toHaveLength(2 * 5 * 2);
+  });
+
+  it("keeps exactly each set's sources, kind and slot, and marches the set's two, everywhere", () => {
     const wrong = frames
-      .filter(({ setting, set, scene }) => {
-        const photoreal = SETTINGS[setting].photoreal;
-        const body = earthInput("0200080020000000.0315", built.medium, scene.earthCentreM, figure);
-        const sources = bodyLightSources(body, [body], scene.lights, {
-          annuli: photoreal.discAnnuli,
-          planetshine: photoreal.planetshineSources,
-        });
-        const listed = listSources(
-          sources,
-          scene.air,
-          figure,
-          built.medium,
-          absorberCount(built.medium) > 0 ? built.curves.length : Infinity,
-          TABLE_SIZES[setting].marchSourceCap,
-        );
-        return (
-          listed.left.length > 0 || !sourcesAsSet(listed, set, TABLE_SIZES[setting].marchSourceCap)
+      .filter(
+        ({ setting, set, listed }) =>
+          !sourcesAsSet(listed, set, TABLE_SIZES[setting].marchSourceCap),
+      )
+      .map(({ label }) => label);
+    expect(wrong).toEqual([]);
+  });
+
+  it("leaves none of the plan's sources out of the sky, its giants' planetshine included", () => {
+    const left = frames.filter(({ listed }) => listed.left.length > 0).map(({ label }) => label);
+    expect(left).toEqual([]);
+  });
+
+  it("stands its giants twenty of their radii from Saturn's centre, beyond its farthest camera", () => {
+    const farthestM = Math.max(...places.map(({ distanceM }) => distanceM));
+    const off = frames
+      .filter(({ scene }) =>
+        scene.giants.some(
+          (giant) =>
+            !(
+              Math.abs(norm(sub(giant.centreM, scene.earthCentreM)) / SATURN_GIANT_DISTANCE_M - 1) <
+              1e-12
+            ),
+        ),
+      )
+      .map(({ label }) => label);
+    expect([SATURN_GIANT_DISTANCE_M / GIANT_EQUATORIAL_RADIUS_M, off]).toEqual([20, []]);
+    expect(SATURN_GIANT_DISTANCE_M / farthestM).toBeCloseTo(1.51, 2);
+  });
+
+  it("keeps every giant out of the view of every camera", () => {
+    const seen = frames
+      .filter(({ setting, scene }) =>
+        scene.giants.some(
+          (giant) =>
+            !sphereOutsideView(
+              giant.centreM,
+              giant.figure.equatorialRadiusM,
+              scene.camera,
+              settingOutput(setting),
+            ),
+        ),
+      )
+      .map(({ label }) => label);
+    expect(seen).toEqual([]);
+  });
+
+  it("keeps every giant's disc off Saturn's from every camera, neither covering the other", () => {
+    // Each disc bounded by its equatorial radius; the nearest camera leaves 7.8° between them.
+    const covered = frames
+      .filter(({ scene }) => {
+        const saturnRad = Math.asin(figure.equatorialRadiusM / norm(scene.earthCentreM));
+        return scene.giants.some(
+          (giant) =>
+            !(
+              angleBetweenRad(giant.centreM, scene.earthCentreM) >
+              saturnRad + Math.asin(giant.figure.equatorialRadiusM / norm(giant.centreM))
+            ),
         );
       })
       .map(({ label }) => label);
-    expect(wrong).toEqual([]);
+    expect(covered).toEqual([]);
+  });
+
+  it("gives each giant's planetshine over 5e-4 of the Sun at every camera, under the second star", () => {
+    // The Earth's rows' bounds: 7.2e-4 at the nearest camera in x2p, up to 2.5e-3 at the farthest.
+    const outside = frames
+      .filter(({ set, listed }) => {
+        const share = planetshineShare(listed);
+        return set.giants === 0 ? share !== null : share === null || share < 5e-4 || share >= 0.05;
+      })
+      .map(({ label }) => label);
+    expect(outside).toEqual([]);
+  });
+
+  it("records each giant's planetshine at Saturn's centre as a share of the Sun's there", () => {
+    // R07's E = E★ (R ÷ Δ)² p Φ(α) (`planetshine.ts`): for a Lambert sphere at 20 R and 60° of
+    // phase, (1 ÷ 20)² × 0.5 × [sin α + (π − α) cos α] ÷ π = 2.5e-3 × 0.5 × 0.6090 = 7.61e-4
+    // (Russell 1916, ApJ 43, 173, the Lambert sphere's phase law; R and c, Jupiter's at 1 bar:
+    // Archinal et al. 2018, Celest. Mech. Dyn. Astron. 130, 22, Table 4; p 0.5, near Jupiter's
+    // visual 0.54: Mallama, Krobusek and Pavlov 2017, Icarus 282, 19); the Sun's inverse square
+    // at the giant, 120° from the Sun and so 7.2e8 m farther from it, × 0.9904: 7.54e-4; R07's
+    // reflection integrated over Jupiter's spheroid (c ÷ a 0.935) and law, the first giant seen
+    // 14.5° off its equator, × 0.964: 7.27e-4. In the whole count the second star, a tenth of the
+    // Sun at another phase, lights each giant too, and the second giant is seen 64° off its
+    // equator, nearer its larger pole-on disc.
+    const recorded: Readonly<Record<SourceSet["name"], ReadonlyArray<number>>> = {
+      x1: [],
+      x2: [],
+      x2p: [7.2716e-4],
+      x3: [8.341e-4],
+      x4: [8.341e-4, 8.6565e-4],
+    };
+    const shares = frames.map(({ label, sources }) => {
+      const sun = sources.stars[0];
+      const sunLx = sun === undefined ? Number.NaN : photopicIlluminance(sun.illuminance);
+      return {
+        label,
+        shares: sources.planetshine.map(
+          (source) => photopicIlluminance(source.illuminance) / sunLx,
+        ),
+      };
+    });
+    expect(shares).toEqual(
+      frames.map(({ label, set }) => ({
+        label,
+        shares: recorded[set.name].map((share) => expect.closeTo(share, 7)),
+      })),
+    );
+  });
+
+  it("would lose x2p's giant at the nearest camera were the Earth's giants scaled as the cameras are", () => {
+    const nearest = places[0];
+    const x2p = sourceSetsOf("high").find((set) => set.name === "x2p");
+    if (nearest === undefined || x2p === undefined) {
+      throw new Error("Saturn's cameras and high's sets are not empty");
+    }
+    const ratio = figure.equatorialRadiusM / SLICES_EARTH.figure.equatorialRadiusM;
+    const { listed } = frameAt("high", nearest.distanceM, x2p, GIANT_DISTANCE_M * ratio);
+    expect(listed.left.map(({ source, why }) => `${source.kind}: ${why}`)).toEqual([
+      "planetshine: negligible",
+    ]);
   });
 });
 

@@ -215,20 +215,29 @@ export function framesFinite(frames: ReadonlyArray<TimedFrame>): boolean {
 export interface ViewPasses {
   readonly skyNs: number;
   readonly aerialNs: number;
+  /** The ray march's passes, summed: since R08.T11.d its two entry points, the centre ray's and the footprint's. */
   readonly marchNs: number;
-  /** Any view passes after the ray march, summed: none today. */
+  /** Any view passes after the ray march's two, summed: none today. */
   readonly moreNs: number;
 }
 
 /**
  * A frame's atmosphere view passes (`ATMOSPHERE_VIEW_PASS`) by their place: the sky view, the aerial
- * perspective and the ray march, in their order, then any more; a lone pass is the ray march's, the
- * frame having left the other two unread (from the march band's upper edge up, R08.T8.d's lever 2).
+ * perspective and the ray march's two (the centre ray's and the footprint's, R08.T11.d's tile
+ * cull; the footprint's alone over the whole frame), in their order, then any more; one or two
+ * passes are the ray march's, the frame having left the other two unread (from the march band's
+ * upper edge up, R08.T8.d's lever 2).
  */
 export function viewPassesOf(frame: TimedFrame): ViewPasses {
   const views = frame.passes.filter((pass) => pass.label === ATMOSPHERE_VIEW_PASS).map((p) => p.ns);
-  const [sky = 0, aerial = 0, march = 0, ...more] = views.length === 1 ? [0, 0, ...views] : views;
-  return { skyNs: sky, aerialNs: aerial, marchNs: march, moreNs: more.reduce((a, b) => a + b, 0) };
+  const [sky = 0, aerial = 0, ...rest] = views.length <= 2 ? [0, 0, ...views] : views;
+  const march = rest.slice(0, 2).reduce((a, b) => a + b, 0);
+  return {
+    skyNs: sky,
+    aerialNs: aerial,
+    marchNs: march,
+    moreNs: rest.slice(2).reduce((a, b) => a + b, 0),
+  };
 }
 
 /** A combination timed: what it draws, and its timed frames' records in timed order. */

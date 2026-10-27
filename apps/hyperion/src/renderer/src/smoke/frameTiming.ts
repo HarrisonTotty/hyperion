@@ -36,12 +36,17 @@
  * - (H) three small air bodies in one view, 32, 10 and 4 px across, each its own air over the
  *   measured Earth's tables, at `x2` on high (each body lit by the other two's planetshine too,
  *   `trioSourceSet`), with their air and without;
- * - (I) the measured Earth under a class map with its normal map, from 400 km and 10⁷ m, at `x2`
- *   and `x4` on high: R10's fixture's as the smoke builds it (`smokeClassMapTexels`), judged as
- *   (A)'s rows are, and a generated patch's whole palette (`generatedClassMapTexels`), recorded;
+ * - (I) the measured Earth under a class map with its normal map, from 400 km and 10⁷ m, at `x2`,
+ *   `x2p` (since R08.T11.d, for QW30) and `x4` on high: R10's fixture's as the smoke builds it
+ *   (`smokeClassMapTexels`), judged as (A)'s rows are, the verdict's row, and a generated patch's
+ *   whole palette (`generatedClassMapTexels`), judged and reported too since QW30 (main,
+ *   2026-10-27: what generated worlds show at 24; a row of it over 16.67 ms at `x2` or `x2p` goes
+ *   to main by name);
  * - (J) `TEST SATURN` (`ATMOSPHERE TEST`'s `saturn-oblate`, Saturn's spheroid of five slices and
  *   four bands, R08.T6.f's Saturn-class passes) at (A)'s five cameras scaled to its radius
- *   (`placesScaledTo`), at `x1` and `x2` on both settings.
+ *   (`placesScaledTo`), under the setting's four sets on both settings as (A)'s: `x1` and `x2`
+ *   since R08.T11.c, `x2p` and the whole count since R08.T11.d (for QW30), its giants placed as
+ *   (A)'s but at `SATURN_GIANT_DISTANCE_M`, beyond the farthest of its cameras.
  *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
@@ -150,11 +155,14 @@ import {
   generatedClassLaws,
   generatedClassMapTexels,
   generatedNormalMapTexels,
+  GIANT_DISTANCE_M,
+  GIANT_EQUATORIAL_RADIUS_M,
   listSources,
   type ListedSources,
   NORMAL_MAP_LEVEL,
   placesScaledTo,
   planetshineShare,
+  SATURN_GIANT_DISTANCE_M,
   SMALL_TRIO,
   type SmallBodiesScene,
   type SourceSet,
@@ -165,7 +173,6 @@ import {
   smokeNormalMapTexels,
   sourcesAsSet,
   sourceSetsOf,
-  STAR_SETS,
   type TimedPlace,
   trioSourceSet,
 } from "./frameTimingScene";
@@ -356,6 +363,11 @@ interface FrameMedium {
   readonly lightSlots: number;
   /** The body's figure, its pole +z: WGS 84 for the Earths, Saturn's spheroid for (J)'s. */
   readonly figure: SpheroidFigure;
+  /**
+   * The giants' distance from the body's centre, m: `GIANT_DISTANCE_M` for the Earths,
+   * `SATURN_GIANT_DISTANCE_M` for (J)'s.
+   */
+  readonly giantDistanceM: number;
   /** The body's class-map surface, (I)'s; `null` for the Lambert sphere of its ground albedo. */
   readonly surface: MappedSurface | null;
 }
@@ -429,6 +441,7 @@ function frameMedia(engine: RenderEngine, releases: Releases): FrameMedium[] {
     }),
     lightSlots: absorberCount(spec.medium) > 0 ? spec.curves.length : Infinity,
     figure: SLICES_EARTH.figure,
+    giantDistanceM: GIANT_DISTANCE_M,
     surface: null,
   }));
 }
@@ -436,7 +449,7 @@ function frameMedia(engine: RenderEngine, releases: Releases): FrameMedium[] {
 /** (I)'s judged medium's name in its checks: the R10 fixture's class map. */
 const CLASS_MAP_NAME = "the measured Earth under R10's smoke class map";
 
-/** (I)'s recorded medium's name in its checks: a generated patch's whole palette. */
+/** (I)'s second medium's name in its checks: a generated patch's whole palette, judged and reported. */
 const PALETTE_NAME = "the measured Earth under a generated palette's class map";
 
 /** (J)'s medium's name in its checks. */
@@ -455,7 +468,8 @@ interface ClassMapSpec {
 
 /**
  * (I)'s two class maps: the R10 fixture's as the smoke builds it, judged (`decision-r08-t11-frame.md`
- * §2), and a generated patch's whole palette, recorded.
+ * §2), the verdict's row, and a generated patch's whole palette, judged and reported too since QW30
+ * (main, 2026-10-27).
  */
 function classMapSpecs(): ClassMapSpec[] {
   const figure = SLICES_EARTH.figure;
@@ -474,7 +488,7 @@ function classMapSpecs(): ClassMapSpec[] {
       texels: generatedClassMapTexels(),
       laws: generatedClassLaws(),
       normals: generatedNormalMapTexels(figure),
-      about: `a generated patch's whole palette (${GENERATED_CLASSES} classes at R10's level, every texel surveyed, three classes a region of ${GENERATED_REGION_TEXELS} × ${GENERATED_REGION_TEXELS} texels, the shares turning smoothly, every class drawn from its maturity nodes; the normal map at level ${NORMAL_MAP_LEVEL} on every cell, tilted ±12°), recorded, not judged`,
+      about: `a generated patch's whole palette (${GENERATED_CLASSES} classes at R10's level, every texel surveyed, three classes a region of ${GENERATED_REGION_TEXELS} × ${GENERATED_REGION_TEXELS} texels, the shares turning smoothly, every class drawn from its maturity nodes; the normal map at level ${NORMAL_MAP_LEVEL} on every cell, tilted ±12°), judged and reported, a row over 16.67 ms at x2 or x2p to main by name`,
     },
   ];
 }
@@ -543,6 +557,7 @@ async function saturnMedium(engine: RenderEngine, releases: Releases): Promise<F
     tables,
     lightSlots: absorberCount(built.medium) > 0 ? built.curves.length : Infinity,
     figure: body.figure,
+    giantDistanceM: SATURN_GIANT_DISTANCE_M,
     surface: null,
   };
 }
@@ -608,7 +623,13 @@ function frameCombination(
   failures: string[],
 ): Timed<FrameCombination> {
   const viewport = settingOutput(setting);
-  const scene = farLimbFrameScene(place.distanceM, viewport, set, medium.figure);
+  const scene = farLimbFrameScene(
+    place.distanceM,
+    viewport,
+    set,
+    medium.figure,
+    medium.giantDistanceM,
+  );
   const earth: LitBodyInput = {
     ...earthInput(medium.id, medium.medium, scene.earthCentreM, medium.figure),
     ...medium.surface,
@@ -736,8 +757,9 @@ async function timeFrames(
 }
 
 /**
- * (I): the measured Earth under each of `mapped`'s class maps, from 400 km and 10⁷ m, at `x2` and
- * the setting's whole count, on high (`decision-r08-t11-frame.md` §2, QW29's class-map row).
+ * (I): the measured Earth under each of `mapped`'s class maps, from 400 km and 10⁷ m, at `x2`,
+ * `x2p` (since R08.T11.d) and the setting's whole count, on high (`decision-r08-t11-frame.md` §2,
+ * QW29's class-map row).
  */
 async function timeClassMap(
   on: FrameView,
@@ -746,7 +768,8 @@ async function timeClassMap(
 ): Promise<FrameTimings> {
   const failures: string[] = [];
   const places = FAR_LIMB_TIMING_PLACES.slice(0, 2);
-  const sets = sourceSetsOf("high").filter((set) => set.name === "x2" || set.name === "x4");
+  // x2p since R08.T11.d, for QW30's x2p verdicts (main, 2026-10-27).
+  const sets = sourceSetsOf("high").filter((set) => set.name !== "x1");
   const combinations = mapped.flatMap((medium) =>
     places.flatMap((place) =>
       sets.map((set) => frameCombination("high", medium, place, set, failures)),
@@ -756,8 +779,9 @@ async function timeClassMap(
 }
 
 /**
- * (J): `TEST SATURN` at (A)'s five cameras scaled to its radius, under the stars' sets, on both
- * settings (`decision-r08-approximate-plate.md` item 3: R08.T6.f's Saturn-class passes).
+ * (J): `TEST SATURN` at (A)'s five cameras scaled to its radius, under the setting's sets as (A)'s,
+ * on both settings (`decision-r08-approximate-plate.md` item 3: R08.T6.f's Saturn-class passes),
+ * its giants at `SATURN_GIANT_DISTANCE_M`.
  */
 async function timeSaturn(
   on: FrameView,
@@ -767,7 +791,7 @@ async function timeSaturn(
   const failures: string[] = [];
   const combinations = (["high", "low"] as const).flatMap((setting) =>
     placesScaledTo(saturn.figure).flatMap((place) =>
-      STAR_SETS.map((set) => frameCombination(setting, saturn, place, set, failures)),
+      sourceSetsOf(setting).map((set) => frameCombination(setting, saturn, place, set, failures)),
     ),
   );
   return timeCombinations(on, ledger, combinations, failures);
@@ -2226,7 +2250,7 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       checks,
       saturnFrames,
       () =>
-        `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the stars' sets alone, the Earth's giants being placed for the Earth's cameras`,
+        `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the setting's sets as the Earth's, its giants placed as the Earth's but ${(SATURN_GIANT_DISTANCE_M / GIANT_EQUATORIAL_RADIUS_M).toFixed(0)} of their radii off (${SATURN_GIANT_DISTANCE_M.toExponential(2)} m), beyond its farthest camera, so that their planetshine stays past the sky's negligible skip at every camera`,
     );
     const frameMissing = missingOf(frames);
     const mappedMissing = missingOf(mappedFrames);
