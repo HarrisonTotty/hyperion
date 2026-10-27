@@ -850,6 +850,25 @@ domain_tags! {
     /// word 0, one open uniform, its log-uniform rank in [0.016, 0.45]; words 1–7 are reserved
     /// (`planetary::hooks::cold_traps::exposed_fraction`).
     BODY_COLD_TRAPS: Body = "body.cold_traps";
+
+    // Plan 14, phase G (P14.T31.a): three of the five event tags the "Plan 14" heading above
+    // lists, each behind its event tag in plan 06's block 0x0400–0x04FF; P14.T31.b adds
+    // `body.storm` and `body.duststorm`. Appended here, after P14.T51.f's `body.cold_traps`,
+    // because the macro's order fixes `ALL`.
+
+    /// Impacts on a body (P14.T31.a), behind event tag 0x0400, keyed through the event key with the
+    /// body's ID as the subject: Poisson bins of a Julian year (`planetary::events::impacts`).
+    BODY_IMPACT: Event = "body.impact";
+
+    /// Volcanic eruptions on a body (P14.T31.a), behind event tag 0x0401, keyed through the event
+    /// key with the body's ID as the subject: Poisson bins of a week
+    /// (`planetary::events::eruptions`).
+    BODY_ERUPTION: Event = "body.eruption";
+
+    /// The perihelion passages of a system's long-period comets (P14.T31.a), behind event tag
+    /// 0x0404, keyed through the event key with the system's ID as the subject: Poisson bins of a
+    /// Julian year (`planetary::events::comets`).
+    SYSTEM_COMET: Event = "system.comet";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1090,14 +1109,32 @@ mod tests {
         assert!(at(BODY_FORMATION) > at(STAR_NS_GLITCH_CLASS));
     }
 
-    /// P14.T51.f's one new tag, keyed by the body, last in `ALL` when it was appended.
+    /// P14.T51.f's one new tag, keyed by the body, appended after P14.T51.c's.
     #[test]
     fn plan_14_registers_the_cold_traps_tag_with_body_scope() {
         assert_eq!(BODY_COLD_TRAPS.name(), "body.cold_traps");
         assert_eq!(BODY_COLD_TRAPS.scope(), crate::rng::TagScope::Body);
         let at = |tag| ALL.iter().position(|t| *t == tag);
-        assert_eq!(at(BODY_COLD_TRAPS), Some(ALL.len() - 1));
         assert!(at(BODY_COLD_TRAPS) > at(BODY_FORMATION));
+    }
+
+    /// P14.T31.a's three event tags, in the order the "Plan 14" heading lists them, the last three
+    /// of `ALL` when they were appended.
+    #[test]
+    fn plan_14_registers_its_first_event_tags_with_event_scope() {
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        let appended = [
+            (BODY_IMPACT, "body.impact"),
+            (BODY_ERUPTION, "body.eruption"),
+            (SYSTEM_COMET, "system.comet"),
+        ];
+        for (tag, name) in appended {
+            assert_eq!(tag.name(), name);
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{name}");
+            assert!(at(tag) > at(BODY_COLD_TRAPS), "{name}");
+        }
+        assert_eq!(at(BODY_ERUPTION), at(BODY_IMPACT).map(|i| i + 1));
+        assert_eq!(at(SYSTEM_COMET), at(BODY_ERUPTION).map(|i| i + 1));
     }
 
     #[test]

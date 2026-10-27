@@ -30679,3 +30679,125 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     with v∞ = U v_K and U² = `ImpactorSource::excitation()` + the body's own e² + sin² i. A belt
     part's own U_b² at any a inside its annulus is `PopulationLaw::encounter_excitation`, over
     `Belt::population()` or `SourceBelt::population_of`, read under the rules in force.
+- **Deviations in P14.T31.a, as built (`p14-events`, 2026-10-27).** The Poisson bins, as pure
+  modules on plain inputs: nothing on the record calls them until P14.T31.c. Ruled by
+  decision-p14-t31a-events (four leans, amendments (a)–(d)); main accepted one deviation from lean 2
+  (below).
+  - _Files._ The plan's `planetary/events.rs` is a module with one file per kind:
+    `planetary/events.rs` (the shared `SizeLaw` and `SurfacePoint`), `events/impacts.rs`,
+    `events/eruptions.rs` and `events/comets.rs`, each with its `tests.rs`; `events/tests.rs`
+    holds the shared fixtures and the golden.
+  - _Tags._ `rng::tags::{BODY_IMPACT, BODY_ERUPTION, SYSTEM_COMET}` (`body.impact`,
+    `body.eruption`, `system.comet`, scope `Event`) are appended after P14.T51.f's
+    `body.cold_traps`; `id::event_tags::{BODY_IMPACT, BODY_ERUPTION, SYSTEM_COMET}` take 0x0400,
+    0x0401 and 0x0404, and 0x0402–0x0403 stay for P14.T31.b. P14.T51.f's tag test drops its
+    "last in `ALL`".
+  - _`body.impact` (`ImpactModel`, `ImpactInputs`, `Impact`, `impacts`, `impact`)._
+    - Ṅ(> D) = Φ☾ × B(A) × `R_b` × 4πR² × S(D). Φ☾ is `LUNAR_FLUX_PER_KM2_YEAR` = 2.3 × 10⁻¹⁵ km⁻²
+      yr⁻¹, science-p14-t24b-laws §2.2's anchor. `R_b` is `Impactors::rate`, which already holds
+      the focusing. B is `bombardment`, the lunar chronology's mean rate over the 1 Myr after the
+      system's age over the Sun's (1 at 4.567 Gyr, 1.25 × 10⁴ at 0.1 Gyr, 25.4 at 1 Gyr).
+    - S follows the projectiles' composition (amendments (a), (b); `size_law_of`, by
+      `ImpactorSource`). Rocky: `ROCKY_IMPACTOR_SLOPE` 2.25 from 1 km to 450 km
+      (`rocky_projectiles`). Icy, from an icy belt or the comets: 1.92 normalised at
+      `ICY_REFERENCE_DIAMETER` 1.5 km, to 150 km (`icy_projectiles`). P14.T21.c's per-belt q is not
+      read.
+    - E = π ρ D³ v² ÷ 12 at `Impactors::velocity` and `projectile_density`. The floor is the
+      larger of `FIXED_FLOOR_JOULES` (1 Mt, the plan's stated energy) and the energy at which a
+      bin's mean reaches 64. The law is normalised at its reference, never at the floor.
+    - Bins of a Julian year, no look-back, a constant rate read at the epoch. Marks: word 0 the
+      diameter, words 1–2 the site (`SurfacePoint`, uniform on the sphere), words 3–7 reserved.
+    - `ImpactInputs::new(radius, &Impactors, system_age)` picks the law from the impactors' source.
+    - On P14.T48.f's Solar fixtures at 23 (at 24, with every hold in force): Earth above 1 Mt once
+      in 133.5 years (133.2), the Moon once in 3,315 (3,290), and Jupiter a comet over 1.5 km once
+      in 164 years (164) with 22.9 impacts a year above 1 Mt (22.8). Brown et al. 2002 give Earth
+      about 135, Zahnle et al. 2003 Jupiter 91–500, Hueso et al. 2018 10–65 a year.
+  - _`body.eruption` (`EruptionModel`, `EruptionInputs`, `Eruption`, `eruptions`,
+    `eruptions_active_at`, `eruption`)._
+    - Γ = Γ⊕ × O(F) × (R ÷ R⊕)², with O `interior::outgassing`: zero at or below `F_c` =
+      `SURFACE_MELT_HEAT_FLOW`, 1 at the generator's Earth.
+    - Durations are log-normal, median 49 d, cut at 10 Julian years (`MAX_DURATION`). Bins of a
+      week, a look-back of 522 bins. Onsets are held at 64 a bin, about 3,300 a year
+      (`is_saturated`, lava worlds only).
+    - Marks: words 0–1 the duration's normal; words 2–3 reserved for a place, 4–7 for a size.
+    - _Deviation from decision-p14-t31a-events lean 2, accepted by main:_ Γ⊕ = 35 (ruled 40) and
+      σ = 2.08 (ruled 1.6), from the Global Volcanism Program database's own figures, read for the
+      science check: 34.9–36.5 onsets a year (1980–2019, 2000–2024), 37–44 eruptions running at
+      once, 16.8% lasting over a year and 1.9% over ten. The ruled σ was fitted to about 20 running
+      at once, from memory. With the 10-year cut about 27 run at once
+      (`the_durations_match_the_global_volcanism_program`).
+  - _`system.comet` (`CometModel`, `CometInputs`, `Comet`, `comets`, `comets_listed_in`,
+    `comets_listed_at`, `comet`)._
+    - The rate is an input (the halo's `comet_rate` at L). Bins of a Julian year on the system's
+      key; the event's time is the perihelion's.
+    - Marks: word 0 q, uniform in (0, 5 au √L]. Word 1 the eccentricity: 1 − e = u × min(10⁻², q ÷
+      `a_min`), `a_min` = max(30 au √L, the semi-major axis of a 200-year period), 34.2 au about
+      the Sun (amendment (c)). Words 2–4 an isotropic orientation; word 5 the nucleus (`nuclei`:
+      1.92 normalised at 1 km, to 150 km); words 6–7 reserved.
+    - The orbit is `orbit::Orbit`: `KeplerElements` below `OpenOrbit::MIN_ECCENTRICITY` (0.9999,
+      above ruling 84.5's 0.99), at perihelion at the event's time through `rephased` (the phase
+      reduced exactly by the orbit's own period), and `OpenOrbit` from it.
+    - Listed while inside 30 au √L (`Comet::listed`). The times in and out are Kepler's equation
+      in a form that holds 1 − e exactly (sin²(E ÷ 2) from (1 − e)(r ÷ q − 1), E − sin E by its
+      series below 0.1 rad), and Barker's at e = 1 alone: Barker's across `NEAR_PARABOLIC_BAND`
+      was off by about (1 − e) r ÷ 4q, 10⁻³ at q = 0.01 au. A comet whose q lies inside its host
+      plunges and is listed until it reaches the host's surface.
+    - The floor rises from 1 km where a bin's mean would pass 64 or more than `MAX_LISTED_COMETS`
+      (1,024) would be listed at once (amendment (d)). `reach`, the longest listing either side of
+      perihelion (about 15.2 years about the Sun), is the larger of the slowest orbits at q = 5 au
+      √L and at q = 10⁻² `a_min`; a grid over 10⁻⁴–10⁵ L☉ and 0.08–30 M☉ found no longer one, and
+      `no_comet_outstays_the_reach` checks the draws.
+    - `comets` lists by perihelion time and partitions; `comets_listed_in` and `comets_listed_at`
+      read the bins `reach` either side.
+  - _Not here (P14.T31.c's):_ choosing the inputs from a system (a body's radius, `Impactors` and
+    heat flow, and the halo host's luminosity, μ and radius, at the epoch), `events_between`,
+    "no event changes any `body_at` result", and the bodies' existence at the time.
+  - _Plan text (R10):_ T31.a's "eccentricity 1 − 10⁻⁴ to 1" is superseded by ruling 84.5 and
+    amendment (c).
+  - _Goldens:_ the new `planetary/events` (header 23), on plain inputs only, so no generated body
+    moves it: the kinds' constants, B at five ages, a Jupiter-like giant's impacts over a year
+    and a young Earth's over a tenth of a year (its floor raised), an Earth's eruptions over
+    60 days and those running at the epoch with an Io's and a lava world's rates, and the Sun's
+    comets over a year with their orbits, nuclei, listings and positions. `rng/tags` gains three
+    lines (+3 −0). No other golden moves, there is no hold and no `with_every_24_hold` arm, and
+    nothing moves at 23. Bodies move at 24, so the event goldens on generated systems are
+    P14.T54.b's.
+  - _Tests_ (`cargo test -p hyperion-sim planetary::events`): the ruling's tests 1–7. Earth above
+    1 Mt, 10 Mt and 1 km; the Moon; Jupiter's Shoemaker–Levy class and its rate above 1 Mt, at 23
+    and with every hold at 24 in force. B against the chronology's derivative. The comets: 5–20 a
+    year inside 5 au from the halo, 200–400 listed at once about the Sun, no period under 200
+    years, at most 1,024 listed at 10, 100 and 10⁴ L☉, and K–S tests of the marks. The eruptions:
+    Earth's and Mars's counts, durations against the database's figures, `eruptions_active_at`
+    against a brute-force scan, and saturation. Test (a)'s Poisson counts over 10⁴ years for each
+    kind. Test (c): partition and order independence (`assert_partition_independent`,
+    `assert_order_independent`), `EventId` text round trips, and the same seed twice for each
+    kind. The ruling's test 5 draw check is a grid: `eccentricity_of` at 601 perihelia down to
+    10⁻⁶ of the limit, × 5 uniforms × hosts of 1, 10, 100 and 10⁴ L☉, P ≥ 200 years to 10⁻⁸ (an
+    f64 near 1 holds 1 − e to about 10⁻⁹ there); some 2,000 drawn comets have their aphelia
+    checked beyond the listing radius.
+  - _Deferred findings (2026-10-13 rule), from P14.T31.a_ (the ruling's R1–R9, with the science
+    check's):
+    - R1: the rocky slope 2.25 is one slope over 24 m–450 km through two anchors, Brown et al.
+      2002's read from its abstract only. The real distribution is wavy (Harris and D'Abramo
+      2015), and Brown et al. 2013 find the flux of bodies tens of metres across may be up to an
+      order of magnitude higher than other estimates.
+    - R2: a belt-dependent impactor slope is deferred (T21.c's q is no longer read).
+    - R3: the icy slope 1.92 is the Jupiter-family comets' above a 1.25 km radius, carried to
+      long-period comets and down to about 20 m. Long-period nuclei are not agreed (Fernández and
+      Sosa 2012 about 2.15; Boe et al. 2019 about 3.6 above 3.7 km, flattening below about 1 km),
+      and the small-body deficit seen at Pluto and Charon is not modelled.
+    - R4: impact sites are uniform, with no apex–antapex or latitude asymmetry.
+    - R5: the impact speed is the mean, with no spread (⟨v²⟩ ÷ ⟨v⟩² ≈ 1.1–1.2 is not carried
+      into the energies).
+    - R6: B extrapolates Neukum's curve before about 4.1 Ga, to each system's birth, as the
+      crater contract does.
+    - R7: the share of eruptions over within a day is 3.1% against Simkin's about 10% (from
+      memory). Persistent activity over 10 years is cut, so about 27 run at once against 37–44.
+      Icy bodies take the silicate `F_c`, so Enceladus has none. Lava and cryovolcanism are not
+      told apart: T31.c and T43 should read the crust.
+    - R8: comets' eccentricities are uniform in e at fixed q, not in 1 ÷ a, so the Oort spike is
+      not resolved; the galactic tide's mark on perihelion latitudes is absent.
+    - R9: about luminous hosts, 30 au √L exceeds the halo's 2,000 au inner edge above about
+      4,400 L☉, and a listing scans 2 × `reach` year-bins (some 30,000 at 10⁴ L☉).
+    - The halo's 10.9 a year inside 5 au is 0.79 of Francis 2005's flux scaled to 5 au
+      (P14.T21.d's figure, inside the plan's 5–20).

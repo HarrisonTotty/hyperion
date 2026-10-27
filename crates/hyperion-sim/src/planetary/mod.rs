@@ -49,6 +49,9 @@
 //! - [`chem`]: element chemistry on the snapshot path (Phase L, P14.T50.a): a body's element
 //!   inventory by reservoir, its mantle's ΔIW and redox class, and its host's C/O and Mg/Si, all
 //!   pure until P14.T54.a wires them onto the record.
+//! - [`events`]: events on bodies (P14.T31): so far the Poisson bins of P14.T31.a, a body's
+//!   impacts and eruptions and a system's long-period comets, each from plain arguments until
+//!   P14.T31.c calls them.
 //! - [`surface`]: rendering plan R09's coarse pass, a body's coarse field from its surface seed
 //!   and plan 14's global figures; so far its frame (R09.T10): the inputs, the cell graph, the
 //!   quantiser and the steps as no-ops.
@@ -104,6 +107,7 @@
 //! | 01 | a host's C/O and Mg/Si (P14.T50.a) | [`rng::tags::SYSTEM_ABUNDANCES`](crate::rng::tags::SYSTEM_ABUNDANCES) (`System`), opened with `ObjectKey::from(SystemId)`, words 0–1 ([`chem::AbundanceDraws`]) |
 //! | 01 | a small body's formation time (P14.T51.c) | [`rng::tags::BODY_FORMATION`](crate::rng::tags::BODY_FORMATION) (`Body`), opened with `ObjectKey::from(BodyId)`, word 0 ([`hooks::crust::formation_time`]) |
 //! | 01 | an airless body's exposed fraction of its cold traps (P14.T51.f) | [`rng::tags::BODY_COLD_TRAPS`](crate::rng::tags::BODY_COLD_TRAPS) (`Body`), opened with `ObjectKey::from(BodyId)`, word 0 ([`hooks::cold_traps::exposed_fraction`]) |
+//! | 01, 06 | events on bodies (P14.T31.a) | [`events::EventSeries::new`](crate::events::EventSeries::new) with a [`BodyId`](crate::id::BodyId) or [`SystemId`](crate::id::SystemId) subject, [`events::PoissonBins`](crate::events::PoissonBins) and [`events::RateModel`](crate::events::RateModel); [`id::event_tags::BODY_IMPACT`](crate::id::event_tags::BODY_IMPACT), [`BODY_ERUPTION`](crate::id::event_tags::BODY_ERUPTION) and [`SYSTEM_COMET`](crate::id::event_tags::SYSTEM_COMET), backed by `rng::tags`' scope-`Event` tags of the same names |
 //! | 14 | a young magma ocean (design note 12) | [`hosts::young::Formation::molten_until`], which [`derive::PlacedBody::with_magma_ocean_until`] carries to the atmosphere |
 
 pub mod architecture;
@@ -115,6 +119,7 @@ pub mod derive;
 pub mod disc;
 pub mod drift;
 pub mod error;
+pub mod events;
 pub mod fate;
 pub mod frames;
 pub mod halo;

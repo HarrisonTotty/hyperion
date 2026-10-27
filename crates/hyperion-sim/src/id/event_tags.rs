@@ -143,6 +143,17 @@ event_tags! {
     /// The central black hole's tidal disruptions of stars, in bins of 1,024 years on the black
     /// hole's own ID (Poisson bins; P09.T30.a).
     0x0201 => TIDAL_DISRUPTION = tags::CENTRE_EV_TIDAL_DISRUPTION;
+
+    // Plan 14: bodies, block 0x0400–0x04FF (plan 14, design note 15). P14.T31.a registers 0x0400,
+    // 0x0401 and 0x0404; 0x0402 and 0x0403 stay reserved for P14.T31.b's storms.
+    /// Impacts on a body, in bins of a Julian year on the body's ID (Poisson bins; P14.T31.a).
+    0x0400 => BODY_IMPACT = tags::BODY_IMPACT;
+    /// Volcanic eruptions on a body, in bins of a week on the body's ID (Poisson bins;
+    /// P14.T31.a).
+    0x0401 => BODY_ERUPTION = tags::BODY_ERUPTION;
+    /// The perihelion passages of a system's long-period comets, in bins of a Julian year on the
+    /// system's ID (Poisson bins; P14.T31.a).
+    0x0404 => SYSTEM_COMET = tags::SYSTEM_COMET;
 }
 
 #[cfg(test)]
@@ -210,6 +221,32 @@ mod tests {
             .collect();
         in_block.sort_unstable();
         assert_eq!(in_block, [0x0200, 0x0201, 0x0202]);
+    }
+
+    /// Plan 14's block holds 0x0400, 0x0401 and 0x0404 after P14.T31.a, each backed by its domain
+    /// tag; 0x0402 and 0x0403 wait for P14.T31.b and 0x0405–0x04FF stay reserved.
+    #[test]
+    fn plan_14_holds_its_t31a_tags_with_their_names() {
+        let plan_14 = [
+            (BODY_IMPACT, 0x0400, "body.impact"),
+            (BODY_ERUPTION, 0x0401, "body.eruption"),
+            (SYSTEM_COMET, 0x0404, "system.comet"),
+        ];
+        for (tag, number, name) in plan_14 {
+            assert_eq!(tag.number(), number, "{name}");
+            assert_eq!(tag.name(), name);
+            assert_eq!(EventTag::from_number(number), Some(tag));
+        }
+        for reserved in [0x0402, 0x0403, 0x0405] {
+            assert_eq!(EventTag::from_number(reserved), None, "{reserved:#06x}");
+        }
+        let mut in_block: Vec<u16> = ALL
+            .iter()
+            .map(|t| t.number())
+            .filter(|n| (0x0400..=0x04FF).contains(n))
+            .collect();
+        in_block.sort_unstable();
+        assert_eq!(in_block, [0x0400, 0x0401, 0x0404]);
     }
 
     #[test]

@@ -192,3 +192,6 @@ centre.ev.tidal_disruption (Event) = 0xa1782ed5a9226363
 star.ns.glitch_class (Body) = 0x7563dcffcc4325be
 body.formation (Body) = 0x4fb44c8a523094a0
 body.cold_traps (Body) = 0x2a8afff8f29b65f4
+body.impact (Event) = 0xf6e3402aafa913e3
+body.eruption (Event) = 0xc28038004ab16699
+system.comet (Event) = 0x202ddc74fefacbe6
