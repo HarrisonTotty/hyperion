@@ -37,11 +37,14 @@ import {
   DISC_ROWS,
   discCellJobs,
   drawnThroughCells,
+  faceBandSpans,
+  LIMB_SPAN_ROWS,
   type LimbSpans,
   limbSpans,
   limbThroughCells,
   MAX_CELL_JOBS,
   packDiscRecords,
+  pixelsPerGroup,
   viewRay,
 } from "./discShading";
 import { packClassMap } from "./discSurface";
@@ -329,12 +332,12 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
     );
   });
 
-  it("dispatches once for a 3.5 px and a 13 px disc, one job a pixel, under its label", async () => {
+  it("dispatches once for a 3.5 px and a 13 px disc, a workgroup a run of their pixels, under its label", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     const kernel = engine.createCompute(BODY_DISC_CELLS_KERNEL);
     const plan = planOf([3.5, 13]);
-    const jobs = discCellJobs(plan.discs);
+    const groups = discCellJobs(plan.discs).groups.length / 4;
     expect(renderer.dispatchCells(plan, kernel, FRAME)).toBe(true);
     expect(
       engine.dispatched.map((d) => [
@@ -343,21 +346,26 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
         d.workgroups,
         Array.from(d.bindings.uniforms["cell_pass"] ?? []),
       ]),
-    ).toEqual([
-      [BODY_DISC_CELLS_KERNEL.name, DISC_CELLS_PASS, [jobs.count, 1, 1], [jobs.count, 0, 0, 0]],
-    ]);
+    ).toEqual([[BODY_DISC_CELLS_KERNEL.name, DISC_CELLS_PASS, [groups, 1, 1], [groups, 0, 0, 0]]]);
     renderer.dispose();
   });
 
-  it("binds the records, its jobs and room for every pixel's sums", async () => {
+  it("binds the records, its jobs, its workgroups' runs of them and room for every pixel's sums", async () => {
     const { engine, plan } = await dispatchedFor([3.5, 13]);
     const buffers = onlyDispatch(engine).bindings.buffers;
     expect([
       buffers["discs"]?.name,
       buffers["cell_jobs"]?.name,
+      buffers["cell_groups"]?.name,
       buffers["cell_sums"]?.name,
       (buffers["cell_sums"]?.bytes ?? 0) >= 32 * discCellJobs(plan.discs).count,
-    ]).toEqual(["bodies:discs", "bodies:disc cell jobs", "bodies:disc cell sums", true]);
+    ]).toEqual([
+      "bodies:discs",
+      "bodies:disc cell jobs",
+      "bodies:disc cell groups",
+      "bodies:disc cell sums",
+      true,
+    ]);
   });
 
   it("binds the texel of no weight as the class map and normal map its kernel reaches for uniform discs, which none of them reads (R10.T10.g)", async () => {
@@ -374,6 +382,14 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
     const written = lastWrite(engine, "bodies:disc cell jobs");
     expect(Array.from(new Int32Array(written.data.buffer))).toEqual(
       Array.from(discCellJobs(plan.discs).jobs),
+    );
+  });
+
+  it("writes the jobs' workgroups into the buffer it binds (R07.T8.g)", async () => {
+    const { engine, plan } = await dispatchedFor([3.5, 13]);
+    const written = lastWrite(engine, "bodies:disc cell groups");
+    expect(Array.from(new Uint32Array(written.data.buffer))).toEqual(
+      Array.from(discCellJobs(plan.discs).groups),
     );
   });
 
@@ -494,12 +510,17 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
     renderer.dispatchCells(planOf([13]), engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME);
     const [before, after] = engine.dispatched.map((d) => d.bindings.buffers);
     expect(created).toEqual(
-      expect.arrayContaining(["bodies:disc cell jobs", "bodies:disc cell sums"]),
+      expect.arrayContaining([
+        "bodies:disc cell jobs",
+        "bodies:disc cell groups",
+        "bodies:disc cell sums",
+      ]),
     );
     expect([
       before?.["cell_jobs"] === after?.["cell_jobs"],
+      before?.["cell_groups"] === after?.["cell_groups"],
       before?.["cell_sums"] === after?.["cell_sums"],
-    ]).toEqual([false, false]);
+    ]).toEqual([false, false, false]);
     renderer.dispose();
   });
 
@@ -664,11 +685,16 @@ describe("the cell pass for every record (R07.T8.e)", () => {
         expected[at]?.push(i);
       }
     });
+    // A 13 px disc's 4 × 4 cells take four pixels a workgroup (R07.T8.g).
+    const groupsOf = (i: number): number => Math.ceil((pixels[i] ?? 0) / 4);
     let first = 0;
+    let firstGroup = 0;
     const sets = expected.map((indices) => {
       const count = indices.reduce((sum, i) => sum + (pixels[i] ?? 0), 0);
-      const set = { first, count, record: indices[0] };
+      const groups = indices.reduce((sum, i) => sum + groupsOf(i), 0);
+      const set = { first, count, record: indices[0], firstGroup, groups };
       first += count;
+      firstGroup += groups;
       return set;
     });
     expect([cells.sets, cells.count]).toEqual([sets, first]);
@@ -705,23 +731,26 @@ describe("the cell pass for every record (R07.T8.e)", () => {
     ).toEqual(
       cells.sets.map((set) => [
         DISC_CELLS_PASS,
-        [set.count, set.first, 0, 0],
-        cellWorkgroups(set.count),
+        [set.groups, set.firstGroup, 0, 0],
+        cellWorkgroups(set.groups),
       ]),
     );
     const bodyOf = (set: DiscCellSet): string => plan.discs[set.record]?.body ?? "";
     expect(texturesBound(engine)).toEqual(
       cells.sets.map((set) => boundFor(kindOf.get(bodyOf(set)) ?? "plain", bodyOf(set))),
     );
-    // Every dispatch binds the same jobs and sums, which the draws read.
+    // Every dispatch binds the same jobs, workgroups and sums, which the draws read.
     expect(
       new Set(
         engine.dispatched.flatMap((d) => [
           d.bindings.buffers["cell_jobs"]?.name,
+          d.bindings.buffers["cell_groups"]?.name,
           d.bindings.buffers["cell_sums"]?.name,
         ]),
       ),
-    ).toEqual(new Set(["bodies:disc cell jobs", "bodies:disc cell sums"]));
+    ).toEqual(
+      new Set(["bodies:disc cell jobs", "bodies:disc cell groups", "bodies:disc cell sums"]),
+    );
     renderer.dispose();
   });
 
@@ -1021,31 +1050,38 @@ describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
     ]);
   });
 
-  it("lays one job a pixel of each limb span in row order, after the sets' earlier jobs", () => {
+  it("lays one job a pixel of each limb span in row order, then one a pixel of its face band's (R07.T8.g)", () => {
     const [record] = recordsOf(planOf([40]), 1);
     if (record === undefined) {
       throw new Error("no disc");
     }
     const cells = discCellJobs([record], MAX_CELL_JOBS, FRAME);
     const spans = limbSpans(record, FRAME);
-    if (spans === null) {
+    const band = faceBandSpans(record, FRAME);
+    if (spans === null || band === null) {
       throw new Error("no spans");
     }
     const expected: number[][] = [];
-    for (let row = 0; row < spans.rows; row += 1) {
-      const [s0 = 0, e0 = 0, s1 = 0, e1 = 0] = spans.spans.subarray(row * 4, row * 4 + 4);
-      for (let x = s0; x < e0; x += 1) {
-        expected.push([0, x, spans.topPx + row, 0]);
-      }
-      for (let x = s1; x < e1; x += 1) {
-        expected.push([0, x, spans.topPx + row, 0]);
+    for (const list of [spans, band]) {
+      for (let row = 0; row < list.rows; row += 1) {
+        const [s0 = 0, e0 = 0, s1 = 0, e1 = 0] = list.spans.subarray(row * 4, row * 4 + 4);
+        for (let x = s0; x < e0; x += 1) {
+          expected.push([0, x, list.topPx + row, 0]);
+        }
+        for (let x = s1; x < e1; x += 1) {
+          expected.push([0, x, list.topPx + row, 0]);
+        }
       }
     }
-    expect([cells.count, rowsOf(cells.jobs), cells.sets, cells.spanRows]).toEqual([
-      spans.pixels,
+    const count = spans.pixels + band.pixels;
+    // The limb's 4 × 4 cells four pixels a workgroup, the band's one cell 64.
+    const groups = Math.ceil(spans.pixels / 4) + Math.ceil(band.pixels / 64);
+    expect([band.pixels > 0, cells.count, rowsOf(cells.jobs), cells.sets, cells.spanRows]).toEqual([
+      true,
+      count,
       expected,
-      [{ first: 0, count: spans.pixels, record: 0 }],
-      2 * spans.rows,
+      [{ first: 0, count, record: 0, firstGroup: 0, groups }],
+      LIMB_SPAN_ROWS * spans.rows,
     ]);
   });
 
@@ -1058,20 +1094,28 @@ describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
       throw new Error("no limb");
     }
     const packed = packDiscRecords(records, cells);
-    const { spans, rows, topPx } = range.spans;
+    const { rows, topPx } = range.spans;
+    const band = range.band;
+    if (band === null) {
+      throw new Error("no band");
+    }
     expect(cellRows(packed, 2)[index]).toEqual([2 * DISC_ROWS + range.spanRow, rows, topPx, -1]);
     const tail = rowsOf(packed.subarray(2 * DISC_ROWS * 4));
+    // Each pixel row's limb spans, then its face band's (R07.T8.g), the band's sums after the
+    // limb's.
     let first = range.first;
-    const expected: number[][] = [];
-    for (let row = 0; row < rows; row += 1) {
-      for (const span of [0, 1]) {
-        const from = spans[row * 4 + 2 * span] ?? 0;
-        const to = spans[row * 4 + 2 * span + 1] ?? 0;
-        expected.push([first, from, to, 0]);
-        first += to - from;
+    const expected: number[][] = Array.from({ length: LIMB_SPAN_ROWS * rows }, () => []);
+    [range.spans.spans, band.spans].forEach((spans, list) => {
+      for (let row = 0; row < rows; row += 1) {
+        for (const span of [0, 1]) {
+          const from = spans[row * 4 + 2 * span] ?? 0;
+          const to = spans[row * 4 + 2 * span + 1] ?? 0;
+          expected[LIMB_SPAN_ROWS * row + 2 * list + span] = [first, from, to, 0];
+          first += to - from;
+        }
       }
-    }
-    expect([tail, first]).toEqual([expected, range.first + range.spans.pixels]);
+    });
+    expect([tail, first]).toEqual([expected, range.first + range.spans.pixels + band.pixels]);
   });
 
   it("dispatches a larger disc's limb with the small discs of its set", async () => {
@@ -1082,7 +1126,7 @@ describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
     renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME);
     expect(
       engine.dispatched.map((d) => Array.from(d.bindings.uniforms["cell_pass"] ?? [])),
-    ).toEqual([[cells.count, 0, 0, 0]]);
+    ).toEqual([[cells.groups.length / 4, 0, 0, 0]]);
     const packed = new Float32Array(lastWrite(engine, "bodies:discs").data.buffer);
     expect(Array.from(packed.subarray(0, (2 * DISC_ROWS + cells.spanRows) * 4))).toEqual(
       Array.from(packDiscRecords(plan.discs, cells)),
@@ -1094,5 +1138,195 @@ describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
     // From 10 m above an Earth's ground the limb's cone is within a pixel's turn of π ÷ 2.
     const record = recordOfBody(bodyToward(EARTH, vec3(0, -1, -0.2), 6.371e6 + 10), VIEWPORT);
     expect(limbSpans(record, frameOf(VIEWPORT))).toBeNull();
+  });
+});
+
+/**
+ * The face pixels whose one cell `cell_samples` shades at more than one point (`bodyDisc.wgsl`), in
+ * `f64`: those of the rectangle whose four corners lie inside the limb, the interior draw's, whose
+ * centre's depth δ = −angle ÷ slope, the slope by the angle's forward differences over 1/64 px, less
+ * half the pixel's extent across the limb's normal, is at most two pixels.
+ */
+function bandPixels(record: DiscRecord, viewport: Viewport): Array<readonly [number, number]> {
+  const centre = toViewAxes(record.direction, CAMERA.orientation);
+  const pole = normalise(toViewAxes(record.pole, CAMERA.orientation));
+  const stretch = 1 / record.polarOverEquatorial;
+  const stretched = (x: Vec3): Vec3 => add(x, scale(pole, (stretch - 1) * dot(x, pole)));
+  const scaledCentre = stretched(centre);
+  const limb = Math.asin(record.radiusOverDistance / norm(scaledCentre));
+  const angle = (x: number, y: number): number => {
+    const ray = stretched(viewRay(x, y, CAMERA, viewport));
+    return Math.atan2(norm(cross(ray, scaledCentre)), dot(ray, scaledCentre)) - limb;
+  };
+  const step = 1 / 64;
+  const pixels: Array<readonly [number, number]> = [];
+  const { rect } = record;
+  for (let y = Math.floor(rect.topPx); y < Math.ceil(rect.bottomPx); y += 1) {
+    for (let x = Math.floor(rect.leftPx); x < Math.ceil(rect.rightPx); x += 1) {
+      const corners = [angle(x, y), angle(x + 1, y), angle(x, y + 1), angle(x + 1, y + 1)];
+      if (!corners.every((c) => c < 0)) {
+        continue;
+      }
+      const at = angle(x + 0.5, y + 0.5);
+      const sx = (angle(x + 0.5 + step, y + 0.5) - at) / step;
+      const sy = (angle(x + 0.5, y + 0.5 + step) - at) / step;
+      const slope = Math.hypot(sx, sy);
+      if (!(slope > 0)) {
+        continue;
+      }
+      const halfExtent = (Math.abs(sx) + Math.abs(sy)) / slope / 2;
+      if (-at / slope - halfExtent <= 2) {
+        pixels.push([x, y]);
+      }
+    }
+  }
+  return pixels;
+}
+
+/** A case of {@link LIMB_CASES}: the body's record, its limb's and face band's spans, and the band. */
+function bandCase(
+  figure: BodyFigure,
+  direction: Vec3,
+  distanceM: number,
+  viewport: Viewport,
+): {
+  readonly record: DiscRecord;
+  readonly limb: LimbSpans;
+  readonly band: LimbSpans;
+  readonly shaded: ReadonlyArray<readonly [number, number]>;
+} {
+  const record = recordOfBody(bodyToward(figure, direction, distanceM), viewport);
+  const limb = limbSpans(record, frameOf(viewport));
+  const band = faceBandSpans(record, frameOf(viewport));
+  if (limb === null || band === null) {
+    throw new Error("no spans");
+  }
+  return { record, limb, band, shaded: bandPixels(record, viewport) };
+}
+
+describe("a large disc's face's near-limb band through the cell pass (R07.T8.g)", () => {
+  it.each(LIMB_CASES)(
+    "holds every face pixel shaded at more than one point in its spans: %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const { band, shaded } = bandCase(figure, direction, distanceM, viewport);
+      expect([shaded.length > 0, shaded.filter(([x, y]) => !inSpans(band, x, y))]).toEqual([
+        true,
+        [],
+      ]);
+    },
+  );
+
+  it.each(LIMB_CASES)(
+    "lays each row's two spans in order within the rectangle, on the limb's rows: %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const { record, limb, band } = bandCase(figure, direction, distanceM, viewport);
+      const ordered = Array.from({ length: band.rows }, (__, row) => {
+        const [s0 = 0, e0 = 0, s1 = 0, e1 = 0] = band.spans.subarray(row * 4, row * 4 + 4);
+        return (
+          s0 <= e0 &&
+          e0 <= s1 &&
+          s1 <= e1 &&
+          s0 >= Math.floor(record.rect.leftPx) &&
+          e1 <= Math.ceil(record.rect.rightPx)
+        );
+      });
+      expect([ordered.every(Boolean), band.topPx, band.rows]).toEqual([
+        true,
+        limb.topPx,
+        limb.rows,
+      ]);
+    },
+  );
+
+  // The spans' cost: 1.28 to 1.58 times the pixels shaded at nine points as built, the band's
+  // margins and the gradient's bound over the slope where the view turns its rays less.
+  it.each(LIMB_CASES)(
+    "takes at most twice the pixels shaded at more than one point: %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const { band, shaded } = bandCase(figure, direction, distanceM, viewport);
+      expect(band.pixels).toBeLessThanOrEqual(2 * shaded.length);
+    },
+  );
+
+  it("takes no band of a face of more than one cell, whose face sums its own", () => {
+    const [record] = recordsOf(planOf([40]), 1);
+    if (record === undefined) {
+      throw new Error("no disc");
+    }
+    const twoCells = { ...record, interiorSamples: 2 };
+    const cells = discCellJobs([twoCells], MAX_CELL_JOBS, FRAME);
+    const range = cells.ranges[0];
+    expect([
+      faceBandSpans(twoCells, FRAME),
+      range?.kind === "limb" ? range.band : "no limb",
+      cells.count,
+    ]).toEqual([null, null, limbSpans(twoCells, FRAME)?.pixels]);
+  });
+});
+
+/**
+ * The workgroups a frame's jobs should take: each range's runs of one cell count (a rectangle's,
+ * or a limb's and then its face band's) in the jobs' order, each cut into workgroups of
+ * {@link pixelsPerGroup} jobs, the last the rest, as (first job, jobs, n, 0).
+ */
+function expectedGroups(records: ReadonlyArray<DiscRecord>, cells: DiscCellJobs): number[][] {
+  const runs: Array<readonly [number, number, number]> = [];
+  records.forEach((record, index) => {
+    const range = cells.ranges[index];
+    if (range === null || range === undefined) {
+      return;
+    }
+    if (range.kind === "rectangle") {
+      runs.push([range.first, range.widthPx * range.heightPx, record.limbSamples]);
+      return;
+    }
+    runs.push([range.first, range.spans.pixels, record.limbSamples]);
+    if (range.band !== null && range.band.pixels > 0) {
+      runs.push([range.first + range.spans.pixels, range.band.pixels, record.interiorSamples]);
+    }
+  });
+  return runs
+    .toSorted((a, b) => a[0] - b[0])
+    .flatMap(([first, jobs, n]) => {
+      const per = pixelsPerGroup(n);
+      return Array.from({ length: Math.ceil(jobs / per) }, (_, g) => [
+        first + g * per,
+        Math.min(per, jobs - g * per),
+        n,
+        0,
+      ]);
+    });
+}
+
+describe("the cell pass's workgroups (R07.T8.g)", () => {
+  it("takes ⌊64 ÷ n²⌋ pixels of n × n cells a workgroup", () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map(pixelsPerGroup)).toEqual([64, 16, 7, 4, 2, 1, 1, 1]);
+  });
+
+  it("cuts each run of one cell count into full workgroups, the last the rest, in the jobs' order", () => {
+    const records = recordsOf(planOf([3.5, 13, 40]), 3);
+    const cells = discCellJobs(records, MAX_CELL_JOBS, FRAME);
+    const groups = expectedGroups(records, cells);
+    // Runs of 8 × 8, 4 × 4 and one cell, and every job in one workgroup.
+    expect([
+      new Set(groups.map((group) => group[2])),
+      groups.reduce((sum, group) => sum + (group[1] ?? 0), 0),
+    ]).toEqual([new Set([8, 4, 1]), cells.count]);
+    expect(rowsOf(cells.groups)).toEqual(groups);
+  });
+
+  it("gives each set its run of the workgroups, over its own jobs", () => {
+    const { plan } = planWith(["plain", "air", "map", "plain"]);
+    const cells = discCellJobs(plan.discs, MAX_CELL_JOBS, FRAME);
+    const groups = rowsOf(cells.groups);
+    const spans = cells.sets.map((set) => {
+      const own = groups.slice(set.firstGroup, set.firstGroup + set.groups);
+      const last = own.at(-1);
+      return [own[0]?.[0], (last?.[0] ?? 0) + (last?.[1] ?? 0)];
+    });
+    expect([spans, cells.sets.reduce((sum, set) => sum + set.groups, 0)]).toEqual([
+      cells.sets.map((set) => [set.first, set.first + set.count]),
+      groups.length,
+    ]);
   });
 });

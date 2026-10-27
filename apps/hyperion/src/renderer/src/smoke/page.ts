@@ -409,7 +409,7 @@ async function run(
     checkAtmosphereSlicesEarth(engine, checks, twins),
   );
   // In part 8, which had room (66 s at 6f4463c4's gate), with R05's Earth's tables of its own.
-  await group(8, "R07.T8.e–f the cell pass for every record", () =>
+  await group(8, "R07.T8.e–g the cell pass for every record", () =>
     checkCellPassEveryRecord(engine, checks),
   );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
