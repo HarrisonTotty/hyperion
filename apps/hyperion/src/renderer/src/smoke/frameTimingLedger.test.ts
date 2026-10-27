@@ -160,6 +160,25 @@ describe("a frame's atmosphere view passes", () => {
     });
   });
 
+  it("reads two as the ray march's two entry points, the centre ray's and the footprint's (R08.T11.d)", () => {
+    const frame = frameOf([
+      [ATMOSPHERE_VIEW_PASS, 4],
+      ["atmosphere composite", 9],
+      [ATMOSPHERE_VIEW_PASS, 3],
+    ]);
+    expect(viewPassesOf(frame)).toEqual({ skyNs: 0, aerialNs: 0, marchNs: 7, moreNs: 0 });
+  });
+
+  it("reads four as the sky view, the aerial perspective and the march's two", () => {
+    const frame = frameOf([
+      [ATMOSPHERE_VIEW_PASS, 1],
+      [ATMOSPHERE_VIEW_PASS, 2],
+      [ATMOSPHERE_VIEW_PASS, 3],
+      [ATMOSPHERE_VIEW_PASS, 4],
+    ]);
+    expect(viewPassesOf(frame)).toEqual({ skyNs: 1, aerialNs: 2, marchNs: 7, moreNs: 0 });
+  });
+
   it("reads three as the sky view, the aerial perspective and the march, in their order", () => {
     const frame = frameOf([
       [ATMOSPHERE_VIEW_PASS, 1],
@@ -170,15 +189,16 @@ describe("a frame's atmosphere view passes", () => {
     expect(viewPassesOf(frame)).toEqual({ skyNs: 1, aerialNs: 2, marchNs: 3, moreNs: 0 });
   });
 
-  it("sums the view passes past the march", () => {
+  it("sums the view passes past the march's two", () => {
     const frame = frameOf([
       [ATMOSPHERE_VIEW_PASS, 1],
       [ATMOSPHERE_VIEW_PASS, 2],
       [ATMOSPHERE_VIEW_PASS, 3],
       [ATMOSPHERE_VIEW_PASS, 4],
       [ATMOSPHERE_VIEW_PASS, 5],
+      [ATMOSPHERE_VIEW_PASS, 6],
     ]);
-    expect(viewPassesOf(frame).moreNs).toBe(9);
+    expect(viewPassesOf(frame).moreNs).toBe(11);
   });
 });
 

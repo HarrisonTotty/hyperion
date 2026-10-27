@@ -11,7 +11,10 @@
 import {
   AERIAL_PERSPECTIVE_KERNEL,
   COMPOSITE_MATERIAL,
+  RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   SKY_VIEW_KERNEL,
 } from "../atmosphere/hillaire";
@@ -110,13 +113,20 @@ const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 
 /**
  * R05.T12.c's per-frame atmosphere: the sky view, the aerial perspective and the ray march, since
- * R08.T8.e in both its forms (the shared read, and by slot), and the composite that lays them over
- * the terrain.
+ * R08.T8.e in both its forms (the shared read, and by slot), since R08.T11.d each with its two entry
+ * points (the centre ray's and the footprint's) and the fill of its target outside the air's area,
+ * and the composite that lays them over the terrain.
  */
 const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
-  ...[SKY_VIEW_KERNEL, AERIAL_PERSPECTIVE_KERNEL, RAY_MARCH_KERNEL, RAY_MARCH_SLOTS_KERNEL].map(
-    (spec): CatalogueEntry => ({ kind: "compute", spec }),
-  ),
+  ...[
+    SKY_VIEW_KERNEL,
+    AERIAL_PERSPECTIVE_KERNEL,
+    RAY_MARCH_KERNEL,
+    RAY_MARCH_SLOTS_KERNEL,
+    RAY_MARCH_CENTRE_KERNEL,
+    RAY_MARCH_SLOTS_CENTRE_KERNEL,
+    RAY_MARCH_FILL_KERNEL,
+  ].map((spec): CatalogueEntry => ({ kind: "compute", spec })),
   { kind: "material", spec: COMPOSITE_MATERIAL },
 ];
 

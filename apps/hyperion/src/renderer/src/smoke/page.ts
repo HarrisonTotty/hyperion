@@ -23,8 +23,9 @@
  * Saturn-class figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
  * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
  * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
- * its binary, and R10.T16.g's datum inside the figure over the image last, with R02.T19's on
- * `TEST SATURN`'s spheroid (`datumFrame.ts`); R08.T8.b's far limb, with the composite from above
+ * its binary and R08.T11.d's march area after them, and R10.T16.g's datum inside the figure over
+ * the image last, with R02.T19's on `TEST SATURN`'s spheroid (`datumFrame.ts`); R08.T8.b's far
+ * limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
  * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
@@ -64,6 +65,7 @@ import {
   checkFarLimb,
   checkFarLimbFootprint,
   checkLowPick,
+  checkMarchArea,
   checkMarchBand,
   checkSeveralSuns,
   checkSurfaceLightingEarth,
@@ -460,6 +462,10 @@ async function run(
     checkSeveralSuns(engine, checks, twins),
   );
   await group(10, "R08.T8.e the binary's slot layers", () => checkBinarySlotLayers(engine, checks));
+  // In part 10, which had room (83 s at 408b7359's gate).
+  await group(10, "R08.T11.d the march over the air's area and the tile cull", () =>
+    checkMarchArea(engine, checks, summary.fallback),
+  );
   await group(12, "R08.T11.e the unread column table at one texel on Earth", () =>
     checkUnreadEarth(engine, checks),
   );

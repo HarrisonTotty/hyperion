@@ -53,6 +53,12 @@
 // (`farLimb.wgsl`; `decision-r08-t8-leans.md` section 6.1), so that a star, or the Sun's disc in
 // an eclipse seen from afar, is not cut out row by row where the centre ray grazes the base of the
 // air.
+// Changes (plan R08, R08.T11.d; `decision-r08-t11-frame.md` section 2): the march is dispatched over
+// the air's area alone (`marchArea.ts`), and a pixel whose texel, or at half resolution any of its
+// four candidates, lies outside it reads no air: the march's (0, 0, 0, 1), and from above the top a
+// transmittance to space of 1, each what it read there, since outside the area every ray misses the
+// top's shell, widened, and no footprint blends (`marchArea.ts`). It reads neither the march's
+// target, which the march left as it was there, nor the footprint.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -94,6 +100,9 @@ struct Draw {
   // terms are absorbers, 0 to ABSORBER_SLOTS (R08.T6.c); z: the medium's line slots, the bitmask
   // `common.wgsl`'s `pressureChannelOf` reads (R08.T4.d); w: unused.
   shell : vec4f,
+  // The ray march's area, its texels [x, z) x [y, w) of its target (R08.T11.d; `marchArea.ts`'s
+  // marchAreaTexels): every texel the march wrote this frame.
+  marchArea : vec4f,
 }
 
 @group(1) @binding(0) var<uniform> draw : Draw;
@@ -338,6 +347,31 @@ fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
   return best;
 }
 
+// Whether the ray march wrote what this pixel reads (R08.T11.d): its texel at full resolution, at
+// half each of the four `rayMarched` chooses from, within the march's area.
+fn marchedHere(pixel : vec2u) -> bool {
+  let scale = draw.output.z;
+  var low = vec2i(pixel);
+  var high = low;
+  if (scale < 1.0) {
+    let size = vec2i(ceil(draw.output.xy * scale));
+    let base = vec2i(vec2f(pixel) * scale - 0.5);
+    low = clamp(base, vec2i(0), size - 1);
+    high = clamp(base + vec2i(1), vec2i(0), size - 1);
+  }
+  let area = draw.marchArea;
+  return all(vec2f(low) >= area.xy) && all(vec2f(high) < area.zw);
+}
+
+// The ray march's texel for this pixel (`rayMarched`) where the march wrote it, and outside the
+// area what it would have written there, its ray missing the air (R08.T11.d).
+fn marchedAt(pixel : vec2u, depth : f32, here : bool) -> vec4f {
+  if (here) {
+    return rayMarched(pixel, depth);
+  }
+  return vec4f(0.0, 0.0, 0.0, 1.0);
+}
+
 @fragment
 fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let v = viewOf();
@@ -357,6 +391,8 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // the same for every pixel, so each branch on it is uniform.
   let marchWeight = v.exact.w;
   let count = skySourceCount(v);
+  // Whether the pixel lies in the march's area (R08.T11.d); outside it, it reads no air.
+  let here = marchedHere(pixel);
 
   if (depth == 0.0) {
     // The source whose disc the ray falls in, the last such, whose light slot dims what lies behind
@@ -374,10 +410,14 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     if (aboveTop) {
       // What lies behind takes its transmittance to space per channel from the ray's entry into the
       // air (R08.T8.b), not the march's mean over the channels, and across the pixel's footprint
-      // (R08.T8.c).
-      footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
-      inscattered = rayMarched(pixel, depth).rgb;
-      behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
+      // (R08.T8.c); outside the march's area, where the ray misses the air, 1 (R08.T11.d).
+      behind = vec3f(1.0);
+      inscattered = vec3f(0.0);
+      if (here) {
+        footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
+        inscattered = rayMarched(pixel, depth).rgb;
+        behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
+      }
     } else {
       // Inside the air: from the march band's upper edge up the march's sky, below its lower edge
       // the sky view's, and between them the two blended by the march's share (R08.T8). What lies
@@ -398,7 +438,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
         inscattered = textureSampleLevel(skyView, linearClamp, skyUv, 0.0).rgb;
       }
       if (marchWeight > 0.0) {
-        let marched = rayMarched(pixel, depth);
+        let marched = marchedAt(pixel, depth, here);
         if (marchWeight < 1.0) {
           inscattered = mix(inscattered, marched.rgb, marchWeight);
         } else {
@@ -415,7 +455,10 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       if (withinDisc(dir, source) && dot(source.disc.rgb, vec3f(1.0)) > 0.0) {
         var toSpace : vec3f;
         if (aboveTop) {
-          toSpace = transmittanceAcrossFromAbove(v, body, &footprint, dir, skySlotOf(source));
+          toSpace = vec3f(1.0);
+          if (here) {
+            toSpace = transmittanceAcrossFromAbove(v, body, &footprint, dir, skySlotOf(source));
+          }
         } else {
           toSpace = transmittanceToSpace(v, body, dir, skySlotOf(source));
         }
@@ -434,12 +477,12 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     let aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
     var luminance = colour * aerialAt.a + aerialAt.rgb * factor;
     if (marchWeight > 0.0) {
-      let marched = rayMarched(pixel, depth);
+      let marched = marchedAt(pixel, depth, here);
       luminance = mix(luminance, colour * marched.a + marched.rgb * factor, marchWeight);
     }
     return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
-  let marched = rayMarched(pixel, depth);
+  let marched = marchedAt(pixel, depth, here);
   let luminance = colour * marched.a + marched.rgb * factor;
   return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
 }
