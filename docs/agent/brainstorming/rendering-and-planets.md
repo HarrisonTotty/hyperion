@@ -1674,19 +1674,26 @@ Hillaire's tables, the two per-planet ones regenerated when the atmosphere chang
 per-view ones every frame, summed over every sun, with a ray march for views from orbit, where the
 sky-view table spends its resolution on empty space; terrain beyond the aerial-perspective volume's
 32 km reach (Hillaire 2020's, §5.4, and Bevy's; sebh's reference code reaches 128 km) also needs
-the march. Where the multiple-scattering term drifts from a converged reference, at Venus-class
-depths and for Titan-class haze, only that term is replaced, and not by another isotropic one: near
-a thick cloud's boundary the source's anisotropy is a 30–70% effect. Its replacement depends on the
-view, a source-function table J_ms(h, μ₀, μ_v, m) in the first azimuthal modes, baked for that
-atmosphere with a converged solver (discrete ordinates, in `f64`, with a spherical Monte Carlo as
-the independent reference) and cached per world. Generated worlds cannot be baked at development
-time, so every bake runs at arrival, in workers. A cloud deck of optical depth above about 10
-splits the atmosphere in two: above it, Hillaire's tables run over the deck as a baked reflecting
+the march. Where the multiple-scattering term drifts from a converged reference, only that term
+is replaced, and not by another isotropic one: near a thick cloud's boundary the source's anisotropy
+is a 30–70% effect. Measured against the path tracer (plan R08, R08.T13), it drifts past the 5% from
+about an eighth of a vertical optical depth in clear gas, so already in an Earth-class sky under a
+low sun, as well as at Venus-class depths and for Titan-class haze; only tenuous airs keep the
+analytic term. Its replacement depends on the view, a source-function table J_ms(h, μ₀, μ_v, m) in
+the first azimuthal modes, baked for that atmosphere with a converged solver (discrete ordinates,
+in `f64`, with a spherical Monte Carlo as the independent reference) and cached per world.
+Generated worlds cannot be baked at development time, so every bake runs at arrival, in workers. A
+cloud deck of optical depth above about 10 splits the atmosphere in two: above it, Hillaire's tables
+run over the deck as a baked reflecting
 boundary; below it, a baked plane-parallel table of downwelling radiance by altitude, view angle and
 sun angle gives both the sky and the aerial perspective. Bruneton's iterated orders are not the
 fallback, since they diverge in exactly this regime. Every baked table is validated against a
 path-traced reference, to 5% in radiance wherever in the view a difference could be seen, before
-Venus- and Titan-class atmospheres ship ([open question 3](#open-questions)).
+the atmospheres it replaces are presented as computed, Earth-class ones among them
+([open question 3](#open-questions)). _Amended 2026-10-27 by a decision agent (owner's delegation;
+`decision-r08-t13c2-classes.md` §7, which main judged not an owner-level change): where the term
+drifts is R08.T13's measurement in place of a prediction from the literature, and the rule, the 5%
+standard and the bake are unchanged._
 
 Hillaire's tables assume a sphere, and a fast-spinning giant is far from one. On an oblate body
 every lookup takes the height above the spheroid scaled by the local normal gravity,
