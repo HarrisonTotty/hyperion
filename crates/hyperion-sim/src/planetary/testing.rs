@@ -342,10 +342,13 @@ impl Error for SampleContextsError {
 ///   `SmallBodyRules::Batch` through `with_small_body_rules`, which a system reads as it is
 ///   generated (its `RecordRules`): every planet's, member's and moon's taxonomic class, not
 ///   modelled where the record's modifiers are, which the air's sections' hold (`AirRules`, set
-///   through `PlanetarySystem::with_record_rules` alone) keeps off the record.
+///   through `PlanetarySystem::with_record_rules` alone) keeps off the record;
 /// - the tenuous air's, `TENUOUS_VERSION` (P14.T53.c), at `TenuousRules::Tenuous` through
 ///   `with_tenuous`: the ice-held nitrogen and argon at their ice's own temperature, the `Tenuous`
-///   state above its floor, and no ocean under a `Snowball`'s ice in its liquids.
+///   state above its floor, and no ocean under a `Snowball`'s ice in its liquids;
+/// - the ocean's, `OCEAN_VERSION` (P14.T51.g.b), at `OceanRules::Solved` through
+///   `with_ocean_rules`: every body's subsurface ocean is the solve's, and a moon's ocean branch
+///   its spherical shell's (it supersedes the ocean floor's arm where both are in force).
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
@@ -357,7 +360,9 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::chem::tenuous::{TenuousRules, with_tenuous};
     use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, with_cold_trap_rules};
-    use crate::planetary::hooks::ocean::{OceanFloorRules, with_ocean_floor};
+    use crate::planetary::hooks::ocean::{
+        OceanFloorRules, OceanRules, with_ocean_floor, with_ocean_rules,
+    };
     use crate::planetary::system::moon_ice::{MoonBulkRules, with_moon_bulk};
     use crate::planetary::system::small_bodies::{SmallBodyRules, with_small_body_rules};
     use crate::substance::optics::{RowDarkeningRules, with_row_darkening};
@@ -373,7 +378,9 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
                             with_row_darkening(RowDarkeningRules::Darkened, || {
                                 with_ocean_floor(OceanFloorRules::Floored, || {
                                     with_small_body_rules(SmallBodyRules::Batch, || {
-                                        with_tenuous(TenuousRules::Tenuous, run)
+                                        with_tenuous(TenuousRules::Tenuous, || {
+                                            with_ocean_rules(OceanRules::Solved, run)
+                                        })
                                     })
                                 })
                             })
@@ -565,7 +572,7 @@ mod tests {
         use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
         use crate::planetary::derive::photometry::area_mix::RayleighFloorRules;
         use crate::planetary::hooks::cold_traps::ColdTrapRules;
-        use crate::planetary::hooks::ocean::OceanFloorRules;
+        use crate::planetary::hooks::ocean::{OceanFloorRules, OceanRules};
         use crate::planetary::system::moon_ice::MoonBulkRules;
         use crate::substance::optics::RowDarkeningRules;
         use crate::substance::{CompressedLiquidsRules, ReadDensitiesRules, with_read_densities};
@@ -581,6 +588,7 @@ mod tests {
                 RowDarkeningRules::in_force(),
                 OceanFloorRules::in_force(),
                 TenuousRules::in_force(),
+                OceanRules::in_force(),
             )
         };
         let at_24 = (
@@ -594,6 +602,7 @@ mod tests {
             RowDarkeningRules::Darkened,
             OceanFloorRules::Floored,
             TenuousRules::Tenuous,
+            OceanRules::Solved,
         );
         let at_23 = (
             EscapeRules::Held,
@@ -606,6 +615,7 @@ mod tests {
             RowDarkeningRules::Held,
             OceanFloorRules::Held,
             TenuousRules::Held,
+            OceanRules::Held,
         );
         assert_eq!(rules(), at_23, "the version's, outside the helper");
         assert_eq!(with_every_24_hold(rules), at_24);
@@ -630,6 +640,7 @@ mod tests {
                 RowDarkeningRules::Darkened,
                 OceanFloorRules::Floored,
                 TenuousRules::Tenuous,
+                OceanRules::Solved,
             ),
             "every 24 hold but the unlit mean's"
         );
@@ -646,6 +657,7 @@ mod tests {
                 RowDarkeningRules::Darkened,
                 OceanFloorRules::Floored,
                 TenuousRules::Tenuous,
+                OceanRules::Solved,
             ),
             "every 24 hold but the read densities'"
         );

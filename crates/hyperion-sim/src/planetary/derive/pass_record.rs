@@ -43,6 +43,7 @@ use crate::planetary::hooks::crust::{
 use crate::planetary::hooks::figures::cover::{self, SurfaceWaterInputs};
 use crate::planetary::hooks::figures::relief::Hypsometry;
 use crate::planetary::hooks::figures::{Crust, PartitionGround, PassFigures, TectonicRegime};
+use crate::planetary::hooks::ocean::OceanSolutes;
 use crate::planetary::hooks::surface::{OceanWeight, SeasonalSpin, ZonalInsolation};
 use crate::planetary::moons::tides::TidalBranch;
 use crate::units::{
@@ -74,6 +75,9 @@ pub(crate) struct PassBulk {
     /// The surface lag its derivation decided (P14.T56.g), which its record's surface material
     /// reads ([`surface_material`](super::surface_material)).
     pub(crate) lag: SurfaceLag,
+    /// What its ocean would dissolve (P14.T51.g.b), its air's bulk's, which a moon's tidal branch
+    /// reads at each pass from `OCEAN_VERSION`.
+    pub(crate) ocean_solutes: OceanSolutes,
 }
 
 /// What a body's spun climate reads of its record beyond each pass (P14.T54.a): its spin under its

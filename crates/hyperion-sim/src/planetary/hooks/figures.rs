@@ -1708,6 +1708,28 @@ impl SubsurfaceOcean {
         }
     }
 
+    /// P14.T51.g.b's ocean (`hooks::ocean`'s solve): under the shell `shell_thickness`,
+    /// `thickness` deep on `floor`, of the liquid `liquid` holding the solutes' mass fraction
+    /// `solute_mass_fraction`, at `base_temperature` throughout.
+    #[must_use]
+    pub(crate) const fn solved(
+        shell_thickness: Metres,
+        thickness: Metres,
+        floor: OceanFloor,
+        liquid: SubstanceId,
+        solute_mass_fraction: f64,
+        base_temperature: Kelvin,
+    ) -> Self {
+        Self {
+            shell_thickness,
+            thickness,
+            floor,
+            liquid,
+            solute_mass_fraction,
+            base_temperature,
+        }
+    }
+
     /// The ice shell over it, m.
     #[must_use]
     pub const fn shell_thickness(&self) -> Metres {
@@ -1726,13 +1748,17 @@ impl SubsurfaceOcean {
         self.floor
     }
 
-    /// Its liquid, a registry row: water, `H2O`, for every rule so far.
+    /// Its liquid, a registry row: water, `H2O`, under the flag; from P14.T51.g.b's bump the
+    /// solution row of the solute that depresses its freezing point most, `brine_nacl` or
+    /// `nh3_h2o`, where that solute's mass fraction is at least 10⁻³, and `H2O` otherwise.
     #[must_use]
     pub const fn liquid(&self) -> SubstanceId {
         self.liquid
     }
 
-    /// The mass fraction of solutes in its liquid, 0 to 1: none for every rule so far.
+    /// The mass fraction of solutes in its liquid, 0 to 1: none under the flag; from P14.T51.g.b's
+    /// bump its sodium chloride's and ammonia's together, each at most its eutectic's (0.233 and
+    /// 0.321), so at most 0.554.
     #[must_use]
     pub const fn solute_mass_fraction(&self) -> f64 {
         self.solute_mass_fraction
@@ -2342,6 +2368,9 @@ impl GlobalFigures {
     /// built ([`WaterIce::Covered`], lever (a)), or the conditions' cold area off the body's
     /// insolation table `table` ([`SurfaceConditions::cold_area_over`]), its record's, built once
     /// a body (lever (h)).
+    ///
+    /// The subsurface ocean is left as the inputs gave it, the tidal branch's, which the regime
+    /// read; [`with_subsurface_ocean`](Self::with_subsurface_ocean) publishes the record's.
     #[must_use]
     pub(crate) fn with_surface_under(
         self,
@@ -2647,6 +2676,18 @@ impl GlobalFigures {
     #[must_use]
     pub const fn subsurface_ocean(&self) -> &Subsurface {
         &self.subsurface_ocean
+    }
+
+    /// These figures publishing the ocean `ocean` under their surface (P14.T51.g.b's record,
+    /// `hooks::ocean`'s solve at the record's own surface temperature, heat flow and water), in
+    /// place of the one their inputs gave, which their regime read: a moon's tidal branch's, whose
+    /// shell alone makes an ice shell's regime (decision-p14-t51g Q1). Nothing else moves.
+    #[must_use]
+    pub(crate) fn with_subsurface_ocean(self, ocean: Subsurface) -> Self {
+        Self {
+            subsurface_ocean: ocean,
+            ..self
+        }
     }
 
     /// The surface age S, the time since the last global resurfacing, yr, in [0, age]

@@ -2,10 +2,12 @@
 //! (decision-p14-t56g §4, §5, §7 and §8 (d)), under the moon bulk's batch rules
 //! ([`MoonBulkRules::Batch`]) against P14.T56.f's arms alone ([`MoonBulkRules::BulkOnly`]).
 //!
-//! And P14.T51.g.a's census (decision-p14-t51g Q9, Q4): with every 24 hold in force, a regular
-//! moon's published ocean ends at the shallower of its rock and ice V's melting pressure at its
-//! 273 K base, or is not modelled beyond it, and no lagged moon takes the ocean branch
-//! ([`OceanCensus`]), over the golden systems, the 400 and LOOK72 by name.
+//! And P14.T51.g.a's census (decision-p14-t51g Q9, Q4): with every 24 hold in force but
+//! P14.T51.g.b's ocean (which supersedes the floor where both are; its own census is
+//! `system/ocean_tests.rs`), a regular moon's published ocean ends at the shallower of its rock
+//! and ice V's melting pressure at its 273 K base, or is not modelled beyond it, and no lagged
+//! moon takes the ocean branch ([`OceanCensus`]), over the golden systems, the 400 and LOOK72 by
+//! name.
 
 use std::collections::BTreeMap;
 
@@ -20,7 +22,9 @@ use crate::planetary::derive::photometry::PhaseTemplate;
 use crate::planetary::hooks::crust::{CrustLithology, LidCrust};
 use crate::planetary::hooks::figures::interior::ICE_SHELL_LIMIT;
 use crate::planetary::hooks::figures::{OceanFloor, Subsurface, TectonicRegime};
-use crate::planetary::hooks::ocean::{OceanFloorRules, base_liquidus, with_ocean_floor};
+use crate::planetary::hooks::ocean::{
+    OceanFloorRules, OceanRules, base_liquidus, with_ocean_floor, with_ocean_rules,
+};
 use crate::planetary::moons::regular::{
     ICE_CONDUCTIVITY_COEFFICIENT, ICE_MELTING_POINT, WATER_DENSITY, with_ocean_under_a_lag,
 };
@@ -607,6 +611,13 @@ fn the_0501_capture_s_surface_under_both_arms() {
 
 // P14.T51.g.a: the ocean's floor at its liquidus, and none under a lag (decision-p14-t51g Q9, Q4).
 
+/// `run`'s result under every 24 hold but the ocean's (`with_every_24_hold` with
+/// `OceanRules::Held`): P14.T51.g.b's solve supersedes the floor where both are in force, so this
+/// census reads P14.T51.g.a's floor itself, as 24 ships if P14.T51.g.b misses it.
+fn with_the_floor<R>(run: impl FnOnce() -> R) -> R {
+    with_every_24_hold(|| with_ocean_rules(OceanRules::Held, run))
+}
+
 /// `system`'s snapshot at [`RECORD_TIME`] under every 24 hold ([`with_every_24_hold`], the ocean
 /// floor's among them), the ocean floor's at `floor`, its context `ctx`; `None` for a system not
 /// yet formed then.
@@ -616,7 +627,7 @@ fn snapshot_at_24(
     floor: OceanFloorRules,
 ) -> Option<SystemSnapshot> {
     (ctx.age_at(RECORD_TIME).value() > 0.0).then(|| {
-        with_every_24_hold(|| with_ocean_floor(floor, || system.snapshot_at(ctx, RECORD_TIME)))
+        with_the_floor(|| with_ocean_floor(floor, || system.snapshot_at(ctx, RECORD_TIME)))
     })
 }
 
@@ -674,7 +685,7 @@ impl OceanCensus {
         let t = RECORD_TIME;
         let p_f = base_liquidus(ICE_MELTING_POINT).value();
         let km = |m: f64| m / 1e3;
-        with_every_24_hold(|| {
+        with_the_floor(|| {
             let epoch = Epoch::new(system, ctx, t).with_shades();
             let cosines = HourCosines::new();
             for body in system.bodies() {
@@ -947,9 +958,8 @@ fn without_its_ocean(record: &BodyRecord) -> String {
 /// members and the lagged moons moved off the branch are listed.
 #[test]
 fn a_golden_moon_s_ocean_ends_at_its_liquidus_and_none_under_a_lag() {
-    let floored = with_every_24_hold(golden_systems_afresh);
-    let held =
-        with_every_24_hold(|| with_ocean_floor(OceanFloorRules::Held, golden_systems_afresh));
+    let floored = with_the_floor(golden_systems_afresh);
+    let held = with_the_floor(|| with_ocean_floor(OceanFloorRules::Held, golden_systems_afresh));
     let mut census = OceanCensus::default();
     let (mut moved, mut oceans_moved) = (Vec::new(), 0_u32);
     for ((name, ctx, floored), (_, _, held)) in floored.into_iter().zip(held) {
@@ -987,7 +997,7 @@ fn a_golden_moon_s_ocean_ends_at_its_liquidus_and_none_under_a_lag() {
 fn a_moon_s_ocean_ends_at_its_liquidus_over_the_sample() {
     let mut census = OceanCensus::default();
     for ctx in sample() {
-        let system = with_every_24_hold(|| generate(SEED, ctx));
+        let system = with_the_floor(|| generate(SEED, ctx));
         if let Some(snapshot) = snapshot_at_24(&system, ctx, OceanFloorRules::Floored) {
             census.visit("sample", ctx, (&system, &snapshot));
         }
@@ -1055,7 +1065,7 @@ fn look72_s_oceans_end_at_their_liquidus() {
     for id in systems {
         let ctx = SystemContext::for_system(&galaxy, id.parse().expect("a system ID"))
             .expect("a system of LOOK72");
-        let system = with_every_24_hold(|| generate(galaxy.seed(), &ctx));
+        let system = with_the_floor(|| generate(galaxy.seed(), &ctx));
         if let Some(snapshot) = snapshot_at_24(&system, &ctx, OceanFloorRules::Floored) {
             census.visit("look72", &ctx, (&system, &snapshot));
         }

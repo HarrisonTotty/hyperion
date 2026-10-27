@@ -104,11 +104,11 @@ use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
 use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
-use crate::planetary::chem::partition::{Condensates, CrustWater, Partition};
+use crate::planetary::chem::partition::{CondensatePhase, Condensates, CrustWater, Partition};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{HostKind, SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, SurfaceMaterial, SurfaceState, VolatileDraws, has_surface_section,
+    Atmosphere, Gas, SurfaceMaterial, SurfaceState, VolatileDraws, has_surface_section,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
@@ -146,6 +146,7 @@ use crate::planetary::hooks::figures::{
     VolatileHistoryInputs, WaterIce, WindowAt, WindowEntryInputs, pass_figures, past_outgassing,
     relief, window_entry,
 };
+use crate::planetary::hooks::ocean::{OceanInputs, OceanRules, OceanSolutes, subsurface_ocean};
 use crate::planetary::hooks::surface::{
     ClimateInputs, HourCosines, SeasonalSpin, SeasonsFrom, SurfaceInputs, ZonalInsolation,
 };
@@ -4927,12 +4928,8 @@ impl MoonRecordOf for SatellitePasses<'_> {
             self.system
                 .moon_craters(self.frame.primary, moon, shape.ice_fraction, &orbit)?;
         let figure = PlanetarySystem::moon_figure_of_shape(moon, shape, &bulk.fractions, parent);
-        // A regular moon's ocean is its flag's; no rule publishes another moon's
-        // ([`SurfaceInterior::of_moon`]).
-        let subsurface = match moon.satellite.moon() {
-            SatelliteMoon::Regular(_) => tide.subsurface,
-            SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => Subsurface::NotComputed,
-        };
+        // The ocean its tidal branch keeps, as the record's figures read it ([`moon_ocean`]).
+        let subsurface = moon_ocean(moon, tide.subsurface);
         self.frame
             .figures_of(
                 (moon.satellite.mass(), figure, bulk.inventory_water),
@@ -5178,13 +5175,15 @@ struct SurfaceSky<'a> {
 
 /// What a body's global figures read at a time beyond its bulk section, its sky and its spin
 /// (P14.T24.b): its mass, its volatile inventory's water, the tide its parent raises in it, and
-/// its subsurface ocean as its rule computes it.
+/// its subsurface ocean as its rule computes it; with what its ocean would dissolve, which the
+/// record's own ocean reads (P14.T51.g.b).
 #[derive(Debug, Clone, Copy)]
 struct SurfaceInterior {
     mass: EarthMasses,
     inventory_water: Kilograms,
     tidal_heat_flow: WattsPerSquareMetre,
     subsurface_ocean: Subsurface,
+    ocean_solutes: OceanSolutes,
 }
 
 impl SurfaceSky<'_> {
@@ -5229,27 +5228,90 @@ impl SurfaceInterior {
             inventory_water: derived.inventory().water(),
             tidal_heat_flow: WattsPerSquareMetre::new(0.0),
             subsurface_ocean: Subsurface::NotComputed,
+            ocean_solutes: derived.ocean_solutes(),
         }
     }
 
     /// The interior of the moon `moon`, derived as `derived`: its tide is its derivation's,
-    /// P14.T17.b's (science-p14-t24b-laws §1.1's `q_tid`) at its own tides (P14.T56.d), and a
-    /// regular moon's ocean is its flag's ([`DerivedMoon::subsurface`]: its branch's at its whole
-    /// heat flow, decision-p14-moons §F-ocean F3); no rule publishes another moon's ocean, though
-    /// its tides read one.
+    /// P14.T17.b's (science-p14-t24b-laws §1.1's `q_tid`) at its own tides (P14.T56.d), and the
+    /// ocean its figures read is its tidal branch's ([`moon_ocean`]: a regular moon's flag's below
+    /// P14.T51.g.b's bump, every moon's branch's from it; decision-p14-moons §F-ocean F3).
     #[must_use]
     fn of_moon(moon: &MoonPart, derived: &DerivedMoon) -> Self {
-        let subsurface_ocean = match moon.satellite.moon() {
-            SatelliteMoon::Regular(_) => derived.subsurface(),
-            SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => Subsurface::NotComputed,
-        };
         Self {
             mass: moon.satellite.mass(),
             inventory_water: derived.inventory().water(),
             tidal_heat_flow: derived.heat_flux(),
-            subsurface_ocean,
+            subsurface_ocean: moon_ocean(moon, derived.subsurface()),
+            ocean_solutes: derived.ocean_solutes(),
         }
     }
+}
+
+/// The ocean a moon `moon`'s figures read under its surface, from its tidal branch's `branch` (its
+/// derivation's at the pass, [`DerivedMoon::subsurface`]): below P14.T51.g.b's bump
+/// (`OCEAN_VERSION`) a regular moon's, its flag's, and no rule's for another moon, though its
+/// tides read one; from it every moon's, the solve's at its branch's root, whose shell alone may
+/// make its regime an ice shell's (decision-p14-t51g Q1: captures and giant-impact moons too, and
+/// never a lagged moon, which takes no ocean branch). The record publishes its own ocean in its
+/// place ([`record_subsurface_ocean`]).
+#[must_use]
+fn moon_ocean(moon: &MoonPart, branch: Subsurface) -> Subsurface {
+    match (OceanRules::in_force(), moon.satellite.moon()) {
+        (
+            OceanRules::Solved,
+            SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_),
+        )
+        | (OceanRules::Held, SatelliteMoon::Regular(_)) => branch,
+        (OceanRules::Held, SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_)) => {
+            Subsurface::NotComputed
+        }
+    }
+}
+
+/// The record's subsurface ocean of the body `case` describes (P14.T51.g.b; `hooks::ocean`'s
+/// solve), from the surface it publishes: its bulk section's radius and its mass; its water, the
+/// larger of its bulk section's fraction (a moon's own) and its condensates' water, solid and
+/// liquid, over its mass (the larger, not the sum, so that an ice crust's water is not counted
+/// twice); its conditions' mean surface temperature, the emission mean (a thin-shell bias,
+/// recorded); its figures' heat flow, a moon's tidal heat with it, all of it crossing the shell's
+/// base; and its air's bulk's solutes. None on a body P14.T56.g lags, whose heated shell holds no
+/// ice (decision-p14-t56g §1).
+#[must_use]
+fn record_subsurface_ocean(
+    case: &SurfaceCase<'_>,
+    figures: &GlobalFigures,
+    conditions: &SurfaceConditions,
+    condensates: &Condensates,
+) -> Subsurface {
+    if case.sky.lag == SurfaceLag::Lagged {
+        return Subsurface::NoOcean;
+    }
+    let radius = Metres::from(case.bulk.radius());
+    let mass = Kilograms::from(case.interior.mass);
+    let r = radius.value();
+    let water = Gas::Water.substance();
+    let column = condensates
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.substance() == water
+                && matches!(
+                    entry.phase(),
+                    CondensatePhase::Solid | CondensatePhase::Liquid
+                )
+        })
+        .fold(0.0, |sum, entry| sum + entry.reservoir().value());
+    let condensed = column * 4.0 * core::f64::consts::PI * r * r / mass.value();
+    let bulk = case.bulk.fractions().water();
+    subsurface_ocean(&OceanInputs {
+        radius,
+        mass,
+        water_fraction: if condensed > bulk { condensed } else { bulk },
+        surface_temperature: conditions.mean_surface_temperature(),
+        heat_flow: figures.heat_flow(),
+        solutes: case.interior.ocean_solutes,
+    })
 }
 
 /// What a body's surface conditions and global figures read of the time they are asked at
@@ -5596,6 +5658,14 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     });
     // T24.b's ice is the partition's cover's, read off the profile it built (lever (a)).
     let figures = figures.with_surface_under(&conditions, history, Some(&published), table, ice);
+    // P14.T51.g.b's ocean, the record's own, in place of the tidal branch's its regime read.
+    let figures = match OceanRules::in_force() {
+        OceanRules::Held => figures,
+        OceanRules::Solved => {
+            let ocean = record_subsurface_ocean(case, &figures, &conditions, &published);
+            figures.with_subsurface_ocean(ocean)
+        }
+    };
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
@@ -6369,6 +6439,8 @@ impl<'c> Epoch<'c> {
 mod air;
 mod modifiers;
 pub(crate) mod moon_ice;
+#[cfg(test)]
+mod ocean_tests;
 pub(crate) mod small_bodies;
 #[cfg(test)]
 pub(crate) mod tests;

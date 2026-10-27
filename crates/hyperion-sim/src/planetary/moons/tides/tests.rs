@@ -1013,3 +1013,301 @@ fn the_measured_moons_tides_are_pinned() {
     }
     golden!("planetary/moon_tides", w.as_str());
 }
+
+// P14.T51.g.b: T56.d's ocean branch on the solve's spherical shell (decision-p14-t51g's T56.d
+// branch), its moons at their measured elements with their chlorine at CI chondrites' per unit
+// rock and, beyond ammonia hydrate's line, their ice's ammonia at `ACCRETED_AMMONIA`.
+
+use crate::planetary::chem::inventory::CI_CHLORINE_PER_MASS;
+use crate::planetary::hooks::ocean::{
+    ACCRETED_AMMONIA, OceanInputs, has_ocean, implausibility, with_ocean_rules,
+};
+use crate::substance::Element;
+
+impl Measured {
+    /// Its solutes: its rock's chlorine at CI chondrites' as sodium chloride, and where `ammonia`
+    /// its ice's ammonia.
+    fn solutes(&self, ammonia: bool) -> OceanSolutes {
+        let cl = Element::Cl.standard_atomic_weight_g_per_mol();
+        let salt = Element::Na.standard_atomic_weight_g_per_mol() + cl;
+        let chlorine = CI_CHLORINE_PER_MASS * (1.0 - self.water) * self.mass().value();
+        OceanSolutes {
+            sodium_chloride: Kilograms::new(chlorine * salt / cl),
+            ammonia_per_water: if ammonia { ACCRETED_AMMONIA } else { 0.0 },
+        }
+    }
+
+    /// Its tides and its branch's ocean under P14.T51.g.b's rules.
+    fn solved(&self, ammonia: bool) -> (MoonTides, Subsurface) {
+        let (tides, ocean) = with_ocean_rules(OceanRules::Solved, || {
+            MoonTides::with_ocean(&self.inputs(), &self.solutes(ammonia))
+        });
+        (tides, ocean.expect("the solve keeps the branch's ocean"))
+    }
+
+    /// The ocean inputs its branch read at the heat flow `flux`.
+    fn ocean_inputs(&self, ammonia: bool, flux: WattsPerSquareMetre) -> OceanInputs {
+        OceanInputs {
+            radius: self.radius(),
+            mass: self.mass(),
+            water_fraction: self.water,
+            surface_temperature: Kelvin::new(self.surface),
+            heat_flow: flux,
+            solutes: self.solutes(ammonia),
+        }
+    }
+}
+
+/// The shell's profile is [`shell_modulus`]'s mean when read at 273 K from a top above 30 K, to
+/// 0.5% (its nodes run to 273.16 K, and are read in proportion); its nodes are the quadrature's.
+#[test]
+fn the_profile_reads_the_shell_s_modulus_to_its_base() {
+    assert_eq!(usize::try_from(SHELL_QUADRATURE_NODES), Ok(PROFILE_NODES));
+    for name in ["Europa", "Ganymede", "Titan", "Enceladus", "Mimas"] {
+        let body = moon(name);
+        let surface = Kelvin::new(body.surface);
+        let n = body.mean_motion();
+        let held = shell_modulus(surface, n);
+        let profile = ShellProfile::new(surface, n, Kelvin::new(273.16)).to(Kelvin::new(273.0));
+        assert!(
+            (profile.storage / held.storage - 1.0).abs() < 5e-3,
+            "{name}: {profile:?}"
+        );
+        assert!(
+            (profile.loss / held.loss - 1.0).abs() < 5e-3,
+            "{name}: {profile:?}"
+        );
+        // A colder base averages over a stiffer, less lossy shell.
+        let cold = ShellProfile::new(surface, n, Kelvin::new(273.16)).to(Kelvin::new(240.0));
+        assert!(
+            cold.storage > profile.storage && cold.loss < profile.loss,
+            "{name}"
+        );
+    }
+}
+
+/// Europa at its measured elements, with its brine: on the ocean branch under the spherical shell,
+/// its k₂ 0.22–0.24, its heat flow 15–35 mW m⁻², and its branch's shell 19–39 km (the design's
+/// estimates), and, without solutes, within 10% of version 23's planar root: d ÷ R differs, and so
+/// does the base, at ice Ih's melting point at its pressure (some 271 K) rather than 273 K, whose
+/// warmest, lossiest ice the planar shell held (7.2% under it, recorded).
+#[test]
+fn europa_s_branch_under_the_spherical_shell() {
+    let europa = moon("Europa");
+    let (tides, ocean) = europa.solved(false);
+    assert_eq!(tides.branch(), TidalBranch::Ocean);
+    let Subsurface::Ocean(ocean) = ocean else {
+        panic!("Europa's branch keeps an ocean: {ocean:?}");
+    };
+    let shell = ocean.shell_thickness().value() / 1e3;
+    let flux = tides.heat_flow().value() * 1e3;
+    eprintln!(
+        "Europa on its branch: k₂ {:.4}, Q {:.1}, F {flux:.2} mW m⁻², shell {shell:.1} km, ocean \
+         {:.1} km on {:?} (version 23: k₂ {:.4}, F {:.2})",
+        tides.k2(),
+        tides.q(),
+        ocean.thickness().value() / 1e3,
+        ocean.floor(),
+        europa.tides().k2(),
+        europa.tides().heat_flow().value() * 1e3
+    );
+    assert!((0.22..=0.24).contains(&tides.k2()), "{}", tides.k2());
+    assert!((15.0..=35.0).contains(&flux), "{flux}");
+    assert!((19.0..=39.0).contains(&shell), "{shell} km");
+    let fresh = with_ocean_rules(OceanRules::Solved, || {
+        MoonTides::with_ocean(&europa.inputs(), &OceanSolutes::FRESH).0
+    });
+    let planar = europa.tides().heat_flow().value();
+    assert!(
+        (fresh.heat_flow().value() / planar - 1.0).abs() < 0.10,
+        "{fresh:?} against {planar}"
+    );
+}
+
+/// Titan on T56.d's ocean branch under 1,000 kg m⁻³ (decision-p14-t51g Q3): its k₂ is stated,
+/// about 0.41, against 0.616 ± 0.067 (Durante et al. 2019, 1σ) and 0.589 ± 0.150 (Iess et al.
+/// 2012, 2σ), about 3σ low: a miss recorded for P14.T55.k with T55.j.
+#[test]
+fn titan_s_love_number_on_its_ocean_is_stated() {
+    let titan = moon("Titan");
+    let (tides, ocean) = titan.solved(true);
+    assert_eq!(tides.branch(), TidalBranch::Ocean);
+    eprintln!(
+        "Titan on its branch: k₂ {:.4} (Durante et al. 2019: 0.616 ± 0.067), Q {:.1}, F {:.3} mW \
+         m⁻², {ocean:?}",
+        tides.k2(),
+        tides.q(),
+        tides.heat_flow().value() * 1e3
+    );
+    assert!((0.35..=0.47).contains(&tides.k2()), "{}", tides.k2());
+}
+
+/// A moon's ocean branch reads `has_ocean` at its whole heat flow, with its own water and solutes:
+/// on the branch the presence test holds at `F_ocean` and its branch's ocean is an ocean, absent
+/// (an ice-II base), or none under a metre; a dry moon takes no ocean branch.
+#[test]
+fn the_ocean_branch_reads_has_ocean_at_its_whole_heat_flow() {
+    for (name, ammonia) in [
+        ("Europa", false),
+        ("Ganymede", false),
+        ("Callisto", true),
+        ("Titan", true),
+        ("Enceladus", true),
+        ("Dione", true),
+        ("Rhea", true),
+        ("Iapetus", true),
+        ("Mimas", true),
+        ("Io", false),
+        ("Moon", false),
+    ] {
+        let body = moon(name);
+        let (tides, ocean) = body.solved(ammonia);
+        let on = tides.branch() == TidalBranch::Ocean;
+        eprintln!(
+            "{name}: {:?}, k₂ {:.4}, F {:.3} mW m⁻², {ocean:?}",
+            tides.branch(),
+            tides.k2(),
+            tides.heat_flow().value() * 1e3
+        );
+        if on {
+            let inputs = body.ocean_inputs(ammonia, tides.heat_flow());
+            assert!(has_ocean(&inputs), "{name}");
+            if let Subsurface::Ocean(published) = ocean {
+                assert_eq!(implausibility(&inputs, &published), None, "{name}");
+            }
+        } else {
+            assert_eq!(ocean, Subsurface::NoOcean, "{name}");
+        }
+        let dry = with_ocean_rules(OceanRules::Solved, || {
+            MoonTides::with_ocean(
+                &TideInputs {
+                    water: 0.0,
+                    ..body.inputs()
+                },
+                &body.solutes(ammonia),
+            )
+        });
+        assert_ne!(dry.0.branch(), TidalBranch::Ocean, "{name}");
+    }
+}
+
+/// The branch takes its largest stable root: over 10⁴ random moons, on a 256-point grid geometric
+/// in 273.16 K − T* over [T*₀, 273.16 K], the excess F(T*) − `F_nt` − Φ Im k₂ is positive at every
+/// point of a larger heat flow than the root the branch took; the moons whose excess changes sign
+/// more than once, a stiff shell's tidal heat peaking at an intermediate depth, are counted.
+#[test]
+fn the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
+    let mut state = 0x0051_0060_b000_0003_u64;
+    let mut uniform = || {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        f64::from(u32::try_from(z >> 32).unwrap()) / 4_294_967_296.0
+    };
+    let (mut oceans, mut multiple, mut missed) = (0_u32, 0_u32, Vec::new());
+    for index in 0..10_000 {
+        let base = moon(
+            [
+                "Europa",
+                "Ganymede",
+                "Callisto",
+                "Titan",
+                "Enceladus",
+                "Rhea",
+            ][index % 6],
+        );
+        let scale = |u: f64, lo: f64, hi: f64| lo * crate::math::powf(hi / lo, u);
+        let body = Measured {
+            gm: base.gm * scale(uniform(), 0.1, 10.0),
+            a_km: base.a_km * scale(uniform(), 0.5, 2.0),
+            e: scale(uniform(), 1e-4, 0.05),
+            surface: 30.0 + 200.0 * uniform(),
+            water: 0.02 + 0.5 * uniform(),
+            ..base
+        };
+        let inputs = body.inputs();
+        let solutes = body.solutes(uniform() < 0.5);
+        let (density, gravity) = MoonTides::bulk(&inputs);
+        let Some(branch) = ShellBranch::of(&inputs, &solutes, density, gravity) else {
+            continue;
+        };
+        let (lo, hi) = (branch.water.deepest().value(), branch.water.top().value());
+        let states: Vec<BranchState> = (0..=256)
+            .map(|k| {
+                let t = hi - (hi - lo) * crate::math::exp10(-6.0 * f64::from(256 - k) / 256.0);
+                branch.state(t)
+            })
+            .collect();
+        let changes = states
+            .windows(2)
+            .filter(|pair| (pair[0].excess_w_per_m2 > 0.0) != (pair[1].excess_w_per_m2 > 0.0))
+            .count();
+        multiple += u32::from(changes > 1);
+        let solved = with_ocean_rules(OceanRules::Solved, || {
+            MoonTides::with_ocean(&inputs, &solutes).0
+        });
+        if solved.branch() != TidalBranch::Ocean {
+            continue;
+        }
+        oceans += 1;
+        let root = solved.heat_flow().value();
+        // Above the root (a thinner shell, a larger heat flow) the shell conducts more than the
+        // moon makes, at every point of the fine grid.
+        if let Some(state) = states.iter().find(|state| {
+            state.base.heat_flow.value() > root * (1.0 + 1e-6) && state.excess_w_per_m2 <= 0.0
+        }) {
+            missed.push((index, body.name, state.base.melting_point, root));
+        }
+    }
+    eprintln!(
+        "10⁴ moons: {oceans} on the ocean branch, {multiple} whose excess changes sign more than \
+         once on the grid"
+    );
+    assert!(oceans > 1_000, "{oceans}");
+    assert_eq!(
+        missed,
+        Vec::new(),
+        "moons with a larger stable root than the branch's"
+    );
+}
+
+/// The measured moons' tides on P14.T51.g.b's spherical shell, pinned to the bit, under the
+/// solve's rules ahead of their bump (the determinism review: no golden prints a solved ocean
+/// until the bump re-blesses): each moon's branch, k₂, Q, loss and whole heat flow, and its
+/// branch's ocean's shell, depth, floor, liquid, solutes and base temperature, so that a moved
+/// curve, halving count, scan or profile moves a line on either target.
+#[test]
+fn the_measured_moons_tides_on_their_shell_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    for moon in MOONS.iter().chain(core::iter::once(&TRITON)) {
+        let ammonia = !matches!(moon.name, "Europa" | "Ganymede" | "Io" | "Moon");
+        let (tides, ocean) = moon.solved(ammonia);
+        let name = moon.name.to_lowercase();
+        w.line(&format!("{name}_branch = {:?}", tides.branch()));
+        w.f64(&format!("{name}_k2"), tides.k2());
+        w.f64(&format!("{name}_q"), tides.q());
+        w.f64(&format!("{name}_loss"), tides.loss());
+        w.f64(&format!("{name}_heat_flow"), tides.heat_flow().value());
+        match ocean {
+            Subsurface::Ocean(ocean) => {
+                w.line(&format!(
+                    "{name}_ocean = {:?} {}",
+                    ocean.floor(),
+                    ocean.liquid().substance().key().as_str()
+                ));
+                w.f64(&format!("{name}_shell"), ocean.shell_thickness().value());
+                w.f64(&format!("{name}_thickness"), ocean.thickness().value());
+                w.f64(&format!("{name}_solutes"), ocean.solute_mass_fraction());
+                w.f64(&format!("{name}_base"), ocean.base_temperature().value());
+            }
+            other => w.line(&format!("{name}_ocean = {other:?}")),
+        }
+    }
+    golden!("planetary/moon_tides_on_their_shell", w.as_str());
+}

@@ -145,6 +145,7 @@ use crate::planetary::hooks::crust::{
     AmmoniaIce, CrustBasis, CrustBasisInputs, CrustLid, DeriveCrustError,
 };
 use crate::planetary::hooks::figures::cover::UNDER_ICE_MELTING_POINT;
+use crate::planetary::hooks::ocean::OceanSolutes;
 use crate::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, OceanWeight};
 use crate::planetary::params::{
     GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
@@ -814,6 +815,7 @@ pub struct DerivedBody {
     crust_lid: Option<CrustLid>,
     regolith_albedo: f64,
     surface_lag: SurfaceLag,
+    ocean_solutes: OceanSolutes,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -996,6 +998,14 @@ impl DerivedBody {
     #[must_use]
     pub(crate) const fn surface_lag(&self) -> SurfaceLag {
         self.surface_lag
+    }
+
+    /// What the body's ocean would dissolve (P14.T51.g.b; [`OceanSolutes`]), its air's bulk's,
+    /// built once before its passes: its record's subsurface ocean reads them, as a moon's tidal
+    /// branch did at its passes. No output reads them below `OCEAN_VERSION`.
+    #[must_use]
+    pub(crate) const fn ocean_solutes(&self) -> OceanSolutes {
+        self.ocean_solutes
     }
 
     /// The body's atmosphere and surface at the time (P14.T13).
@@ -1459,6 +1469,7 @@ pub(crate) fn derive_body_driven(
         fractions,
         inventory_water: bulk.elements.volatiles().water(),
         lag: bulk.lag,
+        ocean_solutes: bulk.ocean_solutes,
     };
     let history = envelope_history(&bulk, &escape);
     let passes = PassBody {
@@ -1510,6 +1521,7 @@ pub(crate) fn derive_body_driven(
         crust_lid: passes.crust_lid,
         regolith_albedo,
         surface_lag: bulk.lag,
+        ocean_solutes: bulk.ocean_solutes,
         internal_luminosity,
         radius,
         density,
@@ -2746,6 +2758,10 @@ struct AirBulk {
     /// `nitrogen_boosted` at the formation temperature its volatiles formed at, the one its
     /// nitrogen's boost reads.
     ammonia: AmmoniaIce,
+    /// What its ocean would dissolve (P14.T51.g.b): its element inventory's whole chlorine as
+    /// sodium chloride, and its ice's ammonia where its nitrogen took the icy boost (beyond the
+    /// snow line, with [`ammonia`](Self::ammonia) carried), at its nitrogen rank's multiple.
+    ocean_solutes: OceanSolutes,
 }
 
 impl PlacedBody {
@@ -2796,6 +2812,17 @@ impl PlacedBody {
         } else {
             AmmoniaIce::Absent
         };
+        // The ice's ammonia is the nitrogen's icy boost's, which only a body formed beyond the
+        // snow line takes (`volatile_inventory`).
+        let icy_ammonia = match side {
+            SnowLineSide::Beyond => ammonia,
+            SnowLineSide::Inside => AmmoniaIce::Absent,
+        };
+        let ocean_solutes = OceanSolutes::of_body(
+            elements.total(crate::substance::Element::Cl),
+            icy_ammonia,
+            self.volatiles.nitrogen,
+        );
         AirBulk {
             mass: Kilograms::from(mass),
             radius,
@@ -2804,6 +2831,7 @@ impl PlacedBody {
             side,
             elements,
             ammonia,
+            ocean_solutes,
         }
     }
 
@@ -4527,6 +4555,65 @@ mod tests {
             }
         }
         assert_eq!(checked, 30);
+    }
+
+    /// P14.T51.g.b: a derived body's ocean solutes are its element inventory's whole chlorine as
+    /// sodium chloride, and its ice's ammonia, `ACCRETED_AMMONIA` times its nitrogen rank's
+    /// multiple, only where its volatiles formed beyond the snow line at or below ammonia
+    /// hydrate's temperature (the nitrogen's icy boost): none inside the snow line or between it
+    /// and the ammonia line, some beyond both, and some for a body whose volatiles formed in a far
+    /// zone, at the median and the extreme ranks.
+    #[test]
+    fn a_body_s_ocean_solutes_are_its_chlorine_and_its_ice_s_ammonia() {
+        use crate::planetary::derive::atmosphere::nitrogen_boosted;
+        use crate::planetary::hooks::ocean::{ACCRETED_AMMONIA, nitrogen_multiple};
+        use crate::substance::Element;
+        let disc = solar_disc();
+        let line = disc.snow_line();
+        let r = |u: f64| UnitUniform::new(u).unwrap();
+        let ranked = VolatileDraws {
+            nitrogen: r(0.97),
+            chlorine: r(0.03),
+            ..VolatileDraws::MEDIAN
+        };
+        let far = FormationZone::new(Metres::new(9.58 * METRES_PER_AU), line).unwrap();
+        let cl = Element::Cl.standard_atomic_weight_g_per_mol();
+        let salt = Element::Na.standard_atomic_weight_g_per_mol() + cl;
+        for (kg, a_au, at_home) in [
+            (EARTH_MASS_KG, 1.0, Some(false)),
+            (EARTH_MASS_KG, 3.0, None),
+            (1.3452e23, 6.0, None),
+            (1.3452e23, 9.58, Some(true)),
+        ] {
+            for draws in [VolatileDraws::MEDIAN, ranked] {
+                let own = placed(kg, a_au, 0.0, 0.5).with_volatiles(draws);
+                for (body, zone) in [(own, None), (own.with_volatiles_from(far), Some(far))] {
+                    let derived = derive(&body, &disc).unwrap();
+                    let (side, distance, snow_line) = zone
+                        .map_or((derived.formed(), body.formation_distance(), line), |z| {
+                            (z.side(), z.distance(), z.snow_line())
+                        });
+                    let icy = side == SnowLineSide::Beyond
+                        && nitrogen_boosted(formation_temperature(distance, snow_line));
+                    let solutes = derived.ocean_solutes();
+                    let chlorine = derived.element_inventory().total(Element::Cl).value();
+                    assert_same_bits(solutes.sodium_chloride.value(), chlorine * salt / cl);
+                    let ammonia = if icy {
+                        ACCRETED_AMMONIA * nitrogen_multiple(draws.nitrogen)
+                    } else {
+                        0.0
+                    };
+                    assert_same_bits(solutes.ammonia_per_water, ammonia);
+                    // Inside the snow line at 1 au, beyond both lines at 9.58 au and in the far
+                    // zone: none, then some.
+                    let expected = if zone.is_some() { Some(true) } else { at_home };
+                    if let Some(expected) = expected {
+                        assert_eq!(icy, expected, "{a_au} au, {zone:?}");
+                        assert_eq!(solutes.ammonia_per_water > 0.0, expected, "{a_au} au");
+                    }
+                }
+            }
+        }
     }
 
     /// P14.T56.c's follow-up: a body given its own bulk ([`PlacedBody::with_bulk`]) has its

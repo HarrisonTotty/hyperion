@@ -1855,10 +1855,13 @@ mod tests {
 
     /// P14.T35.e: the members of later tasks are absent, as the record holds them, with
     /// P14.T35.f's `silicate_vapour`, which the record does not hold, and a subsurface ocean is
-    /// computed for a regular moon alone, an object or `null`, until P14.T51.g.b. From P14.T51.g.a's
-    /// bump (23 → 24) a regular moon's is absent where its record's is not computed, its shell's
-    /// base lying at or beyond ice V's melting pressure (liquid under high-pressure ice, P14.T55.k's),
-    /// and none is below it; an ocean rests on rock or, from that bump, on ice V. The condensates
+    /// computed for a regular moon alone, an object or `null`, until P14.T51.g.b's bump, and for
+    /// every solid surface from it. From P14.T51.g.a's bump (23 → 24) a regular moon's is absent
+    /// where its record's is not computed, its shell's base lying at or beyond ice V's melting
+    /// pressure (liquid under high-pressure ice, P14.T55.k's), and none is below it; from
+    /// P14.T51.g.b's, any body's is absent where its column keeps liquid only under high-pressure
+    /// ice or its base lies in ice II. An ocean rests on rock or, from those bumps, on ice III or
+    /// ice V, never on ice VI or VII while it is at most 273.16 K. The condensates
     /// and the crust are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`,
     /// `every_solid_surface_sends_its_record_s_crust`). The vertical structure and the aerosol
     /// inventory are not modelled on every golden body's record and absent on the wire while the
@@ -1904,9 +1907,12 @@ mod tests {
                     origin: MoonOriginDto::Regular,
                 };
             let not_computed = matches!(sim.figures().subsurface_ocean(), Subsurface::NotComputed);
+            // From P14.T51.g.b's bump every solid surface's ocean is computed.
+            let every_body =
+                hyperion_sim::GENERATOR_VERSION >= hyperion_sim::GeneratorVersion::new(24);
             assert_eq!(
                 dto.subsurface_ocean.is_not_modelled(),
-                !regular || not_computed,
+                (!regular && !every_body) || not_computed,
                 "{}",
                 wire.id
             );
@@ -1917,7 +1923,10 @@ mod tests {
                 assert!(
                     ocean.thickness_m > 0.0
                         && ocean.shell_thickness_m >= 0.0
-                        && matches!(ocean.floor, OceanFloorDto::Rock | OceanFloorDto::IceV),
+                        && matches!(
+                            ocean.floor,
+                            OceanFloorDto::Rock | OceanFloorDto::IceIii | OceanFloorDto::IceV
+                        ),
                     "{}: {ocean:?}",
                     wire.id
                 );

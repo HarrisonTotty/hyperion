@@ -836,13 +836,16 @@ Order and parallelism:
       next bump, renumbering their hold: T51.f (after T51.a and R09.T7.d's
       `cold_trap::fraction`), behind a hold at 24, → T51.i, its fast path and field, behind the
       same hold (with R09.T7.k; decision-p14-t51-batch §1 and §6); T51.j, the oxidised surface,
-      pure (after T51.c and T51.d; §5); T51.d → T51.e → T51.g (one lane: T51.e and
-      T51.g both edit the record's surface; T51.e and T51.g after T54.a, T51.e also after
-      P14.T54.b.c, behind `SMALL_BODY_TYPES_VERSION`, and T51.g also after T56.d, T50.c and
-      T49.b, behind `OCEAN_VERSION`); T48.g (its own lane), at once, behind a hold at 24 in
-      `belts.rs` and `hooks/figures.rs`; T53.a (after T57.a) → T53.b (after its section ruling)
-      → T53.c (after T24.c); T53.d (after T24.c); and T31.a → T31.b → T31.c, whose goldens T54.b
-      pins.
+      pure (after T51.c and T51.d; §5); T51.d → T51.e → T51.g.b (one lane: T51.e and T51.g both
+      edit `moons/`; T51.e and T51.g after T54.a, T51.e also after P14.T54.b.c, behind
+      `SMALL_BODY_TYPES_VERSION`, T51.g also after T56.d, T50.c and T49.b, and T51.g.b behind
+      `OCEAN_VERSION`); T48.g (its own lane), at once, behind a hold at 24 in `belts.rs` and
+      `hooks/figures.rs`; T53.a (after T57.a) → T53.b (after its section ruling) → T53.c (after
+      T24.c); T53.d (after T24.c); and T31.a → T31.b → T31.c, whose goldens T54.b pins.
+    - P14.T51.g.a, the ocean's floor at its liquidus and none under a lag, is a MUST-FIX member,
+      not a rider. In the same lane between T51.e and T51.g.b, behind `OCEAN_FLOOR_VERSION` (its
+      lag clause behind `MOON_BULK_VERSION`), it boards until P14.T54.b.l's blessing message
+      (decision-p14-t51g).
     - Then T54.b, after 23 has landed, then T33.c. If T52.c still cannot start when every other
       member of 24 has landed, T54.b leaves without T52.c, T24.c with T24.g, T24.d with T52.d,
       T53.c and T53.d, whose members stay `NotModelled`, and those tasks take the next planetary
@@ -7119,7 +7122,7 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
       The shell's thickness is also the ocean's top depth.
     - `floor` is an `OceanFloor`: `Rock`, `IceIii`, `IceV`, `IceVi` or `IceVii`. `IceVi` and
       `IceVii` are unreachable while the ocean is at most 273.16 K, below the V–VI–liquid point
-      (273.31 K, 632.4 MPa), so every floor lies at or above ice V's 629.34 MPa at 273.16 K. They
+      (273.31 K, 632.4 MPa), so every floor lies at or under ice V's 629.34 MPa at 273.16 K. They
       wait for P14.T55.k's warm oceans under high-pressure ice.
     - `liquid` is `brine_nacl` or `nh3_h2o`, the solute whose own depression is larger, where its
       fraction is at least 10⁻³ (fresh water's 1,000 mg L⁻¹), and `H2O` otherwise.
@@ -7128,8 +7131,13 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - **Not modelled (absent):**
     - where the test fails and the column reaches 208.566 MPa;
     - where the root's base lies in ice II, P_b > 14 MPa + 0.827 MPa K⁻¹ × T_b (Hammond et al.
-      2016, eq. 5).
-    - Both are P14.T55.k's.
+      2016, eq. 5);
+    - where the ocean's floor, at its own pressure and T_b, lies outside the field of the ice it
+      names: in ice II's (a cold solution meets ice II, whose liquidus is not modelled), an
+      `IceIii` floor in ice V's, or any floor in ice VI's, by Bridgman 1912's triple points and
+      R14-08's (decision-p14-t51gb-ice-ii). A column that only crosses ice II's field, its floor
+      beyond it, is published.
+    - Each is P14.T55.k's.
   - **T56.d's branch at this bump:** an icy moon takes the ocean branch iff `has_ocean` holds at
     F_ocean, its whole heat flow with the ocean branch's tidal heat (decision-p14-moons §F-ocean
     F3), with its own water and solutes.
@@ -7169,12 +7177,15 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     - **Pluto** (1,188.3 km, 1.303 × 10²² kg, 0.32, 40 K): absent at 2.45 mW m⁻²; at 3.09 an
       ocean 15–35 km thick under 270–300 km, `Rock`, `nh3_h2o`; at 3.5 one of 35–55 km under
       250–280 km (Hammond et al. 2016's warm state, 50 km under 250 km); its threshold, the
-      least heat flow at which it publishes an ocean, 2.84 ± 0.10 mW m⁻², stated with the edge
+      least heat flow at which it publishes an ocean, 3.03 ± 0.10 mW m⁻², where its rock floor
+      leaves ice II's field, stated with the edge
       that ends it.
-    - **Triton** (1,353.4 km, 2.139 × 10²² kg, 0.28, 38 K): absent at 3.28 mW m⁻²; at 4.03 an
-      ocean under 225–260 km.
-    - **At T24.b's heat flow:** the table's Pluto and Triton, at their rock's lag (1.26 and 1.23
-      times production), hold oceans 15–35 km thick (decision-p14-moons §F-ocean F1).
+    - **Triton** (1,353.4 km, 2.139 × 10²² kg, 0.28, 38 K): absent at 3.28 and at 4.03 mW m⁻² (at
+      4.03 its 236.0 K ammonia water reaches 223.8 MPa, inside ice II's field); its threshold, the
+      least heat flow at which it publishes an ocean, stated with the edge that ends it.
+    - **At T24.b's heat flow:** the table's Pluto, at its rock's lag, holds an ocean 15–35 km
+      thick; Triton's member is absent, its floor in ice II's field (decision-p14-moons §F-ocean
+      F1; decision-p14-t51gb-ice-ii).
     - **Ceres** (469.7 km, 9.39 × 10²⁰ kg, 0.25, 160 K, 1.24 mW m⁻², no NH₃): `None`.
     - **Rhea** (763.8 km, 2.307 × 10²¹ kg, 0.62, 76 K, 0.59 mW m⁻²): `None`.
     - **A snowball Earth** (Earth's R and M, x_w 2.3 × 10⁻⁴, 230 K, 0.087 W m⁻², chlorine at
@@ -7191,7 +7202,8 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
       - `liquid` is a registry key.
     - **Every published ocean** over the sample, the goldens and LOOK72, every hold in force: a
       shell and a thickness of at least 1 m; shell and thickness within R − r_w (to 1 m); ocean
-      mass at most x_w M; P_b at most 208.566 MPa and outside ice II; an ice floor at p_HP(T*)
+      mass at most x_w M; P_b at most 208.566 MPa and outside ice II; its floor, at p_f and T_b,
+      inside the field of its own ice (decision-p14-t51gb-ice-ii); an ice floor at p_HP(T*)
       to 10⁻⁶, a `Rock` floor below it, and every floor at or under 629.34 MPa; T_b between
       the largest present eutectic and 273.16 K; the solute fraction in [0, 0.554].
     - **T56.d's branch** reads `has_ocean`, and a moon's water fraction is its bulk section's.
@@ -7405,6 +7417,16 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Files:_ `planetary/derive/passes.rs` and its tests.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::passes`;
     `cargo test -p hyperion-sim planetary::derive`.
+- **P14.T51.m The surface's coupled condensables** (a later planetary bump, after 24; lane
+  `p14-modifiers`, after P14.T51.g.b; decision-p14-t51a-part2 §2.3, decision-bump-plan-after-22
+  R2, decision-p14-t51g Q7).
+  - The partition's two-condensable equilibria at the surface: NH₃ in a water sea or its ice
+    (`nh3_h2o`), SO₂ and H₂SO₄ in water, and CO₂ in water at high pressure.
+  - It reads P14.T51.g.b's liquidus functions in `substance/phase.rs` and the rows' eutectics.
+    A sea's salinity from its crust stays T51.c's with T51.g (deferred).
+  - Not in 24: until it lands each condensable keeps its own row's law (T51.a part 2's
+    ruling), a composition simplification and not a wrong state.
+  - _Files, tests and acceptance_ at its own ruling, which weighs the partition's cost.
 
 #### P14.T52 Atmospheric chemistry
 
@@ -8118,7 +8140,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `packages/protocol/src/planetary.test.ts`.
 - **P14.T54.b The 23 → 24 batch on the record, and its bump.** As T54.a, for T51.d's
   `modifiers`, T51.e's types, T51.f's cold-trapped condensates (each giving its body's palette an
-  `Ice` entry, removing T54.a's label), T51.g's `subsurface_ocean` for every body (deleting
+  `Ice` entry, removing T54.a's label), T51.g.a's ocean floor (deleting `OCEAN_FLOOR_VERSION`
+  and its tripwire) and, if it boarded, T51.g.b's `subsurface_ocean` for every body (deleting
   `OCEAN_VERSION` and its tripwire), T53.a–c's states and gases, T48.g's belt moments and impact
   velocities, and T53.d's member, which stays
   absent.
@@ -8137,7 +8160,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     hot-Jupiter envelope and a Jupiter whose envelope is `Ok` with an NH₃ deck (both from T54.a),
     the escape, steam and tenuous wiring into `derive/atmosphere.rs`, and P14.T31's event
     goldens. It restamps `thermo` and `condensate_extinction` `--since 24`, and it opens the serve
-    gate (T54.a) if R09.T16 has landed. It deletes `OCEAN_VERSION` and every hold at 24, then bumps.
+    gate (T54.a) if R09.T16 has landed. It deletes every hold at 24, `OCEAN_FLOOR_VERSION` among
+    them, then bumps.
     It re-checks T24.e's 300–370 K Venus test on T57.a's Venus and deletes T24.e's tripwire
     `the_venus_test_is_rechecked_at_the_23_to_24_bump`, with the rest of T24.e's "Held for
     P14.T54.b" list (Risks, "Deviations in P14.T24.e, as built"). It fills rendering plan R09's
@@ -8225,8 +8249,9 @@ feeding back into p_s, T_s, the albedo or the bulk.
       (e, f).
 
     A batch lands when its gate passes, linear and re-cut onto the tip (decision-bump-plan-after-22
-    V3.7). Riders board until P14.T54.b.i's commit and the MUST-FIX members until P14.T54.b.l's
-    blessing message; later ones take the next bump, their hold renumbered (V3.4). A member this task
+    V3.7). Riders board until P14.T54.b.i's commit and the MUST-FIX members (P14.T51.g.a among
+    them, decision-p14-t51g) until P14.T54.b.l's blessing message; later ones take the next bump,
+    their hold renumbered (V3.4). A member this task
     first puts on the record that the audit finds physically absurd stays `NotModelled` at 24 and
     takes the next bump. The wire types under `hyperion-protocol`'s `planetary/record/` are this
     lane's until the bump.
@@ -8348,8 +8373,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - This commit closes the riders' membership.
     - **P14.T54.b.j The riders** (B3; each landed by P14.T54.b.i's commit).
       - T51.e's types.
-      - T51.g's `subsurface_ocean` for every body, with T56.d's ocean k₂; `OCEAN_VERSION` goes at
-        P14.T54.b.l.
+      - T51.g.b's `subsurface_ocean` for every body, with T56.d's ocean k₂, if landed by this
+        commit; `OCEAN_VERSION` goes at P14.T54.b.l.
       - T48.g's belt moments and impact velocities. If the Moon moves by more than 0.1 km/s,
         `LUNAR_IMPACT_VELOCITY` and R09's reference worlds follow.
       - T53.c; T53.d's member, absent; T53.b part 3.
@@ -8445,8 +8470,10 @@ Each is labelled "not yet modelled" where a console could show it:
     2019), and a rogue's frozen atmosphere (Abbot and Switzer 2011);
   - relic oceans of a hot start or a capture (Bierson et al. 2020; Triton), and obliquity tides
     (Nimmo and Spencer 2015);
-  - liquid under high-pressure ice, and shells with an ice-II base (Journaux et al. 2020; Hammond
-    et al. 2016), which T51.g leaves absent;
+  - liquid under high-pressure ice, shells with an ice-II base, and oceans floored on ice II (ice
+    II's liquidus in the solution, after Choukroun and Grasset 2010; the `IceIi` floor at the next
+    `PROTOCOL_VERSION` bump; decision-p14-t51gb-ice-ii) (Journaux et al. 2020; Hammond et al.
+    2016), which T51.g leaves absent;
   - sulphate (`brine_mgso4`) oceans by redox, and methanol with carbon's carriers (T55.d);
   - the crust history's rock: the ocean pins the core's top near 270–300 K and the ice convects,
     so Callisto's rock stays unmelted (Anderson et al. 2001), where at 23 the conductive history
@@ -8713,10 +8740,10 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     would; regular moons' ocean flags turn on where their whole heat flow keeps an ocean; heated
     rocky moons' heat and every planet are unchanged; every `planetary/systems` golden with moons,
     and `planetary/moons`'s derived values.
-- **P14.T56.e Tidal heat in a porous rock core** (after P14.T56.d and P14.T51.g, in T51.g's lane,
-  since all three edit `moons/`, and after its own science ruling; behind `OCEAN_VERSION` = 24 if
-  it has landed when P14.T54.b's wiring starts, else the next bump; decision-p14-t56d-membrane
-  §2.4, 2026-10-16; decision-pre-23-review item 4, 2026-10-20).
+- **P14.T56.e Tidal heat in a porous rock core** (after P14.T56.d and P14.T51.g.b, in T51.g's
+  lane, since all three edit `moons/`, and after its own science ruling; behind T51.g.b's
+  `OCEAN_VERSION` if it has landed when P14.T54.b's wiring starts, else the next bump;
+  decision-p14-t56d-membrane §2.4, 2026-10-16; decision-pre-23-review item 4, 2026-10-20).
   - At 23 Enceladus is cold: its shell's own hot root is 0.41 mW m⁻² (0.33 GW), and its conductive
     shell holds no ocean. That is the literature's result for a shell (Beuthe 2019: it "cannot
     explain the whole conductive flux, whatever the dissipation enhancement"). Dione and Mimas are
@@ -29841,3 +29868,247 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _The floor's other light:_ the X-ray light takes the ion-stopping floor by the plan's labelled
     simplification, though at 1 keV dry air passes 96% of it through the floor (μ ÷ ρ 3,606 cm²
     g⁻¹, NIST XCOM; τ 1 needs 2.8 × 10⁻³ kg m⁻²). For main.
+- **Deviations in P14.T51.g.b, as built (`p14-modifiers`, branch `p14-t51gb`, 2026-10-26).** Every
+  body with a solid surface publishes the solve's subsurface ocean, and P14.T56.d's ocean branch
+  reads the solve's spherical shell. Both sit behind `OCEAN_VERSION` = 24, a P14.T54.b.j rider
+  that takes 25 if its commit misses P14.T54.b.i's (`OceanRules { Held, Solved }`,
+  `with_ocean_rules`, and the tripwire `the_ocean_is_held_only_until_its_bump`, which names what
+  the bump deletes). `GENERATOR_VERSION` stays 23. No existing golden moves; two goldens are new
+  (below). No draw, domain tag or wire type is added, and there is no `derive/atmosphere*`,
+  `record.rs` or `hyperion-protocol` hunk (`hooks/mod.rs` only its module list). Base 5d9d26e7,
+  with P14.T53.c's tenuous air.
+  - _The curves_ (`substance/phase.rs`, crate-private; decision-p14-t51g Q8):
+    - ice Ih's melting pressure, its foot (the Ih–III–liquid point) and its inverse by
+      `CURVE_HALVINGS` = 64, all read from the registry's water row;
+    - the rising branch's `high_pressure_melting`, its ice (`HighPressureIce`) named by the order
+      of the registry's pieces, which carry no phase name. A test holds the pieces' starts to IAPWS
+      R14-08's triple points, and the pressures to `PhaseDiagram::melting_pressure` bit for bit;
+    - `ICE_IH_ATMOSPHERIC_MELTING_POINT`, 273.152 519 K (IAPWS R10-06, §3 and Table 6);
+    - `AqueousLiquidus`, built once from the registry: the `brine_nacl` and `nh3_h2o` eutectics
+      and ammonia's molar mass.
+    - NaCl is Bodnar's cubic inverted by 64 halvings and scaled by 21.2525 ÷ 21.386 = 0.99374. The
+      ruling's 0.9936 divides by the rounded 21.39.
+    - NH₃ is the quintic × 97.0025 ÷ 93.54 = 1.03702. It is never below the dilute law at
+      `WATER_CRYOSCOPIC_CONSTANT` = 1.86, for which the registry's R T² M ÷ ΔH_fus gives 1.8604, and
+      the two cross at w ≈ 0.05. The scaled quintic puts 25 wt% at 214.23 K, 2.1 K under the
+      unscaled 216.3 K (the ruling wrote 1.4 K).
+    - `foreign_ice`, the one test of a base's and a floor's ice (the ice-II floor, below), over
+      `ice_ii_warmest` (E_II), `ice_iii_v_pressure` and `ice_v_vi_pressure`: Bridgman 1912's triple
+      points (`ICE_IH_II_III`, `ICE_II_III_V`, `ICE_II_V_VI`) in his kg cm⁻² and °C, converted, with
+      Hammond et al. 2016's line to its meeting with the II–III line (`ice_ii_edge_meeting`,
+      211.09 MPa), and R14-08's liquid triple points read from the registry.
+  - _The solve_ (`hooks/ocean.rs`, `Hydrosphere`):
+    - It reads the shell's base by its pure-water melting point T* (`base_at`). P_b is ice Ih's
+      melting pressure at T*, and r_b and an ice floor's r_f come from the column's 64 halvings
+      (`WaterColumn::of_water`, from R, M and x_w). T_b = T* − ΔT, and F(T*) = ∫k dT × r_b ÷ (R (R −
+      r_b)), which rises strictly wherever T_b > T_s. So `base_under` takes `SHELL_BASE_HALVINGS` =
+      48 halvings of T* on [T*₀, 273.16 K], in place of a root in r to 1 m. The deepest base is r₀
+      itself, so `holds_an_ocean` (the plan's closed form, `has_ocean`) and the solve agree over 10⁴
+      random bodies.
+    - _Each solute's fraction_ is its binary's, m_j ÷ (m_j + M_liq), as in the prototype. "The
+      solutes over solutes plus the liquid" is read so, because at no liquid every solute present
+      must be eutectic, as the presence test takes it. A first build that divided by all the
+      solutes broke the test's agreement on a dry, salty body.
+    - _The published solute fraction_ is the true mass fraction, Σr ÷ (1 + Σr), with each r = w ÷
+      (1 − w) held at its eutectic; it is at most 0.437. It is not the sum of the binaries'
+      fractions, whose bound is the plan's 0.554 (the science check). It still lies in the plan's
+      [0, 0.554].
+    - _More `None` cases than the plan lists:_ a heat flow that is not positive; a surface at or
+      above the whole column's liquidus, or a heat flow beyond what a shell below its top's triple
+      pressure conducts (the plan's "None by the surface's liquidus"); and a shell or an ocean
+      under `LEAST_LAYER` = 1 m (the invariants' 1 m; the wire refuses 0 m).
+    - _The ice-II floor_ is the review's science must-fix, ruled by decision-p14-t51gb-ice-ii (the
+      lean's column test amended). `Hydrosphere::absence` makes a member absent (P14.T55.k's) where
+      its base lies in ice II's field (Hammond's line, the plan's rule), or its floor, at its own
+      pressure and T_b, lies outside the field of the ice it names (`foreign_ice`): in ice II's,
+      since a cold solution meets ice II, whose liquidus is not modelled; an `IceIii` floor in ice
+      V's; or any floor in ice VI's. Nothing between them is tested: a column that only crosses ice
+      II's field, its floor on ice V beyond it, is right and published. `OceanFloor` froze at 23,
+      so an `IceIi` floor waits for P14.T55.k at the next `PROTOCOL_VERSION` bump. The lean's
+      `ice_ii_warmest_to` and its constants (Wikipedia's 344 MPa and 249.15 K, 620 MPa and 218 K)
+      are gone.
+    - `ICE_CONDUCTIVITY_COEFFICIENT` moved here and is re-exported from `moons::regular`. The
+      conduction is `conducted_w_per_m`, and its inverse is `conducted_temperature_k`. A shell's
+      failure to find a base is `FindShellBaseError`.
+  - _The solutes_ (`OceanSolutes`, crate-private) are built once in `air_of` (`AirBulk`) and carried
+    on `PassBulk` and `DerivedBody` (`ocean_solutes()`; `DerivedMoon` forwards them).
+    - Sodium chloride is the element inventory's whole chlorine × M(NaCl) ÷ M(Cl), from the
+      registry's atomic weights.
+    - Ammonia is `ACCRETED_AMMONIA` × `nitrogen_multiple(rank)`, given only where the volatiles
+      formed beyond the snow line with their ice carrying ammonia (`AmmoniaIce::Carried`).
+    - `nitrogen_multiple` (`hooks/ocean.rs`) is held to `volatile_inventory`'s nitrogen to the
+      bit, and a derive-level test holds each of the three inputs.
+  - _T56.d's branch_ (`moons/tides.rs`):
+    - `MoonTides::with_ocean(inputs, solutes)` (crate-private) gives the tides and the branch's
+      ocean. The public `MoonTides::of` reads it at fresh water, so `TideInputs` and its fixtures
+      are unchanged.
+    - Under `Solved`, `ShellBranch` gives each T*'s state. Λ = 8(1 + ν) ÷ (5 + ν) μ̄ d ÷ (ρ_w g R²)
+      over d = R − r_b. μ̄ comes from `ShellProfile`: 512 nodes in ln T up to 273.16 K, each
+      weighted by k dT = C min(1, T ÷ 30 K) d ln T, summed once into running totals and read at T_b
+      in proportion. η stays referenced to 273 K.
+    - **Deviation:** the excess F(T*) − F_nt − Φ Im k₂ changes sign more than once for 202 of 10⁴
+      random moons, because a stiff shell's tidal heat peaks at an intermediate depth. So the branch
+      takes the largest stable root, as version 23's cubic did. `ShellBranch::largest_root_cell`
+      scans down from the top: `ROOT_SCAN_POINTS` = 48 points, geometric in 273.16 K − T* over
+      `ROOT_SCAN_DECADES` = 6 decades, find the first cell whose lower end conducts no more than the
+      moon makes, and 48 halvings refine it. A test holds it to the topmost root on a 256-point grid
+      over the 10⁴. The branch then reads `holds_an_ocean` at F_ocean.
+    - `own_tides` keeps the branch's ocean: `Some` under `Solved`, the flag's rule under `Held`.
+  - _The regime and the record_ (`system.rs`):
+    - Under `Solved`, `moon_ocean` gives every moon's figures its branch's ocean, in the passes
+      (`SatellitePasses::figures`) and the record (`SurfaceInterior::of_moon`) alike. So a moon's
+      regime is an ice shell's exactly where its own branch keeps a shell of at most 60 km,
+      captures and giant-impact moons included (Q1).
+    - Then `record_subsurface_ocean` publishes the record's own ocean, after `with_surface_under`
+      (`GlobalFigures::with_subsurface_ocean`). It reads R from the bulk section; M from the
+      interior; x_w, the larger of the bulk's water and the condensates' water (solid and liquid)
+      over M; T_s from the conditions; the figures' heat flow; and the derivation's solutes.
+    - A lagged body publishes none.
+  - _The hold's switch:_ `with_every_24_hold` gains its eleventh arm (`OceanRules::Solved`), after
+    P14.T53.c's tenuous air, and it supersedes the floor's arm. P14.T51.g.a's census (`system/moon_ice/lag_tests.rs`) now runs
+    under `with_the_floor` (every 24 hold, the ocean's held), so that it reads the floor itself, as
+    24 ships if this rider misses it. Its golden test and its 400 and LOOK72 runs pass so.
+  - _Tests:_
+    - `substance/phase.rs`: the inverse; the triple points; each liquidus at its eutectic to 10⁻⁹ K;
+      the dilute law; the cap; Bridgman's points converted; E_II, P_III–V and P_V–VI through their
+      ends; `foreign_ice`'s cases.
+    - `hooks/ocean/tests.rs`: the tripwire; the nitrogen multiple; the conduction's inverse; the
+      plan's bodies; the thresholds; has_ocean against the solve and the invariants over 10⁴
+      random bodies; continuity, with its absence windows listed by cause; monotony; the fresh
+      base; the registry keys; the None cases; Pluto and Triton at T24.b's heat flow; the
+      ruling's hand-built bases (§4.4 (2), the ice-V crossing published); and the golden
+      `planetary/ocean_solve`.
+    - `moons/tides/tests.rs`: the profile against `shell_modulus`; Europa's and Titan's branch;
+      has_ocean on the branch; the largest root over 10⁴ moons; and the golden
+      `planetary/moon_tides_on_their_shell`.
+    - `derive/mod.rs`: the solutes from the inventory.
+    - The new `system/ocean_tests.rs`: the census over the golden systems (in CI) and over the 400
+      and LOOK72 (`#[ignore]`). It asserts each published ocean is the rule's at the record's
+      inputs and plausible (`implausibility`, the plan's invariants); none on a lagged body; Q1's
+      ice shell from the branch alone; and Q2. It counts the absent members by cause, and lists the
+      ruling's names, the oceans that cross ice II's field to a floor beyond it (which the lean
+      would have dropped) and the regime movers against the ocean held. Rule (f)'s reuse, the same-twice check and order independence also
+      run under every 24 hold.
+    - The server's test is version-aware (every kind computed from 24; floors on rock, ice III or
+      ice V). If this rider takes 25, its guard renumbers with `OCEAN_VERSION`.
+  - _Accept, as built:_ `cargo test -p hyperion-sim planetary::hooks::ocean`; `… planetary::moons`;
+    `… substance`; `… planetary::system::ocean_tests` (with `--ignored` for the 400 and LOOK72);
+    `… moon_ice`; and `cargo test -p hyperion-server convert::planetary`.
+  - _As measured, by hand_ (chlorine at CI's per unit rock, NH₃ at 0.0063):
+    - Europa: 12.6 km, 124.5 km on rock, `brine_nacl` at 14.5 g/kg, 271.05 K.
+    - Ganymede: 114.5 km, 130.8 km on ice V, 256.28 K.
+    - Callisto: 111.8 km, 202.1 km on ice V, `nh3_h2o`.
+    - Titan: 130.8 km on ice III at 4.6 mW m⁻²; 66.1 km on ice V at 9.9.
+    - Enceladus at 22 GW: 27.1 km, 46.2 km on rock. At its radiogenic heat: none.
+    - Pluto: absent at 2.45 mW m⁻². At 3.09: 23.2 km thick under 284.6 km. At 3.5: 44.0 km under
+      263.9 km. At T24.b's heat flow (all solids rock, 1.29 × production, 3.163 mW m⁻²): 26.7 km.
+    - Pluto's threshold is reconciled (Q5). The least F publishing an ocean is 3.028 mW m⁻² (20.4
+      km), and under it the member is absent. The plan's 2.84 ± 0.10, the design's "2.80: 13 km"
+      and the prototype's 2.845 are where the base itself enters ice II's field. The ice-II floor
+      moves the threshold to where the water clears that field down to the rock.
+    - Triton: absent at 3.28 and at 4.03 mW m⁻². Its 236.0 K ammonia water reaches 224 MPa against
+      the field's 239.32 K edge there, so the plan's ocean under 225–260 km and its 15–35 km at the
+      lag are superseded (decision-p14-t51gb-ice-ii). At T24.b's 4.088 mW m⁻² it is printed, not
+      asserted to a side: absent, its floor in ice II's field. Its least ocean-bearing heat flow is
+      4.096 mW m⁻² (29.6 km), stated, not pinned.
+    - Absence windows as the heat falls (the continuity test): Ganymede's ocean is absent for a
+      step at 4.440 mW m⁻² (an ice III floor in ice V's field) and ends at 3.35 (ice II); Callisto's
+      first run ends at 3.16 (ice III in ice V's field), with ice II's windows below; Pluto's ends at
+      3.028; Europa thins to 0.25 km at 3.575 and then none.
+    - Ceres and Rhea: none. A snowball Earth: 0.9 km of ice over 1.8 km of brine at 157.6 g/kg.
+    - On the branch at the measured elements: Europa k₂ 0.2272, F 17.47 mW m⁻², shell 35.2 km. At
+      fresh water its F is 7.2% under version 23's planar 19.29, inside a 10% bound this build set
+      itself: the base is ice Ih's melting point at its pressure, not 273 K.
+    - Titan's k₂ is 0.4082 against 0.616 ± 0.067 (Q3; P14.T55.k with T55.j), and Ganymede's is
+      0.3980.
+  - _As measured, the census_ (every 24 hold in force, at `RECORD_TIME`):
+    - The golden systems: 341 records with a solid surface.
+      - Oceans: planets 12 (6 on rock, 6 on ice V); members 56 (35 on rock, 15 on ice III, 6 on
+        ice V); regular moons 4 (2 on rock, 1 on ice III, 1 on ice V).
+      - Absent: planets 3 (1 base in ice II, 2 the foot); members 4 (2 base, 2 foot).
+      - Count (xiii), whole hydrospheres on rock (every kind): 43.
+      - Published across ice II's field to an ice V floor (the lean would drop them): the Snowball
+        planets `02002b2ca0000000.0400` and `42002cb200000009.0b00`.
+      - The regular moons against 23 and the floor:
+        - solar_like .0503: 386.4 km under 181.5 km on rock at 23 and at the floor; solved, 234.5
+          km under 174.6 km on ice V;
+        - hierarchical_triple .1201: 113.9 km under 30.3 km becomes 117.2 under 27.0 on rock;
+        - filler_b .0303: 769.1 km becomes 333.3 km on ice V at the floor, and solved 132.8 km
+          under 133.5 km on ice III;
+        - subgiant .0504 (heated branch): none becomes 4.9 km under 0.7 km on rock.
+      - No regime moves against the ocean held.
+    - The 400: 5,963 records.
+      - Oceans: planets 188; members 576; regular moons 40; captures 12; giant-impact moons 1.
+      - Absent: planets 123 (the foot 73, floor in ice II 46, base in ice II 3, floor in ice VI 1);
+        members 781 (foot 617, base 136, floor in ice II 27, ice III in ice V's field 1); regular
+        moons 16 (foot); captures 5 (foot 4, base 1); giant-impact moons 10 (foot 7, base 2,
+        floor in ice II 1).
+      - Count (xiii): 577. Published across ice II's field: 32.
+      - 78 Temperate records under 273.16 K publish an ocean, none of them with a surface liquid.
+      - Q2: four ocean-branch moons publish absence, and one, `41ffecb5ffc00007.0404`, publishes
+        none for an ocean under a metre.
+      - Q2's off-branch list:
+        - `42002cb1ffc00009.0303`, cold branch, 88.06 mW m⁻², under 14.9 km;
+        - `42002cb200000000.0601`, heated branch, Snowball at 218 K, 111.8 W m⁻², under about 1 m.
+      - Q1's two ocean-branch moons under a published shell of 60 km or less that are not ice
+        shells: `01fffb2c20030000.0803` (59.2 km) and `02000b2d60020002.0601` (49.7 km). Their
+        branch's shell, at T_eq, is over 60 km.
+      - Regime movers against the ocean held: captures 8 and one regular moon from stagnant lid to
+        ice shell; one regular moon from ice shell to stagnant lid.
+    - LOOK72: 319 records.
+      - `020e56ef60080002.0c01`: 272.8 km on ice V under 59.1 km (1,395.1 under 51.3 at 23).
+      - `420e5bbe00800024.0306`: 262.2 km on ice V under 44.7 km (976.1 under 29.8 at 23).
+      - `420e5bbe00800032.0701`: 519.2 km on rock under 18.8 km at 29.26 mW m⁻² (count (xiii)).
+      - Oceans: planets 33, members 85, regular moons 3, giant-impact moons 3. Absent: planets 5
+        (floor in ice II 3, foot 2), members 5 (floor in ice II 4, base 1), one capture (base).
+      - Count (xiii): 99. Published across ice II's field: `020e56ef20080006.0300`,
+        `020e56ef20090004.0600`, `020e56ef60080007.0400` and `020e66efa007000b.0800`.
+      - Q2: one capture absent on the branch. Q1: none. Three giant-impact moons move to ice shell
+        (`020e56ef60080003.0701`, `020e66efa0080003.e384`, `.e386`).
+    - None of the lists holds an airless icy body publishing an ocean above its liquidus, and no
+      invariant fails.
+  - _Two new goldens_ at header 23: `planetary/ocean_solve` (the plan's bodies) and
+    `planetary/moon_tides_on_their_shell` (the measured moons on the branch). They pin a solved
+    ocean ahead of the bump, as the determinism review asked; the bump re-blesses their headers.
+  - _Deferred findings (2026-10-13 rule; decision-p14-t51g):_
+    - _The NH₃ eutectic's composition._ The NH₃ quintic reaches 176.15 K at 0.327, not the
+      `nh3_h2o` row's 0.321. That 0.321 is ammonia dihydrate's stoichiometry, stated as an
+      assumption there; the ice–dihydrate eutectic's own composition is unread.
+    - _Titan's k₂_ is about 0.41 against 0.616 ± 0.067. An ocean of 1,200–1,300 kg m⁻³ needs a
+      near-saturated brine, which CI chlorine does not make; P14.T55.k with T55.j.
+    - _The shell's top temperature_ is the record's emission mean, at or above the area mean.
+    - _The nitrogen multiple's two definitions_ (the inventory's closures and the ocean's
+      helper): one, after 24, by p14-escape.
+    - _The column's density_ (T51.g.a's) stays 1,000 kg m⁻³, as Q3 rules.
+    - _The quintic's source:_ Croft, Lunine and Kargel 1988's eq. (3a), read only as the PISTES
+      code transcribes it ("valid for X<0.329"). The printed page and Leliwa-Kopystyński et al.
+      2002 are unread.
+    - _The conductivity's range:_ Carnahan et al. 2021's 30–273 K is for their 612 ÷ T. The
+      as-built 651 ÷ T is Petrenko and Whitworth's, whose range is unread.
+    - _The ice-II floor_ (decision-p14-t51gb-ice-ii): a member is absent where its floor lies
+      outside its ice's field, for want of ice II's liquidus and an `IceIi` variant (P14.T55.k, at
+      the next protocol bump). Superseded: Triton's ocean at 4.03 mW m⁻² (24.1 km on ice III under
+      242.2 km) and at its lag; Pluto's threshold, 2.84 → 3.03 mW m⁻². The real floor lies
+      between the field's entry (Triton's 8.2 km below its base) and the solve's. II–V–VI is
+      Bridgman's estimate, unmeasured (SeaFreeze predicts 209.1 K at 670.8 MPa); NH₃'s effect on
+      ice II's field is unread.
+    - _The membrane's thin-shell range:_ Beuthe 2015 holds it for d under 5–10% of R. The k dT
+      weights over-weight a thick shell's base by (R ÷ r_b)²: Europa 1.6%, Titan and Ganymede
+      5–10%, Enceladus 20%. ν stays elastic. η stays at 273 K and not at T*, ruled; that is 5–10×
+      at Ganymede's and Titan's bases.
+    - _The scan's resolution:_ two roots within a step (0.75 in 273.16 K − T*) near the top would
+      be read as the deeper one.
+    - _All the chlorine in the liquid_ overstates a rocky planet's brine: the snowball Earth's 157.6
+      g/kg against about 53 at Earth's ocean chlorine.
+    - _The plan's figures from memory_ (Mitri et al. 2014, Durante et al. 2019, Hammond et al.
+      2016's warm state) are as the plan states them, and are not re-read.
+    - _Heat in the shell:_ all of a moon's tidal heat crosses the shell's base. Heat dissipated
+      inside the shell would thicken it.
+  - _For the sign-off_ (#92): a drafted `SUBSURFACE OCEAN` guide sentence, now that every solid
+    surface's member is computed, is in the lane's handoff for main's sign-off agent. The sign-off
+    must give an absent member on a shown surface section a visible not-modelled reading in that
+    row (decision-p14-t51gb-ice-ii §3, a condition of it): after T51.g.b an empty row mostly means
+    none, so a Triton-like absent member would read as "no ocean". Client only, no bump, the
+    laptop's, before the first served build with T51.g.b's members.
+  - _P1's wording_ "at or under 629.34 MPa" is corrected in this change, which closes T51.g.a's
+    deferred line.

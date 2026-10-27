@@ -47,9 +47,11 @@
 //!   `f_x`, drawn once a body on `body.cold_traps`, the zonal annual maximum and the cold-trap
 //!   fraction of each condensable, which the record's published condensates take behind a hold at
 //!   generator version 24, until P14.T54.b's bump.
-//! - `ocean`: a body's subsurface ocean beyond its flag (P14.T51.g), so far the floor of a regular
-//!   moon's ocean at the liquidus of its base (P14.T51.g.a), which its figures'
-//!   [`SubsurfaceOcean`] takes behind a hold at generator version 24, until P14.T54.b's bump.
+//! - `ocean`: a body's subsurface ocean beyond its flag (P14.T51.g): the floor of a regular moon's
+//!   ocean at the liquidus of its base (P14.T51.g.a), and every solid body's ice shell and ocean by
+//!   a conductive solve with its chlorine and ammonia, which a moon's tidal ocean branch reads too
+//!   (P14.T51.g.b). Its figures' [`SubsurfaceOcean`] takes them behind holds at generator version
+//!   24, until P14.T54.b's bump.
 //! - [`small_bodies`]: a small body's [`TaxonomicClass`] (P14.T51.e), a label and not a substance,
 //!   from its kind, its lid's lithology, its veneer and its weathering clocks. It is pure; its
 //!   wiring puts it on the record behind a hold at generator version 24.

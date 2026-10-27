@@ -106,7 +106,7 @@ use crate::planetary::derive::{
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
 use crate::planetary::hooks::figures::{HeatInputs, PassFigures, Subsurface, non_tidal_heat_flow};
-use crate::planetary::hooks::ocean::OceanFloorRules;
+use crate::planetary::hooks::ocean::{OceanFloorRules, OceanRules, OceanSolutes};
 use crate::planetary::moons::tides::{
     MoonTides, TidalBranch, TidalMaterial, TideInputs, mean_density, tidal_forcing,
 };
@@ -247,11 +247,7 @@ pub const ICE_LINE_TEMPERATURE: Kelvin = Kelvin::new(170.0);
 /// 2.2.
 pub const MOON_TIDAL_RESPONSE: f64 = 0.015;
 
-/// The thermal conductivity of water ice times temperature: 651 W m⁻¹ (k = 651 ÷ T; Petrenko
-/// and Whitworth 1999, as Hussmann et al. 2006, Icarus 185, 258 use it), so that a conductive ice
-/// shell of thickness D between a surface at `T_s` and its melting point carries 651 ln(`T_m` ÷
-/// `T_s`) ÷ D.
-pub const ICE_CONDUCTIVITY_COEFFICIENT: f64 = 651.0;
+pub use crate::planetary::hooks::ocean::ICE_CONDUCTIVITY_COEFFICIENT;
 
 /// The melting point at the base of an ice shell: 273 K.
 pub const ICE_MELTING_POINT: Kelvin = Kelvin::new(273.0);
@@ -1158,6 +1154,13 @@ impl DerivedMoon {
         self.body.surface_lag()
     }
 
+    /// What its ocean would dissolve (P14.T51.g.b; [`DerivedBody::ocean_solutes`]): its air's
+    /// bulk's, which its tidal branch read at its passes.
+    #[must_use]
+    pub(crate) const fn ocean_solutes(&self) -> OceanSolutes {
+        self.body.ocean_solutes()
+    }
+
     /// How many passes its derivation took (P14.T51.b; [`DerivedBody::atmosphere_passes`]).
     #[cfg(test)]
     #[must_use]
@@ -1280,7 +1283,10 @@ impl DerivedMoon {
     /// under its surface at its equilibrium temperature, with the heat flow its flag reads; none
     /// where its flag holds none. From P14.T51.g.a's bump it ends at ice V's liquidus, and is
     /// [`Subsurface::NotComputed`] where its shell's base lies beyond it, though its flag holds an
-    /// ocean.
+    /// ocean. From P14.T51.g.b's bump (`OCEAN_VERSION`) it is its tidal branch's: the solve's ocean
+    /// at the branch's root, at its equilibrium temperature with its own water and solutes, which
+    /// its regime reads (an ice shell's where its shell is at most 60 km), and none off the ocean
+    /// branch; its record publishes its own in its figures' place.
     #[must_use]
     pub(crate) const fn subsurface(&self) -> Subsurface {
         self.tide.subsurface
@@ -1908,7 +1914,7 @@ pub(crate) fn derive_moon_under(
             body.inventory().water(),
             body.atmosphere(),
             body.equilibrium_temperature(),
-            body.fractions(),
+            (body.fractions(), body.ocean_solutes()),
         ),
     );
     Ok(DerivedMoon {
@@ -1963,7 +1969,12 @@ impl PassRecordOf for MoonPassRecord<'_> {
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext {
         let tide = own_tides(
             &self.tide,
-            &TideAt::of(bulk.inventory_water, air, equilibrium, bulk.fractions),
+            &TideAt::of(
+                bulk.inventory_water,
+                air,
+                equilibrium,
+                (bulk.fractions, bulk.ocean_solutes),
+            ),
         );
         let at = MoonTideAt {
             heat_flux: tide.heat_flux,
@@ -1998,8 +2009,9 @@ struct TideOf<'a> {
 }
 
 /// What a moon's tide reads of a pass (P14.T54.a): its inventory's water, the state and the
-/// equilibrium temperature of the pass, and the mass fractions its derivation splits its solids
-/// into, all but the pass's state and temperature the same at every pass.
+/// equilibrium temperature of the pass, the mass fractions its derivation splits its solids
+/// into and what its ocean would dissolve (P14.T51.g.b), all but the pass's state and temperature
+/// the same at every pass.
 #[derive(Debug, Clone, Copy)]
 struct TideAt {
     inventory_water: Kilograms,
@@ -2008,12 +2020,16 @@ struct TideAt {
     state: SurfaceState,
     equilibrium: Kelvin,
     fractions: MassFractions,
+    /// What its ocean would dissolve, its air's bulk's ([`OceanSolutes`]), which its ocean branch
+    /// reads from P14.T51.g.b's bump.
+    solutes: OceanSolutes,
 }
 
 impl TideAt {
     /// What a moon's tide reads of a pass whose atmosphere is `air`, at its inventory's water
-    /// `inventory_water`, its equilibrium temperature `equilibrium` and its solids' fractions
-    /// `fractions`: its state the one its water follows ([`Atmosphere::water_state`]), so that a
+    /// `inventory_water`, its equilibrium temperature `equilibrium`, its solids' fractions
+    /// `fractions` and its ocean's solutes `solutes`: its state the one its water follows
+    /// ([`Atmosphere::water_state`]), so that a
     /// moon inside the runaway limit at its hosts' largest past luminosity alone, published
     /// `Temperate` or `Snowball`, takes the runaway's dry lid in its non-tidal heat (P14.T53.b part
     /// 1 (a)). Its derivation and its passes' contexts both read a pass by it.
@@ -2022,13 +2038,14 @@ impl TideAt {
         inventory_water: Kilograms,
         air: &Atmosphere,
         equilibrium: Kelvin,
-        fractions: MassFractions,
+        (fractions, solutes): (MassFractions, OceanSolutes),
     ) -> Self {
         Self {
             inventory_water,
             state: air.water_state(),
             equilibrium,
             fractions,
+            solutes,
         }
     }
 }
@@ -2119,34 +2136,44 @@ fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
         mean_motion_rad_per_s: n,
     };
     // A heated shell's rock lag holds no ice to float on an ocean (P14.T51.g.a; decision-p14-t56g
-    // §1): the lag exists only under the moon bulk's batch rules, so this rides its hold.
-    let tides = if ocean_branch_open(at.bulk) {
-        MoonTides::of(&inputs)
+    // §1): the lag exists only under the moon bulk's batch rules, so this rides its hold. From
+    // P14.T51.g.b's bump the branch dissolves its solutes and keeps the solve's ocean; below it
+    // the flag's rule gives the ocean of the branch, `None` here.
+    let (tides, solved) = if ocean_branch_open(at.bulk) {
+        MoonTides::with_ocean(&inputs, &pass.solutes)
     } else {
-        MoonTides::without_an_ocean(&inputs)
+        (MoonTides::without_an_ocean(&inputs), None)
     };
     let heat = tidal_heating(at.planet, radius, tides.loss(), a, e, n);
     let area = 4.0 * core::f64::consts::PI * r * r;
     let flux = WattsPerSquareMetre::new(heat.value() / area);
     let ocean = tides.branch() == TidalBranch::Ocean;
-    let subsurface = if ocean {
-        Subsurface::of_regular_moon(
+    let subsurface = match solved {
+        Some(subsurface) => subsurface,
+        None if ocean => Subsurface::of_regular_moon(
             radius,
             mean_density(kilograms, radius),
             fractions.water(),
             surface,
             tides.heat_flow(),
-        )
-    } else {
-        Subsurface::NoOcean
+        ),
+        None => Subsurface::NoOcean,
     };
     debug_assert!(
-        match OceanFloorRules::in_force() {
-            OceanFloorRules::Held => matches!(subsurface, Subsurface::Ocean(_)) == ocean,
-            OceanFloorRules::Floored => matches!(subsurface, Subsurface::NoOcean) != ocean,
+        match (OceanRules::in_force(), OceanFloorRules::in_force()) {
+            (OceanRules::Solved, OceanFloorRules::Held | OceanFloorRules::Floored) => {
+                ocean || matches!(subsurface, Subsurface::NoOcean)
+            }
+            (OceanRules::Held, OceanFloorRules::Held) => {
+                matches!(subsurface, Subsurface::Ocean(_)) == ocean
+            }
+            (OceanRules::Held, OceanFloorRules::Floored) => {
+                matches!(subsurface, Subsurface::NoOcean) != ocean
+            }
         },
         "an ocean-branch moon's layers are those its branch was decided on: an ocean, or from \
-         P14.T51.g.a's floor one not modelled under high-pressure ice"
+         P14.T51.g.a's floor one not modelled under high-pressure ice; from P14.T51.g.b's the \
+         solve's at the branch's root, and none off the branch"
     );
     TideState {
         tidal_heating: heat,
@@ -4645,7 +4672,10 @@ mod tests {
         };
         for case in past_only_runaways() {
             let water = case.inputs.inventory.water();
-            let at = |air: &Atmosphere| TideAt::of(water, air, case.inputs.equilibrium, fractions);
+            let at = |air: &Atmosphere| {
+                let solutes = OceanSolutes::FRESH;
+                TideAt::of(water, air, case.inputs.equilibrium, (fractions, solutes))
+            };
             let (now, control, runaway) = (at(&case.air), at(&case.control), at(&case.runaway));
             assert_eq!(now.state, SurfaceState::RunawayGreenhouse);
             assert_eq!(control.state, case.published);

@@ -30,7 +30,10 @@
 //!    ([`shell_modulus`]), so its loss factor is the moon's own, from its period and surface
 //!    temperature: no loss factor is fitted. `F_ocean` is the
 //!    largest stable root of F = `F_nt` + Φ Im k₂(d(F)), the warm start a moon formed hot in its
-//!    planet's disc keeps ([`ocean_heat_flow`]).
+//!    planet's disc keeps ([`ocean_heat_flow`]). From P14.T51.g.b's bump (`OCEAN_VERSION`) the
+//!    test is the ocean's own presence test, at `F_ocean`, over the moon's water and solutes, and
+//!    d(F) its spherical shell, its modulus averaged to its base's liquidus: a bracketed root of
+//!    F − `F_nt` − Φ Im k₂(Λ(d(F))) (decision-p14-t51g's T56.d branch).
 //! 2. **The heated branch** ([`TidalBranch::Heated`]), for a rocky moon if `F_nt` and its tidal
 //!    flux at Io's Im k₂ = 0.015
 //!    ([`MOON_TIDAL_RESPONSE`]) reach
@@ -59,6 +62,10 @@
 
 use crate::math;
 use crate::planetary::derive::rotation::SpinTides;
+use crate::planetary::hooks::figures::Subsurface;
+use crate::planetary::hooks::ocean::{
+    Hydrosphere, ICE_CONDUCTIVITY_FLOOR, OceanRules, OceanSolutes, SHELL_BASE_HALVINGS, ShellBase,
+};
 use crate::planetary::moons::regular::{
     ICE_CONDUCTIVITY_COEFFICIENT, ICE_MELTING_POINT, MOON_TIDAL_RESPONSE, WATER_DENSITY,
     has_subsurface_ocean, tidal_heating,
@@ -350,6 +357,90 @@ pub(crate) fn shell_modulus_with(
     }
 }
 
+/// [`SHELL_QUADRATURE_NODES`] as an index bound: the nodes of a [`ShellProfile`].
+const PROFILE_NODES: usize = 512;
+
+/// An ice shell's Maxwell rigidity averaged from its top to any base temperature (P14.T51.g.b): the
+/// depth mean over its conductive profile, by [`PROFILE_NODES`] midpoint nodes in ln T from its
+/// top (at least 1 K, as [`shell_modulus`] holds it) to water's triple temperature, each weighted
+/// by its depth, k dT = C min(1, T ÷ 30 K) d ln T under the conductivity's floor
+/// ([`ICE_CONDUCTIVITY_FLOOR`]), summed once into running totals that a base temperature reads by
+/// its place among them, its last node in proportion. A base at 273 K and a top above 30 K give
+/// [`shell_modulus`]'s mean to its nodes' spacing; η is still referenced to 273 K
+/// (decision-p14-t56d-membrane §5 (5)).
+#[derive(Debug, Clone, PartialEq)]
+struct ShellProfile {
+    /// ln of the first node's lower edge, the top's temperature.
+    lo: f64,
+    /// The nodes' spacing in ln T.
+    step: f64,
+    /// The running totals of the weights, of the weighted storage shares and of the weighted loss
+    /// shares, before each node and after the last.
+    totals: [[f64; 3]; PROFILE_NODES + 1],
+}
+
+impl ShellProfile {
+    /// The profile of a shell whose top is at `surface`, flexed at the mean motion
+    /// `mean_motion_rad_per_s`, up to the temperature `top`.
+    #[must_use]
+    fn new(surface: Kelvin, mean_motion_rad_per_s: f64, top: Kelvin) -> Self {
+        let rheology = IceRheology::SHELL;
+        let melting = ICE_MELTING_POINT.value();
+        let t_s = surface.value();
+        let lo = math::ln(if t_s > 1.0 { t_s } else { 1.0 });
+        let step = (math::ln(top.value()) - lo) / f64::from(SHELL_QUADRATURE_NODES);
+        let at_melting =
+            ICE_RIGIDITY.value() / (mean_motion_rad_per_s * rheology.melting_viscosity_pa_s);
+        let arrhenius = rheology.activation_j_per_mol / MOLAR_GAS_CONSTANT;
+        let floor = ICE_CONDUCTIVITY_FLOOR.value();
+        let mut totals = [[0.0; 3]; PROFILE_NODES + 1];
+        let mut sum = [0.0; 3];
+        for (k, node) in (0..SHELL_QUADRATURE_NODES).zip(1..=PROFILE_NODES) {
+            let t = math::exp(lo + (f64::from(k) + 0.5) * step);
+            let m = at_melting * math::exp(-arrhenius * (1.0 / t - 1.0 / melting));
+            let share = 1.0 / (1.0 + m * m);
+            let weight = if t < floor { t / floor } else { 1.0 };
+            sum[0] += weight;
+            sum[1] += weight * share;
+            sum[2] += weight * m * share;
+            totals[node] = sum;
+        }
+        Self { lo, step, totals }
+    }
+
+    /// The shell's depth-mean rigidity from its top to a base at `base`, as shares of
+    /// [`ICE_RIGIDITY`]: the first node's alone for a base at or under the top, all of them for one
+    /// at or above the profile's end.
+    #[must_use]
+    fn to(&self, base: Kelvin) -> ShellModulus {
+        let t_b = base.value();
+        let place = (math::ln(if t_b > 1.0 { t_b } else { 1.0 }) - self.lo) / self.step;
+        let end = f64::from(SHELL_QUADRATURE_NODES);
+        let total = if place > 0.0 {
+            let place = if place < end { place } else { end };
+            let whole = place.floor();
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "`whole` is a whole number in [0, 512], which a usize holds on every target"
+            )]
+            let node = whole as usize;
+            let part = place - whole;
+            let before = self.totals[node];
+            match self.totals.get(node + 1) {
+                Some(after) => [0, 1, 2].map(|i| before[i] + part * (after[i] - before[i])),
+                None => before,
+            }
+        } else {
+            self.totals[1]
+        };
+        ShellModulus {
+            storage: total[1] / total[0],
+            loss: total[2] / total[0],
+        }
+    }
+}
+
 /// An ice shell's stiffness against its ocean's gravity times the heat flow it conducts,
 /// K = ΛF, complex, W m⁻² ([`shell_stiffness`]): a constant of the moon, so that the membrane's
 /// Λ = K ÷ F at a heat flow F ([`at`](Self::at)).
@@ -581,6 +672,155 @@ pub fn ocean_heat_flow(
     WattsPerSquareMetre::new(f64::midpoint(lo, hi))
 }
 
+/// The points by which [`ShellBranch::largest_root_cell`] scans T* for the branch's largest root:
+/// 48, geometric in 273.16 K − T* over [`ROOT_SCAN_DECADES`] decades below the deepest base's,
+/// about 0.75 a step, so that a shell's depth, nearly proportional to its base's pressure and so to
+/// 273.16 K − T* near the surface, is scanned evenly in its logarithm from the deepest base its
+/// water allows to some 10⁻⁶ of it.
+pub(crate) const ROOT_SCAN_POINTS: u32 = 48;
+
+/// The decades of 273.16 K − T* that [`ROOT_SCAN_POINTS`] span: 6.
+pub(crate) const ROOT_SCAN_DECADES: f64 = 6.0;
+
+/// The ocean branch of a moon on the solve's spherical shell (P14.T51.g.b; [`MoonTides`]'s
+/// `on_its_shell`): its water, its shell's profile, the membrane's scale, its ocean's limit, and
+/// its non-tidal heat and forcing.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ShellBranch {
+    /// Its water over its rock, under its shell's top.
+    pub(crate) water: Hydrosphere,
+    profile: ShellProfile,
+    /// 8(1 + ν) ÷ (5 + ν) `μ_ice` ÷ (`ρ_w` g R²), m⁻¹: Λ ÷ (μ̄ ÷ `μ_ice`) d.
+    membrane_per_m: f64,
+    /// `k_oc`.
+    ocean: f64,
+    /// `F_nt`.
+    non_tidal: WattsPerSquareMetre,
+    /// Φ.
+    forcing: WattsPerSquareMetre,
+}
+
+/// One state of a moon's ocean branch, at a base's pure-water melting point T*
+/// ([`ShellBranch::state`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BranchState {
+    /// The shell's base.
+    pub(crate) base: ShellBase,
+    /// The membrane's complex Love number over the shell to it.
+    pub(crate) love: ComplexLoveNumber,
+    /// F(T*) − `F_nt` − Φ Im k₂, W m⁻²: what the shell conducts beyond the heat the moon makes.
+    pub(crate) excess_w_per_m2: f64,
+}
+
+impl ShellBranch {
+    /// The branch of the moon `inputs` describe, of mean density `density` and surface gravity
+    /// `gravity`, dissolving `solutes`: `None` without water, with an ocean limit that is not
+    /// positive, or under a surface at or above water's triple point.
+    #[must_use]
+    pub(crate) fn of(
+        inputs: &TideInputs,
+        solutes: &OceanSolutes,
+        density: KilogramsPerCubicMetre,
+        gravity: MetresPerSecondSquared,
+    ) -> Option<Self> {
+        let ocean = ocean_love_number(density);
+        if inputs.water <= 0.0 || !(ocean.is_finite() && ocean > 0.0) {
+            return None;
+        }
+        let water = Hydrosphere::new(
+            inputs.radius,
+            inputs.mass,
+            inputs.water,
+            inputs.surface_temperature,
+            *solutes,
+        )?;
+        let profile = ShellProfile::new(
+            inputs.surface_temperature,
+            inputs.mean_motion_rad_per_s,
+            water.top(),
+        );
+        let r = inputs.radius.value();
+        let membrane = 8.0 * (1.0 + ICE_POISSON_RATIO) / (5.0 + ICE_POISSON_RATIO)
+            * ICE_RIGIDITY.value()
+            / (WATER_DENSITY.value() * gravity.value() * r * r);
+        Some(Self {
+            water,
+            profile,
+            membrane_per_m: membrane,
+            ocean,
+            non_tidal: inputs.non_tidal_heat_flow,
+            forcing: inputs.forcing,
+        })
+    }
+
+    /// The branch's state at the base whose pure-water melting point is `melting_point_k`, K, on
+    /// [T*₀, 273.16 K]: the base, the membrane's k₂ over the shell d = R − `r_b` at its modulus to
+    /// the base's temperature, Λ = scale × μ̄ ÷ `μ_ice` × d, and what the shell conducts beyond the
+    /// moon's heat. The membrane is Beuthe 2015's thin shell, his §1's "less than 5 to 10%" of the
+    /// radius, and the depth mean weights each node by k dT, a flat shell's dz = k dT ÷ q, which
+    /// over-weights a thick spherical shell's base by (R ÷ `r_b`)² (recorded).
+    ///
+    /// # Panics
+    ///
+    /// For a melting point outside [251.165 K, 273.16 K], as [`Hydrosphere::base_at`]: the
+    /// branch reads it only on [T*₀, 273.16 K].
+    #[must_use]
+    pub(crate) fn state(&self, melting_point_k: f64) -> BranchState {
+        let base = self.water.base_at(melting_point_k);
+        let modulus = self.profile.to(base.temperature);
+        let d = base.shell(self.water.column().radius()).value();
+        let love = membrane_love_number(
+            self.ocean,
+            MembraneStiffness {
+                real: self.membrane_per_m * modulus.storage * d,
+                imaginary: self.membrane_per_m * modulus.loss * d,
+            },
+        );
+        let excess =
+            base.heat_flow.value() - self.non_tidal.value() - self.forcing.value() * love.loss();
+        BranchState {
+            base,
+            love,
+            excess_w_per_m2: excess,
+        }
+    }
+
+    /// The cell of T* that holds the branch's largest stable root, the warm start a moon formed
+    /// hot in its planet's disc keeps (version 23's choice of root, [`ocean_heat_flow`]): scanning
+    /// down from the top `top`, where the shell vanishes and conducts more than the moon makes, by
+    /// [`ROOT_SCAN_POINTS`] points geometric in `top` − T* to the deepest base `deepest`, the first
+    /// point whose shell conducts at most what the moon makes, with the point above it. A shell's
+    /// tidal heat can peak at an intermediate depth, so the excess F(T*) − `F_nt` − Φ Im k₂ may
+    /// change sign more than once; the root in this cell is the one with the largest heat flow,
+    /// and stable (the excess rises through it as the shell thins). `None` where every point
+    /// conducts more than the moon makes: a cold moon. Both ends of the cell and of the scan,
+    /// `deepest_k` and `top_k`, are melting points, K.
+    ///
+    /// # Panics
+    ///
+    /// For ends outside [251.165 K, 273.16 K], as [`state`](Self::state).
+    #[must_use]
+    pub(crate) fn largest_root_cell(&self, deepest_k: f64, top_k: f64) -> Option<(f64, f64)> {
+        let (deepest, top) = (deepest_k, top_k);
+        let span = top - deepest;
+        let mut above = top;
+        for point in 0..=ROOT_SCAN_POINTS {
+            let t = if point == ROOT_SCAN_POINTS {
+                deepest
+            } else {
+                let decades = ROOT_SCAN_DECADES * f64::from(ROOT_SCAN_POINTS - point)
+                    / f64::from(ROOT_SCAN_POINTS);
+                top - span * math::exp10(-decades)
+            };
+            if self.state(t).excess_w_per_m2 <= 0.0 {
+                return Some((t, above));
+            }
+            above = t;
+        }
+        None
+    }
+}
+
 /// A moon's tidal state, the branch its whole heat flow puts it on ([`MoonTides::of`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TidalBranch {
@@ -667,6 +907,10 @@ impl MoonTides {
     /// Reading `F_nt` alone, not the age, the branch is read at each time: an ocean that the
     /// falling radiogenic heat freezes is a recorded state change.
     ///
+    /// From P14.T51.g.b's bump (`OCEAN_VERSION`, 24) the ocean branch is the spherical shell's over
+    /// fresh water, its base at ice Ih's melting point at its pressure; the generator's moons
+    /// dissolve their own chlorine and ammonia, which this public form does not take.
+    ///
     /// # Examples
     ///
     /// A cold Moon-like moon of Earth's: elastic rock at Q = 38.
@@ -692,9 +936,40 @@ impl MoonTides {
     /// ```
     #[must_use]
     pub fn of(inputs: &TideInputs) -> Self {
+        Self::with_ocean(inputs, &OceanSolutes::FRESH).0
+    }
+
+    /// The tides of the moon `inputs` describe, whose ocean would dissolve `solutes`, with the ocean
+    /// its branch keeps (crate-private; [`of`](Self::of) reads it at fresh water):
+    ///
+    /// - under [`OceanRules::Held`], version 23's tides, the ocean branch on the flag's planar
+    ///   shell, whose ocean the flag's own rule gives (`None` here);
+    /// - under [`OceanRules::Solved`] (P14.T51.g.b), the ocean branch on the solve's spherical
+    ///   shell ([`on_its_shell`](Self::on_its_shell)), with the solve's ocean at the branch's root,
+    ///   and [`Subsurface::NoOcean`] off it.
+    #[must_use]
+    pub(crate) fn with_ocean(
+        inputs: &TideInputs,
+        solutes: &OceanSolutes,
+    ) -> (Self, Option<Subsurface>) {
         let (density, gravity) = Self::bulk(inputs);
-        Self::on_an_ocean(inputs, density, gravity)
-            .unwrap_or_else(|| Self::off_an_ocean(inputs, density, gravity))
+        match OceanRules::in_force() {
+            OceanRules::Held => (
+                Self::on_an_ocean(inputs, density, gravity)
+                    .unwrap_or_else(|| Self::off_an_ocean(inputs, density, gravity)),
+                None,
+            ),
+            OceanRules::Solved => {
+                let (tides, ocean) = Self::on_its_shell(inputs, solutes, density, gravity)
+                    .unwrap_or_else(|| {
+                        (
+                            Self::off_an_ocean(inputs, density, gravity),
+                            Subsurface::NoOcean,
+                        )
+                    });
+                (tides, Some(ocean))
+            }
+        }
     }
 
     /// The tides of a moon `inputs` describe that takes no ocean branch, whatever its water and
@@ -803,6 +1078,73 @@ impl MoonTides {
             branch: TidalBranch::Ocean,
             heat_flow,
         })
+    }
+
+    /// The ocean branch's tides on the solve's spherical shell (P14.T51.g.b; decision-p14-t51g's
+    /// T56.d branch), with the ocean the branch keeps, if the moon of `inputs`, of mean density
+    /// `density` and surface gravity `gravity`, dissolving `solutes`, holds an ocean at its root.
+    ///
+    /// Its water is its own bulk's under its shell's top at `inputs`' surface temperature (its
+    /// equilibrium temperature, the passes'), over its rock ([`Hydrosphere`]). At each base, read by
+    /// its pure-water melting point T* ([`Hydrosphere::base_at`]), the shell is d = R − `r_b` thick
+    /// and conducts F(T*); its membrane's Λ = 8(1 + ν) ÷ (5 + ν) μ̄ d ÷ (`ρ_w` g R²), μ̄ its Maxwell
+    /// rigidity averaged over its conductive profile from its top to the base's temperature
+    /// ([`ShellProfile`]), with η still referenced to 273 K (decision-p14-t56d-membrane §5 (5)), and
+    /// Λ and `k_oc` at [`WATER_DENSITY`] (decision-p14-t51g Q3). The branch's heat flow `F_ocean` is
+    /// the largest stable root of F(T*) − `F_nt` − Φ Im k₂(Λ(T*)) on [T*₀, 273.16 K], as version
+    /// 23's was: the excess is positive at the top, where the shell vanishes, a scan down from it
+    /// finds the first cell where it is not ([`ShellBranch::largest_root_cell`]), and
+    /// [`SHELL_BASE_HALVINGS`] halvings refine the root there. The excess may change sign more than
+    /// once, since a stiff shell's tidal heat peaks at an intermediate depth. The branch then reads
+    /// the presence test at `F_ocean`, which holds wherever the root lies on [T*₀, 273.16 K].
+    /// `None` (the heated or cold branch) without water, under a surface at or above its water's
+    /// liquidus, where the moon's heat keeps no ocean at any depth its water allows, and for a
+    /// shell with no loss.
+    #[must_use]
+    fn on_its_shell(
+        inputs: &TideInputs,
+        solutes: &OceanSolutes,
+        density: KilogramsPerCubicMetre,
+        gravity: MetresPerSecondSquared,
+    ) -> Option<(Self, Subsurface)> {
+        let branch = ShellBranch::of(inputs, solutes, density, gravity)?;
+        let (deepest, top) = (branch.water.deepest().value(), branch.water.top().value());
+        let top_state = branch.state(top);
+        // A surface at or above its whole water's liquidus holds no shell, and a root above the
+        // top would be a shell thinner than its triple pressure's depth: no ocean branch.
+        if top_state.base.temperature.value() <= inputs.surface_temperature.value()
+            || top_state.excess_w_per_m2 <= 0.0
+        {
+            return None;
+        }
+        let (mut lo, mut hi) = branch.largest_root_cell(deepest, top)?;
+        for _ in 0..SHELL_BASE_HALVINGS {
+            let mid = f64::midpoint(lo, hi);
+            if branch.state(mid).excess_w_per_m2 > 0.0 {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        let root = branch.state(f64::midpoint(lo, hi));
+        // The branch reads the ocean's presence test at its whole heat flow, `F_ocean`, as the
+        // plan's T56.d branch does (it holds wherever the root lies above T*₀).
+        if !branch.water.holds_an_ocean(root.base.heat_flow) {
+            return None;
+        }
+        let (modulus, loss) = (root.love.modulus(), root.love.loss());
+        // A shell with no loss at all, which a finite viscosity never gives, despins nothing.
+        if !(loss.is_finite() && loss > 0.0) {
+            return None;
+        }
+        let tides = Self {
+            k2: modulus,
+            q: modulus / loss,
+            loss,
+            branch: TidalBranch::Ocean,
+            heat_flow: root.base.heat_flow,
+        };
+        Some((tides, branch.water.publish(&root.base)))
     }
 
     /// Its Love number k₂ = |k₂|, dimensionless.
