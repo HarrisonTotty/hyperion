@@ -819,6 +819,7 @@ pub struct DerivedBody {
     weathered: PassMaturity,
     cold_traps: PassTraps,
     regolith_albedo: f64,
+    envelope_helium: Option<crate::planetary::chem::escape::EnvelopeHelium>,
     surface_lag: SurfaceLag,
     ocean_solutes: OceanSolutes,
     internal_luminosity: Watts,
@@ -973,6 +974,24 @@ impl DerivedBody {
     #[must_use]
     pub(crate) const fn convergence(&self) -> Convergence {
         self.convergence
+    }
+
+    /// The helium P14.T53.a's fractionation leaves the body's envelope, as its passes read it
+    /// (P14.T54.b.h): `helium_before_passes`'s, taken once before them (its He/H, its helium mass
+    /// fraction and the shares of hydrogen and helium kept), the one the thin envelope's air was
+    /// built at and the escape's outcome carries (`EscapeOutcome::envelope`); `None` under the
+    /// escape's hold, which reads none, and for a body that formed with no envelope. P14.T54.b.i
+    /// passes it to T50.b's envelope (decision-p14-t50b-envelope §5), where the host star's own
+    /// primordial helium joins it.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.b.i's envelope section reads it")
+    )]
+    #[must_use]
+    pub(crate) const fn envelope_helium(
+        &self,
+    ) -> Option<&crate::planetary::chem::escape::EnvelopeHelium> {
+        self.envelope_helium.as_ref()
     }
 
     /// The Bond albedo of the body's bare regolith about its hosts' bands, airless (P14.T51.i): the
@@ -1496,8 +1515,8 @@ pub(crate) fn derive_body_driven(
         lag: bulk.lag,
         ocean_solutes: bulk.ocean_solutes,
     };
-    let history = envelope_history(&bulk, &escape);
-    let passes = PassBody {
+    let (history, envelope_helium) = envelope_and_helium(&bulk, &escape, &sky, age_now);
+    let (passes, regolith_albedo) = PassBody {
         placed,
         sky: &sky,
         bulk: &bulk,
@@ -1510,12 +1529,11 @@ pub(crate) fn derive_body_driven(
         formed,
         impact_speed: impact_speed(placed, hosts, (bulk.mass, bulk.radius)),
         envelope_history: history,
-        envelope_helium: helium_before_passes(history, &bulk, &sky, age_now),
+        envelope_helium,
         deck: RunawayDeck::Kept,
         published: PublishedState::Climate,
     }
     .passes(driver, record);
-    let (passes, regolith_albedo) = passes;
 
     // T15.
     let hill = hill_radius(a, 0.0, mass_kg, hosts.primary_mass);
@@ -1547,6 +1565,7 @@ pub(crate) fn derive_body_driven(
         weathered: passes.weathered,
         cold_traps: passes.cold_traps,
         regolith_albedo,
+        envelope_helium,
         surface_lag: bulk.lag,
         ocean_solutes: bulk.ocean_solutes,
         internal_luminosity,
@@ -1663,6 +1682,23 @@ fn envelope_history(bulk: &AirBulk, escape: &Escape) -> EnvelopeHistory {
         initial: Kilograms::new(bulk.fractions.envelope() * bulk.mass.value() + lost.value()),
         lost,
     }
+}
+
+/// The envelope's history of the body of bulk `bulk` after its escape `escape`
+/// ([`envelope_history`]), with the helium it keeps by `age` under the sky `sky`, taken once before
+/// its passes ([`helium_before_passes`]; P14.T54.b.h carries it to the derivation).
+#[must_use]
+fn envelope_and_helium(
+    bulk: &AirBulk,
+    escape: &Escape,
+    sky: &Sky,
+    age: Years,
+) -> (
+    EnvelopeHistory,
+    Option<crate::planetary::chem::escape::EnvelopeHelium>,
+) {
+    let history = envelope_history(bulk, escape);
+    (history, helium_before_passes(history, bulk, sky, age))
 }
 
 /// The helium the envelope of history `history` of the body of bulk `bulk` under the sky `sky`

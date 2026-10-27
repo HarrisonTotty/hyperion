@@ -29768,14 +29768,48 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         condensables), so the carry moves no `Copy` off `DerivedBody`, `DerivedMoon` or the solver
         (`P: Copy` stays);
       - R09's trapped parts are scaled with their ices where the record's figures scaled every ice
-        into the surface (their shares summing above 1, `within_the_surface`): 244 of 283 parts,
-        `ColdTrapExceedsIce` otherwise; to the bit elsewhere;
+        into the surface (their shares summing above 1, `within_the_surface`): t′ = min(t × s ÷ a,
+        s), a the entry's area and s its ice's share on the figures, 244 of 283 parts, which
+        `ColdTrapExceedsIce` refused otherwise; to the bit against the record's trapped area
+        elsewhere (39), and against the t′ rule where scaled (decision-p14-t54b-f-coldtraps §11,
+        accepted; the record's figures scaling the trapped parts too was refused, a redundant record
+        and wire value);
       - a trapped part below 10⁻⁶ of a level-6 cell that no cell centre's fraction holds is listed,
         not asserted short 0 (four parts of 10⁻¹⁶–7 × 10⁻¹⁴ of the surface).
     - _Deferred findings:_ R09's ground reads the record figures' heat flow and craters (K(P*)), the
       carried field C*'s (§5), within 10⁻⁹ on a converged body; the icy moons wait for P14.T49.m
-      (§6); the record's figures scale the ices into the surface but not the condensates' trapped
-      parts (R09 scales them, above).
+      (§6); whether a body's cold traps should be exempt from the ices' scaling into the surface
+      (decision-p14-t54b-f-coldtraps §11; R09 scales them, above). The cost is re-timed in release
+      under the heavy lock before B2 lands (§11 item 4).
+  - _P14.T54.b.h, the escape, steam and tenuous wiring_ (B2, 2026-10-26; cut from P14.T53.c as
+    landed, main's ruling on the lane's lean). `GENERATOR_VERSION` stays 23, no golden moves, and
+    `PROTOCOL_VERSION` stays 3: no wire type changes.
+    - _The tenuous state and its gas list:_ P14.T53.c put both on the record and the wire itself
+      (`SurfaceState::Tenuous`, the server's arm, `Surface::of`'s gases, pressure, μ and c_p ÷ R
+      over `BodySurfaceDto.gases`, the docs), so h adds no member and no DTO. Its census,
+      `under_every_24_hold_an_airless_record_lists_no_gas_and_a_tenuous_one_its_air` (the sample's
+      first 60 systems, the golden systems and LOOK72's, every 24 hold): 1,283 `Airless` records,
+      each with no gas, p_s exactly 0 and no μ or c_p ÷ R; 109 `Tenuous` ones, each listing its
+      gases (largest first, in [0, 1], summing to 1 to 10⁻⁹) at 0 < p_s < 100 Pa with p ÷ g at or
+      above `TENUOUS_FLOOR_COLUMN`, with its mixture figures. The server sends each member one to
+      one; the client's decoder reads a tenuous body's air (`bodiesWire.test.ts`, a Pluto-like
+      1 Pa of nitrogen).
+    - _P14.T53.b part 2's section tags:_ with P14.T54.b.d (B1); nothing more.
+    - _T53.a's He/H after fractionation, for P14.T54.b.i:_ `DerivedBody::envelope_helium` carries
+      the `EnvelopeHelium` the passes read (`helium_before_passes`, once before them), crate-private;
+      `under_every_24_hold_a_derivation_carries_its_envelope_s_helium`: over the golden systems
+      every body that formed with an envelope carries one and every other none (23 and 243), each
+      equal to its escape outcome's (`EscapeOutcome::envelope`, the thin envelope's) to the bit;
+      none at 23, under the escape's hold. Stated: 9 gas giants, 6 ice giants and 7 sub-Neptunes
+      at He/H 0.096818–0.102554 (Y 0.277711–0.289403), the protosolar start's 0.096818 where
+      little escaped, the sub-Neptunes most fractionated; and `red_giant` 0400, a magma ocean whose
+      envelope kept no hydrogen (He/H infinite, Y 1).
+    - _Left for P14.T54.b.i (main's ruling):_ the host star's own primordial Y as the
+      fractionation's start (`escaping.rs`'s "P14.T54.b passes the host star's own";
+      decision-p14-t50b-envelope §5), with T50.b's inputs and its own arm, since it moves the thin
+      envelopes' helium under the escape's batch; it must land before P14.T54.b.l.
+    - _Steam:_ nothing at 24 unless P14.T53.b part 3 lands, then P14.T54.b.j's.
+    - `ESCAPE_VERSION` goes at P14.T54.b.l.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

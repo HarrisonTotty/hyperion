@@ -12009,6 +12009,175 @@ fn under_the_escape_batch_the_golden_envelopes_helium_is_stated() {
     eprintln!("the batch's extra solves over the goldens: {counts:?}");
 }
 
+/// P14.T54.b.h: the `Airless` and `Tenuous` records as the wire sends them (P14.T53.c), over the
+/// sample's first 60 systems, the golden systems and LOOK72's, every 24 hold in force. An
+/// `Airless` record lists no gas, at a surface pressure of exactly 0 and with no mixture figures
+/// (μ and `c_p` ÷ R `None`, sent `null`); a `Tenuous` one lists its air's gases, largest first with
+/// each fraction in [0, 1] and their sum 1 to 10⁻⁹, at a surface pressure above 0 and under 100 Pa
+/// whose column p ÷ g reaches the tenuous floor (`TENUOUS_FLOOR_COLUMN`, 10⁻⁴ kg m⁻²), with its
+/// mixture figures. The server sends each member one to one (`convert::planetary`'s surface: the
+/// state's `tenuous` string, pinned by the protocol's wire-string test, and the conditions' gases,
+/// pressure, μ and `c_p` ÷ R), and the client's decoder reads both shapes (`bodiesWire.test.ts`).
+#[test]
+fn under_every_24_hold_an_airless_record_lists_no_gas_and_a_tenuous_one_its_air() {
+    use crate::planetary::chem::tenuous::TENUOUS_FLOOR_COLUMN;
+    use crate::planetary::derive::atmosphere::AIRLESS_PRESSURE;
+    use crate::planetary::testing::with_every_24_hold;
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let (mut airless, mut tenuous) = (0_usize, Vec::new());
+    with_every_24_hold(|| {
+        for &(set, seed, ctx) in &sets {
+            let system = generate(seed, ctx);
+            census_walk(set, ctx, &system, &mut |case| {
+                let conditions = case.surface.conditions();
+                let at = format!("{} {}", case.set, case.key);
+                match case.surface.state() {
+                    SurfaceState::Airless => {
+                        assert_eq!(conditions.gases(), [], "{at}");
+                        assert_same_bits(conditions.surface_pressure().value(), 0.0);
+                        assert_eq!(conditions.mean_molar_mass_g_per_mol(), None, "{at}");
+                        assert_eq!(conditions.heat_capacity_over_r(), None, "{at}");
+                        airless += 1;
+                    }
+                    SurfaceState::Tenuous => {
+                        let p = conditions.surface_pressure().value();
+                        let g = case.derived.surface_gravity().value();
+                        let gases = conditions.gases();
+                        let sum = gases.iter().fold(0.0, |sum, &(_, x)| sum + x);
+                        assert!(p > 0.0 && p < AIRLESS_PRESSURE.value(), "{at}: {p} Pa");
+                        assert!(
+                            p / g >= TENUOUS_FLOOR_COLUMN.value(),
+                            "{at}: {} kg/m2",
+                            p / g
+                        );
+                        assert!(!gases.is_empty(), "{at}");
+                        assert!((sum - 1.0).abs() <= 1e-9, "{at}: {gases:?}");
+                        assert!(
+                            gases.iter().all(|&(_, x)| (0.0..=1.0).contains(&x))
+                                && gases.windows(2).all(|pair| pair[0].1 >= pair[1].1),
+                            "{at}: {gases:?}"
+                        );
+                        assert!(
+                            conditions
+                                .mean_molar_mass_g_per_mol()
+                                .is_some_and(|mu| mu > 0.0),
+                            "{at}"
+                        );
+                        assert!(conditions.heat_capacity_over_r().is_some(), "{at}");
+                        tenuous.push(format!(
+                            "{at} {}: {p:.4e} Pa, {:.4e} kg/m2, {}",
+                            case.kind,
+                            p / g,
+                            gases
+                                .iter()
+                                .map(|&(id, x)| format!("{} {x:.4}", id.substance().key()))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    SurfaceState::GasEnvelope
+                    | SurfaceState::MagmaOcean
+                    | SurfaceState::RunawayGreenhouse
+                    | SurfaceState::Temperate
+                    | SurfaceState::Snowball => {}
+                }
+            });
+        }
+    });
+    eprintln!(
+        "{airless} airless records list no gas; {} tenuous ones their air:\n  {}",
+        tenuous.len(),
+        tenuous.join("\n  ")
+    );
+    assert!(airless > 0 && !tenuous.is_empty());
+}
+
+/// P14.T54.b.h: every derivation carries the helium P14.T53.a's fractionation left its envelope,
+/// the one its passes read (`DerivedBody::envelope_helium`, for P14.T54.b.i's envelope and T50.b's
+/// primordial He/H, decision-p14-t50b-envelope §5). Over the golden systems, every 24 hold in
+/// force: a body that formed with an envelope carries one, and one that formed with none carries
+/// none; where its published air's escape outcome holds its envelope's helium
+/// (`EscapeOutcome::envelope`, the one its thin envelope's air was built at), the two are the same
+/// to the bit. At 23, under the escape's hold, no derivation carries one. Each is stated by kind
+/// with its He/H and Y.
+#[test]
+fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
+    use crate::planetary::chem::escape::EnvelopeHelium;
+    use crate::planetary::testing::with_every_24_hold;
+    let same = |a: &EnvelopeHelium, b: &EnvelopeHelium| {
+        assert_same_bits(a.helium_to_hydrogen(), b.helium_to_hydrogen());
+        assert_same_bits(a.helium_mass_fraction(), b.helium_mass_fraction());
+        assert_same_bits(a.hydrogen_kept_share(), b.hydrogen_kept_share());
+        assert_same_bits(a.helium_kept_share(), b.helium_kept_share());
+    };
+    let (mut carried, mut on_the_outcome, mut none) = (0, 0, 0);
+    with_every_24_hold(|| {
+        for (name, ctx, _) in golden_systems() {
+            let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx);
+            for body in system.bodies() {
+                let Some((derived, ..)) = derived_at_epoch(ctx, &system, body.index.get()) else {
+                    continue;
+                };
+                let formed_with_one = derived.initial_envelope_fraction() > 0.0;
+                let Some(helium) = derived.envelope_helium() else {
+                    assert!(!formed_with_one, "{name} {:04x}", body.index.get());
+                    none += 1;
+                    continue;
+                };
+                assert!(formed_with_one, "{name} {:04x}", body.index.get());
+                carried += 1;
+                let outcome = derived
+                    .atmosphere()
+                    .escape()
+                    .and_then(|escape| escape.envelope());
+                if let Some(outcome) = outcome {
+                    same(helium, outcome);
+                    on_the_outcome += 1;
+                }
+                eprintln!(
+                    "{name} {:04x}: {:?}, {:?}, formed with {:.5} of its mass in its envelope; \
+                     He/H {:.6}, Y {:.6}{}",
+                    body.index.get(),
+                    derived.class(),
+                    derived.atmosphere().state(),
+                    derived.initial_envelope_fraction(),
+                    helium.helium_to_hydrogen(),
+                    helium.helium_mass_fraction(),
+                    if outcome.is_some() {
+                        ", its escape outcome's"
+                    } else {
+                        ""
+                    },
+                );
+            }
+        }
+    });
+    eprintln!(
+        "{carried} derivations carry their envelope's helium ({on_the_outcome} on their escape \
+         outcome too), {none} none"
+    );
+    assert!(carried > 0 && on_the_outcome > 0);
+    for (name, ctx, held) in golden_systems() {
+        for body in held.bodies() {
+            if let Some((derived, ..)) = derived_at_epoch(ctx, held, body.index.get()) {
+                assert!(derived.envelope_helium().is_none(), "{name} at 23");
+            }
+        }
+    }
+}
+
 // P14.T53.b part 1: the state from the present insolation, and the runaway's deck
 // (decision-absurd-states-24 R3–R4; decision-pre-23-review item 33).
 
