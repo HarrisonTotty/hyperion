@@ -144,6 +144,7 @@ function answerBlock(w: ScriptedHeightWorker, n: number, first: number): void {
       newlySurveyed: Uint32Array.from([first, first + 2]),
       newlyHeld: Uint32Array.from([first, first + 3]),
       levels: new Float64Array(100).fill(first),
+      sigmaM: new Float64Array(25).fill(first / 10),
     },
   });
 }
@@ -537,16 +538,20 @@ describe("the height-worker pool", () => {
     ]);
   });
 
-  it("keeps the level table of the latest block reported, and none once released", () => {
+  it("keeps the level bounds of the latest block reported, and none once released", () => {
     const { pool, created } = poolOf(1, MOON_SOURCE);
     pool.fieldInit(MOON, blockOf(4, 0));
     pool.fieldChunk(MOON, blockOf(4, 1));
     expect(pool.fieldLevels(MOON)).toBeNull();
+    expect(pool.fieldBounds(MOON)).toBeNull();
     answerBlock(workerAt(created, 0), 0, 10);
     answerBlock(workerAt(created, 0), 1, 20);
     expect(pool.fieldLevels(MOON)?.[0]).toBe(20);
+    expect(pool.fieldBounds(MOON)?.table).toBe(pool.fieldLevels(MOON));
+    expect(pool.fieldBounds(MOON)?.sigmaM[24]).toBe(2);
     pool.fieldRelease(MOON);
     expect(pool.fieldLevels(MOON)).toBeNull();
+    expect(pool.fieldBounds(MOON)).toBeNull();
   });
 
   it("reports no change again from a replacement's answers to the blocks posted again", () => {

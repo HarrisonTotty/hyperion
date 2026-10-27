@@ -13,6 +13,7 @@
     "src/renderer/src/view/terrain/workers/messages.ts",
     "src/renderer/src/view/terrain/patchKey.ts",
     "src/renderer/src/view/terrain/planet.ts",
+    "src/renderer/src/view/terrain/levelBounds.ts",
     "src/renderer/src/view/terrain/cube.ts",
     "src/renderer/src/view/spike/surfaceQuery.ts",
     "src/renderer/src/view/quality/terrainKinds.ts",

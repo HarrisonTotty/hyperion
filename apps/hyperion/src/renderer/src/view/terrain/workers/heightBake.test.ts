@@ -18,12 +18,13 @@ import type { ClassMapAnswer, GroundReadoutRequest } from "./messages";
 const MOON = keptBody(1);
 const PLANET = keptBody(2);
 
-/** A block answer of the fake module: no cell surveyed anew, a table of zeros. */
+/** A block answer of the fake module: no cell surveyed anew, a table and σ of zeros. */
 function emptyBlock(): WasmFieldBlock {
   return {
     newlySurveyed: () => new Uint32Array(),
     newlyHeld: () => new Uint32Array(),
     levelTable: () => new Float64Array(100),
+    levelSigmaM: () => new Float64Array(25),
     fieldLevel: 6,
     free: () => {},
   };
@@ -308,6 +309,7 @@ describe("a height worker's fields", () => {
       chunk.reply.block.newlySurveyed.buffer,
       chunk.reply.block.newlyHeld.buffer,
       chunk.reply.block.levels.buffer,
+      chunk.reply.block.sigmaM.buffer,
     ]);
     expect(held.size).toBe(1);
     expect(fields.bodies).toEqual([MOON]);

@@ -783,13 +783,18 @@ targets at header 21 (below).
    σ_b a_(n+1) ÷ √(1 − g²), so with noise normalised to B ≈ 1 and σ_b ≈ 0.2–0.3 the observed 99.9th
    percentile over the hard bound is expected at about 0.3–0.5, lower with craters, whose bound is
    the largest omitted crater's depth that few points see. Patch count scales as the inverse square
-   of that ratio, four to eleven times a perfect bound. The reference renderers bound it the same
-   way: chunked level of detail (Ulrich 2002) stores a hard maximum vertical error per chunk and
-   refines while ρ = δ K ÷ D > τ; CDLOD (Strugar 2009) and Proland are distance-based; CesiumJS's
-   geometric error for heightmap terrain is a horizontal-spacing heuristic,
-   `getEstimatedLevelZeroGeometricErrorForAHeightmap`, with `maximumScreenSpaceError` defaulting to
-   2 px (verified in `TerrainProvider.js` and `Globe.js`). So the hard bound stays the stated and
-   tested bound, which is what a sensor's stated error means. The candidate calibration, ruled to
+   of that ratio, four to eleven times a perfect bound. _Measured by R10.T4.a (Risks, "Recorded per
+   world and level (R10.T4.a)" and its "Deferred findings"): the 99.9th percentile is 0.000–0.074
+   of ε on every sample world and level, not 0.3–0.5, so the stated bound draws some 180 to 28,000
+   times a perfect bound's patches at most levels; and the deviations are heavy-tailed, so 4σ is
+   no bound either (R10.T4.b's record applies item 30's rule to them)._ The reference renderers
+   bound it the same way: chunked level of detail (Ulrich 2002) stores a hard maximum vertical error
+   per chunk and refines while ρ = δ K ÷ D > τ; CDLOD (Strugar 2009) and Proland are
+   distance-based; CesiumJS's geometric error for heightmap terrain is a horizontal-spacing
+   heuristic, `getEstimatedLevelZeroGeometricErrorForAHeightmap`, with `maximumScreenSpaceError`
+   defaulting to 2 px (verified in `TerrainProvider.js` and `Globe.js`). So the hard bound stays
+   the stated and tested bound, which is what a sensor's stated error means. The candidate
+   calibration, ruled to
    apply by T4.a's and T4.b's numbers (`signoff-12.md`, item 30), is that selection takes the
    smaller of the hard bound and 4σ of the omitted bands, σ from R09's level-keyed closed forms
    (`Synthesiser::omitted_rms` at the level, added by R10.T5). Over a patch's 4,225 vertices, taken
@@ -3940,7 +3945,9 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
 - **The selection bound's calibration is ruled by its numbers** (`signoff-12.md`, item 30). If
   T4.a's 99.9th-percentile ratios fall at the expected 0.3–0.5, the hard bound costs four to eleven
   times the patches of a perfect bound; selection by min(hard, 4σ) recovers two to three times. T4.b
-  applies the rule to T4.a's recorded figures; until then selection uses the hard bound.
+  applies the rule to T4.a's recorded figures; until then selection uses the hard bound. _They fell
+  at 0.000–0.074 (R10.T4.a's records, at the end of this section; Design note 5's pointer), and
+  R10.T4.b's record applies the rule._
 - **The low setting's cache is at its edge.** With 16-bit horizon maps a low-setting patch is
   about 156 kB, and the sizing rule's 430 slots fill 64 MiB exactly before relief and balancing. T14
   decides between a larger low cache (inside the 1 GB ceiling), a half-resolution near-field horizon
@@ -14336,3 +14343,548 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _Design note 5 and the Risks bullet "The selection bound's calibration is ruled by its
     numbers" still expect 0.3–0.5._ This record is append-only; a pointer there to the findings
     above is main's.
+- **Deviations in R10.T4.b, as built** (2026-10-26; lane r10-t4b, on `rendering-and-planets` at
+  `5d9d26e7`; `GENERATOR_VERSION` 23, no bump). The worker's σ by level beside its level table, the
+  client's level bounds and selection rule, and `signoff-12.md` item 30 applied to them. Selection is
+  unchanged under the rule in force, the hard bound.
+  - _σ beside the table, not a column of it._ `WorkerFields::level_sigma_m(body)`, a
+    `[f64; 25]`, and the module's `FieldBlock.levelSigmaM()`, a `Float64Array` of 25, answered with
+    every block as the table is (T6.b's as-built), `field_init`'s among them. The table keeps R05's
+    stride 4, which the test planet's golden and every reader index. The client carries σ as
+    `FieldBlockAnswer.sigmaM`, and the pool keeps it with the table (`fieldBounds(body)`). σ_n is
+    the largest `Synthesiser::omitted_rms` at n over the cells the field holds as surveyed, and 0
+    before any. It is taken over surveyed cells, not every held cell: an unsurveyed vertex takes the
+    reference surface (R10.T6.a), and a bake's own σ is over its surveyed vertices' cells. This is a
+    reversible choice, recorded with main's OK.
+  - _Provides' sketch, as built._ Provides has `LevelBounds { hard; sigma }` per body in
+    `levelBounds.ts`, and `selectionBound(bounds, level, rule)`. As built:
+    - `LevelBounds` is `{ table, sigmaM }`: the stride-4 table, whose heights culling reads, with σ
+      beside it;
+    - the pool holds it per body (`fieldBounds`), as it held the table (T6.b);
+    - `selectionBound(hardM, sigmaM, rule = SELECTION_RULE)` takes one level's values, and
+      `planet.ts`' `selectionBoundM(planet, level)` reads them a level at a time.
+
+    No later plan consumes either. A pointer from Provides is main's.
+
+  - _Its cost._ A block reads each cell it surveys anew once, at each level whose bound is positive.
+    σ is 0 where the bound is: T4.a found it so on every world, and the worker's tests hold it to
+    the bit on the Moon-like fixture and on the Earth-like one, which has air and channels. The small
+    craters' share of a level's omitted variance is the body's, the same in every cell, so it is
+    built once at the field's start. That is a new crate-private `synth::omitted_variance_in`,
+    `Synthesiser::omitted_variance`'s own composition with the share passed in (main's OK for
+    `synth.rs`; the output is bit-identical). The figures below are native, `opt-level = 2`, by
+    hand on R09's synthetic worlds; they are provisional, taken on a shared machine whose 1-minute
+    load was 2.3 when the first run started, and not taken per run.
+    - About 50–70 µs a cell, against 1,200–1,400 µs with `omitted_rms` whole at each level.
+    - A whole field: 0.3 s for the Ceres-like (6,144 cells), 1.8 s for the Moon-like (24,576), 6 s
+      for the Mars-like (98,304) and 25–28 s for the Earth-like (393,216).
+    - A full 1 MiB block of a level-8 field (about 27,000 cells): 2.1–3.1 s, in every worker.
+    - A small survey's block: milliseconds.
+
+    Deferred, with its levers (below).
+
+  - _The golden._ `tests/golden/worker/moon_like.golden` gains `level_sigma first` and
+    `level_sigma last`, re-blessed at 23 by name (presentation; no bump):
+    `HYPERION_BLESS=1 cargo test -p hyperion-surface --lib worker::golden::worker_matches_its_golden`.
+    `fieldsWasm.test.ts` holds the module's σ to them bit for bit.
+  - _The client._
+    - `levelBounds.ts` holds `SelectionRule` (`"hard" | "statistical"`) and `SELECTION_RULE`, which
+      is `"hard"`; that constant is the one place the switch is made. It also holds
+      `SIGMA_MULTIPLE` (4), `LevelBounds`, `selectionBound`, `checkLevelSigma` and
+      `LEVEL_SIGMA_LENGTH`.
+    - `planet.ts`: `planetGeometry(figure, levelTable, sigmaM = null, rule = SELECTION_RULE)`.
+      `PlanetGeometry` gains `sigmaM`, `selectionBoundM` (25 values) and `rule`, and there is a new
+      `selectionBoundM(planet, level)`.
+    - `select.ts`: `selectionErrorM` charges `selectionBoundM` plus the sagitta.
+  - _Only the error takes the rule._ The task text has `selectionBound` fill the table's bound
+    column. As built, the column stays the stated bound and selection reads its own. The subtree
+    ranges' skirt bottoms (`subtreeHeightRangeM`), the baked ranges' widening (`widenBoundM`,
+    `skirtBoundM`) and every other reader of `levelBoundM` keep ε_n, so that under the statistical
+    rule a box still holds what it bounds. Under the hard rule the two are the same. Design note 5's
+    "selection takes the smaller" is read as applying to the error alone. `cacheBudget.ts`'s count
+    model keeps `levelBoundM` (its premise planet has no σ). The spike's `calibratedLevelTable` keeps
+    its own min(ε, 4σ) over the whole column, culling included: that is R05's count, not this rule.
+  - _The live path._ `TerrainPass.setLevels(levels, sigmaM = null)` keeps the planet's rule, and
+    `session.ts` (R10.T16's, last changed by R08.T10.b) passes `change.sigmaM`, and the pool's
+    bounds to `planetGeometry`. These are two call sites, changed after T10.b landed, with main's
+    OK. The smoke harnesses' `planetGeometry(…, pool.fieldLevels(…))` and the spike's
+    `bodyDescent.ts` still pass the table alone, so they get the stated bound under either rule
+    (deferred, below).
+  - _`tsconfig.worker.json`_ lists `levelBounds.ts`, which `planet.ts` now imports. That widens
+    smart-ci's plan to every package's vitest.
+  - _Tests._ `levelBounds.test.ts` (Vitest, pure; 18 tests):
+    - the bound under either rule, its σ = 0 case, and the rule in force by default;
+    - culling's ε untouched under the statistical rule;
+    - selection's error being the rule's bound plus the sagitta, below ε at every level that omits
+      anything under the statistical rule;
+    - no bound with no table, and a bad σ refused;
+    - the fixture's six tables, composed as the worker's `level_table` makes them, positive in
+      bound and σ exactly below the complete level;
+    - selection exact under either rule at 1, 2 and 4 px: every seen patch above the finest level
+      meets τ, and every split parent is past τ or was split by the 2:1 balance alone;
+    - never finer under the statistical rule than under the hard one;
+    - R05's history independence under either rule, on the Mars-like world;
+    - the grounded-body rule's finest level under a contact on all six worlds, both rules and each
+      style at its pass's budget, on ranges baked flat at ±1 m;
+    - item 30's second condition failing on the fixture, with the hard rule in force.
+
+    The unbudgeted tests select on a view an eighth of 1,920 px wide, from two poses of the arc
+    (300 s and 600 s), on five worlds (the locked Earth-like's bounds are the Earth-like's). ρ goes
+    as the width over τ, so the property is the same. On the hard bound an unbudgeted selection of
+    the presented view runs past 16,384 patches from orbit on the Earths, and to about 50,000 at a
+    quarter of its width. Their limit is 60 s: 4.5 s worst in the terrain directory's run at 4
+    workers (M2), 5.0 s beside a second run (M3), ten times M2 rounded up (the vitest config's
+    rule).
+
+    Beside them:
+    - `terrainPassShared.test.ts`: the pass selects again on a new σ with the table, and not on the
+      same one;
+    - `sessionPasses.test.ts`: the session hands its pass each block's σ;
+    - the worker's Rust tests (`cargo test -p hyperion-surface --lib worker::`): σ bit for bit the
+      largest `omitted_rms` over the surveyed cells, after a one-block payload's block 0 and after
+      every block, in either order of the blocks; 0 before any surveyed cell, none once released,
+      and positive exactly where the bound is; and the same on the Earth-like fixture at all 25
+      levels.
+
+  - _Acceptance._ `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`: 71 files
+    and 2,102 tests, exit 0, on the final code (2026-10-26).
+  - _The counts are by hand, not a test._ An unbudgeted selection on the hard bound reaches 10⁵–10⁶
+    patches near the ground: at the Mars-like world's ε_17 = 13 m, level 17 refines out to 21 km at
+    1 px. So the counts below were taken by a harness in the lane's scratch,
+    `.git/rm45-scratch/r10-t4b/levelBoundsRecord.tmp.test.ts` (copied into `view/terrain/` for its
+    one run of about 350 s, its output `counts-step10.txt`). It reads the fixture's tables composed
+    as the test composes them, with σ the fixture's `sigma_m`: the largest over 16,384 sampled
+    cells, a little under a fully surveyed worker's σ at coarse levels 7 and 8 (T4.a). It takes:
+    - each world a sphere of its radius;
+    - R05's descent at its record seed (`RECORD_SEED`, 7), at 124 poses 10 s apart;
+    - one 1,920 × 1,080 view of 60° for each style (the presented size, Design note 23): τ = 1 px
+      (high), 2 px (low) and 4 px (wireframe);
+    - no contact;
+    - at each pose, one selection held to 16,384 patches (the "guard") and one at the style's pass
+      budget, half its slots (604 high, 187 low, 260 wireframe), whose limit excess gives
+      τ′ = τ × max(1, excess);
+    - boxes either unbaked (the table's ranges, the rule's "from the fixture") or baked flat at
+      ±1 m, so that τ alone sets the depth, as `terrainWireSelection.test.ts` bakes them.
+
+    The test keeps only what decides the rule.
+- **Recorded (R10.T4.b): `signoff-12.md` item 30 applied.** Sums of the selected patches over the
+  124 poses, the guard capping a pose at 16,384; "capped" counts the poses it held. A hard sum
+  capped at most poses is a lower bound. So is the saving, wherever the min(hard, 4σ) sum is
+  uncapped: at 1 px on the Mars-, Moon-, Ceres- and Europa-like worlds, at 2 and 4 px on every
+  world, and on flat boxes. On the two Earths at 1 px, unbaked, both sums are capped (124 and 46
+  poses), so 1.89 bounds nothing.
+
+  | World             | Hard, 1 px (capped) | min(hard, 4σ), 1 px (capped) | Saving, unbaked, 1 / 2 / 4 px | Saving, flat, 1 / 2 / 4 px (each ≥) | Past 4σ_body    |
+  | ----------------- | ------------------- | ---------------------------- | ----------------------------- | ----------------------------------- | --------------- |
+  | Earth-like        | ≥ 2,031,509 (124)   | 1,073,702 (46)               | 1.89 / ≥ 4.37 / ≥ 14.0        | 5.92 / 21.7 / 66.4                  | 0 of 76         |
+  | Mars-like         | ≥ 2,031,473 (124)   | 144,044 (0)                  | ≥ 14.1 / ≥ 36.4 / ≥ 78.6      | 46.3 / 108 / 220                    | 41 of 72 (0.57) |
+  | Moon-like         | ≥ 2,031,490 (124)   | 175,708 (0)                  | ≥ 11.6 / ≥ 31.6 / ≥ 75.5      | 21.6 / 59.6 / 158                   | 49 of 68 (0.72) |
+  | Ceres-like        | ≥ 1,529,173 (92)    | 80,360 (0)                   | ≥ 19.0 / ≥ 43.0 / ≥ 82.6      | 38.9 / 85.3 / 162                   | 46 of 60 (0.77) |
+  | Europa-like       | ≥ 2,031,483 (124)   | 163,039 (0)                  | ≥ 12.5 / ≥ 39.5 / ≥ 75.8      | 162 / 376 / 406                     | 45 of 68 (0.66) |
+  | locked Earth-like | ≥ 2,031,502 (124)   | 1,074,086 (46)               | 1.89 / ≥ 4.37 / ≥ 14.0        | 5.91 / 21.7 / 66.4                  | 0 of 76         |
+  - _The rule._ The first condition, a saving of 1.5 or more at 1 px on every world, holds: at
+    least 5.92 on the Earths on flat boxes (their unbaked 1.89 is a ratio of two capped sums), and
+    at least 11.6–19.0 on the rest. The second, the per-patch maxima past 4σ in at most one patch in
+    three on every world, fails on four of the six: 0.57–0.77 past 4σ_body, the σ selection would
+    read, and 0.66–0.77 past 4σ of their own cells; the Earths have 0 and 0.22. So the hard bound
+    stays (`SELECTION_RULE`). Neither figure is within 10% of its threshold, so nothing goes to the
+    sign-off queue by the rule.
+  - _What the hard bound costs at the pass's budget_, the high setting at 1 px: τ′ = τ × max(1,
+    excess) over the poses, with the poses limited out of 124.
+
+    | World             | Hard, unbaked: τ′ mean (max), limited | Hard, flat: τ′ mean (max) | min(hard, 4σ), unbaked: τ′ mean (max), limited | min(hard, 4σ), flat: τ′ mean (max) |
+    | ----------------- | ------------------------------------- | ------------------------- | ---------------------------------------------- | ---------------------------------- |
+    | Earth-like        | 84.9 (175) px, 124                    | 29.2 (43.2) px            | 5.84 (12.0) px, 124                            | 2.09 (2.8) px                      |
+    | Mars-like         | 178 (366) px, 124                     | 47.0 (87.6) px            | 1.70 (2.9) px, 62                              | 1.00 (1.0) px                      |
+    | Moon-like         | 121 (277) px, 124                     | 51.1 (87.1) px            | 1.87 (3.5) px, 124                             | 1.16 (1.5) px                      |
+    | Ceres-like        | 66.0 (191) px, 95                     | 21.1 (58.2) px            | 1.38 (2.7) px, 49                              | 1.00 (1.0) px                      |
+    | Europa-like       | 37.9 (139) px, 124                    | 11.0 (27.0) px            | 1.70 (4.3) px, 28                              | 1.00 (1.0) px                      |
+    | locked Earth-like | 84.9 (175) px, 124                    | 29.2 (43.2) px            | 5.85 (12.0) px, 124                            | 2.09 (2.8) px                      |
+
+    The hard bound holds the high setting at `DETAIL LIMITED` almost throughout the descent, at a
+    stated error of tens of pixels. The drawn error is some 0.03 of that (T4.a's p99.9/ε), so about
+    1–5 px. At the low and wireframe budgets the unbaked boxes give τ′ of 10³–10⁶ px under both
+    rules. That is the boxes, not the bound: an unbaked box spans the field's whole height range,
+    the camera low in the descent stands inside it, and 187 or 260 patches run out before selection
+    reaches the camera. The flat runs there give a τ′ mean of 2.0–4.5 px at 2 px and 4.0–4.1 px at
+    4 px under min(hard, 4σ), and 16–106 px under the hard bound.
+
+- **Deferred findings (2026-10-13 rule) (R10.T4.b)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _Item 30's ruling round (main's)._ By the rule, the hard bound stays. The figures above show
+    why: the saving is large (1.9 to 400 times), but the deviations are heavy-tailed (T4.a), so 4σ
+    is passed in most patches on the cratered worlds. Meanwhile the hard bound keeps the high setting
+    limited almost throughout. Levers for the round:
+    - R09's terms (T8.d's (b): the channels held to the body's largest valley depth);
+    - a calibrated factor on the stated bound, from T4.a's p99.9 or worst-case ratios (0.005–0.134
+      of ε);
+    - a σ multiple fitted to the tails rather than 4.
+  - _What waited on "T4.b's statistical bound"._ The hard bound stays, so nothing keyed to that
+    bound has been triggered:
+    - decision-r10-t14b-constants' re-size now waits on R09's (ii) or item 30's ruling round. The
+      constants stay at 400,000,000 B, 64 MiB and 520 slots (Design note 15, T14.b, "The low
+      setting's cache is at its edge", T14.b's deferred findings). Their "two to three times" lever
+      is measured above, at 1.9 to 400 times, but not adopted.
+    - The trigger "T4.b's statistical bound making a code-0 level a steady leaf" does not fire.
+    - R05's high normal scale rests on R12.T11.b alone.
+    - The roadmap's "Awaiting the owner" entry still says "Until then".
+
+    Pointers are main's.
+
+  - _σ's cost per block._ 2–3 s of every worker's time for a full 1 MiB block of a level-8 field,
+    and 25–28 s for a whole one, while the rule in force reads no σ. Bakes queue behind it. Its
+    levers:
+    - a coarse crater's rims share is the crater's at a level, not the cell's, so it could be built
+      once a crater (about half the cost on the cratered worlds);
+    - the relief's and channels' per-octave terms could be built once a cell, not once a level;
+    - σ could be read only under the statistical rule (main's call).
+
+    Small surveys cost milliseconds.
+
+  - _Callers that pass no σ._ The smoke harnesses (`sharedPass.ts`, `terrainFrame.ts`,
+    `wireframeTerrain.ts`) and the spike's `bodyDescent.ts` give `planetGeometry` the table alone,
+    and `cacheBudget.ts`'s model reads `levelBoundM`. Nothing moves under the hard rule. A switch to
+    the statistical rule should make them pass `fieldBounds(body)?.sigmaM`.
+  - _The counts' harness is by hand._ It is in the lane's scratch, described above, so that
+    R10.T15.b can take it again at 24, when the fixture is re-blessed and these counts become
+    provisional. R10.T15.b's text has no step for it (main's).
+- **Deviations in T2's `sample_worlds()` follow-up, as built** (2026-10-26; lane r10-worlds, begun
+  on `rendering-and-planets` at `f2331483` and fast-forwarded to `5d9d26e7`, which moves no coarse
+  field: no coarse golden, nothing in the surface crate; `GENERATOR_VERSION` 23, no bump). Test code
+  and this record; nothing generated moves. The figures are at 23. The coarse fields move at 24 by
+  P14.T53.a's water term, so R10.T15.b re-records them at 24 (main's brief), and R09's follow-up on
+  the closed forms (decision-r10-t2-weights §2.5, held for decision-r09-channel-term.md) re-measures
+  them first.
+  - _What it is._ New `crates/hyperion-sim/tests/surface_weights_worlds.rs`, the plan's binary. It
+    ports `material::weights::tests`' `agreements` and `patch_palette` to the public interface,
+    onto R09.T16's `sample_worlds()`, through `tests/common/surface_worlds.rs`'s
+    `sample_world(name)` and `SampleWorld::field()` (`mod common;` under `#[expect(dead_code, …)]`,
+    as T1.b's and T3's binaries have it). Each world has one slow test,
+    `the_weights_hold_on_the_<world>_sample_world`, `#[ignore = "slow: …"]`. Each pays its own
+    pass, and the agreement and the patches share it (decision-r09-t13-test-cost §1.2). One fast
+    test, `every_sample_world_has_a_weights_test`, checks with no pass that the six names the slow
+    tests look up (`TESTED`), sorted, are `sample_worlds()`'s names sorted. A world's checks are
+    `assert_the_weights_hold(&SampleWorld)`.
+  - _The measure is the library's._
+    - A texel of band level m is a cell of quadtree level m + 6 about a vertex of the level's
+      lattice, kept off the face's edges.
+    - `weights_at` at its centre is set against `material_at` at its 8 × 8 step centres at
+      n − 1 to n − 6, and at 64 × 64 at the class map's level 4, by its total variation.
+    - A texel has a cache of its own, and every texel's bytes sum to 255.
+    - A failure names the level's five worst texels and their cells.
+    - n is `finest_level` of the header's equatorial radius, which is the classifier's
+      crate-private `finest_band`.
+  - _The wrong-dominant count_ (decision-r10-t2-weights §2.4.2). Each level prints, but does not
+    assert, its texels whose largest weight's material (`ClassWeights::largest`) is not the material
+    counted at the most points (ties to the lower material). They come by pair, each saying whether
+    the two share an entry and a photometric form (`MaterialClass::photometric_form`).
+  - _The hard cells_ take half the texels; the other half lie at random over the sphere.
+    - The library's five kinds come by the same rules, through the public interface:
+      `ReliefStyle::of(cell).belt()`; `SynthesisCell`'s `ice`, `is_under_water()`,
+      `water_surface_mm` and `elevation_mm`; `Channels::network`'s `segment`; and
+      `CoarseField::craters()` for the rims.
+    - A sixth kind is the cells of full ice. The synthetic worlds have none, and the sample worlds'
+      passes place them (T2's deferred "_The synthetic worlds barely mix_").
+    - They are found once a world, not once a level as in the library, up to a thousand of each,
+      spread in `cell_index` order.
+    - The counts (belts, partial ice, full ice, shallow sea, trunks, rims):
+      - `earth_like`: 5,180, 1, 15,118, 27,237, 105,430 and 1, of which 4,002 are taken;
+      - `locked_earth_like`: 5,943, 1, 18,274, 24,264, 66,527 and 1, with 4,002 taken;
+      - `mars_like`: 0, 2, 772, 0, 51,687 and 325, with 2,099 taken;
+      - `moon_like` and `ceres_like`: rims alone, 324 and 75;
+      - `europa_like`: none, so all its texels lie at random.
+  - _The patches._ At n − 1, n − 3, n − 6 and 4, six patches a level (`PATCHES`), where the library
+    takes one. Each is the level's patch about a random point of a hard cell, taking the first cell
+    of each kind in turn. One cache serves them all, as in the library. On the reference Earth the
+    patch `(PosX, 4, 2, 1)` is checked as well and admitted at nine materials by name
+    (`nine_material_patch`, decision-r10-t2-weights §3). Any other patch past eight fails, and is
+    named.
+  - _The samplers_ are the testkit's `Lcg`, seeded by FNV-1a 64 over the world's name, with this
+    binary's seeds in place of the offset basis:
+    - `SAMPLES` for the texels and `PATCH_SAMPLES` for the patches, so that a world's points depend
+      on its name and field alone and the patches do not move with the texels' count;
+    - the detail seed is the binary's own `DETAIL`.
+  - _The Mars-like world's class-map level takes a hundred texels_ (`MARS_CLASS_MAP_TEXELS`), not
+    the plan's thousand. This is T2's deferred "_The slow cases' cost_", settled for this binary by
+    decision-r10-t2-weights §1. On the sample Mars a finest point costs about 4 ms away from a cache
+    by this binary's 20-texel probe (370 s for that world), and about 1.9 ms in its full run
+    (1,536.5 s over about 7.9 × 10⁵ points), both under load. So 1,000 × 4,096 points would take
+    some two to five hours alone. Every other world and level takes the plan's thousand. The
+    library's synthetic Mars-like slow case (`…_over_a_thousand_texels_mars_like`) keeps the plan's
+    thousand and its cost; whether §1 extends to it is asked of main.
+  - _Nothing is pinned for the agreement._ The reference Earth's level-4 mean over its thousand
+    texels is 0.0651, under the plan's 0.10 and so under §2.4.1's pin line. The 20-texel probe's
+    0.141 came from two of its texels.
+  - _The figures._ Each world's mean total variation over a level's texels, its worst texel's, and
+    the mean over its mixed texels with their count, then the wrong-dominant texels. The run used
+    the slow-test profile under nextest at four threads, `CPUQuota=400%`, at a 1-minute load of 4.8
+    at its start and 11.9 at its end. Every case holds the plan's 0.10:
+
+    | World               | Level      | Mean   | Worst  | Mixed: mean (count) | Wrong-dominant |
+    | ------------------- | ---------- | ------ | ------ | ------------------- | -------------- |
+    | `earth_like`        | 18 (n − 1) | 0.0007 | 0.3281 | 0.2448 (3)          | 0              |
+    | `earth_like`        | 17         | 0.0058 | 0.9020 | 0.2062 (28)         | 7              |
+    | `earth_like`        | 16         | 0.0080 | 0.7181 | 0.1593 (50)         | 5              |
+    | `earth_like`        | 15         | 0.0059 | 0.4688 | 0.1010 (58)         | 3              |
+    | `earth_like`        | 14         | 0.0086 | 0.5732 | 0.1199 (72)         | 6              |
+    | `earth_like`        | 13 (n − 6) | 0.0081 | 0.5337 | 0.0829 (98)         | 4              |
+    | `earth_like`        | 4          | 0.0651 | 1.0000 | 0.1431 (448)        | 64             |
+    | `locked_earth_like` | 18 (n − 1) | 0.0018 | 0.5000 | 0.3656 (5)          | 0              |
+    | `locked_earth_like` | 17         | 0.0039 | 0.5924 | 0.1438 (27)         | 5              |
+    | `locked_earth_like` | 16         | 0.0046 | 0.7026 | 0.1219 (38)         | 5              |
+    | `locked_earth_like` | 15         | 0.0064 | 0.5539 | 0.1166 (55)         | 8              |
+    | `locked_earth_like` | 14         | 0.0077 | 0.6905 | 0.1217 (63)         | 5              |
+    | `locked_earth_like` | 13 (n − 6) | 0.0097 | 0.6078 | 0.1024 (95)         | 10             |
+    | `locked_earth_like` | 4          | 0.0403 | 0.9907 | 0.1215 (332)        | 35             |
+    | `mars_like`         | 17 (n − 1) | 0      | 0      | (0)                 | 0              |
+    | `mars_like`         | 16         | 0.0006 | 0.5725 | 0.5725 (1)          | 1              |
+    | `mars_like`         | 15         | 0.0000 | 0.0118 | 0.0118 (1)          | 0              |
+    | `mars_like`         | 14         | 0      | 0      | (0)                 | 0              |
+    | `mars_like`         | 13         | 0.0004 | 0.1961 | 0.1061 (4)          | 0              |
+    | `mars_like`         | 12 (n − 6) | 0.0005 | 0.5000 | 0.2559 (2)          | 0              |
+    | `mars_like`         | 4 (100)    | 0.0235 | 0.5000 | 0.1022 (23)         | 1              |
+    | `moon_like`         | 16 (n − 1) | 0.0000 | 0.0312 | 0.0312 (1)          | 0              |
+    | `moon_like`         | 15         | 0.0016 | 0.7812 | 0.5495 (3)          | 2              |
+    | `moon_like`         | 14         | 0.0006 | 0.5340 | 0.2014 (3)          | 1              |
+    | `moon_like`         | 13         | 0.0004 | 0.2512 | 0.0824 (5)          | 0              |
+    | `moon_like`         | 12         | 0.0002 | 0.1092 | 0.0380 (4)          | 0              |
+    | `moon_like`         | 11 (n − 6) | 0.0007 | 0.2746 | 0.1138 (6)          | 1              |
+    | `moon_like`         | 4          | 0.0025 | 0.2422 | 0.0113 (219)        | 0              |
+    | `ceres_like`        | 15, 14     | 0      | 0      | (0)                 | 0              |
+    | `ceres_like`        | 13         | 0.0003 | 0.2713 | 0.1670 (2)          | 0              |
+    | `ceres_like`        | 12         | 0.0003 | 0.1727 | 0.0404 (7)          | 0              |
+    | `ceres_like`        | 11         | 0.0002 | 0.2031 | 0.2031 (1)          | 0              |
+    | `ceres_like`        | 10 (n − 6) | 0.0002 | 0.0784 | 0.0434 (4)          | 0              |
+    | `ceres_like`        | 4          | 0.0003 | 0.0593 | 0.0066 (42)         | 0              |
+    | `europa_like`       | 16 (n − 1) | 0.0001 | 0.0568 | 0.0568 (1)          | 1              |
+    | `europa_like`       | 15         | 0.0003 | 0.2256 | 0.0440 (7)          | 0              |
+    | `europa_like`       | 14         | 0.0001 | 0.0784 | 0.0122 (10)         | 0              |
+    | `europa_like`       | 13         | 0.0003 | 0.1366 | 0.0453 (7)          | 0              |
+    | `europa_like`       | 12         | 0.0002 | 0.1177 | 0.0279 (8)          | 0              |
+    | `europa_like`       | 11 (n − 6) | 0.0003 | 0.1406 | 0.0386 (7)          | 0              |
+    | `europa_like`       | 4          | 0.0006 | 0.0366 | 0.0011 (560)        | 0              |
+    - The wrong-dominant pairs at n − 1 to n − 6 are the Earths' Bedrock, Soil and Sand of one crust
+      entry against each other. Beside them are a few Snow for Bedrock (different in entry and in
+      form), Mars's one Frost for Dust (a different entry), and the Moon's and the Europa's Bedrock
+      for Regolith.
+    - The level-4 pairs are in the deferred findings below.
+    - The most materials a patch needed: the Earth's named patch 9, the locked Earth 8, Mars 4, the
+      Moon 2, the Europa 2 and Ceres 1.
+
+  - _Times_ (provisional: the same run, each test's own, at a 1-minute load from 4.8 to 11.9):
+    - `the_weights_hold_on_the_mars_like_sample_world` 1,536.5 s. That is under half an hour, not
+      the hour decision-r10-t2-weights §1 estimated;
+    - `…_moon_like_…` 1,180.3 s, `…_europa_like_…` 1,039.8 s, `…_earth_like_…` 333.8 s (its
+      pass included), `…_locked_earth_like_…` 279.8 s and `…_ceres_like_…` 203.3 s;
+    - the whole run of both follow-ups' binaries took 2,052 s at four threads.
+
+    The slow pass's native hold gains about 1.3 CPU-hours from this binary. Its wasip1 hold
+    (`--run-ignored only` on the sim) gains a few times that.
+
+  - _Acceptance, as built._ `just test-slow -E 'binary(surface_weights_worlds)'` selects the six
+    slow tests (it runs the ignored alone). The fast `every_sample_world_has_a_weights_test` runs in
+    the default suite, under
+    `cargo test -p hyperion-sim --features testing --test surface_weights_worlds`. By name, the
+    slow ones run with
+    `cargo nextest run -p hyperion-sim --features testing --cargo-profile slow-test --profile slow`
+    and `--test surface_weights_worlds --run-ignored only`, as the binary's module documentation
+    gives. The plan's `cargo test -p hyperion-surface material::weights` is unchanged.
+  - _The gate's plan_ is #99's and #101's width, for their reason: the binary's new `mod common;`
+    (R10's "Deviations in T3's `sample_worlds()` follow-up, as built").
+- **Deferred findings (2026-10-13 rule) (R10.T2's `sample_worlds()` follow-up)**
+  (decision-r10-t2-weights, 2026-10-26; each leaves the algorithm and the contracts as built).
+  - _The closed forms read the cell's own style_ (deferred; decision-r10-t2-weights §2; owner R09).
+    R09's level-keyed forms (`omitted_variance`, `omitted_structure_function`) take each cell's own
+    `ReliefStyle` (`relief.rs`, `each_octave_from`), while the synthesis interpolates the styles by
+    its approximating spline over about two cells. On the reference Earth no relief octave is
+    evaluated at band levels 0–4, so near a rougher style the omitted ground, chiefly a belt's
+    lifted coarse octaves, is far wider than the cell's form. The z-scores' variance is 11.6 and
+    14.4 at band levels 3 and 4 (max |z| 25 and 56; |z| > 3 at 6.5% and 4.5% of 400 points, against
+    0.27% for a normal distribution, mostly in cells under water). It is 1.6–2.3 at levels 5–6,
+    about 1 from level 8, and about 1 on the other worlds. The weights there are over-confident. Of
+    the probe's 20 level-4 texels, its two shallow-shelf ones are Seabed 255 where every finest
+    point, or 3,743 of 4,096, is Soil (total variation 1.00 and 0.91), and the level's mean is
+    0.141. Over the thousand texels: the level's mean is 0.0651 (worst 1.00; 448 mixed texels, at
+    0.143), and 64 texels are wrong-dominant (6.4%; the locked Earth 0.0403 and 35, 3.5%; against
+    the ruling's estimate of 2–4%). The Earth's pairs: Seabed for Soil ×11 and for Sand ×7, Soil for
+    Seabed ×5, Sand for Seabed ×5, Sand for Soil ×7, Soil for Sand ×4, Snow for Soil ×10, Soil for
+    Snow ×7, Sand for Snow ×2, Snow for Sand ×1, Soil for Glacier ×1, Soil for Bedrock ×1, Sediment
+    for Sand ×1, Sand for Seabed of crust entry 0 ×1, and across the crusts Seabed of entry 1 for
+    Seabed of entry 0 ×1. The estimate is a few per cent of the Earth's level-3–4 texels, systematic
+    along shallow shelves within about a cell of a rougher style. It is not a blocker:
+    - band levels 3–4 are never steady leaves on the reference Earth, since R09's hard bound (84.0
+      and 80.9 km) meets τ_sel only beyond 1.5 × 10⁸ m on high and 7.4 × 10⁷ m on low, while the
+      body hands over at 3.1 × 10⁷ and 1.5 × 10⁷ m and keeps level 7 there. Their weights show only
+      in fallback frames, a ~10 km texel at 0.5–2 px;
+    - the disc's class map reads band level 0;
+    - the cases found are Seabed for Soil of one crust entry, which draw alike.
+
+    The same forms reach the disc's band-0 map and T10.a's band-2 fractions on the Earth, inside
+    "_A class-map texel takes its centre's cell_". The lever is R09's: the forms at the point's
+    interpolated style, re-blessing `height/closed_forms.golden`, `weights/`, `terrain_bake/` and
+    `level-bounds.json`. It moves the served `albedo_scale`, so it rides 24 only if it lands before
+    p14-wire-24's bless, and otherwise takes a bump. The finding is re-opened if R10.T4.b's rule
+    makes band level 4 or coarser a steady leaf on the Earth inside its hand-over range. Pinned as
+    measured: nothing, since the thousand-texel mean, 0.0651, is under the 0.10 line (§2.4.1).
+
+    The thousand-texel run finds pairs that draw differently, beside the like-drawing Seabed for
+    Soil: Snow for Soil ×10, Soil for Snow ×7, Sand for Snow ×2 and Snow for Sand ×1, different in
+    entry and photometric form, and on the locked Earth Seabed for Snow ×5 and for sea ice ×2, Snow
+    for Sand ×2, and Sand for Snow and for Glacier ×1 each. They weaken the ruling's third point;
+    the steady-leaf argument, its first, still holds (main, 2026-10-26). R10.T5's `STYLE_GAP` is
+    named for the same cause (that follow-up's record), and R09's follow-up re-measures both.
+
+    _The cause, re-probed (after the ruling): the channels', not settled._ At the probe's two shelf
+    texels' centres the band level 4 → 5 jump was split by contribution. The relief through its
+    first octave, 9, adds −13.3 m and +4.2 m (through octave 22, +7.3 and +38.0 m), and the small
+    craters add 0.0 at both. The rest, +432.3 m and +101.5 m, is all there by band level 5, where
+    channel level 8, the coarse trunks, first enters, and the finer levels add nothing to it; the
+    rims are negligible on the Earth, which has one coarse crater. The cell and its eight neighbours
+    along the face's axes within two cells share one style, amplitude 0.120 and belt 0, so neither
+    texel lies at a style edge. At these texels the over-confidence is the channels' term raising
+    shelf and lake ground by hundreds of metres, beyond the cell's σ of 18–26 m. R10.T4.a's record
+    also puts the Earths' worst deviations at n = 0 to 4 on the channels. So the cause in §2 is not
+    settled. Lean, sent to main: point R09's follow-up at the channels' contribution and its closed
+    form (whether a positive channel term is meant, and whether `omitted_variance` counts channel
+    level 8 below band level 5). Main holds R09's follow-up until a decision agent settles it
+    (decision-r09-channel-term.md); the probes' code and logs are in the lane's scratch. The
+    re-validation's "_Channelled plains' structure function_" (this plan's Risks) already finds
+    R09.T8's channel closed form off on channelled plains, 15–37% high, the opposite direction.
+
+  - _The samplers and the world names in four copies._ The FNV-1a sampler, the six world names,
+    `TESTED` and the names test are now in this binary and T5's, beside the sampler in T1.b's and
+    T3's (each with its own seed). A `sampler(seed, name)` and the names in
+    `tests/common/surface_worlds.rs` would hold one copy each, a change to the shared helper this
+    follow-up left alone (its brief kept the helper read-only); for a follow-up with the siblings,
+    as R10.T4.a's record also asks.
+
+  - _A patch of nine_ (decision-r10-t2-weights §3): the Earth's level-4 patch (PosX, 4, 2, 1),
+    where a coast between two crusts meets a glaciated range, needs nine. T6.a's bake keeps the
+    eight of largest summed bytes, and the test admits that patch by name at nine.
+- **Deviations in T5's `sample_worlds()` follow-up, as built** (2026-10-26; lane r10-worlds, begun
+  on `rendering-and-planets` at `f2331483` and fast-forwarded to `5d9d26e7`, which moves no coarse
+  field: no coarse golden, nothing in the surface crate; `GENERATOR_VERSION` 23, no bump). Test code
+  and this record; nothing generated moves. The figures are at 23. The coarse fields move at 24 by
+  P14.T53.a's water term, so R10.T15.b re-records them at 24 (main's brief), and R09's follow-up on
+  the closed forms (decision-r10-t2-weights §2.5, held for decision-r09-channel-term.md) re-measures
+  them first.
+  - _What moved._ `crates/hyperion-sim/tests/surface_reading_worlds.rs`, the plan's binary, held
+    the synthetic worlds' pooled case. It now adds the case on R09.T16's `sample_worlds()`, through
+    `tests/common/surface_worlds.rs`'s `sample_world(name)` and `SampleWorld::field()`
+    (`mod common;` under `#[expect(dead_code, …)]`). The pooled measurement of one world and survey
+    is now `pool_survey(field, cells, metres, rng, label)`, which both cases call.
+  - _The synthetic case_, `an_orbital_survey_s_quoted_sigma_holds_pooled_on_every_world`, keeps its
+    name, its draws and its `CRATER_GAP`. The HEAD binary, run beside it on the same tree under a
+    temporary name (deleted after), gives the same eight lines to the fourth decimal, so the
+    refactor moves nothing. Its figures (below) differ from the 2026-10-14 table's, by the
+    synthesis's changes since, not by this follow-up.
+  - _The sample worlds' case._ Each world has one slow test,
+    `an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_<world>_sample_world`,
+    `#[ignore = "slow: …"]`, each paying its own pass, over `assert_the_sigma_holds(&SampleWorld)`.
+    - It takes 200 cells of the field's level at random and 100 points a cell, at the 100 m and
+      1 km surveys, each read through a client's `PartialField` from the payload.
+    - It holds them at the plan's 10% in RMS ÷ σ and 15% in var z, but for `STYLE_GAP`, below.
+    - One fast test, `every_sample_world_has_a_reading_test`, checks with no pass that the six names
+      the slow tests look up (`TESTED`), sorted, are `sample_worlds()`'s names sorted.
+  - _The sampler_ of a sample world's cells and points is the testkit's `Lcg`, seeded by FNV-1a 64
+    over its name, with this binary's `SAMPLES` in place of the offset basis, as T1.b's and T3's
+    binaries have theirs. The detail seed `DETAIL` is the synthetic case's.
+  - _`STYLE_GAP`, pinned as measured_ (main's acceptance, 2026-10-26, under decision-r10-t2-weights
+    §2.4's rule for a pin). Three cases miss the plan's 15% in var z:
+    - the reference Earth at 100 m (1.1772) and at 1 km (1.1584);
+    - the locked Earth at 100 m (1.1658).
+
+    Each has its RMS ratio within 1% of 1. They are held to var z in [0.85, 1.18]: the plan's
+    tolerance from below, so that a σ quoted too high still fails, and from above the largest
+    measured, rounded up to the next 0.01. The bound is in one place (`STYLE_GAP`, `STYLE_GAP_Z`),
+    for R09's follow-up to re-pin or remove. Every other case is held at the plan's bounds.
+
+  - _The figures_ (the slow-test profile under nextest at four threads, `CPUQuota=400%`, at a
+    1-minute load of 4.8 at the run's start and 11.9 at its end):
+
+    | World               | Survey | RMS ÷ σ | var z  |
+    | ------------------- | ------ | ------- | ------ |
+    | `earth_like`        | 100 m  | 0.9954  | 1.1772 |
+    | `earth_like`        | 1 km   | 1.0086  | 1.1584 |
+    | `mars_like`         | 100 m  | 0.9999  | 0.9461 |
+    | `mars_like`         | 1 km   | 0.9741  | 0.9456 |
+    | `moon_like`         | 100 m  | 0.9957  | 0.9915 |
+    | `moon_like`         | 1 km   | 1.0044  | 1.0088 |
+    | `ceres_like`        | 100 m  | 1.0118  | 1.0238 |
+    | `ceres_like`        | 1 km   | 1.0224  | 1.0454 |
+    | `europa_like`       | 100 m  | 0.9911  | 0.9823 |
+    | `europa_like`       | 1 km   | 0.9951  | 0.9901 |
+    | `locked_earth_like` | 100 m  | 0.9952  | 1.1658 |
+    | `locked_earth_like` | 1 km   | 0.9873  | 1.0151 |
+
+    The pooled σ runs from 0.70 m (Ceres at 100 m) to 30 m (the Moon and Ceres at 1 km). The sample
+    Moon and Ceres hold the plan's 15% without the synthetic Ceres's crater gap, their 1 km var z
+    being 1.009 and 1.045.
+
+    The synthetic case on the same run:
+
+    | World      | Survey | RMS ÷ σ | var z  |
+    | ---------- | ------ | ------- | ------ |
+    | Earth-like | 100 m  | 0.9828  | 0.9389 |
+    | Earth-like | 1 km   | 0.9870  | 0.9733 |
+    | Mars-like  | 100 m  | 0.9883  | 0.9488 |
+    | Mars-like  | 1 km   | 1.0217  | 1.0141 |
+    | Moon-like  | 100 m  | 1.0247  | 1.0418 |
+    | Moon-like  | 1 km   | 1.0000  | 0.9986 |
+    | Ceres-like | 100 m  | 1.0194  | 1.0393 |
+    | Ceres-like | 1 km   | 1.0867  | 1.1808 |
+
+    Its `CRATER_GAP` case is the last row, inside [0.85, 1.25].
+
+  - _Times_ (provisional: the same run, each test's own, at a 1-minute load from 4.8 to 11.9):
+    - the sample worlds: `…_mars_like_…` 452.8 s, `…_moon_like_…` 75.8 s, `…_ceres_like_…` 63.1 s
+      and `…_europa_like_…` 49.9 s; the reference Earth 80.4 s and the locked Earth 41.8 s, each
+      with its pass, both failing then on var z before `STYLE_GAP`, and with it 106.6 s and 54.2 s
+      by name, passing (at a load of about 16);
+    - the synthetic case, 539.0 s (2026-10-14: 577 s);
+    - the slow pass's native hold gains about 13 minutes from the six sample-world tests.
+  - _Acceptance, as built._ `just test-slow -E 'binary(surface_reading_worlds)'` selects the seven
+    slow tests (it runs the ignored alone). The fast `every_sample_world_has_a_reading_test` runs in
+    the default suite, under
+    `cargo test -p hyperion-sim --features testing --test surface_reading_worlds`. By name, the
+    slow ones run with
+    `cargo nextest run -p hyperion-sim --features testing --cargo-profile slow-test --profile slow`
+    and `--test surface_reading_worlds --run-ignored only`.
+  - _The gate's plan_ is #99's and #101's width, for their reason: the binary's new `mod common;`.
+- **Deferred findings (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)** (recorded, not
+  ruled; each leaves the algorithm and the contracts as built).
+  - _The quoted σ is low at some points of the Earths_ (`STYLE_GAP`, above; owner R09; the cause:
+    the channels', not settled). The three misses have var z 16–18% above 1 with RMS ÷ σ within
+    1%. That is the signature of z-scores large where σ is small, which raises their variance
+    without moving the pooled RMS. The gap is named for decision-r10-t2-weights §2's cause, R09's
+    level-keyed forms taking each cell's own relief style while the synthesis interpolates the
+    styles. But at two of the Earth's shelf texels, at uniform styles, R10.T2's follow-up found the
+    channels' term instead, +432 m and +102 m against a cell σ of 18–26 m (that follow-up's
+    deferred findings, "_The cause, re-probed_"); main has a decision agent on it
+    (decision-r09-channel-term.md). These three cases were not probed point by point. A 400-point
+    probe of (finest − level n) ÷ `omitted_rms` found var z 0.84–0.99 on the reference Earth at
+    levels 8 and 11; on the locked Earth 1.3 at level 8 and 11.4 at level 11, from one point at
+    65σ; and about 1 on the other worlds. The lever is R09's follow-up on the closed forms, held by
+    main until the cause is settled; it re-measures this table and re-pins or removes `STYLE_GAP`.
+    The readout quotes too small a σ at those points, the unsafe side, while the pooled RMS agrees
+    within 1%.
+  - _`STYLE_GAP`'s headroom at 24._ The bound, 1.18, sits 0.0028 above the largest measured. The 24
+    bump moves the Earths' coarse fields (P14.T53.a's water term), so the three cases may pass or
+    miss it then, and T2's figures move too. Neither binary is on `prebless-24-list.md`. Asked of
+    main: a by-name re-run of both binaries at 24's bless, re-pinning or removing `STYLE_GAP`
+    there.
+- **Deferred findings (2026-10-13 rule) (R10.T2's and R10.T5's `sample_worlds()` follow-ups),
+  updated by decision-r09-channel-term** (2026-10-26; §7's record text, verbatim). It replaces, as
+  the cause, both follow-ups' "_The closed forms read the cell's own style_" and "_The cause,
+  re-probed_" (T2's) and "_The quoted σ is low at some points of the Earths_" (T5's), above, whose
+  figures stand.
+  - _The band-3–4 shelf texels are R09's trunk level in water_ (decision-r09-channel-term; owner
+    R09's follow-up, a serve-gate must-fix for 24). The band-4→5 jump at the two shelf texels,
+    +432.3 m and +101.5 m, is channel level 8's correction alone (no groove reaches, E = 0):
+    - dry cells' trunks cut valleys of 1.1–1.8 km into lake and shelf cells;
+    - the level's mean removal lifts the rest of those cells above their water.
+
+    The closed form counts no channel there: a wet cell's channel RMS is 0.0–0.8 m against 67–163 m
+    realised. decision-r10-t2-weights §2's style cause is withdrawn for these findings, and kept as a
+    small figure (relief variance 1.1–1.5 times its form at style edges), which `STYLE_GAP` still
+    pins. R10's pins stand as measured; R10.T15.b re-measures them at 24 after R09's fix.

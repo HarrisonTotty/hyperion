@@ -148,6 +148,8 @@ interface Fixture {
   readonly held: ReadonlyArray<ReadonlyArray<string>>;
   /** The level table's rows after the first block and after the last, as bits. */
   readonly levels: Readonly<Record<"first" | "last", ReadonlyArray<string>>>;
+  /** The body's σ by level after the first block and after the last, as bits (R10.T4.b). */
+  readonly sigma: Readonly<Record<"first" | "last", ReadonlyArray<string>>>;
   readonly records: ReadonlyArray<FixtureRecord>;
 }
 
@@ -162,6 +164,7 @@ function parseFixture(): Fixture {
   const changes: string[][] = [];
   const held: string[][] = [];
   const levels: Record<"first" | "last", string[]> = { first: [], last: [] };
+  const sigma: Record<"first" | "last", string[]> = { first: [], last: [] };
   const records: { head: string[]; bits: Map<string, string>; lines: Map<string, string[]> }[] = [];
   for (const line of fixture.split("\n").slice(1)) {
     const words = line.split(" ");
@@ -186,6 +189,11 @@ function parseFixture(): Fixture {
       if (when === "first" || when === "last") {
         levels[when].push(...rest.slice(2));
       }
+    } else if (head === "level_sigma") {
+      const when = rest[0];
+      if (when === "first" || when === "last") {
+        sigma[when].push(...rest.slice(1));
+      }
     } else if (HEADS.has(head)) {
       records.push({ head: words, bits: new Map(), lines: new Map() });
     } else if (current !== undefined && words[1] === "=") {
@@ -194,7 +202,7 @@ function parseFixture(): Fixture {
       current.lines.set(head, rest);
     }
   }
-  return { body, seed, blocks, payloads, changes, held, levels, records };
+  return { body, seed, blocks, payloads, changes, held, levels, sigma, records };
 }
 
 const FIXTURE = parseFixture();
@@ -393,7 +401,7 @@ describe("the height worker's fields on the real module", () => {
     expect(WASM_LINE_OF_SIGHT["not-surveyed"]).toBe(LineOfSightKind.NotSurveyed);
   });
 
-  it("takes every block of the fixture, answering each with the native change and table", () => {
+  it("takes every block of the fixture, answering each with the native change, table and σ", () => {
     expect(FIXTURE.blocks.length).toBeGreaterThanOrEqual(4);
     const fields = new WorkerFields(module);
     const answers = FIXTURE.blocks.map((block, n) => {
@@ -418,12 +426,17 @@ describe("the height worker's fields on the real module", () => {
         a.block.newlySurveyed.buffer,
         a.block.newlyHeld.buffer,
         a.block.levels.buffer,
+        a.block.sigmaM.buffer,
       ]),
     );
     expect(answers.map((a) => a.block.fieldLevel)).toEqual(FIXTURE.blocks.map(() => 6));
     const tables = answers.map((a) => [...a.block.levels].map(bitsHex));
     expect(tables[0]).toEqual(FIXTURE.levels.first);
     expect(tables.at(-1)).toEqual(FIXTURE.levels.last);
+    const sigmas = answers.map((a) => [...a.block.sigmaM].map(bitsHex));
+    expect(FIXTURE.sigma.last).toHaveLength(25);
+    expect(sigmas[0]).toEqual(FIXTURE.sigma.first);
+    expect(sigmas.at(-1)).toEqual(FIXTURE.sigma.last);
     expect(fields.bodies).toEqual([FIXTURE.body]);
   });
 

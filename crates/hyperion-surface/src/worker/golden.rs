@@ -42,6 +42,8 @@
 //!   [`held_runs`](SurveyChange::held_runs) alike (R10.T8.b);
 //! - `level <when> <n> <bits> <bits> <bits> <bits>`, the level table's row n after the first block
 //!   (`first`) and after the last (`last`);
+//! - `level_sigma <when> <bits ×25>`, the body's σ by level ([`WorkerFields::level_sigma_m`],
+//!   R10.T4.b) after the first block and after the last, alike;
 //! - for each bake, `patch <name> <face> <level> <i> <j> <vertex path> <normals> <weights>`, then
 //!   R10.T6.a's lines (`tests/golden/terrain_bake/`'s), then `unsurveyed <indices>` or
 //!   `unsurveyed -`;
@@ -272,11 +274,14 @@ fn write_horizon(out: &mut GoldenWriter, name: &str, bake: &BodyBake) {
     out.line(&format!("refused {}", indices(map.refused_cells())));
 }
 
-/// Writes `table`'s rows, as of `when`.
-fn write_levels(out: &mut GoldenWriter, when: &str, table: &[f64]) {
+/// Writes the level table's rows and σ by level of `body` in `fields`, as of `when`.
+fn write_levels(out: &mut GoldenWriter, when: &str, fields: &WorkerFields, body: BodyRef) {
+    let table = fields.level_table(body).expect("held");
     for (n, row) in table.chunks(LEVEL_TABLE_STRIDE).enumerate() {
         out.line(&format!("level {when} {n} {}", bits_of(row)));
     }
+    let sigma = fields.level_sigma_m(body).expect("held");
+    out.line(&format!("level_sigma {when} {}", bits_of(&sigma)));
 }
 
 /// Writes `bake`'s lines, the bake named `name` of `opts`.
@@ -381,14 +386,10 @@ fn moon_text() -> String {
         out.line(&format!("change {ordinal} {}", runs(change.runs())));
         out.line(&format!("held {ordinal} {}", runs(change.held_runs())));
         if ordinal == 0 {
-            write_levels(
-                &mut out,
-                "first",
-                &fields.level_table(f.body).expect("held"),
-            );
+            write_levels(&mut out, "first", &fields, f.body);
         }
     }
-    write_levels(&mut out, "last", &fields.level_table(f.body).expect("held"));
+    write_levels(&mut out, "last", &fields, f.body);
     for (name, key, opts) in probes() {
         let bake = fields.bake(f.body, SEED, key, &opts).expect("held");
         write_bake(&mut out, name, &opts, &bake);

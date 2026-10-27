@@ -3,11 +3,12 @@
  * setting and the grounded bodies (plan R05, T7.b–T7.d, Design note 7).
  *
  * @remarks
- * A level is drawn where its error bound subtends at most τ pixels at the nearest point of the
- * patch's bounding volume; a camera inside the volume refines, down to the finest level. The set is
- * a function of each view's pose, field of view and viewport, the setting, the grounded bodies,
- * the height ranges of the patches baked so far and the patch budget alone: no history, no arrival
- * order and no hysteresis, the morph hiding a level change. The
+ * A level is drawn where its error bound, the level's selection bound under the rule in force
+ * (`levelBounds.ts`; plan R10, R10.T4.b) plus its chords' sagitta, subtends at most τ pixels at the
+ * nearest point of the patch's bounding volume; a camera inside the volume refines, down to the
+ * finest level. The set is a function of each view's pose, field of view and viewport, the
+ * setting, the grounded bodies, the height ranges of the patches baked so far and the patch budget
+ * alone: no history, no arrival order and no hysteresis, the morph hiding a level change. The
  * selected patches form a restricted quadtree: no two neighbours, across face edges and at cube
  * corners included, differ by more than one level. Patches no view can see, outside every frustum
  * or below every horizon, are not selected.
@@ -58,6 +59,7 @@ import {
   F32_RELATIVE_STEP,
   levelBoundM,
   type PlanetGeometry,
+  selectionBoundM,
   subtreeHeightRangeM,
 } from "./planet";
 import {
@@ -334,18 +336,22 @@ export function chordSagittaM(planet: PlanetGeometry, level: number): number {
 }
 
 /**
- * The error selection charges a level, metres: the level bound ε_n against the finest level
- * (Design note 15) plus {@link chordSagittaM}; nothing at the finest level.
+ * The error selection charges a level, metres: the level's selection bound, ε_n against the
+ * finest level (Design note 15) under the rule in force (`selectionBoundM`; plan R10, R10.T4.b),
+ * plus {@link chordSagittaM}; nothing at the finest level.
  *
  * @remarks
  * The sagitta is what a zero-height spheroid with no level table (R07's `mesh` regime) refines on;
- * on the test planet it is under a sixth of ε_n at level 0 and under a tenth from level 1.
+ * on the test planet it is under a sixth of ε_n at level 0 and under a tenth from level 1. Under
+ * the hard rule the selection bound is the stated ε_n, `levelBoundM`; under the statistical one
+ * min(ε_n, 4σ_n). Only this error takes it: the boxes, the skirts and the baked ranges' widening
+ * read the stated ε_n.
  */
 export function selectionErrorM(planet: PlanetGeometry, level: number): number {
   if (level >= planet.finestLevel) {
     return 0;
   }
-  return levelBoundM(planet, level) + chordSagittaM(planet, level);
+  return selectionBoundM(planet, level) + chordSagittaM(planet, level);
 }
 
 /** One view, prepared once a call: its frustum, its horizon and its error scale. */

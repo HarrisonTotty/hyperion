@@ -1345,7 +1345,7 @@ export class TerrainSession {
     // lit one and the wireframe's alike).
     let unsettled = passes.length;
     for (const pass of passes) {
-      pass.setLevels(change.levels);
+      pass.setLevels(change.levels, change.sigmaM);
       pass.fieldChanged(change, () => {
         unsettled -= 1;
         if (
@@ -1632,13 +1632,15 @@ export class TerrainSession {
         material = "wireframe's terrain material";
         break;
     }
+    // The workers' latest level bounds: the table and σ by level (R10.T4.b).
+    const bounds = this.#pool.fieldBounds(body);
     let pass: TerrainPass;
     try {
       pass = new TerrainPass({
         engine: this.#engine,
         setting: first.report.setting,
         ...(terrain === null ? {} : { terrain }),
-        planet: planetGeometry(figure, this.#pool.fieldLevels(body)),
+        planet: planetGeometry(figure, bounds?.table ?? null, bounds?.sigmaM ?? null),
         source: { kind: "body", body, detailSeed, weights },
         createPool: (bake) => this.#pool.lane(bake),
         survey: held.survey,

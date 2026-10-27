@@ -119,11 +119,15 @@ export interface WasmBakedTerrain extends WasmBakedPatch {
   readonly horizonComplete: boolean;
 }
 
-/** The module's `FieldBlock`: what a block taken changed, and the body's level table after it. */
+/**
+ * The module's `FieldBlock`: what a block taken changed, and the body's level table and σ by level
+ * after it.
+ */
 export interface WasmFieldBlock {
   newlySurveyed(): Uint32Array;
   newlyHeld(): Uint32Array;
   levelTable(): Float64Array;
+  levelSigmaM(): Float64Array;
   readonly fieldLevel: number;
   free(): void;
 }
@@ -878,6 +882,7 @@ export class WorkerFields {
           newlySurveyed: block.newlySurveyed(),
           newlyHeld: block.newlyHeld(),
           levels: block.levelTable(),
+          sigmaM: block.levelSigmaM(),
         },
       };
     } finally {

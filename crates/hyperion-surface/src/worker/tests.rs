@@ -816,6 +816,7 @@ fn worker_fields_start_afresh_and_release_to_nothing() {
     assert_eq!(fields.bodies().count(), 0);
     assert_eq!(fields.heap_bytes(), 0);
     assert_eq!(fields.level_table(f.body), None);
+    assert_eq!(fields.level_sigma_m(f.body), None);
 }
 
 #[test]
@@ -873,6 +874,91 @@ fn worker_level_table_is_the_datum_before_any_cell() {
     for row in table.chunks(LEVEL_TABLE_STRIDE) {
         assert_eq!((bits(row[1]), bits(row[2])), (bits(0.0), bits(0.0)));
     }
+    // Nor any σ: no cell is surveyed.
+    let sigma = fields.level_sigma_m(f.body).unwrap();
+    assert_eq!(sigma.map(bits), [bits(0.0); LEVEL_TABLE_ROWS]);
+}
+
+/// The largest `omitted_rms` at each level over `cells`, as R09's synthesiser over `field` gives
+/// each.
+fn largest_omitted_rms(
+    field: &PartialField,
+    cells: &BTreeSet<PatchKey>,
+) -> [f64; LEVEL_TABLE_ROWS] {
+    let synth = Synthesiser::new(field, SEED);
+    let mut largest = [0.0; LEVEL_TABLE_ROWS];
+    for (level, value) in (0..=MAX_LEVEL).zip(&mut largest) {
+        for &cell in cells {
+            let rms = synth.omitted_rms(cell, band(level)).unwrap().value();
+            *value = num::max(*value, rms);
+        }
+    }
+    largest
+}
+
+#[test]
+fn worker_level_sigma_is_the_largest_omitted_rms_over_the_surveyed_cells() {
+    let f = fixture();
+    let field = f.field();
+    // The fixture's first block 0 surveys nothing (its cells are margin), so `init` reads σ over a
+    // payload of the first survey in one block 0.
+    let whole = split(&encode_within(
+        world(WORLD),
+        &cover(&f.first, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        crate::wire::MAX_BLOCK_BYTES,
+    ));
+    assert_eq!(whole.len(), 1);
+    let mut fields = WorkerFields::new();
+    let change = fields.init(f.body, &whole[0]).unwrap();
+    assert!(!change.surveys_nothing());
+    let early = fields.level_sigma_m(f.body).unwrap();
+    assert_eq!(
+        early.map(bits),
+        largest_omitted_rms(&field, &f.first).map(bits)
+    );
+    // After every block, over both surveys' cells, bit for bit, whatever the blocks' order after
+    // the first block 0.
+    let both: BTreeSet<PatchKey> = f.first.union(&f.second).copied().collect();
+    let expected = largest_omitted_rms(&field, &both);
+    let sigma = f.worker().level_sigma_m(f.body).unwrap();
+    assert_eq!(sigma.map(bits), expected.map(bits));
+    let mut reversed = WorkerFields::new();
+    let mut blocks: Vec<&[u8]> = f.blocks().collect();
+    reversed.init(f.body, blocks.remove(0)).unwrap();
+    for block in blocks.into_iter().rev() {
+        reversed.chunk(f.body, block).unwrap();
+    }
+    assert_eq!(
+        reversed.level_sigma_m(f.body).unwrap().map(bits),
+        expected.map(bits)
+    );
+    // It only grows, is positive while a level omits anything, and is zero from the band limit's
+    // level, where the level bound is too.
+    let table = fields.level_table(f.body).unwrap();
+    for (level, (&now, &then)) in sigma.iter().zip(&early).enumerate() {
+        assert!(then <= now && now.is_finite(), "{level}: {then} {now}");
+        let bound = table[level * LEVEL_TABLE_STRIDE];
+        assert_eq!(now > 0.0, bound > 0.0, "{level}: σ {now}, ε {bound}");
+    }
+}
+
+/// The worker reads no σ where a level's bound is zero; on a world with air, channels and their
+/// epoch's valleys, as on the airless one, `omitted_rms` is zero there too, so σ is its largest at
+/// every level, bit for bit.
+#[test]
+fn worker_level_sigma_is_the_largest_omitted_rms_on_an_earth_like_field() {
+    let f = earth_fixture();
+    let fields = earth_worker(&f);
+    let field = fields.field(f.body).unwrap();
+    let cells: BTreeSet<PatchKey> = [earth_cell()].into_iter().collect();
+    let sigma = fields.level_sigma_m(f.body).unwrap();
+    assert_eq!(
+        sigma.map(bits),
+        largest_omitted_rms(field, &cells).map(bits)
+    );
+    assert!(sigma[0] > 0.0, "{sigma:?}");
 }
 
 /// Patches about the two surveys: inside the first, astride the two, beside the second's far

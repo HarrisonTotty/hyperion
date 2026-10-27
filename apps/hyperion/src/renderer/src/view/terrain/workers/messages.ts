@@ -213,6 +213,12 @@ export interface FieldBlockAnswer {
    * height, largest vertex spacing, metres), as the field now holds it (`worker::level_table`).
    */
   readonly levels: Float64Array;
+  /**
+   * The body's σ by level, 25, level n at n, metres: the largest omitted RMS at the level over the
+   * cells the field holds as surveyed, 0 before any (`worker::level_sigma_m`; plan R10,
+   * R10.T4.b). With {@link levels}' hard bound it makes the body's level bounds (`levelBounds.ts`).
+   */
+  readonly sigmaM: Float64Array;
 }
 
 /**
@@ -598,7 +604,12 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
 export function blockTransferables(block: FieldBlockAnswer | null): Transferable[] {
   return block === null
     ? []
-    : [block.newlySurveyed.buffer, block.newlyHeld.buffer, block.levels.buffer];
+    : [
+        block.newlySurveyed.buffer,
+        block.newlyHeld.buffer,
+        block.levels.buffer,
+        block.sigmaM.buffer,
+      ];
 }
 
 /** The buffers a worker transfers with a class map and its normal map, its maturity's with them. */
