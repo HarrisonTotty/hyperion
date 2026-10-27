@@ -11,7 +11,7 @@ import { planetTwin } from "./tablesCpu";
  * measured Earth's gate is `marchGateMeasured.test.ts`, the slab Earth's `marchGateSlab.test.ts`.
  */
 
-it("covers the march's 268 rays, the night limb's among them, the last light's 525, and the sky's others 278 from high's band's cameras and 358 from low's", () => {
+it("covers the march's 456 rays, the night limb's and since R08.T11.b the drawn surfaces' 188 among them, the last light's 525, and the sky's others 278 from high's band's cameras and 358 from low's", () => {
   const counts = (["high", "low"] as const).map((setting) => {
     const rays = raysOf(setting);
     return [
@@ -21,9 +21,10 @@ it("covers the march's 268 rays, the night limb's among them, the last light's 5
     ];
   });
   expect(counts).toEqual([
-    [268, 525, 1_071],
-    [268, 525, 1_151],
+    [456, 525, 1_259],
+    [456, 525, 1_339],
   ]);
+  expect(raysOf("high").filter((ray) => ray.family === "drawn")).toHaveLength(188);
 });
 
 describeMarchGate({

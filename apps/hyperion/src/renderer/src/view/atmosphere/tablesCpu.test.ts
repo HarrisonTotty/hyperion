@@ -262,7 +262,7 @@ function twinPixel(medium: AtmosphereMedium, sources: TwinSources, slotSources: 
     });
     const mu = dot(end, ray.s);
     const toSun: Rgb3 = [0, 0, 0];
-    read.sunTransmittance(0, mu, toSun, 0);
+    read.sunTransmittance(ray.drawnHeightM ?? 0, mu, toSun, 0);
     const lit = (c: 0 | 1 | 2): number => (mu > 0 ? (GROUND_ALBEDO / Math.PI) * mu * toSun[c] : 0);
     return [l[0] + t[0] * lit(0), l[1] + t[1] * lit(1), l[2] + t[2] * lit(2)];
   };
@@ -466,7 +466,9 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
   // Measured 2026-10-21 under the sun-aware warp and recorded in plan R08's Risks ("Deviations in
   // T8.a, as built"); the sky families are the sky view's, the last light the ray march's. Since
   // R08.T8.e high's march count on the bare ground is scaled by its optical depth: the disc at 20
-  // steps, 1.43% and 0.70% (0.45% and 0.18% at 36), measured 2026-10-22.
+  // steps, 1.43% and 0.70% (0.45% and 0.18% at 36), measured 2026-10-22. Since R08.T11.b the
+  // inside family's drawn terrain on the datum takes the bare ground's count: 0.23% → 0.73% and
+  // 0.03% → 0.09% (2026-10-27).
   it("records the twin's worst by family and class at high's and low's counts", () => {
     expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
       high: asRecordedFigures({
@@ -478,8 +480,8 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
         "high band twilight": 0.02581,
         "high limb ordinary": 0.00309,
         "high limb twilight": 0.01278,
-        "inside ordinary": 0.0023,
-        "inside twilight": 0.00029,
+        "inside ordinary": 0.00727,
+        "inside twilight": 0.0009,
         "last light twilight": 0.00788,
         "limb ordinary": 0.00447,
         "limb twilight": 0.04348,
@@ -1177,8 +1179,9 @@ describe("the per-frame twins' steps", () => {
     expect(compared).toBeGreaterThan(0);
   });
 
-  // R08.T8.e: high's count by a segment's optical depth (`marchSteps.ts`'s `marchSamplesOf`).
-  it("march a thin sky segment at 28 steps on high, a thick one and a drawn surface at 36, and the bare ground at 20", () => {
+  // R08.T8.e: high's count by a segment's optical depth (`marchSteps.ts`'s `marchSamplesOf`), and
+  // since R08.T11.b a drawn surface on the datum's (`drawnSurfaceKind`).
+  it("march a thin sky segment at 28 steps on high, a thick one and a drawn surface off the datum at 36, and the bare ground and a drawn surface on the datum at 20", () => {
     const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
     const a = WGS84.equatorialRadiusM;
     const r = a + 400_000;
@@ -1199,7 +1202,11 @@ describe("the per-frame twins' steps", () => {
       { what: "thin sky, tangent 70 km", d: toTangent(70_000), tSurfaceM: open, n: 28 },
       { what: "thick sky, tangent 5 km", d: toTangent(5_000), tSurfaceM: open, n: 36 },
       { what: "bare ground, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: open, n: 20 },
-      { what: "drawn surface, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 399_000, n: 36 },
+      { what: "drawn, 1 km up, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 399_000, n: 20 },
+      { what: "drawn, under the datum", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 401_000, n: 20 },
+      { what: "drawn, 24 km up, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 376_000, n: 20 },
+      { what: "drawn, 26 km up, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 374_000, n: 36 },
+      { what: "drawn, 50 km up, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 350_000, n: 36 },
     ];
     // Each texel is the march at its count to the bit, and only the 36-step ones the march at 36.
     const drawn = cases.map(({ what, d, tSurfaceM, n }) => {
@@ -2038,7 +2045,8 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
   });
 
   // Measured 2026-10-21 under the sun-aware warp, as R05's Earth's; since R08.T8.e (2026-10-22) the
-  // disc at 20 steps, 1.35% and 0.62% (0.41% and 0.14% at 36).
+  // disc at 20 steps, 1.35% and 0.62% (0.41% and 0.14% at 36). Since R08.T11.b the inside
+  // family's drawn terrain at the bare ground's count: 0.21% → 0.66% and 0.03% → 0.08% (2026-10-27).
   it("records the twin's worst by family and class at high's and low's counts", () => {
     expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
       high: asRecordedFigures({
@@ -2050,8 +2058,8 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
         "high band twilight": 0.01085,
         "high limb ordinary": 0.00209,
         "high limb twilight": 0.01301,
-        "inside ordinary": 0.00207,
-        "inside twilight": 0.00026,
+        "inside ordinary": 0.0066,
+        "inside twilight": 0.00078,
         "last light twilight": 0.00554,
         "limb ordinary": 0.00528,
         "limb twilight": 0.03239,
@@ -2232,7 +2240,8 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
   // re-pinned on a test medium. Since R08.T8.e (2026-10-22) the disc at 28 steps, 20 and 4 for each
   // of the slab's two edges, 1.59% and 1.09% (1.12% and 0.99% at 36). Since R08.T8.e's lever 5
   // (2026-10-23, the ray march's slot read; `decision-r08-t8-leans.md` §15) the disc's twilight on
-  // high 1.087% → 1.181%.
+  // high 1.087% → 1.181%. Since R08.T11.b the inside family's drawn terrain at the bare ground's
+  // count, 20 and 4 a layer edge: 0.53% → 1.04% and 0.03% → 0.04% (2026-10-27).
   it("records the twin's worst by family and class at high's and low's counts", () => {
     expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
       high: asRecordedFigures({
@@ -2244,8 +2253,8 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
         "high band twilight": 0.0161,
         "high limb ordinary": 0.00367,
         "high limb twilight": 0.01605,
-        "inside ordinary": 0.00531,
-        "inside twilight": 0.00034,
+        "inside ordinary": 0.01038,
+        "inside twilight": 0.00042,
         "last light twilight": 0.00553,
         "limb ordinary": 0.00868,
         "limb twilight": 0.05154,

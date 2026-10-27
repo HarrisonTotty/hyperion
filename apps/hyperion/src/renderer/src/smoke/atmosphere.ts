@@ -134,6 +134,7 @@ import {
   mediumMarchEdgesM,
   type RayMarchRay,
   piecedSteps,
+  rayMarchKindOf,
   rayMarchRayAlongTwin,
   rayMarchRayTwin,
   rayMarchTargetTexelTwin,
@@ -2045,6 +2046,175 @@ async function checkFrameTwins(
   } finally {
     atmosphere.dispose();
   }
+}
+
+// --- R08.T11.b: the face's count on a drawn surface -----------------------------------------------
+
+/**
+ * A camera `distanceM` from the centre over the equator at longitude 0, looking straight down, north
+ * up its frame, its frame `tanY` of its distance ahead each side vertically (64 × 32 unless
+ * `viewport` is given): the face.
+ */
+function nadirCamera(
+  distanceM: number,
+  tanY: number,
+  viewport: ViewSize = FRAME_SIZE,
+): AtmosphereCamera {
+  const forward = { x: -1, y: 0, z: 0 };
+  const up = { x: 0, y: 0, z: 1 };
+  // right = up × back, back = −forward.
+  const right = { x: 0, y: 1, z: 0 };
+  const aspect = viewport.widthPx / viewport.heightPx;
+  return {
+    positionM: { x: distanceM, y: 0, z: 0 },
+    orientation: quaternionFromRows([
+      { x: right.x, y: up.x, z: -forward.x },
+      { x: right.y, y: up.y, z: -forward.y },
+      { x: right.z, y: up.z, z: -forward.z },
+    ]),
+    fovXRad: 2 * Math.atan(aspect * tanY),
+    viewport,
+  };
+}
+
+/**
+ * R08.T11.b's Earth: the measured Earth (`EARTH_REFERENCE`, its ozone under the Sun's curves) on
+ * WGS 84 with its normal gravity, R08.T11's frame's medium.
+ */
+function faceEarth(): HeightsBody {
+  return {
+    ...SLICES_EARTH,
+    task: "R08.T11.b",
+    name: "the measured Earth",
+    medium: EARTH_REFERENCE,
+    curves: EARTH_REFERENCE_CURVES,
+    heightsM: [],
+    limbsM: [],
+  };
+}
+
+/**
+ * R08.T11.b's views on high: from 400 km over the ground and from 10⁷ m from the centre, looking
+ * straight down at the face, the sun 30° up, over a surface drawn a little beyond the nadir's ground
+ * (405 km and 3,640 km ahead), so that the face's rays end on it at or beyond the datum's hit at the
+ * frame's centre, before the hit within the band in a ring about it, and above the band toward the
+ * frame's edges.
+ */
+function faceViews(): HeightsView[] {
+  const views: Array<readonly [string, number, number, number]> = [
+    ["400 km", WGS84.equatorialRadiusM + 400_000, Math.tan(40 * DEGREE_RAD), 405_000],
+    ["1e7 m", 1e7, Math.tan(40 * DEGREE_RAD), 3_640_000],
+  ];
+  return views.map(([place, distanceM, tanY, surfaceM]) => ({
+    name: `from ${place} at the nadir, the sun 30° up, a surface ${surfaceM / 1_000} km ahead`,
+    camera: nadirCamera(distanceM, tanY),
+    sun: sunAt(30),
+    sunElevationDeg: 30,
+    surfaceM,
+  }));
+}
+
+/** How a view's ray-march texels end, as the kernel's count tells them (R08.T11.b). */
+interface FaceKinds {
+  /** On the drawn surface at or beyond the datum's hit, the bare ground's count. */
+  readonly beyond: number;
+  /** On the drawn surface before the hit within the band, the bare ground's count. */
+  readonly inBand: number;
+  /** On the drawn surface over the band, the setting's count. */
+  readonly over: number;
+  /** On the drawn surface on a ray that meets no datum, the setting's count. */
+  readonly offDatum: number;
+}
+
+/** Each ray-march texel's end of a view over its one surface, by the twin's own rule. */
+function faceKindsOf(
+  planet: SmokePlanet,
+  view: TwinView,
+  sizes: TableSizes,
+  depth: number,
+): FaceKinds {
+  const w = Math.ceil(view.viewport.widthPx * sizes.rayMarchScale);
+  const h = Math.ceil(view.viewport.heightPx * sizes.rayMarchScale);
+  const geometry = { kind: "spheroid", figure: view.figure } as const;
+  let beyond = 0;
+  let inBand = 0;
+  let over = 0;
+  let offDatum = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const u = (x + 0.5) / w;
+      const v = (y + 0.5) / h;
+      const marched =
+        planet.kind === "sphere"
+          ? rayMarchRayTwin(planet.twin.medium, view, u, v, depth, sizes)
+          : oblateRayMarchRayTwin(planet.twin, view, u, v, depth, sizes);
+      if (marched === null) {
+        continue;
+      }
+      const kind = rayMarchKindOf(geometry, marched, sizes.marchDepthSteps);
+      const hit = marched.datumHitM;
+      if (hit === null) {
+        offDatum += 1;
+      } else if (kind === "ground") {
+        if (marched.ray.tEndM < hit) {
+          inBand += 1;
+        } else {
+          beyond += 1;
+        }
+      } else {
+        over += 1;
+      }
+    }
+  }
+  return { beyond, inBand, over, offDatum };
+}
+
+/**
+ * R08.T11.b: the face's count on a drawn surface (lever A of `decision-r08-t11-frame.md` §2), the
+ * ray march against its twin over a surface drawn across the face from orbit, on high, in both
+ * arms, with every other per-view kernel's: a drawn surface on the datum, at or beyond its hit or
+ * within the band over it before the hit, takes the bare ground's count, and anything else drawn
+ * the setting's, on the GPU as in the twin (`tablesCpu.ts`'s `rayMarchKindOf`). Each view records how
+ * its texels end, and holds that each of the three is drawn.
+ */
+export async function checkFaceCount(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const body = faceEarth();
+  const read = kernelMedium(body.medium);
+  const sizes = twinSizes(TABLE_SIZES.high);
+  await inOrder(checks, async (ordered) => {
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      body.medium,
+      sizes,
+      body.figure,
+      body.curves,
+      body.gravity,
+    );
+    try {
+      const planet = await planetOf(engine, atmosphere, read, body.figure);
+      for (const view of faceViews()) {
+        // The harness's GPU work runs in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        await checkViewArms(engine, ordered, atmosphere, planet, body, sizes, "high", view, twins);
+        const twinView = frameViewOf(atmosphere, view.camera, [view.sun], body.figure);
+        const depth = view.surfaceM === null ? 0 : NEAR_M / view.surfaceM;
+        const kinds = faceKindsOf(planet, twinView, sizes, depth);
+        ordered.now((slot) => {
+          slot.check(
+            `R08.T11.b ${body.name}, high, ${view.name}: the march takes the bare ground's count on the face, at or beyond the datum's hit and within the band over it, and the setting's over the band`,
+            kinds.beyond > 0 && kinds.inBand > 0 && kinds.over > 0,
+            `${kinds.beyond} texels at or beyond the hit, ${kinds.inBand} within the band before it, ${kinds.over} over the band, ${kinds.offDatum} off the datum, the band ${sizes.marchDepthSteps?.drawnBandM ?? 0} m`,
+          );
+        });
+      }
+    } finally {
+      atmosphere.dispose();
+    }
+  });
 }
 
 // --- R08.T7: several suns, and the sky through the air -------------------------------------------

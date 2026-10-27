@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../geometry/vec3";
-import { type GateRay, type Placement, type Rgb3, runGate } from "./atmosphereGate";
+import { add, scale, vec3 } from "../geometry/vec3";
+import { TABLE_SIZES } from "../view/atmosphere/hillaire";
+import {
+  BOTTOM_M,
+  drawnSurfaceRays,
+  type GateRay,
+  marchKindOf,
+  type Placement,
+  type Rgb3,
+  runGate,
+  sphereHits,
+  sunZenithAtDeg,
+} from "./atmosphereGate";
 
 /** A sky ray of the gate's shape, named, that only a stand-in pixel reads. */
 function aRay(name: string): GateRay {
@@ -14,6 +25,7 @@ function aRay(name: string): GateRay {
     tStartM: 0,
     tEndM: 1,
     ground: false,
+    drawnHeightM: null,
     sunPoint: vec3(0, 0, 0),
     sunZenithDeg: 0,
   };
@@ -75,5 +87,63 @@ describe("the gate's reference steps (decision-test-coverage R3(b))", () => {
 
   it("states the brightest of the references it ends with", () => {
     expect(gate.lMax.get("skyView")).toEqual([250, 250, 250]);
+  });
+});
+
+/** A gate ray's end's height above the gate's sphere, m. */
+function heightOf(ray: GateRay): number {
+  const end = add(ray.o, scale(ray.d, ray.tEndM));
+  return Math.hypot(end.x, end.y, end.z) - BOTTOM_M;
+}
+
+describe("the drawn surfaces' family (R08.T11.b)", () => {
+  const rays = drawnSurfaceRays();
+  const rule = TABLE_SIZES.high.marchDepthSteps;
+
+  it("draws 188 surfaces, 168 from orbit and 20 from inside the air", () => {
+    expect([rays.length, rays.filter(({ tStartM }) => tStartM > 0).length]).toEqual([188, 168]);
+  });
+
+  it("puts each surface on the ground or within the band's 25 km, on a ray that meets the ground", () => {
+    const misplaced = rays.filter((ray) => {
+      const ground = sphereHits(ray.o, ray.d, BOTTOM_M);
+      const onGround = ground !== null && ray.tEndM === ground[0];
+      const drawn = ray.drawnHeightM ?? Number.NaN;
+      return (
+        ground === null ||
+        !(ground[0] > 0 && ray.tEndM <= ground[0]) ||
+        !ray.ground ||
+        (onGround ? drawn !== 0 : Math.abs(drawn - heightOf(ray)) > 1e-9 * ray.tEndM)
+      );
+    });
+    expect(misplaced.map(({ name }) => name)).toEqual([]);
+  });
+
+  it("stands half the orbit's surfaces at the band's 25 km edge, and the inside ones no higher", () => {
+    const edges = rays.filter(({ drawnHeightM }) => drawnHeightM !== 0);
+    expect(edges.every(({ drawnHeightM }) => (drawnHeightM ?? Number.NaN) <= 25_000)).toBe(true);
+    expect(
+      edges.filter(({ tStartM, drawnHeightM }) => tStartM > 0 && drawnHeightM === 25_000),
+    ).toHaveLength(104);
+  });
+
+  it("puts every surface past the aerial perspective's reach from inside the air, where the march draws it", () => {
+    const inside = rays.filter(({ tStartM }) => tStartM <= 0);
+    expect(inside).toHaveLength(20);
+    expect(
+      inside.filter(({ tEndM }) => !(tEndM > TABLE_SIZES.high.aerialPerspectiveReachM)),
+    ).toEqual([]);
+  });
+
+  it("counts every drawn surface as the bare ground under high's rule, and as a drawn surface under low's", () => {
+    expect(new Set(rays.map((ray) => marchKindOf(ray, rule)))).toEqual(new Set(["ground"]));
+    expect(new Set(rays.map((ray) => marchKindOf(ray, null)))).toEqual(new Set(["surface"]));
+  });
+
+  it("puts each ray's sun at its zenith angle at the drawn surface", () => {
+    const misplaced = rays.filter(
+      (ray) => !(Math.abs(sunZenithAtDeg(ray) - ray.sunZenithDeg) < 1e-9),
+    );
+    expect(misplaced.map(({ name }) => name)).toEqual([]);
   });
 });

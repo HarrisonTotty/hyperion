@@ -101,6 +101,7 @@ import {
 } from "./absorbers";
 import { type ForwardLobe, forwardLobeAt, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import {
+  drawnSurfaceKind,
   type MarchDepthSteps,
   marchEdgesM,
   marchEvenStep,
@@ -3299,6 +3300,12 @@ export interface RayMarchRay {
   readonly ray: TwinRay;
   /** The distance to the ground the ray meets with nothing drawn in front of it, m, or `null`. */
   readonly bareGroundM: number | null;
+  /**
+   * The distance to the datum's first hit, m, drawn on or not, or `null` where the ray meets no
+   * datum ahead: what a drawn surface's count is told by (R08.T11.b, `marchSteps.ts`'s
+   * `drawnSurfaceKind`), and its depth read from.
+   */
+  readonly datumHitM: number | null;
 }
 
 /** What decides whether the ray march draws a texel: the volume's reach and the march band. */
@@ -3372,6 +3379,7 @@ export function rayMarchRayAlongTwin(
     },
     bareGroundM:
       !Number.isFinite(tSurfaceM) && hitsGround && groundNear <= tEndM ? groundNear : null,
+    datumHitM: hitsGround ? groundNear : null,
   };
 }
 
@@ -3393,7 +3401,8 @@ export type RayMarchSettings = Pick<
  * medium's layer edges on their shell quadrics ({@link piecedSteps}, R08.T6.i), and since R08.T8.e
  * on the bare ground and on a thin sky as many as its optical depth asks under the settings'
  * `marchDepthSteps` (`marchSteps.ts`'s `marchSamplesOf`; the bare ground's light from its ground
- * point along −d, the sky's from its lowest point along each side), a drawn surface the setting's
+ * point along −d, the sky's from its lowest point along each side), a drawn surface on the datum
+ * the bare ground's since R08.T11.b (its depth from the datum's hit) and any other the setting's
  * count. The smoke marches a texel's ray
  * again, turned or moved, through it (R08.T6.g).
  *
@@ -3500,20 +3509,18 @@ function rayMarchTexelInto(
     out.set([0, 0, 0, 1]);
     return;
   }
-  const { ray, bareGroundM } = marched;
+  const { ray, bareGroundM, datumHitM } = marched;
   // The count by the segment's optical depth (R08.T8.e), as `rayMarch.wgsl`'s `marchRay` takes it:
-  // nothing drawn along the ray, it ends on the bare ground or in the sky.
-  let kind: MarchSegmentKind = "surface";
-  if (ray.skySegment === true) {
-    kind = bareGroundM === null ? "sky" : "ground";
-  }
+  // nothing drawn along the ray, it ends on the bare ground or in the sky; since R08.T11.b a drawn
+  // surface on the datum counts as the bare ground, its depth read from the datum's hit.
+  const kind = rayMarchKindOf(geometry, marched, depthSteps);
   // Lever 3's count keeps the curves' read in both kernels (R08.T8.e, `decision-r08-t8-leans.md`
   // §13, point 4).
   const depthAlong = (placeM: Vec3, direction: Vec3): number =>
     lightDepthGOf(countReads, geometry, placeM, direction);
   let depthG = Number.NaN;
   if (depthSteps !== null && kind === "ground") {
-    depthG = bareGroundDepthG(depthAlong, ray);
+    depthG = bareGroundDepthG(depthAlong, ray, datumHitM ?? ray.tEndM);
   } else if (kind === "sky" && depthSteps !== null && depthSteps.thinSky !== null) {
     depthG = skyDepthG(depthAlong, ray);
   }
@@ -3659,15 +3666,66 @@ function sphereLightInto(
 /**
  * The bare ground's green optical depth as the ray march's count reads it (plan R08, R08.T8.e;
  * `marchSteps.ts`'s `marchSamplesOf`): `depthAlong` (−ln T.g from a place along a unit direction to
- * the top) from the segment's ground point at t_end along −d.
+ * the top) from the segment's ground point `groundM` along it along −d: the bare ground's at t_end,
+ * a drawn surface's on the datum at the datum's hit (R08.T11.b).
  */
 function bareGroundDepthG(
   depthAlong: (placeM: Vec3, direction: Vec3) => number,
   ray: TwinSegment,
+  groundM: number,
 ): number {
   const o = ray.originM;
   const d = ray.direction;
-  return depthAlong(add(o, scale(d, ray.tEndM)), { x: -d.x, y: -d.y, z: -d.z });
+  return depthAlong(add(o, scale(d, groundM)), { x: -d.x, y: -d.y, z: -d.z });
+}
+
+/**
+ * What a ray-march texel's segment ends on as the kernel's count tells it (plan R08, R08.T8.e and
+ * R08.T11.b; `rayMarch.wgsl`'s `marchRay`): nothing drawn, the bare ground or the sky; a drawn
+ * surface on the datum under `rule`, at or beyond the datum's hit or within its band above it
+ * (`marchSteps.ts`'s `drawnSurfaceKind`), the bare ground; any other drawn surface, a surface.
+ */
+export function rayMarchKindOf(
+  geometry: MarchGeometry,
+  marched: RayMarchRay,
+  rule: MarchDepthSteps | null,
+): MarchSegmentKind {
+  const { ray, bareGroundM, datumHitM } = marched;
+  if (ray.skySegment === true) {
+    return bareGroundM === null ? "sky" : "ground";
+  }
+  return drawnSurfaceKind(drawnHeightOf(geometry, ray, datumHitM), rule);
+}
+
+/**
+ * A drawn surface's height above the datum as `rayMarch.wgsl`'s `marchRay` tells its count by
+ * (plan R08, R08.T11.b; `marchSteps.ts`'s `drawnSurfaceKind`): 0 at or beyond the datum's hit, where
+ * the march ends at the hit, the segment's end's own height on `geometry` before it (its radial
+ * height on a sphere, its geodetic one on a spheroid), and `null` where the ray meets no datum.
+ */
+function drawnHeightOf(
+  geometry: MarchGeometry,
+  ray: TwinSegment,
+  datumHitM: number | null,
+): number | null {
+  if (datumHitM === null) {
+    return null;
+  }
+  if (ray.tEndM >= datumHitM) {
+    return 0;
+  }
+  const end = add(ray.originM, scale(ray.direction, ray.tEndM));
+  let heightM: number;
+  switch (geometry.kind) {
+    case "sphere":
+      heightM = Math.hypot(end.x, end.y, end.z) - geometry.bottomRadiusM;
+      break;
+    case "spheroid":
+    case "gravitySpheroid":
+      heightM = geodeticOf(end, geometry.figure).heightM;
+      break;
+  }
+  return heightM;
 }
 
 /**
@@ -3717,20 +3775,25 @@ export function sphereSkyDepthG(
 /**
  * The bare ground's green optical depth as the ray march's count reads it (plan R08, R08.T8.e) on a
  * sphere's tables, `transmittanceAt` read at light slot 0: the light's from the segment's ground
- * point at t_end along −d, at its height and cosine on `geometry` as {@link rayMarchTexelTwin}
- * takes them. R05.T12.e's gate reads its bare-ground rays' counts through it
- * (`test/atmosphereGate.ts`).
+ * point at t_end, or at `groundM` along it where given (a drawn surface's datum hit, R08.T11.b),
+ * along −d, at its height and cosine on `geometry` as {@link rayMarchTexelTwin} takes them.
+ * R05.T12.e's gate reads its bare-ground rays' counts through it (`test/atmosphereGate.ts`).
  */
 export function sphereBareGroundDepthG(
   transmittanceAt: TwinSources["sunTransmittance"],
   geometry: MarchGeometry,
   ray: TwinSegment,
+  groundM: number = ray.tEndM,
 ): number {
-  return bareGroundDepthG((placeM, direction) => {
-    const out: TwinRgb = [0, 0, 0];
-    sphereLightInto(transmittanceAt, geometry, placeM, direction, out);
-    return -Math.log(out[1]);
-  }, ray);
+  return bareGroundDepthG(
+    (placeM, direction) => {
+      const out: TwinRgb = [0, 0, 0];
+      sphereLightInto(transmittanceAt, geometry, placeM, direction, out);
+      return -Math.log(out[1]);
+    },
+    ray,
+    groundM,
+  );
 }
 
 /**
@@ -5999,6 +6062,7 @@ export function oblateRayMarchRayAlongTwin(
     },
     bareGroundM:
       !Number.isFinite(tSurfaceM) && hitsGround && groundNear <= tEndM ? groundNear : null,
+    datumHitM: hitsGround ? groundNear : null,
   };
 }
 

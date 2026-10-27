@@ -11,6 +11,7 @@ import { DEFAULT_FOV_DEG } from "../../camera/projection";
 import { lookAlong } from "../../camera/quaternion";
 import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
 import { type AtmosphereCamera, type SunState, TABLE_SIZES } from "../hillaire";
+import { MARCH_TOLERANCE } from "../marchSteps";
 import type { AtmosphereMedium } from "../medium";
 import { bodyGravity } from "../oblate";
 import { kernelMedium } from "../tables";
@@ -372,12 +373,20 @@ describe("the reference twin's media", { timeout: TWIN_TIMEOUT_MS }, () => {
     }
   });
 
+  // At the setting's count, and since R08.T11.b at the bare ground's, which the disc's drawn ground
+  // takes from orbit (20 steps at this depth, `decision-r08-t11-frame.md` §2): 0.64% off, within
+  // R05.T12.e's 2% (2026-10-27).
   it("shows the disc of a medium of ω 0 as the ground's direct light through the air both ways", () => {
-    const twin = twinOf({ ...POINT, singleScatteringAlbedo: 0 });
+    const point = { ...POINT, singleScatteringAlbedo: 0 };
     const geometry = { ...geometryNamed("disc-p60"), detectorHalfAngleDeg: 0 };
     const tau = POINT.tau;
     const expected = (0.3 / Math.PI) * 0.5 * Math.exp(-tau / 0.5) * Math.exp(-tau);
-    expect(twin.radiance(geometry)[1] / expected).toBeCloseTo(1, 2);
+    const atTheSetting = referenceTwin(sweepMedium(point), FIGURE, {
+      sizes: { ...TABLE_SIZES.high, marchDepthSteps: null },
+    });
+    expect(atTheSetting.radiance(geometry)[1] / expected).toBeCloseTo(1, 2);
+    const shipped = twinOf(point).radiance(geometry)[1] / expected;
+    expect(Math.abs(shipped - 1)).toBeLessThan(MARCH_TOLERANCE);
   });
 });
 

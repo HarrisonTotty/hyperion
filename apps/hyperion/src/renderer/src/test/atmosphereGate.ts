@@ -31,6 +31,7 @@ import { add, cross, dot, normalise, scale, type Vec3 } from "../geometry/vec3";
 import { R05_EARTH_REFERENCE, RAYLEIGH_SCALE_HEIGHT_M } from "../view/atmosphere/earth";
 import { TABLE_SIZES } from "../view/atmosphere/hillaire";
 import {
+  drawnSurfaceKind,
   grazingTwilight,
   LOW_TWIN_WORST,
   MARCH_TOLERANCE,
@@ -291,15 +292,25 @@ export function sphereHits(o: Vec3, d: Vec3, radiusM: number): readonly [number,
   return [-b - root, -b + root];
 }
 
-type MarchFamily = "disc" | "limb" | "night limb" | "inside" | "near-level";
+type MarchFamily = "disc" | "limb" | "night limb" | "inside" | "near-level" | "drawn";
 type SkyFamily = "sky" | "band" | "past" | "high limb" | "high band" | "last light";
-/** A family of the gate's rays: the march's five, then the sky's six. */
-export type Family = MarchFamily | SkyFamily;
-const MARCH_FAMILIES: readonly Family[] = ["disc", "limb", "night limb", "inside", "near-level"];
 /**
- * The families whose rays are the ray march's: the march's five, and since R08.T8 the sky's last
- * light (`decision-r08-t8-leans.md` §5.5), which the ray march draws from the band's cameras and
- * the gate holds it to wherever it holds the march, marched as a sky pixel at the march's count.
+ * A family of the gate's rays: the march's five and, since R08.T11.b, its drawn surfaces
+ * ({@link drawnSurfaceRays}), then the sky's six.
+ */
+export type Family = MarchFamily | SkyFamily;
+const MARCH_FAMILIES: readonly Family[] = [
+  "disc",
+  "limb",
+  "night limb",
+  "inside",
+  "near-level",
+  "drawn",
+];
+/**
+ * The families whose rays are the ray march's: the march's, and since R08.T8 the sky's last light
+ * (`decision-r08-t8-leans.md` §5.5), which the ray march draws from the band's cameras and the gate
+ * holds it to wherever it holds the march, marched as a sky pixel at the march's count.
  */
 const RAY_MARCH_FAMILIES: ReadonlySet<Family> = new Set([...MARCH_FAMILIES, "last light"]);
 /** The families in the order the gate counts them. */
@@ -322,7 +333,17 @@ export interface GateRay {
   readonly s: Vec3;
   readonly tStartM: number;
   readonly tEndM: number;
+  /**
+   * Whether it ends on a lit surface of the gate's albedo: the ground, or since R08.T11.b a surface
+   * drawn in the air ({@link GateRay.drawnHeightM}).
+   */
   readonly ground: boolean;
+  /**
+   * Where a ray ends on a surface the scene draws, its depth in the scene's depth (R08.T11.b), the
+   * surface's height above the sphere, m, 0 on the ground; `null` where nothing is drawn, the bare
+   * ground or the sky.
+   */
+  readonly drawnHeightM: number | null;
   /** The point the sun's zenith angle is given at, and that angle. */
   readonly sunPoint: Vec3;
   readonly sunZenithDeg: number;
@@ -340,18 +361,26 @@ export const kernelOf = (ray: GateRay): "rayMarch" | "skyView" =>
  */
 export const skySegmentOf = (ray: GateRay): boolean => kernelOf(ray) === "rayMarch" && !ray.ground;
 
-/**
- * What a gate ray's segment ends on, as the ray march tells it (plan R08, R08.T8.e;
- * `marchSteps.ts`'s `MarchSegmentKind`): the inside and near-level families' drawn terrain
- * (`surface`); the bare ground, nothing drawn along the ray (`ground`: the disc from orbit, and the
- * sky families' rays that meet the ground and end there); otherwise the sky.
- */
-export function marchKindOf(ray: GateRay): MarchSegmentKind {
-  if (ray.ground && ray.tStartM <= 0) {
-    return "surface";
-  }
+/** The distance along a gate ray to the sphere's first hit ahead, m, or `null` where it meets none. */
+function groundHitOf(ray: GateRay): number | null {
   const ground = sphereHits(ray.o, ray.d, BOTTOM_M);
-  return ground !== null && ground[0] > 0 && ground[0] <= ray.tEndM ? "ground" : "sky";
+  return ground !== null && ground[0] > 0 ? ground[0] : null;
+}
+
+/**
+ * What a gate ray's segment ends on, as the ray march tells it under `rule` (plan R08, R08.T8.e;
+ * `marchSteps.ts`'s `MarchSegmentKind`): a drawn surface, the inside, near-level and drawn
+ * families' (`surface`), counted since R08.T11.b as the bare ground where it stands on the datum,
+ * at or beyond its hit or within the rule's band above it (`marchSteps.ts`'s `drawnSurfaceKind`);
+ * the bare ground, nothing drawn along the ray (`ground`: the disc from orbit, and the sky families'
+ * rays that meet the ground and end there); otherwise the sky.
+ */
+export function marchKindOf(ray: GateRay, rule: MarchDepthSteps | null): MarchSegmentKind {
+  const hit = groundHitOf(ray);
+  if (ray.drawnHeightM !== null) {
+    return drawnSurfaceKind(hit === null ? null : ray.drawnHeightM, rule);
+  }
+  return hit !== null && hit <= ray.tEndM ? "ground" : "sky";
 }
 
 /**
@@ -369,7 +398,7 @@ export function gateMarchSamples(
   edges: number,
   transmittanceAt: TwinSources["sunTransmittance"],
 ): number {
-  const kind = marchKindOf(ray);
+  const kind = marchKindOf(ray, rule);
   if (rule === null || kind === "surface" || (kind === "sky" && rule.thinSky === null)) {
     return n;
   }
@@ -381,9 +410,11 @@ export function gateMarchSamples(
     fromCamera: ray.tStartM <= 0,
   };
   const sphere = { kind: "sphere", bottomRadiusM: BOTTOM_M } as const;
+  // The bare ground's depth from the sphere's hit: its end, or a drawn surface's beyond it
+  // (R08.T11.b).
   const depthG =
     kind === "ground"
-      ? sphereBareGroundDepthG(transmittanceAt, sphere, segment)
+      ? sphereBareGroundDepthG(transmittanceAt, sphere, segment, groundHitOf(ray) ?? ray.tEndM)
       : sphereSkyDepthG(transmittanceAt, sphere, segment);
   return marchSamplesOf(kind, depthG, n, edges, rule);
 }
@@ -469,6 +500,7 @@ export function marchRays(): GateRay[] {
       tStartM: shell[0],
       tEndM: hits ? ground[0] : shell[1],
       ground: hits,
+      drawnHeightM: null,
       sunPoint: q,
       sunZenithDeg,
     });
@@ -543,18 +575,158 @@ export function marchRays(): GateRay[] {
           tStartM: 0,
           tEndM: hit.tM,
           ground: true,
+          drawnHeightM: 0,
           sunPoint: q,
           sunZenithDeg: zen,
         });
       }
     }
   };
-  const insideSuns = [30, 85].flatMap((zen) => [0, 180].map((az) => [zen, az] as const));
-  for (const cameraM of [20_000, 60_000]) {
-    toTerrain("inside", cameraM, [40_000, 100_000, 300_000], insideSuns);
+  for (const cameraM of INSIDE_CAMERAS_M) {
+    toTerrain("inside", cameraM, INSIDE_TERRAIN_M, INSIDE_SUNS);
   }
   for (const cameraM of [500, 1_000, 2_000, 5_000]) {
     toTerrain("near-level", cameraM, [40_000, 80_000, 150_000], SUNS_FULL);
+  }
+  return rays;
+}
+
+/** The inside family's cameras, m above the ground: from inside the air, under the march band. */
+const INSIDE_CAMERAS_M = [20_000, 60_000] as const;
+
+/** The inside family's terrain, m from the camera: every one beyond the aerial perspective's reach. */
+const INSIDE_TERRAIN_M = [40_000, 100_000, 300_000] as const;
+
+/** The inside family's suns: 30/85° from the zenith at the terrain, 0/180° in azimuth. */
+const INSIDE_SUNS = [30, 85].flatMap((zen) => [0, 180].map((az) => [zen, az] as const));
+
+/** The drawn surfaces' cameras from orbit, m from the centre: R05.T12.e's orbit and 10⁷ m. */
+const DRAWN_ORBIT_CAMERAS_M = [BOTTOM_M + 400_000, 1e7] as const;
+
+/**
+ * The drawn surfaces' ground zenith angles from orbit, degrees: the disc family's face, and 89°,
+ * the limb's last ground ray, a pixel inside the limb from 400 km at 1080p across 60°.
+ */
+const DRAWN_GROUND_ZENITHS_DEG = [0, 60, 80, 87, 89] as const;
+
+/**
+ * The band's edge the drawn surfaces stand at, m over the ground: high's band
+ * (`TableSizes`' `marchDepthSteps.drawnBandM`, R08.T11.b).
+ */
+function drawnBandEdgeM(): number {
+  const rule = TABLE_SIZES.high.marchDepthSteps;
+  if (rule === null) {
+    throw new Error("high's march takes a rule by optical depth");
+  }
+  return rule.drawnBandM;
+}
+
+/**
+ * The march's drawn surfaces (plan R08, R08.T11.b; `decision-r08-t11-frame.md` §2, lever A's
+ * family): surfaces the scene draws, each lit at the gate's albedo, on the datum and at the
+ * band's edge, {@link drawnBandEdgeM} over it, where high's march takes the bare ground's count by
+ * the optical depth from the datum's hit. From orbit, 400 km over the ground and 10⁷ m from the
+ * centre (the face, ground zenith 0/60/80/87°, and the limb's last ground ray, 89°) under the disc
+ * family's suns (30/80/90/95° at the surface × 0/90/180°, one azimuth at the nadir), on the ground
+ * and at the band's edge, but the disc's own rays (on the ground from 400 km at 0–87°), 168 rays;
+ * from 20 and 60 km, the inside family's terrain under its suns, at the band's edge or, where it
+ * is nearer or behind the camera, just past the aerial perspective's 32 km reach, where the march
+ * first draws a surface from there, 20 rays (no ground lies 40 km from the 60 km camera, as in the
+ * inside family). On the gate's sphere a ray's chord through the shells is set by its ground zenith
+ * alone, so the 10⁷ m rays repeat the 400 km ones' segments and figures in this `f64` twin; the
+ * `f32` kernel's far form, which only 10⁷ m takes, is the smoke's (`R08.T11.b the face's count on a
+ * drawn surface`). A surface beyond the datum's hit, R07's mesh
+ * on its chords, ends the march at the hit, so its ray is the one on the ground. The inside and
+ * near-level families are drawn surfaces on the ground too.
+ */
+export function drawnSurfaceRays(): GateRay[] {
+  const rays: GateRay[] = [];
+  const bandM = drawnBandEdgeM();
+  // Each surface at its height: 0 on the ground, the band's on its edge's shell, by construction.
+  const push = (
+    name: string,
+    o: Vec3,
+    d: Vec3,
+    span: { readonly tStartM: number; readonly tEndM: number; readonly heightM: number },
+    zen: number,
+    az: number,
+  ): void => {
+    const q = along(o, d, span.tEndM);
+    rays.push({
+      family: "drawn",
+      name: `drawn, ${name}, sun ${zen}°/${az}°`,
+      o,
+      d,
+      s: sunAt(q, d, zen, az),
+      tStartM: span.tStartM,
+      tEndM: span.tEndM,
+      ground: true,
+      drawnHeightM: span.heightM,
+      sunPoint: q,
+      sunZenithDeg: zen,
+    });
+  };
+  for (const cameraM of DRAWN_ORBIT_CAMERAS_M) {
+    const o = { x: 0, y: 0, z: cameraM };
+    const place = cameraM === DRAWN_ORBIT_CAMERAS_M[0] ? "400 km" : "1e7 m";
+    for (const groundZenithDeg of DRAWN_GROUND_ZENITHS_DEG) {
+      const alpha = Math.asin((BOTTOM_M / cameraM) * Math.sin(rad(groundZenithDeg)));
+      const d = { x: Math.sin(alpha), y: 0, z: -Math.cos(alpha) };
+      const shell = sphereHits(o, d, TOP_M);
+      const ground = sphereHits(o, d, BOTTOM_M);
+      const edge = sphereHits(o, d, BOTTOM_M + bandM);
+      if (shell === null || ground === null || edge === null) {
+        throw new Error(`a drawn ray from ${place} at ${groundZenithDeg}° misses the ground`);
+      }
+      // On the ground but where the disc family holds the same ray, and at the band's edge.
+      const ends = [
+        { at: "on the ground", tEndM: ground[0], heightM: 0 },
+        { at: `${bandM / 1_000} km over the ground`, tEndM: edge[0], heightM: bandM },
+      ].filter(({ heightM }) => !(heightM === 0 && place === "400 km" && groundZenithDeg < 89));
+      for (const end of ends) {
+        for (const zen of [30, 80, 90, 95]) {
+          for (const az of groundZenithDeg === 0 ? [0] : [0, 90, 180]) {
+            push(
+              `${place}, ground zenith ${groundZenithDeg}°, ${end.at}`,
+              o,
+              d,
+              { tStartM: shell[0], tEndM: end.tEndM, heightM: end.heightM },
+              zen,
+              az,
+            );
+          }
+        }
+      }
+    }
+  }
+  const reachM = TABLE_SIZES.high.aerialPerspectiveReachM;
+  for (const cameraM of INSIDE_CAMERAS_M) {
+    const o = { x: 0, y: 0, z: BOTTOM_M + cameraM };
+    for (const distanceM of INSIDE_TERRAIN_M) {
+      const hit = towardTerrain(o, distanceM);
+      if (hit === null) {
+        continue;
+      }
+      // The band's edge, where the camera stands over it, or the first surface past the reach.
+      const edge = cameraM > bandM ? sphereHits(o, hit.d, BOTTOM_M + bandM) : null;
+      const tM = Math.max(edge?.[0] ?? 0, reachM + 1_000);
+      if (!(tM < hit.tM)) {
+        continue;
+      }
+      const q = along(o, hit.d, tM);
+      const heightM =
+        edge !== null && tM === edge[0] ? bandM : Math.hypot(q.x, q.y, q.z) - BOTTOM_M;
+      for (const [zen, az] of INSIDE_SUNS) {
+        push(
+          `${cameraM / 1_000} km, terrain ${distanceM / 1_000} km, ${(tM / 1_000).toFixed(1)} km ahead at ${(heightM / 1_000).toFixed(1)} km`,
+          o,
+          hit.d,
+          { tStartM: 0, tEndM: tM, heightM },
+          zen,
+          az,
+        );
+      }
+    }
   }
   return rays;
 }
@@ -638,6 +810,7 @@ export function skyRays(): GateRay[] {
         tStartM: 0,
         tEndM,
         ground: false,
+        drawnHeightM: null,
         sunPoint: o,
         sunZenithDeg: zen,
       });
@@ -687,6 +860,7 @@ export function skyRays(): GateRay[] {
             tStartM: 0,
             tEndM: shell[1],
             ground: false,
+            drawnHeightM: null,
             sunPoint: q,
             sunZenithDeg: zen,
           });
@@ -754,9 +928,10 @@ export function singleScatteringPixel(
   if (!ray.ground) {
     return l;
   }
+  // A surface drawn in the air is lit at its own height (R08.T11.b).
   const mu = dot(normalise(along(ray.o, ray.d, ray.tEndM)), ray.s);
   const toSun: Rgb3 = [0, 0, 0];
-  sunTransmittance(BOTTOM_M, mu, toSun);
+  sunTransmittance(BOTTOM_M + (ray.drawnHeightM ?? 0), mu, toSun);
   const lit = (c: 0 | 1 | 2): number => (mu > 0 ? (GROUND_ALBEDO / Math.PI) * mu * toSun[c] : 0);
   return [l[0] + t[0] * lit(0), l[1] + t[1] * lit(1), l[2] + t[2] * lit(2)];
 }

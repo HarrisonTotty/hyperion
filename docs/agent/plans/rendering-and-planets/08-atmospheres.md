@@ -5039,7 +5039,8 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
 - **R08.T11.b The face's lever 3.** A march ray ending on a drawn surface within a band of the
   reference spheroid's hit takes the bare ground's count (lever 3), and nothing else changes. One
   `marchRay` call site. Acceptance: R05.T12.e's gate with its drawn-surface family, `pnpm test`,
-  `just test-render`.
+  `just test-render`. _Built 2026-10-27_ (Risks, "Deviations in R08.T11.b, as built"; the band a
+  height, 25 km over the datum, by `decision-r08-t11-frame.md` §8).
 - **R08.T11.c The frame re-measured (QW29),** after T11.b, T11.e and R07.T8.e–f, in QW28's form,
   with a class-map row and three small air bodies. Acceptance: the record; every high row's p95
   at most 16.67 ms, and at most 15.67 ms or T11.d's and R07.T8.g's turn.
@@ -10731,6 +10732,92 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
   - _R08.T8.e's items for R08.T11_ (E2 and E3 at one source, lever 4's payoff, the slab's step at
     the top on low, the twilight shadow's step boundary, the view path near a layer edge, the slot
     read on several bands): none is measured anew here. For R12.T10 with the frame's ruling.
+- **Deviations in R08.T11.b, as built** (2026-10-27; `decision-r08-t11-frame.md` §2, lever A, and
+  §8). Edited: `shaders/rayMarch.wgsl` (both march kernels) and `view.wgsl`'s comment; `hillaire.ts`
+  (high's `marchDepthSteps.drawnBandM`, packed in `view.marchSky.z`) and its test; `marchSteps.ts`
+  (`DRAWN_SURFACE_BAND_M`, `MarchDepthSteps.drawnBandM`, `drawnSurfaceKind`) and its test;
+  `tablesCpu.ts` (`RayMarchRay.datumHitM`, the exported `rayMarchKindOf`, `sphereBareGroundDepthG`'s
+  ground) and its tests; `test/atmosphereGate.ts` (`GateRay.drawnHeightM`, `marchKindOf(ray, rule)`,
+  `drawnSurfaceRays`) and its test; `test/marchGate.ts` and the three media's records;
+  `reference/twin.test.ts`; `smoke/atmosphere.ts`; the smoke's new part 12 (`smoke/page.ts`,
+  `scripts/testRender.sh`, `src/smoke/main.ts`, `result.ts` and its test); and the eight
+  `reference/ms-sweep-*.case.json` files, `hyperion-fit`'s `sweep_smoke.case.json` and R08.T13.c1's
+  `reference/caseGate.json`, re-blessed. No wire, version, golden of the sim or table moves.
+  - _The band._ A height over the datum, 25 km (`DRAWN_SURFACE_BAND_M`), not V4's 1% of the hit
+    distance: §8 confirmed it, amending §2's start. A drawn surface at or beyond the datum's hit
+    counts as in band, since the march ends at the hit there and the segment is the bare ground's.
+    R07's face, drawn on its chords, always is (its limb draw writes no depth), so V4's whole saving
+    is kept at the four rows. Before the hit the kernel takes the drawn point's height by
+    `datumPointOf` from the ground quadric at the surface's distance, near and far forms as a
+    step's. The count's depth is the bare ground's, from the datum's hit back along the ray. The
+    branch runs only where the setting has the bare ground's rule (`view.marchGround.x` over 0,
+    high), so on low the kernel and the twin tell every drawn surface alike.
+    - _The limit, recorded_ (§8): plan 14 caps an edifice's rise over its base at 21.9 km at Mars's
+      gravity, growing as 1 ÷ g. A summit over 25 km, on a world lighter than Mars or on a base
+      more than about 3 km over the datum, keeps the setting's count: no saving there, and no wrong
+      picture. Deferred to R12.T10: the band as max(25 km, the body's own edifice cap at its g),
+      per view in `view.marchSky.z`, tested by the gate's drawn family on a low-g medium (a
+      Titan-class column) up to that cap.
+  - _The gate's family_ (`drawnSurfaceRays`, 188 rays, in `test/marchGate.ts`'s `raysOf`, so on
+    both settings, the three media and 1 and 6 sources): from 400 km over the ground and from 10⁷ m
+    from the centre at ground zenith 0, 60, 80, 87 and 89° (the limb's last ground ray) under the
+    disc's suns, on the ground and at the band's edge, but the disc's own rays (168); from 20 and
+    60 km the inside family's terrain, the surface at the band's edge or just past the 32 km reach
+    (20). Every one is lit at the gate's albedo at its own height. R05's own twin gate
+    (`marchSteps.test.ts`) keeps `gateRays()` and counts the family as 0.
+    - High, at one source and at six: no ray misses, and every record holds on all three media.
+      The family's worst is the 10⁷ m disc on the ground, the same segments as the 400 km disc's:
+      1.43%, 1.35% and 1.59% (R05's, the measured and the slab Earth) ordinary at one source, 0.70%,
+      0.62% and 1.38% twilight. At the band's edge it is at most 0.43% ordinary, and from inside
+      the air 0.10%.
+    - Low (no rule): the slab Earth's two 10⁷ m disc rays at ground zenith 60 and 80°, sun 80°/0°,
+      join the rays over `LOW_TWIN_WORST` (5.97% and 3.78%), as the 400 km disc's same rays stand;
+      recorded, not a gate.
+    - The inside family's drawn terrain on the datum now takes the bare ground's count too: in
+      `tablesCpu.test.ts`'s gates its high worst rises 0.23% → 0.73% (R05's Earth), 0.21% → 0.66%
+      (measured) and 0.53% → 1.04% (slab), within 2%. The near-level family's depth keeps 36.
+  - _The pin_ (`marchSteps.test.ts`): the kind's rule as the kernel's text holds it, its depth the
+    bare ground's, and the bare ground's light and its transmittance of 0 still keyed on depth 0;
+    `hillaire.test.ts`'s one `marchRay` call site an entry point holds.
+  - _The GPU against the twin_ (`R08.T11.b the face's count on a drawn surface`, part 12): the
+    measured Earth on high from 400 km and from 10⁷ m at the nadir over a surface 405 and 3,640 km
+    ahead, every per-view kernel in both arms within 10⁻³ of the twin. From 400 km 448 texels end
+    at or beyond the hit, 1,320 within the band before it and 280 over it; from 10⁷ m 16, 36 and 72
+    (both variants, 2026-10-27). The group takes 49–69 s: in part 8 beside R07.T8.e–f's cell pass
+    it took the part past the watchdog (185 s at a load of 13), so the smoke gained a part 12
+    (`page.ts`, `scripts/testRender.sh`, `src/smoke/main.ts` and `result.ts`).
+  - _The twin's reads moved_ (main told 2026-10-27): `reference/twin.ts` draws a surface at the
+    ground's distance from orbit, so every cone direction from orbit that meets the ground takes
+    the bare ground's count. In the sweep cases the five disc geometries (`disc-p0` to `disc-p85`)
+    moved, 0.03–0.14% at τ 1, the ground, aerial and limb reads at τ 1 not; re-blessed whole on
+    9f40e651, every file's sha256 changed (now w400 `dc8df5fa`, w600 `d89c4d91`, w800 `f57f2bb7`,
+    w900 `7d6b61fe`, w950 `109ee4ec`, w990 `aa498df2`, w1000 `32064966`, w1000-a800 `a6e71b2a`,
+    `sweep_smoke` `78b15d4c`), each under 450 kB; a first bless on 6f4463c4 gave the two w1000 files
+    byte for byte, so R08.T13.c1's `twin.ts` moves none of them. In `caseGate.json` (now
+    `a6b06a06`) the orbit discs and limbs moved: Earth's and the slab Earth's discs 0.48–0.66% and
+    limbs 0.78–1.19%, Mars's 0.22–0.33% and 0.26–0.37%, saturn-oblate's limbs 0.03–0.29%, and 14
+    of its recorded twin values (the slab's placed-step limbs up to 1.36%, saturn-oblate's
+    one-slice limbs up to 0.05%); every case's passes, misses and worst ratio are unchanged. A test
+    bound, recorded: `twin.test.ts`'s ω-0 disc holds the closed form to 0.5% at the setting's
+    count, as before, and to R05.T12.e's 2% at the shipped one (0.64%, the bare ground's 20 steps
+    from orbit).
+  - _Untimed re-measure_ (RTX 3080, hidden, part 1's frame group, 2026-10-27 06:30–06:39 UTC, A
+    the lever on and B the band at −1 m, back to back; loads 5.7–12.9, P0, a median 1,965–1,980 MHz
+    busy, at most 67 °C; `.git/rm45-scratch/r08-t11be/rtx-{a,b}.log`). The atmosphere's median at
+    400 km, 10⁷ m and 1.54 × 10⁷ m falls 3.65–3.70, 3.04 and 2.32 ms on the measured Earth at x2
+    and x4 (13.19–13.99 → 9.49–10.95 ms), within 0.06 ms of V4's, B within 0.07 ms of V0's; on the
+    slab Earth, whose bare ground takes 28 steps (20 and 4 a layer edge), it falls 1.13–1.80 ms.
+    2.55 × 10⁷ m is faster (1.6 and 0.8 ms) and 10⁸ m within 0.2 ms on both. The frame's sum falls
+    3.8–5.4 ms on the measured Earth and 2.5–4.2 ms on the slab, with `discs` 0.8–3.3 ms of it, not
+    the lever's (B ran after A, hotter); the four rows stay over 16.67 ms until R07.T8.e–f, and QW29
+    judges them.
+- **Deferred findings (2026-10-13 rule)** (R08.T11.b). Recorded and deferred: each leaves the
+  algorithm and every contract as it is.
+  - _The band at the body's own relief_ (§8): max(25 km, the body's edifice cap at its g), per view,
+    with a low-g gate medium, for R12.T10.
+  - _Plescia 2004's 21.9 km_ (the science check, 2026-10-27): the paper could not be read (the
+    publisher refused the fetch); the figure stands on the sim's constant and a secondary source,
+    as plan 14's own check owes it.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is

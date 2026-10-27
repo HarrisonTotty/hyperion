@@ -1541,14 +1541,14 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     expect([...(draw.uniforms["exact"] ?? [])]).toEqual(expected);
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 0, 0, 0]);
     // The kernels' view block: the members in order, `exact` the eleventh, `curvature` the twelfth
-    // (R08.T6.f), `marchGround` and `marchSky` the thirteenth and fourteenth (R08.T8.e), the
-    // sources after them.
+    // (R08.T6.f), `marchGround` and `marchSky` the thirteenth and fourteenth (R08.T8.e), the drawn
+    // surface's band in `marchSky.z` (R08.T11.b), the sources after them.
     const block = engine.dispatched.find((d) => d.kernel === "atmosphere sky view")?.bindings
       .uniforms["view"];
     expect(Array.from(block ?? []).slice(40, 44)).toEqual(expected);
     expect(Array.from(block ?? []).slice(44, 48)).toEqual([...(draw.uniforms["curvature"] ?? [])]);
     expect(Array.from(block ?? []).slice(48, 52)).toEqual([20, 4, 2, 8]);
-    expect(Array.from(block ?? []).slice(52, 56)).toEqual([28, Math.fround(0.05), 0, 0]);
+    expect(Array.from(block ?? []).slice(52, 56)).toEqual([28, Math.fround(0.05), 25_000, 0]);
     expect(block).toHaveLength((14 + 3 * 6) * 4);
   });
 

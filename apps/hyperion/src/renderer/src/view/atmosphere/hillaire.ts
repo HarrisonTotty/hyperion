@@ -70,7 +70,7 @@ import { photopicIlluminance } from "../lighting/illuminance";
 import type { Rgb } from "../photometry/toneCurve";
 import type { QualitySetting } from "../quality/qualitySetting";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
-import type { MarchDepthSteps } from "./marchSteps";
+import { DRAWN_SURFACE_BAND_M, type MarchDepthSteps } from "./marchSteps";
 import { type AtmosphereMedium, localScaleHeightM } from "./medium";
 import { type BodyGravity, bodyGravity, gravityRatio, principalRadiiM } from "./oblate";
 import commonWgsl from "./shaders/common.wgsl?raw";
@@ -156,8 +156,9 @@ export interface TableSizes {
    * `decision-r08-t8-leans.md` §8, §9's Ruling 2, item 3; `marchSteps.ts`'s
    * {@link MarchDepthSteps} and `marchSamplesOf`): at most {@link TableSizes.rayMarchSamples}, the
    * bare ground down to the floors R05.T12.e's gate sets and a thin sky segment at its own count
-   * (§10, Ruling 4, item 2), other sky segments and drawn surfaces at the setting's count; `null`
-   * where every segment takes the setting's count.
+   * (§10, Ruling 4, item 2), a drawn surface on the datum at the bare ground's (R08.T11.b), other
+   * sky segments and drawn surfaces at the setting's count; `null` where every segment takes the
+   * setting's count.
    */
   readonly marchDepthSteps: MarchDepthSteps | null;
 }
@@ -262,9 +263,13 @@ export function marchWeightOf(heightStarM: number, topHeightM: number, band: Mar
  * even steps from a green optical depth of 2 to 8; a sky segment whose green optical depth, summed
  * from its lowest point along each side, is under 0.05 takes 28 (§10's floor, searched from 16 up:
  * under 28 the band's last-light window broke, and 12 broke the far limb's flicker and the band's
- * seam; `marchSteps.ts`'s `MarchDepthSteps`); a drawn surface keeps 36. R05.T12.e's gate holds
- * every ray within its tolerance at one source and at six on R05's Earth, the measured Earth and
- * the slab Earth, the slab's named misses unmoved. Low keeps its 16.
+ * seam; `marchSteps.ts`'s `MarchDepthSteps`). Since R08.T11.b (lever A of
+ * `decision-r08-t11-frame.md` §2) a drawn surface on a ray that meets the datum, at or beyond its
+ * hit or within 25 km above it before the hit, takes the bare ground's count, R07's face and
+ * terrain among them; anything else drawn keeps 36. R05.T12.e's gate holds every ray within its
+ * tolerance at one source and at six on R05's Earth, the measured Earth and the slab Earth, the
+ * slab's named misses unmoved, its drawn surfaces on the datum and at the band's edge among them.
+ * Low keeps its 16.
  */
 export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
   high: {
@@ -285,6 +290,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
       groundFloorPerEdge: 4,
       groundRampDepths: [2, 8],
       thinSky: { samples: 28, depthG: 0.05 },
+      drawnBandM: DRAWN_SURFACE_BAND_M,
     },
   },
   low: {
@@ -2171,7 +2177,9 @@ export class HillaireAtmosphere {
     // A thin sky segment's count and the depth under which it takes it (R08.T8.e, lever 3), a
     // count of 0 where every sky segment takes the setting's.
     const thinSky = ground?.thinSky ?? null;
-    set("marchSky", thinSky === null ? [0, 0, 0, 0] : [thinSky.samples, thinSky.depthG, 0, 0]);
+    // And the band over the datum within which a drawn surface takes the bare ground's count
+    // (R08.T11.b), 0 where the bare ground keeps the setting's.
+    set("marchSky", [thinSky?.samples ?? 0, thinSky?.depthG ?? 0, ground?.drawnBandM ?? 0, 0]);
     // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), how many of the
     // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
     // its line slots, whose pressure channels the read takes (R08.T4.d).

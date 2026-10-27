@@ -210,6 +210,29 @@ export function marchStep(split: MarchSplit, i: number): MarchStep {
 // --- The ray march's count by a segment's optical depth (plan R08, R08.T8.e) ---------------------
 
 /**
+ * The band over the datum within which high's march counts a drawn surface as the bare ground, m:
+ * 25 km (plan R08, R08.T11.b; `decision-r08-t11-frame.md` §2, lever A;
+ * {@link MarchDepthSteps.drawnBandM}).
+ *
+ * @remarks
+ * The least band that holds R07's mesh and terrain's heights (`decision-r08-t11-frame.md` §8,
+ * which confirmed it). R07's mesh draws the face on its chords, which sag inside the spheroid, so
+ * its depth lies at or beyond the hit (its limb draw writes none), where the march ends at the hit
+ * as on the bare ground: its segment is the bare ground's, and its count the one the gate accepted
+ * for the same rays before R08.T10.b drew the face with depth. Terrain stands above the datum,
+ * before the hit: plan 14 caps a volcanic edifice's rise over its base at 21.9 km at Mars's
+ * gravity, Olympus Mons's (`TALLEST_EDIFICE_RELIEF`, after Plescia 2004), so 25 km holds an
+ * edifice's rise at Mars's gravity and above, and its summit where its base stands within about
+ * 3 km of the datum (an Earth's 8.8 km, Everest's 8,848.86 m by the 2020 Nepal–China survey, and
+ * Venus's 11 km, Maxwell Montes over its mean radius by Magellan's altimetry, Ford and Pettengill
+ * 1992, J. Geophys. Res. 97, 13103). A summit over 25 km, on a world lighter
+ * than Mars, whose cap grows as 1 ÷ g, or on high ground, keeps the setting's count, and so its
+ * reference path. V4's share of the hit distance, 1%, holds neither: 4 km from 400 km at the
+ * nadir, under an Earth's summit, and 36–77 km before the face from 10⁷ m.
+ */
+export const DRAWN_SURFACE_BAND_M = 25_000;
+
+/**
  * The ray march's count scaled by a segment's optical depth (plan R08, R08.T8.e; lever 3 of
  * `decision-r08-t8-leans.md` §8, taken by §9, Ruling 2, item 3; the thin sky's floor by §10,
  * Ruling 4, item 2): at most the setting's count, down to the floors R05.T12.e's gate sets, at no
@@ -223,7 +246,9 @@ export function marchStep(split: MarchSplit, i: number): MarchStep {
  * 28 on the slab Earth, whose ozone slab's two edges cut each ray into three pieces. Grazing bare
  * ground under a twilight sun behind the camera (the gate's `past` family from 50 km, depth 6–10)
  * needs 22–28 even on R05's Earth, so the ground's count climbs back to the setting's over
- * {@link MarchDepthSteps.groundRampDepths}. A drawn surface keeps the setting's count.
+ * {@link MarchDepthSteps.groundRampDepths}. Since R08.T11.b a drawn surface on the datum takes the
+ * bare ground's count ({@link MarchDepthSteps.drawnBandM}, {@link drawnSurfaceKind}); anything else
+ * drawn keeps the setting's.
  *
  * A thin sky segment's error follows its depth in the gate (every one under 0.05 in green held at
  * 8–12 steps), but the gate does not bound the floor (2026-10-22–23): 12 steps put the far limb of
@@ -251,6 +276,13 @@ export interface MarchDepthSteps {
   readonly groundRampDepths: readonly [number, number];
   /** A thin sky segment's count, or `null` where the sky keeps the setting's count. */
   readonly thinSky: ThinSkyRule | null;
+  /**
+   * The band over the datum within which a drawn surface takes the bare ground's count, m (plan
+   * R08, R08.T11.b): a surface on a ray that meets the datum, at most this high above it before the
+   * datum's hit, or anywhere at or beyond the hit ({@link drawnSurfaceKind}); high's is
+   * {@link DRAWN_SURFACE_BAND_M}.
+   */
+  readonly drawnBandM: number;
 }
 
 /** A thin sky segment's count under {@link MarchDepthSteps} (plan R08, R08.T8.e). */
@@ -267,9 +299,29 @@ export interface ThinSkyRule {
 /**
  * What a ray-march segment ends on, as `rayMarch.wgsl`'s `marchRay` tells it (plan R08, R08.T8.e):
  * the bare ground with nothing drawn (`ground`), the sky with nothing drawn and the ground not
- * reached (`sky`), or a drawn surface (`surface`).
+ * reached (`sky`), or a drawn surface (`surface`). Since R08.T11.b a drawn surface on the datum
+ * counts as the bare ground ({@link drawnSurfaceKind}).
  */
 export type MarchSegmentKind = "ground" | "sky" | "surface";
+
+/**
+ * What a ray-march segment that ends on a drawn surface counts as (plan R08, R08.T11.b, lever A of
+ * `decision-r08-t11-frame.md` §2): the bare ground (`ground`), its count by its optical depth from
+ * the datum's hit back along the ray, where the ray meets the datum and the surface stands within
+ * the rule's {@link MarchDepthSteps.drawnBandM} above it, at or beyond the hit included; a drawn
+ * surface (`surface`), the setting's count, otherwise or with no rule. Only the count changes: the
+ * ray's end, its transmittance and the surface's light are the drawn surface's, and no bare ground
+ * is added. As `rayMarch.wgsl`'s `marchRay` tells it.
+ *
+ * @param heightM - The drawn point's height above the datum, m: 0 where it stands at or beyond the
+ *   datum's hit, where the march ends at the hit; `null` where the ray meets no datum.
+ */
+export function drawnSurfaceKind(
+  heightM: number | null,
+  rule: MarchDepthSteps | null,
+): MarchSegmentKind {
+  return rule !== null && heightM !== null && heightM <= rule.drawnBandM ? "ground" : "surface";
+}
 
 /**
  * The ray march's count for one segment (plan R08, R08.T8.e; `decision-r08-t8-leans.md` §8, lever 3):
@@ -281,8 +333,8 @@ export type MarchSegmentKind = "ground" | "sky" | "surface";
  * `f32` (`rayMarch.wgsl`).
  *
  * @param depthG - The segment's green optical depth, absorbers included: the bare ground's from its
- *   ground point along −d, a sky segment's from its lowest point along each side
- *   (`tablesCpu.ts`'s `rayMarchTexelInto`).
+ *   ground point along −d (a drawn surface's on the datum from the datum's hit, R08.T11.b), a sky
+ *   segment's from its lowest point along each side (`tablesCpu.ts`'s `rayMarchTexelInto`).
  * @param samples - The setting's count (`TableSizes`' `rayMarchSamples`).
  * @param edges - The medium's march edges, as many as the kernel's `layerEdges.count.x`.
  * @param rule - The setting's {@link MarchDepthSteps}, or `null` for the setting's count everywhere.

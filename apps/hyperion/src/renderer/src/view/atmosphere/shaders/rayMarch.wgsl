@@ -92,9 +92,9 @@
 // depth from the ground back along the ray, absorbers included, is at most 2, climbing back to the
 // setting's count in even steps by 8 (`rayMarchSamplesOf`, `view.marchGround`; `marchSteps.ts`'s
 // marchSamplesOf is its twin). A sky segment whose optical depth from its lowest point, along each
-// side, is under 0.05 takes 28 on high (`view.marchSky`). A drawn surface keeps the setting's
-// count. From orbit the face is most of the march's step work; R05.T12.e's gate holds every ray at
-// the rule on all three media at 1 and 6 sources, at no wider tolerance.
+// side, is under 0.05 takes 28 on high (`view.marchSky`). A drawn surface kept the setting's count
+// until R08.T11.b (below). From orbit the face is most of the march's step work; R05.T12.e's gate
+// holds every ray at the rule on all three media at 1 and 6 sources, at no wider tolerance.
 //
 // Changes (plan R08, R08.T8.e; lever 5 of `decision-r08-t8-leans.md` sections 10 and 13): two kernels
 // are made from this module, each with a file of its own appended that gives the step its sources'
@@ -104,6 +104,16 @@
 // layers, for a body whose tables hold them (`tables.ts`'s slotDepthsRefusal), chosen when its
 // pipeline is made. The ray's count (lever 3, `rayMarchDepthAlong`), the forward lobes' depth, the
 // view's own path and every other kernel keep the shared read.
+//
+// Changes (plan R08, R08.T11.b; lever A of `decision-r08-t11-frame.md` sections 2 and 8): a ray
+// that ends on a drawn surface on the datum takes the bare ground's count, by its optical depth from
+// the datum's hit back along the ray: on a ray that meets the datum, the surface at or beyond the
+// hit, where the march ends at the hit as on the bare ground (R07's face, drawn on its chords), or
+// before it within the band `view.marchSky.z` above the datum, 25 km on high (terrain's heights).
+// Only the count changes: the ray's end, its transmittance and the drawn surface's light are as
+// before, and no bare ground is added, which stays keyed on depth 0. From orbit the face's rays
+// return to the counts R05.T12.e's gate accepted for them as bare ground before R08.T10.b drew the
+// face with depth; anything else drawn keeps the setting's count.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -297,12 +307,13 @@ fn rayMarchDepthAlong(body : OblateBody, p : vec3f, bigQ : f32, d : vec3f) -> f3
 // The ray march's count for one ray (plan R08, R08.T8.e, lever 3 of `decision-r08-t8-leans.md`
 // sections 8 to 10; `marchSteps.ts`'s marchSamplesOf is its twin): `samples`, the setting's, but
 // where the view holds the rules: on the bare ground (`kind` 1: nothing drawn, the ray ending on
-// the ground), the ground's floor at the medium's `edges` layer edges while the ray's green optical
-// depth `depthG` is at most the ramp's first depth, climbing back to `samples` in even steps by its
-// last (`view.marchGround`); on a sky segment (`kind` 2: nothing drawn, the ground not reached), the
-// thin sky's count where its depth is under the thin sky's (`view.marchSky`). A drawn surface
-// (`kind` 0) keeps `samples`. R05.T12.e's gate holds every ray at them, on all three media, at 1
-// and 6 sources. A depth that is not finite takes `samples`.
+// the ground, or since R08.T11.b a drawn surface on the datum), the ground's floor at the medium's
+// `edges` layer edges while the ray's green optical depth `depthG` is at most the ramp's first
+// depth, climbing back to `samples` in even steps by its last (`view.marchGround`); on a sky
+// segment (`kind` 2: nothing drawn, the ground not reached), the thin sky's count where its depth
+// is under the thin sky's (`view.marchSky`). Any other drawn surface (`kind` 0) keeps `samples`.
+// R05.T12.e's gate holds every ray at them, on all three media, at 1 and 6 sources. A depth that is
+// not finite takes `samples`.
 fn rayMarchSamplesOf(kind : u32, depthG : f32, samples : u32, edges : u32) -> u32 {
   if (kind == 0u || !(abs(depthG) < 3.4e38)) {
     return samples;
@@ -380,6 +391,26 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   var kind = 0u;
   if (depth == 0.0) {
     kind = select(2u, 1u, hitsGround);
+  } else if (hitsGround && view.marchGround.x > 0.0) {
+    // Since R08.T11.b (lever A of `decision-r08-t11-frame.md` section 2) a drawn surface on the
+    // datum counts as the bare ground where the setting has the rule (high): at or beyond the
+    // datum's hit, where the march ends at the hit as on the bare ground, or before it within the
+    // band `view.marchSky.z` above the datum, R07's face and terrain's heights (`marchSteps.ts`'s
+    // drawnSurfaceKind). Only the count changes; anything else drawn keeps the setting's.
+    var drawnHeightM = 0.0;
+    if (tSurface < ground.x) {
+      var drawnQ : f32;
+      if (far) {
+        let fromStar = (tSurface - nearest) + nearestFromStar;
+        drawnQ = groundQ.qa * fromStar * fromStar + qStar;
+      } else {
+        drawnQ = tSurface * (groundQ.qa * tSurface + 2.0 * groundQ.qb) + groundQ.qc;
+      }
+      drawnHeightM = datumPointOf(body, origin + tSurface * dir, drawnQ).heightM;
+    }
+    if (drawnHeightM <= view.marchSky.z) {
+      kind = 1u;
+    }
   }
   var depthG = 0.0;
   if (kind == 1u && view.marchGround.x > 0.0) {

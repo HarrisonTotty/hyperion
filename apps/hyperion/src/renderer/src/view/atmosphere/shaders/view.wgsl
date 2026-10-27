@@ -83,7 +83,9 @@ struct AtmosphereView {
   marchGround : vec4f,
   // The ray march's count by optical depth on a sky segment (R08.T8.e, lever 3): x a thin sky
   // segment's count, 0 where every sky segment takes `figure.w`; y the green optical depth, summed
-  // from the segment's lowest point along each side, absorbers included, under which it takes it.
+  // from the segment's lowest point along each side, absorbers included, under which it takes it;
+  // z the band over the datum, m, within which a drawn surface on a ray that meets the datum takes
+  // the bare ground's count (R08.T11.b; `marchSteps.ts`'s MarchDepthSteps.drawnBandM).
   marchSky : vec4f,
   // The drawn sources, the first `sky.x` of them (R08.T7).
   sources : array<SkySource, MAX_SKY_SOURCES>,

@@ -830,7 +830,7 @@ describe("the oblate ray march and aerial perspective on a Saturn-class figure (
   });
 
   // R08.T8.e: high's count by the bare ground's optical depth, its light read through the slices.
-  it("marches the bare ground at 20 steps on high, and a drawn surface and the sky at 36", () => {
+  it("marches the bare ground and a drawn surface on the datum at 20 steps on high, and a drawn surface over the band and the sky at 36", () => {
     const planet = saturnSlicesPlanet();
     const phi = 45 * DEG;
     const view = twinView(northCamera(phi, 2 * top), saturnSun(phi), SATURN, 0.1);
@@ -847,9 +847,13 @@ describe("the oblate ray march and aerial perspective on a Saturn-class figure (
       return marched;
     };
     const ground = along(down, Number.POSITIVE_INFINITY);
+    // Since R08.T11.b a drawn surface on the datum, at or beyond its hit or within 25 km over it,
+    // takes the bare ground's count: 1% short of the hit is about 15 km up.
     const cases = [
       { what: "bare ground", marched: ground, n: 20 },
-      { what: "a drawn surface", marched: along(down, 0.99 * ground.ray.tEndM), n: 36 },
+      { what: "a drawn surface 1% short", marched: along(down, 0.99 * ground.ray.tEndM), n: 20 },
+      { what: "a drawn surface beyond", marched: along(down, 1.01 * ground.ray.tEndM), n: 20 },
+      { what: "a drawn surface 10% short", marched: along(down, 0.9 * ground.ray.tEndM), n: 36 },
       { what: "sky", marched: along(limb, Number.POSITIVE_INFINITY), n: 36 },
     ];
     const drawn = cases.map(({ what, marched }) => {

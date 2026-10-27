@@ -103,6 +103,7 @@ function nightRays(): GateRay[] {
         tStartM: 0,
         tEndM: shell[1],
         ground: false,
+        drawnHeightM: null,
         sunPoint: q,
         sunZenithDeg: zenithDeg,
       }));

@@ -29,6 +29,8 @@ import {
 } from "../../test/atmosphereGate";
 import { RAY_MARCH_KERNEL, SKY_VIEW_KERNEL, TABLE_SIZES } from "./hillaire";
 import {
+  DRAWN_SURFACE_BAND_M,
+  drawnSurfaceKind,
   grazingTwilight,
   marchEdgesM,
   marchEvenStep,
@@ -479,6 +481,28 @@ describe("the kernels' WGSL", () => {
     }
   });
 
+  // Lever A of `decision-r08-t11-frame.md` §2: only the count changes.
+  it("counts a drawn surface on the datum as the bare ground in the ray march, its light and its end untouched (R08.T11.b)", () => {
+    const code = rayMarchWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code).toMatch(
+      /if \(depth == 0\.0\) \{\s*kind = select\(2u, 1u, hitsGround\);\s*\} else if \(hitsGround && view\.marchGround\.x > 0\.0\) \{\s*var drawnHeightM = 0\.0;\s*if \(tSurface < ground\.x\) \{/u,
+    );
+    expect(code).toMatch(
+      /drawnHeightM = datumPointOf\(body, origin \+ tSurface \* dir, drawnQ\)\.heightM;\s*\}\s*if \(drawnHeightM <= view\.marchSky\.z\) \{\s*kind = 1u;\s*\}/u,
+    );
+    // Its depth is the bare ground's, from the datum's hit back along the ray.
+    expect(code).toMatch(
+      /if \(kind == 1u && view\.marchGround\.x > 0\.0\) \{\s*depthG = rayMarchDepthAlong\(body, origin \+ ground\.x \* dir, 0\.0, -dir\);/u,
+    );
+    // The bare ground's light and its sky's transmittance of 0 stay keyed on depth 0, the end on
+    // the drawn surface, and its camera side's placement and the warp the drawn surface's.
+    expect(code.match(/if \(depth == 0\.0 && hitsGround && ground\.x <= tEnd\) \{/gu)).toHaveLength(
+      2,
+    );
+    expect(code).toMatch(/tEnd = min\(tEnd, tSurface\);/u);
+    expect(code).toMatch(/let evenSky = depth == 0\.0 && split\.beforeM > 0\.0/u);
+  });
+
   it("takes the warp's constant and form in common.wgsl as marchSteps.ts takes them (R08.T8)", () => {
     expect(commonWgsl).toMatch(
       new RegExp(
@@ -613,7 +637,8 @@ describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
   it("covers the decision's rays, those of addenda A and B, and R08.T8's night limb and last light", () => {
     const count = (family: Family): number =>
       gate.results.filter((r) => r.ray.family === family).length;
-    expect(FAMILIES.map(count)).toEqual([40, 30, 70, 20, 108, 120, 336, 224, 72, 96, 525]);
+    // The drawn surfaces are the widened march's family (`test/marchGate.ts`, R08.T11.b), not R05's.
+    expect(FAMILIES.map(count)).toEqual([40, 30, 70, 20, 108, 0, 120, 336, 224, 72, 96, 525]);
     expect(gate.results).toHaveLength(1_641);
   });
 
@@ -710,12 +735,14 @@ describe("the ray march's count by a segment's optical depth (R08.T8.e)", () => 
     groundFloorPerEdge: 4,
     groundRampDepths: [2, 8],
     thinSky: { samples: 28, depthG: 0.05 },
+    drawnBandM: DRAWN_SURFACE_BAND_M,
   };
   const groundOnly: MarchDepthSteps = { ...rule, thinSky: null };
   const KINDS: readonly MarchSegmentKind[] = ["ground", "sky", "surface"];
 
-  it("scales high's 36 steps by the rule `decision-r08-t8-leans.md` §8's lever 3 asks, and leaves low's 16", () => {
+  it("scales high's 36 steps by the rule `decision-r08-t8-leans.md` §8's lever 3 asks, a drawn surface on the datum among them (R08.T11.b), and leaves low's 16", () => {
     expect(TABLE_SIZES.high.marchDepthSteps).toEqual(rule);
+    expect(DRAWN_SURFACE_BAND_M).toBe(25_000);
     expect(TABLE_SIZES.high.rayMarchSamples).toBe(36);
     expect(TABLE_SIZES.low.marchDepthSteps).toBeNull();
   });
@@ -778,5 +805,39 @@ describe("the ray march's count by a segment's optical depth (R08.T8.e)", () => 
     expect(marchSamplesOf("ground", 7.999, 36, 0, rule)).toBe(36);
     expect(marchSamplesOf("ground", 8, 36, 0, rule)).toBe(36);
     expect(marchSamplesOf("ground", 50, 36, 2, rule)).toBe(36);
+  });
+
+  // R08.T11.b: lever A of `decision-r08-t11-frame.md` §2, the face's lever 3.
+  it("counts a drawn surface on the datum as the bare ground, at or beyond its hit or within 25 km over it (R08.T11.b)", () => {
+    expect([0, 1, 8_848, 24_999, 25_000].map((h) => drawnSurfaceKind(h, rule))).toEqual([
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+    ]);
+    // Below the datum the march ends at its hit; a sag inside the spheroid is told as 0 there.
+    expect(drawnSurfaceKind(-500, rule)).toBe("ground");
+    expect(drawnSurfaceKind(-500, groundOnly)).toBe("ground");
+  });
+
+  it("keeps a drawn surface off the datum, or on a ray that meets none, at the setting's count (R08.T11.b)", () => {
+    expect([25_000.001, 60_000, Number.NaN].map((h) => drawnSurfaceKind(h, rule))).toEqual([
+      "surface",
+      "surface",
+      "surface",
+    ]);
+    expect(drawnSurfaceKind(null, rule)).toBe("surface");
+    expect(drawnSurfaceKind(0, null)).toBe("surface");
+    // So low, which takes no rule, marches every drawn surface at its 16.
+    expect(marchSamplesOf(drawnSurfaceKind(0, null), 0.5, 16, 0, null)).toBe(16);
+  });
+
+  it("gives a drawn surface on the datum the bare ground's count by its depth (R08.T11.b)", () => {
+    const counts = [0.5, 3, 8].map((d) =>
+      marchSamplesOf(drawnSurfaceKind(0, rule), d, 36, 0, rule),
+    );
+    expect(counts).toEqual([0.5, 3, 8].map((d) => marchSamplesOf("ground", d, 36, 0, rule)));
+    expect(counts).toEqual([20, 24, 36]);
   });
 });

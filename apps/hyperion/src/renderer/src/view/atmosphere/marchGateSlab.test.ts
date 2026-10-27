@@ -30,7 +30,9 @@ describeMarchGate({
   // 18.26658% (18.23 → 18.27), all of it the interpolation of the slot layer's −ln T_c(u) between
   // texels, §10's second-order effect; s ≡ 1, and the GPU's `rgba16float` layers move it about
   // −0.004 points the other way (18.2626%, an estimate). Low's even-step sky twilight 0.49632 →
-  // 0.49657.
+  // 0.49657. Since R08.T11.b the drawn surfaces add to the rays over `LOW_TWIN_WORST` two from
+  // 10⁷ m on the ground, which low marches at its 16 as it does the disc's same rays from 400 km
+  // (5.97% and 3.78%, the same segments); high's figures and named misses hold (2026-10-27).
   record: {
     highMisses: [
       [
@@ -123,6 +125,8 @@ describeMarchGate({
         "night limb, 101 km, 0.1 H, sun 90°/0°: 28.56%",
         "night limb, 101 km, 0.1 H, sun 95°/180°: 27.51%",
         "night limb, 101 km, 0.3 H, sun 95°/180°: 24.12%",
+        "drawn, 1e7 m, ground zenith 60°, on the ground, sun 80°/0°: 5.97%",
+        "drawn, 1e7 m, ground zenith 80°, on the ground, sun 80°/0°: 3.78%",
         "band, 50000 m, view zenith 97.008°, sun 90°/180°: 18.27%",
       ],
       ["limb, 0.3 H, sun 30°/180°: 3.95%", "limb, 1 H, sun 30°/180°: 4.12%"],

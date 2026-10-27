@@ -8,16 +8,17 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in eleven parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6 and 8 to 11 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
- * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e), part 4 with R05.T12.e's marches before them
- * and part 6 with R05.T12.c's frames, part 7 R10's terrain groups, and part 1 every other; with no
+ * groups are in twelve parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 6 and 8 to 12 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11), part 4 with R05.T12.e's marches
+ * before them and part 6 with R05.T12.c's frames, part 7 R10's terrain groups, and part 1 every other; with no
  * part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
- * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`); R08.T6.b's
- * kernels over N terms in two, its medium of four absorbers in part 6 and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the Saturn-class
- * figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
+ * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
+ * R08.T11.b's face count in part 12; R08.T6.b's kernels over N terms in two, its medium of four
+ * absorbers in part 6 and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the
+ * Saturn-class figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
  * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
  * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
  * its binary; R08.T8.b's far limb, with the composite from above
@@ -56,6 +57,7 @@ import {
   checkAtmosphereTwins,
   checkAtmosphereTwinsFourAbsorbers,
   checkBinarySlotLayers,
+  checkFaceCount,
   checkFarLimb,
   checkFarLimbFootprint,
   checkLowPick,
@@ -131,14 +133,14 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 };
 
 /**
- * A part of the page's groups: 2 to 6 and 8 to 11 the atmosphere's CPU-twin groups (R08.T6,
- * R08.T7, R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e), whose twins outweigh their GPU work
- * (2 R08.T6.b's but its medium of four absorbers, 3 R08.T6.g's, 4 R08.T8.b's far limb, with the
+ * A part of the page's groups: 2 to 6 and 8 to 12 the atmosphere's CPU-twin groups (R08.T6,
+ * R08.T7, R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11), whose twins outweigh their
+ * GPU work (2 R08.T6.b's but its medium of four absorbers, 3 R08.T6.g's, 4 R08.T8.b's far limb, with the
  * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
  * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7's
  * several suns and R08.T8.e's slot layers on its binary, 11 R08.T9.b's Earth and Saturn-class
- * figure and R08.T8.c's far limb's footprint), 7 R10's terrain groups (R10.T10.b,
- * T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
+ * figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's face count), 7 R10's terrain groups
+ * (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
  * joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's frames, which
  * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
  * materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
@@ -174,9 +176,11 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * 7 s outside its groups; the whole render 1,281 s, parts 9 and 10 together 186 s and parts 8 and
  * 11 144 s against 152 to 154 s and 151 to 153 s as one part each at a load of 8 to 13, so the two
  * parts' starts and their twins set up again cost about 30 s of the render's wall clock
- * (2026-10-23).
+ * (2026-10-23). R08.T11.b's face count (49 to 69 s) took part 8 past the watchdog beside
+ * R07.T8.e–f's cell pass (185 s at a load of 13, R08.T6.f's Earth 79 s), so part 12 joined, with
+ * it (2026-10-27).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -206,6 +210,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 10;
     case "11":
       return 11;
+    case "12":
+      return 12;
     default:
       return null;
   }
@@ -260,7 +266,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 11 or all");
+    return failed("the part asked for is not 1 to 12 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -398,6 +404,9 @@ async function run(
   // In part 8, which had room (66 s at 6f4463c4's gate), with R05's Earth's tables of its own.
   await group(8, "R07.T8.e–f the cell pass for every record", () =>
     checkCellPassEveryRecord(engine, checks),
+  );
+  await group(12, "R08.T11.b the face's count on a drawn surface", () =>
+    checkFaceCount(engine, checks, twins),
   );
   await group(5, "R08.T6.i the marches cut at layer edges", () =>
     checkAtmosphereLayerEdges(engine, checks, twins),

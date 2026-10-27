@@ -11,6 +11,12 @@
  * `gateMarchSamples`); the references R05.T12.e's placed steps. The floor is each kernel's family
  * group's brightest reference over the setting's rays.
  *
+ * Since R08.T11.b (`decision-r08-t11-frame.md` §2, lever A) the march's families gain its drawn
+ * surfaces (`atmosphereGate.ts`'s `drawnSurfaceRays`), on the datum and at the band's edge, which
+ * high's march counts as the bare ground, as it does the inside and near-level families' terrain:
+ * each scored on its in-scatter and its transmittance together over its surface at the gate's
+ * albedo, lit at its own height.
+ *
  * @remarks
  * Moved here from `view/atmosphere/marchGate.test.ts` (2026-10-22, main's infra ruling) and split
  * by medium, so that Vitest runs the three gates side by side, on three workers:
@@ -49,6 +55,7 @@ import {
   BOTTOM_M,
   CONVERGED,
   describeFailures,
+  drawnSurfaceRays,
   errorOf,
   errors,
   evenAt,
@@ -191,8 +198,9 @@ function pixelOf(
     const end = normalise(add(ray.o, scale(ray.d, ray.tEndM)));
     const toSun: Rgb3 = [0, 0, 0];
     for (const light of lights) {
+      // A surface drawn in the air is lit at its own height (R08.T11.b).
       const mu = dot(end, light.direction);
-      read.sunTransmittance(0, mu, toSun, light.slot);
+      read.sunTransmittance(ray.drawnHeightM ?? 0, mu, toSun, light.slot);
       for (const c of [0, 1, 2] as const) {
         out[c] += t[c] * light.weight[c] * (GROUND_ALBEDO / Math.PI) * Math.max(mu, 0) * toSun[c];
       }
@@ -203,10 +211,17 @@ function pixelOf(
 
 const cameraHeightM = (ray: GateRay): number => Math.hypot(ray.o.x, ray.o.y, ray.o.z) - BOTTOM_M;
 
-/** A setting's rays: the march's, and the sky's from cameras at or above its band's lower edge. */
+/**
+ * A setting's rays: the march's, its drawn surfaces since R08.T11.b, and the sky's from cameras at
+ * or above its band's lower edge.
+ */
 export function raysOf(setting: QualitySetting): GateRay[] {
   const lowerM = TABLE_SIZES[setting].marchBand.lowerShareOfTop * TOP_M;
-  return [...marchRays(), ...skyRays().filter((ray) => cameraHeightM(ray) >= lowerM)];
+  return [
+    ...marchRays(),
+    ...drawnSurfaceRays(),
+    ...skyRays().filter((ray) => cameraHeightM(ray) >= lowerM),
+  ];
 }
 
 /**
