@@ -49,7 +49,9 @@
 //! where the case gives them, and the command's count elsewhere; the key leaves one's count out of
 //! the others' draws. Each records its count, and the standard error of its own first quarter of
 //! samples beside the whole run's, for R08's N^(−1/2) check (`gate.ts`): the blocks are merged
-//! in index order, so the first quarter's moments are a part of the run's.
+//! in index order, so the first quarter's moments are a part of the run's. For the same reason a
+//! geometry's run can be carried on from where it stopped, onto its moments so far, and read as one
+//! traced to its new count (`trace_spans`, R08.T13.b's top-up).
 
 mod absorber;
 #[cfg(test)]
@@ -212,6 +214,55 @@ pub(crate) struct CountedTrace {
     pub(crate) geometry_vertices: Vec<u64>,
     /// Each aggregate's vertices over both its fluxes' samples and the wavelengths.
     pub(crate) aggregate_vertices: Vec<u64>,
+    /// Each geometry's radiance moments, by wavelength and then geometry in the case's order, from
+    /// which [`trace_spans`] carries a geometry on (R08.T13.b's top-up).
+    pub(crate) geometry_moments: Vec<Vec<GeometryMoments>>,
+}
+
+/// A geometry's radiance moments at one wavelength: over its whole run and over its first
+/// quarter of samples, ⌊N ÷ 4⌋.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct GeometryMoments {
+    /// Over the whole run.
+    pub(crate) whole: Moments,
+    /// Over the first quarter.
+    pub(crate) quarter: Moments,
+}
+
+/// One span of a geometry's samples for [`trace_spans`].
+///
+/// It traces samples `N..end` of the geometry's own stream at one wavelength, merged onto
+/// `prior`, the radiance moments of its samples `0..N`, N their count.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Span {
+    /// The case's wavelength, by index.
+    pub(crate) wavelength: usize,
+    /// The case's geometry, by index.
+    pub(crate) geometry: usize,
+    /// The radiance moments of the geometry's samples `0..N`: the span starts at N.
+    pub(crate) prior: Moments,
+    /// One past its last sample.
+    pub(crate) end: u64,
+}
+
+impl Span {
+    /// The span's first sample: its prior's count.
+    #[must_use]
+    pub(crate) fn start(&self) -> u64 {
+        self.prior.samples()
+    }
+}
+
+/// A span traced.
+///
+/// It holds the radiance moments of its geometry's samples `0..end`, its prior's and its own, and
+/// the vertices its own samples reached.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SpanTrace {
+    /// The moments of samples `0..end`.
+    pub(crate) moments: Moments,
+    /// The vertices of the span's own samples.
+    pub(crate) vertices: u64,
 }
 
 /// [`trace_reference`] with each geometry's and aggregate's vertices counted.
@@ -237,6 +288,99 @@ pub(crate) fn trace_counted(
         Estimator::ByMedium,
         Orders::Every,
     )
+}
+
+/// Traces each span of `case`'s geometries, each carried on from its prior.
+///
+/// It traces in the scalar mode under [`trace_counted`]'s estimator, on the case's seed and each
+/// geometry's own stream, so that a geometry traced to N by [`trace_counted`] and carried on from
+/// N to N′ onto its whole run's moments reads, bit for bit, as one traced to N′, for N in whole
+/// blocks (R08.T13.b's top-up, `decision-r08-t13-scope.md`, "#112's floor refusals"). A span over
+/// samples the geometry already holds gives a part of its run: from the moments of samples `0..b`
+/// it gives those of `0..e`, as a fresh trace's first quarter folds them where b is in whole
+/// blocks. The output is the same, bit for bit, for any number of threads.
+///
+/// # Errors
+///
+/// [`TraceReferenceError::TooManySamples`] for a span past [`MAX_SAMPLES`];
+/// [`TraceReferenceError::ThreadPool`] if the threads cannot be started.
+///
+/// # Panics
+///
+/// If a span names a wavelength or a geometry the case does not have, or ends before it starts,
+/// each a caller's bug; and as [`trace_reference`], if a traced value is not finite.
+pub(crate) fn trace_spans(
+    case: &AtmosphereCase,
+    spans: &[Span],
+    threads: NonZeroUsize,
+) -> Result<Vec<SpanTrace>, TraceReferenceError> {
+    if let Some(span) = spans.iter().find(|s| s.end > MAX_SAMPLES) {
+        return Err(TraceReferenceError::TooManySamples { samples: span.end });
+    }
+    for span in spans {
+        assert!(
+            span.wavelength < case.wavelengths_nm().len() && span.geometry < case.geometry_count(),
+            "a span names one of the case's own wavelengths and geometries"
+        );
+        assert!(
+            span.start() <= span.end,
+            "a span ends no earlier than its prior's samples"
+        );
+    }
+    let grid = shell_grid(case);
+    let media: Vec<Medium<'_>> = (0..case.wavelengths_nm().len())
+        .map(|w| Medium::new(case, &grid, w, Estimator::ByMedium, Orders::Every))
+        .collect();
+    // Only the geometries the spans name, each keyed by its index in the case as
+    // `trace_counted_with` keys it, so that its stream is its own whatever else is traced.
+    let mut named: Vec<usize> = spans.iter().map(|s| s.geometry).collect();
+    named.sort_unstable();
+    named.dedup();
+    let sources: Vec<(u64, Source)> = named
+        .iter()
+        .map(|&g| {
+            (
+                wide(g),
+                Source::detector(case, &grid, &case.geometries()[g]),
+            )
+        })
+        .collect();
+    let jobs: Vec<Job> = spans
+        .iter()
+        .map(|s| {
+            let mut prior = [Moments::default(); MOMENTS];
+            prior[I] = s.prior;
+            Job {
+                wavelength: s.wavelength,
+                source: named
+                    .binary_search(&s.geometry)
+                    .expect("every span's geometry is among those named"),
+                start: s.start(),
+                end: s.end,
+                // Every sample of a span lies at or past its start: none is the first quarter's.
+                quarter: s.start(),
+                prior,
+            }
+        })
+        .collect();
+    let traced = trace_moments(
+        case.seed(),
+        &media,
+        &sources,
+        &jobs,
+        Polarisation::Scalar,
+        threads,
+    )?;
+    Ok(traced
+        .whole
+        .iter()
+        .zip(&traced.vertices)
+        .map(|(moments, &vertices)| {
+            let moments = moments[I];
+            finite(vec![moments.mean(), moments.standard_error()]);
+            SpanTrace { moments, vertices }
+        })
+        .collect())
 }
 
 /// Whether the medium of `case` runs VROOM at wavelength index `wavelength` under the estimator
@@ -305,14 +449,8 @@ fn trace_counted_with(
                 .flat_map(|a| [a.samples.unwrap_or(default); 2]),
         )
         .collect();
-    let traced = trace_moments(
-        case.seed(),
-        &media,
-        &sources,
-        &counts,
-        polarisation,
-        threads,
-    )?;
+    let jobs = Job::whole_runs(media.len(), &counts);
+    let traced = trace_moments(case.seed(), &media, &sources, &jobs, polarisation, threads)?;
     // Each source's vertices over the wavelengths: an aggregate's two fluxes are its own.
     let per_wavelength = sources.len();
     let source_vertices: Vec<u64> = (0..per_wavelength)
@@ -324,6 +462,7 @@ fn trace_counted_with(
         .chunks(2)
         .map(|pair| pair.iter().sum())
         .collect();
+    let geometry_moments = traced.geometry_moments(media.len(), per_wavelength, geometry_count);
     let run = Run {
         case,
         grid: &grid,
@@ -351,6 +490,7 @@ fn trace_counted_with(
         reference,
         geometry_vertices,
         aggregate_vertices,
+        geometry_moments,
     })
 }
 
@@ -361,12 +501,37 @@ const MOMENTS: usize = COMPONENTS + 1;
 /// Where the moments of a sample's radiance less its scalar radiance are kept.
 const DIFFERENCE: usize = COMPONENTS;
 
-/// The moments of a traced case, per task, wavelength-major: of each source's whole run and of its
-/// first quarter of samples, ⌊N ÷ 4⌋; and the vertices each task's samples reached.
+/// The moments of a traced case, per job in the jobs' order (for whole runs, per task,
+/// wavelength-major): of each job's samples merged onto its prior, and of those below its quarter
+/// (a whole run's first quarter of samples, ⌊N ÷ 4⌋); and the vertices each job's samples reached.
 struct Traced {
     whole: Vec<[Moments; MOMENTS]>,
     quarters: Vec<[Moments; MOMENTS]>,
     vertices: Vec<u64>,
+}
+
+impl Traced {
+    /// Whole runs' geometries' radiance moments, by wavelength and then geometry: the jobs laid
+    /// out as [`Job::whole_runs`] lays them, `per_wavelength` sources a wavelength, the geometries
+    /// first.
+    #[must_use]
+    fn geometry_moments(
+        &self,
+        wavelengths: usize,
+        per_wavelength: usize,
+        geometries: usize,
+    ) -> Vec<Vec<GeometryMoments>> {
+        (0..wavelengths)
+            .map(|w| {
+                (0..geometries)
+                    .map(|g| GeometryMoments {
+                        whole: self.whole[w * per_wavelength + g][I],
+                        quarter: self.quarters[w * per_wavelength + g][I],
+                    })
+                    .collect()
+            })
+            .collect()
+    }
 }
 
 /// Pushes a sample's components `x` into `moments`: I alone in the scalar mode, and in the Stokes
@@ -387,36 +552,74 @@ fn push_sample(
     }
 }
 
-/// Traces every source at every wavelength, source k `counts[k]` samples: the moments of
-/// (I, Q, U, V), of the scalar radiance and of the radiance less it, per task, wavelength-major,
-/// over the whole run and over its first quarter. The scalar mode fills the first alone.
+/// One source's samples a trace takes at one wavelength.
+///
+/// They are `start..end` of its stream, those below `quarter` also kept apart, merged onto
+/// `prior`, the moments of its samples before `start`. A whole run is `0..N` with its first
+/// quarter `N ÷ 4` and no prior; [`trace_spans`] carries a run on from where it stopped.
+#[derive(Debug, Clone, Copy)]
+struct Job {
+    /// The wavelength, by index into the media.
+    wavelength: usize,
+    /// The source, by index into the sources.
+    source: usize,
+    start: u64,
+    end: u64,
+    quarter: u64,
+    prior: [Moments; MOMENTS],
+}
+
+impl Job {
+    /// Every source's whole run at each of `wavelengths`, wavelength-major, source k `counts[k]`
+    /// samples with its first quarter apart.
+    #[must_use]
+    fn whole_runs(wavelengths: usize, counts: &[u64]) -> Vec<Self> {
+        (0..wavelengths)
+            .flat_map(|w| {
+                counts.iter().enumerate().map(move |(k, &n)| Self {
+                    wavelength: w,
+                    source: k,
+                    start: 0,
+                    end: n,
+                    quarter: n / 4,
+                    prior: [Moments::default(); MOMENTS],
+                })
+            })
+            .collect()
+    }
+}
+
+/// Traces each job.
+///
+/// It gives the moments of (I, Q, U, V), of the scalar radiance and of the radiance less it, per
+/// job, over its samples merged onto its prior, and over those below its `quarter`. The scalar
+/// mode fills the first alone.
 fn trace_moments(
     seed: u64,
     media: &[Medium<'_>],
     sources: &[(u64, Source)],
-    counts: &[u64],
+    jobs: &[Job],
     polarisation: Polarisation,
     threads: NonZeroUsize,
 ) -> Result<Traced, TraceReferenceError> {
-    let per_wavelength = sources.len();
-    let tasks = media.len() * per_wavelength;
-    // Each task's first item, its blocks laid out task after task: for one count everywhere, the
-    // item `task × blocks + block` as before.
-    let mut starts = Vec::with_capacity(tasks + 1);
+    // Each job's first item, its blocks laid out job after job, each block `start + 1,024 b` on:
+    // for whole runs, the item `task × blocks + block` as before.
+    let mut starts = Vec::with_capacity(jobs.len() + 1);
     let mut items = 0_u64;
-    for task in 0..tasks {
+    for job in jobs {
         starts.push(items);
-        let samples = counts[task % per_wavelength];
         // Past 2⁶⁴ blocks the run's samples are more than any count, so it is refused as such.
         items = items
-            .checked_add(samples.div_ceil(BLOCK_SAMPLES))
+            .checked_add(job.end.saturating_sub(job.start).div_ceil(BLOCK_SAMPLES))
             .ok_or(TraceReferenceError::TooManySamples { samples: u64::MAX })?;
     }
     starts.push(items);
     let seed = seed ^ ATMOSPHERE_STREAM;
-    let mut whole = vec![[Moments::default(); MOMENTS]; tasks];
-    let mut quarters = vec![[Moments::default(); MOMENTS]; tasks];
-    let mut vertices = vec![0_u64; tasks];
+    // Each job's blocks merge onto its prior in index order, as a whole run's merge onto the
+    // empty moments: a run carried on from N reads as one traced from 0.
+    let mut whole: Vec<[Moments; MOMENTS]> = jobs.iter().map(|job| job.prior).collect();
+    let mut quarters = vec![[Moments::default(); MOMENTS]; jobs.len()];
+    let mut vertices = vec![0_u64; jobs.len()];
     map_reduce_chunks(
         items,
         1,
@@ -425,27 +628,29 @@ fn trace_moments(
             let mut scratch = Scratch::default();
             range
                 .map(|item| {
+                    // The last job starting at or before the item: an empty job shares its start
+                    // with the next, which holds the item.
                     let index = starts.partition_point(|&start| start <= item) - 1;
                     let block = item - starts[index];
-                    let wavelength = index / per_wavelength;
-                    let (key, source) = &sources[index % per_wavelength];
-                    let samples = counts[index % per_wavelength];
-                    let quarter = samples / 4;
+                    let job = &jobs[index];
+                    let (key, source) = &sources[job.source];
                     // The case keeps its wavelengths below 2¹⁶ and its sources' keys below 2³⁴.
-                    let stream = (wide(wavelength) << 34) | key;
+                    let stream = (wide(job.wavelength) << 34) | key;
                     let mut block_moments = [Moments::default(); MOMENTS];
                     let mut quarter_moments = [Moments::default(); MOMENTS];
-                    let end = ((block + 1) * BLOCK_SAMPLES).min(samples);
-                    for sample in block * BLOCK_SAMPLES..end {
+                    // Below 2⁵³ + 2¹⁰: no sum here overflows.
+                    let first = job.start + block * BLOCK_SAMPLES;
+                    let end = (first + BLOCK_SAMPLES).min(job.end);
+                    for sample in first..end {
                         let mut draws = Draws::new(seed, stream, sample);
-                        let x = media[wavelength].sample(
+                        let x = media[job.wavelength].sample(
                             source,
                             polarisation,
                             &mut draws,
                             &mut scratch,
                         );
                         push_sample(&mut block_moments, &x, polarisation);
-                        if sample < quarter {
+                        if sample < job.quarter {
                             push_sample(&mut quarter_moments, &x, polarisation);
                         }
                     }
@@ -881,6 +1086,163 @@ mod tests {
         assert_eq!(counted(&uneven, 300, 1), counted(&uneven, 300, 4));
         let thick = thick_peaked_slab();
         assert_eq!(counted(&thick, 64, 1), counted(&thick, 64, 4));
+    }
+
+    /// Each of `case`'s geometries carried on from `short` to `to`, with its first quarter carried
+    /// on to `to ÷ 4`, on `threads` threads: per wavelength and geometry, the run's span and the
+    /// quarter's.
+    fn carried_on(
+        case: &AtmosphereCase,
+        short: &CountedTrace,
+        to: u64,
+        threads: usize,
+    ) -> Vec<SpanTrace> {
+        let mut spans = Vec::new();
+        for (w, moments) in short.geometry_moments.iter().enumerate() {
+            for (g, m) in moments.iter().enumerate() {
+                spans.push(Span {
+                    wavelength: w,
+                    geometry: g,
+                    prior: m.whole,
+                    end: to,
+                });
+                spans.push(Span {
+                    wavelength: w,
+                    geometry: g,
+                    prior: m.quarter,
+                    end: to / 4,
+                });
+            }
+        }
+        trace_spans(case, &spans, NonZeroUsize::new(threads).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn atmosphere_spans_carry_a_geometry_on_as_one_traced_to_the_end() {
+        // Traced to 4,096 and carried on to 8,192, its first quarter from 1,024 to 2,048, every
+        // geometry at both wavelengths reads bit for bit as one traced to 8,192, and its vertices
+        // add up to that trace's.
+        let sample = case::tests::sample_case();
+        let case = case_of(&sample);
+        let (short, long) = (counted(&sample, 4096, 4), counted(&sample, 8192, 1));
+        let spans = carried_on(&case, &short, 8192, 4);
+        let geometries = case.geometry_count();
+        assert_eq!(case.wavelengths_nm().len(), 2);
+        assert_eq!(
+            spans.len(),
+            2 * 2 * geometries,
+            "two spans a geometry and wavelength"
+        );
+        for (w, (moments, pairs)) in long
+            .geometry_moments
+            .iter()
+            .zip(spans.chunks(2 * geometries))
+            .enumerate()
+        {
+            for (g, (m, pair)) in moments.iter().zip(pairs.chunks(2)).enumerate() {
+                assert_eq!(
+                    pair[0].moments, m.whole,
+                    "the run, wavelength {w}, geometry {g}"
+                );
+                assert_eq!(
+                    pair[1].moments, m.quarter,
+                    "the quarter, wavelength {w}, geometry {g}"
+                );
+            }
+        }
+        for g in 0..geometries {
+            let carried: u64 = (0..2)
+                .map(|w| spans[(w * geometries + g) * 2].vertices)
+                .sum();
+            assert_eq!(
+                short.geometry_vertices[g] + carried,
+                long.geometry_vertices[g],
+                "geometry {g}'s vertices"
+            );
+        }
+        // The same on one thread, and for one geometry named alone: its stream is its own.
+        assert_eq!(carried_on(&case, &short, 8192, 1), spans);
+        let alone = trace_spans(
+            &case,
+            &[Span {
+                wavelength: 1,
+                geometry: 1,
+                prior: short.geometry_moments[1][1].whole,
+                end: 8192,
+            }],
+            NonZeroUsize::new(4).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(alone[0], spans[(geometries + 1) * 2]);
+        // From 3,072, whose quarter of 768 ends inside a block: the run is the trace's to the bit,
+        // and so is the quarter carried on from the empty run, as the sweep's top-ups carry it.
+        let (short, long) = (counted(&sample, 3072, 4), counted(&sample, 6144, 4));
+        let mut spans = Vec::new();
+        for (w, moments) in short.geometry_moments.iter().enumerate() {
+            for (g, m) in moments.iter().enumerate() {
+                spans.push(Span {
+                    wavelength: w,
+                    geometry: g,
+                    prior: m.whole,
+                    end: 6144,
+                });
+                spans.push(Span {
+                    wavelength: w,
+                    geometry: g,
+                    prior: Moments::default(),
+                    end: 1536,
+                });
+            }
+        }
+        let traced = trace_spans(&case, &spans, NonZeroUsize::new(4).unwrap()).unwrap();
+        for (k, pair) in traced.chunks(2).enumerate() {
+            let m = long.geometry_moments[k / geometries][k % geometries];
+            assert_eq!(pair[0].moments, m.whole, "the run {k}");
+            assert_eq!(pair[1].moments, m.quarter, "the quarter {k}");
+        }
+    }
+
+    #[test]
+    fn atmosphere_span_to_its_own_start_gives_its_prior() {
+        let sample = case::tests::sample_case();
+        let short = counted(&sample, 2048, 1);
+        let prior = short.geometry_moments[0][0].whole;
+        let traced = trace_spans(
+            &case_of(&sample),
+            &[Span {
+                wavelength: 0,
+                geometry: 0,
+                prior,
+                end: 2048,
+            }],
+            NonZeroUsize::MIN,
+        )
+        .unwrap();
+        assert_eq!(
+            traced,
+            [SpanTrace {
+                moments: prior,
+                vertices: 0,
+            }]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a span ends no earlier than its prior's samples")]
+    fn atmosphere_spans_refuse_a_span_ending_before_its_prior() {
+        let sample = case::tests::sample_case();
+        let short = counted(&sample, 2048, 1);
+        // It panics before it returns, so there is no result to read.
+        let _ = trace_spans(
+            &case_of(&sample),
+            &[Span {
+                wavelength: 0,
+                geometry: 0,
+                prior: short.geometry_moments[0][0].whole,
+                end: 1024,
+            }],
+            NonZeroUsize::MIN,
+        );
     }
 
     /// A conservative slab of τ 5 (550 nm) and 2.5 (440 nm) scattering by Henyey–Greenstein at g

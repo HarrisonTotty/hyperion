@@ -1,8 +1,9 @@
-//! R08.T13.a's sweep end to end on its smoke (plan R08; `decision-r08-t13-scope.md`, ruling 6
-//! and "#107's floor misses"): the same output at one and four threads, its timings masked (main's
-//! reading 3), its walk and its floor scan as they fall, a run stopped after its first point and
-//! run again giving a whole run's output, that point traced once, and the pilot stage alone the
-//! same at one and four threads.
+//! R08.T13.a's sweep end to end on its smoke (plan R08; `decision-r08-t13-scope.md`, ruling 6,
+//! "#107's floor misses" and "#112's floor refusals"): the same output at one and four threads,
+//! its timings masked (main's reading 3), its forced top-ups among it; its walk, its floor scan and
+//! its top-ups as they fall; a run stopped after its first point and run again giving a whole
+//! run's output, that point traced once; and the pilot stage alone the same at one and four
+//! threads.
 
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -68,7 +69,7 @@ fn smoke(threads: usize, work: Option<&Path>, max_points: Option<usize>) -> Swee
 fn check_floor_scan(cells: &[Value], points: &[Value]) {
     // The floor scan as it falls: the Rayleigh column misses nothing over any ground, A* 1; the
     // g 0.75 column's two ground views pass over the black ground and fail over a brighter one,
-    // the isotropic ground bounce, from 0.02 and from the walk's own 0.3: A* 0.02.
+    // the isotropic ground bounce, from 0.02 and from 0.05: A* 0.02.
     let fields = [
         "scanPoints",
         "fixedMisses",
@@ -102,7 +103,7 @@ fn check_floor_scan(cells: &[Value], points: &[Value]) {
                 "fixedMisses": [],
                 "groundMisses": [
                     { "geometry": "ground-s30-v60-a180", "groundAlbedo": 0.02 },
-                    { "geometry": "ground-s60-v60-a90", "groundAlbedo": 0.3 },
+                    { "geometry": "ground-s60-v60-a90", "groundAlbedo": 0.05 },
                 ],
                 "unsortedMisses": [],
                 "albedoStar": 0.02,
@@ -177,7 +178,7 @@ fn atmosphere_sweep_smoke_is_the_same_at_one_and_four_threads() {
     }
     // The walk as it falls on the smoke: the Rayleigh column climbs to its last octave and tops
     // out; the g 0.75 column, which runs VROOM, keeps its two ground views as floor misses, stops
-    // at its first octave on two refusals and takes the half-octave below it.
+    // at its first octave on two refusals at their caps and takes the half-octave below it.
     let indices = |value: &Value| -> Vec<u64> {
         value
             .as_array()
@@ -204,7 +205,65 @@ fn atmosphere_sweep_smoke_is_the_same_at_one_and_four_threads() {
             (true, "reach", vec![375, 377, 376], 2),
         ]
     );
+    // Its g 0.75 column is Mars's, walked on through τ 1 past a drift; but a reach ends it all
+    // the same, and its g 0 column is no must-have cell.
+    assert_eq!(cells[0]["walkPast"], json!({ "kind": "no" }));
+    assert_eq!(
+        cells[1]["walkPast"],
+        json!({ "kind": "through", "tau": 1.0 })
+    );
     check_floor_scan(cells, points);
+    check_top_ups(&output, points);
+}
+
+/// The smoke's forced top-ups ("#112's floor refusals", item 1): its margin of 0.25 leaves its
+/// first traces short of their σ target, so its refused geometries are carried on, each count
+/// doubled or raised to its cap, and every geometry still refused has stopped at a cap.
+fn check_top_ups(output: &Value, points: &[Value]) {
+    assert_eq!(output["settings"]["countMargin"], json!(0.25));
+    assert_eq!(output["settings"]["minFinalSamples"], json!(1024));
+    let numbers = |value: &Value| -> Vec<u64> {
+        value
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|x| x.as_u64().expect("a count"))
+            .collect()
+    };
+    let mut doublings = 0;
+    for point in points {
+        let traced = &point["traced"];
+        let samples = numbers(&traced["samples"]);
+        let doubled = numbers(&traced["doublings"]);
+        assert_eq!(doubled.len(), samples.len(), "one record a geometry");
+        assert!(
+            samples.iter().all(|&n| n >= 1024 && n % 1024 == 0),
+            "{samples:?}"
+        );
+        doublings += doubled.iter().sum::<u64>();
+        for refused in traced["refused"].as_array().expect("its refusals") {
+            assert!(
+                matches!(refused["cap"].as_str(), Some("geometry" | "point")),
+                "{refused}"
+            );
+        }
+    }
+    assert!(doublings > 0, "the smoke's top-ups ran");
+    // The stop at τ 1/8 as it falls: two views refused at their own caps, one after two
+    // doublings, the other held at its cap by its pilot.
+    let stop = points
+        .iter()
+        .find(|p| p["index"] == 377)
+        .expect("the stop's row");
+    assert_eq!(stop["class"], "reach");
+    assert_eq!(
+        stop["traced"]["refused"],
+        json!([
+            { "geometry": 0, "refusal": "noisy", "listed": false, "cap": "geometry" },
+            { "geometry": 3, "refusal": "noisy", "listed": false, "cap": "geometry" },
+        ])
+    );
+    assert_eq!(stop["traced"]["doublings"], json!([2, 2, 2, 0]));
 }
 
 #[test]

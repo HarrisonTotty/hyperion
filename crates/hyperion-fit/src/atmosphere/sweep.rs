@@ -1,5 +1,6 @@
 //! R08.T13's sweep: where Hillaire's analytic multiple-scattering term drifts from the reference
-//! (plan R08, R08.T13.a; Design notes 9 and 10; `decision-r08-t13-scope.md`, rulings 2–8).
+//! (plan R08, R08.T13.a and its top-ups, built in R08.T13.b; Design notes 9 and 10;
+//! `decision-r08-t13-scope.md`, rulings 2–8 and "#112's floor refusals").
 //!
 //! `hyperion-fit atmosphere-sweep` reads a sweep case ([`SweepCase`], `SWEEP_FORMAT` 1, written by
 //! the client's `reference/sweepCases.test.ts`), expands each of its points into an
@@ -54,23 +55,39 @@
 //!
 //! Per column: the floor point; the octave points in ascending order to the first **stop**, a
 //! point that fails or that a refusal or the point cap stops; then the half-octave point below that
-//! stop, if its projection fits the cap. Each point is piloted at `N_p` a geometry, at its pilot
-//! seed, and its final counts planned from the pilot: `N_p (σ_p ÷ (T_p ÷ 8))² × 1.15` (T12.e's
-//! rule), `T_p` the pilot's own, in whole blocks of [`BLOCK_SAMPLES`] and at least `N_p`; the
-//! aggregate's alike at `σ_F ≤ 0.0025 F`. The cost is projected from deterministic figures alone
-//! (main's reading 2): the pilot's counted vertices a sample at each geometry
-//! (the tracer's `trace_counted`) times a fixed CPU per vertex, given to the run by estimator
-//! ([`SweepSettings`]), so that no decision reads the clock. A geometry projected past
+//! stop, if its projection fits the cap. The must-have cells climb on past a drift
+//! ("#112's floor refusals", item 3; `WalkPast`): (1, 0) to a reach or its last octave, and
+//! ruling 3's other must-have cells through τ 1, each over the walk's ground; the points past the
+//! first stop add verdicts alone, and the half-octave is still the one below it.
+//!
+//! Each point is piloted at `N_p` a geometry, at its pilot seed, and its final counts planned from
+//! the pilot: `N_p (σ_p ÷ (T_p ÷ 8))² × 1.15` (T12.e's rule), `T_p` the pilot's own, in whole
+//! blocks of [`BLOCK_SAMPLES`] and at least 8,192 (`MIN_FINAL_SAMPLES`, so that the first quarter
+//! holds 2,048); the aggregate's alike at `σ_F ≤ 0.0025 F`. The cost is projected from
+//! deterministic figures alone (main's reading 2): the pilot's counted vertices a sample at each
+//! geometry (the tracer's `trace_counted`), at least one, times a fixed CPU per vertex, given to the run by
+//! estimator ([`SweepSettings`]), so that no decision reads the clock. A geometry projected past
 //! [`SweepSettings::geometry_cap_cpu_h`] is traced at that cap; a point whose summed projection,
 //! pilot and final, passes [`SweepSettings::point_cap_cpu_h`] is not traced, and stops its column
 //! as `reach`. The final trace is fresh, at the point's own seed.
 //!
+//! **The top-ups** ("#112's floor refusals", item 1). A geometry the metric refuses after the final
+//! trace, `noisy` or `unscaled`, is carried on, on its own seed and stream (the tracer's
+//! `trace_spans`), its count doubled in whole blocks, and every geometry held to the metric again
+//! at each doubling, until it passes both checks or reaches its geometry cap, to which it is then
+//! traced and checked once more. A point's top-ups stop too where the next would take its
+//! projection, pilot, final and top-ups, past the point cap. Both caps are counted in samples from
+//! the pilot's vertices and the run's CPU a vertex. A geometry carried on from N to N′ reads, bit
+//! for bit, as one traced to N′, its first quarter too, which is carried on from the longest run
+//! in whole blocks it holds below N′ ÷ 4 (every count is in whole blocks, the pilot's among them).
+//! The σ target and the refusals are `gate.ts`'s, unmoved.
+//!
 //! A traced point's geometries are held to the twin by the metric's mirror. A geometry that fails
 //! at its column's floor is a **floor miss**, listed and never a drift; a refused geometry within
 //! 15° of the sun at a point that runs VROOM (`NEAR_SUN_DEG`; Buras and Mayer's §2.5 is unbuilt)
-//! is listed only; any other refusal stops the column as `reach`; any other failure is a `drift`.
-//! τ* is the least traced τ that fails (`drift`), else the last verified passing τ (`reach`, 0 if
-//! none), else the last octave (`top`).
+//! is listed only; any other refusal, which stands only at a cap, stops the column as `reach`; any
+//! other failure is a `drift`. τ* is the least traced τ that fails (`drift`), else the last
+//! verified passing τ (`reach`, 0 if none), else the last octave (`top`).
 //!
 //! # The floor scan (`decision-r08-t13-scope.md`, "#107's floor misses")
 //!
@@ -97,6 +114,7 @@
 //!   "pilotSamples",             // N_p
 //!   "geometries": [names],      // the order of every per-geometry array
 //!   "cells": [{ "singleScatteringAlbedo", "asymmetry", "groundAlbedo", "vroom",
+//!               "walkPast": { "kind": "no" | "through" | "top", "tau"? },   // WalkPast
 //!               "kind": "drift" | "reach" | "top", "tauStar", "points": [indices, walk order],
 //!               "floorMisses": [names],                       // the walk's, which set no τ*
 //!               "listedRefusals": [{ "index", "geometry", "refusal" }],
@@ -108,10 +126,12 @@
 //!                "projectedCpuH", "pilotVerticesPerSample", "cpuS", "wallS",
 //!                "pilot": { "seed", "samples", "radiance", "standardError", "plannedSamples" }
 //!                                              // a point the cap stopped, instead of "traced"
-//!                "traced": { "seed", "samples", "radiance", "standardError",
-//!                            "quarterStandardError", "twin",
+//!                "traced": { "seed", "samples",     // each geometry's, its top-ups' included
+//!                            "doublings",           // each geometry's top-ups
+//!                            "radiance", "standardError", "quarterStandardError", "twin",
 //!                            "failing": [geometry indices],
-//!                            "refused": [{ "geometry": index, "refusal", "listed" }],
+//!                            "refused": [{ "geometry": index, "refusal", "listed",
+//!                                          "cap": "geometry" | "point" }],
 //!                            "aggregate": { "samples", "downwelling", "downwellingStandardError",
 //!                                           "upwelling", "upwellingStandardError", "vertices",
 //!                                           "refused" } } }] }
@@ -142,8 +162,8 @@ use serde_json::{Value, json};
 
 use super::case::{AtmosphereCase, ReadCaseError};
 use super::metric::{self, AGGREGATE_SIGMA_CAP, Reading, Refusal};
-use super::reference::{GeometryRadiance, ReferenceRadiances};
-use super::{BLOCK_SAMPLES, MAX_SAMPLES, Polarisation, TraceReferenceError};
+use super::reference::{Moments, ReferenceRadiances};
+use super::{BLOCK_SAMPLES, MAX_SAMPLES, Polarisation, Span, TraceReferenceError};
 use crate::emit::sha256_hex;
 
 /// The sweep case format this command reads, and the format of its output.
@@ -158,7 +178,39 @@ pub(crate) const GEOMETRY_CAP_CPU_H: PositiveFigure = figure(4.0);
 pub(crate) const POINT_CAP_CPU_H: PositiveFigure = figure(24.0);
 
 /// The margin on a planned count: 1.15 (R08.T12.e's rule).
-pub(crate) const COUNT_MARGIN: f64 = 1.15;
+pub(crate) const COUNT_MARGIN: PositiveFigure = figure(1.15);
+
+/// The least final count of a geometry or the aggregate: 8,192, so that the first quarter that
+/// `unscaled` reads holds 2,048 samples (`decision-r08-t13-scope.md`, "#112's floor refusals",
+/// item 1).
+pub(crate) const MIN_FINAL_SAMPLES: u64 = 8192;
+
+/// The ground over which the must-have cells are walked on: the walk's 0.3, ruling 2's hand value.
+const WALK_GROUND_ALBEDO: f64 = 0.3;
+
+/// The must-have cells walked on through τ 1 past their first drift, by (ω, g).
+///
+/// Each is over the walk's ground (ruling 3's table; "#112's floor refusals", item 3): Earth's
+/// ω 0.95, 0.99 and 1 at g 0 and 0.3,
+/// but (1, 0), which is walked to its reach or top ([`WalkPast::Top`]); Mars's ω 0.9 and 0.95 at
+/// g 0.5, 0.65 and 0.75; the Titan class's ω 0.9 and 0.95 at g 0.3, 0.5 and 0.65; and the Venus
+/// class's (1, 0.75) and (1, 0.85). A cell two worlds share is listed once.
+const WALKED_THROUGH_ONE: [(f64, f64); 14] = [
+    (0.95, 0.0),
+    (0.95, 0.3),
+    (0.99, 0.0),
+    (0.99, 0.3),
+    (1.0, 0.3),
+    (0.9, 0.3),
+    (0.9, 0.5),
+    (0.9, 0.65),
+    (0.9, 0.75),
+    (0.95, 0.5),
+    (0.95, 0.65),
+    (0.95, 0.75),
+    (1.0, 0.75),
+    (1.0, 0.85),
+];
 
 /// A refused geometry this close to the sun at a VROOM point is listed only, degrees: 15
 /// (ruling 5; Buras and Mayer 2011's §2.5, circumsolar virtual importance sampling, is unbuilt).
@@ -413,10 +465,12 @@ fn check_head(file: &SweepFile) -> Result<(), ReadSweepError> {
         || "name".to_owned(),
         "must not be empty, and only lowercase letters, digits and hyphens",
     )?;
+    // In whole blocks, so that every count planned from it is, as the top-ups' exact carry needs.
     require(
-        (1..=MAX_SAMPLES).contains(&file.pilot_samples),
+        (1..=MAX_SAMPLES).contains(&file.pilot_samples)
+            && file.pilot_samples.is_multiple_of(BLOCK_SAMPLES),
         || "pilotSamples".to_owned(),
-        "must lie in 1 to 2^53",
+        "must lie in 1 to 2^53, in whole blocks of 1,024",
     )?;
     let template = &file.template;
     for (value, field) in [
@@ -613,8 +667,8 @@ impl SweepCase {
     /// column's phase that is not Rayleigh's at g 0 and a table on `phaseU` otherwise, point
     /// indices that are not one a candidate or scan ground and unique, a twin that is not one
     /// finite radiance at least 0 a candidate or scan ground and geometry, geometry names that
-    /// repeat, or a pilot count of 0; and [`ReadSweepError::Point`] for a column whose floor point
-    /// the tracer's own validation refuses.
+    /// repeat, or a pilot count of 0 or not in whole blocks; and [`ReadSweepError::Point`] for a
+    /// column whose floor point the tracer's own validation refuses.
     pub fn from_json(text: &str) -> Result<Self, ReadSweepError> {
         let file: SweepFile = serde_json::from_str(text).map_err(ReadSweepError::Json)?;
         // The committed files are LF; a checkout that writes CRLF keeps the same hash, and so the
@@ -716,6 +770,16 @@ impl SweepCase {
             Spot::Walk(k) => &col.twin[k],
             Spot::Scan(a) => &col.scan_twin[a],
         }
+    }
+
+    /// How far column `column`'s walk climbs past its first drift (module documentation).
+    #[must_use]
+    pub(crate) fn walk_past(&self, column: usize) -> WalkPast {
+        WalkPast::of(
+            self.file.single_scattering_albedo,
+            self.file.columns[column].asymmetry,
+            self.file.template.ground_albedo,
+        )
     }
 
     /// The scan's spots, black ground first.
@@ -870,7 +934,7 @@ pub(crate) struct PointVerdicts {
     pub(crate) refused: Vec<RefusedGeometry>,
 }
 
-/// A geometry at which the reference is refused.
+/// A geometry at which the reference is refused, once its top-ups have stopped at a cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RefusedGeometry {
@@ -878,6 +942,18 @@ pub(crate) struct RefusedGeometry {
     pub(crate) refusal: Refusal,
     /// Within [`NEAR_SUN_DEG`] of the sun at a VROOM point: listed, not a stop.
     pub(crate) listed: bool,
+    /// The cap its top-ups stopped at.
+    pub(crate) cap: TopUpCap,
+}
+
+/// The cap at which a refused geometry's top-ups stopped ("#112's floor refusals", item 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum TopUpCap {
+    /// Its own, [`SweepSettings::geometry_cap_cpu_h`], in samples: traced to it.
+    Geometry,
+    /// The point's, [`SweepSettings::point_cap_cpu_h`]: its next top-up would pass it.
+    Point,
 }
 
 /// A point's class in its column's walk.
@@ -902,6 +978,50 @@ pub(crate) enum CellKind {
     Reach,
     /// The last octave: no stop came.
     Top,
+}
+
+/// How far a column's walk climbs past its first drift ("#112's floor refusals", item 3): its τ*
+/// stays the first drift's, and the points past it add verdicts alone.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum WalkPast {
+    /// No farther: the climb ends at its first stop (ruling 3).
+    No,
+    /// Past every drift at a τ below this one; once a drift has come, the climb ends at this τ.
+    Through(f64),
+    /// Past every drift, to a reach or the last octave.
+    Top,
+}
+
+impl WalkPast {
+    /// A column's, by its ω, g and ground (module documentation): [`WalkPast::Top`] for (1, 0),
+    /// [`WalkPast::Through`] τ 1 for [`WALKED_THROUGH_ONE`]'s cells, each over the walk's ground,
+    /// and [`WalkPast::No`] for every other.
+    #[must_use]
+    fn of(omega: f64, g: f64, ground_albedo: f64) -> Self {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-9;
+        if !near(ground_albedo, WALK_GROUND_ALBEDO) {
+            Self::No
+        } else if near(omega, 1.0) && near(g, 0.0) {
+            Self::Top
+        } else if WALKED_THROUGH_ONE
+            .iter()
+            .any(|&(w, a)| near(omega, w) && near(g, a))
+        {
+            Self::Through(1.0)
+        } else {
+            Self::No
+        }
+    }
+
+    /// The output's record of it: `{ "kind": "no" | "through" | "top", "tau"? }`.
+    #[must_use]
+    fn to_json(self) -> Value {
+        match self {
+            Self::No => json!({ "kind": "no" }),
+            Self::Through(tau) => json!({ "kind": "through", "tau": rounded(tau) }),
+            Self::Top => json!({ "kind": "top" }),
+        }
+    }
 }
 
 /// One column's walk (module documentation).
@@ -934,7 +1054,8 @@ fn classify(outcome: &PointOutcome, floor_misses: &BTreeSet<usize>) -> PointClas
     }
 }
 
-/// Walks one column (module documentation): `evaluate(candidate)` pilots and traces a point.
+/// Walks one column (module documentation), past its first drift as `past` says:
+/// `evaluate(candidate)` pilots and traces a point.
 ///
 /// # Errors
 ///
@@ -942,6 +1063,7 @@ fn classify(outcome: &PointOutcome, floor_misses: &BTreeSet<usize>) -> PointClas
 pub(crate) fn walk_column<E>(
     taus: &[f64],
     roles: &[TauRole],
+    past: WalkPast,
     mut evaluate: impl FnMut(usize) -> Result<PointOutcome, E>,
 ) -> Result<ColumnWalk, E> {
     let mut walk = ColumnWalk {
@@ -969,10 +1091,32 @@ pub(crate) fn walk_column<E>(
         Ok(class)
     };
     let climb = std::iter::once(0).chain((1..roles.len()).filter(|&k| roles[k] == TauRole::Octave));
+    // The first point that does not pass, where ruling 3's climb ends and below which the
+    // half-octave is taken; the climb goes on past a drift only as `past` says.
     let mut stop = None;
+    let mut drifted = false;
     for candidate in climb {
-        if visit(candidate, &mut walk)? != PointClass::Pass {
+        let class = visit(candidate, &mut walk)?;
+        if class != PointClass::Pass && stop.is_none() {
             stop = Some(candidate);
+        }
+        let tau = taus[candidate];
+        let goes_on = match class {
+            PointClass::Pass => match past {
+                WalkPast::Through(t) => !drifted || tau < t,
+                WalkPast::No | WalkPast::Top => true,
+            },
+            PointClass::Drift => {
+                drifted = true;
+                match past {
+                    WalkPast::No => false,
+                    WalkPast::Through(t) => tau < t,
+                    WalkPast::Top => true,
+                }
+            }
+            PointClass::Reach => false,
+        };
+        if !goes_on {
             break;
         }
     }
@@ -1146,21 +1290,33 @@ pub struct SweepSettings {
     geometry_cap_cpu_h: PositiveFigure,
     cpu_per_vertex_us: PositiveFigure,
     vroom_cpu_per_vertex_us: PositiveFigure,
+    /// The least final count, samples.
+    min_final_samples: u64,
+    /// The margin on a planned count.
+    count_margin: PositiveFigure,
 }
 
 impl SweepSettings {
     /// The smoke's: 50 µs a vertex under either estimator, a geometry capped at 2 CPU-s and a
-    /// point at 20 CPU-s as projected, so that it runs in seconds.
-    pub const SMOKE: Self = Self::new(
-        figure(20.0 / 3600.0),
-        figure(2.0 / 3600.0),
-        figure(50.0),
-        figure(50.0),
-    );
+    /// point at 20 CPU-s as projected, a final count of at least its pilot's 1,024, so that it
+    /// runs in seconds; and a margin of 0.25 on a planned count, under R08.T12.e's 1.15, so that
+    /// its first traces miss their σ target and its top-ups run (the forced top-up, "#112's floor
+    /// refusals", item 1).
+    pub const SMOKE: Self = Self {
+        min_final_samples: BLOCK_SAMPLES,
+        count_margin: figure(0.25),
+        ..Self::new(
+            figure(20.0 / 3600.0),
+            figure(2.0 / 3600.0),
+            figure(50.0),
+            figure(50.0),
+        )
+    };
 
     /// The settings of a run: a point's cap and a geometry's, CPU-h (24 and 4 as ruled, the point
     /// cap the ladder's first step's to lower), and the CPU a vertex takes under R08.T12.c's
-    /// estimator and under VROOM, µs, the pilot's measured figures (main's reading 2).
+    /// estimator and under VROOM, µs, the pilot's measured figures (main's reading 2); with the
+    /// ruled final count of at least 8,192 samples and margin of 1.15.
     #[must_use]
     pub const fn new(
         point_cap_cpu_h: PositiveFigure,
@@ -1173,6 +1329,8 @@ impl SweepSettings {
             geometry_cap_cpu_h,
             cpu_per_vertex_us,
             vroom_cpu_per_vertex_us,
+            min_final_samples: MIN_FINAL_SAMPLES,
+            count_margin: COUNT_MARGIN,
         }
     }
 
@@ -1221,6 +1379,18 @@ impl SweepSettings {
     #[must_use]
     pub const fn vroom_cpu_per_vertex_us(&self) -> f64 {
         self.vroom_cpu_per_vertex_us.get()
+    }
+
+    /// The least final count of a geometry or the aggregate, samples.
+    #[must_use]
+    pub const fn min_final_samples(&self) -> u64 {
+        self.min_final_samples
+    }
+
+    /// The margin on a planned count.
+    #[must_use]
+    pub const fn count_margin(&self) -> f64 {
+        self.count_margin.get()
     }
 }
 
@@ -1427,33 +1597,57 @@ fn blocks_down(x: f64, low: u64) -> u64 {
     (samples as u64).max(low)
 }
 
+/// The CPU a sample takes, µs, as projected from a pilot (main's reading 2): its `vertices` over
+/// `samples`, at least one a sample (the forced first collision's, so that no geometry's cap is
+/// unbounded), times `cpu_per_vertex_us`.
+#[must_use]
+fn sample_cost_us(vertices: u64, samples: u64, cpu_per_vertex_us: f64) -> f64 {
+    (count(vertices) / count(samples)).max(1.0) * cpu_per_vertex_us
+}
+
+/// The least final count from a pilot of `n_p` samples: `N_p`, or the settings' least if more.
+#[must_use]
+fn least_count(n_p: u64, settings: &SweepSettings) -> u64 {
+    n_p.max(settings.min_final_samples())
+}
+
+/// A geometry's cap in samples (module documentation): the count `cpu_per_sample_us`, the pilot's
+/// vertices a sample times the CPU a vertex, projects to the settings' geometry cap, in whole
+/// blocks and at least [`least_count`]; [`MAX_SAMPLES`] where the pilot counted no vertex.
+#[must_use]
+fn cap_count(n_p: u64, cpu_per_sample_us: f64, settings: &SweepSettings) -> u64 {
+    let low = least_count(n_p, settings);
+    if cpu_per_sample_us > 0.0 {
+        blocks_down(
+            settings.geometry_cap_cpu_h() * MICROSECONDS_PER_HOUR / cpu_per_sample_us,
+            low,
+        )
+    } else {
+        MAX_SAMPLES.max(low)
+    }
+}
+
 /// A final count planned from a pilot of `n_p` samples (module documentation): R08.T12.e's
-/// `N_p (σ_p ÷ target)² × 1.15` for a σ target `target` (`T_p ÷ 8`, or `0.0025 F_p` for a flux),
-/// in whole blocks and at least `N_p`; held at the geometry cap where `cpu_per_sample_us`, the
-/// pilot's vertices a sample times the CPU a vertex, projects it past `cap_cpu_h`, and whether it
-/// was.
+/// `N_p (σ_p ÷ target)² × 1.15` (the settings' margin) for a σ target `target` (`T_p ÷ 8`, or
+/// `0.0025 F_p` for a flux), in whole blocks and at least [`least_count`]; held at the geometry's
+/// [`cap_count`] where it would pass it, and whether it was.
 #[must_use]
 fn planned_count(
     n_p: u64,
     sigma: f64,
     target: f64,
     cpu_per_sample_us: f64,
-    cap_cpu_h: f64,
+    settings: &SweepSettings,
 ) -> (u64, bool) {
     let need = if sigma > 0.0 && target > 0.0 {
         let ratio = sigma / target;
-        count(n_p) * ratio * ratio * COUNT_MARGIN
+        count(n_p) * ratio * ratio * settings.count_margin()
     } else {
         count(n_p)
     };
-    let n = blocks_up(need, n_p);
-    if cpu_per_sample_us > 0.0 {
-        let cap = blocks_down(cap_cpu_h * MICROSECONDS_PER_HOUR / cpu_per_sample_us, n_p);
-        if n > cap {
-            return (cap, true);
-        }
-    }
-    (n, false)
+    let n = blocks_up(need, least_count(n_p, settings));
+    let cap = cap_count(n_p, cpu_per_sample_us, settings);
+    if n > cap { (cap, true) } else { (n, false) }
 }
 
 /// A pilot's aggregate: the two fluxes and their σ, and their vertices.
@@ -1508,15 +1702,19 @@ struct PilotRecord {
     wall_s: f64,
 }
 
-/// A point's final trace and its verdicts.
+/// A point's final trace, its top-ups and its verdicts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TracedRecord {
     seed: u64,
+    /// Each geometry's final count, its top-ups' included.
     samples: Vec<u64>,
     radiance: Vec<f64>,
     standard_error: Vec<f64>,
     quarter_standard_error: Vec<f64>,
+    /// Each geometry's top-ups: its count doubled, or the last raised to its cap.
+    doublings: Vec<u32>,
+    /// The vertices of each geometry's final count of samples.
     vertices: Vec<u64>,
     aggregate: Option<FluxRecord>,
     /// The aggregate's reference past `σ_F ≤ 0.0025 F` in either flux: recorded only.
@@ -1635,8 +1833,123 @@ struct Timed {
     reference: ReferenceRadiances,
     geometry_vertices: Vec<u64>,
     aggregate_vertices: Option<u64>,
+    /// Each geometry's radiance moments at the case's one wavelength.
+    geometry_moments: Vec<super::GeometryMoments>,
     cpu_s: Option<f64>,
     wall_s: f64,
+}
+
+/// A refused geometry's next top-up ([`Carried::next_step`]), or the cap it stops at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Step {
+    /// Its run carried on to `end`, and its first quarter to `end ÷ 4` from `quarter`, the moments
+    /// of the longest run it holds below that, where it holds none to there; projected to take
+    /// `cost_us` of CPU.
+    Carry {
+        end: u64,
+        quarter: Option<Moments>,
+        cost_us: f64,
+    },
+    /// No top-up: it stops at this cap.
+    Stop(TopUpCap),
+}
+
+/// A geometry's run as its top-ups carry it on (module documentation): its whole run's moments,
+/// the moments of each run of samples `0..b` it holds by `b` (the empty run's, its first quarter's,
+/// and each count it was traced to, and each quarter its top-ups traced), its top-ups, its
+/// vertices, and the cap its top-ups stopped at.
+#[derive(Debug, Clone)]
+struct Carried {
+    whole: Moments,
+    prefixes: BTreeMap<u64, Moments>,
+    doublings: u32,
+    vertices: u64,
+    stopped: Option<TopUpCap>,
+}
+
+impl Carried {
+    /// A geometry traced once, `moments` its run's and its first quarter's.
+    #[must_use]
+    fn new(moments: super::GeometryMoments, vertices: u64) -> Self {
+        let n = moments.whole.samples();
+        let prefixes = BTreeMap::from([
+            (0, Moments::default()),
+            (n / 4, moments.quarter),
+            (n, moments.whole),
+        ]);
+        Self {
+            whole: moments.whole,
+            prefixes,
+            doublings: 0,
+            vertices,
+            stopped: None,
+        }
+    }
+
+    /// Its count.
+    #[must_use]
+    fn samples(&self) -> u64 {
+        self.whole.samples()
+    }
+
+    /// The moments of its first quarter, ⌊N ÷ 4⌋, which each top-up keeps.
+    #[must_use]
+    fn quarter(&self) -> Moments {
+        self.prefixes[&(self.samples() / 4)]
+    }
+
+    /// Its next top-up, or the cap it stops at (module documentation).
+    ///
+    /// From N, its run is carried on to 2N, or to `cap` where that is less, and its first quarter
+    /// from the longest run in whole blocks it holds below the new N ÷ 4, so that the quarter too
+    /// reads, bit for bit, as a fresh trace's; at `cpu_per_sample_us` a sample, a step that would
+    /// take the point's projection, `projected_us`, past `point_cap_us` is not taken.
+    #[must_use]
+    fn next_step(
+        &self,
+        cap: u64,
+        cpu_per_sample_us: f64,
+        projected_us: f64,
+        point_cap_us: f64,
+    ) -> Step {
+        let n = self.samples();
+        if n >= cap {
+            return Step::Stop(TopUpCap::Geometry);
+        }
+        let end = n.saturating_mul(2).min(cap);
+        let quarter = end / 4;
+        // A run in whole blocks folds as a fresh trace's first blocks do: one that ends inside a
+        // block would merge that block's samples in two parts.
+        let (&base, &prior) = self
+            .prefixes
+            .range(..=quarter)
+            .rev()
+            .find(|&(&b, _)| b.is_multiple_of(BLOCK_SAMPLES))
+            .expect("every geometry holds the empty run's moments, at 0");
+        let cost_us = count(end - n + (quarter - base)) * cpu_per_sample_us;
+        if projected_us + cost_us > point_cap_us {
+            return Step::Stop(TopUpCap::Point);
+        }
+        Step::Carry {
+            end,
+            quarter: (base < quarter).then_some(prior),
+            cost_us,
+        }
+    }
+
+    /// Its reading in `image` for the metric.
+    #[must_use]
+    fn reading<'a>(&self, image: &'a str) -> Reading<'a> {
+        let n = self.samples();
+        Reading {
+            image,
+            radiance: self.whole.mean(),
+            standard_error: self.whole.standard_error(),
+            samples: n,
+            quarter_samples: n / 4,
+            quarter_standard_error: self.quarter().standard_error(),
+        }
+    }
 }
 
 impl Runner<'_, '_> {
@@ -1660,9 +1973,26 @@ impl Runner<'_, '_> {
             reference: counted.reference,
             geometry_vertices: counted.geometry_vertices,
             aggregate_vertices: counted.aggregate_vertices.first().copied(),
+            geometry_moments: counted
+                .geometry_moments
+                .into_iter()
+                .next()
+                .unwrap_or_default(),
             cpu_s,
             wall_s,
         })
+    }
+
+    /// The CPU each geometry's sample takes at `column`'s points, µs, as projected from `pilot`:
+    /// its vertices a sample times the CPU a vertex (main's reading 2).
+    #[must_use]
+    fn cpu_per_sample_us(&self, column: usize, pilot: &PilotRecord) -> Vec<f64> {
+        let c_v = self.cpu_per_vertex_us(column);
+        pilot
+            .vertices
+            .iter()
+            .map(|&v| sample_cost_us(v, pilot.samples, c_v))
+            .collect()
     }
 
     /// The CPU a vertex takes at `column`'s points, µs, by its estimator.
@@ -1713,8 +2043,8 @@ impl Runner<'_, '_> {
             .collect();
         let maxima = metric::image_maxima(&readings);
         let c_v = self.cpu_per_vertex_us(column);
-        let cap = self.run.settings.geometry_cap_cpu_h();
-        let per_sample = |vertices: u64| count(vertices) / count(n_p);
+        let settings = &self.run.settings;
+        let per_sample = |vertices: u64| sample_cost_us(vertices, n_p, c_v);
         let mut capped = Vec::new();
         let mut planned = Vec::with_capacity(radiance.len());
         for (g, ((r, &sigma), &vertices)) in readings
@@ -1725,7 +2055,7 @@ impl Runner<'_, '_> {
         {
             let target = metric::metric_tolerance(r.radiance, maxima[r.image])
                 / metric::METRIC_SIGMA_DIVISOR;
-            let (n, held) = planned_count(n_p, sigma, target, per_sample(vertices) * c_v, cap);
+            let (n, held) = planned_count(n_p, sigma, target, per_sample(vertices), settings);
             if held {
                 capped.push(g);
             }
@@ -1733,29 +2063,29 @@ impl Runner<'_, '_> {
         }
         let aggregate = flux_record(reference, timed.aggregate_vertices);
         let planned_aggregate = aggregate.map(|a| {
-            let cost = per_sample(a.vertices) * c_v;
+            let cost = per_sample(a.vertices);
             let (down, _) = planned_count(
                 n_p,
                 a.downwelling_standard_error,
                 AGGREGATE_SIGMA_CAP * a.downwelling,
                 cost,
-                cap,
+                settings,
             );
             let (up, _) = planned_count(
                 n_p,
                 a.upwelling_standard_error,
                 AGGREGATE_SIGMA_CAP * a.upwelling,
                 cost,
-                cap,
+                settings,
             );
             down.max(up)
         });
         let mut projected_us = 0.0;
         for (&n, &vertices) in planned.iter().zip(&timed.geometry_vertices) {
-            projected_us += count(n_p + n) * per_sample(vertices) * c_v;
+            projected_us += count(n_p + n) * per_sample(vertices);
         }
         if let (Some(a), Some(n)) = (aggregate, planned_aggregate) {
-            projected_us += count(n_p + n) * per_sample(a.vertices) * c_v;
+            projected_us += count(n_p + n) * per_sample(a.vertices);
         }
         Ok(PilotRecord {
             seed,
@@ -1773,7 +2103,8 @@ impl Runner<'_, '_> {
         })
     }
 
-    /// The point's final trace at its planned counts, and its verdicts (module documentation).
+    /// The point's final trace at its planned counts, its top-ups, and its verdicts (module
+    /// documentation).
     fn final_trace(
         &self,
         column: usize,
@@ -1793,23 +2124,17 @@ impl Runner<'_, '_> {
                 pilot.planned_aggregate_samples,
             )
             .map_err(|source| RunSweepError::Point { index, source })?;
+        let (cpu, wall) = (process_cpu_s(), Instant::now());
         let timed = self.trace(&point)?;
-        let reference = &timed.reference;
-        let first = |values: &[f64]| values[0];
-        let readings: Vec<Reading<'_>> = file
-            .geometries
+        let mut carried: Vec<Carried> = timed
+            .geometry_moments
             .iter()
-            .zip(reference.geometries())
-            .map(|(g, r)| Reading {
-                image: &g.image,
-                radiance: first(r.radiance()),
-                standard_error: first(r.standard_error()),
-                samples: r.samples(),
-                quarter_samples: r.quarter_samples(),
-                quarter_standard_error: first(r.quarter_standard_error()),
-            })
+            .zip(&timed.geometry_vertices)
+            .map(|(&moments, &vertices)| Carried::new(moments, vertices))
             .collect();
-        let verdicts = metric::verdicts(&readings, case.twin(column, spot));
+        let verdicts = self.top_up(column, pilot, &point, &mut carried, case.twin(column, spot))?;
+        let wall_s = wall.elapsed().as_secs_f64();
+        let cpu_s = cpu.zip(process_cpu_s()).map(|(a, b)| b - a);
         let vroom = case.vroom[column];
         let failing = verdicts
             .iter()
@@ -1825,32 +2150,129 @@ impl Runner<'_, '_> {
                     geometry: g,
                     refusal,
                     listed: vroom && case.near_sun[g],
+                    cap: carried[g]
+                        .stopped
+                        .expect("the top-ups leave every refused geometry stopped at a cap"),
                 })
             })
             .collect();
-        let aggregate = flux_record(reference, timed.aggregate_vertices);
+        let aggregate = flux_record(&timed.reference, timed.aggregate_vertices);
         let aggregate_refused = aggregate.is_some_and(|a| {
             a.downwelling_standard_error > AGGREGATE_SIGMA_CAP * a.downwelling
                 || a.upwelling_standard_error > AGGREGATE_SIGMA_CAP * a.upwelling
         });
         Ok(TracedRecord {
             seed,
-            samples: reference
-                .geometries()
+            samples: carried.iter().map(Carried::samples).collect(),
+            radiance: carried.iter().map(|c| c.whole.mean()).collect(),
+            standard_error: carried.iter().map(|c| c.whole.standard_error()).collect(),
+            quarter_standard_error: carried
                 .iter()
-                .map(GeometryRadiance::samples)
+                .map(|c| c.quarter().standard_error())
                 .collect(),
-            radiance: readings.iter().map(|r| r.radiance).collect(),
-            standard_error: readings.iter().map(|r| r.standard_error).collect(),
-            quarter_standard_error: readings.iter().map(|r| r.quarter_standard_error).collect(),
-            vertices: timed.geometry_vertices,
+            doublings: carried.iter().map(|c| c.doublings).collect(),
+            vertices: carried.iter().map(|c| c.vertices).collect(),
             aggregate,
             aggregate_refused,
             failing,
             refused,
-            cpu_s: timed.cpu_s,
-            wall_s: timed.wall_s,
+            cpu_s,
+            wall_s,
         })
+    }
+
+    /// Tops up `point`'s refused geometries, `carried` as its final trace left them, and gives the
+    /// metric's verdicts at the end (module documentation; "#112's floor refusals", item 1).
+    ///
+    /// Each round holds every geometry to `twin` by the metric, and carries each refused geometry
+    /// on, on its own seed and stream, from its count N to 2N, or to its cap where that is less,
+    /// with its first quarter. A geometry at its cap stops there, and so does one whose round
+    /// would take the point past its cap: the pilot's and the planned counts' projection, with
+    /// every top-up so far. Both caps are counted in samples, at the pilot's vertices a sample and
+    /// the run's CPU a vertex, never by the clock. The rounds end when no refused geometry can go
+    /// on.
+    fn top_up(
+        &self,
+        column: usize,
+        pilot: &PilotRecord,
+        point: &AtmosphereCase,
+        carried: &mut [Carried],
+        twin: &[f64],
+    ) -> Result<Vec<metric::Verdict>, RunSweepError> {
+        let settings = &self.run.settings;
+        let geometries = &self.case().file.geometries;
+        let per_sample = self.cpu_per_sample_us(column, pilot);
+        let caps: Vec<u64> = per_sample
+            .iter()
+            .map(|&us| cap_count(pilot.samples, us, settings))
+            .collect();
+        let point_cap_us = settings.point_cap_cpu_h() * MICROSECONDS_PER_HOUR;
+        let mut projected_us = pilot.projected_cpu_h * MICROSECONDS_PER_HOUR;
+        loop {
+            let readings: Vec<Reading<'_>> = geometries
+                .iter()
+                .zip(carried.iter())
+                .map(|(g, c)| c.reading(&g.image))
+                .collect();
+            let verdicts = metric::verdicts(&readings, twin);
+            // This round's spans in geometry order: each geometry's run carried on and then,
+            // where it holds no run to its new quarter, the part of the quarter it lacks.
+            let mut spans = Vec::new();
+            let mut taken = Vec::new();
+            for (g, verdict) in verdicts.iter().enumerate() {
+                let c = &mut carried[g];
+                if verdict.refusal.is_none() || c.stopped.is_some() {
+                    continue;
+                }
+                match c.next_step(caps[g], per_sample[g], projected_us, point_cap_us) {
+                    Step::Stop(cap) => c.stopped = Some(cap),
+                    Step::Carry {
+                        end,
+                        quarter,
+                        cost_us,
+                    } => {
+                        projected_us += cost_us;
+                        spans.push(Span {
+                            wavelength: 0,
+                            geometry: g,
+                            prior: c.whole,
+                            end,
+                        });
+                        if let Some(prior) = quarter {
+                            spans.push(Span {
+                                wavelength: 0,
+                                geometry: g,
+                                prior,
+                                end: end / 4,
+                            });
+                        }
+                        taken.push((g, quarter.is_some()));
+                    }
+                }
+            }
+            if spans.is_empty() {
+                return Ok(verdicts);
+            }
+            let mut traced = super::trace_spans(point, &spans, self.run.threads)?.into_iter();
+            let mut next_span = || {
+                traced
+                    .next()
+                    .expect("the tracer gives one result a span, in order")
+            };
+            for (g, piece) in taken {
+                let c = &mut carried[g];
+                let run = next_span();
+                c.whole = run.moments;
+                c.vertices += run.vertices;
+                c.prefixes.insert(run.moments.samples(), run.moments);
+                if piece {
+                    let quarter = next_span();
+                    c.prefixes
+                        .insert(quarter.moments.samples(), quarter.moments);
+                }
+                c.doublings += 1;
+            }
+        }
     }
 
     /// Whether this invocation has done its `max_points`.
@@ -1899,8 +2321,9 @@ impl Runner<'_, '_> {
             // Writing into a `String` cannot fail.
             let _ = write!(
                 line,
-                "; traced {:.1} s: {} failing, {} refused",
+                "; traced {:.1} s, {} top-ups: {} failing, {} refused",
                 traced.wall_s,
+                traced.doublings.iter().sum::<u32>(),
                 traced.failing.len(),
                 traced.refused.len()
             );
@@ -1950,7 +2373,7 @@ fn work_key(run: &SweepRun<'_>) -> String {
         SweepMode::PilotOnly(_) => "pilot",
     };
     let settings = serde_json::to_string(&run.settings)
-        .expect("a struct of four numbers serialises into a String");
+        .expect("a struct of plain numbers serialises into a String");
     let key = format!(
         "sweep-format {SWEEP_FORMAT}\ncase {}\nbinary {}\nmode {mode}\nsettings {settings}\n",
         run.case.sha256(),
@@ -2079,13 +2502,19 @@ fn point_row(case: &SweepCase, column: usize, record: &PointRecord, row: Row) ->
             let refused: Vec<Value> = t
                 .refused
                 .iter()
-                .map(
-                    |r| json!({ "geometry": r.geometry, "refusal": r.refusal, "listed": r.listed }),
-                )
+                .map(|r| {
+                    json!({
+                        "geometry": r.geometry,
+                        "refusal": r.refusal,
+                        "listed": r.listed,
+                        "cap": r.cap,
+                    })
+                })
                 .collect();
             value["traced"] = json!({
                 "seed": t.seed,
                 "samples": t.samples,
+                "doublings": t.doublings,
                 "radiance": rounded_all(&t.radiance),
                 "standardError": rounded_all(&t.standard_error),
                 "quarterStandardError": rounded_all(&t.quarter_standard_error),
@@ -2162,6 +2591,7 @@ fn cell_row(case: &SweepCase, column: usize, walk: &ColumnWalk, sort: &FloorSort
         "asymmetry": file.columns[column].asymmetry,
         "groundAlbedo": file.template.ground_albedo,
         "vroom": case.vroom[column],
+        "walkPast": case.walk_past(column).to_json(),
         "kind": walk.kind,
         "tauStar": rounded(walk.tau_star),
         "points": indices,
@@ -2197,7 +2627,7 @@ fn render(run: &SweepRun<'_>, kind: OutputKind, cells: &[Value], points: &[Value
         (
             "settings",
             serde_json::to_value(run.settings)
-                .expect("a struct of four numbers serialises into a JSON value"),
+                .expect("a struct of plain numbers serialises into a JSON value"),
         ),
         ("pilotSamples", json!(case.file.pilot_samples)),
         (
@@ -2281,7 +2711,8 @@ pub fn run_sweep(
             let mut cells = Vec::with_capacity(case.file.columns.len());
             let mut points = Vec::new();
             for column in 0..case.file.columns.len() {
-                let walked = walk_column(&case.file.tau, &case.file.tau_roles, |candidate| {
+                let past = case.walk_past(column);
+                let walked = walk_column(&case.file.tau, &case.file.tau_roles, past, |candidate| {
                     runner
                         .point(column, Spot::Walk(candidate), Stage::Walk)
                         .map(PointRecord::outcome)
@@ -2337,6 +2768,7 @@ mod tests {
                     geometry,
                     refusal: Refusal::Noisy,
                     listed,
+                    cap: TopUpCap::Geometry,
                 })
                 .collect(),
         })
@@ -2359,14 +2791,104 @@ mod tests {
 
     /// Walks the ladder with `outcome(candidate)`, recording what it asked for.
     fn walk_ladder(outcome: impl Fn(usize) -> PointOutcome) -> (ColumnWalk, Vec<usize>) {
+        walk_ladder_past(WalkPast::No, outcome)
+    }
+
+    /// Walks the ladder past its first drift as `past` says.
+    fn walk_ladder_past(
+        past: WalkPast,
+        outcome: impl Fn(usize) -> PointOutcome,
+    ) -> (ColumnWalk, Vec<usize>) {
         let (taus, roles) = ladder();
         let mut asked = Vec::new();
-        let walk = walk_column::<()>(&taus, &roles, |k| {
+        let walk = walk_column::<()>(&taus, &roles, past, |k| {
             asked.push(k);
             Ok(outcome(k))
         })
         .unwrap();
         (walk, asked)
+    }
+
+    #[test]
+    fn atmosphere_sweep_walk_through_one_climbs_past_a_drift_to_tau_1() {
+        // Fails from τ ½ (candidate 6) up: the climb goes on to τ 1 (8) and ends there, then takes
+        // the half-octave below its first drift; τ* stays the first drift's, ½.
+        let fails_from =
+            |from: usize| move |k: usize| traced(if k >= from { &[3] } else { &[] }, &[]);
+        let (walk, asked) = walk_ladder_past(WalkPast::Through(1.0), fails_from(6));
+        assert_eq!(asked, [0, 2, 4, 6, 8, 5]);
+        assert_eq!(walk.kind, CellKind::Drift);
+        assert!((walk.tau_star - 0.5).abs() < 1e-12, "{}", walk.tau_star);
+        // Passing at τ 1 after a drift ends the climb there all the same.
+        let (_, asked) = walk_ladder_past(WalkPast::Through(1.0), |k| {
+            traced(if k == 6 { &[3] } else { &[] }, &[])
+        });
+        assert_eq!(asked, [0, 2, 4, 6, 8, 5]);
+        // With no drift through τ 1, the climb ends at its first stop past it, as ruling 3's.
+        let (walk, asked) = walk_ladder_past(WalkPast::Through(1.0), fails_from(10));
+        assert_eq!(asked, [0, 2, 4, 6, 8, 10, 9]);
+        assert!((walk.tau_star - 2.0).abs() < 1e-12, "{}", walk.tau_star);
+        // A reach ends it below τ 1, as ever.
+        let (walk, asked) = walk_ladder_past(WalkPast::Through(1.0), |k| {
+            if k >= 4 {
+                traced(&[], &[(4, false)])
+            } else {
+                traced(&[], &[])
+            }
+        });
+        assert_eq!(asked, [0, 2, 4, 3]);
+        assert_eq!(walk.kind, CellKind::Reach);
+    }
+
+    #[test]
+    fn atmosphere_sweep_walk_to_the_top_climbs_past_every_drift_to_a_reach_or_the_top() {
+        // Fails from τ 1/8 (candidate 2): every octave is traced, then the half-octave below the
+        // first drift; τ* stays 1/8's.
+        let (walk, asked) = walk_ladder_past(WalkPast::Top, |k| {
+            traced(if k >= 2 { &[3] } else { &[] }, &[])
+        });
+        assert_eq!(asked, [0, 2, 4, 6, 8, 10, 12, 14, 1]);
+        assert_eq!(walk.kind, CellKind::Drift);
+        assert!((walk.tau_star - 0.125).abs() < 1e-12, "{}", walk.tau_star);
+        // A reach past the drift ends the climb, and leaves the kind and τ* the drift's.
+        let (walk, asked) = walk_ladder_past(WalkPast::Top, |k| match k {
+            0..=3 => traced(&[], &[]),
+            4..=9 => traced(&[3], &[]),
+            _ => PointOutcome::OverCap,
+        });
+        assert_eq!(asked, [0, 2, 4, 6, 8, 10, 3]);
+        assert_eq!(walk.kind, CellKind::Drift);
+        assert!((walk.tau_star - 0.25).abs() < 1e-12, "{}", walk.tau_star);
+    }
+
+    #[test]
+    fn atmosphere_sweep_walks_on_the_must_have_cells_over_the_walk_ground_alone() {
+        assert_eq!(WalkPast::of(1.0, 0.0, 0.3), WalkPast::Top);
+        for (omega, g) in WALKED_THROUGH_ONE {
+            assert_eq!(
+                WalkPast::of(omega, g, 0.3),
+                WalkPast::Through(1.0),
+                "({omega}, {g})"
+            );
+        }
+        // Mars's and Earth's, Titan's and Venus's: 14 cells besides (1, 0), each once.
+        for (k, &(w, g)) in WALKED_THROUGH_ONE.iter().enumerate() {
+            assert!(
+                WALKED_THROUGH_ONE[k + 1..]
+                    .iter()
+                    .all(|&(v, a)| (v - w).abs() > 1e-9 || (a - g).abs() > 1e-9),
+                "({w}, {g}) listed twice"
+            );
+        }
+        // Not a must-have cell, nor the bright column's (1, 0) over 0.8.
+        assert_eq!(WalkPast::of(0.8, 0.5, 0.3), WalkPast::No);
+        assert_eq!(WalkPast::of(1.0, 0.9, 0.3), WalkPast::No);
+        assert_eq!(WalkPast::of(1.0, 0.0, 0.8), WalkPast::No);
+        assert_eq!(WalkPast::of(0.99, 0.3, 0.8), WalkPast::No);
+        // The smoke's g 0.75 column at ω 0.9 is Mars's, its g 0 column none.
+        let smoke = SweepCase::from_json(SMOKE_CASE).unwrap();
+        assert_eq!(smoke.walk_past(0), WalkPast::No);
+        assert_eq!(smoke.walk_past(1), WalkPast::Through(1.0));
     }
 
     #[test]
@@ -2523,19 +3045,147 @@ mod tests {
         assert_eq!(blocks_down(100.0, 2048), 2048);
     }
 
+    /// The ruled settings with a geometry cap of `cap_cpu_h`.
+    fn capped_at(cap_cpu_h: f64) -> SweepSettings {
+        SweepSettings::new(
+            POINT_CAP_CPU_H,
+            PositiveFigure::new(cap_cpu_h).unwrap(),
+            figure(8.79),
+            figure(4.0),
+        )
+    }
+
     #[test]
     fn atmosphere_sweep_counts_follow_t12e_rule_and_the_geometry_cap() {
-        // σ at its target: N_p × 1.15 = 2,355.2, a third block.
-        assert_eq!(planned_count(2048, 0.01, 0.01, 0.0, 4.0), (3072, false));
+        let ruled = capped_at(4.0);
         // Four times its target: 2,048 × 16 × 1.15 = 37,683.2, in 37 blocks.
-        assert_eq!(planned_count(2048, 0.04, 0.01, 0.0, 4.0), (37_888, false));
-        // Never under N_p, nor from an exact pilot.
-        assert_eq!(planned_count(2048, 0.001, 0.01, 0.0, 4.0), (2048, false));
-        assert_eq!(planned_count(2048, 0.0, 0.01, 0.0, 4.0), (2048, false));
-        // 100 µs a sample under a cap of 10⁻³ CPU-h, 3.6 s: 36,000 samples, held at 35 blocks.
-        assert_eq!(planned_count(2048, 0.04, 0.01, 100.0, 1e-3), (35_840, true));
-        // A cap under N_p holds the count at N_p.
-        assert_eq!(planned_count(2048, 0.04, 0.01, 100.0, 1e-6), (2048, true));
+        assert_eq!(
+            planned_count(2048, 0.04, 0.01, 0.0, &ruled),
+            (37_888, false)
+        );
+        // Never under 8,192 ("#112's floor refusals"), nor from an exact pilot.
+        assert_eq!(MIN_FINAL_SAMPLES, 8192);
+        assert_eq!(planned_count(2048, 0.01, 0.01, 0.0, &ruled), (8192, false));
+        assert_eq!(planned_count(2048, 0.001, 0.01, 0.0, &ruled), (8192, false));
+        assert_eq!(planned_count(2048, 0.0, 0.01, 0.0, &ruled), (8192, false));
+        // 100 µs a sample under a cap of 10⁻² CPU-h, 36 s: 360,000 samples, held at 351 blocks.
+        let tenth = capped_at(1e-2);
+        assert_eq!(cap_count(2048, 100.0, &tenth), 359_424);
+        assert_eq!(
+            planned_count(2048, 0.4, 0.01, 100.0, &tenth),
+            (359_424, true)
+        );
+        // A cap under 8,192 holds the count at 8,192.
+        let tiny = capped_at(1e-6);
+        assert_eq!(cap_count(2048, 100.0, &tiny), 8192);
+        assert_eq!(planned_count(2048, 0.04, 0.01, 100.0, &tiny), (8192, true));
+        // No vertex counted: no cap below the tracer's most.
+        assert_eq!(cap_count(2048, 0.0, &ruled), MAX_SAMPLES);
+        // The smoke's: its pilot's 1,024 at least, and a margin of 0.25, a quarter's count of
+        // σ at its target: 1,024 × 16 × 0.25 = 4,096.
+        let smoke = SweepSettings::SMOKE;
+        assert_eq!(planned_count(1024, 0.01, 0.01, 0.0, &smoke), (1024, false));
+        assert_eq!(planned_count(1024, 0.04, 0.01, 0.0, &smoke), (4096, false));
+    }
+
+    /// The moments of a run of `n` samples, each 0.
+    fn run_of(n: u64) -> Moments {
+        let mut moments = Moments::default();
+        for _ in 0..n {
+            moments.push(0.0);
+        }
+        moments
+    }
+
+    #[test]
+    fn atmosphere_sweep_top_ups_double_to_the_cap_within_the_point_budget() {
+        let first = Carried::new(
+            crate::atmosphere::GeometryMoments {
+                whole: run_of(8192),
+                quarter: run_of(2048),
+            },
+            0,
+        );
+        let ample = 1e12;
+        // Doubled, its first quarter carried on from 2,048 to 4,096: 8,192 + 2,048 samples at
+        // 1 µs.
+        let Step::Carry {
+            end,
+            quarter,
+            cost_us,
+        } = first.next_step(1 << 20, 1.0, 0.0, ample)
+        else {
+            panic!("a geometry below its cap is carried on");
+        };
+        assert_eq!((end, quarter.map(|q| q.samples())), (16_384, Some(2048)));
+        assert!((cost_us - 10_240.0).abs() < 1e-9, "{cost_us}");
+        // Once it holds 16,384 and its 4,096, the next quarter is a count it already holds.
+        let mut on = first.clone();
+        on.whole = run_of(16_384);
+        on.prefixes.insert(16_384, on.whole);
+        on.prefixes.insert(4096, run_of(4096));
+        assert_eq!(on.quarter().samples(), 4096);
+        assert_eq!(
+            on.next_step(1 << 20, 1.0, 0.0, ample),
+            Step::Carry {
+                end: 32_768,
+                quarter: None,
+                cost_us: 16_384.0,
+            }
+        );
+        // Short of double by its cap: raised to the cap, its quarter from the longest run below.
+        let Step::Carry {
+            end,
+            quarter,
+            cost_us,
+        } = first.next_step(10_240, 1.0, 0.0, ample)
+        else {
+            panic!("a geometry below its cap is carried on");
+        };
+        assert_eq!((end, quarter.map(|q| q.samples())), (10_240, Some(2048)));
+        assert!((cost_us - 2560.0).abs() < 1e-9, "{cost_us}");
+        // From 9,216, whose quarter of 2,304 ends inside a block: the new quarter, 4,608, is carried
+        // on from the empty run, so that it folds as a fresh trace's.
+        let odd = Carried::new(
+            crate::atmosphere::GeometryMoments {
+                whole: run_of(9216),
+                quarter: run_of(2304),
+            },
+            0,
+        );
+        let Step::Carry {
+            end,
+            quarter,
+            cost_us,
+        } = odd.next_step(1 << 20, 1.0, 0.0, ample)
+        else {
+            panic!("a geometry below its cap is carried on");
+        };
+        assert_eq!((end, quarter.map(|q| q.samples())), (18_432, Some(0)));
+        assert!((cost_us - 13_824.0).abs() < 1e-9, "{cost_us}");
+        // At its cap it stops there; a step past the point's budget stops at the point's, and one
+        // to the budget is taken.
+        assert_eq!(
+            first.next_step(8192, 1.0, 0.0, ample),
+            Step::Stop(TopUpCap::Geometry)
+        );
+        assert_eq!(
+            first.next_step(1 << 20, 1.0, 5000.0, 15_239.0),
+            Step::Stop(TopUpCap::Point)
+        );
+        assert!(matches!(
+            first.next_step(1 << 20, 1.0, 5000.0, 15_240.0),
+            Step::Carry { end: 16_384, .. }
+        ));
+    }
+
+    #[test]
+    fn atmosphere_sweep_projects_a_sample_at_one_vertex_at_least() {
+        assert!((sample_cost_us(4096, 1024, 2.5) - 10.0).abs() < 1e-12);
+        // A pilot that counted no vertex: the forced first collision's one, so its cap is bounded.
+        assert!((sample_cost_us(0, 1024, 2.5) - 2.5).abs() < 1e-12);
+        let ruled = capped_at(4.0);
+        assert!(cap_count(2048, sample_cost_us(0, 2048, 8.79), &ruled) < MAX_SAMPLES);
     }
 
     /// The smoke's sweep as JSON, to be changed.
@@ -2575,6 +3225,10 @@ mod tests {
         let mut v = smoke_json();
         v["tauRoles"][0] = json!("octave");
         assert_eq!(refused_field(&v), "tauRoles");
+        // A pilot count off the blocks, from which the counts would leave them.
+        let mut v = smoke_json();
+        v["pilotSamples"] = json!(1000);
+        assert_eq!(refused_field(&v), "pilotSamples");
         let mut v = smoke_json();
         v["columns"][1]["twin"][0][0] = json!(-1.0);
         assert_eq!(refused_field(&v), "columns[1].twin[0]");
