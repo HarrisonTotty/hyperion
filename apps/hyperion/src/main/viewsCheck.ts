@@ -57,7 +57,12 @@ import {
   writeHandoverResults,
 } from "./handoverCheckResults";
 import { type Measured, measured, missing } from "./measured";
-import { readTraceEvents, recordedGpuSlices, TraceReducer, type TraceFigures } from "./reduceTrace";
+import {
+  readTraceFileEvents,
+  recordedGpuSlices,
+  TraceReducer,
+  type TraceFigures,
+} from "./reduceTrace";
 import { readSpikeEnd } from "./spike";
 import {
   buildTerrainCheckResults,
@@ -243,11 +248,18 @@ export interface ReducedWindow {
   readonly scan: WindowScan;
 }
 
-/** Reads a trace file once, through R05's reducer and the check's scan. */
+/**
+ * Reads a trace file once, through R05's reducer and the check's scan.
+ *
+ * @remarks
+ * The file is told by its first byte (`readTraceFileEvents`): Electron 45's
+ * `contentTracing.stopRecording` writes a Perfetto protobuf trace only, where Electron 44's wrote
+ * Chromium's JSON.
+ */
 export async function reduceWindowFile(path: string): Promise<ReducedWindow> {
   const reducer = new TraceReducer({ categories: VIEWS_CHECK_TRACE_CATEGORIES });
   const scan = new WindowScan();
-  for await (const event of readTraceEvents(path)) {
+  for await (const event of readTraceFileEvents(path)) {
     reducer.add(event);
     scan.add(event);
   }

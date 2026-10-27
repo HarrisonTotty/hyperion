@@ -5,9 +5,10 @@
  * protobuf stream, and read into the window's file.
  *
  * @remarks
- * Electron's `contentTracing` writes JSON only, which Chromium's tracing service builds whole in
+ * Electron 44's `contentTracing` wrote JSON only, which Chromium's tracing service builds whole in
  * memory at the stop, 4.3–5.7 times the buffer's bytes; the protobuf stream is about 1.2 times the
- * buffer and is read in seconds (T14.f's measurements). The session sends only `Tracing` and `IO`
+ * buffer and is read in seconds (T14.f's measurements). Electron 45's writes protobuf only, to a
+ * file. The session sends only `Tracing` and `IO`
  * commands ({@link CDP_TRACE_COMMANDS}), which the browser process's DevTools handlers answer, so
  * the page's renderer sees only the attach and the detach. It attaches once, at the first window's
  * start, and detaches once, after the last stop ({@link CdpTracing.close}), so no measured frame

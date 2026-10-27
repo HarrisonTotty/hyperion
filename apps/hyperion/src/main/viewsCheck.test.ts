@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -17,6 +19,7 @@ import { measured } from "./results";
 import {
   phaseTraceFigures,
   type ReducedWindow,
+  reduceWindowFile,
   registerViewsCheckHandlers,
   VIEWS_CHECK_CHANNELS,
   VIEWS_CHECK_TRACE_CATEGORIES,
@@ -27,6 +30,12 @@ import {
 } from "./viewsCheck";
 import type { TerrainCheckResults } from "./terrainCheckResults";
 import { NO_WINDOW_REASON, type ViewsCheckResults } from "./viewsCheckResults";
+
+/**
+ * The descent spike's recorded traces (`traceProto.test.ts` and `reduceTrace.test.ts` give their
+ * provenance), taken with the same five categories as a phase's window.
+ */
+const FIXTURES = join(__dirname, "fixtures");
 
 const RECORD: ViewsCheckRecord = {
   timer: "full",
@@ -250,6 +259,16 @@ describe("the views check's trace", () => {
     const blind = phaseTraceFigures({ figures: figures(null), scan: scanned() }, true, SPAN);
     expect(blind.presentation.reason).toMatch(/clock/);
     expect(blind.gpuProcess.reason).toMatch(/clock/);
+  });
+
+  it("reads a Perfetto protobuf window, the only format Electron 45's contentTracing writes", async () => {
+    const { figures: read } = await reduceWindowFile(join(FIXTURES, "spike.pftrace"));
+    expect(read.frames).toMatchObject({ presented: 28, dropped: 2, noUpdate: 0 });
+  });
+
+  it("still reads a JSON window, the format Electron 44's contentTracing wrote", async () => {
+    const { figures: read } = await reduceWindowFile(join(FIXTURES, "spike.trace.json"));
+    expect(read.frames.presented).toBe(1);
   });
 });
 

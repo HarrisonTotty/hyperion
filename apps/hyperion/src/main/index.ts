@@ -510,7 +510,7 @@ function startViewsCheckSession(
       return { widthDip, heightDip };
     },
     tracing: contentTracing,
-    tracePath: (phase) => join(app.getPath("userData"), `views-check-${phase}.json`),
+    tracePath: (phase) => join(app.getPath("userData"), `views-check-${phase}.pftrace`),
     reduce: reduceWindowFile,
     removeFile: (path) => rm(path, { force: true }),
     capturesDir: resolve(repo, dirs.captures, `captures-${stamp}`),
