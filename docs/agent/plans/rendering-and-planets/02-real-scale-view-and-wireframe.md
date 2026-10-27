@@ -2051,8 +2051,9 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   - _A window with no safe cut._ On a spheroid, whose safe cut stands farther in, a facing window
     with none is searched beyond its middle, at its ends and its eight even steps
     (`windowsInside`'s `searchWhole`): the tilted `TEST SATURN`, centred at (1500, 330) while it
-    was built, lost its 75° parallel's stretch across λ = 0 under the middle alone. A sphere keeps
-    T16.g's middle-only rule (a deferred finding below).
+    was built, lost its 75° parallel's stretch across λ = 0 under the middle alone. In T19's own
+    commit a sphere keeps T16.g's middle-only rule; the commit after it searches the whole window
+    on every body (below, "Fixed in R10.T16.g's follow-up").
   - _The cut._ `outlineLeastDiameterPx`: twice the least angular semi-axis of the cone of lines of
     sight that graze the spheroid, from the eigenvalues of uᵀMu ≥ 0, M = L(sin²α′ I − [ĉ′]ₓᵀ[ĉ′]ₓ)L
     (the normal of the plane of the line of sight and the pole is one eigenvector), at the
@@ -2108,17 +2109,32 @@ highest step`, naming the key held back as the field of view's ends name theirs;
     figure's outline. Pole-on the sphere's outline stood 0.31 px beyond, its inside limb's
     centreline 3.22 px inside (δ_limb 3.5, so its casing 0.28 px beyond); now from δ_limb + 0.031
     to δ_limb + 0.279. Tilted 26.7° near the corner, at (1640, 280), the sphere's outline 25.40 px
-    beyond the figure before, δ_limb + 0.031 to δ_limb + 0.281 after. Every point of every line is on the spheroid to 10⁻¹⁴ of a, and every
-    meridian and parallel point at least its reach + 1/32 px inside, its cut ends at it.
+    beyond the figure before, δ_limb + 0.031 to δ_limb + 0.281 after. Every point of every line is
+    on the spheroid to 10⁻¹⁴ of a, and every meridian and parallel point at least its reach + 1/32
+    px inside, its cut ends at it.
+- **Fixed in R10.T16.g's follow-up (2026-10-27; `decision-r02-t19-leans.md` item 7, a blocker of
+  low severity, a visibly wrong picture): a window with no safe cut keeps its far stretch, on every
+  body.** R02.T19 found it. Over the image, T16.g's `windowsInside` kept only the stretch about the
+  middle of a facing window that held no safe window, so a parallel's piece across λ = 0, or a
+  meridian whose middle runs within its reach of the limb, was lost though it stood its reach
+  inside: 114 of 20,000 random spheres in a scratch comparison (0.57%), never a line beyond the
+  figure. The commit after T19's, R10.T16.g's "A window with no safe cut keeps its far stretch, on
+  every body", removes `searchWhole`, so that every body's window is searched at its middle, its
+  ends and its eight even steps, and drops the rounding test's limb-only filter over the image.
+  The scratch comparison after it, against the code at 1808146a, both styles: the 114 spheres gain
+  runs and lose none, and every other sphere's lines are the same.
+  - _Tests_ (`bodies.test.ts`, each failing under the middle-only rule): a sphere whose 30°
+    parallel's facing arc straddles λ = 0, its safe arc on one side, now runs across it, each cut
+    end at its reach + 1/32 px; a sphere whose meridian at 150° runs its middle near the limb keeps
+    its far stretch, its cut end the same. And a completeness property over 213 spheres (the 13
+    poses of the 114 with a rotation, no orbit normal and the high setting, and 200 more from a
+    fixed seed), in four tests of about 3 s each: every point of each facing arc, sampled at 1,024
+    points, on the view and at least its reach + 1/32 + ε px inside the exact outline, with
+    ε = 0.02 px, lies within 0.5 px of a drawn run of its line. Under the middle-only rule three
+    of the four fail (59, 203 and 149 points undrawn), and at ε = 0.25 px one; with the fix none.
+    The eight even steps needed no densifying.
 - **Deferred findings (2026-10-13 rule) (R02.T19)** (recorded, not ruled; each leaves the
   algorithm and the contracts as built).
-  - _T16.g's window with no safe cut drops a far stretch on a sphere._ Over the image, a facing
-    window with no safe one keeps only the stretch about its middle. In the scratch comparison
-    above, the spheroid's whole-window search would have changed 114 of the 20,000 random spheres
-    (0.57%), all over the image: a meridian whose middle runs within its reach of the limb, or a
-    parallel's stretch across λ = 0, lost though it stands its reach inside. A visible line missing,
-    never one beyond the figure. The fix is `searchWhole` for every body, one line; it waits on a
-    ruling, since this task keeps a sphere's lines unchanged.
   - _The inside graticule's cost on a spheroid_ was not timed; the conic's sums and the reduced
     latitude add a few operations a point to T16.g's (about 2.0 ms for a 416 px Earth, Node on a
     laptop), for R12's budget.

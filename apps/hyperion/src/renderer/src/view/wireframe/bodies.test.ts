@@ -27,7 +27,7 @@ import {
   ringEllipse,
   SYMBOL_BELOW_PX,
 } from "./bodies";
-import type { Polyline } from "./curve";
+import { cosineWindows, type Polyline } from "./curve";
 import { CASING_PX, STROKE_PX } from "./drawList";
 import { datumSpheroidOf } from "./spheroid";
 
@@ -1244,17 +1244,13 @@ describe("the datum on the body's spheroid (R02.T19), on TEST SATURN at 482 Mm",
   );
 
   it.each(cases)(
-    "meets the sphere's lines as the figure rounds: at a stretch of 1 + 10⁻¹² every point within (s − 1) d of the sphere's, its wireframe datum and its limb over the image, seen %s at a line scale of %s",
+    "meets the sphere's lines as the figure rounds: at a stretch of 1 + 10⁻¹² every point within (s − 1) d of the sphere's, in both styles, seen %s at a line scale of %s",
     (_, strokeScale, xPx, yPx, pole) => {
       const sphere: GraticuleBody = { ...saturnAt(xPx, yPx, pole), spheroid: null };
       const nearly: GraticuleBody = { ...sphere, spheroid: { pole, stretch: 1 + 1e-12 } };
-      // Over the image the graticule is left out: a spheroid's keeps a far stretch of a facing
-      // window with no safe cut that a sphere's drops (`windowsInside`'s `searchWhole`).
       const gaps = [null, reachesAt(strokeScale)].map((inside) => {
         const linesOf = (body: GraticuleBody): ReadonlyArray<GraticuleLine> =>
-          graticule(body, FIELD_CAMERA, FIELD, strokeScale, false, inside).lines.filter(
-            (line) => inside === null || line.kind === "limb",
-          );
+          graticule(body, FIELD_CAMERA, FIELD, strokeScale, false, inside).lines;
         const want = linesOf(sphere);
         const seen = linesOf(nearly);
         const points = want.flatMap((line, i) =>
@@ -1349,6 +1345,383 @@ describe("the datum on the body's spheroid (R02.T19), on TEST SATURN at 482 Mm",
         ["graticule", true, true, true, true],
         ["graticule", true, true, true, true],
       ]);
+    },
+  );
+});
+
+/** A sphere's view as the random sample below draws it: its body, camera, field and line scale. */
+interface SphereView {
+  readonly body: GraticuleBody;
+  readonly camera: ProjectionCamera;
+  readonly strokeScale: number;
+}
+
+/** A body's rotation looking along `forward`, +z up, as the scratch comparison drew them. */
+function lookingRotation(forward: Vec3): GraticuleBody["rotation"] {
+  return rotation3FromRows(rotationRows(lookAlong(normalise(forward), vec3(0, 0, 1))));
+}
+
+/**
+ * A sphere of `radiusM` at `rangeM` along `direction`, its graticule turned to look along
+ * `forward`, on {@link FIELD} at `fovDeg` across: a pose of the scratch comparison's 20,000.
+ */
+function sphereView(
+  radiusM: number,
+  rangeM: number,
+  direction: Vec3,
+  forward: Vec3,
+  fovDeg: number,
+  strokeScale: number,
+): SphereView {
+  return {
+    body: {
+      centreM: scale(normalise(direction), rangeM),
+      radiusM,
+      rotation: lookingRotation(forward),
+      unmodelledPole: null,
+      spheroid: null,
+    },
+    camera: { orientation: IDENTITY_QUATERNION, fovXRad: (fovDeg * Math.PI) / 180 },
+    strokeScale,
+  };
+}
+
+/** A sphere whose 30° parallel's facing arc straddles λ = 0, its safe arc wholly on one side. */
+const SEAM_CASE = sphereView(
+  21_697_264.450974762,
+  410_392_519.836727,
+  vec3(0.0873615180165723, 0.1594170580265957, -0.9833382768813514),
+  vec3(0.1592391536119229, 0.614269140478741, -0.7728624166127287),
+  66.14651962183416,
+  3,
+);
+
+/** A sphere whose meridian at 150° runs its middle within its reach of the limb. */
+const MERIDIAN_CASE = sphereView(
+  6_804_794.964753091,
+  215_361_309.96516234,
+  vec3(0.15591618458855092, 0.2957451683595898, -0.9424568630846226),
+  vec3(0.7302866178783345, 0.4292454950964605, 0.5314412109417351),
+  74.0277921129018,
+  2,
+);
+
+/**
+ * The scratch comparison's poses whose datum over the image the middle-only rule left short, of its
+ * 114 (those with a rotation, no orbit normal and the high setting): parallels split at λ = 0 and
+ * meridians whose middle runs near the limb. {@link SEAM_CASE} and {@link MERIDIAN_CASE} are among
+ * them.
+ */
+const SHORT_POSES: ReadonlyArray<SphereView> = [
+  sphereView(
+    21697264.450974762,
+    410392519.836727,
+    vec3(0.0873615180165723, 0.1594170580265957, -0.9833382768813514),
+    vec3(0.1592391536119229, 0.614269140478741, -0.7728624166127287),
+    66.14651962183416,
+    3,
+  ),
+  sphereView(
+    63923306.2508516,
+    2022524044.417224,
+    vec3(0.3455955872438431, 0.10642606529063317, -0.9323289026434487),
+    vec3(-0.5083954500311934, -0.8505658311968924, 0.13443151858072466),
+    34.93845705408603,
+    3,
+  ),
+  sphereView(
+    36101533.28618035,
+    1834567479.0548995,
+    vec3(-0.05419592928226836, -0.2696936726873286, -0.9614198480173225),
+    vec3(-0.34178822266918535, 0.6482640134644536, -0.6803929597604594),
+    70.49024692270905,
+    2,
+  ),
+  sphereView(
+    37132529.02254462,
+    1500372020.942132,
+    vec3(0.5664211097412477, 0.16436768565571386, -0.8075582891356377),
+    vec3(0.47040032755617905, -0.8135509996032524, 0.34184543711974325),
+    26.95413388311863,
+    3,
+  ),
+  sphereView(
+    6804794.964753091,
+    215361309.96516234,
+    vec3(0.15591618458855092, 0.2957451683595898, -0.9424568630846226),
+    vec3(0.7302866178783345, 0.4292454950964605, 0.5314412109417351),
+    74.0277921129018,
+    2,
+  ),
+  sphereView(
+    39238676.66851729,
+    556390834.7703439,
+    vec3(-0.03247075277254835, -0.5529937280856517, -0.832552452949552),
+    vec3(0.32403927982490094, 0.36235557623775505, -0.8738975806694765),
+    63.05120245553553,
+    2,
+  ),
+  sphereView(
+    56936195.583455265,
+    1676633165.6748164,
+    vec3(-0.3453789103986816, -0.3287304007525952, -0.8790049669216082),
+    vec3(0.4745400222685626, 0.27143987596973557, -0.8373363487863684),
+    90.42921469546854,
+    2,
+  ),
+  sphereView(
+    65379846.554622054,
+    1227687020.2590027,
+    vec3(0.12808842446438476, 0.4665445488376551, -0.8751740052515845),
+    vec3(0.35792755007062654, -0.640046314547323, -0.6798739472393602),
+    74.62291045114398,
+    2,
+  ),
+  sphereView(
+    26072860.311158,
+    299347108.6981777,
+    vec3(-0.4398736750303532, 0.7462211284427513, -0.4996650652996648),
+    vec3(-0.15022517689804932, 0.4847921087916533, -0.8616315961472695),
+    27.62480548582971,
+    2,
+  ),
+  sphereView(
+    15392986.475396901,
+    440919838.29349756,
+    vec3(0.7379197695488376, -0.046043685742762984, -0.673315967961708),
+    vec3(0.34324012387740716, -0.8166749651150391, -0.4639269540724827),
+    85.99348864983767,
+    2,
+  ),
+  sphereView(
+    39777560.21535024,
+    1731399331.428559,
+    vec3(-0.4881048363902541, 0.5494324511215839, -0.6781427949532247),
+    vec3(0.2137106792729321, 0.47080207094747933, 0.8559632910097644),
+    52.27254601661116,
+    3,
+  ),
+  sphereView(
+    67347559.35370922,
+    4015072315.1497664,
+    vec3(-0.4269585570156825, -0.02938865794954042, -0.9037935037247232),
+    vec3(0.16316627427713848, 0.7518563776309362, -0.6388182482946182),
+    63.27884782105684,
+    2,
+  ),
+  sphereView(
+    58920177.66358331,
+    984893396.0803636,
+    vec3(0.5816775584092049, -0.379820580359328, -0.7192965624682277),
+    vec3(0.08156942917878035, -0.7895301603501469, 0.6082668445024102),
+    24.57411732058972,
+    3,
+  ),
+];
+
+/** A sphere's lines over the image on its field. */
+function insideLines(view: SphereView): ReadonlyArray<GraticuleLine> {
+  return graticule(
+    view.body,
+    view.camera,
+    FIELD,
+    view.strokeScale,
+    false,
+    reachesAt(view.strokeScale),
+  ).lines;
+}
+
+/** The margins past their reach of a line's run ends cut short of the limb, px. */
+function cutEndMargins(view: SphereView, line: GraticuleLine): number[] {
+  const inset = insetFromOutline(view.body, { camera: view.camera, viewport: FIELD });
+  const inside = reachesAt(view.strokeScale);
+  const reach = line.major ? inside.reachPx.heavy : inside.reachPx.thin;
+  const pole = rotateToBody(view.body.rotation ?? graticuleRotation(view.body), vec3(0, 0, 1));
+  const ends = line.runs.flatMap((run) => [run[0], run.at(-1)]).filter((p) => p !== undefined);
+  return ends
+    .filter((end) => {
+      const n = normalise(sub(end, view.body.centreM));
+      const atPole = Math.abs(Math.abs(dot(n, pole)) - 1) < 1e-9;
+      const shared = ends.filter((o) => norm(sub(o, end)) < 1e-6 * view.body.radiusM).length > 1;
+      return !atPole && !shared;
+    })
+    .map((end) => inset(end) - reach);
+}
+
+/**
+ * The points of a sphere's meridians and parallels over the image that the datum should draw but
+ * does not: each line's facing arcs sampled at `samples` points each, every point on the view at
+ * least its reach + 1/32 + `epsPx` px inside the exact outline that lies farther than `drawnPx`
+ * from every drawn run of its line, on screen. A lower bound on the inset, f (α − β) (the
+ * gnomonic scale is at least f, and the outline's lines of sight lie α − β off the point's),
+ * settles most points; the rest are measured on the exact outline.
+ */
+function undrawnPoints(
+  view: SphereView,
+  samples: number,
+  epsPx: number,
+): { readonly checked: number; readonly undrawn: number } {
+  const { body, camera, strokeScale } = view;
+  const field: Field = { camera, viewport: FIELD };
+  const inside = reachesAt(strokeScale);
+  const wireframe = graticule(body, camera, FIELD, strokeScale, false, inside);
+  if (wireframe.lines.length === 0) {
+    return { checked: 0, undrawn: 0 };
+  }
+  const exactInset = insetFromOutline(body, field);
+  const d = norm(body.centreM);
+  const alpha = Math.asin(body.radiusM / d);
+  const toCentre = scale(body.centreM, 1 / d);
+  const focalPx = FIELD.widthPx / (2 * Math.tan(camera.fovXRad / 2));
+  const rotation = graticuleRotation(body);
+  const axes = [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)].map((axis) =>
+    rotateToBody(rotation, axis),
+  );
+  const [x, y, z] = [axes[0] ?? toCentre, axes[1] ?? toCentre, axes[2] ?? toCentre];
+  const [fx, fy, fz] = [x, y, z].map((axis) => -dot(axis, body.centreM));
+  const stepRad = (graticuleStepDeg(wireframe.diameterPx, strokeScale, false) * Math.PI) / 180;
+  const meridianLines = wireframe.lines.filter((line) => line.kind === "meridian");
+  const parallelLines = wireframe.lines.filter((line) => line.kind === "parallel");
+  // Each line: its point at a parameter, its facing coefficients and range, and its drawn runs.
+  const unitOf = (lat: number, lon: number): Vec3 =>
+    add(
+      add(scale(x, Math.cos(lat) * Math.cos(lon)), scale(y, Math.cos(lat) * Math.sin(lon))),
+      scale(z, Math.sin(lat)),
+    );
+  const specs = [
+    ...meridianLines.map((line, k) => {
+      const lon = k * stepRad;
+      return {
+        line,
+        point: (lat: number): Vec3 => unitOf(lat, lon),
+        windows: cosineWindows(
+          Math.cos(lon) * (fx ?? 0) + Math.sin(lon) * (fy ?? 0),
+          fz ?? 0,
+          body.radiusM,
+          -Math.PI / 2,
+          Math.PI / 2,
+        ),
+      };
+    }),
+    ...parallelLines.map((line, k) => {
+      const lat = -Math.PI / 2 + (k + 1) * stepRad;
+      return {
+        line,
+        point: (lon: number): Vec3 => unitOf(lat, lon),
+        windows: cosineWindows(
+          Math.cos(lat) * (fx ?? 0),
+          Math.cos(lat) * (fy ?? 0),
+          body.radiusM - Math.sin(lat) * (fz ?? 0),
+          0,
+          2 * Math.PI,
+        ),
+      };
+    }),
+  ];
+  let checked = 0;
+  let undrawn = 0;
+  for (const { line, point, windows } of specs) {
+    const reach = line.major ? inside.reachPx.heavy : inside.reachPx.thin;
+    const threshold = reach + 1 / 32 + epsPx;
+    const drawn = line.runs.map((run) => run.map((p) => project(p, camera, FIELD)));
+    const drawnNear = (q: { xPx: number; yPx: number }): boolean =>
+      drawn.some((run) =>
+        run.some((a, i) => {
+          const b = run[i + 1];
+          return b !== undefined && toSegmentPx(q.xPx, q.yPx, a, b) <= 0.5;
+        }),
+      );
+    for (const [lo, hi] of windows) {
+      for (let i = 1; i < samples; i += 1) {
+        const p = add(body.centreM, scale(point(lo + ((hi - lo) * i) / samples), body.radiusM));
+        const q = project(p, camera, FIELD);
+        const onView =
+          q.inFront &&
+          q.xPx >= 0 &&
+          q.xPx <= FIELD.widthPx &&
+          q.yPx >= 0 &&
+          q.yPx <= FIELD.heightPx;
+        if (!onView) {
+          continue;
+        }
+        const beta = Math.acos(Math.min(1, dot(normalise(p), toCentre)));
+        const lowerPx = focalPx * (alpha - beta);
+        if (lowerPx < threshold && exactInset(p) < threshold) {
+          continue;
+        }
+        checked += 1;
+        undrawn += drawnNear(q) ? 0 : 1;
+      }
+    }
+  }
+  return { checked, undrawn };
+}
+
+/**
+ * The fixed sample of spheres the completeness check draws: `count` poses from a seeded linear
+ * congruential sequence, as the lane's scratch comparison drew its 20,000, over the image at line
+ * scales of 2 and 3 in fields of 20° to 120°.
+ */
+function sampledSphereViews(seed: number, count: number): SphereView[] {
+  let state = seed >>> 0;
+  const next = (): number => {
+    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
+    return state / 2 ** 32;
+  };
+  return Array.from({ length: count }, () => {
+    const radiusM = 1e5 + next() * 7e7;
+    const rangeM = radiusM * (1.0001 + next() * 400);
+    const direction = vec3(next() - 0.5, next() - 0.5, -0.2 - next());
+    const forward = vec3(next() - 0.5, next() - 0.5, next() - 0.5);
+    const fovDeg = 20 + next() * 100;
+    const strokeScale = next() < 0.5 ? 2 : 3;
+    return sphereView(radiusM, rangeM, direction, forward, fovDeg, strokeScale);
+  });
+}
+
+describe("a window with no safe cut keeps its far stretch, on every body (R10.T16.g; R02.T19's finding)", () => {
+  it("runs a parallel whose facing arc straddles λ = 0 across it, each cut end at its reach + 1/32 px inside the outline", () => {
+    const parallels = insideLines(SEAM_CASE).filter((line) => line.kind === "parallel");
+    // The 30° parallel: 12 meridians and 5 parallels at the 30° step, the fourth from the south.
+    const seam = parallels[3];
+    const ends = seam === undefined ? [] : cutEndMargins(SEAM_CASE, seam);
+    // Its two runs meet at λ = 0, where each piece of its facing arc ends.
+    const atSeam = (seam?.runs ?? [])
+      .flatMap((run) => [run[0], run.at(-1)])
+      .filter(
+        (p, _, all) =>
+          p !== undefined &&
+          all.filter((o) => o !== undefined && norm(sub(o, p)) < 1e-3).length > 1,
+      );
+    expect({
+      runs: seam?.runs.length,
+      meetAtTheSeam: atSeam.length,
+      cutEnds: ends.length,
+      atTheReach: ends.every((margin) => margin >= 0 && margin <= 0.05),
+    }).toEqual({ runs: 2, meetAtTheSeam: 2, cutEnds: 2, atTheReach: true });
+  });
+
+  it("keeps the far stretch of a meridian whose middle runs within its reach of the limb, its cut end at the reach", () => {
+    const lines = insideLines(MERIDIAN_CASE).filter((line) => line.kind === "meridian");
+    // The meridian at 150°: 12 meridians at the 30° step.
+    const near = lines[5];
+    const ends = near === undefined ? [] : cutEndMargins(MERIDIAN_CASE, near);
+    expect({
+      points: (near?.runs.flat().length ?? 0) > 2,
+      cutEnds: ends.length > 0,
+      atTheReach: ends.every((margin) => margin >= 0 && margin <= 0.05),
+    }).toEqual({ points: true, cutEnds: true, atTheReach: true });
+  });
+
+  it.each([0, 1, 2, 3])(
+    "draws every point of a meridian or parallel standing its reach + 1/32 + 0.02 px inside the outline, over a fixed sample of spheres (chunk %s of 4)",
+    (chunk) => {
+      const views = [...SHORT_POSES, ...sampledSphereViews(20_261_027, 200)];
+      const mine = views.filter((_, i) => i % 4 === chunk);
+      const counts = mine.map((view) => undrawnPoints(view, 1_024, 0.02));
+      const checked = counts.reduce((sum, count) => sum + count.checked, 0);
+      const undrawn = counts.reduce((sum, count) => sum + count.undrawn, 0);
+      expect([checked > 10_000, undrawn]).toEqual([true, 0]);
     },
   );
 });

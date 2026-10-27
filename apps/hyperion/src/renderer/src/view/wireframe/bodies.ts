@@ -628,21 +628,18 @@ const CUT_BISECTIONS = 24;
  * next safe window's: in even steps to the first point too near the outline, then by bisection
  * between it and the last point far enough inside, so that a run ends at its reach inside the
  * outline. Windows that meet are joined. A facing window with no safe one keeps the stretch about
- * its middle that stands far enough inside, or none; on a spheroid (`searchWhole`; R02.T19), whose
- * safe cut stands farther in, the stretch about the farthest inside of its middle, its ends and its
- * even steps, so that a window cut by a parallel's λ = 0, or a meridian's whose middle runs near
- * the limb, keeps the far stretch it has.
+ * the farthest inside of its middle, its ends and its even steps, or none, so that a window cut by a
+ * parallel's λ = 0, or a meridian's whose middle runs near the limb, keeps the far stretch it has
+ * (R02.T19's finding, ruled a fix of R10.T16.g's: `decision-r02-t19-leans.md` item 7; the middle
+ * alone dropped it).
  *
  * @param insetAt - How far inside the outline the line's point at a parameter is seen, px.
- * @param searchWhole - Whether a facing window with no safe one is searched beyond its middle: on a
- *   spheroid; a sphere's lines are kept as R10.T16.g built them.
  */
 function windowsInside(
   facing: ReadonlyArray<ParameterWindow>,
   safe: ReadonlyArray<ParameterWindow>,
   insetAt: (u: number) => number,
   insetPx: number,
-  searchWhole: boolean,
 ): ParameterWindow[] {
   const far = (u: number): boolean => insetAt(u) >= insetPx;
   // How far from `inner`, far enough inside, towards `outer` the line stays far enough inside.
@@ -667,14 +664,11 @@ function windowsInside(
     return outer;
   };
   // Where in a facing window with no safe one the line stands far enough inside: its middle, as
-  // R10.T16.g took it, or on a spheroid else the farthest inside of its ends and even steps.
+  // R10.T16.g took it, or else the farthest inside of its ends and even steps.
   const farFrom = (lo: number, hi: number): number | null => {
     const middle = (lo + hi) / 2;
     if (far(middle)) {
       return middle;
-    }
-    if (!searchWhole) {
-      return null;
     }
     let best: number | null = null;
     let bestPx = insetPx;
@@ -748,7 +742,7 @@ function windowsInside(
  * least apparent radius ({@link outlineLeastDiameterPx}). Its parallels stand at planetocentric
  * (geocentric) latitudes φ, as R10's `graticulePatch` takes them, at the reduced latitude
  * atan((a ÷ c) tan φ) on the stretched sphere; its meridians are a sphere's. Its regime and step stay
- * the equatorial sphere's, as the image sizes it. A sphere's lines are built as before.
+ * the equatorial sphere's, as the image sizes it. A sphere takes the sphere's own sums, as before.
  *
  * @param strokeScale - The device px drawn for each CSS px of a line (`ViewStrokes.strokeScale`).
  * @param lowSetting - The wireframe's low setting, which draws graticules at 30° only.
@@ -845,7 +839,6 @@ export function graticule(
       cosineWindows(alpha, beta, thresholdM - offsetM, uMin, uMax),
       (u) => outlineInsetPx(conic, pointAt(u), camera, viewport),
       (major ? inside.reachPx.heavy : inside.reachPx.thin) + DATUM_INSIDE_MARGIN_PX,
-      spheroid !== null,
     );
   };
   const stepDeg = graticuleStepDeg(diameterPx, strokeScale, lowSetting);
