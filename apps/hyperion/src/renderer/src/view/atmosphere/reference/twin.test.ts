@@ -9,19 +9,32 @@ import {
 } from "../../../test/atmosphereSweep";
 import { DEFAULT_FOV_DEG } from "../../camera/projection";
 import { lookAlong } from "../../camera/quaternion";
+import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
 import { type AtmosphereCamera, type SunState, TABLE_SIZES } from "../hillaire";
+import type { AtmosphereMedium } from "../medium";
+import { bodyGravity } from "../oblate";
 import { kernelMedium } from "../tables";
 import {
   aerialPerspectiveTwin,
+  mediumMarchEdgesM,
+  MULTI_SCATTERING_KERNEL_OPTIONS,
+  multiScatteringTwin,
   planetTwin,
   rayMarchTargetTexelTwin,
   skyViewReadTwin,
   skyViewTexelsTwin,
+  slicedSunTransmittance,
   tableSources,
+  transmittanceTablesTwin,
   twinView,
   type TwinRgb,
 } from "../tablesCpu";
-import { EARTH_REFERENCE_RADIUS_M } from "./cases";
+import {
+  EARTH_REFERENCE_RADIUS_M,
+  SATURN_OBLATE_GRAVITY,
+  SATURN_OBLATE_GROUND_ALBEDO,
+  SATURN_OBLATE_REFERENCE,
+} from "./cases";
 import {
   geodeticPoint,
   localDirectionVector,
@@ -30,9 +43,12 @@ import {
 } from "./geometries";
 import {
   AERIAL_FROXEL_SCALE,
+  groundConeShare,
   groundDistanceM,
   referenceTwin,
+  spheroidGroundDistanceM,
   TWIN_VIEWPORT,
+  type TwinFigure,
   twinGeometryKind,
   type ReferenceTwin,
 } from "./twin";
@@ -389,5 +405,239 @@ describe("the reference twin's geometry", () => {
       observer: { heightM: 40_000, latitudeDeg: 0 },
     };
     expect(() => twinGeometryKind(geometry, sweepMedium(POINT))).toThrow(RangeError);
+  });
+});
+
+/** A copy of a medium with every tabulated term's layer edges dropped: R05's one piece a ray. */
+function withoutEdges(medium: AtmosphereMedium): AtmosphereMedium {
+  return {
+    ...medium,
+    terms: medium.terms.map((term) =>
+      term.density.kind === "tabulated"
+        ? { ...term, density: { ...term.density, edgesM: [] } }
+        : term,
+    ),
+  };
+}
+
+/** Earth's sphere as a level spheroid with no spin: a = c = R, s ≡ 1 everywhere. */
+const STILL_GRAVITY = bodyGravity(
+  {
+    figure: SPHERE,
+    massKg: 5.972e24,
+    angularVelocityRadS: 0,
+    bulkGravityMS2: 9.806_65,
+    figureLaw: null,
+  },
+  RADIUS_M,
+);
+
+/** Saturn's level spheroid, as `saturn-oblate` stands on it. */
+const SATURN_FIGURE = { kind: "spheroid", gravity: SATURN_OBLATE_GRAVITY } as const;
+
+describe("the reference twin's ground on a spheroid (R08.T13.c1)", () => {
+  it("meets a spheroid of equal radii where it meets the sphere", () => {
+    const origin = { x: RADIUS_M + 1_000_000, y: 0, z: 0 };
+    const direction = normalise({ x: -1, y: 0.1, z: 0.05 });
+    const sphere = groundDistanceM(origin, direction, RADIUS_M) ?? Number.NaN;
+    expect(spheroidGroundDistanceM(origin, direction, SPHERE)).toBeCloseTo(sphere, 6);
+  });
+
+  it("meets an oblate spheroid's pole at c straight down", () => {
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const above = { x: 0, y: 0, z: datum.polarRadiusM + 5_000 };
+    expect(spheroidGroundDistanceM(above, { x: 0, y: 0, z: -1 }, datum)).toBeCloseTo(5_000, 6);
+  });
+
+  it("does not meet an oblate spheroid looking up from above it", () => {
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const above = { x: 0, y: 0, z: datum.polarRadiusM + 5_000 };
+    expect(spheroidGroundDistanceM(above, { x: 0, y: 0, z: 1 }, datum)).toBeNull();
+  });
+});
+
+describe("the reference twin's spheroid (R08.T13.c1)", { timeout: TWIN_TIMEOUT_MS }, () => {
+  // Earth's sphere as a still level spheroid, and the sweep point's twin on it, built once.
+  const stillFigure = (): TwinFigure => {
+    const spheroid = STILL_GRAVITY.spheroid;
+    if (spheroid === null) {
+      throw new Error("a body with a rotation section has its level spheroid");
+    }
+    return { kind: "spheroid", gravity: { ...STILL_GRAVITY, spheroid } };
+  };
+  let stillBuilt: ReferenceTwin | undefined;
+  const stillTwin = (): ReferenceTwin => {
+    stillBuilt ??= referenceTwin(sweepMedium(POINT), stillFigure());
+    return stillBuilt;
+  };
+  const stillNames = ["ground-s30-v60-a90", "disc-p30", "limb-1H", "aerial-10km"];
+
+  it("reads a spheroid of a sphere's radii through the oblate twins as the sphere", () => {
+    for (const name of stillNames) {
+      const geometry = geometryNamed(name);
+      const sphere = twinOf(POINT).radiance(geometry);
+      const oblate = stillTwin().radiance(geometry);
+      for (const c of [0, 1, 2] as const) {
+        expect(Math.abs(oblate[c] / sphere[c] - 1)).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it("gives a spheroid of a sphere's radii the sphere's transmittance along a view", () => {
+    for (const name of stillNames) {
+      const geometry = geometryNamed(name);
+      for (const direction of [sunOf(geometry), axisOf(geometry)]) {
+        const sphere = twinOf(POINT).transmittanceAlong(geometry, direction);
+        const oblate = stillTwin().transmittanceAlong(geometry, direction);
+        for (const c of [0, 1, 2] as const) {
+          expect(Math.abs(oblate[c] - sphere[c])).toBeLessThan(1e-6);
+        }
+      }
+    }
+  });
+
+  it("gives a spheroid of a sphere's radii the sphere's share of a cone meeting the ground", () => {
+    for (const name of stillNames) {
+      const geometry = geometryNamed(name);
+      expect(groundConeShare(geometry, stillFigure())).toBeCloseTo(
+        groundConeShare(geometry, FIGURE),
+        12,
+      );
+    }
+  });
+
+  // One twin of Saturn's figure of one slice and one band, built once for the tests that read it.
+  let oneSliceBuilt: ReferenceTwin | undefined;
+  const oneSliceTwin = (): ReferenceTwin => {
+    oneSliceBuilt ??= referenceTwin(SATURN_OBLATE_REFERENCE, SATURN_FIGURE, { slicing: "single" });
+    return oneSliceBuilt;
+  };
+
+  it("builds one slice and one band on Saturn's spheroid where asked", () => {
+    const { oblate } = oneSliceTwin();
+    expect([[...oblate.kappa], oblate.bands.map((band) => band.gravityRatio)]).toEqual([[1], [1]]);
+  });
+
+  it("reads Saturn's sun through its one slice by the unsliced lookup", () => {
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const ground = geodeticPoint(datum, 45, 1);
+    const sun = localDirectionVector(45, { zenithDeg: 60, azimuthDeg: 30 });
+    expect(slicedSunTransmittance(oneSliceTwin().oblate, ground, sun).ray.fit).toBe("single");
+  });
+
+  it("lights a spheroid's ground by its geodetic normal and latitude", () => {
+    const twin = oneSliceTwin();
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const latitudeRad = (60 * Math.PI) / 180;
+    const ground = geodeticPoint(datum, 60, 0);
+    const overhead = localDirectionVector(60, { zenithDeg: 0, azimuthDeg: 0 });
+    const transmitted = twin.surfaceLighting.sunTransmittance(0, 1, latitudeRad, 0, 0);
+    const sky = twin.surfaceLighting.skyIrradiance(0, 1, latitudeRad, 0);
+    const lit = twin.litGroundRadiance(ground, overhead);
+    const expected = (SATURN_OBLATE_GROUND_ALBEDO * (transmitted[1] + sky[1])) / Math.PI;
+    expect(lit[1]).toBeCloseTo(expected, 12);
+  });
+
+  it("refuses the steps' options on a medium with layer edges over several slices", () => {
+    expect(() =>
+      referenceTwin(EARTH_SLAB_REFERENCE, SATURN_FIGURE, { transmittanceSteps: "equal" }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe("the reference twin's steps (R08.T13.c1)", { timeout: TWIN_TIMEOUT_MS }, () => {
+  const curves = EARTH_SLAB_REFERENCE_CURVES;
+
+  // The slab Earth's tables as the kernels build them, and its twins under each steps' option,
+  // each built once for the tests that read it.
+  let splitBuilt: ReturnType<typeof transmittanceTablesTwin> | undefined;
+  const splitTables = (): ReturnType<typeof transmittanceTablesTwin> => {
+    splitBuilt ??= transmittanceTablesTwin(kernelMedium(EARTH_SLAB_REFERENCE), RADIUS_M, curves);
+    return splitBuilt;
+  };
+  let equalBuilt: ReferenceTwin | undefined;
+  const equalTwin = (): ReferenceTwin => {
+    equalBuilt ??= referenceTwin(EARTH_SLAB_REFERENCE, FIGURE, {
+      curves,
+      transmittanceSteps: "equal",
+    });
+    return equalBuilt;
+  };
+  let placedBuilt: ReferenceTwin | undefined;
+  const placedTwin = (): ReferenceTwin => {
+    placedBuilt ??= referenceTwin(EARTH_SLAB_REFERENCE, FIGURE, { curves, marchSteps: "placed" });
+    return placedBuilt;
+  };
+
+  it("reads a medium with no layer edge the same under every steps' option, to the bit", () => {
+    const options = { transmittanceSteps: "equal", marchSteps: "placed" } as const;
+    const other = referenceTwin(sweepMedium(POINT), FIGURE, options);
+    for (const name of ["ground-s30-v60-a90", "disc-p30", "limb-1H", "aerial-10km"]) {
+      const geometry = geometryNamed(name);
+      expect(other.radiance(geometry)).toEqual(twinOf(POINT).radiance(geometry));
+    }
+  });
+
+  it("builds the transmittance in R05's equal steps where asked", () => {
+    const edgeless = withoutEdges(kernelMedium(EARTH_SLAB_REFERENCE));
+    const equal = transmittanceTablesTwin(edgeless, RADIUS_M, curves);
+    expect(equalTwin().planet.transmittance.texels).toEqual(equal.transmittance.texels);
+  });
+
+  it("builds the slab's transmittance in equal steps unlike its split one", () => {
+    expect(equalTwin().planet.transmittance.texels).not.toEqual(splitTables().transmittance.texels);
+  });
+
+  it("keeps the marches cut at the layer edges under equal transmittance steps", () => {
+    expect(mediumMarchEdgesM(equalTwin().planet.medium).length).toBeGreaterThan(0);
+  });
+
+  it("builds the multiple scattering by R05.T12.e's placement where asked", () => {
+    const placed = multiScatteringTwin(
+      withoutEdges(kernelMedium(EARTH_SLAB_REFERENCE)),
+      RADIUS_M,
+      splitTables(),
+      { ...MULTI_SCATTERING_KERNEL_OPTIONS, placement: "placed" },
+    );
+    expect(placedTwin().planet.multiScattering.texels).toEqual(placed.texels);
+  });
+
+  it("drops the per-frame marches' layer edges under R05.T12.e's placement", () => {
+    expect(mediumMarchEdgesM(placedTwin().planet.medium)).toEqual([]);
+  });
+
+  it("keeps the transmittance split under R05.T12.e's placement", () => {
+    expect(placedTwin().planet.transmittance.texels).toEqual(splitTables().transmittance.texels);
+  });
+});
+
+describe(
+  "the reference twin's transmittance along a view (R08.T13.c1)",
+  { timeout: TWIN_TIMEOUT_MS },
+  () => {
+    it("gives the vertical column's from the ground towards the zenith", () => {
+      const twin = twinOf(POINT);
+      const geometry = geometryNamed("ground-s0-v30-a0");
+      const up = normalise(observerOf(geometry));
+      expect(twin.transmittanceAlong(geometry, up)[1]).toBeCloseTo(Math.exp(-POINT.tau), 3);
+    });
+
+    it("gives 1 from orbit along a ray that misses the air", () => {
+      const twin = twinOf(POINT);
+      const geometry = geometryNamed("disc-p30");
+      const up = normalise(observerOf(geometry));
+      expect(twin.transmittanceAlong(geometry, up)).toEqual([1, 1, 1]);
+    });
+  },
+);
+
+describe("the reference twin's ground observers (R08.T13.c1)", { timeout: TWIN_TIMEOUT_MS }, () => {
+  it("refuses a ground view whose cone meets the ground", () => {
+    const twin = twinOf(POINT);
+    const geometry = {
+      ...geometryNamed("ground-s30-v85-a90"),
+      view: { zenithDeg: 95, azimuthDeg: 90 },
+    };
+    expect(() => twin.radiance(geometry)).toThrow(RangeError);
   });
 });

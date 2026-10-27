@@ -80,3 +80,6 @@ apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w*.case.json
 apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w*.json
 crates/hyperion-fit/src/atmosphere/sweep_smoke.case.json
 crates/hyperion-fit/src/atmosphere/metric_verdicts.json
+# R08.T13's case gate on the four committed references, written by `reference/caseGate.test.ts`
+# through `bless.ts`, a geometry a line (plan R08, R08.T13.c1)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/caseGate.json
