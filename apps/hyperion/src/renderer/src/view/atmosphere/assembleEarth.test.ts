@@ -75,7 +75,7 @@ describe("the generated Earth (the wire fixture's) with its line tables", () => 
   });
 
   it("is so for its water's continuum below 567 nm alone", () => {
-    // Its lines, which CO2 broadens with no width on file, clear the trace broadeners' effect bound
+    // Its lines, which CO2 broadens with no width on file, clear the widthless gases' effect bound
     // since R08.T10.c, and give no reason.
     expect(earth.reasons).toEqual([
       "H2O–H2O pairs: their absorption estimated, not measured",
@@ -115,7 +115,7 @@ describe("the generated Earth (the wire fixture's) with its line tables", () => 
   });
 });
 
-describe("the generated Earth with its CO2 raised past the trace broadeners' bound (R08.T10.c)", () => {
+describe("the generated Earth with its CO2 raised past the widthless gases' bound (R08.T10.c)", () => {
   /**
    * CO2's raised mole fraction, 1%: past the 6.0–6.1 times 330 ppm at which H2O's bound crosses
    * 10⁻³ (`negligible.test.ts`).

@@ -20,12 +20,12 @@ import { PRIMARY_NAME } from "./viewNames";
 import { LabelStatementLine } from "./LabelStatementLine";
 import {
   CONTOUR_INTERVAL_LABEL,
+  instrumentPhotorealStatements,
   type LabelLine,
   type LabelStatement,
   labelLines,
   labelStatements,
   photorealStatements,
-  PHOTOREAL_PREPARING,
   POSITIONS_FROM_SHIP,
   PRESET_NAMES,
   statementText,
@@ -143,7 +143,9 @@ function instrumentLines(
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
  * two composed, R07.T16.e) unless the primary's block shows the same line
- * (decision-r07-t19-layout, item 5). `ROTATION: NOT YET MODELLED` and `ROTATION: NOT RESOLVED`,
+ * (decision-r07-t19-layout, item 5), save `ATMOSPHERE: APPROXIMATE` straight above a reason line of
+ * its own, which never stands without its note (`viewRun.ts`' `instrumentPhotorealStatements`;
+ * plan R08, R08.T10.d). `ROTATION: NOT YET MODELLED` and `ROTATION: NOT RESOLVED`,
  * about the scene's bodies, are the primary's alone. While its wireframe draws a body's contours,
  * its block states its own `CONTOUR INTERVAL` after its `FOV` (plan R10, R10.T12.b), the interval
  * the primary's states where the two stand at one pose. Its list and its camera and style controls
@@ -176,7 +178,6 @@ export function InstrumentView({
   const { shown, name, panelRef } = instrument;
   const drawn = shown?.drawnStyle ?? "wireframe";
   const run = shown?.run ?? null;
-  const primaryTexts = new Set(primaryPhotorealStatements.map(statementText));
   const statements: ReadonlyArray<LabelStatement> =
     run === null
       ? []
@@ -185,18 +186,16 @@ export function InstrumentView({
           ...labelStatements(run, terrainStatementOf(shown?.terrain ?? null, faults)).filter(
             (statement) => statement === POSITIONS_FROM_SHIP || statement === shown?.terrain,
           ),
-          // Its own preparing, and the photorealistic style's statements about its picture that
-          // the primary's block does not show already.
-          // Its own atmospheres' notes among them (R08.T10.b), where the primary's differ.
-          ...photorealStatements(
-            { ...run, camera: { ...run.camera, style: budgetStyle } },
-            lighting,
-            drawn,
-            litLabels,
-            shown?.atmosphere,
-          ).filter(
-            (statement) =>
-              statement === PHOTOREAL_PREPARING || !primaryTexts.has(statementText(statement)),
+          // Drawn at its own budget's style, not the primary's.
+          ...instrumentPhotorealStatements(
+            photorealStatements(
+              { ...run, camera: { ...run.camera, style: budgetStyle } },
+              lighting,
+              drawn,
+              litLabels,
+              shown?.atmosphere,
+            ),
+            primaryPhotorealStatements,
           ),
         ];
   const describedBy = [

@@ -3978,6 +3978,15 @@ body {
   letter-spacing: 0.15em;
 }
 
+/*
+ * A statement that is a description, not a state, such as ATMOSPHERE: APPROXIMATE's reasons: set
+ * whole as a sentence, its head included, with no letter spacing (the guide's Typography; plan R08,
+ * R08.T10.d).
+ */
+.view-label__statement--sentence {
+  letter-spacing: 0;
+}
+
 /* The stars' count line: numbers, in B612 Mono with tabular figures. */
 .view-label__count {
   margin: 0.25rem 0 0;

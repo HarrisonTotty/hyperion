@@ -1280,6 +1280,13 @@ function fallbackOptics(
  * A non-spherical mode's optics at one wavelength from its particles, by the module's rules: the
  * table's model, the floor rule, the ices' analogue, or the fallback.
  *
+ * @remarks
+ * An analogue's or a fallback's `phaseNote` is player text, a reason on the label block's plate
+ * (R08.T10.c), so it cites no paper or data set (R08.T10.d; `decision-r08-approximate-plate.md`
+ * §6): an ice's expected g is van Diedenhoven et al. 2014's ({@link ICE_ANALOGUE_ASYMMETRY_BIAS}),
+ * and "no reduced dust-kernel table on file" says that the particles have no table reduced from
+ * TAMUdust2020's hexahedra (Saito et al. 2021).
+ *
  * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
  * @throws RangeError as {@link tableModeOptics} and `sphereModeOptics` do.
@@ -1326,7 +1333,7 @@ export function opticsOfParticles(
       phaseNote: `${iceName(particles.material)} drawn on H2O ice's roughened 8-column table, a named analogue${
         bias === undefined
           ? ""
-          : `; its g expected ${bias > 0 ? "+" : ""}${bias.toFixed(3)} from H2O ice's (van Diedenhoven et al. 2014)`
+          : `; its g expected ${bias > 0 ? "+" : ""}${bias.toFixed(3)} from H2O ice's`
       }${tailNote === undefined ? "" : `; ${tailNote}`}`,
       sizeConvergence: mie.sizeConvergence,
     };
@@ -1344,7 +1351,7 @@ export function opticsOfParticles(
       mu,
       outside
         ? `n ${index.n.toFixed(3)} above ${KERNEL_TRANSPARENT_N_MAX} with k under 1E-3, below the longwave kernel's k floor, with no floor table on file`
-        : "no reduced TAMUdust2020 table on file",
+        : "no reduced dust-kernel table on file",
     );
   }
   // The kernel-edge rule, from the particles' own index at the wavelength; the floor rule after it,

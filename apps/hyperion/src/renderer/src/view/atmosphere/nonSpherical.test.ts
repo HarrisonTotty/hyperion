@@ -516,7 +516,7 @@ describe("the fallback", () => {
       550,
     );
     expect(optics.phaseNote).toBe(
-      "unlisted material: no reduced TAMUdust2020 table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback",
+      "unlisted material: no reduced dust-kernel table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback",
     );
   });
 });
@@ -588,7 +588,7 @@ describe("the other ices, on water ice's table as named analogues", () => {
     expect(optics.phaseBasis).toBe("analogue");
     expect(optics.phaseModel).toBe("yang2013");
     expect(optics.phaseNote).toBe(
-      "NH3 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected -0.056 from H2O ice's (van Diedenhoven et al. 2014)",
+      "NH3 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected -0.056 from H2O ice's",
     );
     // Since R08.T5.i NH₃ ice's k is 0 (decision-p14-t49c-split §5.3), so its own index gives ω = 1
     // to rounding, where water ice's absorbs.
@@ -889,14 +889,14 @@ describe("the ices' expected g bias, by van Diedenhoven et al. 2014's eq. (16)",
   it("names O2 ice's analogue and its expected g, signed, in its note", () => {
     const optics = iceOptics("O2");
     expect(optics.phaseNote).toBe(
-      "O2 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.024 from H2O ice's (van Diedenhoven et al. 2014)",
+      "O2 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.024 from H2O ice's",
     );
   });
 
   it("names argon, an atomic solid, as solid Ar in its note", () => {
     const optics = iceOptics("Ar");
     expect(optics.phaseNote).toBe(
-      "solid Ar drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.028 from H2O ice's (van Diedenhoven et al. 2014)",
+      "solid Ar drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.028 from H2O ice's",
     );
   });
 });
@@ -1021,5 +1021,33 @@ describe("the kernel-edge rule (decision-r08-t5d ruling 2)", () => {
         expect(node.nTable).toBe(node.n > KERNEL_EDGE_N[1] ? KERNEL_EDGE_N[1] : KERNEL_EDGE_N[0]);
       }
     }
+  });
+});
+
+describe("the reasons as player text (R08.T10.d)", () => {
+  /**
+   * A citation in player text: an author, a year, a data set's name, or an author's equation or
+   * condition number, which no reason on the plate holds.
+   */
+  const CITATION = /et al\.|Diedenhoven|TAMUdust|\b(?:19|20)\d\d\b|(?:equation|condition|eq\.) \(/u;
+
+  it("cites no paper or data set in an ice's analogue, a fallback with no table, or a kernel's edge", () => {
+    const noTable: NonSphericalParticles = {
+      ...particlesOfKey("MnS"),
+      material: "an absorbing mineral",
+      index: () => ({ n: 1.5, k: 0.01 }),
+      table: undefined,
+    };
+    const notes = [
+      iceOptics("O2").phaseNote,
+      iceOptics("Ar").phaseNote,
+      opticsOfParticles(noTable, gamma(3), 550).phaseNote,
+      opticsOfParticles(particlesOfKey("MnS"), gamma(0.3), 380).phaseNote,
+      opticsOfParticles(particlesOfKey("MnS", { n: 4.5, k: 0.01 }), gamma(0.3), 450).phaseNote,
+    ];
+    expect([
+      notes.every((note) => note !== undefined),
+      notes.filter((note) => CITATION.test(note ?? "")),
+    ]).toEqual([true, []]);
   });
 });
