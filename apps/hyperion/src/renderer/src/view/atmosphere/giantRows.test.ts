@@ -202,8 +202,10 @@ async function rowOf(giant: Giant, air: Air, steps: Steps): Promise<readonly num
 async function rowsOn(air: Air): Promise<Record<string, Record<string, readonly number[]>>> {
   const entries = await Promise.all(
     GIANTS.map(async (giant) => {
-      const rows = await Promise.all(STEPS.map(async (steps) => rowOf(giant, air, steps)));
-      return [giant.name, Object.fromEntries(STEPS.map((steps, i) => [steps.name, rows[i]]))];
+      const byStep = await Promise.all(
+        STEPS.map(async (steps) => [steps.name, await rowOf(giant, air, steps)] as const),
+      );
+      return [giant.name, Object.fromEntries(byStep)] as const;
     }),
   );
   return Object.fromEntries(entries);

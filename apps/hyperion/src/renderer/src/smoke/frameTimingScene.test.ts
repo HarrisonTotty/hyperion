@@ -26,8 +26,6 @@ import { FAR_LIMB_TIMING_PLACES, settingOutput, SLICES_EARTH } from "./atmospher
 import {
   angleBetweenRad,
   earthInput,
-  expectedMarch,
-  expectedSources,
   farLimbFrameScene,
   type FrameScene,
   GIANT_DISTANCE_M,
@@ -37,6 +35,7 @@ import {
   planetshineShare,
   type SourceSet,
   smallEarthScene,
+  sourcesAsSet,
   sourceSetsOf,
 } from "./frameTimingScene";
 
@@ -109,9 +108,11 @@ function cases(): Case[] {
 const CASES = cases();
 
 describe("the photorealistic frame's timed sets", () => {
+  it("takes the sky's two stars at each setting's whole count", () => {
+    expect([SKY_SUN_CAP.high, SKY_SUN_CAP.low]).toEqual([2, 2]);
+  });
+
   it("names the setting's whole count by its sources: x4 on high, x3 on low", () => {
-    expect(SKY_SUN_CAP.high).toBe(2);
-    expect(SKY_SUN_CAP.low).toBe(2);
     expect(sourceSetsOf("high").map((set) => set.name)).toEqual(["x1", "x2", "x2p", "x4"]);
     expect(sourceSetsOf("low").map((set) => set.name)).toEqual(["x1", "x2", "x2p", "x3"]);
   });
@@ -121,23 +122,23 @@ describe("the photorealistic frame's timed sets", () => {
     expect(CASES.filter(({ scene }) => scene.giants.length > 0)).toHaveLength(2 * 3 * 5 * 2);
   });
 
-  it("keeps exactly each set's sources, kind and light slot, at every camera on every medium", () => {
-    const wrong = CASES.filter(({ set, listed }) => {
-      const kept = listed.kept.map(({ kind, curveSlot }) => ({ kind, curveSlot }));
-      return (
-        JSON.stringify(kept) !== JSON.stringify(expectedSources(set)) || listed.left.length > 0
-      );
-    }).map(({ label }) => label);
+  it("keeps exactly each set's sources, kind and slot, and marches the set's two, everywhere", () => {
+    const wrong = CASES.filter(
+      ({ setting, set, listed }) => !sourcesAsSet(listed, set, TABLE_SIZES[setting].marchSourceCap),
+    ).map(({ label }) => label);
     expect(wrong).toEqual([]);
   });
 
-  it("marches the set's two: x2 the two stars, x2p the Sun and the giant, the whole count the stars", () => {
-    const wrong = CASES.filter(({ setting, set, listed }) => {
-      const march = listed.march.map(({ kind, curveSlot }) => ({ kind, curveSlot }));
-      const meant = expectedMarch(set, TABLE_SIZES[setting].marchSourceCap);
-      return JSON.stringify(march) !== JSON.stringify(meant);
-    }).map(({ label }) => label);
-    expect(wrong).toEqual([]);
+  it("tells a march of one source from the set's two", () => {
+    const passed = CASES.filter(
+      ({ set, listed }) => set.stars + set.giants > 1 && sourcesAsSet(listed, set, 1),
+    ).map(({ label }) => label);
+    expect(passed).toEqual([]);
+  });
+
+  it("leaves none of the plan's sources out of the sky", () => {
+    const left = CASES.filter(({ listed }) => listed.left.length > 0).map(({ label }) => label);
+    expect(left).toEqual([]);
   });
 
   it("keeps every giant out of the view", () => {
@@ -204,22 +205,39 @@ describe("the photorealistic frame's timed sets", () => {
 });
 
 describe("the small air bodies' frames", () => {
-  it("draws the Earth whole at its diameter in pixels, centred, the Sun 40° off the sight line", () => {
-    const viewport = settingOutput("high");
-    for (const diameterPx of [4, 10, 32]) {
-      const scene = smallEarthScene(diameterPx, viewport, SLICES_EARTH.figure);
+  const viewport = settingOutput("high");
+  const DIAMETERS_PX = [4, 10, 32] as const;
+  const scenes = DIAMETERS_PX.map((diameterPx) => ({
+    diameterPx,
+    scene: smallEarthScene(diameterPx, viewport, SLICES_EARTH.figure),
+  }));
+
+  it("draws the Earth whole at its diameter in pixels", () => {
+    const drawn = scenes.map(({ scene }) => {
       const pxPerRad = viewport.widthPx / (2 * Math.tan(scene.camera.fovXRad / 2));
       const distanceM = -scene.earthCentreM.z;
-      const drawnPx = 2 * Math.asin(SLICES_EARTH.figure.equatorialRadiusM / distanceM) * pxPerRad;
-      expect(drawnPx).toBeCloseTo(diameterPx, 6);
-      expect(scene.air.positionM).toEqual({ x: 0, y: 0, z: distanceM });
-      const sun = scene.lights[0];
-      expect(sun).toBeDefined();
-      const offRad = angleBetweenRad(
-        sub(sun?.centreM ?? scene.earthCentreM, scene.earthCentreM),
-        scene.air.positionM,
-      );
-      expect((offRad * 180) / Math.PI).toBeCloseTo(40, 6);
+      const px = 2 * Math.asin(SLICES_EARTH.figure.equatorialRadiusM / distanceM) * pxPerRad;
+      return Number(px.toFixed(6));
+    });
+    expect(drawn).toEqual([...DIAMETERS_PX]);
+  });
+
+  it("centres the Earth on the view's axis, the air's camera on the far side of its centre", () => {
+    for (const { scene } of scenes) {
+      expect(scene.earthCentreM).toEqual({ x: 0, y: 0, z: scene.earthCentreM.z });
+      expect(scene.air.positionM).toEqual({ x: 0, y: 0, z: -scene.earthCentreM.z });
     }
+  });
+
+  it("lights the Earth by the Sun 40° off the line of sight", () => {
+    const offDeg = scenes.map(({ scene }) => {
+      const sun = scene.lights[0];
+      const offRad =
+        sun === undefined
+          ? Number.NaN
+          : angleBetweenRad(sub(sun.centreM, scene.earthCentreM), scene.air.positionM);
+      return Number(((offRad * 180) / Math.PI).toFixed(6));
+    });
+    expect(offDeg).toEqual([40, 40, 40]);
   });
 });

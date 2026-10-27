@@ -44,6 +44,7 @@ import {
 } from "../view/atmosphere/hillaire";
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import {
+  type SkySkip,
   type SkySource,
   type SkySourceKind,
   skySourcesWithSkips,
@@ -66,10 +67,15 @@ import {
   SLICES_EARTH,
 } from "./atmosphere";
 
+/**
+ * A timed set's name: `x1` the Sun, `x2` a binary's two stars, `x2p` the Sun and a giant's
+ * planetshine, and the setting's whole count, two stars and its giants (`x3` on low, `x4` on high).
+ */
+export type SourceSetName = "x1" | "x2" | "x2p" | "x3" | "x4";
+
 /** One timed set of sources: its name, its stars and its giants. */
 export interface SourceSet {
-  /** `x1`, `x2`, `x2p`, or `x<n>` for the setting's whole count. */
-  readonly name: string;
+  readonly name: SourceSetName;
   /** The stars: the Sun alone, or the Sun and a binary's second star. */
   readonly stars: 1 | 2;
   /** The giants whose planetshine lights the Earth: none, up to the setting's count. */
@@ -77,8 +83,27 @@ export interface SourceSet {
 }
 
 /**
+ * The whole count's name for a binary's two stars and `giants` planetshine sources.
+ *
+ * @throws RangeError for a count the sets have no name for (a setting of more than two sources of
+ *   planetshine, or none).
+ */
+function wholeCountName(giants: number): SourceSetName {
+  switch (giants) {
+    case 1:
+      return "x3";
+    case 2:
+      return "x4";
+    default:
+      throw new RangeError(`the timed sets name two stars and 1 or 2 giants, not ${giants}`);
+  }
+}
+
+/**
  * A setting's timed sets: `x1`, `x2`, `x2p`, and the setting's whole count, two stars and
  * `SETTINGS[s].photoreal.planetshineSources` giants (`x4` on high, `x3` on low).
+ *
+ * @throws RangeError as {@link wholeCountName}.
  */
 export function sourceSetsOf(setting: QualitySetting): readonly SourceSet[] {
   const giants = SETTINGS[setting].photoreal.planetshineSources;
@@ -86,7 +111,7 @@ export function sourceSetsOf(setting: QualitySetting): readonly SourceSet[] {
     { name: "x1", stars: 1, giants: 0 },
     { name: "x2", stars: 2, giants: 0 },
     { name: "x2p", stars: 1, giants: 1 },
-    { name: `x${String(2 + giants)}`, stars: 2, giants },
+    { name: wholeCountName(giants), stars: 2, giants },
   ];
 }
 
@@ -348,12 +373,15 @@ export function expectedMarch(set: SourceSet, cap: number): ExpectedSource[] {
   return expectedSources(set).slice(0, cap);
 }
 
+/** Why a source is left out of the sky: Design note 7's skips, or a light slot the tables lack. */
+export type SourceLeftOut = NonNullable<SkySkip> | "no light slot";
+
 /** A body's sky sources as the frame draws them: kept, left out and why, and the march's. */
 export interface ListedSources {
   /** Past Design note 7's skips and the tables' light slots, in `skySources`' order. */
   readonly kept: ReadonlyArray<SkySource>;
   /** Each source left out, with its skip, or `no light slot` for a star past the tables' slots. */
-  readonly left: ReadonlyArray<{ readonly source: SkySource; readonly why: string }>;
+  readonly left: ReadonlyArray<{ readonly source: SkySource; readonly why: SourceLeftOut }>;
   /** The kept sources the ray march takes (`marchSourcesOf` at the cap), in their order. */
   readonly march: ReadonlyArray<SkySource>;
 }
@@ -381,7 +409,7 @@ export function listSources(
     IDENTITY_QUATERNION,
   );
   const kept: SkySource[] = [];
-  const left: Array<{ readonly source: SkySource; readonly why: string }> = [];
+  const left: Array<{ readonly source: SkySource; readonly why: SourceLeftOut }> = [];
   for (const { source, skip } of listed) {
     if (skip !== null) {
       left.push({ source, why: skip });

@@ -30,13 +30,14 @@
  * - (F) the main thread's first frame of a new body's air against the steady frame's, and the
  *   renderer's `prepare`.
  *
- * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10): each combination's
- * {@link WARM_UP_FRAMES} frames, then {@link TIMED_FRAMES} timed, back to back; two sweeps over
- * every combination, the second in the reverse order. There is no idle gap: a frame waits only
- * for the resolves of the frame {@link FRAMES_AHEAD} before it, so that two frames stay queued and
- * the timer, which holds `TIMING_FRAMES_IN_FLIGHT` (135) resolves in flight, drops none. A frame
- * with any resolve missing is left out and counted. Timings are figures, never held: a check fails
- * only when frames are missing or not finite, or a frame's sources are not its set's.
+ * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
+ * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
+ * timed, back to back; two sweeps over every combination, the second in the reverse order. There
+ * is no idle gap: a frame waits only for the resolves of the frame three before it, so that two
+ * frames stay queued and the timer, which holds `TIMING_FRAMES_IN_FLIGHT` (135) resolves in flight,
+ * drops none. A frame with any resolve missing is left out and counted. Timings are figures, never
+ * held: a check fails only when frames are missing or not finite, or a frame's sources are not its
+ * set's.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
@@ -79,13 +80,7 @@ import type { LitRegime } from "../view/bodies/regime";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
 import type { GpuTimer } from "../view/engine/status";
 import type { AllocationEvent, MemoryCategory } from "../view/engine/memory";
-import type {
-  PassTimes,
-  RenderEngine,
-  RenderTarget,
-  RenderView,
-  ViewSize,
-} from "../view/engine/types";
+import type { RenderEngine, RenderTarget, RenderView, ViewSize } from "../view/engine/types";
 import { PHOTOREAL_PASS_LABELS, photorealisticPasses } from "../view/photoreal/passes";
 import {
   type FrameAtmosphere,
@@ -108,6 +103,22 @@ import {
   SMOKE_EXPOSURE_SCALE,
 } from "./atmosphere";
 import { addCanvas } from "./frames";
+import {
+  type FrameRecord,
+  framesFinite,
+  keptOf,
+  labelledNs,
+  perFrameSums,
+  QW_FORM,
+  ResolveLedger,
+  runTimed,
+  sumNs,
+  type Timed,
+  TIMED_IN_ALL,
+  type TimedFrame,
+  timedFrameOf,
+  viewPassesOf,
+} from "./frameTimingLedger";
 import {
   describeSources,
   earthInput,
@@ -133,27 +144,30 @@ import {
 /** The group's checks' names begin so. */
 const TASK = "R08.T11";
 
-/** The frames a combination draws before its timed ones, a sweep: 10. */
-const WARM_UP_FRAMES = 10;
-
-/** A combination's timed frames a sweep: 30, so 60 over the two sweeps. */
-const TIMED_FRAMES = 30;
-
-/** The timed frames a combination has in all: two sweeps of {@link TIMED_FRAMES}. */
-const TIMED_IN_ALL = 2 * TIMED_FRAMES;
-
 /**
- * The frames in flight: before frame n is drawn, frame n − 3's resolves have arrived, so that two
- * frames stay queued on the GPU and the resolves in flight stay a few frames' (a frame makes about
- * a dozen), far under the timer's 135.
+ * The group's checks' names, each part's from one template, so that the run without
+ * `timestamp-query` fails the very checks the full run passes.
  */
-const FRAMES_AHEAD = 3;
-
-/** How long one frame's resolves are waited for before it counts as missing, ms. */
-const RESOLVE_WAIT_MS = 2_000;
-
-/** How long the last timed frames' resolves are waited for in all, ms. */
-const LAST_RESOLVES_WAIT_MS = 5_000;
+const CHECK_NAMES = {
+  frameTable: (setting: QualitySetting, medium: string): string =>
+    `${TASK} the photorealistic frame's timings, ${setting}, ${medium}`,
+  frameSums: (setting: QualitySetting, medium: string, place: string, set: string): string =>
+    `${TASK} the frame's per-frame sums, ${setting}, ${medium}, ${place}, ${set}`,
+  alone: `${TASK} the atmosphere alone's timings, high`,
+  aloneSums: (medium: string, place: string, set: string): string =>
+    `${TASK} the atmosphere alone's per-frame sums, high, ${medium}, ${place}, ${set}`,
+  small: `${TASK} small air bodies' timings, high`,
+  smallSums: (diameterPx: number, air: boolean): string =>
+    `${TASK} small air bodies' per-frame sums, high, ${diameterPx} px, ${air ? "with" : "without"} air`,
+  bare: (medium: string): string => `${TASK} the frame without its air's timings, high, ${medium}`,
+  bareSums: (medium: string, place: string, set: string): string =>
+    `${TASK} the frame without its air's per-frame sums, high, ${medium}, ${place}, ${set}`,
+  tables: `${TASK} the per-planet tables' builds`,
+  bytes: `${TASK} the per-view bytes of a body's air`,
+  firstAir: `${TASK} the first air frame on the main thread, high`,
+  dropped: `${TASK} no timed frame dropped`,
+  wall: `${TASK} the group's parts' wall times`,
+} as const;
 
 /** The small air bodies' diameters, px (R08.T11's (C)). */
 const SMALL_DIAMETERS_PX = [4, 10, 32] as const;
@@ -178,155 +192,54 @@ const FIRST_AIR_IDS: readonly BodyIdHex[] = [
   "0200080020000000.0333",
 ];
 
-// --- The timer's resolves ------------------------------------------------------------------------
-
-/** One frame's submissions as the timer numbers and reports them. */
-interface FrameRecord {
-  /** Its first resolve's number, `passTimesFrame` before it + 1. */
-  readonly first: number;
-  /** Its last resolve's number, `passTimesFrame` after it; below `first` where it made none. */
-  readonly last: number;
-  /** Its resolves as they arrive, by number − `first`. */
-  readonly resolves: Array<PassTimes | undefined>;
-  /** The main thread's time in its measured call, ms. */
-  readonly cpuMs: number;
-  /** Its resolves arrived so far. */
-  arrived: number;
-  /** Wakes the one waiter on it, once it is complete. */
-  wake: (() => void) | null;
-}
-
-/** Whether every resolve of `record` has arrived. */
-function complete(record: FrameRecord): boolean {
-  return record.arrived === record.resolves.length;
-}
+// --- What a part makes ---------------------------------------------------------------------------
 
 /**
- * The timer's resolves sorted to the frames that made them: a frame's are those numbered after
- * the count before its submissions up to the count after them (`RenderEngine.passTimesFrame`). A
- * frame is registered in the same task as its submissions, before any of their resolves can
- * arrive, so a resolve no frame owns is another submission's (a fence's, a scene's) and is passed
- * over.
+ * What a part makes, released in the reverse order whatever throws: `checks.group` catches a
+ * group's throw and part 1 goes on with the same engine, so nothing a group made may outlive it.
  */
-class ResolveLedger {
-  readonly #engine: RenderEngine;
-  readonly #owners = new Map<number, FrameRecord>();
-  readonly #stop: () => void;
+class Releases {
+  readonly #releases: Array<() => void> = [];
 
-  constructor(engine: RenderEngine) {
-    this.#engine = engine;
-    this.#stop = engine.onPassTimes((times) => {
-      this.#take(times);
+  /** Holds `value`, released by `release` when the part ends, and returns it. */
+  hold<T>(value: T, release: (held: T) => void): T {
+    this.#releases.push(() => {
+      release(value);
     });
+    return value;
   }
 
-  #take(times: PassTimes): void {
-    const record = this.#owners.get(times.frame);
-    if (record === undefined) {
-      return;
+  /** Releases everything held, the latest first; a release that throws is logged, and the rest run. */
+  run(): void {
+    for (const release of this.#releases.toReversed()) {
+      try {
+        release();
+      } catch (error: unknown) {
+        console.error("R08.T11: a release failed:", error);
+      }
     }
-    this.#owners.delete(times.frame);
-    record.resolves[times.frame - record.first] = times;
-    record.arrived += 1;
-    if (complete(record)) {
-      record.wake?.();
-      record.wake = null;
-    }
-  }
-
-  /** The timer's count now, before a frame's submissions. */
-  get count(): number {
-    return this.#engine.passTimesFrame;
-  }
-
-  /** Registers the resolves made since the count was `before` as one frame's. */
-  frame(before: number, cpuMs: number): FrameRecord {
-    const last = this.#engine.passTimesFrame;
-    const record: FrameRecord = {
-      first: before + 1,
-      last,
-      resolves: Array.from({ length: Math.max(0, last - before) }, () => undefined),
-      cpuMs,
-      arrived: 0,
-      wake: null,
-    };
-    for (let k = record.first; k <= last; k += 1) {
-      this.#owners.set(k, record);
-    }
-    return record;
-  }
-
-  /** Settles once every resolve of `record` has arrived, or `limitMs` after; whether they had. */
-  async settled(record: FrameRecord, limitMs: number): Promise<boolean> {
-    if (!complete(record)) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(
-          () => {
-            record.wake = null;
-            resolve();
-          },
-          Math.max(0, limitMs),
-        );
-        record.wake = () => {
-          clearTimeout(timer);
-          resolve();
-        };
-      });
-    }
-    return complete(record);
-  }
-
-  /** Stops listening; the frames still waiting count as missing. */
-  dispose(): void {
-    this.#stop();
-    this.#owners.clear();
+    this.#releases.length = 0;
   }
 }
 
-/** One pass of a resolve: its label and its time, ns. */
-interface PassTime {
-  readonly label: string;
-  readonly ns: number;
+/** A canvas view of `size` held by `releases`, its canvas removed after it. */
+function heldView(
+  releases: Releases,
+  engine: RenderEngine,
+  name: string,
+  size: ViewSize,
+): RenderView {
+  const canvas = releases.hold(addCanvas(), (made) => {
+    made.remove();
+  });
+  const view = releases.hold(engine.createView(canvas, name), (made) => {
+    made.dispose();
+  });
+  view.resize(size);
+  return view;
 }
 
-/** A timed frame that arrived whole: its passes in submission order and its main-thread time. */
-interface TimedFrame {
-  readonly passes: ReadonlyArray<PassTime>;
-  readonly cpuMs: number;
-  readonly timers: ReadonlyArray<GpuTimer>;
-}
-
-/** A frame's passes in order, its resolves' in turn, or `null` where it has a resolve missing or none. */
-function timedFrameOf(record: FrameRecord): TimedFrame | null {
-  if (record.resolves.length === 0 || !complete(record)) {
-    return null;
-  }
-  const passes: PassTime[] = [];
-  const timers: GpuTimer[] = [];
-  for (const times of record.resolves) {
-    if (times === undefined) {
-      return null;
-    }
-    timers.push(times.timer);
-    passes.push(...times.passes.map(({ label, ns }) => ({ label, ns })));
-  }
-  return { passes, cpuMs: record.cpuMs, timers };
-}
-
-/** A frame's GPU pass sum, ns. */
-function sumNs(frame: TimedFrame): number {
-  return frame.passes.reduce((sum, pass) => sum + pass.ns, 0);
-}
-
-/** A frame's passes under `labels`, summed, ns. */
-function labelledNs(frame: TimedFrame, labels: ReadonlySet<string>): number {
-  return frame.passes.reduce((sum, pass) => sum + (labels.has(pass.label) ? pass.ns : 0), 0);
-}
-
-/** Whether every pass time of every frame is finite and not negative. */
-function framesFinite(frames: ReadonlyArray<TimedFrame>): boolean {
-  return frames.every((frame) => frame.passes.every((p) => Number.isFinite(p.ns) && p.ns >= 0));
-}
+// --- The figures ---------------------------------------------------------------------------------
 
 /** The timer kinds a run's frames saw, and how many of their pass times lie off Dawn's grid. */
 interface TimerSummary {
@@ -363,91 +276,6 @@ function timerText(summary: TimerSummary): string {
 /** ms as ns, for {@link microsecondsOf}. */
 function nsOfMs(ms: number): number {
   return ms * 1e6;
-}
-
-/** A combination timed: what it draws, and its timed frames' records in timed order. */
-interface Timed<T> {
-  readonly item: T;
-  readonly records: FrameRecord[];
-}
-
-/** A combination's timed frames that arrived whole, and how many did not. */
-function keptOf<T>(combination: Timed<T>): {
-  readonly combination: Timed<T>;
-  readonly frames: TimedFrame[];
-  readonly missing: number;
-} {
-  const frames: TimedFrame[] = [];
-  for (const record of combination.records) {
-    const frame = timedFrameOf(record);
-    if (frame !== null) {
-      frames.push(frame);
-    }
-  }
-  return { combination, frames, missing: combination.records.length - frames.length };
-}
-
-/**
- * Draws `combinations` in QW2's form (the module's remarks): two sweeps, the second reversed, each
- * combination's warm-up frames then its timed ones back to back, every frame drawn as soon as the
- * one {@link FRAMES_AHEAD} before it has resolved, `setUp` called before a combination's first
- * frame of each sweep; then waits for the last timed frames' resolves.
- *
- * @param draw - Draws one frame of a combination and returns the main thread's time in the call
- *   the run measures, ms.
- */
-async function runTimed<T>(
-  ledger: ResolveLedger,
-  combinations: ReadonlyArray<Timed<T>>,
-  setUp: (item: T) => void,
-  draw: (item: T) => number,
-): Promise<void> {
-  const order = combinations.map((_, i) => i);
-  const frames = [...order, ...order.toReversed()].flatMap((i) =>
-    Array.from({ length: WARM_UP_FRAMES + TIMED_FRAMES }, (_, k) => ({ i, k })),
-  );
-  const recent: FrameRecord[] = [];
-  for (const { i, k } of frames) {
-    const combination = combinations[i];
-    if (combination === undefined) {
-      continue;
-    }
-    if (k === 0) {
-      setUp(combination.item);
-    }
-    const ahead = recent.length >= FRAMES_AHEAD ? recent[recent.length - FRAMES_AHEAD] : undefined;
-    if (ahead !== undefined) {
-      // The run's one wait: frame n − 3's resolves, so that two frames stay queued.
-      // oxlint-disable-next-line no-await-in-loop
-      await ledger.settled(ahead, RESOLVE_WAIT_MS);
-    }
-    const before = ledger.count;
-    const cpuMs = draw(combination.item);
-    const record = ledger.frame(before, cpuMs);
-    recent.push(record);
-    if (recent.length > FRAMES_AHEAD) {
-      recent.shift();
-    }
-    if (k >= WARM_UP_FRAMES) {
-      combination.records.push(record);
-    }
-  }
-  const deadline = performance.now() + LAST_RESOLVES_WAIT_MS;
-  for (const record of combinations.flatMap((combination) => combination.records)) {
-    // The last frames' resolves, a frame or more after their work, within one deadline.
-    // oxlint-disable-next-line no-await-in-loop
-    await ledger.settled(record, deadline - performance.now());
-  }
-}
-
-/** A timed combination's per-frame sums, µs, in timed order, `-` for a frame left out. */
-function perFrameSums<T>(combination: Timed<T>): string {
-  return combination.records
-    .map((record) => {
-      const frame = timedFrameOf(record);
-      return frame === null ? "-" : String(Math.round(sumNs(frame) / 1_000));
-    })
-    .join(" ");
 }
 
 /** A count of kept frames as a table's cell: `60`, or `58 (2 missing)`. */
@@ -496,52 +324,51 @@ function earthTables(
   );
 }
 
+/** One of (A)'s media before its tables are built: its name, body and lights' curves. */
+interface FrameMediumSpec {
+  readonly name: string;
+  readonly id: BodyIdHex;
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+}
+
+/** The measured Earth's name in the checks, the medium (B) to (G) draw. */
+const MEASURED_EARTH_NAME = "the measured Earth";
+
 /**
- * (A)'s three media, each its own tables and body: R05's Earth (no absorber), the measured Earth
- * and the slab Earth, each with its curves twice, a binary's two light slots.
+ * (A)'s three media: R05's Earth (no absorber), the measured Earth and the slab Earth, each with
+ * its curves twice, a binary's two light slots.
  */
-function frameMedia(engine: RenderEngine): FrameMedium[] {
-  const specs: ReadonlyArray<{
-    readonly name: string;
-    readonly id: BodyIdHex;
-    readonly medium: AtmosphereMedium;
-    readonly curves: AbsorberCurveSlots;
-  }> = [
-    {
-      name: "R05's Earth",
-      id: EARTH_IDS.r05,
-      medium: R05_EARTH_REFERENCE,
-      curves: NO_ABSORBER_CURVES,
-    },
-    {
-      name: "the measured Earth",
-      id: EARTH_IDS.measured,
-      medium: EARTH_REFERENCE,
-      curves: [...EARTH_REFERENCE_CURVES, ...EARTH_REFERENCE_CURVES],
-    },
-    {
-      name: "the slab Earth",
-      id: EARTH_IDS.slab,
-      medium: EARTH_SLAB_REFERENCE,
-      curves: [...EARTH_SLAB_REFERENCE_CURVES, ...EARTH_SLAB_REFERENCE_CURVES],
-    },
-  ];
-  const media: FrameMedium[] = [];
-  try {
-    for (const spec of specs) {
-      media.push({
-        ...spec,
-        tables: earthTables(engine, spec.medium, spec.curves),
-        lightSlots: absorberCount(spec.medium) > 0 ? spec.curves.length : Infinity,
-      });
-    }
-  } catch (error: unknown) {
-    for (const made of media) {
-      made.tables.dispose();
-    }
-    throw error;
-  }
-  return media;
+const FRAME_MEDIA: ReadonlyArray<FrameMediumSpec> = [
+  {
+    name: "R05's Earth",
+    id: EARTH_IDS.r05,
+    medium: R05_EARTH_REFERENCE,
+    curves: NO_ABSORBER_CURVES,
+  },
+  {
+    name: MEASURED_EARTH_NAME,
+    id: EARTH_IDS.measured,
+    medium: EARTH_REFERENCE,
+    curves: [...EARTH_REFERENCE_CURVES, ...EARTH_REFERENCE_CURVES],
+  },
+  {
+    name: "the slab Earth",
+    id: EARTH_IDS.slab,
+    medium: EARTH_SLAB_REFERENCE,
+    curves: [...EARTH_SLAB_REFERENCE_CURVES, ...EARTH_SLAB_REFERENCE_CURVES],
+  },
+];
+
+/** (A)'s media, each its own tables, built once and held by `releases`, and its own body. */
+function frameMedia(engine: RenderEngine, releases: Releases): FrameMedium[] {
+  return FRAME_MEDIA.map((spec) => ({
+    ...spec,
+    tables: releases.hold(earthTables(engine, spec.medium, spec.curves), (made) => {
+      made.dispose();
+    }),
+    lightSlots: absorberCount(spec.medium) > 0 ? spec.curves.length : Infinity,
+  }));
 }
 
 // --- (A) the frame -------------------------------------------------------------------------------
@@ -658,13 +485,39 @@ interface FrameTimings {
   readonly failures: ReadonlyArray<string>;
 }
 
-/** The renderer and view (A), (C) and (F) draw on, and the view's canvas. */
+/** A renderer and the view it draws into: (A)'s, (C)'s, (G)'s and (F)'s, or (E)'s own. */
 interface FrameView {
   readonly renderer: PhotorealRenderer;
   readonly view: RenderView;
-  readonly canvas: HTMLCanvasElement;
   /** The regimes of the latest frame, the next one's hysteresis. */
   regimes: ReadonlyMap<BodyIdHex, LitRegime>;
+}
+
+/**
+ * A new renderer on a new canvas view at `setting`'s output, both held by `releases`, prepared for
+ * `camera`, with the wall time of its `prepare`, ms.
+ *
+ * @throws Error where the renderer could not be made.
+ */
+async function heldFrameView(
+  releases: Releases,
+  engine: RenderEngine,
+  name: string,
+  setting: QualitySetting,
+  camera: FrameScene["camera"],
+): Promise<{ readonly on: FrameView; readonly prepareMs: number }> {
+  const viewport = settingOutput(setting);
+  const view = heldView(releases, engine, name, viewport);
+  const renderer = releases.hold(new PhotorealRenderer(engine, name), (made) => {
+    made.dispose();
+  });
+  const start = performance.now();
+  await renderer.prepare(viewport, setting, "eye", camera);
+  const prepareMs = performance.now() - start;
+  if (renderer.status !== "ready") {
+    throw new Error(`the renderer is ${renderer.status}, not ready`);
+  }
+  return { on: { renderer, view, regimes: new Map() }, prepareMs };
 }
 
 /** Draws one frame of `frame` on `on`, with the latest regimes; the main thread's time in `render`. */
@@ -761,7 +614,7 @@ function reportFrames(checks: Checks, timings: FrameTimings): void {
       table.push(combination);
     }
   }
-  for (const [key, combinations] of tables) {
+  for (const combinations of tables.values()) {
     const first = combinations[0]?.item;
     if (first === undefined) {
       continue;
@@ -802,12 +655,12 @@ function reportFrames(checks: Checks, timings: FrameTimings): void {
         ? []
         : [`air failures: ${timings.failures.slice(0, 5).join("; ")}`];
     checks.check(
-      `${TASK} the photorealistic frame's timings, ${key}`,
+      CHECK_NAMES.frameTable(setting, first.medium.name),
       held && timings.failures.length === 0,
       [
         `${setting} at ${viewport.widthPx} × ${viewport.heightPx}, PhotorealRenderer on a canvas view, role eye, the average meter, EV100 ${SMOKE_EV100}, no sky, no star sprites, no overlay, no terrain: the Earth drawn as R07's mesh, as R08.T10.b draws every air body not handed to terrain`,
         timerText(timerSummary(all)),
-        `${WARM_UP_FRAMES} warm-up and ${TIMED_FRAMES} timed frames a combination back to back, two sweeps, the second reversed, each frame after frame n − ${FRAMES_AHEAD}'s resolves`,
+        `${QW_FORM.warmUp} warm-up and ${QW_FORM.timed} timed frames a combination back to back, two sweeps, the second reversed, each frame after frame n − ${QW_FORM.ahead}'s resolves`,
         `each camera on the equator at longitude ${FAR_LIMB_LONGITUDE_RAD} rad, the datum's limb at the frame's centre, 60° across; the Sun at 1 au ${FAR_LIMB_TIMING_SUN_ZENITH_DEG}° from the zenith at the tangent point and ${FAR_LIMB_TIMING_SUN_AZIMUTH_DEG}° right of the view`,
         ...failures,
         `the frame's GPU pass sum and its passes by label, and the main thread's time in render (performance.now(), 0.1 ms steps here), µs, median / p95: ${[heading, ...rows].join(" || ")}`,
@@ -818,7 +671,7 @@ function reportFrames(checks: Checks, timings: FrameTimings): void {
     const { setting, medium, place, set } = combination.item;
     const { frames } = keptOf(combination);
     checks.check(
-      `${TASK} the frame's per-frame sums, ${setting}, ${medium.name}, ${place}, ${set.name}`,
+      CHECK_NAMES.frameSums(setting, medium.name, place, set.name),
       frames.length === TIMED_IN_ALL && framesFinite(frames) && sourcesHeld(combination.item),
       `${sourcesText(combination.item)}; ${frames.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
     );
@@ -843,7 +696,12 @@ interface AloneTargets {
   readonly output: RenderTarget;
 }
 
-/** A target of `size` as `timeFarLimbSetting`'s, with depth. */
+/** Disposes a target a part held. */
+function releaseTarget(held: RenderTarget): void {
+  held.dispose();
+}
+
+/** A target of `size` as `timeFarLimbSetting`'s, with depth where asked. */
 function timingTarget(
   engine: RenderEngine,
   name: string,
@@ -860,19 +718,6 @@ function timingTarget(
   });
 }
 
-/** A frame's atmosphere view passes by their place: the sky view, the aerial perspective, the march. */
-function viewPassesOf(frame: TimedFrame): {
-  readonly skyNs: number;
-  readonly aerialNs: number;
-  readonly marchNs: number;
-  readonly moreNs: number;
-} {
-  const views = frame.passes.filter((pass) => pass.label === ATMOSPHERE_VIEW_PASS).map((p) => p.ns);
-  // From the march band's upper edge up the frame makes the ray march alone (R08.T8.d's lever 2).
-  const [sky = 0, aerial = 0, march = 0, ...more] = views.length === 1 ? [0, 0, ...views] : views;
-  return { skyNs: sky, aerialNs: aerial, marchNs: march, moreNs: more.reduce((a, b) => a + b, 0) };
-}
-
 /**
  * (B): the atmosphere alone over the same tables and (A)'s sources, on high, `x1` and `x2`.
  *
@@ -887,14 +732,26 @@ async function timeAlone(
 ): Promise<number> {
   const viewport = settingOutput("high");
   const aspect = viewport.widthPx / viewport.heightPx;
-  const atmospheres = media.map((medium) =>
-    HillaireAtmosphere.over(engine, medium.tables, TABLE_SIZES.high, null),
-  );
-  const targets: AloneTargets = {
-    scene: timingTarget(engine, `${TASK} alone scene`, viewport, true),
-    output: timingTarget(engine, `${TASK} alone output`, viewport, true),
-  };
+  const releases = new Releases();
   try {
+    const atmospheres = media.map((medium) =>
+      releases.hold(
+        HillaireAtmosphere.over(engine, medium.tables, TABLE_SIZES.high, null),
+        (made) => {
+          made.dispose();
+        },
+      ),
+    );
+    const targets: AloneTargets = {
+      scene: releases.hold(
+        timingTarget(engine, `${TASK} alone scene`, viewport, true),
+        releaseTarget,
+      ),
+      output: releases.hold(
+        timingTarget(engine, `${TASK} alone output`, viewport, true),
+        releaseTarget,
+      ),
+    };
     // Nothing drawn, so that every pixel is the bare ground's or the sky's.
     targets.scene.render(frameOf(`${TASK} alone scene`, [], aspect));
     const scene = {
@@ -986,7 +843,7 @@ async function timeAlone(
       missingSources.length === 0 &&
       kept.every(({ frames: f }) => f.length === TIMED_IN_ALL && framesFinite(f));
     checks.check(
-      `${TASK} the atmosphere alone's timings, high`,
+      CHECK_NAMES.alone,
       held,
       [
         `high at ${viewport.widthPx} × ${viewport.heightPx}, the atmosphere alone as R08.T8.c's far limb timings draw it (its frame over an empty scene at depth 0, then its composite), over the same tables with the sources (A)'s plan gave each combination`,
@@ -1001,18 +858,14 @@ async function timeAlone(
       const { medium, place, set } = combination.item;
       const { frames: f } = keptOf(combination);
       checks.check(
-        `${TASK} the atmosphere alone's per-frame sums, high, ${medium.name}, ${place}, ${set}`,
+        CHECK_NAMES.aloneSums(medium.name, place, set),
         f.length === TIMED_IN_ALL && framesFinite(f),
         `${f.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
       );
     }
     return kept.reduce((sum, { missing }) => sum + missing, 0);
   } finally {
-    targets.scene.dispose();
-    targets.output.dispose();
-    for (const atmosphere of atmospheres) {
-      atmosphere.dispose();
-    }
+    releases.run();
   }
 }
 
@@ -1104,7 +957,7 @@ async function timeSmallBodies(
     ].join(" | "),
   );
   checks.check(
-    `${TASK} small air bodies' timings, high`,
+    CHECK_NAMES.small,
     kept.every(({ frames }) => frames.length === TIMED_IN_ALL && framesFinite(frames)) &&
       failures.length === 0,
     [
@@ -1117,7 +970,7 @@ async function timeSmallBodies(
   for (const combination of combinations) {
     const { frames } = keptOf(combination);
     checks.check(
-      `${TASK} small air bodies' per-frame sums, high, ${combination.item.diameterPx} px, ${combination.item.air ? "with" : "without"} air`,
+      CHECK_NAMES.smallSums(combination.item.diameterPx, combination.item.air),
       frames.length === TIMED_IN_ALL && framesFinite(frames),
       `${frames.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
     );
@@ -1194,7 +1047,7 @@ async function timeBare(
     ].join(" | "),
   );
   checks.check(
-    `${TASK} the frame without its air's timings, high, ${measured.name}`,
+    CHECK_NAMES.bare(measured.name),
     kept.every(({ frames }) => frames.length === TIMED_IN_ALL && framesFinite(frames)) &&
       failures.length === 0,
     [
@@ -1206,7 +1059,7 @@ async function timeBare(
   for (const combination of combinations) {
     const { frames } = keptOf(combination);
     checks.check(
-      `${TASK} the frame without its air's per-frame sums, high, ${measured.name}, ${combination.item.place}, ${combination.item.set.name}`,
+      CHECK_NAMES.bareSums(measured.name, combination.item.place, combination.item.set.name),
       frames.length === TIMED_IN_ALL && framesFinite(frames),
       `${frames.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
     );
@@ -1396,26 +1249,27 @@ async function buildTables(
   const flushFrame = (): void => {
     flush.render(frameOf(`${TASK} tables flush`, [], 1));
   };
-  let tables: AtmosphereTables;
-  let constructorMs: number;
-  let built: FrameRecord;
+  const releases = new Releases();
   try {
-    const before = ledger.count;
-    const start = performance.now();
-    tables = new AtmosphereTables(
-      engine,
-      entry.medium,
-      entry.bottomRadiusM,
-      entry.curves,
-      entry.body,
-    );
-    constructorMs = performance.now() - start;
-    flushFrame();
-    built = ledger.frame(before, constructorMs);
-  } finally {
-    stop();
-  }
-  try {
+    let built: FrameRecord;
+    let constructorMs: number;
+    let tables: AtmosphereTables;
+    try {
+      const before = ledger.count;
+      const start = performance.now();
+      tables = releases.hold(
+        new AtmosphereTables(engine, entry.medium, entry.bottomRadiusM, entry.curves, entry.body),
+        (made) => {
+          made.dispose();
+        },
+      );
+      constructorMs = performance.now() - start;
+      flushFrame();
+      built = ledger.frame(before, constructorMs);
+    } finally {
+      // The tally covers the constructor and its flush alone.
+      stop();
+    }
     const before = ledger.count;
     const start = performance.now();
     tables.irradiance();
@@ -1423,8 +1277,8 @@ async function buildTables(
     flushFrame();
     const irradiance = ledger.frame(before, irradianceMs);
     await engine.readTexture(flush.colour, 0, { x: 0, y: 0, width: 1, height: 1 });
-    await ledger.settled(built, RESOLVE_WAIT_MS);
-    await ledger.settled(irradiance, RESOLVE_WAIT_MS);
+    await ledger.settled(built, QW_FORM.waitMs);
+    await ledger.settled(irradiance, QW_FORM.waitMs);
     const build = tablePasses(built, ATMOSPHERE_TABLES_PASS);
     const lit = tablePasses(irradiance, ATMOSPHERE_TABLES_PASS);
     return {
@@ -1443,7 +1297,7 @@ async function buildTables(
       complete: build.complete && lit.complete,
     };
   } finally {
-    tables.dispose();
+    releases.run();
   }
 }
 
@@ -1526,11 +1380,11 @@ async function timeTables(
 ): Promise<void> {
   const kept = await keptFixtureCases();
   const cases = [...fixtureCases(), ...kept.cases];
-  const flush = timingTarget(engine, `${TASK} tables flush`, { widthPx: 1, heightPx: 1 }, false);
   const rows: string[] = [];
   const splits: string[] = [];
   const lobesUncached = new Map<AtmosphereMedium, UncachedLobes>();
   let held = true;
+  const flush = timingTarget(engine, `${TASK} tables flush`, { widthPx: 1, heightPx: 1 }, false);
   try {
     for (const entry of cases) {
       // Each build after the last, cold then warm, so that the second finds what the first left.
@@ -1600,7 +1454,7 @@ async function timeTables(
     "cold − warm, ms",
   ].join(" | ");
   checks.check(
-    `${TASK} the per-planet tables' builds`,
+    CHECK_NAMES.tables,
     held,
     [
       `each medium's tables built twice by new AtmosphereTables, cold (the first in this group; R05.T12.b's tables and the earlier groups of part 1 compiled the kernels before) and warm, each disposed after; the GPU time of the passes each dispatched, which ride the next resolve (a 1 × 1 flush's), after a fence; the irradiance at its first read after the build`,
@@ -1672,7 +1526,6 @@ async function perViewBytes(
   const changed: string[] = [];
   let held = true;
   for (const setting of ["high", "low"] as const) {
-    const viewport = settingOutput(setting);
     const sets = sourceSetsOf(setting).filter((set) => set.name !== "x2p");
     const place = FAR_LIMB_TIMING_PLACES[0];
     if (place === undefined) {
@@ -1686,23 +1539,18 @@ async function perViewBytes(
     if (first === undefined) {
       continue;
     }
-    const canvas = addCanvas();
-    const view = engine.createView(canvas, `${TASK} bytes ${setting}`);
-    view.resize(viewport);
-    const on: FrameView = {
-      renderer: new PhotorealRenderer(engine, `${TASK} bytes ${setting}`),
-      view,
-      canvas,
-      regimes: new Map(),
-    };
+    const releases = new Releases();
     try {
-      const start = performance.now();
+      // Each setting's renderer in turn, released before the next is made.
       // oxlint-disable-next-line no-await-in-loop
-      await on.renderer.prepare(viewport, setting, "eye", first.scene.camera);
-      prepares.push(`${setting} ${(performance.now() - start).toFixed(1)} ms`);
-      if (on.renderer.status !== "ready") {
-        throw new Error(`the renderer is ${on.renderer.status}, not ready`);
-      }
+      const { on, prepareMs } = await heldFrameView(
+        releases,
+        engine,
+        `${TASK} bytes ${setting}`,
+        setting,
+        first.scene.camera,
+      );
+      prepares.push(`${setting} ${prepareMs.toFixed(1)} ms`);
       // A frame without the air first, so that what the first air frame makes is the air's alone.
       renderFrame(on, { ...first.frame, atmospheres: [] });
       for (const [i, combination] of frames.entries()) {
@@ -1725,13 +1573,11 @@ async function perViewBytes(
       }
       held &&= failures.length === 0;
     } finally {
-      on.renderer.dispose();
-      view.dispose();
-      canvas.remove();
+      releases.run();
     }
   }
   checks.check(
-    `${TASK} the per-view bytes of a body's air`,
+    CHECK_NAMES.bytes,
     held,
     [
       `a new PhotorealRenderer a setting on its own canvas view, the measured Earth from 400 km, one frame without its air, then its first air frame (x1) and frames at two and the setting's whole count of sources; each frame's creations and destructions (onAllocation), the air's (its per-view tables, its march's buffers, the air targets) apart from the rest, and its uploads summed, the timer's resolve buffers left out`,
@@ -1785,11 +1631,11 @@ async function firstAirFrame(
     const ms: number[] = [];
     for (let k = 0; k < STEADY_FRAMES; k += 1) {
       const ahead =
-        records.length >= FRAMES_AHEAD ? records[records.length - FRAMES_AHEAD] : undefined;
+        records.length >= QW_FORM.ahead ? records[records.length - QW_FORM.ahead] : undefined;
       if (ahead !== undefined) {
         // Frame n − 3's resolves, as the timed runs wait, so that the queue stays as theirs.
         // oxlint-disable-next-line no-await-in-loop
-        await ledger.settled(ahead, RESOLVE_WAIT_MS);
+        await ledger.settled(ahead, QW_FORM.waitMs);
       }
       const before = ledger.count;
       const frame = renderFrame(on, item.frame);
@@ -1813,13 +1659,24 @@ async function firstAirFrame(
         item.set.name === set.name,
     )?.item.listed?.kept ?? null;
   const aspect = viewport.widthPx / viewport.heightPx;
-  const kernelsStart = performance.now();
-  const kernels = await createAtmosphereFrameKernels(engine);
-  const kernelsMs = performance.now() - kernelsStart;
-  const scene = timingTarget(engine, `${TASK} first air scene`, viewport, true);
-  const output = timingTarget(engine, `${TASK} first air output`, viewport, false);
   let alone = "no sources from (A) for the measured Earth's 400 km x1";
+  let kernelsMs = Number.NaN;
+  const releases = new Releases();
   try {
+    const kernelsStart = performance.now();
+    const kernels = releases.hold(await createAtmosphereFrameKernels(engine), (made) => {
+      engine.releaseMaterial(made.composite);
+      engine.releaseMesh(made.triangle);
+    });
+    kernelsMs = performance.now() - kernelsStart;
+    const scene = releases.hold(
+      timingTarget(engine, `${TASK} first air scene`, viewport, true),
+      releaseTarget,
+    );
+    const output = releases.hold(
+      timingTarget(engine, `${TASK} first air output`, viewport, false),
+      releaseTarget,
+    );
     scene.render(frameOf(`${TASK} first air scene`, [], aspect));
     const sceneInput = {
       colour: scene.colour,
@@ -1830,35 +1687,28 @@ async function firstAirFrame(
     const { item } = frameCombination("high", measured, place, set, failures);
     if (suns !== null) {
       const overStart = performance.now();
-      const atmosphere = HillaireAtmosphere.over(
-        engine,
-        measured.tables,
-        TABLE_SIZES.high,
-        kernels,
+      const atmosphere = releases.hold(
+        HillaireAtmosphere.over(engine, measured.tables, TABLE_SIZES.high, kernels),
+        (made) => {
+          made.dispose();
+        },
       );
       const overMs = performance.now() - overStart;
-      try {
-        const drawMs = [0, 1].map(() =>
-          timedMs(() => {
-            const composite = atmosphere.drawFrame(item.scene.air, suns, sceneInput);
-            output.render(frameOf(ATMOSPHERE_COMPOSITE_PASS, [composite], aspect));
-          }),
-        );
-        alone = `over ${overMs.toFixed(2)} ms, the first drawFrame and its composite ${drawMs[0]?.toFixed(2) ?? "?"} ms, the second ${drawMs[1]?.toFixed(2) ?? "?"} ms`;
-      } finally {
-        atmosphere.dispose();
-      }
+      const drawMs = [0, 1].map(() =>
+        timedMs(() => {
+          const composite = atmosphere.drawFrame(item.scene.air, suns, sceneInput);
+          output.render(frameOf(ATMOSPHERE_COMPOSITE_PASS, [composite], aspect));
+        }),
+      );
+      alone = `over ${overMs.toFixed(2)} ms, the first drawFrame and its composite ${drawMs[0]?.toFixed(2) ?? "?"} ms, the second ${drawMs[1]?.toFixed(2) ?? "?"} ms`;
     }
     held &&= suns !== null;
     await engine.readTexture(output.colour, 0, { x: 0, y: 0, width: 1, height: 1 });
   } finally {
-    scene.dispose();
-    output.dispose();
-    engine.releaseMaterial(kernels.composite);
-    engine.releaseMesh(kernels.triangle);
+    releases.run();
   }
   checks.check(
-    `${TASK} the first air frame on the main thread, high`,
+    CHECK_NAMES.firstAir,
     held && failures.length === 0,
     [
       `the measured Earth from 400 km, x1, each time a new body over the same tables on (A)'s renderer, whose render makes its atmosphere (HillaireAtmosphere.over) and draws its first frame, then ${STEADY_FRAMES} steady frames`,
@@ -1872,17 +1722,26 @@ async function firstAirFrame(
 
 // --- The group -----------------------------------------------------------------------------------
 
-/** The names of the group's summary checks, which fail together without `timestamp-query`. */
-const SUMMARY_CHECKS = [
-  `${TASK} the photorealistic frame's timings`,
-  `${TASK} the atmosphere alone's timings, high`,
-  `${TASK} small air bodies' timings, high`,
-  `${TASK} the frame without its air's timings, high`,
-  `${TASK} the per-planet tables' builds`,
-  `${TASK} the per-view bytes of a body's air`,
-  `${TASK} the first air frame on the main thread, high`,
-  `${TASK} no timed frame dropped`,
-] as const;
+/**
+ * The group's summary checks, which fail together without `timestamp-query`: each setting's and
+ * medium's table of (A), and (B), (C), (G), (D), (E) and (F)'s, and the dropped frames', by the
+ * full run's own templates ({@link CHECK_NAMES}).
+ */
+function summaryCheckNames(): string[] {
+  const frameTables = (["high", "low"] as const).flatMap((setting) =>
+    FRAME_MEDIA.map((spec) => CHECK_NAMES.frameTable(setting, spec.name)),
+  );
+  return [
+    ...frameTables,
+    CHECK_NAMES.alone,
+    CHECK_NAMES.small,
+    CHECK_NAMES.bare(MEASURED_EARTH_NAME),
+    CHECK_NAMES.tables,
+    CHECK_NAMES.bytes,
+    CHECK_NAMES.firstAir,
+    CHECK_NAMES.dropped,
+  ];
+}
 
 /**
  * R08.T11's photorealistic frame's timings (the module's remarks): (D) first, so that its cold
@@ -1893,7 +1752,7 @@ const SUMMARY_CHECKS = [
  */
 export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks): Promise<void> {
   if (!engine.capabilities.timestampQuery) {
-    for (const name of SUMMARY_CHECKS) {
+    for (const name of summaryCheckNames()) {
       checks.check(name, false, "no timestamp-query, so no pass times");
     }
     return;
@@ -1907,74 +1766,55 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       wall.push(`${name} ${((performance.now() - start) / 1_000).toFixed(1)} s`);
     }
   };
-  const ledger = new ResolveLedger(engine);
+  const releases = new Releases();
   try {
+    const ledger = releases.hold(new ResolveLedger(engine), (made) => {
+      made.dispose();
+    });
     await timedPart("(D)", () => timeTables(engine, checks, ledger));
-    const media = frameMedia(engine);
-    const canvas = addCanvas();
-    const view = engine.createView(canvas, `${TASK} frame`);
-    const on: FrameView = {
-      renderer: new PhotorealRenderer(engine, `${TASK} frame`),
-      view,
-      canvas,
-      regimes: new Map(),
-    };
-    try {
-      const viewport = settingOutput("high");
-      view.resize(viewport);
-      const firstPlace = FAR_LIMB_TIMING_PLACES[0];
-      if (firstPlace === undefined) {
-        throw new Error("the far limb's cameras are not empty");
-      }
-      const start = performance.now();
-      await on.renderer.prepare(
-        viewport,
-        "high",
-        "eye",
-        farLimbFrameScene(firstPlace.distanceM, viewport, { name: "x1", stars: 1, giants: 0 })
-          .camera,
-      );
-      const prepareMs = performance.now() - start;
-      if (on.renderer.status !== "ready") {
-        throw new Error(`the renderer is ${on.renderer.status}, not ready`);
-      }
-      const frames = await timedPart("(A)", () => timeFrames(on, ledger, media));
-      reportFrames(checks, frames);
-      const aloneMissing = await timedPart("(B)", () =>
-        timeAlone(engine, checks, ledger, media, frames),
-      );
-      const measured = media[1];
-      if (measured === undefined) {
-        throw new Error("the measured Earth is among (A)'s media");
-      }
-      const smallMissing = await timedPart("(C)", () =>
-        timeSmallBodies(on, checks, ledger, measured),
-      );
-      const bareMissing = await timedPart("(G)", () => timeBare(on, checks, ledger, measured));
-      const frameMissing = frames.combinations.reduce(
-        (sum, combination) => sum + keptOf(combination).missing,
-        0,
-      );
-      const missing = frameMissing + aloneMissing + smallMissing + bareMissing;
-      checks.check(
-        `${TASK} no timed frame dropped`,
-        missing === 0,
-        `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}`,
-      );
-      const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
-      await timedPart("(F)", () =>
-        firstAirFrame(engine, checks, on, ledger, measured, frames, { frameMs: prepareMs, bytes }),
-      );
-    } finally {
-      on.renderer.dispose();
-      view.dispose();
-      canvas.remove();
-      for (const medium of media) {
-        medium.tables.dispose();
-      }
+    const media = frameMedia(engine, releases);
+    const firstPlace = FAR_LIMB_TIMING_PLACES[0];
+    const firstSet = sourceSetsOf("high")[0];
+    if (firstPlace === undefined || firstSet === undefined) {
+      throw new Error("the far limb's cameras and sets are not empty");
     }
+    const { on, prepareMs } = await heldFrameView(
+      releases,
+      engine,
+      `${TASK} frame`,
+      "high",
+      farLimbFrameScene(firstPlace.distanceM, settingOutput("high"), firstSet).camera,
+    );
+    const frames = await timedPart("(A)", () => timeFrames(on, ledger, media));
+    reportFrames(checks, frames);
+    const aloneMissing = await timedPart("(B)", () =>
+      timeAlone(engine, checks, ledger, media, frames),
+    );
+    const measured = media.find((medium) => medium.name === MEASURED_EARTH_NAME);
+    if (measured === undefined) {
+      throw new Error("the measured Earth is among (A)'s media");
+    }
+    const smallMissing = await timedPart("(C)", () =>
+      timeSmallBodies(on, checks, ledger, measured),
+    );
+    const bareMissing = await timedPart("(G)", () => timeBare(on, checks, ledger, measured));
+    const frameMissing = frames.combinations.reduce(
+      (sum, combination) => sum + keptOf(combination).missing,
+      0,
+    );
+    const missing = frameMissing + aloneMissing + smallMissing + bareMissing;
+    checks.check(
+      CHECK_NAMES.dropped,
+      missing === 0,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}`,
+    );
+    const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
+    await timedPart("(F)", () =>
+      firstAirFrame(engine, checks, on, ledger, measured, frames, { frameMs: prepareMs, bytes }),
+    );
   } finally {
-    ledger.dispose();
-    checks.check(`${TASK} the group's parts' wall times`, true, wall.join(", "));
+    // The renderer and its view, then the media's tables, then the ledger.
+    releases.run();
+    checks.check(CHECK_NAMES.wall, true, wall.join(", "));
   }
 }
