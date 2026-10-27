@@ -107,6 +107,7 @@ import {
   type AtmosphereBody,
   AtmosphereTables,
   KERNEL_ARM_FORMAT,
+  marchEdgeCountOf,
   MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
   packMediumUniform,
@@ -902,6 +903,70 @@ export const RAY_MARCH_SLOTS_CENTRE_KERNEL = kernel(
   `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchCentreWgsl}`,
 );
 /**
+ * The specialised march's three rewrites of the general one's sources (R08.T11.d), each made once
+ * and each within a line, so that a checkout's line ends do not matter: `oblateSliceCount`'s and
+ * `oblateBandCount`'s bodies (`oblate.wgsl`) and the march's edges' count (`rayMarch.wgsl`).
+ */
+const SPECIALISED_MARCH: ReadonlyArray<readonly [string, string]> = [
+  ["return clamp(u32(body.counts.x), 1u, MAX_SLICES);", "return 1u;"],
+  ["return clamp(u32(body.counts.y), 1u, MAX_BANDS);", "return 1u;"],
+  [
+    "let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);",
+    "let edgeCount = min(u32(layerEdges.count.x), 0u);",
+  ],
+];
+
+/**
+ * `pair`, a ray march's, specialised for a body of one slice and one band under a medium with no
+ * layer edge (plan R08, R08.T11.d; `decision-r08-approximate-plate.md` item 3): the slices' and the
+ * bands' counts constant 1 (`oblate.wgsl`) and the march's edges' count 0 (`rayMarch.wgsl`), the
+ * values its uniforms hold for such a body, so that the compiler drops T6.f's sliced and banded
+ * code and T6.i's private array. Exact for those bodies; chosen from their tables
+ * ({@link marchSpecialisedFor}). The edges' uniform stays read, so the bindings are the general
+ * kernel's.
+ *
+ * @throws Error naming the kernel when its sources lack a place to rewrite.
+ */
+export function withMarchSpecialised(pair: KernelPair): KernelPair {
+  const rewrite = (wgsl: string): string =>
+    SPECIALISED_MARCH.reduce((code, [general, special]) => {
+      const at = code.indexOf(general);
+      if (at < 0 || code.indexOf(general, at + 1) >= 0) {
+        throw new Error(`kernel ${pair.name} holds no single place for: ${general}`);
+      }
+      return code.replace(general, special);
+    }, wgsl);
+  return {
+    ...pair,
+    name: `${pair.name} for one band, edge-free`,
+    reference: rewrite(pair.reference),
+    subgroup: pair.subgroup === null ? null : rewrite(pair.subgroup),
+  };
+}
+
+/**
+ * {@link RAY_MARCH_KERNEL} specialised for one band and no layer edge (R08.T11.d;
+ * {@link withMarchSpecialised}): the march of a view's frame over such a body's air.
+ */
+export const RAY_MARCH_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_KERNEL);
+
+/** {@link RAY_MARCH_SLOTS_KERNEL} specialised likewise (R08.T11.d). */
+export const RAY_MARCH_SLOTS_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_SLOTS_KERNEL);
+
+/**
+ * Whether a body's tables take the specialised march ({@link withMarchSpecialised}; plan R08,
+ * R08.T11.d): one slice and one band in their plan, and no layer edge in their medium's, from the
+ * tables alone, never the body's class.
+ */
+export function marchSpecialisedFor(tables: AtmosphereTables): boolean {
+  return (
+    tables.plan.kappa.length === 1 &&
+    tables.plan.bands.length === 1 &&
+    marchEdgeCountOf(tables.layerEdges) === 0
+  );
+}
+
+/**
  * The ray march's target outside the air's area, (0, 0, 0, 1), for a reader of the whole target
  * (plan R08, R08.T11.d; `marchFill.wgsl`): {@link HillaireAtmosphere.frameTables} asks it, and a
  * frame never does, its composite reading no air there.
@@ -917,7 +982,8 @@ export const RAY_MARCH_FILL_KERNEL: KernelPair = {
  * How a frame's ray march covers its target (plan R08, R08.T11.d), each exact, each texel what the
  * march over the whole frame gives:
  * - `area`, a view's: {@link RAY_MARCH_KERNEL} over the air's area alone (`marchArea.ts`), the
- *   composite reading no air outside it;
+ *   composite reading no air outside it, specialised for a body of one band and no layer edge
+ *   ({@link RAY_MARCH_SPECIAL_KERNEL}, {@link marchSpecialisedFor});
  * - `tiles`: the area under the tile cull (`decision-r08-t8-leans.md` §11, Ruling 4),
  *   {@link RAY_MARCH_CENTRE_KERNEL} taking the tiles no far-limb footprint can blend in and
  *   {@link RAY_MARCH_KERNEL} the rest. Off: on the RTX 3080 it cost 0.4–1.0 ms against the whole
@@ -1026,6 +1092,13 @@ interface MarchKernels {
   /** The centre ray's, made at its first culled frame where the kernels are made synchronously. */
   readonly centre: () => ComputeHandle;
   readonly footprint: ComputeHandle;
+  /**
+   * The footprint's entry point specialised for one band and no layer edge (R08.T11.d,
+   * {@link withMarchSpecialised}), made up front with the footprint's by
+   * {@link createAtmosphereFrameKernels} and at its first frame over the area where the kernels
+   * are made synchronously.
+   */
+  readonly special: () => ComputeHandle;
 }
 
 /** The per-frame kernels, each with its output, as one frame dispatches them. */
@@ -1033,15 +1106,17 @@ interface FrameKernels {
   readonly skyView: ComputeHandle;
   readonly aerial: ComputeHandle;
   /**
-   * The march over the shared read ({@link RAY_MARCH_CENTRE_KERNEL}, {@link RAY_MARCH_KERNEL}):
+   * The march over the shared read ({@link RAY_MARCH_CENTRE_KERNEL}, {@link RAY_MARCH_KERNEL},
+   * {@link RAY_MARCH_SPECIAL_KERNEL}):
    * an atmosphere's own kernels make it at the first frame of tables that take it (R08.T11.d), so
    * that a body with slot layers never compiles the pair; the device's shared kernels
    * ({@link createAtmosphereFrameKernels}) make every kernel up front, off the frame path.
    */
   readonly rayMarch: () => MarchKernels;
   /**
-   * The ray march by slot ({@link RAY_MARCH_SLOTS_CENTRE_KERNEL}, {@link RAY_MARCH_SLOTS_KERNEL}),
-   * made at the first frame of tables that hold the slot layers (R08.T8.e).
+   * The ray march by slot ({@link RAY_MARCH_SLOTS_CENTRE_KERNEL}, {@link RAY_MARCH_SLOTS_KERNEL},
+   * {@link RAY_MARCH_SLOTS_SPECIAL_KERNEL}), made at the first frame of tables that hold the slot
+   * layers (R08.T8.e).
    */
   readonly rayMarchSlots: () => MarchKernels;
   /**
@@ -1102,7 +1177,9 @@ export interface FrameKernelsAhead {
 /**
  * Makes a device's {@link AtmosphereFrameKernels}: each kernel by `createComputeAsync` and the
  * composite's pipeline into an `rgba16float` target, as a photorealistic frame's atmosphere targets
- * are, by `createMaterialAsync`, so that no frame waits on a compile (plan R08, R08.T10.b).
+ * are, by `createMaterialAsync`, so that no frame waits on a compile (plan R08, R08.T10.b). Each
+ * read's march is made with its footprint's entry point twice, the general and the one specialised
+ * for one band and no layer edge (R08.T11.d, {@link RAY_MARCH_SPECIAL_KERNEL}).
  *
  * @throws Error, as a rejection, as the engine's async creations reject, `EngineUnavailable`
  *   among them during a loss.
@@ -1118,34 +1195,49 @@ export async function createAtmosphereFrameKernels(
     made: boolean,
     centrePair: KernelPair,
     footprintPair: KernelPair,
+    specialPair: KernelPair,
   ): Promise<() => MarchKernels> => {
     if (!made) {
       let late: MarchKernels | null = null;
       return () =>
         (late ??= (() => {
           let centre: ComputeHandle | null = null;
+          let special: ComputeHandle | null = null;
           return {
             centre: () => (centre ??= engine.createCompute(centrePair)),
             footprint: engine.createCompute(footprintPair),
+            special: () => (special ??= engine.createCompute(specialPair)),
           };
         })());
     }
-    const [footprint, centre] = await Promise.all([
+    const [footprint, special, centre] = await Promise.all([
       engine.createComputeAsync(footprintPair),
+      engine.createComputeAsync(specialPair),
       tiles ? engine.createComputeAsync(centrePair) : Promise.resolve(null),
     ]);
     let late: ComputeHandle | null = centre;
     const kernels: MarchKernels = {
       centre: () => (late ??= engine.createCompute(centrePair)),
       footprint,
+      special: () => special,
     };
     return () => kernels;
   };
   const [skyView, aerial, rayMarch, rayMarchSlots, composite] = await Promise.all([
     engine.createComputeAsync(SKY_VIEW_KERNEL),
     engine.createComputeAsync(AERIAL_PERSPECTIVE_KERNEL),
-    pairOf(reads !== "by slot", RAY_MARCH_CENTRE_KERNEL, RAY_MARCH_KERNEL),
-    pairOf(reads !== "shared read", RAY_MARCH_SLOTS_CENTRE_KERNEL, RAY_MARCH_SLOTS_KERNEL),
+    pairOf(
+      reads !== "by slot",
+      RAY_MARCH_CENTRE_KERNEL,
+      RAY_MARCH_KERNEL,
+      RAY_MARCH_SPECIAL_KERNEL,
+    ),
+    pairOf(
+      reads !== "shared read",
+      RAY_MARCH_SLOTS_CENTRE_KERNEL,
+      RAY_MARCH_SLOTS_KERNEL,
+      RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+    ),
     engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"], [triangle]),
   ]);
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
@@ -1561,18 +1653,30 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
   let shared: MarchKernels | null = null;
   let slots: MarchKernels | null = null;
   let fill: ComputeHandle | null = null;
-  const pairOf = (centre: KernelPair, footprint: KernelPair): MarchKernels => {
+  const pairOf = (
+    centre: KernelPair,
+    footprint: KernelPair,
+    specialPair: KernelPair,
+  ): MarchKernels => {
     let made: ComputeHandle | null = null;
+    let special: ComputeHandle | null = null;
     return {
       centre: () => (made ??= engine.createCompute(as(centre))),
       footprint: engine.createCompute(as(footprint)),
+      special: () => (special ??= engine.createCompute(as(specialPair))),
     };
   };
   return {
     skyView: engine.createCompute(as(SKY_VIEW_KERNEL)),
     aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_KERNEL)),
-    rayMarch: () => (shared ??= pairOf(RAY_MARCH_CENTRE_KERNEL, RAY_MARCH_KERNEL)),
-    rayMarchSlots: () => (slots ??= pairOf(RAY_MARCH_SLOTS_CENTRE_KERNEL, RAY_MARCH_SLOTS_KERNEL)),
+    rayMarch: () =>
+      (shared ??= pairOf(RAY_MARCH_CENTRE_KERNEL, RAY_MARCH_KERNEL, RAY_MARCH_SPECIAL_KERNEL)),
+    rayMarchSlots: () =>
+      (slots ??= pairOf(
+        RAY_MARCH_SLOTS_CENTRE_KERNEL,
+        RAY_MARCH_SLOTS_KERNEL,
+        RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+      )),
     rayMarchFill: () => (fill ??= engine.createCompute(as(RAY_MARCH_FILL_KERNEL))),
   };
 }
@@ -1959,12 +2063,14 @@ export class HillaireAtmosphere {
    * Over the device's shared kernels ({@link createAtmosphereFrameKernels}: every photorealistic
    * view's, and so the frame-timing harness's and QW31's) the ray march is dispatched over the air's
    * area alone, the tiles of its target that the top shell can reach (plan R08, R08.T11.d;
-   * `marchArea.ts`), the composite reading no air outside them. Over its own kernels (the smoke's
-   * other checks, the descent spike, the kernel arm) it marches the whole frame as before, unless
-   * asked ({@link HillaireAtmosphere.setMarchCover}; the tile cull is a cover of its own, off).
-   * Every cover is exact, each texel what the march over the whole frame gives: the smoke's
-   * `checkMarchArea` holds the area's and the tile cull's to the whole frame's, byte for byte on
-   * SwiftShader, and so binds them.
+   * `marchArea.ts`), the composite reading no air outside them, by the march specialised for one
+   * band and no layer edge where the tables fit it ({@link marchSpecialisedFor}). Over its own
+   * kernels (the smoke's other checks, the descent spike, the kernel arm) it marches the whole frame
+   * by the general march as before, unless asked ({@link HillaireAtmosphere.setMarchCover}; the
+   * tile cull is a cover of its own, off). Every cover is exact, each texel what the general march
+   * over the whole frame gives: the smoke's `checkMarchArea` and `checkMarchSpecialised` hold the
+   * area's, specialised, and the tile cull's to the whole frame's, byte for byte on SwiftShader,
+   * and so bind them.
    *
    * @param suns - The drawn sources, at most {@link MAX_SKY_SOURCES}: `sources.ts`'s `skySources`
    *   for a body, or a caller's own; none draws a sky of nothing but what lies behind it.
@@ -2271,7 +2377,15 @@ export class HillaireAtmosphere {
       if (tileCull) {
         engine.dispatch(march.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
       }
-      engine.dispatch(march.footprint, bindings, tiles, ATMOSPHERE_VIEW_PASS);
+      // A view's area over a body of one band with no layer edge takes the specialised march
+      // (R08.T11.d): exact there, and the general one on the reference path and under the cull.
+      const specialised = this.#cover === "area" && marchSpecialisedFor(tables);
+      engine.dispatch(
+        specialised ? march.special() : march.footprint,
+        bindings,
+        tiles,
+        ATMOSPHERE_VIEW_PASS,
+      );
     }
     // The rest of the target, (0, 0, 0, 1), for a reader of the whole (R08.T11.d): the frame's
     // waits for one, and the kernel arm's read-backs take it at once.

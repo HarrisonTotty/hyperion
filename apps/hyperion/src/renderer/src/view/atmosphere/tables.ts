@@ -1343,6 +1343,14 @@ const MARCH_EDGE_COUNT_AT = MARCH_EDGES_AT + MARCH_EDGES_MAX;
 export const LAYER_EDGES_FLOATS = MARCH_EDGE_COUNT_AT + 4;
 
 /**
+ * How many layer edges the per-frame marches cut their steps at, from {@link packLayerEdges}'
+ * block: `LayerEdges.count.x`, 0 for a medium with none (R08.T6.i; R08.T11.d's specialised march).
+ */
+export function marchEdgeCountOf(packed: Float32Array): number {
+  return packed[MARCH_EDGE_COUNT_AT] ?? 0;
+}
+
+/**
  * The medium's layer edges as the kernels' `layerEdges` uniform reads them (`common.wgsl`'s
  * `LayerEdges`; plan R08, R08.T6.d and R08.T6.i; `decision-r08-t6b-floor.md` §9.2 and
  * `decision-r08-t6d-findings.md` §1), of its density tables as the kernels read them

@@ -18,7 +18,8 @@
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
  * R08.T11.b's face count in part 12; R08.T11.e's unread tables in two, a giant's in part 9 after
  * R08.T8.a's march band and Earth's in part 12 after R08.T11.b's face count; R08.T11.d's march
- * area in part 8 after R07.T8.e–g's cell pass; R08.T6.b's kernels
+ * area in part 8 after R07.T8.e–g's cell pass, and its specialised march over the shared read in
+ * part 12 after R08.T11.e's Earth; R08.T6.b's kernels
  * over N terms in two, its medium of four
  * absorbers in part 6 and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the
  * Saturn-class figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
@@ -67,6 +68,7 @@ import {
   checkLowPick,
   checkMarchArea,
   checkMarchBand,
+  checkMarchSpecialised,
   checkSeveralSuns,
   checkSurfaceLightingEarth,
   checkSurfaceLightingSaturn,
@@ -148,9 +150,10 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7's
  * several suns, R08.T8.e's slot layers on its binary and R10.T16.g's datum over the image, 11
  * R08.T9.b's Earth and Saturn-class figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's
- * face count and R08.T11.e's Earth), 7 R10's terrain groups (R10.T10.b, T10.c, T11, T16 and
- * T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
- * joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's frames, which
+ * face count, R08.T11.e's Earth and R08.T11.d's specialised march over the shared read), 7 R10's
+ * terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2
+ * once R10.T9.b's cascades joined them (2026-10-21), and 1 every other group but R05.T12.e's and
+ * R05.T12.c's frames, which
  * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
  * materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
  * among them; part 1 also takes the captures, R08.T8.c's far limb's among them, when asked, under
@@ -469,6 +472,11 @@ async function run(
   await group(10, "R08.T8.e the binary's slot layers", () => checkBinarySlotLayers(engine, checks));
   await group(12, "R08.T11.e the unread column table at one texel on Earth", () =>
     checkUnreadEarth(engine, checks),
+  );
+  // In part 12 after R08.T11.e's Earth (the part 92 s at 415a7f82's gate), apart from part 8's
+  // march by slot, so that neither part's GPU process compiles both reads' marches.
+  await group(12, "R08.T11.d the specialised march over the shared read", () =>
+    checkMarchSpecialised(engine, checks, summary.fallback),
   );
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
   await group(11, "R08.T8.c the far limb's footprint", () =>

@@ -77,6 +77,7 @@ import {
   type MarchBand,
   type MarchCover,
   marchSourcesOf,
+  marchSpecialisedFor,
   marchWeightOf,
   skyViewHeight,
   type SpheroidFigure,
@@ -2428,6 +2429,11 @@ interface AreaBody {
   /** Its figure and gravity, the tables' slicing. */
   readonly body: () => AtmosphereBody;
   readonly frames: ReadonlyArray<AreaFrame>;
+  /**
+   * Whether its tables take the march specialised for one band and no layer edge over the area
+   * (`hillaire.ts`'s `marchSpecialisedFor`), which the check then holds to the general march.
+   */
+  readonly specialised: boolean;
 }
 
 /**
@@ -2458,10 +2464,12 @@ const AREA_FRAMES: ReadonlyArray<AreaFrame> = [
 ];
 
 /**
- * The measured Earth, whose tables hold the slot layers (the march by slot), in every frame. The
- * march over the shared read takes the same two entry points over another source's read
- * (`rayMarchCurves.wgsl`), and is left out for the part's watchdog: with R05's Earth from 10⁷ m
- * beside it the group took 50 to 52 s at a CPU quota of 400%, and part 12 149 to 166 s.
+ * The measured Earth, whose tables hold the slot layers (the march by slot), in every frame, its
+ * area by the specialised march. The march over the shared read takes the same two entry points
+ * over another source's read (`rayMarchCurves.wgsl`), and is left out of the tile cull's check for
+ * the part's watchdog: with R05's Earth from 10⁷ m beside it the group took 50 to 52 s at a CPU
+ * quota of 400%, and part 12 149 to 166 s. R05's Earth's area is held in a group of its own
+ * ({@link checkMarchSpecialised}).
  */
 const AREA_BODIES: ReadonlyArray<AreaBody> = [
   {
@@ -2470,6 +2478,22 @@ const AREA_BODIES: ReadonlyArray<AreaBody> = [
     curves: EARTH_REFERENCE_CURVES,
     body: earthBody,
     frames: AREA_FRAMES,
+    specialised: true,
+  },
+];
+
+/**
+ * R05's Earth on WGS 84, which keeps the shared read, its area by the specialised march, in the
+ * frames from 400 km, from 10⁷ m over a surface and at low's half resolution.
+ */
+const SPECIALISED_BODIES: ReadonlyArray<AreaBody> = [
+  {
+    name: "R05's Earth",
+    medium: R05_EARTH_REFERENCE,
+    curves: NO_ABSORBER_CURVES,
+    body: earthBody,
+    frames: AREA_FRAMES.filter((frame) => frame.distanceM !== 1e8),
+    specialised: true,
   },
 ];
 
@@ -2625,12 +2649,13 @@ async function areaReadsOf(
 /**
  * R08.T11.d: the march over each air body's area and the tile cull (`decision-r08-t11-frame.md`
  * §2; `decision-r08-t8-leans.md` §11, Ruling 4), each exact: each frame drawn over the air's area
- * (`marchArea.ts`; the `area` cover, a view's), the composite reading no air outside it; again
+ * (`marchArea.ts`; the `area` cover, a view's), the composite reading no air outside it, by the
+ * march specialised for one band and no layer edge, as the measured Earth's tables take it; again
  * under the tile cull (`tiles`, off for a view), the centre ray's entry point and the footprint's;
- * and on the reference path, the footprint's entry point over every texel, as the one kernel
- * marched before them. Each cover's composite output and the march's whole target (its rest filled
- * as a reader asks) are read back and compared with the reference's half float by half float: on a
- * fallback adapter (SwiftShader) the same byte for byte, and on hardware within T8.d's
+ * and on the reference path, the general footprint's entry point over every texel, as the one
+ * kernel marched before them. Each cover's composite output and the march's whole target (its rest
+ * filled as a reader asks) are read back and compared with the reference's half float by half
+ * float: on a fallback adapter (SwiftShader) the same byte for byte, and on hardware within T8.d's
  * fused-multiply-add ulp, 1, where two compiles may fuse differently (as E1′ and E4 did on the RTX
  * 3080, R08.T8.e). Each frame names its area and the kinds its tiles took on the GPU under the
  * cull, and the check holds that the frames met every kind.
@@ -2646,22 +2671,51 @@ export async function checkMarchArea(
   // the tile cull's centre ray's kernel, so that none is made on the frame path.
   const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot", tiles: true });
   try {
-    await checkAreaBodies(engine, checks, fallback, kernels);
+    await checkAreaBodies(engine, checks, fallback, kernels, AREA_BODIES, true);
   } finally {
     engine.releaseMaterial(kernels.composite);
     engine.releaseMesh(kernels.triangle);
   }
 }
 
-/** {@link checkMarchArea}'s bodies and frames over the device's shared kernels. */
+/**
+ * R08.T11.d: the march specialised for one band and no layer edge over the shared read, exact
+ * (`hillaire.ts`'s `withMarchSpecialised`): R05's Earth's frames over the air's area, which take
+ * it, held to the general march over the whole frame as {@link checkMarchArea} holds the measured
+ * Earth's by slot, byte for byte on a fallback adapter and within T8.d's ulp on hardware.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkMarchSpecialised(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  // R05's Earth keeps the shared read: that march alone, up front, without the tile cull's.
+  const kernels = await createAtmosphereFrameKernels(engine, { reads: "shared read" });
+  try {
+    await checkAreaBodies(engine, checks, fallback, kernels, SPECIALISED_BODIES, false);
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
+ * {@link checkMarchArea}'s and {@link checkMarchSpecialised}'s bodies and frames over the device's
+ * shared kernels, each frame over the area and, where `tileCull`, under the tile cull, each held
+ * to the whole frame's.
+ */
 async function checkAreaBodies(
   engine: RenderEngine,
   checks: Checks,
   fallback: boolean,
   kernels: AtmosphereFrameKernels,
+  bodies: ReadonlyArray<AreaBody>,
+  tileCull: boolean,
 ): Promise<void> {
   const met = { miss: 0, centre: 0, footprint: 0, unknown: 0 };
-  for (const body of AREA_BODIES) {
+  for (const body of bodies) {
     const sliced = body.body();
     const tables = new AtmosphereTables(
       engine,
@@ -2671,36 +2725,51 @@ async function checkAreaBodies(
       sliced,
     );
     try {
+      // Whether the area's frames take the specialised march, as the body is listed to.
+      const specialised = marchSpecialisedFor(tables);
+      const march = specialised ? "the specialised march" : "the general march";
       for (const frame of body.frames) {
         // The harness's GPU work runs in order: each frame is read back before the next draws.
         // oxlint-disable-next-line no-await-in-loop
         const area = await areaReadsOf(engine, tables, kernels, frame, "area");
-        // The tile cull's after it, in order as the area's: its read-backs before the next.
-        // oxlint-disable-next-line no-await-in-loop
-        const tiles = await areaReadsOf(engine, tables, kernels, frame, "tiles");
+        let tiles: AreaReads | null = null;
+        if (tileCull) {
+          // The tile cull's after it, in order as the area's: its read-backs before the next.
+          // oxlint-disable-next-line no-await-in-loop
+          tiles = await areaReadsOf(engine, tables, kernels, frame, "tiles");
+        }
         // The reference after both, in order as they were: its read-backs before the next.
         // oxlint-disable-next-line no-await-in-loop
         const whole = await areaReadsOf(engine, tables, kernels, frame, "whole frame");
-        met.miss += tiles.kinds.miss;
-        met.centre += tiles.kinds.centre;
-        met.footprint += tiles.kinds.footprint;
-        met.unknown += tiles.unknown;
-        for (const [what, reads, how] of [
-          ["the march over the air's area", area, `the area ${area.area}`],
+        const covers: Array<readonly [string, AreaReads, string, boolean]> = [
           [
+            `${march} over the air's area`,
+            area,
+            `the area ${area.area}`,
+            specialised === body.specialised,
+          ],
+        ];
+        if (tiles !== null) {
+          met.miss += tiles.kinds.miss;
+          met.centre += tiles.kinds.centre;
+          met.footprint += tiles.kinds.footprint;
+          met.unknown += tiles.unknown;
+          covers.push([
             "the tile cull over the air's area",
             tiles,
             `the area ${tiles.area}; the tiles ${tiles.kinds.miss} missed, ${tiles.kinds.centre} at the centre ray, ${tiles.kinds.footprint} over the footprint`,
-          ],
-        ] as const) {
+            true,
+          ]);
+        }
+        for (const [what, reads, how, chosen] of covers) {
           const composite = halvesDiffering(reads.composite, whole.composite);
-          const march = halvesDiffering(reads.march, whole.march);
-          const same = composite.texels === 0 && march.texels === 0;
-          const withinUlp = composite.ulps <= 1 && march.ulps <= 1;
+          const marched = halvesDiffering(reads.march, whole.march);
+          const same = composite.texels === 0 && marched.texels === 0;
+          const withinUlp = composite.ulps <= 1 && marched.ulps <= 1;
           checks.check(
-            `R08.T11.d ${body.name}, ${frame.setting}, ${frame.name}: ${what} reads back as the march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
-            fallback ? same : withinUlp,
-            `${differenceOf("the composite's output", composite)}, ${differenceOf("the march's target", march)} (${fallback ? "SwiftShader: byte for byte" : "hardware: within T8.d's fused-multiply-add ulp"}); ${how}`,
+            `R08.T11.d ${body.name}, ${frame.setting}, ${frame.name}: ${what} reads back as the general march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
+            chosen && (fallback ? same : withinUlp),
+            `${differenceOf("the composite's output", composite)}, ${differenceOf("the march's target", marched)} (${fallback ? "SwiftShader: byte for byte" : "hardware: within T8.d's fused-multiply-add ulp"}); ${how}`,
           );
         }
       }
@@ -2708,11 +2777,13 @@ async function checkAreaBodies(
       tables.dispose();
     }
   }
-  checks.check(
-    "R08.T11.d the tile cull's frames met each of its kinds on the GPU, and wrote no other code",
-    met.miss > 0 && met.centre > 0 && met.footprint > 0 && met.unknown === 0,
-    `${met.miss} tiles missed, ${met.centre} at the centre ray, ${met.footprint} over the footprint, ${met.unknown} of no kind`,
-  );
+  if (tileCull) {
+    checks.check(
+      "R08.T11.d the tile cull's frames met each of its kinds on the GPU, and wrote no other code",
+      met.miss > 0 && met.centre > 0 && met.footprint > 0 && met.unknown === 0,
+      `${met.miss} tiles missed, ${met.centre} at the centre ray, ${met.footprint} over the footprint, ${met.unknown} of no kind`,
+    );
+  }
 }
 
 // --- R08.T7: several suns, and the sky through the air -------------------------------------------
