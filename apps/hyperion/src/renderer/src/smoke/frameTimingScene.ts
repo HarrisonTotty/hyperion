@@ -35,8 +35,7 @@
  * - `TEST SATURN`'s far-limb frames ({@link farLimbFrameScene} on Saturn's spheroid at
  *   {@link placesScaledTo}'s distances): Earth's five cameras with every distance scaled by the
  *   equatorial radii's ratio, so that the disc and its limb fill the frame as the Earth's do, under
- *   the stars' sets alone ({@link STAR_SETS}), since a giant's moons light it far under the sky's
- *   cut;
+ *   the stars' sets alone ({@link STAR_SETS});
  * - three small air bodies in one view ({@link smallEarthsScene}), each its own air, under a
  *   binary's two stars, each body lit by the other two's planetshine too ({@link trioSourceSet});
  * - two class maps with their normal maps: R10's fixture's as the smoke builds it
@@ -378,9 +377,18 @@ export function smallEarthScene(
 }
 
 /**
- * The stars' sets alone, `x1` and `x2`: `TEST SATURN`'s rows. A giant's moons light it at under
- * 10⁻⁶ of the Sun (Titan: geometric albedo about 0.2, (2,575 km ÷ 1.22 × 10⁶ km)² about 4.5 × 10⁻⁶),
- * far under the sky's cut, so no planetshine set stands for a giant.
+ * The stars' sets alone, `x1` and `x2`: `TEST SATURN`'s rows, the frames of R08.T6.f's
+ * Saturn-class passes (`decision-r08-approximate-plate.md` item 3).
+ *
+ * @remarks
+ * The Earth's planetshine sets are not taken: their giants stand {@link GIANT_DISTANCE_M} from the
+ * body, a distance placed for the Earth's cameras, inside the farthest of the cameras scaled to a
+ * giant. A giant does take planetshine in VIEW: the plan gives every lit body its brightest
+ * neighbours however faint (`planetshineSources`), its moons among them: Io, seen from Jupiter's
+ * centre at full phase, at p (R ÷ a)² = 0.63 × (1,821.49 km ÷ 421,800 km)² ≈ 1.2 × 10⁻⁵ of the Sun
+ * (a: JPL SSD's mean orbital elements, JUP365; R: JPL SSD's physical parameters, from Archinal et
+ * al. 2018, Celest. Mech. Dyn. Astron. 130, 22; p: Simonelli and Veverka 1984, Icarus 59, 406).
+ * Those rows are left for a later run.
  */
 export const STAR_SETS: readonly SourceSet[] = [
   { name: "x1", stars: 1, giants: 0 },
@@ -435,11 +443,14 @@ export interface SmallBodiesScene {
 
 /**
  * The three small air bodies' frame (QW29, `decision-r08-t11-frame.md` §2): the Earth on `figure`
- * three times in one view, at {@link SMALL_TRIO}'s diameters and directions, each at the distance
- * {@link smallEarthScene} gives its diameter; the Sun 40° off the middle body's line of sight, as
- * {@link smallEarthScene}'s, and in a binary's set the second star turned from it about the pole
- * (+z) by {@link COMPANION_TURN_RAD}, at {@link COMPANION_DISTANCE_M}, as {@link farLimbFrameScene}
- * turns it; the camera's axes the bodies' body-fixed ones.
+ * three times in one view, lit by `set`'s stars.
+ *
+ * @remarks
+ * Each body stands at {@link SMALL_TRIO}'s diameter and direction, at the distance
+ * {@link smallEarthScene} gives its diameter. The Sun stands 40° off the middle body's line of
+ * sight, as {@link smallEarthScene}'s does; in a binary's set the second star is turned from it
+ * about the pole (+z) by {@link COMPANION_TURN_RAD}, at {@link COMPANION_DISTANCE_M}, as
+ * {@link farLimbFrameScene} turns it. The camera's axes are the bodies' body-fixed ones.
  *
  * @throws RangeError for a set with giants: the small bodies take the stars alone.
  */
@@ -467,7 +478,10 @@ export function smallEarthsScene(
       },
     };
   });
-  const middle = bodies[1]?.centreM ?? vec3(0, 0, 0);
+  const middle = bodies[1]?.centreM;
+  if (middle === undefined) {
+    throw new Error("the small bodies' trio has a middle body");
+  }
   const towards = vec3(Math.sin(SMALL_SUN_OFF_RAD), 0, Math.cos(SMALL_SUN_OFF_RAD));
   const lights: PlacedLight[] = [{ disc: SUN_DISC, centreM: add(middle, scale(towards, AU_M)) }];
   if (set.stars === 2) {
@@ -509,7 +523,7 @@ export function smokeClassMapTexels(): ClassMapTexels {
 }
 
 /** The smoke's R10 fixture's laws (`bodies.ts`' T8.b and R10.T10.d checks): lunar, then terrestrial. */
-export function smokeClassLaws(): PhotometricLaw[] {
+export function smokeClassLaws(): readonly [PhotometricLaw, PhotometricLaw] {
   return [
     lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
     lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
@@ -557,14 +571,16 @@ function nodeAlbedo(k: number, j: number, channel: number): number {
 }
 
 /**
- * A generated patch's whole palette as a class map, QW29's second class-map row (recorded): at
- * R10's level, every texel surveyed, {@link GENERATED_CLASSES} classes; each region of
+ * A generated patch's whole palette as a class map: QW29's second class-map row, recorded.
+ *
+ * @remarks
+ * It is at R10's level, every texel surveyed, with {@link GENERATED_CLASSES} classes. Each region of
  * {@link GENERATED_REGION_TEXELS} × {@link GENERATED_REGION_TEXELS} texels holds three of them, its
- * shares turning smoothly across it (0.4–0.6, 0.25–0.35 and the rest), the regions' triples turning
- * across the face, so that a point meets three classes inside a region and up to six on its edges;
- * each class drawn from its maturity nodes (R10.T1.c), the codes turning smoothly. A timing scene's
- * map, heavier than the R10 fixture's in every term the shader reads: classes, shares, maturity and
- * the normal map.
+ * shares turning smoothly across it (0.4–0.6, 0.25–0.35 and the rest), and the regions' triples turn
+ * across the face, so that a point meets three classes inside a region and up to six on its edges.
+ * Each class is drawn from its maturity nodes (R10.T1.c), the codes turning smoothly. A timing
+ * scene's map, it is heavier than the R10 fixture's in every term the shader reads: classes, shares,
+ * maturity and the normal map.
  */
 export function generatedClassMapTexels(): ClassMapTexels {
   const classes = GENERATED_CLASSES;
@@ -584,11 +600,12 @@ export function generatedClassMapTexels(): ClassMapTexels {
       const first = (Math.floor(i / side) + 3 * Math.floor(j / side) + 5 * face) % classes;
       const u = (i % side) / (side - 1);
       const v = (j % side) / (side - 1);
-      const shares = [0.4 + 0.2 * u, 0.35 - 0.1 * v];
+      const firstShare = 0.4 + 0.2 * u;
+      const secondShare = 0.35 - 0.1 * v;
       const weights = Array.from({ length: classes }, () => 0);
-      weights[first] = shares[0] ?? 0;
-      weights[(first + 3) % classes] = shares[1] ?? 0;
-      weights[(first + 5) % classes] = 1 - (shares[0] ?? 0) - (shares[1] ?? 0);
+      weights[first] = firstShare;
+      weights[(first + 3) % classes] = secondShare;
+      weights[(first + 5) % classes] = 1 - firstShare - secondShare;
       return weights;
     },
     {
@@ -607,7 +624,7 @@ export function generatedClassLaws(): PhotometricLaw[] {
   const [moon, earth] = smokeClassLaws();
   const lambert = lawFor([0.2, 0.2, 0.2], [1.5, 1.5, 1.5], "lambert");
   return Array.from({ length: GENERATED_CLASSES }, (_, k) =>
-    k % 3 === 0 ? (moon ?? lambert) : k % 3 === 1 ? (earth ?? lambert) : lambert,
+    k % 3 === 0 ? moon : k % 3 === 1 ? earth : lambert,
   );
 }
 

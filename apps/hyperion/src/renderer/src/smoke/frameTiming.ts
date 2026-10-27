@@ -2226,7 +2226,7 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       checks,
       saturnFrames,
       () =>
-        `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the stars' sets alone, since a giant's moons light it far under the sky's cut`,
+        `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the stars' sets alone, the Earth's giants being placed for the Earth's cameras`,
     );
     const frameMissing = missingOf(frames);
     const mappedMissing = missingOf(mappedFrames);
@@ -2249,7 +2249,8 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       firstAirFrame(engine, checks, on, ledger, measured, frames, { frameMs: prepareMs, bytes }),
     );
   } finally {
-    // The renderer and its view, then the media's tables, then the ledger.
+    // The renderer and its view, then (J)'s tables and (I)'s textures, then (A)'s tables, then the
+    // ledger.
     releases.run();
     checks.check(CHECK_NAMES.wall, true, wall.join(", "));
   }

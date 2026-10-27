@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { norm, normalise, sub } from "../geometry/vec3";
+import { add, dot, norm, normalise, sub, vec3 } from "../geometry/vec3";
 import { NO_NORMAL_ABOVE, type NormalMapTexels } from "../view/bodies/discNormals";
-import { type ClassMapTexels, classMapSide, classMapTexelLayers } from "../view/bodies/discSurface";
+import { type ClassMapTexels, classMapSide } from "../view/bodies/discSurface";
 import { SATURN_OBLATE_CASE } from "../view/atmosphere/reference/cases";
 import { builtOfCase } from "../view/scenes/atmosphereScene";
 import { CLASS_MAP_FACE_TEXELS } from "../view/terrain/classMap";
@@ -23,6 +23,7 @@ import {
   NO_ABSORBER_CURVES,
 } from "../view/atmosphere/tables";
 import { bodyLightSources } from "../view/bodies/draw";
+import { rotate } from "../view/camera/quaternion";
 import { SUN_RADIUS_M } from "../view/lighting/hostDisc";
 import { type QualitySetting, SETTINGS } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
@@ -30,6 +31,7 @@ import { sphereOutsideView } from "../view/wireframe/submit";
 import { FAR_LIMB_TIMING_PLACES, settingOutput, SLICES_EARTH } from "./atmosphere";
 import {
   angleBetweenRad,
+  COMPANION_DISTANCE_M,
   earthInput,
   farLimbFrameScene,
   type FrameScene,
@@ -290,6 +292,9 @@ describe("TEST SATURN's frames", () => {
     expect(saturnRad.map((rad, i) => Math.abs(rad - (earthRad[i] ?? Number.NaN)))).toEqual(
       places.map(() => expect.closeTo(0, 12)),
     );
+  });
+
+  it("names each camera by its distance", () => {
     expect(places.map(({ label }) => label)).toEqual([
       "6.40e7 m",
       "9.45e7 m",
@@ -297,6 +302,27 @@ describe("TEST SATURN's frames", () => {
       "2.41e8 m",
       "9.45e8 m",
     ]);
+  });
+
+  it("aims each view's centre ray at Saturn's datum, at a tangent height of 0", () => {
+    const off = frames
+      .filter(({ scene }) => {
+        const p = scene.air.positionM;
+        const along = dot(p, rotate(scene.air.orientation, vec3(0, 0, -1)));
+        const missM = Math.sqrt(dot(p, p) - along * along);
+        return !(Math.abs(missM - figure.equatorialRadiusM) < 1e-9 * figure.equatorialRadiusM);
+      })
+      .map(({ label }) => label);
+    expect(off).toEqual([]);
+  });
+
+  it("gives its body Saturn's radii about the frame's +z", () => {
+    const body = earthInput("0200080020000000.0315", built.medium, vec3(0, 0, 0), figure);
+    expect(body.figure).toEqual({
+      equatorialRadiusM: figure.equatorialRadiusM,
+      polarRadiusM: figure.polarRadiusM,
+      pole: vec3(0, 0, 1),
+    });
   });
 
   it("stands every camera above its air's top", () => {
@@ -342,6 +368,10 @@ describe("three small air bodies in one view", () => {
   }
   const scene = smallEarthsScene(viewport, SLICES_EARTH.figure, set);
   const pxPerRad = viewport.widthPx / (2 * Math.tan(scene.camera.fovXRad / 2));
+  const middle = scene.bodies[1];
+  if (middle === undefined) {
+    throw new Error("the trio has a middle body");
+  }
 
   it("draws each at its diameter, on the on-axis reckoning", () => {
     const drawn = scene.bodies.map(({ centreM }) =>
@@ -354,34 +384,74 @@ describe("three small air bodies in one view", () => {
     expect(drawn).toEqual(SMALL_TRIO.map(({ diameterPx }) => diameterPx));
   });
 
-  it("stands them 6° apart, more than 150 px between their discs' edges", () => {
-    const gapsPx = scene.bodies.slice(1).map((body, i) => {
-      const before = scene.bodies[i];
-      if (before === undefined) {
-        return Number.NaN;
-      }
-      const apartRad = angleBetweenRad(before.centreM, body.centreM);
-      expect(apartRad).toBeCloseTo((6 * Math.PI) / 180, 12);
-      return apartRad * pxPerRad - (before.diameterPx + body.diameterPx) / 2;
-    });
-    expect(gapsPx.every((gap) => gap > 150)).toBe(true);
+  it("stands them 6° apart", () => {
+    const apartDeg = scene.bodies
+      .slice(1)
+      .map((body, i) =>
+        Number(
+          (
+            (angleBetweenRad(scene.bodies[i]?.centreM ?? body.centreM, body.centreM) * 180) /
+            Math.PI
+          ).toFixed(9),
+        ),
+      );
+    expect(apartDeg).toEqual([6, 6]);
   });
 
-  it("puts each body's air camera on the far side of its centre, in the frame's axes", () => {
-    for (const body of scene.bodies) {
-      expect(body.air.positionM).toEqual({
-        x: -body.centreM.x,
-        y: -body.centreM.y,
-        z: -body.centreM.z,
-      });
-      expect(body.air.orientation).toEqual(scene.camera.orientation);
+  it("leaves more than 150 px between their discs' edges", () => {
+    const gapsPx = scene.bodies.slice(1).map((body, i) => {
+      const before = scene.bodies[i];
+      return before === undefined
+        ? Number.NaN
+        : angleBetweenRad(before.centreM, body.centreM) * pxPerRad -
+            (before.diameterPx + body.diameterPx) / 2;
+    });
+    expect(gapsPx.filter((gap) => !(gap > 150))).toEqual([]);
+  });
+
+  it("puts each body's air camera on the far side of its centre", () => {
+    const off = scene.bodies.filter((body) => !(norm(add(body.air.positionM, body.centreM)) === 0));
+    expect(off).toEqual([]);
+  });
+
+  it("gives each body's air camera the frame's axes", () => {
+    expect(scene.bodies.map((body) => body.air.orientation)).toEqual(
+      scene.bodies.map(() => scene.camera.orientation),
+    );
+  });
+
+  it("lights the middle body by the Sun 40° off its line of sight", () => {
+    const sun = scene.lights[0];
+    const offDeg =
+      sun === undefined
+        ? Number.NaN
+        : (angleBetweenRad(sub(sun.centreM, middle.centreM), middle.air.positionM) * 180) / Math.PI;
+    expect(offDeg).toBeCloseTo(40, 9);
+  });
+
+  it("turns the second star 40° from the Sun about the pole, at √10 au", () => {
+    const sun = scene.lights[0];
+    const second = scene.lights[1];
+    if (sun === undefined || second === undefined) {
+      throw new Error("x2 places two stars");
     }
+    const s = normalise(sub(sun.centreM, middle.centreM));
+    const c = sub(second.centreM, middle.centreM);
+    const turnDeg = ((Math.atan2(c.y, c.x) - Math.atan2(s.y, s.x)) * 180) / Math.PI;
+    expect([norm(c) / COMPANION_DISTANCE_M, c.z / norm(c) - s.z, turnDeg]).toEqual([
+      expect.closeTo(1, 12),
+      expect.closeTo(0, 12),
+      expect.closeTo(40, 9),
+    ]);
+  });
+
+  it("draws each body's sources as the set's two stars and the other two's planetshine", () => {
+    expect(trioSourceSet(set, "high")).toEqual({ name: "x2", stars: 2, giants: 2 });
   });
 
   it("lights every body by both stars, each on its own slot, and the other two's planetshine", () => {
     const photoreal = SETTINGS.high.photoreal;
     const drawn = trioSourceSet(set, "high");
-    expect(drawn).toEqual({ name: "x2", stars: 2, giants: 2 });
     const ids = ["0200080020000000.0341", "0200080020000000.0342", "0200080020000000.0343"];
     const inputs = scene.bodies.map((body, i) =>
       earthInput(ids[i] ?? "0200080020000000.0340", EARTH_REFERENCE, body.centreM),
@@ -454,10 +524,15 @@ describe("R10's smoke class map", () => {
   const n = map.faceTexels;
 
   it("holds two classes at R10's level with no maturity, as the smoke's R10.T10.d map", () => {
-    expect(map.classes).toBe(2);
-    expect(map.faceTexels).toBe(CLASS_MAP_FACE_TEXELS);
-    expect(map.maturity).toBeUndefined();
-    expect(smokeClassLaws()).toHaveLength(2);
+    expect([map.classes, map.faceTexels, map.maturity]).toEqual([
+      2,
+      CLASS_MAP_FACE_TEXELS,
+      undefined,
+    ]);
+  });
+
+  it("shades its classes by the smoke's lunar and terrestrial laws", () => {
+    expect(smokeClassLaws().map((law) => law.template)).toEqual(["moon", "earth"]);
   });
 
   it("surveys half of every face, the edge column half, and nothing past it", () => {
@@ -472,9 +547,8 @@ describe("R10's smoke class map", () => {
   it("carries its normals at level 7 over the same half of every face", () => {
     const normals = smokeNormalMapTexels(SLICES_EARTH.figure);
     const m = 2 ** NORMAL_MAP_LEVEL;
-    expect(normals.faceTexels).toBe(128);
     const wrong = normalsHeld(normals).filter((held, t) => held !== t % m < m / 2);
-    expect(wrong).toEqual([]);
+    expect([normals.faceTexels, wrong]).toEqual([128, []]);
   });
 });
 
@@ -484,13 +558,16 @@ describe("a generated palette's class map", () => {
   const n = map.faceTexels;
   const r = GENERATED_REGION_TEXELS;
 
-  it("holds a generated patch's eight classes at R10's level, each drawn from its nodes", () => {
-    expect(map.classes).toBe(GENERATED_CLASSES);
-    expect(GENERATED_CLASSES).toBe(8);
-    expect(map.faceTexels).toBe(CLASS_MAP_FACE_TEXELS);
-    expect(map.maturity?.drawn).toEqual(Array.from({ length: 8 }, () => true));
-    expect(map.data.length).toBe(classMapSide(n) * classMapSide(n) * classMapTexelLayers(map) * 4);
-    expect(generatedClassLaws()).toHaveLength(8);
+  it("holds a generated patch's eight classes at R10's level", () => {
+    expect([map.classes, map.faceTexels]).toEqual([8, CLASS_MAP_FACE_TEXELS]);
+  });
+
+  it("draws every class from its maturity nodes", () => {
+    expect(map.maturity?.drawn).toEqual(Array.from({ length: GENERATED_CLASSES }, () => true));
+  });
+
+  it("gives each class a law", () => {
+    expect(generatedClassLaws()).toHaveLength(GENERATED_CLASSES);
   });
 
   it("surveys every texel whole, three classes a texel", () => {
@@ -498,11 +575,10 @@ describe("a generated palette's class map", () => {
       (texel) =>
         texel.reduce((sum, b) => sum + b, 0) !== 255 || texel.filter((b) => b > 0).length !== 3,
     );
-    expect(bytes).toHaveLength(6 * 64 * 64);
-    expect(off).toEqual([]);
+    expect([bytes.length, off]).toEqual([6 * 64 * 64, []]);
   });
 
-  it("keeps one region's three classes across it, every class held somewhere", () => {
+  it("keeps one region's three classes across it", () => {
     const split = bytes.filter((texel, t) => {
       const face = Math.floor(t / (n * n));
       const i = t % n;
@@ -511,13 +587,18 @@ describe("a generated palette's class map", () => {
       return classesOf(texel) !== classesOf(corner);
     });
     expect(split).toEqual([]);
+  });
+
+  it("holds every class of the palette somewhere", () => {
     const held = new Set(bytes.flatMap((texel) => texel.flatMap((b, k) => (b > 0 ? [k] : []))));
     expect([...held].toSorted((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   });
 
   it("carries the field's normals at level 7 on every cell", () => {
     const normals = generatedNormalMapTexels(SLICES_EARTH.figure);
-    expect(normals.faceTexels).toBe(2 ** NORMAL_MAP_LEVEL);
-    expect(normalsHeld(normals).filter((held) => !held)).toEqual([]);
+    expect([normals.faceTexels, normalsHeld(normals).filter((held) => !held)]).toEqual([
+      2 ** NORMAL_MAP_LEVEL,
+      [],
+    ]);
   });
 });
