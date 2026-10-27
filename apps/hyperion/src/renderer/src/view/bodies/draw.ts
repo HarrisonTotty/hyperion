@@ -897,10 +897,11 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
 export const DISC_CELLS_PASS = "disc cells";
 
 /**
- * The `disc cells` kernel (R07.T8.d–f, decision-r07-small-disc-cost §1.2, decision-r08-t11-frame
+ * The `disc cells` kernel (R07.T8.d–g, decision-r07-small-disc-cost §1.2, decision-r08-t11-frame
  * §2; `shaders/bodyDiscCells.wgsl`): every cell of every pixel of the frame's small discs, and of
- * its larger discs' limbs, shaded at once, one invocation a cell, and summed in each pixel's order
- * for the draws to read.
+ * its larger discs' limbs and their faces' near-limb bands, shaded at once, one invocation a cell,
+ * as many pixels a workgroup as fit (R07.T8.g), and summed in each pixel's order for the draws to
+ * read.
  *
  * @remarks
  * Its one source serves both capability paths: it has no subgroup variant. Its sums are a pure
@@ -916,15 +917,16 @@ export const BODY_DISC_CELLS_KERNEL: KernelPair = {
   readback: "bit-exact",
 };
 
-/** The workgroups a dispatch lays along x at most, the kernel's `JOBS_PER_ROW`. */
-const CELL_JOBS_PER_ROW = 65_535;
+/** The workgroups a dispatch lays along x at most, the kernel's `GROUPS_PER_ROW`. */
+const CELL_GROUPS_PER_ROW = 65_535;
 
 /**
- * The `disc cells` dispatch's workgroups for `jobs` jobs, one a job: (min(J, 65,535),
- * ⌈J ÷ 65,535⌉, 1), within WebGPU's 65,535 a dimension; the kernel leaves the last row's excess.
+ * The `disc cells` dispatch's grid for a set's `groups` workgroups (its `DiscCellSet.groups`,
+ * each a run of pixels, R07.T8.g): (min(G, 65,535), ⌈G ÷ 65,535⌉, 1), within WebGPU's 65,535 a
+ * dimension; the kernel leaves the last row's excess.
  */
-export function cellWorkgroups(jobs: number): readonly [number, number, number] {
-  return [Math.min(jobs, CELL_JOBS_PER_ROW), Math.ceil(jobs / CELL_JOBS_PER_ROW), 1];
+export function cellWorkgroups(groups: number): readonly [number, number, number] {
+  return [Math.min(groups, CELL_GROUPS_PER_ROW), Math.ceil(groups / CELL_GROUPS_PER_ROW), 1];
 }
 
 /** Bytes of one pixel's sums in `cell_sums`: two `vec4f`. */
@@ -1010,6 +1012,8 @@ interface DeviceResources {
   instances: BufferHandle;
   /** The `disc cells` pass's jobs and the pixels' sums it leaves (R07.T8.d). */
   cellJobs: BufferHandle;
+  /** Its workgroups' runs of the jobs (R07.T8.g). */
+  cellGroups: BufferHandle;
   cellSums: BufferHandle;
 }
 
@@ -1022,8 +1026,9 @@ interface DeviceResources {
  * draws, its wholly covered pixels and then its limb; each run of points one draw of
  * `spriteMaterial`, an HDR twin of R02's star sprite reading `sprites` at binding 0. A mesh body is
  * one instanced draw of its figure ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass) and
- * its limb's draw in the sequence. The small discs' cells, and the larger discs' limb pixels', are
- * shaded first by the `disc cells` pass ({@link LitBodyRenderer.dispatchCells}, R07.T8.d–f),
+ * its limb's draw in the sequence. The small discs' cells, and the larger discs' limb pixels' and
+ * their faces' near-limb bands', are shaded first by the `disc cells` pass
+ * ({@link LitBodyRenderer.dispatchCells}, R07.T8.d–g),
  * whose sums their draws read. A plan's
  * records are written once, by whichever of the three is called first for it, so all three must
  * be called for a plan before its passes are submitted, {@link LitBodyRenderer.dispatchCells}
@@ -1113,6 +1118,7 @@ export class LitBodyRenderer {
       slots: this.#buffer("bodies:mesh slots", MIN_BUFFER_BYTES),
       instances: this.#buffer("bodies:mesh instances", MIN_BUFFER_BYTES),
       cellJobs: this.#buffer("bodies:disc cell jobs", MIN_BUFFER_BYTES),
+      cellGroups: this.#buffer("bodies:disc cell groups", MIN_BUFFER_BYTES),
       cellSums: this.#buffer("bodies:disc cell sums", MIN_BUFFER_BYTES),
     };
   }
@@ -1171,7 +1177,7 @@ export class LitBodyRenderer {
   }
 
   /** Writes `data` into a buffer, replacing it by a doubled one if it is too small. */
-  #write(handle: BufferHandle, data: Float32Array | Int32Array): BufferHandle {
+  #write(handle: BufferHandle, data: Float32Array | Int32Array | Uint32Array): BufferHandle {
     const target = this.#reserve(handle, data.byteLength);
     if (data.byteLength > 0) {
       this.#engine.writeBuffer(target, 0, data);
@@ -1268,11 +1274,11 @@ export class LitBodyRenderer {
   }
 
   /**
-   * Shades a plan's discs' cells in parallel: the `disc cells` pass (R07.T8.d–f,
+   * Shades a plan's discs' cells in parallel: the `disc cells` pass (R07.T8.d–g,
    * decision-r07-small-disc-cost §1.2, decision-r08-t11-frame §2), one dispatch of `kernel`
    * ({@link BODY_DISC_CELLS_KERNEL}) for each set of textures its records bind, over every pixel of
-   * each disc under 32 px and each larger disc's limb pixels ({@link discCellJobs}), and none where
-   * the plan has no such pixel.
+   * each disc under 32 px and each larger disc's limb pixels and its face's near-limb band
+   * ({@link discCellJobs}), and none where the plan has no such pixel.
    *
    * @remarks
    * It writes the plan's records with each such disc's sums in row 51, and is called for a plan
@@ -1281,7 +1287,8 @@ export class LitBodyRenderer {
    * submission, in call order. A plan already written by either of those is left to sum its own
    * cells, and nothing is dispatched. Each dispatch binds its set's textures, its body's
    * atmosphere tables and its class map and normal map, or the defaults (R07.T8.e), takes its run
-   * of the jobs from its first, and has {@link cellWorkgroups}' workgroups for them, one a pixel.
+   * of the workgroups from its first, and has {@link cellWorkgroups}' grid for them, each workgroup
+   * a run of up to `pixelsPerGroup` pixels of one cell count (R07.T8.g).
    *
    * @param frame - The `discs` pass's own frame, which the kernel shades in and a large disc's limb
    *   is found in.
@@ -1301,6 +1308,7 @@ export class LitBodyRenderer {
     this.#upload(plan, cells);
     const resources = this.#resources;
     resources.cellJobs = this.#write(resources.cellJobs, cells.jobs);
+    resources.cellGroups = this.#write(resources.cellGroups, cells.groups);
     resources.cellSums = this.#reserve(resources.cellSums, cells.count * CELL_SUM_BYTES);
     const block = discCellFrameBlock(frame);
     for (const set of cells.sets) {
@@ -1313,11 +1321,12 @@ export class LitBodyRenderer {
         {
           uniforms: {
             frame: block,
-            cell_pass: new Uint32Array([set.count, set.first, 0, 0]),
+            cell_pass: new Uint32Array([set.groups, set.firstGroup, 0, 0]),
           },
           buffers: {
             discs: resources.discs,
             cell_jobs: resources.cellJobs,
+            cell_groups: resources.cellGroups,
             cell_sums: resources.cellSums,
           },
           sampled: {
@@ -1328,7 +1337,7 @@ export class LitBodyRenderer {
           },
           storage: {},
         },
-        cellWorkgroups(set.count),
+        cellWorkgroups(set.groups),
         DISC_CELLS_PASS,
       );
     }
@@ -1467,6 +1476,7 @@ export class LitBodyRenderer {
       resources.slots,
       resources.instances,
       resources.cellJobs,
+      resources.cellGroups,
       resources.cellSums,
     ];
     for (const buffer of buffers) {

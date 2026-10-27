@@ -1,13 +1,14 @@
 /**
- * The smoke page's checks of the `disc cells` pass for every record (plan R07, R07.T8.e and
- * R07.T8.f; decision-r08-t11-frame §2 and §7): G11 on the GPU, each plan drawn through the pass and
+ * The smoke page's checks of the `disc cells` pass for every record (plan R07, R07.T8.e to
+ * R07.T8.g; decision-r08-t11-frame §2 and §7): G11 on the GPU, each plan drawn through the pass and
  * in-fragment in the same run, every channel within one `rgba16float` ulp and every alpha (the
  * interior's meter class) equal. The plans hold a 13 px body with air (R05's Earth's tables) as a
  * disc and as the mesh the view draws it as, and a 13 px disc under a half-surveyed two-class map,
  * which the pass now binds (T8.e); a 220 px airless disc's limb, and a 96 px air body's limb in the
- * mesh regime, which it now takes (T8.f); and one plan of four such bodies, three sets of textures
- * and two limbs, so that a later set's jobs and a later limb's span rows are read. The large
- * airless disc and the class map's disc are held to the CPU rasteriser too (G10).
+ * mesh regime, which it now takes (T8.f), each with its face's near-limb band (T8.g); and one plan
+ * of four such bodies, three sets of textures and two limbs, so that a later set's jobs and a later
+ * limb's span rows are read. The large airless disc and the class map's disc are held to the CPU
+ * rasteriser too (G10).
  *
  * @remarks
  * The pass is exact, so an in-fragment draw where the pass was meant equals it too: a third draw of
@@ -15,7 +16,8 @@
  * sentinel far above any light drawn, and every pixel the draws must take from the pass shows it:
  * each pixel of a disc under 32 px, and each limb pixel of a larger one, that the limb draw's
  * corner tests (`bodyDisc.wgsl`'s `disc_pixel`) take in `f64` with a hundredth of a pixel to spare,
- * so that `f32`'s rounding at the tests' edges cannot decide it.
+ * so that `f32`'s rounding at the tests' edges cannot decide it; and each face pixel of a larger
+ * one whose one cell `cell_samples` shades at more than one point (T8.g), with as much to spare.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
@@ -99,6 +101,12 @@ const SENTINEL_SPARE_PX = 0.01;
 
 /** The limb draw's bound outside the limb (`bodyDisc.wgsl`'s `OUTSIDE_PX`), px. */
 const OUTSIDE_PX = 0.75;
+
+/** `cell_samples`' step of the limb angle's gradient (`bodyDisc.wgsl`'s `GRADIENT_STEP_PX`), px. */
+const GRADIENT_STEP_PX = 1 / 64;
+
+/** The depth inside the limb within which a cell is shaded at more than one point, cell widths. */
+const NEAR_LIMB_CELLS = 2;
 
 /** One body of a case: its size and place, and what it carries. */
 interface CellBody {
@@ -279,7 +287,10 @@ async function drawPlan(
 /**
  * The pixels a record's draws must take from the pass (the module's remarks): each that its
  * interior draw takes, where every pixel reads the pass, and each that its limb draw takes, by the
- * corner tests in `f64` with {@link SENTINEL_SPARE_PX} to spare.
+ * corner tests in `f64` with {@link SENTINEL_SPARE_PX} to spare; and where the interior takes one
+ * cell beside a larger limb's, each its interior draw takes whose centre's depth, less half its
+ * extent across the limb's normal, is within {@link NEAR_LIMB_CELLS} of the limb (R07.T8.g's band),
+ * with as much to spare.
  */
 function passPixels(record: DiscRecord, viewport: Viewport): Array<readonly [number, number]> {
   const centre = toViewAxes(record.direction, CAMERA.orientation);
@@ -293,6 +304,16 @@ function passPixels(record: DiscRecord, viewport: Viewport): Array<readonly [num
     return Math.atan2(norm(cross(ray, scaledCentre)), dot(ray, scaledCentre)) - limbRad;
   };
   const whole = record.interiorSamples === record.limbSamples;
+  const banded = !whole && record.interiorSamples === 1;
+  // `cell_samples`' test at the pixel's centre: more than one point within the band.
+  const inBand = (x: number, y: number): boolean => {
+    const at = angleAt(x + 0.5, y + 0.5);
+    const sx = (angleAt(x + 0.5 + GRADIENT_STEP_PX, y + 0.5) - at) / GRADIENT_STEP_PX;
+    const sy = (angleAt(x + 0.5, y + 0.5 + GRADIENT_STEP_PX) - at) / GRADIENT_STEP_PX;
+    const slope = Math.hypot(sx, sy);
+    const halfExtent = (Math.abs(sx) + Math.abs(sy)) / slope / 2;
+    return slope > 0 && -at / slope - halfExtent <= NEAR_LIMB_CELLS - SENTINEL_SPARE_PX;
+  };
   const pixels: Array<readonly [number, number]> = [];
   const { rect } = record;
   for (let y = Math.floor(rect.topPx); y < Math.ceil(rect.bottomPx); y += 1) {
@@ -308,7 +329,8 @@ function passPixels(record: DiscRecord, viewport: Viewport): Array<readonly [num
       const limb =
         mean <= OUTSIDE_PX - SENTINEL_SPARE_PX &&
         Math.max(...depths) >= -LIMB_OVERLAP_PX + SENTINEL_SPARE_PX;
-      const interior = whole && depths.every((depth) => depth < -SENTINEL_SPARE_PX);
+      const inside = depths.every((depth) => depth < -SENTINEL_SPARE_PX);
+      const interior = inside && (whole || (banded && inBand(x, y)));
       if (limb || interior) {
         pixels.push([x, y]);
       }
@@ -540,7 +562,7 @@ export async function checkCellPassEveryRecord(
       results.push(result.text);
     }
     checks.check(
-      "R07.T8.e–f G11 air bodies, a class map's body and large discs' limbs, disc and mesh, alone and together, drawn through the disc cells pass equal their in-fragment draws within one rgba16float ulp, and read the pass",
+      "R07.T8.e–g G11 air bodies, a class map's body and large discs' limbs and their faces' near-limb bands, disc and mesh, alone and together, drawn through the disc cells pass equal their in-fragment draws within one rgba16float ulp, and read the pass",
       pass,
       results.join("; "),
     );

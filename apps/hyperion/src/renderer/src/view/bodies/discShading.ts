@@ -22,8 +22,9 @@
  * integrated across its profile in √δ, the depth inside the limb (see {@link rasteriseDisc}).
  * Under {@link SMALL_DISC_PX} a pixel's cells are shaded at once by the `disc cells` pass, one
  * invocation a cell, and summed there in the draws' order ({@link discCellJobs}, R07.T8.d), and so
- * are a larger disc's limb pixels' (R07.T8.f), whatever the surface or the air (R07.T8.e); the
- * draws read the pixel's sums through row 51. The arithmetic is the draws' own.
+ * are a larger disc's limb pixels' (R07.T8.f) and its face's near-limb band's (R07.T8.g), whatever
+ * the surface or the air (R07.T8.e); the draws read the pixel's sums through row 51. The arithmetic
+ * is the draws' own.
  * {@link rasteriseDisc} runs the shader's arithmetic in `f64`.
  *
  * A class map that carries the field's normal map (plan R10, R10.T10.g; `discNormals.ts`) shades its
@@ -231,15 +232,41 @@ export interface DiscCellRectangle {
   readonly heightPx: number;
 }
 
-/** Where the `disc cells` pass leaves the sums of a large disc's limb pixels (T8.f). */
+/**
+ * Where the `disc cells` pass leaves the sums of a large disc's limb pixels (T8.f), and of its
+ * face's near-limb band (T8.g): the limb's at its limb cells from {@link DiscCellLimb.first}, then
+ * the band's at its interior's one cell.
+ */
 export interface DiscCellLimb {
   readonly kind: "limb";
-  /** The index in `cell_sums` of its first pixel's sums. */
+  /** The index in `cell_sums` of its first limb pixel's sums; its band's follow its limb's. */
   readonly first: number;
-  /** Its spans' first row past the frame's records in `discs`, two a pixel row. */
+  /** Its spans' first row past the frame's records in `discs`, {@link LIMB_SPAN_ROWS} a pixel row. */
   readonly spanRow: number;
-  /** Its pixel rows and their spans. */
+  /** Its pixel rows and their limb's spans. */
   readonly spans: LimbSpans;
+  /**
+   * Its face's near-limb band (T8.g, {@link faceBandSpans}) by the same rows, or `null` where the
+   * face sums its own cells.
+   */
+  readonly band: LimbSpans | null;
+}
+
+/**
+ * The rows of `discs` a large disc's pixel row takes past the records (T8.f–g): its limb's two
+ * spans, then its face's near-limb band's two.
+ */
+export const LIMB_SPAN_ROWS = 4;
+
+/** The `disc cells` kernel's invocations a workgroup (`bodyDiscCells.wgsl`'s CELL_INVOCATIONS). */
+export const CELL_INVOCATIONS = 64;
+
+/**
+ * The pixels of n × n cells one workgroup of the `disc cells` kernel takes (R07.T8.g): ⌊64 ÷ n²⌋,
+ * so that 64 one-cell pixels of a face's band share one, four pixels of 4 × 4, and one of 8 × 8.
+ */
+export function pixelsPerGroup(n: number): number {
+  return Math.max(1, Math.floor(CELL_INVOCATIONS / (n * n)));
 }
 
 /** Where the `disc cells` pass leaves one record's pixels' sums. */
@@ -256,14 +283,21 @@ export interface DiscCellSet {
   readonly count: number;
   /** One of its records, by index, whose textures the dispatch binds. */
   readonly record: number;
+  /** Its first workgroup in {@link DiscCellJobs.groups} (R07.T8.g). */
+  readonly firstGroup: number;
+  /** Its workgroups, the dispatch's. */
+  readonly groups: number;
 }
 
-/** A frame's jobs for the `disc cells` pass: one a pixel of each small disc and large disc's limb. */
+/**
+ * A frame's jobs for the `disc cells` pass: one a pixel of each small disc, and of each large
+ * disc's limb and its face's near-limb band.
+ */
 export interface DiscCellJobs {
   /**
    * Four `i32` a job, the shader's `vec4i`: the record's index, the pixel's x and y, px, and 0; laid
    * out by set ({@link DiscCellJobs.sets}), each set's records in their order, each rectangle's
-   * pixels and each limb's spans in row order.
+   * pixels in row order, and each limb's spans and then its face band's, each in row order.
    */
   readonly jobs: Int32Array;
   /** The jobs J, the pixels whose sums the pass leaves, in the jobs' order. */
@@ -272,8 +306,18 @@ export interface DiscCellJobs {
   readonly ranges: ReadonlyArray<DiscCellRange | null>;
   /** The dispatches, in the jobs' order, each over its run of jobs. */
   readonly sets: ReadonlyArray<DiscCellSet>;
-  /** The limb spans' rows the records' buffer holds past the records, two a limb's pixel row. */
+  /**
+   * The limb spans' rows the records' buffer holds past the records, {@link LIMB_SPAN_ROWS} a
+   * limb's pixel row.
+   */
   readonly spanRows: number;
+  /**
+   * Four `u32` a workgroup, the shader's `vec4u` (R07.T8.g): its first job, its jobs, their cells
+   * per axis n, and 0. Each range's runs of one n (a rectangle's; a limb's, then its face band's)
+   * are cut into workgroups of {@link pixelsPerGroup} jobs, the last the rest, in the jobs' order,
+   * so that each set's workgroups are a run from its {@link DiscCellSet.firstGroup}.
+   */
+  readonly groups: Uint32Array;
 }
 
 /** The jobs a frame takes at most: 2²⁴, past which row 51's `f32` would lose a first index. */
@@ -290,9 +334,9 @@ export interface DiscLimbFrame {
 }
 
 /**
- * A large disc's limb pixels, row by row (R07.T8.f): from {@link LimbSpans.topPx}, each pixel row's
- * two spans of pixels, the first [s₀, e₀) and the second [s₁, e₁), px, an empty one's start its
- * end.
+ * A large disc's limb pixels (R07.T8.f), or its face's near-limb band (R07.T8.g), row by row: from
+ * {@link LimbSpans.topPx}, each pixel row's two spans of pixels, the first [s₀, e₀) and the second
+ * [s₁, e₁), px, an empty one's start its end.
  */
 export interface LimbSpans {
   /** The first row's y, ⌊top⌋ of the rectangle, px. */
@@ -399,25 +443,8 @@ function hullOf(a: LineInterval | null, b: LineInterval | null): LineInterval | 
  * (`pixel_cells`).
  */
 export function limbSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpans | null {
-  const m = frame.viewRotation;
-  const at = (i: number): number => m[i] ?? Number.NaN;
-  const toView = (v: Vec3): Vec3 =>
-    vec3(
-      at(0) * v.x + at(4) * v.y + at(8) * v.z,
-      at(1) * v.x + at(5) * v.y + at(9) * v.z,
-      at(2) * v.x + at(6) * v.y + at(10) * v.z,
-    );
-  const { widthPx, heightPx } = frame.size;
-  const p00 = frame.projection[0] ?? Number.NaN;
-  const p11 = frame.projection[5] ?? Number.NaN;
-  const pole = normalise(toView(record.pole));
-  const stretch = 1 / record.polarOverEquatorial;
-  const scaledCentre = stretchAlong(pole, stretch, toView(record.direction));
-  const reach = norm(scaledCentre);
-  const axis = scale(scaledCentre, 1 / reach);
-  const limbRad = Math.asin(record.radiusOverDistance / reach);
-  const stepXRad = 2 / (widthPx * p00);
-  const stepYRad = 2 / (heightPx * p11);
+  const view = limbViewOf(record, frame);
+  const { limbRad, axis, stretch, stepXRad, stepYRad } = view;
   const boundRad = Math.max(stretch, 1 / stretch) * Math.hypot(stepXRad, stepYRad);
   const outerRad = limbRad + (OUTSIDE_PX + LIMB_SPAN_MARGIN_PX) * boundRad;
   const innerRad = limbRad - (LIMB_OVERLAP_PX + LIMB_SPAN_MARGIN_PX) * boundRad;
@@ -426,11 +453,13 @@ export function limbSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpans |
   }
   const cosOuter = Math.cos(outerRad);
   const cosInner = Math.cos(innerRad);
-  const sb = stretchAlong(pole, stretch, vec3(stepXRad, 0, 0));
   // A line of pixel corners y: the outer cone's interval and the inner's.
   const lineAt = (y: number): readonly [LineInterval | null, LineInterval | null] => {
-    const sa = stretchAlong(pole, stretch, vec3(-1 / p00, (1 - (2 * y) / heightPx) / p11, -1));
-    return [coneInterval(sa, sb, axis, cosOuter), coneInterval(sa, sb, axis, cosInner)];
+    const sa = view.lineStart(y);
+    return [
+      coneInterval(sa, view.lineStep, axis, cosOuter),
+      coneInterval(sa, view.lineStep, axis, cosInner),
+    ];
   };
   const { rect } = record;
   const left = Math.floor(rect.leftPx);
@@ -453,6 +482,147 @@ export function limbSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpans |
     if (upper !== null && lower !== null) {
       const first = Math.ceil(Math.max(upper[0], lower[0]));
       const last = Math.floor(Math.min(upper[1], lower[1]));
+      if (first < last) {
+        cutStart = Math.min(end, Math.max(start, first));
+        cutEnd = Math.min(end, Math.max(start, last));
+      }
+    }
+    spans.set([start, cutStart, cutEnd, end], row * 4);
+    pixels += cutStart - start + (end - cutEnd);
+    above = below;
+  }
+  return { topPx: top, spans, rows, pixels };
+}
+
+/**
+ * A large disc's limb as the `disc cells` pass's frame sees it, in the scaled space: the limb's
+ * cone, the view's turn a pixel, and the lines of the view at a pixel row's y, each
+ * r(x) = A + x B scaled (`coneInterval`'s `sa` and `sb`).
+ */
+interface LimbView {
+  /** The scaled centre's unit direction, the cones' axis. */
+  readonly axis: Vec3;
+  /** The limb's half-angle λ about it, rad. */
+  readonly limbRad: number;
+  /** a ÷ c, the scaled space's stretch along the pole. */
+  readonly stretch: number;
+  /** The most a pixel turns the view's unnormalised ray along x and along y, rad. */
+  readonly stepXRad: number;
+  readonly stepYRad: number;
+  /** The scaled S B of every line of the view. */
+  readonly lineStep: Vec3;
+  /** The scaled S A of the line at y, px. */
+  readonly lineStart: (yPx: number) => Vec3;
+}
+
+/**
+ * A record's {@link LimbView} in a frame, every value taken as the shader takes it: the view's ray
+ * (`view_ray`) from the frame's projection, the body's axes through its rotation (`to_view`).
+ */
+function limbViewOf(record: DiscRecord, frame: DiscLimbFrame): LimbView {
+  const m = frame.viewRotation;
+  const at = (i: number): number => m[i] ?? Number.NaN;
+  const toView = (v: Vec3): Vec3 =>
+    vec3(
+      at(0) * v.x + at(4) * v.y + at(8) * v.z,
+      at(1) * v.x + at(5) * v.y + at(9) * v.z,
+      at(2) * v.x + at(6) * v.y + at(10) * v.z,
+    );
+  const { widthPx, heightPx } = frame.size;
+  const p00 = frame.projection[0] ?? Number.NaN;
+  const p11 = frame.projection[5] ?? Number.NaN;
+  const pole = normalise(toView(record.pole));
+  const stretch = 1 / record.polarOverEquatorial;
+  const scaledCentre = stretchAlong(pole, stretch, toView(record.direction));
+  const reach = norm(scaledCentre);
+  const stepXRad = 2 / (widthPx * p00);
+  return {
+    axis: scale(scaledCentre, 1 / reach),
+    limbRad: Math.asin(record.radiusOverDistance / reach),
+    stretch,
+    stepXRad,
+    stepYRad: 2 / (heightPx * p11),
+    lineStep: stretchAlong(pole, stretch, vec3(stepXRad, 0, 0)),
+    lineStart: (yPx) =>
+      stretchAlong(pole, stretch, vec3(-1 / p00, (1 - (2 * yPx) / heightPx) / p11, -1)),
+  };
+}
+
+/**
+ * How far past the face band's bound its spans take each edge ({@link faceBandSpans}), px of the
+ * limb angle's largest gradient: a quarter of a pixel, against the `f32` shader's error in that
+ * gradient. That is its forward difference over {@link GRADIENT_STEP_PX} of two angles from the
+ * scaled centre, each good to about 10⁻⁷ of itself where `atan2` is near correctly rounded, so
+ * about 1.5 × 10⁻⁵ θ rad a pixel at the limb's angle θ: 2% of the gradient for Earth's limb from
+ * 400 km at 60° across 1080p, and more at a narrower field or a wider view (23% at 10° across 4K
+ * there). The band's reach of 2.71 px takes up to 9% of it; a pixel the spans miss past that costs
+ * its own nine shades, not its light.
+ */
+const BAND_SPAN_MARGIN_PX = 0.25;
+
+/**
+ * A large disc's face pixels that `cell_samples` shades at more than one point, conservatively,
+ * row by row (R07.T8.g; decision-r08-t11-frame §2): the interior draw's (`edge_pass` 0) pixels of
+ * one cell within {@link NEAR_LIMB_CELLS} of the limb, in the `disc cells` pass's frame, by the rows
+ * of the limb's ({@link limbSpans}); `null` for a record whose interior takes other than one cell,
+ * or whose cones fail the bound as the limb's do, when the face sums its own cells.
+ *
+ * @remarks
+ * The interior draw takes a pixel whose four corners lie inside the limb. Its one cell, the pixel,
+ * is shaded at one point where its centre's depth δ = −angle ÷ slope, less its half extent
+ * (|n_x| + |n_y|) ÷ 2 ≤ √2 ÷ 2 across the limb's normal, is over {@link NEAR_LIMB_CELLS}; otherwise
+ * at up to nine, the band whose serial chain the fragment pays in every warp it crosses. The slope
+ * is at most G′ = s max(k_x, k_y): the view's unit ray turns at most max(k_x, k_y) a pixel (its
+ * unnormalised step, at least its turn, along two orthogonal axes), and the scaled space at most
+ * s = max(a ÷ c, c ÷ a) more; `limbSpans`' √(k_x² + k_y²) bounds the corners' gradient, at most √2
+ * looser. So each band pixel has its four corners within the cone of half-angle λ + m G′ about the
+ * scaled centre, and its centre outside the one of λ − (2 + √2 ÷ 2 + m) G′, m
+ * {@link BAND_SPAN_MARGIN_PX}. A row's pixels with every corner in the outer cone are one interval
+ * of both its lines of corners, and those whose centre is in the inner cone one interval of its line
+ * of centres, so the band is two spans at most. A pixel the spans miss still draws the same light:
+ * it sums its own cell (`pixel_cells`).
+ */
+export function faceBandSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpans | null {
+  if (record.interiorSamples !== 1) {
+    return null;
+  }
+  const view = limbViewOf(record, frame);
+  const { limbRad, axis, stretch, stepXRad, stepYRad, lineStep } = view;
+  const gradientRad = Math.max(stretch, 1 / stretch) * Math.max(stepXRad, stepYRad);
+  const outerRad = limbRad + BAND_SPAN_MARGIN_PX * gradientRad;
+  const innerRad = limbRad - (NEAR_LIMB_CELLS + Math.SQRT1_2 + BAND_SPAN_MARGIN_PX) * gradientRad;
+  if (!(outerRad < Math.PI / 2) || !(innerRad > 0)) {
+    return null;
+  }
+  const cosOuter = Math.cos(outerRad);
+  const cosInner = Math.cos(innerRad);
+  const outerAt = (y: number): LineInterval | null =>
+    coneInterval(view.lineStart(y), lineStep, axis, cosOuter);
+  const { rect } = record;
+  const left = Math.floor(rect.leftPx);
+  const right = Math.ceil(rect.rightPx);
+  const top = Math.floor(rect.topPx);
+  const rows = Math.max(0, Math.ceil(rect.bottomPx) - top);
+  const spans = new Int32Array(rows * 4);
+  let pixels = 0;
+  let above = outerAt(top);
+  for (let row = 0; row < rows; row += 1) {
+    const y = top + row;
+    const below = outerAt(y + 1);
+    // The pixels [x, x + 1) whose corners on both lines lie in the outer cone.
+    let start = left;
+    let end = left;
+    if (above !== null && below !== null) {
+      start = Math.max(left, Math.ceil(Math.max(above[0], below[0])));
+      end = Math.max(start, Math.min(right, Math.floor(Math.min(above[1], below[1]))));
+    }
+    // Less the pixels whose centre, at x + ½ on the line y + ½, lies in the inner cone.
+    let cutStart = end;
+    let cutEnd = end;
+    const centres = coneInterval(view.lineStart(y + 0.5), lineStep, axis, cosInner);
+    if (centres !== null) {
+      const first = Math.ceil(centres[0] - 0.5);
+      const last = Math.floor(centres[1] - 0.5) + 1;
       if (first < last) {
         cutStart = Math.min(end, Math.max(start, first));
         cutEnd = Math.min(end, Math.max(start, last));
@@ -489,10 +659,18 @@ function sameTextures(
   return a.length === b.length && a.every((texture, i) => texture === b[i]);
 }
 
-/** A record's pixels for the pass before they are laid out: its rectangle's, its limb's, or none. */
+/**
+ * A record's pixels for the pass before they are laid out: its rectangle's, its limb's with its
+ * face band's, or none.
+ */
 type PlannedCells =
   | { readonly kind: "rectangle"; readonly pixels: number }
-  | { readonly kind: "limb"; readonly pixels: number; readonly spans: LimbSpans };
+  | {
+      readonly kind: "limb";
+      readonly pixels: number;
+      readonly spans: LimbSpans;
+      readonly band: LimbSpans | null;
+    };
 
 function plannedCellsOf(record: DiscRecord, frame: DiscLimbFrame | null): PlannedCells | null {
   if (drawnThroughCells(record)) {
@@ -505,7 +683,11 @@ function plannedCellsOf(record: DiscRecord, frame: DiscLimbFrame | null): Planne
     return null;
   }
   const spans = limbSpans(record, frame);
-  return spans === null ? null : { kind: "limb", pixels: spans.pixels, spans };
+  if (spans === null) {
+    return null;
+  }
+  const band = faceBandSpans(record, frame);
+  return { kind: "limb", pixels: spans.pixels + (band?.pixels ?? 0), spans, band };
 }
 
 /**
@@ -549,21 +731,40 @@ function layJobs(jobs: Int32Array, index: number, range: DiscCellRange): void {
     return;
   }
   let job = range.first;
-  const { spans, topPx, rows } = range.spans;
-  for (let row = 0; row < rows; row += 1) {
-    for (const span of [0, 1]) {
-      const from = spans[row * 4 + 2 * span] ?? 0;
-      const to = spans[row * 4 + 2 * span + 1] ?? 0;
-      for (let x = from; x < to; x += 1) {
-        jobs.set([index, x, topPx + row, 0], job * 4);
-        job += 1;
+  // The limb's spans, then the face band's, each in row order.
+  for (const { spans, topPx, rows } of range.band === null
+    ? [range.spans]
+    : [range.spans, range.band]) {
+    for (let row = 0; row < rows; row += 1) {
+      for (const span of [0, 1]) {
+        const from = spans[row * 4 + 2 * span] ?? 0;
+        const to = spans[row * 4 + 2 * span + 1] ?? 0;
+        for (let x = from; x < to; x += 1) {
+          jobs.set([index, x, topPx + row, 0], job * 4);
+          job += 1;
+        }
       }
     }
   }
 }
 
+/** A range's runs of jobs of one cell count: (first job, jobs, n) each, in the jobs' order. */
+function runsOf(
+  record: DiscRecord,
+  range: DiscCellRange,
+): ReadonlyArray<readonly [number, number, number]> {
+  if (range.kind === "rectangle") {
+    return [[range.first, range.widthPx * range.heightPx, record.limbSamples]];
+  }
+  const limb = [range.first, range.spans.pixels, record.limbSamples] as const;
+  if (range.band === null || range.band.pixels === 0) {
+    return [limb];
+  }
+  return [limb, [range.first + range.spans.pixels, range.band.pixels, record.interiorSamples]];
+}
+
 /**
- * The `disc cells` pass's jobs for a frame's records (R07.T8.d–f; decision-r07-small-disc-cost
+ * The `disc cells` pass's jobs for a frame's records (R07.T8.d–g; decision-r07-small-disc-cost
  * §1.2, decision-r08-t11-frame §2).
  *
  * @remarks
@@ -571,10 +772,13 @@ function layJobs(jobs: Int32Array, index: number, range: DiscCellRange): void {
  * [⌊top⌋, ⌈bottom⌉), the rectangle {@link rasteriseDisc} walks: a superset of the pixels either of
  * its draws shades. Its pixel (x, y) finds its sums at first + (y − top) w + (x − left), which row
  * 51 carries. Given the pass's frame, each record {@link limbThroughCells}, a disc of 32 px or more,
- * takes one job a pixel of its limb's spans ({@link limbSpans}), which the records' buffer holds
- * past the records for its limb draw to find its sums by. The jobs are laid out by the textures
- * their records bind, one {@link DiscCellSet} a set in the order of its first record, each set's
- * records in their order (R07.T8.e). A record whose pixels would take the jobs past `maxJobs`
+ * takes one job a pixel of its limb's spans ({@link limbSpans}) at its limb's cells, then one a
+ * pixel of its face's near-limb band ({@link faceBandSpans}) at its interior's one cell (R07.T8.g),
+ * which the records' buffer holds past the records for its draws to find their sums by. The jobs
+ * are laid out by the textures their records bind, one {@link DiscCellSet} a set in the order of
+ * its first record, each set's records in their order (R07.T8.e), and cut into workgroups of
+ * {@link pixelsPerGroup} pixels of one cell count ({@link DiscCellJobs.groups}, R07.T8.g). A record
+ * whose pixels would take the jobs past `maxJobs`
  * takes none, and its draws sum their own cells, as before the pass; so does a limb whose span rows
  * would end past row 2²⁴ of the records' buffer, which row 51's `f32` could not index.
  *
@@ -594,8 +798,10 @@ export function discCellJobs(
   let spanRows = 0;
   const ranges: Array<DiscCellRange | null> = records.map(() => null);
   const sets: DiscCellSet[] = [];
+  const groups: number[] = [];
   for (const indices of boundSets(records, planned)) {
     const first = count;
+    const firstGroup = groups.length / 4;
     let head: number | null = null;
     for (const index of indices) {
       const plan = planned[index] ?? null;
@@ -606,26 +812,47 @@ export function discCellJobs(
       // A limb's span rows follow the records, where row 51's `f32` must still index them.
       if (
         plan.kind === "limb" &&
-        records.length * DISC_ROWS + spanRows + 2 * plan.spans.rows > MAX_CELL_JOBS
+        records.length * DISC_ROWS + spanRows + LIMB_SPAN_ROWS * plan.spans.rows > MAX_CELL_JOBS
       ) {
         continue;
       }
+      let range: DiscCellRange;
       if (plan.kind === "rectangle") {
         const { rect } = record;
         const leftPx = Math.floor(rect.leftPx);
         const topPx = Math.floor(rect.topPx);
         const widthPx = Math.max(0, Math.ceil(rect.rightPx) - leftPx);
         const heightPx = Math.max(0, Math.ceil(rect.bottomPx) - topPx);
-        ranges[index] = { kind: "rectangle", first: count, leftPx, topPx, widthPx, heightPx };
+        range = { kind: "rectangle", first: count, leftPx, topPx, widthPx, heightPx };
       } else {
-        ranges[index] = { kind: "limb", first: count, spanRow: spanRows, spans: plan.spans };
-        spanRows += 2 * plan.spans.rows;
+        range = {
+          kind: "limb",
+          first: count,
+          spanRow: spanRows,
+          spans: plan.spans,
+          band: plan.band,
+        };
+        spanRows += LIMB_SPAN_ROWS * plan.spans.rows;
+      }
+      ranges[index] = range;
+      for (const [from, jobs, n] of runsOf(record, range)) {
+        const per = pixelsPerGroup(n);
+        for (let job = 0; job < jobs; job += per) {
+          groups.push(from + job, Math.min(per, jobs - job), n, 0);
+        }
       }
       count += plan.pixels;
       head ??= index;
     }
     if (head !== null && count > first) {
-      sets.push({ first, count: count - first, record: head });
+      const groupCount = groups.length / 4;
+      sets.push({
+        first,
+        count: count - first,
+        record: head,
+        firstGroup,
+        groups: groupCount - firstGroup,
+      });
     }
   }
   const jobs = new Int32Array(count * 4);
@@ -634,7 +861,7 @@ export function discCellJobs(
       layJobs(jobs, index, range);
     }
   });
-  return { jobs, count, ranges, sets, spanRows };
+  return { jobs, count, ranges, sets, spanRows, groups: Uint32Array.from(groups) };
 }
 
 /** One star lighting a disc, relative to the body's centre. */
@@ -800,9 +1027,10 @@ function bodyAxesOf(rotation: Rotation3): readonly [Vec3, Vec3] {
  *
  * Row 51 says where the `disc cells` pass leaves a record's sums: a rectangle's first sum, ⌊left⌋,
  * ⌊top⌋ and width (T8.d); a large disc's limb's first span row, its rows, ⌊top⌋ and −1 (T8.f); or
- * −1 in x where its draws sum their own cells. The limbs' spans follow the records, two rows a
- * pixel row, each one span's first sum, its first pixel's x and its end's, px, and 0, so that the
- * buffer is {@link DISC_ROWS} rows a record and `cells.spanRows` more.
+ * −1 in x where its draws sum their own cells. The limbs' spans follow the records,
+ * {@link LIMB_SPAN_ROWS} rows a pixel row, the limb's two spans and then its face band's two
+ * (T8.g; empty without a band), each one span's first sum, its first pixel's x and its end's, px,
+ * and 0, so that the buffer is {@link DISC_ROWS} rows a record and `cells.spanRows` more.
  *
  * @param cells - The `disc cells` pass's jobs for these records, whose ranges row 51 carries; `null`
  *   where no pass runs, when every record's row 51 says its draws sum their own cells.
@@ -905,17 +1133,23 @@ export function packDiscRecords(
     } else if (range.kind === "rectangle") {
       put(CELL_SUMS_ROW, [range.first, range.leftPx, range.topPx, range.widthPx]);
     } else {
-      const { spans, rows, topPx } = range.spans;
+      const { rows, topPx } = range.spans;
       put(CELL_SUMS_ROW, [recordRows + range.spanRow, rows, topPx, -1]);
+      // The limb's spans in each row's first two rows, then the face band's (empty without one),
+      // each band's sums after the limb's.
+      const lists = [range.spans.spans, range.band?.spans ?? null] as const;
       let first = range.first;
-      for (let row = 0; row < rows; row += 1) {
-        for (const span of [0, 1]) {
-          const from = spans[row * 4 + 2 * span] ?? 0;
-          const to = spans[row * 4 + 2 * span + 1] ?? 0;
-          out.set([first, from, to, 0], (recordRows + range.spanRow + 2 * row + span) * 4);
-          first += to - from;
+      lists.forEach((spans, list) => {
+        for (let row = 0; row < rows; row += 1) {
+          for (const span of [0, 1]) {
+            const from = spans?.[row * 4 + 2 * span] ?? 0;
+            const to = spans?.[row * 4 + 2 * span + 1] ?? 0;
+            const at = recordRows + range.spanRow + LIMB_SPAN_ROWS * row + 2 * list + span;
+            out.set([first, from, to, 0], at * 4);
+            first += to - from;
+          }
         }
-      }
+      });
     }
   });
   return out;

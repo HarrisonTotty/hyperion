@@ -1534,6 +1534,8 @@ describe("the renderer", () => {
         "bodies:mesh slots",
         "bodies:mesh instances",
         "bodies:disc cell jobs",
+        // R07.T8.g's workgroups' runs of the jobs.
+        "bodies:disc cell groups",
         "bodies:disc cell sums",
         "bodies:phase table",
         "bodies:no class map",
