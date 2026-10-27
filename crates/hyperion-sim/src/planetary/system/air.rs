@@ -119,15 +119,25 @@ pub(crate) fn record_structure(
 
 /// What the record's aerosol and absorber inventory reads of a published surface beside its
 /// vertical structure (P14.T24.c with T24.g, wired by P14.T54.b.b; plan 14's T54.b list): its
-/// state, its conditions, its figures, its bulk section's gravity and the photochemistry's star.
+/// state, whether a runaway keeps Venus's deck, its conditions, its figures, its bulk section's
+/// gravity and the photochemistry's star.
 ///
-/// P14.T24.g's sulphur takes its case from the state, as T24.g takes it, until P14.T54.b.g gives
-/// the inventory `case_of(state, deck)`, which joins these members as one more.
+/// P14.T24.g's sulphur takes its case from the published state and deck
+/// (`SulphurCycle::case_of(state, deck)`, P14.T54.b.g; decision-absurd-states-24 R3.3), so that a
+/// runaway its passes solved without the deck takes case 2's dry branch, once through, as a
+/// temperate world's.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AirSurface<'a> {
     /// The surface's state (P14.T13.c): an airless body's inventory is empty, and a magma ocean's
     /// is not modelled while it holds an air ([`record_aerosols`]).
     pub(crate) state: SurfaceState,
+    /// Whether its air, if a runaway greenhouse, keeps Venus's acid deck: its published
+    /// atmosphere's (`Atmosphere::runaway_deck`, P14.T53.b part 1 (b)), [`RunawayDeck::Deckless`]
+    /// only where its passes solved a runaway colder than the acid's cycling temperature again
+    /// without the deck, under the escape's batch rules, and [`RunawayDeck::Kept`] for every other
+    /// state and below them. With the state it gives P14.T24.g's case
+    /// (`SulphurCycle::case_of`).
+    pub(crate) runaway_deck: RunawayDeck,
     /// Its conditions (P14.T24.a): the surface pressure, the gases and their mean molar mass, and
     /// the liquid-water flag P14.T24.g's SO₂ reads.
     pub(crate) conditions: &'a SurfaceConditions,
@@ -207,7 +217,8 @@ pub(crate) fn record_aerosols(
 }
 
 /// The inventory's inputs of the surface `surface` whose air's structure is `structure`, each the
-/// published surface's own (plan 14's T54.b list): the state, the conditions' surface pressure,
+/// published surface's own (plan 14's T54.b list): the state and its runaway's deck (P14.T24.g's
+/// case, P14.T54.b.g), the conditions' surface pressure,
 /// gases (P14.T24.a's published fractions at the ground), mean molar mass and liquid-water flag,
 /// the bulk section's gravity, the structure, the figures' cloud fraction, the share of the ground
 /// their surface liquids cover (their summed cover held at 1, the ocean fraction) and their
@@ -232,9 +243,7 @@ fn aerosol_inputs<'a>(
         surface_liquid_cover: figures.ocean_fraction(),
         outgassing: figures.outgassing(),
         liquid_water: conditions.liquid_water(),
-        // T24.g's case as the state gives it, until P14.T54.b.g reads P14.T53.b part 1 (b)'s
-        // deck.
-        runaway_deck: RunawayDeck::Kept,
+        runaway_deck: surface.runaway_deck,
     })
 }
 

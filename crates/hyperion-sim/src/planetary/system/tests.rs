@@ -13275,6 +13275,120 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
     assert_eq!(exempt, EXEMPT_ON_TWO_PATHS, "the exempt set on two paths");
 }
 
+/// P14.T54.b.g (brief-notes-24's V3.9 MUST-FIX (b); decision-absurd-states-24 R3.3): the record's
+/// aerosol inventory takes P14.T24.g's case from its published state and deck
+/// (`SulphurCycle::case_of`), over the sample's first 60 systems, the golden systems and LOOK72's,
+/// every 24 hold in force and the record's rules at their batch (the air's sections and the cold
+/// traps):
+///
+/// - no record carries Venus's acid deck (an `H2SO4` deck) but a runaway its passes solved under
+///   the deck at or above the acid's cycling temperature, 430 K, so that none keeps it colder;
+/// - a runaway solved without the deck (`RunawayDeck::Deckless`) carries none, its sulphur case
+///   2's dry branch, once through, as a temperate world's; the census's five decked runaways
+///   ([`DECKED_FIVE`]) are among them;
+/// - (c)'s hothouse ([`HOTHOUSE_BODY`]) keeps its deck, the cycling case.
+///
+/// The decked and deckless runaways are printed with their `T_s` and `p_s`, the deckless with
+/// whether they carry a sulphate layer (an `H2SO4` mode of no deck).
+#[test]
+fn under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperature() {
+    use crate::planetary::derive::atmosphere::{ACID_CYCLING_TEMPERATURE, RunawayDeck};
+    use crate::planetary::hooks::cold_traps::ColdTrapRules;
+    use crate::planetary::testing::with_every_24_hold;
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let rules = RecordRules {
+        cold_traps: ColdTrapRules::Batch,
+        air: AirRules::Batch,
+        ..RecordRules::in_force()
+    };
+    let acid = crate::substance::by_key("H2SO4").expect("sulphuric acid is a registry row");
+    let cycling = ACID_CYCLING_TEMPERATURE.value();
+    let (mut decked, mut deckless, mut wrong) = (Vec::new(), Vec::new(), Vec::new());
+    with_every_24_hold(|| {
+        for &(set, seed, ctx) in &sets {
+            let system = generate(seed, ctx).with_record_rules(rules);
+            envelope_walk(ctx, &system, &mut |kind, record, derived| {
+                let Section::Ok(surface) = record.surface() else {
+                    return;
+                };
+                let Modelled::Ok(inventory) = surface.aerosols() else {
+                    return;
+                };
+                let id = record.identity().id().to_string();
+                let state = surface.state();
+                let deck = derived.atmosphere().runaway_deck();
+                let conditions = surface.conditions();
+                let t_s = conditions.mean_surface_temperature().value();
+                let p_s = conditions.surface_pressure().value();
+                let has_deck = inventory.decks().iter().any(|d| d.condensate() == acid);
+                let layer = !has_deck && inventory.modes().iter().any(|m| m.deck() == acid);
+                let line = format!(
+                    "{set} {id} {kind}: {state:?} {deck:?} at {t_s:.2} K, {:.4e} bar",
+                    p_s / 1e5
+                );
+                let kept = state == SurfaceState::RunawayGreenhouse && deck == RunawayDeck::Kept;
+                if has_deck && !(kept && t_s >= cycling) {
+                    wrong.push(format!("{line}: Venus's deck"));
+                }
+                if state == SurfaceState::RunawayGreenhouse {
+                    match (deck, has_deck) {
+                        (RunawayDeck::Kept, true) => decked.push(line),
+                        (RunawayDeck::Kept, false) => {
+                            decked.push(format!("{line}, no acid deck formed"));
+                        }
+                        (RunawayDeck::Deckless, false) => {
+                            deckless.push(format!("{line}, sulphate layer {layer}"));
+                        }
+                        (RunawayDeck::Deckless, true) => {
+                            wrong.push(format!("{line}: a deck solved without one"));
+                        }
+                    }
+                }
+            });
+        }
+    });
+    eprintln!(
+        "runaways under the deck at or above {cycling} K: {}:\n  {}\nrunaways solved without it, \
+         case 2's dry branch: {}:\n  {}",
+        decked.len(),
+        decked.join("\n  "),
+        deckless.len(),
+        deckless.join("\n  ")
+    );
+    assert_eq!(
+        wrong,
+        Vec::<String>::new(),
+        "Venus's deck below the cycling temperature"
+    );
+    for name in DECKED_FIVE {
+        assert!(
+            deckless
+                .iter()
+                .any(|line| line.starts_with(&format!("sample {name} "))),
+            "{name}: not among the deckless runaways"
+        );
+    }
+    assert!(
+        decked
+            .iter()
+            .any(|line| line.starts_with(&format!("sample {HOTHOUSE_BODY} "))
+                && !line.ends_with("no acid deck formed")),
+        "{HOTHOUSE_BODY}: (c)'s hothouse without its deck"
+    );
+}
+
 /// P14.T53.b part 1 (c) through the passes, with every 24 hold in force (decision-t53b-arm-c §3,
 /// §5.5): the census's hothouse between the limits, [`HOTHOUSE_BODY`], publishes a
 /// `RunawayGreenhouse` under Venus's deck, P14.T24.g's cycling case (`SulphurCycle::case_of`'s

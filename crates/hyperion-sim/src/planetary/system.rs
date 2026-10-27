@@ -5900,8 +5900,9 @@ fn mantle_sulphur(rules: AirRules, elements: &ElementInventory) -> Option<Kilogr
 /// with the conditions `conditions` and the figures `figures` (P14.T54.b; `air`): its vertical
 /// structure (`air::record_structure`), from the conditions, the bulk section's equilibrium
 /// temperature and the figures' heat flow, and its aerosol and absorber inventory
-/// (`air::record_aerosols`), from that structure, the published surface, the bulk section's
-/// gravity and the photochemistry's star. Neither is computed while the air's sections are held.
+/// (`air::record_aerosols`), from that structure, the published surface with its published
+/// atmosphere's runaway deck (P14.T24.g's case, P14.T54.b.g), the bulk section's gravity and the
+/// photochemistry's star. Neither is computed while the air's sections are held.
 #[must_use]
 fn record_air_sections(
     case: &SurfaceCase<'_>,
@@ -5921,6 +5922,7 @@ fn record_air_sections(
     );
     let surface = AirSurface {
         state,
+        runaway_deck: case.sky.atmosphere.runaway_deck(),
         conditions,
         figures,
         gravity: bulk.surface_gravity(),

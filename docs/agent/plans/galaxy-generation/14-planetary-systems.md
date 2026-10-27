@@ -29911,6 +29911,28 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     P14.T51.g.b's ocean solutes in e's moon wet epoch, in e; P14.T53.c's counts and named set in
     f's two restated floor tests, in f; e's must-fix (decision-p14-t54b-e-findings) with the
     review's fixes in the last commit.
+  - _P14.T54.b.g, T24.g's case from the published state and deck_ (B3, 2026-10-27).
+    `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3; no golden moves, and no hold is added:
+    the inventory is on the record only under `AirRules::Batch`, and below the escape's batch
+    every runaway keeps its deck, so under the air's batch alone every inventory keeps its bits.
+    - _The wiring:_ `air::AirSurface` gains `runaway_deck`, the published atmosphere's
+      (`Atmosphere::runaway_deck`, the record's `case.sky.atmosphere`), which `aerosol_inputs`
+      passes as `AerosolInputs::runaway_deck`, so that `SulphurCycle::case_of(state, deck)` gives a
+      runaway its passes solved without the deck case 2's dry branch, once through. The record
+      does not publish the deck; the tests that rebuild an inventory from a record under the air's
+      batch alone take `Kept`, 23's states, and the table's bodies their own atmosphere's.
+    - _Tests:_ `under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperature`
+      (system/tests.rs; the sample's first 60 systems, the golden systems and LOOK72's, every 24
+      hold and the record's batch rules, about 20 s): no record carries an `H2SO4` deck but a
+      runaway under the deck at or above 430 K, and no deckless runaway carries one; 25 runaways
+      under the deck (430 K and above, three with no acid deck formed), 11 solved without it, each
+      with a sulphate layer, `DECKED_FIVE` among them (asserted); (c)'s hothouse
+      `01ffeb2c5ffe0000.0100` keeps its deck at 934.59 K (asserted). Three deckless runaways lie
+      at or above 430 K without the deck (456.26, 477.13 and 559.79 K: `01ffeb2ce0000000.0100`,
+      LOOK72's `020e56ef20090004.0200` and `220e4dde8020000b.0600`), count (ii)'s partial decks
+      for P14.T53.e. `the_record_s_inventory_changes_with_the_state_only_in_its_sulphur` adds a
+      deckless runaway's inventory, the temperate one's to the bit. The table's Venus (the median
+      Venus) keeps case 1 by its own atmosphere's `Kept`: its acid-deck test passes unchanged.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

@@ -203,6 +203,9 @@ struct TableAir {
     structure: Modelled<Option<VerticalStructure>>,
     /// Its state.
     state: SurfaceState,
+    /// Whether its air keeps Venus's deck: its table atmosphere's, one solve under the deck and so
+    /// [`RunawayDeck::Kept`] (`Atmosphere::runaway_deck`).
+    runaway_deck: RunawayDeck,
     /// Its surface gravity.
     gravity: MetresPerSecondSquared,
     /// Its figures after their second stage, as a record's surface holds them.
@@ -215,6 +218,7 @@ impl TableAir {
     fn surface(&self) -> AirSurface<'_> {
         AirSurface {
             state: self.state,
+            runaway_deck: self.runaway_deck,
             conditions: &self.conditions,
             figures: &self.figures,
             gravity: self.gravity,
@@ -255,6 +259,7 @@ fn table_under_the_switch() -> Vec<TableAir> {
                 heat_flow,
                 structure,
                 state: body.atmosphere().state(),
+                runaway_deck: body.atmosphere().runaway_deck(),
                 gravity: body.surface_gravity(),
                 figures: published,
             }
@@ -612,7 +617,9 @@ fn owned_structure(surface: &Surface) -> Modelled<Option<VerticalStructure>> {
 }
 
 /// What the record's inventory of `surface`, of record `record`, reads beside its structure, its
-/// photochemistry's star's effective temperature `star`, which the record does not hold.
+/// photochemistry's star's effective temperature `star`, which the record does not hold, under the
+/// air's batch alone: 23's states, the escape's rules held, under which every runaway keeps
+/// Venus's deck ([`RunawayDeck::Kept`]; the record does not hold its deck either).
 fn air_surface_of<'a>(
     record: &BodyRecord,
     surface: &'a Surface,
@@ -623,6 +630,7 @@ fn air_surface_of<'a>(
     };
     AirSurface {
         state: surface.state(),
+        runaway_deck: RunawayDeck::Kept,
         conditions: surface.conditions(),
         figures: surface.figures(),
         gravity: bulk.surface_gravity(),
@@ -686,7 +694,7 @@ fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
                     surface_liquid_cover: air.figures.ocean_fraction(),
                     outgassing: air.figures.outgassing(),
                     liquid_water: air.conditions.liquid_water(),
-                    runaway_deck: RunawayDeck::Kept,
+                    runaway_deck: air.runaway_deck,
                 };
                 let derived =
                     AerosolInventory::derive(&inputs).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -1539,7 +1547,7 @@ fn without_the_sulphur(inventory: &AerosolInventory, sizes: bool) -> String {
 }
 
 /// The record's inventory changes with its surface's state only through P14.T24.g's sulphur, whose
-/// case the state sets until P14.T54.b.g (T24.g's case is taken as T24.g takes it): over the first
+/// case the state and a runaway's deck set (`SulphurCycle::case_of`, P14.T54.b.g): over the first
 /// ten whole systems under the batch's rules, each air's record members given each state that
 /// holds an air, its photochemistry's star the Sun's, the airless state the empty inventory and a
 /// magma ocean none, not modelled while it holds an air (R08's S5).
@@ -1550,6 +1558,9 @@ fn without_the_sulphur(inventory: &AerosolInventory, sizes: bool) -> String {
 ///   mode's column, profile, coverage and temperature keep their bits, but a mode's size and τ
 ///   move where the SO₂ is the air's most abundant gas, whose viscosity sets the sizes (a thin air
 ///   flipped to a runaway, which T24.g's SO₂ cap, with P14.T24.d's batch, bounds); counted.
+/// - A runaway solved without Venus's deck (`RunawayDeck::Deckless`, P14.T53.b part 1 (b)) takes
+///   case 2's dry branch, once through, as a temperate world's: its inventory is the temperate
+///   one's to the bit.
 #[test]
 fn the_record_s_inventory_changes_with_the_state_only_in_its_sulphur() {
     let sun = Some(Kelvin::new(5_772.0));
@@ -1566,14 +1577,19 @@ fn the_record_s_inventory_changes_with_the_state_only_in_its_sulphur() {
             let id = record.identity().id();
             let structure = owned_structure(surface);
             let base = air_surface_of(record, surface, sun);
-            let of = |state| match record_aerosols(
+            let of_deck = |state, runaway_deck| match record_aerosols(
                 AirRules::Batch,
-                &AirSurface { state, ..base },
+                &AirSurface {
+                    state,
+                    runaway_deck,
+                    ..base
+                },
                 &structure,
             ) {
                 Modelled::Ok(inventory) => inventory,
                 Modelled::NotModelled => panic!("{id}: {state:?} refused"),
             };
+            let of = |state| of_deck(state, RunawayDeck::Kept);
             let temperate = of(SurfaceState::Temperate);
             assert_eq!(
                 without_the_sulphur(&of(SurfaceState::Snowball), true),
@@ -1589,6 +1605,11 @@ fn the_record_s_inventory_changes_with_the_state_only_in_its_sulphur() {
             if without_the_sulphur(&runaway, true) != without_the_sulphur(&temperate, true) {
                 resized.push(id.to_string());
             }
+            assert_eq!(
+                of_deck(SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless),
+                temperate,
+                "{id}: a runaway solved without the deck"
+            );
             assert_eq!(
                 of(SurfaceState::Airless),
                 AerosolInventory::empty(),
