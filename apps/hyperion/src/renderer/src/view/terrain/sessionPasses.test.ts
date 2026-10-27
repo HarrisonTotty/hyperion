@@ -546,6 +546,27 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
   });
 });
 
+describe("the terrain session's level bounds (R10.T4.b)", () => {
+  it("hands its pass each block's σ by level with the block's table", async () => {
+    const h = await harness();
+    const cells = [{ i: 15, j: 15 }].map(({ i, j }) =>
+      fieldCellIndex({ face: 2, level: FIELD_LEVEL, i, j }),
+    );
+    h.session.noteView(PRIMARY, handing(5e6));
+    h.session.step();
+    await answerField(h, 1, cells);
+    h.session.step();
+    await settle();
+    const pass = h.session.pass(MOON);
+    expect(pass?.planet.sigmaM ?? null).toBeNull();
+    const sigmaM = Float64Array.from({ length: 25 }, (_, n) => (n < 10 ? 10 - n : 0));
+    for (const worker of h.workers) {
+      answerBlock(worker, 0, { ...blockChange(FIELD_LEVEL, runsOf(cells)), sigmaM });
+    }
+    expect(pass?.planet.sigmaM).toEqual(sigmaM);
+  });
+});
+
 describe("the terrain session's mask behind the rebakes (R10.T16.b; decision D7)", () => {
   it("gives the mask a block's cells only once the rebakes it named have landed, the invariant holding throughout", async () => {
     const h = await harness();

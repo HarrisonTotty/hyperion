@@ -458,6 +458,24 @@ describe("the shared pass's level table (R10.T16.b)", () => {
     expect(inputs.at(-1)?.planet.levels).toEqual(widened);
     expect(made.pass.planet.levels).toEqual(widened);
   });
+
+  it("selects again on a new σ by level with the table, and not on the same one (R10.T4.b)", async () => {
+    const inputs: SelectionInput[] = [];
+    const made = await sharedPass("high", { onSelect: (input) => inputs.push(input) });
+    const views = [passView(PRIMARY, northPole(2_000_000))];
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
+    const table = goldenLevelTable("off");
+    const sigma = Float64Array.from({ length: 25 }, (_, n) => (n < 19 ? 2 ** (10 - n) : 0));
+    made.pass.setLevels(table, sigma);
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
+    expect([inputs.at(-1)?.planet.sigmaM, made.pass.planet.sigmaM]).toEqual([sigma, sigma]);
+    made.pass.setLevels(table, Float64Array.from(sigma));
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(false);
+    const doubled = sigma.map((x) => 2 * x);
+    made.pass.setLevels(table, doubled);
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
+    expect(made.pass.planet.sigmaM).toEqual(doubled);
+  });
 });
 
 describe("the shared pass's rebakes (R10.T16.b; R10 Design note 16)", () => {

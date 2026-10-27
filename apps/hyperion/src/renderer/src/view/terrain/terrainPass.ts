@@ -1256,14 +1256,20 @@ export class TerrainPass {
 
   /**
    * The body's level table as its field's latest block gives it (`FieldChange.levels`, the pool's
-   * `fieldLevels`; R10.T16.b): selection reads its bounds from the next step on. A table equal to
-   * the one held, or none, changes nothing.
+   * `fieldLevels`; R10.T16.b), with its σ by level (`FieldChange.sigmaM`, the pool's
+   * `fieldBounds`; R10.T4.b), which the selection bound reads under the statistical rule: selection
+   * reads its bounds from the next step on. A table and σ equal to those held, or no table,
+   * change nothing; no σ is none.
    */
-  setLevels(levels: Float64Array | null): void {
-    if (levels === null || this.#disposed || sameLevels(this.#planet.levels, levels)) {
+  setLevels(levels: Float64Array | null, sigmaM: Float64Array | null = null): void {
+    if (
+      levels === null ||
+      this.#disposed ||
+      (sameLevels(this.#planet.levels, levels) && sameLevels(this.#planet.sigmaM, sigmaM))
+    ) {
       return;
     }
-    this.#planet = planetGeometry(this.#planet.figure, levels);
+    this.#planet = planetGeometry(this.#planet.figure, levels, sigmaM, this.#planet.rule);
     this.#rangesVersion += 1;
   }
 

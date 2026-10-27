@@ -11,10 +11,10 @@
 //! capacity and the pad friction, with the month's temperature the friction is taken at).
 //!
 //! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
-//! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and each
-//! query's synthesis are here, so that the native and wasip1 tests check them as the browser
-//! target runs them, and the client's worker test holds the module's answers to this module's on a
-//! fixture field (`tests/golden/worker/moon_like.golden`, `golden`).
+//! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and σ by
+//! level (R10.T4.b) and each query's synthesis are here, so that the native and wasip1 tests check
+//! them as the browser target runs them, and the client's worker test holds the module's answers
+//! to this module's on a fixture field (`tests/golden/worker/moon_like.golden`, `golden`).
 //!
 //! # A body's field
 //!
@@ -99,7 +99,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use hyperion_base::rng::DetailSeed;
-use hyperion_base::units::{Kelvin, Metres, Pascals, Radians};
+use hyperion_base::units::{Kelvin, Metres, Pascals, Radians, SquareMetres};
 
 use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity};
 use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
@@ -120,7 +120,10 @@ use crate::patch::normals::{encode_octahedral_f32, surface_normal};
 use crate::reading::{
     LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedReading, slant_range, surveyed_reading,
 };
-use crate::synth::{BandLevel, LevelBounds, QueryHeightError, SynthCache, Synthesiser};
+use crate::synth::craters::CraterOctaves;
+use crate::synth::{
+    BandLevel, LevelBounds, QueryHeightError, SynthCache, Synthesiser, omitted_variance_in,
+};
 use crate::wire::{DecodeBlockError, DecodedBlock, decode_block};
 
 /// The values a level's row of a [level table](WorkerFields::level_table) holds: 4.
@@ -147,6 +150,8 @@ struct BodyField {
     bounds: LevelBounds,
     /// The lowest and highest elevation of the cells held, millimetres, `None` before any.
     elevation_mm: Option<(i32, i32)>,
+    /// The body's σ by level over the cells held as surveyed (R10.T4.b).
+    sigma: LevelSigma,
     /// The body's synthesis cache, kept from the field's start to its release. It is correct only
     /// because the field never drops a cell ([`SynthCache`]'s rule): a change that evicts cells
     /// must start it afresh with them.
@@ -237,6 +242,67 @@ impl BodyField {
                 self.elevation_mm
                     .map_or((e, e), |(lo, hi)| (lo.min(e), hi.max(e))),
             );
+        }
+    }
+}
+
+/// A body's σ by level as its worker keeps it (R10.T4.b): for band level n, the largest of R09's
+/// [`Synthesiser::omitted_rms`] at n over the cells the field holds as surveyed, metres, 0 before
+/// any ([`WorkerFields::level_sigma_m`]).
+///
+/// It grows with the cells each block surveys anew, each read once, and never shrinks, since a
+/// cell surveyed stays surveyed and its record never changes (R10.T6.a): the largest over a set,
+/// so the same whatever the order of the blocks. Each level's small-crater share is the body's,
+/// the same in every cell ([`omitted_variance_in`]), so it is built once at the field's start,
+/// leaving each cell its relief, channels and coarse rims; a cell's σ is then
+/// [`Synthesiser::omitted_rms`]'s to the bit. A level whose bound is zero, from the band limit's
+/// level on, leaves nothing out, so its σ is 0 and no cell is read there (R10.T4.a's record: on
+/// every sample world σ is 0 exactly where the bound is; the worker's test holds the two to the
+/// bit). The rest costs about 50 to 70 µs a cell (R10.T4.b's record).
+#[derive(Debug, Clone)]
+struct LevelSigma {
+    /// Each level's small-crater share of the variance it leaves out, square metres
+    /// ([`CraterOctaves::omitted_variance`] at the level's set), or `None` for a level whose
+    /// bound is zero.
+    small_craters: [Option<SquareMetres>; LEVEL_TABLE_ROWS],
+    /// Each level's largest σ so far, metres.
+    largest_m: [f64; LEVEL_TABLE_ROWS],
+}
+
+impl LevelSigma {
+    /// No cell read yet, with each level's small-crater share from `octaves`, the body's, at
+    /// `bounds`' sets.
+    #[must_use]
+    fn new(bounds: &LevelBounds, octaves: &CraterOctaves) -> Self {
+        let mut small_craters = [None; LEVEL_TABLE_ROWS];
+        for (level, share) in (0..=MAX_LEVEL).zip(&mut small_craters) {
+            let n = band(level);
+            *share = (bounds.bound_m(n) > 0.0).then(|| octaves.omitted_variance(bounds.set(n)));
+        }
+        Self {
+            small_craters,
+            largest_m: [0.0; LEVEL_TABLE_ROWS],
+        }
+    }
+
+    /// Widens each level's σ by the cells of `runs`, which `field` holds as surveyed: a block's
+    /// [`SurveyChange::runs`] once the field has taken it.
+    fn survey(&mut self, field: &PartialField, bounds: &LevelBounds, runs: &[(u32, u32)]) {
+        let level = field.header().level().get();
+        for &(start, end) in runs {
+            for index in start..end {
+                let cell =
+                    cell_at_index(level, index).expect("a run's cells are the field's level's");
+                let levels = (0..=MAX_LEVEL).zip(&self.small_craters);
+                for ((n, &share), largest) in levels.zip(&mut self.largest_m) {
+                    let Some(share) = share else {
+                        continue;
+                    };
+                    let variance = omitted_variance_in(field, bounds.set(band(n)), share, cell)
+                        .expect("a cell the field took as surveyed is held");
+                    *largest = num::max(*largest, variance.total().value().sqrt());
+                }
+            }
         }
     }
 }
@@ -1300,7 +1366,8 @@ impl WorkerFields {
     /// answers with the cells it surveys and brings ([`SurveyChange`]).
     ///
     /// It builds the body's level bounds from the header ([`LevelBounds::new`], a few to some
-    /// tens of milliseconds) and starts its cache afresh.
+    /// tens of milliseconds) with each level's small-crater share of σ, starts its cache afresh,
+    /// and reads σ over the cells the block surveys ([`level_sigma_m`](Self::level_sigma_m)).
     ///
     /// # Errors
     ///
@@ -1315,14 +1382,19 @@ impl WorkerFields {
         let mut field = PartialField::new(header.clone());
         let change = survey_change(&field, &block);
         field.insert(&block).map_err(TakeBlockError::Insert)?;
+        // `LevelBounds::new`'s own build, keeping its octaves for σ's small-crater shares.
+        let octaves = CraterOctaves::new(field.header());
+        let bounds = LevelBounds::of(field.header(), &octaves);
         let mut held = BodyField {
-            bounds: LevelBounds::new(field.header()),
+            sigma: LevelSigma::new(&bounds, &octaves),
+            bounds,
             field,
             elevation_mm: None,
             cache: SynthCache::new(),
             nodes: NodeCache::default(),
         };
         held.hold_elevations(&block);
+        held.sigma.survey(&held.field, &held.bounds, change.runs());
         self.bodies.insert(body, held);
         Ok(change)
     }
@@ -1352,6 +1424,7 @@ impl WorkerFields {
         let change = survey_change(&held.field, &block);
         held.field.insert(&block).map_err(TakeBlockError::Insert)?;
         held.hold_elevations(&block);
+        held.sigma.survey(&held.field, &held.bounds, change.runs());
         Ok(change)
     }
 
@@ -1410,6 +1483,26 @@ impl WorkerFields {
             ]);
         }
         Some(table)
+    }
+
+    /// `body`'s σ by level, the statistical half of its level bounds beside
+    /// [`level_table`](Self::level_table)'s hard bound (plan R10, R10.T4.b; R10's Design note 5):
+    /// for band level n at index n, from 0 to 24, the largest of R09's level-keyed
+    /// [`Synthesiser::omitted_rms`] at n over the cells the field holds as surveyed, metres; 0 at
+    /// every level before any cell is surveyed.
+    ///
+    /// It is the body-wide σ that selection's min(`ε_n`, 4`σ_n`) reads under R10's statistical rule
+    /// (the client's `levelBounds.ts`), and it bounds nothing: the hard bound stays the table's. It
+    /// is taken over the surveyed ground alone, which is all a patch draws from the field (an
+    /// unsurveyed vertex takes the reference surface, R10.T6.a), as a bake's own σ is
+    /// ([`TerrainLayers::sigma`](crate::bake::TerrainLayers::sigma)). It grows as blocks survey
+    /// cells, each cell read once as its block is taken (the closed forms of each level below the
+    /// band limit's, the small craters' share built once a level at the field's start: about 50 to
+    /// 70 µs a cell, some 2 s for a full 1 MiB block of a level-8 field), and is the same whatever
+    /// the order of the blocks. `None` if no field of `body` is held.
+    #[must_use]
+    pub fn level_sigma_m(&self, body: BodyRef) -> Option<[f64; LEVEL_TABLE_ROWS]> {
+        self.bodies.get(&body).map(|held| held.sigma.largest_m)
     }
 
     /// Bakes `key` over `body`'s field with the body's detail seed `seed` ([`bake_terrain`], no

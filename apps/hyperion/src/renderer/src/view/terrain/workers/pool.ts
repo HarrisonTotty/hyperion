@@ -42,6 +42,7 @@
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
+import type { LevelBounds } from "../levelBounds";
 import { patchKeyString, unreachable } from "../patchKey";
 import type { PatchRequest } from "../select";
 import type {
@@ -161,8 +162,8 @@ interface KeptField {
   refused: boolean;
   /** How many of its blocks, from the first, have had their changes reported. */
   reported: number;
-  /** The body's level table as a worker last reported it, `null` before any. */
-  levels: Float64Array | null;
+  /** The body's level bounds as a worker last reported them, `null` before any. */
+  bounds: LevelBounds | null;
 }
 
 /** A block posted to a worker, by the message's ID. */
@@ -528,7 +529,16 @@ export class HeightWorkerPool {
    * reported it (R10.T6.b; T4.b's selection reads it); `null` before any, or with no field kept.
    */
   fieldLevels(body: BodyIdHex): Float64Array | null {
-    return this.fields.get(body)?.levels ?? null;
+    return this.fields.get(body)?.bounds?.table ?? null;
+  }
+
+  /**
+   * `body`'s level bounds, its level table ({@link fieldLevels}) with its σ by level, as its
+   * field's latest block reported them (plan R10, R10.T4.b; `levelBounds.ts`); `null` before any,
+   * or with no field kept.
+   */
+  fieldBounds(body: BodyIdHex): LevelBounds | null {
+    return this.fields.get(body)?.bounds ?? null;
   }
 
   /**
@@ -668,7 +678,7 @@ export class HeightWorkerPool {
       sinceId: this.nextId,
       refused: false,
       reported: 0,
-      levels: null,
+      bounds: null,
     };
     this.fields.set(body, kept);
     for (const slot of this.slots) {
@@ -1279,7 +1289,7 @@ export class HeightWorkerPool {
       return;
     }
     field.reported = sequence + 1;
-    field.levels = block.levels;
+    field.bounds = { table: block.levels, sigmaM: block.sigmaM };
     const change: FieldChange = { ...block, body, sequence };
     tell(this.changeListeners, change, "field changes");
   }

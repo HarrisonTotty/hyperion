@@ -68,10 +68,13 @@
 //!   `FieldBlock`'s `newlySurveyed()` is a `Uint32Array` of runs, each the first cell index and the
 //!   index past the last, at the field's level, `fieldLevel`, of the cells the block surveyed
 //!   anew; its `newlyHeld()` the runs, laid out alike, of the cells it brought, surveyed or margin,
-//!   that the field did not hold ([`SurveyChange::held_runs`], R10.T8.b's rebake rule); and its
+//!   that the field did not hold ([`SurveyChange::held_runs`], R10.T8.b's rebake rule); its
 //!   `levelTable()` the body's level table in `levelTable(ridges)`'s layout
-//!   ([`WorkerFields::level_table`]). `fieldRelease(system, body)` drops it, `true` if one was
-//!   held, and `heldBytes` is what every field holds on the heap.
+//!   ([`WorkerFields::level_table`]); and its `levelSigmaM()` a `Float64Array` of 25, level n at
+//!   n, the body's `σ_n`, metres: the largest omitted RMS at the level over the cells held as
+//!   surveyed, 0 before any ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's
+//!   hard bound makes the body's level bounds. `fieldRelease(system, body)` drops it, `true` if
+//!   one was held, and `heldBytes` is what every field holds on the heap.
 //! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon, skirtM)`
 //!   bakes the patch as `bakePatch` does, `weights` a `WeightsLayer` and `horizon` a
 //!   `HorizonLayer`, each `Baked` (0) or `Skipped` (1), and returns a `BakedTerrain`, or
@@ -176,8 +179,8 @@ use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, GroundAtSight, GroundProperties,
-    GroundReadout, GroundReadoutQuery, NormalMap, QueryBodyError, SeasonAnomaly, SlopeBaseline,
-    SurveyChange, SurveyedMaterial, WorkerFields,
+    GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap, QueryBodyError, SeasonAnomaly,
+    SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
 };
 
 /// The generator version this module computes surfaces for, the crate's `generator_version`.
@@ -563,7 +566,7 @@ pub struct JsSurfaceFields {
     fields: WorkerFields,
 }
 
-/// What a block taken changed, and the body's level table after it (see the module
+/// What a block taken changed, and the body's level table and σ by level after it (see the module
 /// documentation).
 #[wasm_bindgen]
 #[derive(Debug)]
@@ -572,6 +575,7 @@ pub struct FieldBlock {
     runs: Vec<u32>,
     held: Vec<u32>,
     table: Vec<f64>,
+    sigma: [f64; LEVEL_TABLE_ROWS],
 }
 
 #[wasm_bindgen]
@@ -604,6 +608,13 @@ impl FieldBlock {
     #[must_use]
     pub fn level_table(&self) -> Vec<f64> {
         self.table.clone()
+    }
+
+    /// The body's σ by level, 25, metres.
+    #[wasm_bindgen(js_name = levelSigmaM)]
+    #[must_use]
+    pub fn level_sigma_m(&self) -> Vec<f64> {
+        self.sigma.to_vec()
     }
 }
 
@@ -1860,6 +1871,10 @@ impl JsSurfaceFields {
             table: self
                 .fields
                 .level_table(body)
+                .expect("a block taken leaves its body's field held"),
+            sigma: self
+                .fields
+                .level_sigma_m(body)
                 .expect("a block taken leaves its body's field held"),
         }
     }

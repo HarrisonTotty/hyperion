@@ -183,6 +183,7 @@ class ScriptedPool implements ClassMapPool {
         newlySurveyed: Uint32Array.from(surveyed),
         newlyHeld: Uint32Array.from(held),
         levels: new Float64Array(100),
+        sigmaM: new Float64Array(25),
       });
     }
   }

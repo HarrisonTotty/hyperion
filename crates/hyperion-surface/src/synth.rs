@@ -362,17 +362,13 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// If `cell` is not of the field's level.
     #[must_use]
     pub fn omitted_variance(&self, cell: PatchKey, level: BandLevel) -> Option<UnresolvedVariance> {
-        let field = self.field;
         let set = self.level_set(level);
-        let cuts = levels::LevelCuts::of(field.header(), set);
-        let relief = relief::relief_variance_from(field, cell, cuts.relief_degree)?;
-        let channels = channels::unresolved_channel_variance(field, cell, cuts.channels)?;
-        Some(UnresolvedVariance {
-            relief,
-            channels,
-            craters: self.craters.octaves().omitted_variance(set),
-            rims: craters::rims::unresolved_rims(field, cell, cuts.rims)?,
-        })
+        omitted_variance_in(
+            self.field,
+            set,
+            self.craters.octaves().omitted_variance(set),
+            cell,
+        )
     }
 
     /// The structure function at a lag of `lag` of what band level `level` leaves out of the
@@ -432,6 +428,37 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     ) -> Result<(PatchKey, &'a SynthesisCell), QueryHeightError> {
         Ok(interp::cell_at(self.field, dir)?)
     }
+}
+
+/// What the band level of `set` leaves out of the finest level's ground in `cell` of `field`,
+/// per contribution, with the small craters' part given: [`Synthesiser::omitted_variance`]'s
+/// closed forms and sum, which it calls with `small_craters` its octaves'
+/// [`CraterOctaves::omitted_variance`] at `set`; `None` where `field` does not hold the cell.
+///
+/// The small craters' part is the body's, the same in every cell and a sum over the octaves and
+/// their sampled profiles, so a caller that asks of many cells at a level builds it once (R10.T4.b,
+/// the client worker's body σ). Given that part, the answer is
+/// [`Synthesiser::omitted_variance`]'s, bit for bit.
+///
+/// # Panics
+///
+/// If `cell` is not of the field's level.
+#[must_use]
+pub(crate) fn omitted_variance_in(
+    field: &impl FieldView,
+    set: &LevelSet,
+    small_craters: SquareMetres,
+    cell: PatchKey,
+) -> Option<UnresolvedVariance> {
+    let cuts = levels::LevelCuts::of(field.header(), set);
+    let relief = relief::relief_variance_from(field, cell, cuts.relief_degree)?;
+    let channels = channels::unresolved_channel_variance(field, cell, cuts.channels)?;
+    Some(UnresolvedVariance {
+        relief,
+        channels,
+        craters: small_craters,
+        rims: craters::rims::unresolved_rims(field, cell, cuts.rims)?,
+    })
 }
 
 /// The caller's cache for a [`Synthesiser`]'s queries, one per worker or per bake.
