@@ -960,6 +960,14 @@ Four classes, shared by the whole ship:
       where the image draws the terrain in the reference surface's place, so that surveyed ground
       on a night side, or drawn black under a `LIGHTING:` annunciation, shows none of them.
       Surveyed ground is told by the survey edge, not by where the datum's lines end.
+    - Over the photorealistic image the limb is stroked inside the body's figure: the outer edge of
+      its casing lies on the limb, and no datum line or casing is drawn beyond it, so that the image
+      beyond the figure, an atmosphere's glow above the limb included, is never covered. The
+      wireframe centres its limb on the figure's edge, as it does every line. A body whose cased
+      limb, stroked inside it, would cover more than half its drawn disc, under an apparent radius
+      of 24 device px at a line scale of 2 or 35 at 3, has no limb or graticule over the image: the
+      image alone shows it, as it shows a body under 3 device px, and its entry in the view's list,
+      its label and, while it is selected, the bracket still mark it.
     - The edge is drawn along the surveyed terrain's border, as the chart's query edge marks where
       fetched data ends: a solid `--text` line `1px` wide with short ticks pointing into the
       unsurveyed side. Each tick is `0.25rem` long, one every `1rem` of the drawn line, and none is
