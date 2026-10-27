@@ -340,8 +340,10 @@ impl<'a> Builder<'a> {
 
     /// This builder for a star whose provisional companion-stripped mark is `stripped` (plan 06,
     /// design note 11, P06.T19.c): a marked star's electron-capture window is the companion-stripped
-    /// one, 1 M☉ wide, and not the single star's 0.1 M☉ ([`ElectronCaptureWindows`]). Nothing
-    /// else on the track reads the mark: its envelope is a single star's until plan 11.
+    /// one and not the single star's ([`ElectronCaptureWindows`]), each of the width the track's
+    /// options give it ([`TrackOptions::capture_windows`]; the generator's are 1 M☉ and 0.1 M☉,
+    /// P15.T5.d). Nothing else on the track reads the mark: its envelope is a single star's until
+    /// plan 11.
     ///
     /// [`ElectronCaptureWindows`]: crate::stellar::remnant::collapse::ElectronCaptureWindows
     #[must_use]

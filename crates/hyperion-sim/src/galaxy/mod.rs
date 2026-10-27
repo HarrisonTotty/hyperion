@@ -55,6 +55,7 @@ use self::kinematics::KinematicTables;
 use self::params::GalaxyParams;
 use self::potential::{MassModel, PotentialTables};
 use self::shares::ShareMatrix;
+use self::snr::WindowCaps;
 use self::substellar::{SubstellarAbundance, SubstellarParams};
 use crate::Seed;
 use crate::coords::GalacticPosition;
@@ -166,8 +167,9 @@ impl Population {
 /// read, which the mass model does while the galaxy is built; the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
 /// 100 ms, two thirds of it the discs' vertical Jeans solve in [`Fields::new`] (plan 02, Risks,
 /// R19); the gas field adds its two radial quadratures, some tens of microseconds, and nothing on
-/// the heap (plan 07). [`heap_bytes`](Self::heap_bytes) states what one costs to keep, about
-/// 1.4 MiB.
+/// the heap (plan 07), and the shell window's caps their scan, about 1% (plan 09,
+/// [`window_caps`](Self::window_caps)). [`heap_bytes`](Self::heap_bytes) states what one costs to
+/// keep, about 1.4 MiB.
 ///
 /// # Examples
 ///
@@ -203,6 +205,7 @@ pub struct Galaxy {
     kinematics: Option<Box<KinematicTables>>,
     feature_shares: FeatureShares,
     substellar: SubstellarAbundance,
+    window_caps: WindowCaps,
 }
 
 impl Galaxy {
@@ -215,7 +218,8 @@ impl Galaxy {
     /// the warm layer is clamped so that the neutral layer keeps at least half the gas wherever the
     /// molecular disc, at most 3 × 10⁶ M☉, weighs less than half of it. Every galaxy plan 02 draws
     /// has at least 2.5 × 10⁹ M☉ of gas, the least at any corner of its ranges; the proof is
-    /// `gas::params`'s `the_neutral_share_is_at_least_half_at_every_corner_of_the_draws`.
+    /// `gas::params`'s `the_neutral_share_is_at_least_half_at_every_corner_of_the_draws`. Nor
+    /// does [`from_params`](Self::from_params)'s check of the shell window's caps fire, as it says.
     #[must_use]
     pub fn new(seed: Seed) -> Self {
         Self::with_mass_function(seed, MassFunctionKind::default())
@@ -248,6 +252,13 @@ impl Galaxy {
     /// disc and warm ionised layer, drawn for `seed`, outweigh its gas disc (plan 07, ruling 22).
     /// Since the warm layer's clamp (ruling 91) that needs a gas disc under 6 × 10⁶ M☉, which no
     /// galaxy the builder accepts has.
+    ///
+    /// # Panics
+    ///
+    /// If a cap of the shell window over the gas exceeds
+    /// [`SHELL_WINDOW_CAP`](snr::SHELL_WINDOW_CAP) ([`WindowCaps::from_gas_params`]). It never
+    /// does: the caps are largest at the lowest pressure floor a galaxy's gas has, 300 K cm⁻³,
+    /// where the field's is 3.67 Myr (P09.T15.b, ruling 136.3).
     pub fn from_params(seed: Seed, params: GalaxyParams) -> Result<Self, BuildGalaxyError> {
         let mass_function = HeldMassFunction::of(params.mass_function());
         let model = MassModel::new(&params);
@@ -270,6 +281,7 @@ impl Galaxy {
             params.mean_formed_mass(),
         );
         feature_shares.set_class_shares(&crate::tables::binary::CLASS_SHARES);
+        let window_caps = WindowCaps::from_gas_params(gas.params());
         Ok(Self {
             seed,
             params,
@@ -282,6 +294,7 @@ impl Galaxy {
             kinematics: None,
             feature_shares,
             substellar,
+            window_caps,
         })
     }
 
@@ -345,6 +358,19 @@ impl Galaxy {
     #[must_use]
     pub fn feature_shares(&self) -> &FeatureShares {
         &self.feature_shares
+    }
+
+    /// The shell window's caps over this galaxy's gas, one per environment (plan 09, P09.T15.b),
+    /// which the supernova test cuts every window at (P09.T17's `claims`).
+    ///
+    /// They are [`WindowCaps::from_gas_params`] of the gas's parameters, a fixed scan of some 5,000
+    /// windows, computed once with the galaxy: 3.7 ms against 352 ms for the whole of
+    /// [`Galaxy::new`] in the same test build (2026-10-27, on a shared machine), about 1%, where a
+    /// scan on every claim would cost that for every recent death. [`WindowCaps::from_galaxy`]
+    /// reads them here.
+    #[must_use]
+    pub const fn window_caps(&self) -> &WindowCaps {
+        &self.window_caps
     }
 
     /// The free-floating brown dwarfs and rogue planets per system, with the rogue planets' cap
@@ -437,8 +463,8 @@ impl Galaxy {
     /// The initial mass formed per system, with nothing dead: the denominator of rates quoted per
     /// solar mass formed.
     ///
-    /// It depends on the mass function alone: 0.957 M☉ under the default, 0.836 M☉ under
-    /// Kroupa's.
+    /// It depends on the mass function alone: 1.0961 M☉ under the default, 0.8215 M☉ under
+    /// Kroupa's, at generator version 23 (plan 11, P11.T8.e).
     #[must_use]
     pub fn mean_formed_mass(&self) -> SolarMasses {
         self.params.mean_formed_mass()

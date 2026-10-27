@@ -78,7 +78,8 @@ pub const PLUMMER_HALF_MASS_RATIO: f64 = 1.304_766_372_624_786;
 pub const BLACK_HOLE_BIRTH_FRACTION: f64 = 0.06;
 
 /// The mean mass of a retained black hole, M☉, which turns their mass fraction into a count
-/// (ours, provisional: a stand-in for the mass spectrum P15.T8.a fits).
+/// (ours, provisional by ruling 126.9: a stand-in for their mass spectrum, which P15.T8.a does not
+/// fit; its block, `tables::cluster_dynamics`, holds the loss law's β, ψ₁, clock and prefactor).
 pub const MEAN_BLACK_HOLE_MASS: f64 = 15.0;
 
 /// A cluster older than this many relaxation times with no black holes is core-collapsed

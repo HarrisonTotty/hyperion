@@ -884,6 +884,17 @@ domain_tags! {
     /// orbital period with a skip, held to the perihelion season
     /// (`planetary::events::dust_storms`).
     BODY_DUSTSTORM: Event = "body.duststorm";
+
+    // Plan 09, phase 4 (P09.T17): the supernova test's explosion energy, which plan 09's Provides
+    // names with scope `System`, read on every side of the carve-out. Appended here, after
+    // P14.T31.b's `body.duststorm`, because the macro's order fixes `ALL`.
+
+    /// A supernova's kinetic energy (P09.T17, `DeathMarks`), opened with
+    /// `ObjectKey::from(SystemId)` of the system whose star explodes: word 0, one uniform, the
+    /// energy's rank in its death's law (`ExplosionEnergy::from_uniform`, or
+    /// `ExplosionEnergy::electron_capture_from_uniform` for an electron-capture supernova and
+    /// `ExplosionEnergy::iax_from_uniform` for a Type Iax); words 1–7 are reserved.
+    SNR_ENERGY: System = "snr.energy";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1262,6 +1273,11 @@ mod tests {
             assert!(tag.name().starts_with("centre."));
             assert!(ALL.contains(&tag));
         }
+        // P09.T17: the explosion energy, the one tag plan 09's Provides names under `snr.`.
+        assert_eq!(SNR_ENERGY.name(), "snr.energy");
+        assert_eq!(SNR_ENERGY.scope(), crate::rng::TagScope::System);
+        assert!(SNR_ENERGY.name().starts_with("snr."));
+        assert!(ALL.contains(&SNR_ENERGY));
     }
 
     #[test]
