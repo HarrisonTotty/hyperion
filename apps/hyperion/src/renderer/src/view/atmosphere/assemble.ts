@@ -44,7 +44,12 @@
  * `substanceName`, shown under Design note 12's rule: while less than
  * `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` of vertical optical depth at 550 nm lies above the layer's or the
  * mode's top, counting the molecular, Thomson and aerosol terms (gas absorption is each light's,
- * and left out). The provisional thick line (`thick/regime.ts`) adds one of its own.
+ * and left out). The router (`thick/regime.ts`'s `classifyRegime`) adds one of its own,
+ * `THICK_REASON`, for a body it routes past the thin regime (R08.T13.d).
+ *
+ * **The regime** is the router's, of the medium and the body's cover ({@link bodyCoverOf}),
+ * computed once here and carried with the medium ({@link AssembledMedium}), so that the read path
+ * routes on it (R08.T14.c).
  */
 
 import type { AerosolShapeDto } from "@hyperion/protocol";
@@ -58,6 +63,7 @@ import type {
   BodyRecord,
   BodySurface,
   BulkProperties,
+  CondensateDeck,
   AerosolMode as RecordAerosolMode,
   SizeDistribution as RecordSizeDistribution,
   Section,
@@ -111,7 +117,15 @@ import { molecularMixture, molecularTerm, type RayleighApproximation } from "./r
 import { REGISTRY_OPTICS_FLAGS } from "./registryFlags";
 import type { ModeOptics, SizeDistribution } from "./sizeDistribution";
 import type { BakeSpectrum } from "./spectralColour";
-import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH, provisionalThick, THICK_REASON } from "./thick/regime";
+import {
+  approximateRegime,
+  type AtmosphereRegime,
+  type BodyCover,
+  classifyRegime,
+  CLOUD_DECK_SPLIT_OPTICAL_DEPTH,
+  type CoverDeck,
+  THICK_REASON,
+} from "./thick/regime";
 
 export {
   ATMOSPHERE_OPTICS_VERSION,
@@ -181,11 +195,20 @@ interface AssembledLabels {
 
 /**
  * A body's medium and labels (the Provides' `AssembledMedium`): no medium, or the medium with what
- * its tables take ({@link DrawnMedium}).
+ * its tables take ({@link DrawnMedium}) and its regime.
  */
 export type AssembledMedium =
   | (AssembledLabels & { readonly medium: undefined; readonly drawn: undefined })
-  | (AssembledLabels & { readonly medium: AtmosphereMedium; readonly drawn: DrawnMedium });
+  | (AssembledLabels & {
+      readonly medium: AtmosphereMedium;
+      readonly drawn: DrawnMedium;
+      /**
+       * How the medium is drawn: `classifyRegime`'s, of the medium and {@link bodyCoverOf}'s cover
+       * (R08.T13.d). Both thick regimes carry `atmosphereApproximate` with `THICK_REASON` until
+       * their gates pass.
+       */
+      readonly regime: AtmosphereRegime;
+    });
 
 /** What the assembly takes beside its input. */
 export interface AssembleOptions {
@@ -1123,6 +1146,49 @@ function depthAbove(
 }
 
 // ---------------------------------------------------------------------------------------------
+// The cover the router reads.
+
+/** A deck's τ(550): the sum of the modes naming it, each at its coverage, those of a modelled τ. */
+function deckOpticalDepth550(inventory: AerosolInventory, deck: CondensateDeck): number {
+  let tau = 0;
+  for (const mode of inventory.modes) {
+    if (mode.deck === deck.condensate && mode.opticalDepth.kind === "value") {
+      tau += mode.opticalDepth.value.tau550 * mode.coverage;
+    }
+  }
+  return tau;
+}
+
+/**
+ * A surface air's cover, as `thick/regime.ts`'s `classifyRegime` reads it beside the medium
+ * (R08.T13.d; `decision-r08-t13c2-classes.md` §5): the surface's cloud fraction (P14.T24.b), and
+ * each of its inventory's decks in the inventory's order, its τ(550) the sum of its modes' at their
+ * coverage (the modes whose `deck` names it), its base and top as heights above the datum on
+ * `column` by the τ rule's own map of pressure to height.
+ *
+ * @remarks
+ * - A mode whose optical depth the generator does not model adds nothing to its deck: the assembly
+ *   drops it and gives its reason, so a deck known only in part is not split on.
+ * - A deck below the datum lies at 0, and one above the column's top at the top.
+ * - The cover is never an envelope's. The assembly draws a surface's air alone: a gas envelope
+ *   gets no medium until R08.T16.a, which gives it its own cover.
+ * - A surface whose inventory is not modelled, or none, has no decks.
+ */
+export function bodyCoverOf(surface: BodySurface, column: AtmosphereColumn): BodyCover {
+  const { cloudFraction } = surface;
+  if (surface.aerosols.kind !== "value") {
+    return { cloudFraction, decks: [], envelope: false };
+  }
+  const inventory = surface.aerosols.value;
+  const decks = inventory.decks.map((deck): CoverDeck => ({
+    opticalDepth550: deckOpticalDepth550(inventory, deck),
+    baseAltitudeM: heightAtPa(column, deck.basePa),
+    topAltitudeM: heightAtPa(column, deck.topPa),
+  }));
+  return { cloudFraction, decks, envelope: false };
+}
+
+// ---------------------------------------------------------------------------------------------
 // The assembly.
 
 /** No medium, with its labels. */
@@ -1242,7 +1308,8 @@ export function assembleMedium(
       shown.push(...sizeConvergenceReasons(material, phase, [...term.channels, term.at550]));
     }
   }
-  if (provisionalThick(medium)) {
+  const regime = classifyRegime(medium, bodyCoverOf(plan.air.surface, column));
+  if (approximateRegime(regime)) {
     shown.push(THICK_REASON);
   }
   const reasonsShown = [...new Set(shown)];
@@ -1260,6 +1327,7 @@ export function assembleMedium(
     labels: ordered([...plan.air.labels, ...approximate]),
     reasons: reasonsShown,
     negligible: plan.negligible,
+    regime,
   };
 }
 

@@ -21,6 +21,7 @@ import {
 import { toBodyDetail } from "../../lib/system/bodiesWire";
 import { earthBody, venusClassMedium } from "../../test/atmosphereFixtures";
 import { type DetailAnswer, SUN_LIGHT, withRecord } from "../../test/atmosphereRecords";
+import { sweepMedium } from "../../test/atmosphereSweep";
 import { BodyDetailSeam } from "../../test/bodyDetailSeam";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
 import { ignore, microtasks, NOT_MODELLED, toyLoader } from "../../test/opticsFakes";
@@ -65,7 +66,7 @@ import {
   OpticsWorkerPool,
 } from "./opticsPool";
 import { perPlanetRowOf, tablesPlanOf } from "./tables";
-import { THICK_REASON } from "./thick/regime";
+import { type AtmosphereRegime, THICK_REASON } from "./thick/regime";
 
 /** A body's per-planet tables as the fake factory makes them, with the bytes it reports. */
 class FakeTables implements CachedTables {
@@ -248,8 +249,11 @@ async function land(h: Harness, body: BodyIdHex, outcome: OpticsBuildOutcome): P
   await microtasks();
 }
 
-/** R05's Earth as an assembly, one light and no absorber. */
-function earthAssembly(labels: ReadonlyArray<AtmosphereLabel> = []): AssembledMedium {
+/** R05's Earth as an assembly, one light and no absorber, its regime as given. */
+function earthAssembly(
+  labels: ReadonlyArray<AtmosphereLabel> = [],
+  regime: AtmosphereRegime = { kind: "thin" },
+): AssembledMedium {
   return {
     medium: R05_EARTH_REFERENCE,
     drawn: {
@@ -262,6 +266,7 @@ function earthAssembly(labels: ReadonlyArray<AtmosphereLabel> = []): AssembledMe
     labels,
     reasons: [],
     negligible: [],
+    regime,
   };
 }
 
@@ -1045,7 +1050,7 @@ describe("a kept scene's bodies", () => {
     ]).toEqual([assembled, 0]);
   });
 
-  it("makes a scene's medium's tables as given, once, adding atmosphereApproximate to a thick one", () => {
+  it("makes a scene's medium's tables as given, once, adding atmosphereApproximate to each the router routes thick, R05's Earth among them (R08.T13.d)", () => {
     const h = harness();
     const venus = venusClassMedium();
     const earth: BuiltAtmosphere = {
@@ -1071,17 +1076,27 @@ describe("a kept scene's bodies", () => {
       h.cache.labelsOf(bodyId(2)),
       h.made.map((tables) => tables.built),
       h.seam.asked.length,
-    ]).toEqual([[], ["aerosolsNotYetModelled", "atmosphereApproximate"], [earth, thick], 0]);
+    ]).toEqual([
+      ["atmosphereApproximate"],
+      ["aerosolsNotYetModelled", "atmosphereApproximate"],
+      [earth, thick],
+      0,
+    ]);
   });
 
-  it("gives a scene's medium past the thick line the line's reason, and one under it none (R08.T10.c)", () => {
+  it("gives a scene's medium the router routes thick its reason and regime, and a thin one neither (R08.T10.c, R08.T13.d)", () => {
     const h = harness();
     const venus = venusClassMedium();
-    const earth: BuiltAtmosphere = {
-      medium: R05_EARTH_REFERENCE,
+    const tenuous: BuiltAtmosphere = {
+      medium: sweepMedium({
+        singleScatteringAlbedo: 1,
+        asymmetry: 0,
+        tau: 1 / 64,
+        groundAlbedo: 0.3,
+      }),
       bottomRadiusM: 6_371_008.8,
       curves: [],
-      body: earthBody(),
+      body: null,
     };
     const thick: BuiltAtmosphere = {
       medium: venus.medium,
@@ -1090,7 +1105,7 @@ describe("a kept scene's bodies", () => {
       body: null,
     };
     const bodies = [
-      kept(bodyId(1), { kind: "medium", built: earth, labels: [] }),
+      kept(bodyId(1), { kind: "medium", built: tenuous, labels: [] }),
       kept(bodyId(2), { kind: "medium", built: thick, labels: [] }),
     ];
     note(h, bodies, 0, null);
@@ -1099,7 +1114,35 @@ describe("a kept scene's bodies", () => {
       [...report.reasons],
       h.cache.entryOf(bodyId(1))?.reasons,
       h.cache.entryOf(bodyId(2))?.reasons,
-    ]).toEqual([[[bodyId(2), [THICK_REASON]]], [], [THICK_REASON]]);
+      h.cache.entryOf(bodyId(1))?.regime,
+      h.cache.entryOf(bodyId(2))?.regime,
+    ]).toEqual([
+      [[bodyId(2), [THICK_REASON]]],
+      [],
+      [THICK_REASON],
+      { kind: "thin" },
+      { kind: "thickScattering" },
+    ]);
+  });
+
+  it("routes a kept body again when its scene gives another cover, the same medium kept (R08.T13.d)", () => {
+    const h = harness();
+    const venus = venusClassMedium();
+    const built: BuiltAtmosphere = {
+      medium: venus.medium,
+      bottomRadiusM: venus.radiusM,
+      curves: [],
+      body: null,
+    };
+    const deck = { opticalDepth550: 30, baseAltitudeM: 2_000, topAltitudeM: 5_000 };
+    note(h, [kept(A, { kind: "medium", built, labels: [] })], 0, null);
+    const clear = h.cache.entryOf(A)?.regime;
+    const cover = { cloudFraction: 1, decks: [deck], envelope: false };
+    note(h, [kept(A, { kind: "medium", built, labels: [], cover })], 0, null);
+    expect([clear, h.cache.entryOf(A)?.regime]).toEqual([
+      { kind: "thickScattering" },
+      { kind: "cloudDeck", deckAltitudeM: 5_000 },
+    ]);
   });
 
   it("holds a body whose scene is still building its medium pending, then draws it (R08.T10.b)", () => {
@@ -1150,6 +1193,21 @@ describe("a kept scene's bodies", () => {
     note(h, [kept(A, { kind: "medium", built: keptEarth(), labels: [] })], 0, null);
     note(h, [kept(A, { kind: "medium", built: keptEarth(), labels: [] })], 0, null);
     expect(h.made.map((tables) => tables.disposed)).toEqual([true, false]);
+  });
+});
+
+describe("the regime a server body's entry carries (R08.T13.d)", () => {
+  it("is the assembly's, as the worker computed it", async () => {
+    const h = harness();
+    const regime = { kind: "cloudDeck", deckAltitudeM: 4_000 } as const;
+    await drawn(h, [lit(A)], earthAssembly(["atmosphereApproximate"], regime));
+    expect(h.cache.entryOf(A)?.regime).toEqual(regime);
+  });
+
+  it("is null for an assembly that draws no medium", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], NOT_MODELLED);
+    expect(h.cache.entryOf(A)?.regime).toBeNull();
   });
 });
 

@@ -347,9 +347,38 @@ describe("the optics-worker pool", () => {
         labels: [],
         reasons: [],
         negligible: [],
+        regime: { kind: "thin" },
       },
     });
     expect(builtOf(await build.outcome).drawn?.curves).toEqual([[]]);
+  });
+
+  it("lands the regime the worker computed with its medium (R08.T13.d)", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const build = pool.build(earthInput());
+    const worker = workerAt(workers, 0);
+    const { medium } = r05EarthWithOzoneAbsorber();
+    const regime = { kind: "cloudDeck", deckAltitudeM: 4_000 } as const;
+    worker.reply({
+      kind: "assembled",
+      id: lastPosted(worker).id,
+      assembled: {
+        medium: { ...medium, terms: medium.terms.filter((term) => term.absorber === undefined) },
+        drawn: {
+          body: earthBody(),
+          bottomRadiusM: 6_371_008.8,
+          absorbers: [],
+          spectra: [SUN_LIGHT.spectrum],
+          curves: [],
+        },
+        labels: ["atmosphereApproximate"],
+        reasons: [],
+        negligible: [],
+        regime,
+      },
+    });
+    const built = builtOf(await build.outcome);
+    expect(built.medium === undefined ? null : built.regime).toEqual(regime);
   });
 
   it("fails a build whose job throws, with the job's message", async () => {
@@ -521,6 +550,7 @@ function absorbing(spec: AbsorberSpec, medium: AssembledMedium["medium"]): Assem
     labels: [],
     reasons: [],
     negligible: [],
+    regime: { kind: "thin" },
   };
 }
 

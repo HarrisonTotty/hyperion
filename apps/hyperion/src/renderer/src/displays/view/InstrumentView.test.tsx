@@ -1122,7 +1122,8 @@ function instrumentPanel(): ReturnType<typeof within> {
 describe("an instrument's reasons for ATMOSPHERE: APPROXIMATE (R08.T10.d)", () => {
   const note = "ATMOSPHERE: APPROXIMATE";
   const water = "H2O: its absorption estimated, not measured, for TEST GIANT";
-  const thick = "A thick atmosphere drawn by the thin-atmosphere method, for TEST GIANT";
+  const thick =
+    "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for TEST GIANT";
 
   it("shows ATMOSPHERE: APPROXIMATE straight above a reason the primary lacks, though the primary shows the note", () => {
     renderInstrument([water, thick], [note, { text: water, standing: "sentence" }]);

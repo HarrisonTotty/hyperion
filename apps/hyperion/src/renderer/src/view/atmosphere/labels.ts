@@ -60,12 +60,12 @@
  *   clears by itself (decision-r08-giant-label).
  * - `atmosphereComputing`: a gated thick bake is running, and the analytic term is drawn meanwhile
  *   (Design note 9).
- * - `atmosphereApproximate`: a thick world drawn with the analytic term because its regime's gate
- *   has not passed (Design note 9), or a body whose medium holds an NH₄SH mode with less than
- *   `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at 550 nm, drawn with the stated stand-in
- *   (decision-r08-licences, row 5), which clears only when measured constants replace it. The same
- *   holds for any other material drawn with a stated stand-in, a named analogue or, for a key this
- *   client does not know, the generic stand-in, under the same optical-depth rule
+ * - `atmosphereApproximate`: a body routed past `thin`, drawn with the analytic term because its
+ *   regime's gate has not passed (Design note 9; R08.T13.d), or a body whose medium holds an NH₄SH
+ *   mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at 550 nm, drawn with the stated
+ *   stand-in (decision-r08-licences, row 5), which clears only when measured constants replace it.
+ *   The same holds for any other material drawn with a stated stand-in, a named analogue or, for a
+ *   key this client does not know, the generic stand-in, under the same optical-depth rule
  *   (decision-composition §1.9; `materials/materials.ts`'s `materialLabels`), and for an aerosol
  *   mode drawn with a named analogue's phase function or the Henyey–Greenstein fallback (R08.T5.c;
  *   `aerosol.ts`'s `phaseLabels`), which clears when a published model for it replaces it. It
@@ -372,8 +372,8 @@ const LOWER_CASE_WORD = /^[a-z]+(?:-[a-z]+)*$/u;
 
 /**
  * A reason as a line begins it: a capital first letter where its first token is a word in lower
- * case (`a thick …` → `A thick …`, `liquid H2SO4 particles: …` → `Liquid H2SO4 particles: …`,
- * `ice-giant haze: …` → `Ice-giant haze: …`), its case as given where it begins with a formula or a
+ * case (`multiple scattering: …` → `Multiple scattering: …`, `liquid H2SO4 particles: …` →
+ * `Liquid H2SO4 particles: …`, `ice-giant haze: …` → `Ice-giant haze: …`), its case as given where it begins with a formula or a
  * symbol, whose case is its meaning (`H2O: …`, `H2O–air pairs: …`, `e− scattering: …`).
  */
 function capitalised(reason: string): string {

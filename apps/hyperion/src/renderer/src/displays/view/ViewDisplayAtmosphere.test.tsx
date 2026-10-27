@@ -136,7 +136,7 @@ function renderPlate(): void {
 describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c, R08.T10.d)", () => {
   const notes = ["AEROSOLS AND ABSORBERS: NOT YET MODELLED", "ATMOSPHERE: APPROXIMATE"];
   const reasons = [
-    "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
+    "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2 and KX 4417 /5",
     "H2O: its absorption estimated, not measured, for KX 4417 /3",
   ];
 

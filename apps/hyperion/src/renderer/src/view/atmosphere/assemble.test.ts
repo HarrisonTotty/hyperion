@@ -2,7 +2,7 @@
  * The medium of a body from its record (plan R08, R08.T10.a): the labels by section, the key, the
  * gravity by figure law, the seams the cache and the tables take, and the types held to theirs.
  * The generated Earth's medium with its line tables is `assembleEarth.test.ts`'s; aerosols are
- * `assembleAerosols.test.ts`'s; the thick line is `assembleThick.test.ts`'s.
+ * `assembleAerosols.test.ts`'s; the router at the assembly is `assembleThick.test.ts`'s.
  */
 import type { CrustCompositionDto } from "@hyperion/protocol";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -40,6 +40,7 @@ import {
   lineSpeciesOf,
   MEDIUM_TERM_LIMIT,
   mediumTableRadiusM,
+  THICK_REASON,
   withCurves,
 } from "./assemble";
 import { type SpheroidFigure, tableRadiusM } from "./hillaire";
@@ -240,9 +241,12 @@ describe("the gases' reasons", () => {
         { species: "Na+", mole_fraction: 0.0003 },
       ],
     }));
-    expect(assembled(electrons).reasons.filter((reason) => reason.includes("scattering"))).toEqual(
-      [],
-    );
+    // The multiple-scattering reason is the air's, past the router's boundary (R08.T13.d), not a gas's.
+    expect(
+      assembled(electrons).reasons.filter(
+        (reason) => reason.includes("scattering") && reason !== THICK_REASON,
+      ),
+    ).toEqual([]);
   });
 });
 

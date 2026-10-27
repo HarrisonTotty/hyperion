@@ -103,7 +103,14 @@ import {
 import type { AtmosphereMedium } from "./medium";
 import type { AtmosphereBuilder, OpticsBuild } from "./opticsPool";
 import { type AbsorberCurveSlots, type AtmosphereBody, AtmosphereTables } from "./tables";
-import { provisionalThick, THICK_REASON } from "./thick/regime";
+import {
+  approximateRegime,
+  type AtmosphereRegime,
+  type BodyCover,
+  CLEAR_COVER,
+  classifyRegime,
+  THICK_REASON,
+} from "./thick/regime";
 
 /**
  * The cache's size, B: 32,000,000 of per-planet rows, decimal as `PER_PLANET_ROW_BYTES` is,
@@ -160,10 +167,11 @@ export function atmosphereTablesOn(
 /**
  * A kept scene's setting of a body's atmosphere: none set, airless, or a medium the scene built
  * with its curves and labels (`reference/cases.ts`'s fixtures), taken as it is, its tables made
- * here. The provisional thick line (`thick/regime.ts`'s `provisionalThick`) adds
- * `atmosphereApproximate` to a scene's medium (`decision-r08-t10a-leans.md` item 1), with its
- * reason, `THICK_REASON` (R08.T10.c). A scene's own labels carry no reasons: one that holds
- * `atmosphereApproximate` would stand on the plate with none, which no kept scene passes.
+ * here. The router (`thick/regime.ts`'s `classifyRegime`) routes a scene's medium under its cover,
+ * and a regime past `thin` adds `atmosphereApproximate` with its reason, `THICK_REASON`
+ * (R08.T13.d; R08.T10.c gave the provisional thick line's the same way). A scene's own labels
+ * carry no reasons: one that holds `atmosphereApproximate` would stand on the plate with none,
+ * which no kept scene passes.
  */
 export type KeptBodyAtmosphere =
   | KeptAtmosphere
@@ -172,6 +180,13 @@ export type KeptBodyAtmosphere =
       /** Compared by identity: another object makes the body's tables again. */
       readonly built: BuiltAtmosphere;
       readonly labels: ReadonlyArray<AtmosphereLabel>;
+      /**
+       * The body's cover as the router reads it; `CLEAR_COVER` if absent, a clear sky over a
+       * ground, as the reference cases were traced (R08.T13.d). Compared by identity as `built`
+       * is: another object routes the body again and, as another `built` does, makes its tables
+       * again, so a scene holds one cover object for as long as the body's cover stands.
+       */
+      readonly cover?: BodyCover;
     }
   /**
    * A medium the scene is still building, its fixtures' optics loading lazily (R08.T10.b): nothing
@@ -232,6 +247,11 @@ export interface AtmosphereEntry<T> {
   readonly labels: ReadonlyArray<AtmosphereLabel>;
   /** Why it carries `atmosphereApproximate`, as player text; empty without it. */
   readonly reasons: ReadonlyArray<string>;
+  /**
+   * How its medium is drawn, `classifyRegime`'s (R08.T13.d): the assembly's for a server body, the
+   * cache's own for a kept scene's medium; `null` where it draws no medium.
+   */
+  readonly regime: AtmosphereRegime | null;
   /**
    * What its tables are made from; `null` where it draws no medium, or holds an absorber and no
    * light lights it, so that no curve exists.
@@ -353,6 +373,7 @@ interface ToDraw {
   readonly key: string;
   readonly labels: ReadonlyArray<AtmosphereLabel>;
   readonly reasons: ReadonlyArray<string>;
+  readonly regime: AtmosphereRegime | null;
   readonly built: BuiltAtmosphere | null;
 }
 
@@ -498,7 +519,7 @@ function sameKept(a: KeptBodyAtmosphere | null, b: KeptBodyAtmosphere): boolean 
   if (a === null || a.kind !== b.kind) {
     return false;
   }
-  return a.kind !== "medium" || (b.kind === "medium" && a.built === b.built);
+  return a.kind !== "medium" || (b.kind === "medium" && a.built === b.built && a.cover === b.cover);
 }
 
 /** Labels each once, in `ATMOSPHERE_LABELS`' order. */
@@ -514,7 +535,7 @@ function ordered(labels: Iterable<AtmosphereLabel>): ReadonlyArray<AtmosphereLab
 function toDrawOf(key: string, assembled: AssembledMedium): ToDraw {
   const { labels, reasons } = assembled;
   if (assembled.medium === undefined) {
-    return { key, labels, reasons, built: null };
+    return { key, labels, reasons, regime: null, built: null };
   }
   const { drawn } = assembled;
   const curved = drawn.absorbers.length === 0 || drawn.curves.length > 0;
@@ -522,6 +543,7 @@ function toDrawOf(key: string, assembled: AssembledMedium): ToDraw {
     key,
     labels,
     reasons,
+    regime: assembled.regime,
     built: curved
       ? {
           medium: assembled.medium,
@@ -763,6 +785,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           key: atmosphereKey({ kind: "kept", atmosphere: kept }),
           labels: kept.kind === "unset" ? ["atmosphereNotYetModelled"] : [],
           reasons: [],
+          regime: null,
           built: null,
         };
         break;
@@ -777,13 +800,18 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         held.problem = LOAD_FAILED;
         return;
       case "medium": {
-        // The thick line's note carries its reason, so that no APPROXIMATE on a kept scene stands
+        // The router's note carries its reason, so that no APPROXIMATE on a kept scene stands
         // without one; a scene's own labels carry none (R08.T10.c).
-        const thick = provisionalThick(kept.built.medium);
+        const regime = classifyRegime(kept.built.medium, kept.cover ?? CLEAR_COVER);
+        const approximate = approximateRegime(regime);
         entry = {
           key: `kept/medium/v${ATMOSPHERE_OPTICS_VERSION}`,
-          labels: ordered([...kept.labels, ...(thick ? (["atmosphereApproximate"] as const) : [])]),
-          reasons: thick ? [THICK_REASON] : [],
+          labels: ordered([
+            ...kept.labels,
+            ...(approximate ? (["atmosphereApproximate"] as const) : []),
+          ]),
+          reasons: approximate ? [THICK_REASON] : [],
+          regime,
           built: kept.built,
         };
         break;

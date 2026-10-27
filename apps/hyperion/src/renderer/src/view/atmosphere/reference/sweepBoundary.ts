@@ -44,14 +44,15 @@ import {
 } from "../gate";
 import type { AtmosphereMedium } from "../medium";
 import {
+  approximateRegime,
   type AtmosphereRegime,
   type BodyCover,
   type BoundaryKind,
   type ChannelRegime,
   classifyRegime,
-  provisionalThick,
   regimeChannels,
   type ThickBoundary,
+  verticalOpticalDepth,
 } from "../thick/regime";
 import { recorded, type RecordValue, RECORD_SIGNIFICANT_FIGURES } from "./caseGate";
 
@@ -1298,19 +1299,29 @@ function classRows(media: ReadonlyArray<ClassifiedMedium>): RecordValue {
 }
 
 /**
- * The label changes for R08.T13.d (ruling 9's label changes): each medium's `provisionalThick`
- * against `classifyRegime`, and whether its label changes, every thick regime carrying
- * `ATMOSPHERE: APPROXIMATE` as the provisional line does.
+ * R08.T10.a's provisional thick line, retired by R08.T13.d (`decision-r08-t13c2-classes.md` §5,
+ * item 4): a medium whose {@link verticalOpticalDepth} reaches 1 on its worst channel. A private
+ * copy, kept only to write the record's `provisionalThick` column, so that `sweepBoundary.json`
+ * stays byte for byte; no label reads it.
+ */
+function retiredProvisionalThick(medium: AtmosphereMedium): boolean {
+  return Math.max(...verticalOpticalDepth(medium)) >= 1;
+}
+
+/**
+ * The label changes for R08.T13.d (ruling 9's label changes): each medium's class by the retired
+ * provisional line ({@link retiredProvisionalThick}) against `classifyRegime`, and whether its
+ * label changes, every thick regime carrying `ATMOSPHERE: APPROXIMATE` as the provisional line did.
  */
 function labelRows(media: ReadonlyArray<ClassifiedMedium>): RecordValue {
   return media.map(({ name, medium, cover }) => {
-    const provisional = provisionalThick(medium);
+    const provisional = retiredProvisionalThick(medium);
     const regime = classifyRegime(medium, cover);
     const channels = regimeChannels(medium);
     const lines = channels.flatMap((c, i) =>
       lineOf(c) === "none" ? [] : [`${CHANNEL_LETTERS[i] ?? "?"}: ${lineOf(c)}`],
     );
-    const thick = regime.kind !== "thin";
+    const thick = approximateRegime(regime);
     let line = lines.length > 0 ? lines.join("; ") : "none";
     if (regime.kind === "cloudDeck") {
       line = "the deck rule";

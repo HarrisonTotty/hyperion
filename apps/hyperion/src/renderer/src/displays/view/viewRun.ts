@@ -833,8 +833,8 @@ export interface StatusStatement {
  * @remarks
  * It is set whole as a sentence in its own case with no letter spacing, its head included, and is
  * never tracked as an annunciation, colon or not (`decision-r08-approximate-plate.md` §6,
- * 2026-10-27; plan R08, R08.T10.d): `A thick atmosphere drawn by the thin-atmosphere method, for
- * KX 4417 /2`, `e− scattering: left out, …`.
+ * 2026-10-27; plan R08, R08.T10.d): `Multiple scattering: drawn by the thin-atmosphere method
+ * beyond its checked range, for KX 4417 /2`, `e− scattering: left out, …`.
  */
 export interface SentenceStatement {
   readonly text: string;

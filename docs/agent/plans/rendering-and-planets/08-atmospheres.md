@@ -16370,6 +16370,101 @@ cover)` calls supply them (flagged for R11's re-validation).
     `tables.test.ts` bounds); a medium classified at its line could differ from its drawn medium's.
   - _The deck's altitude_ is its top, the upper medium's reflecting boundary, a choice R08.T15 may
     revisit.
+- **Deviations in T13.d, as built** (2026-10-27; `view/atmosphere/`: `assemble.ts`,
+  `AtmosphereCache.ts`, `thick/regime.ts`, `reference/sweepBoundary.ts`, `assembleThick.test.ts`
+  (rewritten), `AtmosphereCache.test.ts`, `AtmosphereCacheOptics.test.ts`, `assemble.test.ts`
+  (e− and the ions' scattering reasons, `THICK_REASON` left out of the filter),
+  `assembleEarth.test.ts` and `labels.test.ts`; `displays/view/`: `viewRun.ts`'s TSDoc and the five
+  tests that quote the reason; the comments of `labels.ts` and `view/scenes/atmosphereScene.ts`
+  that named the retired line; the guide's `ATMOSPHERE: APPROXIMATE` and `ATMOSPHERE: COMPUTING`
+  rows. Ruling: `decision-r08-t13c2-classes.md` §§4–7, 2026-10-27).
+  - _The call sites_: `assembleMedium` routes its medium by `classifyRegime` under
+    `bodyCoverOf(surface, column)`, and the cache's kept path routes a scene's medium under its
+    `cover`, `CLEAR_COVER` if absent. Both read `approximateRegime(regime)` (new in
+    `thick/regime.ts`, an exhaustive switch with no `default`: `thickScattering` and `cloudDeck`
+    true, `thin` false) and give `atmosphereApproximate` with `THICK_REASON`. No pixel, kernel,
+    table, WGSL or `view/engine/` file changes; no version bump.
+  - _Names beside the Provides_ (additive):
+    - `AssembledMedium`'s drawn branch gains `regime: AtmosphereRegime`, computed once in the
+      worker; the branch of no medium has none. The pool and the jobs pass the assembly on by
+      spreads, so it reaches the cache with no optics worker file changed.
+    - `AtmosphereEntry` (and the cache's `ToDraw`) gains `regime: AtmosphereRegime | null`, `null`
+      where no medium is drawn: the assembly's for a server body, the cache's own for a kept one.
+    - `KeptBodyAtmosphere`'s `medium` gains `cover?: BodyCover`, `CLEAR_COVER` if absent.
+      `sameKept` compares it by identity, as it does `built`, so a scene that gives another cover
+      is routed again. The four kept bodies give none.
+    - `assemble.ts` exports `bodyCoverOf(surface, column)`: the surface's `cloudFraction`; each of
+      the inventory's decks in its order, its τ(550) the sum of the modes naming it at their
+      `coverage`, its base and top the τ rule's own `heightAtPa`, clamped to the datum and the
+      column's top. A mode whose τ is not modelled adds nothing (the assembly drops it with its
+      own reason). `envelope` is always `false`: the assembly draws a surface's air alone, and a
+      gas envelope gets no medium until R08.T16.a, which gives it its own cover. A surface whose
+      inventory is not modelled has no decks.
+  - _The reason_ is the ruling's string exactly; the guide's two rows take the ruling's texts
+    exactly. The UX review (the `ux-reviewer` against the guide, glyphs and voice) found nothing and
+    changed no word. On the plate the kept scene reads `Multiple scattering: drawn by the thin-atmosphere
+method beyond its checked range, for TEST EARTH, TEST EARTH O3 SLAB, TEST MARS and TEST
+SATURN` (asserted).
+  - _Retired_: `provisionalThick`, `PROVISIONAL_THICK_OPTICAL_DEPTH` and their pins in
+    `assembleThick.test.ts`. `verticalOpticalDepth` stays exported, its doc naming the retired
+    line, since `regime.test.ts`, `sweepBoundary.ts`, `sweepBoundary.test.ts` and
+    `assembleThick.test.ts` read it. `sweepBoundary.ts` keeps a
+    private, documented copy, `retiredProvisionalThick`, for the record's `provisionalThick` column
+    alone, so `sweepBoundary.json` is unchanged byte for byte (the ruling's lean).
+  - _The label changes as built_ (`assembleThick.test.ts`, row by row): at the cache, the media of
+    `TEST EARTH`, `TEST EARTH O3 SLAB`, `TEST MARS` and `TEST SATURN`, an Earth-class air at
+    0.999 and at 1.001 of τ 1, the Venus-class medium and a Titan-class column are
+    `thickScattering` with the note and the reason, and a Rayleigh air of τ 1/64 is `thin` with
+    neither; at the assembly, the generated Earth and Venus at 92 and 58 bar are `thickScattering`
+    with both, the Mars-like record of gas alone `thin` with no thick reason. A τ 30 deck at a
+    cloud fraction of 1 gives `cloudDeck` at its top with both, through each call site, and at
+    0.6 `thickScattering`; the cache's split is asserted at the deck's top, the assembly's inside
+    its column (the height map is `bodyCoverOf`'s test). Each row runs through its own call site:
+    a record's medium through the assembly, a kept one through the cache. No routed medium is left
+    unlabelled, and no medium the retired line labelled loses the note.
+  - _`TEST SATURN`'s row_: the ruling's table gives it an e− reason before and the new reason
+    beside it. A kept scene's medium carries no reasons of its own, and its worst channel (0.728)
+    was under the retired line, so it had neither. As built it gains the note and `THICK_REASON`
+    alone, as c2's `sweepBoundary.json` row says ("gains APPROXIMATE"), and the plate's one line
+    names it with the other three.
+  - _The regime through the pool_: `AtmosphereCacheOptics.test.ts` holds the worker's regime on
+    the built outcome, and `AtmosphereCache.test.ts` on the entry. The generated Earth's reasons gain `THICK_REASON` after its two water
+    pairs (`assembleEarth.test.ts`); the cache's R05 Earth gains the note.
+  - _The kernels' resampling_ (§4): each kept fixture and record medium (the four kept, the
+    Venus- and Titan-class fixtures, the generated Earth, Venus at 92 and 58 bar and the Mars-like
+    record) classifies alike on `kernelMedium(m)` and on `m`, in its regime and in each channel's
+    two lines. No medium flips; the finding closes as recorded.
+  - _Design note 9's sentence_ reads "√2/16–√2/4 above" for the ruling's "√2/16–1/4 above": the
+    table's (0.4, 0.65) cell is √2/4, every other cell above g 0.3 at most ¼. Its "As measured
+    (R08.T13.c2)" reads "As measured (R08.T13.b's sweep, tabulated by R08.T13.c2)" (the science
+    check).
+  - _The plan's and brainstorm's text_, in their own commits: T13's entry, T14.c's, T14.f's and
+    T14.d's (§6), Design note 9's routing, and the brainstorm's "Atmosphere" (§7), with an
+    amendment note in its style.
+  - _Left as it stands_: `regime.test.ts`'s titles of the kept bodies' classes still say main rules
+    on them after the report, and its "leaves the absorbers out, as the provisional line does"
+    speaks of the retired line in the present (`thick/` beyond `regime.ts`, for its next task).
+    The brainstorm's open question 3 still closes "before Venus- and Titan-class atmospheres ship":
+    §7 amended the Atmosphere section alone, so that phrase is main's to judge.
+  - _Closed here_: T10.a's deferred "_The provisional thick line_" (item 1) closes with the line. Of
+    c2's deferred findings, "_Every kept reference case and the generated Earth gain
+    `APPROXIMATE`_" is the label changes above, "_The kernels' resampling_" closes above, "_The
+    ground line on generated bodies_" is the cloud-brightened ground below, and the kept bodies'
+    classes are ruled (`decision-r08-t13c2-classes.md` §§1–2).
+  - T13 closes.
+- **Deferred findings (2026-10-13 rule)** (R08.T13.d). Recorded and deferred, as the ruling's §4
+  places them; each leaves the algorithm and every contract as they are.
+  - _A\* read bilinearly across the placeholder 1_ waits for version 24's aerosols. It is settled
+    before they reach the client, with the aerosol reasons' review
+    (`decision-r08-approximate-plate.md` §6). At 23 every generated air is gas alone, ḡ 0 and A\*
+    read at its node, and every kept fixture is thick by depth, so no drawn medium reads the blend.
+    The lean for that task, a science check confirming the form first: interpolate 1/A\*, the
+    placeholder taken as the scan's top ground, 0.8; the cell's least corner refused. The same task
+    settles a ground clamped at 1 tripping "≥ A\* = 1", conservative and recorded.
+  - _The cloud-brightened ground_ is not the classifier's: `classifyRegime` reads the ground the
+    kernels draw, so the class is right for what is drawn. The bias is T10.a item 2's deferred
+    finding, whose trigger stands (R11 drawing clouds inside the medium, or the ground's own albedo
+    on the wire). At 23 it moves no class.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:

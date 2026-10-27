@@ -737,7 +737,7 @@ describe("the style", () => {
     );
     const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
     const reasons = [
-      "A thick atmosphere drawn by the thin-atmosphere method, for TEST GIANT",
+      "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for TEST GIANT",
       "H2O: its absorption estimated, not measured, for TEST GIANT and TEST PLANET 0°",
     ];
     expect(
@@ -857,7 +857,7 @@ describe("an instrument's run (R07.T19)", () => {
 describe("an instrument's photorealistic statements (decision-r07-t19-layout, item 5; R08.T10.d)", () => {
   const note = "ATMOSPHERE: APPROXIMATE";
   const thick: LabelStatement = {
-    text: "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2",
+    text: "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2",
     standing: "sentence",
   };
   const water: LabelStatement = {

@@ -7,7 +7,7 @@ import { LabelStatementLine } from "./LabelStatementLine";
 
 /** `ATMOSPHERE: APPROXIMATE`'s two reasons of the ruling's examples (plan R08, R08.T10.d). */
 const REASONS = [
-  "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2",
+  "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2",
   "e− scattering: left out, the console can draw no more layers, for TEST SATURN",
 ];
 

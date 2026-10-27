@@ -112,7 +112,7 @@ describe("atmosphereNotes (R08.T10.b)", () => {
 describe("atmosphereNotes with APPROXIMATE's reasons (R08.T10.c)", () => {
   const reasons = [
     "H2O: its absorption estimated, not measured, for KX 4417 /3",
-    "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
+    "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2 and KX 4417 /5",
   ];
 
   it("sets the reasons straight after ATMOSPHERE: APPROXIMATE, each a reason and the note a note, the REJECTED lines in their place (R08.T10.d)", () => {
@@ -160,7 +160,7 @@ describe("atmosphereApproximateLines (R08.T10.c)", () => {
         },
       ]),
     ).toEqual([
-      "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
+      "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2 and KX 4417 /5",
       "H2O: its absorption estimated, not measured, for KX 4417 /3",
       "e− scattering: left out, the console can draw no more layers, for TEST SATURN",
     ]);
@@ -172,7 +172,7 @@ describe("atmosphereApproximateLines (R08.T10.c)", () => {
         })),
       ),
     ).toEqual([
-      "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2, KX 4417 /3 and KX 4417 /5",
+      "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2, KX 4417 /3 and KX 4417 /5",
     ]);
   });
 
@@ -185,7 +185,7 @@ describe("atmosphereApproximateLines (R08.T10.c)", () => {
         })),
       ),
     ).toEqual([
-      "A thick atmosphere drawn by the thin-atmosphere method, for Kepler-9 /2 and Kepler-9 /10",
+      "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for Kepler-9 /2 and Kepler-9 /10",
     ]);
   });
 
@@ -243,9 +243,11 @@ describe("atmosphereApproximateLines (R08.T10.c)", () => {
     expect(
       atmosphereApproximateLines([
         { designation: "A", reasons: [THICK_REASON] },
-        { designation: "B", reasons: [`A${THICK_REASON.slice(1)}`] },
+        { designation: "B", reasons: [`M${THICK_REASON.slice(1)}`] },
       ]),
-    ).toEqual(["A thick atmosphere drawn by the thin-atmosphere method, for A and B"]);
+    ).toEqual([
+      "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for A and B",
+    ]);
   });
 
   it("gives no line for a body with no reasons, and none for no bodies", () => {

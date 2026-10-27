@@ -171,7 +171,7 @@ describe("ATMOSPHERE: APPROXIMATE's reasons shown (R08.T10.c)", () => {
       scene,
     );
     expect(shown.approximate).toEqual([
-      `A thick atmosphere drawn by the thin-atmosphere method, for TEST GIANT and ${planet.designation}`,
+      `Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for TEST GIANT and ${planet.designation}`,
       "H2O: its absorption estimated, not measured, for TEST GIANT",
     ]);
   });

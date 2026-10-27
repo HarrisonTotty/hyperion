@@ -449,7 +449,7 @@ const FAILED: KeptBodyAtmosphere = { kind: "failed" };
 const UNSET: KeptBodyAtmosphere = { kind: "unset" };
 const AIRLESS: KeptBodyAtmosphere = { kind: "airless" };
 
-/** A kept medium's labels: none of the scene's own; the cache adds the thick line where it applies. */
+/** A kept medium's labels: none of the scene's own; the cache adds the router's where it applies. */
 const NO_LABELS: ReadonlyArray<never> = Object.freeze([]);
 
 /**

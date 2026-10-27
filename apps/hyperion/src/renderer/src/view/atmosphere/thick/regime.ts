@@ -4,10 +4,11 @@
  *
  * @remarks
  * R08.T5.b created this file for the deck split's optical depth, which its stand-in label reads
- * (Design note 12). R08.T10.a adds the provisional thick line, {@link PROVISIONAL_THICK_OPTICAL_DEPTH},
- * and R08.T10.c moves the line's reason here from `assemble.ts`, {@link THICK_REASON}. R08.T13.c2
- * adds the measured boundary, {@link THICK_MS_BOUNDARY}, and the router, {@link classifyRegime},
- * which replace the provisional line once R08.T13.d moves its call sites. Its imports stay light,
+ * (Design note 12). R08.T10.a added a provisional thick line, a vertical optical depth of 1 on the
+ * worst channel, and R08.T10.c moved its reason here from `assemble.ts`, {@link THICK_REASON}.
+ * R08.T13.c2 adds the measured boundary, {@link THICK_MS_BOUNDARY}, and the router,
+ * {@link classifyRegime}, and R08.T13.d moves `assemble.ts` and `AtmosphereCache.ts` to them and
+ * retires the provisional line (`decision-r08-t13c2-classes.md` §5). Its imports stay light,
  * `medium.ts` alone (and type imports), so that the render thread can test a kept scene's prebuilt
  * medium without the optics data: the forward delta's share and a table's mean cosine are read
  * here, not through `tables.ts` (which brings WGSL and the engine) or `aerosol.ts` (which imports
@@ -38,32 +39,16 @@ import {
 export const CLOUD_DECK_SPLIT_OPTICAL_DEPTH = 10;
 
 /**
- * The provisional thick line: a medium whose vertical optical depth from the ground to the top
- * reaches 1 on its worst channel, over every term but the absorbers, is drawn by the analytic
- * term under `ATMOSPHERE: APPROXIMATE` (plan R08, Design note 9's routing; R08.T10.a,
- * `decision-r08-t10a-leans.md` item 1). Provisional: R08.T13's `classifyRegime` retires it.
- *
- * @remarks
- * 1 is the column's optical thickness, the conventional line between thin and thick, not a
- * measured boundary. For Rayleigh air it falls at about 3.9 Earth columns (Earth's Rayleigh τ is
- * about 0.26 at 433.6 nm, `earth.ts`'s τ_R(550 nm) = 0.0969 scaled by λ^−4.08), inside the fifty
- * times Earth's density Hillaire tested to (Design note 9) and past the 3 Earth columns at which
- * R08.T4.a measured the thin path's three-channel transmittance 0.0151 off in u′v′ at low sun.
- * Absorbers are left out: the analytic term fails in multiple scattering,
- * which absorption alone makes none of, and their depth is each light's curve of growth, so that
- * counting it would make the label depend on the body's stars.
- *
- * @deprecated Replaced by {@link classifyRegime} and {@link THICK_MS_BOUNDARY} (R08.T13.c2);
- *   R08.T13.d moves `assemble.ts` and `AtmosphereCache.ts` to them and retires this line.
- */
-export const PROVISIONAL_THICK_OPTICAL_DEPTH = 1;
-
-/**
  * A medium's vertical optical depth per channel from the ground to its top over every term but
- * the absorbers, each at its whole extinction (an aerosol's forward peak included): the depth the
- * provisional thick line reads.
+ * the absorbers, each at its whole extinction (an aerosol's forward peak included): the depth
+ * R08.T10.a's provisional thick line read, before {@link regimeChannels} took a table's forward
+ * delta out by similarity.
  *
  * @remarks
+ * Absorbers are left out: the analytic term fails in multiple scattering, which absorption alone
+ * makes none of, and their depth is each light's curve of growth, so that counting it would make
+ * the label depend on the body's stars.
+ *
  * Along the zenith from the ground a ray's height is its distance, whatever the ground's radius,
  * so this is Σ (scattering + absorption) ∫₀^top ρ dh, in closed form by `medium.ts`'s
  * `columnLengthM`: `opticalDepth.ts`'s `opticalDepthToTop(medium, R, R, 1)`, which takes the same
@@ -88,26 +73,22 @@ export function verticalOpticalDepth(medium: AtmosphereMedium): Rgb {
 }
 
 /**
- * Whether a medium is thick by the provisional line: its {@link verticalOpticalDepth} reaches
- * {@link PROVISIONAL_THICK_OPTICAL_DEPTH} on its worst channel, so that it carries
- * `atmosphereApproximate` until R08.T13's gate. Every medium the cache draws is tested, a kept
- * scene's fixtures among them.
+ * Why a medium {@link classifyRegime} routes past the thin regime carries `atmosphereApproximate`,
+ * as player text, as `assemble.ts`'s other reasons are: the assembly gives it a record's body, and
+ * the atmosphere cache a kept scene's medium, so that the label block can name the reason beside
+ * the note (`decision-r08-approximate-plate.md`, item 1b). It lives here, beside the router, so
+ * that the render thread reads it without `assemble.ts`'s optics data.
  *
- * @deprecated Replaced by {@link classifyRegime} (R08.T13.c2), whose `thickScattering` and
- *   `cloudDeck` carry the label in its place; R08.T13.d moves the call sites and retires this.
+ * @remarks
+ * The words are `decision-r08-t13c2-classes.md` §5's (R08.T13.d), in the `<name>: <sentence>` form
+ * of the H2O and e− reasons. They hold for every body the router does not route `thin`, by depth or
+ * by the ground, Earth's air or Venus's: `thickScattering` is the router's name for a medium past
+ * the measured boundary, {@link THICK_MS_BOUNDARY}, not an optical thickness, and an Earth-class
+ * air of τ 0.13–0.39 is optically thin by any reader's sense. Before R08.T13.d the reason read
+ * "a thick atmosphere drawn by the thin-atmosphere method".
  */
-export function provisionalThick(medium: AtmosphereMedium): boolean {
-  return Math.max(...verticalOpticalDepth(medium)) >= PROVISIONAL_THICK_OPTICAL_DEPTH;
-}
-
-/**
- * Why a medium {@link provisionalThick} finds thick carries `atmosphereApproximate`, as player
- * text, as `assemble.ts`'s other reasons are (R08.T10.a): the assembly gives it a record's body,
- * and since R08.T10.c the atmosphere cache a kept scene's medium, so that the label block can name
- * the reason beside the note (`decision-r08-approximate-plate.md`, item 1b). It lives here, beside
- * the line, so that the render thread reads it without `assemble.ts`'s optics data.
- */
-export const THICK_REASON = "a thick atmosphere drawn by the thin-atmosphere method";
+export const THICK_REASON =
+  "multiple scattering: drawn by the thin-atmosphere method beyond its checked range";
 
 // --- The measured boundary (R08.T13.c2) ---------------------------------------------------------
 
@@ -654,4 +635,24 @@ export function classifyRegime(medium: AtmosphereMedium, cover: BodyCover): Atmo
   }
   const thick = regimeChannels(medium).some((c) => c.thickByDepth || c.thickByGround);
   return thick ? { kind: "thickScattering" } : { kind: "thin" };
+}
+
+/**
+ * Whether a body routed `regime` is drawn under `ATMOSPHERE: APPROXIMATE`, with {@link THICK_REASON}
+ * (Design note 9's routing; `decision-r08-t13c2-classes.md` §5): both thick regimes, which the
+ * analytic term draws until their gates pass (R08.T14.d's for `thickScattering`, R08.T15's for
+ * `cloudDeck`), and not `thin`. The assembly and the atmosphere cache both read it.
+ */
+export function approximateRegime(regime: AtmosphereRegime): boolean {
+  let approximate: boolean;
+  switch (regime.kind) {
+    case "thin":
+      approximate = false;
+      break;
+    case "thickScattering":
+    case "cloudDeck":
+      approximate = true;
+      break;
+  }
+  return approximate;
 }

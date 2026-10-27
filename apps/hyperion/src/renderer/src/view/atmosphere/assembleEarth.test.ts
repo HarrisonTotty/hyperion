@@ -29,6 +29,7 @@ import {
   type CurveSlots,
   curveSlotsOf,
   lineSpeciesOf,
+  THICK_REASON,
   withCurves,
 } from "./assemble";
 import { checkAbsorberCurves } from "./tables";
@@ -74,12 +75,13 @@ describe("the generated Earth (the wire fixture's) with its line tables", () => 
     expect(earth.labels).toEqual(["aerosolsNotYetModelled", "atmosphereApproximate"]);
   });
 
-  it("is so for its water's continuum below 567 nm alone", () => {
+  it("is so for its water's continuum below 567 nm and its multiple scattering past the checked range", () => {
     // Its lines, which CO2 broadens with no width on file, clear the widthless gases' effect bound
-    // since R08.T10.c, and give no reason.
+    // since R08.T10.c, and give no reason; its air is past the boundary by depth since R08.T13.d.
     expect(earth.reasons).toEqual([
       "H2O–H2O pairs: their absorption estimated, not measured",
       "H2O–air pairs: their absorption estimated, not measured",
+      THICK_REASON,
     ]);
   });
 
