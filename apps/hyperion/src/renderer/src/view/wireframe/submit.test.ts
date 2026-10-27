@@ -42,10 +42,12 @@ import {
   linearColour,
   MATERIAL_BUFFER,
   NO_WIREFRAME_TERRAIN,
+  OCCLUDER_SPHERE_ROWS,
   OUTSIDE_VIEW_MARGIN_PX,
   type PackedDraw,
   packWireframe,
   sphereScreenRect,
+  spheroidAxis,
   type SurveyedDatum,
   WIREFRAME_MATERIALS,
   type WireframeEngine,
@@ -151,6 +153,21 @@ describe("the wireframe's shaders", () => {
       /@builtin\(frag_depth\)/.test(source),
       /dpdxFine\(depth\), dpdyFine\(depth\)/.test(source),
     ]).toEqual([HULL_OCCLUDER_DEPTH_FRACTION, true, true]);
+  });
+
+  it("read a sphere's rows by the stride packWireframe writes them at, named once in each language (R02.T19)", () => {
+    const source = WIREFRAME_MATERIALS.occluderSphere.vertexWgsl;
+    const stride = /const SPHERE_ROWS: u32 = (\d+)u;/.exec(source);
+    expect([
+      Number(stride?.[1]),
+      OCCLUDER_SPHERE_ROWS,
+      // Every read of `spheres` goes through the stride.
+      [...source.matchAll(/spheres\[([^\]]*)\]/g)].map((read) => read[1]),
+    ]).toEqual([
+      3,
+      3,
+      ["sphere * SPHERE_ROWS", "v.sphere * SPHERE_ROWS + 1u", "v.sphere * SPHERE_ROWS + 2u"],
+    ]);
   });
 
   it("take both occluders' slope term from the draw's uniform, not a constant", () => {
@@ -372,8 +389,34 @@ describe("packWireframe", () => {
     expect([...packed.spheres].slice(4, 12)).toEqual([0, 0, -1e7, 1e6, 9e6, 0, 0, 0]);
   });
 
-  it("leaves out a sphere off the view", () => {
-    expect(packed.spheres.length).toBe(12);
+  it("leaves out a sphere off the view, packing the other's rows at the stride the shader reads", () => {
+    expect(packed.spheres.length).toBe(4 * OCCLUDER_SPHERE_ROWS);
+  });
+
+  it("packs a spheroid's axis, its pole times √(a ÷ c − 1), after its altitude (R02.T19)", () => {
+    const pole = normalise(vec3(0, 3, 4));
+    const spheroidal = packWireframe(
+      {
+        ...list,
+        occluderSpheres: [
+          {
+            id: "giant",
+            centreF32: new Float32Array([0, 0, -1e9]),
+            radiusM: 6e7,
+            altitudeM: 9.4e8,
+            spheroid: { pole, stretch: 1.25 },
+          },
+        ],
+      },
+      CAMERA,
+      VIEWPORT,
+    );
+    const row = [...spheroidal.spheres.subarray(8, 12)];
+    const axis = spheroidAxis({ pole, stretch: 1.25 });
+    expect([row, [axis.x, axis.y, axis.z]]).toEqual([
+      [9.4e8, ...[0, 0.3, 0.4].map((x) => Math.fround(x))],
+      [0, 0.30000000000000004, 0.4],
+    ]);
   });
 
   it("packs a sprite's position and colour", () => {

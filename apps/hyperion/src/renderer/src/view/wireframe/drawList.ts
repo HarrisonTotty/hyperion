@@ -30,6 +30,7 @@ import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../s
 import {
   angularDiameterPx,
   type DatumInside,
+  datumSpheroidOfFigure,
   graticule,
   isSymbolSized,
   ringEllipse,
@@ -39,6 +40,7 @@ import type { Polyline } from "./curve";
 import { hullBoundingRadiusM, hullEdges, hullFaces, hullOnView } from "./hulls";
 import { orbitPath } from "./orbits";
 import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
+import { type DatumSpheroid, stretched } from "./spheroid";
 import {
   anchorRadiusPx,
   bracketHalfSizePx,
@@ -240,14 +242,22 @@ export interface OccluderSphere {
   readonly centreF32: Float32Array;
   /**
    * Its radius, m: `occluderRadius`, a little inside the body; of its polar radius where the list
-   * draws its survey edge, so that the edge on its spheroid stands outside it (R10.T10.c).
+   * draws its survey edge, so that the edge on its spheroid stands outside it (R10.T10.c). For a
+   * spheroid (R02.T19), the radius of the stretched sphere, inside its equatorial radius.
    */
   readonly radiusM: number;
   /**
    * Its centre's distance from the camera less its radius, m, differenced in `f64`: the shader's
-   * intersection takes it rather than lose it to cancellation in `f32` near the body (R02.T14).
+   * intersection takes it rather than lose it to cancellation in `f32` near the body (R02.T14). For
+   * a spheroid, its stretched centre's, |L c|, less its stretched radius.
    */
   readonly altitudeM: number;
+  /**
+   * The spheroid it is, where the body's datum is drawn on one (plan R02, R02.T19): the occluder is
+   * the body's figure, the stretched sphere of {@link OccluderSphere.radiusM} mapped back, the
+   * figure shrunk about its centre. Absent for a sphere.
+   */
+  readonly spheroid?: DatumSpheroid;
 }
 
 /**
@@ -672,25 +682,45 @@ export function buildWireframeDrawList(
   const occluderSpheres: OccluderSphere[] = [];
   const lines: LineBatch[] = [];
   const anchors: DrawAnchor[] = [];
-  const limbs: { id: string; centreM: Vec3; radiusM: number }[] = [];
+  const limbs: {
+    id: string;
+    centreM: Vec3;
+    radiusM: number;
+    spheroid: DatumSpheroid | null;
+  }[] = [];
   const surveyedPolarRadiusM = new Map(
     (options.surveyEdges ?? []).map((edge) => [edge.body, edge.figure.polarRadiusM]),
   );
-  // Whether a mark is in sight: not behind the limb of a body drawn as a sphere, its own excepted.
+  // Whether a mark is in sight: not behind the limb of a body drawn as a sphere or a spheroid, its
+  // own excepted. A spheroid's is its stretched sphere's, the stretch keeping which lines of sight
+  // meet it before their point (R02.T19).
   const shown = (pointM: Vec3, own: string | null): boolean =>
-    !limbs.some((body) => body.id !== own && behindLimb(pointM, body.centreM, body.radiusM));
+    !limbs.some(
+      (body) =>
+        body.id !== own &&
+        behindLimb(
+          stretched(pointM, body.spheroid),
+          stretched(body.centreM, body.spheroid),
+          body.radiusM,
+        ),
+    );
 
   for (const body of scene.bodies) {
     const centreM = bodyCentre(body);
     if (!sphereInFrustum(centreM, body.radiusM, projection, viewport)) {
       continue;
     }
+    // Its datum on its figure's spheroid (R02.T19); with no rotation, a flattened body's drawn
+    // about the pole its figure is drawn about, a sphere's about its orbit normal
+    // (`graticuleRotation`).
+    const spheroid = datumSpheroidOfFigure(body.appearance?.figure ?? null);
     const wireframe = graticule(
       {
         centreM,
         radiusM: body.radiusM,
         rotation: body.rotation,
         unmodelledPole: body.orbitNormal,
+        spheroid,
       },
       projection,
       viewport,
@@ -699,21 +729,42 @@ export function buildWireframeDrawList(
       datumInside,
     );
     if (wireframe.regime !== "symbol") {
-      limbs.push({ id: body.id, centreM, radiusM: body.radiusM });
+      limbs.push({ id: body.id, centreM, radiusM: body.radiusM, spheroid });
       const distanceM = norm(centreM);
-      // A body whose survey edge is drawn is occluded from inside its spheroid, at its polar
-      // radius: the edge stands on the spheroid, up to a − c inside the equatorial sphere
-      // (21 km on Earth), and the edge's own horizon cull hides what of it lies behind the body.
-      const radiusM = occluderRadius(
-        Math.min(body.radiusM, surveyedPolarRadiusM.get(body.id) ?? body.radiusM),
-        distanceM,
-      );
-      occluderSpheres.push({
-        id: body.id,
-        centreF32: narrow(centreM),
-        radiusM,
-        altitudeM: distanceM - radiusM,
-      });
+      if (spheroid === null) {
+        // A body whose survey edge is drawn is occluded from inside its spheroid, at its polar
+        // radius: the edge stands on the spheroid, up to a − c inside the equatorial sphere
+        // (21 km on Earth), and the edge's own horizon cull hides what of it lies behind the body.
+        const radiusM = occluderRadius(
+          Math.min(body.radiusM, surveyedPolarRadiusM.get(body.id) ?? body.radiusM),
+          distanceM,
+        );
+        occluderSpheres.push({
+          id: body.id,
+          centreF32: narrow(centreM),
+          radiusM,
+          altitudeM: distanceM - radiusM,
+        });
+      } else {
+        // The figure itself with both its radii inset by `occluderRadius`'s margin, a′ and c′, so
+        // that it stands that margin inside the figure all over it, within 0.13% on Saturn and
+        // 0.62% at the wire's least c ÷ a, 0.8, while the margin is under c ÷ 2
+        // (decision-r02-t19-leans, item 4), and its own survey edge, on the figure, stands outside
+        // it: the sphere of radius a′ in its own stretch a′ ÷ c′, its altitude differenced there in
+        // `f64`.
+        const radiusM = occluderRadius(body.radiusM, distanceM);
+        const occluder: DatumSpheroid = {
+          pole: spheroid.pole,
+          stretch: radiusM / occluderRadius(body.radiusM / spheroid.stretch, distanceM),
+        };
+        occluderSpheres.push({
+          id: body.id,
+          centreF32: narrow(centreM),
+          radiusM,
+          altitudeM: norm(stretched(centreM, occluder)) - radiusM,
+          spheroid: occluder,
+        });
+      }
     }
     const major = wireframe.lines.filter((line) => line.major).flatMap((line) => line.runs);
     const minor = wireframe.lines.filter((line) => !line.major).flatMap((line) => line.runs);

@@ -7,7 +7,16 @@ import {
   rotateToBody,
   rotation3FromRows,
 } from "../coords/rotation";
+import type { BodyFigure } from "../terrain/planet";
+import { figurePole } from "../bodies/oblate";
 import { cosineWindows, type ParameterWindow, type Polyline, sampleCurve } from "./curve";
+import {
+  angularDistortion,
+  type DatumSpheroid,
+  datumSpheroidOf,
+  stretched,
+  unstretched,
+} from "./spheroid";
 
 /**
  * How a body is drawn at its size on screen (plan R02, Design note 13): below 3 device px its
@@ -97,6 +106,58 @@ export function angularDiameterPx(
 }
 
 /**
+ * A body's outline's least apparent diameter on a view, px (plan R02, R02.T19): twice the least
+ * angular semi-axis of the cone of lines of sight that graze its spheroid, at the view's
+ * centre-pixel scale, as {@link angularDiameterPx} measures a sphere's; a sphere's
+ * {@link angularDiameterPx} itself, and infinite from inside the body.
+ *
+ * @remarks
+ * A direction u lies in the cone where the stretched ray L u is within α′ = asin(a ÷ |L c|) of
+ * L c: uᵀMu ≥ 0, M = L(sin²α′ I − [ĉ′]ₓᵀ[ĉ′]ₓ)L, written so (by (x × ĉ′) · (y × ĉ′) =
+ * x · y − (x · ĉ′)(y · ĉ′), ĉ′ a unit vector) that a small α′ loses nothing to cancellation. The
+ * normal e of the plane of the centre's line of sight and the pole is fixed by L, and is an
+ * eigenvector of M of eigenvalue −cos²α′; in that plane M's 2 × 2 block, in the basis of ĉ and
+ * e × ĉ, has one positive eigenvalue λ₁, the cone's axis, and one negative, λ₂. Along each
+ * principal direction the cone's half-angle θ has tan² θ = λ₁ ÷ (−λᵢ), the least of which is the
+ * outline's least semi-axis. For a sphere it is α itself. Seen pole-on any plane through the line
+ * of sight serves.
+ */
+export function outlineLeastDiameterPx(
+  body: Pick<GraticuleBody, "centreM" | "radiusM" | "spheroid">,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): number {
+  const spheroid = body.spheroid;
+  if (spheroid === null) {
+    return angularDiameterPx(body.centreM, body.radiusM, camera, viewport);
+  }
+  const centre = stretched(body.centreM, spheroid);
+  const d = norm(centre);
+  if (!(d > body.radiusM)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const sin2 = (body.radiusM / d) ** 2;
+  const along = normalise(body.centreM);
+  const stretchedAlong = scale(centre, 1 / d);
+  const across = cross(along, spheroid.pole);
+  const e = norm(across) > 1e-12 ? normalise(across) : perpendicularPair(along)[0];
+  const lAlong = stretched(along, spheroid);
+  const lAside = stretched(cross(e, along), spheroid);
+  const m = (x: Vec3, y: Vec3): number =>
+    sin2 * dot(x, y) - dot(cross(x, stretchedAlong), cross(y, stretchedAlong));
+  const m11 = m(lAlong, lAlong);
+  const m12 = m(lAlong, lAside);
+  const m22 = m(lAside, lAside);
+  const mean = (m11 + m22) / 2;
+  const half = Math.hypot((m11 - m22) / 2, m12);
+  const lambdaAxis = mean + half;
+  // The steepest of the other two, −λᵢ largest, gives the least half-angle.
+  const lambdaSteepest = Math.max(half - mean, 1 - sin2);
+  const leastRad = Math.atan(Math.sqrt(lambdaAxis / lambdaSteepest));
+  return 2 * leastRad * focalPx(camera, viewport);
+}
+
+/**
  * The view's focal length, px: width ÷ (2 tan(fovX ÷ 2)), the pixels a radian subtends at the
  * view's centre, and the pixels per unit of the image plane's tangent coordinates everywhere.
  */
@@ -143,14 +204,17 @@ export const DATUM_INSIDE_MARGIN_PX = 1 / 32;
  * 24 and 35. Below it the body has no limb or graticule over the image, which alone shows it, as it
  * shows a body under 3 device px; its entry in the view's list and, while it is selected, the
  * bracket still mark it. A cut with no hysteresis; a thinner stroke and an outside tick were both
- * refused.
+ * refused. On a flattened body its least apparent radius, its outline's least semi-axis
+ * ({@link outlineLeastDiameterPx}; R02.T19, decision-r02-t19-leans item 3): a band 2δ wide inside an
+ * elliptic outline of semi-axes A ≥ B covers at most what it covers in the circle of radius B, so no
+ * body that passes the cut has more than half its disc covered.
  */
 export const DATUM_OVER_IMAGE_RADIUS_PER_REACH = 2 * (2 + Math.SQRT2);
 
 /**
  * Whether a body of this apparent diameter, device px, has its datum over the photorealistic image:
  * an apparent radius of at least {@link DATUM_OVER_IMAGE_RADIUS_PER_REACH} times its limb's reach,
- * device px.
+ * device px, on a flattened body its least ({@link outlineLeastDiameterPx}; R02.T19).
  */
 export function datumOverImage(diameterPx: number, limbReachPx: number): boolean {
   return diameterPx / 2 >= DATUM_OVER_IMAGE_RADIUS_PER_REACH * limbReachPx;
@@ -160,7 +224,7 @@ export function datumOverImage(diameterPx: number, limbReachPx: number): boolean
 export interface GraticuleBody {
   /** The body's centre from the camera, m along the camera frame's axes. */
   readonly centreM: Vec3;
-  /** Its radius, m. */
+  /** Its radius, m: its equatorial radius, a, where it is a spheroid. */
   readonly radiusM: number;
   /**
    * Its rotation from body-fixed to body axes, or `null` where rotation is not modelled: the
@@ -172,22 +236,40 @@ export interface GraticuleBody {
    * 14, as `displays/system/bodyFrame.ts` assumes), or `null` for the frame's +z.
    */
   readonly unmodelledPole: Vec3 | null;
+  /**
+   * The spheroid its datum is drawn on (R02.T19): its figure's stretch a ÷ c along its pole; `null`
+   * for the sphere of {@link GraticuleBody.radiusM}.
+   */
+  readonly spheroid: DatumSpheroid | null;
+}
+
+/**
+ * The spheroid a body's datum is drawn on (plan R02, R02.T19), from its figure (R07's
+ * `BodyFigure`) where one is given; `null` for a sphere, a = c, or a body with none. Its axis is
+ * the one the image draws the figure about, `figurePole` (its pole, or +z where it has none), so
+ * that the datum lies on the drawn bulge (decision-r02-t19-leans, item 2).
+ */
+export function datumSpheroidOfFigure(figure: BodyFigure | null): DatumSpheroid | null {
+  return figure === null ? null : datumSpheroidOf(figure, figurePole(figure));
 }
 
 /**
  * The rotation a graticule is drawn in: the body's own, or where it is not modelled one whose pole
- * is the given pole (the orbit normal) and whose prime meridian is fixed, so that it does not turn.
+ * is the given pole (the orbit normal) and whose prime meridian is fixed, so that it does not turn;
+ * on a flattened body (a spheroid; R02.T19) the pole its figure is drawn about instead, so that its
+ * equator lies on the figure's (decision-r02-t19-leans, item 2).
  */
 export function graticuleRotation(
-  body: Pick<GraticuleBody, "rotation" | "unmodelledPole">,
+  body: Pick<GraticuleBody, "rotation" | "unmodelledPole" | "spheroid">,
 ): Rotation3 {
   if (body.rotation !== null) {
     return body.rotation;
   }
-  if (body.unmodelledPole === null) {
+  const pole = body.spheroid?.pole ?? body.unmodelledPole;
+  if (pole === null) {
     return IDENTITY_ROTATION;
   }
-  const z = normalise(body.unmodelledPole);
+  const z = normalise(pole);
   const [x, y] = perpendicularPair(z);
   // Columns are the body-fixed axes in the frame, so the rows are their components.
   return rotation3FromRows([vec3(x.x, y.x, z.x), vec3(x.y, y.y, z.y), vec3(x.z, y.z, z.z)]);
@@ -213,7 +295,11 @@ export interface BodyWireframe {
   readonly lines: ReadonlyArray<GraticuleLine>;
 }
 
-/** The unit vector of latitude `latRad` and longitude `lonRad` along the body-fixed axes. */
+/**
+ * The unit vector of latitude `latRad` and longitude `lonRad` along the body-fixed axes: the
+ * direction of planetocentric (geocentric) latitude, as R10's `graticulePatch` takes it (R02.T19,
+ * decision-r02-t19-leans item 1).
+ */
 function unitAt(latRad: number, lonRad: number): Vec3 {
   const c = Math.cos(latRad);
   return vec3(c * Math.cos(lonRad), c * Math.sin(lonRad), Math.sin(latRad));
@@ -227,27 +313,40 @@ export function perpendicularPair(axis: Vec3): readonly [Vec3, Vec3] {
   return [e1, cross(n, e1)];
 }
 
-/** The point at `theta` of the sphere's horizon from the camera, its circle of tangency. */
-function horizonOf(body: Pick<GraticuleBody, "centreM" | "radiusM">): (theta: number) => Vec3 {
-  const d = norm(body.centreM);
-  const toCentre = scale(body.centreM, 1 / d);
+/**
+ * The point at `theta` of the body's horizon from the camera: a sphere's circle of tangency, or a
+ * spheroid's, the stretched sphere's mapped back (R02.T19), the ellipse in which the cone of lines
+ * of sight that graze the spheroid touches it.
+ */
+function horizonOf(
+  body: Pick<GraticuleBody, "centreM" | "radiusM" | "spheroid">,
+): (theta: number) => Vec3 {
+  const spheroid = body.spheroid;
+  const centre = stretched(body.centreM, spheroid);
+  const d = norm(centre);
+  const toCentre = scale(centre, 1 / d);
   const [u, v] = perpendicularPair(toCentre);
   const along = -(body.radiusM * body.radiusM) / d;
   const across = body.radiusM * Math.sqrt(1 - (body.radiusM / d) ** 2);
   const centreOffset = scale(toCentre, along);
+  // Each point from the centre, mapped back from the stretched space before the centre is added,
+  // so that it keeps its precision near the body.
   return (theta) =>
     add(
       body.centreM,
-      add(
-        centreOffset,
-        add(scale(u, across * Math.cos(theta)), scale(v, across * Math.sin(theta))),
+      unstretched(
+        add(
+          centreOffset,
+          add(scale(u, across * Math.cos(theta)), scale(v, across * Math.sin(theta))),
+        ),
+        spheroid,
       ),
     );
 }
 
 /**
- * The limb circle: the sphere's silhouette from the camera, the true horizon, subdivided to the
- * sagitta tolerance.
+ * The limb: the body's silhouette from the camera, the true horizon of its sphere or spheroid,
+ * subdivided to the sagitta tolerance.
  */
 function limb(body: GraticuleBody, camera: ProjectionCamera, viewport: Viewport): Polyline[] {
   return sampleCurve(
@@ -255,6 +354,20 @@ function limb(body: GraticuleBody, camera: ProjectionCamera, viewport: Viewport)
     camera,
     viewport,
   );
+}
+
+/**
+ * The body's spheroid with its pole along the view axes, for the sums in the image plane's tangent
+ * coordinates; `null` for a sphere.
+ */
+function viewSpheroidOf(
+  body: Pick<GraticuleBody, "spheroid">,
+  camera: ProjectionCamera,
+): DatumSpheroid | null {
+  const spheroid = body.spheroid;
+  return spheroid === null
+    ? null
+    : { pole: toViewAxes(spheroid.pole, camera.orientation), stretch: spheroid.stretch };
 }
 
 /**
@@ -276,6 +389,12 @@ function limb(body: GraticuleBody, camera: ProjectionCamera, viewport: Viewport)
  * The outline bounds a convex region, and the curve inside it, parallel to it, is convex too, so
  * its chords lie farther in than their ends: the 0.25 px subdivision never puts a chord nearer the
  * outline than its points.
+ *
+ * A spheroid's (R02.T19) is the same in its stretched space, where the ray L u meets the sphere of
+ * radius a about L c: F = (L u · L c)² − (|L c|² − a²)|L u|², whose gradient in (a, b) is L G's,
+ * G = (L u · L c) L c − (|L c|² − a²) L u, L being symmetric; the ray's parameter t is the same in
+ * both spaces. Its outline is a conic still, an ellipse whose least radius of curvature is far
+ * above the inset wherever a datum is drawn over the image.
  */
 function limbInside(
   body: GraticuleBody,
@@ -284,9 +403,11 @@ function limbInside(
   insetPx: number,
 ): Polyline[] {
   const horizon = horizonOf(body);
-  const d = norm(body.centreM);
+  const viewSpheroid = viewSpheroidOf(body, camera);
+  const centre = stretched(body.centreM, body.spheroid);
+  const d = norm(centre);
   const k = (d - body.radiusM) * (d + body.radiusM);
-  const c = toViewAxes(body.centreM, camera.orientation);
+  const c = toViewAxes(centre, camera.orientation);
   const insetTan = insetPx / focalPx(camera, viewport);
   const inside = (theta: number): Vec3 => {
     const onHorizon = horizon(theta);
@@ -296,18 +417,21 @@ function limbInside(
     }
     const a = p.x / -p.z;
     const b = p.y / -p.z;
-    const uc = a * c.x + b * c.y - c.z;
+    const u = stretched(vec3(a, b, -1), viewSpheroid);
+    const uc = dot(u, c);
     // ∇F ÷ 2 in (a, b): the outline's inward normal.
-    const ga = uc * c.x - k * a;
-    const gb = uc * c.y - k * b;
+    const gradient = stretched(sub(scale(c, uc), scale(u, k)), viewSpheroid);
+    const ga = gradient.x;
+    const gb = gradient.y;
     const g = Math.hypot(ga, gb);
     if (!(g > 0)) {
       return onHorizon;
     }
     const qa = a + (insetTan * ga) / g;
     const qb = b + (insetTan * gb) / g;
-    const qc = qa * c.x + qb * c.y - c.z;
-    const f = Math.max(0, qc * qc - (qa * qa + qb * qb + 1) * k);
+    const q = stretched(vec3(qa, qb, -1), viewSpheroid);
+    const qc = dot(q, c);
+    const f = Math.max(0, qc * qc - dot(q, q) * k);
     const t = k / (qc + Math.sqrt(f));
     return rotate(camera.orientation, vec3(t * qa, t * qb, -t));
   };
@@ -337,6 +461,12 @@ function limbInside(
  * off it it stands up to sec² θ ÷ sec θ_min of the inset inside, about 1.4 of it at a corner of a
  * 60° field and 5 in a 120° field, where a line would end short of the limb's casing; so
  * `windowsInside` moves each cut out from it to the exact inset.
+ *
+ * A spheroid's (R02.T19) is the stretched sphere's, of radius a about L c, with its angular inset
+ * s times as large: the stretch turns lines of sight apart by at most s (`angularDistortion`), and
+ * maps the grazing lines of sight to the spheroid's, so a line of sight s ε inside the stretched
+ * cone stands at least ε inside the spheroid's. θ_min is taken from the sphere of radius a about
+ * c, which holds the spheroid, its least angle off the axis 0 where the camera stands inside it.
  */
 function insideThresholdM(
   body: GraticuleBody,
@@ -344,14 +474,27 @@ function insideThresholdM(
   viewport: Viewport,
   insetPx: number,
 ): number | null {
-  const d = norm(body.centreM);
+  const spheroid = body.spheroid;
+  const centre = stretched(body.centreM, spheroid);
+  const d = norm(centre);
   const alpha = Math.asin(body.radiusM / d);
-  const forward = -toViewAxes(body.centreM, camera.orientation).z / d;
-  const thetaMin = Math.max(0, Math.acos(Math.min(1, Math.max(-1, forward))) - alpha);
+  const distanceM = norm(body.centreM);
+  const forward = -toViewAxes(body.centreM, camera.orientation).z / distanceM;
+  // The angular radius of the sphere that holds the body: the sphere's own, or about a spheroid
+  // the sphere of its equatorial radius, a right angle from inside it.
+  const holdingRad =
+    spheroid === null
+      ? alpha
+      : distanceM > body.radiusM
+        ? Math.asin(body.radiusM / distanceM)
+        : Math.PI / 2;
+  const thetaMin = Math.max(0, Math.acos(Math.min(1, Math.max(-1, forward))) - holdingRad);
   if (!(thetaMin < Math.PI / 2)) {
     return null;
   }
-  const beta = alpha - (insetPx * Math.cos(thetaMin)) / focalPx(camera, viewport);
+  const beta =
+    alpha -
+    (angularDistortion(spheroid) * insetPx * Math.cos(thetaMin)) / focalPx(camera, viewport);
   if (!(beta > 0)) {
     return null;
   }
@@ -362,7 +505,8 @@ function insideThresholdM(
 /**
  * A sphere's outline on a view as a conic in the image plane's tangent coordinates x = (a, b):
  * F(x) = xᵀAx + 2gᵀx + h = (u · c)² − (d² − r²)|u|², u = (a, b, −1), c the centre along the view
- * axes, zero on the outline and positive inside it.
+ * axes, zero on the outline and positive inside it; a spheroid's (R02.T19) the same of L u and L c
+ * in its stretched space, d = |L c| and r its equatorial radius.
  */
 interface OutlineConic {
   readonly a11: number;
@@ -374,16 +518,33 @@ interface OutlineConic {
 }
 
 function outlineConicOf(body: GraticuleBody, camera: ProjectionCamera): OutlineConic {
-  const d = norm(body.centreM);
+  const viewSpheroid = viewSpheroidOf(body, camera);
+  const centre = stretched(body.centreM, body.spheroid);
+  const d = norm(centre);
   const k = (d - body.radiusM) * (d + body.radiusM);
-  const c = toViewAxes(body.centreM, camera.orientation);
+  const c = toViewAxes(centre, camera.orientation);
+  if (viewSpheroid === null) {
+    return {
+      a11: c.x * c.x - k,
+      a12: c.x * c.y,
+      a22: c.y * c.y - k,
+      g1: -c.z * c.x,
+      g2: -c.z * c.y,
+      h: c.z * c.z - k,
+    };
+  }
+  // L u = a l₁ + b l₂ − l₃, lᵢ = L eᵢ, so L u · L c = a m₁ + b m₂ − m₃ with mᵢ = lᵢ · L c.
+  const l1 = stretched(vec3(1, 0, 0), viewSpheroid);
+  const l2 = stretched(vec3(0, 1, 0), viewSpheroid);
+  const l3 = stretched(vec3(0, 0, 1), viewSpheroid);
+  const [m1, m2, m3] = [dot(l1, c), dot(l2, c), dot(l3, c)];
   return {
-    a11: c.x * c.x - k,
-    a12: c.x * c.y,
-    a22: c.y * c.y - k,
-    g1: -c.z * c.x,
-    g2: -c.z * c.y,
-    h: c.z * c.z - k,
+    a11: m1 * m1 - k * dot(l1, l1),
+    a12: m1 * m2 - k * dot(l1, l2),
+    a22: m2 * m2 - k * dot(l2, l2),
+    g1: -m3 * m1 + k * dot(l1, l3),
+    g2: -m3 * m2 + k * dot(l2, l3),
+    h: m3 * m3 - k * dot(l3, l3),
   };
 }
 
@@ -401,7 +562,9 @@ const OUTLINE_NEWTON_STEPS = 32;
  * unique, for a pixel nearer the outline than its least radius of curvature, f tan α (the conic's
  * semi-latus rectum, at every place in the field), as every pixel it is asked of near a cut is: a
  * datum's reach is at most 1 ÷ 6.8 of the apparent radius over the image
- * ({@link DATUM_OVER_IMAGE_RADIUS_PER_REACH}).
+ * ({@link DATUM_OVER_IMAGE_RADIUS_PER_REACH}). A spheroid's outline (R02.T19) is an ellipse of
+ * semi-axes A ≥ B, its least radius of curvature B² ÷ A, which the reach, at most B ÷ 6.8, stays
+ * under wherever B ÷ A is above 0.15, and every flattening the wire allows keeps it above 0.8.
  */
 function outlineInsetPx(
   conic: OutlineConic,
@@ -465,15 +628,21 @@ const CUT_BISECTIONS = 24;
  * next safe window's: in even steps to the first point too near the outline, then by bisection
  * between it and the last point far enough inside, so that a run ends at its reach inside the
  * outline. Windows that meet are joined. A facing window with no safe one keeps the stretch about
- * its middle that stands far enough inside, or none.
+ * its middle that stands far enough inside, or none; on a spheroid (`searchWhole`; R02.T19), whose
+ * safe cut stands farther in, the stretch about the farthest inside of its middle, its ends and its
+ * even steps, so that a window cut by a parallel's λ = 0, or a meridian's whose middle runs near
+ * the limb, keeps the far stretch it has.
  *
  * @param insetAt - How far inside the outline the line's point at a parameter is seen, px.
+ * @param searchWhole - Whether a facing window with no safe one is searched beyond its middle: on a
+ *   spheroid; a sphere's lines are kept as R10.T16.g built them.
  */
 function windowsInside(
   facing: ReadonlyArray<ParameterWindow>,
   safe: ReadonlyArray<ParameterWindow>,
   insetAt: (u: number) => number,
   insetPx: number,
+  searchWhole: boolean,
 ): ParameterWindow[] {
   const far = (u: number): boolean => insetAt(u) >= insetPx;
   // How far from `inner`, far enough inside, towards `outer` the line stays far enough inside.
@@ -497,15 +666,37 @@ function windowsInside(
     }
     return outer;
   };
+  // Where in a facing window with no safe one the line stands far enough inside: its middle, as
+  // R10.T16.g took it, or on a spheroid else the farthest inside of its ends and even steps.
+  const farFrom = (lo: number, hi: number): number | null => {
+    const middle = (lo + hi) / 2;
+    if (far(middle)) {
+      return middle;
+    }
+    if (!searchWhole) {
+      return null;
+    }
+    let best: number | null = null;
+    let bestPx = insetPx;
+    for (let i = 0; i <= CUT_STEPS; i += 1) {
+      const u = lo + ((hi - lo) * i) / CUT_STEPS;
+      const atPx = insetAt(u);
+      if (atPx >= bestPx) {
+        best = u;
+        bestPx = atPx;
+      }
+    }
+    return best;
+  };
   const windows: ParameterWindow[] = [];
   for (const [lo, hi] of facing) {
     const inner = safe
       .filter(([sLo, sHi]) => sLo >= lo && sHi <= hi)
       .toSorted((x, y) => x[0] - y[0]);
     if (inner.length === 0) {
-      const middle = (lo + hi) / 2;
-      if (far(middle)) {
-        windows.push([endFrom(lo, middle), endFrom(hi, middle)]);
+      const from = farFrom(lo, hi);
+      if (from !== null) {
+        windows.push([endFrom(lo, from), endFrom(hi, from)]);
       }
       continue;
     }
@@ -549,6 +740,16 @@ function windowsInside(
  * {@link DATUM_OVER_IMAGE_RADIUS_PER_REACH} limb reaches has no lines there ({@link datumOverImage}).
  * The regime is the body's at its size in either case.
  *
+ * A flattened body (`body.spheroid`; plan R02, R02.T19) has its datum on its spheroid in both
+ * styles, built on the sphere of radius a its stretch a ÷ c along the pole makes of it, with every
+ * point mapped back, c + L⁻¹(a · R · n), so that it lies on the figure: the limb is the spheroid's
+ * horizon from the camera, the graticule is faced by the spheroid's normal (−n · L c > a, which the
+ * stretch keeps exact), and over the image its outline is the spheroid's conic and its cut on its
+ * least apparent radius ({@link outlineLeastDiameterPx}). Its parallels stand at planetocentric
+ * (geocentric) latitudes φ, as R10's `graticulePatch` takes them, at the reduced latitude
+ * atan((a ÷ c) tan φ) on the stretched sphere; its meridians are a sphere's. Its regime and step stay
+ * the equatorial sphere's, as the image sizes it. A sphere's lines are built as before.
+ *
  * @param strokeScale - The device px drawn for each CSS px of a line (`ViewStrokes.strokeScale`).
  * @param lowSetting - The wireframe's low setting, which draws graticules at 30° only.
  * @param inside - How the datum is stroked inside the figure over the photorealistic image, or
@@ -564,9 +765,14 @@ export function graticule(
 ): BodyWireframe {
   const diameterPx = angularDiameterPx(body.centreM, body.radiusM, camera, viewport);
   const regime = bodyRegime(diameterPx, strokeScale);
+  const spheroid = body.spheroid;
   if (
     regime === "symbol" ||
-    (inside !== null && !datumOverImage(diameterPx, inside.reachPx.thin))
+    (inside !== null &&
+      !datumOverImage(
+        spheroid === null ? diameterPx : outlineLeastDiameterPx(body, camera, viewport),
+        inside.reachPx.thin,
+      ))
   ) {
     return { regime, diameterPx, lines: [] };
   }
@@ -586,15 +792,19 @@ export function graticule(
   const rotation = graticuleRotation(body);
   const onSphere = (latRad: number, lonRad: number): Vec3 =>
     rotateToBody(rotation, unitAt(latRad, lonRad));
-  // The body's axes turned into the frame, and each one's facing component −axis · c.
+  // The body's axes turned into the frame, and each one's facing component −axis · c, on a
+  // spheroid in its stretched space, −axis · L c, where it is the sphere of radius a (R02.T19).
   const xAxis = rotateToBody(rotation, vec3(1, 0, 0));
   const yAxis = rotateToBody(rotation, vec3(0, 1, 0));
   const zAxis = rotateToBody(rotation, vec3(0, 0, 1));
-  const [fx, fy, fz] = [xAxis, yAxis, zAxis].map((axis) => -dot(axis, body.centreM));
+  const facingCentre = stretched(body.centreM, spheroid);
+  const [fx, fy, fz] = [xAxis, yAxis, zAxis].map((axis) => -dot(axis, facingCentre));
   const facingX = fx ?? 0;
   const facingY = fy ?? 0;
   const facingZ = fz ?? 0;
-  const pointOf = (n: Vec3): Vec3 => add(body.centreM, scale(n, body.radiusM));
+  // c + L⁻¹(r n): on a spheroid the stretched sphere's point mapped back, from the centre.
+  const pointOf = (n: Vec3): Vec3 =>
+    add(body.centreM, unstretched(scale(n, body.radiusM), spheroid));
   // The facing threshold of a line, thin or heavy, m: the horizon's r, or inside the figure each
   // weight's own, `null` where its inset closes the disc.
   const facingAboveM = (major: boolean): number | null =>
@@ -635,6 +845,7 @@ export function graticule(
       cosineWindows(alpha, beta, thresholdM - offsetM, uMin, uMax),
       (u) => outlineInsetPx(conic, pointAt(u), camera, viewport),
       (major ? inside.reachPx.heavy : inside.reachPx.thin) + DATUM_INSIDE_MARGIN_PX,
+      spheroid !== null,
     );
   };
   const stepDeg = graticuleStepDeg(diameterPx, strokeScale, lowSetting);
@@ -650,7 +861,8 @@ export function graticule(
       runs: sampleCurve(
         {
           point,
-          // n = cos φ (cos λ x + sin λ y) + sin φ z faces the camera where −n · c > r.
+          // n = cos φ (cos λ x + sin λ y) + sin φ z faces the camera where −n · c > r, on a
+          // spheroid −n · L c > a on its stretched sphere, φ the reduced latitude there.
           windows: lineWindows(
             Math.cos(lonRad) * facingX + Math.sin(lonRad) * facingY,
             facingZ,
@@ -670,7 +882,13 @@ export function graticule(
   for (let k = 1; k < count / 2; k += 1) {
     const latRad = -Math.PI / 2 + k * stepRad;
     const major = Math.abs(latRad) < 1e-12;
-    const point = (lon: number): Vec3 => pointOf(onSphere(latRad, lon));
+    // The parallel's latitude on the stretched sphere: its own on a sphere, and on a spheroid the
+    // parametric β of its planetocentric φ, tan β = (a ÷ c) tan φ (R02.T19).
+    const onRad =
+      spheroid === null
+        ? latRad
+        : Math.atan2(spheroid.stretch * Math.sin(latRad), Math.cos(latRad));
+    const point = (lon: number): Vec3 => pointOf(onSphere(onRad, lon));
     lines.push({
       kind: "parallel",
       major,
@@ -678,9 +896,9 @@ export function graticule(
         {
           point,
           windows: lineWindows(
-            Math.cos(latRad) * facingX,
-            Math.cos(latRad) * facingY,
-            Math.sin(latRad) * facingZ,
+            Math.cos(onRad) * facingX,
+            Math.cos(onRad) * facingY,
+            Math.sin(onRad) * facingZ,
             0,
             2 * Math.PI,
             major,

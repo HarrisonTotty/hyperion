@@ -15,16 +15,21 @@ import {
   bodyRegime,
   DATUM_OVER_IMAGE_RADIUS_PER_REACH,
   type DatumInside,
+  datumSpheroidOfFigure,
   type GraticuleBody,
+  type GraticuleLine,
   graticule,
+  graticuleRotation,
   graticuleStepDeg,
   isSymbolSized,
+  outlineLeastDiameterPx,
   perpendicularPair,
   ringEllipse,
   SYMBOL_BELOW_PX,
 } from "./bodies";
 import type { Polyline } from "./curve";
 import { CASING_PX, STROKE_PX } from "./drawList";
+import { datumSpheroidOf } from "./spheroid";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const FOV_X_RAD = Math.PI / 3;
@@ -110,6 +115,7 @@ describe("a body's regime at the view's line scale (R07.T16.g; decision-r07-t16d
       radiusM: EARTH_RADIUS_M,
       rotation: null,
       unmodelledPole: null,
+      spheroid: null,
     });
     const drawn = (diameterPx: number): [string, number] => {
       const wireframe = graticule(at(diameterPx), camera, VIEWPORT, 2);
@@ -137,6 +143,7 @@ describe("a body 400 km below the camera", () => {
     radiusM: EARTH_RADIUS_M,
     rotation: null,
     unmodelledPole: null,
+    spheroid: null,
   };
   const limb = graticule(body, camera, VIEWPORT, AS_BUILT_SCALE).lines.find(
     (line) => line.kind === "limb",
@@ -215,7 +222,7 @@ describe("a graticule", () => {
 
   it("emits no point on the far hemisphere", () => {
     const wireframe = graticule(
-      { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: null },
+      { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: null, spheroid: null },
       camera,
       VIEWPORT,
       AS_BUILT_SCALE,
@@ -245,7 +252,13 @@ describe("a graticule", () => {
       fovXRad: FOV_X_RAD,
     };
     const prime = graticule(
-      { centreM: facingCentre, radiusM: EARTH_RADIUS_M, rotation, unmodelledPole: null },
+      {
+        centreM: facingCentre,
+        radiusM: EARTH_RADIUS_M,
+        rotation,
+        unmodelledPole: null,
+        spheroid: null,
+      },
       looking,
       VIEWPORT,
       AS_BUILT_SCALE,
@@ -267,13 +280,14 @@ describe("a graticule", () => {
         radiusM: EARTH_RADIUS_M,
         rotation: null,
         unmodelledPole: null,
+        spheroid: null,
       },
       camera,
       VIEWPORT,
       AS_BUILT_SCALE,
     );
     const low = graticule(
-      { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: null },
+      { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: null, spheroid: null },
       camera,
       VIEWPORT,
       AS_BUILT_SCALE,
@@ -315,6 +329,7 @@ describe("a graticule seen from low altitude", () => {
         radiusM: EARTH_RADIUS_M,
         rotation: null,
         unmodelledPole: null,
+        spheroid: null,
       },
       camera: { orientation: lookAlong(scale(up, -1), vec3(0, 0, 1)), fovXRad: FOV_X_RAD },
     };
@@ -334,7 +349,7 @@ describe("an unrotated body's graticule", () => {
     const pole = scale(vec3(0.3, 0.2, 1), 1 / norm(vec3(0.3, 0.2, 1)));
     const centreM = vec3(0, 0, -3 * EARTH_RADIUS_M);
     const equator = graticule(
-      { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: pole },
+      { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: pole, spheroid: null },
       { orientation: IDENTITY_QUATERNION, fovXRad: FOV_X_RAD },
       VIEWPORT,
       AS_BUILT_SCALE,
@@ -404,7 +419,13 @@ function sphereAt(xPx: number, yPx: number, rangeM: number, radiusM: number): Gr
   const direction = normalise(
     vec3((xPx - FIELD.widthPx / 2) / FOCAL_PX, -(yPx - FIELD.heightPx / 2) / FOCAL_PX, -1),
   );
-  return { centreM: scale(direction, rangeM), radiusM, rotation: TILTED, unmodelledPole: null };
+  return {
+    centreM: scale(direction, rangeM),
+    radiusM,
+    rotation: TILTED,
+    unmodelledPole: null,
+    spheroid: null,
+  };
 }
 
 /** Where `TEST EARTH` is placed on the field: at its centre, and near its top right corner. */
@@ -454,6 +475,7 @@ const NEAR_THE_CORNERS: GraticuleBody = {
   radiusM: TEST_EARTH_RADIUS_M,
   rotation: TILTED,
   unmodelledPole: null,
+  spheroid: null,
 };
 
 /**
@@ -764,6 +786,569 @@ describe("the datum stroked inside the figure over the image (R10.T16.g)", () =>
       const radiusPx = DATUM_OVER_IMAGE_RADIUS_PER_REACH * reachPx;
       // The band, 2δ wide from the limb in, covers 1 − (1 − 2δ ÷ R)² of the disc.
       expect(1 - (1 - (2 * reachPx) / radiusPx) ** 2).toBeLessThanOrEqual(0.5 + 1e-12);
+    },
+  );
+});
+
+/** `TEST SATURN`'s figure, Saturn's spheroid at 1 bar, 60,268 by 54,364 km (`ATMOSPHERE_FIXTURES`). */
+function testSaturnFigure(): { readonly equatorialRadiusM: number; readonly polarRadiusM: number } {
+  const saturn = ATMOSPHERE_FIXTURES.find((fixture) => fixture.designation === "TEST SATURN");
+  if (saturn === undefined) {
+    throw new Error("ATMOSPHERE_FIXTURES has no TEST SATURN");
+  }
+  return saturn.figure;
+}
+
+const SATURN = testSaturnFigure();
+
+/** The range of R10.T16.g's measurement on `TEST SATURN`, m from its centre: 482 Mm. */
+const SATURN_RANGE_M = 482e6;
+
+/**
+ * `TEST SATURN` at {@link SATURN_RANGE_M}, its centre at pixel (`xPx`, `yPx`) of the field, about
+ * `pole`, as the draw list gives it: its datum on its spheroid, and with no rotation its graticule
+ * drawn about the spheroid's pole.
+ */
+function saturnAt(xPx: number, yPx: number, pole: Vec3): GraticuleBody {
+  const direction = normalise(
+    vec3((xPx - FIELD.widthPx / 2) / FOCAL_PX, -(yPx - FIELD.heightPx / 2) / FOCAL_PX, -1),
+  );
+  return {
+    centreM: scale(direction, SATURN_RANGE_M),
+    radiusM: SATURN.equatorialRadiusM,
+    rotation: null,
+    unmodelledPole: pole,
+    spheroid: datumSpheroidOf(SATURN, pole),
+  };
+}
+
+/** The ways `TEST SATURN` is seen: equator-on, its pole up the field; pole-on; and tilted. */
+const SATURN_VIEWS = [
+  ["equator-on", 960, 540, vec3(0, 1, 0)],
+  ["pole-on", 960, 540, vec3(0, 0, 1)],
+  // Its rings' opening at 26.7°, near the field's corner where T16.g placed `TEST EARTH`.
+  ["tilted, near a corner", 1640, 280, normalise(vec3(0.3, 1, Math.tan((26.7 * Math.PI) / 180)))],
+] as const;
+
+/**
+ * `TEST SATURN` on {@link WIDE}'s axis, about the tilted pole, so near that its equatorial limb
+ * stands 62.6° off the axis and its polar one 60.0°, both past the field's sides and by its
+ * corners, 63.3° off it.
+ */
+const SATURN_NEAR_THE_CORNERS: GraticuleBody = {
+  ...saturnAt(960, 540, SATURN_VIEWS[2][3]),
+  centreM: vec3(0, 0, -SATURN.equatorialRadiusM / Math.sin((62.6 * Math.PI) / 180)),
+};
+
+/** The lengths of each line's runs: the shape of a body's wireframe. */
+function shape(lines: ReadonlyArray<GraticuleLine>): number[][] {
+  return lines.map((line) => line.runs.map((run) => run.length));
+}
+
+/** The spheroid of `body`: its pole and polar radius, the quadric's two terms at a point. */
+function spheroidOfBody(body: GraticuleBody): { readonly pole: Vec3; readonly c: number } {
+  const spheroid = body.spheroid ?? null;
+  if (spheroid === null) {
+    throw new Error("the body is drawn on no spheroid");
+  }
+  return { pole: spheroid.pole, c: body.radiusM / spheroid.stretch };
+}
+
+/**
+ * How far off the spheroid a point lies, as a fraction of its radius: √(ρ² ÷ a² + z² ÷ c²) − 1, ρ
+ * and z its distance from the pole's axis and along it, from the body's centre.
+ */
+function offSpheroid(body: GraticuleBody, p: Vec3): number {
+  const { pole, c } = spheroidOfBody(body);
+  const q = sub(p, body.centreM);
+  const z = dot(q, pole);
+  const rho2 = dot(q, q) - z * z;
+  return Math.abs(Math.sqrt(rho2 / body.radiusM ** 2 + (z * z) / (c * c)) - 1);
+}
+
+/** The spheroid's outward normal at a point of it, unit: the quadric's gradient. */
+function normalAt(body: GraticuleBody, p: Vec3): Vec3 {
+  const { pole, c } = spheroidOfBody(body);
+  const q = sub(p, body.centreM);
+  const z = dot(q, pole);
+  const across = sub(q, scale(pole, z));
+  return normalise(add(scale(across, 1 / body.radiusM ** 2), scale(pole, z / (c * c))));
+}
+
+/**
+ * The discriminant of a line of sight u with the spheroid, (uᵀSc)² − (cᵀSc − 1)(uᵀSu), S its
+ * quadric's matrix, (I − ppᵀ) ÷ a² + ppᵀ ÷ c²: positive where the line meets it. Written from the
+ * quadric alone, apart from the code's stretched sphere.
+ */
+function discriminant(body: GraticuleBody, u: Vec3): number {
+  const { pole, c } = spheroidOfBody(body);
+  const s = (v: Vec3): Vec3 => {
+    const z = dot(v, pole);
+    return add(scale(sub(v, scale(pole, z)), 1 / body.radiusM ** 2), scale(pole, z / (c * c)));
+  };
+  const centre = body.centreM;
+  const sc = s(centre);
+  return dot(u, sc) ** 2 - (dot(centre, sc) - 1) * dot(u, s(u));
+}
+
+/**
+ * How far inside the spheroid's outline on the field a point is seen, device px: its distance
+ * from the outline's nearest point, negative where its line of sight misses the spheroid. The
+ * outline is found from the quadric alone: along each of 720 directions from the centre's pixel,
+ * the radius at which the pixel's line of sight grazes it, by bisection; the nearest is refined by
+ * golden section.
+ */
+function insetFromSpheroidOutline(
+  body: GraticuleBody,
+  field: Field = SIXTY,
+): (point: Vec3) => number {
+  const { camera, viewport } = field;
+  const focalPx = viewport.widthPx / (2 * Math.tan(camera.fovXRad / 2));
+  const centrePx = project(body.centreM, camera, viewport);
+  const rayAt = (xPx: number, yPx: number): Vec3 =>
+    vec3((xPx - viewport.widthPx / 2) / focalPx, -(yPx - viewport.heightPx / 2) / focalPx, -1);
+  const farPx = 4 * focalPx * Math.tan(Math.asin(body.radiusM / norm(body.centreM)));
+  const outlineAt = (theta: number): { xPx: number; yPx: number } => {
+    const [dx, dy] = [Math.cos(theta), Math.sin(theta)];
+    let inPx = 0;
+    let outPx = farPx;
+    for (let i = 0; i < 80; i += 1) {
+      const mid = (inPx + outPx) / 2;
+      if (discriminant(body, rayAt(centrePx.xPx + mid * dx, centrePx.yPx + mid * dy)) >= 0) {
+        inPx = mid;
+      } else {
+        outPx = mid;
+      }
+    }
+    const radiusPx = (inPx + outPx) / 2;
+    return { xPx: centrePx.xPx + radiusPx * dx, yPx: centrePx.yPx + radiusPx * dy };
+  };
+  const step = (2 * Math.PI) / 720;
+  const coarse = Array.from({ length: 720 }, (_, i) => outlineAt(i * step));
+  return (point) => {
+    const q = project(point, camera, viewport);
+    const squared = (p: { xPx: number; yPx: number }): number =>
+      (p.xPx - q.xPx) ** 2 + (p.yPx - q.yPx) ** 2;
+    let nearest = 0;
+    let nearestSquared = Number.POSITIVE_INFINITY;
+    coarse.forEach((p, i) => {
+      if (squared(p) < nearestSquared) {
+        nearest = i;
+        nearestSquared = squared(p);
+      }
+    });
+    let lo = (nearest - 1) * step;
+    let hi = (nearest + 1) * step;
+    const golden = (Math.sqrt(5) - 1) / 2;
+    for (let i = 0; i < 60; i += 1) {
+      const a = hi - golden * (hi - lo);
+      const b = lo + golden * (hi - lo);
+      if (squared(outlineAt(a)) < squared(outlineAt(b))) {
+        hi = b;
+      } else {
+        lo = a;
+      }
+    }
+    const distancePx = Math.sqrt(squared(outlineAt((lo + hi) / 2)));
+    return discriminant(body, rayAt(q.xPx, q.yPx)) >= 0 ? distancePx : -distancePx;
+  };
+}
+
+describe("the datum on the body's spheroid (R02.T19), on TEST SATURN at 482 Mm", () => {
+  const cases = SATURN_VIEWS.flatMap(([how, xPx, yPx, pole]) =>
+    VIEW_SCALES.map((strokeScale) => [how, strokeScale, xPx, yPx, pole] as const),
+  );
+
+  /** Every point of every line of the body's datum, in either style. */
+  function pointsOf(
+    body: GraticuleBody,
+    strokeScale: number,
+    inside: DatumInside | null,
+  ): ReadonlyArray<Vec3> {
+    return graticule(body, FIELD_CAMERA, FIELD, strokeScale, false, inside).lines.flatMap((line) =>
+      line.runs.flat(),
+    );
+  }
+
+  it.each(cases)(
+    "strokes the limb, seen %s at a line scale of %s, its reach to half a pixel more inside the figure's outline at every point",
+    (_, strokeScale, xPx, yPx, pole) => {
+      const body = saturnAt(xPx, yPx, pole);
+      const inside = reachesAt(strokeScale);
+      const limb = graticule(body, FIELD_CAMERA, FIELD, strokeScale, false, inside).lines.find(
+        (line) => line.kind === "limb",
+      );
+      const insets = alongChords(limb?.runs ?? []).map(insetFromSpheroidOutline(body));
+      const reach = inside.reachPx.thin;
+      expect({
+        points: insets.length > 200,
+        leastOverReach: Math.min(...insets) - reach >= 0,
+        mostOverReach: Math.max(...insets) - reach <= 0.5,
+      }).toEqual({ points: true, leastOverReach: true, mostOverReach: true });
+    },
+  );
+
+  it.each(cases)(
+    "puts every point of the limb and graticule on the spheroid to 10⁻⁹ of its radius, seen %s at a line scale of %s, in both styles",
+    (_, strokeScale, xPx, yPx, pole) => {
+      const body = saturnAt(xPx, yPx, pole);
+      const styles = [null, reachesAt(strokeScale)].map((inside) =>
+        pointsOf(body, strokeScale, inside).map((p) => offSpheroid(body, p)),
+      );
+      expect(styles.map((off) => [off.length > 400, Math.max(...off) <= 1e-9])).toEqual([
+        [true, true],
+        [true, true],
+      ]);
+    },
+  );
+
+  it.each(cases)(
+    "faces every point by the spheroid's normal, none on its far side, seen %s at a line scale of %s, in both styles",
+    (_, strokeScale, xPx, yPx, pole) => {
+      const body = saturnAt(xPx, yPx, pole);
+      // −p̂ · n̂ is the cosine of the line of sight's angle to the normal: 0 on the horizon.
+      const facing = [null, reachesAt(strokeScale)].map((inside) =>
+        pointsOf(body, strokeScale, inside).map((p) => -dot(normalise(p), normalAt(body, p))),
+      );
+      expect(facing.map((cosines) => Math.min(...cosines) >= -1e-9)).toEqual([true, true]);
+    },
+  );
+
+  /**
+   * How far inside the spheroid's outline each point of a body's meridians and parallels stands
+   * past its own reach on a field, px, and each of their cut ends: not at a pole, nor where the
+   * line's next run goes on (a parallel across its λ = 0).
+   */
+  function spheroidMarginsOf(
+    body: GraticuleBody,
+    strokeScale: number,
+    field: Field,
+  ): { readonly lines: number; readonly points: number[]; readonly cutEnds: number[] } {
+    const inset = insetFromSpheroidOutline(body, field);
+    const inside = reachesAt(strokeScale);
+    const lines = graticule(
+      body,
+      field.camera,
+      field.viewport,
+      strokeScale,
+      false,
+      inside,
+    ).lines.filter((line) => line.kind !== "limb");
+    const { pole } = spheroidOfBody(body);
+    const reachOf = (major: boolean): number =>
+      major ? inside.reachPx.heavy : inside.reachPx.thin;
+    return {
+      lines: lines.length,
+      points: lines.flatMap((line) => line.runs.flat().map((p) => inset(p) - reachOf(line.major))),
+      cutEnds: lines.flatMap((line) => {
+        const all = line.runs.flatMap((run) => [run[0], run.at(-1)]).filter((p) => p !== undefined);
+        return all
+          .filter((end) => {
+            const atPole =
+              Math.abs(Math.abs(dot(normalise(sub(end, body.centreM)), pole)) - 1) < 1e-9;
+            const shared = all.filter((o) => norm(sub(o, end)) < 1e-6 * body.radiusM).length > 1;
+            return !atPole && !shared;
+          })
+          .map((end) => inset(end) - reachOf(line.major));
+      }),
+    };
+  }
+
+  it.each(cases)(
+    "keeps every point of every meridian and parallel its own reach inside the figure's outline, seen %s at a line scale of %s",
+    (_, strokeScale, xPx, yPx, pole) => {
+      const { lines, points } = spheroidMarginsOf(saturnAt(xPx, yPx, pole), strokeScale, SIXTY);
+      expect({ lines, points: points.length > 300, leastMargin: Math.min(...points) >= 0 }).toEqual(
+        {
+          lines: 24 + 11,
+          points: true,
+          leastMargin: true,
+        },
+      );
+    },
+  );
+
+  it.each(cases)(
+    "ends each meridian and parallel cut short of the limb at its own reach inside the figure's outline, seen %s at a line scale of %s",
+    (_, strokeScale, xPx, yPx, pole) => {
+      const ends = spheroidMarginsOf(saturnAt(xPx, yPx, pole), strokeScale, SIXTY).cutEnds;
+      expect({
+        cutEnds: ends.length > 10,
+        atTheReach: ends.every((margin) => margin >= 0 && margin <= 0.05),
+      }).toEqual({ cutEnds: true, atTheReach: true });
+    },
+  );
+
+  it.each(VIEW_SCALES)(
+    "keeps every point of every meridian and parallel its own reach inside the figure's outline, its cut ends at the reach, in a 120° field with the limb by its corners, at a line scale of %s",
+    (strokeScale) => {
+      const margins = spheroidMarginsOf(SATURN_NEAR_THE_CORNERS, strokeScale, WIDE);
+      const { points } = margins;
+      const ends = margins.cutEnds;
+      expect([
+        points.length > 200,
+        Math.min(...points) >= 0,
+        ends.length > 10,
+        ends.every((margin) => margin >= 0 && margin <= 0.05),
+      ]).toEqual([true, true, true, true]);
+    },
+  );
+
+  it.each(SATURN_VIEWS)(
+    "draws the wireframe's limb on the spheroid's horizon, seen %s: every line of sight to it grazes the figure",
+    (_, xPx, yPx, pole) => {
+      const body = saturnAt(xPx, yPx, pole);
+      const limb = graticule(body, FIELD_CAMERA, FIELD, 2).lines.find(
+        (line) => line.kind === "limb",
+      );
+      const points = (limb?.runs ?? []).flat();
+      const inset = insetFromSpheroidOutline(body);
+      expect({
+        points: points.length > 50,
+        grazing:
+          Math.max(...points.map((p) => Math.abs(dot(normalise(p), normalAt(body, p))))) < 1e-9,
+        onOutline: Math.max(...points.map((p) => Math.abs(inset(p)))) < 1e-4,
+        betweenPoints:
+          Math.max(...alongChords(limb?.runs ?? []).map((p) => Math.abs(inset(p)))) < 0.25,
+      }).toEqual({ points: true, grazing: true, onOutline: true, betweenPoints: true });
+    },
+  );
+
+  it.each(SATURN_VIEWS)(
+    "draws the parallels at planetocentric latitudes every 15°, and the meridians every 15° of longitude, seen %s",
+    (_, xPx, yPx, pole) => {
+      const body = saturnAt(xPx, yPx, pole);
+      const lines = graticule(body, FIELD_CAMERA, FIELD, 2).lines;
+      // The graticule's prime meridian's axis and the one a quarter-turn east, about the pole.
+      const rotation = graticuleRotation(body);
+      const east = [vec3(1, 0, 0), vec3(0, 1, 0)].map((axis) => rotateToBody(rotation, axis));
+      const fromCentre = (p: Vec3): Vec3 => normalise(sub(p, body.centreM));
+      const latitudeDeg = (p: Vec3): number =>
+        (Math.asin(dot(fromCentre(p), pole)) * 180) / Math.PI;
+      const longitudeDeg = (p: Vec3): number =>
+        (Math.atan2(dot(fromCentre(p), east[1] ?? pole), dot(fromCentre(p), east[0] ?? pole)) *
+          180) /
+        Math.PI;
+      // Each parallel's points off its latitude, −75° + 15° k, and each meridian's off its
+      // longitude, 15° k, but at the poles, degrees.
+      const parallels = lines.filter((line) => line.kind === "parallel");
+      const offLatitude = parallels.flatMap((line, k) =>
+        line.runs.flat().map((p) => Math.abs(latitudeDeg(p) - (-75 + 15 * k))),
+      );
+      const offLongitude = lines
+        .filter((line) => line.kind === "meridian")
+        .flatMap((line, k) =>
+          line.runs
+            .flat()
+            .filter((p) => Math.abs(latitudeDeg(p)) < 89.9)
+            .map((p) => Math.abs(((longitudeDeg(p) - 15 * k + 540) % 360) - 180)),
+        );
+      expect([
+        parallels.length,
+        offLatitude.length > 50,
+        Math.max(...offLatitude) < 1e-9,
+        offLongitude.length > 50,
+        Math.max(...offLongitude) < 1e-9,
+      ]).toEqual([11, true, true, true, true]);
+    },
+  );
+
+  it("leaves the sphere's limb, the datum as R10.T16.g drew it, 17 px beyond the figure at the poles seen equator-on, as T16.g measured", () => {
+    const body = saturnAt(960, 540, vec3(0, 1, 0));
+    const inside = reachesAt(2);
+    const limbOf = (each: GraticuleBody): ReadonlyArray<Vec3> =>
+      graticule(each, FIELD_CAMERA, FIELD, 2, false, inside)
+        .lines.find((line) => line.kind === "limb")
+        ?.runs.flat() ?? [];
+    const inset = insetFromSpheroidOutline(body);
+    const sphere = limbOf({ ...body, spheroid: null }).map(inset);
+    const spheroid = limbOf(body).map(inset);
+    // The centreline 17.0 px beyond the figure, its casing's outer edge 20.5 (plan 10's record).
+    expect([
+      Math.round(Math.min(...sphere) * 10) / 10,
+      Math.round(Math.min(...spheroid) * 100) / 100,
+    ]).toEqual([-17.0, 3.53]);
+  });
+
+  it.each([
+    ["equator-on", vec3(0, 1, 0)],
+    ["pole-on", vec3(0, 0, 1)],
+  ] as const)(
+    "measures the outline's least apparent diameter seen %s: 2 atan(c ÷ √(d² − a²)) equator-on, 2 atan(a ÷ √(d² − c²)) pole-on",
+    (how, pole) => {
+      const body = saturnAt(960, 540, pole);
+      const a = SATURN.equatorialRadiusM;
+      const c = SATURN.polarRadiusM;
+      const d = SATURN_RANGE_M;
+      // The tangents from the camera to the meridian's ellipse, a across the line of sight and c
+      // along it pole-on, the other way about equator-on.
+      const want =
+        how === "equator-on"
+          ? 2 * Math.atan(c / Math.sqrt(d * d - a * a)) * FOCAL_PX
+          : 2 * Math.atan(a / Math.sqrt(d * d - c * c)) * FOCAL_PX;
+      const seen = outlineLeastDiameterPx(body, FIELD_CAMERA, FIELD);
+      expect(Math.abs(seen / want - 1)).toBeLessThan(1e-9);
+    },
+  );
+
+  it("measures a sphere's outline as its apparent diameter", () => {
+    const body = sphereAt(960, 540, GLOW_RANGE_M, TEST_EARTH_RADIUS_M);
+    expect(outlineLeastDiameterPx(body, FIELD_CAMERA, FIELD)).toBe(
+      angularDiameterPx(body.centreM, body.radiusM, FIELD_CAMERA, FIELD),
+    );
+  });
+
+  it.each(VIEW_SCALES)(
+    "cuts the datum over the image on the outline's least semi-axis seen equator-on, at a line scale of %s",
+    (strokeScale) => {
+      const inside = reachesAt(strokeScale);
+      const leastPx = DATUM_OVER_IMAGE_RADIUS_PER_REACH * inside.reachPx.thin;
+      const a = SATURN.equatorialRadiusM;
+      const c = SATURN.polarRadiusM;
+      // The range at which the polar semi-axis, atan(c ÷ √(d² − a²)) at the centre's pixel scale, is
+      // `share` of the least radius.
+      const at = (share: number): GraticuleBody => {
+        const tan = Math.tan((leastPx * share) / FOCAL_PX);
+        const d = Math.sqrt((c / tan) ** 2 + a * a);
+        const body = saturnAt(960, 540, vec3(0, 1, 0));
+        return { ...body, centreM: vec3(0, 0, -d) };
+      };
+      const linesAt = (share: number): number =>
+        graticule(at(share), FIELD_CAMERA, FIELD, strokeScale, false, inside).lines.length;
+      const equatorialPx = (share: number): number =>
+        angularDiameterPx(at(share).centreM, a, FIELD_CAMERA, FIELD) / 2;
+      expect([linesAt(1 + 1e-9) > 0, linesAt(1 - 1e-9), equatorialPx(1 - 1e-9) > leastPx]).toEqual([
+        true,
+        0,
+        true,
+      ]);
+    },
+  );
+
+  it.each(cases)(
+    "draws a sphere's lines as before: a figure as wide at its poles as at its equator is no spheroid, seen %s at a line scale of %s",
+    (_, strokeScale, xPx, yPx, pole) => {
+      const { centreM, radiusM, rotation, unmodelledPole } = saturnAt(xPx, yPx, pole);
+      const sphere: GraticuleBody = { centreM, radiusM, rotation, unmodelledPole, spheroid: null };
+      const round = datumSpheroidOfFigure({
+        equatorialRadiusM: SATURN.equatorialRadiusM,
+        polarRadiusM: SATURN.equatorialRadiusM,
+        pole,
+      });
+      const inside = reachesAt(strokeScale);
+      expect(round).toBeNull();
+      expect(
+        graticule({ ...sphere, spheroid: round }, FIELD_CAMERA, FIELD, strokeScale, false, inside),
+      ).toEqual(graticule(sphere, FIELD_CAMERA, FIELD, strokeScale, false, inside));
+    },
+  );
+
+  it.each(cases)(
+    "meets the sphere's lines as the figure rounds: at a stretch of 1 + 10⁻¹² every point within (s − 1) d of the sphere's, its wireframe datum and its limb over the image, seen %s at a line scale of %s",
+    (_, strokeScale, xPx, yPx, pole) => {
+      const sphere: GraticuleBody = { ...saturnAt(xPx, yPx, pole), spheroid: null };
+      const nearly: GraticuleBody = { ...sphere, spheroid: { pole, stretch: 1 + 1e-12 } };
+      // Over the image the graticule is left out: a spheroid's keeps a far stretch of a facing
+      // window with no safe cut that a sphere's drops (`windowsInside`'s `searchWhole`).
+      const gaps = [null, reachesAt(strokeScale)].map((inside) => {
+        const linesOf = (body: GraticuleBody): ReadonlyArray<GraticuleLine> =>
+          graticule(body, FIELD_CAMERA, FIELD, strokeScale, false, inside).lines.filter(
+            (line) => inside === null || line.kind === "limb",
+          );
+        const want = linesOf(sphere);
+        const seen = linesOf(nearly);
+        const points = want.flatMap((line, i) =>
+          line.runs.flatMap((run, j) =>
+            run.map((p, k) => {
+              const q = seen[i]?.runs[j]?.[k];
+              return q === undefined ? Number.POSITIVE_INFINITY : norm(sub(p, q));
+            }),
+          ),
+        );
+        // The stretch moves the centre's image by up to (s − 1) d, half a millimetre here.
+        return [shape(seen), shape(want), Math.max(...points) < 1e-12 * SATURN_RANGE_M];
+      });
+      for (const [seenShape, wantShape, within] of gaps) {
+        expect([seenShape, within]).toEqual([wantShape, true]);
+      }
+    },
+  );
+
+  /** An orbit normal well off `TEST SATURN`'s pole, as a kept body's with no rotation may be. */
+  const OFF_POLE_NORMAL = normalise(vec3(1, 0.4, 0.7));
+
+  /** The equator's points, the major parallel's, and their heights off a plane through the centre. */
+  function equatorOffPlane(body: GraticuleBody, normal: Vec3): number[] {
+    const equator = graticule(body, FIELD_CAMERA, FIELD, 2).lines.find(
+      (line) => line.kind === "parallel" && line.major,
+    );
+    return (equator?.runs.flat() ?? []).map((p) => Math.abs(dot(sub(p, body.centreM), normal)));
+  }
+
+  it("draws a flattened body with no rotation about the pole its figure is drawn about, its orbit normal off it: its equator in the figure's, to 10⁻⁹ of a", () => {
+    const pole = normalise(vec3(0, 1, 0.2));
+    const body: GraticuleBody = {
+      ...saturnAt(960, 540, pole),
+      unmodelledPole: OFF_POLE_NORMAL,
+      spheroid: datumSpheroidOfFigure({ ...SATURN, pole }),
+    };
+    const off = equatorOffPlane(body, pole);
+    expect([off.length > 20, Math.max(...off) <= 1e-9 * SATURN.equatorialRadiusM]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("draws a sphere set up the same way about its orbit normal, as before", () => {
+    const pole = normalise(vec3(0, 1, 0.2));
+    const body: GraticuleBody = {
+      ...saturnAt(960, 540, pole),
+      unmodelledPole: OFF_POLE_NORMAL,
+      spheroid: datumSpheroidOfFigure({ ...SATURN, polarRadiusM: SATURN.equatorialRadiusM, pole }),
+    };
+    const off = equatorOffPlane(body, OFF_POLE_NORMAL);
+    expect([
+      body.spheroid,
+      off.length > 20,
+      Math.max(...off) <= 1e-9 * SATURN.equatorialRadiusM,
+    ]).toEqual([null, true, true]);
+  });
+
+  it("takes the figure's axis as the image does: its pole, or +z where it has none", () => {
+    expect([
+      datumSpheroidOfFigure({ ...SATURN, pole: vec3(0, 2, 0) })?.pole,
+      datumSpheroidOfFigure({ ...SATURN, pole: null })?.pole,
+      datumSpheroidOfFigure(null),
+    ]).toEqual([vec3(0, 1, 0), vec3(0, 0, 1), null]);
+  });
+
+  it.each(VIEW_SCALES)(
+    "draws the datum from over the pole below the equatorial radius, inside the sphere and outside the figure, at a line scale of %s",
+    (strokeScale) => {
+      // 1,000 km above the north pole, 4,904 km inside the sphere of radius a, looking down at it.
+      const pole = vec3(0, 0, 1);
+      const body: GraticuleBody = {
+        centreM: vec3(0, 0, -(SATURN.polarRadiusM + 1e6)),
+        radiusM: SATURN.equatorialRadiusM,
+        rotation: null,
+        unmodelledPole: pole,
+        spheroid: datumSpheroidOf(SATURN, pole),
+      };
+      const styles = [null, reachesAt(strokeScale)].map((inside) => {
+        const wireframe = graticule(body, FIELD_CAMERA, FIELD, strokeScale, false, inside);
+        const points = wireframe.lines.flatMap((line) => line.runs.flat());
+        return [
+          wireframe.regime,
+          points.length > 100,
+          points.every((p) => Number.isFinite(p.x + p.y + p.z)),
+          Math.max(...points.map((p) => offSpheroid(body, p))) <= 1e-9,
+          Math.min(...points.map((p) => -dot(normalise(p), normalAt(body, p)))) >= -1e-9,
+        ];
+      });
+      expect(styles).toEqual([
+        ["graticule", true, true, true, true],
+        ["graticule", true, true, true, true],
+      ]);
     },
   );
 });

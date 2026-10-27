@@ -19,7 +19,7 @@
  * instanced primitive, read as `@location(0)`.
  */
 
-import { cross, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { cross, norm, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { BUFFER_USAGE } from "../engine/gpuFlags";
 import type {
   BufferHandle,
@@ -55,6 +55,7 @@ import starSpriteWgsl from "../shaders/starSprite.wgsl?raw";
 import toneCurveWgsl from "../shaders/toneCurve.wgsl?raw";
 import wireCoverageWgsl from "../shaders/wireCoverage.wgsl?raw";
 import type { DrawCamera, LineBatch, OccluderSphere, WireframeDrawList } from "./drawList";
+import type { DatumSpheroid } from "./spheroid";
 
 /**
  * The wireframe's materials, by name: `occluderHull` a hull's faces as depth alone, and
@@ -322,7 +323,11 @@ export const NO_WIREFRAME_TERRAIN: WireframeTerrain = { draws: [], surveyed: new
 export interface PackedWireframe {
   /** Two `vec4f` per segment: one end and the dash's phase there, px; the other end and 0. */
   readonly segments: Float32Array;
-  /** Three `vec4f` per sphere: its rectangle, px; its centre and radius, m; its altitude, m. */
+  /**
+   * {@link OCCLUDER_SPHERE_ROWS} `vec4f` per sphere: its rectangle, px; its centre and radius, m;
+   * its altitude, m, and {@link spheroidAxis} of its spheroid along the camera frame's axes, 0 for
+   * a sphere (R02.T19).
+   */
   readonly spheres: Float32Array;
   /** One `vec4f` per corner of each hull triangle, m from the craft. */
   readonly corners: Float32Array;
@@ -548,6 +553,25 @@ function dashPhases(batch: LineBatch, camera: ProjectionCamera, viewport: Viewpo
 
 const ZERO_OFFSET = new Float32Array(3);
 
+/**
+ * How many `vec4f` rows an occluder sphere takes in {@link PackedWireframe.spheres}: 3, as
+ * `occluderSphereHit.wgsl`'s `SPHERE_ROWS` reads them (R02.T19). A spheroid's axis rides in its
+ * third row's spare lanes ({@link spheroidAxis}), so that the stride is a sphere's.
+ */
+export const OCCLUDER_SPHERE_ROWS = 3;
+
+/**
+ * A spheroid's axis as an occluder sphere's third row carries it (plan R02, R02.T19): its pole times
+ * √(s − 1), s its stretch a′ ÷ c′, so that the shader's stretch is L v = v + (v · q) q and
+ * L² v = v + (s + 1)(v · q) q, s + 1 = 2 + |q|²; the zero vector for a sphere, which the shader
+ * then intersects by the sphere's own sums.
+ */
+export function spheroidAxis(spheroid: DatumSpheroid | undefined): Vec3 {
+  return spheroid === undefined
+    ? vec3(0, 0, 0)
+    : scale(spheroid.pole, Math.sqrt(spheroid.stretch - 1));
+}
+
 /** No body's datum gives way to its terrain. */
 const NO_SURVEYED_DATUM: ReadonlyMap<string, SurveyedDatum> = new Map();
 
@@ -597,9 +621,10 @@ export function packWireframe(
         continue;
       }
       const c = sphere.centreF32;
+      const axis = spheroidAxis(sphere.spheroid);
       sphereRows.push(rect.leftPx, rect.topPx, rect.rightPx, rect.bottomPx);
       sphereRows.push(c[0] ?? 0, c[1] ?? 0, c[2] ?? 0, sphere.radiusM);
-      sphereRows.push(sphere.altitudeM, 0, 0, 0);
+      sphereRows.push(sphere.altitudeM, axis.x, axis.y, axis.z);
       if (pass === "surveyed") {
         surveyedSpheres.push({ body: sphere.id, index: sphereCount });
       }

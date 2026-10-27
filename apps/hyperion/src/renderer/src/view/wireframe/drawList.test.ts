@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { add, dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, dot, norm, normalise, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import {
   aBody,
@@ -61,6 +61,9 @@ import {
   type WireframeDrawList,
 } from "./drawList";
 import { hullBoundingRadiusM } from "./hulls";
+import { stretched } from "./spheroid";
+import { type BodyFigure, PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
+import { SATURN_OBLATE_SPHEROID } from "../atmosphere/reference/cases";
 import { lineOfSightTripod, markBoxPx, type ScreenSegment, segmentDistancePx } from "./symbology";
 
 /** Stand-in colours, one distinct string per token, as `readTokens` would read them. */
@@ -1951,5 +1954,162 @@ describe("the bodies' datums inside their figures, for the image's overlay (R10.
       [{ thin: 3.5, heavy: 4 }, 2 * CASING_PX, 3.5],
       [{ thin: 5, heavy: 5.75 }, 3 * CASING_PX, 5],
     ]);
+  });
+});
+
+/** `TEST SATURN`'s spheroid at 1 bar (`SATURN_OBLATE_SPHEROID`), its pole up the view. */
+const GIANT = {
+  equatorialRadiusM: SATURN_OBLATE_SPHEROID.equatorialRadiusM,
+  polarRadiusM: SATURN_OBLATE_SPHEROID.polarRadiusM,
+  pole: vec3(0, 1, 0),
+} as const;
+
+/** A camera 482 Mm from the planet along +z, looking at it, equator-on, at the default 60°. */
+const GIANT_CAMERA: DrawCamera = {
+  pose: {
+    frame: { kind: "system", system: FIXTURE_SYSTEM },
+    positionM: add(FIXTURE_PLANET_CENTRE_M, vec3(0, 0, 4.82e8)),
+    orientation: NO_TURN,
+  },
+  fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180,
+};
+
+/**
+ * The planet as `TEST SATURN`'s figure, with no rotation and its orbit normal off its pole, or with
+ * no appearance (a sphere of its equatorial radius), and a moon behind it seen just past its pole:
+ * the moon's line of sight passes the planet's centre (a + c) ÷ 2 off it, outside the spheroid
+ * and inside the sphere.
+ */
+function giantScene(figured: boolean, figure: BodyFigure = GIANT): ViewScene {
+  const height = (GIANT.equatorialRadiusM + GIANT.polarRadiusM) / 2;
+  const behindM = 1e9;
+  const range = 4.82e8;
+  return aViewScene({
+    bodies: [
+      aBody({
+        radiusM: GIANT.equatorialRadiusM,
+        orbitNormal: normalise(vec3(1, 0.4, 0.7)),
+        appearance: figured
+          ? {
+              photometry: PROVISIONAL_PHOTOMETRY,
+              figure,
+              labels: [],
+              bondRatioFinding: null,
+            }
+          : null,
+      }),
+      aBody({
+        id: FIXTURE_MOON,
+        parent: FIXTURE_PLANET,
+        kind: "moon",
+        designation: "TEST MOON",
+        radiusM: 1e6,
+        centreM: add(
+          FIXTURE_PLANET_CENTRE_M,
+          vec3(0, (height * (range + behindM)) / range, -behindM),
+        ),
+      }),
+    ],
+    craft: [],
+    stars: [],
+    ownShip: null,
+  });
+}
+
+function giantList(figured: boolean, options: Partial<DrawOptions> = {}): WireframeDrawList {
+  return buildWireframeDrawList(giantScene(figured), GIANT_CAMERA, VIEWPORT, TOKENS, {
+    ...OPTIONS,
+    ...viewStrokesAt(1),
+    ...options,
+  });
+}
+
+/** Whether a list marks the moon. */
+function moonMarked(list: WireframeDrawList): boolean {
+  return list.anchors.some(
+    (anchor) => anchor.target.kind === "body" && anchor.target.body === FIXTURE_MOON,
+  );
+}
+
+/** The planet's centre from the giant's camera, m. */
+const GIANT_CENTRE_M = vec3(0, 0, -4.82e8);
+
+/** How far off `TEST SATURN`'s spheroid a point from the camera lies, as a fraction of a. */
+function offGiant(p: Vec3): number {
+  const q = sub(p, GIANT_CENTRE_M);
+  const z = dot(q, GIANT.pole);
+  const rho2 = dot(q, q) - z * z;
+  return Math.abs(
+    Math.sqrt(rho2 / GIANT.equatorialRadiusM ** 2 + (z / GIANT.polarRadiusM) ** 2) - 1,
+  );
+}
+
+/** The points of a list's planet datum batches, from the camera, m. */
+function planetDatumPoints(list: WireframeDrawList): Vec3[] {
+  return list.lines
+    .filter((line) => line.body === FIXTURE_PLANET)
+    .flatMap((line) =>
+      Array.from({ length: line.segments.length / 3 }, (_, i) =>
+        vec3(
+          line.segments[3 * i] ?? 0,
+          line.segments[3 * i + 1] ?? 0,
+          line.segments[3 * i + 2] ?? 0,
+        ),
+      ),
+    );
+}
+
+describe("a flattened body's datum on its spheroid (R02.T19)", () => {
+  it.each([false, true])(
+    "draws its limb and graticule on its figure, to the f32 the list packs, with the datum inside the figure %s",
+    (datumInside) => {
+      const off = planetDatumPoints(giantList(true, { datumInside })).map(offGiant);
+      const sphere = planetDatumPoints(giantList(false, { datumInside })).map(offGiant);
+      // A packed coordinate at 482 Mm is good to about 30 m, 5 × 10⁻⁷ of a; the sphere stands up
+      // to (a − c) ÷ c, 11%, off the figure at its poles.
+      expect([off.length > 200, Math.max(...off) < 2e-6, Math.max(...sphere) > 0.05]).toEqual([
+        true,
+        true,
+        true,
+      ]);
+    },
+  );
+
+  it("occludes with its figure, both radii inset by the sphere's margin, its altitude in its stretched space", () => {
+    const occluder = giantList(true).occluderSpheres.find((sphere) => sphere.id === FIXTURE_PLANET);
+    const distanceM = 4.82e8;
+    const a = occluderRadius(GIANT.equatorialRadiusM, distanceM);
+    const c = occluderRadius(GIANT.polarRadiusM, distanceM);
+    const spheroid = { pole: GIANT.pole, stretch: a / c };
+    expect([occluder?.radiusM, occluder?.spheroid, occluder?.altitudeM]).toEqual([
+      a,
+      spheroid,
+      norm(stretched(GIANT_CENTRE_M, spheroid)) - a,
+    ]);
+  });
+
+  it("keeps a sphere's occluder as it was: no spheroid, its altitude d − r′", () => {
+    const occluder = giantList(false).occluderSpheres.find(
+      (sphere) => sphere.id === FIXTURE_PLANET,
+    );
+    const r = occluderRadius(GIANT.equatorialRadiusM, 4.82e8);
+    expect(occluder).toEqual({
+      id: FIXTURE_PLANET,
+      centreF32: narrow(GIANT_CENTRE_M),
+      radiusM: r,
+      altitudeM: 4.82e8 - r,
+    });
+  });
+
+  it("marks a moon behind it seen past its pole, outside the figure, which its sphere would hide", () => {
+    expect([moonMarked(giantList(true)), moonMarked(giantList(false))]).toEqual([true, false]);
+  });
+
+  it("draws a body whose figure is a sphere as one with no figure", () => {
+    const round = giantScene(true, { ...GIANT, polarRadiusM: GIANT.equatorialRadiusM });
+    const options = { ...OPTIONS, ...viewStrokesAt(1) };
+    expect(buildWireframeDrawList(round, GIANT_CAMERA, VIEWPORT, TOKENS, options)).toEqual(
+      giantList(false),
+    );
   });
 });

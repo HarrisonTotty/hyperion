@@ -23,10 +23,10 @@
  * Saturn-class figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
  * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
  * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
- * its binary; R08.T8.b's far limb, with the composite from above
+ * its binary, and R10.T16.g's datum inside the figure over the image last, with R02.T19's on
+ * `TEST SATURN`'s spheroid (`datumFrame.ts`); R08.T8.b's far limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
- * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11,
- * with R10.T16.g's datum inside the figure over the image last (`datumFrame.ts`);
+ * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
  * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
  * frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
  * engine of its own, whose device it destroys). Three groups of part 1 run only when asked:
@@ -144,8 +144,8 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * GPU work (2 R08.T6.b's but its medium of four absorbers, 3 R08.T6.g's, 4 R08.T8.b's far limb, with the
  * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
  * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7's
- * several suns and R08.T8.e's slot layers on its binary, 11 R08.T9.b's Earth and Saturn-class
- * figure, R08.T8.c's far limb's footprint and R10.T16.g's datum over the image, 12 R08.T11.b's
+ * several suns, R08.T8.e's slot layers on its binary and R10.T16.g's datum over the image, 11
+ * R08.T9.b's Earth and Saturn-class figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's
  * face count and R08.T11.e's Earth), 7 R10's terrain groups (R10.T10.b, T10.c, T11, T16 and
  * T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
  * joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's frames, which
@@ -186,6 +186,12 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * (2026-10-23). R08.T11.b's face count (49 to 69 s) took part 8 past the watchdog beside
  * R07.T8.e–f's cell pass (185 s at a load of 13, R08.T6.f's Earth 79 s), so part 12 joined, with
  * it (2026-10-27), and R08.T11.e's Earth (60 s), which took part 10 to 164 s, after it.
+ * R10.T16.g's datum group then moved from part 11 to part 10, last there, as R02.T19 added its five
+ * airless `TEST SATURN` frames (decision-r02-t19-leans, item 5): at 1808146a's gate, at a load of 5
+ * to 7, part 10 held 81 and 85 s and part 11 130 and 135 s, the group 27 and 31 s of it (part 11
+ * 153 to 154 s at e64fcb9b's). With the move, on R02.T19's tree before its gate at a load of 3 to
+ * 8, part 10 held 116 and 119 s (the group 36 and 34 s) and part 11 119 s on both variants
+ * (2026-10-27).
  */
 type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
@@ -464,7 +470,7 @@ async function run(
   await group(11, "R08.T10.b the air over a drawn ground", () =>
     checkAtmosphereFrame(engine, checks),
   );
-  await group(11, "R10.T16.g the datum inside the figure", () => checkDatumFrame(engine, checks));
+  await group(10, "R10.T16.g the datum inside the figure", () => checkDatumFrame(engine, checks));
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));
   await group(1, "R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
   await group(1, "R06.T13.d the sky's band", () => checkSkyBand(engine, checks));

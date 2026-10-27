@@ -48,6 +48,7 @@ import {
   type WireframeDrawList,
 } from "../view/wireframe/drawList";
 import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
+import { stretched } from "../view/wireframe/spheroid";
 import { type ColourTokens, readTokens } from "../spatial/paint";
 import { runPose, SCENE_OPTIONS, startRun } from "../displays/view/viewRun";
 import { aViewCraft, aViewScene, FIXTURE_SYSTEM, NO_TURN } from "../test/viewFixtures";
@@ -383,6 +384,7 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
     );
   }
 
+  await checkSpheroidOccluder(engine, renderer, checks);
   for (const strokeScale of [1, 2]) {
     // The checks run in order: each reads the GPU back before the next draws.
     // oxlint-disable-next-line no-await-in-loop
@@ -603,6 +605,122 @@ async function checkSphereSlope(
     `R02.T14 a sphere occluder's depth is pushed by ${String(list.occluderSlopePx)} px of its slope's magnitude where the slope is diagonal (stroke scale ${String(strokeScale)})`,
     Math.abs(seen - want) < 0.1 * Math.abs(old - want),
     `depth ${seen.toPrecision(7)}, by the magnitude ${want.toPrecision(7)}, by the larger component ${old.toPrecision(7)}`,
+  );
+}
+
+/**
+ * The spheroid occluder's check (plan R02, R02.T19): its centre straight ahead, m; its equatorial
+ * and polar radii, m; and its pole, turned off every axis, so that the stretch runs obliquely
+ * across the view and along it.
+ */
+const SPHEROID_OCCLUDER = {
+  distanceM: 10,
+  equatorialRadiusM: 6,
+  polarRadiusM: 4,
+  pole: normalise(vec3(1, 2, 0.5)),
+} as const;
+
+/**
+ * Where the axis camera's ray through a texel's centre meets {@link SPHEROID_OCCLUDER}, in `f64`
+ * from its quadric (I − ppᵀ) ÷ a² + ppᵀ ÷ c² alone: the depth `occluderSphereHit.wgsl` should write
+ * there, less `slopePx` px of its screen slope's magnitude on the tangent plane, and the ray's
+ * discriminant as a share of its largest term, positive where it meets the figure; or `null`
+ * where it misses it.
+ */
+function spheroidOccluderAt(
+  column: number,
+  row: number,
+  slopePx: number,
+): { readonly depth: number | null; readonly grazing: number } {
+  const { distanceM, equatorialRadiusM: a, polarRadiusM: c, pole } = SPHEROID_OCCLUDER;
+  const quadric = (v: Vec3): Vec3 => {
+    const z = dot(v, pole);
+    return vec3(
+      (v.x - z * pole.x) / (a * a) + (z * pole.x) / (c * c),
+      (v.y - z * pole.y) / (a * a) + (z * pole.y) / (c * c),
+      (v.z - z * pole.z) / (a * a) + (z * pole.z) / (c * c),
+    );
+  };
+  const ndcX = ((column + 0.5) / SIDE_PX) * 2 - 1;
+  const ndcY = 1 - ((row + 0.5) / SIDE_PX) * 2;
+  const ray = normalise(vec3(ndcX, ndcY, -1));
+  const centre = vec3(0, 0, -distanceM);
+  const sc = quadric(centre);
+  const b = dot(ray, sc);
+  const k = dot(centre, sc) - 1;
+  const su = dot(ray, quadric(ray));
+  const disc = b * b - k * su;
+  const grazing = disc / (b * b);
+  if (!(disc >= 0 && b > 0)) {
+    return { depth: null, grazing };
+  }
+  const t = k / (b + Math.sqrt(disc));
+  const n = NEAR_PLANE_M;
+  const hit = scale(ray, t);
+  const normal = normalise(quadric(sub(hit, centre)));
+  const facing = Math.abs(dot(normal, hit));
+  const slopeX = (n * Math.abs(normal.x) * 2) / (SIDE_PX * facing);
+  const slopeY = (n * Math.abs(normal.y) * 2) / (SIDE_PX * facing);
+  return { depth: n / (t * -ray.z) - slopePx * Math.hypot(slopeX, slopeY), grazing };
+}
+
+/**
+ * R02.T19: a body's occluder is its spheroid, intersected in its stretched space
+ * (`occluderSphereHit.wgsl`): every texel whose ray meets the figure clear of its limb takes its
+ * `f64` depth, pushed by the list's slope term, and every texel whose ray misses it, those inside
+ * the sphere of its equatorial radius among them, keeps the cleared depth.
+ */
+async function checkSpheroidOccluder(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  checks: Checks,
+): Promise<void> {
+  const { distanceM, equatorialRadiusM: a, polarRadiusM: c, pole } = SPHEROID_OCCLUDER;
+  const list = nothingAt(2);
+  const spheroid = { pole, stretch: a / c };
+  const centre = vec3(0, 0, -distanceM);
+  const drawn = await drawSquare(engine, renderer, "R02.T19 spheroid occluder", {
+    ...list,
+    occluderSpheres: [
+      {
+        id: "spheroid",
+        centreF32: new Float32Array([centre.x, centre.y, centre.z]),
+        radiusM: a,
+        altitudeM: norm(stretched(centre, spheroid)) - a,
+        spheroid,
+      },
+    ],
+  });
+  let onFigure = 0;
+  let onFigureMatched = 0;
+  let worst = 0;
+  let missed = 0;
+  let missedClear = 0;
+  let inTheBand = 0;
+  for (let row = 0; row < SIDE_PX; row += 1) {
+    for (let column = 0; column < SIDE_PX; column += 1) {
+      const seen = drawn.depth[row * SIDE_PX + column] ?? Number.NaN;
+      const at = spheroidOccluderAt(column, row, list.occluderSlopePx);
+      // Clear of the limb either way, where `f32`'s hit is sharp: a twentieth of the discriminant.
+      if (at.depth !== null && at.grazing > 0.05) {
+        onFigure += 1;
+        const error = Math.abs(seen / at.depth - 1);
+        worst = Math.max(worst, error);
+        onFigureMatched += error < 1e-4 ? 1 : 0;
+      } else if (at.depth === null && at.grazing < -0.05) {
+        missed += 1;
+        missedClear += seen === 0 ? 1 : 0;
+        // The sphere of radius a about the centre meets this ray: (ray · c)² ≥ |c|² − a².
+        const ndc = [((column + 0.5) / SIDE_PX) * 2 - 1, 1 - ((row + 0.5) / SIDE_PX) * 2];
+        const ray = normalise(vec3(ndc[0] ?? 0, ndc[1] ?? 0, -1));
+        inTheBand += dot(ray, centre) ** 2 >= dot(centre, centre) - a * a ? 1 : 0;
+      }
+    }
+  }
+  checks.check(
+    "R02.T19 a body's occluder is its spheroid: its depth where its rays meet it, none where they miss it inside its equatorial sphere",
+    onFigure > 100 && onFigureMatched === onFigure && inTheBand > 50 && missedClear === missed,
+    `${String(onFigureMatched)} of ${String(onFigure)} texels on the figure within 0.0001 of its f64 depth (worst ${worst.toExponential(2)}); ${String(missedClear)} of ${String(missed)} off it clear, ${String(inTheBand)} of them inside the sphere of its equatorial radius`,
   );
 }
 
