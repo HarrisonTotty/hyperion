@@ -2587,7 +2587,7 @@ async function areaReadsOf(
     const kinds = { miss: 0, centre: 0, footprint: 0 };
     let unknown = 0;
     const tiles = marchArea.tilesAcross * marchArea.tilesDown;
-    if (cover === "culled" && marchTiles !== null && tiles > 0) {
+    if (cover === "tiles" && marchTiles !== null && tiles > 0) {
       const written = new Uint32Array(await engine.readBuffer(marchTiles, "tolerance"), 0, tiles);
       const byCode = new Map(
         (["miss", "centre", "footprint"] as const).map(
@@ -2624,15 +2624,16 @@ async function areaReadsOf(
 
 /**
  * R08.T11.d: the march over each air body's area and the tile cull (`decision-r08-t11-frame.md`
- * §2; `decision-r08-t8-leans.md` §11, Ruling 4), both exact: each frame drawn under the cull, the
- * centre ray's entry point and the footprint's over the air's area (`marchArea.ts`) and the
- * composite reading no air outside it, and again on the reference path, the footprint's entry point
- * over every texel, as the one kernel marched before them; the composite's output and the march's
- * whole target (its rest filled as a reader asks) read back and compared half float by half float:
- * on a fallback adapter (SwiftShader) the same byte for byte, and on hardware within T8.d's
- * fused-multiply-add ulp, 1, where the two entry points' compiles may fuse differently (as E1′ and
- * E4 did on the RTX 3080, R08.T8.e). Each frame names its area and the kinds its tiles took on the
- * GPU, and the check holds that the frames met every kind.
+ * §2; `decision-r08-t8-leans.md` §11, Ruling 4), each exact: each frame drawn over the air's area
+ * (`marchArea.ts`; the `area` cover, a view's), the composite reading no air outside it; again
+ * under the tile cull (`tiles`, off for a view), the centre ray's entry point and the footprint's;
+ * and on the reference path, the footprint's entry point over every texel, as the one kernel
+ * marched before them. Each cover's composite output and the march's whole target (its rest filled
+ * as a reader asks) are read back and compared with the reference's half float by half float: on a
+ * fallback adapter (SwiftShader) the same byte for byte, and on hardware within T8.d's
+ * fused-multiply-add ulp, 1, where two compiles may fuse differently (as E1′ and E4 did on the RTX
+ * 3080, R08.T8.e). Each frame names its area and the kinds its tiles took on the GPU under the
+ * cull, and the check holds that the frames met every kind.
  *
  * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
  */
@@ -2641,8 +2642,9 @@ export async function checkMarchArea(
   checks: Checks,
   fallback: boolean,
 ): Promise<void> {
-  // The measured Earth's tables hold the slot layers: the march by slot alone, up front.
-  const kernels = await createAtmosphereFrameKernels(engine, "by slot");
+  // The measured Earth's tables hold the slot layers: the march by slot alone, up front, with
+  // the tile cull's centre ray's kernel, so that none is made on the frame path.
+  const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot", tiles: true });
   try {
     await checkAreaBodies(engine, checks, fallback, kernels);
   } finally {
@@ -2672,23 +2674,35 @@ async function checkAreaBodies(
       for (const frame of body.frames) {
         // The harness's GPU work runs in order: each frame is read back before the next draws.
         // oxlint-disable-next-line no-await-in-loop
-        const culled = await areaReadsOf(engine, tables, kernels, frame, "culled");
-        // The reference after it, in order as the culled frame: its read-backs before the next.
+        const area = await areaReadsOf(engine, tables, kernels, frame, "area");
+        // The tile cull's after it, in order as the area's: its read-backs before the next.
+        // oxlint-disable-next-line no-await-in-loop
+        const tiles = await areaReadsOf(engine, tables, kernels, frame, "tiles");
+        // The reference after both, in order as they were: its read-backs before the next.
         // oxlint-disable-next-line no-await-in-loop
         const whole = await areaReadsOf(engine, tables, kernels, frame, "whole frame");
-        const composite = halvesDiffering(culled.composite, whole.composite);
-        const march = halvesDiffering(culled.march, whole.march);
-        const same = composite.texels === 0 && march.texels === 0;
-        const withinUlp = composite.ulps <= 1 && march.ulps <= 1;
-        met.miss += culled.kinds.miss;
-        met.centre += culled.kinds.centre;
-        met.footprint += culled.kinds.footprint;
-        met.unknown += culled.unknown;
-        checks.check(
-          `R08.T11.d ${body.name}, ${frame.setting}, ${frame.name}: the march over the air's area under the tile cull reads back as the march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
-          fallback ? same : withinUlp,
-          `${differenceOf("the composite's output", composite)}, ${differenceOf("the march's target", march)} (${fallback ? "SwiftShader: byte for byte" : "hardware: within T8.d's fused-multiply-add ulp"}); the area ${culled.area}; the tiles ${culled.kinds.miss} missed, ${culled.kinds.centre} at the centre ray, ${culled.kinds.footprint} over the footprint`,
-        );
+        met.miss += tiles.kinds.miss;
+        met.centre += tiles.kinds.centre;
+        met.footprint += tiles.kinds.footprint;
+        met.unknown += tiles.unknown;
+        for (const [what, reads, how] of [
+          ["the march over the air's area", area, `the area ${area.area}`],
+          [
+            "the tile cull over the air's area",
+            tiles,
+            `the area ${tiles.area}; the tiles ${tiles.kinds.miss} missed, ${tiles.kinds.centre} at the centre ray, ${tiles.kinds.footprint} over the footprint`,
+          ],
+        ] as const) {
+          const composite = halvesDiffering(reads.composite, whole.composite);
+          const march = halvesDiffering(reads.march, whole.march);
+          const same = composite.texels === 0 && march.texels === 0;
+          const withinUlp = composite.ulps <= 1 && march.ulps <= 1;
+          checks.check(
+            `R08.T11.d ${body.name}, ${frame.setting}, ${frame.name}: ${what} reads back as the march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
+            fallback ? same : withinUlp,
+            `${differenceOf("the composite's output", composite)}, ${differenceOf("the march's target", march)} (${fallback ? "SwiftShader: byte for byte" : "hardware: within T8.d's fused-multiply-add ulp"}); ${how}`,
+          );
+        }
       }
     } finally {
       tables.dispose();

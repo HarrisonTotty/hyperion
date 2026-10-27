@@ -914,11 +914,19 @@ export const RAY_MARCH_FILL_KERNEL: KernelPair = {
 };
 
 /**
- * How a frame's ray march covers its target (plan R08, R08.T11.d): `culled`, over the air's area
- * alone under the tile cull, a frame's; or `whole frame`, the footprint's entry point over every
- * texel, the march as it was before them, the smoke's reference path for its byte-for-byte check.
+ * How a frame's ray march covers its target (plan R08, R08.T11.d), each exact, each texel what the
+ * march over the whole frame gives:
+ * - `area`, a view's: {@link RAY_MARCH_KERNEL} over the air's area alone (`marchArea.ts`), the
+ *   composite reading no air outside it;
+ * - `tiles`: the area under the tile cull (`decision-r08-t8-leans.md` §11, Ruling 4),
+ *   {@link RAY_MARCH_CENTRE_KERNEL} taking the tiles no far-limb footprint can blend in and
+ *   {@link RAY_MARCH_KERNEL} the rest. Off: on the RTX 3080 it cost 0.4–1.0 ms against the whole
+ *   frame from 400 km and 10⁷ m, where the area alone gained 0.4–0.6 ms, and gained 0.4–1.3 ms
+ *   farther (plan R08's "Deviations in R08.T11.d, as built");
+ * - `whole frame`: {@link RAY_MARCH_KERNEL} over every texel, the march as it was before them, the
+ *   smoke's reference path for its byte-for-byte check, and an atmosphere's own kernels' default.
  */
-export type MarchCover = "culled" | "whole frame";
+export type MarchCover = "area" | "tiles" | "whole frame";
 
 /**
  * The sources' members, `view.wgsl`'s `AtmosphereView.sources`: each source's direction, weight
@@ -1075,21 +1083,36 @@ function compositeTriangle(engine: RenderEngine): MeshHandle {
  */
 export type MarchReads = "both" | "shared read" | "by slot";
 
+/** What {@link createAtmosphereFrameKernels} makes up front, beyond the frame's own kernels. */
+export interface FrameKernelsAhead {
+  /**
+   * The march's reads: both for a view, which draws bodies with and without slot layers; one for
+   * a caller that draws only one kind (the smoke's march-area check, R08.T11.d, sparing
+   * SwiftShader's GPU process the other pair). Both where absent.
+   */
+  readonly reads?: MarchReads;
+  /**
+   * Whether the tile cull's centre ray's kernels are made too (R08.T11.d's `tiles` cover, off for
+   * a view): for the smoke's check of that cover. Not where absent; then made at the first
+   * `tiles` frame.
+   */
+  readonly tiles?: boolean;
+}
+
 /**
  * Makes a device's {@link AtmosphereFrameKernels}: each kernel by `createComputeAsync` and the
  * composite's pipeline into an `rgba16float` target, as a photorealistic frame's atmosphere targets
  * are, by `createMaterialAsync`, so that no frame waits on a compile (plan R08, R08.T10.b).
  *
- * @param reads - The march's reads made up front: both for a view, which draws bodies with and
- *   without slot layers; one for a caller that draws only one kind (the smoke's march-area check,
- *   R08.T11.d, sparing SwiftShader's GPU process the other pair).
  * @throws Error, as a rejection, as the engine's async creations reject, `EngineUnavailable`
  *   among them during a loss.
  */
 export async function createAtmosphereFrameKernels(
   engine: RenderEngine,
-  reads: MarchReads = "both",
+  ahead: FrameKernelsAhead = {},
 ): Promise<AtmosphereFrameKernels> {
+  const reads = ahead.reads ?? "both";
+  const tiles = ahead.tiles ?? false;
   const triangle = compositeTriangle(engine);
   const pairOf = async (
     made: boolean,
@@ -1100,15 +1123,22 @@ export async function createAtmosphereFrameKernels(
       let late: MarchKernels | null = null;
       return () =>
         (late ??= (() => {
-          const centre = engine.createCompute(centrePair);
-          return { centre: () => centre, footprint: engine.createCompute(footprintPair) };
+          let centre: ComputeHandle | null = null;
+          return {
+            centre: () => (centre ??= engine.createCompute(centrePair)),
+            footprint: engine.createCompute(footprintPair),
+          };
         })());
     }
-    const [centre, footprint] = await Promise.all([
-      engine.createComputeAsync(centrePair),
+    const [footprint, centre] = await Promise.all([
       engine.createComputeAsync(footprintPair),
+      tiles ? engine.createComputeAsync(centrePair) : Promise.resolve(null),
     ]);
-    const kernels: MarchKernels = { centre: () => centre, footprint };
+    let late: ComputeHandle | null = centre;
+    const kernels: MarchKernels = {
+      centre: () => (late ??= engine.createCompute(centrePair)),
+      footprint,
+    };
     return () => kernels;
   };
   const [skyView, aerial, rayMarch, rayMarchSlots, composite] = await Promise.all([
@@ -1631,7 +1661,7 @@ export class HillaireAtmosphere {
    */
   #unread: UnreadTables = NO_UNREAD_TABLES;
   /**
-   * How the march covers its target (R08.T11.d): culled over the device's shared kernels, the
+   * How the march covers its target (R08.T11.d): the area over the device's shared kernels, the
    * whole frame over its own until asked ({@link HillaireAtmosphere.setMarchCover}).
    */
   #cover: MarchCover;
@@ -1684,11 +1714,10 @@ export class HillaireAtmosphere {
       );
     }
     this.#frame = createFrameResources(engine, tables, this.#shared);
-    // The tile cull's second large kernel is made off the frame path with the device's shared
-    // kernels; an atmosphere's own make each synchronously on it, where SwiftShader's GPU process,
-    // compiling the two pipelines in one task, was ended as hung under load (exit_code 512,
-    // Chromium's RESULT_CODE_HUNG): those march the whole frame unless the cull is asked (R08.T11.d).
-    this.#cover = this.#shared === null ? "whole frame" : "culled";
+    // A view's atmosphere, over the device's shared kernels, marches the air's area alone; one with
+    // its own kernels (the smoke's other checks, the descent spike) the whole frame as before
+    // R08.T11.d, unless asked, so that their frames are those they were checked by.
+    this.#cover = this.#shared === null ? "whole frame" : "area";
     this.#uniforms = Object.fromEntries(
       [...VIEW_MEMBERS, "shell", "marchArea"].map((name) => [name, new Float32Array(4)]),
     );
@@ -1795,12 +1824,13 @@ export class HillaireAtmosphere {
   }
 
   /**
-   * Sets how the frames' ray march covers its target from the next frame on (plan R08, R08.T11.d):
-   * `culled`, over the air's area under the tile cull; or `whole frame`, the march over every
-   * texel through the footprint's entry point, as before them, the reference path the smoke page
-   * holds the culled march to, byte for byte. An atmosphere over the device's shared kernels
-   * (a view's) culls from its making; one with its own marches the whole frame until asked, its
-   * centre ray's kernel made synchronously at its first culled frame.
+   * Sets how the frames' ray march covers its target from the next frame on ({@link MarchCover};
+   * plan R08, R08.T11.d). An atmosphere over the device's shared kernels (a view's) marches the
+   * area from its making; one with its own marches the whole frame until asked. The tile cull's
+   * centre ray's kernel is made at its first `tiles` frame, synchronously, unless the shared kernels
+   * made it up front ({@link createAtmosphereFrameKernels}' `tiles`): SwiftShader's GPU process,
+   * compiling it beside the footprint's in one task, was ended as hung under load (exit_code 512,
+   * Chromium's `RESULT_CODE_HUNG`).
    */
   setMarchCover(cover: MarchCover): void {
     this.#cover = cover;
@@ -1927,16 +1957,14 @@ export class HillaireAtmosphere {
    * the composite take them all.
    *
    * Over the device's shared kernels ({@link createAtmosphereFrameKernels}: every photorealistic
-   * view's, and so the frame-timing harness's and QW30's) the ray march is dispatched over the air's
+   * view's, and so the frame-timing harness's and QW31's) the ray march is dispatched over the air's
    * area alone, the tiles of its target that the top shell can reach (plan R08, R08.T11.d;
-   * `marchArea.ts`), the composite reading no air outside them, under the tile cull:
-   * {@link RAY_MARCH_CENTRE_KERNEL} classes each tile and takes those no far-limb footprint can
-   * blend in, and {@link RAY_MARCH_KERNEL} the rest. Over its own kernels (the smoke's other
-   * checks, the descent spike, the kernel arm) it marches the whole frame through
-   * {@link RAY_MARCH_KERNEL} alone, as before the cull, unless the cull is asked
-   * ({@link HillaireAtmosphere.setMarchCover}). Both paths are exact, each texel what the march
-   * over the whole frame gives: the smoke's `checkMarchArea` holds the culled path to the whole
-   * frame's, byte for byte on SwiftShader, and so binds the two.
+   * `marchArea.ts`), the composite reading no air outside them. Over its own kernels (the smoke's
+   * other checks, the descent spike, the kernel arm) it marches the whole frame as before, unless
+   * asked ({@link HillaireAtmosphere.setMarchCover}; the tile cull is a cover of its own, off).
+   * Every cover is exact, each texel what the march over the whole frame gives: the smoke's
+   * `checkMarchArea` holds the area's and the tile cull's to the whole frame's, byte for byte on
+   * SwiftShader, and so binds them.
    *
    * @param suns - The drawn sources, at most {@link MAX_SKY_SOURCES}: `sources.ts`'s `skySources`
    *   for a body, or a caller's own; none draws a sky of nothing but what lies behind it.
@@ -2208,14 +2236,15 @@ export class HillaireAtmosphere {
     // The march over the air's area alone (R08.T11.d, `marchArea.ts`): the tiles its top shell,
     // widened, can reach, which the composite reads (`marchArea`, its texels); outside them it reads
     // no air. Under the tile cull the centre ray's entry point, first, classes every tile and takes
-    // those no footprint can blend in, and the footprint's the rest; the reference path takes every
-    // tile of the whole frame through the footprint's, as the one kernel did.
-    const culled = this.#cover === "culled";
+    // those no footprint can blend in, and the footprint's the rest; on the area and the whole
+    // frame the footprint's takes every tile, as the one kernel did.
+    const tileCull = this.#cover === "tiles";
     const shell = topShellOf(this.#figure, medium.topHeightM, this.#gravity);
-    const area = culled
-      ? marchAreaOf(view, shell, sizes.rayMarchScale)
-      : wholeMarchArea(view, shell, sizes.rayMarchScale);
-    const areaUniform = marchAreaUniform(area, culled);
+    const area =
+      this.#cover === "whole frame"
+        ? wholeMarchArea(view, shell, sizes.rayMarchScale)
+        : marchAreaOf(view, shell, sizes.rayMarchScale);
+    const areaUniform = marchAreaUniform(area, tileCull);
     const texels = marchAreaTexels(area);
     this.#uniforms["marchArea"]?.set([texels.x0, texels.y0, texels.x1, texels.y1]);
     // A body whose tables hold the slot layers marches by slot, each source's light one read of
@@ -2239,7 +2268,7 @@ export class HillaireAtmosphere {
         storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
       };
       const tiles = [area.tilesAcross, area.tilesDown, 1] as const;
-      if (culled) {
+      if (tileCull) {
         engine.dispatch(march.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
       }
       engine.dispatch(march.footprint, bindings, tiles, ATMOSPHERE_VIEW_PASS);

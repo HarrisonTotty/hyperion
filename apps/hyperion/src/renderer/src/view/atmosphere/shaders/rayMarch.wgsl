@@ -122,8 +122,11 @@
 // 8 x 8 texels by a conservative form of the footprint's own test (`marchArea.wgsl`'s kinds), writes
 // (0, 0, 0, 1) on a tile every ray misses and marches the centre ray on a tile where no footprint
 // can blend; and `rayMarchFootprint.wgsl`'s, the march over the far limb's footprint as before, on
-// the tiles that may blend. Per texel each marches what the one kernel marched. This module holds
-// the march and declares its bindings; the entry points declare the area's.
+// the tiles that may blend. Per texel each marches what the one kernel marched. A view's frame takes
+// the footprint's entry point alone over the area (`hillaire.ts`'s `MarchCover` `area`): on the RTX
+// 3080 the tile cull's two dispatches cost 0.4-1.0 ms from 400 km and 1e7 m, and it is a cover of
+// its own, off. This module holds the march and declares its bindings; the entry points declare
+// the area's.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;

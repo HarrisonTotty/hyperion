@@ -1945,9 +1945,9 @@ describe("the ray march by slot (R08.T8.e, lever 5; decision-r08-t8-leans.md §1
   });
 });
 
-/** `atmosphere` with the tile cull asked for, as a view's shared kernels give it (R08.T11.d). */
+/** `atmosphere` with the tile cull asked for (R08.T11.d's `tiles` cover, off for a view). */
 function culled(atmosphere: HillaireAtmosphere): HillaireAtmosphere {
-  atmosphere.setMarchCover("culled");
+  atmosphere.setMarchCover("tiles");
   return atmosphere;
 }
 
@@ -2117,25 +2117,42 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     expect(made).not.toContain(RAY_MARCH_CENTRE_KERNEL.name);
   });
 
-  it("culls over the device's shared kernels from its making, and over its own marches the whole frame until asked", async () => {
+  it("marches the area over the device's shared kernels from its making, and over its own the whole frame until asked", async () => {
     const engine = await countingRenderEngine();
     const kernels = await createAtmosphereFrameKernels(engine);
     const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
     const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
     engine.dispatched.length = 0;
-    view.drawFrame(far, [NOON], SCENE);
-    expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
-      "atmosphere ray march at the centre ray",
-      "atmosphere ray march",
+    const drawn = view.drawFrame(far, [NOON], SCENE);
+    const area = marchAreaOf(far, shell, 1);
+    const marches = marchesOf(engine);
+    // One kernel over the area's tiles, the tile cull off: no tile's kind is read.
+    expect(marches.map((d) => [d.kernel, d.workgroups])).toEqual([
+      ["atmosphere ray march", [area.tilesAcross, area.tilesDown, 1]],
+    ]);
+    expect(marches[0]?.bindings.uniforms["marchArea"]?.[4]).toBe(0);
+    const texels = marchAreaTexels(area);
+    expect([...(drawn.uniforms["marchArea"] ?? [])]).toEqual([
+      texels.x0,
+      texels.y0,
+      texels.x1,
+      texels.y1,
     ]);
     const own = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     const before = engine.counts.kernels;
     engine.dispatched.length = 0;
     own.drawFrame(far, [NOON], SCENE);
-    expect(marchesOf(engine).map((d) => d.kernel)).toEqual(["atmosphere ray march"]);
-    // Its centre ray's kernel is made at its first culled frame, not before.
+    expect(marchesOf(engine).map((d) => [d.kernel, d.workgroups])).toEqual([
+      ["atmosphere ray march", [40, 23, 1]],
+    ]);
+    // Its centre ray's kernel is made at its first tile-culled frame, not before.
     expect(engine.counts.kernels - before).toBe(1);
-    own.setMarchCover("culled");
+    own.setMarchCover("area");
+    engine.dispatched.length = 0;
+    own.drawFrame(far, [NOON], SCENE);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual(["atmosphere ray march"]);
+    expect(engine.counts.kernels - before).toBe(1);
+    own.setMarchCover("tiles");
     engine.dispatched.length = 0;
     own.drawFrame(far, [NOON], SCENE);
     expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
@@ -2153,8 +2170,10 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
       made.push(pair.name);
       return create(pair);
     };
-    const kernels = await createAtmosphereFrameKernels(engine, "by slot");
-    expect(made).toContain("atmosphere ray march by slot at the centre ray");
+    const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot" });
+    expect(made).toContain("atmosphere ray march by slot");
+    // The tile cull's centre ray's kernels only where asked.
+    expect(made).not.toContain("atmosphere ray march by slot at the centre ray");
     expect(made).not.toContain(RAY_MARCH_CENTRE_KERNEL.name);
     expect(made).not.toContain(RAY_MARCH_KERNEL.name);
     const before = engine.counts.kernels;
@@ -2162,12 +2181,12 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
     engine.dispatched.length = 0;
     view.drawFrame(far, [NOON], SCENE);
-    expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
-      "atmosphere ray march at the centre ray",
-      "atmosphere ray march",
-    ]);
-    // The tables' own build kernels beside the pair made at the frame.
-    expect(engine.counts.kernels - before).toBeGreaterThanOrEqual(2);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual(["atmosphere ray march"]);
+    // The tables' own build kernels beside the footprint's made at the frame.
+    expect(engine.counts.kernels - before).toBeGreaterThanOrEqual(1);
+    made.length = 0;
+    await createAtmosphereFrameKernels(engine, { reads: "by slot", tiles: true });
+    expect(made).toContain("atmosphere ray march by slot at the centre ray");
   });
 
   it("marches nothing where the air lies behind the camera, and the composite reads none of it", async () => {

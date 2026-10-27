@@ -6,7 +6,9 @@
 // footprint can blend in: (0, 0, 0, 1) on a tile every ray misses, and the centre ray, as the
 // footprint's entry point marches a texel of w_L 0, elsewhere. It holds none of the footprint
 // across its march, which cost the one kernel 0.42-0.86 ms from orbit (QW2 and QW3's Kn - K0, plan
-// R08's "Deviations in T8.e, as built"). Appended last to make `hillaire.ts`'s
+// R08's "Deviations in T8.e, as built"); on the RTX 3080 the two dispatches cost 0.4-1.0 ms more
+// than the one kernel from 400 km and 1e7 m and saved 0.4-1.3 ms farther, so the cull is a cover of
+// its own (`hillaire.ts`'s `MarchCover` `tiles`), off for a view. Appended last to make `hillaire.ts`'s
 // RAY_MARCH_CENTRE_KERNEL and RAY_MARCH_SLOTS_CENTRE_KERNEL, after `marchArea.wgsl`,
 // `rayMarch.wgsl` and the source's read.
 
