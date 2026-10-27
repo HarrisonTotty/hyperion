@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { titanClassMethaneMedium, venusClassMedium } from "../../test/atmosphereFixtures";
 import { detailOf, recordInput, venus58Detail, venus92Detail } from "../../test/atmosphereRecords";
 import { earthDetail } from "../../test/planetaryFixture";
-import { assembleMedium } from "./assemble";
+import { assembleMedium, THICK_REASON } from "./assemble";
 import { hydrostaticColumn } from "./column";
 import { EARTH_DRY_AIR, EARTH_REFERENCE, EARTH_SLAB_REFERENCE } from "./earth";
 import { tableRadiusM } from "./hillaire";
@@ -27,9 +27,6 @@ import {
   provisionalThick,
   verticalOpticalDepth,
 } from "./thick/regime";
-
-/** The thick line's reason, as `assemble.ts` writes it. */
-const THICK_REASON = "a thick atmosphere drawn by the thin-atmosphere method";
 
 /**
  * An Earth-class column of dry air at 288.15 K and `surfacePa`, under its molecular term alone:

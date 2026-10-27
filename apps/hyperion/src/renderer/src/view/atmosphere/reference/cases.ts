@@ -214,8 +214,13 @@ const MARS_DUST = aerosolTerm(
  * Mars's reference atmosphere (`decision-r08-t12b-scope.md`, ruling 3): R08.T3.c's molecular term
  * of {@link MARS_AIR} on {@link MARS_FIT_COLUMN}, the dust ({@link MARS_DUST}), and a grey
  * Lambertian ground of {@link MARS_GROUND_ALBEDO}, its top the column's, where the density is
- * 10⁻⁷ of the datum's. No absorber: Mars's CO₂, CO and O₂ bands are negligible in the visible
- * (R08.T10.a's negligible absorbers), and its ozone is not modelled, a stated omission: its
+ * 10⁻⁷ of the datum's. No absorber. Of Mars's gases the negligible-absorbers bound (R08.T10.a)
+ * finds CO's pending overtones negligible (1.4 × 10⁻⁸). O₂'s measured lines move no channel by
+ * more than 1.35 × 10⁻⁵ at k = 1, and since R08.T10.c take no label from their trace broadener
+ * CO, whose effect bound is 7.1 × 10⁻⁹. CO's 7–0 band is measured and takes no verdict. CO₂ at
+ * 214 K lies inside its table's estimated 212.5–225 K and is labelled (2.0 × 10⁻³ at k = 100,
+ * R08.T10.a's deferred finding _Mars's 214 K_). The case leaves all their bands out all the same.
+ * Its ozone is not modelled, a stated omission: its
  * vertical Chappuis depth stays under about 10⁻³ at 6 DU, Mariner 9's 60 µm-atm, the most on
  * record, and the equator the cases stand at has at most 0.3 DU (Perrier et al. 2006, JGR 111,
  * E09S06), about 2 × 10⁻³ along the limb (R08.T12.b.1's science check's estimate). The first Mars

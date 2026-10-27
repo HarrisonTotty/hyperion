@@ -14,8 +14,12 @@
  * body's atmosphere comes from: its surface section, or a gas envelope's own, never a giant's
  * `not_applicable` surface section (decision-r08-giant-label). R08.T10.a's `assembleMedium` gives
  * each body its keys, and R08.T10.b joins {@link atmosphereStatements} to `photorealStatements`
- * (`displays/view/viewRun.ts`) beside the lit bodies' labels (`litLabelsOf`). The provisional
- * temperature profile is recorded in the plan and the code, not on the view (Design note 12).
+ * (`displays/view/viewRun.ts`) beside the lit bodies' labels (`litLabelsOf`). The labels are
+ * scene-level; since R08.T10.c `ATMOSPHERE: APPROXIMATE` is followed by each of its reasons on a
+ * line of its own, naming the bodies it holds for ({@link atmosphereApproximateLines};
+ * `decision-r08-approximate-plate.md`, item 1b), while the `NOT YET MODELLED` notes, the
+ * generator's, stay scene-level. The provisional temperature profile is recorded in the plan and
+ * the code, not on the view (Design note 12).
  */
 
 /**
@@ -168,7 +172,7 @@ const ATMOSPHERE_RELAUNCH_REMEDY = "relaunch to retry";
 function namesOf(designations: ReadonlyArray<string>): string {
   const last = designations.at(-1);
   if (last === undefined) {
-    throw new RangeError("an atmosphere's fault or refusal names at least one body");
+    throw new RangeError("an atmosphere's fault, refusal or reason names at least one body");
   }
   return designations.length === 1 ? last : `${designations.slice(0, -1).join(", ")} and ${last}`;
 }
@@ -346,6 +350,68 @@ export function atmosphereProblemLines(
   return { plate, fault: [...notAvailable, ...checks] };
 }
 
+/** A body drawn with `atmosphereApproximate`, by its designation, with its reasons in its order. */
+export interface BodyApproximateReasons {
+  readonly designation: string;
+  /** Why it carries the label, as player text (`assemble.ts`'s reasons, `thick/regime.ts`'s). */
+  readonly reasons: ReadonlyArray<string>;
+}
+
+/**
+ * The first token of a reason, up to a space, colon or comma: the word or the formula it begins
+ * with.
+ */
+const FIRST_TOKEN = /^[^ :,]+/u;
+
+/**
+ * A token of lower-case letters alone, or of such words joined by hyphens (`ice-giant`,
+ * `ultraviolet-absorbing`, of `lib/substances.ts`'s names): a word, never a formula (`H2O`) or a
+ * symbol (`e−`, whose sign is U+2212, not a hyphen).
+ */
+const LOWER_CASE_WORD = /^[a-z]+(?:-[a-z]+)*$/u;
+
+/**
+ * A reason as a line begins it: a capital first letter where its first token is a word in lower
+ * case (`a thick …` → `A thick …`, `liquid H2SO4 particles: …` → `Liquid H2SO4 particles: …`,
+ * `ice-giant haze: …` → `Ice-giant haze: …`), its case as given where it begins with a formula or a
+ * symbol, whose case is its meaning (`H2O: …`, `H2O–air pairs: …`, `e− scattering: …`).
+ */
+function capitalised(reason: string): string {
+  const token = FIRST_TOKEN.exec(reason)?.[0] ?? "";
+  return LOWER_CASE_WORD.test(token)
+    ? `${token.charAt(0).toUpperCase()}${reason.slice(1)}`
+    : reason;
+}
+
+/**
+ * The lines that follow `ATMOSPHERE: APPROXIMATE` on a view's plate (R08.T10.c;
+ * `decision-r08-approximate-plate.md`, item 1b): one for each distinct reason, compared after its
+ * capital, `<reason>, for <designations>`, naming each body it holds for once, in designation order,
+ * joined as the fault lines join them (`A and B`, `A, B and C`).
+ *
+ * @remarks
+ * The lines stand in the order of their first bodies, and lines with the same first body in that
+ * body's own order of its reasons, as {@link atmosphereProblemLines} orders its own. A body with no
+ * reasons gives no line.
+ */
+export function atmosphereApproximateLines(
+  bodies: ReadonlyArray<BodyApproximateReasons>,
+): ReadonlyArray<string> {
+  // Taken in designation order, each line is first met at its first body, in that body's order.
+  const byReason = new Map<string, Set<string>>();
+  for (const { designation, reasons } of bodies.toSorted((a, b) =>
+    DESIGNATION_ORDER.compare(a.designation, b.designation),
+  )) {
+    for (const reason of reasons) {
+      const line = capitalised(reason);
+      const names = byReason.get(line) ?? new Set<string>();
+      names.add(designation);
+      byReason.set(line, names);
+    }
+  }
+  return [...byReason].map(([reason, names]) => `${reason}, for ${namesOf([...names])}`);
+}
+
 /**
  * One of a view's atmosphere notes on its label block's plate: a steady `note`, or an `ATMOSPHERE
  * REJECTED` line with its standing as every request's `REJECTED` takes one, `refused` (in `--text`)
@@ -360,13 +426,18 @@ export interface AtmosphereNote {
  * A view's atmosphere notes in their place on the plate (plan R08, R08.T10.b): the statements of
  * its bodies' labels in {@link ATMOSPHERE_LABELS}' order, with its `ATMOSPHERE REJECTED` lines after
  * `ATMOSPHERE: NOT RESOLVED` and before the annunciations (`decision-r08-t10a-leans.md`, follow-up
- * to item 6), each standing `refused` or `fault` as the server refused what was asked or failed.
+ * to item 6), each standing `refused` or `fault` as the server refused what was asked or failed,
+ * and `ATMOSPHERE: APPROXIMATE`'s reasons straight after it, each a steady `note` (R08.T10.c;
+ * `decision-r08-approximate-plate.md`, item 1b).
  *
  * @param rejected - {@link atmosphereProblemLines}' `plate`.
+ * @param approximate - {@link atmosphereApproximateLines}' lines; none stand without
+ *   `atmosphereApproximate` among the labels.
  */
 export function atmosphereNotes(
   labels: Iterable<AtmosphereLabel>,
   rejected: ReadonlyArray<AtmosphereRejectedLine>,
+  approximate: ReadonlyArray<string>,
 ): ReadonlyArray<AtmosphereNote> {
   const held = new Set(labels);
   const notes: AtmosphereNote[] = [];
@@ -380,6 +451,11 @@ export function atmosphereNotes(
     }
     if (held.has(label)) {
       notes.push({ statement: ATMOSPHERE_STATEMENTS[label], standing: "note" });
+      if (label === "atmosphereApproximate") {
+        notes.push(
+          ...approximate.map((statement): AtmosphereNote => ({ statement, standing: "note" })),
+        );
+      }
     }
   }
   return notes;

@@ -866,7 +866,8 @@ const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLE
  * R08.T10.b; `labels.ts`'s `atmosphereNotes`), so that `ATMOSPHERE: NOT RESOLVED` stands after
  * every `NOT YET MODELLED` note: its bodies' labels in their order, with each `ATMOSPHERE REJECTED`
  * line after `ATMOSPHERE: NOT RESOLVED` and before the annunciations, a {@link StatusStatement}
- * standing as every request's `REJECTED` does.
+ * standing as every request's `REJECTED` does, and each of `ATMOSPHERE: APPROXIMATE`'s reasons
+ * straight after it, naming its bodies (R08.T10.c).
  *
  * @param drawn - The style the view's last frame was drawn in.
  * @param labels - The appearance labels of the bodies the photorealistic frame lights.
@@ -903,6 +904,7 @@ export function photorealStatements(
   const air: ReadonlyArray<LabelStatement> = atmosphereNotes(
     atmosphere.labels,
     atmosphere.plate,
+    atmosphere.approximate,
   ).map((note): LabelStatement => {
     let statement: LabelStatement;
     switch (note.standing) {

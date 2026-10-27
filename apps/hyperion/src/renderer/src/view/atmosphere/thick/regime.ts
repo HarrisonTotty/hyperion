@@ -4,7 +4,8 @@
  * @remarks
  * R08.T5.b created this file for the deck split's optical depth, which its stand-in label reads
  * (Design note 12). R08.T10.a adds the provisional thick line, {@link PROVISIONAL_THICK_OPTICAL_DEPTH},
- * which R08.T13's `classifyRegime` and `THICK_MS_BOUNDARY` replace. Its imports stay light,
+ * which R08.T13's `classifyRegime` and `THICK_MS_BOUNDARY` replace, and R08.T10.c moves the line's
+ * reason here from `assemble.ts`, {@link THICK_REASON}. Its imports stay light,
  * `medium.ts` alone, so that the render thread can test a kept scene's prebuilt medium without the
  * optics data.
  */
@@ -82,3 +83,12 @@ export function verticalOpticalDepth(medium: AtmosphereMedium): Rgb {
 export function provisionalThick(medium: AtmosphereMedium): boolean {
   return Math.max(...verticalOpticalDepth(medium)) >= PROVISIONAL_THICK_OPTICAL_DEPTH;
 }
+
+/**
+ * Why a medium {@link provisionalThick} finds thick carries `atmosphereApproximate`, as player
+ * text, as `assemble.ts`'s other reasons are (R08.T10.a): the assembly gives it a record's body,
+ * and since R08.T10.c the atmosphere cache a kept scene's medium, so that the label block can name
+ * the reason beside the note (`decision-r08-approximate-plate.md`, item 1b). It lives here, beside
+ * the line, so that the render thread reads it without `assemble.ts`'s optics data.
+ */
+export const THICK_REASON = "a thick atmosphere drawn by the thin-atmosphere method";

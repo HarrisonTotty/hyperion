@@ -4655,6 +4655,8 @@ to 10⁸ m shows no step at the switch, recorded here.
 
 In two subtasks (split on re-validation, since as built the atmosphere is not yet drawn in the
 photorealistic view at all): T10.a assembles and caches the medium, and T10.b draws it in the view.
+A third, T10.c, added from a later ruling (`decision-r08-approximate-plate.md`), bounds the trace
+broadeners' effect and names `ATMOSPHERE: APPROXIMATE`'s reasons on the plate.
 
 - **R08.T10.a The medium and its cache.** Described below, with its tests. Acceptance:
   `pnpm --filter hyperion exec vitest run view/atmosphere/assemble view/atmosphere/AtmosphereCache`
@@ -4693,6 +4695,24 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
   (2026-10-13 rule)" (R08.T8.e), _The hold's four rows_). The flight's frame times at high on the
   RTX 3080 are recorded beside them. They are no verdict on the frame; R08.T11's measured rows
   are.
+- **R08.T10.c The trace broadeners' effect bound, and APPROXIMATE's reasons on the plate.** From
+  `decision-r08-approximate-plate.md`, items 1a and 1b (2026-10-27). A line species whose only
+  uncertainty is a trace broadener with no width on file is no longer `estimated` outright: an
+  effect bound decides, in the negligible rule's own terms (`negligible.ts`'s `BroadenerVerdict`),
+  and a broadener with a permanent dipole keeps it `estimated` (`absorbers/kDistribution.ts`'s
+  `DIPOLAR_BROADENERS`). `ATMOSPHERE: APPROXIMATE` is followed on the plate by each of its
+  reasons on a line of its own, naming the bodies it holds for (`labels.ts`'s
+  `atmosphereApproximateLines`, from the cache's `AtmosphereViewReport.reasons`), and the guide's
+  row says so; two of the guide's rows are reworded (the surface state's `SNOWBALL` clause,
+  `CRUST NONE`). Acceptance: `pnpm --filter hyperion exec vitest run` over
+  `view/atmosphere/negligible`, `view/atmosphere/absorbers.test`,
+  `view/atmosphere/absorbers/kDistribution`, `view/atmosphere/absorbers/lineCurves`,
+  `view/atmosphere/assemble`, `view/atmosphere/AtmosphereCache`, `view/atmosphere/labels`,
+  `displays/view/viewAtmosphere`, `displays/view/viewRun` and
+  `displays/view/ViewDisplayAtmosphere`, and `pnpm test`, pass; the `console-ux` skill's checks
+  pass; no kept fixture's labels change and no case-gate figure moves; and no GENERATOR_VERSION,
+  PROTOCOL, wire, table, shader or kernel changes. _Built 2026-10-27_ (Risks, "Deviations in
+  T10.c, as built", and its "Deferred findings (2026-10-13 rule)" (R08.T10.c)).
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
@@ -10094,6 +10114,8 @@ it rides a bump.
     partners already take. Revisited when R08.T10.b or R08.T11 puts generated worlds on screen.
     `MARS_REFERENCE`'s comment ("CO₂, CO and O₂ bands are negligible", `reference/cases.ts:217`)
     no longer holds of the bound; correct it when `cases.ts` is next touched (R08.T12.b.2).
+    _Ruled 2026-10-27 (`decision-r08-approximate-plate.md`, item 1a): an effect bound, built in
+    R08.T10.c, where `MARS_REFERENCE`'s comment is corrected._
   - _Mars's 214 K_ lies inside CO₂'s estimated 212.5–225 K interval (Δ_c 2.0 × 10⁻³ at k = 100):
     whether k = 100 belongs on a chain-interpolation interval (its error about 4 × 10⁻³) is
     main's.
@@ -18982,3 +19004,154 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     type.
   - The 15 bake bins' inadequacy for M dwarfs' TiO bands stays a recorded limitation, since TiO
     in the star overlaps TiO in the planet.
+- **Deviations in T10.c, as built** (2026-10-27; `decision-r08-approximate-plate.md`, items 1a
+  and 1b). Edited in `view/atmosphere/`: `absorbers/kDistribution.ts`, `absorbers.ts`,
+  `negligible.ts`, `assemble.ts`, `thick/regime.ts`, `AtmosphereCache.ts`, `labels.ts` and
+  `reference/cases.ts` (a comment alone); in `displays/view/`: `viewAtmosphere.ts` and
+  `viewRun.ts`; their tests; and the guide. No table, shader or kernel changes, so the gate ran no
+  `just test-render`, and no GENERATOR_VERSION, PROTOCOL or wire change.
+  - _The split._ `broadeningFactor`'s `Broadening` gains `widthlessShare`, ε: the gases the table
+    holds no width for, other than N₂, O₂ and Ar and the five of `DIPOLAR_BROADENERS` (H₂O, NH₃,
+    SO₂, HCN and H₂S, a constant beside `AIR_GASES`), each its normalised mole fraction times its
+    r of 1, over Σ x r at the temperature. `estimated` stays for a dipolar gas with no width and
+    for a two-variant table's every partner but its own and air's gases, whose gases with no
+    width add nothing to ε. `SpeciesLinesData.widthlessShare` carries it, and the gases with no
+    width no longer set `optics` by themselves.
+  - _The bound's form_ (a deviation: the exact form of the same bound,
+    `decision-r08-approximate-plate.md` §1; accepted on the issue, 2026-10-27, and kept as built).
+    Δ_c,γ = min(1, −ln(1 − ε)) Δ_c(k = 1), in place of the ruling's ε Δ_c(k = 1), which is its
+    first-order term. The ruling's derivative bound holds per unit of ln s, for s the factor
+    between the true broadening pressure and the one drawn, s ∈ [1 − ε, 1 + ε]. And T lies within
+    Δ_c(k = 1) of 1 at every width, which gives the cap, reached at ε = 1 − 1/e, about 0.63.
+    −ln(1 − ε) lies above ε by about ε ÷ 2 of itself: under 3 × 10⁻⁴ for Earth and Mars, 0.28% for
+    Saturn, and 39% at ε 0.5. `BroadenerVerdict`
+    (`test: "broadener"`, the key, `widthlessShare`, `widthFactor`, `amount`, `temperatureK`,
+    `lineChanges` for Δ_c(k = 1), `changes` for Δ_c,γ, `largestChange`, `negligible`) runs for
+    each drawn line species whose `linesRule` is `measured` and whose ε is above 0. It takes the
+    lines' own cell means, chord and suns at k = 1, and stands after `fixedGMix` in a key's tests.
+  - _Its figures_, each the largest over the Sun and the 2,500 K and 30,000 K Planck suns and the
+    three channels:
+
+    | Case                                          | ε           | Δ_c(k = 1)  | Δ_c,γ       | Largest       |
+    | --------------------------------------------- | ----------- | ----------- | ----------- | ------------- |
+    | Earth-class H₂O, CO₂ at 330 ppm (`earthBody`) | 3.25 × 10⁻⁴ | 0.512       | 1.66 × 10⁻⁴ | red, 30,000 K |
+    | Mars-class O₂, CO at 0.06% (`marsBody`)       | 5.2 × 10⁻⁴  | 1.35 × 10⁻⁵ | 7.1 × 10⁻⁹  | red, 2,500 K  |
+    | Saturn-class H₂, CH₄ at 4,500 ppm, 134 K      | 5.5 × 10⁻³  | 1.22 × 10⁻³ | 6.7 × 10⁻⁶  | red, 30,000 K |
+
+    Against the ruling's figures, each is within a factor of three. Mars's ε is the fixture's
+    0.06% CO, not "about 7 × 10⁻⁴". Saturn's ε takes each width's temperature exponent at 134 K
+    (Σ x r 0.82). Saturn's Δ_c(k = 1) is that of the `saturn-oblate` column, 1.22 × 10⁻³, against
+    the 6.0 × 10⁻⁴ that T10.a's record implies. T10.a's 0.060 has no committed test, so the column
+    behind it is not known.
+
+    With Earth's CO₂ raised, H₂O labels between 6.0 and 6.1 times the 330 ppm, about 2,000 ppm
+    (Δ_c,γ 9.97 × 10⁻⁴ and 1.014 × 10⁻³, at ε 1.95 × 10⁻³ and 1.98 × 10⁻³). NH₃ at 1 ppb labels
+    Earth's H₂O at k = 100, 1.96 as before. The Mars-class H₂O, in 95% CO₂ (ε 0.95), takes the
+    cap: Δ_c,γ = Δ_c(k = 1) = 2.8 × 10⁻⁴, negligible.
+
+  - _What moves._
+    - The generated Earth (`earthDetail`) keeps `aerosolsNotYetModelled` and
+      `atmosphereApproximate`. Its reasons drop "H2O: its absorption estimated, not measured" and
+      keep its continuum's two pair reasons below 567 nm, and its `negligible` reads `H2O`, `CO2`.
+    - Mars-class O₂ and Saturn-class H₂ take no reason from their broadeners.
+    - The Mars-class H₂O, 10 precipitable µm in 95% CO₂ (`marsBody`), was `estimatedData` at
+      k = 100, 2.84 × 10⁻², and labelled. At ε 0.95 it now takes the cap, Δ_c,γ = Δ_c(k = 1) =
+      2.8 × 10⁻⁴, and no label. CO₂ is no trace there, but the cap holds at any width, so the
+      clearance does not rest on the [0, 2] range. The ruling's "trace broadener" does not say
+      whether a bulk gas with no width on file takes the bound; as built, it does.
+    - No kept fixture's labels change, and no case-gate figure moves: the kept media are prebuilt.
+    - `MARS_REFERENCE`'s comment now says what the bound finds: CO's pending overtones negligible;
+      O₂'s measured lines at most 1.35 × 10⁻⁵ at k = 1, with no label from CO's width; CO's 7–0
+      band measured, with no verdict; and CO₂ at 214 K labelled inside its estimated interval. The
+      case leaves all their bands out. T10.a's "CO₂, CO and O₂ bands are negligible" no longer
+      held of the bound.
+  - _The plate._
+    - The cache's `AtmosphereViewReport.reasons` gives each body's entry reasons, only where its
+      labels hold `atmosphereApproximate` and it has no problem; `NO_REPORT` holds the empty map.
+    - A kept medium past the provisional thick line takes `THICK_REASON`, which moves to
+      `thick/regime.ts` and is re-exported by `assemble.ts`. A kept scene's own labels that held
+      `atmosphereApproximate` would carry no reason; no kept scene passes any, and
+      `KeptBodyAtmosphere` is unchanged.
+    - `labels.ts` adds `atmosphereApproximateLines(bodies)` and `BodyApproximateReasons`.
+      `atmosphereNotes` takes the lines as its third argument, set straight after
+      `ATMOSPHERE: APPROXIMATE`. `ViewAtmosphereShown.approximate` holds them, mapped to the
+      scene's designations by `atmosphereShownOf`, and `photorealStatements` passes them on.
+    - The capital: a reason's first token, up to a space, colon or comma, is capitalised where it
+      is lower-case letters alone, or such words joined by hyphens (`ice-giant haze`, the UX
+      review's).
+    - It answers R08.T11's deferred finding _`ATMOSPHERE: APPROXIMATE` on generated worlds_: the
+      three broadeners clear, and the plate names each reason and its bodies. T11's records are
+      not edited here; the line that closes the finding is main's to add.
+  - _Tests._ `ViewDisplayAtmosphere.test.tsx` sets the lines on `ViewLabelBlock` itself. No scene
+    the display harness draws carries the note: the kept media are thin, and the harness's optics
+    workers answer nothing. The harness lies outside this task's files.
+  - _The guide_ (`docs/frontend/ux-guidelines.md`), each change worded as the brief's lean, a
+    draft for the owner's sign-off.
+    - The `ATMOSPHERE: APPROXIMATE` row gains §1b's sentence, verbatim.
+    - The surface state's `SNOWBALL` clause reads "with any ocean under the ice read as
+      `SUBSURFACE OCEAN`".
+    - The `CRUST` row gains ", and `CRUST NONE` likewise where it computes that the body has
+      none".
+  - _Not raised:_ `ATMOSPHERE_OPTICS_VERSION` (1). The cache lasts one session, and a medium built
+    from the same inputs is the same; only its labels and reasons move.
+- **Deferred findings (2026-10-13 rule)** (R08.T10.c). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The widths' range_ (for the science check). R08.T10.c's bound takes each gas with no width
+    on file at a ratio to air in [0, 2] at the profile's temperature, `AIR_TRACE_SHARE`'s doc's
+    range for a partner's efficiency. It does so for every gas without a dipole, on every table:
+    the atoms' tables too, whose ratios are to H₂'s width. No measured ratio has been checked
+    against the range. The committed molecular tables' intensity-weighted ratios to air for the
+    foreign gases without a dipole they list lie in 0.34–1.58 (HCl's He, CO₂'s H₂). The cases
+    lean on CO₂'s widths of H₂O's lines (Earth's case) and CH₄'s of H₂'s quadrupole lines, for
+    which the science check found no measurement. H₂'s ratios are to its own narrow width, so one
+    above 2 is plausible. No verdict rests on it: with s to 1 + (R − 1)ε for a ratio up to R,
+    Earth's H₂O stays negligible for R up to 7.0, and Saturn's H₂ for R up to about 230. Only the
+    raised-CO₂ crossing leans on the range. From ε of
+    1 − 1/e, about 0.63, the cap holds and the range no longer matters.
+  - _The shape's limits._ `speciesLines`' measured-shape and 10 MPa tests read the broadening
+    pressure as drawn. A body within ε of either limit could cross it unseen. At the three ruled
+    cases' ε (at most 5.5 × 10⁻³) this is negligible. The Mars-class H₂O (ε 0.95) could be
+    broadened at up to 1.95 times the drawn pressure, about 1.2 kPa on Mars's 636 Pa datum, far
+    below the 1 bar to which Earth's H₂O lines are drawn measured.
+  - _The cell means_ (the science check). Δ_c(k = 1) takes the lines' cell means over the stored
+    rows to the body's largest p_eff, with the first row past it. The integral and the cap both
+    take ⟨σ⟩ at every width to (1 + ε) p_eff. A cell's mean is its lines' strength within it, but
+    wings from the cells beside it, which the 1 nm cells' 17 cm⁻¹ at 760 nm lets in under the
+    25 cm⁻¹ cut-off, grow with the width. The first row past reaches between 1 and 1.78 times the
+    largest p_eff (1.33 above 1 MPa): for the Mars-class H₂O 1.57, not 1.95. There, a cell of
+    such wings alone could run 1.24 times low, 2.8 × 10⁻⁴ at most 3.5 × 10⁻⁴; at the three ruled
+    cases' ε it is nothing. Reading the means at (1 + ε) times the largest p_eff would close it.
+    The amendment of 2026-10-27 keeps the bound as built, so this is the owner's.
+  - _The dipolar list_ (the science check, for the owner). The ruling names five gases. The
+    registry also holds HCl, CH₃OH, SiO, H₂SO₄, TiO, VO and FeH, whose dipoles are as strong as
+    H₂S's or stronger (NIST CCCBDB, by the science check). The bound weighs them as it stands;
+    some of their kind's self widths pass twice air's (HCl's 2.909, CH₃OH's 4 in the committed
+    tables).
+  - _NH₃'s own width_ (the science check, for the owner; from before this task). NH₃'s table lists
+    H₂ and He alone, with no `self`, so NH₃'s own share takes r 1, outside both ε and a label.
+  - _The reasons' letter spacing_ (the UX review). `StatusText` sets a statement that holds no
+    ": " as one annunciation, tracked whole. So "A thick atmosphere drawn by the thin-atmosphere
+    method, for …" is tracked as a state, where the guide's Typography sets a sentence without
+    letter spacing. A reason with a colon splits as the guide's `TEST PLANET: provisional, …` does,
+    but its mixed-case head (`e− scattering:`, `Liquid H2SO4 particles:`) is tracked as a state
+    too. A follow-up could give `LabelStatementLine`, outside this task's files, a sentence form;
+    whether a reason's head is tracked is the owner's.
+  - _An instrument's reasons_ (the UX review). An instrument view drops each photorealistic
+    statement the primary's block already shows (`InstrumentView.tsx`, outside this task's files).
+    A narrow instrument can draw a body whose reason the primary does not hold, so its line stands
+    while `ATMOSPHERE: APPROXIMATE`, shown on the primary, is dropped above it. A follow-up should
+    keep the note with any reason line that stands; whether the guide's "not repeated" gives way
+    there is the owner's.
+  - _The reasons' words on the plate_ (the UX review). This task is the first to put the reasons
+    on screen. Some were written before any display read them: an aerosol's phase reasons cite
+    their papers and equations (`aerosol.ts`, `aggregate.ts`, `nonSpherical.ts`,
+    `sizeDistribution.ts`), and `aerosol.ts` prints a channel's wavelength unrounded (433.625 nm),
+    where the size-convergence reason rounds to whole nm. None reaches a generated body before 24's
+    inventory. A follow-up reviews them as player text.
+  - _A note with no line._ Reasons are dropped for bodies the scene no longer holds, but the
+    report's labels are not, so for a frame after the scene moves on the note can stand alone. A
+    kept scene's own labels that held the note would too; none does.
+  - _`CRUST NONE` and `UNDIFFERENTIATED`_ (the UX review, for the owner). The guide's new clause
+    matches `crustRows`, but the `UNDIFFERENTIATED` row also reads as no crust, and no server
+    sends a crust computed as none yet. Whether the clause should say how the two differ is the
+    owner's; the wording stands meanwhile.

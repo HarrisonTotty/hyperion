@@ -8,6 +8,7 @@ import {
   cellTransmittance,
   committedLineSpecies,
   curveRowsPa,
+  DIPOLAR_BROADENERS,
   fetchPart,
   type KDistributionFile,
   type KDistributionTable,
@@ -216,15 +217,74 @@ describe("the broadening factor", () => {
     const found = broadeningFactor(table, air, 296);
     expect(found.factor).toBeCloseTo(factor, 14);
     expect(found.selfShare).toBeCloseTo((0.2 * 1.005) / factor, 14);
-    expect(found.estimated).toBe(false);
+    expect([found.estimated, found.widthlessShare]).toEqual([false, 0]);
   });
 
-  it("takes a gas with no width as air, estimated, and refuses a mixture of nothing", () => {
+  it("takes a gas with no width as air, its share of the broadening pressure for the effect bound, not estimated (R08.T10.c)", () => {
     expect(broadeningFactor(table, new Map([["H2", 2]]), 296)).toEqual({
       factor: 1,
       selfShare: 0,
-      estimated: true,
+      estimated: false,
+      widthlessShare: 1,
     });
+    // ε = Σ_j x_j ÷ Σ_b x_b r_b, CH₄ the gas with no width, the mole fractions normalised.
+    const found = broadeningFactor(
+      table,
+      new Map([
+        ["O2", 0.2],
+        ["N2", 0.7],
+        ["CO2", 0.08],
+        ["CH4", 0.02],
+      ]),
+      296,
+    );
+    const factor = 0.2 * 1.005 + 0.7 + 0.08 * 1.18 + 0.02;
+    expect([found.estimated, found.factor, found.widthlessShare]).toEqual([
+      false,
+      expect.closeTo(factor, 14),
+      expect.closeTo(0.02 / factor, 14),
+    ]);
+  });
+
+  it("is estimated on a gas with a permanent dipole it holds no width for, at any share, ε left 0", () => {
+    const found = [...DIPOLAR_BROADENERS].map((gas) => {
+      const { estimated, widthlessShare } = broadeningFactor(
+        table,
+        new Map([
+          ["N2", 1],
+          [gas, 1e-9],
+        ]),
+        296,
+      );
+      return [gas, estimated, widthlessShare];
+    });
+    expect(found).toEqual([
+      ["H2O", true, 0],
+      ["NH3", true, 0],
+      ["SO2", true, 0],
+      ["HCN", true, 0],
+      ["H2S", true, 0],
+    ]);
+  });
+
+  it("broadens by a dipolar gas's own ratio where the table gives it a width, neither estimated nor weighed", () => {
+    const listed = toyTable({ broadening: { self: 1.005, H2O: 1.085 } });
+    const found = broadeningFactor(
+      listed,
+      new Map([
+        ["N2", 0.99],
+        ["H2O", 0.01],
+      ]),
+      296,
+    );
+    expect([found.estimated, found.widthlessShare, found.factor]).toEqual([
+      false,
+      0,
+      expect.closeTo(0.99 + 0.01 * 1.085, 14),
+    ]);
+  });
+
+  it("refuses a mixture of nothing", () => {
     expect(() => broadeningFactor(table, new Map([["N2", 0]]), 296)).toThrow("above 0");
   });
 
@@ -289,6 +349,19 @@ describe("a two-variant table (CO₂'s χ sets)", () => {
         296,
       ).estimated,
     ).toBe(true);
+  });
+
+  it("is estimated on a gas it holds no width for, which the effect bound does not weigh (R08.T10.c)", () => {
+    const found = broadeningFactor(
+      table,
+      new Map([
+        ["CO2", 0.95],
+        ["N2", 0.04],
+        ["CH4", 0.01],
+      ]),
+      296,
+    );
+    expect([found.estimated, found.widthlessShare]).toEqual([true, 0]);
   });
 
   it("reports a held χ where a variant the mix takes holds it, at the nodes about the temperature", () => {

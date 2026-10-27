@@ -111,7 +111,7 @@ import { molecularMixture, molecularTerm, type RayleighApproximation } from "./r
 import { REGISTRY_OPTICS_FLAGS } from "./registryFlags";
 import type { ModeOptics, SizeDistribution } from "./sizeDistribution";
 import type { BakeSpectrum } from "./spectralColour";
-import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH, provisionalThick } from "./thick/regime";
+import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH, provisionalThick, THICK_REASON } from "./thick/regime";
 
 export {
   ATMOSPHERE_OPTICS_VERSION,
@@ -121,6 +121,7 @@ export {
   clampedGroundAlbedo,
   type KeptAtmosphere,
 } from "./atmosphereInput";
+export { THICK_REASON } from "./thick/regime";
 
 /**
  * The most terms a medium may have: `tables.ts`'s `MAX_TERMS` (`common.wgsl`'s), 8, held equal by
@@ -263,9 +264,6 @@ function estimatedReason(key: string): string {
 function leftOutReason(key: string): string {
   return `${keyName(key)}: left out, the console can draw no more layers of absorbing gas`;
 }
-
-/** The note of a provisional thick medium (`thick/regime.ts`). */
-const THICK_REASON = "a thick atmosphere drawn by the thin-atmosphere method";
 
 /** The note of Thomson scattering left out past the term limit. */
 const THOMSON_LEFT_OUT_REASON = `${substanceName("e-")} scattering: left out, the console can draw no more layers`;
@@ -719,6 +717,7 @@ function absorberReasons(
           break;
         case "heldChi":
         case "fixedGMix":
+        case "broadener":
           text = estimatedReason(key);
           break;
       }

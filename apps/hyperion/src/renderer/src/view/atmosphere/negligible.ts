@@ -39,7 +39,9 @@
  *
  * **The held χ** (§14), on a drawn line table whose χ is held at the temperature, and **CO₂'s
  * fixed-g mix** (§§16–17), on one with a mix record, are separate tests ({@link HeldChiVerdict},
- * {@link FixedGMixVerdict}).
+ * {@link FixedGMixVerdict}), as is **the trace broadeners' effect bound** (R08.T10.c;
+ * `decision-r08-approximate-plate.md`, item 1a), on measured lines broadened in part by a gas their
+ * table holds no width for ({@link BroadenerVerdict}).
  *
  * Pure and synchronous: the optics worker calls it once a body.
  */
@@ -236,8 +238,53 @@ export interface FixedGMixVerdict {
   readonly negligible: boolean;
 }
 
+/**
+ * The trace broadeners' effect bound (R08.T10.c; `decision-r08-approximate-plate.md`, item 1a,
+ * 2026-10-27), on a drawn line table whose lines are otherwise measured at the body and whose
+ * broadening pressure rests in part on gases the table holds no width for, each taken as air
+ * (`absorbers.ts`'s `SpeciesLines.widthlessShare`, ε). The lines' strengths and air widths are
+ * measured: only the broadening pressure is uncertain, by those gases' terms.
+ *
+ * @remarks
+ * Each such gas's ratio to air at the profile's temperature is taken to lie in [0, 2]: item 1a's
+ * assumption, which borrows the bracket `AIR_TRACE_SHARE`'s doc puts on a continuum partner's
+ * efficiency, not a measured range of line widths. The committed molecular tables'
+ * intensity-weighted ratios to air for the foreign gases without a dipole they list lie in
+ * 0.34–1.58 (HCl's He, CO₂'s H₂); no single line is checked. So the broadening pressure lies within a factor s ∈ [1 − ε, 1 + ε] of the one
+ * drawn. A Lorentz or Voigt profile has |∂ln f ÷ ∂ln γ| ≤ 1, γ the Lorentz half-width and the
+ * Doppler width held (H₂O's, its value at 25 cm⁻¹ subtracted, reaches 1.02 at its shape's 2.5 cm⁻¹
+ * limit), so a cell's transmittance moves by at most ⟨τe^(−τ)⟩ ≤ 1 − T ≤ min(1, ⟨σ⟩u) per unit of
+ * ln s, and by at most min(1, ⟨σ⟩u) whatever s is, since it lies in [1 − that, 1] at every width.
+ *
+ * Hence Δ_c,γ = min(1, −ln(1 − ε)) Δ_c(k = 1), the exact form of the ruling's ε Δ_c(k = 1), which
+ * is its first-order term (accepted on the issue, 2026-10-27), Δ_c(k = 1) the lines' own bound at
+ * k = 1 on the chord, cells and suns their `absorption` test takes. Both steps take a cell's ⟨σ⟩ as
+ * the same at every width to 1 + ε times the broadening pressure; the cell means are read over the
+ * stored rows to the body's largest, with the first past it (R08.T10.c's deferred findings). A gas
+ * with a permanent dipole that the ruling names takes no such range (`kDistribution.ts`'s
+ * `DIPOLAR_BROADENERS`), and keeps the species `estimated`.
+ */
+export interface BroadenerVerdict {
+  readonly test: "broadener";
+  readonly key: string;
+  /** ε, the share of the broadening pressure on gases the table holds no width for, above 0. */
+  readonly widthlessShare: number;
+  /** min(1, −ln(1 − ε)), 1 for ε ≥ 1: the most the lines' widths move, as |ln s|. */
+  readonly widthFactor: number;
+  readonly amount: AbsorberAmount;
+  readonly temperatureK: number;
+  /** Δ_c(k = 1) for each sun, per channel: the lines' own bound, their data taken as measured. */
+  readonly lineChanges: ReadonlyArray<Rgb>;
+  /** Δ_c,γ = {@link BroadenerVerdict.widthFactor} × Δ_c(k = 1) for each sun, per channel. */
+  readonly changes: ReadonlyArray<Rgb>;
+  readonly largestChange: number;
+  /** Whether Δ_c,γ ≤ {@link NEGLIGIBLE_CHANGE} everywhere: the gases are then taken as air, unlabelled. */
+  readonly negligible: boolean;
+}
+
 /** One test's outcome for one key. */
-export type NegligibleVerdict = AbsorptionVerdict | HeldChiVerdict | FixedGMixVerdict;
+export type NegligibleVerdict =
+  AbsorptionVerdict | HeldChiVerdict | FixedGMixVerdict | BroadenerVerdict;
 
 /** What the bound reads of a body: what its optics worker passes to `absorberSpecs`, and its suns. */
 export interface NegligibleBody {
@@ -717,7 +764,7 @@ function marginOf(rule: MarginRule): number {
 /**
  * The verdicts of the negligible-absorbers bound on one body (R08.T10.a), one a tested key and test,
  * in the order of the body's layers (a pair after the later listed of its members), each key's tests
- * in the order `absorption`, `heldChi`, `fixedGMix`.
+ * in the order `absorption`, `heldChi`, `fixedGMix`, `broadener`.
  *
  * @remarks
  * - `absorption` ({@link AbsorptionVerdict}): every key with drawn data `estimated` at the body (the
@@ -729,6 +776,9 @@ function marginOf(rule: MarginRule): number {
  *   from its members' layers as `absorberSpecs` forms a pair.
  * - `heldChi` ({@link HeldChiVerdict}): a drawn line table whose χ is held at the temperature.
  * - `fixedGMix` ({@link FixedGMixVerdict}): a drawn line table with a fixed-g mix record.
+ * - `broadener` ({@link BroadenerVerdict}, R08.T10.c): a drawn line table measured at the body
+ *   (k = 1) whose broadening pressure rests in part on gases it holds no width for. Lines estimated
+ *   on other grounds take their `absorption` test at k = 100, which covers the broadener too.
  *
  * A drawn absorber whose profile took no column (`noColumnFree`) is not tested: it is drawn as
  * nothing and labelled for that. Lines estimated over part of their pressures alone (an atom's
@@ -831,6 +881,21 @@ export function negligibleAbsorbers(
             extra.push({
               order: order + 0.2,
               verdict: fixedGMixVerdict(s.species, table, selfShare, temperatureK, amount),
+            });
+          }
+          if (rule === "measured" && lines.widthlessShare > 0) {
+            extra.push({
+              order: order + 0.3,
+              verdict: broadenerVerdict(
+                s.species,
+                lines.widthlessShare,
+                cellMeans,
+                amount,
+                weights,
+                {
+                  temperatureK,
+                },
+              ),
             });
           }
         }
@@ -1219,6 +1284,48 @@ function heldChiVerdict(
     lorentzHalfWidthPerCm: gamma,
     amount,
     temperatureK: at.temperatureK,
+    changes,
+    largestChange,
+    negligible: largestChange <= NEGLIGIBLE_CHANGE,
+  };
+}
+
+/**
+ * The most the lines' widths move for a share ε of the broadening pressure resting on gases taken
+ * as air whose ratios lie in [0, 2], as |ln s|: −ln(1 − ε), capped at 1, where the bound on any
+ * width takes over ({@link BroadenerVerdict}).
+ */
+function widthFactorOf(widthlessShare: number): number {
+  return widthlessShare < 1 ? Math.min(1, -Math.log1p(-widthlessShare)) : 1;
+}
+
+/** A drawn line table's {@link BroadenerVerdict}, on its lines' cell means at k = 1. */
+function broadenerVerdict(
+  key: string,
+  widthlessShare: number,
+  cellMeans: Float64Array,
+  amount: AbsorberAmount,
+  weights: ReadonlyArray<BoundCellWeights>,
+  at: { readonly temperatureK: number },
+): BroadenerVerdict {
+  const u = amountValue(amount);
+  const depths = cellMeans.map((sigma) => sigma * u);
+  const widthFactor = widthFactorOf(widthlessShare);
+  const lineChanges = weights.map((w) => channelChanges(w, depths));
+  const changes = lineChanges.map(([r, g, b]): Rgb => [
+    widthFactor * r,
+    widthFactor * g,
+    widthFactor * b,
+  ]);
+  const largestChange = Math.max(...changes.flat());
+  return {
+    test: "broadener",
+    key,
+    widthlessShare,
+    widthFactor,
+    amount,
+    temperatureK: at.temperatureK,
+    lineChanges,
     changes,
     largestChange,
     negligible: largestChange <= NEGLIGIBLE_CHANGE,
