@@ -14873,3 +14873,18 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     miss it then, and T2's figures move too. Neither binary is on `prebless-24-list.md`. Asked of
     main: a by-name re-run of both binaries at 24's bless, re-pinning or removing `STYLE_GAP`
     there.
+- **Deferred findings (2026-10-13 rule) (R10.T2's and R10.T5's `sample_worlds()` follow-ups),
+  updated by decision-r09-channel-term** (2026-10-26; §7's record text, verbatim). It replaces, as
+  the cause, both follow-ups' "_The closed forms read the cell's own style_" and "_The cause,
+  re-probed_" (T2's) and "_The quoted σ is low at some points of the Earths_" (T5's), above, whose
+  figures stand.
+  - _The band-3–4 shelf texels are R09's trunk level in water_ (decision-r09-channel-term; owner
+    R09's follow-up, a serve-gate must-fix for 24). The band-4→5 jump at the two shelf texels,
+    +432.3 m and +101.5 m, is channel level 8's correction alone (no groove reaches, E = 0):
+    - dry cells' trunks cut valleys of 1.1–1.8 km into lake and shelf cells;
+    - the level's mean removal lifts the rest of those cells above their water.
+
+    The closed form counts no channel there: a wet cell's channel RMS is 0.0–0.8 m against 67–163 m
+    realised. decision-r10-t2-weights §2's style cause is withdrawn for these findings, and kept as a
+    small figure (relief variance 1.1–1.5 times its form at style edges), which `STYLE_GAP` still
+    pins. R10's pins stand as measured; R10.T15.b re-measures them at 24 after R09's fix.
