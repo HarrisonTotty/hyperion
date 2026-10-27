@@ -4664,7 +4664,9 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
 A third, T10.c, added from a later ruling (`decision-r08-approximate-plate.md`), bounds the trace
 broadeners' effect and names `ATMOSPHERE: APPROXIMATE`'s reasons on the plate. A fourth, T10.d,
 from that decision's §6 (2026-10-27), answers T10.c's findings: the widthless gases' rule, the
-reasons set as sentences, and the aerosol reasons' words.
+reasons set as sentences, and the aerosol reasons' words. A fifth, T10.e, from §6's rule that no
+citation reaches the screen, words the materials' stand-in texts as player text, and from §8.3 sets
+each after its file's phase and name.
 
 - **R08.T10.a The medium and its cache.** Described below, with its tests. Acceptance:
   `pnpm --filter hyperion exec vitest run view/atmosphere/assemble view/atmosphere/AtmosphereCache`
@@ -4749,6 +4751,26 @@ reasons set as sentences, and the aerosol reasons' words.
   GENERATOR_VERSION, PROTOCOL, wire, table, shader, kernel or engine changes; and
   `ATMOSPHERE_OPTICS_VERSION` is 2 (§8, item 1). _Built 2026-10-27_ (Risks, "Deviations in R08.T10.d, as built", and its "Deferred
   findings (2026-10-13 rule)" (R08.T10.d)).
+- **R08.T10.e The materials' stand-in texts as player text.** From
+  `decision-r08-approximate-plate.md` §6 (2026-10-27: no citation reaches the screen; citations
+  stay in the log and the docs), on T10.d's deferred finding _The materials' stand-in texts_, and
+  that decision's §8.3 (2026-10-27: a file's own stand-in reason names its material). The six
+  material files whose `standIn` cited a paper (`ammonia-ice.json`, `calcium-titanate.json`,
+  `ice-giant-haze.json`, `jovian-chromophore.json`, `mars-regolith-simulant.json` and
+  `sodium-sulphide.json`) say what stands in and why in player words, with no author's name or
+  year, in the files and in the tool that writes them (`src/tools/materials.ts`'s
+  `FETCHED_MATERIALS`). Each citation stays in its file's `paper`, which no screen shows. A test
+  holds every file's `name`, `standIn` and `absorptionStandIn` to no citation
+  (`materials.test.ts`). A stand-in file's own text reaches the plate after the file's phase and
+  name (`materials.ts`'s `materialApproximations`, by `phasedName`), as liquid O₂'s absorption
+  text already did; a named analogue's and the generic stand-in's reasons stand as written.
+  Acceptance: `pnpm --filter hyperion exec vitest run` over `view/atmosphere/materials`,
+  `view/atmosphere/assembleAerosols`, `view/atmosphere/parity` and `src/tools/materials.test.ts`,
+  and `pnpm typecheck`, `pnpm lint` and `pnpm test`, pass; the `console-ux` skill's checks pass on
+  the changed files; the fit check finds no table stale; no file's n, k, key, phase, shape,
+  provenance or grid changes; and no GENERATOR_VERSION, `ATMOSPHERE_OPTICS_VERSION`, PROTOCOL,
+  wire, table, shader, kernel or engine change. _Built 2026-10-27_ (Risks, "Deviations in
+  R08.T10.e, as built", and its "Deferred findings (2026-10-13 rule)" (R08.T10.e)).
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
@@ -19924,6 +19946,7 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     `mars-regolith-simulant.json` ("Martikainen et al. 2023") and `sodium-sulphide.json` ("Khachai
     et al. 2009's"). A follow-up words each `standIn` as player text, the citation kept in the
     file's own source fields.
+    _Built in R08.T10.e (2026-10-27)._
   - _H's own width_ (the science check; a question on the issue). H's table holds its own width,
     Barklem, Piskunov and O'Mara 2000b's self-broadening by H atoms (2.198 times H₂'s), under the
     key `H`, and `broadeningFactor` looks a species' own share up as `self` alone. So H's own share
@@ -19958,3 +19981,126 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     The code follows the ruling. The row could add "its head included", or the bullet an exception
     that points to the row.
     _Ruled 2026-10-27 (decision-r08-approximate-plate §8): built in R08.T10.d._
+- **Deviations in R08.T10.e, as built** (2026-10-27; `decision-r08-approximate-plate.md` §6 and
+  §8.3). Edited in `view/atmosphere/materials/`: the six files' `standIn` lines alone,
+  `materials.ts` (`MaterialIndexFile.standIn`'s TSDoc, and `materialApproximations` and its TSDoc)
+  and `materials.test.ts`; and `src/tools/materials.ts` (`MaterialHeader.standIn`'s TSDoc and the
+  six `header.standIn` literals, each the same as its file's; the tool is not rerun). No file's n,
+  k, key, phase, shape, provenance or grid changes, and no GENERATOR_VERSION,
+  `ATMOSPHERE_OPTICS_VERSION`, PROTOCOL, wire, table, shader, kernel or engine change, so the gate
+  ran no `just test-render`. The fit's inputs hash reads no prose, so no table is stale. The
+  `console-ux` skill's `ux_lint.py` reads no JSON, so it passes `materials.ts` alone; the six
+  texts were read against the guide by hand, in the UX review.
+  - _The six texts_, each before and after, the head (below) that now stands before each in
+    brackets:
+    - `ammonia-ice.json` [NH3 ice]: "a crystal whose visible absorption is not drawn: Martonchik
+      et al.'s visible k is a fill between their 1462 nm and 320 nm values, not a measurement, and
+      no measured visible absorption of NH3 ice was found, so k = 0, an upper bound on its
+      brightness; its real index is theirs" becomes "a crystal drawn with a published real index
+      and no visible absorption, k = 0, an upper bound on its brightness, since the visible k
+      published with that index is a fill between the values at 1462 nm and 320 nm, not a
+      measurement, and no measured visible absorption was found".
+    - `calcium-titanate.json` [solid CaTiO3]: "an upper bound on absorption: Ueda et al.'s visible
+      k is a Kramers–Kronig value …" becomes "an upper bound on absorption, since it is drawn with
+      a published visible k that is a Kramers–Kronig value …", the rest unchanged.
+    - `ice-giant-haze.json` [solid ice-giant haze]: "… for their unidentified photochemical haze
+      (Irwin et al. 2022), not a laboratory measurement" drops its parenthesis.
+    - `jovian-chromophore.json` [solid Jovian chromophore]: "… for an unidentified colouring
+      material (Braude et al. 2020), not a laboratory measurement" becomes "… for its unidentified
+      colouring material, not a laboratory measurement".
+    - `mars-regolith-simulant.json` [solid Fe-rich basalt]: "a Mars regolith simulant stands in
+      for Fe-rich basalt: MGS-1's absorption, retrieved by Martikainen et al. 2023 with its real
+      index fixed at 1.5, since no open visible index of an Fe-rich basalt was found" becomes
+      "the absorption of MGS-1, a Mars regolith simulant, as retrieved with its real index fixed at
+      1.5, stands in, since no open visible index of such a basalt was found".
+    - `sodium-sulphide.json` [solid Na2S]: "a computed index: Khachai et al. 2009's
+      first-principles calculation of crystalline Na2S, since no measured visible optical
+      constants of Na2S were found; …" becomes "a computed index, from a first-principles
+      calculation of the crystal, since no measured visible optical constants were found; …", the
+      rest unchanged.
+
+    Four depart from the brief's leans, which were written to read alone, to read after their head
+    (§8.3: no name repeated straight after it, no second colon where a comma or "since" serves),
+    and from the reviews:
+    - NH₃ ice's says first what is drawn, the published real index and k = 0, and ends on the
+      cause, where the lean stacked a second colon, named NH3 ice again and ended on "its real
+      index is the published one", which the body list would follow (the UX review). "Published
+      with that index" ties the filled k to the paper the index is drawn from, as "theirs" did,
+      and "a published real index" claims no other is unpublished: the file's source names a
+      second visible n, at 670 nm (the science check).
+    - CaTiO₃'s departs from §8.3's own example, "since its published visible k is …": after the
+      head that reads as every published visible k of CaTiO3, and the file's source names two
+      visible measurements it could not read, an optical density and an ellipsometry (the science
+      check). "It is drawn with a published visible k that is …" claims only the k drawn.
+    - The basalt's puts what stands in first, "the absorption of MGS-1, …, as retrieved with its
+      real index fixed at 1.5", so that "since" follows "stands in" and gives the reason MGS-1
+      stands in, not the reason n was fixed (the UX review); "such a basalt" replaces the lean's
+      repeated name.
+    - Na₂S's drops its colon and its repeated formula.
+
+    Each citation stays in its file's `paper` (Martonchik, Orton and Appleby 1984; Ueda et al.
+    1998; Irwin et al. 2022; Braude et al. 2020; Martikainen et al. 2023; Khachai et al. 2009),
+    which no screen shows, and a test holds the six papers to their authors and years.
+
+  - _The head_ (§8.3). `materialApproximations` puts `phasedName(file.key, file.phase)` and `: `
+    before a reason that is the resolved file's own `standIn`, which `resolveMaterial` passes on
+    unchanged; the texts `resolveMaterial` builds, a named analogue's and the generic stand-in's,
+    are never a file's, so they stand as written, as liquid O₂'s absorption line does. On the
+    plate: "Solid Jovian chromophore: an effective index retrieved from Jupiter's spectrum for its
+    unidentified colouring material, not a laboratory measurement, for KX 4417 /5". Every
+    stand-in file's own text takes it: sixteen files' `standIn`, which with liquid O₂'s
+    `absorptionStandIn`, headed already, are §8.3's seventeen. Tested: liquid CO's and the
+    chromophore's reasons, and the NH3-ice, CaTiO3, liquid-CO and liquid-H2S decks', take the
+    head; the SO2-ice analogue's, the liquid chromophore's analogue (drawn with the solid's file, a
+    stand-in, whose own text it does not give) and the generic stand-in's do not; and liquid O₂'s
+    absorption line stands as the existing tests pin it (`materials.test.ts`'s liquid O₂
+    `describe`, `assembleAerosols.test.ts`'s `O2_REASON`). `resolveMaterial`'s and the files' own
+    `standIn` are unchanged, and no other test pinned a file's own reason as the plate shows it.
+  - _The pattern_ (`materials.test.ts`'s `CITATION`; a deviation from the brief's lean, from the
+    TypeScript review):
+    `/\bet al\b|(?<![\d.,])(?:19|20)\d{2}(?!\s?(?:nm|µm|K)\b)[a-z]?(?!\d|[.,]\d)/u`. The lean's
+    year arm, `(?:19|20)\d{2}[a-z]?(?![\d.,])(?!\s?(?:nm|µm|K)\b)`, missed a year that ends a
+    clause ("Smith 2020," or "Smith 2020.") and took "1950nm" for a year, its `[a-z]?` eating the
+    unit's first letter; the arm as built reads the unit first and refuses only a digit, or a
+    decimal point or comma before one, after the year. It holds every file's `name`, `standIn`
+    and `absorptionStandIn`; the two player-text tests before it read no `absorptionStandIn`. At
+    the base it matched the six texts and no other, and the test failed on them before the edit,
+    run once by hand. Its own cases, in `describe("the citation pattern")`, take "Martonchik et
+    al.'s", "(Irwin et al. 2022)", "Khachai et al. 2009's", "(Smith 2020)", "Smith 2020," and
+    "Smith 2020." for citations, and "1.2015 at 514.5 nm", "at 1950 nm", "at 2000 K", "1,950 nm",
+    "at 1950nm" and "2000.5" for none: the brief's eight, and four more. It cannot see an author
+    named without "et al" or a year, as in "Tazaki and Tanaka's".
+  - _The tests' place_ (a deviation from the brief). The brief puts the new test in
+    `describe("the material files")`, beside the player-text tests; as built those two sit in
+    `describe("refractiveIndex")`. The new tests go at the end of "the material files", the
+    describe the brief names, the pattern's own cases in a `describe` of their own within it.
+  - _Other citations on the plate._ None found in the 47 other files' `name`, `standIn` and
+    `absorptionStandIn`, in the texts `resolveMaterial` builds, or in the phase tables' text: their
+    `particles` ("TAMUdust2020's ensemble …", which the pattern would take for a year) reaches no
+    reason.
+- **Deferred findings (2026-10-13 rule)** (R08.T10.e). Recorded and deferred: each leaves the
+  algorithm and every contract as they are. The first three are for §8.3's later voice pass.
+  - _`solid` before a particle or a rock._ `phasedName` puts `solid` before a name that already
+    names a particle or a rock: `solid Jovian chromophore`, `solid ice-giant haze` and
+    `solid Fe-rich basalt` on the plate since R08.T10.e, and `solid tholin particles` before it
+    (`assemble.ts`'s particle notes).
+  - _The other ten texts after their head._ The stand-in texts R08.T10.e did not reword repeat
+    their name or stack a colon after it:
+    - straight after the head: `Liquid S8: a constant index: liquid S8's real index …`,
+      `Solid S8: a constant index: crystalline S8's …` and
+      `Liquid ultraviolet-absorbing H2SO4: an empirical absorber: H2SO4 droplets …`;
+    - later in the line: NH4SH ice's, CO ice's, N2 ice's and O2 ice's ("… since no open visible
+      optical constants of CO ice were found: 1.310 at 380 nm …"), and H2S ice's, liquid CO's and
+      liquid H2S's ("… since its measured values contradict themselves: 1.2213 at 514.5 nm …").
+  - _"Open"_ (the UX review). "No open visible index", in the basalt's text, "no open" optical
+    constants or measurement in CO ice's, N2 ice's, O2 ice's and both S8 texts, and "measured
+    openly" in H2S ice's mean openly licensed, which an operator may read as unresolved or as
+    available. Lean: "openly published" in all seven together, not in one alone.
+  - _The ice-giant haze's one index from two_ (the science check, predating R08.T10.e). Its text
+    and name read as one retrieval from Uranus's and Neptune's spectra; its `reduction` takes the
+    geometric mean of each planet's own retrieved k, which differ by up to a factor of 29 over
+    300–800 nm.
+  - _Own text by equality_ (the TypeScript review). `materialApproximations` tells a file's own
+    text from the texts `resolveMaterial` builds by its equality with the file's `standIn`, which
+    holds while no built text is a file's. A `kind` on `ResolvedMaterial` (its own file, a named
+    analogue, the generic stand-in) would make the choice a type; the brief added no field.

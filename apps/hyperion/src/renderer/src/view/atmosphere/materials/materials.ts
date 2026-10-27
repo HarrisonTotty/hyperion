@@ -179,7 +179,12 @@ export interface MaterialIndexFile {
   readonly licence: string;
   /** How the values were brought onto the grid, with every exception. */
   readonly reduction: string;
-  /** For a stand-in file, what stands in and why. */
+  /**
+   * For a stand-in file, what stands in and why. Player text, shown as an
+   * `ATMOSPHERE: APPROXIMATE` reason after the file's phase and name
+   * ({@link materialApproximations}), so it cites no paper: the file's `paper`, which no screen
+   * shows, holds the citation (R08.T10.e).
+   */
   readonly standIn: string | undefined;
   /**
    * For a file whose colour rests on no measurement of the material though its index does, a
@@ -731,6 +736,10 @@ export interface MaterialApproximation {
  * collects (Design note 12). A deeper mode does not reach the picture, so it is not reported.
  *
  * @remarks
+ * A stand-in file's own text ({@link MaterialIndexFile.standIn}) takes the file's phase and name
+ * first, `liquid CO: a non-absorbing liquid …`, since the text need not name its material
+ * (`decision-r08-approximate-plate.md` §8.3; R08.T10.e). A named analogue's and the generic
+ * stand-in's reasons, which {@link resolveMaterial} writes, name it already and stand as written.
  * A file drawn whose colour rests on its gas's absorption (its
  * {@link MaterialIndexFile.absorptionStandIn}, liquid O₂'s) gives a reason of its own under the same
  * rule, its phase and name first (`signoff-12.md`, item 38(c)), whatever its provenance.
@@ -750,10 +759,19 @@ export function materialApproximations(
       continue;
     }
     const resolved = resolveMaterial(layer.material, layer.form);
-    if (resolved.provenance === "standIn") {
-      out.push({ material: layer.material, reason: resolved.standIn ?? "a stand-in" });
-    }
     const drawn = resolved.file;
+    if (resolved.provenance === "standIn") {
+      const reason = resolved.standIn ?? "a stand-in";
+      // The file's own text is the one resolveMaterial passes on unchanged; the texts it builds
+      // (a named analogue's, the generic stand-in's) are never a file's.
+      out.push({
+        material: layer.material,
+        reason:
+          drawn !== undefined && reason === drawn.standIn
+            ? `${phasedName(drawn.key, drawn.phase)}: ${reason}`
+            : reason,
+      });
+    }
     if (drawn?.absorptionStandIn !== undefined) {
       out.push({
         material: layer.material,
