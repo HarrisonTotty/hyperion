@@ -91,12 +91,20 @@ export interface KDistributionTable {
   readonly chiHeld: ReadonlyArray<ReadonlyArray<boolean>>;
   /**
    * Each broadening gas's half-widths over air's, by registry key, with `self` for the species
-   * itself (HITRAN2024's γ_self, γ_H2, γ_He, γ_CO2 and γ_H2O where it gives them). A gas not listed
-   * broadens as air does. Unless it is N₂, O₂ or Ar it is then `estimated` where it has a permanent
-   * dipole of at least H₂S's ({@link DIPOLAR_BROADENERS}) or the table has two variants, and is
-   * otherwise weighed by R08.T10.c's effect bound ({@link Broadening.widthlessShare}). Without
-   * `self`, the species is such a gas for its own share (R08.T10.d): NH₃'s table and the atoms'
-   * tables key none, H's holding its own width under `H` ({@link broadeningFactor}).
+   * itself (HITRAN2024's γ_self, γ_H2, γ_He, γ_CO2 and γ_H2O where it gives them).
+   *
+   * @remarks
+   * A gas not listed broadens as air does. Unless it is N₂, O₂ or Ar it is then `estimated` where
+   * it has a permanent dipole of at least H₂S's ({@link DIPOLAR_BROADENERS}) or the table has two
+   * variants, and is otherwise weighed by R08.T10.c's effect bound
+   * ({@link Broadening.widthlessShare}).
+   *
+   * The species' own width is `self`, or where the table keys no `self`, the entry under the
+   * species' own key, as H's table holds Barklem, Piskunov and O'Mara 2000b's self-broadening;
+   * `self` wins where both are listed, as on H₂'s table, whose `self` offset is −0.252 and whose
+   * `H2` entry's is 0. With neither, the species' own share is a gas with no width (R08.T10.d):
+   * `estimated` for NH₃, a dipolar gas, and for a neutral atom of {@link SELF_BROADENED_ATOMS}, and
+   * weighed by the bound for an ion (Mg⁺, Si⁺) ({@link broadeningFactor}).
    */
   readonly broadening: ReadonlyMap<string, number>;
   /**
@@ -678,6 +686,38 @@ export const DIPOLAR_BROADENERS: ReadonlySet<string> = new Set([
   "FeH",
 ]);
 
+/**
+ * The neutral atoms whose lines a committed table holds: each a species whose own share leaves its
+ * lines `estimated` at any share above 0 where its table holds no width of its own, as a gas of
+ * {@link DIPOLAR_BROADENERS} does.
+ *
+ * @remarks
+ * `decision-r08-approximate-plate.md` §8 (2026-10-27; R08.T10.d). A neutral atom's resonance lines
+ * are broadened by its own kind (resonance broadening) far beyond the [0, 2] range of its H₂ width
+ * that the widthless gases' effect bound takes. Resonance-broadening theory, which Weller et al.
+ * 2011 (J. Phys. B 44, 195006) test on Rb D1, gives Na D full widths of about 1.6 and
+ * 2.4 × 10⁻¹⁸ cm⁻¹ cm³, 44–129 times Na D's H₂ widths over 500–3,000 K by Allard et al. 2019's
+ * eqs. (7) and (8) (A&A 628, A120), or half that if their width is a half width. K's D lines and
+ * Cr's and Fe's resonance lines are alike (Lewis 1980, Phys. Rep. 58, 1). "No width of its own"
+ * is no `self` and no entry under the species' own key: H's table holds Barklem, Piskunov and
+ * O'Mara 2000b's self-broadening under `H`, so H takes it, its basis marking it `estimated`. The
+ * ions (Mg⁺, Si⁺) keep the bound: their lines in 380–760 nm are not resonance lines of their ground
+ * state, or only weakly, and the widths' range science check covers them. Every neutral atom's
+ * table is `estimated` already, by `measuredBelowGrid` or its basis, so no label moves.
+ *
+ * A task that commits a table for another neutral atom of the registry (`kind: "atom"`) adds it here
+ * in the same commit.
+ */
+export const SELF_BROADENED_ATOMS: ReadonlySet<string> = new Set([
+  "Cr",
+  "Fe",
+  "H",
+  "K",
+  "Mg",
+  "Na",
+  "Zn",
+]);
+
 /** A species' broadening in a mixture ({@link broadeningFactor}). */
 export interface Broadening {
   /** Σ_b x_b r_b (296 ÷ T)^(n̄_b − n̄_air), the broadening pressure over the pressure. */
@@ -686,14 +726,16 @@ export interface Broadening {
   readonly selfShare: number;
   /**
    * Whether it rests on a gas of {@link DIPOLAR_BROADENERS} the table holds no width for, the
-   * species itself where the table holds no `self` width (R08.T10.d), or, for a two-variant table,
+   * species itself among them, or on the own share of a neutral atom of
+   * {@link SELF_BROADENED_ATOMS} with no width of its own (R08.T10.d), or, for a two-variant table,
    * on any gas but the species, N₂, O₂ and Ar, whose far wing takes CO₂–N₂'s χ, `estimated`.
    */
   readonly estimated: boolean;
   /**
    * ε, the share of the broadening pressure that rests on the other gases the table holds no width
    * for, each taken as air (r 1), at any share, the species itself among them where the table holds
-   * no `self` width (R08.T10.d): Σ_j x_j ÷ Σ_b x_b r_b (296 ÷ T)^(Δn_b), j over those gases and b
+   * no width of its own, neither `self` nor its own key's (R08.T10.d), save a neutral atom's
+   * ({@link SELF_BROADENED_ATOMS}): Σ_j x_j ÷ Σ_b x_b r_b (296 ÷ T)^(Δn_b), j over those gases and b
    * over the mixture, so that a gas whose own ratio lies anywhere in [0, 2], the range item 1a
    * assumes, moves the broadening pressure by at most this share of itself
    * (`decision-r08-approximate-plate.md`, item 1a). 0 where there are none, and on a two-variant
@@ -706,7 +748,8 @@ export interface Broadening {
 /**
  * The broadening of a species' lines in a mixture at a temperature: Σ_b x_b r_b (296 ÷ T)^(Δn_b)
  * over its gases, r_b and Δn_b the table's ratio and exponent offset for gas b (air's 1 and 0 for a
- * gas it does not list) and r_self's for the species' own mole fraction, and the self share of it
+ * gas it does not list) and the species' own width's (`self`, else its own key's) for its own
+ * mole fraction, and the self share of it
  * (`decision-r08-t4d-kdist.md` §5.3; `decision-r08-t4d-kdist-chain.md` §§7, 13). The mole
  * fractions are normalised to sum to 1.
  *
@@ -714,14 +757,18 @@ export interface Broadening {
  * A gas the table holds no width for, other than N₂, O₂ and Ar, is taken as air, at any share. It
  * makes the species `estimated` where it is one of {@link DIPOLAR_BROADENERS} or the table has two
  * variants, and otherwise adds its share to {@link Broadening.widthlessShare}, for the effect bound
- * (R08.T10.c). A table with no `self` width counts its own species so, as a widthless broadener of
- * itself (R08.T10.d; `decision-r08-approximate-plate.md` §6, 2026-10-27): NH₃'s, which lists H₂ and
- * He alone, is `estimated` wherever its own share is above 0, and the atoms' and ions' tables,
- * which key no `self`, add their own share to ε. H's table holds its own width, Barklem, Piskunov
- * and O'Mara 2000b's self-broadening by H atoms, under the key `H`, which the own share's `self`
- * lookup does not read (R08.T10.d's deferred findings, _H's own width_). No neutral atom's lines
- * reach the effect bound yet: H's basis is `estimated`, and the other neutral atoms' tables are
- * never `measured` below their grid.
+ * (R08.T10.c).
+ *
+ * The species' own share takes `self`, or where the table lists no `self`, the entry under the
+ * species' own key, for both the ratio and the exponent offset: H's table holds Barklem, Piskunov
+ * and O'Mara 2000b's self-broadening by H atoms so, 2.198 times H₂'s; `self` wins where a table
+ * lists both, as H₂'s and CO₂'s do (`decision-r08-approximate-plate.md` §8, item 1, 2026-10-27),
+ * which keeps H₂'s self exponent offset, −0.252, rather than its `H2` entry's 0. A table
+ * with neither counts its own species as a widthless broadener of itself (R08.T10.d; the same
+ * decision's §6): NH₃'s, which lists H₂ and He alone, is `estimated` wherever its own share is
+ * above 0, as a dipolar gas's, and so is a neutral atom's of {@link SELF_BROADENED_ATOMS} (§8, item
+ * 2), whose resonance lines its own kind broadens far more; an ion's tables (Mg⁺'s, Si⁺'s) add
+ * their own share to ε.
  *
  * @param moleFractions - The mixture's gases by registry key, the species' own among them.
  * @param temperatureK - The profile's temperature, K.
@@ -747,12 +794,15 @@ export function broadeningFactor(
       throw new RangeError(`a broadening gas's mole fraction is ${x}, not finite and at least 0`);
     }
     const own = gas === table.species;
-    const key = own ? "self" : gas;
+    // H's table keys its self-broadening under `H`, not `self`; `self` first keeps H₂'s own
+    // exponent offset (−0.252, not its `H2` entry's 0).
+    const key = own && table.broadening.has("self") ? "self" : gas;
     const ratio = table.broadening.get(key);
     const foreign = x > 0 && !own && !AIR_GASES.has(gas);
-    // The species' own share counts too where the table holds no `self` width (R08.T10.d).
+    // The species' own share counts too where the table holds no width of its own (R08.T10.d).
     const noWidth = x > 0 && !AIR_GASES.has(gas) && ratio === undefined;
-    const bounded = noWidth && !twoVariant && !DIPOLAR_BROADENERS.has(gas);
+    const unbounded = DIPOLAR_BROADENERS.has(gas) || (own && SELF_BROADENED_ATOMS.has(gas));
+    const bounded = noWidth && !twoVariant && !unbounded;
     estimated ||= (foreign && twoVariant) || (noWidth && !bounded);
     const atT = (ratio ?? 1) * (296 / temperatureK) ** (table.broadeningExponents.get(key) ?? 0);
     total += x;
