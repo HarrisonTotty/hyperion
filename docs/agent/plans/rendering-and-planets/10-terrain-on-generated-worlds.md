@@ -14112,3 +14112,227 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     leaves `Snow` apart, so the binary does not check it. The brainstorm's "each ice lies where the
     coarse pass placed it" (Materials) may be read to cover perennial snow too, so whether snow
     should lie only where the field names ice is a question for main, then T1.b or R09.
+- **Deviations in R10.T4.a, as built** (2026-10-26; lane r10-t4a, on `rendering-and-planets` at
+  `e3d4423e`; `GENERATOR_VERSION` 23, no bump). A new test binary and its fixture; nothing
+  generated moves.
+  - _Files._ `crates/hyperion-sim/tests/level_bound_worlds.rs`, one slow test,
+    `the_level_bound_holds_on_every_sample_world_and_the_fixture_holds_its_figures`
+    (`#[ignore = "slow: …"]`), over all six of R09.T16's `sample_worlds()`, the fast four and both
+    slow Earths in one test, since one fixture holds them all; and
+    `apps/hyperion/src/renderer/src/view/terrain/fixtures/level-bounds.json` (95 kB, 2,560 lines),
+    which the test writes under `HYPERION_BLESS=1` and otherwise holds to its figures byte for
+    byte, line ends aside, one key a line as Prettier lays JSON out (`prettier --check` passes; no
+    `.prettierignore` line). Per world: its name, radius, coarse, finest and complete levels, the
+    lowest and highest cell elevation of its field, and its point counts; `levels`, by n from 0 to
+    c (the complete level, the band limit's), `bound_m`, `sigma_m`, `sigma_rms_m`,
+    `contribution_low_m` and `contribution_high_m`; `measured`, by n below c, the figures below,
+    `null` where a level has none. The fixture's `description` defines each key.
+  - _Beyond the task text: a level table's heights._ T4.b counts patches through `selectPatches`
+    from this fixture, and selection culls by a level table's lowest and highest heights as well as
+    its bound (R05's stride-4 table; the worker's `level_table`). So the fixture also holds what the
+    worker makes those heights of: the field's lowest and highest cell elevation, every cell, and
+    each level's `LevelBounds::contribution_range_m`. The spacing column is the figure's alone.
+    T4.b composes the rows as `level_table` does (its micrometre slack, the parent level's range
+    and the datum).
+  - _At 23, re-recorded at 24 (main's process call)._ The figures are generator 23's. The coarse
+    fields move at 24 by plan 14's T53.a water term, so from the bump the slow test fails its
+    compare until the fixture is re-blessed, and `just bless` runs no ignored test: the bless is
+    the slow test by name with `HYPERION_BLESS=1` (the module documentation's command). R10.T15.b
+    re-records the figures at 24; until then the bump's bless leaves the slow test red unless main
+    adds the fixture to `prebless-24-list.md` with that command (asked). The fixture's description
+    says so while the version is 23 (`version_note`), and plain "Measured at generator_version v"
+    at any other, so a bless at 24 needs no edit.
+  - _What it asserts._ On each world, at 10⁴ uniform points (25 at random in each of 400 distinct
+    random cells of the coarse level) and 75 to 1,075 extra ones (25 in each of the cube's three
+    seam cells and of up to 40 cells under coarse craters' rims, R09.T8's `rim_cells`),
+    |h(n) − h(m)| ≤ `level_bound_m(n)` for every n below c and every m from n + 1 to c, and every
+    level from c + 1 to 24 gives c's height to the bit; the bound is zero from c and positive and
+    finite below it; and at every vertex of every sampled patch, |h(n) − h(c)| ≤
+    `level_bound_m(n)`. Nothing came near the bound (below).
+  - _What it measures, as built_ (the task text names the figures, not their definitions).
+    - _The 99.9th percentile_ is of |h(n) − h(c)| over `level_bound_m(n)`, by nearest rank over
+      the uniform points alone: the omitted sum Design note 5's 0.3–0.5 is about, and R05's
+      mesh-to-finest. The extra points join the bound and the worst case only, so that the rims'
+      cells do not weigh the quantile. Beside it, the same gap over 4σ of the point's own cell, σ
+      `Synthesiser::omitted_rms` at n (a Gaussian's 99.9th percentile is 0.82 of 4σ).
+    - _The worst case_ is the largest |h(n) − h(m)| over the bound at any point and finer level,
+      with the term whose change between n and m made most of it: relief, channels, small craters
+      or coarse rims, through each term's public evaluator (`Relief::at`, `Channels::incision_at`,
+      `SmallCraters::at`, `CoarseRims::at`) at the level's `LevelSet`, since
+      `Synthesiser::contributions` is crate-private. The four changes are asserted to sum to
+      h(n) − h(m) within 10⁻⁶ m.
+    - _The per-patch maximum_ is the largest |h(n) − h(c)| over a patch's 4,225 vertices, n's
+      heights from `bake_patch` and c's from `height_at`: R05's mesh-to-finest, against c, not every
+      finer m, which the points cover. Each patch's own σ is the largest `omitted_rms` at n over the
+      cells its vertices lie in (T6.b's per-patch σ).
+    - _The body's σ_ (the fixture's `sigma_m` and `sigma_rms_m`, for T4.b's body-wide column) is
+      the largest `omitted_rms` at n, and the root of the mean square, over up to 16,384 cells of
+      the coarse level, every k-th in index order: every cell at coarse level 5 (Ceres-like), every
+      2nd at 6, 6th at 7 and 24th at 8. T4.b chooses which it reads, or neither.
+    - _The spread between the body-wide and a per-patch bound_ is, by level, the largest per-patch
+      maximum over the lower median of the level's four, `null` where that median is zero; a
+      world's summary below takes the lower median over its levels too.
+  - _Four patches a level, not R05's 32_ (`PATCHES`; level 0's too, four of its six). A patch costs
+    about 5–8 s: each of its 4,225 queries at c draws the finest crater octaves' cells afresh,
+    about 1.4 ms a query on the Ceres-like world (a probe, never committed: 32 a level took 47 s
+    for level 0's six patches and 204 s at level 2; provisional, at a 1-minute load of 5 to 18
+    beside other lanes' gates). So each world has 60 to 76 patches, and its shares below carry a
+    sampling error of about ±0.05.
+  - _The body's σ over a sample of cells_ (`SIGMA_CELLS`), not every cell: an `omitted_rms` took
+    about 70 µs on the Ceres-like world (the craters' and rims' closed forms; provisional, as
+    above), so every cell of a level-8 world at 20 levels would take some 550 to 1,100 s (a first
+    run that read them all was stopped after more than 1,000 s of one thread). The largest over
+    the sample may sit a little under the body's true largest at coarse levels 7 and 8.
+  - _The acceptance command_, `just test-slow -E 'binary(level_bound_worlds)'`, builds every slow
+    test of the workspace and runs under the heavy lock. As main directed, it ran by name instead,
+    capped (`MemoryMax=6G`, `CPUQuota=400%`) and through build-slot, with the filter and profiles
+    `test-slow` gives, by name: `cargo nextest run -p hyperion-sim --features testing` with
+    `--cargo-profile slow-test --profile slow --run-ignored only --test level_bound_worlds` and
+    `-E 'binary(level_bound_worlds)'`.
+  - _Threads._ Natively the test measures each world on a thread, with its body σ on one more and
+    its points and patches read on four more (`THREADS`), every draw made first on the world's
+    thread (`draw`), up to about 30 busy threads in one nextest slot. The figures do not depend on
+    the threads: run 5, with the reads spread over threads, reproduced run 4's fixture, whose
+    reads were on each world's one thread, byte for byte. The binary has no `threads-required`
+    reservation, since a change to `.config/nextest.toml` widens any gate to every crate's tests:
+    a lean for main's next infra batch. On WebAssembly the reads would run in turn; no suite runs
+    the binary there (it needs the sim's `testing` feature).
+  - _Times and memory_ (provisional: shared machine, beside other lanes' gates). Run 4, each
+    world's reads on one thread: 2,121.6 s at a 1-minute load of 6.6 to 15.1, the Mars-like
+    world's thread the tail (about 2,100 s of CPU; the locked Earth was done in about 200 s). Run 5,
+    the reads spread over threads, in compare: 812.8 s at a load of 3.8 to 6.2, 3,200 s of CPU,
+    peak 3.46 GB. Run 6, the final code (the review's fixes and the level table's columns), with
+    `HYPERION_BLESS=1`: 865.8 s at a load of 10.5 to 4.7, 3,400 s of CPU, peak 3.59 GB; every
+    figure of run 4's fixture came out unchanged, and only the new keys and the description moved.
+    Run 7, the final code in compare, the acceptance run: 891.3 s at a load of 4.3 to 7.9, 3,490 s
+    of CPU, peak 3.31 GB.
+- **Recorded per world and level (R10.T4.a)**, from `level-bounds.json` at 23: ε is
+  `level_bound_m(n)`, σ_body the fixture's `sigma_m`, and the worst term r (relief), c (channels),
+  k (small craters) or m (coarse rims). No figure is near a blocker: no point or vertex passes the
+  bound, and every value is finite.
+  - _Earth-like_ (coarse level 8, c = 19; 10,000 uniform and 100 extra points; cells from −10,152 to
+    8,381 m): ε 88.9 km at n = 0 to 1.43 m at 18; σ_body 1.2 km (RMS 290 m) to 0.10 mm. By n = 0 to
+    18:
+    p99.9/ε .027 .027 .027 .029 .030 .030 .039 .043 .034 .029 .023 .023 .024 .033 .034 .042 .049
+    .056 .000;
+    p99.9/4σ_cell 19.93 19.93 19.93 19.93 19.93 3.32 2.57 2.44 2.16 1.39 1.39 1.62 1.80 1.37 1.16
+    1.17 0.95 1.20 0.00;
+    worst/ε .037c .037c .037c .039c .040c .072c .055c .064r .061r .039r .039r .053k .065k .087k
+    .044r .056r .060r .081r .005k;
+    patch max/ε .032 .034 .034 .041 .047 .042 .026 .019 .026 .049 .039 .046 .038 .016 .035 .053
+    .049 .058 .000;
+    spread 1.11 1.38 1.38 3.72 5.36 5.64 1.62 1.80 3.00 2.23 2.84 4.80 1.91 4.84 8.45 10.36 8.39
+    1.60 — (lower median 2.840, past 1.5 at 15 of 18 levels);
+    patches past 4σ own (of 4) 0 0 0 1 0 1 0 1 3 2 2 3 1 2 0 1 0 0 0, 17 of 76 in all; past 4σ_body
+    0 of 76.
+  - _Mars-like_ (coarse level 7, c = 18; 10,000 uniform and 1,075 extra points; cells from −6,480 to
+    22,487 m): ε 110.0 km at n = 0 to 13 m at 17; σ_body 924 m (RMS 347 m) to 1.58 mm. By n = 0 to
+    17:
+    p99.9/ε .019 .019 .016 .017 .028 .033 .047 .044 .038 .025 .013 .015 .011 .008 .006 .005 .003
+    .001;
+    p99.9/4σ_cell 1.21 1.21 1.25 1.39 1.85 1.93 2.87 3.28 3.13 2.60 2.15 3.33 2.16 2.17 1.82 1.77
+    1.04 1.06;
+    worst/ε .028k .028k .029k .025k .039k .056k .059k .062k .046k .038k .025k .025k .022k .027k
+    .030k .018k .014k .005k;
+    patch max/ε .025 .025 .024 .024 .041 .060 .058 .063 .058 .037 .023 .024 .012 .017 .010 .012
+    .005 .000;
+    spread 1.21 1.33 1.08 1.23 1.29 1.84 1.09 1.71 1.50 1.73 1.96 2.98 1.36 1.61 4.81 3.27 1.29
+    41.54 (lower median 1.496, past 1.5 at 9 of 18 levels);
+    patches past 4σ own (of 4) 0 0 4 4 4 4 4 4 4 4 3 4 4 4 2 2 2 0, 53 of 72 in all; past 4σ_body
+    41 of 72.
+  - _Moon-like_ (coarse level 6, c = 17; 10,000 uniform and 1,075 extra points; cells from −8,769 to
+    6,704 m): ε 87.5 km at n = 0 to 7.00 m at 16; σ_body 1.5 km (RMS 726 m) to 1.04 mm. By n = 0 to
+    16:
+    p99.9/ε .038 .043 .046 .048 .049 .040 .039 .039 .029 .024 .019 .017 .013 .012 .008 .006 .001;
+    p99.9/4σ_cell 1.23 1.31 1.32 1.50 1.79 1.90 2.00 2.17 2.06 2.39 2.16 1.80 1.31 1.15 0.84 0.70
+    2.25;
+    worst/ε .045k .049k .051k .061k .067k .057k .050k .063k .053k .038k .046k .049k .036k .043k
+    .034k .013k .009k;
+    patch max/ε .067 .056 .058 .067 .073 .059 .042 .072 .034 .038 .023 .057 .012 .008 .033 .025
+    .000;
+    spread 1.37 1.08 1.21 1.11 1.33 1.55 1.29 1.79 1.49 1.13 2.10 2.62 1.22 1.02 2.48 3.55 2.92
+    (lower median 1.370, past 1.5 at 7 of 17 levels);
+    patches past 4σ own (of 4) 1 4 4 4 4 4 4 4 4 4 4 4 3 0 3 1 0, 52 of 68 in all; past 4σ_body 49
+    of 68.
+  - _Ceres-like_ (coarse level 5, c = 15; 10,000 uniform and 1,075 extra points; cells from −7,238
+    to 6,671 m): ε 43.1 km at n = 0 to 6.89 m at 14; σ_body 604 m (RMS 372 m) to 1.34 mm. By n = 0
+    to 14:
+    p99.9/ε .046 .053 .056 .064 .055 .047 .035 .030 .025 .023 .015 .014 .011 .006 .002;
+    p99.9/4σ_cell 1.39 1.47 1.63 2.44 2.53 2.43 2.09 2.22 1.85 1.85 1.32 1.31 1.12 0.71 2.50;
+    worst/ε .063k .074k .082k .106k .071k .068k .051k .062k .051k .068k .044k .041k .047k .011k
+    .014k;
+    patch max/ε .068 .083 .073 .069 .085 .052 .045 .059 .039 .031 .031 .010 .020 .007 .002;
+    spread 1.05 1.32 1.12 1.14 1.39 1.40 1.59 2.37 2.15 1.92 1.79 1.10 2.34 1.04 231.80 (lower
+    median 1.398, past 1.5 at 7 of 15 levels);
+    patches past 4σ own (of 4) 4 4 4 4 4 4 4 4 4 3 4 0 2 0 1, 46 of 60 in all; past
+    4σ_body 46 of 60.
+  - _Europa-like_ (coarse level 6, c = 17; 10,000 uniform and 75 extra points; cells from −3,165 to
+    3,016 m): ε 14.6 km at n = 0 to 4.85 m at 16; σ_body 54 m (RMS 54 m) to 1.79 mm. By n = 0 to 16:
+    p99.9/ε .040 .057 .074 .060 .044 .056 .023 .025 .029 .035 .047 .045 .036 .028 .028 .028 .002;
+    p99.9/4σ_cell 2.70 2.70 2.70 2.07 1.54 2.04 0.88 1.06 1.14 1.35 1.55 1.39 1.02 0.81 0.76 0.71
+    1.58;
+    worst/ε .050k .070k .091k .117k .110k .134k .102k .097k .124k .089k .088k .090k .071k .045k
+    .036k .035k .022k;
+    patch max/ε .057 .074 .060 .105 .088 .057 .059 .128 .057 .080 .086 .046 .056 .043 .033 .034
+    .004;
+    spread 1.12 1.74 2.63 2.33 3.55 1.84 1.39 2.08 1.22 2.22 1.78 1.30 1.60 1.38 1.10 1.11 50.07
+    (lower median 1.743, past 1.5 at 10 of 17 levels);
+    patches past 4σ own (of 4) 4 4 1 3 2 4 3 4 4 4 4 3 3 1 0 0 1, 45 of 68 in all; past 4σ_body 45
+    of 68.
+  - _locked Earth-like_ (coarse level 8, c = 19; 10,000 uniform and 100 extra points; cells from
+    −10,176 to 8,416 m): ε 88.9 km at n = 0 to 1.43 m at 18; σ_body 1.2 km (RMS 244 m) to 0.10 mm.
+    By n = 0 to 18:
+    p99.9/ε .024 .024 .024 .025 .026 .027 .035 .040 .036 .029 .025 .024 .024 .031 .033 .040 .047
+    .055 .000;
+    p99.9/4σ_cell 8.31 8.31 8.31 8.31 8.31 1.87 1.88 2.11 1.05 1.01 1.11 1.27 1.63 1.23 1.11 1.01
+    1.16 1.04 0.00;
+    worst/ε .039c .039c .039c .041c .042c .055c .059c .063r .062r .040r .033k .048k .047k .099k
+    .049r .046r .052r .076r .005k;
+    patch max/ε .033 .033 .019 .031 .030 .050 .046 .058 .053 .019 .047 .032 .054 .035 .058 .052
+    .076 .058 .000;
+    spread 1.50 1.90 1.13 1.91 3.50 3.41 6.59 12.61 1.91 2.56 1.57 1.55 9.06 1.25 14.69 11.33 13.37
+    9.38 — (lower median 2.562, past 1.5 at 16 of 18 levels);
+    patches past 4σ own (of 4) 0 0 0 0 0 0 1 3 3 4 1 1 3 0 1 0 0 0 0, 17 of 76 in all; past 4σ_body
+    0 of 76.
+- **Deferred findings (2026-10-13 rule) (R10.T4.a)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built, and selection keeps the hard bound until T4.b).
+  - _The stated bound is far looser than Design note 5 expected._ The 99.9th percentile over the
+    bound is 0.000–0.074 on every world and level, against the expected 0.3–0.5, and the worst
+    pair 0.005–0.134, about where R09's synthetic worlds stand (T7.j's record: 0.001–0.082). Patch
+    count goes as the inverse square of that ratio. At the typical 0.03 the hard bound draws about
+    1,100 times the patches of a perfect one, and at the 0.006–0.074 of most levels from about 180
+    to 28,000 times, more at the levels next to c, not Design note 5's four to eleven. At Earth's
+    coarse levels ε is 88.9 km where the realised worst is 3.3 km. The test does not split ε by
+    term; R09.T8.d's two loose terms (the channels' cap, and the rims' and craters' quantile) are
+    the likely bulk. The levers are T4.b's min(hard, 4σ) and R09's terms (T8.d's (b), the
+    channels held to the body's largest valley depth).
+  - _The deviations are heavy-tailed, so 4σ is no bound._ The 99.9th percentile over 4σ of the
+    point's cell passes 1 at most levels of every world (a Gaussian's is 0.82): 0.70–3.33 on the
+    cratered worlds, and on the Earths 8.3 (locked) and 19.9 at n = 0 to 4, where the worst cases
+    are the channels' (incision is deep where it is, and the level-keyed σ spreads it over its
+    cell). Per patch, the maxima pass 4σ of their own cells in 17 of 76 patches on each Earth
+    (0.22) but 45–53 of 60–72 on the Mars-, Moon-, Ceres- and Europa-like worlds (0.66–0.77); past
+    4σ_body, 0 on the Earths and 0.57–0.77 on the four. So `signoff-12.md` item 30's second
+    condition, at most one patch in three past 4σ, fails on four of the six worlds whichever σ
+    T4.b takes, well beyond the shares' ±0.05, which keeps the hard bound by the rule. For T4.b and
+    main.
+  - _A per-patch bound's condition is met on the realised proxy at most levels._ Design note 5
+    adopts a per-patch bound if body-wide and per-patch bounds differ by more than 1.5 times. The
+    realised spread passes 1.5 at 7 to 16 levels of every world, its lower median over the levels
+    2.84 and 2.56 on the two Earths, 1.74 on the Europa-like world, 1.40 and 1.37 on the Ceres- and
+    Moon-like ones, and 1.496 on the Mars-like one, just under the line. From four patches a level
+    the figure is coarse, it is a realised proxy for the stated bounds Design note 5 compares, and
+    the stated bound's looseness (the first finding) is the larger lever. For T4.b and main.
+  - _At the level below c the closed form says almost nothing is left._ σ_body at c − 1 is under
+    2 mm on every world (0.1 mm on the Earths), while the small craters still move heights there:
+    the worst gap is 0.005–0.022 of ε, 7 mm on the Earths to 11 cm on the Europa-like world, and
+    the 99.9th percentile over 4σ_cell is 1.06–2.50 on the Mars-, Moon-, Ceres- and Europa-like
+    worlds. Small in metres; for R09's crater closed forms (T7.h's sharpening at the last band).
+  - _The sample-world helpers are copied again._ This binary's name-seeded `sampler` is the third
+    copy (after `surface_ground_worlds.rs` and `surface_material_worlds.rs`), and its `repository`
+    the second (`substance_golden.rs`). A `sampler(seed, name)` in `tests/common/surface_worlds.rs`
+    and `repository` in `tests/common/mod.rs` would hold one each, a change to the shared helpers
+    this task leaves alone (its files are its own); for a follow-up with the siblings.
+  - _Design note 5 and the Risks bullet "The selection bound's calibration is ruled by its
+    numbers" still expect 0.3–0.5._ This record is append-only; a pointer there to the findings
+    above is main's.
