@@ -1,18 +1,21 @@
 /**
- * The smoke page's checks of the `disc cells` pass for every record (plan R07, R07.T8.e;
- * decision-r08-t11-frame §2 and §7): G11 on the GPU, each plan drawn through the pass and
+ * The smoke page's checks of the `disc cells` pass for every record (plan R07, R07.T8.e and
+ * R07.T8.f; decision-r08-t11-frame §2 and §7): G11 on the GPU, each plan drawn through the pass and
  * in-fragment in the same run, every channel within one `rgba16float` ulp and every alpha (the
  * interior's meter class) equal. The plans hold a 13 px body with air (R05's Earth's tables) as a
  * disc and as the mesh the view draws it as, and a 13 px disc under a half-surveyed two-class map,
- * which the pass now binds. The class map's disc is held to the CPU rasteriser too (G10).
+ * which the pass now binds (T8.e); a 220 px airless disc's limb, and a 96 px air body's limb in the
+ * mesh regime, which it now takes (T8.f); and one plan of four such bodies, three sets of textures
+ * and two limbs, so that a later set's jobs and a later limb's span rows are read. The large
+ * airless disc and the class map's disc are held to the CPU rasteriser too (G10).
  *
  * @remarks
  * The pass is exact, so an in-fragment draw where the pass was meant equals it too: a third draw of
  * each plan proves its pixels read the pass. Its sums are overwritten after the dispatch with a
  * sentinel far above any light drawn, and every pixel the draws must take from the pass shows it:
- * each pixel of a disc under 32 px that its draws' corner tests (`bodyDisc.wgsl`'s `disc_pixel`)
- * take in `f64` with a hundredth of a pixel to spare, so that `f32`'s rounding at the tests' edges
- * cannot decide it.
+ * each pixel of a disc under 32 px, and each limb pixel of a larger one, that the limb draw's
+ * corner tests (`bodyDisc.wgsl`'s `disc_pixel`) take in `f64` with a hundredth of a pixel to spare,
+ * so that `f32`'s rounding at the tests' edges cannot decide it.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
@@ -427,12 +430,62 @@ function casesOf(
       bodies: one({ diameterPx: 13, mapped, mesh: false, samples: [4, 4] }),
       twin: true,
     },
+    {
+      name: "a 220 px airless disc's limb",
+      viewport: { widthPx: 256, heightPx: 256 },
+      bodies: one({ diameterPx: 220, mesh: false, samples: [1, 4] }),
+      twin: true,
+    },
+    {
+      name: "a 96 px air body's limb in the mesh regime",
+      viewport: { widthPx: 128, heightPx: 112 },
+      bodies: one({ diameterPx: 96, atmosphere, mesh: true, samples: [1, 4] }),
+      twin: false,
+    },
+    {
+      name: "four bodies of three sets of textures in one plan",
+      viewport: { widthPx: 192, heightPx: 112 },
+      bodies: [
+        {
+          id: "0200080020000000.0011",
+          diameterPx: 13,
+          offsetPx: [-70.3, -25.2],
+          atmosphere,
+          mesh: true,
+          samples: [4, 4],
+        },
+        {
+          id: "0200080020000000.0012",
+          diameterPx: 40,
+          offsetPx: [-20.4, 15.3],
+          mapped,
+          mesh: false,
+          samples: [1, 4],
+        },
+        {
+          id: "0200080020000000.0013",
+          diameterPx: 48,
+          offsetPx: [45.2, 0.4],
+          mesh: false,
+          samples: [1, 4],
+        },
+        {
+          id: "0200080020000000.0014",
+          diameterPx: 13,
+          offsetPx: [80.1, -35.3],
+          mesh: false,
+          samples: [4, 4],
+        },
+      ],
+      twin: false,
+    },
   ];
 }
 
 /**
- * Checks that bodies with air and under a class map, disc and mesh, draw through the `disc cells`
- * pass what they draw in-fragment, and that their pixels read the pass (the module's remarks).
+ * Checks that bodies with air, under a class map and with large limbs, disc and mesh, draw through
+ * the `disc cells` pass what they draw in-fragment, and that their pixels read the pass (the
+ * module's remarks).
  */
 export async function checkCellPassEveryRecord(
   engine: RenderEngine,
@@ -487,7 +540,7 @@ export async function checkCellPassEveryRecord(
       results.push(result.text);
     }
     checks.check(
-      "R07.T8.e G11 air bodies and a class map's body, disc and mesh, drawn through the disc cells pass equal their in-fragment draws within one rgba16float ulp, and read the pass",
+      "R07.T8.e–f G11 air bodies, a class map's body and large discs' limbs, disc and mesh, alone and together, drawn through the disc cells pass equal their in-fragment draws within one rgba16float ulp, and read the pass",
       pass,
       results.join("; "),
     );

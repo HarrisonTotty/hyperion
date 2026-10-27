@@ -10,6 +10,7 @@ import {
   DISC_CELLS_PASS,
   type LitBodyInput,
 } from "../bodies/draw";
+import { packClassMap } from "../bodies/discSurface";
 import { rotationColumns } from "../bodies/smoothMesh";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
@@ -1088,7 +1089,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
     renderer.dispose();
   });
 
-  it("dispatches nothing where every disc is 32 px or more", async () => {
+  it("dispatches a disc of 32 px or more once, for its limb (R07.T8.f)", async () => {
     const engine = await countingRenderEngine();
     const renderer = new PhotorealRenderer(engine, "test view");
     await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
@@ -1096,10 +1097,36 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
       new RecordingView(),
       frameOfDiscs([bodyAcross(34, 0, "0200080020000000.0403")]),
     );
+    const cells = engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS);
+    expect([plan?.discs.map((disc) => disc.interiorSamples), cells.length]).toEqual([[1], 1]);
+    renderer.dispose();
+  });
+
+  it("dispatches nothing where every body is a point", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const plan = renderer.render(new RecordingView(), {
+      ...frameOfDiscs([]),
+      bodies: [bodyAcross(1.5, 0, "0200080020000000.0404")],
+    });
     expect([
       plan?.discs.length,
       engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS).length,
-    ]).toEqual([1, 0]);
+    ]).toEqual([0, 0]);
+    renderer.dispose();
+  });
+
+  it("dispatches once a set of textures: a plain disc and a larger one's limb, and a class map's disc (R07.T8.e)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    renderer.render(new RecordingView(), frameOfDiscs(severalSets()));
+    const cells = engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS);
+    expect(new Set(cells.map((d) => d.bindings.sampled["class_weights"]?.name))).toEqual(
+      new Set(["bodies:no class map", "test class map"]),
+    );
+    expect(cells).toHaveLength(2);
     renderer.dispose();
   });
 
@@ -1172,4 +1199,63 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
       view.renderer.dispose();
     }
   });
+
+  it("keeps three frames of three views in the timer's resolves with a dispatch a set of textures (R07.T8.e–f)", async () => {
+    // A dispatch's times wait for the next render's resolve, so its sets add none.
+    const engine = await countingRenderEngine();
+    const views = [
+      { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
+      { name: "instrument 1", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+      { name: "instrument 2", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+    ];
+    const camera = frameWith([]).camera;
+    const drawn = await Promise.all(
+      views.map(async ({ name, viewport, role }) => {
+        const renderer = new PhotorealRenderer(engine, name);
+        await renderer.prepare(viewport, "high", role, camera);
+        return { viewport, role, renderer, canvas: new RecordingView() };
+      }),
+    );
+    const overlay = (): FrameSubmission => SYMBOLOGY;
+    for (const view of drawn) {
+      view.renderer.render(view.canvas, {
+        ...frameOfDiscs(severalSets(view.viewport), view.viewport),
+        role: view.role,
+        meter: view.role === "eye" ? "average" : null,
+        overlay,
+      });
+    }
+    const resolves =
+      engine.targetFrames.length + drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+    expect(engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS)).toHaveLength(6);
+    expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
+    for (const view of drawn) {
+      view.renderer.dispose();
+    }
+  });
 });
+
+/**
+ * Bodies of two sets of textures on `viewport` (R07.T8.e–f): a 13 px disc and a 40 px one, whose
+ * limb takes the pass, and a 13 px disc of a one-class map.
+ */
+function severalSets(viewport: Viewport = VIEWPORT): LitBodyInput[] {
+  const third = viewport.widthPx / 4;
+  const law = aLitBody().photometry.law;
+  return [
+    bodyAcross(13, third, "0200080020000000.0411", viewport),
+    bodyAcross(40, 0, "0200080020000000.0412", viewport),
+    {
+      ...bodyAcross(13, -third, "0200080020000000.0413", viewport),
+      surface: {
+        kind: "class-map",
+        weights: { kind: "texture", name: "test class map" },
+        texels: packClassMap(1, 1, () => [1]),
+        laws: [law],
+        elsewhere: law,
+        normals: null,
+      },
+      rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+    },
+  ];
+}

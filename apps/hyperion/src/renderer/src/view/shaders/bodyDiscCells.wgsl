@@ -1,17 +1,17 @@
-// The `disc cells` pass (plan R07, T8.d–e; decision-r07-small-disc-cost §1.2,
-// decision-r08-t11-frame §2): every cell of every pixel of a disc under 32 px shaded at once, one
-// invocation a cell, so that a small disc's cost is throughput, not the serial chain of
-// `pixel_sum`'s n² cells of up to nine shades each. Composed after frame.wgsl,
+// The `disc cells` pass (plan R07, T8.d–f; decision-r07-small-disc-cost §1.2,
+// decision-r08-t11-frame §2): every cell of every pixel of a disc under 32 px, and of a larger
+// disc's limb pixels, shaded at once, one invocation a cell, so that their cost is throughput, not
+// the serial chain of `pixel_sum`'s n² cells of up to nine shades each. Composed after frame.wgsl,
 // litBody.wgsl and bodyDisc.wgsl; `frame` is the `discs` pass's own (the scene target's size and
 // projection), so that each cell is the one the pixel's draw would shade.
 //
-// A job is one pixel of one record's rectangle, [⌊left⌋, ⌈right⌉) × [⌊top⌋, ⌈bottom⌉), each
-// rectangle's pixels in row order (`discCellJobs`), so that job j's sums are the j-th in
-// `cell_sums`. The jobs are laid out by the
+// A job is one pixel of one record: every pixel of a small disc's rectangle,
+// [⌊left⌋, ⌈right⌉) × [⌊top⌋, ⌈bottom⌉), in row order, or of a large disc's limb spans
+// (`discCellJobs`), so that job j's sums are the j-th in `cell_sums`. The jobs are laid out by the
 // set of textures their records bind (a body's air, a class map), one dispatch a set (T8.e), each
 // taking its own run of jobs from `first`. One workgroup a job: invocation k < n² evaluates
 // `cell_sum` at the cell `pixel_sum` takes k-th (i = ⌊k ÷ n⌋ outer, j = k mod n inner,
-// `sampleOffset`), n the record's count (row 3's x, its limb's too below 32 px); after
+// `sampleOffset`), n the record's limb count (row 3's y, its interior's too below 32 px); after
 // the barrier, invocation 0 adds the n² cells in that order, as `pixel_sum` does, and writes the
 // pixel's two `vec4f`: the light and the coverage as means over its cells, then its lit and shaded
 // points. The draws read them (`pixel_cells`); nothing in `shade` or `cell_sum` changes.
@@ -57,7 +57,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_index) k
     let pixel = cell_jobs[job];
     draw.disc = u32(pixel.x);
     // At most 8 × 8 cells: the jobs hold no record of more (`discCellJobs`).
-    n = min(u32(disc_row(3u).x), 8u);
+    n = min(u32(disc_row(3u).y), 8u);
     if (k < n * n) {
       let i = k / n;
       let j = k % n;

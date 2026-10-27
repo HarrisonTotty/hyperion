@@ -897,9 +897,10 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
 export const DISC_CELLS_PASS = "disc cells";
 
 /**
- * The `disc cells` kernel (R07.T8.d–e, decision-r07-small-disc-cost §1.2, decision-r08-t11-frame
- * §2; `shaders/bodyDiscCells.wgsl`): every cell of every pixel of the frame's small discs shaded at
- * once, one invocation a cell, and summed in each pixel's order for the draws to read.
+ * The `disc cells` kernel (R07.T8.d–f, decision-r07-small-disc-cost §1.2, decision-r08-t11-frame
+ * §2; `shaders/bodyDiscCells.wgsl`): every cell of every pixel of the frame's small discs, and of
+ * its larger discs' limbs, shaded at once, one invocation a cell, and summed in each pixel's order
+ * for the draws to read.
  *
  * @remarks
  * Its one source serves both capability paths: it has no subgroup variant. Its sums are a pure
@@ -1021,8 +1022,9 @@ interface DeviceResources {
  * draws, its wholly covered pixels and then its limb; each run of points one draw of
  * `spriteMaterial`, an HDR twin of R02's star sprite reading `sprites` at binding 0. A mesh body is
  * one instanced draw of its figure ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass) and
- * its limb's draw in the sequence. The small discs' cells are shaded first by the `disc cells`
- * pass ({@link LitBodyRenderer.dispatchCells}, R07.T8.d–e), whose sums their draws read. A plan's
+ * its limb's draw in the sequence. The small discs' cells, and the larger discs' limb pixels', are
+ * shaded first by the `disc cells` pass ({@link LitBodyRenderer.dispatchCells}, R07.T8.d–f),
+ * whose sums their draws read. A plan's
  * records are written once, by whichever of the three is called first for it, so all three must
  * be called for a plan before its passes are submitted, {@link LitBodyRenderer.dispatchCells}
  * first: a plan whose records were written by the others first sums every disc's cells in its
@@ -1266,11 +1268,11 @@ export class LitBodyRenderer {
   }
 
   /**
-   * Shades a plan's small discs' cells in parallel: the `disc cells` pass (R07.T8.d–e,
+   * Shades a plan's discs' cells in parallel: the `disc cells` pass (R07.T8.d–f,
    * decision-r07-small-disc-cost §1.2, decision-r08-t11-frame §2), one dispatch of `kernel`
    * ({@link BODY_DISC_CELLS_KERNEL}) for each set of textures its records bind, over every pixel of
-   * each disc whose pixels all take the same cells (`drawnThroughCells`: every disc under 32 px),
-   * and none where the plan has no such disc.
+   * each disc under 32 px and each larger disc's limb pixels ({@link discCellJobs}), and none where
+   * the plan has no such pixel.
    *
    * @remarks
    * It writes the plan's records with each such disc's sums in row 51, and is called for a plan
@@ -1281,7 +1283,8 @@ export class LitBodyRenderer {
    * atmosphere tables and its class map and normal map, or the defaults (R07.T8.e), takes its run
    * of the jobs from its first, and has {@link cellWorkgroups}' workgroups for them, one a pixel.
    *
-   * @param frame - The `discs` pass's own frame, which the kernel shades in.
+   * @param frame - The `discs` pass's own frame, which the kernel shades in and a large disc's limb
+   *   is found in.
    * @returns Whether it dispatched.
    */
   dispatchCells(plan: BodyFramePlan, kernel: ComputeHandle, frame: DiscCellFrame): boolean {
@@ -1290,7 +1293,7 @@ export class LitBodyRenderer {
     }
     // As many pixels' sums as one storage binding holds; a disc past them sums its own cells.
     const fits = Math.floor(this.#engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
-    const cells = discCellJobs(plan.discs, fits);
+    const cells = discCellJobs(plan.discs, fits, frame);
     if (cells.count === 0) {
       this.#upload(plan);
       return false;

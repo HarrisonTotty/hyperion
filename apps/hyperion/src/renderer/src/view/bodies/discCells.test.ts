@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { scale, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   type CountingRenderEngine,
   countingRenderEngine,
@@ -11,12 +11,13 @@ import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { wgslFunctions } from "../../test/atmosphereWgsl";
 import { datumNormalMap, unreadNormalMap } from "../../test/normalMapFixtures";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
-import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
+import { type BodyFigure, PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import type { SurfaceLightingTables } from "../atmosphere/surfaceLighting";
 import {
   NEAR_PLANE_M,
   perspectiveReversedInfinite,
   type ProjectionCamera,
+  toViewAxes,
   type Viewport,
   viewRotation4,
 } from "../camera/projection";
@@ -30,13 +31,18 @@ import { AU_M } from "../scenes/kept";
 import type { ScreenRect } from "../wireframe/submit";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import {
+  type DiscCellJobs,
   type DiscCellSet,
   type DiscRecord,
   DISC_ROWS,
   discCellJobs,
   drawnThroughCells,
+  type LimbSpans,
+  limbSpans,
+  limbThroughCells,
   MAX_CELL_JOBS,
   packDiscRecords,
+  viewRay,
 } from "./discShading";
 import { packClassMap } from "./discSurface";
 import {
@@ -214,7 +220,7 @@ describe("the cell pass's jobs (R07.T8.d)", () => {
     ]);
   });
 
-  it("takes no job of a disc of 32 px or more, whose row 51 says it sums its own cells", () => {
+  it("takes no job of a disc of 32 px or more without the pass's frame, whose row 51 says it sums its own cells", () => {
     const records = recordsOf(planOf([40, 13]), 2);
     const cells = discCellJobs(records);
     const rows = cellRows(packDiscRecords(records, cells), 2);
@@ -386,11 +392,18 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
     );
   });
 
-  it("dispatches nothing where every disc is 32 px or more, and writes −1 in their row 51", async () => {
+  it("dispatches nothing where no disc has a pixel through it, and writes −1 in their row 51", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    // Since R07.T8.f a disc of 32 px or more takes its limb's pixels: these two take none, their
+    // limbs' cells past 8 × 8.
     const plan = planOf([40, 64]);
-    expect(renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME)).toBe(
+    const discs: DiscRecord[] = [];
+    for (const record of plan.discs) {
+      discs.push({ ...record, limbSamples: 16 });
+    }
+    const past: BodyFramePlan = { ...plan, discs };
+    expect(renderer.dispatchCells(past, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME)).toBe(
       false,
     );
     const packed = new Float32Array(lastWrite(engine, "bodies:discs").data.buffer);
@@ -679,7 +692,7 @@ describe("the cell pass for every record (R07.T8.e)", () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     const { plan, kindOf } = planWith(["plain", "air", "map", "plain"]);
-    const cells = discCellJobs(plan.discs);
+    const cells = discCellJobs(plan.discs, MAX_CELL_JOBS, FRAME);
     expect(renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME)).toBe(
       true,
     );
@@ -779,5 +792,307 @@ describe("the cell pass for every record (R07.T8.e)", () => {
       true,
     ]);
     renderer.dispose();
+  });
+});
+
+/** A view, its camera at the identity, and the `discs` pass's frame for it. */
+function frameOf(viewport: Viewport): DiscCellFrame {
+  return {
+    viewRotation: viewRotation4(CAMERA.orientation),
+    projection: perspectiveReversedInfinite(
+      CAMERA.fovXRad,
+      viewport.widthPx / viewport.heightPx,
+      NEAR_PLANE_M,
+    ),
+    size: viewport,
+  };
+}
+
+/** The record of one body drawn as a disc in `viewport`, lit as {@link bodiesOf}'s are. */
+function recordOfBody(body: LitBodyInput, viewport: Viewport): DiscRecord {
+  const { hosts } = bodiesOf([13]);
+  const [record] = planLitBodies(
+    [body],
+    hosts,
+    { ...OPTIONS, viewport, presentedPx: viewport },
+    new Map([[body.id, "disc"]]),
+  ).discs;
+  if (record === undefined) {
+    throw new Error(`body ${body.id} has no record`);
+  }
+  return record;
+}
+
+/** A body of `figure` whose centre lies `distanceM` away along `direction`. */
+function bodyToward(figure: BodyFigure, direction: Vec3, distanceM: number): LitBodyInput {
+  return {
+    id: "0200080020000000.0400",
+    centreM: scale(normalise(direction), distanceM),
+    figure,
+    photometry: PROVISIONAL_PHOTOMETRY,
+    lighting: undefined,
+  };
+}
+
+/**
+ * The pixels the limb draw shades (`bodyDisc.wgsl`'s `disc_pixel` at `edge_pass` 1), in `f64`:
+ * those of the rectangle whose corners' mean limb angle is at most 0.75 of their gradient, one of
+ * whose corners lies outside the limb or within 10⁻³ of the gradient inside it.
+ */
+function limbDrawPixels(record: DiscRecord, viewport: Viewport): Array<readonly [number, number]> {
+  const centre = toViewAxes(record.direction, CAMERA.orientation);
+  const pole = normalise(toViewAxes(record.pole, CAMERA.orientation));
+  const stretch = 1 / record.polarOverEquatorial;
+  const stretched = (x: Vec3): Vec3 => add(x, scale(pole, (stretch - 1) * dot(x, pole)));
+  const scaledCentre = stretched(centre);
+  const limb = Math.asin(record.radiusOverDistance / norm(scaledCentre));
+  const angle = (x: number, y: number): number => {
+    const ray = stretched(viewRay(x, y, CAMERA, viewport));
+    return Math.atan2(norm(cross(ray, scaledCentre)), dot(ray, scaledCentre)) - limb;
+  };
+  const pixels: Array<readonly [number, number]> = [];
+  const { rect } = record;
+  for (let y = Math.floor(rect.topPx); y < Math.ceil(rect.bottomPx); y += 1) {
+    for (let x = Math.floor(rect.leftPx); x < Math.ceil(rect.rightPx); x += 1) {
+      if (dot(centre, viewRay(x + 0.5, y + 0.5, CAMERA, viewport)) <= 0) {
+        continue;
+      }
+      const [c00, c10, c01, c11] = [
+        angle(x, y),
+        angle(x + 1, y),
+        angle(x, y + 1),
+        angle(x + 1, y + 1),
+      ];
+      const gradient = Math.hypot((c10 + c11 - c00 - c01) / 2, (c01 + c11 - c00 - c10) / 2);
+      const mean = (c00 + c10 + c01 + c11) / 4;
+      if (!(gradient > 0) || mean / gradient > 0.75) {
+        continue;
+      }
+      if ([c00, c10, c01, c11].every((c) => c / gradient < -1e-3)) {
+        continue;
+      }
+      pixels.push([x, y]);
+    }
+  }
+  return pixels;
+}
+
+/** Whether pixel (x, y) lies in one of its row's spans. */
+function inSpans(spans: LimbSpans, x: number, y: number): boolean {
+  const row = y - spans.topPx;
+  if (row < 0 || row >= spans.rows) {
+    return false;
+  }
+  const at = (k: number): number => spans.spans[row * 4 + k] ?? Number.NaN;
+  return (x >= at(0) && x < at(1)) || (x >= at(2) && x < at(3));
+}
+
+const EARTH: BodyFigure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6, pole: null };
+
+/** A Saturn-like figure flattened to the record's cap, f = 0.2, its pole tilted towards the view. */
+const FLATTENED: BodyFigure = {
+  equatorialRadiusM: 6.0268e7,
+  polarRadiusM: 6.0268e7 * 0.8,
+  pole: normalise(vec3(0.3, 1, 0.4)),
+};
+
+/** A view large enough for a 300 px disc. */
+const LARGE_VIEW: Viewport = { widthPx: 640, heightPx: 480 };
+
+/** The cases of the spans' test: a figure, the centre's direction, its distance, and the view. */
+const LIMB_CASES: ReadonlyArray<readonly [string, BodyFigure, Vec3, number, Viewport]> = [
+  [
+    "a 40 px sphere",
+    EARTH,
+    vec3(0.05, 0.02, -1),
+    6.371e6 / Math.sin(20 / (640 / (2 * Math.tan(Math.PI / 6)))),
+    LARGE_VIEW,
+  ],
+  [
+    "a 300 px sphere across the view's edge",
+    EARTH,
+    vec3(0.5, -0.1, -1),
+    6.371e6 / Math.sin(150 / (640 / (2 * Math.tan(Math.PI / 6)))),
+    LARGE_VIEW,
+  ],
+  [
+    "a 160 px figure of f = 0.2, its pole tilted",
+    FLATTENED,
+    vec3(-0.1, 0.05, -1),
+    6.0268e7 / Math.sin(80 / (640 / (2 * Math.tan(Math.PI / 6)))),
+    LARGE_VIEW,
+  ],
+  [
+    "an Earth filling the view from 400 km",
+    EARTH,
+    vec3(0, -Math.sin((80 * Math.PI) / 180), -Math.cos((80 * Math.PI) / 180)),
+    6.371e6 + 4e5,
+    VIEWPORT,
+  ],
+];
+
+/** A case of {@link LIMB_CASES}: the body's record, its limb's spans and the limb draw's pixels. */
+function limbCase(
+  figure: BodyFigure,
+  direction: Vec3,
+  distanceM: number,
+  viewport: Viewport,
+): {
+  readonly record: DiscRecord;
+  readonly spans: LimbSpans;
+  readonly drawn: ReadonlyArray<readonly [number, number]>;
+} {
+  const record = recordOfBody(bodyToward(figure, direction, distanceM), viewport);
+  const spans = limbSpans(record, frameOf(viewport));
+  if (spans === null) {
+    throw new Error("no spans");
+  }
+  return { record, spans, drawn: limbDrawPixels(record, viewport) };
+}
+
+describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
+  it("takes the limb of a disc whose interior takes other cells than its limb", () => {
+    const [record] = recordsOf(planOf([40]), 1);
+    if (record === undefined) {
+      throw new Error("no disc");
+    }
+    const counts = (interior: number, limb: number): DiscRecord => ({
+      ...record,
+      interiorSamples: interior,
+      limbSamples: limb,
+    });
+    expect(
+      [counts(1, 4), counts(1, 8), counts(4, 4), counts(1, 16), counts(1, 2.5)].map(
+        limbThroughCells,
+      ),
+    ).toEqual([true, true, false, false, false]);
+  });
+
+  it.each(LIMB_CASES)(
+    "holds every pixel the limb draw shades in its spans: %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const { spans, drawn } = limbCase(figure, direction, distanceM, viewport);
+      expect([drawn.length > 0, drawn.filter(([x, y]) => !inSpans(spans, x, y))]).toEqual([
+        true,
+        [],
+      ]);
+    },
+  );
+
+  it.each(LIMB_CASES)(
+    "lays each row's two spans in order within the rectangle: %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const { record, spans } = limbCase(figure, direction, distanceM, viewport);
+      const ordered = Array.from({ length: spans.rows }, (__, row) => {
+        const [s0 = 0, e0 = 0, s1 = 0, e1 = 0] = spans.spans.subarray(row * 4, row * 4 + 4);
+        return (
+          s0 <= e0 &&
+          e0 <= s1 &&
+          s1 <= e1 &&
+          s0 >= Math.floor(record.rect.leftPx) &&
+          e1 <= Math.ceil(record.rect.rightPx)
+        );
+      });
+      expect(ordered.every(Boolean)).toBe(true);
+    },
+  );
+
+  // The spans' cost: 2.1 to 2.6 times the pixels drawn as built, most of the rest outside the limb,
+  // whose cells shade nothing.
+  it.each(LIMB_CASES)(
+    "takes at most three times the limb draw's pixels: %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const { spans, drawn } = limbCase(figure, direction, distanceM, viewport);
+      expect(spans.pixels).toBeLessThanOrEqual(3 * drawn.length);
+    },
+  );
+
+  it("finds a larger disc's limb in the pass's frame, and none without it", () => {
+    const records = recordsOf(planOf([40, 13]), 2);
+    const withFrame = discCellJobs(records, MAX_CELL_JOBS, FRAME);
+    const without = discCellJobs(records);
+    const kinds = (cells: DiscCellJobs): string[] =>
+      records
+        .map((record, i) => `${String(record.interiorSamples)}: ${cells.ranges[i]?.kind ?? "none"}`)
+        .toSorted();
+    expect([kinds(withFrame), kinds(without)]).toEqual([
+      ["1: limb", "4: rectangle"],
+      ["1: none", "4: rectangle"],
+    ]);
+  });
+
+  it("lays one job a pixel of each limb span in row order, after the sets' earlier jobs", () => {
+    const [record] = recordsOf(planOf([40]), 1);
+    if (record === undefined) {
+      throw new Error("no disc");
+    }
+    const cells = discCellJobs([record], MAX_CELL_JOBS, FRAME);
+    const spans = limbSpans(record, FRAME);
+    if (spans === null) {
+      throw new Error("no spans");
+    }
+    const expected: number[][] = [];
+    for (let row = 0; row < spans.rows; row += 1) {
+      const [s0 = 0, e0 = 0, s1 = 0, e1 = 0] = spans.spans.subarray(row * 4, row * 4 + 4);
+      for (let x = s0; x < e0; x += 1) {
+        expected.push([0, x, spans.topPx + row, 0]);
+      }
+      for (let x = s1; x < e1; x += 1) {
+        expected.push([0, x, spans.topPx + row, 0]);
+      }
+    }
+    expect([cells.count, rowsOf(cells.jobs), cells.sets, cells.spanRows]).toEqual([
+      spans.pixels,
+      expected,
+      [{ first: 0, count: spans.pixels, record: 0 }],
+      2 * spans.rows,
+    ]);
+  });
+
+  it("points row 51 at the limb's span rows past the records, each span its first sum, start and end", () => {
+    const records = recordsOf(planOf([13, 40]), 2);
+    const cells = discCellJobs(records, MAX_CELL_JOBS, FRAME);
+    const index = cells.ranges.findIndex((range) => range?.kind === "limb");
+    const range = cells.ranges[index];
+    if (range?.kind !== "limb") {
+      throw new Error("no limb");
+    }
+    const packed = packDiscRecords(records, cells);
+    const { spans, rows, topPx } = range.spans;
+    expect(cellRows(packed, 2)[index]).toEqual([2 * DISC_ROWS + range.spanRow, rows, topPx, -1]);
+    const tail = rowsOf(packed.subarray(2 * DISC_ROWS * 4));
+    let first = range.first;
+    const expected: number[][] = [];
+    for (let row = 0; row < rows; row += 1) {
+      for (const span of [0, 1]) {
+        const from = spans[row * 4 + 2 * span] ?? 0;
+        const to = spans[row * 4 + 2 * span + 1] ?? 0;
+        expected.push([first, from, to, 0]);
+        first += to - from;
+      }
+    }
+    expect([tail, first]).toEqual([expected, range.first + range.spans.pixels]);
+  });
+
+  it("dispatches a larger disc's limb with the small discs of its set", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = planOf([40, 13]);
+    const cells = discCellJobs(plan.discs, MAX_CELL_JOBS, FRAME);
+    renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME);
+    expect(
+      engine.dispatched.map((d) => Array.from(d.bindings.uniforms["cell_pass"] ?? [])),
+    ).toEqual([[cells.count, 0, 0, 0]]);
+    const packed = new Float32Array(lastWrite(engine, "bodies:discs").data.buffer);
+    expect(Array.from(packed.subarray(0, (2 * DISC_ROWS + cells.spanRows) * 4))).toEqual(
+      Array.from(packDiscRecords(plan.discs, cells)),
+    );
+    renderer.dispose();
+  });
+
+  it("leaves a limb too near a right angle from the camera to sum its own cells", () => {
+    // From 10 m above an Earth's ground the limb's cone is within a pixel's turn of π ÷ 2.
+    const record = recordOfBody(bodyToward(EARTH, vec3(0, -1, -0.2), 6.371e6 + 10), VIEWPORT);
+    expect(limbSpans(record, frameOf(VIEWPORT))).toBeNull();
   });
 });

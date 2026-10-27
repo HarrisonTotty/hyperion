@@ -357,7 +357,7 @@ export function photorealisticPasses(setting: QualitySetting): PassList; // Desi
  * chosen so that the derived label is the one recorded in `PassList`.
  */
 export const PHOTOREAL_PASS_LABELS = {
-  discCells: "disc cells", // R07.T8.d: the small discs' cells, a dispatch before `bodies`
+  discCells: "disc cells", // R07.T8.d–f: the small discs' and large limbs' cells, a dispatch a set of textures before `bodies`
   bodies: "bodies", // mesh bodies, opaque with depth
   discs: "discs", // host discs, disc bodies and point bodies in painter order
   histogram: "histogram",
@@ -9756,3 +9756,117 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the turntable on a drag and on `ArrowRight` in the DOM harness.
   - Scratch: `t19f/page/` (`SHOT_FLOW=worst|measure`, `SHOT_CONTROLS=instrument`, `SHOT_OUT` for
     the base), `t19f/tools/probes.py <run-logs>`.
+- **Deviations in R07.T8.e and R07.T8.f, as built** (2026-10-27; the desktop lane, after
+  R08.T11.a; `decision-r08-t11-frame.md` §2, lever B, and §7). Built as the ruling says. `shade`,
+  `cell_sum` and the twin are unchanged, and so is every pixel: G11 holds at 0 ulp.
+  - **T8.e, one dispatch a set of textures.**
+    - `drawnThroughCells` takes every record whose interior and limb counts are equal, a whole
+      number from 1 to 8, whatever its surface or air.
+    - `discCellJobs` lays the jobs by the textures a record binds beyond the frame's
+      (`boundTexturesOf`): its class map, its normal map and its seven surface-lighting tables,
+      compared by identity, `null` where the renderer binds its default. There is one
+      `DiscCellSet` (first, count, record) a set, in the order of its first record, and each set's
+      records stay in their order.
+    - `LitBodyRenderer.dispatchCells` dispatches once a set, binding the set's record's textures
+      through `#classWeights`, `#surfaceNormals` and its tables (or `noAtmosphere`), with
+      `cell_pass` (count, first). The kernel's `CellPass` gains `first`. One jobs buffer and one
+      sums buffer serve every set.
+    - This replaces T8.d's "one dispatch a view" by one dispatch a set a view. It closes plan 10's
+      "Class-map discs and R07's cell pass" and `decision-r08-t10b-depth.md` §5's deferred
+      dispatch, and supersedes plan 08's T9.b record ("a disc with an atmosphere sums its own
+      cells").
+  - **T8.f, the limb's list, made on the CPU.**
+    - `limbThroughCells` takes a record whose interior count differs from its limb's, the limb's
+      from 1 to 8: every disc of 32 px or more.
+    - `limbSpans(record, frame)` gives two spans a pixel row, a superset of the limb draw's pixels.
+      Each such pixel has a corner within the cone of half-angle λ + (0.75 + m) G about the scaled
+      centre and is not wholly within the cone of λ − (10⁻³ + m) G, with
+      G = max(a ÷ c, c ÷ a) √(k_x² + k_y²) and m = 0.1 px (`LIMB_SPAN_MARGIN_PX`). Each cone meets
+      a line of pixel corners in one interval, solved as a quadratic (`coneInterval`).
+    - The spans' rows follow the records in `discs`, two a pixel row (first sum, start, end, 0).
+      Row 51 holds (first span row, rows, ⌊top⌋, −1), its w −1 marking the form; a rectangle's row
+      51 is T8.d's.
+    - `bodyDisc.wgsl`'s `cell_sums_index` finds a pixel's sums. A pixel outside the spans, and the
+      interior draw at its one cell, sum their own cells through `pixel_cells`' one `pixel_sum`
+      call. The kernel takes n from row 3's y, the limb's count, which equals x for a rectangle.
+    - It takes no limb without the pass's frame (T8.d's unit tests call it so), none whose outer
+      cone reaches π ÷ 2 (a camera within about 10 m of the ground at 320 px across 60°), and none
+      whose span rows would end past row 2²⁴ of `discs`.
+    - The spans hold 2.1 to 2.6 times the limb draw's pixels in the unit tests' cases. Most of the
+      rest lie outside the limb, where a cell shades nothing. One workgroup takes one pixel, so 48
+      of its 64 invocations idle, as in T8.d. Packing was not needed for the bound.
+  - **T8.d's tests that the ruling supersedes.** Four changed, each because T8.e or T8.f takes what
+    the test said it left:
+    - `discCells.test.ts`: a class map's disc is now taken;
+    - `discCells.test.ts`: "dispatches nothing" now holds limbs of 16 × 16, past the pass's 8 × 8;
+    - `renderer.test.ts`: a 34 px disc dispatches once, for its limb, and a frame of points
+      dispatches nothing;
+    - `draw.test.ts`: R08.T9.b's disc with air is now taken.
+    - Two T8.d tests were renamed to say what still holds: no limb without the frame, and the
+      texel of no weight for uniform discs.
+  - **Tests added.**
+    - `discCells.test.ts`: the sets' order and runs, and one dispatch a set binding its own air or
+      map, two airs and two maps among them; a normal map bound; a device loss; `shade` reached
+      from one call site in each of the four entry points (`inlinedCopies`); the spans holding every
+      pixel of the limb draw (in `f64`) for a 40 px, a 300 px clipped, a 160 px f = 0.2 tilted and a
+      view-filling 400 km Earth, in order and within 3 times; the limb's jobs, row 51 and span rows.
+    - `renderer.test.ts`: a set each in one view, and `TIMING_FRAMES_IN_FLIGHT` with three views of
+      two sets each.
+  - **G11 on the GPU** (`smoke/cellPass.ts`, the group "R07.T8.e–f the cell pass for every
+    record", in part 8: 21 s a variant, part 8 90 s at a load of about 6).
+    - Six plans, each drawn through the pass, in-fragment and under a sentinel: a 13 px air body
+      as a disc and as the mesh the view draws, a 13 px two-class map, a 220 px airless limb, a
+      96 px air body's limb as a mesh, and four bodies of three sets and two limbs in one plan.
+    - Both variants on SwiftShader, and the RTX 3080 hidden: 0 ulp apart, every alpha equal.
+    - Every pixel the draws must take from the pass shows the sentinel (165, 165, 165, 1,016, 441,
+      and 178 + 170 + 211 + 185).
+    - G10: the map's 162 pixels within 0.110 of the twin's tolerance, and the 220 px disc's 45,740
+      within 0.377.
+    - T8.d's G11 is unchanged at 0 ulp on both.
+  - **The kernel's compile.** On SwiftShader 2.2 to 2.3 s, as before. On the RTX 3080 1.4 to 1.8 s
+    cold, a new source (the base's 0.1 to 0.4 s were the driver's cache), and 0.1 s warm.
+  - **The frame** (R08.T11's group, untimed and hidden on the RTX 3080, 2026-10-27 02:10, load 5 to
+    7, not a quiet window). Before is R08.T11's untimed run 3 (2026-10-26 23:00, the same code). The
+    measured Earth at high, median / p95, ms; the limb's shading is `discs` before, and `disc
+    cells` + `discs` after:
+
+    | Row | Limb before | Limb after | Frame before | Frame after |
+    | --- | --- | --- | --- | --- |
+    | 400 km x2 | 4.43 / 4.81 | 0.95 / 1.12 | 20.59 / 21.10 | 17.16 / 17.35 |
+    | 400 km x4 | 6.62 / 7.46 | 1.14 / 1.31 | 23.47 / 24.40 | 18.00 / 18.14 |
+    | 10⁷ m x2 | 5.92 / 6.70 | 1.21 / 1.26 | 22.68 / 23.63 | 17.86 / 18.04 |
+    | 10⁷ m x4 | 10.55 / 11.72 | 1.47 / 1.50 | 28.31 / 29.61 | 19.09 / 20.64 |
+    | 1.54 × 10⁷ m x2 | 6.09 / 6.73 | 1.00 / 1.20 | 20.58 / 23.84 | 15.55 / 15.75 |
+    | 1.54 × 10⁷ m x4 | 12.83 / 14.40 | 1.49 / 1.52 | 28.34 / 29.91 | 16.86 / 17.01 |
+    | 2.55 × 10⁷ m x2 | 4.12 / 4.58 | 0.73 / 0.90 | 14.56 / 15.09 | 11.26 / 11.44 |
+    | 2.55 × 10⁷ m x4 | 8.27 / 8.80 | 1.09 / 3.03 | 19.61 / 20.17 | 12.52 / 14.27 |
+    | 10⁸ m x2 | 1.71 / 1.81 | 0.26 / 0.36 | 5.90 / 5.99 | 4.48 / 4.62 |
+    | 10⁸ m x4 | 2.94 / 3.49 | 0.53 / 0.58 | 7.52 / 8.13 | 5.19 / 5.28 |
+
+    - The acceptance's bound holds: 1.47 ms at 10⁷ m x4, against 2.6 ms. The slab Earth's rows are
+      within 0.1 ms of these. A p95 is summed from the passes' p95s, so it is an upper bound.
+    - The small air bodies' `discs` fell from 0.49–0.51 ms to 0.01 ms, with 0.06 ms in `disc cells`;
+      their frames from 3.11–3.38 ms to 2.60–2.78 ms. What is left is the full-frame march.
+    - The control without air at 10⁷ m x4: `discs` 7.90 ms before, and `disc cells` 0.95 + `discs`
+      2.00 after, the face's one cell a pixel.
+    - The rows still over 16.67 ms (400 km and 10⁷ m at x2 and x4, 1.54 × 10⁷ m at x4) wait for
+      R08.T11.b, lever A, and QW29 judges them.
+  - **V7, measured and not landed** (a scratch `cell_samples` taking one shade for one cell, the
+    face's near-limb band at one shade; `.git/rm45-scratch/r07-t8ef/v7.patch`). The air body's face
+    (`bodies`) at x4: 3.42 → 3.08 ms at 400 km, 3.62 → 2.96 at 10⁷ m, 3.16 → 2.49 at
+    1.54 × 10⁷ m, 2.08 → 1.53 at 2.55 × 10⁷ m and 0.72 → 0.30 at 10⁸ m; at x2, 0.27–0.44 ms. So the
+    band costs 0.34–0.67 ms at x4, over R07.T8.g's 0.3 ms, should QW29 leave a row over 15.67 ms. The
+    airless face (`discs`, the control) moves by 0.04 ms at most.
+  - **The timer.** Each set's dispatch is a timed pass, resolved with the next render's. A view of
+    more than about 60 sets would pass `PASSES_PER_FRAME` (64), and the rest would go untimed, with
+    a warning.
+  - **Files beyond the ruling's list:** `smoke/cellPass.ts` (new) and `smoke/page.ts`;
+    `photoreal/passes.ts`' comments; plan 08's T9.b record and plan 10's Risks, each a note.
+    `test/fakeViewEngine.ts` and `test/countingRenderEngine.ts` are unchanged.
+- **Deferred findings (2026-10-13 rule)**, from R07.T8.e and R07.T8.f.
+  - _R08.T6.f's Earth twins on the RTX 3080._ Part 8 run hidden on the RTX 3080 fails four of
+    R08.T6.f's Earth checks ("the ray march, the stored arm, agrees with the CPU twin to 10⁻³",
+    from 400 km and 3.56 × 10⁷ m, the sun at 20° and −2°): 2 channels of about 5,600 over the
+    bound in each, relative errors 1.1 to 12.4 × 10⁻³, on texels of 10⁻⁶ to 2 × 10⁻³ of the
+    largest. SwiftShader passes them. This change touches none of their code, and no base RTX run
+    of part 8 is on record.

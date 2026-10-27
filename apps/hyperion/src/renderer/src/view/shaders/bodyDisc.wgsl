@@ -30,8 +30,9 @@
 // cube sphere's texel lookup, moved out of this file by R10.T11) and maturityNodes.wgsl (the
 // maturity nodes' formula, R10.T1.c), with no entry point of
 // its own: its includer declares `draw`, a `Draw` whose `disc` is the body's record in `discs`, and
-// `cell_sums` at `@group(2) @binding(5)`, the pixels' sums of the `disc cells` pass (R07.T8.d),
-// which a disc under 32 px reads in place of summing its own cells (`pixel_cells`). Two includers
+// `cell_sums` at `@group(2) @binding(5)`, the pixels' sums of the `disc cells` pass (R07.T8.d–f),
+// which a disc under 32 px, and a larger disc's limb, read in place of summing their own cells
+// (`pixel_cells`). Two includers
 // draw it (`disc_pixel`), each with `draw` at `@group(1) @binding(0)` and `cell_sums` read-only:
 //   - bodyDiscDraw.wgsl, the disc regime: one screen rectangle the CPU bounds, in two draws the CPU
 //     orders together in the painter's sequence, `edgePass` 0 for the pixels the body covers
@@ -42,8 +43,9 @@
 //   - smoothMesh.wgsl, the mesh regime (T9): R05's patches of the spheroid at zero height, writing
 //     depth, which draw the wholly covered pixels as the disc's first draw does; the limb is the
 //     disc's second draw, at the limb's depth.
-// A third, bodyDiscCells.wgsl, is the `disc cells` kernel: one invocation a cell of a small disc's
-// pixel (`cell_sum`), its `draw` private and set from the job, writing `cell_sums`.
+// A third, bodyDiscCells.wgsl, is the `disc cells` kernel: one invocation a cell of a pixel
+// (`cell_sum`), every pixel of a small disc's and a large disc's limb (R07.T8.d–f), its `draw`
+// private and set from the job, writing `cell_sums`.
 //
 // Every length reaches the GPU already divided: the body's centre as a unit direction with its
 // radii over its distance D, and every light and occluder relative to the body's centre over its
@@ -70,12 +72,17 @@
 //   46  the planetshine sources (x);
 //   47 + 2j, source j: the neighbour's unit direction from the body's centre, w its distance ÷ a;
 //      its illuminance face-on at the body's centre per channel (lx), w its radius ÷ a;
-//   51  where the `disc cells` pass left the pixels' sums (T8.d): the first sum's index in
-//      `cell_sums`, the left and top of the rectangle summed, px, and its width, px; x −1 for a
-//      disc whose draws sum their own cells;
+//   51  where the `disc cells` pass left the pixels' sums (T8.d): for a disc whose every pixel
+//      takes the same cells, the first sum's index in `cell_sums`, the left and top of the
+//      rectangle summed, px, and its width, px; for a large disc's limb (T8.f), the first of its
+//      rows' spans in `discs` (`cell_sums_index`), its rows, its top, px, and w −1; x −1 for a disc
+//      whose draws sum their own cells;
 //   52 + K k + j, class k's maturity node j (R10.T1.c, K = MATURITY_NODES): its A per channel at
 //      the node's maturity, scaled as the class's; node 0's w 1 where the class is drawn from its
 //      nodes; written only where row 25's w is 1, and 0 otherwise.
+// Past the records, the limb spans of the large discs whose row 51 points at them (T8.f;
+// `discShading.ts`' `packDiscRecords`): two rows a pixel row, each one span of it, the index in
+// `cell_sums` of its first pixel's sums, its first pixel's x and its end's, px, and 0.
 @group(2) @binding(0) var<storage, read> discs : array<vec4f>;
 
 // The phase factors of the frame's laws, one row each (`litBody.wgsl`).
@@ -840,18 +847,47 @@ fn pixel_sum(body : Body, centre_px : vec2f, n : u32) -> CellSum {
   return sum;
 }
 
-// The pixel whose centre is `centre_px`, its n × n cells summed: as the `disc cells` pass left it in
-// `cell_sums` where row 51 holds its sums (two `vec4f` a pixel: the light and the coverage as
-// means, then the lit and shaded points), else by `pixel_sum` here. The pass sums each pixel's cells
-// in `pixel_sum`'s order with the same functions, so the two differ by no more than the compilers'
-// own rounding.
-fn pixel_cells(body : Body, centre_px : vec2f, n : u32) -> CellSum {
+// The spans a large disc's limb row takes (T8.f): two rows of `discs` a pixel row.
+const LIMB_SPANS : u32 = 2u;
+
+// The index in `cell_sums` of the sums the `disc cells` pass left for `pixel` (its top-left
+// corner, px) at n × n cells, as row 51 says, or −1 where it left none: every pixel of a
+// rectangle in row order (T8.d); or a large disc's limb (T8.f), each pixel row's spans at the
+// limb's cells, where a pixel outside them, or a draw at other cells (its interior's one), sums its
+// own.
+fn cell_sums_index(pixel : vec2f, n : u32) -> i32 {
   let sums = disc_row(CELL_SUMS_ROW);
   if (sums.x < 0.0) {
+    return -1;
+  }
+  if (sums.w >= 0.0) {
+    return i32(u32(sums.x) + u32(pixel.y - sums.z) * u32(sums.w) + u32(pixel.x - sums.y));
+  }
+  let row = pixel.y - sums.z;
+  if (n != u32(disc_row(3u).y) || row < 0.0 || row >= sums.y) {
+    return -1;
+  }
+  let first = u32(sums.x) + LIMB_SPANS * u32(row);
+  for (var s = 0u; s < LIMB_SPANS; s = s + 1u) {
+    let span = discs[first + s];
+    if (pixel.x >= span.y && pixel.x < span.z) {
+      return i32(u32(span.x) + u32(pixel.x - span.y));
+    }
+  }
+  return -1;
+}
+
+// The pixel whose centre is `centre_px`, its n × n cells summed: as the `disc cells` pass left it in
+// `cell_sums` where row 51 holds its sums (two `vec4f` a pixel: the light and the coverage as
+// means, then the lit and shaded points), else by `pixel_sum` here, its one call. The pass sums each
+// pixel's cells in `pixel_sum`'s order with the same functions, so the two differ by no more than
+// the compilers' own rounding.
+fn pixel_cells(body : Body, centre_px : vec2f, n : u32) -> CellSum {
+  let found = cell_sums_index(floor(centre_px), n);
+  if (found < 0) {
     return pixel_sum(body, centre_px, n);
   }
-  let pixel = floor(centre_px);
-  let index = u32(sums.x) + u32(pixel.y - sums.z) * u32(sums.w) + u32(pixel.x - sums.y);
+  let index = u32(found);
   let light = cell_sums[2u * index];
   let points = cell_sums[2u * index + 1u];
   var sum : CellSum;

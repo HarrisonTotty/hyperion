@@ -23,7 +23,8 @@ struct Draw {
 
 @group(1) @binding(0) var<uniform> draw : Draw;
 
-// The `disc cells` pass's sums, which a disc under 32 px reads (R07.T8.d; `pixel_cells`).
+// The `disc cells` pass's sums, which a disc under 32 px reads, and a larger disc's limb (R07.T8.d
+// and T8.f; `pixel_cells`).
 @group(2) @binding(5) var<storage, read> cell_sums : array<vec4f>;
 
 struct DiscVarying {
