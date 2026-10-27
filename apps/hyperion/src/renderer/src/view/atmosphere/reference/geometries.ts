@@ -218,12 +218,15 @@ function label(value: number): string {
 
 /**
  * Design note 10's ground set at one observer: every view zenith of {@link GROUND_VIEW_ZENITHS_DEG}
- * at each of `viewAzimuthsDeg`, under each sun zenith of {@link GROUND_SUN_ZENITHS_DEG} at
- * `sunAzimuthDeg`, one image a sun zenith, less those within {@link LEAST_SUN_DISTANCE_DEG} of the
- * sun; the azimuths collapse to their first at a view zenith of 0°, and at a sun zenith of 0° where
+ * at each of `viewAzimuthsDeg`, under each sun zenith of `sunZenithsDeg` at `sunAzimuthDeg`, one
+ * image a sun zenith, less those within {@link LEAST_SUN_DISTANCE_DEG} of the sun; the azimuths
+ * collapse to their first at a view zenith of 0°, and at a sun zenith of 0° where
  * `collapseUnderZenithSun` (on a sphere, or at a spheroid's pole), where the azimuth means nothing.
  *
  * @param prefix - The site's name, which starts each image's and geometry's name.
+ * @param sunZenithsDeg - The sun zeniths, degrees: Design note 10's six,
+ *   {@link GROUND_SUN_ZENITHS_DEG}, by default; R08.T13's sweep takes four of them (the
+ *   `decision-r08-t13-scope.md` ruling 4).
  */
 export function groundSet(
   prefix: string,
@@ -231,9 +234,10 @@ export function groundSet(
   viewAzimuthsDeg: ReadonlyArray<number>,
   sunAzimuthDeg: number,
   collapseUnderZenithSun: boolean,
+  sunZenithsDeg: ReadonlyArray<number> = GROUND_SUN_ZENITHS_DEG,
 ): ReferenceGeometry[] {
   const set: ReferenceGeometry[] = [];
-  for (const sunZenith of GROUND_SUN_ZENITHS_DEG) {
+  for (const sunZenith of sunZenithsDeg) {
     const sun = { zenithDeg: sunZenith, azimuthDeg: sunAzimuthDeg };
     for (const viewZenith of GROUND_VIEW_ZENITHS_DEG) {
       const collapsed = viewZenith === 0 || (sunZenith === 0 && collapseUnderZenithSun);

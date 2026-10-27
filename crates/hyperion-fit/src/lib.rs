@@ -89,6 +89,33 @@ pub enum RunFitError {
         #[source]
         source: io::Error,
     },
+    /// An atmosphere sweep case could not be read.
+    #[error(transparent)]
+    SweepCase(#[from] atmosphere::sweep::ReadSweepError),
+    /// An atmosphere sweep could not be run.
+    #[error(transparent)]
+    Sweep(#[from] atmosphere::sweep::RunSweepError),
+    /// `atmosphere-sweep` was given too little to run without `--smoke`.
+    #[error("`atmosphere-sweep` needs {0} unless it runs `--smoke`")]
+    SweepNeeds(&'static str),
+    /// The running binary could not be read for the SHA-256 that keys a sweep's work directory.
+    #[error("cannot read the running binary {} to hash it", path.display())]
+    HashBinary {
+        /// The binary, empty where its path could not be found.
+        path: std::path::PathBuf,
+        /// Why it could not.
+        #[source]
+        source: io::Error,
+    },
+    /// An atmosphere sweep's output could not be written.
+    #[error("cannot write the atmosphere sweep {}", path.display())]
+    WriteSweep {
+        /// Where it was to go.
+        path: std::path::PathBuf,
+        /// Why it could not.
+        #[source]
+        source: io::Error,
+    },
     /// The command's output could not be written.
     #[error("cannot write the output")]
     Output(#[from] io::Error),
@@ -98,9 +125,11 @@ impl RunFitError {
     /// The process exit code for this error: 2 for a bad command line, 1 for everything else.
     ///
     /// For `atmosphere-reference`, `--stokes` on a case the Stokes mode cannot trace and a
-    /// `--samples` past [`atmosphere::MAX_SAMPLES`] are bad command lines.
+    /// `--samples` past [`atmosphere::MAX_SAMPLES`] are bad command lines; for
+    /// `atmosphere-sweep`, a missing argument and a point the case does not hold.
     #[must_use]
     pub fn exit_code(&self) -> u8 {
+        use atmosphere::sweep::RunSweepError;
         match self {
             Self::UnknownTask(_)
             | Self::OtherManifestNeedsOut
@@ -108,7 +137,9 @@ impl RunFitError {
             | Self::AtmosphereReference(
                 atmosphere::TraceReferenceError::StokesNeedsMatrix { .. }
                 | atmosphere::TraceReferenceError::TooManySamples { .. },
-            ) => 2,
+            )
+            | Self::SweepNeeds(_)
+            | Self::Sweep(RunSweepError::UnknownPoint(_)) => 2,
             Self::Manifest(_)
             | Self::Task(_)
             | Self::Emit(_)
@@ -116,6 +147,17 @@ impl RunFitError {
             | Self::AtmosphereCase(_)
             | Self::AtmosphereReference(atmosphere::TraceReferenceError::ThreadPool(_))
             | Self::WriteReference { .. }
+            | Self::SweepCase(_)
+            | Self::Sweep(
+                RunSweepError::Point { .. }
+                | RunSweepError::Trace(_)
+                | RunSweepError::Work { .. }
+                | RunSweepError::Stale { .. }
+                | RunSweepError::CorruptPoint { .. }
+                | RunSweepError::Progress(_),
+            )
+            | Self::HashBinary { .. }
+            | Self::WriteSweep { .. }
             | Self::Output(_) => 1,
         }
     }

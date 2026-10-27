@@ -13,6 +13,13 @@
 //!                                   [--threads N] [--stokes]
 //!                                        # an atmosphere case's reference radiances (plan R08,
 //!                                        # R08.T12.a), not a fit: outside `tables.lock`
+//! hyperion-fit atmosphere-sweep <sweep.case.json> --out <sweep.json> --work <dir>
+//!                               --cpu-per-vertex-us X --vroom-cpu-per-vertex-us Y
+//!                               [--point-cap-cpu-h 24] [--threads N] [--max-points N]
+//!                               [--pilot-only --points I,J,…]
+//! hyperion-fit atmosphere-sweep --smoke --out <sweep.json> [--threads N]
+//!                                        # R08.T13's sweep of the analytic term's drift (plan
+//!                                        # R08, R08.T13.a), resumable from <dir>; not a fit
 //! ```
 //!
 //! `run` writes into the `tables/` of its table's crate unless `--out` says otherwise, and then
@@ -23,13 +30,14 @@
 
 use std::io::Write;
 use std::num::{NonZeroU64, NonZeroUsize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Args, Parser, Subcommand};
 use hyperion_sim::GENERATOR_VERSION;
 
 use crate::RunFitError;
+use crate::atmosphere::sweep::{POINT_CAP_CPU_H, PositiveFigure};
 use crate::atmosphere::{AtmosphereCase, Polarisation, trace_reference};
 use crate::check::{CheckInputs, REPOSITORY_MANIFESTS, Rerun, check};
 use crate::emit::{Destination, Workspace, write_table};
@@ -114,6 +122,52 @@ pub enum Command {
     ///
     /// Not a fit: its output is a client fixture, outside `tables.lock`.
     AtmosphereReference(AtmosphereReferenceArgs),
+    /// Sweep single-layer media for where the client's analytic multiple scattering drifts from
+    /// the reference (plan R08, R08.T13.a), resumably, and write the sweep's cells and points.
+    ///
+    /// Not a fit: its output is a client fixture, outside `tables.lock`.
+    AtmosphereSweep(AtmosphereSweepArgs),
+}
+
+/// `atmosphere-sweep`'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AtmosphereSweepArgs {
+    /// The sweep case, JSON in the format of `atmosphere::sweep`.
+    #[arg(required_unless_present = "smoke", conflicts_with = "smoke")]
+    pub case: Option<PathBuf>,
+    /// Where to write the sweep's output.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// The work directory: each finished point is kept in it, and a rerun resumes from it.
+    #[arg(long, required_unless_present = "smoke")]
+    pub work: Option<PathBuf>,
+    /// Threads for the run; the output is the same for any number.
+    #[arg(long)]
+    pub threads: Option<NonZeroUsize>,
+    /// The most a point's pilot and final trace may be projected to take, CPU-h; the ladder's
+    /// first step lowers it to 12. The smoke takes its own.
+    #[arg(long, default_value_t = POINT_CAP_CPU_H, conflicts_with = "smoke")]
+    pub point_cap_cpu_h: PositiveFigure,
+    /// The CPU a vertex takes under R08.T12.c's estimator, µs, which the projections take: the
+    /// pilot's measured figure, with no default (main's reading 2).
+    #[arg(long, required_unless_present = "smoke", conflicts_with = "smoke")]
+    pub cpu_per_vertex_us: Option<PositiveFigure>,
+    /// The CPU a vertex takes under VROOM, µs: the pilot's measured figure, with no default.
+    #[arg(long, required_unless_present = "smoke", conflicts_with = "smoke")]
+    pub vroom_cpu_per_vertex_us: Option<PositiveFigure>,
+    /// Run the pilot stage alone on `--points`, and write their pilots and projections.
+    #[arg(long, requires = "points")]
+    pub pilot_only: bool,
+    /// The points `--pilot-only` pilots, by index, comma-separated.
+    #[arg(long, value_delimiter = ',', requires = "pilot_only")]
+    pub points: Vec<u64>,
+    /// Compute at most this many points, then stop; run again to resume from `--work`.
+    #[arg(long, requires = "work")]
+    pub max_points: Option<usize>,
+    /// Run the embedded smoke sweep, two columns at a few τ and four geometries at small counts,
+    /// in seconds, through the whole walk and the floor scan.
+    #[arg(long)]
+    pub smoke: bool,
 }
 
 /// `atmosphere-reference`'s arguments.
@@ -160,7 +214,11 @@ fn find(name: &str) -> Result<&'static dyn FitTask, RunFitError> {
 /// [`RunFitError::AtmosphereCase`] if `atmosphere-reference`'s case cannot be read,
 /// [`RunFitError::AtmosphereReference`] if it cannot be traced and
 /// [`RunFitError::WriteReference`] if its reference cannot be written;
-/// [`RunFitError::Output`] if `out` cannot be written.
+/// [`RunFitError::SweepCase`] if `atmosphere-sweep`'s case cannot be read,
+/// [`RunFitError::SweepNeeds`] if its command line lacks an argument,
+/// [`RunFitError::HashBinary`] if the running binary cannot be read for its SHA-256,
+/// [`RunFitError::Sweep`] if it cannot be run and [`RunFitError::WriteSweep`] if its output cannot
+/// be written; [`RunFitError::Output`] if `out` cannot be written.
 pub fn run(cli: &Cli, out: &mut dyn Write) -> Result<(), RunFitError> {
     run_in(cli, &Workspace::repository(), out)
 }
@@ -251,6 +309,7 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
             out,
         ),
         Command::AtmosphereReference(args) => atmosphere_reference(args, out),
+        Command::AtmosphereSweep(args) => atmosphere_sweep(args, out),
         Command::Fingerprint { task } => {
             let task = find(task)?;
             let fingerprint = task.fingerprint();
@@ -360,6 +419,92 @@ fn atmosphere_reference(
         case.geometry_count(),
         case.aggregate_count(),
         case.wavelengths_nm().len(),
+    )?;
+    Ok(())
+}
+
+/// The SHA-256 of the running binary, which keys a sweep's work directory (main's reading 4).
+fn binary_sha256() -> Result<String, RunFitError> {
+    let path = std::env::current_exe().map_err(|source| RunFitError::HashBinary {
+        path: PathBuf::new(),
+        source,
+    })?;
+    let bytes = std::fs::read(&path).map_err(|source| RunFitError::HashBinary { path, source })?;
+    Ok(crate::emit::sha256_hex(&bytes))
+}
+
+/// `atmosphere-sweep`: reads the case, or the smoke's, runs the sweep, printing each point as it
+/// finishes, and writes its output (to a temporary name beside it, then renamed), printing what it
+/// traced and how long it took.
+fn atmosphere_sweep(args: &AtmosphereSweepArgs, out: &mut dyn Write) -> Result<(), RunFitError> {
+    use crate::atmosphere::sweep::{
+        SMOKE_CASE, SweepCase, SweepMode, SweepRun, SweepSettings, run_sweep,
+    };
+    let case = match &args.case {
+        Some(path) => SweepCase::read(path)?,
+        None if args.smoke => SweepCase::from_json(SMOKE_CASE)?,
+        None => return Err(RunFitError::SweepNeeds("a sweep case")),
+    };
+    let settings = if args.smoke {
+        SweepSettings::SMOKE
+    } else {
+        let cpu = args
+            .cpu_per_vertex_us
+            .ok_or(RunFitError::SweepNeeds("--cpu-per-vertex-us"))?;
+        let vroom = args
+            .vroom_cpu_per_vertex_us
+            .ok_or(RunFitError::SweepNeeds("--vroom-cpu-per-vertex-us"))?;
+        if args.work.is_none() {
+            return Err(RunFitError::SweepNeeds("--work"));
+        }
+        SweepSettings::ruled(cpu, vroom).with_point_cap(args.point_cap_cpu_h)
+    };
+    let mode = if args.pilot_only {
+        SweepMode::PilotOnly(args.points.clone())
+    } else {
+        SweepMode::Walk
+    };
+    let binary = binary_sha256()?;
+    let threads = threads_or_all(args.threads);
+    let start = Instant::now();
+    let mut run = SweepRun::new(&case, settings, mode, threads, &binary);
+    if let Some(root) = &args.work {
+        run = run.with_work(root);
+    }
+    if let Some(most) = args.max_points {
+        run = run.with_max_points(most);
+    }
+    let outcome = run_sweep(&run, out)?;
+    let seconds = start.elapsed().as_secs_f64();
+    let (computed, resumed) = (outcome.computed(), outcome.resumed());
+    let Some(text) = outcome.into_text() else {
+        writeln!(
+            out,
+            "stopped after {computed} points ({resumed} resumed); run again to resume from {}",
+            args.work
+                .as_deref()
+                .map_or_else(|| "nothing".to_owned(), |p| p.display().to_string())
+        )?;
+        return Ok(());
+    };
+    let partial = {
+        let mut name = args.out.clone().into_os_string();
+        name.push(".partial");
+        PathBuf::from(name)
+    };
+    let write = |path: &Path| {
+        let path = path.to_path_buf();
+        move |source| RunFitError::WriteSweep { path, source }
+    };
+    std::fs::write(&partial, text).map_err(write(&partial))?;
+    std::fs::rename(&partial, &args.out).map_err(write(&args.out))?;
+    writeln!(
+        out,
+        "wrote {} ({}: {} points traced or piloted, {} resumed, {threads} threads, {seconds:.1} s)",
+        args.out.display(),
+        case.name(),
+        computed,
+        resumed,
     )?;
     Ok(())
 }
@@ -622,6 +767,188 @@ mod tests {
             RunFitError::WriteReference { path, .. } => assert_eq!(path, nowhere),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn atmosphere_sweep_parses() {
+        let figure = |text: &str| text.parse::<PositiveFigure>().unwrap();
+        assert_eq!(
+            parse(&[
+                "atmosphere-sweep",
+                "ms-sweep-w950.case.json",
+                "--out",
+                "ms-sweep-w950.json",
+                "--work",
+                "work",
+                "--cpu-per-vertex-us",
+                "45",
+                "--vroom-cpu-per-vertex-us",
+                "90",
+                "--point-cap-cpu-h",
+                "12",
+                "--threads",
+                "4",
+            ])
+            .unwrap()
+            .command,
+            Command::AtmosphereSweep(AtmosphereSweepArgs {
+                case: Some("ms-sweep-w950.case.json".into()),
+                out: "ms-sweep-w950.json".into(),
+                work: Some("work".into()),
+                threads: NonZeroUsize::new(4),
+                point_cap_cpu_h: figure("12"),
+                cpu_per_vertex_us: Some(figure("45")),
+                vroom_cpu_per_vertex_us: Some(figure("90")),
+                pilot_only: false,
+                points: Vec::new(),
+                max_points: None,
+                smoke: false,
+            })
+        );
+        let Command::AtmosphereSweep(pilot) = parse(&[
+            "atmosphere-sweep",
+            "a.case.json",
+            "--out",
+            "a.json",
+            "--work",
+            "w",
+            "--cpu-per-vertex-us",
+            "45",
+            "--vroom-cpu-per-vertex-us",
+            "45",
+            "--pilot-only",
+            "--points",
+            "3,17,700",
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("an atmosphere-sweep");
+        };
+        assert_eq!((pilot.pilot_only, pilot.points), (true, vec![3, 17, 700]));
+        assert_eq!(pilot.point_cap_cpu_h, figure("24"));
+        assert!(parse(&["atmosphere-sweep", "--smoke", "--out", "s.json"]).is_ok());
+    }
+
+    #[test]
+    fn atmosphere_sweep_refuses_a_bad_command_line() {
+        use clap::error::ErrorKind;
+        for (args, kind) in [
+            (
+                &[
+                    "atmosphere-sweep",
+                    "a.json",
+                    "--out",
+                    "b.json",
+                    "--work",
+                    "w",
+                ][..],
+                ErrorKind::MissingRequiredArgument,
+            ),
+            (
+                &["atmosphere-sweep", "a.json", "--smoke", "--out", "b.json"][..],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "a.json",
+                    "--out",
+                    "b.json",
+                    "--work",
+                    "w",
+                    "--cpu-per-vertex-us",
+                    "45",
+                    "--vroom-cpu-per-vertex-us",
+                    "45",
+                    "--point-cap-cpu-h",
+                    "0",
+                ][..],
+                ErrorKind::ValueValidation,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "--smoke",
+                    "--out",
+                    "b.json",
+                    "--cpu-per-vertex-us",
+                    "45",
+                ][..],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "--smoke",
+                    "--out",
+                    "b.json",
+                    "--max-points",
+                    "1",
+                ][..],
+                ErrorKind::MissingRequiredArgument,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "--smoke",
+                    "--out",
+                    "b.json",
+                    "--points",
+                    "1",
+                ][..],
+                ErrorKind::MissingRequiredArgument,
+            ),
+        ] {
+            assert_eq!(parse(args).unwrap_err().kind(), kind, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn atmosphere_sweep_smoke_writes_its_output_and_names_a_point_it_lacks() {
+        let dir = tempfile::tempdir().unwrap();
+        let out_path = dir.path().join("smoke.json");
+        let out_arg = out_path.to_str().unwrap();
+        let mut out = Vec::new();
+        run(
+            &parse(&[
+                "atmosphere-sweep",
+                "--smoke",
+                "--out",
+                out_arg,
+                "--threads",
+                "4",
+            ])
+            .unwrap(),
+            &mut out,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("wrote") && text.contains("sweep-smoke"),
+            "{text}"
+        );
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&out_path).unwrap()).unwrap();
+        assert_eq!(written["kind"], "sweep");
+        let unknown = parse(&[
+            "atmosphere-sweep",
+            "--smoke",
+            "--out",
+            out_arg,
+            "--pilot-only",
+            "--points",
+            "999999",
+        ])
+        .unwrap();
+        let error = run(&unknown, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 2);
+        assert!(matches!(
+            error,
+            RunFitError::Sweep(crate::atmosphere::sweep::RunSweepError::UnknownPoint(
+                999_999
+            ))
+        ));
     }
 
     #[test]

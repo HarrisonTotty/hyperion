@@ -173,7 +173,8 @@ pub(crate) const ROULETTE_FRACTION: f64 = 0.1;
 
 /// A vertex's phase mixture is forward-peaked, and its new directions are drawn partly towards the
 /// suns, where its forward value passes this, sr⁻¹: some 12 times the isotropic 1 ÷ 4π, and
-/// eight times Rayleigh's largest, which a Henyey–Greenstein phase function reaches at g ≈ 0.65.
+/// eight times Rayleigh's largest, which a Henyey–Greenstein phase function passes at g ≈ 0.64
+/// ((1 + g) ÷ (4π (1 − g)²) = 1 at g = 0.639; Henyey and Greenstein 1941, ApJ 93, 70, eq. 2).
 pub(crate) const FORWARD_PEAK_PER_SR: f64 = 1.0;
 
 /// The fraction of a forward-peaked vertex's new directions drawn about a sun (module
@@ -439,6 +440,17 @@ pub(crate) struct Scratch {
     terms_per_m: Vec<f64>,
     /// The branches waiting to be followed, each with its number of copies.
     pending: Vec<(Branch, u32)>,
+    /// The vertices the samples have reached since the count was last taken: every scattering
+    /// and reflection a branch visits, its clones' and copies' included (R08.T13.a's cost, main's
+    /// reading 2). It is counted beside the draws and reads none, so no sample changes by it.
+    vertices: u64,
+}
+
+impl Scratch {
+    /// The vertices reached since the last call, the count then restarting from 0.
+    pub(crate) fn take_vertices(&mut self) -> u64 {
+        core::mem::take(&mut self.vertices)
+    }
 }
 
 /// One shell's stretch of the first flight.
@@ -798,6 +810,13 @@ impl<'a> Medium<'a> {
                 .map(|s| s.irradiance[wavelength])
                 .collect(),
         }
+    }
+
+    /// Whether the medium's samples run VROOM (module documentation), which R08.T13's sweep reads
+    /// for its estimator's cost and the refusals it lists near a sun.
+    #[must_use]
+    pub(crate) fn runs_vroom(&self) -> bool {
+        self.vroom
     }
 
     /// The height the profiles are read at, at `x`: above the ground on a sphere, gravity-scaled
@@ -1487,6 +1506,7 @@ impl<'a> Medium<'a> {
         let Stage::At(vertex) = branch.stage else {
             return true;
         };
+        scratch.vertices += 1;
         let order = branch.walker.order;
         let duty = if self.vroom {
             if branch.role == Role::Mother
