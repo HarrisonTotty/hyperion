@@ -107,23 +107,27 @@ const GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.25;
 
 /// The sample-world cases, each a world's name and a survey's index in [`SURVEYS_M`], whose
 /// z-scores' variance is held to [`STYLE_GAP_Z`] rather than the plan's 15%: the reference Earth at
-/// both surveys and the locked Earth at 100 m, at 1.1772, 1.1584 and 1.1658 (2026-10-26, generator
-/// version 23), each with its RMS ratio within 1% of 1 and held at the plan's 10%.
+/// both surveys and the locked Earth at 100 m. Since R09.T6.f (2026-10-27, generator version 23)
+/// they measure 1.1751, 1.3568 and 1.1635, each with its RMS ratio within 1% of 1 (the reference
+/// Earth's at 1000 m 1.0072) and held at the plan's 10%; before it, 1.1772, 1.1584 and 1.1658.
 ///
 /// The ground a level leaves out is wider than the cell's σ at some points of the Earths, which
-/// raises the z-scores' variance where σ is small and barely moves the pooled RMS. The gap is named
-/// for decision-r10-t2-weights §2's cause, R09's level-keyed forms reading each cell's own relief
-/// style while the synthesis interpolates the styles. At two of the Earth's shelf texels, though,
-/// R10.T2's follow-up found the channels' term instead, so the cause is open. R09's follow-up on
-/// the closed forms re-measures these figures, and R10.T15.b re-records them at 24 (plan R10's
-/// "Deferred findings (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)").
+/// raises the z-scores' variance where σ is small and barely moves the pooled RMS. The gap was
+/// named for decision-r10-t2-weights §2's cause, R09's level-keyed forms reading each cell's own
+/// relief style while the synthesis interpolates the styles, a small effect that stands
+/// (decision-r09-channel-term §6). Since R09.T6.f the reference Earth's 1000 m case has a second
+/// cause: the synthesis holds a coastal cell's trunk to its base level, which shrinks the cell's own
+/// closed-form channel term, while its neighbours' trunks reaching into it, which the closed forms
+/// omit, and the floor's flats at the sea stay realised (plan R09's "Deferred findings (2026-10-13
+/// rule) (R09.T6.f)"). R10.T15.b re-records these figures at 24 (plan R10's "Deferred findings
+/// (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)").
 const STYLE_GAP: [(&str, usize); 3] = [(EARTH, 0), (EARTH, 1), (LOCKED_EARTH, 0)];
 
-/// The style gap's bounds on the z-scores' variance, \[0.85, 1.18\]: the plan's tolerance from
-/// below, so that a σ quoted too high still fails, and from above the largest measured, 1.1772,
-/// rounded up to the next 0.01 (main's acceptance, 2026-10-26, by decision-r10-t2-weights §2.4's
-/// rule for a pin).
-const STYLE_GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.18;
+/// The style gap's bounds on the z-scores' variance, \[0.85, 1.36\]: the plan's tolerance from
+/// below, so that a σ quoted too high still fails, and from above the largest measured, 1.3568
+/// (the reference Earth at 1000 m since R09.T6.f), rounded up to the next 0.01 (main's ruling,
+/// 2026-10-27, by decision-r10-t2-weights §2.4's rule for a pin; 1.18 before).
+const STYLE_GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.36;
 
 /// `count` distinct cells of `level` at random.
 fn random_cells(level: u8, count: usize, rng: &mut Lcg) -> Vec<PatchKey> {

@@ -144,7 +144,8 @@
 //! (R09.T6.a's test), inside the margin's five (Design note 15 budgets four for the first level);
 //! [`ReadCellError`] names the first that is missing. Its relief, the valleys the channels cut,
 //! level by level with each level's mean over its parent cell removed, is [`Channels::incision_at`]
-//! (R09.T6.b), whose model, cut, search and closed forms [`incision`] describes. [`ChannelNetwork`]
+//! (R09.T6.b), whose model, cut, search and closed forms [`incision`] describes: on dry ground
+//! only, and no deeper than a trunk's base level (R09.T6.f). [`ChannelNetwork`]
 //! memoises what it computes, in its own memo or in the caller's [`SynthCache`],
 //! and no result depends on what it has computed before.
 
@@ -172,7 +173,7 @@ pub use incision::{
     channel_head_area, channel_structure_function, channel_variance, deepest_level, epoch_valley,
     valley_depth,
 };
-pub(crate) use incision::{ChannelCache, unresolved_channel_variance};
+pub(crate) use incision::{ChannelCache, trunk_valley_m, unresolved_channel_variance};
 
 /// ε, the share of a cell's side by which a drawn key point keeps from each of its edges: 0.25,
 /// so that it lies in the cell's central half (Design note 13; Dendry's `GeneratePoint` draws
@@ -820,8 +821,9 @@ pub enum Outlet {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Kind {
     /// A trunk: its receiver, its crossing's parameter and spheroid point (metres), the coarse
-    /// cell's drainage area along it, square metres, its valley's depth, metres ([`valley_depth`],
-    /// or on a world dry now the epoch's valley's, [`EpochValley`]'s G), and on a world dry now
+    /// cell's drainage area along it, square metres, its valley's depth, metres ([`valley_depth`]
+    /// held to its base level, R09.T6.f, or on a world dry now the epoch's valley's,
+    /// [`EpochValley`]'s G), and on a world dry now
     /// that valley's wall width, metres (`None` for T6.b's steady state); its bed runs straight
     /// between its ends.
     Trunk {
@@ -1069,8 +1071,9 @@ impl Segment {
     }
 
     /// How far its bed lies below its trunk's valley top at parameter `t`, metres: the trunk's
-    /// valley depth along a trunk ([`valley_depth`], or on a world dry now the epoch's valley's
-    /// depth, [`EpochValley`]), and along a tributary the inherited top less
+    /// valley depth along a trunk ([`valley_depth`], held to no more than its cell stands above its
+    /// base level, its receiver's water or the sea, R09.T6.f; or on a world dry now the epoch's
+    /// valley's depth, [`EpochValley`]), and along a tributary the inherited top less
     /// its bed there, which falls upstream as the bed rises and is below zero where the channel
     /// has risen above the top (see [`Channels::incision_at`]).
     ///
@@ -1188,6 +1191,13 @@ impl Channels {
     #[must_use]
     pub const fn first_level(&self) -> u8 {
         self.level
+    }
+
+    /// The header's sea level, below which a trunk draining into dry ground cuts no valley
+    /// (R09.T6.f; [`incision::base_level_m`]).
+    #[must_use]
+    pub(crate) const fn sea_level(&self) -> Metres {
+        self.field_marks[0]
     }
 
     /// The network over `field`, with nothing yet computed, memoising in a memo of its own.
@@ -1544,18 +1554,17 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
             area,
             self.channels.gravity,
         );
-        // The relief its tributaries cut, from its cell's channel heads down to it; none where
-        // the cell carries no tributaries. On a world dry now, the epoch's valley instead
-        // (R09.T6.c): no deeper than its incision, ten times as wide as deep.
+        // The relief its tributaries cut, from its cell's channel heads down to it, held to the
+        // height its cell stands above its base level (R09.T6.f); none where the cell carries no
+        // tributaries. On a world dry now, the epoch's valley instead (R09.T6.c): no deeper than
+        // its incision, ten times as wide as deep.
         let (valley_m, epoch_wall_m) = if own.epoch_incision.is_epoch() {
             let epoch = epoch_valley(own, self.channels.body())
                 .expect("a dry-now cell with a receiver and water has its epoch's valley");
             (epoch.depth().value(), Some(epoch.wall().value()))
         } else {
             (
-                tributary_steepness_of(own).map_or(0.0, |k| {
-                    valley_depth(k, self.channels.radius, coarse.level()).value()
-                }),
+                trunk_valley_m(own, into, self.channels.sea_level(), self.channels.body()),
                 None,
             )
         };

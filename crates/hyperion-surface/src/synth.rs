@@ -192,6 +192,14 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// gradient alike, and the sum asserted finite. `cache` is the caller's, and no result depends
     /// on what it holds.
     ///
+    /// The channels take no point of a dry coarse cell below the sea level, except on a world dry
+    /// now (R09.T6.f; decision-r09-channel-term §4(b)): with h₀ the height without their incision
+    /// c, the height is max(h₀ + c, min(h₀, sea)), the sea level and flat where they would cut
+    /// through it, and h₀ where the ground lies below the sea without them. The floor is
+    /// continuous and moves no height towards anything but h₀, so the level bound holds; it binds
+    /// only where the sum lies below the sea and c is negative, and every other height is the sum
+    /// to the bit.
+    ///
     /// # Errors
     ///
     /// [`QueryHeightError::NotSurveyed`] naming the first cell read that the view does not hold:
@@ -212,6 +220,34 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
             sample.height_m += part.height_m;
             for (g, d) in sample.gradient.iter_mut().zip(part.gradient) {
                 *g += d;
+            }
+        }
+        // The channels take no dry point below the sea level (R09.T6.f; decision-r09-channel-term
+        // §4(b)'s per-point floor): h = max(h₀ + c, min(h₀, sea)) with h₀ the height without them.
+        // It binds only where the sum lies below the sea and the channels cut, so that every other
+        // point keeps its sum's bits.
+        let sea = self.field.header().sea_level().value();
+        if sample.height_m < sea && parts.channels.height_m < 0.0 {
+            let (_, record) = self.cell_at(dir)?;
+            if !record.is_under_water() && !record.epoch_incision.is_epoch() {
+                // h₀, the other contributions summed in their order.
+                let mut without = parts.base;
+                for part in [parts.relief, parts.craters, parts.rims] {
+                    without.height_m += part.height_m;
+                    for (g, d) in without.gradient.iter_mut().zip(part.gradient) {
+                        *g += d;
+                    }
+                }
+                sample = if without.height_m >= sea {
+                    // On the floor, flat.
+                    HeightSample {
+                        height_m: sea,
+                        gradient: [0.0; 3],
+                    }
+                } else {
+                    // Below the sea without the channels: they cut nothing there.
+                    without
+                };
             }
         }
         Ok(HeightSample {
@@ -345,7 +381,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 
     /// What band level `level` leaves out of the finest level's ground in `cell`, per
     /// contribution: the level-keyed closed forms (added by R10.T5;
-    /// `decision-r10-t5-closed-forms.md`), or `None` where the view does not hold the cell.
+    /// `decision-r10-t5-closed-forms.md`), or `None` where the view does not hold the cell or the
+    /// receiver of its trunk, one king move away inside the margin, whose base level the channels'
+    /// form reads (R09.T6.f).
     ///
     /// Each contribution's wavelength-keyed form ([`unresolved_variance`]) is taken from the cut
     /// at which it counts what the level leaves out, since a level evaluates each contribution by
@@ -375,8 +413,8 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// finest level's ground in `cell`, square metres: the contributions' structure functions as
     /// [`omitted_variance`](Self::omitted_variance) takes them, at its cuts and the small craters'
     /// octaves kept and left out, summed in its order (added by R10.T5; R09.T7.h); `None` where
-    /// the view does not hold the cell. Each tends to twice its share of that variance at lags long
-    /// against its wavelengths.
+    /// the view does not hold the cell or the receiver of its trunk (R09.T6.f). Each tends to twice
+    /// its share of that variance at lags long against its wavelengths.
     ///
     /// # Panics
     ///
@@ -401,7 +439,8 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// The RMS of what band level `level` leaves out of the finest level's ground in `cell`: the
     /// square root of [`omitted_variance`](Self::omitted_variance)'s total, which R10's readings
     /// quote as the uncertainty of a height read at that level (its Design note 6; added by
-    /// R10.T5); `None` where the view does not hold the cell.
+    /// R10.T5); `None` where the view does not hold the cell or the receiver of its trunk
+    /// (R09.T6.f).
     ///
     /// # Panics
     ///
@@ -433,7 +472,8 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 /// What the band level of `set` leaves out of the finest level's ground in `cell` of `field`,
 /// per contribution, with the small craters' part given: [`Synthesiser::omitted_variance`]'s
 /// closed forms and sum, which it calls with `small_craters` its octaves'
-/// [`CraterOctaves::omitted_variance`] at `set`; `None` where `field` does not hold the cell.
+/// [`CraterOctaves::omitted_variance`] at `set`; `None` where `field` does not hold the cell or
+/// the receiver of its trunk (R09.T6.f).
 ///
 /// The small craters' part is the body's, the same in every cell and a sum over the octaves and
 /// their sampled profiles, so a caller that asks of many cells at a level builds it once (R10.T4.b,
@@ -649,7 +689,8 @@ impl UnresolvedVariance {
 }
 
 /// The variance of `cell`'s ground in wavelengths shorter than `finer_than`, per contribution, or
-/// `None` where `field` does not hold the cell (Design note 18).
+/// `None` where `field` does not hold the cell or the receiver of its trunk (Design note 18;
+/// R09.T6.f).
 ///
 /// Each contribution reads `finer_than` in its own placement ([`UnresolvedVariance`]), so a band
 /// level leaves out more than this at its `λ_n`: what it leaves out is
@@ -691,8 +732,8 @@ fn unresolved_with(
 
 /// The structure function of `cell`'s ground in wavelengths shorter than `finer_than`, at a lag of
 /// `lag`: E[(h(p + Δ e) − h(p))²] along a tangent e, square metres, the sum of its contributions'
-/// closed forms, taken as independent; `None` where `field` does not hold the cell (Design note
-/// 18; R10's slope readouts).
+/// closed forms, taken as independent; `None` where `field` does not hold the cell or the receiver
+/// of its trunk (Design note 18; R10's slope readouts; R09.T6.f).
 ///
 /// The contributions are the structural octaves', octave by octave from their pinned unit
 /// structure functions at the cell's style (`decision-r09-t5.md` item 7.3), the channels'
@@ -750,7 +791,7 @@ fn structure_with(
 /// The RMS of `cell`'s ground in wavelengths shorter than `resolution`: the square root of
 /// [`unresolved_variance`]'s total, one standard deviation of every contribution in wavelengths
 /// shorter than the resolution, each in its own placement ([`UnresolvedVariance`]); `None` where
-/// `field` does not hold the cell.
+/// `field` does not hold the cell or the receiver of its trunk (R09.T6.f).
 ///
 /// It falls as the resolution refines and is zero at the 2 m band limit and below, where the
 /// synthesis has nothing finer. A height read at a band level leaves out more than this at the

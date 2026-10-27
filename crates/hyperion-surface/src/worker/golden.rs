@@ -65,13 +65,15 @@
 //! patch of at least three classes, which neither Moon-like file holds: every cell they survey is
 //! highland, of regolith and bedrock of one entry alone. This one surveys the Earth-like world's
 //! cell (0, 0) of face +x at level 8, at 50 m with its margin (one payload of 4,850 bytes in two
-//! blocks), and pins its finest-level (19) patch (900, 668) of face +x, about 19 m across, centred
+//! blocks), and pins its finest-level (19) patch (900, 669) of face +x, about 19 m across, centred
 //! near 35.23° S, 44.87° W: soil (class 2), sand (3) and a channel's sediment (4), each of the
 //! continental crust's granite, entry 1, where the arid bound's height contour crosses a channel
-//! (66, 4,120 and 39 of its 4,225 vertices dominant, no tie).
+//! (2,336, 273 and 1,616 of its 4,225 vertices dominant).
 //!
 //! The spot was found by a deterministic search, recorded here so that it can be run again (it was,
-//! 2026-10-20, to the same patch). A class is the form
+//! 2026-10-20, to the same patch, (900, 668), and 2026-10-27, after R09.T6.f held the channels'
+//! valleys to their base level, to (900, 669), the row above, through the same blocks). A class is
+//! the form
 //! [`material_at`](crate::material::material_at) answers over the world's whole field (over the
 //! fixture's survey the search finds the same blocks and the same patch), and "columns in turn,
 //! the rows within each" orders a grid by its first index, then its second.
@@ -90,7 +92,7 @@
 //!   from 8 below it to 8 above it each way, columns in turn, the rows within each. Each patch is
 //!   sampled at every eighth vertex, x and y of 0, 8, …, 64, 81 points (`vertex_point`).
 //! - The first patch whose samples hold three classes: the first three blocks have none, and the
-//!   fourth's patches about (896, 672) give (900, 668).
+//!   fourth's patches about (896, 672) give (900, 669).
 //!
 //! After the header:
 //!

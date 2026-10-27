@@ -345,11 +345,11 @@ pub(super) fn earth_cell() -> PatchKey {
     .unwrap()
 }
 
-/// The fixture's patch: (900, 668) of face +x at the Earth-like world's finest level, 19, in
+/// The fixture's patch: (900, 669) of face +x at the Earth-like world's finest level, 19, in
 /// [`earth_cell`], whose ground is soil, sand and a channel's sediment of the continental crust's
 /// granite.
 pub(super) fn earth_patch() -> PatchKey {
-    PatchKey::new(Face::PosX, 19, 900, 668).unwrap()
+    PatchKey::new(Face::PosX, 19, 900, 669).unwrap()
 }
 
 /// The Earth-like fixture: [`earth_cell`] surveyed at 50 m with its margin, in the fixture's blocks.

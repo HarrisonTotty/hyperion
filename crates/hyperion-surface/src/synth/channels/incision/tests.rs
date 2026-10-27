@@ -478,11 +478,19 @@ fn segments_carry_their_discharge_width_depth_and_depth_below_the_top() {
         assert_eq!(bits(trunk.mean_discharge_m3_s()), bits(mean));
         assert_eq!(trunk.bankfull_width(), bankfull_width(forming, g));
         assert_eq!(trunk.bankfull_depth(), bankfull_depth(forming, g));
-        let valley = valley_depth(
+        // Its valley is the cell's, held to its base level (R09.T6.f).
+        let unheld = valley_depth(
             tributary_steepness_of(record).unwrap(),
             header.radius(),
             first,
         );
+        let Outlet::Cell { receiver, .. } = trunk.outlet() else {
+            panic!("a trunk drains to a cell");
+        };
+        let receiver = field.cell(receiver).unwrap();
+        let room = record.water_surface().value() - base_level_m(receiver, header.sea_level());
+        let valley = Metres::new(num::min(unheld.value(), num::max(room, 0.0)));
+        assert!(valley <= unheld);
         assert_eq!(trunk.below_top(0.0), valley);
         assert_eq!(trunk.below_top(1.0), valley);
         // A tributary's is its own cell's runoff times its area where it joins, and its bed lies
@@ -776,20 +784,35 @@ fn the_incision_is_continuous_across_cell_edges() {
 }
 
 #[test]
+fn the_gradient_is_the_incision_s_central_difference() {
+    let field = earth();
+    let (good, total) = central_differences(field, with_tributaries(field, 5));
+    // A few steps cross a kink: where the deepest groove changes, or a groove's depth meets its
+    // floor or its cap.
+    assert!(
+        f64::from(good) >= 0.97 * f64::from(total),
+        "{good} of {total}"
+    );
+}
+
+/// How many of the incision's gradients at 64 points off the edges of each of `cells`, along two
+/// tangents each, agree with its central difference over 1 m, of how many (through L + 4).
 #[expect(
     clippy::many_single_char_names,
     reason = "the cell, its two tangents, the point and the step, as a central difference names \
               them"
 )]
-fn the_gradient_is_the_incision_s_central_difference() {
-    let field = earth();
+fn central_differences(
+    field: &CoarseField,
+    cells: impl IntoIterator<Item = PatchKey>,
+) -> (u32, u32) {
     let header = field.header();
     let first = header.level().get();
     let channels = Channels::new(header, SEED);
     let figure = header.figure();
     let mut cache = SynthCache::new();
     let (mut good, mut total) = (0, 0);
-    for c in with_tributaries(field, 5) {
+    for c in cells {
         // Off every cell's edges to L + 4, where the corrections are C⁰.
         let offsets = [0.093, 0.218, 0.361, 0.477, 0.604, 0.729, 0.852, 0.967];
         let dirs = offsets
@@ -828,12 +851,7 @@ fn the_gradient_is_the_incision_s_central_difference() {
             }
         }
     }
-    // A few steps cross a kink: where the deepest groove changes, or a groove's depth meets its
-    // floor or its cap.
-    assert!(
-        f64::from(good) >= 0.97 * f64::from(total),
-        "{good} of {total}"
-    );
+    (good, total)
 }
 
 /// a × b.
@@ -918,7 +936,11 @@ fn unresolved_variance_carries_the_channels_share() {
         let cell = field.cell(c).unwrap();
         for finer_than in [Metres::new(500.0), Metres::new(5e4)] {
             let v = crate::synth::unresolved_variance(field, c, finer_than).unwrap();
-            assert_eq!(v.channels(), channel_variance(cell, body, finer_than));
+            // The synthesis's own form, which reads the trunk's base level (R09.T6.f).
+            assert_eq!(
+                Some(v.channels()),
+                unresolved_channel_variance(field, c, finer_than)
+            );
             assert_eq!(
                 v.total(),
                 v.relief() + v.channels() + v.craters() + v.rims()
@@ -934,19 +956,18 @@ fn unresolved_variance_carries_the_channels_share() {
 #[test]
 fn the_structure_function_rises_as_its_slopes_and_saturates_at_twice_the_variance() {
     let field = earth();
-    let body = ChannelBody::of(field.header());
     let wide = Metres::new(1e6);
     for c in with_tributaries(field, 5) {
-        let cell = field.cell(c).unwrap();
         let d = |lag: f64| {
             channel_structure_function(field, c, wide, Metres::new(lag))
                 .unwrap()
                 .value()
         };
         assert_eq!(bits(d(0.0)), bits(0.0));
-        let slopes: f64 = level_terms(cell, body).iter().map(|t| t.slope2).sum();
+        let (_, terms) = synthesised_terms(field, c).unwrap();
+        let slopes: f64 = terms.iter().map(|t| t.slope2).sum();
         assert!((d(0.1) / (WHOLE_VARIANCE_SHARE * slopes * 0.01) - 1.0).abs() < 1e-3);
-        let variance = channel_variance(cell, body, wide).value();
+        let variance = unresolved_channel_variance(field, c, wide).unwrap().value();
         assert!((d(1e8) / (2.0 * variance) - 1.0).abs() < 1e-12);
     }
 }
@@ -993,12 +1014,14 @@ fn realised_variance(
 fn the_closed_form_variance_is_within_a_factor_of_two_of_the_realised() {
     for field in [earth(), mars(), mars_epoch()] {
         let channels = Channels::new(field.header(), SEED);
-        let body = ChannelBody::of(field.header());
         let mut cache = SynthCache::new();
         let mut ratios = Vec::new();
         for c in with_tributaries(field, 8) {
             let (realised, _) = realised_variance(&channels, field, &mut cache, c, 32);
-            let closed = channel_variance(field.cell(c).unwrap(), body, Metres::new(1e7)).value();
+            // The synthesis's own form (R09.T6.f), which the realised incision follows.
+            let closed = unresolved_channel_variance(field, c, Metres::new(1e7))
+                .unwrap()
+                .value();
             if closed > 1.0 {
                 ratios.push(realised / closed);
             }
@@ -1038,7 +1061,7 @@ fn measure_the_network_and_the_incision() {
         for &c in &cells {
             let cell = field.cell(c).unwrap();
             let rms = |from: u8, to: u8| {
-                level_terms_to(cell, body, to)
+                level_terms_to(cell, body, to, TrunkValley::FromTheCell)
                     .iter()
                     .filter(|t| t.level > from)
                     .map(|t| t.variance)
@@ -1424,3 +1447,5 @@ fn the_drawn_valleys_void_is_the_closure_s() {
         realised / closed
     );
 }
+
+mod water;

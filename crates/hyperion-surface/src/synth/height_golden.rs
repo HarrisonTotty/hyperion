@@ -81,7 +81,8 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 use super::channels::{
     ChannelBody, ChannelNetwork, MINIMUM_SLOPE, Outlet, Segment, bankfull_depth, bankfull_width,
     channel_head_area, channel_structure_function, channel_variance, deepest_level, epoch_valley,
-    hack_area, head_length, main_stream_length, tributary_rise, valley_depth,
+    hack_area, head_length, main_stream_length, tributary_rise, unresolved_channel_variance,
+    valley_depth,
 };
 use super::craters::rims::{coarse_band_half_width, kept_relief, rims_structure_function};
 use super::craters::{CraterCache, CraterOctave, SmallCrater, SmallCraters};
@@ -319,6 +320,35 @@ fn channelled_cells(field: &CoarseField, count: usize) -> Vec<PatchKey> {
         }
     }
     cells
+}
+
+/// The first of `field`'s coarse cells, in cell-index order, whose steady-state trunk's valley the
+/// synthesis holds to its base level (R09.T6.f), where its closed forms leave the coarse pass's.
+fn held_trunk_cells(field: &CoarseField) -> Vec<PatchKey> {
+    let body = ChannelBody::of(field.header());
+    let whole = Metres::new(1e7);
+    coarse_cells(field)
+        .find(|&c| {
+            let record = field.cell(c).expect("a whole field");
+            let drawn = unresolved_channel_variance(field, c, whole).expect("a whole field");
+            !record.is_under_water()
+                && drawn.value() > 0.0
+                && drawn.value() < channel_variance(record, body, whole).value()
+        })
+        .into_iter()
+        .collect()
+}
+
+/// The first of `field`'s coarse cells, in cell-index order, under water and with a flow edge: a
+/// trunk the synthesis draws nothing of (R09.T6.f) and the coarse pass books a bankfull channel.
+fn wet_trunk_cells(field: &CoarseField) -> Vec<PatchKey> {
+    coarse_cells(field)
+        .find(|&c| {
+            let record = field.cell(c).expect("a whole field");
+            record.is_under_water() && record.flow.edge().is_some()
+        })
+        .into_iter()
+        .collect()
 }
 
 /// Up to `count` of `field`'s coarse cells whose belt weight is between 0 and 1, spread through
@@ -1305,7 +1335,9 @@ fn levels() -> String {
 
 /// The cells each world's closed forms are pinned at, with what each is: a cube corner's cell
 /// and a face edge's, and a cell under a coarse rim, one with channels and one on a belt where the
-/// world has them.
+/// world has them; and where it has them, a dry cell whose trunk's valley the synthesis holds to
+/// its base level and a wet cell with a trunk, whose synthesised closed forms leave the coarse
+/// pass's `channel_variance` (R09.T6.f).
 fn closed_form_cells(kind: SyntheticWorld) -> Vec<(&'static str, PatchKey)> {
     let field = world(kind);
     let level = field.header().level().get();
@@ -1331,6 +1363,16 @@ fn closed_form_cells(kind: SyntheticWorld) -> Vec<(&'static str, PatchKey)> {
             .map(|c| ("with channels", c)),
     );
     cells.extend(belt_cells(field, 1).into_iter().map(|c| ("on a belt", c)));
+    cells.extend(
+        held_trunk_cells(field)
+            .into_iter()
+            .map(|c| ("with its trunk's valley held to its base level", c)),
+    );
+    cells.extend(
+        wet_trunk_cells(field)
+            .into_iter()
+            .map(|c| ("under water with a trunk", c)),
+    );
     cells
 }
 

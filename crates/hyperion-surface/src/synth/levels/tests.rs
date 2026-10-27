@@ -226,10 +226,14 @@ fn sample_levels(field: &CoarseField, cells: usize, points: usize, seed: u64) ->
                     slot.0 = num::min(slot.0, v);
                     slot.1 = num::max(slot.1, v);
                 }
-                let mut height = parts.base.height_m;
-                for part in [relief, channels, craters, rims] {
-                    height += part;
-                }
+                // The height as delivered, the channels' floor at the sea included (R09.T6.f),
+                // which keeps it between the sum with the channels and the sum without them.
+                let height = synth.height_at(&mut cache, dir, level).unwrap().height_m;
+                let floored = height - parts.base.height_m;
+                assert!(
+                    low <= floored && floored <= high,
+                    "{dir:?} {n}: {floored} m outside [{low}, {high}] m"
+                );
                 heights.push(height);
             }
             for n in 0..complete {

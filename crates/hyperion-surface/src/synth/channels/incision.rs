@@ -14,7 +14,9 @@
 //! below its trunk's **valley top**:
 //!
 //! - A trunk's valley is as deep as the relief its cell's tributaries cut, from the channel heads
-//!   down to it ([`valley_depth`]); its top runs that far above its bed all along it.
+//!   down to it ([`valley_depth`]), but no deeper than its cell stands above its **base level**,
+//!   its receiver's water where the receiver is under water and the sea level otherwise (R09.T6.f;
+//!   decision-r09-channel-term §4(b)); its top runs that far above its bed all along it.
 //! - A tributary inherits the top where it joins, so its bed rises towards the top upstream, and its
 //!   groove shallows to its channel alone where it has risen to it.
 //! - On a world dry now a trunk's valley is its epoch's ([`EpochValley`]; R09.T6.c): no deeper than
@@ -34,6 +36,28 @@
 //! Distances are 3D, from the spheroid point to a segment's chords. A trunk's chord sags below the
 //! surface by up to L² ÷ 8R, about 25 m over a 36 km cell, which is accepted (R09.T6.a's note): it
 //! is nothing against the wall's kilometres, and narrows only a floor narrower than the sag.
+//!
+//! # Water
+//!
+//! A coarse cell under water ([`SynthesisCell::is_under_water`], whatever its liquid) carries no
+//! incision at any level, neither a groove nor a correction, and cuts no valley of its own, not
+//! even its trunk's past its crossing into a dry receiver (R09.T6.f; decision-r09-channel-term
+//! §4(a)). Rivers are "highly depositional near their mouths" (Lamb, Nittrouer, Mohrig and Shaw
+//! 2012, JGR Earth Surface 117, F01002, doi:10.1029/2011JF002079, abstract), so a sea's or a lake's
+//! bed is not dissected by the rivers that reach it now, and the level's mean removal does not
+//! lift it above its water. Shelf valleys that a lower sea once exposed, and submarine canyons, are
+//! other processes, not modelled (the field carries no history of the sea level).
+//!
+//! The fade is a device for continuity, not a law: each level's raw incision in a dry cell is
+//! faded towards every edge and corner the cell shares with a cell under water, times the product
+//! of S(d ÷ w) over them, S the cubic smoothstep, d the distance to the edge or corner in the
+//! cell's face coordinates, and w the level's wall width as a share of the coarse cell's side,
+//! ½ ÷ 2^(k − L). So a trunk running into water cuts nothing past its crossing, and its valley
+//! shallows over the last half cell to the shore. Each level's correction is zero at every corner
+//! a cell under water shares, so that it is zero along every shore and over every wet cell, and
+//! the dry cell's bubble carries the rest of its mean. A dry cell with no wet neighbour is not
+//! faded and keeps every corner, though its values still move with its neighbours' means and
+//! grooves.
 //!
 //! # Each level's mean
 //!
@@ -262,6 +286,62 @@ pub fn valley_depth(steepness_m0_9: f64, radius: Metres, level: u8) -> Metres {
     Metres::new(num::assert_finite(rise(steepness_m0_9, heads, cell)))
 }
 
+/// The height above the datum, metres, below which a trunk draining into `receiver` cuts no valley:
+/// its **base level** (R09.T6.f; decision-r09-channel-term §4(b)).
+///
+/// It is the receiver's water surface where the receiver is under water, a lake's or the sea's,
+/// and otherwise the sea level, `sea_level`: "the level of the sea [is] a grand base level, below
+/// which the dry lands cannot be eroded", and a lake's is a local one (Powell 1875, Exploration of
+/// the Colorado River of the West and its Tributaries, Washington: GPO, p. 203). A basin that
+/// drains through dry cells to a lake or a playa above the sea is held to the sea, a weaker hold
+/// than its own outlet's (labelled; the plan's Risks). On a world with no sea the header's sea
+/// level is its lowest cell's ground, so every basin is held to the world's lowest ground, a weak
+/// but harmless bound.
+#[must_use]
+pub(crate) fn base_level_m(receiver: &SynthesisCell, sea_level: Metres) -> f64 {
+    if receiver.is_under_water() {
+        receiver.water_surface().value()
+    } else {
+        sea_level.value()
+    }
+}
+
+/// The valley depth of the trunk of the coarse cell `cell`, whose flow names `receiver`, on a
+/// world that is not dry now, metres (R09.T6.f; decision-r09-channel-term §4(b)).
+///
+/// It is [`valley_depth`] at the cell's tributaries' steepness, zero where the cell carries none,
+/// held to the height the cell's ground stands above its base level ([`base_level_m`]), and zero
+/// where it stands at or below it. That holds the valley at the cell's mean ground, not along its
+/// whole length: the fade towards water and `Synthesiser::height_at`'s floor at the sea keep the
+/// cut above the sea (trunks into lakes above the sea excepted; the plan's Risks). The trunk's
+/// segment carries it ([`Segment::below_top`]), so that its groove, the synthesis's closed form
+/// and its tributaries, through the valley top they inherit, all read the same depth. Where the
+/// hold does not bind it is [`valley_depth`] to the bit. A world dry now's trunks are its epoch's
+/// ([`EpochValley`]) and are not held.
+#[must_use]
+pub(crate) fn trunk_valley_m(
+    cell: &SynthesisCell,
+    receiver: &SynthesisCell,
+    sea_level: Metres,
+    body: ChannelBody,
+) -> f64 {
+    let valley = tributary_steepness_of(cell)
+        .map_or(0.0, |k| valley_depth(k, body.radius, body.level).value());
+    let room = cell.water_surface().value() - base_level_m(receiver, sea_level);
+    num::min(valley, num::max(room, 0.0))
+}
+
+/// A steady-state trunk's groove depth at its axis, G = min(max(`valley_m`, `bankfull_m`),
+/// `cap_m`), metres.
+///
+/// It is at least its bankfull channel and at most its level's cap ([`groove_cap_m`]): the one
+/// form its groove, its closed form and a world dry now's steady-state bound ([`EpochValley`]) all
+/// take.
+#[must_use]
+fn trunk_depth_m(valley_m: f64, bankfull_m: f64, cap_m: f64) -> f64 {
+    num::min(num::max(valley_m, bankfull_m), cap_m)
+}
+
 /// A trunk's valley on a world dry now: the valley of a short wet epoch, whose cross-section the
 /// synthesis cuts and whose void the coarse pass's width closure takes from the cell (R09.T6.c;
 /// decision-r09-t14-choices F2; decision-r09-t14-mars-ceiling §2.2 and §5).
@@ -319,7 +399,7 @@ impl EpochValley {
                 v
             });
         let r = body.radius.value();
-        let steady = num::min(num::max(valley, depth), groove_cap_m(r, body.level));
+        let steady = trunk_depth_m(valley, depth, groove_cap_m(r, body.level));
         let g = num::min(steady, incision);
         let wall = num::min(
             WALL_RUN_PER_DEPTH * g,
@@ -599,9 +679,10 @@ impl Groove {
             } => {
                 let chords = segment.chords().expect("a trunk has two chords");
                 match epoch_wall_m {
-                    // T6.b's steady state: at least the channel, at most the level's cap.
+                    // T6.b's steady state: at least the channel, at most the level's cap, its
+                    // valley held to its base level (R09.T6.f; [`trunk_valley_m`]).
                     None => {
-                        let depth = num::min(num::max(valley_m, floor_depth), cap_m);
+                        let depth = trunk_depth_m(valley_m, floor_depth, cap_m);
                         (chords, 2, Depth::Constant(depth), wall_m)
                     }
                     // A world dry now's: the epoch's valley as it is ([`EpochValley`]).
@@ -786,6 +867,90 @@ impl Correction {
     }
 }
 
+/// The cubic smoothstep S(x) = x²(3 − 2x) on [0, 1], 0 below and 1 above, and its derivative
+/// 6x(1 − x): a groove's fade towards water.
+#[must_use]
+fn smoothstep(x: f64) -> (f64, f64) {
+    let (f, df) = profile(x);
+    (1.0 - f, -df)
+}
+
+/// A coarse cell's water: whether it is under water, and which of the cells across its edges and
+/// corners are (R09.T6.f; the [module documentation](self), "Water").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Shore {
+    /// Whether the cell itself is under water.
+    wet: bool,
+    /// Whether the cell across each edge is, in [`Edge::ALL`]'s order.
+    edges: [bool; 4],
+    /// Whether the cell across each corner is, in [`Correction`]'s corner order; never at a cube
+    /// corner, where there is no such cell and its two edge neighbours meet.
+    corners: [bool; 4],
+}
+
+impl Shore {
+    /// Whether the cell is dry and shares no edge or corner with a cell under water, so that no
+    /// level's incision is faded there.
+    #[must_use]
+    fn is_inland(&self) -> bool {
+        !self.wet && !self.edges.contains(&true) && !self.corners.contains(&true)
+    }
+
+    /// The fade of a level's incision at the face coordinates (`x`, `y`) of the dry cell, each in
+    /// [0, 1], over the width `width` (a share of the cell's side), and its derivatives in x and
+    /// y: the product of S(d ÷ `width`) over each edge and corner the cell shares with a cell under
+    /// water, d the distance to that edge or corner in face coordinates and S the cubic
+    /// [`smoothstep`], so zero on the shared edge or at the shared corner and one from `width` away.
+    #[must_use]
+    fn fade(&self, x: f64, y: f64, width: f64) -> (f64, f64, f64) {
+        let (mut f, mut f_x, mut f_y) = (1.0, 0.0, 0.0);
+        let mut times = |d: f64, d_x: f64, d_y: f64| {
+            let (s, ds) = smoothstep(d / width);
+            let rate = ds / width;
+            f_x = f_x * s + f * rate * d_x;
+            f_y = f_y * s + f * rate * d_y;
+            f *= s;
+        };
+        // The distance to an edge's neighbour, from inside the cell, is the distance to the edge.
+        let edges = [
+            (x, 1.0, 0.0),
+            (1.0 - x, -1.0, 0.0),
+            (y, 0.0, 1.0),
+            (1.0 - y, 0.0, -1.0),
+        ];
+        for (&wet, (d, d_x, d_y)) in self.edges.iter().zip(edges) {
+            if wet {
+                times(d, d_x, d_y);
+            }
+        }
+        for (&wet, (cx, cy)) in
+            self.corners
+                .iter()
+                .zip([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])
+        {
+            if wet {
+                let (dx, dy) = (x - cx, y - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                let (d_x, d_y) = if d > 0.0 {
+                    (dx / d, dy / d)
+                } else {
+                    (0.0, 0.0)
+                };
+                times(d, d_x, d_y);
+            }
+        }
+        (f, f_x, f_y)
+    }
+}
+
+/// The width over which level `level` of a network whose first level is `first` fades towards
+/// water, as a share of a coarse cell's side: the level's wall width, [`VALLEY_WALL_SHARE`] of its
+/// own cell, ½ ÷ 2^(`level` − `first`), exact.
+#[must_use]
+fn fade_width(first: u8, level: u8) -> f64 {
+    VALLEY_WALL_SHARE / f64::from(1_u32 << (level - first))
+}
+
 /// One sample of a parent cell's mean grid: its unit direction, its weight (the solid angle it
 /// stands for, to a constant) and its face coordinates in the cell.
 #[derive(Debug, Clone, Copy)]
@@ -914,6 +1079,10 @@ pub(crate) struct ChannelCache {
     corrections: BTreeMap<(u8, u64), Correction>,
     /// Per level, the parent cell whose correction was last read, and it.
     recent_correction: [Option<(u64, Correction)>; LEVELS],
+    /// Per coarse cell, its water and its neighbours' (R09.T6.f).
+    shores: BTreeMap<u64, Shore>,
+    /// The coarse cell whose shore was last read, and it.
+    recent_shore: Option<(u64, Shore)>,
 }
 
 /// Every level a cell may have, 0 to [`MAX_LEVEL`].
@@ -933,6 +1102,8 @@ impl ChannelCache {
             means: BTreeMap::new(),
             corrections: BTreeMap::new(),
             recent_correction: [None; LEVELS],
+            shores: BTreeMap::new(),
+            recent_shore: None,
         }
     }
 
@@ -1044,6 +1215,47 @@ impl<F: FieldView> Incision<'_, F> {
         Ok((own, around))
     }
 
+    /// The water of the coarse cell `coarse` and of the cells across its edges and corners
+    /// ([`Shore`]); a wet cell's neighbours are not read.
+    fn shore(&mut self, coarse: PatchKey) -> Result<Shore, ReadCellError> {
+        let key = coarse.to_u64();
+        if let Some((recent, shore)) = self.cache.recent_shore
+            && recent == key
+        {
+            return Ok(shore);
+        }
+        let shore = if let Some(&shore) = self.cache.shores.get(&key) {
+            shore
+        } else {
+            let wet = read(self.field, coarse)?.is_under_water();
+            let (mut edges, mut corners) = ([false; 4], [false; 4]);
+            if !wet {
+                for (edge, side) in edges.iter_mut().zip(Edge::ALL) {
+                    *edge = read(self.field, coarse.edge_neighbour(side))?.is_under_water();
+                }
+                for (corner, across) in corners.iter_mut().zip(coarse.corner_neighbours()) {
+                    if let Some(cell) = across {
+                        *corner = read(self.field, cell)?.is_under_water();
+                    }
+                }
+            }
+            let shore = Shore {
+                wet,
+                edges,
+                corners,
+            };
+            self.cache.shores.insert(key, shore);
+            shore
+        };
+        self.cache.recent_shore = Some((key, shore));
+        Ok(shore)
+    }
+
+    /// Whether `cell`, of the first level or finer, lies in a coarse cell under water.
+    fn is_wet(&self, cell: PatchKey) -> Result<bool, ReadCellError> {
+        Ok(read(self.field, ancestor(cell, self.first()))?.is_under_water())
+    }
+
     /// The index in the cache's lists of the grooves of `cell`'s level that may reach `cell`: those
     /// of the segments headed within two king moves of it ([`two_moves`]), in that order, whose
     /// levels their coarse cells evaluate and whose boxes reach the cell's bounding ball.
@@ -1094,6 +1306,11 @@ impl<F: FieldView> Incision<'_, F> {
             let Some(segment) = self.segment(around)? else {
                 continue;
             };
+            // A cell under water cuts no valley of its own, not even past its crossing into a dry
+            // receiver (R09.T6.f); only trunks can be a wet cell's, its tributaries none.
+            if level == first && self.is_wet(around)? {
+                continue;
+            }
             if let Some(groove) = Groove::of(&segment, radius_m)
                 && groove.may_reach_ball(centre, ball)
             {
@@ -1174,11 +1391,27 @@ impl<F: FieldView> Incision<'_, F> {
         }
         let first = self.first();
         let at = usize::from(level - first);
+        // A parent cell under water carries no incision (R09.T6.f), and one by water its faded
+        // incision.
+        let coarse = ancestor(parent, first);
+        let shore = self.shore(coarse)?;
+        if shore.wet {
+            self.cache.means.insert(key, 0.0);
+            return Ok(0.0);
+        }
+        let width = fade_width(first, level);
         let mut sum = 0.0;
         let mut weights = 0.0;
         for sample in mean_grid(parent) {
             let raw = self.raw(sample.dir, level)?;
-            sum += sample.weight * raw.as_slice()[at].value;
+            let value = raw.as_slice()[at].value;
+            let value = if shore.is_inland() {
+                value
+            } else {
+                let (x, y, _, _) = cell_coordinates(coarse, sample.dir);
+                shore.fade(x, y, width).0 * value
+            };
+            sum += sample.weight * value;
             weights += sample.weight;
         }
         let mean = sum / weights;
@@ -1201,6 +1434,16 @@ impl<F: FieldView> Incision<'_, F> {
         }
         let mut corners = [0.0; 4];
         for (corner, cells) in corners.iter_mut().zip(corner_cells(parent)) {
+            // A corner a cell under water shares is zero, as that cell's correction is all over,
+            // so that the correction is continuous onto it and the dry cell's bubble carries the
+            // rest of its mean (R09.T6.f).
+            let mut by_water = false;
+            for &cell in &cells {
+                by_water |= self.is_wet(cell)?;
+            }
+            if by_water {
+                continue;
+            }
             let mut sum = 0.0;
             for &cell in &cells {
                 sum += self.mean(level, cell)?;
@@ -1247,18 +1490,40 @@ impl<F: FieldView> Incision<'_, F> {
             return Ok(out);
         }
         let finest = deepest_cell(dir);
-        let (_, around) = self.deepest(ancestor(finest, first))?;
+        let coarse = ancestor(finest, first);
+        // A cell under water carries no incision at any level (R09.T6.f).
+        let shore = self.shore(coarse)?;
+        if shore.wet {
+            return Ok(out);
+        }
+        let (_, around) = self.deepest(coarse)?;
         let last = through.min(around);
         let raw = self.raw(dir, last)?;
+        let by_water = (!shore.is_inland()).then(|| cell_coordinates(coarse, dir));
         for (level, &r) in (first..=last).zip(raw.as_slice()) {
             let parent = self.parent_of(ancestor(finest, level));
             let correction = self.correction(level, parent)?;
             let (x, y, grad_x, grad_y) = cell_coordinates(parent, dir);
             let (c, d_x, d_y) = correction.at(x, y);
-            out.push(LevelSample {
-                value: r.value - c,
-                of_point: r.gradient,
-                of_direction: [0, 1, 2].map(|k| -(d_x * grad_x[k] + d_y * grad_y[k])),
+            out.push(match by_water {
+                None => LevelSample {
+                    value: r.value - c,
+                    of_point: r.gradient,
+                    of_direction: [0, 1, 2].map(|k| -(d_x * grad_x[k] + d_y * grad_y[k])),
+                },
+                // The raw incision faded towards the water, f r, its gradient f ∇r through the
+                // point and r ∇f through the direction.
+                Some((cx, cy, fade_x, fade_y)) => {
+                    let (f, f_x, f_y) = shore.fade(cx, cy, fade_width(first, level));
+                    LevelSample {
+                        value: f * r.value - c,
+                        of_point: r.gradient.map(|g| f * g),
+                        of_direction: [0, 1, 2].map(|k| {
+                            r.value * (f_x * fade_x[k] + f_y * fade_y[k])
+                                - (d_x * grad_x[k] + d_y * grad_y[k])
+                        }),
+                    }
+                }
             });
         }
         Ok(out)
@@ -1440,16 +1705,73 @@ fn level_term(level: u8, density: f64, depth: f64, floor: f64, wall: f64) -> Lev
     }
 }
 
-/// Each evaluated level's closed-form statistics below the coarse cell `cell` of `body` (see
-/// [`channel_variance`]).
-#[must_use]
-fn level_terms(cell: &SynthesisCell, body: ChannelBody) -> Vec<LevelTerm> {
-    level_terms_to(cell, body, deepest_level(cell, body))
+/// The valley a closed form gives a coarse cell's steady-state trunk.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TrunkValley {
+    /// R09.T6.b's, from the cell alone and not held to its base level: the form the coarse pass's
+    /// `σ_h` budget reads ([`channel_variance`]), kept to the bit (R09.T6.f).
+    FromTheCell,
+    /// Held to its base level ([`trunk_valley_m`]), as the synthesis cuts it.
+    Held {
+        /// The held valley's depth, metres.
+        valley_m: f64,
+    },
 }
 
-/// [`level_terms`] through the tributary level `last` rather than the cut's deepest.
+/// Each evaluated level's closed-form statistics below the coarse cell `cell` of `body`, its trunk's
+/// valley from the cell alone (see [`channel_variance`]).
 #[must_use]
-fn level_terms_to(cell: &SynthesisCell, body: ChannelBody, last: u8) -> Vec<LevelTerm> {
+fn level_terms(cell: &SynthesisCell, body: ChannelBody) -> Vec<LevelTerm> {
+    level_terms_to(
+        cell,
+        body,
+        deepest_level(cell, body),
+        TrunkValley::FromTheCell,
+    )
+}
+
+/// Each evaluated level's closed-form statistics below the coarse cell `key` of `field` as the
+/// synthesis cuts them, with the cell's record (R09.T6.f; decision-r09-channel-term §4).
+///
+/// There are none where the cell is under water, and its steady-state trunk's valley is held to
+/// its base level ([`trunk_valley_m`]), which its tributaries' depths below their inherited top
+/// follow. `None` where `field` does not hold the cell, or the receiver of a cell with a trunk not
+/// of a world dry now: one king move away, inside the synthesis's margin.
+#[must_use]
+fn synthesised_terms(
+    field: &impl FieldView,
+    key: PatchKey,
+) -> Option<(&SynthesisCell, Vec<LevelTerm>)> {
+    let header = field.header();
+    let record = field.cell(key)?;
+    if record.is_under_water() {
+        return Some((record, Vec::new()));
+    }
+    let body = ChannelBody::of(header);
+    let valley = match record.flow.edge() {
+        Some(edge) if !record.epoch_incision.is_epoch() => {
+            let receiver = field.cell(key.edge_neighbour(edge))?;
+            TrunkValley::Held {
+                valley_m: trunk_valley_m(record, receiver, header.sea_level(), body),
+            }
+        }
+        Some(_) | None => TrunkValley::FromTheCell,
+    };
+    Some((
+        record,
+        level_terms_to(record, body, deepest_level(record, body), valley),
+    ))
+}
+
+/// [`level_terms`] through the tributary level `last` rather than the cut's deepest, with the
+/// trunk's valley `valley`.
+#[must_use]
+fn level_terms_to(
+    cell: &SynthesisCell,
+    body: ChannelBody,
+    last: u8,
+    valley: TrunkValley,
+) -> Vec<LevelTerm> {
     body.check();
     let (r, level) = (body.radius.value(), body.level);
     let mut out = Vec::new();
@@ -1481,8 +1803,12 @@ fn level_terms_to(cell: &SynthesisCell, body: ChannelBody, last: u8) -> Vec<Leve
         cell.drainage.area(),
         body.gravity,
     );
-    let valley = tributaries.map_or(0.0, |k| valley_depth(k, body.radius, level).value());
-    let g = num::min(num::max(valley, depth), cap);
+    let from_the_cell = tributaries.map_or(0.0, |k| valley_depth(k, body.radius, level).value());
+    let (valley, held_by) = match valley {
+        TrunkValley::FromTheCell => (from_the_cell, 0.0),
+        TrunkValley::Held { valley_m } => (valley_m, from_the_cell - valley_m),
+    };
+    let g = trunk_depth_m(valley, depth, cap);
     if g > 0.0 {
         let density = MEAN_TRUNK_LENGTH / mean_cell_width(r, level);
         out.push(level_term(level, density, g, 0.5 * width, wall));
@@ -1504,6 +1830,12 @@ fn level_terms_to(cell: &SynthesisCell, body: ChannelBody, last: u8) -> Vec<Leve
             rise(steepness, heads, middle)
         } else {
             0.0
+        };
+        // The top it inherits stands as much lower as its trunk's valley is held (R09.T6.f).
+        let below = if held_by > 0.0 {
+            num::max(below - held_by, 0.0)
+        } else {
+            below
         };
         let area = super::hack_area(Metres::new(head + length));
         let (_, width, depth) = channel_size(runoff, area, body.gravity);
@@ -1528,8 +1860,11 @@ fn band_share(radius_m: f64, level: u8, finer_than: f64) -> f64 {
 }
 
 /// The channels' incision variance below the coarse cell `cell` of `body`, in wavelengths shorter
-/// than `finer_than`, square metres: the closed form of each evaluated level's grooves, summed in
-/// level order (the [module documentation](self) gives the model it estimates).
+/// than `finer_than`, square metres, from the cell's record alone.
+///
+/// It is the closed form of each evaluated level's grooves, summed in level order (the
+/// [module documentation](self) gives the model it estimates), and the coarse pass's `σ_h` budget
+/// reads it (R09.T12.e).
 ///
 /// Level k's grooves, [`TRIBUTARY_SHARE`] × [`MEAN_TRIBUTARY_LENGTH`] mean cells of groove a cell
 /// (one trunk of [`MEAN_TRUNK_LENGTH`] coarse cells at the first level), of depth
@@ -1540,9 +1875,19 @@ fn band_share(radius_m: f64, level: u8, finer_than: f64) -> f64 {
 /// [`TRIBUTARY_VARIANCE_SHARE`] of its own closed form, and their sum's variance is
 /// [`WHOLE_VARIANCE_SHARE`] of the sum of theirs. On a world dry now the cell's one term is its
 /// trunk's epoch valley ([`EpochValley`]: G its depth, h half its bankfull width and W its walls),
-/// taken whole (R09.T6.c). The result is an estimate for the coarse pass's
-/// budget, within a factor of two of the whole incision's realised variance below a coarse cell
-/// (R09.T6.b's test on the Earth- and Mars-like worlds), not a pinned law.
+/// taken whole (R09.T6.c). The result is an estimate for the coarse pass's budget, not a pinned
+/// law. The synthesis's own form, which this is where no trunk is held and no cell is wet, is
+/// within a factor of two of the whole incision's realised variance below a coarse cell
+/// (R09.T6.b's test on the Earth- and Mars-like worlds, which now reads that form).
+///
+/// It is R09.T6.b's form, kept to the bit so that the coarse field does not move (R09.T6.f, main's
+/// ruling of 2026-10-27): its trunk's valley is the cell's [`valley_depth`], not held to its base
+/// level, and a cell under water carries its trunk's bankfull channel. The synthesis cuts neither
+/// ([`Channels::incision_at`]), so the budget books more channel variance than the synthesis
+/// draws: 3.6 times as much on the reference Earth, 0.64% of its `σ_h`² (deferred, the plan's
+/// Risks). The synthesis's own closed forms, which read the receiver, are
+/// [`channel_structure_function`]'s and the band levels' omitted variance
+/// ([`Synthesiser::omitted_variance`](crate::synth::Synthesiser::omitted_variance)).
 ///
 /// # Panics
 ///
@@ -1554,6 +1899,22 @@ pub fn channel_variance(
     body: ChannelBody,
     finer_than: Metres,
 ) -> SquareMetres {
+    variance_of(cell, body, &level_terms(cell, body), finer_than)
+}
+
+/// The variance in wavelengths shorter than `finer_than` of `terms`, the closed-form level terms
+/// of the coarse cell `cell` of `body` ([`channel_variance`]).
+///
+/// # Panics
+///
+/// If `finer_than` is not finite and positive.
+#[must_use]
+fn variance_of(
+    cell: &SynthesisCell,
+    body: ChannelBody,
+    terms: &[LevelTerm],
+    finer_than: Metres,
+) -> SquareMetres {
     let w = finer_than.value();
     assert!(
         w.is_finite() && w > 0.0,
@@ -1561,7 +1922,7 @@ pub fn channel_variance(
     );
     let r = body.radius.value();
     let mut variance = 0.0;
-    for term in level_terms(cell, body) {
+    for term in terms {
         variance += band_share(r, term.level, w) * term.variance;
     }
     SquareMetres::new(whole_share(cell) * variance)
@@ -1569,15 +1930,18 @@ pub fn channel_variance(
 
 /// The channels' share of the structure function of `field`'s ground at the coarse cell `cell` in
 /// wavelengths shorter than `finer_than`, at a lag of `lag`, square metres: E[(h(p + r) − h(p))²]
-/// of their incision; `None` where `field` does not hold the cell.
+/// of their incision as the synthesis cuts it; `None` where `field` does not hold the cell, or the
+/// receiver its trunk's base level is read from.
 ///
-/// Each level contributes its band share of 2V (1 − exp(−s r² ÷ 2V)), with V its variance
-/// ([`channel_variance`]'s terms) and s the mean square of its slope along a random direction,
-/// ρ G² 1.2 ÷ W for its smoothstep walls: the small-lag law s r² and the large-lag 2V of two
-/// independent samples; the sum is scaled by [`WHOLE_VARIANCE_SHARE`] as the variance is (taken
-/// whole on a world dry now's cell, its epoch's trunk alone; R09.T6.c), so that it
-/// saturates at twice [`channel_variance`]. The small-lag slope is the levels' sum scaled alike, an
-/// approximation (the plan's Risks).
+/// Each level contributes its band share of 2V (1 − exp(−s r² ÷ 2V)), with V its variance (the
+/// synthesis's terms, below; [`channel_variance`]'s form) and s the mean square of its slope along
+/// a random direction, ρ G² 1.2 ÷ W for its smoothstep walls: the small-lag law s r² and the
+/// large-lag 2V of two independent samples; the sum is scaled by [`WHOLE_VARIANCE_SHARE`] as the
+/// variance is (taken whole on a world dry now's cell, its epoch's trunk alone; R09.T6.c), so that
+/// it saturates at twice the variance. The small-lag slope is the levels' sum scaled alike, an
+/// approximation (the plan's Risks). The terms are the synthesis's (R09.T6.f): none in a cell under
+/// water, and a steady-state trunk's valley held to its base level, which its tributaries follow,
+/// where [`channel_variance`] reads the cell alone.
 ///
 /// # Panics
 ///
@@ -1602,10 +1966,10 @@ pub fn channel_structure_function(
         header.level().get(),
         "the cell is not of the field's level"
     );
-    let record = field.cell(cell)?;
+    let (record, terms) = synthesised_terms(field, cell)?;
     let body = ChannelBody::of(header);
     let mut d = 0.0;
-    for term in level_terms(record, body) {
+    for term in terms {
         if term.variance <= 0.0 {
             continue;
         }
@@ -1616,7 +1980,10 @@ pub fn channel_structure_function(
     Some(SquareMetres::new(whole_share(record) * d))
 }
 
-/// [`channel_variance`] of `field`'s coarse cell `cell`, or `None` where `field` does not hold it.
+/// The channels' incision variance below `field`'s coarse cell `cell` in wavelengths shorter than
+/// `finer_than` as the synthesis cuts it: [`channel_variance`]'s form over the synthesis's terms
+/// (R09.T6.f), none in a cell under water and a steady-state trunk's valley held to its base level;
+/// `None` where `field` does not hold the cell, or the receiver its trunk's base level is read from.
 ///
 /// # Panics
 ///
@@ -1633,10 +2000,11 @@ pub(crate) fn unresolved_channel_variance(
         header.level().get(),
         "the cell is not of the field's level"
     );
-    let record = field.cell(cell)?;
-    Some(channel_variance(
+    let (record, terms) = synthesised_terms(field, cell)?;
+    Some(variance_of(
         record,
         ChannelBody::of(header),
+        &terms,
         finer_than,
     ))
 }
