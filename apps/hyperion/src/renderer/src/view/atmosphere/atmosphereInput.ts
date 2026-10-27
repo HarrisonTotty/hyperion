@@ -23,8 +23,12 @@ import type { BakeSpectrum } from "./spectralColour";
  * inputs (Design note 14): a client constant, not the generator version, since the atmosphere is
  * not generated output. Raised by any change to the optics or the assembly that changes a medium
  * built from the same inputs.
+ *
+ * @remarks
+ * 2 since R08.T10.d (`decision-r08-approximate-plate.md` §8, item 1, 2026-10-27): H's lines take
+ * H's own width from its table, so a medium that draws them changes.
  */
-export const ATMOSPHERE_OPTICS_VERSION = 1;
+export const ATMOSPHERE_OPTICS_VERSION = 2;
 
 /** One star lighting a body, as `lightsAt` lists it: its body ID and its spectrum in the bake bins. */
 export interface BodyLight {

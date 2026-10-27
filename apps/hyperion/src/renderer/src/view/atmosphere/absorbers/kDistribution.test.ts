@@ -17,6 +17,7 @@ import {
   loadKDistributions,
   mixLimitColumnM2,
   readKDistribution,
+  SELF_BROADENED_ATOMS,
   STANDARD_PRESSURES_PA,
 } from "./kDistribution";
 
@@ -671,25 +672,99 @@ describe("a table with no self width (R08.T10.d)", () => {
     ]);
   }, 120_000);
 
-  it("adds an atom's own share to ε, taken as H₂ and not estimated: Na's table lists no self width", async () => {
+  it("makes a neutral atom's lines estimated at any share of its own above 0: Na's table holds no width of its own", async () => {
     const [na] = await loadKDistributions(["Na"], inlinePart);
     if (na === undefined) {
       throw new Error("Na's k-distribution is committed");
     }
+    const at = (x: number): boolean => broadeningFactor(na, giantMixture("Na", x), 1_500).estimated;
+    expect([na.broadening.has("self"), na.broadening.has("Na"), [1e-9, 1e-6, 0.5].map(at)]).toEqual(
+      [false, false, [true, true, true]],
+    );
+  }, 120_000);
+
+  it("adds an ion's own share to ε, taken as H₂ and not estimated: Mg+'s table holds no width of its own", async () => {
+    const [ion] = await loadKDistributions(["Mg+"], inlinePart);
+    if (ion === undefined) {
+      throw new Error("Mg+'s k-distribution is committed");
+    }
     const x = 1e-6;
-    const temperatureK = 1_500;
-    const found = broadeningFactor(na, giantMixture("Na", x), temperatureK);
-    // Σ x r at the temperature, Na's own r 1 (H₂'s, the atoms' tables' reference) and offset 0.
+    const temperatureK = 4_500;
+    const found = broadeningFactor(ion, giantMixture("Mg+", x), temperatureK);
+    // Σ x r at the temperature, Mg+'s own r 1 (H₂'s, the atoms' tables' reference) and offset 0.
     const ratioAt = (gas: string): number =>
-      (na.broadening.get(gas) ?? Number.NaN) *
-      (296 / temperatureK) ** (na.broadeningExponents.get(gas) ?? 0);
+      (ion.broadening.get(gas) ?? Number.NaN) *
+      (296 / temperatureK) ** (ion.broadeningExponents.get(gas) ?? 0);
     const sum = 0.85 * (1 - x) * ratioAt("H2") + 0.15 * (1 - x) * ratioAt("He") + x;
-    expect([na.broadening.has("self"), found.estimated, found.widthlessShare / (x / sum)]).toEqual([
-      false,
+    expect([found.estimated, found.widthlessShare / (x / sum)]).toEqual([
       false,
       expect.closeTo(1, 12),
     ]);
   }, 120_000);
+});
+
+describe("a species' own width under its own key (R08.T10.d)", () => {
+  it("broadens H's lines by H's own width, 2.198 times H₂'s: 1.531 in H 0.5, H₂ 0.35 and He 0.15", async () => {
+    const [h] = await loadKDistributions(["H"], inlinePart);
+    if (h === undefined) {
+      throw new Error("H's k-distribution is committed");
+    }
+    const mixture = new Map([
+      ["H", 0.5],
+      ["H2", 0.35],
+      ["He", 0.15],
+    ]);
+    // H's exponent offsets are 0, so the factor is the same at every temperature.
+    const found = broadeningFactor(h, mixture, 4_000);
+    expect([found.factor, found.widthlessShare, found.estimated]).toEqual([
+      expect.closeTo(0.5 * 2.198 + 0.35 + 0.15 * 0.5488, 12),
+      0,
+      false,
+    ]);
+  }, 120_000);
+
+  it("takes self, its ratio and its exponent offset, over its own key's entry where a table lists both", () => {
+    const both = toyTable({
+      species: "SO2",
+      broadening: { self: 1.6, SO2: 3 },
+      broadeningExponents: { self: -0.25, SO2: 0.4 },
+    });
+    const found = broadeningFactor(
+      both,
+      new Map([
+        ["N2", 0.5],
+        ["SO2", 0.5],
+      ]),
+      500,
+    );
+    expect(found.factor).toBeCloseTo(0.5 * 1.6 * (296 / 500) ** -0.25 + 0.5, 14);
+  });
+
+  it("takes its own key's ratio and exponent offset where a table lists no self", () => {
+    const own = toyTable({
+      species: "SO2",
+      broadening: { SO2: 3 },
+      broadeningExponents: { SO2: 0.4 },
+    });
+    const found = broadeningFactor(
+      own,
+      new Map([
+        ["N2", 0.5],
+        ["SO2", 0.5],
+      ]),
+      500,
+    );
+    expect(found.factor).toBeCloseTo(0.5 * 3 * (296 / 500) ** 0.4 + 0.5, 14);
+  });
+});
+
+describe("the self-broadened atoms (R08.T10.d)", () => {
+  it("are the registry's neutral atoms whose lines a committed table holds", () => {
+    const atoms = new Set(registry.substances.filter((s) => s.kind === "atom").map((s) => s.key));
+    expect([...SELF_BROADENED_ATOMS]).toEqual(
+      committedLineSpecies().filter((species) => atoms.has(species)),
+    );
+  });
 });
 
 describe("the worker's part reader", () => {

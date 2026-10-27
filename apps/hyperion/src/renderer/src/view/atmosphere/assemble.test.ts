@@ -33,6 +33,7 @@ import {
   type AssembledBody,
   type AssembledMedium,
   assembleMedium,
+  ATMOSPHERE_OPTICS_VERSION,
   atmosphereKey,
   type CurveSlots,
   LIGHT_SLOT_LIMIT,
@@ -274,13 +275,22 @@ describe("the key the cache holds a medium under", () => {
 
   it("names the body, the optics' version and a 64-bit digest", () => {
     expect(atmosphereKey(recordInput(detailOf(earthDetail())))).toMatch(
-      /^0200080020000000\.0300\/v1\/[0-9a-f]{16}$/u,
+      new RegExp(`^0200080020000000\\.0300/v${ATMOSPHERE_OPTICS_VERSION}/[0-9a-f]{16}$`, "u"),
     );
   });
 
-  it.each(["unset", "airless"] as const)("is kept/%s/v1 for a kept scene's body so set", (kind) => {
-    expect(atmosphereKey({ kind: "kept", atmosphere: { kind } })).toBe(`kept/${kind}/v1`);
+  it("keys on the optics' version 2, raised by R08.T10.d's H's own width", () => {
+    expect(ATMOSPHERE_OPTICS_VERSION).toBe(2);
   });
+
+  it.each(["unset", "airless"] as const)(
+    "is kept/%s/v<version> for a kept scene's body so set",
+    (kind) => {
+      expect(atmosphereKey({ kind: "kept", atmosphere: { kind } })).toBe(
+        `kept/${kind}/v${ATMOSPHERE_OPTICS_VERSION}`,
+      );
+    },
+  );
 });
 
 describe("a body's gravity by its figure law (Design note 17)", () => {

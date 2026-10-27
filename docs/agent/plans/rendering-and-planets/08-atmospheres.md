@@ -2732,7 +2732,9 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       HITRAN2024 gives γ_j for. r_self comes from γ_self, and N₂, O₂ and Ar are taken as air. A
       gas with no HITRAN width is taken as air, at any share: `estimated` where it has a permanent
       dipole of at least H₂S's (`DIPOLAR_BROADENERS`) or the table has two variants, and otherwise
-      weighed by R08.T10.c's effect bound. A table with no γ_self takes its own species likewise
+      weighed by R08.T10.c's effect bound. A table with no γ_self takes its own species likewise,
+      by the entry under its own key where it lists one (H's); a neutral atom with neither is
+      `estimated`, its resonance lines' self-broadening being tens of times its H₂ width
       (R08.T10.d). Each broadener takes its own
       HITRAN2024 temperature exponent where given (n_air otherwise), through
       p_eff = p Σ_j x_j r_j (296 ÷ T)^(n_j − n_air) at the profile's temperature.
@@ -4721,17 +4723,20 @@ reasons set as sentences, and the aerosol reasons' words.
   T10.c, as built", and its "Deferred findings (2026-10-13 rule)" (R08.T10.c)).
 - **R08.T10.d The widthless gases' rule, APPROXIMATE's reasons as sentences, and the aerosol
   reasons' words.** From `decision-r08-approximate-plate.md` §6 (2026-10-27), on T10.c's deferred
-  findings. The broadener verdict reads its lines' cell means to (1 + ε) times the body's largest
+  findings, and that decision's §8 (2026-10-27), on T10.d's own. The broadener verdict reads its lines' cell means to (1 + ε) times the body's largest
   broadening pressure, which makes the cap exact (`negligible.ts`). `DIPOLAR_BROADENERS` holds
   every molecule of the registry whose dipole is at least H₂S's, twelve, each with its measured
-  value and source, and a table with no `self` width counts its own species as a widthless
-  broadener of itself (`absorbers/kDistribution.ts`). `ATMOSPHERE: APPROXIMATE`'s reasons stand
+  value and source. A species' own share takes `self`, else the entry under its own key (H's), and
+  a table with neither counts its own species as a widthless broadener of itself, a neutral
+  atom's (`SELF_BROADENED_ATOMS`) `estimated` (`absorbers/kDistribution.ts`); so
+  `ATMOSPHERE_OPTICS_VERSION` is raised to 2 (`atmosphereInput.ts`). `ATMOSPHERE: APPROXIMATE`'s reasons stand
   `reason` (`labels.ts`) and reach the plate as a `SentenceStatement`, set whole with no letter
   spacing (`displays/view/viewRun.ts`, `LabelStatementLine.tsx`, `styles.css`), and an instrument
   shows the note straight above any reason of its own (`viewRun.ts`'s
   `instrumentPhotorealStatements`). The aerosol reasons cite no paper and give a wavelength in whole
   nm (`aerosol.ts`, `aggregate.ts`, `nonSpherical.ts`). The guide's `ATMOSPHERE: APPROXIMATE`,
-  `CRUST` and `UNDIFFERENTIATED` rows and its instruments' rule are reworded. Acceptance:
+  `CRUST` and `UNDIFFERENTIATED` rows, its instruments' rule and its Typography's statement
+  bullet are reworded. Acceptance:
   `pnpm --filter hyperion exec vitest run` over `view/atmosphere/negligible`,
   `view/atmosphere/absorbers.test`, `view/atmosphere/absorbers/kDistribution`,
   `view/atmosphere/absorbers/lineCurves`, `view/atmosphere/aerosol`, `view/atmosphere/aggregate`,
@@ -4740,9 +4745,9 @@ reasons set as sentences, and the aerosol reasons' words.
   `displays/view/LabelStatementLine`, `displays/view/InstrumentView`,
   `displays/view/ViewLabelBlock` and `displays/view/ViewDisplayAtmosphere`, and `pnpm typecheck`,
   `pnpm lint` and `pnpm test`, pass; the `console-ux` skill's checks pass on the changed renderer
-  files and the guide; no kept fixture's labels change and no case-gate figure moves; and no
-  GENERATOR_VERSION, PROTOCOL, wire, table, shader, kernel, engine or `ATMOSPHERE_OPTICS_VERSION`
-  changes. _Built 2026-10-27_ (Risks, "Deviations in R08.T10.d, as built", and its "Deferred
+  files and the guide; no kept fixture's labels change and no case-gate figure moves; no
+  GENERATOR_VERSION, PROTOCOL, wire, table, shader, kernel or engine changes; and
+  `ATMOSPHERE_OPTICS_VERSION` is 2 (§8, item 1). _Built 2026-10-27_ (Risks, "Deviations in R08.T10.d, as built", and its "Deferred
   findings (2026-10-13 rule)" (R08.T10.d)).
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
@@ -19513,13 +19518,16 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     sends a crust computed as none yet. Whether the clause should say how the two differ is the
     owner's; the wording stands meanwhile.
     _Ruled 2026-10-27 (`decision-r08-approximate-plate.md` §6): built in R08.T10.d._
-- **Deviations in R08.T10.d, as built** (2026-10-27; `decision-r08-approximate-plate.md` §6).
-  Edited in `view/atmosphere/`: `negligible.ts`, `absorbers/kDistribution.ts`, `labels.ts`,
-  `aerosol.ts`, `aggregate.ts` and `nonSpherical.ts`; in `displays/view/`: `viewRun.ts`,
-  `LabelStatementLine.tsx`, `InstrumentView.tsx` and `ViewLabelBlock.tsx` (its TSDoc alone);
-  `styles.css`; their tests, `LabelStatementLine.test.tsx` new; and the guide. No GENERATOR_VERSION,
-  PROTOCOL, wire, table, shader, kernel, engine or `ATMOSPHERE_OPTICS_VERSION` change, so the gate
-  ran no `just test-render`.
+- **Deviations in R08.T10.d, as built** (2026-10-27; `decision-r08-approximate-plate.md` §6 and
+  §8). Edited in `view/atmosphere/`: `negligible.ts`, `absorbers/kDistribution.ts`,
+  `atmosphereInput.ts`, `labels.ts`, `aerosol.ts`, `aggregate.ts` and `nonSpherical.ts`; in
+  `displays/view/`: `viewRun.ts`, `LabelStatementLine.tsx`, `InstrumentView.tsx` and
+  `ViewLabelBlock.tsx` (its TSDoc alone); `styles.css`; their tests, `LabelStatementLine.test.tsx`
+  new and `assemble.test.ts` among them; and the guide. No GENERATOR_VERSION, PROTOCOL, wire,
+  table, shader, kernel or engine change, so the gate ran no `just test-render`.
+  `ATMOSPHERE_OPTICS_VERSION` is raised from 1 to 2 (§8, item 1, approved), in place of the brief's
+  "not raised": a medium that draws H's lines changes. `assemble.test.ts`' key tests read the
+  constant.
   - _The cell means_ (item 2). The broadener verdict reads `lineCellMeans` to
     (1 + ε) × `largestBroadeningPa`; the absorption and held-χ tests keep it at
     `largestBroadeningPa`. The brief names the fixed-g test too, but it reads no cell means
@@ -19550,7 +19558,7 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     It moved four of the brief's figures:
     - H₂S, the threshold, is 0.977 D (CCCBDB, after Viswanathan and Dyke 1984), not the brief's
       "0.978 D in the standard tables", which no source read prints (NSRDS-NBS 10 gives
-      0.97 ± 0.01);
+      0.97 ± 0.01); _confirmed 2026-10-27 (decision-r08-approximate-plate §8)_;
     - NH₃ is 1.476 ± 0.0029 D (Shimizu 1970, by CCCBDB);
     - CH₃OH is 1.672 D (Sastry, Lees and Van der Linde 1981), not NSRDS-NBS 10's 1.70;
     - H₂SO₄ is 2.9643 D (Sedo, Schultz and Leopold 2008, by the JPL catalogue), which supersedes
@@ -19561,17 +19569,38 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     dipole is checked.
 
   - _NH₃'s own width._ `broadeningFactor` counts the species' own share as a gas with no width on
-    file wherever the table holds no `self` and the species is not N₂, O₂ or Ar. It moves no
-    body's labels, reasons or `negligible` list:
+    file wherever the table holds no width of its own (no `self` and, since §8's item 1, no entry
+    under its own key) and the species is not N₂, O₂ or Ar. It moves no body's labels, reasons or
+    `negligible` list:
     - NH₃'s table marks no node's line shape measured (`measuredShapeTo` −1 at every temperature),
       so its lines were `estimatedData` before it. On a Jupiter-class body (new in
       `negligible.test.ts`, 260 ppm in H₂ and He at 165 K) they are 2.13 at k = 100, red under the
       30,000 K sun.
-    - The atoms' and ions' own shares now join ε. Every atom's lines a test draws are estimated
-      already, by their shape or their temperature, so no broadener verdict runs for them: the hot
-      giant's K on its 1 and 10 kPa data takes the same verdicts as before.
+    - The ions' own shares join ε, and the neutral atoms' are `estimated` (§8's item 2, below).
+      Every atom's lines a test draws are estimated already, by their shape or their temperature,
+      so no broadener verdict runs for them: the hot giant's K on its 1 and 10 kPa data takes the
+      same verdicts as before.
     - No kept fixture and no generated world in the tests (`assemble*`, `AtmosphereCache`) draws
       NH₃'s or an atom's lines measured.
+  - _H's own width_ (§8, item 1, a deviation from the brief, which listed H among the tables with
+    no `self`). The species' own share takes `self`, else the entry under its own key, for both
+    the ratio and the exponent offset; `self` wins where a table lists both (CO₂'s, 1.33 each, and
+    H₂'s, whose `self` offset −0.252 it keeps over its `H2` entry's 0), the precedence and the
+    fallback, ratio and offset, tested on toy tables at 500 K. H's
+    table holds Barklem, Piskunov and O'Mara 2000b's self-broadening by H atoms under `H`, 2.198
+    times H₂'s, which the lookup never read: in H 0.5, H₂ 0.35 and He 0.15 the factor is now 1.531,
+    where it read 0.932, and H's own share adds nothing to ε. No sidecar or reduction changes. H's
+    basis is `estimated`, so no label moves, and no recorded figure on H's lines moved (no test
+    records one under a mixture with H in it). `ATMOSPHERE_OPTICS_VERSION` is raised to 2 for it.
+  - _The neutral atoms' own shares_ (§8, item 2, a deviation from the brief, which put every
+    atom's own share in ε). `SELF_BROADENED_ATOMS`, new beside `DIPOLAR_BROADENERS`, holds the
+    registry's neutral atoms (`kind: "atom"`) whose lines a committed table holds: Cr, Fe, H, K,
+    Mg, Na and Zn, tested against the fixture. Where such a table holds no width of its own, the
+    own share at any share above 0 makes the species `estimated`, as a dipolar gas does; H has its
+    own width since item 1. The ions, Mg⁺ and Si⁺, keep the brief's rule: their own share joins ε.
+    The brief's one atom test is two: Na's table is `estimated` at any own share, and Mg⁺'s adds its
+    own share to ε. No label moves: every neutral atom's table is `estimated` already, by
+    `measuredBelowGrid` (false for all but H) or H's basis.
   - _The sentence_ (§4). `LabelStatement` gains `SentenceStatement` (`standing: "sentence"`), and
     `AtmosphereNote.standing` gains `reason`. `photorealStatements` maps a reason to the sentence.
     `LabelStatementLine` sets it in a `p.view-label__statement.view-label__statement--sentence`,
@@ -19614,9 +19643,13 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     figures already follow its formats. `sizeDistribution.ts`'s reason holds no citation and is
     unchanged.
 
-  - _The guide._ The three rows take the brief's sentences verbatim. The instruments' rule takes
-    the brief's lean verbatim: "… is not repeated, save `ATMOSPHERE: APPROXIMATE` above a reason line
-    of the instrument's own." `ViewLabelBlock.tsx`'s TSDoc gains a sentence on the sentence
+  - _The guide._ The three rows take the brief's sentences verbatim. From §8's item 3 the
+    `ATMOSPHERE: APPROXIMATE` row's reason sentence reads "set as a sentence with no letter spacing,
+    its head included:", and Typography's statement bullet gains the sentence that an
+    `ATMOSPHERE: APPROXIMATE` reason is a description, set whole, its head included. The
+    instruments' rule takes the brief's lean verbatim: "… is not repeated, save
+    `ATMOSPHERE: APPROXIMATE` above a reason line of the instrument's own." `ViewLabelBlock.tsx`'s
+    TSDoc gains a sentence on the sentence
     statement. `assembleEarth.test.ts`' comment on the generated Earth's reasons and its
     raised-CO₂ `describe` title read "widthless gases" where they read "trace broadeners".
 - **Deferred findings (2026-10-13 rule)** (R08.T10.d). Recorded and deferred: each leaves the
@@ -19634,15 +19667,19 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     He 0.15) the factor reads 0.93 where the table gives 1.53. H's basis is `estimated`, so no
     label moves, but the drawn widths do. Lean: fall back to the species' own key where `self` is
     absent, which changes built media and so `ATMOSPHERE_OPTICS_VERSION`, the owner's to raise.
+    _Ruled 2026-10-27 (decision-r08-approximate-plate §8): built in R08.T10.d._
   - _The atoms' own widths_ (for T10.c's widths' range science check, due before R08.T16.a; a
     question on the issue). An atom's own share takes r 1, H₂'s, inside [0, 2]; but its resonance
-    lines are broadened by its own kind far more: Na D's self-broadening (Weller et al. 2011,
-    J. Phys. B 44, 195006, Table I) is 34–66 times its H₂ widths over 500–3,000 K (Allard et al.
-    2019, A&A 628, A120), and K's D lines and Cr's and Fe's resonance lines are alike (Lewis 1980,
-    Phys. Rep. 58, 1). No verdict rests on it yet: the neutral atoms' tables are never `measured`
-    below their grid and H's basis is `estimated`, so no neutral atom's lines reach the bound; the
-    ions' visible lines (Mg⁺, Si⁺) are not resonance lines. Lean: an atom's own share `estimated`,
+    lines are broadened by its own kind far more: resonance-broadening theory, which Weller et al.
+    2011 (J. Phys. B 44, 195006) test on Rb D1, gives Na D's self-broadening 44–129 times its H₂
+    widths over 500–3,000 K (Allard et al. 2019, A&A 628, A120), or half that if their width is a
+    half width, and K's D lines and Cr's and Fe's resonance lines are alike (Lewis 1980, Phys. Rep.
+    58, 1). The first check's 34–66, which read Weller et al.'s figures as Na's, lies inside it.
+    No verdict rests on it yet: the neutral atoms' tables are never `measured` below their grid
+    and H's basis is `estimated`, so no neutral atom's lines reach the bound; the ions' visible
+    lines (Mg⁺, Si⁺) are not resonance lines. Lean: an atom's own share `estimated`,
     as a dipolar gas's is, until a `self` width is on file.
+    _Ruled 2026-10-27 (decision-r08-approximate-plate §8): built in R08.T10.d._
   - _Polar salts' vapour_ (the science check, low confidence). The registry files NaCl and KCl as
     `mineral`, so `DIPOLAR_BROADENERS`' rule, which reads molecules, leaves them out, though their
     vapours' dipoles are 8.971 D and 10.239 D (NIST CCCBDB). Were a server to send either as a
@@ -19656,3 +19693,4 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     `TEST PLANET: provisional, …`, its head tracked, which `H2O: its absorption estimated, …` fits.
     The code follows the ruling. The row could add "its head included", or the bullet an exception
     that points to the row.
+    _Ruled 2026-10-27 (decision-r08-approximate-plate §8): built in R08.T10.d._
