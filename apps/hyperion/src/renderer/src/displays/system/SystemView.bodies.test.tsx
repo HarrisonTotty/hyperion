@@ -1321,6 +1321,8 @@ describe("SystemView's body readout", () => {
     expect(reading("LIQUID COVER")).toBe("CH4–C2H6–N2 MIXTURE 97.3\u00A0% · N2\u00A01.36\u00A0%");
   });
 
+  // decision-ux-ocean-row §1: an ocean computed as none is a value, read as the section's other
+  // rows read a quantity computed and empty.
   it.each<readonly [string, () => ResponseFor<"body_detail">]>([
     [
       "the fixture's Titan, its ocean computed as none",
@@ -1339,13 +1341,15 @@ describe("SystemView's body readout", () => {
       "a temperate surface whose condensates list no liquid water, its ocean computed as none",
       () => oceanComputedAsNone(earthWithNoLiquidWaterEntry()),
     ],
-  ])("shows no SUBSURFACE OCEAN row for %s", async (_name, detail) => {
+  ])("reads SUBSURFACE OCEAN NONE, the last surface row, for %s", async (_name, detail) => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
     await answerDetail(socket, detail());
 
-    expect(terms("SUBSURFACE OCEAN")).toHaveLength(0);
+    expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
+    expect(reading("SUBSURFACE OCEAN")).toBe("NONE");
+    expect(rowsBetween("SURFACE", "GENERATOR INPUTS").at(-1)).toEqual(["SUBSURFACE OCEAN", "NONE"]);
   });
 
   // P14.T51.g.b (decision-p14-t51gb-ice-ii §3): an ocean not modelled is never read as none.
@@ -1466,12 +1470,14 @@ describe("SystemView's body readout", () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
-    // A member computed as none adds no row of its own: the cover's rule decides alone.
+    // To generator version 23 the cover's ocean stands before the member's `NONE` (rule 5;
+    // decision-ux-ocean-row §4): one row, the cover's.
     await answerDetail(
       socket,
       earthWithSurface(() => ({ ...snowball0700(), subsurface_ocean: null })),
     );
 
+    expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
     expect(reading("SUBSURFACE OCEAN")).toBe("H2O");
   });
 
@@ -1521,11 +1527,34 @@ describe("SystemView's body readout", () => {
     expect(within(readout()).queryByText(/NaCl BRINE/)).not.toBeInTheDocument();
   });
 
+  // decision-ux-ocean-row §1: the member decides, as a version-23 server sends a regular moon's.
+  it("reads SUBSURFACE OCEAN NONE after its COLD TRAPS row on an airless icy moon whose ocean is computed as none", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, oceanComputedAsNone(earthWithSurface(airlessBrineMoon)));
+
+    expect(rowsBetween("SURFACE", "GENERATOR INPUTS").slice(-2)).toEqual([
+      ["COLD TRAPS", "NOT YET MODELLED"],
+      ["SUBSURFACE OCEAN", "NONE"],
+    ]);
+    expect(within(readout()).queryByText(/NaCl BRINE/)).not.toBeInTheDocument();
+  });
+
   it("reads SUBSURFACE OCEAN NOT YET MODELLED with no unit", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
     await answerDetail(socket, earthWithSurface(titanWithNoOceanKey));
+
+    expect(readingOf("SUBSURFACE OCEAN").querySelector(".body-readout__unit")).toBeNull();
+  });
+
+  it("reads SUBSURFACE OCEAN NONE with no unit", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, oceanComputedAsNone(earthDetail()));
 
     expect(readingOf("SUBSURFACE OCEAN").querySelector(".body-readout__unit")).toBeNull();
   });

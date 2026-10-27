@@ -4544,6 +4544,10 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
   - _Lifespan:_ moot once P14.T53.c ends W3 (b) with T51.g's shell. The "For 24" follow-up that
     reads `subsurface_ocean` under the same row is P14.T43.i, built; what remains after T53.c is
     to retire `oceanUnderIce` and `liquidsOnIce`, with T53.c's code.
+    - _At the 24 bump_ (decision-ux-ocean-row §4, 2026-10-26): P14.T53.c ends the appended item
+      only behind its hold at 24, so rule 5, `oceanUnderIce`, `liquidsOnIce` and the guide's
+      version-23 clause in the `SUBSURFACE OCEAN` row go together in the bump's client work
+      (P14.T54.b.l), once no served version appends the item. Until then they stand.
 - **P14.T43.i A regular moon's ocean under its ice in the readout** (decision-p14-t43h-review
   §4; signoff-p14-t43h-ux, "Recorded, not blocking"; a display change only, with no wire, output
   or protocol change; after P14.T43.h).
@@ -4571,6 +4575,9 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
   - _Follow-up (P14.T51.g.b's UX condition, decision-p14-t51gb-ice-ii §3):_ a member not
     modelled reads `SUBSURFACE OCEAN NOT YET MODELLED` where no ocean under a Snowball's ice
     stands; `none` still adds no row. See T51.g.b's as-built record.
+  - _Follow-up (decision-ux-ocean-row, 2026-10-26):_ a member computed as none reads
+    `SUBSURFACE OCEAN NONE` where no ocean under a Snowball's ice stands, so the row stands on
+    every shown surface section, once. See T51.g.b's as-built record.
 
 #### P14.T44 Time control
 
@@ -30171,6 +30178,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
           member, as 23 for the fixture's Earth; "an ice world's" is not a guide term (the planet
           class is `ICY`); and the Data states' Missing bullet now has a fifth unstated exception
           among a shown section's `NOT YET MODELLED` rows.
+    - _Ruled and built_ (decision-ux-ocean-row, 2026-10-26; `lane/114-p14-t51gb-ocean-none`,
+      2026-10-27), answering the three findings above: (1) a member computed as none reads
+      `SUBSURFACE OCEAN NONE`, a value; (2) the Missing bullet is amended; (3) the four nits are
+      accepted, the row's sentence rewritten; (4) rule 5 stays, with the guide's version-23 clause,
+      until P14.T54.b.l, since T53.c ends the appended `H2O` only behind its hold at 24. _Built:_
+      `subsurfaceOceanShown` returns `Shown`, `none` reading the cover's ocean, else
+      `value("NONE")`; `surfaceRows`' row is unconditional, last; no new name. `GENERATOR_VERSION`
+      23, `PROTOCOL_VERSION` 3, no merge. _Changed,_ a computed none being a row now: #111's no-row
+      `it.each` reads `NONE` last; rule 5's test pins one row. Two tests added. The guide `8 3`;
+      the console-ux lint 0 errors, 0 checks. _Reviews:_ no must-fix or should-fix; the
+      ux-reviewer's three nits on the ruled texts go to main. _Pending:_ main's look at landing.
+      _Deferred (2026-10-13 rule):_ the guide's `SNOWBALL` clause "where that row stands" is now
+      always true; its `CRUST` row gives no `CRUST NONE`, which the code reads.
   - _P1's wording_ "at or under 629.34 MPa" is corrected in this change, which closes T51.g.a's
     deferred line.
 - **Deviations in P14.T48.g, as built (`p14-belts`, 2026-10-26).** Held at 24 behind
