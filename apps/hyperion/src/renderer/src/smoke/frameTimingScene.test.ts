@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { normalise, sub } from "../geometry/vec3";
+import { norm, normalise, sub } from "../geometry/vec3";
+import { NO_NORMAL_ABOVE, type NormalMapTexels } from "../view/bodies/discNormals";
+import { type ClassMapTexels, classMapSide, classMapTexelLayers } from "../view/bodies/discSurface";
+import { SATURN_OBLATE_CASE } from "../view/atmosphere/reference/cases";
+import { builtOfCase } from "../view/scenes/atmosphereScene";
+import { CLASS_MAP_FACE_TEXELS } from "../view/terrain/classMap";
 import {
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
@@ -28,15 +33,29 @@ import {
   earthInput,
   farLimbFrameScene,
   type FrameScene,
+  GENERATED_CLASSES,
+  GENERATED_REGION_TEXELS,
+  generatedClassLaws,
+  generatedClassMapTexels,
+  generatedNormalMapTexels,
   GIANT_DISTANCE_M,
   GIANT_EQUATORIAL_RADIUS_M,
   listSources,
   type ListedSources,
+  NORMAL_MAP_LEVEL,
+  placesScaledTo,
   planetshineShare,
+  SMALL_TRIO,
   type SourceSet,
   smallEarthScene,
+  smallEarthsScene,
+  smokeClassLaws,
+  smokeClassMapTexels,
+  smokeNormalMapTexels,
   sourcesAsSet,
   sourceSetsOf,
+  STAR_SETS,
+  trioSourceSet,
 } from "./frameTimingScene";
 
 /** The three media the frames are timed on, each with its tables' light slots' curves. */
@@ -239,5 +258,266 @@ describe("the small air bodies' frames", () => {
       return Number(((offRad * 180) / Math.PI).toFixed(6));
     });
     expect(offDeg).toEqual([40, 40, 40]);
+  });
+});
+
+describe("TEST SATURN's frames", () => {
+  const built = builtOfCase(SATURN_OBLATE_CASE, "saturn-oblate");
+  const figure = built.body?.figure ?? SLICES_EARTH.figure;
+  const places = placesScaledTo(figure);
+  const frames = SETTINGS_TIMED.flatMap((setting) =>
+    places.flatMap((place) =>
+      STAR_SETS.map((set) => {
+        const scene = farLimbFrameScene(place.distanceM, settingOutput(setting), set, figure);
+        return { label: `${setting} ${place.label} ${set.name}`, setting, set, scene };
+      }),
+    ),
+  );
+
+  it("is drawn on Saturn's spheroid, not the Earth's", () => {
+    expect(built.body).not.toBeNull();
+    expect(figure.equatorialRadiusM).toBeGreaterThan(9 * SLICES_EARTH.figure.equatorialRadiusM);
+    expect(figure.polarRadiusM).toBeLessThan(0.95 * figure.equatorialRadiusM);
+  });
+
+  it("sees its disc as the Earth's at each of the Earth's five cameras", () => {
+    const earthRad = FAR_LIMB_TIMING_PLACES.map(({ distanceM }) =>
+      Math.asin(SLICES_EARTH.figure.equatorialRadiusM / distanceM),
+    );
+    const saturnRad = places.map(({ distanceM }) =>
+      Math.asin(figure.equatorialRadiusM / distanceM),
+    );
+    expect(saturnRad.map((rad, i) => Math.abs(rad - (earthRad[i] ?? Number.NaN)))).toEqual(
+      places.map(() => expect.closeTo(0, 12)),
+    );
+    expect(places.map(({ label }) => label)).toEqual([
+      "6.40e7 m",
+      "9.45e7 m",
+      "1.46e8 m",
+      "2.41e8 m",
+      "9.45e8 m",
+    ]);
+  });
+
+  it("stands every camera above its air's top", () => {
+    const inside = frames
+      .filter(
+        ({ scene }) => !(geodeticOf(scene.air.positionM, figure).heightM > built.medium.topHeightM),
+      )
+      .map(({ label }) => label);
+    expect(inside).toEqual([]);
+  });
+
+  it("keeps exactly the stars' sets' sources, each star on its own slot, and marches them", () => {
+    const wrong = frames
+      .filter(({ setting, set, scene }) => {
+        const photoreal = SETTINGS[setting].photoreal;
+        const body = earthInput("0200080020000000.0315", built.medium, scene.earthCentreM, figure);
+        const sources = bodyLightSources(body, [body], scene.lights, {
+          annuli: photoreal.discAnnuli,
+          planetshine: photoreal.planetshineSources,
+        });
+        const listed = listSources(
+          sources,
+          scene.air,
+          figure,
+          built.medium,
+          absorberCount(built.medium) > 0 ? built.curves.length : Infinity,
+          TABLE_SIZES[setting].marchSourceCap,
+        );
+        return (
+          listed.left.length > 0 || !sourcesAsSet(listed, set, TABLE_SIZES[setting].marchSourceCap)
+        );
+      })
+      .map(({ label }) => label);
+    expect(wrong).toEqual([]);
+  });
+});
+
+describe("three small air bodies in one view", () => {
+  const viewport = settingOutput("high");
+  const set = sourceSetsOf("high").find((each) => each.name === "x2");
+  if (set === undefined) {
+    throw new Error("high's sets hold x2");
+  }
+  const scene = smallEarthsScene(viewport, SLICES_EARTH.figure, set);
+  const pxPerRad = viewport.widthPx / (2 * Math.tan(scene.camera.fovXRad / 2));
+
+  it("draws each at its diameter, on the on-axis reckoning", () => {
+    const drawn = scene.bodies.map(({ centreM }) =>
+      Number(
+        (2 * Math.asin(SLICES_EARTH.figure.equatorialRadiusM / norm(centreM)) * pxPerRad).toFixed(
+          6,
+        ),
+      ),
+    );
+    expect(drawn).toEqual(SMALL_TRIO.map(({ diameterPx }) => diameterPx));
+  });
+
+  it("stands them 6° apart, more than 150 px between their discs' edges", () => {
+    const gapsPx = scene.bodies.slice(1).map((body, i) => {
+      const before = scene.bodies[i];
+      if (before === undefined) {
+        return Number.NaN;
+      }
+      const apartRad = angleBetweenRad(before.centreM, body.centreM);
+      expect(apartRad).toBeCloseTo((6 * Math.PI) / 180, 12);
+      return apartRad * pxPerRad - (before.diameterPx + body.diameterPx) / 2;
+    });
+    expect(gapsPx.every((gap) => gap > 150)).toBe(true);
+  });
+
+  it("puts each body's air camera on the far side of its centre, in the frame's axes", () => {
+    for (const body of scene.bodies) {
+      expect(body.air.positionM).toEqual({
+        x: -body.centreM.x,
+        y: -body.centreM.y,
+        z: -body.centreM.z,
+      });
+      expect(body.air.orientation).toEqual(scene.camera.orientation);
+    }
+  });
+
+  it("lights every body by both stars, each on its own slot, and the other two's planetshine", () => {
+    const photoreal = SETTINGS.high.photoreal;
+    const drawn = trioSourceSet(set, "high");
+    expect(drawn).toEqual({ name: "x2", stars: 2, giants: 2 });
+    const ids = ["0200080020000000.0341", "0200080020000000.0342", "0200080020000000.0343"];
+    const inputs = scene.bodies.map((body, i) =>
+      earthInput(ids[i] ?? "0200080020000000.0340", EARTH_REFERENCE, body.centreM),
+    );
+    const wrong = inputs.filter((input, i) => {
+      const body = scene.bodies[i];
+      if (body === undefined) {
+        return true;
+      }
+      const listed = listSources(
+        bodyLightSources(input, inputs, scene.lights, {
+          annuli: photoreal.discAnnuli,
+          planetshine: photoreal.planetshineSources,
+        }),
+        body.air,
+        SLICES_EARTH.figure,
+        EARTH_REFERENCE,
+        2 * EARTH_REFERENCE_CURVES.length,
+        TABLE_SIZES.high.marchSourceCap,
+      );
+      return (
+        listed.left.length > 0 || !sourcesAsSet(listed, drawn, TABLE_SIZES.high.marchSourceCap)
+      );
+    });
+    expect(wrong).toEqual([]);
+  });
+
+  it("takes no giant", () => {
+    const x2p: SourceSet = { name: "x2p", stars: 1, giants: 1 };
+    expect(() => smallEarthsScene(viewport, SLICES_EARTH.figure, x2p)).toThrow(RangeError);
+  });
+});
+
+/** Each face texel's byte per class of `map`, face by face, row by row. */
+function texelBytes(map: ClassMapTexels): number[][] {
+  const side = classMapSide(map.faceTexels);
+  const n = map.faceTexels;
+  return Array.from({ length: 6 * n * n }, (_, t) => {
+    const face = Math.floor(t / (n * n));
+    const i = t % n;
+    const j = Math.floor(t / n) % n;
+    return Array.from({ length: map.classes }, (_unused, k) => {
+      const layer = face + 6 * Math.floor(k / 4);
+      return map.data[((layer * side + (j + 1)) * side + (i + 1)) * 4 + (k % 4)] ?? Number.NaN;
+    });
+  });
+}
+
+/** Whether each face cell of `normals` holds a normal, face by face, row by row. */
+function normalsHeld(normals: NormalMapTexels): boolean[] {
+  const n = normals.faceTexels;
+  const side = classMapSide(n);
+  return Array.from({ length: 6 * n * n }, (_, t) => {
+    const face = Math.floor(t / (n * n));
+    const i = t % n;
+    const j = Math.floor(t / n) % n;
+    const x = normals.data[((face * side + (j + 1)) * side + (i + 1)) * 2] ?? Number.NaN;
+    return Math.abs(x) <= NO_NORMAL_ABOVE;
+  });
+}
+
+/** The classes a texel's bytes hold, as `0,3,5`. */
+function classesOf(texel: ReadonlyArray<number>): string {
+  return texel.flatMap((b, k) => (b > 0 ? [k] : [])).join(",");
+}
+
+describe("R10's smoke class map", () => {
+  const map = smokeClassMapTexels();
+  const bytes = texelBytes(map);
+  const n = map.faceTexels;
+
+  it("holds two classes at R10's level with no maturity, as the smoke's R10.T10.d map", () => {
+    expect(map.classes).toBe(2);
+    expect(map.faceTexels).toBe(CLASS_MAP_FACE_TEXELS);
+    expect(map.maturity).toBeUndefined();
+    expect(smokeClassLaws()).toHaveLength(2);
+  });
+
+  it("surveys half of every face, the edge column half, and nothing past it", () => {
+    const off = bytes.filter((texel, t) => {
+      const i = t % n;
+      const sum = texel.reduce((a, b) => a + b, 0);
+      return i < n / 2 - 1 ? sum !== 255 : i === n / 2 - 1 ? Math.abs(sum - 128) > 1 : sum !== 0;
+    });
+    expect(off).toEqual([]);
+  });
+
+  it("carries its normals at level 7 over the same half of every face", () => {
+    const normals = smokeNormalMapTexels(SLICES_EARTH.figure);
+    const m = 2 ** NORMAL_MAP_LEVEL;
+    expect(normals.faceTexels).toBe(128);
+    const wrong = normalsHeld(normals).filter((held, t) => held !== t % m < m / 2);
+    expect(wrong).toEqual([]);
+  });
+});
+
+describe("a generated palette's class map", () => {
+  const map = generatedClassMapTexels();
+  const bytes = texelBytes(map);
+  const n = map.faceTexels;
+  const r = GENERATED_REGION_TEXELS;
+
+  it("holds a generated patch's eight classes at R10's level, each drawn from its nodes", () => {
+    expect(map.classes).toBe(GENERATED_CLASSES);
+    expect(GENERATED_CLASSES).toBe(8);
+    expect(map.faceTexels).toBe(CLASS_MAP_FACE_TEXELS);
+    expect(map.maturity?.drawn).toEqual(Array.from({ length: 8 }, () => true));
+    expect(map.data.length).toBe(classMapSide(n) * classMapSide(n) * classMapTexelLayers(map) * 4);
+    expect(generatedClassLaws()).toHaveLength(8);
+  });
+
+  it("surveys every texel whole, three classes a texel", () => {
+    const off = bytes.filter(
+      (texel) =>
+        texel.reduce((sum, b) => sum + b, 0) !== 255 || texel.filter((b) => b > 0).length !== 3,
+    );
+    expect(bytes).toHaveLength(6 * 64 * 64);
+    expect(off).toEqual([]);
+  });
+
+  it("keeps one region's three classes across it, every class held somewhere", () => {
+    const split = bytes.filter((texel, t) => {
+      const face = Math.floor(t / (n * n));
+      const i = t % n;
+      const j = Math.floor(t / n) % n;
+      const corner = bytes[face * n * n + (j - (j % r)) * n + (i - (i % r))] ?? [];
+      return classesOf(texel) !== classesOf(corner);
+    });
+    expect(split).toEqual([]);
+    const held = new Set(bytes.flatMap((texel) => texel.flatMap((b, k) => (b > 0 ? [k] : []))));
+    expect([...held].toSorted((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("carries the field's normals at level 7 on every cell", () => {
+    const normals = generatedNormalMapTexels(SLICES_EARTH.figure);
+    expect(normals.faceTexels).toBe(2 ** NORMAL_MAP_LEVEL);
+    expect(normalsHeld(normals).filter((held) => !held)).toEqual([]);
   });
 });

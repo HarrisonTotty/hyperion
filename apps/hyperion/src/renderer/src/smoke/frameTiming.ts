@@ -30,6 +30,19 @@
  * - (F) the main thread's first frame of a new body's air against the steady frame's, and the
  *   renderer's `prepare`.
  *
+ * R08.T11.c (QW29, `decision-r08-t11-frame.md` §2; `decision-r08-approximate-plate.md` item 3) adds
+ * three, timed and reported as (A) and (C) are:
+ *
+ * - (H) three small air bodies in one view, 32, 10 and 4 px across, each its own air over the
+ *   measured Earth's tables, at `x2` on high (each body lit by the other two's planetshine too,
+ *   `trioSourceSet`), with their air and without;
+ * - (I) the measured Earth under a class map with its normal map, from 400 km and 10⁷ m, at `x2`
+ *   and `x4` on high: R10's fixture's as the smoke builds it (`smokeClassMapTexels`), judged as
+ *   (A)'s rows are, and a generated patch's whole palette (`generatedClassMapTexels`), recorded;
+ * - (J) `TEST SATURN` (`ATMOSPHERE TEST`'s `saturn-oblate`, Saturn's spheroid of five slices and
+ *   four bands, R08.T6.f's Saturn-class passes) at (A)'s five cameras scaled to its radius
+ *   (`placesScaledTo`), at `x1` and `x2` on both settings.
+ *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
  * timed, back to back; two sweeps over every combination, the second in the reverse order. There
@@ -42,11 +55,15 @@
 
 import type { BodyIdHex } from "@hyperion/protocol";
 
+import type { DiscSurface } from "../view/appearance/bodyAppearance";
+import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
+import type { PhotometricLaw } from "../view/appearance/law";
 import {
   ATMOSPHERE_COMPOSITE_PASS,
   ATMOSPHERE_VIEW_PASS,
   createAtmosphereFrameKernels,
   HillaireAtmosphere,
+  type SpheroidFigure,
   type SunState,
   TABLE_SIZES,
   tableRadiusM,
@@ -75,9 +92,12 @@ import {
   resampledPhase,
   withoutForwardDelta,
 } from "../view/atmosphere/tables";
+import { type NormalMapTexels, normalMapTexture } from "../view/bodies/discNormals";
+import { type ClassMapTexels, classMapSurface } from "../view/bodies/discSurface";
 import type { BodyFramePlan, LitBodyInput } from "../view/bodies/draw";
 import type { LitRegime } from "../view/bodies/regime";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
+import { IDENTITY_ROTATION, type Rotation3 } from "../view/coords/rotation";
 import type { GpuTimer } from "../view/engine/status";
 import type { AllocationEvent, MemoryCategory } from "../view/engine/memory";
 import type { RenderEngine, RenderTarget, RenderView, ViewSize } from "../view/engine/types";
@@ -89,6 +109,7 @@ import {
 } from "../view/photoreal/renderer";
 import type { QualitySetting } from "../view/quality/qualitySetting";
 import { builtOfCase } from "../view/scenes/atmosphereScene";
+import { CLASS_MAP_FACE_TEXELS } from "../view/terrain/classMap";
 import {
   FAR_LIMB_LONGITUDE_RAD,
   FAR_LIMB_TIMING_PLACES,
@@ -124,13 +145,29 @@ import {
   earthInput,
   farLimbFrameScene,
   type FrameScene,
+  GENERATED_CLASSES,
+  GENERATED_REGION_TEXELS,
+  generatedClassLaws,
+  generatedClassMapTexels,
+  generatedNormalMapTexels,
   listSources,
   type ListedSources,
+  NORMAL_MAP_LEVEL,
+  placesScaledTo,
   planetshineShare,
+  SMALL_TRIO,
+  type SmallBodiesScene,
   type SourceSet,
   smallEarthScene,
+  smallEarthsScene,
+  smokeClassLaws,
+  smokeClassMapTexels,
+  smokeNormalMapTexels,
   sourcesAsSet,
   sourceSetsOf,
+  STAR_SETS,
+  type TimedPlace,
+  trioSourceSet,
 } from "./frameTimingScene";
 import { type Checks, frameOf, NEAR_M } from "./harness";
 import { percentile } from "./soak";
@@ -159,6 +196,9 @@ const CHECK_NAMES = {
   small: `${TASK} small air bodies' timings, high`,
   smallSums: (diameterPx: number, air: boolean): string =>
     `${TASK} small air bodies' per-frame sums, high, ${diameterPx} px, ${air ? "with" : "without"} air`,
+  trio: `${TASK} three small air bodies in one view's timings, high`,
+  trioSums: (air: boolean): string =>
+    `${TASK} three small air bodies in one view's per-frame sums, high, ${air ? "with" : "without"} air`,
   bare: (medium: string): string => `${TASK} the frame without its air's timings, high, ${medium}`,
   bareSums: (medium: string, place: string, set: string): string =>
     `${TASK} the frame without its air's per-frame sums, high, ${medium}, ${place}, ${set}`,
@@ -178,12 +218,22 @@ const STEADY_FRAMES = 20;
 /** How many first air frames (F) draws, each of a new body. */
 const FIRST_AIR_SAMPLES = 3;
 
-/** The Earths' body ids, one a medium, and (F)'s new bodies'. */
+/** The Earths' body ids, one a medium, (I)'s and (J)'s; (F)'s new bodies' and (H)'s are apart. */
 const EARTH_IDS = {
   r05: "0200080020000000.0311",
   measured: "0200080020000000.0312",
   slab: "0200080020000000.0313",
+  classMap: "0200080020000000.0314",
+  saturn: "0200080020000000.0315",
+  palette: "0200080020000000.0316",
 } as const;
+
+/** (H)'s three small bodies' ids, in `SMALL_TRIO`'s order. */
+const TRIO_IDS: readonly BodyIdHex[] = [
+  "0200080020000000.0341",
+  "0200080020000000.0342",
+  "0200080020000000.0343",
+];
 
 /** (F)'s new bodies, each the measured Earth under its own id. */
 const FIRST_AIR_IDS: readonly BodyIdHex[] = [
@@ -290,6 +340,12 @@ function cell(frames: ReadonlyArray<TimedFrame>, pick: (frame: TimedFrame) => nu
 
 // --- The media -----------------------------------------------------------------------------------
 
+/** A body's class-map surface as its input carries it: the surface and its body-fixed axes. */
+interface MappedSurface {
+  readonly surface: DiscSurface;
+  readonly rotation: Rotation3;
+}
+
 /** One of (A)'s media: its tables, built once, its body and its light slots. */
 interface FrameMedium {
   readonly name: string;
@@ -298,6 +354,10 @@ interface FrameMedium {
   readonly tables: AtmosphereTables;
   /** The renderer's limit on a source's light slot: the curves' slots, `Infinity` with no absorber. */
   readonly lightSlots: number;
+  /** The body's figure, its pole +z: WGS 84 for the Earths, Saturn's spheroid for (J)'s. */
+  readonly figure: SpheroidFigure;
+  /** The body's class-map surface, (I)'s; `null` for the Lambert sphere of its ground albedo. */
+  readonly surface: MappedSurface | null;
 }
 
 /** Earth on WGS 84 with its normal gravity, as `timeFarLimbSetting` builds R05's Earth. */
@@ -368,7 +428,123 @@ function frameMedia(engine: RenderEngine, releases: Releases): FrameMedium[] {
       made.dispose();
     }),
     lightSlots: absorberCount(spec.medium) > 0 ? spec.curves.length : Infinity,
+    figure: SLICES_EARTH.figure,
+    surface: null,
   }));
+}
+
+/** (I)'s judged medium's name in its checks: the R10 fixture's class map. */
+const CLASS_MAP_NAME = "the measured Earth under R10's smoke class map";
+
+/** (I)'s recorded medium's name in its checks: a generated patch's whole palette. */
+const PALETTE_NAME = "the measured Earth under a generated palette's class map";
+
+/** (J)'s medium's name in its checks. */
+const SATURN_NAME = "TEST SATURN";
+
+/** A class map (I) draws the measured Earth under: its name, id, texels, laws and normals. */
+interface ClassMapSpec {
+  readonly name: string;
+  readonly id: BodyIdHex;
+  readonly texels: ClassMapTexels;
+  readonly laws: ReadonlyArray<PhotometricLaw>;
+  readonly normals: NormalMapTexels;
+  /** What its table's detail says it is. */
+  readonly about: string;
+}
+
+/**
+ * (I)'s two class maps: the R10 fixture's as the smoke builds it, judged (`decision-r08-t11-frame.md`
+ * §2), and a generated patch's whole palette, recorded.
+ */
+function classMapSpecs(): ClassMapSpec[] {
+  const figure = SLICES_EARTH.figure;
+  return [
+    {
+      name: CLASS_MAP_NAME,
+      id: EARTH_IDS.classMap,
+      texels: smokeClassMapTexels(),
+      laws: smokeClassLaws(),
+      normals: smokeNormalMapTexels(figure),
+      about: `R10's fixture's class map as the smoke builds it (R10.T10.d's: 2 classes at R10's level, ${CLASS_MAP_FACE_TEXELS} texels a face, half of every face surveyed, the edge column half, the shares turning texel to texel; R10.T10.g's normal map at level ${NORMAL_MAP_LEVEL} over the same half, its cells tilted ±12°), judged`,
+    },
+    {
+      name: PALETTE_NAME,
+      id: EARTH_IDS.palette,
+      texels: generatedClassMapTexels(),
+      laws: generatedClassLaws(),
+      normals: generatedNormalMapTexels(figure),
+      about: `a generated patch's whole palette (${GENERATED_CLASSES} classes at R10's level, every texel surveyed, three classes a region of ${GENERATED_REGION_TEXELS} × ${GENERATED_REGION_TEXELS} texels, the shares turning smoothly, every class drawn from its maturity nodes; the normal map at level ${NORMAL_MAP_LEVEL} on every cell, tilted ±12°), recorded, not judged`,
+    },
+  ];
+}
+
+/**
+ * One of (I)'s media: the measured Earth's tables and air, its body under `spec`'s class map with
+ * its laws and its normal map, under the spec's own id; the textures held by `releases`.
+ */
+function classMapMedium(
+  engine: RenderEngine,
+  releases: Releases,
+  measured: FrameMedium,
+  spec: ClassMapSpec,
+): FrameMedium {
+  const normals = releases.hold(
+    normalMapTexture(engine, `${TASK} ${spec.name} normals`, spec.normals),
+    (made) => {
+      engine.releaseTexture(made.texture);
+    },
+  );
+  const surface = releases.hold(
+    classMapSurface(
+      engine,
+      `${TASK} ${spec.name}`,
+      spec.texels,
+      spec.laws,
+      PROVISIONAL_PHOTOMETRY.law,
+      normals,
+    ),
+    (made) => {
+      engine.releaseTexture(made.weights);
+    },
+  );
+  return {
+    ...measured,
+    name: spec.name,
+    id: spec.id,
+    surface: { surface, rotation: IDENTITY_ROTATION },
+  };
+}
+
+/**
+ * (J)'s medium: `ATMOSPHERE TEST`'s `saturn-oblate` as its scene and the cache build it
+ * (`builtOfCase`), on Saturn's spheroid with its gravity, its tables built once and held by
+ * `releases`; `reference/cases.ts` imported as the app imports it, lazily, as (D) has.
+ *
+ * @throws Error where the case is not on a spheroid.
+ */
+async function saturnMedium(engine: RenderEngine, releases: Releases): Promise<FrameMedium> {
+  const loaded = await import("../view/atmosphere/reference/cases");
+  const built = builtOfCase(loaded.SATURN_OBLATE_CASE, "saturn-oblate");
+  const body = built.body;
+  if (body === null) {
+    throw new Error("TEST SATURN's case is on Saturn's spheroid");
+  }
+  const tables = releases.hold(
+    new AtmosphereTables(engine, built.medium, built.bottomRadiusM, built.curves, body),
+    (made) => {
+      made.dispose();
+    },
+  );
+  return {
+    name: SATURN_NAME,
+    id: EARTH_IDS.saturn,
+    medium: built.medium,
+    tables,
+    lightSlots: absorberCount(built.medium) > 0 ? built.curves.length : Infinity,
+    figure: body.figure,
+    surface: null,
+  };
 }
 
 // --- (A) the frame -------------------------------------------------------------------------------
@@ -420,17 +596,23 @@ function photorealFrame(
   };
 }
 
-/** The far-limb frame's combination of `setting`, `medium`, a camera and a set. */
+/**
+ * The far-limb frame's combination of `setting`, `medium`, a camera and a set: the medium's body
+ * on its figure, under its class map where it has one.
+ */
 function frameCombination(
   setting: QualitySetting,
   medium: FrameMedium,
-  place: { readonly label: string; readonly distanceM: number },
+  place: TimedPlace,
   set: SourceSet,
   failures: string[],
 ): Timed<FrameCombination> {
   const viewport = settingOutput(setting);
-  const scene = farLimbFrameScene(place.distanceM, viewport, set);
-  const earth = earthInput(medium.id, medium.medium, scene.earthCentreM);
+  const scene = farLimbFrameScene(place.distanceM, viewport, set, medium.figure);
+  const earth: LitBodyInput = {
+    ...earthInput(medium.id, medium.medium, scene.earthCentreM, medium.figure),
+    ...medium.surface,
+  };
   const air: FrameAtmosphere = {
     id: medium.id,
     tables: medium.tables,
@@ -550,6 +732,54 @@ async function timeFrames(
       ),
     ),
   );
+  return timeCombinations(on, ledger, combinations, failures);
+}
+
+/**
+ * (I): the measured Earth under each of `mapped`'s class maps, from 400 km and 10⁷ m, at `x2` and
+ * the setting's whole count, on high (`decision-r08-t11-frame.md` §2, QW29's class-map row).
+ */
+async function timeClassMap(
+  on: FrameView,
+  ledger: ResolveLedger,
+  mapped: ReadonlyArray<FrameMedium>,
+): Promise<FrameTimings> {
+  const failures: string[] = [];
+  const places = FAR_LIMB_TIMING_PLACES.slice(0, 2);
+  const sets = sourceSetsOf("high").filter((set) => set.name === "x2" || set.name === "x4");
+  const combinations = mapped.flatMap((medium) =>
+    places.flatMap((place) =>
+      sets.map((set) => frameCombination("high", medium, place, set, failures)),
+    ),
+  );
+  return timeCombinations(on, ledger, combinations, failures);
+}
+
+/**
+ * (J): `TEST SATURN` at (A)'s five cameras scaled to its radius, under the stars' sets, on both
+ * settings (`decision-r08-approximate-plate.md` item 3: R08.T6.f's Saturn-class passes).
+ */
+async function timeSaturn(
+  on: FrameView,
+  ledger: ResolveLedger,
+  saturn: FrameMedium,
+): Promise<FrameTimings> {
+  const failures: string[] = [];
+  const combinations = (["high", "low"] as const).flatMap((setting) =>
+    placesScaledTo(saturn.figure).flatMap((place) =>
+      STAR_SETS.map((set) => frameCombination(setting, saturn, place, set, failures)),
+    ),
+  );
+  return timeCombinations(on, ledger, combinations, failures);
+}
+
+/** `combinations`, timed on `on` in QW2's form, each listing its plan's sources at its first frame. */
+async function timeCombinations(
+  on: FrameView,
+  ledger: ResolveLedger,
+  combinations: ReadonlyArray<Timed<FrameCombination>>,
+  failures: string[],
+): Promise<FrameTimings> {
   let size: ViewSize | null = null;
   await runTimed(
     ledger,
@@ -568,7 +798,7 @@ async function timeFrames(
           combination.listed = listSources(
             sources,
             combination.scene.air,
-            SLICES_EARTH.figure,
+            combination.medium.figure,
             combination.medium.medium,
             combination.medium.lightSlots,
             TABLE_SIZES[combination.setting].marchSourceCap,
@@ -579,6 +809,11 @@ async function timeFrames(
     },
   );
   return { combinations, failures };
+}
+
+/** The timed frames of `timings` with a resolve missing. */
+function missingOf(timings: FrameTimings): number {
+  return timings.combinations.reduce((sum, combination) => sum + keptOf(combination).missing, 0);
 }
 
 /** Whether a combination drew its set's sources. */
@@ -601,8 +836,18 @@ function sourcesText(combination: FrameCombination): string {
   return `${describeSources(listed)}${shine}`;
 }
 
-/** (A)'s checks: a table a setting and medium, and each combination's per-frame sums. */
-function reportFrames(checks: Checks, timings: FrameTimings): void {
+/**
+ * (A)'s checks, and (I)'s and (J)'s: a table a setting and medium, and each combination's per-frame
+ * sums.
+ *
+ * @param about - What a table's medium draws beyond (A)'s scene, a segment of its detail; `null`
+ *   for (A)'s.
+ */
+function reportFrames(
+  checks: Checks,
+  timings: FrameTimings,
+  about: (medium: FrameMedium) => string | null,
+): void {
   const tables = new Map<string, Array<Timed<FrameCombination>>>();
   for (const combination of timings.combinations) {
     const { setting, medium } = combination.item;
@@ -620,6 +865,7 @@ function reportFrames(checks: Checks, timings: FrameTimings): void {
       continue;
     }
     const { setting, viewport } = first;
+    const drawn = about(first.medium);
     const kept = combinations.map((combination) => keptOf(combination));
     const all = kept.flatMap(({ frames }) => frames);
     const labels = labelsSeen(setting, all);
@@ -659,6 +905,7 @@ function reportFrames(checks: Checks, timings: FrameTimings): void {
       held && timings.failures.length === 0,
       [
         `${setting} at ${viewport.widthPx} × ${viewport.heightPx}, PhotorealRenderer on a canvas view, role eye, the average meter, EV100 ${SMOKE_EV100}, no sky, no star sprites, no overlay, no terrain: the Earth drawn as R07's mesh, as R08.T10.b draws every air body not handed to terrain`,
+        ...(drawn === null ? [] : [drawn]),
         timerText(timerSummary(all)),
         `${QW_FORM.warmUp} warm-up and ${QW_FORM.timed} timed frames a combination back to back, two sweeps, the second reversed, each frame after frame n − ${QW_FORM.ahead}'s resolves`,
         `each camera on the equator at longitude ${FAR_LIMB_LONGITUDE_RAD} rad, the datum's limb at the frame's centre, 60° across; the Sun at 1 au ${FAR_LIMB_TIMING_SUN_ZENITH_DEG}° from the zenith at the tangent point and ${FAR_LIMB_TIMING_SUN_AZIMUTH_DEG}° right of the view`,
@@ -972,6 +1219,163 @@ async function timeSmallBodies(
     checks.check(
       CHECK_NAMES.smallSums(combination.item.diameterPx, combination.item.air),
       frames.length === TIMED_IN_ALL && framesFinite(frames),
+      `${frames.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
+    );
+  }
+  return kept.reduce((sum, { missing }) => sum + missing, 0);
+}
+
+// --- (H) three small air bodies in one view ------------------------------------------------------
+
+/** (H)'s bodies as its check names them: `32 px at -6°`. */
+const SMALL_TRIO_TEXT: readonly string[] = SMALL_TRIO.map(
+  ({ diameterPx, offRad }) => `${diameterPx} px at ${Math.round((offRad * 180) / Math.PI)}°`,
+);
+
+/** One of (H)'s combinations: the three small Earths, with their air or without. */
+interface TrioCombination {
+  readonly air: boolean;
+  readonly scene: SmallBodiesScene;
+  readonly frame: PhotorealFrame;
+  /** The bodies' regimes at the combination's last frame, in `SMALL_TRIO`'s order. */
+  regimes: ReadonlyArray<LitRegime | null>;
+  /** Each body's sources as the plan listed them at the first frame with air; `null` before it. */
+  listed: ReadonlyArray<ListedSources | null> | null;
+}
+
+/**
+ * (H): three small air bodies in one view (QW29, `decision-r08-t11-frame.md` §2), the measured
+ * Earth 32, 10 and 4 px across, each its own body and air over the measured Earth's tables, at `x2`
+ * on high, with their air and without; recorded, not judged.
+ *
+ * @returns Its timed frames with a resolve missing.
+ */
+async function timeSmallTrio(
+  on: FrameView,
+  checks: Checks,
+  ledger: ResolveLedger,
+  measured: FrameMedium,
+): Promise<number> {
+  const viewport = settingOutput("high");
+  on.view.resize(viewport);
+  const failures: string[] = [];
+  const set = sourceSetsOf("high").find((each) => each.name === "x2");
+  if (set === undefined) {
+    throw new Error("high's sets hold x2");
+  }
+  const cap = TABLE_SIZES.high.marchSourceCap;
+  const combinations: Array<Timed<TrioCombination>> = [true, false].map((air) => {
+    const scene = smallEarthsScene(viewport, SLICES_EARTH.figure, set);
+    const bodies = scene.bodies.flatMap((body, i) => {
+      const id = TRIO_IDS[i];
+      return id === undefined ? [] : [{ id, body }];
+    });
+    const atmospheres: FrameAtmosphere[] = air
+      ? bodies.map(({ id, body }) => ({
+          id,
+          tables: measured.tables,
+          camera: body.air,
+          toBodyFixed: IDENTITY_QUATERNION,
+        }))
+      : [];
+    return {
+      item: {
+        air,
+        scene,
+        frame: photorealFrame(
+          "high",
+          viewport,
+          scene.camera,
+          scene.lights,
+          bodies.map(({ id, body }) => earthInput(id, measured.medium, body.centreM)),
+          atmospheres,
+          failures,
+        ),
+        regimes: [],
+        listed: null,
+      },
+      records: [],
+    };
+  });
+  await runTimed(
+    ledger,
+    combinations,
+    () => {
+      // One view at high's output for every combination.
+    },
+    (combination) => {
+      const { plan, ms } = renderFrame(on, combination.frame);
+      combination.regimes = TRIO_IDS.map((id) => plan?.regimes.get(id) ?? null);
+      if (combination.air && combination.listed === null && plan !== null) {
+        combination.listed = combination.scene.bodies.map((body, i) => {
+          const id = TRIO_IDS[i];
+          const sources = id === undefined ? undefined : plan.sources.get(id);
+          return sources === undefined
+            ? null
+            : listSources(
+                sources,
+                body.air,
+                SLICES_EARTH.figure,
+                measured.medium,
+                measured.lightSlots,
+                cap,
+              );
+        });
+      }
+      return ms;
+    },
+  );
+  const drawn = trioSourceSet(set, "high");
+  const held = (combination: TrioCombination): boolean =>
+    !combination.air ||
+    (combination.listed !== null &&
+      combination.listed.length === TRIO_IDS.length &&
+      combination.listed.every((listed) => listed !== null && sourcesAsSet(listed, drawn, cap)));
+  const kept = combinations.map((combination) => keptOf(combination));
+  const all = kept.flatMap(({ frames }) => frames);
+  const passes = [
+    PHOTOREAL_PASS_LABELS.discCells,
+    PHOTOREAL_PASS_LABELS.bodies,
+    PHOTOREAL_PASS_LABELS.discs,
+  ];
+  const heading = ["air", "regimes", ...passes, "atmosphere", "sum", "frames"].join(" | ");
+  const rows = kept.map(({ combination, frames, missing }) =>
+    [
+      combination.item.air ? "with" : "without",
+      combination.item.regimes.map((regime) => regime ?? "none").join(", "),
+      ...passes.map((label) => cell(frames, (f) => labelledNs(f, new Set([label])))),
+      cell(frames, (f) => labelledNs(f, ATMOSPHERE_LABELS)),
+      cell(frames, sumNs),
+      framesCell(frames.length, missing),
+    ].join(" | "),
+  );
+  const sources = combinations
+    .find(({ item }) => item.air)
+    ?.item.listed?.map((listed, i) =>
+      listed === null
+        ? `${SMALL_TRIO_TEXT[i] ?? "?"}: no plan held its sources`
+        : `${SMALL_TRIO_TEXT[i] ?? "?"}: ${describeSources(listed)}`,
+    )
+    .join("; ");
+  checks.check(
+    CHECK_NAMES.trio,
+    kept.every(
+      ({ combination, frames }) =>
+        frames.length === TIMED_IN_ALL && framesFinite(frames) && held(combination.item),
+    ) && failures.length === 0,
+    [
+      `high at ${viewport.widthPx} × ${viewport.heightPx}, the measured Earth whole three times in one view, ${SMALL_TRIO_TEXT.join(", ")} (each its own body and air over the same tables), the Sun at 1 au 40° off the middle one's line of sight and a binary's second star (x2), with their air and without; each body lit by the two stars and the other two's planetshine, ${drawn.stars} + ${drawn.giants}, as the plan gives every lit body`,
+      timerText(timerSummary(all)),
+      `sources with air: ${sources ?? "none listed"}`,
+      ...(failures.length === 0 ? [] : [`air failures: ${failures.slice(0, 5).join("; ")}`]),
+      `GPU time, µs, median / p95: ${[heading, ...rows].join(" || ")}`,
+    ].join("; "),
+  );
+  for (const combination of combinations) {
+    const { frames } = keptOf(combination);
+    checks.check(
+      CHECK_NAMES.trioSums(combination.item.air),
+      frames.length === TIMED_IN_ALL && framesFinite(frames) && held(combination.item),
       `${frames.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
     );
   }
@@ -1735,7 +2139,12 @@ function summaryCheckNames(): string[] {
     ...frameTables,
     CHECK_NAMES.alone,
     CHECK_NAMES.small,
+    CHECK_NAMES.trio,
     CHECK_NAMES.bare(MEASURED_EARTH_NAME),
+    CHECK_NAMES.frameTable("high", CLASS_MAP_NAME),
+    CHECK_NAMES.frameTable("high", PALETTE_NAME),
+    CHECK_NAMES.frameTable("high", SATURN_NAME),
+    CHECK_NAMES.frameTable("low", SATURN_NAME),
     CHECK_NAMES.tables,
     CHECK_NAMES.bytes,
     CHECK_NAMES.firstAir,
@@ -1745,8 +2154,8 @@ function summaryCheckNames(): string[] {
 
 /**
  * R08.T11's photorealistic frame's timings (the module's remarks): (D) first, so that its cold
- * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), (E) and
- * (F);
+ * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), R08.T11.c's
+ * (H), (I) and (J), then (E) and (F);
  * a check a table, one per combination with its per-frame sums, and one that no timed frame was
  * dropped. Without `timestamp-query` each check fails with the reason.
  */
@@ -1773,6 +2182,14 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
     });
     await timedPart("(D)", () => timeTables(engine, checks, ledger));
     const media = frameMedia(engine, releases);
+    const measured = media.find((medium) => medium.name === MEASURED_EARTH_NAME);
+    if (measured === undefined) {
+      throw new Error("the measured Earth is among (A)'s media");
+    }
+    // (I)'s and (J)'s media before the renderer, so that they outlive it in `releases`.
+    const specs = classMapSpecs();
+    const mapped = specs.map((spec) => classMapMedium(engine, releases, measured, spec));
+    const saturn = await saturnMedium(engine, releases);
     const firstPlace = FAR_LIMB_TIMING_PLACES[0];
     const firstSet = sourceSetsOf("high")[0];
     if (firstPlace === undefined || firstSet === undefined) {
@@ -1786,27 +2203,46 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       farLimbFrameScene(firstPlace.distanceM, settingOutput("high"), firstSet).camera,
     );
     const frames = await timedPart("(A)", () => timeFrames(on, ledger, media));
-    reportFrames(checks, frames);
+    reportFrames(checks, frames, () => null);
     const aloneMissing = await timedPart("(B)", () =>
       timeAlone(engine, checks, ledger, media, frames),
     );
-    const measured = media.find((medium) => medium.name === MEASURED_EARTH_NAME);
-    if (measured === undefined) {
-      throw new Error("the measured Earth is among (A)'s media");
-    }
     const smallMissing = await timedPart("(C)", () =>
       timeSmallBodies(on, checks, ledger, measured),
     );
     const bareMissing = await timedPart("(G)", () => timeBare(on, checks, ledger, measured));
-    const frameMissing = frames.combinations.reduce(
-      (sum, combination) => sum + keptOf(combination).missing,
-      0,
+    const trioMissing = await timedPart("(H)", () => timeSmallTrio(on, checks, ledger, measured));
+    const mappedFrames = await timedPart("(I)", () => timeClassMap(on, ledger, mapped));
+    const specAbout = new Map(specs.map((spec) => [spec.name, spec.about]));
+    reportFrames(
+      checks,
+      mappedFrames,
+      (medium) =>
+        `${MEASURED_EARTH_NAME}'s body under ${specAbout.get(medium.name) ?? "a class map"}, under its own id, over ${MEASURED_EARTH_NAME}'s tables`,
     );
-    const missing = frameMissing + aloneMissing + smallMissing + bareMissing;
+    const saturnFrames = await timedPart("(J)", () => timeSaturn(on, ledger, saturn));
+    const ratio = saturn.figure.equatorialRadiusM / SLICES_EARTH.figure.equatorialRadiusM;
+    reportFrames(
+      checks,
+      saturnFrames,
+      () =>
+        `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the stars' sets alone, since a giant's moons light it far under the sky's cut`,
+    );
+    const frameMissing = missingOf(frames);
+    const mappedMissing = missingOf(mappedFrames);
+    const saturnMissing = missingOf(saturnFrames);
+    const missing =
+      frameMissing +
+      aloneMissing +
+      smallMissing +
+      bareMissing +
+      trioMissing +
+      mappedMissing +
+      saturnMissing;
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>

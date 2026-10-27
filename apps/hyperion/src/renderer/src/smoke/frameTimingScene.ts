@@ -29,12 +29,28 @@
  * `PLANETSHINE_SOURCES_LOW`). The small bodies' frames ({@link smallEarthScene}) are R08.T10.b's
  * (`atmosphereFrame.ts`): the Earth whole at a diameter in pixels, the Sun 40° off the line of
  * sight.
+ *
+ * R08.T11.c (QW29, `decision-r08-t11-frame.md` §2) adds three scenes:
+ *
+ * - `TEST SATURN`'s far-limb frames ({@link farLimbFrameScene} on Saturn's spheroid at
+ *   {@link placesScaledTo}'s distances): Earth's five cameras with every distance scaled by the
+ *   equatorial radii's ratio, so that the disc and its limb fill the frame as the Earth's do, under
+ *   the stars' sets alone ({@link STAR_SETS}), since a giant's moons light it far under the sky's
+ *   cut;
+ * - three small air bodies in one view ({@link smallEarthsScene}), each its own air, under a
+ *   binary's two stars, each body lit by the other two's planetshine too ({@link trioSourceSet});
+ * - two class maps with their normal maps: R10's fixture's as the smoke builds it
+ *   ({@link smokeClassMapTexels}, {@link smokeNormalMapTexels}), and a generated patch's whole
+ *   palette, every texel surveyed, each class drawn from its maturity nodes
+ *   ({@link generatedClassMapTexels}, {@link generatedNormalMapTexels}).
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
+import { checkerNormalMap } from "../test/normalMapFixtures";
 import { type BodyPhotometry, PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
+import type { PhotometricLaw } from "../view/appearance/law";
 import { lawFor } from "../view/appearance/phase";
 import {
   type AtmosphereCamera,
@@ -49,6 +65,8 @@ import {
   type SkySourceKind,
   skySourcesWithSkips,
 } from "../view/atmosphere/sources";
+import type { NormalMapTexels } from "../view/bodies/discNormals";
+import { type ClassMapTexels, packClassMap } from "../view/bodies/discSurface";
 import type { BodyLightSources, LitBodyInput } from "../view/bodies/draw";
 import { DEFAULT_FOV_DEG, type ProjectionCamera, type Viewport } from "../view/camera/projection";
 import { IDENTITY_QUATERNION, rotate } from "../view/camera/quaternion";
@@ -58,8 +76,11 @@ import { photopicIlluminance } from "../view/lighting/illuminance";
 import type { Rgb } from "../view/photometry/toneCurve";
 import { type QualitySetting, SETTINGS } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
+import { CLASS_MAP_FACE_TEXELS } from "../view/terrain/classMap";
+import { MATURITY_NODES } from "../view/terrain/maturityNodes";
 import {
   FAR_LIMB_TIMING_FRAME,
+  FAR_LIMB_TIMING_PLACES,
   FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
   FAR_LIMB_TIMING_SUN_ZENITH_DEG,
   farLimbTimingCamera,
@@ -184,17 +205,24 @@ export function lambertPhotometry(p: Rgb): BodyPhotometry {
  * lighting (the frame's hosts and bodies light it).
  *
  * @param centreM - Its centre from the camera, m.
+ * @param figure - Its figure, its pole +z: WGS 84 by default, Saturn's spheroid for `TEST SATURN`
+ *   (whose disc `ATMOSPHERE TEST` draws as a grey Lambert sphere of its medium's ground albedo too).
  */
 export function earthInput(
   id: BodyIdHex,
   medium: Pick<AtmosphereMedium, "groundAlbedo">,
   centreM: Vec3,
+  figure: SpheroidFigure = SLICES_EARTH.figure,
 ): LitBodyInput {
   const [r, g, b] = medium.groundAlbedo;
   return {
     id,
     centreM,
-    figure: { ...SLICES_EARTH.figure, pole: POLE },
+    figure: {
+      equatorialRadiusM: figure.equatorialRadiusM,
+      polarRadiusM: figure.polarRadiusM,
+      pole: POLE,
+    },
     photometry: lambertPhotometry([
       r / LAMBERT_PHASE_INTEGRAL,
       g / LAMBERT_PHASE_INTEGRAL,
@@ -259,7 +287,7 @@ export interface FrameScene {
   readonly air: AtmosphereCamera;
   /** The frame's camera, at the origin: the air camera's orientation and field. */
   readonly camera: ProjectionCamera;
-  /** The Earth's centre from the camera, m. */
+  /** The Earth's centre from the camera, m (`TEST SATURN`'s in its rows). */
   readonly earthCentreM: Vec3;
   /** The hosts at their centres from the camera: the Sun, and the second star in a binary's sets. */
   readonly lights: ReadonlyArray<PlacedLight>;
@@ -272,17 +300,21 @@ export interface FrameScene {
  * camera (`farLimbTimingCamera`) and sun (`limbSunToward`, 30° from the zenith at the tangent
  * point, 90° right of the view), the set's second star and giants placed as the module's remarks
  * say.
+ *
+ * @param figure - The body's figure, its pole +z: WGS 84 by default, Saturn's spheroid for
+ *   `TEST SATURN`'s rows.
  */
 export function farLimbFrameScene(
   distanceM: number,
   viewport: Viewport,
   set: SourceSet,
+  figure: SpheroidFigure = SLICES_EARTH.figure,
 ): FrameScene {
-  const air = farLimbTimingCamera(distanceM, viewport);
+  const air = farLimbTimingCamera(distanceM, viewport, figure);
   const earthCentreM = scale(air.positionM, -1);
   const sun = limbSunToward(
     distanceM,
-    SLICES_EARTH.figure,
+    figure,
     FAR_LIMB_TIMING_SUN_ZENITH_DEG,
     FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
     FAR_LIMB_TIMING_FRAME,
@@ -343,6 +375,252 @@ export function smallEarthScene(
     earthCentreM,
     lights: [{ disc: SUN_DISC, centreM: add(earthCentreM, scale(towards, AU_M)) }],
   };
+}
+
+/**
+ * The stars' sets alone, `x1` and `x2`: `TEST SATURN`'s rows. A giant's moons light it at under
+ * 10⁻⁶ of the Sun (Titan: geometric albedo about 0.2, (2,575 km ÷ 1.22 × 10⁶ km)² about 4.5 × 10⁻⁶),
+ * far under the sky's cut, so no planetshine set stands for a giant.
+ */
+export const STAR_SETS: readonly SourceSet[] = [
+  { name: "x1", stars: 1, giants: 0 },
+  { name: "x2", stars: 2, giants: 0 },
+];
+
+/** A camera of the timed frames: its label and its distance from the body's centre, m. */
+export interface TimedPlace {
+  readonly label: string;
+  readonly distanceM: number;
+}
+
+/**
+ * R08.T8.c's five far-limb cameras (`FAR_LIMB_TIMING_PLACES`) with every distance scaled to
+ * `figure` by its equatorial radius over WGS 84's, so that its disc and limb fill the frame as the
+ * Earth's do at the camera they stand for; each labelled by its distance, `6.40e7 m`.
+ */
+export function placesScaledTo(figure: SpheroidFigure): TimedPlace[] {
+  const ratio = figure.equatorialRadiusM / SLICES_EARTH.figure.equatorialRadiusM;
+  return FAR_LIMB_TIMING_PLACES.map(({ distanceM }) => {
+    const scaledM = distanceM * ratio;
+    return { label: `${scaledM.toExponential(2).replace("e+", "e")} m`, distanceM: scaledM };
+  });
+}
+
+/**
+ * The three small air bodies of one view: each one's diameter, px (the on-axis reckoning of
+ * {@link smallEarthScene}), and its direction's angle from the view's axis towards +x, rad, 6°
+ * apart (about 175 px at high's 1,920 across), so that none covers another.
+ */
+export const SMALL_TRIO: ReadonlyArray<{ readonly diameterPx: number; readonly offRad: number }> = [
+  { diameterPx: 32, offRad: (-6 * Math.PI) / 180 },
+  { diameterPx: 10, offRad: 0 },
+  { diameterPx: 4, offRad: (6 * Math.PI) / 180 },
+];
+
+/** One of the small bodies of {@link SmallBodiesScene}: its diameter, centre and air camera. */
+export interface SmallBodyPlace {
+  readonly diameterPx: number;
+  /** Its centre from the camera, m. */
+  readonly centreM: Vec3;
+  /** Its atmosphere camera: from its centre, in its body-fixed axes, the frame's own. */
+  readonly air: AtmosphereCamera;
+}
+
+/** The three small air bodies' frame: the camera, the bodies, and the set's stars. */
+export interface SmallBodiesScene {
+  readonly camera: ProjectionCamera;
+  readonly bodies: ReadonlyArray<SmallBodyPlace>;
+  readonly lights: ReadonlyArray<PlacedLight>;
+}
+
+/**
+ * The three small air bodies' frame (QW29, `decision-r08-t11-frame.md` §2): the Earth on `figure`
+ * three times in one view, at {@link SMALL_TRIO}'s diameters and directions, each at the distance
+ * {@link smallEarthScene} gives its diameter; the Sun 40° off the middle body's line of sight, as
+ * {@link smallEarthScene}'s, and in a binary's set the second star turned from it about the pole
+ * (+z) by {@link COMPANION_TURN_RAD}, at {@link COMPANION_DISTANCE_M}, as {@link farLimbFrameScene}
+ * turns it; the camera's axes the bodies' body-fixed ones.
+ *
+ * @throws RangeError for a set with giants: the small bodies take the stars alone.
+ */
+export function smallEarthsScene(
+  viewport: Viewport,
+  figure: SpheroidFigure,
+  set: SourceSet,
+): SmallBodiesScene {
+  if (set.giants !== 0) {
+    throw new RangeError(`the small bodies take the stars alone, not ${set.giants} giants`);
+  }
+  const fovXRad = (DEFAULT_FOV_DEG * Math.PI) / 180;
+  const pxPerRad = viewport.widthPx / (2 * Math.tan(fovXRad / 2));
+  const bodies = SMALL_TRIO.map(({ diameterPx, offRad }): SmallBodyPlace => {
+    const distanceM = figure.equatorialRadiusM / Math.sin(diameterPx / 2 / pxPerRad);
+    const centreM = scale(vec3(Math.sin(offRad), 0, -Math.cos(offRad)), distanceM);
+    return {
+      diameterPx,
+      centreM,
+      air: {
+        positionM: scale(centreM, -1),
+        orientation: IDENTITY_QUATERNION,
+        fovXRad,
+        viewport,
+      },
+    };
+  });
+  const middle = bodies[1]?.centreM ?? vec3(0, 0, 0);
+  const towards = vec3(Math.sin(SMALL_SUN_OFF_RAD), 0, Math.cos(SMALL_SUN_OFF_RAD));
+  const lights: PlacedLight[] = [{ disc: SUN_DISC, centreM: add(middle, scale(towards, AU_M)) }];
+  if (set.stars === 2) {
+    lights.push({
+      disc: COMPANION_DISC,
+      centreM: add(middle, scale(aboutPole(towards, COMPANION_TURN_RAD), COMPANION_DISTANCE_M)),
+    });
+  }
+  return { camera: { orientation: IDENTITY_QUATERNION, fovXRad }, bodies, lights };
+}
+
+/**
+ * The sources each body of {@link smallEarthsScene} draws under `set` on `setting`: the set's
+ * stars, and the other two bodies' planetshine, which the plan gives every lit body
+ * (`bodyLightSources`, the setting's count of the brightest), so `x2` draws 2 + 2 on high. The
+ * sky's negligible skip cuts neither, since from so far out no source stands high enough above the
+ * camera's horizontal to be its reference (`sources.ts`).
+ */
+export function trioSourceSet(set: SourceSet, setting: QualitySetting): SourceSet {
+  const giants = Math.min(SMALL_TRIO.length - 1, SETTINGS[setting].photoreal.planetshineSources);
+  return { name: set.name, stars: set.stars, giants };
+}
+
+/**
+ * The smoke's R10 fixture's class map (`bodies.ts`' R10.T10.d check, as the smoke builds it): at
+ * R10's level (`CLASS_MAP_FACE_TEXELS`, 64 a face), half of every face surveyed (i < 32), the
+ * column at the survey's edge (i = 31) half surveyed, two classes in a pattern turning texel to
+ * texel; the rest `elsewhere`'s. QW29's judged class-map row (`decision-r08-t11-frame.md` §2).
+ */
+export function smokeClassMapTexels(): ClassMapTexels {
+  return packClassMap(CLASS_MAP_FACE_TEXELS, 2, ({ i, j }) => {
+    if (i >= CLASS_MAP_FACE_TEXELS / 2) {
+      return null;
+    }
+    const w = ((i + 2 * j) % 8) / 7;
+    const share = i === CLASS_MAP_FACE_TEXELS / 2 - 1 ? 0.5 : 1;
+    return [w * share, (1 - w) * share];
+  });
+}
+
+/** The smoke's R10 fixture's laws (`bodies.ts`' T8.b and R10.T10.d checks): lunar, then terrestrial. */
+export function smokeClassLaws(): PhotometricLaw[] {
+  return [
+    lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+  ];
+}
+
+/** The field's level of the class maps' normal maps: 7, R10.T10.g's smoke's (128 texels a face). */
+export const NORMAL_MAP_LEVEL = 7;
+
+/** The tilt of the normal maps' cells, rad: ±12°, R10.T10.g's smoke's ridges. */
+const NORMAL_TILT_RAD = (12 * Math.PI) / 180;
+
+/**
+ * The smoke's R10 fixture's normal map (`bodies.ts`' R10.T10.g check): the field's at
+ * {@link NORMAL_MAP_LEVEL}, surveyed where {@link smokeClassMapTexels} is (half of every face), its
+ * datum normals on `figure` tilted ±12° in a checkerboard.
+ */
+export function smokeNormalMapTexels(figure: SpheroidFigure): NormalMapTexels {
+  const half = 2 ** NORMAL_MAP_LEVEL / 2;
+  return checkerNormalMap(
+    NORMAL_MAP_LEVEL,
+    NORMAL_TILT_RAD,
+    figure.polarRadiusM / figure.equatorialRadiusM,
+    (cell) => cell.i < half,
+  );
+}
+
+/**
+ * The classes of a generated patch's palette: 8 (`hyperion-surface`'s `MAX_CLASSES`, the eight of
+ * largest summed weight a patch keeps).
+ */
+export const GENERATED_CLASSES = 8;
+
+/** The side of the regions of {@link generatedClassMapTexels} that share their three classes, texels. */
+export const GENERATED_REGION_TEXELS = 8;
+
+/**
+ * Class `k`'s albedo at maturity node `j` in display channel `channel`: a timing scene's figures,
+ * 0.08 to 0.43 by class at fresh ground, darkening to half by the body's background maturity, a
+ * little redder (R, V, B as 1, 0.95, 0.9).
+ */
+function nodeAlbedo(k: number, j: number, channel: number): number {
+  const fresh = 0.08 + 0.05 * k;
+  return fresh * (1 - (0.5 * j) / (MATURITY_NODES - 1)) * (1 - 0.05 * channel);
+}
+
+/**
+ * A generated patch's whole palette as a class map, QW29's second class-map row (recorded): at
+ * R10's level, every texel surveyed, {@link GENERATED_CLASSES} classes; each region of
+ * {@link GENERATED_REGION_TEXELS} × {@link GENERATED_REGION_TEXELS} texels holds three of them, its
+ * shares turning smoothly across it (0.4–0.6, 0.25–0.35 and the rest), the regions' triples turning
+ * across the face, so that a point meets three classes inside a region and up to six on its edges;
+ * each class drawn from its maturity nodes (R10.T1.c), the codes turning smoothly. A timing scene's
+ * map, heavier than the R10 fixture's in every term the shader reads: classes, shares, maturity and
+ * the normal map.
+ */
+export function generatedClassMapTexels(): ClassMapTexels {
+  const classes = GENERATED_CLASSES;
+  const side = GENERATED_REGION_TEXELS;
+  const nodes = new Float32Array(3 * MATURITY_NODES * classes);
+  for (let k = 0; k < classes; k += 1) {
+    for (let j = 0; j < MATURITY_NODES; j += 1) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        nodes[3 * (MATURITY_NODES * k + j) + channel] = nodeAlbedo(k, j, channel);
+      }
+    }
+  }
+  return packClassMap(
+    CLASS_MAP_FACE_TEXELS,
+    classes,
+    ({ face, i, j }) => {
+      const first = (Math.floor(i / side) + 3 * Math.floor(j / side) + 5 * face) % classes;
+      const u = (i % side) / (side - 1);
+      const v = (j % side) / (side - 1);
+      const shares = [0.4 + 0.2 * u, 0.35 - 0.1 * v];
+      const weights = Array.from({ length: classes }, () => 0);
+      weights[first] = shares[0] ?? 0;
+      weights[(first + 3) % classes] = shares[1] ?? 0;
+      weights[(first + 5) % classes] = 1 - (shares[0] ?? 0) - (shares[1] ?? 0);
+      return weights;
+    },
+    {
+      codeOf: ({ face, i, j }) => ((i + j) * 512 + face * 4_099) % 65_536,
+      nodes,
+      drawn: Array.from({ length: classes }, () => true),
+    },
+  );
+}
+
+/**
+ * The generated palette's laws, one a class: the R10 fixture's lunar and terrestrial laws and a
+ * Lambert law in turn, each class drawn from its nodes taking its A from them.
+ */
+export function generatedClassLaws(): PhotometricLaw[] {
+  const [moon, earth] = smokeClassLaws();
+  const lambert = lawFor([0.2, 0.2, 0.2], [1.5, 1.5, 1.5], "lambert");
+  return Array.from({ length: GENERATED_CLASSES }, (_, k) =>
+    k % 3 === 0 ? (moon ?? lambert) : k % 3 === 1 ? (earth ?? lambert) : lambert,
+  );
+}
+
+/**
+ * The generated palette's normal map: the field's at {@link NORMAL_MAP_LEVEL}, every cell surveyed,
+ * its datum normals on `figure` tilted ±12° in a checkerboard (R10.T10.g's smoke's ridges).
+ */
+export function generatedNormalMapTexels(figure: SpheroidFigure): NormalMapTexels {
+  return checkerNormalMap(
+    NORMAL_MAP_LEVEL,
+    NORMAL_TILT_RAD,
+    figure.polarRadiusM / figure.equatorialRadiusM,
+  );
 }
 
 /** A source as a set means it: its array and its light slot. */
