@@ -1,6 +1,7 @@
 /**
- * An optics worker: assembles bodies' media and shares their curves of growth off the render
- * thread (plan R08, R08.T10.a; Design note 1), for the render thread's pool (`opticsPool.ts`).
+ * An optics worker: assembles bodies' media, shares their curves of growth and bakes thick
+ * atmospheres' multiple-scattering tables off the render thread (plan R08, R08.T10.a and
+ * R08.T14.b; Design notes 1 and 9), for the render thread's pool (`opticsPool.ts`).
  *
  * @remarks
  * A same-origin module worker, started by `opticsPool.ts`'s `startOpticsWorker` with

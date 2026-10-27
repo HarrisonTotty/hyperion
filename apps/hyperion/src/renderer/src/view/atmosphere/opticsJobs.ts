@@ -19,16 +19,26 @@
  *   lights asked, and the join `absorberCurvesFromSums` of every share's, of which only each
  *   light's channel curves are answered: the per-planet tables read those, and the bake bins'
  *   curves, about 1 MB an absorber and sun, are left to R08.T14's bakes.
+ * - **The thick bake** (R08.T14.b; `thick/bake.ts`): the body's absorber specs as a share takes
+ *   them, each of the column's absorber terms matched to the spec of its name, its bin curves under
+ *   the lights asked formed here (`absorberCurvesBySun`, the lines' exponentials shared by the
+ *   lights), the column's optics and the fits prepared once a request, and one table a band asked.
  * - **The answer** is a structured copy of the reply, whose every buffer is transferred: the copy
  *   is made in the worker, off the render thread, and leaves the worker's own arrays (its kept
  *   assemblies, and any table a medium references, such as a cross-section's) attached.
  *
  * A throw in a job is a bug (`decision-r08-t10a-leans.md` item 6) and is answered `failed` with its
- * message; a k-table that cannot be loaded rejects, so that the worker raises its error and the
- * pool replaces it.
+ * message, but for a bake's, which is answered `thick-bake-failed`: a failed bake is never the
+ * medium's fault (decision-r08-t10a-leans, UX review item 1). A k-table that cannot be loaded
+ * rejects, so that the worker raises its error and the pool replaces it.
  */
 
-import { absorberCurvesFromSums, absorberCurveSums, type AbsorberSpec } from "./absorbers";
+import {
+  absorberCurvesBySun,
+  absorberCurvesFromSums,
+  absorberCurveSums,
+  type AbsorberSpec,
+} from "./absorbers";
 import type { KDistributionTable } from "./absorbers/kDistribution";
 import {
   absorberSpecsOf,
@@ -46,6 +56,12 @@ import {
   transferablesOf,
 } from "./opticsMessages";
 import type { BakeSpectrum } from "./spectralColour";
+import {
+  bakeMultipleScattering,
+  type MsSourceTable,
+  prepareBake,
+  type ThickBakeLight,
+} from "./thick/bake";
 
 /** How many bodies' assemblies, or absorber specs, a worker keeps, by key, the latest asked. */
 export const OPTICS_MEDIA_KEPT = 2;
@@ -126,6 +142,9 @@ export class OpticsJobs {
         reply = { kind: "curve-sums", id: request.id, sums };
         break;
       }
+      case "thick-bake":
+        reply = { kind: "thick-baked", id: request.id, tables: this.#bake(request, options) };
+        break;
       case "curve-join": {
         const { specs, suns } = this.#absorbersUnder(request, options);
         const perAbsorber = specs.map((spec, k) =>
@@ -172,24 +191,57 @@ export class OpticsJobs {
     request: Extract<OpticsRequest, { kind: "curve-sums" | "curve-join" }>,
     options: AssembleOptions,
   ): { readonly specs: ReadonlyArray<AbsorberSpec>; readonly suns: ReadonlyArray<BakeSpectrum> } {
+    const { specs, spectra } = this.#heldAbsorbers(request, options);
+    if (specs.length === 0) {
+      return { specs, suns: [] };
+    }
+    return { specs, suns: spectraOf(spectra, request.slots) };
+  }
+
+  /** The body's absorber specs and its lights' spectra, kept where formed. */
+  #heldAbsorbers(
+    request: Extract<OpticsRequest, { kind: "curve-sums" | "curve-join" | "thick-bake" }>,
+    options: AssembleOptions,
+  ): HeldAbsorbers {
     const key = atmosphereKey(request.input);
     let held = this.#take(key);
     if (held === undefined) {
       held = { assembled: null, absorbers: absorberSpecsOf(request.input, options) };
       this.#keep(key, held);
     }
-    const { specs, spectra } = held.absorbers;
-    if (specs.length === 0) {
-      return { specs, suns: [] };
-    }
-    const suns = request.slots.map((slot) => {
-      const spectrum = spectra[slot];
-      if (spectrum === undefined) {
-        throw new RangeError(`light slot ${slot} is not one of the body's ${spectra.length}`);
+    return held.absorbers;
+  }
+
+  /** A thick bake's tables, one a band asked (the module's remarks); throws for a failed bake. */
+  #bake(
+    request: Extract<OpticsRequest, { kind: "thick-bake" }>,
+    options: AssembleOptions,
+  ): ReadonlyArray<MsSourceTable> {
+    const { specs, spectra } = this.#heldAbsorbers(request, options);
+    const suns = spectraOf(spectra, request.slots);
+    const absorbers = request.column.terms.flatMap((term) => {
+      if (term.source.kind !== "absorber") {
+        return [];
       }
-      return spectrum;
+      const spec = specs.find((each) => each.name === term.name);
+      if (spec === undefined) {
+        throw new RangeError(`the body has no absorber ${term.name} for the bake's column`);
+      }
+      return [spec];
     });
-    return { specs, suns };
+    const curves = absorbers.map((spec) => absorberCurvesBySun(spec, suns));
+    const lights = suns.map((spectrum, j): ThickBakeLight => ({
+      spectrum,
+      absorbers: curves.map((bySun) => {
+        const bins = bySun[j]?.bins;
+        if (bins === undefined) {
+          throw new RangeError(`an absorber has no curves for light ${j}`);
+        }
+        return bins;
+      }),
+    }));
+    const prepared = prepareBake(request.column, lights);
+    return request.bands.map((band) => bakeMultipleScattering(prepared, request.body, band));
   }
 
   /** The body kept under `key`, made the most recently asked. */
@@ -240,8 +292,36 @@ export class OpticsJobs {
   }
 }
 
-/** A job's failure as its answer: a bug's message, nothing to transfer. */
+/** The spectra of the light slots asked. */
+function spectraOf(
+  spectra: ReadonlyArray<BakeSpectrum>,
+  slots: ReadonlyArray<number>,
+): ReadonlyArray<BakeSpectrum> {
+  return slots.map((slot) => {
+    const spectrum = spectra[slot];
+    if (spectrum === undefined) {
+      throw new RangeError(`light slot ${slot} is not one of the body's ${spectra.length}`);
+    }
+    return spectrum;
+  });
+}
+
+/**
+ * A job's failure as its answer, nothing to transfer: a bug's message, `failed`, or a bake's own
+ * failure, `thick-bake-failed`, with the bands it asked.
+ */
 function failed(request: OpticsRequest, error: unknown): OpticsAnswer {
   const message = error instanceof Error ? error.message : String(error);
-  return { reply: { kind: "failed", id: request.id, message }, transfer: [] };
+  let reply: OpticsReply;
+  switch (request.kind) {
+    case "thick-bake":
+      reply = { kind: "thick-bake-failed", id: request.id, bands: request.bands, message };
+      break;
+    case "assemble":
+    case "curve-sums":
+    case "curve-join":
+      reply = { kind: "failed", id: request.id, message };
+      break;
+  }
+  return { reply, transfer: [] };
 }
