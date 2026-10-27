@@ -115,7 +115,7 @@ describe("atmosphereNotes with APPROXIMATE's reasons (R08.T10.c)", () => {
     "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
   ];
 
-  it("sets the reasons straight after ATMOSPHERE: APPROXIMATE, each a steady note, the REJECTED lines in their place", () => {
+  it("sets the reasons straight after ATMOSPHERE: APPROXIMATE, each a reason and the note a note, the REJECTED lines in their place (R08.T10.d)", () => {
     const failed = {
       statement: "ATMOSPHERE REJECTED: for KX 4417 /4, failed, reopen VIEW to retry",
       refusal: false,
@@ -131,8 +131,8 @@ describe("atmosphereNotes with APPROXIMATE's reasons (R08.T10.c)", () => {
       { statement: "ATMOSPHERE: NOT RESOLVED", standing: "note" },
       { statement: failed.statement, standing: "fault" },
       { statement: "ATMOSPHERE: APPROXIMATE", standing: "note" },
-      { statement: reasons[0], standing: "note" },
-      { statement: reasons[1], standing: "note" },
+      { statement: reasons[0], standing: "reason" },
+      { statement: reasons[1], standing: "reason" },
     ]);
   });
 

@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { binaryFrame } from "../../test/binaryFrames";
@@ -37,8 +37,13 @@ import { SKY_PASS_LABEL } from "../../view/photoreal/passes";
 import { HISTOGRAM_PASS } from "../../view/post/histogram";
 import { TONEMAP_PASS } from "../../view/post/tonemap";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
+import { viewId } from "../../view/camera/state";
+import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
+import { phaseScene } from "../../view/scenes/phaseScene";
+import { InstrumentView } from "./InstrumentView";
+import type { Instrument } from "./useInstruments";
 import type { ViewEngineSource } from "./useViewEngine";
-import { STAR_SOURCE } from "./viewRun";
+import { type LabelStatement, STAR_SOURCE, startRun } from "./viewRun";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -1045,5 +1050,94 @@ describe("VIEW's instruments held for the stage's room (R10.T12.b)", () => {
     view.advance(600);
     expect([turning, chaseCameraLine()]).toEqual([true, returned]);
     await view.user.keyboard("{/ArrowLeft}");
+  });
+});
+
+/** `INSTRUMENT 1` drawing PHASE TEST photorealistically, its atmosphere's reasons given. */
+function renderInstrument(
+  reasons: ReadonlyArray<string>,
+  primary: ReadonlyArray<LabelStatement>,
+): void {
+  const instrument: Instrument = {
+    slot: 1,
+    id: viewId("INSTRUMENT 1"),
+    name: "INSTRUMENT 1",
+    open: true,
+    style: "photorealistic",
+    selection: null,
+    shown: {
+      run: startRun(phaseScene()),
+      anchors: [],
+      drawnStyle: "photorealistic",
+      sceneStars: false,
+      photoreal: "ready",
+      terrain: null,
+      surveyEdges: [],
+      contourIntervalM: null,
+      atmosphere: {
+        labels: ["atmosphereApproximate"],
+        plate: [],
+        approximate: reasons,
+        fault: [],
+      },
+    },
+    refused: false,
+    size: null,
+    skyLabel: null,
+    canvas: null,
+    canvasRef: () => undefined,
+    stageRef: () => undefined,
+    panelSize: null,
+    panelRef: () => undefined,
+  };
+  render(
+    <InstrumentView
+      instrument={instrument}
+      exposure={DEFAULT_EXPOSURE}
+      budgetStyle="photorealistic"
+      stale={false}
+      lighting="lit"
+      litLabels={[]}
+      primaryPhotorealStatements={primary}
+      skyAwaiting={false}
+      faults={[]}
+      legendId="legend"
+      onKeyDown={() => undefined}
+      onKeyUp={() => undefined}
+      onBlur={() => undefined}
+      fovDeg={() => 60}
+      dragKind={() => "orbit"}
+      onPress={() => undefined}
+      onTurn={() => undefined}
+      onPick={() => undefined}
+    />,
+  );
+}
+
+/** `INSTRUMENT 1`'s panel, its statements queried within it. */
+function instrumentPanel(): ReturnType<typeof within> {
+  return within(screen.getByRole("region", { name: "INSTRUMENT 1" }));
+}
+
+describe("an instrument's reasons for ATMOSPHERE: APPROXIMATE (R08.T10.d)", () => {
+  const note = "ATMOSPHERE: APPROXIMATE";
+  const water = "H2O: its absorption estimated, not measured, for TEST GIANT";
+  const thick = "A thick atmosphere drawn by the thin-atmosphere method, for TEST GIANT";
+
+  it("shows ATMOSPHERE: APPROXIMATE straight above a reason the primary lacks, though the primary shows the note", () => {
+    renderInstrument([water, thick], [note, { text: water, standing: "sentence" }]);
+    const panel = instrumentPanel();
+    expect(panel.getByText(statusLine(note)).nextElementSibling).toBe(panel.getByText(thick));
+  });
+
+  it("drops a reason the primary shows already", () => {
+    renderInstrument([water, thick], [note, { text: water, standing: "sentence" }]);
+    expect(instrumentPanel().queryByText(water)).toBeNull();
+  });
+
+  it("shows neither the note nor a reason where all its reasons are the primary's", () => {
+    renderInstrument([water], [note, { text: water, standing: "sentence" }]);
+    const panel = instrumentPanel();
+    expect([panel.queryByText(statusLine(note)), panel.queryByText(water)]).toEqual([null, null]);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import registry from "../../../../../../../../packages/protocol/fixtures/substances.json" with { type: "json" };
 import { inlinePart, type ToyCell, toyPart, toySidecar } from "../../../test/kDistributionFixtures";
 import {
   broadeningFactor,
@@ -64,6 +65,51 @@ function toyTable(
 
 /** The 16-bit step's largest relative error in σ for the toy cell's range. */
 const STEP_RELATIVE = 2e-4;
+
+/**
+ * The registry's molecules with a permanent dipole of at least H₂S's (R08.T10.d): R08.T10.c's five,
+ * then the seven `decision-r08-approximate-plate.md` §6 adds.
+ */
+const DIPOLAR_GASES = [
+  "H2O",
+  "NH3",
+  "SO2",
+  "H2S",
+  "HCN",
+  "HCl",
+  "CH3OH",
+  "SiO",
+  "H2SO4",
+  "TiO",
+  "VO",
+  "FeH",
+] as const;
+
+/** The registry's other molecules, each under H₂S's dipole (the science check of R08.T10.d). */
+const NON_DIPOLAR_MOLECULES = [
+  "H2",
+  "CH4",
+  "N2",
+  "O2",
+  "CO2",
+  "N2O",
+  "CO",
+  "O3",
+  "C2H2",
+  "C2H4",
+  "C2H6",
+  "PH3",
+  "S8",
+] as const;
+
+/** A mixture of H₂ and He at a giant's 85 : 15 with a species at its own mole fraction. */
+function giantMixture(species: string, ownFraction: number): ReadonlyMap<string, number> {
+  return new Map([
+    ["H2", 0.85 * (1 - ownFraction)],
+    ["He", 0.15 * (1 - ownFraction)],
+    [species, ownFraction],
+  ]);
+}
 
 describe("a k-distribution table", () => {
   it("joins its parts into one table, its cells in order", () => {
@@ -246,8 +292,9 @@ describe("the broadening factor", () => {
     ]);
   });
 
-  it("is estimated on a gas with a permanent dipole it holds no width for, at any share, ε left 0", () => {
-    const found = [...DIPOLAR_BROADENERS].map((gas) => {
+  it("is estimated on a gas with a permanent dipole of at least H₂S's it holds no width for, at a part per billion, ε left 0", () => {
+    // The five of R08.T10.c, then the seven R08.T10.d adds.
+    const found = [...DIPOLAR_GASES].map((gas) => {
       const { estimated, widthlessShare } = broadeningFactor(
         table,
         new Map([
@@ -258,12 +305,37 @@ describe("the broadening factor", () => {
       );
       return [gas, estimated, widthlessShare];
     });
-    expect(found).toEqual([
-      ["H2O", true, 0],
-      ["NH3", true, 0],
-      ["SO2", true, 0],
-      ["HCN", true, 0],
-      ["H2S", true, 0],
+    expect(found).toEqual(DIPOLAR_GASES.map((gas) => [gas, true, 0]));
+  });
+
+  it("takes a gas under H₂S's dipole that it holds no width for into ε, not estimated", () => {
+    // CO, whose dipole is about a ninth of H₂S's.
+    const { estimated, widthlessShare } = broadeningFactor(
+      table,
+      new Map([
+        ["N2", 1],
+        ["CO", 1e-9],
+      ]),
+      296,
+    );
+    // ε = x ÷ Σ x r, the mole fractions normalised: CO at 10⁻⁹ in N₂.
+    expect([estimated, widthlessShare]).toEqual([false, expect.closeTo(1e-9 / (1 + 1e-9), 20)]);
+  });
+
+  it("leaves a table with a self width as it was: its own share takes r_self, outside ε", () => {
+    // A dipolar species, SO₂, with its own width on file, at an even share with N₂.
+    const found = broadeningFactor(
+      toyTable({ species: "SO2", broadening: { self: 1.6 } }),
+      new Map([
+        ["N2", 0.5],
+        ["SO2", 0.5],
+      ]),
+      296,
+    );
+    expect([found.estimated, found.widthlessShare, found.factor]).toEqual([
+      false,
+      0,
+      expect.closeTo(0.5 * 1.6 + 0.5, 14),
     ]);
   });
 
@@ -562,6 +634,61 @@ describe("the committed k-distributions", () => {
     const species = committedLineSpecies();
     const tables = await loadKDistributions(species, inlinePart);
     expect(tables.map((t) => t.species)).toEqual(species);
+  }, 120_000);
+});
+
+describe("the dipolar broadeners (R08.T10.d)", () => {
+  /** The registry's molecules, by the fixture's `kind`. */
+  const molecules = registry.substances.filter((s) => s.kind === "molecule").map((s) => s.key);
+
+  it("are the twelve molecules of the registry with a dipole of at least H₂S's", () => {
+    expect([...DIPOLAR_BROADENERS]).toEqual(DIPOLAR_GASES);
+  });
+
+  it("hold only the registry's molecules", () => {
+    expect(DIPOLAR_GASES.filter((gas) => !molecules.includes(gas))).toEqual([]);
+  });
+
+  it("leave out only the registry's molecules checked to lie under H₂S's dipole", () => {
+    // A molecule added to the registry fails here until its dipole is checked and it is listed.
+    expect(molecules.filter((key) => !DIPOLAR_BROADENERS.has(key)).toSorted()).toEqual(
+      [...NON_DIPOLAR_MOLECULES].toSorted(),
+    );
+  });
+});
+
+describe("a table with no self width (R08.T10.d)", () => {
+  it("makes NH₃'s lines estimated at any share of its own above 0: its table lists H₂ and He alone", async () => {
+    const [nh3] = await loadKDistributions(["NH3"], inlinePart);
+    if (nh3 === undefined) {
+      throw new Error("NH3's k-distribution is committed");
+    }
+    const at = (x: number): boolean => broadeningFactor(nh3, giantMixture("NH3", x), 150).estimated;
+    expect([[...nh3.broadening.keys()], [1e-9, 1e-4, 0.5, 1].map(at), at(0)]).toEqual([
+      ["H2", "He"],
+      [true, true, true, true],
+      false,
+    ]);
+  }, 120_000);
+
+  it("adds an atom's own share to ε, taken as H₂ and not estimated: Na's table lists no self width", async () => {
+    const [na] = await loadKDistributions(["Na"], inlinePart);
+    if (na === undefined) {
+      throw new Error("Na's k-distribution is committed");
+    }
+    const x = 1e-6;
+    const temperatureK = 1_500;
+    const found = broadeningFactor(na, giantMixture("Na", x), temperatureK);
+    // Σ x r at the temperature, Na's own r 1 (H₂'s, the atoms' tables' reference) and offset 0.
+    const ratioAt = (gas: string): number =>
+      (na.broadening.get(gas) ?? Number.NaN) *
+      (296 / temperatureK) ** (na.broadeningExponents.get(gas) ?? 0);
+    const sum = 0.85 * (1 - x) * ratioAt("H2") + 0.15 * (1 - x) * ratioAt("He") + x;
+    expect([na.broadening.has("self"), found.estimated, found.widthlessShare / (x / sum)]).toEqual([
+      false,
+      false,
+      expect.closeTo(1, 12),
+    ]);
   }, 120_000);
 });
 

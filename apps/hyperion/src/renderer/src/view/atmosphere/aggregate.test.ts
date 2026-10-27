@@ -35,6 +35,12 @@ const SOOT = {
 } as const;
 
 /**
+ * A citation in player text: an author, a year, or an author's equation or condition number, which
+ * no reason on the plate holds (R08.T10.d).
+ */
+const CITATION = /et al\.|Tazaki|Tanaka|\b(?:19|20)\d\d\b|(?:equation|condition) \(/u;
+
+/**
  * The comparison's tolerances, optool's own numerical accuracy as its code states it
  * (`optool_fractal.f90`): its phase function's normalisation and its correlation function's
  * unitary condition are checked to 10⁻³; past qR_g = 26 it takes S(q)'s leading asymptotic term,
@@ -155,7 +161,7 @@ describe("the phase-shift gate (science-r08-mmf.md §1.4)", () => {
     expect(optics.matrix).toBeDefined();
     expect(optics.phaseNote).toContain("analogue");
     expect(optics.phaseNote).toMatch(
-      /^an aggregate of tholin, phase shift \d\.\d\d by Tazaki and Tanaka's equation \(9\) \(aggregate term \d\.\d\d\), past the limit of 1 in their condition \(8\): the modified mean-field table, an analogue$/u,
+      /^an aggregate of tholin, phase shift \d\.\d\d \(the aggregate's own phase shift \d\.\d\d\), past the modified mean-field model's limit of 1: the modified mean-field table, an analogue$/u,
     );
   });
 
@@ -228,7 +234,7 @@ describe("the index-contrast condition, Tazaki and Tanaka 2018's (7) (science-r0
       expect(channel.phaseModel).toBe("mmf");
       expect(channel.matrix).toBeDefined();
       expect(channel.phaseNote).toMatch(
-        /^an aggregate of Fe, index contrast \|m − 1\| \d\.\d\d, past the limit of 2 in Tazaki and Tanaka's condition \(7\): the modified mean-field table, an analogue$/u,
+        /^an aggregate of Fe, index contrast \|m − 1\| \d\.\d\d, past the modified mean-field model's limit of 2: the modified mean-field table, an analogue$/u,
       );
     }
     expect(phaseLabels([{ material: "Fe", optics, opticalDepthAbove550: 0 }])).not.toEqual([]);
@@ -241,8 +247,23 @@ describe("the index-contrast condition, Tazaki and Tanaka 2018's (7) (science-r0
     );
     expect(optics.phaseBasis).toBe("fallback");
     expect(optics.phaseNote).toMatch(
-      /^an aggregate of Fe, phase shift \d+\.\d\d by Tazaki and Tanaka's equation \(9\) \(aggregate term \d+\.\d\d\), the aggregate term past the limit of 1; index contrast \|m − 1\| \d\.\d\d, past the limit of 2 in Tazaki and Tanaka's condition \(7\): a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback$/u,
+      /^an aggregate of Fe, phase shift \d+\.\d\d \(the aggregate's own phase shift \d+\.\d\d\), the aggregate's own phase shift past the modified mean-field model's limit of 1; index contrast \|m − 1\| \d\.\d\d, past the modified mean-field model's limit of 2: a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback$/u,
     );
+  });
+
+  it("cites no paper in a reason: no author, year, or equation or condition number (R08.T10.d)", () => {
+    const notes = [
+      aggregateOptics({ material: "tholin", ...TITAN }, 380),
+      aggregateOptics(SMALL_IRON, 550),
+      aggregateOptics(
+        { material: "Fe", monomerRadiusUm: 0.05, monomerCount: 3000, fractalDimension: 2.5 },
+        550,
+      ),
+    ].map((optics) => optics.phaseNote);
+    expect([
+      notes.every((note) => note !== undefined),
+      notes.filter((note) => CITATION.test(note ?? "")),
+    ]).toEqual([true, []]);
   });
 
   it("finds soot and tholin inside (7) at every 5 nm over 380–780 nm", () => {

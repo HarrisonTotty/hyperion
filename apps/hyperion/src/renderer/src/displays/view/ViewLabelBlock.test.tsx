@@ -83,6 +83,28 @@ describe("the view's label block", () => {
     ]).toEqual([["status-text__state"], ["status-text__state", "status-text__sentence"]]);
   });
 
+  it("sets a reason after ATMOSPHERE: APPROXIMATE whole as a sentence, its head untracked (R08.T10.d)", () => {
+    const reason = "H2O–H2O pairs: their absorption estimated, not measured, for KX 4417 /3";
+    render(
+      <ViewLabelBlock
+        lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+        statements={["ATMOSPHERE: APPROXIMATE", { text: reason, standing: "sentence" }]}
+        countLine={null}
+        faults={[]}
+      />,
+    );
+    const line = screen.getByText(reason);
+    expect([
+      partsOf("ATMOSPHERE: APPROXIMATE"),
+      line.className,
+      line.querySelector(".status-text__state"),
+    ]).toEqual([
+      ["status-text__state"],
+      "view-label__statement view-label__statement--sentence",
+      null,
+    ]);
+  });
+
   describe("with a graphics fault and the terrain's (R10.T16.b)", () => {
     it("sets each fault on a fault line of its own, the graphics fault first", () => {
       renderFaults();

@@ -39,9 +39,9 @@
  *
  * **The held χ** (§14), on a drawn line table whose χ is held at the temperature, and **CO₂'s
  * fixed-g mix** (§§16–17), on one with a mix record, are separate tests ({@link HeldChiVerdict},
- * {@link FixedGMixVerdict}), as is **the trace broadeners' effect bound** (R08.T10.c;
+ * {@link FixedGMixVerdict}), as is **the widthless gases' effect bound** (R08.T10.c;
  * `decision-r08-approximate-plate.md`, item 1a), on measured lines broadened in part by a gas their
- * table holds no width for ({@link BroadenerVerdict}).
+ * table holds no width for, at any share ({@link BroadenerVerdict}).
  *
  * Pure and synchronous: the optics worker calls it once a body.
  */
@@ -239,29 +239,32 @@ export interface FixedGMixVerdict {
 }
 
 /**
- * The trace broadeners' effect bound (R08.T10.c; `decision-r08-approximate-plate.md`, item 1a,
+ * The widthless gases' effect bound (R08.T10.c; `decision-r08-approximate-plate.md`, item 1a,
  * 2026-10-27), on a drawn line table whose lines are otherwise measured at the body and whose
- * broadening pressure rests in part on gases the table holds no width for, each taken as air
- * (`absorbers.ts`'s `SpeciesLines.widthlessShare`, ε). The lines' strengths and air widths are
- * measured: only the broadening pressure is uncertain, by those gases' terms.
+ * broadening pressure rests in part on gases the table holds no width for, each taken as air at
+ * any share, the species itself among them where the table holds no self width
+ * (`absorbers.ts`'s `SpeciesLines.widthlessShare`, ε; R08.T10.d). The lines' strengths and air
+ * widths are measured: only the broadening pressure is uncertain, by those gases' terms.
  *
  * @remarks
  * Each such gas's ratio to air at the profile's temperature is taken to lie in [0, 2]: item 1a's
  * assumption, which borrows the bracket `AIR_TRACE_SHARE`'s doc puts on a continuum partner's
  * efficiency, not a measured range of line widths. The committed molecular tables'
  * intensity-weighted ratios to air for the foreign gases without a dipole they list lie in
- * 0.34–1.58 (HCl's He, CO₂'s H₂); no single line is checked. So the broadening pressure lies within a factor s ∈ [1 − ε, 1 + ε] of the one
- * drawn. A Lorentz or Voigt profile has |∂ln f ÷ ∂ln γ| ≤ 1, γ the Lorentz half-width and the
- * Doppler width held (H₂O's, its value at 25 cm⁻¹ subtracted, reaches 1.02 at its shape's 2.5 cm⁻¹
- * limit), so a cell's transmittance moves by at most ⟨τe^(−τ)⟩ ≤ 1 − T ≤ min(1, ⟨σ⟩u) per unit of
- * ln s, and by at most min(1, ⟨σ⟩u) whatever s is, since it lies in [1 − that, 1] at every width.
+ * 0.34–1.58 (HCl's He, CO₂'s H₂); no single line is checked. So the broadening pressure lies
+ * within a factor s ∈ [1 − ε, 1 + ε] of the one drawn. A Lorentz or Voigt profile has
+ * |∂ln f ÷ ∂ln γ| ≤ 1, γ the Lorentz half-width and the Doppler width held (H₂O's, its value at
+ * 25 cm⁻¹ subtracted, reaches 1.02 at its shape's 2.5 cm⁻¹ limit), so a cell's transmittance moves
+ * by at most ⟨τe^(−τ)⟩ ≤ 1 − T ≤ min(1, ⟨σ⟩u) per unit of ln s, and by at most min(1, ⟨σ⟩u)
+ * whatever s is, since it lies in [1 − that, 1] at every width.
  *
  * Hence Δ_c,γ = min(1, −ln(1 − ε)) Δ_c(k = 1), the exact form of the ruling's ε Δ_c(k = 1), which
  * is its first-order term (accepted on the issue, 2026-10-27), Δ_c(k = 1) the lines' own bound at
- * k = 1 on the chord, cells and suns their `absorption` test takes. Both steps take a cell's ⟨σ⟩ as
- * the same at every width to 1 + ε times the broadening pressure; the cell means are read over the
- * stored rows to the body's largest, with the first past it (R08.T10.c's deferred findings). A gas
- * with a permanent dipole that the ruling names takes no such range (`kDistribution.ts`'s
+ * k = 1 on the chord, cells and suns their `absorption` test takes. Both steps take a cell's ⟨σ⟩ at
+ * every width the gases allow, to 1 + ε times the body's largest broadening pressure, so the cell
+ * means are the largest over the stored rows to the first at or past that pressure
+ * (`decision-r08-approximate-plate.md` §6, item 2, 2026-10-27; R08.T10.d), which makes the cap
+ * exact at the stored rows. A gas with a permanent dipole of at least H₂S's takes no such range (`kDistribution.ts`'s
  * `DIPOLAR_BROADENERS`), and keeps the species `estimated`.
  */
 export interface BroadenerVerdict {
@@ -273,7 +276,12 @@ export interface BroadenerVerdict {
   readonly widthFactor: number;
   readonly amount: AbsorberAmount;
   readonly temperatureK: number;
-  /** Δ_c(k = 1) for each sun, per channel: the lines' own bound, their data taken as measured. */
+  /**
+   * Δ_c(k = 1) for each sun, per channel: the lines' own bound, their data taken as measured, on
+   * their cell means read to (1 + ε) times the body's largest broadening pressure, the widest the
+   * gases allow (R08.T10.d), where the `absorption` and held-χ tests read them to that pressure
+   * itself.
+   */
   readonly lineChanges: ReadonlyArray<Rgb>;
   /** Δ_c,γ = {@link BroadenerVerdict.widthFactor} × Δ_c(k = 1) for each sun, per channel. */
   readonly changes: ReadonlyArray<Rgb>;
@@ -685,13 +693,18 @@ function gridCellMeans(
 
 /**
  * A line species' cell means at its temperature, m²: each cell's Σ_g w_g σ_g, the largest over the
- * table's pressure rows up to the first at or past the body's largest broadening pressure, so that
- * no path's read exceeds it.
+ * table's pressure rows up to the first at or past `reachPa`, or over every row where none reaches
+ * it, so that no path's read at a stored row exceeds it (a read between rows is a 4-point Lagrange
+ * cubic, which may overshoot them a little).
+ *
+ * @param reachPa - The pressure the means must cover, Pa: the body's largest broadening pressure
+ *   for the `absorption` and held-χ tests, and (1 + ε) times it for the broadener's, the
+ *   widest a gas with no width on file allows (R08.T10.d).
  */
-function lineCellMeans(kd: SpeciesKDistribution, largestBroadeningPa: number): Float64Array {
+function lineCellMeans(kd: SpeciesKDistribution, reachPa: number): Float64Array {
   const out = new Float64Array(PENDING_CELL_COUNT);
   const pressures = kd.pressuresPa.length;
-  const reach = kd.pressuresPa.findIndex((p) => p >= largestBroadeningPa);
+  const reach = kd.pressuresPa.findIndex((p) => p >= reachPa);
   const lastRow = reach < 0 ? pressures - 1 : reach;
   for (const cell of kd.cells) {
     const g = cell.weights.length;
@@ -884,12 +897,14 @@ export function negligibleAbsorbers(
             });
           }
           if (rule === "measured" && lines.widthlessShare > 0) {
+            // The widest the gases allow, so that the cap holds at any width.
+            const widestPa = (1 + lines.widthlessShare) * largestBroadeningPa;
             extra.push({
               order: order + 0.3,
               verdict: broadenerVerdict(
                 s.species,
                 lines.widthlessShare,
-                cellMeans,
+                lineCellMeans(lines.kDistribution, widestPa),
                 amount,
                 weights,
                 {

@@ -501,7 +501,20 @@ describe("the label", () => {
     const reasons = phaseApproximations([
       { material: "tholin", optics: titan, opticalDepthAbove550: 0 },
     ]);
-    expect(reasons[0]?.reason).toContain(`at ${CHANNEL_WAVELENGTHS_NM[2]} nm`);
+    expect(reasons[0]?.reason).toContain(`(at ${Math.round(CHANNEL_WAVELENGTHS_NM[2])} nm)`);
+  });
+
+  it("gives a fitted channel's wavelength in whole nm: 433.625 nm reads 434 nm (R08.T10.d)", () => {
+    const bare: ModeOptics = {
+      ...dust(),
+      wavelengthNm: 433.625,
+      phaseBasis: "fallback",
+      phaseNote: undefined,
+    };
+    expect(
+      phaseApproximations([{ material: "mars_dust", optics: [bare], opticalDepthAbove550: 0 }])[0]
+        ?.reason,
+    ).toBe("Mars-type dust: a fallback phase (at 434 nm)");
   });
 
   it("names the substance and its basis in words where a mode states no note", () => {
