@@ -1244,7 +1244,8 @@ impl CoarseInputs {
         &self.gases
     }
 
-    /// The surface state (P14.T13.c), never a gas envelope: such a body has no surface to build.
+    /// The surface state (P14.T13.c), never a gas envelope or, from generator version 25, a steam
+    /// envelope (P14.T53.b part 3): such a body has no surface to build.
     #[must_use]
     pub const fn surface_state(&self) -> SurfaceState {
         self.surface_state
@@ -1779,7 +1780,8 @@ fn surface_pressure_of(state: SurfaceState, pressure: Pascals) -> Pascals {
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
         | SurfaceState::Snowball
-        | SurfaceState::Tenuous => pressure,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => pressure,
     }
 }
 
@@ -1797,7 +1799,8 @@ pub enum BuildCoarseInputsError {
     },
     /// The figure's radii are not finite with 0 < c ≤ a.
     Figure(Spheroid),
-    /// The surface state is a gas envelope: the body has no solid surface.
+    /// The surface state is a gas envelope or, from generator version 25, a steam envelope
+    /// (P14.T53.b part 3): the body has no solid surface it shows.
     NoSolidSurface,
     /// The palette has no entry for a substance the inputs name where it lies: an ice, a liquid,
     /// a condensate on the ground as one, or a lithology of the crust or its bulk material.
@@ -1893,7 +1896,7 @@ impl fmt::Display for BuildCoarseInputsError {
                 "figure a = {} m, c = {} m is not a spheroid with 0 < c ≤ a",
                 s.equatorial_radius_m, s.polar_radius_m
             ),
-            Self::NoSolidSurface => f.write_str("a gas envelope has no solid surface"),
+            Self::NoSolidSurface => f.write_str("a gas or steam envelope has no solid surface"),
             Self::NotInPalette {
                 part,
                 substance,
@@ -2417,8 +2420,8 @@ impl CoarseInputsBuilder {
     /// [`BuildCoarseInputsError::Missing`] for a required value not given, the cold-trap inputs
     /// among them where a cold-trapped share is above zero, and otherwise the first rule broken,
     /// as each value's setter states it: a value out of range or not finite, a figure that is not
-    /// a spheroid, a gas-envelope surface, a substance named twice, shares above the whole, a
-    /// cold-trapped share above its ice's or of a substance with no ice share
+    /// a spheroid, a gas-envelope or steam-envelope surface, a substance named twice, shares above
+    /// the whole, a cold-trapped share above its ice's or of a substance with no ice share
     /// ([`BuildCoarseInputsError::ColdTrapExceedsIce`]) or with no cold-trap threshold
     /// ([`BuildCoarseInputsError::ColdTrapWithoutThreshold`]), cold-trap inputs out of range,
     /// too many condensates, a wet epoch that ends before it starts, the provinces' surface age
@@ -2475,7 +2478,10 @@ impl CoarseInputsBuilder {
         check_non_negative("surface pressure", surface_pressure.value())?;
         let gases = gas_shares(self.gases)?;
         let surface_state = required(self.surface_state, "surface state")?;
-        if surface_state == SurfaceState::GasEnvelope {
+        if matches!(
+            surface_state,
+            SurfaceState::GasEnvelope | SurfaceState::SteamEnvelope
+        ) {
             return Err(BuildCoarseInputsError::NoSolidSurface);
         }
         let surface_material = required(self.surface_material, "surface material")?;
@@ -2974,10 +2980,12 @@ pub(crate) mod tests {
             refused(earth_builder().figure(inverted)),
             BuildCoarseInputsError::Figure(inverted)
         );
-        assert_eq!(
-            refused(earth_builder().surface(SurfaceState::GasEnvelope, SurfaceMaterial::Rock)),
-            BuildCoarseInputsError::NoSolidSurface
-        );
+        for envelope in [SurfaceState::GasEnvelope, SurfaceState::SteamEnvelope] {
+            assert_eq!(
+                refused(earth_builder().surface(envelope, SurfaceMaterial::Rock)),
+                BuildCoarseInputsError::NoSolidSurface
+            );
+        }
         assert!(matches!(
             refused(earth_builder().tectonics(TectonicRegime::MobileLid, 1.2)),
             BuildCoarseInputsError::OutOfRange {

@@ -174,7 +174,11 @@ pub(crate) fn record_aerosols(
         AirRules::Held => Modelled::NotModelled,
         AirRules::Batch => {
             match surface.state {
-                SurfaceState::Tenuous => return Modelled::NotModelled,
+                // A steam envelope's air is its envelope section's, whose surface never holds it
+                // (P14.T53.b part 3).
+                SurfaceState::Tenuous | SurfaceState::SteamEnvelope => {
+                    return Modelled::NotModelled;
+                }
                 SurfaceState::MagmaOcean if !surface.conditions.gases().is_empty() => {
                     return Modelled::NotModelled;
                 }

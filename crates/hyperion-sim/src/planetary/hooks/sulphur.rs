@@ -325,8 +325,14 @@ impl SulphurCycle {
     #[must_use]
     pub const fn case_of(state: SurfaceState, deck: RunawayDeck) -> Self {
         match (state, deck) {
-            (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) => Self::Cycling,
-            (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless)
+            // A steam envelope takes a runaway's case by its deck (P14.T53.b part 3).
+            (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Kept) => {
+                Self::Cycling
+            }
+            (
+                SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope,
+                RunawayDeck::Deckless,
+            )
             | (SurfaceState::Temperate | SurfaceState::Snowball, _) => Self::OnceThrough,
             (
                 SurfaceState::Airless

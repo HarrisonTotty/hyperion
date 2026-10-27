@@ -1120,8 +1120,9 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
 ///
 /// # Panics
 ///
-/// For [`SurfaceState::GasEnvelope`], which a record's surface never holds: [`Surface`] refuses it,
-/// since a gas-envelope body's surface section is not applicable (decision-p14-t35e-wire §2).
+/// For [`SurfaceState::GasEnvelope`] and [`SurfaceState::SteamEnvelope`], which a record's surface
+/// never holds: [`Surface`] refuses them, since an envelope body's surface section is not applicable
+/// (decision-p14-t35e-wire §2; P14.T53.b part 3).
 #[must_use]
 fn surface_state(state: SurfaceState) -> SurfaceStateDto {
     match state {
@@ -1133,6 +1134,9 @@ fn surface_state(state: SurfaceState) -> SurfaceStateDto {
         SurfaceState::Tenuous => SurfaceStateDto::Tenuous,
         SurfaceState::GasEnvelope => {
             unreachable!("a record's surface is never in the gas-envelope state")
+        }
+        SurfaceState::SteamEnvelope => {
+            unreachable!("a record's surface is never in the steam-envelope state")
         }
     }
 }

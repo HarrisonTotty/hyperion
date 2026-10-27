@@ -826,7 +826,9 @@ fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
             | PlanetClass::IceGiant => PhaseTemplate::Neptune,
         },
         SurfaceState::MagmaOcean if thin => PhaseTemplate::Magma,
-        SurfaceState::RunawayGreenhouse if inputs.runaway_deck == RunawayDeck::Deckless => {
+        SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope
+            if inputs.runaway_deck == RunawayDeck::Deckless =>
+        {
             if thin {
                 PhaseTemplate::Mars
             } else {
@@ -834,8 +836,11 @@ fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
             }
         }
         // A runaway greenhouse under its deck, and a magma ocean under a thick atmosphere
-        // (unlabelled: it has no analogue either).
-        SurfaceState::RunawayGreenhouse | SurfaceState::MagmaOcean => PhaseTemplate::Venus,
+        // (unlabelled: it has no analogue either); a steam envelope takes a runaway's photometry
+        // (P14.T53.b part 3).
+        SurfaceState::RunawayGreenhouse
+        | SurfaceState::MagmaOcean
+        | SurfaceState::SteamEnvelope => PhaseTemplate::Venus,
         SurfaceState::Snowball => PhaseTemplate::Snowball,
         // A tenuous air hides nothing of its ground (P14.T53.c).
         SurfaceState::Airless | SurfaceState::Tenuous => match inputs.material {

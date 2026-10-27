@@ -41,7 +41,11 @@
 //!   constants are P14.T57.a's, fitted at Venus's and then Earth's measured states
 //!   ([`GREENHOUSE_CARBON_DIOXIDE`], [`GREENHOUSE_WATER`]). Version 22's rules, each condensable
 //!   at its saturation pressure under P14.T13.c's constants, went with the `p14-snapshot` lane's
-//!   hold (P14.T54.a).
+//!   hold (P14.T54.a). From generator version 25 (P14.T53.b part 3, behind its own hold) the
+//!   partition caps each condensable above its critical temperature at its critical isochore, the
+//!   rest a liquid-like supercritical reservoir; a runaway keeps the water its escape could not
+//!   remove as steam; and a water reservoir that hides the surface labels the published solve
+//!   [`SurfaceState::SteamEnvelope`] ([`Atmosphere::published_state`]).
 //! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line that lies
 //!   beyond the maximum-greenhouse limit carries its carbon as methane, held where a reservoir lies
 //!   on its surface at [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure; a runaway world
@@ -72,9 +76,13 @@ pub(crate) use escaping::{
     THERMOSTAT_SET_POINT, Thermostat, ThermostatCounts, WaterPhase, water_phase,
     with_resolve_check, with_thermostat,
 };
-pub(crate) use supercritical::has_surface_section;
 #[cfg(test)]
-pub(crate) use supercritical::{SupercriticalReservoir, supercritical_section_in_force};
+pub(crate) use supercritical::{
+    SteamEnvelopeRules, supercritical_section_in_force, with_steam_envelope,
+};
+pub(crate) use supercritical::{
+    SupercriticalReservoir, has_surface_section, steam_envelope_in_force,
+};
 #[cfg(test)]
 pub(crate) use surface_mix::floor_read;
 #[cfg(test)]
@@ -91,8 +99,8 @@ use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::escape::{EnvelopeHelium, EscapeOutcome, EscapeRules};
 use crate::planetary::chem::partition::{
-    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory, Ground, dominance,
-    exits_taken,
+    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory, CriticalColumn,
+    Ground, dominance, exits_taken,
 };
 use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::chem::tenuous::{TenuousRules, ice_held_loss, ice_temperature};
@@ -1739,7 +1747,9 @@ pub const TEMPERATE_AIRBORNE_CARBON: f64 = 6.0e-6;
 /// solid's, and the same 0.5 is extrapolated over it (the lane's, provisional), which keeps the
 /// gases continuous there. Titan's figure was measured far from its seas; the humidity does not
 /// vary with the surface's liquid coverage, which decides only whether a reservoir exists (the
-/// lane's, provisional).
+/// lane's, provisional). From P14.T53.b part 3 the same 0.5 scales the partition's cap above
+/// methane's 190.564 K critical point too, its critical isochore, where the fluid has no interface
+/// and no measurement gives a humidity (the lane's, provisional).
 pub const METHANE_RELATIVE_HUMIDITY: f64 = 0.5;
 
 /// The share of the absorbed X-ray and ultraviolet energy that drives hydrogen out of a runaway
@@ -2093,6 +2103,26 @@ pub enum SurfaceState {
     /// cover and lid are `Airless`'s, and its climate's column holds no air below 100 Pa, as the
     /// greenhouse's steps read it; only its published pressure and gases are its air's.
     Tenuous,
+    /// Water above its critical point, 647.096 K and 22.064 MPa (IAPWS-95, Wagner and Pruß 2002,
+    /// J. Phys. Chem. Ref. Data 31, 387, as the registry's water row takes it), with no
+    /// interface, whose liquid-like reservoir above its critical isochore holds at least
+    /// [`THIN_ENVELOPE_FRACTION`] of the body's mass and hides its surface: a steam envelope, as a
+    /// steam world's radius is its steam's (Turbet et al. 2020, A&A 638, A41), over rock or a magma
+    /// ocean (P14.T53.b part 3; decision-bump-plan-after-22 R1.1).
+    ///
+    /// Produced from generator version 25 alone, behind part 3's hold and on the escape's batch
+    /// path, as a label on the published solve, whatever the climate's division, which its water
+    /// follows ([`Atmosphere::water_state`]): [`Atmosphere::published_state`] gives it, and
+    /// [`Atmosphere::state`] never does, so that every figure of the body is the labelled solve's
+    /// to the bit and no pass reads it (decision-p14-t53b-part3 §5). Every branch of the state
+    /// groups it with [`RunawayGreenhouse`](Self::RunawayGreenhouse) and its deck, its photometry
+    /// a runaway's (Venus's deck, 0.76, near Pluriel, Marcq and Turbet 2019's ~0.80 under full
+    /// cloud to some 1,300 K and 0.75 at 1,500 K, for 200 bar of H₂O and 100 bar of CO₂), and
+    /// refuses it where a gas envelope is refused. Its record
+    /// has no surface section: its envelope's applies, not modelled until P14.T53.f, and the
+    /// record's surface never holds this state. Its figure's datum is the liquid-like fluid's top.
+    /// Another condensable's supercritical envelope keeps its state.
+    SteamEnvelope,
 }
 
 /// Whether a published [`SurfaceState::RunawayGreenhouse`] keeps Venus's sulphuric acid deck
@@ -2155,7 +2185,10 @@ impl SurfaceState {
     /// - airless rock 0.11, the Moon's Bond albedo (NASA's fact sheet), and airless ice 0.35, the
     ///   lane's for a Galilean moon's dirty ice, below Ganymede's geometric albedo of 0.43; a
     ///   tenuous air's bare surface the same (P14.T53.c);
-    /// - a runaway greenhouse 0.76, Venus's (Haus et al. 2016, Icarus 272, 178);
+    /// - a runaway greenhouse 0.76, Venus's (Haus et al. 2016, Icarus 272, 178), and a steam
+    ///   envelope the same (P14.T53.b part 3; for 200 bar of H₂O and 100 bar of CO₂ about a
+    ///   Sun-like host about 0.80 under full cloud to some 1,300 K, 0.75 at 1,500 K, and about
+    ///   0.25–0.26 cloudless: Pluriel, Marcq and Turbet 2019, Icarus 317, 583, Fig. 4);
     /// - temperate 0.294, Earth's (NASA's Earth fact sheet, since its update of 11 January 2024;
     ///   CERES's EBAF Ed4.0 gives 0.2915, Loeb et al. 2018, J. Climate 31, 895);
     /// - a snowball 0.50, between bare ice's 0.6 (Pierrehumbert et al. 2011) and Titan's hazy 0.27.
@@ -2168,19 +2201,19 @@ impl SurfaceState {
                 SurfaceMaterial::Rock => 0.11,
                 SurfaceMaterial::Ice => 0.35,
             },
-            Self::RunawayGreenhouse => 0.76,
+            Self::RunawayGreenhouse | Self::SteamEnvelope => 0.76,
             Self::Temperate => 0.294,
             Self::Snowball => 0.50,
         })
     }
 
-    /// The share of the disc covered by cloud (the lane's table, provisional): a gas envelope's
-    /// and a runaway greenhouse's whole disc, Earth's 0.67 for a temperate world (King et al.
-    /// 2013, IEEE TGRS 51, 3826), and none for the rest.
+    /// The share of the disc covered by cloud (the lane's table, provisional): a gas envelope's,
+    /// a runaway greenhouse's and a steam envelope's whole disc, Earth's 0.67 for a temperate world
+    /// (King et al. 2013, IEEE TGRS 51, 3826), and none for the rest.
     #[must_use]
     pub const fn cloud_fraction(self) -> f64 {
         match self {
-            Self::GasEnvelope | Self::RunawayGreenhouse => 1.0,
+            Self::GasEnvelope | Self::RunawayGreenhouse | Self::SteamEnvelope => 1.0,
             Self::Temperate => 0.67,
             Self::MagmaOcean | Self::Airless | Self::Snowball | Self::Tenuous => 0.0,
         }
@@ -2388,6 +2421,18 @@ pub struct Atmosphere {
     column: PartialPressures,
     escape: Option<EscapeOutcome>,
     ceiling: GreenhouseCeiling,
+    /// Its partition's supercritical reservoir with the most liquid-like fluid, at its solve's last
+    /// climate (P14.T53.b part 3; [`supercritical_reservoir`](Self::supercritical_reservoir)):
+    /// `None` under its hold, to generator version 23, and where none lies above its critical
+    /// point.
+    supercritical: Option<CriticalColumn>,
+    /// The water a past-only runaway keeps beyond its escape's capacity, which its present class
+    /// holds (P14.T53.b part 3; [`surface_water_inventory`](Self::surface_water_inventory)):
+    /// `None` for every other body, and under part 3's hold.
+    kept_water: Option<Kilograms>,
+    /// Whether its published solve is labelled a steam envelope (P14.T53.b part 3;
+    /// [`published_state`](Self::published_state)), a label no figure reads.
+    steam_envelope: bool,
 }
 
 impl Atmosphere {
@@ -2424,10 +2469,31 @@ impl Atmosphere {
     /// From generator version 24 its runaway arm is the present insolation's (P14.T53.b part 1
     /// (a)), and a body's passes publish a dry hothouse between the limits as a runaway (part 1
     /// (c)); the water the body holds follows its [`water_state`](Self::water_state), the
-    /// division's.
+    /// division's. It is never [`SurfaceState::SteamEnvelope`], which labels a solve for its
+    /// sections alone ([`published_state`](Self::published_state)), so that no branch of the
+    /// state reads that label (P14.T53.b part 3).
     #[must_use]
     pub const fn state(&self) -> SurfaceState {
         self.state
+    }
+
+    /// The state the body's record publishes (P14.T53.b part 3): [`SurfaceState::SteamEnvelope`]
+    /// where water above its critical point holds a liquid-like reservoir of at least
+    /// [`THIN_ENVELOPE_FRACTION`] of the body's mass under the derivation's gravity, which hides
+    /// its surface (from generator version 25), and [`state`](Self::state) otherwise.
+    ///
+    /// The steam envelope is a label on the published solve, whatever the climate's division:
+    /// every figure of the body (its temperature, albedo, pressure, condensates, deck and
+    /// template) is the labelled solve's to the bit, since no branch of the state and no pass reads
+    /// it (decision-p14-t53b-part3 §5). The record's sections read it: such a body has its
+    /// envelope's section, not modelled at 25, and no surface's.
+    #[must_use]
+    pub const fn published_state(&self) -> SurfaceState {
+        if self.steam_envelope {
+            SurfaceState::SteamEnvelope
+        } else {
+            self.state
+        }
     }
 
     /// The state its water follows (P14.T53.b part 1 (a)): the state of the climate's division,
@@ -2523,6 +2589,26 @@ impl Atmosphere {
     #[must_use]
     pub const fn water_state(&self) -> SurfaceState {
         self.water_state
+    }
+
+    /// The water its surface can hold, kg, where its body's volatile inventory holds `inventory`
+    /// (P14.T13.a's water, which the cover reads; P14.T53.b part 3).
+    ///
+    /// It is `inventory` but for a world inside the runaway limit at its hosts' largest past
+    /// luminosity alone that keeps water beyond its escape's capacity (from generator version
+    /// 25): its present class holds what it kept, its ice crust's and its steam's, and what it lost
+    /// to space is not on its surface ([`water_state`](Self::water_state) reads that class).
+    #[must_use]
+    pub(crate) fn surface_water_inventory(&self, inventory: Kilograms) -> Kilograms {
+        self.kept_water.unwrap_or(inventory)
+    }
+
+    /// The water a past-only runaway kept beyond its escape's capacity, which its present class
+    /// holds (P14.T53.b part 3), for a census: `None` for every other body.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn kept_water(&self) -> Option<Kilograms> {
+        self.kept_water
     }
 
     /// Whether a runaway keeps Venus's sulphuric acid deck (P14.T53.b part 1 (b),
@@ -3148,6 +3234,10 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 /// full count's to the bit. A column with nothing that condenses ([`ColumnInventory::condenses`])
 /// is partitioned the same over every climate, so its steps read none, and the mean's isothermal
 /// span stands in.
+///
+/// With them it gives the last step's supercritical reservoir with the most liquid-like fluid
+/// (P14.T53.b part 3, [`AirborneWeights::supercritical_column`]), over that step's climate: `None`
+/// under the version 23 rules and where none lies above its critical point.
 #[must_use]
 fn partitioned_greenhouse(
     inventory: &ColumnInventory,
@@ -3156,7 +3246,7 @@ fn partitioned_greenhouse(
     climate: &ClimateOf<'_>,
     ground: (&Ground, GreenhouseCeiling),
     steps: u32,
-) -> (f64, PartialPressures, f64) {
+) -> (f64, PartialPressures, f64, Option<CriticalColumn>) {
     #[cfg(test)]
     if let Some(checked) = crate::planetary::chem::partition::checked_exits(
         crate::planetary::chem::partition::ExitsChecked::Greenhouse,
@@ -3177,7 +3267,7 @@ fn greenhouse_steps(
     climate: &ClimateOf<'_>,
     (ground, ceiling): (&Ground, GreenhouseCeiling),
     steps: u32,
-) -> (f64, PartialPressures, f64) {
+) -> (f64, PartialPressures, f64, Option<CriticalColumn>) {
     let constants = GreenhouseConstants::in_force();
     let exits = exits_taken();
     let reads_climate = !exits || inventory.condenses();
@@ -3209,7 +3299,8 @@ fn greenhouse_steps(
         t = next_t;
         partials = next;
         if settled && exits {
-            return (t, partials, tau);
+            let reservoir = weights.supercritical_column(&span, inventory);
+            return (t, partials, tau, reservoir);
         }
     }
     #[cfg(test)]
@@ -3220,7 +3311,8 @@ fn greenhouse_steps(
     let span = span_at(t, &partials);
     partials = partitioned_partials(inventory, &span, ground, &mut weights);
     let tau = constants.optical_depth(&partials, base, ground.gravity());
-    (t, partials, tau)
+    let reservoir = weights.supercritical_column(&span, inventory);
+    (t, partials, tau, reservoir)
 }
 
 /// Whether the partial pressures `a` and `b` are the same, bit for bit.
@@ -3231,16 +3323,45 @@ fn same_partials(a: &PartialPressures, b: &PartialPressures) -> bool {
         .all(|(x, y)| x.value().total_cmp(&y.value()).is_eq())
 }
 
-/// Asserts that the greenhouses `taken` and `oracle`, each a temperature, partial pressures and
-/// an optical depth, are the same, bit for bit.
+/// A greenhouse's temperature, partial pressures, optical depth and supercritical reservoir
+/// ([`partitioned_greenhouse`]).
 #[cfg(test)]
-fn same_greenhouse(taken: &(f64, PartialPressures, f64), oracle: &(f64, PartialPressures, f64)) {
+type Greenhouse = (f64, PartialPressures, f64, Option<CriticalColumn>);
+
+/// Asserts that the greenhouses `taken` and `oracle`, each a temperature, partial pressures, an
+/// optical depth and a supercritical reservoir, are the same, bit for bit.
+#[cfg(test)]
+fn same_greenhouse(taken: &Greenhouse, oracle: &Greenhouse) {
     use hyperion_testkit::float::assert_same_bits;
     assert_same_bits(taken.0, oracle.0);
     for (a, b) in taken.1.0.iter().zip(&oracle.1.0) {
         assert_same_bits(a.value(), b.value());
     }
     assert_same_bits(taken.2, oracle.2);
+    match (taken.3, oracle.3) {
+        (Some(a), Some(b)) => {
+            assert_eq!(a.substance(), b.substance());
+            let pascals = |c: &CriticalColumn| {
+                [
+                    c.partial_pressure(),
+                    c.isochore_pressure(),
+                    c.surface_pressure(),
+                    c.reservoir(),
+                    c.fluid(),
+                ]
+            };
+            for (x, y) in pascals(&a).iter().zip(&pascals(&b)) {
+                assert_same_bits(x.value(), y.value());
+            }
+            assert_same_bits(a.lies_at().value(), b.lies_at().value());
+            assert_same_bits(a.temperature_ratio(), b.temperature_ratio());
+            match (a.melting_pressure(), b.melting_pressure()) {
+                (Some(x), Some(y)) => assert_same_bits(x.value(), y.value()),
+                (x, y) => assert_eq!(x.is_some(), y.is_some()),
+            }
+        }
+        (a, b) => assert_eq!(a.is_some(), b.is_some(), "{a:?} against {b:?}"),
+    }
 }
 
 /// The climate a pass's greenhouse steps read ([`ClimateOf`]): a climate given, or the body's own
@@ -3262,15 +3383,17 @@ enum StepClimate<'a> {
 
 impl<'a> StepClimate<'a> {
     /// The step climate of the body `inputs` describe over `surface`, its airborne inventory as
-    /// column weights `column`, and for its surface water the state of its climate's division
-    /// (step 3), which no step of its partition moves, and whether it keeps its water against
-    /// escape (decision-p14-t54a-passes §3.1).
+    /// column weights `column`, and for its surface water the state its water follows (step 3's
+    /// division's, or a past-only runaway's present class where it keeps steam, P14.T53.b part 3),
+    /// which no step of its partition moves, whether it keeps its water against escape
+    /// (decision-p14-t54a-passes §3.1), and the water its surface can hold (P14.T13.a's, or what
+    /// that runaway kept).
     #[must_use]
     fn of(
         surface: &PassSurface<'a>,
         inputs: &AtmosphereInputs,
         column: PartialPressures,
-        (state, retained): (SurfaceState, bool),
+        (state, retained, water): (SurfaceState, bool, Kilograms),
     ) -> Self {
         match surface.climate {
             PassClimate::Given(climate_of) => Self::Given(climate_of),
@@ -3291,12 +3414,7 @@ impl<'a> StepClimate<'a> {
                     inventory: column,
                     ceiling: GreenhouseCeiling::of(inputs),
                 },
-                water: WaterGate::new(
-                    state,
-                    retained,
-                    inputs.inventory.water(),
-                    spun.record.bulk(),
-                ),
+                water: WaterGate::new(state, retained, water, spun.record.bulk()),
                 context: &spun.context,
             },
         }
@@ -3635,6 +3753,9 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
         column: PartialPressures::default(),
         escape: None,
         ceiling: GreenhouseCeiling::None,
+        supercritical: None,
+        kept_water: None,
+        steam_envelope: false,
     };
     if inputs.envelope_fraction >= THIN_ENVELOPE_FRACTION {
         let state = SurfaceState::GasEnvelope;
@@ -3677,9 +3798,14 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
     };
     let column = airborne.column_weights(weight);
     let retained = retention.retains_against_escape(ice_held, Gas::Water);
-    let step = StepClimate::of(surface, inputs, column, (climate, retained));
+    let step = StepClimate::of(
+        surface,
+        inputs,
+        column,
+        (climate, retained, inputs.inventory.water()),
+    );
     let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
-    let (mut t, mut partials, tau) = partitioned_greenhouse(
+    let (mut t, mut partials, tau, _) = partitioned_greenhouse(
         &inventory,
         base,
         &saturate,
@@ -3724,6 +3850,9 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
         column,
         escape: None,
         ceiling: GreenhouseCeiling::None,
+        supercritical: None,
+        kept_water: None,
+        steam_envelope: false,
     }
 }
 

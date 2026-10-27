@@ -36,7 +36,8 @@
 //!
 //! Each closed enum here is a physics class with every variant the plan's drafted tasks name, so
 //! that no later task adds one: a variant no rule produces yet is listed and documented as such
-//! (`steam_envelope`, `heat_pipe`, `episodic`, `ice_shell`; `tenuous` until generator version 24).
+//! (`heat_pipe`, `episodic`, `ice_shell`; `tenuous` until generator version 24), and one no record
+//! sends (`steam_envelope`, whose body has its envelope section).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -44,8 +45,9 @@ use ts_rs::TS;
 use crate::modelled::Modelled;
 use crate::surface::ClimateModelDto;
 
-/// The state of a body's surface (plan 14's `SurfaceState`, P14.T13.c), less the gas envelope,
-/// which has no surface section: its air is the envelope section's.
+/// The state of a body's surface (plan 14's `SurfaceState`, P14.T13.c), less the gas envelope and,
+/// from generator version 25, the steam envelope (P14.T53.b part 3), which have no surface section:
+/// their air is the envelope section's.
 ///
 /// `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
 /// hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
@@ -99,7 +101,11 @@ pub enum SurfaceStateDto {
     /// melting with no ice (P14.T13.c's finding "No maximum-greenhouse ceiling";
     /// decision-p14-t51a-partition §1).
     Snowball,
-    /// A steam envelope over a magma ocean (P14.T53.b): produced by no rule until that task.
+    /// Water above its critical point with no interface, whose liquid-like reservoir hides the
+    /// body's surface: never sent, since such a body has its envelope section (from generator
+    /// version 25, P14.T53.b part 3) and its surface is `not_applicable`, as a gas envelope's is
+    /// (decision-bump-plan-after-22 R1.1). The variant stays so that the class needs no
+    /// `PROTOCOL_VERSION` change.
     SteamEnvelope,
     /// A thin or transient air below 100 Pa whose column reaches the tenuous floor, 10⁻⁴ kg m⁻²
     /// (the column above which the wind's ions do not reach the ground), its gases listed, as
@@ -244,7 +250,8 @@ pub enum SubstancePhaseDto {
     /// A gas: never an aerosol mode's or a condensate's phase.
     Vapour,
     /// At or above both the critical temperature and pressure, with no interface, as Venus's
-    /// carbon dioxide: never an aerosol mode's.
+    /// carbon dioxide, and, from generator version 25, a condensate's reservoir held above its
+    /// critical isochore (P14.T53.b part 3): never an aerosol mode's.
     Supercritical,
 }
 
@@ -761,12 +768,16 @@ pub struct SurfaceCondensateDto {
     /// Its phase where it lies: `solid`, `liquid` or `supercritical`, never `vapour`.
     pub phase: SubstancePhaseDto,
     /// Its condensed mass in this phase over the body's whole surface, kg m⁻²: the list's sort
-    /// key, and its amount where its layer is absent; 0 for a supercritical fluid. On a body whose
-    /// water froze, as `reservoir_gel_m`. Finite and not negative, and always sent.
+    /// key, and its amount where its layer is absent; 0 for a supercritical fluid that is the air at
+    /// the surface, and from generator version 25 a supercritical reservoir's whole, the
+    /// liquid-like fluid above its critical isochore (P14.T53.b part 3). On a body whose water
+    /// froze, as `reservoir_gel_m`. Finite and not negative, and always sent.
     pub reservoir_kg_m2: f64,
     /// Its condensed reservoir as a global equivalent layer, m, not negative: its mass over the
-    /// whole surface over its grain density in its phase at the temperature it lies at, and 0 for a
-    /// supercritical fluid. On a body whose water froze, the whole frozen water the partition
+    /// whole surface over its grain density in its phase at the temperature it lies at; 0 for a
+    /// supercritical fluid that is the air at the surface, and from generator version 25 a
+    /// supercritical reservoir's over its liquid's density at its critical temperature, an upper
+    /// bound (P14.T53.b part 3). On a body whose water froze, the whole frozen water the partition
     /// holds, shell, any ocean under a `Snowball`'s ice and deeper ice included, until P14.T53.c
     /// divides it between the condensate, the crust and the shell (decision-pre-23-review item
     /// 12).
@@ -781,8 +792,10 @@ pub struct SurfaceCondensateDto {
     /// its layer fills (water's alone, the other liquids' together, divided by volume), so none
     /// where its reservoir lies whole as ice; a solid's the climate's cold area below its edge,
     /// at most its mass spread at 1.93 km of its density (but water on an ice-rich crust, which
-    /// is the crust's own ice); 0 for a supercritical fluid, which is the air at the surface and
-    /// the only entry with no mass. Entries may overlap: an ice over a sea, and ices in the same
+    /// is the crust's own ice); from generator version 25 a supercritical reservoir's as a
+    /// liquid's, the share of the basins its layer fills beside the other liquids (P14.T53.b part
+    /// 3); 0 for a supercritical fluid that is the air at the surface, the only entry with no mass.
+    /// Entries may overlap: an ice over a sea, and ices in the same
     /// cold zones (decision-p14-t54a-water-consistency §4, W4–W5).
     pub area_fraction: f64,
     /// The part of `area_fraction` in cold traps (P14.T51.f), in `[0, area_fraction]`. Absent
@@ -1052,8 +1065,8 @@ pub struct BodySurfaceDto {
     /// It is not part of the volatile air that `surface_pressure_pa` and `gases` hold: the
     /// melt's temperature sets it where melt lies, not a volatile inventory's weight over the
     /// globe. It applies where a surface holds melt, a fact on the wire: the state `magma_ocean`
-    /// (and P14.T53.b's `steam_envelope`, where its surface section is the applicable one) and,
-    /// from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
+    /// (P14.T53.b's `steam_envelope` is never a surface's: such a body has its envelope section)
+    /// and, from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
     /// nothing. From P14.T55.b it is `null` on a surface holding no melt, and the vapour over
     /// melt (decision-backlog-2 §2.3).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
@@ -1088,9 +1101,10 @@ pub struct BodyEnvelopeDto {
     /// The condensable whose supercritical fluid the envelope is, by its registry key: `null` for
     /// an H₂/He envelope, a giant's or a sub-Neptune's (decision-absurd-states-24 R2.3).
     ///
-    /// A solid body under a supercritical envelope (P14.T53.b part 2) is sent its envelope
-    /// `not_modelled`, so no build sends this member other than `null` before P14.T53.b part 3
-    /// gives that envelope its value. Always present on an `ok` envelope, as `null` where none.
+    /// A solid body under a supercritical envelope (P14.T53.b parts 2 and 3, a steam envelope among
+    /// them) is sent its envelope `not_modelled`, so no build sends this member other than `null`
+    /// before P14.T53.f gives that envelope its model and this its value. Always present on an `ok`
+    /// envelope, as `null` where none.
     pub supercritical: Option<String>,
     /// The internal temperature `T_int`, K, not negative: 0 for a body with no internal heat.
     pub internal_temperature_k: f64,

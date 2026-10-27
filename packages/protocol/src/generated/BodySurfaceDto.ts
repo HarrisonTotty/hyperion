@@ -234,8 +234,8 @@ biosphere?: BiosphereDto | null,
  * It is not part of the volatile air that `surface_pressure_pa` and `gases` hold: the
  * melt's temperature sets it where melt lies, not a volatile inventory's weight over the
  * globe. It applies where a surface holds melt, a fact on the wire: the state `magma_ocean`
- * (and P14.T53.b's `steam_envelope`, where its surface section is the applicable one) and,
- * from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
+ * (P14.T53.b's `steam_envelope` is never a surface's: such a body has its envelope section)
+ * and, from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
  * nothing. From P14.T55.b it is `null` on a surface holding no melt, and the vapour over
  * melt (decision-backlog-2 §2.3).
  */

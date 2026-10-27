@@ -1842,7 +1842,8 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
             | SurfaceState::MagmaOcean
             | SurfaceState::RunawayGreenhouse
             | SurfaceState::Temperate
-            | SurfaceState::Snowball => {}
+            | SurfaceState::Snowball
+            | SurfaceState::SteamEnvelope => {}
         }
         assert!(!body.under_ice_item, "an ocean under ice listed: {}", at());
         assert!(body.misread.is_empty(), "{}: {:?}", at(), body.misread);

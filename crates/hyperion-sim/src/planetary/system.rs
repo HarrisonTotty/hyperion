@@ -5833,8 +5833,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     let crust = record_crust(sky.crust_lid, &figures, &conditions);
     let surface = Surface::new(air.state(), material, conditions, figures, published)
         .expect(
-            "conditions exist only off the gas-envelope state, and `with_climate` gives their \
-             regime",
+            "conditions exist only off the gas-envelope and steam-envelope states, and \
+             `with_climate` gives their regime",
         )
         .with_basis(basis)
         .with_crust(crust);

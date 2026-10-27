@@ -1937,10 +1937,12 @@ fn holds_air(inputs: &AerosolInputs<'_>) -> bool {
     let p = inputs.surface_pressure.value();
     let state = match inputs.state {
         SurfaceState::Temperate | SurfaceState::Snowball | SurfaceState::RunawayGreenhouse => true,
+        // A steam envelope's air is its envelope section's, not a surface's (P14.T53.b part 3).
         SurfaceState::Airless
         | SurfaceState::MagmaOcean
         | SurfaceState::GasEnvelope
-        | SurfaceState::Tenuous => false,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => false,
     };
     state && p.is_finite() && p > 0.0 && !inputs.gases.is_empty()
 }

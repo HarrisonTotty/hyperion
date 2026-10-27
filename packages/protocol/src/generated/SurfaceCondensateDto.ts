@@ -26,14 +26,18 @@ substance: string,
 phase: SubstancePhaseDto, 
 /**
  * Its condensed mass in this phase over the body's whole surface, kg m⁻²: the list's sort
- * key, and its amount where its layer is absent; 0 for a supercritical fluid. On a body whose
- * water froze, as `reservoir_gel_m`. Finite and not negative, and always sent.
+ * key, and its amount where its layer is absent; 0 for a supercritical fluid that is the air at
+ * the surface, and from generator version 25 a supercritical reservoir's whole, the
+ * liquid-like fluid above its critical isochore (P14.T53.b part 3). On a body whose water
+ * froze, as `reservoir_gel_m`. Finite and not negative, and always sent.
  */
 reservoir_kg_m2: number, 
 /**
  * Its condensed reservoir as a global equivalent layer, m, not negative: its mass over the
- * whole surface over its grain density in its phase at the temperature it lies at, and 0 for a
- * supercritical fluid. On a body whose water froze, the whole frozen water the partition
+ * whole surface over its grain density in its phase at the temperature it lies at; 0 for a
+ * supercritical fluid that is the air at the surface, and from generator version 25 a
+ * supercritical reservoir's over its liquid's density at its critical temperature, an upper
+ * bound (P14.T53.b part 3). On a body whose water froze, the whole frozen water the partition
  * holds, shell, any ocean under a `Snowball`'s ice and deeper ice included, until P14.T53.c
  * divides it between the condensate, the crust and the shell (decision-pre-23-review item
  * 12).
@@ -48,8 +52,10 @@ reservoir_gel_m?: number,
  * its layer fills (water's alone, the other liquids' together, divided by volume), so none
  * where its reservoir lies whole as ice; a solid's the climate's cold area below its edge,
  * at most its mass spread at 1.93 km of its density (but water on an ice-rich crust, which
- * is the crust's own ice); 0 for a supercritical fluid, which is the air at the surface and
- * the only entry with no mass. Entries may overlap: an ice over a sea, and ices in the same
+ * is the crust's own ice); from generator version 25 a supercritical reservoir's as a
+ * liquid's, the share of the basins its layer fills beside the other liquids (P14.T53.b part
+ * 3); 0 for a supercritical fluid that is the air at the surface, the only entry with no mass.
+ * Entries may overlap: an ice over a sea, and ices in the same
  * cold zones (decision-p14-t54a-water-consistency §4, W4–W5).
  */
 area_fraction: number, 

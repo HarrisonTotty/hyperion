@@ -328,7 +328,8 @@ pub enum FigureLawDto {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum FigureDatumDto {
-    /// The solid or liquid surface.
+    /// The solid or liquid surface, or, under a supercritical envelope (P14.T53.b), the top of its
+    /// liquid-like reservoir.
     SolidSurface,
     /// The 1-bar level of a hydrogen and helium envelope, which its radius is quoted at.
     OneBar,

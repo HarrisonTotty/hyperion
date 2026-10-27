@@ -1190,6 +1190,10 @@ diagram 2 H2O: melting_pressure_pa at 0.95 T_t = 0x41b7923371b7d2d6  # 395457393
 diagram 2 H2O: melting_pressure_pa at 1.05 T_t = 0x41c7e137d330f5ba  # 801271718.382499
 diagram 2 H2O: falling_melting_pressure_pa at 0.95 T_t = 0x41a0fe67dc1a43e3  # 142554094.05129918
 diagram 2 H2O: saturation_temperature_k at 101325 Pa = 0x407751fd1d99345c  # 373.1242958054115
+diagram 2 H2O: cap_slope_pa_per_k = 0x41105b465914d046  # 267985.58699345996
+diagram 2 H2O: condensation_cap_pa at T_c = 0x41750ab800000000  # 22064000.0
+diagram 2 H2O: condensation_cap_pa at 1.5 T_c = 0x4199eece62cd5f99  # 108770200.70055999
+diagram 2 H2O: condensation_cap_pa at 2 T_c = 0x41a74d7762cd5f99  # 195476401.40111998
 diagram 3 CH4: triple_temperature_k = 0x4056ac6c226809d5  # 90.6941
 diagram 3 CH4: triple_pressure_pa = 0x40c6d80000000000  # 11696.0
 diagram 3 CH4: critical_temperature_k = 0x4067d20c49ba5e35  # 190.564
@@ -1217,6 +1221,10 @@ diagram 3 CH4: melting_pressure_pa at 0.95 T_t none
 diagram 3 CH4: melting_pressure_pa at 1.05 T_t = 0x41713b282ef24685  # 18068098.934149284
 diagram 3 CH4: falling_melting_pressure_pa at 0.95 T_t none
 diagram 3 CH4: saturation_temperature_k at 101325 Pa = 0x405beab2bd236208  # 111.66715935187688
+diagram 3 CH4: cap_slope_pa_per_k = 0x4101c8916b003519  # 145682.17724648936
+diagram 3 CH4: condensation_cap_pa at T_c = 0x41518b6800000000  # 4599200.0
+diagram 3 CH4: condensation_cap_pa at 1.5 T_c = 0x41719fbd9365fd8b  # 18480089.2124
+diagram 3 CH4: condensation_cap_pa at 2 T_c = 0x417edca126cbfb15  # 32360978.424799997
 diagram 4 NH3: triple_temperature_k = 0x40686fae147ae148  # 195.49
 diagram 4 NH3: triple_pressure_pa = 0x40b7a563d70a3d71  # 6053.39
 diagram 4 NH3: critical_temperature_k = 0x407958f5c28f5c29  # 405.56
@@ -1244,6 +1252,10 @@ diagram 4 NH3: melting_pressure_pa at 0.95 T_t none
 diagram 4 NH3: melting_pressure_pa at 1.05 T_t = 0x419d7ef67c69a028  # 123714975.10315001
 diagram 4 NH3: falling_melting_pressure_pa at 0.95 T_t none
 diagram 4 NH3: saturation_temperature_k at 101325 Pa = 0x406dfacf4b6e0fbe  # 239.83780452247987
+diagram 4 NH3: cap_slope_pa_per_k = 0x4109030cd129bc96  # 204897.60213038762
+diagram 4 NH3: condensation_cap_pa at T_c = 0x4165ac8900000000  # 11363400.0
+diagram 4 NH3: condensation_cap_pa at 1.5 T_c = 0x41893b0cbe147ae2  # 52912535.760000005
+diagram 4 NH3: condensation_cap_pa at 2 T_c = 0x4196857b9e147ae1  # 94461671.52
 diagram 5 N2: triple_temperature_k = 0x404f9353f7ced917  # 63.151
 diagram 5 N2: triple_pressure_pa = 0x40c8758000000000  # 12523.0
 diagram 5 N2: critical_temperature_k = 0x405f8c49ba5e353f  # 126.192
@@ -1272,6 +1284,10 @@ diagram 5 N2: melting_pressure_pa at 0.95 T_t none
 diagram 5 N2: melting_pressure_pa at 1.05 T_t = 0x416beab925df02c0  # 14636489.183472991
 diagram 5 N2: falling_melting_pressure_pa at 0.95 T_t none
 diagram 5 N2: saturation_temperature_k at 101325 Pa = 0x405356bd771f3830  # 77.35531404541757
+diagram 5 N2: cap_slope_pa_per_k = 0x41041e3dd540dbeb  # 164807.72912761508
+diagram 5 N2: condensation_cap_pa at T_c = 0x4149e86c00000000  # 3395800.0
+diagram 5 N2: condensation_cap_pa at 1.5 T_c = 0x416a4f998f43e100  # 13794508.477036
+diagram 5 N2: condensation_cap_pa at 2 T_c = 0x4177128c0f43e101  # 24193216.954072002
 diagram 6 O2: triple_temperature_k = 0x404b2e353f7ced91  # 54.361
 diagram 6 O2: triple_pressure_pa = 0x40624a8f5c28f5c3  # 146.33
 diagram 6 O2: critical_temperature_k = 0x406352978d4fdf3b  # 154.581
@@ -1301,6 +1317,10 @@ diagram 6 O2: melting_pressure_pa at 0.95 T_t none
 diagram 6 O2: melting_pressure_pa at 1.05 T_t none
 diagram 6 O2: falling_melting_pressure_pa at 0.95 T_t none
 diagram 6 O2: saturation_temperature_k at 101325 Pa = 0x40568c079a07f60a  # 90.18796396996927
+diagram 6 O2: cap_slope_pa_per_k = 0x410811bba8242117  # 197175.4571001611
+diagram 6 O2: condensation_cap_pa at T_c = 0x41533cce00000000  # 5043000.0
+diagram 6 O2: condensation_cap_pa at 1.5 T_c = 0x417357da5aac0830  # 20282789.666999996
+diagram 6 O2: condensation_cap_pa at 2 T_c = 0x4180f0409aac0831  # 35522579.334
 diagram 7 CO2: triple_temperature_k = 0x406b12f1a9fbe76d  # 216.592
 diagram 7 CO2: triple_pressure_pa = 0x411f9cf800000000  # 517950.0
 diagram 7 CO2: critical_temperature_k = 0x4073020d1b71758e  # 304.1282
@@ -1329,6 +1349,10 @@ diagram 7 CO2: melting_pressure_pa at 0.95 T_t none
 diagram 7 CO2: melting_pressure_pa at 1.05 T_t = 0x4189aa3360e8a096  # 53823084.11358754
 diagram 7 CO2: falling_melting_pressure_pa at 0.95 T_t none
 diagram 7 CO2: saturation_temperature_k at 101325 Pa = 0x406855ed071debac  # 194.68518405765406
+diagram 7 CO2: cap_slope_pa_per_k = 0x4104e7e76bbb9a68  # 171260.92760391836
+diagram 7 CO2: condensation_cap_pa at T_c = 0x415c246500000000  # 7377300.0
+diagram 7 CO2: condensation_cap_pa at 1.5 T_c = 0x417fdf2a2d23dc49  # 33419938.821255002
+diagram 7 CO2: condensation_cap_pa at 2 T_c = 0x418c5a9d8d23dc49  # 59462577.642510004
 diagram 8 Ar: triple_temperature_k = 0x4054f3923a29c77a  # 83.8058
 diagram 8 Ar: triple_pressure_pa = 0x40f0d1b000000000  # 68891.0
 diagram 8 Ar: critical_temperature_k = 0x4062d5fbe76c8b44  # 150.687
@@ -1356,6 +1380,10 @@ diagram 8 Ar: melting_pressure_pa at 0.95 T_t none
 diagram 8 Ar: melting_pressure_pa at 1.05 T_t = 0x41703df45f8927b5  # 17030981.970985133
 diagram 8 Ar: falling_melting_pressure_pa at 0.95 T_t none
 diagram 8 Ar: saturation_temperature_k at 101325 Pa = 0x4055d35e1a645b10  # 87.3026185970341
+diagram 8 Ar: cap_slope_pa_per_k = 0x4107678341434018  # 191728.40686655114
+diagram 8 Ar: condensation_cap_pa at T_c = 0x41528d0600000000  # 4863000.0
+diagram 8 Ar: condensation_cap_pa at 1.5 T_c = 0x417269fc9390624d  # 19308489.222749997
+diagram 8 Ar: condensation_cap_pa at 2 T_c = 0x4180185bd390624d  # 33753978.445499994
 diagram 10 Kr: triple_temperature_k = 0x405cf147ae147ae1  # 115.77
 diagram 10 Kr: triple_pressure_pa = 0x40f1f1ed66516db1  # 73502.83748
 diagram 10 Kr: critical_temperature_k = 0x406a2f5c28f5c28f  # 209.48
@@ -1383,6 +1411,10 @@ diagram 10 Kr: melting_pressure_pa at 0.95 T_t none
 diagram 10 Kr: melting_pressure_pa at 1.05 T_t none
 diagram 10 Kr: falling_melting_pressure_pa at 0.95 T_t none
 diagram 10 Kr: saturation_temperature_k at 101325 Pa = 0x405def119888774e  # 119.73544896437417
+diagram 10 Kr: cap_slope_pa_per_k = 0x4102dce265e36264  # 154524.29975010746
+diagram 10 Kr: condensation_cap_pa at T_c = 0x4155138200000000  # 5525000.0
+diagram 10 Kr: condensation_cap_pa at 1.5 T_c = 0x4174b443327e43ab  # 21709875.155826252
+diagram 10 Kr: condensation_cap_pa at 2 T_c = 0x418211d2f27e43ac  # 37894750.31165251
 diagram 11 Xe: triple_temperature_k = 0x40642ccccccccccd  # 161.4
 diagram 11 Xe: triple_pressure_pa = 0x40f3f53cc8fd9fd3  # 81747.79907
 diagram 11 Xe: critical_temperature_k = 0x40721bba5e353f7d  # 289.733
@@ -1410,6 +1442,10 @@ diagram 11 Xe: melting_pressure_pa at 0.95 T_t none
 diagram 11 Xe: melting_pressure_pa at 1.05 T_t none
 diagram 11 Xe: falling_melting_pressure_pa at 0.95 T_t none
 diagram 11 Xe: saturation_temperature_k at 101325 Pa = 0x4064a1a35c87aa72  # 165.0511915826533
+diagram 11 Xe: cap_slope_pa_per_k = 0x40fd18e0d09c2160  # 119182.05093014752
+diagram 11 Xe: condensation_cap_pa at T_c = 0x4156491400000000  # 5842000.0
+diagram 11 Xe: condensation_cap_pa at 1.5 T_c = 0x41760979e94c1262  # 23107486.58107222
+diagram 11 Xe: condensation_cap_pa at 2 T_c = 0x41834057694c1261  # 40372973.16214443
 diagram 12 N2O: triple_temperature_k = 0x4066ca8f5c28f5c3  # 182.33
 diagram 12 N2O: triple_pressure_pa = 0x40f571d707160957  # 87837.43923
 diagram 12 N2O: critical_temperature_k = 0x40735851eb851eb8  # 309.52
@@ -1437,6 +1473,10 @@ diagram 12 N2O: melting_pressure_pa at 0.95 T_t none
 diagram 12 N2O: melting_pressure_pa at 1.05 T_t none
 diagram 12 N2O: falling_melting_pressure_pa at 0.95 T_t none
 diagram 12 N2O: saturation_temperature_k at 101325 Pa = 0x406715e22aa99796  # 184.6838582336756
+diagram 12 N2O: cap_slope_pa_per_k = 0x4103579bf98d656c  # 158451.49685172306
+diagram 12 N2O: condensation_cap_pa at T_c = 0x415ba33200000000  # 7245000.0
+diagram 12 N2O: condensation_cap_pa at 1.5 T_c = 0x417e4b9a9a71c1be  # 31766953.652772658
+diagram 12 N2O: condensation_cap_pa at 2 T_c = 0x418ad7345a71c1be  # 56288907.305545315
 diagram 13 CO: triple_temperature_k = 0x40510a3d70a3d70a  # 68.16
 diagram 13 CO: triple_pressure_pa = 0x40ce5870366516db  # 15536.87666
 diagram 13 CO: critical_temperature_k = 0x40609b851eb851ec  # 132.86
@@ -1465,6 +1505,10 @@ diagram 13 CO: melting_pressure_pa at 0.95 T_t none
 diagram 13 CO: melting_pressure_pa at 1.05 T_t none
 diagram 13 CO: falling_melting_pressure_pa at 0.95 T_t none
 diagram 13 CO: saturation_temperature_k at 101325 Pa = 0x405468d19c95c90c  # 81.63779368045306
+diagram 13 CO: cap_slope_pa_per_k = 0x4104749d1d9a6f67  # 167571.63945471795
+diagram 13 CO: condensation_cap_pa at T_c = 0x414aa83800000000  # 3494000.0
+diagram 13 CO: condensation_cap_pa at 1.5 T_c = 0x416be57f004989f4  # 14625784.008976914
+diagram 13 CO: condensation_cap_pa at 2 T_c = 0x41789078004989f4  # 25757568.017953828
 diagram 14 SO2: triple_temperature_k = 0x4068b66666666666  # 197.7
 diagram 14 SO2: triple_pressure_pa = 0x409a089389720429  # 1666.144079
 diagram 14 SO2: critical_temperature_k = 0x407aea3d70a3d70a  # 430.64
@@ -1492,6 +1536,10 @@ diagram 14 SO2: melting_pressure_pa at 0.95 T_t none
 diagram 14 SO2: melting_pressure_pa at 1.05 T_t none
 diagram 14 SO2: falling_melting_pressure_pa at 0.95 T_t none
 diagram 14 SO2: saturation_temperature_k at 101325 Pa = 0x4070723001a2828a  # 263.13672030907094
+diagram 14 SO2: cap_slope_pa_per_k = 0x4100538454798a71  # 133744.54124744565
+diagram 14 SO2: condensation_cap_pa at T_c = 0x415e15bee6666666  # 7886587.6
+diagram 14 SO2: condensation_cap_pa at 1.5 T_c = 0x41817e1571c56d5e  # 36684462.22140001
+diagram 14 SO2: condensation_cap_pa at 2 T_c = 0x418f397306be0ded  # 65482336.8428
 diagram 15 H2S: triple_temperature_k = 0x4067766666666666  # 187.7
 diagram 15 H2S: triple_pressure_pa = 0x40d6b6b6c61522a7  # 23258.85584
 diagram 15 H2S: critical_temperature_k = 0x407751999999999a  # 373.1
@@ -1520,6 +1568,10 @@ diagram 15 H2S: melting_pressure_pa at 0.95 T_t none
 diagram 15 H2S: melting_pressure_pa at 1.05 T_t none
 diagram 15 H2S: falling_melting_pressure_pa at 0.95 T_t none
 diagram 15 H2S: saturation_temperature_k at 101325 Pa = 0x406a9b5e654a8e30  # 212.85527290879827
+diagram 15 H2S: cap_slope_pa_per_k = 0x41031166d3e666af  # 156204.853466799
+diagram 15 H2S: condensation_cap_pa at T_c = 0x41612a8800000000  # 9000000.0
+diagram 15 H2S: condensation_cap_pa at 1.5 T_c = 0x41822fc37b505888  # 38140015.41423136
+diagram 15 H2S: condensation_cap_pa at 2 T_c = 0x41900a727b505887  # 67280030.8284627
 diagram 20 C2H6: triple_temperature_k = 0x4056978d4fdf3b64  # 90.368
 diagram 20 C2H6: triple_pressure_pa = 0x3ff24612a8e044b5  # 1.142107639
 diagram 20 C2H6: critical_temperature_k = 0x40731526e978d4fe  # 305.322
@@ -1547,6 +1599,10 @@ diagram 20 C2H6: melting_pressure_pa at 0.95 T_t none
 diagram 20 C2H6: melting_pressure_pa at 1.05 T_t = 0x41686c2c610efb6b  # 12804451.03307887
 diagram 20 C2H6: falling_melting_pressure_pa at 0.95 T_t none
 diagram 20 C2H6: saturation_temperature_k at 101325 Pa = 0x4067121685e88710  # 184.56524939933342
+diagram 20 C2H6: cap_slope_pa_per_k = 0x40f9109c966a032b  # 102665.78672219503
+diagram 20 C2H6: condensation_cap_pa at T_c = 0x4152960200000000  # 4872200.0
+diagram 20 C2H6: condensation_cap_pa at 1.5 T_c = 0x417397eedaab3359  # 20545261.666797016
+diagram 20 C2H6: condensation_cap_pa at 2 T_c = 0x4181452e9aab3359  # 36218323.33359403
 [condensed]
 condensed 2 H2O: grain density of its diagram
 condensed 2 H2O: solid grain_density_kg_per_m3 at 0.9 T_t = 0x408cc480dc360192  # 920.5629200190763

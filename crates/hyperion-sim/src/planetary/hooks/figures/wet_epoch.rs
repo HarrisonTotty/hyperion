@@ -559,7 +559,8 @@ fn history_span(molten_until: Option<Years>, age: Years) -> Option<(Years, Years
 #[must_use]
 fn holds_water(air: &Atmosphere, water: Kilograms, radius: Metres) -> bool {
     let solid = match air.state() {
-        SurfaceState::GasEnvelope | SurfaceState::MagmaOcean => false,
+        // A steam envelope hides its surface, as a gas envelope does (P14.T53.b part 3).
+        SurfaceState::GasEnvelope | SurfaceState::MagmaOcean | SurfaceState::SteamEnvelope => false,
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate

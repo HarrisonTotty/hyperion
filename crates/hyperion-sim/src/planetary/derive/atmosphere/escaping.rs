@@ -74,7 +74,7 @@ use crate::planetary::chem::escape::{
     desiccated_carbon_dioxide, envelope_helium, methane_outcome, runaway_oxygen_timed,
     thin_envelope_air,
 };
-use crate::planetary::chem::partition::Ground;
+use crate::planetary::chem::partition::{CriticalColumn, Ground};
 use crate::planetary::chem::tenuous::holds_tenuous_air;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
 use crate::substance::{Element, MOLAR_GAS_CONSTANT, heat_capacity_over_r_at};
@@ -88,9 +88,9 @@ use super::{
     AIRLESS_PRESSURE, Airborne, Atmosphere, AtmosphereInputs, CarbonCarrier, Crust,
     EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, IceHeld, Insolation,
     PartialPressures, PassSurface, PublishedState, Retention, RunawayDeck, SILICATE_SOLIDUS,
-    StepClimate, SurfaceState, TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature,
-    mole_fraction_of, partitioned_greenhouse, present_state_in_force, retained, surface_mix,
-    tenuous_in_force,
+    StepClimate, SupercriticalReservoir, SurfaceState, TEMPERATE_AIRBORNE_CARBON,
+    earth_xuv_fluence, exobase_temperature, mole_fraction_of, partitioned_greenhouse,
+    present_state_in_force, retained, steam_envelope_in_force, surface_mix, tenuous_in_force,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -978,6 +978,9 @@ struct Solve<'a> {
     partials: PartialPressures,
     tau: f64,
     step: StepClimate<'a>,
+    /// Its partition's supercritical reservoir with the most liquid-like fluid at its last step
+    /// (P14.T53.b part 3, [`partitioned_greenhouse`]): `None` under part 3's hold.
+    supercritical: Option<CriticalColumn>,
 }
 
 impl Solve<'_> {
@@ -1117,6 +1120,10 @@ struct Kept {
     runaway: bool,
     /// The carbon kept, as its stored carrier carbon dioxide, kg.
     carbon: f64,
+    /// The free water a runaway keeps as steam beyond its escape's capacity (P14.T53.b part 3,
+    /// step 5's division, [`Body::divide`]): none before the division, for every other world, and
+    /// under part 3's hold.
+    steam: Kilograms,
 }
 
 impl<'a> Body<'a> {
@@ -1179,6 +1186,9 @@ impl<'a> Body<'a> {
             column: PartialPressures::default(),
             escape: None,
             ceiling: self.ceiling,
+            supercritical: None,
+            kept_water: None,
+            steam_envelope: false,
         }
     }
 
@@ -1294,6 +1304,7 @@ impl<'a> Body<'a> {
             held_water,
             runaway,
             carbon: carbon_kept,
+            steam: Kilograms::ZERO,
         }
     }
 
@@ -1400,14 +1411,17 @@ impl<'a> Body<'a> {
                     EARTH_OXYGEN_SINK_MOL_PER_M2_YEAR,
                     inputs.age,
                 );
-                // The free water the timed route has not lost by the age leaves the air all the
-                // same by rule (a), as before; P14.T53.b's steam is to keep it. Until then it is
-                // counted with the interior.
-                ledger.gas(
-                    Gas::Water,
-                    (kept.free_water - oxygen.water_lost().value()).max(0.0),
-                    Fate::Sequestered,
-                );
+                // The free water the timed route has not lost by the age: from P14.T53.b part 3 the
+                // air keeps it as steam where water is retained (decision-bump-plan-after-22 R1.4,
+                // Luger and Barnes 2015), counted airborne with the air's water; else it leaves the
+                // air by rule (a), as before, counted with the interior.
+                let unlost = (kept.free_water - oxygen.water_lost().value()).max(0.0);
+                if steam_envelope_in_force() && self.retention.retains(Gas::Water) {
+                    kept.steam = Kilograms::new(unlost);
+                    kept.air.water += unlost;
+                } else {
+                    ledger.gas(Gas::Water, unlost, Fate::Sequestered);
+                }
                 if self.retention.retains(Gas::Oxygen) {
                     kept.air.oxygen = oxygen.kept().value();
                 }
@@ -1430,6 +1444,12 @@ struct Solver<'a, 'b> {
     weight: f64,
     ground: Ground,
     state: SurfaceState,
+    /// The state its water follows at each step's surface water (`water_follows`): the
+    /// division's, but a past-only runaway's present class where it keeps steam (P14.T53.b part 3).
+    water_state: SurfaceState,
+    /// The water its surface can hold, kg: P14.T13.a's, but the water that runaway kept, its ice
+    /// crust's and its steam (`Atmosphere::surface_water_inventory`).
+    surface_water: Kilograms,
     /// Whether the body keeps its water against escape.
     retained_water: bool,
 }
@@ -1466,10 +1486,10 @@ impl<'b> Solver<'_, 'b> {
             self.surface,
             inputs,
             column,
-            (self.state, self.retained_water),
+            (self.water_state, self.retained_water, self.surface_water),
         );
         let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
-        let (t, partials, tau) = partitioned_greenhouse(
+        let (t, partials, tau, supercritical) = partitioned_greenhouse(
             &inventory,
             self.body.base,
             &|t| self.body.saturate(t),
@@ -1484,6 +1504,7 @@ impl<'b> Solver<'_, 'b> {
             partials,
             tau,
             step,
+            supercritical,
         })
     }
 
@@ -1710,17 +1731,22 @@ pub(super) fn state_and_greenhouse(
     let formed = body.thin_envelope(&mut kept.air, &shoreline, &mut ledger);
     let (state, runaway_oxygen) = body.divide(&mut kept, &mut ledger);
     let (air, carrier) = (kept.air, kept.air.carrier);
+    // P14.T53.b part 3: the state the water follows, a past-only runaway's present class where it
+    // keeps steam beyond its escape's capacity.
+    let water = water_follows(state, inputs, kept.steam);
     // Whether the division stores no carbon for want of water, which P14.T53.b part 1 (c) reads
     // (`solved_as_a_hothouse`): a runaway's, its water lost, or one between the limits that holds
     // no water, which the weathering thermostat then skips (`Solver::airborne_carbon`).
     let dry = match state {
         SurfaceState::RunawayGreenhouse => true,
         SurfaceState::Temperate => air.water <= 0.0,
+        // No division is a steam envelope, which only `finish` publishes (P14.T53.b part 3).
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::Snowball
-        | SurfaceState::Tenuous => false,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => false,
     };
 
     // Step 5's greenhouse, the thermostat's carbonate, the cold trap's oxygen and the methane's
@@ -1732,6 +1758,12 @@ pub(super) fn state_and_greenhouse(
         weight: gravity.value() / (4.0 * PI * r * r),
         ground: Ground::new(gravity, surface.basins, surface.water_at_surface),
         state,
+        water_state: water,
+        surface_water: if water == state {
+            inputs.inventory.water()
+        } else {
+            Kilograms::new(air.water)
+        },
         retained_water: body
             .retention
             .retains_against_escape(body.held.retention(), Gas::Water),
@@ -1756,7 +1788,7 @@ pub(super) fn state_and_greenhouse(
     finish(
         &body,
         &solved,
-        (state, dry, gravity),
+        (state, water, dry, gravity),
         &mut ledger,
         Recorded {
             envelope: body.envelope,
@@ -1808,12 +1840,83 @@ fn present_state(
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
         | SurfaceState::Snowball
-        | SurfaceState::Tenuous => state,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => state,
     };
     if present == SurfaceState::Temperate && published == PublishedState::Hothouse {
         SurfaceState::RunawayGreenhouse
     } else {
         present
+    }
+}
+
+/// The state the water of a body follows, the atmosphere's inputs `inputs` describing it, its
+/// climate's division in the state `state`, keeping the steam `steam` beyond its escape's capacity
+/// (P14.T53.b part 3; [`Atmosphere::water_state`]).
+///
+/// It is `state`, as P14.T53.b part 1 has it, but for a world inside the runaway limit at its
+/// hosts' largest past luminosity alone that keeps steam: its water, lost to space only up to the
+/// capacity of its escape (Luger and Barnes 2015, Astrobiology 15, 119, who count the loss only
+/// while the runaway lasts; here over the whole age, an upper bound on it), stands now as its
+/// present class holds it, `Temperate`'s seas or `Snowball`'s ice, as the steam of a
+/// runaway that ended condenses (Hamano, Abe and Genda 2013, Nature 497, 607). Its oxygen and its
+/// carbon left airborne stay the division's. A world inside the limit now keeps its steam as a
+/// runaway's.
+#[must_use]
+fn water_follows(state: SurfaceState, inputs: &AtmosphereInputs, steam: Kilograms) -> SurfaceState {
+    if state == SurfaceState::RunawayGreenhouse
+        && steam > Kilograms::ZERO
+        && present_state_in_force()
+    {
+        match inputs.present_insolation {
+            Insolation::InsideRunaway => SurfaceState::RunawayGreenhouse,
+            Insolation::Habitable => SurfaceState::Temperate,
+            Insolation::BeyondMaximumGreenhouse => SurfaceState::Snowball,
+        }
+    } else {
+        state
+    }
+}
+
+/// Whether the supercritical reservoir `reservoir` of a body's partition hides its surface as a
+/// steam envelope under the surface gravity `gravity` (P14.T53.b part 3): it is water's, and its
+/// liquid-like fluid holds at least [`THIN_ENVELOPE_FRACTION`] of the body's mass
+/// (`SupercriticalReservoir::hides_the_surface`).
+#[must_use]
+fn steam_hides_the_surface(
+    reservoir: Option<CriticalColumn>,
+    gravity: MetresPerSecondSquared,
+) -> bool {
+    reservoir
+        .and_then(|column| SupercriticalReservoir::of_column(&column, gravity))
+        .is_some_and(|reservoir| reservoir.gas() == Gas::Water && reservoir.hides_the_surface())
+}
+
+/// Step 6's carbon monoxide (Gao et al. 2015, [`desiccated_carbon_dioxide`]), on the outcome only:
+/// what a carbon dioxide air of the partial pressures `partials`, carried as `carrier`, on the body
+/// `inputs` describe at surface gravity `gravity`, photolyses under a host that shines; none
+/// otherwise.
+#[must_use]
+fn carbon_monoxide(
+    inputs: &AtmosphereInputs,
+    carrier: CarbonCarrier,
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+) -> Kilograms {
+    let r = inputs.radius.value();
+    if carrier == CarbonCarrier::CarbonDioxide && inputs.hottest_host.value() > 0.0 {
+        let co2 = partials.of(Gas::CarbonDioxide).value() * 4.0 * PI * r * r / gravity.value();
+        let moles = co2 / (Gas::CarbonDioxide.molar_mass_g_per_mol() * 1e-3);
+        let photolysed = desiccated_carbon_dioxide(
+            moles,
+            hydrogen_atom_fraction(partials),
+            UltravioletHost::of(inputs.hottest_host),
+        );
+        let monoxide = Element::C.standard_atomic_weight_g_per_mol()
+            + Element::O.standard_atomic_weight_g_per_mol();
+        Kilograms::new(photolysed.carbon_monoxide_mol() * monoxide * 1e-3)
+    } else {
+        Kilograms::ZERO
     }
 }
 
@@ -1830,7 +1933,7 @@ fn present_state(
 fn finish(
     body: &Body<'_>,
     solved: &Solve<'_>,
-    (state, dry, gravity): (SurfaceState, bool, MetresPerSecondSquared),
+    (state, water, dry, gravity): (SurfaceState, SurfaceState, bool, MetresPerSecondSquared),
     ledger: &mut Ledger,
     recorded: Recorded,
 ) -> Atmosphere {
@@ -1870,22 +1973,7 @@ fn finish(
     ledger.element(Element::He, air.helium, Fate::Airborne);
 
     // Step 6: Gao et al. 2015, under a host that shines, on the outcome only.
-    let r = inputs.radius.value();
-    let carbon_monoxide =
-        if carrier == CarbonCarrier::CarbonDioxide && inputs.hottest_host.value() > 0.0 {
-            let co2 = partials.of(Gas::CarbonDioxide).value() * 4.0 * PI * r * r / gravity.value();
-            let moles = co2 / (Gas::CarbonDioxide.molar_mass_g_per_mol() * 1e-3);
-            let photolysed = desiccated_carbon_dioxide(
-                moles,
-                hydrogen_atom_fraction(&partials),
-                UltravioletHost::of(inputs.hottest_host),
-            );
-            let monoxide = Element::C.standard_atomic_weight_g_per_mol()
-                + Element::O.standard_atomic_weight_g_per_mol();
-            Kilograms::new(photolysed.carbon_monoxide_mol() * monoxide * 1e-3)
-        } else {
-            Kilograms::ZERO
-        };
+    let carbon_monoxide = carbon_monoxide(inputs, carrier, &partials, gravity);
 
     // Step 8: the outcome.
     let escape = Some(
@@ -1919,9 +2007,13 @@ fn finish(
     } else {
         state
     };
-    // P14.T53.b part 1 (a) and (c): the state the water follows is the division's, and the
-    // published one the present insolation's, or in a hothouse's re-solve a runaway's.
-    let water_state = state;
+    // P14.T53.b part 1 (a) and (c), and part 3: the state the water follows is the division's (a
+    // past-only runaway's present class where it keeps steam, `water_follows`), the published one
+    // the present insolation's, or in a hothouse's re-solve a runaway's; a water reservoir that
+    // hides the surface labels it a steam envelope, a label no figure or pass reads
+    // (`published_state`; decision-p14-t53b-part3 §5).
+    let water_state = if molten { state } else { water };
+    let kept_water = (water_state != state).then(|| Kilograms::new(air.water));
     let state = present_state(state, inputs, body.published);
     Atmosphere {
         state,
@@ -1943,5 +2035,8 @@ fn finish(
         column,
         escape,
         ceiling: body.ceiling,
+        supercritical: solved.supercritical,
+        kept_water,
+        steam_envelope: steam_hides_the_surface(solved.supercritical, gravity),
     }
 }

@@ -57,6 +57,15 @@ pub(super) const AVOGADRO_PER_MOL: f64 = 6.022_140_76e23;
 /// kelvin to under 10⁻¹⁶ K, past the last bit of a temperature.
 const BISECTIONS: u32 = 64;
 
+/// The fraction of its critical temperature at which a fitted vapour-pressure curve with no finite
+/// slope at its critical point takes its tangent for the partition's cap above it, 0.999
+/// (decision-p14-t53b-part3 §1; [`PhaseDiagram::cap_slope_pa_per_k`]).
+///
+/// At θ = 1 − T ÷ `T_c` = 10⁻³, 0.13–0.37 K below the six fits' critical temperatures, the tangent
+/// is the fitted curve's own near its end, but away from θ = 0, where the fits' exponents make the
+/// slope zero or unbounded.
+pub const FITTED_TANGENT_FRACTION: f64 = 0.999;
+
 /// A Wagner-type equation, ln(p ÷ `p_r`) = (`T_r` ÷ T) Σ aᵢ θ^tᵢ with θ = 1 − T ÷ `T_r`: the reference
 /// equations' ancillary vapour-pressure equations (`p_r` and `T_r` their critical point), and the
 /// sublimation equations of Span and Wagner 1996 and Tegeler et al. 1999 (`p_r` and `T_r` their triple
@@ -1017,8 +1026,11 @@ impl PhaseDiagram {
     /// It divides a fluid above its critical temperature into the gas-like air below it and a
     /// liquid-like supercritical layer above it. The two regimes are divided by no first-order
     /// singularity, and the line between them leaves the critical point along the saturation
-    /// curve's continuation: the critical isochore approximates the Widom line (Simeoni, Bryk,
-    /// Gorelli, Krisch, Ruocco, Santoro and Scopigno 2010, Nat. Phys. 6, 503–507).
+    /// curve's continuation: the critical isochore's tangent at `T_c`, the boundary above which the
+    /// fluid is denser than `ρ_c`. Within a few per cent of `T_c` it follows the Widom line
+    /// (Simeoni, Bryk, Gorelli, Krisch, Ruocco, Santoro and Scopigno 2010, Nat. Phys. 6, 503–507),
+    /// and above that lies below it (methane's heat-capacity maxima at 1.13 `T_c` under 2 `p_c` and
+    /// 1.25 `T_c` under 4 `p_c`, NIST Chemistry WebBook).
     ///
     /// NIST's critical isochores (Chemistry WebBook, SRD 69, isochoric data at `ρ_c`) of methane,
     /// carbon dioxide, nitrogen and water lie within 6% of this line up to 2–2.5 `T_c`, its worst
@@ -1070,6 +1082,82 @@ impl PhaseDiagram {
         let slope = self.critical_slope_pa_per_k()?;
         let above = temperature.value() - self.critical_temperature.value();
         Some(Pascals::new(self.critical_pressure.value() + slope * above))
+    }
+
+    /// The slope of the line that caps a condensable's own partial pressure above its critical
+    /// temperature in the condensate partition, Pa K⁻¹ (P14.T53.b part 3,
+    /// [`condensation_cap`](Self::condensation_cap)).
+    ///
+    /// It is the critical slope where the equation gives one
+    /// ([`critical_slope_pa_per_k`](Self::critical_slope_pa_per_k)), so that the line is the
+    /// critical isochore ([`critical_isochore_pressure`](Self::critical_isochore_pressure)). For
+    /// CoolProp's fitted ancillaries, whose slope at `T_c` is zero or unbounded as an artefact of
+    /// their exponents, it is the curve's own tangent at [`FITTED_TANGENT_FRACTION`] of `T_c`,
+    /// −`p_sat` (d ln p ÷ d(1 ÷ T)) ÷ T² there: 5.86 `p_c` ÷ `T_c` for krypton, 5.91 for xenon,
+    /// 6.77 for nitrous oxide, 6.37 for carbon monoxide, 6.48 for hydrogen sulphide and 6.43 for
+    /// ethane (P14.T53.b part 3's test), beside methane's 6.04 and water's 7.86 by their critical
+    /// slopes. `None` where neither is
+    /// finite and positive.
+    #[must_use]
+    pub fn cap_slope_pa_per_k(&self) -> Option<f64> {
+        if let Some(slope) = self.critical_slope_pa_per_k() {
+            return Some(slope);
+        }
+        let near = Kelvin::new(FITTED_TANGENT_FRACTION * self.critical_temperature.value());
+        let t = near.value();
+        let p = math::exp(self.vapour_pressure.ln_pressure(near));
+        let slope = -p * self.vapour_pressure.slope_k(near) / (t * t);
+        (slope.is_finite() && slope > 0.0).then_some(slope)
+    }
+
+    /// The most of its own partial pressure a condensable's air holds at `temperature` in the
+    /// condensate partition (P14.T51.a, with P14.T53.b part 3's cap above the critical point;
+    /// decision-p14-t51a-partition §5).
+    ///
+    /// Below the critical temperature it is the saturation pressure
+    /// ([`saturation_pressure`](Self::saturation_pressure)). At or above it, where the fluid has no
+    /// interface, it is the line `p_c` + s (T − `T_c`) of [`cap_slope_pa_per_k`](Self::cap_slope_pa_per_k):
+    /// the critical isochore's tangent at `T_c`, the saturation curve's tangent at its end continued
+    /// above it, which follows the Widom line between the gas-like and liquid-like fluids within a
+    /// few per cent of `T_c` and lies below it above that (Simeoni et al. 2010, Nat. Phys. 6, 503;
+    /// [`critical_isochore_pressure`](Self::critical_isochore_pressure)). A condensable's own
+    /// column above it is a liquid-like supercritical
+    /// reservoir, as one below the curve is a liquid or a solid. Continuous in value at `T_c`, where
+    /// the curve ends at `p_c`; infinite at or above `T_c` where no slope is found, as the
+    /// saturation pressure is; zero at or below 0 K and for a temperature that is not a number.
+    ///
+    /// # Examples
+    ///
+    /// A nitrogen-warmed methane world at 200 K holds about 60 bar of its methane in its air, the
+    /// rest a liquid-like layer beneath it; below 190.564 K the saturation curve caps it instead:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::by_key;
+    /// use hyperion_sim::units::Kelvin;
+    ///
+    /// # fn main() {
+    /// #     assert!(example().is_some(), "every value the example reads is there");
+    /// # }
+    /// # fn example() -> Option<()> {
+    /// let methane = by_key("CH4")?.substance().phase_diagram()?;
+    /// let at_200 = methane.condensation_cap(Kelvin::new(200.0)).value();
+    /// assert!((59e5..61e5).contains(&at_200));
+    /// let below = methane.condensation_cap(Kelvin::new(190.0)).value();
+    /// let saturated = methane.saturation_pressure(Kelvin::new(190.0)).value();
+    /// assert!((below / saturated - 1.0).abs() < 1e-15);
+    /// # Some(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn condensation_cap(&self, temperature: Kelvin) -> Pascals {
+        if temperature.value().is_nan() || temperature < self.critical_temperature {
+            return self.saturation_pressure(temperature);
+        }
+        self.cap_slope_pa_per_k()
+            .map_or(Pascals::new(f64::INFINITY), |slope| {
+                let above = temperature.value() - self.critical_temperature.value();
+                Pascals::new(self.critical_pressure.value() + slope * above)
+            })
     }
 
     /// The phase at `temperature` and `pressure`.
@@ -2087,6 +2175,95 @@ mod tests {
             let above = Kelvin::new(d.critical_temperature().value() + 10.0);
             let isochore = d.critical_isochore_pressure(above);
             assert!(isochore.is_none(), "{key}: {isochore:?}");
+        }
+    }
+
+    /// P14.T53.b part 3 (decision-p14-t53b-part3 §1, §9): the partition's cap is the saturation
+    /// pressure below each condensable's critical temperature and its critical line above it,
+    /// `p_c` at `T_c` to the bit and continuous across it for every one of the fourteen, its
+    /// relative step at 10⁻¹² `T_c` stated: under 2 × 10⁻⁶ where the equation gives a critical
+    /// slope (sulphur dioxide's reducing pressure lies 1.6 × 10⁻⁶ above its critical pressure), and
+    /// under 10⁻³ for the fitted ancillaries, which near `p_c` as θ^tᵢ with tᵢ below 1 (carbon
+    /// monoxide's 7.5 × 10⁻⁴); the line's slope is the critical slope where the equation gives one,
+    /// and for the six fitted ancillaries the curve's tangent at 0.999 `T_c`, 5.5–7.5 `p_c` ÷
+    /// `T_c`, rising above `T_c`.
+    ///
+    /// Where the line is the critical isochore it meets the curve in slope too: the difference
+    /// quotients over δ either side of `T_c` close as √(δ ÷ `T_c`), the curve's θ^1.5 term (IAPWS
+    /// SR1-86's a₂, Setzmann and Wagner's, Span and Wagner's), so that their step is stated at δ =
+    /// 10⁻⁶ `T_c` (some 10⁻⁴, where the ruling asked 10⁻⁶) and held at 10⁻¹⁰ `T_c` under 10⁻⁵.
+    #[test]
+    fn diagram_the_condensation_cap_is_continuous_across_each_critical_point() {
+        for id in condensables() {
+            let key = id.substance().key().as_str().to_owned();
+            let d = diagram(&key);
+            let (t_c, p_c) = (d.critical_temperature(), d.critical_pressure());
+            let below = d
+                .condensation_cap(Kelvin::new(t_c.value() * (1.0 - 1e-12)))
+                .value();
+            let at = d.condensation_cap(t_c).value();
+            let above = d
+                .condensation_cap(Kelvin::new(t_c.value() * (1.0 + 1e-12)))
+                .value();
+            let step = relative(below, at);
+            eprintln!(
+                "{key}: cap {below:.6e} Pa at T_c⁻, {at:.6e} at T_c, step {step:.2e}, slope {:.3} \
+                 p_c / T_c",
+                d.cap_slope_pa_per_k().unwrap() * t_c.value() / p_c.value()
+            );
+            // A fitted ancillary whose first exponent lies below 1 nears its critical pressure as
+            // θ^tᵢ, so slowly that at 10⁻¹² T_c it still lies 7.5 × 10⁻⁴ above it (carbon
+            // monoxide's): a fit's artefact, as its slope there is (no gas row of the air).
+            let bound = if d.critical_slope_pa_per_k().is_some() {
+                2e-6
+            } else {
+                1e-3
+            };
+            assert!(step < bound, "{key}: {below} below T_c against {at} at it");
+            assert!(relative(above, at) < 1e-9 && above > at, "{key}");
+            assert_same_bits(at, p_c.value());
+            for t in [0.5, 0.9, 0.999_999] {
+                let t = Kelvin::new(t * t_c.value());
+                assert_same_bits(
+                    d.condensation_cap(t).value(),
+                    d.saturation_pressure(t).value(),
+                );
+            }
+            let slope = d.cap_slope_pa_per_k().unwrap();
+            let reduced = slope * t_c.value() / p_c.value();
+            match d.critical_slope_pa_per_k() {
+                Some(critical) => {
+                    assert_same_bits(slope, critical);
+                    // A curve whose reducing point is not its critical point steps there in value
+                    // (sulphur dioxide's), so its quotients are not its slope's.
+                    if step <= 1e-9 {
+                        let quotients = |delta: f64| {
+                            let dt = delta * t_c.value();
+                            let under = d.condensation_cap(Kelvin::new(t_c.value() - dt)).value();
+                            let over = d.condensation_cap(Kelvin::new(t_c.value() + dt)).value();
+                            relative((at - under) / dt, (over - at) / dt)
+                        };
+                        let (wide, narrow) = (quotients(1e-6), quotients(1e-10));
+                        eprintln!(
+                            "{key}: slope step {wide:.2e} at 1e-6 T_c, {narrow:.2e} at 1e-10 T_c"
+                        );
+                        assert!(
+                            narrow < 1e-5 && narrow < wide,
+                            "{key}: {narrow} after {wide}"
+                        );
+                    }
+                }
+                None => assert!((5.5..7.5).contains(&reduced), "{key}: {reduced}"),
+            }
+            let hot = Kelvin::new(2.0 * t_c.value());
+            assert!(
+                relative(
+                    d.condensation_cap(hot).value(),
+                    p_c.value() + slope * t_c.value()
+                ) < 1e-12,
+                "{key}"
+            );
+            assert_same_bits(d.condensation_cap(Kelvin::new(f64::NAN)).value(), 0.0);
         }
     }
 

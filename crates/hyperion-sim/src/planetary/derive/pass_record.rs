@@ -707,9 +707,10 @@ impl WaterGate {
 
     /// The gate of the atmosphere `air`, the state its water follows
     /// ([`Atmosphere::water_state`]) and its retention
-    /// ([`Atmosphere::retains_against_escape`]), of a body whose inventory's water is `water`, of
-    /// its record's bulk's radius and gravity `bulk` ([`RecordSpin::bulk`]): a pass's published
-    /// partition's and the record's.
+    /// ([`Atmosphere::retains_against_escape`]), of a body whose inventory's water is `water` (or
+    /// the water a past-only runaway kept, [`Atmosphere::surface_water_inventory`], P14.T53.b part
+    /// 3), of its record's bulk's radius and gravity `bulk` ([`RecordSpin::bulk`]): a pass's
+    /// published partition's and the record's.
     #[must_use]
     pub(crate) fn of_air(
         air: &Atmosphere,
@@ -719,7 +720,7 @@ impl WaterGate {
         Self::new(
             air.water_state(),
             air.retains_against_escape(Gas::Water),
-            water,
+            air.surface_water_inventory(water),
             bulk,
         )
     }

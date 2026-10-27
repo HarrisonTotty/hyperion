@@ -614,7 +614,8 @@ impl BulkProperties {
 /// a condensable above its critical temperature whose liquid-like column over its critical
 /// isochore holds at least a thousandth of the mass), whose air is its [`Envelope`] section's, so
 /// that no surface section is `Ok` with no surface behind it (decision-p14-t35e-wire §2). It is
-/// never in the state [`SurfaceState::GasEnvelope`].
+/// never in the state [`SurfaceState::GasEnvelope`], nor, from generator version 25, in
+/// [`SurfaceState::SteamEnvelope`] (P14.T53.b part 3), a water envelope's.
 ///
 /// It also carries the body's taxonomic class (P14.T51.e, [`TaxonomicClass`]), a label of its
 /// surface's spectrum read from its built crust, condensates, modifiers and figures, held off the
@@ -677,8 +678,9 @@ impl Surface {
     /// The surface of a body in the state `state`, of material `material`, with the conditions
     /// `conditions`, the figures `figures` and the published condensates `condensates`
     /// ([`Partition::publish`](crate::planetary::chem::partition::Partition::publish)), which the
-    /// figures' liquids and ices read; `None` for the gas-envelope state, which has no surface,
-    /// and for conditions without their climate regime, which the batch's second stage gives
+    /// figures' liquids and ices read; `None` for the gas-envelope state and the steam-envelope
+    /// state (P14.T53.b part 3), which have no surface on the record, and for conditions without
+    /// their climate regime, which the batch's second stage gives
     /// ([`SurfaceConditions::with_climate`]).
     #[must_use]
     pub(crate) fn new(
@@ -688,7 +690,7 @@ impl Surface {
         figures: GlobalFigures,
         condensates: Condensates,
     ) -> Option<Self> {
-        if state == SurfaceState::GasEnvelope {
+        if Self::refuses(state) {
             return None;
         }
         Some(Self {
@@ -706,6 +708,16 @@ impl Surface {
             taxonomic_class: Modelled::NotModelled,
             basis: None,
         })
+    }
+
+    /// Whether a surface refuses the state `state`: the gas-envelope state and, from P14.T53.b
+    /// part 3, the steam-envelope state, whose bodies have no surface on the record.
+    #[must_use]
+    pub(crate) const fn refuses(state: SurfaceState) -> bool {
+        matches!(
+            state,
+            SurfaceState::GasEnvelope | SurfaceState::SteamEnvelope
+        )
     }
 
     /// The surface with what its conditions and condensates were built on, `basis` (rule (f)).
@@ -783,7 +795,8 @@ impl Surface {
         (self.conditions, self.figures)
     }
 
-    /// The surface state (P14.T13.c), never [`SurfaceState::GasEnvelope`].
+    /// The surface state (P14.T13.c), never [`SurfaceState::GasEnvelope`] or
+    /// [`SurfaceState::SteamEnvelope`].
     #[must_use]
     pub const fn state(&self) -> SurfaceState {
         self.state
@@ -2229,11 +2242,16 @@ mod tests {
     /// surface to the generator, which publishes it, and its envelope not applicable; and the
     /// batch's derivation read under the hold is tagged as the hold's. Its bulk's gravity is its
     /// derivation's, to the bit, so that the builder and the generator decide alike.
+    ///
+    /// With every 25 hold in force, P14.T53.b part 3's, the partition's cap holds its nitrogen at
+    /// its isochore, its air cools under methane's critical point and its methane condenses, so
+    /// that it keeps its surface (decision-p14-t53b-part3 §12 (0400)), from the generator and the
+    /// builder alike.
     #[test]
     fn under_every_24_hold_a_supercritical_envelope_takes_the_envelope_s_tags_from_the_builder() {
         use crate::planetary::chem::escape::{EscapeRules, with_rules};
         use crate::planetary::system::tests::supercritical_methane_body;
-        use crate::planetary::testing::with_every_24_hold;
+        use crate::planetary::testing::{with_every_24_hold, with_every_25_hold};
         let tags = |record: &BodyRecord| {
             (
                 record.section_state(RecordSection::Surface),
@@ -2244,6 +2262,15 @@ mod tests {
         let enveloped = (SectionState::NotApplicable, SectionState::NotModelled);
         let (batch_record, batch) = with_every_24_hold(supercritical_methane_body);
         let (held_record, held) = with_rules(EscapeRules::Held, supercritical_methane_body);
+        let (steam_record, steam) = with_every_25_hold(supercritical_methane_body);
+        assert_eq!(
+            tags(&steam_record),
+            (SectionState::Ok, SectionState::NotApplicable)
+        );
+        assert_eq!(
+            with_every_25_hold(|| tags(&built(&steam))),
+            (SectionState::NotModelled, SectionState::NotApplicable)
+        );
         for (record, derived) in [(&batch_record, &batch), (&held_record, &held)] {
             let bulk = record.bulk().ok().expect("a present body's bulk");
             hyperion_testkit::float::assert_same_bits(

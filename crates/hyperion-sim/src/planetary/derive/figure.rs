@@ -113,7 +113,8 @@ pub enum FigureLaw {
 /// What a body's heights are measured from (P14.T46.e).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Datum {
-    /// The solid or liquid surface.
+    /// The solid or liquid surface, or, under a supercritical envelope (P14.T53.b), the top of its
+    /// liquid-like reservoir.
     SolidSurface,
     /// The 1-bar level of a hydrogen and helium envelope, which its radius is quoted at.
     OneBar,

@@ -256,7 +256,10 @@ pub(crate) fn header_pressure(inputs: &CoarseInputs) -> Pascals {
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
         | SurfaceState::Snowball
-        | SurfaceState::Tenuous => Pascals::new(unsigned_zero(inputs.surface_pressure().value())),
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => {
+            Pascals::new(unsigned_zero(inputs.surface_pressure().value()))
+        }
     }
 }
 

@@ -632,7 +632,8 @@ pub fn tectonic_regime(inputs: &RegimeInputs) -> TectonicRegime {
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Tenuous => false,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => false,
     };
     let wet = holds_water && inputs.water_depth >= PLATE_WATER_DEPTH;
     if wet {

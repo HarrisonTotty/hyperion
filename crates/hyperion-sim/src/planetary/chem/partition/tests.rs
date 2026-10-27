@@ -2247,7 +2247,16 @@ fn under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density(
     let ground = on_earth(EARTH_GRAVITY);
     let minor = diagram.saturation_pressure(climate.mean());
     let others = Pascals::new(3e6);
-    let weight = || own_ocean_weight(species, diagram, &climate, &ground, others, minor);
+    let weight = || {
+        own_ocean_weight(
+            (species, diagram),
+            &climate,
+            &ground,
+            others,
+            minor,
+            CriticalCap::Uncapped,
+        )
+    };
     let held = weight();
     let moved = with_compressed_liquids(CompressedLiquidsRules::Compressed, weight);
     let rho = co2
@@ -2404,4 +2413,296 @@ fn an_ice_held_cold_trap_replaces_the_coldest_zone_alone() {
         partition(&climate, &ground, &at_coldest).condensates(),
         partition(&climate, &ground, &inventory).condensates()
     );
+}
+
+/// The phase diagram of the row `key`.
+fn phase_diagram(key: &str) -> &'static PhaseDiagram {
+    id(key).substance().phase_diagram().unwrap()
+}
+
+/// The methane of a column `kilobars` deep alone over an isothermal climate at `t`, K, at Earth's
+/// gravity (P14.T53.b part 3's hand cases).
+fn methane_column(t: f64, kilobars: f64) -> (ClimateSpan, Ground, ColumnInventory) {
+    (
+        ClimateSpan::isothermal(Kelvin::new(t)),
+        gravity(EARTH_GRAVITY),
+        inventory(&[("CH4", kilobars * 1e8)]),
+    )
+}
+
+/// P14.T53.b part 3 (decision-p14-t51a-partition §5): with every landed 25 hold in force, a methane
+/// column above its 190.564 K critical point keeps its own critical isochore's pressure airborne,
+/// about 60 bar at 200 K, and the rest lies at the surface as a liquid-like supercritical
+/// reservoir; under part 3's hold all of it is airborne, as at version 24.
+#[test]
+fn under_every_25_hold_a_methane_column_above_its_critical_point_is_capped_at_its_isochore() {
+    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
+    use crate::planetary::testing::with_every_25_hold;
+    let ch4 = phase_diagram("CH4");
+    let (climate, ground, column) = methane_column(200.0, 1.0);
+    let isochore = ch4.condensation_cap(Kelvin::new(200.0)).value();
+    assert!((59e5..61e5).contains(&isochore), "{isochore}");
+    with_every_25_hold(|| {
+        let world = partition(&climate, &ground, &column);
+        let methane = of(&world, "CH4");
+        assert_same_bits(methane.dominance(), 1.0);
+        assert!(relative(methane.airborne().value(), isochore) < 1e-12);
+        assert!(relative(methane.partial_pressure().value(), isochore) < 1e-12);
+        assert!(relative(methane.condensed().value(), 1e8 - isochore) < 1e-12);
+        let fluid = condensate(&world, "CH4");
+        assert_eq!(fluid.phase(), CondensatePhase::Supercritical);
+        assert_same_bits(
+            fluid.reservoir().value(),
+            methane.condensed().value() / EARTH_GRAVITY,
+        );
+        // A supercritical reservoir is never seasonal (decision-p14-t53b-part3 §9).
+        assert!(!fluid.is_seasonal(), "{fluid:?}");
+        // Its column with the most fluid is the partition's own reservoir, below the melting
+        // curve whole.
+        let mut weights = AirborneWeights::new();
+        weights.solve(&climate, &ground, &column);
+        let reservoir = weights.supercritical_column(&climate, &column).unwrap();
+        assert_eq!(reservoir.substance(), id("CH4"));
+        assert_same_bits(reservoir.reservoir().value(), methane.condensed().value());
+        assert_same_bits(reservoir.fluid().value(), methane.condensed().value());
+        assert_same_bits(
+            reservoir.surface_pressure().value(),
+            world.surface_pressure().value(),
+        );
+        assert_same_bits(reservoir.lies_at().value(), 200.0);
+        let melting = reservoir.melting_pressure().unwrap().value();
+        // Setzmann and Wagner 1991's melting equation: 5.94 kbar at 200 K.
+        assert!((5.8e8..6.1e8).contains(&melting), "{melting}");
+        // Under part 3's hold the column is all airborne, as at version 24.
+        let held = with_steam_envelope(SteamEnvelopeRules::Held, || {
+            partition(&climate, &ground, &column)
+        });
+        assert_same_bits(of(&held, "CH4").condensed().value(), 0.0);
+        assert_same_bits(condensate(&held, "CH4").reservoir().value(), 0.0);
+        let mut held_weights = AirborneWeights::new();
+        with_steam_envelope(SteamEnvelopeRules::Held, || {
+            held_weights.solve(&climate, &ground, &column);
+        });
+        assert!(
+            held_weights
+                .supercritical_column(&climate, &column)
+                .is_none()
+        );
+    });
+}
+
+/// P14.T53.b part 3: the reservoir's fluid ends at its melting pressure, the solid beneath it; and
+/// where the surface pressure itself reaches the melting curve, the reservoir is solid
+/// (decision-absurd-states-24 R2.2: methane at 41.8–68.3 kbar is solid above about 5.4–5.7 kbar
+/// at 192–197 K, Setzmann and Wagner 1991's melting equation, not supercritical).
+#[test]
+fn under_every_25_hold_the_melting_curve_comes_first_above_the_critical_point() {
+    use crate::planetary::testing::with_every_25_hold;
+    with_every_25_hold(|| {
+        let (climate, ground, deep) = methane_column(200.0, 10.0);
+        let mut weights = AirborneWeights::new();
+        weights.solve(&climate, &ground, &deep);
+        let reservoir = weights.supercritical_column(&climate, &deep).unwrap();
+        let melting = reservoir.melting_pressure().unwrap();
+        assert_same_bits(
+            reservoir.fluid().value(),
+            (melting - reservoir.surface_pressure()).value(),
+        );
+        assert!(reservoir.fluid() < reservoir.reservoir(), "{reservoir:?}");
+        let world = partition(&climate, &ground, &deep);
+        assert_eq!(
+            condensate(&world, "CH4").phase(),
+            CondensatePhase::Supercritical
+        );
+        // Under ten kilobars of helium the surface pressure lies above methane's melting pressure
+        // at 200 K, so its reservoir lies there as a solid.
+        let buried = inventory(&[("CH4", 1e8), ("He", 1e9)]);
+        let world = partition(&climate, &ground, &buried);
+        assert!(world.surface_pressure() >= melting, "{world:?}");
+        let solid = condensate(&world, "CH4");
+        assert!(solid.reservoir().value() > 0.0, "{solid:?}");
+        assert_eq!(solid.phase(), CondensatePhase::Solid);
+        let mut weights = AirborneWeights::new();
+        weights.solve(&climate, &ground, &buried);
+        let column = weights.supercritical_column(&climate, &buried).unwrap();
+        assert_same_bits(column.fluid().value(), 0.0);
+    });
+}
+
+/// P14.T53.b part 3: the cap and the airborne methane are continuous across its critical point
+/// (decision-p14-t51a-partition §5, where the curve meets the isochore in value and slope).
+#[test]
+fn under_every_25_hold_the_cap_is_continuous_across_the_critical_point() {
+    use crate::planetary::testing::with_every_25_hold;
+    with_every_25_hold(|| {
+        let t_c = phase_diagram("CH4").critical_temperature().value();
+        let airborne = |t: f64| {
+            let (climate, ground, column) = methane_column(t, 1.0);
+            of(&partition(&climate, &ground, &column), "CH4")
+                .airborne()
+                .value()
+        };
+        let (below, at, above) = (
+            airborne(t_c * (1.0 - 1e-12)),
+            airborne(t_c),
+            airborne(t_c * (1.0 + 1e-12)),
+        );
+        assert!(relative(below, at) < 1e-9, "{below} below against {at}");
+        assert!(relative(above, at) < 1e-9, "{above} above against {at}");
+        assert!(below < at && at < above);
+    });
+}
+
+/// P14.T53.b part 3: a supercritical reservoir is published with its reservoir, its layer over its
+/// liquid's density at its critical temperature, and its share of the basins as a liquid's; a
+/// supercritical fluid that is the air at the surface (the measured Venus's carbon dioxide) keeps
+/// none.
+#[test]
+fn under_every_25_hold_a_supercritical_reservoir_is_published_as_a_layer() {
+    use crate::planetary::testing::with_every_25_hold;
+    with_every_25_hold(|| {
+        let (climate, ground, column) = methane_column(200.0, 1.0);
+        let world = partition(&climate, &ground, &column);
+        let cold_area = |_: Kelvin| 0.0;
+        let water = WaterCover {
+            surface_water: KilogramsPerSquareMetre::ZERO,
+            potential_ocean: 0.0,
+            ice_fraction: 0.0,
+            ice_density: KilogramsPerCubicMetre::new(917.0),
+            crust_water: CrustWater::Unlisted,
+        };
+        let cover = Cover {
+            cold_area: &cold_area,
+            state: SurfaceState::Snowball,
+            water,
+        };
+        let published = world.publish(&cover);
+        let entry = published
+            .entry(id("CH4"), CondensatePhase::Supercritical)
+            .unwrap();
+        let reservoir = condensate(&world, "CH4").reservoir().value();
+        assert_same_bits(entry.reservoir().value(), reservoir);
+        let rho = id("CH4")
+            .substance()
+            .liquid_density_at_pressure(
+                phase_diagram("CH4").critical_temperature(),
+                world.surface_pressure(),
+            )
+            .unwrap()
+            .value();
+        assert!((150.0..250.0).contains(&rho), "{rho} kg m⁻³");
+        assert_same_bits(entry.reservoir_gel().unwrap().value(), reservoir / rho);
+        assert!(!entry.is_seasonal());
+        assert_eq!(
+            published.surface_liquids(),
+            Vec::<(SubstanceId, f64)>::new()
+        );
+        let venus = venus("Venus at 92 bar", 9.2e6).partition();
+        let fluid = venus.publish(&cover);
+        let entry = fluid
+            .entry(id("CO2"), CondensatePhase::Supercritical)
+            .unwrap();
+        assert_same_bits(entry.reservoir().value(), 0.0);
+        assert_same_bits(entry.area_fraction(), 0.0);
+    });
+}
+
+/// P14.T53.b part 3 (the determinism review): with every 25 hold in force, the partition above
+/// the critical point is the same twice, and a shared scratch, its supercritical column read
+/// with its weights, is the same in any order of cases, a version 24 solve among them.
+#[test]
+fn under_every_25_hold_the_cap_and_its_column_are_the_same_twice_and_in_any_order() {
+    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
+    use crate::planetary::testing::with_every_25_hold;
+    with_every_25_hold(|| {
+        let (climate, ground, _) = methane_column(200.0, 1.0);
+        let below = ClimateSpan::isothermal(Kelvin::new(180.0));
+        let cases: Vec<(ClimateSpan, ColumnInventory)> = vec![
+            (climate, methane_column(200.0, 1.0).2),
+            (climate, methane_column(200.0, 10.0).2),
+            (climate, inventory(&[("CH4", 1e8), ("He", 1e9)])),
+            (climate, inventory(&[("N2", 1e8), ("CH4", 1e6)])),
+            (below, methane_column(180.0, 1.0).2),
+        ];
+        for (climate, inv) in &cases {
+            assert_eq!(
+                format!("{:?}", partition(climate, &ground, inv)),
+                format!("{:?}", partition(climate, &ground, inv))
+            );
+        }
+        let shared = RefCell::new(AirborneWeights::new());
+        let solve_once = |held: bool, (climate, inv): &(ClimateSpan, ColumnInventory)| {
+            let mut weights = shared.borrow_mut();
+            if held {
+                with_steam_envelope(SteamEnvelopeRules::Held, || {
+                    weights.solve(climate, &ground, inv);
+                });
+            } else {
+                weights.solve(climate, &ground, inv);
+            }
+            format!(
+                "{:?} {:?}",
+                weights.weights(),
+                weights.supercritical_column(climate, inv)
+            )
+        };
+        assert_order_independent(&cases, |case| solve_once(false, case));
+        // A version 24 solve between two leaves no trace in the next.
+        let first = solve_once(false, &cases[0]);
+        let between = solve_once(true, &cases[1]);
+        assert!(between.ends_with("None"), "{between}");
+        assert_eq!(solve_once(false, &cases[0]), first);
+    });
+}
+
+/// P14.T53.b part 3 (the Rust review): a supercritical reservoir shares the basins by volume with
+/// the other liquids, as a liquid does: methane above its critical point beside a sea of ammonia
+/// at 250 K, on Earth's basins, each entry's area its layer's share of the basins' fill of their
+/// summed layers.
+#[test]
+fn under_every_25_hold_a_supercritical_reservoir_shares_the_basins_with_the_liquids() {
+    use crate::planetary::testing::with_every_25_hold;
+    with_every_25_hold(|| {
+        let climate = ClimateSpan::isothermal(Kelvin::new(250.0));
+        let ground = on_earth(EARTH_GRAVITY);
+        // 160 bar of methane, some 27 bar above its isochore's 133 bar at 250 K: a layer of about
+        // 1.7 km at its critical density, which fills Earth's basins in part.
+        let world = partition(
+            &climate,
+            &ground,
+            &inventory(&[("CH4", 1.6e7), ("NH3", 1e6)]),
+        );
+        let cold_area = |_: Kelvin| 0.0;
+        let cover = Cover {
+            cold_area: &cold_area,
+            state: SurfaceState::Snowball,
+            water: WaterCover {
+                surface_water: KilogramsPerSquareMetre::ZERO,
+                potential_ocean: 0.0,
+                ice_fraction: 0.0,
+                ice_density: KilogramsPerCubicMetre::new(917.0),
+                crust_water: CrustWater::Unlisted,
+            },
+        };
+        let published = world.publish(&cover);
+        let fluid = published
+            .entry(id("CH4"), CondensatePhase::Supercritical)
+            .unwrap();
+        let sea = published.entry(id("NH3"), CondensatePhase::Liquid).unwrap();
+        assert!(fluid.reservoir() > sea.reservoir(), "{published:?}");
+        let (d_fluid, d_sea) = (
+            fluid.reservoir_gel().unwrap().value(),
+            sea.reservoir_gel().unwrap().value(),
+        );
+        // The liquids are summed in the condensates' order, the larger reservoir first.
+        let volume = d_fluid + d_sea;
+        let filled = earth_basins().area_filled(Metres::new(volume));
+        assert!(filled > 0.0 && filled < 1.0, "{filled}");
+        assert_same_bits(fluid.area_fraction(), filled * d_fluid / volume);
+        assert_same_bits(sea.area_fraction(), filled * d_sea / volume);
+        assert_eq!(
+            published.surface_liquids(),
+            vec![(id("NH3"), sea.area_fraction())]
+        );
+    });
 }

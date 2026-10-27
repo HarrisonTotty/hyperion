@@ -205,7 +205,8 @@ fn f64_or_none(w: &mut GoldenWriter, label: &str, value: Option<f64>) {
 
 /// The golden's diagram section: each condensable's points, anchors, saturation pressure at fixed
 /// fractions of its triple and critical temperatures, liquid and solid densities, melting
-/// pressure, enthalpies and boiling point under one atmosphere (P14.T49.b).
+/// pressure, enthalpies and boiling point under one atmosphere (P14.T49.b), and the partition's cap
+/// ([`cap_lines`]).
 fn diagram_section(w: &mut GoldenWriter) {
     w.line("[diagram]");
     for id in substance::diagram::condensables() {
@@ -301,6 +302,24 @@ fn diagram_section(w: &mut GoldenWriter) {
             &format!("{label}: saturation_temperature_k at 101325 Pa"),
             d.saturation_temperature(Pascals::new(101_325.0))
                 .map(Kelvin::value),
+        );
+        cap_lines(w, &label, d, t_c);
+    }
+}
+
+/// The partition's cap above the critical point `t_c`, K, of the diagram `d` labelled `label`: its
+/// line's slope and its value at 1, 1.5 and 2 `T_c` (P14.T53.b part 3, a pure function of the row
+/// that its hold reads).
+fn cap_lines(w: &mut GoldenWriter, label: &str, d: &PhaseDiagram, t_c: f64) {
+    f64_or_none(
+        w,
+        &format!("{label}: cap_slope_pa_per_k"),
+        d.cap_slope_pa_per_k(),
+    );
+    for (name, t) in [("T_c", t_c), ("1.5 T_c", 1.5 * t_c), ("2 T_c", 2.0 * t_c)] {
+        w.f64(
+            &format!("{label}: condensation_cap_pa at {name}"),
+            d.condensation_cap(Kelvin::new(t)).value(),
         );
     }
 }

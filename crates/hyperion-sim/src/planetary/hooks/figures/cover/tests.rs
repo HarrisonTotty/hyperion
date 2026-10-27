@@ -672,7 +672,8 @@ fn surface_water_as_built(
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Tenuous => false,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => false,
     };
     let (kg, r, g) = (water.value(), radius.value(), surface_gravity.value());
     if !(holds && atmosphere.retains_against_escape(Gas::Water) && kg > 0.0 && r > 0.0 && g > 0.0) {

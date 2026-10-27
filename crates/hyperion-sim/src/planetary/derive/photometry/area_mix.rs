@@ -1714,15 +1714,16 @@ pub(crate) fn with_area_mix_weathering<R>(rules: AreaMixWeathering, run: impl Fn
 
 /// The share of the disc under cloud of a body in the state `state` before its condensable's
 /// availability (the lane's stand-in, P14.T51.b, recorded): a runaway greenhouse 1, Venus's deck
-/// (T13.c's table); a temperate world and a snowball Earth's 0.67 (King et al. 2013, IEEE TGRS 51,
-/// 3826, as T13.c's table cites it); a gas envelope 1, whose albedo is its class's, clouds
-/// included ([`giant_bond`]); airless and molten surfaces none.
+/// (T13.c's table), and a steam envelope the same, stated (P14.T53.b part 3); a temperate world and
+/// a snowball Earth's 0.67 (King et al. 2013, IEEE TGRS 51, 3826, as T13.c's table cites it); a gas
+/// envelope 1, whose albedo is its class's, clouds included ([`giant_bond`]); airless and molten
+/// surfaces none.
 #[must_use]
 pub(crate) fn cloud_share_of_state(state: SurfaceState) -> f64 {
     match state {
-        SurfaceState::RunawayGreenhouse | SurfaceState::GasEnvelope => {
-            SurfaceState::RunawayGreenhouse.cloud_fraction()
-        }
+        SurfaceState::RunawayGreenhouse
+        | SurfaceState::GasEnvelope
+        | SurfaceState::SteamEnvelope => SurfaceState::RunawayGreenhouse.cloud_fraction(),
         SurfaceState::Temperate | SurfaceState::Snowball => {
             SurfaceState::Temperate.cloud_fraction()
         }
@@ -1805,7 +1806,8 @@ pub(crate) fn cloud_availability(partition: &Partition, shade: &HostShade) -> f6
 /// greenhouse under its deck, which keeps it with or without sulphur, and a gas envelope (the plan:
 /// "never from the Surface path's decks"). A runaway solved without its deck
 /// ([`RunawayDeck::Deckless`], P14.T53.b part 1 (b); decision-absurd-states-24 R3.2) takes a
-/// temperate world's share times its availability, the water cloud's, none on a dry world.
+/// temperate world's share times its availability, the water cloud's, none on a dry world. A
+/// steam envelope takes a runaway's, by its deck (P14.T53.b part 3).
 #[must_use]
 pub(crate) fn cloud_fraction(
     (state, deck): (SurfaceState, RunawayDeck),
@@ -1813,10 +1815,9 @@ pub(crate) fn cloud_fraction(
     shade: &HostShade,
 ) -> f64 {
     match (state, deck) {
-        (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) | (SurfaceState::GasEnvelope, _) => {
-            cloud_share_of_state(state)
-        }
-        (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless) => {
+        (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Kept)
+        | (SurfaceState::GasEnvelope, _) => cloud_share_of_state(state),
+        (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Deckless) => {
             cloud_share_of_state(SurfaceState::Temperate) * cloud_availability(partition, shade)
         }
         (SurfaceState::Temperate | SurfaceState::Snowball, _) => {
@@ -1830,14 +1831,17 @@ pub(crate) fn cloud_fraction(
 /// under the light of `shade`: a runaway greenhouse's under its deck Venus's 0.76 (Haus et al.
 /// 2016, Icarus 272, 178, T13.c's table), so that Venus keeps it exactly at its full cover; a
 /// temperate world's, a snowball's and a runaway's solved without its deck (P14.T53.b part 1 (b))
-/// the water cloud calibrated on Earth ([`water_cloud_albedo`]); none for the rest.
+/// the water cloud calibrated on Earth ([`water_cloud_albedo`]), a steam envelope's a runaway's by
+/// its deck (P14.T53.b part 3); none for the rest.
 #[must_use]
 pub(crate) fn cloud_albedo((state, deck): (SurfaceState, RunawayDeck), shade: &HostShade) -> f64 {
     match (state, deck) {
-        (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) => SurfaceState::RunawayGreenhouse
-            .albedo(SurfaceMaterial::Rock)
-            .value(),
-        (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless)
+        (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Kept) => {
+            SurfaceState::RunawayGreenhouse
+                .albedo(SurfaceMaterial::Rock)
+                .value()
+        }
+        (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Deckless)
         | (SurfaceState::Temperate | SurfaceState::Snowball, _) => shade.water_cloud,
         (
             SurfaceState::GasEnvelope

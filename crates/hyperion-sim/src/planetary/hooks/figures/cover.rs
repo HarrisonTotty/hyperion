@@ -159,7 +159,9 @@ pub fn liquid_water_density() -> KilogramsPerCubicMetre {
 /// "T13.a's water", plan 14's Risks). It reads O and T13.c's state, not the climate, so the order
 /// has no loop: the state its water follows (`Atmosphere::water_state`), which from generator
 /// version 24 is a runaway's for a world inside the runaway limit at its hosts' largest past
-/// luminosity alone, published `Temperate` or `Snowball`, its water lost (P14.T53.b part 1 (a)).
+/// luminosity alone, published `Temperate` or `Snowball`, its water lost (P14.T53.b part 1 (a)),
+/// but where it keeps water beyond its escape's capacity (part 3): then its present class's, over
+/// the water it kept, not `water` (`Atmosphere::surface_water_inventory`).
 ///
 /// # Examples
 ///
@@ -212,7 +214,7 @@ pub fn surface_water(
     surface_water_of(&SurfaceWaterInputs {
         state: atmosphere.water_state(),
         retained: atmosphere.retains_against_escape(Gas::Water),
-        water,
+        water: atmosphere.surface_water_inventory(water),
         radius,
         surface_gravity,
         vapour: atmosphere.partial_pressures().of(Gas::Water),
@@ -254,7 +256,8 @@ pub(crate) fn surface_water_of(inputs: &SurfaceWaterInputs) -> KilogramsPerSquar
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Tenuous => false,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => false,
     };
     let (kg, r, g) = (
         inputs.water.value(),
@@ -536,7 +539,8 @@ pub fn under_ice_ocean(
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Tenuous => return false,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => return false,
     }
     let (f, t_s) = (heat_flow.value(), surface_temperature.value());
     if !(f > 0.0 && t_s > 0.0 && t_s < UNDER_ICE_MELTING_POINT.value()) {
@@ -558,7 +562,8 @@ pub const fn ice_temperature(state: SurfaceState) -> Kelvin {
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => PERENNIAL_ICE_TEMPERATURE,
+        | SurfaceState::Snowball
+        | SurfaceState::SteamEnvelope => PERENNIAL_ICE_TEMPERATURE,
     }
 }
 
@@ -576,7 +581,8 @@ pub fn ice_threshold(state: SurfaceState) -> Kelvin {
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Tenuous => ice_temperature(state),
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => ice_temperature(state),
     }
 }
 
@@ -650,7 +656,8 @@ pub(crate) fn ice_fraction_over(inputs: &IceInputs<'_>, cold: f64) -> f64 {
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Tenuous => {}
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => {}
     }
     match inputs.crust {
         Crust::IceRich => cold,

@@ -410,6 +410,30 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
     })
 }
 
+/// `run`'s result with every landed hold at generator version 25 in force on this thread, over
+/// every 24 hold ([`with_every_24_hold`]), for a test that asserts a 25 figure: a hold that missed
+/// 24's membership, which P14.T54.b.i closed (decision-p14-t53b-part3 §8), rides 25 behind its own
+/// version and switch, so that every 24 test and 24's census read none of it. Each switch sets its
+/// rules back as it returns, a panic in `run` included, and a test may set one hold back inside it
+/// to compare 25 with and without it.
+///
+/// The holds, each with its switch:
+///
+/// - the steam envelope's, `STEAM_ENVELOPE_VERSION` (P14.T53.b part 3), at
+///   `SteamEnvelopeRules::Steam` through `with_steam_envelope`: the partition's cap at each
+///   condensable's critical isochore and its supercritical reservoir, the envelope's section from
+///   that reservoir, the steam a runaway keeps beyond its escape's capacity and the
+///   `SteamEnvelope` state.
+///
+/// As with 24's helper, a system or a record is read under the rules in force when it is
+/// generated, so a test generates afresh inside it. A later hold at 25 adds its switch here; 25's
+/// bump deletes this helper with its holds.
+#[cfg(test)]
+pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
+    with_every_24_hold(|| with_steam_envelope(SteamEnvelopeRules::Steam, run))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,6 +714,39 @@ mod tests {
             "every 24 hold but the read densities'"
         );
         assert_eq!(rules(), at_23, "set back after");
+    }
+
+    /// 25's first switch, the steam envelope's (P14.T53.b part 3): in force inside 25's helper,
+    /// held inside 24's, outside both and where a test sets it back, and moving none of 24's
+    /// holds' rules.
+    #[test]
+    fn the_steam_envelope_s_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::planetary::derive::atmosphere::{
+            SteamEnvelopeRules, UnlitMeanRules, with_steam_envelope,
+        };
+        use crate::planetary::system::moon_ice::MoonBulkRules;
+        let others = || (UnlitMeanRules::in_force(), MoonBulkRules::in_force());
+        assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
+        assert_eq!(
+            with_every_24_hold(SteamEnvelopeRules::in_force),
+            SteamEnvelopeRules::Held
+        );
+        assert_eq!(
+            with_every_25_hold(SteamEnvelopeRules::in_force),
+            SteamEnvelopeRules::Steam
+        );
+        assert_eq!(
+            with_every_25_hold(others),
+            with_every_24_hold(others),
+            "every 24 hold, and the steam envelope's"
+        );
+        assert_eq!(
+            with_every_25_hold(|| {
+                with_steam_envelope(SteamEnvelopeRules::Held, SteamEnvelopeRules::in_force)
+            }),
+            SteamEnvelopeRules::Held
+        );
+        assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
     }
 
     #[test]

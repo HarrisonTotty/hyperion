@@ -496,7 +496,8 @@ fn pass_water_cover(
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Tenuous => false,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => false,
     };
     let reservoir = solved
         .condensate(Gas::Water.substance())
@@ -941,11 +942,14 @@ pub(super) fn area_mixed(
                 cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
             }
         }
+        // A steam envelope's photometry is a runaway's, its label read by no pass (P14.T53.b
+        // part 3).
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
         | SurfaceState::Snowball
-        | SurfaceState::Tenuous => surface_and_cloud(air, inputs, surface, shade),
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => surface_and_cloud(air, inputs, surface, shade),
     };
     #[cfg(test)]
     if let PassClimate::Spun(_) = surface.climate {
@@ -953,7 +957,7 @@ pub(super) fn area_mixed(
     }
     let albedo = floored(albedo, air, inputs, shade);
     let runaway_deck = match air.state {
-        SurfaceState::RunawayGreenhouse => surface.deck,
+        SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope => surface.deck,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
@@ -1119,7 +1123,8 @@ fn floored(albedo: f64, air: &Atmosphere, inputs: &AtmosphereInputs, shade: &Hos
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
         | SurfaceState::Snowball
-        | SurfaceState::Tenuous => true,
+        | SurfaceState::Tenuous
+        | SurfaceState::SteamEnvelope => true,
     };
     if !surface || albedo.is_nan() || RayleighFloorRules::in_force() == RayleighFloorRules::Held {
         return albedo;

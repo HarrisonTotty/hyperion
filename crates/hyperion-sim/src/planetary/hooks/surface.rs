@@ -1780,7 +1780,9 @@ impl Surface {
     fn of(inputs: &SurfaceInputs<'_>) -> Option<Self> {
         let air = inputs.atmosphere;
         let (airless, tenuous) = match air.state() {
-            SurfaceState::GasEnvelope => return None,
+            // A steam envelope's surface is hidden, as a gas envelope's (P14.T53.b part 3); its
+            // label is never an atmosphere's state, so no figure reaches this.
+            SurfaceState::GasEnvelope | SurfaceState::SteamEnvelope => return None,
             SurfaceState::Airless => (true, false),
             SurfaceState::Tenuous => (true, true),
             SurfaceState::MagmaOcean
@@ -1942,6 +1944,7 @@ pub(crate) fn published_surface_pressure(air: &Atmosphere) -> Pascals {
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
+        | SurfaceState::SteamEnvelope
         | SurfaceState::Temperate
         | SurfaceState::Snowball
         | SurfaceState::Tenuous => air.surface_pressure().unwrap_or(Pascals::ZERO),

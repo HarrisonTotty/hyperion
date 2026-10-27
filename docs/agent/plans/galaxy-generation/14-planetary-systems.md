@@ -7851,7 +7851,19 @@ feeding back into p_s, T_s, the albedo or the bulk.
       body just under the line keeps its surface; p* equals p_c at T_c; every mover listed by
       substance, T ÷ T_c and mass fraction, those beyond 2.5 T_c with their margins.
   - **Part 3, the steam envelope and the cap** (a rider: 24 if in by T24.d with T52.d's checkpoint,
-    else 25 with its hold renumbered; R1.4; decision-absurd-states-24 R2.4):
+    else 25 with its hold renumbered; R1.4; decision-absurd-states-24 R2.4; its leans ruled in
+    decision-p14-t53b-part3, which amends the bullets below as its own items say). **It rides 25:**
+    P14.T54.b.i's commit closed 24's membership before part 3 landed (decision-p14-t53b-part3 §8;
+    main, 2026-10-27), so it is behind its own hold at 25, `STEAM_ENVELOPE_VERSION`, the first
+    switch of `with_every_25_hold`, and 24's rules and census read none of it:
+    - _Boarding_ (decision-p14-t53b-part3 §8): it would have ridden 24 only if its linear series
+      had landed before P14.T54.b.i's commit. Its census for its landing at 25, every 25 hold in
+      force against every 24 hold, over the sample, the goldens and LOOK72: (B1) no present
+      `RunawayGreenhouse` or `SteamEnvelope` holds H₂O liquid or solid; (B2) Venus, the median
+      Venus, Earth, Mars and Titan are unchanged to the bit; (B3) part 2's cases keep the envelope
+      section, or main rules each by name; (B4) every mover's figures finite, no new bracketed body
+      above 10⁻⁶ or jump; (B5) every `SteamEnvelope` label-only to the bit, on a runaway's
+      division, with no `Ok` surface.
     - the water lost only up to its escape capacity over its history (Luger and Barnes 2015, on
       T53.a's rates), in place of "a runaway world loses all its water"; steam over a surface where
       the column allows one; `SteamEnvelope` above 647.1 K and 22.06 MPa with no interface; a past
@@ -7864,12 +7876,17 @@ feeding back into p_s, T_s, the albedo or the bulk.
       solid above about 5.4–5.7 kbar: decision-absurd-states-24 R2.2). Venus's 92 bar at 737 K
       lies far below its ~800-bar isochore and stays air (Lebonnois and Schubert 2017, Nat. Geosci.
       10, 473);
-    - the envelope `ok` (`record::Envelope`; a new `SurfaceState::SteamEnvelope`, which
-      `Surface::new` refuses as it refuses `GasEnvelope`; the section's tag reading the state, and
-      `derive/figure.rs`'s datum (about :129) with it; `SurfaceStateDto::SteamEnvelope` stays, its
-      doc "never sent: such a body has its envelope section"); `BodyEnvelopeDto.supercritical`'s
-      first value (`H2O`) and the client's lead row (`SUPERCRITICAL H2O`, signoff-11 item 21; other
-      keys to the UX sign-off); the figure's datum, albedo, cloud and phase template, stated;
+    - a new `SurfaceState::SteamEnvelope`, a label on the published solve where the hiding
+      reservoir is water's, which no pass reads, so that every figure is the labelled solve's to the
+      bit; every branch of the state groups it with `RunawayGreenhouse` and its deck (Venus's 0.76,
+      near Pluriel et al. 2019's cloudy steam ~0.80), and every site that refuses `GasEnvelope`
+      refuses it (`Surface::new`, the conditions, R09's builder, the server's arm); the section's
+      tag reads the state inside `has_surface_section`; the figure's datum stays `SolidSurface`, the
+      liquid-like reservoir's top (decision-p14-t53b-part3 §5); `SurfaceStateDto::SteamEnvelope`
+      stays, its doc "never sent: such a body has its envelope section". At 25 the section stays
+      `not_modelled` and `BodyEnvelopeDto.supercritical` `null` on every envelope: the envelope's
+      model, `record::Envelope` `ok`, `supercritical`'s first value (`H2O`) and the client's lead row
+      (`SUPERCRITICAL H2O`) are P14.T53.f's, with or after 25 (§7);
     - _Tests:_ a 25%-water world inside the runaway limit is `SteamEnvelope`; an Earth-water world
       loses its oceans as today; Venus unchanged; a nitrogen-warmed methane world above 190.564 K
       (science-p14-t24f §5's 1,600–3,100 bar) holds about p*(T_s) of methane airborne; the cap is
@@ -8017,6 +8034,19 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - its bless re-runs the states census and item 26's re-check.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/mod.rs` (the passes).
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`.
+- **P14.T53.f The supercritical envelope's section** (after P14.T53.b part 3, placed with 25's train; lane
+  p14-escape, else a free slot; decision-p14-t53b-part3 §7).
+  - A model of a supercritical envelope over a solid body, a steam envelope's and any other
+    condensable's: its profile, adiabat and decks, and its radius's inflation (Turbet et al. 2019,
+    A&A 628, A12; 2020, A&A 638, A41), which P14.T24.d's model gives for a hydrogen–helium
+    envelope alone.
+  - `record::Envelope` `ok` for such a body; `BodyEnvelopeDto.supercritical`'s first value, the
+    condensable's registry key (`H2O`), read off `Atmosphere::supercritical_reservoir`; the client's
+    lead row `SUPERCRITICAL H2O` (signoff-11 item 21; other keys to the UX sign-off).
+  - Until then the section is `not_modelled` and `supercritical` `null` on every envelope sent
+    (P14.T53.b parts 2 and 3).
+  - _Files:_ `planetary/record.rs`, `planetary/system.rs`, the protocol's `BodyEnvelopeDto`, the
+    client's envelope rows.
 
 #### P14.T54 The composition batches on the record
 
@@ -30801,3 +30831,160 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       4,400 L☉, and a listing scans 2 × `reach` year-bins (some 30,000 at 10⁴ L☉).
     - The halo's 10.9 a year inside 5 au is 0.79 of Francis 2005's flux scaled to 5 au
       (P14.T21.d's figure, inside the plan's 5–20).
+- **Deviations in P14.T53.b part 3, as built (`p14-escape`, 2026-10-26).** The steam envelope and
+  the partition's cap, behind its own hold at 25 (`STEAM_ENVELOPE_VERSION` 25, `SteamEnvelopeRules`,
+  the first switch of `with_every_25_hold`, which wraps `with_every_24_hold`), read only under the
+  escape's batch rules (`steam_envelope_in_force`). **It rides 25:** P14.T54.b.i's commit closed
+  24's membership before it landed (decision-p14-t53b-part3 §8; main, 2026-10-27), so every 24
+  test and 24's census read none of it; its own tests and its census run under every 25 hold.
+  Versions 23 and 24 are unchanged to the bit; no golden moved. Its leans were ruled in
+  decision-p14-t53b-part3 (§1–§13).
+  - _The cap_ (§1). `PhaseDiagram::condensation_cap`: the saturation pressure below `T_c`, and the
+    line `p_c` + s (T − `T_c`) at or above it, s `PhaseDiagram::cap_slope_pa_per_k` (the critical
+    slope, or for the six fitted ancillaries the curve's tangent at `FITTED_TANGENT_FRACTION`,
+    0.999 `T_c`: 5.86–6.77 `p_c` ÷ `T_c`). `saturation_pressure` stays infinite above `T_c`. The
+    partition reads it through `CriticalCap` (`Uncapped`, version 23's; `Isochore`), set once a
+    solve in `AirborneWeights::start`, in the minor, dominant and pulled caps, and in `taken_off`'s
+    and `condensate_of`'s sublimation tests. `C(T_c)` is `p_c` to the bit for every row; its step
+    at 10⁻¹² `T_c` is under 8 × 10⁻¹² for the rows with a critical slope (sulphur dioxide's
+    1.6 × 10⁻⁶ reducing-pressure offset aside) and 7.5 × 10⁻⁴ for carbon monoxide's fit, which
+    nears `p_c` as θ^tᵢ with tᵢ under 1. **Deviation:** the slope's continuity is held as the
+    difference quotients' step falling with δ (2.0–4.3 × 10⁻⁴ at δ = 10⁻⁶ `T_c`, 1.0–5.4 × 10⁻⁶ at
+    10⁻¹⁰ `T_c`), not under 10⁻⁶ at 10⁻⁶ `T_c` as §9 asked: the Wagner curves' θ^1.5 term makes the
+    one-sided quotient differ from the tangent as √θ.
+  - _The phase and the entry_ (§2). Under the cap, `condensed_phase_at` above `T_c` is solid at or
+    above the melting pressure at the surface pressure, else supercritical; the nothing-condensed
+    arm keeps its `p_i` ≥ `p_c` test and is no fluid where the surface pressure reaches the
+    melting curve. A supercritical reservoir is published with its reservoir, its layer over its
+    own liquid's density at `T_c` under the surface pressure (ρ_c), and its share of the basins by
+    volume beside the liquids; never seasonal, not in `surface_liquids`. Venus's carbon dioxide
+    stays `supercritical` with no reservoir, to the bit.
+  - _The section_ (§3). `AirborneWeights::supercritical_column` gives the last solve's
+    `CriticalColumn` with the most liquid-like fluid, min(R, `p_m`(T_lies) − `p_s`), or R with no
+    melting branch; `partitioned_greenhouse` returns it, `Solve` and `Atmosphere` carry it
+    (`supercritical`), and `SupercriticalReservoir::of_column` gives its share under a gravity.
+    `Atmosphere::supercritical_reservoir` reads it under part 3, and part 2's air-based predicate
+    (`hiding_reservoir`) where part 3 is held. **Deviation:** the section reads the greenhouse
+    steps' last solve (`Solve::supercritical`), not the published pass's `Supercritical`
+    condensate; 0400's test holds the two to the same nitrogen (T_lies, `p_i`, `p_s` and R) to the
+    bit.
+  - _The steam_ (§4). `Body::divide`'s runaway arm keeps the unlost water (the free water after the
+    shoreline, less `runaway_oxygen_timed`'s loss) in `air.water` where water is retained, counted
+    airborne, in place of sequestered; its oxygen and carbon are the division's to the bit.
+    `water_follows`: a past-only runaway that keeps steam has its water follow its present class.
+    **Deviation (an addition the ruling's L4 needs):** its surface's water is what it kept, not its
+    inventory's: `Atmosphere::kept_water` and `surface_water_inventory`, read by
+    `WaterGate::of_air`, `cover::surface_water` and the steps' `StepClimate::of` (its gate's water
+    now a parameter); the steps' gate reads the water's state (`Solver::water_state`), the
+    thermostat and the cold trap the division's.
+  - _The label_ (§5). **Deviation:** `SurfaceState::SteamEnvelope` is `Atmosphere::published_state`'s
+    alone (a flag set in `escaping::finish` from the hiding reservoir's gas, H₂O), and
+    `Atmosphere::state` never returns it, so that no pass and no figure reads it: label-only to the
+    bit by construction. Every branch groups it with `RunawayGreenhouse` and its deck (albedo,
+    cloud, cloud albedo, template, sulphur case, deck), and it is refused where `GasEnvelope` is:
+    `Surface::refuses` (`Surface::new`), `hooks::surface`'s `Surface::of`, R09's coarse builder, the
+    server's `surface_state` (`unreachable!`); `record_aerosols` and the aerosols' `holds_air` give
+    none. `has_surface_section` reads `published_state`. `Datum::SolidSurface`'s doc names the
+    reservoir's top. `finish`'s carbon monoxide step moved to `carbon_monoxide` (clippy's
+    `too_many_lines`; the arithmetic unchanged).
+  - _The wire_ (§7). DTO docs only (`SurfaceStateDto::SteamEnvelope` never sent; the closed-class
+    list; `silicate_vapour`'s mention struck; `FigureDatumDto::SolidSurface`; `supercritical`'s
+    pointer to P14.T53.f; `SurfaceCondensateDto`'s `reservoir_kg_m2`, `reservoir_gel_m` and
+    `area_fraction` and `SubstancePhaseDto::Supercritical` name the supercritical reservoir, sent
+    with its reservoir, layer and area under an `Ok` surface, 0400's N₂ at share 3.0 × 10⁻⁴),
+    `just gen-protocol`, no `PROTOCOL_VERSION` change. The envelope section stays `not_modelled`
+    and `supercritical` `null` at 25: P14.T53.f, entered in the task list.
+  - _The seasonal flag._ A supercritical reservoir's published entry is never seasonal
+    (`Partition::publish`); `Condensate::is_seasonal` still reads the cap at the warmest zone, and
+    no reader takes it for that phase.
+  - _API._ `Atmosphere` gains `supercritical`, `kept_water` and `steam_envelope` (private),
+    `published_state` and `surface_water_inventory` (crate); `Atmosphere::kept_water`,
+    `partitioned_reservoir` and `supercritical_column` are the tests'. `StepClimate::of` takes the
+    water as its tuple's third member (`Solver::surface_water`). `CriticalColumn` is crate-private
+    with getters. `BuildCoarseInputsError::NoSolidSurface` reads "a gas or steam envelope has no
+    solid surface". The tests' `testing::with_every_25_hold` is new: every 24 hold and part 3's
+    switch, the pattern of 24's helper for the holds that ride 25.
+  - _Files, as built also:_ `substance/diagram.rs`;
+    `derive/atmosphere/{escaping,supercritical,surface_mix}.rs`,
+    `derive/{figure,photometry,pass_record}.rs`, `photometry/area_mix.rs`;
+    `hooks/{aerosols,sulphur,surface}.rs`, `hooks/figures/{cover,interior,wet_epoch}.rs`;
+    `surface/{inputs,quantise}.rs`, `system.rs`, `system/air.rs`, `record.rs`, `testing.rs`;
+    `tests/substance_golden.rs` and `golden/substance/registry.golden` (each condensable's cap
+    slope and its cap at 1, 1.5 and 2 `T_c`: 56 new values, an extension, every pinned value
+    unchanged); the protocol's `record.rs` and
+    `record/surface.rs`, the server's `convert/planetary.rs`; the generated `BodyEnvelopeDto.ts`,
+    `BodySurfaceDto.ts`, `SurfaceStateDto.ts` and `SurfaceCondensateDto.ts`.
+  - _Accept (part 3):_ `cargo test -p hyperion-sim --lib diagram_the_condensation_cap`,
+    `planetary::chem::partition`, `planetary::derive::atmosphere`, `under_every_25_hold`,
+    `the_steam_envelope` and `planetary::testing`; run by name,
+    `cargo test -p hyperion-sim --lib under_every_25_hold_part_three_s_movers_are_stated -- --ignored`.
+  - _Tests._ The cap's continuity (`diagram_the_condensation_cap_is_continuous_across_each_critical_point`);
+    the partition's methane column at its isochore, the melting curve first, the cap continuous
+    across `T_c`, the published layer, the same in any order, the basins shared with the liquids
+    (six `under_every_25_hold_*` in `chem/partition/tests.rs`);
+    the hold's tripwire (`the_steam_envelope_is_held_only_until_the_25_bump`) and 25's helper
+    (`the_steam_envelope_s_hold_is_in_force_inside_25_s_helper_alone`); a quarter-water Earth inside the runaway limit is a steam envelope (1,154 K
+    under 2,475 bar, A 0.869 from the area mix's Rayleigh floor, share 0.247); an Earth-water
+    runaway loses its oceans as today (to the bit); a runaway keeps its water beyond its capacity
+    (a present one's steam all airborne at 994 K; past-only ones at 2 mbar of CO₂ hold ice at 169 K
+    and a sea at 308 K); a nitrogen-warmed methane world of 2.5 kbar (science-p14-t24f §5's range)
+    at 230.3 K holds 81.3 bar of methane against p* 103.8 bar (its humidity's h^(1 − d)), its
+    2,434 bar reservoir a fluid under its 8.1 kbar melting pressure, hiding its surface (share
+    0.0021); Venus, Earth, Mars, Titan and the measured Venus to the bit; a steam envelope has no
+    surface under any gravity, by its label alone where its reservoir would not hide it (10⁶ m
+    s⁻²; no hand-built moon record); `for_body`'s invariant: no `Ok` surface is `SteamEnvelope`,
+    the census body hidden under every 24 hold and none under every 25 hold.
+    §13.2's check compares the record and the derivation outside its atmosphere and its partial
+    pressures' copies (the weathering's, P14.T54.b.e, holding its 10⁻⁹⁶ Pa of water) to the bit,
+    and the atmosphere's figures but its water (its other columns, state, T_s, `p_s`, A), not its
+    atmosphere's text field by field.
+  - _The census_ (`under_every_25_hold_part_three_s_movers_are_stated`, run by name; part 1's set,
+    1,706 bodies of 102 systems, every 25 hold against every 24 hold; B1–B5, §12 and §13
+    asserted, 0900's ice alone among them; on origin e64fcb9b): 25 movers, no state flips, no
+    steam envelope and no present runaway keeping steam. Twelve N₂ airs capped at their
+    isochores (02001b2c9ffe0000.0500 1,072 → 71 bar, 205 → 150 K; LOOK72's 020e56ef20080000.0900
+    988 → 90 bar, 191 → 157 K, its 0.197 bracket now converged; 02001b2c5ffe0000.0700's 0.119 bracket
+    converged); the runaway 01ffeb2c1ffe0000.0200's O₂ capped at 5.92 `T_c` (2,568 → 1,703 bar);
+    seven past-only runaways keeping water (the four Jeans-retaining ice bulks among them:
+    02001b2cdfff0000.0200 and 01ffeb2c5ffe0000.0300 ice at 110 and 134 K, 01ffeb2c20000000.0500 a
+    sea at the 273.15 K cap, .0600 ice at 169 K; LOOK72's 820e6ee00000008d.0900 ice); two airless
+    remnant bodies keeping water unlisted (§13.2); LOOK72's 020e56ef60080003.0700 and
+    020e66efa007000b.0900 by their seasonal flags; 0400's moon 02001b2ca0000000.0401 by its host's
+    record, its figures the same. The walk's passes 9,780 against 9,962.
+  - _Rulings applied:_ §12 (0400), 02001b2ca0000000.0400 keeps its surface under every 25 hold
+    (163.414 K, 104.15 bar, its methane liquid below `T_c`, its N₂ at its isochore, share 3.0 ×
+    10⁻⁴), part 2's three tests standing at 24 as they are; §12 (0300), 01ffeb2c5ffe0000.0300's
+    ice; §12 (0900), LOOK72's 0900's ice alone, in the census; §13.2, the two airless remnants;
+    §13.3, the column beyond 2.5 `T_c` keeps its verdict at 0.75 and 1.25 p*. **Deviation (riding
+    25):** §13.1's floor-test exemption is not built, since the floor test reads every 24 hold and
+    no part 3: under every 25 hold 0900's craters' screening column mass alone differs between the
+    unlit mean's rules, by 1.5 × 10⁻¹⁵ (measured before the move), and 25's bump, which runs the
+    floor test with part 3, takes the exemption with it (the tripwire names it).
+- **Deferred findings (2026-10-13 rule), from P14.T53.b part 3:**
+  - the steam's own albedo, Venus's deck's 0.76 against Pluriel et al. 2019's ~0.80 under full
+    cloud to some 1,300 K (0.75 at 1,500 K) and ~0.25–0.26 cloudless, for 200 bar of H₂O and 100
+    bar of CO₂, its fall above ~1,900 K; a pure steam air carries no H₂SO₄; the quarter-water
+    Earth's A 0.869, from the area mix's Rayleigh floor over 2,475 bar, above both branches; the
+    dayside's clear sky under 3-D night-side clouds (Turbet et al. 2021, Nature 598, 276);
+  - the radius's inflation by a steam envelope (Turbet et al. 2019, 2020), not in the bulk radius;
+  - ρ_c as the reservoir's density, an upper bound on its layer wherever the column lies above its
+    true critical isochore (the line lies up to 2.6% under methane's and 4.3% under water's);
+  - a past-only runaway's loss taken over the whole age, so the record errs dry;
+  - a past-only runaway's carbon left airborne over a returned sea (P14.T53.e);
+  - the grey water feedback keeps a past-only runaway's kept steam above ~10 bar airborne under a
+    bar or more of CO₂ (a hand Earth keeping 179 bar: 845 K under Earth's carbon, 688 K under 1.9
+    bar), a steam hothouse that part 1 (c) takes in the passes;
+  - the partition treats each gas as pure: an N₂–CH₄ mix at 104 bar and 163 K is one fluid
+    (§12, recorded; the composition audit, P14.T53.f);
+  - the line beyond 2.5 `T_c` is extrapolated (01ffeb2c1ffe0000.0200's O₂ at 5.92 `T_c`);
+  - the two airless remnants' kept ice, 41ffecb200000005.0600 (5,821 bar, 23.8 K, A 0.858) and
+    42002cb1ffc00009.0203 (375 bar, 24.2 K, A 0.401), both rock with no lag, listed nowhere:
+    P14.T56.g's class and count (xv);
+  - carbon monoxide's fitted curve steps 7.5 × 10⁻⁴ at 10⁻¹² `T_c` (no gas row of the air), and
+    sulphur dioxide's 1.6 × 10⁻⁶ at its reducing pressure;
+  - 0400's methane ice below its melting pressure, not published as its own entry (§12, recorded);
+  - a part 1 (c) hothouse that keeps steam keeps its (c) state, for count (xi) with its water;
+  - Titan's methane humidity, 0.5, scales the cap above methane's critical point too, where no
+    measurement gives one (`METHANE_RELATIVE_HUMIDITY`);
+  - `wet_epoch::holds_water` groups `SteamEnvelope` with `GasEnvelope` (no reader, as `state`
+    never gives it), and the client's `model.ts` still reads "until P14.T53.b part 3": P14.T53.f's.
