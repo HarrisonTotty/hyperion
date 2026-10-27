@@ -2,5 +2,9 @@
 
 /**
  * What a subsurface ocean rests on (plan 14's `OceanFloor`, P14.T24.b and P14.T51.g).
+ *
+ * Below generator version 24 every ocean rests on rock. At 24 a rule makes rock, ice III and ice
+ * V; ice VI and ice VII wait for P14.T55.k's warm oceans under high-pressure ice, since an ocean
+ * at most 273.16 K lies below the V–VI–liquid point, 273.31 K (IAPWS R14-08(2011), Table 1).
  */
 export type OceanFloorDto = "rock" | "ice_iii" | "ice_v" | "ice_vi" | "ice_vii";

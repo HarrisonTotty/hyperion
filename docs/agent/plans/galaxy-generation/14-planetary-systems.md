@@ -8412,7 +8412,15 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - R08's review takes a second pass on the envelope's shape before P14.T54.b.l.
       - This commit closes the riders' membership.
     - **P14.T54.b.j The riders** (B3; each landed by P14.T54.b.i's commit).
-      - T51.e's types.
+      - T51.e's types, the wire only: T51.e puts its class on the sim's record itself, behind
+        `SMALL_BODY_TYPES_VERSION` (decision-p14-t51e-contract).
+        - `TaxonomicClassDto`, closed, with every variant at its first send.
+        - `BodySurfaceDto.taxonomic_class`: absent where the member is not modelled, `null` where
+          it is computed none.
+        - The conversion, the client's decoder and model, and `just gen-protocol`.
+        - R08's reviewer checks its units and naming before P14.T54.b.l.
+        - If T51.e has not landed by P14.T54.b.i's commit, nothing of it rides 24, and its hold
+          becomes 25.
       - T51.g.b's `subsurface_ocean` for every body, with T56.d's ocean k₂, if landed by this
         commit; `OCEAN_VERSION` goes at P14.T54.b.l.
       - T48.g's belt moments and impact velocities. If the Moon moves by more than 0.1 km/s,
@@ -8446,8 +8454,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - R09's coarse field's move through `ebm.rs`'s greenhouse constants, listed.
     - **P14.T54.b.l The bump** (B4, alone; after B3's gate and R08's sign-off).
       - It deletes every hold at 24 with its tripwire (P14.T51.g.a's `OCEAN_FLOOR_VERSION`, a
-        MUST-FIX member, among them), the four source scans with their `HELD` lists, and
-        `OCEAN_VERSION`.
+        MUST-FIX member, and `SMALL_BODY_TYPES_VERSION` among them), the source scans with their
+        `HELD` lists (the four, and T51.e's), and `OCEAN_VERSION`.
       - It restamps `thermo_equilibrium`, `condensate_extinction` ×7 and the surface crate's
         `space_weathering` `--since 24`, with whatever `fit-check` flags. No stellar table may be
         stale.
@@ -29933,6 +29941,53 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       for P14.T53.e. `the_record_s_inventory_changes_with_the_state_only_in_its_sulphur` adds a
       deckless runaway's inventory, the temperate one's to the bit. The table's Venus (the median
       Venus) keeps case 1 by its own atmosphere's `Kept`: its acid-deck test passes unchanged.
+  - _P14.T54.b.j, the riders_ (B3, 2026-10-27). `GENERATOR_VERSION` stays 23 and
+    `PROTOCOL_VERSION` 3; no golden moves, and no hold is added.
+    - _T51.e's wire_ (decision-p14-t51e-contract §4, §6.2): `TaxonomicClassDto`, closed, its 27
+      variants at the first send (the 24 Bus–DeMeo classes, P, red and neutral), each documented
+      with whether a rule makes it at 24 (S, Q, C, Ch, K, Xc, V, A, D, P, red and neutral; the 15
+      others none); `BodySurfaceDto.taxonomic_class: Modelled<TaxonomicClassDto>` after
+      `modifiers`, absent for not modelled, `null` for none. The strings are
+      `rename_all = "snake_case"`, as every protocol enum's (none sends a mixed case), which gives
+      each class's `name()` in lower case (`cgh`, `xk`, `red`); R08's reviewer checks the naming
+      before P14.T54.b.l. The server's exhaustive `taxonomic_class` and `taxonomic_class_member`
+      (through `later`), the client's model and decoder (the closed string passed through, as
+      `floor` and `lid` are), `just gen-protocol`, and the index's import and export by hand. No
+      console row: none is signed.
+    - _T51.g.b:_ docs only. `subsurface_ocean`: a regular moon's below 24, every solid surface's
+      from it, absent where the solve has no answer, `null` on a lagged moon (P14.T56.g).
+      `liquid`, `solute_mass_fraction` (at most 0.437, both solutes at their eutectics; the sim's
+      `SubsurfaceOcean::solute_mass_fraction` doc gives 0.554, the two binaries' fractions summed,
+      a bound but not the least) and `base_temperature_k` say what 24 sends; `OceanFloorDto` names
+      the floors a rule makes at 24 (rock, ice III, ice V). No `IceIi` variant
+      (decision-p14-t51gb-ice-ii: P14.T55.k's, at the next protocol bump).
+    - _T48.g:_ nothing. The Moon's impact speed at 24 is 16.768 km/s, +0.084 on 23's 16.68 (T48.f
+      as built), under the 0.1 km/s, so `LUNAR_IMPACT_VELOCITY` (16.7) and R09's reference worlds
+      stay.
+    - _T53.c:_ nothing (its wire landed with it; its census and decoding with h). _T53.d:_ its
+      member stays absent. _T53.b part 3:_ not landed at j's commit; main decides its boarding at
+      i's.
+    - _T52.e, T50.d, T49.l, T24.h.b and T56.e:_ not landed; each takes the next bump.
+    - _P14.T31.a_ landed (82a2005b) with no hold: its `planetary/events` golden moves at 24 by its
+      header alone, at l, and the systems' century of events waits for T31.c, at 25.
+    - _T56.g's `SurfaceMaterialDto` docs_ (decision-p14-t56g §7.5): Rock "rock and dust: a rock
+      bulk's, or a heated ice bulk's rock lag", Ice "an ice bulk with no lag", and the type's doc
+      says so from 24, as the sim's `SurfaceMaterial` does.
+    - _The helper's own test:_ `every_24_hold_is_in_force_inside_the_helper` compares nested
+      tuples, the first twelve holds' rules and then `SmallBodyRules`' and `AreaMixWeathering`'s,
+      which it did not check before (std's tuple impls stop at twelve), at 24 inside the helper,
+      at 23 outside it and at 24 in the set-back variants.
+    - _The APPROXIMATE plate's aerosol strings:_ left to R08's next client issue; the strings are
+      R08's, under brief-notes-24's item (decision-r08-approximate-plate §6).
+    - _Plan text:_ j's and l's first bullets take decision-p14-t51e-contract §5.2 and §5.3; l's
+      keeps its `OCEAN_FLOOR_VERSION` clause, added after the decision, beside §5.3's.
+    - _Tests:_ the protocol's `taxonomic_class_strings` (all 27) and
+      `each_later_member_round_trips_absent_null_and_a_value`'s new arm; the server's
+      `a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case` (every class of
+      `TaxonomicClass::ALL` to its own variant, its wire string `name()` in lower case, none as
+      `null`, not modelled left off) and the absent-at-23 asserts in
+      `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed`; the protocol
+      package's and the client's absent, `null` and value cases.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

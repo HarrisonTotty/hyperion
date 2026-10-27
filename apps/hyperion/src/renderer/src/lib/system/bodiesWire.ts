@@ -1595,6 +1595,7 @@ function toSurface(surface: BodySurfaceDto): BodySurface {
     condensates: modelled(surface.condensates, toCondensates),
     crust: modelled(surface.crust, toCrust),
     modifiers: modelled(surface.modifiers, toModifiers),
+    taxonomicClass: modelled(surface.taxonomic_class, (taxonomicClass) => taxonomicClass),
     biosphere: modelled(surface.biosphere, toBiosphere),
     silicateVapour: modelled(surface.silicate_vapour, toSilicateVapour),
   };

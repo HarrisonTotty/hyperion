@@ -30,7 +30,8 @@ pub use record::{
     PhaseTemplateDto, PlanetClassDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto,
     SilicateVapourDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
     SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
-    SurfaceStateDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    SurfaceStateDto, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto,
+    WetEpochDto,
 };
 pub use requests::{
     BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,

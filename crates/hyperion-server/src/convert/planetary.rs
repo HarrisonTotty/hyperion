@@ -25,8 +25,8 @@ use hyperion_protocol::{
     SeenPositionDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
     SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
     SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
-    SystemSummaryRequest, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
-    ZoneDto,
+    SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto,
+    VerticalStructureDto, WetEpochDto, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -60,6 +60,7 @@ use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
     BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, Envelope, Hooks,
     Modelled as RecordModelled, MoonOrigin, Population, Section, Surface, SystemSnapshot,
+    TaxonomicClass,
 };
 use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
 use hyperion_sim::planetary::{
@@ -1032,6 +1033,50 @@ fn surface_modifiers(modifiers: &SurfaceModifiers) -> SurfaceModifiersDto {
     }
 }
 
+/// A surface's taxonomic class member as the wire carries it (P14.T51.e, wired by P14.T54.b.j):
+/// absent where the record does not model it, every record's below generator version 24, `null`
+/// for a body the rules leave unclassed (a planet among them), and otherwise its class.
+#[must_use]
+fn taxonomic_class_member(
+    member: RecordModelled<Option<TaxonomicClass>>,
+) -> Modelled<TaxonomicClassDto> {
+    later(member.as_ref(), |class| class.map(taxonomic_class))
+}
+
+/// A taxonomic class as the wire names it, the class's name in lower case.
+#[must_use]
+const fn taxonomic_class(class: TaxonomicClass) -> TaxonomicClassDto {
+    match class {
+        TaxonomicClass::A => TaxonomicClassDto::A,
+        TaxonomicClass::B => TaxonomicClassDto::B,
+        TaxonomicClass::C => TaxonomicClassDto::C,
+        TaxonomicClass::Cb => TaxonomicClassDto::Cb,
+        TaxonomicClass::Cg => TaxonomicClassDto::Cg,
+        TaxonomicClass::Cgh => TaxonomicClassDto::Cgh,
+        TaxonomicClass::Ch => TaxonomicClassDto::Ch,
+        TaxonomicClass::D => TaxonomicClassDto::D,
+        TaxonomicClass::K => TaxonomicClassDto::K,
+        TaxonomicClass::L => TaxonomicClassDto::L,
+        TaxonomicClass::O => TaxonomicClassDto::O,
+        TaxonomicClass::Q => TaxonomicClassDto::Q,
+        TaxonomicClass::R => TaxonomicClassDto::R,
+        TaxonomicClass::S => TaxonomicClassDto::S,
+        TaxonomicClass::Sa => TaxonomicClassDto::Sa,
+        TaxonomicClass::Sq => TaxonomicClassDto::Sq,
+        TaxonomicClass::Sr => TaxonomicClassDto::Sr,
+        TaxonomicClass::Sv => TaxonomicClassDto::Sv,
+        TaxonomicClass::T => TaxonomicClassDto::T,
+        TaxonomicClass::V => TaxonomicClassDto::V,
+        TaxonomicClass::X => TaxonomicClassDto::X,
+        TaxonomicClass::Xc => TaxonomicClassDto::Xc,
+        TaxonomicClass::Xe => TaxonomicClassDto::Xe,
+        TaxonomicClass::Xk => TaxonomicClassDto::Xk,
+        TaxonomicClass::P => TaxonomicClassDto::P,
+        TaxonomicClass::Red => TaxonomicClassDto::Red,
+        TaxonomicClass::Neutral => TaxonomicClassDto::Neutral,
+    }
+}
+
 /// A member of the surface section that a later task fills, as the wire carries it (P14.T35.e):
 /// absent while this generator version does not model it, and once it does, its value converted
 /// by `value`, which is `None` for a member computed as none, sent `null`.
@@ -1051,9 +1096,10 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 /// only where the record holds none (a body whose passes took no lid), and P14.T54.b the vertical
 /// structure ([`vertical_structure_member`]) and the aerosol inventory ([`aerosol_inventory`],
 /// never `null`: the empty inventory for a surface with no air), both absent while the record
-/// holds the air's sections off, below generator version 24. The melt's own vapour,
-/// `silicate_vapour`, has no member in the record and is sent absent from every surface until
-/// P14.T55.b.
+/// holds the air's sections off, below generator version 24. The modifiers are held with them, and
+/// the taxonomic class ([`taxonomic_class_member`]) is absent while the record holds it off, below
+/// generator version 24. The melt's own vapour, `silicate_vapour`, has no member in the record and
+/// is sent absent from every surface until P14.T55.b.
 #[must_use]
 fn surface(surface: &Surface) -> BodySurfaceDto {
     let conditions = surface.conditions();
@@ -1109,6 +1155,7 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         modifiers: later(surface.modifiers(), |modifiers| {
             Some(surface_modifiers(modifiers))
         }),
+        taxonomic_class: taxonomic_class_member(surface.taxonomic_class()),
         biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
         // P14.T55.b's: the record holds no such member, so every server sends it absent until
         // then (P14.T35.f).
@@ -1877,7 +1924,10 @@ mod tests {
     /// `an_aerosol_inventory_is_sent_as_the_record_holds_it` test their conversions). So are the
     /// modifiers, held behind the same hold (P14.T54.b.c; at the bump present on every surface
     /// whose record models them; `a_surface_s_modifiers_are_sent_as_the_record_holds_them` tests
-    /// their conversion).
+    /// their conversion), and the taxonomic class, held behind its own,
+    /// `SMALL_BODY_TYPES_VERSION` (P14.T51.e, wired by P14.T54.b.j: not modelled on every record
+    /// and absent on the wire below generator version 24;
+    /// `a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case` tests its conversion).
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let (mut moons, mut absent) = (0, Vec::new());
@@ -1895,15 +1945,23 @@ mod tests {
                 wire.id
             );
             assert_eq!(
+                sim.taxonomic_class(),
+                RecordModelled::NotModelled,
+                "{}: the taxonomic class is held below 24",
+                wire.id
+            );
+            assert_eq!(
                 [
                     dto.vertical_structure.is_not_modelled(),
                     dto.aerosols.is_not_modelled(),
                     dto.modifiers.is_not_modelled(),
+                    dto.taxonomic_class.is_not_modelled(),
                     dto.biosphere.is_not_modelled(),
                     dto.silicate_vapour.is_not_modelled(),
                 ],
-                [true; 5],
-                "{}: the structure, aerosols, modifiers, biosphere and silicate vapour",
+                [true; 6],
+                "{}: the structure, aerosols, modifiers, taxonomic class, biosphere and silicate \
+                 vapour",
                 wire.id
             );
             let regular = wire.kind
@@ -2014,6 +2072,41 @@ mod tests {
                 dto.weathering_deposits
             );
         }
+    }
+
+    /// P14.T51.e, wired by P14.T54.b.j: every taxonomic class is sent as its own variant, whose
+    /// wire string is the class's name in lower case (`Cgh` as `cgh`), a class the record computes
+    /// as none as `null`, and one it does not model left off the wire. The mapping alone is
+    /// checked, since no record carries a class below generator version 24.
+    #[test]
+    fn a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case() {
+        let mut sent = Vec::new();
+        for class in TaxonomicClass::ALL {
+            let member = taxonomic_class_member(RecordModelled::Ok(Some(class)));
+            assert_eq!(
+                member,
+                Modelled::Value(taxonomic_class(class)),
+                "{}",
+                class.name()
+            );
+            assert_eq!(
+                serde_json::to_value(taxonomic_class(class)).unwrap(),
+                json!(class.name().to_lowercase()),
+                "{}",
+                class.name()
+            );
+            sent.push(taxonomic_class(class));
+        }
+        sent.sort_unstable();
+        sent.dedup();
+        assert_eq!(sent.len(), TaxonomicClass::ALL.len(), "one variant a class");
+        let none = taxonomic_class_member(RecordModelled::Ok(None));
+        assert_eq!(none, Modelled::Null);
+        assert_eq!(serde_json::to_value(none).unwrap(), serde_json::Value::Null);
+        assert_eq!(
+            taxonomic_class_member(RecordModelled::NotModelled),
+            Modelled::NotModelled
+        );
     }
 
     /// The Io-like and Mars-like modifiers' inputs of

@@ -45,6 +45,7 @@ import type {
   SurfaceMaterialDto,
   SurfaceStateDto,
   SystemIdHex,
+  TaxonomicClassDto,
   TectonicRegimeDto,
   ThermalRegimeDto,
   UniverseIdHex,
@@ -949,6 +950,15 @@ export interface BodySurface {
   readonly condensates: Modelled<ReadonlyArray<SurfaceCondensate>>;
   readonly crust: Modelled<CrustComposition>;
   readonly modifiers: Modelled<SurfaceModifiers>;
+  /**
+   * The body's taxonomic class (P14.T51.e), the class's name in lower case as the wire sends it.
+   *
+   * @remarks
+   * Not modelled from every server before generator version 24, and where the record lacks what
+   * the body's rule reads (its crust, or its modifiers); `none` for a planet, and for a member or
+   * moon the rules leave unclassed.
+   */
+  readonly taxonomicClass: Modelled<TaxonomicClassDto>;
   readonly biosphere: Modelled<Biosphere>;
   /**
    * The melt's own vapour (P14.T35.f), which is not part of the volatile air of

@@ -14,6 +14,7 @@ import type { SurfaceCondensateDto } from "./SurfaceCondensateDto";
 import type { SurfaceMaterialDto } from "./SurfaceMaterialDto";
 import type { SurfaceModifiersDto } from "./SurfaceModifiersDto";
 import type { SurfaceStateDto } from "./SurfaceStateDto";
+import type { TaxonomicClassDto } from "./TaxonomicClassDto";
 import type { TectonicRegimeDto } from "./TectonicRegimeDto";
 import type { VerticalStructureDto } from "./VerticalStructureDto";
 import type { WetEpochDto } from "./WetEpochDto";
@@ -166,7 +167,10 @@ magnetic_field_class: MagneticFieldClassDto,
 surface_age_s: number, 
 /**
  * The ocean under the surface: `null` for a body computed to hold none, and absent for a body
- * no rule computes, every body but a regular moon until P14.T51.g.
+ * no rule computes. Below generator version 24 a regular moon's alone is computed. From 24
+ * (P14.T51.g.b) every solid surface's is, absent where the solve has no answer (liquid only
+ * under high-pressure ice, or a base or floor outside its ice's field, ice II's among them),
+ * and `null` on a moon whose heated shell lost its ice (P14.T56.g).
  */
 subsurface_ocean?: SubsurfaceOceanDto | null, 
 /**
@@ -223,6 +227,16 @@ crust?: CrustCompositionDto | null,
  * whose inputs the generator refuses (an unlit body at 0 K).
  */
 modifiers?: SurfaceModifiersDto | null, 
+/**
+ * The body's taxonomic class (P14.T51.e), by its kind, its crust's lid, its veneer (its
+ * modifiers' tholin cover and its condensates' perennial ice) and, for an ordinary chondrite,
+ * its weathering. Absent from a server whose generator does not model it, every one before
+ * P14.T54.b's bump at generator version 24, and for a body whose rule reads a member its
+ * record does not give (its crust, but for a Kuiper-belt body's, or its modifiers), never to
+ * be read as none; `null` for a planet, and for a member or moon the rules leave unclassed (a
+ * majority of uncovered ice, or a lid no class is given for); otherwise the class.
+ */
+taxonomic_class?: TaxonomicClassDto | null, 
 /**
  * The biosphere's fluxes (P14.T53.d); absent until a life plan exists.
  */

@@ -800,6 +800,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       surface.verticalStructure,
       surface.aerosols,
       surface.modifiers,
+      surface.taxonomicClass,
       surface.biosphere,
       surface.silicateVapour,
     ];
@@ -904,16 +905,15 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
           ...earthSurface(),
           subsurface_ocean: null,
           aerosols: null,
+          taxonomic_class: null,
           silicate_vapour: null,
         }),
       ).surface,
     );
 
-    expect([none.subsurfaceOcean, none.aerosols, none.silicateVapour]).toEqual([
-      { kind: "none" },
-      { kind: "none" },
-      { kind: "none" },
-    ]);
+    expect([none.subsurfaceOcean, none.aerosols, none.taxonomicClass, none.silicateVapour]).toEqual(
+      [{ kind: "none" }, { kind: "none" }, { kind: "none" }, { kind: "none" }],
+    );
   });
 
   it("reads a newer server's silicate vapour as a value, never as a fault", () => {
@@ -951,6 +951,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
             volcanic_deposits: [{ substance: "SO2", area_fraction: 0.27 }],
             weathering_deposits: [],
           },
+          taxonomic_class: "cgh",
         }),
       ).surface,
     );
@@ -996,6 +997,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
         weatheringDeposits: [],
       },
     });
+    expect(valued.taxonomicClass).toEqual({ kind: "value", value: "cgh" });
   });
 
   it("reads a Jupiter's envelope, its surface not applicable", () => {

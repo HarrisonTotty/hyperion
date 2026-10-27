@@ -229,6 +229,7 @@ describe("body_detail", () => {
       "vertical_structure",
       "aerosols",
       "modifiers",
+      "taxonomic_class",
       "biosphere",
       "silicate_vapour",
     ]) {

@@ -27,8 +27,8 @@
 //! subsurface ocean's `subsurface_ocean`, an H₂/He envelope's `supercritical`. A member this
 //! generator version does not compute is absent ([`Modelled::NotModelled`]), and a reader takes it
 //! as not modelled, never as none. The members whose tasks land later (P14.T24.c, T24.e, T51.d,
-//! T53.d and T55.b) are absent until they do, and each task may reshape its own member's type
-//! while no build has sent a value of it; once a build has, a change bumps
+//! T51.e, T53.d and T55.b) are absent until they do, and each task may reshape its own member's
+//! type while no build has sent a value of it; once a build has, a change bumps
 //! [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The condensates (P14.T51.a) and the crust
 //! (P14.T51.c) are sent from P14.T54.a's batch, so their shapes are now fixed.
 //!
@@ -36,8 +36,9 @@
 //!
 //! Each closed enum here is a physics class with every variant the plan's drafted tasks name, so
 //! that no later task adds one: a variant no rule produces yet is listed and documented as such
-//! (`heat_pipe`, `episodic`, `ice_shell`; `tenuous` until generator version 24), and one no record
-//! sends (`steam_envelope`, whose body has its envelope section).
+//! (`heat_pipe`, `episodic`, `ice_shell`; `tenuous` until generator version 24; the taxonomic
+//! classes P14.T51.e's rules do not make, `cgh` among them), and one no record sends
+//! (`steam_envelope`, whose body has its envelope section).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -117,14 +118,16 @@ pub enum SurfaceStateDto {
 }
 
 /// What a surface is made of, rock or ice, by the body's water fraction (plan 14's
-/// `SurfaceMaterial`, P14.T13.c).
+/// `SurfaceMaterial`, P14.T13.c): ice for a body of at least 10% water by mass, rock otherwise;
+/// and from generator version 24 rock where a heated ice bulk's shell lost its ice, leaving a rock
+/// lag (P14.T56.g).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum SurfaceMaterialDto {
-    /// Rock and dust.
+    /// Rock and dust: a rock bulk's, or a heated ice bulk's rock lag (P14.T56.g).
     Rock,
-    /// Ice: a body of at least 10% water by mass.
+    /// Ice: a body of at least 10% water by mass, an ice bulk with no lag.
     Ice,
 }
 
@@ -209,6 +212,10 @@ pub enum MagneticFieldClassDto {
 }
 
 /// What a subsurface ocean rests on (plan 14's `OceanFloor`, P14.T24.b and P14.T51.g).
+///
+/// Below generator version 24 every ocean rests on rock. At 24 a rule makes rock, ice III and ice
+/// V; ice VI and ice VII wait for P14.T55.k's warm oceans under high-pressure ice, since an ocean
+/// at most 273.16 K lies below the V–VI–liquid point, 273.31 K (IAPWS R14-08(2011), Table 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -344,12 +351,19 @@ pub struct SubsurfaceOceanDto {
     pub thickness_m: f64,
     /// What it rests on.
     pub floor: OceanFloorDto,
-    /// Its liquid: a key of the substance registry (`H2O` for every rule so far).
+    /// Its liquid: a key of the substance registry. `H2O` below generator version 24; from 24
+    /// (P14.T51.g.b) the solution row of the solute that depresses its freezing point most,
+    /// `brine_nacl` or `nh3_h2o`, where that solute's mass fraction is at least 10⁻³, and `H2O`
+    /// otherwise.
     pub liquid: String,
-    /// The mass fraction of solutes in its liquid, in `[0, 1]`.
+    /// The mass fraction of solutes in its liquid, in `[0, 1]`: 0 below generator version 24; from
+    /// 24 its sodium chloride's and ammonia's together, each held at its eutectic's, so at most
+    /// 0.437.
     pub solute_mass_fraction: f64,
     /// Its temperature at the ice shell's base, where the shell meets it, K, positive: the
-    /// liquid's melting point there (273 K for every rule so far).
+    /// liquid's melting point there. 273 K below generator version 24; from 24 (P14.T51.g.b) ice
+    /// Ih's melting point at the base's pressure less the solutes' depression, at most 273.16 K and
+    /// lower under a deeper base or with solutes.
     pub base_temperature_k: f64,
 }
 
@@ -873,6 +887,90 @@ pub struct SurfaceModifiersDto {
     pub weathering_deposits: Vec<SubstanceAreaDto>,
 }
 
+/// A small body's taxonomic class (plan 14's `TaxonomicClass`, P14.T51.e): a label of its
+/// surface's spectrum, not a substance. On the wire each is the class's name in lower case (`s`,
+/// `cgh`, `xc`, `red`).
+///
+/// Closed, with every variant at its first send (decision-p14-t51e-contract §1.6): `DeMeo` et al.
+/// 2009's 24 Bus–`DeMeo` classes (Icarus 202, 160), in their S, C and X complexes and end members;
+/// Tholen's P, `DeMeo` and Carry 2013's low-albedo split of X (Icarus 226, 723); and the two
+/// Kuiper-belt colours. At generator version 24 the rules make S, Q, C, Ch, K, Xc, V, A, D, P, red
+/// and neutral; the others are made by no rule, so that a later rule needs no protocol change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TaxonomicClassDto {
+    /// A-type, an end member (`DeMeo` et al. 2009): an ultramafic lid's. Made from generator
+    /// version 24.
+    A,
+    /// B-type, of the C complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    B,
+    /// C-type, of the C complex (`DeMeo` et al. 2009): a CI chondrite's or a phyllosilicate lid's.
+    /// Made from generator version 24.
+    C,
+    /// Cb-type, of the C complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Cb,
+    /// Cg-type, of the C complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Cg,
+    /// Cgh-type, of the C complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Cgh,
+    /// Ch-type, of the C complex (`DeMeo` et al. 2009): a CM chondrite lid's. Made from generator
+    /// version 24.
+    Ch,
+    /// D-type, an end member (`DeMeo` et al. 2009): an asteroid belt's member or a moon, outside a
+    /// Kuiper-like belt, with a classed lid under a tholin cover over at least half its surface.
+    /// Made from generator version 24.
+    D,
+    /// K-type, an end member (`DeMeo` et al. 2009): a CV chondrite lid's. Made from generator
+    /// version 24.
+    K,
+    /// L-type, an end member (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    L,
+    /// O-type, an end member (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    O,
+    /// Q-type, an end member (`DeMeo` et al. 2009): an ordinary chondrite's fresh surface. Made
+    /// from generator version 24.
+    Q,
+    /// R-type, an end member (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    R,
+    /// S-type, of the S complex (`DeMeo` et al. 2009): an ordinary chondrite's weathered surface,
+    /// or one under an air whose column, above 10⁻⁴ kg m⁻², stops the wind's ions. Made from
+    /// generator version 24.
+    S,
+    /// Sa-type, of the S complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Sa,
+    /// Sq-type, of the S complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Sq,
+    /// Sr-type, of the S complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Sr,
+    /// Sv-type, of the S complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Sv,
+    /// T-type, an end member (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    T,
+    /// V-type, an end member (`DeMeo` et al. 2009): a basaltic lid's, as Vesta's crust. Made from
+    /// generator version 24.
+    V,
+    /// X-type, of the X complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    X,
+    /// Xc-type, of the X complex (`DeMeo` et al. 2009): an enstatite chondrite lid's. Made from
+    /// generator version 24.
+    Xc,
+    /// Xe-type, of the X complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Xe,
+    /// Xk-type, of the X complex (`DeMeo` et al. 2009). Made by no rule at generator version 24.
+    Xk,
+    /// P-type, Tholen's, the low-albedo X of `DeMeo` and Carry 2013 (geometric albedo under
+    /// 0.075): a cometary lid's under no majority veneer. Made from generator version 24.
+    P,
+    /// A Kuiper-belt body's red colour: a tholin cover over at least half its surface, whatever
+    /// its lid, as Quaoar's (Brown 2012, Annu. Rev. Earth Planet. Sci. 40, 467). Made from
+    /// generator version 24.
+    Red,
+    /// A Kuiper-belt body's neutral colour: less of its surface under tholin, as Orcus's, Charon's
+    /// and Haumea's water ice (Brown 2012). Made from generator version 24.
+    Neutral,
+}
+
 /// One net surface flux of a biosphere.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -1001,7 +1099,10 @@ pub struct BodySurfaceDto {
     /// system's age.
     pub surface_age_s: f64,
     /// The ocean under the surface: `null` for a body computed to hold none, and absent for a body
-    /// no rule computes, every body but a regular moon until P14.T51.g.
+    /// no rule computes. Below generator version 24 a regular moon's alone is computed. From 24
+    /// (P14.T51.g.b) every solid surface's is, absent where the solve has no answer (liquid only
+    /// under high-pressure ice, or a base or floor outside its ice's field, ice II's among them),
+    /// and `null` on a moon whose heated shell lost its ice (P14.T56.g).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<SubsurfaceOceanDto>>", optional)]
     pub subsurface_ocean: Modelled<SubsurfaceOceanDto>,
@@ -1055,6 +1156,16 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<SurfaceModifiersDto>>", optional)]
     pub modifiers: Modelled<SurfaceModifiersDto>,
+    /// The body's taxonomic class (P14.T51.e), by its kind, its crust's lid, its veneer (its
+    /// modifiers' tholin cover and its condensates' perennial ice) and, for an ordinary chondrite,
+    /// its weathering. Absent from a server whose generator does not model it, every one before
+    /// P14.T54.b's bump at generator version 24, and for a body whose rule reads a member its
+    /// record does not give (its crust, but for a Kuiper-belt body's, or its modifiers), never to
+    /// be read as none; `null` for a planet, and for a member or moon the rules leave unclassed (a
+    /// majority of uncovered ice, or a lid no class is given for); otherwise the class.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<TaxonomicClassDto>>", optional)]
+    pub taxonomic_class: Modelled<TaxonomicClassDto>,
     /// The biosphere's fluxes (P14.T53.d); absent until a life plan exists.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<BiosphereDto>>", optional)]
@@ -1223,6 +1334,7 @@ pub(crate) mod tests {
             condensates: Modelled::NotModelled,
             crust: Modelled::NotModelled,
             modifiers: Modelled::NotModelled,
+            taxonomic_class: Modelled::NotModelled,
             biosphere: Modelled::NotModelled,
             silicate_vapour: Modelled::NotModelled,
         }
@@ -2125,6 +2237,9 @@ pub(crate) mod tests {
                 "condensates" => surface.condensates = modelled(value, condensates),
                 "crust" => surface.crust = modelled(value, crust),
                 "modifiers" => surface.modifiers = modelled(value, modifiers),
+                "taxonomic_class" => {
+                    surface.taxonomic_class = modelled(value, || TaxonomicClassDto::V);
+                }
                 _ => surface.biosphere = modelled(value, biosphere),
             }
             surface
@@ -2136,6 +2251,7 @@ pub(crate) mod tests {
             ("condensates", condensates_json()),
             ("crust", crust_json()),
             ("modifiers", modifiers_json()),
+            ("taxonomic_class", json!("v")),
             ("biosphere", biosphere_json()),
         ];
         // Absent: the Earth's own form has none of the keys.
@@ -2614,6 +2730,40 @@ pub(crate) mod tests {
             (CrustLidDto::Primary, "primary"),
             (CrustLidDto::Secondary, "secondary"),
             (CrustLidDto::Bulk, "bulk"),
+        ]);
+    }
+
+    /// P14.T51.e: every class at its first send, each its name in lower case.
+    #[test]
+    fn taxonomic_class_strings() {
+        assert_wire_strings(&[
+            (TaxonomicClassDto::A, "a"),
+            (TaxonomicClassDto::B, "b"),
+            (TaxonomicClassDto::C, "c"),
+            (TaxonomicClassDto::Cb, "cb"),
+            (TaxonomicClassDto::Cg, "cg"),
+            (TaxonomicClassDto::Cgh, "cgh"),
+            (TaxonomicClassDto::Ch, "ch"),
+            (TaxonomicClassDto::D, "d"),
+            (TaxonomicClassDto::K, "k"),
+            (TaxonomicClassDto::L, "l"),
+            (TaxonomicClassDto::O, "o"),
+            (TaxonomicClassDto::Q, "q"),
+            (TaxonomicClassDto::R, "r"),
+            (TaxonomicClassDto::S, "s"),
+            (TaxonomicClassDto::Sa, "sa"),
+            (TaxonomicClassDto::Sq, "sq"),
+            (TaxonomicClassDto::Sr, "sr"),
+            (TaxonomicClassDto::Sv, "sv"),
+            (TaxonomicClassDto::T, "t"),
+            (TaxonomicClassDto::V, "v"),
+            (TaxonomicClassDto::X, "x"),
+            (TaxonomicClassDto::Xc, "xc"),
+            (TaxonomicClassDto::Xe, "xe"),
+            (TaxonomicClassDto::Xk, "xk"),
+            (TaxonomicClassDto::P, "p"),
+            (TaxonomicClassDto::Red, "red"),
+            (TaxonomicClassDto::Neutral, "neutral"),
         ]);
     }
 

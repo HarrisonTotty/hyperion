@@ -2,6 +2,8 @@
 
 /**
  * What a surface is made of, rock or ice, by the body's water fraction (plan 14's
- * `SurfaceMaterial`, P14.T13.c).
+ * `SurfaceMaterial`, P14.T13.c): ice for a body of at least 10% water by mass, rock otherwise;
+ * and from generator version 24 rock where a heated ice bulk's shell lost its ice, leaving a rock
+ * lag (P14.T56.g).
  */
 export type SurfaceMaterialDto = "rock" | "ice";

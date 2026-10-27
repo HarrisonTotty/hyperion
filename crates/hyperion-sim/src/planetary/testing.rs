@@ -606,7 +606,9 @@ mod tests {
 
     /// Inside [`with_every_24_hold`] every landed hold at 24 gives its 24 rules, one set back
     /// inside it gives its hold's alone, and outside it each gives the version's, 23's (P14.T24.i's
-    /// follow-up, decision-t24i-airless-state D3.3).
+    /// follow-up, decision-t24i-airless-state D3.3). Each rule set is the first twelve holds' rules
+    /// and then the later ones' (P14.T51.e's small bodies' types, P14.T54.b.e's weathered area
+    /// mix), nested, since std compares and prints tuples of at most twelve elements.
     #[test]
     #[expect(
         clippy::too_many_lines,
@@ -617,72 +619,39 @@ mod tests {
         use crate::planetary::chem::escape::EscapeRules;
         use crate::planetary::chem::tenuous::TenuousRules;
         use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-        use crate::planetary::derive::photometry::area_mix::RayleighFloorRules;
+        use crate::planetary::derive::photometry::area_mix::{
+            AreaMixWeathering, RayleighFloorRules,
+        };
         use crate::planetary::hooks::cold_traps::ColdTrapRules;
         use crate::planetary::hooks::ocean::{OceanFloorRules, OceanRules};
         use crate::planetary::system::moon_ice::MoonBulkRules;
+        use crate::planetary::system::small_bodies::SmallBodyRules;
         use crate::substance::optics::RowDarkeningRules;
         use crate::substance::{CompressedLiquidsRules, ReadDensitiesRules, with_read_densities};
         let rules = || {
             (
-                EscapeRules::in_force(),
-                RayleighFloorRules::in_force(),
-                UnlitMeanRules::in_force(),
-                MoonBulkRules::in_force(),
-                ColdTrapRules::in_force(),
-                ReadDensitiesRules::in_force(),
-                CompressedLiquidsRules::in_force(),
-                RowDarkeningRules::in_force(),
-                OceanFloorRules::in_force(),
-                TenuousRules::in_force(),
-                OceanRules::in_force(),
-                PopulationRules::in_force(),
+                (
+                    EscapeRules::in_force(),
+                    RayleighFloorRules::in_force(),
+                    UnlitMeanRules::in_force(),
+                    MoonBulkRules::in_force(),
+                    ColdTrapRules::in_force(),
+                    ReadDensitiesRules::in_force(),
+                    CompressedLiquidsRules::in_force(),
+                    RowDarkeningRules::in_force(),
+                    OceanFloorRules::in_force(),
+                    TenuousRules::in_force(),
+                    OceanRules::in_force(),
+                    PopulationRules::in_force(),
+                ),
+                (SmallBodyRules::in_force(), AreaMixWeathering::in_force()),
             )
         };
         let at_24 = (
-            EscapeRules::Batch,
-            RayleighFloorRules::Floored,
-            UnlitMeanRules::Floored,
-            MoonBulkRules::Batch,
-            ColdTrapRules::Batch,
-            ReadDensitiesRules::Read,
-            CompressedLiquidsRules::Compressed,
-            RowDarkeningRules::Darkened,
-            OceanFloorRules::Floored,
-            TenuousRules::Tenuous,
-            OceanRules::Solved,
-            PopulationRules::Laws,
-        );
-        let at_23 = (
-            EscapeRules::Held,
-            RayleighFloorRules::Held,
-            UnlitMeanRules::Held,
-            MoonBulkRules::Held,
-            ColdTrapRules::Held,
-            ReadDensitiesRules::Held,
-            CompressedLiquidsRules::Saturated,
-            RowDarkeningRules::Held,
-            OceanFloorRules::Held,
-            TenuousRules::Held,
-            OceanRules::Held,
-            PopulationRules::Held,
-        );
-        assert_eq!(rules(), at_23, "the version's, outside the helper");
-        assert_eq!(with_every_24_hold(rules), at_24);
-        assert_eq!(
-            with_every_24_hold(|| {
-                crate::planetary::chem::tenuous::with_tenuous(TenuousRules::Held, rules)
-            })
-            .9,
-            TenuousRules::Held,
-            "every 24 hold but the tenuous air's"
-        );
-        assert_eq!(
-            with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, rules)),
             (
                 EscapeRules::Batch,
                 RayleighFloorRules::Floored,
-                UnlitMeanRules::Held,
+                UnlitMeanRules::Floored,
                 MoonBulkRules::Batch,
                 ColdTrapRules::Batch,
                 ReadDensitiesRules::Read,
@@ -693,23 +662,75 @@ mod tests {
                 OceanRules::Solved,
                 PopulationRules::Laws,
             ),
+            (SmallBodyRules::Batch, AreaMixWeathering::Weathered),
+        );
+        let at_23 = (
+            (
+                EscapeRules::Held,
+                RayleighFloorRules::Held,
+                UnlitMeanRules::Held,
+                MoonBulkRules::Held,
+                ColdTrapRules::Held,
+                ReadDensitiesRules::Held,
+                CompressedLiquidsRules::Saturated,
+                RowDarkeningRules::Held,
+                OceanFloorRules::Held,
+                TenuousRules::Held,
+                OceanRules::Held,
+                PopulationRules::Held,
+            ),
+            (SmallBodyRules::Held, AreaMixWeathering::Held),
+        );
+        assert_eq!(rules(), at_23, "the version's, outside the helper");
+        assert_eq!(with_every_24_hold(rules), at_24);
+        assert_eq!(
+            with_every_24_hold(|| {
+                crate::planetary::chem::tenuous::with_tenuous(TenuousRules::Held, rules)
+            })
+            .0
+            .9,
+            TenuousRules::Held,
+            "every 24 hold but the tenuous air's"
+        );
+        assert_eq!(
+            with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, rules)),
+            (
+                (
+                    EscapeRules::Batch,
+                    RayleighFloorRules::Floored,
+                    UnlitMeanRules::Held,
+                    MoonBulkRules::Batch,
+                    ColdTrapRules::Batch,
+                    ReadDensitiesRules::Read,
+                    CompressedLiquidsRules::Compressed,
+                    RowDarkeningRules::Darkened,
+                    OceanFloorRules::Floored,
+                    TenuousRules::Tenuous,
+                    OceanRules::Solved,
+                    PopulationRules::Laws,
+                ),
+                (SmallBodyRules::Batch, AreaMixWeathering::Weathered),
+            ),
             "every 24 hold but the unlit mean's"
         );
         assert_eq!(
             with_every_24_hold(|| with_read_densities(ReadDensitiesRules::Held, rules)),
             (
-                EscapeRules::Batch,
-                RayleighFloorRules::Floored,
-                UnlitMeanRules::Floored,
-                MoonBulkRules::Batch,
-                ColdTrapRules::Batch,
-                ReadDensitiesRules::Held,
-                CompressedLiquidsRules::Compressed,
-                RowDarkeningRules::Darkened,
-                OceanFloorRules::Floored,
-                TenuousRules::Tenuous,
-                OceanRules::Solved,
-                PopulationRules::Laws,
+                (
+                    EscapeRules::Batch,
+                    RayleighFloorRules::Floored,
+                    UnlitMeanRules::Floored,
+                    MoonBulkRules::Batch,
+                    ColdTrapRules::Batch,
+                    ReadDensitiesRules::Held,
+                    CompressedLiquidsRules::Compressed,
+                    RowDarkeningRules::Darkened,
+                    OceanFloorRules::Floored,
+                    TenuousRules::Tenuous,
+                    OceanRules::Solved,
+                    PopulationRules::Laws,
+                ),
+                (SmallBodyRules::Batch, AreaMixWeathering::Weathered),
             ),
             "every 24 hold but the read densities'"
         );

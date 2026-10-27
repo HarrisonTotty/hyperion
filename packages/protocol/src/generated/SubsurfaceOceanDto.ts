@@ -18,15 +18,22 @@ thickness_m: number,
  */
 floor: OceanFloorDto, 
 /**
- * Its liquid: a key of the substance registry (`H2O` for every rule so far).
+ * Its liquid: a key of the substance registry. `H2O` below generator version 24; from 24
+ * (P14.T51.g.b) the solution row of the solute that depresses its freezing point most,
+ * `brine_nacl` or `nh3_h2o`, where that solute's mass fraction is at least 10⁻³, and `H2O`
+ * otherwise.
  */
 liquid: string, 
 /**
- * The mass fraction of solutes in its liquid, in `[0, 1]`.
+ * The mass fraction of solutes in its liquid, in `[0, 1]`: 0 below generator version 24; from
+ * 24 its sodium chloride's and ammonia's together, each held at its eutectic's, so at most
+ * 0.437.
  */
 solute_mass_fraction: number, 
 /**
  * Its temperature at the ice shell's base, where the shell meets it, K, positive: the
- * liquid's melting point there (273 K for every rule so far).
+ * liquid's melting point there. 273 K below generator version 24; from 24 (P14.T51.g.b) ice
+ * Ih's melting point at the base's pressure less the solutes' depression, at most 273.16 K and
+ * lower under a deeper base or with solutes.
  */
 base_temperature_k: number, };

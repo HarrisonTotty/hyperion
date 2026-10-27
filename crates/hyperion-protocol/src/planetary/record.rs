@@ -31,7 +31,7 @@ pub use surface::{
     OceanFloorDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, SilicateVapourDto,
     SizeDistributionDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
     SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
-    TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
 };
 
 use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, PopulationDto, SectionDto};

@@ -76,6 +76,7 @@ import type { SurfaceCondensateDto } from "./generated/SurfaceCondensateDto";
 import type { SurfaceMaterialDto } from "./generated/SurfaceMaterialDto";
 import type { SurfaceModifiersDto } from "./generated/SurfaceModifiersDto";
 import type { SurfaceStateDto } from "./generated/SurfaceStateDto";
+import type { TaxonomicClassDto } from "./generated/TaxonomicClassDto";
 import type { TectonicRegimeDto } from "./generated/TectonicRegimeDto";
 import type { ThermalRegimeDto } from "./generated/ThermalRegimeDto";
 import type { VerticalStructureDto } from "./generated/VerticalStructureDto";
@@ -289,6 +290,7 @@ export type {
   SurfaceMaterialDto,
   SurfaceModifiersDto,
   SurfaceStateDto,
+  TaxonomicClassDto,
   TectonicRegimeDto,
   ThermalRegimeDto,
   VerticalStructureDto,
