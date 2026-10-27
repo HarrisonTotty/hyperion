@@ -5073,10 +5073,14 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
   `just test-render`. _Built 2026-10-27_ (Risks, "Deviations in R08.T11.b, as built"; the band a
   height, 25 km over the datum, by `decision-r08-t11-frame.md` §8).
 - **R08.T11.c The frame re-measured (QW29),** after T11.b, T11.e and R07.T8.e–f, in QW28's form,
-  with a class-map row and three small air bodies. Acceptance: the record; every high row's p95
-  at most 16.67 ms, and at most 15.67 ms or T11.d's and R07.T8.g's turn.
+  with a class-map row and three small air bodies, and `TEST SATURN`'s rows, T6.f's Saturn-class
+  passes. Acceptance: the record; every high row's p95 at most 16.67 ms, and at most 15.67 ms or
+  T11.d's and R07.T8.g's turn. _Built 2026-10-27_ (Risks, "Deviations in R08.T11.c, as built":
+  five high rows over 16.67 ms, the blocker, and four more over 15.67 ms, at x2 and x4, so T11.d's
+  and R07.T8.g's turn, then QW30).
 - **R08.T11.d The march over the air's rectangle, and the tile cull,** both exact, only if QW29
-  leaves a high row over 15.67 ms. Acceptance: byte-identical read-backs on SwiftShader, within
+  leaves a high row over 15.67 ms, with T6.i's and T6.f's compiled-out pairs, to weigh a pipeline
+  specialised by medium. Acceptance: byte-identical read-backs on SwiftShader, within
   T8.d's ulp on the RTX 3080, and QW30.
 - **R08.T11.e The unread tables at one texel.** The absorber-column and pressure-column tables a
   medium does not read, at one texel. Design note 11's widenings are applied only above 2 MB. At
@@ -10692,7 +10696,9 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
       edged or oblate branch compiled out. The slab's and the measured Earth's rows here and in
       QW1–QW3 set an edged medium beside one without edges. R08.T8.d's W1 (one slice against
       WGS 84, about 1%) and W2 and W5 (the slab Earth costs what `EARTH_REFERENCE` does) answer
-      part of both on the RTX 3080 (the task text). The move to R12.T10 is pending main's ruling.
+      part of both on the RTX 3080 (the task text). The Saturn-class figure's passes are QW29's
+      `TEST SATURN` rows (R08.T11.c), and the compiled-out pairs R08.T11.d's turn; ruled 2026-10-27
+      (`decision-r08-approximate-plate.md`, item 3): not R12.T10's.
     - R08.T8.c's first rows are retaken in the run: the far limb's own timings on both settings
       (R05's Earth, x1; high 5.25 ms and low 0.93 ms at 400 km, medians), in the measurement.
       R08.T8.d's atmosphere-alone rows at the setting's count, at `MAX_SKY_SOURCES` and on low
@@ -10907,6 +10913,172 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
     so that a widened body's bands match its tables'.
   - _The one-texel tables in the twins_: `tablesCpu.ts` keeps its column tables at full size, of
     zeros where unread; nothing reads them there.
+- **Deviations in R08.T11.c, as built** (2026-10-27; `decision-r08-t11-frame.md` §2, QW29;
+  `decision-r08-approximate-plate.md` item 3). Edited: `smoke/frameTiming.ts` (its parts (H), (I)
+  and (J); `FrameMedium`'s figure and class-map surface; `timeCombinations`, and `reportFrames`'
+  detail by medium), `smoke/frameTimingScene.ts` (`farLimbFrameScene`'s and `earthInput`'s
+  figure; `STAR_SETS`, `TimedPlace`, `placesScaledTo`; `SMALL_TRIO`, `SmallBodyPlace`,
+  `SmallBodiesScene`, `smallEarthsScene`, `trioSourceSet`; `smokeClassMapTexels`,
+  `smokeClassLaws`, `smokeNormalMapTexels`, `NORMAL_MAP_LEVEL`; `GENERATED_CLASSES`,
+  `GENERATED_REGION_TEXELS`, `generatedClassMapTexels`, `generatedClassLaws`,
+  `generatedNormalMapTexels`) and its test, and `smoke/atmosphere.ts` (`farLimbTimingCamera`'s
+  figure, WGS 84 by default). The record is
+  `docs/measurements/atmosphere-frame/2026-10-27-qw29-frame-timings.md`, the raw check lines in the
+  `.txt` beside it. No kernel, table, golden, wire or version moves.
+  - _The rows added_, each timed in QW2's form and reported as (A)'s or (C)'s are:
+    - (H) _Three small air bodies in one view_: the measured Earth 32, 10 and 4 px across (the
+      on-axis reckoning, `SMALL_TRIO`), 6° apart, each its own body and air over the same tables,
+      at x2 on high, with their air and without. Each body also takes the other two's planetshine
+      (`trioSourceSet`, 2 + 2): the plan gives every lit body the brightest of the others, and from
+      so far out the sky's negligible skip has no source standing high enough to be its reference
+      (`sources.ts`). That is VIEW's frame, so it is kept and checked as drawn.
+    - (I) _The class-map row_: the measured Earth under a class map with its normal map, from
+      400 km and 10⁷ m at x2 and x4, under its own id over the measured Earth's tables.
+      - _Judged_: R10's fixture's map as the smoke builds it, the ruling's named form
+        (`smokeClassMapTexels`: R10.T10.d's two classes at R10's level, half of every face
+        surveyed; R10.T10.g's normal map at level 7 over the same half, its cells tilted ±12°).
+      - _Recorded, not judged_: a generated patch's whole palette (`generatedClassMapTexels`: 8
+        classes, `hyperion-surface`'s `MAX_CLASSES`; every texel surveyed; three classes a region
+        of 8 × 8 texels; every class drawn from its maturity nodes; the normal map on every cell),
+        heavier than the fixture in every term the shader reads.
+      - _Not kept_: a first untimed form of eight classes turning texel to texel, so that every
+        point met all eight. It cost 2.4–4.7 ms over the plain Earth, a mixture no generated world
+        has at every point.
+    - (J) _`TEST SATURN`_: `ATMOSPHERE TEST`'s `saturn-oblate` (Saturn's spheroid, 5 slices and 4
+      bands), drawn as `ATMOSPHERE TEST` draws it, a grey Lambert sphere of its ground albedo.
+      - Its cameras are R08.T8.c's five with every distance scaled by its equatorial radius over
+        WGS 84's (9.4492, `placesScaledTo`), so that its disc and limb fill the frame as the
+        Earth's do.
+      - It takes x1 and x2 on both settings (`STAR_SETS`). The Earth's giants stand 6 R_J off,
+        placed for the Earth's cameras and inside the farthest of the scaled ones, so the
+        planetshine sets are not taken. A giant does take planetshine in VIEW, its moons' or any
+        neighbour's (below, _Planetshine at any brightness_): its x2p and x4 rows are for QW30.
+  - _The untimed proof_ (the GPU lock only, 2026-10-27 06:24 and 06:30 local, loads 1.4–2.4 and
+    0.4–0.8): 520 and 525 checks passed, none dropped, part 1 at 142–145 s of its 480 s allowance;
+    each run's one failure R07.T16.f's known one.
+  - _QW29_. RTX 3080, hidden, 2026-10-27 11:34:51–11:37:16 UTC, at e9f531d6 on origin's 77923ca4.
+    - The 1-minute load was 0.89 at the start and 2.25 at the end, under the heavy-test and GPU
+      locks, CPUQuota 1200%.
+    - Clocks: P0 in 1,336 of 1,422 samples; busy, a median of 1,965 of 2,115 MHz, 5 samples under
+      90% of the maximum; at most 65 °C.
+    - Every check of the group passed, and no timed frame was dropped. The part's one failure is
+      R07.T16.f's spatial strokes on hardware, as before.
+  - _The verdict_ (the frame's GPU pass sum on high at 1920 × 1080, p95 (median), ms; the target
+    15.67, the blocker 16.67). Of the 74 judged high rows, 65 meet 15.67 ms; 4 are over it and at
+    most 16.67 ms, and 5 are over 16.67 ms, the blocker (R08.T11):
+
+    | Medium                | Camera       | Set | p95 (median)  | QW28's p95 | Verdict    |
+    | --------------------- | ------------ | --- | ------------- | ---------- | ---------- |
+    | the measured Earth    | 10⁷ m        | x4  | 19.58 (16.12) | 29.81      | over 16.67 |
+    | the slab Earth        | 10⁷ m        | x2  | 18.35 (16.24) | 23.55      | over 16.67 |
+    | the slab Earth        | 10⁷ m        | x4  | 17.66 (17.50) | 30.58      | over 16.67 |
+    | R10's smoke class map | 400 km       | x4  | 17.33 (16.51) | -          | over 16.67 |
+    | R10's smoke class map | 10⁷ m        | x4  | 18.33 (17.79) | -          | over 16.67 |
+    | the slab Earth        | 400 km       | x4  | 16.47 (16.14) | 24.42      | over 15.67 |
+    | the slab Earth        | 1.54 × 10⁷ m | x4  | 16.32 (15.75) | 30.32      | over 15.67 |
+    | R10's smoke class map | 10⁷ m        | x2  | 16.45 (16.03) | -          | over 15.67 |
+    | `TEST SATURN`         | 9.45 × 10⁷ m | x2  | 16.41 (16.31) | -          | over 15.67 |
+    - Two rows are over by their tails, since a 60-frame p95 is the fourth-highest frame by nearest
+      rank (`soak.ts`'s `percentile`): the measured Earth's 10⁷ m x4 (four frames of 19.6–20.7 ms)
+      and the slab's 10⁷ m x2 (six frames over 16.67 ms, its p95 the fourth-highest). The two untimed
+      runs put them at 16.25–16.30 and 16.26–17.40 ms.
+    - Three are over by their medians: the slab's 10⁷ m x4, and the class map's two x4 rows.
+    - R05's Earth meets everywhere, at most 14.13 ms. The measured Earth's other rows are at most
+      15.43 ms. Every medium meets at 2.55 × 10⁷ m and 10⁸ m (at most 11.83 ms).
+    - _Next_ (§2, §7): R08.T11.d and R07.T8.g at once (R07.T8.g's band only if V7 puts it at
+      0.3 ms or more at a row that is over), then QW30, judged the same way. QW30 adds
+      `TEST SATURN`'s x2p and x4 rows, under a giant's own planetshine sources, not the Earth's
+      giants 6 R_J off.
+      - _QW30 judges both class maps_ (main, 2026-10-27). R10's smoke class map stays the verdict
+        row, and decides what goes to R08.T11.f. The generated palette is judged and reported too,
+        since it is what generated worlds show at 24. Any generated-palette row over 16.67 ms at
+        x2 or x2p goes to main by name.
+      - After QW30 a row between 15.67 and 16.67 ms is recorded and goes to main with R12.T10's
+        rungs.
+      - An x4 row alone over 16.67 ms takes R08.T11.f, then QW31.
+      - An x2 or x2p row over 16.67 ms goes to main.
+
+  - _Against QW28_ (the measured Earth, medians, ms).
+    - The atmosphere is 9.51, 10.88 and 9.70 at x2 from 400 km to 1.54 × 10⁷ m, against 13.10,
+      13.84 and 11.95. (B), the atmosphere alone over nothing drawn, is 9.67, 11.01 and 9.84, so
+      R08.T11.b's lever 3 takes back the face's whole loss.
+    - The limb draw (`discs`) is 0.02–0.06 ms, against 4.5–12.9. Its shading moved into
+      `disc cells`, now 0.2–1.3 ms on high (R07.T8.f).
+    - The face (`bodies`) is unchanged, at 2.2–3.6 ms from 400 km to 1.54 × 10⁷ m at x2, x2p and
+      x4 (1.9–2.3 ms at x1).
+    - At the binding rows the frame is the atmosphere, then the face, then the cells:
+      - the slab's 10⁷ m x4: 12.33 + 3.59 + 1.24;
+      - the measured Earth's 10⁷ m x4: 10.96 + 3.57 + 1.24;
+      - the class map's 10⁷ m x4: 10.97 + 4.95 + 1.54.
+    - The class map adds 1.0–1.7 ms on `bodies` and 0.1–0.4 ms on `disc cells` over the plain
+      Earth. The generated palette adds 1.8–2.2 and 0.7–1.4 ms (16.49–20.56 ms p95).
+  - _`TEST SATURN`'s passes_ (R08.T6.f's "on the Saturn-class figure"): 3.79–16.41 ms p95 on high
+    and 1.62–4.33 ms on low.
+    - At the frame of the Earth's 10⁷ m, x2, its atmosphere takes 11.93 ms against R05's Earth's
+      8.94 ms. R05's Earth is the other medium with no absorber, on one slice and one band.
+    - Its face takes 2.97 against 2.56 ms, and its cells 1.06 against 1.10 ms.
+    - The compiled-out pairs that would part the slices' cost from the medium's are R08.T11.d's
+      turn (`decision-r08-approximate-plate.md` item 3).
+  - _Small air bodies_ (C): one body costs 2.53–2.73 ms with its air, of which 2.13–2.28 ms is the
+    atmosphere. Its `discs` is 0.01 ms, against 0.5 ms in QW28, now that its cells go through the
+    pass (R07.T8.e).
+  - _Three in one view_ (H): 10.11 (9.98) ms p95 (median) with their air, of which the atmosphere
+    is 9.35 ms, three full-frame marches; 0.45 ms without. It is R08.T11.d's to cut, about 2 ms a
+    body (§2).
+  - _Low_ (1280 × 720), p95, ms: R05's Earth 1.25–3.90, the measured Earth 1.43–4.45, the slab
+    Earth 1.50–4.47 and `TEST SATURN` 1.62–4.33, against QW28's 1.6–10.5.
+    - Re-projected to the UHD 620 by R07's Gen9 cycles a shade (3,000–7,000 against the RTX 3080's
+      3,500, `decision-r07-small-disc-cost.md`) at the run's 1,965 MHz, they come to about 2–16 ms
+      at 1.1 GHz and 7–59 ms at its 300 MHz floor. These are estimates.
+    - The factor scales a dependent chain's latency. The march is throughput, which QW28 took at
+      §9's 25–68 times, a factor the ruling sets aside here (§5). The owner's pass settles both.
+  - _The tails_: on high, 67 of 3,600 frames (1.86%) are over 1.2 times their combination's median,
+    against QW28's 0.72%; on low 4 of 3,600. (B) has 31 of 1,800, the class maps 2 of 480,
+    `TEST SATURN` 6 of 1,200, and (C), (G) and (H) none.
+  - _The per-planet tables and the bytes_ (D, E). Since R08.T11.e the rows are 157,084 B for R05's
+    Earth, 439,200 and 598,704 B for the measured and slab Earths, and 755,196 B for the
+    Saturn-class figures. The builds' own passes take QW28's GPU times to within 0.1 ms;
+    `TEST SATURN`'s take 11.7 ms (11.1–11.8 ms in QW28). Its irradiance at the first read took
+    11.9 ms cold and 9.9 ms warm, against QW28's 9.4–9.9 ms.
+    - The per-view bytes are QW28's: 165,888 B and 262,144 B of tables on high, and the ray-march
+      and air targets.
+    - `prepare` takes 70 ms a setting for (E)'s new renderers and 513 ms for (A)'s.
+- **Deferred findings (2026-10-13 rule)** (R08.T11.c). Recorded and deferred: each leaves the
+  algorithm and every contract as it is.
+  - _The class map's cost on the face_: 1.0–1.7 ms on `bodies` for R10's fixture, and 1.8–2.2 ms
+    for a generated palette, at the four rows. It is R07.T8.g's hoisting (c)'s ground, and
+    R12.T10's.
+  - _The main thread in `render`_: 0.8–1.7 ms medians and 2.3 ms at p95 on high, against QW28's
+    0.6–1.1 and 1.4. Very likely R07.T8.f's limb spans and the cells' sets, made on the CPU each
+    frame. The frame stays GPU-bound (14–18 ms).
+  - _The high tails_: 1.86% of frames over 1.2 times their median, against 0.72%. They set two
+    rows' p95 over 16.67 ms over medians of 16.1–16.2 ms. A 60-frame p95 is the 57th frame by
+    nearest rank, so four tail frames set it (`decision-r08-t11-frame.md` §2's margin).
+  - _Part 8 on the RTX_ (untimed, the GPU lock only; 2026-10-27 06:10 and 06:11 local, loads
+    0.1–0.2 and 1.0–1.8).
+    - At the base before R07.T8.e (9f40e651) and at the tip (77923ca4), the same four R08.T6.f Earth
+      twin checks fail, byte for byte: the ray march's stored arm on the limbs from 400 km and from
+      3.56 × 10⁷ m under suns of 20° and −2°, worst 1.101, 1.101, 6.703 and 12.352 × 10⁻³ against
+      the bound of 10⁻³.
+    - So they predate R07.T8.e–f, and R08.T11.b and T11.e did not move them. SwiftShader passes
+      them. Main took them to R08.T6.f's follow-up and R08.T17's hardware validation.
+  - _`TEST SATURN`'s atmosphere_: 33% over R05's Earth's at the same frame and sources. It is for
+    R08.T11.d's compiled-out pair.
+  - _The gate's part 6 on SwiftShader_: the first run (tree bafae55f, `smart-ci-run1.log`) failed
+    only on the GPU process's exit (exit_code=512) in part 6's default variant, in
+    `R08.T6.b the kernels over four absorbers`, at a load of 9–10. Every other step and the other
+    23 smoke runs passed. It is the known exit under load (2026-10-21, 22 and 23), so the gate was
+    run again on the same code (`smart-ci-final.log`).
+  - _Planetshine at any brightness_ (found by (H)): `planetshineSources` gives a body the
+    setting's count of its brightest neighbours however faint. (H)'s Earths each took the other
+    two's, at about 10⁻⁷ to 10⁻⁶ of the Sun.
+    - From orbit the sky's negligible skip seldom has a reference standing high enough to cut
+      them (`sources.ts`).
+    - So a body in a system with any lit neighbour likely draws x(stars) + 2 on high, the march
+      included. The x2p and x4 rows may then be the common frame, not x1 and x2.
+    - _Deferred to R08.T11.d_ (main, 2026-10-27), as a candidate lever: a cull of the
+      planetshine sources below a brightness that moves no pixel by more than the twin's
+      tolerance. `TEST SATURN`'s x2p and x4 rows are for QW30.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
