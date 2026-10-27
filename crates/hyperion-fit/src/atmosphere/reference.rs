@@ -494,6 +494,12 @@ impl Moments {
         self.n = n;
     }
 
+    /// The samples pushed or merged in.
+    #[must_use]
+    pub(crate) fn samples(&self) -> u64 {
+        self.n
+    }
+
     /// The mean.
     #[must_use]
     pub(crate) fn mean(&self) -> f64 {
