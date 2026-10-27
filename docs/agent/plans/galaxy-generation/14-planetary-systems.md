@@ -7881,8 +7881,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
         a stated, cited emissivity (Triton's 0.59 ± 0.16, Hillier et al. 1990, Science 250,
         419), not the bare surface's 0.95.
       - Its pressure is the registry's saturation pressure there: on β-N₂, 1.4 Pa at 37.25 K.
-    - The sublimation air from T51.a's partition (Pluto, Triton), its gases listed, and its haze
-      by T24.c's methane rule where CH₄ is present.
+    - The sublimation air from T51.a's partition (Pluto, Triton), its gases listed, and its
+      aerosols not modelled at 24 (decision-p14-t53c-tenuous-aerosols; P14.T55.n).
     - Io's patchy SO₂ air from T24.g's outgassing under `Extreme` volcanism.
   - Exospheres are P14.T55.c's, and seasonal transport and frost by month P14.T55.e's.
   - The docs of `JEANS_RETENTION_THRESHOLD`, `Retention` and `AIRLESS_PRESSURE` name the
@@ -7893,10 +7893,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
       14 ± 2 µbar (Gurrola 1995, as Marques Oliveira et al. 2022, A&A 659, A136, quote it),
       14.1 ± 0.4 µbar in 2017 (Marques Oliveira et al.) and 14.5 ± 0.5 µbar in 2022 (Sicardy et
       al. 2024, arXiv:2402.02476); the 38 ± 1 K is Tryka et al. 1994, Icarus 112, 513;
-    - a Pluto at its inventory carries N₂ with CH₄ and a haze (Gladstone et al. 2016), its N₂
-      within a factor of 10 of 1.1 Pa: 11 ± 1 and 10 ± 1 µbar in 2015, 12.2 µbar in 2020 (Sicardy
-      et al. 2021, arXiv:2112.07764). The band is wider than Triton's because its measured season
-      is not its orbit mean;
+    - a Pluto at its inventory carries N₂ with CH₄, its haze not modelled at 24 (P14.T55.n)
+      (Gladstone et al. 2016), its N₂ within a factor of 10 of 1.1 Pa: 11 ± 1 and 10 ± 1 µbar in
+      2015, 12.2 µbar in 2020 (Sicardy et al. 2021, arXiv:2112.07764). The band is wider than
+      Triton's because its measured season is not its orbit mean;
     - a Charon at Pluto's distance keeps no N₂, while Pluto and Triton keep theirs (Johnson et
       al. 2015);
     - the table's Titan, Ganymede and Callisto keep T13.b's N₂ verdicts;
@@ -7908,19 +7908,23 @@ feeding back into p_s, T_s, the albedo or the bulk.
       P14.T53.a, main's ruling of 2026-10-22: under T53.a's hold the table's Mars keeps 0.22 bar at
       243.9 K, its shoreline keeping 2.18% of its air and the thermostat all its carbon airborne,
       over which T24.a's climate spans 230–251 K against CO₂'s 177.6 K frost point, so the
-      greenhouse, starting from the whole column, takes the warm branch). This subtask gives a
-      collapse-first start where the dominant condensable can cold-trap (Wordsworth 2015's
-      bistability; atmospheric collapse below about 1 bar, Soto et al. 2015, Icarus 250, 553),
-      with escape on the airborne part, and runs T53.a's ignored test
-      `under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide` by name;
+      greenhouse, starting from the whole column, takes the warm branch). The collapse-first
+      start that main's ruling gave it is not built (decision-p14-t53c-collapse §1: from an empty
+      column the steps' airless climate took 100 bulk airs of 100 Pa–1.48 bar onto night floors),
+      and the model's climate holds no collapsed branch at Mars's inventory, so T53.a's test
+      `under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide` stays
+      ignored, its cure the CO₂ cap's own energy balance after 24 (decision-p14-t53c-collapse
+      §4 (b));
     - the record says `Tenuous`, not `Airless`, where a gas is held above the floor;
     - every `Airless` body has an empty gas list;
-    - 02000b2ca0000001.1100's Ar air (48.7 Pa at 24 over a night-side ice at 32 K, where Ar's
-      saturation pressure is 6 × 10⁻⁴ Pa, 8 × 10⁴ times supersaturated; at 23 a state edge, at
-      a published 99.86 Pa, bless-note-23) collapses to its cold trap under the collapse-first
-      start, or the reason it does not is stated; over the sample, no published air whose
-      dominant condensable lies above 10 times its saturation pressure at the record's coldest
-      zone where its ice lies (decision-t24i-airless-state D4);
+    - 02000b2ca0000001.1100 (with every 24 hold a `Snowball` at 100.03 Pa, N₂ 0.60 and Ar 0.40,
+      its N₂ ×559 over its 33.57 K ice; at 23 a state edge, at a published 99.86 Pa,
+      bless-note-23) is asserted as built and named main's 24 gate item, a wrong state, its
+      steady state `Tenuous` at 0.034 Pa (decision-p14-t53c-collapse §2.1); over the sample, the
+      goldens and LOOK72, no published air whose dominant condensable lies at or above 10 times
+      its saturation pressure at the record's coldest zone where its ice lies (an ice-held gas at
+      its ice's own temperature) but 1100 and count (vii)'s 01ffeb2d20000000.e101 and
+      02002b2d1ffe0000.e103 (decision-t24i-airless-state D4; decision-p14-t53c-collapse §2.2);
     - no `surface_liquids` item is an ocean under ice, and every liquid entry's listed share equals
       its own `area_fraction` where the entries' total is at most 1 (decision-absurd-states-24 R1;
       decision-p14-t54a-water-consistency W2): LOOK72's 020e56ef60080003.0700 lists its sea at
@@ -8457,6 +8461,16 @@ Each is labelled "not yet modelled" where a console could show it:
   At a 10 mbar photosphere their lines change an ultra-hot dayside's transmitted sunlight by
   Δu′v′ ≤ 2.3 × 10⁻⁴ and at most 0.6% in luminance together, and by up to 1.7 × 10⁻³ and 3% at
   a 0.1 bar upper bound. Li also serves P14.T55.i's brown dwarfs (science-r08-unowned-absorbers).
+- **P14.T55.n** a tenuous air's aerosols (after P14.T55.e's methane;
+  decision-p14-t53c-tenuous-aerosols §4): a haze law for a `Tenuous` air, its τ(550) from the
+  methane photolysis supply and the air's column, not from T24.c's index alone, calibrated on
+  Pluto's vertical τ of about 0.013 at 607.6 nm (Gladstone et al. 2016) and checked on Triton's
+  (Voyager 2); it decides the dust, the decks and the absorbers of such an air with it. T24.c's
+  index on Pluto's measured 0.8% of CH₄ gives τ 6.3, and on a Triton-like 1.4 Pa N₂ air at x(CH₄)
+  10⁻³ 4.3: absurd, so it is not applied. Until it lands a `Tenuous` record's aerosols are not
+  modelled (absent), labelled `AEROSOLS AND ABSORBERS: NOT YET MODELLED`. Recorded with it,
+  P14.T55.e's figure: the model's Pluto holds 3 × 10⁻⁷ Pa of CH₄ (x 2 × 10⁻⁷, on the minor branch
+  at its 32.5 K mean) against a measured x of 0.006–0.0084, so no haze could form even by T24.c.
 
 #### P14.T56 Moons and their parents (decision-p14-moons, 2026-10-10)
 
@@ -29682,3 +29696,148 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     the condensates (decision-p14-t54a-ganymede §C3.1: the lid's row is the surface the albedo
     reads), so no sampled cometary body carries the water-ice veneer that would leave it
     unclassed, and P matches the record's own dark surface.
+- **Deviations in P14.T53.c, as built (`p14-escape`, 2026-10-26).** Thin and transient air, behind
+  its own hold, `TENUOUS_VERSION` 24 (`chem/tenuous.rs`; `TenuousRules`, the tests' `with_tenuous`,
+  the tripwire `the_tenuous_air_is_held_only_until_the_24_bump`), read only on the escape's batch
+  path (`tenuous_in_force`: `EscapeRules::Batch` and `TenuousRules::Tenuous`), its switch the tenth
+  of `with_every_24_hold`'s, inside T51.e's. Version 23 is unchanged to the bit; no golden moved;
+  no draw or tag.
+  - _The ice-held retention_ (`IceHeld::of`'s 24 arm). Nitrogen and argon that fail T13.b's
+    threshold, on any solid surface with no envelope (not an ice crust's alone), are held where the
+    registry's saturation pressure at their ice's own temperature lies below both their inventory's
+    weight and `AIRLESS_PRESSURE` (decision-p14-t53c-collapse §3, decision-triton-and-e101 A4's
+    scope: without the 100 Pa line 25 bodies T13.b judges airless revived 0.1–0.8 bar N₂ airs,
+    01ffeb2c20010000.0200 among them), and keep their inventory less `ice_held_loss`: Jeans's flux
+    at the exobase (σ n H = 1, σ `COLLISION_CROSS_SECTION_M2`, 3 × 10⁻¹⁹ m²) of an upper atmosphere
+    isothermal at `UPPER_ATMOSPHERE_MULTIPLE` (2.0, the lane's, inside the plan's 1.7–2.7) times
+    the ice's temperature, `vapour_escape_molecules_per_second`; where the column reaches no
+    exobase before its sonic point the regime is hydrodynamic and the ice keeps none. Pluto at
+    1.0–1.2 Pa on the registry's β-N₂ curve (36.65–36.95 K) escapes at 1.9–3.1 × 10²³ s⁻¹ against
+    its measured 1 × 10²³ (1.8 gives 4.7 × 10²¹ and 2.2 gives 4.1 × 10²⁴ at 1.0 Pa, the rate
+    exponential in it), 1.5–2.4 × 10⁻³ of its median over 4.5 Gyr; Triton at 37.7 K loses 4 × 10⁹
+    kg; a Charon has no exobase (λ_s ≈ 8). **Deviations:** water keeps P14.T54.a's stand-in (an
+    ice crust is its own ice, §1.8); CO₂, NH₃ and O₂ keep T13.b's verdicts (beyond the snow line
+    carbon is methane, which follows nitrogen); argon joins nitrogen, the plan's "a condensable";
+    the test is "any of it lies as ice" (p_sat under the inventory's weight), not "most of it",
+    and dominance is not checked; the loss is the present rate times the age (no fainter young
+    host, no orbit); ice-held gases skip T53.a's shoreline, which judges airs. Pluto's measured
+    5 × 10²⁵ CH₄ s⁻¹ is not checked: methane has no loss law here (it follows nitrogen's verdict),
+    and that rate is diffusive separation at the exobase, which a single-gas isothermal law cannot
+    give (for T53.a's methane diffusion limit; recorded for main).
+  - _The ice's temperature_ (`ice_temperature`): ((σ T_eq⁴ + F) ÷ ε σ)^¼ with ε
+    `NITROGEN_ICE_EMISSIVITY` 0.59 (Hillier et al. 1990), F the pass's heat flow. **Deviations:**
+    the body's Bond albedo stands for the ice's, as Hillier et al. inferred ε from it (the
+    registry's frost rows are pure-frost upper bounds, `N2` at 1.000, which would leave the ice the
+    heat flow alone); the balance is global and isothermal (the ice's own share of the light by
+    where it lies is P14.T55.e's); argon takes the bare surface's 0.95, a stand-in (no argon-ice
+    figure read), against the plan's "not the bare surface's 0.95", which it states for nitrogen.
+    The partition holds an ice-held gas's vapour there (`ColumnInventory::with_ice_temperature`,
+    read for its cold cap and where it lies; `ClimateSpan::toward`, the one interpolation for both
+    cold traps; `HeldIce` on the atmosphere, attached by `column_inventory` and the solver's
+    columns, so the record's partition is the pass's). Triton's ice is 36.78 K at the table's
+    Triton (1.08 Pa), its published T_s the bare surface's base (32.24 K).
+  - _`Tenuous`_ (`SurfaceState::Tenuous`, the wire's `tenuous`, the server's arm): below 100 Pa
+    where p ÷ g reaches `TENUOUS_FLOOR_COLUMN`, 10⁻⁴ kg m⁻², P14.T51.d's ion-stopping column (its
+    figure written in `chem/tenuous.rs`, since the surface modifiers are not read on the record
+    before T54.b, and held to `ION_STOPPING_COLUMN`'s bits by
+    `the_tenuous_floor_is_the_ion_stopping_column`), published at the base as `Airless` is. Its
+    surface is a bare one: albedo, cloud, template, cover, lid, sulphur case, wet epoch (no bulk
+    air) and the regolith's weathering cap are `Airless`'s, so that a tenuous body's figures are its
+    airless twin's; its conditions' column holds no air (the steps' climate under 100 Pa) while its
+    pressure, gases, μ and c_p ÷ R are its air's (`Surface::of`); R09's inputs and the field header
+    keep its pressure, and R09 reads all 375 of the census's tenuous planets and members.
+    **Deviations:** T24.c's rules are not applied to it (`holds_air`;
+    decision-p14-t53c-tenuous-aerosols): its aerosols are not modelled at 24 (P14.T55.n), and
+    `record_aerosols` sends them absent (its `Tenuous` arm, an exhaustive match on the state, added
+    over B1, P14.T54.b, with its test in `system/air/tests.rs`; the census reads the record's air
+    batch, asserts it, and asserts the structure never computed as no air, its gases listed and its
+    structure published as the ruling's §2 has it); `capped_lid`'s weathering cap applies under any
+    tenuous column, a stand-in until T54.b reads `weathering_rate` (micrometeoroids reach the ground
+    under 0.3 kg m⁻², and the maturity saturates over the age); the partition's ice line keeps the
+    airless arm. Cold traps and T51.j's oxidised surface keep T51.f's collisional test (the floor
+    lies some 650 times above it): switching them to the floor moves their own figures, for main.
+  - _No collapse-first start_ (decision-p14-t53c-collapse §1; main's ruling of 2026-10-22 not
+    built): §4's record below. The greenhouse keeps its whole column's solve.
+  - _The ocean under a `Snowball`'s ice_ (W3 (b)) is not appended to `surface_liquids`
+    (`with_surface_under`); W3 (a) stands, an ice-rich crust being its own ice. The wire's
+    `condensates` doc says so. The client's `oceanUnderIce` and `liquidsOnIce` (P14.T43.h) retire
+    with T54.b, since 23's records still send the item (the tripwire names them).
+  - _Io's SO₂ air_ is not built: SO₂ is not among the air's nine gases, and Io's measured equatorial
+    columns, 3 × 10¹⁶ to 1.5 × 10¹⁷ cm⁻² (Lellouch et al. 2015), straddle the floor; the table's Io
+    is `Airless` with no gas listed. For P14.T55.c; rendering plan R08's "An Io is `Tenuous` under
+    P14.T53.c" (08-atmospheres.md) no longer holds (for main).
+  - _Tests outside the files under test:_ Triton and the icy moons in `moons/regular.rs` (the
+    table moons' fixtures); the census, the aerosols' regression test and Pluto's haze in
+    `hooks/aerosols/tests.rs` (T24.c's tripwire bars its rules elsewhere); the floor's bits in
+    `hooks/modifiers/tests.rs`; the golden records' liquids in `system/tests.rs`. Pluto's ×10 is
+    asserted at its measured 0.72 by hand (aerosols ruling §3). T24.i's follow-up tests restated
+    for T53.c's argon ices (13 of `fallback_black_hole`'s 19 unlit records hold one and 9 of the
+    sample's 18, which 24's densities read and 23's refuse; a second raised airless record's; the
+    sample's lit airless records raised to their night floor 1,403 → 1,408, their cover changes
+    1,127 → 1,350, their argon ices 383 → 1,139) and for its `Tenuous` under the floor (the four
+    split bodies' held arm, `unlit_moves`' and `FloorBody`'s airless class).
+  - _Accept, as built:_ `cargo test -p hyperion-sim planetary::chem::tenuous`;
+    `planetary::derive::atmosphere`; `planetary::chem::partition`;
+    `planetary::moons::regular::tests::under_every_24_hold_`; `planetary::hooks::aerosols`;
+    `planetary::hooks::modifiers::tests::the_tenuous_floor`; `planetary::system`;
+    `planetary::testing`; and the census by name, with `-- --ignored --exact`,
+    `planetary::hooks::aerosols::tests::under_every_24_hold_t53c_s_thin_airs_are_stated`.
+  - _The census_ (400 whole systems, the goldens and LOOK72's triaged systems; every 24 hold against
+    T53.c held; 6,670 bodies with a surface): `Airless` 5,518, `Tenuous` 397, `Snowball` 343,
+    `Temperate` 187, `RunawayGreenhouse` 166, `MagmaOcean` 59. Every `Tenuous` record came from
+    `Airless` (251 members, 125 planets, 21 moons; no other state moved): 230 relabels alone and 167
+    whose ice-held nitrogen or argon now keeps its ice; 4.5 × 10⁻⁵–100 Pa, 10⁻⁴–82 kg m⁻²; dominant
+    N₂ 312, Ar 84, CO₂ 1. Count (xiv): 52 tenuous airs with a haze τ by T24.c's rule (the largest
+    8.1), 17 with a dust τ (the largest 0.265), every one's aerosols not modelled and its structure
+    published (397 profiles, under the record's air batch). Oceans under ice listed: 0 (148 with
+    T53.c held). Liquids at other than their own extent: 0 (73). Every `Airless` record lists no
+    gas, and none's air reaches the floor. No ice-held gas saturates at 100 Pa or more.
+    Supersaturated over their ice (×10 and more): main's gate item 02000b2ca0000001.1100 and count
+    (vii)'s two (below).
+- **Deferred findings (2026-10-13 rule), from P14.T53.c:**
+  - _The collapse-first start (main, 2026-10-22) is not built_ (decision-p14-t53c-collapse §1).
+    From an empty column the steps' airless climate (no transport under 100 Pa) took 100 bulk airs
+    of 100 Pa–1.48 bar onto night floors (census, every 24 hold: 22 Temperate → Tenuous, 12 →
+    Airless, 21 Snowball → Tenuous, 13 → Airless, 9 RunawayGreenhouse → Tenuous; e.g.
+    02000b2cdfff0000.0200, 0.99 bar at 240 K → 6.8 Pa over a 39.7 K night). The ruled narrow
+    thin-branch rule (100 Pa ≤ p < 1 kPa, the dominant condensable ≥ 10× saturated at its own
+    coldest zone) was built and dropped (main, 2026-10-26): it moved 02000b2ca0000001.1100 alone,
+    but its passes settled on a third state, a `Snowball` at 295.6 Pa (N₂ 0.818, Ar 0.182) over a
+    42.61 K coldest zone, N₂ ×9.998 against the rule's ×10: a knife edge its own threshold made,
+    and a native-against-wasm hazard. A rule that latches the empty-column branch across the
+    passes was not tried. Deferred, one owner after 24 (P14.T55.e or the new rider on 25's train,
+    which main places): (a) the collapse of an air above the thin branch by its own transport
+    (Wordsworth 2015; Koll and Abbot 2016), which the steps' climate cannot arbitrate; (b) the
+    table's Mars, its CO₂ cap's energy balance (its test ignored: at 2, 6 and 10 mbar its coldest
+    zone lies at 136–139, 164 and 174 K against CO₂'s 140, 148 and 151 K frost points, and the
+    shoreline's 234 Pa of N₂ holds a start from an empty column above the 100 Pa line; with no N₂,
+    or Mars's real 16 Pa, the start lands at 0.18–0.30 Pa on the airless climate's 107.5 K coldest
+    zone, the ~2 mbar a marginal fixed point the empty start never reaches); (c) the thin airs on
+    the airless climate whose partly dominant condensable T51.a's ramp holds near the base, not at
+    its ice: 01ffeb2d20000000.e101 (`Tenuous` near 100 Pa, N₂ ×1132 over its 33.30 K ice) and
+    02002b2d1ffe0000.e103 (×741 over 33.81 K), count (vii), state right and figure wrong.
+  - _Main's 24 gate item_ (decision-p14-t53c-collapse §2.1): 02000b2ca0000001.1100 is a wrong
+    state at 24, a `Snowball` at 100.03 Pa (N₂ 0.60, Ar 0.40), its N₂ ×559 over its 33.57 K ice,
+    whose steady state is `Tenuous` at 0.034 Pa. The census asserts it as built, so that it cannot
+    drift silently; main rules on it at the gate.
+  - _The ice-held line_ (decision-p14-t53c-collapse §3; decision-triton-and-e101 A4's scope):
+    ice-held only where p_sat at the ice's temperature is under `AIRLESS_PRESSURE`; without it 25
+    bodies T13.b judges airless revive 0.1–0.8 bar N₂ airs (e.g. 01ffeb2c20010000.0200).
+  - _Pluto through its own passes_ is `Tenuous` at 0.040 Pa of N₂ (ice 32.42 K) under its Bond
+    albedo of 0.836 (T51.b's recorded miss) against a measured 0.72 ± 0.07; at 0.72 by hand it
+    holds 1.29 Pa (37.06 K). Its CH₄, 3 × 10⁻⁷ Pa on the minor branch at its 32.5 K mean, against a
+    measured x of 0.006–0.0084, is P14.T55.e's; its haze, T24.c's index on it 0 and on a Triton-like
+    1.4 Pa N₂ air at x(CH₄) 10⁻³ τ 4.3, is P14.T55.n's (decision-p14-t53c-tenuous-aerosols §4).
+  - _The ice's temperature against the record's climate_: of the 397 tenuous records 251 hold their
+    ice more than 0.5 K above their record's coldest zone, by up to 22.7 K, while T_s stays the
+    bare surface's; D4's factor is judged at the ice's own temperature for an ice-held gas
+    (decision-p14-t53c-collapse §1.5). For P14.T55.e.
+  - _Work other records gave T53.c, not built here, for main to place:_ main's reorder "for every
+    condensable … with T53.a's loss rates" (built for nitrogen and argon only, with the lane's
+    law); dividing a frozen body's water between the condensate, the crust and the shell, with
+    T51.g's shell; a sea's ice, its floating thickness and its mass in the sea's level; the cold
+    traps' and T51.j's collisional test moved to the floor; R09's D2 edge, a dominant ice's
+    lasting line under a thin air (the partition's airless arm holds it at 0.963 T_fm).
+  - _The floor's other light:_ the X-ray light takes the ion-stopping floor by the plan's labelled
+    simplification, though at 1 keV dry air passes 96% of it through the floor (μ ÷ ρ 3,606 cm²
+    g⁻¹, NIST XCOM; τ 1 needs 2.8 × 10⁻³ kg m⁻²). For main.
