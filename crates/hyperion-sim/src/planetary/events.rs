@@ -1,11 +1,11 @@
 //! Events on bodies (plan 14, P14.T31; design note 15): what happens to a system's bodies during
 //! play, as a pure function of the seed, the subject, the event tag and the time.
 //!
-//! Every kind is one of plan 06's two constructions ([`crate::events`]), on an
-//! [`EventSeries`](crate::events::EventSeries) whose subject is the body's
+//! Every kind is one of plan 06's two constructions ([`crate::events`]), on an [`EventSeries`]
+//! whose subject is the body's
 //! [`BodyId`](crate::id::BodyId), or the system's [`SystemId`](crate::id::SystemId) for its
 //! comets, under the kind's own event tag in plan 06's block 0x0400–0x04FF. A series goes to one
-//! construction only. Built so far (P14.T31.a, the Poisson bins):
+//! construction only. The Poisson bins (P14.T31.a):
 //!
 //! - [`impacts`]: `body.impact` (0x0400), impacts above a stated energy at the belts' number flux
 //!   at the body times its gravitationally focused cross-section, each with an energy from the
@@ -17,10 +17,21 @@
 //!   P14.T21.d's rate, each a comet on its own near-parabolic orbit, listed while it is inside
 //!   30 au × √(L ÷ L☉).
 //!
-//! P14.T31.b adds the monotone phases (`body.storm`, `body.duststorm`) and P14.T31.c merges every
-//! kind into `PlanetarySystem::events_between`. Until then nothing on the record calls these
-//! modules: each takes what a body's record or hooks give as plain values, which P14.T31.c reads
-//! once, at the epoch (design note 23 of plan 06), so that a rate never depends on the time asked.
+//! The monotone phases (P14.T31.b), each on a [`LinearClock`] whose period is the body's orbital
+//! period, from a perihelion passage for the dust storms and from a plain origin for the storms,
+//! which P14.T31.c sets at one:
+//!
+//! - [`storms`]: `body.storm` (0x0402), the great storms of giant planets, Saturn's great white
+//!   spots: one a cycle, on a phase that diffuses across the source horizon, each with a duration
+//!   and a latitude band;
+//! - [`dust_storms`]: `body.duststorm` (0x0403), the global dust storms of dry, thin-aired planets,
+//!   Mars's: one in about three cycles, on a phase locked to the orbit so that every onset falls in
+//!   the perihelion season, each with a duration.
+//!
+//! P14.T31.c merges every kind into `PlanetarySystem::events_between`. Until then nothing on the
+//! record calls these modules: each takes what a body's record or hooks give as plain values,
+//! which P14.T31.c reads once, at the epoch (design note 23 of plan 06), so that a rate never
+//! depends on the time asked.
 //!
 //! No event leaves a mark (design note 15): an impact made during play is below the resolution of
 //! the global figures, and no event changes any `body_at` result.
@@ -33,20 +44,28 @@
 //! - [`SurfacePoint`]: a place on a body, uniform over its sphere.
 
 pub mod comets;
+pub mod dust_storms;
 pub mod eruptions;
 pub mod impacts;
+pub mod storms;
 
 use core::f64::consts::TAU;
 use std::error::Error;
 use std::fmt;
 
 pub use comets::{BuildCometModelError, Comet, CometInputs, CometModel};
+pub use dust_storms::{BuildDustStormModelError, DustStorm, DustStormInputs, DustStormModel};
 pub use eruptions::{BuildEruptionModelError, Eruption, EruptionInputs, EruptionModel};
 pub use impacts::{BuildImpactModelError, Impact, ImpactInputs, ImpactModel};
+pub use storms::{BuildStormModelError, Storm, StormBand, StormInputs, StormModel};
 
-use crate::events::{EventsPerSecond, TimeWindow, to_nanos};
+use crate::events::{
+    CycleEvent, EventSeries, EventsPerSecond, LinearClock, MonotonePhase, TimeWindow,
+    from_nanos_saturating, to_nanos,
+};
 use crate::math;
 use crate::rng::{BuildPowerLawError, PowerLaw, Stream};
+use crate::time::{Span, UniverseTime};
 use crate::units::{Metres, Radians};
 
 /// A [`SizeLaw`] could not be built.
@@ -254,6 +273,55 @@ fn expected_count(rate: EventsPerSecond, window: TimeWindow) -> f64 {
     )]
     let seconds = nanos as f64 / 1e9;
     rate.value() * seconds
+}
+
+/// The least share of the period between two events of a monotone phase whose noise passes
+/// [`MonotonePhase::new`]'s slope check: 1 ÷ 1.9, since dΦ/dφ is at most 1 + 0.9.
+///
+/// A phase kind whose events last a smaller share of the period than this never has two running
+/// at once, and [`events_about`] holds every event running at an instant.
+const LEAST_INTERVAL_SHARE: f64 = 1.0 / (1.0 + MonotonePhase::MAX_SLOPE);
+
+/// The events of `noise` on `series` and `clock` from the cycle before the one Φ is in at `t` to
+/// the cycle after it, in cycle order: the margin [`MonotonePhase::events_in`] takes at a window's
+/// ends, so that a crossing a nanosecond from `t` is not missed.
+///
+/// An event that lasts under [`LEAST_INTERVAL_SHARE`] of the period and is running at `t` began
+/// at or before `t` and after the crossing of the cycle before Φ(t)'s, so it is among them. Cycles
+/// beyond the 40-bit cycle numbers and skipped cycles give none.
+fn events_about<'a>(
+    noise: &'a MonotonePhase,
+    series: &'a EventSeries,
+    clock: &'a LinearClock,
+    t: UniverseTime,
+) -> impl Iterator<Item = CycleEvent> + 'a {
+    let now = noise.phase_at(series, clock, t).cycles();
+    (now.saturating_sub(1)..=now.saturating_add(1))
+        .filter_map(move |cycle| noise.event(series, clock, cycle))
+}
+
+/// `share` of `period`, a share in [0, 1), floored to whole nanoseconds.
+///
+/// # Panics
+///
+/// Never for a share in [0, 1): such a share of a span is a span.
+#[must_use]
+fn share_of(period: Span, share: f64) -> Span {
+    debug_assert!(
+        (0.0..1.0).contains(&share),
+        "a share of a period lies in [0, 1), got {share}"
+    );
+    Span::from_seconds_f64(share * period.as_seconds_f64())
+        .expect("a share in [0, 1) of a span is a span")
+}
+
+/// `onset` plus `duration`, a span that is not negative, held at the clock's last instant: the
+/// end of an event whose onset the bisection saturated at the clock's end.
+#[must_use]
+fn end_of(onset: UniverseTime, duration: Span) -> UniverseTime {
+    onset
+        .checked_add(duration)
+        .unwrap_or_else(|| from_nanos_saturating(i128::MAX))
 }
 
 #[cfg(test)]

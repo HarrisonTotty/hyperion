@@ -30988,3 +30988,170 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     measurement gives one (`METHANE_RELATIVE_HUMIDITY`);
   - `wet_epoch::holds_water` groups `SteamEnvelope` with `GasEnvelope` (no reader, as `state`
     never gives it), and the client's `model.ts` still reads "until P14.T53.b part 3": P14.T53.f's.
+- **Deviations in P14.T31.b, as built (`lane/120-p14-t31b-storms`, 2026-10-27).** The monotone
+  phases, as pure modules on plain inputs: nothing on the record calls them until P14.T31.c, so
+  nothing generated moves, with no hold and no `GENERATOR_VERSION` change. The design points were
+  ruled by decision-p14-t31b-phases (2026-10-27): (a) and (c) accepted, the storms' season declined
+  and (b) accepted.
+  - _Files._ `planetary/events/storms.rs` (`body.storm`) and `planetary/events/dust_storms.rs`
+    (`body.duststorm`), each with its `tests.rs`, declared in `planetary/events.rs`, which gains
+    the two kinds' shared private pieces: `LEAST_INTERVAL_SHARE` (1 ÷ 1.9, the least interval
+    between two crossings over P), `events_about` (the events of the cycles from the one before
+    Φ(t)'s to the one after), `share_of` and `end_of`. `events/tests.rs` holds the fixtures
+    (`SATURN_PERIOD`, `MARS_PERIOD`, `MARS_ECCENTRICITY`, `origin`, `saturn_storms`,
+    `mars_dust_storms`) and the golden's new section.
+  - _Tags._ `rng::tags`' `BODY_STORM` and `BODY_DUSTSTORM` (`body.storm`, `body.duststorm`, scope
+    `Event`) are appended after P14.T31.a's `system.comet`. `id::event_tags`' `BODY_STORM` and
+    `BODY_DUSTSTORM` take 0x0402 and 0x0403, in number order before 0x0404, and 0x0405–0x04FF stay
+    free. The event-tag test is renamed `plan_14_holds_its_five_tags_with_their_names`.
+  - _`body.storm` (`StormModel`, `StormInputs`, `Storm`, `StormBand`, `BuildStormModelError`,
+    `storms`, `storms_active_at`, `storm`, `has_great_storms`)._
+    - Inputs: the orbital period (a `Span` of at least `LinearClock::MIN_PERIOD`) and the clock's
+      origin, a plain instant that P14.T31.c sets at a perihelion passage. The clock is a
+      `LinearClock` of P from it. The series is opened inside, from the seed and the body.
+    - Noise: design note 16's diffusing phase, a = `NOISE_AMPLITUDE_CYCLES` 0.087, ℓ = 1 and J
+      from the source horizon (`octaves_to_span`), as `GlitchCycle::of` builds it: at Saturn's
+      period of 10,755.70 days J = 15 and the bound is 37.8 cycles. The slope bound is 0.896. There
+      is no skip and no season.
+    - Eligibility: `has_great_storms(class)`, every giant, gas or ice (`PlanetClass::is_giant`).
+    - Marks, from `CycleEvent::marks` at word 0. Word 0 is the duration's share of P, uniform in
+      [`MIN_DURATION_SHARE` 0.0024, `MAX_DURATION_SHARE` 0.0187), 26–201 days at Saturn: its six
+      storms' 26, 150, 44, 41 and 55 days (Sayanagi et al. 2013 §1, after Alexander 1962 and
+      Sánchez-Lavega 1994) and 2010–11's 201 (§4). Word 1 is the `StormBand`, picked at
+      `BAND_WEIGHTS` 3 : 2 : 1, equatorial, mid-latitude and polar, all northern (Sánchez-Lavega et
+      al. 2018, Table 13.1; the bands as the 2024 review names them). Words 2–7 are reserved, for a
+      latitude within the band, a longitude and a size.
+  - _`body.duststorm` (`DustStormModel`, `DustStormInputs`, `DustStorm`,
+    `BuildDustStormModelError`, `dust_storms`, `dust_storms_active_at`, `dust_storm`,
+    `has_dust_storms`, `season_half_width_cycles`, `noise_amplitude_cycles`,
+    `perihelion_contrast`)._
+    - Inputs: the orbital period, a perihelion passage, which is the clock's origin, and the orbit's
+      `Eccentricity`, which needs no refusal. The clock is a `LinearClock` of P from the perihelion.
+    - Noise: ℓ = 1, J = `NOISE_OCTAVES` 2, and a(e) = min(0.9 h(e) ÷ (1 + √2), 0.087), with h(e) =
+      (arccos e − e√(1 − e²)) ÷ 2π. The bound a(1 + √2) stays at or under 0.9 h(e); for Mars a is
+      0.0821 and the bound 0.198 cycles, about ±82° of true anomaly. The cap binds below e ≈ 0.05.
+      a(e) is clamped to [0, 0.087] and h(e) to 0 or above, since the two terms of h nearly cancel
+      as e → 1.
+    - Skip: `SkipMark::from_probability(2.0 / 3.0)` (`SKIP_PROBABILITY`).
+    - Season: |ν| ≤ 90° about perihelion (`SEASON_HALF_WIDTH`), Ls ≈ 161–341° at Mars (perihelion
+      at Ls 251.0° at J2000) and 0.4406 of the year. It holds by construction, since an onset lies the noise's value from its
+      perihelion in mean anomaly. `DustStormModel::true_anomaly_at` (through `solve_kepler`) and
+      `DustStorm::onset_true_anomaly` give it. Near-circular orbits have no cut-off: as e → 0 the
+      season is the half-year about the pericentre, and the doc gives the perihelion contrast
+      (`perihelion_contrast`: 45% at Mars, 7% at Earth's e).
+    - Eligibility: `has_dust_storms(τ)`, with τ the background dust's τ(550), P14.T24.c's
+      `dust_optical_depth` above 0, so a storm raises a column that exists. A NaN has none.
+    - Marks, from `CycleEvent::marks` at word 0. Word 0 is the duration's share of P, uniform in
+      [`MIN_DURATION_SHARE` 0.16, `MAX_DURATION_SHARE` 0.23), 110–158 days at Mars. Those are the
+      three storms seen from orbit, 110 to over 154 days, with 0.224 rounded up: MY 25 (110–140
+      days from Ls ~177; Strausberg et al. 2005, abstract), MY 28 (about 114–123; Lemmon et al.
+      2015 §4.1) and MY 34 (about 136 to 154; Kass et al. 2020, abstract; Montabone et al. 2020).
+      Words 1–7 are reserved, for a peak optical depth and a place of onset.
+    - **Departure from plan 06's design note 16 and the brainstorm's "a plain jittered lattice is
+      wrong, because its phase never diffuses"** (ruled, §1): the largest octave does not span the
+      source horizon, so the phase does not diffuse. Seasonal forcing locks the phase to the orbit;
+      note 16's diffusion is for internally timed cycles. The doc comment says so.
+  - _Durations, design point (e)._ Both kinds give the duration as a share of P, from the record.
+    A `const` assertion holds every share under `LEAST_INTERVAL_SHARE`, so no storm outlasts its
+    cycle and at most one of a kind runs at once. `storms_active_at` and `dust_storms_active_at`
+    read the cycles about Φ(t) (`events_about`), the margin `events_in` takes at a window's ends.
+  - _Design points._
+    - (a): the ruled lean. The fallback, an onset placed from the marks, is not built.
+    - (b): the ruled lean, with no season.
+    - (c): ±90° of true anomaly, with no threshold in e.
+    - (d): `has_great_storms` and `has_dust_storms`, which P14.T31.c applies.
+    - (e): the durations above and the storms' band. No other mark is drawn.
+  - _Figures read at source over the brief's and the ruling's._ Saturn's sidereal period is
+    10,755.70 days (29.447 years; NASA's Saturn fact sheet), not 29.46 years. It is a test fixture,
+    not a constant. Li and Ingersoll's water threshold is about 1.0%, not 0.9% (doc only). The
+    storms' cooling-time citation is Sugiyama et al. 2014, Icarus 229, 71. The
+    1990 storm broke out on 25 September 1990 (1990.73; the 2024 review, Fig. 14.12). With the
+    onsets to the month, Saturn's five intervals give a CV of 0.155, or 0.077 without 2010: the
+    ruling's 0.15 and 0.06 are from whole years, and the test's bounds stay the ruling's.
+  - _Figures as measured_ (seed 0x0e7e00140031000a, the fixtures' period and an origin 41 days
+    after the epoch):
+    - _A Saturn-like giant over 10⁴ years:_ 342 storms against 10⁴ ÷ P = 339.6, exactly the cycles
+      Φ crosses (−9 to 332). The intervals average 29.26 years (0.994 P), with an s.d. of 2.70
+      years and a CV of 0.092, a lag-1 correlation of +0.19 and a range of 22.7–39.8 years. The
+      bands came out 174 : 110 : 58, against 171 : 114 : 57.
+    - _A Mars-like planet over 10⁴ years:_ 1,778 storm years of K = 5,317 (0.334), inside the
+      ruling's 1,772 ± 113. The same count comes at e = 0 and 0.3, since the skip does not read e.
+    - _The season:_ every onset is within ±90° at e = 0, 0.0934 and 0.3. At Mars's e the onsets
+      run from −77.9° to +72.7° (Ls ≈ 173–324), with an s.d. of 31.0°; at e = 0 and e = 0.3 the
+      s.d. is 27.6° and 34.0°.
+  - _Plan text (as T31.a's R10)._ Test (a, b)'s "(Poisson interval)" does not fit a phase.
+    - The storms' count is exactly the whole cycles Φ crosses, read from `phase_at` at the window's
+      ends, and lies within ±(2 × the noise bound + 1) of 10⁴ ÷ P.
+    - The dust storms' count is Binomial(K, 1/3), tested by χ² against K ÷ 3 and 2K ÷ 3.
+    - Test (b)'s season check runs at e = 0, 0.0934 and 0.3 (ruled, §3).
+  - _Goldens._ `golden_diff.py --base origin/rendering-and-planets`: GENERATOR_VERSION 23 → 23,
+    "Extended only (2)", every existing value unchanged. `rng/tags` gains two lines (+2 −0):
+    `body.storm (Event) = 0xaf34260e90978442` and `body.duststorm (Event) = 0x897bfe1cca8063ea`.
+    The tail of
+    `planetary/events` gains 63 lines, all on plain inputs (`pin_storms`, after T31.a's sections,
+    byte for byte):
+    - the phase kinds' constants;
+    - h(e), a(e) and the contrast at five eccentricities;
+    - a Saturn-like giant's storms over 300 years, and the one running mid-way through the first;
+    - a Mars-like planet's dust storms over 30 years, with their true anomalies, and the one
+      running mid-way through the first.
+  - _Tests_ (`cargo test -p hyperion-sim planetary::events`):
+    - each refusal (`PeriodTooShort`) and its text;
+    - the eligibility rules. `has_dust_storms`'s test takes plain τ, since P14.T54.b's tripwire
+      (`nothing_on_the_record_calls_the_inventory_yet`) refuses code outside the aerosols module
+      that names it before the 24 bump; the doctest reads `MARS_DUST_OPTICAL_DEPTH`;
+    - Saturn's J and bound, and the ruled h(e), a(e), bound and contrast, with the bound under
+      0.9 h at 1,000 eccentricities;
+    - the season's ends at ±90°;
+    - test (a, b)'s counts;
+    - test (b)'s season and the onsets' spread;
+    - the storms' scatter: CV in [0.06, 0.15], mean within 5% of P, every interval in [P ÷ 1.9,
+      P ÷ 0.1];
+    - K–S of the duration shares and χ² of the bands;
+    - `*_active_at` against a scan about every onset and end and on a grid;
+    - test (c): partition and order independence, `EventId` text round trips, regeneration by ID,
+      another body's, another tag's, a non-zero number's and a skipped cycle's ID, and the same
+      seed twice;
+    - the tags (`plan_14_registers_its_storm_tags_with_event_scope_after_the_comets` and the renamed
+      event-tag test), which run under `--lib rng::tags` and `--lib id::event_tags`, outside the
+      `planetary::events` filter;
+    - `*_active_at` in any order of asking (`assert_order_independent`).
+  - _Not here (P14.T31.c's):_ choosing the inputs from a system at the epoch (plan 06's design
+    note 23: the period, the perihelion passage, e, the class and the dust's τ), `events_between`,
+    `BodyEvent`, "no event changes any `body_at` result", and each body's existence at the event's
+    time. Also not here: T35's `BodyEventDto`, T24.c's column raise while a dust storm lasts, and
+    R08's re-request of the atmosphere on one.
+- **Deferred findings (2026-10-13 rule), from P14.T31.b:**
+  - The dust storms' onsets spread with an s.d. of 31.0° of true anomaly at Mars's e (the ruling's
+    figure is about 32°), against about 45° for the ten catalogued storms.
+  - The 1977 pair of global storms is not modelled, since the construction gives one a cycle. The
+    catalogue also lists 1924, 1956 and 1994.
+  - The skip is independent between years, so orbit–spin coupling (Shirley 2015) is not modelled.
+  - The storms are not held to the northern summer (ruled, §2). The inputs exist: the record's
+    rotation section has the body-fixed frame's `pole()` and `obliquity()`, and the orbit its
+    periapsis direction and normal. P14.T31.c could pass the solstice's true anomaly, ν_s =
+    atan2(−p̂·Q̂, −p̂·P̂). That would change `body.storm`'s events, so it would land with T31.c,
+    before P14.T54.b pins T31.c's goldens, or ride a later bump.
+  - Eligibility by water above its critical mixing ratio is not modelled: "giants" by class stands,
+    so Jupiter, the ice giants and hot Jupiters all have great storms. The threshold is about 1.0%
+    of the troposphere's water vapour (Li and Ingersoll 2015, read from its abstract; the ruling's
+    0.9% is the density minimum of Sánchez-Lavega et al. 2024, Fig. 14.9), and Jupiter's lower
+    water "may explain" its lack of them.
+  - The bands are drawn apart from one another, so a band repeats about 39% of the time, where
+    Saturn's six storms never repeated one twice running: Li and Ingersoll find the storms
+    alternate between mid-latitudes and the equator.
+  - The dust storms' duration shares come from Mars alone and are carried to other periods as
+    they are.
+  - A giant's storms keep the plan's P = the orbital period, and their durations scale with it. A
+    hot Jupiter of a 3-day orbit has a storm every 3 days lasting about 10–80 minutes, where the
+    mechanism's own time, radiative cooling above the water cloud, is not the orbit's.
+  - 2010's 20.2-year interval is reachable, since the slope allows 15.5 years, but rarer than once
+    in 341 intervals: the shortest in 10⁴ years was 22.7.
+  - The four short great white spots (26–55 days) were seen from Earth with gaps in coverage, so
+    the shortest share, 0.0024, may be too short. The 1990 disturbance went on making spots into
+    mid-1991.
+  - The duration is drawn apart from the season. An onset at the season's end runs on past it, as
+    MY 28's decay ran to Ls ~335.
+  - The science check read these from abstracts or second-hand: Zurek and Martin 1993, Strausberg
+    et al. 2005, Kass et al. 2020 and Li and Ingersoll 2015 from their abstracts, and Sánchez-Lavega
+    1994's durations through Sayanagi et al. 2013.

@@ -195,3 +195,5 @@ body.cold_traps (Body) = 0x2a8afff8f29b65f4
 body.impact (Event) = 0xf6e3402aafa913e3
 body.eruption (Event) = 0xc28038004ab16699
 system.comet (Event) = 0x202ddc74fefacbe6
+body.storm (Event) = 0xaf34260e90978442
+body.duststorm (Event) = 0x897bfe1cca8063ea
