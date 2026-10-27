@@ -3181,3 +3181,52 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _A stale Consumes line._ This plan's Consumes bullet for plan 08 still says "only P08.T1–T7
     are built" at `d2787a2`; P08.T9, T12 and T13 are built. Left for the plan's next
     re-validation.
+- **P09.T28.a's propagator: a solve the iteration leaves unsolved is bisected (found and fixed in
+  P09.T28.b.a, lane `p09-centre`, 2026-10-27, at `GENERATOR_VERSION` 23; main's ruling of
+  2026-10-27).** No output moves: nothing generated reads the propagator yet, and every state
+  that the ten Laguerre–Conway steps solve keeps its bits (`kepler.golden` and T28.a's tests
+  unchanged).
+  - _The defect._ The fixed `UNIVERSAL_ITERATIONS` = 10 do not solve every state the centre
+    holds. P09.T28.b.a's pre-pin found a rogue planet of seed 0x5eed0000c0ffee00
+    (`0xcfffdfffc0005f87`: 1.50 ly out, leaving at 958 km/s on a nearly radial hyperbola, e =
+    1.449, q = 0.0875 ly) whose state 1,000 yr back came out 26,480 ly away (3,953 ly at −999 yr),
+    where the orbit is some 2 ly out; its energy was conserved, since any χ gives a point of the
+    conic, but at the wrong time. Run backward, the flyby falls in through its pericentre: the
+    starter (the parabolic cubic's, below the root as designed) lies near the pericentre, where
+    `F′ = r` is least, the first step overshoots into the hyperbolic branch, and from there each
+    step gains only about `1 ÷ √−α`. A scale-free scan (e from 1 to 2, the start's true anomaly,
+    τ in units of `√(q³ ÷ μ)`) finds two such regions, neither in T28.a's stress set: a solve
+    towards the pericentre from 20–220 pericentres out at e of 1.05–2 and τ′ of 60–3,000, and a
+    nearly parabolic flyby (e ≈ 1.01) over τ′ of 10⁶–10⁷, which within the clock window means
+    pericentres inside about 10⁻⁴ ly.
+  - _The fix._ `propagate` solves through `universal_anomaly`: the ten steps as before, then
+    `solves` checks Kepler's universal equation to `UNSOLVED_RESIDUAL` = 10⁻⁸ of its largest term
+    (a solved χ leaves 10⁻¹³ even far out on a hyperbola; the unsolved ones leave 10³–10⁴ times
+    √μτ; an overflowed one is never solved), and an unsolved χ is found again by `bisect_anomaly`,
+    `BISECTION_STEPS` = 128 halvings of `[0, √μτ ÷ q]`. The bracket holds the one root:
+    `dF ÷ dχ = r ≥ q > 0` (Battin 1999, §4.5), so F is increasing, `F(0) = 0` and
+    `F(√μτ ÷ q) ≥ √μτ`. Far out on a hyperbola the bracket's end can
+    lie where the Stumpff terms overflow and their sum is not a number; such a χ is beyond the root
+    (the terms grow with |χ|, and every root the clock window reaches is finite), so the far end
+    moves in to it. Only IEEE operations and `math` functions, fixed counts; the residual test is a
+    comparison of deterministic values, so native and wasip1 agree bit for bit (the tests run in
+    the wasip1 suite).
+  - _Tests (new, in `galaxy/motion.rs`)._
+    `an_inbound_flyby_through_its_pericentre_is_solved_pinned` (the rogue planet: the ten steps
+    leave it unsolved, the fallback solves it, 1.5–2.5 ly at −1,000 yr, within 10⁻⁹ of the
+    hyperbolic anomaly's position, energy to 10⁻¹²);
+    `nearly_radial_flybys_match_independent_references_pinned` (e = 1, 1 + 10⁻⁶, 1 + 10⁻⁴, 1.01,
+    1.05, 1.2, 1.45, 2; pericentres 10⁻⁴–1 ly; starts 1–300 pericentres out, inbound and outbound;
+    ±1 to ±10⁴ yr; against Barker's equation for the parabolas and the hyperbolic anomaly for the
+    rest, both by bisection and sharing no algebra with the universal variables (Vallado 2013,
+    §2.2); 2,016 propagations, 14 by the fallback, worst 3.5 × 10⁻¹⁰ of the farther radius,
+    held to 10⁻⁹; it fails if the fallback is never reached); and T28.a's
+    `the_fixed_iteration_count_converges` now asserts that its stress set never takes the
+    fallback, so those states keep the iterated χ. Both constants belong to the generator version
+    once P09.T28.b.b wires the propagator in. This supersedes "P09.T28.a as built"'s _Method_ (the
+    ten steps alone); its _Domain_ case (e = 100, q = 10⁻³ ly, solved back from 160 ly) was not
+    re-run.
+  - _In P09.T28.b.a's pre-pin sample_ (three galaxies, 453,819 Kepler-regime grid records at four
+    times each), 5 records take the fallback, each at one of its times; with it, the Kepler arm
+    moves no record more than 4.6 ly from its straight line over 1,000 yr (fast flybys deflected
+    by the black hole), where it had moved one 26,480 ly.

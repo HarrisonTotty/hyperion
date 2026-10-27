@@ -24,10 +24,14 @@
 //! g, ḟ and ġ (Battin 1999, *An Introduction to the Mathematics and Methods of Astrodynamics*, rev.
 //! ed., §4.5; Vallado 2013, *Fundamentals of Astrodynamics and Applications*, 4th ed., §2.3,
 //! algorithm 8). The equation is solved by the Laguerre–Conway iteration (Conway 1986, *Celestial
-//! Mechanics* 39, 199), which converges from a poor starting value for every conic, run a fixed
-//! [`UNIVERSAL_ITERATIONS`] times and never stopped on a tolerance. A bound orbit's time is first
-//! reduced to within half a period of the epoch, so the anomaly never winds up over the thousand
-//! orbits an inner star completes in the clock window.
+//! Mechanics* 39, 199), which converges from a poor starting value for nearly every state, run a
+//! fixed [`UNIVERSAL_ITERATIONS`] times and never stopped early. Its result is then checked
+//! against the equation, and a χ it leaves unsolved, to `UNSOLVED_RESIDUAL` of the equation's
+//! largest term, is found again by a fixed `BISECTION_STEPS` bisections, which cannot fail: an
+//! inbound flyby that passes its pericentre within the span can need them (P09.T28.a's fix, found
+//! by P09.T28.b.a). A bound orbit's time is first reduced to within half a period of the epoch, so
+//! the anomaly never winds up over the thousand orbits an inner star completes in the clock
+//! window.
 //!
 //! # Units and precision
 //!
@@ -45,9 +49,11 @@
 //!
 //! The module is pure: no streams, no tags, no caches. Every operation is an IEEE operation or a
 //! [`math`] function, the iteration count is fixed, and the arithmetic's form is fixed, so every
-//! platform gives the same bits. [`UNIVERSAL_ITERATIONS`], the Stumpff series' length and the form
-//! of every expression here belong to the generator version once P09.T28.b wires the propagator
-//! into the drift hook; until then nothing generated reads it.
+//! platform gives the same bits; the residual's test compares deterministic values, so a state
+//! takes the bisection on every platform or on none. [`UNIVERSAL_ITERATIONS`],
+//! `UNSOLVED_RESIDUAL`, `BISECTION_STEPS`, the Stumpff series' length and the form of every
+//! expression here belong to the generator version once P09.T28.b wires the propagator into the
+//! drift hook; until then nothing generated reads it.
 
 use std::error::Error;
 use std::fmt;
@@ -59,7 +65,8 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{GravitationalParameter, LightYears, Metres, Seconds};
 
 /// How many Laguerre–Conway iterations solve Kepler's equation in universal form: a fixed count,
-/// never a tolerance, so that every platform takes the same steps.
+/// never stopped early, so that every platform takes the same steps; a result they leave unsolved
+/// is bisected (`UNSOLVED_RESIDUAL`).
 ///
 /// From the starting values below the iteration reaches the root to 10⁻¹³ relative in at most
 /// seven steps over the stress set of this module's tests (bound orbits to e = 0.9999, parabolic,
@@ -75,6 +82,18 @@ const LAGUERRE_ORDER: f64 = 5.0;
 /// Above this eccentricity an unbound orbit's starting value comes from its hyperbolic anomaly,
 /// which is ill-conditioned as e approaches 1, where the parabolic cubic serves instead.
 const HYPERBOLIC_STARTER_ECCENTRICITY: f64 = 1.01;
+
+/// The share of the largest of its terms within which Kepler's universal equation counts as solved
+/// ([`KeplerOrbit::universal_anomaly`]): far above the 10⁻¹³ to which a solved χ leaves it, even
+/// far out on a hyperbola, where its terms are a million times χ's own, and far below what an
+/// unsolved one leaves, a large share of its terms.
+const UNSOLVED_RESIDUAL: f64 = 1e-8;
+
+/// How many bisections solve Kepler's universal equation when the iteration has not: 128 halve the
+/// bracket `√μ τ ÷ q`, under 10²⁶ √m over ±10⁴ yr for any pericentre over a metre about any
+/// black hole under 10¹⁰ M☉, by 3 × 10³⁸, to below the rounding of any root it holds. Steps
+/// past the rounding leave the bracket where it is.
+const BISECTION_STEPS: u32 = 128;
 
 /// Below this |z| the Stumpff functions come from their series, where the closed forms lose
 /// digits to cancellation.
@@ -351,7 +370,7 @@ impl KeplerOrbit {
         let sqrt_mu = self.mu.sqrt();
         let tau = self.reduced_time(dt.value());
         let sigma = dot(self.position, self.velocity) / sqrt_mu;
-        let chi = self.solve(tau * sqrt_mu, sigma, iterations);
+        let chi = self.universal_anomaly(tau * sqrt_mu, sigma, iterations);
         let (r0, alpha) = (self.radius, self.alpha);
         let z = alpha * chi * chi;
         let (c, s) = stumpff(z);
@@ -383,6 +402,90 @@ impl KeplerOrbit {
         } else {
             dt
         }
+    }
+
+    /// The universal anomaly χ, √m, at which Kepler's universal equation gives `sqrt_mu_tau`: by
+    /// `iterations` Laguerre–Conway steps ([`KeplerOrbit::solve`]), or, if they leave the equation
+    /// unsolved, by [`KeplerOrbit::bisect_anomaly`].
+    ///
+    /// From its starting value the iteration reaches the root in a few steps for every state of
+    /// P09.T28.a's stress set, but not for every state the centre holds. An inbound flyby that
+    /// passes its pericentre within the span starts near the pericentre, where `F′ = r` is least,
+    /// and its first step can overshoot into the hyperbolic branch, where each step gains only
+    /// about `1 ÷ √−α`: a rogue planet at 1.5 ly falling in at 958 km/s on an orbit of e = 1.45
+    /// came out 26,480 ly away after −1,000 yr (plan 09's Risks, "P09.T28.a's propagator: an
+    /// unsolved universal anomaly is bisected"). Such a χ is found by its
+    /// residual, which is then a large share of the equation's terms, and solved again. A state
+    /// the iteration solves keeps its bits, so P09.T28.a's goldens and tests are unchanged.
+    #[must_use]
+    fn universal_anomaly(&self, sqrt_mu_tau: f64, sigma: f64, iterations: u32) -> f64 {
+        let chi = self.solve(sqrt_mu_tau, sigma, iterations);
+        if self.solves(chi, sqrt_mu_tau, sigma) {
+            chi
+        } else {
+            self.bisect_anomaly(sqrt_mu_tau, sigma)
+        }
+    }
+
+    /// Whether `chi` solves Kepler's universal equation for `sqrt_mu_tau` to
+    /// [`UNSOLVED_RESIDUAL`] of the largest of its terms.
+    #[must_use]
+    fn solves(&self, chi: f64, sqrt_mu_tau: f64, sigma: f64) -> bool {
+        let (r0, alpha) = (self.radius, self.alpha);
+        let z = alpha * chi * chi;
+        let (c, s) = stumpff(z);
+        let chi2 = chi * chi;
+        let terms = [
+            sigma * chi2 * c,
+            (1.0 - alpha * r0) * chi2 * chi * s,
+            r0 * chi,
+            -sqrt_mu_tau,
+        ];
+        let residual = terms[0] + terms[1] + terms[2] + terms[3];
+        let scale = terms.iter().fold(0.0_f64, |m, t| m.max(t.abs()));
+        // An overflowed χ is never solved, whatever its terms' signs.
+        residual.is_finite() && residual.abs() <= UNSOLVED_RESIDUAL * scale
+    }
+
+    /// χ by [`BISECTION_STEPS`] bisections of Kepler's universal equation `F(χ) = √μ τ`, with
+    /// `F(χ) = σ₀ χ² C(z) + (1 − α r₀) χ³ S(z) + r₀ χ`. Slow, and certain, because the bracket
+    /// always holds the one root:
+    ///
+    /// - `F` is strictly increasing: `dF ÷ dχ = r(χ)`, the distance at χ (Battin 1999, §4.5), which
+    ///   is positive on every orbit that has a pericentre, as every one built does (not `Radial`,
+    ///   not `AtCentre`);
+    /// - `F(0) = 0`, and since `r ≥ q`, the pericentre distance, `F(√μ τ ÷ q) = ∫ r dχ` over
+    ///   `[0, √μ τ ÷ q]` is at least `q × √μ τ ÷ q = √μ τ` for `τ > 0`, and at most it for `τ < 0`
+    ///   over `[√μ τ ÷ q, 0]`, so the root lies between 0 and `√μ τ ÷ q`.
+    ///
+    /// Far out on a hyperbola the bracket's end can lie where the Stumpff terms overflow, and
+    /// their sum is then not a number. Such a χ lies beyond the root: the terms grow with |χ|, and
+    /// every root the clock window reaches is finite ([`KeplerOrbit::propagate`]'s domain), so the
+    /// bracket's far end moves in to it.
+    #[must_use]
+    fn bisect_anomaly(&self, sqrt_mu_tau: f64, sigma: f64) -> f64 {
+        let (r0, alpha) = (self.radius, self.alpha);
+        let b = 1.0 - alpha * r0;
+        let far = sqrt_mu_tau / self.pericentre_m();
+        let (mut lo, mut hi) = if far >= 0.0 { (0.0, far) } else { (far, 0.0) };
+        for _ in 0..BISECTION_STEPS {
+            let chi = f64::midpoint(lo, hi);
+            let z = alpha * chi * chi;
+            let (c, s) = stumpff(z);
+            let chi2 = chi * chi;
+            let value = sigma * chi2 * c + b * chi2 * chi * s + r0 * chi;
+            let below = if value.is_finite() {
+                value < sqrt_mu_tau
+            } else {
+                far < 0.0
+            };
+            if below {
+                lo = chi;
+            } else {
+                hi = chi;
+            }
+        }
+        f64::midpoint(lo, hi)
     }
 
     /// The universal anomaly χ, √m, at which Kepler's universal equation gives `sqrt_mu_tau`,
@@ -810,6 +913,11 @@ mod tests {
                     .unwrap();
                 worst = worst.max(needed);
                 let fixed = orbit.solve(tau * sqrt_mu, sigma, UNIVERSAL_ITERATIONS);
+                // The stress set never takes the fallback, so its states keep the iterated χ.
+                assert!(
+                    orbit.solves(fixed, tau * sqrt_mu, sigma),
+                    "the stress set took the fallback after {years} yr: {orbit:?}"
+                );
                 assert!(
                     (fixed - reference).abs() <= tolerance,
                     "χ {fixed} against {reference} after {years} yr: {orbit:?}"
@@ -889,6 +997,199 @@ mod tests {
         let kepler = start.propagate(Seconds::new(span));
         let dr = distance(kepler.position, r) / kepler.radius;
         assert!(dr < 1e-8, "off by {dr:e}");
+    }
+
+    /// The position `dt` seconds on of a hyperbolic orbit by its hyperbolic anomaly, a reference
+    /// independent of the universal variables: `M = e sinh H − H` advanced by the mean motion
+    /// `√(μ ÷ |a|³)` and solved for H by bisection (it is increasing in H), and the perifocal
+    /// position `x = |a| (e − cosh H)`, `y = |a| √(e² − 1) sinh H` (Vallado 2013, §2.2), with
+    /// `sinh H₀ = r · v ÷ (e √(μ |a|))` at the start.
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the literature's symbols: r, v, e, h, x, y"
+    )]
+    fn hyperbolic_reference(orbit: &KeplerOrbit, dt: f64) -> [f64; 3] {
+        let (r, v, mu) = (orbit.position, orbit.velocity, orbit.mu);
+        let semi = -1.0 / orbit.alpha;
+        let ev = orbit.eccentricity_vector();
+        let e = length(ev);
+        let p_hat = ev.map(|c| c / e);
+        let h = cross(r, v);
+        let q_hat = cross(h, p_hat).map(|c| c / length(h));
+        let h0 = math::asinh(dot(r, v) / (e * (mu * semi).sqrt()));
+        let mean = e * math::sinh(h0) - h0 + (mu / (semi * semi * semi)).sqrt() * dt;
+        let reach = math::asinh(mean.abs() / (e - 1.0)) + 1.0;
+        let (mut lo, mut hi) = (-reach, reach);
+        for _ in 0..200 {
+            let mid = f64::midpoint(lo, hi);
+            if e * math::sinh(mid) - mid < mean {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let anomaly = f64::midpoint(lo, hi);
+        let x = semi * (e - math::cosh(anomaly));
+        let y = semi * (e * e - 1.0).sqrt() * math::sinh(anomaly);
+        [0, 1, 2].map(|i| x * p_hat[i] + y * q_hat[i])
+    }
+
+    /// The position `dt` seconds on of a parabolic orbit by Barker's equation, a reference
+    /// independent of the universal variables: `D + D³ ÷ 3 = W`, D = tan(ν ÷ 2), with W advanced
+    /// by `dt ÷ √(2q³ ÷ μ)` and solved by bisection, and the perifocal position `x = q (1 − D²)`,
+    /// `y = 2qD` (Vallado 2013, §2.2), with `D₀ = r · v ÷ √(2μq)` at the start.
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the literature's symbols: r, v, h, q, w, d, x, y"
+    )]
+    fn parabolic_reference(orbit: &KeplerOrbit, dt: f64) -> [f64; 3] {
+        let (r, v, mu) = (orbit.position, orbit.velocity, orbit.mu);
+        let h = cross(r, v);
+        let q = dot(h, h) / (2.0 * mu);
+        let ev = orbit.eccentricity_vector();
+        let p_hat = ev.map(|c| c / length(ev));
+        let q_hat = cross(h, p_hat).map(|c| c / length(h));
+        let d0 = dot(r, v) / (2.0 * mu * q).sqrt();
+        let w = d0 + d0 * d0 * d0 / 3.0 + dt / (2.0 * q * q * q / mu).sqrt();
+        let reach = math::cbrt(3.0 * w.abs()) + 1.0;
+        let (mut lo, mut hi) = (-reach, reach);
+        for _ in 0..200 {
+            let mid = f64::midpoint(lo, hi);
+            if mid + mid * mid * mid / 3.0 < w {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let d = f64::midpoint(lo, hi);
+        let (x, y) = (q * (1.0 - d * d), 2.0 * q * d);
+        [0, 1, 2].map(|i| x * p_hat[i] + y * q_hat[i])
+    }
+
+    /// A rogue planet of seed 0x5eed0000c0ffee00's centre (`0xcfffdfffc0005f87`, P09.T28.b.a's
+    /// pre-pin): 1.5 ly out on a nearly radial flyby, e = 1.45, q = 0.0875 ly. A thousand years
+    /// back it passes its pericentre on the way in, and ten Laguerre–Conway steps from the
+    /// starting value leave Kepler's equation unsolved: the state came out 26,480 ly away, where
+    /// the orbit is some 2 ly out. The bisection solves it, to the hyperbolic anomaly's answer.
+    #[test]
+    fn an_inbound_flyby_through_its_pericentre_is_solved_pinned() {
+        let orbit = KeplerOrbit::from_state(
+            PointLy::new(
+                -0.924_728_158_321_281,
+                -0.523_016_646_507_413_1,
+                1.062_825_901_658_277_5,
+            ),
+            GalacticVelocity::new([
+                -521_820.097_021_385_2,
+                -277_315.864_063_661_37,
+                753_724.179_127_419,
+            ]),
+            GravitationalParameter::new(1.344_056_460_257_621_7e27),
+        )
+        .unwrap();
+        assert!((orbit.eccentricity() - 1.4486).abs() < 1e-4);
+        let dt = -1_000.0 * YEAR;
+        let sqrt_mu = orbit.mu.sqrt();
+        let sigma = dot(orbit.position, orbit.velocity) / sqrt_mu;
+        let target = orbit.reduced_time(dt) * sqrt_mu;
+        let iterated = orbit.solve(target, sigma, UNIVERSAL_ITERATIONS);
+        assert!(
+            !orbit.solves(iterated, target, sigma),
+            "the iteration solved it"
+        );
+        let chi = orbit.universal_anomaly(target, sigma, UNIVERSAL_ITERATIONS);
+        assert!(orbit.solves(chi, target, sigma));
+        let later = orbit.propagate(Seconds::new(dt));
+        let expected = hyperbolic_reference(&orbit, dt);
+        let off = distance(later.position, expected) / length(expected);
+        assert!(off < 1e-9, "{off:e} from the hyperbolic anomaly's position");
+        let r = later.distance().value() / METRES_PER_LIGHT_YEAR;
+        assert!((1.5..2.5).contains(&r), "{r} ly");
+        let de = relative(
+            later.specific_energy_j_per_kg(),
+            orbit.specific_energy_j_per_kg(),
+        );
+        assert!(de < 1e-12, "{de:e}");
+    }
+
+    /// Nearly radial and parabolic flybys, inbound and outbound, at e from 1 to 2, pericentres
+    /// of 10⁻⁴–1 ly and starts 1–300 pericentres out, over up to ±10⁴ yr, each against a
+    /// reference independent of the universal variables: Barker's equation for the parabolas and
+    /// the hyperbolic anomaly for the rest, both solved by bisection. The sweep reaches the two
+    /// regions where ten steps fall short (a solve towards the pericentre from 20 or more
+    /// pericentres out, and a nearly parabolic flyby over 10⁶ of its pericentre's time scale
+    /// √(q³ ÷ μ)), so the fallback serves some of it; every propagation solves Kepler's
+    /// equation, and the positions agree to 10⁻⁹ of the farther radius.
+    #[test]
+    fn nearly_radial_flybys_match_independent_references_pinned() {
+        let mut lcg = Lcg::new(0x0928_a000_0000_0f1b);
+        let mu = sgr_a().value();
+        let (mut worst, mut fallbacks, mut count) = (0.0_f64, 0_u32, 0_u32);
+        for e in [1.0, 1.0 + 1e-6, 1.0 + 1e-4, 1.01, 1.05, 1.2, 1.45, 2.0] {
+            for n in 0..24 {
+                let q = 1e-4 * math::exp10(4.0 * lcg.next_f64());
+                let out = math::exp10(math::log10(300.0) * lcg.next_f64());
+                if q * out > 10.0 {
+                    continue;
+                }
+                let q_m = q * METRES_PER_LIGHT_YEAR;
+                let p = q_m * (1.0 + e);
+                // The true anomaly `out` pericentres out, falling in for even n and leaving for odd.
+                let cos = ((1.0 + e) / out - 1.0) / e;
+                let sin = (1.0 - cos * cos).max(0.0).sqrt() * if n % 2 == 0 { -1.0 } else { 1.0 };
+                let r = p / (1.0 + e * cos);
+                let vr = (mu / p).sqrt() * e * sin;
+                let vt = (mu / p).sqrt() * (1.0 + e * cos);
+                let angles = [0, 1, 2].map(|_| std::f64::consts::TAU * lcg.next_f64());
+                let position =
+                    rotate([r * cos, r * sin, 0.0], angles).map(|c| c / METRES_PER_LIGHT_YEAR);
+                let orbit = KeplerOrbit::from_state(
+                    PointLy::new(position[0], position[1], position[2]),
+                    GalacticVelocity::new(rotate(
+                        [vr * cos - vt * sin, vr * sin + vt * cos, 0.0],
+                        angles,
+                    )),
+                    GravitationalParameter::new(mu),
+                )
+                .unwrap();
+                let sqrt_mu = orbit.mu.sqrt();
+                let sigma = dot(orbit.position, orbit.velocity) / sqrt_mu;
+                for years in [
+                    -1e4, -3e3, -1e3, -300.0, -100.0, -1.0, 1.0, 100.0, 300.0, 1e3, 3e3, 1e4,
+                ] {
+                    let dt = years * YEAR;
+                    let target = orbit.reduced_time(dt) * sqrt_mu;
+                    let iterated = orbit.solve(target, sigma, UNIVERSAL_ITERATIONS);
+                    if !orbit.solves(iterated, target, sigma) {
+                        fallbacks += 1;
+                    }
+                    let chi = orbit.universal_anomaly(target, sigma, UNIVERSAL_ITERATIONS);
+                    assert!(
+                        orbit.solves(chi, target, sigma),
+                        "unsolved after {years} yr: {orbit:?}"
+                    );
+                    let later = orbit.propagate(Seconds::new(dt));
+                    let expected = if orbit.alpha < 0.0 && e > 1.0 {
+                        hyperbolic_reference(&orbit, dt)
+                    } else {
+                        parabolic_reference(&orbit, dt)
+                    };
+                    let scale = length(expected).max(orbit.radius);
+                    let off = distance(later.position, expected) / scale;
+                    worst = worst.max(off);
+                    count += 1;
+                    assert!(
+                        off < 1e-9,
+                        "{off:e} off after {years} yr at e = {e}, q = {q} ly, {out} q out: {orbit:?}"
+                    );
+                }
+            }
+        }
+        println!(
+            "{count} propagations, {fallbacks} by the fallback, worst {worst:e} of the radius"
+        );
+        assert!(fallbacks > 0, "the sweep never reached the fallback");
+        assert!(count > 1_000, "{count} propagations");
     }
 
     #[test]
