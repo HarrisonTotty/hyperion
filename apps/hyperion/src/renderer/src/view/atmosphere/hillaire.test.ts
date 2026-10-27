@@ -2145,6 +2145,31 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     expect(engine.counts.kernels - before).toBe(2);
   });
 
+  it("makes up front only the reads asked of the device's shared kernels, the other at its first frame", async () => {
+    const engine = await countingRenderEngine();
+    const made: string[] = [];
+    const create = engine.createComputeAsync.bind(engine);
+    engine.createComputeAsync = (pair) => {
+      made.push(pair.name);
+      return create(pair);
+    };
+    const kernels = await createAtmosphereFrameKernels(engine, "by slot");
+    expect(made).toContain("atmosphere ray march by slot at the centre ray");
+    expect(made).not.toContain(RAY_MARCH_CENTRE_KERNEL.name);
+    expect(made).not.toContain(RAY_MARCH_KERNEL.name);
+    const before = engine.counts.kernels;
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    engine.dispatched.length = 0;
+    view.drawFrame(far, [NOON], SCENE);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
+      "atmosphere ray march at the centre ray",
+      "atmosphere ray march",
+    ]);
+    // The tables' own build kernels beside the pair made at the frame.
+    expect(engine.counts.kernels - before).toBeGreaterThanOrEqual(2);
+  });
+
   it("marches nothing where the air lies behind the camera, and the composite reads none of it", async () => {
     const { engine, atmosphere } = await atmosphereOf();
     const away = { ...far, orientation: lookAlong({ x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }) };

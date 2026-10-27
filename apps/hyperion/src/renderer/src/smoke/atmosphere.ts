@@ -2435,8 +2435,10 @@ interface AreaBody {
  * 60° field, T8.c's timed Sun 30° from the zenith of the tangent point and 90° right) from 400 km,
  * 10⁷ m and 10⁸ m on high, so that the area is part of the frame and holds tiles of each kind;
  * 10⁷ m over a surface drawn across the frame beyond the body, so that every texel has a depth and
- * the face's rays end on the datum before it; 10⁷ m at low's half resolution, the composite's four
- * candidates of a pixel; and 60 km, inside the air, where the area is the whole frame.
+ * the face's rays end on the datum before it; and 10⁷ m at low's half resolution, the composite's
+ * four candidates of a pixel. A frame from inside the air, whose area is the whole target, was held
+ * byte for byte once beside them and is left out for the part's time and its GPU process's memory
+ * (plan R08's "Deviations in R08.T11.d, as built").
  */
 const AREA_FRAMES: ReadonlyArray<AreaFrame> = [
   {
@@ -2453,12 +2455,6 @@ const AREA_FRAMES: ReadonlyArray<AreaFrame> = [
   },
   { name: "from 10⁸ m", setting: "high", distanceM: 1e8, surfaceM: null },
   { name: "from 10⁷ m", setting: "low", distanceM: 1e7, surfaceM: null },
-  {
-    name: "from 60 km, inside the air",
-    setting: "high",
-    distanceM: WGS84.equatorialRadiusM + 60_000,
-    surfaceM: null,
-  },
 ];
 
 /**
@@ -2645,7 +2641,8 @@ export async function checkMarchArea(
   checks: Checks,
   fallback: boolean,
 ): Promise<void> {
-  const kernels = await createAtmosphereFrameKernels(engine);
+  // The measured Earth's tables hold the slot layers: the march by slot alone, up front.
+  const kernels = await createAtmosphereFrameKernels(engine, "by slot");
   try {
     await checkAreaBodies(engine, checks, fallback, kernels);
   } finally {
