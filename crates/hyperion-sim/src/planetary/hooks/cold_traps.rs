@@ -117,15 +117,35 @@
 //! are the Moon's 0.11, so no figure moves.
 //!
 //! So the zonal annual maxima and every condensable's `f_ct` read only the sky, the regolith's
-//! albedo, the heat flow and the terrain, none of which T13.c's passes change. They are one
-//! `ColdTrapField`, built once a body (`ColdTrapField::new`); `publish_over` reads it, the
-//! record's `publish` builds it once, and from P14.T54.b every pass reads the same field, so
-//! the passes and the record agree by construction at one evaluation a body. Its `f_ct` are one
-//! latitude integral for every species at once (`over_latitude_each`), each latitude's fractions
-//! one call of `ColdTrapGround::fractions_at`, whose closed form shares one depth integral among
-//! the thresholds (`hyperion_surface::cold_trap::fractions`, R09.T7.k). The zonal entries and the
-//! reservoirs stay each publish's, per partition, and whether a body qualifies is tested at every
-//! publish (`qualifies`).
+//! albedo, the heat flow and the terrain. They are one `ColdTrapField` (`ColdTrapField::new`),
+//! which `publish_over` reads. Its `f_ct` are one latitude integral for every species at once
+//! (`over_latitude_each`), each latitude's fractions one call of `ColdTrapGround::fractions_at`,
+//! whose closed form shares one depth integral among the thresholds
+//! (`hyperion_surface::cold_trap::fractions`, R09.T7.k). The zonal entries and the reservoirs stay
+//! each publish's, per partition, and whether a body qualifies is tested at every publish
+//! (`qualifies`).
+//!
+//! # The field in the passes (P14.T54.b.f)
+//!
+//! The field's inputs are not the same at every pass (decision-p14-t54b-f-coldtraps §1): the heat
+//! flow, the crater contract and the crust are the context's a pass reads (K of the pass before),
+//! and the regolith is the pass's own lid's row, weathered at its own maturity. So a pass under
+//! its body's own climate that qualifies builds or reuses a field over its own inputs
+//! (`FieldInputs`), and nothing else: the derivation's sky, the heat flow, crater contract and
+//! crust of the context it reads, its weathered bare regolith's Bond albedo (the one its area mix
+//! reads), its partition's condensables (`condensables`, [`DELIVERED`] included, water left out on
+//! an ice-rich crust) and its profile's area points. Within a pass the conditions come first, then
+//! its lid, its regolith, the field, `publish_over` and the area mix.
+//!
+//! - **One build per run of equal inputs.** The derivation keeps one slot (`FieldSlot`): a pass
+//!   whose inputs are the slot's, every float the same bits, reuses its field, and any other builds
+//!   one and takes the slot. No tolerance: a pass never reads a field of other inputs.
+//! - **The record builds none.** The published pass's field rides with it to the record
+//!   (`PassColdTraps`), which publishes over it with that pass's heat flow, crust and craters, so
+//!   that the record's condensates are the published pass's by identity, to the bit.
+//! - **No field.** A pass whose context holds no figures (C₀), a climate given (the passes'
+//!   stand-in), a pass that does not qualify and every pass under the hold read none, and publish
+//!   P14.T51.a's condensates, the reason labelled (`NoColdTraps`).
 //!
 //! # The reservoir
 //!
@@ -179,19 +199,23 @@
 //!
 //! One new tag, [`tags::BODY_COLD_TRAPS`], keyed by the body; word 0 read, words 1–7 reserved
 //! ([`EXPOSED_FRACTION_WORDS`]). No existing stream gains a draw. The integral sums its bands and
-//! nodes in their fixed order, the species are taken in registry order, and nothing is cached: a
-//! field is a value its caller builds and passes, never kept behind a call.
+//! nodes in their fixed order, and the species are taken in registry order. Nothing outlives a
+//! derivation: a field is a value the derivation's passes build, held in its one slot
+//! (`FieldSlot`), a local the derivation drops when it returns, never a static or a thread's, and
+//! reused only where every input is the same bits. The field is a pure function of those inputs,
+//! so its reuse moves no bit; a moon's second round is a derivation of its own and starts empty.
 
 #[cfg(test)]
 mod tests;
 
+use core::cell::Cell;
 use core::f64::consts::{FRAC_PI_2, PI};
 
 use hyperion_surface::cold_trap::{
     self, BodyParts, DepthRatios, LUNAR_SHARE_UNDER_CUTOFF, Terrain, TerrainParts,
     flux_weighted_elevation,
 };
-use hyperion_surface::craters::{CraterParams, cumulative_density, saturation};
+use hyperion_surface::craters::{CraterParams, Screening, cumulative_density, saturation};
 
 use crate::id::BodyId;
 use crate::math;
@@ -231,7 +255,8 @@ pub(crate) enum ColdTrapRules {
     /// annual mean, with no cold traps.
     Held,
     /// The 23 → 24 batch's: on a body with no collisional atmosphere that is not locked to its
-    /// star, the airless branch keyed on the zonal annual maximum and the cold traps ([`publish`]).
+    /// star, the airless branch keyed on the zonal annual maximum and the cold traps
+    /// ([`publish_over`]).
     Batch,
 }
 
@@ -470,42 +495,74 @@ pub(crate) fn lunar_sky() -> ColdTrapSky {
 }
 
 /// What the record's cold traps read beyond a body's figures and conditions
-/// (`GlobalFigures::condensates_and_ice_over`; P14.T51.f, P14.T51.i): their rules, their sky and
-/// draw, and the bare regolith's Bond albedo its derivation gives.
+/// (`GlobalFigures::condensates_and_ice_over`; P14.T51.f, P14.T51.i, P14.T54.b.f): their rules
+/// and the field they publish over.
 ///
 /// Plain data with crate-visible fields.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RecordColdTraps<'a> {
     /// Which rules they follow, their hold at 24.
     pub(crate) rules: ColdTrapRules,
-    /// The body's sky and its exposed fraction.
-    pub(crate) sky: &'a ColdTrapSky,
-    /// The bare regolith's Bond albedo about the body's hosts' bands, airless
-    /// (`DerivedBody::regolith_albedo`), 0 to 1.
-    pub(crate) regolith_albedo: f64,
+    /// The field.
+    pub(crate) field: RecordField<'a>,
+}
+
+/// The field a record's cold traps publish over ([`RecordColdTraps::field`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum RecordField<'a> {
+    /// The field the body's published pass read, with its inputs, carried to the record
+    /// (P14.T54.b.f; decision-p14-t54b-f-coldtraps §3): the record builds none. `None` where that
+    /// pass read none (the passes' stand-in, a pass that does not qualify, the hold), whose record
+    /// publishes P14.T51.a's condensates, as its pass did.
+    Carried(Option<&'a PassColdTraps>),
+    /// The tests' record path on the figures alone: a field built here ([`publish`]) under the sky
+    /// `sky` at the bare regolith's Bond albedo `regolith_albedo`, over the figures' own heat flow,
+    /// crust and craters, as the record built it before P14.T54.b.f.
+    #[cfg(test)]
+    Built {
+        /// The body's sky and its exposed fraction.
+        sky: &'a ColdTrapSky,
+        /// The bare regolith's Bond albedo about the body's hosts' bands, airless, 0 to 1.
+        regolith_albedo: f64,
+    },
 }
 
 #[cfg(test)]
 impl<'a> RecordColdTraps<'a> {
     /// The record's cold traps under `rules` and the sky `sky`, at the Bond albedo of the
-    /// atmosphere `air` as the regolith's: what the tests of bodies whose regolith is the airless
-    /// rock's take, the Moon's 0.11, so that their figures are P14.T51.f's.
+    /// atmosphere `air` as the regolith's, built on the figures ([`RecordField::Built`]): what the
+    /// tests of bodies whose regolith is the airless rock's take, the Moon's 0.11, so that their
+    /// figures are P14.T51.f's.
     #[must_use]
     pub(crate) fn at_the_albedo_of(
         rules: ColdTrapRules,
         sky: &'a ColdTrapSky,
         air: &Atmosphere,
     ) -> Self {
+        Self::built(rules, sky, air.albedo().value())
+    }
+
+    /// The record's cold traps under `rules` and the sky `sky`, at the bare regolith's albedo
+    /// `regolith_albedo`, built on the figures ([`RecordField::Built`]).
+    #[must_use]
+    pub(crate) const fn built(
+        rules: ColdTrapRules,
+        sky: &'a ColdTrapSky,
+        regolith_albedo: f64,
+    ) -> Self {
         Self {
             rules,
-            sky,
-            regolith_albedo: air.albedo().value(),
+            field: RecordField::Built {
+                sky,
+                regolith_albedo,
+            },
         }
     }
 }
 
-/// What a body's cold traps read beyond its partition and its cover, on the record path
-/// (`GlobalFigures::condensates_and_ice_over`).
+/// What a body's cold traps read beyond its partition and its cover, on a pass (its area mix's
+/// `spun_partition`) and on the record (`GlobalFigures::condensates_and_ice_over`), which build it
+/// over a field's inputs by one constructor ([`PassColdTraps::body`]).
 ///
 /// Plain data with crate-visible fields.
 #[derive(Debug, Clone, Copy)]
@@ -535,10 +592,11 @@ pub(crate) struct ColdTrapBody<'a> {
 /// traps (P14.T51.f, under [`ColdTrapRules::Batch`]): P14.T51.a's publish on a body that does not
 /// qualify ([`qualifies`]), and on one that does the zonal annual maximum's branch
 /// ([`SolidEdges::Exosphere`]) with each condensable's cold-trapped ice merged in, over the field
-/// it builds once ([`ColdTrapField::of`], P14.T51.i), at the regolith albedo its derivation always
-/// gives (`DerivedBody::regolith_albedo`). A body whose profile is not zonal, which has no field,
-/// keeps P14.T51.a's publish. From P14.T54.b the record takes the passes' field instead
-/// ([`publish_over`]), so that a body builds one field, not one for its passes and one here.
+/// it builds ([`ColdTrapField::of`], P14.T51.i). A body whose profile is not zonal, which has no
+/// field, keeps P14.T51.a's publish. The tests' form on the figures alone (`RecordField::Built`):
+/// from P14.T54.b.f the passes build their fields and the record takes its published pass's
+/// ([`publish_over`]), building none.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn publish(
     partition: &Partition,
@@ -554,18 +612,12 @@ pub(crate) fn publish(
     published_over(partition, cover, body, &field)
 }
 
-/// [`publish`] over the field `field`, built once a body (P14.T51.i; decision-p14-t51-batch §6): the
-/// one function T13.c's passes call from P14.T54.b, every pass over the same field, so that the
-/// record's condensates and the last pass's agree to the bit. Whether the body qualifies is tested
-/// here, at every call ([`qualifies`]); the field holds what no pass changes. It must hold every
-/// condensable of `partition` that has a threshold ([`ColdTrapField::of`]'s list, or a superset).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "P14.T54.b's passes call it; the record path builds its own"
-    )
-)]
+/// `publish` over the field `field` (P14.T51.i, P14.T54.b.f): the one function a qualifying pass
+/// under its body's own climate calls, over the field of its own inputs (`FieldInputs`), and the
+/// record over its published pass's, carried (decision-p14-t54b-f-coldtraps §3), so that the
+/// record's condensates and that pass's are one computation, to the bit. Whether the body
+/// qualifies is tested here, at every call ([`qualifies`]). The field must hold every condensable
+/// of `partition` that has a threshold ([`FieldInputs::of`]'s list, or a superset).
 #[must_use]
 pub(crate) fn publish_over(
     partition: &Partition,
@@ -588,7 +640,7 @@ fn published_over(
     body: &ColdTrapBody<'_>,
     field: &ColdTrapField,
 ) -> Condensates {
-    let warm_below = |t: Kelvin| area_below(&field.maxima, t);
+    let warm_below = |t: Kelvin| area_below(field.maxima(), t);
     let zonal = partition.publish_with(
         &Cover {
             cold_area: &warm_below,
@@ -609,23 +661,49 @@ fn published_over(
 /// field does not read it.
 #[must_use]
 pub(crate) fn qualifies(body: &ColdTrapBody<'_>) -> bool {
-    matches!(body.profile, ColdProfile::Zonal(_))
-        && body.atmosphere.state() == SurfaceState::Airless
-        && !is_collisional(body.atmosphere, body.gravity)
+    qualifies_by(body.atmosphere, body.profile, body.gravity)
 }
+
+/// [`qualifies`]' test on a body's atmosphere `atmosphere`, its profile `profile` and its surface
+/// gravity `gravity` alone, which a pass reads before it builds a field's inputs.
+#[must_use]
+pub(crate) fn qualifies_by(
+    atmosphere: &Atmosphere,
+    profile: &ColdProfile,
+    gravity: MetresPerSecondSquared,
+) -> bool {
+    matches!(profile, ColdProfile::Zonal(_))
+        && atmosphere.state() == SurfaceState::Airless
+        && !is_collisional(atmosphere, gravity)
+}
+
+/// The most area points a field holds: a zonal profile's
+/// [`ZONAL_AREA_POINTS`](crate::planetary::hooks::surface::ZONAL_AREA_POINTS), 64, and its two
+/// ends, the equator's and the pole's (`ZonalProfile::points`).
+pub(crate) const MOST_AREA_POINTS: usize = 66;
+
+/// The most condensables a field holds: one for each gas a column holds ([`Gas::ALL`]), among which
+/// are [`DELIVERED`]'s.
+pub(crate) const MOST_CONDENSABLES: usize = Gas::ALL.len();
 
 /// A body's cold-trap field (P14.T51.i; decision-p14-t51-batch §6): its zonal annual maxima at its
 /// profile's area points and each condensable's cold-trap fraction `f_ct`, which read only its
 /// sky, its bare regolith's Bond albedo, its heat flow and its terrain ([the module](self)'s "The
-/// albedo, and the field"). T13.c's passes change none of these, so it is built once a body and
-/// read by every publish ([`publish_over`]).
-#[derive(Debug, Clone, PartialEq)]
+/// albedo, and the field"), and which every publish over it reads ([`publish_over`]).
+///
+/// A plain value held in place, at most [`MOST_AREA_POINTS`] maxima and [`MOST_CONDENSABLES`]
+/// traps, so that a pass's output and a derivation carry it by copy (P14.T54.b.f's carry,
+/// decision-p14-t54b-f-coldtraps §3).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ColdTrapField {
     /// The zonal annual maximum at each area point, `(x, T_max)` with x the sine of the latitude
-    /// from 0 to 1, K.
-    maxima: Vec<(f64, f64)>,
-    /// Each condensable with a threshold, in the order given, with its `f_ct`.
-    traps: Vec<FieldTrap>,
+    /// from 0 to 1, K: the first `points` of them.
+    maxima: [(f64, f64); MOST_AREA_POINTS],
+    /// How many maxima it holds.
+    points: usize,
+    /// Each condensable with a threshold, in the order given, with its `f_ct`; `None` past the
+    /// last.
+    traps: [Option<FieldTrap>; MOST_CONDENSABLES],
 }
 
 /// One condensable's place in a [`ColdTrapField`]: its threshold and its cold-trap fraction.
@@ -649,7 +727,8 @@ impl ColdTrapField {
     ///
     /// # Panics
     ///
-    /// If an area point's x is outside [−1, 1].
+    /// If an area point's x is outside [−1, 1], or there are more than [`MOST_AREA_POINTS`] points
+    /// or [`MOST_CONDENSABLES`] species.
     #[must_use]
     pub(crate) fn new(
         sunlit: &Sunlit,
@@ -657,6 +736,15 @@ impl ColdTrapField {
         points: &[(f64, f64)],
         species: &[SubstanceId],
     ) -> Self {
+        assert!(
+            points.len() <= MOST_AREA_POINTS && species.len() <= MOST_CONDENSABLES,
+            "a field holds at most {MOST_AREA_POINTS} area points and {MOST_CONDENSABLES} \
+             condensables, given {} and {}",
+            points.len(),
+            species.len()
+        );
+        #[cfg(test)]
+        field_log::count_build();
         let listed: Vec<(SubstanceId, Kelvin)> = species
             .iter()
             .filter_map(|&substance| trap_threshold(substance).map(|t| (substance, t)))
@@ -670,49 +758,43 @@ impl ColdTrapField {
                 ground.fractions_at(latitude, &thresholds, values);
             });
         }
+        let mut maxima = [(0.0, 0.0); MOST_AREA_POINTS];
+        for (held, maximum) in maxima.iter_mut().zip(sunlit.maxima(points)) {
+            *held = maximum;
+        }
+        let mut traps = [None; MOST_CONDENSABLES];
+        for (held, ((substance, threshold), fraction)) in
+            traps.iter_mut().zip(listed.into_iter().zip(fractions))
+        {
+            *held = Some(FieldTrap {
+                substance,
+                threshold,
+                fraction,
+            });
+        }
         Self {
-            maxima: sunlit.maxima(points),
-            traps: listed
-                .into_iter()
-                .zip(fractions)
-                .map(|((substance, threshold), fraction)| FieldTrap {
-                    substance,
-                    threshold,
-                    fraction,
-                })
-                .collect(),
+            maxima,
+            points: points.len(),
+            traps,
         }
     }
 
-    /// The record path's field of the body `body` of partition `partition`: its ground under its
-    /// sky at its regolith's albedo, over [`terrain_of`] its craters, at its profile's area points,
-    /// for its [`condensables`], water left out on an ice-rich crust, which keeps P14.T24.b's ice.
-    /// `None` where its profile is not zonal.
+    /// The field of the body `body` of partition `partition` over its own inputs
+    /// ([`FieldInputs::of`], [`FieldInputs::field`]): its ground under its sky at its regolith's
+    /// albedo, over [`terrain_of`] its craters, at its profile's area points, for its
+    /// [`condensables`], water left out on an ice-rich crust, which keeps P14.T24.b's ice. `None`
+    /// where its profile is not zonal. The tests' form; a pass keeps its inputs beside its field
+    /// (`FieldSlot::traps`).
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn of(body: &ColdTrapBody<'_>, partition: &Partition) -> Option<Self> {
-        let albedo = body.regolith_albedo;
-        let ColdProfile::Zonal(points) = body.profile else {
-            return None;
-        };
-        let sunlit = Sunlit::new(*body.sky, albedo, body.heat_flow);
-        let water = Gas::Water.substance();
-        let species: Vec<SubstanceId> = condensables(partition)
-            .into_iter()
-            .filter(|&substance| !(substance == water && body.crust == Crust::IceRich))
-            .collect();
-        Some(Self::new(
-            &sunlit,
-            terrain_of(body.craters),
-            points,
-            &species,
-        ))
+        FieldInputs::of(body, partition).map(|inputs| inputs.field())
     }
 
     /// The zonal annual maximum at each area point, `(x, T_max)`, K.
-    #[cfg(test)]
     #[must_use]
     pub(crate) fn maxima(&self) -> &[(f64, f64)] {
-        &self.maxima
+        &self.maxima[..self.points]
     }
 
     /// The threshold and the cold-trap fraction `f_ct` of `substance`, a share of the whole
@@ -721,8 +803,476 @@ impl ColdTrapField {
     pub(crate) fn trap(&self, substance: SubstanceId) -> Option<(Kelvin, f64)> {
         self.traps
             .iter()
+            .flatten()
             .find(|trap| trap.substance == substance)
             .map(|trap| (trap.threshold, trap.fraction))
+    }
+
+    /// Whether the field is `other`'s to the bit: every maximum's x and T, every trap's substance,
+    /// threshold and `f_ct` (the tests' bit-exact form of `==`).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn same_bits(&self, other: &Self) -> bool {
+        let float = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        let maxima = self.maxima().len() == other.maxima().len()
+            && self
+                .maxima()
+                .iter()
+                .zip(other.maxima())
+                .all(|(&(x, t), &(y, u))| float(x, y) && float(t, u));
+        maxima
+            && self.traps.iter().zip(&other.traps).all(|pair| match pair {
+                (None, None) => true,
+                (Some(a), Some(b)) => {
+                    a.substance == b.substance
+                        && float(a.threshold.value(), b.threshold.value())
+                        && float(a.fraction, b.fraction)
+                }
+                (Some(_), None) | (None, Some(_)) => false,
+            })
+    }
+}
+
+/// Why a pass read no cold-trap field and published P14.T51.a's condensates (P14.T54.b.f;
+/// decision-p14-t54b-f-coldtraps §2 (c) and §7), each labelled ([`NoColdTraps::label`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum NoColdTraps {
+    /// The cold traps' hold, [`ColdTrapRules::Held`], as the record's rules give it: nothing of
+    /// them is computed.
+    Held,
+    /// A climate given: the passes' stand-in, with no rotation law.
+    ClimateGiven,
+    /// No sky: the record holds no seasonal orbit at the time.
+    NoSky,
+    /// The context the pass read holds no figures (C₀, or a first stage refused).
+    NoFigures,
+    /// The pass does not qualify ([`qualifies`]): it is not airless, its air is collisional, its
+    /// profile is not zonal (a world locked 1:1), or its area mix reads no partition (a gas
+    /// envelope, a magma ocean, a body of no mass or radius).
+    Unqualified,
+}
+
+impl NoColdTraps {
+    /// The label a reader states.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "P14.T54.b.l's bless note and the census state the labels"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Held => "the cold traps are held",
+            Self::ClimateGiven => "the passes' stand-in: a climate given (no cold traps)",
+            Self::NoSky => "no seasonal orbit at the time (no cold traps)",
+            Self::NoFigures => "the context the pass read holds no figures (C0, a stage refused)",
+            Self::Unqualified => {
+                "not airless, collisional, locked 1:1, or no partition in its area mix"
+            }
+        }
+    }
+}
+
+/// What a pass's cold traps give beside its condensates (P14.T54.b.f): the field it read with its
+/// inputs, or why it read none.
+pub(crate) type PassTraps = Result<PassColdTraps, NoColdTraps>;
+
+/// The inputs of a pass's cold-trap field, and nothing else (P14.T54.b.f;
+/// decision-p14-t54b-f-coldtraps §2 (a)): the derivation's sky, the heat flow, crater contract and
+/// crust of the context the pass read, the pass's own bare regolith's Bond albedo, its
+/// partition's condensables ([`condensables`], [`DELIVERED`] included) and its profile's area
+/// points' x. Its field is [`field`](Self::field)'s, and its key is every member to the bit
+/// ([`same`](Self::same)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FieldInputs {
+    sky: ColdTrapSky,
+    regolith_albedo: f64,
+    heat_flow: WattsPerSquareMetre,
+    craters: CraterParams,
+    crust: Crust,
+    species: [Option<SubstanceId>; MOST_CONDENSABLES],
+    xs: [f64; MOST_AREA_POINTS],
+    points: usize,
+}
+
+impl FieldInputs {
+    /// The field's inputs of the body `body` of partition `partition`: its sky, its regolith's
+    /// albedo, its heat flow, craters and crust, its [`condensables`] in registry order and its
+    /// profile's area points' x in their order. `None` where its profile is not zonal.
+    ///
+    /// # Panics
+    ///
+    /// If its profile holds more than [`MOST_AREA_POINTS`] points, or its partition more than
+    /// [`MOST_CONDENSABLES`] condensables: a zonal profile holds 66, and a column's gases are nine.
+    #[must_use]
+    pub(crate) fn of(body: &ColdTrapBody<'_>, partition: &Partition) -> Option<Self> {
+        let ColdProfile::Zonal(points) = body.profile else {
+            return None;
+        };
+        let listed = condensables(partition);
+        assert!(
+            points.len() <= MOST_AREA_POINTS && listed.len() <= MOST_CONDENSABLES,
+            "a field holds at most {MOST_AREA_POINTS} area points and {MOST_CONDENSABLES} \
+             condensables, given {} and {}",
+            points.len(),
+            listed.len()
+        );
+        let mut xs = [0.0; MOST_AREA_POINTS];
+        for (held, &(x, _)) in xs.iter_mut().zip(points) {
+            *held = x;
+        }
+        let mut species = [None; MOST_CONDENSABLES];
+        for (held, substance) in species.iter_mut().zip(listed) {
+            *held = Some(substance);
+        }
+        Some(Self {
+            sky: *body.sky,
+            regolith_albedo: body.regolith_albedo,
+            heat_flow: body.heat_flow,
+            craters: *body.craters,
+            crust: body.crust,
+            species,
+            xs,
+            points: points.len(),
+        })
+    }
+
+    /// The field of these inputs ([`ColdTrapField::new`]): the ground under the sky at the
+    /// regolith's albedo and heat flow, over [`terrain_of`] the craters, at the area points, for
+    /// the condensables, water left out on an ice-rich crust.
+    #[must_use]
+    pub(crate) fn field(&self) -> ColdTrapField {
+        let points: Vec<(f64, f64)> = self.xs[..self.points].iter().map(|&x| (x, 0.0)).collect();
+        let water = Gas::Water.substance();
+        let species: Vec<SubstanceId> = self
+            .species
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|&substance| !(substance == water && self.crust == Crust::IceRich))
+            .collect();
+        ColdTrapField::new(
+            &Sunlit::new(self.sky, self.regolith_albedo, self.heat_flow),
+            terrain_of(&self.craters),
+            &points,
+            &species,
+        )
+    }
+
+    /// Whether these inputs are `other`'s to the bit, the field's key
+    /// (decision-p14-t54b-f-coldtraps §4): every float of the sky, the albedo, the heat flow, every
+    /// member of the crater contract and every area point's x the same bits (`total_cmp`, never
+    /// `==` and no tolerance), and the crust, the condensables and the number of points equal.
+    #[must_use]
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        let (a, b) = (&self.sky, &other.sky);
+        same_float(
+            a.greatest_declination.value(),
+            b.greatest_declination.value(),
+        ) && same_float(a.periapsis_flux.value(), b.periapsis_flux.value())
+            && same_float(a.star_radius.value(), b.star_radius.value())
+            && same_float(a.exposed_fraction, b.exposed_fraction)
+            && same_float(self.regolith_albedo, other.regolith_albedo)
+            && same_float(self.heat_flow.value(), other.heat_flow.value())
+            && same_craters(&self.craters, &other.craters)
+            && self.crust == other.crust
+            && self.species == other.species
+            && self.points == other.points
+            && self.xs[..self.points]
+                .iter()
+                .zip(&other.xs[..other.points])
+                .all(|(&x, &y)| same_float(x, y))
+    }
+
+    /// The sky.
+    #[must_use]
+    pub(crate) const fn sky(&self) -> &ColdTrapSky {
+        &self.sky
+    }
+
+    /// The bare regolith's Bond albedo about the body's hosts' bands, airless, 0 to 1.
+    #[must_use]
+    pub(crate) const fn regolith_albedo(&self) -> f64 {
+        self.regolith_albedo
+    }
+
+    /// The heat flow, W m⁻², the context's.
+    #[must_use]
+    pub(crate) const fn heat_flow(&self) -> WattsPerSquareMetre {
+        self.heat_flow
+    }
+
+    /// The crater contract, the context's.
+    #[must_use]
+    pub(crate) const fn craters(&self) -> &CraterParams {
+        &self.craters
+    }
+
+    /// The crust, the context's.
+    #[must_use]
+    pub(crate) const fn crust(&self) -> Crust {
+        self.crust
+    }
+}
+
+/// Whether two floats are the same bits: `total_cmp`'s equality, never `==`.
+#[must_use]
+fn same_float(a: f64, b: f64) -> bool {
+    a.total_cmp(&b).is_eq()
+}
+
+/// Whether two crater contracts are the same to the bit, member by member: N☾(>1 km), the
+/// screening's variant and its float, the gravity, the target factor, the impact velocity, the
+/// projectiles' density, the target's class and density, and the system's age.
+#[must_use]
+pub(crate) fn same_craters(one: &CraterParams, other: &CraterParams) -> bool {
+    let (ours, theirs) = (one.parts(), other.parts());
+    let screening = match (ours.screening, theirs.screening) {
+        (Screening::None, Screening::None) => true,
+        (
+            Screening::Atmosphere { column_mass: ours },
+            Screening::Atmosphere {
+                column_mass: theirs,
+            },
+        ) => same_float(ours.value(), theirs.value()),
+        (Screening::Cutoff { diameter: ours }, Screening::Cutoff { diameter: theirs }) => {
+            same_float(ours.value(), theirs.value())
+        }
+        (Screening::None | Screening::Atmosphere { .. } | Screening::Cutoff { .. }, _) => false,
+    };
+    let velocity = match (ours.impact_velocity, theirs.impact_velocity) {
+        (None, None) => true,
+        (Some(ours), Some(theirs)) => same_float(ours.value(), theirs.value()),
+        (Some(_), None) | (None, Some(_)) => false,
+    };
+    same_float(ours.n_1km.value(), theirs.n_1km.value())
+        && screening
+        && same_float(ours.gravity.value(), theirs.gravity.value())
+        && same_float(ours.k_target, theirs.k_target)
+        && velocity
+        && same_float(
+            ours.projectile_density.value(),
+            theirs.projectile_density.value(),
+        )
+        && ours.target.class == theirs.target.class
+        && same_float(ours.target.density.value(), theirs.target.density.value())
+        && same_float(ours.system_age.value(), theirs.system_age.value())
+}
+
+/// The cold traps a pass read (P14.T54.b.f): its field's inputs and its field, which the published
+/// pass carries to the record (decision-p14-t54b-f-coldtraps §3), so that the record publishes
+/// over the field that pass read and builds none.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PassColdTraps {
+    inputs: FieldInputs,
+    field: ColdTrapField,
+}
+
+impl PassColdTraps {
+    /// The field's inputs.
+    #[must_use]
+    pub(crate) const fn inputs(&self) -> &FieldInputs {
+        &self.inputs
+    }
+
+    /// The field.
+    #[must_use]
+    pub(crate) const fn field(&self) -> &ColdTrapField {
+        &self.field
+    }
+
+    /// The body a publish over this field reads, of the atmosphere `atmosphere`, the profile
+    /// `profile` and the surface gravity `gravity`, with the field's heat flow, crust, craters, sky
+    /// and albedo: the one constructor a pass and the record build it by, so that the record's
+    /// condensates are the published pass's to the bit.
+    #[must_use]
+    pub(crate) const fn body<'a>(
+        &'a self,
+        atmosphere: &'a Atmosphere,
+        profile: &'a ColdProfile,
+        gravity: MetresPerSecondSquared,
+    ) -> ColdTrapBody<'a> {
+        let inputs = &self.inputs;
+        ColdTrapBody {
+            atmosphere,
+            profile,
+            gravity,
+            heat_flow: inputs.heat_flow,
+            crust: inputs.crust,
+            craters: &inputs.craters,
+            sky: &inputs.sky,
+            regolith_albedo: inputs.regolith_albedo,
+        }
+    }
+}
+
+/// A derivation's one slot for its passes' cold-trap fields (P14.T54.b.f;
+/// decision-p14-t54b-f-coldtraps §4): the last field built, with its inputs. A pass whose inputs
+/// are the slot's to the bit ([`FieldInputs::same`]) reuses its field; any other builds one, which
+/// takes the slot. So a body's passes build one field per run of equal inputs, and none on the
+/// record.
+///
+/// The slot is a local of its derivation, built before its passes and dropped when it returns:
+/// never a static or a thread's, so that no derivation reads another's field (a moon's second
+/// round starts empty). The field is a pure function of its inputs, so a reuse gives the bits a
+/// build would.
+#[derive(Debug, Default)]
+pub(crate) struct FieldSlot {
+    held: Cell<Option<PassColdTraps>>,
+}
+
+impl FieldSlot {
+    /// An empty slot, for one derivation's passes.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        #[cfg(test)]
+        field_log::opened();
+        Self::default()
+    }
+
+    /// The cold traps of a pass whose field's inputs are `inputs`: the slot's field where its
+    /// inputs are these to the bit, and otherwise a field built over them, which then takes the
+    /// slot.
+    #[must_use]
+    pub(crate) fn traps(&self, inputs: &FieldInputs) -> PassColdTraps {
+        if let Some(held) = self.held.get()
+            && fields_reused()
+            && held.inputs.same(inputs)
+        {
+            #[cfg(test)]
+            field_log::reused(inputs);
+            return held;
+        }
+        let built = PassColdTraps {
+            inputs: *inputs,
+            field: inputs.field(),
+        };
+        #[cfg(test)]
+        field_log::built(inputs);
+        self.held.set(Some(built));
+        built
+    }
+}
+
+/// Whether a slot reuses a field of the same inputs: always in the generator, and for the tests'
+/// switch off (`with_fields_rebuilt`) never, which takes the same bits at a build a pass.
+#[must_use]
+fn fields_reused() -> bool {
+    #[cfg(test)]
+    {
+        !field_log::REBUILT.with(Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        true
+    }
+}
+
+/// `run`'s result with every qualifying pass building its field afresh, none reused: a test-only
+/// switch, set back after (decision-p14-t54b-f-coldtraps §9 test 3).
+#[cfg(test)]
+pub(crate) fn with_fields_rebuilt<R>(run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's switch back as it drops.
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            field_log::REBUILT.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(field_log::REBUILT.with(|cell| cell.replace(true)));
+    run()
+}
+
+/// What the cold traps' fields did on a thread, kept only while a test asks
+/// ([`field_log::capture`]): each slot opened, each field built and each reused, in order, with
+/// every build counted and the record path's builds apart (decision-p14-t54b-f-coldtraps §9 test
+/// 2).
+#[cfg(test)]
+pub(crate) mod field_log {
+    use core::cell::{Cell, RefCell};
+
+    use super::FieldInputs;
+
+    /// One event of a thread's fields.
+    #[derive(Debug, Clone)]
+    pub(crate) enum FieldEvent {
+        /// A derivation's slot opened.
+        Opened,
+        /// A field built over these inputs.
+        Built(Box<FieldInputs>),
+        /// A field of these inputs reused.
+        Reused(Box<FieldInputs>),
+    }
+
+    thread_local! {
+        /// Whether a test on this thread asks for the events.
+        static ON: Cell<bool> = const { Cell::new(false) };
+        /// The events since the capture began.
+        static LOG: RefCell<Vec<FieldEvent>> = const { RefCell::new(Vec::new()) };
+        /// Every field built on this thread, a test's count.
+        static BUILDS: Cell<u64> = const { Cell::new(0) };
+        /// The fields the record path built on this thread.
+        static RECORD_BUILDS: Cell<u64> = const { Cell::new(0) };
+        /// Whether every pass builds its field afresh ([`super::with_fields_rebuilt`]).
+        pub(super) static REBUILT: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Records an event where a test asks for them.
+    fn push(event: FieldEvent) {
+        if ON.with(Cell::get) {
+            LOG.with(|log| log.borrow_mut().push(event));
+        }
+    }
+
+    /// A slot opened.
+    pub(crate) fn opened() {
+        push(FieldEvent::Opened);
+    }
+
+    /// A slot built a field over `inputs`.
+    pub(crate) fn built(inputs: &FieldInputs) {
+        push(FieldEvent::Built(Box::new(*inputs)));
+    }
+
+    /// A slot reused a field of `inputs`.
+    pub(crate) fn reused(inputs: &FieldInputs) {
+        push(FieldEvent::Reused(Box::new(*inputs)));
+    }
+
+    /// Counts a field built anywhere ([`super::ColdTrapField::new`]).
+    pub(crate) fn count_build() {
+        BUILDS.with(|count| count.set(count.get() + 1));
+    }
+
+    /// Every field built on this thread so far.
+    #[must_use]
+    pub(crate) fn builds() -> u64 {
+        BUILDS.with(Cell::get)
+    }
+
+    /// Counts `builds` fields built on the record path.
+    pub(crate) fn count_record_builds(builds: u64) {
+        RECORD_BUILDS.with(|count| count.set(count.get() + builds));
+    }
+
+    /// The fields the record path built on this thread so far.
+    #[must_use]
+    pub(crate) fn record_builds() -> u64 {
+        RECORD_BUILDS.with(Cell::get)
+    }
+
+    /// `run`'s result and the events of the fields it built and reused. The switch is set back
+    /// after.
+    #[must_use]
+    pub(crate) fn capture<R>(run: impl FnOnce() -> R) -> (R, Vec<FieldEvent>) {
+        let before = ON.with(|on| on.replace(true));
+        LOG.with(|log| log.borrow_mut().clear());
+        let result = run();
+        ON.with(|on| on.set(before));
+        let log = LOG.with(|log| core::mem::take(&mut *log.borrow_mut()));
+        (result, log)
     }
 }
 

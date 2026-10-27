@@ -81,7 +81,7 @@ pub(crate) use surface_mix::floor_read;
 pub(crate) use surface_mix::spun_read;
 pub(crate) use surface_mix::{
     LARGEST_BOND_ALBEDO, NoMaturity, PassClimate, PassLight, PassMaturity, PassSurface,
-    PassWeathered, PassWeathering, SpunClimate, WeatheringCase, pass_regolith,
+    PassWeathered, PassWeathering, SpunClimate, SpunColdTraps, WeatheringCase, pass_regolith,
 };
 #[cfg(test)]
 pub(crate) use surface_mix::{UnlitMeanRules, with_unlit_mean};
@@ -3537,11 +3537,17 @@ pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, surface: &PassSurface<
 
 /// [`atmosphere_under`] with the lid its pass takes under the body's own climate (P14.T54.a;
 /// [`SpunClimate`]): `None` over a climate given, which takes none, and where no lid is known;
-/// and its maturity's outcome (P14.T54.b.e; [`PassMaturity`]).
+/// its maturity's outcome (P14.T54.b.e; [`PassMaturity`]); and its cold traps' (P14.T54.b.f;
+/// `cold_traps::PassTraps`): the field it read, or why it read none.
 pub(crate) fn atmosphere_and_lid(
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
-) -> (Atmosphere, Option<CrustLid>, PassMaturity) {
+) -> (
+    Atmosphere,
+    Option<CrustLid>,
+    PassMaturity,
+    crate::planetary::hooks::cold_traps::PassTraps,
+) {
     let air = state_and_greenhouse(inputs, surface);
     surface_mix::area_mixed(&air, inputs, surface)
 }

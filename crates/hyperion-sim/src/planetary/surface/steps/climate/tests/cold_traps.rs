@@ -709,3 +709,85 @@ fn a_cell_and_its_mirror_across_the_equator_take_equal_fractions() {
     eprintln!("{pairs} cells against their mirrors, the largest difference {worst:e}");
     assert!(pairs > 0);
 }
+
+/// The share of one cell below which a trapped part no cell centre's fraction holds is listed as
+/// unresolved rather than short (P14.T54.b.f's placement test): 10⁻⁶.
+const SUB_CELL: f64 = 1e-6;
+
+/// decision-p14-t54b-f-coldtraps §9 test 10 (R09.T13.f's on the record; plan 14's T54.b bullet
+/// "From P14.T51.i and T51.j"): a generated qualifying body's field places its record's trapped
+/// areas. Over the sample's bodies under every 24 hold whose R09 inputs carry cold traps
+/// (`system::cold_trap_tests::trap_bodies`), each trapped part's placed plus undrawn lies within one
+/// cell of its target, the record's `A_s`, with none of it short, on every converged body at level
+/// 6, but a part below [`SUB_CELL`] of a cell that no cell centre's fraction holds, which is listed;
+/// a bracketed body's are listed with their figures, its ground reading the figures' heat flow and
+/// craters (K(P*)) beside the carried field's (C*), a recorded residual.
+#[test]
+#[ignore = "slow: R09's climate step over the sample's qualifying bodies at level 6"]
+fn a_generated_qualifying_body_s_field_places_its_record_s_trapped_areas() {
+    use crate::planetary::system::cold_trap_tests::{fit_of, trap_bodies};
+    use crate::planetary::testing::with_every_24_hold;
+
+    let (mut checked, mut traps) = (0_u32, 0_u32);
+    let mut bracketed = Vec::new();
+    let (mut shorts, mut unresolved) = (Vec::new(), Vec::new());
+    let bodies = trap_bodies();
+    with_every_24_hold(|| {
+        for body in bodies {
+            let Ok(inputs) = CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx)
+            else {
+                continue;
+            };
+            if inputs.cold_traps().is_empty() {
+                continue;
+            }
+            let (field, _, diagnostics) = run_at(&inputs, 6);
+            let one = one_cell(&field);
+            for trap in &diagnostics.cold_traps {
+                let off = trap.placed + trap.undrawn - trap.target;
+                if body.bracketed() {
+                    bracketed.push(format!(
+                    "{} ({:?}): {} placed {:e} + undrawn {:e} − A_s {:e} = {off:e}, short {:e}, \
+                     one cell {one:e}",
+                    body.id(),
+                    fit_of(body),
+                    trap.substance.as_str(),
+                    trap.placed,
+                    trap.undrawn,
+                    trap.target,
+                    trap.short
+                ));
+                    continue;
+                }
+                assert!(
+                    off.abs() <= one,
+                    "{}: {trap:?}, off by {off:e} against one cell {one:e}",
+                    body.id()
+                );
+                // A part far below a cell (10⁻⁶ of one) that no cell centre's fraction holds is short
+                // by itself, which no level of the field resolves: listed, not a failure.
+                if trap.short.classify() != core::num::FpCategory::Zero {
+                    if trap.short <= SUB_CELL * one {
+                        unresolved.push(format!(
+                            "{} {}: {:e}",
+                            body.id(),
+                            trap.substance.as_str(),
+                            trap.short
+                        ));
+                    } else {
+                        shorts.push(format!("{}: {trap:?}", body.id()));
+                    }
+                }
+                traps += 1;
+            }
+            checked += 1;
+        }
+    });
+    assert!(shorts.is_empty(), "{}", shorts.join("\n"));
+    eprintln!(
+        "{checked} bodies, {traps} trapped parts placed to one cell, short 0 but {} below 10⁻⁶ of \
+         a cell, which no cell holds: {unresolved:?}; bracketed: {bracketed:?}",
+        unresolved.len()
+    );
+    assert!(checked > 10 && traps > 10, "{checked} {traps}");
+}

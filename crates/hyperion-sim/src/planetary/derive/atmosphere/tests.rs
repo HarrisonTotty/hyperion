@@ -5990,6 +5990,17 @@ fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_t
         fn wet_epoch(&self, _: &PassBulk, _: &Atmosphere, _: Kelvin) -> Option<WetEpoch> {
             None
         }
+
+        fn cold_trap_sky(
+            &self,
+            _: WattsPerSquareMetre,
+        ) -> Result<
+            crate::planetary::hooks::cold_traps::ColdTrapSky,
+            crate::planetary::hooks::cold_traps::NoColdTraps,
+        > {
+            // A hand-built record with no seasonal orbit for its cold traps.
+            Err(crate::planetary::hooks::cold_traps::NoColdTraps::NoSky)
+        }
     }
 
     let host = SolarMasses::new(0.3);

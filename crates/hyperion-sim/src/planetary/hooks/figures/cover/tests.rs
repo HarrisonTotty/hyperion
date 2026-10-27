@@ -19,6 +19,7 @@ use crate::planetary::derive::solar::{
     derive_historic, historic_sun, placed_about_the_sun, solar_disc, table_bodies,
 };
 use crate::planetary::derive::{BodyHosts, PassDriver, Under, derive_body_driven};
+use crate::planetary::hooks::cold_traps::{ColdTrapSky, NoColdTraps};
 use crate::planetary::hooks::crust::CrustOrigin;
 use crate::planetary::hooks::figures::relief::{
     EARTH_CONTINENTAL_FRACTION, Population, Relief, ReliefInputs,
@@ -765,9 +766,15 @@ struct TableRecord<'a> {
     spin: SeasonalSpin,
     /// Its obliquity's insolation table.
     table: ZonalInsolation,
+    /// The sky its passes' cold traps read, or why they read none (P14.T54.b.f).
+    cold_traps: Result<ColdTrapSky, NoColdTraps>,
 }
 
 impl PassRecordOf for TableRecord<'_> {
+    fn cold_trap_sky(&self, _: WattsPerSquareMetre) -> Result<ColdTrapSky, NoColdTraps> {
+        self.cold_traps
+    }
+
     fn spin(&self, bulk: &PassBulk) -> RecordSpin<'_> {
         RecordSpin {
             spin: self.spin,
@@ -828,6 +835,15 @@ impl PassRecordOf for TableRecord<'_> {
 /// passes' stand-in and over its record ([`TableRecord`]), with its published pass's publication
 /// run again at its published albedo and context (rule (f)): what its area mix read.
 fn over_its_record(name: &'static str) -> (DerivedBody, DerivedBody, SpunRead) {
+    over_its_record_under(name, Err(NoColdTraps::Held))
+}
+
+/// [`over_its_record`] with its passes' cold traps reading the sky `cold_traps`, or none
+/// (P14.T54.b.f): the table's airless bodies through the real passes.
+fn over_its_record_under(
+    name: &'static str,
+    cold_traps: Result<ColdTrapSky, NoColdTraps>,
+) -> (DerivedBody, DerivedBody, SpunRead) {
     let disc = solar_disc();
     let &(_, kg, km, a, e) = table_bodies().find(|(n, ..)| *n == name).unwrap();
     let placed = placed_about_the_sun(&disc, (kg, km, a, e));
@@ -838,6 +854,7 @@ fn over_its_record(name: &'static str) -> (DerivedBody, DerivedBody, SpunRead) {
         stand_in: &stand_in,
         spin,
         table: ZonalInsolation::of(spin.obliquity, &HourCosines::new()),
+        cold_traps,
     };
     let lights = [historic_sun()];
     let hosts = BodyHosts::new(
@@ -1031,4 +1048,84 @@ fn the_table_s_mars_over_its_record_takes_the_record_s_ice_in_its_passes() {
     eprintln!("Mars's water ice: {ice:.6} in its passes, {record:.6} the record's");
     assert_same_bits(ice, record);
     assert!((0.005..=0.02).contains(&ice), "{ice}");
+}
+
+/// decision-p14-t54b-f-coldtraps §9 test 8: the delivered traps survive L2. The table's Moon,
+/// Mercury and Ceres, each in its own sky (the Moon's T51.f's; Mercury and Ceres as
+/// `time_the_cold_traps` takes them), taken through the real passes over their records, every 24
+/// hold in force: each published pass reads a field, and its water and carbon dioxide traps are
+/// T51.f's and T51.i's figures at its own albedo, heat flow and craters, `f_ct` × `f_x` to the bit,
+/// on the pass and so on the record; the Moon's water `f_ct` lies in plan 14's 0.024–0.2% (half of
+/// Williams et al. 2019's Diviner-mapped 0.048% to twice Hayne et al. 2021's point-source 0.10%).
+/// Mercury's and Ceres's figures are stated.
+#[test]
+fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
+    use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+    use crate::planetary::derive::atmosphere::Gas;
+    use crate::planetary::hooks::cold_traps::{Sunlit, lunar_sky, terrain_of, trap_threshold};
+    use crate::planetary::testing::with_every_24_hold;
+    use crate::units::consts::METRES_PER_AU;
+    use crate::units::{Metres, SolarRadii, WattsPerSquareMetre};
+
+    // Mercury and Ceres in their own skies (NASA's fact sheets, *from memory*: Mercury 0.387 au,
+    // e 0.2056, 0.034°; Ceres 2.767 au, e 0.0785, 4°), as `time_the_cold_traps` takes them.
+    let own = |degrees: f64, (a_au, e): (f64, f64)| {
+        ColdTrapSky::at_periapsis(
+            Radians::from(Degrees::new(degrees)),
+            WattsPerSquareMetre::new(1361.0 / (a_au * a_au * (1.0 - e * e).sqrt())),
+            (Metres::new(a_au * METRES_PER_AU), e),
+            Some(SolarRadii::new(1.0)),
+            0.035,
+        )
+    };
+    with_every_24_hold(|| {
+        for (name, sky) in [
+            ("Moon", lunar_sky()),
+            ("Mercury", own(0.034, (0.387_098, 0.205_63))),
+            ("Ceres", own(4.0, (2.767, 0.0785))),
+        ] {
+            let (_, derived, read) = over_its_record_under(name, Ok(sky));
+            let traps = derived
+                .cold_traps()
+                .as_ref()
+                .unwrap_or_else(|why| panic!("{name}: no field, {why:?}"));
+            let inputs = traps.inputs();
+            let context = derived.spun().expect("over its record").context();
+            let first = context.figures().expect("its context holds figures");
+            let sunlit = Sunlit::new(sky, inputs.regolith_albedo(), context.heat_flow());
+            let shadows = sunlit.shadows().expect("a lit body's shadows");
+            let terrain = terrain_of(first.craters());
+            let column = derived.atmosphere().column_inventory().condenses();
+            for gas in [Gas::Water, Gas::CarbonDioxide] {
+                let substance = gas.substance();
+                let f_ct =
+                    sunlit.trap_fraction(&shadows, &terrain, trap_threshold(substance).unwrap());
+                let entry = read.condensates.entry(substance, CondensatePhase::Solid);
+                let trapped = entry.map_or(0.0, CondensateEntry::trapped_area_fraction);
+                eprintln!(
+                    "{name} through its passes ({:?}, its column condensing {column}): {gas:?} \
+                     f_ct {f_ct:.4e}, A_s {trapped:.4e}, reservoir {:?}, at the regolith's \
+                     {:.4} and {:.4e} W m⁻²",
+                    derived.convergence(),
+                    entry.map(|e| e.reservoir().value()),
+                    inputs.regolith_albedo(),
+                    context.heat_flow().value()
+                );
+                assert_same_bits(
+                    traps.field().trap(substance).map_or(f64::NAN, |t| t.1),
+                    f_ct,
+                );
+                // A delivered species (none in its column) lies in its traps alone, its whole
+                // trapped area `f_ct` × `f_x`; one its column holds takes what is left of its
+                // condensed reservoir (T51.f), stated.
+                let delivered = derived.atmosphere().partial_pressures().of(gas).value() <= 0.0;
+                if f_ct > 0.0 && delivered {
+                    assert_same_bits(trapped, f_ct * sky.exposed_fraction);
+                }
+                if name == "Moon" && gas == Gas::Water {
+                    assert!((0.000_24..=0.002).contains(&f_ct), "{f_ct}");
+                }
+            }
+        }
+    });
 }

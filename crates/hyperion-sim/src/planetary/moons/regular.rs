@@ -1158,6 +1158,12 @@ impl DerivedMoon {
         self.body.weathered()
     }
 
+    /// Its published pass's cold traps (P14.T54.b.f; [`DerivedBody::cold_traps`]).
+    #[must_use]
+    pub(crate) const fn cold_traps(&self) -> &crate::planetary::hooks::cold_traps::PassTraps {
+        self.body.cold_traps()
+    }
+
     /// Its surface lag (P14.T56.g; [`DerivedBody::surface_lag`]): its given bulk's.
     #[must_use]
     pub(crate) const fn surface_lag(&self) -> SurfaceLag {
@@ -1726,6 +1732,21 @@ pub(crate) trait MoonRecordOf {
         air: &Atmosphere,
         tide: &MoonTideAt,
     ) -> Option<WetEpoch>;
+
+    /// The sky the moon's passes' cold traps read, under its hosts' orbit-mean flux at it `flux`
+    /// (P14.T54.b.f; `PassRecordOf::cold_trap_sky`): its own spin's obliquity under its planet's
+    /// orbit, the seasonal one.
+    ///
+    /// # Errors
+    ///
+    /// As `PassRecordOf::cold_trap_sky`: the cold traps' hold, or no seasonal orbit.
+    fn cold_trap_sky(
+        &self,
+        flux: WattsPerSquareMetre,
+    ) -> Result<
+        crate::planetary::hooks::cold_traps::ColdTrapSky,
+        crate::planetary::hooks::cold_traps::NoColdTraps,
+    >;
 }
 
 /// The shape a moon's derivation gives it before its passes, which no pass moves: its ice
@@ -2022,6 +2043,16 @@ impl PassRecordOf for MoonPassRecord<'_> {
             subsurface: tide.subsurface,
         };
         self.record.wet_epoch(&self.shape, bulk, air, &at)
+    }
+
+    fn cold_trap_sky(
+        &self,
+        flux: WattsPerSquareMetre,
+    ) -> Result<
+        crate::planetary::hooks::cold_traps::ColdTrapSky,
+        crate::planetary::hooks::cold_traps::NoColdTraps,
+    > {
+        self.record.cold_trap_sky(flux)
     }
 
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext {

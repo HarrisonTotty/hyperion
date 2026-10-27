@@ -6698,16 +6698,28 @@ fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
 /// interleaved rounds of each; the difference is the cold traps'. The budget is a mean of at most
 /// 7 ms a system and at most 50 ms in any. A timing alone, run by name in release and recorded in
 /// plan 14's Risks; it asserts nothing.
+///
+/// From P14.T54.b.f the cost is the passes' builds (decision-p14-t54b-f-coldtraps §4): the passes
+/// read the record's cold traps' rules, so the batch's records time each qualifying pass's field,
+/// built once per run of equal inputs, and the record's publish over the carried field, which
+/// builds none. The fields built per system are counted beside, and the record path's builds,
+/// which must be none.
 #[test]
 #[ignore = "a timing, run by name in release"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one timing over the sample: its interleaved rounds, its counts and their statement"
+)]
 fn time_the_cold_traps_over_the_sample() {
     use std::time::Instant;
 
-    use crate::planetary::hooks::cold_traps::{ColdTrapRules, is_collisional};
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, field_log, is_collisional};
 
     let t = UniverseTime::EPOCH;
     let mut costs: Vec<(f64, u32, String)> = Vec::new();
     let mut listed = [0_usize; 2];
+    let (mut fields, mut most_fields) = ([0_u64; 2], 0_u64);
+    let record_builds = field_log::record_builds();
     for (ctx, system) in whole().iter().take(60) {
         if ctx.age_at_epoch().value() <= 0.0 {
             continue;
@@ -6758,12 +6770,14 @@ fn time_the_cold_traps_over_the_sample() {
             (airless, ices)
         };
         let (mut best_held, mut best_batch) = (f64::INFINITY, f64::INFINITY);
-        let (mut airless, mut ices) = (0, [0; 2]);
+        let (mut airless, mut ices, mut built) = (0, [0; 2], [0; 2]);
         for _ in 0..3 {
             for (k, system) in [&held, &batch].into_iter().enumerate() {
+                let before = field_log::builds();
                 let start = Instant::now();
                 (airless, ices[k]) = records(system);
                 let ms = start.elapsed().as_secs_f64() * 1e3;
+                built[k] = field_log::builds() - before;
                 if k == 0 && ms < best_held {
                     best_held = ms;
                 }
@@ -6777,12 +6791,17 @@ fn time_the_cold_traps_over_the_sample() {
             airless,
             format!(
                 "{:?}: held {best_held:.2} ms, batch {best_batch:.2} ms, ices listed {} held and {} \
-                 with the cold traps",
+                 with the cold traps, fields built {} held and {} with the cold traps",
                 ctx.id(),
                 ices[0],
-                ices[1]
+                ices[1],
+                built[0],
+                built[1]
             ),
         ));
+        fields[0] += built[0];
+        fields[1] += built[1];
+        most_fields = most_fields.max(built[1]);
         listed[0] += ices[0];
         listed[1] += ices[1];
     }
@@ -6801,6 +6820,14 @@ fn time_the_cold_traps_over_the_sample() {
     eprintln!(
         "ices listed on the records: {} held, {} with the cold traps",
         listed[0], listed[1]
+    );
+    eprintln!(
+        "fields built, a round's: {} held, {} with the cold traps over {n} systems ({:.2} a \
+         system, at most {most_fields}); the record path built {}",
+        fields[0],
+        fields[1],
+        f64::from(u32::try_from(fields[1]).unwrap()) / f64::from(u32::try_from(n).unwrap()),
+        field_log::record_builds() - record_builds
     );
     for (cost, airless, what) in costs.iter().rev().take(5) {
         eprintln!("  {cost:.3} ms, {airless} airless: {what}");
@@ -8509,6 +8536,12 @@ fn named(lines: &[String]) -> Vec<&str> {
 /// records' (19, 15, 4) became (19, 19, 0); the raised airless records 10 → 11, subgiant's moon
 /// 0503, an air on the held path (64.2 → 128.1 K), being airless at its 117.7 K floor under the
 /// escape's batch; the raised airs [0503, 0504] → [0504].
+///
+/// P14.T54.b.f (the cold traps in the passes) moves none of these counts with P14.T53.c in force:
+/// without it, `filler_b` 2200165980000000.e207 left them (11 → 10, 8 → 7), its passes publishing
+/// the zonal annual maximum's branch so that its `T_eq` rose from 16.51 K past its 17.84 K floor;
+/// with P14.T53.c's ice-held argon at its ice's own temperature it stays at its floor, holding its
+/// argon ice.
 #[test]
 fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor() {
     let moves =
@@ -10931,16 +10964,63 @@ struct FloorBody {
     ice_held: crate::planetary::derive::atmosphere::Retention,
     /// Its derivation's atmosphere passes.
     passes: u32,
+    /// The row of the lid its published pass took (`DerivedBody::crust_lid`), `None` for none.
+    lid: Option<crate::substance::SubstanceId>,
+    /// Its record's condensates, each entry's substance and phase, in their order.
+    condensates: Vec<(
+        crate::substance::SubstanceId,
+        crate::planetary::chem::partition::CondensatePhase,
+    )>,
+    /// Its derivation's convergence class (`DerivedBody::convergence`).
+    convergence: crate::planetary::derive::passes::Convergence,
+    /// For a body of [`IN_THEIR_LAST_BITS`] alone, how many of its traced passes lay under their
+    /// night floor (P14.T54.b.f): each pass's equilibrium temperature below `night_floor` at the
+    /// heat flow of the context it read; `None` for every other body, which is not traced.
+    passes_under_floor: Option<usize>,
     /// A hash of its record's and its derivation's whole `Debug` text: the same, or moved.
     bits: u64,
 }
+
+/// A convergence's class (P14.T51.h): plain or bracketed, a bracket's context fit, and whether it
+/// ended at a jump; its residual, a float, is left out, since it moves with the last bits.
+fn convergence_class(
+    convergence: crate::planetary::derive::passes::Convergence,
+) -> (
+    bool,
+    Option<crate::planetary::derive::passes::ContextFit>,
+    bool,
+) {
+    use crate::planetary::derive::passes::Convergence;
+    match convergence {
+        Convergence::Converged => (false, None, false),
+        Convergence::Bracketed { fit, .. } => (true, Some(fit), convergence.is_jump()),
+    }
+}
+
+/// The bodies above their night floor whose last bits an earlier pass under it moves through the
+/// cold traps' field (P14.T54.b.f; decision-p14-t54b-f-coldtraps §11), by their census labels,
+/// sorted: `under_every_24_hold_a_body_above_its_floor_is_unchanged_by_it`'s named set, which
+/// [`FloorBody::of`] traces.
+const IN_THEIR_LAST_BITS: [&str; 11] = [
+    "look72 020e56ef20080001.e104 members",
+    "look72 620e377802000074.e306 members",
+    "look72 820e6ee00000008d.e401 members",
+    "look72 820e6ee00000008d.e402 members",
+    "look72 820e6ee00000008d.e408 members",
+    "sample 01ffeb2c20010000.e201 members",
+    "sample 01ffeb2ce0000000.e108 members",
+    "sample 02000b2c5fff0000.e106 members",
+    "sample 02000b2ca0000001.e305 members",
+    "sample 02000b2cdffe0000.e108 members",
+    "sample 02001b2ca0000000.e104 members",
+];
 
 impl FloorBody {
     /// The figures of the body `case`, under the rules in force.
     fn of(case: &CensusCase<'_>) -> Self {
         use std::hash::{DefaultHasher, Hash, Hasher};
 
-        use crate::planetary::derive::{PassDriver, Under};
+        use crate::planetary::derive::{PassDriver, Under, traced};
         use crate::planetary::hooks::surface::night_floor;
         let (surface, derived) = (case.surface, case.derived);
         let air = derived.atmosphere();
@@ -10969,8 +11049,20 @@ impl FloorBody {
         format!("{:?} {:?}", case.record, derived).hash(&mut hasher);
         let partials = air.partial_pressures();
         let id = case.record.identity().id().to_string();
+        let label = format!("{} {id} {}", case.set, case.kind);
+        // The named set's passes, traced: each one's equilibrium temperature against the night
+        // floor at the heat flow of the context it read.
+        let passes_under_floor = IN_THEIR_LAST_BITS.contains(&label.as_str()).then(|| {
+            let (_, trace) = traced(|| (case.again)(PassDriver::Traced));
+            trace
+                .iter()
+                .filter(|pass| {
+                    pass.equilibrium.value() < night_floor(pass.context.heat_flow()).value()
+                })
+                .count()
+        });
         Self {
-            label: format!("{} {id} {}", case.set, case.kind),
+            label,
             id,
             state: surface.state(),
             t_s: surface.conditions().mean_surface_temperature().value(),
@@ -10987,6 +11079,17 @@ impl FloorBody {
             airborne,
             ice_held: air.ice_held(),
             passes: derived.atmosphere_passes(),
+            lid: derived
+                .crust_lid()
+                .map(crate::planetary::hooks::crust::CrustLid::row),
+            condensates: surface
+                .condensates()
+                .entries()
+                .iter()
+                .map(|entry| (entry.substance(), entry.phase()))
+                .collect(),
+            convergence: derived.convergence(),
+            passes_under_floor,
             bits: hasher.finish(),
         }
     }
@@ -11105,23 +11208,81 @@ fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
     );
 }
 
-/// P14.T24.i's follow-up, to the bit (decision-t24i-airless-state D1.3–D1.4): over the census's set
-/// and LOOK72's systems, every body whose equilibrium temperature is at or above its night floor
-/// under both rules is the same, its whole record and derivation, with every 24 hold in force as
-/// with every 24 hold but the unlit mean's, since the base is then its `T_eq`.
+/// P14.T24.i's follow-up (decision-t24i-airless-state D1.3–D1.4): over the census's set and
+/// LOOK72's systems, every body whose equilibrium temperature is at or above its night floor under
+/// both rules is the same, its whole record and derivation, with every 24 hold in force as with
+/// every 24 hold but the unlit mean's, since the base is then its `T_eq`.
+///
+/// To the bit but for a named set, `IN_THEIR_LAST_BITS` (P14.T54.b.f; the exemption's form is
+/// decision-p14-t54b-e-findings §B.2's): an airless member whose earlier pass lay under its floor,
+/// whose mean, the floor's or its `T_eq`, moves the figures of the context the next pass reads,
+/// whose crater contract and crust that pass's cold-trap field reads, so that the published pass's
+/// last bits move. Each keeps its state, pass count, lid, condensates' keys and phases and
+/// convergence class, its `T_s`, `T_eq` and pressure agree within the passes' convergence, 10⁻⁹ of
+/// themselves (`ATMOSPHERE_CONVERGENCE`), and its traced passes under the floored rules hold one
+/// under its night floor; the set of such bodies is asserted to be exactly the named one, and any
+/// other body that moves fails (decision-p14-t54b-f-coldtraps §11).
 #[test]
 fn under_every_24_hold_a_body_above_its_floor_is_unchanged_by_it() {
     let census = floor_census();
-    let moved: Vec<String> = census
-        .floored
-        .iter()
-        .zip(&census.held)
-        .filter(|(floored, held)| {
-            !floored.under_its_floor() && !held.under_its_floor() && floored.bits != held.bits
-        })
-        .map(|(floored, held)| format!("{}: {} → {}", floored.label, held.line(), floored.line()))
-        .collect();
+    let within = |a: f64, b: f64| a.total_cmp(&b).is_eq() || (a - b).abs() <= 1e-9 * a.abs();
+    let (mut moved, mut in_its_last_bits) = (Vec::new(), Vec::new());
+    for (floored, held) in census.floored.iter().zip(&census.held) {
+        if floored.under_its_floor() || held.under_its_floor() || floored.bits == held.bits {
+            continue;
+        }
+        let line = format!("{}: {} → {}", floored.label, held.line(), floored.line());
+        // The same state, passes, lid, condensates and convergence class, the figures within the
+        // passes' convergence, and, floored, a traced pass under the floor
+        // (decision-p14-t54b-f-coldtraps §11).
+        let close = floored.state == held.state
+            && floored.passes == held.passes
+            && floored.lid == held.lid
+            && floored.condensates == held.condensates
+            && convergence_class(floored.convergence) == convergence_class(held.convergence)
+            && floored.passes_under_floor.is_some_and(|n| n > 0)
+            && within(floored.t_s, held.t_s)
+            && within(floored.t_eq, held.t_eq)
+            && within(floored.p_s, held.p_s);
+        if close && IN_THEIR_LAST_BITS.contains(&floored.label.as_str()) {
+            let under = floored.passes_under_floor.unwrap_or(0);
+            let line = format!(
+                "{line}; {under} traced passes under the floor, {:?}",
+                floored.lid
+            );
+            in_its_last_bits.push((floored.label.as_str(), line));
+        } else {
+            moved.push(format!(
+                "{line}; the same state {}, passes {}, lid {}, condensates {}, convergence class \
+                 {}; traced passes under the floor {:?} (the named set's alone); T_s {}, T_eq {} \
+                 and p_s {} within 1e-9",
+                floored.state == held.state,
+                floored.passes == held.passes,
+                floored.lid == held.lid,
+                floored.condensates == held.condensates,
+                convergence_class(floored.convergence) == convergence_class(held.convergence),
+                floored.passes_under_floor,
+                within(floored.t_s, held.t_s),
+                within(floored.t_eq, held.t_eq),
+                within(floored.p_s, held.p_s)
+            ));
+        }
+    }
+    in_its_last_bits.sort_unstable();
+    eprintln!(
+        "above their floor, moved in their last bits by an earlier pass under it: {} \
+         {in_its_last_bits:#?}",
+        in_its_last_bits.len()
+    );
     assert_eq!(moved, Vec::<String>::new());
+    assert_eq!(
+        in_its_last_bits
+            .iter()
+            .map(|&(label, _)| label)
+            .collect::<Vec<_>>(),
+        IN_THEIR_LAST_BITS,
+        "the named set moves in its last bits, and only it"
+    );
     let above = census
         .floored
         .iter()

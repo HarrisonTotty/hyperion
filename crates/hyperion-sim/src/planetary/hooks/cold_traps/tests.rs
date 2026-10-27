@@ -153,15 +153,19 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
         "the 23 → 24 bump (P14.T54.b) puts the cold traps on the record: every airless body with \
          no collisional air that is not locked to its star takes the zonal annual maximum's \
          airless branch and its cold-trapped ices. Delete `COLD_TRAPS_VERSION`, `ColdTrapRules` \
-         and its `Held` arm, `RecordColdTraps::rules` and `condensates_under`'s `Held` branch, \
-         `RecordRules` with `SurfaceCase::record` and `PlanetarySystem::with_record_rules` (the \
-         record's partition then follows the snapshot's hold, deleted at 23), the tests' switch \
+         and its `Held` arm, `RecordColdTraps::rules` and `condensates_and_ice_over`'s `Held` \
+         branch, `NoColdTraps::Held` and `ColdTrapCase::rules` with `SurfaceFrame::cold_trap_sky`'s \
+         `Held` arm (the passes then always read their sky), `RecordRules` with \
+         `SurfaceCase::record` and `PlanetarySystem::with_record_rules` (the record's partition \
+         then follows the snapshot's hold, deleted at 23), the tests' switch \
          `with_cold_trap_rules` and its thread's rules (and its place in \
-         `planetary::testing::with_every_24_hold`), and this test. \
-         Settle too that T13.c's passes (`surface_mix::pass_condensates`) keep P14.T51.a's \
-         airless branch: give them `cold_traps::publish_over` over one `ColdTrapField` a body \
-         (P14.T51.i), with the record's sky and these rules, or the Bond albedo reads other areas \
-         than the record publishes (plan 14, P14.T51.f and T51.i as built)"
+         `planetary::testing::with_every_24_hold`), R09's Held half \
+         (`under_the_cold_traps_hold_the_record_gives_no_cold_traps`), the tests' Held arms of \
+         `held_the_passes_build_no_field`, and this test. Delete too what holds T13.c's \
+         passes (`surface_mix::spun_partition`) to 23's at the hold: `can_take_cold_traps`' test \
+         of the hold, so that L2 (nothing condenses, no conditions read) stands only for a pass \
+         that cannot qualify, and the `Err(NoColdTraps::Held)` arms of `pass_cold_traps` and \
+         `no_cold_traps` (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (d) and §7)"
     );
     assert_eq!(ColdTrapRules::in_force(), ColdTrapRules::Held);
     let sky = lunar_sky();
@@ -1363,11 +1367,7 @@ impl RecordMoon {
     /// Its published condensates under the batch's cold traps, its atmosphere `air` and its
     /// regolith's albedo `regolith`.
     fn published(&self, air: &Atmosphere, regolith: f64, sky: &ColdTrapSky) -> Condensates {
-        let traps = RecordColdTraps {
-            rules: ColdTrapRules::Batch,
-            sky,
-            regolith_albedo: regolith,
-        };
+        let traps = RecordColdTraps::built(ColdTrapRules::Batch, sky, regolith);
         self.figures
             .condensates_under(
                 air,
@@ -1451,4 +1451,305 @@ fn one_field_built_once_serves_every_publish() {
     let (_, earth) = bodies.iter().find(|(name, _)| *name == "Earth").unwrap();
     let over = publish_over(&solved, &cover, &body(earth.atmosphere()), &field);
     assert_eq!(format!("{over:?}"), format!("{:?}", solved.publish(&cover)));
+}
+
+/// decision-p14-t54b-f-coldtraps §9 test 5: a field's key is every input to the bit. Over the
+/// table's Moon's inputs, a slot reuses its field for the same inputs, a copy, and the reuse is the
+/// build's bits; it builds afresh where any one input moves: each float of the sky, the regolith's
+/// albedo and the heat flow by one ulp; each member of the crater contract by one ulp, or its
+/// screening, impact velocity or target class to another variant; the crust to the other class;
+/// the condensables to another list; each area point's x by one ulp (down, so that the pole's 1
+/// stays a sine); and the number of points.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of every member of the key, each moved alone"
+)]
+fn a_field_s_key_is_every_input_to_the_bit() {
+    use hyperion_surface::craters::{CraterParamsParts, Screening, TargetClass};
+
+    use crate::units::{Gigayears, MetresPerSecond, PerSquareKilometre};
+
+    let moon = RecordMoon::new();
+    let sky = lunar_sky();
+    let (solved, _) = moon.figures.condensates_under(
+        &moon.air,
+        &moon.conditions,
+        moon.gravity,
+        &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
+        &moon.conditions.zonal_insolation(),
+    );
+    let profile = moon.conditions.cold_profile();
+    let body = ColdTrapBody {
+        atmosphere: &moon.air,
+        profile: &profile,
+        gravity: moon.gravity,
+        heat_flow: moon.figures.heat_flow(),
+        crust: moon.figures.impactors().crust(),
+        craters: moon.figures.craters(),
+        sky: &sky,
+        regolith_albedo: moon.air.albedo().value(),
+    };
+    let base = FieldInputs::of(&body, &solved).unwrap();
+    let field = ColdTrapField::of(&body, &solved).unwrap();
+    assert!(
+        base.field().same_bits(&field),
+        "the inputs' field is `of`'s"
+    );
+    // A fresh slot over two inputs in turn: its events, and the cold traps it gave.
+    let pair = |a: &FieldInputs, b: &FieldInputs| {
+        let ((first, second), events) = field_log::capture(|| {
+            let slot = FieldSlot::new();
+            (slot.traps(a), slot.traps(b))
+        });
+        let kinds: Vec<&str> = events
+            .iter()
+            .map(|event| match event {
+                field_log::FieldEvent::Opened => "opened",
+                field_log::FieldEvent::Built(_) => "built",
+                field_log::FieldEvent::Reused(_) => "reused",
+            })
+            .collect();
+        (first, second, kinds)
+    };
+    let copy = base;
+    let (first, second, kinds) = pair(&base, &copy);
+    assert_eq!(kinds, ["opened", "built", "reused"]);
+    assert!(second.field().same_bits(first.field()));
+    assert!(
+        second.field().same_bits(&field),
+        "a reuse is the build's bits"
+    );
+    assert!(base.same(&copy));
+    let up = f64::next_up;
+    let parts = *base.craters.parts();
+    let craters = |parts: CraterParamsParts| CraterParams::new(parts).unwrap();
+    let mut moved: Vec<(String, FieldInputs)> = vec![
+        (
+            "the greatest declination".into(),
+            FieldInputs {
+                sky: ColdTrapSky {
+                    greatest_declination: Radians::new(up(sky.greatest_declination.value())),
+                    ..sky
+                },
+                ..base
+            },
+        ),
+        (
+            "the flux at periapsis".into(),
+            FieldInputs {
+                sky: ColdTrapSky {
+                    periapsis_flux: WattsPerSquareMetre::new(up(sky.periapsis_flux.value())),
+                    ..sky
+                },
+                ..base
+            },
+        ),
+        (
+            "the star's angular radius".into(),
+            FieldInputs {
+                sky: ColdTrapSky {
+                    star_radius: Radians::new(up(sky.star_radius.value())),
+                    ..sky
+                },
+                ..base
+            },
+        ),
+        (
+            "the exposed fraction".into(),
+            FieldInputs {
+                sky: ColdTrapSky {
+                    exposed_fraction: up(sky.exposed_fraction),
+                    ..sky
+                },
+                ..base
+            },
+        ),
+        (
+            "the regolith's albedo".into(),
+            FieldInputs {
+                regolith_albedo: up(base.regolith_albedo),
+                ..base
+            },
+        ),
+        (
+            "the heat flow".into(),
+            FieldInputs {
+                heat_flow: WattsPerSquareMetre::new(up(base.heat_flow.value())),
+                ..base
+            },
+        ),
+        (
+            "N(>1 km)".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    n_1km: PerSquareKilometre::new(up(parts.n_1km.value())),
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the crater gravity".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    gravity: MetresPerSecondSquared::new(up(parts.gravity.value())),
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the target factor".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    k_target: up(parts.k_target),
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the projectiles' density".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    projectile_density: KilogramsPerCubicMetre::new(up(parts
+                        .projectile_density
+                        .value())),
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the target's density".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    target: hyperion_surface::craters::CraterTarget {
+                        density: KilogramsPerCubicMetre::new(up(parts.target.density.value())),
+                        ..parts.target
+                    },
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the target's class".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    target: hyperion_surface::craters::CraterTarget {
+                        class: match parts.target.class {
+                            TargetClass::NonPorous => TargetClass::Porous,
+                            TargetClass::Porous => TargetClass::NonPorous,
+                        },
+                        ..parts.target
+                    },
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the system's age".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    system_age: Gigayears::new(up(parts.system_age.value())),
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the impact velocity".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    impact_velocity: Some(MetresPerSecond::new(
+                        parts.impact_velocity.map_or(1.0e4, |v| up(v.value())),
+                    )),
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "no impact velocity".into(),
+            FieldInputs {
+                craters: craters(CraterParamsParts {
+                    impact_velocity: match parts.impact_velocity {
+                        Some(_) => None,
+                        None => Some(MetresPerSecond::new(1.0e4)),
+                    },
+                    ..parts
+                }),
+                ..base
+            },
+        ),
+        (
+            "the crust".into(),
+            FieldInputs {
+                crust: match base.crust {
+                    Crust::Silicate => Crust::IceRich,
+                    Crust::IceRich => Crust::Silicate,
+                },
+                ..base
+            },
+        ),
+        (
+            "the condensables".into(),
+            FieldInputs {
+                species: {
+                    let mut species = base.species;
+                    let last = species.iter().rposition(Option::is_some).unwrap();
+                    species[last] = None;
+                    species
+                },
+                ..base
+            },
+        ),
+        (
+            "the number of area points".into(),
+            FieldInputs {
+                points: base.points - 1,
+                ..base
+            },
+        ),
+    ];
+    for screening in [
+        Screening::None,
+        Screening::Atmosphere {
+            column_mass: KilogramsPerSquareMetre::new(1.0),
+        },
+        Screening::Cutoff {
+            diameter: Metres::new(1.0),
+        },
+    ] {
+        let same_variant = matches!(
+            (screening, parts.screening),
+            (Screening::None, Screening::None)
+                | (Screening::Atmosphere { .. }, Screening::Atmosphere { .. })
+                | (Screening::Cutoff { .. }, Screening::Cutoff { .. })
+        );
+        if !same_variant {
+            moved.push((
+                format!("the screening {screening:?}"),
+                FieldInputs {
+                    craters: craters(CraterParamsParts { screening, ..parts }),
+                    ..base
+                },
+            ));
+        }
+    }
+    // Down an ulp, so that the pole's x of 1 stays a sine.
+    for k in 0..base.points {
+        let mut xs = base.xs;
+        xs[k] = xs[k].next_down();
+        moved.push((format!("area point {k}'s x"), FieldInputs { xs, ..base }));
+    }
+    for (member, inputs) in &moved {
+        assert!(!base.same(inputs), "{member}: the same key");
+        let (_, _, kinds) = pair(&base, inputs);
+        assert_eq!(kinds, ["opened", "built", "built"], "{member}");
+    }
+    eprintln!("{} members moved, each rebuilding", moved.len());
 }

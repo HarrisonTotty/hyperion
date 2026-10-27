@@ -655,6 +655,22 @@ pub(crate) struct SurfaceBasis {
     /// The lid its conditions' ground's inertia read (P14.T54.a): its published pass's context's,
     /// the pass before's own lid; `None` where it read none (the material's constant).
     pub(crate) lid: Option<CrustLithology>,
+    /// What R09's cold traps read of the cold-trap field its published pass read (P14.T54.b.f;
+    /// decision-p14-t54b-f-coldtraps §5): `Some` exactly where that pass read one.
+    pub(crate) cold_traps: Option<ColdTrapBasis>,
+}
+
+/// What R09's cold traps read of the cold-trap field a record's published pass read beyond the
+/// record's other members (P14.T54.b.f; decision-p14-t54b-f-coldtraps §5), each that field's
+/// input, to the bit: the star's angular radius α of its sky and the bare regolith's Bond albedo
+/// it read, the published pass's own (never recomputed from the record's maturity, K(P*)'s surface
+/// age). Its heat flow and craters R09 reads from the record's figures (a recorded residual).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ColdTrapBasis {
+    /// The star's angular radius at the seasonal orbit's periapsis, rad in [0, π/2].
+    pub(crate) star_radius: Radians,
+    /// The bare regolith's Bond albedo about the body's hosts' bands, airless, 0 to 1.
+    pub(crate) regolith_albedo: f64,
 }
 
 impl Surface {
@@ -753,8 +769,8 @@ impl Surface {
     }
 
     /// What its conditions and condensates were built on (rule (f)); `None` for a surface built
-    /// apart from a record. The tests of rule (f) read it.
-    #[cfg(test)]
+    /// apart from a record. R09's inputs read its cold traps' part (P14.T54.b.f), and the tests of
+    /// rule (f) the rest.
     #[must_use]
     pub(crate) const fn basis(&self) -> Option<&SurfaceBasis> {
         self.basis.as_ref()

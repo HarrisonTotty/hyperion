@@ -29658,6 +29658,124 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         largest T_eq move −10.26 K (`42002cae0000000a.0101`, 0.110 → 0.342). A lava flow's glassy
         texture is not modelled, and the rows carry the method's known overstatement of
         crystalline rows (decision-p14-t49k §2.6). For the composition audit.
+  - _P14.T54.b.f, the cold traps in the passes_ (B2, 2026-10-26; decision-p14-t54b-f-coldtraps).
+    `GENERATOR_VERSION` stays 23 and no golden moves: at `ColdTrapRules::Held` the passes build no
+    field, keep their order and branches and move no bit.
+    - _The premise, corrected (§1):_ the field's inputs are not the same at every pass. A
+      qualifying pass under the batch builds or reuses a field of its own inputs
+      (`cold_traps::FieldInputs`), and nothing else: the derivation's sky (`ColdTrapSky`, built
+      once a solve from the record's spin, seasonal orbit and brightest star,
+      `PassRecordOf::cold_trap_sky`, which reads the record's `ColdTrapRules` through
+      `ColdTrapCase::rules`, so that `with_cold_trap_rules` and `with_record_rules` drive both
+      paths); the heat flow, crater contract and crust of the context it reads; its weathered bare
+      regolith's Bond albedo, airless, `pass_regolith`'s, the one its area mix reads; its
+      partition's `condensables` (`DELIVERED` included, water left out on an ice-rich crust); its
+      profile's area points' x. Within a pass: conditions, `spun_lid`, the maturity and regolith,
+      the field (`surface_mix::pass_cold_traps`), `publish_over`, the area mix.
+    - _L2 closed under the batch (§2 (d)):_ a pass that can qualify (`can_take_cold_traps`: a sky,
+      `rotates(spin)`, `Airless`, not collisional) reads its conditions where nothing condenses, so
+      its delivered water and carbon dioxide traps are its own. L2 stands at `Held` and for a pass
+      that cannot qualify. 259 of the 656 qualifying bodies of the 60-system sample are L2's case.
+    - _No field:_ `NoColdTraps { Held, ClimateGiven, NoSky, NoFigures, Unqualified }`, labelled;
+      a pass under C₀ reads none (`NoFigures`) and publishes P14.T51.a's, as does a climate given
+      ("(no cold traps)"). No published pass of a body whose record has figures is figures-free.
+    - _The carry (§3):_ the field travels with its pass (`PassOut`'s sixth member,
+      `PassColdTraps`, its inputs beside it), so the published pass carries its own whichever
+      evaluation the solver publishes; it rides `Passes` → `DerivedBody::cold_traps` (and
+      `DerivedMoon`'s) → `SurfaceSky` → `RecordField::Carried`. The record builds none: it
+      publishes over the carried field with the carried heat flow, crust, craters, sky and albedo
+      (`PassColdTraps::body`, the one constructor a pass and the record use), so its condensates are
+      the published pass's to the bit, bracketed bodies included (an ice bulk's water aside, whose
+      crust the record lists, as rule (f)'s own test sets it aside). The record's `cold_trap_sky`
+      is deleted; `cold_traps::publish` and `ColdTrapField::of` are the tests' alone
+      (`RecordField::Built`).
+    - _The slot and the key (§4):_ `FieldSlot`, a local of `record_passes`, dropped with the solve:
+      a pass whose inputs are the slot's to the bit (`FieldInputs::same`: `total_cmp` on every float
+      of the sky, the albedo, the heat flow, every `CraterParams` member and each area x, equality
+      for the screening's variant, the target class, the crust and the condensables; no tolerance)
+      reuses its field, any other builds one.
+    - _R09 (§5):_ `SurfaceBasis::cold_traps: Option<ColdTrapBasis>` (α and the regolith albedo of
+      the carried field's inputs), `Some` exactly where the published pass read a field;
+      `from_record` fills `cold_trap_inputs()` from it and `cold_traps()` from each solid entry's
+      trapped part. R09's tripwire is replaced by
+      `under_the_cold_traps_hold_the_record_gives_no_cold_traps` and
+      `under_the_batch_the_record_gives_its_cold_traps_to_the_bit`.
+    - _Tests (§9):_ 1 `under_the_batch_every_record_s_condensates_are_its_published_pass_s`; 2
+      `the_passes_build_one_field_per_run_of_equal_inputs_and_the_record_none` (the record's builds
+      counted, `field_log`); 3 `fields_reused_and_rebuilt_give_every_derivation_to_the_bit`; 4
+      `under_the_batch_the_snapshots_do_not_depend_on_their_order`; 5
+      `a_field_s_key_is_every_input_to_the_bit` (86 members moved); 6
+      `every_carried_field_is_its_published_pass_s`; 7
+      `no_published_pass_reads_no_figures_and_a_figures_free_pass_publishes_t51a_s`; 8
+      `the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes`; 9
+      `held_the_passes_build_no_field`; 10 R09's two and
+      `a_generated_qualifying_body_s_field_places_its_record_s_trapped_areas` (slow); the census
+      `the_cold_traps_census_is_stated`; the timing re-pointed.
+    - _Figures (every 24 hold, the 60-system sample):_
+      - 656 of 888 surfaces read a field (planets 19, members 481, moons 156), 3 bracketed; 1,386
+        fields over 2,095 qualifying passes. Builds per qualifying body: planets {1: 12, 2: 4,
+        3: 3}, members {1: 158, 2: 122, 3: 202, 4: 3, 8: 1}, moons {1: 65, 2: 15, 3: 70, 4: 6}: the
+        first pass reads C₀ and no field, and the context's lid and the weathered regolith move
+        over the next one or two.
+      - The cost (§4; `time_the_cold_traps_over_the_sample`, re-pointed at the passes' builds, which
+        it counts): a mean of 5.95 ms a system and at most 27.69 ms (`02000b2ca0000001`, 59 fields),
+        against T51.i's 7 ms and 50 ms (0.68 and 4.05 ms with one field a body on the record);
+        25.5 fields a system, at most 103, none on the record path. Measured in the dev profile
+        (the sim at `opt-level` 2) beside other tests, outside a quiet window: to be measured again
+        at the bless, with D5's reference.
+      - Through the real passes (`TableRecord`, every hold, their columns condensing nothing, L2's
+        case): the Moon water `f_ct` 9.2169 × 10⁻⁴ (in 0.024–0.2%), `A_s` 3.2259 × 10⁻⁵, CO₂ `f_ct`
+        2.0073 × 10⁻⁵; Mercury water 2.3607 × 10⁻⁴, CO₂ 2.1847 × 10⁻⁶; Ceres water 3.5950 × 10⁻⁴,
+        CO₂ 9.3922 × 10⁻⁵; each at the regolith's 0.1100.
+      - The icy moons, pending P14.T49.m (§6), on T49.i's `H2O` frost as the lid's row (its Bond
+        albedo about each body's hosts, 0.011–0.961, median 0.640; 0.832 about the Sun): 377
+        qualifying bodies with an `H2O` lid (60 moons, 315 members, 2 planets). Water takes no
+        traps on their ice-rich crusts (P14.T24.b's ice kept). Trapped: CO₂ on 104 (11 moons),
+        `f_ct` up to 5.33 × 10⁻⁴, `A_s` up to 2.11 × 10⁻⁴; CH₄ on 67, N₂ on 64, Ar on 18, `A_s` up
+        to 1.9 × 10⁻⁴.
+      - R09: 656 records with a field read, none refused (`for_body` under the 24 holds), 39
+        trapped parts to the bit and 244 scaled (below), 236 records with none; over 202 bodies at
+        level 6, 280 trapped parts placed plus undrawn within one cell of `A_s`, short 0, but four
+        of 10⁻¹⁶–7 × 10⁻¹⁴ of the surface that no cell centre's fraction holds (below); the one
+        bracketed body, `220016597ff80000.e201` (first round), places its Ar, CH₄ and CO₂ undrawn,
+        within 10⁻²¹ of `A_s`, short 0.
+      - `is_collisional`'s 0 ≥ 0 (P14.T54.b.e's finding): no sample body meets it under every 24
+        hold (an `Airless` air's `surface_pressure()` is its partials' sum, never 0 over partials
+        above 0).
+    - _Other tests restated (the 24 combination moves with the cold traps in the passes):_
+      - `under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor`: before
+        P14.T53.c the raised went 11 → 10 and their cover changes 8 → 7, `filler_b`
+        `2200165980000000.e207` leaving them (its passes publishing the zonal annual maximum's
+        branch, as its record does, so that its `T_eq` rose from 16.51 K past its 17.84 K floor);
+        with P14.T53.c's ice-held argon it stays at its floor holding its argon ice, and the counts
+        are P14.T53.c's, (11, 8, 0, 2) (decision-p14-t54b-f-coldtraps §11 (a), confirmed before
+        the merge);
+      - `under_every_24_hold_a_body_above_its_floor_is_unchanged_by_it`: to the bit but where an
+        earlier pass lay under its floor, which moves the context the next pass's field reads (its
+        craters and crust), so that the published pass moves in its last bits: to the bit for every
+        body but a named set (`IN_THEIR_LAST_BITS`), asserted exactly (the form of
+        decision-p14-t54b-e-findings §B.2, amended by decision-p14-t54b-f-coldtraps §11 (b)), each
+        keeping its state, passes, lid, condensates' keys and phases and convergence class (the
+        variant, a bracket's fit and its jump, not its residual), its `T_s`, `T_eq` and pressure
+        within 10⁻⁹, and holding a traced pass under its floor under the floored rules. Five before
+        P14.T53.c; eleven with it, airless members of 12–24 K: the sample's
+        `01ffeb2c20010000.e201`, `01ffeb2ce0000000.e108`, `02000b2c5fff0000.e106`,
+        `02000b2ca0000001.e305`, `02000b2cdffe0000.e108` and `02001b2ca0000000.e104`, and LOOK72's
+        `020e56ef20080001.e104`, `620e377802000074.e306` and `820e6ee00000008d.e401`, `.e402` and
+        `.e408`.
+    - _Deviations:_
+      - the field is a plain `Copy` value held in place (at most 66 area points and nine
+        condensables), so the carry moves no `Copy` off `DerivedBody`, `DerivedMoon` or the solver
+        (`P: Copy` stays);
+      - R09's trapped parts are scaled with their ices where the record's figures scaled every ice
+        into the surface (their shares summing above 1, `within_the_surface`): 244 of 283 parts,
+        `ColdTrapExceedsIce` otherwise; to the bit elsewhere;
+      - a trapped part below 10⁻⁶ of a level-6 cell that no cell centre's fraction holds is listed,
+        not asserted short 0 (four parts of 10⁻¹⁶–7 × 10⁻¹⁴ of the surface).
+    - _Deferred findings:_ R09's ground reads the record figures' heat flow and craters (K(P*)), the
+      carried field C*'s (§5), within 10⁻⁹ on a converged body; the icy moons wait for P14.T49.m
+      (§6); the record's figures scale the ices into the surface but not the condensates' trapped
+      parts (R09 scales them, above).
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

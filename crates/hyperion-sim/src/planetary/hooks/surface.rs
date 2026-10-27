@@ -863,6 +863,16 @@ pub enum SeasonsFrom {
     Planet,
 }
 
+/// Whether a body of spin `spin` turns under its seasonal host: a solar day that is positive. A
+/// world locked 1:1 to its seasonal host, whose hosts stand still in its sky, does not, and its
+/// conditions' cold profile is the eyeball's, not a zonal one ([`SurfaceConditions::cold_profile`]);
+/// a solar day that is not positive is no solar day. The cold traps read it before a pass's
+/// conditions (P14.T54.b.f).
+#[must_use]
+pub(crate) fn rotates(spin: &SeasonalSpin) -> bool {
+    spin.solar_day.is_some_and(|day| day.value() > 0.0)
+}
+
 impl SeasonalSpin {
     /// The spin at `t` of the body whose frame is `frame`, under the seasonal orbit `seasonal`,
     /// which is `whose`.
@@ -1141,7 +1151,7 @@ impl SurfaceConditions {
             zonal,
             day_and_night: (day, night),
             // A solar day that is not positive is no solar day, as `day_and_night` takes it.
-            locked: !inputs.spin.solar_day.is_some_and(|day| day.value() > 0.0),
+            locked: !rotates(&inputs.spin),
             spin: SeasonalSpin {
                 solar_day: inputs.spin.solar_day.filter(|day| day.value() > 0.0),
                 ..inputs.spin

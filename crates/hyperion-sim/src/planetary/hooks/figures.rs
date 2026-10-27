@@ -149,7 +149,9 @@ use crate::planetary::derive::atmosphere::{
     Atmosphere, Gas, SurfaceMaterial, SurfaceState, tenuous_in_force,
 };
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
-use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
+#[cfg(test)]
+use crate::planetary::hooks::cold_traps::ColdTrapBody;
+use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, RecordColdTraps, RecordField};
 use crate::planetary::hooks::ocean;
 use crate::planetary::hooks::surface::{
     ColdProfile, OceanWeight, SurfaceConditions, ZonalInsolation,
@@ -2679,10 +2681,13 @@ impl GlobalFigures {
     /// The partition and water's cover are [`partition_over`]'s, the one computation a pass's area
     /// mix publishes over (P14.T54.a, rule (f)). The condensates are published over that cover
     /// ([`Cover`]): the conditions' cold area, the state and water's cover. Under
-    /// [`ColdTrapRules::Held`] they are P14.T51.a's; under [`ColdTrapRules::Batch`] a body with no
-    /// collisional atmosphere that is not locked to its star takes the cold traps' airless branch
-    /// and their ices ([`cold_traps::publish`]), which read these figures' heat flow, crust and
-    /// craters.
+    /// [`ColdTrapRules::Held`] they are P14.T51.a's; under [`ColdTrapRules::Batch`] a body whose
+    /// published pass read a cold-trap field takes the cold traps' airless branch and their ices
+    /// over that field, carried ([`cold_traps::publish_over`], [`RecordField::Carried`];
+    /// P14.T54.b.f), with that pass's heat flow, crust and craters, so that they are that pass's
+    /// to the bit and the record builds no field; one whose pass read none keeps P14.T51.a's. The
+    /// tests' figures-alone form builds its field here over these figures' heat flow, crust and
+    /// craters (`RecordField::Built`).
     ///
     /// The third value is T24.b's water ice as the cover read it off that profile
     /// ([`WaterCover::ice_fraction`]), which [`with_surface_under`](Self::with_surface_under) takes
@@ -2691,6 +2696,15 @@ impl GlobalFigures {
     /// temperature and their cold profile, none of which their liquid-water flag
     /// ([`SurfaceConditions::with_condensates`]) moves.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unused_self,
+            reason = "the record publishes over its published pass's field with that pass's heat \
+                      flow, crust and craters, not these figures' (P14.T54.b.f); the tests' \
+                      figures-alone form reads them"
+        )
+    )]
     pub(crate) fn condensates_and_ice_over(
         &self,
         atmosphere: &Atmosphere,
@@ -2720,9 +2734,35 @@ impl GlobalFigures {
             state: atmosphere.state(),
             water,
         };
-        let published = match traps.rules {
-            ColdTrapRules::Held => solved.publish(&cover),
-            ColdTrapRules::Batch => cold_traps::publish(
+        let published = match (traps.rules, traps.field) {
+            (ColdTrapRules::Held, _) | (ColdTrapRules::Batch, RecordField::Carried(None)) => {
+                solved.publish(&cover)
+            }
+            // The published pass's field, carried, over its own heat flow, crust and craters
+            // (P14.T54.b.f; decision-p14-t54b-f-coldtraps §3): the record builds none.
+            (ColdTrapRules::Batch, RecordField::Carried(Some(carried))) => {
+                #[cfg(test)]
+                let before = cold_traps::field_log::builds();
+                let published = cold_traps::publish_over(
+                    &solved,
+                    &cover,
+                    &carried.body(atmosphere, &profile, ground.ground.gravity()),
+                    carried.field(),
+                );
+                #[cfg(test)]
+                cold_traps::field_log::count_record_builds(
+                    cold_traps::field_log::builds() - before,
+                );
+                published
+            }
+            #[cfg(test)]
+            (
+                ColdTrapRules::Batch,
+                RecordField::Built {
+                    sky,
+                    regolith_albedo,
+                },
+            ) => cold_traps::publish(
                 &solved,
                 &cover,
                 &ColdTrapBody {
@@ -2732,8 +2772,8 @@ impl GlobalFigures {
                     heat_flow: self.heat_flow,
                     crust: self.impactors.crust(),
                     craters: &self.craters,
-                    sky: traps.sky,
-                    regolith_albedo: traps.regolith_albedo,
+                    sky,
+                    regolith_albedo,
                 },
             ),
         };
@@ -3199,6 +3239,13 @@ impl PassFigures {
     #[must_use]
     pub(crate) const fn crust(&self) -> Crust {
         self.impactors.crust()
+    }
+
+    /// The crater contract ([`GlobalFigures::craters`]), whose terrain a pass's cold traps read
+    /// (P14.T54.b.f).
+    #[must_use]
+    pub(crate) const fn craters(&self) -> &CraterParams {
+        &self.craters
     }
 
     /// Whether the volcanic greenhouse still runs at the outgassing, the branch that sets the

@@ -136,7 +136,9 @@ use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
-use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, ColdTrapSky, RecordColdTraps};
+use crate::planetary::hooks::cold_traps::{
+    self, ColdTrapRules, ColdTrapSky, NoColdTraps, PassColdTraps, RecordColdTraps, RecordField,
+};
 use crate::planetary::hooks::crust::{
     CrustComposition, CrustLid, CrustLithology, CrustOrigin, CrustRecord, FormationWindow,
     ParentSurface, formation_time,
@@ -182,8 +184,8 @@ use crate::planetary::placement::{
 };
 use crate::planetary::record::{
     AerosolInventory, BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties,
-    Envelope, HaloRecord, Hooks, Modelled, MoonOrigin, Population, Section, Surface, SurfaceBasis,
-    SystemSnapshot, VerticalStructure,
+    ColdTrapBasis, Envelope, HaloRecord, Hooks, Modelled, MoonOrigin, Population, Section, Surface,
+    SurfaceBasis, SystemSnapshot, VerticalStructure,
 };
 use crate::planetary::rings::{Ring, RingParent};
 use crate::planetary::satellites::{
@@ -2535,7 +2537,6 @@ impl PlanetarySystem {
                 craters: self.body_craters(body),
                 sources: frame.sources.as_ref(),
                 continental_asymptote: frame.continental_asymptote,
-                cold_traps: frame.cold_traps,
                 star_temperature: frame.star_temperature,
                 modifiers: ModifierCase {
                     star: frame.modifier_star,
@@ -2557,7 +2558,6 @@ impl PlanetarySystem {
                 craters: self.moon_craters(frame.primary, moon, derived.ice_fraction(), orbit),
                 sources: frame.sources.as_ref(),
                 continental_asymptote: frame.continental_asymptote,
-                cold_traps: frame.cold_traps,
                 star_temperature: frame.star_temperature,
                 modifiers: ModifierCase {
                     star: frame.modifier_star,
@@ -2620,6 +2620,7 @@ impl PlanetarySystem {
             cold_traps: ColdTrapCase {
                 exposed_fraction: cold_traps::exposed_fraction(self.seed, id),
                 star_radius: brightest.map(|(_, state)| state.radius()),
+                rules: self.record.cold_traps,
             },
             // The air's photochemistry and the modifiers read the star on the record only under
             // the batch's rules, and the passes' maturity under the weathered area mix's
@@ -4670,6 +4671,38 @@ struct SurfaceFrame<'a> {
 }
 
 impl SurfaceFrame<'_> {
+    /// The sky a body's passes' cold traps read under its spin `spin` and its hosts' orbit-mean
+    /// flux at it `flux` (P14.T51.f, P14.T54.b.f; `PassRecordOf::cold_trap_sky`): the greatest
+    /// declination from its obliquity, the flux and the brightest star's angular radius at the
+    /// seasonal orbit's periapsis ([`ColdTrapSky::at_periapsis`]), and its exposed fraction. The
+    /// flux is the body's orbit-mean flux from every host, a moon's planet's light and a
+    /// companion's included, taken to periapsis as its seasonal host's.
+    ///
+    /// # Errors
+    ///
+    /// [`NoColdTraps::Held`] under its record's cold traps' hold, and [`NoColdTraps::NoSky`] with
+    /// no seasonal orbit at the time.
+    fn cold_trap_sky(
+        &self,
+        spin: &SeasonalSpin,
+        flux: WattsPerSquareMetre,
+    ) -> Result<ColdTrapSky, NoColdTraps> {
+        let case = &self.cold_traps;
+        match case.rules {
+            ColdTrapRules::Held => Err(NoColdTraps::Held),
+            ColdTrapRules::Batch => {
+                let seasonal = self.seasonal.as_ref().ok_or(NoColdTraps::NoSky)?;
+                Ok(ColdTrapSky::at_periapsis(
+                    spin.obliquity,
+                    flux,
+                    (seasonal.semi_major_axis(), seasonal.eccentricity().value()),
+                    case.star_radius,
+                    case.exposed_fraction,
+                ))
+            }
+        }
+    }
+
     /// What the figures of a body of mass `mass`, record's bulk `bulk` and inventory's water
     /// `inventory_water`, turning at the rotation period `rotation_period`, whose crater contract
     /// reads `craters`, read beyond its air and its tide; `None` with no impactor sources.
@@ -4855,6 +4888,10 @@ impl PassRecordOf for PrimaryPasses<'_> {
         FigureBulk::of_primary(self.body, bulk).record_spin(self.spin, self.table, bulk.lag)
     }
 
+    fn cold_trap_sky(&self, flux: WattsPerSquareMetre) -> Result<ColdTrapSky, NoColdTraps> {
+        self.frame.cold_trap_sky(&self.spin, flux)
+    }
+
     fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust> {
         let crust = self.crust?;
         Some(crust.with_bulk(&FigureBulk::of_primary(self.body, bulk), bulk.mass))
@@ -4940,6 +4977,10 @@ struct SatellitePasses<'a> {
 }
 
 impl MoonRecordOf for SatellitePasses<'_> {
+    fn cold_trap_sky(&self, flux: WattsPerSquareMetre) -> Result<ColdTrapSky, NoColdTraps> {
+        self.frame.cold_trap_sky(&self.spin, flux)
+    }
+
     fn spin(&self, shape: &MoonShape, bulk: &PassBulk) -> RecordSpin<'_> {
         PlanetarySystem::moon_figure_of_shape(
             self.now.moon,
@@ -5276,8 +5317,12 @@ struct SurfaceSky<'a> {
     equilibrium_temperature: Kelvin,
     flux: EarthFluxes,
     xuv_flux: WattsPerSquareMetre,
-    /// The bare regolith's Bond albedo its derivation gives (P14.T51.i), which its cold traps read.
+    /// The bare regolith's Bond albedo its derivation gives (P14.T51.i), the one its published
+    /// pass's cold-trap field read.
     regolith_albedo: f64,
+    /// The cold-trap field its published pass read, with its inputs (P14.T54.b.f), which its
+    /// record publishes over and builds none; `None` where that pass read none.
+    cold_traps: Option<&'a PassColdTraps>,
     /// What its passes over its record leave for it (P14.T54.a, rule (f)), `None` over the
     /// stand-in.
     spun: Option<&'a SpunPasses>,
@@ -5314,6 +5359,7 @@ impl SurfaceSky<'_> {
             flux: derived.flux(),
             xuv_flux: derived.xuv_flux(),
             regolith_albedo: derived.regolith_albedo(),
+            cold_traps: derived.cold_traps().as_ref().ok(),
             spun: derived.spun(),
             crust_lid: derived.crust_lid(),
             weathered: derived.weathered().as_ref().ok(),
@@ -5330,6 +5376,7 @@ impl SurfaceSky<'_> {
             flux: derived.flux(),
             xuv_flux: derived.xuv_flux(),
             regolith_albedo: derived.regolith_albedo(),
+            cold_traps: derived.cold_traps().as_ref().ok(),
             spun: derived.spun(),
             crust_lid: derived.crust_lid(),
             weathered: derived.weathered().as_ref().ok(),
@@ -5525,8 +5572,6 @@ struct SurfaceCase<'a> {
     /// Its continental asymptote f∞ (P14.T48.a), a fraction of the surface in (0.2, 0.7), from
     /// word 0 of its `body.continents` stream (`relief::continental_asymptote`).
     continental_asymptote: f64,
-    /// What its cold traps read beyond its sky (P14.T51.f).
-    cold_traps: ColdTrapCase,
     /// The effective temperature of the star its air's photochemistry reads (P14.T24.c's
     /// `star_temperature`), its frame's.
     star_temperature: Option<Kelvin>,
@@ -5539,11 +5584,14 @@ struct SurfaceCase<'a> {
 
 /// What a body's cold traps read beyond its sky and its spin (P14.T51.f): its exposed fraction,
 /// word 0 of its `body.cold_traps` stream, and the radius of the brightest star its zone's bodies
-/// orbit at the time, `None` before one forms.
+/// orbit at the time, `None` before one forms; and the rules its record's cold traps follow, which
+/// its passes follow too (P14.T54.b.f), so that `with_cold_trap_rules` and
+/// `PlanetarySystem::with_record_rules` drive both.
 #[derive(Debug, Clone, Copy)]
 struct ColdTrapCase {
     exposed_fraction: f64,
     star_radius: Option<SolarRadii>,
+    rules: ColdTrapRules,
 }
 
 /// What a body's water window reads of its hosts over its past (P14.T48.b; science-p14-t24b-laws
@@ -5755,13 +5803,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         return Section::NotApplicable;
     };
     let table = time.table;
-    let (conditions, (partition, published, ice)) = with_partition(
-        &figures,
-        case,
-        (&spin, seasonal),
-        conditions,
-        (table, &basis.ground),
-    );
+    let (conditions, (partition, published, ice)) =
+        with_partition(&figures, case, conditions, (table, &basis.ground));
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
     // read the conditions (science-p14-t24b-laws §4.6, steps 8–12).
@@ -5929,6 +5972,7 @@ fn surface_basis(
             heat_flow: figures.heat_flow(),
             ocean_weight: figures.ocean_weight(),
             lid: None,
+            cold_traps: None,
         };
     };
     let air = sky.atmosphere;
@@ -5957,6 +6001,12 @@ fn surface_basis(
         heat_flow: context.heat_flow(),
         ocean_weight: spun.ocean_weight(),
         lid: context.lid().map(|lid| lid.lithology),
+        // What R09's cold traps read of the field the published pass read, its own inputs' to the
+        // bit (P14.T54.b.f; decision-p14-t54b-f-coldtraps §5).
+        cold_traps: sky.cold_traps.map(|traps| ColdTrapBasis {
+            star_radius: traps.inputs().sky().star_radius,
+            regolith_albedo: traps.inputs().regolith_albedo(),
+        }),
     }
 }
 
@@ -5990,30 +6040,48 @@ pub(crate) fn with_crust_water_by_material<R>(run: impl FnOnce() -> R) -> R {
     result
 }
 
-/// The conditions `conditions` of the body `case` describes, of figures `figures`, spin and seasonal
-/// orbit `seasons`, with P14.T51.a's partition on the record and T24.b's water ice as its cover read
-/// it ([`GlobalFigures::condensates_and_ice_over`]) on the ground `ground` (rule (f), the
-/// published pass's context's): the conditions' liquid-water flag, the ocean and ices, and the
-/// regime's reservoirs read it. Its cold traps (P14.T51.f) take the sky [`cold_trap_sky`] gives
-/// and the bare regolith's albedo its derivation gives (P14.T51.i), under their own hold at 24,
-/// which follows the case's rules, those in force. The cold profile reads the body's insolation
-/// table `table`.
+/// The conditions `conditions` of the body `case` describes, of figures `figures`, with P14.T51.a's
+/// partition on the record and T24.b's water ice as its cover read it
+/// ([`GlobalFigures::condensates_and_ice_over`]) on the ground `ground` (rule (f), the published
+/// pass's context's): the conditions' liquid-water flag, the ocean and ices, and the regime's
+/// reservoirs read it. Its cold traps (P14.T51.f) publish over the field its published pass read
+/// (P14.T54.b.f; [`RecordField::Carried`]), with that pass's sky, regolith albedo, heat flow, crust
+/// and craters, under their own hold at 24, which follows the case's rules: the record builds no
+/// field. The cold profile reads the body's insolation table `table`.
 #[must_use]
 fn with_partition(
     figures: &GlobalFigures,
     case: &SurfaceCase<'_>,
-    seasons: (&SeasonalSpin, &KeplerElements),
     conditions: SurfaceConditions,
     (table, ground): (&ZonalInsolation, &PartitionGround),
 ) -> (SurfaceConditions, (Partition, Condensates, WaterIce)) {
+    let carried = case.sky.cold_traps;
+    // The carried field's inputs are its published pass's: that pass's regolith albedo, the
+    // derivation's, and the heat flow, crust and craters of the context it read, the record's
+    // ground's (decision-p14-t54b-f-coldtraps §3).
+    debug_assert!(
+        carried.is_none_or(|traps| {
+            let inputs = traps.inputs();
+            let context = case.sky.spun.map(SpunPasses::context);
+            let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+            same(inputs.regolith_albedo(), case.sky.regolith_albedo)
+                && inputs.crust() == ground.crust
+                && context.is_some_and(|context| {
+                    same(inputs.heat_flow().value(), context.heat_flow().value())
+                        && context.figures().is_some_and(|first| {
+                            cold_traps::same_craters(first.craters(), inputs.craters())
+                        })
+                })
+        }),
+        "the carried field's inputs are its published pass's: {carried:?}"
+    );
     let condensates = figures.condensates_and_ice_over(
         case.sky.atmosphere,
         &conditions,
         ground,
         &RecordColdTraps {
             rules: case.record.cold_traps,
-            sky: &cold_trap_sky(case, seasons),
-            regolith_albedo: case.sky.regolith_albedo,
+            field: RecordField::Carried(carried),
         },
         table,
     );
@@ -6038,25 +6106,6 @@ pub(crate) fn with_first_stage_recomputed<R>(run: impl FnOnce() -> R) -> R {
     let result = run();
     FIRST_STAGE_RECOMPUTED.with(|cell| cell.set(before));
     result
-}
-
-/// What the cold traps of the body `case` describes read of its sky (P14.T51.f), under its spin and
-/// seasonal orbit `seasons`: the greatest declination from its obliquity, the flux and the
-/// brightest star's angular radius at the seasonal orbit's periapsis ([`ColdTrapSky::at_periapsis`]),
-/// and its exposed fraction. The flux is the body's orbit-mean flux from every host, a moon's
-/// planet's light and a companion's included, taken to periapsis as its seasonal host's.
-#[must_use]
-fn cold_trap_sky(
-    case: &SurfaceCase<'_>,
-    (spin, seasonal): (&SeasonalSpin, &KeplerElements),
-) -> ColdTrapSky {
-    ColdTrapSky::at_periapsis(
-        spin.obliquity,
-        WattsPerSquareMetre::from(case.sky.flux),
-        (seasonal.semi_major_axis(), seasonal.eccentricity().value()),
-        case.cold_traps.star_radius,
-        case.cold_traps.exposed_fraction,
-    )
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose
@@ -6548,6 +6597,8 @@ impl<'c> Epoch<'c> {
 }
 
 mod air;
+#[cfg(test)]
+pub(crate) mod cold_trap_tests;
 mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]

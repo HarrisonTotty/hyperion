@@ -39,6 +39,7 @@ use crate::planetary::derive::atmosphere::{
 };
 use crate::planetary::derive::passes::{Context, floats_agree};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide, SurfaceLag};
+use crate::planetary::hooks::cold_traps::{ColdTrapSky, NoColdTraps};
 use crate::planetary::hooks::crust::{
     CrustLid, CrustLithology, CrustOrigin, LidCrust, TidalVolcanism,
 };
@@ -151,6 +152,18 @@ pub(crate) trait PassRecordOf {
     #[must_use]
     fn wet_epoch(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin)
     -> Option<WetEpoch>;
+
+    /// The sky the body's passes' cold traps read (P14.T54.b.f; `ColdTrapSky::at_periapsis`), once
+    /// a derivation before them, its hosts' orbit-mean flux at the body `flux` (the derivation's):
+    /// its record's spin's obliquity, its seasonal orbit and its zone's brightest star's radius, and
+    /// its exposed fraction, as its record's cold traps read them.
+    ///
+    /// # Errors
+    ///
+    /// [`NoColdTraps::Held`] under the cold traps' hold as its record's rules give it, so that the
+    /// passes and the record follow one rule, and [`NoColdTraps::NoSky`] where its record holds no
+    /// seasonal orbit at the time.
+    fn cold_trap_sky(&self, flux: WattsPerSquareMetre) -> Result<ColdTrapSky, NoColdTraps>;
 }
 
 /// What a body's record gives its crust's basis (P14.T54.a; P14.T51.c's `CrustBasisInputs`), the

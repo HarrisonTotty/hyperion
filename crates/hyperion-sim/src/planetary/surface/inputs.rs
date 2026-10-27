@@ -378,8 +378,9 @@ impl From<&CondensateEntry> for Condensate {
     /// Plan 14's published condensate (P14.T51.a) in the pass's vocabulary, as
     /// [`CoarseInputs::for_body`] reads the record from P14.T54.a: its substance by its row's key,
     /// its phase, its reservoir and its area to the bit, and seasonal where the record says so,
-    /// perennial otherwise. Its cold-trapped part is not read: the record carries none until
-    /// P14.T54.b ([`CoarseInputs::cold_traps`]).
+    /// perennial otherwise. Its cold-trapped part is read apart, into
+    /// [`CoarseInputs::cold_traps`], where the record's published pass read a cold-trap field
+    /// (P14.T54.b.f).
     fn from(entry: &CondensateEntry) -> Self {
         Self {
             substance: entry.substance().substance().key(),
@@ -856,11 +857,14 @@ impl CoarseInputs {
     /// here: `crust` and `condensates` stand for them, and `palette` for their resolution, which
     /// [`for_body`](Self::for_body) gives from the record.
     ///
-    /// It gives no cold traps: [`cold_traps`](Self::cold_traps) is empty and
-    /// [`cold_trap_inputs`](Self::cold_trap_inputs) `None`, until P14.T54.b puts P14.T51.f's cold
-    /// traps on the record at generator version 24, each solid entry's trapped area with the star's
-    /// angular radius and the regolith's albedo they read (decision-r09-t13f-cold-traps §1.1,
-    /// §2.2). Each ice's share is the record's whole share, its cold-trapped part included.
+    /// Its cold traps are the record's (P14.T54.b.f; decision-p14-t54b-f-coldtraps §5): where the
+    /// record's published pass read a cold-trap field (the record's basis holds what it read),
+    /// [`cold_trap_inputs`](Self::cold_trap_inputs) is that field's star angular radius and
+    /// regolith albedo, to the bit, and [`cold_traps`](Self::cold_traps) each solid entry's trapped
+    /// area above zero (decision-r09-t13f-cold-traps §1.1, §2.2), to the bit but where the
+    /// record's figures scaled every ice into the surface, whose trapped parts are scaled alike;
+    /// elsewhere, and under the cold traps' hold at generator version 23, none and `None`. Each
+    /// ice's share is the record's whole share, its cold-trapped part included.
     ///
     /// The ground's weathering ([`weathering`](Self::weathering), the maturity with the weathering
     /// rate) and its [`organic_cover`](Self::organic_cover) are the surface section's modifiers'
@@ -1052,6 +1056,18 @@ impl CoarseInputs {
         if let Some(epoch) = figures.wet_epoch() {
             builder = builder.wet_epoch(WetEpoch::from(epoch));
         }
+        // The cold traps, where the record's published pass read a field (P14.T54.b.f;
+        // decision-p14-t54b-f-coldtraps §5): its star's angular radius and its regolith's albedo,
+        // to the bit, and each solid entry's cold-trapped part, to the bit but where the figures
+        // scaled the ices into the surface (`trapped_of`).
+        if let Some(traps) = surface.basis().and_then(|basis| basis.cold_traps) {
+            builder = builder
+                .cold_trap_inputs(ColdTrapInputs {
+                    star_angular_radius: traps.star_radius,
+                    bond_albedo: traps.regolith_albedo,
+                })
+                .cold_traps(trapped_of(surface));
+        }
         // The header's weathering parts and organic cover, where the record's modifiers are
         // modelled (P14.T54.b.c): absent together until then, so that every field keeps its bits.
         if let Modelled::Ok(modifiers) = surface.modifiers() {
@@ -1120,8 +1136,10 @@ impl CoarseInputs {
     /// [`ices`](Self::ices) share. R09.T13.f places it in proportion to each cell's cold-trap
     /// fraction, and R09.T13.d places the rest of the share, its zonal part, by its own rule.
     ///
-    /// Empty for a body with no cold traps. It is empty from the record until P14.T54.b puts
-    /// P14.T51.f's cold traps on it at generator version 24, and
+    /// Empty for a body with no cold traps. From the record (P14.T54.b.f, at generator version 24)
+    /// it is each solid condensate entry's cold-trapped part above zero, where the record's
+    /// published pass read a cold-trap field: to the bit, but scaled as its ice is where the
+    /// record's figures scaled the ices into the surface (their shares summing above 1), and
     /// [`cold_trap_inputs`](Self::cold_trap_inputs) is `Some` wherever a cold-trapped share is
     /// above zero.
     #[must_use]
@@ -1130,8 +1148,10 @@ impl CoarseInputs {
     }
 
     /// What the cold traps read of the body's star and ground beyond the other inputs, or `None`
-    /// where the inputs give no cold traps (from the record until P14.T54.b). It is `Some`
-    /// wherever a cold-trapped share of [`cold_traps`](Self::cold_traps) is above zero.
+    /// where the inputs give no cold traps: from the record (P14.T54.b.f) the star's angular
+    /// radius and the bare regolith's albedo the field of its published pass read, to the bit, and
+    /// `None` where that pass read none. It is `Some` wherever a cold-trapped share of
+    /// [`cold_traps`](Self::cold_traps) is above zero.
     #[must_use]
     pub const fn cold_trap_inputs(&self) -> Option<&ColdTrapInputs> {
         self.cold_trap_inputs.as_ref()
@@ -1461,6 +1481,42 @@ fn crust_inputs(crust: &CrustComposition) -> CrustInputs {
 /// (P14.T51.a), in the pass's vocabulary (`From<&CondensateEntry>`).
 fn condensates_of(surface: &Surface) -> impl Iterator<Item = Condensate> + '_ {
     surface.condensates().entries().iter().map(Condensate::from)
+}
+
+/// The cold-trapped parts of the record's surface `surface` (P14.T51.f; P14.T54.b.f): each solid
+/// condensate entry's `trapped_area_fraction` above zero, by substance, to the bit where the
+/// record's figures list its ice at the entry's area. Where they list it smaller, having scaled
+/// every ice into the surface (the ices' shares summing above 1, P14.T24.b's `within_the_surface`),
+/// the trapped part is scaled alike, ice share ÷ entry area, and held to the ice's share, so that it
+/// stays a part of the ice R09 reads ([`CoarseInputs::ices`]); a part that comes to 0 is left out.
+fn trapped_of(surface: &Surface) -> Vec<AreaShare> {
+    let ices = surface.figures().surface_ices();
+    surface
+        .condensates()
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.phase() == partition::CondensatePhase::Solid
+                && entry.trapped_area_fraction() > 0.0
+        })
+        .filter_map(|entry| {
+            let ice = ices
+                .iter()
+                .find(|&&(id, _)| id == entry.substance())
+                .map_or(0.0, |&(_, share)| share);
+            let (trapped, area) = (entry.trapped_area_fraction(), entry.area_fraction());
+            let share = if ice < area {
+                let scaled = trapped * (ice / area);
+                if scaled < ice { scaled } else { ice }
+            } else {
+                trapped
+            };
+            (share > 0.0).then(|| AreaShare {
+                substance: entry.substance().substance().key(),
+                area_fraction: share,
+            })
+        })
+        .collect()
 }
 
 /// What [`CoarseInputs::for_body`] answers where the palette of a body's record is not resolved,
@@ -3916,21 +3972,16 @@ pub(crate) mod tests {
         }
     }
 
-    /// The record gives no cold traps before the 23 → 24 bump: a generated planet's and a
-    /// generated moon's inputs have none, and no cold-trap inputs (decision-r09-t13f-cold-traps
-    /// §7.2). It fails at 24, so that P14.T54.b wires them.
+    /// Under the cold traps' hold, generator version 23's, the record gives no cold traps: a
+    /// generated planet's and a generated moon's inputs have none, and no cold-trap inputs
+    /// (decision-r09-t13f-cold-traps §7.2; decision-p14-t54b-f-coldtraps §5, the Held half of what
+    /// replaces R09's tripwire `the_record_gives_no_cold_traps_until_the_24_bump`).
     #[test]
-    fn the_record_gives_no_cold_traps_until_the_24_bump() {
-        assert!(
-            GENERATOR_VERSION < COLD_TRAPS_VERSION,
-            "the 23 → 24 bump (P14.T54.b) puts P14.T51.f's cold traps on the record: fill \
-             `from_record`'s `cold_traps` from each solid entry's \
-             `CondensateEntry::trapped_area_fraction`, and its `cold_trap_inputs` from the star's \
-             angular radius and the bare regolith's Bond albedo the record's cold traps read, to \
-             the bit, test that a generated qualifying body's field places its record's trapped \
-             areas (placed plus undrawn to one cell, short 0), and delete this test \
-             (decision-r09-t13f-cold-traps §6 step 4 and §8)"
-        );
+    fn under_the_cold_traps_hold_the_record_gives_no_cold_traps() {
+        use crate::planetary::hooks::cold_traps::ColdTrapRules;
+
+        assert!(GENERATOR_VERSION < COLD_TRAPS_VERSION);
+        assert_eq!(ColdTrapRules::in_force(), ColdTrapRules::Held);
         let (_, _, planet) = planet_reading();
         let (_, moon, its_planet) = generated_moon();
         let moon = read(&moon, SeasonsFromRecord::Planet(&its_planet));
@@ -3938,6 +3989,123 @@ pub(crate) mod tests {
             assert!(inputs.cold_traps().is_empty(), "{:?}", inputs.cold_traps());
             assert_eq!(inputs.cold_trap_inputs(), None);
         }
+    }
+
+    /// Under the cold traps' batch, every 24 hold in force, R09's inputs read the record's cold
+    /// traps to the bit (decision-p14-t54b-f-coldtraps §5, the Batch half): over the sample's
+    /// bodies whose record's published pass read a field, `cold_trap_inputs()` is that field's
+    /// star angular radius and its regolith's albedo, the carried field's inputs to the bit, and
+    /// `cold_traps()` each solid entry's trapped area above zero, by substance, to the bit where the
+    /// figures list its ice at its entry's area and scaled as that ice where they scaled the ices
+    /// into the surface; a record whose pass read none gives none. Records `for_body` refuses are
+    /// listed, none for its cold traps.
+    #[test]
+    fn under_the_batch_the_record_gives_its_cold_traps_to_the_bit() {
+        use std::collections::BTreeMap;
+
+        use crate::planetary::chem::partition::CondensatePhase as Phase;
+        use crate::planetary::system::cold_trap_tests::trap_bodies;
+        use hyperion_testkit::float::bits;
+
+        let (mut read_in, mut none) = (0_u32, 0_u32);
+        let (mut exact, mut scaled) = (0_u32, 0_u32);
+        let mut refused: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let bodies = trap_bodies();
+        // R09 reads the records under the rules they were built by.
+        crate::planetary::testing::with_every_24_hold(|| {
+            for body in bodies {
+                let surface = body.surface();
+                let inputs =
+                    match CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx) {
+                        Ok(inputs) => inputs,
+                        Err(error) => {
+                            // Why a surface is not modelled: no crust, unlit, or the palette's refusal.
+                            let why = match (surface.crust(), &error) {
+                                (Modelled::NotModelled, _) => "no crust".to_owned(),
+                                (Modelled::Ok(crust), ReadCoarseInputsError::Section(_)) => {
+                                    match palette::resolve(surface, crust) {
+                                        Ok(_) => "unlit".to_owned(),
+                                        Err(palette) => format!("palette {palette:?}"),
+                                    }
+                                }
+                                (Modelled::Ok(_), _) => format!("{error:?}"),
+                            };
+                            refused.entry(why).or_default().push(body.id());
+                            continue;
+                        }
+                    };
+                let Some(basis) = surface.basis().and_then(|basis| basis.cold_traps) else {
+                    assert!(inputs.cold_traps().is_empty(), "{}", body.id());
+                    assert_eq!(inputs.cold_trap_inputs(), None, "{}", body.id());
+                    none += 1;
+                    continue;
+                };
+                let carried = body
+                    .traps()
+                    .as_ref()
+                    .unwrap_or_else(|why| panic!("{}: a basis with no field, {why:?}", body.id()));
+                let group = inputs
+                    .cold_trap_inputs()
+                    .unwrap_or_else(|| panic!("{}: no cold-trap inputs", body.id()));
+                assert_same_bits(group.star_angular_radius.value(), basis.star_radius.value());
+                assert_same_bits(
+                    group.star_angular_radius.value(),
+                    carried.inputs().sky().star_radius.value(),
+                );
+                assert_same_bits(group.bond_albedo, basis.regolith_albedo);
+                assert_same_bits(group.bond_albedo, carried.inputs().regolith_albedo());
+                let ices = surface.figures().surface_ices();
+                let mut expected: Vec<(String, u64)> = Vec::new();
+                for e in surface.condensates().entries() {
+                    if e.phase() != Phase::Solid || e.trapped_area_fraction() <= 0.0 {
+                        continue;
+                    }
+                    let ice = ices
+                        .iter()
+                        .find(|&&(id, _)| id == e.substance())
+                        .map_or(0.0, |&(_, share)| share);
+                    let share = if bits(ice) == bits(e.area_fraction()) {
+                        exact += 1;
+                        e.trapped_area_fraction()
+                    } else {
+                        // The figures scaled every ice into the surface: the trapped part alike.
+                        scaled += 1;
+                        let share = e.trapped_area_fraction() * (ice / e.area_fraction());
+                        assert!(ice < e.area_fraction(), "{}", body.id());
+                        if share < ice { share } else { ice }
+                    };
+                    if share > 0.0 {
+                        expected.push((
+                            e.substance().substance().key().as_str().to_owned(),
+                            bits(share),
+                        ));
+                    }
+                }
+                let mut got: Vec<(String, u64)> = inputs
+                    .cold_traps()
+                    .iter()
+                    .map(|share| {
+                        (
+                            share.substance.as_str().to_owned(),
+                            bits(share.area_fraction),
+                        )
+                    })
+                    .collect();
+                expected.sort();
+                got.sort();
+                assert_eq!(got, expected, "{}", body.id());
+                read_in += 1;
+            }
+        });
+        eprintln!(
+            "{read_in} records' cold traps read ({exact} trapped parts to the bit, {scaled} scaled \
+             with their ices into the surface), {none} with none; refused: {refused:?}"
+        );
+        assert!(
+            refused.keys().all(|error| !error.contains("ColdTrap")),
+            "{refused:?}"
+        );
+        assert!(read_in > 10 && exact > 10, "{read_in} {exact}");
     }
 
     #[test]
@@ -5442,15 +5610,20 @@ pub(crate) mod tests {
     /// partial-melt and airless bodies, those its tests find.
     #[test]
     fn the_record_s_coarse_inputs_are_pinned() {
+        /// A test record's reader: its context, its record and its coarse inputs.
+        type Read = fn() -> (SystemContext, BodyRecord, CoarseInputs);
         let mut w = GoldenWriter::new();
         w.header(GENERATOR_VERSION.get());
-        for (kind, (ctx, record, inputs)) in [
-            ("titan_like", first_titan_like()),
-            ("earth_like", first_earth_like()),
-            ("magma_ocean", first_magma_ocean()),
-            ("partial_melt", first_partial_melt()),
-            ("airless", first_airless()),
-        ] {
+        // Each read in turn, so that the five records never sit on the stack together.
+        let reads: [(&str, Read); 5] = [
+            ("titan_like", first_titan_like),
+            ("earth_like", first_earth_like),
+            ("magma_ocean", first_magma_ocean),
+            ("partial_melt", first_partial_melt),
+            ("airless", first_airless),
+        ];
+        for (kind, read) in reads {
+            let (ctx, record, inputs) = read();
             let id = record.index().body_id(ctx.id());
             w.line(&format!("{kind} = {id}"));
             pin_record_inputs(&mut w, kind, &inputs);

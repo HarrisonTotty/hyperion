@@ -40,6 +40,18 @@
 //! published pass's parts ride to the record ([`PassWeathered`]), whose modifiers read them, so
 //! that they are that pass's to the bit. Where a pass takes no maturity, its regolith is the
 //! stand-in's, with why ([`NoMaturity`]).
+//!
+//! **The cold traps** (P14.T54.b.f, held at 24, `cold_traps::COLD_TRAPS_VERSION`; the record's
+//! rules): under the body's own climate a pass that qualifies (a zonal profile, airless, its air
+//! not collisional) reads a cold-trap field of its own inputs after its regolith and before it
+//! publishes: the derivation's sky, the heat flow, crater contract and crust of the context it
+//! reads, its weathered regolith's Bond albedo, airless, and its partition's condensables
+//! ([`SpunColdTraps`], `cold_traps::FieldInputs`), reused from the derivation's one slot where they
+//! are the same bits. It publishes over it (`cold_traps::publish_over`), and its field rides to the
+//! record (`cold_traps::PassColdTraps`). Such a pass reads its conditions even where nothing in its
+//! column condenses, so that the delivered water and carbon dioxide traps are its own (L2 closed,
+//! decision-p14-t54b-f-coldtraps §2 (d)). A pass that reads no field publishes P14.T51.a's, with
+//! why (`cold_traps::NoColdTraps`).
 
 use super::{
     Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, PublishedState, RunawayDeck,
@@ -54,9 +66,13 @@ use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
 use crate::planetary::derive::photometry::area_mix::{
     self, AreaMixWeathering, HostShade, RayleighFloorRules, Regolith,
 };
+use crate::planetary::hooks::cold_traps::{
+    self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
+    is_collisional, qualifies_by,
+};
 use crate::planetary::hooks::crust::{CrustBasis, CrustLid, LidAt};
 use crate::planetary::hooks::figures::{
-    FieldBody, PartitionGround, PartitionOver, WetEpoch, cover, partition_over,
+    Crust, FieldBody, PartitionGround, PartitionOver, WetEpoch, cover, partition_over,
 };
 use crate::planetary::hooks::modifiers::{
     DeriveModifiersError, HeliocentricOrbit, ModifierHost, ModifierParts, Primary,
@@ -64,7 +80,7 @@ use crate::planetary::hooks::modifiers::{
 };
 use crate::planetary::hooks::surface::{
     ColdProfile, OceanWeight, SurfaceConditions, SurfaceInputs, night_floor,
-    published_surface_pressure,
+    published_surface_pressure, rotates,
 };
 use crate::substance::{SubstanceId, ice_ih_density};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
@@ -161,7 +177,8 @@ pub(crate) enum PassClimate<'a> {
 ///   bulk's crust listed ([`CrustWater::Unlisted`]: the area mix reads it as the regolith). A
 ///   column with nothing that condenses reads no climate there (lever (p), L2): its partition is
 ///   solved over the mean's isothermal span, which no part of it reads, and nothing of the cover
-///   is read.
+///   is read; but not, under the cold traps' batch, a pass that can qualify for them, which reads
+///   its conditions all the same (P14.T54.b.f).
 /// - **The pass's lid** is its crust's basis's at the pass's climate ([`spun_lid`]): its regolith
 ///   is that lid's row.
 ///
@@ -184,6 +201,22 @@ pub(crate) struct SpunClimate<'a> {
     /// What its passes' maturity reads beyond each pass, once a body before them (P14.T54.b.e;
     /// [`PassWeathering::in_force`]), or why it takes none.
     pub(crate) weathering: Result<PassWeathering<'a>, NoMaturity>,
+    /// What its passes' cold traps read beyond each pass, once a derivation before them
+    /// (P14.T54.b.f): the derivation's sky and its one field slot, or why they read none (the
+    /// record's hold, or no seasonal orbit).
+    pub(crate) cold_traps: Result<SpunColdTraps<'a>, NoColdTraps>,
+}
+
+/// What a body's passes' cold traps read beyond each pass, once a derivation before them
+/// (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (a) and §4): the derivation's sky, built once
+/// from its record's spin, seasonal orbit and brightest star, and the one slot its passes' fields
+/// are kept in, a local of the derivation.
+#[derive(Clone, Copy)]
+pub(crate) struct SpunColdTraps<'a> {
+    /// The sky and the exposed fraction, as the record's cold traps read them.
+    pub(crate) sky: ColdTrapSky,
+    /// The derivation's slot.
+    pub(crate) slot: &'a FieldSlot,
 }
 
 /// What a body's passes' maturity reads of its record beyond each pass, once a body before them
@@ -580,8 +613,13 @@ struct SpunPartition {
     cover: SpunCover,
     /// The state its cover reads.
     state: SurfaceState,
-    /// The record's conditions it read, `None` where nothing condenses.
+    /// The record's conditions it read, `None` where nothing condenses and it cannot qualify for
+    /// the cold traps.
     conditions: Option<SurfaceConditions>,
+    /// Its ground's crust, the context's, which its cold traps read.
+    crust: Crust,
+    /// Its ground's surface gravity, which its cold traps' collisional test reads.
+    gravity: MetresPerSecondSquared,
 }
 
 /// The cover a spun pass publishes its condensates over ([`SpunPartition`]).
@@ -604,25 +642,37 @@ enum SpunCover {
 
 impl SpunPartition {
     /// Its condensates published over its cover, with the partition and the conditions it read: the
-    /// record's computation, to the bit.
+    /// record's computation, to the bit. Where the pass read a cold-trap field (`traps`, of the
+    /// atmosphere `air`), over that field ([`cold_traps::publish_over`]), with the body the record
+    /// builds by the same constructor ([`PassColdTraps::body`]); P14.T51.a's otherwise.
     #[must_use]
-    fn publish(self) -> PassPartition {
-        let published = match self.cover {
+    fn publish(self, traps: Option<&PassColdTraps>, air: &Atmosphere) -> PassPartition {
+        let published = match &self.cover {
             SpunCover::Isothermal { climate, water } => {
-                let cold_area = |t: Kelvin| linear_cold_area(&climate, t);
+                debug_assert!(traps.is_none(), "a pass with no profile reads no field");
+                let cold_area = |t: Kelvin| linear_cold_area(climate, t);
                 self.solved.publish(&Cover {
                     cold_area: &cold_area,
                     state: self.state,
-                    water,
+                    water: *water,
                 })
             }
             SpunCover::Profiled { profile, water } => {
                 let cold_area = |t: Kelvin| profile.area_below(t);
-                self.solved.publish(&Cover {
+                let cover = Cover {
                     cold_area: &cold_area,
                     state: self.state,
-                    water,
-                })
+                    water: *water,
+                };
+                match traps {
+                    Some(traps) => cold_traps::publish_over(
+                        &self.solved,
+                        &cover,
+                        &traps.body(air, profile, self.gravity),
+                        traps.field(),
+                    ),
+                    None => self.solved.publish(&cover),
+                }
             }
         };
         (self.solved, published, self.conditions)
@@ -638,7 +688,9 @@ impl SpunPartition {
 /// ([`spun_conditions`]), and the partition and its cover are [`partition_over`]'s. A column with
 /// nothing that condenses is solved over the mean's isothermal span instead, which its partition
 /// does not read, and no part of its cover is read: it publishes nothing, and reads no
-/// conditions.
+/// conditions (L2). Under the cold traps' batch a pass that can qualify for them
+/// ([`can_take_cold_traps`]) is not: it reads its conditions, so that its delivered water and
+/// carbon dioxide traps are published by it (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (d)).
 #[must_use]
 fn spun_partition(
     air: &Atmosphere,
@@ -646,9 +698,10 @@ fn spun_partition(
     spun: &SpunClimate<'_>,
 ) -> SpunPartition {
     let ground = spun_ground(air, spun);
+    let (crust, gravity) = (ground.crust, ground.ground.gravity());
     let inventory = air.column_inventory();
-    let conditions = inventory
-        .condenses()
+    let reads_conditions = inventory.condenses() || can_take_cold_traps(air, spun, gravity);
+    let conditions = reads_conditions
         .then(|| spun_conditions(air, inputs, spun, &ground))
         .flatten();
     let Some(conditions) = conditions else {
@@ -669,6 +722,8 @@ fn spun_partition(
             },
             state: air.state,
             conditions: None,
+            crust,
+            gravity,
         };
     };
     let PartitionOver {
@@ -681,6 +736,75 @@ fn spun_partition(
         cover: SpunCover::Profiled { profile, water },
         state: air.state,
         conditions: Some(conditions),
+        crust,
+        gravity,
+    }
+}
+
+/// Whether a pass of the atmosphere `air` under its body's own climate `spun`, of surface gravity
+/// `gravity`, can qualify for the cold traps before it reads its conditions (P14.T54.b.f;
+/// decision-p14-t54b-f-coldtraps §2 (d)): the cold traps' batch with a sky
+/// ([`SpunClimate::cold_traps`]), a spin that turns under its seasonal host (the conditions'
+/// zonal profile, [`rotates`]), the airless state and an air that is not collisional. False under
+/// the hold, so that L2 stands there to the bit.
+#[must_use]
+fn can_take_cold_traps(
+    air: &Atmosphere,
+    spun: &SpunClimate<'_>,
+    gravity: MetresPerSecondSquared,
+) -> bool {
+    spun.cold_traps.is_ok()
+        && rotates(&spun.record.spin)
+        && air.state == SurfaceState::Airless
+        && !is_collisional(air, gravity)
+}
+
+/// The cold traps of the pass of the atmosphere `air` under its body's own climate `spun`, before
+/// it publishes the partition `pending`, whose bare regolith is `regolith` under the light `shade`
+/// (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2): the field of its own inputs, from the
+/// derivation's slot ([`FieldSlot::traps`]) where it qualifies, its context holds figures and its
+/// cold traps are under the batch with a sky; otherwise why it reads none.
+///
+/// The inputs are the derivation's sky, the context's heat flow, crater contract and crust (its
+/// ground's), the regolith's Bond albedo in the airless state about the hosts' bands (the one
+/// regolith its area mix reads, [`pass_regolith`]), its partition's condensables and its profile's
+/// area points (`FieldInputs::of`).
+fn pass_cold_traps(
+    air: &Atmosphere,
+    spun: &SpunClimate<'_>,
+    pending: &SpunPartition,
+    (regolith, shade): (&Regolith, &HostShade),
+) -> PassTraps {
+    let traps = spun.cold_traps?;
+    let SpunCover::Profiled { profile, .. } = &pending.cover else {
+        return Err(NoColdTraps::Unqualified);
+    };
+    if !qualifies_by(air, profile, pending.gravity) {
+        return Err(NoColdTraps::Unqualified);
+    }
+    let figures = spun.context.figures().ok_or(NoColdTraps::NoFigures)?;
+    let body = ColdTrapBody {
+        atmosphere: air,
+        profile,
+        gravity: pending.gravity,
+        heat_flow: spun.context.heat_flow(),
+        crust: pending.crust,
+        craters: figures.craters(),
+        sky: &traps.sky,
+        regolith_albedo: regolith.bond(SurfaceState::Airless, shade.bands()).bond,
+    };
+    let inputs = FieldInputs::of(&body, &pending.solved)
+        .expect("a qualifying pass's profile is zonal, and so holds a field's area points");
+    Ok(traps.slot.traps(&inputs))
+}
+
+/// Why a pass over the surface `surface` that reads no partition reads no cold-trap field, `why`:
+/// a climate given's, or the hold's and no sky's where its spun climate's cold traps read none.
+#[must_use]
+fn no_cold_traps(surface: &PassSurface<'_>, why: NoColdTraps) -> NoColdTraps {
+    match surface.climate {
+        PassClimate::Given(_) => NoColdTraps::ClimateGiven,
+        PassClimate::Spun(spun) => spun.cold_traps.err().unwrap_or(why),
     }
 }
 
@@ -770,14 +894,15 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 /// The atmosphere also carries whether the condensates the pass published list liquid water,
 /// which P14.T53.b part 1 (c)'s test reads ([`solved_as_a_hothouse`]): none for a gas envelope
 /// and a magma ocean, which publish none. Beside the atmosphere and the lid it gives its
-/// maturity's outcome (P14.T54.b.e; [`PassMaturity`]).
+/// maturity's outcome (P14.T54.b.e; [`PassMaturity`]) and its cold traps' (P14.T54.b.f;
+/// `cold_traps::PassTraps`).
 ///
 /// [`solved_as_a_hothouse`]: super::solved_as_a_hothouse
 pub(super) fn area_mixed(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
-) -> (Atmosphere, Option<CrustLid>, PassMaturity) {
+) -> (Atmosphere, Option<CrustLid>, PassMaturity, PassTraps) {
     let hottest;
     let shade = match surface.light {
         PassLight::Shade(shade) => shade,
@@ -792,6 +917,7 @@ pub(super) fn area_mixed(
         lid,
         liquid_water,
         maturity,
+        cold_traps,
     } = match air.state {
         SurfaceState::GasEnvelope => SurfaceMix {
             albedo: area_mix::giant_bond(shade, inputs.heated, inputs.class),
@@ -799,6 +925,7 @@ pub(super) fn area_mixed(
             lid: None,
             liquid_water: false,
             maturity: Err(NoMaturity::no_regolith()),
+            cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
         },
         SurfaceState::MagmaOcean => {
             let lid = match surface.climate {
@@ -811,6 +938,7 @@ pub(super) fn area_mixed(
                 lid,
                 liquid_water: false,
                 maturity: Err(NoMaturity::no_regolith()),
+                cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
             }
         }
         SurfaceState::Airless
@@ -840,18 +968,19 @@ pub(super) fn area_mixed(
         liquid_water,
         ..*air
     };
-    (air, lid, maturity)
+    (air, lid, maturity, cold_traps)
 }
 
 /// What a pass's area mix gives ([`area_mixed`]): its Bond albedo before its floor, its cloud
-/// fraction, the lid it took, whether its condensates list liquid water, and its maturity's
-/// outcome.
+/// fraction, the lid it took, whether its condensates list liquid water, its maturity's outcome
+/// and its cold traps'.
 struct SurfaceMix {
     albedo: f64,
     cloud_fraction: f64,
     lid: Option<CrustLid>,
     liquid_water: bool,
     maturity: PassMaturity,
+    cold_traps: PassTraps,
 }
 
 /// The generator version from which an airless body's mean surface temperature is at least its
@@ -1182,9 +1311,10 @@ fn pass_deposits(
 /// (P14.T53.b part 1 (c)), and its maturity's outcome (P14.T54.b.e).
 ///
 /// Under the body's own climate a pass partitions and takes its conditions, its lid, its maturity
-/// ([`pass_maturity`]) and its regolith ([`pass_regolith`]), and then publishes its condensates,
-/// over which its modifiers give `ferric`'s deposit ([`pass_deposits`]); the area mix then reads
-/// the condensates, the deposit and the regolith on the rest.
+/// ([`pass_maturity`]), its regolith ([`pass_regolith`]) and its cold traps' field
+/// ([`pass_cold_traps`], P14.T54.b.f), and then publishes its condensates, over that field where it
+/// read one, over which its modifiers give `ferric`'s deposit ([`pass_deposits`]); the area mix
+/// then reads the condensates, the deposit and the regolith on the rest.
 #[must_use]
 fn surface_and_cloud(
     air: &Atmosphere,
@@ -1201,36 +1331,42 @@ fn surface_and_cloud(
             lid: None,
             liquid_water: false,
             maturity: Err(NoMaturity::no_regolith()),
+            cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
         };
     };
-    let ((solved, published, _), lid, (deposits, maturity), regolith) = match surface.climate {
-        PassClimate::Given(climate_of) => (
-            given_partition(air, inputs, surface, (climate_of, gravity)),
-            None,
-            (Vec::new(), Err(NoMaturity::no_regolith())),
-            pass_regolith(surface.regolith, inputs.material, None, None),
-        ),
-        PassClimate::Spun(spun) => {
-            let pending = spun_partition(air, inputs, spun);
-            let lid = spun_lid(air, inputs, spun, pending.conditions.as_ref());
-            let maturity = pass_maturity(air, spun, lid.as_ref());
-            let at = maturity
-                .as_ref()
-                .ok()
-                .map(|maturing| (maturing.weathering.maturity(), air.surface_temperature));
-            let regolith = pass_regolith(surface.regolith, inputs.material, lid.as_ref(), at);
-            let partition = pending.publish();
-            #[cfg(test)]
-            spun_read::record(
-                partition.2.as_ref(),
-                &partition.0,
-                &partition.1,
-                lid.as_ref(),
-            );
-            let deposits = pass_deposits(air, inputs, (maturity, regolith), &partition.1);
-            (partition, lid, deposits, regolith)
-        }
-    };
+    let ((solved, published, _), lid, (deposits, maturity), regolith, cold_traps) =
+        match surface.climate {
+            PassClimate::Given(climate_of) => (
+                given_partition(air, inputs, surface, (climate_of, gravity)),
+                None,
+                (Vec::new(), Err(NoMaturity::no_regolith())),
+                pass_regolith(surface.regolith, inputs.material, None, None),
+                Err(NoColdTraps::ClimateGiven),
+            ),
+            PassClimate::Spun(spun) => {
+                let pending = spun_partition(air, inputs, spun);
+                let lid = spun_lid(air, inputs, spun, pending.conditions.as_ref());
+                let maturity = pass_maturity(air, spun, lid.as_ref());
+                let at = maturity
+                    .as_ref()
+                    .ok()
+                    .map(|maturing| (maturing.weathering.maturity(), air.surface_temperature));
+                let regolith = pass_regolith(surface.regolith, inputs.material, lid.as_ref(), at);
+                // The cold traps' field, of this pass's own inputs, between its regolith and its
+                // publish (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (b)).
+                let cold_traps = pass_cold_traps(air, spun, &pending, (&regolith, shade));
+                let partition = pending.publish(cold_traps.as_ref().ok(), air);
+                #[cfg(test)]
+                spun_read::record(
+                    partition.2.as_ref(),
+                    &partition.0,
+                    &partition.1,
+                    lid.as_ref(),
+                );
+                let deposits = pass_deposits(air, inputs, (maturity, regolith), &partition.1);
+                (partition, lid, deposits, regolith, cold_traps)
+            }
+        };
     let ground = area_mix::surface_bond(
         &published,
         &solved,
@@ -1253,6 +1389,7 @@ fn surface_and_cloud(
         lid,
         liquid_water,
         maturity,
+        cold_traps,
     }
 }
 
