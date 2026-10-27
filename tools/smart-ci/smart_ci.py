@@ -129,10 +129,11 @@ RUST_READERS: List[Tuple[str, str, str, str]] = [
      "native", "read by hyperion-fit's condensate_extinction"),
 ]
 # The sources of the tests that the justfile's `wasm_sky` leaves out of the wasip1 runs, of the test
-# code they reach (the sky's modules and the sim's shared test fixtures) and of the testkit's golden
+# code they reach (the sky's modules, the sim's shared test fixtures and the surface worker that
+# they reach since R10.T4.b) and of the testkit's golden
 # checks: smart-ci's tests hold each such test to pinning no value (`test_smart_ci.py`'s guard, which
 # checks that it reads no other file), so a change here runs them.
-WASM_SKY_SOURCES = re.compile(r"^crates/hyperion-(sim/src/.*\.rs|testkit/src/golden\.rs)$")
+WASM_SKY_SOURCES = re.compile(r"^crates/hyperion-(sim/src/.*\.rs|surface/src/worker\.rs|testkit/src/golden\.rs)$")
 # GENERATOR_VERSION heads every golden file, so a change to it runs every crate's tests.
 GENERATOR_VERSION_FILE = "crates/hyperion-base/src/version.rs"
 # A crate's goldens, under its `tests/golden/`, which its tests read by name through the testkit's
