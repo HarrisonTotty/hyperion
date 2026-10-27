@@ -27,7 +27,13 @@ import { starColour } from "../photometry/starColour";
 import { REC709_LUMA } from "../sky/photometry";
 import type { Rgb } from "../photometry/toneCurve";
 import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
-import { angularDiameterPx, graticule, isSymbolSized, ringEllipse } from "./bodies";
+import {
+  angularDiameterPx,
+  type DatumInside,
+  graticule,
+  isSymbolSized,
+  ringEllipse,
+} from "./bodies";
 import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
 import { hullBoundingRadiusM, hullEdges, hullFaces, hullOnView } from "./hulls";
@@ -64,6 +70,41 @@ export { CASING_PX };
  * stroke), and the selected orbit's 2 px (the guide's).
  */
 export const STROKE_PX = { thin: 1, heavy: 1.5, selected: 2 } as const;
+
+/**
+ * The `--surface-0` casing on each side of a stroke at a line scale, device px: {@link CASING_PX}
+ * times the scale. The wireframe cases its lines at it, the photorealistic overlay every batch
+ * (`overlayDrawList`), and a body's datum is stroked inside its figure by it over the image
+ * ({@link datumInsideAt}; R10.T16.g), so that the inset and the casing drawn cannot drift.
+ */
+export function casingDevicePx(strokeScale: number): number {
+  return CASING_PX * strokeScale;
+}
+
+/**
+ * How far a cased stroke's coverage reaches from its centreline, device px: δ = w ÷ 2 + c +
+ * {@link STROKE_FRINGE_PX}, for a stroke `widthPx` wide cased `casingPx` on each side, its casing
+ * drawn w + 2c wide beneath it (`lineStroke.wgsl`'s coverage; R10.T16.g). At a line scale of 2 a
+ * thin line's is 3.5 and a heavy one's 4; at 3, 5 and 5.75.
+ */
+export function strokeReachPx(widthPx: number, casingPx: number): number {
+  return widthPx / 2 + casingPx + STROKE_FRINGE_PX;
+}
+
+/**
+ * How a body's datum is stroked inside its figure over the photorealistic image at a line scale
+ * (plan R10, R10.T16.g): the thin and heavy lines' reaches, cased as the overlay cases them
+ * ({@link casingDevicePx}).
+ */
+export function datumInsideAt(strokeScale: number): DatumInside {
+  const casingPx = casingDevicePx(strokeScale);
+  return {
+    reachPx: {
+      thin: strokeReachPx(STROKE_PX.thin * strokeScale, casingPx),
+      heavy: strokeReachPx(STROKE_PX.heavy * strokeScale, casingPx),
+    },
+  };
+}
 
 /**
  * The dash of a predicted path, CSS px on and off, in screen space so that it does not crawl: 6
@@ -471,6 +512,14 @@ export interface DrawOptions extends ViewStrokes {
    * instrument (decision-r10-t12-leans §3), or a view under `TERRAIN NOT AVAILABLE` (§5).
    */
   readonly lineOfSight?: LineOfSightOptions | null;
+  /**
+   * Whether the bodies' datums are stroked inside their figures, for a list drawn over the
+   * photorealistic image (plan R10, R10.T16.g; {@link datumInsideAt}): each limb its reach inside
+   * the outline, every other datum line at least its own, and none for a body too small to stroke
+   * inside (`datumOverImage`). Absent or `false`, the wireframe's datum, its limb centred on the
+   * outline, as the list was before R10.T16.g.
+   */
+  readonly datumInside?: boolean;
 }
 
 /** A star as the sprite path takes it: its direction from the camera and its light per channel. */
@@ -565,6 +614,11 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * literals. Every position is differenced in `f64` and narrowed once. The list is a function of
  * its arguments alone.
  *
+ * For a list drawn over the photorealistic image (`options.datumInside`; plan R10, R10.T16.g) each
+ * body's datum is stroked inside its figure (`graticule`'s `inside`, at {@link datumInsideAt} the
+ * line scale), so that no datum line or casing covers the image beyond the body; its batches keep
+ * their names and their `body`, so that a surveyed body's still give way (R10.T16.f).
+ *
  * Where the options give the view's line of sight with a point (plan R10, R10.T12), its tripod is
  * drawn at the picture's centre, the first of the screen-space marks, after the survey edges and
  * before every other mark, and the survey edges' ticks keep 0.5 rem clear of its ticks. It gives
@@ -590,6 +644,7 @@ export function buildWireframeDrawList(
   const bodyCentre = (body: ViewBody): Vec3 =>
     fromCamera({ kind: "body", body: body.id, m: vec3(0, 0, 0) });
   const { strokeScale, markStrokePx } = options;
+  const datumInside = options.datumInside === true ? datumInsideAt(strokeScale) : null;
   // A line's width, or a dash's length, given in the guide's CSS pixels, as the view draws it.
   const drawnPx = (cssPx: number): number => cssPx * strokeScale;
   const batch = (
@@ -600,7 +655,7 @@ export function buildWireframeDrawList(
     widthPx: number,
     dash: LineBatch["dash"] = null,
     originF32: Float32Array = new Float32Array(3),
-    casingWidthPx: number = drawnPx(CASING_PX),
+    casingWidthPx: number = casingDevicePx(strokeScale),
   ): LineBatch => ({
     id,
     space,
@@ -641,6 +696,7 @@ export function buildWireframeDrawList(
       viewport,
       strokeScale,
       options.lowSetting,
+      datumInside,
     );
     if (wireframe.regime !== "symbol") {
       limbs.push({ id: body.id, centreM, radiusM: body.radiusM });
@@ -997,7 +1053,7 @@ function lineOfSightMark(
   if (input === null) {
     return { tripod: null, drawn: null };
   }
-  const casingPx = CASING_PX * options.strokeScale;
+  const casingPx = casingDevicePx(options.strokeScale);
   const tripod = lineOfSightTripod(
     { xPx: viewport.widthPx / 2, yPx: viewport.heightPx / 2 },
     options.remPx,
@@ -1011,7 +1067,7 @@ function lineOfSightMark(
     tripod,
     drawn: {
       yielded,
-      boxPx: markBoxPx(tripod, options.markStrokePx / 2 + casingPx + STROKE_FRINGE_PX),
+      boxPx: markBoxPx(tripod, strokeReachPx(options.markStrokePx, casingPx)),
     },
   };
 }

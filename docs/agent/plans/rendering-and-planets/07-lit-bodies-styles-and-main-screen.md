@@ -1576,6 +1576,7 @@ src/renderer/src/view/scenes src/renderer/src/view/lighting`.
     as built"._
 - **R07.T8.g The face's near-limb band, and the hoisting (c),** only if R08.T11.c leaves a high
   row over 15.67 ms. Acceptance: G10, G11, and R08.T11's QW30.
+  - _As built (2026-10-27, the desktop lane): see Risks, "Deviations in R07.T8.g, as built"._
 
 #### R07.T9 Mesh bodies
 
@@ -8828,6 +8829,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `bodies:disc cell sums` (category `other`, 4,096 bytes, doubling, remade after a loss).
     - Its frame is the `discs` pass's own (`DiscCellFrame`), packed by `discCellFrameBlock`,
       which is tested equal to the adapter's `packFrame`. Its workgroups are `cellWorkgroups(J)`.
+      _Since R07.T8.g, `cellWorkgroups(G)` for a set's G workgroups, each a run of up to
+      ⌊64 ÷ n²⌋ pixels, with a third buffer, `bodies:disc cell groups`._
     - It is called for a plan before `meshDraws` and `draws`, and writes the records with row
       51. A plan whose records those wrote first is drawn in-fragment, and nothing is
       dispatched. That is how a test asks for the in-fragment path: the smoke harness's earlier
@@ -9770,7 +9773,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - `LitBodyRenderer.dispatchCells` dispatches once a set, binding the set's record's textures
       through `#classWeights`, `#surfaceNormals` and its tables (or `noAtmosphere`), with
       `cell_pass` (count, first). The kernel's `CellPass` gains `first`. One jobs buffer and one
-      sums buffer serve every set.
+      sums buffer serve every set. _Since R07.T8.g, `cell_pass` is (groups, first group) over the
+      workgroups' runs in `cell_groups`._
     - This replaces T8.d's "one dispatch a view" by one dispatch a set a view. It closes plan 10's
       "Class-map discs and R07's cell pass" and `decision-r08-t10b-depth.md` §5's deferred
       dispatch, and supersedes plan 08's T9.b record ("a disc with an atmosphere sums its own
@@ -9785,16 +9789,19 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       a line of pixel corners in one interval, solved as a quadratic (`coneInterval`).
     - The spans' rows follow the records in `discs`, two a pixel row (first sum, start, end, 0).
       Row 51 holds (first span row, rows, ⌊top⌋, −1), its w −1 marking the form; a rectangle's row
-      51 is T8.d's.
+      51 is T8.d's. _Since R07.T8.g, four a pixel row: the limb's two, then the face band's two._
     - `bodyDisc.wgsl`'s `cell_sums_index` finds a pixel's sums. A pixel outside the spans, and the
       interior draw at its one cell, sum their own cells through `pixel_cells`' one `pixel_sum`
       call. The kernel takes n from row 3's y, the limb's count, which equals x for a rectangle.
+      _Since R07.T8.g, the face's near-limb band reads the pass too, and the kernel takes n from
+      its workgroup's run._
     - It takes no limb without the pass's frame (T8.d's unit tests call it so), none whose outer
       cone reaches π ÷ 2 (a camera within about 10 m of the ground at 320 px across 60°), and none
       whose span rows would end past row 2²⁴ of `discs`.
     - The spans hold 2.1 to 2.6 times the limb draw's pixels in the unit tests' cases. Most of the
       rest lie outside the limb, where a cell shades nothing. One workgroup takes one pixel, so 48
-      of its 64 invocations idle, as in T8.d. Packing was not needed for the bound.
+      of its 64 invocations idle, as in T8.d. Packing was not needed for the bound. _Since
+      R07.T8.g, a workgroup takes four 4 × 4 pixels._
   - **T8.d's tests that the ruling supersedes.** Four changed, each because T8.e or T8.f takes what
     the test said it left:
     - `discCells.test.ts`: a class map's disc is now taken;
@@ -9870,3 +9877,131 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     bound in each, relative errors 1.1 to 12.4 × 10⁻³, on texels of 10⁻⁶ to 2 × 10⁻³ of the
     largest. SwiftShader passes them. This change touches none of their code, and no base RTX run
     of part 8 is on record.
+- **Deviations in R07.T8.g, as built** (2026-10-27; the desktop lane, after QW29;
+  `decision-r08-t11-frame.md` §2, "Then, only if QW29 leaves a high row over 15.67 ms"). The face's
+  near-limb band goes through the `disc cells` pass, exactly. The hoisting (c) was measured in its
+  ruled form and in two exact forms; none saves time on the RTX 3080, so none is landed.
+  `shade`, `cell_sum` and the twin are unchanged, and so is every pixel: G11 holds at 0 ulp.
+  - **The band, its list made on the CPU** (`faceBandSpans`).
+    - The band is the interior draw's pixels of one cell that `cell_samples` shades at up to nine
+      points: the centre's depth, less half the pixel's extent across the limb's normal, within
+      `NEAR_LIMB_CELLS` (2 px). V7 put it at 0.34–0.67 ms of `bodies` at x4.
+    - `faceBandSpans(record, frame)` gives two spans a pixel row, on the limb's rows, a superset of
+      the band: each pixel with its four corners within the cone of half-angle λ + m G′ and its
+      centre outside the one of λ − (2 + √2 ÷ 2 + m) G′, with m = 0.25 px (`BAND_SPAN_MARGIN_PX`).
+    - G′ = s max(k_x, k_y) bounds the forward-difference slope. It is up to √2 tighter than the
+      limb's √(k_x² + k_y²), which bounds the corners' gradient.
+    - The margin takes up to 9% of error in the slope. The shader's is about 2% for Earth's limb
+      from 400 km at 60° across 1080p, and grows at a narrower field or a wider view (about 23% at
+      10° across 4K). A band pixel the spans miss there sums its own cell: exact, only slower.
+    - The spans hold 1.28 to 1.58 times the band's pixels in the unit tests' four cases.
+    - Only a face of one cell takes a band (every disc of 32 px or more); any other sums its own.
+  - **The ranges, rows and jobs.**
+    - A limb range carries its `band` (`DiscCellLimb.band`). Its jobs follow the limb's in the
+      range, and its sums follow the limb's.
+    - Each pixel row takes `LIMB_SPAN_ROWS` (4) rows past the records: the limb draw's two spans,
+      then the band's two, empty without a band. `spanRows` counts 4 a row, not 2.
+    - `cell_sums_index` picks the list by the draw's cells: the limb's count for the limb draw's
+      spans, the interior's for the band's. The two differ for every record with a limb's spans.
+      A face fragment off the band now reads its row's two band spans before it sums its own.
+  - **Workgroups of ⌊64 ÷ n²⌋ pixels (a deviation the band needs).**
+    - One workgroup a job would leave 63 of 64 invocations idle on a one-cell band pixel, so a
+      workgroup now takes a run of one range's jobs of one cell count n: 64 band pixels, 16 of
+      2 × 2, 7 of 3 × 3, 4 of 4 × 4, 2 of 5 × 5, and one of 6 × 6 to 8 × 8 (`pixelsPerGroup`).
+    - This extends `decision-r07-small-disc-cost.md` §1.2's allowance for packing four 4 × 4 pixels
+      a workgroup, each pixel's order kept. It holds for every n, so a limb's and a small disc's
+      4 × 4 pixels now go four a workgroup, where T8.d's left 48 of 64 idle.
+    - `DiscCellJobs.groups` holds four `u32` a workgroup: the first job, the jobs, n and 0. Each
+      range's runs (a rectangle's, or a limb's and then its band's) are cut into workgroups in the
+      jobs' order. `DiscCellSet` gains `firstGroup` and `groups`.
+    - The kernel binds `cell_groups` at `@group(1) @binding(2)`. `CellPass` is (groups, first
+      group), and `cellWorkgroups` takes the set's workgroups. Each pixel's first invocation sums
+      its n² cells in `pixel_sum`'s order, and n comes from the group, no longer from row 3's y.
+    - One dispatch a set stays, so T8.e's counts hold. `LitBodyRenderer` gains the buffer
+      `bodies:disc cell groups`, made again after a device loss and released with the renderer.
+  - **The hoisting (c), measured and not landed.** Three variants, each built on the band and run
+    as the frame below. The logs are `h1.log`, `h3.log` and `v8.log`, compared with `band1.log`
+    over the 78 high rows.
+    - _V8, the ruled form, timing only_ (`wip-v8.patch`). The record's per-draw rows (the centre,
+      the pole, the class map's axes, the lights, the occluders and the planetshine sources) were
+      turned into the view's axes on the CPU, and every `to_view` of them was dropped from
+      `body_of` and `shade`. `bodies` moved by −0.01 to +0.08 ms, and the frame by −0.04 to
+      +0.16 ms, within the runs' noise. On the RTX 3080 the per-draw rotations cost nothing
+      measurable. The ruling's 10–20% was R07's estimate from before R08's air, and it does not
+      stand here.
+    - _H1, exact_ (`wip-h1-full.patch`). The air's per-point values were formed once a shade, not
+      once a lookup: the body's table and the place, that is the latitude's sine and cosine, s, h*
+      and the local scale height (`SurfaceAir`, `atmosphere_surface_air` and the lookups' `_at`
+      forms). At x4 a shade had formed them eight times. `bodies` was slower by 0.00 to 0.37 ms
+      in every row, and `disc cells` by 0.00 to 0.06 ms. This was taken as register pressure: the
+      hoisted air stays live across the shade's source loops, where each lookup's place had been
+      short-lived.
+    - _H3, exact_ (`wip-h3.patch`). The limb's half-angle was formed once an invocation, not once
+      a `limb_angle`, and each mesh fragment formed one `body_of` for both its survey test and its
+      pixel. `bodies` moved by −0.02 to +0.19 ms: the compiler already shares them.
+  - **Tests.**
+    - `discCells.test.ts`, on the four limb cases: the band's spans hold every face pixel shaded at
+      more than one point (in `f64`); they lie in order within the rectangle, on the limb's rows;
+      and they take at most twice those pixels.
+    - Also: no band for a face of two cells; `pixelsPerGroup`; each run cut into full workgroups,
+      the last the rest, in the jobs' order; each set's run of the workgroups over its own jobs;
+      the groups written to the buffer bound; and the groups' buffer remade after a device loss.
+    - Changed to the new layout: the limb's jobs, row 51's span rows (four a row), the dispatches'
+      `cell_pass` and workgroups, the bound buffers, the sets' fields, and `draw.test.ts`'s
+      released buffers.
+  - **G11 on the GPU** (`smoke/cellPass.ts`, part 8; the check and its group are renamed
+    "R07.T8.e–g").
+    - The sentinel now also holds each band pixel, by `cell_samples`' test in `f64` with
+      `SENTINEL_SPARE_PX` to spare. All read the pass: 2,511 pixels of the 220 px disc (1,016
+      before), 1,067 of the 96 px mesh (441), and 178 + 404 + 499 + 185 in the four-body plan
+      (178 + 170 + 211 + 185).
+    - The RTX 3080, hidden (`band1-part8.log`): six plans at 0 ulp, every alpha equal. G10: the
+      map's 162 pixels are within 0.210 of the twin's tolerance and the 220 px disc's 45,740 within
+      0.238, both as at the base on the RTX.
+    - Part 8's other failures there are T8.f's four deferred R08.T6.f Earth twins, and no others.
+    - Both variants on SwiftShader are the gate's `just test-render`
+      (`.git/rm45-scratch/r07-t8g/smart-ci-final.log`).
+    - The band is decided by `depth − half_extent > 2` in both the kernel and the fragment, as
+      T8.f's limb cells are. A driver that contracted that arithmetic differently in the two
+      stages could shade a pixel at the band's edge at one point in one and nine in the other.
+      G11 is the check against it.
+  - **The frame** (R08.T11's group with QW29's rows, e9f531d6 applied for the run and not
+    committed; untimed and hidden on the RTX 3080, 2026-10-27 06:48 and 07:03, load 5 to 10, P0
+    busy at 1,965 MHz, not a quiet window). Medians in ms, before → after, with `bodies` and `disc
+    cells`. The p95s of an untimed run at that load carry tails of up to 20.4 ms, so only medians
+    are compared; QW30 takes the p95s.
+
+    | Row | Frame | `bodies` | `disc cells` |
+    | --- | --- | --- | --- |
+    | measured 10⁷ m x4 | 16.06 → 15.50 | 3.54 → 2.91 | 1.23 → 1.34 |
+    | measured 400 km x4 | 14.55 → 14.17 | 3.39 → 3.03 | 1.03 → 1.14 |
+    | measured 1.54 × 10⁷ m x4 | 14.52 → 13.80 | 3.13 → 2.45 | 1.26 → 1.24 |
+    | slab 10⁷ m x2 | 16.17 → 15.84 | 2.67 → 2.17 | 1.00 → 1.15 |
+    | slab 10⁷ m x4 | 17.36 → 16.79 | 3.55 → 2.89 | 1.23 → 1.34 |
+    | slab 400 km x4 | 16.08 → 15.87 | 3.39 → 3.01 | 1.00 → 1.15 |
+    | slab 1.54 × 10⁷ m x4 | 15.66 → 14.94 | 3.15 → 2.44 | 1.26 → 1.25 |
+    | R10's smoke map 400 km x4 | 16.37 → 16.16 | 4.99 → 4.64 | 1.43 → 1.59 |
+    | R10's smoke map 10⁷ m x2 | 15.94 → 15.70 | 3.65 → 3.01 | 1.09 → 1.52 |
+    | R10's smoke map 10⁷ m x4 | 17.64 → 17.10 | 4.81 → 4.14 | 1.54 → 1.70 |
+    | TEST SATURN 9.45 × 10⁷ m x2 | 16.20 → 15.82 | 2.95 → 2.41 | 1.06 → 1.25 |
+    | generated palette's map 400 km x4 (recorded) | 17.19 → 16.08 | | |
+    | generated palette's map 10⁷ m x2 (recorded) | 17.68 → 16.40 | | |
+    | generated palette's map 10⁷ m x4 (recorded) | 19.47 → 17.62 | | |
+
+    - The base run's medians are QW29's to within 0.15 ms.
+    - Every one of the 148 rows of both settings is faster, by 0.04 to 1.85 ms.
+    - Of the judged rows, two keep a median over 16.67 ms: the slab's 10⁷ m x4 (16.79) and R10's
+      smoke map's 10⁷ m x4 (17.10). Five have a median between 15.67 and 16.67 ms: the slab's
+      400 km x4 and 10⁷ m x2, the smoke map's 400 km x4 and 10⁷ m x2, and TEST SATURN's
+      9.45 × 10⁷ m x2. QW30 judges them after R08.T11.d.
+    - Logs: `.git/rm45-scratch/r07-t8g/base1.log` and `band1.log`. `rows.py` and `allrows.py`
+      print the comparison.
+  - **The kernel's compile.** On the RTX 3080, 0.1 to 0.2 s in every run, its new source's first
+    included, as at the base. It has one more binding, and its shading is unchanged.
+- **Deferred findings (2026-10-13 rule)**, from R07.T8.g.
+  - _The latitude's and azimuth's round trips._ `local_frame` takes the latitude by
+    `preciseAtan2`, and `local_azimuth` takes each source's azimuth. The lookups turn both back
+    into a sine and cosine (`atmosphereSinCos`): once a lookup for the latitude, eight times a
+    shade at x4, and once a source for the azimuth. Passing the cosines through would keep the
+    picture within G10, but not bit for bit. Not measured. H1's exact hoist of the latitude's side
+    was slower.

@@ -7247,9 +7247,15 @@ export const FAR_LIMB_TIMING_FRAME: LimbFrame = {
  * {@link FAR_LIMB_LONGITUDE_RAD}, looking along the limb at the datum's edge (tangent height 0),
  * the limb level across a frame of `viewport` at the view's 60° across: {@link limbCamera}'s, its
  * half-span of tangent height the 60° field's at the tangent point.
+ *
+ * @param figure - The body's figure, its pole +z: WGS 84 by default (R08.T8.c's), Saturn's
+ *   spheroid for R08.T11.c's `TEST SATURN` rows.
  */
-export function farLimbTimingCamera(distanceM: number, viewport: ViewSize): AtmosphereCamera {
-  const figure = SLICES_EARTH.figure;
+export function farLimbTimingCamera(
+  distanceM: number,
+  viewport: ViewSize,
+  figure: SpheroidFigure = SLICES_EARTH.figure,
+): AtmosphereCamera {
   const frame = FAR_LIMB_TIMING_FRAME;
   const tanY = (Math.tan(FAR_LIMB_FIELD_X_RAD / 2) * viewport.heightPx) / viewport.widthPx;
   const halfSpanM = tanY * limbTangentDistanceM(distanceM, figure, frame);

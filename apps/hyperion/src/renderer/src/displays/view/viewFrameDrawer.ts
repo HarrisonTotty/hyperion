@@ -245,7 +245,10 @@ export function terrainReportOf(
  * the batch review's S8): photorealistic where the view may draw so and its photorealistic
  * pipelines are made, and the wireframe otherwise, its stand-in while they are made, after a device
  * loss, or for good where they failed. A frame refused within its draw (a loss meanwhile) is drawn
- * in the wireframe all the same, which its {@link ViewFrameDrawn.drawnStyle} says.
+ * in the wireframe all the same, which its {@link ViewFrameDrawn.drawnStyle} says. The frame's
+ * draw list is built for this style: its survey edges (R10.T16.c), and its bodies' datums inside
+ * their figures where it is photorealistic (`DrawOptions.datumInside`, R10.T16.g), so that a frame
+ * refused within its draw draws that one wireframe frame with them.
  */
 export function frameStyleOf(
   inputs: Pick<ViewFrameInputs, "style" | "availability">,
@@ -405,6 +408,9 @@ export class ViewFrameDrawer {
     // `ATMOSPHERE TEST` carries (plan R08, R08.T10.b), stand in for the field where no sky is drawn
     // either; R06's star layer is the server's. Every other kept scene has none.
     const sceneStars = sceneStarsStandIn(run.scene.stars, inputs.stars, inputs.sky !== null);
+    // The style this frame is foreseen to draw in, the one its list is built for: a frame that
+    // falls back to the wireframe within its draw keeps that style's survey edges and inside datum.
+    const style = frameStyleOf(inputs, this.#photoreal.status);
     const list = buildWireframeDrawList(
       { ...run.scene, stars: sceneStars ? run.scene.stars : inputs.stars },
       camera,
@@ -424,13 +430,10 @@ export class ViewFrameDrawer {
         surveyEdges:
           inputs.terrain === undefined
             ? []
-            : this.#surveyEdges(
-                inputs.terrain,
-                run.scene,
-                camera,
-                viewport,
-                frameStyleOf(inputs, this.#photoreal.status),
-              ),
+            : this.#surveyEdges(inputs.terrain, run.scene, camera, viewport, style),
+        // The bodies' datums inside their figures over the image, the wireframe's centred on them
+        // (R10.T16.g).
+        datumInside: style === "photorealistic",
         // The tripod at the picture's centre where the readout has a point, and its give-way's
         // state from the frame before (R10.T12).
         lineOfSight:

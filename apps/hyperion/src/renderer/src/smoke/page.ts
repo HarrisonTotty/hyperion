@@ -25,7 +25,8 @@
  * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
  * its binary; R08.T8.b's far limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
- * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
+ * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11,
+ * with R10.T16.g's datum inside the figure over the image last (`datumFrame.ts`);
  * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
  * frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
  * engine of its own, whose device it destroys). Three groups of part 1 run only when asked:
@@ -73,6 +74,7 @@ import {
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
 import { checkCellPassEveryRecord } from "./cellPass";
+import { checkDatumFrame } from "./datumFrame";
 import { timeAtmosphereFrame } from "./frameTiming";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
@@ -143,8 +145,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
  * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7's
  * several suns and R08.T8.e's slot layers on its binary, 11 R08.T9.b's Earth and Saturn-class
- * figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's face count and R08.T11.e's Earth), 7
- * R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
+ * figure, R08.T8.c's far limb's footprint and R10.T16.g's datum over the image, 12 R08.T11.b's
+ * face count and R08.T11.e's Earth), 7 R10's terrain groups (R10.T10.b, T10.c, T11, T16 and
+ * T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
  * joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's frames, which
  * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
  * materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
@@ -406,7 +409,7 @@ async function run(
     checkAtmosphereSlicesEarth(engine, checks, twins),
   );
   // In part 8, which had room (66 s at 6f4463c4's gate), with R05's Earth's tables of its own.
-  await group(8, "R07.T8.e–f the cell pass for every record", () =>
+  await group(8, "R07.T8.e–g the cell pass for every record", () =>
     checkCellPassEveryRecord(engine, checks),
   );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
@@ -461,6 +464,7 @@ async function run(
   await group(11, "R08.T10.b the air over a drawn ground", () =>
     checkAtmosphereFrame(engine, checks),
   );
+  await group(11, "R10.T16.g the datum inside the figure", () => checkDatumFrame(engine, checks));
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));
   await group(1, "R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
   await group(1, "R06.T13.d the sky's band", () => checkSkyBand(engine, checks));

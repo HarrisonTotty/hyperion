@@ -58,7 +58,8 @@ struct PatchInstance {
 @group(2) @binding(4) var<storage, read> instances : array<PatchInstance>;
 
 // The `disc cells` pass's sums, which a small body's figure reads, with air or a class map since
-// R07.T8.e (R07.T8.d; `pixel_cells`); a larger body's figure sums its own one cell a pixel.
+// R07.T8.e (R07.T8.d; `pixel_cells`); a larger body's figure, one cell a pixel, reads them in its
+// near-limb band (R07.T8.g) and sums its own elsewhere.
 @group(2) @binding(5) var<storage, read> cell_sums : array<vec4f>;
 
 // The body's coverage mask (plan R10, `terrain/coverage.ts`' `CoverageMask`): one `r8unorm` layer a

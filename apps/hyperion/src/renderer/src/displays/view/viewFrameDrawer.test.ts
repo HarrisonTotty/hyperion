@@ -28,6 +28,7 @@ import { PoseIntervals } from "../../view/terrain/poseInterval";
 import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
 import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
 import { heightAboveGroundM } from "../../view/terrain/terrainWire";
+import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
 import {
   frameStyleOf,
   makeViewFrameDrawer,
@@ -436,6 +437,115 @@ describe("the style a view's frame is drawn in, foreseen (the batch review's S8)
   );
 });
 
+describe("a view's datum inside its bodies' figures over the image (R10.T16.g)", () => {
+  /** The phase scene's planets at 1280 × 720, the 90° one, 71 px across, with its datum drawn. */
+  const SIZE = { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 } as const;
+
+  /** The phase scene's frame inputs in `style`, its planets turning. */
+  function inputsIn(style: "photorealistic" | "wireframe"): ViewFrameInputs {
+    return {
+      run: phaseRun(true),
+      size: SIZE,
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style,
+      setting: "low",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    };
+  }
+
+  /**
+   * The style a frame in `style` was drawn in by a drawer whose photorealistic pipelines are made,
+   * and the segments its lines were packed with, eight `f32` each as the wireframe's renderer
+   * writes them, the symbology's over the image.
+   */
+  async function drawnIn(
+    style: "photorealistic" | "wireframe",
+  ): Promise<{ readonly drawnStyle: string | undefined; readonly rows: ReadonlyArray<number> }> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputsIn("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const from = engine.writes.length;
+    const drawn = drawer.draw(inputsIn(style));
+    drawer.dispose();
+    const written = engine.writes
+      .slice(from)
+      .findLast((write) => write.buffer === "wireframe:segments")?.data;
+    return {
+      drawnStyle: drawn?.drawnStyle,
+      rows:
+        written === undefined
+          ? []
+          : [...new Float32Array(written.buffer, written.byteOffset, written.byteLength / 4)],
+    };
+  }
+
+  /**
+   * The bodies' batches of the frame's list built with its datums inside their figures or not,
+   * packed as the renderer packs them, first in the segments: each end's x, y and z, and a dash's
+   * phase of 0.
+   */
+  function bodyRows(datumInside: boolean): number[] {
+    const run = phaseRun(true);
+    const list = buildWireframeDrawList(
+      run.scene,
+      { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 },
+      presentedViewport(SIZE),
+      TOKENS,
+      {
+        lowSetting: true,
+        ev100: 0,
+        selection: null,
+        destination: null,
+        remPx: SIZE.remPx,
+        ...viewStrokesAt(SIZE.devicePixelRatio),
+        datumInside,
+      },
+    );
+    return list.lines
+      .filter((line) => line.body !== undefined)
+      .flatMap((line) => {
+        const s = line.segments;
+        return Array.from({ length: s.length / 6 }, (_, i) => [
+          ...s.subarray(i * 6, i * 6 + 3),
+          0,
+          ...s.subarray(i * 6 + 3, i * 6 + 6),
+          0,
+        ]).flat();
+      });
+  }
+
+  it("builds a photorealistic frame's list with the datum inside the figure", async () => {
+    const inside = bodyRows(true);
+    const drawn = await drawnIn("photorealistic");
+    expect({
+      style: drawn.drawnStyle,
+      datum: inside.length > 0,
+      inside: drawn.rows.slice(0, inside.length),
+    }).toEqual({ style: "photorealistic", datum: true, inside });
+  });
+
+  it("builds a wireframe frame's list with the datum centred on the limb", async () => {
+    const centred = bodyRows(false);
+    const inside = bodyRows(true);
+    const drawn = await drawnIn("wireframe");
+    expect({
+      style: drawn.drawnStyle,
+      differs: centred.length !== inside.length || centred.some((value, i) => value !== inside[i]),
+      centred: drawn.rows.slice(0, centred.length),
+    }).toEqual({ style: "wireframe", differs: true, centred });
+  });
+});
+
 /**
  * A session stand-in whose survey throws `error` while `throws` holds, the faults its drawer's
  * guard raised counted.
@@ -799,8 +909,13 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
       faulted: false,
     };
     const { source } = wireSource(DATUM, { pass: (body) => (body === HANDED ? pass : null) });
-    // Relief enough that every planet with a rotation is handed over.
-    const inputs = { ...inputsOver(source, "photorealistic"), reliefs: { reliefM: () => 1e9 } };
+    // Relief enough that every planet with a rotation is handed over, on a view wide enough that
+    // the planet, 71 px across, has its datum over the image (R10.T16.g's least radius, 24 px).
+    const inputs: ViewFrameInputs = {
+      ...inputsOver(source, "photorealistic"),
+      size: { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 },
+      reliefs: { reliefM: () => 1e9 },
+    };
     const engine = await countingRenderEngine();
     const view = new RecordingView("view");
     const drawer = new ViewFrameDrawer(engine, view, "view");

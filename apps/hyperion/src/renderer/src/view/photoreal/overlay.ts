@@ -4,8 +4,8 @@
  * tone-mapped image.
  *
  * @remarks
- * Every mark over the image is stroked twice, a `--surface-0` casing of {@link CASING_PX} CSS px
- * on each side, drawn at the list's stroke scale, beneath its coloured stroke, never a blur or a
+ * Every mark over the image is stroked twice, a `--surface-0` casing of `CASING_PX` CSS px
+ * on each side, drawn at the list's stroke scale ({@link casingDevicePx}), beneath its coloured stroke, never a blur or a
  * glow (the guide's "Outlines for symbology"), so that it carries its own dark surface over any
  * part of the image; the image is never dimmed under it. The wireframe style's list cases every
  * batch but the hull edges, whose own faces hide the stars behind them; over the image they are
@@ -26,6 +26,12 @@
  * the sphere hides no mark in one. There the graticule is not drawn, where the image draws the
  * terrain in the reference surface's place (main's ruling for R10.T16.f; a graticule on the
  * terrain's height in the image is not built).
+ *
+ * A body's datum is stroked inside its figure over the image (plan R10, R10.T16.g; main's ruling,
+ * `decision-r08-approximate-plate.md` item 2): the list the overlay draws is built with
+ * `DrawOptions.datumInside`, so that its limb's casing ends on the limb and no datum line or casing
+ * covers the image beyond the body, an atmosphere's glow above the limb included; a body too small
+ * to stroke inside has no datum over the image (`datumOverImage`). The wireframe centres its limb.
  */
 import type { ColourTokens } from "../../spatial/paint";
 import type { BodyFigure } from "../appearance/fromWire";
@@ -35,7 +41,7 @@ import { rotationColumns } from "../bodies/smoothMesh";
 import type { Viewport } from "../camera/projection";
 import type { FrameSubmission } from "../engine/types";
 import {
-  CASING_PX,
+  casingDevicePx,
   type DrawCamera,
   type LineBatch,
   type OccluderMesh,
@@ -53,9 +59,14 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
 
 /**
  * R02's draw list as the overlay draws it over the image: every line batch cased in its
- * `--surface-0` casing colour at {@link CASING_PX} times the list's stroke scale, the hull edges
- * included; every hull's opaque faces filled in `--surface-0`, its silhouette (R07.T16.e); and no
- * star sprite.
+ * `--surface-0` casing colour at `CASING_PX` times the list's stroke scale ({@link casingDevicePx}), the
+ * hull edges included; every hull's opaque faces filled in `--surface-0`, its silhouette
+ * (R07.T16.e); and no star sprite.
+ *
+ * @remarks
+ * Its list is built with the datum inside the figure (`DrawOptions.datumInside`; plan R10,
+ * R10.T16.g), at the casing this cases its lines at, so that no datum line or casing covers the
+ * image beyond a body.
  *
  * @param tokens - The tokens the list was built with, whose `--surface-0` its casings take: the
  *   silhouette is one surface with them (decision-r07-t16a, item 3).
@@ -64,7 +75,7 @@ export function overlayDrawList(
   list: WireframeDrawList,
   tokens: Pick<ColourTokens, "surface0">,
 ): WireframeDrawList {
-  const casingPx = CASING_PX * list.strokeScale;
+  const casingPx = casingDevicePx(list.strokeScale);
   const silhouette = (mesh: OccluderMesh): OccluderMesh => ({ ...mesh, fill: tokens.surface0 });
   return {
     ...list,

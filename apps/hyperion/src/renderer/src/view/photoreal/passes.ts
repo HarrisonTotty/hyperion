@@ -3,8 +3,9 @@
  * target, in order, and the labels R12's `PASS_ROWS` keys on.
  *
  * @remarks
- * In order: R06's sky; the small discs' cells and the larger discs' limbs' (R07.T8.d–f, a compute
- * pass, a dispatch a set of bound textures, whose sums the bodies' draws read); R10's terrain shadows (R10.T9.b, the shadow cascades' four caster passes, depth
+ * In order: R06's sky; the small discs' cells and the larger discs' limbs' and their faces'
+ * near-limb bands' (R07.T8.d–g, a compute pass, a dispatch a set of bound textures, whose sums the
+ * bodies' draws read); R10's terrain shadows (R10.T9.b, the shadow cascades' four caster passes, depth
  * alone into the engine's layers, which the terrain's draws read); mesh bodies (opaque, depth);
  * R10's terrain; host discs, disc bodies and point bodies in one painter order (Design note 2);
  * R08's atmosphere, each body's composite over everything drawn before it (R08.T10.b); R11's
@@ -33,8 +34,9 @@ import { TONEMAP_PASS } from "../post/tonemap";
  */
 export const PHOTOREAL_PASS_LABELS = {
   /**
-   * The small discs' cells and the larger discs' limbs', shaded in parallel for the draws that
-   * read them, a dispatch a set of bound textures under one label (R07.T8.d–f).
+   * The small discs' cells and the larger discs' limbs' and their faces' near-limb bands', shaded
+   * in parallel for the draws that read them, a dispatch a set of bound textures under one label
+   * (R07.T8.d–g).
    */
   discCells: DISC_CELLS_PASS,
   bodies: "bodies",
