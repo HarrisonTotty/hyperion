@@ -77,7 +77,8 @@ const ADIABATIC_FACTOR: f64 = 1.290_994_448_735_805_6;
 /// The explosion's energy is always positive and finite; this rejects the rest.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BuildExplosionEnergyError {
-    /// The energy, in units of 10⁵¹ erg, lies outside [`ExplosionEnergy::MIN`]–[`ExplosionEnergy::MAX`].
+    /// The energy, in units of 10⁵¹ erg, lies outside
+    /// [`ExplosionEnergy::IAX_MIN`]–[`ExplosionEnergy::MAX`].
     OutOfRange(f64),
 }
 
@@ -96,12 +97,45 @@ impl Error for BuildExplosionEnergyError {}
 
 /// A supernova's kinetic energy, in units of 10⁵¹ erg (the "foe", `E₅₁`).
 ///
-/// Its law belongs to the generator version: log-normal about 10⁵¹ erg with 0.2 dex, truncated at
-/// two standard deviations, so 0.40–2.51 × 10⁵¹ erg (ours, provisional: the plan asks for "a
-/// log-normal about 10⁵¹ erg" and names no width; core-collapse energies inferred from light
-/// curves spread over a few tenths to a few 10⁵¹ erg). The truncation is what keeps the window's
-/// supremum finite, since the window rises as about `E₅₁^0.32`. The constructor rejects anything
-/// outside the range, so every energy a caller holds is one the caps allow for.
+/// Its three laws belong to the generator version, each a log-normal truncated at two standard
+/// deviations:
+///
+/// - **Core collapses and normal Type Ia** ([`from_uniform`](Self::from_uniform)): about 10⁵¹ erg
+///   with 0.2 dex, so 0.40–2.51 × 10⁵¹ erg (ours, provisional: the plan asks for "a log-normal
+///   about 10⁵¹ erg" and names no width; core-collapse energies inferred from light curves spread
+///   over a few tenths to a few 10⁵¹ erg). A normal Type Ia's lies inside it: Woosley et al.
+///   (2007, ApJ 662, 487, §8) find "1.2±0.2×10⁵¹ erg" at infinity.
+/// - **Electron-capture supernovae**
+///   ([`electron_capture_from_uniform`](Self::electron_capture_from_uniform)), weaker: about √2 ×
+///   10⁵⁰ erg with 0.2 dex, so 0.056–0.35 × 10⁵¹ erg (ours, provisional). The median is the
+///   geometric middle of the simulations' 1–2 × 10⁵⁰ erg: an oxygen–neon core's collapse explodes
+///   "with an energy of about or slightly more than `10**50` erg" (Kitaura, Janka and Hillebrandt
+///   2006, A&A 450, 345, arXiv astro-ph/0512065's abstract), "simulations consistently predict
+///   explosion energy (∼ 2 × 10⁵⁰ erg)" (Hiramatsu et al. 2021, Nature Astronomy 5, 903, on the
+///   electron-capture candidate SN 2018zd), and self-consistent models give 0.12–0.18 × 10⁵¹ erg
+///   (Radice et al. 2017, ApJ 850, 43, Table 2, model n8.8) and 1.36–1.48 × 10⁵⁰ (Zha et al. 2022,
+///   arXiv 2112.15257). The width is the core-collapse law's. The Crab's filaments carry about 7 ×
+///   10⁴⁹ erg (Smith 2013, arXiv 1304.0689, §2), inside the range near its floor.
+/// - **Type Iax** ([`iax_from_uniform`](Self::iax_from_uniform), ruling 136.10), weaker still:
+///   about 0.05 × 10⁵¹ erg with 0.65 dex, so 0.0025–1.0 × 10⁵¹ erg (ours, provisional). The median
+///   is SN 2020kyg's, a faint Iax: `E_k = 4.4 (+2.2/−1.5) × 10⁴⁹` erg, "0.05 ± 0.02 × 10⁵¹ erg" in
+///   the abstract (Srivastav et al. 2022, MNRAS 511, 2708, §3; doi 10.1093/mnras/stac177). Their
+///   volume-limited rates put faint Iax at 12 (+14/−8)% and luminous Iax at 0.9 (+1.1/−0.5)% of
+///   the Type Ia rate, against 15 (+17/−9)% for all ([`CHANNEL_SHARES`]'s 0.13), so the faint are
+///   about four in five. The floor is SN 2008ha's "∼2 × 10⁴⁸ ergs" (Foley et al. 2009, AJ 138,
+///   376; Valenti et al. 2009, Nature 459, 674, find 1–5 × 10⁴⁹ for the same event), and the top
+///   SN 2012Z's "∼10⁵¹ erg" (Stritzinger et al. 2015, A&A 573, A2), who give the class "∼10⁴⁹–10⁵¹
+///   erg". The law puts 6% of Iax above 0.4 × 10⁵¹ erg, the luminous share of 0.9 in 15 if the
+///   luminous are the energetic (our reading). Faint Iax are the least complete part of every
+///   sample, so the low half is the least certain, and CMB88's window is extrapolated there, to
+///   energies far below those its scalings were fitted at.
+///
+/// The truncations are what keep the window's supremum finite, since the window rises as about
+/// `E₅₁^0.32`, and every energy a law gives is at most [`MAX`](Self::MAX), at which the caps scan.
+/// The constructor rejects anything outside [`IAX_MIN`](Self::IAX_MIN)–[`MAX`](Self::MAX), so
+/// every energy a caller holds is one the caps allow for.
+///
+/// [`CHANNEL_SHARES`]: crate::galaxy::catalogue_classes::type_ia::CHANNEL_SHARES
 ///
 /// # Examples
 ///
@@ -129,20 +163,59 @@ impl ExplosionEnergy {
     /// The truncation, in standard deviations either side of the median.
     pub const TRUNCATION: f64 = 2.0;
 
-    /// The least energy, `10^(−0.4)` × 10⁵¹ erg.
+    /// The least energy of [`from_uniform`](Self::from_uniform)'s law, `10^(−0.4)` × 10⁵¹ erg.
     pub const MIN: Self = Self(0.398_107_170_553_497_2);
 
-    /// The greatest energy, `10^0.4` × 10⁵¹ erg.
+    /// The greatest energy, `10^0.4` × 10⁵¹ erg: of [`from_uniform`](Self::from_uniform)'s law
+    /// and of every energy the type holds, which is what the caps scan at.
     pub const MAX: Self = Self(2.511_886_431_509_580_4);
+
+    /// The decimal logarithm of the electron-capture law's median, in units of 10⁵¹ erg: −0.85, so
+    /// 0.141 × 10⁵¹ erg ([`electron_capture_from_uniform`](Self::electron_capture_from_uniform);
+    /// the type's documentation gives the sources).
+    pub const ELECTRON_CAPTURE_LOG_MEDIAN: f64 = -0.85;
+
+    /// The electron-capture law's width, dex: the core-collapse law's.
+    pub const ELECTRON_CAPTURE_SIGMA_DEX: f64 = 0.2;
+
+    /// The electron-capture law's truncation, in standard deviations either side of its median.
+    pub const ELECTRON_CAPTURE_TRUNCATION: f64 = 2.0;
+
+    /// The least energy of the electron-capture law, `10^(−0.85 − 2 × 0.2)` = `10^(−1.25)` × 10⁵¹
+    /// erg.
+    pub const ELECTRON_CAPTURE_MIN: Self = Self(0.056_234_132_519_034_91);
+
+    /// The greatest energy of the electron-capture law, `10^(−0.85 + 2 × 0.2)` = `10^(−0.45)` ×
+    /// 10⁵¹ erg.
+    pub const ELECTRON_CAPTURE_MAX: Self = Self(0.354_813_389_233_575_47);
+
+    /// The decimal logarithm of the Type Iax law's median, in units of 10⁵¹ erg: −1.3, so 0.050 ×
+    /// 10⁵¹ erg ([`iax_from_uniform`](Self::iax_from_uniform); the type's documentation gives the
+    /// sources).
+    pub const IAX_LOG_MEDIAN: f64 = -1.3;
+
+    /// The Type Iax law's width, dex.
+    pub const IAX_SIGMA_DEX: f64 = 0.65;
+
+    /// The Type Iax law's truncation, in standard deviations either side of its median.
+    pub const IAX_TRUNCATION: f64 = 2.0;
+
+    /// The least energy of the Type Iax law, `10^(−1.3 − 2 × 0.65)` = `10^(−2.6)` × 10⁵¹ erg, and
+    /// the least the type holds.
+    pub const IAX_MIN: Self = Self(0.002_511_886_431_509_579_4);
+
+    /// The greatest energy of the Type Iax law, `10^(−1.3 + 2 × 0.65)` = 10⁵¹ erg.
+    pub const IAX_MAX: Self = Self(1.0);
 
     /// The energy of `foes` × 10⁵¹ erg.
     ///
     /// # Errors
     ///
-    /// [`BuildExplosionEnergyError::OutOfRange`] for a value outside [`MIN`](Self::MIN)–[`MAX`](Self::MAX),
-    /// NaN included.
+    /// [`BuildExplosionEnergyError::OutOfRange`] for a value outside
+    /// [`IAX_MIN`](Self::IAX_MIN)–[`MAX`](Self::MAX), the least and greatest energies any law
+    /// gives, NaN included.
     pub fn from_foes(foes: f64) -> Result<Self, BuildExplosionEnergyError> {
-        if (Self::MIN.0..=Self::MAX.0).contains(&foes) {
+        if (Self::IAX_MIN.0..=Self::MAX.0).contains(&foes) {
             Ok(Self(foes))
         } else {
             Err(BuildExplosionEnergyError::OutOfRange(foes))
@@ -150,13 +223,45 @@ impl ExplosionEnergy {
     }
 
     /// The energy at rank `u` in [0, 1] of the truncated log-normal: `10^(σ z)` with `z` the
-    /// standard normal's quantile at `Φ(−2) + u (Φ(2) − Φ(−2))`. It is the one law of the
-    /// generator version's explosion energies; plan 09's `DeathMarks::of` feeds it one uniform of
-    /// the system's `snr.energy` stream. A `u` outside [0, 1] is held to it.
+    /// standard normal's quantile at `Φ(−2) + u (Φ(2) − Φ(−2))`. It is the law of core collapses
+    /// and normal Type Ia; plan 09's
+    /// [`DeathMarks`](crate::galaxy::catalogue_classes::supernova::DeathMarks) feeds it one uniform
+    /// of the system's `snr.energy` stream. A `u` outside [0, 1] is held to it.
     #[must_use]
     pub fn from_uniform(u: f64) -> Self {
         let z = truncated_standard_normal(u, Self::TRUNCATION);
         Self(math::exp10(Self::SIGMA_DEX * z).clamp(Self::MIN.0, Self::MAX.0))
+    }
+
+    /// A Type Iax's energy at rank `u` in [0, 1]: `10^(IAX_LOG_MEDIAN + IAX_SIGMA_DEX z)` with `z`
+    /// the standard normal truncated at [`IAX_TRUNCATION`](Self::IAX_TRUNCATION) at rank `u`, held
+    /// to [`IAX_MIN`](Self::IAX_MIN)–[`IAX_MAX`](Self::IAX_MAX) (ruling 136.10). Plan 09's
+    /// [`DeathMarks`](crate::galaxy::catalogue_classes::supernova::DeathMarks) feeds it the same
+    /// uniform of `snr.energy` a core collapse's [`from_uniform`](Self::from_uniform) reads. A `u`
+    /// outside [0, 1] is held to it.
+    #[must_use]
+    pub fn iax_from_uniform(u: f64) -> Self {
+        let z = truncated_standard_normal(u, Self::IAX_TRUNCATION);
+        Self(
+            math::exp10(Self::IAX_LOG_MEDIAN + Self::IAX_SIGMA_DEX * z)
+                .clamp(Self::IAX_MIN.0, Self::IAX_MAX.0),
+        )
+    }
+
+    /// An electron-capture supernova's energy at rank `u` in [0, 1]:
+    /// `10^(ELECTRON_CAPTURE_LOG_MEDIAN + ELECTRON_CAPTURE_SIGMA_DEX z)` with `z` the standard
+    /// normal truncated at [`ELECTRON_CAPTURE_TRUNCATION`](Self::ELECTRON_CAPTURE_TRUNCATION) at
+    /// rank `u`, held to [`ELECTRON_CAPTURE_MIN`](Self::ELECTRON_CAPTURE_MIN)–
+    /// [`ELECTRON_CAPTURE_MAX`](Self::ELECTRON_CAPTURE_MAX). Plan 09's
+    /// [`DeathMarks`](crate::galaxy::catalogue_classes::supernova::DeathMarks) feeds it the same
+    /// uniform of `snr.energy` the other laws read. A `u` outside [0, 1] is held to it.
+    #[must_use]
+    pub fn electron_capture_from_uniform(u: f64) -> Self {
+        let z = truncated_standard_normal(u, Self::ELECTRON_CAPTURE_TRUNCATION);
+        Self(
+            math::exp10(Self::ELECTRON_CAPTURE_LOG_MEDIAN + Self::ELECTRON_CAPTURE_SIGMA_DEX * z)
+                .clamp(Self::ELECTRON_CAPTURE_MIN.0, Self::ELECTRON_CAPTURE_MAX.0),
+        )
     }
 
     /// The energy in units of 10⁵¹ erg.

@@ -864,6 +864,8 @@ Pure functions. The processes that use them are in phase 7.
 
 #### P09.T17 The supernova test with a clock
 
+**Built** (2026-10-27; no output moves): see "P09.T17 as built" under Risks.
+
 `DeathMarks { death_time: T, energy, metallicity, fastest_member_speed, kind: SupernovaKind }` and
 `claims(galaxy, site, marks, environment)`: true if and only if −(W_eff + L + H) < T ≤ +H. W is
 `shell_window` at the site, W_eff = min(W, the environment's cap, 4,096 ly ÷ v_fast − (L + 2H))
@@ -1590,7 +1592,8 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   on P08.T12's `stay_share`; P09.T15.b, T17 and T33–T36 on P08.T9, T12 and T13 (`ClassTable`,
   `explosion_site`, `SHELL_WINDOW_CAP`, `recent_death_claims`); P09.T10's member velocities on a
   record-free draw such as `kinematics::draw_on`; P09.T24 on research finding R2 (the M–σ offset).
-  Phases 2–8 otherwise consume only what phase 1 now provides.
+  _(T17's names reconciled at `e8b5c6f3`: see "P09.T17 as built".)_ Phases 2–8 otherwise consume
+  only what phase 1 now provides.
 - **Ruling 2's gas decision is provisional** (copied here at re-validation, as the ruling asks). The
   gas stays exponential in height, so the clouds' proposal bound is the ratio at the height nearest
   the plane. If a later ruling cores the gas as the stellar discs are, the clouds take the stellar
@@ -3007,3 +3010,174 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     one kind test now sets the radius's unit and the nebula's rows in two files (`collapsed`,
     `isCoreCollapseRemnant`); one predicate in `lib/system/`, outside this lane, would keep the two
     displays from drifting apart (UX review).
+- **P09.T17 as built (issue #122, lane `lane/122-p09-t17-supernova-clock`, 2026-10-27, at
+  `GENERATOR_VERSION` 23, no output moves).** Pure functions; nothing calls them until P09.T35, so
+  no generated output moves and there is no bump (decision-bump-plan-after-22, §3). Files:
+  `galaxy/catalogue_classes/supernova.rs` (the items) with `supernova/clock_tests.rs` (their
+  tests), `snr/window.rs` (the electron-capture and Iax laws), `snr/caps.rs` and `galaxy/mod.rs`
+  (the held caps), `gas/field.rs` (`GasField::metallicity_at`), `rng/tags.rs` (`snr.energy`, scope
+  `System`, keyed by `ObjectKey::from(SystemId)`: word 0 one uniform, the energy's rank; words 1–7
+  reserved). Also the brief's three doc comments from the docs queue: `features/cluster.rs`'s
+  `MEAN_BLACK_HOLE_MASS` (F1), `Galaxy::mean_formed_mass` (F2: 1.0961 M☉ under the default and
+  0.8215 under Kroupa's, measured at this base) and `sse/track/build.rs`'s
+  `stripped_by_companion` (F3). The desktop accepted leans (a)–(g) as built on the issue
+  (2026-10-27); the signatures below are the Provides that P09.T33–T36 consume.
+  - _Consumes, re-validated against P08.T9 and P08.T13 as built._
+    `SystemStars::death_time()`'s T is `ClockDeath::At(UniverseTime, DeathKind)`, with
+    `BeyondClockRange` and `AlreadyRemnantAtBirth` beside it. `natal_kick()` is `Option<NatalKick>`
+    (`speed`, `direction`, `velocity` in m/s). The system's `Composition` is
+    `SystemStars::primary().composition()` and is not read (ruling 136.9).
+    `displaced::ExplosionSite` is `new(position, death)`, `position()`, `death()`.
+    `SHELL_WINDOW_CAP` is `snr::caps::SHELL_WINDOW_CAP`, already this plan's. `explosion_site` and
+    `death_in_interval` are as built, the latter's interval (−(`SHELL_WINDOW_CAP` + L + H), +H].
+    `recent_death_claims` is no function: `RECENT_DEATH_CLAIM: Option<RecentDeathClaim> = None`,
+    for P09.T35, untouched here. `ClassTable` is read only through `IaLeftover::speed`, whose
+    speeds `IaLeftover::draw` takes from `SURVIVOR_POPULATIONS`. `GasField::dust_per_hydrogen`
+    returns ζ = 10^[M/H], not [M/H]. `ShellEnvironment` carries no data. `snr.energy` was not
+    registered, and is added here.
+  - _Signatures, against the Provides sketch._
+    `DeathMarks::of(&Galaxy, &SystemStars, &ExplosionSite, GalacticVelocity) -> Option<DeathMarks>`
+    (the velocity added, and `Option`; points (a) and (e)).
+    `DeathMarks::of_type_ia` (added; point (b)) takes `&Galaxy`, `SystemId`, `&IaProgenitor`,
+    `&IaLeftover`, `&ExplosionSite` and `GalacticVelocity`, and gives `DeathMarks`.
+    `claims(&Galaxy, &ExplosionSite, &DeathMarks, Surroundings) -> bool` (`Surroundings` for
+    `ShellEnvironment`; point (g)). Added beside them: `claimed_window` (the cut window where
+    `claims` holds, the one route by which a class tests a death and gets its entry's window),
+    `effective_window` (W_eff's window), `lifetime_cap`, `LIFETIME_REACH` (4,096 ly, a parameter
+    of the generator version), `Surroundings::environment`, `BubbleInterior`,
+    `SupernovaKind::of_death`, `SupernovaInterval`'s `of_window`, `of_cap`, `thinning_cap`,
+    `window`, `start`, `end`, `length` and `contains`, and on `ExplosionEnergy` the two new laws
+    and their constants.
+    `DeathMarks` holds the system, T, the kind, the energy and v_fast; the sketch's metallicity is
+    dropped (point (c)).
+  - _The interval on the clock._ W_eff = min(W, the environment's cap, 4,096 ly ÷ v_fast − (L +
+    2H)), floored at zero, in Julian years, then floored to the nanosecond
+    (`Span::from_seconds_f64`) and held to 0…`SHELL_WINDOW_CAP`. `claims` is start < T ≤ +H with
+    start = EPOCH − (W_eff + L + H), so T = +H is in and T = start is out, exactly. At
+    `SHELL_WINDOW_CAP` the start is `death_in_interval`'s, 134,534,593,094,400 s before the epoch,
+    and no interval opens earlier.
+  - _Design points._
+    - (a) v_fast for a core collapse is |v + kick|, or |v| with no kick, with v the caller's
+      galactic velocity: the grid's `epoch_velocity`, a member's bulk plus its own, a candidate's
+      draw. `epoch_velocity` serves grid records only and a Type Ia candidate has no
+      `SystemStars`, so the constructor cannot find v itself. The system's companions are not
+      members of the entry and are not read.
+    - (b) A second constructor for Type Ia candidates, since they have no `SystemStars`; a recent
+      Type Ia has no grid side to agree with (P09.T35: plan 11's binaries redraw any explosion
+      before +H). v_fast is the bound |v| + `IaLeftover::speed`, which has no direction; |v| for
+      a merger and for a Type Iax's partly burnt dwarf.
+    - (c) `claims` reads the site gas's [M/H], `GasField::metallicity_at(p) -> Dex`, which
+      `zeta` now calls, bit for bit (`dust_per_hydrogen` is 10^ it, tested); `shell_window` holds
+      it to −1…+0.5 dex. Cited to CMB88, p. 259 ("`ζ_m` = 1 for solar abundances").
+    - (d) The Iax law, `ExplosionEnergy::iax_from_uniform`, and, by the desktop's answer on the
+      issue (2026-10-27), an electron-capture law, `ExplosionEnergy::electron_capture_from_uniform`:
+      below. A private `EnergyLaw` picks the law from the death (`ElectronCapture`) or the channel
+      (`Iax`), so `SupernovaKind` is unchanged and an electron-capture supernova keeps the light
+      curve of its type. `ExplosionEnergy::from_foes` now accepts `IAX_MIN`–`MAX`; `MIN`, `MAX`,
+      `from_uniform` and the caps' scan, at `MAX`, are unchanged, so no cap moves.
+    - (e) `SupernovaKind::of_death(&Death) -> Option<SupernovaKind>`. `CoreCollapse` keeps its
+      type. `ElectronCapture` is typed by plan 06's envelope rule (`SupernovaType::of_envelopes`
+      on the hydrogen envelope and the helium outside the carbon–oxygen core), so a super-AGB
+      progenitor is a IIP, as SN 2018zd is (Hiramatsu et al. 2021). `EnvelopeLoss`,
+      `DirectCollapse` and a `CoreCollapse` of `SupernovaType::None` make no shell and give no
+      marks; so do `PairInstability` (5–94 × 10⁵¹ erg, Heger and Woosley 2002, far above the caps)
+      and `ThermonuclearDisruption` (no Type Ia channel describes a single star's carbon
+      ignition), both stated as not modelled and left on the grid. No marks rather than a `claims`
+      of false: the marks would have no kind to carry, and the caller learns before it reads the
+      gas.
+    - (f) `WindowCaps::from_galaxy` costs 3.7 ms in a test build against 352 ms for
+      `Galaxy::new`, about 1%, so `Galaxy::from_params` computes the caps once
+      (`Galaxy::window_caps`) and `from_galaxy` now copies them; a test holds them to
+      `WindowCaps::from_gas_params` of the gas's parameters, bit for bit. A scan on every claim
+      would cost that for every recent death. `Galaxy::from_params` documents the caps' assertion
+      under Panics; it never fires at the drawn floors, 300–450 K cm⁻³.
+    - (g) `ShellEnvironment` stays fieldless. `Surroundings`, of `Field`, `TypeIa` and
+      `Bubble(BubbleInterior)`, carries the interior the caller passes from the member's parent
+      feature, `BubbleInterior::new(SiteGas, wall)`, with the distance from the site to the
+      bubble's wall, so the wall cut (`ShellWindow::ended_at_wall`) is part of the shared test and
+      every side agrees on T36.a's window "ended at the wall". The window is cut at the cap with
+      `WindowCaps::cut`, whose debug assertion catches an interior the bubble's cap was not
+      scanned over.
+    - (h) `claims` takes no cache, so no `FeatureCellCache` can be passed to panic on use, and the
+      plan's test cannot be written as sketched. `the_test_reaches_no_feature` pins the signatures
+      of `claims`, `claimed_window`, `effective_window` and both constructors, and checks that the
+      non-test source of `supernova.rs`, `snr/{mod,window,shell,caps}.rs` and
+      `gas/{field,noise,phase,pressure,smooth}.rs` names neither `FeatureCatalogue`,
+      `FeatureCellCache`, `NoFeatureCache` nor `FeatureRef`, and that `supernova.rs` and
+      `snr/window.rs` name no `features::` path, no `GasModifier` and no `modifiers_near`. Our
+      reading: with no cache argument the remaining route to a feature is generating its cell,
+      `FeatureCatalogue::cell`, and nothing the test calls names it.
+  - _The electron-capture law (the desktop's answer, 2026-10-27)._ Log-normal in E, median
+    10^−0.85 = 0.141 × 10⁵¹ erg (√2 × 10⁵⁰, the geometric middle of the simulations' 1–2 × 10⁵⁰),
+    0.2 dex as the core-collapse law, truncated at ±2σ: 0.056–0.35 × 10⁵¹ erg (ours, provisional;
+    `ELECTRON_CAPTURE_LOG_MEDIAN`, `_SIGMA_DEX`, `_TRUNCATION`, `_MIN`, `_MAX`). Sources: an
+    oxygen–neon core explodes "with an energy of about or slightly more than `10**50` erg" (Kitaura,
+    Janka and Hillebrandt 2006, the arXiv abstract; the manuscript's reads "≳ 0.1 × 10⁵¹ erg");
+    "simulations consistently predict explosion energy (∼ 2 × 10⁵⁰ erg)" (Hiramatsu et al. 2021,
+    on SN 2018zd); self-consistent models give 0.12–0.18 × 10⁵¹ (Radice et al. 2017, model n8.8)
+    and 1.36–1.48 × 10⁵⁰ (Zha et al. 2022). The Crab's filaments carry about 7 × 10⁴⁹ erg (Smith
+    2013, §2), inside the range near its floor. The whole law lies below the core-collapse law's
+    0.40 and above the Iax floor. Science check: the quotes and constants hold; it offered
+    10^−0.9 (0.126) as an alternative median, between the Garching runs' ~0.10 and the others'
+    0.14–0.18, and found −0.85 defensible, which is kept.
+  - _The Iax law (ruling 136.10)._ Log-normal in E, median 10^−1.3 = 0.050 × 10⁵¹ erg, 0.65 dex,
+    truncated at ±2σ: 0.0025–1.0 × 10⁵¹ erg (ours, provisional; `IAX_LOG_MEDIAN`,
+    `IAX_SIGMA_DEX`, `IAX_TRUNCATION`, `IAX_MIN`, `IAX_MAX`). Median: SN 2020kyg's E_k = 4.4
+    (+2.2/−1.5) × 10⁴⁹ erg (Srivastav et al. 2022, §3), a faint Iax; their volume-limited rates
+    put faint Iax at 12 and luminous at 0.9 per 100 Type Ia, of 15 for all. Floor: SN 2008ha's
+    ~2 × 10⁴⁸ erg (Foley et al. 2009); Valenti et al. (2009) find 1–5 × 10⁴⁹ for the same event,
+    which the sources leave discrepant. Top: SN 2012Z's ~10⁵¹ erg (Stritzinger et al. 2015, who
+    give the class ~10⁴⁹–10⁵¹). 6.3% of Iax lie above 0.4 × 10⁵¹ erg, the luminous share of 0.9 in
+    15 if the luminous are the energetic (our reading). A normal Type Ia's 1.2 ± 0.2 × 10⁵¹ erg
+    (Woosley et al. 2007, §8) lies inside the core-collapse law's 0.40–2.51. The window at each
+    law's least energy is finite and positive over the window table's densities.
+  - _Figures._ The lifetime cap at 2,500 km/s is 4,096 × 299,792.458 ÷ 2,500 − 264,144 =
+    227,035.963 yr, under 0.23 Myr; at a thin site, (0, 30,000, 900) ly, it is what ends the
+    window. Seed 19's caps, as `claims` reads them: field and Type Ia 3.357 Myr, bubble 0.570
+    Myr; thinning caps 3.622 and 0.834 Myr. At the solar site (0, 26,000, 20) ly, 10⁵¹ erg, W_eff
+    is 3.181 × 10⁵ yr, so the interval opens 18,343,657,851,196.6 s before the epoch.
+  - _Tests_ (`supernova/clock_tests.rs`, fifteen, each on its own build of seed 19's galaxy;
+    `snr::caps`'s held-caps test; the plan-09 tag test; five doctests, on `lifetime_cap`, `claims`,
+    `claimed_window`, `DeathMarks::of_type_ia` and `SupernovaInterval`): membership by
+    `SupernovaEntry::state_at` before, at and after T and after W_eff, and a death 500 years
+    after the epoch claimed as a progenitor; the marks against the stellar stage, the kick and
+    the stream (the death's law bit for bit, the same twice, two systems two streams); each death
+    kind; Type Ia marks of all four channels (the Iax law, |v| + survivor); a 240-case sweep for
+    purity and `assert_order_independent`, both answers in every environment, `claimed_window`
+    agreeing with `claims`; the four boundary ticks; the lifetime cap, and W_eff never negative
+    nor above its cap or `SHELL_WINDOW_CAP` over 400 sites and speeds to 6,000 km/s; every
+    interval inside `death_in_interval`'s, the ends and thinning caps exact; ζ from the site gas;
+    the bubble's wall and cap; the Iax and electron-capture laws' ranges and medians, and the Iax
+    share above 0.4 × 10⁵¹ erg; each death on its law; no feature reached; and the three laws at
+    three ranks, two systems' draws and the solar site's W_eff and start pinned bit for bit, so
+    that a change before P09.T35 fails a test rather than riding T35's bump (determinism review).
+  - _Goldens._ golden_diff against `origin/rendering-and-planets`: `rng/tags.golden` extended only
+    (+1 −0, `snr.energy (System) = 0xc77e73f30ba691e8`), no changed value, no other golden,
+    `GENERATOR_VERSION` 23 → 23.
+  - _Not here (P09.T32–T36's)._ `ClassProcess` and the class grid, the processes and lists of
+    T33–T36, `recent_death_claims` and `RECENT_DEATH_CLAIM`, any change in `displaced/` or
+    `placement/`, plan 08's text.
+- **Deferred findings (2026-10-13 rule)**, from P09.T17:
+  - _One velocity on every side._ v_fast reads the velocity the caller passes, and decides
+    W_eff's lifetime cap, so near the interval's start two sides that pass the same system
+    different velocities could disagree. T35 and T33–T36 should take the velocity from one
+    function per kind of candidate (the grid's `epoch_velocity`), or test that the sides pass the
+    same bits (determinism review).
+  - _CMB88 at low energy._ The Iax and electron-capture laws run CMB88's window down to 0.0025 ×
+    10⁵¹ erg, far below the energies its scalings were fitted at, where the ejecta-dominated phase
+    lasts longer. The caps are unaffected (the window is largest at `MAX`); the window at the
+    least energies is an extrapolation, noted in `ExplosionEnergy`'s doc (science review).
+  - _Partly burnt Iax remnants move._ LP 40-365 moves at 852 ± 10 km/s in the Galaxy's rest frame
+    (Raddi et al. 2018) and Jordan et al. (2012) expect a kick of a few hundred km/s, but
+    P09.T18.c's `IaLeftover::PartlyBurntDwarf` stays at the site with no speed, so an Iax entry's
+    v_fast is |v|. If T18.c gives it a speed, `of_type_ia` reads it through `IaLeftover::speed`.
+  - _Companions._ v_fast reads only the remnant: a bound companion's recoil
+    (`SystemStars::recoil`) and an unbound one's speed are plan 11's, and no member of the entry
+    yet.
+  - _F2's "alone"._ `Galaxy::mean_formed_mass`'s doc, as queued, says the figure "depends on the
+    mass function alone", but 1.0961 and 0.8215 M☉ count the companions the mass function implies
+    (`fates.rs`); "on the mass function and the companions it implies" would be exact (science
+    review). Applied as queued.
+  - _A stale Consumes line._ This plan's Consumes bullet for plan 08 still says "only P08.T1–T7
+    are built" at `d2787a2`; P08.T9, T12 and T13 are built. Left for the plan's next
+    re-validation.
