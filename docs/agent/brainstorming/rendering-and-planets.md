@@ -3147,8 +3147,11 @@ and the rest — and their answers are leans in the body, listed under [Decision
    over a baked reflecting boundary and a baked plane-parallel table beneath. Bruneton's iterated
    orders are not the fallback: they diverge in exactly this regime. What remains is the path-traced
    reference itself, a spherical Monte Carlo independent of the bakes, which every baked table must
-   match to 5% in radiance, wherever in the view a difference could be seen, before Venus- and
-   Titan-class atmospheres ship ([Atmosphere](#atmosphere)).
+   match to 5% in radiance, wherever in the view a difference could be seen, before the atmospheres
+   it replaces are presented as computed, Earth-class ones among them ([Atmosphere](#atmosphere)).
+   _Amended 2026-10-27 with the Atmosphere section (`decision-r08-t13c2-classes.md` §7): R08.T13's
+   measurement puts Earth-, Mars- and Saturn-class airs in the thick regime, so the rule binds them
+   too; the standard and the bake are unchanged._
 4. **Whether the coarse field is persisted.** **Lean:** not persisted. The server recomputes it and
    caches it keyed by seed, generator version and body, so the coarse pass stays bit-identical on
    every machine a server may run on. Knowledge records coverage only, as survey passes: one versioned

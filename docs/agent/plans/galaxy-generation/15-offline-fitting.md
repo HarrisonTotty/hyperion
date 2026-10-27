@@ -1828,7 +1828,7 @@ T8.a–c's blocks leave the provisional set with their adoption lane, which move
 | LBV sampler           | P15.T10.a    | 09       | M3        | 06, 09 | fast  | plan 09           |
 | Orphan streams        | P15.T11      | 10       | M3        | 10     | slow  | plan 10           |
 | Chabrier branch scale | P15.T4       | 02       | M4        | 11     | fast  | plan 02           |
-| Merged-binary fate    | P15.T5.c     | 09, 11   | M4        | 09, 11 | slow  | plan 11           |
+| Merged-binary fate    | P15.T5.c     | 09, 11   | n/a       | 09, 11 | n/a   | plan 11           |
 | Type Ia yield, mark   | P15.T9.b     | 11       | M4        | P11.T6 | slow  | plan 11           |
 | Binary class samplers | P15.T10.b    | 11       | M4        | P11.T8 | slow  | plan 11           |
 
@@ -1841,9 +1841,12 @@ more, since P09.T9.b's retention is the default fate's reading, and it moves not
 M4 and slow no longer hold (decision-p15-revalidation Q4); P15.T9.b needs P11.T6, and T10.b
 P11.T8; T10.a needs P09.T43, its consumer; T11.b needs P10.T5–T6. T3.c rides version 25 (S1), and
 T6's production run starts from 25's commit and lands with 26 (S2). T7.b's swap rides the first
-galaxy train after its gate. Built: T1, T2, T4, T5.a (its production run is P06.T19.e's), T6.a–g,
-T7.a, T8.a–c (production at their committed values by decision-p15-t8-blocks, adopted by T8.d;
-no bump), T8.d and T9.a.
+galaxy train after its gate. Built: T1, T2, T4, T5.a (its production run is P06.T19.e's), T5.b–d
+(T5.c a guard, so its row has no milestone or class; Risks, "T5.d, T5.b and T5.c as built"),
+T6.a–g, T7.a, T7.b's first landing (the table still P06.T17's identity, its fit to scratch;
+Risks, "T7.b as built"), T8.a–c (production at their committed values by
+decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a and T11.a (`streams` registered,
+provisional; Risks, "T11.a as built").
 
 ## Verification
 

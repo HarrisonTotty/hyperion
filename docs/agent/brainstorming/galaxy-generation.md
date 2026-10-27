@@ -1227,9 +1227,9 @@ Ia.
 - **A monotone phase**, for cycles of accumulation and release. An event falls where t ÷ P plus a
   bounded-slope noise crosses an integer, which keeps events in order while letting the phase
   wander, with an optional skip mark for strongly irregular sources. A plain jittered lattice is
-  wrong, because its phase never diffuses. Classical and recurrent novae, with P from the ignition
-  mass and the accretion rate, dwarf novae, X-ray transients and bursts, Vela-like glitches, and
-  thermal pulses on the asymptotic giant branch.
+  wrong for internally timed cycles, because its phase never diffuses. Classical and recurrent
+  novae, with P from the ignition mass and the accretion rate, dwarf novae, X-ray transients and
+  bursts, Vela-like glitches, and thermal pulses on the asymptotic giant branch.
 
 No event may leave a mark that needs history replayed: a cumulative effect must be a closed form in
 the event number, as a pulsar's spin-down already includes its mean glitch activity, or vanish
@@ -2529,7 +2529,9 @@ belongs to the generator version and has a named source to fit against:
 - The Type Ia yield table and the conditional samplers of the other catalogue classes, against the
   binary formulae and the observed rates.
 - Black-hole loss from clusters, against the CMC cluster catalogue; the partial-equipartition
-  exponent, against multimass King models; the pulsar count against encounter rate.
+  exponent, against multimass King models; the pulsar count against encounter rate. _Done
+  2026-10-26 (plan 15's P15.T8.a–d; decision-p15-t8-blocks): the three blocks keep their
+  committed values as production, with no bump; the fits' own figures are reported in plan 15._
 - The number of orphan streams per globular cluster, 1.5 and uncertain threefold.
 - The helium correction to lifetimes and the horizontal branch.
 - The scaling of Chabrier's high-mass branch, now the default's, fitted together with the binary
