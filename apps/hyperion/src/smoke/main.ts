@@ -171,10 +171,14 @@ const childSwitches =
 // Before `ready`: Chromium reads its switches when the GPU process starts.
 applyGraphicsSwitches(app.commandLine, childSwitches);
 
-/** How long a run may take before the watchdog ends it: part 1's grows with the captures. */
+/**
+ * How long a run may take before the watchdog ends it: part 1's grows with the captures and with
+ * the GPU timings.
+ */
 const WATCHDOG_MS = smokeWatchdogMs({
   part,
   captures: capturesDir !== "",
+  gpuTiming: gpuTiming === "1",
   soakSeconds,
   childSeconds,
 });

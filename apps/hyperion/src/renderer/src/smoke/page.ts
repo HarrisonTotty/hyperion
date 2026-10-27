@@ -25,10 +25,11 @@
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
  * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
  * frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
- * engine of its own, whose device it destroys). Two groups of part 1 run only when asked:
- * R08.T8.c's far limb's timings, after the low pick, when the run lifted timestamp quantization
- * (`gpuTiming`, the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's
- * eclipse captures, with the other captures; a plain `just test-render` runs neither.
+ * engine of its own, whose device it destroys). Three groups of part 1 run only when asked:
+ * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
+ * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
+ * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
+ * captures, with the other captures; a plain `just test-render` runs none of them.
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -65,6 +66,7 @@ import {
   timeFarLimb,
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
+import { timeAtmosphereFrame } from "./frameTiming";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
@@ -140,8 +142,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
  * materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
  * among them; part 1 also takes the captures, R08.T8.c's far limb's among them, when asked, under
- * the same watchdog, and R08.T8.c's far limb's timings when the run lifted timestamp quantization
- * (`gpuTiming`).
+ * the same watchdog, and R08.T8.c's far limb's timings and R08.T11's photorealistic frame's
+ * timings when the run lifted timestamp quantization (`gpuTiming`), under an allowance of their
+ * own (`result.ts`' `GPU_TIMING_WATCHDOG_MS`).
  *
  * @remarks
  * R08.T8.c's footprints, whose nodes the twins and SwiftShader march on every limb from above the
@@ -357,6 +360,9 @@ async function run(
   // lifted their quantization.
   if (gpuTiming) {
     await group(1, "R08.T8.c the far limb's timings", () => timeFarLimb(engine, checks));
+    await group(1, "R08.T11 the photorealistic frame's timings", () =>
+      timeAtmosphereFrame(engine, checks),
+    );
   }
   await group(1, "R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
   await group(1, "R07.T14.b bloom and glare", () =>

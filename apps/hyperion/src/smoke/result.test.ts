@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CAPTURES_WATCHDOG_MS,
+  GPU_TIMING_WATCHDOG_MS,
   isOfflineUrl,
   isUncapturedGpuError,
   judgeSmokeRun,
@@ -125,7 +126,7 @@ describe("readSmokeImages", () => {
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
 describe("smokeWatchdogMs", () => {
-  const plain = { part: "1", captures: false, soakSeconds: 0, childSeconds: 0 };
+  const plain = { part: "1", captures: false, gpuTiming: false, soakSeconds: 0, childSeconds: 0 };
 
   it("is 180 s for a run without the captures", () => {
     expect(SMOKE_WATCHDOG_BASE_MS).toBe(180_000);
@@ -145,6 +146,23 @@ describe("smokeWatchdogMs", () => {
   it("adds nothing for the captures to parts 2 to 11, which take none", () => {
     for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]) {
       expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
+    }
+  });
+
+  it("adds the GPU timings' allowance to part 1 and to every part at once", () => {
+    for (const part of ["1", "all"]) {
+      expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(
+        180_000 + GPU_TIMING_WATCHDOG_MS,
+      );
+      expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true, captures: true })).toBe(
+        180_000 + GPU_TIMING_WATCHDOG_MS + CAPTURES_WATCHDOG_MS,
+      );
+    }
+  });
+
+  it("adds nothing for the GPU timings to parts 2 to 11, which take none", () => {
+    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]) {
+      expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(180_000);
     }
   });
 

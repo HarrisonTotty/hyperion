@@ -64,12 +64,30 @@ export const SMOKE_WATCHDOG_BASE_MS = 180_000;
  */
 export const CAPTURES_WATCHDOG_MS = 1_380_000;
 
+/**
+ * What part 1's watchdog gains when the run lifts timestamp quantization (`--smoke-gpu-timing=1`,
+ * the hardware runs of R01.T11), ms: the timing groups' allowance, R08.T8.c's far limb's timings
+ * and R08.T11's photorealistic frame's timings (`frameTiming.ts`), which run only then and are
+ * part 1's, beside its checks.
+ *
+ * @remarks
+ * Three times the two groups' measured time, rounded up to the minute. Measured 2026-10-26 on the
+ * RTX 3080 in an untimed, hidden run of part 1 on a shared machine (a 1-minute load of 12.4 at the
+ * start): R08.T8.c's timings 2.4 s and R08.T11's group 145.8 s, 148.2 s in all, and part 1's
+ * groups 172.5 s. Three times 148.2 s is 444.6 s, 8 minutes rounded up. No `just test-render` run
+ * lifts quantization (SwiftShader has no `timestamp-query`), so `scripts/testRender.sh`'s outer
+ * limit takes none of it.
+ */
+export const GPU_TIMING_WATCHDOG_MS = 480_000;
+
 /** What sets a run's watchdog: the main process's switches. */
 export interface SmokeWatchdogInputs {
   /** `--smoke-part`'s value: `1` to `11`, or `all`. */
   readonly part: string;
   /** Whether `--smoke-captures` asks for the capture frames. */
   readonly captures: boolean;
+  /** Whether `--smoke-gpu-timing=1` lifts timestamp quantization, which part 1's timings take. */
+  readonly gpuTiming: boolean;
   /** `--smoke-soak`'s seconds, 0 for none. */
   readonly soakSeconds: number;
   /** `--smoke-child`'s seconds, 0 for none. */
@@ -78,13 +96,16 @@ export interface SmokeWatchdogInputs {
 
 /**
  * A run's watchdog, ms: {@link SMOKE_WATCHDOG_BASE_MS}, plus the soak's and the child window's
- * seconds, plus {@link CAPTURES_WATCHDOG_MS} where the captures are asked for and the run takes
+ * seconds, plus {@link CAPTURES_WATCHDOG_MS} where the captures are asked for and
+ * {@link GPU_TIMING_WATCHDOG_MS} where timestamp quantization is lifted, each where the run takes
  * part 1, whose groups they are (part 1 or all of them).
  */
 export function smokeWatchdogMs(inputs: SmokeWatchdogInputs): number {
-  const { part, captures, soakSeconds, childSeconds } = inputs;
-  const capturesMs = captures && (part === "1" || part === "all") ? CAPTURES_WATCHDOG_MS : 0;
-  return SMOKE_WATCHDOG_BASE_MS + (soakSeconds + childSeconds) * 1000 + capturesMs;
+  const { part, captures, gpuTiming, soakSeconds, childSeconds } = inputs;
+  const partOne = part === "1" || part === "all";
+  const capturesMs = captures && partOne ? CAPTURES_WATCHDOG_MS : 0;
+  const timingMs = gpuTiming && partOne ? GPU_TIMING_WATCHDOG_MS : 0;
+  return SMOKE_WATCHDOG_BASE_MS + (soakSeconds + childSeconds) * 1000 + capturesMs + timingMs;
 }
 
 /** Whether a URL may load in the harness: the built page and inline data only. */

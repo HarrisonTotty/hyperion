@@ -360,10 +360,10 @@ function sunAt(elevationDeg: number): SunState {
 const SURFACE_GREY = 0.02;
 
 /** The exposure the smoke's frames are drawn at, EV100: 15. */
-const SMOKE_EV100 = 15;
+export const SMOKE_EV100 = 15;
 
 /** The pre-exposure the smoke's frames are drawn at, {@link SMOKE_EV100}'s. */
-const SMOKE_EXPOSURE_SCALE = exposureScale(SMOKE_EV100);
+export const SMOKE_EXPOSURE_SCALE = exposureScale(SMOKE_EV100);
 
 /**
  * The twins' view of a frame `atmosphere` draws for `suns` at {@link SMOKE_EXPOSURE_SCALE}: each
@@ -476,7 +476,12 @@ async function compositeFrame(
   );
 }
 
-function requireDepth(depth: TextureHandle | null): TextureHandle {
+/**
+ * A scene target's depth, which every composite reads.
+ *
+ * @throws Error for a target made without depth.
+ */
+export function requireDepth(depth: TextureHandle | null): TextureHandle {
   if (depth === null) {
     throw new Error("the scene target has no depth");
   }
@@ -2441,7 +2446,7 @@ function sphereFigure(radiusM: number): SpheroidFigure {
  * One body of R08.T6.g's and R08.T6.f's checks: its figure, its medium and gravity, its cameras'
  * heights, its limb cameras and any further view.
  */
-interface HeightsBody {
+export interface HeightsBody {
   /**
    * The task whose check it is, which names the check: R08.T6.g's, R08.T6.i's slab Earth or
    * R08.T6.f's.
@@ -2893,7 +2898,7 @@ const LIMB_HALF_SPAN_M = 150_000;
  * Where a {@link limbCamera}'s frame looks, and where the camera stands (R08.T8.b): each member
  * absent takes R08.T6.g's limb frame, at longitude 0.
  */
-interface LimbFrame {
+export interface LimbFrame {
   /** The tangent height the frame is centred on, m; {@link LIMB_CENTRE_M} where absent. */
   readonly centreM?: number;
   /**
@@ -3997,7 +4002,7 @@ export async function checkAtmosphereLayerEdges(
  * every per-view sphere R_α), R05's Earth medium, on R08.T6.g's heights and limbs, whose views were
  * R08.T6.g's until R08.T6.f put them on the oblate twins.
  */
-const SLICES_EARTH: HeightsBody = {
+export const SLICES_EARTH: HeightsBody = {
   task: "R08.T6.f",
   name: "Earth",
   figure: WGS84,
@@ -5310,7 +5315,7 @@ const FAR_LIMB_SUNS_DEG = [20, -2] as const;
  * The far limb's cameras' longitude, rad: off every axis, so that the camera's position in `f32`
  * carries the 2ε|P| rounding the envelope stands for; R08.T6.g's and R08.T6.f's limbs stand at 0.
  */
-const FAR_LIMB_LONGITUDE_RAD = 1;
+export const FAR_LIMB_LONGITUDE_RAD = 1;
 
 /** Texels a row of the far limb's frames gives the medium's lowest scale height: 5, at least 4. */
 const FAR_LIMB_ROWS_PER_SCALE_HEIGHT = 5;
@@ -6819,7 +6824,7 @@ const CANVAS_1080P_HEIGHT_PX = 1_080;
  * from: high at the 1080p canvas's 1,920 × 1,080, low at its `renderHeightPx` rows, 1,280 × 720
  * (`qualitySetting.ts`'s `SETTINGS`).
  */
-function settingOutput(setting: QualitySetting): ViewSize {
+export function settingOutput(setting: QualitySetting): ViewSize {
   const heightPx = SETTINGS[setting].terrain.renderHeightPx ?? CANVAS_1080P_HEIGHT_PX;
   return { widthPx: Math.round((heightPx * 16) / 9), heightPx };
 }
@@ -6840,7 +6845,7 @@ function outputPixelTan(setting: QualitySetting): number {
  * R08's "Deviations in T8.b, as built"), 2.55 × 10⁷ m (where the 1 H row reaches s = 1 by the
  * table's local scale height, R08.T8.c) and 10⁸ m.
  */
-const FAR_LIMB_TIMING_PLACES: ReadonlyArray<{
+export const FAR_LIMB_TIMING_PLACES: ReadonlyArray<{
   readonly label: string;
   readonly distanceM: number;
 }> = [
@@ -6864,8 +6869,9 @@ const FAR_LIMB_TIMED_ROUNDS = 60;
 const FAR_LIMB_FENCE_ROUNDS = 10;
 
 /** The timed frames' sun: 30° from the zenith at the limb's tangent point, 90° right of the view. */
-const FAR_LIMB_TIMING_SUN_ZENITH_DEG = 30;
-const FAR_LIMB_TIMING_SUN_AZIMUTH_DEG = 90;
+export const FAR_LIMB_TIMING_SUN_ZENITH_DEG = 30;
+/** The timed frames' sun's azimuth from the view's direction, clockwise seen from above: 90°. */
+export const FAR_LIMB_TIMING_SUN_AZIMUTH_DEG = 90;
 
 /**
  * The label of the per-frame kernels' passes (`hillaire.ts`'s `#dispatchFrame`): the sky view, the
@@ -6881,10 +6887,13 @@ const FAR_LIMB_TIMING_LABEL = "far limb timing";
 const FAR_LIMB_TIMING_COMPOSITE_PASS = `${FAR_LIMB_TIMING_LABEL} composite`;
 
 /** Dawn's timestamp quantum where quantization is not lifted, ns (R01 Design note 4). */
-const QUANTIZED_TIMESTAMP_NS = 65_536;
+export const QUANTIZED_TIMESTAMP_NS = 65_536;
 
 /** The place of the far limb's timed cameras: the datum's edge, at the far limb's longitude. */
-const FAR_LIMB_TIMING_FRAME: LimbFrame = { centreM: 0, longitudeRad: FAR_LIMB_LONGITUDE_RAD };
+export const FAR_LIMB_TIMING_FRAME: LimbFrame = {
+  centreM: 0,
+  longitudeRad: FAR_LIMB_LONGITUDE_RAD,
+};
 
 /**
  * A far limb's timed camera (R08.T8.c): `distanceM` from the centre on the equator at longitude
@@ -6892,7 +6901,7 @@ const FAR_LIMB_TIMING_FRAME: LimbFrame = { centreM: 0, longitudeRad: FAR_LIMB_LO
  * the limb level across a frame of `viewport` at the view's 60° across: {@link limbCamera}'s, its
  * half-span of tangent height the 60° field's at the tangent point.
  */
-function farLimbTimingCamera(distanceM: number, viewport: ViewSize): AtmosphereCamera {
+export function farLimbTimingCamera(distanceM: number, viewport: ViewSize): AtmosphereCamera {
   const figure = SLICES_EARTH.figure;
   const frame = FAR_LIMB_TIMING_FRAME;
   const tanY = (Math.tan(FAR_LIMB_FIELD_X_RAD / 2) * viewport.heightPx) / viewport.widthPx;
@@ -6905,7 +6914,7 @@ function farLimbTimingCamera(distanceM: number, viewport: ViewSize): AtmosphereC
  * the view's direction there, clockwise seen from above (90° the frame's right), for the camera
  * `frame` places, the Sun at 1 au: {@link limbSun} at any azimuth.
  */
-function limbSunToward(
+export function limbSunToward(
   distanceM: number,
   figure: SpheroidFigure,
   zenithDeg: number,
@@ -7018,7 +7027,7 @@ interface FarLimbTimedSetting {
 }
 
 /** The median and 95th percentile of times in ns, as µs to a tenth: `median / p95`. */
-function microsecondsOf(valuesNs: readonly number[]): string {
+export function microsecondsOf(valuesNs: readonly number[]): string {
   const at = (p: number): string => (percentile(valuesNs, p) / 1_000).toFixed(1);
   return `${at(0.5)} / ${at(0.95)}`;
 }
