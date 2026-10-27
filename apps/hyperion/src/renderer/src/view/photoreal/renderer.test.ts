@@ -46,6 +46,8 @@ import {
   RAY_MARCH_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_SPECIAL_KERNEL,
   SKY_VIEW_KERNEL,
   tableRadiusM,
 } from "../atmosphere/hillaire";
@@ -815,12 +817,14 @@ async function overlayDatums(
 /**
  * Every kernel VIEW makes on a device (plan R01, R01.T15): the photorealistic renderer's histogram
  * and disc cells; the atmosphere's per-frame kernels, its sky view, aerial perspective, its two
- * marches' centre and footprint entry points under R08.T11.d's tile cull and the march's fill; its
- * per-planet tables' four; and the sky bake's four. Each is a module constant, its WGSL fixed text
- * with no value of a medium, a body or a setting in it (term counts, slices, bands and light slots
- * are uniforms), so the records a device's cache holds for VIEW are bounded by this list's length,
- * 17, however many bodies a session visits. The smoke's kernel arm (`withKernelArmFormat`, ten
- * more) and its probes are the smoke's alone.
+ * marches' footprint entry points, each general and specialised for one band and no layer edge
+ * (R08.T11.d), their centre ray's entry points under R08.T11.d's tile cull (off for a view) and the
+ * march's fill; its per-planet tables' four; and the sky bake's four. Each is a module constant, its
+ * WGSL fixed text with no value of a medium, a body or a setting in it (term counts, slices, bands
+ * and light slots are uniforms; the specialised march is one variant of fixed text, chosen from the
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 19,
+ * however many bodies a session visits. The smoke's kernel arm (`withKernelArmFormat`, twelve more)
+ * and its probes are the smoke's alone.
  */
 const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   HISTOGRAM_KERNEL,
@@ -831,6 +835,8 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   TRANSMITTANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
@@ -986,11 +992,12 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     const bound = new Set(VIEW_KERNELS.map(keyOf));
     expect(bound.size).toBe(VIEW_KERNELS.length);
     expect([...distinct].filter((key) => !bound.has(key))).toEqual([]);
-    // Every kind of air has been met by its first body; none after adds a kernel. All but five
-    // are made: the sky bake's four are the sky's, and the march's fill a reader's, which no
-    // frame asks.
+    // Every kind of air has been met by its first body; none after adds a kernel. All but seven
+    // are made: the sky bake's four are the sky's, the march's fill a reader's, which no frame
+    // asks, and the tile cull's two centre ray's kernels its own cover's, which a view never takes
+    // (R08.T11.d).
     expect(new Set(held.slice(kinds.length - 1))).toEqual(new Set([held.at(-1)]));
-    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 1);
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 3);
     // Each body's tables made their own handles all the while.
     expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
     renderer.dispose();
