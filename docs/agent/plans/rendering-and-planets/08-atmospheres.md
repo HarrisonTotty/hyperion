@@ -536,13 +536,28 @@ export function bakeMultipleScattering(
 ): MsSourceTable;
 /** Above: the deck as a reflecting boundary; below: downwelling radiance. One latitude band. */
 export function bakeDeck(medium: AtmosphereMedium, deckAltitudeM: number, band: number): DeckTables;
+/** Everything of the correction but the band (R08.T14.e, as built): the column's optics with each
+ * term's matrix moments at the render channels (and 570 nm for the layers), the thick bake's
+ * layers, and each light's exponential sums in the channels' bins. */
+export function preparePolarisation(
+  column: SpectralColumn,
+  lights: ReadonlyArray<ThickBakeLight>,
+  options?: PolarisationOptions, // grid, sums, wavelengths, moment order, `depolarising` for tests
+): PreparedPolarisation;
 /** ΔJ_pol(h, μ₀, μ_v, m), m = 0..2: the vector-minus-scalar source function (I) of one 8-stream
- * discrete-ordinates solve of the medium, at the render channels, for one latitude band. Added
- * to the multiple-scattering term of thin and thick worlds alike (Design note 10, R08.T14.e). */
+ * discrete-ordinates solve of the medium, sr⁻¹ per unit of the star's irradiance and of the
+ * column's whole σ_s (forward deltas included), at the render channels, one table a light, for one
+ * latitude band, on the thick bake's grid. Added, as σ_s Σ_m ΔJ_m cos mΔφ with that σ_s, to the
+ * multiple-scattering term of thin and thick worlds alike (Design note 10). f64, in the optics
+ * worker (`polarisation-bake`). */
 export function bakePolarisationCorrection(
-  medium: AtmosphereMedium,
+  prepared: PreparedPolarisation,
+  body: ThickBakeBody,
   band: number,
 ): PolarisationTable;
+/** Whether a world needs it: some scattering term with a matrix whose b₁ ≠ 0 (every world with
+ * air, by its molecular term; else its aerosols' matrices at the green channel). */
+export function needsPolarisationCorrection(column: SpectralColumn): boolean;
 ```
 
 Files: `thick/regime.ts` (R08.T13), `thick/discreteOrdinates.ts` and `thick/bake.ts` (R08.T14),
@@ -19999,6 +20014,380 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
   - _A Cholesky that does not throw._ `expSum.ts` keeps its own `definiteSolve` for the fit's damped
     steps, where a matrix that is not positive definite is an outcome, since `linearAlgebra.ts`'s
     `choleskyLower` throws; T14.a's module could give both the non-throwing form.
+- **Deviations in T14.e, as built** (2026-10-27; `thick/polarisation.ts`,
+  `thick/polarisationFixtures.ts`, `thick/polarisation.test.ts`, `thick/polarisationBake.test.ts`,
+  `thick/polarisationJob.test.ts` and `thick/polarisation.bench.ts`; `thick/linearAlgebra.ts` and
+  its test; `thick/bake.ts`; `opticsJobs.ts`, `opticsMessages.ts`, `optics.worker.ts`'s docs and
+  `tsconfig.worker.json`; decision-r08-vector item 2, decision-r08-t14a-scope ruling 3).
+  - _The signatures._ T14.b's shape, in place of the sketch's `(medium, band)` (Provides updated):
+    - `preparePolarisation(column, lights, options?): PreparedPolarisation`, the band-independent
+      part: the column's optics with each term's matrix moments at the render channels (and at
+      570 nm for the layers), the thick bake's layers, and each light's exponential sums in the
+      channels' bins. `options` takes the grid, the sums' options, `wavelengthsNm` (the channels by
+      default; the bake bins for test 6), `momentOrder` (16, enough for the tests' 16-stream
+      delta-M) and `matrices` (`drawn`, or `depolarising` for test 3).
+    - then `bakePolarisationCorrection(prepared, body, band): PolarisationTable`, one
+      `PolarisationSlot` a light.
+    - Also exported: `solvePolarised(problem)` and `stokesAtAzimuth`, the vector mode;
+      `polarisationSources(prepared, body, band, point, { streams, maxMode })`, one wavelength's
+      vector and scalar sources at any streams and modes, the tests' and T14.f's if it needs the
+      bins; `needsPolarisationCorrection(column)`; `wignerD`, `rayleighMatrixMoments`,
+      `tableMatrixMoments`, `depolarisingMoments`, `truncateMatrixMoments` and
+      `meridianPhaseMatrix` (the tests');
+      `POLARISATION_STREAMS` (8), `POLARISATION_MODES` (3) and `POLARISATION_MOMENT_ORDER` (16).
+  - _The vector mode_ (derived here, then checked against Siewert 2000 eqs. 2–6, 8–9 and 26 and
+    Hovenier and van der Mee 1983 eqs. 87, 107, 113–117, 187–189 and 207, as the research agent
+    read them; the module's remarks).
+    - The phase matrix's modes were derived through the circular-polarisation representation and
+      the d-functions' addition theorem: Π^m = Σ_l (2l + 1) P^m_l B_l P^m_l, Siewert's A^m and
+      Hovenier and van der Mee's W^j. A test holds the modes' sum to F rotated geometrically into
+      the meridian frames, for Rayleigh and for a matrix with b₂, to 1.0 × 10⁻¹⁵.
+    - The scattering matrix is written in Wigner's d^l_mn: a₁ and a₄ in d^l_00, a₂ ± a₃ in
+      d^l_2,±2, b₁ and b₂ in d^l_02, each moment the coefficient over 2l + 1 (`MatrixMoments`, a₁'s
+      the scalar χ_l).
+    - a₁ … a₄ are de Rooij and van der Stap's α over 2l + 1, but b₁ and b₂ are their −β over
+      2l + 1: their P^l_02 is −d^l_02 (Mishchenko, Travis and Lacis 2002, eq. B.30; Hovenier and
+      van der Mee 1983, eq. A20). Published coefficients load with that sign (the science check).
+      Both moment routines integrate against d^l_02 directly, so no value changed.
+    - Hovenier and van der Mee's B_l (eqs. 178–179, after Siewert 1981) carries −ε_l at (3, 4),
+      which their eq. 204 makes (2l + 1) b₂ here: the same entry, and V's sign theirs. The first
+      record's "Siewert's B_l carries −ε where this one carries b₂, which flips V" is withdrawn.
+      The science check traced it to the generalised spherical functions' sign, and Siewert
+      2000's own expansion of b₂ could not be re-read.
+    - _The frame_ is the tracer's (lean kept): e₁ = ∂k ÷ ∂θ, e₂ = k × e₁, Δφ counted from north
+      toward east in an east, north, up frame, clockwise seen from above. T in P^m_l is
+      ½(d^l_m,−2 − d^l_m2) in that sense. The first build counted Δφ anticlockwise, and Natraj's U
+      came out with the tracer's opposite sign; the tracer's `LocalFrame` (azimuth north to east)
+      settled it. With it, the solver matches Natraj's I and their Q and U negated, which are the
+      tracer's (`benchmarks.rs`'s `NATRAJ_2009_SIGNS`).
+    - The frame's construction is the mirror image of Hovenier and van der Mee's, who count azimuth
+      anticlockwise seen from above (p. 6) and take r × ℓ = k (p. 7). Its Stokes parameters at a
+      relative azimuth are theirs (eqs. 87–95), which the science check reproduced to
+      6.6 × 10⁻¹⁵.
+    - _The components_: (I, Q) at m = 0, where U and V vanish; (I, Q, U) past it, and V too where
+      some layer's b₂ is not 0 (`circular`), since with b₂ = 0 V decouples and stays 0.
+    - _The eigenproblem._ With J⁻ = Δ I⁻ the system is the scalar solver's, α ± β built of the
+      matrix kernel's parity parts.
+      - Where b₂ = 0, S± are symmetric and the scalar solver's Cholesky-and-Jacobi reduction
+        carries over, its k² real. m = 0, which carries no V, is always symmetric.
+      - Where a layer has b₂, it is solved by `linearAlgebra.ts`'s new `realEigen` on (−P)(−Q).
+        A complex pair k, k̄ gives the real solutions Re and Im of G e^{−kt} (Siewert 2000's
+        eqs. 45–46 form). The faces, the user-angle integrals (ψ and φ in complex arithmetic) and
+        the resonance window (|k − λ| ≤ h λ) take them as they are.
+      - The particular solution: on the symmetric path, through each layer-mode's maps (Yᵀ Lᵀ,
+        Yᵀ L⁻¹, D L Y, D L⁻ᵀ Y, D L⁻ᵀ L⁻¹), as the scalar solver's eigenbasis form; on the other,
+        by dense elimination of ((−P)(−Q) − λ²) a beam and layer.
+      - The source at the user cosines is a matrix a layer-mode, (2 U C) × (2 N C), applied to
+        each solution and each beam.
+    - _ω = 1_ is the conservative solution at m = 0, no dither: the null pair replaced by the
+      unpolarised I = 1 and I = t ± u, u = −(α − β)⁻¹ 𝟙 with 𝟙 = (1, 0) at each node. Energy holds
+      to 2.5 × 10⁻¹⁴ (test 2).
+    - _The ground and the beam_: the Lambertian ground reflects I alone, depolarised; the beam is
+      unpolarised, of flux 1 normal to itself; the pseudo-spherical seam is the scalar solver's.
+  - _The matrices._
+    - Rayleigh's moments are closed (`rayleighMatrixMoments`). They are Hansen and Travis 1974's
+      eqs. 2.15–2.16, Δ = (1 − ρ) ÷ (1 + ρ ÷ 2), Δ′ = (1 − 2ρ) ÷ (1 − ρ), Δ′ on a₄ alone (as the
+      research agent read the paper, p. 541):
+      - a₁_2 = Δ ÷ 10, `spectralColumn.ts`'s χ₂ to the bit;
+      - a₂_2 = 3Δ ÷ 5, a₃ = 0, a₄_1 = ΔΔ′ ÷ 2, b₁_2 = −Δ √6 ÷ 10 and b₂ = 0.
+      - A 32-point Gauss–Legendre quadrature of the matrix holds each to 10⁻¹⁴, at ρ 0, 0.0279
+        and 0.09.
+    - A tabulated term's other moments come from its `PhaseMatrixTable` on its own u, by
+      `phaseTableMoment`'s quadrature; Rayleigh's matrix laid on the tables' u gives them to
+      1.2 × 10⁻⁵, the interpolant's error. Its a₁ is `phaseMoments`', the scalar's.
+    - A term with no matrix is a₁ alone. The terms mix by their scattering, as the thick bake
+      mixes χ_l.
+  - _Delta-M on the matrix_ (derived here; none of the papers read truncates the whole matrix,
+    and Hovenier and van der Mee 1983, p. 11, call it an open problem).
+    - f = max(a₁_NSTR, f_c, 0), τ′ and ω′ as the thick bake's `deltaMLayer`.
+    - One τ′ for all four components takes the removed peak as the identity: ωf M I joins the
+      extinction as (1 − ωf) I only where M = 1.
+    - So every element keeps its moments below NSTR. This is the DISORT report's eq. 54b (Stamnes,
+      Tsay, Wiscombe and Laszlo 2000, v1.1) applied to each element: a₂, a₃ and a₄ lose f, and b₁
+      and b₂ become b ÷ (1 − f) (`truncateMatrixMoments`). A test holds (1 − f) x′ + f = x to
+      10⁻¹⁵.
+    - For a term with a matrix, the identity is its own forward matrix (as `aerosol.ts` lays a
+      forward peak). A depolariser's own peak would take Q, U and V out of the beam. The negative
+      a₂′ … a₄′ that result (−f ÷ (1 − f) for a depolariser alone) are that removal, kept to
+      NSTR.
+    - _Changed after the science check._
+      - The first build took a depolariser's peak as a₁ alone, so a₂ … a₄ lost only f η (η the
+        share of the peak the terms with a matrix carry).
+      - Since one τ′ takes every peak as the identity, that solved a problem whose a₂ … a₄ were
+        x + f(1 − η) (the science check).
+      - Measured on nine slabs, against 64- and 128-stream solves of the same moments at m ≤ 2:
+        air at ρ 0.0279 and τ 0.1–0.3, with a depolarising Henyey–Greenstein aerosol of g 0.7–0.95
+        and τ 0.1–1. The moment-preserving rule misses ΔI by 0.6–23 × 10⁻⁶, and the first rule by
+        0.5–41 × 10⁻⁵, 3 to 18 times more. At g 0.95 with τ 0.3 of each, the misses are 1.3% and
+        24% of the largest ΔI.
+      - No slab was refused: negative moments only make −P more definite. A test holds that slab
+        to 2%.
+      - The science check leaned to keeping the first rule and restating its model (a
+        depolariser's peak passing polarisation, as a real diffraction peak does). The measurement
+        chose this rule, for the brief's stated approximation of total depolarisers.
+    - η is 1 on all four columns (Mie, MMF and Rayleigh, whose own peak is 0), so no figure of
+      tests 4–6 moves. Test 3 holds whatever the truncation: with no b, Q is never made.
+    - Where it bites: T14.f's kept scenes, `TEST EARTH`'s Cornette–Shanks aerosol and
+      `TEST MARS`'s tabulated dust, are depolarisers mixed with air (T14.f's ruling of
+      2026-10-27).
+  - _The bake._
+    - Its layers are the thick bake's to the bit (`bakeLayering` on the 570 nm optics), so a thick
+      world's two tables share their 33 altitudes; the table holds the same grid.
+    - The beam is `sphericalBeamPath` on the channel's delta-M depths, and both halves share it,
+      the layers and the truncation.
+    - The channels' optics are `spectralOptics(column, CHANNEL_WAVELENGTHS_NM)`, the drawn terms'
+      to the bit.
+    - _Absorbers_ (lean kept): each channel reads its gases through the bake bin that holds its
+      wavelength (645, 544 and 433.6 nm in bins 10, 6 and 2), with the thick bake's own fits
+      (`bakeLightBins`), one pair of solves a term, ΔJ summed by the terms' weights.
+    - The ground's albedo is the channel's own.
+    - _ΔJ's unit and frame_ (lean kept), for T14.f.
+      - ΔJ is per steradian and per unit of the star's irradiance normal to its beam at the top.
+      - It is per unit of the column's whole σ_s at h\*, every scattering term's forward delta
+        included (`PolarisationSources.scatteringPerM`, the reference medium's per unit of true
+        length).
+      - It is (E_vector − E_scalar) ÷ σ_s, with E the thick bake's emission of orders two and up in
+        the kernels' frame (they march with σ_ext − f_c σ_s and add their exact single scattering),
+        each solve's E taken at 8 streams with the point's own optics. The single scattering and
+        the aureole's term are the same in both halves and cancel.
+      - T14.f adds σ_s Σ_m ΔJ_m cos mΔφ with that whole σ_s, multiplied by the star's colour as
+        every table is; the sense of Δφ does not matter to cos.
+      - A kernel whose σ_s leaves the forward delta out, σ_s,k = Σ (1 − f_c) σ_s (`tables.ts`'s
+        `withoutForwardDelta`), multiplies by σ_s,k ÷ (1 − f̄_c), f̄_c the σ_s-weighted delta.
+      - T14.c's lever (T13.d's ruling, 2026-10-27), one summed table of m = 0..2 on a
+        `thickScattering` world: the table's altitudes, μ₀ and μ_v are T14.b's to the bit, from
+        the same grid. So the sum is E + σ_s ΔJ_m at each point, with the whole σ_s, and
+        T14.b's E holds m = 0 and 1 alone, so m = 2 is σ_s ΔJ_2.
+    - _The beam_: μ₀ ∈ (0, 1], where T14.b's beam is defined at every height, so no entry is set
+      to 0 for want of a beam. μ₀ ≤ 0 lies outside the table, for T14.c and T14.d.
+    - _The table_: `[altitude][μ₀][μ_v][m][RGB]`, 33 × 32 × 16 × 3 × 3, 608,256 B a band and light
+      as `f32`; as T14.f would pack it in `rgba16float`, 304,128 B of RGB before any padding to
+      four channels (405,504 B padded), one band and light. Padded, that is just over the Risks'
+      0.20–0.39 MB a band: 33 altitudes and three modes.
+    - _Which worlds_ (lean kept): `needsPolarisationCorrection(column)` is true when a molecular
+      or Thomson term has any density (Rayleigh's b₁ = −¾Δ sin²Θ, Δ > 0 for ρ < 1), so every
+      world with air. A column with neither is judged by its aerosols' matrices at the green
+      channel. Calling it is T14.f's.
+  - _The job_ (lean kept): `polarisation-bake` `{ id, input, slots, bands, column, body }`, answered
+    `polarisation-baked` `{ id, tables }` with every buffer transferred, or
+    `polarisation-bake-failed` `{ id, bands, message }` for any throw, never `failed`.
+    - Its lights are formed as the thick bake's (`#bakeLights`, shared).
+    - It shares no preparation with `thick-bake`. It takes no 15-bin Mie: it computes the aerosols'
+      optics at the channels and 570 nm (with 550 nm for their scale) and fits three bins.
+  - _The refactors_, each leaving its module's behaviour as it was (T14.a's and T14.b's tests pass
+    unchanged):
+    - `bake.ts` exports `checkBakeInputs`, `bakeLayering`, `bakeLightBins`, `BakeLightBin`,
+      `BakeLayering` and `TermExtinction`, out of `prepareBake`, whose output is unchanged.
+    - `linearAlgebra.ts` gains `factorDense` and `solveDense` (Golub and Van Loan §3.4) and
+      `realEigen`: Householder to Hessenberg (§7.4), Francis double-shift QR to the real Schur form
+      (§7.5), each real 2 × 2 block split by a rotation, and the eigenvectors by back substitution
+      (§7.6), in LAPACK `dgeev`'s layout.
+    - Its `at` reads Float64Array alone, and the pivots in place: the polymorphic accessor had
+      kept the banded LU's loops from being inlined. In two single profiled runs under load (not
+      the benchmark's mean of 7.50 s below), a Titan-class band fell from 8.7 s to 5.6 s, with
+      the same results.
+  - _`realEigen`'s deflation_, beyond the textbook's ε (|t_ii| + |t_jj|).
+    - The problem: at a high mode the four Stokes components at one node share 1 ÷ μ² and couple
+      little, and not normally. Their window stalled at the noise the matrix's larger entries
+      leave there (10⁻¹⁴ at entries of 9.2 beside 207), and once as a nearly defective cluster.
+      The cluster held three eigenvalues within 2 × 10⁻⁸, which numpy places only to 10⁻⁵, near
+      ε^⅓. Test 5's Venus-class solve at m = 7 met it.
+    - So, after 10 stalled sweeps, a subdiagonal is also taken as 0 at n ε ‖H‖, the iteration's
+      own backward error.
+    - After 30, the window's smallest subdiagonal is cut where it is at most √ε of the window.
+      The captured matrix then converges, its residuals 2.8 × 10⁻¹¹.
+    - Tested: 40 such matrices; a 6 × 6 of a nearly defective triple eigenvalue (a Jordan block
+      coupled by 10⁻¹⁰ under a fixed similarity) that stalls without the split, checked so; and 400
+      of the first kind in a scratch run.
+  - _The tests' figures_ (2026-10-27; every comparison deterministic, no α).
+
+    | Check                                                       | Held to                | Measured                                                                   |
+    | ----------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
+    | (1) Natraj et al. 2009, τ 0.5, μ₀ 0.2, 16 streams: I, Q, U  | 10⁻³ of the row's I    | 1.6 × 10⁻⁴, 1.2 × 10⁻⁴, 1.9 × 10⁻⁵ of I, each at the bottom's μ 0.1, φ 90° |
+    | (1) the same at 32 streams (recorded)                       | —                      | 6.4 × 10⁻⁷, 4.3 × 10⁻⁷, 8.8 × 10⁻⁸                                         |
+    | (1) the same at 8 streams (recorded)                        | —                      | 4.0 × 10⁻³, 3.1 × 10⁻³, 6.3 × 10⁻⁴                                         |
+    | (1) 16 against 32 streams on that slab                      | 10⁻³ of I              | 1.6 × 10⁻⁴ (I, the bottom's μ 0.1, φ 90°)                                  |
+    | single scattering at τ 10⁻⁶, I, Q, U and V                  | 10⁻⁴ of I              | 3.5 × 10⁻⁶ (Rayleigh ρ 0.03), 4.7 × 10⁻⁶ (a matrix with b₂)                |
+    | the modes' sum against F rotated geometrically              | 10⁻¹³                  | 1.0 × 10⁻¹⁵                                                                |
+    | (2) energy at ω 1, 1 and 12 layers, black and white grounds | 10⁻⁶ of μ₀             | 2.5 × 10⁻¹⁴ (Rayleigh; a Mie sphere's matrix, V carried; both mixed)       |
+    | (3) depolarisers: vector I against the scalar solver's      | 10⁻¹² of the largest I | 1.1 × 10⁻¹⁴                                                                |
+    | (3) depolarisers: the bake's ΔJ, Earth and Titan-class      | 10⁻¹² sr⁻¹             | 1.5 × 10⁻¹⁴ and 2.5 × 10⁻¹⁴                                                |
+    | one layer against 32 (a sphere's matrix, V carried)         | 10⁻¹⁰ of I             | 1.3 × 10⁻¹⁵                                                                |
+    | all μ₀ together against each alone                          | equal                  | equal, bit for bit                                                         |
+    - _Test 4_, on the four columns. Each value is the worst over the three channels, every table
+      point and Δφ 0°, 45°, 90°, 135° and 180°, in units of DN10's tolerance, max(0.5% of the
+      16-stream vector value, F = 3 × 10⁻⁴ of its image's brightest). An image is one boundary and
+      sun for a radiance, and one altitude and sun for a source. In brackets is the worst share of
+      the value itself, over every point, those under the floor included.
+      - The reference is the 16-stream vector solve at m ≤ 2, as the 8-stream ΔJ is: the modes past
+        2 are test 5's.
+
+      | Column      | Boundary radiances, I16s + ΔI8 against I16v                 | Whole source, single scattering included | Held to |
+      | ----------- | ----------------------------------------------------------- | ---------------------------------------- | ------- |
+      | Earth       | 0.50 (0.28% of I)                                           | 1.21 (0.60%)                             | 1, 1.3  |
+      | three-bar   | 0.26 (0.13%)                                                | 1.34 (0.67%)                             | 1, 1.4  |
+      | Venus-class | 0.24 (28%, of an I of 5 × 10⁻⁶ at μ₀ 1/64, under the floor) | 0.42 (0.21%)                             | 1, 1    |
+      | Titan-class | 0.77 (2.3% of an I under the floor)                         | 1.23 (36% of a source near 0)            | 1, 1.3  |
+      - The boundary radiances meet the plan's 0.5%: the ruling's figure, which it measured on
+        radiances.
+      - The source misses it on three columns, all at the grid's lowest sun, μ₀ 1/64, by up to
+        1.34 times the tolerance (0.67% of the three-bar world's source). Those columns are held to
+        their measured misses, rounded up.
+      - Titan-class's worst points are where its m ≤ 2 source plus the single scattering nears 0:
+        its m ≤ 2 diffuse part dips below 0 on the far side of the haze's lobe, as T14.b found.
+
+    - _Test 5_, the 8-stream correction's modes 3–7 against the whole source (every mode, single
+      scattering included):
+      - 0 on Earth and the three-bar world (Rayleigh's B_l end at l = 2);
+      - 1.1–1.9 × 10⁻⁴ on the Venus-class column;
+      - 0.12–0.29% on the Titan-class column, at μ₀ 1/64 and the near-horizontal view (μ 1/16).
+      - At the boundary radiances, which T14.d's gate reads, in units of max(0.1% of I, F of the
+        image's brightest): 0 on Earth and the three-bar world; at most 0.06 on the Venus-class
+        column; 1.01, 0.79 and 0.40 on the Titan-class column, red, green and blue.
+      - Lean: m ≤ 2 is kept, the ruling's. A fourth mode adds a third to the table (811,008 B a
+        band and light as `f32`) and to T14.f's reads, and the gated radiances are at the plan's
+        figure to within a hair.
+      - The Titan-class column is held to its measured misses as figures T14.f can tighten: 0.5% of
+        the source, and 1.1 times the tolerance at the boundaries. The rest are held to the plan's
+        0.1%.
+      - Raised on the issue as a question that does not block (2026-10-27).
+    - _Test 6_, the channels against the 15 bins converted (σ_s ΔJ by `binConversion`), in units
+      of the same tolerance of the point's whole E:
+      - the Venus-class column: 0.04, 0.10 and 0.24 (red, green, blue);
+      - the Titan-class column: 2.6, 2.2 and 5.4, about 1.3%, 1.1% and 2.7% of its source at
+        μ₀ 1/64. The likely cause, not isolated, is the haze's optics varying across each channel's
+        response.
+      - The bound the Titan-class column is held to is 6 times the tolerance (3% of the source): a
+        figure T14.f can tighten.
+      - Ruled on the issue (2026-10-27, the desktop kept the lean): the channel solve stands for
+        every world, as built.
+      - The bins path stays as T14.f's route for thick, hazy worlds, if T14.d's gate asks for it:
+        `wavelengthsNm: BAKE_WAVELENGTHS_NM`, then `polarisationSources` and `binConversion`, about
+        four times the Titan-class column's cost.
+    - _The eigenvalues met._
+      - Complex pairs occurred on the Venus-class column alone, from its Mie cloud's b₂, in the
+        cloud's layers at m = 1 and 2. At 8 streams that is 28 pairs a solve in red and green and
+        none in blue, |Im k²| ÷ |k²| 2.7–3.7 × 10⁻³. At 16 streams there are 1,030, 146 and 115 over
+        the channels' solves, 2 × 10⁻⁴ to 1.3 × 10⁻².
+      - They were solved as Re and Im pairs.
+      - The Titan-class haze's MMF matrix (b₂ ≠ 0) took the nonsymmetric path in every layer at
+        m ≥ 1 and met no complex pair.
+      - Earth and the three-bar world carry no V and are symmetric throughout.
+
+  - _Timing_ (test 7; `thick/polarisation.bench.ts`, by hand, never asserted; provisional).
+    - Taken on one of this laptop's 8 threads (an i7-8665U) at `nice 10`, the 1-minute load 4.9 at
+      the start and 5.2 at the end, with #120's native nextest beside it. Each is a mean of 3.
+    - Vitest's module runner flagged its export getters (`bandIndex`, `RESONANCE_HALF_WIDTH`) in
+      the hot loops; a bundled worker does not pay them.
+
+    | Column      | Preparation | A band of the correction (pairs of solves) | The thick bake's band | A 16-stream vector and scalar solve (green, m ≤ 2) |
+    | ----------- | ----------- | ------------------------------------------ | --------------------- | -------------------------------------------------- |
+    | Earth       | 19 ms       | 1.32 s (3)                                 | 1.80 s                | 0.92 s                                             |
+    | three-bar   | 9 ms        | 1.19 s (3)                                 | 1.70 s                | 1.31 s                                             |
+    | Venus-class | 4.99 s      | 5.03 s (7)                                 | 4.36 s                | 2.61 s                                             |
+    | Titan-class | 0.26 s      | 7.50 s (12; 5.7–9.5 s)                     | 5.48 s                | 11.5 s                                             |
+    - Against the ruling's 0.15–0.5 s a band, which counted one solve a channel, the thin worlds'
+      three solves take about 1.2–1.3 s, and the thick worlds' gas terms multiply it.
+    - The Venus-class preparation is the cloud's Mie at the channels, 550 and 570 nm.
+    - With the thick bake, a Titan-class band comes to about 13 s, over `BAKE_CEILING_S` (5 s a
+      world). The fallbacks are T14.d's to take.
+    - Under `vitest run`, one worker at a load of 5 with #120's nextest beside it:
+      `polarisation.test.ts` takes 4.0 s, `polarisationBake.test.ts` 176–192 s over three runs
+      (its 35 tests; the 16-stream Titan-class solves the most), and `polarisationJob.test.ts`
+      10 s. That is about 3.5 minutes of one core, under the brief's 10.
+
+  - _Sources._
+    - Read by the research agent and transcribed for the check, all from ADS scans:
+      - Hansen and Travis 1974 (Space Sci. Rev. 16, 527), pp. 534–542, eqs. 2.15–2.18;
+      - de Rooij and van der Stap 1984 (A&A 131, 237), whole;
+      - Hovenier and van der Mee 1983 (A&A 128, 1), whole;
+      - de Haan, Bosma and Hovenier 1987 (A&A 183, 371), whole, its Sect. 5 on complex
+        eigenvalues in polarised doubling. The science check could not reach it again (ADS
+        answered 504 twice).
+    - Siewert 2000 (JQSRT 64, 227, doi:10.1016/S0022-4073(99)00006-0) was read in its author's
+      own posting of the published paper, from the Internet Archive's copy. Whether the publisher
+      allowed that posting could not be confirmed; nothing was taken from it beyond the check of
+      the forms above. The science check could not reach it again (the Internet Archive offline,
+      the author's pages gone, the publisher's closed), so the V note drawn from it is withdrawn
+      (above).
+    - The science check (2026-10-27) re-read Hansen and Travis, Hovenier and van der Mee, de Rooij
+      and van der Stap, Mishchenko, Travis and Lacis 2002 (Appendix B), Natraj et al. 2009, the
+      DISORT report v1.1, WGS 84 (NIMA TR8350.2) and the NSSDCA Earth fact sheet. It rebuilt the
+      modes in its own code against the matrix rotated geometrically, to 8.9 × 10⁻¹⁶, and found
+      the two sign notes and the delta-M rule above.
+    - Not reached: Schulz, Stamnes and Weng 1999 (JQSRT 61, 105, doi:10.1016/S0022-4073(97)00215-X),
+      behind the publisher's wall, checked by its Crossref record alone.
+    - Nothing was ported from any code. The module was derived here and checked against the
+      papers' forms afterwards.
+    - Cited, not re-read: Golub and Van Loan's 4th edition (§§3.4, 7.4–7.6), each method held by
+      its own test; Wiscombe 1977. Mishchenko, Travis and Lacis 2002 (Appendix B), for the
+      d-functions' recurrence, is held to closed forms, orthogonality and the mirror symmetry.
+    - The tables of Natraj, Li and Yung 2009 are T12.c's asserted values, copied into
+      `thick/polarisation.test.ts` with their citation (decision-r08-licences row 6b); `NOTICE`
+      already lists them.
+  - _The slot's records._ A `PolarisationSlot` keeps its solves, its complex pairs and their
+    imaginary shares, and its nonsymmetric layers. It drops `MsSourceSlot`'s bin records, floored
+    slant factors and beam deficit: its three bins' fits are `bakeLightBins`' own, which the thick
+    slot already reports, and its beams are the thick bake's.
+  - _The job's failures._ A k-table that cannot be loaded rejects, so that the worker raises its
+    error, as for `thick-bake`. Every other throw is answered `polarisation-bake-failed`.
+  - _A −P that is not definite_ on the symmetric path is refused with the scalar solver's delta-M
+    hint, as the scalar solver refuses the same moments; a test holds Henyey–Greenstein g 0.95's
+    raw moments refused and their truncation solved. Only a layer whose b₂ is not 0 takes the
+    nonsymmetric path past m = 0.
+  - _Departures from the brief._
+    - Test 4 is held in DN10's own form, 0.5% of the reference or F of its image's brightest,
+      rather than 0.5% alone, since near a sun at the horizon both pipelines' values fall toward 0.
+      Its source misses on three columns are recorded above and held to their measured bounds.
+    - Tests 5 and 6 on the Titan-class column are held to their recorded misses, named above as
+      figures. Test 5 is also run at the boundary radiances (the plan reviewer's suggestion).
+    - The tests are split by what they read: `polarisation.test.ts` (the solver and Natraj),
+      `polarisationBake.test.ts` (tests 3–6, the table, the predicate) and
+      `polarisationJob.test.ts`. The acceptance's filter takes all three.
+    - The three-bar world stands over a black ground, the ruling's, as pure N₂ at 3 × 101,325 Pa,
+      isothermal at 288 K, on an Earth-sized sphere (`thick/polarisationFixtures.ts`). The
+      generated Earth draws no aerosol, so its column is the molecular term and its lined absorber
+      (`bakeJob.test.ts`'s).
+    - The fixtures sit in `thick/polarisationFixtures.ts`, outside `test/`, as T14.b's do.
+- **Deferred findings (2026-10-13 rule)** (R08.T14.e). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The band's cost._
+    - The ruling's 0.15–0.5 s a band counted one solve a channel. The gases' exponential sums
+      give the Titan-class column 12 pairs and the Venus-class 7.
+    - In a Titan-class band's profile, the per-beam banded solves and the banded factorisations
+      take about 30%, the beams' reconstruction about 20%, and the nonsymmetric layers' dense
+      elimination about 10%.
+    - Three measures would cut them, none changing a result:
+      - a block-bidiagonal elimination (T14.a's finding);
+      - the particular solution on the real Schur form (O(n²) a beam, not n³);
+      - the beams' right-hand sides solved together.
+    - T14.d takes the fallbacks (6 streams, a halved μ₀ axis) if the sum passes `BAKE_CEILING_S`.
+    - For the owner now, not at T14.d: a Titan-class band costs about 7.5 s of correction and
+      5.5 s of thick bake on the ceiling's own host, provisionally at a load of 5, against
+      `BAKE_CEILING_S` of 5 s a world. The thick band alone passes the ceiling, and the Risks'
+      "sub-second a band" is exceeded. Their fallback of a family of tables computed at
+      development time may be needed. Noted on the issue.
+  - _Titan-class's channels against its bins_ (test 6). Recorded above; the desktop kept the
+    channels (2026-10-27), and the bins path is T14.f's route should T14.d's gate ask for it.
+  - _The source at the lowest sun_ (test 4). The 8-stream correction's source misses 0.5% by up
+    to 1.34 times its tolerance at μ₀ 1/64, while the radiances it makes meet it. T14.d's gate
+    reads radiances.
+  - _Three Legendre recurrences in `atm/`._ `aerosol.ts`'s `legendre`, `discreteOrdinates.ts`'s
+    `normalizedAssociatedLegendre` and this module's `wignerD` (d^l_m0 = (−1)^m Λ_l^m) overlap.
+    One could serve all three.
+  - _A beam resonant with an unforced mode._ A depolariser with no peak removed has Q, U and V
+    modes of k = 1 ÷ μ_i exactly. A λ within the resonance window of one shifts and averages the whole layer-mode,
+    though nothing forces that mode, which moves I by about 10⁻¹⁰ (estimated from the scalar
+    solver's measured window). The bake's grid met none; the
+    check could skip modes the beam does not force.
+  - _Half floats._ |ΔJ| is at most 8 × 10⁻³ sr⁻¹ on the Earth and 1.3 × 10⁻² on the three-bar
+    world, and falls toward 0 at the top, under `rgba16float`'s least normal (6.1 × 10⁻⁵) there.
+    T14.f's packing should check its least values, as T14.b's E needs a scale.
+  - _The fixtures' home._ `thick/polarisationFixtures.ts` is a test fixture outside `test/`, which
+    this lane may not edit, as T14.b's `bakeFixtures.ts` is.
+  - _The depolarisers' peak_ (changed after the science check, above). If a ruling prefers the
+    check's model, in which a depolariser's peak passes polarisation, only `truncatedMoments`
+    changes, along with the slab test's bound. No test column has a depolariser mixed with air.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
