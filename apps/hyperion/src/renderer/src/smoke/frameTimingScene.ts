@@ -35,7 +35,8 @@
  * - `TEST SATURN`'s far-limb frames ({@link farLimbFrameScene} on Saturn's spheroid at
  *   {@link placesScaledTo}'s distances): Earth's five cameras with every distance scaled by the
  *   equatorial radii's ratio, so that the disc and its limb fill the frame as the Earth's do, under
- *   the stars' sets alone ({@link STAR_SETS});
+ *   the setting's sets as the Earth's ({@link sourceSetsOf}), its giants placed as the Earth's but
+ *   at {@link SATURN_GIANT_DISTANCE_M}, beyond the farthest of its cameras (R08.T11.d, for QW30);
  * - three small air bodies in one view ({@link smallEarthsScene}), each its own air, under a
  *   binary's two stars, each body lit by the other two's planetshine too ({@link trioSourceSet});
  * - two class maps with their normal maps: R10's fixture's as the smoke builds it
@@ -158,6 +159,31 @@ export const GIANT_POLAR_RADIUS_M = 6.6854e7;
  * moon of a giant stands (Io at 5.9 Jupiter radii).
  */
 export const GIANT_DISTANCE_M = 6 * GIANT_EQUATORIAL_RADIUS_M;
+
+/**
+ * The giants' distance from `TEST SATURN`'s centre, m: twenty of their equatorial radii, 1.43 ×
+ * 10⁹ m, 1.51 times the farthest of its cameras ({@link placesScaledTo}'s 9.45 × 10⁸ m).
+ *
+ * @remarks
+ * The Earth's placement scaled as the cameras are, {@link GIANT_DISTANCE_M} × 9.4492 = 4.05 ×
+ * 10⁹ m, keeps the scene's geometry but not its light: the giants' radius does not scale, so their
+ * planetshine at the body falls by the ratio's square, to 9.0 × 10⁻⁵ of the Sun's illuminance
+ * there, under `STAR_CUT_RELATIVE` (10⁻⁴). The sky's negligible skip then cuts it at the nearest
+ * camera (6.40 × 10⁷ m), where the Sun stands 54.6° above the camera's horizontal, past its 21.8°
+ * dip, and `x2p` there would draw the Sun alone.
+ *
+ * Twenty radii lie between the farthest camera (13.2 radii) and 24, where the planetshine at the
+ * nearest camera falls to the Earth's rows' floor, 5 × 10⁻⁴ of the Sun. Its photopic illuminance
+ * at Saturn's centre is then 7.27 × 10⁻⁴ of the Sun's there: (R ÷ Δ)² p Φ(60°) for a Lambert
+ * sphere, 7.61 × 10⁻⁴, times the Sun's inverse square to the giant (0.990) and R07's integration
+ * over Jupiter's spheroid and law (0.964); under both stars, 8.34 and 8.66 × 10⁻⁴. At the cameras,
+ * carried by the inverse square, it is 7.2 × 10⁻⁴ to 2.5 × 10⁻³ of the Sun, so that no skip cuts
+ * it, and the giants stay out of every camera's view and off Saturn's disc
+ * (`frameTimingScene.test.ts`, which records the derivation's sources). Their directions are the
+ * Earth's rule ({@link giantDirections}). It is a timing scene's placement: a Jupiter-like giant
+ * that near a Saturn would be a binary planet.
+ */
+export const SATURN_GIANT_DISTANCE_M = 20 * GIANT_EQUATORIAL_RADIUS_M;
 
 /** The giants' phase angle at the Earth, Sun–giant–Earth, rad: 60°, a gibbous giant. */
 export const GIANT_PHASE_RAD = Math.PI / 3;
@@ -302,12 +328,15 @@ export interface FrameScene {
  *
  * @param figure - The body's figure, its pole +z: WGS 84 by default, Saturn's spheroid for
  *   `TEST SATURN`'s rows.
+ * @param giantDistanceM - The giants' distance from the body's centre, m:
+ *   {@link GIANT_DISTANCE_M} by default, {@link SATURN_GIANT_DISTANCE_M} for `TEST SATURN`'s rows.
  */
 export function farLimbFrameScene(
   distanceM: number,
   viewport: Viewport,
   set: SourceSet,
   figure: SpheroidFigure = SLICES_EARTH.figure,
+  giantDistanceM: number = GIANT_DISTANCE_M,
 ): FrameScene {
   const air = farLimbTimingCamera(distanceM, viewport, figure);
   const earthCentreM = scale(air.positionM, -1);
@@ -333,7 +362,7 @@ export function farLimbFrameScene(
       const id = GIANT_IDS[i];
       return id === undefined
         ? []
-        : [giantInput(id, add(earthCentreM, scale(direction, GIANT_DISTANCE_M)))];
+        : [giantInput(id, add(earthCentreM, scale(direction, giantDistanceM)))];
     });
   return {
     air,
@@ -375,25 +404,6 @@ export function smallEarthScene(
     lights: [{ disc: SUN_DISC, centreM: add(earthCentreM, scale(towards, AU_M)) }],
   };
 }
-
-/**
- * The stars' sets alone, `x1` and `x2`: `TEST SATURN`'s rows, the frames of R08.T6.f's
- * Saturn-class passes (`decision-r08-approximate-plate.md` item 3).
- *
- * @remarks
- * The Earth's planetshine sets are not taken: their giants stand {@link GIANT_DISTANCE_M} from the
- * body, a distance placed for the Earth's cameras, inside the farthest of the cameras scaled to a
- * giant. A giant does take planetshine in VIEW: the plan gives every lit body its brightest
- * neighbours however faint (`planetshineSources`), its moons among them: Io, seen from Jupiter's
- * centre at full phase, at p (R ÷ a)² = 0.63 × (1,821.49 km ÷ 421,800 km)² ≈ 1.2 × 10⁻⁵ of the Sun
- * (a: JPL SSD's mean orbital elements, JUP365; R: JPL SSD's physical parameters, from Archinal et
- * al. 2018, Celest. Mech. Dyn. Astron. 130, 22; p: Simonelli and Veverka 1984, Icarus 59, 406).
- * Those rows are left for a later run.
- */
-export const STAR_SETS: readonly SourceSet[] = [
-  { name: "x1", stars: 1, giants: 0 },
-  { name: "x2", stars: 2, giants: 0 },
-];
 
 /** A camera of the timed frames: its label and its distance from the body's centre, m. */
 export interface TimedPlace {

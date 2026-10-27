@@ -41,7 +41,9 @@
  *   (A)'s rows are, and a generated patch's whole palette (`generatedClassMapTexels`), recorded;
  * - (J) `TEST SATURN` (`ATMOSPHERE TEST`'s `saturn-oblate`, Saturn's spheroid of five slices and
  *   four bands, R08.T6.f's Saturn-class passes) at (A)'s five cameras scaled to its radius
- *   (`placesScaledTo`), at `x1` and `x2` on both settings.
+ *   (`placesScaledTo`), under the setting's four sets on both settings as (A)'s: `x1` and `x2`
+ *   since R08.T11.c, `x2p` and the whole count since R08.T11.d (for QW30), its giants placed as
+ *   (A)'s but at `SATURN_GIANT_DISTANCE_M`, beyond the farthest of its cameras.
  *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
@@ -150,11 +152,14 @@ import {
   generatedClassLaws,
   generatedClassMapTexels,
   generatedNormalMapTexels,
+  GIANT_DISTANCE_M,
+  GIANT_EQUATORIAL_RADIUS_M,
   listSources,
   type ListedSources,
   NORMAL_MAP_LEVEL,
   placesScaledTo,
   planetshineShare,
+  SATURN_GIANT_DISTANCE_M,
   SMALL_TRIO,
   type SmallBodiesScene,
   type SourceSet,
@@ -165,7 +170,6 @@ import {
   smokeNormalMapTexels,
   sourcesAsSet,
   sourceSetsOf,
-  STAR_SETS,
   type TimedPlace,
   trioSourceSet,
 } from "./frameTimingScene";
@@ -356,6 +360,11 @@ interface FrameMedium {
   readonly lightSlots: number;
   /** The body's figure, its pole +z: WGS 84 for the Earths, Saturn's spheroid for (J)'s. */
   readonly figure: SpheroidFigure;
+  /**
+   * The giants' distance from the body's centre, m: `GIANT_DISTANCE_M` for the Earths,
+   * `SATURN_GIANT_DISTANCE_M` for (J)'s.
+   */
+  readonly giantDistanceM: number;
   /** The body's class-map surface, (I)'s; `null` for the Lambert sphere of its ground albedo. */
   readonly surface: MappedSurface | null;
 }
@@ -429,6 +438,7 @@ function frameMedia(engine: RenderEngine, releases: Releases): FrameMedium[] {
     }),
     lightSlots: absorberCount(spec.medium) > 0 ? spec.curves.length : Infinity,
     figure: SLICES_EARTH.figure,
+    giantDistanceM: GIANT_DISTANCE_M,
     surface: null,
   }));
 }
@@ -543,6 +553,7 @@ async function saturnMedium(engine: RenderEngine, releases: Releases): Promise<F
     tables,
     lightSlots: absorberCount(built.medium) > 0 ? built.curves.length : Infinity,
     figure: body.figure,
+    giantDistanceM: SATURN_GIANT_DISTANCE_M,
     surface: null,
   };
 }
@@ -608,7 +619,13 @@ function frameCombination(
   failures: string[],
 ): Timed<FrameCombination> {
   const viewport = settingOutput(setting);
-  const scene = farLimbFrameScene(place.distanceM, viewport, set, medium.figure);
+  const scene = farLimbFrameScene(
+    place.distanceM,
+    viewport,
+    set,
+    medium.figure,
+    medium.giantDistanceM,
+  );
   const earth: LitBodyInput = {
     ...earthInput(medium.id, medium.medium, scene.earthCentreM, medium.figure),
     ...medium.surface,
@@ -756,8 +773,9 @@ async function timeClassMap(
 }
 
 /**
- * (J): `TEST SATURN` at (A)'s five cameras scaled to its radius, under the stars' sets, on both
- * settings (`decision-r08-approximate-plate.md` item 3: R08.T6.f's Saturn-class passes).
+ * (J): `TEST SATURN` at (A)'s five cameras scaled to its radius, under the setting's sets as (A)'s,
+ * on both settings (`decision-r08-approximate-plate.md` item 3: R08.T6.f's Saturn-class passes),
+ * its giants at `SATURN_GIANT_DISTANCE_M`.
  */
 async function timeSaturn(
   on: FrameView,
@@ -767,7 +785,7 @@ async function timeSaturn(
   const failures: string[] = [];
   const combinations = (["high", "low"] as const).flatMap((setting) =>
     placesScaledTo(saturn.figure).flatMap((place) =>
-      STAR_SETS.map((set) => frameCombination(setting, saturn, place, set, failures)),
+      sourceSetsOf(setting).map((set) => frameCombination(setting, saturn, place, set, failures)),
     ),
   );
   return timeCombinations(on, ledger, combinations, failures);
@@ -2226,7 +2244,7 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       checks,
       saturnFrames,
       () =>
-        `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the stars' sets alone, the Earth's giants being placed for the Earth's cameras`,
+        `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the setting's sets as the Earth's, its giants placed as the Earth's but ${(SATURN_GIANT_DISTANCE_M / GIANT_EQUATORIAL_RADIUS_M).toFixed(0)} of their radii off (${SATURN_GIANT_DISTANCE_M.toExponential(2)} m), beyond its farthest camera, so that their planetshine stays past the sky's negligible skip at every camera`,
     );
     const frameMissing = missingOf(frames);
     const mappedMissing = missingOf(mappedFrames);
