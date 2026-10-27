@@ -978,8 +978,9 @@ pub enum TaxonomicClassDto {
     /// its lid, as Quaoar's (Brown 2012, Annu. Rev. Earth Planet. Sci. 40, 467). Made from
     /// generator version 24.
     Red,
-    /// A Kuiper-belt body's neutral colour: less of its surface under tholin, as Orcus's, Charon's
-    /// and Haumea's water ice (Brown 2012). Made from generator version 24.
+    /// A Kuiper-belt body's neutral colour: less of its surface under tholin, its water ice
+    /// showing, as Orcus's and Haumea's neutral colours (Brown 2012). Made from generator version
+    /// 24.
     Neutral,
 }
 
@@ -1198,9 +1199,11 @@ pub struct BodySurfaceDto {
 }
 
 /// The parameters of an envelope's irradiated grey profile above its join to the adiabat: Guillot
-/// 2010's (A&A 520, A27) Eq. 29 in the thermal optical depth τ, which holds for an opacity that
-/// varies with pressure at a fixed γ, with τ = `κ_th` p₁ ÷ (n g) × (p ÷ p₁)ⁿ, p₁ = 1 bar (10⁵ Pa),
-/// n the optical depth's exponent and g the bulk section's surface gravity.
+/// 2010's (A&A 520, A27) Eq. 29 in the thermal optical depth τ, with τ = `κ_th` p₁ ÷ (n g) × (p ÷
+/// p₁)ⁿ, p₁ = 1 bar (10⁵ Pa), n the optical depth's exponent and g the bulk section's surface
+/// gravity. Guillot 2010 assumes constant opacities (its §6). The pressure-dependent form follows
+/// because, with γ fixed, the moment equations are local in τ, so that Eq. 29 holds in τ: this
+/// generator's consequence, not Guillot's statement.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct GuillotProfileDto {

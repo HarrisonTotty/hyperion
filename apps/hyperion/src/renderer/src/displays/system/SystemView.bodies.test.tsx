@@ -1828,7 +1828,7 @@ describe("SystemView's body readout", () => {
     await answer(socket);
     await selectRow(user, /\/768/);
     // Decision-absurd-states-24 R2.3: from generator version 24 such a planet's surface does not
-    // apply, and its envelope is not modelled until P14.T53.b part 3.
+    // apply, and its envelope is not modelled until P14.T53.f.
     await answerDetail(socket, earthUnderASupercriticalEnvelope());
 
     expect(reading("CLASS")).toBe("ROCKY");

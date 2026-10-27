@@ -618,14 +618,14 @@ function surfaceRows(surface: BodySurface): ReactNode {
  * state is, then its composition by mole fraction, as a surface's gases read.
  *
  * @remarks
- * Its other figures (the Guillot profile's temperatures and parameters, the adiabat, the decks and
- * the haze) are on the wire and not yet read here. Every server sends the section `not_modelled`
- * until generator version 24 (P14.T54.b.i), and {@link sectionRows} reads it so. `GAS ENVELOPE`
- * holds while every `ok` envelope is an H₂/He one, its `supercritical` `null`: a solid body under a
- * supercritical envelope (P14.T53.b part 2, from generator version 24) is sent its envelope
- * `not_modelled`, which reads `ATMOSPHERE NOT YET MODELLED` with no `SURFACE` section, and once
- * P14.T53.b part 3 sends one `ok` the lead row is to read its condensable instead
- * (`SUPERCRITICAL H2O`, decision-absurd-states-24 R2.4).
+ * Its other figures (the Guillot profile's temperatures and parameters, the adiabat, the decks,
+ * the hazes, the absorbers and the condensables not formed) are on the wire and not yet read here.
+ * Every server sends the section `not_modelled` until generator version 24 (P14.T54.b.i), and
+ * {@link sectionRows} reads it so. `GAS ENVELOPE` holds while every `ok` envelope is an H₂/He one,
+ * its `supercritical` `null`: a solid body under a supercritical envelope (P14.T53.b part 2, from
+ * generator version 24) is sent its envelope `not_modelled`, which reads `ATMOSPHERE NOT YET
+ * MODELLED` with no `SURFACE` section, and once P14.T53.f sends one `ok` the lead row is to read
+ * its condensable instead (`SUPERCRITICAL H2O`, decision-absurd-states-24 R2.4).
  */
 function envelopeRows(envelope: BodyEnvelope): ReactNode {
   return (

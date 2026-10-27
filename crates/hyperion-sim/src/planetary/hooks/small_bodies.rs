@@ -301,8 +301,8 @@ pub enum TaxonomicClass {
     /// Fraser 2011 (ApJL 739, L60); for tholins as the outer Solar System's colouring agents,
     /// Cruikshank, Imanaka and Dalle Ore 2005 (Adv. Space Res. 36, 178). Produced.
     Red,
-    /// A Kuiper-belt body's neutral colour: less of its surface under tholin, as Orcus's, Charon's
-    /// and Haumea's water ice (Brown 2012).
+    /// A Kuiper-belt body's neutral colour: less of its surface under tholin, its water ice
+    /// showing, as Orcus's and Haumea's neutral colours (Brown 2012).
     ///
     /// Produced.
     Neutral,

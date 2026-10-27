@@ -1643,8 +1643,9 @@ function toSurface(surface: BodySurfaceDto): BodySurface {
 
 /**
  * A gas-envelope body's envelope section, checked (plan 14's P14.T24.d with P14.T52.d, on the wire
- * by P14.T35.e and P14.T54.b.i): temperatures not negative, the profile's parameters and the join
- * positive, the optical depth's exponent finite and at least 1, the adiabat's pressures rising
+ * by P14.T35.e and P14.T54.b.i): the internal temperature positive and the irradiation
+ * temperature not negative, the profile's parameters and the join positive, the optical depth's
+ * exponent finite and at least 1, the adiabat's pressures rising
  * from the join, none above it, the composition summing to 1 and largest first. Its supercritical
  * condensable is any registry key, or `null` for an H₂/He envelope (P14.T54.b.d).
  *
@@ -1659,7 +1660,7 @@ function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
   const profile = envelope.profile;
   const first = envelope.adiabat[0];
   check(
-    atLeastZero(envelope.internal_temperature_k) &&
+    positive(envelope.internal_temperature_k) &&
       atLeastZero(envelope.irradiation_temperature_k) &&
       positive(profile.thermal_opacity_m2_per_kg) &&
       Number.isFinite(profile.optical_depth_exponent) &&

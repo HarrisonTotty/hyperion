@@ -925,17 +925,18 @@ fn envelope_of(inputs: &AtmosphereInputs, exposure: &XuvExposure) -> Option<Enve
 /// The helium that escape leaves an envelope of history `history` on a body of mass and radius
 /// `bulk` at the time, whose gravity sets the diffusion that separates its helium from its escaping
 /// hydrogen, under the exposure `exposure` by `age` ([`envelope_helium`]), from the helium mass
-/// fraction `start` it formed with (the host star's from generator version 24,
-/// `fractionation_start`, P14.T54.b.i; [`protosolar_helium_mass_fraction`] before, and for a body
-/// its derivation gives none), where it formed with an envelope: a function of what a body's passes
-/// do not move, so that its derivation takes it once ([`AtmosphereInputs::envelope_helium`]).
+/// fraction `helium_mass_fraction_start` it formed with (helium's share of its hydrogen and helium
+/// by mass, 0–1: the host star's from generator version 24, `fractionation_start`, P14.T54.b.i;
+/// [`protosolar_helium_mass_fraction`] before, and for a body its derivation gives none), where it
+/// formed with an envelope: a function of what a body's passes do not move, so that its derivation
+/// takes it once ([`AtmosphereInputs::envelope_helium`]).
 #[must_use]
 pub(crate) fn helium_left(
     history: EnvelopeHistory,
     (mass, radius): (Kilograms, Metres),
     exposure: &XuvExposure,
     age: Years,
-    start: f64,
+    helium_mass_fraction_start: f64,
 ) -> Option<EnvelopeHelium> {
     (history.initial.value() > 0.0).then(|| {
         #[cfg(test)]
@@ -947,7 +948,7 @@ pub(crate) fn helium_left(
             radius,
             exposure,
             age,
-            start,
+            helium_mass_fraction_start,
         )
     })
 }

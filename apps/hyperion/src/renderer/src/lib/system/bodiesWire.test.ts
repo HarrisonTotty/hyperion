@@ -1704,6 +1704,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
 
   it.each<[string, Partial<BodyEnvelopeDto>]>([
     ["a negative internal temperature", { internal_temperature_k: -1 }],
+    ["an internal temperature of 0", { internal_temperature_k: 0 }],
     ["a join at no pressure", { join_pressure_pa: 0 }],
     ["an adiabat starting above its join", { join_pressure_pa: 1e6 }],
     ["a mean molar mass of 0", { mean_molar_mass_g_per_mol: 0 }],
@@ -1713,18 +1714,22 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       { profile: { ...jupiterEnvelope().profile, optical_depth_exponent: 0.5 } },
     ],
     [
-      "an optical depth's exponent that is not a number",
-      { profile: { ...jupiterEnvelope().profile, optical_depth_exponent: Number.NaN } },
+      "an optical depth's exponent that is not finite",
+      {
+        profile: { ...jupiterEnvelope().profile, optical_depth_exponent: Number.POSITIVE_INFINITY },
+      },
     ],
   ])("refuses an envelope with %s", (_, change) => {
     expect(envelopeFault(change)).toBe("envelope unusable");
   });
 
-  it("refuses an envelope's deck mode that names no listed deck, or no deck (R08's S4)", () => {
+  it.each<[string, string | null]>([
+    ["names no listed deck", "CH4"],
+    ["names no deck", null],
+  ])("refuses an envelope's deck mode that %s (R08's S4)", (_, deck) => {
     const { mode } = jupiterAmmoniaAndHaze();
 
-    expect(envelopeFault({ decks: [{ ...mode, deck: "CH4" }] })).toBe("aerosol mode unusable");
-    expect(envelopeFault({ decks: [{ ...mode, deck: null }] })).toBe("aerosol mode unusable");
+    expect(envelopeFault({ decks: [{ ...mode, deck }] })).toBe("aerosol mode unusable");
   });
 
   it("refuses an envelope's haze that names a deck (R08's S4)", () => {

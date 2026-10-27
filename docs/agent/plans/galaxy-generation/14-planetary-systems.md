@@ -8450,12 +8450,14 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - Each hold's cost share (D5).
       - §C.7's splits, listed.
       - Per-hold attribution of every moved value: `golden_diff` after each hold's deletion, in a
-        fixed order that includes P14.T51.g.a's `OCEAN_FLOOR_VERSION`, in scratch.
+        fixed order that includes P14.T51.g.a's `OCEAN_FLOOR_VERSION` and P14.T54.b.i's
+        `PRIMORDIAL_HELIUM_VERSION`, in scratch.
       - R09's coarse field's move through `ebm.rs`'s greenhouse constants, listed.
     - **P14.T54.b.l The bump** (B4, alone; after B3's gate and R08's sign-off).
       - It deletes every hold at 24 with its tripwire (P14.T51.g.a's `OCEAN_FLOOR_VERSION`, a
-        MUST-FIX member, and `SMALL_BODY_TYPES_VERSION` among them), the source scans with their
-        `HELD` lists (the four, and T51.e's), and `OCEAN_VERSION`.
+        MUST-FIX member, `SMALL_BODY_TYPES_VERSION` and P14.T54.b.i's `PRIMORDIAL_HELIUM_VERSION`
+        among them), the source scans with their `HELD` lists (the five, and T51.e's), and
+        `OCEAN_VERSION`.
       - It restamps `thermo_equilibrium`, `condensate_extinction` ×7 and the surface crate's
         `space_weathering` `--since 24`, with whatever `fit-check` flags. No stellar table may be
         stale.
@@ -29920,7 +29922,8 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     f's two restated floor tests, in f; e's must-fix (decision-p14-t54b-e-findings) with the
     review's fixes in the last commit.
   - _P14.T54.b.g, T24.g's case from the published state and deck_ (B3, 2026-10-27).
-    `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3; no golden moves, and no hold is added:
+    `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3; no golden moves (`golden_diff.py`: 0
+    moved), and no hold is added:
     the inventory is on the record only under `AirRules::Batch`, and below the escape's batch
     every runaway keeps its deck, so under the air's batch alone every inventory keeps its bits.
     - _The wiring:_ `air::AirSurface` gains `runaway_deck`, the published atmosphere's
@@ -29930,7 +29933,8 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       does not publish the deck; the tests that rebuild an inventory from a record under the air's
       batch alone take `Kept`, 23's states, and the table's bodies their own atmosphere's.
     - _Tests:_ `under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperature`
-      (system/tests.rs; the sample's first 60 systems, the golden systems and LOOK72's, every 24
+      (system/tests.rs; the sample's first 60 systems (as T53.b part 1's `present_census`), the
+      golden systems and LOOK72's, every 24
       hold and the record's batch rules, about 20 s): no record carries an `H2SO4` deck but a
       runaway under the deck at or above 430 K, and no deckless runaway carries one; 25 runaways
       under the deck (430 K and above, three with no acid deck formed), 11 solved without it, each
@@ -29942,7 +29946,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       deckless runaway's inventory, the temperate one's to the bit. The table's Venus (the median
       Venus) keeps case 1 by its own atmosphere's `Kept`: its acid-deck test passes unchanged.
   - _P14.T54.b.j, the riders_ (B3, 2026-10-27). `GENERATOR_VERSION` stays 23 and
-    `PROTOCOL_VERSION` 3; no golden moves, and no hold is added.
+    `PROTOCOL_VERSION` 3; no golden moves (`golden_diff.py`: 0 moved), and no hold is added.
     - _T51.e's wire_ (decision-p14-t51e-contract §4, §6.2): `TaxonomicClassDto`, closed, its 27
       variants at the first send (the 24 Bus–DeMeo classes, P, red and neutral), each documented
       with whether a rule makes it at 24 (S, Q, C, Ch, K, Xc, V, A, D, P, red and neutral; the 15
@@ -29954,7 +29958,10 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       (through `later`), the client's model and decoder (the closed string passed through, as
       `floor` and `lid` are), `just gen-protocol`, and the index's import and export by hand. No
       console row: none is signed.
-    - _T51.g.b:_ docs only. `subsurface_ocean`: a regular moon's below 24, every solid surface's
+    - _T51.g.b boards 24_ (a0eb2ae3, before i's commit). T56.d's ocean k₂ rides with it: the
+      ocean branch reads the solve's spherical shell under `OCEAN_VERSION`; no wire member carries
+      k₂, so j has no hunk for it. j's part is docs only. `subsurface_ocean`: a regular moon's
+      below 24, every solid surface's
       from it, absent where the solve has no answer, `null` on a lagged moon (P14.T56.g).
       `liquid`, `solute_mass_fraction` (at most 0.437, both solutes at their eutectics; the sim's
       `SubsurfaceOcean::solute_mass_fraction` doc gives 0.554, the two binaries' fractions summed,
@@ -29992,14 +29999,17 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     (parts i-1 and i-3, under _The wire_). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3;
     no golden moves (`planetary_golden`, `observe_in_system_golden`; `golden_diff.py`: no golden
     file changed). This commit closes the riders' membership: P14.T53.b part 3 had not landed by
-    it, so part 3 rides 25, its hold renumbered (decision-p14-t53b-part3 §8; main, 2026-10-27).
+    it, so part 3 rides 25 (decision-p14-t53b-part3 §8; main, 2026-10-27). On the lane's re-cut
+    base part 3's commit (05ad5867) precedes g: its hold is 25, `STEAM_ENVELOPE_VERSION`, outside
+    `with_every_24_hold` (the first switch of `with_every_25_hold`, which wraps it), so that no 24
+    test reads it.
     The envelope takes no hold of its own: it is on the record under the air's sections' hold
     alone (`AirRules::Batch`, `AIR_SECTIONS_VERSION`; decision-p14-t54b-open §1.2 item 6). The
     host star's primordial helium has its own (below).
-    - _The record type:_ `record::Envelope` is a struct of `supercritical`, T50.b's
-      `EnvelopeAbundances` and T52.d's `EnvelopeAtmosphere` (which holds T24.d's profile, so κ₁,
-      n, γ, f, T_int and T_irr), built by the crate's `Envelope::hydrogen_helium` and read by
-      `supercritical()`, `abundances()` and `atmosphere()`. `supercritical` is `None` on every
+    - _The record type:_ `record::Envelope` is a struct of `supercritical` and, behind one box,
+      T50.b's `EnvelopeAbundances` and T52.d's `EnvelopeAtmosphere` (which holds T24.d's profile,
+      so κ₁, n, γ, f, T_int and T_irr), built by the crate's `Envelope::hydrogen_helium` and read
+      by `supercritical()`, `abundances()` and `atmosphere()`. `supercritical` is `None` on every
       envelope: P14.T53.b part 3 has not landed, and a steam envelope's section would stay
       `NotModelled` at 24 either way. `Envelope` is no longer `Copy`, so the server's conversion
       and its test take it by reference. The stale "until P14.T24.d" docs of record.rs (the
@@ -30028,7 +30038,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     - _The chain_ (`envelope_of`): no [α/Fe] or no disc → not modelled, before anything is
       computed; then T24.d's T_int, T_eff = (T_eq⁴ + T_int⁴)^¼ through `crate::math`, T50.b, and
       T52.d on `GreyProfile::ADOPTED`. Every refusal → `NotModelled`, and the record keeps no
-      reason; `EnvelopeNotModelled`, crate-private, is the census's (main's Q12:
+      reason; `DeriveEnvelopeError` is the census's and the testing helper's (main's Q12:
       `LevelAboveRecords` → `NotModelled`, counted). The not-modelled cases match
       `BodyEnvelopeDto`'s doc as part i-1 wrote it; no protocol doc changes.
     - _The network_ is built once a query: `Epoch::network`, a
@@ -30082,8 +30092,8 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - _`system::envelope` is `pub(crate)`_, not a private `mod`, and `EnvelopeOf` and
         `envelope_of` are `pub(crate)`: `planetary::testing`'s builder reaches them.
       - _`envelope_by_hand`_ (with `EnvelopeByHand`, behind `testing`) returns
-        `BuildEnvelopeByHandError`, which carries the refusing step's reason, rather than `String`
-        (the crate's error rule).
+        `DeriveEnvelopeError`, the chain's own enum, re-exported by `testing` (the crate's error
+        rule; the batch review's fix, below).
     - _Moved 24 figures (Q15):_ the 130 non-ignored tests that run under the escape's batch
       (every 24 hold), run under each arm with their outputs compared, move only B2's statement.
       `under_every_24_hold_a_derivation_carries_its_envelope_s_helium` keeps its asserts. The
@@ -30113,7 +30123,11 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         clouds a viewer would see.
       - _A body that loses its envelope at its recorded change_ (T24.d's moved test): no gas
         envelope's recorded change falls inside the clock window over the census's sets, so the
-        test is stated and not built on a hand system.
+        test is stated and not built on a hand system. At 24, i states the section change at the
+        recorded state change rather than building it. P14.T33.c's whole-sample composition
+        census then counts every gas envelope that changes section inside the clock window; if it
+        finds any, building and testing that path becomes a must-fix before R08.T16.a draws
+        envelopes (main's ruling, 2026-10-27).
     - _The census_ (`the_envelopes_are_stated`, ignored, by name; decision-p14-t24d-profile §9's
       bless-note lines and count (x)'s inputs). It runs at the epoch, every 24 hold and the
       record's batch rules, over `thin_air_sets`' first 60 sample systems (the helper holds 400),
@@ -30156,7 +30170,9 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         envelope not applicable.
       - `under_every_24_hold_the_record_s_envelope_is_the_same_twice_and_in_both_queries`: the same
         seed twice, and `body_at` against `snapshot_at`, on `hot_jupiter`, `solar_like` and
-        `eccentric_giant`.
+        `eccentric_giant`, the envelopes compared by `Debug` (signed zeros); and
+        `assert_order_independent` over `body_at`'s envelopes in each, so that the escape batch's
+        carried helium is permuted.
       - `the_table_s_jupiter_on_the_record_follows_the_probe`: through `envelope_of`, T(1 bar)
         166.08 K, the NH₃ deck's base at 0.726 bar, CH₄ ÷ H₂ 2.04 × 10⁻³, the join at 0.899 bar
         and the photosphere at 0.339 bar. It has 13 decks and 14 modes, and its haze τ is 0.307.
@@ -30233,12 +30249,18 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - _The fixture's hot Jupiter_, `body_detail_hot_jupiter`, is new. Its id is 32, the next after
         31; 28 is free but out of sequence. It is body .0200 of the slice's system.
         - It takes Jupiter's record form, its bulk at HD 209458 b's measured 0.685 M_J, 1.359 R_J
-          and T_eq 1,449 K (zero albedo), at 0.04707 au (Torres, Winn and Holman 2008, ApJ 677,
-          1324, Table 5). The science checker confirmed each figure, and its g (9.19 m s⁻²) and ρ
-          (0.338 g cm⁻³), against the paper.
-        - T_int is stated, 558 K: Thorngren and Fortney 2018's ε of 2.2% at its flux, giving ε^¼
-          T_eq, the generator's heat for an inflated giant. So T_eff is 1,456.9 K. Its envelope
-          share is `giant_composition`'s (0.7889).
+          and T_eq 1,449 K (zero albedo; Torres, Winn and Holman 2008, ApJ 677, 1324, Table 5).
+          The science checker confirmed each figure, and its g (9.19 m s⁻²) and ρ (0.338 g cm⁻³),
+          against the paper.
+        - Its orbit is placed for that T_eq about the fixture's Sun-like host: 0.036896 au
+          (5,519,610,061.347 m), where T_eq = (L★ ÷ 16πσa²)^¼ at the host's 1 L☉ gives 1,449 K at
+          zero albedo, its period and position moved with it. HD 209458's own L★ (1.622 L☉,
+          Torres et al. 2008, Table 3) puts it at 0.04707 au, where the 1 L☉ host gives 1,283 K.
+          Main accepted 0.03689 au (2026-10-27): the measured bulk, T_eq and the 558 K stand, and
+          the envelope, which reads neither a nor the host's flux, keeps its pin.
+        - T_int is stated, 558 K: Thorngren and Fortney 2018's (AJ 155, 214, eqs. 34 and 35) ε of
+          2.2% at its flux, giving ε^¼ T_eq, the generator's heat for an inflated giant. So T_eff
+          is 1,456.9 K. Its envelope share is `giant_composition`'s (0.7889).
         - It formed at the slice zone's snow line, where the generator grows a giant it places
           inside it. It is 3.1 Gyr old (Torres et al. 2008, Table 3). The rest is the Jupiter's.
         - Its envelope comes from the same builder. Its label, moons, rings and hooks are
@@ -30321,9 +30343,9 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
           adiabat and profile, and a hot-Jupiter block citing Torres et al.'s figures.
         - _bodiesWire.test.ts:_
           - the sim's values;
-          - n 0.5 and NaN refused;
-          - a deck mode naming an unlisted deck, or none, refused, and a haze naming a deck
-            refused;
+          - n 0.5 and an infinite n refused, and a T_int of 0;
+          - a deck mode naming an unlisted deck, and one naming none, refused (two cases), and a
+            haze naming a deck refused;
           - two decks of one condensate refused;
           - a coverage of 0.6 read;
           - unknown keys in every new list passed;
@@ -30334,6 +30356,49 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - _Left for P14.T54.b.l, with C5:_ `view/atmosphere/parity.test.ts:358`'s sentence that the
         envelope deck's τ "is not the sim's" is now stale (R08's file; review-r08-shapes-i §3
         item 5).
+    - _The pointer to P14.T53.f:_ the docs of `BodyEnvelopeDto`, `BodyRecordDto.envelope`,
+      `record::Envelope` and the client say "until P14.T53.f", the task part 3's commit
+      (05ad5867) enters in the task list (placed with 25's train). brief-notes-24 gave that edit
+      to part 3's own commit; on the re-cut base part 3 precedes i, and the two agree.
+    - _The envelope on `snapshot_at`:_ the section is built in `primary_record`, which
+      `snapshot_at` and `body_at` both call, so from 24 T50.b's record's "`snapshot_at` never
+      does" no longer holds (as b's aerosols already are): it is struck from 24 (main,
+      2026-10-27). About 28 ms an envelope in the test build, inside `AIR_SECTIONS_VERSION`'s
+      share, for P14.T54.b.k's cost (D5) and T33.a's (v) and (vi).
+    - _l's lists:_ five air scans; `PRIMORDIAL_HELIUM_VERSION` in k's attribution order and in l's
+      deletions (P14.T54.b.k and .l's bullets name it). `planetary/primordial_helium` is on
+      prebless-24-list (main).
+    - _The batch review's fixes_ (B3's review of g, j and i, 2026-10-27):
+      - _The error enum:_ `system::envelope::EnvelopeNotModelled` is `DeriveEnvelopeError`, with
+        `Display` and `Error` (`source()` each wrapped cause: `BuildFormationZoneError`,
+        `BuildNetworkError`, `DeriveInternalTemperatureError`, `DeriveEnvelopeAbundancesError`,
+        `DeriveEnvelopeAtmosphereError`; none for no \[α/Fe\] or no disc), re-exported by
+        `testing`, whose `envelope_by_hand` returns it in place of the `String`-carrying
+        `BuildEnvelopeByHandError`; the census counts its new `FormationZone` reason.
+      - _The ledger's start:_ the movers' test asserts, under both arms, that each carried
+        envelope's escape outcome holds its helium, airborne and escaped, at the formed envelope's
+        mass times `initial_helium_mass_fraction()`, to 10⁻¹²; the carry's helper `same` compares
+        that member too.
+      - _The golden_ `planetary/primordial_helium` (`the_primordial_helium_is_pinned`, beside the
+        law's tests): `primordial_helium_per_hydrogen` and `helium_mass_fraction_of` at solar,
+        \[Fe/H\] −1, +0.1, +0.3 (clamped) and ΔY 0.05 at solar Z, each its He/H and Y, blessed
+        by name at header 23 (an extension; nothing moves).
+      - _Order independence:_ the both-queries test above.
+      - _The fixture's orbit:_ the hot Jupiter's, above, and `@hyperion/protocol`'s test that the
+        orbit gives 1,449 K about the slice's 1 L☉ host.
+      - _The docs:_ `TaxonomicClassDto::Neutral` (and the sim's twin) cite Brown 2012 for Orcus's
+        and Haumea's neutral colours alone, not Charon's; `GuillotProfileDto` says Guillot 2010
+        assumes constant opacities (§6), and that Eq. 29 holding in τ for a pressure-dependent
+        opacity at fixed γ is the lane's consequence; `helium_left`'s `start` is
+        `helium_mass_fraction_start`; the escape tests' compound asserts are split; the server's
+        envelope conversion filters the modes twice by a named closure in place of `partition`;
+        `record::Envelope` boxes its abundances and atmosphere (552 bytes inline, measured, above
+        the 512-byte line); the client decoder refuses a T_int of 0 (`positive`), and its tests
+        take an infinite n, the deck-mode cases apart and T_int 0; the client's comments point at
+        P14.T53.f.
+      - _Declined:_ the census's `Instant` timings (`the_envelopes_are_stated`). It is an ignored
+        by-name census whose timings are printed, never asserted, as the crate's other censuses
+        do; D5's release measurement is l's probe.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

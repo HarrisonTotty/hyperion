@@ -543,9 +543,16 @@ const JUPITER_RADIUS_M = 7.1492e7;
  * HD 209458 b's measured mass and radius, in Jupiter's, and its zero-albedo equilibrium
  * temperature, K, T_eff (R★ ÷ 2a)^½, each with its uncertainty: 0.685 (+0.015, −0.014) Jupiter
  * masses, 1.359 (+0.016, −0.019) Jupiter radii and 1,449 ± 12 K, at 0.04707 au (Torres, Winn and
- * Holman 2008, ApJ 677, 1324, Table 5).
+ * Holman 2008, ApJ 677, 1324, Table 5) about its own star of 1.622 L☉ (their Table 3).
  */
 const HD_209458_B = { massJupiters: 0.685, radiusJupiters: 1.359, equilibriumK: 1_449 };
+
+/**
+ * The nominal solar luminosity, W (IAU 2015 Resolution B3), and the Stefan–Boltzmann constant,
+ * W m⁻² K⁻⁴ (CODATA 2018), as `hyperion-base` takes them.
+ */
+const SOLAR_LUMINOSITY_W = 3.828e26;
+const STEFAN_BOLTZMANN = 5.670_374_419e-8;
 
 describe("body_detail's hot Jupiter, an HD 209458 b (P14.T54.b.i)", () => {
   const record = () => response("body_detail_hot_jupiter", "body_detail").record;
@@ -557,11 +564,23 @@ describe("body_detail's hot Jupiter, an HD 209458 b (P14.T54.b.i)", () => {
     expect(bulk.radius_m / JUPITER_RADIUS_M).toBeCloseTo(HD_209458_B.radiusJupiters, 12);
     expect(bulk.equilibrium_temperature_k).toBe(HD_209458_B.equilibriumK);
     expect(bulk.class).toBe("gas_giant");
-    expect(okValue(record().orbit).orbit.semi_major_axis_m / METRES_PER_AU).toBeCloseTo(
-      0.04707,
-      12,
-    );
     expect(record().surface).toEqual({ state: "not_applicable" });
+  });
+
+  it("is placed where the slice's Sun-like host gives it HD 209458 b's equilibrium temperature", () => {
+    const [host] = response("system_bodies_response", "system_bodies").hosts.stars;
+    if (host === undefined) {
+      throw new Error("the slice's system lost its star");
+    }
+    const a = okValue(record().orbit).orbit.semi_major_axis_m;
+    // T_eq = (L★ ÷ 16πσa²)^¼ at zero albedo, about the fixture's 1 L☉ host rather than HD 209458's
+    // own 1.622 L☉, which puts it at 0.04707 au.
+    const luminosityW = host.luminosity_lsun * SOLAR_LUMINOSITY_W;
+    const equilibriumK = (luminosityW / (16 * Math.PI * STEFAN_BOLTZMANN * a * a)) ** 0.25;
+
+    expect(host.luminosity_lsun).toBe(1);
+    expect(equilibriumK).toBeCloseTo(HD_209458_B.equilibriumK, 9);
+    expect(a / METRES_PER_AU).toBeCloseTo(0.036896, 6);
   });
 
   it("holds the generator's envelope: alkali absorbers, silicate decks below its photosphere, no ammonia deck and no haze", () => {

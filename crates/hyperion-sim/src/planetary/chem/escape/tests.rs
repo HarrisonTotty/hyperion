@@ -184,8 +184,18 @@ fn the_primordial_helium_follows_the_host_s_y_over_x() {
     assert!((poor - expected(0.002, 0.0)).abs() < 1e-12, "{poor}");
     assert!((rich - expected(0.03, 0.0)).abs() < 1e-12, "{rich}");
     assert!((excess - expected(0.02, 0.05)).abs() < 1e-12, "{excess}");
-    assert!((poor - 0.809).abs() < 5e-4 && (at(-1.0, 0.0) - 0.0783).abs() < 5e-5);
-    assert!((rich - 1.119).abs() < 5e-4 && (at(0.5, 0.0) - 0.1084).abs() < 5e-5);
+    assert!((poor - 0.809).abs() < 5e-4, "[Fe/H] -1: {poor} n☉");
+    let poor_helium = at(-1.0, 0.0);
+    assert!(
+        (poor_helium - 0.0783).abs() < 5e-5,
+        "[Fe/H] -1: He/H {poor_helium}"
+    );
+    assert!((rich - 1.119).abs() < 5e-4, "[Fe/H] +0.5: {rich} n☉");
+    let rich_helium = at(0.5, 0.0);
+    assert!(
+        (rich_helium - 0.1084).abs() < 5e-5,
+        "[Fe/H] +0.5: He/H {rich_helium}"
+    );
     assert!((excess - 1.269).abs() < 5e-4, "{excess}");
     let mut last = 0.0;
     for k in 0..=400 {
@@ -207,7 +217,10 @@ fn the_primordial_helium_follows_the_host_s_y_over_x() {
             "at Z {z}: {below} {above}"
         );
     }
-    assert!(at(0.0, 0.01) > at(0.0, 0.0) && at(0.0, 0.1) > at(0.0, 0.05));
+    let (none, little) = (at(0.0, 0.0), at(0.0, 0.01));
+    assert!(little > none, "dY 0.01 {little} against 0 {none}");
+    let (some, more) = (at(0.0, 0.05), at(0.0, 0.1));
+    assert!(more > some, "dY 0.1 {more} against 0.05 {some}");
     assert_same_bits(at(1.0, 0.0), at(0.5, 0.0));
     eprintln!(
         "state: [Fe/H] -1 He/H {:.6} (x{poor:.4}), from +0.176 {:.6} (x{rich:.4}), dY 0.05 \
@@ -216,6 +229,34 @@ fn the_primordial_helium_follows_the_host_s_y_over_x() {
         at(0.5, 0.0),
         at(0.0, 0.05)
     );
+}
+
+/// The host star's primordial helium pinned by its bits (P14.T54.b.i; the sim-determinism skill's
+/// goldens): `primordial_helium_per_hydrogen` and `helium_mass_fraction_of` at five hosts, solar,
+/// \[Fe/H\] −1, +0.1, +0.3 (past the clamp at Z 0.03) and a helium excess of 0.05 at solar Z, each
+/// its He/H and its Y. Nothing on the record reads them until the 24 bump
+/// (`PRIMORDIAL_HELIUM_VERSION`), so they move no other golden.
+#[test]
+fn the_primordial_helium_is_pinned() {
+    use crate::units::{Dex, HeliumExcess};
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let host =
+        |fe_h: f64, excess: f64| Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::new(excess));
+    for (label, composition) in [
+        ("solar", Composition::SOLAR),
+        ("[Fe/H] -1", host(-1.0, 0.0)),
+        ("[Fe/H] +0.1", host(0.1, 0.0)),
+        ("[Fe/H] +0.3 clamped", host(0.3, 0.0)),
+        ("dY 0.05 solar Z", host(0.0, 0.05)),
+    ] {
+        let per_hydrogen = primordial_helium_per_hydrogen(&composition);
+        w.f64(&format!("{label} He/H"), per_hydrogen);
+        w.f64(&format!("{label} Y"), helium_mass_fraction_of(per_hydrogen));
+    }
+    golden!("planetary/primordial_helium", w.as_str());
 }
 
 // ---------------------------------------------------------------------------------------------

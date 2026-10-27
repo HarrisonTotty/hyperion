@@ -1615,10 +1615,8 @@ fn envelope(envelope: &Envelope) -> BodyEnvelopeDto {
     let profile = atmosphere.profile();
     let grey = profile.grey();
     let decks = atmosphere.decks();
-    let (deck_modes, hazes): (Vec<_>, Vec<_>) = atmosphere
-        .modes()
-        .iter()
-        .partition(|mode| decks.iter().any(|deck| deck.condensate() == mode.deck()));
+    let names_a_deck =
+        |mode: &&AerosolMode| decks.iter().any(|deck| deck.condensate() == mode.deck());
     BodyEnvelopeDto {
         supercritical: envelope.supercritical().map(key),
         internal_temperature_k: atmosphere.internal_temperature().value(),
@@ -1634,12 +1632,16 @@ fn envelope(envelope: &Envelope) -> BodyEnvelopeDto {
         composition: gas_shares(atmosphere.composition()),
         mean_molar_mass_g_per_mol: atmosphere.mean_molar_mass_g_per_mol(),
         heat_capacity_over_r: atmosphere.heat_capacity_over_r(),
-        decks: deck_modes
-            .into_iter()
+        decks: atmosphere
+            .modes()
+            .iter()
+            .filter(names_a_deck)
             .map(|mode| aerosol_mode(mode, decks))
             .collect(),
-        hazes: hazes
-            .into_iter()
+        hazes: atmosphere
+            .modes()
+            .iter()
+            .filter(|mode| !names_a_deck(mode))
             .map(|mode| aerosol_mode(mode, decks))
             .collect(),
         haze_tau_550: atmosphere.haze_optical_depth(),

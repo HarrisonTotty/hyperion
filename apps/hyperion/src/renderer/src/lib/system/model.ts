@@ -1002,8 +1002,8 @@ export interface GuillotProfile {
 export interface BodyEnvelope {
   /**
    * The condensable whose supercritical fluid the envelope is, by its registry key; `null` for an
-   * H₂/He envelope. No server sends it other than `null` before P14.T53.b part 3: a solid body
-   * under a supercritical envelope has its envelope `not_modelled` until then.
+   * H₂/He envelope. No server sends it other than `null` before P14.T53.f: a solid body under a
+   * supercritical envelope has its envelope `not_modelled` until then.
    */
   readonly supercritical: string | null;
   /**

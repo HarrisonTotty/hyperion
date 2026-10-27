@@ -15,7 +15,11 @@
 //! law; the envelope's effective temperature (`T_eq`⁴ + `T_int`⁴)^¼ with that `T_int`
 //! (decision-p14-t24d-profile §3.5), which P14.T50.b's helium rain reads; P14.T50.b's abundances;
 //! and P14.T52.d's atmosphere on [`GreyProfile::ADOPTED`]. Any refusal leaves the section not
-//! modelled, and the record keeps no reason ([`EnvelopeNotModelled`] is the census's).
+//! modelled, and the record keeps no reason ([`DeriveEnvelopeError`] is the census's, and the
+//! testing helper's).
+
+use std::error::Error;
+use std::fmt;
 
 use super::air::AirRules;
 use crate::math;
@@ -24,7 +28,7 @@ use crate::planetary::chem::envelope_abundances::{
     DeriveEnvelopeAbundancesError, EnvelopeAbundances, EnvelopeInputs,
 };
 use crate::planetary::chem::equilibrium::{BuildNetworkError, Network};
-use crate::planetary::derive::{FormationZone, MassFractions};
+use crate::planetary::derive::{BuildFormationZoneError, FormationZone, MassFractions};
 use crate::planetary::hooks::{
     DeriveEnvelopeAtmosphereError, DeriveInternalTemperatureError, EnvelopeAtmosphere,
     EnvelopeAtmosphereInputs, GreyProfile, envelope_internal_temperature,
@@ -68,14 +72,18 @@ pub(crate) struct EnvelopeOf {
     pub(crate) starlit: bool,
 }
 
-/// Why a record's envelope is not modelled under the air's batch: the census's reasons, of which
-/// the record keeps none (P14.T54.b.b's rule: `Section::NotModelled` carries no reason).
+/// Why a record's envelope is not modelled under the air's batch, or the testing helper's
+/// envelope by hand gives none: the census's reasons, of which the record keeps none
+/// (P14.T54.b.b's rule: `Section::NotModelled` carries no reason).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum EnvelopeNotModelled {
+pub enum DeriveEnvelopeError {
     /// The host has no \[α/Fe\] of its own, which is never defaulted.
     NoAlphaFe,
     /// The host has no disc to place the body's formation in.
     NoDisc,
+    /// The body's formation zone is not one: a formation distance or snow line that is not
+    /// positive, which only an envelope stated by hand gives (a record's zone is its disc's).
+    FormationZone(BuildFormationZoneError),
     /// P14.T24.d's internal temperature refused its inputs.
     InternalTemperature(DeriveInternalTemperatureError),
     /// P14.T50.b refused its inputs.
@@ -88,12 +96,39 @@ pub(crate) enum EnvelopeNotModelled {
     Atmosphere(DeriveEnvelopeAtmosphereError),
 }
 
+impl fmt::Display for DeriveEnvelopeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoAlphaFe => write!(f, "the host has no [α/Fe] of its own"),
+            Self::NoDisc => write!(f, "the host has no disc to place the body's formation in"),
+            Self::FormationZone(error) => write!(f, "the formation zone: {error}"),
+            Self::InternalTemperature(error) => write!(f, "the internal temperature: {error}"),
+            Self::Abundances(error) => write!(f, "the abundances: {error}"),
+            Self::Network(error) => write!(f, "the network: {error}"),
+            Self::Atmosphere(error) => write!(f, "the atmosphere: {error}"),
+        }
+    }
+}
+
+impl Error for DeriveEnvelopeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::FormationZone(error) => Some(error),
+            Self::InternalTemperature(error) => Some(error),
+            Self::Abundances(error) => Some(error),
+            Self::Network(error) => Some(error),
+            Self::Atmosphere(error) => Some(error),
+            Self::NoAlphaFe | Self::NoDisc => None,
+        }
+    }
+}
+
 /// The record's envelope section of the body `of` describes, its network `network`, under the
 /// rules `rules` (P14.T54.b.i).
 ///
 /// Under [`AirRules::Held`] it is not modelled, and neither closure runs: nothing is read or
 /// computed. Under [`AirRules::Batch`] it is [`envelope_of`]'s envelope, and not modelled for
-/// every refusal ([`EnvelopeNotModelled`]), whose reason the record does not keep.
+/// every refusal ([`DeriveEnvelopeError`]), whose reason the record does not keep.
 #[must_use]
 pub(super) fn record_envelope<'n>(
     rules: AirRules,
@@ -105,7 +140,7 @@ pub(super) fn record_envelope<'n>(
         AirRules::Batch => {
             let of = of();
             network()
-                .map_err(EnvelopeNotModelled::Network)
+                .map_err(DeriveEnvelopeError::Network)
                 .and_then(|network| envelope_of(&of, network))
                 .map_or(Section::NotModelled, Section::Ok)
         }
@@ -117,17 +152,20 @@ pub(super) fn record_envelope<'n>(
 ///
 /// # Errors
 ///
-/// [`EnvelopeNotModelled`]: a host with no \[α/Fe\] or no disc, before anything is computed; then
-/// each step's refusal, P14.T24.d's internal temperature's, P14.T50.b's and P14.T52.d's.
+/// [`DeriveEnvelopeError::NoAlphaFe`] or [`DeriveEnvelopeError::NoDisc`] for a host with no
+/// \[α/Fe\] or no disc, before anything is computed; then each step's refusal,
+/// [`DeriveEnvelopeError::InternalTemperature`] for P14.T24.d's internal temperature's,
+/// [`DeriveEnvelopeError::Abundances`] for P14.T50.b's and [`DeriveEnvelopeError::Atmosphere`] for
+/// P14.T52.d's.
 pub(crate) fn envelope_of(
     of: &EnvelopeOf,
     network: &Network,
-) -> Result<Envelope, EnvelopeNotModelled> {
-    let alpha_fe = of.alpha_fe.ok_or(EnvelopeNotModelled::NoAlphaFe)?;
-    let formation = of.formation.ok_or(EnvelopeNotModelled::NoDisc)?;
+) -> Result<Envelope, DeriveEnvelopeError> {
+    let alpha_fe = of.alpha_fe.ok_or(DeriveEnvelopeError::NoAlphaFe)?;
+    let formation = of.formation.ok_or(DeriveEnvelopeError::NoDisc)?;
     let internal_temperature =
         envelope_internal_temperature(of.internal_luminosity, of.radius, of.mass, of.age)
-            .map_err(EnvelopeNotModelled::InternalTemperature)?;
+            .map_err(DeriveEnvelopeError::InternalTemperature)?;
     let abundances = EnvelopeAbundances::derive(&EnvelopeInputs {
         mass: of.mass,
         fractions: of.fractions,
@@ -144,7 +182,7 @@ pub(crate) fn envelope_of(
         surface_gravity: of.gravity,
         primordial_helium_per_hydrogen: of.primordial_helium_per_hydrogen,
     })
-    .map_err(EnvelopeNotModelled::Abundances)?;
+    .map_err(DeriveEnvelopeError::Abundances)?;
     let atmosphere = EnvelopeAtmosphere::derive(&EnvelopeAtmosphereInputs {
         abundances: &abundances,
         network,
@@ -155,7 +193,7 @@ pub(crate) fn envelope_of(
         grey: GreyProfile::ADOPTED,
         starlit: of.starlit,
     })
-    .map_err(EnvelopeNotModelled::Atmosphere)?;
+    .map_err(DeriveEnvelopeError::Atmosphere)?;
     Ok(Envelope::hydrogen_helium(abundances, atmosphere))
 }
 

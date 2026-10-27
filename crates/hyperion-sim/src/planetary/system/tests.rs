@@ -12141,6 +12141,10 @@ fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
         assert_same_bits(a.helium_mass_fraction(), b.helium_mass_fraction());
         assert_same_bits(a.hydrogen_kept_share(), b.hydrogen_kept_share());
         assert_same_bits(a.helium_kept_share(), b.helium_kept_share());
+        assert_same_bits(
+            a.initial_helium_mass_fraction(),
+            b.initial_helium_mass_fraction(),
+        );
     };
     let (mut carried, mut on_the_outcome, mut none) = (0, 0, 0);
     with_every_24_hold(|| {
@@ -12205,9 +12209,12 @@ fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
 /// at the epoch, each system generated afresh under each arm: a body whose derivation carries no
 /// envelope helium derives to the bit (by `Debug`); every carried helium starts at its host's
 /// start (`fractionation_start`) under the host's arm and at the protosolar Y under the other, to
-/// the bit; about a solar host the two derivations are one, to the bit. The movers are counted,
-/// with the largest move of the carried He/H, and any state change is named (none expected: the
-/// thin envelopes' H₂ and He move by a few percent at most).
+/// the bit; under either arm, the escape outcome's helium, airborne and escaped as its ledger books
+/// it (`envelope_at_formation`), is the formed envelope's mass times the start its carry records
+/// (`EnvelopeHelium::initial_helium_mass_fraction`), to 10⁻¹²; about a solar host the two
+/// derivations are one, to the bit. The movers are counted, with the largest move of the carried
+/// He/H, and any state change is named (none expected: the thin envelopes' H₂ and He move by a few
+/// percent at most).
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -12215,11 +12222,36 @@ fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
 )]
 fn under_the_host_helium_only_envelope_bearing_bodies_about_other_hosts_move() {
     use crate::planetary::chem::escape::{
-        PrimordialHeliumRules, fractionation_start, with_primordial_helium,
+        EnvelopeHelium, PrimordialHeliumRules, fractionation_start, with_primordial_helium,
     };
+    use crate::planetary::derive::DerivedBody;
     use crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction;
     use crate::planetary::testing::with_every_24_hold;
     use crate::stellar::Composition;
+    use crate::substance::Element;
+    use crate::units::Kilograms;
+    // The ledger's formed helium (`envelope_at_formation`): the envelope's mass at formation, its
+    // share of the body's mass now and what energy-limited escape took (`envelope_history`), times
+    // the start the carry records; the outcome's helium, airborne and escaped, is all of it.
+    let booked = |at: &str, derived: &DerivedBody, helium: &EnvelopeHelium| {
+        let formed = derived.fractions().envelope() * Kilograms::from(derived.mass()).value()
+            + Kilograms::from(derived.envelope_lost()).value();
+        let start = helium.initial_helium_mass_fraction();
+        let expected = formed * start;
+        let outcome = derived
+            .atmosphere()
+            .escape()
+            .and_then(|escape| escape.element(Element::He))
+            .unwrap_or_else(|| {
+                panic!("{at}: a carried envelope's escape outcome holds its helium")
+            });
+        let got = outcome.airborne().value() + outcome.escaped().value();
+        assert!(
+            (got - expected).abs() <= 1e-12 * expected,
+            "{at}: the ledger's helium {got:e} kg against the formed envelope's {formed:e} kg \
+             times Y0 {start} ({expected:e} kg)"
+        );
+    };
     let mut sets: Vec<(String, Seed, SystemContext)> = golden_systems()
         .iter()
         .map(|(name, ctx, _)| {
@@ -12261,6 +12293,8 @@ fn under_the_host_helium_only_envelope_bearing_bodies_about_other_hosts_move() {
                 let other = proto
                     .envelope_helium()
                     .unwrap_or_else(|| panic!("{at}: a carry under either arm"));
+                booked(&format!("{at} host"), &host, helium);
+                booked(&format!("{at} protosolar"), &proto, other);
                 assert_same_bits(
                     helium.initial_helium_mass_fraction(),
                     fractionation_start(ctx.composition()),

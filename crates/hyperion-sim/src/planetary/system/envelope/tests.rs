@@ -7,6 +7,7 @@
 use std::sync::OnceLock;
 
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
 use crate::Seed;
@@ -162,17 +163,18 @@ fn rebuilt(
 }
 
 /// A refusal's name, for the counts.
-fn reason(error: &EnvelopeNotModelled) -> &'static str {
+fn reason(error: &DeriveEnvelopeError) -> &'static str {
     use DeriveEnvelopeAtmosphereError as E;
     match error {
-        EnvelopeNotModelled::NoAlphaFe => "no [α/Fe]",
-        EnvelopeNotModelled::NoDisc => "no disc",
-        EnvelopeNotModelled::InternalTemperature(_) => "internal temperature",
-        EnvelopeNotModelled::Abundances(_) => "abundances",
-        EnvelopeNotModelled::Network(_) => "network",
-        EnvelopeNotModelled::Atmosphere(E::NotHydrogenDominated { .. }) => "not hydrogen-dominated",
-        EnvelopeNotModelled::Atmosphere(E::LevelAboveRecords { .. }) => "level above records",
-        EnvelopeNotModelled::Atmosphere(
+        DeriveEnvelopeError::NoAlphaFe => "no [α/Fe]",
+        DeriveEnvelopeError::NoDisc => "no disc",
+        DeriveEnvelopeError::FormationZone(_) => "formation zone",
+        DeriveEnvelopeError::InternalTemperature(_) => "internal temperature",
+        DeriveEnvelopeError::Abundances(_) => "abundances",
+        DeriveEnvelopeError::Network(_) => "network",
+        DeriveEnvelopeError::Atmosphere(E::NotHydrogenDominated { .. }) => "not hydrogen-dominated",
+        DeriveEnvelopeError::Atmosphere(E::LevelAboveRecords { .. }) => "level above records",
+        DeriveEnvelopeError::Atmosphere(
             E::InternalTemperature(_)
             | E::EquilibriumTemperature(_)
             | E::Gravity(_)
@@ -359,9 +361,9 @@ impl Figures {
     }
 }
 
-/// The relative move from `a` to `b`, 0 where both are 0.
+/// The relative move from `a` to `b`, 0 where both are 0 (each below the smallest normal float).
 fn relative(a: f64, b: f64) -> f64 {
-    if a == 0.0 && b == 0.0 {
+    if a.abs() < f64::MIN_POSITIVE && b.abs() < f64::MIN_POSITIVE {
         0.0
     } else {
         ((b - a) / a).abs()
@@ -549,8 +551,11 @@ fn under_every_24_hold_every_gas_envelope_record_is_its_builder_s_or_not_modelle
 }
 
 /// The record's envelope is the same for the same seed twice, and a body's own record
-/// (`PlanetarySystem::body_at`) holds the snapshot's envelope (`snapshot_at`), every 24 hold in
-/// force and the record's rules at their batch, over three golden systems with giants.
+/// (`PlanetarySystem::body_at`) holds the snapshot's envelope (`snapshot_at`), each to the bit
+/// (signed zeros included, by `Debug`), every 24 hold in force and the record's rules at their
+/// batch, over three golden systems with giants; and `body_at` gives each body the same envelope
+/// whatever order its system's bodies are asked in, so that the escape batch's carried helium, read
+/// by each envelope, keeps nothing between bodies (the sim-determinism skill's call-order rule).
 #[test]
 fn under_every_24_hold_the_record_s_envelope_is_the_same_twice_and_in_both_queries() {
     let mut envelopes = 0;
@@ -566,15 +571,38 @@ fn under_every_24_hold_the_record_s_envelope_is_the_same_twice_and_in_both_queri
             let again = generate(system.seed, &ctx).with_record_rules(rules);
             let t = UniverseTime::EPOCH;
             let snapshot = system.snapshot_at(&ctx, t);
-            assert_eq!(snapshot, again.snapshot_at(&ctx, t), "{name}");
-            for record in snapshot.bodies() {
+            let twice = again.snapshot_at(&ctx, t);
+            assert_eq!(snapshot, twice, "{name}");
+            for (record, other) in snapshot.bodies().iter().zip(twice.bodies()) {
+                assert_eq!(
+                    format!("{:?}", record.envelope()),
+                    format!("{:?}", other.envelope()),
+                    "{name} {:?}",
+                    record.index()
+                );
                 if record.section_state(RecordSection::Envelope) != SectionState::Ok {
                     continue;
                 }
                 let alone = system.body_at(&ctx, record.index(), t).unwrap();
                 assert_eq!(&alone, record, "{name} {:?}", record.index());
+                assert_eq!(
+                    format!("{:?}", alone.envelope()),
+                    format!("{:?}", record.envelope()),
+                    "{name} {:?}",
+                    record.index()
+                );
                 envelopes += 1;
             }
+            let indices = system.indices();
+            assert_order_independent(&indices, |&index| {
+                format!(
+                    "{:?}",
+                    system
+                        .body_at(&ctx, index, t)
+                        .expect("a body of its system")
+                        .envelope()
+                )
+            });
         }
     });
     assert!(envelopes > 2, "{envelopes} envelopes");

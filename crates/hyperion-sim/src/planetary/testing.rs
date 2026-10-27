@@ -27,6 +27,7 @@ use super::context::{BuildSystemContextError, SystemContext};
 use super::derive::atmosphere::{Gas, PartialPressures};
 use super::derive::{FormationZone, MassFractions};
 use super::record::Envelope;
+pub use super::system::envelope::DeriveEnvelopeError;
 use super::system::envelope::{EnvelopeOf, envelope_of};
 use crate::Seed;
 use crate::coords::GalacticPosition;
@@ -99,13 +100,22 @@ pub struct EnvelopeByHand {
 ///
 /// # Errors
 ///
-/// [`BuildEnvelopeByHandError`], with the refusing step's reason, for a formation zone that is not
-/// one, or inputs a step of the chain refuses, which leave a record's envelope not modelled.
-pub fn envelope_by_hand(inputs: &EnvelopeByHand) -> Result<Envelope, BuildEnvelopeByHandError> {
-    let refused = |reason: String| BuildEnvelopeByHandError { reason };
+/// [`DeriveEnvelopeError`], the refusing step's:
+///
+/// - [`DeriveEnvelopeError::FormationZone`] for a formation distance or snow line that is not
+///   positive;
+/// - [`DeriveEnvelopeError::Network`] where P14.T52.a's network cannot be built from the registry,
+///   which the registry as built never gives;
+/// - [`DeriveEnvelopeError::InternalTemperature`], [`DeriveEnvelopeError::Abundances`] or
+///   [`DeriveEnvelopeError::Atmosphere`] for inputs P14.T24.d's internal temperature, P14.T50.b or
+///   P14.T52.d refuses, which leave a record's envelope not modelled.
+///
+/// [`DeriveEnvelopeError::NoAlphaFe`] and [`DeriveEnvelopeError::NoDisc`] are a record's alone:
+/// the inputs by hand always state an \[α/Fe\] and a disc's snow line.
+pub fn envelope_by_hand(inputs: &EnvelopeByHand) -> Result<Envelope, DeriveEnvelopeError> {
     let formation = FormationZone::new(inputs.formation_distance, inputs.snow_line)
-        .map_err(|error| refused(error.to_string()))?;
-    let network = Network::registry().map_err(|error| refused(error.to_string()))?;
+        .map_err(DeriveEnvelopeError::FormationZone)?;
+    let network = Network::registry().map_err(DeriveEnvelopeError::Network)?;
     let of = EnvelopeOf {
         mass: inputs.mass,
         fractions: inputs.fractions,
@@ -121,26 +131,8 @@ pub fn envelope_by_hand(inputs: &EnvelopeByHand) -> Result<Envelope, BuildEnvelo
         primordial_helium_per_hydrogen: inputs.primordial_helium_per_hydrogen,
         starlit: inputs.starlit,
     };
-    envelope_of(&of, &network).map_err(|reason| refused(format!("{reason:?}")))
+    envelope_of(&of, &network)
 }
-
-/// [`envelope_by_hand`] gave no envelope: the step that refused, as its reason reads.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BuildEnvelopeByHandError {
-    reason: String,
-}
-
-impl fmt::Display for BuildEnvelopeByHandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "the envelope's chain refused its inputs: {}",
-            self.reason
-        )
-    }
-}
-
-impl Error for BuildEnvelopeByHandError {}
 
 /// A single star of initial mass `mass` (0.08–150 M☉), \[Fe/H\] `fe_h` and age at the epoch
 /// `age`, as the system `id`: the builder's defaults otherwise (the median star's draws, the

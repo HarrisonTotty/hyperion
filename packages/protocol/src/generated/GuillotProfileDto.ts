@@ -2,9 +2,11 @@
 
 /**
  * The parameters of an envelope's irradiated grey profile above its join to the adiabat: Guillot
- * 2010's (A&A 520, A27) Eq. 29 in the thermal optical depth τ, which holds for an opacity that
- * varies with pressure at a fixed γ, with τ = `κ_th` p₁ ÷ (n g) × (p ÷ p₁)ⁿ, p₁ = 1 bar (10⁵ Pa),
- * n the optical depth's exponent and g the bulk section's surface gravity.
+ * 2010's (A&A 520, A27) Eq. 29 in the thermal optical depth τ, with τ = `κ_th` p₁ ÷ (n g) × (p ÷
+ * p₁)ⁿ, p₁ = 1 bar (10⁵ Pa), n the optical depth's exponent and g the bulk section's surface
+ * gravity. Guillot 2010 assumes constant opacities (its §6). The pressure-dependent form follows
+ * because, with γ fixed, the moment equations are local in τ, so that Eq. 29 holds in τ: this
+ * generator's consequence, not Guillot's statement.
  */
 export type GuillotProfileDto = { 
 /**

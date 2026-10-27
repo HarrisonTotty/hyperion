@@ -1003,9 +1003,19 @@ pub enum Biosphere {}
 /// Its atmosphere's modes are its decks' (each naming its deck's condensate, one of
 /// [`EnvelopeAtmosphere::decks`]), then its hazes' (each of its own material, which no deck
 /// condenses: the S₈ haze, soot, the ice giants' haze and the chromophore have no law aloft).
+///
+/// Its abundances and atmosphere are held behind one box, so that every record's envelope section
+/// stays small whether or not it holds an envelope (552 bytes inline and 16 boxed, measured with
+/// `size_of` on x86-64; a record 2,920 bytes and 2,384).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Envelope {
     supercritical: Option<SubstanceId>,
+    model: Box<EnvelopeModel>,
+}
+
+/// What an [`Envelope`] holds behind its box: its element abundances and its visible atmosphere.
+#[derive(Debug, Clone, PartialEq)]
+struct EnvelopeModel {
     abundances: EnvelopeAbundances,
     atmosphere: EnvelopeAtmosphere,
 }
@@ -1014,14 +1024,16 @@ impl Envelope {
     /// An H₂/He envelope, a giant's or a sub-Neptune's, of element abundances `abundances` and
     /// visible atmosphere `atmosphere` (P14.T54.b.i): no supercritical condensable.
     #[must_use]
-    pub(crate) const fn hydrogen_helium(
+    pub(crate) fn hydrogen_helium(
         abundances: EnvelopeAbundances,
         atmosphere: EnvelopeAtmosphere,
     ) -> Self {
         Self {
             supercritical: None,
-            abundances,
-            atmosphere,
+            model: Box::new(EnvelopeModel {
+                abundances,
+                atmosphere,
+            }),
         }
     }
 
@@ -1037,8 +1049,8 @@ impl Envelope {
     /// temperature (`T_eq`⁴ + `T_int`⁴)^¼ with its atmosphere's `T_int`, and its primordial He/H: the
     /// host star's own, fractionated by its escape (P14.T53.a), as its derivation carries it.
     #[must_use]
-    pub const fn abundances(&self) -> &EnvelopeAbundances {
-        &self.abundances
+    pub fn abundances(&self) -> &EnvelopeAbundances {
+        &self.model.abundances
     }
 
     /// Its visible atmosphere (P14.T52.d): its profile (P14.T24.d's Guillot profile joined to its
@@ -1047,8 +1059,8 @@ impl Envelope {
     /// its decks with their modes, its hazes, its absorbers at 10 mbar and its condensables not
     /// formed.
     #[must_use]
-    pub const fn atmosphere(&self) -> &EnvelopeAtmosphere {
-        &self.atmosphere
+    pub fn atmosphere(&self) -> &EnvelopeAtmosphere {
+        &self.model.atmosphere
     }
 }
 
