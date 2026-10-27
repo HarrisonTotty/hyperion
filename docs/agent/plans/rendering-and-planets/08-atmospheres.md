@@ -582,6 +582,25 @@ and their `.reference.json`, formatted so that `prettier --check .` (in `just ci
 listed in `.prettierignore` as written data, and each under the repository's 500 kB added-file
 hook. The metric is `gate.ts` (R08.T12.b).
 
+The sweep (R08.T13.a): `hyperion-fit atmosphere-sweep <sweep.case.json> --out <sweep.json> --work
+<dir> --cpu-per-vertex-us X --vroom-cpu-per-vertex-us Y [--point-cap-cpu-h 24] [--threads N]
+[--max-points N] [--pilot-only --points I,J,…]`, and `--smoke --out <sweep.json>`, another clap
+variant of `Command`, not a `FitTask`. It reads `SWEEP_FORMAT` 1 (`atmosphere::sweep`), a grid's
+template, axes, phase tables (one a g), its 54 geometries and its aggregate (ruling 4's 55), each
+geometry's share of its cone that meets the ground, the floor scan's grounds, and the twin's
+radiance at every candidate point and scan point, expands each point into an `AtmosphereCase`
+through `from_json`, walks each (ω, g) column (rulings 3–6), its counts and caps from the pilot's
+counted vertices and the given CPU a vertex, its verdicts by `atmosphere::metric`, `gate.ts`'s
+mirror held to it by `metric_verdicts.json`, and traces each column's floor again over grey grounds
+of 0, 0.02, 0.05, 0.1, 0.2, 0.5 and 0.8, never cut, sorting its misses into fixed and ground misses
+and finding A*(ω, g) ("#107's floor misses"). Each finished point is kept in
+`<dir>/<case>-<key>/point-<index>.json`, the key the SHA-256 of the format, the case, the binary,
+the mode and the settings, and a rerun resumes from it.
+Fixtures: `view/atmosphere/reference/ms-sweep-w<ω×1000>.case.json` (seven ω rows and the bright
+column's `ms-sweep-w1000-a800.case.json`, written by `reference/sweepCases.test.ts` through
+`bless.ts`) and their outputs `ms-sweep-w<ω×1000>.json` (R08.T13.b's), a cell or a point a line,
+each under 450 kB and in `.prettierignore`.
+
 ## Consumes
 
 Names are those the owning plans give; the owning plan is authoritative.
@@ -5316,8 +5335,9 @@ re-runs the gate against the vector radiance with the polarisation correction (D
 subcommand `hyperion-fit atmosphere-sweep --out <sweep.json> [--smoke]` traces single-layer media
 over vertical extinction optical depth, single-scattering albedo and asymmetry. Beside each point
 it writes the twin's analytic radiances, which a bless-style vitest supplies as a case file. The
-full sweep is run by hand and its output committed as `reference/ms-sweep.json`, kept under the
-500 kB added-file hook (the grid is sized for it, or the file is split by ω). `atmosphere-sweep` is
+full sweep is run by hand and its outputs committed as `reference/ms-sweep-w<ω×1000>.json`, one
+an ω row beside its case, `reference/ms-sweep-w<ω×1000>.case.json`, each kept under the 500 kB
+added-file hook (the file is split by ω, `decision-r08-t13-scope.md`, ruling 8). `atmosphere-sweep` is
 a `cli.rs` variant like `atmosphere-reference`. From it,
 `thick/regime.ts` sets `THICK_MS_BOUNDARY`, the τ*(ω, g) table of Design note 9 (the smallest
 swept τ at which some geometry fails the metric, every sweep point traced to σ_ref ≤ T ÷ 8), and
@@ -5365,6 +5385,27 @@ R08.T10.a's provisional thick line retires here. `classifyRegime` replaces
 `PROVISIONAL_THICK_OPTICAL_DEPTH` (vertical τ of at least 1 on the worst channel, over every term
 but the absorbers), and each fixture and reference case whose label changes is recorded
 (`decision-r08-t10a-leans.md`, item 1).
+
+- _The split_ (ruled 2026-10-26, `decision-r08-t13-scope.md`, ruling 1). T13 is built in five
+  parts, their commit subjects naming `R08.T13.a`, `.b`, `.c1`, `.c2` and `.d`:
+  - T13.a, the subcommand and its pilot: `atmosphere-sweep` (rulings 2–6), the sweep cases'
+    writer with the twin's radiances (ruling 8), `reference/twin.ts`, the twin's radiance at a
+    reference geometry, the metric's shared values, `--smoke`, and the pilot of 14 points with its
+    projection of T13.b (ruling 7);
+  - T13.b, the sweep: T13.a's landed binary over the full grid, committing
+    `reference/ms-sweep-w*.json` and the record;
+  - T13.c1, the case gate: T13's tests on the four committed cases, through `twin.ts`;
+  - T13.c2, the boundary: `THICK_MS_BOUNDARY`, `classifyRegime` and their tests in
+    `thick/regime.ts`, every cell recomputed from the sweep's outputs with `gate.ts` itself. With
+    the floor scan's A*(ω, g) (ruled 2026-10-27, "#107's floor misses"): a channel is thick where
+    τ > τ*, or where τ ≥ 1/32 and the medium's ground albedo is at least A*, and `ThickBoundary`
+    gains `albedoStar`. Mars may classify thick by the ground line, accepted where c1's own `mars`
+    gate also misses off the sun; Earth or `saturn-oblate` classified thick is raised;
+  - T13.d, the call sites: `assemble.ts` and `AtmosphereCache.ts` move from `provisionalThick` to
+    `classifyRegime`.
+
+  The order: a → b, with c1 beside b once a lands; c2 after b; d after c2 and R08.T10.b. T13
+  closes when d lands. T14.f needs c1 and c2, not d.
 
 Acceptance: `cargo test -p hyperion-fit atmosphere` (the sweep's `--smoke` mode) and `pnpm test`
 pass, and the full sweep is recorded here.
@@ -14630,6 +14671,195 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _Heavy tails away from the sun_: `mars`'s `disc-p30` (red) and green `flux-s0`, and
     `saturn-oblate`'s `equator-s60-v85-a0` (blue), caught a rare heavy path, so their σ does not fall
     as N^(−1/2) from the first quarter (4.6, 0.54 and 0.70 of its prediction); all three refused.
+- **Deviations in T13.a, as built** (2026-10-27; `crates/hyperion-fit/src/atmosphere/`: `sweep.rs`,
+  `metric.rs`, `metric_verdicts.json` and `sweep_smoke.case.json` (new), `mod.rs`, `transport.rs`;
+  `cli.rs`, `lib.rs`; `tests/atmosphere_sweep.rs` (new); `view/atmosphere/reference/`: `twin.ts`,
+  `twin.test.ts`, `sweepCases.test.ts`, `metricVerdicts.test.ts` and the eight
+  `ms-sweep-w*.case.json` (new), `geometries.ts`; `test/atmosphereSweep.ts` (new); `.prettierignore`.
+  Rulings: `decision-r08-t13-scope.md`, rulings 1–8 and 12, "#107's twin ground" and "#107's floor
+  misses", 2026-10-27).
+  - _The sweep case_ (`SWEEP_FORMAT` 1, `sweep.rs`'s module documentation): the template (radius,
+    H, top, ground albedo, 550 nm, the sun's irradiance 1, the 0.5° cone, ρ), ω, the fifteen τ with
+    their roles (`tauRoles`) and β₀ (`extinctionPerM`, β₀ H (1 − e^(−12.5)) = τ to 10⁻¹²), the u
+    grid once (`phaseU`, `PHASE_TABLE_U`), the 54 geometries with their image, `kind` and
+    `groundConeShare`, the aggregate, N_p, the seeds, the floor scan's grounds
+    (`scanGroundAlbedos`), and per column its g, its phase (`rayleigh`, or `tabulated` with `a1`),
+    its points and twin rows by τ candidate, and its scan points and twin rows by scan ground.
+  - _The CLI_: `atmosphere-sweep <case> --out <file> --work <dir>` with
+    `--cpu-per-vertex-us X` and `--vroom-cpu-per-vertex-us Y`, and optionally
+    `--point-cap-cpu-h 24`, `--threads N`, `--max-points N` and `--pilot-only --points I,J,…`; and
+    `--smoke --out <file> [--threads N]`. Both CPU figures are required, with no default
+    (reading 2). `--max-points` is added: it stops after N points, for
+    the resumption test and a planned stop. Exit 2 for a missing argument or an unknown `--points`
+    index, 1 for any other failure.
+  - _The counts_: T12.e's rule rounded up to whole blocks of 1,024 (`BLOCK_SAMPLES`), the geometry
+    cap rounded down to whole blocks, both at least N_p. The aggregate's target is 0.0025 F, F
+    direct plus diffuse; its miss is recorded, never a stop.
+  - _The work directory_: `<work>/<case>-<16 hex digits>/point-NNNN.json`, written beside and
+    renamed. The key is the SHA-256 of `SWEEP_FORMAT`, the case's SHA-256 (its line ends read as
+    LF), the binary's SHA-256, the mode and the settings; the binary's hash stands for the crate's
+    version (reading 4). A kept point of another τ, ground or index is refused as stale.
+  - _The output_: the head (`format`, `kind`, `case`, `caseSha256`, `binarySha256`, `settings`,
+    `pilotSamples`, `geometries`), then a cell or a point a line, numbers to seven significant
+    figures. A cell: ω, g, A, VROOM, `kind`, `tauStar`, its walk's points, `floorMisses`,
+    `listedRefusals`, `scanPoints`, `fixedMisses`, `groundMisses` (each with the least albedo it
+    fails over), `unsortedMisses` and `albedoStar`, the misses by name. A point: its index, τ, ω,
+    g, A, VROOM, `pilotSeed`, `class` (`pass`, `drift`, `reach` or `scan`), the projection, CPU and
+    wall time, and its final trace's seed, samples, L, σ and first quarter's σ by geometry, the
+    twin echoed, the failing and refused geometries by index into the head's `geometries` (names
+    would put a file walked to τ 8 past the 450 kB line), and the aggregate; a capped point its
+    pilot instead. N_q is ⌊N ÷ 4⌋, not written. `cpuS` is Linux's alone (`/proc/self/stat`,
+    `USER_HZ` 100), else `null`.
+  - _The floor scan_ ("#107's floor misses", items 1 and 2): each column's τ 1/32 again over grey
+    grounds of 0, 0.02, 0.05, 0.1, 0.2, 0.5 and 0.8, after its walk, under the walk's counts and
+    caps and never cut: 350 points, indices 750 + 7 × (ω row × 7 + g column) + ground, the bright
+    column's 1,093 + ground, seeded as the walk's. The walk is ruling 5's: its floor misses set no
+    τ*. `sort_floor` then sorts each geometry that fails at the floor τ over any ground, the walk's
+    own included: fixed if it fails over the black ground, ground if it passes there, unsorted if
+    it is refused or not traced there; A* is the least albedo of a ground miss, else 1. The bright
+    column's scan repeats (1, 0)'s on its own seeds. `classifyRegime`'s ground line and
+    `ThickBoundary`'s `albedoStar` are c2's (item 3, in the split note).
+  - _Main's readings as applied_:
+    1. (1, 0.75) at τ 8 (point 74) is the pilot's fourteenth point.
+    2. Vertices are counted in `Scratch` beside the draws (`trace_counted`), once a `visit` past the
+       stage check; the projection is the pilot's counted vertices a sample times the given CPU a
+       vertex, by estimator. The three pinned-bits tests pass with their values untouched.
+    3. Masked when outputs are compared: `cpuS`, `wallS`, `cpuPerVertexUs` and `cpuPerSampleUs`; a
+       resumed point keeps its first run's.
+    4. Index ω row × 105 + g column × 15 + τ candidate, the bright column 735 + τ candidate, the
+       scan's above; case seed 10,000; pilot seed 1,000,000 + index; the key as above.
+    5. The default compare: τ 1 of `ms-sweep-w1000`'s g 0 and g 0.75 columns and of the bright
+       column, and `ms-sweep-w1000`'s g 0.75 floor over the black ground, 3.5–5.4 s each; the file
+       20.6 s, §7.2's command 28 s (7 files, 169 tests).
+    6. All three τ* scenarios are projected, the scan with each.
+    7. τ is vertical, ground to top, at 550 nm; both pipelines read the file's β₀.
+    8. The bright file is `ms-sweep-w1000-a800.case.json`.
+    9. The twin reads `TABLE_SIZES.high`.
+  - _The near-sun listing_: "within 15°" is read inclusively, to 10⁻¹² in cosine:
+    `ground-s60-v75-a0` (exactly 15°), `ground-s80-v75-a0` and `ground-s80-v85-a0` (5°). Over the
+    50 columns, g ≥ 0.65 is exactly where `runs_vroom` holds (HG's forward value passes 1 sr⁻¹ at
+    g 0.639).
+  - _The twin_ (`reference/twin.ts`, `TABLE_SIZES.high`): `referenceTwin(medium, figure, options)`
+    builds its tables once a medium, one slice and one band of `oblatePlanetTwin` (its band's
+    tables are `planetTwin`'s), the sun's irradiance, the cone and the curves its options.
+    - On the ground: the sky view built at the observer for its sun, read by `skyViewReadTwin`.
+    - From orbit: `rayMarchTargetTexelTwin` at the centre of a 1,921 × 1,081 camera at
+      `DEFAULT_FOV_DEG`, the far limb blended.
+    - Aerial perspective: `aerialPerspectiveTwin` on a 2 × 2 volume at 1/31 of the field's tangent,
+      whose corners are the client's 32 × 32 volume's four central froxels (a test holds them so),
+      read as `aerialRead.wgsl` reads the centre, its slice mapping and fade mirrored.
+    - The lit ground ("#107's twin ground", item 1): where a cone direction meets the ground,
+      A ÷ π (max(μ₀, 0) T + E_sky) by `surfaceLightingTwin` with `oblateIrradianceTwin`'s ground row
+      (item 2; `tablesCpu.ts` untouched, no `export` added), behind the march's transmittance or the
+      volume's at the ground's distance. `groundConeShare` and `surfaceRadiance` record it, ungated.
+    - c1 must add: a spheroid `TwinFigure` (`saturn-oblate`'s slices, bands and oblate marches),
+      the layer split and the pieces as options for `earth-ozone-slab`, and a drawn surface for a
+      ground observer whose cone meets the ground (no set yet reaches below the horizon).
+  - _The smoke_: `ms-sweep-w900`'s g 0 and 0.75 columns, τ to ¼, the whole scan, and
+    `ground-s30-v60-a180`, `ground-s60-v60-a90`, `disc-p30` and `disc-p75`, at a pilot of 1,024,
+    50 µs a vertex, a geometry capped at 2 CPU-s and a point at 20 CPU-s (the limbs and aerial
+    perspective need about 50,000 samples, and would stop it at its floor). Its walk: g 0 `top` at
+    τ ¼; g 0.75 `reach` at 1/32, its two ground views floor misses. Its scan: g 0 misses nothing,
+    A* 1; g 0.75's two views are ground misses, from 0.02 and from the walk's 0.3, A* 0.02. Equal at
+    1 and 4 threads, timings masked: 30.0 s and 9.4 s by hand, 36 lines each.
+  - _Files_, bytes, each under the 450 kB line: the ω rows 241,854–248,081, the bright column
+    52,373, `sweep_smoke.case.json` 15,865 and `metric_verdicts.json` 9,804 (23 comparisons in four
+    cases); ruling 8 estimated 100–150 kB a case before the scan. The largest HG mean-cosine error
+    is 7.8 × 10⁻⁶ (g 0.5).
+  - _Times_ (an i7-8665U, 4 cores and 8 threads, a 4 GB scope, `nice -n 10`): the bless 2,013 s on
+    four single-worker vitest processes, 950–1,058 s a file of 154 points, about 6.5 s of CPU a
+    point, mostly its tables (3.5–5.4 s alone); the full compare (`HYPERION_SLOW_TESTS=1`, the same
+    four processes) 1,952 s, 937–998 s a file, every file and the smoke current, at a load of 1.5
+    rising to 4.4.
+  - _The pilot_ (2026-10-27, the release build, thin LTO, `--threads 4`, N_p 2,048, at a nominal
+    45 µs a vertex; just after the 33-minute bless, the load 3.6–3.8 with the pilot alone on the
+    machine): the walk's 14 points 36 s wall, the scan's 350 points 302 s.
+
+    | Point | (ω, g, τ, A)           | CPU / wall, s | CPU a sample, µs | n_v: ground / disc / limb / aerial / aggregate | σ₁ ÷ L: ground / disc / limb / aerial | Final N: min / median / max  | CPU-h |
+    | ----- | ---------------------- | ------------- | ---------------- | ---------------------------------------------- | ------------------------------------- | ---------------------------- | ----- |
+    | 8     | (1, 0, 1, 0.3)         | 5.8 / 1.5     | 50.2             | 5.26 / 9.17 / 5.18 / 7.64 / 13.92              | 0.86 / 0.72 / 0.73 / 1.09             | 8,192 / 22,528 / 149,504     | 0.03  |
+    | 10    | (1, 0, 2, 0.3)         | 9.7 / 2.5     | 84.8             | 10.19 / 16.48 / 8.21 / 13.84 / 25.22           | 1.25 / 0.97 / 0.79 / 1.42             | 15,360 / 39,424 / 178,176    | 0.09  |
+    | 12    | (1, 0, 4, 0.3)         | 18.6 / 4.7    | 161.9            | 21.12 / 31.31 / 13.20 / 27.68 / 49.75          | 1.88 / 0.95 / 0.86 / 1.94             | 19,456 / 84,480 / 275,456    | 0.35  |
+    | 74    | (1, 0.75, 8, 0.3) V    | 24.3 / 6.5    | 211.5            | 74.40 / 89.38 / 38.53 / 65.84 / 160.74         | 2.31 / 1.62 / 1.57 / 2.73             | 46,080 / 128,000 / 680,960   | 0.94  |
+    | 85    | (1, 0.85, 2, 0.3) V    | 7.6 / 2.1     | 66.2             | 11.84 / 16.34 / 10.39 / 13.82 / 25.18          | 1.94 / 1.91 / 2.11 / 2.36             | 25,600 / 125,952 / 1,075,200 | 0.14  |
+    | 87    | (1, 0.85, 4, 0.3) V    | 13.0 / 3.5    | 113.7            | 25.87 / 36.72 / 20.40 / 29.80 / 60.27          | 1.98 / 2.28 / 2.03 / 2.53             | 28,672 / 126,976 / 717,824   | 0.36  |
+    | 126   | (0.99, 0.3, ½, 0.3)    | 4.9 / 1.3     | 42.6             | 2.92 / 5.84 / 3.40 / 4.32 / 8.34               | 0.69 / 0.52 / 0.71 / 0.90             | 4,096 / 14,848 / 142,336     | 0.01  |
+    | 128   | (0.99, 0.3, 1, 0.3)    | 6.5 / 1.7     | 56.9             | 4.75 / 9.16 / 4.97 / 6.65 / 13.28              | 0.84 / 0.79 / 0.74 / 1.02             | 8,192 / 23,040 / 160,768     | 0.03  |
+    | 261   | (0.95, 0.65, ½, 0.3) V | 4.5 / 1.2     | 38.9             | 2.92 / 5.08 / 3.61 / 3.99 / 7.47               | 0.92 / 0.81 / 1.12 / 1.25             | 7,168 / 32,256 / 244,736     | 0.01  |
+    | 263   | (0.95, 0.65, 1, 0.3) V | 5.7 / 1.5     | 49.3             | 5.24 / 8.00 / 5.23 / 6.46 / 11.88              | 1.09 / 1.10 / 1.22 / 1.44             | 10,240 / 43,008 / 224,256    | 0.02  |
+    | 355   | (0.9, 0.5, 2, 0.3)     | 8.3 / 2.2     | 72.5             | 6.99 / 13.35 / 7.04 / 9.73 / 19.29             | 1.26 / 1.27 / 0.97 / 1.49             | 10,240 / 47,616 / 243,712    | 0.09  |
+    | 357   | (0.9, 0.5, 4, 0.3)     | 13.0 / 3.4    | 113.2            | 12.44 / 21.42 / 10.19 / 16.73 / 32.03          | 1.83 / 1.42 / 0.97 / 1.93             | 23,552 / 85,504 / 372,736    | 0.23  |
+    | 567   | (0.6, 0.5, 4, 0.3)     | 6.8 / 1.8     | 59.5             | 5.58 / 9.88 / 5.01 / 7.73 / 14.54              | 1.97 / 1.81 / 0.94 / 2.64             | 17,408 / 105,984 / 1,168,384 | 0.18  |
+    | 743   | (1, 0, 1, 0.8)         | 6.8 / 1.8     | 59.1             | 5.84 / 10.40 / 5.36 / 8.49 / 15.51             | 0.79 / 0.60 / 0.81 / 0.83             | 8,192 / 19,456 / 165,888     | 0.03  |
+
+    Each point's pilot seed is 1,000,000 + its index; V marks VROOM; CPU-h is the point's pilot and
+    final at the measured c_v. The CPU a vertex, Σ CPU ÷ Σ counted vertices: 8.79 µs under R08.T12.c's
+    estimator and 4.00 µs under VROOM, against §3.7's 30–60; on 2026-10-26, before the bless, at a
+    load of 2.4–3.0 and on the binary before the scan, 5.57 and 2.66: the figure moves with the
+    machine's state, and part b's command takes the higher. No geometry nears its 4 CPU-h cap
+    nor any point its 24. The scan: 1,155 CPU-s of pilot, its points 0.010–0.042 CPU-h each with
+    their finals, 0.98 CPU-h in all (0.041 CPU-days).
+
+  - _The projection of T13.b_ (`project.py`, scratch: §3.7's forms fitted to the pilot, n_v = a + b
+    τ_eff (1 + c VROOM) by kind, the counts' factor q by kind, transmitted as max(s₀, A (τ_e ÷ 2)^p)
+    and orbit as A e^(Bτ); c_v as measured), the walk's points plus the scan's 350, CPU-days and
+    wall-days at 4 threads (3.9 CPU-h a wall hour): early 754, 0.71 and 0.18; central 763, 0.98 and
+    0.25; none 750, 0.97 and 0.25. The 4-day line holds about 16 times over: no ladder step is
+    needed, the cap stops no column, and none is left as `reach` by cost. Each must-have cell's walk,
+    central: Earth's 0.78–1.31 CPU-h, Mars's 0.62–1.05, (1, 0) 1.31, Titan-class 0.62–1.05,
+    Venus-class (1, 0.75) 0.24 and (1, 0.85) 0.21; each scan 0.01–0.04 more.
+  - _Bytes_: a traced row 3,387–3,725 B (the walk's pilot points, filled as the final writes them),
+    a scan row 3,412–3,622 B; an ω file about 390 kB as projected (central), 436 kB at the worst
+    (every column walked to τ 8 and its stop, every row failing every geometry), the bright file
+    about 55 kB.
+  - _T13.b's command_, once a file from the repository's root, with the bright file's `-a800` in
+    its name; about 6 h wall for all eight (central), a release build of the landed tree first:
+
+    ```text
+    systemd-run --user --scope -p MemoryMax=4G -p MemorySwapMax=0 -- timeout 43200 nice -n 10 \
+      target/release/hyperion-fit atmosphere-sweep \
+      apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w<ω×1000>.case.json \
+      --out apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w<ω×1000>.json \
+      --work <scratch>/ms-sweep-work --cpu-per-vertex-us 8.79 --vroom-cpu-per-vertex-us 4.0 \
+      --point-cap-cpu-h 24 --threads 4
+    ```
+
+- **Deferred findings (2026-10-13 rule)** (R08.T13.a). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The tracer is cheaper than the model_: 8.79 µs a vertex under R08.T12.c's estimator and 4.00
+    under VROOM (5.57 and 2.66 on a cooler machine), against §3.7's 30–60, and part b 0.71–0.98
+    CPU-days against the ruling's 6–14. VROOM's split paths count as vertices, so its figure is not
+    the other's.
+  - _The ground misses_: at (0.9, 0.75), τ 1/32, the twin reads 1.98 and 1.48 times the reference at
+    `ground-s30-v60-a180` and `ground-s60-v60-a90` over the 0.3 ground (σ ÷ L 0.6%), but 1.04 × 10⁻³
+    over a black one, the single scattering: Hillaire's ground bounce scattered isotropically, where
+    a g 0.75 phase sends back about a quarter of it. The smoke sorts both as ground misses, A* 0.02.
+    The scan's pilot, provisional at its own σ: A* 1 in every g 0 column, 0.2 at g 0.3, 0.1 at g 0.5,
+    0.02–0.05 at g 0.65 and 0.02 from g 0.75; so a VROOM medium over any ground but black routes
+    thick by the ground line, Mars's 0.25 among them (item 4), and Earth's 0.1 stays thin by it at
+    ḡ 0.3 or less.
+  - _Fixed misses over the black ground_ (the scan's pilot, provisional): none at g ≤ 0.5; from
+    g 0.65, in most columns, the disc at phases 0° to 60°, and at g 0.85 and 0.9 a few views at 75°
+    to 85° (`ground-s30-v85-a0` the most) and one limb, 0 to 5 geometries a column. c1 meets the
+    disc on `mars`.
+  - _Provisional verdicts_ (the pilot's own σ, 1–10% of L; they set nothing): the twin leaves the
+    metric at τ ½–1 in most columns; at (1, 0), τ 1, 36 of 54 geometries, the ground views reading
+    0.42–0.89 of the reference, and over the bright ground all 54 (0.24–0.81). Earth's (0.99, 0.3) and
+    Mars's (0.95, 0.65) cells fail 26 and 23 geometries at τ ½, so their τ* may fall below their
+    worst channels' 0.394 and 0.508; Earth classified thick is to be raised (item 4).
+  - _The aerial read is mirrored_: `twin.ts` repeats `aerialRead.wgsl`'s slice mapping and first
+    slice's fade, which no CPU read exports; a change to one must be made to both.
+  - _The pilot's σ at 2,048 samples_ may understate a heavy tail at depth (T12.c's coefficient of
+    variation 3–7 at τ 2–4); the final trace's `noisy` refusal then stops the column as `reach`, and
+    part b may cost more than its projection.
+  - _The output's margin_: an ω file projects to about 390 kB, 436 kB at the worst, under the 450 kB
+    line but not far; a file past it is split by halves of g (ruling 8), part b's to do.
+  - _The hashed files' line ends_: a case's SHA-256 is taken over its text with CRLF read as LF, so a
+    checkout that writes CRLF keeps its work directory; a `.gitattributes` rule keeping the sweep
+    cases LF is outside the lane.
+  - _ρ's citation_: `rayleigh.ts` cites Sneep and Ubachs 2005, eq. 7, for ρ = 6(F_K − 1) ÷ (3 + 7F_K);
+    the paper was not read (the science check), and the formula is Bodhaine et al. 1999's eqs. 1 and
+    22 inverted, which it reproduces.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:

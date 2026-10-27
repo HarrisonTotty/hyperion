@@ -72,3 +72,11 @@ apps/hyperion/src/renderer/src/view/atmosphere/reference/*.case.json
 apps/hyperion/src/renderer/src/view/atmosphere/reference/*.reference.json
 apps/hyperion/src/renderer/src/view/atmosphere/reference/refusals.json
 crates/hyperion-fit/src/atmosphere/absorber_curves.json
+# R08.T13's sweep cases, written by `reference/sweepCases.test.ts` through `bless.ts`, and their
+# outputs, `hyperion-fit atmosphere-sweep`'s, a cell or a point a line; the smoke's sweep the
+# tracer's `sweep` module embeds, and the metric's shared values its `metric` module reads
+# (`metricVerdicts.test.ts`; plan R08, R08.T13.a)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w*.case.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w*.json
+crates/hyperion-fit/src/atmosphere/sweep_smoke.case.json
+crates/hyperion-fit/src/atmosphere/metric_verdicts.json

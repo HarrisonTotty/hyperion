@@ -26,6 +26,11 @@
 //! - `spheroid`: the level spheroid of an oblate body, its normal gravity, geodetic coordinates
 //!   and quadric shells, over which the medium is read at the gravity-scaled height;
 //! - [`mod@reference`]: the output and its moments;
+//! - `metric`: the 5% metric's mirror, held to the client's `gate.ts` by shared values
+//!   (R08.T13.a);
+//! - [`sweep`]: R08.T13's sweep of single-layer media, `hyperion-fit atmosphere-sweep`, which
+//!   walks each (ω, g) column of its grid to where the client's analytic multiple scattering
+//!   leaves the metric (R08.T13.a);
 //! - `benchmarks` (tests only): the published benchmarks the tracer is held to before its
 //!   references are trusted (R08.T12.c), slow tests run by `just test-slow atmosphere::benchmarks`.
 //!
@@ -51,9 +56,11 @@ mod absorber;
 mod benchmarks;
 pub mod case;
 mod geometry;
+pub(crate) mod metric;
 mod optics;
 pub mod reference;
 mod spheroid;
+pub mod sweep;
 mod transport;
 
 use std::num::{NonZeroU64, NonZeroUsize};
@@ -190,6 +197,65 @@ pub(crate) fn trace_reference_with(
     estimator: Estimator,
     orders: Orders,
 ) -> Result<ReferenceRadiances, TraceReferenceError> {
+    trace_counted_with(case, polarisation, samples, threads, estimator, orders)
+        .map(|counted| counted.reference)
+}
+
+/// A traced reference with the vertices its samples reached (R08.T13.a's cost, main's reading 2):
+/// every scattering and reflection of every branch, counted beside the draws, which it leaves
+/// alone.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CountedTrace {
+    /// The reference, as [`trace_reference`] traces it.
+    pub(crate) reference: ReferenceRadiances,
+    /// Each geometry's vertices over its samples and wavelengths, in the case's order.
+    pub(crate) geometry_vertices: Vec<u64>,
+    /// Each aggregate's vertices over both its fluxes' samples and the wavelengths.
+    pub(crate) aggregate_vertices: Vec<u64>,
+}
+
+/// [`trace_reference`] with each geometry's and aggregate's vertices counted.
+///
+/// # Errors
+///
+/// As [`trace_reference`].
+///
+/// # Panics
+///
+/// As [`trace_reference`].
+pub(crate) fn trace_counted(
+    case: &AtmosphereCase,
+    polarisation: Polarisation,
+    samples: NonZeroU64,
+    threads: NonZeroUsize,
+) -> Result<CountedTrace, TraceReferenceError> {
+    trace_counted_with(
+        case,
+        polarisation,
+        samples,
+        threads,
+        Estimator::ByMedium,
+        Orders::Every,
+    )
+}
+
+/// Whether the medium of `case` runs VROOM at wavelength index `wavelength` under the estimator
+/// every reference runs (the `transport` module): where a scattering term is forward-peaked.
+#[must_use]
+pub(crate) fn runs_vroom(case: &AtmosphereCase, wavelength: usize) -> bool {
+    let grid = shell_grid(case);
+    Medium::new(case, &grid, wavelength, Estimator::ByMedium, Orders::Every).runs_vroom()
+}
+
+/// [`trace_counted`] with the estimator and orders of [`trace_reference_with`].
+fn trace_counted_with(
+    case: &AtmosphereCase,
+    polarisation: Polarisation,
+    samples: NonZeroU64,
+    threads: NonZeroUsize,
+    estimator: Estimator,
+    orders: Orders,
+) -> Result<CountedTrace, TraceReferenceError> {
     if polarisation == Polarisation::Stokes
         && let Some(term) = case
             .terms()
@@ -247,6 +313,17 @@ pub(crate) fn trace_reference_with(
         polarisation,
         threads,
     )?;
+    // Each source's vertices over the wavelengths: an aggregate's two fluxes are its own.
+    let per_wavelength = sources.len();
+    let source_vertices: Vec<u64> = (0..per_wavelength)
+        .map(|k| traced.vertices.iter().skip(k).step_by(per_wavelength).sum())
+        .collect();
+    let geometry_count = case.geometry_count();
+    let geometry_vertices = source_vertices[..geometry_count].to_vec();
+    let aggregate_vertices = source_vertices[geometry_count..]
+        .chunks(2)
+        .map(|pair| pair.iter().sum())
+        .collect();
     let run = Run {
         case,
         grid: &grid,
@@ -256,7 +333,7 @@ pub(crate) fn trace_reference_with(
         moments: traced.whole,
         quarters: traced.quarters,
     };
-    Ok(ReferenceRadiances {
+    let reference = ReferenceRadiances {
         format: REFERENCE_FORMAT,
         case: case.name().to_owned(),
         polarisation,
@@ -269,6 +346,11 @@ pub(crate) fn trace_reference_with(
         aggregates: (0..case.aggregate_count())
             .map(|a| run.aggregate(a, polarisation))
             .collect(),
+    };
+    Ok(CountedTrace {
+        reference,
+        geometry_vertices,
+        aggregate_vertices,
     })
 }
 
@@ -280,10 +362,11 @@ const MOMENTS: usize = COMPONENTS + 1;
 const DIFFERENCE: usize = COMPONENTS;
 
 /// The moments of a traced case, per task, wavelength-major: of each source's whole run and of its
-/// first quarter of samples, ⌊N ÷ 4⌋.
+/// first quarter of samples, ⌊N ÷ 4⌋; and the vertices each task's samples reached.
 struct Traced {
     whole: Vec<[Moments; MOMENTS]>,
     quarters: Vec<[Moments; MOMENTS]>,
+    vertices: Vec<u64>,
 }
 
 /// Pushes a sample's components `x` into `moments`: I alone in the scalar mode, and in the Stokes
@@ -333,6 +416,7 @@ fn trace_moments(
     let seed = seed ^ ATMOSPHERE_STREAM;
     let mut whole = vec![[Moments::default(); MOMENTS]; tasks];
     let mut quarters = vec![[Moments::default(); MOMENTS]; tasks];
+    let mut vertices = vec![0_u64; tasks];
     map_reduce_chunks(
         items,
         1,
@@ -365,12 +449,18 @@ fn trace_moments(
                             push_sample(&mut quarter_moments, &x, polarisation);
                         }
                     }
-                    (index, block_moments, quarter_moments)
+                    (
+                        index,
+                        block_moments,
+                        quarter_moments,
+                        scratch.take_vertices(),
+                    )
                 })
                 .collect::<Vec<_>>()
         },
         |results| {
-            for (index, block_moments, quarter_moments) in results {
+            for (index, block_moments, quarter_moments, block_vertices) in results {
+                vertices[index] += block_vertices;
                 for (total, part) in whole[index].iter_mut().zip(&block_moments) {
                     total.merge(part);
                 }
@@ -380,7 +470,11 @@ fn trace_moments(
             }
         },
     )?;
-    Ok(Traced { whole, quarters })
+    Ok(Traced {
+        whole,
+        quarters,
+        vertices,
+    })
 }
 
 /// A traced case: its media per wavelength, its sources (the geometries' detectors, then each
@@ -734,6 +828,59 @@ mod tests {
         let one = trace(&absorbing, Polarisation::Scalar, 300, 1).to_json();
         let four = trace(&absorbing, Polarisation::Scalar, 300, 4).to_json();
         assert_eq!(one, four);
+    }
+
+    /// `value` traced with its vertices counted, `samples` a source, on `threads` threads.
+    fn counted(value: &Value, samples: u64, threads: usize) -> CountedTrace {
+        trace_counted(
+            &case_of(value),
+            Polarisation::Scalar,
+            NonZeroU64::new(samples).unwrap(),
+            NonZeroUsize::new(threads).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn atmosphere_counted_trace_counts_each_vertex_its_paths_reach() {
+        // Nothing scatters and the ground is black: the view from orbit reaches the ground, one
+        // vertex a sample at each of the two wavelengths, and the view of the sky reaches none; of
+        // the aggregate's two fluxes, the ground's reaches nothing and the top's the ground, but
+        // for the directions within the horizon's dip of 10° from 100 km, which pass over the
+        // limb: about 3% of a cosine-weighted hemisphere.
+        let mut absorbing = case::tests::sample_case();
+        let ozone = absorbing["terms"][2].clone();
+        absorbing["terms"] = json!([ozone]);
+        absorbing["groundAlbedo"] = json!([0.0, 0.0]);
+        let traced = counted(&absorbing, 300, 4);
+        assert_eq!(traced.geometry_vertices, [0, 600]);
+        let top = traced.aggregate_vertices[0];
+        assert!((540..600).contains(&top), "{top}");
+        // Where the air scatters, every sample's forced collision is a vertex, and the reference
+        // is `trace_reference`'s.
+        let sample = case::tests::sample_case();
+        let traced = counted(&sample, 1500, 1);
+        assert!(
+            traced.geometry_vertices.iter().all(|&v| v >= 2 * 1500),
+            "{:?}",
+            traced.geometry_vertices
+        );
+        assert_eq!(
+            traced.reference.to_json(),
+            trace(&sample, Polarisation::Scalar, 1500, 1).to_json()
+        );
+    }
+
+    #[test]
+    fn atmosphere_counted_trace_counts_the_same_on_one_and_four_threads() {
+        // Two wavelengths, a geometry and an aggregate of their own counts, blocks uneven among
+        // the threads; and VROOM's clones and copies deep in a thick forward-peaked slab.
+        let mut uneven = case::tests::sample_case();
+        uneven["geometries"][1]["samples"] = json!(2500);
+        uneven["aggregates"][0]["samples"] = json!(1100);
+        assert_eq!(counted(&uneven, 300, 1), counted(&uneven, 300, 4));
+        let thick = thick_peaked_slab();
+        assert_eq!(counted(&thick, 64, 1), counted(&thick, 64, 4));
     }
 
     /// A conservative slab of τ 5 (550 nm) and 2.5 (440 nm) scattering by Henyey–Greenstein at g
