@@ -2544,6 +2544,58 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
     MOON weathered at descent-100s, descent-150s and lowest-180s on high and low
     (`viewsCheck.sh --hidden --terrain --weathered`), the line gone over the surveyed plain.
 
+- **R10.T16.g The datum's limb stroked inside the figure over the image** (new, 2026-10-27, from
+  `decision-r08-approximate-plate.md`, item 2; a blocker, low in severity: a visibly wrong picture).
+  - **The cause.** T16.f's overlay strokes each body's limb centred on it, as the wireframe does,
+    so half its cased width lies over the image beyond the body. A cased line covers pixels up to
+    δ = w ÷ 2 + c + 0.5 device px from its centreline (`lineStroke.wgsl`'s coverage, the casing
+    drawn w + 2c wide): 3.5 px for the thin limb at a line scale of 2. On `TEST EARTH` at 51 Mm
+    that covers the air's whole limb glow, about 2 px (plan 08's T10.b records, _The datum over
+    the limb_).
+  - **The rule** (main's ruling, 2026-10-27, under the owner's delegation). In the photorealistic
+    style the datum's limb is stroked inside the figure, the outer edge of its casing on the limb,
+    and no datum line or casing is drawn beyond the figure, with or without the body's air, so
+    that the limb does not move when the air arrives. The wireframe centres its limb, as it does
+    every line. Main's rulings on the brief's two calls (§7): a body whose apparent radius is under
+    2(2 + √2) δ_limb (24 device px at a line scale of 2, 35 at 3) has no limb or graticule over
+    the image, a cut with no hysteresis; the oblate figure's datum is R02.T19's, after this task.
+  - **Files.** `view/wireframe/bodies.ts` (`DatumInside`, `DATUM_INSIDE_MARGIN_PX`,
+    `DATUM_OVER_IMAGE_RADIUS_PER_REACH`, `datumOverImage`, `graticule`'s `inside`),
+    `view/wireframe/drawList.ts` (`DrawOptions.datumInside`, `casingDevicePx`, `strokeReachPx`,
+    `datumInsideAt`), `view/photoreal/overlay.ts`, `displays/view/viewFrameDrawer.ts`, the guide's
+    bullet after "The datum's lines, …", and the smoke harness's new `smoke/datumFrame.ts`, in
+    `smoke/page.ts`'s part 11 (part 8 had no room on the laptop that built it: Risks).
+  - **Tests:**
+    - `bodies.test.ts`: on `TEST EARTH` at 51 Mm, 1920 × 1080 at 60°, at the field's centre and
+      near a corner, at line scales of 2 and 3: the inside limb's points and chords from δ_limb to
+      δ_limb + 0.5 px inside the outline, each point on the sphere's near side; every meridian
+      and parallel at least its own δ inside, its cut ends at its own δ, under the limb's casing,
+      there and in a 120° field with the limb by its corners; the option off leaves the limb on
+      the horizon, as built; no datum over the image just under the least radius, and the datum
+      at it; the ruling's points, the datum at 24 and 35 device px of apparent radius and none at
+      23 and 34, at line scales of 2 and 3, the band covering at most half the disc at the least
+      radius;
+    - `drawList.test.ts`: the option reaches both batches of every body, which keep their names
+      and `body`, and nothing else; the list as built with it off; a body too small loses its
+      batches and keeps its occluder sphere; the reaches at the overlay's casing;
+    - `overlay.test.ts`: on `TEST EARTH` at 51 Mm, no segment of the body's batches in
+      `overlayDrawList`'s list, widened by its `widthPx` ÷ 2 + `casingWidthPx` + 0.5, passes the
+      outline, at line scales of 2 and 3; the limb's least margin within a twentieth of a pixel,
+      so the inset's casing is the casing drawn; the centred datum, the control, passes it;
+    - `viewFrameDrawer.test.ts`: a photorealistic frame's symbology packs the inside datum, and a
+      wireframe frame's the centred one;
+    - the smoke harness's `R10.T16.g the datum inside the figure` (part 11), on a sphere of R05's
+      Earth with R05's Earth medium: every pixel whose centre's line of sight misses the sphere
+      holds the same bytes with the inside datum and with none; pixels inside the outline differ;
+      the air's glow stands beyond the limb; the centred datum changes pixels beyond it.
+  - **Acceptance.**
+    - `pnpm --filter hyperion exec vitest run view/wireframe view/photoreal displays/view/viewFrameDrawer`;
+    - `just test-render --part=11`; `pnpm typecheck`, `pnpm lint` and `pnpm test`;
+    - the `console-ux` checks on the changed renderer files and the guide;
+    - by hand, hidden, `just views-check --hidden --atmosphere --setting high`: the glow at
+      `TEST EARTH` at 51 Mm shows beyond the limb's casing.
+  - _Built 2026-10-27_ (Risks, "Deviations in T16.g, as built").
+
 ### R10.T11 The wireframe's terrain
 
 Depth-only terrain in the wireframe style at τ = 4 px from the same bounds and bakes (heights and
@@ -15048,3 +15100,94 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _The smoke harnesses and the spike's `bodyDescent.ts` still pass no σ_ (T4.b's deferred
     finding). The workers now answer 0 under the hard rule anyway. A switch of rule should make
     them pass `fieldBounds(body)?.sigmaM`, as T4.b's record says.
+- **Deviations in T16.g, as built** (2026-10-27; lane 116, on `rendering-and-planets` at
+  `c2a8da33`; issue #116's brief, and main's rulings of 2026-10-27 on its two calls,
+  `decision-r08-approximate-plate.md` §7).
+  - _The shape (§3.1)._ The brief's lean, in R02's draw list. `DrawOptions.datumInside` (absent
+    or `false`, the list as built) is set by the drawer from `frameStyleOf`, as the survey edges'
+    style is. `graticule(…, inside)` takes a `DatumInside` holding each weight's reach
+    (`reachPx.thin`, `reachPx.heavy`) rather than the casing alone, since `bodies.ts` holds no
+    stroke width (`STROKE_PX` is `drawList.ts`', which imports `bodies.ts`). `datumInsideAt` makes
+    it from `STROKE_PX` and `casingDevicePx`, the one function the wireframe's batches and
+    `overlayDrawList` now case at; `strokeReachPx` names δ, and the tripod's box takes it too.
+    `overlay.test.ts` holds the inset to the casing drawn: the limb's least margin over the
+    overlay batch's own `widthPx` ÷ 2 + `casingWidthPx` + 0.5 is within 1/20 px.
+  - _The fallback frame._ A frame foreseen photorealistic that falls back to the wireframe within
+    its draw (a loss meanwhile, a refused creation) draws that one wireframe frame with the inside
+    datum, and with none for a body under the least radius, as its survey edges are built for the
+    style foreseen. The next frame is foreseen as the wireframe. While the pipelines are made,
+    `frameStyleOf` foresees the wireframe and the datum is centred. The UX review read this against
+    the new bullet's "The wireframe centres its limb"; the brief rules it.
+  - _The limb (§3.2)._ `limbInside` moves each horizon sample δ_limb + 1/32 px along the outline's
+    screen normal, in the image plane's tangent coordinates, where the pixel scale is the focal
+    length on both axes and the normal is ∇F of the cone's quadric, exact anywhere in the field.
+    It then lifts the point onto the sphere's near surface along that pixel's ray,
+    t = (d² − r²) ÷ (u · c + √F), so the limb takes the near surface's depth (the brief's hazard).
+  - _The margin._ `DATUM_INSIDE_MARGIN_PX`, 1/32 px beyond every reach, above the `f32` rounding of
+    the segments and of the GPU's projection, so that "never less than δ" holds as drawn. On
+    `TEST EARTH` at 51 Mm, 1920 × 1080 at 60°, at line scales of 2 and 3, the limb's points and
+    chords stand δ_limb + 0.031 to + 0.279 px inside at the field's centre and + 0.031 to + 0.114
+    near its corner: within §2's half pixel, the 0.25 px sagitta the rest.
+  - _The graticule's ends (§3.3)_ are cut in two steps.
+    - A safe cut, `insideThresholdM`: d cos ψ_e in place of r in `cosineWindows`, with
+      ψ_e = asin(d sin β_e ÷ r) − β_e and β_e = α − δ cos θ_min ÷ f, θ_min the body's cap's least
+      angle off the view axis, where the view's scale is at least f sec θ in every direction.
+      Alone it ended runs up to 1.31 δ inside near a 60° field's corner, and about 5 δ inside in a
+      120° field, 6 px short of the limb's casing there (the geometry review's counterexample).
+    - So `windowsInside` moves each cut out from the safe one, in 8 even steps to the first point
+      within the reach and then 24 bisections, on the exact distance inside the outline
+      (`outlineInsetPx`: Newton's method on the nearest-point multiplier of the outline's conic).
+    - Every run now ends at its own δ + 1/32 px at the centre, near the corner and in the 120°
+      field, under the limb's casing, and every point stands at least its δ inside; the least
+      margin over δ is the 1/32 px.
+    - The cost: a 416 px Earth's graticule takes 2.0 ms inside the figure against 1.0 ms centred
+      (Node on this laptop, a load of 1.1; provisional).
+  - _The small body (§3.5), as ruled._ `DATUM_OVER_IMAGE_RADIUS_PER_REACH` is 2(2 + √2), and under
+    `datumOverImage`'s radius, 23.90 device px of apparent radius at a line scale of 2 and 34.14
+    at 3 (asin(r ÷ d) at the centre's pixel scale, R02's regime measure), `graticule` draws no line
+    over the image. The body's regime, its occluder sphere and its place in the limb list
+    (`shown`) stay. So no body in R02's `limb` regime, under 8 CSS px across, has a datum over the
+    image. The brief's 14 px lean is superseded.
+  - _The smoke group (§5) is in part 11_, last, after R08.T10.b's. On the UHD 620 laptop
+    (i7-8665U, 8 threads, SwiftShader) part 8 already took 161 s with both variants at a 1-minute
+    load of 10.1 before the group (R08.T6.f's Earth 124 s, the cell pass 37 s), and its 180 s
+    watchdog fired with the group in it. One variant at a time, at a load of 1.6 to 3.6: part 8
+    took 108.5 s, and part 11 129 s before the group and 162.8 and 165.4 s with it. The group took
+    32.5 to 32.8 s: `PhotorealRenderer.prepare` 22.2 s, its first frame 11.9 s, the other three
+    0.35 to 1.9 s; the low setting saved nothing.
+  - _The smoke checks' figures_ (the default variant alone, on the code as committed, and the same
+    before the review's changes): 1,556 of the 1,556 pixels whose centres' lines of sight miss the
+    sphere hold the same bytes with the inside datum and without it; 876 of the 1,516 inside the
+    outline differ, in all 48 of the rows the limb crosses within 7 px of it; 143 pixels beyond the
+    limb read above black with no symbology, all 143 brighter than without the air; the centred
+    datum changes 160 of the 1,556 beyond the limb.
+  - _The look by hand_ (2026-10-27, the UHD 620 laptop, hidden, high, a load of 0.83 at the start;
+    `just views-check --hidden --atmosphere --setting high`, its results under `--out` in the
+    worktree's `target/`). The run passes: every capture taken, no fault line. Its captures are in
+    `target/views-check/atmosphere/captures-20261027T102135` (not committed). On `TEST EARTH` at
+    50.6 Mm, 246 px across on the 1126 px primary, the air shows along the lit limb as a 1 px blue
+    band outside the limb's dark casing, then black: the glow beyond the casing.
+  - _Tests outside the brief's list._ `viewFrameDrawer.test.ts`'s R10.T16.f case draws at
+    1280 × 720: at 320 × 180 the planet it hands over, 18 px across, is under the least radius,
+    and no `linesSurveyed` draw was left to bind the mask.
+  - _`smoke/strokeContrast.ts`_ is unchanged: it builds its lists with the option off.
+  - _The guide._ The brief's bullet verbatim, straight after "The datum's lines, …" at its
+    indentation, with the ruling's sentence after its "… is never covered.", where §7 places it.
+- **Deferred findings (2026-10-13 rule) (R10.T16.g)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The spheroid's datum_ (§3.6; main's R02.T19). On `TEST SATURN` at 482 Mm, 1920 × 1080 at 60°,
+    a line scale of 2, seen equator-on, the sphere's outline (a = 60,268 km) stands 20.53 px
+    beyond the figure's at the poles (an apparent semi-axis of 209.55 px against 189.02). There the
+    limb's casing reaches 20.50 px beyond the figure, its centreline 17.0 and its casing's inner
+    edge 13.5. The casing's outer edge leaves the figure 0.8° of position angle from the equator,
+    the centreline at 22.8°, and the whole band from 33.7° to the poles. The graticule's coverage
+    reaches up to 20.4 px beyond the figure.
+  - _The ruled sentence's "its label"._ A body drawn larger than its symbol has no DOM label
+    (`ViewMarkLabels` labels a body only as its symbol, under 3 device px), so from 3 px across
+    up to the cut such a body is marked by its list entry and, while it is selected, the bracket
+    alone. Raised on the issue; lean: drop "its label" from the guide's sentence.
+  - _The guide's rounded radii._ The cut is the ruled formula, 23.90 and 34.14 px; the guide gives
+    24 and 35, so a body from 34.14 to 35 px at a line scale of 3 keeps its datum. Raised on the
+    issue; lean: keep the formula and the guide's whole pixels.
+  - _The inside graticule's cost_, about 1 ms more a frame for each body drawn large over the image
+    (above), for R12's budget.

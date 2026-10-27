@@ -1,18 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { normalise, vec3 } from "../../geometry/vec3";
+import { add, normalise, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
-import { aMarkedViewScene, FIXTURE_PLANET, OFF_PLANET_CAMERA } from "../../test/viewFixtures";
+import {
+  aBody,
+  aMarkedViewScene,
+  aViewScene,
+  FIXTURE_PLANET,
+  FIXTURE_PLANET_CENTRE_M,
+  FIXTURE_SYSTEM,
+  NO_TURN,
+  OFF_PLANET_CAMERA,
+} from "../../test/viewFixtures";
 import { rotationColumns } from "../bodies/smoothMesh";
 import { lookAlong, rotationRows } from "../camera/quaternion";
-import type { Viewport } from "../camera/projection";
+import { DEFAULT_FOV_DEG, project, type Viewport } from "../camera/projection";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import type { TextureHandle } from "../engine/types";
 import type { ViewScene } from "../scene/model";
+import { ATMOSPHERE_FIXTURES } from "../scenes/atmosphereScene";
 import {
   buildWireframeDrawList,
   CASING_PX,
+  type DrawCamera,
+  type LineBatch,
   viewStrokesAt,
   type WireframeDrawList,
 } from "../wireframe/drawList";
@@ -261,6 +273,129 @@ describe("the symbology's canvas pass over a surveyed body (R10.T16.f)", () => {
       }),
     );
     renderer.dispose();
+  });
+});
+
+/** `TEST EARTH`'s figure's radius, m, a sphere of 6,371,008.8 m (`ATMOSPHERE_FIXTURES`). */
+function testEarthRadiusM(): number {
+  const earth = ATMOSPHERE_FIXTURES.find((fixture) => fixture.designation === "TEST EARTH");
+  if (earth === undefined) {
+    throw new Error("ATMOSPHERE_FIXTURES has no TEST EARTH");
+  }
+  return earth.figure.equatorialRadiusM;
+}
+
+/** `TEST EARTH`'s radius, m. */
+const TEST_EARTH_RADIUS_M = testEarthRadiusM();
+
+/** The range at which the datum covered the air's limb glow, m from the body's centre: 51 Mm. */
+const GLOW_RANGE_M = 51e6;
+
+/** A camera 51 Mm from the planet, looking at its centre at the default 60°. */
+const AT_GLOW_RANGE: DrawCamera = {
+  pose: {
+    frame: { kind: "system", system: FIXTURE_SYSTEM },
+    positionM: add(FIXTURE_PLANET_CENTRE_M, vec3(0, 0, GLOW_RANGE_M)),
+    orientation: NO_TURN,
+  },
+  fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180,
+};
+
+/** The planet as `TEST EARTH`, alone: no craft, orbit or star. */
+function testEarthScene(): ViewScene {
+  return aViewScene({
+    bodies: [aBody({ designation: "TEST EARTH", radiusM: TEST_EARTH_RADIUS_M })],
+    craft: [],
+    stars: [],
+    ownShip: null,
+  });
+}
+
+/** The overlay's list of `TEST EARTH` at 51 Mm, at a display ratio, its datum inside or centred. */
+function testEarthOverlay(ratio: number, datumInside: boolean): WireframeDrawList {
+  const list = buildWireframeDrawList(testEarthScene(), AT_GLOW_RANGE, VIEWPORT, TOKENS, {
+    lowSetting: false,
+    ev100: -1,
+    selection: null,
+    destination: null,
+    remPx: 16 * ratio,
+    ...viewStrokesAt(ratio),
+    datumInside,
+  });
+  return overlayDrawList(list, TOKENS);
+}
+
+/**
+ * How far inside `TEST EARTH`'s outline a point of a segment is seen, device px: on the view's
+ * axis the outline is the circle of radius f tan α about the view's centre, α = asin(r ÷ d).
+ */
+function insetPx(x: number, y: number, z: number): number {
+  const p = project(
+    vec3(x, y, z),
+    { orientation: AT_GLOW_RANGE.pose.orientation, fovXRad: AT_GLOW_RANGE.fovXRad },
+    VIEWPORT,
+  );
+  const focalPx = VIEWPORT.widthPx / (2 * Math.tan(AT_GLOW_RANGE.fovXRad / 2));
+  const outlinePx =
+    (focalPx * TEST_EARTH_RADIUS_M) / Math.sqrt(GLOW_RANGE_M ** 2 - TEST_EARTH_RADIUS_M ** 2);
+  return outlinePx - Math.hypot(p.xPx - VIEWPORT.widthPx / 2, p.yPx - VIEWPORT.heightPx / 2);
+}
+
+/**
+ * The least distance inside the outline of a batch's segments, at their ends and at their
+ * quarter points, less the reach of its cased stroke as the overlay draws it: its width ÷ 2, its
+ * casing and the half pixel the coverage's fringe adds; negative where it passes the outline.
+ */
+function leastMarginPx(batch: LineBatch): number {
+  const s = batch.segments;
+  const reachPx = batch.widthPx / 2 + batch.casingWidthPx + 0.5;
+  let least = Number.POSITIVE_INFINITY;
+  for (let i = 0; i + 5 < s.length; i += 6) {
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      const at = (axis: number): number =>
+        (s[i + axis] ?? Number.NaN) * (1 - t) + (s[i + 3 + axis] ?? Number.NaN) * t;
+      least = Math.min(least, insetPx(at(0), at(1), at(2)));
+    }
+  }
+  return least - reachPx;
+}
+
+/** The planet's own batches, the limb's and graticule's, and the equator's and prime meridian's. */
+function ownBatches(list: WireframeDrawList): ReadonlyArray<LineBatch> {
+  return list.lines.filter((line) => line.body === FIXTURE_PLANET);
+}
+
+describe("the overlay's datum over TEST EARTH at 51 Mm (R10.T16.g)", () => {
+  it.each([
+    [1, 2],
+    [3, 3],
+  ])(
+    "covers no pixel outside the figure's silhouette at a display ratio of %s, a line scale of %s: no segment widened by its cased reach passes the outline",
+    (ratio, strokeScale) => {
+      const overlay = testEarthOverlay(ratio, true);
+      const own = ownBatches(overlay);
+      expect({
+        strokeScale: overlay.strokeScale,
+        batches: own.map((line) => line.id.split(":").at(-1)),
+        inside: own.map((line) => leastMarginPx(line) >= 0),
+      }).toEqual({ strokeScale, batches: ["major", "graticule"], inside: [true, true] });
+    },
+  );
+
+  it.each([1, 3])(
+    "insets the limb by the casing the overlay draws, at a display ratio of %s: its least margin within a twentieth of a pixel",
+    (ratio) => {
+      const limbs = testEarthOverlay(ratio, true).lines.find(
+        (line) => line.id === `body:${FIXTURE_PLANET}:graticule`,
+      );
+      const margin = limbs === undefined ? Number.NaN : leastMarginPx(limbs);
+      expect([margin >= 0, margin <= 0.05]).toEqual([true, true]);
+    },
+  );
+
+  it("lays the centred datum, as the overlay drew it before, over the image beyond the figure", () => {
+    const own = ownBatches(testEarthOverlay(1, false));
+    expect(own.map((line) => leastMarginPx(line) < -3)).toEqual([true, true]);
   });
 });
 

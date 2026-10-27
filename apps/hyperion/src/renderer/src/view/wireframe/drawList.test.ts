@@ -46,12 +46,16 @@ import { type BodyMarkSymbol, cameraSceneOf, sceneOrigins, type ViewScene } from
 import {
   buildWireframeDrawList,
   CASING_PX,
+  casingDevicePx,
+  datumInsideAt,
   type DrawCamera,
   type DrawOptions,
   type LineBatch,
   type LineOfSightOptions,
   LOW_SETTING_MAX_SPRITES,
   occluderSlopePxAt,
+  STROKE_PX,
+  strokeReachPx,
   type ViewStrokes,
   viewStrokesAt,
   type WireframeDrawList,
@@ -1832,4 +1836,120 @@ describe("the tripod over a craft's hull (R10.T12; decision-r10-t12-commit3 §1)
       );
     },
   );
+});
+
+/** The moon brought near, 1.6 × 10⁷ m from the camera beside the planet, about 350 px across. */
+const NEAR_MOON = add(FIXTURE_PLANET_CENTRE_M, vec3(-6e6, 3e6, 1.5e7));
+
+/** The moon 2 × 10⁸ m off in the view, 29 px across, its apparent radius under 24 px. */
+const FAR_MOON = add(CAMERA.pose.positionM, vec3(-0.3 * 1.9e8, 0.1 * 1.9e8, -1.9e8));
+
+/** The fixture's planet and moon, the moon's centre at `moonM`, with no craft, orbit or star. */
+function planetAndMoon(moonM: Vec3): ViewScene {
+  return aViewScene({
+    bodies: [
+      aBody(),
+      aBody({
+        id: FIXTURE_MOON,
+        parent: FIXTURE_PLANET,
+        kind: "moon",
+        designation: "TEST MOON",
+        radiusM: 1.737e6,
+        centreM: moonM,
+      }),
+    ],
+    craft: [],
+    stars: [],
+    ownShip: null,
+  });
+}
+
+/** The list of `bodies` at a display ratio of 1, its datums inside or not. */
+function datumListOf(bodies: ViewScene, datumInside: boolean | undefined): WireframeDrawList {
+  const options: DrawOptions = { ...OPTIONS, ...viewStrokesAt(1) };
+  return buildWireframeDrawList(
+    bodies,
+    CAMERA,
+    VIEWPORT,
+    TOKENS,
+    datumInside === undefined ? options : { ...options, datumInside },
+  );
+}
+
+/** A list's batches by name. */
+function batchesById(list: WireframeDrawList): ReadonlyMap<string, LineBatch> {
+  return new Map(list.lines.map((line) => [line.id, line]));
+}
+
+/** The names of a list's batches of the moon's datum. */
+function moonBatchIds(list: WireframeDrawList): string[] {
+  return list.lines.filter((line) => line.body === FIXTURE_MOON).map((line) => line.id);
+}
+
+/** The names of both bodies' datum batches, each body's heavy lines' and thin lines'. */
+const DATUM_BATCHES = [FIXTURE_PLANET, FIXTURE_MOON].flatMap((body) =>
+  ["major", "graticule"].map((kind) => `body:${body}:${kind}`),
+);
+
+describe("the bodies' datums inside their figures, for the image's overlay (R10.T16.g)", () => {
+  it("moves both batches of every body's datum, which keep their names and their body", () => {
+    const bodies = planetAndMoon(NEAR_MOON);
+    const centred = batchesById(datumListOf(bodies, undefined));
+    const inside = batchesById(datumListOf(bodies, true));
+    // Each batch's tag, and whether its segments moved.
+    const moved = (id: string): [string | undefined, boolean] => {
+      const was = centred.get(id)?.segments ?? new Float32Array(0);
+      const now = inside.get(id);
+      const segments = now?.segments ?? new Float32Array(0);
+      return [
+        now?.body,
+        segments.length > 0 &&
+          (segments.length !== was.length || segments.some((value, i) => value !== was[i])),
+      ];
+    };
+    expect(DATUM_BATCHES.map(moved)).toEqual(DATUM_BATCHES.map((id) => [id.split(":")[1], true]));
+  });
+
+  it("leaves every other mark, the occluder spheres and the anchors as they were", () => {
+    const bodies = planetAndMoon(NEAR_MOON);
+    const centred = datumListOf(bodies, undefined);
+    const inside = datumListOf(bodies, true);
+    const others = (list: WireframeDrawList): unknown[] => [
+      list.lines.filter((line) => !DATUM_BATCHES.includes(line.id)),
+      list.occluderSpheres,
+      list.anchors,
+    ];
+    expect(others(inside)).toEqual(others(centred));
+  });
+
+  it("is the list as built when the option is off", () => {
+    const bodies = planetAndMoon(NEAR_MOON);
+    expect(datumListOf(bodies, false)).toEqual(datumListOf(bodies, undefined));
+  });
+
+  it("draws no datum over the image for a body too small to stroke inside, which the wireframe draws", () => {
+    const bodies = planetAndMoon(FAR_MOON);
+    expect([
+      moonBatchIds(datumListOf(bodies, undefined)),
+      moonBatchIds(datumListOf(bodies, true)),
+    ]).toEqual([[`body:${FIXTURE_MOON}:major`, `body:${FIXTURE_MOON}:graticule`], []]);
+  });
+
+  it("keeps the occluder sphere of a body too small to stroke inside", () => {
+    const inside = datumListOf(planetAndMoon(FAR_MOON), true);
+    expect(inside.occluderSpheres.some((sphere) => sphere.id === FIXTURE_MOON)).toBe(true);
+  });
+
+  it("insets each line by its reach at the overlay's casing: 3.5 and 4 px at a line scale of 2, 5 and 5.75 at 3", () => {
+    expect(
+      [2, 3].map((strokeScale) => [
+        datumInsideAt(strokeScale).reachPx,
+        casingDevicePx(strokeScale),
+        strokeReachPx(STROKE_PX.thin * strokeScale, casingDevicePx(strokeScale)),
+      ]),
+    ).toEqual([
+      [{ thin: 3.5, heavy: 4 }, 2 * CASING_PX, 3.5],
+      [{ thin: 5, heavy: 5.75 }, 3 * CASING_PX, 5],
+    ]);
+  });
 });
