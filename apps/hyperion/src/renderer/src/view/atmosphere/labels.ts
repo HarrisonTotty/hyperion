@@ -413,22 +413,25 @@ export function atmosphereApproximateLines(
 }
 
 /**
- * One of a view's atmosphere notes on its label block's plate: a steady `note`, or an `ATMOSPHERE
- * REJECTED` line with its standing as every request's `REJECTED` takes one, `refused` (in `--text`)
- * where the server refused what was asked and `fault` (in `--status-caution`) for its own failure.
+ * One of a view's atmosphere notes on its label block's plate: a steady `note`; one of
+ * `ATMOSPHERE: APPROXIMATE`'s reasons, a steady `reason`, a description set as a sentence, never
+ * tracked (R08.T10.d); or an `ATMOSPHERE REJECTED` line with its standing as every request's
+ * `REJECTED` takes one, `refused` (in `--text`) where the server refused what was asked and `fault`
+ * (in `--status-caution`) for its own failure.
  */
 export interface AtmosphereNote {
   readonly statement: string;
-  readonly standing: "note" | "refused" | "fault";
+  readonly standing: "note" | "reason" | "refused" | "fault";
 }
 
 /**
  * A view's atmosphere notes in their place on the plate (plan R08, R08.T10.b): the statements of
- * its bodies' labels in {@link ATMOSPHERE_LABELS}' order, with its `ATMOSPHERE REJECTED` lines after
- * `ATMOSPHERE: NOT RESOLVED` and before the annunciations (`decision-r08-t10a-leans.md`, follow-up
- * to item 6), each standing `refused` or `fault` as the server refused what was asked or failed,
- * and `ATMOSPHERE: APPROXIMATE`'s reasons straight after it, each a steady `note` (R08.T10.c;
- * `decision-r08-approximate-plate.md`, item 1b).
+ * its bodies' labels in {@link ATMOSPHERE_LABELS}' order, each a `note`, with its `ATMOSPHERE
+ * REJECTED` lines after `ATMOSPHERE: NOT RESOLVED` and before the annunciations
+ * (`decision-r08-t10a-leans.md`, follow-up to item 6), each standing `refused` or `fault` as the
+ * server refused what was asked or failed, and `ATMOSPHERE: APPROXIMATE`'s reasons straight after
+ * it (R08.T10.c; `decision-r08-approximate-plate.md`, item 1b), each a `reason` (R08.T10.d; the
+ * same decision's §6, 2026-10-27).
  *
  * @param rejected - {@link atmosphereProblemLines}' `plate`.
  * @param approximate - {@link atmosphereApproximateLines}' lines; none stand without
@@ -453,7 +456,7 @@ export function atmosphereNotes(
       notes.push({ statement: ATMOSPHERE_STATEMENTS[label], standing: "note" });
       if (label === "atmosphereApproximate") {
         notes.push(
-          ...approximate.map((statement): AtmosphereNote => ({ statement, standing: "note" })),
+          ...approximate.map((statement): AtmosphereNote => ({ statement, standing: "reason" })),
         );
       }
     }

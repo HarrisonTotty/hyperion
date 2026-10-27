@@ -52,7 +52,11 @@ import {
   turnLook,
 } from "../../view/camera/state";
 import type { AppearanceLabel } from "../../view/appearance/fromWire";
-import { atmosphereNotes } from "../../view/atmosphere/labels";
+import {
+  ATMOSPHERE_STATEMENTS,
+  type AtmosphereNote,
+  atmosphereNotes,
+} from "../../view/atmosphere/labels";
 import { relativeToCamera } from "../../view/coords/relative";
 import { differenceM, type ViewPosition } from "../../view/coords/position";
 import {
@@ -822,12 +826,35 @@ export interface StatusStatement {
   readonly standing: "refused" | "fault";
 }
 
-/** A statement of the label block: a steady note's text, or a request's {@link StatusStatement}. */
-export type LabelStatement = string | StatusStatement;
+/**
+ * A statement of the label block that is a description, not a state: one of `ATMOSPHERE:
+ * APPROXIMATE`'s reasons.
+ *
+ * @remarks
+ * It is set whole as a sentence in its own case with no letter spacing, its head included, and is
+ * never tracked as an annunciation, colon or not (`decision-r08-approximate-plate.md` §6,
+ * 2026-10-27; plan R08, R08.T10.d): `A thick atmosphere drawn by the thin-atmosphere method, for
+ * KX 4417 /2`, `e− scattering: left out, …`.
+ */
+export interface SentenceStatement {
+  readonly text: string;
+  readonly standing: "sentence";
+}
+
+/**
+ * A statement of the label block: a steady note's text, a request's {@link StatusStatement}, or a
+ * {@link SentenceStatement}.
+ */
+export type LabelStatement = string | StatusStatement | SentenceStatement;
 
 /** A statement's text. */
 export function statementText(statement: LabelStatement): string {
   return typeof statement === "string" ? statement : statement.text;
+}
+
+/** Whether a statement is a {@link SentenceStatement}. */
+function isSentence(statement: LabelStatement): boolean {
+  return typeof statement !== "string" && statement.standing === "sentence";
 }
 
 /** The statement while the photorealistic style is chosen and its image is not yet drawn. */
@@ -867,7 +894,7 @@ const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLE
  * every `NOT YET MODELLED` note: its bodies' labels in their order, with each `ATMOSPHERE REJECTED`
  * line after `ATMOSPHERE: NOT RESOLVED` and before the annunciations, a {@link StatusStatement}
  * standing as every request's `REJECTED` does, and each of `ATMOSPHERE: APPROXIMATE`'s reasons
- * straight after it, naming its bodies (R08.T10.c).
+ * straight after it, naming its bodies (R08.T10.c), a {@link SentenceStatement} (R08.T10.d).
  *
  * @param drawn - The style the view's last frame was drawn in.
  * @param labels - The appearance labels of the bodies the photorealistic frame lights.
@@ -905,20 +932,64 @@ export function photorealStatements(
     atmosphere.labels,
     atmosphere.plate,
     atmosphere.approximate,
-  ).map((note): LabelStatement => {
-    let statement: LabelStatement;
-    switch (note.standing) {
-      case "note":
-        statement = note.statement;
-        break;
-      case "refused":
-      case "fault":
-        statement = { text: note.statement, standing: note.standing };
-        break;
-    }
-    return statement;
-  });
+  ).map(atmosphereNoteStatement);
   return [...(line === null ? [] : [line]), ...notes, ...air];
+}
+
+/**
+ * An atmosphere note as the label block sets it: a `note` as its text, a `reason` as a
+ * {@link SentenceStatement} (plan R08, R08.T10.d), and a `refused` or `fault` line as a
+ * {@link StatusStatement} (R08.T10.b).
+ */
+export function atmosphereNoteStatement(note: AtmosphereNote): LabelStatement {
+  let statement: LabelStatement;
+  switch (note.standing) {
+    case "note":
+      statement = note.statement;
+      break;
+    case "reason":
+      statement = { text: note.statement, standing: "sentence" };
+      break;
+    case "refused":
+    case "fault":
+      statement = { text: note.statement, standing: note.standing };
+      break;
+  }
+  return statement;
+}
+
+/**
+ * An instrument view's photorealistic statements, less those the `PRIMARY` view's block shows
+ * already.
+ *
+ * @remarks
+ * Each statement the primary's block shows is dropped (decision-r07-t19-layout, item 5), save
+ * `PHOTOREAL_PREPARING`, the instrument's own, and save `ATMOSPHERE: APPROXIMATE` where one of the
+ * instrument's own reasons stands, since a reason line never stands without its note
+ * (`decision-r08-approximate-plate.md` §6, item 4, 2026-10-27; plan R08, R08.T10.d). The note's
+ * reasons are the sentences straight after it, so it stays straight above the first that stands.
+ * Where none of its reasons stands, the note is dropped as any statement is, where the primary
+ * shows it.
+ *
+ * @param own - {@link photorealStatements} of the instrument's own picture.
+ * @param primary - The photorealistic statements the primary's block shows.
+ */
+export function instrumentPhotorealStatements(
+  own: ReadonlyArray<LabelStatement>,
+  primary: ReadonlyArray<LabelStatement>,
+): ReadonlyArray<LabelStatement> {
+  const shown = new Set(primary.map(statementText));
+  const fresh = (statement: LabelStatement): boolean => !shown.has(statementText(statement));
+  // The note's reasons are the sentences straight after it (`atmosphereNotes`' order).
+  const note = own.indexOf(ATMOSPHERE_STATEMENTS.atmosphereApproximate);
+  const after = note < 0 ? [] : own.slice(note + 1);
+  const firstOther = after.findIndex((statement) => !isSentence(statement));
+  const reasons = firstOther < 0 ? after : after.slice(0, firstOther);
+  const reasonStands = reasons.some(fresh);
+  return own.filter(
+    (statement, i) =>
+      statement === PHOTOREAL_PREPARING || fresh(statement) || (i === note && reasonStands),
+  );
 }
 
 /**

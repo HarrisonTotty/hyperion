@@ -26,6 +26,7 @@ import {
   type AbsorberBound,
   PENDING_ABSORBERS,
   PENDING_CELL_COUNT,
+  PENDING_CELLS_NM,
   type PendingAbsorber,
 } from "./absorbers/transparency";
 import { MARS_AIR, MARS_FIT_COLUMN } from "./channels";
@@ -147,7 +148,10 @@ function broadenerOf(
 let tables: ReadonlyArray<KDistributionTable> = [];
 
 beforeAll(async () => {
-  tables = await loadKDistributions(["CO", "CO2", "H2O", "N2O", "O2", "H2", "K"], inlinePart);
+  tables = await loadKDistributions(
+    ["CO", "CO2", "H2O", "N2O", "O2", "H2", "K", "NH3"],
+    inlinePart,
+  );
 }, 120_000);
 
 /** Earth's dry air's mole fractions (`earth.ts`'s {@link EARTH_DRY_AIR}: N₂, O₂, Ar and CO₂ at 0.033%). */
@@ -683,6 +687,7 @@ describe("the negligible-absorbers bound on an Earth-class body", () => {
     // Recorded: ε 3.25 × 10⁻⁴ (330 ppm over the mixture's Σ x r), Δ_c(k = 1) 0.512 and Δ_c,γ
     // 1.66 × 10⁻⁴, both red under the 30,000 K sun (Σ|w| ÷ Σw passes 1 where r̄ is negative); the
     // ruling's "at most 6.3 × 10⁻⁴". Until R08.T10.c the lines were `estimatedData`, 1.96 at k = 100.
+    // The cell means read to (1 + ε) times the largest p_eff (R08.T10.d) move neither figure.
     expect([
       broadener?.negligible,
       (broadener?.widthlessShare ?? 0) > 3e-4 && (broadener?.widthlessShare ?? 1) < 3.5e-4,
@@ -714,8 +719,9 @@ describe("the negligible-absorbers bound on an Earth-class body", () => {
       (factor) =>
         broadenerOf(negligibleAbsorbers(earthWith("CO2", factor * co2)), "H2O")?.negligible,
     );
-    // Recorded: it crosses between 6.0 and 6.1 times the 330 ppm, 9.97 × 10⁻⁴ and 1.014 × 10⁻³, at
-    // ε 1.95 × 10⁻³ and 1.98 × 10⁻³; 8.3 × 10⁻⁴ at 5 times, 1.66 × 10⁻³ at 10.
+    // Recorded: it crosses between 6.01 and 6.02 times the 330 ppm, 9.991 × 10⁻⁴ and 1.0008 × 10⁻³,
+    // at ε 1.950 × 10⁻³ and 1.953 × 10⁻³; 8.3 × 10⁻⁴ at 5 times, 1.66 × 10⁻³ at 10. The cell means
+    // read to (1 + ε) times the largest p_eff (R08.T10.d) move none of these.
     expect(raised).toEqual([true, false]);
   });
 
@@ -767,7 +773,8 @@ describe("the negligible-absorbers bound on a Mars-class body", () => {
   it("takes no label from CO's broadening of its O₂ lines, about 10⁻⁸ by their effect bound (R08.T10.c)", () => {
     const broadener = broadenerOf(verdicts, "O2");
     // Recorded: ε 5.2 × 10⁻⁴ (0.06% CO), Δ_c(k = 1) 1.35 × 10⁻⁵ and Δ_c,γ 7.1 × 10⁻⁹, both red under
-    // the 2,500 K sun. Until R08.T10.c the lines were `estimatedData`, 1.35 × 10⁻³ at k = 100.
+    // the 2,500 K sun. Until R08.T10.c the lines were `estimatedData`, 1.35 × 10⁻³ at k = 100. The
+    // cell means read to (1 + ε) times the largest p_eff (R08.T10.d) move neither figure.
     expect([broadener?.negligible, absorptionOf(verdicts, "O2")]).toEqual([true, undefined]);
     expect(broadener?.largestChange).toBeLessThan(1e-7);
   });
@@ -775,14 +782,18 @@ describe("the negligible-absorbers bound on a Mars-class body", () => {
   it("bounds its H₂O lines, which CO₂ broadens with no width on file, by their whole light at k = 1", () => {
     const broadener = broadenerOf(verdicts, "H2O");
     // CO₂ is 95% of the mixture, so ε is 0.95 and the width's factor its ceiling, 1: whatever the
-    // widths, the lines move no channel by more than their own bound. Recorded: 2.8 × 10⁻⁴, red
-    // under the 30,000 K sun.
+    // widths, the lines move no channel by more than their own bound, its cell means read to the
+    // first stored row at or past 1.95 times the largest p_eff (R08.T10.d), the widest the gas
+    // allows. Recorded: 2.84056 × 10⁻⁴, red under the 30,000 K sun; 2.84048 × 10⁻⁴ read to the first
+    // row past the largest p_eff alone, as R08.T10.c read it. The ruling's bound on it is 3.5 × 10⁻⁴
+    // (`decision-r08-approximate-plate.md` §6, item 2).
     expect([broadener?.widthFactor, broadener?.changes, broadener?.negligible]).toEqual([
       1,
       broadener?.lineChanges,
       true,
     ]);
     expect(broadener?.widthlessShare).toBeGreaterThan(0.9);
+    expect(broadener?.largestChange).toBeLessThanOrEqual(3.5e-4);
   });
 
   it("labels its CO₂ at 214 K, inside CO₂'s estimated 212.5–225 K, past 10⁻³ at k = 100", () => {
@@ -874,9 +885,124 @@ describe("the negligible-absorbers bound on a Saturn-class body (R08.T10.c)", ()
     const broadener = broadenerOf(verdicts, "H2");
     // Recorded: ε 5.5 × 10⁻³ at 134 K (each width at its own exponent), Δ_c(k = 1) 1.22 × 10⁻³ and
     // Δ_c,γ 6.7 × 10⁻⁶, both red under the 30,000 K sun. Until R08.T10.c the lines were
-    // `estimatedData` at k = 100.
+    // `estimatedData` at k = 100. The cell means read to (1 + ε) times the largest p_eff
+    // (R08.T10.d) move neither figure.
     expect([broadener?.negligible, absorptionOf(verdicts, "H2")]).toEqual([true, undefined]);
     expect(broadener?.largestChange).toBeLessThan(1e-5);
+  });
+});
+
+/** The toy table's σ at a stored row, m²: 10⁻³⁰ to 100 kPa, 10⁻²⁷ past it. */
+function toySigmaAt(pressurePa: number): number {
+  return pressurePa > 1e5 ? 1e-27 : 1e-30;
+}
+
+describe("the broadener's cell means (R08.T10.d)", () => {
+  // A toy CO table whose one cell's σ is 10⁻³⁰ m² at every stored row to 100 kPa and 10⁻²⁷ m² at
+  // 1 MPa, broadened half by CH₄, which it holds no width for: ε 0.5, less CO's own part per
+  // million, which takes its self width. On an 80 kPa datum the largest p_eff is 80 kPa, whose
+  // first row at or past is 100 kPa's, and (1 + ε) of it is 120 kPa, whose first is 1 MPa's.
+  const pressuresPa = [10, 100, 1e3, 1e4, 1e5, 1e6];
+  const table = readKDistribution(
+    toySidecar([200, 300], pressuresPa, 1, { species: "CO", broadening: { self: 1 } }),
+    [
+      toyPart(
+        [
+          {
+            nm: 690,
+            weights: [1],
+            sigmasM2: [200, 300].flatMap(() => pressuresPa.map(toySigmaAt)),
+          },
+        ],
+        {
+          variants: 1,
+          temperatures: 2,
+          pressures: pressuresPa.length,
+        },
+      ),
+    ],
+    "toy",
+  );
+  const gases = [
+    ["N2", 0.5],
+    ["CH4", 0.5],
+  ] as const;
+  const body: NegligibleBody = {
+    ...isothermalBody({
+      surfacePa: 8e4,
+      temperatureK: 250,
+      molarMassGPerMol: 22,
+      gravityMS2: 9.8,
+      radiusM: 6_371_000,
+      gases: [...gases, ["CO", 1e-6]],
+      bulk: gases,
+    }),
+    kDistributions: [table],
+  };
+
+  /** Δ_c(k = 1) for each sun, per channel, of the cell's σ at a stored row over the chord. */
+  function changesAtRow(pressurePa: number, columnPerM2: number): number[] {
+    const kd = kDistributionAt(table, 250, 0);
+    const row = kd.pressuresPa.indexOf(pressurePa);
+    const depths = new Float64Array(PENDING_CELL_COUNT);
+    depths[690 - PENDING_CELLS_NM[0]] = (kd.cells[0]?.sigmas[row] ?? Number.NaN) * columnPerM2;
+    return SUNS.flatMap((sun) => channelChanges(boundCellWeights(sun), depths));
+  }
+
+  it("reads them to the first stored row at or past (1 + ε) times the largest p_eff", () => {
+    const broadener = broadenerOf(negligibleAbsorbers(body), "CO");
+    const u = broadener?.amount.kind === "column" ? broadener.amount.columnPerM2 : Number.NaN;
+    const wide = changesAtRow(1e6, u);
+    expect([
+      broadener?.widthlessShare,
+      broadener?.lineChanges.flat().map((d, i) => d / (wide[i] ?? Number.NaN)),
+    ]).toEqual([expect.closeTo(0.5, 5), wide.map(() => expect.closeTo(1, 12))]);
+  });
+
+  it("finds more there than at the first row past the largest p_eff alone, as R08.T10.c read them", () => {
+    const broadener = broadenerOf(negligibleAbsorbers(body), "CO");
+    const u = broadener?.amount.kind === "column" ? broadener.amount.columnPerM2 : Number.NaN;
+    const near = Math.max(...changesAtRow(1e5, u));
+    expect(Math.max(...(broadener?.lineChanges.flat() ?? []))).toBeGreaterThan(100 * near);
+  });
+});
+
+/**
+ * A Jupiter-class body (R08.T10.d): NSSDCA's Jupiter fact sheet's 89.8% H₂ and 10.2% He with its
+ * 260 ppm of NH₃, renormalised, its 3,000 ppm of CH₄ left out, whose lines the client holds no table
+ * for; isothermal at its 165 K at 1 bar, 2.22 g mol⁻¹, g 24.79 m s⁻² and R 71,492 km, its datum at
+ * 1 bar.
+ */
+function jupiterBody(): NegligibleBody {
+  const ammonia = 2.6e-4;
+  const gases = [
+    ["H2", 0.898 * (1 - ammonia)],
+    ["He", 0.102 * (1 - ammonia)],
+    ["NH3", ammonia],
+  ] as const;
+  return isothermalBody({
+    surfacePa: 1e5,
+    temperatureK: 165,
+    molarMassGPerMol: 2.22,
+    gravityMS2: 24.79,
+    radiusM: 71_492_000,
+    gases,
+    bulk: gases,
+  });
+}
+
+describe("the negligible-absorbers bound on a Jupiter-class body's NH₃ (R08.T10.d)", () => {
+  it("labels NH₃'s lines `estimatedData` at k = 100: its table holds no self width, and no shape measured", () => {
+    const verdicts = negligibleAbsorbers(jupiterBody());
+    const nh3 = absorptionOf(verdicts, "NH3");
+    // NH₃'s table lists H₂ and He alone, so its own share is a widthless broadener of itself, and
+    // NH₃ has a dipole (R08.T10.d). Its table marks no node's line shape measured, which labelled
+    // the lines before as well. Recorded: 2.13, red under the 30,000 K sun.
+    expect([
+      nh3?.negligible,
+      nh3?.entries.map((e) => [e.origin, e.k, e.rule]),
+      broadenerOf(verdicts, "NH3"),
+    ]).toEqual([false, [["drawn", 100, "estimatedData"]], undefined]);
   });
 });
 

@@ -641,6 +641,12 @@ function labelled(material: string, optics: ModeOptics): boolean {
  * {@link CLOUD_DECK_SPLIT_OPTICAL_DEPTH} at 550 nm: the reasons R08.T10.a's `atmosphereApproximate`
  * collects (Design note 12). A deeper mode does not reach the picture.
  *
+ * @remarks
+ * Each reason is player text on the label block's plate (R08.T10.c): the first labelled channel's
+ * phase note, or its basis in words, with the channel's wavelength in whole nm, as
+ * `assemble.ts`' `sizeConvergenceReasons` rounds it (`434 nm` for a fitted channel's 433.625;
+ * R08.T10.d).
+ *
  * @throws RangeError for an optical depth that is not finite and ≥ 0.
  */
 export function phaseApproximations(
@@ -656,7 +662,7 @@ export function phaseApproximations(
     if (depth < CLOUD_DECK_SPLIT_OPTICAL_DEPTH && channel !== undefined) {
       out.push({
         material: layer.material,
-        reason: `${channel.phaseNote ?? `${substanceName(layer.material)}: ${PHASE_BASIS_WORDS[channel.phaseBasis]}`} (at ${channel.wavelengthNm} nm)`,
+        reason: `${channel.phaseNote ?? `${substanceName(layer.material)}: ${PHASE_BASIS_WORDS[channel.phaseBasis]}`} (at ${Math.round(channel.wavelengthNm)} nm)`,
       });
     }
   }

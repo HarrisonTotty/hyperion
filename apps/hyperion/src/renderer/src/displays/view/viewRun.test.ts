@@ -45,10 +45,13 @@ import {
   followRun,
   lookReading,
   photorealStatements,
+  PHOTOREAL_PREPARING,
   frameBody,
   frameName,
   freeRateReading,
+  instrumentPhotorealStatements,
   labelLines,
+  type LabelStatement,
   labelStatements,
   markRows,
   rangesFromCamera,
@@ -728,7 +731,7 @@ describe("the style", () => {
     ]);
   });
 
-  it("states each of APPROXIMATE's reasons on a line of its own straight after it, the other notes unmoved (R08.T10.c)", () => {
+  it("states each of APPROXIMATE's reasons on a line of its own straight after it, as a sentence, the other notes unmoved (R08.T10.c, R08.T10.d)", () => {
     const photoreal = done(
       commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
     );
@@ -748,7 +751,7 @@ describe("the style", () => {
       ...albedo,
       "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
       "ATMOSPHERE: APPROXIMATE",
-      ...reasons,
+      ...reasons.map((text) => ({ text, standing: "sentence" })),
     ]);
   });
 
@@ -848,6 +851,49 @@ describe("an instrument's run (R07.T19)", () => {
       { dtS: 0, held: new Set(), reducedMotion: true },
     );
     expect([moved.camera.preset, moved.camera.target]).toEqual(["chase", null]);
+  });
+});
+
+describe("an instrument's photorealistic statements (decision-r07-t19-layout, item 5; R08.T10.d)", () => {
+  const note = "ATMOSPHERE: APPROXIMATE";
+  const thick: LabelStatement = {
+    text: "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2",
+    standing: "sentence",
+  };
+  const water: LabelStatement = {
+    text: "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    standing: "sentence",
+  };
+  const albedo = "BODY PHOTOMETRY: NOT YET MODELLED";
+
+  it("drops each statement the primary's block shows already", () => {
+    expect(instrumentPhotorealStatements([albedo, "LIGHTING: PENDING"], [albedo])).toEqual([
+      "LIGHTING: PENDING",
+    ]);
+  });
+
+  it("keeps its own PHOTOREALISTIC: PREPARING, though the primary shows it", () => {
+    expect(instrumentPhotorealStatements([PHOTOREAL_PREPARING], [PHOTOREAL_PREPARING])).toEqual([
+      PHOTOREAL_PREPARING,
+    ]);
+  });
+
+  it("keeps a note with no reason of its own where the primary lacks the note", () => {
+    expect(instrumentPhotorealStatements([albedo, note], [albedo])).toEqual([note]);
+  });
+
+  it("keeps ATMOSPHERE: APPROXIMATE straight above a reason of its own the primary lacks, though the primary shows the note", () => {
+    expect(
+      instrumentPhotorealStatements([albedo, note, water, thick], [albedo, note, water]),
+    ).toEqual([note, thick]);
+  });
+
+  it("shows neither the note nor a reason where all its reasons are the primary's", () => {
+    expect(instrumentPhotorealStatements([albedo, note, water], [albedo, note, water])).toEqual([]);
+  });
+
+  it("shows its note and its reasons where the primary shows neither", () => {
+    expect(instrumentPhotorealStatements([albedo, note, water], [albedo])).toEqual([note, water]);
   });
 });
 

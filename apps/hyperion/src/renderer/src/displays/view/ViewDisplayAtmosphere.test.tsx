@@ -24,6 +24,7 @@ import {
 import { atmosphereApproximateLines, atmosphereNotes } from "../../view/atmosphere/labels";
 import { THICK_REASON } from "../../view/atmosphere/thick/regime";
 import { ViewLabelBlock } from "./ViewLabelBlock";
+import { atmosphereNoteStatement } from "./viewRun";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -110,33 +111,41 @@ describe("the atmosphere on a live VIEW (R08.T10.b)", () => {
   });
 });
 
-describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c)", () => {
+/** The label block with the notes and three bodies' reasons, as `photorealStatements` sets them. */
+function renderPlate(): void {
+  const lines = atmosphereApproximateLines([
+    { designation: "KX 4417 /3", reasons: ["H2O: its absorption estimated, not measured"] },
+    { designation: "KX 4417 /5", reasons: [THICK_REASON] },
+    { designation: "KX 4417 /2", reasons: [THICK_REASON] },
+  ]);
+  const statements = atmosphereNotes(
+    ["aerosolsNotYetModelled", "atmosphereApproximate"],
+    [],
+    lines,
+  ).map(atmosphereNoteStatement);
+  render(
+    <ViewLabelBlock
+      lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+      statements={statements}
+      countLine={null}
+      faults={[]}
+    />,
+  );
+}
+
+describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c, R08.T10.d)", () => {
+  const notes = ["AEROSOLS AND ABSORBERS: NOT YET MODELLED", "ATMOSPHERE: APPROXIMATE"];
+  const reasons = [
+    "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
+    "H2O: its absorption estimated, not measured, for KX 4417 /3",
+  ];
+
   it("sets each reason on a line of its own straight after the note, a steady statement in the case given", () => {
-    const lines = atmosphereApproximateLines([
-      { designation: "KX 4417 /3", reasons: ["H2O: its absorption estimated, not measured"] },
-      { designation: "KX 4417 /5", reasons: [THICK_REASON] },
-      { designation: "KX 4417 /2", reasons: [THICK_REASON] },
-    ]);
-    const statements = atmosphereNotes(
-      ["aerosolsNotYetModelled", "atmosphereApproximate"],
-      [],
-      lines,
-    ).map((note) => note.statement);
-    render(
-      <ViewLabelBlock
-        lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
-        statements={statements}
-        countLine={null}
-        faults={[]}
-      />,
-    );
-    const said = [
-      "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
-      "ATMOSPHERE: APPROXIMATE",
-      "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
-      "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    renderPlate();
+    const shown = [
+      ...notes.map((text) => screen.getByText(statusLine(text))),
+      ...reasons.map((text) => screen.getByText(text)),
     ];
-    const shown = said.map((text) => screen.getByText(statusLine(text)));
     const inOrder = shown.every((line, i) => {
       const before = shown[i - 1];
       return (
@@ -147,9 +156,31 @@ describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c)", () => {
     // In the order said, each the plate's steady statement in `--text`, neither an alert nor a status.
     expect([
       inOrder,
-      shown.map((line) => line.className),
+      shown.every((line) => line.classList.contains("view-label__statement")),
       screen.queryByRole("alert"),
       screen.queryAllByRole("status").some((status) => shown.some((line) => status.contains(line))),
-    ]).toEqual([true, said.map(() => "view-label__statement"), null, false]);
+    ]).toEqual([true, true, null, false]);
+  });
+
+  it("sets each reason whole as a sentence, nothing in it tracked (R08.T10.d)", () => {
+    renderPlate();
+    expect(
+      reasons.map((text) => {
+        const line = screen.getByText(text);
+        return [
+          line.classList.contains("view-label__statement--sentence"),
+          line.querySelector(".status-text__state"),
+        ];
+      }),
+    ).toEqual(reasons.map(() => [true, null]));
+  });
+
+  it("tracks ATMOSPHERE: APPROXIMATE itself as a state", () => {
+    renderPlate();
+    expect(
+      screen
+        .getByText(statusLine("ATMOSPHERE: APPROXIMATE"))
+        .classList.contains("view-label__statement--sentence"),
+    ).toBe(false);
   });
 });

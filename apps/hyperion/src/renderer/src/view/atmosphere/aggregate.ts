@@ -906,6 +906,16 @@ export function mmfPhaseBasis(
  * term is below 1; otherwise a labelled Henyey–Greenstein `fallback` from the MMF asymmetry, with
  * no matrix ({@link mmfPhaseBasis}).
  *
+ * @remarks
+ * An analogue's or a fallback's `phaseNote` is player text, a reason on the label block's plate
+ * (R08.T10.c), so it names each limit in words and cites no paper (R08.T10.d;
+ * `decision-r08-approximate-plate.md` §6): its phase shift is Tazaki and Tanaka 2018's (9), the
+ * larger of the monomer's and the aggregate's own, and "the modified mean-field model's limit of
+ * 1" their condition (8) ({@link MMF_PHASE_SHIFT_LIMIT}); its index contrast's "limit of 2" is
+ * their condition (7) ({@link MMF_INDEX_CONTRAST_LIMIT}), stated in their §2.2 and tied to the
+ * MMF in their §3.5 and §4.2. The model keeps one name, the one its table and asymmetry take in the
+ * same reason.
+ *
  * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
  * @throws RangeError as {@link mmfAggregate}, or for a wavelength outside the files' range.
@@ -922,8 +932,8 @@ export function aggregateOptics(
   const geometricM2 = result.geometricCrossSectionUm2 * 1e-12;
   const extM2 = result.extinctionCrossSectionUm2 * 1e-12;
   const scaM2 = result.scatteringCrossSectionUm2 * 1e-12;
-  const shifts = `phase shift ${mmfPhaseShift(result).toFixed(2)} by Tazaki and Tanaka's equation (9) (aggregate term ${result.phaseShift.toFixed(2)})`;
-  const contrast = `index contrast |m − 1| ${result.indexContrast.toFixed(2)}, past the limit of ${MMF_INDEX_CONTRAST_LIMIT} in Tazaki and Tanaka's condition (7)`;
+  const shifts = `phase shift ${mmfPhaseShift(result).toFixed(2)} (the aggregate's own phase shift ${result.phaseShift.toFixed(2)})`;
+  const contrast = `index contrast |m − 1| ${result.indexContrast.toFixed(2)}, past the modified mean-field model's limit of ${MMF_INDEX_CONTRAST_LIMIT}`;
   const contrastFails = result.indexContrast >= MMF_INDEX_CONTRAST_LIMIT;
   let note: string | undefined;
   switch (basis) {
@@ -934,7 +944,7 @@ export function aggregateOptics(
       const reasons: string[] = [];
       if (mmfPhaseShift(result) >= MMF_PHASE_SHIFT_LIMIT) {
         reasons.push(
-          `${shifts}, past the limit of ${MMF_PHASE_SHIFT_LIMIT} in their condition (8)`,
+          `${shifts}, past the modified mean-field model's limit of ${MMF_PHASE_SHIFT_LIMIT}`,
         );
       }
       if (contrastFails) {
@@ -944,7 +954,7 @@ export function aggregateOptics(
       break;
     }
     case "fallback":
-      note = `an aggregate of ${substanceName(mode.material)}, ${shifts}, the aggregate term past the limit of ${MMF_PHASE_SHIFT_LIMIT}${contrastFails ? `; ${contrast}` : ""}: a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback`;
+      note = `an aggregate of ${substanceName(mode.material)}, ${shifts}, the aggregate's own phase shift past the modified mean-field model's limit of ${MMF_PHASE_SHIFT_LIMIT}${contrastFails ? `; ${contrast}` : ""}: a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback`;
       break;
   }
   const hasTable = basis !== "fallback";
