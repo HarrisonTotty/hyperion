@@ -233,6 +233,15 @@ function marsDustK(wavelengthNm: number): number {
   return refractiveIndex("mars_dust", wavelengthNm).index.k;
 }
 
+/**
+ * A citation in player text: an author's `et al`, or a year of 1900–2099 standing alone, perhaps
+ * lettered (`2000b`) and perhaps ending a clause (`2020,`, `2020.`). A year's four digits are not
+ * a decimal's or a grouped number's, and not a figure's with its unit after it (`1950 nm`,
+ * `2000 K`, `1950nm`). No citation reaches the screen (`decision-r08-approximate-plate.md` §6;
+ * R08.T10.e).
+ */
+const CITATION = /\bet al\b|(?<![\d.,])(?:19|20)\d{2}(?!\s?(?:nm|µm|K)\b)[a-z]?(?!\d|[.,]\d)/u;
+
 describe("the material files", () => {
   it("hold every key of T5.b's list", () => {
     const keys = new Set(MATERIAL_FILES.map((f) => f.key));
@@ -391,6 +400,51 @@ describe("the material files", () => {
     expect(() => parseMaterialFile({ ...waterFile, ...broken }, "broken.json")).toThrow(
       /broken\.json/u,
     );
+  });
+
+  it("cite no paper in a file's player text: its name, its stand-in or its absorption's", () => {
+    // Each reaches the plate (`materialApproximations`, `resolveMaterial`'s named analogue), and
+    // each file's `paper`, which no screen shows, holds its citation (R08.T10.e).
+    expect(
+      MATERIAL_FILES.flatMap((file) => [
+        file.name,
+        file.standIn ?? "",
+        file.absorptionStandIn ?? "",
+      ]).filter((text) => CITATION.test(text)),
+    ).toEqual([]);
+  });
+
+  describe("the citation pattern", () => {
+    it.each([
+      "Martonchik et al.'s",
+      "(Irwin et al. 2022)",
+      "Khachai et al. 2009's",
+      "(Smith 2020)",
+      "Smith 2020,",
+      "Smith 2020.",
+    ])("takes %s for a citation", (text) => {
+      expect(CITATION.test(text)).toBe(true);
+    });
+
+    it.each(["1.2015 at 514.5 nm", "at 1950 nm", "at 2000 K", "1,950 nm", "at 1950nm", "2000.5"])(
+      "takes %s, a figure, for no citation",
+      (text) => {
+        expect(CITATION.test(text)).toBe(false);
+      },
+    );
+  });
+
+  it.each([
+    ["NH3", "solid", "J. V. Martonchik", "(1984)"],
+    ["CaTiO3", "solid", "K. Ueda", "(1998)"],
+    ["ice_giant_haze", "solid", "P. G. J. Irwin", "(2022)"],
+    ["chromophore", "solid", "A. S. Braude", "(2020)"],
+    ["basalt_fe", "solid", "J. Martikainen", "(2023)"],
+    ["Na2S", "solid", "H. Khachai", "(2009)"],
+  ] as const)("keep the %s %s file's citation in its paper: %s %s", (key, phase, author, year) => {
+    // The six whose stand-in text cited its paper until R08.T10.e.
+    const { paper } = fileOf(key, phase);
+    expect([paper.includes(author), paper.includes(year)]).toEqual([true, true]);
   });
 });
 
@@ -751,21 +805,26 @@ describe("the solids' visible absorption (R08.T5.i, decision-p14-t49c-split §5.
 
   it("names each stand-in's reason: the fill, reflectance's Kramers–Kronig value, the computed spectrum", () => {
     expect(ammonia.standIn).toMatch(
-      /a fill between their 1462 nm and 320 nm values, not a measurement/u,
+      /a fill between the values at 1462 nm and 320 nm, not a measurement/u,
     );
     expect(titanate.standIn).toMatch(/a Kramers–Kronig value from normal-incidence reflectance/u);
     expect(sulphide.standIn).toMatch(/a computed spectrum's, not a colourless solid's absorption/u);
   });
 
   it.each([
-    ["an NH3-ice", { material: "NH3", form: { phase: "solid" }, opticalDepthAbove550: 0 }, ammonia],
-    ["a CaTiO3", { material: "CaTiO3", opticalDepthAbove550: 0 }, titanate],
+    [
+      "an NH3-ice",
+      { material: "NH3", form: { phase: "solid" }, opticalDepthAbove550: 0 },
+      ammonia,
+      "NH3 ice",
+    ],
+    ["a CaTiO3", { material: "CaTiO3", opticalDepthAbove550: 0 }, titanate, "solid CaTiO3"],
   ] as const)(
-    "gives atmosphereApproximate for %s deck at τ 0, its file's stand-in the reason",
-    (_, layer, file) => {
+    "gives atmosphereApproximate for %s deck at τ 0, its file's stand-in after its phase and name the reason",
+    (_, layer, file, head) => {
       expect(materialLabels([layer])).toEqual(["atmosphereApproximate"]);
       expect(materialApproximations([layer])).toEqual([
-        { material: layer.material, reason: file.standIn },
+        { material: layer.material, reason: `${head}: ${file.standIn ?? ""}` },
       ]);
     },
   );
@@ -779,6 +838,35 @@ describe("the stand-in label", () => {
     expect(
       materialApproximations([{ material: "Xx9", opticalDepthAbove550: 0 }])[0]?.reason,
     ).toMatch(/generic stand-in/u);
+  });
+
+  it("puts a file's own stand-in text after its phase and name: liquid CO's, the chromophore's", () => {
+    // decision-r08-approximate-plate.md §8.3 (R08.T10.e): neither text names its material.
+    expect(
+      materialApproximations([
+        { material: "CO", form: { phase: "liquid" }, opticalDepthAbove550: 0 },
+        { material: "chromophore", opticalDepthAbove550: 0 },
+      ]).map(({ reason }) => reason),
+    ).toEqual([
+      `liquid CO: ${liquidOf("CO").standIn ?? ""}`,
+      `solid Jovian chromophore: ${fileOf("chromophore").standIn ?? ""}`,
+    ]);
+  });
+
+  it("leaves the reasons resolveMaterial writes as written: a named analogue's, the generic stand-in's", () => {
+    // The chromophore's liquid is drawn with the solid's file, a stand-in, whose text it does not
+    // give.
+    expect(
+      materialApproximations([
+        { material: "SO2", form: { phase: "solid" }, opticalDepthAbove550: 0 },
+        { material: "chromophore", form: { phase: "liquid" }, opticalDepthAbove550: 0 },
+        { material: "Xx9", opticalDepthAbove550: 0 },
+      ]).map(({ reason }) => reason),
+    ).toEqual([
+      "no SO2 ice on file: liquid SO2 at 198 K stands in, a named analogue",
+      "no liquid Jovian chromophore on file: Jovian chromophore, an effective index retrieved from Jupiter's spectrum stands in, a named analogue",
+      "no index file for Xx9: the generic stand-in, a non-absorbing sphere of real index 1.5, a stated convention",
+    ]);
   });
 
   it("is not given by measured or derived materials", () => {
@@ -1513,12 +1601,14 @@ describe("the liquids from their gases and their measurements (R08.T5.k)", () =>
   });
 
   it.each(["CO", "H2S"])(
-    "give atmosphereApproximate for a liquid-%s deck at τ 0, its file's stand-in the reason",
+    "give atmosphereApproximate for a liquid-%s deck at τ 0, its file's stand-in after its phase and name the reason",
     (key) => {
       const layer = { material: key, form: { phase: "liquid" as const }, opticalDepthAbove550: 0 };
       const file = liquidOf(key);
       expect(materialLabels([layer])).toEqual(["atmosphereApproximate"]);
-      expect(materialApproximations([layer])).toEqual([{ material: key, reason: file.standIn }]);
+      expect(materialApproximations([layer])).toEqual([
+        { material: key, reason: `liquid ${key}: ${file.standIn ?? ""}` },
+      ]);
       expect(file.standIn).toMatch(
         /^a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values contradict themselves: /u,
       );

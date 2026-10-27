@@ -122,7 +122,12 @@ export interface MaterialHeader {
   readonly licence: string;
   /** How the values were brought onto the grid, and every exception. */
   readonly reduction: string;
-  /** For a stand-in, what stands in and why; otherwise null. */
+  /**
+   * For a stand-in, what stands in and why; otherwise null. Player text, which the client shows as
+   * an `ATMOSPHERE: APPROXIMATE` reason after the file's phase and name (`materials.ts`'s
+   * `materialApproximations`), so it cites no paper: {@link MaterialHeader.paper}, which no screen
+   * shows, holds the citation (R08.T10.e).
+   */
   readonly standIn: string | null;
   /**
    * For a file whose colour rests on no measurement of the material though its index does, what its
@@ -1291,7 +1296,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: OPTOOL_TERMS,
       reduction: ammoniaIceReductionText(),
       standIn:
-        "a crystal whose visible absorption is not drawn: Martonchik et al.'s visible k is a fill between their 1462 nm and 320 nm values, not a measurement, and no measured visible absorption of NH3 ice was found, so k = 0, an upper bound on its brightness; its real index is theirs",
+        "a crystal drawn with a published real index and no visible absorption, k = 0, an upper bound on its brightness, since the visible k published with that index is a fill between the values at 1462 nm and 320 nm, not a measurement, and no measured visible absorption was found",
       fit: null,
     },
     adjust: withoutVisibleAbsorption,
@@ -1607,7 +1612,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: COMPILATION_TERMS,
       reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.6–7.7 nm apart here. No open copy of Ueda et al.'s visible values was found. The copy states no temperature. ${CATIO3_BOUND_TEXT}`,
       standIn:
-        "an upper bound on absorption: Ueda et al.'s visible k is a Kramers–Kronig value from normal-incidence reflectance, which cannot detect a k this small, and thin sections of the mineral can be colourless, so the pure crystal absorbs less",
+        "an upper bound on absorption, since it is drawn with a published visible k that is a Kramers–Kronig value from normal-incidence reflectance, which cannot detect a k this small, and thin sections of the mineral can be colourless, so the pure crystal absorbs less",
       fit: null,
     },
   },
@@ -1683,7 +1688,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: COMPILATION_TERMS,
       reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.5–8 nm apart here. Its visible part is Khachai et al.'s first-principles (FP-APW+lo) calculation, not a measurement, so the file is a stated stand-in. The copy states no temperature. ${NA2S_BOUND_TEXT}`,
       standIn:
-        "a computed index: Khachai et al. 2009's first-principles calculation of crystalline Na2S, since no measured visible optical constants of Na2S were found; its flat visible k is a computed spectrum's, not a colourless solid's absorption, so it is an upper bound on the crystal's absorption",
+        "a computed index, from a first-principles calculation of the crystal, since no measured visible optical constants were found; its flat visible k is a computed spectrum's, not a colourless solid's absorption, so it is an upper bound on the crystal's absorption",
       fit: null,
     },
   },
@@ -1763,7 +1768,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: `Adapted from CC BY 4.0 material (${CC_BY}): A. S. Braude, P. G. J. Irwin, G. S. Orton and L. N. Fletcher, arXiv:1912.00918v1. Changed: the adopted solution's k reduced onto this grid and extrapolated below 450 nm, with n held at the paper's 1.4; this file is offered under CC BY 4.0`,
       reduction: `${STANDARD_REDUCTION}. The table gives k every 50 nm over 450–950 nm, so below 450 nm k is extrapolated linearly in log k from its 450 and 500 nm rows (0.033 and 0.023), since the chromophore absorbs more towards the blue, and n is held. n is the paper's 1.4, which its retrieval fixes at 700 nm (its §4.1); the paper does not say how n varies elsewhere (a Kramers–Kronig shape, presumably, as in the same group's retrievals), and n is 1.4 throughout`,
       standIn:
-        "an effective index retrieved from Jupiter's spectrum for an unidentified colouring material (Braude et al. 2020), not a laboratory measurement",
+        "an effective index retrieved from Jupiter's spectrum for its unidentified colouring material, not a laboratory measurement",
       fit: null,
     },
   },
@@ -1787,7 +1792,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: `Adapted from CC BY 4.0 material (${CC_BY}): P. G. J. Irwin et al., J. Geophys. Res. Planets 127 (2022) e2022JE007189 (arXiv:2201.04516v2). Changed: the geometric mean of the two planets' Aerosol-3 k, reduced onto this grid, with n held at the paper's 1.4; this file is offered under CC BY 4.0`,
       reduction: `at each of the tables' wavelengths, every 100 nm over 300–1,900 nm, k is the geometric mean of Uranus's and Neptune's Aerosol-3 "Mean 1", since one key serves every ice giant; then ${STANDARD_REDUCTION}. The two planets differ by up to a factor of 29 over 300–800 nm (${IRWIN_PLANETS_TEXT}). n is the paper's 1.4, which its retrieval fixes at 800 nm and carries elsewhere by Kramers–Kronig (its §3.4 and §3.6); that shape is not reproduced, and n is 1.4 throughout`,
       standIn:
-        "an effective index retrieved from Uranus's and Neptune's spectra for their unidentified photochemical haze (Irwin et al. 2022), not a laboratory measurement",
+        "an effective index retrieved from Uranus's and Neptune's spectra for their unidentified photochemical haze, not a laboratory measurement",
       fit: null,
     },
   },
@@ -1894,7 +1899,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: `Adapted from CC BY 4.0 material (${CC_BY}): J. Martikainen et al., Astrophys. J. Suppl. 268 (2023) 47. Changed: MGS-1's k from Table 6 reduced onto this grid, with n the paper's fixed 1.5; this file is offered under CC BY 4.0`,
       reduction: `${STANDARD_REDUCTION}. Table 6's k is MGS-1's, retrieved with the paper's second Gaussian-random-sphere shapes and n fixed at 1.5; its 650 nm value, 4.33 × 10⁻⁴, is the index Martikainen et al. 2025's MGS-1 database takes (R08.T5.c's fidelity test), where Table 3's first shapes give 3.15 × 10⁻⁴. The rows are every 25 nm to 400 nm, then every 50 nm; the sample is a laboratory simulant at room temperature, unstated`,
       standIn:
-        "a Mars regolith simulant stands in for Fe-rich basalt: MGS-1's absorption, retrieved by Martikainen et al. 2023 with its real index fixed at 1.5, since no open visible index of an Fe-rich basalt was found",
+        "the absorption of MGS-1, a Mars regolith simulant, as retrieved with its real index fixed at 1.5, stands in, since no open visible index of such a basalt was found",
       fit: null,
     },
   },
