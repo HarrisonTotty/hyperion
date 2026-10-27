@@ -7,6 +7,7 @@ import {
   fakeEngineModule,
   type FakeRenderEngine,
 } from "../../test/fakeRenderEngine";
+import type { KernelPair } from "./kernels";
 import { loadRenderEngine } from "./loadEngine";
 import type { AllocationEvent } from "./memory";
 import { type AdapterOutcome, requestAdapterOutcome } from "./platform";
@@ -94,6 +95,14 @@ const MATERIAL: WgslMaterialSpec = {
   depthWrite: false,
   colourWrites: true,
   blend: "none",
+};
+
+/** A kernel the fake engines make a handle for (R01.T15's releases). */
+const KERNEL: KernelPair = {
+  name: "toy",
+  reference: "",
+  subgroup: null,
+  readback: "bit-exact",
 };
 
 /** The depth-layer set the fake engines make a target for (R10.T9.b). */
@@ -428,6 +437,34 @@ describe("a device loss", () => {
     engine.releaseMesh(remade);
     engine.releaseMaterial(recompiled);
     expect(nth(module, 1).released).toEqual([remade, recompiled]);
+  });
+
+  it("forwards a kernel's release to the engine that made it, and refuses a second (R01.T15)", async () => {
+    const { engine, module } = await load([adapter()]);
+    const kernel = engine.createCompute(KERNEL);
+    const compiled = await engine.createComputeAsync(KERNEL);
+    engine.releaseCompute(compiled);
+    engine.releaseCompute(kernel);
+    expect(nth(module, 0).released).toEqual([compiled, kernel]);
+    expect(() => {
+      engine.releaseCompute(kernel);
+    }).toThrow(/kernel toy was not made through this engine, or was released/u);
+  });
+
+  it("drops the release of a kernel a lost engine made, and forwards the new engine's (R01.T15)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const kernel = engine.createCompute(KERNEL);
+    const compiled = await engine.createComputeAsync(KERNEL);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    const remade = engine.createCompute(KERNEL);
+    engine.releaseCompute(kernel);
+    engine.releaseCompute(compiled);
+    expect(nth(module, 0).released).toEqual([]);
+    engine.releaseCompute(remade);
+    expect(nth(module, 1).released).toEqual([remade]);
   });
 
   it("prepares a material the current engine made, and refuses one a lost engine made (R10.T14.d)", async () => {

@@ -3,7 +3,8 @@
  * declares.
  *
  * @remarks
- * Each uniform is written into a buffer of the kernel's own, made once per name through the one
+ * Each uniform is written into a buffer of the kernel's record's own, shared by every handle of
+ * the record and destroyed at its last release (R01.T15), made once per name through the one
  * creation path (Design note 18), so that its bytes and uploads are counted; a storage texture is
  * bound at the level `ComputeBindings` names, a cube's as a `2d-array` view of its six faces. A
  * texture is viewed at the dimension its declaration takes (R08.T0), under the rule a material's
@@ -65,8 +66,8 @@ function kernelViewDimension(
 /**
  * Resolves `bindings` for `kernel`.
  *
- * @param uniformBuffers - The kernel's uniform buffers by name, made here when first needed and
- * kept by the caller.
+ * @param uniformBuffers - The kernel's record's uniform buffers by name, made here when first
+ * needed and kept by the caller (the engine's kernel cache, R01.T15).
  * @throws Error naming the kernel and the binding when a texture does not bind at the view
  * dimension the kernel declares for it, before any uniform is written or any view made; Error
  * naming the uniform when a value is larger than the buffer its first value made.

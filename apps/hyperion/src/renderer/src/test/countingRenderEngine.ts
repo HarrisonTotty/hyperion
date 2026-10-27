@@ -226,6 +226,12 @@ export class CountingRenderEngine implements RenderEngine {
   readonly compiles: RecordedCompile[] = [];
   /** Every material asked of `prepareMaterial`, first first, refused ones too (R10.T14.d). */
   readonly prepares: RecordedPrepare[] = [];
+  /**
+   * Every kernel asked of `createCompute` or `createComputeAsync`, first first (plan R01, R01.T15):
+   * a test reads from it the distinct kernels an owner makes, which are the records a device's
+   * cache holds.
+   */
+  readonly kernelPairs: KernelPair[] = [];
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #restoredListeners = new Set<() => void>();
   /** What each buffer and texture was made with, so that a release raises its bytes (R06.T13.h). */
@@ -237,8 +243,12 @@ export class CountingRenderEngine implements RenderEngine {
   readonly #meshes = new Map<MeshHandle, ReadonlyArray<{ name: string; bytes: number }>>();
   /** The materials made and not released or lost (R10.T16.b). */
   readonly #materials = new Set<MaterialHandle>();
+  /** The kernels' handles made and not released or lost (R01.T15). */
+  readonly #kernels = new Set<ComputeHandle>();
   /** The handles a modelled loss took ({@link CountingRenderEngine.loseHandles}), whose release is dropped. */
-  readonly #lost = new WeakSet<BufferHandle | TextureHandle | MeshHandle | MaterialHandle>();
+  readonly #lost = new WeakSet<
+    BufferHandle | TextureHandle | MeshHandle | MaterialHandle | ComputeHandle
+  >();
   #capabilities: GpuCapabilities;
   /** Inside a modelled loss's window ({@link CountingRenderEngine.loseDevice}). */
   #unavailable = false;
@@ -298,6 +308,10 @@ export class CountingRenderEngine implements RenderEngine {
       this.#lost.add(material);
     }
     this.#materials.clear();
+    for (const kernel of this.#kernels) {
+      this.#lost.add(kernel);
+    }
+    this.#kernels.clear();
   }
 
   /**
@@ -548,7 +562,10 @@ export class CountingRenderEngine implements RenderEngine {
   createCompute(pair: KernelPair): ComputeHandle {
     this.#available("createCompute");
     this.counts.kernels += 1;
-    return { kind: "compute", name: pair.name, path: "reference" };
+    this.kernelPairs.push(pair);
+    const kernel: ComputeHandle = { kind: "compute", name: pair.name, path: "reference" };
+    this.#kernels.add(kernel);
+    return kernel;
   }
 
   createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
@@ -649,6 +666,16 @@ export class CountingRenderEngine implements RenderEngine {
     }
     if (!this.#materials.delete(material)) {
       throw new Error(`material ${material.name} was not made by this engine, or was released`);
+    }
+  }
+
+  /** Forgets a kernel's handle, as the engine lets it go (R01.T15); a lost one is dropped. */
+  releaseCompute(kernel: ComputeHandle): void {
+    if (this.#lost.delete(kernel)) {
+      return;
+    }
+    if (!this.#kernels.delete(kernel)) {
+      throw new Error(`kernel ${kernel.name} was not made by this engine, or was released`);
     }
   }
 

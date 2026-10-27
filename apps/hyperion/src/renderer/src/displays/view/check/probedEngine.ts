@@ -346,6 +346,10 @@ export class ProbedEngine implements RenderEngine {
     this.#inner.releaseMaterial(material);
   }
 
+  releaseCompute(kernel: ComputeHandle): void {
+    this.#inner.releaseCompute(kernel);
+  }
+
   dispatch(
     kernel: ComputeHandle,
     bindings: ComputeBindings,

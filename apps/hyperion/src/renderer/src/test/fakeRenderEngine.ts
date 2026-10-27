@@ -3,16 +3,18 @@
  * adapter as a real one does, and whose device loss the test raises.
  *
  * @remarks
- * Only views, faults, allocation listeners, disposal, buffer, mesh and material handles and
- * releases, and depth-layer targets that record their renders, are faked; every other member
+ * Only views, faults, allocation listeners, disposal, buffer, mesh, material and kernel handles
+ * and releases, and depth-layer targets that record their renders, are faked; every other member
  * throws, naming itself.
  */
 
+import type { KernelPair } from "../view/engine/kernels";
 import type { AllocationEvent, BufferSpec } from "../view/engine/memory";
 import { deviceCapabilities } from "../view/engine/platform";
 import type { GraphicsFault } from "../view/engine/status";
 import type {
   BufferHandle,
+  ComputeHandle,
   CreateWebGpuEngine,
   DepthLayerPass,
   DepthLayersSpec,
@@ -102,8 +104,10 @@ export class FakeRenderEngine implements RenderEngine {
   readonly views: FakeView[] = [];
   /** The depth-layer targets made, first first (R10.T9.b). */
   readonly depthLayers: FakeDepthLayers[] = [];
-  /** The buffers, textures, meshes and materials released, in order. */
-  readonly released: Array<BufferHandle | TextureHandle | MeshHandle | MaterialHandle> = [];
+  /** The buffers, textures, meshes, materials and kernels released, in order. */
+  readonly released: Array<
+    BufferHandle | TextureHandle | MeshHandle | MaterialHandle | ComputeHandle
+  > = [];
   /** The materials asked of `prepareMaterial`, in order (R10.T14.d). */
   readonly prepared: MaterialHandle[] = [];
   disposed = false;
@@ -227,11 +231,13 @@ export class FakeRenderEngine implements RenderEngine {
   createPostProcess(): never {
     throw notFaked("createPostProcess");
   }
-  createCompute(): never {
-    throw notFaked("createCompute");
+  /** A kernel's handle with no pipeline behind it, for tests of what is done with handles (R01.T15). */
+  createCompute(pair: KernelPair): ComputeHandle {
+    return Object.freeze({ kind: "compute", name: pair.name, path: "reference" });
   }
-  createComputeAsync(): Promise<never> {
-    return Promise.reject(notFaked("createComputeAsync"));
+  /** A handle as {@link FakeRenderEngine.createCompute} makes one, at once. */
+  createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
+    return Promise.resolve(this.createCompute(pair));
   }
   /** A handle with no GPU memory behind it, for tests of what is done with handles. */
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -270,6 +276,10 @@ export class FakeRenderEngine implements RenderEngine {
   /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does (R10.T16.b). */
   releaseMaterial(material: MaterialHandle): void {
     this.released.push(material);
+  }
+  /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does (R01.T15). */
+  releaseCompute(kernel: ComputeHandle): void {
+    this.released.push(kernel);
   }
   dispatch(): never {
     throw notFaked("dispatch");

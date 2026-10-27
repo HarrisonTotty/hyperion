@@ -2,6 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
 import { sphereFootprint } from "../bodies/regime";
+import {
+  earthBody,
+  fiveLineSlotMedium,
+  fourAbsorberMedium,
+  iceGiantMethaneBody,
+  lineAbsorberMedium,
+  r05EarthWithOzoneAbsorber,
+  SATURN_SPHEROID,
+  saturnBody,
+  saturnClassMedium,
+  titanClassMethaneMedium,
+  venusClassMedium,
+  WGS84_SPHEROID,
+} from "../../test/atmosphereFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
@@ -19,14 +33,38 @@ import { TIMING_FRAMES_IN_FLIGHT } from "../engine/webgpu/timing";
 import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../engine/types";
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
-import { histogramParams, histogramWorkgroups } from "../post/histogram";
+import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/submit";
-import { ATMOSPHERE_COMPOSITE_PASS, AtmosphereRetired } from "../atmosphere/hillaire";
+import {
+  AERIAL_PERSPECTIVE_KERNEL,
+  ATMOSPHERE_COMPOSITE_PASS,
+  AtmosphereRetired,
+  RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
+  RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
+  SKY_VIEW_KERNEL,
+  tableRadiusM,
+} from "../atmosphere/hillaire";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
-import { AtmosphereTables } from "../atmosphere/tables";
+import type { AtmosphereMedium } from "../atmosphere/medium";
+import {
+  type AbsorberCurveSlots,
+  type AtmosphereBody,
+  AtmosphereTables,
+  IRRADIANCE_KERNEL,
+  MULTI_SCATTERING_KERNEL,
+  SLOT_DEPTHS_KERNEL,
+  TRANSMITTANCE_KERNEL,
+} from "../atmosphere/tables";
+import type { KernelPair } from "../engine/kernels";
+import { kernelKey, prepareKernel } from "../engine/webgpu/compute";
+import { BAKE_KERNELS } from "../sky/bake";
+import { between, seededRandom } from "../../test/seededRandom";
 import {
   type FrameAtmosphere,
   type PhotorealFrame,
@@ -773,6 +811,191 @@ async function overlayDatums(
     given,
   };
 }
+
+/**
+ * Every kernel VIEW makes on a device (plan R01, R01.T15): the photorealistic renderer's histogram
+ * and disc cells; the atmosphere's per-frame kernels, its sky view, aerial perspective, its two
+ * marches' centre and footprint entry points under R08.T11.d's tile cull and the march's fill; its
+ * per-planet tables' four; and the sky bake's four. Each is a module constant, its WGSL fixed text
+ * with no value of a medium, a body or a setting in it (term counts, slices, bands and light slots
+ * are uniforms), so the records a device's cache holds for VIEW are bounded by this list's length,
+ * 17, however many bodies a session visits. The smoke's kernel arm (`withKernelArmFormat`, ten
+ * more) and its probes are the smoke's alone.
+ */
+const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
+  HISTOGRAM_KERNEL,
+  BODY_DISC_CELLS_KERNEL,
+  SKY_VIEW_KERNEL,
+  AERIAL_PERSPECTIVE_KERNEL,
+  RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
+  TRANSMITTANCE_KERNEL,
+  MULTI_SCATTERING_KERNEL,
+  SLOT_DEPTHS_KERNEL,
+  IRRADIANCE_KERNEL,
+  ...BAKE_KERNELS,
+];
+
+/** A body's air as the optics pool builds it, for the app's tables factory. */
+interface SessionAir {
+  readonly medium: AtmosphereMedium;
+  readonly bottomRadiusM: number;
+  readonly curves: AbsorberCurveSlots;
+  readonly body: AtmosphereBody | null;
+}
+
+/** A kind of air, and whether it stands on an Earth-sized ground that WGS 84's figure may slice. */
+interface AirKind {
+  readonly air: SessionAir;
+  readonly earthLike: boolean;
+}
+
+/** Air on an Earth-sized ground, WGS 84's mean radius, with no figure of its own. */
+function onEarth(medium: AtmosphereMedium, curves: AbsorberCurveSlots): AirKind {
+  return {
+    air: { medium, bottomRadiusM: tableRadiusM(WGS84_SPHEROID), curves, body: null },
+    earthLike: true,
+  };
+}
+
+/**
+ * The fixtures' kinds of air, each built once (their curves of growth are most of a build's cost):
+ * R05's Earth, with and without its ozone as an absorber, four column absorbers under one, two and
+ * three seeded lights, a line absorber, five line slots, a Venus-class deck, a Titan-class methane
+ * air, an oblate ice giant and an oblate Saturn-class air; so they differ in their terms,
+ * absorbers, light slots, slices and bands.
+ */
+function airKinds(random: () => number): AirKind[] {
+  const ozone = r05EarthWithOzoneAbsorber();
+  const lines = lineAbsorberMedium();
+  const slots = fiveLineSlotMedium();
+  const venus = venusClassMedium();
+  const titan = titanClassMethaneMedium();
+  const iceGiant = iceGiantMethaneBody();
+  return [
+    onEarth(R05_EARTH_REFERENCE, []),
+    onEarth(ozone.medium, ozone.curves),
+    ...[1, 2, 3].map((count) => {
+      const lightsK = Array.from({ length: count }, () => between(random, 3_000, 7_000));
+      const { medium, curves } = fourAbsorberMedium(lightsK);
+      return onEarth(medium, curves);
+    }),
+    onEarth(lines.medium, lines.curves),
+    onEarth(slots.medium, slots.curves),
+    {
+      air: { medium: venus.medium, bottomRadiusM: venus.radiusM, curves: [], body: null },
+      earthLike: false,
+    },
+    {
+      air: { medium: titan.medium, bottomRadiusM: titan.radiusM, curves: titan.curves, body: null },
+      earthLike: false,
+    },
+    {
+      air: {
+        medium: iceGiant.medium,
+        bottomRadiusM: tableRadiusM(iceGiant.body.figure),
+        curves: iceGiant.curves,
+        body: iceGiant.body,
+      },
+      earthLike: false,
+    },
+    {
+      air: {
+        medium: saturnClassMedium(),
+        bottomRadiusM: tableRadiusM(SATURN_SPHEROID),
+        curves: [],
+        body: saturnBody(),
+      },
+      earthLike: false,
+    },
+  ];
+}
+
+/**
+ * `count` bodies' air, as a session meets them: `kinds` in turn, each body's medium its own (its
+ * name and a seeded grey ground albedo), and an Earth-like kind on WGS 84's figure and gravity
+ * every second turn.
+ */
+function sessionAirs(
+  kinds: ReadonlyArray<AirKind>,
+  count: number,
+  random: () => number,
+): SessionAir[] {
+  return Array.from({ length: count }, (_, i) => {
+    const kind = kinds[i % kinds.length];
+    if (kind === undefined) {
+      throw new Error("no kind of air");
+    }
+    const albedo = between(random, 0.05, 0.5);
+    const sliced = kind.earthLike && Math.floor(i / kinds.length) % 2 === 1;
+    return {
+      ...kind.air,
+      medium: {
+        ...kind.air.medium,
+        name: `${kind.air.medium.name} ${i}`,
+        groundAlbedo: [albedo, albedo, albedo],
+      },
+      body: sliced ? earthBody() : kind.air.body,
+    };
+  });
+}
+
+describe("the device's kernels over a session's bodies (R01.T15)", () => {
+  it("stay within VIEW's fixed set, and stop growing after the first of each kind of air, over 50 bodies", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const keyOf = (pair: KernelPair): string =>
+      kernelKey(pair, prepareKernel(pair, engine.capabilities));
+    // The distinct kernels made so far, read incrementally: a key holds the whole WGSL text.
+    const distinct = new Set<string>();
+    let counted = 0;
+    const count = (): number => {
+      for (const pair of engine.kernelPairs.slice(counted)) {
+        distinct.add(keyOf(pair));
+      }
+      counted = engine.kernelPairs.length;
+      return distinct.size;
+    };
+    const random = seededRandom(15);
+    const kinds = airKinds(random);
+    const airs = sessionAirs(kinds, 50, random);
+    const held: number[] = [];
+    for (const [i, air] of airs.entries()) {
+      const planet = bodyAt(
+        `0200080020000000.${String(300 + i).padStart(4, "0")}`,
+        vec3(0, 0, -3e7),
+      );
+      // The app's factory's construction (`atmosphereTablesOn`), and its eviction's disposal.
+      const tables = new AtmosphereTables(
+        engine,
+        air.medium,
+        air.bottomRadiusM,
+        air.curves,
+        air.body,
+      );
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      tables.dispose();
+      held.push(count());
+    }
+    const bound = new Set(VIEW_KERNELS.map(keyOf));
+    expect(bound.size).toBe(VIEW_KERNELS.length);
+    expect([...distinct].filter((key) => !bound.has(key))).toEqual([]);
+    // Every kind of air has been met by its first body; none after adds a kernel. All but five
+    // are made: the sky bake's four are the sky's, and the march's fill a reader's, which no
+    // frame asks.
+    expect(new Set(held.slice(kinds.length - 1))).toEqual(new Set([held.at(-1)]));
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 1);
+    // Each body's tables made their own handles all the while.
+    expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
+    renderer.dispose();
+  });
+});
 
 describe("the photorealistic renderer's overlay", () => {
   it("loads the tone-mapped image for the symbology", async () => {

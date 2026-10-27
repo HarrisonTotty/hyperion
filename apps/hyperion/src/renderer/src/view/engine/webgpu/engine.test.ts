@@ -1184,6 +1184,195 @@ describe("unclippedDepth (R10.T9.b)", () => {
   });
 });
 
+/** A bit-exact kernel with a uniform, `params`, and a storage buffer, `values`. */
+const SCALER: KernelPair = {
+  name: "scaler",
+  reference: [
+    "@group(0) @binding(0) var<uniform> params : vec4u;",
+    "@group(0) @binding(1) var<storage, read_write> values : array<u32>;",
+  ].join("\n"),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** A storage buffer for {@link SCALER}'s `values`. */
+function valuesBuffer(engine: WebGpuRenderEngine): ReturnType<WebGpuRenderEngine["createBuffer"]> {
+  return engine.createBuffer({
+    name: "values",
+    bytes: 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+}
+
+/** Dispatches `kernel`, a {@link SCALER}, with `params` filled with `value`. */
+function scale(
+  engine: WebGpuRenderEngine,
+  kernel: ReturnType<WebGpuRenderEngine["createCompute"]>,
+  values: ReturnType<WebGpuRenderEngine["createBuffer"]>,
+  value: number,
+): void {
+  engine.dispatch(
+    kernel,
+    {
+      ...NO_BINDINGS,
+      uniforms: { params: new Uint32Array(4).fill(value) },
+      buffers: { values },
+      storage: {},
+    },
+    [1, 1, 1],
+    "scale",
+  );
+}
+
+/** The fake device's buffers not destroyed. */
+function liveBuffers(gpu: FakeDevice): number {
+  return gpu.buffers.filter((buffer) => !buffer.destroyed).length;
+}
+
+describe("the kernel cache (R01.T15)", () => {
+  it("makes one pipeline for kernels of one name and sources, a new handle each, sync or async", async () => {
+    const { engine, gpu } = await engineOn();
+    const handles = [
+      engine.createCompute(SCALER),
+      engine.createCompute({ ...SCALER }),
+      await engine.createComputeAsync(SCALER),
+    ];
+    expect(gpu.computePipelines).toHaveLength(1);
+    expect(new Set(handles).size).toBe(3);
+    expect(new Set(handles.map((handle) => engine.kernelOf(handle))).size).toBe(1);
+  });
+
+  it("makes a pipeline of its own for a kernel that differs in its name, a source or its readback", async () => {
+    const { engine, gpu } = await engineOn();
+    engine.createCompute(SCALER);
+    engine.createCompute({ ...SCALER, name: "scaler 2" });
+    engine.createCompute({ ...SCALER, reference: `${SCALER.reference}\n` });
+    engine.createCompute({ ...SCALER, subgroup: "enable subgroups;" });
+    engine.createCompute({ ...SCALER, readback: "presentation-only" });
+    expect(gpu.computePipelines).toHaveLength(5);
+  });
+
+  it("shares one compile among concurrent asynchronous creates of a kernel", async () => {
+    const { engine, gpu } = await engineOn();
+    const compiles = vi.spyOn(gpu, "createComputePipelineAsync");
+    const handles = await Promise.all([
+      engine.createComputeAsync(SCALER),
+      engine.createComputeAsync(SCALER),
+      engine.createComputeAsync({ ...SCALER }),
+    ]);
+    expect(compiles).toHaveBeenCalledOnce();
+    expect(new Set(handles.map((handle) => engine.kernelOf(handle))).size).toBe(1);
+  });
+
+  it("writes each dispatch's uniforms before its own submission, through every handle of a shared record", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const first = engine.createCompute(SCALER);
+    const second = engine.createCompute(SCALER);
+    const order: string[] = [];
+    vi.spyOn(gpu.queue, "writeBuffer").mockImplementation((buffer, _offset, data) => {
+      if (buffer.label === "scaler:params" && data instanceof ArrayBuffer) {
+        order.push(`write ${new Uint32Array(data)[0]}`);
+      }
+      return undefined;
+    });
+    vi.spyOn(gpu.queue, "submit").mockImplementation(() => {
+      order.push("submit");
+      return undefined;
+    });
+    scale(engine, first, values, 2);
+    scale(engine, second, values, 3);
+    scale(engine, first, values, 5);
+    expect(order).toEqual(["write 2", "submit", "write 3", "submit", "write 5", "submit"]);
+    // The one record's one uniform buffer, written by each dispatch in turn.
+    expect(gpu.buffers.filter((buffer) => buffer.label === "scaler:params")).toHaveLength(1);
+  });
+
+  it("returns to its first buffers and events once N distinct kernels' handles are released", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const before = liveBuffers(gpu);
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const kernels = Array.from({ length: 6 }, (_, i) =>
+      engine.createCompute({ ...SCALER, name: `scaler ${i}` }),
+    );
+    for (const kernel of kernels) {
+      scale(engine, kernel, values, 1);
+    }
+    expect(liveBuffers(gpu)).toBe(before + 6);
+    for (const kernel of kernels) {
+      engine.releaseCompute(kernel);
+    }
+    expect(liveBuffers(gpu)).toBe(before);
+    const tally = (kind: "created" | "destroyed"): string[] =>
+      events.flatMap((event) => (event.kind === kind ? [`${event.name} ${event.bytes}`] : []));
+    expect(tally("destroyed")).toEqual(tally("created"));
+    expect(tally("created")).toHaveLength(6);
+    // Released, each record is forgotten: a kernel made again is compiled again.
+    engine.createCompute({ ...SCALER, name: "scaler 0" });
+    expect(gpu.computePipelines).toHaveLength(7);
+  });
+
+  it("keeps a shared record's uniform buffer until its last handle is released", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const first = engine.createCompute(SCALER);
+    const second = engine.createCompute(SCALER);
+    scale(engine, first, values, 1);
+    const params = (): ReadonlyArray<boolean> =>
+      gpu.buffers.filter((buffer) => buffer.label === "scaler:params").map((b) => b.destroyed);
+    engine.releaseCompute(first);
+    expect(params()).toEqual([false]);
+    scale(engine, second, values, 2);
+    engine.releaseCompute(second);
+    expect(params()).toEqual([true]);
+  });
+
+  it("refuses a released kernel in a dispatch and in a second release, and one another engine made", async () => {
+    const { engine } = await engineOn();
+    const { engine: other } = await engineOn();
+    const values = valuesBuffer(engine);
+    const kernel = engine.createCompute(SCALER);
+    engine.releaseCompute(kernel);
+    expect(() => {
+      scale(engine, kernel, values, 1);
+    }).toThrow("kernel scaler was released");
+    expect(() => {
+      engine.releaseCompute(kernel);
+    }).toThrow("kernel scaler was released");
+    expect(() => {
+      engine.releaseCompute(other.createCompute(SCALER));
+    }).toThrow("kernel scaler was not made by this engine");
+  });
+
+  it("forgets every record at a device loss: a kernel made after it is compiled again", async () => {
+    const { engine, gpu } = await engineOn();
+    engine.createCompute(SCALER);
+    const lost = new Promise<void>((resolve) => {
+      engine.onFault(() => {
+        resolve();
+      });
+    });
+    gpu.loseDevice();
+    await lost;
+    engine.createCompute(SCALER);
+    expect(gpu.computePipelines).toHaveLength(2);
+  });
+
+  it("destroys the records' uniform buffers with the rest at its disposal", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    scale(engine, engine.createCompute(SCALER), values, 1);
+    engine.dispose();
+    expect(
+      gpu.buffers.filter((buffer) => buffer.label === "scaler:params").map((b) => b.destroyed),
+    ).toEqual([true]);
+    expect(() => engine.createCompute(SCALER)).toThrow(/disposed/u);
+  });
+});
+
 describe("the sampler cache (R10.T9.b)", () => {
   it("keys a sampler by its filter, its address mode and its comparison", () => {
     const plain = { filter: "linear", address: "clamp-to-edge" } as const;

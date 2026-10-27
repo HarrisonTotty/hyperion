@@ -88,3 +88,30 @@ describe("the counting engine's unclippedDepth (R10.T9.b)", () => {
     );
   });
 });
+
+describe("the counting engine's kernels (R01.T15)", () => {
+  const TOY = { name: "toy", reference: "", subgroup: null, readback: "bit-exact" } as const;
+
+  it("records every kernel asked, and releases each handle once", async () => {
+    const engine = await countingRenderEngine();
+    const kernel = engine.createCompute(TOY);
+    await engine.createComputeAsync(TOY);
+    expect(engine.kernelPairs).toEqual([TOY, TOY]);
+    engine.releaseCompute(kernel);
+    expect(() => {
+      engine.releaseCompute(kernel);
+    }).toThrow(/kernel toy was not made by this engine, or was released/u);
+  });
+
+  it("drops the release of a kernel a modelled loss took, once", async () => {
+    const engine = await countingRenderEngine();
+    const kernel = engine.createCompute(TOY);
+    engine.loseHandles();
+    expect(() => {
+      engine.releaseCompute(kernel);
+    }).not.toThrow();
+    expect(() => {
+      engine.releaseCompute(kernel);
+    }).toThrow(/was released/u);
+  });
+});

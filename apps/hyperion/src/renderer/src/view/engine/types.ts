@@ -714,6 +714,22 @@ export interface RenderEngine {
    */
   releaseMaterial(material: MaterialHandle): void;
   /**
+   * Lets a kernel's handle go (plan R01, R01.T15).
+   *
+   * @remarks
+   * Each `createCompute` or `createComputeAsync` returns a new handle over the device's one record
+   * of its kernel, by name, readback class, sources, entry point, constants and layout. The last
+   * handle released over a record destroys its uniform buffers, each raising its `destroyed`
+   * allocation event with the bytes it was made with, and the engine forgets the record, with its
+   * pipeline, which WebGPU cannot destroy and which goes with its last reference. A handle dropped
+   * unreleased keeps its record until the device is lost or the engine disposed, so the records
+   * held are bounded by the distinct kernels made. The handle is refused by every later call: a
+   * dispatch of it and a second release. A caller never releases a kernel a dispatch not yet made
+   * needs. `ResilientEngine` drops the release of a kernel a lost engine made.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseCompute(kernel: ComputeHandle): void;
+  /**
    * Dispatches a kernel.
    *
    * @param workgroups - Workgroup counts, or GPU-written ones (an indirect dispatch).

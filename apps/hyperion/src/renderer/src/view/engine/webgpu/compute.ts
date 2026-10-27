@@ -115,47 +115,115 @@ export interface KernelRecord {
 }
 
 /**
- * The variant the device runs, checked and with its bindings read.
+ * Everything that shapes the pipeline a kernel's chosen variant compiles to, besides the device:
+ * its module, entry point, pipeline-overridable constants and layout (plan R01, R01.T15).
+ *
+ * @remarks
+ * The engine's cache keys a pipeline by every member of these with the pair ({@link kernelKey}),
+ * and {@link createKernel} compiles from them alone, so that no part of a descriptor can be left
+ * out of the key. A {@link KernelPair} names no entry point, constant or layout: every kernel in
+ * the catalogue is `main` under the `auto` layout, with no `override` declaration.
+ */
+export interface KernelPipelineSpec {
+  readonly path: "reference" | "subgroup";
+  readonly module: GPUShaderModuleDescriptor;
+  /** `main`, this module's convention, for every kernel. */
+  readonly entryPoint: string;
+  /** The `override` declarations' values by name; none for every kernel. */
+  readonly constants: Readonly<Record<string, GPUPipelineConstantValue>>;
+  /** `auto`: the layout holds the bindings the entry point uses (see {@link kernelBindings}). */
+  readonly layout: "auto";
+}
+
+/**
+ * The variant the device runs, checked, with what its pipeline is compiled from.
  *
  * @throws Error naming the kernel when its chosen source enables both `f16` and `subgroups`.
  */
-export function prepareKernel(
-  pair: KernelPair,
-  capabilities: GpuCapabilities,
-): { readonly path: "reference" | "subgroup"; readonly module: GPUShaderModuleDescriptor } {
+export function prepareKernel(pair: KernelPair, capabilities: GpuCapabilities): KernelPipelineSpec {
   const { path, wgsl } = selectKernel(pair, capabilities);
   assertNoF16Subgroups(pair.name, wgsl);
-  return { path, module: { label: `${pair.name}:${path}`, code: wgsl } };
+  return {
+    path,
+    module: { label: `${pair.name}:${path}`, code: wgsl },
+    entryPoint: "main",
+    constants: {},
+    layout: "auto",
+  };
 }
 
-/** Compiles `pair`'s variant on `device`, blocking the queue's timeline on the compile. */
+/** A constant's value as the key holds it: `-0` apart from `0`, which an `f32` override keeps. */
+function constantText(value: GPUPipelineConstantValue): string {
+  return Object.is(value, -0) ? "-0" : String(value);
+}
+
+/**
+ * The key a device's cache holds `pair`'s record under (plan R01, R01.T15): its name, its readback
+ * class, both its sources, and everything its pipeline is compiled from in `spec` (its path, its
+ * module's label and code, its entry point, constants and layout).
+ *
+ * @remarks
+ * Two kernels share a record exactly where their keys are equal. The readback class shapes no
+ * pipeline, but the record's pair is what the readback guard reads a writer from, so a kernel that
+ * differs only in it keeps a record of its own. The source compiled is keyed as the module's code,
+ * which {@link prepareKernel} takes from it, and the other source as it is, so that each source is
+ * keyed once (the atmosphere's march is some 190 kB of WGSL) and a spec of any other code keys a
+ * record of its own. Constants are keyed in the order of their names, which WebGPU does not depend
+ * on.
+ */
+export function kernelKey(pair: KernelPair, spec: KernelPipelineSpec): string {
+  const constants = Object.entries(spec.constants)
+    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, value]) => [name, constantText(value)]);
+  const uncompiled = spec.path === "subgroup" ? pair.reference : pair.subgroup;
+  return JSON.stringify([
+    pair.name,
+    pair.readback,
+    spec.path,
+    spec.module.label ?? null,
+    spec.module.code,
+    uncompiled,
+    spec.entryPoint,
+    constants,
+    spec.layout,
+  ]);
+}
+
+/** The pipeline descriptor of `spec` on `device`: its constants only where it has any. */
+function pipelineDescriptor(
+  device: GPUDevice,
+  pair: KernelPair,
+  spec: KernelPipelineSpec,
+): GPUComputePipelineDescriptor {
+  const module = device.createShaderModule(spec.module);
+  return {
+    label: spec.module.label ?? pair.name,
+    layout: spec.layout,
+    compute:
+      Object.keys(spec.constants).length > 0
+        ? { module, entryPoint: spec.entryPoint, constants: spec.constants }
+        : { module, entryPoint: spec.entryPoint },
+  };
+}
+
+/** Compiles `pair`'s variant `spec` on `device`, blocking the queue's timeline on the compile. */
 export function createKernel(
   device: GPUDevice,
   pair: KernelPair,
-  capabilities: GpuCapabilities,
+  spec: KernelPipelineSpec,
 ): KernelRecord {
-  const { path, module } = prepareKernel(pair, capabilities);
-  const pipeline = device.createComputePipeline({
-    label: module.label ?? pair.name,
-    layout: "auto",
-    compute: { module: device.createShaderModule(module), entryPoint: "main" },
-  });
-  return { pair, path, pipeline, bindings: kernelBindings(module.code) };
+  const pipeline = device.createComputePipeline(pipelineDescriptor(device, pair, spec));
+  return { pair, path: spec.path, pipeline, bindings: kernelBindings(spec.module.code) };
 }
 
-/** Compiles `pair`'s variant on `device` off the queue's timeline. */
+/** Compiles `pair`'s variant `spec` on `device` off the queue's timeline. */
 export async function createKernelAsync(
   device: GPUDevice,
   pair: KernelPair,
-  capabilities: GpuCapabilities,
+  spec: KernelPipelineSpec,
 ): Promise<KernelRecord> {
-  const { path, module } = prepareKernel(pair, capabilities);
-  const pipeline = await device.createComputePipelineAsync({
-    label: module.label ?? pair.name,
-    layout: "auto",
-    compute: { module: device.createShaderModule(module), entryPoint: "main" },
-  });
-  return { pair, path, pipeline, bindings: kernelBindings(module.code) };
+  const pipeline = await device.createComputePipelineAsync(pipelineDescriptor(device, pair, spec));
+  return { pair, path: spec.path, pipeline, bindings: kernelBindings(spec.module.code) };
 }
 
 /** A resource bound to one of a kernel's declarations, resolved to the GPU object it is. */

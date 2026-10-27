@@ -64,6 +64,7 @@ import {
   createKernelAsync,
   encodeDispatch,
   type KernelRecord,
+  prepareKernel,
   type Workgroups,
 } from "./compute";
 import { WebGpuDepthLayers } from "./depthLayers";
@@ -76,6 +77,7 @@ import {
   type MaterialRecord,
   type PostProcessRecord,
 } from "./drawing";
+import { KernelCache } from "./kernelCache";
 import { resolveKernelResources } from "./kernelResources";
 import {
   FULL_SCREEN_WGSL,
@@ -181,7 +183,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   /** The meshes and materials released, so that a later use names the release (R10.T16.b). */
   readonly #released = new WeakSet<MeshHandle | MaterialHandle>();
   readonly #postProcesses = new WeakMap<PostProcessHandle, PostProcessRecord>();
-  readonly #kernels = new WeakMap<ComputeHandle, KernelRecord>();
+  /**
+   * Each distinct kernel's record, shared by its handles with its uniform buffers, until its last
+   * handle is released or the device is lost (R01.T15).
+   */
+  readonly #kernels: KernelCache;
   readonly #views = new Set<WebGpuView>();
   readonly #targets = new Set<WebGpuRenderTarget>();
   readonly #depthLayers = new Set<WebGpuDepthLayers>();
@@ -196,8 +202,6 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly #watches: ReadonlyArray<() => void>;
   readonly #resources: ResourceRegistry;
   readonly #drawing: Drawing;
-  /** Each kernel's uniform buffers, by uniform name. */
-  readonly #kernelUniforms = new Map<KernelRecord, Map<string, BufferHandle>>();
   /** The device's loss, once reported. */
   #lost: GraphicsFault | null = null;
   #disposed = false;
@@ -217,6 +221,15 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         listener(event);
       }
     });
+    this.#kernels = new KernelCache({
+      compile: (pair, spec) => createKernel(device, pair, spec),
+      compileAsync: (pair, spec) => createKernelAsync(device, pair, spec),
+      // A kernel's uniform buffers are bound by its dispatches alone, never by a draw's cached bind
+      // group, so the draw path's cache is left as it is.
+      destroyBuffer: (buffer) => {
+        this.#resources.destroyBuffer(buffer);
+      },
+    });
     const { gpuTiming } = status.getSnapshot();
     this.#timer = new PassTimer(
       {
@@ -232,6 +245,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         () => this.#disposed,
         (fault) => {
           this.#lost = fault;
+          // The records' pipelines died with the device: none is handed out again.
+          this.#kernels.clear();
           for (const listener of this.#faultListeners) {
             listener(fault);
           }
@@ -370,13 +385,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return record;
   }
 
-  /** The kernel behind `handle`, which must be this engine's. */
+  /**
+   * The kernel behind `handle`, which must be this engine's.
+   *
+   * @throws Error naming the kernel for a handle this engine did not make or has released.
+   */
   kernelOf(handle: ComputeHandle): KernelRecord {
-    const record = this.#kernels.get(handle);
-    if (record === undefined) {
-      throw new Error(`kernel ${handle.name} was not made by this engine`);
-    }
-    return record;
+    return this.#kernels.kernelOf(handle).record;
   }
 
   /**
@@ -558,17 +573,34 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return handle;
   }
 
+  /**
+   * A new handle over the device's one record of `pair` (R01.T15): compiled now where the engine
+   * holds none of its key (`kernelKey`).
+   */
   createCompute(pair: KernelPair): ComputeHandle {
     this.#assertLive();
-    const record = createKernel(this.device, pair, this.capabilities);
-    return this.#kernelHandle(pair, record);
+    return this.#kernels.create(pair, prepareKernel(pair, this.capabilities));
   }
 
-  /** A kernel whose pipeline is made by `createComputePipelineAsync`, off the frame path. */
+  /**
+   * A kernel whose pipeline is made by `createComputePipelineAsync`, off the frame path: a new
+   * handle over the device's one record of `pair`, which concurrent creates of its key wait on
+   * together, and which a record already held serves at once (R01.T15).
+   */
   async createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
     this.#assertLive();
-    const record = await createKernelAsync(this.device, pair, this.capabilities);
-    return this.#kernelHandle(pair, record);
+    return this.#kernels.createAsync(pair, prepareKernel(pair, this.capabilities));
+  }
+
+  /**
+   * Lets a kernel's handle go (R01.T15): the last handle over its record destroys the record's
+   * uniform buffers, each raising its `destroyed` event, and the engine forgets the record.
+   *
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseCompute(kernel: ComputeHandle): void {
+    this.#assertLive();
+    this.#kernels.release(kernel);
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -761,9 +793,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     pass = "compute",
   ): void {
     this.#assertLive();
-    const record = this.kernelOf(kernel);
-    const uniforms = this.#kernelUniforms.get(record) ?? new Map<string, BufferHandle>();
-    this.#kernelUniforms.set(record, uniforms);
+    const { record, uniforms } = this.#kernels.kernelOf(kernel);
+    // The uniforms are written here, through the queue, and the dispatch is submitted below before
+    // anything else is encoded, so that a record's buffers shared by several handles hold each
+    // dispatch's own values when it runs (R01.T15).
     const resources = resolveKernelResources(this.#resources, record, bindings, uniforms);
     const counts: Workgroups =
       "buffer" in workgroups
@@ -923,7 +956,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     this.#drawing.dispose();
     this.#timer.dispose();
     this.#resources.dispose();
-    this.#kernelUniforms.clear();
+    this.#kernels.clear();
     this.#samplers.clear();
     this.device.destroy();
     this.#allocationListeners.clear();
@@ -984,16 +1017,6 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     if (!this.#disposed) {
       console.error(`the compile check of ${owner} failed:`, error);
     }
-  }
-
-  #kernelHandle(pair: KernelPair, record: KernelRecord): ComputeHandle {
-    const handle: ComputeHandle = Object.freeze({
-      kind: "compute",
-      name: pair.name,
-      path: record.path,
-    });
-    this.#kernels.set(handle, record);
-    return handle;
   }
 
   /**

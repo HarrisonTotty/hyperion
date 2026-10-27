@@ -138,7 +138,7 @@ class ResilientView implements RenderView {
 }
 
 /** A handle a caller releases through the engine that made it. */
-type Released = BufferHandle | TextureHandle | MeshHandle | MaterialHandle;
+type Released = BufferHandle | TextureHandle | MeshHandle | MaterialHandle | ComputeHandle;
 
 /** The engine a caller holds: the current one, re-created after each loss. */
 export class ResilientEngine implements RenderEngine {
@@ -153,8 +153,9 @@ export class ResilientEngine implements RenderEngine {
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   #inner: RenderEngine | null = null;
   /**
-   * The engine that made each buffer, texture, mesh and material, so that a release reaches it or
-   * is dropped (R06.T13.h; meshes and materials from R10.T16.b).
+   * The engine that made each buffer, texture, mesh, material and kernel, so that a release
+   * reaches it or is dropped (R06.T13.h; meshes and materials from R10.T16.b, kernels from
+   * R01.T15).
    */
   readonly #makers = new WeakMap<Released, RenderEngine>();
   #capabilities: GpuCapabilities;
@@ -267,11 +268,16 @@ export class ResilientEngine implements RenderEngine {
   }
 
   createCompute(pair: KernelPair): ComputeHandle {
-    return this.#current("createCompute").createCompute(pair);
+    return this.#made(this.#current("createCompute").createCompute(pair));
   }
 
   createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
-    return this.#currentAsync("createComputeAsync", (inner) => inner.createComputeAsync(pair));
+    return this.#currentAsync("createComputeAsync", async (inner) => {
+      const kernel = await inner.createComputeAsync(pair);
+      // The engine asked, which a loss during the compile has left behind: its release is dropped.
+      this.#makers.set(kernel, inner);
+      return kernel;
+    });
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -338,6 +344,18 @@ export class ResilientEngine implements RenderEngine {
   releaseMaterial(material: MaterialHandle): void {
     if (this.#releasedFromMaker("material", material)) {
       this.#inner?.releaseMaterial(material);
+    }
+  }
+
+  /**
+   * Releases a kernel's handle the current engine made (R01.T15), as
+   * {@link ResilientEngine.releaseMesh} does a mesh.
+   *
+   * @throws Error as {@link ResilientEngine.releaseBuffer} does.
+   */
+  releaseCompute(kernel: ComputeHandle): void {
+    if (this.#releasedFromMaker("kernel", kernel)) {
+      this.#inner?.releaseCompute(kernel);
     }
   }
 
