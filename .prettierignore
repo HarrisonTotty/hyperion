@@ -83,3 +83,6 @@ crates/hyperion-fit/src/atmosphere/metric_verdicts.json
 # R08.T13's case gate on the four committed references, written by `reference/caseGate.test.ts`
 # through `bless.ts`, a geometry a line (plan R08, R08.T13.c1)
 apps/hyperion/src/renderer/src/view/atmosphere/reference/caseGate.json
+# R08.T13's recompute of the sweep, its boundary, attribution and classes, written by
+# `reference/sweepBoundary.test.ts` through `bless.ts`, a row a line (plan R08, R08.T13.c2)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/sweepBoundary.json

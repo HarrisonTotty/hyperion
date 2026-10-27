@@ -640,6 +640,80 @@ describe(
   },
 );
 
+/** The sky's irradiance a twin's lit ground reads, at the ground under a sun at 60°, green. */
+function groundSkyIrradiance(twin: ReferenceTwin): number {
+  return twin.surfaceLighting.skyIrradiance(0, 0.5, 0, 0)[1];
+}
+
+describe(
+  "the reference twin's zeroed multiple scattering (R08.T13.c2)",
+  { timeout: TWIN_TIMEOUT_MS },
+  () => {
+    const zeroed = new Map<string, ReferenceTwin>();
+    /** The twin of a sweep point with its multiple scattering zeroed, built once a test file. */
+    const zeroedTwinOf = (point: SweepPoint): ReferenceTwin => {
+      const key = JSON.stringify(point);
+      let twin = zeroed.get(key);
+      if (twin === undefined) {
+        twin = referenceTwin(sweepMedium(point), FIGURE, { multipleScattering: "zeroed" });
+        zeroed.set(key, twin);
+      }
+      return twin;
+    };
+    // A ground view under each sun, the disc with its lit ground, a limb and a path to the ground.
+    const SAMPLED = [
+      "ground-s0-v60-a0",
+      "ground-s30-v75-a180",
+      "ground-s80-v85-a90",
+      "disc-p0",
+      "disc-p60",
+      "limb-0.3H",
+      "aerial-1km",
+    ].map(geometryNamed);
+    const conservative: SweepPoint = { ...POINT, singleScatteringAlbedo: 1 };
+
+    it("reads a medium of ω 0 as drawn, at a sample of every kind of geometry", () => {
+      const point = { ...POINT, singleScatteringAlbedo: 0 };
+      expect(SAMPLED.map((g) => zeroedTwinOf(point).radiance(g))).toEqual(
+        SAMPLED.map((g) => twinOf(point).radiance(g)),
+      );
+    });
+
+    it("reads a medium of ω 1 no brighter than drawn at every sampled geometry", () => {
+      const brighter = SAMPLED.filter(
+        (g) =>
+          zeroedTwinOf(conservative).radiance(g)[1] >
+          twinOf(conservative).radiance(g)[1] * (1 + 1e-12),
+      );
+      expect(brighter.map((g) => g.name)).toEqual([]);
+    });
+
+    it.each(["ground-s30-v75-a180", "disc-p0"])(
+      "reads a medium of ω 1 dimmer than drawn by over 5% at %s",
+      (name) => {
+        const g = geometryNamed(name);
+        const share =
+          1 - zeroedTwinOf(conservative).radiance(g)[1] / twinOf(conservative).radiance(g)[1];
+        expect(share).toBeGreaterThan(0.05);
+      },
+    );
+
+    it("zeroes the multiple-scattering term of the sky's irradiance the lit ground reads", () => {
+      const drawn = groundSkyIrradiance(twinOf(conservative));
+      const single = groundSkyIrradiance(zeroedTwinOf(conservative));
+      expect([single > 0, single < drawn]).toEqual([true, true]);
+    });
+
+    it("keeps the transmittance tables, so the drawn beam, as drawn", () => {
+      const geometry = geometryNamed("ground-s30-v75-a180");
+      const sun = sunOf(geometry);
+      expect(zeroedTwinOf(conservative).transmittanceAlong(geometry, sun)).toEqual(
+        twinOf(conservative).transmittanceAlong(geometry, sun),
+      );
+    });
+  },
+);
+
 describe("the reference twin's ground observers (R08.T13.c1)", { timeout: TWIN_TIMEOUT_MS }, () => {
   it("refuses a ground view whose cone meets the ground", () => {
     const twin = twinOf(POINT);

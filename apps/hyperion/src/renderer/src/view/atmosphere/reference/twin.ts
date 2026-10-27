@@ -55,6 +55,12 @@
  * (R08.T6.d) or in R05's 256 equal steps, and the marches cut into pieces at the edges (R08.T6.i)
  * or in R05.T12.e's placement, each by building that part of the tables from the medium with its
  * layer edges dropped. A medium with no layer edge reads the same either way, to the bit.
+ *
+ * **The multiple scattering** ({@link TwinOptions.multipleScattering}, R08.T13.c2): drawn, or
+ * zeroed for the attribution of a miss, every band's multiple-scattering layer replaced by zeros
+ * of its shape after the tables are built, so that the sky view, the march, aerial perspective and
+ * the lit ground's sky irradiance, each built from those layers, take the single scattering alone.
+ * The transmittance tables are untouched, and the default reads the built tables themselves.
  */
 
 import { normalise, type Vec3 } from "../../../geometry/vec3";
@@ -102,8 +108,10 @@ import {
   surfaceLightingTwin,
   tableSources,
   transmittanceTablesTwin,
+  type TwinBand,
   type TwinBody,
   twinBandOf,
+  type TwinTable,
   type TwinVolume,
   twinView,
   type TwinView,
@@ -142,6 +150,15 @@ export type TwinTransmittanceSteps = "split" | "equal";
  */
 export type TwinMarchSteps = "pieces" | "placed";
 
+/**
+ * The multiple scattering the twin's reads take: `drawn`, the band's tables as the kernels build
+ * them, or `zeroed`, each multiple-scattering layer replaced by a layer of zeros of its shape
+ * (R08.T13.c2's attribution, "#112's floor refusals", item 3), so that every read takes the
+ * single scattering alone: the sky view, the march from orbit, aerial perspective and the sky's
+ * irradiance the lit ground reads, each of which reads Ψ only through those layers.
+ */
+export type TwinMultipleScattering = "drawn" | "zeroed";
+
 /** How a twin reads its tables and averages its cone. */
 export interface TwinOptions {
   /** The tables' sizes and steps: `TABLE_SIZES.high`, the twin's gate tests' setting. */
@@ -158,6 +175,8 @@ export interface TwinOptions {
   readonly transmittanceSteps: TwinTransmittanceSteps;
   /** The marches' steps: cut into pieces at the layer edges by default. */
   readonly marchSteps: TwinMarchSteps;
+  /** The multiple scattering every read takes: as drawn by default. */
+  readonly multipleScattering: TwinMultipleScattering;
 }
 
 /** The options a twin takes where its caller gives none. */
@@ -169,6 +188,7 @@ export const DEFAULT_TWIN_OPTIONS: TwinOptions = {
   slicing: "body",
   transmittanceSteps: "split",
   marchSteps: "pieces",
+  multipleScattering: "drawn",
 };
 
 /**
@@ -512,6 +532,24 @@ function tablesOf(
 }
 
 /**
+ * The tables with every band's multiple-scattering layers replaced by zeros of their shape
+ * ({@link TwinMultipleScattering}'s `zeroed`), every other table the same object.
+ */
+function withoutMultipleScattering(tables: OblatePlanetTwin): OblatePlanetTwin {
+  return {
+    ...tables,
+    bands: tables.bands.map((band): TwinBand => ({
+      ...band,
+      multiScatteringBySlot: band.multiScatteringBySlot.map((layer): TwinTable => ({
+        widthTexels: layer.widthTexels,
+        heightTexels: layer.heightTexels,
+        texels: new Float64Array(layer.texels.length),
+      })),
+    })),
+  };
+}
+
+/**
  * The twin of a medium on a figure (the module's remarks): its tables built once, each sun's sky
  * view as it is first read.
  *
@@ -527,7 +565,17 @@ export function referenceTwin(
   const drawn = kernelMedium(medium);
   const datum = twinDatum(figure);
   const body = bodyOf(figure, datum, settings.slicing);
-  const oblate = tablesOf(drawn, body, settings);
+  const asBuilt = tablesOf(drawn, body, settings);
+  // Every read below takes its multiple scattering from the bands' layers alone.
+  let oblate: OblatePlanetTwin;
+  switch (settings.multipleScattering) {
+    case "drawn":
+      oblate = asBuilt;
+      break;
+    case "zeroed":
+      oblate = withoutMultipleScattering(asBuilt);
+      break;
+  }
   const marched = oblate.medium;
   const [band] = oblate.bands;
   const [first, ...more] = band?.multiScatteringBySlot ?? [];
