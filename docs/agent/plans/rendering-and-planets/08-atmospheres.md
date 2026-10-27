@@ -15209,6 +15209,235 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _ρ's citation_: `rayleigh.ts` cites Sneep and Ubachs 2005, eq. 7, for ρ = 6(F_K − 1) ÷ (3 + 7F_K);
     the paper was not read (the science check), and the formula is Bodhaine et al. 1999's eqs. 1 and
     22 inverted, which it reproduces.
+- **Deviations in T13.c1, as built** (2026-10-27; `view/atmosphere/reference/`: `twin.ts` and
+  `twin.test.ts`, `caseGate.ts`, `caseGate.test.ts` and `caseGate.json` (new); `.prettierignore`.
+  Rulings: `decision-r08-t13-scope.md`, rulings 1, 10 and 12, "#107's twin ground" and "#107's floor
+  misses", 2026-10-27).
+  - _The twin's additions_ (`reference/twin.ts`). The sphere's default path makes the same calls in
+    the same order: `twin.test.ts`'s earlier tests and `sweepCases.test.ts`'s default compare pass
+    unchanged, so the eight sweep cases stay current.
+    - `TwinFigure` is `cases.ts`'s `CaseFigure`. A `spheroid` builds `oblatePlanetTwin` on its level
+      spheroid and gravity and reads it as `tablesCpuOblate.test.ts` drives it:
+      `oblateSkyViewTexelsTwin` and `oblateSkyViewReadTwin` on the ground,
+      `oblateRayMarchTargetTexelTwin` from orbit, `oblateAerialPerspectiveTwin`, and the lit ground by
+      `surfaceLightingTwin` over `oblateIrradianceTwin`'s bands at the point's geodetic latitude,
+      normal and sun azimuth. New: `spheroidGroundDistanceM`, `figureGroundDistanceM`, `twinDatum`;
+      `groundConeShare` takes either figure. A spheroid of a sphere's radii reads the sphere within
+      10⁻⁶ (a test).
+    - `TwinOptions` gains `slicing` (`body`, or `single`: one slice at κ 1 and one band at s 1, read
+      by the `single` fit), `transmittanceSteps` (`split`, or `equal`: R05's 256 equal steps, the
+      transmittance built from the medium with its layer edges dropped) and `marchSteps` (`pieces`,
+      or `placed`: every march, the multiple-scattering and sky-irradiance tables' and the per-frame
+      ones', on the medium with its edges dropped, the multiple scattering placed by R05.T12.e's
+      rule). On a medium with no layer edge both steps' options read the default to the bit (a
+      test); on one with edges they are built on one slice and one band alone, a `RangeError`
+      otherwise, which no case meets. Both drop every tabulated term's edges, not the slab's alone,
+      as R05's tables had none.
+    - `ReferenceTwin` gains `oblate` and `transmittanceAlong`: the composite's transmittance along a
+      direction from the observer (`compositeTransmittanceTwin`, `oblateCompositeTransmittanceTwin`
+      on the spheroid), towards the sun the drawn beam, and along a limb its line of sight.
+    - _No drawn surface for a ground observer_: no ground view of the four cases has a cone that meets
+      the ground (85° and the 0.5° cone stay above the horizon at 1 m; the record's `attribution`
+      lists none), so none is built, and the twin refuses a ground view that would need one
+      (`RangeError`, a test).
+    - `tablesCpu.ts` and the other read-only modules are untouched, and no `export` is added.
+  - _The harness_ (`reference/caseGate.ts`, with no runtime import outside `view/atmosphere/` and
+    none from `test/`, for R08.T14.f). Every value read from a twin (`TwinValueSpec`: a radiance, a
+    surface share, a beam, a line of sight, a per-channel drawn surface, the downwelling irradiance)
+    is kept at seven significant figures, and the record is a pure function of the cases, their
+    references and those values (`caseGateRecord`), so its verdicts are the recorded values'. The
+    record's head names the references' radiance it reads (`RecordHead.radiance`): `scalar` here,
+    `vector` for R08.T14.f. Seven twins: each case's own (`caseTwin`: its medium, figure and
+    curves, its `sunIlluminanceLx` as the irradiance, `TABLE_SIZES.high`), `saturn-oblate`'s of one
+    slice and one band, read at its nine limbs alone, where the check looks, and `earth-ozone-slab`'s
+    of equal steps and of R05.T12.e's placement, read at the slab's runs' geometries alone.
+  - _The record_ (`caseGate.json`, 233,644 B, through `bless.ts`'s `expectCommittedTable` from a `{}`
+    placeholder, in `.prettierignore`): a head (its writer, the twin's settings, `gate.ts`'s
+    constants, every table's columns); each case's headline, tally and images, and a geometry a line
+    (image, kind, cone share, and per channel L_twin, surface share, L_ref, σ_ref, T, verdict and
+    |ΔL| ÷ (T + 4σ_ref)); the runs below; and last the twin's values the geometry lines do not hold,
+    a key a line. Under a bless or `HYPERION_SLOW_TESTS=1` every value is computed. By default the
+    record is computed from its own values and held byte for byte, and 15 values of three twins,
+    `earth-ozone-slab`'s (each draw, a beam, a line of sight, a per-channel surface), `mars`'s (its
+    tabulated dust) and `saturn-oblate`'s, are recomputed and held equal to them, as
+    `sweepCases.test.ts` holds the sweep's. A case's `headline` is `pass` where no comparison
+    misses; refused comparisons are counted beside it and pass nothing. The
+    hard checks are ruling 12's blockers (a twin value non-finite or negative: none), the record's
+    currency and its coverage of every geometry; every verdict is recorded, none asserted.
+  - _The gate_ (scalar against scalar; passes / misses / refusals in comparisons, then each image's
+    worst |ΔL| ÷ (T + 4σ_ref)):
+
+    | Image        | `earth`       | `earth-ozone-slab` | `mars`        |
+    | ------------ | ------------- | ------------------ | ------------- |
+    | `ground-s0`  | 12/0/0, 0.95  | 11/1/0, 1.00       | 3/9/0, 4.02   |
+    | `ground-s30` | 45/15/0, 2.02 | 47/13/0, 1.92      | 11/49/0, 7.48 |
+    | `ground-s60` | 37/23/0, 2.86 | 36/24/0, 2.79      | 21/51/0, 5.22 |
+    | `ground-s80` | 19/44/0, 3.68 | 19/44/0, 3.65      | 18/45/0, 5.51 |
+    | `ground-s85` | —             | —                  | 6/6/0, 2.33   |
+    | `ground-s90` | 40/18/5, 2.29 | 41/17/5, 2.23      | 5/21/37, 5.89 |
+    | `ground-s95` | 0/0/63        | 0/0/63             | 0/6/57, 4.16  |
+    | `disc-p0`    | 2/1/0, 1.48   | 2/1/0, 1.18        | 0/3/0, 1.49   |
+    | `disc-p30`   | 2/1/0, 1.31   | 2/1/0, 1.19        | 0/2/1, 1.47   |
+    | `disc-p60`   | 3/0/0, 0.99   | 3/0/0, 0.95        | 1/2/0, 1.09   |
+    | `disc-p75`   | 3/0/0, 0.61   | 3/0/0, 0.81        | 3/0/0, 0.38   |
+    | `disc-p85`   | 3/0/0, 0.57   | 3/0/0, 0.62        | 0/3/0, 3.49   |
+    | `limb`       | 15/0/0, 0.33  | 15/0/0, 0.33       | 4/11/0, 3.54  |
+    | `aerial`     | 2/7/0, 2.44   | 2/7/0, 2.33        | 3/5/1, 2.30   |
+    | All          | 183/109/68    | 184/108/68         | 75/213/96     |
+    - `saturn-oblate`, 197/255/22: its nine limbs pass (worst 0.79, 0.68 and 0.55 at the equator,
+      45° and the pole); its ground views at the equator, 60° and the pole miss from the sun at 0°
+      (12/12/0, 15/9/0, 8/4/0; worst 3.43, 2.61, 2.36) to 80° (3/24/0, 5/22/0, 4/23/0; 7.45, 5.85,
+      5.37), with the sun at 90° 18/9/0, 20/7/0 and 23/4/0, and in twilight 0/27/0, 0/20/7 and
+      0/12/15 (28.5, 35.3, 38.8).
+    - Twin ÷ reference: Earth's ground views 0.86–1.12 with the sun at 0–30° and 0.74–1.11 at 60–90°
+      (medians 0.87–0.98, blue the lowest), aerial perspective 0.83–0.96, the limbs 0.98–1.02, the
+      discs red 0.94–0.98 and blue 1.04–1.10 (the slab alike); Mars's ground views 0.60–1.50
+      (medians 1.03–1.19), its twilight 0.69–0.82, limbs 0.77–1.26 and discs 0.90–0.93 to phase 60°
+      and 1.16–1.24 at 85°; Saturn's ground views 0.90–1.01 in red and 0.51–1.04 in blue, its
+      twilight 1.2–3.9, its limbs 0.95–1.02.
+    - _Earth's and Mars's verdicts: both miss_ (raised). _`saturn-oblate`'s, with its slicing,
+      misses too_, where R08.T13's text expects it to pass (raised; its classification is
+      R08.T13.c2's). _`mars` off the sun_ (for R08.T13.c2: its
+      101 ground views more than 15° from the sun, `marsOffSun` in the record): 303 comparisons, 40
+      pass, 178 miss, 85 refused. So Mars classified thick by the ground line is the measured state,
+      with no contradiction to raise.
+
+  - _Mars's aureole_ (`marsAureole`): blue over red, the twin's and the reference's, and the gate:
+
+    | Sun up | 3°                  | 5°                  | 8°                  | 12°                 | Crossing 1, twin / reference | Crossing the Sun's 0.861 |
+    | ------ | ------------------- | ------------------- | ------------------- | ------------------- | ---------------------------- | ------------------------ |
+    | 5°     | 1.322 / 1.348, pass | 1.053 / 1.068, pass | 0.842 / 0.835, miss | 0.714 / 0.714, miss | 5.76° / 5.87°                | 7.72° / 7.66°            |
+    | 30°    | 1.251 / 1.214, pass | 0.955 / 0.924, pass | 0.736 / 0.721, pass | 0.635 / 0.627, pass | 4.69° / 4.48°                | 6.28° / 5.93°            |
+
+    The two 5°-sun misses are in every channel (|ΔL| ÷ (T + 4σ_ref) 1.03–1.20 at 8°, 2.17–2.33 at
+    12°), the twin brighter; its ratio follows the reference's within 0.04 and its crossovers within
+    0.4°. Each crossover is taken where blue over red crosses 1, as R08.T13 asks, and where it crosses
+    the case's Sun's own 0.861 (the sky turning bluer than the sunlight, the like for like of an
+    image white-balanced to the Sun; R08.T4.a's record takes the Sun's 0.86). The rovers' 7–12°
+    (recorded only) is R08's science check's reading of where blue equals red in two
+    colour-processed press images, PIA07997 (Pancam false colour at 750, 530 and 430 nm) and
+    PIA19400 (Mastcam, calibrated and white-balanced), whose captions give no angle: not a measured
+    extent. At 1 both pipelines cross at 4.5–5.9°, below it; at the Sun's colour at 5.9–7.7°, the
+    5°-sun's inside it. Mars's aureole misses (raised).
+
+  - _`saturn-oblate`'s oblateness_ (`saturnOblateness`): with its slicing its limbs pass (above).
+    With one slice and one band some comparison reaches |ΔL| ≥ T + 8σ_ref above 1 H: at 3 H on the
+    equator in red and green and at the pole in blue ((|ΔL| − T) ÷ σ_ref 10.5, 11.3 and 10.8), and at
+    1 H on the equator in every channel and at the pole in blue; at 45° none (at most 2.0). The largest |ΔL| ÷ σ_ref above 1 H
+    is 21.9 (`limb-lat0-3H`, green), and 33.2 counting 1 H (`limb-lat0-1H`, red). So the gate sees
+    oblateness beyond the reference's noise, read either way.
+  - _The beams_ (`beams`; every observer and sun once, the drawn beam inside the air alone):
+
+    | Case               | Depth, worst \|Δτ\| ÷ 10⁻⁶ max(1, τ) | Drawn beam, worst ratio to T | Horizon beam (`ground-s90`) |
+    | ------------------ | ------------------------------------ | ---------------------------- | --------------------------- |
+    | `earth`            | 3.8 × 10⁻⁴ (`ground-s60`)            | 0.113 (`ground-s80`, blue)   | pass, 0.0068                |
+    | `earth-ozone-slab` | 0.072 (`ground-s0`)                  | 0.114 (`ground-s80`, blue)   | pass, 0.0056                |
+    | `mars`             | 3.8 × 10⁻⁴ (`ground-s0`)             | 0.162 (`ground-s80`, blue)   | pass, 0.0031                |
+    | `saturn-oblate`    | 0.020 (`lat60-s60`)                  | 0.041 (`equator-s80`, blue)  | (a spheroid) pass           |
+
+    Every depth agrees and every drawn beam passes. The sphere's horizon beam passes inside the 5%
+    as well as under the floor: its transmittance is 0.13–0.27% over e^(−τ_ref) on Earth and the
+    slab (red 5.838 × 10⁻⁵ against 5.829 × 10⁻⁵ at τ 9.75) and 2.0–2.8% over on Mars (τ 10.9–11.1).
+    Under the sun at 95° both hide it.
+
+  - _The slab_ (`slab`; the ramps 18.51–18.59 km and 38.54–38.55 km):
+    - The beam, worst ratio to T: the sun at 80°, split 0.114 and equal 0.113; at 90°, 0.0056 and
+      0.012; all pass. Through each limb (the composite's line of sight against the client's own
+      chord quadrature, converged below 10⁻⁷, the tracer giving none): at 0.1, 0.3, 3 and 10 H all
+      pass with either (split 0.0007, 0.026, 0.065, 0.072; equal 0.0007, 0.025, 0.61, 0.037); at 1 H
+      red misses with either (2.52 and 2.45; the client's 1.453 × 10⁻³ against 1.662 × 10⁻³, Δτ 0.13
+      of 6.4), green and blue passing. A miss with the split: raised.
+    - The sky: with the pieces 75/61/5 (worst 3.65), with R05.T12.e's placement 71/65/5 (3.69):
+      `ground-s80` 19/44/0 with either, `ground-s90` 41/17/5 and 37/21/5, the limb 15/0/0 with
+      either. The misses with the pieces are the measured Earth's own: at `ground-s80` `earth` misses
+      the same 44, and at `ground-s90` 18 against the slab's 17, sets that overlap but differ by
+      three (the slab's `ground-s90-v85-a180` red, `earth`'s `ground-s90-v75-a180` blue and
+      `ground-s90-v85-a135` green). Raised, the pieces not their cause.
+    - _Waiting for T12.b.2_: the limbs stand at 0.21, 0.63, 2.10, 6.31 and 21.0 km, so only
+      `limb-10H` is tangent inside the slab, none at its base or top; those layer-edge checks wait for
+      T12.b.2's higher `limb` images.
+  - _The surface's irradiance_ (`irradiance`): the twin's direct and diffuse irradiance at the
+    ground under the sun at 0° against `earth`'s `flux-s0` downwelling flux: +0.29%, +0.25% and
+    −0.05% (σ_F ÷ F 2.3–5.4 × 10⁻⁴), passing the 2%; inside T9.b's quadrature residual of up to
+    0.95%. Beside it, `aerial-1km`: cone share 0.342, surface share 0.70, 0.61 and 0.48, pass, pass and
+    miss (|ΔL| ÷ (T + 4σ_ref) 0.64, 0.89 and 1.57).
+  - _The legs apart_ (`legsApart`; the single-scattered light and the ground's one bounce along each
+    geometry's axis, by the client's own curve read, with each absorber taken as the twin takes it
+    over the same light taken as the reference does, less 1): at 10 + 10 vertical columns of the
+    300 DU ozone, red +1.10%, green −0.55% and blue 0 (T6.c's science check: about +1.5% red). A
+    product over the joint above 1 is possible only through the channels' signed weights (Rec. 709's
+    r̄ negative over 462–552 nm, where ozone absorbs less than in its lobe near 600 nm, makes red's
+    −ln T grow faster than u); with weights all positive T(u + v) ≥ T(u) T(v). Blue's 0 is the
+    curve's clamp at 1, b̄'s negative lobe covering the Chappuis peak (the science check). Over
+    the geometries, at most red +4.2%, green −1.3% and blue +0.96%, all at `ground-s95`, which the
+    gate refuses. Over those it holds, at most red +0.31% (`earth`'s `ground-s90-v85-a180`; the
+    slab's `limb-1H` +0.23%), green −0.21% and blue +0.04%: under the metric's 5% everywhere.
+  - _The twin's changes since the traces_: no miss traces to one. The thin-sky count of 28 (R08.T8.e)
+    moves the reads from orbit by at most 2.4 × 10⁻⁶ and no verdict (the same twin with 36 steps
+    everywhere, by hand); the far limb (R08.T8.c) blends in only at Earth's and the slab's 0.1 and
+    0.3 H limbs (w_L 0.95 and 0.63), which pass, and at none of Mars's, which miss; the pressure-row
+    bisection moves no pixel and no case's curve has pressure rows; R08.T8.d's march moves no twin
+    value (its record).
+  - _The attribution_ (`attribution`): with the drawn surface's transmittance taken per channel in
+    place of the march's mean, `earth`'s and the slab's `disc-p0` and `disc-p30` blue misses pass:
+    sorted under T8.b's deferred finding. The grey mean is all of red's −6% there (+0.3% after) and
+    half of blue's +10% (+5.2% after, a pass); the rest is the sky's own term. Their aerial perspective's misses are not the grey mean
+    (the volume's mean transmittance, `aerialRead.wgsl`'s alpha): at 1 km blue and at 32 km every
+    channel still miss, at 10 km red alone passes. Every miss of `mars` from orbit (its discs at
+    0–60° and 85°, its limbs at 0.1–1 H) and along its paths still misses: Hillaire's drift, not the
+    grey. `saturn-oblate`'s limbs' cones meet the ground (shares 0.05–0.49) and pass.
+  - _Read as built_: the slab's "beam at the limb geometries" is the line of sight through each
+    limb, a limb's observer standing above the air, where its sun's beam never enters it (the
+    reference's `sunOpticalDepth` there is 0); "above 1 H" is recorded both ways, at 3 H and from
+    1 H; the attribution sorts every geometry from orbit or along a path whose cone meets the
+    ground, in all four cases (`grey`, `partly grey` or `not grey`), not only the coloured cases'
+    discs.
+  - _Earlier records' checks left to R08.T13, as c1 measures them_: T6.e's slices' tables on a giant
+    and T6.f's ray left over the bound are held in radiance by Saturn's drawn beam, which passes
+    (worst 0.041 of T), as is T6.f's composite's sliced read, which that beam is. T6.e's Ψ curvature
+    at a 10 H tangent is not measured, Saturn's limbs stopping at 3 H, nor are T6.e's and T6.f's
+    lookups that start on R_α, Saturn's ground views missing by the analytic term in blue. T7's view
+    leg of the lobes' effect, an estimated 1.5–1.9 times dark at wide angles under a 30° Sun on dusty
+    Mars, is not seen: there Mars's ground views more than 15° from the sun read 0.64–1.51 of the
+    tracer (median 1.07); under a 5° Sun (2.6–4.1) the case has the aureole's points alone.
+    T7's slab's flux with both halves of the lobe is the aureole's points against the tracer
+    (above).
+  - _Times_ (an i7-8665U, 8 threads, under `nice -n 10` and a 4 GB memory scope, the sweep not
+    running): the whole compare 95.6, 98.7 and 101.0 s and the blesses 100.5, 111.4 and 97.0 s, at
+    a 1-minute load of 0.2–3; the default run 54.2 s at a load of 1.3–1.6 (44.8 s before `mars`
+    joined the sample), under the 60 s budget.
+- **Deferred findings (2026-10-13 rule)** (R08.T13.c1). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The line of sight through a low limb from orbit_: the composite's transmittance through
+    `earth-ozone-slab`'s limbs reads 38%, 30% and 13% low in red at 0.1, 0.3 and 1 H (45% and 56% in
+    green and blue at 0.1 H), with the split and with equal steps alike, τ 1.2–2.9% high, and with
+    the split at most 0.14% at 3 and 10 H (equal steps 1.06% at 3 H in red). Below 1 H, and in green and blue at 1 H, they pass only because the
+    beam is far under the image's floor F·L_max. The table's linear
+    read between its μ texels near the horizon from the top is the cause (measured by hand on the
+    slab's tables): at the two texels about the 1 H ray, tangent at 2.36 and 1.57 km, the table holds
+    the converged chord to 5 × 10⁻⁴ in τ, and between them, at 2.10 km, its read is 2.1%, 1.8% and
+    1.2% high (red τ 6.53 against 6.40), the chord's τ steepening over the aerosol's 1.2 km. It
+    reaches the sun and stars seen through the limb from orbit, not the drawn beam at an observer
+    inside the air, which passes everywhere.
+  - _Hillaire's drift on the cases_: Earth's ground views at low sun and its aerial perspective, Mars
+    almost everywhere, and Saturn's blue ground views and twilight (1.2–3.9 times bright) miss.
+    These are the term R08.T13.b's sweep measures, and R08.T13.c2's boundary routes on them. Saturn's
+    twilight, red as bright as blue at its smallest τ, may be the multiple-scattering table's μ_s
+    resolution as much as the isotropic term (32 texels, Δμ_s about 0.065, read between texels where
+    Ψ falls steeply under the horizon; the science check's estimate, not measured): R08.T13.b and
+    c2 separate the two.
+  - _Saturn's single slice at 45°_: no comparison there reaches T + 8σ_ref, so the check that the
+    gate sees oblateness holds at the equator and the pole alone.
+  - _The aureole's crossover_ at blue over red 1 stands at 4.5–5.9° in both pipelines, below the
+    rovers' 7–12°, and at the Sun's own 0.861 at 5.9–7.7°. The rovers' figure being a reading of
+    colour-processed images, c1 does not settle whether the case's dust's lobe is too narrow (R08.T4.a's
+    finding, for the owner): the twin follows the reference within 0.4° either way.
+  - _`earth.ts`'s `DOBSON_UNIT_PER_M2`_ is 2.687 × 10²⁰ m⁻², 8 × 10⁻⁵ over 10 µm of the Loschmidt
+    number density at 273.15 K and 101.325 kPa, 2.6868 × 10²⁰ (the science check). c1 only reports
+    the cases' columns in it (300 DU); changing it moves every Earth column, outside the lane.
+  - _The default compare's sample_ recomputes three of the seven twins, `earth-ozone-slab`'s,
+    `mars`'s and `saturn-oblate`'s: a change that moves only another (`earth`'s, one slice, the equal
+    or placed steps) shows in the whole compare alone.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:
