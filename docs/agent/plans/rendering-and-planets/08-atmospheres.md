@@ -5003,8 +5003,38 @@ one recorded path: the edged ground's split at crossings (R08.T8.e, item 8), onc
 the first source's shadow cures its erratic ray. QW3 puts the slab's centre-ray excess over the
 measured Earth's at 1.75, 1.47 and 1.03 ms at x2 from 400 km to 1.54 × 10⁷ m, so that path would
 bring those rows to about the measured Earth's (estimates). Where the low setting misses,
-`TABLE_SIZES` changes here. Acceptance: the
-record is here, and `pnpm test` passes.
+`TABLE_SIZES` changes here.
+
+_Since `decision-r08-t11-frame.md` (2026-10-26)._ QW28 measured the frame over 16.67 ms at high
+on every x2 row from 400 km to 1.54 × 10⁷ m and every x4 row from 400 km to 2.55 × 10⁷ m (at
+2.55 × 10⁷ m, x2 measures 12.4–15.0 ms p95, under the line; p95 up to 30.6 ms at 10⁷ m, x4).
+Two items make up most of it: the face's lost lever 3 (2.3–3.5 ms), and the limb draw's
+per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at every high row;
+16.67 ms stays the blocker.
+
+- **R08.T11.a The frame's timings.** The harness (`smoke/frameTiming.ts`,
+  `smoke/frameTimingScene.ts`), the giants' rows (`giantRows.test.ts`), QW28 and the levers'
+  untimed variants, recorded in Risks. Acceptance: `pnpm test`. _Built 2026-10-27_ (Risks,
+  "Deviations in T11, as built"; "Deferred findings (2026-10-13 rule)" (R08.T11)).
+- **R08.T11.b The face's lever 3.** A march ray ending on a drawn surface within a band of the
+  reference spheroid's hit takes the bare ground's count (lever 3), and nothing else changes. One
+  `marchRay` call site. Acceptance: R05.T12.e's gate with its drawn-surface family, `pnpm test`,
+  `just test-render`.
+- **R08.T11.c The frame re-measured (QW29),** after T11.b, T11.e and R07.T8.e–f, in QW28's form,
+  with a class-map row and three small air bodies. Acceptance: the record; every high row's p95
+  at most 16.67 ms, and at most 15.67 ms or T11.d's and R07.T8.g's turn.
+- **R08.T11.d The march over the air's rectangle, and the tile cull,** both exact, only if QW29
+  leaves a high row over 15.67 ms. Acceptance: byte-identical read-backs on SwiftShader, within
+  T8.d's ulp on the RTX 3080, and QW30.
+- **R08.T11.e The unread tables at one texel.** The absorber-column and pressure-column tables a
+  medium does not read, at one texel. Design note 11's widenings are applied only above 2 MB. At
+  the f 0.2 cap still over after both, fewer bands. Acceptance: the rows re-pinned, a
+  byte-identical giant read-back, `pnpm test`.
+- **R08.T11.f Planetshine's nodes by the horizon,** only if an x4 row alone stays over 16.67 ms
+  after QW30. Acceptance: within today's three-node error plus 0.1% on the twin's night-side set,
+  and QW31.
+
+Acceptance: the record is here, and `pnpm test` passes.
 
 ### R08.T12 The reference path tracer
 
@@ -10337,7 +10367,9 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
   - _The face's lost lever 3 and the serial cells_ (`decision-r08-t10b-depth.md` §5, §7): for
     R08.T11's measured frame, and to R12.T10 only if its rows miss (lever 3's count for a drawn
     surface on the reference spheroid, through R05.T12.e's gate, and one `disc cells` dispatch
-    per set of tables, against T9.b's note that gave it to T10.b).
+    per set of tables, against T9.b's note that gave it to T10.b). _Taken_
+    (`decision-r08-t11-frame.md`): lever 3's count on the face by R08.T11.b, the serial cells by
+    R07.T8.e.
   - _The band on each drawn body_ (T8.a's lean: `marchBand.test.ts`'s read, march and blend frames
     on each body T10.b draws) and _each drawn body's low e_q_ beside `LOW_TWIN_WORST` (T8.b): not
     run; figure-matching, for R08.T11's frame or R08.T17.
@@ -10360,6 +10392,323 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
   - _Generated worlds on screen._ T10.a's _trace broadeners' widths_ now show:
     `ATMOSPHERE: APPROXIMATE` stands on every Earth-, Mars- and Saturn-class generated world that
     draws. For main's revisit, as T10.a's record asked.
+- **Deviations in T11, as built** (2026-10-27; the RTX 3080's rows; the UHD 620's are the owner's,
+  pending). New: `smoke/frameTiming.ts`, `smoke/frameTimingScene.ts` and its test,
+  `smoke/frameTimingLedger.ts` (the timing's bookkeeping, GPU-free, since the review) and its test,
+  and `view/atmosphere/giantRows.test.ts`. Edited: `smoke/atmosphere.ts` (exports only), `smoke/page.ts`,
+  and the smoke main's `result.ts` (with its test) and `main.ts`. The record is in
+  `docs/measurements/atmosphere-frame/2026-10-27-effect-frame-timings.md`, with the raw check lines,
+  every timed frame's sum included, in the `.txt` beside it. No kernel, table, golden, wire or version
+  moves.
+  - _The harness, committed._ It is a GPU-timing-only group of the smoke page's part 1,
+    `R08.T11 the photorealistic frame's timings`.
+    - When it runs: after R08.T8.c's far-limb timings, under `--smoke-gpu-timing=1`. A plain
+      `just test-render` never runs it, since SwiftShader has no `timestamp-query`.
+    - Why committed, not scratch: the owner's UHD 620 pass runs it too (`settingOutput("low")`
+      draws 1280 × 720).
+    - Its watchdog: `smokeWatchdogMs` gains `GPU_TIMING_WATCHDOG_MS`, 480 s, for a timing run that
+      takes part 1 (3 × the 148 s measured).
+    - Its parts:
+      - (A) the frame through `PhotorealRenderer`;
+      - (B) the atmosphere alone over nothing drawn, on the same tables and `SunState`s;
+      - (C) small air bodies;
+      - (D) each medium's per-planet tables, cold and warm, with the main thread's split;
+      - (E) the first air frame's allocations;
+      - (F) its main-thread time and `prepare`'s;
+      - (G) the frame without its air.
+    - The form: QW2's (`decision-r08-t8-leans.md` §10). Each combination gets 10 warm-up and 30
+      timed frames, over two sweeps, the second reversed. Each frame is drawn as soon as frame
+      n − 3 has resolved, so the GPU never idles on the page and the timer drops nothing. The
+      measure is the frame's GPU pass sum.
+    - The scene (the record's header has it whole): high 1920 × 1080, the average meter, EV100 15.
+      R05's, the measured and the slab Earth on WGS 84, drawn as R07's mesh. R08.T8.c's five
+      far-limb cameras, and T8.c's timed Sun.
+    - The sets, each built as scene geometry and checked through `skySourcesWithSkips`:
+      - `x1`: the Sun;
+      - `x2`: a binary's two light slots, a second Sun-like star at √10 au, 40° off;
+      - `x2p`: a star and a giant's planetshine on one slot. The giant is Jupiter-like, 6 R_J off,
+        out of view, at 60° of phase, its planetshine 8 × 10⁻³ to 1.4 × 10⁻² of the Sun;
+      - `x4`: the setting's count on high, two stars and two giants (`x3` on low).
+    - Not drawn: terrain, the sky, the star sprites and the symbology. The terrain's cost from orbit
+      stands as R08.T8.e's estimate, 1.5, 1.3 and 1.0 ms from 400 km to 1.54 × 10⁷ m, in the
+      mesh's place. The mesh's own `bodies` pass is 1.9–3.5 ms.
+  - _QW28._ RTX 3080, hidden, 2026-10-27 03:05 UTC; the 1-minute load 1.33 at the start and 1.12
+    at the end; under the heavy-test and GPU locks, CPUQuota 1200%. Clocks: P0 in 1,465 of 1,543
+    samples; busy, a median of 1,965 of 2,115 MHz, 5 samples under 90%; at most 66 °C. Every check
+    of the group passed. No timed frame was dropped, and every combination drew exactly its set's
+    sources. The part's one failure is R07.T16.f's spatial strokes on hardware, which failed alike
+    in R08.T8.c's RTX runs. Two untimed runs before the harness's commit (2026-10-27 02:24 and
+    02:41 UTC, loads 7.2 and 12.4, P0) put each combination's median within ±9% of QW28's.
+  - _The frame against the budget_ (`decision-r08-t8-leans.md` §16, text E). The frame's GPU pass
+    sum on high at 1920 × 1080, p95 (median), ms; the 60 Hz frame is 16.67 ms and R05's 0.8 T row
+    13.33 ms:
+
+    | Camera       | measured x1   | measured x2   | measured x2p  | measured x4   | slab x2       | slab x2p      | slab x4       | R05's x2      | R05's x4      |
+    | ------------ | ------------- | ------------- | ------------- | ------------- | ------------- | ------------- | ------------- | ------------- | ------------- |
+    | 400 km       | 14.32 (14.04) | 21.51 (20.68) | 18.02 (17.67) | 24.95 (23.52) | 21.19 (20.48) | 18.16 (17.76) | 24.42 (23.48) | 17.88 (16.98) | 20.48 (19.47) |
+    | 10⁷ m        | 15.80 (15.38) | 24.22 (22.82) | 21.16 (20.50) | 29.81 (28.29) | 23.55 (22.72) | 21.06 (20.45) | 30.58 (28.32) | 22.06 (19.12) | 25.95 (23.48) |
+    | 1.54 × 10⁷ m | 14.92 (14.20) | 21.58 (20.61) | 22.41 (20.18) | 30.31 (28.31) | 21.24 (20.63) | 22.97 (20.29) | 30.32 (28.23) | 18.34 (17.24) | 24.68 (22.65) |
+    | 2.55 × 10⁷ m | 10.34 (10.14) | 14.99 (14.51) | 14.79 (14.64) | 20.39 (19.75) | 14.98 (14.54) | 14.94 (14.68) | 20.11 (19.63) | 12.40 (12.18) | 16.17 (15.85) |
+    | 10⁸ m        | 4.30 (4.18)   | 6.08 (5.87)   | 6.38 (5.91)   | 8.46 (7.58)   | 6.06 (5.91)   | 6.19 (5.96)   | 8.44 (7.59)   | 5.18 (5.05)   | 6.83 (6.17)   |
+
+    R05's Earth at x1 and x2p, p95 from 400 km to 10⁸ m: 12.82, 14.71, 12.68, 8.97 and 3.84 ms;
+    16.31, 19.30, 20.42, 15.09 and 5.49 ms. Every row, the slab's x1 and low's included, is in the
+    measurement's tables.
+
+    - _The verdict._ The p95 is over 16.67 ms at x2, x2p and x4 from 400 km to 1.54 × 10⁷ m on
+      the measured and slab Earths, and on R05's Earth but for x2p at 400 km (16.31 ms); and at
+      x4 at 2.55 × 10⁷ m on the absorbing media (20.1–20.4 ms). Main took it as a blocker on
+      2026-10-27, and `decision-r08-t11-frame.md` rules the fix plan (R08.T11.b–f, R07.T8.e–g).
+    - It is over 13.33 ms as well at x1 on the absorbing media from 400 km to 1.54 × 10⁷ m
+      (14.3–16.1 ms) and on R05's Earth at 10⁷ m (14.71 ms); and at 2.55 × 10⁷ m at x2 and x2p on
+      the absorbing media (14.79–14.99 ms), R05's x2p (15.09 ms) and R05's x4 (16.17 ms).
+    - It meets both at 10⁸ m, and 13.33 ms at 2.55 × 10⁷ m at x1 and R05's x2, and at R05's x1
+      from 400 km and 1.54 × 10⁷ m (12.82 and 12.68 ms).
+    - The slab's medians are the measured Earth's to within 0.2 ms, its p95s to within 1.0 ms.
+      The face's drawn surface takes 36 steps on both, so the edged ground's split (T8.e's item 8) no longer applies to them.
+    - _The tails_ (`decision-r08-t8-leans.md` §16, Ruling 4; frames over 1.2 times their
+      combination's median, from the per-frame sums): the frame on high 26 of 3,600 (0.72%), on
+      low 17 of 3,600 (0.47%); the atmosphere alone (B) 47 of 1,800 (2.61%, QW3's 2.0%); the
+      frame without its air (G) 3 of 900; the small bodies none of 360.
+
+  - _The split_ (QW28, the measured Earth, medians, ms):
+    - _The atmosphere_: 13.10, 13.84 and 11.95 at x2 from 400 km to 1.54 × 10⁷ m.
+      - The same tables and sources over nothing drawn (B) give 9.60, 10.91 and 9.84. That is
+        QW3's 9.56, 10.86 and 9.71 to 0.1 ms.
+      - So the face's lost lever 3 (`decision-r08-t10b-depth.md` §5) costs 3.50, 2.93 and 2.11 ms.
+        On the slab it costs 1.60, 1.33 and 0.89 ms (its floor was 28), and on R05's Earth 2.86,
+        2.43 and 1.79 ms.
+      - x4 marches what x2 does under the cap of two (13.15, 13.94, 12.04).
+    - _The air body's drawing._ The rest of the frame is 7.55, 8.96 and 8.63 ms at x2, and 10.27,
+      14.33 and 16.29 ms at x4.
+      - Of it, `bodies` is 2.74, 2.60 and 2.23 ms at x2 (the mesh face lit through the air). The
+        rest is `discs`: 4.51, 6.04 and 6.09 ms at x2, and 6.59, 10.46 and 12.89 ms at x4 (the air
+        body's limb draw).
+      - The same scene without its air (G) draws the Earth as a disc: 5.07, 6.38 and 6.02 ms in
+        all at x2, and 6.33, 8.13 and 7.94 ms at x4, almost all of it `discs`.
+      - So R07's large disc alone costs 4–8 ms at these cameras. The air raises it by 2.5–8.4 ms.
+    - _Every other pass_ (sky, histogram, bloom, tone map) takes under 0.4 ms. The main thread
+      spends 0.5–1.1 ms a frame in `render` (medians; 1.4 ms at most at p95), so the frames are
+      GPU-bound.
+  - _The levers, estimated_ (scratch variants, never committed: `.git/rm45-scratch/r08-t11/diag.patch`
+    with `diagScratch.ts`; untimed, 2026-10-27 02:58 UTC, load 7.9, P0 at 1,965–1,980 MHz; production
+    measured first and last, agreeing to 1%).
+    - The measured Earth's frame sum, medians, ms, at 400 km, 10⁷ m and 1.54 × 10⁷ m, x2 then x4:
+
+      | Variant                                        | x2 rows            | x4 rows            |
+      | ---------------------------------------------- | ------------------ | ------------------ |
+      | Production                                     | 20.6 / 22.9 / 20.7 | 23.6 / 28.4 / 28.5 |
+      | V1: no limb draw                               | 16.0 / 16.6 / 14.3 | 16.8 / 17.6 / 15.3 |
+      | V1a: the limb's quad kept, its shading skipped | 16.2 / 16.8 / 14.4 | 16.9 / 17.7 / 15.4 |
+      | V2: the face and limb lit without the air      | 18.1 / 19.6 / 17.4 | 19.4 / 21.4 / 19.4 |
+      | V3: `marchSourceCap` 1 on high                 | 16.4 / 18.4 / 16.9 | 19.4 / 23.8 / 24.8 |
+      | V4: lever 3's count on the face                | 17.1 / 19.9 / 18.4 | 20.2 / 25.5 / 26.0 |
+      | V5: V1a + V2 + V3 + V4                         | 9.5 / 10.3 / 9.2   | 9.9 / 11.0 / 9.7   |
+      | V6: V2 + V4 (every source kept)                | 14.7 / 16.9 / 15.3 | 16.0 / 18.5 / 17.3 |
+
+    - The limb draw's cost is its limb pixels' shading. Its quad and corner tests take 0.02–0.06
+      ms (V1 against V1a).
+      - A limb pixel of a disc over 32 px is 16 cells. A cell within half a pixel of the limb is
+        shaded at up to 9 points, each point lit per star and per planetshine source through the
+        air: a sky-irradiance lookup and a sliced transmittance lookup with its curves of growth,
+        and a planetshine source's three such lookups.
+      - The air's lighting is about half the limb's cost (V2), 2.2–8.4 ms.
+    - V4's lever 3 on the face takes 3.5, 3.0 and 2.3 ms off the atmosphere.
+    - V3 takes 3.8–4.5 ms off and drops the second source from the march. R08.T8.e's §16 named it
+      low's first knob, not high's.
+    - _The limb's reading_ (`decision-r08-t11-frame.md` §1): the limb draw is a per-fragment
+      chain, not a fill, and QW29 tests it. Its four pieces of evidence:
+      - a limb pixel above 32 px takes 4 × 4 cells, each within two cell widths of the limb shaded
+        at up to nine points: on a straight limb about 62 shades a pixel against one inside,
+        each over every source with T9.b's reads;
+      - V1a leaves 19–60 µs, so the quad costs nothing;
+      - small air bodies, which sum their cells in their draws, take 0.49–0.51 ms of `discs` at
+        4, 10 and 32 px whatever their pixel count, against 0.008 ms at 4 px bare through the
+        `disc cells` pass;
+      - R07's T17 record found the in-fragment chain to be arithmetic latency, constant with
+        pixel count, and `decision-r07-small-disc-cost.md` §6 names a large limb's cells through
+        the pass as the next step.
+
+      So each of the ring's few thousand pixels runs one long chain while the GPU idles beside
+      them: at 10⁷ m about 0.14 M shades (about 2,300 limb pixels × 62), a seventh of the face's
+      ~1 M, which costs 3.5 ms (an estimate). The bare control agrees: R07's airless disc alone
+      costs 3.66–7.81 ms at these cameras, most of it its limb.
+
+    - _Refused on high_ (`decision-r08-t11-frame.md` §1, §3):
+      - lever (2), V2's face and limb lit bare, which removes the air's light on the surface,
+        the reddened sun and the sky's light (T9.b), a visibly wrong picture; most of its saving
+        is the limb's, which R07.T8.f takes exactly;
+      - lever (3), V3's march cap 1, which drops the second star from the air, where on a
+        binary's night side and night limb the companion lights the air alone (2.2–15.5% in
+        red); it stays low's first knob.
+    - _What ships_ (`decision-r08-t11-frame.md` §2): V4's rule as R08.T11.b, and the limb's cells
+      in parallel as R07.T8.e–f, both keeping every source and pixel, then QW29 (R08.T11.c)
+      against a target of 15.67 ms p95.
+    - _Text A, corrected_ (main, 2026-10-27): the ruling's "on every x2 and x4 row from 400 km to
+      2.55 × 10⁷ m" reads in R08.T11's entry as the measurements stand, every x2 row to
+      1.54 × 10⁷ m and every x4 row to 2.55 × 10⁷ m.
+  - _Small air bodies_ (C, the measured Earth whole at x1). An Earth 4, 10 or 32 px across costs
+    3.1–3.4 ms a frame with its air, against 0.37–0.62 ms without it.
+    - Its atmosphere costs 2.2–2.3 ms, the march over the whole target for a body that covers a
+      handful of pixels (R12.T10's tile cull).
+    - Its limb draw costs 0.5 ms, its cells shaded serially, against 0.01–0.30 ms bare (the
+      `disc cells` pass, which a record with air skips; at 32 px the bare disc's interior).
+  - _The per-frame atmosphere against the brainstorm's 0.5–1 ms discrete_ (an estimate; R05
+    Design note 21 judges the frame). The atmosphere's share is:
+    - R05's Earth: 6.8–7.9 ms at one source, 9.9–11.5 ms at x2 and x4, from 400 km to
+      1.54 × 10⁷ m (medians);
+    - the absorbing media: 8.2–9.5 ms and 11.9–13.9 ms;
+    - every medium at 10⁸ m: 2.3–3.7 ms.
+
+    `MAX_SKY_SOURCES` (6) is not reached through the renderer on high, whose count is 2 + 2.
+    QW3's atmosphere-alone x6 rows (R08.T8.e) stand for it.
+
+  - _Low_ (QW28, 1280 × 720, the march at half resolution), the frame's p95 in ms:
+    - R05's Earth 1.6–8.6;
+    - the measured Earth 1.8–10.5;
+    - the slab Earth 1.9–10.5.
+
+    The atmosphere is only 0.72–1.75 ms of it (medians); the discs, up to 6.7 ms, dominate low as
+    well.
+    - At §9 Ruling 4's 25–68 times (an estimate), the UHD 620 would take 40–700 ms against its
+      33.3 ms frame and 18 ms row.
+    - Low's knobs (§9 Ruling 4, §10 Ruling 5: `marchSourceCap` 1, the footprint's nodes, low's
+      steps) wait for the owner's run, as ruled. The limb's cost is not among them.
+
+  - _The per-planet tables_ (D: each built cold, the first in the group, and warm; its passes' GPU
+    time after a fence; the irradiance, made at its first read, apart):
+    - R05's Earth: 0.38 ms, plus 0.30 ms of irradiance;
+    - the measured Earth: 0.59 ms (one slot) and 0.89 ms (two), plus 0.51 and 1.01 ms;
+    - the slab Earth: 1.22 ms, plus 1.04 ms;
+    - the Titan-class methane: 0.56 ms;
+    - the ice giant: 1.52 ms, plus 1.38 ms;
+    - the Saturn-class figure: 1.63 ms, plus 1.30 ms;
+    - `ATMOSPHERE TEST`'s Mars: 1.27–1.38 ms, plus 1.60 ms;
+    - its saturn-oblate: 11.1–11.8 ms, plus 9.4–9.9 ms.
+
+    That is against the brainstorm's under 0.1 ms on discrete. The constructor takes 2–9 ms on the
+    main thread, but 950 ms for Mars cold: its tabulated dust's forward lobe, 840–860 ms
+    uncached, which the warm build finds in the lobe cache (7 ms). A second light slot adds one
+    pass, 0.30 ms, and 0.50 ms of irradiance (the measured Earth), against R08.T7's estimate of
+    8 KB and under 0.1 ms a slot's multiple-scattering layer.
+
+  - _The bytes._
+    - Per planet (`rowBytes`, held to the engine's allocations): R05's Earth 419,212 B; the
+      measured and slab Earths 570,264 B with one star and 729,768 B with two; the Titan-class
+      methane 566,168 B; Mars 828,776 B; the ice giant 852,896 B; the Saturn-class figure
+      2,065,836 B, over the 2 MB row.
+    - The giants' rows (`giantRows.test.ts`, the thin air; the methane air adds 15–16 KB), each as
+      built, then as Design note 11's widening would give them, `KAPPA_STEP` 0.3 and then
+      `BAND_STEP` 0.15 as well. That widening is not built: nothing in the client widens either
+      step, so every giant is drawn at the first figure.
+      - Jupiter: 4 slices and 3 bands, 1,648,036 B, then 1,254,812 and 1,254,812 B;
+      - Saturn: 5 and 4, 2,065,836 B, then 1,279,388 and 1,254,812 B;
+      - Uranus: 2 and 2, 837,012 B, unchanged by either;
+      - the cap (f = 0.2): 10 and 7, 4,105,684 B, then 2,532,788 and 2,483,636 B, so it stays over
+        2 MB after both widenings.
+    - Design note 11 estimated 0.57, 0.72, 0.29 and 1.3–1.4 MB. The excess is every slice's
+      depth, absorber-column and pressure-column tables at full size, 393,224 B a slice, whatever
+      the air reads (R08.T6.f's and R08.T8.e's deferred finding). The Saturn-class row and the
+      capped giant's went to main on 2026-10-27, under Design note 11's rule (below).
+    - Per view (E), at the first air frame:
+      - high: the sky view 165,888 B and the aerial volume 262,144 B (Design note 11's 0.43 MB),
+        plus the ray-march target 16,588,800 B and one air target 16,588,800 B, 33.6 MB in all;
+      - low: 65,536, 131,072, 1,843,200 and 7,372,800 B, 9.4 MB in all.
+
+      Nothing more at two and four sources. Only R07's phase table grows with the giants' laws.
+      These are one air body's. The air targets are made as needed, two at most, so a second
+      air body adds the second air target and its own per-view tables and ray-march target
+      (R08.T10.b's record has two air targets at the first air; one air body makes one).
+  - _The first air frame and the stall_ (F).
+    - The first frame that draws a new body's air takes 1.0–1.5 ms on the main thread, against a
+      steady 0.7–0.9 ms. `HillaireAtmosphere.over` and its first `drawFrame` take under 1 ms.
+    - A view's `prepare` takes 509 and 543 ms on high and 69 ms on low in QW28 (425–713 ms on
+      high in the untimed runs), with every kernel already compiled; `createAtmosphereFrameKernels`
+      alone takes 43 ms warm. The cold compile, the cost of the first `VIEW`, is not isolated
+      here: R08.T10.b's compile item stands.
+    - So R08.T10.b's stall of about 1 s near `TEST EARTH O3 SLAB` is very likely `TEST MARS`'s
+      tables wanted at about that time, their lobe on the main thread. The slab fixture has no
+      tabulated term. Not proven by a flight. Its fix is a follow-up task (main, 2026-10-27).
+  - _Not timed here_:
+    - R08.T6.i's layer-edge setup and R08.T6.f's cost per transmittance read, each against the
+      kernels before those tasks, and the Saturn-class figure's per-frame passes. The kernels
+      before T6.i and T6.f predate T8.a–T8.e, so a fair pair now needs today's kernels with the
+      edged or oblate branch compiled out. The slab's and the measured Earth's rows here and in
+      QW1–QW3 set an edged medium beside one without edges. R08.T8.d's W1 (one slice against
+      WGS 84, about 1%) and W2 and W5 (the slab Earth costs what `EARTH_REFERENCE` does) answer
+      part of both on the RTX 3080 (the task text). The move to R12.T10 is pending main's ruling.
+    - R08.T8.c's first rows are retaken in the run: the far limb's own timings on both settings
+      (R05's Earth, x1; high 5.25 ms and low 0.93 ms at 400 km, medians), in the measurement.
+      R08.T8.d's atmosphere-alone rows at the setting's count, at `MAX_SKY_SOURCES` and on low
+      are not retaken; QW3's stand.
+    - R08.T8.a's band frame (a frame in each setting's band, beside the 400 km frame): no camera
+      of the group stands in the band. For a rerun of this group or R12.T10.
+    - R08.T7's low sky at 2 + 1 in a multiple system's twilight with a moon up: low's x3 here is
+      2 + 1 from orbit by day (6.4–10.5 ms p95 on the absorbing media); the twilight case is not
+      timed.
+    - Line arrival, a budget line of its own at 5 s a world on the UHD 620 host (R08.T4's
+      record): the owner's, with the UHD 620's runs.
+    - The cache's size (R08.T10.a's 32 MB of rows, about 56 measured Earths): unchanged here.
+    - R05's descent spike with today's atmosphere. Its shown run is the owner's; its hidden GPU
+      rows are one command for main's overnight window (`.git/rm45-scratch/r08-t11/spike-hidden.sh`;
+      main, 2026-10-27).
+    - The UHD 620's runs (the owner's), after R07.T8.f, under R08.T17 and R12.T8
+      (`decision-r08-t11-frame.md` §5): the same part on the laptop, built from this tree, with
+      whatever timer the adapter gives (the command in the measurement's header, less the NVIDIA
+      and X11 switches). As committed the group times both settings, and (B), (C) and (G) on high,
+      under the 480 s allowance sized from the RTX 3080: at §9's 25–68 times the laptop would take
+      40 minutes to 2 hours, so that pass first needs a low-only selection and an allowance of its
+      own (for R08.T17 or R12.T8).
+- **Deferred findings (2026-10-13 rule)** (R08.T11). Recorded and deferred: each leaves the
+  algorithm and every contract as it is. The frame's blocker is `decision-r08-t11-frame.md`'s,
+  not one of these.
+  - _The per-planet table time_: 0.38–1.6 ms on Earth- to Saturn-class media, 11–12 ms on the
+    kept saturn-oblate (with 9–10 ms of irradiance at its first read), against the brainstorm's
+    under 0.1 ms on discrete. A hitch at arrival, not a frame cost. _Ruled_
+    (`decision-r08-t11-frame.md` §5): R08.T16's and R08.T17's records, and R12.T10, whose
+    candidate is a several-band build spread over frames.
+  - _The 2 MB row on giants_ (Design note 11; to main 2026-10-27).
+    A thin Saturn-class world is drawn at 2,065,836 B, over the row, and a giant at plan 14's cap
+    at 4,105,684 B, still 2,483,636 B after both of Design note 11's widenings, which are not
+    built. _Ruled_ (`decision-r08-t11-frame.md` §5): not a blocker; R08.T11.e binds the column
+    tables a medium does not read at one texel (no pixel moves), then Design note 11's widenings
+    only for a row still over 2 MB, and at the f 0.2 cap still over after both, fewer bands, the
+    least count under 2 MB within Design note 10's metric, or the row left over.
+  - _The per-view bytes_: Design note 11's 0.43 MB line leaves out the full-resolution ray-march
+    target and the air target, 33.2 MB a photorealistic view on high and 9.2 MB on low; small beside
+    R05 Design note 21's 2 GB finding line. For R12.T10's memory rows.
+  - _The forward lobe on the main thread_: a tabulated aerosol's lobe is made on the render thread
+    in `setMedium`, 0.84–0.86 s (`ATMOSPHERE TEST`'s Mars). Generated airs carry no aerosols
+    before 24, so only the kept scene shows it today. A follow-up task moves it into the optics
+    worker (main, 2026-10-27).
+  - _`ATMOSPHERE: APPROXIMATE` on generated worlds_ (T10.a's _trace broadeners' widths_; for main).
+    - Read from the code: VIEW was not flown over a server's worlds, and the kept fixtures do not
+      carry it.
+    - The plate shows one scene-level `ATMOSPHERE: APPROXIMATE`, naming no body and giving no
+      reason. The cache keeps the reason, `H2O: its absorption estimated, not measured`, but the
+      plate does not show it.
+    - It stands on every Earth-, Mars- and Saturn-class world beside
+      `AEROSOLS AND ABSORBERS: NOT YET MODELLED`, because a trace broadener has no width on file:
+      CO2 on H2O's lines (Δ_c 1.96 at the Earth-class test's 330 ppm, under the estimate's
+      hundredfold margin), CO on Mars's O2, CH4 on Saturn's H2.
+    - So on generated worlds the note is always on, and no longer tells the guide's cases apart: a
+      thick, flattened or stand-in air against a thin one drawn as computed.
+    - Each broadener is far under 2% of its air (CO2 0.033% in the test, Mars's CO about 0.07%,
+      CH4 about 0.45%), so the lean's 2% trace tolerance, the one the air pairs take (`AIR_TRACE_SHARE`),
+      would clear all three.
+  - _The label block's room_: not measured. Since R10.T12.b the upper plate scrolls where the stage
+    cannot hold it whole, so an added note cannot be lost. Whether `PRECISION TEST`'s photorealistic
+    primary (6–14 px to spare with slots open at 1280 × 720) now scrolls is for R12 or R08.T17.
+  - _The datum over the limb_ (a symbology question for main). On the flight's `TEST EARTH` capture
+    at 51 Mm, the photorealistic view's cased datum and graticule (R10.T16.f) stroke the limb about
+    3 px wide. The air's 100 km there is about 2 px, so the stroke covers the whole limb glow at
+    that range and beyond. Lean: stroke the datum's limb inside the figure where a body's air is
+    drawn, so the glow beyond the datum shows.
+  - _Figure-matching left to R08.T17_: the band on each drawn body, each drawn body's low e_q, and
+    several bands on the GPU (`transmittanceFromAbove`'s branch, by eye on `TEST SATURN` only).
+  - _R08.T8.e's items for R08.T11_ (E2 and E3 at one source, lever 4's payoff, the slab's step at
+    the top on low, the twilight shadow's step boundary, the view path near a layer edge, the slot
+    read on several bands): none is measured anew here. For R12.T10 with the frame's ruling.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
