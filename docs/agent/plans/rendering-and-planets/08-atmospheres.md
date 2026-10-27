@@ -5150,7 +5150,10 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
 - **R08.T11.d The march over the air's rectangle, and the tile cull,** both exact, only if QW29
   leaves a high row over 15.67 ms, with T6.i's and T6.f's compiled-out pairs, to weigh a pipeline
   specialised by medium. Acceptance: byte-identical read-backs on SwiftShader, within
-  T8.d's ulp on the RTX 3080, and QW30.
+  T8.d's ulp on the RTX 3080, and QW30. _Built 2026-10-27_ (Risks, "Deviations in R08.T11.d, as
+  built": a view's march over the air's area alone, the tile cull a cover of its own and off, and
+  the march specialised for one band and no layer edge; the timed run QW31, in which two x4 rows
+  stay over 16.67 ms, so R08.T11.f).
 - **R08.T11.e The unread tables at one texel.** The absorber-column and pressure-column tables a
   medium does not read, at one texel. Design note 11's widenings are applied only above 2 MB. At
   the f 0.2 cap still over after both, fewer bands. Acceptance: the rows re-pinned, a
@@ -9974,7 +9977,9 @@ it rides a bump.
     it cuts the mean nodes a blended texel by a third at 400 km. Its schedule stays; no further
     round. For R08.T11.
   - _The tile cull_ (§12). QW2's split puts its whole reach at Kn − K0: 0.56–0.86 ms on R05's and
-    the measured Earth, and nothing on the slab. Not built in T8.e; for R12.T10.
+    the measured Earth, and nothing on the slab. Not built in T8.e; for R12.T10. _Taken_ by
+    R08.T11.d, and off: the area alone is faster at every row (Risks, "Deviations in R08.T11.d,
+    as built").
   - _The slab's step at the top on low_ (2026-10-23, `decision-r08-t8-leans.md` §14).
     - It is 2.65 × 10⁻³ (sun −5°/180°, row 44 at −7.90°, red), with lever 7 off, on or blended:
       over the 0.2% that binds elsewhere. The same row is 9.0 × 10⁻⁴ on high. It is pinned as a
@@ -10811,7 +10816,8 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
       WGS 84, about 1%) and W2 and W5 (the slab Earth costs what `EARTH_REFERENCE` does) answer
       part of both on the RTX 3080 (the task text). The Saturn-class figure's passes are QW29's
       `TEST SATURN` rows (R08.T11.c), and the compiled-out pairs R08.T11.d's turn; ruled 2026-10-27
-      (`decision-r08-approximate-plate.md`, item 3): not R12.T10's.
+      (`decision-r08-approximate-plate.md`, item 3): not R12.T10's. _Taken_ by R08.T11.d: the
+      march specialised for one band and no layer edge.
     - R08.T8.c's first rows are retaken in the run: the far limb's own timings on both settings
       (R05's Earth, x1; high 5.25 ms and low 0.93 ms at 400 km, medians), in the measurement.
       R08.T8.d's atmosphere-alone rows at the setting's count, at `MAX_SKY_SOURCES` and on low
@@ -11131,13 +11137,13 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
       8.94 ms. R05's Earth is the other medium with no absorber, on one slice and one band.
     - Its face takes 2.97 against 2.56 ms, and its cells 1.06 against 1.10 ms.
     - The compiled-out pairs that would part the slices' cost from the medium's are R08.T11.d's
-      turn (`decision-r08-approximate-plate.md` item 3).
+      turn (`decision-r08-approximate-plate.md` item 3). _Taken_ by R08.T11.d.
   - _Small air bodies_ (C): one body costs 2.53–2.73 ms with its air, of which 2.13–2.28 ms is the
     atmosphere. Its `discs` is 0.01 ms, against 0.5 ms in QW28, now that its cells go through the
     pass (R07.T8.e).
   - _Three in one view_ (H): 10.11 (9.98) ms p95 (median) with their air, of which the atmosphere
     is 9.35 ms, three full-frame marches; 0.45 ms without. It is R08.T11.d's to cut, about 2 ms a
-    body (§2).
+    body (§2). _Taken_ by R08.T11.d: 6.98–7.69 ms in QW31.
   - _Low_ (1280 × 720), p95, ms: R05's Earth 1.25–3.90, the measured Earth 1.43–4.45, the slab
     Earth 1.50–4.47 and `TEST SATURN` 1.62–4.33, against QW28's 1.6–10.5.
     - Re-projected to the UHD 620 by R07's Gen9 cycles a shade (3,000–7,000 against the RTX 3080's
@@ -11176,7 +11182,8 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
     - So they predate R07.T8.e–f, and R08.T11.b and T11.e did not move them. SwiftShader passes
       them. Main took them to R08.T6.f's follow-up and R08.T17's hardware validation.
   - _`TEST SATURN`'s atmosphere_: 33% over R05's Earth's at the same frame and sources. It is for
-    R08.T11.d's compiled-out pair.
+    R08.T11.d's compiled-out pair. _Taken_ by R08.T11.d: the 33% is T6.f's slices and bands, which
+    no exact constant removes.
   - _The gate's part 6 on SwiftShader_: the first run (tree bafae55f, `smart-ci-run1.log`) failed
     only on the GPU process's exit (exit_code=512) in part 6's default variant, in
     `R08.T6.b the kernels over four absorbers`, at a load of 9–10. Every other step and the other
@@ -11191,7 +11198,263 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
       included. The x2p and x4 rows may then be the common frame, not x1 and x2.
     - _Deferred to R08.T11.d_ (main, 2026-10-27), as a candidate lever: a cull of the
       planetshine sources below a brightness that moves no pixel by more than the twin's
-      tolerance. `TEST SATURN`'s x2p and x4 rows are for QW30.
+      tolerance. `TEST SATURN`'s x2p and x4 rows are for QW30. Recorded by R08.T11.d and not
+      built, being exact only to the twin's tolerance (its deferred findings); the rows are QW31's.
+- **Deviations in R08.T11.d, as built** (2026-10-27; `decision-r08-t11-frame.md` §2;
+  `decision-r08-t8-leans.md` §11, Ruling 4; `decision-r08-approximate-plate.md` item 3). Landed in
+  two series: 9e7056b2..a295699b (the area, the tile cull, QW30's rows) and 1972c2bc, c747f3f2,
+  ef712615 (the area alone as a view's march, the specialised march, R01.T15's bound). The timed
+  run is QW31, not QW30, since main's QW30 ran B3's cost share only.
+  - _Files._ New: `view/atmosphere/marchArea.ts` and its test (`MARCH_TILE_TEXELS`,
+    `MARCH_AREA_MARGIN_TEXELS`, `MARCH_AREA_WIDENING`, `MarchShell`, `MarchArea`,
+    `MarchAreaTexels`, `marchAreaTexels`, `marchAreaOf`, `wholeMarchArea`; the tile cull's twin
+    `MarchTileKind`, `MARCH_TILE_CODES`, `MARCH_TILE_REACH_TEXELS`, `MarchTileView`,
+    `MarchTileShells`, `marchTileKindTwin`); the shaders `marchArea.wgsl`, `rayMarchCentre.wgsl`,
+    `rayMarchFootprint.wgsl` and `marchFill.wgsl`.
+  - Edited: `rayMarch.wgsl` (its `main` moved unchanged to `rayMarchFootprint.wgsl`);
+    `composite.wgsl`; `tables.ts` (`marchEdgeCountOf`); the catalogue; `photoreal/renderer.test.ts`
+    (R01.T15's bound).
+  - `hillaire.ts` and its test gain `RAY_MARCH_CENTRE_KERNEL`, `RAY_MARCH_SLOTS_CENTRE_KERNEL`,
+    `RAY_MARCH_FILL_KERNEL`, `RAY_MARCH_SPECIAL_KERNEL`, `RAY_MARCH_SLOTS_SPECIAL_KERNEL`,
+    `withMarchSpecialised`, `marchSpecialisedFor`, `MarchCover`, `MarchReads`,
+    `FrameKernelsAhead`, `HillaireAtmosphere.setMarchCover` and `topShellOf`.
+    `createAtmosphereFrameKernels` takes a `FrameKernelsAhead`. `frameTables` gains `marchTiles`
+    and `marchArea`, and the composite gains the uniform `marchArea`.
+  - `smoke/atmosphere.ts` gains `checkMarchArea` and `checkMarchSpecialised`;
+    `farLimbFrameTimes` sums the march's passes. `smoke/frameTimingLedger.ts` (`viewPassesOf`
+    likewise) and its test; `smoke/page.ts` (parts 8 and 12); `smoke/frameTiming.ts`,
+    `smoke/frameTimingScene.ts` and its test.
+  - No table, golden, wire or version moves.
+  - _The area_ (the brief's "rectangle"). The tiles of the march's target, 8 × 8 texels on its own
+    grid, that the top shell (a + H ÷ s_e, c + H ÷ s_p; `topShellOf`, the march's own quadric)
+    can reach, the shell widened by 10⁻⁵ of the camera's distance (about 160 times `f32`'s
+    rounding of a tangent height or of the march's discriminant).
+    - Its bounds are taken in `f64` along each view axis from the widened shell's dual quadric: the
+      ellipsoid's shadow along the other axis seen from the camera, so that a shell reaching
+      behind the camera's plane, as from orbit over the limb, is still bounded on its far side.
+      Then 2 texels each side, the target's edges and the tiles.
+    - A camera within the shell's shadow along both axes, inside the shell among those, takes the
+      whole target; a shell no forward ray meets, none.
+    - The composite outside it reads (0, 0, 0, 1) for the march and, from above the top, a
+      transmittance of 1, each what it read there; it reads neither the target nor the footprint.
+      At half resolution it does so wherever any of a pixel's four candidates lies outside.
+    - On T8.c's far-limb cameras at 1080p (the twin's count): 57.8% of the tiles from 400 km,
+      52.6% from 10⁷ m, 47.1% from 1.54 × 10⁷ m, 24.3% from 2.55 × 10⁷ m and 2.4% from 10⁸ m.
+    - _The review's fix._ The bounds were first held to the field before the margin. From afar a
+      limb a tenth of a texel outside the frame's side then took no area, though the edge texels'
+      footprints blended, their nodes reaching past the edge. The bounds are now held to the
+      forward half turn, and the target's edges hold them after the margin (`marchArea.test.ts`,
+      from 3 × 10⁸ to 3 × 10⁹ m: 14 of its 18 cases failed before the fix).
+  - _The tile cull, against §11, Ruling 4's sketch._ No classification pass and no indirect
+    dispatch: both entry points are dispatched over the area's tiles, and the centre ray's,
+    dispatched first, classes each tile and takes the tiles no footprint can blend in. Every
+    invocation forms the tile's kind from the same values, and the first writes it to a buffer of
+    one `u32` a tile. The footprint's entry point returns on every other tile.
+    - The test is the footprint's own, made conservative over the tile: the datum's and the top's
+      tangent heights of the line through the tile's centre, and the bound |o| k² 2E (|right| ÷
+      width + |upRay| ÷ height), E 4.5 texels (the texels' centres, their nodes and their spans'
+      rays), widened by 1% and by the area's widening. `marchTileKindTwin` is its `f64` twin.
+    - A third kind, `miss` (every ray misses the widened top and no footprint reaches it), is
+      written (0, 0, 0, 1) without a march.
+    - One `marchRay` call site per entry point, pinned for every march kernel (`hillaire.test.ts`).
+    - From T8.c's cameras at 1080p (the twin), of the area's tiles, miss | centre | footprint:
+      288 | 14,392 | 4,040 from 400 km; 3,140 | 12,338 | 1,562 from 10⁷ m; 5,302 | 8,898 | 1,060
+      from 1.54 × 10⁷ m; 1,356 | 5,870 | 640 from 2.55 × 10⁷ m; 126 | 462 | 196 from 10⁸ m.
+    - Not taken: the span's own condition (span ÷ H over 0.6) at the tile, which would move the
+      annulus's tiles that never blend to the centre ray. It needs H across the tile.
+  - _The covers_ (`MarchCover`, `setMarchCover`; 1972c2bc). `area` is the footprint's entry point
+    over the area's tiles, with no tile read. It is the default over the device's shared kernels
+    (`createAtmosphereFrameKernels`, compiled asynchronously off the frame path): every
+    photorealistic view's, and so the frame-timing harness's and QW31's. `tiles` is the area under
+    the tile cull, the centre ray's entry point first; it is a cover of its own, and off. `whole
+frame` is the reference path and the default of an atmosphere with its own kernels (the smoke's
+    other checks, the descent spike, the kernel arm), compiled synchronously on the frame path.
+    Each is exact, and `checkMarchArea` holds `area` and `tiles` to `whole frame`, so it binds all
+    three.
+    - _Why the cull is off._ Untimed hidden runs on the RTX 3080 (the GPU lock only; `atmosphere
+view` medians on high at 1080p) put the cull's two dispatches 0.4–1.0 ms over the one kernel
+      across the whole frame from 400 km and 10⁷ m, the binding rows, and 0.4–1.3 ms under it
+      farther out. The area with the one footprint kernel gained 0.39–0.86 ms at every row of every
+      medium. Marching the centre ray in the footprint kernel's loop shape moved the cull by under
+      0.1 ms.
+    - _Why an atmosphere's own kernels march the whole frame._ SwiftShader's GPU process was ended
+      as hung under load (exit_code=512, a raw status for exit(2), Chromium's `RESULT_CODE_HUNG`:
+      the GPU watchdog) where a second large kernel was compiled synchronously beside the first.
+      Part 8, with both variants at once and a load under 8 at the start, lost one variant's GPU
+      process 30 s in, right after the two march compiles. Part 12 lost it twice in two runs before
+      the shared-read pair was made at first use.
+    - An atmosphere's own kernels make each read's kernels at the first frame that takes them, so
+      that a body with slot layers never compiles the shared read's. `createAtmosphereFrameKernels`
+      takes what to make up front (`FrameKernelsAhead`): `reads`, both for a view; and `tiles`, the
+      centre ray's kernels, off for a view.
+  - _The reference path._ `setMarchCover("whole frame")` runs the general footprint's entry point
+    over every texel with no tile read: the one kernel as it was.
+  - _The reader's fill._ A reader of the whole target (`frameTables`, the kernel arm) asks
+    `RAY_MARCH_FILL_KERNEL` for the target outside the area, (0, 0, 0, 1). A frame never does, so
+    every existing read-back of the target reads as before.
+  - _The march specialised for one band, edge-free_ (c747f3f2; the brief's item 5, ruled through
+    main on 2026-10-27). It is a second march pipeline beside the general one,
+    `RAY_MARCH_SPECIAL_KERNEL` and `RAY_MARCH_SLOTS_SPECIAL_KERNEL`, from `withMarchSpecialised`.
+    That is a text transform of the general sources. `oblateSliceCount`'s and `oblateBandCount`'s
+    bodies return 1. The march's edges' count is `min(count, 0u)`, which keeps the uniform read,
+    so the bindings stay the general kernel's (`hillaire.test.ts` pins every one reached). Each
+    place is rewritten exactly once and within a line, so a CRLF checkout cannot matter, and the
+    transform throws otherwise.
+    - It is chosen from the tables alone, never the body's class (`marchSpecialisedFor`):
+      `plan.kappa.length` 1, `plan.bands.length` 1 and `LayerEdges.count` 0. These are the values
+      `packOblateBody` and `packLayerEdges` write into the uniforms, so the variant is exact for
+      those bodies.
+    - It is taken on the `area` cover only; the reference path and the tile cull keep the general
+      march. `hillaire.test.ts` shows that R05's and the measured Earth on WGS 84 take it, and that
+      the slab (layer edges), the Saturn-class figure (several slices and bands) and the
+      Venus-class deck (layer edges) do not.
+    - The device's shared kernels make it up front with each read asked; an atmosphere's own make
+      it at its first `area` frame. A view now compiles four large march kernels up front (two
+      reads, general and specialised), against two.
+    - _R01.T15's cache._ The variants' keys are the general kernels' names with
+      " for one band, edge-free": `atmosphere ray march for one band, edge-free` and
+      `atmosphere ray march by slot for one band, edge-free`, each a module constant. The smoke's
+      kernel arm may make the two in `rgba32float` too. VIEW's bound grows from 17 module
+      constants to 19. A 50-body session still makes 12 distinct kernels: the two specialised in,
+      and the tile cull's two centre ray's out, since a view never takes `tiles`
+      (`photoreal/renderer.test.ts`).
+    - Not taken (main, 2026-10-27, condition 4): the sky view and the aerial perspective could
+      take the same constants from inside the air. Not measured; recorded.
+    - _The compiled-out pairs_, measured alone before the ruling. These were untimed runs on the
+      landed tip, the cull on, one half of the transform at a time across every kernel.
+      - T6.f's oblate code compiled out took −1.15 to −1.95 ms off the measured Earth's
+        `atmosphere view` median (400 km x2 −1.81, 10⁷ m x2 −1.95, 1.54 × 10⁷ m x2 −1.40) and −0.8
+        to −1.5 off R05's Earth's.
+      - T6.i's private array compiled out took −0.45 to −0.86 off the measured Earth's, −0.2 to
+        −0.75 off R05's, and −0.4 to −0.9 off `TEST SATURN`'s at its four nearer cameras.
+      - `TEST SATURN`'s gain is the edge-free half alone, which the common case does not take: its
+        figure has 5 slices and 4 bands. Its 33% over R05's Earth (QW29) is so T6.f's slices and
+        bands, which no exact constant removes.
+  - _The checks_ (`checkMarchArea`, part 8 after R07.T8.e–g's cell pass; `checkMarchSpecialised`,
+    part 12 after R08.T11.e's Earth). Each runs at 160 × 90, under T8.c's timed Sun, over the
+    device's shared kernels made for one read alone. Each compares the composite's output and the
+    march's whole target with the reference path's, half float by half float.
+    - Part 8 takes the measured Earth (by slot) from 400 km, from 10⁷ m over a surface 2 × 10⁷ m
+      ahead and from 10⁸ m on high, and from 10⁷ m on low. Each frame is drawn on `area` (by the
+      specialised march), on `tiles` and on the reference path.
+    - Part 12 takes R05's Earth (the shared read) in the same frames but 10⁸ m, on `area`
+      (specialised) and on the reference path.
+    - On SwiftShader every frame matches byte for byte. The tiles the GPU classed under the cull,
+      miss | centre | footprint: 0 | 60 | 100, 4 | 70 | 66, 2 | 0 | 14 and 0 | 10 | 30 (low).
+    - The check allows T8.d's 1 ulp on hardware. On the RTX 3080 every frame also read back the
+      same byte for byte, the specialised march's included (abea9b3e, the landed tree).
+    - Left out of the gated check, each held byte for byte once on SwiftShader (scratch, the first
+      series): the slab Earth, the Saturn-class figure and a frame from 60 km inside the air.
+    - _Placement and cost._ At the last gate (abea9b3e, after R01.T15's kernel cache), part 8 took
+      97–98 s with the group at 27–28 s, part 12 took 58–62 s with the new group at 15–19 s, and
+      part 1 took 97 s with the catalogue at 41 s. Under the first series, before R01.T15, part 8
+      took 129–139 s on SwiftShader against the base's 97–103 s (e004c7f1; both variants at once,
+      a load under 8, three runs each), and its GPU process peaked at 0.98–1.03 GB against 0.82–0.83
+      GB.
+  - _Per-view bytes._ The tile kinds, one `u32` a tile of the whole target: 129,600 B on high at
+    1920 × 1080 and 14,400 B on low at 1280 × 720 (`atmosphere-view`), beside the march's own
+    target (16.6 MB on high).
+  - _The passes._ The march is one `atmosphere view` pass on `area` and on the reference path, and
+    two under the tile cull. The far limb's timings and the frame's sum them as the ray march's
+    (`farLimbFrameTimes`, `viewPassesOf`).
+  - _QW30's rows_ (the first series' test(smoke) commit and the review's fix), taken by QW31.
+    - (J) takes `TEST SATURN` under the setting's four sets as (A)'s. Its giants are the Earth's
+      pair, Jupiter-like, at 20 of their radii from its centre (`SATURN_GIANT_DISTANCE_M`, 1.43 ×
+      10⁹ m, 1.51 times its farthest camera), out of every camera's view and off its disc. Their
+      planetshine at the cameras is 7.2 × 10⁻⁴ to 2.5 × 10⁻³ of the Sun.
+    - The Earth's 6 R_J scaled as the cameras are (4.05 × 10⁹ m) would give 9.0 × 10⁻⁵, under
+      `STAR_CUT_RELATIVE`, and the sky's skip would cut it at the nearest camera. This is a timing
+      scene's placement, not a giant's moons. `STAR_SETS` goes.
+    - (I) takes x2p beside x2 and x4 on both class maps. The generated palette is judged and
+      reported (main, 2026-10-27, the brief's item 8: a row of it over 16.67 ms at x2 or x2p goes
+      to main).
+  - _The payoff, untimed_ (the RTX 3080, hidden, the GPU lock only; the frame's GPU pass sum on
+    high, medians, ms; the whole frame, the area alone, then the area with the specialised march,
+    the last at abea9b3e under a load of 8–11).
+    - The brief's binding rows: the slab's 10⁷ m x4 17.07 → 16.59 → 16.47 and x2 16.10 → 15.60 →
+      15.47 (the general march, layer edges); R10's smoke class map's 400 km x4 16.46 → 15.99 →
+      13.27 and 10⁷ m x4 17.50 → 16.96 → 14.10; the measured Earth's 10⁷ m x4 15.79 → 15.26 →
+      12.69.
+    - The generated palette's 10⁷ m x2 16.82 → 16.33 → 13.54 and x4 18.01 → 17.57 → 14.74.
+    - The specialised march takes 2.3–3.4 ms off every WGS 84 Earth row (the measured Earth, R05's,
+      both class maps) beyond the area's 0.3–0.9. The slab and `TEST SATURN` keep the general
+      march and gain the area's 0.4–1.0 alone.
+    - One small air body (C), with its air: 2.95 → 1.89 → 1.71 ms at 4 px, against 0.37 ms
+      without. Three in one view (H): 10.61 → 7.68 → 6.77 ms, the atmosphere 10.03 → 7.10 → 6.18.
+      So the area takes 1.1–1.2 ms off a small body, against the ruling's "about 2 ms". The rest,
+      about 1.3 ms a body, is what the march's area leaves: the sky view, the aerial perspective
+      and the composite, which do not shrink with the body.
+  - _QW31_ (the frame re-measured, in QW29's form with QW30's rows; main's quiet window,
+    2026-10-27; `docs/measurements/atmosphere-frame/2026-10-27-qw31-frame-timings.md`).
+    - Two timed runs on abea9b3e (the landed code), 16:55:11–16:57:43 and 16:59:01–17:01:33
+      local, at loads of 0.3–1.3. The heavy-test and GPU locks were held 152 s each, the busy
+      clock's median 1,950–1,965 MHz, at most 68 °C. Every check of the group passed, and no timed
+      frame was dropped. The part's one failure is R07.T16.f's spatial strokes, as on all
+      hardware.
+    - _The external stalls._ Each run had one: plateaus of 18 to 27 consecutive frames in one or
+      two rows, at constant multiples of the row's median (up to 4 times), with the clocks
+      unchanged. Each stalled row was clean in the other run. The owner's desktop shares the GPU.
+      The rule (main, 2026-10-27): a row with at least 5 consecutive frames over 1.5 times its
+      median is stalled, and a row stalled in one run is judged from the other. Every other row
+      is judged on the worse p95 of the two runs.
+    - _The verdict._ Of the 92 judged high rows, 85 meet 15.67 ms; 5 are over it and at most
+      16.67 ms; and 2 are over 16.67 ms (p95 (median), run 1 / run 2):
+
+      | Medium             | Camera       | Set | Run 1         | Run 2         | QW29's p95 | Verdict    |
+      | ------------------ | ------------ | --- | ------------- | ------------- | ---------- | ---------- |
+      | the slab Earth     | 10⁷ m        | x4  | 16.73 (16.64) | 16.76 (16.52) | 17.66      | over 16.67 |
+      | `TEST SATURN`      | 9.45 × 10⁷ m | x4  | 16.69 (16.35) | 16.58 (16.29) | -          | over 16.67 |
+      | the slab Earth     | 400 km       | x4  | 16.01 (15.61) | 15.66 (15.56) | 16.47      | over 15.67 |
+      | the slab Earth     | 10⁷ m        | x2  | 15.73 (15.63) | 15.72 (15.60) | 18.35      | over 15.67 |
+      | the slab Earth     | 1.54 × 10⁷ m | x2  | 13.91 (13.77) | 16.28 (13.70) | 14.63      | over 15.67 |
+      | the measured Earth | 10⁷ m        | x4  | 15.82 (12.92) | 15.93 (12.83) | 19.58      | over 15.67 |
+      | `TEST SATURN`      | 9.45 × 10⁷ m | x2  | 15.81 (15.52) | 15.59 (15.49) | 16.41      | over 15.67 |
+
+    - Both rows over 16.67 ms are x4, on the general march (the slab's layer edges; `TEST
+SATURN`'s 5 slices and 4 bands), their medians 16.29–16.64. No x2 or x2p row is over
+      16.67 ms. So under §7 this is R08.T11.f's case (main, 2026-10-27).
+    - Both class maps meet 15.67 ms at every row: R10's smoke class map's x4 rows at 13.44 and
+      14.82, against QW29's 17.33 and 18.33, and the generated palette's worst at 15.30 (10⁷ m
+      x4). `TEST SATURN`'s x2p rows all meet, at most 15.60.
+    - _Against QW29_ (medians at x2 from 400 km, 10⁷ m and 1.54 × 10⁷ m): the atmosphere is 6.55,
+      8.13 and 7.24 ms on the measured Earth, against 9.51, 10.88 and 9.70. On the slab, by the
+      general march, it is 10.97, 11.88 and 10.54, against 11.22, 12.24 and 10.91. `TEST SATURN`'s
+      is now 82% over R05's Earth's at the Earth's 10⁷ m frame, against 33%, since R05's takes the
+      specialised march.
+    - Three small air bodies in one view (H) take 6.98–7.69 ms with their air, against QW29's
+      9.98. One small body (C) takes 1.76–2.10 ms, against 2.53–2.73.
+    - The atmosphere alone (B), drawn with its own kernels and so on the reference path, takes
+      0.25–0.31 ms more than in QW29 at x2. The cause is not separated; (B) is not judged.
+    - The high tails are 5.0% of frames in each run, 52 and 42 frames of them in the stalls'
+      plateaus, against QW29's 1.86%.
+- **Deferred findings (2026-10-13 rule)** (R08.T11.d). Recorded and deferred: each leaves the
+  algorithm and every contract as it is.
+  - _The planetshine-source cull: recorded, not built_ (the brief's item 7; main, 2026-10-27). A
+    cull below a brightness that moves no pixel past the twin's tolerance is exact only to that
+    tolerance, not bit for bit, so it is not this task's exact kind.
+    - Its reach is what a faint source costs, from QW31's medians. x2p over x1 (the Sun and one
+      giant against the Sun alone, the march then taking two) is 1.6–2.4 ms on the WGS 84 Earths
+      from 400 km to 1.54 × 10⁷ m, 2.7–3.4 on the slab and 3.4–5.0 on `TEST SATURN`'s nearer
+      cameras, mostly the march's second source. x4 over x2 (the two giants beside the binary,
+      the march at its cap of two) is 0.6–1.0 ms, nearly all on the face and the cells (`bodies`
+      +0.4–0.8, `disc cells` +0.1–0.2), which light by every source: R08.T11.f's ground.
+    - QW31's giants stand at 7.2 × 10⁻⁴ to 2.5 × 10⁻³ of the Sun at the cameras, which such a
+      cull would keep. QW29's trio took each other's at 10⁻⁷ to 10⁻⁶, which it would cut.
+  - _The tile cull's cover_, off: it would want the classification pass and the indirect dispatch
+    of §11's sketch, so that the centre ray's march does not hold the footprint's registers twice
+    over one tile set. Not worth it while the area alone is faster at every row.
+  - _The sky view and the aerial perspective, specialised_ (main's condition 4): not measured.
+  - _The RTX's twin rows_ (untimed, the GPU lock only), none moved by either series.
+    - Part 8's four R08.T6.f Earth rows on the stored arm's limbs fail as in R08.T11.c's record
+      (1.101 to 12.352 × 10⁻³ over 2 texels each).
+    - Part 12's R08.T11.b stored-arm row fails at 1.019 × 10⁻³ at 2 texels against its 10⁻³ (the
+      measured Earth from 10⁷ m at the nadir, a surface 3,640 km ahead). This is a new RTX
+      observation; it predates these series, being the arm's general march over the whole frame.
+    - Part 1's R07.T16.f spatial strokes fail, as in every hardware run.
+    - Main took them to R08.T6.f's follow-up and R08.T17's hardware validation.
+  - _A production leak, found by the first series_: `WebGpuEngine` kept every dispatched kernel's
+    record, its pipeline and uniform buffers, in a strong `Map` for the engine's life. R01.T15
+    (c183b046) fixed it with the per-device kernel cache and `releaseCompute`.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
