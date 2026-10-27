@@ -2602,7 +2602,8 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
     `view/wireframe/drawList.ts` (`DrawOptions.datumInside`, `casingDevicePx`, `strokeReachPx`,
     `datumInsideAt`), `view/photoreal/overlay.ts`, `displays/view/viewFrameDrawer.ts`, the guide's
     bullet after "The datum's lines, …", and the smoke harness's new `smoke/datumFrame.ts`, in
-    `smoke/page.ts`'s part 11 (part 8 had no room on the laptop that built it: Risks).
+    `smoke/page.ts`'s part 11 (part 8 had no room on the laptop that built it: Risks), moved to
+    part 10 by R02.T19.
   - **Tests:**
     - `bodies.test.ts`: on `TEST EARTH` at 51 Mm, 1920 × 1080 at 60°, at the field's centre and
       near a corner, at line scales of 2 and 3: the inside limb's points and chords from δ_limb to
@@ -2622,13 +2623,15 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
       so the inset's casing is the casing drawn; the centred datum, the control, passes it;
     - `viewFrameDrawer.test.ts`: a photorealistic frame's symbology packs the inside datum, and a
       wireframe frame's the centred one;
-    - the smoke harness's `R10.T16.g the datum inside the figure` (part 11), on a sphere of R05's
-      Earth with R05's Earth medium: every pixel whose centre's line of sight misses the sphere
-      holds the same bytes with the inside datum and with none; pixels inside the outline differ;
-      the air's glow stands beyond the limb; the centred datum changes pixels beyond it.
+    - the smoke harness's `R10.T16.g the datum inside the figure` (part 10 since R02.T19, built in
+      part 11), on a sphere of R05's Earth with R05's Earth medium: every pixel whose centre's line
+      of sight misses the sphere holds the same bytes with the inside datum and with none; pixels
+      inside the outline differ; the air's glow stands beyond the limb; the centred datum changes
+      pixels beyond it.
   - **Acceptance.**
     - `pnpm --filter hyperion exec vitest run view/wireframe view/photoreal displays/view/viewFrameDrawer`;
-    - `just test-render --part=11`; `pnpm typecheck`, `pnpm lint` and `pnpm test`;
+    - `just test-render --part=10` (part 11 until R02.T19); `pnpm typecheck`, `pnpm lint` and
+      `pnpm test`;
     - the `console-ux` checks on the changed renderer files and the guide;
     - by hand, hidden, `just views-check --hidden --atmosphere --setting high`: the glow at
       `TEST EARTH` at 51 Mm shows beyond the limb's casing.

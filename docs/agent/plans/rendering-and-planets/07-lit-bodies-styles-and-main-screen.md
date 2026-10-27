@@ -3218,6 +3218,9 @@ those subtasks (T1's drafts) carry plan 14's own bump, coordinated through the o
   and collision is spherical; both are R02's and the flight model's to take up once plan 14 sends f.
   For an Earth-like rotator, collision against a sphere is up to 21 km wrong at low altitude, so the
   flight model needs the spheroid (or R10's terrain on it) before landings on such worlds.
+  _The graticule's part is built: since R02.T19 (2026-10-27) a body's limb, graticule and
+  occluder are drawn on its spheroid, in both styles (plan 02's Risks, "Deviations in R02.T19, as
+  built"). Collision is still spherical, the flight model's to take up._
 - **The datum across plans.** The spheroid of Design note 19 is the one height datum for R05's
   vertex formation, R09's coarse elevations and R10 (the coordinator's ruling of 2026-09-29, on
   this plan's research; not an owner decision). Until each plan's text is built to it, a height

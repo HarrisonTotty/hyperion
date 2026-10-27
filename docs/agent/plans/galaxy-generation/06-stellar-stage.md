@@ -1205,8 +1205,8 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
   task commits `tables/helium.rs` with every coefficient zero, README's header, and marked
   provisional. The code path applies the correction only when ΔY > 0, so grid stars are
   bit-identical whatever plan 15 later fits. Document the expected signs for plan 15: ΔY = 0.1
-  shortens the lifetime of a 0.8 M☉ star by roughly a third and moves the horizontal branch
-  bluewards.
+  shortens the lifetime of a 0.8 M☉ star by about a half (0.42–0.55; decision-p15-t7b-leans L3,
+  which retired the earlier estimate of a third) and moves the horizontal branch bluewards.
 - **Files:** `stellar/composition.rs`, `stellar/sse/track.rs`,
   `crates/hyperion-sim/src/tables/helium.rs`, `tables/mod.rs`.
 - **Tests:** ΔY = 0 gives bit-identical tracks with and without the hook compiled in (golden); a
