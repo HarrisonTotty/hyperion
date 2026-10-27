@@ -47,8 +47,8 @@
 //! The law lives here, not in the record's derivation: the record's internal luminosity, the bulk
 //! section's effective temperature and every reader of them (the rings, the moons' heating, the
 //! photometry) are unchanged, so below 0.414 Jupiter masses the envelope's `T_int` is not the bulk
-//! section's (decision-p14-t24d-profile §3.4). P14.T54.b passes P14.T50.b the envelope's `T_eff`,
-//! (`T_eq`⁴ + `T_int`⁴)^¼, so that the profile and the helium read one temperature.
+//! section's (decision-p14-t24d-profile §3.4). P14.T54.b.i passes P14.T50.b the envelope's
+//! `T_eff`, (`T_eq`⁴ + `T_int`⁴)^¼, so that the profile and the helium read one temperature.
 //!
 //! An input out of its range (a mass that is not finite and positive, an age that is not finite, a
 //! luminosity that is not finite and not negative, a radius that is not finite and positive) is
@@ -217,10 +217,13 @@
 //!   depleted in a window of roughly 1,750–1,930 K of `T_eq` where they should stay (Pelletier et
 //!   al. 2023, Nature 619, 491, find V and VO near protosolar on WASP-76b with its Ti depleted).
 //!
-//! # Not on the record yet
+//! # On the record from 24
 //!
-//! This module is pure: nothing on the record calls it at generator version 23
-//! (decision-bump-plan-after-22 §1.3). P14.T54.b fills the record's envelope section from it.
+//! This module is pure. The record calls it behind the air's sections' hold
+//! (`system::envelope`, P14.T54.b.i; `AIR_SECTIONS_VERSION`), so that at generator version 23
+//! nothing on the record calls it (decision-bump-plan-after-22 §1.3): from 24 the record's
+//! envelope section of every sub-Neptune and giant is its [`EnvelopeAtmosphere`] on P14.T50.b's
+//! abundances, at the envelope's `T_eff` (`T_eq`⁴ + `T_int`⁴)^¼ with this module's `T_int`.
 //!
 //! # Determinism
 //!

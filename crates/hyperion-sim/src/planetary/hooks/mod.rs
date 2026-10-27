@@ -23,15 +23,15 @@
 //!   over P14.T49.b's `c_p`(T) to an isothermal skin, with [`temperature_at`](structure::temperature_at),
 //!   which the flight model's drag and rendering plan R08 read, and of a gas envelope
 //!   ([`EnvelopeProfile`], P14.T24.d), Guillot's grey profile joined to its dry adiabat.
-//!   P14.T54.b's wiring puts the surface's in the record's surface section, held off the record
-//!   until the 23 → 24 bump; the envelope's stays pure until P14.T54.b puts it in the record's
-//!   envelope section.
+//!   P14.T54.b's wiring puts the surface's in the record's surface section and the envelope's in
+//!   its envelope section (P14.T54.b.i), each held off the record until the 23 → 24 bump.
 //! - [`envelope_atmosphere`]: a gas envelope's visible atmosphere (P14.T24.d with P14.T52.d): its
 //!   internal temperature, the record's giant cooling blended with a stated cooling law
 //!   ([`envelope_internal_temperature`]), and its [`EnvelopeAtmosphere`], Guillot's profile on the
 //!   envelope's own gas, its quenched and cold-trapped composition at 1 bar, its decks, its
-//!   photochemical hazes and its absorbers at 10 mbar. It is pure until P14.T54.b puts it in the
-//!   record's envelope section.
+//!   photochemical hazes and its absorbers at 10 mbar. It is pure: the record calls it behind the
+//!   air's hold (`system::envelope`, P14.T54.b.i), its envelope section, held off the record until
+//!   the 23 → 24 bump.
 //! - [`modifiers`]: a solid surface's [`SurfaceModifiers`] (P14.T51.d, T51.j), its
 //!   space-weathering rate and maturity, organic cover, resurfacing rate, an Io's volcanic
 //!   deposits and an oxidised surface's `ferric`. It is pure: P14.T54.b's wiring puts it in the

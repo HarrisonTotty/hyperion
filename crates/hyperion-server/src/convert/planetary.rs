@@ -17,16 +17,16 @@ use hyperion_protocol::{
     BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto,
     CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
     CrustCompositionDto, CrustLidDto, DestructionCauseDto, DetailLevelDto, DetailSeedHex,
-    ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, HabitableZoneDto, MagneticFieldClassDto,
-    MassFractionsDto, MixingRatioNodeDto, Modelled, MoonOriginDto, NotFormedCondensateDto,
-    NotFormedReasonDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto,
-    PlanetClassDto, PopulationDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, RequestError,
-    RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
-    SeenPositionDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
-    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
-    SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
-    SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto,
-    VerticalStructureDto, WetEpochDto, ZoneDto,
+    ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto, HabitableZoneDto,
+    MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, Modelled, MoonOriginDto,
+    NotFormedCondensateDto, NotFormedReasonDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto,
+    PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto, RadiationClassDto,
+    RedoxClassDto, RequestError, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto,
+    SceneSystemDto, SectionDto, SeenPositionDto, SizeDistributionDto, SpinResonanceDto,
+    SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
+    SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest,
+    SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto,
+    ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -52,8 +52,8 @@ use hyperion_sim::planetary::hooks::crust::{CrustComposition, LidCrust};
 use hyperion_sim::planetary::hooks::figures::WetEpoch;
 use hyperion_sim::planetary::hooks::surface::regime::{Forcing, ThermalRegime};
 use hyperion_sim::planetary::hooks::{
-    AerosolInventory, ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface,
-    SubsurfaceOcean, SurfaceModifiers, TectonicRegime, VerticalStructure,
+    AerosolInventory, ClimateRegime, MagneticField, OceanFloor, ProfileNode, RadiationClass,
+    Subsurface, SubsurfaceOcean, SurfaceModifiers, TectonicRegime, VerticalStructure,
 };
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
@@ -639,7 +639,7 @@ fn body_record(record: &BodyRecord) -> BodyRecordDto {
         figure: summary.figure,
         photometry: summary.photometry,
         surface: section(record.surface(), surface),
-        envelope: Some(section(record.envelope(), |inner| envelope(*inner))),
+        envelope: Some(section(record.envelope(), envelope)),
         hooks: section(record.hooks(), hooks),
     }
 }
@@ -1263,19 +1263,26 @@ fn vertical_structure(structure: &VerticalStructure) -> VerticalStructureDto {
         VerticalStructure::RadiativeConvective(profile) => VerticalStructureDto {
             alpha: profile.lapse_factor(),
             skin_temperature_k: profile.skin_temperature().value(),
-            adiabat: profile
-                .nodes()
-                .iter()
-                .map(|node| ProfileNodeDto {
-                    pressure_pa: node.pressure().value(),
-                    temperature_k: node.temperature().value(),
-                })
-                .collect(),
+            adiabat: profile_nodes(profile.nodes()),
         },
         VerticalStructure::Envelope(_) => {
             unreachable!("a record's surface never carries a gas envelope's profile")
         }
     }
+}
+
+/// A profile's nodes as the wire carries them, in the record's order, each pressure in Pa and
+/// temperature in K: a surface air's adiabat from the ground to the tropopause, or an envelope's
+/// from its join down.
+#[must_use]
+fn profile_nodes(nodes: &[ProfileNode]) -> Vec<ProfileNodeDto> {
+    nodes
+        .iter()
+        .map(|node| ProfileNodeDto {
+            pressure_pa: node.pressure().value(),
+            temperature_k: node.temperature().value(),
+        })
+        .collect()
 }
 
 /// A surface air's aerosol and absorber inventory as the wire carries it (P14.T24.c with T24.g,
@@ -1294,21 +1301,27 @@ fn aerosol_inventory(inventory: &AerosolInventory) -> AerosolInventoryDto {
             .collect(),
         decks: decks.iter().map(condensate_deck).collect(),
         absorbers: inventory.absorbers().iter().map(absorber).collect(),
-        not_formed: inventory
-            .not_formed()
-            .iter()
-            .map(|&(condensate, why)| NotFormedCondensateDto {
-                condensate: key(condensate),
-                reason: match why {
-                    NotFormed::BulkGas => NotFormedReasonDto::BulkGas,
-                    NotFormed::Displaced { by } => NotFormedReasonDto::Displaced {
-                        by: by.as_str().to_owned(),
-                    },
-                    NotFormed::Supercritical => NotFormedReasonDto::Supercritical,
-                },
-            })
-            .collect(),
+        not_formed: not_formed(inventory.not_formed()),
     }
+}
+
+/// The condensables a decks' loop labels rather than traps, as the wire carries them, in the
+/// record's order: each by its registry key, with why (its gas a bulk gas, displaced by the
+/// condensate it names, or supercritical).
+#[must_use]
+fn not_formed(rows: &[(SubstanceId, NotFormed)]) -> Vec<NotFormedCondensateDto> {
+    rows.iter()
+        .map(|&(condensate, why)| NotFormedCondensateDto {
+            condensate: key(condensate),
+            reason: match why {
+                NotFormed::BulkGas => NotFormedReasonDto::BulkGas,
+                NotFormed::Displaced { by } => NotFormedReasonDto::Displaced {
+                    by: by.as_str().to_owned(),
+                },
+                NotFormed::Supercritical => NotFormedReasonDto::Supercritical,
+            },
+        })
+        .collect()
 }
 
 /// A condensed phase as an aerosol mode's or a deck's wire names it: `solid` or `liquid`.
@@ -1581,11 +1594,59 @@ fn wet_epoch(epoch: &WetEpoch) -> WetEpochDto {
     }
 }
 
-/// An envelope section's value as the wire carries it: none yet, since the record's
-/// [`Envelope`] has no value until P14.T24.d, which fills it here.
+/// An envelope section's value as the wire carries it (P14.T24.d with T52.d on T50.b's abundances,
+/// wired by P14.T54.b.i), every member read from the record's [`Envelope`], to the bit, computing
+/// none:
+///
+/// - its supercritical condensable by its key, `null` for every H₂/He envelope;
+/// - its atmosphere's internal and irradiation temperatures, its grey profile's κ₁, n, γ and f,
+///   and its join's pressure with its adiabat's nodes ([`profile_nodes`]);
+/// - its composition at 1 bar, mean molar mass and `c_p` ÷ R;
+/// - its modes split by the inventory's own rule ([`aerosol_mode`]): `decks` the modes whose deck
+///   is one of its decks' condensates, each naming it, and `hazes` the rest, each of its own
+///   material and naming none (no haze's material condenses as a deck: none has a law aloft, so
+///   P14.T52.c's loop makes no deck of one), each list in the record's order, the decks' modes
+///   first;
+/// - its hazes' τ(550), its decks ([`condensate_deck`]), its absorbers ([`absorber`]) and its
+///   condensables not formed ([`not_formed`]).
 #[must_use]
-fn envelope(envelope: Envelope) -> BodyEnvelopeDto {
-    match envelope {}
+fn envelope(envelope: &Envelope) -> BodyEnvelopeDto {
+    let atmosphere = envelope.atmosphere();
+    let profile = atmosphere.profile();
+    let grey = profile.grey();
+    let decks = atmosphere.decks();
+    let (deck_modes, hazes): (Vec<_>, Vec<_>) = atmosphere
+        .modes()
+        .iter()
+        .partition(|mode| decks.iter().any(|deck| deck.condensate() == mode.deck()));
+    BodyEnvelopeDto {
+        supercritical: envelope.supercritical().map(key),
+        internal_temperature_k: atmosphere.internal_temperature().value(),
+        irradiation_temperature_k: atmosphere.irradiation_temperature().value(),
+        profile: GuillotProfileDto {
+            thermal_opacity_m2_per_kg: grey.thermal_opacity_m2_per_kg(),
+            optical_depth_exponent: grey.optical_depth_exponent(),
+            opacity_ratio: grey.opacity_ratio(),
+            redistribution_factor: grey.redistribution(),
+        },
+        join_pressure_pa: profile.join_pressure().value(),
+        adiabat: profile_nodes(profile.nodes()),
+        composition: gas_shares(atmosphere.composition()),
+        mean_molar_mass_g_per_mol: atmosphere.mean_molar_mass_g_per_mol(),
+        heat_capacity_over_r: atmosphere.heat_capacity_over_r(),
+        decks: deck_modes
+            .into_iter()
+            .map(|mode| aerosol_mode(mode, decks))
+            .collect(),
+        hazes: hazes
+            .into_iter()
+            .map(|mode| aerosol_mode(mode, decks))
+            .collect(),
+        haze_tau_550: atmosphere.haze_optical_depth(),
+        condensate_decks: decks.iter().map(condensate_deck).collect(),
+        absorbers: atmosphere.absorbers().iter().map(absorber).collect(),
+        not_formed: not_formed(atmosphere.not_formed()),
+    }
 }
 
 /// A hooks section's value: the body's detail seed (the rendering plans' R09.T1.b), which the
@@ -1702,6 +1763,7 @@ mod tests {
 
     use hyperion_sim::galaxy::Galaxy;
     use hyperion_sim::galaxy::params::GalaxyParams;
+    use hyperion_sim::planetary::testing::{EnvelopeByHand, envelope_by_hand};
     use hyperion_sim::substance;
     use hyperion_sim::units::Dex;
     use serde_json::json;
@@ -1792,8 +1854,9 @@ mod tests {
 
     /// P14.T35.e: a present planet has exactly one of its surface and its envelope other than
     /// `not_applicable`; a giant's and a sub-Neptune's surface is not applicable and its envelope
-    /// not modelled until P14.T24.d, as, from generator version 24, a solid planet's under a
-    /// supercritical envelope (P14.T53.b part 2); and every record carries the envelope.
+    /// not modelled below generator version 24 (P14.T54.b.i's envelope is held off the record
+    /// until the bump), as, from 24, a solid planet's under a supercritical envelope (P14.T53.b
+    /// part 2); and every record carries the envelope.
     #[test]
     fn every_present_planet_has_exactly_one_of_a_surface_and_an_envelope() {
         let (mut solid, mut sub_neptunes, mut giants) = (0, 0, 0);
@@ -2357,24 +2420,21 @@ mod tests {
         hazes: usize,
     }
 
-    /// Asserts that the wire's modes `sent` are `inventory`'s, of the air `name`, each value to
-    /// the bit, `deck` by the inventory's decks, and `not_modelled` present exactly where a member
-    /// is absent; counted into `counts`.
+    /// Asserts that the wire's modes `sent` are `modes`, of the air or envelope `name` whose
+    /// decks are `decks`, each value to the bit, `deck` by those decks, and `not_modelled` present
+    /// exactly where a member is absent; counted into `counts`.
     fn assert_modes_sent(
         name: &str,
-        inventory: &AerosolInventory,
+        (modes, decks): (&[AerosolMode], &[AerosolDeck]),
         sent: &[AerosolModeDto],
         counts: &mut ModesSent,
     ) {
         let acid = substance::by_key("H2SO4").expect("a registry row");
         let bits = |value: Option<f64>| value.map(f64::to_bits);
-        assert_eq!(sent.len(), inventory.modes().len(), "{name}");
-        for (sent, mode) in sent.iter().zip(inventory.modes()) {
+        assert_eq!(sent.len(), modes.len(), "{name}");
+        for (sent, mode) in sent.iter().zip(modes) {
             assert_eq!(sent.material, key(mode.material()), "{name}");
-            let listed = inventory
-                .decks()
-                .iter()
-                .any(|deck| deck.condensate() == mode.deck());
+            let listed = decks.iter().any(|deck| deck.condensate() == mode.deck());
             assert_eq!(sent.deck, listed.then(|| key(mode.deck())), "{name}");
             assert_eq!(
                 bits(sent.column_mass_kg_m2),
@@ -2477,6 +2537,39 @@ mod tests {
         }
     }
 
+    /// Asserts that the wire's decks `sent` are `decks`, of the air or envelope `name`, in their
+    /// order, each by its condensate's key and phase, every value to the bit.
+    fn assert_decks_sent(name: &str, decks: &[AerosolDeck], sent: &[CondensateDeckDto]) {
+        assert_eq!(sent.len(), decks.len(), "{name}");
+        for (sent, deck) in sent.iter().zip(decks) {
+            assert_eq!(
+                (
+                    sent.condensate.as_str(),
+                    sent.phase,
+                    sent.base_pa.to_bits(),
+                    sent.base_temperature_k.to_bits(),
+                    sent.top_pa.to_bits(),
+                    sent.vapour_mole_fraction_below.to_bits(),
+                    sent.vapour_mole_fraction_above.to_bits(),
+                    sent.f_sed.to_bits(),
+                    sent.extrapolated,
+                ),
+                (
+                    key(deck.condensate()).as_str(),
+                    aerosol_phase(deck.phase()),
+                    deck.base().value().to_bits(),
+                    deck.base_temperature().value().to_bits(),
+                    deck.top().value().to_bits(),
+                    deck.vapour_below().to_bits(),
+                    deck.vapour_above().to_bits(),
+                    deck.sedimentation().to_bits(),
+                    deck.extrapolated(),
+                ),
+                "{name}"
+            );
+        }
+    }
+
     /// P14.T54.b.b (decision-p14-t54b-open §2.2): an inventory is sent as the record holds it, each
     /// value to the bit and every list in the record's order: an oxygenated Earth's, a Venus's and
     /// a Titan's by hand. A mode's `deck` is its deck's condensate where the inventory lists a deck
@@ -2494,34 +2587,14 @@ mod tests {
         ] {
             let inventory = air.inventory();
             let dto = aerosol_inventory(&inventory);
-            assert_modes_sent(name, &inventory, &dto.modes, &mut counts);
+            assert_modes_sent(
+                name,
+                (inventory.modes(), inventory.decks()),
+                &dto.modes,
+                &mut counts,
+            );
             assert_absorbers_sent(name, inventory.absorbers(), &dto.absorbers);
-            assert_eq!(dto.decks.len(), inventory.decks().len(), "{name}");
-            for (sent, deck) in dto.decks.iter().zip(inventory.decks()) {
-                assert_eq!(
-                    (
-                        sent.condensate.as_str(),
-                        sent.base_pa.to_bits(),
-                        sent.base_temperature_k.to_bits(),
-                        sent.top_pa.to_bits(),
-                        sent.vapour_mole_fraction_below.to_bits(),
-                        sent.vapour_mole_fraction_above.to_bits(),
-                        sent.f_sed.to_bits(),
-                        sent.extrapolated,
-                    ),
-                    (
-                        key(deck.condensate()).as_str(),
-                        deck.base().value().to_bits(),
-                        deck.base_temperature().value().to_bits(),
-                        deck.top().value().to_bits(),
-                        deck.vapour_below().to_bits(),
-                        deck.vapour_above().to_bits(),
-                        deck.sedimentation().to_bits(),
-                        deck.extrapolated(),
-                    ),
-                    "{name}"
-                );
-            }
+            assert_decks_sent(name, inventory.decks(), &dto.decks);
             let not_formed: Vec<(&str, &NotFormedReasonDto)> = dto
                 .not_formed
                 .iter()
@@ -3332,7 +3405,7 @@ mod tests {
     /// P14.T54.b.d: a solid planet under a supercritical envelope (P14.T53.b part 2, from
     /// generator version 24) is sent its surface `not_applicable` and its envelope `not_modelled`
     /// by their tags alone, as a giant's: neither value's conversion runs, so nothing reaches
-    /// [`surface_state`]'s gas-envelope arm or [`envelope`]'s empty match.
+    /// [`surface_state`]'s gas-envelope arm or [`envelope`].
     #[test]
     fn a_surface_not_applicable_and_an_envelope_not_modelled_are_sent_by_their_tags() {
         assert_eq!(
@@ -3340,8 +3413,363 @@ mod tests {
             SectionDto::NotApplicable
         );
         assert_eq!(
-            section(&Section::<Envelope>::NotModelled, |inner| envelope(*inner)),
+            section(&Section::<Envelope>::NotModelled, envelope),
             SectionDto::NotModelled
         );
+    }
+
+    /// The shared fixture of plan 14's messages, `packages/protocol/fixtures/planetary.json`
+    /// (P14.T37), which `hyperion-protocol`'s wire-form tests read and `@hyperion/protocol`'s tests
+    /// decode.
+    static PLANETARY_FIXTURE: LazyLock<serde_json::Value> = LazyLock::new(|| {
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/protocol/fixtures/planetary.json"
+        )))
+        .expect("the shared fixture is JSON")
+    });
+
+    /// The shared fixture's giants whose envelopes are the generator's (P14.T54.b.i): the slice's
+    /// Jupiter and the illustrative hot Jupiter, an HD 209458 b.
+    const FIXTURE_GIANTS: [&str; 2] = ["body_detail_jupiter", "body_detail_hot_jupiter"];
+
+    /// The number at `pointer` in the record of the shared fixture's `body_detail` message
+    /// `message`.
+    fn fixture_number(message: &str, pointer: &str) -> f64 {
+        PLANETARY_FIXTURE[message]["body"]["record"]
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or_else(|| panic!("{message}'s record holds a number at {pointer}"))
+    }
+
+    /// The inputs of the generator's envelope for the shared fixture's giant `message` (one of
+    /// `FIXTURE_GIANTS`), on its record's own bulk section:
+    ///
+    /// - its mass, and its bulk section's radius, surface gravity and equilibrium temperature;
+    /// - its internal luminosity from that section's effective temperature, 4π R² σ (`T_eff`⁴ −
+    ///   `T_eq`⁴), so that its `T_int` is the section's own (ruling 112.7);
+    /// - its mass fractions the generator's for a giant of its mass formed beyond its snow line
+    ///   (`giant_composition`), of which the envelope reads the envelope's share alone (and the
+    ///   class): the bulk section's share, rounded, agrees to 5 × 10⁻⁴, and its split of the heavy
+    ///   elements is illustrative;
+    /// - a solar host: \[Fe/H\] and \[α/Fe\] 0, the median C/O and Mg/Si draws, and the protosolar
+    ///   He/H n☉ as its envelope's start, a solar host's, unfractionated (no escape at 5.2 au; the
+    ///   hot Jupiter's escape is not modelled here, stated);
+    /// - starlit;
+    /// - the slice zone's snow line (the fixture's `system_bodies_response`): the Jupiter formed
+    ///   at its orbit's 5.2 au, beyond it, and is 4.57 Gyr old; the hot Jupiter formed at it, the
+    ///   site where the generator grows the core of a giant it places inside the snow line
+    ///   (`PlacedPlanet::formation_distance`), and is HD 209458's 3.1 Gyr (Torres, Winn and Holman
+    ///   2008, Astrophys. J. 677, 1324, Table 3).
+    fn fixture_giant(message: &str) -> EnvelopeByHand {
+        use hyperion_sim::math;
+        use hyperion_sim::planetary::chem::{AbundanceDraws, HostAbundances};
+        use hyperion_sim::planetary::derive::{SnowLineSide, giant_composition};
+        use hyperion_sim::substance::Element;
+        use hyperion_sim::units::consts::STEFAN_BOLTZMANN;
+        use hyperion_sim::units::{EarthMasses, MetresPerSecondSquared, Watts, Years};
+
+        let number = |pointer: &str| fixture_number(message, pointer);
+        let snow_line = PLANETARY_FIXTURE["system_bodies_response"]
+            .pointer("/body/zones/0/snow_line_m")
+            .and_then(serde_json::Value::as_f64)
+            .expect("the slice's zone has its snow line");
+        let (formation_distance, age_gyr) = match message {
+            "body_detail_jupiter" => (number("/orbit/value/orbit/semi_major_axis_m"), 4.57),
+            "body_detail_hot_jupiter" => (snow_line, 3.1),
+            other => panic!("{other} is not one of the fixture's giants"),
+        };
+        let mass = EarthMasses::from(Kilograms::new(number("/mass_kg/value")));
+        let fractions = giant_composition(mass, SnowLineSide::Beyond)
+            .expect("a giant's mass")
+            .fractions();
+        let share = number("/bulk/value/mass_fractions/envelope");
+        assert!(
+            (fractions.envelope() - share).abs() < 5e-4,
+            "{message}: the generator's envelope share {} against the bulk's {share}",
+            fractions.envelope()
+        );
+        let radius = number("/bulk/value/radius_m");
+        let t_eq = number("/bulk/value/equilibrium_temperature_k");
+        let t_eff = number("/bulk/value/effective_temperature_k");
+        let area = 4.0 * core::f64::consts::PI * radius * radius;
+        EnvelopeByHand {
+            mass,
+            fractions,
+            radius: Metres::new(radius),
+            gravity: MetresPerSecondSquared::new(number("/bulk/value/surface_gravity_m_s2")),
+            equilibrium_temperature: Kelvin::new(t_eq),
+            internal_luminosity: Watts::new(
+                area * STEFAN_BOLTZMANN * (math::powi(t_eff, 4) - math::powi(t_eq, 4)),
+            ),
+            age: Years::new(age_gyr * 1e9),
+            formation_distance: Metres::new(formation_distance),
+            snow_line: Metres::new(snow_line),
+            fe_h: Dex::ZERO,
+            alpha_fe: Dex::ZERO,
+            host: HostAbundances::of(Dex::ZERO, &AbundanceDraws::MEDIAN),
+            primordial_helium_per_hydrogen: Element::He.protosolar_abundance_per_hydrogen(),
+            starlit: true,
+        }
+    }
+
+    /// The generator's envelope of the shared fixture's giant `message` (`fixture_giant`).
+    fn fixture_envelope(message: &str) -> Envelope {
+        envelope_by_hand(&fixture_giant(message))
+            .unwrap_or_else(|error| panic!("{message}: {error}"))
+    }
+
+    /// Asserts that the wire's envelope `sent` is `held`'s, of the giant `name`, member by member
+    /// against the record's getters, each value to the bit, and that its modes split into `decks`
+    /// and `hazes` by the decks they name; returns the counts of its deck modes and hazes.
+    fn assert_envelope_sent(name: &str, held: &Envelope, sent: &BodyEnvelopeDto) -> (usize, usize) {
+        let atmosphere = held.atmosphere();
+        let profile = atmosphere.profile();
+        let grey = profile.grey();
+        assert_eq!(
+            (held.supercritical(), &sent.supercritical),
+            (None, &None),
+            "{name}"
+        );
+        assert_eq!(
+            (
+                sent.internal_temperature_k.to_bits(),
+                sent.irradiation_temperature_k.to_bits(),
+                sent.profile.thermal_opacity_m2_per_kg.to_bits(),
+                sent.profile.optical_depth_exponent.to_bits(),
+                sent.profile.opacity_ratio.to_bits(),
+                sent.profile.redistribution_factor.to_bits(),
+                sent.join_pressure_pa.to_bits(),
+                sent.mean_molar_mass_g_per_mol.to_bits(),
+                sent.heat_capacity_over_r.to_bits(),
+                sent.haze_tau_550.to_bits(),
+            ),
+            (
+                atmosphere.internal_temperature().value().to_bits(),
+                atmosphere.irradiation_temperature().value().to_bits(),
+                grey.thermal_opacity_m2_per_kg().to_bits(),
+                grey.optical_depth_exponent().to_bits(),
+                grey.opacity_ratio().to_bits(),
+                grey.redistribution().to_bits(),
+                profile.join_pressure().value().to_bits(),
+                atmosphere.mean_molar_mass_g_per_mol().to_bits(),
+                atmosphere.heat_capacity_over_r().to_bits(),
+                atmosphere.haze_optical_depth().to_bits(),
+            ),
+            "{name}"
+        );
+        assert_eq!(sent.adiabat.len(), profile.nodes().len(), "{name}");
+        for (node, held) in sent.adiabat.iter().zip(profile.nodes()) {
+            assert_eq!(
+                (node.pressure_pa.to_bits(), node.temperature_k.to_bits()),
+                (
+                    held.pressure().value().to_bits(),
+                    held.temperature().value().to_bits()
+                ),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            sent.composition.len(),
+            atmosphere.composition().len(),
+            "{name}"
+        );
+        for (gas, &(species, share)) in sent.composition.iter().zip(atmosphere.composition()) {
+            assert_eq!(
+                (gas.species.as_str(), gas.mole_fraction.to_bits()),
+                (key(species).as_str(), share.to_bits()),
+                "{name}"
+            );
+        }
+        // The split: every deck mode names one of `condensate_decks`, every haze none, each of
+        // the record's modes in exactly one list, the deck modes first, each over the whole sky.
+        let listed = |deck: &Option<String>| {
+            sent.condensate_decks
+                .iter()
+                .any(|listed| deck.as_ref() == Some(&listed.condensate))
+        };
+        assert!(sent.decks.iter().all(|mode| listed(&mode.deck)), "{name}");
+        assert!(sent.hazes.iter().all(|haze| haze.deck.is_none()), "{name}");
+        let joined: Vec<AerosolModeDto> = sent.decks.iter().chain(&sent.hazes).cloned().collect();
+        let mut counts = ModesSent::default();
+        assert_modes_sent(
+            name,
+            (atmosphere.modes(), atmosphere.decks()),
+            &joined,
+            &mut counts,
+        );
+        assert!(
+            joined
+                .iter()
+                .all(|mode| mode.coverage.to_bits() == 1.0_f64.to_bits()),
+            "{name}"
+        );
+        assert_decks_sent(name, atmosphere.decks(), &sent.condensate_decks);
+        assert_absorbers_sent(name, atmosphere.absorbers(), &sent.absorbers);
+        assert_eq!(
+            sent.not_formed.len(),
+            atmosphere.not_formed().len(),
+            "{name}"
+        );
+        for (entry, &(condensate, why)) in sent.not_formed.iter().zip(atmosphere.not_formed()) {
+            let reason = match why {
+                NotFormed::BulkGas => NotFormedReasonDto::BulkGas,
+                NotFormed::Displaced { by } => NotFormedReasonDto::Displaced {
+                    by: by.as_str().to_owned(),
+                },
+                NotFormed::Supercritical => NotFormedReasonDto::Supercritical,
+            };
+            assert_eq!(
+                (&entry.condensate, &entry.reason),
+                (&key(condensate), &reason)
+            );
+        }
+        (sent.decks.len(), sent.hazes.len())
+    }
+
+    /// P14.T54.b.i (design-i §3.3): an envelope is sent as the record holds it, every member read
+    /// from the record's getters to the bit (κ₁, n, γ, f, `T_int`, `T_irr`, the join and the
+    /// adiabat's nodes, the composition, μ, `c_p` ÷ R and the hazes' τ), `supercritical` `null`,
+    /// its modes split between `decks` and `hazes` by the decks they name (each deck mode naming
+    /// one of `condensate_decks`, every haze none, each mode in exactly one list, every one over
+    /// the whole sky), its decks, absorbers and condensables not formed with their reasons. A
+    /// Jupiter-like and a hot giant, the shared fixture's, built by hand through the record's own
+    /// chain: the Jupiter with an ammonia deck and the modes that name it under a lit sky's haze;
+    /// the hot Jupiter with its alkalis among its absorbers, silicate decks below its photosphere
+    /// and no ammonia deck.
+    #[test]
+    fn an_envelope_is_sent_as_the_record_holds_it() {
+        let deck_of = |envelope: &BodyEnvelopeDto, key: &str| {
+            envelope
+                .condensate_decks
+                .iter()
+                .find(|deck| deck.condensate == key)
+                .cloned()
+        };
+        let jupiter = fixture_envelope("body_detail_jupiter");
+        let sent = envelope(&jupiter);
+        let (decks, hazes) = assert_envelope_sent("Jupiter", &jupiter, &sent);
+        assert!(
+            deck_of(&sent, "NH3").is_some(),
+            "{:?}",
+            sent.condensate_decks
+        );
+        assert!(
+            sent.decks
+                .iter()
+                .any(|mode| mode.deck.as_deref() == Some("NH3")),
+            "{:?}",
+            sent.decks
+        );
+        assert!(decks > 1 && hazes > 0, "{decks} deck modes, {hazes} hazes");
+
+        let hot = fixture_envelope("body_detail_hot_jupiter");
+        let sent = envelope(&hot);
+        let (decks, _) = assert_envelope_sent("the hot Jupiter", &hot, &sent);
+        assert!(
+            deck_of(&sent, "NH3").is_none(),
+            "{:?}",
+            sent.condensate_decks
+        );
+        for alkali in ["Na", "K"] {
+            assert!(
+                sent.absorbers
+                    .iter()
+                    .any(|absorber| absorber.species == alkali),
+                "{alkali}: {:?}",
+                sent.absorbers
+            );
+        }
+        let photosphere = hot.atmosphere().profile().photosphere_pressure().value();
+        assert!(
+            sent.condensate_decks.iter().any(|deck| {
+                ["MgSiO3", "Mg2SiO4"].contains(&deck.condensate.as_str())
+                    && deck.base_pa > photosphere
+            }),
+            "photosphere {photosphere} Pa: {:?}",
+            sent.condensate_decks
+        );
+        assert!(decks > 0, "{decks} deck modes");
+    }
+
+    /// P14.T54.b.i (design-i §3.5, Q8): the shared fixture's two giants' envelopes are the
+    /// generator's, each built from the inputs `fixture_giant` states on its own record and sent
+    /// by [`envelope`], exactly, so that the client decodes what the server sends: the slice's
+    /// Jupiter's and the hot Jupiter's (`body_detail_hot_jupiter`, an HD 209458 b). Any change to
+    /// the envelope's chain fails it until the fixture is refreshed from [`envelope`]'s output for
+    /// the same inputs (`serde_json::to_string_pretty` of it, pasted).
+    ///
+    /// The values are the generator's under the rules in force, generator version 23's: the
+    /// read densities' hold (`READ_DENSITIES_VERSION`, 24) leaves the liquid refractory deck
+    /// modes (Fe, `CaTiO3`, `Al2O3`, `Mg2SiO4`, `MgSiO3`) with no grain density, so with no size,
+    /// and P14.T54.b.l's bump, which deletes the hold, refreshes them here.
+    ///
+    /// The fixture meets the three docs its interim values broke (review-r08-shapes-i C2): the
+    /// adiabat's first node is the join at the grey profile's temperature there, to the bit; its
+    /// nodes are even in ln p; and the composition holds the vapour of each deck of its own gas
+    /// based above the 1-bar level (Jupiter's NH₃, the hot Jupiter's Cr), at that deck's vapour
+    /// below to 1% (the composition is renormalised after its deeper decks' trims, the deck's
+    /// vapour below is not). A deck based below 1 bar (water's) has trimmed its vapour at 1 bar to
+    /// saturation, and an element's or a product's law (the silicates', NH₄SH's) names no one gas,
+    /// so neither is asserted.
+    #[test]
+    fn the_fixture_s_envelopes_are_the_generator_s() {
+        use hyperion_sim::math;
+        use hyperion_sim::units::Pascals;
+
+        for message in FIXTURE_GIANTS {
+            let built = fixture_envelope(message);
+            let sent = serde_json::to_value(envelope(&built)).expect("an envelope serialises");
+            let fixture = &PLANETARY_FIXTURE[message]["body"]["record"]["envelope"];
+            assert_eq!(fixture["state"], "ok", "{message}");
+            assert_eq!(fixture["value"], sent, "{message}");
+
+            let value: BodyEnvelopeDto =
+                serde_json::from_value(fixture["value"].clone()).expect("an envelope's wire form");
+            let profile = built.atmosphere().profile();
+            let grey = profile.grey();
+            let at_join = grey.temperature(
+                grey.optical_depth(Pascals::new(value.join_pressure_pa), profile.gravity()),
+                profile.internal_temperature(),
+                profile.irradiation_temperature(),
+            );
+            let first = value.adiabat.first().expect("an adiabat");
+            assert_eq!(
+                (first.pressure_pa.to_bits(), first.temperature_k.to_bits()),
+                (value.join_pressure_pa.to_bits(), at_join.value().to_bits()),
+                "{message}"
+            );
+            let steps: Vec<f64> = value
+                .adiabat
+                .windows(2)
+                .map(|pair| math::ln(pair[1].pressure_pa / pair[0].pressure_pa))
+                .collect();
+            assert!(
+                steps
+                    .iter()
+                    .all(|step| (step / steps[0] - 1.0).abs() < 1e-9),
+                "{message}: {steps:?}"
+            );
+            let mut held = 0;
+            for deck in value
+                .condensate_decks
+                .iter()
+                .filter(|deck| deck.base_pa < 1e5)
+            {
+                let Some(gas) = value
+                    .composition
+                    .iter()
+                    .find(|gas| gas.species == deck.condensate)
+                else {
+                    continue;
+                };
+                assert!(
+                    (gas.mole_fraction / deck.vapour_mole_fraction_below - 1.0).abs() < 1e-2,
+                    "{message}: {gas:?} under {deck:?}"
+                );
+                held += 1;
+            }
+            assert!(held > 0, "{message}: no deck of its own gas above 1 bar");
+        }
     }
 }

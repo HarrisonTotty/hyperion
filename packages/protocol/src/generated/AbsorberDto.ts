@@ -2,8 +2,9 @@
 import type { MixingRatioNodeDto } from "./MixingRatioNodeDto";
 
 /**
- * An absorbing gas that is not one of the section's well-mixed `gases`, with its column and
- * layer (plan 14, P14.T24.c): ozone, and sulphur dioxide by P14.T24.g.
+ * An absorbing gas with its column and layer (plan 14, P14.T24.c): in a surface's inventory, one
+ * that is not one of the section's well-mixed `gases` (ozone, and sulphur dioxide by P14.T24.g);
+ * in an envelope, its 10-mbar gas's (P14.T52.d), which its `composition` at 1 bar may hold too.
  */
 export type AbsorberDto = { 
 /**

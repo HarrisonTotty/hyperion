@@ -1375,8 +1375,10 @@ fn check_record_condensates<'a>(
 /// its surface not applicable and its envelope not modelled under a supercritical envelope
 /// (P14.T53.b part 2, whose test the record does not carry: the 24 arm of
 /// `a_surface_holds_a_solid_state_and_its_conditions_regime` checks it on the derivation); every
-/// other its surface not applicable and its envelope not modelled until P14.T24.d, so that exactly
-/// one of the two applies. Whether the body's class has a solid surface.
+/// other its surface not applicable and its envelope not modelled under the air's sections' hold,
+/// which every caller's records read (P14.T54.b.i's envelope is `Ok` under the air's batch alone,
+/// `system::envelope`'s tests), so that exactly one of the two applies. Whether the body's class
+/// has a solid surface.
 fn assert_surface_or_envelope(record: &BodyRecord) -> bool {
     use crate::planetary::derive::atmosphere::supercritical_section_in_force;
     let index = record.index();
@@ -12198,6 +12200,137 @@ fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
     }
 }
 
+/// P14.T54.b.i: under the host star's primordial helium (`PrimordialHeliumRules::Host`) against
+/// the protosolar start, every 24 hold in force, over the golden systems and eight synthetic Suns
+/// at the epoch, each system generated afresh under each arm: a body whose derivation carries no
+/// envelope helium derives to the bit (by `Debug`); every carried helium starts at its host's
+/// start (`fractionation_start`) under the host's arm and at the protosolar Y under the other, to
+/// the bit; about a solar host the two derivations are one, to the bit. The movers are counted,
+/// with the largest move of the carried He/H, and any state change is named (none expected: the
+/// thin envelopes' H₂ and He move by a few percent at most).
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk under both arms, each carried helium's checks and the movers stated"
+)]
+fn under_the_host_helium_only_envelope_bearing_bodies_about_other_hosts_move() {
+    use crate::planetary::chem::escape::{
+        PrimordialHeliumRules, fractionation_start, with_primordial_helium,
+    };
+    use crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction;
+    use crate::planetary::testing::with_every_24_hold;
+    use crate::stellar::Composition;
+    let mut sets: Vec<(String, Seed, SystemContext)> = golden_systems()
+        .iter()
+        .map(|(name, ctx, _)| {
+            (
+                (*name).to_owned(),
+                Seed::new(GOLDEN_SYSTEMS_SEED),
+                ctx.clone(),
+            )
+        })
+        .collect();
+    sets.extend((1..=8).map(|k| (format!("sun {k}"), SEED, sun(k))));
+    let (mut unmoved, mut carried, mut solar, mut moved) = (0_usize, 0_usize, 0_usize, 0_usize);
+    let mut largest = (0.0_f64, String::new());
+    let (mut changes, mut unbounded) = (Vec::new(), Vec::new());
+    with_every_24_hold(|| {
+        let start = protosolar_helium_mass_fraction();
+        for (name, seed, ctx) in &sets {
+            let host_system = generate(*seed, ctx);
+            let proto_system =
+                with_primordial_helium(PrimordialHeliumRules::Protosolar, || generate(*seed, ctx));
+            let is_solar = *ctx.composition() == Composition::SOLAR;
+            for body in host_system.bodies() {
+                let index = body.index.get();
+                let Some((host, ..)) = derived_at_epoch(ctx, &host_system, index) else {
+                    continue;
+                };
+                let (proto, ..) = with_primordial_helium(PrimordialHeliumRules::Protosolar, || {
+                    derived_at_epoch(ctx, &proto_system, index)
+                })
+                .unwrap_or_else(|| panic!("{name} {index:04x}: present under either arm"));
+                let at = format!("{name} {index:04x}");
+                let Some(helium) = host.envelope_helium() else {
+                    assert!(proto.envelope_helium().is_none(), "{at}");
+                    assert_eq!(format!("{host:?}"), format!("{proto:?}"), "{at}");
+                    unmoved += 1;
+                    continue;
+                };
+                carried += 1;
+                let other = proto
+                    .envelope_helium()
+                    .unwrap_or_else(|| panic!("{at}: a carry under either arm"));
+                assert_same_bits(
+                    helium.initial_helium_mass_fraction(),
+                    fractionation_start(ctx.composition()),
+                );
+                assert_same_bits(other.initial_helium_mass_fraction(), start);
+                if is_solar {
+                    assert_eq!(
+                        format!("{host:?}"),
+                        format!("{proto:?}"),
+                        "{at}: a solar host"
+                    );
+                    solar += 1;
+                }
+                if format!("{host:?}") != format!("{proto:?}") {
+                    moved += 1;
+                }
+                let (ours, theirs) = (helium.helium_to_hydrogen(), other.helium_to_hydrogen());
+                if !(ours.is_finite() && theirs.is_finite()) {
+                    // An envelope that kept no hydrogen under either start, whose He/H is
+                    // infinite there.
+                    unbounded.push(format!(
+                        "{at} {:?} {:?}: He/H {ours:.6} (Y {:.6}) against {theirs:.6} (Y {:.6})",
+                        host.class(),
+                        host.atmosphere().state(),
+                        helium.helium_mass_fraction(),
+                        other.helium_mass_fraction()
+                    ));
+                }
+                let ratio = ours / theirs - 1.0;
+                if ours.is_finite() && theirs.is_finite() && ratio.abs() > largest.0.abs() {
+                    largest = (
+                        ratio,
+                        format!(
+                            "{at} {:?} {:?} [Fe/H] {:+.3}: He/H {:.6} against {:.6}",
+                            host.class(),
+                            host.atmosphere().state(),
+                            ctx.fe_h().value(),
+                            helium.helium_to_hydrogen(),
+                            other.helium_to_hydrogen()
+                        ),
+                    );
+                }
+                if host.atmosphere().state() != proto.atmosphere().state() {
+                    changes.push(format!(
+                        "{at}: {:?} against {:?}",
+                        host.atmosphere().state(),
+                        proto.atmosphere().state()
+                    ));
+                }
+            }
+        }
+    });
+    eprintln!(
+        "{unmoved} derivations with no envelope helium to the bit; {carried} carried ({solar} about \
+         a solar host, unmoved), {moved} moved; the largest He/H move {:+.4e}: {}; with no \
+         hydrogen left under either arm: {unbounded:?}; state changes: {changes:?}",
+        largest.0, largest.1
+    );
+    assert!(
+        unmoved > 100 && carried > 10 && moved > 0,
+        "{unmoved} {carried} {moved}"
+    );
+    assert!(solar > 0, "a solar host's envelope");
+    assert_eq!(
+        changes,
+        Vec::<String>::new(),
+        "TO MAIN: a state change under the host's helium"
+    );
+}
+
 // P14.T53.b part 1: the state from the present insolation, and the runaway's deck
 // (decision-absurd-states-24 R3–R4; decision-pre-23-review item 33).
 
@@ -13801,8 +13934,10 @@ fn under_every_24_hold_the_sample_s_moons_supercritical_columns_are_stated() {
 /// P14.T53.b part 2's tags on `body`: a solid class has its surface `Ok` and its envelope not
 /// applicable exactly where no supercritical envelope hides its surface, and its surface not
 /// applicable and its envelope not modelled where one does; every other class its surface not
-/// applicable and its envelope not modelled. So no `Ok` surface lies under a supercritical
-/// envelope, and exactly one of the two applies.
+/// applicable and its envelope not modelled, under the air's sections' hold, which every caller's
+/// records read (P14.T54.b.i's envelope is `Ok` under the air's batch alone,
+/// `system::envelope`'s tests). So no `Ok` surface lies under a supercritical envelope, and
+/// exactly one of the two applies.
 fn assert_envelope_tags(body: &EnvelopeBody) {
     let at = || format!("{}: {}", body.label, body.line());
     // A steam envelope's label is the section's whatever the bulk's gravity (P14.T53.b part 3).

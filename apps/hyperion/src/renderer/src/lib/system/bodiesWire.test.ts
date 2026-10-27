@@ -31,6 +31,7 @@ import {
   FIXTURE_EARTH,
   FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
+  hotJupiterDetail,
   jupiterDetail,
   lavaWorldDetail,
   populatedBodies,
@@ -549,6 +550,22 @@ function jupiterEnvelope(): BodyEnvelopeDto {
   return envelope.value;
 }
 
+/** The fixture's Jupiter's ammonia deck and its mode, and its first haze. */
+function jupiterAmmoniaAndHaze(): {
+  readonly deck: CondensateDeckDto;
+  readonly mode: AerosolModeDto;
+  readonly haze: AerosolModeDto;
+} {
+  const envelope = jupiterEnvelope();
+  const deck = envelope.condensate_decks.find((listed) => listed.condensate === "NH3");
+  const mode = envelope.decks.find((listed) => listed.deck === "NH3");
+  const [haze] = envelope.hazes;
+  if (deck === undefined || mode === undefined || haze === undefined) {
+    throw new Error("the fixture's Jupiter has its ammonia deck, its mode and a haze");
+  }
+  return { deck, mode, haze };
+}
+
 /** The fixture's Earth with its surface `surface`, read. */
 function earthWithSurface(surface: BodySurfaceDto) {
   const detail = earthDetail();
@@ -1000,15 +1017,48 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     expect(valued.taxonomicClass).toEqual({ kind: "value", value: "cgh" });
   });
 
-  it("reads a Jupiter's envelope, its surface not applicable", () => {
+  it("reads a Jupiter's envelope, its surface not applicable, at the generator's values (P14.T54.b.i)", () => {
     const record = recordOf(toBodyDetail(jupiterDetail(), FIXTURE_SYSTEM, DESIGNATION));
+    const envelope = okSection(record.envelope);
+    const wire = jupiterEnvelope();
+
+    expect(record.surface).toEqual({ state: "not_applicable" });
+    expect(envelope.composition.slice(0, 4).map((gas) => gas.species)).toEqual([
+      "H2",
+      "He",
+      "CH4",
+      "NH3",
+    ]);
+    expect(envelope.adiabat[0]?.pressurePa).toBe(envelope.joinPressurePa);
+    expect([
+      envelope.profile.thermalOpacityM2PerKg,
+      envelope.profile.opticalDepthExponent,
+      envelope.profile.opacityRatio,
+      envelope.profile.redistributionFactor,
+    ]).toEqual([0.00287, 2, 0.4, 0.25]);
+    // One inventory (R08's C1): the deck modes, each naming a listed deck, then the hazes.
+    expect(envelope.aerosols.modes.map((mode) => [mode.material, mode.deck])).toEqual([
+      ...wire.decks.map((mode) => [mode.material, mode.deck]),
+      ...wire.hazes.map((haze) => [haze.material, null]),
+    ]);
+    expect(envelope.aerosols.decks.map((deck) => deck.condensate)).toContain("NH3");
+    expect(envelope.aerosols.modes.some((mode) => mode.deck === "NH3")).toBe(true);
+    expect(envelope.aerosols.modes.at(-1)).toMatchObject({ material: "chromophore", deck: null });
+    expect(envelope.aerosols.notFormed.map((entry) => entry.condensate)).toContain("SiO2");
+  });
+
+  it("reads a hot Jupiter's envelope: its alkalis among its absorbers, no ammonia deck and no haze (P14.T54.b.i)", () => {
+    const record = recordOf(toBodyDetail(hotJupiterDetail(), FIXTURE_SYSTEM, DESIGNATION));
     const envelope = okSection(record.envelope);
 
     expect(record.surface).toEqual({ state: "not_applicable" });
-    expect(envelope.composition.map((gas) => gas.species)).toEqual(["H2", "He", "CH4"]);
-    expect(envelope.adiabat[1]).toEqual({ pressurePa: 100_000, temperatureK: 166.1 });
-    expect(envelope.decks[0]?.deck).toBe("NH3");
-    expect(envelope.profile.redistributionFactor).toBe(0.25);
+    expect(envelope.aerosols.absorbers.map((absorber) => absorber.species)).toEqual(
+      expect.arrayContaining(["Na", "K"]),
+    );
+    expect(envelope.aerosols.decks.map((deck) => deck.condensate)).not.toContain("NH3");
+    expect(envelope.aerosols.decks.map((deck) => deck.condensate)).toContain("MgSiO3");
+    expect(envelope.aerosols.modes.every((mode) => mode.deck !== null)).toBe(true);
+    expect(envelope.hazeTau550).toBe(0);
   });
 
   it("reads an envelope's supercritical condensable by its key", () => {
@@ -1126,10 +1176,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       },
       biosphere: { fluxes: [{ species: unknown, flux_earth: 1 }] },
     });
-    const [ammonia] = envelope.decks;
-    if (ammonia === undefined) {
-      throw new Error("the fixture's Jupiter has its ammonia deck");
-    }
+    const ammonia = jupiterAmmoniaAndHaze();
     const envelopeResult = jupiterWithEnvelope({
       ...envelope,
       supercritical: unknown,
@@ -1137,7 +1184,11 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
         species: unknown,
         mole_fraction: gas.mole_fraction,
       })),
-      decks: [{ ...ammonia, material: unknown, deck: unknown }],
+      decks: [{ ...ammonia.mode, material: unknown, deck: unknown }],
+      hazes: [{ ...ammonia.haze, material: unknown }],
+      condensate_decks: [{ ...ammonia.deck, condensate: unknown }],
+      absorbers: [{ species: unknown, column_m2: 1e19, base_pa: 1_000, top_pa: 1, profile: null }],
+      not_formed: [{ condensate: unknown, reason: { type: "displaced", by: unknown } }],
     });
 
     expect([surfaceResult.kind, envelopeResult.kind]).toEqual(["ok", "ok"]);
@@ -1657,8 +1708,52 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     ["an adiabat starting above its join", { join_pressure_pa: 1e6 }],
     ["a mean molar mass of 0", { mean_molar_mass_g_per_mol: 0 }],
     ["a negative haze", { haze_tau_550: -1 }],
+    [
+      "an optical depth's exponent below 1",
+      { profile: { ...jupiterEnvelope().profile, optical_depth_exponent: 0.5 } },
+    ],
+    [
+      "an optical depth's exponent that is not a number",
+      { profile: { ...jupiterEnvelope().profile, optical_depth_exponent: Number.NaN } },
+    ],
   ])("refuses an envelope with %s", (_, change) => {
     expect(envelopeFault(change)).toBe("envelope unusable");
+  });
+
+  it("refuses an envelope's deck mode that names no listed deck, or no deck (R08's S4)", () => {
+    const { mode } = jupiterAmmoniaAndHaze();
+
+    expect(envelopeFault({ decks: [{ ...mode, deck: "CH4" }] })).toBe("aerosol mode unusable");
+    expect(envelopeFault({ decks: [{ ...mode, deck: null }] })).toBe("aerosol mode unusable");
+  });
+
+  it("refuses an envelope's haze that names a deck (R08's S4)", () => {
+    const { haze } = jupiterAmmoniaAndHaze();
+
+    expect(envelopeFault({ hazes: [{ ...haze, deck: "NH3" }] })).toBe("aerosol mode unusable");
+  });
+
+  it("refuses an envelope with two decks of one condensate", () => {
+    const { deck } = jupiterAmmoniaAndHaze();
+
+    expect(
+      envelopeFault({
+        condensate_decks: [
+          ...jupiterEnvelope().condensate_decks,
+          { ...deck, top_pa: deck.top_pa / 2 },
+        ],
+      }),
+    ).toBe("condensate deck unusable");
+  });
+
+  it("reads an envelope mode's coverage as the fraction it is, refusing none below 1", () => {
+    const { mode } = jupiterAmmoniaAndHaze();
+    const envelope = okSection(
+      recordOf(jupiterWithEnvelope({ ...jupiterEnvelope(), decks: [{ ...mode, coverage: 0.6 }] }))
+        .envelope,
+    );
+
+    expect(envelope.aerosols.modes[0]?.coverage).toBe(0.6);
   });
 
   it("reads an airless body's empty gases with no mixture figures", () => {

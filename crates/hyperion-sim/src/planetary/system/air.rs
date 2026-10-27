@@ -1,7 +1,8 @@
 //! The air's sections on the record (plan 14, P14.T54.b, the 23 → 24 batch's wiring): a surface's
 //! vertical structure (P14.T24.e, P14.T54.b.a) and its aerosol and absorber inventory (P14.T24.c
 //! with T24.g's sulphur, P14.T54.b.b), each held off the record until the bump
-//! ([`AIR_SECTIONS_VERSION`]).
+//! ([`AIR_SECTIONS_VERSION`]), as are the surface's modifiers (`system::modifiers`, P14.T54.b.c)
+//! and a gas-envelope body's envelope section (`system::envelope`, P14.T54.b.i).
 //!
 //! The record's surface section (`published_surface`) builds its air's members here from what it
 //! publishes: the vertical structure from its surface conditions with their climate regime, its
@@ -30,25 +31,27 @@ use crate::{GENERATOR_VERSION, GeneratorVersion};
 ///
 /// It holds the members P14.T54.b first puts on the record: a surface's vertical structure
 /// (P14.T24.e, P14.T54.b.a), its aerosol and absorber inventory (P14.T24.c with T24.g,
-/// P14.T54.b.b) and its modifiers (P14.T51.d with T51.j, P14.T54.b.c, `system::modifiers`), and the
-/// envelope as P14.T54.b's later subtasks wire it (decision-p14-t54b-open §1.2 item 6). Below it
+/// P14.T54.b.b) and its modifiers (P14.T51.d with T51.j, P14.T54.b.c, `system::modifiers`), and a
+/// sub-Neptune's or a giant's envelope section (P14.T24.d with T52.d on T50.b's abundances,
+/// P14.T54.b.i, `system::envelope`; decision-p14-t54b-open §1.2 item 6). Below it
 /// [`AirRules::in_force`] is [`AirRules::Held`], so that each is not
 /// modelled, as at 23, and every golden keeps its bits. The bump, P14.T54.b.l, deletes this hold,
-/// [`AirRules`] with its `Held` arm, `RecordRules::air`, the four source scans with their `HELD`
+/// [`AirRules`] with its `Held` arm, `RecordRules::air`, the five source scans with their `HELD`
 /// lists, and its tripwire (`the_air_sections_are_held_only_until_the_24_bump`).
 pub(crate) const AIR_SECTIONS_VERSION: GeneratorVersion = GeneratorVersion::new(24);
 
 /// Whether the record's surface carries its air's sections (the hold, [`AIR_SECTIONS_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum AirRules {
-    /// Versions 23's and before: the vertical structure, the aerosols and the modifiers are not
-    /// modelled, and nothing of them is computed.
+    /// Versions 23's and before: the vertical structure, the aerosols, the modifiers and the
+    /// envelope are not modelled, and nothing of them is computed.
     Held,
     /// The 23 → 24 batch's: the surface carries its air's vertical structure, computed as none for
     /// a surface with no air ([`record_structure`]), its aerosol and absorber inventory, the
     /// empty inventory for a surface with no air, not modelled for a magma ocean's air or a
     /// tenuous one ([`record_aerosols`]), and its modifiers
-    /// (`system::modifiers::record_modifiers`).
+    /// (`system::modifiers::record_modifiers`); a sub-Neptune or a giant its envelope, where the
+    /// generator models it (`system::envelope::record_envelope`).
     Batch,
 }
 

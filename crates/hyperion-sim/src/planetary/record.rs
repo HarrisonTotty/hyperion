@@ -26,8 +26,11 @@
 //! (P14.T34). A present body with a solid surface has its surface section [`Section::Ok`]
 //! (P14.T48.e) and its envelope [`Section::NotApplicable`]; a body in the gas-envelope state, a
 //! sub-Neptune or a giant, or, from generator version 24, a solid body under a supercritical
-//! envelope (P14.T53.b part 2), the other way round, its envelope [`Section::NotModelled`] until
-//! P14.T24.d (decision-p14-t35e-wire). The hooks section, [`Hooks`], holds the body's detail seed
+//! envelope (P14.T53.b part 2), the other way round (decision-p14-t35e-wire): a sub-Neptune's or a
+//! giant's envelope [`Section::Ok`] from generator version 24 where the generator models it
+//! ([`Envelope`], P14.T54.b.i), and [`Section::NotModelled`] below 24 and otherwise; a solid
+//! body's under a supercritical envelope not modelled until P14.T53.f. The hooks section,
+//! [`Hooks`], holds the body's detail seed
 //! (R09.T1.b): [`Section::Ok`] for a planet, moon or dwarf planet present at the record's time,
 //! and [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
 
@@ -39,6 +42,7 @@ use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltSite};
+use crate::planetary::chem::envelope_abundances::EnvelopeAbundances;
 use crate::planetary::chem::partition::Condensates;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::figure::BodyFigure;
@@ -49,6 +53,7 @@ use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
 pub use crate::planetary::hooks::AerosolInventory;
 use crate::planetary::hooks::DetailSeed;
+use crate::planetary::hooks::EnvelopeAtmosphere;
 pub use crate::planetary::hooks::SurfaceModifiers;
 pub use crate::planetary::hooks::TaxonomicClass;
 use crate::planetary::hooks::cold_traps::ColdTrapRules;
@@ -61,6 +66,7 @@ use crate::planetary::index::{BodyIndex, BodySub};
 pub use crate::planetary::label::BodyLabel;
 use crate::planetary::placement::OrbitHost;
 use crate::planetary::rings::Ring;
+use crate::substance::SubstanceId;
 use crate::time::UniverseTime;
 use crate::units::{
     EarthMasses, EarthRadii, Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared,
@@ -601,7 +607,7 @@ impl BulkProperties {
 /// vertical structure (P14.T24.e), its aerosol and absorber inventory (P14.T24.c with T24.g) and
 /// its modifiers (P14.T51.d with T51.j), each held off the record until P14.T54.b's bump at
 /// generator version 24, every substance in them a
-/// [`SubstanceId`](crate::substance::SubstanceId), and the members
+/// [`SubstanceId`], and the members
 /// whose tasks land later, each [`Modelled::NotModelled`] until they do (decision-composition
 /// §1.10).
 ///
@@ -981,15 +987,70 @@ impl<T> Modelled<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Biosphere {}
 
-/// The contents of an envelope section: a gas-envelope body's air, its profile, composition and
-/// decks (P14.T24.d), the section of the bodies whose surface section is
+/// The contents of an envelope section: a gas-envelope body's visible atmosphere (P14.T24.d's
+/// profile and internal heat, P14.T52.d's chemistry, decks, hazes and absorbers, on P14.T50.b's
+/// element abundances; wired by P14.T54.b.i), the section of the bodies whose surface section is
 /// [`Section::NotApplicable`] (P14.T48.e's gas-envelope split, decision-p14-t35e-wire §2.5).
 ///
-/// Not built, so the type has no value: a gas-envelope body's envelope is
-/// [`Section::NotModelled`] until P14.T24.d fills it, and every other body's
-/// [`Section::NotApplicable`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Envelope {}
+/// A gas-envelope body's envelope is [`Section::Ok`] from generator version 24 where the generator
+/// models it, and [`Section::NotModelled`] below 24 (the air's sections' hold), for an envelope
+/// that is not hydrogen-dominated (decision-p14-t24d-profile §4), one whose 1-bar or 10-mbar level
+/// is hotter than the chemistry's records, a host with no \[α/Fe\] of its own or no disc, and inputs
+/// a step refuses; a solid body's under a supercritical envelope (P14.T53.b part 2) is not
+/// modelled until P14.T53.f; every other body's is not applicable. Every value is the record's:
+/// the wire converts and computes none.
+///
+/// Its atmosphere's modes are its decks' (each naming its deck's condensate, one of
+/// [`EnvelopeAtmosphere::decks`]), then its hazes' (each of its own material, which no deck
+/// condenses: the S₈ haze, soot, the ice giants' haze and the chromophore have no law aloft).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Envelope {
+    supercritical: Option<SubstanceId>,
+    abundances: EnvelopeAbundances,
+    atmosphere: EnvelopeAtmosphere,
+}
+
+impl Envelope {
+    /// An H₂/He envelope, a giant's or a sub-Neptune's, of element abundances `abundances` and
+    /// visible atmosphere `atmosphere` (P14.T54.b.i): no supercritical condensable.
+    #[must_use]
+    pub(crate) const fn hydrogen_helium(
+        abundances: EnvelopeAbundances,
+        atmosphere: EnvelopeAtmosphere,
+    ) -> Self {
+        Self {
+            supercritical: None,
+            abundances,
+            atmosphere,
+        }
+    }
+
+    /// The condensable whose supercritical envelope this is: `None` for an H₂/He envelope, every
+    /// envelope this generator models; P14.T53.f gives a steam envelope its condensable.
+    #[must_use]
+    pub const fn supercritical(&self) -> Option<SubstanceId> {
+        self.supercritical
+    }
+
+    /// Its element abundances by number relative to hydrogen (P14.T50.b), from the host's
+    /// \[Fe/H\], \[α/Fe\], C/O and Mg/Si, its formation zone, its mass and bulk, its effective
+    /// temperature (`T_eq`⁴ + `T_int`⁴)^¼ with its atmosphere's `T_int`, and its primordial He/H: the
+    /// host star's own, fractionated by its escape (P14.T53.a), as its derivation carries it.
+    #[must_use]
+    pub const fn abundances(&self) -> &EnvelopeAbundances {
+        &self.abundances
+    }
+
+    /// Its visible atmosphere (P14.T52.d): its profile (P14.T24.d's Guillot profile joined to its
+    /// dry adiabat, whose [`grey`](crate::planetary::hooks::EnvelopeProfile::grey) parameters
+    /// give κ₁, n, γ and f), its internal and irradiation temperatures, its composition at 1 bar,
+    /// its decks with their modes, its hazes, its absorbers at 10 mbar and its condensables not
+    /// formed.
+    #[must_use]
+    pub const fn atmosphere(&self) -> &EnvelopeAtmosphere {
+        &self.atmosphere
+    }
+}
 
 /// The contents of a hooks section, what the generators of surfaces, life and civilisations read of
 /// a body (design note 16): so far its detail seed (the rendering plans' R09.T1.b), joined by the
@@ -1416,9 +1477,11 @@ impl BodyRecord {
         self.surface
     }
 
-    /// The envelope (P14.T48.e's gas-envelope split): [`Section::NotModelled`] for a present body
-    /// in the gas-envelope state, a sub-Neptune or a giant, until P14.T24.d fills [`Envelope`],
-    /// and [`Section::NotApplicable`] for every other body.
+    /// The envelope (P14.T48.e's gas-envelope split): for a present sub-Neptune or giant,
+    /// [`Section::Ok`] from generator version 24 where the generator models it ([`Envelope`],
+    /// P14.T54.b.i) and [`Section::NotModelled`] below 24 and where it does not; for a solid body
+    /// under a supercritical envelope (from 24, P14.T53.b part 2) [`Section::NotModelled`] until
+    /// P14.T53.f; and [`Section::NotApplicable`] for every other body.
     ///
     /// Exactly one of it and the [`surface`](Self::surface) applies to a present body with a bulk
     /// section.
@@ -1643,7 +1706,7 @@ impl BodyRecordBuilder {
     /// critical temperature whose liquid-like column over its critical isochore holds at least
     /// [`THIN_ENVELOPE_FRACTION`](crate::planetary::params::THIN_ENVELOPE_FRACTION) of the mass,
     /// under its surface gravity), the surface [`Section::NotApplicable`] and the envelope
-    /// [`Section::NotModelled`], until P14.T24.d.
+    /// [`Section::NotModelled`], which the generator then sets where it computes it (P14.T54.b.i).
     ///
     /// The tags read the derivation's own class and surface gravity
     /// ([`DerivedBody::surface_gravity`]). A generator that publishes another bulk than the
@@ -2180,7 +2243,7 @@ mod tests {
     fn a_derivation_tags_the_surface_and_the_envelope_by_the_gas_envelope_split() {
         // The builder's tags (P14.T48.e): a class with a solid surface leaves the surface for the
         // generator to set and has no envelope; a giant has no surface and its envelope is not
-        // modelled until P14.T24.d.
+        // modelled, for the generator to set where it computes one (P14.T54.b.i).
         let (earth, saturn) = earth_and_saturn();
         let earth = planet_record(3, &earth, 1.0);
         assert_eq!(earth.level(), DetailLevel::Full);

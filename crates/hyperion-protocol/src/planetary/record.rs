@@ -551,12 +551,14 @@ pub struct BodyRecordDto {
     /// thousandth of the body's mass), whose air is its `envelope`, for a ring, a belt or the halo,
     /// and for a body not present.
     pub surface: SectionDto<BodySurfaceDto>,
-    /// Its gas envelope (`surface`, P14.T35.e): `not_modelled` for a present body in the
-    /// gas-envelope state, or, from generator version 24, a solid body under a supercritical
-    /// envelope (P14.T53.b part 2), until P14.T24.d, and `not_applicable` for every other body, so
-    /// that a present body with a bulk section has exactly one of `surface` and `envelope` other
-    /// than `not_applicable`. The server always sends it; it is optional only so that an older server's
-    /// record, which lacks it, still reads, and a client reads it absent as `not_modelled`.
+    /// Its gas envelope (`surface`, P14.T35.e): for a present body in the gas-envelope state, `ok`
+    /// from generator version 24 where the generator models it (P14.T54.b.i) and `not_modelled`
+    /// otherwise, below 24 among them; from 24, `not_modelled` for a solid body under a
+    /// supercritical envelope (P14.T53.b part 2) until P14.T53.f; and `not_applicable` for every
+    /// other body, so that a present body with a bulk section has exactly one of `surface` and
+    /// `envelope` other than `not_applicable`. The server always sends it; it is optional only so
+    /// that an older server's record, which lacks it, still reads, and a client reads it absent as
+    /// `not_modelled`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub envelope: Option<SectionDto<BodyEnvelopeDto>>,
@@ -984,7 +986,8 @@ pub(crate) mod tests {
 
     /// P14.T35.e: the surface's three states other than `ok` keep the bytes they had before the
     /// section had a value, and the envelope's take the same forms; a gas-envelope body's envelope
-    /// is `not_modelled` until P14.T24.d.
+    /// is `not_modelled` below generator version 24, and from it where the generator does not model
+    /// it (P14.T54.b.i).
     #[test]
     fn the_surface_and_envelope_sections_in_every_other_state() {
         for (state, surface) in [

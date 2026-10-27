@@ -27,6 +27,7 @@ type ResponseName =
   | "system_bodies_populated"
   | "body_detail_response"
   | "body_detail_jupiter"
+  | "body_detail_hot_jupiter"
   | "body_detail_mass_and_orbit"
   | "body_detail_contact"
   | "body_detail_lava_world"
@@ -114,11 +115,21 @@ export function earthContact(): ResponseFor<"body_detail"> {
 
 /**
  * The slice's Jupiter as a whole record at the `full` level: its list entry with a surface that
- * does not apply, as a gas giant's does not, its envelope `ok` (P14.T35.e, illustrative values),
- * and hooks not modelled, like the Earth's.
+ * does not apply, as a gas giant's does not, its envelope `ok`, the generator's on its bulk
+ * (P14.T54.b.i), and hooks not modelled, like the Earth's.
  */
 export function jupiterDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_jupiter", "body_detail");
+}
+
+/**
+ * A hot Jupiter in the Jupiter's record form at the `full` level (P14.T54.b.i): an illustrative
+ * bulk at HD 209458 b's measured mass, radius and equilibrium temperature, and its envelope the
+ * generator's on that bulk, with alkali absorbers, silicate decks below its photosphere and no
+ * ammonia deck or haze. `packages/protocol/src/planetary.test.ts` cites each measured figure.
+ */
+export function hotJupiterDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_hot_jupiter", "body_detail");
 }
 
 /**

@@ -23,8 +23,9 @@ material: string,
 phase: SubstancePhaseDto, 
 /**
  * The deck it belongs to, by the deck's condensate key, so that a deck of several modes is
- * one deck to its readers: in a surface's inventory, one of its `decks`. `null` for a mode of
- * no deck: the dust, a haze, and a sulphate layer, which names no deck though its material,
+ * one deck to its readers: in a surface's inventory, one of its `decks`; in an envelope, one
+ * of its `condensate_decks`. `null` for a mode of no deck: the dust, a haze (every mode of an
+ * envelope's `hazes`), and a sulphate layer, which names no deck though its material,
  * sulphuric acid, condenses as a deck on another world.
  */
 deck: string | null, 
@@ -68,14 +69,18 @@ top_pa: number,
  */
 f_sed: number, 
 /**
- * The share of the sky it covers, in `[0, 1]`: a deck's mode the body's cloud fraction
- * (P14.T51.b's), a rule's mode (the dust, a haze, a sulphate layer) the whole sky.
+ * The share of the sky it covers, dimensionless, in `[0, 1]`: in a surface's inventory, a
+ * deck's mode the body's cloud fraction (P14.T51.b's) and a rule's mode (the dust, a haze, a
+ * sulphate layer) the whole sky; every mode of an envelope, its decks' and its hazes', the
+ * whole sky, 1, at generator version 24. A reader applies it as the fraction it is, never as
+ * 1 by rule.
  */
 coverage: number, 
 /**
  * The temperature its phase, grain density and τ(550) were taken at, K, positive
  * (decision-p14-t54a-grain-density §3): a deck's base's, a sulphate layer's at the skin, the
- * dust's at the ground. Absent where no optics were taken (an aggregate's).
+ * dust's at the ground, an envelope haze's at its base on the envelope's profile. Absent where
+ * no optics were taken (an aggregate's).
  */
 temperature_k?: number, 
 /**

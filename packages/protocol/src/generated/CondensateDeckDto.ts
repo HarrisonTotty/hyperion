@@ -16,11 +16,15 @@ condensate: string,
  */
 phase: SubstancePhaseDto, 
 /**
- * The pressure of its base, Pa, positive and at least `top_pa`.
+ * The pressure of its base, Pa, positive and at least `top_pa`: the deepest level of its
+ * column at which its vapour reaches saturation, or the column's bottom (a surface air's
+ * ground, an envelope's 10 kbar, 10⁹ Pa) where the vapour is saturated there already, its
+ * condensate from below the column not counted.
  */
 base_pa: number, 
 /**
- * The temperature at its base on the air's vertical structure, K, positive.
+ * The temperature at its base on the air's vertical structure or the envelope's profile, K,
+ * positive.
  */
 base_temperature_k: number, 
 /**
@@ -28,8 +32,10 @@ base_temperature_k: number,
  */
 top_pa: number, 
 /**
- * Its limiting vapour's mole fraction below the deck, in `[0, 1]`: the air's at the ground,
- * less what a deck below takes of it.
+ * Its limiting vapour's mole fraction below the deck, dimensionless, in `[0, 1]`: in a
+ * surface's air, the air's at the ground; in an envelope, its quenched gas's at 1 bar before
+ * the decks trim it, the gas its decks' loop starts from at the column's 10-kbar bottom; in
+ * each, less what a deeper deck takes of it.
  *
  * Whose vapour it is follows the condensate's saturation law: the condensate's own gas for a
  * law that reads one species (a volatile's own curve, as every deck of the generated sample's

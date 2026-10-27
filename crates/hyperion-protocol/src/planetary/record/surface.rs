@@ -591,8 +591,9 @@ pub struct AerosolModeDto {
     /// Its phase: `solid` or `liquid`, never `vapour` or `supercritical`.
     pub phase: SubstancePhaseDto,
     /// The deck it belongs to, by the deck's condensate key, so that a deck of several modes is
-    /// one deck to its readers: in a surface's inventory, one of its `decks`. `null` for a mode of
-    /// no deck: the dust, a haze, and a sulphate layer, which names no deck though its material,
+    /// one deck to its readers: in a surface's inventory, one of its `decks`; in an envelope, one
+    /// of its `condensate_decks`. `null` for a mode of no deck: the dust, a haze (every mode of an
+    /// envelope's `hazes`), and a sulphate layer, which names no deck though its material,
     /// sulphuric acid, condenses as a deck on another world.
     pub deck: Option<String>,
     /// Its shape class.
@@ -626,12 +627,16 @@ pub struct AerosolModeDto {
     /// `base_pa`)^(f+1)) ÷ (1 − (`top_pa` ÷ `base_pa`)^(f+1)): plan 08 cuts a mode at a gas
     /// envelope's floor by it.
     pub f_sed: f64,
-    /// The share of the sky it covers, in `[0, 1]`: a deck's mode the body's cloud fraction
-    /// (P14.T51.b's), a rule's mode (the dust, a haze, a sulphate layer) the whole sky.
+    /// The share of the sky it covers, dimensionless, in `[0, 1]`: in a surface's inventory, a
+    /// deck's mode the body's cloud fraction (P14.T51.b's) and a rule's mode (the dust, a haze, a
+    /// sulphate layer) the whole sky; every mode of an envelope, its decks' and its hazes', the
+    /// whole sky, 1, at generator version 24. A reader applies it as the fraction it is, never as
+    /// 1 by rule.
     pub coverage: f64,
     /// The temperature its phase, grain density and τ(550) were taken at, K, positive
     /// (decision-p14-t54a-grain-density §3): a deck's base's, a sulphate layer's at the skin, the
-    /// dust's at the ground. Absent where no optics were taken (an aggregate's).
+    /// dust's at the ground, an envelope haze's at its base on the envelope's profile. Absent where
+    /// no optics were taken (an aggregate's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub temperature_k: Option<f64>,
@@ -651,14 +656,20 @@ pub struct CondensateDeckDto {
     /// Its phase at its base: `solid` or `liquid`. A deck keeps the phase it forms in, so that a
     /// liquid deck that rises above its freezing level stays liquid.
     pub phase: SubstancePhaseDto,
-    /// The pressure of its base, Pa, positive and at least `top_pa`.
+    /// The pressure of its base, Pa, positive and at least `top_pa`: the deepest level of its
+    /// column at which its vapour reaches saturation, or the column's bottom (a surface air's
+    /// ground, an envelope's 10 kbar, 10⁹ Pa) where the vapour is saturated there already, its
+    /// condensate from below the column not counted.
     pub base_pa: f64,
-    /// The temperature at its base on the air's vertical structure, K, positive.
+    /// The temperature at its base on the air's vertical structure or the envelope's profile, K,
+    /// positive.
     pub base_temperature_k: f64,
     /// The pressure of its top, Pa, positive.
     pub top_pa: f64,
-    /// Its limiting vapour's mole fraction below the deck, in `[0, 1]`: the air's at the ground,
-    /// less what a deck below takes of it.
+    /// Its limiting vapour's mole fraction below the deck, dimensionless, in `[0, 1]`: in a
+    /// surface's air, the air's at the ground; in an envelope, its quenched gas's at 1 bar before
+    /// the decks trim it, the gas its decks' loop starts from at the column's 10-kbar bottom; in
+    /// each, less what a deeper deck takes of it.
     ///
     /// Whose vapour it is follows the condensate's saturation law: the condensate's own gas for a
     /// law that reads one species (a volatile's own curve, as every deck of the generated sample's
@@ -723,8 +734,9 @@ pub struct MixingRatioNodeDto {
     pub relative_mixing_ratio: f64,
 }
 
-/// An absorbing gas that is not one of the section's well-mixed `gases`, with its column and
-/// layer (plan 14, P14.T24.c): ozone, and sulphur dioxide by P14.T24.g.
+/// An absorbing gas with its column and layer (plan 14, P14.T24.c): in a surface's inventory, one
+/// that is not one of the section's well-mixed `gases` (ozone, and sulphur dioxide by P14.T24.g);
+/// in an envelope, its 10-mbar gas's (P14.T52.d), which its `composition` at 1 bar may hold too.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AbsorberDto {
@@ -1186,26 +1198,42 @@ pub struct BodySurfaceDto {
 }
 
 /// The parameters of an envelope's irradiated grey profile above its join to the adiabat: Guillot
-/// 2010's (A&A 520, A27) Eq. 29, with τ = `κ_th` p ÷ g and g the bulk section's surface gravity.
+/// 2010's (A&A 520, A27) Eq. 29 in the thermal optical depth τ, which holds for an opacity that
+/// varies with pressure at a fixed γ, with τ = `κ_th` p₁ ÷ (n g) × (p ÷ p₁)ⁿ, p₁ = 1 bar (10⁵ Pa),
+/// n the optical depth's exponent and g the bulk section's surface gravity.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct GuillotProfileDto {
-    /// The mean thermal opacity `κ_th`, m² kg⁻¹, positive.
+    /// The thermal opacity at 1 bar, `κ_th`, m² kg⁻¹, positive: at a pressure p the opacity is
+    /// `κ_th` (p ÷ 1 bar)ⁿ⁻¹.
     pub thermal_opacity_m2_per_kg: f64,
-    /// γ, the visible opacity over the thermal, `κ_v` ÷ `κ_th`, dimensionless and positive.
+    /// n, the exponent of the optical depth's power law τ ∝ pⁿ, dimensionless, at least 1: 1 for an
+    /// opacity independent of pressure, 2 for one proportional to it, as collision-induced
+    /// absorption is (Robinson and Catling 2012, Astrophys. J. 757, 104, Eq. 6). 2 for every
+    /// envelope from P14.T24.d.
+    pub optical_depth_exponent: f64,
+    /// γ, the visible opacity over the thermal, `κ_v` ÷ `κ_th`, dimensionless and positive: the
+    /// same at every depth. `κ_v` is the grey profile's mean opacity to the host's light, a
+    /// parameter of T(p), not an extinction at 550 nm.
     pub opacity_ratio: f64,
     /// f, the redistribution of the irradiation over the planet, dimensionless and positive: ¼ for
     /// an average over the whole sphere.
     pub redistribution_factor: f64,
 }
 
-/// A gas-envelope body's visible atmosphere: its profile, composition and decks (plan 14,
-/// P14.T24.d with T52.d; the simulation's `record::Envelope`).
+/// A gas-envelope body's visible atmosphere (plan 14, P14.T24.d with P14.T52.d on P14.T50.b's
+/// abundances; the simulation's `record::Envelope`): its internal heat and irradiation, its grey
+/// profile joined to its dry adiabat, its composition at 1 bar, its condensate decks with their
+/// modes, its photochemical hazes, its absorbers at 10 mbar and its condensables not formed.
 ///
-/// The section is `not_modelled` for every gas-envelope body, and from generator version 24 for a
-/// solid body under a supercritical envelope (P14.T53.b part 2), until P14.T24.d, which may give
-/// these members their final shape before a build first sends one, and `not_applicable` for every
-/// other body, whose surface section is the applicable one.
+/// Sent `ok` from P14.T54.b's bump at generator version 24 where the generator models it, and
+/// `not_modelled` otherwise: below 24; for an envelope that is not hydrogen-dominated, or whose
+/// 1-bar or 10-mbar level is hotter than the chemistry's records (6,000 K); for a body whose host
+/// has no \[α/Fe\] of its own or no disc to place its formation, or whose inputs a step of the
+/// chain refuses; and, from 24, for a solid body under a supercritical envelope (P14.T53.b part 2,
+/// and from 25 part 3's steam envelope) until P14.T53.f. `not_applicable` for every other body,
+/// whose surface section is the applicable one. Its shape is P14.T54.b.i's, fixed from 24's first
+/// send.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyEnvelopeDto {
@@ -1217,29 +1245,76 @@ pub struct BodyEnvelopeDto {
     /// before P14.T53.f gives that envelope its model and this its value. Always present on an `ok`
     /// envelope, as `null` where none.
     pub supercritical: Option<String>,
-    /// The internal temperature `T_int`, K, not negative: 0 for a body with no internal heat.
+    /// The internal temperature `T_int` the profile reads, K, positive: the record's internal heat
+    /// (ruling 112.7) from 0.414 Jupiter masses, and below that blended with P14.T24.d's cooling
+    /// law, which alone gives it below 0.3 Jupiter masses. Below 0.414 Jupiter masses it is
+    /// therefore not the bulk section's (`T_eff`⁴ − `T_eq`⁴)^¼, whose `effective_temperature_k` is
+    /// the record's own.
     pub internal_temperature_k: f64,
-    /// The irradiation temperature `T_irr`, K, not negative.
+    /// The irradiation temperature `T_irr`, K, not negative: `T_irr`⁴ = `T_eq`⁴ ÷ f, from the bulk
+    /// section's equilibrium temperature, which carries the Bond albedo, so that the profile
+    /// radiates the bulk section's absorbed starlight.
     pub irradiation_temperature_k: f64,
     /// The grey profile's parameters.
     pub profile: GuillotProfileDto,
-    /// The pressure at which the profile joins the dry adiabat, where its gradient
-    /// dln T ÷ dln p first exceeds R ÷ `c_p`, Pa, positive.
+    /// The pressure at which the profile joins the dry adiabat, where its gradient dln T ÷ dln p
+    /// first exceeds R ÷ `c_p`, Pa, positive and finite: with n = 2 and a positive `T_int` the
+    /// gradient tends to ½ at depth, above any ideal gas's R ÷ `c_p`, so every envelope has one.
     pub join_pressure_pa: f64,
-    /// The adiabat's nodes below the join, from `join_pressure_pa` to 100 bar, the pressures
-    /// ascending; deeper, the temperature follows the last segment's exponent.
+    /// The adiabat's nodes from `join_pressure_pa` to the larger of 100 bar (10⁷ Pa) and e^0.3
+    /// times the join's pressure, the pressures ascending evenly in ln p (P14.T24.e's spacing), the
+    /// first at the join at the grey profile's temperature there; between two nodes the
+    /// temperature follows the power law between them, and below the last node the last
+    /// segment's.
     pub adiabat: Vec<ProfileNodeDto>,
-    /// The envelope's gases by number, largest first, their mole fractions summing to 1 to 10⁻⁹.
+    /// The envelope's gases at 1 bar (10⁵ Pa) by number, quenched and trimmed by its decks, each
+    /// at least 10⁻¹², largest first (ties in registry order), their mole fractions summing to 1
+    /// to 10⁻⁹. It is the gas at that level alone, from which the decks form: the generator
+    /// speciates the envelope at 1 bar and at its absorbers' 10 mbar only, and states no profile
+    /// between or below them; above a deck its condensate's vapour is that deck's
+    /// `vapour_mole_fraction_above`, by its law.
     pub composition: Vec<GasShareDto>,
     /// The gases' mean molar mass, g mol⁻¹, positive.
     pub mean_molar_mass_g_per_mol: f64,
     /// The gases' mixed `c_p` ÷ R at the 1-bar level's temperature, dimensionless and positive: for
     /// display, since no reader derives a lapse rate from it.
     pub heat_capacity_over_r: f64,
-    /// The condensate decks, as aerosol modes.
+    /// The modes of its condensate decks (P14.T52.c's loop along the profile from 10 kbar, 10⁹ Pa,
+    /// up to 1 Pa), each deck's in `condensate_decks`' order, each naming one of them as its
+    /// `deck` and covering the whole sky, `coverage` 1 at generator version 24. A client refuses a
+    /// mode here that names no listed deck, and one in `hazes` that names one; the split is part
+    /// of the shape from the first send.
     pub decks: Vec<AerosolModeDto>,
-    /// The haze's optical depth at 550 nm, dimensionless and not negative.
+    /// Its photochemical hazes' modes, on an envelope a star's ultraviolet lights (P14.T52.b's
+    /// rules, in this order): the S₈ haze (Gao et al. 2017), soot at an equilibrium temperature
+    /// between 600 and 950 K (Gao et al. 2020, tapered in below their grid's 700 K), the ice
+    /// giants' haze from a CH₄ deck's base (Irwin et al. 2022) and the chromophore over an NH₃
+    /// deck with no CH₄ deck above it (Braude et al. 2020). Each is of its own material, names no
+    /// deck (`deck` `null`) and covers the whole sky, `coverage` 1 at generator version 24; the
+    /// list is empty for an envelope no star lights. No other haze is modelled: a cool giant's
+    /// stratospheric haze beyond these rules is not computed, so a lit envelope's list is these
+    /// four rules' output, not a clear upper air.
+    pub hazes: Vec<AerosolModeDto>,
+    /// The hazes' optical depth at 550 nm, dimensionless and not negative: the sum of `hazes`'
+    /// `tau_550`, in their order, over those that carry one; 0 where none does.
     pub haze_tau_550: f64,
+    /// Its condensate decks, hottest base first, at most one a condensate, which `decks`' modes
+    /// name (P14.T24.c's deck shape; decision-p14-t54b-open §2.2 (5)).
+    pub condensate_decks: Vec<CondensateDeckDto>,
+    /// Its absorbers at 10 mbar (10³ Pa; R08.T4.e's lines), in registry order, each species at
+    /// most once: the atoms of P14.T52.a's metals (Na, K, Mg, Al, Si, Ca, Ti, V, Cr, Mn, Fe, Ni and
+    /// Zn) and their first ions by their registry keys (`Na+`, `K+`, …), `TiO`, `VO`, `SiO`, `H`,
+    /// `H-` and `e-`, each where its share of the 10-mbar gas (quenched, trimmed by the decks and
+    /// renormalised) is at least 10⁻¹², as a slab of that share from 10 mbar to 1 Pa (`profile`
+    /// `null`); and, on an envelope a star's ultraviolet lights, photochemical SO₂'s layer (Tsai et
+    /// al. 2023), a slab too. A slab is the 10-mbar level's share of its species, stated from 10
+    /// mbar up: a species that `composition` also holds is one gas read at two levels, so the slab
+    /// neither adds to its 1-bar share above 10 mbar nor replaces it below. `FeH`, which has no
+    /// thermochemistry, is never listed: it is not modelled.
+    pub absorbers: Vec<AbsorberDto>,
+    /// The condensables whose vapour its gas holds that its decks' loop labels rather than traps,
+    /// each with why, in registry order.
+    pub not_formed: Vec<NotFormedCondensateDto>,
 }
 
 #[cfg(test)]
@@ -1516,16 +1591,23 @@ pub(crate) mod tests {
         wire
     }
 
-    /// A Jupiter's envelope, illustrative: Guillot 2010's fiducial opacities, the protosolar
-    /// atmosphere depleted of helium (He/H₂ 0.157 and CH₄/H₂ 2.1 × 10⁻³ by number), the adiabat
-    /// through 166.1 K at 1 bar, and an ammonia-ice deck at 0.45–0.7 bar.
+    /// A Jupiter's envelope, illustrative, on the shared fixture's Jupiter's bulk section (`T_eq`
+    /// 111.6 K, `T_eff` 128.9 K): `T_int` (128.9⁴ − 111.6⁴)^¼ = 104.9 K and `T_irr` (4 × 111.6⁴)^¼
+    /// = 157.8 K, the generator's grey profile (κ 2.87 × 10⁻³ m² kg⁻¹, n 2, γ 0.4, f ¼), the
+    /// protosolar atmosphere depleted of helium (He/H₂ 0.157 and CH₄/H₂ 2.1 × 10⁻³ by number), the
+    /// adiabat through 166.1 K at 1 bar, an ammonia-ice deck at 0.45–0.7 bar
+    /// ([`ammonia_deck`], [`ammonia_condensate_deck`]), its red chromophore over it
+    /// ([`chromophore_haze`]), a sodium slab at 10 mbar (a warmer giant's: the generator's Jupiter
+    /// traps its sodium in a deep `Na₂S` deck and lists no absorber) and the generator's Jupiter's
+    /// quartz, displaced by enstatite.
     pub(crate) fn jupiter_envelope() -> BodyEnvelopeDto {
         BodyEnvelopeDto {
             supercritical: None,
-            internal_temperature_k: 99.0,
-            irradiation_temperature_k: 155.4,
+            internal_temperature_k: 104.9,
+            irradiation_temperature_k: 157.8,
             profile: GuillotProfileDto {
-                thermal_opacity_m2_per_kg: 1e-3,
+                thermal_opacity_m2_per_kg: 2.87e-3,
+                optical_depth_exponent: 2.0,
                 opacity_ratio: 0.4,
                 redistribution_factor: 0.25,
             },
@@ -1565,12 +1647,27 @@ pub(crate) mod tests {
             mean_molar_mass_g_per_mol: 2.310_487_1,
             heat_capacity_over_r: 3.3654,
             decks: vec![ammonia_deck()],
-            haze_tau_550: 0.5,
+            hazes: vec![chromophore_haze()],
+            haze_tau_550: 0.31,
+            condensate_decks: vec![ammonia_condensate_deck()],
+            absorbers: vec![AbsorberDto {
+                species: "Na".to_owned(),
+                column_m2: 1.05e19,
+                base_pa: 1e3,
+                top_pa: 1.0,
+                profile: None,
+            }],
+            not_formed: vec![NotFormedCondensateDto {
+                condensate: "SiO2".to_owned(),
+                reason: NotFormedReasonDto::Displaced {
+                    by: "MgSiO3".to_owned(),
+                },
+            }],
         }
     }
 
-    /// The ammonia-ice deck of [`jupiter_envelope`], illustrative, over the whole sky at its base's
-    /// temperature on the envelope's adiabat (about 149 K at 0.7 bar).
+    /// The ammonia-ice deck's mode of [`jupiter_envelope`], illustrative, over the whole sky at its
+    /// base's temperature on the envelope's adiabat (about 149 K at 0.7 bar).
     pub(crate) fn ammonia_deck() -> AerosolModeDto {
         AerosolModeDto {
             material: "NH3".to_owned(),
@@ -1615,13 +1712,92 @@ pub(crate) mod tests {
         })
     }
 
+    /// The ammonia-ice deck of [`jupiter_envelope`], which [`ammonia_deck`] names, illustrative:
+    /// its vapour below about the generator's Jupiter's, 2.4 × 10⁻⁴, and its cold trap's above.
+    pub(crate) fn ammonia_condensate_deck() -> CondensateDeckDto {
+        CondensateDeckDto {
+            condensate: "NH3".to_owned(),
+            phase: SubstancePhaseDto::Solid,
+            base_pa: 7e4,
+            base_temperature_k: 149.1,
+            top_pa: 4.5e4,
+            vapour_mole_fraction_below: 2.4e-4,
+            vapour_mole_fraction_above: 2e-7,
+            f_sed: 2.0,
+            extrapolated: false,
+        }
+    }
+
+    pub(crate) fn ammonia_condensate_deck_json() -> Value {
+        json!({
+            "condensate": "NH3",
+            "phase": "solid",
+            "base_pa": 7e4,
+            "base_temperature_k": 149.1,
+            "top_pa": 4.5e4,
+            "vapour_mole_fraction_below": 2.4e-4,
+            "vapour_mole_fraction_above": 2e-7,
+            "f_sed": 2.0,
+            "extrapolated": false,
+        })
+    }
+
+    /// The red chromophore of [`jupiter_envelope`], illustrative, after the generator's Jupiter's:
+    /// Braude et al. 2020's column and particles, a well-mixed slab between its Gaussian's 1/e
+    /// points about 0.2 bar, its optics at its base's temperature on the envelope's profile, and no
+    /// deck of its own.
+    pub(crate) fn chromophore_haze() -> AerosolModeDto {
+        AerosolModeDto {
+            material: "chromophore".to_owned(),
+            phase: SubstancePhaseDto::Solid,
+            deck: None,
+            shape: AerosolShapeDto::Sphere,
+            size_distribution: Some(SizeDistributionDto::Gamma {
+                effective_radius_m: 5e-8,
+                effective_variance: 0.05,
+            }),
+            column_mass_kg_m2: Some(6.3e-4),
+            tau_550: Some(0.31),
+            tau_basis: Some(AerosolTauBasisDto::Sphere),
+            base_pa: 2.57e4,
+            top_pa: 1.56e4,
+            f_sed: 0.0,
+            coverage: 1.0,
+            temperature_k: Some(123.5),
+            not_modelled: None,
+        }
+    }
+
+    pub(crate) fn chromophore_haze_json() -> Value {
+        json!({
+            "material": "chromophore",
+            "phase": "solid",
+            "deck": null,
+            "shape": "sphere",
+            "size_distribution": {
+                "type": "gamma",
+                "effective_radius_m": 5e-8,
+                "effective_variance": 0.05,
+            },
+            "column_mass_kg_m2": 6.3e-4,
+            "tau_550": 0.31,
+            "tau_basis": "sphere",
+            "base_pa": 2.57e4,
+            "top_pa": 1.56e4,
+            "f_sed": 0.0,
+            "coverage": 1.0,
+            "temperature_k": 123.5,
+        })
+    }
+
     pub(crate) fn jupiter_envelope_json() -> Value {
         json!({
             "supercritical": null,
-            "internal_temperature_k": 99.0,
-            "irradiation_temperature_k": 155.4,
+            "internal_temperature_k": 104.9,
+            "irradiation_temperature_k": 157.8,
             "profile": {
-                "thermal_opacity_m2_per_kg": 1e-3,
+                "thermal_opacity_m2_per_kg": 2.87e-3,
+                "optical_depth_exponent": 2.0,
                 "opacity_ratio": 0.4,
                 "redistribution_factor": 0.25,
             },
@@ -1640,15 +1816,32 @@ pub(crate) mod tests {
             "mean_molar_mass_g_per_mol": 2.310_487_1,
             "heat_capacity_over_r": 3.3654,
             "decks": [ammonia_deck_json()],
-            "haze_tau_550": 0.5,
+            "hazes": [chromophore_haze_json()],
+            "haze_tau_550": 0.31,
+            "condensate_decks": [ammonia_condensate_deck_json()],
+            "absorbers": [
+                {
+                    "species": "Na",
+                    "column_m2": 1.05e19,
+                    "base_pa": 1e3,
+                    "top_pa": 1.0,
+                    "profile": null,
+                },
+            ],
+            "not_formed": [
+                { "condensate": "SiO2", "reason": { "type": "displaced", "by": "MgSiO3" } },
+            ],
         })
     }
 
-    /// A warm sub-Neptune's envelope, illustrative: no internal heat stated, water and methane
-    /// beside the hydrogen and helium, and no deck.
+    /// A warm sub-Neptune's envelope, illustrative, of 10 M⊕ at 4.57 Gyr: P14.T24.d's cooling
+    /// law's `T_int`, 84.13 K × (10 ÷ 95.161)^0.2744 = 45.34 K, `T_irr` 640 K (`T_eq` 452.5 K),
+    /// water and methane beside the hydrogen and helium, and every list empty, the wire form of an
+    /// envelope with none (the generator's would hold its refractories' and salts' decks, far
+    /// below 100 bar).
     pub(crate) fn sub_neptune_envelope() -> BodyEnvelopeDto {
         BodyEnvelopeDto {
-            internal_temperature_k: 0.0,
+            internal_temperature_k: 45.34,
             irradiation_temperature_k: 640.0,
             join_pressure_pa: 2e6,
             adiabat: vec![
@@ -1682,7 +1875,11 @@ pub(crate) mod tests {
             mean_molar_mass_g_per_mol: 2.602_556_7,
             heat_capacity_over_r: 3.3679,
             decks: Vec::new(),
+            hazes: Vec::new(),
             haze_tau_550: 0.0,
+            condensate_decks: Vec::new(),
+            absorbers: Vec::new(),
+            not_formed: Vec::new(),
             ..jupiter_envelope()
         }
     }
@@ -1690,7 +1887,7 @@ pub(crate) mod tests {
     pub(crate) fn sub_neptune_envelope_json() -> Value {
         let mut wire = jupiter_envelope_json();
         for (key, value) in [
-            ("internal_temperature_k", json!(0.0)),
+            ("internal_temperature_k", json!(45.34)),
             ("irradiation_temperature_k", json!(640.0)),
             ("join_pressure_pa", json!(2e6)),
             (
@@ -1712,7 +1909,11 @@ pub(crate) mod tests {
             ("mean_molar_mass_g_per_mol", json!(2.602_556_7)),
             ("heat_capacity_over_r", json!(3.3679)),
             ("decks", json!([])),
+            ("hazes", json!([])),
             ("haze_tau_550", json!(0.0)),
+            ("condensate_decks", json!([])),
+            ("absorbers", json!([])),
+            ("not_formed", json!([])),
         ] {
             wire[key] = value;
         }
@@ -2454,15 +2655,25 @@ pub(crate) mod tests {
         wire["biosphere"] = json!({ "fluxes": [{ "species": unknown, "flux_earth": 1.0 }] });
         assert_wire_form(&surface, wire);
         let mut envelope = jupiter_envelope();
-        envelope.supercritical = Some(unknown.to_owned());
-        envelope.composition[0].species = unknown.to_owned();
-        envelope.decks[0].material = unknown.to_owned();
-        envelope.decks[0].deck = Some(unknown.to_owned());
+        envelope.supercritical = Some(key());
+        envelope.composition[0].species = key();
+        envelope.decks[0].material = key();
+        envelope.decks[0].deck = Some(key());
+        envelope.hazes[0].material = key();
+        envelope.condensate_decks[0].condensate = key();
+        envelope.absorbers[0].species = key();
+        envelope.not_formed[0].condensate = key();
+        envelope.not_formed[0].reason = NotFormedReasonDto::Displaced { by: key() };
         let mut wire = jupiter_envelope_json();
         wire["supercritical"] = json!(unknown);
         wire["composition"][0]["species"] = json!(unknown);
         wire["decks"][0]["material"] = json!(unknown);
         wire["decks"][0]["deck"] = json!(unknown);
+        wire["hazes"][0]["material"] = json!(unknown);
+        wire["condensate_decks"][0]["condensate"] = json!(unknown);
+        wire["absorbers"][0]["species"] = json!(unknown);
+        wire["not_formed"][0]["condensate"] = json!(unknown);
+        wire["not_formed"][0]["reason"]["by"] = json!(unknown);
         assert_wire_form(&envelope, wire);
     }
 
@@ -2843,7 +3054,7 @@ pub(crate) mod tests {
     /// ends in a unit, or is a dimensionless quantity named as one.
     #[test]
     fn every_quantity_s_name_carries_its_unit() {
-        const DIMENSIONLESS: [&str; 27] = [
+        const DIMENSIONLESS: [&str; 28] = [
             "mole_fraction",
             "area_fraction",
             "heat_capacity_over_r",
@@ -2866,6 +3077,7 @@ pub(crate) mod tests {
             "vapour_mole_fraction_below",
             "coverage",
             "relative_mixing_ratio",
+            "optical_depth_exponent",
             "opacity_ratio",
             "redistribution_factor",
             "haze_tau_550",

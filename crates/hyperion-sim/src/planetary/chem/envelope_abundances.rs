@@ -11,9 +11,9 @@
 //! ratios its star sets ([`HostAbundances`], P14.T50.a): C/O, so carbon is the host's C/O times
 //! its oxygen; Mg/Si, so magnesium is that times its silicon, as the crust (P14.T51.c) reads it;
 //! and N/O, the protosolar ratio, so nitrogen is that times its oxygen. The envelope's helium
-//! before any rain is an input ([`EnvelopeInputs::primordial_helium_per_hydrogen`]): P14.T54.b
-//! gives it, from the host star's helium and P14.T53.a's escape, and the tests pass the protosolar
-//! value.
+//! before any rain is an input ([`EnvelopeInputs::primordial_helium_per_hydrogen`]): the record
+//! gives it (P14.T54.b.i), the host star's helium fractionated by P14.T53.a's escape, and the
+//! tests pass the protosolar value.
 //!
 //! # The envelope's metals: E(M)
 //!
@@ -148,11 +148,12 @@
 //!   differentiation has not occurred on Uranus" (Conrath et al. 1987, JGR 92, 15003, abstract
 //!   read).
 //!
-//! # Not on the record yet
+//! # On the record from 24
 //!
-//! This module is pure: nothing on the record calls it at generator version 22
-//! (decision-bump-plan-after-22 §1.3). P14.T52.a speciates its abundances and P14.T52.d publishes
-//! them in the record's envelope section at P14.T54.b, the 23 → 24 bump.
+//! This module is pure. P14.T52.a speciates its abundances and P14.T52.d publishes them in the
+//! record's envelope section, which the record builds behind the air's sections' hold
+//! (P14.T54.b.i), so that at generator version 23 nothing on the record calls it
+//! (decision-bump-plan-after-22 §1.3).
 //!
 //! # Determinism
 //!
@@ -438,9 +439,12 @@ pub struct EnvelopeInputs {
     pub alpha_fe: Dex,
     /// Its host's C/O and Mg/Si (P14.T50.a).
     pub host: HostAbundances,
-    /// Its effective temperature, `T_eff`⁴ = `T_eq`⁴ + `T_int`⁴: the record's
-    /// [`effective_temperature`](crate::planetary::derive::DerivedBody::effective_temperature), or
-    /// its equilibrium temperature for a body with no luminosity of its own.
+    /// Its effective temperature, `T_eff`⁴ = `T_eq`⁴ + `T_int`⁴: (`T_eq`⁴ + `T_int`⁴)^¼ with
+    /// P14.T24.d's `T_int`
+    /// ([`envelope_internal_temperature`](crate::planetary::hooks::envelope_internal_temperature)),
+    /// as P14.T54.b.i passes it (decision-p14-t24d-profile §3.5), the envelope's profile's own
+    /// temperature, not the bulk section's `T_eff`, which below 0.414 Jupiter masses has no
+    /// internal heat.
     pub effective_temperature: Kelvin,
     /// Its age at the time, which the helium rain waits on.
     pub age: Years,
@@ -448,9 +452,10 @@ pub struct EnvelopeInputs {
     /// [`surface_gravity`](crate::planetary::derive::DerivedBody::surface_gravity)), which sets the
     /// adiabat its `T_eff` lies on.
     pub surface_gravity: MetresPerSecondSquared,
-    /// The envelope's He/H by number before any helium rain: the host star's helium, less what
-    /// escape fractionated (P14.T54.b gives it; P14.T53.a). The tests pass the protosolar value,
-    /// [`Element::He`]'s.
+    /// The envelope's He/H by number before any helium rain: the derivation's
+    /// [`EnvelopeHelium::helium_to_hydrogen`](crate::planetary::chem::escape::EnvelopeHelium::helium_to_hydrogen),
+    /// fractionated by P14.T53.a's escape from the host star's start (P14.T54.b.i). The tests pass
+    /// the protosolar value, [`Element::He`]'s.
     pub primordial_helium_per_hydrogen: f64,
 }
 

@@ -67,7 +67,6 @@ mod escaping;
 mod supercritical;
 mod surface_mix;
 
-pub(crate) use escaping::helium_left;
 pub use escaping::{
     EARTH_MANTLE_FEO_MASS_FRACTION, EARTH_MANTLE_MASS_FRACTION, WATER_MELTING_POINT,
 };
@@ -76,6 +75,7 @@ pub(crate) use escaping::{
     THERMOSTAT_SET_POINT, Thermostat, ThermostatCounts, WaterPhase, water_phase,
     with_resolve_check, with_thermostat,
 };
+pub(crate) use escaping::{helium_left, protosolar_helium_mass_fraction};
 #[cfg(test)]
 pub(crate) use supercritical::{
     SteamEnvelopeRules, supercritical_section_in_force, with_steam_envelope,

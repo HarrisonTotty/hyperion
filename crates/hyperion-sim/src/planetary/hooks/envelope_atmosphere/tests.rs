@@ -1366,10 +1366,50 @@ fn every_table_envelope_s_internal_temperature_is_finite_and_positive() {
     assert!(sub_neptune.is_ok_and(|t| t.value() > 0.0));
 }
 
-/// Nothing on the record calls the envelope's atmosphere before P14.T54.b, its bump
-/// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside this module and its
-/// tests names it, comments, its module line and `hooks`' re-export (whatever lines it takes) left
-/// out. **P14.T54.b deletes this tripwire.**
+/// The files outside this module whose code reaches the envelope's atmosphere behind a named
+/// hold, each with the name of its hold, which its code (outside an inline test module, comments
+/// left out) must name: P14.T54.b.i's wiring of the record's envelope section, behind the air's
+/// sections' hold (`AirRules`), and its tests (decision-p14-t54b-open §3.3). **P14.T54.b.l deletes
+/// this list** with the tripwire below.
+const HELD: [(&str, &str); 2] = [
+    ("planetary/system/envelope.rs", "AirRules"),
+    ("planetary/system/envelope/tests.rs", "AirRules"),
+];
+
+/// Whether the code of `text` (its lines before an inline `mod tests {`, comments left out) names
+/// `hold`.
+fn names_its_hold(text: &str, hold: &str) -> bool {
+    text.lines()
+        .map(str::trim_start)
+        .take_while(|code| !code.starts_with("mod tests {"))
+        .filter(|code| !code.starts_with("//"))
+        .any(|code| code.contains(hold))
+}
+
+/// The hold check reads the code alone: a comment naming the hold, or code inside an inline test
+/// module, does not count.
+#[test]
+fn the_envelope_s_hold_check_reads_the_code_alone() {
+    assert!(names_its_hold(
+        "match rules { AirRules::Held => 0 }\n",
+        "AirRules"
+    ));
+    assert!(!names_its_hold("// AirRules\nfn f() {}\n", "AirRules"));
+    assert!(!names_its_hold(
+        "fn f() {}\n#[cfg(test)]\nmod tests {\n    use super::AirRules;\n}\n",
+        "AirRules"
+    ));
+}
+
+/// Nothing on the record calls the envelope's atmosphere but through its hold before P14.T54.b's
+/// bump (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside this module, its
+/// tests and [`HELD`]'s files calls it or builds its inputs, comments, its module line and
+/// `hooks`' re-export (whatever lines it takes) left out; each of [`HELD`]'s files is a source file
+/// whose code names its hold, so that a caller in any other file fails, and so does a listed file
+/// that drops its hold (decision-p14-t54b-open §3.3). The bare type is not matched: the record's
+/// envelope (`record::Envelope`) stores an [`EnvelopeAtmosphere`] and reads only what it holds, as
+/// the inventory's scan reads its type; under the hold's `Held` arm the record calls nothing here
+/// (`the_held_envelope_computes_nothing`). **P14.T54.b.l deletes this tripwire.**
 #[test]
 fn nothing_on_the_record_calls_the_envelope_atmosphere_yet() {
     fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
@@ -1390,21 +1430,38 @@ fn nothing_on_the_record_calls_the_envelope_atmosphere_yet() {
     let mut files = Vec::new();
     walk(&src, &mut files);
     assert!(files.len() > 100, "the walk found the crate's sources");
+    // Its calls and the inputs it would be called with, by name.
     let patterns = [
+        "EnvelopeAtmosphere::derive",
+        "EnvelopeAtmosphereInputs",
         "envelope_atmosphere::",
-        "EnvelopeAtmosphere",
         "envelope_internal_temperature",
         "cooling_law_temperature",
         "DeckKind",
     ];
-    let mut found = Vec::new();
-    for path in &files {
-        let relative = path
-            .strip_prefix(&src)
+    let relative_of = |path: &std::path::Path| {
+        path.strip_prefix(&src)
             .expect("under src")
             .to_string_lossy()
-            .replace('\\', "/");
-        if relative.starts_with("planetary/hooks/envelope_atmosphere") {
+            .replace('\\', "/")
+    };
+    for (held, hold) in HELD {
+        let path = files
+            .iter()
+            .find(|path| relative_of(path.as_path()) == held)
+            .unwrap_or_else(|| panic!("{held} is a source file"));
+        let text = std::fs::read_to_string(path).expect("a readable source");
+        assert!(
+            names_its_hold(&text, hold),
+            "{held} calls the envelope's atmosphere behind {hold}, which its code no longer names"
+        );
+    }
+    let mut found = Vec::new();
+    for path in &files {
+        let relative = relative_of(path);
+        if relative.starts_with("planetary/hooks/envelope_atmosphere")
+            || HELD.iter().any(|(held, _)| *held == relative)
+        {
             continue;
         }
         let text = std::fs::read_to_string(path).expect("a readable source");
@@ -1434,8 +1491,49 @@ fn nothing_on_the_record_calls_the_envelope_atmosphere_yet() {
     }
     assert!(
         found.is_empty(),
-        "nothing on the record calls it before P14.T54.b: {found:#?}"
+        "nothing on the record calls it but through its hold before P14.T54.b: {found:#?}"
     );
+}
+
+/// No haze's material can be a deck's condensate, so that every mode of an envelope is a deck's or
+/// a haze's by whether its deck is a listed deck's condensate (the record's and the server's rule,
+/// P14.T54.b.i): P14.T52.c's loop forms decks of the rows with a law aloft alone
+/// ([`laws_aloft`]), and none of the hazes' four materials has one (S₈ is listed as not modelled
+/// aloft, a photochemical haze rather than a deep vapour's deck; soot, the ice giants' haze and the
+/// chromophore have no vapour). On the table's Jupiter and Neptune the modes are the decks' first,
+/// each naming a listed deck, then the hazes'.
+#[test]
+fn no_haze_material_condenses_as_a_deck() {
+    let hazes = ["S8", "soot", "ice_giant_haze", "chromophore"].map(row);
+    for (id, _) in laws_aloft() {
+        assert!(!hazes.contains(&id), "{} has a law aloft", key_of(id));
+    }
+    for name in ["Jupiter", "Neptune"] {
+        let atmosphere = table_case(name).atmosphere();
+        let decks: Vec<SubstanceId> = atmosphere
+            .decks()
+            .iter()
+            .map(AerosolDeck::condensate)
+            .collect();
+        let deck_modes: usize = atmosphere.decks().len();
+        let split = atmosphere
+            .modes()
+            .iter()
+            .position(|mode| !decks.contains(&mode.deck()))
+            .unwrap_or(atmosphere.modes().len());
+        for (k, mode) in atmosphere.modes().iter().enumerate() {
+            assert_eq!(k < split, decks.contains(&mode.deck()), "{name} mode {k}");
+            assert_eq!(
+                k >= split,
+                hazes.contains(&mode.material()),
+                "{name} mode {k}"
+            );
+        }
+        assert!(
+            split >= deck_modes && split < atmosphere.modes().len(),
+            "{name}: {split}"
+        );
+    }
 }
 
 /// Recorded, not asserted beyond being finite (printed with `--nocapture`): Jupiter's NH₄SH deck's τ

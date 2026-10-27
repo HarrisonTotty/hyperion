@@ -71,8 +71,8 @@ use crate::planetary::chem::escape::{
     EARTH_OXYGEN_SINK_MOL_PER_M2_YEAR, ESCAPE_ELEMENTS, ElementOutcome, EnvelopeHelium,
     EscapeOutcome, MeltWindow, MethaneOutcome, MoistAir, OxygenOutcome, Shoreline,
     TITAN_INSOLATION, UltravioletHost, XuvExposure, cold_trap_failure_oxygen,
-    desiccated_carbon_dioxide, envelope_helium, methane_outcome, runaway_oxygen_timed,
-    thin_envelope_air,
+    desiccated_carbon_dioxide, envelope_helium, helium_mass_fraction_of, methane_outcome,
+    runaway_oxygen_timed, thin_envelope_air,
 };
 use crate::planetary::chem::partition::{CriticalColumn, Ground};
 use crate::planetary::chem::tenuous::holds_tenuous_air;
@@ -193,14 +193,14 @@ pub(crate) fn melt_oxygen_capacity(mass: Kilograms) -> Kilograms {
 
 /// The protosolar helium mass fraction of hydrogen and helium, Y = `m_He` n ÷ (`m_H` + `m_He` n):
 /// n the element registry's protosolar He/H, 10^(10.986 − 12) = 0.0968 (Lodders 2010, Table 6, as
-/// [`Element::protosolar_abundance_per_hydrogen`] holds it), at its standard atomic weights, 0.278.
-/// It is the helium an envelope forms with, from which P14.T53.a's fractionation starts; P14.T54.b
-/// passes the host star's own (decision-p14-t50b-envelope §5).
+/// [`Element::protosolar_abundance_per_hydrogen`] holds it), at its standard atomic weights, 0.278
+/// ([`helium_mass_fraction_of`]). It is the helium an envelope forms with, from which P14.T53.a's
+/// fractionation starts, to generator version 23 and for a body its derivation gives no helium;
+/// from 24 the derivation starts from the host star's own (`PRIMORDIAL_HELIUM_VERSION`,
+/// `fractionation_start`; decision-p14-t50b-envelope §5), and a solar host's is this to the bit.
 #[must_use]
 pub(crate) fn protosolar_helium_mass_fraction() -> f64 {
-    let per_hydrogen = Element::He.protosolar_abundance_per_hydrogen();
-    let helium = per_hydrogen * Element::He.standard_atomic_weight_g_per_mol();
-    helium / (Element::H.standard_atomic_weight_g_per_mol() + helium)
+    helium_mass_fraction_of(Element::He.protosolar_abundance_per_hydrogen())
 }
 
 /// Whether liquid water stands at a climate's warmest zone `warmest` under the surface pressure
@@ -907,7 +907,8 @@ impl Recorded {
 }
 
 /// The helium that escape leaves the envelope of the body `inputs` describe under the exposure
-/// `exposure`, its own unless its derivation gave it ([`AtmosphereInputs::envelope_helium`]).
+/// `exposure`, its own unless its derivation gave it ([`AtmosphereInputs::envelope_helium`]): a
+/// hand-built body's, which no derivation gave one, fractionated from the protosolar helium.
 #[must_use]
 fn envelope_of(inputs: &AtmosphereInputs, exposure: &XuvExposure) -> Option<EnvelopeHelium> {
     inputs.envelope_helium.or_else(|| {
@@ -916,22 +917,25 @@ fn envelope_of(inputs: &AtmosphereInputs, exposure: &XuvExposure) -> Option<Enve
             (inputs.mass, inputs.radius),
             exposure,
             inputs.age,
+            protosolar_helium_mass_fraction(),
         )
     })
 }
 
 /// The helium that escape leaves an envelope of history `history` on a body of mass and radius
 /// `bulk` at the time, whose gravity sets the diffusion that separates its helium from its escaping
-/// hydrogen, under the exposure `exposure` by `age` ([`envelope_helium`], from the protosolar
-/// helium, [`protosolar_helium_mass_fraction`]), where it formed with one: a function of what a
-/// body's passes do not move, so that its derivation takes it once
-/// ([`AtmosphereInputs::envelope_helium`]).
+/// hydrogen, under the exposure `exposure` by `age` ([`envelope_helium`]), from the helium mass
+/// fraction `start` it formed with (the host star's from generator version 24,
+/// `fractionation_start`, P14.T54.b.i; [`protosolar_helium_mass_fraction`] before, and for a body
+/// its derivation gives none), where it formed with an envelope: a function of what a body's passes
+/// do not move, so that its derivation takes it once ([`AtmosphereInputs::envelope_helium`]).
 #[must_use]
 pub(crate) fn helium_left(
     history: EnvelopeHistory,
     (mass, radius): (Kilograms, Metres),
     exposure: &XuvExposure,
     age: Years,
+    start: f64,
 ) -> Option<EnvelopeHelium> {
     (history.initial.value() > 0.0).then(|| {
         #[cfg(test)]
@@ -943,17 +947,27 @@ pub(crate) fn helium_left(
             radius,
             exposure,
             age,
-            protosolar_helium_mass_fraction(),
+            start,
         )
     })
 }
 
-/// The envelope's hydrogen and helium at formation, kg, of the body `inputs` describe: its
-/// history's mass at the protosolar helium mass fraction; none where it formed with none.
+/// The envelope's hydrogen and helium at formation, kg, of the body `inputs` describe, whose
+/// escape left it `envelope`: its history's mass at the helium mass fraction the fractionation
+/// started from ([`EnvelopeHelium::initial_helium_mass_fraction`], the host star's from generator
+/// version 24), so that the ledger's formed helium and the shares kept read one start, or the
+/// protosolar one ([`protosolar_helium_mass_fraction`]) where it carries none; none where it formed
+/// with none.
 #[must_use]
-fn envelope_at_formation(inputs: &AtmosphereInputs) -> (f64, f64) {
+fn envelope_at_formation(
+    inputs: &AtmosphereInputs,
+    envelope: Option<&EnvelopeHelium>,
+) -> (f64, f64) {
     let initial = inputs.envelope_history.initial.value().max(0.0);
-    let helium = protosolar_helium_mass_fraction();
+    let helium = envelope.map_or_else(
+        protosolar_helium_mass_fraction,
+        EnvelopeHelium::initial_helium_mass_fraction,
+    );
     ((1.0 - helium) * initial, helium * initial)
 }
 
@@ -1136,6 +1150,7 @@ impl<'a> Body<'a> {
         let base = surface_mix::airless_mean(inputs.equilibrium, surface);
         let (retention, held) = retained(inputs, exobase, base, surface_mix::heat_flow(surface));
         let exposure = XuvExposure::new(inputs.saturated_xuv_flux, inputs.xuv_saturation_time);
+        let envelope = envelope_of(inputs, &exposure);
         Self {
             inputs,
             exobase,
@@ -1143,8 +1158,8 @@ impl<'a> Body<'a> {
             retention,
             held,
             exposure,
-            envelope: envelope_of(inputs, &exposure),
-            formed: envelope_at_formation(inputs),
+            envelope,
+            formed: envelope_at_formation(inputs, envelope.as_ref()),
             ceiling: GreenhouseCeiling::of(inputs),
             published: surface.published,
         }

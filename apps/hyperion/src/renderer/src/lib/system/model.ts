@@ -763,7 +763,11 @@ export interface MixingRatioNode {
   readonly relativeMixingRatio: number;
 }
 
-/** An absorbing gas that is not one of the section's well-mixed gases, with its column and layer. */
+/**
+ * An absorbing gas with its column and layer: in a surface's inventory, one that is not one of the
+ * section's well-mixed gases; in an envelope's, its 10-mbar gas's, which its 1-bar composition may
+ * hold too, one gas read at two levels (the protocol's `AbsorberDto`).
+ */
 export interface Absorber {
   /** The gas, by its registry key. */
   readonly species: string;
@@ -776,10 +780,12 @@ export interface Absorber {
 }
 
 /**
- * A surface air's aerosol and absorber inventory (plan 14's P14.T24.c): every list empty for a
- * surface with no air; not modelled for a magma ocean that holds an air.
+ * A surface air's aerosol and absorber inventory (plan 14's P14.T24.c), or a gas envelope's
+ * (P14.T52.d, {@link BodyEnvelope.aerosols}): every list empty for a surface with no air; not
+ * modelled for a magma ocean that holds an air.
  */
 export interface AerosolInventory {
+  /** Each deck's modes, in the decks' order, then the modes of no deck. */
   readonly modes: ReadonlyArray<AerosolMode>;
   /** At most one a condensate, so that a mode's `deck` names one. */
   readonly decks: ReadonlyArray<CondensateDeck>;
@@ -971,10 +977,15 @@ export interface BodySurface {
   readonly silicateVapour: Modelled<SilicateVapour>;
 }
 
-/** An envelope's irradiated grey profile's parameters (Guillot 2010, Eq. 29). */
+/**
+ * An envelope's irradiated grey profile's parameters (Guillot 2010, Eq. 29), with τ = κ_th p₁ ÷
+ * (n g) × (p ÷ p₁)ⁿ, p₁ = 1 bar, and g the bulk section's surface gravity.
+ */
 export interface GuillotProfile {
-  /** κ_th. */
+  /** κ_th at 1 bar, m² kg⁻¹. */
   readonly thermalOpacityM2PerKg: number;
+  /** n, τ ∝ pⁿ, dimensionless and at least 1; 2 for every envelope. */
+  readonly opticalDepthExponent: number;
   /** γ = κ_v ÷ κ_th, dimensionless. */
   readonly opacityRatio: number;
   /** f, dimensionless: ¼ averaged over the sphere. */
@@ -982,10 +993,11 @@ export interface GuillotProfile {
 }
 
 /**
- * A gas-envelope body's visible atmosphere (the protocol's `BodyEnvelopeDto`, plan 14's P14.T24.d,
- * on the wire by P14.T35.e): the section of a giant or a sub-Neptune, whose surface section does
- * not apply, and from generator version 24 of a solid body under a supercritical envelope
- * (P14.T53.b part 2), sent `not_modelled` until P14.T53.b part 3.
+ * A gas-envelope body's visible atmosphere (the protocol's `BodyEnvelopeDto`, plan 14's P14.T24.d
+ * with P14.T52.d on P14.T50.b's abundances, on the wire by P14.T35.e and P14.T54.b.i): the section
+ * of a giant or a sub-Neptune, whose surface section does not apply, sent `ok` from generator
+ * version 24 where the generator models it, and from 24 of a solid body under a supercritical
+ * envelope (P14.T53.b part 2), sent `not_modelled` until P14.T53.f.
  */
 export interface BodyEnvelope {
   /**
@@ -994,21 +1006,36 @@ export interface BodyEnvelope {
    * under a supercritical envelope has its envelope `not_modelled` until then.
    */
   readonly supercritical: string | null;
-  /** Zero for a body with no internal heat. */
+  /**
+   * Positive: the record's internal heat from 0.414 Jupiter masses, blended with P14.T24.d's
+   * cooling law below; not the bulk section's (`T_eff`⁴ − `T_eq`⁴)^¼ there.
+   */
   readonly internalTemperatureK: number;
+  /** `T_irr`⁴ = `T_eq`⁴ ÷ f, from the bulk section's equilibrium temperature. */
   readonly irradiationTemperatureK: number;
   readonly profile: GuillotProfile;
   /** Where the profile joins the dry adiabat. */
   readonly joinPressurePa: number;
-  /** Below the join, the pressures ascending, to 100 bar. */
+  /**
+   * From the join, at the grey profile's temperature there, the pressures ascending evenly in
+   * ln p to the larger of 100 bar and e^0.3 p_join; between two nodes the temperature follows the
+   * power law between them.
+   */
   readonly adiabat: ReadonlyArray<ProfileNode>;
-  /** Largest first, summing to 1. */
+  /** The gas at 1 bar alone, largest first, summing to 1. */
   readonly composition: ReadonlyArray<GasShare>;
   readonly meanMolarMassGPerMol: number;
   /** `c_p` ÷ R at the 1-bar level's temperature, dimensionless, for display. */
   readonly heatCapacityOverR: number;
-  readonly decks: ReadonlyArray<AerosolMode>;
-  /** The haze's optical depth at 550 nm, dimensionless. */
+  /**
+   * Its condensate decks with their modes, its photochemical hazes, its absorbers at 10 mbar and
+   * its condensables not formed, as one inventory, the type a surface's takes (R08's review of
+   * P14.T54.b.i, C1): `modes` the wire's deck modes, each naming one of `decks`, then its hazes,
+   * naming none; `decks` the wire's `condensate_decks`. Every envelope mode covers the whole sky
+   * at generator version 24, read as the fraction it is.
+   */
+  readonly aerosols: AerosolInventory;
+  /** The hazes' optical depth at 550 nm, dimensionless: the sum of theirs that carry one. */
   readonly hazeTau550: number;
 }
 
@@ -1023,10 +1050,10 @@ export interface BodyRecord extends SystemBody {
    */
   readonly surface: Section<BodySurface>;
   /**
-   * A gas-envelope body's air (`not_modelled` until P14.T24.d), a solid body's under a
-   * supercritical envelope from generator version 24 (`not_modelled` until P14.T53.b part 3), and
-   * `not_applicable` for every other body; `not_modelled` where an older server leaves the field
-   * out.
+   * A gas-envelope body's air (`ok` from generator version 24 where the generator models it,
+   * P14.T54.b.i, and `not_modelled` below it), a solid body's under a supercritical envelope from
+   * generator version 24 (`not_modelled` until P14.T53.f), and `not_applicable` for every other
+   * body; `not_modelled` where an older server leaves the field out.
    */
   readonly envelope: Section<BodyEnvelope>;
   readonly hooks: Section<BodyHooks>;

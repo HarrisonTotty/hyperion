@@ -1788,14 +1788,34 @@ describe("SystemView's body readout", () => {
     await answerDetail(socket, jupiterDetail());
 
     expect(reading("ATMOSPHERE")).toBe("GAS ENVELOPE");
-    expect(reading("MOLE FRACTION")).toBe(partsReading("H2 86.3 %", "He 13.6 %", "CH4 0.180 %"));
+    // The generator's composition at 1 bar (P14.T54.b.i), every gas of at least 10⁻¹².
+    expect(reading("MOLE FRACTION")).toBe(
+      partsReading(
+        "H2 84.8 %",
+        "He 15.0 %",
+        "CH4 0.150 %",
+        "NH3 0.0237 %",
+        "Ne 0.0122 %",
+        "Ar 0.00161 %",
+        "N2 0.00124 %",
+        "PH3 1.46E-4 %",
+        "HCl 2.49E-5 %",
+        "Kr 9.67E-7 %",
+        "H2O 6.81E-7 %",
+        "CO 1.19E-7 %",
+        "Xe 9.45E-8 %",
+        "H2S 4.22E-8 %",
+        "HCN 7.61E-10 %",
+        "CO2 7.40E-10 %",
+      ),
+    );
   });
 
   it("reads a gas giant's atmosphere as NOT YET MODELLED while the server does not compute it", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/1280/);
-    // As every server sends a giant's envelope until P14.T24.d.
+    // As every server sends a giant's envelope below generator version 24 (P14.T54.b.i).
     await answerDetail(socket, jupiterWithEnvelope({ state: "not_modelled" }));
 
     expect(terms("ATMOSPHERE")).toHaveLength(1);

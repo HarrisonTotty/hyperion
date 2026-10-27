@@ -978,15 +978,11 @@ impl DerivedBody {
 
     /// The helium P14.T53.a's fractionation leaves the body's envelope, as its passes read it
     /// (P14.T54.b.h): `helium_before_passes`'s, taken once before them (its He/H, its helium mass
-    /// fraction and the shares of hydrogen and helium kept), the one the thin envelope's air was
-    /// built at and the escape's outcome carries (`EscapeOutcome::envelope`); `None` under the
-    /// escape's hold, which reads none, and for a body that formed with no envelope. P14.T54.b.i
-    /// passes it to T50.b's envelope (decision-p14-t50b-envelope §5), where the host star's own
-    /// primordial helium joins it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.b.i's envelope section reads it")
-    )]
+    /// fraction, the shares of hydrogen and helium kept and the start they were fractionated from,
+    /// the host star's own from generator version 24), the one the thin envelope's air was built at
+    /// and the escape's outcome carries (`EscapeOutcome::envelope`); `None` under the escape's
+    /// hold, which reads none, and for a body that formed with no envelope. The record's envelope
+    /// section passes its He/H to T50.b (P14.T54.b.i; decision-p14-t50b-envelope §5).
     #[must_use]
     pub(crate) const fn envelope_helium(
         &self,
@@ -1515,7 +1511,7 @@ pub(crate) fn derive_body_driven(
         lag: bulk.lag,
         ocean_solutes: bulk.ocean_solutes,
     };
-    let (history, envelope_helium) = envelope_and_helium(&bulk, &escape, &sky, age_now);
+    let (history, envelope_helium) = envelope_and_helium(&bulk, &escape, &sky, (age_now, hosts));
     let (passes, regolith_albedo) = PassBody {
         placed,
         sky: &sky,
@@ -1685,33 +1681,40 @@ fn envelope_history(bulk: &AirBulk, escape: &Escape) -> EnvelopeHistory {
 }
 
 /// The envelope's history of the body of bulk `bulk` after its escape `escape`
-/// ([`envelope_history`]), with the helium it keeps by `age` under the sky `sky`, taken once before
-/// its passes ([`helium_before_passes`]; P14.T54.b.h carries it to the derivation).
+/// ([`envelope_history`]), with the helium it keeps by `age` under the sky `sky` about the hosts
+/// `hosts`, of their composition, taken once before its passes ([`helium_before_passes`];
+/// P14.T54.b.h carries it to the derivation).
 #[must_use]
 fn envelope_and_helium(
     bulk: &AirBulk,
     escape: &Escape,
     sky: &Sky,
-    age: Years,
+    (age, hosts): (Years, &BodyHosts<'_>),
 ) -> (
     EnvelopeHistory,
     Option<crate::planetary::chem::escape::EnvelopeHelium>,
 ) {
     let history = envelope_history(bulk, escape);
-    (history, helium_before_passes(history, bulk, sky, age))
+    (
+        history,
+        helium_before_passes(history, bulk, sky, (age, hosts.composition())),
+    )
 }
 
 /// The helium the envelope of history `history` of the body of bulk `bulk` under the sky `sky`
 /// keeps by `age`, taken once before its passes, which do not move it, under the escape's batch
-/// rules ([`AtmosphereInputs::envelope_helium`]); none under its hold, which reads none.
+/// rules ([`AtmosphereInputs::envelope_helium`]): fractionated from the helium its host of
+/// composition `composition` gives it, the protosolar to generator version 23 and the host star's
+/// own from 24 (`fractionation_start`, behind `PRIMORDIAL_HELIUM_VERSION`; P14.T54.b.i). None under
+/// the escape's hold, which reads none and computes no start.
 #[must_use]
 fn helium_before_passes(
     history: EnvelopeHistory,
     bulk: &AirBulk,
     sky: &Sky,
-    age: Years,
+    (age, composition): (Years, &Composition),
 ) -> Option<crate::planetary::chem::escape::EnvelopeHelium> {
-    use crate::planetary::chem::escape::{EscapeRules, XuvExposure};
+    use crate::planetary::chem::escape::{EscapeRules, XuvExposure, fractionation_start};
     match EscapeRules::in_force() {
         EscapeRules::Held => None,
         EscapeRules::Batch => helium_left(
@@ -1719,6 +1722,7 @@ fn helium_before_passes(
             (bulk.mass, bulk.radius),
             &XuvExposure::new(sky.saturated_xuv_flux, sky.xuv_saturation_time),
             age,
+            fractionation_start(composition),
         ),
     }
 }

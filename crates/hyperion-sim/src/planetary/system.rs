@@ -78,8 +78,9 @@
 //!   time, with the light of the system's other stars (P14.T12.b).
 //!
 //! What is not computed is said in every record rather than left to be read as "none" (ruling
-//! 34): a gas-envelope body's surface is [`Section::NotApplicable`] and its `envelope`
-//! `NotModelled` (P14.T48.e, until P14.T24.d), and a dwarf planet's rings `NotModelled`. Its
+//! 34): a gas-envelope body's surface is [`Section::NotApplicable`] (P14.T48.e) and its `envelope`
+//! `NotModelled` below generator version 24, and from it where the generator does not model it
+//! (P14.T54.b.i, behind the air's sections' hold), and a dwarf planet's rings `NotModelled`. Its
 //! `hooks` hold the body's detail seed alone (the rendering plans' R09.T1.b): [`Section::Ok`] for
 //! a planet, moon or dwarf planet present at the time, `NotApplicable` otherwise. Events on bodies
 //! (P14.T31) are not built, so there is no `events_between`.
@@ -91,6 +92,7 @@
 //! rank on `belt.member`. Every other draw is its stage's.
 
 use core::f64::consts::TAU;
+use std::sync::OnceLock;
 
 use crate::Seed;
 use crate::coords::{SystemPosition, SystemVelocity};
@@ -103,6 +105,8 @@ use crate::planetary::architecture::{
 use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
+use crate::planetary::chem::equilibrium::{BuildNetworkError, Network};
+use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
 use crate::planetary::chem::partition::{CondensatePhase, Condensates, CrustWater, Partition};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
@@ -123,10 +127,10 @@ use crate::planetary::derive::rotation::{
     BodyRotation, ObliquityLaw, SpinDraws, SpinInputs, SpinState, SpinTides,
 };
 use crate::planetary::derive::{
-    BodyHosts, DerivedBody, DerivedBulk, GivenBulk, GivenFractions, GivenLag, HabitableZone,
-    HostLight, Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass, SnowLineSide,
-    SpunPasses, SurfaceLag, derive_body, derive_body_driven, derive_bulk, habitable_zone_of,
-    radius_chen_kipping, surface_material,
+    BodyHosts, DerivedBody, DerivedBulk, FormationZone, GivenBulk, GivenFractions, GivenLag,
+    HabitableZone, HostLight, Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass,
+    SnowLineSide, SpunPasses, SurfaceLag, derive_body, derive_body_driven, derive_bulk,
+    habitable_zone_of, radius_chen_kipping, surface_material,
 };
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
@@ -207,6 +211,7 @@ use crate::units::{
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
 use air::{AirRules, AirSurface, record_aerosols, record_structure};
+use envelope::{EnvelopeOf, record_envelope};
 use modifiers::{
     ModifierCase, ModifierStar, ModifierSurface, PlanetField, RecordPrimary, planet_field,
     planet_field_rules, reads_modifier_star, record_modifiers, weathering_case,
@@ -2485,6 +2490,105 @@ impl PlanetarySystem {
         }
     }
 
+    /// The envelope section of the present planet or member `body` at the epoch's time, whose
+    /// derivation is `derived` and whose published bulk is `bulk`, from the tag
+    /// [`surface_or_envelope`](Self::surface_or_envelope) gave it, `envelope` (P14.T54.b.i): a
+    /// sub-Neptune's or a giant's, which the tag leaves not modelled, is its visible atmosphere
+    /// under the record's air's rules (`envelope::record_envelope`, behind the air's sections'
+    /// hold, `AirRules`), which under the hold reads and computes nothing; every other tag stands,
+    /// so that a solid body's under a supercritical envelope stays not modelled (P14.T53.b part 2,
+    /// until P14.T53.f). The query's network is built at the first envelope it records
+    /// ([`Epoch::network`]).
+    #[must_use]
+    fn envelope_section(
+        &self,
+        epoch: &Epoch<'_>,
+        body: &Body,
+        (derived, bulk): (&DerivedBody, &BulkProperties),
+        envelope: Section<Envelope>,
+    ) -> Section<Envelope> {
+        let open = matches!(envelope, Section::NotModelled) && !bulk.class().has_solid_surface();
+        if !open {
+            return envelope;
+        }
+        record_envelope(
+            self.record.air,
+            || self.envelope_inputs(epoch, body, (derived, bulk)),
+            || epoch.network(),
+        )
+    }
+
+    /// What the envelope section of the present planet or member `body` reads at the epoch's time
+    /// ([`EnvelopeOf`]), each the record's own:
+    ///
+    /// - its derivation's mass and internal luminosity (the record's, already times
+    ///   `giant_share`), and its published bulk's mass fractions, radius, surface gravity and
+    ///   equilibrium temperature;
+    /// - its age then, the derivation's ([`SystemContext::age_at`]);
+    /// - its formation zone ([`formation_zone`](Self::formation_zone)), `None` with no disc;
+    /// - the host's \[Fe/H\] and \[α/Fe\] (`None` for a host with none of its own, never read
+    ///   as 0), and its C/O and Mg/Si (P14.T50.a's [`HostAbundances`] at its `system.abundances`
+    ///   draws, the crust's);
+    /// - its primordial He/H: the He/H its derivation's escape left it (P14.T53.a's
+    ///   fractionation from the host star's own, [`DerivedBody::envelope_helium`]), and where the
+    ///   escape is held, which carries none, the host's unfractionated (`host_helium_per_hydrogen`,
+    ///   the protosolar below generator version 24);
+    /// - whether a star's ultraviolet lights it, the aerosols' photochemistry star's rule
+    ///   ([`Epoch::photochemistry_temperature`] of its zone's brightest star).
+    #[must_use]
+    fn envelope_inputs(
+        &self,
+        epoch: &Epoch<'_>,
+        body: &Body,
+        (derived, bulk): (&DerivedBody, &BulkProperties),
+    ) -> EnvelopeOf {
+        let ctx = epoch.ctx;
+        EnvelopeOf {
+            mass: derived.mass(),
+            fractions: bulk.fractions(),
+            radius: Metres::from(bulk.radius()),
+            gravity: bulk.surface_gravity(),
+            equilibrium_temperature: bulk.equilibrium_temperature(),
+            internal_luminosity: derived.internal_luminosity(),
+            age: ctx.age_at(epoch.t),
+            formation: self.formation_zone(body),
+            fe_h: ctx.fe_h(),
+            alpha_fe: ctx.alpha_fe(),
+            host: HostAbundances::of(
+                ctx.fe_h(),
+                &AbundanceDraws::for_system(self.seed, self.system),
+            ),
+            primordial_helium_per_hydrogen: derived.envelope_helium().map_or_else(
+                || host_helium_per_hydrogen(ctx.composition()),
+                EnvelopeHelium::helium_to_hydrogen,
+            ),
+            starlit: epoch
+                .photochemistry_temperature(epoch.brightest(self.zone_of(body)))
+                .is_some(),
+        }
+    }
+
+    /// Where the planet or member `body` formed in its host's disc (P14.T50.a's formation zone, as
+    /// its derivation's volatiles read it, `PlacedBody::air_of`): a planet's formation distance
+    /// and a member's (its semi-major axis), against its zone's host's disc's snow line. `None`
+    /// for a moon or a ring, and for a body whose host has no disc.
+    #[must_use]
+    fn formation_zone(&self, body: &Body) -> Option<FormationZone> {
+        let distance = match &body.part {
+            Part::Planet(planet) => planet.placed.formation_distance(),
+            Part::Member(member) => member.member.placed_body().formation_distance(),
+            Part::Moon(_) | Part::Ring(_) => return None,
+        };
+        let snow_line = self
+            .host(self.zone_of(body).host())?
+            .disc
+            .profile()?
+            .snow_line();
+        // A placed planet's formation distance and a member's semi-major axis are positive and
+        // finite, and so is a disc's snow line: a zone refused is none to read, never a default.
+        FormationZone::new(distance, snow_line).ok()
+    }
+
     /// The surface section of the planet, member or moon `body` at the epoch's time
     /// (P14.T24.a–b, T48.a–d, P14.T48.e), read as `of` describes it ([`published_surface`]), under
     /// the spin `spun` its record computed once for its passes and its surface, with its insolation
@@ -3565,6 +3669,7 @@ impl PlanetarySystem {
                 };
                 let (surface, envelope) =
                     self.surface_or_envelope(body, of, body_spin, (&bulk, derived.atmosphere()));
+                let envelope = self.envelope_section(epoch, body, (&derived, &bulk), envelope);
                 // P14.T51.e: its taxonomic class, from its built surface, behind its hold.
                 let surface = small_bodies::with_class(
                     epoch.small_bodies,
@@ -6347,6 +6452,14 @@ struct Epoch<'c> {
     /// reference wind term, derived once for the query and never once a body; held for the
     /// others, which derive nothing of it.
     small_bodies: SmallBodyTypes,
+    /// P14.T52.a's network of the registry's gases, which its records' envelopes read
+    /// (P14.T54.b.i): built lazily, at the first envelope the query records
+    /// ([`network`](Self::network)), and never under the air's sections' hold, which records
+    /// none. It is a documented lazy value (the sim-determinism rule): [`Network::registry`] is a
+    /// pure function of the substance registry alone, which is fixed, draws on no stream and never
+    /// reads this member, so it gives the same bits whichever envelope asks first, and the epoch is
+    /// neither compared nor printed. A `OnceLock` keeps the epoch `Sync`, as the rule asks.
+    network: OnceLock<Result<Network, BuildNetworkError>>,
 }
 
 impl<'c> Epoch<'c> {
@@ -6376,6 +6489,7 @@ impl<'c> Epoch<'c> {
             xuv: ctx.xuv_histories(),
             shades: None,
             small_bodies: SmallBodyTypes::Held,
+            network: OnceLock::new(),
         }
     }
 
@@ -6407,6 +6521,19 @@ impl<'c> Epoch<'c> {
             small_bodies: SmallBodyTypes::under(rules),
             ..self
         }
+    }
+
+    /// P14.T52.a's network of the registry's gases, built at its first read and shared by the
+    /// query's envelopes after ([`Network::registry`]; the member's lazy rule).
+    ///
+    /// # Errors
+    ///
+    /// [`Network::registry`]'s, which the registry as built never gives (its tests hold it so).
+    fn network(&self) -> Result<&Network, BuildNetworkError> {
+        self.network
+            .get_or_init(Network::registry)
+            .as_ref()
+            .map_err(|&error| error)
     }
 
     /// The summed luminosity of the stars `zone`'s bodies orbit at the time, or `None` before
@@ -6601,6 +6728,7 @@ impl<'c> Epoch<'c> {
 mod air;
 #[cfg(test)]
 pub(crate) mod cold_trap_tests;
+pub(crate) mod envelope;
 mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]

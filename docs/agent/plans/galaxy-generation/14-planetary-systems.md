@@ -29988,6 +29988,352 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       `null`, not modelled left off) and the absent-at-23 asserts in
       `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed`; the protocol
       package's and the client's absent, `null` and value cases.
+  - _P14.T54.b.i, the envelope_ (B3, 2026-10-27). The sim's side (part i-2), then the wire's
+    (parts i-1 and i-3, under _The wire_). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3;
+    no golden moves (`planetary_golden`, `observe_in_system_golden`; `golden_diff.py`: no golden
+    file changed). This commit closes the riders' membership: P14.T53.b part 3 had not landed by
+    it, so part 3 rides 25, its hold renumbered (decision-p14-t53b-part3 §8; main, 2026-10-27).
+    The envelope takes no hold of its own: it is on the record under the air's sections' hold
+    alone (`AirRules::Batch`, `AIR_SECTIONS_VERSION`; decision-p14-t54b-open §1.2 item 6). The
+    host star's primordial helium has its own (below).
+    - _The record type:_ `record::Envelope` is a struct of `supercritical`, T50.b's
+      `EnvelopeAbundances` and T52.d's `EnvelopeAtmosphere` (which holds T24.d's profile, so κ₁,
+      n, γ, f, T_int and T_irr), built by the crate's `Envelope::hydrogen_helium` and read by
+      `supercritical()`, `abundances()` and `atmosphere()`. `supercritical` is `None` on every
+      envelope: P14.T53.b part 3 has not landed, and a steam envelope's section would stay
+      `NotModelled` at 24 either way. `Envelope` is no longer `Copy`, so the server's conversion
+      and its test take it by reference. The stale "until P14.T24.d" docs of record.rs (the
+      module, `BodyRecord::envelope`, the builder's `derived`) and system.rs's module are
+      rewritten.
+    - _The build site:_ `PlanetarySystem::envelope_section`, one line in `primary_record` after
+      `surface_or_envelope`. P14.T51.e's `small_bodies::with_class` lines and `satellite_record`
+      are untouched (a moon's class is solid). A non-solid class's `NotModelled` tag becomes
+      `system::envelope::record_envelope(self.record.air, || inputs, || network)`; every other
+      tag stands, so a solid body under a supercritical envelope stays `NotModelled` until
+      P14.T53.f. Under `AirRules::Held` neither closure runs, so nothing is read or computed
+      (`the_held_envelope_computes_nothing`).
+    - _The inputs_ (`EnvelopeOf`, from `PlanetarySystem::envelope_inputs`), each the record's own:
+      - the derivation's mass and internal luminosity, and the published bulk's fractions,
+        radius, gravity and T_eq;
+      - the age `ctx.age_at(t)`, the derivation's `age_now`;
+      - T50.a's formation zone (`formation_zone`): a planet's formation distance or a member's
+        semi-major axis, against its zone's disc's snow line, the pair `PlacedBody::air_of` reads;
+      - the host's [Fe/H] and [α/Fe] (`None` → not modelled, never 0), and its C/O and Mg/Si
+        (`HostAbundances::of` at its `system.abundances` draws, the crust's);
+      - the He/H, `DerivedBody::envelope_helium`'s (B2's carry, its `expect(dead_code)` gone);
+        where the escape is held, which carries none, the host's unfractionated He/H
+        (`host_helium_per_hydrogen`, n☉ below 24);
+      - starlit by the aerosols' star rule (`photochemistry_temperature` of the zone's brightest
+        star).
+    - _The chain_ (`envelope_of`): no [α/Fe] or no disc → not modelled, before anything is
+      computed; then T24.d's T_int, T_eff = (T_eq⁴ + T_int⁴)^¼ through `crate::math`, T50.b, and
+      T52.d on `GreyProfile::ADOPTED`. Every refusal → `NotModelled`, and the record keeps no
+      reason; `EnvelopeNotModelled`, crate-private, is the census's (main's Q12:
+      `LevelAboveRecords` → `NotModelled`, counted). The not-modelled cases match
+      `BodyEnvelopeDto`'s doc as part i-1 wrote it; no protocol doc changes.
+    - _The network_ is built once a query: `Epoch::network`, a
+      `OnceLock<Result<Network, BuildNetworkError>>` filled at the first envelope the query
+      records (Q10). It is the
+      sim-determinism skill's documented lazy value: a pure function of the fixed registry, no
+      stream, never re-entered, and the epoch is neither compared nor printed. It costs 0.2 ms.
+    - _The deck/haze split:_ T52.d's modes are the decks' modes first, then the hazes'. No haze's
+      material can be a deck's condensate: P14.T52.c's loop forms decks of the rows with a law
+      aloft alone, and S₈ (listed as not modelled aloft), soot, the ice giants' haze and the
+      chromophore have none (`no_haze_material_condenses_as_a_deck`). So the server's membership
+      rule splits them exactly, and no structural split was needed.
+    - _The primordial helium_ (main's Q1, Q2, 2026-10-27):
+      - _The hold:_ `PRIMORDIAL_HELIUM_VERSION` = 24 in `chem/escape.rs`, with
+        `PrimordialHeliumRules { Protosolar, Host }` (thread-local `in_force`,
+        `#[cfg(test)] with_primordial_helium`), innermost in `with_every_24_hold` with its doc
+        bullet. Its
+        tripwire, `the_host_s_primordial_helium_is_held_only_until_the_24_bump`, lists what
+        P14.T54.b.l deletes.
+      - _The law,_ `primordial_helium_per_hydrogen`: n☉ × (Y/X)(Z, ΔY) ÷ (Y/X)(Z☉, 0), with X =
+        0.76 − 3Z − ΔY and Y = 1 − X − Z. Z is `Composition::z_fit()`, as at the crate's other X =
+        0.76 − 3Z sites (rlof.rs, peculiar.rs, sse/ms.rs); ΔY is `Composition::helium_excess()`;
+        Z☉ is `stellar::composition::Z_SOLAR`; and n☉ is the registry's protosolar He/H, as
+        `protosolar_helium_mass_fraction` reads it.
+      - _Where it is read:_ `helium_before_passes` passes `fractionation_start(composition)` to
+        `helium_left` under `EscapeRules::Batch` alone, so at 23 no start is computed.
+        `EnvelopeHelium` gains `initial_helium_mass_fraction`, which `envelope_at_formation`
+        reads, so the ledger's formed helium and the kept shares share one start. A hand-built
+        body (`AtmosphereInputs` with no carry) keeps the protosolar start.
+        `protosolar_helium_mass_fraction` now calls `helium_mass_fraction_of`, to the same bits.
+      - _Its figures:_ a solar host gives n☉ 0.096828 and Y 0.277711, to the bit
+        (`a_solar_host_s_primordial_helium_is_protosolar_to_the_bit`). [Fe/H] −1 gives 0.078335
+        (×0.8090). Every host from +0.176 dex, where Z reaches 0.03, gives 0.108389 (×1.1194). ΔY
+        0.05 at solar Z gives 0.122897 (×1.2692). It rises with [Fe/H] inside the clamp and is
+        continuous at both edges (`the_primordial_helium_follows_the_host_s_y_over_x`).
+      - _Its movers_ (`under_the_host_helium_only_envelope_bearing_bodies_about_other_hosts_move`;
+        the golden systems and eight synthetic Suns, every 24 hold, Host against Protosolar): 337
+        derivations with no envelope helium are the same to the bit (by `Debug`). 30 carry one,
+        each starting at its host's start to the bit; the 7 about a solar host are the same to the
+        bit, and 23 move. The largest He/H move is +12.1%, on `hierarchical_triple` 0d00, a
+        sub-Neptune about a [Fe/H] +0.245 host (0.114982 against 0.102554). No state changes.
+        `red_giant` 0400, a rocky magma ocean, keeps a trace of hydrogen under the host's start:
+        He/H 46.03, Y 0.99456, against infinite and Y 1 (its state is unchanged).
+    - _Deviations from the plan text:_
+      - _The X form._ The plan's Y = 1 − X − Z + ΔY with X = 0.76 − 3Z summed to 1 + ΔY. Built as
+        X = 0.76 − 3Z − ΔY and Y = 1 − X − Z, with Z = `z_fit()` (main's ruling, 2026-10-27); the
+        two agree for every ΔY = 0 host. The T50.b inputs bullet is not edited here.
+      - _T50.b's T_eff_ is (T_eq⁴ + T_int⁴)^¼ with the envelope's T_int
+        (decision-p14-t24d-profile §3.5; main's Q3), not "the record's T_eff (its T_eq where it
+        has none)". `EnvelopeInputs`' docs say so.
+      - _`system::envelope` is `pub(crate)`_, not a private `mod`, and `EnvelopeOf` and
+        `envelope_of` are `pub(crate)`: `planetary::testing`'s builder reaches them.
+      - _`envelope_by_hand`_ (with `EnvelopeByHand`, behind `testing`) returns
+        `BuildEnvelopeByHandError`, which carries the refusing step's reason, rather than `String`
+        (the crate's error rule).
+    - _Moved 24 figures (Q15):_ the 130 non-ignored tests that run under the escape's batch
+      (every 24 hold), run under each arm with their outputs compared, move only B2's statement.
+      `under_every_24_hold_a_derivation_carries_its_envelope_s_helium` keeps its asserts. The
+      ignored censuses were not run again. Under the host's start it now states (against B2's
+      protosolar 0.096818–0.102554, Y 0.277711–0.289403, and red_giant 0400's infinite He/H):
+      - 9 gas giants at He/H 0.100367–0.108458 (Y 0.284988–0.301047);
+      - 6 ice giants at 0.099979–0.109224 (Y 0.284200–0.302530);
+      - 7 sub-Neptunes at 0.092350–0.114982 (Y 0.268334–0.313479);
+      - `red_giant` 0400 at 46.03 (Y 0.99456).
+    - _Recorded:_
+      - _The carry's He/H for an envelope that lost nothing_ is 0.096818, 1.0 × 10⁻⁴ below n☉
+        (0.096828). `EnvelopeHelium::helium_to_hydrogen` reads hydrogen and helium at the gas
+        rows' masses (half the registry's H₂, its He); the start's Y uses the standard atomic
+        weights. These are two scales of one figure. A solar host's T50.b input is therefore
+        0.096818 where the escape's batch carries it, and n☉ where the escape is held.
+      - _P14.T54.b.k's count (x), its "to main" class:_ 108 deck modes, on 34 envelopes of
+        the census, have no τ and top out above 10 bar. Of these, 96 are liquid refractory modes
+        (MgSiO₃, Mg₂SiO₄, Al₂O₃, CaTiO₃, Fe) with no liquid optics file, and 12 are liquid KCl
+        and Na₂S modes with no liquid grain density at 1,070–1,780 K. The highest are KCl at
+        0.044 bar (sample `21fff6597ff00000` 0200) and `hot_jupiter` 0100's MgSiO₃, Mg₂SiO₄ and
+        Fe at 0.072, 0.103 and 0.161 bar. No deep deck's τ above 1 bar reaches 1: the largest is
+        1.4 × 10⁻³, against 5.65 above 10 bar. Main's ruling (2026-10-27): not a blocker at
+        24, since each mode is sent labelled not modelled and nothing draws an envelope yet; the
+        liquid refractory optics (MgSiO₃, Mg₂SiO₄, Al₂O₃, CaTiO₃, Fe) and the liquid KCl and Na₂S
+        grain densities are a registry follow-up that must land before R08.T16.a draws
+        envelopes, since `hot_jupiter` 0100's silicate and iron decks at 0.07–0.16 bar are the
+        clouds a viewer would see.
+      - _A body that loses its envelope at its recorded change_ (T24.d's moved test): no gas
+        envelope's recorded change falls inside the clock window over the census's sets, so the
+        test is stated and not built on a hand system.
+    - _The census_ (`the_envelopes_are_stated`, ignored, by name; decision-p14-t24d-profile §9's
+      bless-note lines and count (x)'s inputs). It runs at the epoch, every 24 hold and the
+      record's batch rules, over `thin_air_sets`' first 60 sample systems (the helper holds 400),
+      its 15 golden systems and its 27 LOOK72 systems.
+      - _By class:_ 25 gas giants, 23 ice giants and 36 sub-Neptunes `Ok`; 22 sub-Neptunes not
+        modelled as not hydrogen-dominated (hydrides taking 0.50–1.35 of the hydrogen); no
+        `LevelAboveRecords` and no other refusal; one solid body under a supercritical envelope.
+      - _The table's giants on the record_ (their carried He/H, 0.096818): Jupiter 166.08 K at
+        1 bar (T_int 104.81 K), Saturn 149.63 K (84.13 K), Uranus 98.98 K (50.24 K) and Neptune
+        94.20 K (52.57 K). The generated giants' T(1 bar), T_int and joins are listed.
+      - _Joins deeper than 100 bar:_ two, both hot ice giants (287.7 bar at T_eq 1,104 K; 149.9
+        bar on `subgiant` 0100).
+      - _T_int below 0.414 M_J:_ 64 envelopes. 61 have no bulk T_int, against the envelope's
+        27.5–105.1 K; the 3 blended giants (0.31–0.33 M_J) have 67–68 K against the bulk's
+        32–43 K.
+      - _The 0.15–0.3 M_J giants:_ none in the sets. The three of 0.31–0.33 M_J keep their whole
+        helium (depletion 1) at either T_eff.
+      - _Count (x):_ 834 refractory, sulphide and salt decks based below their join, over 86
+        envelopes. The largest deck τ is 1.08 × 10⁷ (a ZnS deck). 463 decks are bound at the
+        10-kbar bottom, each based at 10⁹ Pa to rounding (asserted).
+      - _The ice giants' CH₄ decks:_ τ 1.63–9.82, the largest on sample `01ffeb2ce0000000` 0800,
+        all under 10.
+      - _The cost:_ 106 envelope rebuilds took 28.4 ms on average (median 32.8 ms, the slowest
+        48.0 ms). This is the test build (the sim at `opt-level` 2), on a machine at load 6–11,
+        one thread; release is not measured.
+    - _Tests_ (system/envelope/tests.rs unless named):
+      - `under_every_24_hold_every_gas_envelope_record_is_its_builder_s_or_not_modelled`: the
+        golden systems and the sample's first 10, at both ends of the clock window, every 24 hold
+        with the record's batch rules. Every present non-solid envelope is either `Ok` and equal
+        to its builder's rebuilt from its record's own members (by `Debug`), or `NotModelled` for
+        a stated reason. Each `Ok` envelope keeps every invariant of design-i §4 item 1 (κ₁ 2.87 ×
+        10⁻³, n 2, γ 0.4, f ¼; T_irr⁴ = 4 T_eq⁴ to 10⁻¹²; the nodes; the composition; coverage 1;
+        the deck/haze split; the hazes' τ to the bit; He/H the carry's times its rain's
+        depletion). Solid classes are not applicable, or not modelled under a supercritical
+        envelope. Counts: 20 gas-giant, 14 ice-giant and 12 sub-Neptune records `Ok`, 10
+        sub-Neptune records not hydrogen-dominated. Across the window, 28 bodies keep their
+        state, with T_int, T_irr, join, μ and the three largest shares inside 10× their inputs'
+        largest move; the largest deck-base move is 8.1 × 10⁻⁵. T24.d's moved record tests ride on
+        it: a sub-Neptune's envelope `Ok` with its surface not applicable, and a rocky body's
+        envelope not applicable.
+      - `under_every_24_hold_the_record_s_envelope_is_the_same_twice_and_in_both_queries`: the same
+        seed twice, and `body_at` against `snapshot_at`, on `hot_jupiter`, `solar_like` and
+        `eccentric_giant`.
+      - `the_table_s_jupiter_on_the_record_follows_the_probe`: through `envelope_of`, T(1 bar)
+        166.08 K, the NH₃ deck's base at 0.726 bar, CH₄ ÷ H₂ 2.04 × 10⁻³, the join at 0.899 bar
+        and the photosphere at 0.339 bar. It has 13 decks and 14 modes, and its haze τ is 0.307.
+      - `the_ice_giants_methane_decks_meet_g3`: Neptune's CH₄ τ is 5.769 (based at 0.648 bar) and
+        Uranus's 3.759 (0.503 bar). Each is under R08's 10 and within 3× its range's top (4 and
+        5), against T52.d's 5.77 and 3.76 at the protosolar He/H.
+      - `the_held_envelope_computes_nothing`.
+      - The air's tripwire, `the_air_sections_are_held_only_until_the_24_bump`, gains the
+        envelope: every golden gas envelope is `NotModelled` under `Held` at both times
+        (asserted > 10), and its message lists `record_envelope`'s rules, the fifth scan and the
+        server's `ok` at l.
+      - The envelope scan, `nothing_on_the_record_calls_the_envelope_atmosphere_yet`, gains a
+        `HELD` list (`system/envelope.rs` and its tests, each naming `AirRules` in code, with
+        `the_envelope_s_hold_check_reads_the_code_alone`), and its patterns narrow to the calls and
+        the inputs, so record.rs may store the type. The condensation scan's `HELD` gains the
+        envelope's tests, which read the decks' bounds.
+      - In chem/escape/tests.rs: the arm's tripwire and its two law tests. In system/tests.rs: the
+        movers' test. In testing.rs: `every_24_hold_is_in_force_inside_the_helper`'s second tuple
+        gains `PrimordialHeliumRules`, with the case "every 24 hold but the host helium's".
+      - `assert_envelope_tags` and `assert_surface_or_envelope` keep `NotModelled`: no caller reads
+        the air's batch (their docs say so).
+    - _The wire_ (part i-1's shapes, with the lane's docs for R08's S1–S5, and part i-3). Neither
+      type had been sent `ok`, so reshaping them is no protocol change (decision-p14-t24d-profile
+      §2), and `PROTOCOL_VERSION` stays 3.
+      - _The shapes:_ `GuillotProfileDto` gains `optical_depth_exponent` (n, at least 1, 2 for
+        every envelope), and κ_th is stated at 1 bar. `BodyEnvelopeDto` keeps its 11 members with
+        their docs rewritten, and gains `hazes`, `condensate_decks`, `absorbers` and `not_formed`.
+        - `decks` keeps its key and its type, a list of `AerosolModeDto`, now holding the deck
+          modes alone (decision-p14-t54b-open §2.3's invariant).
+        - The hazes are apart in `hazes`, each with `deck` `null`.
+        - The decks themselves are `condensate_decks`, not `aerosols`, which R08's parity walk
+          finds at any depth (review-r08-shapes-b N1).
+        - No new type, so no new binding file. `optical_depth_exponent` joins the unit test's
+          `DIMENSIONLESS` (27 → 28).
+      - _R08's second shape review_ (review-r08-shapes-i, SIGNED, no must-fix):
+        - S1–S5 are doc sentences in surface.rs: how the two gas levels combine, how the adiabat
+          interpolates, the hazes no rule makes, the client's refusals (with coverage 1 not a
+          rule), an envelope haze's `temperature_k`, the absorbers' registry keys, and κ_v not an
+          extinction at 550 nm.
+        - C1 is adopted (the lane's decision): the client model carries the envelope's lists as an
+          `AerosolInventory` (below).
+        - C2 is cured by the generator's values (below).
+      - _Declined at 24, recorded:_
+        - C2's `vapour` member on `CondensateDeckDto` (Q5). It would matter only for the element-
+          and product-law decks, and all but NH₄SH lie below R08's floor
+          (decision-deep-decks-split §3.3). NH₄SH's reactants reach R08 through `composition` and
+          the NH₃ deck's own fractions. As an optional member it can still come later.
+        - The 10-kbar bound (`DeckBound::Bottom`, Q6) is a sentence in `base_pa`'s doc ("an
+          envelope's 10 kbar, 10⁹ Pa"), not a member.
+        - FeH (Q7) is a sentence in `absorbers`' doc ("never listed: it is not modelled"), not a
+          member.
+      - _The conversion_ (`convert::planetary::envelope`, part i-2): every member is read from the
+        record's getters. The modes are split by the inventory's own membership rule: `decks` are
+        the modes whose deck is a listed deck's condensate, and `hazes` the rest, which
+        `aerosol_mode` sends with `deck` `null`. The rule cannot collide, since no haze's material
+        has a law aloft (`no_haze_material_condenses_as_a_deck`). `profile_nodes` and `not_formed`
+        are factored out, and the surface's conversion shares them.
+      - _The fixture's Jupiter_ (`packages/protocol/fixtures/planetary.json`):
+        `body_detail_jupiter`'s envelope is the generator's on the record's own bulk, through
+        `planetary::testing::envelope_by_hand`. Its bulk and its list entry do not change.
+        - Its mass, radius, gravity and T_eq are the record's.
+        - L_int is 4πR²σ(T_eff⁴ − T_eq⁴) from the bulk's 128.9 and 111.6 K, so T_int is 104.87 K.
+        - Its envelope share is `giant_composition`'s at its mass beyond the snow line, 0.81783,
+          against the bulk's rounded 0.818. The bulk's split of the heavy elements (0.05, 0.06,
+          0.072) is illustrative, and the envelope reads none of it.
+        - It formed at its orbit's 5.2 au, against the slice zone's snow line.
+        - Its host is solar: [Fe/H] and [α/Fe] 0 and the median C/O and Mg/Si draws. Its He/H
+          starts at n☉ (0.096828), unfractionated, as no escape fractionates it at 5.2 au. A
+          generated record would carry the escape's 0.096818 (the recorded scale difference
+          above).
+        - It is 4.57 Gyr old and starlit.
+        - The description's interim note is replaced by "its envelope ok, the generator's on its
+          bulk (P14.T54.b.i)", with these inputs and the start stated as n☉.
+      - _The fixture's hot Jupiter_, `body_detail_hot_jupiter`, is new. Its id is 32, the next after
+        31; 28 is free but out of sequence. It is body .0200 of the slice's system.
+        - It takes Jupiter's record form, its bulk at HD 209458 b's measured 0.685 M_J, 1.359 R_J
+          and T_eq 1,449 K (zero albedo), at 0.04707 au (Torres, Winn and Holman 2008, ApJ 677,
+          1324, Table 5). The science checker confirmed each figure, and its g (9.19 m s⁻²) and ρ
+          (0.338 g cm⁻³), against the paper.
+        - T_int is stated, 558 K: Thorngren and Fortney 2018's ε of 2.2% at its flux, giving ε^¼
+          T_eq, the generator's heat for an inflated giant. So T_eff is 1,456.9 K. Its envelope
+          share is `giant_composition`'s (0.7889).
+        - It formed at the slice zone's snow line, where the generator grows a giant it places
+          inside it. It is 3.1 Gyr old (Torres et al. 2008, Table 3). The rest is the Jupiter's.
+        - Its envelope comes from the same builder. Its label, moons, rings and hooks are
+          `not_modelled`.
+      - _Figures, the fixture's Jupiter:_
+        - T(1 bar) 169.65 K; the join at 1.017 bar, with 17 nodes to 100 bar; the photosphere at
+          0.339 bar.
+        - The NH₃ deck is based at 0.641 bar (τ 2.39), with 13 decks and 14 modes; the chromophore
+          haze has τ 0.307.
+        - μ is 2.342, with 16 gases (NH₃ 2.37 × 10⁻⁴). It has no absorber, and SiO₂ and TiO₂ are
+          not formed.
+      - _Figures, the fixture's hot Jupiter:_
+        - T(1 bar) 1,690.1 K; the join at 2.99 bar; the photosphere at 0.207 bar.
+        - It has 7 decks (Al₂O₃, CaTiO₃, Fe, Mg₂SiO₄, MgSiO₃, Cr and MnS), based at 0.077–3.9 bar,
+          all but MnS's below the photosphere. It has no NH₃ deck and no haze (soot needs T_eq
+          600–950 K).
+        - It has 12 absorbers (SO₂, H, e⁻, Na, K, Fe, Mn, Ni, Zn, Na⁺, K⁺, Cr) and 33 gases.
+      - _Recorded (figure-level, to the lane):_
+        - _The fixture is at 23's rules._ Its values are the generator's under the rules in force.
+          The read densities' hold leaves the liquid refractory deck modes (Fe, CaTiO₃, Al₂O₃,
+          Mg₂SiO₄ and MgSiO₃ on the Jupiter, Fe on the hot Jupiter) with `no_grain_density` and
+          no size; at 24 they gain a size and `optics_not_modelled` (T52.d's record). Another
+          crate cannot run `envelope_by_hand` under the 24 holds, which are `cfg(test)`. So
+          P14.T54.b.l's bump, which deletes them, fails
+          `the_fixture_s_envelopes_are_the_generator_s`, and l refreshes the fixture from that
+          test's inputs. Every mode above R08's floor is a
+          solid's, and none moves. Main's ruling (2026-10-27): accepted; on l's list and
+          prebless-24-list by name.
+        - _The hot Jupiter's silicate decks are thick._ Their in-cloud τ are 1.1 × 10⁴ (MgSiO₃) and
+          8.1 × 10⁴ (Mg₂SiO₄). The f_sed share puts about 66, 47 and 20 (Mg₂SiO₄, MgSiO₃, Cr) above
+          its photosphere, about 135 in all. That is T52.d's deck model, count (x)'s class, not the
+          wire's. It is relayed against R08.T4.e's dark class IV giant. Main's ruling
+          (2026-10-27): not a 24 blocker, since nothing draws it; it would draw bright against
+          HD 209458 b's low measured albedo, so it joins count (x) as a precondition of
+          R08.T16.a: P14.T52.d's owner reviews the deck model's `f_sed` share before envelopes
+          are drawn. Jupiter's NH₃ deck is at τ 2.39, inside the observed 2–10 of the T52.c
+          serve-gate line.
+        - The volatile decks' `f_sed` are the supply rule's (NH₃ 368, NH₄SH 954, H₂O 7,132), far
+          above Ackerman and Marley's range: for the same P14.T52.d review (main, 2026-10-27), with
+          no deadline beyond R08.T16.a's precondition.
+      - _The pinning test_, `the_fixture_s_envelopes_are_the_generator_s` (server, design-i Q8),
+        builds both envelopes from the inputs it states on each record and asserts that the
+        fixture's JSON equals `serde_json::to_value(envelope(&e))` exactly. The values were pasted
+        from one run of `serde_json::to_string_pretty`, and the print was deleted. It also asserts
+        C2's three docs:
+        - the first node is the join at the grey profile's temperature, to the bit;
+        - the nodes are even in ln p, to 10⁻⁹;
+        - the composition holds the vapour of each own-gas deck based above 1 bar, at its vapour
+          below to 1% (Jupiter's NH₃ 2.375 against 2.368 × 10⁻⁴, the composition renormalised
+          after the deeper decks' trims; the hot Jupiter's Cr).
+        - Decks based below 1 bar have trimmed their vapour to saturation there, and element and
+          product laws name no one gas, so neither is asserted.
+      - _The client_ (`lib/system/model.ts`, `bodiesWire.ts`):
+        - `GuillotProfile.opticalDepthExponent` is added, and `thermalOpacityM2PerKg` is κ_th at
+          1 bar.
+        - `BodyEnvelope.aerosols` is an `AerosolInventory` (C1): `modes` the wire's deck modes and
+          then its hazes, `decks` its `condensate_decks`, then `absorbers` and `notFormed`. It
+          replaces the `decks` member of modes, which only the decoder read. The docs take the
+          DTO's sense.
+        - `toEnvelope` refuses an n that is not finite and at least 1 ("envelope unusable"). It
+          decodes the four lists with `toAerosolMode`, `toCondensateDeck`, `toAbsorber` and
+          `toNotFormed`.
+        - One helper, `checkDeckNames`, holds the deck checks for `toAerosols` and the envelope:
+          at most one deck a condensate ("condensate deck unusable"); every `decks` mode naming a
+          listed deck, and every haze naming none ("aerosol mode unusable"). It runs before the
+          lists are joined. Coverage is checked as a fraction only.
+        - `BodyRecordReadings.tsx`'s comment reads "until generator version 24 (P14.T54.b.i)". No
+          row and no displayed string changed.
+      - _Tests:_
+        - _Server:_ `an_envelope_is_sent_as_the_record_holds_it` (both giants by hand, every member
+          against the record's getters to the bit, the split, coverage 1, the decks, absorbers and
+          reasons, the Jupiter's NH₃ deck and haze, the hot Jupiter's alkalis, sub-photosphere
+          silicates and no NH₃), and the pinning test. `assert_modes_sent` now takes the modes and
+          decks, and `assert_decks_sent` is factored out. The `every_present_planet_…` doc is
+          rewritten (part i-2).
+        - _Protocol:_ `the_shared_jupiter_fixture_holds_its_envelope` points at the server's pin.
+          `every_shared_fixture_is_exactly_a_wire_form` counts 14 messages. record.rs's two
+          "until P14.T24.d" docs are rewritten.
+        - _`@hyperion/protocol`'s planetary.test.ts:_ the Jupiter's composition, decks, hazes,
+          adiabat and profile, and a hot-Jupiter block citing Torres et al.'s figures.
+        - _bodiesWire.test.ts:_
+          - the sim's values;
+          - n 0.5 and NaN refused;
+          - a deck mode naming an unlisted deck, or none, refused, and a haze naming a deck
+            refused;
+          - two decks of one condensate refused;
+          - a coverage of 0.6 read;
+          - unknown keys in every new list passed;
+          - the hot Jupiter decoded.
+        - _Others:_ `test/planetaryFixture.ts` gains `hotJupiterDetail`.
+          `SystemView.bodies.test.tsx`'s `MOLE FRACTION` reads the 16 gases. R08's
+          `view/atmosphere` tests pass on the new fixture unedited.
+      - _Left for P14.T54.b.l, with C5:_ `view/atmosphere/parity.test.ts:358`'s sentence that the
+        envelope deck's τ "is not the sim's" is now stale (R08's file; review-r08-shapes-i §3
+        item 5).
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

@@ -134,8 +134,7 @@ pub(crate) mod tests {
     use crate::envelope::{ClientMessage, ResponseBody, ServerMessage};
     use crate::orbit::{HierarchyDto, HierarchyNodeDto};
     use crate::planetary::record::tests::{
-        SYSTEM, earth_condensates, earth_crust, jupiter_envelope, planet_record, planet_summary,
-        planet_summary_json,
+        SYSTEM, earth_condensates, earth_crust, planet_record, planet_summary, planet_summary_json,
     };
     use crate::planetary::zones::tests::{solar_zone, solar_zone_json};
     use crate::planetary::{BodyKindDto, BodyRecordDto, BodyStateDto};
@@ -394,7 +393,7 @@ pub(crate) mod tests {
             .unwrap();
             assert_eq!(&again, wire, "{name}");
         }
-        assert_eq!(messages.len(), 13);
+        assert_eq!(messages.len(), 14);
     }
 
     #[test]
@@ -435,7 +434,11 @@ pub(crate) mod tests {
 
     /// P14.T35.e: the shared Jupiter's record is the slice's list entry for it, its surface not
     /// applicable and its envelope `ok`, so that the client decodes an envelope the server is
-    /// pinned to send.
+    /// pinned to send. The envelope is read from the fixture itself (P14.T54.b.i), whose values
+    /// `hyperion-server`'s `the_fixture_s_envelopes_are_the_generator_s` pins to the generator's:
+    /// an H₂/He envelope's, `supercritical` `null`, on the generator's grey profile (κ 2.87 × 10⁻³
+    /// m² kg⁻¹ at 1 bar, n 2), with an ammonia deck and the modes that name it, every deck mode
+    /// naming one of its decks and no haze naming any, each over the whole sky.
     #[test]
     fn the_shared_jupiter_fixture_holds_its_envelope() {
         let ServerMessage::Response {
@@ -476,10 +479,53 @@ pub(crate) mod tests {
                 figure: listed.figure,
                 photometry: listed.photometry,
                 surface: SectionDto::NotApplicable,
-                envelope: Some(SectionDto::Ok(jupiter_envelope())),
+                envelope: detail.record.envelope.clone(),
                 hooks: SectionDto::NotModelled,
             }
         );
+        let Some(SectionDto::Ok(envelope)) = detail.record.envelope else {
+            panic!("the fixture's Jupiter's envelope is ok");
+        };
+        assert_eq!(envelope.supercritical, None);
+        let profile = envelope.profile;
+        assert!(
+            (profile.thermal_opacity_m2_per_kg - 2.87e-3).abs() < 1e-15
+                && (profile.optical_depth_exponent - 2.0).abs() < 1e-15,
+            "{profile:?}"
+        );
+        assert!(
+            envelope
+                .condensate_decks
+                .iter()
+                .any(|deck| deck.condensate == "NH3"),
+            "{:?}",
+            envelope.condensate_decks
+        );
+        assert!(
+            envelope
+                .decks
+                .iter()
+                .any(|mode| mode.deck.as_deref() == Some("NH3")),
+            "{:?}",
+            envelope.decks
+        );
+        for mode in &envelope.decks {
+            assert!(
+                envelope
+                    .condensate_decks
+                    .iter()
+                    .any(|deck| mode.deck.as_ref() == Some(&deck.condensate)),
+                "{mode:?} names no listed deck"
+            );
+        }
+        assert!(
+            envelope.hazes.iter().all(|haze| haze.deck.is_none()),
+            "{:?}",
+            envelope.hazes
+        );
+        for mode in envelope.decks.iter().chain(&envelope.hazes) {
+            assert!((mode.coverage - 1.0).abs() < 1e-15, "{mode:?}");
+        }
     }
 
     /// P14.T35.e: the shared mass-and-orbit record withholds the envelope with the surface.

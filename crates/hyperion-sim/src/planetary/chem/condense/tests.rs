@@ -881,11 +881,13 @@ fn a_rule_s_mode_takes_its_optics_as_the_loop_s() {
 /// reaches the loop behind a named hold, each with the name of its hold, which its code must name:
 /// P14.T54.b.b's wiring of the record's aerosol inventory, whose `Batch` arm alone calls
 /// `hooks::aerosols` and so the loop (decision-p14-t54b-open §3.3), and its tests, which read the
-/// loop's errors and labels (B1's fix, P14.T52.f). **P14.T54.b.l deletes this list** with the
-/// tripwire below.
-const HELD: [(&str, &str); 2] = [
+/// loop's errors and labels (B1's fix, P14.T52.f); and the tests of P14.T54.b.i's envelope section
+/// (behind the air's hold, `AirRules`), which read its decks' bounds. **P14.T54.b.l deletes this
+/// list** with the tripwire below.
+const HELD: [(&str, &str); 3] = [
     ("planetary/system/air.rs", "AIR_SECTIONS_VERSION"),
     ("planetary/system/air/tests.rs", "AIR_SECTIONS_VERSION"),
+    ("planetary/system/envelope/tests.rs", "AirRules"),
 ];
 
 /// Nothing on the record reaches the loop or the laws aloft before P14.T54.b's bump

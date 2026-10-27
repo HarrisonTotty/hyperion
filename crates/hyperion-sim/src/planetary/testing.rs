@@ -14,12 +14,20 @@
 //!   ship (decision-t24i-airless-state D3.3).
 //! - [`partial_pressures`] states an air by hand, for other crates' tests of what a derivation
 //!   reads of one.
+//! - [`envelope_by_hand`] builds a record's envelope from inputs stated by hand
+//!   ([`EnvelopeByHand`]), through the record's own chain, for other crates' tests of its
+//!   conversion and the shared fixtures' envelopes (P14.T54.b.i).
 
 use std::error::Error;
 use std::fmt;
 
+use super::chem::HostAbundances;
+use super::chem::equilibrium::Network;
 use super::context::{BuildSystemContextError, SystemContext};
 use super::derive::atmosphere::{Gas, PartialPressures};
+use super::derive::{FormationZone, MassFractions};
+use super::record::Envelope;
+use super::system::envelope::{EnvelopeOf, envelope_of};
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::imf::MassBand;
@@ -30,7 +38,10 @@ use crate::galaxy::{BuildGalaxyError, Galaxy};
 use crate::id::SystemId;
 use crate::orbit::Eccentricity;
 use crate::time::UniverseTime;
-use crate::units::{Dex, LightYears, Metres, Pascals, SolarMasses, Years};
+use crate::units::{
+    Dex, EarthMasses, Kelvin, LightYears, Metres, MetresPerSecondSquared, Pascals, SolarMasses,
+    Watts, Years,
+};
 
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
 /// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation
@@ -40,6 +51,96 @@ use crate::units::{Dex, LightYears, Metres, Pascals, SolarMasses, Years};
 pub fn partial_pressures(pressure: impl Fn(Gas) -> Pascals) -> PartialPressures {
     PartialPressures::from_fn(pressure)
 }
+
+/// A gas envelope's inputs stated by hand ([`envelope_by_hand`]): what a record's envelope reads of
+/// its body, its host and its time, each a plain value its caller states (P14.T54.b.i).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EnvelopeByHand {
+    /// The body's mass.
+    pub mass: EarthMasses,
+    /// Its mass fractions, whose envelope share is at least
+    /// [`THIN_ENVELOPE_FRACTION`](crate::planetary::params::THIN_ENVELOPE_FRACTION).
+    pub fractions: MassFractions,
+    /// Its radius, its bulk section's.
+    pub radius: Metres,
+    /// Its surface gravity, its bulk section's.
+    pub gravity: MetresPerSecondSquared,
+    /// Its equilibrium temperature, its bulk section's: from its hosts' light alone, with its Bond
+    /// albedo (ruling 112.7).
+    pub equilibrium_temperature: Kelvin,
+    /// Its internal luminosity, the record's (0 below 0.3 Jupiter masses, where P14.T24.d's
+    /// cooling law gives its heat).
+    pub internal_luminosity: Watts,
+    /// Its age at the time.
+    pub age: Years,
+    /// Where it formed from its host.
+    pub formation_distance: Metres,
+    /// Its host's disc's snow line.
+    pub snow_line: Metres,
+    /// Its host's \[Fe/H\], dex.
+    pub fe_h: Dex,
+    /// Its host's \[α/Fe\], dex.
+    pub alpha_fe: Dex,
+    /// Its host's C/O and Mg/Si (P14.T50.a).
+    pub host: HostAbundances,
+    /// Its envelope's He/H by number before any helium rain: its host star's own, less what escape
+    /// fractionated (a solar host's unfractionated, the protosolar
+    /// [`Element::He`](crate::substance::Element::He)'s).
+    pub primordial_helium_per_hydrogen: f64,
+    /// Whether a star's ultraviolet lights it.
+    pub starlit: bool,
+}
+
+/// The record's envelope of the body `inputs` states, by the record's own chain (P14.T24.d's
+/// internal temperature, P14.T50.b's abundances at the envelope's (`T_eq`⁴ + `T_int`⁴)^¼ and
+/// P14.T52.d's atmosphere on the adopted grey profile), on a network built afresh: for other
+/// crates' tests of what the record holds, as the server's conversion and its fixtures' envelopes
+/// read one (a caller's values are its own to check).
+///
+/// # Errors
+///
+/// [`BuildEnvelopeByHandError`], with the refusing step's reason, for a formation zone that is not
+/// one, or inputs a step of the chain refuses, which leave a record's envelope not modelled.
+pub fn envelope_by_hand(inputs: &EnvelopeByHand) -> Result<Envelope, BuildEnvelopeByHandError> {
+    let refused = |reason: String| BuildEnvelopeByHandError { reason };
+    let formation = FormationZone::new(inputs.formation_distance, inputs.snow_line)
+        .map_err(|error| refused(error.to_string()))?;
+    let network = Network::registry().map_err(|error| refused(error.to_string()))?;
+    let of = EnvelopeOf {
+        mass: inputs.mass,
+        fractions: inputs.fractions,
+        radius: inputs.radius,
+        gravity: inputs.gravity,
+        equilibrium_temperature: inputs.equilibrium_temperature,
+        internal_luminosity: inputs.internal_luminosity,
+        age: inputs.age,
+        formation: Some(formation),
+        fe_h: inputs.fe_h,
+        alpha_fe: Some(inputs.alpha_fe),
+        host: inputs.host,
+        primordial_helium_per_hydrogen: inputs.primordial_helium_per_hydrogen,
+        starlit: inputs.starlit,
+    };
+    envelope_of(&of, &network).map_err(|reason| refused(format!("{reason:?}")))
+}
+
+/// [`envelope_by_hand`] gave no envelope: the step that refused, as its reason reads.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BuildEnvelopeByHandError {
+    reason: String,
+}
+
+impl fmt::Display for BuildEnvelopeByHandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the envelope's chain refused its inputs: {}",
+            self.reason
+        )
+    }
+}
+
+impl Error for BuildEnvelopeByHandError {}
 
 /// A single star of initial mass `mass` (0.08–150 M☉), \[Fe/H\] `fe_h` and age at the epoch
 /// `age`, as the system `id`: the builder's defaults otherwise (the median star's draws, the
@@ -355,7 +456,11 @@ impl Error for SampleContextsError {
 /// - the weathered area mix's, `WEATHERED_AREA_MIX_VERSION` (P14.T54.b.e), at
 ///   `AreaMixWeathering::Weathered` through `with_area_mix_weathering`: every pass's regolith
 ///   weathered at its body's maturity, but `basalt_reduced`'s, which keeps the cap, and `ferric`'s
-///   deposit in the area mix.
+///   deposit in the area mix;
+/// - the primordial helium's, `PRIMORDIAL_HELIUM_VERSION` (P14.T54.b.i), at
+///   `PrimordialHeliumRules::Host` through `with_primordial_helium`: every envelope's helium starts
+///   at its host star's own He/H, under the escape's batch the fractionation's start and the
+///   record's envelope's T50.b input.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
@@ -364,7 +469,9 @@ impl Error for SampleContextsError {
 #[cfg(test)]
 pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::belts::population::{PopulationRules, with_population_rules};
-    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::chem::escape::{
+        EscapeRules, PrimordialHeliumRules, with_primordial_helium, with_rules,
+    };
     use crate::planetary::chem::tenuous::{TenuousRules, with_tenuous};
     use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
     use crate::planetary::derive::photometry::area_mix::{
@@ -394,7 +501,12 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
                                                 with_population_rules(PopulationRules::Laws, || {
                                                     with_area_mix_weathering(
                                                         AreaMixWeathering::Weathered,
-                                                        run,
+                                                        || {
+                                                            with_primordial_helium(
+                                                                PrimordialHeliumRules::Host,
+                                                                run,
+                                                            )
+                                                        },
                                                     )
                                                 })
                                             })
@@ -608,7 +720,8 @@ mod tests {
     /// inside it gives its hold's alone, and outside it each gives the version's, 23's (P14.T24.i's
     /// follow-up, decision-t24i-airless-state D3.3). Each rule set is the first twelve holds' rules
     /// and then the later ones' (P14.T51.e's small bodies' types, P14.T54.b.e's weathered area
-    /// mix), nested, since std compares and prints tuples of at most twelve elements.
+    /// mix, P14.T54.b.i's primordial helium), nested, since std compares and prints tuples of at
+    /// most twelve elements.
     #[test]
     #[expect(
         clippy::too_many_lines,
@@ -616,7 +729,9 @@ mod tests {
     )]
     fn every_24_hold_is_in_force_inside_the_helper() {
         use crate::planetary::belts::population::PopulationRules;
-        use crate::planetary::chem::escape::EscapeRules;
+        use crate::planetary::chem::escape::{
+            EscapeRules, PrimordialHeliumRules, with_primordial_helium,
+        };
         use crate::planetary::chem::tenuous::TenuousRules;
         use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
         use crate::planetary::derive::photometry::area_mix::{
@@ -644,7 +759,11 @@ mod tests {
                     OceanRules::in_force(),
                     PopulationRules::in_force(),
                 ),
-                (SmallBodyRules::in_force(), AreaMixWeathering::in_force()),
+                (
+                    SmallBodyRules::in_force(),
+                    AreaMixWeathering::in_force(),
+                    PrimordialHeliumRules::in_force(),
+                ),
             )
         };
         let at_24 = (
@@ -662,7 +781,11 @@ mod tests {
                 OceanRules::Solved,
                 PopulationRules::Laws,
             ),
-            (SmallBodyRules::Batch, AreaMixWeathering::Weathered),
+            (
+                SmallBodyRules::Batch,
+                AreaMixWeathering::Weathered,
+                PrimordialHeliumRules::Host,
+            ),
         );
         let at_23 = (
             (
@@ -679,7 +802,11 @@ mod tests {
                 OceanRules::Held,
                 PopulationRules::Held,
             ),
-            (SmallBodyRules::Held, AreaMixWeathering::Held),
+            (
+                SmallBodyRules::Held,
+                AreaMixWeathering::Held,
+                PrimordialHeliumRules::Protosolar,
+            ),
         );
         assert_eq!(rules(), at_23, "the version's, outside the helper");
         assert_eq!(with_every_24_hold(rules), at_24);
@@ -709,7 +836,11 @@ mod tests {
                     OceanRules::Solved,
                     PopulationRules::Laws,
                 ),
-                (SmallBodyRules::Batch, AreaMixWeathering::Weathered),
+                (
+                    SmallBodyRules::Batch,
+                    AreaMixWeathering::Weathered,
+                    PrimordialHeliumRules::Host,
+                ),
             ),
             "every 24 hold but the unlit mean's"
         );
@@ -730,9 +861,25 @@ mod tests {
                     OceanRules::Solved,
                     PopulationRules::Laws,
                 ),
-                (SmallBodyRules::Batch, AreaMixWeathering::Weathered),
+                (
+                    SmallBodyRules::Batch,
+                    AreaMixWeathering::Weathered,
+                    PrimordialHeliumRules::Host,
+                ),
             ),
             "every 24 hold but the read densities'"
+        );
+        assert_eq!(
+            with_every_24_hold(|| with_primordial_helium(PrimordialHeliumRules::Protosolar, rules)),
+            (
+                at_24.0,
+                (
+                    SmallBodyRules::Batch,
+                    AreaMixWeathering::Weathered,
+                    PrimordialHeliumRules::Protosolar,
+                ),
+            ),
+            "every 24 hold but the host helium's"
         );
         assert_eq!(rules(), at_23, "set back after");
     }

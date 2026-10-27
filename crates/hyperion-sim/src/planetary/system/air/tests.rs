@@ -121,16 +121,18 @@ fn check_profile(record: &BodyRecord, surface: &Surface, profile: &RadiativeConv
 /// The air's sections are held until P14.T54.b's bump (P14.T54.b.l; decision-p14-t54b-open §3.3):
 /// below it the rules in force are the held ones, and under them every golden system's record, at
 /// both times its golden pins, holds its vertical structure, its aerosol inventory and its
-/// modifiers (P14.T54.b.c, behind the same hold) not modelled. The server's
+/// modifiers (P14.T54.b.c, behind the same hold) not modelled, and every gas-envelope record's
+/// envelope (P14.T54.b.i, behind the same hold) not modelled. The server's
 /// `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` holds the wire's members
-/// absent on every golden body. P14.T54.b.i adds the envelope to the same check; d added none,
-/// its member being on a DTO no build sends (`record::Envelope` has no value yet). That the
-/// held arm calls none of the pure modules is held by the source scans' `HELD` lists
-/// (`nothing_on_the_record_calls_the_inventory_yet`,
+/// absent on every golden body, and `every_present_planet_has_exactly_one_of_a_surface_and_an_envelope`
+/// the envelope `not_modelled`. That the held arm calls none of the pure modules is held by the
+/// source scans' `HELD` lists (`nothing_on_the_record_calls_the_inventory_yet`,
 /// `nothing_on_the_record_calls_the_condensation_yet`,
-/// `modifiers_nothing_on_the_record_reads_the_modifiers_yet`) and here by its arm: the table's
+/// `modifiers_nothing_on_the_record_reads_the_modifiers_yet`,
+/// `nothing_on_the_record_calls_the_envelope_atmosphere_yet`) and here by its arm: the table's
 /// Venus, whose inventory the batch builds, records none under `Held` (and the modifiers' arm in
-/// `system::modifiers`' tests, `the_held_record_computes_no_modifiers`).
+/// `system::modifiers`' tests, `the_held_record_computes_no_modifiers`, and the envelope's in
+/// `system::envelope`'s, `the_held_envelope_computes_nothing`).
 #[test]
 fn the_air_sections_are_held_only_until_the_24_bump() {
     assert!(
@@ -139,29 +141,43 @@ fn the_air_sections_are_held_only_until_the_24_bump() {
          vertical structure (P14.T24.e), `null` for one with no air, its aerosol and absorber \
          inventory (P14.T24.c with T24.g), the empty inventory for one with no air and not \
          modelled for a magma ocean's air, and its modifiers (P14.T51.d with T51.j, \
-         P14.T54.b.c), with the members P14.T54.b's later subtasks hold here. Delete \
+         P14.T54.b.c), and every sub-Neptune's and giant's envelope section (P14.T24.d with \
+         T52.d on T50.b's abundances, P14.T54.b.i). Delete \
          `AIR_SECTIONS_VERSION`, `AirRules` with its `Held` arm, `record_structure`'s, \
-         `record_aerosols`', `record_modifiers`' and `planet_field`'s rules, `RecordRules::air` \
+         `record_aerosols`', `record_modifiers`', `planet_field`'s and `record_envelope`'s rules, \
+         `RecordRules::air` \
          (and `RecordRules` with `PlanetarySystem::with_record_rules` once the cold traps' hold \
-         goes too); the four source scans with their `HELD` lists \
+         goes too); the five source scans with their `HELD` lists \
          (`nothing_on_the_record_calls_the_inventory_yet`, \
          `nothing_on_the_record_calls_the_condensation_yet`, \
          `substance_aerosol_nothing_on_the_record_reads_the_extinction_yet`, \
-         `modifiers_nothing_on_the_record_reads_the_modifiers_yet`); \
+         `modifiers_nothing_on_the_record_reads_the_modifiers_yet`, \
+         `nothing_on_the_record_calls_the_envelope_atmosphere_yet`); \
          `the_venus_test_is_rechecked_at_the_23_to_24_bump`, \
-         `the_held_record_carries_no_structure`, `the_held_record_computes_no_modifiers` and this \
+         `the_held_record_carries_no_structure`, `the_held_record_computes_no_modifiers`, \
+         `the_held_envelope_computes_nothing` and this \
          test. The server's \
          `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` then takes the \
          structure as present, `null` on an airless surface, the aerosols as present, the empty \
-         object on an airless surface, and the modifiers as present where the record models them \
-         (decision-p14-t54b-open §1.3, §3.3)"
+         object on an airless surface, and the modifiers as present where the record models them, \
+         and `every_present_planet_has_exactly_one_of_a_surface_and_an_envelope` the envelope `ok` \
+         where modelled (decision-p14-t54b-open §1.3, §3.3)"
     );
     assert_eq!(AirRules::in_force(), AirRules::Held);
     assert_eq!(RecordRules::in_force().air, AirRules::Held);
-    let mut surfaces = 0_usize;
+    let (mut surfaces, mut envelopes) = (0_usize, 0_usize);
     for (name, ctx, system) in golden_systems() {
         for t in [UniverseTime::EPOCH, ClockWindow::END] {
             for record in system.snapshot_at(ctx, t).bodies() {
+                if record
+                    .bulk()
+                    .ok()
+                    .is_some_and(|bulk| !bulk.class().has_solid_surface())
+                {
+                    let id = record.identity().id();
+                    assert_eq!(record.envelope(), &Section::NotModelled, "{name} {id}");
+                    envelopes += 1;
+                }
                 let Section::Ok(surface) = record.surface() else {
                     continue;
                 };
@@ -178,6 +194,7 @@ fn the_air_sections_are_held_only_until_the_24_bump() {
         }
     }
     assert!(surfaces > 20, "{surfaces} golden surfaces");
+    assert!(envelopes > 10, "{envelopes} golden gas envelopes");
     let venus = table_under_the_switch()
         .into_iter()
         .find(|air| air.name == "Venus")

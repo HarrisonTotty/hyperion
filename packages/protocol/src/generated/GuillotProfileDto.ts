@@ -2,15 +2,27 @@
 
 /**
  * The parameters of an envelope's irradiated grey profile above its join to the adiabat: Guillot
- * 2010's (A&A 520, A27) Eq. 29, with τ = `κ_th` p ÷ g and g the bulk section's surface gravity.
+ * 2010's (A&A 520, A27) Eq. 29 in the thermal optical depth τ, which holds for an opacity that
+ * varies with pressure at a fixed γ, with τ = `κ_th` p₁ ÷ (n g) × (p ÷ p₁)ⁿ, p₁ = 1 bar (10⁵ Pa),
+ * n the optical depth's exponent and g the bulk section's surface gravity.
  */
 export type GuillotProfileDto = { 
 /**
- * The mean thermal opacity `κ_th`, m² kg⁻¹, positive.
+ * The thermal opacity at 1 bar, `κ_th`, m² kg⁻¹, positive: at a pressure p the opacity is
+ * `κ_th` (p ÷ 1 bar)ⁿ⁻¹.
  */
 thermal_opacity_m2_per_kg: number, 
 /**
- * γ, the visible opacity over the thermal, `κ_v` ÷ `κ_th`, dimensionless and positive.
+ * n, the exponent of the optical depth's power law τ ∝ pⁿ, dimensionless, at least 1: 1 for an
+ * opacity independent of pressure, 2 for one proportional to it, as collision-induced
+ * absorption is (Robinson and Catling 2012, Astrophys. J. 757, 104, Eq. 6). 2 for every
+ * envelope from P14.T24.d.
+ */
+optical_depth_exponent: number, 
+/**
+ * γ, the visible opacity over the thermal, `κ_v` ÷ `κ_th`, dimensionless and positive: the
+ * same at every depth. `κ_v` is the grey profile's mean opacity to the host's light, a
+ * parameter of T(p), not an extinction at 550 nm.
  */
 opacity_ratio: number, 
 /**

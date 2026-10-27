@@ -1339,24 +1339,64 @@ function toNotFormed(entry: NotFormedCondensateDto): NotFormedCondensate {
   return { condensate: entry.condensate, reason };
 }
 
+/** Which decks the modes of a list may name: one of the listed decks, none, or either. */
+type DeckNaming = "listed" | "none" | "listed_or_none";
+
+/** Whether a mode naming `deck` names what `naming` lets it, of the decks `decks`. */
+function namesAsAllowed(
+  deck: string | null,
+  decks: ReadonlyArray<CondensateDeck>,
+  naming: DeckNaming,
+): boolean {
+  const listed = deck !== null && decks.some((listedDeck) => listedDeck.condensate === deck);
+  let allowed: boolean;
+  switch (naming) {
+    case "listed":
+      allowed = listed;
+      break;
+    case "none":
+      allowed = deck === null;
+      break;
+    case "listed_or_none":
+      allowed = deck === null || listed;
+      break;
+  }
+  return allowed;
+}
+
 /**
- * A surface air's inventory, checked: its modes and decks each as above, at most one deck a
- * condensate, and every mode's deck, where it names one, one of the inventory's decks, which is
- * what a mode's `deck` means (decision-p14-t54b-open §2.2; R08's review of P14.T54.b.b, S3).
+ * The checks of an inventory's decks and the decks its modes name, a surface's and an envelope's
+ * alike (decision-p14-t54b-open §2.2; R08's reviews of P14.T54.b.b, S3, and of P14.T54.b.i, S4):
+ * at most one deck a condensate, and the modes of each list naming the decks its rule lets them
+ * ({@link DeckNaming}), which is what a mode's `deck` means. Two decks of one condensate are
+ * "condensate deck unusable", and a mode that names a deck its list's rule does not let it is
+ * "aerosol mode unusable".
  */
-function toAerosols(inventory: AerosolInventoryDto): AerosolInventory {
-  const decks = inventory.decks.map(toCondensateDeck);
-  const modes = inventory.modes.map(toAerosolMode);
+function checkDeckNames(
+  decks: ReadonlyArray<CondensateDeck>,
+  lists: ReadonlyArray<readonly [ReadonlyArray<AerosolMode>, DeckNaming]>,
+): void {
   check(
     new Set(decks.map((deck) => deck.condensate)).size === decks.length,
     "condensate deck unusable",
   );
   check(
-    modes.every(
-      (mode) => mode.deck === null || decks.some((deck) => deck.condensate === mode.deck),
+    lists.every(([modes, naming]) =>
+      modes.every((mode) => namesAsAllowed(mode.deck, decks, naming)),
     ),
     "aerosol mode unusable",
   );
+}
+
+/**
+ * A surface air's inventory, checked: its modes and decks each as above, at most one deck a
+ * condensate, and every mode's deck, where it names one, one of the inventory's decks
+ * ({@link checkDeckNames}).
+ */
+function toAerosols(inventory: AerosolInventoryDto): AerosolInventory {
+  const decks = inventory.decks.map(toCondensateDeck);
+  const modes = inventory.modes.map(toAerosolMode);
+  checkDeckNames(decks, [[modes, "listed_or_none"]]);
   return {
     modes,
     decks,
@@ -1602,11 +1642,18 @@ function toSurface(surface: BodySurfaceDto): BodySurface {
 }
 
 /**
- * A gas-envelope body's envelope section, checked (plan 14's P14.T24.d, on the wire by
- * P14.T35.e): temperatures not negative, the profile's parameters and the join positive, the
- * adiabat's pressures rising from the join, none above it, the composition summing to 1 and
- * largest first. Its supercritical condensable is any registry key, or `null` for an H₂/He
- * envelope (P14.T54.b.d).
+ * A gas-envelope body's envelope section, checked (plan 14's P14.T24.d with P14.T52.d, on the wire
+ * by P14.T35.e and P14.T54.b.i): temperatures not negative, the profile's parameters and the join
+ * positive, the optical depth's exponent finite and at least 1, the adiabat's pressures rising
+ * from the join, none above it, the composition summing to 1 and largest first. Its supercritical
+ * condensable is any registry key, or `null` for an H₂/He envelope (P14.T54.b.d).
+ *
+ * @remarks
+ * Its modes, decks, absorbers and condensables not formed are each checked as a surface's are, and
+ * joined as one inventory ({@link BodyEnvelope.aerosols}; R08's review of P14.T54.b.i, C1) after
+ * the wire's split is checked ({@link checkDeckNames}): every mode of `decks` names one of
+ * `condensate_decks`, and no haze names any. A mode's coverage is taken as the fraction it is, not
+ * refused where it is not 1.
  */
 function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
   const profile = envelope.profile;
@@ -1615,6 +1662,8 @@ function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
     atLeastZero(envelope.internal_temperature_k) &&
       atLeastZero(envelope.irradiation_temperature_k) &&
       positive(profile.thermal_opacity_m2_per_kg) &&
+      Number.isFinite(profile.optical_depth_exponent) &&
+      profile.optical_depth_exponent >= 1 &&
       positive(profile.opacity_ratio) &&
       positive(profile.redistribution_factor) &&
       positive(envelope.join_pressure_pa) &&
@@ -1624,12 +1673,20 @@ function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
       atLeastZero(envelope.haze_tau_550),
     "envelope unusable",
   );
+  const decks = envelope.condensate_decks.map(toCondensateDeck);
+  const deckModes = envelope.decks.map(toAerosolMode);
+  const hazes = envelope.hazes.map(toAerosolMode);
+  checkDeckNames(decks, [
+    [deckModes, "listed"],
+    [hazes, "none"],
+  ]);
   return {
     supercritical: envelope.supercritical,
     internalTemperatureK: envelope.internal_temperature_k,
     irradiationTemperatureK: envelope.irradiation_temperature_k,
     profile: {
       thermalOpacityM2PerKg: profile.thermal_opacity_m2_per_kg,
+      opticalDepthExponent: profile.optical_depth_exponent,
       opacityRatio: profile.opacity_ratio,
       redistributionFactor: profile.redistribution_factor,
     },
@@ -1638,7 +1695,12 @@ function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
     composition: toGases(envelope.composition, "envelope composition"),
     meanMolarMassGPerMol: envelope.mean_molar_mass_g_per_mol,
     heatCapacityOverR: envelope.heat_capacity_over_r,
-    decks: envelope.decks.map(toAerosolMode),
+    aerosols: {
+      modes: [...deckModes, ...hazes],
+      decks,
+      absorbers: envelope.absorbers.map(toAbsorber),
+      notFormed: envelope.not_formed.map(toNotFormed),
+    },
     hazeTau550: envelope.haze_tau_550,
   };
 }

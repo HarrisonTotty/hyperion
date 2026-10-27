@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import fixture from "../fixtures/planetary.json" with { type: "json" };
+import type { BodyEnvelopeDto } from "./generated/BodyEnvelopeDto";
 import type { BodyKindDto } from "./generated/BodyKindDto";
 import type { BodyStateDto } from "./generated/BodyStateDto";
 import type { BodySummaryDto } from "./generated/BodySummaryDto";
@@ -33,6 +34,15 @@ function response<K extends RequestKind>(name: FixtureName, kind: K): ResponseFo
     throw new Error(`the fixture's ${name} is not a ${kind} response`);
   }
   return message.body;
+}
+
+/** The `ok` envelope of the fixture's `body_detail` message `name`. */
+function envelopeOf(name: FixtureName): BodyEnvelopeDto {
+  const { envelope } = response(name, "body_detail").record;
+  if (envelope?.state !== "ok") {
+    throw new Error(`the fixture's ${name} carries no envelope`);
+  }
+  return envelope.value;
 }
 
 /** The value of a section that must be `ok`. */
@@ -318,22 +328,43 @@ describe("body_detail", () => {
     expect(vapour).toBeNull();
   });
 
-  it("decodes a Jupiter's envelope, its surface not applicable (P14.T35.e)", () => {
+  it("decodes a Jupiter's envelope, its surface not applicable, at the generator's values (P14.T35.e, P14.T54.b.i)", () => {
+    const envelope = envelopeOf("body_detail_jupiter");
     const { record } = response("body_detail_jupiter", "body_detail");
-    if (record.envelope === undefined) {
-      throw new Error("the fixture's Jupiter lost its envelope");
-    }
-    const envelope = okValue(record.envelope);
 
     expect(record.surface).toEqual({ state: "not_applicable" });
     expect(okValue(record.bulk).class).toBe("gas_giant");
     // An H2/He envelope names no supercritical condensable, and says so with null (P14.T54.b.d).
     expect(envelope.supercritical).toBeNull();
-    expect(envelope.composition.map((gas) => gas.species)).toEqual(["H2", "He", "CH4"]);
-    expect(envelope.decks.map((deck) => [deck.material, deck.phase, deck.deck])).toEqual([
-      ["NH3", "solid", "NH3"],
+    expect(envelope.composition.slice(0, 4).map((gas) => gas.species)).toEqual([
+      "H2",
+      "He",
+      "CH4",
+      "NH3",
     ]);
-    expect(envelope.adiabat.map((node) => node.pressure_pa)).toEqual([5e4, 1e5, 1e6, 1e7]);
+    expect(envelope.composition.reduce((sum, gas) => sum + gas.mole_fraction, 0)).toBeCloseTo(1, 9);
+    // The volatile decks above the refractory ones, hottest base first, the modes naming them.
+    expect(envelope.condensate_decks.slice(-3).map((deck) => deck.condensate)).toEqual([
+      "H2O",
+      "NH4SH",
+      "NH3",
+    ]);
+    expect(envelope.decks.map((mode) => mode.deck)).toEqual(
+      envelope.condensate_decks.map((deck) => deck.condensate),
+    );
+    expect(envelope.hazes.map((haze) => [haze.material, haze.deck])).toEqual([
+      ["chromophore", null],
+    ]);
+    // The adiabat from the join, at 1.02 bar, to 100 bar, evenly in ln p.
+    const pressures = envelope.adiabat.map((node) => node.pressure_pa);
+    expect(pressures[0]).toBe(envelope.join_pressure_pa);
+    expect(pressures.at(-1)).toBe(1e7);
+    expect(envelope.profile).toEqual({
+      thermal_opacity_m2_per_kg: 0.00287,
+      optical_depth_exponent: 2,
+      opacity_ratio: 0.4,
+      redistribution_factor: 0.25,
+    });
   });
 
   it("keeps a record as a server before P14.T35.e wrote it, with no envelope key", () => {
@@ -497,6 +528,57 @@ describe("body_detail", () => {
 
     expect(message.error.code).toBe("unknown_body");
     expect(message.error.field).toBe("body");
+  });
+});
+
+/**
+ * Jupiter's mass, kg: the nominal Jovian mass parameter over the constant of gravitation, GM_J ÷ G
+ * (IAU 2015 Resolution B3's 1.266 865 3 × 10¹⁷ m³ s⁻²; CODATA 2018's 6.674 30 × 10⁻¹¹ m³ kg⁻¹ s⁻²),
+ * as `hyperion-base` takes it; and its nominal equatorial radius, m (IAU 2015 Resolution B3).
+ */
+const JUPITER_MASS_KG = 1.266_865_3e17 / 6.674_3e-11;
+const JUPITER_RADIUS_M = 7.1492e7;
+
+/**
+ * HD 209458 b's measured mass and radius, in Jupiter's, and its zero-albedo equilibrium
+ * temperature, K, T_eff (R★ ÷ 2a)^½, each with its uncertainty: 0.685 (+0.015, −0.014) Jupiter
+ * masses, 1.359 (+0.016, −0.019) Jupiter radii and 1,449 ± 12 K, at 0.04707 au (Torres, Winn and
+ * Holman 2008, ApJ 677, 1324, Table 5).
+ */
+const HD_209458_B = { massJupiters: 0.685, radiusJupiters: 1.359, equilibriumK: 1_449 };
+
+describe("body_detail's hot Jupiter, an HD 209458 b (P14.T54.b.i)", () => {
+  const record = () => response("body_detail_hot_jupiter", "body_detail").record;
+
+  it("is a gas giant at HD 209458 b's measured mass, radius and equilibrium temperature", () => {
+    const bulk = okValue(record().bulk);
+
+    expect(okValue(record().mass_kg) / JUPITER_MASS_KG).toBeCloseTo(HD_209458_B.massJupiters, 12);
+    expect(bulk.radius_m / JUPITER_RADIUS_M).toBeCloseTo(HD_209458_B.radiusJupiters, 12);
+    expect(bulk.equilibrium_temperature_k).toBe(HD_209458_B.equilibriumK);
+    expect(bulk.class).toBe("gas_giant");
+    expect(okValue(record().orbit).orbit.semi_major_axis_m / METRES_PER_AU).toBeCloseTo(
+      0.04707,
+      12,
+    );
+    expect(record().surface).toEqual({ state: "not_applicable" });
+  });
+
+  it("holds the generator's envelope: alkali absorbers, silicate decks below its photosphere, no ammonia deck and no haze", () => {
+    const envelope = envelopeOf("body_detail_hot_jupiter");
+
+    expect(envelope.supercritical).toBeNull();
+    expect(envelope.absorbers.map((absorber) => absorber.species)).toEqual(
+      expect.arrayContaining(["Na", "K"]),
+    );
+    expect(envelope.condensate_decks.map((deck) => deck.condensate)).toEqual(
+      expect.arrayContaining(["MgSiO3", "Mg2SiO4"]),
+    );
+    expect(envelope.condensate_decks.map((deck) => deck.condensate)).not.toContain("NH3");
+    expect([envelope.hazes, envelope.haze_tau_550]).toEqual([[], 0]);
+    // Its internal heat is stated, 558 K, its bulk's effective temperature its equilibrium's
+    // with it: (T_eq⁴ + T_int⁴)^¼.
+    expect(envelope.internal_temperature_k).toBeCloseTo(558, 0);
   });
 });
 

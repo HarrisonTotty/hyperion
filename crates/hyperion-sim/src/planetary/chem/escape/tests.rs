@@ -72,6 +72,152 @@ fn under_the_escape_batch_a_test_s_rules_hold_inside_with_rules_and_are_set_back
     );
 }
 
+/// The host star's primordial helium is held until the 23 → 24 bump (P14.T54.b.i): below
+/// `PRIMORDIAL_HELIUM_VERSION` the rules in force are the protosolar start's, so that, with the
+/// escape held too, every figure on the record is version 23's; the switch sets its rules back.
+#[test]
+fn the_host_s_primordial_helium_is_held_only_until_the_24_bump() {
+    assert_eq!(PRIMORDIAL_HELIUM_VERSION, GeneratorVersion::new(24));
+    assert!(
+        GENERATOR_VERSION < PRIMORDIAL_HELIUM_VERSION,
+        "the 23 → 24 bump (P14.T54.b.l) starts every envelope's helium at its host star's own \
+         He/H (`primordial_helium_per_hydrogen`): the fractionation's start under the escape's \
+         batch (`fractionation_start` in `helium_before_passes`) and the record's envelope's T50.b \
+         input (`host_helium_per_hydrogen`). Delete `PRIMORDIAL_HELIUM_VERSION`, \
+         `PrimordialHeliumRules` with its `Protosolar` arm (so that `fractionation_start` and \
+         `host_helium_per_hydrogen` read the host's alone), `with_primordial_helium` and its \
+         thread's rules, its line in `with_every_24_hold` and its member of \
+         `every_24_hold_is_in_force_inside_the_helper`'s rules, \
+         `under_the_host_helium_only_envelope_bearing_bodies_about_other_hosts_move`'s \
+         `Protosolar` run (its movers then stated against 23), and this test"
+    );
+    assert_eq!(
+        PrimordialHeliumRules::in_force(),
+        PrimordialHeliumRules::Protosolar
+    );
+    let switched = with_primordial_helium(PrimordialHeliumRules::Host, || {
+        (
+            PrimordialHeliumRules::in_force(),
+            with_primordial_helium(
+                PrimordialHeliumRules::Protosolar,
+                PrimordialHeliumRules::in_force,
+            ),
+        )
+    });
+    assert_eq!(
+        switched,
+        (
+            PrimordialHeliumRules::Host,
+            PrimordialHeliumRules::Protosolar
+        )
+    );
+    assert_eq!(
+        PrimordialHeliumRules::in_force(),
+        PrimordialHeliumRules::Protosolar
+    );
+    let rich = Composition::from_fe_h(
+        crate::units::Dex::new(0.3),
+        crate::units::HeliumExcess::ZERO,
+    );
+    let protosolar = Element::He.protosolar_abundance_per_hydrogen();
+    assert_same_bits(host_helium_per_hydrogen(&rich), protosolar);
+    assert_same_bits(
+        fractionation_start(&rich),
+        crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction(),
+    );
+}
+
+/// A solar host's primordial helium is the protosolar to the bit (main's ruling Q2, 2026-10-27): its
+/// He/H n☉, the registry's 0.0968, and its Y the protosolar helium mass fraction the
+/// fractionation started from to 23, under either arm, so that a solar host's envelope keeps its
+/// bits at 24.
+#[test]
+fn a_solar_host_s_primordial_helium_is_protosolar_to_the_bit() {
+    let protosolar = Element::He.protosolar_abundance_per_hydrogen();
+    let y = crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction();
+    let sun = Composition::SOLAR;
+    let drawn = Composition::from_fe_h(crate::units::Dex::ZERO, crate::units::HeliumExcess::ZERO);
+    for host in [sun, drawn] {
+        assert_same_bits(primordial_helium_per_hydrogen(&host), protosolar);
+        assert_same_bits(
+            helium_mass_fraction_of(primordial_helium_per_hydrogen(&host)),
+            y,
+        );
+        for rules in [
+            PrimordialHeliumRules::Protosolar,
+            PrimordialHeliumRules::Host,
+        ] {
+            with_primordial_helium(rules, || {
+                assert_same_bits(host_helium_per_hydrogen(&host), protosolar);
+                assert_same_bits(fractionation_start(&host), y);
+            });
+        }
+    }
+    assert!((protosolar - 0.0968).abs() < 5e-5, "{protosolar}");
+    assert!((y - 0.278).abs() < 5e-4, "{y}");
+    eprintln!("state: a solar host's He/H {protosolar:.6}, Y {y:.6}");
+}
+
+/// The primordial helium follows the host's Y ÷ X (P14.T54.b.i; X = 0.76 − 3Z − ΔY, Y = 1 − X − Z,
+/// Z the formulae's held 0.0001–0.03): \[Fe/H\] −1 gives 0.809 n☉ (He/H 0.0783), and every host
+/// from +0.176 dex, where Z reaches 0.03, 1.119 n☉ (0.1084); it rises with \[Fe/H\] (strictly
+/// inside the clamp, flat outside it), is continuous at the clamp's edges, and rises with ΔY (0.05
+/// at solar Z: 1.269 n☉).
+#[test]
+fn the_primordial_helium_follows_the_host_s_y_over_x() {
+    use crate::units::{Dex, HeliumExcess};
+    let protosolar = Element::He.protosolar_abundance_per_hydrogen();
+    let at = |fe_h: f64, excess: f64| {
+        primordial_helium_per_hydrogen(&Composition::from_fe_h(
+            Dex::new(fe_h),
+            HeliumExcess::new(excess),
+        ))
+    };
+    let poor = at(-1.0, 0.0) / protosolar;
+    let rich = at(0.5, 0.0) / protosolar;
+    let excess = at(0.0, 0.05) / protosolar;
+    // (Y ÷ X) over the Sun's 0.28 ÷ 0.70.
+    let expected = |z: f64, dy: f64| {
+        let x = 0.76 - 3.0 * z - dy;
+        ((1.0 - x - z) / x) / 0.4
+    };
+    assert!((poor - expected(0.002, 0.0)).abs() < 1e-12, "{poor}");
+    assert!((rich - expected(0.03, 0.0)).abs() < 1e-12, "{rich}");
+    assert!((excess - expected(0.02, 0.05)).abs() < 1e-12, "{excess}");
+    assert!((poor - 0.809).abs() < 5e-4 && (at(-1.0, 0.0) - 0.0783).abs() < 5e-5);
+    assert!((rich - 1.119).abs() < 5e-4 && (at(0.5, 0.0) - 0.1084).abs() < 5e-5);
+    assert!((excess - 1.269).abs() < 5e-4, "{excess}");
+    let mut last = 0.0;
+    for k in 0..=400 {
+        let fe_h = -3.0 + 0.01 * f64::from(k);
+        let helium = at(fe_h, 0.0);
+        let z = 0.02 * crate::math::exp10(fe_h);
+        if z > 0.0001 && z < 0.03 {
+            assert!(helium > last, "rises inside the clamp at {fe_h}");
+        } else {
+            assert!(helium >= last, "never falls at {fe_h}");
+        }
+        last = helium;
+    }
+    for z in [0.0001, 0.03] {
+        let edge = crate::math::log10(z / 0.02);
+        let (below, above) = (at(edge - 1e-9, 0.0), at(edge + 1e-9, 0.0));
+        assert!(
+            (below / above - 1.0).abs() < 1e-8,
+            "at Z {z}: {below} {above}"
+        );
+    }
+    assert!(at(0.0, 0.01) > at(0.0, 0.0) && at(0.0, 0.1) > at(0.0, 0.05));
+    assert_same_bits(at(1.0, 0.0), at(0.5, 0.0));
+    eprintln!(
+        "state: [Fe/H] -1 He/H {:.6} (x{poor:.4}), from +0.176 {:.6} (x{rich:.4}), dY 0.05 \
+         {:.6} (x{excess:.4})",
+        at(-1.0, 0.0),
+        at(0.5, 0.0),
+        at(0.0, 0.05)
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Part B: the pure laws. Figures marked "state" are printed (`--nocapture`) as well as checked.
 //

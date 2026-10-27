@@ -104,12 +104,14 @@ photometry?: SectionDto<BodyPhotometryDto>,
  */
 surface: SectionDto<BodySurfaceDto>, 
 /**
- * Its gas envelope (`surface`, P14.T35.e): `not_modelled` for a present body in the
- * gas-envelope state, or, from generator version 24, a solid body under a supercritical
- * envelope (P14.T53.b part 2), until P14.T24.d, and `not_applicable` for every other body, so
- * that a present body with a bulk section has exactly one of `surface` and `envelope` other
- * than `not_applicable`. The server always sends it; it is optional only so that an older server's
- * record, which lacks it, still reads, and a client reads it absent as `not_modelled`.
+ * Its gas envelope (`surface`, P14.T35.e): for a present body in the gas-envelope state, `ok`
+ * from generator version 24 where the generator models it (P14.T54.b.i) and `not_modelled`
+ * otherwise, below 24 among them; from 24, `not_modelled` for a solid body under a
+ * supercritical envelope (P14.T53.b part 2) until P14.T53.f; and `not_applicable` for every
+ * other body, so that a present body with a bulk section has exactly one of `surface` and
+ * `envelope` other than `not_applicable`. The server always sends it; it is optional only so
+ * that an older server's record, which lacks it, still reads, and a client reads it absent as
+ * `not_modelled`.
  */
 envelope?: SectionDto<BodyEnvelopeDto>, 
 /**

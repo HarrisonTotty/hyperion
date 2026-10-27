@@ -73,6 +73,8 @@ use crate::planetary::derive::atmosphere::{
     OXYGEN_IN_HYDROGEN_DIFFUSION_PER_METRE_SECOND, WATER_LOSS_ESCAPE_EFFICIENCY,
 };
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
+use crate::stellar::Composition;
+use crate::stellar::composition::Z_SOLAR;
 use crate::substance::Element;
 use crate::units::consts::{
     BOLTZMANN_CONSTANT, EARTH_RADIUS_M, GRAVITATIONAL_CONSTANT, SECONDS_PER_JULIAN_YEAR,
@@ -152,6 +154,75 @@ pub(crate) fn with_rules<R>(rules: EscapeRules, run: impl FnOnce() -> R) -> R {
     };
     let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
     with_rayleigh_floor(floor, run)
+}
+
+/// The generator version from which every envelope's helium starts at its host star's own
+/// primordial He/H ([`primordial_helium_per_hydrogen`]), not the protosolar value (P14.T54.b.i;
+/// decision-p14-t50b-envelope §5): 24.
+///
+/// It moves the thin envelopes' helium under the escape's batch, the fractionation's start
+/// (`helium_before_passes`), and the He/H P14.T50.b's envelope reads, so it has its own arm, for
+/// P14.T54.b.k's attribution, rather than an arm of [`EscapeRules`]. Below it
+/// [`PrimordialHeliumRules::in_force`] is [`PrimordialHeliumRules::Protosolar`]; under the escape's
+/// hold no start is computed at all, so version 23's figures keep their bits. P14.T54.b.l deletes
+/// it, [`PrimordialHeliumRules`] with its `Protosolar` arm, `with_primordial_helium`, its line in
+/// `with_every_24_hold` and its tripwire
+/// (`the_host_s_primordial_helium_is_held_only_until_the_24_bump`).
+pub(crate) const PRIMORDIAL_HELIUM_VERSION: GeneratorVersion = GeneratorVersion::new(24);
+
+/// Which helium an envelope forms with (the hold, [`PRIMORDIAL_HELIUM_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PrimordialHeliumRules {
+    /// Versions 23's and before: the protosolar He/H, 0.0968, about every host
+    /// (`protosolar_helium_mass_fraction`).
+    Protosolar,
+    /// The 23 → 24 batch's: the host star's own ([`primordial_helium_per_hydrogen`]).
+    Host,
+}
+
+impl PrimordialHeliumRules {
+    /// The rules this generator version gives: the host's helium from
+    /// [`PRIMORDIAL_HELIUM_VERSION`], the protosolar below it; in the tests, the rules a test's
+    /// switch sets on its thread (`with_primordial_helium`).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = PRIMORDIAL_HELIUM_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= PRIMORDIAL_HELIUM_VERSION {
+            Self::Host
+        } else {
+            Self::Protosolar
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The primordial helium's rules a test sets on its thread, `None` for the version's.
+    static PRIMORDIAL_HELIUM_RULES: core::cell::Cell<Option<PrimordialHeliumRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the primordial helium's rules `rules` on this thread
+/// ([`PrimordialHeliumRules::in_force`]), for the tests to reach 24's start ahead of the bump; the
+/// rules before are set back after, a panic in `run` included. A system derives lazily, so a test
+/// generates and reads it inside the switch. P14.T54.b.l deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_primordial_helium<R>(
+    rules: PrimordialHeliumRules,
+    run: impl FnOnce() -> R,
+) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<PrimordialHeliumRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PRIMORDIAL_HELIUM_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(PRIMORDIAL_HELIUM_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
 }
 
 /// The smooth step 3u² − 2u³ of `u` held to [0, 1], continuous with its slope at both ends: 0 at
@@ -861,6 +932,7 @@ pub struct EnvelopeHelium {
     helium_mass_fraction: f64,
     hydrogen_kept_share: f64,
     helium_kept_share: f64,
+    initial_helium_mass_fraction: f64,
 }
 
 impl EnvelopeHelium {
@@ -872,6 +944,7 @@ impl EnvelopeHelium {
             helium_mass_fraction: helium,
             hydrogen_kept_share: 1.0,
             helium_kept_share: 1.0,
+            initial_helium_mass_fraction: helium,
         }
     }
 
@@ -899,6 +972,14 @@ impl EnvelopeHelium {
     pub const fn helium_kept_share(&self) -> f64 {
         self.helium_kept_share
     }
+
+    /// The helium mass fraction the envelope formed with, Y₀, the fractionation's start (held to
+    /// [0, 1], a NaN as 0): the start the escape's ledger books its formed helium at, so that the
+    /// two agree (P14.T54.b.i).
+    #[must_use]
+    pub const fn initial_helium_mass_fraction(&self) -> f64 {
+        self.initial_helium_mass_fraction
+    }
 }
 
 /// Helium atoms per hydrogen atom in a gas of hydrogen and helium of helium mass fraction `helium`.
@@ -911,12 +992,90 @@ fn helium_to_hydrogen(helium: f64) -> f64 {
     helium * hydrogen_atom_mass() / (hydrogen_share * Gas::Helium.molecular_mass().value())
 }
 
+/// A star's helium-to-hydrogen mass ratio Y ÷ X at metal fraction `z` and helium excess
+/// `helium_excess`, X = 0.76 − 3Z − ΔY and Y = 1 − X − Z: the hydrogen fraction of the stellar
+/// formulae's models, X = 0.76 − 3Z (Pols et al. 1998, MNRAS 298, 525, as `sse::ms::hydrogen` and
+/// every other X of the crate take it), with a helium excess taking the place of hydrogen, so that
+/// X + Y + Z = 1 (main's ruling, 2026-10-27: the plan's Y = 1 − X − Z + ΔY summed to 1 + ΔY).
+#[must_use]
+fn helium_over_hydrogen_by_mass(z: f64, helium_excess: f64) -> f64 {
+    let hydrogen = 0.76 - 3.0 * z - helium_excess;
+    let helium = 1.0 - hydrogen - z;
+    helium / hydrogen
+}
+
+/// The primordial He/H by number of a gas envelope formed about a star of composition
+/// `composition` (P14.T54.b.i; decision-p14-t50b-envelope §5): the protosolar He/H n☉ times the
+/// star's Y ÷ X over the Sun's, n☉ × (Y ÷ X)(Z, ΔY) ÷ (Y ÷ X)(Z☉, 0).
+///
+/// - n☉ is the element registry's protosolar He/H, 10^(10.986 − 12) = 0.0968 (Lodders 2010,
+///   Table 6, as [`Element::protosolar_abundance_per_hydrogen`] holds it), the value
+///   `protosolar_helium_mass_fraction` reads.
+/// - Z is the star's metal fraction as the stellar formulae read it, [`Composition::z_fit`]: Z☉ ×
+///   10^\[Fe/H\] held to 0.0001–0.03, as every other X = 0.76 − 3Z of the crate takes it (the
+///   wind's Eddington factor, the accretion's Eddington rate, the main sequence's degenerate
+///   radius); Z☉ is [`Z_SOLAR`], 0.02, the formulae's solar metal fraction.
+/// - ΔY is the star's [`Composition::helium_excess`], 0 for every star the grid places and at most
+///   0.18 in a massive cluster's second population, so that X stays at least 0.49.
+///
+/// A solar host (Z = Z☉, ΔY = 0) gives n☉ to the bit, the two Y ÷ X being one expression of the
+/// same values. \[Fe/H\] −1 gives 0.809 n☉ (0.0783), and any host from +0.176 dex, where Z reaches
+/// 0.03, 1.119 n☉ (0.1084); a helium excess of 0.05 at solar Z gives 1.269 n☉ (0.1229).
+#[must_use]
+pub(crate) fn primordial_helium_per_hydrogen(composition: &Composition) -> f64 {
+    let ratio = helium_over_hydrogen_by_mass(
+        composition.z_fit().value(),
+        composition.helium_excess().value(),
+    ) / helium_over_hydrogen_by_mass(Z_SOLAR.value(), 0.0);
+    Element::He.protosolar_abundance_per_hydrogen() * ratio
+}
+
+/// The helium mass fraction Y = `m_He` n ÷ (`m_H` + `m_He` n) of hydrogen and helium of He/H `n`
+/// by number, at the registry's standard atomic weights (`protosolar_helium_mass_fraction` is it
+/// at the protosolar He/H, 0.278).
+#[must_use]
+pub(crate) fn helium_mass_fraction_of(per_hydrogen: f64) -> f64 {
+    let helium = per_hydrogen * Element::He.standard_atomic_weight_g_per_mol();
+    helium / (Element::H.standard_atomic_weight_g_per_mol() + helium)
+}
+
+/// The helium mass fraction an envelope of a host of composition `composition` starts its
+/// fractionation from under the rules in force ([`PrimordialHeliumRules`]): the protosolar
+/// (`protosolar_helium_mass_fraction`) below [`PRIMORDIAL_HELIUM_VERSION`], and the host's own
+/// from it, [`helium_mass_fraction_of`] its [`primordial_helium_per_hydrogen`]. Only the escape's
+/// batch reads it (`helium_before_passes`), so that under the escape's hold none is computed.
+#[must_use]
+pub(crate) fn fractionation_start(composition: &Composition) -> f64 {
+    match PrimordialHeliumRules::in_force() {
+        PrimordialHeliumRules::Protosolar => {
+            crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction()
+        }
+        PrimordialHeliumRules::Host => {
+            helium_mass_fraction_of(primordial_helium_per_hydrogen(composition))
+        }
+    }
+}
+
+/// The He/H by number an envelope of a host of composition `composition` forms with under the
+/// rules in force ([`PrimordialHeliumRules`]), before any escape: the protosolar He/H below
+/// [`PRIMORDIAL_HELIUM_VERSION`] and the host's own, [`primordial_helium_per_hydrogen`], from it.
+/// The record's envelope reads it where the escape is held, which fractionates nothing and carries
+/// no helium (P14.T54.b.i).
+#[must_use]
+pub(crate) fn host_helium_per_hydrogen(composition: &Composition) -> f64 {
+    match PrimordialHeliumRules::in_force() {
+        PrimordialHeliumRules::Protosolar => Element::He.protosolar_abundance_per_hydrogen(),
+        PrimordialHeliumRules::Host => primordial_helium_per_hydrogen(composition),
+    }
+}
+
 /// The helium a hydrogen and helium envelope keeps as escape takes its hydrogen preferentially
 /// (P14.T53.a; Hu, Seager and Yung 2015, ApJ 807, 8, read; Malsky et al. 2023, Nat. Astron. 7, 57,
 /// read): the envelope of `initial_envelope`, helium mass fraction `helium_mass_fraction_initial`
-/// (helium's share of its hydrogen and helium, which the caller gives: P14.T54.b passes the host's,
-/// decision-p14-t50b-envelope §5), on a body of mass `mass` and radius `radius` under the exposure
-/// `exposure`, that loses `lost` by `age`.
+/// (helium's share of its hydrogen and helium, which the caller gives: from generator version 24
+/// the host star's own, behind `PRIMORDIAL_HELIUM_VERSION`, decision-p14-t50b-envelope §5), on a
+/// body of mass `mass` and radius `radius` under the exposure `exposure`, that loses `lost` by
+/// `age`.
 ///
 /// - **The loss's timing.** `lost` is the caller's energy-limited loss
 ///   ([`energy_limited_loss`](crate::planetary::derive::atmosphere::energy_limited_loss), as
@@ -1034,6 +1193,7 @@ pub fn envelope_helium(
         } else {
             1.0
         },
+        initial_helium_mass_fraction: initial_share,
     }
 }
 
