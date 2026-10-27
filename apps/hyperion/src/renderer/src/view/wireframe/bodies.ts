@@ -141,9 +141,9 @@ export const DATUM_INSIDE_MARGIN_PX = 1 / 32;
  * R the band covers 1 − ((R − 2δ) ÷ R)² of the disc, half of it at R = 2δ ÷ (1 − 1 ÷ √2) = 2(2 + √2)δ:
  * 23.9 device px at a line scale of 2 (δ 3.5) and 34.1 at 3 (δ 5), which the guide gives rounded up,
  * 24 and 35. Below it the body has no limb or graticule over the image, which alone shows it, as it
- * shows a body under 3 device px; its entry in the view's list, its label and, while it is selected,
- * the bracket still mark it. A cut with no hysteresis; a thinner stroke and an outside tick were
- * both refused.
+ * shows a body under 3 device px; its entry in the view's list and, while it is selected, the
+ * bracket still mark it. A cut with no hysteresis; a thinner stroke and an outside tick were both
+ * refused.
  */
 export const DATUM_OVER_IMAGE_RADIUS_PER_REACH = 2 * (2 + Math.SQRT2);
 

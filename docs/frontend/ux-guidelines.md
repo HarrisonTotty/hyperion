@@ -970,8 +970,8 @@ Four classes, shared by the whole ship:
       whose cased limb, stroked inside it, would cover more than half its drawn disc, under an
       apparent radius of 24 device px at a line scale of 2 or 35 at 3, has no limb or graticule
       over the image: the image alone shows it, as it shows a body under 3 device px, and its entry
-      in the view's list, its label and, while it is selected, the bracket still mark it. The
-      wireframe centres its limb on the figure's edge, as it does every line.
+      in the view's list and, while it is selected, the bracket still mark it. The wireframe
+      centres its limb on the figure's edge, as it does every line.
     - The edge is drawn along the surveyed terrain's border, as the chart's query edge marks where
       fetched data ends: a solid `--text` line `1px` wide with short ticks pointing into the
       unsurveyed side. Each tick is `0.25rem` long, one every `1rem` of the drawn line, and none is
