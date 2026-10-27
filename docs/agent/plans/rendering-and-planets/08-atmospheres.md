@@ -15586,6 +15586,270 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _ρ's citation_: `rayleigh.ts` cites Sneep and Ubachs 2005, eq. 7, for ρ = 6(F_K − 1) ÷ (3 + 7F_K);
     the paper was not read (the science check), and the formula is Bodhaine et al. 1999's eqs. 1 and
     22 inverted, which it reproduces.
+- **Deviations in T13.b, as built** (2026-10-27; the eight files
+  `view/atmosphere/reference/ms-sweep-w1000.json`, `-w990`, `-w950`, `-w900`, `-w800`, `-w600`,
+  `-w400` and `-w1000-a800` (new); and T13.a's top-up stage, its own commit, in
+  `crates/hyperion-fit/src/atmosphere/`: `mod.rs`, `reference.rs` and `sweep.rs`, and
+  `tests/atmosphere_sweep.rs`. Rulings: `decision-r08-t13-scope.md`, rulings 1–8 and 12, "#107's
+  twin ground", "#107's floor misses" and "#112's floor refusals", 2026-10-27).
+  - _The as-built run, superseded_: T13.a's binary (SHA-256 `a89ede37…a7f9fd`) traced `w1000`,
+    `w990` and `w950`, 7–9 min each. It left most walks at their floor, `reach` at τ* 0: 14% of the
+    traced geometries were refused, and 50 of `w1000`'s 58 points held a refusal, every one far
+    below its cap. Of the `noisy`, 155 of 273 stood within 10% over T ÷ 8; of the `unscaled`, 128 of
+    165 were at the least count, 2,048 (N_q 512). Main ruled the top-up stage ("#112's floor
+    refusals"); the three outputs are scratch, never committed.
+  - _The top-up stage_ (`fix(atmosphere): R08.T13.a …`, `8b35a126`; `sweep.rs`'s module
+    documentation):
+    - every final count is at least 8,192 (`MIN_FINAL_SAMPLES`), so N_q is at least 2,048;
+    - a refused geometry, `noisy` or `unscaled`, is carried on, on its own seed and stream, its
+      count doubled in whole blocks and every geometry held to the metric again at each doubling,
+      until it passes or reaches its 4 CPU-h cap, to which it is traced and checked once more; a
+      point's top-ups stop where the next would take its projection past 24 CPU-h. Both caps are
+      counted in samples, at the pilot's vertices a sample (at least one) times the run's CPU a
+      vertex;
+    - the carry is exact: a geometry carried on from N to N′ (the tracer's new `trace_spans`) reads
+      bit for bit as one traced to N′, its first quarter too, carried on from the longest run in
+      whole blocks it holds below N′ ÷ 4, at most N ÷ 4 samples more on a first doubling or a step
+      to the cap. The sweep case's pilot count must be in whole blocks. The tracer now takes jobs,
+      and every existing trace keeps its layout: the old and new binaries' `atmosphere-reference`
+      outputs are byte-identical on reduced `saturn-oblate` and `mars` cases (6 geometries at 3
+      wavelengths, 3,000 samples, one geometry at 2,500 and Mars's aggregate at 1,100);
+    - every refused geometry is topped up, the near-sun ones at VROOM points too, which are listed
+      where still refused at the cap; any other refusal, standing only at a cap, stops its column as
+      `reach`; each refusal records its cap (`geometry` or `point`), and each geometry its
+      doublings;
+    - walked on past the first drift, each over the walk's ground and recorded as the cell's
+      `walkPast`: (1, 0) to its reach or top, and ruling 3's other 14 must-have cells through τ 1;
+      τ* stays the first drift's;
+    - the head's `settings` gain `minFinalSamples` and `countMargin`. The smoke forces its top-ups
+      with a margin of 0.25 and a floor of its pilot's 1,024, the same at 1 and 4 threads;
+    - Rust and determinism reviews; `cargo test -p hyperion-fit atmosphere`, 113 passed and 14
+      ignored, before the reviews' fixes, and after them the narrow sweep and span tests, 28 of 28,
+      on the merged tree before the rerun; the whole command again on the final tree, after the
+      rerun: 116 passed and 14 ignored.
+  - _The run_: T13.a's command (T13.a's record, _T13.b's command_), once a file. It used
+    `--cpu-per-vertex-us 8.79 --vroom-cpu-per-vertex-us 4.0 --point-cap-cpu-h 24 --threads 4`, in a
+    4 GB scope with no swap, `nice -n 10` and `timeout 43200`. The binary was one release build
+    (thin LTO) of `8b35a126` (tree `2db68ac7`), whose parent `77923ca4` carries T11.b's re-blessed
+    cases (`3dd6fa87`): SHA-256 `1551629a76781ac80ba700308d88782ebbb150d9e253770d36729a9f7475aec8`.
+    The settings were a point cap of 24 CPU-h, a geometry cap of 4 CPU-h, 8.79 and 4.0 µs a vertex,
+    a final count of at least 8,192 and a margin of 1.15; the seeds case 10,000 and pilot 1,000,000,
+    each plus the point's index. It ran on an i7-8665U (4 cores, 8 threads), with other lanes' tests
+    beside it at times:
+
+    | File         | Points, walk + scan | CPU-h | Wall        | Load, start → end | Final N: min / median / max | Top-ups: geometries, doublings | Bytes   |
+    | ------------ | ------------------- | ----- | ----------- | ----------------- | --------------------------- | ------------------------------ | ------- |
+    | `w1000`      | 36 + 49             | 3.33  | 51 min 4 s  | 2.6 → 6.1         | 8,192 / 10,240 / 2,582,528  | 322, 396                       | 330,751 |
+    | `w990`       | 27 + 49             | 1.46  | 22 min 58 s | 5.0 → 5.4         | 8,192 / 8,192 / 2,727,936   | 311, 387                       | 297,483 |
+    | `w950`       | 36 + 49             | 1.44  | 21 min 59 s | 4.2 → 4.0         | 8,192 / 9,216 / 3,866,624   | 319, 390                       | 330,668 |
+    | `w900`       | 33 + 49             | 1.73  | 27 min 21 s | 0.3 → 6.2         | 8,192 / 9,216 / 1,769,472   | 310, 385                       | 319,812 |
+    | `w800`       | 25 + 49             | 1.36  | 21 min 45 s | 4.8 → 9.5         | 8,192 / 8,192 / 3,100,672   | 281, 354                       | 290,220 |
+    | `w600`       | 27 + 49             | 1.11  | 17 min 15 s | 8.0 → 6.2         | 8,192 / 8,192 / 2,867,200   | 261, 326                       | 297,880 |
+    | `w400`       | 29 + 49             | 1.14  | 18 min 2 s  | 5.0 → 8.0         | 8,192 / 8,192 / 2,097,152   | 292, 393                       | 305,639 |
+    | `w1000-a800` | 3 + 7               | 0.06  | 52 s        | 3.5 → 3.9         | 8,192 / 8,192 / 66,560      | 0, 0                           | 38,123  |
+
+    In all, 566 points (216 walk, 350 scan) took 11.6 CPU-h (0.48 CPU-days) and 3 h 1 min of wall
+    time. No file was resumed, no point passed its cap, and no geometry was left refused: 2,096 of
+    30,564 geometry traces were topped up, by up to 7 doublings. The load is the 1-minute figure.
+
+  - _The ladder_: no step was taken. #107 projected 0.71–0.98 CPU-days, and main 2.6–3.6 days of
+    wall time after the ruling; measured, 0.48 CPU-days and 3 h. Every column drifts by τ ½, so the
+    deep points the projections priced, beyond the must-have walks, were never traced.
+  - _The table_, A the walk's 0.3, a hand value. The first failing geometry is the lowest index in
+    the drift point's `failing` (ruling 5); it is mostly a floor miss, which sets no τ*, so the
+    first geometry that is not one is beside it. Each carries its cone's `groundConeShare`:
+
+    | ω    | g    | Kind  | τ*    | A*   | Fixed | Ground | Unsorted | Listed | First failing (share)                   | First not a floor miss (share) | Failing meeting the ground |
+    | ---- | ---- | ----- | ----- | ---- | ----- | ------ | -------- | ------ | --------------------------------------- | ------------------------------ | -------------------------- |
+    | 1    | 0    | drift | 1/8   | 1    | 0     | 0      | 0        | 0      | `ground-s80-v75-a90` (0)                | the same                       | 0 of 2                     |
+    | 1    | 0.3  | drift | 1/8   | 0.2  | 1     | 18     | 0        | 0      | `ground-s30-v30-a180` (0), a floor miss | `ground-s60-v85-a0` (0)        | 0 of 2                     |
+    | 1    | 0.5  | drift | √2/16 | 0.1  | 2     | 29     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `limb-0.3H` (0.48)             | 1 of 18                    |
+    | 1    | 0.65 | drift | √2/16 | 0.02 | 6     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 1 of 27                    |
+    | 1    | 0.75 | drift | √2/16 | 0.02 | 8     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 33                    |
+    | 1    | 0.85 | drift | √2/16 | 0.02 | 11    | 37     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 32                    |
+    | 1    | 0.9  | drift | √2/16 | 0.02 | 16    | 33     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 1 of 34                    |
+    | 0.99 | 0    | drift | 1/8   | 1    | 0     | 0      | 0        | 0      | `ground-s80-v75-a90` (0)                | the same                       | 0 of 2                     |
+    | 0.99 | 0.3  | drift | 1/8   | 0.2  | 0     | 19     | 0        | 0      | `ground-s80-v85-a90` (0)                | the same                       | 0 of 1                     |
+    | 0.99 | 0.5  | drift | 1/8   | 0.05 | 2     | 29     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a90` (0)       | 3 of 22                    |
+    | 0.99 | 0.65 | drift | √2/16 | 0.02 | 6     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 28                    |
+    | 0.99 | 0.75 | drift | √2/16 | 0.02 | 8     | 34     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 32                    |
+    | 0.99 | 0.85 | drift | √2/16 | 0.02 | 12    | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 33                    |
+    | 0.99 | 0.9  | drift | √2/16 | 0.02 | 14    | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 1 of 34                    |
+    | 0.95 | 0    | drift | 1/8   | 1    | 1     | 0      | 0        | 0      | `ground-s80-v75-a90` (0)                | the same                       | 0 of 2                     |
+    | 0.95 | 0.3  | drift | 1/8   | 0.2  | 1     | 20     | 0        | 0      | `ground-s30-v0-a0` (0), a floor miss    | `ground-s80-v85-a90` (0)       | 0 of 3                     |
+    | 0.95 | 0.5  | drift | 1/8   | 0.05 | 2     | 31     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s80-v85-a90` (0)       | 1 of 19                    |
+    | 0.95 | 0.65 | drift | 1/8   | 0.02 | 5     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s30-v85-a0` (0)        | 3 of 30                    |
+    | 0.95 | 0.75 | drift | √2/16 | 0.02 | 7     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 33                    |
+    | 0.95 | 0.85 | drift | √2/16 | 0.02 | 13    | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 33                    |
+    | 0.95 | 0.9  | drift | √2/16 | 0.02 | 13    | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 1 of 34                    |
+    | 0.9  | 0    | drift | 1/8   | 1    | 1     | 0      | 0        | 0      | `ground-s80-v60-a90` (0)                | the same                       | 0 of 2                     |
+    | 0.9  | 0.3  | drift | √2/8  | 0.2  | 1     | 20     | 0        | 0      | `ground-s80-v75-a90` (0)                | the same                       | 0 of 3                     |
+    | 0.9  | 0.5  | drift | 1/8   | 0.1  | 2     | 31     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `limb-0.3H` (0.48)             | 1 of 17                    |
+    | 0.9  | 0.65 | drift | 1/8   | 0.02 | 4     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 2 of 28                    |
+    | 0.9  | 0.75 | drift | √2/16 | 0.02 | 6     | 36     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 33                    |
+    | 0.9  | 0.85 | drift | √2/16 | 0.02 | 9     | 36     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 34                    |
+    | 0.9  | 0.9  | drift | √2/16 | 0.02 | 12    | 36     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 1 of 33                    |
+    | 0.8  | 0    | drift | √2/8  | 1    | 0     | 0      | 0        | 0      | `ground-s80-v85-a90` (0)                | the same                       | 0 of 1                     |
+    | 0.8  | 0.3  | drift | √2/8  | 0.2  | 0     | 20     | 0        | 0      | `ground-s30-v30-a180` (0), a floor miss | `ground-s80-v85-a90` (0)       | 0 of 2                     |
+    | 0.8  | 0.5  | drift | √2/8  | 0.05 | 2     | 31     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `limb-0.1H` (0.5)              | 1 of 18                    |
+    | 0.8  | 0.65 | drift | √2/8  | 0.02 | 4     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s30-v85-a0` (0)        | 2 of 28                    |
+    | 0.8  | 0.75 | drift | 1/8   | 0.02 | 4     | 36     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 32                    |
+    | 0.8  | 0.85 | drift | √2/16 | 0.02 | 7     | 37     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 32                    |
+    | 0.8  | 0.9  | drift | √2/16 | 0.02 | 11    | 37     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 2 of 35                    |
+    | 0.6  | 0    | drift | √2/4  | 1    | 0     | 0      | 0        | 0      | `ground-s80-v85-a0` (0)                 | the same                       | 0 of 3                     |
+    | 0.6  | 0.3  | drift | ¼     | 0.2  | 0     | 23     | 0        | 0      | `ground-s30-v30-a180` (0), a floor miss | `ground-s80-v85-a0` (0)        | 0 of 3                     |
+    | 0.6  | 0.5  | drift | ¼     | 0.05 | 1     | 34     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s80-v85-a180` (0)      | 0 of 17                    |
+    | 0.6  | 0.65 | drift | ¼     | 0.02 | 2     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s30-v85-a0` (0)        | 1 of 27                    |
+    | 0.6  | 0.75 | drift | √2/8  | 0.02 | 4     | 37     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 0 of 32                    |
+    | 0.6  | 0.85 | drift | √2/16 | 0.02 | 5     | 38     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s60-v85-a0` (0)        | 1 of 34                    |
+    | 0.6  | 0.9  | drift | √2/16 | 0.02 | 7     | 39     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s80-v60-a0` (0)        | 1 of 33                    |
+    | 0.4  | 0    | drift | ½     | 1    | 0     | 0      | 0        | 0      | `ground-s80-v85-a90` (0)                | the same                       | 0 of 1                     |
+    | 0.4  | 0.3  | drift | ½     | 0.2  | 0     | 23     | 0        | 0      | `ground-s80-v85-a0` (0)                 | the same                       | 0 of 2                     |
+    | 0.4  | 0.5  | drift | ¼     | 0.05 | 0     | 35     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s80-v85-a180` (0)      | 0 of 17                    |
+    | 0.4  | 0.65 | drift | √2/4  | 0.02 | 1     | 37     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `disc-p85` (1)                 | 1 of 25                    |
+    | 0.4  | 0.75 | drift | ¼     | 0.02 | 1     | 38     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `limb-10H` (0)                 | 0 of 30                    |
+    | 0.4  | 0.85 | drift | 1/8   | 0.02 | 4     | 37     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `limb-10H` (0)                 | 1 of 33                    |
+    | 0.4  | 0.9  | drift | √2/16 | 0.02 | 6     | 40     | 0        | 0      | `ground-s0-v30-a0` (0), a floor miss    | `ground-s80-v60-a0` (0)        | 2 of 34                    |
+
+    Every cell is a measured `drift`, none `reach` or `top`. τ* is non-decreasing as ω falls at
+    every g. The twin's surface share of each first failing radiance is c2's to add ("#107's twin
+    ground", main's reading).
+
+  - _The bright column_, (1, 0) over 0.8 (a hand value), is recorded, never put in the table: a
+    drift at τ* √2/16, A* 1, its first failing `ground-s30-v75-a90` (cone share 0), 0 of its 14
+    failing meeting the ground. Against (1, 0)'s 1/8 it is one half-octave lower, not more, so it is
+    no finding (ruling 3).
+  - _The must-have cells_, each a drift, every verdict recorded. The walked-on cells' failing
+    geometries by τ, from the floor:
+    - Earth, worst channel τ 0.394: (1, 0), (1, 0.3), (0.99, 0), (0.99, 0.3), (0.95, 0) and (0.95,
+      0.3), each at τ* 1/8, below 0.394. (0.99, 0.3) fails 10, 5, 1, 17, 43 and 52 at 1/32, √2/16,
+      1/8, ¼, ½ and 1, its drift at τ 1/8 one geometry, `ground-s80-v85-a90`. A* is 1 at g 0 and 0.2
+      at g 0.3, so Earth's 0.1 ground stays thin by the ground line. Earth classified thick by τ is
+      raised at c2 (the floor-scan ruling's item 4; main's answer to #107).
+    - Mars, worst channel 0.508: (0.9, 0.5) at 1/8 with A* 0.1, (0.95, 0.5) at 1/8 with 0.05, (0.9,
+      0.65) and (0.95, 0.65) at 1/8, and (0.9, 0.75) and (0.95, 0.75) at √2/16, each from g 0.65
+      with A* 0.02. All lie below 0.508, so Mars routes thick by τ as well as by the ground line,
+      its 0.25 ground being over every A*; raised at c2, as the ground line's acceptance covers A*
+      alone.
+    - `saturn-oblate`, the thick N₂ and CO₂ airs and the tenuous airs: (1, 0), walked to τ 8, fails
+      0, 0, 2, 21, 43, 49, 49, 54 and 54 at 1/32, √2/16, 1/8, ¼, ½, 1, 2, 4 and 8. `saturn-oblate`'s
+      0.728 and the thick airs' 1–7 lie past its 1/8, and the tenuous airs' 0.05 below it;
+      `saturn-oblate` classified thick is raised at c2 (the split note).
+    - The Titan class, τ about 3–10: (0.9, 0.3) at √2/8, and (0.9, 0.5), (0.9, 0.65), (0.95, 0.3),
+      (0.95, 0.5) and (0.95, 0.65) at 1/8, each far below.
+    - The Venus class, gas 27.3 and 43.3 and a deck of τ about 30: (1, 0.75) and (1, 0.85) at √2/16,
+      far below, failing 34, 33, 33, 36, 44 and 42, and 33, 32, 37, 39, 46 and 49, at 1/32, √2/16,
+      1/8, ¼, ½ and 1.
+    - The other walked-on cells, at 1/32, √2/16, 1/8, ¼, ½ and 1:
+      - (1, 0.3): 11, 4, 2, 18, 43, 52;
+      - (0.99, 0): 0, 0, 2, 20, 43, 49;
+      - (0.95, 0): 0, 0, 2, 17, 41, 48;
+      - (0.95, 0.3): 11, 5, 3, 15, 41, 49;
+      - (0.95, 0.5): 21, 18, 19, 22, 30, 45;
+      - (0.95, 0.65): 31, 24, 30, 30, 38, 37;
+      - (0.95, 0.75): 34, 33, 33, 36, 43, 42;
+      - (0.9, 0.3), at 1/32, 1/8, √2/8, ¼, ½ and 1: 11, 1, 3, 11, 36, 47;
+      - (0.9, 0.5): 22, 19, 17, 19, 30, 45;
+      - (0.9, 0.65): 31, 26, 28, 30, 35, 36;
+      - (0.9, 0.75): 35, 33, 31, 35, 42, 41.
+  - _The fixed misses_, over the black ground, raised, by column:
+    - (1, 0.3): `aerial-32km`;
+    - (1, 0.5): `aerial-10km`, `aerial-32km`;
+    - (1, 0.65): `disc-p0`, `disc-p30`, `limb-0.1H`, `limb-0.3H`, `aerial-10km`, `aerial-32km`;
+    - (1, 0.75): `ground-s30-v85-a0`, `ground-s60-v60-a180`, `disc-p0`, `disc-p30`, `disc-p60`,
+      `limb-0.1H`, `aerial-10km`, `aerial-32km`;
+    - (1, 0.85): `ground-s30-v85-a0`, `disc-p0`, `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`,
+      `limb-1H`, `limb-3H`, `aerial-1km`, `aerial-10km`, `aerial-32km`;
+    - (1, 0.9): `ground-s30-v85-a0`, `ground-s30-v85-a90`, `ground-s60-v75-a180`,
+      `ground-s60-v85-a0`, `ground-s60-v85-a90`, `disc-p0`, `disc-p30`, `disc-p60`, `disc-p75`,
+      `limb-0.1H`, `limb-0.3H`, `limb-1H`, `limb-3H`, `aerial-1km`, `aerial-10km`, `aerial-32km`;
+    - (0.99, 0.5): `aerial-10km`, `aerial-32km`;
+    - (0.99, 0.65): `disc-p0`, `disc-p30`, `limb-0.1H`, `limb-0.3H`, `aerial-10km`, `aerial-32km`;
+    - (0.99, 0.75): `ground-s30-v85-a0`, `ground-s60-v75-a180`, `disc-p0`, `disc-p30`, `limb-0.1H`,
+      `limb-0.3H`, `aerial-10km`, `aerial-32km`;
+    - (0.99, 0.85): `ground-s30-v85-a0`, `ground-s60-v75-a180`, `ground-s60-v85-a0`, `disc-p0`,
+      `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`, `limb-1H`, `aerial-1km`, `aerial-10km`,
+      `aerial-32km`;
+    - (0.99, 0.9): `ground-s30-v85-a0`, `ground-s60-v85-a0`, `ground-s60-v85-a90`, `disc-p0`,
+      `disc-p30`, `disc-p60`, `disc-p75`, `limb-0.1H`, `limb-0.3H`, `limb-1H`, `limb-3H`,
+      `aerial-1km`, `aerial-10km`, `aerial-32km`;
+    - (0.95, 0) and (0.95, 0.3): `aerial-32km`;
+    - (0.95, 0.5): `aerial-10km`, `aerial-32km`;
+    - (0.95, 0.65): `disc-p0`, `disc-p30`, `limb-0.3H`, `aerial-10km`, `aerial-32km`;
+    - (0.95, 0.75): `ground-s60-v60-a180`, `disc-p0`, `disc-p30`, `limb-0.1H`, `limb-0.3H`,
+      `aerial-10km`, `aerial-32km`;
+    - (0.95, 0.85): `ground-s30-v85-a0`, `ground-s60-v75-a180`, `ground-s60-v85-a0`, `disc-p0`,
+      `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`, `limb-1H`, `limb-3H`, `aerial-1km`,
+      `aerial-10km`, `aerial-32km`;
+    - (0.95, 0.9): `ground-s30-v85-a0`, `ground-s60-v85-a0`, `ground-s60-v85-a90`, `disc-p0`,
+      `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`, `limb-1H`, `limb-3H`, `aerial-1km`,
+      `aerial-10km`, `aerial-32km`;
+    - (0.9, 0) and (0.9, 0.3): `aerial-32km`;
+    - (0.9, 0.5): `aerial-10km`, `aerial-32km`;
+    - (0.9, 0.65): `disc-p0`, `disc-p30`, `aerial-10km`, `aerial-32km`;
+    - (0.9, 0.75): `disc-p0`, `disc-p30`, `limb-0.1H`, `limb-0.3H`, `aerial-10km`, `aerial-32km`;
+    - (0.9, 0.85): `ground-s30-v85-a0`, `disc-p0`, `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`,
+      `limb-3H`, `aerial-10km`, `aerial-32km`;
+    - (0.9, 0.9): `ground-s30-v85-a0`, `ground-s60-v85-a0`, `disc-p0`, `disc-p30`, `disc-p60`,
+      `limb-0.1H`, `limb-0.3H`, `limb-1H`, `limb-3H`, `aerial-1km`, `aerial-10km`, `aerial-32km`;
+    - (0.8, 0.5): `aerial-10km`, `aerial-32km`;
+    - (0.8, 0.65) and (0.8, 0.75): `disc-p0`, `disc-p30`, `aerial-10km`, `aerial-32km`;
+    - (0.8, 0.85): `disc-p0`, `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`, `aerial-10km`,
+      `aerial-32km`;
+    - (0.8, 0.9): `ground-s30-v85-a0`, `disc-p0`, `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`,
+      `limb-1H`, `limb-3H`, `aerial-1km`, `aerial-10km`, `aerial-32km`;
+    - (0.6, 0.5): `aerial-32km`;
+    - (0.6, 0.65): `aerial-10km`, `aerial-32km`;
+    - (0.6, 0.75): `disc-p0`, `disc-p30`, `aerial-10km`, `aerial-32km`;
+    - (0.6, 0.85): `disc-p0`, `disc-p30`, `disc-p60`, `aerial-10km`, `aerial-32km`;
+    - (0.6, 0.9): `disc-p0`, `disc-p30`, `disc-p60`, `limb-0.1H`, `limb-0.3H`, `aerial-10km`,
+      `aerial-32km`;
+    - (0.4, 0.65): `aerial-32km`;
+    - (0.4, 0.75): `disc-p0`;
+    - (0.4, 0.85): `disc-p0`, `disc-p30`, `aerial-10km`, `aerial-32km`;
+    - (0.4, 0.9): `disc-p0`, `disc-p30`, `disc-p60`, `limb-0.3H`, `aerial-10km`, `aerial-32km`.
+
+    The other ten columns and the bright column have none.
+
+  - _Refusals_: no column stopped as `reach`, and no near-sun refusal was listed. Every refused
+    geometry was topped up until it passed.
+  - _The aggregates past σ_F ≤ 0.0025 F_ (recorded, never a stop, not topped up), by point:
+    - `w1000`: 750, 758, 769, 771, 776, 778, 785, 786 and 794, σ_F ÷ F to 0.0062;
+    - `w990`: 197, 800, 801, 813, 814, 820, 827, 828, 837, 841, 842, 843 and 845, to 0.0056;
+    - `w950`: 849, 869, 871, 879, 883, 884, 891 and 893, to 0.0042;
+    - `w900`: 361, 405, 407, 911, 912, 918, 920, 925, 928, 930, 932, 933, 936, 940 and 943, to
+      0.0082;
+    - `w800`: 953, 968, 969, 976, 977, 983, 984, 986, 988, 989 and 994, to 0.0040;
+    - `w600`: 617, 995, 1001, 1009, 1017, 1031, 1033, 1038 and 1039, to 0.0073;
+    - `w400`: 681, 721, 1051, 1066, 1067, 1068, 1073, 1074, 1075, 1079, 1080, 1081, 1087 and 1090,
+      to 0.0079.
+
+    That is 79 points in all, 72 of them floor-scan points; the bright column has none.
+
+  - _The cases_: every output's `caseSha256` is its committed case's at the lane's head, the eight
+    T11.b re-blessed.
+- **Deferred findings (2026-10-13 rule)** (R08.T13.b). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Earth's six cells_ drift at τ* 1/8, below its worst channel's 0.394: raised at c2 (item 4).
+  - _Mars's six cells_ drift at τ\* 1/8 and √2/16, below its 0.508: Mars routes thick by τ as well
+    as by the ground line, whose acceptance covers A\* alone; raised at c2.
+  - _`saturn-oblate`_'s 0.728 lies past (1, 0)'s τ\* 1/8: raised at c2.
+  - _(1, 0) at τ 1/8_ fails 2 geometries just past the bound: the twin reads 0.9238 and 0.9249 of
+    the reference at `ground-s80-v75-a90` and `-v85-a90`, against 0.9275 and 0.9283 (T + 4σ_ref, σ ÷
+    L 0.56% and 0.54%). It is at the line; c2 attributes it for main.
+  - _Fixed misses at g ≤ 0.5_, where #107's pilot saw none: `aerial-32km` over the black ground at
+    (0.95, 0) and (0.9, 0), at (1, 0.3), (0.95, 0.3) and (0.9, 0.3), and at g 0.5 for ω from 0.6 up;
+    `aerial-10km` at g 0.5 for ω from 0.8 up.
+  - _τ\* is not monotone in g at ω 0.9 and 0.4_: (0.9, 0.3) at √2/8 lies above (0.9, 0) and (0.9,
+    0.5) at 1/8, and (0.4, 0.65) at √2/4 above (0.4, 0.5) and (0.4, 0.75) at ¼.
+  - _The aggregates_: 79 traced points miss σ_F ≤ 0.0025 F, up to 0.0082, 72 of them floor-scan
+    points; they set nothing.
+  - _The cost_ is well under the projections: 0.48 CPU-days, against #107's 0.71–0.98 and main's
+    2.6–3.6 days of wall time, as every column drifts by τ ½.
+  - _The first failing geometry_ by the record's rule is a floor miss in 39 of the 49 cells
+    (`ground-s0-v30-a0` in 35), and the drift's own geometry stands beside it.
+  - _Provides' sweep paragraph_ names no top-up, `doublings`, `walkPast` or 8,192 floor: main's to
+    amend.
 - **Deviations in T13.c1, as built** (2026-10-27; `view/atmosphere/reference/`: `twin.ts` and
   `twin.test.ts`, `caseGate.ts`, `caseGate.test.ts` and `caseGate.json` (new); `.prettierignore`.
   Rulings: `decision-r08-t13-scope.md`, rulings 1, 10 and 12, "#107's twin ground" and "#107's floor
