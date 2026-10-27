@@ -38,7 +38,7 @@ use crate::coords::SystemPosition;
 use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
-use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltPart, BeltSite};
+use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltSite};
 use crate::planetary::chem::partition::Condensates;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::figure::BodyFigure;
@@ -1076,8 +1076,8 @@ impl BeltRecord {
             size_slope: belt.size_slope(),
             largest_diameter: belt.largest_diameter(),
             composition: belt.composition(),
-            mean_eccentricity: BeltPart::Main.mean_eccentricity(),
-            mean_inclination: BeltPart::Main.mean_inclination(),
+            mean_eccentricity: belt.main().mean_eccentricity(),
+            mean_inclination: belt.main().mean_inclination(),
             fractional_luminosity,
             members: Section::Ok(members),
         }

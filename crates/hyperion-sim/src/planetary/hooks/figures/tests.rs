@@ -191,31 +191,105 @@ fn solar_planets() -> impl Iterator<Item = (EarthMasses, Metres)> {
         .map(|&(_, a, .., mass, _)| (earths(mass * 1e24), au(a)))
 }
 
+/// The chaotic zone about the Sun of a planet of `mass_1e24` × 10²⁴ kg at `a` au with
+/// eccentricity `e`, its inner and outer edges (P14.T21.a's 1.3 μ^(2⁄7) beyond its pericentre and
+/// apocentre).
+fn solar_zone(mass_1e24: f64, a: f64, e: f64) -> (Metres, Metres) {
+    let planet = Neighbour::new(earths(mass_1e24 * 1e24), au(a), e);
+    let (lo, hi) = crate::planetary::belts::chaotic_zone(&planet, SolarMasses::new(1.0));
+    (Metres::new(lo), Metres::new(hi))
+}
+
+/// The population (P14.T48.g) of a part `part` over `annulus` with eccentricities `eccentricity`
+/// between `floor` and `ceiling`, uniform in a.
+fn solar_population(
+    part: BeltPart,
+    eccentricity: EccentricityLaw,
+    annulus: SourceAnnulus,
+    floor: Metres,
+    ceiling: Option<Metres>,
+) -> PopulationLaw {
+    PopulationLaw::new(PopulationParts {
+        part,
+        eccentricity,
+        inner_edge: annulus.inner_edge,
+        outer_edge: annulus.outer_edge,
+        floor,
+        ceiling,
+        spread: AxisSpread::Uniform,
+    })
+    .unwrap()
+}
+
+/// The Solar main belt's population over `annulus` (P14.T48.g): truncated Rayleigh between Mars's
+/// chaotic zone and Jupiter's, on [`PLANETS`]' elements and masses, uniform in a.
+fn solar_main_population(annulus: SourceAnnulus) -> BeltPopulation {
+    let (_, a, e, _, mass, _) = PLANETS[3];
+    let (_, beyond_mars) = solar_zone(mass, a, e);
+    let (_, a, e, _, mass, _) = PLANETS[4];
+    let (inside_jupiter, _) = solar_zone(mass, a, e);
+    BeltPopulation {
+        main: solar_population(
+            BeltPart::Main,
+            EccentricityLaw::TruncatedRayleigh,
+            annulus,
+            beyond_mars,
+            Some(inside_jupiter),
+        ),
+        scattered: None,
+    }
+}
+
 /// The Solar System's belts: the asteroid belt between Jupiter's 4:1 and 2:1 resonances (rocky,
 /// P14.T21.a), of the Solar main belt's mass, and the Kuiper belt from Neptune's 3:2 to its 2:1,
-/// of the Solar Kuiper belt's, with a massless scattered component beyond (icy, P14.T21.b).
+/// of the Solar Kuiper belt's, with a massless scattered component beyond (icy, P14.T21.b). Their
+/// populations (P14.T48.g) lie between the planets' chaotic zones, the Kuiper belt's beyond
+/// Neptune's, its scattered component perihelion-anchored there.
 fn solar_belts() -> Vec<SourceBelt> {
     let jupiter = PLANETS[4].1;
     let resonance = |p: f64, q: f64, a: f64| a * math::powf(q / p, 2.0 / 3.0);
+    let main = annulus(resonance(4.0, 1.0, jupiter), resonance(2.0, 1.0, jupiter));
+    let kuiper = annulus(
+        resonance(2.0, 3.0, NEPTUNE_AU),
+        resonance(1.0, 2.0, NEPTUNE_AU),
+    );
+    let scattered = annulus(resonance(1.0, 2.0, NEPTUNE_AU), 100.0);
+    let (e, _, mass, _) = NEPTUNE;
+    let (_, neptune) = solar_zone(mass, NEPTUNE_AU, e);
+    let kuiper_population = BeltPopulation {
+        main: solar_population(
+            BeltPart::Main,
+            EccentricityLaw::TruncatedRayleigh,
+            kuiper,
+            neptune,
+            None,
+        ),
+        scattered: Some(solar_population(
+            BeltPart::Scattered,
+            EccentricityLaw::PerihelionAnchored,
+            scattered,
+            neptune,
+            None,
+        )),
+    };
     vec![
         SourceBelt {
             kind: BeltKind::Asteroid,
             composition: BeltComposition::Rocky,
-            main: annulus(resonance(4.0, 1.0, jupiter), resonance(2.0, 1.0, jupiter)),
+            main,
             scattered: None,
             main_mass: SOLAR_MAIN_BELT_MASS,
             scattered_mass: EarthMasses::ZERO,
+            population: Some(solar_main_population(main)),
         },
         SourceBelt {
             kind: BeltKind::Kuiper,
             composition: BeltComposition::Icy,
-            main: annulus(
-                resonance(2.0, 3.0, NEPTUNE_AU),
-                resonance(1.0, 2.0, NEPTUNE_AU),
-            ),
-            scattered: Some(annulus(resonance(1.0, 2.0, NEPTUNE_AU), 100.0)),
+            main: kuiper,
+            scattered: Some(scattered),
             main_mass: KUIPER_BELT_MASS,
             scattered_mass: EarthMasses::ZERO,
+            population: Some(kuiper_population),
         },
     ]
 }
@@ -695,6 +769,7 @@ fn rule_three_takes_the_nearest_asteroid_belt_then_any_then_the_giant() {
         scattered: None,
         main_mass: KUIPER_BELT_MASS,
         scattered_mass: EarthMasses::ZERO,
+        population: None,
     };
     let asteroid = SourceBelt {
         kind: BeltKind::Asteroid,
@@ -703,6 +778,7 @@ fn rule_three_takes_the_nearest_asteroid_belt_then_any_then_the_giant() {
         scattered: None,
         main_mass: SOLAR_MAIN_BELT_MASS,
         scattered_mass: EarthMasses::ZERO,
+        population: None,
     };
     let sources = |belts: Vec<SourceBelt>, giant: Option<f64>| {
         let giants = giant.map(|a| (EarthMasses::new(317.8), au(a)));
@@ -733,6 +809,7 @@ fn rule_three_takes_the_nearest_asteroid_belt_then_any_then_the_giant() {
         scattered: None,
         main_mass: SOLAR_MAIN_BELT_MASS,
         scattered_mass: EarthMasses::ZERO,
+        population: None,
     };
     let at_one = HostOrbiter {
         orbit: orbit(1.0, 0.0, 0.0),
@@ -848,6 +925,8 @@ fn the_generators_belts_carry_over() {
             source.scattered.map(|s| (s.inner_edge, s.outer_edge)),
             belt.scattered().map(|s| (s.inner_edge(), s.outer_edge()))
         );
+        // P14.T48.g: the populations carry over whole.
+        assert_eq!(source.population, Some(belt.population()));
     }
     let sources = ImpactorSources::new(sun_parameter(), generated, solar_planets()).unwrap();
     for (name, expected) in [("Earth", 19.9), ("Mars", 10.6)] {
@@ -1899,6 +1978,7 @@ fn reference_moon() -> Impactors {
         scattered: None,
         main_mass: SOLAR_MAIN_BELT_MASS,
         scattered_mass: EarthMasses::ZERO,
+        population: Some(solar_main_population(annulus(inner, outer))),
     };
     let jupiter = (earths(PLANETS[4].4 * 1e24), au(PLANETS[4].1));
     let sun = ImpactorSources::new(sun_parameter(), vec![belt], [jupiter]).unwrap();
@@ -1947,6 +2027,12 @@ fn the_moon_s_rate_is_one() {
 /// Pluto 30.3 within 5% (Zahnle et al. 2003, §5.5, Case A); the Moon about 1.
 #[test]
 fn the_solar_system_s_rates_follow_the_ruling() {
+    check_the_solar_system_s_rates(LUNAR_ENCOUNTER_SPEED);
+}
+
+/// [`the_solar_system_s_rates_follow_the_ruling`]'s checks under the rules in force, their
+/// encounter factors printed over `lunar`.
+pub(in crate::planetary::hooks::figures) fn check_the_solar_system_s_rates(lunar: MetresPerSecond) {
     let sun = solar_sources();
     let ganymede = MOONS[2];
     let cases = [
@@ -1978,7 +2064,7 @@ fn the_solar_system_s_rates_follow_the_ruling() {
         eprintln!(
             "{name}: Ψ {:.4}, V ÷ V☾ {:.4}, R_b {rate:.4}",
             impactors.abundance,
-            impactors.encounter / LUNAR_ENCOUNTER_SPEED
+            impactors.encounter / lunar
         );
         assert!(range.contains(&rate), "{name}: R_b {rate}");
     }
@@ -2162,6 +2248,7 @@ fn the_abundance_follows_the_source_rule() {
         scattered: None,
         main_mass: KUIPER_BELT_MASS,
         scattered_mass: EarthMasses::ZERO,
+        population: None,
     };
     let giant = [(EarthMasses::new(317.8), au(5.2))];
     let comets_only = ImpactorSources::new(sun_parameter(), Vec::new(), giant).unwrap();
@@ -3021,3 +3108,6 @@ fn under_every_24_hold_a_past_only_runaway_s_lid_and_ice_follow_its_water() {
         });
     }
 }
+
+// P14.T48.g: the impactors under the belts' population laws, at 24.
+mod population;

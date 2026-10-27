@@ -77,6 +77,17 @@
 //!      from the innermost giant's `a_g`; with neither, [`COMET_EXCITATION`]². The nearest belt is
 //!      the one of the least ratio max(a, `a_b`) ÷ min(a, `a_b`), the first in the given order on a
 //!      tie; the cube is continuous at `a_b` but not at a belt's edges, where rule 1 takes over.
+//! - **From P14.T48.g's bump** (`BELT_POPULATION_VERSION`, 24; decision-p14-t48g-opik), a belt's
+//!   `U_b`² is its population's: Öpik's mean U² over the part's orbits that cross the body's a,
+//!   weighted by their collision probability ([`PopulationLaw::encounter_excitation`], over each
+//!   source belt's [`BeltPopulation`]), at the body's a for rule 1 and at the belt proper's
+//!   mid-radius for rule 3, whose cube becomes c xⁿ, refitted on the five inner bodies
+//!   ([`ENCOUNTER_APPROACH_COEFFICIENT`], [`ENCOUNTER_APPROACH_EXPONENT`]); the comets' branch
+//!   keeps its cube. The Solar main belt's `U_b`² at its mid-radius is then 0.0453, against
+//!   0.0587. Ceres's rms impact speed is then 5.26 km/s, and its probability-weighted mean about
+//!   4.8–5.1, within 10% of Bottke et al. 1994's belt-wide mean of about 5.3 km/s (from memory,
+//!   its abstract unread; Dahlgren 1998's 5.28, as Cibulková et al. 2014 quote it;
+//!   decision-p14-t48g-opik §1); the five inner bodies move by under 0.09 km/s.
 //! - **The projectiles' density**: [`ROCKY_PROJECTILE_DENSITY`] from a rocky belt,
 //!   [`ICY_PROJECTILE_DENSITY`] from an icy belt or the comets.
 //! - **The target** ([`Crust`]): porous below a radius of [`POROUS_TARGET_RADIUS`], at the body's
@@ -122,9 +133,13 @@ use hyperion_surface::craters::{
 };
 
 use crate::math;
+use crate::planetary::belts::population::{
+    AxisSpread, EccentricityLaw, PopulationParts, PopulationRules,
+};
 use crate::planetary::belts::{
-    BELT_GIANT_MASS, Belt, BeltComposition, BeltPart, MEMBER_ECCENTRICITY_WIDTH,
-    MEMBER_INCLINATION_WIDTH_DEG, SCATTERED_ECCENTRICITY_WIDTH, SCATTERED_INCLINATION_WIDTH_DEG,
+    BELT_GIANT_MASS, Belt, BeltComposition, BeltPart, BeltPopulation, MEMBER_ECCENTRICITY_WIDTH,
+    MEMBER_INCLINATION_WIDTH_DEG, PopulationLaw, SCATTERED_ECCENTRICITY_WIDTH,
+    SCATTERED_INCLINATION_WIDTH_DEG,
 };
 use crate::planetary::chem::partition::{
     Basins, ClimateSpan, ColumnInventory, CondensatePhase, Condensates, Cover, CrustWater, Ground,
@@ -336,6 +351,25 @@ pub const LEFTOVER_DENSITY: f64 = 0.01;
 /// DE440).
 pub const LUNAR_ENCOUNTER_SPEED: MetresPerSecond = MetresPerSecond::new(16_921.789_060_825_588);
 
+/// The Moon's encounter factor V☾ from P14.T48.g's bump (`BELT_POPULATION_VERSION`), m/s: the
+/// same configuration as [`LUNAR_ENCOUNTER_SPEED`]'s, its belt the Solar main belt's population
+/// between Mars's chaotic zone and Jupiter's ([`BeltPopulation`]), under Öpik's mean and rule 3's
+/// refitted approach ([`ENCOUNTER_APPROACH_COEFFICIENT`]), so that the Moon's `R_b` stays 1
+/// (decision-p14-t48g-opik §3). `Fitted`: a test refits it.
+pub const POPULATION_LUNAR_ENCOUNTER_SPEED: MetresPerSecond =
+    MetresPerSecond::new(17_004.271_408_862_347);
+
+/// The coefficient c of rule 3's approach from P14.T48.g's bump, c xⁿ with x the fractional
+/// distance to the nearest belt's mid-radius: refitted, as P14.T48.g allows, by minimax on
+/// P14.T48.f's Solar-System figures for Mercury, Venus, Earth, the Moon and Mars under Öpik's mean
+/// `U_b`² (decision-p14-t48g-opik §3; the cube, c = 1 and n = 3, leaves them 0.31–0.38 km/s
+/// slow). `Fitted`: a test refits it.
+pub const ENCOUNTER_APPROACH_COEFFICIENT: f64 = 0.992;
+
+/// The exponent n of rule 3's approach from P14.T48.g's bump ([`ENCOUNTER_APPROACH_COEFFICIENT`]).
+/// `Fitted`: a test refits it.
+pub const ENCOUNTER_APPROACH_EXPONENT: f64 = 2.843;
+
 /// A body's orbit about its host as its impactors read it.
 ///
 /// Plain data with public fields: [`impactors`] validates them.
@@ -441,6 +475,41 @@ pub struct SourceBelt {
     /// The scattered component's mass at [`SOURCE_MASS_AGE`], finite and non-negative; zero for a
     /// belt with none.
     pub scattered_mass: EarthMasses,
+    /// Its components' small bodies' orbital laws (P14.T48.g), whose encounter speeds the
+    /// impactors read from its bump.
+    ///
+    /// Each law's annulus and part are its component's. `None` gives no laws, read as
+    /// untruncated over each annulus and uniform in a ([`SourceBelt::population_of`]).
+    pub population: Option<BeltPopulation>,
+}
+
+impl SourceBelt {
+    /// The orbital law of its part `part`'s small bodies (P14.T48.g), over that part's annulus:
+    /// its own, or with none given its part's Rayleigh laws untruncated (no floor, no ceiling,
+    /// uniform in a); `None` for a scattered part it does not have.
+    #[must_use]
+    pub fn population_of(&self, part: BeltPart) -> Option<PopulationLaw> {
+        if let Some(population) = &self.population {
+            return population.part(part).copied();
+        }
+        let annulus = match part {
+            BeltPart::Main => self.main,
+            BeltPart::Scattered => self.scattered?,
+        };
+        // An annulus that is not finite, positive and widening has no law: `ImpactorSources::new`
+        // refuses such edges, so only a caller's own unvalidated belt reaches this, and the
+        // excitation then falls back to the part's widths ([`belt_excitation`]).
+        PopulationLaw::new(PopulationParts {
+            part,
+            eccentricity: EccentricityLaw::TruncatedRayleigh,
+            inner_edge: annulus.inner_edge,
+            outer_edge: annulus.outer_edge,
+            floor: Metres::ZERO,
+            ceiling: None,
+            spread: AxisSpread::Uniform,
+        })
+        .ok()
+    }
 }
 
 impl From<&Belt> for SourceBelt {
@@ -469,6 +538,7 @@ impl From<&Belt> for SourceBelt {
                 .map(|part| annulus(part.inner_edge(), part.outer_edge())),
             main_mass: mass_of(belt.main()),
             scattered_mass: belt.scattered().map_or(EarthMasses::ZERO, mass_of),
+            population: Some(belt.population()),
         }
     }
 }
@@ -499,6 +569,8 @@ impl ImpactorSources {
     ///   positive and ordered;
     /// - [`BuildImpactorSourcesError::BeltMass`] for a component's mass that is not finite and
     ///   non-negative, or a scattered mass other than zero on a belt with no scattered component;
+    /// - [`BuildImpactorSourcesError::BeltPopulation`] for a belt's population whose laws are not
+    ///   its components', part for part and annulus for annulus;
     /// - [`BuildImpactorSourcesError::Planet`] for a planet whose mass is not finite and
     ///   non-negative, or whose semi-major axis is not finite and positive.
     pub fn new(
@@ -525,6 +597,26 @@ impl ImpactorSources {
             }
             if belt.scattered.is_none() && belt.scattered_mass.value() > 0.0 {
                 return Err(BuildImpactorSourcesError::BeltMass(belt.scattered_mass));
+            }
+            if let Some(population) = &belt.population {
+                let fits = |law: &PopulationLaw, part, annulus: SourceAnnulus| {
+                    let parts = law.parts();
+                    law.part() == part
+                        && parts.inner_edge.total_cmp(&annulus.inner_edge).is_eq()
+                        && parts.outer_edge.total_cmp(&annulus.outer_edge).is_eq()
+                };
+                let main_fits = fits(&population.main, BeltPart::Main, belt.main);
+                let scattered_fits = match (&population.scattered, belt.scattered) {
+                    (Some(law), Some(annulus)) => fits(law, BeltPart::Scattered, annulus),
+                    (None, None) => true,
+                    (Some(_), None) | (None, Some(_)) => false,
+                };
+                if !(main_fits && scattered_fits) {
+                    return Err(BuildImpactorSourcesError::BeltPopulation(
+                        population.main.parts().inner_edge,
+                        population.main.parts().outer_edge,
+                    ));
+                }
             }
             match belt.composition {
                 BeltComposition::Icy => {
@@ -602,6 +694,9 @@ pub enum BuildImpactorSourcesError {
     /// A belt component's mass is not finite and non-negative, or a belt with no scattered
     /// component has a scattered mass.
     BeltMass(EarthMasses),
+    /// A belt's population is not its components', part for part and annulus for annulus: its
+    /// belt proper's law's edges, inner and outer.
+    BeltPopulation(Metres, Metres),
     /// A planet's mass is not finite and non-negative, or its semi-major axis is not finite and
     /// positive.
     Planet(EarthMasses, Metres),
@@ -625,6 +720,12 @@ impl fmt::Display for BuildImpactorSourcesError {
                 f,
                 "belt mass {} M⊕ is out of range or has no component",
                 mass.value()
+            ),
+            Self::BeltPopulation(inner, outer) => write!(
+                f,
+                "belt population over {} m to {} m is not its components'",
+                inner.value(),
+                outer.value()
             ),
             Self::Planet(mass, a) => write!(
                 f,
@@ -895,21 +996,42 @@ impl ImpactorSource {
 
     /// The source of the impactors striking `orbiter`, or a moon of it, under `sources`, with
     /// their abundance Ψ over the Moon's by the same rule, before the floor
-    /// ([`floored_abundance`]): the rate and the velocity read one population.
+    /// ([`floored_abundance`]): the rate and the velocity read one population. The tests' entry,
+    /// under the rules in force; [`impactors`] reads the rules once itself.
+    #[cfg(test)]
     #[must_use]
     fn with_abundance(orbiter: &HostOrbiter, sources: &ImpactorSources) -> (Self, f64) {
+        Self::with_abundance_under(orbiter, sources, PopulationRules::in_force())
+    }
+
+    /// The source of the impactors striking `orbiter`, or a moon of it, under `sources` and the
+    /// belt population's rules `rules`, with their abundance Ψ over the Moon's by the same rule,
+    /// before the floor ([`floored_abundance`]): the rate and the velocity read one population,
+    /// and the caller reads the rules once, so that the source and the rate's lunar factor follow
+    /// one set.
+    #[must_use]
+    fn with_abundance_under(
+        orbiter: &HostOrbiter,
+        sources: &ImpactorSources,
+        rules: PopulationRules,
+    ) -> (Self, f64) {
         let a = orbiter.orbit.semi_major_axis;
         // Rule 1: a member shares its part's excitation; any body orbiting in an annulus, that
         // annulus's.
         if let Some(membership) = orbiter.belt {
+            let component = member_component(sources, membership, a);
             let source = Self::InBelt {
-                excitation: belt_excitation(membership.part),
+                excitation: in_belt_excitation(
+                    component.map(|(belt, ..)| belt),
+                    membership.part,
+                    a,
+                    rules,
+                ),
                 composition: membership.composition,
             };
-            let abundance =
-                member_component(sources, membership, a).map_or(0.0, |(annulus, mass)| {
-                    in_belt_abundance(annulus, mass, membership.part, membership.composition)
-                });
+            let abundance = component.map_or(0.0, |(_, annulus, mass)| {
+                in_belt_abundance(annulus, mass, membership.part, membership.composition)
+            });
             return (source, abundance);
         }
         for belt in &sources.belts {
@@ -920,7 +1042,7 @@ impl ImpactorSource {
             for (part, annulus, mass) in parts {
                 if let Some(annulus) = annulus.filter(|annulus| annulus.holds(a)) {
                     let source = Self::InBelt {
-                        excitation: belt_excitation(part),
+                        excitation: in_belt_excitation(Some(belt), part, a, rules),
                         composition: belt.composition,
                     };
                     let abundance = in_belt_abundance(annulus, mass, part, belt.composition);
@@ -948,9 +1070,8 @@ impl ImpactorSource {
             a,
         );
         if let Some(belt) = asteroid.or_else(|| nearest_belt(sources.belts.iter(), a)) {
-            let a_b = belt.main.mid_radius();
             let source = Self::NearestBelt {
-                excitation: belt_excitation(BeltPart::Main) + approach(a, a_b),
+                excitation: nearest_belt_excitation(belt, a, rules),
                 composition: belt.composition,
             };
             let abundance = match belt.kind {
@@ -1003,35 +1124,36 @@ fn floored_abundance(abundance: f64) -> f64 {
     }
 }
 
-/// The component a belt's member belongs to, with its mass: of the belts of the member's
-/// composition that have its part, the first whose annulus holds the member's semi-major axis
-/// `a`, as P14.T21.c places every member, or failing one the nearest of them by
+/// The component a belt's member belongs to, with its belt and its mass: of the belts of the
+/// member's composition that have its part, the first whose annulus holds the member's semi-major
+/// axis `a`, as P14.T21.c places every member, or failing one the nearest of them by
 /// [`nearest_belt`]'s ratio; `None` with no such belt.
 #[must_use]
 fn member_component(
     sources: &ImpactorSources,
     membership: BeltMembership,
     a: Metres,
-) -> Option<(SourceAnnulus, EarthMasses)> {
-    let component = |belt: &SourceBelt| match membership.part {
-        BeltPart::Main => Some((belt.main, belt.main_mass)),
-        BeltPart::Scattered => belt.scattered.map(|annulus| (annulus, belt.scattered_mass)),
-    };
+) -> Option<(&SourceBelt, SourceAnnulus, EarthMasses)> {
     let candidates = || {
         sources
             .belts
             .iter()
             .filter(|belt| belt.composition == membership.composition)
-            .filter_map(component)
+            .filter_map(|belt| match membership.part {
+                BeltPart::Main => Some((belt, belt.main, belt.main_mass)),
+                BeltPart::Scattered => belt
+                    .scattered
+                    .map(|annulus| (belt, annulus, belt.scattered_mass)),
+            })
     };
     candidates()
-        .find(|(annulus, _)| annulus.holds(a))
+        .find(|(_, annulus, _)| annulus.holds(a))
         .or_else(|| {
             candidates()
                 .fold(
                     None,
-                    |best: Option<((SourceAnnulus, EarthMasses), f64)>, c| {
-                        let (r, x) = (c.0.mid_radius().value(), a.value());
+                    |best: Option<((&SourceBelt, SourceAnnulus, EarthMasses), f64)>, c| {
+                        let (r, x) = (c.1.mid_radius().value(), a.value());
                         let closeness = r.min(x) / r.max(x);
                         match best {
                             Some((_, b)) if closeness <= b => best,
@@ -1128,9 +1250,10 @@ fn approach_abundance(belt: &SourceBelt, a: Metres) -> f64 {
 ///
 /// To second order it is Öpik's U² = 2 − 2√(1 − e²) cos i at equal semi-major axes. Over the same
 /// untruncated laws, that U²'s exact mean is 0.0586 and 0.408, within 0.2% and 1.4% of these. The
-/// exact ⟨e²⟩ + ⟨sin² i⟩, 0.0580 and 0.388, lies 1.0% and 5.0% below it (F5.6). The members'
-/// truncation at the crossing limit is not applied: the record's population moments are the
-/// untruncated laws' (P14.T48.g).
+/// exact ⟨e²⟩ + ⟨sin² i⟩, 0.0580 and 0.388, lies 1.0% and 5.0% below it (F5.6). It is the
+/// excitation below P14.T48.g's bump, where the record's population moments are the untruncated
+/// laws'; from it the impactors read each population's truncated laws through Öpik's mean
+/// ([`PopulationLaw::encounter_excitation`]).
 #[must_use]
 pub fn belt_excitation(part: BeltPart) -> f64 {
     let (sigma_e, sigma_i_deg) = match part {
@@ -1148,12 +1271,60 @@ pub fn belt_excitation(part: BeltPart) -> f64 {
 /// (1 − `a_b` ÷ a)³ outside it: the cube of the fractional distance, zero at `a_b`.
 #[must_use]
 fn approach(a: Metres, a_b: Metres) -> f64 {
-    let x = if a < a_b {
+    let x = fractional_distance(a, a_b);
+    x * x * x
+}
+
+/// The fractional distance of a semi-major axis `a` from a reference radius `a_b`: 1 − a ÷ `a_b`
+/// inside it and 1 − `a_b` ÷ a outside it, from 0 to 1.
+#[must_use]
+fn fractional_distance(a: Metres, a_b: Metres) -> f64 {
+    if a < a_b {
         1.0 - a.value() / a_b.value()
     } else {
         1.0 - a_b.value() / a.value()
-    };
-    x * x * x
+    }
+}
+
+/// Rule 1's excitation `U_b`² for a body at a semi-major axis `a` in the part `part` of `belt`,
+/// under the belt population's rules `rules`: from P14.T48.g's bump its population's Öpik mean at
+/// a ([`PopulationLaw::encounter_excitation`]), and below it, or for a member whose belt is not
+/// among the sources, the part's untruncated widths' [`belt_excitation`].
+#[must_use]
+fn in_belt_excitation(
+    belt: Option<&SourceBelt>,
+    part: BeltPart,
+    a: Metres,
+    rules: PopulationRules,
+) -> f64 {
+    match rules {
+        PopulationRules::Held => belt_excitation(part),
+        PopulationRules::Laws => belt
+            .and_then(|belt| belt.population_of(part))
+            .map_or_else(|| belt_excitation(part), |law| law.encounter_excitation(a)),
+    }
+}
+
+/// Rule 3's excitation for a body at a semi-major axis `a` from the nearest belt `belt`, under
+/// the belt population's rules `rules`: its belt proper's `U_b`² plus the approach from its
+/// mid-radius `a_b`. Below P14.T48.g's bump that is
+/// [`belt_excitation`]'s 2σₑ² + 2 sin² σᵢ plus the cube of the fractional distance x; from it,
+/// the belt proper's Öpik mean at `a_b` plus c xⁿ, [`ENCOUNTER_APPROACH_COEFFICIENT`] and
+/// [`ENCOUNTER_APPROACH_EXPONENT`] (decision-p14-t48g-opik §3).
+#[must_use]
+fn nearest_belt_excitation(belt: &SourceBelt, a: Metres, rules: PopulationRules) -> f64 {
+    let a_b = belt.main.mid_radius();
+    match rules {
+        PopulationRules::Held => belt_excitation(BeltPart::Main) + approach(a, a_b),
+        PopulationRules::Laws => {
+            let own = belt.population_of(BeltPart::Main).map_or_else(
+                || belt_excitation(BeltPart::Main),
+                |law| law.encounter_excitation(a_b),
+            );
+            own + ENCOUNTER_APPROACH_COEFFICIENT
+                * math::powf(fractional_distance(a, a_b), ENCOUNTER_APPROACH_EXPONENT)
+        }
+    }
 }
 
 /// The nearest of `belts` to a semi-major axis `a`, by its belt proper's mid-radius `a_b`: the
@@ -1197,6 +1368,10 @@ pub struct Impactors {
     crust: Crust,
     abundance: f64,
     encounter: MetresPerSecond,
+    /// The Moon's encounter factor the rate is taken over: [`LUNAR_ENCOUNTER_SPEED`], or
+    /// [`POPULATION_LUNAR_ENCOUNTER_SPEED`] from P14.T48.g's bump, by the rules the impactors were
+    /// derived under.
+    lunar: MetresPerSecond,
 }
 
 impl Impactors {
@@ -1235,7 +1410,7 @@ impl Impactors {
     /// lunar-equivalent N☾(>1 km), as R09's reference worlds read it.
     #[must_use]
     pub fn rate(&self) -> f64 {
-        self.abundance * (self.encounter / LUNAR_ENCOUNTER_SPEED)
+        self.abundance * (self.encounter / self.lunar)
     }
 
     /// The projectile abundance Ψ over the Moon's, dimensionless, at least [`LEFTOVER_DENSITY`]:
@@ -1489,6 +1664,7 @@ fn speeds(
 ///     scattered: None,
 ///     main_mass: SOLAR_MAIN_BELT_MASS,
 ///     scattered_mass: EarthMasses::ZERO,
+///     population: None,
 /// };
 /// let sun = ImpactorSources::new(
 ///     GravitationalParameter::from_solar_masses(SolarMasses::new(1.0)),
@@ -1557,7 +1733,10 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
         return Err(DeriveImpactorsError::Water(body.water));
     }
 
-    let (source, abundance) = ImpactorSource::with_abundance(&orbiter, body.sources);
+    // The belt population's rules are read once, so that the source and the rate's lunar factor
+    // follow one set.
+    let rules = PopulationRules::in_force();
+    let (source, abundance) = ImpactorSource::with_abundance_under(&orbiter, body.sources, rules);
     let escape_squared = 2.0 * gravity.value() * radius.value();
     let speeds = speeds(
         source,
@@ -1605,6 +1784,10 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
         crust,
         abundance: floored_abundance(abundance),
         encounter: speeds.encounter,
+        lunar: match rules {
+            PopulationRules::Held => LUNAR_ENCOUNTER_SPEED,
+            PopulationRules::Laws => POPULATION_LUNAR_ENCOUNTER_SPEED,
+        },
     })
 }
 
@@ -2075,6 +2258,7 @@ impl GlobalFigures {
     ///     scattered: None,
     ///     main_mass: SOLAR_MAIN_BELT_MASS,
     ///     scattered_mass: EarthMasses::ZERO,
+    ///     population: None,
     /// };
     /// let sources = ImpactorSources::new(mu, vec![belt], [(EarthMasses::new(317.8), au(5.2029))])?;
     /// let orbit = ImpactorOrbit::Host(HostOrbiter {
@@ -2269,6 +2453,7 @@ impl GlobalFigures {
     /// #     scattered: None,
     /// #     main_mass: SOLAR_MAIN_BELT_MASS,
     /// #     scattered_mass: EarthMasses::ZERO,
+    /// #     population: None,
     /// # };
     /// # let sources = ImpactorSources::new(mu, vec![belt], [(EarthMasses::new(317.8), au(5.2029))])?;
     /// # let figures = GlobalFigures::derive(&FiguresInputs {
@@ -3349,6 +3534,7 @@ fn heat_at(
 /// #     scattered: None,
 /// #     main_mass: SOLAR_MAIN_BELT_MASS,
 /// #     scattered_mass: EarthMasses::ZERO,
+/// #     population: None,
 /// # };
 /// # let sources = ImpactorSources::new(mu, vec![belt], [(EarthMasses::new(317.8), au(5.2029))])?;
 /// # let inputs = FiguresInputs {

@@ -113,7 +113,9 @@
 //! population: its mass, size slope, bounds, mean eccentricity and inclination, and composition
 //! class by the side of the snow line its mass lies on: its components' solids weighted by each
 //! component's mass, so that a Kuiper-like belt's massless scattered component does not count
-//! (ruling 95.2).
+//! (ruling 95.2). Each component's small bodies follow the members' laws with the population's own
+//! bounds ([`population`], P14.T48.g): from that task's bump the record's mean eccentricity is
+//! their quadrature mean, and the impactors' encounter speeds Öpik's mean over their crossers.
 //!
 //! # Slots and draws
 //!
@@ -159,8 +161,11 @@ use crate::units::{
     SolarLuminosities, SolarMasses, Years,
 };
 
+pub mod population;
 mod sizes;
 
+use population::{AxisSpread, EccentricityLaw, PopulationParts, PopulationRules};
+pub use population::{BeltPopulation, PopulationLaw};
 pub use sizes::{
     GROWTH_SPREAD, ICY_GROWTH_CAP, LARGEST_MEMBER_SHARE, MEMBER_CANDIDATES, MEMBER_MASS_SHARE_CAP,
     MEMBER_RANK_SLOPE, MemberSize, MemberSizes, NEBULA_RATIO_EXPONENT, NEBULA_RATIO_RANGE,
@@ -413,7 +418,8 @@ impl BeltPart {
     }
 }
 
-/// One annulus of a belt: its edges and the mass of planetesimals it held at the start.
+/// One annulus of a belt: its edges, the mass of planetesimals it held at the start, and its
+/// small bodies' orbital laws (P14.T48.g).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BeltComponent {
     part: BeltPart,
@@ -421,6 +427,7 @@ pub struct BeltComponent {
     outer_edge: Metres,
     solids: EarthMasses,
     initial_mass: EarthMasses,
+    population: PopulationLaw,
 }
 
 impl BeltComponent {
@@ -454,6 +461,32 @@ impl BeltComponent {
     #[must_use]
     pub const fn initial_mass(&self) -> EarthMasses {
         self.initial_mass
+    }
+
+    /// Its small bodies' orbital laws (P14.T48.g): its annulus's solids, and its pericentres and
+    /// apocentres bounded by the planets' chaotic zones.
+    #[must_use]
+    pub const fn population(&self) -> &PopulationLaw {
+        &self.population
+    }
+
+    /// The mean eccentricity of its population, as the record holds it: its laws' quadrature mean
+    /// ([`PopulationLaw::mean_eccentricity`]) from P14.T48.g's bump (`BELT_POPULATION_VERSION`),
+    /// and its part's untruncated σ√(π ÷ 2) ([`BeltPart::mean_eccentricity`]) below it.
+    #[must_use]
+    pub fn mean_eccentricity(&self) -> f64 {
+        match PopulationRules::in_force() {
+            PopulationRules::Held => self.part.mean_eccentricity(),
+            PopulationRules::Laws => self.population.mean_eccentricity(),
+        }
+    }
+
+    /// The mean inclination of its population to its host's plane, as the record holds it: its
+    /// Rayleigh law's σᵢ√(π ÷ 2), untruncated, at every version
+    /// ([`BeltPart::mean_inclination`], which [`PopulationLaw::mean_inclination`] is too).
+    #[must_use]
+    pub fn mean_inclination(&self) -> Radians {
+        self.part.mean_inclination()
     }
 
     /// Its mean radius r, the midpoint of its edges, which the cascade's formulae read.
@@ -642,6 +675,15 @@ impl Belt {
     #[must_use]
     pub fn members(&self) -> &[BeltMember] {
         &self.members
+    }
+
+    /// Its components' small bodies' orbital laws (P14.T48.g), as its impactors read them.
+    #[must_use]
+    pub fn population(&self) -> BeltPopulation {
+        BeltPopulation {
+            main: self.main.population,
+            scattered: self.scattered.as_ref().map(|s| s.population),
+        }
     }
 
     /// The bytes the belt owns on the heap, its gaps' and members' (P14.T36.a's byte bound).
@@ -1051,7 +1093,7 @@ fn resonance_ratio((p, q): (u8, u8)) -> f64 {
 /// Where a planet's chaotic zone ends on either side: its pericentre less, and its apocentre
 /// plus, 1.3 μ^(2⁄7) of its semi-major axis (Wisdom 1980).
 #[must_use]
-fn chaotic_zone(planet: &Neighbour, host_mass: SolarMasses) -> (f64, f64) {
+pub(crate) fn chaotic_zone(planet: &Neighbour, host_mass: SolarMasses) -> (f64, f64) {
     let mu = planet.mass().value() * EARTH_MASS_KG / (host_mass.value() * SOLAR_MASS_KG);
     let a = planet.semi_major_axis().value();
     let e = planet.eccentricity();
@@ -1427,6 +1469,7 @@ fn build(
             outer_edge: Metres::new(hi),
             solids,
             initial_mass: solids * depletion,
+            population: population_law(part, (lo, hi), solids, planets, zones, disc),
         })
     };
     let main = component(BeltPart::Main, plan.main);
@@ -1633,6 +1676,60 @@ fn eccentricity_limit(
     (1.0 - floor / a)
         .min(ceiling / a - 1.0)
         .clamp(0.0, MEMBER_ECCENTRICITY_CAP)
+}
+
+/// The small bodies' orbital laws of the component `part` between `lo` and `hi` (m), holding
+/// `solids` of `disc`'s solids, about the planets `planets`, sorted by semi-major axis, whose
+/// chaotic zones are `zones` (P14.T48.g; [`population`]).
+///
+/// Its floor and ceiling are [`eccentricity_limit`]'s at any a inside it, but for the disc's outer
+/// edge, which bounds the members' placement and not the population: no planet orbits inside a
+/// component, so the planets inside and beyond it are those inside and beyond its midpoint. A
+/// scattered component beyond a giant is perihelion-anchored, and every other part truncated
+/// Rayleigh.
+fn population_law(
+    part: BeltPart,
+    (lo, hi): (f64, f64),
+    solids: EarthMasses,
+    planets: &[Neighbour],
+    zones: &[(f64, f64)],
+    disc: &DiscProfile,
+) -> PopulationLaw {
+    let mid = f64::midpoint(lo, hi);
+    let floor = planets
+        .iter()
+        .zip(zones)
+        .filter(|(p, _)| p.semi_major_axis().value() < mid)
+        .map(|(_, &(_, zone_hi))| zone_hi)
+        .fold(disc.inner_edge().value(), f64::max);
+    let ceiling = planets
+        .iter()
+        .zip(zones)
+        .filter(|(p, _)| p.semi_major_axis().value() > mid)
+        .map(|(_, &(zone_lo, _))| zone_lo)
+        .reduce(f64::min);
+    let eccentricity = match part {
+        BeltPart::Scattered if planets.last().is_some_and(is_giant) => {
+            EccentricityLaw::PerihelionAnchored
+        }
+        BeltPart::Main | BeltPart::Scattered => EccentricityLaw::TruncatedRayleigh,
+    };
+    let snow = disc.snow_line();
+    let inside = disc.solid_mass_between(Metres::new(lo), Metres::new(snow.value().clamp(lo, hi)));
+    PopulationLaw::new(PopulationParts {
+        part,
+        eccentricity,
+        inner_edge: Metres::new(lo),
+        outer_edge: Metres::new(hi),
+        floor: Metres::new(floor),
+        ceiling: ceiling.map(Metres::new),
+        spread: AxisSpread::Solids {
+            characteristic_radius: disc.characteristic_radius(),
+            snow_line: snow,
+            inside_share: (inside.value() / solids.value()).clamp(0.0, 1.0),
+        },
+    })
+    .expect("a component's edges, the disc's radii and the planets' zones are finite and in range")
 }
 
 /// The quantile at `rank` of a Rayleigh law of width `width` truncated at `limit`.

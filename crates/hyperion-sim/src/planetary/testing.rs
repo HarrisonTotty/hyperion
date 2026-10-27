@@ -348,7 +348,10 @@ impl Error for SampleContextsError {
 ///   state above its floor, and no ocean under a `Snowball`'s ice in its liquids;
 /// - the ocean's, `OCEAN_VERSION` (P14.T51.g.b), at `OceanRules::Solved` through
 ///   `with_ocean_rules`: every body's subsurface ocean is the solve's, and a moon's ocean branch
-///   its spherical shell's (it supersedes the ocean floor's arm where both are in force).
+///   its spherical shell's (it supersedes the ocean floor's arm where both are in force);
+/// - the belt population's, `BELT_POPULATION_VERSION` (P14.T48.g), at `PopulationRules::Laws`
+///   through `with_population_rules`: every belt's recorded mean eccentricity its laws' mean, and
+///   the impactors' `U_b`² Öpik's mean over the crossers, with rule 3's refitted approach.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
@@ -356,6 +359,7 @@ impl Error for SampleContextsError {
 /// 24 test then reads it. P14.T54.b deletes this helper with the holds.
 #[cfg(test)]
 pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::belts::population::{PopulationRules, with_population_rules};
     use crate::planetary::chem::escape::{EscapeRules, with_rules};
     use crate::planetary::chem::tenuous::{TenuousRules, with_tenuous};
     use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
@@ -379,7 +383,9 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
                                 with_ocean_floor(OceanFloorRules::Floored, || {
                                     with_small_body_rules(SmallBodyRules::Batch, || {
                                         with_tenuous(TenuousRules::Tenuous, || {
-                                            with_ocean_rules(OceanRules::Solved, run)
+                                            with_ocean_rules(OceanRules::Solved, || {
+                                                with_population_rules(PopulationRules::Laws, run)
+                                            })
                                         })
                                     })
                                 })
@@ -566,7 +572,12 @@ mod tests {
     /// inside it gives its hold's alone, and outside it each gives the version's, 23's (P14.T24.i's
     /// follow-up, decision-t24i-airless-state D3.3).
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one line per landed hold in each of the five rule sets it compares"
+    )]
     fn every_24_hold_is_in_force_inside_the_helper() {
+        use crate::planetary::belts::population::PopulationRules;
         use crate::planetary::chem::escape::EscapeRules;
         use crate::planetary::chem::tenuous::TenuousRules;
         use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
@@ -589,6 +600,7 @@ mod tests {
                 OceanFloorRules::in_force(),
                 TenuousRules::in_force(),
                 OceanRules::in_force(),
+                PopulationRules::in_force(),
             )
         };
         let at_24 = (
@@ -603,6 +615,7 @@ mod tests {
             OceanFloorRules::Floored,
             TenuousRules::Tenuous,
             OceanRules::Solved,
+            PopulationRules::Laws,
         );
         let at_23 = (
             EscapeRules::Held,
@@ -616,6 +629,7 @@ mod tests {
             OceanFloorRules::Held,
             TenuousRules::Held,
             OceanRules::Held,
+            PopulationRules::Held,
         );
         assert_eq!(rules(), at_23, "the version's, outside the helper");
         assert_eq!(with_every_24_hold(rules), at_24);
@@ -641,6 +655,7 @@ mod tests {
                 OceanFloorRules::Floored,
                 TenuousRules::Tenuous,
                 OceanRules::Solved,
+                PopulationRules::Laws,
             ),
             "every 24 hold but the unlit mean's"
         );
@@ -658,6 +673,7 @@ mod tests {
                 OceanFloorRules::Floored,
                 TenuousRules::Tenuous,
                 OceanRules::Solved,
+                PopulationRules::Laws,
             ),
             "every 24 hold but the read densities'"
         );

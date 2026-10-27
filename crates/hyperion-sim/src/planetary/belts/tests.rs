@@ -144,6 +144,9 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
                     assert!(hi <= inner || lo >= outer, "{belt:?} overlaps {planet:?}");
                 }
             }
+            for part in belt.components() {
+                check_population(part);
+            }
         }
         let scatterer = scatterer_of(&system);
         let Some(primary) = system.hosts().first() else {
@@ -166,6 +169,37 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
         }
     }
     assert!(belts_seen > 100, "only {belts_seen} belts in the sample");
+}
+
+/// P14.T48.g on a placed system's belt component `part`: its population's moments are finite,
+/// a truncated Rayleigh's mean no more than the untruncated law's and a perihelion-anchored one's
+/// inside 0–1, its ⟨e²⟩ at least the square of its mean, and its encounter speed `U_b`² finite and
+/// positive at both edges and the mid-radius (decision-p14-t48g-opik §4).
+fn check_population(part: &BeltComponent) {
+    let law = part.population();
+    let (mean, square) = (law.mean_eccentricity(), law.mean_square_eccentricity());
+    assert!(mean.is_finite() && square.is_finite(), "{law:?}");
+    match law.parts().eccentricity {
+        population::EccentricityLaw::TruncatedRayleigh => {
+            // To the quadrature's rounding where the truncation is far out in the tail.
+            let untruncated = widths(part.part()).0 * (PI / 2.0).sqrt();
+            assert!(
+                (0.0..=untruncated * (1.0 + 1e-12)).contains(&mean),
+                "{mean} {law:?}"
+            );
+        }
+        population::EccentricityLaw::PerihelionAnchored => {
+            assert!(0.0 < mean && mean < 1.0, "{mean} {law:?}");
+        }
+    }
+    assert!(
+        square >= mean * mean * (1.0 - 1e-12) && square < 1.0,
+        "{square} {law:?}"
+    );
+    for a in [part.inner_edge(), part.radius(), part.outer_edge()] {
+        let u2 = law.encounter_excitation(a);
+        assert!(u2.is_finite() && u2 > 0.0, "U² {u2} at {a:?}: {law:?}");
+    }
 }
 
 /// P14.T21.b and ruling 84 (amended): of FGK hosts of 1–10 Gyr, 0.15–0.30 have a Kuiper-like belt
@@ -229,29 +263,29 @@ fn a_fifth_of_fgk_hosts_have_a_detected_cold_belt() {
     assert!(share(warm) <= 0.03, "detected warm {:.3}", share(warm));
 }
 
-mod solar {
+pub(super) mod solar {
     use super::*;
     use crate::planetary::derive::{BodyHosts, HostLight, PlanetClass, derive_body};
     use crate::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
     use crate::stellar::Composition;
     use crate::units::{AstronomicalUnits, Dex, Kelvin, Kilograms, Megayears, SolarRadii};
 
-    pub(super) const SYSTEM: u64 = 0x0200_0800_2000_0000;
+    pub(in crate::planetary::belts) const SYSTEM: u64 = 0x0200_0800_2000_0000;
 
-    pub(super) fn au(x: f64) -> Metres {
+    pub(in crate::planetary::belts) fn au(x: f64) -> Metres {
         Metres::from(AstronomicalUnits::new(x))
     }
 
-    pub(super) fn in_au(m: Metres) -> f64 {
+    pub(in crate::planetary::belts) fn in_au(m: Metres) -> f64 {
         AstronomicalUnits::from(m).value()
     }
 
-    pub(super) fn system() -> SystemId {
+    pub(in crate::planetary::belts) fn system() -> SystemId {
         SystemId::from_raw(SYSTEM).unwrap()
     }
 
     /// The median disc of the zero-age Sun (P14.T3).
-    pub(super) fn disc() -> DiscProfile {
+    pub(in crate::planetary::belts) fn disc() -> DiscProfile {
         let host = DiscHost::new(
             SolarMasses::new(1.0),
             Dex::new(0.0),
@@ -269,12 +303,12 @@ mod solar {
         .unwrap()
     }
 
-    pub(super) fn plane() -> SystemPlane {
+    pub(in crate::planetary::belts) fn plane() -> SystemPlane {
         SystemPlane::new(Radians::ZERO, Radians::ZERO).unwrap()
     }
 
     /// The eight planets: masses in M⊕, semi-major axes in au and eccentricities.
-    pub(super) fn planets() -> Vec<Neighbour> {
+    pub(in crate::planetary::belts) fn planets() -> Vec<Neighbour> {
         [
             (0.0553, 0.387, 0.206),
             (0.815, 0.723, 0.007),
@@ -290,7 +324,11 @@ mod solar {
         .collect()
     }
 
-    pub(super) fn belts_about(planets: &[Neighbour], disc: &DiscProfile, first: u8) -> HostBelts {
+    pub(in crate::planetary::belts) fn belts_about(
+        planets: &[Neighbour],
+        disc: &DiscProfile,
+        first: u8,
+    ) -> HostBelts {
         let host = BeltHost::new(OrbitHost::Star(0), disc, planets, plane());
         host_belts(SEED, system(), &host, first)
     }
@@ -621,6 +659,16 @@ fn belts_wear_down_as_wyatt_s_model_has_it() {
         outer_edge: solar::au(6.0),
         solids: EarthMasses::new(1.0),
         initial_mass: EarthMasses::new(1.0),
+        population: PopulationLaw::new(population::PopulationParts {
+            part: BeltPart::Main,
+            eccentricity: population::EccentricityLaw::TruncatedRayleigh,
+            inner_edge: solar::au(4.0),
+            outer_edge: solar::au(6.0),
+            floor: Metres::ZERO,
+            ceiling: None,
+            spread: population::AxisSpread::Uniform,
+        })
+        .unwrap(),
     };
     let sun = SolarMasses::new(1.0);
     let t_c = component.collisional_time(sun);

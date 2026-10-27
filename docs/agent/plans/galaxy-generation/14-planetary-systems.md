@@ -30173,3 +30173,156 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
           among a shown section's `NOT YET MODELLED` rows.
   - _P1's wording_ "at or under 629.34 MPa" is corrected in this change, which closes T51.g.a's
     deferred line.
+- **Deviations in P14.T48.g, as built (`p14-belts`, 2026-10-26).** Held at 24 behind
+  `BELT_POPULATION_VERSION` (`planetary/belts/population.rs`; `PopulationRules::{Held, Laws}`, the
+  tests' `with_population_rules`, its arm in `with_every_24_hold`, and the tripwire
+  `the_belt_population_is_held_only_until_its_bump`). Below 24 every belt's recorded moments and
+  every impactor are version 23's to the bit (`the_record_s_moments_are_23_s_below_the_bump`,
+  `below_24_the_populations_move_no_impactor`). No golden moves; two new goldens,
+  `planetary/belt_population` and `planetary/impactors_population`, pin 24's values under the
+  switch at header 23.
+  - _Where it lives._ The laws are a new module, `planetary/belts/population.rs`: `PopulationLaw`,
+    built from `PopulationParts` with `EccentricityLaw` and `AxisSpread`; `BeltPopulation`;
+    `BuildPopulationLawError`; `PERIHELION_SPREAD`. Each `BeltComponent` carries its law
+    (`population()`), and gives the record's means (`mean_eccentricity()`, which reads the hold,
+    and `mean_inclination()`); `Belt::population()` gives both parts' laws. `record.rs`'s
+    `BeltRecord::new` reads `belt.main()`'s means in place of `BeltPart::Main`'s constants (two
+    lines and an import, agreed with p14-wire-24 through main; the hold stays out of `record.rs`).
+    The record keeps its one pair of means, the belt proper's. A scattered part's law is read by
+    the impactors alone.
+  - _The laws as built._
+    - Eccentricity: Rayleigh truncated at P14.T21.c's `eccentricity_limit` without the disc's
+      outer edge (the members' placement guard), held to 0.99. Its floor and ceiling are constant
+      over a component: the planets inside and beyond its midpoint, since no planet orbits inside
+      one. A floor beyond the inner edge is allowed, the population circular inside it.
+    - Semi-major axis: the disc's two-sided exponential taper, each side of the snow line holding
+      its exact share of the component's solids.
+    - Inclination: untruncated Rayleigh. The record's mean inclination therefore does not move at
+      24, where the task's _Moves_ named it; it has no hold.
+    - Quadrature: Gauss–Legendre, 16 nodes on each piece between the edges, the snow line, the
+      law's kinks and (for an encounter) the target, summed in order; 16 × 16 in s and i.
+    - The members keep T21.c's placement: no member orbit moves.
+  - _The scattered component's law_ (the task's test). Against JPL's Small-Body Database (the
+    `TNO` class, fetched 2026-10-26) the perihelion-anchored law is adopted: q uniform from `q_z`
+    to 1.2 `q_z` (`PERIHELION_SPREAD`, the lane's figure, its mean 1.1 `q_z` = 35.9 au the
+    observed median q), `q_z` the outer edge of the outermost planet's chaotic zone, e = 1 − q ÷ a.
+    Between 47.7 and 100 au (2,146 bodies) its mean e is 0.399 against the observed 0.416 (T21.c's
+    Rayleigh of width 0.3, truncated at the same floor: 0.263), and the KS distance of the bodies'
+    e at their a 0.244 (0.459).
+  - _Ruled_ (decision-p14-t48g-opik §7, 2026-10-27).
+    - The perihelion-anchored law is the plan's own branch, and is adopted beyond an outermost
+      planet of at least `BELT_GIANT_MASS`.
+    - Its decisive evidence is SBDB's flat median q, 35.1–36.0 au from 47.7 to 150 au. T21.c's
+      Rayleigh would put it at 39–92 au (Duncan & Levison 1997's scattered disc; Gladman et al.
+      2008's scattering class).
+    - The KS floor, 0.244, is SBDB's 24% of bodies with q < `q_z`, so 1.2 and 1.3 tie. 1.2 is
+      fixed by the median q.
+    - The fraction of e in 0.2–0.6 favours the Rayleigh (0.678 and 0.932, against the observed
+      0.778). It is outweighed and recorded.
+    - "⟨e²⟩ below 0.18" presumed the Rayleigh branch. The anchored branch is tested within 10% of
+      SBDB's 0.191 over 47.7–90 au, the fixture's edge (0.188 as built). The Rayleigh
+      alternative keeps < 0.18 (0.089).
+    - _Deferred:_
+      - a spread scaled by the planet's Hill radius in place of the fixed 1.2 `q_z`;
+      - a gate scaled by the Safronov number and the scattering time (∝ P μ⁻²) against the age,
+        in place of 10 M⊕.
+    - These are figures only: no member orbit, record mean, state or class moves.
+  - _The weighting and the equal-a limit_ (decision-p14-t48g-opik, 2026-10-26).
+    - T48.g weights U_b² by Öpik's collision probability. But its "in the limit of equal a and
+      untruncated laws it gives F5.6's 0.0586 and 0.408", and its first test, hold only for an
+      unweighted mean.
+    - F5.6 took ⟨2 − 2√(1 − e²) cos i⟩ over the laws, unweighted. At A = 1, Öpik's
+      P ∝ U ÷ (sin i |U_x| a^1.5) still favours slow, low-inclination encounters, so the
+      weighted limit is 0.0453 and 0.3205.
+    - _Ruled:_ U_b² is the weighted mean, the mean over impacts that Bottke et al. 1994's
+      5.3 km/s is. The first test checks the U² kernel unweighted against F5.6, and pins the
+      weighted limit, each within 10⁻³.
+    - Ceres at 24 is 5.25 km/s, within 10% of Bottke's 5.3. T48.f's Ceres 5.6 ± 0.1 holds below
+      24 only.
+    - Under the weighted U_b², rule 3's cube moved Mercury to Mars by −0.31 to −0.38 km/s, past
+      T48.f's bounds. As T48.g allows, it is refitted to c·xⁿ: c = 0.993 and n = 2.846 by
+      minimax, all five within 0.085 km/s.
+    - The Moon is 16.77 km/s, +0.08, so R09's `LUNAR_IMPACT_VELOCITY` stays.
+      `LUNAR_ENCOUNTER_SPEED` is refitted so that the Moon's `R_b` stays 1.
+    - Both refits are behind T48.g's hold at 24.
+    - Mars ÷ Moon is 0.624, Pluto 2.41 km/s and Mars's `R_b` about 1.94. Every `R_b` moves by
+      under 1%, except Ceres's, by about −7%.
+    - _Kept:_ the mean of U² (not of U).
+    - _Not reopened:_ `R_b`'s encounter factor, which reads the same U.
+    - These are figures only: no state, class or finiteness changes.
+  - _As built_ (the Rust model's own values, which ruling §4 takes over the prototype's).
+    - The kernel at equal a: 0.058554 and 0.408460 unweighted, 0.045304 and 0.320512 weighted.
+      The Solar main belt's U_b² at its mid-radius, uniform in a between Mars's and Jupiter's
+      zones, is 0.04529 (an independent Python replica, 0.04528); at Ceres's a, 0.04518.
+    - Rule 3's minimax, in Rust on a grid of 0.0005 in c and 0.001 in n:
+      `ENCOUNTER_APPROACH_COEFFICIENT` = 0.992 and `ENCOUNTER_APPROACH_EXPONENT` = 2.843 (the
+      prototype's 0.993 and 2.846). The greatest miss is 0.0837 km/s, the Moon's; the cube's is
+      0.378. The comets' branch with no belt, 0.30² + (1 − a ÷ a_g)³, keeps its cube: it reads no
+      belt's U_b².
+    - _The 24 targets._ The five bodies are held within 0.1 km/s of T48.f's figures as built,
+      41.43, 25.68, 19.87, 16.68 and 10.55 km/s (F5.5's JPL values; main, 2026-10-26), not of
+      the rounded 41.4 to 10.6 of T48.f's test, which no c·xⁿ meets within 0.1 (best 0.1004; Mars
+      is 0.131 below 10.6). Below 24 T48.f's tests on the rounded figures stand. At 24: Mercury
+      41.347 (−0.083), Venus 25.749 (+0.072), Earth 19.938 (+0.070), the Moon 16.768 (+0.084),
+      Mars 10.469 (−0.081); Mars ÷ the Moon 0.624; Pluto 2.414 (+9.7% of 2.2); Ceres 5.256. The
+      generator's own Solar belts, whose a follows the solids, give Earth 19.939 and Mars 10.470.
+    - _V☾._ `POPULATION_LUNAR_ENCOUNTER_SPEED` is 17,004.271 m/s (+0.49%), a second constant
+      that the hold chooses through a private `Impactors::lunar`, read with the source under one
+      read of the rules, so that below 24 every rate keeps 23's bits. Every `R_b` moves at 24, at
+      least by V☾'s −0.49%, comet-struck bodies included: Mercury −0.7%, Venus −0.3%, Earth
+      −0.3%, Mars −1.0% (1.939, +1.0% of Ivanov's 1.92), Ganymede −0.5%, Pluto −2.3% (29.43),
+      Ceres −7.4% (124.3). This replaces §5's "every R_b moves by under 1%, except Ceres's".
+    - _Ceres's speed_ is an rms, √(U² v_K² + v_esc²), and Bottke's 5.3 a probability-weighted
+      mean over the belt's pairs. Ceres's own weighted mean speed is about 4.8–5.1 km/s,
+      3–9% below 5.3: inside the 10%, not within 1% (the science review). The 5.3 is from
+      memory, its abstract unread; Dahlgren 1998's whole-belt 5.28 km/s, as Cibulková et al. 2014
+      (Icarus 241, 358, §4) quote it, is the figure seen.
+    - _The asteroid belt's ⟨e²⟩._ Within 5% of 0.020 at F5.6's zones, Mars's and Jupiter's about
+      circular orbits (1.55–4.28 au): 0.0196. The Solar System input's generated belt, with
+      P14.T21.a's eccentric zones (1.69–4.03 au) and its a as the solids lie, gives 0.0187, 6.3%
+      low, tested in 0.017–0.020; its mean e is 0.1221 against the untruncated 0.1253 (−2.6%).
+      The Kuiper belt proper's mean e is 0.1150 (−8.3%), its ⟨e²⟩ 0.0163.
+  - _The impactors' API._ `SourceBelt` gains a public field `population: Option<BeltPopulation>`,
+    which `From<&Belt>` fills; `None` reads each part's untruncated Rayleigh laws, uniform in a,
+    with no floor or ceiling (`SourceBelt::population_of`). `ImpactorSources::new` checks each
+    law against its belt's annuli (`BuildImpactorSourcesError::BeltPopulation`), which refuses
+    nothing the generator builds. A perihelion-anchored law needs a positive floor
+    (`BuildPopulationLawError::Floor`). `belts::chaotic_zone` is `pub(crate)` for the tests.
+  - _The census_ (`under_every_24_hold_the_sample_s_belt_moments_and_impacts_are_stated`, ignored,
+    run by name): the first 200 systems of `system::tests::sample()`, generated whole under every
+    hold at 24, with T48.g's hold set back and in force (55 s, debug).
+    - 348 belts: the recorded mean e at 24 over 23's has median 0.879, 5th percentile 0.150, least
+      0.0012 (the thin bands below) and most 1.000. No mean inclination moves.
+    - 3,157 bodies with figures. None changes rule or goes non-finite. The 398 struck by the
+      comets keep their velocity, their `R_b` and mapped N(1 km) −0.49% (V☾).
+    - Velocities, least / median / most: belt-proper members (1,644) −19.1% / −7.0% / −0.5%;
+      scattered members under the Rayleigh (293) −21.0% / −6.4% / −2.1%; scattered members under
+      the anchored law (64) −16.7% / +6.6% / +85.2%; other bodies in an annulus, mostly members'
+      moons (131), −18.0% / −7.0% / +33.0%; rule 3 (627) −18.1% / −0.7% / +0.6%.
+    - The mapped N(1 km) moves from −42% to +399% (the anchored members').
+  - _Deferred findings (2026-10-13 rule)_, from P14.T48.g:
+    - _A belt bounded by its own zones is all but circular._ An annulus whose floor is its inner
+      edge and whose ceiling (or the next zone) lies close beyond its outer edge holds only
+      orbits of e below its relative width: the census's coldest belts, a Kuiper-like band of
+      0.151–0.152 au beyond a hot planet, a gap belt of 4.311–4.329 au, have mean e 1.5 × 10⁻⁴ to
+      7 × 10⁻⁴. It is the truncated law's own consequence, and P14.T21's placement of such thin
+      bands is the question.
+    - _A scattered disc far beyond an inner giant_ is perihelion-anchored at the giant's zone, so
+      at tens of au its bodies are on e of 0.9 and more, and their members strike up to 85% faster
+      than at 23. Whether a giant inside a few au keeps such a disc for gigayears is the deferred
+      gate's (§7): a Safronov- and scattering-time-scaled gate.
+    - _1.3 fits the bodies beyond `q_z` better_ than 1.2 (KS 0.126 against 0.250 over the 1,622
+      bodies with q ≥ `q_z`; their median q 36.9 au, 1.13 `q_z`), and SBDB's detection bias
+      favours low q, so the true median is if anything higher: for the Hill-scaled spread.
+    - _The ⟨e²⟩ match depends on the spread in a._ The anchored law's ⟨e²⟩ is 0.161 at SBDB's
+      own a, 0.223 uniform in a and 0.188 under the disc's taper: the 10% test reads the disc's
+      solids against SBDB's detection-biased spread. The mean e and the KS compare at each body's
+      a, like for like.
+    - _Cost._ An encounter speed runs about 25,000 kernel evaluations (up to six pieces × 16 a
+      nodes × 256 in e and i) with one allocation, once for each body under rule 1 or 3; rule
+      3's mid-radius value is not cached per belt. For P14.T54.b.k's cost audit.
+  - _For P14.T31_ (p14-events, whose focusing reads the encounter speed): from 24 a body's
+    encounter factor is `Impactors::encounter_speed()` (v∞ with the escape speed's focusing),
+    with v∞ = U v_K and U² = `ImpactorSource::excitation()` + the body's own e² + sin² i. A belt
+    part's own U_b² at any a inside its annulus is `PopulationLaw::encounter_excitation`, over
+    `Belt::population()` or `SourceBelt::population_of`, read under the rules in force.
