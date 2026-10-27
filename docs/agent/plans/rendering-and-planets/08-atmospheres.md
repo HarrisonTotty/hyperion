@@ -176,8 +176,11 @@ export interface AtmosphereMedium {
 }
 export type AtmosphereRegime =
   | { readonly kind: "thin" }
-  | { readonly kind: "thickScattering"; readonly bakeKey: string }
-  | { readonly kind: "cloudDeck"; readonly deckAltitudeM: number; readonly bakeKey: string };
+  | { readonly kind: "thickScattering" }
+  | { readonly kind: "cloudDeck"; readonly deckAltitudeM: number };
+// As built by R08.T13.c2 (`thick/regime.ts`), without `bakeKey`, which R08.T14 adds with its
+// bake. `AtmosphereMedium`'s `regime` above is not added yet: `classifyRegime(medium, cover)`
+// gives it beside the medium, and `medium.ts` is untouched (Risks, "Deviations in T13.c2").
 // `DensityProfile`'s `tabulated` variant: R08.T3.a. `BAKE_WAVELENGTHS_NM`: R08.T4.a.
 
 export type TemperatureProfile =
@@ -491,17 +494,30 @@ module R12 reads for this plan's ladder entries.
 
 ```ts
 export interface ThickBoundary {
-  readonly omega: Float64Array; // single-scattering albedo grid
-  readonly g: Float64Array; // asymmetry grid
-  readonly tauStar: Float64Array; // vertical extinction τ* at each (ω, g), row-major
+  readonly omega: Float64Array; // single-scattering albedo grid, the sweep's order: 1 first
+  readonly g: Float64Array; // asymmetry grid, ascending
+  readonly tauStar: Float64Array; // vertical extinction τ* at each (ω, g), row-major by ω
+  readonly albedoStar: Float64Array; // A*: the floor scan's least ground of a ground miss, else 1
+  readonly kind: ReadonlyArray<"drift" | "reach" | "top">; // what set each cell's τ* (ruling 5)
 }
 export const THICK_MS_BOUNDARY: ThickBoundary; // measured in R08.T13, Design note 9
 export const CLOUD_DECK_SPLIT_OPTICAL_DEPTH = 10; // the brainstorm's, open question 3
 export const BAKE_CEILING_S = 5; // thick/bake.ts: per world on the UHD 620 host, Design note 9
+export interface CoverDeck {
+  readonly opticalDepth550: number; // its modes' at their coverage
+  readonly baseAltitudeM: number;
+  readonly topAltitudeM: number;
+}
 export interface BodyCover {
   readonly cloudFraction: number; // P14.T24.b's, 0–1
+  readonly decks: ReadonlyArray<CoverDeck>; // P14.T24.c's, in the inventory's order, deepest first
+  readonly envelope: boolean; // a gas envelope, split at its floor
 }
-export function classifyRegime(medium: AtmosphereMedium, cover: BodyCover): AtmosphereRegime; // per body, Design note 9
+/** Per body (Design note 9): the deck rule first (an envelope at its floor; a deck past τ(550) 10
+ * under a cloud fraction of 1 at the shallowest such deck's top); then per channel, thick where
+ * τ > τ*(ω̄, ḡ) (the depth line) or τ ≥ 1/32 and the ground's albedo ≥ A*(ω̄, ḡ) (the ground
+ * line), over every term but the absorbers, a table's forward delta taken out by similarity. */
+export function classifyRegime(medium: AtmosphereMedium, cover: BodyCover): AtmosphereRegime;
 /** Everything of a bake but the band (R08.T14.b, as built): the spectral column's optics in the
  * bins, the layers, and each light's exponential sums and conversion. */
 export function prepareBake(
@@ -1239,7 +1255,14 @@ Names are those the owning plans give; the owning plan is authoritative.
      boundary τ*(ω, g) on its sweep grid, the vertical extinction optical depth at which the
      analytic term first leaves the 5% metric, and stores it as `THICK_MS_BOUNDARY`, a small 2-D
      table. A column is thick when, on its worst channel, its vertical τ exceeds τ*(ω̄, ḡ), where
-     ω̄ = τ_s/τ and ḡ is weighted by scattering optical depth. Similarity theory suggests that
+     ω̄ = τ_s/τ and ḡ is weighted by scattering optical depth; or when that channel's τ is at
+     least the sweep's floor, 1/32, and the ground's albedo in it is at least A*(ω̄, ḡ) (ruled
+     2026-10-27, "#107's floor misses", item 3). A*(ω, g) is the floor scan's: the least grey
+     ground, of 0, 0.02, 0.05, 0.1, 0.2, 0.5 and 0.8 beside the walk's 0.3, over which some
+     geometry that passes at the black ground already misses at τ 1/32, or 1 where none does.
+     Hillaire's ground bounce, scattered as if isotropic, reads a forward-peaked medium's sky
+     about 1 + cA too bright away from the sun, which no τ shrinks; the ground is the body's own,
+     so the label does not depend on its stars. Similarity theory suggests that
      the boundary may collapse onto constant τ(1 − ωg) (van de Hulst 1980; Joseph, Wiscombe and
      Weinman 1976; King and Harshvardhan 1986). But that holds for fluxes far from boundaries, not
      for the near-boundary radiance where Hillaire's term fails. So a single scalar is adopted
@@ -16101,6 +16124,204 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _The default compare's sample_ recomputes three of the seven twins, `earth-ozone-slab`'s,
     `mars`'s and `saturn-oblate`'s: a change that moves only another (`earth`'s, one slice, the equal
     or placed steps) shows in the whole compare alone.
+- **Deviations in T13.c2, as built** (2026-10-27; `view/atmosphere/thick/regime.ts` and
+  `regime.test.ts` (new); `view/atmosphere/reference/`: `sweepBoundary.ts`, `sweepBoundary.test.ts`
+  and `sweepBoundary.json` (new), `twin.ts` and `twin.test.ts`; `.prettierignore`. Rulings:
+  `decision-r08-t13-scope.md`, rulings 1, 5, 6, 9 and 12, "#107's twin ground", "#107's floor misses"
+  and "#112's floor refusals", 2026-10-26 and 2026-10-27).
+  - _`THICK_MS_BOUNDARY` as built_: `ThickBoundary` gains `albedoStar` and `kind`; its rows are ω in
+    the sweep's order (1, 0.99, 0.95, 0.9, 0.8, 0.6, 0.4), its columns g ascending, row-major by ω;
+    τ\* as the exact grid value 2^(k ÷ 2), A\* the scan's ground. The table is T13.b's, every cell
+    a `drift`. Its doc comment carries the table itself (τ\*, A\* a cell), ruling 5's definitions,
+    the eight files, 3d1cf4c8, the binary's SHA-256, the walk's hand 0.3, the bright column left
+    out and the T4.a note.
+  - _Names beside the Provides_: `regime.ts` also exports `BoundaryKind`, `BoundaryReading` and
+    `readThickBoundary(omega, g, boundary?)`, `BOUNDARY_FLOOR_OPTICAL_DEPTH` (1/32) and
+    `BOUNDARY_TOP_OPTICAL_DEPTH` (8), `cornetteShanksMeanCosine`, `ChannelRegime` and
+    `regimeChannels`, `CoverDeck`, `CLEAR_COVER`, `ENVELOPE_FLOOR_CHANNEL` and `envelopeFloorM`;
+    `twin.ts` exports `TwinMultipleScattering`. The plan's text changed with them: Provides' thick
+    block, the `AtmosphereRegime` sketch (without `bakeKey`, with a note) and Design note 9's
+    ground line and A\* ("#107's floor misses", item 3).
+  - _`BodyCover`, wider_: `decks` and `envelope` are required, so R11's `classifyRegime(medium,
+cover)` calls supply them (flagged for R11's re-validation).
+  - _The recompute_ (`sweepBoundary.ts`, no import from `test/`): each traced point's geometries as
+    `gate.ts`'s readings (the grey channel in all three, channel 1 read, the case's images, N_q
+    ⌊N ÷ 4⌋), the client's radiance the case's twin row; then `sweep.rs`'s walk rule for rule
+    (`walk_column`, `classify`, `sort_floor`, the near-sun listing at VROOM points, `walkPast`), its
+    rules tested on their own (the climb to the top, the half-octave, a floor miss, a refusal as
+    `reach`, a listed refusal, the cap, the walk through τ 1, the floor's sort, A\* 1). **All 50
+    cells agree with the walk** (the 49 and the bright column), in kind, τ\*, A\*, points, floor,
+    fixed, ground, unsorted and listed misses, and all 566 points in their failing and refused sets.
+    Every echoed twin equals its case's row to seven figures, so no case was re-blessed after its
+    trace. No refusal is left in the outputs, and none in the recompute, so no `cap` appears. 109
+    geometry traces took three or more doublings (59 three, 22 four, 15 five, 10 six, 3 seven), 88
+    of them passing and 21 missing: the heavy-tail suspects, recorded (`heavyTail`).
+  - _The read as built_ (`regimeChannels`): per channel over every term but the absorbers, each
+    term's column by `columnLengthM` of its own density (the kernels' resampling of a tabulated
+    density or phase, `kernelMedium`, not repeated). A table's forward delta comes out by
+    similarity, τ_s(1 − f) and (g − f) ÷ (1 − f), the delta's mean cosine (1 − 8.3 × 10⁻⁸) taken
+    as 1; held to `withoutForwardDelta`'s term to 10⁻⁶ and classified alike over a ladder of depths.
+    This lowers T10.a's whole-extinction count by f τ_s (Mars's dust: 0.5079 to 0.5070 in red). ḡ
+    is each term's mean cosine as drawn, weighted by τ_s: Rayleigh's and `none`'s 0, a table's
+    first moment (`regime.ts` repeats `forwardPeak.ts`'s Gauss–Legendre quadrature node for node,
+    held to `phaseTableAsymmetry` to 10⁻¹⁴), and Cornette and Shanks's own 3g(4 + g²) ÷ (5(2 + g²)),
+    held to a 96-node quadrature of `phaseAt` to 10⁻⁹. The clamps: ω̄ below 0.4 reads the 0.4 row,
+    ḡ held to [0, 0.9] (`asymmetryOffGrid` says so), τ > 8 thick, a channel of τ 0 thin with ω̄ 1.
+    τ\* is bilinear in ln τ\* and A\* bilinear, each returning a node's value to the exponential's
+    rounding. The deck rule: an envelope is `cloudDeck` at its floor; a cover of cloud fraction ≥ 1
+    with a deck of τ(550) > 10 is `cloudDeck` at the shallowest such deck's top (the upper medium's
+    reflecting boundary, a choice); a deck of exactly 10 does not split.
+  - _The envelope's floor at 550 nm_: the medium has no 550 nm channel, so the floor is read in
+    green, at the fitted 544 nm (`ENVELOPE_FLOOR_CHANNEL`), at whole extinction over every term but
+    the absorbers (whose depth is each light's curve of growth, so that counting it would put the
+    floor where the body's stars say, as for the depth line), by bisection; the medium's ground
+    where the column is shallower than 10. Rayleigh's
+    τ is about 4.6% higher at 544 nm (λ^−4.08; Bodhaine et al. 1999, eq. 30, by the science check),
+    the most any term moves it, so the floor lies at most about 0.045 H higher than at 550 nm.
+  - _The types_: `AtmosphereRegime` is `regime.ts`'s, without `bakeKey` (R08.T14's); `BodyCover`
+    gains `decks` (`CoverDeck`: τ(550), base and top altitudes, in the inventory's order) and
+    `envelope`; `CLEAR_COVER` is a clear sky over a ground, how the cases were traced.
+    `AtmosphereMedium` gains no `regime` field: `medium.ts` is untouched. `provisionalThick` and
+    `PROVISIONAL_THICK_OPTICAL_DEPTH` are `@deprecated`, naming `classifyRegime` and T13.d.
+  - _The zeroed twin_ (`TwinOptions.multipleScattering`, `drawn` by default): every band's
+    multiple-scattering layers replaced by zeros of their shape after the tables are built, so the
+    sky view, the march, aerial perspective and the lit ground's sky irradiance (built from the same
+    layers by `oblateIrradianceTwin`) take single scattering alone; no read keeps its multiple
+    scattering. Hillaire's ground bounce, which a ground view takes only through Ψ_ms, goes with
+    it, so the multiple-scattering share includes it. The default reads the built tables themselves: `twin.test.ts`'s earlier tests,
+    `sweepCases.test.ts`'s default compare and `caseGate.test.ts` pass unchanged, and no case or
+    `caseGate.json` was re-blessed.
+  - _The attribution_ (`raises` in the record; "#112's floor refusals", item 3): at each failing
+    geometry of the raises' points, L_ref, σ ÷ L, L_twin ÷ L_ref, the bound T + 4σ as a ratio, the
+    miss past it (of L_ref), the miss |ΔL| ÷ L_twin, the surface share and the multiple-scattering
+    share M ÷ L_twin = (L_twin − L_zeroed) ÷ L_twin, then item 3's comparison (`missAgainstShare`,
+    larger or smaller) and what it can say (`attribution`, `attributionOf`). Read as built, by the
+    science check: a miss past the share is the kernels' only where the twin is too bright, its
+    single scattering alone then outshining the reference; too dim, it says only that the
+    reference's multiple scattering is over twice M, which nothing bounds, so it is `undetermined`;
+    a miss within the share is the analytic term's, not excluded rather than shown. None of the 560
+    rows is the kernels'; the 12 past their share are all too dim.
+  - _The four raises_ (each recorded, not blocking; main rules after the report):
+    1. _Earth's six cells_ at τ\* 1/8. Each drift's views and the miss past the bound (of L_ref),
+       against the twin's multiple-scattering share: (1, 0) `ground-s80-v75-a90` 0.92382 against
+       0.92755, 0.0037, share 0.270, and `-v85-a90` 0.92486 against 0.92826, 0.0034, 0.282; (1, 0.3)
+       `ground-s60-v85-a0` 0.9354 against 0.9361, 0.0008, 0.180; (0.99, 0) `-v75-a90` 0.0001, 0.268,
+       and `-v85-a90` 0.0085, 0.280; (0.99, 0.3) `-v85-a90` 0.0086, 0.267; (0.95, 0) `-v75-a90`
+       0.0028, 0.261, and `-v85-a90` 0.0118, 0.272; (0.95, 0.3) `-v85-a90` 0.0034, 0.260. Every view
+       is a ground view (cone share 0, surface share 0), the twin 7–9% of itself below the
+       reference against a multiple-scattering share of 18–28%. At τ ¼ the six cells fail 15–21
+       geometries each, the twin 0.86–0.93 of the reference against shares 0.15–0.61: all 120 rows
+       within their share, the analytic term's. Earth classifies `thickScattering` by the depth line on every channel
+       (τ ÷ τ\* 1.06, 1.62 and 3.15; A\* 0.13–0.43 over its ground of 0.1). Lean: accept the
+       measured class. c1's own Earth gate misses (183/109/68) where this boundary says the
+       analytic term drifts, so `ATMOSPHERE: APPROXIMATE` until T14.d's bake passes is the label's
+       meaning; Earth stays thin only by changing the metric, which Design note 10 refuses.
+    2. _Mars thick by depth_: τ ÷ τ\* 5.42, 5.15 and 4.54 (τ 0.507, 0.501 and 0.497 after the
+       similarity, ω̄ 0.97–0.83, ḡ 0.71–0.76, τ\* 0.094–0.110); its 0.25 ground is past A\* 0.02 on
+       every channel, so both lines hold. c1's off-sun views: 303 comparisons, 40 pass, 178 miss
+       and 85 refused. Of its 12 raise points' 325 rows, 56 are drifts (48 within their share; the
+       8 others all `ground-s60-v85-a0`, 25° from the sun, the twin 0.87–0.92 of the reference
+       against a share of 0.07–0.10, too dim past it: undetermined, an isotropic Ψ missing the
+       multiply scattered forward aureole or the kernels) and 269 floor misses (267 ground misses,
+       up to 1.95 times bright, and 2 fixed), all within their share. Lean: accept; the depth line
+       agrees with the ground line and with c1's off-sun misses, and the forward view is a finding
+       for T14.d's gate.
+    3. _`saturn-oblate`_: `thickScattering` by depth on every channel, τ ÷ τ\* 1.14, 2.28 and 5.82
+       (ω̄ 1, ḡ 0, τ\* 1/8), its ground of 0.3 under A\* 1. c1's Saturn gate: 197/255/22, its blue
+       ground views 0.51–1.04 and its twilight 1.2–3.9 times bright. Lean: accept; the sweep's
+       (1, 0) column is Saturn's gas, and c1's misses are where it says the analytic term drifts.
+    4. _(1, 0) at τ 1/8_: the two views' miss is 8.2% and 8.1% of the twin against its
+       multiple-scattering share of 27.0% and 28.2% (surface share 0, cone share 0): the analytic
+       term's by the rule. The column then fails 21, 43 and 49 views at ¼, ½ and 1 (all but four
+       within their share; the four, at τ 1, the twin 0.42–0.60 of the reference against shares
+       of 0.64–0.93, too dim past it: undetermined). Lean: Hillaire's term, which the bake
+       cures; the zeroed twin cannot separate the kernels' grazing reads from it, but the miss is
+       absent at the floor and grows with τ, as an isotropic multiple-scattering error does.
+  - _The kept bodies' classes_ (clear, over each case's ground; per channel τ, ω̄, ḡ, τ\*, A\*):
+    `earth` and `earth-ozone-slab` alike, red 0.132, 0.951, 0.387, 1/8, 0.135; green 0.203, 0.960,
+    0.311, 1/8, 0.192; blue 0.394, 0.972, 0.213, 1/8, 0.433, ground 0.1, by depth. `mars` red
+    0.507, 0.975, 0.706, 0.0936, 0.02; green 0.501, 0.926, 0.722, 0.0973, 0.02; blue 0.497, 0.829,
+    0.762, 0.1096, 0.02, ground 0.25, by both. `saturn-oblate` 0.142, 0.285 and 0.728, ω̄ 1, ḡ 0,
+    1/8, 1, ground 0.3, by depth. None reads ω̄ below the grid or ḡ past 0.9.
+  - _The label changes for T13.d_ (`labels` in the record; every thick regime carries
+    `APPROXIMATE`, as the provisional line did):
+
+    | Medium                                      | `provisionalThick` | `classifyRegime`  | Line                  | Label             |
+    | ------------------------------------------- | ------------------ | ----------------- | --------------------- | ----------------- |
+    | `earth`, `earth-ozone-slab` (kept fixtures) | thin               | `thickScattering` | depth, every channel  | gains APPROXIMATE |
+    | `mars` (kept fixture)                       | thin               | `thickScattering` | depth and ground, all | gains APPROXIMATE |
+    | `saturn-oblate` (kept fixture)              | thin               | `thickScattering` | depth, every channel  | gains APPROXIMATE |
+    | the generated Earth (record)                | thin               | `thickScattering` | depth, blue           | gains APPROXIMATE |
+    | Earth-class air at 0.999 of τ 1             | thin               | `thickScattering` | depth, every channel  | gains APPROXIMATE |
+    | Earth-class air at 1.001 of τ 1             | thick              | `thickScattering` | depth, every channel  | the same          |
+    | Venus-class medium, Titan-class column      | thick              | `thickScattering` | depth (and ground)    | the same          |
+    | Venus at 92 and 58 bar (records)            | thick              | `thickScattering` | depth, every channel  | the same          |
+
+    Every medium is classified clear (no deck in its cover); a cover carrying the Venus-class
+    medium's τ 30 deck at a cloud fraction of 1 would make it `cloudDeck` (`regime.test.ts`).
+
+  - _The drift cells' surface shares_: the first failing geometry of all 50 drift cells has a cone
+    share of 0, so a surface share of 0: none meets the ground (b's table). Of the first that is not
+    a floor miss, four meet it: `limb-0.3H` at (1, 0.5), share 0.122, and at (0.9, 0.5), 0.075;
+    `limb-0.1H` at (0.8, 0.5), 0.044; `disc-p85` at (0.4, 0.65), 0.435.
+  - _The collapse_: the 49 cells' τ\*(1 − ωg) run from 0.0088 at (1, 0.9) to 0.5 at (0.4, 0), 3.0
+    octaves from their geometric mean of 0.062, past one half-octave: no collapse, the table stays.
+  - _The T4.a depth note_ (computed in `regime.test.ts`): (1, 0)'s τ\* 1/8 is 0.49 of Earth's dry
+    air on its worst channel (blue, τ 0.258), inside the two to three columns past which no three
+    wavelengths hold (R08.T4.a's 0.0106 and 0.0151 in u′v′); recorded in the constant's doc comment.
+  - _T13's tests as amended_: "Earth and Mars classify `thin`" reads as "classify as the table and
+    A\* predict, pinned at their measured class" (`decision-r08-t13-scope.md`, ruling 12 as amended
+    on 2026-10-27, after #112's report); the tests' titles say main rules on Earth's, Mars's depth
+    line and `saturn-oblate`'s after the report. The two-layer media are a Rayleigh layer over a
+    g 0.7 aerosol (H 8 km over 1.2 km; ω̄ 0.97, ḡ 0.40), `thin` at 0.99 of their τ\* and
+    `thickScattering` at 1.01, over a black ground.
+  - _The record_ (`sweepBoundary.json`, 340,287 B, through `expectCommittedTable` from a `{}`
+    placeholder, in `.prettierignore`): a head (the writer, the twin's settings, `gate.ts`'s
+    constants, the files' hashes, the tables' columns), the agreement, the cells, the drift cells,
+    the raises, the bodies with c1's headlines, the labels, the heavy-tail suspects, the points, and
+    last the twin's 1,143 values, a key a line (90 twins, 30 raise points). By default the record is
+    rebuilt from its own values and held byte for byte, and one zeroed value and one surface share
+    are recomputed. The hard checks are the blockers (none), the record's currency and its coverage.
+  - _Times_ (an i7-8665U, 4 cores and 8 threads, the 1-minute load beside each; another lane's
+    tests ran at times, so they are provisional): the bless, one worker, `nice -n 10` in a 4 GB
+    scope, 426 s at a load of 0.3 rising to 3.4, and again after the attribution's column 497 s
+    at 2.5 rising to 4.7; the whole run (`HYPERION_SLOW_TESTS=1`, every twin value computed and
+    the record held byte for byte) 514 s at 2.4 rising to 3.7. The default run of `regime.test.ts`
+    and `sweepBoundary.test.ts` together 12.5 s at 1.5 (22.9 s at 4.3–4.7), under the 60 s budget;
+    `twin.test.ts` whole 85 s at 1.5–2.0, its new zeroed block about 20 s of it; the acceptance's
+    command (`regime.test.ts`, `reference/`, `gate.test.ts` and `assembleThick.test.ts`, 4 workers)
+    11 files and 319 tests in 187 s at 4.0 rising to 6.6.
+- **Deferred findings (2026-10-13 rule)** (R08.T13.c2). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Earth, Mars and `saturn-oblate` classify thick by depth_ on every channel: main rules (above).
+    Routed so, every Earth-class body carries `APPROXIMATE` until T14.d's bake passes, and comes
+    under the bake's `BAKE_CEILING_S`, where the brainstorm's "Atmosphere" section expects the
+    analytic term replaced only at Venus-class depths and for Titan-class haze.
+  - _The ground line on generated bodies_: a generated body's ground albedo is its spherical
+    albedo, clouds included (T10.a; about 0.3 on an Earth-class world), so once aerosols reach the
+    wire the ground line (A\* 0.02–0.2 from g 0.3) trips on a cloud-brightened ground: for T13.d,
+    or the task that puts the ground's own albedo on the wire.
+  - _Every kept reference case and the generated Earth gain `APPROXIMATE`_ when T13.d moves the call
+    sites: the label changes above.
+  - _Mars's forward view_ `ground-s60-v85-a0` misses by more than the twin's multiple-scattering
+    share at all 8 of its Mars raise points, the twin 8–13% dim: undetermined, for T14.d's gate.
+  - _The attribution's dim case_: item 3's rule settles only a too-bright miss. A too-dim miss past
+    the share (the 12 rows, (1, 0)'s τ 1 low-sun views at 0.42–0.43 of the reference among them) is
+    recorded `undetermined`; a reference traced in single scattering alone, against L_zeroed,
+    would settle it.
+  - _A\* read bilinearly_ across a cell whose corners hold the placeholder 1 (no miss through 0.8)
+    and a measured 0.2 gives values (0.6 at ḡ 0.15) that nothing measured supports; each A\* is
+    also the upper end of its bracket of scan grounds. The ruling reads it bilinearly; the cell's
+    least corner would be the conservative read (the science check).
+  - _A single-layer boundary on stratified columns_: τ\*(ω, g) was measured on one exponential layer
+    on Earth's sphere, and is read through column means ω̄ and ḡ for stratified media (an aerosol
+    under a gas) and other figures, an extrapolation the two-layer test checks only arithmetically.
+  - _Heavy-tail suspects_: 109 geometry traces passed their scaling check only after three to seven
+    doublings, 21 of them missing; recorded, no verdict changed.
+  - _The kernels' resampling_ of a tabulated density or phase is not repeated in the read (a change
+    `tables.test.ts` bounds); a medium classified at its line could differ from its drawn medium's.
+  - _The deck's altitude_ is its top, the upper medium's reflecting boundary, a choice R08.T15 may
+    revisit.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:
