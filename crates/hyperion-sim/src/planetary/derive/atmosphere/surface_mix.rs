@@ -64,7 +64,7 @@ use crate::planetary::chem::partition::{
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
 use crate::planetary::derive::photometry::area_mix::{
-    self, AreaMixWeathering, HostShade, RayleighFloorRules, Regolith,
+    self, AreaMixWeathering, HostShade, LidWeathering, RayleighFloorRules, Regolith,
 };
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
@@ -1165,22 +1165,21 @@ pub(crate) mod floor_read {
 /// its area mix and its bare regolith read (P14.T51.b, P14.T54.a, P14.T54.b.e; the cold traps'
 /// bare regolith is its [`Regolith::bond`] in the airless state): with no lid, the passes'
 /// regolith provider's on the material `material` (`of_material`, the material's rule); with a
-/// lid `lid` and no maturity, its row by the stand-in ([`Regolith::with_lid`]); and with a lid and
-/// the maturity m and mean surface temperature of `weathered`, its row weathered at m where it
-/// lies ([`Regolith::weathered_lid`]). A pass computes it before it publishes its condensates.
+/// lid of `lid` and no maturity, its row by the stand-in ([`Regolith::with_lid`]); and with a lid
+/// and the pass's maturity m, mean surface temperature, surface age and state, its row weathered
+/// at m where it lies, or, an airless silicate lid on a surface younger than a regolith, capped
+/// ([`Regolith::weathered_lid`]; decision-p14-t54b-e-findings §A.5). A maturity comes only with a
+/// lid, which it weathers. A pass computes it before it publishes its condensates.
 #[must_use]
 pub(crate) fn pass_regolith(
     of_material: &RegolithOf<'_>,
     material: SurfaceMaterial,
-    lid: Option<&CrustLid>,
-    weathered: Option<(f64, Kelvin)>,
+    lid: Option<(&CrustLid, Option<LidWeathering>)>,
 ) -> Regolith {
-    match (lid, weathered) {
-        (None, _) => of_material(material),
-        (Some(lid), None) => Regolith::with_lid(lid.row(), material),
-        (Some(lid), Some((maturity, temperature))) => {
-            Regolith::weathered_lid(lid.row(), material, maturity, temperature)
-        }
+    match lid {
+        None => of_material(material),
+        Some((lid, None)) => Regolith::with_lid(lid.row(), material),
+        Some((lid, Some(at))) => Regolith::weathered_lid(lid.row(), material, at),
     }
 }
 
@@ -1324,7 +1323,7 @@ fn surface_and_cloud(
 ) -> SurfaceMix {
     let Some(gravity) = surface_gravity(inputs) else {
         // A body of no mass or radius holds nothing, and takes no lid.
-        let regolith = pass_regolith(surface.regolith, inputs.material, None, None);
+        let regolith = pass_regolith(surface.regolith, inputs.material, None);
         return SurfaceMix {
             albedo: regolith.bond(air.state, shade.bands()).bond,
             cloud_fraction: 0.0,
@@ -1340,18 +1339,24 @@ fn surface_and_cloud(
                 given_partition(air, inputs, surface, (climate_of, gravity)),
                 None,
                 (Vec::new(), Err(NoMaturity::no_regolith())),
-                pass_regolith(surface.regolith, inputs.material, None, None),
+                pass_regolith(surface.regolith, inputs.material, None),
                 Err(NoColdTraps::ClimateGiven),
             ),
             PassClimate::Spun(spun) => {
                 let pending = spun_partition(air, inputs, spun);
                 let lid = spun_lid(air, inputs, spun, pending.conditions.as_ref());
                 let maturity = pass_maturity(air, spun, lid.as_ref());
-                let at = maturity
-                    .as_ref()
-                    .ok()
-                    .map(|maturing| (maturing.weathering.maturity(), air.surface_temperature));
-                let regolith = pass_regolith(surface.regolith, inputs.material, lid.as_ref(), at);
+                let at = maturity.as_ref().ok().map(|maturing| LidWeathering {
+                    maturity: maturing.weathering.maturity(),
+                    temperature: air.surface_temperature,
+                    surface_age: maturing.parts.surface_age,
+                    state: air.state,
+                });
+                let regolith = pass_regolith(
+                    surface.regolith,
+                    inputs.material,
+                    lid.as_ref().map(|lid| (lid, at)),
+                );
                 // The cold traps' field, of this pass's own inputs, between its regolith and its
                 // publish (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (b)).
                 let cold_traps = pass_cold_traps(air, spun, &pending, (&regolith, shade));

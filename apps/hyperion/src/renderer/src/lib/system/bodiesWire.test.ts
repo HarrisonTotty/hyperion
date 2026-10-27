@@ -1680,10 +1680,9 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     ]);
   });
 
-  it("reads a tenuous body's air: its gases under 100 Pa, with their mixture figures", () => {
-    // P14.T53.c's `tenuous` state, as the server sends it from 24 (P14.T54.b.h): a bare surface
-    // under a thin air held by its ice, its pressure, gases, μ and c_p ÷ R its air's own (a
-    // Pluto-like 1 Pa of nitrogen with a trace of methane).
+  it("reads a tenuous body's air: its pressure, its gases and their mixture figures", () => {
+    // P14.T53.c's `tenuous` state's air members, as the server sends them from 24 (P14.T54.b.h):
+    // a Pluto-like 1 Pa of nitrogen with a trace of methane, on the fixture's other members.
     const tenuous = okSection(
       recordOf(
         earthWithSurface({
@@ -1705,7 +1704,11 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       { species: "N2", moleFraction: 0.995 },
       { species: "CH4", moleFraction: 0.005 },
     ]);
-    expect([tenuous.meanMolarMassGPerMol, tenuous.heatCapacityOverR]).toEqual([27.95, 3.5]);
+    expect([
+      tenuous.surfacePressurePa,
+      tenuous.meanMolarMassGPerMol,
+      tenuous.heatCapacityOverR,
+    ]).toEqual([1, 27.95, 3.5]);
   });
 
   it("refuses a cloud fraction above 1", () => {

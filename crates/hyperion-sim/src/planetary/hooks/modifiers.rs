@@ -538,7 +538,7 @@ pub(crate) struct SurfaceWeathering {
     weathering: WeatheringRate,
     maturity: f64,
     /// [`Exposure::dose_flux`], W m⁻².
-    dose_flux: f64,
+    dose_flux_w_per_m2: f64,
     /// The wind's term before its shield, over the lunar reference
     /// ([`SurfaceModifiers::unshielded_wind_term`], P14.T51.e).
     unshielded_wind: f64,
@@ -599,7 +599,7 @@ pub(crate) fn surface_weathering(
     Ok(SurfaceWeathering {
         weathering,
         maturity: body_maturity(Gigayears::from(parts.surface_age), rate),
-        dose_flux: exposure.dose_flux,
+        dose_flux_w_per_m2: exposure.dose_flux,
         // The wind's term before its shield, over the same lunar reference, whose own share is 1
         // (P14.T51.e's Q/S split, decision-p14-t51e-qs §1.2).
         unshielded_wind: exposure.unshielded_wind_mass_flux / moon.wind_mass_flux,
@@ -887,7 +887,7 @@ impl SurfaceModifiers {
         let SurfaceWeathering {
             weathering,
             maturity,
-            dose_flux,
+            dose_flux_w_per_m2: dose_flux,
             unshielded_wind,
         } = surface_weathering(&inputs.parts())?;
         let volcanic = volcanic_deposits(inputs);

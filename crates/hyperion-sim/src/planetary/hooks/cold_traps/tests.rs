@@ -1753,3 +1753,15 @@ fn a_field_s_key_is_every_input_to_the_bit() {
     }
     eprintln!("{} members moved, each rebuilding", moved.len());
 }
+
+/// A field's fixed capacity is a zonal profile's own (P14.T54.b.f): its area points, the profile's
+/// [`ZONAL_AREA_POINTS`](crate::planetary::hooks::surface::ZONAL_AREA_POINTS) and its two ends, so
+/// that a change to the profile's points fails here, not in generation.
+#[test]
+fn a_field_holds_a_zonal_profile_s_area_points() {
+    assert_eq!(
+        MOST_AREA_POINTS,
+        usize::try_from(ZONAL_AREA_POINTS).unwrap() + 2
+    );
+    assert_eq!(MOST_CONDENSABLES, Gas::ALL.len());
+}

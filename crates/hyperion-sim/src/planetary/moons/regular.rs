@@ -4667,6 +4667,69 @@ mod tests {
         });
     }
 
+    /// decision-p14-t54b-e-findings §A.5 item 7, stated and not asserted: the table's Io at the rank
+    /// that keeps its radius, every 24 hold in force, its Bond albedo and `p_V` under the weathered
+    /// area mix's hold and under it with the must-fix, beside its observed whole-disc Bond albedo of
+    /// about 0.5, which is its SO₂ frost's and sulphur's, deposits the area mix leaves out
+    /// (P14.T54.b.e's recorded deviation).
+    #[test]
+    fn under_every_24_hold_the_table_s_io_s_albedo_is_stated_held_and_weathered() {
+        use crate::planetary::derive::atmosphere::{PassWeathered, SurfaceMaterial};
+        use crate::planetary::derive::photometry::area_mix::{
+            AreaMixWeathering, with_area_mix_weathering,
+        };
+        use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
+        use crate::units::MetresPerSecondSquared;
+
+        crate::planetary::testing::with_every_24_hold(|| {
+            let jupiter = table_giant("Jupiter", 5, None);
+            let ((kg, keep), orbit) = table_moon(IO, &jupiter);
+            let mut lines = Vec::new();
+            for rules in [AreaMixWeathering::Held, AreaMixWeathering::Weathered] {
+                with_area_mix_weathering(rules, || {
+                    let io = own_moon(
+                        (kg, keep),
+                        &orbit,
+                        &jupiter,
+                        &MoonVolatiles::SHARED,
+                        MoonBulk::Derived,
+                    );
+                    let air = io.atmosphere();
+                    let r = io.radius().value();
+                    let photometry = BodyPhotometry::derive(&PhotometryInputs {
+                        state: air.state(),
+                        runaway_deck: air.runaway_deck(),
+                        material: SurfaceMaterial::of(&io.fractions()),
+                        surface_pressure: air.surface_pressure(),
+                        cloud_fraction: air.cloud_fraction(),
+                        surface_temperature: air.surface_temperature(),
+                        equilibrium_temperature: io.equilibrium_temperature(),
+                        surface_gravity: MetresPerSecondSquared::new(
+                            GRAVITATIONAL_CONSTANT * kg / (r * r),
+                        ),
+                        class: io.class(),
+                        fractions: io.fractions(),
+                        bond: io.albedo(),
+                    });
+                    lines.push(format!(
+                        "{rules:?}: {:?}, A {:.4}, p_V {:.4}, T_eq {:.2} K, its passes' maturity \
+                         {:?}",
+                        air.state(),
+                        io.albedo().value(),
+                        photometry.geometric_albedo().v,
+                        io.equilibrium_temperature().value(),
+                        io.weathered().as_ref().map(PassWeathered::maturity),
+                    ));
+                });
+            }
+            eprintln!(
+                "the table's Io, every 24 hold: {}; observed about 0.5, its SO2 frost's and \
+                 sulphur's, deposits the area mix leaves out",
+                lines.join("; ")
+            );
+        });
+    }
+
     /// P14.T53.c's Triton (moved from P14.T51.b; decision-triton-and-e101 §1.8 item 4): the table's
     /// Triton at its distance and own bulk, every 24 hold in force, is `Tenuous`, its N₂ held by
     /// its ice (λ ≈ 15.6 at the exobase fails T13.b's threshold) within a factor of 3 of 1.4 Pa

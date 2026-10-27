@@ -12108,9 +12108,9 @@ fn under_every_24_hold_an_airless_record_lists_no_gas_and_a_tenuous_one_its_air(
 /// the one its passes read (`DerivedBody::envelope_helium`, for P14.T54.b.i's envelope and T50.b's
 /// primordial He/H, decision-p14-t50b-envelope §5). Over the golden systems, every 24 hold in
 /// force: a body that formed with an envelope carries one, and one that formed with none carries
-/// none; where its published air's escape outcome holds its envelope's helium
-/// (`EscapeOutcome::envelope`, the one its thin envelope's air was built at), the two are the same
-/// to the bit. At 23, under the escape's hold, no derivation carries one. Each is stated by kind
+/// none; each one's published air's escape outcome holds it too (`EscapeOutcome::envelope`, the
+/// one its thin envelope's air was built at), the same to the bit. At 23, under the escape's hold,
+/// no derivation carries one. Each is stated by kind
 /// with its He/H and Y.
 #[test]
 fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
@@ -12168,7 +12168,9 @@ fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
         "{carried} derivations carry their envelope's helium ({on_the_outcome} on their escape \
          outcome too), {none} none"
     );
-    assert!(carried > 0 && on_the_outcome > 0);
+    // Every carried helium is on its escape outcome too: the escape reads the derivation's.
+    assert!(carried > 0);
+    assert_eq!(on_the_outcome, carried);
     for (name, ctx, held) in golden_systems() {
         for body in held.bodies() {
             if let Some((derived, ..)) = derived_at_epoch(ctx, held, body.index.get()) {
@@ -12248,8 +12250,32 @@ struct PresentBody {
     passes: u32,
     /// How its derivation's passes ended.
     convergence: crate::planetary::derive::passes::Convergence,
+    /// For [`ITEM_33_WORLD`] alone, its dominant condensable's supersaturation over its ice,
+    /// p ÷ `p_sat` (count (vii)'s figure, [`dominant_supersaturation`]); `None` for every other body.
+    supersaturation: Option<f64>,
     /// A hash of its record's and its derivation's whole `Debug` text: the same, or moved.
     bits: u64,
+}
+
+/// The dominant condensable's supersaturation over its ice, p ÷ `p_sat`, of a body whose published
+/// surface is `surface` and whose derivation is `derived`: its largest gas, where its ice is
+/// listed, at its ice's own temperature where its ice holds it (P14.T53.c) and otherwise at the
+/// coldest zone, as count (vii)'s census takes it (`ThinAirBody::factor`); `None` where its largest
+/// gas has no phase diagram or no ice.
+fn dominant_supersaturation(surface: &Surface, derived: &DerivedBody) -> Option<f64> {
+    use crate::planetary::chem::partition::CondensatePhase;
+    let conditions = surface.conditions();
+    let p = conditions.surface_pressure().value();
+    let coldest = conditions.climate_range().0.value();
+    let &(id, x) = conditions.gases().first()?;
+    let gas = id.gas()?;
+    let diagram = id.substance().phase_diagram()?;
+    surface.condensates().entry(id, CondensatePhase::Solid)?;
+    let at = derived
+        .atmosphere()
+        .held_ice_temperature(gas)
+        .map_or(coldest, Kelvin::value);
+    Some(x * p / diagram.saturation_pressure(Kelvin::new(at)).value())
 }
 
 impl PresentBody {
@@ -12282,7 +12308,11 @@ impl PresentBody {
         format!("{:?} {:?}", case.record, derived).hash(&mut hasher);
         let id = case.record.identity().id().to_string();
         let condensates = surface.condensates();
+        let supersaturation = (id == ITEM_33_WORLD)
+            .then(|| dominant_supersaturation(surface, derived))
+            .flatten();
         Self {
+            supersaturation,
             label: format!("{} {id} {}", case.set, case.kind),
             id,
             hosts: case.hosts.clone(),
@@ -12876,6 +12906,13 @@ fn under_every_24_hold_a_re_solve_keeps_what_was_traced_before_it() {
 /// luminosity (a runaway ratio of 1.51 then, 0.0029 now).
 pub(crate) const ITEM_33_WORLD: &str = "02000b2ca0000001.1100";
 
+/// The bodies whose two insolation rules' solves need not agree to the bit though they publish one
+/// state and deck (decision-p14-t54b-e-findings §B.2, as §C amends it): [`ITEM_33_WORLD`] alone, a
+/// runaway at its hosts' peak alone, which the passes lead along different paths under the
+/// weathered area mix (42 and 39 passes), `Tenuous` at about 1.68 Pa under both rules with
+/// P14.T53.c in force.
+const EXEMPT_ON_TWO_PATHS: [&str; 1] = [ITEM_33_WORLD];
+
 /// LOOK72's 106 K runaway (decision-absurd-states-24 R4.1, item 1): at 23 a `RunawayGreenhouse`
 /// at 106.5 K under 5.33 bar, mostly O₂, its present runaway ratio 0.0405 and its
 /// maximum-greenhouse ratio 0.1152.
@@ -12912,7 +12949,11 @@ const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
 ///   present limit, each stated with its present ratio, `T_s`, Bond albedo and `p_s`;
 /// - every body whose state and deck part 1 does not move is P14.T53.a's batch's to the bit, its
 ///   whole record and derivation: a past runaway (c) publishes under the deck is its decked solve
-///   again;
+///   again; but the named set [`EXEMPT_ON_TWO_PATHS`], computed by decision-p14-t54b-e-findings
+///   §B.2's rule as §C amends it (a runaway ratio at least 1 at the peak and under 1 now, the same
+///   state and deck, not a runaway, its A and `T_s` within 10⁻⁴ relative and its `p_s` within 1 %)
+///   and asserted equal to it, each printed with its dominant condensable's supersaturation over
+///   its ice;
 /// - no present runaway ratio exceeds its peak's.
 ///
 /// The bodies solved without the deck whose deckless `T_s` is at or above the cycling temperature
@@ -13041,32 +13082,49 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
 
     let pairs: Vec<(&PresentBody, &PresentBody)> =
         census.peak.iter().zip(&census.present).collect();
+    // decision-p14-t54b-e-findings §B.2 as §C amends it: every body whose state and deck the two
+    // rules agree on is P14.T53.a's batch's to the bit, but a named set, `EXEMPT_ON_TWO_PATHS`: a
+    // runaway at its hosts' peak alone (a ratio of 1 or more then, under 1 now), the only bodies
+    // the two rules treat differently by construction, whose passes they may lead along different
+    // paths, not a runaway under either, its A and T_s within 1e-4 and its p_s within 1 % of each
+    // other. Any other body they move fails, one that meets the conditions but is not named among
+    // them.
+    let relative = |a: f64, b: f64| (a / b - 1.0).abs();
+    let exempt_by_rule = |peak: &PresentBody, now: &PresentBody| {
+        now.runaway_peak >= 1.0
+            && now.runaway_now < 1.0
+            && now.state != SurfaceState::RunawayGreenhouse
+            && relative(now.bond, peak.bond) <= 1e-4
+            && relative(now.t_s, peak.t_s) <= 1e-4
+            && relative(now.p_s, peak.p_s) <= 0.01
+    };
+    let (mut exempt, mut moved_off_the_line) = (Vec::new(), Vec::new());
     let mut past_only = 0;
     for (peak, now) in &pairs {
-        // A bracketed solve whose passes the two rules led along different paths (another pass
-        // count or end) moved too, though it publishes one state: under the weathered area mix
-        // (P14.T54.b.e) one such body sits at the 100 Pa line, a runaway at its hosts' peak alone
-        // (sample `02000b2ca0000001.1100`), and is stated.
-        let path_moved = peak.passes != now.passes || peak.convergence != now.convergence;
-        let moved = peak.state != now.state || peak.deck != now.deck || path_moved;
+        let moved = peak.state != now.state || peak.deck != now.deck;
         if !moved {
-            assert_eq!(
-                peak.bits,
-                now.bits,
+            let lines = format!(
                 "{}: {} (P14.T53.a's batch: {})",
                 now.label,
                 now.line(),
                 peak.line()
             );
-            continue;
-        }
-        if path_moved && peak.state == now.state && peak.deck == now.deck {
-            eprintln!(
-                "a solve the two rules led along different paths: {}: {} (P14.T53.a's batch: {})",
-                now.label,
-                now.line(),
-                peak.line()
-            );
+            if peak.bits != now.bits && exempt_by_rule(peak, now) {
+                eprintln!(
+                    "exempt on two paths: {lines}; its dominant condensable {:?} times its \
+                     saturation over its ice (count (vii) at 10 or more, a figure miss beside it \
+                     under that)",
+                    now.supersaturation
+                );
+                exempt.push(now.id.clone());
+            } else if peak.bits != now.bits {
+                eprintln!(
+                    "moved off the line: {lines}; p_s {:.6e} Pa against {:.6e} Pa, A {:.6} \
+                     against {:.6}, T_s {:.4} K against {:.4} K",
+                    now.p_s, peak.p_s, now.bond, peak.bond, now.t_s, peak.t_s
+                );
+                moved_off_the_line.push(lines);
+            }
             continue;
         }
         if now.water_state == SurfaceState::RunawayGreenhouse
@@ -13186,6 +13244,17 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
         Vec::<String>::new(),
         "a present ratio above the peak's"
     );
+    eprintln!(
+        "decision-p14-t54b-e-findings §B.2 and §C: exempt on two paths {exempt:?}; moved \
+         otherwise {}",
+        moved_off_the_line.len()
+    );
+    assert_eq!(
+        moved_off_the_line,
+        Vec::<String>::new(),
+        "a body whose state and deck the two rules agree on, moved but not exempt"
+    );
+    assert_eq!(exempt, EXEMPT_ON_TWO_PATHS, "the exempt set on two paths");
 }
 
 /// P14.T53.b part 1 (c) through the passes, with every 24 hold in force (decision-t53b-arm-c §3,

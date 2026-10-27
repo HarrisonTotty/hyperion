@@ -2170,7 +2170,11 @@ impl PassBody<'_> {
         let material = surface_material(&self.bulk.fractions, self.bulk.lag);
         let regolith = match &ended.weathered {
             Ok(weathered) => weathered.regolith(),
-            Err(_) => pass_regolith(surface.regolith, material, ended.crust_lid.as_ref(), None),
+            Err(_) => pass_regolith(
+                surface.regolith,
+                material,
+                ended.crust_lid.as_ref().map(|lid| (lid, None)),
+            ),
         };
         let regolith_albedo = regolith.bond(SurfaceState::Airless, shade.bands()).bond;
         // The field the published pass read reads that regolith, the same one function's bits

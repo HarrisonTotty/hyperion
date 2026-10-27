@@ -29618,10 +29618,24 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - the server's albedo-scale test is its existing one (`field_albedo_scale` on a header's
         maturity); the sim states that the header's maturity and the lid's `FeO_T` are the
         published pass's, since the server cannot reach the sim's switches;
-      - Mercury's checks are taken at the area mix (no Mercury-like body in the sample);
-      - `under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_…` counts a bracketed
-        solve whose passes the two rules lead along different paths as moved, and prints it:
-        `02000b2ca0000001.1100` (42 and 39 passes).
+      - Mercury's checks are taken at the area mix: of the sample's 71 `basalt_reduced` lids none is
+        a Mercury about a Sun-like host of 3.5–6 Gyr by the test's criteria;
+      - Europa's `H2O` lid keeps its frost to the bit (the law is the identity at `FeO_T` 0): its
+        normal reflectances, `H2O`'s fresh frost's 0.958/0.949/0.938, lie above Europa's 0.48–0.85
+        (Buratti and Veverka 1983): stated, not asserted, pending P14.T49.m's icy regolith (its
+        Europa test, 0.58–0.70); its Bond albedo, a different quantity, is stated
+        beside them and not compared with that range (the review's science check);
+      - the root of the 0 ≥ 0 case stays in `cold_traps::is_collisional_air`, guarded in
+        `oxidisable` alone; P14.T54.b.f finds no body whose cold traps meet it (an `Airless` air's
+        pressure is its partials' sum), a deferred finding for the cold traps' owner;
+      - `under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_…` keeps its bit
+        equality but for a named set, `EXEMPT_ON_TWO_PATHS`, asserted exactly
+        (decision-p14-t54b-e-findings §B.2 as §C amends it: a runaway ratio of 1 or more at the
+        peak and under 1 now, the same state and deck, not a runaway, A and T_s within 10⁻⁴ and p_s
+        within 1 %; any other body the two rules move fails): `02000b2ca0000001.1100` alone, whose
+        passes the two rules lead along different paths (42 and 39). With P14.T53.c in force it is
+        `Tenuous` at 1.6796 Pa and 1.6777 Pa, A 0.3928, T_s 54.96 K, its N₂ 49.2 times its
+        saturation over its ice: count (vii), beside e101 and e103 (its steady state 0.034 Pa).
     - _Figures under every 24 hold and the air's batch:_
       - Mercury (`basalt_reduced`, about a Sun): 0.1100 by the cap, within the allowance of 1.25
         of 0.088 ± 0.003 (Mallama 2017, a preprint; 0.0704–0.1138), Domingue et al. 2011's 0.081
@@ -29636,11 +29650,15 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - the Moon's recorded miss at m = 1, stated: highlands (`feldspathic`) 0.092/0.130/0.145,
         Bond 0.1326, maria (`basalt_fe`) 0.051/0.054/0.056, Bond 0.0514, their B/R 0.921 against
         0.733, the V contrast 2.42 against 1.58;
-      - the census over 599 surfaces of the first 40 systems: 475 weathered, 71 capped
+      - the census over 599 surfaces of the first 40 systems (before the must-fix, below, which takes
+        5 of them onto its arm): 475 weathered, 71 capped
         (`basalt_reduced`), 49 on the stand-in's arm (`FeO_T` not modelled), 3 with no regolith and
-        1 moon whose planet's record gives no field, 5 with `ferric`. The largest moves are young lava worlds (below); one state
-        flips, `02000b2ca0000001.1100`, Snowball → Airless at the same albedo and T_eq, on the
-        100 Pa line (k 121, the M dwarf's uncapped wind, already recorded).
+        1 moon whose planet's record gives no field, 5 with `ferric`. One state flips,
+        `02000b2ca0000001.1100`, at the same albedo and T_eq: Snowball → Airless at 99.98 Pa on the
+        100 Pa line before P14.T53.c, → Tenuous at 1.68 Pa with it (k 121, the M dwarf's uncapped
+        wind, already recorded).
+      - rule (f): 930 records their published pass's modifiers to the bit, every field header at
+        that maturity (`for_body` read under every 24 hold, whose densities read an argon ice).
     - _Deferred findings (2026-10-13 rule):_
       - _The cap on `basalt_reduced`._ It stays past P14.T49.k (decision-p14-t49k Q5). Its deletion
         needs the weathering of an Fe-poor, carbon-bearing regolith, which darkens without npFe
@@ -29652,12 +29670,48 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         self-consistent. The expectation (decision-r10-t1c-maturity item 5 and §6;
         decision-r10-t1c-halo §1.8) needs the surface crate's crater expectation each pass and a
         bump of its own: R10.T1.c's follow-up, after 24.
-      - _Young lava worlds show their fresh rows._ Without the cap a freshly resurfaced lid takes
-        its fresh row, m ≈ 0 at a surface age near 0: 63 airless weathered regoliths lie below
-        m = 10⁻³, `komatiite` up to 0.5217 (`42002cb1ffc00009.0301`, T_eq 31.16 → 26.68 K) and the
-        largest T_eq move −10.26 K (`42002cae0000000a.0101`, 0.110 → 0.342). A lava flow's glassy
-        texture is not modelled, and the rows carry the method's known overstatement of
-        crystalline rows (decision-p14-t49k §2.6). For the composition audit.
+      - _A lava surface's own reflectance._ An airless silicate lid younger than
+        `REGOLITH_FORMATION_TIME` (1 Myr) has no regolith. Its glassy or slab flow surface (Io's
+        dark lavas and fresh terrestrial flows, about 0.05–0.1) is not modelled, so T51.b's cap,
+        min(row, 0.11), stands in. Three things wait together: a flow row (a glass or rock slab,
+        not 70 µm grains, for example `basaltic-glass.json`'s n, k as a slab, and an ultramafic
+        glass for `komatiite`); a formation clock scaled by the body's micrometeoroid term; a
+        fresh-to-gardened transition in place of the step at 1 Myr. Separately, immature surfaces
+        over 1 Myr old keep the fresh rows' known overstatement (`komatiite` A_N,V 0.430, an
+        unvalidated mixture of clean separates; decision-p14-t49k §2.6): by name,
+        `42002cb1ffc00009.0202` (`komatiite`, 1.45 Myr, k 1.0 × 10⁻⁴: m ≈ 0 by its rate, not its
+        youth; Bond 0.5212, p_V 0.67), `02000b2ca0000001.0d02` (7.5 Myr, 0.4282) and the golden
+        `8200b2e00000000a.e281` (`feldspathic`, `Tenuous`, 437 Myr, m 1.7 × 10⁻⁷, regolith 0.5802,
+        unlit). Owner: the composition audit (decision-p14-t54b-e-findings §A.6, §C).
+    - _The must-fix_ (decision-p14-t54b-e-findings §A, a BLOCKER, 2026-10-26): without the cap, a
+      freshly resurfaced lid took its fresh 70 µm powder row (`komatiite` to Bond 0.5217 and p_V
+      0.67 on `42002cb1ffc00009.0301` at t_s ≈ 137 yr; 0.3417 on `42002cae0000000a.0101` at
+      t_s ≈ 5.6 yr, T_eq −10.26 K), against 0.05–0.1 for fresh lava. Fixed under e's own hold: an
+      airless (or `Tenuous`) silicate lid whose surface age (the pass's, the maturity's) is under
+      `REGOLITH_FORMATION_TIME` = 1 Myr keeps min(row, 0.11) with its own label,
+      `StandIn::UnweatheredLava` (`RegolithWeathering::UnweatheredLava`; `LidWeathering` carries the
+      maturity, temperature, surface age and state into `Regolith::weathered_lid`). Its source:
+      micrometeoroid erosion of about 1 mm per Myr (Hörz et al. 1991, Lunar Sourcebook ch. 4,
+      _from memory_, an assumption), Speyerer et al. 2016's 81 kyr churning beside it; τ under
+      1 Myr marks a heat flow above 0.387 W m⁻², 4.18× Earth's. The census (the 599 sample
+      surfaces and the goldens, 940; every 24 hold and the air's batch):
+      - the new arm: 6 airless `komatiite` lids, t_s 0.10 yr to 16.3 kyr (the sample's
+        `42002cae0000000a.0d01`, `.0101`, `.0202`, `42002cb1ffc00009.0301` and `.0302`, the golden
+        `42006c9a00000004.0401`), each 0.1100 Held → 0.34–0.52 as built → 0.1100, p_V 0.142;
+      - `.0301` and `.0101` at 0.1100 with their Held T_eq, 31.16 K and 141.30 K, to the bit
+        (asserted); no lid under 1 Myr above 0.11 (asserted); nothing at or above 1 Myr and
+        nothing under air moved;
+      - m < 10⁻³: 118 regoliths (54 of the sample's airless ones, 63 before P14.T53.c), 6 on the
+        new arm and 112 still weathered (`H2O` 74, `komatiite` 15, `basalt_fe` 11, `basalt` 10,
+        `feldspathic` 1, `ultramafic` 1), nearly all old surfaces of tiny k;
+      - by t_s: 5 under 10⁴ yr, 1 in [10⁴ yr, 1 Myr), 3 in [1, 10) Myr, 283 above (a 10 kyr
+        threshold would free `.0302`; a 10 Myr one would catch `.0202` and `.0d02`);
+      - the brightest still weathered: the golden `8200b2e00000000a.e281` (above);
+      - the largest moves against Held: A 0.4696 (`e281`) and T_eq 30.35 K
+        (`02001b2c9ffe0000.0100`), neither the fix's; against as built: A 0.4117 (`.0301`), T_eq
+        10.86 K (the golden `.0401`);
+      - the table's Io: Bond 0.1100 and p_V 0.142 Held and fixed (its passes take no maturity),
+        against its observed about 0.5 (its deposits, out of the area mix).
   - _P14.T54.b.f, the cold traps in the passes_ (B2, 2026-10-26; decision-p14-t54b-f-coldtraps).
     `GENERATOR_VERSION` stays 23 and no golden moves: at `ColdTrapRules::Held` the passes build no
     field, keep their order and branches and move no bit.
@@ -29720,9 +29774,15 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - The cost (§4; `time_the_cold_traps_over_the_sample`, re-pointed at the passes' builds, which
         it counts): a mean of 5.95 ms a system and at most 27.69 ms (`02000b2ca0000001`, 59 fields),
         against T51.i's 7 ms and 50 ms (0.68 and 4.05 ms with one field a body on the record);
-        25.5 fields a system, at most 103, none on the record path. Measured in the dev profile
-        (the sim at `opt-level` 2) beside other tests, outside a quiet window: to be measured again
-        at the bless, with D5's reference.
+        25.5 fields a system, at most 103, none on the record path, measured in the dev profile.
+        Re-timed in release under the heavy lock (decision-p14-t54b-f-coldtraps §11 item 4;
+        2026-10-27, one thread, `CPUQuota` 1200%, the 1-minute load 8.13 at the start and 8.28 at
+        the end), on the tree with P14.T53.c, T51.g.b and T48.g merged: a mean of 4.893 ms a system
+        (median 3.411 ms) and at most 22.706 ms (`02000b2ca0000001`, 59 fields), within 7 ms and
+        50 ms; 1,528 fields over the 60 systems (25.47 a system, at most 103), none on the record
+        path. Builds per qualifying body on that tree, 627 bodies against 656 before those merges:
+        planets {1: 2, 2: 1, 3: 10}, members {1: 60, 2: 48, 3: 324, 4: 24, 5: 1}, moons {1: 49,
+        2: 12, 3: 87, 4: 9}. D5's reference is the bless's.
       - Through the real passes (`TableRecord`, every hold, their columns condensing nothing, L2's
         case): the Moon water `f_ct` 9.2169 × 10⁻⁴ (in 0.024–0.2%), `A_s` 3.2259 × 10⁻⁵, CO₂ `f_ct`
         2.0073 × 10⁻⁵; Mercury water 2.3607 × 10⁻⁴, CO₂ 2.1847 × 10⁻⁶; Ceres water 3.5950 × 10⁻⁴,
@@ -29758,11 +29818,15 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         keeping its state, passes, lid, condensates' keys and phases and convergence class (the
         variant, a bracket's fit and its jump, not its residual), its `T_s`, `T_eq` and pressure
         within 10⁻⁹, and holding a traced pass under its floor under the floored rules. Five before
-        P14.T53.c; eleven with it, airless members of 12–24 K: the sample's
+        P14.T53.c; eleven with it (main, 2026-10-26: §11's criteria stand for the grown set, with no
+        new ruling, as does the census at P14.T53.c's counts), airless members of 12–24 K: the sample's
         `01ffeb2c20010000.e201`, `01ffeb2ce0000000.e108`, `02000b2c5fff0000.e106`,
         `02000b2ca0000001.e305`, `02000b2cdffe0000.e108` and `02001b2ca0000000.e104`, and LOOK72's
         `020e56ef20080001.e104`, `620e377802000074.e306` and `820e6ee00000008d.e401`, `.e402` and
-        `.e408`.
+        `.e408`. The six that join with P14.T53.c in the tree move by the same path, each with
+        traced passes under its floor under the floored rules (one each for `02000b2c5fff0000.e106`
+        and `02001b2ca0000000.e104`, three for `01ffeb2c20010000.e201`, two each for LOOK72's
+        three), which move the context whose craters and crust their next field reads.
     - _Deviations:_
       - the field is a plain `Copy` value held in place (at most 66 area points and nine
         condensables), so the carry moves no `Copy` off `DerivedBody`, `DerivedMoon` or the solver
@@ -29779,8 +29843,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     - _Deferred findings:_ R09's ground reads the record figures' heat flow and craters (K(P*)), the
       carried field C*'s (§5), within 10⁻⁹ on a converged body; the icy moons wait for P14.T49.m
       (§6); whether a body's cold traps should be exempt from the ices' scaling into the surface
-      (decision-p14-t54b-f-coldtraps §11; R09 scales them, above). The cost is re-timed in release
-      under the heavy lock before B2 lands (§11 item 4).
+      (decision-p14-t54b-f-coldtraps §11; R09 scales them, above).
   - _P14.T54.b.h, the escape, steam and tenuous wiring_ (B2, 2026-10-26; cut from P14.T53.c as
     landed, main's ruling on the lane's lean). `GENERATOR_VERSION` stays 23, no golden moves, and
     `PROTOCOL_VERSION` stays 3: no wire type changes.
@@ -29798,8 +29861,9 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     - _T53.a's He/H after fractionation, for P14.T54.b.i:_ `DerivedBody::envelope_helium` carries
       the `EnvelopeHelium` the passes read (`helium_before_passes`, once before them), crate-private;
       `under_every_24_hold_a_derivation_carries_its_envelope_s_helium`: over the golden systems
-      every body that formed with an envelope carries one and every other none (23 and 243), each
-      equal to its escape outcome's (`EscapeOutcome::envelope`, the thin envelope's) to the bit;
+      every body that formed with an envelope carries one and every other none (23 and 243), every
+      one also on its escape outcome (`EscapeOutcome::envelope`, the thin envelope's; 23 of 23,
+      asserted), the same to the bit;
       none at 23, under the escape's hold. Stated: 9 gas giants, 6 ice giants and 7 sub-Neptunes
       at He/H 0.096818–0.102554 (Y 0.277711–0.289403), the protosolar start's 0.096818 where
       little escaped, the sub-Neptunes most fractionated; and `red_giant` 0400, a magma ocean whose
@@ -29810,6 +29874,13 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       envelopes' helium under the escape's batch; it must land before P14.T54.b.l.
     - _Steam:_ nothing at 24 unless P14.T53.b part 3 lands, then P14.T54.b.j's.
     - `ESCAPE_VERSION` goes at P14.T54.b.l.
+  - _B2's re-cut_ (2026-10-27): the lane merged origin four times while it built (P14.T51.e;
+    P14.T53.c with P14.T51.g.b; P14.T48.g; R08.T13.c1), and lands as a linear series on 9f40e651,
+    its last tree the merged branch's. Its folds: P14.T51.e's unshielded wind term in e's
+    condensate-free `surface_weathering`, the `Tenuous` arm of `published_surface_pressure` and
+    P14.T51.g.b's ocean solutes in e's moon wet epoch, in e; P14.T53.c's counts and named set in
+    f's two restated floor tests, in f; e's must-fix (decision-p14-t54b-e-findings) with the
+    review's fixes in the last commit.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

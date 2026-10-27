@@ -45,7 +45,8 @@
 //! - **The regolith** ([`Regolith`]) on the surface the condensates leave: its lid's row, or while
 //!   the passes do not know the lid a stand-in, on an airless rocky body the Moon's 0.11 exactly
 //!   and a known lid's row at most 0.11 ([`airless_silicate_stand_in`]); from generator version 24
-//!   a known lid's row weathered at the body's maturity ([`Regolith::weathered_lid`]).
+//!   a known lid's row weathered at the body's maturity ([`Regolith::weathered_lid`]), but an
+//!   airless silicate lid younger than a regolith, which keeps the 0.11 at most.
 //! - **A weathering deposit** (P14.T51.j's `ferric`, from 24): its area at its row's optics, a
 //!   solid's ([`surface_bond`]'s `deposits`).
 //! - **The cloud's condensable** weighs by 1 − d, its dominance ([`cloud_availability`]).
@@ -74,8 +75,8 @@
 //! solution its solvent's record; a liquid without a record `r_d` at liquid nitrogen's index; a
 //! liquid at a temperature no bound of its range holds its record at its first melt; an airless
 //! rocky body whose lid is not known the Moon's 0.11, a known lid's airless silicate
-//! regolith at most 0.11, any other lid not known a row by its material; a body with no luminous
-//! host a Sun's light.
+//! regolith at most 0.11 (and, under the weathered area mix, a lava younger than a regolith), any
+//! other lid not known a row by its material; a body with no luminous host a Sun's light.
 //!
 //! # The weathered area mix (P14.T54.b.e; held at 24, [`WEATHERED_AREA_MIX_VERSION`])
 //!
@@ -89,9 +90,13 @@
 //! `basalt_reduced` ([`CAPPED_ROWS`]), which keeps it (decision-p14-t49k Q5): its graphite-bearing
 //! row lies above 0.11, and the law, npFe⁰ per `FeO_T`, does not weather an Fe-poor, carbon-bearing
 //! regolith (Shackelford et al. 2025, PSJ 6, 254, a deferred finding), so that it takes one
-//! darkening, the cap's. An airless rocky body whose lid is not known keeps the Moon's 0.11, and a
-//! body whose maturity is not modelled its stand-in, each labelled. `ferric`'s weathering deposit
-//! joins the area mix at its row's optics ([`surface_bond`]).
+//! darkening, the cap's. An airless silicate lid on a surface younger than
+//! [`REGOLITH_FORMATION_TIME`] (1 Myr, global volcanic resurfacing's class) is a lava with no
+//! regolith yet, and keeps the cap too, under its own label ([`StandIn::UnweatheredLava`];
+//! decision-p14-t54b-e-findings §A.5): the rows are fine powders, and its glassy or slab surface is
+//! not modelled. An airless rocky body whose lid is not known keeps the Moon's 0.11, and a body
+//! whose maturity is not modelled its stand-in, each labelled. `ferric`'s weathering deposit joins
+//! the area mix at its row's optics ([`surface_bond`]).
 //!
 //! # The Rayleigh floor (P14.T24.h.a; decision-p14-t54a-passes §G3.5)
 //!
@@ -130,7 +135,9 @@ use crate::substance::{
 };
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
-use crate::units::{EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals};
+use crate::units::{
+    EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals, Years,
+};
 use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
@@ -902,11 +909,19 @@ pub(crate) enum StandIn {
     /// ([`StandIn::SolventForASolution`]).
     RecordAtItsFirstMelt,
     /// An airless regolith of a known lid whose row is of the `Silicate` family takes at most the
-    /// Moon's 0.11: space weathering's stand-in until P14.T54.b weathers the area mix
-    /// ([`airless_silicate_stand_in`], [`capped_lid`]). Under the weathered area mix
-    /// ([`AreaMixWeathering::Weathered`]) only [`CAPPED_ROWS`]' `basalt_reduced` keeps it, and a
-    /// known lid whose maturity is not modelled.
+    /// Moon's 0.11: space weathering's stand-in ([`airless_silicate_stand_in`], [`capped_lid`]),
+    /// every such lid's while the weathered area mix is held; under it
+    /// ([`AreaMixWeathering::Weathered`]) only where R10.T1.d's law cannot weather the lid:
+    /// [`CAPPED_ROWS`]' `basalt_reduced`, whose darkening is its carbon (decision-p14-t49k Q5), a
+    /// row whose `FeO_T` is not modelled, and a pass with no maturity. It stays past P14.T54.b.l.
     SpaceWeathering,
+    /// Under the weathered area mix ([`AreaMixWeathering::Weathered`]), an airless lid whose row is
+    /// of the `Silicate` family ([`capped_lid`]) on a surface younger than
+    /// [`REGOLITH_FORMATION_TIME`] keeps T51.b's cap, the smaller of its row's Bond albedo and the
+    /// Moon's 0.11 ([`airless_silicate_stand_in`]): it is a lava with no regolith yet, whose glassy
+    /// or slab surface is not modelled, and its row is a fine powder's (decision-p14-t54b-e-findings
+    /// §A.5).
+    UnweatheredLava,
     /// An airless rocky body whose lid is not known (the passes' first pass, the passes' stand-in
     /// with no rotation law, a body with no crust) takes the Moon's 0.11 exactly (NASA's fact
     /// sheet, T13.c's present value; [`Regolith::bond`]).
@@ -946,7 +961,11 @@ impl StandIn {
             }
             Self::SpaceWeathering => {
                 "an airless regolith whose lid's row is silicate takes at most the Moon's 0.11, \
-                 space weathering's stand-in until P14.T54.b weathers the area mix"
+                 space weathering's stand-in where the weathering law cannot weather it"
+            }
+            Self::UnweatheredLava => {
+                "an airless silicate lid younger than a regolith: its lava's glassy surface is not \
+                 modelled, and the Moon's 0.11 at most stands in"
             }
             Self::MoonForAnUnknownAirlessLid => {
                 "an airless rocky body whose lid is not known (a first pass, a stand-in with no \
@@ -1201,8 +1220,9 @@ fn moon_bond() -> f64 {
 /// P14.T51.d's maturity instead ([`Regolith::weathered_lid`], behind
 /// [`WEATHERED_AREA_MIX_VERSION`]; decision-p14-t51d-weathering), and keeps this cap on
 /// `basalt_reduced` alone ([`CAPPED_ROWS`]; decision-p14-t49k Q5: the law, npFe⁰ per `FeO_T`, does
-/// not weather its Fe-poor, graphite-bearing row, which would leave a Mercury too bright), and on a
-/// known lid whose maturity is not modelled.
+/// not weather its Fe-poor, graphite-bearing row, which would leave a Mercury too bright), on a
+/// known lid whose maturity is not modelled, and on a lava younger than a regolith
+/// ([`REGOLITH_FORMATION_TIME`], [`StandIn::UnweatheredLava`]).
 #[must_use]
 pub(crate) fn airless_silicate_stand_in(row: f64) -> f64 {
     let cap = moon_bond();
@@ -1213,13 +1233,20 @@ pub(crate) fn airless_silicate_stand_in(row: f64) -> f64 {
 /// decision-p14-t51d-weathering).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum RegolithWeathering {
-    /// As the passes take it until P14.T54.b: an airless regolith of a known lid whose row is
-    /// silicate takes the space-weathering stand-in, the smaller of its row's Bond albedo and the
-    /// Moon's 0.11 ([`airless_silicate_stand_in`], labelled), and an airless rocky body's of a lid
-    /// not known the Moon's 0.11 exactly; any other lid's row, or one under air, as it is
-    /// ([`Regolith::bond`]). P14.T54.b deletes this arm when it weathers the area mix with
-    /// R10.T1.d's law.
+    /// The stand-in's arm: an airless regolith of a known lid whose row is silicate takes the
+    /// space-weathering stand-in, the smaller of its row's Bond albedo and the Moon's 0.11
+    /// ([`airless_silicate_stand_in`], labelled), and an airless rocky body's of a lid not known
+    /// the Moon's 0.11 exactly; any other lid's row, or one under air, as it is
+    /// ([`Regolith::bond`]). Every regolith's while the weathered area mix is held, and under it a
+    /// lid's that R10.T1.d's law cannot weather ([`Regolith::weathered_lid`]: `basalt_reduced`, a
+    /// row whose `FeO_T` is not modelled, a pass with no maturity). It stays past P14.T54.b.l.
     StandIn,
+    /// Not yet a regolith (decision-p14-t54b-e-findings §A.5): under the weathered area mix, an
+    /// airless silicate lid on a surface younger than [`REGOLITH_FORMATION_TIME`] keeps the
+    /// stand-in's arm, the smaller of its row's Bond albedo and the Moon's 0.11, under its own
+    /// label ([`StandIn::UnweatheredLava`]), and is not weathered ([`Regolith::weathered_lid`]).
+    /// It outlives the weathered area mix's hold.
+    UnweatheredLava,
     /// Weathered: its spherical albedos by bin, `spherical_bins`, which P14.T54.b.e computes from
     /// the lid's row by R10.T1.d's law at P14.T51.d's maturity ([`Regolith::weathered_lid`]), and
     /// which weigh by the host's bins as any solid's do ([`Regolith::weathered`]). Never capped.
@@ -1287,18 +1314,23 @@ impl Regolith {
         }
     }
 
-    /// The regolith of a known lid's row `row` on a body of `material`, weathered at the body's
-    /// maturity `maturity` (P14.T51.d's m, dimensionless in [0, 1]) where it lies at `temperature`
-    /// (the pass's mean surface temperature), P14.T54.b.e's ([module](self) documentation, "The
-    /// weathered area mix"):
+    /// The regolith of a known lid's row `row` on a body of `material`, weathered as `at` gives
+    /// ([`LidWeathering`]: P14.T51.d's maturity m, the pass's mean surface temperature, the surface
+    /// age the maturity reads and the state of the pass's air), P14.T54.b.e's ([module](self)
+    /// documentation, "The weathered area mix"):
     ///
     /// - [`CAPPED_ROWS`]' `basalt_reduced` keeps the stand-in's cap ([`with_lid`](Self::with_lid),
     ///   [`StandIn::SpaceWeathering`] on an airless body), one darkening, never weathered as well;
+    /// - an airless lid whose row is silicate ([`capped_lid`] at `at`'s state) on a surface younger
+    ///   than [`REGOLITH_FORMATION_TIME`] is a lava with no regolith yet: it keeps the stand-in's
+    ///   arm, the smaller of its row's Bond albedo and the Moon's 0.11, under its own label
+    ///   ([`StandIn::UnweatheredLava`]; decision-p14-t54b-e-findings §A.5), and is not weathered,
+    ///   since its row is a fine powder's;
     /// - every other row with condensed optics is weathered ([`Regolith::weathered`]): each of its
     ///   spherical albedos by bin (`CondensedOptics::spherical_albedo_bins`), in bin order, by
     ///   [`weathered_spherical_albedo`] at the bin's midpoint ([`bin_wavelength_nm`]), under its
-    ///   law (`CondensedColumns::phase_law`), at its solid's grain density at `temperature` held at
-    ///   its first melt ([`held_at_first_melt`], its palette entry's) and its palette `FeO_T`
+    ///   law (`CondensedColumns::phase_law`), at its solid's grain density at the temperature held
+    ///   at its first melt ([`held_at_first_melt`], its palette entry's) and its palette `FeO_T`
     ///   ([`palette_feo_mass_fraction`]); never capped, so that `basalt_fe`'s row is darkened
     ///   once;
     /// - a row whose albedo is an observed, weathered value (`mars_dust`'s: its palette `FeO_T` is
@@ -1307,20 +1339,19 @@ impl Regolith {
     ///   Europa's), and one at m = 0 (an air above the ion column: k and m +0);
     /// - a row whose `FeO_T` is not modelled (the chondrites, `phyllosilicate`, `cometary`), one
     ///   with no condensed optics, and one whose `FeO_T` is above 0 but whose solid has no grain
-    ///   density at `temperature` keep the stand-in (`with_lid`, capped where airless and
+    ///   density at the temperature keep the stand-in (`with_lid`, capped where airless and
     ///   silicate): the law weathers only a row that carries its darkening agent
     ///   (decision-pre-23-review item 16), and there is nothing it can read.
     ///
     /// # Panics
     ///
-    /// If `maturity` is not in [0, 1] (as [`weathered_spherical_albedo`]): P14.T51.d's maturity
-    /// lies there.
+    /// If `at`'s maturity is not in [0, 1] (as [`weathered_spherical_albedo`]): P14.T51.d's
+    /// maturity lies there.
     #[must_use]
     pub(crate) fn weathered_lid(
         row: SubstanceId,
         material: SurfaceMaterial,
-        maturity: f64,
-        temperature: Kelvin,
+        at: LidWeathering,
     ) -> Self {
         let substance = row.substance();
         let capped = CAPPED_ROWS.contains(&substance.key().as_str());
@@ -1329,6 +1360,17 @@ impl Regolith {
         else {
             return Self::with_lid(row, material);
         };
+        if at.surface_age.value() < REGOLITH_FORMATION_TIME.value()
+            && capped_lid(row, at.state)
+            && young_lava_capped()
+        {
+            return Self {
+                row: Some(row),
+                material,
+                weathering: RegolithWeathering::UnweatheredLava,
+            };
+        }
+        let (maturity, temperature) = (at.maturity, at.temperature);
         let fresh = optics.spherical_albedo_bins();
         let feo = match (
             palette_feo_mass_fraction(row),
@@ -1400,23 +1442,29 @@ impl Regolith {
     ///   body with no crust): on an airless rocky body the Moon's 0.11 exactly, so that the
     ///   stand-in neither brightens nor darkens a body whose lid the passes do not know
     ///   (decision-p14-t49c-split §1.5), and on any other the row by its material
-    ///   ([`Regolith::stand_in_row`]), each labelled.
+    ///   ([`Regolith::stand_in_row`]), each labelled;
+    /// - not yet a regolith ([`RegolithWeathering::UnweatheredLava`]), as under the stand-in of a
+    ///   known lid, its cap labelled [`StandIn::UnweatheredLava`].
     ///
     /// The one predicate the passes, the record and P14.T51.i's cold traps' bare regolith read.
     #[must_use]
     pub(crate) fn bond(&self, state: SurfaceState, bands: &[f64; OPTICS_BANDS]) -> Component {
-        if let RegolithWeathering::Weathered { spherical_bins } = self.weathering {
-            return Component {
-                bond: band_weighted(&spherical_bins, bands),
-                stand_in: None,
-            };
-        }
+        let cap = match self.weathering {
+            RegolithWeathering::Weathered { spherical_bins } => {
+                return Component {
+                    bond: band_weighted(&spherical_bins, bands),
+                    stand_in: None,
+                };
+            }
+            RegolithWeathering::StandIn => StandIn::SpaceWeathering,
+            RegolithWeathering::UnweatheredLava => StandIn::UnweatheredLava,
+        };
         // A tenuous air's bare surface is weathered as an airless one's (P14.T53.c).
         let airless = matches!(state, SurfaceState::Airless | SurfaceState::Tenuous);
         match self.row {
             Some(row) if capped_lid(row, state) => Component {
                 bond: airless_silicate_stand_in(solid_bond(row, bands).bond),
-                stand_in: Some(StandIn::SpaceWeathering),
+                stand_in: Some(cap),
             },
             Some(row) => solid_bond(row, bands),
             None if airless && self.material == SurfaceMaterial::Rock => Component {
@@ -1454,6 +1502,83 @@ pub(crate) fn capped_lid(row: SubstanceId, state: SurfaceState) -> bool {
 /// al. 2025, PSJ 6, 254, a deferred finding), so that its graphite-bearing row, above the Moon's
 /// 0.11 about a Sun, takes the cap and only the cap.
 pub(crate) const CAPPED_ROWS: [&str; 1] = ["basalt_reduced"];
+
+/// The surface age under which an airless silicate lid has no regolith yet, and keeps T51.b's cap
+/// under the weathered area mix ([`Regolith::weathered_lid`], [`StandIn::UnweatheredLava`];
+/// decision-p14-t54b-e-findings §A.5): 1 Myr.
+///
+/// - **What it stands for.** At micrometeoroid erosion of exposed lunar rock "on the order of
+///   1 mm/10⁶ years for typical kilogram-sized lunar rocks" (Hörz et al. 1991, Lunar Sourcebook
+///   ch. 4, p. 87, after Ashworth 1977; the same page gardens the regolith "to a depth of almost
+///   1 cm" in 10⁶ years, and Fig. 4.20's caption puts contemporary regolith growth under 1 mm per
+///   Myr; read by the batch's science check), 1 Myr comminutes about 1 mm, some 14 of the rows'
+///   70 µm grains, an optically thick powder. Every rock row is such a powder (`substance::optics`'s "a fresh particulate
+///   regolith of 70 µm grains"), never a flow. The top 2 cm of an existing regolith churn in about
+///   81 kyr (Speyerer et al. 2016, Nature 538, 215; its abstract as the ruling read it), a lower
+///   bound for reworking, not for forming a regolith on bedrock.
+/// - **What it marks.** Under a silicate crust's resurfacing time τ(F) = 64.2 Myr × (F₀ ÷ F)^2.908
+///   (`surface_age::resurfacing_time`, F₀ the generator's Earth's 92.55 mW m⁻²), a surface under
+///   1 Myr means a heat flow above about 0.39 W m⁻², 4.2 times Earth's: global volcanic
+///   resurfacing, Io's class. A surface just after its magma ocean's end, or a giant impact's,
+///   falls under it too, and is quenched lava as well.
+/// - **What it is not.** A step, not a fresh-to-gardened transition, and the same for every body,
+///   not a clock scaled by the body's own micrometeoroid term: both are deferred, with the lava's
+///   own slab or glass row, to the composition audit (decision-p14-t54b-e-findings §A.6).
+///
+/// It is part of the weathered area mix's behaviour and outlives its hold
+/// ([`WEATHERED_AREA_MIX_VERSION`]); under the hold nothing reads it.
+pub(crate) const REGOLITH_FORMATION_TIME: Years = Years::new(1.0e6);
+
+/// What a pass's weathered regolith reads beside its lid's row (P14.T54.b.e;
+/// [`Regolith::weathered_lid`]): each the pass's own, the record's to the bit (rule (f)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LidWeathering {
+    /// P14.T51.d's maturity m, dimensionless in [0, 1].
+    pub(crate) maturity: f64,
+    /// The pass's mean surface temperature, at which the row's grain density is read.
+    pub(crate) temperature: Kelvin,
+    /// The surface age the maturity reads (`ModifierParts::surface_age`), yr: under
+    /// [`REGOLITH_FORMATION_TIME`] an airless silicate lid has no regolith yet.
+    pub(crate) surface_age: Years,
+    /// The state of the pass's air, which says whether its lid is airless ([`capped_lid`]).
+    pub(crate) state: SurfaceState,
+}
+
+/// Whether a lid younger than [`REGOLITH_FORMATION_TIME`] keeps the cap
+/// ([`StandIn::UnweatheredLava`]): always, but in a test that reads P14.T54.b.e's area mix as
+/// built before decision-p14-t54b-e-findings' must-fix ([`with_young_lava_weathered`]).
+#[must_use]
+fn young_lava_capped() -> bool {
+    #[cfg(test)]
+    if YOUNG_LAVA_WEATHERED.with(core::cell::Cell::get) {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether a test reads young lava weathered as any other lid, on its thread.
+    static YOUNG_LAVA_WEATHERED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with a lid younger than [`REGOLITH_FORMATION_TIME`] weathered as any other on
+/// this thread: P14.T54.b.e's area mix as built (1ebcd3b6), which the must-fix's census sets
+/// beside the fix (decision-p14-t54b-e-findings §A.5, item 1); set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. A test's alone: it
+/// goes with the census.
+#[cfg(test)]
+pub(crate) fn with_young_lava_weathered<R>(run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's switch back as it drops.
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            YOUNG_LAVA_WEATHERED.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(YOUNG_LAVA_WEATHERED.with(|cell| cell.replace(true)));
+    run()
+}
 
 /// The wavelength, nm, at which the weathering law reads optics bin `bin`
 /// ([`Regolith::weathered_lid`]): the midpoint of its edges ([`SPECTRAL_BIN_EDGES_NM`]), 345 nm to

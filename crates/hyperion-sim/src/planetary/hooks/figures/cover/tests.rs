@@ -1056,7 +1056,8 @@ fn the_table_s_mars_over_its_record_takes_the_record_s_ice_in_its_passes() {
 /// hold in force: each published pass reads a field, and its water and carbon dioxide traps are
 /// T51.f's and T51.i's figures at its own albedo, heat flow and craters, `f_ct` × `f_x` to the bit,
 /// on the pass and so on the record; the Moon's water `f_ct` lies in plan 14's 0.024–0.2% (half of
-/// Williams et al. 2019's Diviner-mapped 0.048% to twice Hayne et al. 2021's point-source 0.10%).
+/// Williams et al. 2019's Diviner-mapped 0.048%, JGR Planets 124, 2505, its 18,300 km² not re-read
+/// here, to twice Hayne et al. 2021's point-source 0.10%, Nat. Astron. 5, 169: about 40,000 km²).
 /// Mercury's and Ceres's figures are stated.
 #[test]
 fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {

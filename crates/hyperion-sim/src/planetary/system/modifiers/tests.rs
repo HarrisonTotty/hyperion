@@ -21,7 +21,8 @@ use crate::planetary::derive::atmosphere::{
     Gas, NoMaturity, PassMaturity, PassWeathered, SurfaceMaterial, SurfaceState,
 };
 use crate::planetary::derive::photometry::area_mix::{
-    AreaMixWeathering, CAPPED_ROWS, Regolith, sun_bands,
+    AreaMixWeathering, CAPPED_ROWS, LidWeathering, REGOLITH_FORMATION_TIME, Regolith, StandIn,
+    capped_lid, sun_bands,
 };
 use crate::planetary::fate::BodyFate;
 use crate::planetary::hooks::crust::LidCrust;
@@ -1126,31 +1127,92 @@ fn held_bodies_at_24() -> &'static [BatchBody] {
     BODIES.get_or_init(|| bodies_at_24(MODIFIER_SAMPLE, AreaMixWeathering::Held))
 }
 
+/// The golden systems, generated afresh under the switches, as [`golden_bodies_at_24`] keeps them:
+/// each body borrows its context for good.
+type Goldens = Vec<(&'static str, SystemContext, PlanetarySystem)>;
+
+/// How a census view takes a lid younger than [`REGOLITH_FORMATION_TIME`] under the weathered area
+/// mix (decision-p14-t54b-e-findings §A.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum YoungLava {
+    /// The rules in force: it keeps the cap (`StandIn::UnweatheredLava`).
+    Capped,
+    /// P14.T54.b.e as built (1ebcd3b6): weathered as any other lid
+    /// (`area_mix::with_young_lava_weathered`).
+    AsBuilt,
+}
+
+/// `run`'s result under every 24 hold with the weathered area mix at `rules` and young lava as
+/// `lava` takes it.
+fn under_24<R>(rules: AreaMixWeathering, lava: YoungLava, run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::photometry::area_mix::{
+        with_area_mix_weathering, with_young_lava_weathered,
+    };
+    use crate::planetary::testing::with_every_24_hold;
+
+    with_every_24_hold(|| {
+        with_area_mix_weathering(rules, || match lava {
+            YoungLava::Capped => run(),
+            YoungLava::AsBuilt => with_young_lava_weathered(run),
+        })
+    })
+}
+
+/// The golden systems' batch bodies under every 24 hold, the weathered area mix at `rules` and
+/// young lava as `lava` takes it, the systems generated afresh into `systems` under the same
+/// switches.
+fn golden_bodies_at_24(
+    rules: AreaMixWeathering,
+    lava: YoungLava,
+    systems: &'static OnceLock<Goldens>,
+) -> Vec<BatchBody> {
+    use crate::planetary::system::tests::golden_systems_afresh;
+
+    let systems = systems.get_or_init(|| under_24(rules, lava, golden_systems_afresh));
+    under_24(rules, lava, || {
+        systems
+            .iter()
+            .flat_map(|(_, ctx, system)| {
+                bodies_of(ctx, &system.clone().with_record_rules(air_batch()))
+            })
+            .collect()
+    })
+}
+
 /// The golden systems' batch bodies under every 24 hold and the weathered area mix, generated
 /// afresh, built once.
 fn golden_weathered_bodies() -> &'static [BatchBody] {
-    use crate::planetary::derive::photometry::area_mix::with_area_mix_weathering;
-    use crate::planetary::system::tests::golden_systems_afresh;
-    use crate::planetary::testing::with_every_24_hold;
-
-    static SYSTEMS: OnceLock<Vec<(&'static str, SystemContext, PlanetarySystem)>> = OnceLock::new();
+    static SYSTEMS: OnceLock<Goldens> = OnceLock::new();
     static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
-    let weathered = |run: &dyn Fn() -> Vec<BatchBody>| {
-        with_every_24_hold(|| with_area_mix_weathering(AreaMixWeathering::Weathered, run))
-    };
-    let systems = SYSTEMS.get_or_init(|| {
-        with_every_24_hold(|| {
-            with_area_mix_weathering(AreaMixWeathering::Weathered, golden_systems_afresh)
-        })
-    });
     BODIES.get_or_init(|| {
-        weathered(&|| {
-            systems
-                .iter()
-                .flat_map(|(_, ctx, system)| {
-                    bodies_of(ctx, &system.clone().with_record_rules(air_batch()))
-                })
-                .collect()
+        golden_bodies_at_24(AreaMixWeathering::Weathered, YoungLava::Capped, &SYSTEMS)
+    })
+}
+
+/// The same under every 24 hold but the weathered area mix's, built once.
+fn golden_held_bodies_at_24() -> &'static [BatchBody] {
+    static SYSTEMS: OnceLock<Goldens> = OnceLock::new();
+    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
+    BODIES.get_or_init(|| golden_bodies_at_24(AreaMixWeathering::Held, YoungLava::Capped, &SYSTEMS))
+}
+
+/// The same under the weathered area mix as P14.T54.b.e built it, young lava weathered, built
+/// once.
+fn golden_as_built_bodies() -> &'static [BatchBody] {
+    static SYSTEMS: OnceLock<Goldens> = OnceLock::new();
+    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
+    BODIES.get_or_init(|| {
+        golden_bodies_at_24(AreaMixWeathering::Weathered, YoungLava::AsBuilt, &SYSTEMS)
+    })
+}
+
+/// The first [`MODIFIER_SAMPLE`] systems' batch bodies under the weathered area mix as P14.T54.b.e
+/// built it, young lava weathered, built once.
+fn as_built_bodies() -> &'static [BatchBody] {
+    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
+    BODIES.get_or_init(|| {
+        under_24(AreaMixWeathering::Weathered, YoungLava::AsBuilt, || {
+            bodies_at_24(MODIFIER_SAMPLE, AreaMixWeathering::Weathered)
         })
     })
 }
@@ -1297,8 +1359,12 @@ fn under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_
         let regolith = Regolith::weathered_lid(
             rebuilt.lid,
             surface.material(),
-            pass.maturity(),
-            surface.conditions().mean_surface_temperature(),
+            LidWeathering {
+                maturity: pass.maturity(),
+                temperature: surface.conditions().mean_surface_temperature(),
+                surface_age: parts.surface_age,
+                state: body.published.2,
+            },
         );
         assert_eq!(
             regolith.is_weathered(),
@@ -1309,8 +1375,12 @@ fn under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_
         capped += usize::from(!regolith.is_weathered());
         ferric += usize::from(!record.weathering_deposits().is_empty());
         checked += 1;
-        // The field header carries the maturity, and the lid's entry the FeO_T the law read.
-        if let Ok(inputs) = CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx) {
+        // The field header carries the maturity, and the lid's entry the FeO_T the law read, read
+        // at 24's rules (24's densities read an argon ice, which 23's refuse).
+        let read = crate::planetary::testing::with_every_24_hold(|| {
+            CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx)
+        });
+        if let Ok(inputs) = read {
             let header = inputs
                 .weathering()
                 .expect("a record with modifiers gives its header's");
@@ -1501,4 +1571,323 @@ fn the_weathered_area_mix_s_census() {
         outcomes.get("weathered").copied().unwrap_or(0) > 0,
         "{outcomes:?}"
     );
+    young_lava_census();
+}
+
+/// One of the young-lava census's sets: its name, and its batch bodies under the fix, as built and
+/// under the weathered area mix's hold, body by body in the same order.
+type CensusSet = (
+    &'static str,
+    &'static [BatchBody],
+    &'static [BatchBody],
+    &'static [BatchBody],
+);
+
+/// The key of the lid's row whose regolith the pass `pass` read.
+fn lid_key(pass: &PassWeathered) -> String {
+    pass.parts().lid.substance().key().as_str().to_owned()
+}
+
+/// The published pass of `body` where it took a maturity and its lid is airless (or under a tenuous
+/// air) and its row silicate ([`capped_lid`]), outside [`CAPPED_ROWS`].
+fn airless_silicate(body: &BatchBody) -> Option<&PassWeathered> {
+    let state = body.published.2;
+    body.weathered.as_ref().ok().filter(|pass| {
+        matches!(state, SurfaceState::Airless | SurfaceState::Tenuous)
+            && capped_lid(pass.parts().lid, state)
+            && !CAPPED_ROWS.contains(&lid_key(pass).as_str())
+    })
+}
+
+/// decision-p14-t54b-e-findings §A.5's 42002cb1ffc00009.0301 and 42002cae0000000a.0101, the young
+/// lava worlds whose fresh `komatiite` rows P14.T54.b.e as built published (Bond 0.5217 and
+/// 0.3417), and their Held `T_eq`, K (31.16 and 141.30).
+const YOUNG_LAVA_WORLDS: [(&str, f64); 2] = [
+    ("42002cb1ffc00009.0301", 31.16),
+    ("42002cae0000000a.0101", 141.30),
+];
+
+/// The census's young lava (decision-p14-t54b-e-findings §A.5's items 1–6, the assert and the
+/// stop condition; item 7, the table's Io, is `moons::regular`'s), over the first
+/// [`MODIFIER_SAMPLE`] sample systems and the golden systems, every 24 hold in force and the air's
+/// sections under the batch, each body under three views: the weathered area mix's hold
+/// (`Held`), P14.T54.b.e as built (young lava weathered as any lid) and the fix (young lava capped):
+///
+/// 1. the airless silicate lids on the new arm ([`StandIn::UnweatheredLava`]), by lid, with their
+///    surface ages and their Bond albedo and `T_eq` Held → as built → fixed;
+/// 2. as built's airless (or tenuous) weathered regoliths below m = 10⁻³, split into the new arm
+///    and still weathered, by lid, each with its surface age and k, and how many are the sample's
+///    `Airless` ones, P14.T54.b.e's census's basis;
+/// 3. [`YOUNG_LAVA_WORLDS`] back at the cap's 0.1100, their Bond albedo and `T_eq` Held's to the
+///    bit;
+/// 4. the airless silicate lids outside [`CAPPED_ROWS`] with a maturity by surface age, below
+///    10⁴ yr, in [10⁴ yr, 1 Myr), [1, 10) Myr and above, how sensitive the result is to
+///    [`REGOLITH_FORMATION_TIME`], each body in [10⁴ yr, 10 Myr) listed;
+/// 5. the brightest airless silicate regolith still weathered, by its own Bond albedo about a Sun;
+/// 6. the largest Bond albedo and `T_eq` moves against Held after the fix and against as built,
+///    and every state flip against Held by name.
+///
+/// It asserts that no airless silicate lid outside [`CAPPED_ROWS`] whose surface is younger than
+/// [`REGOLITH_FORMATION_TIME`] publishes a regolith above 0.11 (each on the new arm), and the
+/// ruling's stop condition: no body moves against as built but one on the new arm, airless, under
+/// 1 Myr.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census of the ruling's items, each stated beside its basis"
+)]
+fn young_lava_census() {
+    let sun = sun_bands();
+    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+    let formation = REGOLITH_FORMATION_TIME.value();
+    let airless =
+        |state: SurfaceState| matches!(state, SurfaceState::Airless | SurfaceState::Tenuous);
+    let young = |body: &BatchBody| {
+        body.weathered.as_ref().is_ok_and(|pass| {
+            pass.regolith().bond(SurfaceState::Airless, &sun).stand_in
+                == Some(StandIn::UnweatheredLava)
+        })
+    };
+    let p_v = |body: &BatchBody| {
+        body.record
+            .photometry()
+            .ok()
+            .map_or(f64::NAN, |photometry| photometry.geometric_albedo().v)
+    };
+    let sets: [CensusSet; 2] = [
+        (
+            "sample",
+            weathered_bodies(),
+            as_built_bodies(),
+            held_bodies_at_24(),
+        ),
+        (
+            "golden",
+            golden_weathered_bodies(),
+            golden_as_built_bodies(),
+            golden_held_bodies_at_24(),
+        ),
+    ];
+    // Item 1: lid → (count, t_s range, lines).
+    let mut on_arm: BTreeMap<String, (usize, f64, f64, Vec<String>)> = BTreeMap::new();
+    // Item 2: (lid, arm) → lines.
+    let mut below: BTreeMap<(String, &str), Vec<String>> = BTreeMap::new();
+    // Item 4: below 10⁴ yr, [10⁴ yr, 1 Myr), [1, 10) Myr, above.
+    let mut by_age = [0_usize; 4];
+    let mut brightest = (0.0_f64, String::new());
+    // Item 4's bodies within a factor of 100 below or 10 above the step.
+    let mut near_the_step = Vec::new();
+    // Item 2's basis as P14.T54.b.e's census took it: the sample's `Airless` bodies alone.
+    let mut below_basis = 0_usize;
+    let mut largest = [
+        (0.0_f64, String::new()),
+        (0.0, String::new()),
+        (0.0, String::new()),
+        (0.0, String::new()),
+    ];
+    let (mut flips, mut stop, mut above, mut surfaces) =
+        (Vec::new(), Vec::new(), Vec::new(), 0_usize);
+    for (set, fixed, built, held) in sets {
+        assert_eq!(fixed.len(), built.len(), "{set}");
+        assert_eq!(fixed.len(), held.len(), "{set}");
+        surfaces += fixed.len();
+        for ((now, was), before) in fixed.iter().zip(built).zip(held) {
+            let id = now.record.identity().id();
+            assert_eq!(id, was.record.identity().id());
+            assert_eq!(id, before.record.identity().id());
+            let ((a, t, state), (a_was, t_was, _), (a_held, t_held, state_held)) =
+                (now.published, was.published, before.published);
+            let pass = now.weathered.as_ref().ok();
+            let (m, t_s, k) = pass.map_or((f64::NAN, f64::NAN, f64::NAN), |pass| {
+                (
+                    pass.maturity(),
+                    pass.parts().surface_age.value(),
+                    pass.weathering().weathering().value(),
+                )
+            });
+            let lid = pass.map_or_else(|| "none".to_owned(), lid_key);
+            let line = format!(
+                "{set} {id} ({lid}, {state:?}, t_s {t_s:.3e} yr, m {m:.3e}, k {k:.3e}): A \
+                 {a_held:.4} → {a_was:.4} → {a:.4}, T_eq {t_held:.2} → {t_was:.2} → {t:.2} K, p_V \
+                 {:.4} → {:.4}",
+                p_v(was),
+                p_v(now)
+            );
+            let is_young = young(now);
+            // The stop condition: the fix moves a body on the new arm alone.
+            let moved = format!("{:?}", now.record) != format!("{:?}", was.record)
+                || bits(a) != bits(a_was)
+                || bits(t) != bits(t_was)
+                || state != was.published.2;
+            if moved && !(is_young && airless(state) && t_s < formation) {
+                stop.push(line.clone());
+            }
+            if is_young {
+                assert!(airless_silicate(now).is_some() && t_s < formation, "{line}");
+                let entry =
+                    on_arm
+                        .entry(lid.clone())
+                        .or_insert((0, f64::INFINITY, 0.0, Vec::new()));
+                entry.0 += 1;
+                entry.1 = entry.1.min(t_s);
+                entry.2 = entry.2.max(t_s);
+                entry.3.push(line.clone());
+            }
+            // The assert: none above 0.11, each on the new arm.
+            if let Some(pass) = airless_silicate(now)
+                && t_s < formation
+            {
+                let regolith = pass.regolith().bond(state, &sun);
+                if regolith.bond > moon || regolith.stand_in != Some(StandIn::UnweatheredLava) {
+                    above.push(format!("{line}: its regolith {regolith:?}"));
+                }
+            }
+            if let Some(pass) = airless_silicate(now) {
+                let bin = if t_s < 1e4 {
+                    0
+                } else if t_s < formation {
+                    1
+                } else if t_s < 10.0 * formation {
+                    2
+                } else {
+                    3
+                };
+                by_age[bin] += 1;
+                let own = pass.regolith().bond(state, &sun).bond;
+                if bin == 1 || bin == 2 {
+                    near_the_step.push(format!("{line}; its regolith about a Sun {own:.4}"));
+                }
+                if pass.regolith().is_weathered() && own > brightest.0 {
+                    brightest = (own, format!("{line}; its regolith about a Sun {own:.4}"));
+                }
+            }
+            // Item 2: as built's airless weathered regoliths below m = 10⁻³.
+            if let Ok(built_pass) = &was.weathered
+                && built_pass.regolith().is_weathered()
+                && airless(was.published.2)
+                && built_pass.maturity() < 1e-3
+            {
+                let arm = if is_young {
+                    "the new arm"
+                } else {
+                    "still weathered"
+                };
+                let basis = set == "sample" && was.published.2 == SurfaceState::Airless;
+                below_basis += usize::from(basis);
+                below
+                    .entry((lid_key(built_pass), arm))
+                    .or_default()
+                    .push(format!(
+                        "{set} {id} ({:?}) t_s {t_s:.3e} yr, k {k:.3e}",
+                        was.published.2
+                    ));
+            }
+            for (slot, delta) in [
+                (0, (a - a_held).abs()),
+                (1, (t - t_held).abs()),
+                (2, (a - a_was).abs()),
+                (3, (t - t_was).abs()),
+            ] {
+                if delta > largest[slot].0 {
+                    largest[slot] = (delta, line.clone());
+                }
+            }
+            if state != state_held {
+                flips.push(format!("{line}: {state_held:?} → {state:?}"));
+            }
+        }
+    }
+    // Item 3: the two named worlds, back at the cap and at their Held T_eq to the bit.
+    let mut named = Vec::new();
+    for (name, t_eq) in YOUNG_LAVA_WORLDS {
+        let find = |bodies: &'static [BatchBody]| {
+            bodies
+                .iter()
+                .find(|body| body.record.identity().id().to_string() == name)
+                .unwrap_or_else(|| panic!("{name} is in the sample"))
+        };
+        let (now, was, before) = (
+            find(weathered_bodies()),
+            find(as_built_bodies()),
+            find(held_bodies_at_24()),
+        );
+        assert!(young(now), "{name}");
+        assert_same_bits(now.published.0, moon);
+        assert_same_bits(now.published.0, before.published.0);
+        assert_same_bits(now.published.1, before.published.1);
+        named.push(format!(
+            "{name}: A {:.4} → as built {:.4} → fixed {:.4}, T_eq {:.2} → {:.2} → {:.2} K (the \
+             fix's A and T_eq Held's to the bit; the ruling's Held T_eq {t_eq:.2} K), p_V as built \
+             {:.4} → fixed {:.4}",
+            before.published.0,
+            was.published.0,
+            now.published.0,
+            before.published.1,
+            was.published.1,
+            now.published.1,
+            p_v(was),
+            p_v(now)
+        ));
+    }
+    let arm_lines: Vec<String> = on_arm
+        .iter()
+        .map(|(lid, (count, low, high, lines))| {
+            format!(
+                "{lid}: {count}, t_s {low:.3e}–{high:.3e} yr\n      {}",
+                lines.join("\n      ")
+            )
+        })
+        .collect();
+    let below_lines: Vec<String> = below
+        .iter()
+        .map(|((lid, arm), lines)| {
+            format!(
+                "{lid}, {arm}: {}\n      {}",
+                lines.len(),
+                lines.join("\n      ")
+            )
+        })
+        .collect();
+    let below_count: usize = below.values().map(Vec::len).sum();
+    eprintln!(
+        "young lava (decision-p14-t54b-e-findings §A.5) over {surfaces} surfaces of the first \
+         {MODIFIER_SAMPLE} sample systems and the golden systems, each A Held → as built → fixed:\n  \
+         (1) the new arm, airless silicate lids under {formation:.0e} yr: {}\n    {}\n  (2) as \
+         built's airless or tenuous weathered regoliths below m = 1e-3: {below_count} ({below_basis} \
+         of them the sample's Airless, P14.T54.b.e's census's basis)\n    {}\n  (3) {}\n  (4) the \
+         airless silicate lids outside CAPPED_ROWS with a maturity by t_s (below 1e4 yr, [1e4 yr, \
+         1 Myr), [1, 10) Myr, above) {by_age:?}; within [1e4 yr, 10 Myr):\n    {}\n  (5) the \
+         brightest airless silicate regolith still weathered, about a Sun, {:.4}: {}\n  (6) the largest moves against Held: A {:.4}: {}\n      T_eq {:.3} K: {}\n    \
+         against as built: A {:.4}: {}\n      T_eq {:.3} K: {}\n    state flips against Held: \
+         {}\n      {}\n  the stop condition's moves elsewhere: {}; above 0.11 under 1 Myr: {}",
+        on_arm.values().map(|entry| entry.0).sum::<usize>(),
+        arm_lines.join("\n    "),
+        below_lines.join("\n    "),
+        named.join("\n      "),
+        near_the_step.join("\n    "),
+        brightest.0,
+        brightest.1,
+        largest[0].0,
+        largest[0].1,
+        largest[1].0,
+        largest[1].1,
+        largest[2].0,
+        largest[2].1,
+        largest[3].0,
+        largest[3].1,
+        flips.len(),
+        flips.join("\n      "),
+        stop.len(),
+        above.len(),
+    );
+    assert_eq!(
+        stop,
+        Vec::<String>::new(),
+        "the fix moved a body off the new arm"
+    );
+    assert_eq!(
+        above,
+        Vec::<String>::new(),
+        "an airless silicate lid under 1 Myr above 0.11"
+    );
+    assert!(!on_arm.is_empty());
 }

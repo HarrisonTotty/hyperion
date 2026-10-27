@@ -502,14 +502,14 @@ fn under_the_batch_the_snapshots_do_not_depend_on_their_order() {
         let mut reversed: Vec<String> = systems.iter().rev().map(snapshot).collect();
         reversed.reverse();
         for (k, (a, b)) in forward.iter().zip(&reversed).enumerate() {
-            assert!(a == b, "system {k} moved with the order");
+            assert_eq!(a, b, "system {k} moved with the order");
         }
         let first = snapshot(&systems[0]);
         // Another system between, whose snapshot is not read.
         let between = snapshot(&systems[1]);
-        assert!(between == forward[1], "a later run moved");
-        assert!(first == snapshot(&systems[0]), "a second run moved");
-        assert!(first == forward[0], "a later run moved");
+        assert_eq!(between, forward[1], "a later run moved");
+        assert_eq!(first, snapshot(&systems[0]), "a second run moved");
+        assert_eq!(first, forward[0], "a later run moved");
     });
 }
 

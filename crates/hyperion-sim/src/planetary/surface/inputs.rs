@@ -1489,6 +1489,7 @@ fn condensates_of(surface: &Surface) -> impl Iterator<Item = Condensate> + '_ {
 /// every ice into the surface (the ices' shares summing above 1, P14.T24.b's `within_the_surface`),
 /// the trapped part is scaled alike, ice share ÷ entry area, and held to the ice's share, so that it
 /// stays a part of the ice R09 reads ([`CoarseInputs::ices`]); a part that comes to 0 is left out.
+#[must_use]
 fn trapped_of(surface: &Surface) -> Vec<AreaShare> {
     let ices = surface.figures().surface_ices();
     surface
