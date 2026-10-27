@@ -145,12 +145,20 @@ event_tags! {
     0x0201 => TIDAL_DISRUPTION = tags::CENTRE_EV_TIDAL_DISRUPTION;
 
     // Plan 14: bodies, block 0x0400–0x04FF (plan 14, design note 15). P14.T31.a registers 0x0400,
-    // 0x0401 and 0x0404; 0x0402 and 0x0403 stay reserved for P14.T31.b's storms.
+    // 0x0401 and 0x0404, and P14.T31.b 0x0402 and 0x0403; 0x0405–0x04FF stay free for later body
+    // events.
     /// Impacts on a body, in bins of a Julian year on the body's ID (Poisson bins; P14.T31.a).
     0x0400 => BODY_IMPACT = tags::BODY_IMPACT;
     /// Volcanic eruptions on a body, in bins of a week on the body's ID (Poisson bins;
     /// P14.T31.a).
     0x0401 => BODY_ERUPTION = tags::BODY_ERUPTION;
+    /// The great storms of a giant planet, one a cycle of its orbital period on the body's ID
+    /// (monotone phase; P14.T31.b).
+    0x0402 => BODY_STORM = tags::BODY_STORM;
+    /// The global dust storms of a dry, thin-aired planet, at most one a cycle of its orbital
+    /// period on the body's ID, with a skip and in the perihelion season (monotone phase;
+    /// P14.T31.b).
+    0x0403 => BODY_DUSTSTORM = tags::BODY_DUSTSTORM;
     /// The perihelion passages of a system's long-period comets, in bins of a Julian year on the
     /// system's ID (Poisson bins; P14.T31.a).
     0x0404 => SYSTEM_COMET = tags::SYSTEM_COMET;
@@ -223,13 +231,16 @@ mod tests {
         assert_eq!(in_block, [0x0200, 0x0201, 0x0202]);
     }
 
-    /// Plan 14's block holds 0x0400, 0x0401 and 0x0404 after P14.T31.a, each backed by its domain
-    /// tag; 0x0402 and 0x0403 wait for P14.T31.b and 0x0405–0x04FF stay reserved.
+    /// Plan 14's block holds 0x0400–0x0404, its five event tags of Provides, each backed by its
+    /// domain tag: P14.T31.a's 0x0400, 0x0401 and 0x0404 and P14.T31.b's 0x0402 and 0x0403.
+    /// 0x0405–0x04FF stay reserved.
     #[test]
-    fn plan_14_holds_its_t31a_tags_with_their_names() {
+    fn plan_14_holds_its_five_tags_with_their_names() {
         let plan_14 = [
             (BODY_IMPACT, 0x0400, "body.impact"),
             (BODY_ERUPTION, 0x0401, "body.eruption"),
+            (BODY_STORM, 0x0402, "body.storm"),
+            (BODY_DUSTSTORM, 0x0403, "body.duststorm"),
             (SYSTEM_COMET, 0x0404, "system.comet"),
         ];
         for (tag, number, name) in plan_14 {
@@ -237,7 +248,7 @@ mod tests {
             assert_eq!(tag.name(), name);
             assert_eq!(EventTag::from_number(number), Some(tag));
         }
-        for reserved in [0x0402, 0x0403, 0x0405] {
+        for reserved in [0x0405, 0x0406, 0x04FF] {
             assert_eq!(EventTag::from_number(reserved), None, "{reserved:#06x}");
         }
         let mut in_block: Vec<u16> = ALL
@@ -246,7 +257,7 @@ mod tests {
             .filter(|n| (0x0400..=0x04FF).contains(n))
             .collect();
         in_block.sort_unstable();
-        assert_eq!(in_block, [0x0400, 0x0401, 0x0404]);
+        assert_eq!(in_block, [0x0400, 0x0401, 0x0402, 0x0403, 0x0404]);
     }
 
     #[test]

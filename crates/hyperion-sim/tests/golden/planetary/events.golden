@@ -298,3 +298,66 @@ a lava world's listed rate (per s) = 0x3f1bbd779334ef0b  # 0.0001058201058201058
   x a year later (m) = 0x426288d89141a5ab  # 636842445325.1771
   y a year later (m) = 0xc2525902dabc90c2  # -315211082482.26184
   z a year later (m) = 0x4229d8e40d729e1e  # 55506503353.30882
+
+# the phase kinds' constants
+storms: noise amplitude (cycles) = 0x3fb645a1cac08312  # 0.087
+storms: noise lattice (cycles) 1
+storms: shortest (share) = 0x3f63a92a30553261  # 0.0024
+storms: longest (share) = 0x3f932617c1bda512  # 0.0187
+storms: equatorial weight = 0x4008000000000000  # 3.0
+storms: mid-latitude weight = 0x4000000000000000  # 2.0
+storms: polar weight = 0x3ff0000000000000  # 1.0
+dust storms: skip = 0x3fe5555555555555  # 0.6666666666666666
+dust storms: season half-width (rad) = 0x3ff921fb54442d18  # 1.5707963267948966
+dust storms: season margin = 0x3feccccccccccccd  # 0.9
+dust storms: largest noise amplitude (cycles) = 0x3fb645a1cac08312  # 0.087
+dust storms: noise octaves 2, lattice (cycles) 1
+dust storms: shortest (share) = 0x3fc47ae147ae147b  # 0.16
+dust storms: longest (share) = 0x3fcd70a3d70a3d71  # 0.23
+dust storms: season half-width at e = 0 (cycles) = 0x3fd0000000000000  # 0.25
+dust storms: noise amplitude at e = 0 (cycles) = 0x3fb645a1cac08312  # 0.087
+dust storms: perihelion contrast at e = 0 = 0x0000000000000000  # 0.0
+dust storms: season half-width at e = 0.0167 (cycles) = 0x3fcf51d21e888d1a  # 0.24468447199715443
+dust storms: noise amplitude at e = 0.0167 (cycles) = 0x3fb645a1cac08312  # 0.087
+dust storms: perihelion contrast at e = 0.0167 = 0x3fb1afc501742f40  # 0.06908828053945815
+dust storms: season half-width at e = 0.0934 (cycles) = 0x3fcc33388f0ce733  # 0.22031313881762457
+dust storms: noise amplitude at e = 0.0934 (cycles) = 0x3fb50689e17128c8  # 0.08213102106052184
+dust storms: perihelion contrast at e = 0.0934 = 0x3fdd173d8f7fdc00  # 0.45454348577135306
+dust storms: season half-width at e = 0.3 (cycles) = 0x3fc3f67a6807ed52  # 0.15595941619526826
+dust storms: noise amplitude at e = 0.3 (cycles) = 0x3fadc495f025ec32  # 0.058140454831083224
+dust storms: perihelion contrast at e = 0.3 = 0x400397829cbc14e8  # 2.4489795918367356
+dust storms: season half-width at e = 0.9 (cycles) = 0x3f83244475bf0110  # 0.009346518367124662
+dust storms: noise amplitude at e = 0.9 (cycles) = 0x3f6c8b204243954e  # 0.003484309201769043
+dust storms: perihelion contrast at e = 0.9 = 0x4076800000000002  # 360.0000000000001
+
+# storms on a Saturn-like giant
+  octaves 15
+  noise bound (cycles) = 0x4042e7c33c971d89  # 37.81064565066033
+0200080020000000.0106:0402fffffffff700 cycle -9 from T+417195067.067907489 s to T+421172743.854704056 s (+3977676.786796567 s), MidLatitude
+0200080020000000.0106:0402fffffffff800 cycle -8 from T+1447203034.187425441 s to T+1453625894.618222372 s (+6422860.430796931 s), Equatorial
+0200080020000000.0106:0402fffffffff900 cycle -7 from T+2524694972.891920320 s to T+2538178906.746951652 s (+13483933.855031332 s), Equatorial
+0200080020000000.0106:0402fffffffffa00 cycle -6 from T+3623737139.330481600 s to T+3629456414.097452200 s (+5719274.766970600 s), MidLatitude
+0200080020000000.0106:0402fffffffffb00 cycle -5 from T+4468231454.375403712 s to T+4484478550.859455978 s (+16247096.484052266 s), Equatorial
+0200080020000000.0106:0402fffffffffc00 cycle -4 from T+5382370897.267914049 s to T+5392930244.970513306 s (+10559347.702599257 s), Equatorial
+0200080020000000.0106:0402fffffffffd00 cycle -3 from T+6289439033.835660992 s to T+6292629616.184208882 s (+3190582.348547890 s), MidLatitude
+0200080020000000.0106:0402fffffffffe00 cycle -2 from T+7239271355.583191105 s to T+7254190171.100808062 s (+14918815.517616957 s), MidLatitude
+0200080020000000.0106:0402ffffffffff00 cycle -1 from T+8099922858.584952512 s to T+8115576268.404762386 s (+15653409.819809874 s), Equatorial
+0200080020000000.0106:0402000000000000 cycle 0 from T+9064221889.757625409 s to T+9070152987.516607564 s (+5931097.758982155 s), MidLatitude
+  running at T+419183905.067907489 s:
+  0200080020000000.0106:0402fffffffff700 from T+417195067.067907489 s
+
+# dust storms on a Mars-like planet
+  noise amplitude (cycles) = 0x3fb50689e17128c8  # 0.08213102106052184
+  noise bound (cycles) = 0x3fc9614c80bed014  # 0.1982818249358621
+0200080020000000.0104:0403000000000200 cycle 2 from T+126659325.044140396 s to T+136981978.781303472 s (+10322653.737163076 s)
+  true anomaly at onset (rad) = 0x3fe1e4ec402e822a  # 0.559194684367019
+0200080020000000.0104:0403000000000600 cycle 6 from T+364003172.370929880 s to T+376497937.170812908 s (+12494764.799883028 s)
+  true anomaly at onset (rad) = 0x3fe196aac61d6fd6  # 0.5496419782098154
+0200080020000000.0104:0403000000000b00 cycle 11 from T+651037584.469887468 s to T+661241468.104140532 s (+10203883.634253064 s)
+  true anomaly at onset (rad) = 0xbfe5f072c2987e0b  # -0.685601596898722
+0200080020000000.0104:0403000000000d00 cycle 13 from T+779367777.236394272 s to T+791648693.232945470 s (+12280915.996551198 s)
+  true anomaly at onset (rad) = 0x3fe11ac26f41c45d  # 0.5345165417658212
+0200080020000000.0104:0403000000000e00 cycle 14 from T+835702512.449357665 s to T+845882859.566057686 s (+10180347.116700021 s)
+  true anomaly at onset (rad) = 0x3fc362de5372f1c6  # 0.15145472597749982
+  running at T+131820651.044140396 s:
+  0200080020000000.0104:0403000000000200 from T+126659325.044140396 s

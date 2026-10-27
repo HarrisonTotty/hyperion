@@ -853,8 +853,8 @@ domain_tags! {
 
     // Plan 14, phase G (P14.T31.a): three of the five event tags the "Plan 14" heading above
     // lists, each behind its event tag in plan 06's block 0x0400–0x04FF; P14.T31.b adds
-    // `body.storm` and `body.duststorm`. Appended here, after P14.T51.f's `body.cold_traps`,
-    // because the macro's order fixes `ALL`.
+    // `body.storm` and `body.duststorm`, after `system.comet`. Appended here, after P14.T51.f's
+    // `body.cold_traps`, because the macro's order fixes `ALL`.
 
     /// Impacts on a body (P14.T31.a), behind event tag 0x0400, keyed through the event key with the
     /// body's ID as the subject: Poisson bins of a Julian year (`planetary::events::impacts`).
@@ -869,6 +869,21 @@ domain_tags! {
     /// 0x0404, keyed through the event key with the system's ID as the subject: Poisson bins of a
     /// Julian year (`planetary::events::comets`).
     SYSTEM_COMET: Event = "system.comet";
+
+    // Plan 14, phase G (P14.T31.b): the last two of the five event tags the "Plan 14" heading
+    // above lists, each behind its event tag in plan 06's block 0x0400–0x04FF. Appended here,
+    // after P14.T31.a's `system.comet`, because the macro's order fixes `ALL`.
+
+    /// The great storms of a giant planet (P14.T31.b), behind event tag 0x0402, keyed through the
+    /// event key with the body's ID as the subject: a monotone phase of the orbital period
+    /// (`planetary::events::storms`).
+    BODY_STORM: Event = "body.storm";
+
+    /// The global dust storms of a dry, thin-aired planet (P14.T31.b), behind event tag 0x0403,
+    /// keyed through the event key with the body's ID as the subject: a monotone phase of the
+    /// orbital period with a skip, held to the perihelion season
+    /// (`planetary::events::dust_storms`).
+    BODY_DUSTSTORM: Event = "body.duststorm";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1135,6 +1150,23 @@ mod tests {
         }
         assert_eq!(at(BODY_ERUPTION), at(BODY_IMPACT).map(|i| i + 1));
         assert_eq!(at(SYSTEM_COMET), at(BODY_ERUPTION).map(|i| i + 1));
+    }
+
+    /// P14.T31.b's two event tags, in the order the "Plan 14" heading lists them, appended after
+    /// P14.T31.a's `system.comet`.
+    #[test]
+    fn plan_14_registers_its_storm_tags_with_event_scope_after_the_comets() {
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        for (tag, name) in [
+            (BODY_STORM, "body.storm"),
+            (BODY_DUSTSTORM, "body.duststorm"),
+        ] {
+            assert_eq!(tag.name(), name);
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{name}");
+            assert!(at(tag) > at(SYSTEM_COMET), "{name}");
+        }
+        assert_eq!(at(BODY_STORM), at(SYSTEM_COMET).map(|i| i + 1));
+        assert_eq!(at(BODY_DUSTSTORM), at(BODY_STORM).map(|i| i + 1));
     }
 
     #[test]

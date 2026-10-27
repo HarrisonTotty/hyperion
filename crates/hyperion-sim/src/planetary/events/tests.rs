@@ -1,18 +1,21 @@
 //! Tests of the shared pieces of `planetary::events`, the fixtures the kinds' tests share, and the
-//! golden that pins all three kinds on plain inputs (P14.T31.a).
+//! golden that pins all five kinds on plain inputs (P14.T31.a and T31.b).
 
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
 use super::comets::{self, CometInputs, CometModel};
+use super::dust_storms::{self, DustStormInputs, DustStormModel};
 use super::eruptions::{self, EruptionInputs, EruptionModel};
 use super::impacts::{
     self, ImpactInputs, ImpactModel, bombardment, icy_projectiles, rocky_projectiles,
 };
+use super::storms::{self, StormInputs, StormModel};
 use super::*;
 use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
+use crate::orbit::Eccentricity;
 use crate::planetary::derive::SnowLineSide;
 use crate::planetary::hooks::figures::interior::GENERATED_EARTH_HEAT_FLOW;
 use crate::planetary::hooks::figures::tests::solar_sources;
@@ -181,6 +184,40 @@ pub(super) fn earth_eruptions() -> EruptionInputs {
     }
 }
 
+/// Saturn's sidereal orbital period, s: 10,755.70 days (NASA's Saturn fact sheet, read for the
+/// science check of P14.T31.b), 29.447 Julian years.
+pub(super) const SATURN_PERIOD: Span = Span::from_seconds(929_292_480);
+
+/// Mars's sidereal orbital period, s: 686.980 days (NASA's Mars fact sheet).
+pub(super) const MARS_PERIOD: Span = Span::from_seconds(59_355_072);
+
+/// Mars's orbital eccentricity, 0.0934 (NASA's Mars fact sheet).
+pub(super) const MARS_ECCENTRICITY: f64 = 0.0934;
+
+/// The clock origin the phase kinds' fixtures take, a little after the epoch, so that a phase's
+/// cycles are not counted from the epoch itself.
+pub(super) fn origin() -> UniverseTime {
+    UniverseTime::new(41 * 86_400 + 7_211, 0).unwrap()
+}
+
+/// A Saturn-like giant on plain inputs: Saturn's period from [`origin`].
+pub(super) fn saturn_storms() -> StormInputs {
+    StormInputs {
+        orbital_period: SATURN_PERIOD,
+        origin: origin(),
+    }
+}
+
+/// A Mars-like planet on plain inputs: Mars's period, perihelion at [`origin`] and eccentricity
+/// `e`.
+pub(super) fn mars_dust_storms(e: f64) -> DustStormInputs {
+    DustStormInputs {
+        orbital_period: MARS_PERIOD,
+        perihelion: origin(),
+        eccentricity: Eccentricity::new(e).unwrap(),
+    }
+}
+
 #[test]
 fn a_size_law_refuses_its_parts_out_of_range() {
     let km = |x: f64| Metres::new(x * 1e3);
@@ -298,7 +335,11 @@ fn surface_points_are_uniform_over_the_sphere() {
 /// over a year and a young Earth-like planet's over a tenth of a year, whose floor the bins' limit
 /// raises; an Earth's eruptions over 60 days and those running at the epoch, with an Io's
 /// and a lava world's rates; and the Sun's comets over a year, each with its orbit, nucleus and
-/// listing, and its position at perihelion and a year later.
+/// listing, and its position at perihelion and a year later. P14.T31.b's sections follow, after
+/// T31.a's, which stay as they were: the phase kinds' constants and their season and noise
+/// figures; a Saturn-like giant's storms over 300 years and the one running mid-way through the
+/// first; and a Mars-like planet's dust storms over 30 years and the one running mid-way through
+/// the first.
 #[test]
 fn events_on_bodies_are_pinned() {
     let mut w = GoldenWriter::new();
@@ -307,6 +348,7 @@ fn events_on_bodies_are_pinned() {
     pin_impacts(&mut w);
     pin_eruptions(&mut w);
     pin_comets(&mut w);
+    pin_storms(&mut w);
     golden!("planetary/events", w.as_str());
 }
 
@@ -479,4 +521,151 @@ fn pin_comets(w: &mut GoldenWriter) {
             w.f64(&format!("  z {label} (m)"), z);
         }
     }
+}
+
+/// P14.T31.b's phase kinds: their constants and season and noise figures, a Saturn-like giant's
+/// storms over 300 years and a Mars-like planet's dust storms over 30, each with the one running
+/// mid-way through its first.
+fn pin_storms(w: &mut GoldenWriter) {
+    pin_phase_constants(w);
+    pin_saturn_storms(w);
+    pin_mars_dust_storms(w);
+}
+
+/// The phase kinds' constants, and the dust storms' season and noise at five eccentricities.
+fn pin_phase_constants(w: &mut GoldenWriter) {
+    w.line("");
+    w.line("# the phase kinds' constants");
+    w.f64(
+        "storms: noise amplitude (cycles)",
+        storms::NOISE_AMPLITUDE_CYCLES,
+    );
+    w.line(&format!(
+        "storms: noise lattice (cycles) {}",
+        storms::NOISE_LATTICE_CYCLES
+    ));
+    w.f64("storms: shortest (share)", storms::MIN_DURATION_SHARE);
+    w.f64("storms: longest (share)", storms::MAX_DURATION_SHARE);
+    for (band, weight) in ["equatorial", "mid-latitude", "polar"]
+        .into_iter()
+        .zip(storms::BAND_WEIGHTS)
+    {
+        w.f64(&format!("storms: {band} weight"), weight);
+    }
+    w.f64("dust storms: skip", dust_storms::SKIP_PROBABILITY);
+    w.f64(
+        "dust storms: season half-width (rad)",
+        dust_storms::SEASON_HALF_WIDTH.value(),
+    );
+    w.f64("dust storms: season margin", dust_storms::SEASON_MARGIN);
+    w.f64(
+        "dust storms: largest noise amplitude (cycles)",
+        dust_storms::MAX_NOISE_AMPLITUDE_CYCLES,
+    );
+    w.line(&format!(
+        "dust storms: noise octaves {}, lattice (cycles) {}",
+        dust_storms::NOISE_OCTAVES,
+        dust_storms::NOISE_LATTICE_CYCLES
+    ));
+    w.f64(
+        "dust storms: shortest (share)",
+        dust_storms::MIN_DURATION_SHARE,
+    );
+    w.f64(
+        "dust storms: longest (share)",
+        dust_storms::MAX_DURATION_SHARE,
+    );
+    for e in [0.0, 0.016_7, MARS_ECCENTRICITY, 0.3, 0.9] {
+        let e = Eccentricity::new(e).unwrap();
+        w.f64(
+            &format!(
+                "dust storms: season half-width at e = {} (cycles)",
+                e.value()
+            ),
+            dust_storms::season_half_width_cycles(e),
+        );
+        w.f64(
+            &format!("dust storms: noise amplitude at e = {} (cycles)", e.value()),
+            dust_storms::noise_amplitude_cycles(e),
+        );
+        w.f64(
+            &format!("dust storms: perihelion contrast at e = {}", e.value()),
+            dust_storms::perihelion_contrast(e),
+        );
+    }
+}
+
+/// A Saturn-like giant's storms over 300 years, and the one running mid-way through the first.
+fn pin_saturn_storms(w: &mut GoldenWriter) {
+    w.line("");
+    w.line("# storms on a Saturn-like giant");
+    let saturn = StormModel::new(SEED, body(0x0106), &saturn_storms()).unwrap();
+    w.line(&format!("  octaves {}", saturn.noise().octaves()));
+    w.f64(
+        "  noise bound (cycles)",
+        saturn.noise().noise_bound_cycles(),
+    );
+    let mut listed = Vec::new();
+    storms::storms(&saturn, years(0, 300), &mut listed);
+    for storm in &listed {
+        w.line(&format!(
+            "{} cycle {} from {} to {} ({}), {:?}",
+            storm.id(),
+            storm.cycle(),
+            storm.onset(),
+            storm.end(),
+            storm.duration(),
+            storm.band()
+        ));
+    }
+    let midway = mid_way(listed[0].onset(), listed[0].duration());
+    let mut running = Vec::new();
+    storms::storms_active_at(&saturn, midway, &mut running);
+    w.line(&format!("  running at {midway}:"));
+    for storm in running {
+        w.line(&format!("  {} from {}", storm.id(), storm.onset()));
+    }
+}
+
+/// A Mars-like planet's dust storms over 30 years, and the one running mid-way through the first.
+fn pin_mars_dust_storms(w: &mut GoldenWriter) {
+    w.line("");
+    w.line("# dust storms on a Mars-like planet");
+    let mars =
+        DustStormModel::new(SEED, body(0x0104), &mars_dust_storms(MARS_ECCENTRICITY)).unwrap();
+    w.f64(
+        "  noise amplitude (cycles)",
+        mars.noise().amplitude_cycles(),
+    );
+    w.f64("  noise bound (cycles)", mars.noise().noise_bound_cycles());
+    let mut listed = Vec::new();
+    dust_storms::dust_storms(&mars, years(0, 30), &mut listed);
+    for storm in &listed {
+        w.line(&format!(
+            "{} cycle {} from {} to {} ({})",
+            storm.id(),
+            storm.cycle(),
+            storm.onset(),
+            storm.end(),
+            storm.duration()
+        ));
+        w.f64(
+            "  true anomaly at onset (rad)",
+            storm.onset_true_anomaly().value(),
+        );
+    }
+    let midway = mid_way(listed[0].onset(), listed[0].duration());
+    let mut running = Vec::new();
+    dust_storms::dust_storms_active_at(&mars, midway, &mut running);
+    w.line(&format!("  running at {midway}:"));
+    for storm in running {
+        w.line(&format!("  {} from {}", storm.id(), storm.onset()));
+    }
+}
+
+/// The instant half of `duration` after `onset`, to the whole second.
+fn mid_way(onset: UniverseTime, duration: Span) -> UniverseTime {
+    onset
+        .checked_add(Span::from_seconds(duration.seconds() / 2))
+        .unwrap()
 }
