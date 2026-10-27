@@ -2572,7 +2572,9 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
       and parallel at least its own δ inside, its cut ends at its own δ, under the limb's casing,
       there and in a 120° field with the limb by its corners; the option off leaves the limb on
       the horizon, as built; no datum over the image just under the least radius, and the datum
-      at it;
+      at it; the ruling's points, the datum at 24 and 35 device px of apparent radius and none at
+      23 and 34, at line scales of 2 and 3, the band covering at most half the disc at the least
+      radius;
     - `drawList.test.ts`: the option reaches both batches of every body, which keep their names
       and `body`, and nothing else; the list as built with it off; a body too small loses its
       batches and keeps its occluder sphere; the reaches at the overlay's casing;
@@ -15169,8 +15171,8 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     1280 × 720: at 320 × 180 the planet it hands over, 18 px across, is under the least radius,
     and no `linesSurveyed` draw was left to bind the mask.
   - _`smoke/strokeContrast.ts`_ is unchanged: it builds its lists with the option off.
-  - _The guide._ The brief's bullet verbatim, with the ruling's sentence after it, straight after
-    "The datum's lines, …" at its indentation.
+  - _The guide._ The brief's bullet verbatim, straight after "The datum's lines, …" at its
+    indentation, with the ruling's sentence after its "… is never covered.", where §7 places it.
 - **Deferred findings (2026-10-13 rule) (R10.T16.g)** (recorded, not ruled; each leaves the
   algorithm and the contracts as built).
   - _The spheroid's datum_ (§3.6; main's R02.T19). On `TEST SATURN` at 482 Mm, 1920 × 1080 at 60°,

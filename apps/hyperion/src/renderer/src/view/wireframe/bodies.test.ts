@@ -743,4 +743,27 @@ describe("the datum stroked inside the figure over the image (R10.T16.g)", () =>
       expect([under.regime, under.lines]).toEqual(["graticule", 0]);
     },
   );
+
+  it.each([
+    [2, 24, 23],
+    [3, 35, 34],
+  ])(
+    "draws the datum over the image at a line scale of %s at %s px of apparent radius and none at %s px, the ruling's points",
+    (strokeScale, drawnPx, undrawnPx) => {
+      const leastPx = DATUM_OVER_IMAGE_RADIUS_PER_REACH * reachesAt(strokeScale).reachPx.thin;
+      const linesAt = (radiusPx: number): number =>
+        atShareOfTheLeastRadius(strokeScale, radiusPx / leastPx).lines;
+      expect([linesAt(drawnPx) > 0, linesAt(undrawnPx)]).toEqual([true, 0]);
+    },
+  );
+
+  it.each(VIEW_SCALES)(
+    "covers at most half the disc with the inside limb's cased band at the least radius, at a line scale of %s",
+    (strokeScale) => {
+      const reachPx = reachesAt(strokeScale).reachPx.thin;
+      const radiusPx = DATUM_OVER_IMAGE_RADIUS_PER_REACH * reachPx;
+      // The band, 2δ wide from the limb in, covers 1 − (1 − 2δ ÷ R)² of the disc.
+      expect(1 - (1 - (2 * reachPx) / radiusPx) ** 2).toBeLessThanOrEqual(0.5 + 1e-12);
+    },
+  );
 });
