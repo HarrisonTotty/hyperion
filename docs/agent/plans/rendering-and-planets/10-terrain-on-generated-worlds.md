@@ -14761,3 +14761,115 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _A patch of nine_ (decision-r10-t2-weights §3): the Earth's level-4 patch (PosX, 4, 2, 1),
     where a coast between two crusts meets a glaciated range, needs nine. T6.a's bake keeps the
     eight of largest summed bytes, and the test admits that patch by name at nine.
+- **Deviations in T5's `sample_worlds()` follow-up, as built** (2026-10-26; lane r10-worlds, begun
+  on `rendering-and-planets` at `f2331483` and fast-forwarded to `5d9d26e7`, which moves no coarse
+  field: no coarse golden, nothing in the surface crate; `GENERATOR_VERSION` 23, no bump). Test code
+  and this record; nothing generated moves. The figures are at 23. The coarse fields move at 24 by
+  P14.T53.a's water term, so R10.T15.b re-records them at 24 (main's brief), and R09's follow-up on
+  the closed forms (decision-r10-t2-weights §2.5, held for decision-r09-channel-term.md) re-measures
+  them first.
+  - _What moved._ `crates/hyperion-sim/tests/surface_reading_worlds.rs`, the plan's binary, held
+    the synthetic worlds' pooled case. It now adds the case on R09.T16's `sample_worlds()`, through
+    `tests/common/surface_worlds.rs`'s `sample_world(name)` and `SampleWorld::field()`
+    (`mod common;` under `#[expect(dead_code, …)]`). The pooled measurement of one world and survey
+    is now `pool_survey(field, cells, metres, rng, label)`, which both cases call.
+  - _The synthetic case_, `an_orbital_survey_s_quoted_sigma_holds_pooled_on_every_world`, keeps its
+    name, its draws and its `CRATER_GAP`. The HEAD binary, run beside it on the same tree under a
+    temporary name (deleted after), gives the same eight lines to the fourth decimal, so the
+    refactor moves nothing. Its figures (below) differ from the 2026-10-14 table's, by the
+    synthesis's changes since, not by this follow-up.
+  - _The sample worlds' case._ Each world has one slow test,
+    `an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_<world>_sample_world`,
+    `#[ignore = "slow: …"]`, each paying its own pass, over `assert_the_sigma_holds(&SampleWorld)`.
+    - It takes 200 cells of the field's level at random and 100 points a cell, at the 100 m and
+      1 km surveys, each read through a client's `PartialField` from the payload.
+    - It holds them at the plan's 10% in RMS ÷ σ and 15% in var z, but for `STYLE_GAP`, below.
+    - One fast test, `every_sample_world_has_a_reading_test`, checks with no pass that the six names
+      the slow tests look up (`TESTED`), sorted, are `sample_worlds()`'s names sorted.
+  - _The sampler_ of a sample world's cells and points is the testkit's `Lcg`, seeded by FNV-1a 64
+    over its name, with this binary's `SAMPLES` in place of the offset basis, as T1.b's and T3's
+    binaries have theirs. The detail seed `DETAIL` is the synthetic case's.
+  - _`STYLE_GAP`, pinned as measured_ (main's acceptance, 2026-10-26, under decision-r10-t2-weights
+    §2.4's rule for a pin). Three cases miss the plan's 15% in var z:
+    - the reference Earth at 100 m (1.1772) and at 1 km (1.1584);
+    - the locked Earth at 100 m (1.1658).
+
+    Each has its RMS ratio within 1% of 1. They are held to var z in [0.85, 1.18]: the plan's
+    tolerance from below, so that a σ quoted too high still fails, and from above the largest
+    measured, rounded up to the next 0.01. The bound is in one place (`STYLE_GAP`, `STYLE_GAP_Z`),
+    for R09's follow-up to re-pin or remove. Every other case is held at the plan's bounds.
+
+  - _The figures_ (the slow-test profile under nextest at four threads, `CPUQuota=400%`, at a
+    1-minute load of 4.8 at the run's start and 11.9 at its end):
+
+    | World               | Survey | RMS ÷ σ | var z  |
+    | ------------------- | ------ | ------- | ------ |
+    | `earth_like`        | 100 m  | 0.9954  | 1.1772 |
+    | `earth_like`        | 1 km   | 1.0086  | 1.1584 |
+    | `mars_like`         | 100 m  | 0.9999  | 0.9461 |
+    | `mars_like`         | 1 km   | 0.9741  | 0.9456 |
+    | `moon_like`         | 100 m  | 0.9957  | 0.9915 |
+    | `moon_like`         | 1 km   | 1.0044  | 1.0088 |
+    | `ceres_like`        | 100 m  | 1.0118  | 1.0238 |
+    | `ceres_like`        | 1 km   | 1.0224  | 1.0454 |
+    | `europa_like`       | 100 m  | 0.9911  | 0.9823 |
+    | `europa_like`       | 1 km   | 0.9951  | 0.9901 |
+    | `locked_earth_like` | 100 m  | 0.9952  | 1.1658 |
+    | `locked_earth_like` | 1 km   | 0.9873  | 1.0151 |
+
+    The pooled σ runs from 0.70 m (Ceres at 100 m) to 30 m (the Moon and Ceres at 1 km). The sample
+    Moon and Ceres hold the plan's 15% without the synthetic Ceres's crater gap, their 1 km var z
+    being 1.009 and 1.045.
+
+    The synthetic case on the same run:
+
+    | World      | Survey | RMS ÷ σ | var z  |
+    | ---------- | ------ | ------- | ------ |
+    | Earth-like | 100 m  | 0.9828  | 0.9389 |
+    | Earth-like | 1 km   | 0.9870  | 0.9733 |
+    | Mars-like  | 100 m  | 0.9883  | 0.9488 |
+    | Mars-like  | 1 km   | 1.0217  | 1.0141 |
+    | Moon-like  | 100 m  | 1.0247  | 1.0418 |
+    | Moon-like  | 1 km   | 1.0000  | 0.9986 |
+    | Ceres-like | 100 m  | 1.0194  | 1.0393 |
+    | Ceres-like | 1 km   | 1.0867  | 1.1808 |
+
+    Its `CRATER_GAP` case is the last row, inside [0.85, 1.25].
+
+  - _Times_ (provisional: the same run, each test's own, at a 1-minute load from 4.8 to 11.9):
+    - the sample worlds: `…_mars_like_…` 452.8 s, `…_moon_like_…` 75.8 s, `…_ceres_like_…` 63.1 s
+      and `…_europa_like_…` 49.9 s; the reference Earth 80.4 s and the locked Earth 41.8 s, each
+      with its pass, both failing then on var z before `STYLE_GAP`, and with it 106.6 s and 54.2 s
+      by name, passing (at a load of about 16);
+    - the synthetic case, 539.0 s (2026-10-14: 577 s);
+    - the slow pass's native hold gains about 13 minutes from the six sample-world tests.
+  - _Acceptance, as built._ `just test-slow -E 'binary(surface_reading_worlds)'` selects the seven
+    slow tests (it runs the ignored alone). The fast `every_sample_world_has_a_reading_test` runs in
+    the default suite, under
+    `cargo test -p hyperion-sim --features testing --test surface_reading_worlds`. By name, the
+    slow ones run with
+    `cargo nextest run -p hyperion-sim --features testing --cargo-profile slow-test --profile slow`
+    and `--test surface_reading_worlds --run-ignored only`.
+  - _The gate's plan_ is #99's and #101's width, for their reason: the binary's new `mod common;`.
+- **Deferred findings (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)** (recorded, not
+  ruled; each leaves the algorithm and the contracts as built).
+  - _The quoted σ is low at some points of the Earths_ (`STYLE_GAP`, above; owner R09; the cause:
+    the channels', not settled). The three misses have var z 16–18% above 1 with RMS ÷ σ within
+    1%. That is the signature of z-scores large where σ is small, which raises their variance
+    without moving the pooled RMS. The gap is named for decision-r10-t2-weights §2's cause, R09's
+    level-keyed forms taking each cell's own relief style while the synthesis interpolates the
+    styles. But at two of the Earth's shelf texels, at uniform styles, R10.T2's follow-up found the
+    channels' term instead, +432 m and +102 m against a cell σ of 18–26 m (that follow-up's
+    deferred findings, "_The cause, re-probed_"); main has a decision agent on it
+    (decision-r09-channel-term.md). These three cases were not probed point by point. A 400-point
+    probe of (finest − level n) ÷ `omitted_rms` found var z 0.84–0.99 on the reference Earth at
+    levels 8 and 11; on the locked Earth 1.3 at level 8 and 11.4 at level 11, from one point at
+    65σ; and about 1 on the other worlds. The lever is R09's follow-up on the closed forms, held by
+    main until the cause is settled; it re-measures this table and re-pins or removes `STYLE_GAP`.
+    The readout quotes too small a σ at those points, the unsafe side, while the pooled RMS agrees
+    within 1%.
+  - _`STYLE_GAP`'s headroom at 24._ The bound, 1.18, sits 0.0028 above the largest measured. The 24
+    bump moves the Earths' coarse fields (P14.T53.a's water term), so the three cases may pass or
+    miss it then, and T2's figures move too. Neither binary is on `prebless-24-list.md`. Asked of
+    main: a by-name re-run of both binaries at 24's bless, re-pinning or removing `STYLE_GAP`
+    there.

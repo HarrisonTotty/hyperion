@@ -3,22 +3,36 @@
 //! quoted elevation is within 10% of the pooled quoted σ, and the points' z-scores, each by its
 //! cell's σ, have unit variance within 15%. The quoted σ is R09's level-keyed `omitted_rms` at the
 //! reading's level, whose small craters count the sharpening of the octaves the level keeps
-//! (R09.T7.h). One case, the Ceres-like world at the 1 km survey, holds its z-scores' variance to a
-//! wider bound for its heavy-tailed craters (`CRATER_GAP`).
+//! (R09.T7.h). One case, the synthetic Ceres-like world at the 1 km survey, holds its z-scores'
+//! variance to a wider bound for its heavy-tailed craters (`CRATER_GAP`), and three sample-world
+//! cases, the reference Earth's and the locked Earth's, to one for the closed forms' cell styles
+//! (`STYLE_GAP`).
 //!
-//! It runs on the four bodies of R09's synthetic worlds (`hyperion_surface::testing`, under the
-//! sim's `testing` feature), each surveyed through a client's own field: a payload of 200 cells at
-//! the survey's code, with their margin, decoded into a `PartialField`, as the client holds it.
-//! R09.T16's `sample_worlds()` (`tests/common/surface_worlds.rs`) joins them when it lands, under
-//! the same task ID (the plan's order of tasks); until R09.T11–T16 fill the coarse pass, the
-//! reference worlds have no ground finer than their cells, and so no uncertainty to test.
+//! Each world is surveyed through a client's own field: a payload of 200 cells at the survey's code,
+//! with their margin, decoded into a `PartialField`, as the client holds it. The worlds are the
+//! four bodies of R09's synthetic worlds (`hyperion_surface::testing`, under the sim's `testing`
+//! feature), in one test, and R09.T16's `sample_worlds()` (`tests/common/surface_worlds.rs`): the
+//! reference Earth, Mars, Moon and Ceres, the icy moon `europa_like` and the locked
+//! `locked_earth_like`, each run through the whole coarse pass under `reference::SEED`, each in a
+//! test of its own, since under nextest each test pays for the passes of the worlds it reads. A
+//! sample world's cells and points come from a sampler seeded by its name ([`sampler`]).
 //!
-//! Slow: `just test-slow -E 'binary(surface_reading_worlds)'`.
+//! Every pooled case is slow: `just test-slow -E 'binary(surface_reading_worlds)'`, or by name with
+//! `cargo nextest run -p hyperion-sim --features testing --cargo-profile slow-test --profile slow
+//! --test surface_reading_worlds --run-ignored only`. The one fast test checks that every sample
+//! world has its slow test.
 #![cfg(feature = "testing")]
+
+#[expect(
+    dead_code,
+    reason = "the readings' tests use only the sample worlds of the shared helpers"
+)]
+mod common;
 
 use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 
+use common::surface_worlds::{SampleWorld, sample_world, sample_worlds};
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::Metres;
 use hyperion_surface::cube::{Face, FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
@@ -34,6 +48,24 @@ use hyperion_testkit::lcg::Lcg;
 
 /// The detail seed the worlds' ground is drawn with.
 const DETAIL: DetailSeed = DetailSeed::new(0x7265_6164_696e_6773);
+
+/// The seed of a sample world's cells and points, into which its name is folded ([`sampler`]).
+const SAMPLES: u64 = 0x7265_6164_7361_6d70;
+
+/// The FNV-1a 64 prime (Fowler, Noll and Vo), the testkit's `f64_digest`'s, which folds a world's
+/// name into [`SAMPLES`].
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// The sample worlds, each with a slow test of its own.
+const EARTH: &str = "earth_like";
+const MARS: &str = "mars_like";
+const MOON: &str = "moon_like";
+const CERES: &str = "ceres_like";
+const EUROPA: &str = "europa_like";
+const LOCKED_EARTH: &str = "locked_earth_like";
+
+/// The sample worlds the slow tests run, one each.
+const TESTED: [&str; 6] = [EARTH, MARS, MOON, CERES, EUROPA, LOCKED_EARTH];
 
 /// The bodies of the synthetic worlds, which have ground finer than their cells.
 const BODIES: [SyntheticWorld; 4] = [
@@ -72,6 +104,26 @@ const CRATER_GAP: (SyntheticWorld, usize) = (SyntheticWorld::CeresLike, 1);
 /// below, so that a σ quoted too high still fails, and from above 1.176, measured with R09.T7.h,
 /// with headroom for a change of seed.
 const GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.25;
+
+/// The sample-world cases, each a world's name and a survey's index in [`SURVEYS_M`], whose
+/// z-scores' variance is held to [`STYLE_GAP_Z`] rather than the plan's 15%: the reference Earth at
+/// both surveys and the locked Earth at 100 m, at 1.1772, 1.1584 and 1.1658 (2026-10-26, generator
+/// version 23), each with its RMS ratio within 1% of 1 and held at the plan's 10%.
+///
+/// The ground a level leaves out is wider than the cell's σ at some points of the Earths, which
+/// raises the z-scores' variance where σ is small and barely moves the pooled RMS. The gap is named
+/// for decision-r10-t2-weights §2's cause, R09's level-keyed forms reading each cell's own relief
+/// style while the synthesis interpolates the styles. At two of the Earth's shelf texels, though,
+/// R10.T2's follow-up found the channels' term instead, so the cause is open. R09's follow-up on
+/// the closed forms re-measures these figures, and R10.T15.b re-records them at 24 (plan R10's
+/// "Deferred findings (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)").
+const STYLE_GAP: [(&str, usize); 3] = [(EARTH, 0), (EARTH, 1), (LOCKED_EARTH, 0)];
+
+/// The style gap's bounds on the z-scores' variance, \[0.85, 1.18\]: the plan's tolerance from
+/// below, so that a σ quoted too high still fails, and from above the largest measured, 1.1772,
+/// rounded up to the next 0.01 (main's acceptance, 2026-10-26, by decision-r10-t2-weights §2.4's
+/// rule for a pin).
+const STYLE_GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.18;
 
 /// `count` distinct cells of `level` at random.
 fn random_cells(level: u8, count: usize, rng: &mut Lcg) -> Vec<PatchKey> {
@@ -114,6 +166,15 @@ fn client_field(field: &CoarseField, cells: &[PatchKey], code: ResolutionCode) -
     client
 }
 
+/// The sampler of the sample world named `name`: an [`Lcg`] seeded with FNV-1a 64 over the
+/// name's bytes, from [`SAMPLES`] in place of the offset basis, so that a world's cells and points
+/// depend on its name alone.
+fn sampler(name: &str) -> Lcg {
+    Lcg::new(name.bytes().fold(SAMPLES, |hash, b| {
+        (hash ^ u64::from(b)).wrapping_mul(FNV_PRIME)
+    }))
+}
+
 /// The pooled figures of one world and survey.
 #[derive(Debug, Default)]
 struct Pooled {
@@ -135,45 +196,64 @@ impl Pooled {
     }
 }
 
+/// The pooled figures of `field` surveyed at `metres` over `cells`, [`POINTS`] a cell at random
+/// from `rng`, printed under `label`.
+///
+/// # Panics
+///
+/// If a point of a surveyed cell has no reading or no σ, naming `label`, the survey and the cell.
+fn pool_survey(
+    field: &CoarseField,
+    cells: &[PatchKey],
+    metres: f64,
+    rng: &mut Lcg,
+    label: &str,
+) -> Pooled {
+    let figure = field.header().figure();
+    let code = ResolutionCode::from_resolution(Metres::new(metres)).unwrap();
+    let client = client_field(field, cells, code);
+    let synth = Synthesiser::new(&client, DETAIL);
+    let mut cache = SynthCache::new();
+    let mut pooled = Pooled::default();
+    for &cell in cells {
+        for _ in 0..POINTS {
+            let at = point_in(cell, rng.next_f64(), rng.next_f64());
+            let reading = surveyed_reading(&synth, &mut cache, at, SLOPE_BASELINES[0])
+                .unwrap()
+                .unwrap_or_else(|| panic!("{label} at {metres} m: no reading in {cell:?}"));
+            let dir = unit_dir(face_uv_to_xyz(at));
+            let ground = ground_at(&synth, &mut cache, &figure.point(dir)).unwrap();
+            let r = ground.height().value() - reading.elevation().value();
+            let s = reading.elevation_sigma().value();
+            assert!(s > 0.0, "{label} at {metres} m: no σ in {cell:?}");
+            pooled.residual2 += r * r;
+            pooled.sigma2 += s * s;
+            pooled.z2 += (r / s) * (r / s);
+            pooled.points += 1.0;
+        }
+    }
+    eprintln!(
+        "{label} at {metres} m: pooled RMS {:.4} m against σ {:.4} m, ratio {:.4}; z-score \
+         variance {:.4}",
+        (pooled.residual2 / pooled.points).sqrt(),
+        (pooled.sigma2 / pooled.points).sqrt(),
+        pooled.rms_ratio(),
+        pooled.z_variance(),
+    );
+    pooled
+}
+
 #[test]
 #[ignore = "slow: 200 cells × 100 points on each of four worlds at two surveys"]
 fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_every_world() {
     let mut misses = Vec::new();
     for (n, &world) in BODIES.iter().enumerate() {
         let field = synthetic_field(world);
-        let figure = field.header().figure();
         let mut rng = Lcg::new(0x7265_6164_0000 + u64::try_from(n).unwrap());
         let cells = random_cells(field.header().level().get(), CELLS, &mut rng);
         for (survey, metres) in SURVEYS_M.into_iter().enumerate() {
-            let code = ResolutionCode::from_resolution(Metres::new(metres)).unwrap();
-            let client = client_field(&field, &cells, code);
-            let synth = Synthesiser::new(&client, DETAIL);
-            let mut cache = SynthCache::new();
-            let mut pooled = Pooled::default();
-            for &cell in &cells {
-                for _ in 0..POINTS {
-                    let at = point_in(cell, rng.next_f64(), rng.next_f64());
-                    let reading = surveyed_reading(&synth, &mut cache, at, SLOPE_BASELINES[0])
-                        .unwrap()
-                        .expect("a surveyed cell has a reading");
-                    let dir = unit_dir(face_uv_to_xyz(at));
-                    let ground = ground_at(&synth, &mut cache, &figure.point(dir)).unwrap();
-                    let r = ground.height().value() - reading.elevation().value();
-                    let s = reading.elevation_sigma().value();
-                    assert!(s > 0.0, "{world:?} at {metres} m: no σ in {cell:?}");
-                    pooled.residual2 += r * r;
-                    pooled.sigma2 += s * s;
-                    pooled.z2 += (r / s) * (r / s);
-                    pooled.points += 1.0;
-                }
-            }
+            let pooled = pool_survey(&field, &cells, metres, &mut rng, &format!("{world:?}"));
             let (rms, z) = (pooled.rms_ratio(), pooled.z_variance());
-            eprintln!(
-                "{world:?} at {metres} m: pooled RMS {:.4} m against σ {:.4} m, ratio {rms:.4}; \
-                 z-score variance {z:.4}",
-                (pooled.residual2 / pooled.points).sqrt(),
-                (pooled.sigma2 / pooled.points).sqrt(),
-            );
             let z_within = if (world, survey) == CRATER_GAP {
                 GAP_Z.contains(&z)
             } else {
@@ -188,4 +268,79 @@ fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_every_world() {
         }
     }
     assert!(misses.is_empty(), "outside the tolerances: {misses:#?}");
+}
+
+/// Holds the pooled σ of `world` at both orbital surveys to the plan's tolerances, 10% in the RMS
+/// ratio and 15% in the z-scores' variance, the [`STYLE_GAP`] cases' variance to [`STYLE_GAP_Z`].
+fn assert_the_sigma_holds(world: &SampleWorld) {
+    let name = world.name();
+    let field = world.field();
+    let mut rng = sampler(name);
+    let cells = random_cells(field.header().level().get(), CELLS, &mut rng);
+    let mut misses = Vec::new();
+    for (survey, metres) in SURVEYS_M.into_iter().enumerate() {
+        let pooled = pool_survey(field, &cells, metres, &mut rng, name);
+        let (rms, z) = (pooled.rms_ratio(), pooled.z_variance());
+        let z_within = if STYLE_GAP.contains(&(name, survey)) {
+            STYLE_GAP_Z.contains(&z)
+        } else {
+            (z - 1.0).abs() <= Z_TOLERANCE
+        };
+        if (rms - 1.0).abs() > RMS_TOLERANCE || !z_within {
+            misses.push(format!(
+                "{name} at {metres} m: RMS ÷ σ {rms:.4}, var z {z:.4}"
+            ));
+        }
+    }
+    assert!(misses.is_empty(), "outside the tolerances: {misses:#?}");
+}
+
+#[test]
+fn every_sample_world_has_a_reading_test() {
+    let mut tested = TESTED.to_vec();
+    let mut names: Vec<&str> = sample_worlds().iter().map(SampleWorld::name).collect();
+    tested.sort_unstable();
+    names.sort_unstable();
+    assert_eq!(
+        tested, names,
+        "every sample world runs in exactly one of this binary's slow tests"
+    );
+}
+
+#[test]
+#[ignore = "slow: the reference Earth's coarse pass at level 8, and 200 cells × 100 points at two \
+            surveys"]
+fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_earth_like_sample_world() {
+    assert_the_sigma_holds(sample_world(EARTH));
+}
+
+#[test]
+#[ignore = "slow: 200 cells × 100 points at two surveys"]
+fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_mars_like_sample_world() {
+    assert_the_sigma_holds(sample_world(MARS));
+}
+
+#[test]
+#[ignore = "slow: 200 cells × 100 points at two surveys"]
+fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_moon_like_sample_world() {
+    assert_the_sigma_holds(sample_world(MOON));
+}
+
+#[test]
+#[ignore = "slow: 200 cells × 100 points at two surveys"]
+fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_ceres_like_sample_world() {
+    assert_the_sigma_holds(sample_world(CERES));
+}
+
+#[test]
+#[ignore = "slow: 200 cells × 100 points at two surveys"]
+fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_europa_like_sample_world() {
+    assert_the_sigma_holds(sample_world(EUROPA));
+}
+
+#[test]
+#[ignore = "slow: the reference locked Earth's coarse pass at level 8, and 200 cells × 100 points \
+            at two surveys"]
+fn an_orbital_survey_s_quoted_sigma_holds_pooled_on_the_locked_earth_like_sample_world() {
+    assert_the_sigma_holds(sample_world(LOCKED_EARTH));
 }
