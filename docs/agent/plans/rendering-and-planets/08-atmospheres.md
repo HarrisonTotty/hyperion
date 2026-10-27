@@ -497,14 +497,27 @@ export interface ThickBoundary {
 }
 export const THICK_MS_BOUNDARY: ThickBoundary; // measured in R08.T13, Design note 9
 export const CLOUD_DECK_SPLIT_OPTICAL_DEPTH = 10; // the brainstorm's, open question 3
-export const BAKE_CEILING_S = 5; // per world on the UHD 620 host, Design note 9
+export const BAKE_CEILING_S = 5; // thick/bake.ts: per world on the UHD 620 host, Design note 9
 export interface BodyCover {
   readonly cloudFraction: number; // P14.T24.b's, 0–1
 }
 export function classifyRegime(medium: AtmosphereMedium, cover: BodyCover): AtmosphereRegime; // per body, Design note 9
-/** J_ms(h, μ₀, μ_v, m), m = 0..1: the source function of orders two and higher, spectral in,
- * channels out, for one latitude band of `medium.slicing` (Design note 17). f64, in a worker. */
-export function bakeMultipleScattering(medium: AtmosphereMedium, band: number): MsSourceTable;
+/** Everything of a bake but the band (R08.T14.b, as built): the spectral column's optics in the
+ * bins, the layers, and each light's exponential sums and conversion. */
+export function prepareBake(
+  column: SpectralColumn, // thick/spectralColumn.ts: the drawn medium's terms by their sources
+  lights: ReadonlyArray<ThickBakeLight>, // a spectrum and its absorbers' bin curves each
+  grid?: ThickBakeGrid, // Design note 9's by default
+  options?: ExpSumOptions, // thick/expSum.ts: the fits' tolerance and cap
+): PreparedBake;
+/** J_ms(h, μ₀, μ_v, m), m = 0..1: the emission of orders two and higher, m⁻¹ sr⁻¹ per unit of the
+ * star's irradiance, spectral in, channels out, one table a light, for one latitude band of
+ * `gravity.slicing` (Design note 17). f64, in the optics worker (`thick-bake`). */
+export function bakeMultipleScattering(
+  prepared: PreparedBake,
+  body: ThickBakeBody, // the figure, the gravity and R_ref
+  band: number,
+): MsSourceTable;
 /** Above: the deck as a reflecting boundary; below: downwelling radiance. One latitude band. */
 export function bakeDeck(medium: AtmosphereMedium, deckAltitudeM: number, band: number): DeckTables;
 /** ΔJ_pol(h, μ₀, μ_v, m), m = 0..2: the vector-minus-scalar source function (I) of one 8-stream
@@ -517,7 +530,9 @@ export function bakePolarisationCorrection(
 ```
 
 Files: `thick/regime.ts` (R08.T13), `thick/discreteOrdinates.ts` and `thick/bake.ts` (R08.T14),
-`thick/polarisation.ts` (R08.T14.e), `thick/deck.ts` (R08.T15).
+with `thick/spectralColumn.ts`, `thick/expSum.ts`, `thick/sphericalBeam.ts` and
+`thick/binConversion.ts` (R08.T14.b), `thick/polarisation.ts` (R08.T14.e), `thick/deck.ts`
+(R08.T15).
 
 ### For R07's analytic disc (`discReflectance.ts`)
 
@@ -2015,10 +2030,11 @@ The order:
   T12.b.2, its cloudy and hazy cases (the Venus-class and Titan-class cases and the decks), needs
   T12.f and T5.b's files, and holds R08.T5.e, after its Venus cases are written and before their
   references are traced. Each part builds its own media, which T10.a's kept scenes read.
-- T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13: T14.a, T14.b and T14.c in
-  turn; T14.e (the polarisation correction) after T14.a and T14.b; T14.f (its read path and the
-  vector gates) after T13, T14.c and T14.e; and T14.d (the gates) after T14.f. T15 follows T14,
-  whose solver it uses.
+- T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14.a, T14.b and T14.c follow in turn and read
+  nothing of T13, so they need not wait for it (`decision-r08-t14a-scope.md`, §1 and ruling 1);
+  T14.e (the polarisation correction) follows T14.a and T14.b; T14.f (its read path and the vector
+  gates) follows T13, T14.c and T14.e; and T14.d (the gates) follows T14.f. T15 follows T14, whose
+  solver it uses.
 - T16 needs T8 and T15. It runs on the hand giant fixture, and re-runs on plan 14's envelope when
   P14.T24.d is on the wire. T18 needs T6, T9, T14 and T16.b. T19 needs P14.T49.a's fixture and
   T5.b, and grows with the registry. Both precede T17. T17 closes.
@@ -5378,6 +5394,10 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   the full solve's to 1%; the conversion of a flat spectrum is the identity; a one-band body bakes
   once, and a two-band body's bands differ in vertical optical depth by their gravity ratio.
   Acceptance: `pnpm test`.
+  - Ruled 2026-10-21 (decision-r08-t14a-scope, §1 and ruling 1): T14.b follows T14.a and starts
+    before T13, which it does not read. As built, the bake takes a spectral column of its own,
+    the drawn medium's terms by their sources, which R08.T14.c has the assembly expose (Risks,
+    "Deviations in T14.b, as built").
 - **R08.T14.c The read path.** The sky-view, aerial-perspective and march kernels read the thick
   table in place of σ_s·Ψ_ms·p_u (catalogued), one layer a band, interpolated at the sample's
   latitude. `TABLE_SIZES` gains the thick size, and the table is cached per world.
@@ -17922,6 +17942,228 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     a block elimination would cost less than the general banded LU, whose bandwidth 3N − 1 grows
     with the streams (2–3.4 s a 64-stream, 64-mode solve of 8 layers). At 16 streams it is not
     needed (54 ms for the ruling's solve); T14.e's vector mode may want it.
+- **Deviations in T14.b, as built** (2026-10-26; `thick/bake.ts`, `thick/spectralColumn.ts`,
+  `thick/expSum.ts`, `thick/sphericalBeam.ts` and `thick/binConversion.ts`, each with its test,
+  `thick/deltaM.test.ts`, `thick/bakeJob.test.ts`, `thick/bakeFixtures.ts` and
+  `thick/bake.bench.ts`; `opticsJobs.ts`, `opticsMessages.ts`, `optics.worker.ts`'s docs and
+  `tsconfig.worker.json`; decision-r08-t14a-scope).
+  - _The signatures._ Two calls in place of the sketch's `(medium: AtmosphereMedium, band)`:
+    - `prepareBake(column, lights, grid?, options?): PreparedBake`, with `column: SpectralColumn`,
+      `lights: ReadonlyArray<ThickBakeLight>`, `grid = THICK_BAKE_GRID` and
+      `options = EXP_SUM_OPTIONS`;
+    - then `bakeMultipleScattering(prepared: PreparedBake, body: ThickBakeBody, band: number)`,
+      which gives an `MsSourceTable`.
+    - The medium's terms are three-channel, so the sketch could not be spectral; the bins' optics
+      (Mie) and the fits do not depend on the band, so they are prepared once for every band.
+    - A `ThickBakeLight` is `{ spectrum, absorbers }`, one `AbsorberBinCurves` an absorber term in
+      the column's order. A `ThickBakeBody` is the assembly's `{ figure, gravity }` with R_ref as
+      `bottomRadiusM`. `thickBakeBands(body)` gives `tablesPlanOf`'s bands, held equal by a test,
+      since the worker may not import the tables.
+    - `thick/bake.ts` also exports `BAKE_CEILING_S` (5), `THICK_BAKE_STREAMS` (16),
+      `THICK_BAKE_MODES` (2), `THICK_BAKE_MAX_TERMS_PER_BIN` (64), `THICK_BAKE_GRID`, `deltaMLayer`
+      and `bakeBinSolve` (one solve and its source, for the tests).
+  - _The spectral column_ (`thick/spectralColumn.ts`).
+    - `SpectralColumn` is `{ name, topHeightM, groundAlbedo, terms, pressureBar? }`. Each
+      `SpectralTerm` is the drawn term's `name` and `density` with a `SpectralSource`: `molecular`
+      (the gas fractions and n_s), `thomson` (n_e), `aerosol` (the mode's `AerosolParticles` and
+      σ_ext(550) at relative density 1) or `absorber` (its amount at relative density 1).
+    - `spectralOptics(column, wavelengths)` takes `molecularMixture`, σ_T, and `aerosolModeOptics`
+      with `aerosolPhaseTable` (the mode's optics in all three of its channels, channel 0 read)
+      and `aerosolTerm`'s scale in its own order of operations. At `CHANNEL_WAVELENGTHS_NM` every
+      coefficient, ρ and table entry is the drawn term's to the bit.
+    - No rule of `assemble.ts` is repeated: the term selection, `MEDIUM_TERM_LIMIT`, the modes'
+      guards and names and the deck's cuts stay the assembly's, and the column takes the terms it
+      drew.
+    - _The hand-off for T14.c._ `DrawnMedium` gains `sources: ReadonlyArray<SpectralSource>`, one a
+      medium term in order: n_s from the column, n_e and an aerosol's σ_ext(550) as `thomsonTerm`
+      and `aerosolTerm` form them, the particles as `particlesOf` forms them, and an absorber
+      term's amount from the term. `spectralColumnOf(medium, sources)` lays them beside the terms.
+      None can be read from the assembly's exports without repeating its rules: the fixtures read
+      n_s from the drawn term's green coefficient over σ_mix there, which holds only to rounding.
+    - _Also for T14.c._ A kept scene's medium is handed to the cache whole and never assembled, so
+      it has no record for a request's `input`: T14.c gives kept scenes their own path. A bake whose
+      worker is lost, or whose k-tables fail to load, reaches the pool as the worker's error, not
+      `thick-bake-failed`: T14.c shows `ATMOSPHERE: APPROXIMATE` for those too.
+  - _The table_ (`MsSourceTable`, one a band, an `MsSourceSlot` a light).
+    - A slot's `values` are a `Float32Array`, `[altitude][μ₀][μ_v][m][RGB]` row-major: 33
+      altitudes, every second interface of the solve's 64 layers in h\* from the ground
+      (`altitudesM`, per body); 32 μ₀ at (s + ½) ÷ 32; 16 travel cosines at ±(v + ½) ÷ 8, the
+      downward half first, so that an observer looking at elevation e reads −sin e; m = 0 and 1.
+      The cosines are cells' centres, which a texture's filter with clamped edges reads directly.
+    - 405,504 B a band and light as `f32` and 270,336 B as `rgba16float`, Design note 9's 0.26 MB
+      at 33 altitudes for its 32. The solve is `f64`.
+    - Each light slot holds its own table, since μ₀ and the curves of growth are a sun's. Two suns
+      double Design note 11's J_ms row: a four-band Saturn-class world's comes to 2.16 MB, for
+      R08.T11 and T14.c's `TABLE_SIZES`.
+    - Stored is E, the emission of orders two and up per unit of true length at h\*, per
+      steradian, per unit of the star's irradiance normal to its beam at the top: m⁻¹ sr⁻¹, which
+      the kernels multiply by the star's colour in place of σ_s·Ψ_ms·p_u. E = E⁰ + E¹ cos Δφ, Δφ the
+      azimuth looked toward less the sun's.
+  - _The layers._ 64, evenly in ξ = ½(1 − τ(h) ÷ τ(0)) + ½ h ÷ top, τ the vertical extinction
+    above h at 570 nm without the gases. The table's rows step 2.8–13 km below the Venus-class
+    cloud, 1.4–3.7 km through it (about 67–94 km on the isothermal seam's column) and 17 km above
+    it, and 1.3–24 km on the Titan-class column. Each layer's terms are their exact ∫ρ dh over it,
+    mixed by their scattering; E takes the medium's own optics at each altitude.
+  - _The beam_ (`thick/sphericalBeam.ts`).
+    - T_p = e^(−τ_s), τ_s the slant depth from the chords through the band's homogeneous shells of
+      R_b + h\* (R_b = s_b √(MN), or R_ref for one band), and λ_p the average secant
+      (τ_s(p + 1) − τ_s(p)) ÷ τ_p, so that T_{p+1} = T_p e^(−λ_p τ_p).
+    - μ₀'s domain is (0, 1]. A ray with μ₀ > 0 climbs from its point, so the beam is defined at
+      every height and no entry is 0 for want of it. μ₀ ≤ 0, twilight's lit upper air included,
+      lies outside the table: T14.c and T14.d judge it. (Loughman et al. 2004's 8% at 60 km
+      tangent height is a figure for Earth's limb, which Design note 9 takes as its warning for
+      Titan: the science check, 2026-10-26.)
+    - Where τ_s falls downward (a thin layer under a thick one at a grazing sun) λ is floored at
+      10⁻⁶ and the beam catches up below: 5,406 layers of the Venus-class fixture's 34 × 32 beams,
+      withholding at most 1.1 × 10⁻¹⁶ of the beam, and none on the Titan-class.
+  - _Delta-M and Nakajima and Tanaka's corrections_ (derived here).
+    - 16 streams in all. On each layer's mixed moments f = max(χ₁₆, f_c, 0), f_c the forward
+      delta's share (R08.T5.c), and τ′, ω′ and χ′ as Wiscombe's.
+    - The kernels march with σ_ext − f_c σ_s and add the exact single scattering of their own beam
+      T_k, in place of TMS (which scatters the delta-M beam T′ by the exact phase function), so the
+      table holds no single scattering.
+    - For the kernels' extinction to carry delta-M's transport, E = σ_s[(f − f_c) I′_d(Ω) +
+      (1 − f) ∫ p′ I′_d dΩ′ + (1 − f) p′(Θ₀)(T′ − T_k)]: the truncated lobe's re-emission of the
+      diffuse field into its own direction, the smooth part's, and the aureole (the light delta-M
+      counts as beam) scattered once more.
+    - IMS is left out: the aureole scattered again inside the lobe, σ_s (f − f_c)(T′ − T_k), stays
+      within the lobe of the sun, and no table of m ≤ 1 and 16 cosines holds it. Its share of a
+      point's light, (f − f_c)(T′ − T_k) ÷ [(1 − f_c)(4π Ī′_d + T′ − T_k)], is at most 1.2% on the
+      Venus-class fixture and 5.0% on the Titan-class (`doubleForwardShare`). The science check
+      re-derived E and found it consistent, this term the only one missing.
+  - _The exponential sums_ (`thick/expSum.ts`).
+    - The method: the weights by non-negative least squares (Lawson and Hanson) at fixed k on a
+      grid of 8 a decade, kU from 10^−4.5 to 10⁵ and 0, their sum held to 1; terms dropped one at a
+      time while the largest |ΔT| over the curve's nodes stays within 2 × 10⁻³, at most 8 kept; a
+      drop that misses on the grid's k alone polished by a joint Levenberg–Marquardt of the
+      weights and ln k.
+    - The rows: the weights fitted at the row nearest the column's Curtis–Godson pressure and
+      shared; each row's k fitted alone, from its neighbour's. Each layer reads k at its own
+      Curtis–Godson pressure, ln k linear in ln p, p held as the curves' read holds it.
+    - The overlap is random, the product of the absorbers' sums, the weakest taken as one term
+      past 64 solves a bin.
+    - Under the Sun, the terms by bin and the largest |ΔT|:
+      - Titan-class CH₄ (one row): 1 2 4 3 4 3 4 3 3 4 4 3 3 3 3, 47 solves, 1.7 × 10⁻³ (bin 13);
+      - Venus-class CO₂ (30 rows): 1 1 1 1 1 1 1 1 2 3 5 5 2 7 2, 34 solves; 3.9 × 10⁻² over every
+        row (bin 13, at the rows below 0.1 bar, which hold under 0.1% of the gas), and 1.2 × 10⁻²
+        over the rows its bulk reads (the fullest layers holding 99%, `readFitError`). The k order
+        crosses at 3, 2 and 8 of its rows in bins 10, 11 and 13 (`crossedRows`; none on Titan).
+  - _The conversion and the ground_ (`thick/binConversion.ts`).
+    - X_c = Σ_b W_cb X_b ÷ C_c, W_cb the star's c̄ S Δλ over bin b's 1 nm rows
+      (⌊15 (λ − 380) ÷ 380⌋, 760 nm in the last) and C_c its colour; a flat X converts to itself.
+    - The guard: a channel whose star colour is at most 10⁻⁶ of its largest takes the spectrum's
+      mean over the bins, Σ S_b X_b ÷ Σ S_b, also the identity on a flat X.
+    - The ground: each bin's albedo linear in wavelength between the channels' wavelengths, and
+      the nearer channel's outside them.
+  - _The job._ `thick-bake` is `{ id, input, slots, bands, column, body }`. The worker forms the
+    specs (`absorberSpecsOf`), matches each absorber term to the spec of its name, forms the lights'
+    bin curves (`absorberCurvesBySun`), prepares once and bakes each band asked. It answers
+    `thick-baked` `{ id, tables }`, every buffer transferred, or `thick-bake-failed`
+    `{ id, bands, message }` for any throw of a bake, never `failed`. The other kinds are unchanged.
+  - _The tests' figures._
+    - Delta-M: the worst flux gap from the whole 64-stream solve is 1.8 × 10⁻⁴ (Henyey–Greenstein
+      g 0.85, χ₁₆ 0.074) and 1.9 × 10⁻⁴ (`sulphuric-acid-75`, r_eff 1.05 µm, at 550 nm, χ₁₆ 0.118),
+      relative to the flux or to 1% of μ₀ (a black ground's upward flux there is 0); with the same
+      moments cut at l = 15, delta-M off, 4.8 × 10⁻³ and 3.1 × 10⁻³. Both are held to 1%.
+    - The conversion: 1.3 × 10⁻¹⁵. The bands: τ₁ ÷ τ₂ = s₂ ÷ s₁ to 4.4 × 10⁻¹⁶ (Uranus, s 0.975
+      and 1.026 on spheres of 24,352 and 26,826 km), the geometry `tablesPlanOf`'s. The column
+      against the medium: 0, to the bit.
+    - The source's consistency: 2π ∫ E⁰ dμ_v at the Gauss nodes against
+      σ_s[(1 − f_c) 4π Ī′_d + (1 − f)(T′ − T_k)] from the solver's mean intensity, 1.9 × 10⁻¹⁴.
+    - E⁰ ≥ 0 at every point of both fixtures. E¹ is a signed coefficient, and E⁰ + E¹ cos Δφ dips
+      below 0 by up to 4.4% of E⁰ on the Venus-class fixture and 49% on the Titan-class (a finding
+      below).
+    - A direct quadrature of σ_s ∫ p I_d dΩ′ over the solver's own field on a Rayleigh column, at
+      Δφ 0, π ÷ 2 and π, holds E⁰ + E¹ cos Δφ to 10⁻¹², and E¹ is 0 at an overhead sun.
+  - _Timing_, provisional: the laptop's 8 threads, the benchmark on one at `nice 10`, at a 1-minute
+    load of 3.4–4.5 with #107's three-process sweep beside it, a mean of 3 each. Vitest's module
+    runner also flagged its export getters in the solver's hot loop, which a bundled worker does
+    not pay. The Titan-class row was timed with the haze at τ 3, before the science check set it
+    to 8.1; at 8.1 its terms and solves are the same.
+
+    | Fixture                 | Solves | Preparation | A band | A solve | One band | Four bands |
+    | ----------------------- | ------ | ----------- | ------ | ------- | -------- | ---------- |
+    | Venus-class, H₂SO₄ τ 30 | 34     | 9.0 s       | 2.98 s | 88 ms   | 12.6 s   | 21.5 s     |
+    | Titan-class, tholin     | 47     | 0.50 s      | 4.55 s | 97 ms   | 5.1 s    | 18.7 s     |
+    - The preparation holds the column's optics in the 15 bins, 5.6 s and 0.05 s. The bin curves
+      under the Sun, 0.58 s and 0.04 s, are formed before it and counted in "One band".
+    - "Four bands" is the bin curves and the preparation once and four bands, as one request takes
+      them; four whole bakes would be 50 s and 20 s.
+    - A first run of the benchmark at a load of 4.9–6.0, #107's four processes beside it, took
+      16.6 s and 4.45 s (Venus-class) and 0.75 s and 4.45 s (Titan-class). Under `vitest run`, the
+      module runner's export getters unflagged, a Venus-class band took 1.8 s at a load of 0.8
+      (6.1 s to prepare), and a Titan-class band at τ 8.1 took 2.4 s at a load of 3.3: 47–51 ms a
+      solve, as T14.a's 54 ms.
+    - Against `BAKE_CEILING_S` = 5 s: a Titan-class band is about at it on this laptop, a four-band
+      Saturn-class body three to four times over it, and the Venus-class over it on Mie alone (15
+      bins of the cloud's matrix at 256 angles). To be repeated on a quiet machine.
+
+  - _The fixtures_ (`thick/bakeFixtures.ts`, the science check's corrections, 2026-10-26).
+    - The Venus-class column is `venus92Detail`'s air as the assembly draws it, its CO₂ on the
+      committed line tables, with a cloud of `sulphuric-acid-75` droplets: r_eff 1.05 µm and v_eff
+      0.07 (Hansen and Hovenier 1974), from 1 bar (50.4 km in VIRA, Seiff et al. 1985) to 0.04 bar
+      (69.6 km), the measured base at 47.9 km and about 1.37 bar (Tomasko et al. 1980) left out,
+      and τ(550) 30, a test's choice inside the clouds' measured 25 at 0.63 µm (Tomasko et
+      al. 1980) and the probes' 25–40 (the brainstorm).
+    - The Titan-class column is `titanClassMethaneMedium`'s air with a tholin haze of aggregates,
+      3,000 monomers of 0.05 µm at D_f 2 (`aerosol.test.ts`'s, after Tomasko et al. 2008, not
+      read; Hörst 2017 quotes 4,000 of 0.04 µm), well mixed, at τ(550) 8.1: the column DISR
+      measured (Tomasko et al. 2008, Fig. 47, as Bazzon, Schmid and Buenzli 2014, A&A 572, A6,
+      fit it), as `hyperion-sim`'s Titan haze takes it. The first build's 3 was a third of it.
+
+  - _Sources._ Read: T14.a's solver and its record, and `aerosol.ts`, `absorbers.ts`,
+    `rayleigh.ts`, `oblate.ts`, `spectralColour.ts`, `assemble.ts` and `tables.ts`'s
+    `tablesPlanOf`. Cited, not re-read: Wiscombe 1977; Nakajima and Tanaka 1988, for TMS's and
+    IMS's roles (the source table's form is derived here); Dahlback and Stamnes 1991, by its DOI
+    record and the solver's seam; Lacis and Oinas 1991; Wiscombe and Evans 1977; Lawson and Hanson
+    1974; Levenberg 1944 and Marquardt 1963; Golub and Van Loan, §5.3. Read by the science
+    check: the DISORT report v1.1 (delta-M, eqs. 54 and 68a), Hansen and Hovenier 1974's and
+    Tomasko et al. 1980's abstracts, VIRA as EPIC transcribes it, Bazzon et al. 2014 and Hörst
+    2017 (arXiv), and Loughman et al. 2004's abstract; Dahlback and Stamnes 1991 and Tomasko et al.
+    2008 could not be reached.
+  - _Departures from the brief._
+    - The band-independent work is `prepareBake`, the band's bake `bakeMultipleScattering`.
+    - IMS is measured (`doubleForwardShare`) rather than shown negligible, and held to 2% and 6%
+      against the 1.2% and 5.0% measured. The fits are held to 2 × 10⁻³ (Titan-class), and to 0.04
+      over every row and 0.013 over the bulk's rows (Venus-class).
+    - Beside the brief's error over every row, the error over the rows the bulk reads is recorded.
+    - "Not negative" is read as E⁰ ≥ 0: E¹ is a signed coefficient, and the sum's dips below 0 are
+      recorded above and deferred below.
+    - The fixtures sit in `thick/bakeFixtures.ts`, outside `test/`, which this lane may not edit.
+- **Deferred findings (2026-10-13 rule)** (R08.T14.b). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Mie's share of the bake._ The Venus-class cloud's optics in 15 bins are most of its
+    preparation, and the matrix at 256 angles is about 80% of each call (33 ms without angles, 164
+    ms with them, at 550 nm). A Mie that gives the Legendre moments from its expansion
+    coefficients, or a worker that keeps a body's bin optics, would cut it several times;
+    `sizeDistribution.ts` lies outside this task's files.
+  - _CO₂'s low-pressure rows._ With the weights shared, the rows below 0.1 bar miss by up to 3.9%
+    in T. The layers there hold under 0.1% of the gas; weights fitted over the bulk's rows together
+    would cut it.
+  - _m ≤ 1 dips below 0._ E⁰ + E¹ cos Δφ falls below 0 by up to 49% of E⁰ (Titan-class) on the far
+    side of a forward-peaked point. T14.c's read clamps it at 0 (lean), and T14.d's gate judges
+    whether m = 1 suffices.
+  - _The altitudes are per body._ The table's altitudes follow the column's optical depth, so
+    T14.c reads them through a lookup, as the oblate body's table carries its scale heights.
+  - _One request for every band._ The preparation is per request, so T14.c asks for a body's bands
+    in one request; split over workers, each would repeat its Mie.
+  - _IMS on Titan._ Up to 5.0% of a point's light, within the haze's lobe of the sun, is left out;
+    T14.d's gate near the sun judges it.
+  - _The k order across rows._ CO₂'s fits cross at 13 of their rows in three bins. Correlated-k
+    takes each term as one g interval at every pressure; an ordered fit (each k the last one's plus
+    a positive step) would hold it, its error recorded beside this one's.
+  - _Half floats._ E is about 10⁻⁷–10⁻⁶ m⁻¹ sr⁻¹ near an Earth-like ground and far less aloft,
+    under `rgba16float`'s least normal (6.1 × 10⁻⁵): T14.c stores it with a scale a table or an
+    altitude, or in km⁻¹ (the science check).
+  - _Design note 9's Titan bullet._ It gives Loughman et al. 2004's 8% at 60 km tangent height as
+    Titan's; the paper's comparison is of Earth's limb (the science check, 2026-10-26). The warning
+    stands for Titan, its figure Earth's.
+  - _The fixtures' home._ `thick/bakeFixtures.ts` is a test fixture outside `test/`, which this lane
+    may not edit; it moves to `test/` with the next task that may, as `view/clouds/slabFixtures.ts`
+    waits to.
+  - _A Cholesky that does not throw._ `expSum.ts` keeps its own `definiteSolve` for the fit's damped
+    steps, where a matrix that is not positive definite is an outcome, since `linearAlgebra.ts`'s
+    `choleskyLower` throws; T14.a's module could give both the non-throwing form.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
