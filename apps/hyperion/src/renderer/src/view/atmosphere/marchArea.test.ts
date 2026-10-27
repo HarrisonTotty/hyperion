@@ -5,6 +5,7 @@ import { lookAlong, quaternionFromAxisAngle, rotate } from "../camera/quaternion
 import type { AtmosphereCamera, SpheroidFigure } from "./hillaire";
 import {
   MARCH_AREA_MARGIN_TEXELS,
+  MARCH_TILE_CODES,
   MARCH_TILE_REACH_TEXELS,
   MARCH_TILE_TEXELS,
   type MarchArea,
@@ -283,19 +284,32 @@ describe("the ray march's area (R08.T11.d)", () => {
       ),
     ),
   )(
-    "leaves outside %s's area no texel whose ray meets the top or whose footprint may blend, from %f radii, at the scale %f",
+    "leaves outside %s's area, and within a texel inside its edges, no texel whose ray meets the top or whose footprint may blend, from %f radii, at the scale %f",
     (body, factor, scaleOfOutput) => {
       const distanceM = body.shell.equatorialM * factor;
       const angularRadius = Math.asin(Math.min(body.shell.equatorialM / distanceM, 1));
-      const cameras = camerasAbout(distanceM, 6, angularRadius + 0.5, 1.05, viewport, 7 + factor);
+      const cameras = camerasAbout(
+        distanceM,
+        6,
+        angularRadius + 0.5,
+        1.05,
+        viewport,
+        7 + Math.round(factor * 1_000),
+      );
       let outside = 0;
       for (const camera of cameras) {
         const area = marchAreaOf(camera, body.shell, scaleOfOutput);
         const texels = marchAreaTexels(area);
         const view = viewOf(camera, body);
+        // An edge at the target's own is no edge: the composite's candidates are held to the
+        // target.
+        const x0 = texels.x0 > 0 ? texels.x0 + 1 : 0;
+        const x1 = texels.x1 < area.widthTexels ? texels.x1 - 1 : area.widthTexels;
+        const y0 = texels.y0 > 0 ? texels.y0 + 1 : 0;
+        const y1 = texels.y1 < area.heightTexels ? texels.y1 - 1 : area.heightTexels;
         for (let y = 0; y < area.heightTexels; y += 1) {
           for (let x = 0; x < area.widthTexels; x += 1) {
-            if (x >= texels.x0 && x < texels.x1 && y >= texels.y0 && y < texels.y1) {
+            if (x >= x0 && x < x1 && y >= y0 && y < y1) {
               continue;
             }
             outside += 1;
@@ -305,6 +319,65 @@ describe("the ray march's area (R08.T11.d)", () => {
       }
       // From afar most of the frame lies outside the area.
       expect(outside > 0 || factor < 4).toBe(true);
+    },
+  );
+});
+
+describe("the ray march's area at the field's edge (R08.T11.d's review)", () => {
+  // From afar a limb a tenth of a texel outside the frame's side still blends in the edge texels,
+  // whose footprints' nodes reach past the edge: the area must hold them, though no ray of the
+  // field meets the shell.
+  const [earth] = BODIES;
+  const viewport = { widthPx: 160, heightPx: 90 };
+  const tanX = Math.tan(Math.PI / 6);
+  it.each(
+    [3e8, 1e9, 3e9].flatMap((distanceM) =>
+      [0.01, 0.03, 0.05].flatMap((outsideTexels) =>
+        [-1, 1].map((side) => [distanceM, outsideTexels, side] as const),
+      ),
+    ),
+  )(
+    "leaves out no edge texel that blends, the limb just outside the frame from %f m, %f texel out on side %i",
+    (distanceM, outsideTexels, side) => {
+      if (earth === undefined) {
+        throw new Error("BODIES opens with the Earth");
+      }
+      const angularRadius = Math.asin(earth.shell.equatorialM / distanceM);
+      const turn =
+        side * (Math.atan(tanX + (outsideTexels * 2 * tanX) / viewport.widthPx) + angularRadius);
+      for (const pitch of [-0.0104, -0.013, -0.0156]) {
+        const yawed = rotate(quaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, turn), {
+          x: -1,
+          y: 0,
+          z: 0,
+        });
+        const forward = rotate(
+          quaternionFromAxisAngle({ x: -yawed.y, y: yawed.x, z: 0 }, pitch),
+          yawed,
+        );
+        const camera: AtmosphereCamera = {
+          positionM: { x: distanceM, y: 0, z: 0 },
+          orientation: lookAlong(forward, { x: 0, y: 0, z: 1 }),
+          fovXRad: Math.PI / 3,
+          viewport,
+        };
+        const area = marchAreaOf(camera, earth.shell, 1);
+        const texels = marchAreaTexels(area);
+        const view = viewOf(camera, earth);
+        for (let y = 0; y < area.heightTexels; y += 1) {
+          for (const x of [0, 1, area.widthTexels - 2, area.widthTexels - 1]) {
+            if (x >= texels.x0 && x < texels.x1 && y >= texels.y0 && y < texels.y1) {
+              continue;
+            }
+            expect({ x, y, ...texelReads(view, earth, area, x, y) }).toEqual({
+              x,
+              y,
+              meets: false,
+              blends: false,
+            });
+          }
+        }
+      }
     },
   );
 });
@@ -319,7 +392,14 @@ describe("the tile cull's kinds (R08.T11.d, decision-r08-t8-leans.md §11 Ruling
     (body, factor) => {
       const distanceM = body.shell.equatorialM * factor;
       const angularRadius = Math.asin(Math.min(body.shell.equatorialM / distanceM, 1));
-      const cameras = camerasAbout(distanceM, 4, angularRadius + 0.3, 1.05, viewport, 31 + factor);
+      const cameras = camerasAbout(
+        distanceM,
+        4,
+        angularRadius + 0.3,
+        1.05,
+        viewport,
+        31 + Math.round(factor * 1_000),
+      );
       const kinds = new Map<MarchTileKind, number>();
       for (const camera of cameras) {
         const area = marchAreaOf(camera, body.shell, 1);
@@ -396,6 +476,15 @@ describe("the tile cull's kinds (R08.T11.d, decision-r08-t8-leans.md §11 Ruling
     expect(marchAreaWgsl).toContain(
       `const MARCH_TILE_TEXELS : u32 = ${String(MARCH_TILE_TEXELS)}u;`,
     );
+    for (const [kind, name] of [
+      ["miss", "MISS"],
+      ["centre", "CENTRE"],
+      ["footprint", "FOOTPRINT"],
+    ] as const) {
+      expect(marchAreaWgsl).toContain(
+        `const MARCH_TILE_${name} : u32 = ${String(MARCH_TILE_CODES[kind])}u;`,
+      );
+    }
     expect(rayMarchCentreWgsl).toContain(
       `const MARCH_TILE_REACH_TEXELS : f32 = ${String(MARCH_TILE_REACH_TEXELS)};`,
     );

@@ -87,6 +87,11 @@ import {
   tablesFigureOf,
 } from "../view/atmosphere/hillaire";
 import {
+  MARCH_TILE_CODES,
+  MARCH_TILE_TEXELS,
+  type MarchTileKind,
+} from "../view/atmosphere/marchArea";
+import {
   grazingTwilight,
   LOW_TWIN_WORST,
   MARCH_TOLERANCE,
@@ -2400,10 +2405,11 @@ export async function checkUnreadEarth(engine: RenderEngine, checks: Checks): Pr
 // --- R08.T11.d: the march over the air's area, and the tile cull ----------------------------------
 
 /**
- * R08.T11.d's frames' size: 16:9 at 200 × 112, 25 × 14 tiles of the march on high and 13 × 7 at
- * low's half, small enough for SwiftShader to march both covers of each frame.
+ * R08.T11.d's frames' size: 16:9 at 160 × 90, 20 × 12 tiles of the march on high and 10 × 6 at
+ * low's half, small enough for SwiftShader to march both covers of each frame (at 200 × 112 the
+ * group took 57 s at a CPU quota of 400%).
  */
-const AREA_FRAME_SIZE: ViewSize = { widthPx: 200, heightPx: 112 };
+const AREA_FRAME_SIZE: ViewSize = { widthPx: 160, heightPx: 90 };
 
 /** One frame of R08.T11.d's check: its name, its setting, its camera and its surface, if any. */
 interface AreaFrame {
@@ -2419,6 +2425,8 @@ interface AreaBody {
   readonly name: string;
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
+  /** Its figure and gravity, the tables' slicing. */
+  readonly body: () => AtmosphereBody;
   readonly frames: ReadonlyArray<AreaFrame>;
 }
 
@@ -2454,21 +2462,18 @@ const AREA_FRAMES: ReadonlyArray<AreaFrame> = [
 ];
 
 /**
- * The measured Earth, whose tables hold the slot layers (the march by slot), in every frame, and
- * R05's Earth, the march over the shared read, from 10⁷ m.
+ * The measured Earth, whose tables hold the slot layers (the march by slot), in every frame. The
+ * march over the shared read takes the same two entry points over another source's read
+ * (`rayMarchCurves.wgsl`), and is left out for the part's watchdog: with R05's Earth from 10⁷ m
+ * beside it the group took 50 to 52 s at a CPU quota of 400%, and part 12 149 to 166 s.
  */
 const AREA_BODIES: ReadonlyArray<AreaBody> = [
   {
     name: "the measured Earth",
     medium: EARTH_REFERENCE,
     curves: EARTH_REFERENCE_CURVES,
+    body: earthBody,
     frames: AREA_FRAMES,
-  },
-  {
-    name: "R05's Earth",
-    medium: R05_EARTH_REFERENCE,
-    curves: NO_ABSORBER_CURVES,
-    frames: AREA_FRAMES.filter((frame) => frame.setting === "high" && frame.distanceM === 1e7),
   },
 ];
 
@@ -2477,7 +2482,9 @@ interface AreaReads {
   readonly composite: ArrayBuffer;
   readonly march: ArrayBuffer;
   /** The tile cull's kinds the frame wrote, by kind, under the cull; none on the reference path. */
-  readonly kinds: Readonly<Record<"miss" | "centre" | "footprint", number>>;
+  readonly kinds: Readonly<Record<MarchTileKind, number>>;
+  /** The tiles whose code is none of the kinds' (`MARCH_TILE_CODES`). */
+  readonly unknown: number;
   readonly area: string;
 }
 
@@ -2545,6 +2552,15 @@ async function areaReadsOf(
     kernels,
   );
   atmosphere.setMarchCover(cover);
+  // The surface's mesh and material, made once and let go with the frame.
+  const surfaceM = frame.surfaceM;
+  const drawn =
+    surfaceM === null
+      ? null
+      : {
+          mesh: fullScreenMesh(engine, "march area surface", -surfaceM),
+          material: engine.createMaterial(flatSpec("march area surface")),
+        };
   try {
     const figure = tablesFigureOf(tables);
     const camera = farLimbTimingCamera(frame.distanceM, AREA_FRAME_SIZE, figure);
@@ -2555,16 +2571,10 @@ async function areaReadsOf(
       FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
       FAR_LIMB_TIMING_FRAME,
     );
-    const surfaceM = frame.surfaceM;
     const surface: SceneSurface | null =
-      surfaceM === null
+      drawn === null
         ? null
-        : () =>
-            drawOf(
-              fullScreenMesh(engine, "march area surface", -surfaceM),
-              engine.createMaterial(flatSpec("march area surface")),
-              [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1],
-            );
+        : () => drawOf(drawn.mesh, drawn.material, [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1]);
     const composite = await drawComposite(
       engine,
       atmosphere,
@@ -2579,28 +2589,40 @@ async function areaReadsOf(
     }
     const march = await engine.readTexture(rayMarch, 0, undefined, "tolerance");
     const kinds = { miss: 0, centre: 0, footprint: 0 };
+    let unknown = 0;
     const tiles = marchArea.tilesAcross * marchArea.tilesDown;
     if (cover === "culled" && marchTiles !== null && tiles > 0) {
       const written = new Uint32Array(await engine.readBuffer(marchTiles, "tolerance"), 0, tiles);
-      for (const kind of written) {
-        if (kind === 0) {
-          kinds.miss += 1;
-        } else if (kind === 1) {
-          kinds.centre += 1;
+      const byCode = new Map(
+        (["miss", "centre", "footprint"] as const).map(
+          (kind) => [MARCH_TILE_CODES[kind], kind] as const,
+        ),
+      );
+      for (const code of written) {
+        const kind = byCode.get(code);
+        if (kind === undefined) {
+          unknown += 1;
         } else {
-          kinds.footprint += 1;
+          kinds[kind] += 1;
         }
       }
     }
-    const all = Math.ceil(marchArea.widthTexels / 8) * Math.ceil(marchArea.heightTexels / 8);
+    const all =
+      Math.ceil(marchArea.widthTexels / MARCH_TILE_TEXELS) *
+      Math.ceil(marchArea.heightTexels / MARCH_TILE_TEXELS);
     return {
       composite,
       march,
       kinds,
+      unknown,
       area: `${marchArea.tilesAcross} × ${marchArea.tilesDown} tiles from (${marchArea.firstTileX}, ${marchArea.firstTileY}) of ${all}`,
     };
   } finally {
     atmosphere.dispose();
+    if (drawn !== null) {
+      engine.releaseMesh(drawn.mesh);
+      engine.releaseMaterial(drawn.material);
+    }
   }
 }
 
@@ -2624,21 +2646,37 @@ export async function checkMarchArea(
   fallback: boolean,
 ): Promise<void> {
   const kernels = await createAtmosphereFrameKernels(engine);
-  const met = { miss: 0, centre: 0, footprint: 0 };
+  try {
+    await checkAreaBodies(engine, checks, fallback, kernels);
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/** {@link checkMarchArea}'s bodies and frames over the device's shared kernels. */
+async function checkAreaBodies(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+  kernels: AtmosphereFrameKernels,
+): Promise<void> {
+  const met = { miss: 0, centre: 0, footprint: 0, unknown: 0 };
   for (const body of AREA_BODIES) {
-    const earth = earthBody();
+    const sliced = body.body();
     const tables = new AtmosphereTables(
       engine,
       body.medium,
-      tableRadiusM(earth.figure),
+      tableRadiusM(sliced.figure),
       body.curves,
-      earth,
+      sliced,
     );
     try {
       for (const frame of body.frames) {
         // The harness's GPU work runs in order: each frame is read back before the next draws.
         // oxlint-disable-next-line no-await-in-loop
         const culled = await areaReadsOf(engine, tables, kernels, frame, "culled");
+        // The reference after it, in order as the culled frame: its read-backs before the next.
         // oxlint-disable-next-line no-await-in-loop
         const whole = await areaReadsOf(engine, tables, kernels, frame, "whole frame");
         const composite = halvesDiffering(culled.composite, whole.composite);
@@ -2648,6 +2686,7 @@ export async function checkMarchArea(
         met.miss += culled.kinds.miss;
         met.centre += culled.kinds.centre;
         met.footprint += culled.kinds.footprint;
+        met.unknown += culled.unknown;
         checks.check(
           `R08.T11.d ${body.name}, ${frame.setting}, ${frame.name}: the march over the air's area under the tile cull reads back as the march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
           fallback ? same : withinUlp,
@@ -2659,9 +2698,9 @@ export async function checkMarchArea(
     }
   }
   checks.check(
-    "R08.T11.d the tile cull's frames met each of its kinds on the GPU",
-    met.miss > 0 && met.centre > 0 && met.footprint > 0,
-    `${met.miss} tiles missed, ${met.centre} at the centre ray, ${met.footprint} over the footprint`,
+    "R08.T11.d the tile cull's frames met each of its kinds on the GPU, and wrote no other code",
+    met.miss > 0 && met.centre > 0 && met.footprint > 0 && met.unknown === 0,
+    `${met.miss} tiles missed, ${met.centre} at the centre ray, ${met.footprint} over the footprint, ${met.unknown} of no kind`,
   );
 }
 

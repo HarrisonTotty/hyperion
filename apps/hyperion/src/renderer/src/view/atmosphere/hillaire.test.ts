@@ -59,6 +59,7 @@ import {
   type SunState,
   TABLE_SIZES,
   tableRadiusM,
+  topShellOf,
   viewExactOf,
 } from "./hillaire";
 import { marchAreaOf, marchAreaTexels } from "./marchArea";
@@ -1796,6 +1797,8 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
         "atmosphere aerial perspective",
         "atmosphere transmittance",
         "atmosphere terms",
+        // The tile cull's kinds, which the kernel arm's frame made (R08.T11.d).
+        "atmosphere ray march's tiles",
       ]),
     );
   });
@@ -2061,6 +2064,67 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
       ["atmosphere ray march's fill", [40, 23, 1]],
     ]);
     expect(fills[0]?.bindings.storage["rayMarchOut"]?.texture).toBe(rayMarch);
+  });
+
+  it("bounds the area by the top shell through h* = H at the equator and the poles on a body whose gravity varies with latitude", async () => {
+    const engine = await countingRenderEngine();
+    const gravity = gravityOfSpheroid(SATURN_SPHEROID);
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.high,
+      SATURN_SPHEROID,
+      NO_ABSORBER_CURVES,
+      gravity,
+    );
+    // From 4 × 10⁸ m over the equator, looking at the centre: the giant's air a few tiles across.
+    const giant: AtmosphereCamera = { ...far, positionM: { x: 4e8, y: 0, z: 0 } };
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(giant, [NOON], SCENE);
+    const top = topShellOf(SATURN_SPHEROID, R05_EARTH_REFERENCE.topHeightM, gravity);
+    expect([top.equatorialM, top.polarM]).toEqual([
+      SATURN_SPHEROID.equatorialRadiusM + 100_000 / gravityRatio(gravity, 0),
+      SATURN_SPHEROID.polarRadiusM + 100_000 / gravityRatio(gravity, Math.PI / 2),
+    ]);
+    const area = marchAreaOf(giant, top, 1);
+    expect(area.whole).toBe(false);
+    const footprint = marchesOf(engine).find((d) => d.kernel === "atmosphere ray march");
+    expect([...(footprint?.bindings.uniforms["marchArea"] ?? [])].slice(0, 4)).toEqual([
+      area.firstTileX,
+      area.firstTileY,
+      area.tilesAcross,
+      area.tilesDown,
+    ]);
+    // The march's own top: the quadric viewExactOf forms is the same shell's.
+    const exact = viewExactOf(
+      giant.positionM,
+      SATURN_SPHEROID,
+      R05_EARTH_REFERENCE,
+      atmosphereInputs(giant, SATURN_SPHEROID, gravity),
+      gravity,
+    );
+    const z = (giant.positionM.z * top.equatorialM) / top.polarM;
+    expect(exact.topQuadricM2).toBe(
+      giant.positionM.x ** 2 + giant.positionM.y ** 2 + z * z - top.equatorialM ** 2,
+    );
+  });
+
+  it("makes no shared-read march for a body whose tables hold the slot layers", async () => {
+    const engine = await countingRenderEngine();
+    const made: string[] = [];
+    const create = engine.createCompute.bind(engine);
+    engine.createCompute = (pair) => {
+      made.push(pair.name);
+      return create(pair);
+    };
+    const { medium, curves } = fourAbsorberMedium();
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
+    expect(made).toContain("atmosphere ray march by slot");
+    expect(made).toContain("atmosphere ray march by slot at the centre ray");
+    expect(made).not.toContain(RAY_MARCH_KERNEL.name);
+    expect(made).not.toContain(RAY_MARCH_CENTRE_KERNEL.name);
   });
 
   it("marches nothing where the air lies behind the camera, and the composite reads none of it", async () => {

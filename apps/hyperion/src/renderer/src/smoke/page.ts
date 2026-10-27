@@ -17,15 +17,15 @@
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
  * R08.T11.b's face count in part 12; R08.T11.e's unread tables in two, a giant's in part 9 after
- * R08.T8.a's march band and Earth's in part 12 after R08.T11.b's face count; R08.T6.b's kernels
+ * R08.T8.a's march band and Earth's in part 12 after R08.T11.b's face count; R08.T11.d's march
+ * area in part 8 after R07.T8.e–g's cell pass; R08.T6.b's kernels
  * over N terms in two, its medium of four
  * absorbers in part 6 and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the
  * Saturn-class figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
  * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
  * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
- * its binary and R08.T11.d's march area after them, and R10.T16.g's datum inside the figure over
- * the image last, with R02.T19's on `TEST SATURN`'s spheroid (`datumFrame.ts`); R08.T8.b's far
- * limb, with the composite from above
+ * its binary, and R10.T16.g's datum inside the figure over the image last, with R02.T19's on
+ * `TEST SATURN`'s spheroid (`datumFrame.ts`); R08.T8.b's far limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
  * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
@@ -420,6 +420,11 @@ async function run(
   await group(8, "R07.T8.e–g the cell pass for every record", () =>
     checkCellPassEveryRecord(engine, checks),
   );
+  // In part 8 after R07.T8.e–g's cell pass (the part 85 s at e64fcb9b's gate; part 12 took it to
+  // 149 to 177 s at a CPU quota of 400%, and part 10 takes R10.T16.g's group).
+  await group(8, "R08.T11.d the march over the air's area and the tile cull", () =>
+    checkMarchArea(engine, checks, summary.fallback),
+  );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
     checkFaceCount(engine, checks, twins),
   );
@@ -462,10 +467,6 @@ async function run(
     checkSeveralSuns(engine, checks, twins),
   );
   await group(10, "R08.T8.e the binary's slot layers", () => checkBinarySlotLayers(engine, checks));
-  // In part 10, which had room (83 s at 408b7359's gate).
-  await group(10, "R08.T11.d the march over the air's area and the tile cull", () =>
-    checkMarchArea(engine, checks, summary.fallback),
-  );
   await group(12, "R08.T11.e the unread column table at one texel on Earth", () =>
     checkUnreadEarth(engine, checks),
   );

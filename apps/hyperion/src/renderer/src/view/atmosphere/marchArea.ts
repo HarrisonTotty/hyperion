@@ -131,13 +131,16 @@ function wrapped(angleRad: number): number {
 
 /**
  * The forward rays' slopes along `axis`, tan ψ for the ray forward cos ψ + axis sin ψ, that meet
- * the ellipsoid within the half-field `halfFieldRad` about forward: the ellipsoid seen along the
+ * the ellipsoid, ψ within a hair of the half turn about forward: the ellipsoid seen along the
  * view's other axis, the ellipse of its shadow on the plane of `axis` and `forward` (both unit and
  * perpendicular), whose dual shape there is `shape`'s restriction, M₂ = [[M_aa, M_af], [M_af,
  * M_ff]], about its centre m₂ = (m · axis, m · forward) from the camera. A ray of the frame meets
  * the ellipsoid only if its shadow meets the shadow's ellipse, and every shadow ray that meets it
  * forward is a shadow of one that does. `whole` where the camera's own shadow lies in the ellipse,
- * every direction meeting it; `null` where no forward ray of the field does.
+ * every direction meeting it; `null` where no forward ray does. The bounds are not held to the
+ * field here: a texel at the field's edge has rays beyond it (its footprint's nodes reach about a
+ * tenth of a texel past the edge), so the caller adds its margin before the target's edge holds
+ * them (R08.T11.d's review: a limb a tenth of a texel outside the field from 10⁹ m blended there).
  *
  * @remarks
  * The ellipse's tangents through the camera are the directions ψ whose normal n = (cos ψ,
@@ -152,7 +155,6 @@ function forwardSlopes(
   forward: Vec3,
   centre: Vec3,
   shape: (u: Vec3, v: Vec3) => number,
-  halfFieldRad: number,
 ): "whole" | readonly [number, number] | null {
   const ma = dot(axis, centre);
   const mf = dot(forward, centre);
@@ -187,11 +189,12 @@ function forwardSlopes(
   });
   const low = centreRad + Math.min(...offsets);
   const high = centreRad + Math.max(...offsets);
-  // The arc, under a half turn, against the field, under a half turn too: at most one of its turns
-  // meets it.
+  // The arc, under a half turn, against the forward half turn, a hair short of it so that the
+  // slopes stay finite: at most one of its turns meets it.
+  const forwardRad = (Math.PI / 2) * (1 - 1e-9);
   for (const turn of [-2 * Math.PI, 0, 2 * Math.PI]) {
-    const from = Math.max(low + turn, -halfFieldRad);
-    const to = Math.min(high + turn, halfFieldRad);
+    const from = Math.max(low + turn, -forwardRad);
+    const to = Math.min(high + turn, forwardRad);
     if (to >= from) {
       return [Math.tan(from), Math.tan(to)];
     }
@@ -226,14 +229,12 @@ export function marchAreaOf(view: AtmosphereCamera, shell: MarchShell, scale: nu
     forward,
     centre,
     shape,
-    Math.atan(tanX),
   );
   const down = forwardSlopes(
     rotate(view.orientation, { x: 0, y: 1, z: 0 }),
     forward,
     centre,
     shape,
-    Math.atan(tanY),
   );
   if (across === null || down === null) {
     return noArea(widthTexels, heightTexels, widenM);
@@ -290,6 +291,16 @@ export function wholeMarchArea(
  * footprint can blend (`centre`, its centre rays marched); or a footprint may (`footprint`).
  */
 export type MarchTileKind = "miss" | "centre" | "footprint";
+
+/**
+ * Each {@link MarchTileKind}'s code in the tile cull's buffer, as `marchArea.wgsl`'s
+ * `MARCH_TILE_MISS`, `MARCH_TILE_CENTRE` and `MARCH_TILE_FOOTPRINT` write it (R08.T11.d).
+ */
+export const MARCH_TILE_CODES: Readonly<Record<MarchTileKind, number>> = {
+  miss: 0,
+  centre: 1,
+  footprint: 2,
+};
 
 /**
  * The texels about a tile's centre its texels' rays reach, per axis (`rayMarchCentre.wgsl`'s

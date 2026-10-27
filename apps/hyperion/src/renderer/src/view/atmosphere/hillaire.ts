@@ -637,13 +637,32 @@ export function viewExactOf(
     const z = (positionM.z * equatorialM) / polarM;
     return positionM.x ** 2 + positionM.y ** 2 + z * z - equatorialM * equatorialM;
   };
-  const topHeightM = medium.topHeightM;
+  const top = topShellOf(figure, medium.topHeightM, gravity);
+  return {
+    groundQuadricM2: quadric(a, c),
+    topQuadricM2: quadric(top.equatorialM, top.polarM),
+    localScaleHeightM: localScaleHeightM(medium, inputs.gravityRatio * inputs.heightM),
+  };
+}
+
+/**
+ * The air's top shell, m: the quadric (a + H ÷ s_e, c + H ÷ s_p) through h\* = H at the equator
+ * and the poles (R08.T6.f; Design note 17), s_e and s_p the body's gravity's ratios there,
+ * (a + H, c + H) where s ≡ 1: the shell the ray march clips its air by ({@link viewExactOf}'s
+ * `topQuadricM2`) and the march's area bounds (R08.T11.d).
+ *
+ * @throws RangeError as `oblate.ts`'s `gravityRatio`.
+ */
+export function topShellOf(
+  figure: SpheroidFigure,
+  topHeightM: number,
+  gravity: BodyGravity | null,
+): MarchShell {
   const atEquator = gravity === null ? 1 : gravityRatio(gravity, 0);
   const atPole = gravity === null ? 1 : gravityRatio(gravity, Math.PI / 2);
   return {
-    groundQuadricM2: quadric(a, c),
-    topQuadricM2: quadric(a + topHeightM / atEquator, c + topHeightM / atPole),
-    localScaleHeightM: localScaleHeightM(medium, inputs.gravityRatio * inputs.heightM),
+    equatorialM: figure.equatorialRadiusM + topHeightM / atEquator,
+    polarM: figure.polarRadiusM + topHeightM / atPole,
   };
 }
 
@@ -1004,8 +1023,13 @@ interface MarchKernels {
 interface FrameKernels {
   readonly skyView: ComputeHandle;
   readonly aerial: ComputeHandle;
-  /** The march over the shared read ({@link RAY_MARCH_CENTRE_KERNEL}, {@link RAY_MARCH_KERNEL}). */
-  readonly rayMarch: MarchKernels;
+  /**
+   * The march over the shared read ({@link RAY_MARCH_CENTRE_KERNEL}, {@link RAY_MARCH_KERNEL}):
+   * an atmosphere's own kernels make it at the first frame of tables that take it (R08.T11.d), so
+   * that a body with slot layers never compiles the pair; the device's shared kernels
+   * ({@link createAtmosphereFrameKernels}) make every kernel up front, off the frame path.
+   */
+  readonly rayMarch: () => MarchKernels;
   /**
    * The ray march by slot ({@link RAY_MARCH_SLOTS_CENTRE_KERNEL}, {@link RAY_MARCH_SLOTS_KERNEL}),
    * made at the first frame of tables that hold the slot layers (R08.T8.e).
@@ -1065,13 +1089,14 @@ export async function createAtmosphereFrameKernels(
       engine.createComputeAsync(RAY_MARCH_SLOTS_KERNEL),
       engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"], [triangle]),
     ]);
+  const shared: MarchKernels = { centre, footprint };
   const slots: MarchKernels = { centre: slotsCentre, footprint: slotsFootprint };
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
   let fill: ComputeHandle | null = null;
   return {
     skyView,
     aerial,
-    rayMarch: { centre, footprint },
+    rayMarch: () => shared,
     rayMarchSlots: () => slots,
     rayMarchFill: () => (fill ??= engine.createCompute(RAY_MARCH_FILL_KERNEL)),
     composite,
@@ -1472,18 +1497,21 @@ function createFrameResources(
 
 /**
  * The per-frame kernels made synchronously on `engine`, each pair through `as` (the kernel arm's
- * format, or as shipped): the march by slot and the fill at their first frame.
+ * format, or as shipped): each march (the shared read's or by slot) and the fill at the first
+ * frame that takes it.
  */
 function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPair): FrameKernels {
+  let shared: MarchKernels | null = null;
   let slots: MarchKernels | null = null;
   let fill: ComputeHandle | null = null;
   return {
     skyView: engine.createCompute(as(SKY_VIEW_KERNEL)),
     aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_KERNEL)),
-    rayMarch: {
-      centre: engine.createCompute(as(RAY_MARCH_CENTRE_KERNEL)),
-      footprint: engine.createCompute(as(RAY_MARCH_KERNEL)),
-    },
+    rayMarch: () =>
+      (shared ??= {
+        centre: engine.createCompute(as(RAY_MARCH_CENTRE_KERNEL)),
+        footprint: engine.createCompute(as(RAY_MARCH_KERNEL)),
+      }),
     rayMarchSlots: () =>
       (slots ??= {
         centre: engine.createCompute(as(RAY_MARCH_SLOTS_CENTRE_KERNEL)),
@@ -1520,25 +1548,6 @@ function createKernelArmResources(engine: RenderEngine, sizes: TableSizes): Kern
 /** Workgroups of 8 × 8 covering a 2D size. */
 function groups8(width: number, height: number): readonly [number, number, number] {
   return [Math.ceil(width / 8), Math.ceil(height / 8), 1];
-}
-
-/**
- * The air's top shell the ray march clips its air by, m (R08.T11.d): (a + H ÷ s_e, c + H ÷ s_p),
- * as {@link viewExactOf} places it.
- *
- * @throws RangeError as `oblate.ts`'s `gravityRatio`.
- */
-function marchShellOf(
-  figure: SpheroidFigure,
-  topHeightM: number,
-  gravity: BodyGravity | null,
-): MarchShell {
-  const atEquator = gravity === null ? 1 : gravityRatio(gravity, 0);
-  const atPole = gravity === null ? 1 : gravityRatio(gravity, Math.PI / 2);
-  return {
-    equatorialM: figure.equatorialRadiusM + topHeightM / atEquator,
-    polarM: figure.polarRadiusM + topHeightM / atPole,
-  };
 }
 
 /**
@@ -2160,7 +2169,7 @@ export class HillaireAtmosphere {
     // those no footprint can blend in, and the footprint's the rest; the reference path takes every
     // tile of the whole frame through the footprint's, as the one kernel did.
     const culled = this.#cover === "culled";
-    const shell = marchShellOf(this.#figure, medium.topHeightM, this.#gravity);
+    const shell = topShellOf(this.#figure, medium.topHeightM, this.#gravity);
     const area = culled
       ? marchAreaOf(view, shell, sizes.rayMarchScale)
       : wholeMarchArea(view, shell, sizes.rayMarchScale);
@@ -2170,7 +2179,7 @@ export class HillaireAtmosphere {
     // A body whose tables hold the slot layers marches by slot, each source's light one read of
     // its slot's layer (R08.T8.e, lever 5); every other the shared read.
     const slotDepths = tables.slotDepths;
-    const march = slotDepths === null ? kernels.rayMarch : kernels.rayMarchSlots();
+    const march = slotDepths === null ? kernels.rayMarch() : kernels.rayMarchSlots();
     if (area.tilesAcross > 0 && area.tilesDown > 0) {
       const bindings = {
         buffers: { ...common.buffers, marchTiles: this.#marchTiles(area) },
