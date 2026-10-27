@@ -4568,6 +4568,9 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
     - Earth's and the lava world's rows unchanged, and every other T43.h test unchanged.
   - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
   - _Commit:_ `feat(client): P14.T43.i A regular moon's ocean under its ice in the readout`.
+  - _Follow-up (P14.T51.g.b's UX condition, decision-p14-t51gb-ice-ii §3):_ a member not
+    modelled reads `SUBSURFACE OCEAN NOT YET MODELLED` where no ocean under a Snowball's ice
+    stands; `none` still adds no row. See T51.g.b's as-built record.
 
 #### P14.T44 Time control
 
@@ -30110,5 +30113,63 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     row (decision-p14-t51gb-ice-ii §3, a condition of it): after T51.g.b an empty row mostly means
     none, so a Triton-like absent member would read as "no ocean". Client only, no bump, the
     laptop's, before the first served build with T51.g.b's members.
+    - _Built_ (`lane/111-p14-t51gb-ocean-row`, 2026-10-26): the condition, in main's form (#111).
+      `displays/system/BodyRecordReadings.tsx`'s `subsurfaceOceanLiquid` is replaced by
+      `subsurfaceOceanShown`, which gives `SUBSURFACE OCEAN`'s reading, or `null` for no row, in
+      this order: the member's liquid where it is a value; else the cover's ocean under a
+      Snowball's ice (rule 1), whether the member is `none` (rule 5) or `not_modelled`; else
+      `NOT YET MODELLED` (`sectionStateLabel("not_modelled")` through `value`, with no unit) where
+      the member is `not_modelled`; else, the member `none`, no row. It switches on the member's
+      `kind`, exhaustively; whether a row that neither the member nor the cover states reads
+      `NOT YET MODELLED` or is left out follows that `kind` alone, never the state, the
+      temperature, the body's kind or the version. The row keeps its label and its place, the
+      last of `surfaceRows`' fragment, and stands once at most. The docs of the helper, of
+      `surfaceRows` and of `BodyRecordReadings` name the not-modelled reading. `GENERATOR_VERSION`
+      23 and `PROTOCOL_VERSION` 3, on the base f2165e79, with no merge since.
+      - _Tests_ (`SystemView.bodies.test.tsx`; helpers `airlessIcyMoonWithNoOceanKey` and
+        `oceanComputedAsNone`): `SUBSURFACE OCEAN NOT YET MODELLED`, the last surface row and the
+        one such row, where the member is absent: the Snowball whose condensates list liquid
+        water, the fixture's Earth, the temperate surface with no liquid-water entry, the
+        Snowball whose condensates are not modelled and the fixture's lava world; and the
+        Triton-like `titanWithNoOceanKey`. No row with `subsurface_ocean: null` on the fixture's
+        Titan, Earth and lava world, the Snowball with liquid water and the temperate surface
+        with no liquid-water entry; the four added cases' names end ", its ocean computed as
+        none", to tell them from the same bodies' not-modelled cases. The airless icy moon with
+        no member reads `COLD TRAPS NOT YET MODELLED`, then `SUBSURFACE OCEAN NOT YET MODELLED`,
+        as its last two rows, and no `NaCl BRINE`. The not-modelled reading has no unit. T43.h's
+        `0700` and `0703` rows (`H2O`, the cover's ocean beside an absent member) and every T43.i
+        test, rule 5's among them, are unchanged.
+      - _Existing assertions changed:_ T43.h's no-row `it.each`, split in two as above; the lava
+        world's rows, twelve to thirteen, `SUBSURFACE OCEAN NOT YET MODELLED` after `COLD TRAPS`;
+        and one #111 did not name, "reads NOT YET MODELLED once for each section not modelled",
+        renamed "…, and once for the Earth's subsurface ocean": the fixture's Earth carries no
+        member, so its readout holds five `NOT YET MODELLED` readings, not four. Each follows the
+        fixture, which, as a version-23 server, sends no member for the Earth or the lava world;
+        from `OCEAN_VERSION` (24, or 25 if T51.g.b misses T54.b.i's commit) a server sends their
+        member as `null`, and the row goes.
+      - _The guide:_ the `SUBSURFACE OCEAN` row's last sentence, as main gave it (`1 1` in the
+        diff). The console-ux lint on the component: 0 errors, 0 checks.
+      - _Reviews:_ the typescript-reviewer's two should-fixes are fixed (an exhaustive `switch`
+        on the member's `kind` in place of a last conditional, and the helper's "alone" narrowed
+        to the not-modelled-or-no-row choice), as are its nits on the sections test's second
+        reason to fail and the Triton-like test's name; its nit that the `NaCl BRINE` assertion
+        cannot fail is kept, as #111 asks for it. The ux-reviewer and the
+        plan-conformance-reviewer: no must-fix or should-fix; their guide nits are deferred below.
+      - _Pending:_ the visual check at 1280 × 720, 1920 × 1080 and 1920 × 1080 at 150 %, main's at
+        landing.
+      - _Deferred findings (2026-10-13 rule), from P14.T51.g.b's ocean row:_
+        - A `NONE` form for a member computed as none is not built, `null` adding no row as
+          before: main's sign-off decides.
+        - The guide's "A body computed to hold none adds no row" does not hold under rule 5: a
+          Snowball whose member is `none` beside the cover's appended `H2O` reads
+          `SUBSURFACE OCEAN H2O`. Moot once P14.T53.c ends the appended item; until then main's
+          sign-off decides between "unless its cover states one under its ice" in the guide and
+          rule 5 yielding to the member.
+        - The ux-reviewer's nits on the guide's sentence, main's wording, kept as given: "so that
+          its absence is not read as none" names no absence, since the row stands; the "as" list
+          sets a condition beside a thing, and names no generator version that computes no
+          member, as 23 for the fixture's Earth; "an ice world's" is not a guide term (the planet
+          class is `ICY`); and the Data states' Missing bullet now has a fifth unstated exception
+          among a shown section's `NOT YET MODELLED` rows.
   - _P1's wording_ "at or under 629.34 MPa" is corrected in this change, which closes T51.g.a's
     deferred line.

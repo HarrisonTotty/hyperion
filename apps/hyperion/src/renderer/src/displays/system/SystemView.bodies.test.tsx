@@ -488,6 +488,30 @@ function airlessBrineMoon(): BodySurfaceDto {
 }
 
 /**
+ * {@link airlessBrineMoon} with no `subsurface_ocean` key, its ocean not modelled, as the wire
+ * sends a body whose ocean the generator does not compute (P14.T51.g.b).
+ */
+function airlessIcyMoonWithNoOceanKey(): BodySurfaceDto {
+  const { subsurface_ocean: _ocean, ...moon } = airlessBrineMoon();
+  return moon;
+}
+
+/**
+ * `detail`, a record with an `ok` surface section, with its subsurface ocean computed as none, as
+ * a version-24 server sends a body with no water or with a surface at or above water's triple
+ * point (P14.T51.g.b).
+ */
+function oceanComputedAsNone(detail: ResponseFor<"body_detail">): ResponseFor<"body_detail"> {
+  return {
+    ...detail,
+    record: {
+      ...detail.record,
+      surface: { state: "ok", value: { ...surfaceOf(detail), subsurface_ocean: null } },
+    },
+  };
+}
+
+/**
  * A reading of several parts, each named in one word, as the readout sets it: each part's spaces
  * no-break, so that such a part never breaks across a line, and the parts joined by middle dots.
  */
@@ -727,7 +751,7 @@ describe("SystemView's body readout", () => {
     expect(within(bodiesPanel()).queryByText("PENDING")).not.toBeInTheDocument();
   });
 
-  it("reads NOT YET MODELLED once for each section not modelled", async () => {
+  it("reads NOT YET MODELLED once for each section not modelled, and once for the Earth's subsurface ocean", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
@@ -737,7 +761,9 @@ describe("SystemView's body readout", () => {
       expect(terms(section)).toHaveLength(1);
       expect(reading(section)).toBe("NOT YET MODELLED");
     }
-    expect(within(readout()).getAllByText("NOT YET MODELLED")).toHaveLength(4);
+    // The four sections, and a row inside the shown surface section: the fixture's Earth carries no
+    // subsurface ocean, as a version-23 server sends it, so its ocean is not modelled (P14.T51.g.b).
+    expect(within(readout()).getAllByText("NOT YET MODELLED")).toHaveLength(5);
   });
 
   it("reads an ok surface's state, mean temperature, pressure and gases", async () => {
@@ -970,7 +996,7 @@ describe("SystemView's body readout", () => {
   });
 
   // P14.T43.g (decision-ux-23-surface-rows): the ground's rows after the air's.
-  it("reads a locked lava world's twelve surface rows in order, its crust, melt and cover after its air", async () => {
+  it("reads a locked lava world's thirteen surface rows in order, its crust, melt and cover after its air", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
@@ -995,6 +1021,8 @@ describe("SystemView's body readout", () => {
       ["LIQUID COVER", "NONE"],
       ["ICE COVER", "NONE"],
       ["COLD TRAPS", "NOT YET MODELLED"],
+      // It carries no subsurface ocean, as a version-23 server sends it (P14.T51.g.b).
+      ["SUBSURFACE OCEAN", "NOT YET MODELLED"],
     ]);
   });
 
@@ -1295,6 +1323,34 @@ describe("SystemView's body readout", () => {
 
   it.each<readonly [string, () => ResponseFor<"body_detail">]>([
     [
+      "the fixture's Titan, its ocean computed as none",
+      () => earthWithSurface(() => ({ ...surfaceOf(titanDetail()), subsurface_ocean: null })),
+    ],
+    ["the fixture's Earth, its ocean computed as none", () => oceanComputedAsNone(earthDetail())],
+    [
+      "the fixture's lava world, its ocean computed as none",
+      () => oceanComputedAsNone(earthWithSurface(() => surfaceOf(lavaWorldDetail()))),
+    ],
+    [
+      "a Snowball whose condensates list liquid water, its ocean computed as none",
+      () => oceanComputedAsNone(earthWithSurface(snowball0700WithWaterSea)),
+    ],
+    [
+      "a temperate surface whose condensates list no liquid water, its ocean computed as none",
+      () => oceanComputedAsNone(earthWithNoLiquidWaterEntry()),
+    ],
+  ])("shows no SUBSURFACE OCEAN row for %s", async (_name, detail) => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, detail());
+
+    expect(terms("SUBSURFACE OCEAN")).toHaveLength(0);
+  });
+
+  // P14.T51.g.b (decision-p14-t51gb-ice-ii §3): an ocean not modelled is never read as none.
+  it.each<readonly [string, () => ResponseFor<"body_detail">]>([
+    [
       "a Snowball whose condensates list liquid water",
       () => earthWithSurface(snowball0700WithWaterSea),
     ],
@@ -1304,19 +1360,23 @@ describe("SystemView's body readout", () => {
       "a Snowball whose condensates are not modelled",
       () => earthWithSurface(snowball0700OfAnOlderServer),
     ],
-    [
-      "the fixture's Titan, its ocean computed as none",
-      () => earthWithSurface(() => ({ ...surfaceOf(titanDetail()), subsurface_ocean: null })),
-    ],
     ["the fixture's lava world", () => earthWithSurface(() => surfaceOf(lavaWorldDetail()))],
-  ])("shows no SUBSURFACE OCEAN row for %s", async (_name, detail) => {
-    const { user, socket } = renderView();
-    await answer(socket);
-    await selectRow(user, /\/768/);
-    await answerDetail(socket, detail());
+  ])(
+    "reads SUBSURFACE OCEAN NOT YET MODELLED, the last surface row, for %s, its ocean not modelled",
+    async (_name, detail) => {
+      const { user, socket } = renderView();
+      await answer(socket);
+      await selectRow(user, /\/768/);
+      await answerDetail(socket, detail());
 
-    expect(terms("SUBSURFACE OCEAN")).toHaveLength(0);
-  });
+      expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
+      expect(reading("SUBSURFACE OCEAN")).toBe("NOT YET MODELLED");
+      expect(rowsBetween("SURFACE", "GENERATOR INPUTS").at(-1)).toEqual([
+        "SUBSURFACE OCEAN",
+        "NOT YET MODELLED",
+      ]);
+    },
+  );
 
   it("reads a Snowball's listed sea of liquid water in LIQUID COVER, as the wire's list gives it", async () => {
     const { user, socket } = renderView();
@@ -1429,6 +1489,45 @@ describe("SystemView's body readout", () => {
 
     expect(reading("SUBSURFACE OCEAN")).toBe("UNLISTED MATERIAL");
     expect(within(readout()).queryByText(/novel_/)).not.toBeInTheDocument();
+  });
+
+  // P14.T51.g.b (decision-p14-t51gb-ice-ii §3): a Triton-like ocean the generator does not model.
+  it("reads SUBSURFACE OCEAN NOT YET MODELLED last on a Triton-like icy surface, its ocean not modelled and none under its ice in its cover", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // A Snowball with no `H2O` liquid item, so no ocean under its ice from its cover, and no
+    // `subsurface_ocean` key, as a version-24 server sends Triton's, whose ocean's floor would lie
+    // in ice II's field.
+    await answerDetail(socket, earthWithSurface(titanWithNoOceanKey));
+
+    expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
+    expect(rowsBetween("SURFACE", "GENERATOR INPUTS").at(-1)).toEqual([
+      "SUBSURFACE OCEAN",
+      "NOT YET MODELLED",
+    ]);
+  });
+
+  it("reads an airless icy moon's ocean not modelled after its COLD TRAPS row, naming no liquid", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthWithSurface(airlessIcyMoonWithNoOceanKey));
+
+    expect(rowsBetween("SURFACE", "GENERATOR INPUTS").slice(-2)).toEqual([
+      ["COLD TRAPS", "NOT YET MODELLED"],
+      ["SUBSURFACE OCEAN", "NOT YET MODELLED"],
+    ]);
+    expect(within(readout()).queryByText(/NaCl BRINE/)).not.toBeInTheDocument();
+  });
+
+  it("reads SUBSURFACE OCEAN NOT YET MODELLED with no unit", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthWithSurface(titanWithNoOceanKey));
+
+    expect(readingOf("SUBSURFACE OCEAN").querySelector(".body-readout__unit")).toBeNull();
   });
 
   it("names a crust and a cover the console does not know as UNLISTED MATERIAL, never by its key", async () => {

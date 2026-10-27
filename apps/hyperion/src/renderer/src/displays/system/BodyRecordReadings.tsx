@@ -448,24 +448,42 @@ function liquidsOnIce(surface: BodySurface, ocean: SubstanceArea): ReadonlyArray
 }
 
 /**
- * The liquid of the ocean under a body's ice, by its registry key, as `SUBSURFACE OCEAN` reads it,
- * or `null` where neither the member nor the cover states one (plan 14, P14.T43.i;
- * decision-p14-t43h-review §4): the liquid of {@link BodySurface.subsurfaceOcean} where it is a
- * value, on any surface, else the substance of `ocean`, the ocean under a `snowball`'s ice
- * ({@link oceanUnderIce}).
+ * What `SUBSURFACE OCEAN`, the ocean under a body's ice, reads, or `null` where the row is left out
+ * (plan 14, P14.T43.i, decision-p14-t43h-review §4; P14.T51.g.b, decision-p14-t51gb-ice-ii §3). In
+ * this order: the liquid of {@link BodySurface.subsurfaceOcean}, the member, where it is a value,
+ * on any surface; else the substance of `ocean`, the ocean under a `snowball`'s ice
+ * ({@link oceanUnderIce}); else `NOT YET MODELLED` where the member is not modelled; else no row.
  *
  * @remarks
  * The member is the generator's own statement of the ocean, not an item of the cover, so it stands
- * whatever the condensates are, and its liquid is the one read where both are present. A member
- * computed as none, or not modelled, adds no row of its own, and `ocean` decides alone: a `NONE`
- * form waits on P14.T51.g's sign-off, once every body's member is computed
- * (decision-p14-t43h-review).
+ * whatever the condensates are, and its liquid is the one read where both are present. It has the
+ * wire's three states: a value, the ocean; `none`, the wire's `null`, a body computed to hold none,
+ * which adds no row; and `not_modelled`, the wire's absent key, an ocean the generator does not
+ * compute, as a version-23 server sends every body's but a regular moon's, or one whose floor would
+ * be ice II (Triton's). That reads `NOT YET MODELLED`, as `EXOSPHERE` and `COLD TRAPS` do, so that
+ * an ocean the generator does not compute is never read as none (the guide's Data states). `ocean`
+ * stands before either: a version-23 server sends a Snowball's ocean in its cover alone, with no
+ * member, and a member computed as none beside it reads the cover's (P14.T43.i). Whether a row
+ * that neither the member nor `ocean` states reads `NOT YET MODELLED` or is left out follows the
+ * member's state alone, never the surface's state, its temperature, the body's kind or the
+ * generator version, since a state is the server's to set.
  */
-function subsurfaceOceanLiquid(surface: BodySurface, ocean: SubstanceArea | null): string | null {
-  if (surface.subsurfaceOcean.kind === "value") {
-    return surface.subsurfaceOcean.value.liquid;
+function subsurfaceOceanShown(surface: BodySurface, ocean: SubstanceArea | null): Shown | null {
+  const member = surface.subsurfaceOcean;
+  const cover = ocean === null ? null : value(substanceName(ocean.substance, "upper"));
+  let reading: Shown | null;
+  switch (member.kind) {
+    case "value":
+      reading = value(substanceName(member.value.liquid, "upper"));
+      break;
+    case "none":
+      reading = cover;
+      break;
+    case "not_modelled":
+      reading = cover ?? value(sectionStateLabel("not_modelled"));
+      break;
   }
-  return ocean === null ? null : ocean.substance;
+  return reading;
 }
 
 /**
@@ -518,8 +536,12 @@ function subsurfaceOceanLiquid(surface: BodySurface, ocean: SubstanceArea | null
  * the section's, `SUBSURFACE OCEAN`, its liquid named with no share (`SUBSURFACE OCEAN H2O`). The
  * row also stands on any surface whose ocean under its ice the wire states, as a regular moon's
  * ({@link BodySurface.subsurfaceOcean}, the wire's `subsurface_ocean`; P14.T43.i), and reads that
- * ocean's liquid, the member's where both stand ({@link subsurfaceOceanLiquid}):
- * `SUBSURFACE OCEAN NaCl BRINE`.
+ * ocean's liquid, the member's where both stand ({@link subsurfaceOceanShown}):
+ * `SUBSURFACE OCEAN NaCl BRINE`. Where the member is not modelled and no ocean under a `snowball`'s
+ * ice stands, the row reads `SUBSURFACE OCEAN NOT YET MODELLED`, in the same place, as `EXOSPHERE`
+ * and `COLD TRAPS` read theirs, so that an ocean the generator does not compute, as Triton's, is
+ * never read as none (the guide's Data states; P14.T51.g.b, decision-p14-t51gb-ice-ii §3). A member
+ * computed as none adds no row.
  *
  * The section's other members are on the wire and not yet read here: its material, climate regime
  * and global figures; the ocean's shell, depth, floor, solute fraction and base temperature
@@ -538,7 +560,7 @@ function surfaceRows(surface: BodySurface): ReactNode {
   const coverModelled = surface.condensates.kind !== "not_modelled";
   const ocean = oceanUnderIce(surface);
   const liquids = ocean === null ? surface.surfaceLiquids : liquidsOnIce(surface, ocean);
-  const oceanLiquid = subsurfaceOceanLiquid(surface, ocean);
+  const oceanShown = subsurfaceOceanShown(surface, ocean);
   const notModelled = value(sectionStateLabel("not_modelled"));
   return (
     <>
@@ -578,13 +600,7 @@ function surfaceRows(surface: BodySurface): ReactNode {
       {surface.state === "airless" && !coldTrapsKnown(surface.condensates) ? (
         <ReadoutRow label="COLD TRAPS" shown={notModelled} wide />
       ) : null}
-      {oceanLiquid === null ? null : (
-        <ReadoutRow
-          label="SUBSURFACE OCEAN"
-          shown={value(substanceName(oceanLiquid, "upper"))}
-          wide
-        />
-      )}
+      {oceanShown === null ? null : <ReadoutRow label="SUBSURFACE OCEAN" shown={oceanShown} wide />}
     </>
   );
 }
@@ -824,13 +840,14 @@ export interface BodyRecordReadingsProps {
  * pressure and gases, and, over a melt, its own vapour's state; then the crust at the surface, the
  * mantle's redox class, the melt's share of the surface, the liquids and ices that cover it by
  * substance and, beside them, an airless body's cold traps' state and the ocean under a body's ice,
- * which on an airless moon follows the cold traps' state), a gas-envelope body's envelope in the
- * surface's place, read as its `ATMOSPHERE` (its gases), and its hooks, whose detail seed is the
- * one hook the wire carries, the em dash until the server derives it. A section withheld or not
- * modelled reads so, once, in place of its rows; one that does not apply is left out. A server
- * since P14.T35.e sends one of `surface` and `envelope` as not applicable for every planet it
- * resolves to the `surface` level, so the planet's air is read from the other; an older server
- * sends no envelope, which reads `ATMOSPHERE NOT YET MODELLED`.
+ * or its state where the generator does not compute it, which on an airless moon follows the cold
+ * traps' state), a gas-envelope body's envelope in the surface's place, read as its `ATMOSPHERE`
+ * (its gases), and its hooks, whose detail seed is the one hook the wire carries, the em dash until
+ * the server derives it. A section withheld or not modelled reads so, once, in place of its rows;
+ * one that does not apply is left out. A server since P14.T35.e sends one of `surface` and
+ * `envelope` as not applicable for every planet it resolves to the `surface` level, so the planet's
+ * air is read from the other; an older server sends no envelope, which reads
+ * `ATMOSPHERE NOT YET MODELLED`.
  *
  * The distance is the one reading the display derives: from the server's elements at the display
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
