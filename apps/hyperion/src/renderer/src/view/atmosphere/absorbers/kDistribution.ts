@@ -92,7 +92,9 @@ export interface KDistributionTable {
   /**
    * Each broadening gas's half-widths over air's, by registry key, with `self` for the species
    * itself (HITRAN2024's γ_self, γ_H2, γ_He, γ_CO2 and γ_H2O where it gives them). A gas not listed
-   * broadens as air does, `estimated` unless it is N₂, O₂ or Ar.
+   * broadens as air does. Unless it is N₂, O₂ or Ar it is then `estimated` where it has a permanent
+   * dipole ({@link DIPOLAR_BROADENERS}) or the table has two variants, and is otherwise weighed by
+   * R08.T10.c's effect bound ({@link Broadening.widthlessShare}).
    */
   readonly broadening: ReadonlyMap<string, number>;
   /**
@@ -613,6 +615,20 @@ export function curveRowsPa(pressuresPa: ReadonlyArray<number>): ReadonlyArray<n
 /** The gases that broaden as air does by definition: air's own (HITRAN's γ_air). */
 const AIR_GASES: ReadonlySet<string> = new Set(["air", "N2", "O2", "Ar"]);
 
+/**
+ * The five broadening gases with a permanent dipole that `decision-r08-approximate-plate.md`, item
+ * 1a (2026-10-27), names, H₂O, NH₃, SO₂, HCN and H₂S, whose foreign widths can pass twice air's:
+ * beyond the range the trace broadeners' effect bound takes for a gas a table holds no width for
+ * (`negligible.ts`'s `BroadenerVerdict`). A table that holds no width for one of them is
+ * `estimated` at any share, as before the bound, until a cited range of the gas's own exists.
+ *
+ * @remarks
+ * The registry holds other gases whose dipoles are as strong (HCl, CH₃OH, SiO, H₂SO₄, TiO, VO,
+ * FeH), which the bound weighs as the ruling stands; recorded for the owner (R08.T10.c's deferred
+ * findings).
+ */
+export const DIPOLAR_BROADENERS: ReadonlySet<string> = new Set(["H2O", "NH3", "SO2", "HCN", "H2S"]);
+
 /** A species' broadening in a mixture ({@link broadeningFactor}). */
 export interface Broadening {
   /** Σ_b x_b r_b (296 ÷ T)^(n̄_b − n̄_air), the broadening pressure over the pressure. */
@@ -620,11 +636,21 @@ export interface Broadening {
   /** The self share of the Lorentz width, x_self r_self ÷ Σ_b x_b r_b: a two-variant table's mix. */
   readonly selfShare: number;
   /**
-   * Whether it rests on a gas the table holds no width for (other than N₂, O₂ and Ar, which are
-   * air), or, for a two-variant table, on any gas but the species, N₂, O₂ and Ar, whose far wing
-   * takes CO₂–N₂'s χ, `estimated`.
+   * Whether it rests on a gas of {@link DIPOLAR_BROADENERS} the table holds no width for, or, for a
+   * two-variant table, on any gas but the species, N₂, O₂ and Ar, whose far wing takes CO₂–N₂'s χ,
+   * `estimated`.
    */
   readonly estimated: boolean;
+  /**
+   * ε, the share of the broadening pressure that rests on the other gases the table holds no width
+   * for, each taken as air (r 1): Σ_j x_j ÷ Σ_b x_b r_b (296 ÷ T)^(Δn_b), j over those gases and b
+   * over the mixture, so that a gas whose own ratio lies anywhere in [0, 2], the range item 1a
+   * assumes, moves the broadening pressure by at most this share of itself
+   * (`decision-r08-approximate-plate.md`, item 1a). 0 where
+   * there are none, and on a two-variant table, where every such gas is `estimated`. R08.T10.c's
+   * effect bound weighs it in place of a label (`negligible.ts`'s `BroadenerVerdict`).
+   */
+  readonly widthlessShare: number;
 }
 
 /**
@@ -633,6 +659,12 @@ export interface Broadening {
  * gas it does not list) and r_self's for the species' own mole fraction, and the self share of it
  * (`decision-r08-t4d-kdist.md` §5.3; `decision-r08-t4d-kdist-chain.md` §§7, 13). The mole
  * fractions are normalised to sum to 1.
+ *
+ * @remarks
+ * A gas the table holds no width for, other than N₂, O₂ and Ar, is taken as air. It makes the
+ * species `estimated` where it is one of {@link DIPOLAR_BROADENERS} or the table has two variants,
+ * and otherwise adds its share to {@link Broadening.widthlessShare}, for the effect bound
+ * (R08.T10.c).
  *
  * @param moleFractions - The mixture's gases by registry key, the species' own among them.
  * @param temperatureK - The profile's temperature, K.
@@ -647,9 +679,11 @@ export function broadeningFactor(
   if (!(Number.isFinite(temperatureK) && temperatureK > 0)) {
     throw new RangeError(`a broadening temperature is finite and above 0 K, not ${temperatureK}`);
   }
+  const twoVariant = table.variants.length > 1;
   let total = 0;
   let weighted = 0;
   let self = 0;
+  let widthless = 0;
   let estimated = false;
   for (const [gas, x] of moleFractions) {
     if (!(Number.isFinite(x) && x >= 0)) {
@@ -658,17 +692,25 @@ export function broadeningFactor(
     const own = gas === table.species;
     const key = own ? "self" : gas;
     const ratio = table.broadening.get(key);
-    estimated ||=
-      x > 0 && !own && !AIR_GASES.has(gas) && (ratio === undefined || table.variants.length > 1);
+    const foreign = x > 0 && !own && !AIR_GASES.has(gas);
+    const noWidth = foreign && ratio === undefined;
+    const bounded = noWidth && !twoVariant && !DIPOLAR_BROADENERS.has(gas);
+    estimated ||= (foreign && twoVariant) || (noWidth && !bounded);
     const atT = (ratio ?? 1) * (296 / temperatureK) ** (table.broadeningExponents.get(key) ?? 0);
     total += x;
     weighted += x * atT;
     self += own ? x * atT : 0;
+    widthless += bounded ? x * atT : 0;
   }
   if (!(total > 0)) {
     throw new RangeError("a broadening mixture needs a gas with a mole fraction above 0");
   }
-  return { factor: weighted / total, selfShare: self / weighted, estimated };
+  return {
+    factor: weighted / total,
+    selfShare: self / weighted,
+    estimated,
+    widthlessShare: widthless / weighted,
+  };
 }
 
 /** A species' k-distributions at one temperature, on its table's pressures. */

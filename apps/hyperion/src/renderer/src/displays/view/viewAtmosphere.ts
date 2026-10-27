@@ -17,9 +17,11 @@ import type {
 } from "../../view/atmosphere/AtmosphereCache";
 import type { BodyLight } from "../../view/atmosphere/atmosphereInput";
 import {
+  atmosphereApproximateLines,
   type AtmosphereLabel,
   atmosphereProblemLines,
   type AtmosphereRejectedLine,
+  type BodyApproximateReasons,
   type BodyAtmosphereProblem,
 } from "../../view/atmosphere/labels";
 import type { AtmosphereTables } from "../../view/atmosphere/tables";
@@ -130,18 +132,29 @@ export interface ViewAtmosphereShown {
   readonly labels: ReadonlyArray<AtmosphereLabel>;
   /** Its `ATMOSPHERE REJECTED` lines, among the atmosphere's notes. */
   readonly plate: ReadonlyArray<AtmosphereRejectedLine>;
+  /**
+   * The lines that follow `ATMOSPHERE: APPROXIMATE`, each reason with the bodies it holds for
+   * (`atmosphereApproximateLines`; R08.T10.c).
+   */
+  readonly approximate: ReadonlyArray<string>;
   /** Its `ATMOSPHERE NOT AVAILABLE` line, then its `ATMOSPHERE DATA INVALID` lines, for the fault line. */
   readonly fault: ReadonlyArray<string>;
 }
 
 /** A view that states nothing of its atmospheres. */
-export const NO_ATMOSPHERE_SHOWN: ViewAtmosphereShown = { labels: [], plate: [], fault: [] };
+export const NO_ATMOSPHERE_SHOWN: ViewAtmosphereShown = {
+  labels: [],
+  plate: [],
+  approximate: [],
+  fault: [],
+};
 
 /**
- * What a view's report from the cache says on its label block: its labels, and its bodies'
- * problems worded with their designations (`atmosphereProblemLines`). A problem of a body the scene
- * no longer holds, a report the scene has moved on from, says nothing: no line names a body the
- * view does not draw.
+ * What a view's report from the cache says on its label block: its labels, its bodies' problems
+ * worded with their designations (`atmosphereProblemLines`), and `ATMOSPHERE: APPROXIMATE`'s
+ * reasons with theirs (`atmosphereApproximateLines`; R08.T10.c). A problem or a reason of a body
+ * the scene no longer holds, a report the scene has moved on from, says nothing: no line names a
+ * body the view does not draw.
  */
 export function atmosphereShownOf(
   report: AtmosphereViewReport,
@@ -155,6 +168,18 @@ export function atmosphereShownOf(
       problems.push({ designation, problem });
     }
   }
+  const approximate: BodyApproximateReasons[] = [];
+  for (const [id, reasons] of report.reasons) {
+    const designation = designations.get(id);
+    if (designation !== undefined) {
+      approximate.push({ designation, reasons });
+    }
+  }
   const lines = atmosphereProblemLines(problems);
-  return { labels: report.labels, plate: lines.plate, fault: lines.fault };
+  return {
+    labels: report.labels,
+    plate: lines.plate,
+    approximate: atmosphereApproximateLines(approximate),
+    fault: lines.fault,
+  };
 }

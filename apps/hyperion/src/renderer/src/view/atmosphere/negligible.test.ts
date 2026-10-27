@@ -29,7 +29,12 @@ import {
   type PendingAbsorber,
 } from "./absorbers/transparency";
 import { MARS_AIR, MARS_FIT_COLUMN } from "./channels";
-import { type AtmosphereColumn, hydrostaticColumn } from "./column";
+import {
+  type AtmosphereColumn,
+  gasProperties,
+  hydrostaticColumn,
+  meanMolarMassGPerMol,
+} from "./column";
 import {
   DOBSON_UNIT_PER_M2,
   EARTH_COLUMN,
@@ -37,10 +42,12 @@ import {
   EARTH_OZONE_PROFILE,
   OZONE_COLUMN_DU,
 } from "./earth";
+import { tableRadiusM } from "./hillaire";
 import {
   type AbsorptionVerdict,
   boundCellMeansAt,
   boundCellWeights,
+  type BroadenerVerdict,
   channelChanges,
   type FixedGMixVerdict,
   type HeldChiVerdict,
@@ -51,6 +58,12 @@ import {
   negligibleAbsorbers,
   type NegligibleVerdict,
 } from "./negligible";
+import {
+  SATURN_OBLATE_AIR,
+  SATURN_OBLATE_GRAVITY,
+  SATURN_OBLATE_SPHEROID,
+  SATURN_OBLATE_TEMPERATURE_K,
+} from "./reference/cases";
 
 /** The test suns: R06's Sun and the 2,500 K and 30,000 K Planck suns, T4.b's three. */
 const SUNS = RANGE_SUNS.map(([, sun]) => sun);
@@ -122,6 +135,13 @@ function fixedGMixOf(
   key: string,
 ): FixedGMixVerdict | undefined {
   return verdicts.find((v): v is FixedGMixVerdict => v.test === "fixedGMix" && v.key === key);
+}
+
+function broadenerOf(
+  verdicts: ReadonlyArray<NegligibleVerdict>,
+  key: string,
+): BroadenerVerdict | undefined {
+  return verdicts.find((v): v is BroadenerVerdict => v.test === "broadener" && v.key === key);
 }
 
 let tables: ReadonlyArray<KDistributionTable> = [];
@@ -258,6 +278,56 @@ function uranusBody(surfacePa: number): NegligibleBody {
     gases,
     bulk: gases,
   });
+}
+
+/**
+ * A Saturn-class body (R08.T10.c): `reference/cases.ts`'s {@link SATURN_OBLATE_AIR}, the NSSDCA
+ * Saturn fact sheet's 96.3% H₂, 3.25% He and 4,500 ppm CH₄, well mixed and isothermal at
+ * {@link SATURN_OBLATE_TEMPERATURE_K} (134 K), its datum at 1 bar on Saturn's g_ref
+ * ({@link SATURN_OBLATE_GRAVITY}) and its figure's table radius, (2a + c) ÷ 3, as the
+ * `saturn-oblate` reference's column is.
+ */
+function saturnBody(): NegligibleBody {
+  const gases = SATURN_OBLATE_AIR.map(
+    ({ species, moleFraction }) => [species, moleFraction] as const,
+  );
+  return isothermalBody({
+    surfacePa: 1e5,
+    temperatureK: SATURN_OBLATE_TEMPERATURE_K,
+    molarMassGPerMol: meanMolarMassGPerMol(
+      SATURN_OBLATE_AIR.map(({ species, moleFraction }) => ({
+        properties: gasProperties(species),
+        moleFraction,
+      })),
+    ),
+    gravityMS2: SATURN_OBLATE_GRAVITY.referenceGravityMS2,
+    radiusM: tableRadiusM(SATURN_OBLATE_SPHEROID),
+    gases,
+    bulk: gases,
+  });
+}
+
+/**
+ * An Earth-class body ({@link earthBody}) with a bulk gas's mole fraction set: its well-mixed layer,
+ * in its place or after the others, and its share of the broadening mixture, the other gases'
+ * fractions as they are.
+ */
+function earthWith(species: string, moleFraction: number): NegligibleBody {
+  const body = earthBody();
+  const bulk = new Map(EARTH_BULK);
+  bulk.set(species, moleFraction);
+  const [layer] = wellMixed(EARTH_COLUMN, [[species, moleFraction]]);
+  if (layer === undefined) {
+    throw new Error("a gas mixed over the column is one layer");
+  }
+  const held = body.layers.some((l) => l.species === species);
+  return {
+    ...body,
+    layers: held
+      ? body.layers.map((l) => (l.species === species ? layer : l))
+      : [...body.layers, layer],
+    bulkMoleFractions: bulk,
+  };
 }
 
 /**
@@ -602,21 +672,63 @@ describe("the negligible-absorbers bound on an Earth-class body", () => {
       "CO2 fixedGMix",
       "O2+CO2 absorption",
       "N2O absorption",
-      "H2O absorption",
+      "H2O broadener",
       "H2O+H2O absorption",
       "H2O+air absorption",
     ]);
   });
 
-  it("labels its H₂O lines, which CO₂ broadens with no width in their table, at k = 100", () => {
-    const h2o = absorptionOf(verdicts, "H2O");
-    // Recorded: 1.96, red under the 30,000 K sun (Σ|w| ÷ Σw passes 1 where r̄ is negative). The
-    // lines are `estimated` because absorberSpecs takes CO₂'s 330 ppm as a broadener without a
-    // width (R08.T4.d).
-    expect([h2o?.negligible, h2o?.entries.map((e) => [e.origin, e.rule])]).toEqual([
-      false,
-      [["drawn", "estimatedData"]],
+  it("takes no label from CO₂'s broadening of its H₂O lines, which hold no width for it: their effect bound (R08.T10.c)", () => {
+    const broadener = broadenerOf(verdicts, "H2O");
+    // Recorded: ε 3.25 × 10⁻⁴ (330 ppm over the mixture's Σ x r), Δ_c(k = 1) 0.512 and Δ_c,γ
+    // 1.66 × 10⁻⁴, both red under the 30,000 K sun (Σ|w| ÷ Σw passes 1 where r̄ is negative); the
+    // ruling's "at most 6.3 × 10⁻⁴". Until R08.T10.c the lines were `estimatedData`, 1.96 at k = 100.
+    expect([
+      broadener?.negligible,
+      (broadener?.widthlessShare ?? 0) > 3e-4 && (broadener?.widthlessShare ?? 1) < 3.5e-4,
+      absorptionOf(verdicts, "H2O"),
+    ]).toEqual([true, true, undefined]);
+    expect(broadener?.largestChange).toBeLessThan(6.3e-4);
+  });
+
+  it("bounds the change by the width's factor, −ln(1 − ε), times the lines' own bound at k = 1", () => {
+    const broadener = broadenerOf(verdicts, "H2O");
+    if (broadener === undefined) {
+      throw new Error(
+        "Earth's H2O lines are broadened by CO2, which their table holds no width for",
+      );
+    }
+    const factor = -Math.log1p(-broadener.widthlessShare);
+    expect([
+      broadener.widthFactor,
+      broadener.changes.flat().map((d, i) => d / (broadener.lineChanges.flat()[i] ?? Number.NaN)),
+    ]).toEqual([
+      expect.closeTo(factor, 15),
+      broadener.changes.flat().map(() => expect.closeTo(factor, 12)),
     ]);
+  });
+
+  it("labels its H₂O lines once CO₂ is raised past about 2,000 ppm, where Δ_c,γ passes 10⁻³", () => {
+    const co2 = EARTH_BULK.get("CO2") ?? Number.NaN;
+    const raised = [5, 10].map(
+      (factor) =>
+        broadenerOf(negligibleAbsorbers(earthWith("CO2", factor * co2)), "H2O")?.negligible,
+    );
+    // Recorded: it crosses between 6.0 and 6.1 times the 330 ppm, 9.97 × 10⁻⁴ and 1.014 × 10⁻³, at
+    // ε 1.95 × 10⁻³ and 1.98 × 10⁻³; 8.3 × 10⁻⁴ at 5 times, 1.66 × 10⁻³ at 10.
+    expect(raised).toEqual([true, false]);
+  });
+
+  it("labels its H₂O lines at any share of a gas with a dipole their table holds no width for, at k = 100", () => {
+    // NH₃ at a part per billion: H₂O's table holds only its self width.
+    const ammonia = negligibleAbsorbers(earthWith("NH3", 1e-9));
+    const h2o = absorptionOf(ammonia, "H2O");
+    // Recorded: 1.96, as before R08.T10.c, red under the 30,000 K sun.
+    expect([
+      h2o?.negligible,
+      h2o?.entries.map((e) => [e.origin, e.rule]),
+      broadenerOf(ammonia, "H2O"),
+    ]).toEqual([false, [["drawn", "estimatedData"]], undefined]);
   });
 });
 
@@ -652,10 +764,25 @@ describe("the negligible-absorbers bound on a Mars-class body", () => {
     ]).toEqual([true, true]);
   });
 
-  it("labels its O₂, whose lines CO broadens with no width in their table, past 10⁻³ at k = 100", () => {
-    const o2 = absorptionOf(verdicts, "O2");
-    // Recorded: 1.35 × 10⁻³ (red, the 2,500 K sun; 1.06 × 10⁻³ under the Sun).
-    expect([o2?.negligible, o2?.entries.map((e) => e.rule)]).toEqual([false, ["estimatedData"]]);
+  it("takes no label from CO's broadening of its O₂ lines, about 10⁻⁸ by their effect bound (R08.T10.c)", () => {
+    const broadener = broadenerOf(verdicts, "O2");
+    // Recorded: ε 5.2 × 10⁻⁴ (0.06% CO), Δ_c(k = 1) 1.35 × 10⁻⁵ and Δ_c,γ 7.1 × 10⁻⁹, both red under
+    // the 2,500 K sun. Until R08.T10.c the lines were `estimatedData`, 1.35 × 10⁻³ at k = 100.
+    expect([broadener?.negligible, absorptionOf(verdicts, "O2")]).toEqual([true, undefined]);
+    expect(broadener?.largestChange).toBeLessThan(1e-7);
+  });
+
+  it("bounds its H₂O lines, which CO₂ broadens with no width on file, by their whole light at k = 1", () => {
+    const broadener = broadenerOf(verdicts, "H2O");
+    // CO₂ is 95% of the mixture, so ε is 0.95 and the width's factor its ceiling, 1: whatever the
+    // widths, the lines move no channel by more than their own bound. Recorded: 2.8 × 10⁻⁴, red
+    // under the 30,000 K sun.
+    expect([broadener?.widthFactor, broadener?.changes, broadener?.negligible]).toEqual([
+      1,
+      broadener?.lineChanges,
+      true,
+    ]);
+    expect(broadener?.widthlessShare).toBeGreaterThan(0.9);
   });
 
   it("labels its CO₂ at 214 K, inside CO₂'s estimated 212.5–225 K, past 10⁻³ at k = 100", () => {
@@ -738,6 +865,18 @@ describe("the negligible-absorbers bound on a Uranus-class body", () => {
     const h2 = absorptionOf(negligibleAbsorbers(uranusBody(3.7e5)), "H2");
     // Recorded: 0.10, red under the 30,000 K sun; 3.3 × 10⁻³ at k = 1, were the lines measured.
     expect([h2?.negligible, h2?.entries.map((e) => e.rule)]).toEqual([false, ["estimatedData"]]);
+  });
+});
+
+describe("the negligible-absorbers bound on a Saturn-class body (R08.T10.c)", () => {
+  it("takes no label from CH₄'s broadening of its H₂ lines, about 7 × 10⁻⁶ by their effect bound", () => {
+    const verdicts = negligibleAbsorbers(saturnBody());
+    const broadener = broadenerOf(verdicts, "H2");
+    // Recorded: ε 5.5 × 10⁻³ at 134 K (each width at its own exponent), Δ_c(k = 1) 1.22 × 10⁻³ and
+    // Δ_c,γ 6.7 × 10⁻⁶, both red under the 30,000 K sun. Until R08.T10.c the lines were
+    // `estimatedData` at k = 100.
+    expect([broadener?.negligible, absorptionOf(verdicts, "H2")]).toEqual([true, undefined]);
+    expect(broadener?.largestChange).toBeLessThan(1e-5);
   });
 });
 

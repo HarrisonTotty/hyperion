@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { substanceName } from "../../lib/substances";
 import {
   ATMOSPHERE_ANSWER_UNREADABLE,
   ATMOSPHERE_LABELS,
   ATMOSPHERE_STATEMENTS,
+  atmosphereApproximateLines,
   atmosphereDataInvalid,
   type AtmosphereLabel,
   atmosphereNotAvailable,
@@ -12,6 +14,7 @@ import {
   atmosphereRejected,
   atmosphereStatements,
 } from "./labels";
+import { THICK_REASON } from "./thick/regime";
 
 describe("the atmosphere labels", () => {
   it("spell the eight statements as the guide's rows do", () => {
@@ -87,6 +90,7 @@ describe("atmosphereNotes (R08.T10.b)", () => {
           "atmospherePending",
         ],
         [refused, failed],
+        [],
       ),
     ).toEqual([
       { statement: "ATMOSPHERE: NOT YET MODELLED", standing: "note" },
@@ -99,9 +103,156 @@ describe("atmosphereNotes (R08.T10.b)", () => {
   });
 
   it("gives the labels' statements alone where nothing is refused", () => {
-    expect(atmosphereNotes(["aerosolsNotYetModelled"], []).map((note) => note.statement)).toEqual(
-      atmosphereStatements(["aerosolsNotYetModelled"]),
-    );
+    expect(
+      atmosphereNotes(["aerosolsNotYetModelled"], [], []).map((note) => note.statement),
+    ).toEqual(atmosphereStatements(["aerosolsNotYetModelled"]));
+  });
+});
+
+describe("atmosphereNotes with APPROXIMATE's reasons (R08.T10.c)", () => {
+  const reasons = [
+    "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
+  ];
+
+  it("sets the reasons straight after ATMOSPHERE: APPROXIMATE, each a steady note, the REJECTED lines in their place", () => {
+    const failed = {
+      statement: "ATMOSPHERE REJECTED: for KX 4417 /4, failed, reopen VIEW to retry",
+      refusal: false,
+    };
+    expect(
+      atmosphereNotes(
+        ["atmosphereApproximate", "aerosolsNotYetModelled", "atmosphereNotResolved"],
+        [failed],
+        reasons,
+      ),
+    ).toEqual([
+      { statement: "AEROSOLS AND ABSORBERS: NOT YET MODELLED", standing: "note" },
+      { statement: "ATMOSPHERE: NOT RESOLVED", standing: "note" },
+      { statement: failed.statement, standing: "fault" },
+      { statement: "ATMOSPHERE: APPROXIMATE", standing: "note" },
+      { statement: reasons[0], standing: "note" },
+      { statement: reasons[1], standing: "note" },
+    ]);
+  });
+
+  it("sets none without ATMOSPHERE: APPROXIMATE", () => {
+    expect(
+      atmosphereNotes(["aerosolsNotYetModelled", "atmospherePending"], [], reasons).map(
+        (note) => note.statement,
+      ),
+    ).toEqual(["AEROSOLS AND ABSORBERS: NOT YET MODELLED", "ATMOSPHERE: PENDING"]);
+  });
+});
+
+describe("atmosphereApproximateLines (R08.T10.c)", () => {
+  it("words the ruling's lines: a reason, then the bodies it holds for, one, two or three", () => {
+    expect(
+      atmosphereApproximateLines([
+        { designation: "KX 4417 /3", reasons: ["H2O: its absorption estimated, not measured"] },
+        { designation: "KX 4417 /5", reasons: [THICK_REASON] },
+        { designation: "KX 4417 /2", reasons: [THICK_REASON] },
+        {
+          designation: "TEST SATURN",
+          reasons: [
+            `${substanceName("e-")} scattering: left out, the console can draw no more layers`,
+          ],
+        },
+      ]),
+    ).toEqual([
+      "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
+      "H2O: its absorption estimated, not measured, for KX 4417 /3",
+      "e− scattering: left out, the console can draw no more layers, for TEST SATURN",
+    ]);
+    expect(
+      atmosphereApproximateLines(
+        ["KX 4417 /5", "KX 4417 /2", "KX 4417 /3"].map((designation) => ({
+          designation,
+          reasons: [THICK_REASON],
+        })),
+      ),
+    ).toEqual([
+      "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2, KX 4417 /3 and KX 4417 /5",
+    ]);
+  });
+
+  it("names the bodies in designation order, numbers by their value", () => {
+    expect(
+      atmosphereApproximateLines(
+        ["Kepler-9 /10", "Kepler-9 /2"].map((designation) => ({
+          designation,
+          reasons: [THICK_REASON],
+        })),
+      ),
+    ).toEqual([
+      "A thick atmosphere drawn by the thin-atmosphere method, for Kepler-9 /2 and Kepler-9 /10",
+    ]);
+  });
+
+  it("gives a reason two bodies share one line, and names a body listed twice once", () => {
+    const water = "H2O: its absorption estimated, not measured";
+    expect(
+      atmosphereApproximateLines([
+        { designation: "B", reasons: [water] },
+        { designation: "A", reasons: [water] },
+        { designation: "B", reasons: [water] },
+      ]),
+    ).toEqual(["H2O: its absorption estimated, not measured, for A and B"]);
+  });
+
+  it("orders the lines by their first bodies, a body's own reasons in its order", () => {
+    expect(
+      atmosphereApproximateLines([
+        { designation: "B", reasons: ["CH4: second", "CO: first"] },
+        { designation: "A", reasons: ["O3: its own", "CO: first", "CH4: second"] },
+        { designation: "C", reasons: ["N2O: last"] },
+      ]),
+    ).toEqual([
+      "O3: its own, for A",
+      "CO: first, for A and B",
+      "CH4: second, for A and B",
+      "N2O: last, for C",
+    ]);
+  });
+
+  it("capitalises a reason that begins with a word, and keeps a formula's or a symbol's case", () => {
+    const lines = atmosphereApproximateLines([
+      {
+        designation: "A",
+        reasons: [
+          "liquid H2SO4 particles: their sizes summed short of convergence at 450 nm",
+          "no SO2 ice on file: liquid SO2 at 198 K stands in, a named analogue",
+          "H2O–air pairs: their absorption estimated, not measured",
+          `${substanceName("e-")} scattering: left out, the console can draw no more layers`,
+          `${substanceName("ice_giant_haze")}: its phase function a named analogue's`,
+          `${substanceName("mars_dust")}: its phase function a named analogue's`,
+        ],
+      },
+    ]);
+    expect(lines.map((line) => line.split(" ")[0])).toEqual([
+      "Liquid",
+      "No",
+      "H2O–air",
+      "e−",
+      "Ice-giant",
+      "Mars-type",
+    ]);
+  });
+
+  it("compares reasons after the capital, so that one worded either way gives one line", () => {
+    expect(
+      atmosphereApproximateLines([
+        { designation: "A", reasons: [THICK_REASON] },
+        { designation: "B", reasons: [`A${THICK_REASON.slice(1)}`] },
+      ]),
+    ).toEqual(["A thick atmosphere drawn by the thin-atmosphere method, for A and B"]);
+  });
+
+  it("gives no line for a body with no reasons, and none for no bodies", () => {
+    expect([
+      atmosphereApproximateLines([{ designation: "A", reasons: [] }]),
+      atmosphereApproximateLines([]),
+    ]).toEqual([[], []]);
   });
 });
 

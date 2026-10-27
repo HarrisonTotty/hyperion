@@ -9,6 +9,7 @@ import { vec3 } from "../../geometry/vec3";
 import { aHostDisc } from "../../test/litFixtures";
 import { AtmosphereCache } from "../../view/atmosphere/AtmosphereCache";
 import type { AtmosphereBuilder } from "../../view/atmosphere/opticsPool";
+import { THICK_REASON } from "../../view/atmosphere/thick/regime";
 import type { BodyLightSources } from "../../view/bodies/draw";
 import type { LitRegime } from "../../view/bodies/regime";
 import type { ViewBody, ViewScene } from "../../view/scene/model";
@@ -119,6 +120,7 @@ describe("a view's atmosphere shown (R08.T10.b)", () => {
         problems: new Map([
           [body.id, { kind: "rejected", code: "internal", message: "it broke", refusal: false }],
         ]),
+        reasons: new Map(),
         pending: false,
       },
       scene,
@@ -138,11 +140,54 @@ describe("a view's atmosphere shown (R08.T10.b)", () => {
       {
         labels: [],
         problems: new Map([["0300080020000000.0300", { kind: "failed" }]]),
+        reasons: new Map(),
         pending: false,
       },
       scene,
     );
     expect([shown.plate, shown.fault]).toEqual([[], []]);
+  });
+});
+
+describe("ATMOSPHERE: APPROXIMATE's reasons shown (R08.T10.c)", () => {
+  const WATER = "H2O: its absorption estimated, not measured";
+
+  it("names the bodies of each reason by their designations, in designation order", () => {
+    const { scene, body: giant } = phaseBody("TEST GIANT");
+    const planet = scene.bodies.find((each) => each.designation.startsWith("TEST PLANET"));
+    if (planet === undefined) {
+      throw new Error("PHASE TEST holds its planets");
+    }
+    const shown = atmosphereShownOf(
+      {
+        labels: ["atmosphereApproximate"],
+        problems: new Map(),
+        reasons: new Map([
+          [planet.id, [THICK_REASON]],
+          [giant.id, [THICK_REASON, WATER]],
+        ]),
+        pending: false,
+      },
+      scene,
+    );
+    expect(shown.approximate).toEqual([
+      `A thick atmosphere drawn by the thin-atmosphere method, for TEST GIANT and ${planet.designation}`,
+      "H2O: its absorption estimated, not measured, for TEST GIANT",
+    ]);
+  });
+
+  it("names no body the scene no longer holds", () => {
+    const { scene } = phaseBody("TEST GIANT");
+    const shown = atmosphereShownOf(
+      {
+        labels: ["atmosphereApproximate"],
+        problems: new Map(),
+        reasons: new Map([["0300080020000000.0300", [WATER]]]),
+        pending: false,
+      },
+      scene,
+    );
+    expect(shown.approximate).toEqual([]);
   });
 });
 

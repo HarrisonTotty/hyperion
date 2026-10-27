@@ -15,6 +15,7 @@ import {
   pastTheCapWithElectronsDetail,
   recordInput,
   sixProfilesDetail,
+  withSurface,
 } from "../../test/atmosphereRecords";
 import { inlinePart } from "../../test/kDistributionFixtures";
 import { testPatienceMs } from "../../test/patience";
@@ -73,16 +74,17 @@ describe("the generated Earth (the wire fixture's) with its line tables", () => 
     expect(earth.labels).toEqual(["aerosolsNotYetModelled", "atmosphereApproximate"]);
   });
 
-  it("is so for its water: lines CO2 broadens with no width on file, and its continuum below 567 nm", () => {
+  it("is so for its water's continuum below 567 nm alone", () => {
+    // Its lines, which CO2 broadens with no width on file, clear the trace broadeners' effect bound
+    // since R08.T10.c, and give no reason.
     expect(earth.reasons).toEqual([
-      "H2O: its absorption estimated, not measured",
       "H2O–H2O pairs: their absorption estimated, not measured",
       "H2O–air pairs: their absorption estimated, not measured",
     ]);
   });
 
-  it("names CO2 negligible, its held χ and its fixed-g mix under the bound", () => {
-    expect(earth.negligible).toEqual(["CO2"]);
+  it("names H2O negligible, its lines' broadening by CO2 under the effect bound, and CO2, its held χ and its fixed-g mix under the bound", () => {
+    expect(earth.negligible).toEqual(["H2O", "CO2"]);
   });
 
   it("takes one light slot of curves, one a term", () => {
@@ -110,6 +112,42 @@ describe("the generated Earth (the wire fixture's) with its line tables", () => 
     expect(absorberSpecsOf(input, { kDistributions: tables }).specs).toEqual(
       earth.drawn?.absorbers,
     );
+  });
+});
+
+describe("the generated Earth with its CO2 raised past the trace broadeners' bound (R08.T10.c)", () => {
+  /**
+   * CO2's raised mole fraction, 1%: past the 6.0–6.1 times 330 ppm at which H2O's bound crosses
+   * 10⁻³ (`negligible.test.ts`).
+   */
+  const RAISED_CO2 = 0.01;
+
+  /** The generated Earth with CO2 at {@link RAISED_CO2}, its other gases scaled to the rest. */
+  function raisedCo2(): AssembledMedium {
+    const raised = withSurface(earthDetail(), (surface) => {
+      const co2 = surface.gases.find((gas) => gas.species === "CO2")?.mole_fraction ?? 0;
+      const scale = (1 - RAISED_CO2) / (1 - co2);
+      // The wire lists the gases largest first.
+      return {
+        ...surface,
+        gases: surface.gases
+          .map((gas) => ({
+            ...gas,
+            mole_fraction: gas.species === "CO2" ? RAISED_CO2 : gas.mole_fraction * scale,
+          }))
+          .toSorted((a, b) => b.mole_fraction - a.mole_fraction),
+      };
+    });
+    return withTables(detailOf(raised));
+  }
+
+  it("labels its H2O lines estimated, their broadening by CO2 past the bound", () => {
+    const raised = raisedCo2();
+    expect([
+      raised.reasons.includes("H2O: its absorption estimated, not measured"),
+      raised.labels.includes("atmosphereApproximate"),
+      raised.negligible.includes("H2O"),
+    ]).toEqual([true, true, false]);
   });
 });
 

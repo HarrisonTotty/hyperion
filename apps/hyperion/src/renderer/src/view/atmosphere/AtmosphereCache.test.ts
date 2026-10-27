@@ -65,6 +65,7 @@ import {
   OpticsWorkerPool,
 } from "./opticsPool";
 import { perPlanetRowOf, tablesPlanOf } from "./tables";
+import { THICK_REASON } from "./thick/regime";
 
 /** A body's per-planet tables as the fake factory makes them, with the bytes it reports. */
 class FakeTables implements CachedTables {
@@ -564,6 +565,47 @@ describe("ATMOSPHERE: PENDING", () => {
   });
 });
 
+describe("ATMOSPHERE: APPROXIMATE's reasons (R08.T10.c)", () => {
+  const WATER = "H2O: its absorption estimated, not measured";
+
+  it("reports each wanted body drawn with the label by its reasons, and none for the others", async () => {
+    const h = harness();
+    vi.spyOn(console, "error").mockImplementation(ignore);
+    const approximate = bodyId(1);
+    const computing = bodyId(2);
+    const failed = bodyId(3);
+    const pending = bodyId(4);
+    const frame = [approximate, computing, failed, pending].map((id) => lit(id));
+    note(h, frame);
+    for (const id of [approximate, computing, failed]) {
+      h.seam.answer(h.seam.latestFor(id).id, answerFor(id));
+    }
+    await microtasks();
+    await land(h, approximate, {
+      kind: "built",
+      assembled: { ...earthAssembly(["atmosphereApproximate"]), reasons: [WATER] },
+    });
+    // A bake's note in APPROXIMATE's place: the reasons stand with that label alone.
+    await land(h, computing, {
+      kind: "built",
+      assembled: { ...earthAssembly(["atmosphereComputing"]), reasons: [WATER] },
+    });
+    await land(h, failed, { kind: "failed", message: "a bug" });
+    const report = note(h, frame);
+    expect([[...report.reasons], report.problems.has(failed), report.pending]).toEqual([
+      [[approximate, [WATER]]],
+      true,
+      true,
+    ]);
+  });
+
+  it("reports none for a body drawn with the label as a point, which no view wants", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], { ...earthAssembly(["atmosphereApproximate"]), reasons: [WATER] });
+    expect([...note(h, [lit(A, "point")]).reasons]).toEqual([]);
+  });
+});
+
 describe("PendingLineHold", () => {
   it("shows after 250 ms held and goes after 1 s clear, a short clearing changing nothing", () => {
     const hold = new PendingLineHold();
@@ -1032,6 +1074,34 @@ describe("a kept scene's bodies", () => {
     ]).toEqual([[], ["aerosolsNotYetModelled", "atmosphereApproximate"], [earth, thick], 0]);
   });
 
+  it("gives a scene's medium past the thick line the line's reason, and one under it none (R08.T10.c)", () => {
+    const h = harness();
+    const venus = venusClassMedium();
+    const earth: BuiltAtmosphere = {
+      medium: R05_EARTH_REFERENCE,
+      bottomRadiusM: 6_371_008.8,
+      curves: [],
+      body: earthBody(),
+    };
+    const thick: BuiltAtmosphere = {
+      medium: venus.medium,
+      bottomRadiusM: venus.radiusM,
+      curves: [],
+      body: null,
+    };
+    const bodies = [
+      kept(bodyId(1), { kind: "medium", built: earth, labels: [] }),
+      kept(bodyId(2), { kind: "medium", built: thick, labels: [] }),
+    ];
+    note(h, bodies, 0, null);
+    const report = note(h, bodies, 0, null);
+    expect([
+      [...report.reasons],
+      h.cache.entryOf(bodyId(1))?.reasons,
+      h.cache.entryOf(bodyId(2))?.reasons,
+    ]).toEqual([[[bodyId(2), [THICK_REASON]]], [], [THICK_REASON]]);
+  });
+
   it("holds a body whose scene is still building its medium pending, then draws it (R08.T10.b)", () => {
     const h = harness();
     const view = h.cache.openView();
@@ -1126,7 +1196,12 @@ describe("the cache's disposal", () => {
 
   it("reports nothing of a later frame", async () => {
     const h = await disposed();
-    expect(note(h, [lit(A)])).toEqual({ labels: [], problems: new Map(), pending: false });
+    expect(note(h, [lit(A)])).toEqual({
+      labels: [],
+      problems: new Map(),
+      reasons: new Map(),
+      pending: false,
+    });
   });
 });
 

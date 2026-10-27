@@ -123,14 +123,32 @@ describe("a line species in absorberSpecs", () => {
     ]);
   });
 
-  it("is estimated on a background gas the table gives no width for", () => {
+  it("takes a background gas the table gives no width for as air, measured, its share for the effect bound (R08.T10.c)", () => {
     const specs = absorberSpecs([wellMixed("H2O", 1e26)], COLUMN, [], [], {
       kDistributions: [table],
       bulkMoleFractions: new Map([["H2", 1]]),
     });
-    expect(specs.approximations).toEqual([
-      { species: "H2O", provenance: "estimated", reason: "estimatedOptics" },
+    const lines = onlyColumnSpec(specs).species[0]?.lines;
+    // ε = (1 − x) ÷ (x r_self + (1 − x)), H₂ the whole of the rest and taken as air.
+    const x = 1e26 / (COLUMN.surfaceNumberDensityPerM3 * integralOfDensity());
+    expect([specs.approximations, lines?.provenance, lines?.widthlessShare]).toEqual([
+      [],
+      "measured",
+      expect.closeTo((1 - x) / (x * 1.5 + (1 - x)), 6),
     ]);
+  });
+
+  it("is estimated on a background gas with a permanent dipole the table gives no width for, at any share", () => {
+    const specs = absorberSpecs([wellMixed("H2O", 1e26)], COLUMN, [], [], {
+      kDistributions: [table],
+      bulkMoleFractions: new Map([
+        ["N2", 1],
+        ["NH3", 1e-9],
+      ]),
+    });
+    expect([specs.approximations, onlyColumnSpec(specs).species[0]?.lines?.widthlessShare]).toEqual(
+      [[{ species: "H2O", provenance: "estimated", reason: "estimatedOptics" }], 0],
+    );
   });
 
   it("takes its own mole fraction as self-broadening: x r_self + (1 − x) for air", () => {

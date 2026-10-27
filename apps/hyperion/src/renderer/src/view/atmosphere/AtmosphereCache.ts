@@ -47,6 +47,10 @@
  * none while a re-request's previous state is drawn. Each view holds it with its own
  * {@link PendingLineHold} (item 9).
  *
+ * **`ATMOSPHERE: APPROXIMATE`'s reasons** (R08.T10.c; `decision-r08-approximate-plate.md`, item 1b)
+ * are reported by body beside the scene's labels ({@link AtmosphereViewReport.reasons}), for each
+ * wanted body drawn with the label, so that the label block names each reason and its bodies.
+ *
  * **The tables** are made through the injected factory ({@link atmosphereTablesOn} in the app) and
  * owned here (item 3): R08.T10.b hands them to each view's `HillaireAtmosphere`, which does not
  * dispose them. Their bytes, each entry's `rowBytes` as built, are held to
@@ -99,7 +103,7 @@ import {
 import type { AtmosphereMedium } from "./medium";
 import type { AtmosphereBuilder, OpticsBuild } from "./opticsPool";
 import { type AbsorberCurveSlots, type AtmosphereBody, AtmosphereTables } from "./tables";
-import { provisionalThick } from "./thick/regime";
+import { provisionalThick, THICK_REASON } from "./thick/regime";
 
 /**
  * The cache's size, B: 32,000,000 of per-planet rows, decimal as `PER_PLANET_ROW_BYTES` is,
@@ -156,7 +160,9 @@ export function atmosphereTablesOn(
  * A kept scene's setting of a body's atmosphere: none set, airless, or a medium the scene built
  * with its curves and labels (`reference/cases.ts`'s fixtures), taken as it is, its tables made
  * here. The provisional thick line (`thick/regime.ts`'s `provisionalThick`) adds
- * `atmosphereApproximate` to a scene's medium (`decision-r08-t10a-leans.md` item 1).
+ * `atmosphereApproximate` to a scene's medium (`decision-r08-t10a-leans.md` item 1), with its
+ * reason, `THICK_REASON` (R08.T10.c). A scene's own labels carry no reasons: one that holds
+ * `atmosphereApproximate` would stand on the plate with none, which no kept scene passes.
  */
 export type KeptBodyAtmosphere =
   | KeptAtmosphere
@@ -243,6 +249,14 @@ export interface AtmosphereViewReport {
   readonly labels: ReadonlyArray<AtmosphereLabel>;
   /** Each wanted body's problem, where it has one. */
   readonly problems: ReadonlyMap<BodyIdHex, AtmosphereProblem>;
+  /**
+   * Why each wanted body drawn with `atmosphereApproximate` carries it, as player text, in its
+   * entry's order (R08.T10.c; `decision-r08-approximate-plate.md`, item 1b), so that the label block
+   * names each reason and its bodies: none for a body without the label (one with
+   * `atmosphereComputing` in its place among them), with a problem, pending, or whose entry holds
+   * no reason.
+   */
+  readonly reasons: ReadonlyMap<BodyIdHex, ReadonlyArray<string>>;
   /** Whether some wanted body is pending this frame, before the hold. */
   readonly pending: boolean;
 }
@@ -377,7 +391,12 @@ const FAILED: AtmosphereProblem = { kind: "failed" };
 const LOAD_FAILED: AtmosphereProblem = { kind: "loadFailed" };
 
 /** A report of nothing: a closed view's, or a disposed cache's. */
-const NO_REPORT: AtmosphereViewReport = { labels: [], problems: new Map(), pending: false };
+const NO_REPORT: AtmosphereViewReport = {
+  labels: [],
+  problems: new Map(),
+  reasons: new Map(),
+  pending: false,
+};
 
 /** What a `body_detail`'s outcome is to the cache. */
 type DetailAnswer =
@@ -674,6 +693,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
 
     const labels = new Set<AtmosphereLabel>();
     const problems = new Map<BodyIdHex, AtmosphereProblem>();
+    const reasons = new Map<BodyIdHex, ReadonlyArray<string>>();
     let anyPending = false;
     for (const id of wanted.keys()) {
       const held = this.#bodies.get(id);
@@ -686,6 +706,9 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         for (const label of held.drawn.labels) {
           labels.add(label);
         }
+        if (held.drawn.labels.includes("atmosphereApproximate") && held.drawn.reasons.length > 0) {
+          reasons.set(id, held.drawn.reasons);
+        }
       } else if (isPending(held)) {
         anyPending = true;
       }
@@ -693,7 +716,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     if (hold.update(anyPending, frame.nowMs)) {
       labels.add("atmospherePending");
     }
-    return { labels: ordered(labels), problems, pending: anyPending };
+    return { labels: ordered(labels), problems, reasons, pending: anyPending };
   }
 
   /** The body held for a frame's body, made most recently wanted; made anew if its kind changed. */
@@ -752,17 +775,18 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         this.#dropDrawn(held);
         held.problem = LOAD_FAILED;
         return;
-      case "medium":
+      case "medium": {
+        // The thick line's note carries its reason, so that no APPROXIMATE on a kept scene stands
+        // without one; a scene's own labels carry none (R08.T10.c).
+        const thick = provisionalThick(kept.built.medium);
         entry = {
           key: `kept/medium/v${ATMOSPHERE_OPTICS_VERSION}`,
-          labels: ordered([
-            ...kept.labels,
-            ...(provisionalThick(kept.built.medium) ? (["atmosphereApproximate"] as const) : []),
-          ]),
-          reasons: [],
+          labels: ordered([...kept.labels, ...(thick ? (["atmosphereApproximate"] as const) : [])]),
+          reasons: thick ? [THICK_REASON] : [],
           built: kept.built,
         };
         break;
+      }
     }
     held.build = { kind: "landed", key: entry.key, entry };
   }

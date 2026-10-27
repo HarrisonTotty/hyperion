@@ -1068,8 +1068,9 @@ export type SpeciesLines = SpeciesLinesData & OpticsCertainty;
 /**
  * A {@link SpeciesLines}' tables: `measured` where the k-distribution is at the layer's temperature
  * and every broadening pressure up to the layer's base lies within the measured line shape and the
- * stored grid, with a width for every broadening gas; otherwise `estimated`, by `temperature` where
- * it is the temperature alone (`decision-r08-t4d-kdist.md` §3 and §5).
+ * stored grid, with a width for every broadening gas but those the effect bound weighs
+ * ({@link SpeciesLinesData.widthlessShare}); otherwise `estimated`, by `temperature` where it is the
+ * temperature alone (`decision-r08-t4d-kdist.md` §3 and §5).
  */
 export interface SpeciesLinesData {
   readonly kDistribution: SpeciesKDistribution;
@@ -1078,6 +1079,13 @@ export interface SpeciesLinesData {
    * (`absorbers/kDistribution.ts`'s `broadeningFactor`): 1 for air.
    */
   readonly broadeningFactor: number;
+  /**
+   * ε, the share of the broadening pressure that rests on gases the table holds no width for,
+   * taken as air (`broadeningFactor`'s `widthlessShare`), 0 where there are none: these no longer
+   * make the lines `estimated` by themselves, and R08.T10.c's effect bound weighs them instead
+   * (`negligible.ts`'s `BroadenerVerdict`; `decision-r08-approximate-plate.md`, item 1a).
+   */
+  readonly widthlessShare: number;
 }
 
 /** The highest stored broadening pressure, Pa: above it the 10 MPa table is held, `estimated`. */
@@ -1690,6 +1698,7 @@ function speciesLines(
   return {
     kDistribution,
     broadeningFactor: broadening.factor,
+    widthlessShare: broadening.widthlessShare,
     ...certaintyOf(temperature ? "estimated" : "measured", optics),
   };
 }

@@ -716,6 +716,7 @@ describe("the style", () => {
       photorealStatements(photoreal, "lit", "photorealistic", albedo, {
         labels: ["atmosphereNotYetModelled", "atmosphereNotResolved", "atmosphereApproximate"],
         plate: [{ statement: failed, refusal: false }],
+        approximate: [],
         fault: [],
       }),
     ).toEqual([
@@ -727,12 +728,37 @@ describe("the style", () => {
     ]);
   });
 
+  it("states each of APPROXIMATE's reasons on a line of its own straight after it, the other notes unmoved (R08.T10.c)", () => {
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    const reasons = [
+      "A thick atmosphere drawn by the thin-atmosphere method, for TEST GIANT",
+      "H2O: its absorption estimated, not measured, for TEST GIANT and TEST PLANET 0°",
+    ];
+    expect(
+      photorealStatements(photoreal, "lit", "photorealistic", albedo, {
+        labels: ["aerosolsNotYetModelled", "atmosphereApproximate"],
+        plate: [],
+        approximate: reasons,
+        fault: [],
+      }),
+    ).toEqual([
+      ...albedo,
+      "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
+      "ATMOSPHERE: APPROXIMATE",
+      ...reasons,
+    ]);
+  });
+
   it("states no atmosphere note in the wireframe", () => {
     const run = startRun(phaseScene());
     expect(
       photorealStatements(run, "lit", "wireframe", [], {
-        labels: ["atmosphereNotYetModelled"],
+        labels: ["atmosphereNotYetModelled", "atmosphereApproximate"],
         plate: [],
+        approximate: ["H2O: its absorption estimated, not measured, for TEST GIANT"],
         fault: [],
       }),
     ).toEqual([]);

@@ -1,13 +1,17 @@
 /**
  * The atmosphere on a live `VIEW` (plan R08, R08.T10.b): the cache's `body_detail` joined with the
- * terrain session's, and a refused record's line on the primary's plate.
+ * terrain session's, and a refused record's line on the primary's plate; and `ATMOSPHERE:
+ * APPROXIMATE`'s reasons on the label block's plate (R08.T10.c), set on the block itself, since no
+ * scene the display test can draw yet carries the note: the kept scenes' media are thin, and the
+ * display's optics workers answer nothing.
  */
 import type { ResponseBody } from "@hyperion/protocol";
-import { act, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, sliceSceneSystem } from "../../test/sceneFixture";
+import { statusLine } from "../../test/statusLine";
 import {
   nominalStore,
   openUniverse,
@@ -17,6 +21,9 @@ import {
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
+import { atmosphereApproximateLines, atmosphereNotes } from "../../view/atmosphere/labels";
+import { THICK_REASON } from "../../view/atmosphere/thick/regime";
+import { ViewLabelBlock } from "./ViewLabelBlock";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -100,5 +107,49 @@ describe("the atmosphere on a live VIEW (R08.T10.b)", () => {
     expect(rejected).toEqual([
       expect.stringMatching(/^ATMOSPHERE REJECTED: for .+, no such body, reopen VIEW to retry$/u),
     ]);
+  });
+});
+
+describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c)", () => {
+  it("sets each reason on a line of its own straight after the note, a steady statement in the case given", () => {
+    const lines = atmosphereApproximateLines([
+      { designation: "KX 4417 /3", reasons: ["H2O: its absorption estimated, not measured"] },
+      { designation: "KX 4417 /5", reasons: [THICK_REASON] },
+      { designation: "KX 4417 /2", reasons: [THICK_REASON] },
+    ]);
+    const statements = atmosphereNotes(
+      ["aerosolsNotYetModelled", "atmosphereApproximate"],
+      [],
+      lines,
+    ).map((note) => note.statement);
+    render(
+      <ViewLabelBlock
+        lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+        statements={statements}
+        countLine={null}
+        faults={[]}
+      />,
+    );
+    const said = [
+      "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
+      "ATMOSPHERE: APPROXIMATE",
+      "A thick atmosphere drawn by the thin-atmosphere method, for KX 4417 /2 and KX 4417 /5",
+      "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    ];
+    const shown = said.map((text) => screen.getByText(statusLine(text)));
+    const inOrder = shown.every((line, i) => {
+      const before = shown[i - 1];
+      return (
+        before === undefined ||
+        (before.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+      );
+    });
+    // In the order said, each the plate's steady statement in `--text`, neither an alert nor a status.
+    expect([
+      inOrder,
+      shown.map((line) => line.className),
+      screen.queryByRole("alert"),
+      screen.queryAllByRole("status").some((status) => shown.some((line) => status.contains(line))),
+    ]).toEqual([true, said.map(() => "view-label__statement"), null, false]);
   });
 });
