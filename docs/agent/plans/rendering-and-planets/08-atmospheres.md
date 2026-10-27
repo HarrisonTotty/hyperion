@@ -11342,7 +11342,9 @@ and TEST SATURN, relaunch to retry`, which `VIEW` shown again does not clear (ru
     `surfaceLighting.wgsl`, a library with no entry point, through every module that composes it
     (the disc materials, the smooth mesh, the `disc cells` kernel and the lit-body probe).
   - _The disc cells pass_ binds the one-texel defaults: a disc with an atmosphere sums its own cells
-    in its draws (`drawnThroughCells`), as a class map's disc does.
+    in its draws (`drawnThroughCells`), as a class map's disc does. _Superseded by R07.T8.e
+    (`decision-r08-t11-frame.md` §2): the pass binds each record's tables, one dispatch a set of
+    textures (plan 07's "Deviations in R07.T8.e and R07.T8.f, as built")._
   - _R07's shading called from one place_ (found by the smoke). With the lookups in it, SwiftShader,
     which inlines every call, lost its device compiling the disc's materials, whose `shade` was
     inlined six times (two `pixel_cells` sites in `disc_pixel`, three `add_sample` sites in

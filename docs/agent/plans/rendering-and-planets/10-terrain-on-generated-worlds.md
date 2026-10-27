@@ -4051,6 +4051,9 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   serial chain T8.d removes from uniform discs (about 2.0 M cycles under 4 px). T10.d is to bring
   such discs into the pass: the frame's maps as one array texture with each record's layer in its
   record, or one dispatch a map. Open, for the orchestrator (R07's "Deviations in T8.d, as built").
+  _Closed by R07.T8.e (`decision-r08-t11-frame.md` §2): one dispatch a set of bound textures, a
+  class map with its normal map among them, so a class map's disc takes the pass (R07's
+  "Deviations in R07.T8.e and R07.T8.f, as built")._
 - **The live path's costs** (R10.T16). A re-show of `VIEW` fetches every field again (the engine and
   the session go with the display's hiding); an Earth is about 15 MB a show. One pass a handed-over
   body holds a whole cache budget, so two bodies handed over at once (a moon over its planet) hold

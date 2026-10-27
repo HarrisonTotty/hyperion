@@ -1464,7 +1464,7 @@ describe("the renderer", () => {
     renderer.dispose();
   });
 
-  it("carries a body's atmosphere into its record and sums such a disc's own cells (R08.T9.b)", () => {
+  it("carries a body's atmosphere into its record, whose cells the pass takes since R07.T8.e (R08.T9.b)", () => {
     const { body, hosts } = scene(6.371e6 / Math.sin(10 / PX_PER_RAD), 30);
     const table = air("any");
     const tables: SurfaceLightingTables = {
@@ -1489,9 +1489,10 @@ describe("the renderer", () => {
     }
     expect(withAir.atmosphere).toBe(tables);
     expect("atmosphere" in without).toBe(false);
-    // A disc under 32 px: its cells through the pass without an atmosphere, its own with one.
+    // A disc under 32 px: its cells through the pass, with an atmosphere or without, the pass
+    // binding its tables (R07.T8.e).
     expect(drawnThroughCells(without)).toBe(true);
-    expect(drawnThroughCells(withAir)).toBe(false);
+    expect(drawnThroughCells(withAir)).toBe(true);
   });
 
   it("writes the phase table once for the same laws, and grows the disc buffer by doubling", async () => {

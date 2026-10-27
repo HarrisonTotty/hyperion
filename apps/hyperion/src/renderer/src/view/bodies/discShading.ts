@@ -21,8 +21,9 @@
  * coverage, keeping the class beneath (decision-r07-t8a, item 3). Near the limb a cell's light is
  * integrated across its profile in √δ, the depth inside the limb (see {@link rasteriseDisc}).
  * Under {@link SMALL_DISC_PX} a pixel's cells are shaded at once by the `disc cells` pass, one
- * invocation a cell, and summed there in the draws' order ({@link discCellJobs}, R07.T8.d); the
- * draws read the pixel's sums through row 51. The arithmetic is the draws' own.
+ * invocation a cell, and summed there in the draws' order ({@link discCellJobs}, R07.T8.d),
+ * whatever the surface or the air (R07.T8.e); the draws read the pixel's sums through row 51. The
+ * arithmetic is the draws' own.
  * {@link rasteriseDisc} runs the shader's arithmetic in `f64`.
  *
  * A class map that carries the field's normal map (plan R10, R10.T10.g; `discNormals.ts`) shades its
@@ -49,6 +50,7 @@ import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../
 import type { ClassMapDiscSurface, UniformDiscSurface } from "../appearance/bodyAppearance";
 import {
   AIRLESS_LIGHTING,
+  surfaceLightingDrawTextures,
   type SurfaceLightingReader,
   type SurfaceLightingTables,
 } from "../atmosphere/surfaceLighting";
@@ -69,6 +71,7 @@ import type { Rgb } from "../photometry/toneCurve";
 import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
 import { METER_CLASS, type MeterClass } from "../post/meter";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
+import type { TextureHandle } from "../engine/types";
 import type { ScreenRect } from "../wireframe/submit";
 import { MATURITY_NODES } from "../terrain/maturityNodes";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
@@ -185,30 +188,29 @@ const SECONDARY_ROWS = 2;
 const CELL_SUMS_ROW = 51;
 
 /**
- * Whether a record's pixels can take their sums from the `disc cells` pass (R07.T8.d): every pixel
- * of it takes the same cells, at most {@link FINE_DISC_SAMPLES} per axis, as {@link discSamples}
- * gives every disc under {@link SMALL_DISC_PX}, its surface is one law, and its body has no
- * atmosphere.
+ * Whether every pixel of a record can take its sums from the `disc cells` pass (R07.T8.d–e): every
+ * pixel of it takes the same cells, at most {@link FINE_DISC_SAMPLES} per axis, as
+ * {@link discSamples} gives every disc under {@link SMALL_DISC_PX}.
  *
  * @remarks
- * A class map's disc sums its own cells: the pass binds one class map for all its records, and none
- * is live before R10. So does a disc with an atmosphere (plan R08, R08.T9.b): the pass binds the
- * one-texel defaults of a body without one, and no body's atmosphere is drawn before R08.T10.b.
+ * Since R07.T8.e (`decision-r08-t11-frame.md` §2) any surface and any air: the pass binds a
+ * record's class map and its body's atmosphere tables, one dispatch for each set of them
+ * ({@link DiscCellJobs.sets}). Before, a class map's disc and a disc with air summed their own
+ * cells in their draws, the serial chain T8.d removed from the rest.
  */
 export function drawnThroughCells(record: DiscRecord): boolean {
   const n = record.interiorSamples;
-  return (
-    n === record.limbSamples &&
-    Number.isInteger(n) &&
-    n >= 1 &&
-    n <= FINE_DISC_SAMPLES &&
-    record.surface.kind === "uniform" &&
-    record.atmosphere === undefined
-  );
+  return n === record.limbSamples && cellsTaken(n);
 }
 
-/** Where the `disc cells` pass leaves one record's pixels' sums. */
-export interface DiscCellRange {
+/** Whether the pass's workgroup holds a pixel of n × n cells: n a whole number from 1 to 8. */
+function cellsTaken(n: number): boolean {
+  return Number.isInteger(n) && n >= 1 && n <= FINE_DISC_SAMPLES;
+}
+
+/** Where the `disc cells` pass leaves the sums of every pixel of a record's rectangle (T8.d). */
+export interface DiscCellRectangle {
+  readonly kind: "rectangle";
   /** The index in `cell_sums` of its first pixel's sums, two `vec4f` a pixel. */
   readonly first: number;
   /** The rectangle summed, ⌊left⌋ and ⌊top⌋, px. */
@@ -219,31 +221,127 @@ export interface DiscCellRange {
   readonly heightPx: number;
 }
 
+/** Where the `disc cells` pass leaves one record's pixels' sums. */
+export type DiscCellRange = DiscCellRectangle;
+
+/**
+ * One dispatch of the `disc cells` pass (R07.T8.e): the run of jobs whose records bind the same
+ * textures, a body's atmosphere tables and a class map with its normal map, or none of them.
+ */
+export interface DiscCellSet {
+  /** Its first job. */
+  readonly first: number;
+  /** Its jobs. */
+  readonly count: number;
+  /** One of its records, by index, whose textures the dispatch binds. */
+  readonly record: number;
+}
+
 /** A frame's jobs for the `disc cells` pass: one a pixel of each small disc's rectangle. */
 export interface DiscCellJobs {
   /**
-   * Four `i32` a job, the shader's `vec4i`: the record's index, the pixel's x and y, px, and 0; the
-   * records in their order, each rectangle's pixels in row order.
+   * Four `i32` a job, the shader's `vec4i`: the record's index, the pixel's x and y, px, and 0; laid
+   * out by set ({@link DiscCellJobs.sets}), each set's records in their order, each rectangle's
+   * pixels in row order.
    */
   readonly jobs: Int32Array;
   /** The jobs J, the pixels whose sums the pass leaves, in the jobs' order. */
   readonly count: number;
   /** Each record's sums, by index; `null` for a record whose draws sum their own cells. */
   readonly ranges: ReadonlyArray<DiscCellRange | null>;
+  /** The dispatches, in the jobs' order, each over its run of jobs. */
+  readonly sets: ReadonlyArray<DiscCellSet>;
 }
 
 /** The jobs a frame takes at most: 2²⁴, past which row 51's `f32` would lose a first index. */
 export const MAX_CELL_JOBS = 2 ** 24;
 
 /**
- * The `disc cells` pass's jobs for a frame's records (R07.T8.d, decision-r07-small-disc-cost §1.2).
+ * The textures a record's draws and dispatch bind beyond the frame's, as `draw.ts`'
+ * `LitBodyRenderer` chooses them: its class map, and its normal map where it carries one, and its
+ * atmosphere's tables, each `null` where the renderer binds its own default (the texel of no
+ * weight, the one-texel airless tables).
+ */
+function boundTexturesOf(record: DiscRecord): ReadonlyArray<TextureHandle | null> {
+  const { surface, atmosphere } = record;
+  const mapped = surface.kind === "class-map";
+  return [
+    mapped ? surface.weights : null,
+    mapped ? (surface.normals?.texture ?? null) : null,
+    ...(atmosphere === undefined ? [null] : Object.values(surfaceLightingDrawTextures(atmosphere))),
+  ];
+}
+
+/** Whether two records' bound textures (`boundTexturesOf`) are the same, so that they may share a dispatch. */
+function sameTextures(
+  a: ReadonlyArray<TextureHandle | null>,
+  b: ReadonlyArray<TextureHandle | null>,
+): boolean {
+  return a.length === b.length && a.every((texture, i) => texture === b[i]);
+}
+
+/** The pixels of a record's rectangle the pass takes, or `null` where its draws sum their own cells. */
+function plannedPixelsOf(record: DiscRecord): number | null {
+  if (!drawnThroughCells(record)) {
+    return null;
+  }
+  const { rect } = record;
+  const widthPx = Math.max(0, Math.ceil(rect.rightPx) - Math.floor(rect.leftPx));
+  const heightPx = Math.max(0, Math.ceil(rect.bottomPx) - Math.floor(rect.topPx));
+  return widthPx * heightPx;
+}
+
+/**
+ * The records that may share a dispatch (R07.T8.e), each set's by index, in the order of its first
+ * record, each record's textures taken once.
+ */
+function boundSets(
+  records: ReadonlyArray<DiscRecord>,
+  planned: ReadonlyArray<number | null>,
+): number[][] {
+  const sets: Array<{
+    readonly textures: ReadonlyArray<TextureHandle | null>;
+    readonly indices: number[];
+  }> = [];
+  records.forEach((record, index) => {
+    if (planned[index] === null) {
+      return;
+    }
+    const textures = boundTexturesOf(record);
+    const set = sets.find((each) => sameTextures(each.textures, textures));
+    if (set === undefined) {
+      sets.push({ textures, indices: [index] });
+    } else {
+      set.indices.push(index);
+    }
+  });
+  return sets.map(({ indices }) => indices);
+}
+
+/** A range's jobs into `jobs` from its first: (record, x, y, 0) a pixel, in row order. */
+function layJobs(jobs: Int32Array, index: number, range: DiscCellRange): void {
+  for (let row = 0; row < range.heightPx; row += 1) {
+    for (let column = 0; column < range.widthPx; column += 1) {
+      jobs.set(
+        [index, range.leftPx + column, range.topPx + row, 0],
+        (range.first + row * range.widthPx + column) * 4,
+      );
+    }
+  }
+}
+
+/**
+ * The `disc cells` pass's jobs for a frame's records (R07.T8.d–e; decision-r07-small-disc-cost
+ * §1.2, decision-r08-t11-frame §2).
  *
  * @remarks
  * Each record {@link drawnThroughCells} takes one job a pixel of [⌊left⌋, ⌈right⌉) ×
  * [⌊top⌋, ⌈bottom⌉), the rectangle {@link rasteriseDisc} walks: a superset of the pixels either of
- * its draws shades. Job j's sums are the j-th in `cell_sums`, so a record's pixel (x, y) finds its
- * own at first + (y − top) w + (x − left), which row 51 carries. A record whose pixels would take
- * the jobs past `maxJobs` takes none, and its draws sum their own cells, as before the pass.
+ * its draws shades. Its pixel (x, y) finds its sums at first + (y − top) w + (x − left), which row
+ * 51 carries. The jobs are laid out by the textures their records bind, one {@link DiscCellSet} a
+ * set in the order of its first record, each set's records in their order (R07.T8.e). A record
+ * whose pixels would take the jobs past `maxJobs` takes none, and its draws sum their own cells, as
+ * before the pass.
  *
  * @param maxJobs - The jobs at most: {@link MAX_CELL_JOBS}, or fewer where the device's buffers
  *   hold fewer pixels' sums.
@@ -253,38 +351,39 @@ export function discCellJobs(
   maxJobs: number = MAX_CELL_JOBS,
 ): DiscCellJobs {
   const most = Math.min(maxJobs, MAX_CELL_JOBS);
+  const planned = records.map((record) => plannedPixelsOf(record));
   let count = 0;
-  const ranges = records.map((record): DiscCellRange | null => {
-    if (!drawnThroughCells(record)) {
-      return null;
+  const ranges: Array<DiscCellRange | null> = records.map(() => null);
+  const sets: DiscCellSet[] = [];
+  for (const indices of boundSets(records, planned)) {
+    const first = count;
+    let head: number | null = null;
+    for (const index of indices) {
+      const pixels = planned[index] ?? null;
+      const record = records[index];
+      if (pixels === null || record === undefined || count + pixels > most) {
+        continue;
+      }
+      const { rect } = record;
+      const leftPx = Math.floor(rect.leftPx);
+      const topPx = Math.floor(rect.topPx);
+      const widthPx = Math.max(0, Math.ceil(rect.rightPx) - leftPx);
+      const heightPx = Math.max(0, Math.ceil(rect.bottomPx) - topPx);
+      ranges[index] = { kind: "rectangle", first: count, leftPx, topPx, widthPx, heightPx };
+      count += pixels;
+      head ??= index;
     }
-    const { rect } = record;
-    const leftPx = Math.floor(rect.leftPx);
-    const topPx = Math.floor(rect.topPx);
-    const widthPx = Math.max(0, Math.ceil(rect.rightPx) - leftPx);
-    const heightPx = Math.max(0, Math.ceil(rect.bottomPx) - topPx);
-    if (count + widthPx * heightPx > most) {
-      return null;
+    if (head !== null && count > first) {
+      sets.push({ first, count: count - first, record: head });
     }
-    const range = { first: count, leftPx, topPx, widthPx, heightPx };
-    count += widthPx * heightPx;
-    return range;
-  });
+  }
   const jobs = new Int32Array(count * 4);
   ranges.forEach((range, index) => {
-    if (range === null) {
-      return;
-    }
-    for (let row = 0; row < range.heightPx; row += 1) {
-      for (let column = 0; column < range.widthPx; column += 1) {
-        jobs.set(
-          [index, range.leftPx + column, range.topPx + row, 0],
-          (range.first + row * range.widthPx + column) * 4,
-        );
-      }
+    if (range !== null) {
+      layJobs(jobs, index, range);
     }
   });
-  return { jobs, count, ranges };
+  return { jobs, count, ranges, sets };
 }
 
 /** One star lighting a disc, relative to the body's centre. */
@@ -447,6 +546,7 @@ function bodyAxesOf(rotation: Rotation3): readonly [Vec3, Vec3] {
  * the node rows of each class drawn from its nodes, from {@link FIRST_NODE_ROW}: class k's node j at
  * row {@link FIRST_NODE_ROW} + K k + j, its r, g and b times the figure's factor on the class's A,
  * node 0's w 1. Every other disc writes the rows it wrote before, its node rows 0.
+
  *
  * @param cells - The `disc cells` pass's jobs for these records, whose ranges row 51 carries; `null`
  *   where no pass runs, when every record's row 51 says its draws sum their own cells.

@@ -1,16 +1,20 @@
-// The `disc cells` pass (plan R07, T8.d; decision-r07-small-disc-cost §1.2): every cell of every
-// pixel of a disc under 32 px shaded at once, one invocation a cell, so that a small disc's cost is
-// throughput, not the serial chain of `pixel_sum`'s n² cells of up to nine shades each. Composed
-// after frame.wgsl, litBody.wgsl and bodyDisc.wgsl; `frame` is the `discs` pass's own (the scene
-// target's size and projection), so that each cell is the one the pixel's draw would shade.
+// The `disc cells` pass (plan R07, T8.d–e; decision-r07-small-disc-cost §1.2,
+// decision-r08-t11-frame §2): every cell of every pixel of a disc under 32 px shaded at once, one
+// invocation a cell, so that a small disc's cost is throughput, not the serial chain of
+// `pixel_sum`'s n² cells of up to nine shades each. Composed after frame.wgsl,
+// litBody.wgsl and bodyDisc.wgsl; `frame` is the `discs` pass's own (the scene target's size and
+// projection), so that each cell is the one the pixel's draw would shade.
 //
-// A job is one pixel of one record's rectangle, [⌊left⌋, ⌈right⌉) × [⌊top⌋, ⌈bottom⌉), the records
-// in their order and each rectangle's pixels in row order (`discCellJobs`), so that job j's sums are
-// the j-th in `cell_sums`. One workgroup a job: invocation k < n² evaluates `cell_sum` at the cell
-// `pixel_sum` takes k-th (i = ⌊k ÷ n⌋ outer, j = k mod n inner, `sampleOffset`); after the barrier,
-// invocation 0 adds the n² cells in that order, as `pixel_sum` does, and writes the pixel's two
-// `vec4f`: the light and the coverage as means over its cells, then its lit and shaded points.
-// The draws read them (`pixel_cells`); nothing in `shade` or `cell_sum` changes.
+// A job is one pixel of one record's rectangle, [⌊left⌋, ⌈right⌉) × [⌊top⌋, ⌈bottom⌉), each
+// rectangle's pixels in row order (`discCellJobs`), so that job j's sums are the j-th in
+// `cell_sums`. The jobs are laid out by the
+// set of textures their records bind (a body's air, a class map), one dispatch a set (T8.e), each
+// taking its own run of jobs from `first`. One workgroup a job: invocation k < n² evaluates
+// `cell_sum` at the cell `pixel_sum` takes k-th (i = ⌊k ÷ n⌋ outer, j = k mod n inner,
+// `sampleOffset`), n the record's count (row 3's x, its limb's too below 32 px); after
+// the barrier, invocation 0 adds the n² cells in that order, as `pixel_sum` does, and writes the
+// pixel's two `vec4f`: the light and the coverage as means over its cells, then its lit and shaded
+// points. The draws read them (`pixel_cells`); nothing in `shade` or `cell_sum` changes.
 
 struct Draw {
   // The job's record in `discs`, which `disc_row` reads.
@@ -21,8 +25,10 @@ struct Draw {
 var<private> draw : Draw;
 
 struct CellPass {
-  // The jobs J; the dispatch's last row of workgroups may hold more, which do nothing.
+  // The dispatch's jobs; its last row of workgroups may hold more, which do nothing.
   jobs : u32,
+  // Its first job in `cell_jobs`, and so its first sums in `cell_sums`.
+  first : u32,
 }
 
 @group(1) @binding(0) var<uniform> cell_pass : CellPass;
@@ -43,8 +49,9 @@ var<workgroup> job_cells : array<CellSum, CELL_INVOCATIONS>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_index) k : u32) {
-  let job = group.x + group.y * JOBS_PER_ROW;
-  let in_range = job < cell_pass.jobs;
+  let local_job = group.x + group.y * JOBS_PER_ROW;
+  let in_range = local_job < cell_pass.jobs;
+  let job = cell_pass.first + local_job;
   var n = 0u;
   if (in_range) {
     let pixel = cell_jobs[job];

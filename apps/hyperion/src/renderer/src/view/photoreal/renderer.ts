@@ -669,8 +669,8 @@ export class PhotorealRenderer {
       draws: [...frame.sky, ...(stars === null ? [] : [stars])],
       postProcesses: [],
     });
-    // The small discs' cells, all at once, before any draw reads their sums (R07.T8.d); in the
-    // frame the `discs` pass draws in, the scene target's.
+    // The small discs' cells, all at once, a dispatch for each set of textures, before any draw
+    // reads their sums (R07.T8.d–e); in the frame the `discs` pass draws in, the scene target's.
     this.#bodies.dispatchCells(plan, resources.discCells, {
       viewRotation,
       projection,

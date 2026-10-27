@@ -1562,6 +1562,20 @@ src/renderer/src/view/scenes src/renderer/src/view/lighting`.
     - A bound missed is recorded and goes to the orchestrator for a ruling. It does not fail
       silently.
   - _As built (2026-10-06, the shading lane): see Risks, "Deviations in T8.d, as built"._
+- **R07.T8.e Every record through the cells pass** (`decision-r08-t11-frame.md`). A record with
+  air binds its surface-lighting tables, and a class map its textures, one `disc cells` dispatch
+  per bound set per view. Tests: G11 for a 13 px air body and a 13 px class-map body; the
+  dispatch counts; a device loss. Acceptance: `pnpm test`, `just test-render`, `just ci`.
+  - _As built (2026-10-27, the desktop lane): see Risks, "Deviations in R07.T8.e and R07.T8.f,
+    as built"._
+- **R07.T8.f A large disc's limb through the pass.** The limb pixels of a disc of 32 px or more,
+  one invocation a cell, summed in `pixel_sum`'s order; the limb draw reads the sums. Tests: G11
+  for a large airless limb and a large air body's limb; G10. Acceptance: as T8.e, and by hand on
+  the RTX 3080 with R08.T11's group, the `discs` pass at 10⁷ m x4 at most 2.6 ms.
+  - _As built (2026-10-27, the desktop lane): see Risks, "Deviations in R07.T8.e and R07.T8.f,
+    as built"._
+- **R07.T8.g The face's near-limb band, and the hoisting (c),** only if R08.T11.c leaves a high
+  row over 15.67 ms. Acceptance: G10, G11, and R08.T11's QW30.
 
 #### R07.T9 Mesh bodies
 

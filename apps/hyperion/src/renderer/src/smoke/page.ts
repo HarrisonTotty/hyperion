@@ -15,8 +15,8 @@
  * part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
- * Earth, in part 8; R08.T6.b's kernels over N terms in two, its medium of four absorbers in part 6
- * and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the Saturn-class
+ * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`); R08.T6.b's
+ * kernels over N terms in two, its medium of four absorbers in part 6 and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the Saturn-class
  * figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
  * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
  * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
@@ -66,6 +66,7 @@ import {
   timeFarLimb,
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
+import { checkCellPassEveryRecord } from "./cellPass";
 import { timeAtmosphereFrame } from "./frameTiming";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
@@ -393,6 +394,10 @@ async function run(
   );
   await group(8, "R08.T6.f slices and bands on Earth", () =>
     checkAtmosphereSlicesEarth(engine, checks, twins),
+  );
+  // In part 8, which had room (66 s at 6f4463c4's gate), with R05's Earth's tables of its own.
+  await group(8, "R07.T8.e–f the cell pass for every record", () =>
+    checkCellPassEveryRecord(engine, checks),
   );
   await group(5, "R08.T6.i the marches cut at layer edges", () =>
     checkAtmosphereLayerEdges(engine, checks, twins),

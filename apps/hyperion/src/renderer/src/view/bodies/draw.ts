@@ -897,15 +897,16 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
 export const DISC_CELLS_PASS = "disc cells";
 
 /**
- * The `disc cells` kernel (R07.T8.d, decision-r07-small-disc-cost §1.2; `shaders/bodyDiscCells.wgsl`):
- * every cell of every pixel of the frame's small discs shaded at once, one invocation a cell, and
- * summed in each pixel's order for the draws to read.
+ * The `disc cells` kernel (R07.T8.d–e, decision-r07-small-disc-cost §1.2, decision-r08-t11-frame
+ * §2; `shaders/bodyDiscCells.wgsl`): every cell of every pixel of the frame's small discs shaded at
+ * once, one invocation a cell, and summed in each pixel's order for the draws to read.
  *
  * @remarks
  * Its one source serves both capability paths: it has no subgroup variant. Its sums are a pure
- * function of its inputs, so its readback is `bit-exact`, though nothing reads them back. It binds
- * the one-texel atmosphere defaults (plan R08, R08.T9.b): a disc with an atmosphere sums its own
- * cells in its draws ({@link drawnThroughCells}), since one dispatch binds one set of tables.
+ * function of its inputs, so its readback is `bit-exact`, though nothing reads them back. Each
+ * dispatch binds one set of a record's textures: its body's atmosphere tables (plan R08, R08.T9.b)
+ * or the one-texel defaults, and its class map and normal map or the texel of no weight
+ * (R07.T8.e), one dispatch a set ({@link discCellJobs}' sets).
  */
 export const BODY_DISC_CELLS_KERNEL: KernelPair = {
   name: "BODY DISC CELLS",
@@ -1021,7 +1022,7 @@ interface DeviceResources {
  * `spriteMaterial`, an HDR twin of R02's star sprite reading `sprites` at binding 0. A mesh body is
  * one instanced draw of its figure ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass) and
  * its limb's draw in the sequence. The small discs' cells are shaded first by the `disc cells`
- * pass ({@link LitBodyRenderer.dispatchCells}, R07.T8.d), whose sums their draws read. A plan's
+ * pass ({@link LitBodyRenderer.dispatchCells}, R07.T8.d–e), whose sums their draws read. A plan's
  * records are written once, by whichever of the three is called first for it, so all three must
  * be called for a plan before its passes are submitted, {@link LitBodyRenderer.dispatchCells}
  * first: a plan whose records were written by the others first sums every disc's cells in its
@@ -1265,18 +1266,20 @@ export class LitBodyRenderer {
   }
 
   /**
-   * Shades a plan's small discs' cells in parallel: the `disc cells` pass (R07.T8.d,
-   * decision-r07-small-disc-cost §1.2), one dispatch of `kernel` ({@link BODY_DISC_CELLS_KERNEL})
-   * for every disc whose pixels all take the same cells (`drawnThroughCells`: every disc under 32
-   * px of one law), and none where the plan has no such disc.
+   * Shades a plan's small discs' cells in parallel: the `disc cells` pass (R07.T8.d–e,
+   * decision-r07-small-disc-cost §1.2, decision-r08-t11-frame §2), one dispatch of `kernel`
+   * ({@link BODY_DISC_CELLS_KERNEL}) for each set of textures its records bind, over every pixel of
+   * each disc whose pixels all take the same cells (`drawnThroughCells`: every disc under 32 px),
+   * and none where the plan has no such disc.
    *
    * @remarks
    * It writes the plan's records with each such disc's sums in row 51, and is called for a plan
    * before {@link LitBodyRenderer.meshDraws} and {@link LitBodyRenderer.draws}, whose submissions
-   * then follow the dispatch's, after the sky's: each `render` and `dispatch` is its own queue
+   * then follow the dispatches', after the sky's: each `render` and `dispatch` is its own queue
    * submission, in call order. A plan already written by either of those is left to sum its own
-   * cells, and nothing is dispatched. Its workgroups are {@link cellWorkgroups}' for its jobs, one
-   * a pixel.
+   * cells, and nothing is dispatched. Each dispatch binds its set's textures, its body's
+   * atmosphere tables and its class map and normal map, or the defaults (R07.T8.e), takes its run
+   * of the jobs from its first, and has {@link cellWorkgroups}' workgroups for them, one a pixel.
    *
    * @param frame - The `discs` pass's own frame, which the kernel shades in.
    * @returns Whether it dispatched.
@@ -1296,30 +1299,36 @@ export class LitBodyRenderer {
     const resources = this.#resources;
     resources.cellJobs = this.#write(resources.cellJobs, cells.jobs);
     resources.cellSums = this.#reserve(resources.cellSums, cells.count * CELL_SUM_BYTES);
-    this.#engine.dispatch(
-      kernel,
-      {
-        uniforms: {
-          frame: discCellFrameBlock(frame),
-          cell_pass: new Uint32Array([cells.count, 0, 0, 0]),
+    const block = discCellFrameBlock(frame);
+    for (const set of cells.sets) {
+      const record = plan.discs[set.record];
+      if (record === undefined) {
+        throw new Error(`the cell pass's set from job ${set.first} has no record ${set.record}`);
+      }
+      this.#engine.dispatch(
+        kernel,
+        {
+          uniforms: {
+            frame: block,
+            cell_pass: new Uint32Array([set.count, set.first, 0, 0]),
+          },
+          buffers: {
+            discs: resources.discs,
+            cell_jobs: resources.cellJobs,
+            cell_sums: resources.cellSums,
+          },
+          sampled: {
+            phase_factor_table: resources.table,
+            class_weights: this.#classWeights(record.surface),
+            ...surfaceLightingKernelTextures(record.atmosphere ?? resources.noAtmosphere),
+            surface_normals: this.#surfaceNormals(record.surface),
+          },
+          storage: {},
         },
-        buffers: {
-          discs: resources.discs,
-          cell_jobs: resources.cellJobs,
-          cell_sums: resources.cellSums,
-        },
-        sampled: {
-          phase_factor_table: resources.table,
-          class_weights: resources.noClassMap,
-          ...surfaceLightingKernelTextures(resources.noAtmosphere),
-          // Reached through `shade`, never read: the pass's discs are uniform (R10.T10.g).
-          surface_normals: resources.noClassMap,
-        },
-        storage: {},
-      },
-      cellWorkgroups(cells.count),
-      DISC_CELLS_PASS,
-    );
+        cellWorkgroups(set.count),
+        DISC_CELLS_PASS,
+      );
+    }
     return true;
   }
 

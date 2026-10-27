@@ -8,7 +8,11 @@ import {
   type RecordedWrite,
 } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
+import { wgslFunctions } from "../../test/atmosphereWgsl";
+import { datumNormalMap, unreadNormalMap } from "../../test/normalMapFixtures";
+import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
+import type { SurfaceLightingTables } from "../atmosphere/surfaceLighting";
 import {
   NEAR_PLANE_M,
   perspectiveReversedInfinite,
@@ -19,13 +23,14 @@ import {
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import { packFrame } from "../engine/webgpu/uniforms";
-import type { DrawItem } from "../engine/types";
+import type { DrawItem, TextureHandle } from "../engine/types";
 import type { PlacedLight } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { AU_M } from "../scenes/kept";
 import type { ScreenRect } from "../wireframe/submit";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import {
+  type DiscCellSet,
   type DiscRecord,
   DISC_ROWS,
   discCellJobs,
@@ -36,6 +41,7 @@ import {
 import { packClassMap } from "./discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_MATERIALS,
   type BodyFramePlan,
   cellWorkgroups,
   DISC_CELLS_PASS,
@@ -44,6 +50,7 @@ import {
   type LitBodyInput,
   LitBodyRenderer,
   planLitBodies,
+  SMOOTH_MESH_MATERIAL,
 } from "./draw";
 import { sphereFootprint } from "./regime";
 
@@ -264,7 +271,7 @@ describe("the cell pass's jobs (R07.T8.d)", () => {
     );
   });
 
-  it("takes the 8 × 8 and 4 × 4 discs, not the larger rule's nor a class map's", () => {
+  it("takes every pixel of the 8 × 8 and 4 × 4 discs, a class map's among them since R07.T8.e, not the larger rule's", () => {
     const [record] = recordsOf(planOf([13]), 1);
     if (record === undefined) {
       throw new Error("no disc");
@@ -289,7 +296,7 @@ describe("the cell pass's jobs (R07.T8.d)", () => {
     });
     expect(
       [counts(8, 8), counts(4, 4), counts(1, 4), counts(16, 16), mapped].map(drawnThroughCells),
-    ).toEqual([true, true, false, false, false]);
+    ).toEqual([true, true, false, false, true]);
   });
 });
 
@@ -347,7 +354,7 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
     ]).toEqual(["bodies:discs", "bodies:disc cell jobs", "bodies:disc cell sums", true]);
   });
 
-  it("binds the texel of no weight as the class map and normal map its kernel reaches, which no disc of the pass reads (R10.T10.g)", async () => {
+  it("binds the texel of no weight as the class map and normal map its kernel reaches for uniform discs, which none of them reads (R10.T10.g)", async () => {
     const { engine } = await dispatchedFor([3.5, 13]);
     const { sampled } = onlyDispatch(engine).bindings;
     expect([sampled["class_weights"]?.name, sampled["surface_normals"]?.name]).toEqual([
@@ -498,5 +505,279 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
     expect(released.slice(grown)).toEqual(
       expect.arrayContaining(["bodies:disc cell jobs", "bodies:disc cell sums"]),
     );
+  });
+});
+
+/** A stand-in texture handle, named. */
+function texture(name: string): TextureHandle {
+  return { kind: "texture", name };
+}
+
+/** A body's atmosphere tables as stand-ins, each named after the body's `name` (R08.T9.b). */
+function airTables(name: string): SurfaceLightingTables {
+  return {
+    body: texture(`${name} air body`),
+    transmittance: texture(`${name} air transmittance`),
+    absorberColumns: texture(`${name} air absorber columns`),
+    absorberPressureColumns: texture(`${name} air absorber pressure columns`),
+    lastAbsorberPressureColumn: texture(`${name} air last absorber pressure column`),
+    absorberCurves: texture(`${name} air absorber curves`),
+    irradiance: texture(`${name} air irradiance`),
+  };
+}
+
+/** A one-class map surveyed whole, its weights a stand-in texture named `name` (R10.T10.d). */
+function classMapOf(name: string): ClassMapDiscSurface {
+  const law = PROVISIONAL_PHOTOMETRY.law;
+  return {
+    kind: "class-map",
+    weights: texture(name),
+    texels: packClassMap(1, 1, () => [1]),
+    laws: [law],
+    elsewhere: law,
+    normals: null,
+  };
+}
+
+/** How a body of {@link planWith} is drawn: plain, with air, or with a class map. */
+type BodyKind = "plain" | "air" | "map";
+
+/** A frame's plan of 13 px discs, one a kind, each held to the disc regime; and their kinds by id. */
+function planWith(kinds: ReadonlyArray<BodyKind>): {
+  readonly plan: BodyFramePlan;
+  readonly kindOf: ReadonlyMap<string, BodyKind>;
+} {
+  const { bodies, hosts } = bodiesOf(kinds.map(() => 13));
+  const drawn: LitBodyInput[] = [];
+  bodies.forEach((body, i) => {
+    drawn.push(drawnAs(body, kinds[i] ?? "plain"));
+  });
+  const plan = planLitBodies(drawn, hosts, OPTIONS, new Map(drawn.map((b) => [b.id, "disc"])));
+  return { plan, kindOf: new Map(drawn.map((b, i) => [b.id, kinds[i] ?? "plain"])) };
+}
+
+/** A body as {@link planWith} draws one of `kind`. */
+function drawnAs(body: LitBodyInput, kind: BodyKind): LitBodyInput {
+  let drawn: LitBodyInput;
+  switch (kind) {
+    case "air":
+      drawn = { ...body, atmosphere: airTables(body.id) };
+      break;
+    case "map":
+      drawn = { ...body, surface: classMapOf(`${body.id} class map`), rotation: IDENTITY_ROTATION };
+      break;
+    case "plain":
+      drawn = body;
+      break;
+  }
+  return drawn;
+}
+
+/** The names a set's dispatch binds of a body of `kind` (`texturesBound`'s), its body's id `body`. */
+function boundFor(kind: BodyKind, body: string): string[] {
+  let names: string[];
+  switch (kind) {
+    case "air":
+      names = ["bodies:no class map", "bodies:no class map", `${body} air body`];
+      break;
+    case "map":
+      names = [`${body} class map`, "bodies:no class map", "bodies:no atmosphere"];
+      break;
+    case "plain":
+      names = ["bodies:no class map", "bodies:no class map", "bodies:no atmosphere"];
+      break;
+  }
+  return names;
+}
+
+/** Each dispatch's class map, normal map and air body table, by name. */
+function texturesBound(engine: CountingRenderEngine): Array<Array<string | undefined>> {
+  return engine.dispatched.map(({ bindings: { sampled } }) => [
+    sampled["class_weights"]?.name,
+    sampled["surface_normals"]?.name,
+    sampled["atmosphere_body"]?.name,
+  ]);
+}
+
+/**
+ * How many copies of `target` an inliner makes in `entry` of `source`: its call paths from there,
+ * each function's calls of every other function the source declares counted in its body.
+ */
+function inlinedCopies(source: string, entry: string, target: string): number {
+  const functions = wgslFunctions(source);
+  const names = [...functions.keys()];
+  const known = new Map<string, number>();
+  const copiesIn = (name: string): number => {
+    if (name === target) {
+      return 1;
+    }
+    const seen = known.get(name);
+    if (seen !== undefined) {
+      return seen;
+    }
+    const body = functions.get(name)?.body ?? "";
+    let copies = 0;
+    for (const callee of names) {
+      const calls = callee === name ? 0 : body.split(new RegExp(`\\b${callee}\\(`, "u")).length - 1;
+      copies += calls > 0 ? calls * copiesIn(callee) : 0;
+    }
+    known.set(name, copies);
+    return copies;
+  };
+  return copiesIn(entry);
+}
+
+describe("the cell pass for every record (R07.T8.e)", () => {
+  it("takes a disc with air and a class map's disc as it takes a plain one", () => {
+    const { plan } = planWith(["plain", "air", "map"]);
+    expect(plan.discs.map(drawnThroughCells)).toEqual([true, true, true]);
+  });
+
+  it("lays its jobs by the textures their records bind, a set each, in the order of its first record", () => {
+    const { plan, kindOf } = planWith(["plain", "air", "map", "plain"]);
+    const records = recordsOf(plan, 4);
+    const cells = discCellJobs(records);
+    const pixels = records.map((record) => pixelsOf(record.rect).length);
+    // The records of each set, in record order, the sets in the order of their first records.
+    const expected: number[][] = [];
+    const setKinds: Array<BodyKind | undefined> = [];
+    records.forEach((record, i) => {
+      const kind = kindOf.get(record.body);
+      const at = setKinds.indexOf(kind);
+      if (at < 0) {
+        setKinds.push(kind);
+        expected.push([i]);
+      } else {
+        expected[at]?.push(i);
+      }
+    });
+    let first = 0;
+    const sets = expected.map((indices) => {
+      const count = indices.reduce((sum, i) => sum + (pixels[i] ?? 0), 0);
+      const set = { first, count, record: indices[0] };
+      first += count;
+      return set;
+    });
+    expect([cells.sets, cells.count]).toEqual([sets, first]);
+    // Each record's first job, and its jobs its own pixels in row order.
+    const order = expected.flat();
+    let job = 0;
+    for (const index of order) {
+      const range = cells.ranges[index];
+      const record = records[index];
+      if (range?.kind !== "rectangle" || record === undefined) {
+        throw new Error(`record ${index} has no rectangle of sums`);
+      }
+      expect(range.first).toBe(job);
+      const laid = rowsOf(cells.jobs.subarray(job * 4, (job + pixelsOf(record.rect).length) * 4));
+      expect(laid).toEqual(pixelsOf(record.rect).map(([x, y]) => [index, x, y, 0]));
+      job += pixelsOf(record.rect).length;
+    }
+  });
+
+  it("dispatches once a set, each over its own run of jobs, binding its body's air or its class map", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const { plan, kindOf } = planWith(["plain", "air", "map", "plain"]);
+    const cells = discCellJobs(plan.discs);
+    expect(renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME)).toBe(
+      true,
+    );
+    expect(
+      engine.dispatched.map((d) => [
+        d.pass,
+        Array.from(d.bindings.uniforms["cell_pass"] ?? []),
+        d.workgroups,
+      ]),
+    ).toEqual(
+      cells.sets.map((set) => [
+        DISC_CELLS_PASS,
+        [set.count, set.first, 0, 0],
+        cellWorkgroups(set.count),
+      ]),
+    );
+    const bodyOf = (set: DiscCellSet): string => plan.discs[set.record]?.body ?? "";
+    expect(texturesBound(engine)).toEqual(
+      cells.sets.map((set) => boundFor(kindOf.get(bodyOf(set)) ?? "plain", bodyOf(set))),
+    );
+    // Every dispatch binds the same jobs and sums, which the draws read.
+    expect(
+      new Set(
+        engine.dispatched.flatMap((d) => [
+          d.bindings.buffers["cell_jobs"]?.name,
+          d.bindings.buffers["cell_sums"]?.name,
+        ]),
+      ),
+    ).toEqual(new Set(["bodies:disc cell jobs", "bodies:disc cell sums"]));
+    renderer.dispose();
+  });
+
+  it("binds a class map's normal map where it carries one (R10.T10.g)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const { plan } = planWith(["map"]);
+    const [record] = recordsOf(plan, 1);
+    if (record?.surface.kind !== "class-map") {
+      throw new Error("no class map");
+    }
+    const normals = { ...record.surface, normals: unreadNormalMap(datumNormalMap(5), "normals") };
+    const mapped: BodyFramePlan = { ...plan, discs: [{ ...record, surface: normals }] };
+    renderer.dispatchCells(mapped, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME);
+    expect(texturesBound(engine)).toEqual([
+      [record.surface.weights.name, "normals", "bodies:no atmosphere"],
+    ]);
+    renderer.dispose();
+  });
+
+  it("gives two bodies' airs and two class maps a dispatch each, each binding its own", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const { plan, kindOf } = planWith(["air", "air", "map", "map"]);
+    renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME);
+    const expected = plan.discs.map((record) =>
+      boundFor(kindOf.get(record.body) ?? "plain", record.body),
+    );
+    expect([engine.dispatched.length, new Set(texturesBound(engine).map(String))]).toEqual([
+      4,
+      new Set(expected.map(String)),
+    ]);
+    renderer.dispose();
+  });
+
+  // SwiftShader inlines every call: R08.T9.b's lookups made `shade` too large to take more than one
+  // copy in an entry point (plan R08, "R07's shading called from one place").
+  it.each([
+    ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "fragmentMain"],
+    ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "fragmentMain"],
+    ["the smooth mesh", SMOOTH_MESH_MATERIAL.fragmentWgsl, "fragmentMain"],
+    ["the disc cells kernel", BODY_DISC_CELLS_KERNEL.reference, "main"],
+  ])("reaches `shade` from one call site in %s's entry point", (_name, source, entry) => {
+    expect(inlinedCopies(source, entry, "shade")).toBe(1);
+  });
+
+  it("makes its dispatches again after a device loss, a set each, on the new buffers", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    renderer.dispatchCells(
+      planWith(["plain", "air", "map"]).plan,
+      engine.createCompute(BODY_DISC_CELLS_KERNEL),
+      FRAME,
+    );
+    const before = engine.dispatched.map((d) => d.bindings.buffers["cell_sums"]);
+    engine.restore();
+    renderer.dispatchCells(
+      planWith(["plain", "air", "map"]).plan,
+      engine.createCompute(BODY_DISC_CELLS_KERNEL),
+      FRAME,
+    );
+    const after = engine.dispatched
+      .slice(before.length)
+      .map((d) => d.bindings.buffers["cell_sums"]);
+    expect([before.length, after.length, after.every((sums) => !before.includes(sums))]).toEqual([
+      3,
+      3,
+      true,
+    ]);
+    renderer.dispose();
   });
 });
