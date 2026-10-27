@@ -1130,6 +1130,7 @@ fn surface_state(state: SurfaceState) -> SurfaceStateDto {
         SurfaceState::RunawayGreenhouse => SurfaceStateDto::RunawayGreenhouse,
         SurfaceState::Temperate => SurfaceStateDto::Temperate,
         SurfaceState::Snowball => SurfaceStateDto::Snowball,
+        SurfaceState::Tenuous => SurfaceStateDto::Tenuous,
         SurfaceState::GasEnvelope => {
             unreachable!("a record's surface is never in the gas-envelope state")
         }

@@ -1048,3 +1048,14 @@ fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
     assert_eq!(material.matches("pub use maturity::{").count(), 1);
     assert_eq!(material.matches("mod maturity;").count(), 1);
 }
+
+/// P14.T53.c's tenuous floor is P14.T51.d's ion-stopping column, to the bit: the column above
+/// which an air shields its ground is the column at which it is an air (`chem::tenuous`'s
+/// `TENUOUS_FLOOR_COLUMN`, which cannot read this module on the record before P14.T54.b).
+#[test]
+fn the_tenuous_floor_is_the_ion_stopping_column() {
+    assert_same_bits(
+        crate::planetary::chem::tenuous::TENUOUS_FLOOR_COLUMN.value(),
+        ION_STOPPING_COLUMN.value(),
+    );
+}

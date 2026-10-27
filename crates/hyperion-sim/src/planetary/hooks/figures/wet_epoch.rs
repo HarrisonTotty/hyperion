@@ -563,11 +563,15 @@ fn holds_water(air: &Atmosphere, water: Kilograms, radius: Metres) -> bool {
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => true,
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => true,
     };
+    // A tenuous air (P14.T53.c), under 100 Pa, is kept but holds no surface water, as an airless
+    // body holds none: below water's triple point no liquid lies.
+    let bulk_air = air.keeps_atmosphere() && air.state() != SurfaceState::Tenuous;
     let (water, r) = (water.value(), radius.value());
     solid
-        && air.keeps_atmosphere()
+        && bulk_air
         && water.is_finite()
         && water > 0.0
         && air.retains_against_escape(Gas::Water)

@@ -837,7 +837,8 @@ fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
         // (unlabelled: it has no analogue either).
         SurfaceState::RunawayGreenhouse | SurfaceState::MagmaOcean => PhaseTemplate::Venus,
         SurfaceState::Snowball => PhaseTemplate::Snowball,
-        SurfaceState::Airless => match inputs.material {
+        // A tenuous air hides nothing of its ground (P14.T53.c).
+        SurfaceState::Airless | SurfaceState::Tenuous => match inputs.material {
             SurfaceMaterial::Rock => PhaseTemplate::Mercury,
             SurfaceMaterial::Ice => PhaseTemplate::AirlessIce,
         },

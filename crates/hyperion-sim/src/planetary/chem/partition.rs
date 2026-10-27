@@ -252,20 +252,23 @@ impl ClimateSpan {
         self.warmest
     }
 
-    /// The temperature that controls a condensable pulled toward its cold trap by `pull`, in
+    /// The temperature that controls a condensable pulled toward its cold trap `cold` by `pull`, in
     /// [0, 1]: `T_mean` − p (`T_mean` − `T_cold`), with p = d (1 − c) for its dominance d and its
-    /// own sea's ocean weight c ([`Partitioned::own_ocean_weight`]). It is the mean for a minor
-    /// condensable, and for a dominant one over its own full ocean; the coldest zone for a dominant
-    /// one with no sea of its own.
+    /// own sea's ocean weight c ([`Partitioned::own_ocean_weight`]).
+    ///
+    /// It is the mean for a minor condensable, and for a dominant one over its own full ocean; the
+    /// cold trap for a dominant one with no sea of its own. The cold trap is the coldest zone, or
+    /// from generator version 24 an ice-held condensable's own ice (P14.T53.c,
+    /// [`ColumnInventory::with_ice_temperature`]).
     #[must_use]
-    fn controlling(&self, pull: f64) -> Kelvin {
-        let (cold, mean) = (self.coldest.value(), self.mean.value());
+    fn toward(&self, cold: Kelvin, pull: f64) -> Kelvin {
+        let mean = self.mean.value();
         if pull <= 0.0 {
             self.mean
         } else if pull >= 1.0 {
-            self.coldest
+            cold
         } else {
-            Kelvin::new(mean - pull * (mean - cold))
+            Kelvin::new(mean - pull * (mean - cold.value()))
         }
     }
 }
@@ -608,6 +611,10 @@ struct Species {
     molar_mass: f64,
     diagram: Option<&'static PhaseDiagram>,
     humidity: f64,
+    /// Its ice's own temperature, where its ice holds it (P14.T53.c,
+    /// [`ColumnInventory::with_ice_temperature`]): the temperature that stands for the climate's
+    /// coldest zone in its caps and where it lies. `None` for every other species.
+    ice: Option<Kelvin>,
 }
 
 /// Why a [`ColumnInventory`] was refused.
@@ -665,6 +672,7 @@ impl ColumnInventory {
                 molar_mass,
                 diagram: row.phase_diagram(),
                 humidity: surface_humidity(substance),
+                ice: None,
             });
         }
         species.sort_by_key(|s| s.substance);
@@ -675,6 +683,58 @@ impl ColumnInventory {
             return Err(BuildColumnInventoryError::Repeated(pair[0].substance));
         }
         Ok(Self { species })
+    }
+
+    /// This inventory with the species `substance`'s cold trap its ice's own temperature, `ice`
+    /// (P14.T53.c; decision-triton-and-e101 §1.8 item 2).
+    ///
+    /// An ice-held condensable's vapour is held at its ice's temperature, one over all of its
+    /// ice, which latent heat keeps uniform, in place of the climate's coldest zone, and its
+    /// condensate lies there. Its minor branch, the mean's, is unchanged, so the pull toward its
+    /// cold trap moves it from the mean to `ice` as its dominance rises. A species the inventory
+    /// does not name, and a temperature that is negative or not finite, leave it as it was; a −0 is
+    /// written +0.
+    ///
+    /// # Examples
+    ///
+    /// A Triton's nitrogen held by its ice at 37.7 K is held at that ice's saturation pressure, not
+    /// at its colder night's:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::chem::partition::{
+    ///     ClimateSpan, ColumnInventory, Ground, partition,
+    /// };
+    /// use hyperion_sim::planetary::derive::atmosphere::Gas;
+    /// use hyperion_sim::substance::diagram;
+    /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
+    ///
+    /// let n2 = Gas::Nitrogen.substance();
+    /// let climate = ClimateSpan::new(Kelvin::new(30.0), Kelvin::new(34.0), Kelvin::new(40.0))?;
+    /// let ground = Ground::without_basins(MetresPerSecondSquared::new(0.78));
+    /// let inventory = ColumnInventory::new([(n2, Pascals::new(5e4))])?;
+    /// let held = inventory.clone().with_ice_temperature(n2, Kelvin::new(37.7));
+    /// let at_ice = diagram::saturation_pressure(n2, Kelvin::new(37.7)).ok_or("N2 has a diagram")?;
+    /// let partial_of = |inventory: &ColumnInventory| {
+    ///     partition(&climate, &ground, inventory)
+    ///         .of(n2)
+    ///         .map(|n| n.partial_pressure())
+    /// };
+    /// let partial = partial_of(&held).ok_or("named")?;
+    /// assert!((partial.value() / at_ice.value() - 1.0).abs() < 1e-9);
+    /// assert!(partial_of(&inventory).ok_or("named")? < partial);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn with_ice_temperature(mut self, substance: SubstanceId, ice: Kelvin) -> Self {
+        let t = ice.value();
+        if t.is_finite()
+            && t >= 0.0
+            && let Some(species) = self.species.iter_mut().find(|s| s.substance == substance)
+        {
+            // A −0 is written +0, as a climate's temperatures are.
+            species.ice = Some(Kelvin::new(t + 0.0));
+        }
+        self
     }
 
     /// The species and their column weights, in registry order.
@@ -712,6 +772,20 @@ impl Species {
     fn condensable(&self) -> Option<&'static PhaseDiagram> {
         // By comparison, so that a NaN weight condenses nothing.
         self.diagram.filter(|_| self.weight.value() > 0.0)
+    }
+
+    /// The temperature that stands for the climate `climate`'s coldest zone for this species: its
+    /// ice's own where its ice holds it (P14.T53.c), the coldest zone otherwise.
+    #[must_use]
+    fn cold_trap(&self, climate: &ClimateSpan) -> Kelvin {
+        self.ice.unwrap_or(climate.coldest)
+    }
+
+    /// The temperature that controls this species pulled toward its cold trap by `pull` over the
+    /// climate `climate` (`ClimateSpan::toward`), its cold trap its own ([`Self::cold_trap`]).
+    #[must_use]
+    fn controlling(&self, climate: &ClimateSpan, pull: f64) -> Kelvin {
+        climate.toward(self.cold_trap(climate), pull)
     }
 }
 
@@ -893,7 +967,7 @@ impl AirborneWeights {
                 minor_cap: Pascals::new(
                     species.humidity * diagram.saturation_pressure(climate.mean).value(),
                 ),
-                cold_cap: diagram.saturation_pressure(climate.coldest),
+                cold_cap: diagram.saturation_pressure(species.cold_trap(climate)),
                 dominance: 0.0,
                 own_ocean: 0.0,
             });
@@ -956,7 +1030,7 @@ impl AirborneWeights {
                 held.cold_cap
             } else {
                 let humidity = math::powf(species.humidity, 1.0 - d);
-                let at = diagram.saturation_pressure(climate.controlling(pull));
+                let at = diagram.saturation_pressure(species.controlling(climate, pull));
                 Pascals::new(humidity * at.value())
             };
             let weight = if d <= 0.0 { minor } else { at_cap(cap) };
@@ -1704,7 +1778,7 @@ pub fn partition(climate: &ClimateSpan, ground: &Ground, inventory: &ColumnInven
             partial_pressure: Pascals::new(x * pressure),
             dominance: d,
             own_ocean_weight: c,
-            lies_at: climate.controlling(d * (1.0 - c)),
+            lies_at: s.controlling(climate, d * (1.0 - c)),
         };
         if let Some(diagram) = s.diagram
             && let Some(condensate) = condensate_of(
@@ -1994,7 +2068,7 @@ fn ice_line(
 ) -> Kelvin {
     let under_air = perennial_ratio() * first_melt.value();
     match state {
-        SurfaceState::Airless => {
+        SurfaceState::Airless | SurfaceState::Tenuous => {
             let edge = sublimation_edge(
                 diagram,
                 molar_mass_g_per_mol,

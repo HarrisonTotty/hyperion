@@ -46,8 +46,9 @@ pub(crate) enum AirRules {
     Held,
     /// The 23 → 24 batch's: the surface carries its air's vertical structure, computed as none for
     /// a surface with no air ([`record_structure`]), its aerosol and absorber inventory, the
-    /// empty inventory for a surface with no air, not modelled for a magma ocean's air
-    /// ([`record_aerosols`]), and its modifiers (`system::modifiers::record_modifiers`).
+    /// empty inventory for a surface with no air, not modelled for a magma ocean's air or a
+    /// tenuous one ([`record_aerosols`]), and its modifiers
+    /// (`system::modifiers::record_modifiers`).
     Batch,
 }
 
@@ -157,6 +158,9 @@ pub(crate) struct AirSurface<'a> {
 ///   clouds at its top, so the empty inventory would claim a cloud-free air computed as such
 ///   (R08's review of P14.T54.b.b, S5; the wire's "absent means not modelled, `null` or empty
 ///   means computed none", decision-p14-t54b-open §2.1);
+/// - a tenuous air (P14.T53.c's [`SurfaceState::Tenuous`]) is not modelled at 24: T24.c's rules
+///   are not applied to it (`holds_air`), its haze and dust are P14.T55.n's, and the empty
+///   inventory would claim an air computed clear (decision-p14-t53c-tenuous-aerosols);
 /// - a structure not modelled leaves the inventory not modelled;
 /// - an air the inventory refuses is not modelled: its error carries nothing a reader could act
 ///   on, and the generated sample gives none (this module's tests, which re-derive and print any).
@@ -169,8 +173,17 @@ pub(crate) fn record_aerosols(
     match rules {
         AirRules::Held => Modelled::NotModelled,
         AirRules::Batch => {
-            if surface.state == SurfaceState::MagmaOcean && !surface.conditions.gases().is_empty() {
-                return Modelled::NotModelled;
+            match surface.state {
+                SurfaceState::Tenuous => return Modelled::NotModelled,
+                SurfaceState::MagmaOcean if !surface.conditions.gases().is_empty() => {
+                    return Modelled::NotModelled;
+                }
+                SurfaceState::GasEnvelope
+                | SurfaceState::MagmaOcean
+                | SurfaceState::Airless
+                | SurfaceState::RunawayGreenhouse
+                | SurfaceState::Temperate
+                | SurfaceState::Snowball => {}
             }
             let profile = match structure {
                 // A gas envelope's profile (P14.T24.d) is the envelope section's, never a

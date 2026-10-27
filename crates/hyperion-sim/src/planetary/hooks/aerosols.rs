@@ -1924,14 +1924,23 @@ const fn sulphur_inputs<'a>(inputs: &AerosolInputs<'a>) -> SulphurInputs<'a> {
     }
 }
 
-/// Whether the inputs describe an air that can hold aerosols: a state with a surface and an air,
-/// a positive surface pressure and some gas.
+/// Whether the inputs describe an air the inventory's rules apply to: a state with a surface and a
+/// bulk air, a positive surface pressure and some gas.
+///
+/// The inventory's rules are not applied to a tenuous air (P14.T53.c;
+/// decision-p14-t53c-tenuous-aerosols): its methane haze's τ would read its index alone, with no
+/// column or ultraviolet supply (a 1.4 Pa N₂ air at x(CH₄) 10⁻³ would take τ 4.3, against Pluto's
+/// measured 0.013), and its dust, decks and ozone are withheld with it, none of their rules fitted
+/// to so thin a column. The record sends its aerosols not modelled until P14.T55.n.
 #[must_use]
 fn holds_air(inputs: &AerosolInputs<'_>) -> bool {
     let p = inputs.surface_pressure.value();
     let state = match inputs.state {
         SurfaceState::Temperate | SurfaceState::Snowball | SurfaceState::RunawayGreenhouse => true,
-        SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::GasEnvelope => false,
+        SurfaceState::Airless
+        | SurfaceState::MagmaOcean
+        | SurfaceState::GasEnvelope
+        | SurfaceState::Tenuous => false,
     };
     state && p.is_finite() && p > 0.0 && !inputs.gases.is_empty()
 }

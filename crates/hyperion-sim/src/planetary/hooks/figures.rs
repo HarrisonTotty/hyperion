@@ -130,7 +130,9 @@ use crate::planetary::chem::partition::{
     Basins, ClimateSpan, ColumnInventory, CondensatePhase, Condensates, Cover, CrustWater, Ground,
     Partition, WaterCover, partition,
 };
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{
+    Atmosphere, Gas, SurfaceMaterial, SurfaceState, tenuous_in_force,
+};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
 use crate::planetary::hooks::ocean;
@@ -2319,7 +2321,10 @@ impl GlobalFigures {
     /// - The liquids are the condensates' ([`Condensates::surface_liquids`]), in the entries'
     ///   order, with water's ocean under a `Snowball`'s ice ([`cover::under_ice_ocean`]) at its
     ///   potential ocean appended where they hold no liquid water, its water inside the `H2O`
-    ///   solid (W3 (b)).
+    ///   solid (W3 (b)), to generator version 23: from 24 (P14.T53.c, behind its hold) the ocean
+    ///   under the ice is no surface liquid and is not appended, so that every list item that is
+    ///   an entry has its own area where the entries' total is at most 1 (decision-absurd-states-24
+    ///   R1).
     /// - The ices are the condensates' ([`Condensates::surface_ices`]), in the entries' order, with
     ///   T24.b's water ice ([`cover::ice_fraction`]) appended where they hold none, as a
     ///   `Snowball`'s cover is, whose water the partition does not hold, or an ice-rich crust whose
@@ -2330,7 +2335,8 @@ impl GlobalFigures {
     /// - Each list is divided by its total, its appended item included, where that total exceeds
     ///   the whole surface (W2): ices of several substances compete for the same cold zones.
     ///
-    /// Nothing else is appended; P14.T53.c ends both appended items.
+    /// Nothing else is appended. P14.T53.c ends (b); (a) stands, an ice-rich crust being its own
+    /// ice, which the ice-held retention leaves to T24.b's cover (decision-triton-and-e101 §1.8).
     ///
     /// T24.b's ice is `water_ice`: the record's water cover's, read off the profile its partition
     /// built ([`WaterIce::Covered`], lever (a)), or the conditions' cold area off the body's
@@ -2396,7 +2402,13 @@ impl GlobalFigures {
             }
             Some(condensates) => {
                 let mut liquids = condensates.surface_liquids();
-                if under_ice && condensates.entry(water, CondensatePhase::Liquid).is_none() {
+                // From P14.T53.c (its hold) the ocean under a `Snowball`'s ice is not a liquid
+                // at the surface: its water stays inside the `H2O` solid (W3 (b)'s end;
+                // decision-absurd-states-24 R1).
+                if under_ice
+                    && !tenuous_in_force()
+                    && condensates.entry(water, CondensatePhase::Liquid).is_none()
+                {
                     liquids.push((water, self.potential_ocean));
                 }
                 let mut ices = condensates.surface_ices();

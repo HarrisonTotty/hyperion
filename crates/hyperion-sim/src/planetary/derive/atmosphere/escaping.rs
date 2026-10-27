@@ -8,7 +8,10 @@
 //!
 //! 1. **A gas envelope** (at least `THIN_ENVELOPE_FRACTION` of the mass) is as it was, with the
 //!    helium its escape left ([`envelope_helium`]) on its outcome.
-//! 2. **Retention**: Jeans's test and the ice-held volatiles, as built.
+//! 2. **Retention**: Jeans's test and the ice-held volatiles: P14.T54.a's stand-in under
+//!    P14.T53.c's hold, and from 24 an ice-held nitrogen's and argon's own rule, their inventory
+//!    less their vapour air's escape at their ice's own temperature, on any solid surface
+//!    (`chem::tenuous`).
 //! 3. **The cosmic shoreline** ([`Shoreline`]; Zahnle and Catling 2017, ApJ 843, 122): every
 //!    airborne inventory gas is multiplied by the share it keeps, at the body's X-ray and
 //!    ultraviolet fluence over Earth's, its escape speed √(2GM ÷ R), its mean impact speed and its
@@ -47,7 +50,9 @@
 //!    base temperature, the airless mean (`surface_mix::airless_mean`: the larger of `T_eq` and
 //!    the night floor under the unlit mean's rules, `T_eq` to the bit under their hold; P14.T24.i's
 //!    follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of step 2 read
-//!    too. Under 100 Pa of its partial pressures the body is airless at that base.
+//!    too, their vapour held at their ice's own temperature from 24 (P14.T53.c). Under 100 Pa of
+//!    its partial pressures the body is airless at that base; from 24 `Tenuous` there instead
+//!    where its column reaches the tenuous floor, its gases listed (P14.T53.c).
 //! 8. **The outcome** ([`EscapeOutcome`]): each element's, mass-conserving (tested).
 //! 9. **The state published** (P14.T53.b part 1 (a) and (c), `present_state`): a world inside the
 //!    runaway limit at its hosts' largest past luminosity publishes its present class, a runaway
@@ -70,6 +75,7 @@ use crate::planetary::chem::escape::{
     thin_envelope_air,
 };
 use crate::planetary::chem::partition::Ground;
+use crate::planetary::chem::tenuous::holds_tenuous_air;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
 use crate::substance::{Element, MOLAR_GAS_CONSTANT, heat_capacity_over_r_at};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
@@ -84,6 +90,7 @@ use super::{
     PartialPressures, PassSurface, PublishedState, Retention, RunawayDeck, SILICATE_SOLIDUS,
     StepClimate, SurfaceState, TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature,
     mole_fraction_of, partitioned_greenhouse, present_state_in_force, retained, surface_mix,
+    tenuous_in_force,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -1120,7 +1127,7 @@ impl<'a> Body<'a> {
     fn of(inputs: &'a AtmosphereInputs, surface: &PassSurface<'_>) -> Self {
         let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
         let base = surface_mix::airless_mean(inputs.equilibrium, surface);
-        let (retention, held) = retained(inputs, exobase, base);
+        let (retention, held) = retained(inputs, exobase, base, surface_mix::heat_flow(surface));
         let exposure = XuvExposure::new(inputs.saturated_xuv_flux, inputs.xuv_saturation_time);
         Self {
             inputs,
@@ -1163,6 +1170,7 @@ impl<'a> Body<'a> {
             partials,
             retention: self.retention,
             ice_held: self.held.retention(),
+            held_ice: self.held.ice,
             exobase_temperature: self.exobase,
             optical_depth: 0.0,
             albedo: state.albedo(self.inputs.material),
@@ -1320,8 +1328,11 @@ impl<'a> Body<'a> {
             ledger.gas(Gas::Nitrogen, air.nitrogen * lost, Fate::Escaped);
             air.nitrogen *= share;
         }
-        ledger.gas(Gas::Argon, air.argon * lost, Fate::Escaped);
-        air.argon *= share;
+        // Argon its ice holds is not air either (P14.T53.c).
+        if self.held.argon.is_none() {
+            ledger.gas(Gas::Argon, air.argon * lost, Fate::Escaped);
+            air.argon *= share;
+        }
         shoreline
     }
 
@@ -1439,7 +1450,11 @@ impl<'b> Solver<'_, 'b> {
     #[must_use]
     fn solve_in(&self, air: &Airborne, steps: u32) -> Option<Solve<'b>> {
         let inputs = self.body.inputs;
-        let Ok(inventory) = air.column(self.weight) else {
+        // An ice-held gas's vapour is held at its ice's own temperature (P14.T53.c).
+        let Ok(inventory) = air
+            .column(self.weight)
+            .map(|column| self.body.held.ice.on(column))
+        else {
             // A weight that is negative, infinite or not a number (`NotAWeight`): every mass here
             // is held at zero or above, so only a weight per kilogram that is not finite, of a body
             // far smaller than any the generator makes, reaches it; the body then holds nothing
@@ -1704,7 +1719,8 @@ pub(super) fn state_and_greenhouse(
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
-        | SurfaceState::Snowball => false,
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => false,
     };
 
     // Step 5's greenhouse, the thermostat's carbonate, the cold trap's oxygen and the methane's
@@ -1791,7 +1807,8 @@ fn present_state(
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => state,
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => state,
     };
     if present == SurfaceState::Temperate && published == PublishedState::Hothouse {
         SurfaceState::RunawayGreenhouse
@@ -1886,8 +1903,14 @@ fn finish(
     } else if total < AIRLESS_PRESSURE {
         // Under 100 Pa of the greenhouse's own partial pressures, from the base: published at the
         // base, the airless mean, as the held path's airless arms are (decision-t24i-airless-state
-        // D1.3).
-        let air = body.airless(SurfaceState::Airless, partials, body.base.value(), carrier);
+        // D1.3). From P14.T53.c an air whose column reaches the tenuous floor is `Tenuous`, its
+        // gases listed, at the same base: its greenhouse is the airless one its steps solved.
+        let thin = if tenuous_in_force() && holds_tenuous_air(total, gravity) {
+            SurfaceState::Tenuous
+        } else {
+            SurfaceState::Airless
+        };
+        let air = body.airless(thin, partials, body.base.value(), carrier);
         return Atmosphere {
             column,
             escape,
@@ -1911,6 +1934,7 @@ fn finish(
         partials,
         retention: body.retention,
         ice_held: body.held.retention(),
+        held_ice: body.held.ice,
         exobase_temperature: body.exobase,
         optical_depth: tau,
         albedo: state.albedo(inputs.material),

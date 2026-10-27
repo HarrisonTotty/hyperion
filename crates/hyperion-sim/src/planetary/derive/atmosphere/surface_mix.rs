@@ -271,7 +271,8 @@ fn pass_water_cover(
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
-        | SurfaceState::RunawayGreenhouse => false,
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Tenuous => false,
     };
     let reservoir = solved
         .condensate(Gas::Water.substance())
@@ -550,7 +551,8 @@ pub(super) fn area_mixed(
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => surface_and_cloud(air, inputs, surface, shade),
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => surface_and_cloud(air, inputs, surface, shade),
     };
     #[cfg(test)]
     if let PassClimate::Spun(_) = surface.climate {
@@ -563,7 +565,8 @@ pub(super) fn area_mixed(
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => RunawayDeck::Kept,
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => RunawayDeck::Kept,
     };
     let air = Atmosphere {
         albedo: bond_albedo(albedo, air.state, inputs.material),
@@ -666,15 +669,22 @@ pub(super) fn airless_mean(equilibrium: Kelvin, surface: &PassSurface<'_>) -> Ke
     if UnlitMeanRules::in_force() == UnlitMeanRules::Held {
         return equilibrium;
     }
-    let heat_flow = match surface.climate {
-        PassClimate::Spun(spun) => spun.context.heat_flow(),
-        PassClimate::Given(_) => WattsPerSquareMetre::ZERO,
-    };
-    let floor = night_floor(heat_flow);
+    let floor = night_floor(heat_flow(surface));
     if floor.value() > equilibrium.value() {
         floor
     } else {
         equilibrium
+    }
+}
+
+/// The surface heat flow a pass over `surface` reads: its context's, the previous pass's figures',
+/// under the body's own climate, and none for a climate given, the passes' stand-in, which reads
+/// no heat flow ([`airless_mean`]'s floor; P14.T53.c's ice temperature).
+#[must_use]
+pub(super) fn heat_flow(surface: &PassSurface<'_>) -> WattsPerSquareMetre {
+    match surface.climate {
+        PassClimate::Spun(spun) => spun.context.heat_flow(),
+        PassClimate::Given(_) => WattsPerSquareMetre::ZERO,
     }
 }
 
@@ -703,7 +713,8 @@ fn floored(albedo: f64, air: &Atmosphere, inputs: &AtmosphereInputs, shade: &Hos
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => true,
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => true,
     };
     if !surface || albedo.is_nan() || RayleighFloorRules::in_force() == RayleighFloorRules::Held {
         return albedo;

@@ -56,7 +56,8 @@ equator_pole_contrast_k: number,
 day_night_contrast_k: number, 
 /**
  * The mean surface pressure of the modelled air, the volatiles', Pa, not negative: zero for an
- * airless body, and for a surface holding melt whose volatiles are gone.
+ * airless body, and for a surface holding melt whose volatiles are gone; a `tenuous` body's
+ * own, under 100 Pa (P14.T53.c).
  *
  * It does not include the melt's own vapour ([`silicate_vapour`](Self::silicate_vapour)).
  */
@@ -64,7 +65,8 @@ surface_pressure_pa: number,
 /**
  * The gases at the surface by number, largest first with ties by registry order, their mole
  * fractions summing to 1 to 10⁻⁹; empty for an airless body, or for a surface holding melt
- * with no volatile air, which does not deny the melt's own vapour (`silicate_vapour`).
+ * with no volatile air, which does not deny the melt's own vapour (`silicate_vapour`), and
+ * listed for a `tenuous` one (P14.T53.c).
  */
 gases: Array<GasShareDto>, 
 /**
@@ -187,7 +189,8 @@ vertical_structure?: VerticalStructureDto | null,
  * inventory, never `null`, for a surface with no air (an airless body's, a melt's whose
  * volatiles are gone), and absent from a server whose generator does not model it, every one
  * before P14.T54.b's bump at generator version 24, and from a magma ocean that holds an air,
- * whose clouds the generator does not model.
+ * whose clouds the generator does not model. It is absent from a `tenuous` surface too, whose
+ * haze and dust the generator does not model at 24 (P14.T55.n).
  */
 aerosols?: AerosolInventoryDto | null, 
 /**
@@ -201,9 +204,10 @@ aerosols?: AerosolInventoryDto | null,
  * its list, in the entries' order, at its own area, divided by the list's total where that
  * total exceeds 1. At most one `H2O` item is appended to each without an entry: in
  * `surface_ices`, P14.T24.b's water ice where no `H2O` solid is listed (an ice-rich crust's
- * own ice or a `Snowball`'s cover, whose water the partition does not hold); in
- * `surface_liquids`, the ocean under a `Snowball`'s ice where no `H2O` liquid is listed, its
- * water inside the `H2O` solid. Nothing else; P14.T53.c ends both.
+ * own ice or a `Snowball`'s cover, whose water the partition does not hold); and below
+ * generator version 24, in `surface_liquids`, the ocean under a `Snowball`'s ice where no
+ * `H2O` liquid is listed, its water inside the `H2O` solid, which from 24 (P14.T53.c) is no
+ * surface liquid and is not listed. Nothing else.
  */
 condensates?: Array<SurfaceCondensateDto> | null, 
 /**

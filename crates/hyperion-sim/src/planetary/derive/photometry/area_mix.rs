@@ -1318,7 +1318,8 @@ impl Regolith {
                 stand_in: None,
             };
         }
-        let airless = state == SurfaceState::Airless;
+        // A tenuous air's bare surface is weathered as an airless one's (P14.T53.c).
+        let airless = matches!(state, SurfaceState::Airless | SurfaceState::Tenuous);
         match self.row {
             Some(row) if capped_lid(row, state) => Component {
                 bond: airless_silicate_stand_in(solid_bond(row, bands).bond),
@@ -1342,9 +1343,11 @@ impl Regolith {
 /// `Silicate` mechanics family (decision-p14-t54a-passes §3.4, the six points' item 4). Keyed on
 /// the lid's row, not the bulk's material, so that an airless water-ice lid on a rocky bulk
 /// (Europa's) keeps its frost, and a `phyllosilicate` lid on an icy bulk (Ceres's) takes the cap.
+/// A tenuous air's surface takes it too (P14.T53.c): its micrometeoroids still reach the ground
+/// (P14.T51.d's dust share, under 0.3 kg m⁻² of column), and the maturity saturates over the age.
 #[must_use]
 pub(crate) fn capped_lid(row: SubstanceId, state: SurfaceState) -> bool {
-    state == SurfaceState::Airless
+    matches!(state, SurfaceState::Airless | SurfaceState::Tenuous)
         && row
             .substance()
             .condensed()
@@ -1404,7 +1407,7 @@ pub(crate) fn cloud_share_of_state(state: SurfaceState) -> f64 {
         SurfaceState::Temperate | SurfaceState::Snowball => {
             SurfaceState::Temperate.cloud_fraction()
         }
-        SurfaceState::Airless | SurfaceState::MagmaOcean => 0.0,
+        SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::Tenuous => 0.0,
     }
 }
 
@@ -1500,7 +1503,7 @@ pub(crate) fn cloud_fraction(
         (SurfaceState::Temperate | SurfaceState::Snowball, _) => {
             cloud_share_of_state(state) * cloud_availability(partition, shade)
         }
-        (SurfaceState::Airless | SurfaceState::MagmaOcean, _) => 0.0,
+        (SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::Tenuous, _) => 0.0,
     }
 }
 
@@ -1517,7 +1520,13 @@ pub(crate) fn cloud_albedo((state, deck): (SurfaceState, RunawayDeck), shade: &H
             .value(),
         (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless)
         | (SurfaceState::Temperate | SurfaceState::Snowball, _) => shade.water_cloud,
-        (SurfaceState::GasEnvelope | SurfaceState::Airless | SurfaceState::MagmaOcean, _) => 0.0,
+        (
+            SurfaceState::GasEnvelope
+            | SurfaceState::Airless
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Tenuous,
+            _,
+        ) => 0.0,
     }
 }
 

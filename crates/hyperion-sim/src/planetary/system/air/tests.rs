@@ -661,7 +661,8 @@ fn batch_inventories() -> impl Iterator<
 /// structure, the figures' cloud fraction, liquids' cover and outgassing, and the photochemistry's
 /// star), for each body with an air, and the empty inventory for each without (the Moon among
 /// them); a magma ocean's is not modelled while it holds an air (R08's S5) and empty once its
-/// volatiles are gone; held, or with no structure, it is not modelled.
+/// volatiles are gone; a tenuous air's (P14.T53.c) is not modelled at 24 (P14.T55.n); held, or with
+/// no structure, it is not modelled.
 #[test]
 fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
     let (mut airs, mut airless) = (Vec::new(), Vec::new());
@@ -717,6 +718,16 @@ fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
         assert_eq!(
             record_aerosols(AirRules::Batch, &melt, &air.structure),
             melt_s,
+            "{name}"
+        );
+        // P14.T53.c's tenuous air: not modelled at 24, whatever its structure (P14.T55.n).
+        let tenuous = AirSurface {
+            state: SurfaceState::Tenuous,
+            ..surface
+        };
+        assert_eq!(
+            record_aerosols(AirRules::Batch, &tenuous, &air.structure),
+            Modelled::NotModelled,
             "{name}"
         );
         assert_eq!(

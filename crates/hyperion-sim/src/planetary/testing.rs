@@ -343,6 +343,9 @@ impl Error for SampleContextsError {
 ///   generated (its `RecordRules`): every planet's, member's and moon's taxonomic class, not
 ///   modelled where the record's modifiers are, which the air's sections' hold (`AirRules`, set
 ///   through `PlanetarySystem::with_record_rules` alone) keeps off the record.
+/// - the tenuous air's, `TENUOUS_VERSION` (P14.T53.c), at `TenuousRules::Tenuous` through
+///   `with_tenuous`: the ice-held nitrogen and argon at their ice's own temperature, the `Tenuous`
+///   state above its floor, and no ocean under a `Snowball`'s ice in its liquids.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
@@ -351,6 +354,7 @@ impl Error for SampleContextsError {
 #[cfg(test)]
 pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::chem::tenuous::{TenuousRules, with_tenuous};
     use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, with_cold_trap_rules};
     use crate::planetary::hooks::ocean::{OceanFloorRules, with_ocean_floor};
@@ -368,7 +372,9 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
                         with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
                             with_row_darkening(RowDarkeningRules::Darkened, || {
                                 with_ocean_floor(OceanFloorRules::Floored, || {
-                                    with_small_body_rules(SmallBodyRules::Batch, run)
+                                    with_small_body_rules(SmallBodyRules::Batch, || {
+                                        with_tenuous(TenuousRules::Tenuous, run)
+                                    })
                                 })
                             })
                         })
@@ -555,6 +561,7 @@ mod tests {
     #[test]
     fn every_24_hold_is_in_force_inside_the_helper() {
         use crate::planetary::chem::escape::EscapeRules;
+        use crate::planetary::chem::tenuous::TenuousRules;
         use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
         use crate::planetary::derive::photometry::area_mix::RayleighFloorRules;
         use crate::planetary::hooks::cold_traps::ColdTrapRules;
@@ -573,6 +580,7 @@ mod tests {
                 CompressedLiquidsRules::in_force(),
                 RowDarkeningRules::in_force(),
                 OceanFloorRules::in_force(),
+                TenuousRules::in_force(),
             )
         };
         let at_24 = (
@@ -585,6 +593,7 @@ mod tests {
             CompressedLiquidsRules::Compressed,
             RowDarkeningRules::Darkened,
             OceanFloorRules::Floored,
+            TenuousRules::Tenuous,
         );
         let at_23 = (
             EscapeRules::Held,
@@ -596,9 +605,18 @@ mod tests {
             CompressedLiquidsRules::Saturated,
             RowDarkeningRules::Held,
             OceanFloorRules::Held,
+            TenuousRules::Held,
         );
         assert_eq!(rules(), at_23, "the version's, outside the helper");
         assert_eq!(with_every_24_hold(rules), at_24);
+        assert_eq!(
+            with_every_24_hold(|| {
+                crate::planetary::chem::tenuous::with_tenuous(TenuousRules::Held, rules)
+            })
+            .9,
+            TenuousRules::Held,
+            "every 24 hold but the tenuous air's"
+        );
         assert_eq!(
             with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, rules)),
             (
@@ -611,6 +629,7 @@ mod tests {
                 CompressedLiquidsRules::Compressed,
                 RowDarkeningRules::Darkened,
                 OceanFloorRules::Floored,
+                TenuousRules::Tenuous,
             ),
             "every 24 hold but the unlit mean's"
         );
@@ -626,6 +645,7 @@ mod tests {
                 CompressedLiquidsRules::Compressed,
                 RowDarkeningRules::Darkened,
                 OceanFloorRules::Floored,
+                TenuousRules::Tenuous,
             ),
             "every 24 hold but the read densities'"
         );

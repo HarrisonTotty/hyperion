@@ -4486,6 +4486,121 @@ mod tests {
         );
     }
 
+    /// P14.T53.c's unchanged verdicts (decision-triton-and-e101 §1.8 items 1 and 4), every 24 hold
+    /// in force, at the rank that keeps each moon's radius: the table's Titan, Ganymede and
+    /// Callisto keep T13.b's verdicts on their N₂ (Jeans's test at the exobase, no ice holding it:
+    /// its saturation pressure at their ices' temperature exceeds their inventory's weight, an air,
+    /// not an ice, as the plan's 5 and 14 bar at Titan's 94 K and Ganymede's 110 K are),
+    /// Titan's kept as a `Snowball`'s bar and more, Ganymede's and Callisto's lost; Ganymede and
+    /// Callisto stay `Airless` with no gas listed, their radiogenic argon taken by P14.T53.a's
+    /// impact term (their real airs are exospheres, P14.T55.c's); and the table's Io, whose SO₂ air
+    /// is not among the air's gases, is `Airless` too.
+    #[test]
+    fn under_every_24_hold_titan_ganymede_and_callisto_keep_t13b_s_verdicts() {
+        use crate::planetary::derive::atmosphere::{Gas, Retention, SurfaceState};
+        use crate::units::Pascals;
+        crate::planetary::testing::with_every_24_hold(|| {
+            let jupiter = table_giant("Jupiter", 5, None);
+            let saturn = table_giant("Saturn", 6, None);
+            for (name, moon, giant) in [
+                ("Io", IO, &jupiter),
+                ("Ganymede", GANYMEDE, &jupiter),
+                ("Callisto", CALLISTO, &jupiter),
+                ("Titan", TITAN, &saturn),
+            ] {
+                let ((kg, keep), orbit) = table_moon(moon, giant);
+                let derived = own_moon(
+                    (kg, keep),
+                    &orbit,
+                    giant,
+                    &MoonVolatiles::SHARED,
+                    MoonBulk::Derived,
+                );
+                let air = derived.atmosphere();
+                let placed =
+                    Kilograms::from(EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG));
+                let jeans = Retention::of(placed, derived.radius(), air.exobase_temperature());
+                eprintln!(
+                    "{name}, every 24 hold: {:?} at {:.3} K, {:.4e} Pa, N2 {:.4e} Pa, Ar {:.4e} \
+                     Pa; N2 by Jeans {}, held {}",
+                    air.state(),
+                    air.surface_temperature().value(),
+                    air.surface_pressure().map_or(f64::NAN, Pascals::value),
+                    air.partial_pressures().of(Gas::Nitrogen).value(),
+                    air.partial_pressures().of(Gas::Argon).value(),
+                    jeans.retains(Gas::Nitrogen),
+                    air.ice_held().retains(Gas::Nitrogen),
+                );
+                assert!(!air.ice_held().retains(Gas::Nitrogen), "{name}: {air:?}");
+                assert_eq!(
+                    air.retention().retains(Gas::Nitrogen),
+                    jeans.retains(Gas::Nitrogen),
+                    "{name}: {air:?}"
+                );
+                if name == "Titan" {
+                    assert_eq!(air.state(), SurfaceState::Snowball, "{air:?}");
+                    assert!(air.retention().retains(Gas::Nitrogen), "{air:?}");
+                    assert!(air.partial_pressures().of(Gas::Nitrogen).value() >= 1e5);
+                } else {
+                    assert_eq!(air.state(), SurfaceState::Airless, "{name}: {air:?}");
+                    if name != "Io" {
+                        assert!(!air.retention().retains(Gas::Nitrogen), "{name}: {air:?}");
+                    }
+                }
+            }
+        });
+    }
+
+    /// P14.T53.c's Triton (moved from P14.T51.b; decision-triton-and-e101 §1.8 item 4): the table's
+    /// Triton at its distance and own bulk, every 24 hold in force, is `Tenuous`, its N₂ held by
+    /// its ice (λ ≈ 15.6 at the exobase fails T13.b's threshold) within a factor of 3 of 1.4 Pa
+    /// (Voyager 2's 14 ± 2 µbar, Gurrola 1995, as Marques Oliveira et al. 2022, A&A 659, A136,
+    /// quote it; 14.1 ± 0.4 µbar in 2017, Marques Oliveira et al.; 14.5 ± 0.5 µbar in 2022, Sicardy
+    /// et al. 2024, arXiv:2402.02476) and its ice within 2 K of Tryka et al.'s 38 ± 1 K (1994,
+    /// Icarus 112, 513), the methane beside its nitrogen listed among its gases.
+    #[test]
+    fn under_every_24_hold_the_table_s_triton_is_tenuous_at_its_ice_s_temperature() {
+        use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
+        use crate::units::Pascals;
+        crate::planetary::testing::with_every_24_hold(|| {
+            let volatiles = MoonVolatiles {
+                draws: VolatileDraws::MEDIAN,
+                site: VolatileSite::ParentZone,
+            };
+            let neptune = table_giant("Neptune", 8, None);
+            let ((kg, rank), orbit) = table_moon(TRITON, &neptune);
+            let (own, _) = captured_bulk(kg, TRITON.1);
+            let triton = own_moon((kg, rank), &orbit, &neptune, &volatiles, own);
+            let air = triton.atmosphere();
+            let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
+            let methane = air.partial_pressures().of(Gas::Methane).value();
+            let ice = air
+                .held_ice_temperature(Gas::Nitrogen)
+                .expect("Triton's ice holds its nitrogen");
+            eprintln!(
+                "the table's Triton, every 24 hold: {:?} at {:.3} K, {:.4} Pa (N2 {nitrogen:.4} \
+                 Pa, CH4 {methane:.3e} Pa), its N2 ice at {:.3} K, Bond albedo {:.5}, T_eq {:.3} \
+                 K, {} passes, {:?}",
+                air.state(),
+                air.surface_temperature().value(),
+                air.surface_pressure().map_or(f64::NAN, Pascals::value),
+                ice.value(),
+                triton.albedo().value(),
+                triton.equilibrium_temperature().value(),
+                triton.atmosphere_passes(),
+                triton.convergence(),
+            );
+            assert_eq!(air.state(), SurfaceState::Tenuous);
+            assert!(air.ice_held().retains(Gas::Nitrogen), "{air:?}");
+            assert!(
+                (1.4 / 3.0..=1.4 * 3.0).contains(&nitrogen),
+                "Triton's N2 at {nitrogen} Pa"
+            );
+            assert!((ice.value() - 38.0).abs() < 2.0, "Triton's ice at {ice:?}");
+            assert!(methane > 0.0, "{air:?}");
+        });
+    }
+
     fn parts(p: &MoonParent) -> MoonParentParts {
         MoonParentParts {
             id: p.id(),

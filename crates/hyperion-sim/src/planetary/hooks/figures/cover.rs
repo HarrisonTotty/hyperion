@@ -253,7 +253,8 @@ pub(crate) fn surface_water_of(inputs: &SurfaceWaterInputs) -> KilogramsPerSquar
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
-        | SurfaceState::RunawayGreenhouse => false,
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Tenuous => false,
     };
     let (kg, r, g) = (
         inputs.water.value(),
@@ -534,7 +535,8 @@ pub fn under_ice_ocean(
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Temperate => return false,
+        | SurfaceState::Temperate
+        | SurfaceState::Tenuous => return false,
     }
     let (f, t_s) = (heat_flow.value(), surface_temperature.value());
     if !(f > 0.0 && t_s > 0.0 && t_s < UNDER_ICE_MELTING_POINT.value()) {
@@ -546,11 +548,12 @@ pub fn under_ice_ocean(
 }
 
 /// The temperature below which water ice lasts at the surface of a body in the state `state`:
-/// [`AIRLESS_ICE_TEMPERATURE`] for an airless one, and [`PERENNIAL_ICE_TEMPERATURE`] under air.
+/// [`AIRLESS_ICE_TEMPERATURE`] for an airless one and one under a tenuous air (P14.T53.c), whose
+/// ice sublimes as an airless body's does, and [`PERENNIAL_ICE_TEMPERATURE`] under air.
 #[must_use]
 pub const fn ice_temperature(state: SurfaceState) -> Kelvin {
     match state {
-        SurfaceState::Airless => AIRLESS_ICE_TEMPERATURE,
+        SurfaceState::Airless | SurfaceState::Tenuous => AIRLESS_ICE_TEMPERATURE,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
@@ -572,7 +575,8 @@ pub fn ice_threshold(state: SurfaceState) -> Kelvin {
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Temperate => ice_temperature(state),
+        | SurfaceState::Temperate
+        | SurfaceState::Tenuous => ice_temperature(state),
     }
 }
 
@@ -645,7 +649,8 @@ pub(crate) fn ice_fraction_over(inputs: &IceInputs<'_>, cold: f64) -> f64 {
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Temperate => {}
+        | SurfaceState::Temperate
+        | SurfaceState::Tenuous => {}
     }
     match inputs.crust {
         Crust::IceRich => cold,

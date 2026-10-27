@@ -1113,6 +1113,7 @@ impl SurfaceConditions {
     pub fn derive(inputs: &SurfaceInputs<'_>) -> Option<Self> {
         let Surface {
             column,
+            pressure: surface_pressure,
             gases,
             mean_molar_mass_g_per_mol,
             heat_capacity_over_r,
@@ -1151,13 +1152,13 @@ impl SurfaceConditions {
             equator_pole_contrast_k: equator_pole,
             day_night_contrast_k: day.value() - night.value(),
             climate_range: range,
-            surface_pressure: column.surface_pressure,
+            surface_pressure,
             gases,
             mean_molar_mass_g_per_mol,
             heat_capacity_over_r,
             stellar_flux: inputs.stellar_flux,
             radiation: RadiationClass::of(inputs.xuv_flux),
-            liquid_water: liquid_water(range, column.surface_pressure),
+            liquid_water: liquid_water(range, surface_pressure),
             ground,
         })
     }
@@ -1224,7 +1225,8 @@ impl SurfaceConditions {
     }
 
     /// The surface pressure of the modelled air, the volatiles': the sum of the gases' weights,
-    /// zero for an airless body and for a surface holding melt whose volatiles are gone.
+    /// zero for an airless body and for a surface holding melt whose volatiles are gone, and a
+    /// tenuous air's own below 100 Pa (P14.T53.c).
     ///
     /// It does not include the melt's own vapour, which no rule computes until P14.T55.b.
     #[must_use]
@@ -1235,7 +1237,8 @@ impl SurfaceConditions {
     /// The gases at the surface as `(SubstanceId, x)` mole fractions, largest first with ties by
     /// `SubstanceId`, summing to 1 ([`mole_fractions`]); empty for an airless body, or for a
     /// surface holding melt with no volatile air, which does not deny the melt's own vapour
-    /// (P14.T55.b). Every gas the atmosphere holds is listed, whatever its share.
+    /// (P14.T55.b), and listed for a tenuous one (P14.T53.c). Every gas the atmosphere holds is
+    /// listed, whatever its share.
     #[must_use]
     pub fn gases(&self) -> &[(SubstanceId, f64)] {
         &self.gases
@@ -1746,6 +1749,9 @@ pub(crate) struct AirTransport {
 #[derive(Debug, Clone, PartialEq)]
 struct Surface {
     column: Column,
+    /// The air's surface pressure as published: the column's, and a tenuous air's own over a
+    /// column that holds none (P14.T53.c).
+    pressure: Pascals,
     gases: Vec<(SubstanceId, f64)>,
     mean_molar_mass_g_per_mol: Option<f64>,
     heat_capacity_over_r: Option<f64>,
@@ -1753,20 +1759,24 @@ struct Surface {
 
 impl Surface {
     /// The surface of the body `inputs` describe; `None` in the gas-envelope state. An airless
-    /// body's column holds no air, whatever residue its partial pressures hold.
+    /// body's column holds no air, whatever residue its partial pressures hold, and lists no gas.
+    /// A tenuous one's column holds none either, as the greenhouse's steps read an air under
+    /// [`AIRLESS_PRESSURE`] ([`step_climate`]), so that its climate is theirs to the bit, while its
+    /// gases, their pressure, mean molar mass and heat capacity are its air's own (P14.T53.c).
     ///
     /// Its column is [`StepColumn::column`]'s, the one computation T13.c's passes read too
     /// ([`step_climate`]).
     #[must_use]
     fn of(inputs: &SurfaceInputs<'_>) -> Option<Self> {
         let air = inputs.atmosphere;
-        let airless = match air.state() {
+        let (airless, tenuous) = match air.state() {
             SurfaceState::GasEnvelope => return None,
-            SurfaceState::Airless => true,
+            SurfaceState::Airless => (true, false),
+            SurfaceState::Tenuous => (true, true),
             SurfaceState::MagmaOcean
             | SurfaceState::RunawayGreenhouse
             | SurfaceState::Temperate
-            | SurfaceState::Snowball => false,
+            | SurfaceState::Snowball => (false, false),
         };
         let (column, fractions) = StepColumn {
             surface_temperature: air.surface_temperature(),
@@ -1782,8 +1792,20 @@ impl Surface {
         }
         .column()
         .expect("every `Gas` row of the registry has a molar mass");
+        let (pressure, fractions) = if tenuous {
+            (
+                air.surface_pressure().unwrap_or(Pascals::ZERO),
+                GasFractions::of(air.partial_pressures(), false).expect(
+                    "every `Gas` row of the registry has a molar mass, and a tenuous air's partial \
+                     pressures are finite (their total passed `holds_tenuous_air`)",
+                ),
+            )
+        } else {
+            (column.surface_pressure, fractions)
+        };
         Some(Self {
             column,
+            pressure,
             gases: fractions.as_slice().to_vec(),
             mean_molar_mass_g_per_mol: fractions.mean_molar_mass_g_per_mol,
             heat_capacity_over_r: fractions.heat_capacity_over_r_at(column.surface_temperature),

@@ -187,8 +187,9 @@ pub const WIND_SPEED: MetresPerSecond = MetresPerSecond::new(4.0e5);
 
 /// The column of air, Σ = p ÷ g, above which the wind's ions and the host's X-ray and extreme
 /// ultraviolet light do not reach the ground: 10⁻⁴ kg m⁻², a 1 keV proton's range in air (NIST
-/// PSTAR, read: dry air at 1 keV, a CSDA range of 9.857 × 10⁻⁶ g cm⁻²). A stand-in for P14.T53.c's
-/// tenuous floor, which is not built, labelled. The airs' columns, derived here as p ÷ g: Pluto's
+/// PSTAR, read: dry air at 1 keV, a CSDA range of 9.857 × 10⁻⁶ g cm⁻²). P14.T53.c's tenuous floor
+/// (`chem::tenuous`'s `TENUOUS_FLOOR_COLUMN`) is the same figure, held to its bits by this
+/// module's tests. The airs' columns, derived here as p ÷ g: Pluto's
 /// 11.5 µbar over 0.62 m s⁻² is about 1.9 kg m⁻² and Triton's 14 µbar over 0.779 m s⁻² about 1.8,
 /// far above it, and Io's 1 nbar ([`IO_SO2_PRESSURE`]) over 1.80 m s⁻² about 6 × 10⁻⁵, just below
 /// (the pressures and gravities *from memory*).

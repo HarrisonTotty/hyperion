@@ -302,6 +302,66 @@ fn an_unsaturated_or_airless_body_holds_no_aerosols() {
     );
 }
 
+/// P14.T53.c (decision-p14-t53c-tenuous-aerosols §3): the inventory's rules are not applied to a
+/// `Tenuous` air, which the record sends not modelled until P14.T55.n. A Triton-like 1.4 Pa of N₂
+/// over 0.78 m s⁻² with x(CH₄) 10⁻³ about a G star takes the empty inventory, where the methane
+/// rule would give it τ(550) 4.3 by its index alone (Pluto's measured haze is about 0.013 at 607.6
+/// nm, Gladstone et al. 2016), as the same air under a bulk air's state shows.
+#[test]
+fn a_tenuous_air_takes_no_rule_of_the_inventory() {
+    let mut triton = HandAir::new(&[("N2", 1.0 - 1e-3), ("CH4", 1e-3)], None, 38.0, 1.4, 38.0);
+    triton.g = 0.78;
+    let tau = haze_optical_depth(haze_index(1e-3, 0.0));
+    let bulk = triton.inventory(SurfaceState::Snowball);
+    eprintln!(
+        "a Triton-like 1.4 Pa N2 air at x(CH4) 1e-3: the rule's τ {tau:.4}; under a bulk air's \
+         state {} modes",
+        bulk.modes().len()
+    );
+    assert!((tau - 4.3).abs() < 0.05, "{tau}");
+    assert!(!bulk.modes().is_empty(), "{bulk:?}");
+    assert_eq!(
+        triton.inventory(SurfaceState::Tenuous),
+        AerosolInventory::empty()
+    );
+}
+
+/// P14.T53.c's Pluto (decision-p14-t53c-tenuous-aerosols §3), every 24 hold in force: `Tenuous`
+/// through its passes and at its measured 0.72 Bond albedo by hand, its haze not modelled at 24
+/// (P14.T55.n). Stated, not asserted: its x(CH₄), T24.c's haze index and the τ(550) that rule would
+/// give it. Its CH₄, on the minor branch at its mean, some 3 × 10⁻⁷ Pa against a measured x of
+/// 0.006–0.0084 (Gladstone et al. 2016), is P14.T55.e's figure.
+#[test]
+fn under_every_24_hold_pluto_s_haze_is_not_modelled_at_24() {
+    use crate::planetary::derive::atmosphere::tests::{on_pluto_s_orbit, on_pluto_s_orbit_at};
+    use crate::planetary::derive::atmosphere::{Gas, atmosphere};
+    crate::planetary::testing::with_every_24_hold(|| {
+        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+        for (label, air) in [
+            ("through its passes", *pluto.atmosphere()),
+            (
+                "at its measured 0.72",
+                atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72)),
+            ),
+        ] {
+            let partials = air.partial_pressures();
+            let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
+            let all = Gas::ALL.iter().fold(0.0, |sum, &gas| sum + moles(gas));
+            let (methane, carbon_dioxide) =
+                (moles(Gas::Methane) / all, moles(Gas::CarbonDioxide) / all);
+            let index = haze_index(methane, carbon_dioxide);
+            eprintln!(
+                "Pluto {label}: {:?} at {:.4e} Pa, x(CH4) {methane:.4e}, T24.c's haze index \
+                 {index:.4e}, its rule's τ(550) {:.4}; its haze not modelled at 24 (P14.T55.n)",
+                air.state(),
+                air.surface_pressure().map_or(f64::NAN, Pascals::value),
+                haze_optical_depth(index),
+            );
+            assert_eq!(air.state(), SurfaceState::Tenuous, "{label}: {air:?}");
+        }
+    });
+}
+
 /// The inventory refuses bad inputs by their variants: its cloud fraction, gravity and molar mass.
 #[test]
 fn bad_inputs_are_refused_by_their_variants() {
@@ -1571,4 +1631,220 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
         previous = tau;
     }
     assert!(at(10.0) < at(300.0), "thinner air lifts less");
+}
+
+/// P14.T53.c's census over the 400 whole systems, the golden systems and LOOK72's triaged systems
+/// (a measurement, run by name), every 24 hold in force, against T53.c's own hold held:
+///
+/// - every `Tenuous` record, with count (xiv)'s figures (decision-p14-t53c-tenuous-aerosols §5):
+///   its `p_s`, p ÷ g, x(CH₄), T24.c's haze index and the τ(550) its rule would give, and the dust's
+///   τ by rule, the largest stated for P14.T55.n; asserted, under the record's air batch
+///   (P14.T54.b), every `Tenuous` record's aerosols not modelled, never the empty inventory, and
+///   its structure never computed as no air (decision-p14-t53c-tenuous-aerosols §2: its gases
+///   are listed and its structure published);
+/// - the moved states and pressures;
+/// - asserted, the record says `Tenuous`, not `Airless`, where a gas is held above the floor, and
+///   every `Airless` record lists no gas;
+/// - asserted (decision-p14-t53c-collapse §5): with no collapse-first start, the bodies the start
+///   as built moved keep their whole-column solve, as with T53.c held, to the bit
+///   (02000b2cdfff0000.0200, 21fff6587ff80000.0100, 02000b2ca0000001.1000 named);
+/// - asserted, the airs whose dominant condensable lies at or above 10 times its saturation
+///   pressure over its ice (decision-t24i-airless-state D4) are [`ITEM_33_WORLD`], main's 24 gate
+///   item (§2.1: a wrong state at 24, a `Snowball` at 100.03 Pa, N₂ ×559 over its 33.57 K ice,
+///   whose steady state is `Tenuous` at 0.034 Pa), and count (vii)'s two, 01ffeb2d20000000.e101
+///   and 02002b2d1ffe0000.e103, by name;
+/// - asserted, no ice-held gas saturates at or above 100 Pa at its ice, and 01ffeb2c20010000.0200,
+///   which the line keeps from a 0.8 bar N₂ air, keeps T13.b's verdict;
+/// - asserted, no record's liquids list an ocean under its ice (count (i)), and every liquid entry
+///   is listed at its own extent where the entries' total is at most 1 (decision-absurd-states-24
+///   R1; W2).
+#[test]
+#[ignore = "a measurement for P14.T53.c's record, run by name"]
+#[expect(clippy::too_many_lines, reason = "one census's lists, each stated")]
+fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::chem::tenuous::{TenuousRules, holds_tenuous_air, with_tenuous};
+    use crate::planetary::derive::atmosphere::{AIRLESS_PRESSURE, Gas};
+    use crate::planetary::system::tests::{
+        ITEM_33_WORLD, ThinAirBody, thin_air_census, thin_air_sets,
+    };
+    /// Count (vii)'s two members (decision-p14-t53c-collapse §2.2).
+    const COUNT_VII: [&str; 2] = ["01ffeb2d20000000.e101", "02002b2d1ffe0000.e103"];
+    /// The bodies the collapse-first start as built moved that the ruling names.
+    const RESTORED: [&str; 3] = [
+        "02000b2cdfff0000.0200",
+        "21fff6587ff80000.0100",
+        "02000b2ca0000001.1000",
+    ];
+    /// The record the ice-held line keeps T13.b's verdict on.
+    const KEPT_AIRLESS: &str = "01ffeb2c20010000.0200";
+    let sets = thin_air_sets();
+    let (held, tenuous) = crate::planetary::testing::with_every_24_hold(|| {
+        (
+            with_tenuous(TenuousRules::Held, || thin_air_census(&sets)),
+            thin_air_census(&sets),
+        )
+    });
+    let id_of = |b: &ThinAirBody| b.label.rsplit(' ').next().unwrap_or_default().to_owned();
+    let before: BTreeMap<&str, &ThinAirBody> = held.iter().map(|b| (b.label.as_str(), b)).collect();
+    let mut states: BTreeMap<String, u32> = BTreeMap::new();
+    for body in &tenuous {
+        *states.entry(format!("{:?}", body.state)).or_default() += 1;
+    }
+    eprintln!(
+        "{} bodies with a surface; by state {states:?}",
+        tenuous.len()
+    );
+    eprintln!("TENUOUS, with count (xiv)'s figures:");
+    let (mut largest_haze, mut largest_dust) = (0.0_f64, 0.0_f64);
+    for body in tenuous.iter().filter(|b| b.state == SurfaceState::Tenuous) {
+        let (methane, carbon_dioxide) = (body.share(Gas::Methane), body.share(Gas::CarbonDioxide));
+        let index = haze_index(methane, carbon_dioxide);
+        let haze = haze_optical_depth(index);
+        let dust = dust_optical_depth(
+            Pascals::new(body.p),
+            Kelvin::new(body.t_s),
+            body.mu.unwrap_or(f64::NAN),
+            MetresPerSecondSquared::new(body.g),
+            body.liquid_cover,
+        );
+        largest_haze = largest_haze.max(haze);
+        largest_dust = largest_dust.max(dust);
+        eprintln!(
+            "  {}: {}; x(CH4) {methane:.4e}, haze index {index:.4e}, haze τ by rule {haze:.4}, \
+             dust τ by rule {dust:.4}; aerosols modelled {}; structure {:?}; R09 {:?}",
+            body.label,
+            body.line(),
+            body.aerosols_modelled,
+            body.structure,
+            body.r09
+        );
+    }
+    eprintln!("the largest haze τ by rule {largest_haze:.4}, dust τ {largest_dust:.4}");
+    let mut structures: BTreeMap<String, u32> = BTreeMap::new();
+    for body in tenuous.iter().filter(|b| b.state == SurfaceState::Tenuous) {
+        *structures
+            .entry(format!("{:?}", body.structure))
+            .or_default() += 1;
+    }
+    eprintln!(
+        "the tenuous records' structures (None not modelled, Some(true) a profile): {structures:?}"
+    );
+    eprintln!("MOVED from T53.c held (state, or p_s by more than 10⁻⁶):");
+    for body in &tenuous {
+        let Some(was) = before.get(body.label.as_str()) else {
+            eprintln!("  {} new: {}", body.label, body.line());
+            continue;
+        };
+        if was.state != body.state || ((body.p - was.p) / was.p.max(1e-30)).abs() > 1e-6 {
+            eprintln!(
+                "  {}\n    held: {}\n    now:  {}",
+                body.label,
+                was.line(),
+                body.line()
+            );
+        }
+    }
+    let supersaturated: Vec<&ThinAirBody> = tenuous
+        .iter()
+        .filter(|b| b.factor().is_some_and(|f| f >= 10.0))
+        .collect();
+    eprintln!("SUPERSATURATED OVER THEIR ICE (×10 and more): main's gate item and count (vii):");
+    for body in &supersaturated {
+        eprintln!("  {}: {}", body.label, body.line());
+    }
+    let under_ice_held = held.iter().filter(|b| b.under_ice_item).count();
+    let misread_held = held.iter().filter(|b| !b.misread.is_empty()).count();
+    eprintln!(
+        "OCEANS UNDER ICE LISTED: {} (T53.c held: {under_ice_held}); LIQUIDS AT OTHER THAN \
+         THEIR OWN EXTENT: {} (T53.c held: {misread_held})",
+        tenuous.iter().filter(|b| b.under_ice_item).count(),
+        tenuous.iter().filter(|b| !b.misread.is_empty()).count(),
+    );
+    for id in RESTORED {
+        let body = tenuous
+            .iter()
+            .find(|b| b.label.ends_with(id))
+            .unwrap_or_else(|| panic!("{id} is in the census"));
+        assert_eq!(
+            body.bits,
+            before[body.label.as_str()].bits,
+            "{id}: {}",
+            body.line()
+        );
+    }
+    // Main's 24 gate item (decision-p14-t53c-collapse §2.1), as built: a wrong state at 24.
+    let item_33 = tenuous
+        .iter()
+        .find(|b| b.label.ends_with(ITEM_33_WORLD))
+        .expect("item 33's world is in the census");
+    assert_eq!(item_33.state, SurfaceState::Snowball, "{}", item_33.line());
+    assert!((100.0..100.1).contains(&item_33.p), "{}", item_33.line());
+    let supersaturated: Vec<String> = supersaturated.iter().map(|b| id_of(b)).collect();
+    let mut expected = vec![ITEM_33_WORLD];
+    expected.extend(COUNT_VII);
+    assert_eq!(supersaturated, expected, "the gate item and count (vii)");
+    let kept = tenuous
+        .iter()
+        .find(|b| b.label.ends_with(KEPT_AIRLESS))
+        .unwrap_or_else(|| panic!("{KEPT_AIRLESS} is in the census"));
+    let was = before[kept.label.as_str()];
+    assert!(kept.held_ice.is_empty(), "{}", kept.line());
+    assert_eq!(kept.state, was.state, "{}", kept.line());
+    for body in &tenuous {
+        let at = || format!("{}: {}", body.label, body.line());
+        for &(gas, p_sat) in &body.held_ice {
+            assert!(
+                p_sat < AIRLESS_PRESSURE.value(),
+                "{gas:?} held at {p_sat} Pa: {}",
+                at()
+            );
+        }
+        match body.state {
+            SurfaceState::Airless => {
+                assert!(
+                    body.gases.is_empty(),
+                    "an airless record lists a gas: {}",
+                    at()
+                );
+                assert!(
+                    !holds_tenuous_air(
+                        Pascals::new(body.air_p),
+                        MetresPerSecondSquared::new(body.g)
+                    ),
+                    "an airless record's air reaches the floor ({:.4e} Pa): {}",
+                    body.air_p,
+                    at()
+                );
+            }
+            SurfaceState::Tenuous => {
+                assert!(!body.gases.is_empty(), "{}", at());
+                assert!(body.p < AIRLESS_PRESSURE.value(), "{}", at());
+                assert!(
+                    holds_tenuous_air(Pascals::new(body.p), MetresPerSecondSquared::new(body.g)),
+                    "{}",
+                    at()
+                );
+                assert!(
+                    !body.aerosols_modelled,
+                    "a tenuous record's aerosols: {}",
+                    at()
+                );
+                assert_ne!(
+                    body.structure,
+                    Some(false),
+                    "a tenuous record's structure computed as no air: {}",
+                    at()
+                );
+            }
+            SurfaceState::GasEnvelope
+            | SurfaceState::MagmaOcean
+            | SurfaceState::RunawayGreenhouse
+            | SurfaceState::Temperate
+            | SurfaceState::Snowball => {}
+        }
+        assert!(!body.under_ice_item, "an ocean under ice listed: {}", at());
+        assert!(body.misread.is_empty(), "{}: {:?}", at(), body.misread);
+    }
 }

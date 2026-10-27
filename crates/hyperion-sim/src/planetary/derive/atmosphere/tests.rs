@@ -2100,7 +2100,12 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
     // The stand-in's base is the larger of `T_eq` and the background, `T_eq` for every body here.
-    let (retention, held) = retained(inputs, exobase, inputs.equilibrium);
+    let (retention, held) = retained(
+        inputs,
+        exobase,
+        inputs.equilibrium,
+        WattsPerSquareMetre::ZERO,
+    );
     let mut airborne = Airborne::kept(inputs, retention, held);
     airborne.divide(inputs, retention, held);
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
@@ -2230,7 +2235,12 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
     // No state below freezing holds itself: at each, with its column held by the partition over
     // its own climate, the greenhouse warms the surface above it.
     let retention = air.retention();
-    let held = IceHeld::of(&earth, retention, earth.equilibrium);
+    let held = IceHeld::of(
+        &earth,
+        retention,
+        earth.equilibrium,
+        WattsPerSquareMetre::ZERO,
+    );
     let mut airborne = Airborne::kept(&earth, retention, held);
     assert_eq!(
         airborne.divide(&earth, retention, held),
@@ -3631,12 +3641,15 @@ fn under_the_escape_batch_the_dry_earth_beyond_the_maximum_greenhouse_is_stated(
             air.optical_depth(),
         );
         let retention = air.retention();
-        let held = IceHeld::of(&earth, retention, earth.equilibrium);
-        let mut airborne = Airborne::kept(&earth, retention, held);
-        assert_eq!(
-            airborne.divide(&earth, retention, held),
-            SurfaceState::Snowball
+        let held = IceHeld::of(
+            &earth,
+            retention,
+            earth.equilibrium,
+            WattsPerSquareMetre::ZERO,
         );
+        let mut airborne = Airborne::kept(&earth, retention, held);
+        let divided = airborne.divide(&earth, retention, held);
+        assert_eq!(divided, SurfaceState::Snowball);
         let (m, r) = (earth.mass.value(), earth.radius.value());
         let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
         // The ceiling: max(273.15 K, T_rest), T_rest the grey surface of nitrogen's and hydrogen's
@@ -4540,28 +4553,40 @@ fn under_the_escape_batch_the_table_s_mars_loses_its_nitrogen() {
     });
 }
 
-/// P14.T53.a's Mars test as plan 14 states it: under the batch the table's Mars at its own spin
-/// ([`table_mars_at_its_spin`]) keeps 3–10 mbar of carbon dioxide by weight, lies within T13.c's
-/// 8% of 214 K, and holds the rest of its carbon as CO₂ ice. It does not hold as built (the finding
+/// P14.T53.a's Mars test as plan 14 states it, moved to P14.T53.c (main's ruling, 2026-10-22):
+/// every 24 hold in force the table's Mars at its own spin ([`table_mars_at_its_spin`]) keeps 3–10
+/// mbar of carbon dioxide by weight, lies within T13.c's 8% of 214 K, and holds the rest of its
+/// carbon as CO₂ ice. It does not hold as built (the finding
 /// [`under_the_escape_batch_the_table_s_mars_loses_its_nitrogen`] states): 0.22 bar at 243.9 K,
 /// with no ice, against 3–10 mbar at about 214 K. The cause chain: the shoreline keeps 2.18% of the
 /// air at an impact ratio of 4.90, inside Zahnle and Catling's 4–5; the weathering thermostat
 /// leaves all the carbon airborne, a frozen surface weathering none; and 2.18% of the median 10
 /// bar is 0.22 bar, over which T24.a's climate spans 230–251 K against carbon dioxide's 177.6 K
 /// frost point, so no cold trap forms and the greenhouse, starting from the whole column, takes the
-/// warm branch. The collapsed branch, about 6 mbar over a pole near 150 K, is Wordsworth 2015's
-/// bistable other (atmospheric collapse below about 1 bar, Soto et al. 2015, Icarus 250, 553, from
-/// memory). Main's ruling (2026-10-22): recorded, and owned by P14.T53.c, a collapse-first start
-/// where the dominant condensable can cold-trap; a recalibration of the impact band to Mars's
-/// 6 × 10⁻⁴ was refused as a knife edge. Run by name once T53.c lands.
+/// warm branch.
+///
+/// No collapse-first start cures it (P14.T53.c's deferred findings): the model's climate holds no
+/// collapsed branch at Mars's inventory. At 2, 6 and 10 mbar of CO₂ its coldest zone lies at
+/// 136–139, 164 and 174 K, against CO₂'s frost points of 140, 148 and 151 K there, and the
+/// shoreline's 234 Pa of N₂ alone holds a start from an empty column above the 100 Pa line, where
+/// the steps' climate stops being an airless one's, so the start climbs back to the warm branch;
+/// with no N₂, or Mars's real 16 Pa, it lands at 0.18–0.30 Pa, at the airless climate's 107.5 K
+/// coldest zone, the ~2 mbar a marginal fixed point of the contrasts that the empty start never
+/// reaches. The cure is the CO₂ cap's own energy balance, its polar insolation at a stated cap
+/// albedo and emissivity, which moves every Mars-like body (main, 2026-10-26: after 24, P14.T55.e
+/// or a new rider on 25's train). Run by name once that lands.
 #[test]
-#[ignore = "P14.T53.a's recorded miss, P14.T53.c's to cure: the table's Mars keeps 0.22 bar of CO2 at 244 K under the batch"]
+#[ignore = "P14.T53.c's recorded miss: the model's climate holds no collapsed branch at the table's Mars's 0.22 bar (its CO2 cap's own energy balance, after 24)"]
 fn under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide() {
-    with_rules(EscapeRules::Batch, || {
+    crate::planetary::testing::with_every_24_hold(|| {
         let (_, _, air, _) = table_mars_at_its_spin();
         let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
         let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
         let t = air.surface_temperature().value();
+        eprintln!(
+            "the table's Mars, every 24 hold: {}; CO2 {co2:.4} Pa of its column's {column:.4}",
+            air_line("", &air)
+        );
         assert!((300.0..=1_000.0).contains(&co2), "Mars's CO2 at {co2} Pa");
         assert!(
             ((t - MARS_SURFACE_TEMPERATURE) / MARS_SURFACE_TEMPERATURE).abs() < 0.08,
@@ -6211,6 +6236,212 @@ fn under_every_24_hold_venus_titan_and_the_table_keep_their_surfaces() {
         assert!(
             nitrogen.is_none(),
             "Titan's nitrogen lies below its critical temperature: {nitrogen:?}"
+        );
+    });
+}
+
+/// Pluto's semi-major axis, au, and eccentricity (NASA's Pluto fact sheet), at which the Kuiper
+/// belt's bodies of P14.T53.c's tests orbit the Sun.
+const PLUTO_ORBIT: (f64, f64) = (39.48, 0.248_8);
+
+/// A body of `kg` and mean radius `km` on Pluto's orbit ([`PLUTO_ORBIT`]), formed there, at the
+/// rank that keeps its radius (held inside the window), derived about the present Sun with its
+/// history at the Solar System's age under the rules in force.
+pub(crate) fn on_pluto_s_orbit(kg: f64, km: f64) -> DerivedBody {
+    let disc = solar_disc();
+    let (a, e) = PLUTO_ORBIT;
+    let rank = crate::planetary::derive::solar::rank_for(&disc, kg, km, a, e).clamp(0.001, 0.999);
+    let placed = crate::planetary::derive::solar::placed(kg, a, e, rank);
+    crate::planetary::derive::solar::derive_historic(&placed, &disc, SOLAR_AGE)
+}
+
+/// The inputs of `body` on Pluto's orbit ([`PLUTO_ORBIT`]) at its derivation's bulk, inventory and
+/// fluence, at the irradiation for the Bond albedo `albedo` given by hand: beyond the
+/// maximum-greenhouse limit, formed there, with no heat flow (the passes' stand-in).
+pub(crate) fn on_pluto_s_orbit_at(body: &DerivedBody, albedo: f64) -> AtmosphereInputs {
+    let (kg, radius) = (Kilograms::from(body.mass()), Metres::from(body.radius()));
+    let (a, e) = PLUTO_ORBIT;
+    let a = Metres::new(a * METRES_PER_AU);
+    let sun = historic_sun();
+    let orbital = (GRAVITATIONAL_CONSTANT * SOLAR_MASS_KG / a.value()).sqrt();
+    let escape = (2.0 * GRAVITATIONAL_CONSTANT * kg.value() / radius.value()).sqrt();
+    let equilibrium = equilibrium_temperature(body.flux(), BondAlbedo::from_fraction(albedo));
+    AtmosphereInputs {
+        mass: kg,
+        radius,
+        material: SurfaceMaterial::of(&body.fractions()),
+        envelope_fraction: body.fractions().envelope(),
+        class: body.class(),
+        inventory: *body.inventory(),
+        formed: body.formed(),
+        equilibrium,
+        irradiation_temperature: equilibrium_temperature(
+            body.flux(),
+            BondAlbedo::from_fraction(0.0),
+        ),
+        heated: equilibrium,
+        xuv_fluence: body.xuv_fluence(),
+        saturated_xuv_flux: sun.xuv().saturated_flux(a, e),
+        insolation: Insolation::BeyondMaximumGreenhouse,
+        present_insolation: Insolation::BeyondMaximumGreenhouse,
+        crust: Crust::Solid,
+        molten_for: Years::ZERO,
+        age: SOLAR_AGE,
+        hottest_host: Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K),
+        impact_speed: planet_impact_speed(
+            MetresPerSecond::new(orbital),
+            MetresPerSecond::new(escape),
+        ),
+        xuv_saturation_time: sun.xuv().saturation_time(),
+        envelope_history: EnvelopeHistory::NONE,
+        envelope_helium: None,
+        flux: body.flux(),
+        maximum_greenhouse_flux_ratio: sun_maximum_ratio(body.flux()),
+    }
+}
+
+/// P14.T53.c's Pluto and Charon (decision-triton-and-e101 §1.8 item 4; Johnson et al. 2015, ApJ
+/// 809, 43, as Young, Braga-Ribas and Johnson 2020 report: Pluto keeps its nitrogen and Charon has
+/// lost its), every 24 hold in force:
+///
+/// - **a Pluto at its inventory** (1.303 × 10²² kg, 1,188.3 km, on its orbit), its N₂ held by its
+///   ice, is `Tenuous` with N₂ and the CH₄ beside it (Gladstone et al. 2016, Science 351,
+///   aad8866). Its N₂ lies within a factor of 10 of 1.1 Pa (11 ± 1 and 10 ± 1 µbar in 2015,
+///   Gladstone et al.; 12.2 µbar in 2020, Sicardy et al. 2021, arXiv:2112.07764), wider than
+///   Triton's since its measured season is not its orbit mean, at its measured Bond albedo (Buratti
+///   et al. 2017, Icarus 287, 207: 0.72 ± 0.07) by hand. Through its own passes its albedo is
+///   T51.b's 0.84, above that range (a recorded miss: fresh frost over its whole surface, none of
+///   its dark tholin terrain), so its ice sits near 32.4 K and its N₂ near 0.04 Pa: stated, not
+///   asserted. Its haze is not modelled at 24 (P14.T55.n; decision-p14-t53c-tenuous-aerosols): the
+///   inventory's rules are not applied to a tenuous air, and its CH₄ by T24.c's rule is stated
+///   with the aerosols' tests (`under_every_24_hold_pluto_s_haze_is_not_modelled_at_24`).
+/// - **a Charon on Pluto's orbit** (1.586 × 10²¹ kg, 606 km) keeps no N₂: its vapour air has no
+///   exobase, so its ice holds none, and T13.b's verdict, lost, stands.
+#[test]
+fn under_every_24_hold_a_pluto_keeps_its_nitrogen_ice_and_a_charon_none() {
+    crate::planetary::testing::with_every_24_hold(|| {
+        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+        let air = pluto.atmosphere();
+        let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
+        eprintln!(
+            "Pluto through its passes: {}; its ice {:?}, Bond albedo {:.4}, T_eq {:.3} K",
+            air_line("", air),
+            air.held_ice_temperature(Gas::Nitrogen),
+            pluto.albedo().value(),
+            pluto.equilibrium_temperature().value(),
+        );
+        assert_eq!(air.state(), SurfaceState::Tenuous, "{air:?}");
+        assert!(air.ice_held().retains(Gas::Nitrogen), "{air:?}");
+        assert!(nitrogen > 0.0, "{air:?}");
+        assert!(
+            air.partial_pressures().of(Gas::Methane).value() > 0.0,
+            "{air:?}"
+        );
+        let measured = atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72));
+        let nitrogen = measured.partial_pressures().of(Gas::Nitrogen).value();
+        let methane = measured.partial_pressures().of(Gas::Methane).value();
+        eprintln!(
+            "Pluto at its measured 0.72: {}; CH4 {methane:.4e} Pa, its ice {:?}",
+            air_line("", &measured),
+            measured.held_ice_temperature(Gas::Nitrogen),
+        );
+        assert_eq!(measured.state(), SurfaceState::Tenuous, "{measured:?}");
+        assert!(
+            (1.1 / 10.0..=1.1 * 10.0).contains(&nitrogen),
+            "Pluto's N2 at {nitrogen} Pa"
+        );
+        assert!(methane > 0.0, "{measured:?}");
+        let charon = on_pluto_s_orbit(1.586e21, 606.0);
+        let air = charon.atmosphere();
+        eprintln!(
+            "a Charon on Pluto's orbit: {}; Bond albedo {:.4}",
+            air_line("", air),
+            charon.albedo().value()
+        );
+        assert!(!air.retention().retains(Gas::Nitrogen), "{air:?}");
+        assert!(!air.ice_held().retains(Gas::Nitrogen), "{air:?}");
+        assert_same_bits(air.partial_pressures().of(Gas::Nitrogen).value(), 0.0);
+        assert!(charon.inventory().nitrogen().value() > 0.0);
+    });
+}
+
+/// P14.T53.c's record of a tenuous air, every 24 hold in force: the conditions of Pluto at its
+/// measured 0.72 Bond albedo (`Tenuous`, its N₂ and argon held by their ice) publish its air's own
+/// surface pressure, to the bit, and list its gases, while their climate is that of the same air
+/// published `Airless`, to the bit, since the steps' climate holds no air under 100 Pa; and its ice
+/// holds its argon past T53.a's shoreline, which would take 0.69% of an air's (its impact term),
+/// so that its argon's escape is its vapour's alone, under a thousandth of that.
+#[test]
+fn under_every_24_hold_a_tenuous_record_lists_its_air_over_an_airless_climate() {
+    use crate::planetary::hooks::surface::{
+        OceanWeight, SeasonalSpin, SurfaceConditions, SurfaceInputs,
+    };
+    crate::planetary::testing::with_every_24_hold(|| {
+        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+        let inputs = on_pluto_s_orbit_at(&pluto, 0.72);
+        let air = atmosphere(&inputs);
+        assert_eq!(air.state(), SurfaceState::Tenuous, "{air:?}");
+        let conditions = |air: &Atmosphere| {
+            SurfaceConditions::derive(&SurfaceInputs {
+                atmosphere: air,
+                equilibrium_temperature: inputs.equilibrium,
+                surface_gravity: pluto.surface_gravity(),
+                radius: inputs.radius,
+                material: inputs.material,
+                lid: None,
+                stellar_flux: WattsPerSquareMetre::from(pluto.flux()),
+                xuv_flux: pluto.xuv_flux(),
+                spin: SeasonalSpin {
+                    obliquity: Radians::from(Degrees::new(119.6)),
+                    rotation_period: Seconds::new(551_856.7),
+                    solar_day: Some(Seconds::new(551_856.7)),
+                },
+                heat_flow: WattsPerSquareMetre::new(0.003),
+                ocean_weight: OceanWeight::NONE,
+            })
+            .expect("Pluto has a surface")
+        };
+        let tenuous = conditions(&air);
+        let airless = conditions(&Atmosphere {
+            state: SurfaceState::Airless,
+            ..air
+        });
+        let p = air.surface_pressure().expect("a surface").value();
+        assert_same_bits(tenuous.surface_pressure().value(), p);
+        assert!(
+            tenuous
+                .gases()
+                .iter()
+                .any(|&(id, _)| id == Gas::Nitrogen.substance())
+        );
+        assert!(tenuous.mean_molar_mass_g_per_mol().is_some());
+        assert_same_bits(airless.surface_pressure().value(), 0.0);
+        assert_eq!(airless.gases(), []);
+        let (cold, warm) = (tenuous.climate_range(), airless.climate_range());
+        assert_same_bits(cold.0.value(), warm.0.value());
+        assert_same_bits(cold.1.value(), warm.1.value());
+        assert_same_bits(
+            tenuous.mean_surface_temperature().value(),
+            airless.mean_surface_temperature().value(),
+        );
+        // The argon its ice holds is not eroded by the shoreline.
+        assert!(air.ice_held().retains(Gas::Argon), "{air:?}");
+        let argon = escape_of(&air)
+            .element(Element::Ar)
+            .expect("argon's outcome");
+        let total = argon.escaped().value() + argon.airborne().value();
+        let shoreline = escape_of(&air).shoreline().kept();
+        eprintln!(
+            "Pluto at 0.72: argon escaped {:.4e} kg of {total:.4e}; the shoreline keeps \
+             {shoreline:.4}",
+            argon.escaped().value()
+        );
+        // The shoreline would take 1 − its share of an air's argon; the ice-held argon loses far
+        // less, its vapour's escape alone.
+        assert!(shoreline < 1.0, "{shoreline}");
+        assert!(
+            argon.escaped().value() < 1e-3 * (1.0 - shoreline) * total,
+            "{argon:?}"
         );
     });
 }

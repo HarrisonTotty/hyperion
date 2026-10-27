@@ -7701,7 +7701,8 @@ impl Census {
             SurfaceState::Temperate
             | SurfaceState::MagmaOcean
             | SurfaceState::Airless
-            | SurfaceState::GasEnvelope => {}
+            | SurfaceState::GasEnvelope
+            | SurfaceState::Tenuous => {}
         }
         // Item 26's re-check (decision-p14-t54a-states §6.3): the second start, T13.c's table
         // albedo of the other branch.
@@ -7715,7 +7716,8 @@ impl Census {
             | SurfaceState::Temperate
             | SurfaceState::MagmaOcean
             | SurfaceState::Airless
-            | SurfaceState::GasEnvelope => None,
+            | SurfaceState::GasEnvelope
+            | SurfaceState::Tenuous => None,
         };
         if let Some(start) = start {
             let (second, _) = (case.again)(PassDriver::From(BondAlbedo::from_fraction(start)));
@@ -8370,8 +8372,11 @@ fn unlit_moves(
             {
                 let coldest = after_surface.conditions().climate_range().0.value();
                 let mean = mean_of(new);
-                if before_surface.state() == SurfaceState::Airless
-                    && mean_held < coldest
+                // A tenuous air publishes at its base as an airless body does (P14.T53.c).
+                if matches!(
+                    before_surface.state(),
+                    SurfaceState::Airless | SurfaceState::Tenuous
+                ) && mean_held < coldest
                     && mean >= coldest * (1.0 - 1e-12)
                 {
                     moves.raised += 1;
@@ -8422,9 +8427,11 @@ fn unlit_moves(
                     let heat_flow = surface
                         .basis()
                         .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
-                    surface.state() != SurfaceState::Airless
-                        && t_eq(record)
-                            < crate::planetary::hooks::surface::night_floor(heat_flow).value()
+                    !matches!(
+                        surface.state(),
+                        SurfaceState::Airless | SurfaceState::Tenuous
+                    ) && t_eq(record)
+                        < crate::planetary::hooks::surface::night_floor(heat_flow).value()
                 })
             };
             if under_floor(old) || under_floor(new) {
@@ -8491,9 +8498,10 @@ fn named(lines: &[String]) -> Vec<&str> {
 /// (P14.T24.i's follow-up, decision-t24i-airless-state D1.4: the 24 combination, every 24 hold
 /// but the unlit mean's against all of them): `fallback_black_hole`'s 19 unlit bodies, whose
 /// records publish a mean surface temperature of 0 K at 23, read at least their night floor, and
-/// `for_body` reads all 19, none refused for an argon ice (under the escape's batch none of them
-/// holds one); 11 lit airless records under their floor rise to it, 8 of them changing their ices
-/// or condensates, none their `for_body` answer, one holding an argon ice, now at 30.17 K; the air
+/// `for_body` reads all 19, none refused for an argon ice (13 hold one under P14.T53.c's ice-held
+/// argon, which 24's densities read); 11 lit airless records under their floor rise to it, 8 of
+/// them changing their ices or condensates, none their `for_body` answer, two holding an argon ice,
+/// now at 17.84 and 30.17 K (one under the escape's batch alone, the other P14.T53.c's); the air
 /// whose `T_eq` lies under its floor, subgiant's moon 0504, rises with its greenhouse's base; no
 /// record settles again; and every other record of the fifteen systems is unchanged to the bit.
 ///
@@ -8525,7 +8533,7 @@ fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor()
             moves.raised_read,
             moves.raised_argon
         ),
-        (11, 8, 0, 1)
+        (11, 8, 0, 2)
     );
     assert_eq!(moves.resettled, Vec::<String>::new());
     assert_eq!(
@@ -8549,7 +8557,12 @@ fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor()
 /// changes, their `for_body` changes, their argon ices and the re-settled went
 /// 1,405 / 1,144 / 3 / 622 / 3 to 1,403 / 1,127 / 0 / 383 / 4 (the argon ices' means 7.79–69.69
 /// K, were 7.8–451 K; 02003b2be0000000.0700 the fourth to re-settle, as on the follow-up's held
-/// path); and the airs raised with their greenhouse's base are 7.
+/// path); and the airs raised with their greenhouse's base are 7. Restated again by P14.T53.c:
+/// its ice holds the argon and nitrogen that fail Jeans's test at their ice's own temperature, so
+/// 9 of the 18 unlit records hold an argon ice again, which 24's densities read (none refused),
+/// the raised records' argon ices went 383 → 1,139 and their cover changes 1,127 → 1,350 (the
+/// argon ices' means 4.88–69.69 K), and its `Tenuous` records, published at their base as the
+/// airless are and counted with them, raise five more (1,403 → 1,408).
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
@@ -8571,7 +8584,7 @@ fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
             moves.raised_read,
             moves.raised_argon
         ),
-        (1_403, 1_127, 0, 383)
+        (1_408, 1_350, 0, 1_139)
     );
     assert_eq!(
         named(&moves.resettled),
@@ -8601,13 +8614,15 @@ fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
 /// them" here, 2026-10-22), in the 24 combination (P14.T24.i's follow-up, decision-t24i-airless-
 /// state D1.4): with every landed 24 hold in force, 24's densities among them
 /// (`READ_DENSITIES_VERSION`, solid argon's fcc read), `fallback_black_hole`'s 19 unlit records
-/// read at least their night floor and `for_body` reads all 19, and so it does with every 24 hold
-/// but 24's densities: under the escape's batch none of the 19 holds an argon ice (P14.T49.n's
-/// science check: the unlit bodies lose theirs under 24's rules), so none needs solid argon's
-/// density.
+/// read at least their night floor and `for_body` reads all 19, 13 of them holding an argon ice;
+/// with every 24 hold but 24's densities those 13 are refused, not modelled (the record holds no
+/// solid argon's density to spread them by), and the other 6 read.
 ///
-/// Restated from the held escape's (19, 19, 0) under 24's densities and (19, 15, 4) under 23's: (19,
-/// 19, 0) under both.
+/// Restated from the held escape's (19, 19, 0) under 24's densities and (19, 15, 4) under 23's, and
+/// then from (19, 19, 0) under both, none of the 19 holding an argon ice under the escape's batch
+/// (P14.T49.n's science check: the unlit bodies lose theirs under 24's rules), by P14.T53.c: its
+/// ice holds an argon that fails Jeans's test at its own temperature, 27–33 K, where its vapour is
+/// far under 100 Pa, so 13 of the 19 keep their argon ice, which 24's densities read.
 #[test]
 fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
     use crate::substance::{ReadDensitiesRules, with_read_densities};
@@ -8624,31 +8639,43 @@ fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
          {:#?}",
         read.unlit, held.unlit
     );
-    for moves in [&read, &held] {
-        assert_eq!(
-            (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
-            (19, 19, 0)
-        );
-        assert!(
-            moves
-                .unlit
-                .iter()
-                .all(|line| line.contains("argon ice false")),
-            "{:#?}",
-            moves.unlit
-        );
-    }
+    let argon = |moves: &UnlitMoves| {
+        moves
+            .unlit
+            .iter()
+            .filter(|line| line.contains("argon ice true"))
+            .count()
+    };
+    assert_eq!(
+        (
+            read.unlit.len(),
+            read.unlit_read,
+            read.unlit_argon,
+            argon(&read)
+        ),
+        (19, 19, 0, 13)
+    );
+    assert_eq!(
+        (
+            held.unlit.len(),
+            held.unlit_read,
+            held.unlit_argon,
+            argon(&held)
+        ),
+        (19, 6, 13, 13)
+    );
 }
 
 /// P14.T49.n's case of T24.i's test over the 400 whole systems, a measurement run by name, in the
 /// 24 combination (as [`under_24_s_densities_the_golden_systems_unlit_records_all_read`]'s): with
 /// every landed 24 hold in force the 18 unlit records read their night floor and `for_body` reads
-/// all 18, and so it does with every 24 hold but 24's densities: under the escape's batch the 8
-/// unlit 22–24 K members that held an argon ice under the hold (81ffb2dff0000019.e201–e208) hold
-/// none.
+/// all 18, 9 of them holding an argon ice (P14.T53.c's ice-held argon), which 24's densities read;
+/// with every 24 hold but 24's densities those 9 are refused, not modelled, and the other 9 read.
 ///
-/// Restated from the held escape's (18, 18, 0) under 24's densities and (18, 10, 8) under 23's: (18,
-/// 18, 0) under both.
+/// Restated from the held escape's (18, 18, 0) under 24's densities and (18, 10, 8) under 23's, and
+/// then from (18, 18, 0) under both (under the escape's batch the 8 unlit 22–24 K members that held
+/// an argon ice under the hold, 81ffb2dff0000019.e201–e208, holding none), by P14.T53.c: its ice
+/// holds the argon that fails Jeans's test at its own temperature, so 9 keep an argon ice.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
@@ -8663,20 +8690,31 @@ fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
         "the sample's unlit records, every 24 hold in force: {:#?}; with 23's densities: {:#?}",
         read.unlit, held.unlit
     );
-    for moves in [&read, &held] {
-        assert_eq!(
-            (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
-            (18, 18, 0)
-        );
-        assert!(
-            moves
-                .unlit
-                .iter()
-                .all(|line| line.contains("argon ice false")),
-            "{:#?}",
-            moves.unlit
-        );
-    }
+    let argon = |moves: &UnlitMoves| {
+        moves
+            .unlit
+            .iter()
+            .filter(|line| line.contains("argon ice true"))
+            .count()
+    };
+    assert_eq!(
+        (
+            read.unlit.len(),
+            read.unlit_read,
+            read.unlit_argon,
+            argon(&read)
+        ),
+        (18, 18, 0, 9)
+    );
+    assert_eq!(
+        (
+            held.unlit.len(),
+            held.unlit_read,
+            held.unlit_argon,
+            argon(&held)
+        ),
+        (18, 9, 9, 9)
+    );
 }
 
 /// What `for_body` answers on the record `record` of a system of records `records` and context
@@ -10886,7 +10924,7 @@ struct FloorBody {
     /// Its derivation's argon partial pressure, Pa.
     argon: f64,
     /// The airborne total of its published pass's partition, Pa, and its argon's, for an
-    /// `Airless` record: the published pass repeated under the context it read
+    /// `Airless` or a `Tenuous` record: the published pass repeated under the context it read
     /// (`PassDriver::Again(Under::Read)`), to the bit.
     airborne: Option<(f64, f64)>,
     /// The species its ice holds, not Jeans's test (`Atmosphere::ice_held`).
@@ -10909,7 +10947,11 @@ impl FloorBody {
         let heat_flow = surface
             .basis()
             .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
-        let airborne = (surface.state() == SurfaceState::Airless).then(|| {
+        let airborne = matches!(
+            surface.state(),
+            SurfaceState::Airless | SurfaceState::Tenuous
+        )
+        .then(|| {
             let (_, read) = (case.again)(PassDriver::Again(Under::Read));
             read.map_or((f64::NAN, f64::NAN), |read| {
                 let species = read.partition.species();
@@ -11158,10 +11200,10 @@ fn under_every_24_hold_the_four_split_bodies_read_their_floor() {
             floored[id].airborne
         );
         let (before, after) = (&held[id], &floored[id]);
-        // The split: published at `T_eq` under a floor that lies above it.
-        assert_eq!(
-            before.state,
-            SurfaceState::Airless,
+        // The split: published at `T_eq` under a floor that lies above it, under 100 Pa (from
+        // P14.T53.c `Tenuous` where its column reaches the tenuous floor).
+        assert!(
+            matches!(before.state, SurfaceState::Airless | SurfaceState::Tenuous),
             "{id}: {}",
             before.line()
         );
@@ -11195,9 +11237,8 @@ fn under_every_24_hold_the_four_split_bodies_read_their_floor() {
         floored[FLIPPED[0]].line()
     );
     let body = &floored[AIRLESS];
-    assert_eq!(
-        body.state,
-        SurfaceState::Airless,
+    assert!(
+        matches!(body.state, SurfaceState::Airless | SurfaceState::Tenuous),
         "{AIRLESS}: {}",
         body.line()
     );
@@ -12503,7 +12544,7 @@ fn under_every_24_hold_a_re_solve_keeps_what_was_traced_before_it() {
 /// host") and at 100.01 Pa and 56.6 K at 23 (bless-note-23, "across the diagonal": published
 /// `Airless` at 99.86 Pa), inside the runaway limit only at its substellar host's largest past
 /// luminosity (a runaway ratio of 1.51 then, 0.0029 now).
-const ITEM_33_WORLD: &str = "02000b2ca0000001.1100";
+pub(crate) const ITEM_33_WORLD: &str = "02000b2ca0000001.1100";
 
 /// LOOK72's 106 K runaway (decision-absurd-states-24 R4.1, item 1): at 23 a `RunawayGreenhouse`
 /// at 106.5 K under 5.33 bar, mostly O₂, its present runaway ratio 0.0405 and its
@@ -13376,5 +13417,269 @@ fn under_every_24_hold_part_two_s_movers_are_stated() {
     eprintln!("EVERY COLUMN ABOVE ITS ISOCHORE:");
     for (body, column) in &above {
         eprintln!("  {}: {}", body.label, EnvelopeBody::column_line(column));
+    }
+}
+
+/// One body of P14.T53.c's census ([`thin_air_census`]): its record's state and air, and its
+/// dominant condensable against its ice.
+pub(crate) struct ThinAirBody {
+    /// "{set} {kind} {id}".
+    pub(crate) label: String,
+    pub(crate) state: SurfaceState,
+    /// Its record's surface pressure, Pa, and its column p ÷ g, kg m⁻².
+    pub(crate) p: f64,
+    pub(crate) column: f64,
+    /// Its derivation's surface pressure, Pa: an airless body's residue too.
+    pub(crate) air_p: f64,
+    /// Its record's mean surface temperature and coldest zone, K.
+    pub(crate) t_s: f64,
+    pub(crate) coldest: f64,
+    /// Its record's gases, as listed, their mean molar mass, g mol⁻¹, and its surface gravity,
+    /// m s⁻².
+    pub(crate) gases: Vec<(crate::substance::SubstanceId, f64)>,
+    pub(crate) mu: Option<f64>,
+    pub(crate) g: f64,
+    /// Its record's liquids' cover, 0 to 1.
+    pub(crate) liquid_cover: f64,
+    /// Whether its record's aerosols are modelled (a value, an inventory, empty or not).
+    pub(crate) aerosols_modelled: bool,
+    /// Its record's vertical structure: `None` where not modelled, else whether it holds a
+    /// profile (`false`, computed as no air).
+    pub(crate) structure: Option<bool>,
+    /// Its air's largest gas where that gas lies as ice on its surface: the gas, its partial
+    /// pressure, Pa, the temperature its ice is judged at (its own where its ice holds it,
+    /// P14.T53.c, else the record's coldest zone), K, and the gas's saturation pressure there, Pa.
+    pub(crate) dominant: Option<(Gas, f64, f64, f64)>,
+    /// Whether its record's liquids list water's ocean under a `Snowball`'s ice (W3 (b)): an `H2O`
+    /// item with no `H2O` liquid entry.
+    pub(crate) under_ice_item: bool,
+    /// Its liquid entries whose listed share differs from their own `area_fraction` while the
+    /// entries' total is at most 1 (W2), by key.
+    pub(crate) misread: Vec<String>,
+    /// Rendering plan R09's reading of a planet's or a member's record
+    /// (`CoarseInputs::for_body`): `None` for a moon, which reads its planet's record too, else
+    /// whether it read and, where not, why.
+    pub(crate) r09: Option<Result<(), String>>,
+    /// Each gas its ice holds by P14.T53.c's rule, with its saturation pressure at its ice's
+    /// temperature, Pa.
+    pub(crate) held_ice: Vec<(Gas, f64)>,
+    /// A hash of its record's and its derivation's whole `Debug` text: the same, or moved.
+    pub(crate) bits: u64,
+}
+
+impl ThinAirBody {
+    /// The figures of `record` and `derived`, a body of `set` and `kind`, with an `Ok` surface.
+    fn of(
+        (set, ctx): (&str, &SystemContext),
+        kind: &str,
+        record: &BodyRecord,
+        derived: &crate::planetary::derive::DerivedBody,
+    ) -> Option<Self> {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::record::Modelled;
+        let mut hasher = DefaultHasher::new();
+        format!("{record:?} {derived:?}").hash(&mut hasher);
+        let Section::Ok(surface) = record.surface() else {
+            return None;
+        };
+        let conditions = surface.conditions();
+        let p = conditions.surface_pressure().value();
+        let g = derived.surface_gravity().value();
+        let coldest = conditions.climate_range().0.value();
+        let gases = conditions.gases().to_vec();
+        let air = derived.atmosphere();
+        let dominant = gases.first().and_then(|&(id, x)| {
+            let gas = id.gas()?;
+            let diagram = id.substance().phase_diagram()?;
+            surface.condensates().entry(id, CondensatePhase::Solid)?;
+            let at = air.held_ice_temperature(gas).map_or(coldest, Kelvin::value);
+            let p_sat = diagram.saturation_pressure(Kelvin::new(at)).value();
+            Some((gas, x * p, at, p_sat))
+        });
+        let water = Gas::Water.substance();
+        let figures = surface.figures();
+        let condensates = surface.condensates();
+        let under_ice_item = figures.surface_liquids().iter().any(|&(id, _)| id == water)
+            && condensates.entry(water, CondensatePhase::Liquid).is_none();
+        let liquids: Vec<_> = condensates
+            .entries()
+            .iter()
+            .filter(|e| e.phase() == CondensatePhase::Liquid)
+            .collect();
+        let total: f64 = liquids.iter().map(|e| e.area_fraction()).sum();
+        let misread = if total <= 1.0 {
+            liquids
+                .iter()
+                .filter_map(|e| {
+                    let listed = figures
+                        .surface_liquids()
+                        .iter()
+                        .find(|&&(id, _)| id == e.substance())
+                        .map_or(f64::NAN, |&(_, a)| a);
+                    listed.total_cmp(&e.area_fraction()).is_ne().then(|| {
+                        format!(
+                            "{} listed {listed:.5}, its own {:.5}",
+                            e.substance().substance().key(),
+                            e.area_fraction()
+                        )
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Some(Self {
+            label: format!("{set} {kind} {}", record.identity().id()),
+            state: air.state(),
+            p,
+            column: p / g,
+            air_p: air.surface_pressure().map_or(0.0, Pascals::value),
+            t_s: conditions.mean_surface_temperature().value(),
+            coldest,
+            gases,
+            mu: conditions.mean_molar_mass_g_per_mol(),
+            g,
+            liquid_cover: figures.ocean_fraction(),
+            aerosols_modelled: matches!(surface.aerosols(), Modelled::Ok(_)),
+            structure: match surface.vertical_structure() {
+                Modelled::NotModelled => None,
+                Modelled::Ok(profile) => Some(profile.is_some()),
+            },
+            dominant,
+            under_ice_item,
+            misread,
+            r09: (kind != "moons").then(|| {
+                crate::planetary::surface::CoarseInputs::for_body(record, None, ctx)
+                    .map(|_| ())
+                    .map_err(|error| format!("{error:?}"))
+            }),
+            held_ice: [Gas::Nitrogen, Gas::Argon]
+                .into_iter()
+                .filter_map(|gas| {
+                    let ice = air.held_ice_temperature(gas)?;
+                    let p = crate::substance::saturation_pressure(gas.substance(), ice)?;
+                    Some((gas, p.value()))
+                })
+                .collect(),
+            bits: hasher.finish(),
+        })
+    }
+
+    /// The dominant condensable's supersaturation over its ice, p ÷ `p_sat`, where it has one.
+    pub(crate) fn factor(&self) -> Option<f64> {
+        self.dominant.map(|(_, p, _, p_sat)| p / p_sat)
+    }
+
+    /// The mole fraction of `gas` in its record's air.
+    pub(crate) fn share(&self, gas: Gas) -> f64 {
+        self.gases
+            .iter()
+            .find(|&&(id, _)| id == gas.substance())
+            .map_or(0.0, |&(_, x)| x)
+    }
+
+    pub(crate) fn line(&self) -> String {
+        let gases = self
+            .gases
+            .iter()
+            .map(|(id, x)| format!("{} {x:.4}", id.substance().key()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let dominant = self
+            .dominant
+            .map_or_else(String::new, |(gas, p, at, p_sat)| {
+                format!(
+                    "; {gas:?} {p:.4e} Pa over its ice at {at:.2} K, p_sat {p_sat:.4e} Pa, \
+                     ×{:.3e}",
+                    p / p_sat
+                )
+            });
+        format!(
+            "{:?} at {:.2} K (coldest {:.2} K), {:.4e} Pa, column {:.3e} kg m⁻² \
+             [{gases}]{dominant}",
+            self.state, self.t_s, self.coldest, self.p, self.column
+        )
+    }
+}
+
+/// P14.T53.c's census's sets: the 400 whole systems of the sample, the golden systems and LOOK72's
+/// triaged systems, each with its seed.
+pub(crate) fn thin_air_sets() -> Vec<(&'static str, Seed, SystemContext)> {
+    let look72_seed = look72_galaxy().seed();
+    sample()
+        .iter()
+        .map(|ctx| ("sample", SEED, ctx.clone()))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx.clone())),
+        )
+        .chain(
+            look72_triaged_contexts()
+                .into_iter()
+                .map(|ctx| ("look72", look72_seed, ctx)),
+        )
+        .collect()
+}
+
+/// Every present planet, member and moon of `sets` with an `Ok` surface at the epoch, its system
+/// generated afresh under the rules in force on the calling thread ([`ThinAirBody`]), its record
+/// carrying its air's sections under their batch (P14.T54.b's `AirRules::Batch`), so that the
+/// aerosols' arm for a tenuous air is read; the cold traps keep their record hold, as the other
+/// 24 censuses keep it.
+pub(crate) fn thin_air_census(sets: &[(&str, Seed, SystemContext)]) -> Vec<ThinAirBody> {
+    let rules = RecordRules {
+        air: AirRules::Batch,
+        ..RecordRules::in_force()
+    };
+    let mut bodies = Vec::new();
+    for (set, seed, ctx) in sets {
+        let system = generate(*seed, ctx).with_record_rules(rules);
+        envelope_walk(ctx, &system, &mut |kind, record, derived| {
+            bodies.extend(ThinAirBody::of((set, ctx), kind, record, derived));
+        });
+    }
+    bodies
+}
+
+/// P14.T53.c (decision-absurd-states-24 R1; decision-p14-t54a-water-consistency W2–W3), every 24
+/// hold in force, over the golden systems generated afresh: no record's liquids list water's ocean
+/// under a `Snowball`'s ice, where with T53.c held some do (W3 (b), subgiant's moons among them),
+/// and every liquid entry is listed at its own extent where the entries' total is at most 1.
+#[test]
+fn under_every_24_hold_no_golden_record_lists_an_ocean_under_its_ice() {
+    use crate::planetary::chem::tenuous::{TenuousRules, with_tenuous};
+    let sets: Vec<(&str, Seed, SystemContext)> = golden_systems()
+        .iter()
+        .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx.clone()))
+        .collect();
+    let (held, tenuous) = crate::planetary::testing::with_every_24_hold(|| {
+        (
+            with_tenuous(TenuousRules::Held, || thin_air_census(&sets)),
+            thin_air_census(&sets),
+        )
+    });
+    let listed = |bodies: &[ThinAirBody]| {
+        bodies
+            .iter()
+            .filter(|b| b.under_ice_item)
+            .map(|b| b.label.clone())
+            .collect::<Vec<_>>()
+    };
+    eprintln!(
+        "the golden systems' oceans under ice listed, T53.c held: {:?}",
+        listed(&held)
+    );
+    assert_ne!(listed(&held), Vec::<String>::new());
+    assert_eq!(listed(&tenuous), Vec::<String>::new());
+    for body in &tenuous {
+        assert!(
+            body.misread.is_empty(),
+            "{}: {:?}",
+            body.label,
+            body.misread
+        );
     }
 }

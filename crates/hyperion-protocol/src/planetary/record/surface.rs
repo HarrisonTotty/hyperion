@@ -36,7 +36,7 @@
 //!
 //! Each closed enum here is a physics class with every variant the plan's drafted tasks name, so
 //! that no later task adds one: a variant no rule produces yet is listed and documented as such
-//! (`steam_envelope`, `tenuous`, `heat_pipe`, `episodic`, `ice_shell`).
+//! (`steam_envelope`, `heat_pipe`, `episodic`, `ice_shell`; `tenuous` until generator version 24).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -64,7 +64,9 @@ pub enum SurfaceStateDto {
     /// Molten rock at the surface: a young terrestrial planet, or one hotter than the silicate
     /// solidus.
     MagmaOcean,
-    /// A surface pressure below the airless limit: bare rock or ice.
+    /// A surface pressure below the airless limit, 100 Pa: bare rock or ice; from generator
+    /// version 24 (P14.T53.c) one whose column also lies under the tenuous floor, 10⁻⁴ kg m⁻², a
+    /// thinner air above it being `tenuous`. An airless body lists no gases.
     Airless,
     /// Inside the runaway-greenhouse limit when water was present: the oceans lost, a
     /// carbon-dioxide air, as on Venus. Below generator version 24 the limit is read at the hosts'
@@ -99,8 +101,12 @@ pub enum SurfaceStateDto {
     Snowball,
     /// A steam envelope over a magma ocean (P14.T53.b): produced by no rule until that task.
     SteamEnvelope,
-    /// A thin or transient air held above the airless floor, as Pluto's (P14.T53.c): produced by
-    /// no rule until that task.
+    /// A thin or transient air below 100 Pa whose column reaches the tenuous floor, 10⁻⁴ kg m⁻²
+    /// (the column above which the wind's ions do not reach the ground), its gases listed, as
+    /// Triton's and Pluto's nitrogen are held by their ice (P14.T53.c): from generator version 24,
+    /// produced by no rule before it. Its surface is a bare one, as an airless body's; only its
+    /// pressure and gases are its air's. An air below the floor is `airless`, with no gas listed.
+    /// Its aerosols are absent, not modelled at version 24 (P14.T55.n), never the empty inventory.
     Tenuous,
 }
 
@@ -914,13 +920,15 @@ pub struct BodySurfaceDto {
     /// about the substellar axis for a world locked 1:1 to its seasonal host.
     pub day_night_contrast_k: f64,
     /// The mean surface pressure of the modelled air, the volatiles', Pa, not negative: zero for an
-    /// airless body, and for a surface holding melt whose volatiles are gone.
+    /// airless body, and for a surface holding melt whose volatiles are gone; a `tenuous` body's
+    /// own, under 100 Pa (P14.T53.c).
     ///
     /// It does not include the melt's own vapour ([`silicate_vapour`](Self::silicate_vapour)).
     pub surface_pressure_pa: f64,
     /// The gases at the surface by number, largest first with ties by registry order, their mole
     /// fractions summing to 1 to 10⁻⁹; empty for an airless body, or for a surface holding melt
-    /// with no volatile air, which does not deny the melt's own vapour (`silicate_vapour`).
+    /// with no volatile air, which does not deny the melt's own vapour (`silicate_vapour`), and
+    /// listed for a `tenuous` one (P14.T53.c).
     pub gases: Vec<GasShareDto>,
     /// The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, positive; `null` with an empty `gases`: an
     /// airless body, or a surface holding melt with no volatile air.
@@ -999,7 +1007,8 @@ pub struct BodySurfaceDto {
     /// inventory, never `null`, for a surface with no air (an airless body's, a melt's whose
     /// volatiles are gone), and absent from a server whose generator does not model it, every one
     /// before P14.T54.b's bump at generator version 24, and from a magma ocean that holds an air,
-    /// whose clouds the generator does not model.
+    /// whose clouds the generator does not model. It is absent from a `tenuous` surface too, whose
+    /// haze and dust the generator does not model at 24 (P14.T55.n).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<AerosolInventoryDto>>", optional)]
     pub aerosols: Modelled<AerosolInventoryDto>,
@@ -1013,9 +1022,10 @@ pub struct BodySurfaceDto {
     /// its list, in the entries' order, at its own area, divided by the list's total where that
     /// total exceeds 1. At most one `H2O` item is appended to each without an entry: in
     /// `surface_ices`, P14.T24.b's water ice where no `H2O` solid is listed (an ice-rich crust's
-    /// own ice or a `Snowball`'s cover, whose water the partition does not hold); in
-    /// `surface_liquids`, the ocean under a `Snowball`'s ice where no `H2O` liquid is listed, its
-    /// water inside the `H2O` solid. Nothing else; P14.T53.c ends both.
+    /// own ice or a `Snowball`'s cover, whose water the partition does not hold); and below
+    /// generator version 24, in `surface_liquids`, the ocean under a `Snowball`'s ice where no
+    /// `H2O` liquid is listed, its water inside the `H2O` solid, which from 24 (P14.T53.c) is no
+    /// surface liquid and is not listed. Nothing else.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<Vec<SurfaceCondensateDto>>>", optional)]
     pub condensates: Modelled<Vec<SurfaceCondensateDto>>,

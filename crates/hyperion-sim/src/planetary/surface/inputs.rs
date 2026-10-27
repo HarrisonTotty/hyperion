@@ -1711,7 +1711,8 @@ fn on_the_ground(shares: &[(SubstanceId, f64)]) -> impl Iterator<Item = AreaShar
 
 /// The surface pressure the pass reads of a surface in the state `state` whose conditions give
 /// `pressure`: exactly zero for an `Airless` state, the header's contract
-/// (decision-r11-palette-liquids §2, item 5), and the conditions' for every other.
+/// (decision-r11-palette-liquids §2, item 5), and the conditions' for every other, a `Tenuous`
+/// state's its own below 100 Pa (P14.T53.c).
 #[must_use]
 fn surface_pressure_of(state: SurfaceState, pressure: Pascals) -> Pascals {
     match state {
@@ -1720,7 +1721,8 @@ fn surface_pressure_of(state: SurfaceState, pressure: Pascals) -> Pascals {
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => pressure,
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => pressure,
     }
 }
 

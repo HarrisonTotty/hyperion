@@ -2357,3 +2357,51 @@ fn close_binary_s_sea_shrinks_under_its_compressed_water() {
         .unwrap();
     assert_same_bits(grain, law.value());
 }
+
+/// P14.T53.c's ice-held cold trap ([`ColumnInventory::with_ice_temperature`]): a species the
+/// inventory does not name, and a temperature that is negative or not finite, leave it as it was;
+/// a −0 is written +0; the species' controlling temperature runs from the mean at no pull to its
+/// ice at a full one; and an ice at the climate's own coldest zone gives the plain inventory's
+/// partition to the bit, so that the two cold traps cannot drift apart.
+#[test]
+fn an_ice_held_cold_trap_replaces_the_coldest_zone_alone() {
+    let (n2, co2) = (id("N2"), id("CO2"));
+    let climate =
+        ClimateSpan::new(Kelvin::new(30.0), Kelvin::new(34.0), Kelvin::new(40.0)).unwrap();
+    let ground = Ground::without_basins(MetresPerSecondSquared::new(0.78));
+    let inventory = ColumnInventory::new([(n2, Pascals::new(5e4))]).unwrap();
+    for (substance, t) in [(co2, 37.7), (n2, -1.0), (n2, f64::NAN), (n2, f64::INFINITY)] {
+        assert_eq!(
+            inventory
+                .clone()
+                .with_ice_temperature(substance, Kelvin::new(t)),
+            inventory,
+            "{t}"
+        );
+    }
+    let zero = inventory
+        .clone()
+        .with_ice_temperature(n2, Kelvin::new(-0.0));
+    assert_same_bits(zero.species[0].ice.unwrap().value(), 0.0);
+    let held = inventory
+        .clone()
+        .with_ice_temperature(n2, Kelvin::new(37.7));
+    let species = held.species[0];
+    assert_same_bits(species.controlling(&climate, 0.0).value(), 34.0);
+    assert_same_bits(species.controlling(&climate, 1.0).value(), 37.7);
+    assert_same_bits(
+        species.controlling(&climate, 0.5).value(),
+        34.0 - 0.5 * (34.0 - 37.7),
+    );
+    let at_coldest = inventory
+        .clone()
+        .with_ice_temperature(n2, climate.coldest());
+    assert_eq!(
+        partition(&climate, &ground, &at_coldest).species(),
+        partition(&climate, &ground, &inventory).species()
+    );
+    assert_eq!(
+        partition(&climate, &ground, &at_coldest).condensates(),
+        partition(&climate, &ground, &inventory).condensates()
+    );
+}

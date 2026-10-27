@@ -328,9 +328,13 @@ impl SulphurCycle {
             (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) => Self::Cycling,
             (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless)
             | (SurfaceState::Temperate | SurfaceState::Snowball, _) => Self::OnceThrough,
-            (SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::GasEnvelope, _) => {
-                Self::None
-            }
+            (
+                SurfaceState::Airless
+                | SurfaceState::MagmaOcean
+                | SurfaceState::GasEnvelope
+                | SurfaceState::Tenuous,
+                _,
+            ) => Self::None,
         }
     }
 }

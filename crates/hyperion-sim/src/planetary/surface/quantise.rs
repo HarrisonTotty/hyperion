@@ -245,9 +245,8 @@ fn unsigned_zero(x: f64) -> f64 {
 /// it (decision-r11-palette-liquids §2, item 5; R10's "Airless is zero pressure"); the inputs'
 /// pressure under every other state, a −0 made +0, so that a zero has one form on the wire.
 ///
-/// Every state but `Airless` keeps its pressure, so P14.T53.c's tenuous state, when it joins
-/// [`SurfaceState`], takes an arm here that keeps its own, positive and below the airless line.
-/// The classes step reads the same figure (R09.T15).
+/// Every state but `Airless` keeps its pressure: P14.T53.c's [`SurfaceState::Tenuous`] keeps its
+/// own, positive and below the airless line. The classes step reads the same figure (R09.T15).
 #[must_use]
 pub(crate) fn header_pressure(inputs: &CoarseInputs) -> Pascals {
     match inputs.surface_state() {
@@ -256,7 +255,8 @@ pub(crate) fn header_pressure(inputs: &CoarseInputs) -> Pascals {
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => Pascals::new(unsigned_zero(inputs.surface_pressure().value())),
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => Pascals::new(unsigned_zero(inputs.surface_pressure().value())),
     }
 }
 

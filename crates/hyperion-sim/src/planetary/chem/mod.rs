@@ -30,6 +30,8 @@
 //!   phase.
 //! - [`escape`]: escape by regime and fractionation (P14.T53.a, in progress), held with the
 //!   greenhouse's refits at generator version 24.
+//! - [`tenuous`]: thin and transient air (P14.T53.c): an ice-held volatile's retention at its
+//!   ice's own temperature and the `Tenuous` state's floor, held at generator version 24.
 //! - Here, the host's C/O and Mg/Si ([`HostAbundances`]), drawn per system on
 //!   `system.abundances` ([`AbundanceDraws`]), since a star's planets share its photospheric
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving
@@ -86,6 +88,7 @@ pub mod partition;
 pub mod photochem;
 pub mod quench;
 pub mod redox;
+pub mod tenuous;
 
 use crate::Seed;
 use crate::id::SystemId;
