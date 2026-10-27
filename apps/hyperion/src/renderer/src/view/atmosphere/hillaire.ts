@@ -1015,7 +1015,8 @@ const STORAGE_SAMPLED =
  * cull): the centre ray's, dispatched first, and the footprint's.
  */
 interface MarchKernels {
-  readonly centre: ComputeHandle;
+  /** The centre ray's, made at its first culled frame where the kernels are made synchronously. */
+  readonly centre: () => ComputeHandle;
   readonly footprint: ComputeHandle;
 }
 
@@ -1089,8 +1090,8 @@ export async function createAtmosphereFrameKernels(
       engine.createComputeAsync(RAY_MARCH_SLOTS_KERNEL),
       engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"], [triangle]),
     ]);
-  const shared: MarchKernels = { centre, footprint };
-  const slots: MarchKernels = { centre: slotsCentre, footprint: slotsFootprint };
+  const shared: MarchKernels = { centre: () => centre, footprint };
+  const slots: MarchKernels = { centre: () => slotsCentre, footprint: slotsFootprint };
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
   let fill: ComputeHandle | null = null;
   return {
@@ -1504,19 +1505,18 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
   let shared: MarchKernels | null = null;
   let slots: MarchKernels | null = null;
   let fill: ComputeHandle | null = null;
+  const pairOf = (centre: KernelPair, footprint: KernelPair): MarchKernels => {
+    let made: ComputeHandle | null = null;
+    return {
+      centre: () => (made ??= engine.createCompute(as(centre))),
+      footprint: engine.createCompute(as(footprint)),
+    };
+  };
   return {
     skyView: engine.createCompute(as(SKY_VIEW_KERNEL)),
     aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_KERNEL)),
-    rayMarch: () =>
-      (shared ??= {
-        centre: engine.createCompute(as(RAY_MARCH_CENTRE_KERNEL)),
-        footprint: engine.createCompute(as(RAY_MARCH_KERNEL)),
-      }),
-    rayMarchSlots: () =>
-      (slots ??= {
-        centre: engine.createCompute(as(RAY_MARCH_SLOTS_CENTRE_KERNEL)),
-        footprint: engine.createCompute(as(RAY_MARCH_SLOTS_KERNEL)),
-      }),
+    rayMarch: () => (shared ??= pairOf(RAY_MARCH_CENTRE_KERNEL, RAY_MARCH_KERNEL)),
+    rayMarchSlots: () => (slots ??= pairOf(RAY_MARCH_SLOTS_CENTRE_KERNEL, RAY_MARCH_SLOTS_KERNEL)),
     rayMarchFill: () => (fill ??= engine.createCompute(as(RAY_MARCH_FILL_KERNEL))),
   };
 }
@@ -1604,8 +1604,11 @@ export class HillaireAtmosphere {
    * since R08.T11.d, the march's target outside the air's area.
    */
   #unread: UnreadTables = NO_UNREAD_TABLES;
-  /** How the march covers its target (R08.T11.d): culled, or the whole frame for the smoke. */
-  #cover: MarchCover = "culled";
+  /**
+   * How the march covers its target (R08.T11.d): culled over the device's shared kernels, the
+   * whole frame over its own until asked ({@link HillaireAtmosphere.setMarchCover}).
+   */
+  #cover: MarchCover;
   /** The latest frame's march area (R08.T11.d), for the smoke's read ({@link HillaireAtmosphere.frameTables}). */
   #area: MarchArea | null = null;
 
@@ -1655,6 +1658,11 @@ export class HillaireAtmosphere {
       );
     }
     this.#frame = createFrameResources(engine, tables, this.#shared);
+    // The tile cull's second large kernel is made off the frame path with the device's shared
+    // kernels; an atmosphere's own make each synchronously on it, where SwiftShader's GPU process,
+    // compiling the two pipelines in one task, was ended as hung under load (exit_code 512,
+    // Chromium's RESULT_CODE_HUNG): those march the whole frame unless the cull is asked (R08.T11.d).
+    this.#cover = this.#shared === null ? "whole frame" : "culled";
     this.#uniforms = Object.fromEntries(
       [...VIEW_MEMBERS, "shell", "marchArea"].map((name) => [name, new Float32Array(4)]),
     );
@@ -1762,9 +1770,11 @@ export class HillaireAtmosphere {
 
   /**
    * Sets how the frames' ray march covers its target from the next frame on (plan R08, R08.T11.d):
-   * `culled`, every atmosphere's from its making, over the air's area under the tile cull; or
-   * `whole frame`, the march over every texel through the footprint's entry point, as before them,
-   * the reference path the smoke page holds the culled march to, byte for byte.
+   * `culled`, over the air's area under the tile cull; or `whole frame`, the march over every
+   * texel through the footprint's entry point, as before them, the reference path the smoke page
+   * holds the culled march to, byte for byte. An atmosphere over the device's shared kernels
+   * (a view's) culls from its making; one with its own marches the whole frame until asked, its
+   * centre ray's kernel made synchronously at its first culled frame.
    */
   setMarchCover(cover: MarchCover): void {
     this.#cover = cover;
@@ -2198,7 +2208,7 @@ export class HillaireAtmosphere {
       };
       const tiles = [area.tilesAcross, area.tilesDown, 1] as const;
       if (culled) {
-        engine.dispatch(march.centre, bindings, tiles, ATMOSPHERE_VIEW_PASS);
+        engine.dispatch(march.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
       }
       engine.dispatch(march.footprint, bindings, tiles, ATMOSPHERE_VIEW_PASS);
     }
