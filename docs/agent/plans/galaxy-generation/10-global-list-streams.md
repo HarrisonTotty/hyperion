@@ -84,7 +84,10 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   `stream_track`, reserved by plan 04; not plan 09's `galaxy_features`), each a new variant of plan
   04's `RequestBody` and `ResponseBody` with an entry in `REQUEST_KINDS`, payload types
   `GlobalEntryWire`, `StreamTrackWire`, `TrackStatusWire { Ready, Pending }`; `SystemOriginWire`
-  gains `stream` and `dwarf_core` variants (`SystemOriginWire` is P09.T39's, not built).
+  gains `stream` and `dwarf_core` variants (`SystemOriginWire` is P09.T39's, not built). The
+  `GlobalFeatures` reply also carries the accreted progenitors' list, and `galaxy_parameters`
+  gains the drawn `halo.discrete_share` and a derived key for the applied share (P10.T10.a, as
+  ruled there).
 - Server: `TubeTableCache` (byte-bounded LRU implementing `TubeLookup`) and a background warm-up
   job. Client: `StreamTrackOverlay` for the galaxy map, `StreamReadout`.
 - Test helpers: `global_list::testing::{pal5_like, gd1_like, sagittarius_like}` stream
@@ -172,7 +175,7 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   it calls `range_query(&job_galaxy, &mut cells, &[], &query)`. IDs resolve through plan 03's
   `resolve` in `compute/systems.rs`, `requests/observe.rs` (`resolve_system`) and `convert.rs`.
   `galaxy_parameters` (`convert.rs` about 810) leaves out `halo.discrete_share` and
-  `accretion.progenitors` as plan 10's (`EXCLUDED_PARAMETERS`, test-only, about 726; Risks). The
+  `accretion.progenitors` as plan 10's (`EXCLUDED_PARAMETERS`, test-only, about 727; T10.a). The
   client's galaxy map is `displays/galaxy/GalaxyMapView.tsx` (its one overlay the dust's) with its
   toggle in `GalaxyMapPanel.tsx`, the chart's readout `SystemReadout.tsx`, and the request hook
   `lib/useServerRequest.ts`, under `apps/hyperion/src/renderer/src/` (re-validated).
@@ -331,8 +334,9 @@ lifetime` (only `ProvisionalFates` implements it); no item is named the evolved 
 ## Tasks
 
 P10.T1 comes first; P10.T2 can run beside it. P10.T3 needs P10.T2. P10.T1, T2.a–c and T3.a–c are
-built. P10.T3.d.a comes next; P10.T3.d.b follows it and may land whenever it is built, before
-25's wiring (`decision-galaxy-25-train`, 2026-10-27, §2.2). P10.T4 follows P10.T3.a–c and
+built. P10.T3.d.a comes next (`decision-galaxy-25-train`, 2026-10-27, §2.2); P10.T3.d.b, the one
+call in `Galaxy` construction, lands with P10.T10.b's registration member (the desktop's rulings
+on this re-validation, issue #123, 2026-10-27, points 1 and 2). P10.T4 follows P10.T3.a–c and
 P10.T3.d.a: not P10.T3.d.b, since it reads no stored φ, and not P09.T29, since it adds
 `CentreModel::as_global_entry` itself if P09.T29 has not (the same ruling). P10.T5 needs P10.T2's
 leapfrog and P10.T3's specifications, not P10.T4's list, so it can run beside P10.T4. P10.T6 needs
@@ -340,11 +344,12 @@ P10.T1 and P10.T5. P10.T7 needs P10.T1 and P10.T3, P10.T3.d.a included, whose sc
 dwarfs' specifications, and can run in parallel with P10.T4–T6; P10.T7.b's supernova classes need
 P09.T33, T34 and T36. P10.T8 needs P10.T6 and P10.T7. P10.T9 follows P10.T4 and P10.T8 and needs
 P09.T29's `CentreMemberSource`. P10.T10 follows P10.T9: P10.T10.a needs P09.T39's `FeatureIdHex`
-and `SystemOriginWire`, and P10.T10.b's registration with the range-query handler is an open point
-(Risks). P10.T11 follows P10.T10 and needs P09.T41.a–b's feature marks and map overlay. P10.T12
-closes the plan: its budget test compares the sampled halo field plus the discrete members with
-the halo's budget, so before 25 it runs under `GalaxyRules::every_25_hold()`, and the field gives
-up φ only where P09.T2.c applies `field_factor` (Risks, an open point). New draws open
+and `SystemOriginWire`, and P10.T10.b's registration with the range-query handler is a member of
+its own with P09.T37 (27, else 28), which carries P10.T3.d.b's call (the same rulings). P10.T11
+follows P10.T10 and needs P09.T41.a–b's feature marks and map overlay. P10.T12 closes the plan:
+its budget test compares the sampled halo field plus the discrete members with the halo's budget,
+so that half waits for the member that carries P10.T3.d.b and P10.T10.b's registration, and for
+P09.T2.c's `field_factor` in the fields (the same rulings, point 1). New draws open
 `Stream::open(seed, tag, key)` on domain tags under `stream.*` and `dwarf.*`, which each task adds
 to the sim's registry `crates/hyperion-sim/src/rng/tags.rs` under its "Plan 10" heading, with the
 keys of design note 14. Each task's acceptance is `just ci` green and its slow tests by name under
@@ -408,8 +413,10 @@ Risks. The step rule, T2.b's energy tests and T2.c's acceptance follow ruling 14
 ### P10.T3 Which debris gets a tube
 
 _T3.a–c built (lane `int10c`, 2026-09-30, on `62cbe2f` at `GENERATOR_VERSION` 15); see "T3.a–c as
-built" in Risks. T3.d is split (`decision-galaxy-25-train`, 2026-10-27, §1 and §2.2): T3.d.a
-lands at the version in force, pure; T3.d.b rides version 25 behind its hold (below)._
+built" in Risks. T3.d is split (`decision-galaxy-25-train`, 2026-10-27, §2.2, as amended by the
+desktop's rulings on this plan's re-validation, issue #123, 2026-10-27, points 1 and 2): T3.d.a
+lands at the version in force, pure; T3.d.b, the one call in `Galaxy` construction, rides with
+P10.T10.b's registration member (below)._
 
 - **P10.T3.a Living globulars.** For each record of `walk_process(Globular)`: pericentre from
   P09.T13; no tube if it lies inside the bar's corotation; T_s per design note 5; tube mass = the
@@ -430,8 +437,9 @@ lands at the version in force, pure; T3.d.b rides version 25 behind its hold (be
   tube in 15–25% of galaxies; 0–3 cores, none in at least a third of galaxies.
 - **P10.T3.d The discrete share.** `discrete_share` per design note 1, stored through
   `FeatureShares::set_halo_discrete`; the halo's smooth components carry 1 − φ of its budget. Split
-  by `decision-galaxy-25-train` (2026-10-27, §1 and §2.2) into a pure part and a held one; both
-  parts' records are T3.d's.
+  by `decision-galaxy-25-train` (2026-10-27, §2.2) into a pure part and the stored share, as
+  amended by the desktop's rulings on this plan's re-validation (issue #123, 2026-10-27, points 1
+  and 2); both parts' records are T3.d's.
   - **P10.T3.d.a The share, pure.** `global_list::discrete_share` per design note 1, as
     `discrete_share(seed: Seed, params: &GalaxyParams, tables: &PotentialTables) -> f64`, in a
     module of its own, `galaxy/global_list/share.rs`, re-exported from `global_list`. It takes the
@@ -442,7 +450,7 @@ lands at the version in force, pure; T3.d.b rides version 25 behind its hold (be
     (T3.d.b). Design note 1's other half, the dwarfs' cold masses scaled down together when the
     drawn share is the smaller, goes where `Debris::generate` collects the dwarfs
     (`global_list/debris.rs` about 77). It is computed from `discrete_share`'s own figures, not
-    from a stored φ, so it is the same under either arm of T3.d.b's hold, and `dwarfs::dwarfs`
+    from a stored φ, so it is the same whether or not a galaxy stores φ, and `dwarfs::dwarfs`
     and its golden `galaxy/global_list/dwarfs.golden` keep the unscaled masses. Nothing generated
     reads `Debris` (only the global list's tests call `Debris::generate`), so the scaling moves no
     wired output. Nothing stores φ yet. Tests: never above the drawn share; globular tubes alone
@@ -453,60 +461,25 @@ lands at the version in force, pure; T3.d.b rides version 25 behind its hold (be
     Acceptance: `just ci`; `cargo test -p hyperion-sim --lib -- galaxy::global_list`; the
     summary's slow test by name under `just test-slow`; `golden_diff.py` lists the new golden
     alone.
-  - **P10.T3.d.b The share stored, behind a hold.** `Galaxy` construction calls
+  - **P10.T3.d.b The share stored, with T10.b's registration.** `Galaxy` construction calls
     `FeatureShares::set_halo_discrete` with `discrete_share(seed, &params, &potential)` after
     `set_class_shares` in `Galaxy::from_params` (`galaxy/mod.rs` about 266–272), where the seed,
     the parameters and the in-plane tables exist and `feature_shares` is still mutable: the
     `FeatureShares` the construction builds and owns, as plan 09's "T1–T6, as built" asks
-    (`Galaxy` lends its own immutably). The call is held behind `HALO_DISCRETE_VERSION` = 25,
-    read through `GalaxyRules::halo_discrete` (`HaloDiscreteRules`: `Held | Discrete`), by the
-    ruling's pattern (§1):
-    - A new `galaxy/rules.rs`, declared in `galaxy/mod.rs` with no `lib.rs` edit, holds
-      `pub(crate) struct GalaxyRules`, one field per hold; `of_version`, a
-      `pub(crate) const fn` of a `GeneratorVersion`, gives each field's new arm from its version
-      up and the held arm below, and the `#[cfg(test)] pub(crate) const fn every_25_hold()` is
-      `of_version(25)`. The first hold to land creates the file; P09.T28.b.b (`kepler_regime`)
-      and P09.T28.d (`kepler_secular`) add the other two fields.
-    - `Galaxy` gains a private `rules: GalaxyRules`, which `from_params` sets from
-      `of_version(GENERATOR_VERSION)` through a private `from_params_with_rules`. A
-      `#[cfg(test)] pub(crate) fn from_params_with_rules(seed, params, rules)` is the tests' door,
-      `pub(crate) fn rules(&self) -> GalaxyRules` the read, and `with_full_potential` keeps the
-      rules. `HALO_DISCRETE_VERSION` sits beside the call that applies the share.
-    - Eligibility, each to hold: E1, the share is read at `Galaxy` construction; E2, it feeds no
-      process-wide static; E3, no `hyperion-fit` table or fingerprint moves (`just fit-check`
-      byte-identical to the base); E4, the held arm is today's code verbatim, one `match` on the
-      field at the one call site, and the hold's commit changes no `.golden`, no `tables.lock`
-      line and no wire type, so that `.claude/skills/sim-determinism/scripts/golden_diff.py` with
-      `--base origin/rendering-and-planets` says "No golden files changed", with `Debug` written
-      by hand if the new field moves a `Debug` digest (`Galaxy` derives it); E5, no payload or
-      protocol type moves; E6, a tripwire, `assert!(GENERATOR_VERSION < HALO_DISCRETE_VERSION)`
-      with a message to delete the constant, its `GalaxyRules` field and the test at 25's bump.
-    - Tests, unit tests since the rules' doors are crate-visible and test-only. In
-      `galaxy::rules::tests`: D3, `the_rules_in_force_are_a_default_galaxy_s` (`of_version` of
-      `GENERATOR_VERSION` equals a default galaxy's `rules()`, and a galaxy from `from_params`
-      equals one from `from_params_with_rules(.., of_version(GENERATOR_VERSION))`), and E6's
-      `the_halo_discrete_hold_ends_at_twenty_five`. In `galaxy::global_list::share::tests`: D1,
-      `a_halo_cell_is_pinned_before_the_hold`, an extension golden of a halo-dominated cell's
-      records at three seeds, blessed by name at the version in force in T3.d.a's commit or one of
-      its own, which the hold's commit leaves unchanged; D2,
-      `the_discrete_share_moves_the_halo_cell`, under `every_25_hold()` or the field alone, a
-      mover count above zero and the share's invariants holding; D4,
-      `the_discrete_arm_is_reproducible`, one seed twice under the new arm; and C1,
-      `the_discrete_share_census` (slow if long), field on against off over a stated sample: the
-      applied φ per seed, the halo layer's counts in three cells before and after, every density
-      finite, the movers by count, the largest move and every change of existence, state or class
-      by ID, recorded in T3.d.b's record (only a blocker on the owner's list goes back to main).
-      D5: the new arm adds arithmetic on the authoritative path, so `just test-wasm` on
-      `hyperion-sim` runs once at the hold's landing, with the D2 test named `pinned`, its
-      wasmtime version recorded. The fast suite's added time is measured and recorded. Filters:
-      `cargo test -p hyperion-sim --lib -- galaxy::rules galaxy::global_list::share`, and C1 by
-      name under `just test-slow` if it is slow.
-    - It rides version 25 (S1): 25's wiring deletes the hold in a checkpoint of its own, blessed
-      at header 24 (C2). A hold that has not landed when 25's wiring starts is renumbered to 26
-      with its tripwire, with no further ruling (C3).
-    - _Open point (Risks, "Re-validated at `e8b5c6f3`", for a ruling):_ at the base nothing reads
-      the stored φ, since P09.T2.c, which applies `field_factor` to the fields, is not built and
-      rides 26, so D2 and C1 find no mover until it lands.
+    (`Galaxy` lends its own immutably). By the desktop's ruling (point 1) it has no hold, no
+    `GalaxyRules` field and no tripwire: nothing reads `FeatureShares::phi` or `field_factor`
+    until P09.T2.c applies them to the field at 26, so a hold would hold nothing. Nor does the
+    call land on its own. If it did, P09.T2.c's bump would take φ out of the halo's field at 26
+    while the stream and core members it stands for are not served before P10.T10.b's
+    registration, and the halo's budget would be short across that gap, which P09.T38's budget
+    test at 27 would see. So T3.d.b, the one call, rides with P10.T10.b's registration member
+    (point 2), with P09.T37 at 27 or the first train after both are ready, and the halo's field
+    gives up φ in the train where its members are first served, the rule R06.T16.a already
+    applies to the features. Until then no built galaxy calls it, and P09.T2.c's bump leaves the
+    halo's discrete part at zero. Its census goes with that member's: the applied φ per seed, the
+    halo layer's counts in three cells before and after, and every density finite
+    (`the_discrete_share_census`, a unit test in `galaxy::global_list::share::tests`, slow if
+    long, by name under `just test-slow`). Nothing of T3.d lands inside the potential freeze.
 
 ### P10.T4 The global list and its bounding shells
 
@@ -547,14 +520,17 @@ which T4 checks (Risks, "T3.a–c as built").
 
 - **P10.T5.a Release schedule.** About 2,000 tracers per stream, half from each Lagrange point,
   released at step boundaries by stratified sampling of the mass-loss history over [−T_s, 0]
-  (constant fractional rate for a living globular, ending at the dissolution time for an orphan,
-  pulsed at pericentres for a dwarf), each with weight = mass-loss rate × interval. Tests: weights
-  sum to the tube's mass; an orphan releases nothing after its dissolution. The schedule reads the
-  spec's `StreamSpec::mass_loss()`, a `MassLoss` (`global_list/spec.rs` about 374): `Steady`, a
-  living globular's constant rate from its history (P09.T13), `Dissolved { ago }` for an orphan
-  and `Pulsed { fraction, last_pericentre, pericentres }` for a dwarf (Risks, "T3.a–c as built").
-  "Constant fractional rate" against `Steady`'s constant rate is an open point (Risks,
-  "Re-validated at `e8b5c6f3`").
+  (constant rate (`MassLoss::Steady`, as P10.T3.a built it) for a living globular, ending at the
+  dissolution time for an orphan, pulsed at pericentres for a dwarf), each with weight = mass-loss
+  rate × interval. Tests: weights sum to the tube's mass; an orphan releases nothing after its
+  dissolution. The schedule reads the spec's `StreamSpec::mass_loss()`, a `MassLoss`
+  (`global_list/spec.rs` about 374): `Steady`, a living globular's constant rate from its history
+  (P09.T13) over the whole stripping time, `Dissolved { ago }` for an orphan and
+  `Pulsed { fraction, last_pericentre, pericentres }` for a dwarf (Risks, "T3.a–c as built").
+  _Deviation from the plan's text (the desktop's ruling on this re-validation, issue #123,
+  2026-10-27, point 5):_ "constant fractional rate" became "constant rate (`MassLoss::Steady`, as
+  P10.T3.a built it)", so the tracers' weights sum to the tube's mass, rate × T_s, exactly; a
+  fractional rate would change both the release schedule and what the tube's mass means.
 - **P10.T5.b Release and integration.** The progenitor is integrated backwards from its epoch state
   to −T_s and forwards again; at each release the tracer starts at the tidal radius from the
   progenitor along the galactocentric radius, with the offsets in position and velocity and their
@@ -602,9 +578,10 @@ which T4 checks (Risks, "T3.a–c as built").
   segregation (q = 1) and no remnant losses; ages from a `StarFormationHistory` of the core's own
   (an old burst at 10–13 Gyr plus a tail that lasts longer the more massive the dwarf, ending at
   accretion); metallicity from the dwarfs' mass–metallicity relation, [Fe/H] = −1.69 + 0.30 ×
-  log₁₀(M★ ÷ 10⁶ M☉) with 0.17 dex of scatter among members (Kirby et al. 2013, ApJ 779, 102,
-  eq. 4, the mean ⟨[Fe/H]⟩ of a dwarf's stars; a source the brainstorm does not list; the 0.17
-  dex is an open point, Risks); bulk motion from the core's integrated orbit at the epoch and
+  log₁₀(M★ ÷ 10⁶ M☉) (Kirby et al. 2013, ApJ 779, 102, eq. 4, the mean ⟨[Fe/H]⟩ of a galaxy's
+  stars; a source the brainstorm does not list), the cores' means 0.17 dex about Eq. 4 (the rms
+  between galaxies), and members σ(M★) about their core's mean (below); bulk motion from the
+  core's integrated orbit at the epoch and
   the Plummer dispersion. Pure functions of a `DwarfCoreSpec`; nothing is placed yet. Tests: the age
   distribution of a 10⁸ M☉ core spreads over more than 2 Gyr; the profile integrates to the spec's
   system count; the extent stays under the brainstorm's 20,000 ly. _In the code's names:_ the grid
@@ -620,12 +597,27 @@ which T4 checks (Risks, "T3.a–c as built").
   09's `features/interior/table.rs`, leaving every cluster's grid as it is, bit for bit (plan
   09's "Phase 5 as built", "Plan 10 (P10.T7.a)"). Files: `galaxy/global_list/dwarf_core.rs`
   (new) and `galaxy/features/interior/table.rs`. The orbit's step is the spec's
-  (`SphericalOrbit::fixed_step`).
+  (`SphericalOrbit::fixed_step`). _The metallicity, as ruled (the desktop's ruling on this
+  re-validation, issue #123, 2026-10-27, point 4):_ a core's mean is Eq. 4 at the progenitor's
+  stellar mass at infall (`DwarfCoreSpec::accreted_mass`, not the stripped remnant's `mass`),
+  plus one Gaussian offset of 0.17 dex, drawn on the core's own stream under a new `dwarf.*` tag
+  that T7.a registers. The paper's sample ends at 5 × 10⁸ M☉, so above that the doc comment says
+  Eq. 4 is extrapolated; it gives −0.64 at 10⁹·⁵ M☉. Members are drawn about the core's mean (in
+  T7.b) as a Gaussian in [Fe/H] with σ = max(0.45 − 0.06 log₁₀(M★ ÷ 1.6 × 10⁵ M☉), 0.32), Kirby et
+  al. 2011's eq. 13, an error-corrected trend with luminosity, at the M★ ÷ L_V of 1.6 that Kirby
+  et al. 2013 use (Woo et al. 2008). It gives 0.46 at 10⁵ M☉, 0.40 at 10⁶ and 0.34 at 10⁷, and
+  is held at 0.32 from about 10⁷·⁴ M☉, where the dSph data end; the hold is marked as an
+  extrapolation. _Deferred findings (2026-10-13 rule), from P10.T7.a's ruling, recorded and not
+  built:_ the metal-poor skew of the luminous dwarfs (−0.7 to −1.4), which a Gaussian lacks; the
+  dIrrs' 0.37–0.49 near 10⁸ M☉, against the 0.32 held; the stripped core's possibly more
+  metal-rich inner stars; and the Leaky Box (Kirby et al. 2013, eq. 5) as a sourced skewed
+  alternative, too broad for the luminous dSphs. None is a blocker.
 - **P10.T7.b Members.** Members are placed and resolved with plan 09's machinery (P09.T21, T22)
   under `DwarfCoreMemberId`, with records per design note 13 and a `FeatureLevelList` for catalogue
   classes, which holds the supernova classes of plan 09 (Type Ia from the delay-time distribution on
   the core's own history; core collapse only while the history still forms stars).
-  `resolve_dwarf_core_member`, reached from `resolve_with`. Tests: members are not coeval; profile
+  `resolve_dwarf_core_member`, reached from `resolve_with`. Each member's [Fe/H] is drawn about
+  its core's mean with T7.a's σ(M★) (as ruled there). Tests: members are not coeval; profile
   by Kolmogorov–Smirnov; no cell above 8,192 candidates; every member ID round-trips through
   `SystemId::from_raw` (no inner cell, band 7 only with level and cell zero); order independence;
   goldens. _At the base:_ plan 09's supernova processes (P09.T33, T34, T36) are not built, so the
@@ -692,8 +684,22 @@ centre's part waits on P09.T29's `CentreMemberSource`, which P09.T28.b.a must pr
   `FeatureIdHex` and `SystemOriginWire` exist nowhere: they are P09.T39's, which T10.a waits on.
   `REQUEST_KINDS`, `RequestBody` and `ResponseBody` are `crates/hyperion-protocol/src/envelope.rs`
   (about 368, 267 and 315); a new kind or an optional field needs no `PROTOCOL_VERSION` bump (plan
-  04's design note 15). Sending `halo.discrete_share` and the accretion list, which plan 04 leaves
-  to this plan, is an open point (Risks).
+  04's design note 15). _The two parameters plan 04 leaves to this plan (the desktop's ruling on
+  this re-validation, issue #123, 2026-10-27, point 3):_
+  - `halo.discrete_share` is the drawn ceiling (0.085 at Milky Way values); what is held at zero
+    is the applied share. T10.a sends the drawn value as a new entry in the existing grouped
+    `galaxy_parameters` list, origin drawn: plan 04's design note 11's growing key set, so no
+    bump under its design note 15. It sends the applied share as a second, derived key, first in
+    the build that carries P10.T3.d.b's member, since before then the applied share is zero by
+    construction and a non-zero key would misstate the model.
+  - `accretion.progenitors` is a list, not a key and value, so it does not go in
+    `galaxy_parameters`. The `GlobalFeatures` reply carries the accreted progenitors as a list of
+    their own beside the entries: the last major merger and the recent progenitors, each with its
+    stellar mass, its accretion time, its orbit's pericentre and apocentre, and its entry number
+    if it has a tube or a core. It is a new type inside a new request kind, so there is no bump.
+  - When T10.a sends them, it removes both keys from the server's `EXCLUDED_PARAMETERS`
+    (`crates/hyperion-server/src/convert.rs` about 727) and raises the parameter-count test's
+    `PARAMETERS_ACCOUNTED_FOR` (about 795) to match.
 - **P10.T10.b Server.** The server keeps the `GlobalList` with each universe (built on the CPU pool
   when the universe opens), serves tube tables from `TubeTableCache` over plan 04's `ByteLru`,
   builds on a miss inside the job that asked, registers `GlobalListSource` with the range-query
@@ -706,8 +712,15 @@ centre's part waits on P09.T29's `CentreMemberSource`, which P09.T28.b.a must pr
   (`crates/hyperion-server/src/requests/galaxy.rs`, `systems`, about 225–241) registers no source
   (`range_query(&job_galaxy, &mut cells, &[], &query)`); plan 09's sources and caches are
   P09.T40.a's and the merge P09.T37's, neither built. So "in place of plan 09's bare
-  `CentreMemberSource`" holds only once P09.T40 has registered it, and whether this registration
-  moves the range query ahead of P09.T37 is an open point (Risks). The galaxies are
+  `CentreMemberSource`" holds only once P09.T40 has registered it. _T10.b splits (the desktop's
+  ruling on this re-validation, issue #123, 2026-10-27, point 2):_ registering `GlobalListSource`
+  with the range-query handler moves the range query's census and registers the centre's source
+  ahead of P09.T37, so that registration, with the list's registration wherever the sky census by
+  then reads feature sources (R06.T16.a's pattern), is a member of its own with P09.T37 (27, else
+  28), and it carries P10.T3.d.b's call. The rest lands as additions: the list kept per universe,
+  `TubeTableCache`, the warm-up, `resolve_with` at the server's resolve call sites, and the
+  `GlobalFeatures` and `StreamTrack` handlers; its integration test runs the sim's `range_query`
+  with the source passed in until the registration lands. The galaxies are
   `compute/galaxies.rs`'s `GalaxyCache`, the pool `compute/pool.rs`'s `CpuPool` (the warm-up at
   `Priority::Bulk`), the byte bound `cache/byte_lru.rs`'s `SharedByteLru`; the IDs that go through
   `resolve_with` are resolved today by `resolve` in `compute/systems.rs`, `requests/observe.rs`
@@ -729,6 +742,9 @@ pending state and the readouts. _At the base:_ the map's one overlay is the dust
 (`apps/hyperion/src/renderer/src/displays/galaxy/GalaxyMapView.tsx`, its toggle in
 `GalaxyMapPanel.tsx`), no feature mark is drawn yet (P09.T41.a–b), and the chart's readout is
 `SystemReadout.tsx`, which needs P09.T39's `SystemOriginWire` to name a member's stream or core.
+T11 also shows T10.a's list of the accreted progenitors in the galaxy panel, under the UX guide's
+list and readout rules, and its labels go to a sign-off agent (the desktop's ruling on this
+re-validation, issue #123, 2026-10-27, point 3).
 
 ### P10.T12 Statistical tests and cost figures
 
@@ -742,10 +758,10 @@ about a thousandth of the reference density and roughly 7–15 times the smooth 
 recorded, and a value outside it is a finding, since the brainstorm's range is an estimate (see
 Risks). **Figures:** globular tubes 30,000–160,000 ly long, 100–400 ly wide, 0.5–3 km/s; dwarf tubes
 1,000–6,000 ly wide, 10–25 km/s, several wraps. The benches of P10.T4, T6.c and T9 are recorded in
-the plan's doc comment with the machine they ran on. Before version 25 the budget test's halo field
-is built under `GalaxyRules::every_25_hold()` (`Galaxy::from_params_with_rules`, P10.T3.d.b), so
-it is a unit test of the sim, and the field gives up φ only where P09.T2.c applies
-`field_factor` (train 26; Risks, "Re-validated at `e8b5c6f3`", an open point).
+the plan's doc comment with the machine they ran on. The budget test's second half, the sampled
+halo field plus the discrete members, waits for the member that carries P10.T3.d.b's call and
+P10.T10.b's registration, and for P09.T2.c's `field_factor` in the fields, not just for P09.T2.c
+(the desktop's ruling on this re-validation, issue #123, 2026-10-27, point 1).
 
 ## Verification
 
@@ -753,7 +769,7 @@ it is a unit test of the sim, and the field gives up φ only where P09.T2.c appl
   T3.d.b's census if it is slow, and T12. _No workflow returns (plan 01's "T12 is dropped";
   ruling 146.5):_ `just ci` on x86-64, which runs the sim's fast suites under `wasm32-wasip1` too
   (R04.T7), and `just test-wasm` on `hyperion-sim` at each orbit or tube re-bless, at T3.d.b's
-  landing (its D5) and at the plan's close, its wasmtime version recorded (P10.T2.c).
+  landing and at the plan's close, its wasmtime version recorded (P10.T2.c).
 - The brainstorm's Testing lines in scope: stream members stay in their tubes (P10.T12); budgets
   (P10.T3.d, T12); order independence and goldens (P10.T4, T6.c, T8.b); determinism of the leapfrog
   and the tube table on x86-64 and AArch64 (P10.T2.c, T6.c; nothing checks AArch64, and
@@ -766,20 +782,22 @@ it is a unit test of the sim, and the field gives up φ only where P09.T2.c appl
 
 ## Generator version
 
-One change of output, P10.T3.d.b's, when `Galaxy` construction stores the derived discrete share.
-It is held behind `HALO_DISCRETE_VERSION` = 25, read through `GalaxyRules::halo_discrete`, and
-rides version 25 (S1): 25's wiring deletes the hold in a checkpoint of its own blessed at header
-24, or, if the hold has not landed when that wiring starts, it is renumbered to 26 with its
-tripwire (C3) (`decision-galaxy-25-train`, 2026-10-27, §1 and §2.2). P10.T3.d.a and P10.T4–T12
-add output on new tags and kinds and move nothing that existed, so they land at the version in
-force with their new goldens at its header, unless a merge moves the range query, which then rides
-train 27 or 28 (decision-bump-plan-after-22, 2026-10-14, §3, amended to 2026-10-27; P10.T10.b's
-registration, Risks). The halo's field gives up φ only where plan 09's `field_factor` is applied,
-P09.T2.c (train 26; Risks, "Re-validated at `e8b5c6f3`"). Stream and core members are additions
-and move nothing. Reserved: the `10` sub-kind `11`; the three unused bits of a stream member's ID;
-stream numbers above the list's length;
-`dwarf.*` and `stream.*` domain tags. Parameters that belong to the generator version and are
-named as such in code: the streams per globular (1.5, from `tables::streams`), the orphan mass
+Plan 10's one change to generated output is one train member: P10.T3.d.b's call in `Galaxy`
+construction, which stores the derived discrete share, with P10.T10.b's registration of
+`GlobalListSource` with the range-query handler (and with the sky census's feature sources,
+R06.T16.a's pattern). It rides with P09.T37 at 27, or the first train after both are ready, and
+no longer rides 25 (the desktop's rulings on this re-validation, issue #123, 2026-10-27, points 1
+and 2, amending `decision-galaxy-25-train` §2.2). Until then no built galaxy stores φ, and
+P09.T2.c's bump at 26, which applies `field_factor` to the fields, leaves the halo's discrete part
+at zero; the halo's field gives up φ in the train where its members are first served. Nothing of
+T3.d lands inside the potential freeze. P10.T3.d.a and the rest of P10.T4–T12 add output on new
+tags and kinds and move nothing that existed, so they land at the version in force with their new
+goldens at its header (decision-bump-plan-after-22, 2026-10-14, §3, amended to 2026-10-27).
+Stream and core members are additions in the sim, and their registration is what moves the
+census. Reserved: the `10` sub-kind `11`; the three unused bits of a stream member's ID; stream
+numbers above the list's length; `dwarf.*` and `stream.*` domain tags. Parameters that belong to
+the generator version and are named as such in code: the streams per globular (1.5, from
+`tables::streams`), the orphan mass
 law, η's constant, the step rule, the tracer count and kernel width, the gap noise's amplitude and
 wavelengths, the cut at four widths, the dwarfs' stripping fraction, the shell-widening factor.
 
@@ -1082,7 +1100,8 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
   far as its inputs allow. The lane then merged `f7b6f6e7`, which splits plans R09's and R10's
   records and touches nothing the sweep read.
   - _What changed, and why._ Names, signatures, files and commands are corrected to the code, and
-    the ruled split is written in:
+    the ruled split and the desktop's five rulings on this re-validation's open points (below) are
+    written in:
     - Provides: `discrete_share` takes the `Seed` (T3's record: a dwarf's cold mass depends on its
       drawn stripping fraction, and `dwarfs::dwarfs` takes the seed, the parameters and the
       in-plane tables); `Debris` is listed, which T4 builds from and P15.T11 observes; the test
@@ -1095,26 +1114,28 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
       P09.T29; T5 beside T4, since it needs T2's leapfrog and T3's specifications, not the list;
       T7 after T3.d.a, whose scaling reaches the dwarfs' specifications; each task's dependencies
       on plan 09 (T7.b on P09.T33, T34 and T36, T9 on P09.T29, T10.a on P09.T39, T11 on P09.T41.a–b
-      and P09.T39); T12's budget test under `every_25_hold()`. A common acceptance is added,
-      since no unbuilt task had one and a bare `global_list` filter misses tests (T1's record).
+      and P09.T39); T3.d.b and T10.b's registration as one member with P09.T37; T12's budget half
+      after that member. A common acceptance is added, since no unbuilt task had one and a bare
+      `global_list` filter misses tests (T1's record).
     - Tasks: T3's status line; T3.d.a and T3.d.b; T4's note; the code's names, files and binding
       records in T5.a–b, T6.c, T7.a–b, T8.c, T9, T10.a–b, T11 and T12.
     - Verification and Generator version: by the ruling, and with no CI workflow (plan 01's "T12
       is dropped"; R04.T7 runs the sim's fast suites under `wasm32-wasip1` in `just ci`).
-  - _The ruled split and T4's note_ (`decision-galaxy-25-train`, 2026-10-27, §1 and §2.2). T3.d.a,
-    `discrete_share` with its tests and the 2,000-seed golden summary, is pure and lands now.
-    Design note 1's scaling of the dwarfs' cold masses goes with it, in `Debris::generate`, from
-    the share's own figures, since nothing generated reads `Debris` and `dwarfs.golden` keeps the
-    unscaled masses: no wired output moves. T3.d.b stores the share at `Galaxy` construction
-    behind `HALO_DISCRETE_VERSION` = 25, read through `GalaxyRules::halo_discrete`, and rides 25,
-    else 26 (C3). T4 reads only `CentreModel::as_global_entry()`, adds it at plan 09's Provides
-    signature if P09.T29 has not, moves no output, and waits on P10.T3, not on P09.T29.
+  - _The ruled split and T4's note_ (`decision-galaxy-25-train`, 2026-10-27, §2.2, as amended by
+    the desktop's rulings below). T3.d.a, `discrete_share` with its tests and the 2,000-seed golden
+    summary, is pure and lands now. Design note 1's scaling of the dwarfs' cold masses goes with
+    it, in `Debris::generate`, from the share's own figures, since nothing generated reads
+    `Debris` and `dwarfs.golden` keeps the unscaled masses: no wired output moves. T3.d.b, the one
+    call that stores the share at `Galaxy` construction, has no hold and rides with T10.b's
+    registration member, with P09.T37 at 27 or the first train after both are ready. T4 reads only
+    `CentreModel::as_global_entry()`, adds it at plan 09's Provides signature if P09.T29 has not,
+    moves no output, and waits on P10.T3, not on P09.T29.
   - _Pending re-validation:_ T7.b waits on P09.T33, T34 and T36 for its feature-level classes;
     T9 on P09.T29's `CentreMemberSource`, which waits on P09.T28.b.a; T10.a on P09.T39's
-    `FeatureIdHex` and `SystemOriginWire`; T10.b on P09.T40 and, for its registration, P09.T37;
-    T11 on P09.T41.a–b and P09.T39; T12's budget test on P09.T2.c (open point 1). T5.b, T6 and T8
-    use this plan's own sketches (the spray, the tube table, the members), re-checked as each
-    earlier task lands.
+    `FeatureIdHex` and `SystemOriginWire`; T10.b on P09.T40 and, for its registration member,
+    P09.T37; T11 on P09.T41.a–b and P09.T39; T12's budget half on that member and on P09.T2.c.
+    T5.b, T6 and T8 use this plan's own sketches (the spray, the tube table, the members),
+    re-checked as each earlier task lands.
   - _Records now stale in part, left as written:_
     - "T3.a–c as built" defers T3.d "until after v16" and says its figures are re-measured on the
       v16 commit. The code still pins v15's, marked provisional until the potential of v16 lands:
@@ -1136,6 +1157,8 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
     - "Re-validated at `941d80b` for P10.T1": `tables::streams` exists and is registered
       (P15.T11.a); `set_halo_discrete`'s caller is T3.d.b's; `GlobalListMember` and an evolved
       mass function still do not exist.
+    - "Fardal et al.'s constants and Kirby et al.'s relation": Kirby et al.'s is re-checked at
+      source and ruled (ruling 4, in T7.a); Fardal et al.'s stay T5.b's to check.
   - _Brainstorm drift:_ four commits touch the brainstorm since `9d955b26`. `27e90fa0`
     (P11.T8.e.b) gives the centre's feature-level list a 16-bit index under the spare band value;
     the stream and dwarf-core layouts that Provides and T7.b's ID test name are unchanged, a dwarf
@@ -1157,7 +1180,7 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
       no halo mass;
     - plan 02's recent-progenitor apocentres, `ORBIT_APOCENTRE`'s 2–20 × 10⁴ ly against 1–5 × 10⁵
       (T3.c): a change to plan 02's table with a bump, of drawn galaxy parameters whose
-      per-progenitor list plan 04 leaves to this plan to send (plan 04, about 947; open point 3),
+      per-progenitor list plan 04 leaves to this plan to send (plan 04, about 947; ruling 3),
       and the tests' `revalidated` orbits change with it;
     - "0–3 cores" (T3.c), 2.6% of galaxies over three on the moved orbits, which follows the
       apocentres and the reading of "0–3";
@@ -1167,24 +1190,30 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
 
     None is on the owner's list of blockers.
 
-  - _Open points, for a ruling_ (posted on issue #123, 2026-10-27; the plan's text on each stands):
-    - _1. T3.d.b's hold moves nothing at the base._ Nothing outside `features/shares.rs` reads
-      `phi` or `field_factor`, since P09.T2.c is not built and rides 26, so storing φ moves no
-      generated output and D2 and C1 find no mover; T12's budget test needs the same wiring.
-      Lean: T3.d.b lands pure, with no hold, and the halo gives up φ at P09.T2.c's bump in 26.
-    - _2. T10.b's registration._ The server registers no source today, and registering
-      `GlobalListSource` with the centre as entry 0 would register the centre ahead of P09.T37
-      and add its counts to the census: a move of the range query. Lean: that registration rides
-      with P09.T37 (train 27, else 28), and the rest of T10.b lands as additions.
-    - _3. Plan 04's two parameters._ `halo.discrete_share` and `accretion.progenitors` are left to
-      plan 10 by plan 04 (`EXCLUDED_PARAMETERS`), and no task here sends or shows them. Lean: T10.a
-      sends both as optional `galaxy_parameters` fields and T11 shows the progenitor list.
-    - _4. Kirby et al.'s 0.17 dex._ Their eq. 4 is the plan's relation for the mean ⟨[Fe/H]⟩, but
-      the 0.17 dex is the rms of the galaxies' means about it; a dwarf's own stars spread by
-      0.32–0.66 dex (their Table 4). Lean: each core's mean takes the 0.17 dex once, and its
-      members spread by about 0.3–0.5 dex for M★ above 10⁶ M☉, the figure the owner's to rule.
-    - _5. T5.a's "constant fractional rate"_ against T3.a's `MassLoss::Steady`, a constant rate
-      whose product with T_s is the tube's mass. Lean: T5.a releases by the spec as built.
-  - _A risk for main:_ if T3.d.b misses 25, C3 renumbers it to 26, and it would land inside the
-    potential freeze, which covers the halo mixture (decision-bump-plan-after-22 §2.3). Open point
-    1's lean would remove it.
+  - _Open points, ruled_ (raised on issue #123 and ruled by the desktop the same day, 2026-10-27;
+    each is written into the plan as ruled, and is closed):
+    - _1. T3.d.b's hold would hold nothing._ Nothing outside `features/shares.rs` reads `phi` or
+      `field_factor` until P09.T2.c applies them at 26. _Amended:_ T3.d.b has no hold, no
+      `GalaxyRules` field and no tripwire, and does not land on its own: stored now, P09.T2.c's
+      bump would take φ out of the halo's field before the members it stands for are served, a
+      shortfall P09.T38's budget test at 27 would see. It rides with T10.b's registration member,
+      its census goes with that member's, and T12's budget half waits for it (T3, T3.d.b, the
+      ordering paragraph, T12, Generator version).
+    - _2. T10.b's registration moves the range query._ _Accepted, with point 1 folded in:_ the
+      registration, with the sky census's feature sources where they are read by then, is a
+      member of its own with P09.T37 (27, else 28) and carries T3.d.b's call; the rest of T10.b
+      lands as additions (T10.b).
+    - _3. Plan 04's two parameters._ _Amended:_ T10.a sends the drawn `halo.discrete_share` as a
+      grouped `galaxy_parameters` entry, and the applied share as a derived key from the build that
+      carries point 1's member; `GlobalFeatures`' reply carries the accreted progenitors' list, and
+      T11 shows it, its labels to a sign-off agent; both keys leave `EXCLUDED_PARAMETERS` then.
+      Plan 04's two reasons are corrected in main's next docs batch (T10.a, T11, Provides).
+    - _4. Kirby et al.'s 0.17 dex_ is the rms of the galaxies' means about eq. 4, not a spread
+      among one dwarf's stars. _Amended:_ a core's mean is eq. 4 at its infall mass plus one 0.17
+      dex offset on a new `dwarf.*` tag, and members spread by Kirby et al. 2011's σ(M★) about
+      it, held at 0.32 dex as an extrapolation; four deferred findings are recorded, none a
+      blocker (T7.a, T7.b).
+    - _5. T5.a's "constant fractional rate"._ _Accepted:_ T5.a releases by the spec's `MassLoss`
+      as built, a constant rate, and the plan-text deviation is recorded there (T5.a).
+  - _Lead 5's risk, settled:_ the potential freeze from 25 to 26 covers the halo mixture
+    (decision-bump-plan-after-22 §2.3), and by ruling 1 nothing of T3.d lands inside it.
