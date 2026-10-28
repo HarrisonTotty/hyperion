@@ -14,6 +14,8 @@
 //! - `FeatureCatalogue::cell` of an inner-disc feature cell, 10 ms, and the walk of every
 //!   globular, 0.3 s (plan 09, P09.T3.c). Until phase 3 supplies their density the globular walk
 //!   visits 32,768 empty cells.
+//! - `global_list::discrete_share` of the Milky Way fixture, from its in-plane tables: under a
+//!   millisecond (plan 10, P10.T3.d.a).
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -206,7 +208,28 @@ fn features(c: &mut Criterion) {
     group.finish();
 }
 
+/// The halo's discrete share of the Milky Way fixture, from its parameters, seed and in-plane
+/// tables (plan 10, P10.T3.d.a): under a millisecond.
+fn global_list(c: &mut Criterion) {
+    use hyperion_sim::galaxy::global_list::discrete_share;
+    let params = GalaxyParams::milky_way_like();
+    let tables = PotentialTables::in_plane(&MassModel::new(&params));
+    let mut group = c.benchmark_group("global_list");
+    group.bench_function("discrete_share", |b| {
+        b.iter(|| discrete_share(black_box(Seed::new(7)), black_box(&params), &tables));
+    });
+    group.finish();
+}
+
 criterion_group!(
-    galaxy, potential, params, fields, bounds, handle, map, features
+    galaxy,
+    potential,
+    params,
+    fields,
+    bounds,
+    handle,
+    map,
+    features,
+    global_list
 );
 criterion_main!(galaxy);

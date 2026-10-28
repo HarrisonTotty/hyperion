@@ -15,7 +15,11 @@
 //! [`Debris::generate`] numbers them as Design note 12 says: the living globulars in the walk's
 //! order, the orphans in theirs, then the dwarfs by accretion time, the most recent first, ties
 //! by progenitor number; a core takes its progenitor's place among those that keep one, in the
-//! same order. Every figure depends on the potential, so a change to the mass model moves them
+//! same order. When the halo's drawn discrete share is below the physical share, the dwarfs'
+//! tube and core masses are scaled down together to meet it ([`share`](super::share), Design note
+//! 1); [`dwarfs`](super::dwarfs) itself keeps them unscaled. A tube scaled to nothing is then
+//! dropped, and a core scaled under [`CORE_MIN_SYSTEMS`] too, without letting a fifth core take
+//! its number. Every figure depends on the potential, so a change to the mass model moves them
 //! all.
 
 use crate::coords::GalacticPosition;
@@ -26,8 +30,9 @@ use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureMarks, bulk_ve
 use crate::galaxy::features::kinds::globular::history;
 use crate::units::{LightYears, SolarMassesPerYear};
 
-use super::dwarfs::dwarfs;
+use super::dwarfs::{CORE_MIN_SYSTEMS, DwarfDebris, dwarfs};
 use super::orphans::orphans;
+use super::share::{ShareFigures, scale_cold_masses};
 use super::spec::{
     ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec, stripping_time,
 };
@@ -81,12 +86,11 @@ impl Debris {
         );
         let living = living_globulars(galaxy);
         let mut dwarfs = dwarfs(galaxy.seed(), galaxy.params(), galaxy.potential());
-        dwarfs.sort_by(|a, b| {
-            a.accreted
-                .value()
-                .total_cmp(&b.accreted.value())
-                .then(a.progenitor.cmp(&b.progenitor))
-        });
+        in_list_order(&mut dwarfs);
+        // Design note 1: when the drawn share is the smaller, the dwarfs' cold masses are scaled
+        // down together to meet it, from the share's own figures (P10.T3.d.a).
+        let scale = ShareFigures::of(galaxy.params(), galaxy.potential(), &dwarfs).dwarf_scale();
+        scale_cold_masses(&mut dwarfs, scale);
         let limit = usize::from(StreamNumber::LIMIT);
         let dwarf_tubes = dwarfs.iter().filter(|d| d.tube.is_some()).count();
         let mut streams = living;
@@ -96,14 +100,24 @@ impl Debris {
         let orphans = orphans(galaxy, living, room);
         streams.extend(orphans);
         let mut cores = Vec::new();
-        let mut cores_beyond_limit = 0;
+        let (mut placed, mut cores_beyond_limit) = (0, 0);
         for d in dwarfs {
-            if let Some(tube) = d.tube.filter(|_| streams.len() < limit) {
+            // A tube the share scaled to nothing is dropped, as `dwarfs` gives none of no mass.
+            if let Some(tube) = d
+                .tube
+                .filter(|t| t.mass.value() > 0.0 && streams.len() < limit)
+            {
                 streams.push(tube);
             }
             if let Some(core) = d.core {
-                if cores.len() < usize::from(DwarfCoreNumber::LIMIT) {
-                    cores.push(core);
+                // The first four in the list's order take the core numbers, as the share counts
+                // them; one the share scaled under the floor is dropped and leaves its number to
+                // none.
+                if placed < DwarfCoreNumber::LIMIT {
+                    placed += 1;
+                    if core.systems >= CORE_MIN_SYSTEMS {
+                        cores.push(core);
+                    }
                 } else {
                     cores_beyond_limit += 1;
                 }
@@ -140,6 +154,17 @@ impl Debris {
     pub fn cores_beyond_limit(&self) -> u32 {
         self.cores_beyond_limit
     }
+}
+
+/// Puts `dwarfs` in the list's order (Design note 12): by accretion time, the most recent first,
+/// ties by progenitor number.
+pub(crate) fn in_list_order(dwarfs: &mut [DwarfDebris]) {
+    dwarfs.sort_by(|a, b| {
+        a.accreted
+            .value()
+            .total_cmp(&b.accreted.value())
+            .then(a.progenitor.cmp(&b.progenitor))
+    });
 }
 
 /// The living globulars with a tube, in the catalogue's walk order, numbered 0 until the list

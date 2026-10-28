@@ -63,6 +63,29 @@ pub struct MassLaw {
     pub range_solar_masses: (f64, f64),
 }
 
+impl MassLaw {
+    /// The law's mean mass, M☉, in closed form.
+    ///
+    /// With `z = (log₁₀ M − log₁₀ M̃) ÷ σ` a standard normal cut to `[a, b]` and `t = σ ln 10`,
+    /// `E[M] = M̃ e^(t² ÷ 2) (Φ(b − t) − Φ(a − t)) ÷ (Φ(b) − Φ(a))`, the cut normal's
+    /// moment-generating function. [`MASS_LAW`]'s is 1.63 × 10⁴ M☉, the mass plan 10's Design
+    /// note 1 gives every globular tube (P10.T3.d.a).
+    #[must_use]
+    pub fn mean_solar_masses(&self) -> f64 {
+        let (lo, hi) = self.range_solar_masses;
+        let centre = math::log10(self.median_solar_masses);
+        let sigma = self.scatter_dex;
+        let cdf = |x: f64| 0.5 * math::erfc(-x * core::f64::consts::FRAC_1_SQRT_2);
+        let (a, b) = (
+            (math::log10(lo) - centre) / sigma,
+            (math::log10(hi) - centre) / sigma,
+        );
+        let t = sigma * core::f64::consts::LN_10;
+        self.median_solar_masses * math::exp(0.5 * t * t) * (cdf(b - t) - cdf(a - t))
+            / (cdf(b) - cdf(a))
+    }
+}
+
 /// The largest apocentre an orphan's progenitor may have, ly (P10.T3.b).
 pub const APOCENTRE_LIMIT_LY: f64 = 1e6;
 
@@ -311,6 +334,20 @@ mod tests {
                 .iter()
                 .all(|&r| (0.0..=APOCENTRE_LIMIT_LY * (1.0 + 1e-12)).contains(&r))
         );
+    }
+
+    #[test]
+    fn the_mass_law_s_mean_is_its_quantile_s_average() {
+        // The quantile averaged over u by a midpoint rule of 2²⁰ points: the mean to the rule's
+        // error, which the law's steep ends keep near 10⁻⁷.
+        let n = 1_u32 << 20;
+        let sum = (0..n)
+            .map(|k| mass_quantile((f64::from(k) + 0.5) / f64::from(n)).value())
+            .fold(0.0, |s, m| s + m);
+        let average = sum / f64::from(n);
+        let mean = MASS_LAW.mean_solar_masses();
+        assert!((average / mean - 1.0).abs() < 1e-6, "{average} {mean}");
+        assert!((mean - 16_284.3).abs() < 0.1, "{mean}");
     }
 
     #[test]

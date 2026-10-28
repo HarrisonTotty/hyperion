@@ -1217,3 +1217,72 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
       as built, a constant rate, and the plan-text deviation is recorded there (T5.a).
   - _Lead 5's risk, settled:_ the potential freeze from 25 to 26 covers the halo mixture
     (decision-bump-plan-after-22 §2.3), and by ruling 1 nothing of T3.d lands inside it.
+- **Deviations in P10.T3.d.a, as built (lane `p10-share`, 2026-10-28, on `9f4a60da` at
+  `GENERATOR_VERSION` 23).** No output moved: nothing stores φ (T3.d.b), nothing generated reads
+  `Debris`, and `dwarfs::dwarfs` and `dwarfs.golden` keep the unscaled masses. One new unwired
+  golden, `galaxy/global_list/discrete_share.golden`, at 23's header; `golden_diff.py` lists it
+  alone.
+  - _Items._ `global_list::share` (new), with
+    `discrete_share(Seed, &GalaxyParams, &PotentialTables) -> f64` at Provides' signature,
+    re-exported from `global_list`, and `INSIDE_LY` (65,000 ly, the halo's cut, tested against its
+    components' largest cut radius). Crate-visible:
+    `ShareFigures` (`of`, `physical`, `applied`, `dwarf_scale`), `scale_cold_masses`, and
+    `debris::in_list_order`, Design note 12's dwarf order taken out of `Debris::generate` so that
+    both count the same cores. `orphans::MassLaw::mean_solar_masses`, the cut log-normal's mean in
+    closed form: 16,284 M☉ for `MASS_LAW`. The bench `global_list/discrete_share` in
+    `benches/galaxy.rs`.
+  - _The globular term._ 1.5 × plan 02's `AccretionHistory::globular_count` (untruncated, the
+    orphans' "expected globulars") × the orphan law's mean mass. Every globular tube counts whole:
+    no 65,000 ly cut, though the orphans' radial law reaches 10⁶ ly (T3.b), and no living
+    globular's history (Risks, "Living globulars' tube masses").
+  - _The dwarf term, against Design note 1's "each recent progenitor's cold mass times the share
+    of its orbital period spent inside 65,000 ly" (lean, 2026-10-28)._ A tube counts at its mass ×
+    the share of its radial period inside 65,000 ly, by its spec's own quadrature of `dr ÷ v_r` in
+    the mid-plane potential (Kepler's `(E − e sin E) ÷ π` to 10⁻⁹ in a test). A core counts whole,
+    not by its period share: a core exists only where its progenitor is inside the root cube at
+    the epoch (Design note 11), and P10.T12 counts members inside the cube. Only the four cores
+    `Debris` numbers (the first in list order) count; cores beyond the limit count nowhere.
+  - _The scaling._ `Debris::generate` multiplies each dwarf's tube mass, the tube's progenitor
+    (bound) mass, and its core's mass and systems by `(drawn × budget − globular) ÷ dwarfs`,
+    clamped to [0, 1], from the `ShareFigures` of the same dwarfs, so it equals what
+    `discrete_share` gives whether or not φ is stored (the full tables keep the in-plane ones bit
+    for bit; a slow test checks the two shares agree). The orbits, the tidal radius, the stripping
+    fraction, the mass and time at accretion and the `MassLoss` stay the progenitor's. Then
+    (review fix, lean 2026-10-28) a tube scaled to nothing is dropped, and a core scaled under
+    `CORE_MIN_SYSTEMS` too, without letting a fifth core take its number: before the fix a scale
+    of 0 left zero-mass cores, on which P10.T7.a's model panics. The share still counts a dropped
+    core, so the list serves less than φ says by those cores alone, under 10³ systems each.
+  - _Finding: globular tubes are 0.23–7.0% of the halo_ over the 2,000 summary galaxies (median
+    1.0%; the Milky Way fixture 0.84%), against T3.d.a's 0.3–1% and Design note 1's "under 1%":
+    1,024 of 2,000 lie outside 0.3–1%. Plan 02's globular count follows the dark halo's mass, the
+    halo's budget the stars', so a galaxy of low stellar-to-halo mass has many globulars for a
+    small halo. **In 14 of 2,000 the globular tubes alone reach the drawn share**: φ is then the
+    drawn share, the dwarfs are scaled to nothing, and φ is below what the globular tubes hold, so
+    P10.T12's 5% budget test cannot hold there. Pinned provisionally at 0.2–8% for every galaxy
+    (`GLOBULAR_SHARE_PIN`, the fast test's sixteen and the slow test's 2,000), the median at
+    0.8–1.2%. Ruling deferred.
+  - _The summary (v23, seeds `0x0a10_3d00_0000_0000 | n`, n < 2,000)._ Applied share 0.26–14.7%,
+    median 1.80%, mean 2.58%: 388 galaxies under 1%, 719 at 1–2%, 661 at 2–5%, 177 at 5–10% and 55
+    at 10–15%, so 1,107 of 2,000 fall under the brainstorm's 2% floor, not only those with no
+    dwarf (Risks, "The discrete share against the dwarf mass range"). The drawn share binds in 251;
+    10 have no dwarf debris inside 65,000 ly. The physical share reaches 405% of the halo (99th
+    percentile 72%), Design note 1's reason. The golden holds the 0–100th percentiles and means of
+    the applied, physical, globular and drawn shares, those counts, and a digest of every seed's
+    applied share in seed order, not 2,000 readable lines: Risks' "recorded per seed" is met in
+    bits only.
+  - _Cost (finding)._ `global_list/discrete_share` on the Milky Way fixture: 7.5 ms (bench
+    profile, pod, 4 vCPU), against "under a millisecond". Nearly all of it is `dwarfs::dwarfs`'s
+    epoch states, 60 bisections of the time from pericentre per progenitor, which `Debris` shares;
+    T3.d.b's call in `Galaxy::from_params` (about 100 ms) would carry it.
+  - _Tests._ Fast, `cargo test -p hyperion-sim --lib -- galaxy::global_list`: in
+    `share::tests`, Kepler's time inside a radius, `INSIDE_LY` against the halo's cut, the cap and
+    the scale on the fixture and sixteen drawn galaxies, the scale's arithmetic; in
+    `orphans::tests`, the mean mass against the quantile's average. Slow, by name:
+    `galaxy::global_list::share::tests::the_applied_share_over_2000_galaxies_is_summarised` (the
+    golden; 15 minutes in the slow-test profile, pod, 4 vCPU) and
+    `galaxy::global_list::share::tests::debris_carries_the_scaled_dwarfs_and_drops_what_the_scale_empties`
+    (one galaxy whose drawn share binds and one whose globular tubes reach it: `Debris` against
+    `dwarfs` × the scale, the two tables' shares bit for bit; 1 minute: scales 0.58 and 0, the second leaving no dwarf tube or core). The
+    slow pins of T3.a–c's record were run at 23 on this lane: `dwarfs.rs`'s sweep gives v15's
+    figures (a ≥ 10⁸ M☉ tube in 0.127 of galaxies as drawn and 0.203 on the moved orbits, no core
+    in 0.017 and 0.337) and passes, as does the orbit's far-field monopole..

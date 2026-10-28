@@ -14,9 +14,10 @@
 //! number is its progenitor's place among the progenitors that keep a core, in the same order.
 //! Both are pure functions of the seed, so an ID read back from a save names the same stream or
 //! core in every run. The list is built by P10.T4; this module so far holds the numbers, the
-//! kinds, the cache trait, the orbit integrator ([`orbit`]) and the debris the list is built from
+//! kinds, the cache trait, the orbit integrator ([`orbit`]), the debris the list is built from
 //! ([`Debris`]: which progenitors get a tube or a core, P10.T3, with [`spec`], [`orphans`] and
-//! [`dwarfs`]).
+//! [`dwarfs`]) and the halo's discrete share it makes up ([`discrete_share`], P10.T3.d.a, in
+//! [`share`]).
 //!
 //! # Caches
 //!
@@ -29,6 +30,7 @@ mod debris;
 pub mod dwarfs;
 pub mod orbit;
 pub mod orphans;
+pub mod share;
 pub mod spec;
 pub mod tube;
 
@@ -36,6 +38,7 @@ use std::error::Error;
 use std::fmt;
 
 pub use debris::Debris;
+pub use share::discrete_share;
 pub use spec::{ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec};
 pub use tube::{TubeLookup, TubeTable};
 
