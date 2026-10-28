@@ -865,8 +865,10 @@ windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRI
   it into a per-chunk scorer and a quantile step in plan 06's module, with plan 06's tests.
   Fingerprint: core and remnant masses at eight initial masses. **Acceptance:** mapping 10⁷ fresh
   reference draws through the table gives ln(speed ÷ km/s) with mean 5.60 ± 0.01 and standard
-  deviation 0.68 ± 0.01 before the clamp; the knots are strictly increasing; the largest change from
-  plan 06's provisional table is reported. This task writes the file with `--out` to a scratch path
+  deviation 0.68 ± 0.01 before the 1,000 km/s truncation (ruling 96.2), with the rank clamp of
+  0.001–0.999, whose effect on σ is −0.0013 and on the mean none (decision-galaxy-25-train §4,
+  2026-10-27); the knots are strictly increasing; the largest change from plan 06's provisional
+  table is reported. This task writes the file with `--out` to a scratch path
   and its figures into the pull request; **plan 06's P06.T19.e is the commit that swaps it in**,
   with `--since` the bumped version, the regenerated goldens and a rerun of P06.T19.d. One bump,
   owned by plan 06.
@@ -987,7 +989,7 @@ one core, so CI never reruns them and relies on the hash, the fingerprint and th
   - `kick_rank.smoke.toml`: 300 scores.
 - **Acceptance figures.** Fresh scores go through the new table; ln(v ÷ km/s) is taken with the
   rank clamped to 0.001–0.999 and without the truncation at 1,000 km/s. The report also gives
-  the largest shift of a knot's rank from the committed table. The lane reads "before the clamp" as before the truncation, which ruling 96.2 added after the plan was written. The rank clamp alone narrows the spread by a few thousandths (0.6758 over 10⁵ fresh scores of the committed table), inside the ±0.01. This reading is the orchestrator's to confirm. The committed header's `source` was corrected afterwards ("ApJL", which Clippy's `doc_markdown` rejects, became "ApJ Letters") by re-rendering it from the committed quantiles and the recorded acceptance figures, which is what a rerun writes, rather than by a second half-hour run.
+  the largest shift of a knot's rank from the committed table. The lane reads "before the clamp" as before the truncation, which ruling 96.2 added after the plan was written. The rank clamp alone narrows the spread by a few thousandths (0.6758 over 10⁵ fresh scores of the committed table), inside the ±0.01. The orchestrator confirmed this reading on 2026-10-27 (decision-galaxy-25-train §4): the rank clamp Winsorises Φ⁻¹ at ±3.090, which moves σ by −0.0013, analytically, to 0.6787, and leaves the mean unchanged; the lane's 0.6758 at 10⁵ fresh scores is that less about two standard errors (0.0015 each). The production run reports both moments, with the clamp's analytic shift beside them. The committed header's `source` was corrected afterwards ("ApJL", which Clippy's `doc_markdown` rejects, became "ApJ Letters") by re-rendering it from the committed quantiles and the recorded acceptance figures, which is what a rerun writes, rather than by a second half-hour run.
 - **The hand-over to P06.T19.e.** A committed table is always made from `kick_rank.toml`. So
   P06.T19.e moves the production parameters into `kick_rank.toml` (its inputs hash changes with
   them, as it should), bumps the generator version, and either reruns `just fit kick_rank` or
