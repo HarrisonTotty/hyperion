@@ -233,6 +233,13 @@ impl SphericalAverage {
         hermite(t, h, self.psi[k], self.psi[k + 1]).0
     }
 
+    /// The bytes it owns on the heap: its knots and its two tables, for plan 09's
+    /// [`CentreMotion`](crate::galaxy::motion::CentreMotion), which a galaxy holds (P09.T28.b.a).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        size_of_val(&*self.ln_knots) + size_of_val(&*self.log_mass) + size_of_val(&*self.psi)
+    }
+
     /// The Gaussians' mass inside `r` ly: the discs', the bar's and the bulge's.
     #[must_use]
     pub fn extended_mass(&self, r: LightYears) -> SolarMasses {

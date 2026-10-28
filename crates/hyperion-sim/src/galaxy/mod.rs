@@ -45,6 +45,7 @@ pub mod substellar;
 
 use std::error::Error;
 use std::fmt;
+use std::sync::OnceLock;
 
 use self::features::shares::FeatureShares;
 use self::fields::Fields;
@@ -52,6 +53,7 @@ use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
 use self::imf::{BandShares, Chabrier, Kroupa, MassFunction, MassFunctionKind};
 use self::kinematics::KinematicTables;
+use self::motion::CentreMotion;
 use self::params::GalaxyParams;
 use self::potential::{MassModel, PotentialTables};
 use self::shares::ShareMatrix;
@@ -164,7 +166,9 @@ impl Population {
 /// A galaxy is immutable and `Send + Sync`, so one build can be shared between threads behind an
 /// `Arc`, as the server's galaxy cache holds it (plan 04). Its only interior mutability is the
 /// parameters' black hole ([`GalaxyParams::black_hole`]), solved once from the parameters when first
-/// read, which the mass model does while the galaxy is built; the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
+/// read, which the mass model does while the galaxy is built, and the centre's motion
+/// ([`centre_motion`](Self::centre_motion)), built from the parameters and the mass model when
+/// first read (plan 09, P09.T28.b.a); the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
 /// 100 ms, two thirds of it the discs' vertical Jeans solve in [`Fields::new`] (plan 02, Risks,
 /// R19); the gas field adds its two radial quadratures, some tens of microseconds, and nothing on
 /// the heap (plan 07), and the shell window's caps their scan, about 1% (plan 09,
@@ -206,6 +210,7 @@ pub struct Galaxy {
     feature_shares: FeatureShares,
     substellar: SubstellarAbundance,
     window_caps: WindowCaps,
+    centre_motion: CentreMotionCell,
 }
 
 impl Galaxy {
@@ -295,6 +300,7 @@ impl Galaxy {
             feature_shares,
             substellar,
             window_caps,
+            centre_motion: CentreMotionCell::default(),
         })
     }
 
@@ -371,6 +377,35 @@ impl Galaxy {
     #[must_use]
     pub const fn window_caps(&self) -> &WindowCaps {
         &self.window_caps
+    }
+
+    /// What the Kepler regime reads of the centre (plan 09, P09.T28.b.a).
+    ///
+    /// That is the mass about the black hole, the cluster's and the rest of the galaxy's, the
+    /// influence radius where it weighs the black hole, and the loss cone. Nothing on the record
+    /// reads it until P09.T28.b.b. It is held with the galaxy (plan 09, Design note 15) and built when first read, from the
+    /// parameters and the mass model alone, so it is the same bits whichever caller reads it first
+    /// and whenever; the galaxy's equality and its `Debug` text do not depend on whether it has
+    /// been read. Building it takes about 64 ms, nearly all of it the galaxy's spherical average
+    /// ([`SphericalAverage::of_extended`](potential::SphericalAverage::of_extended)), which a
+    /// galaxy that never asks about the centre's motion does not pay (P09.T28.b.a as built).
+    ///
+    /// # Panics
+    ///
+    /// Never: [`CentreMotion::new`] refuses a nuclear cluster or a black hole whose mass is
+    /// negative or not finite, which the parameters never derive (the cluster's is a positive
+    /// share of the nuclear disc's, capped, and the black hole's the M–σ relation's at the
+    /// bulge's positive dispersion), and a galaxy whose mass inside 10⁻³–10⁴ ly does not bracket
+    /// the black hole's, which none of the sweep's (seeds 1–300) is.
+    #[must_use]
+    pub fn centre_motion(&self) -> &CentreMotion {
+        self.centre_motion.0.get_or_init(|| {
+            CentreMotion::new(&self.params, &self.model).expect(
+                "the parameters' nuclear cluster and black hole have finite, positive masses, and \
+                 the mass inside 1e-3 to 1e4 ly brackets the black hole's at every seed of \
+                 P09.T28.b.a's sweep",
+            )
+        })
     }
 
     /// The free-floating brown dwarfs and rogue planets per system, with the rogue planets' cap
@@ -476,7 +511,8 @@ impl Galaxy {
     /// It varies little between seeds, since the parts are fixed-size tables but for the halo's
     /// three to six components. Most of it is the mass model's Gaussians (some 770, each with its
     /// quadrature nodes); the (R, |z|) grid adds 128 KiB and the kinematic tables that read it
-    /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing.
+    /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing. The centre's
+    /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a).
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()
@@ -485,6 +521,11 @@ impl Galaxy {
             + self.fields.heap_bytes()
             + self.gas.heap_bytes()
             + self.shares.heap_bytes()
+            + self
+                .centre_motion
+                .0
+                .get()
+                .map_or(0, CentreMotion::heap_bytes)
             + self
                 .kinematics
                 .as_ref()
@@ -520,6 +561,28 @@ impl Error for BuildGalaxyError {
         match self {
             Self::Gas(e) => Some(e),
         }
+    }
+}
+
+/// [`Galaxy::centre_motion`]'s value, built when first read (the sim-determinism skill's lazy
+/// exception, as [`GalaxyParams::black_hole`]'s second phase is held).
+#[derive(Clone, Default)]
+struct CentreMotionCell(OnceLock<CentreMotion>);
+
+/// Equal always: the centre's motion is a pure function of the parameters and the mass model,
+/// which [`Galaxy`]'s equality compares, so comparing it would make two equal galaxies unequal
+/// because only one of them had been read.
+impl PartialEq for CentreMotionCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been read, so that a galaxy's `Debug` text depends
+/// on what it is and not on its history.
+impl fmt::Debug for CentreMotionCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CentreMotionCell")
     }
 }
 

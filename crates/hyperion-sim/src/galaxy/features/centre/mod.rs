@@ -205,7 +205,10 @@ impl CentreModel {
         self.profile.enclosed_mass(r.value())
     }
 
-    /// Where the stars inside weigh as much as the black hole.
+    /// Where the cluster's stars inside weigh as much as the black hole
+    /// ([`CentreProfile::influence_radius`]): the cluster alone, 10⁴ ly where the black hole
+    /// outweighs the whole cluster; the Kepler regime's edge is
+    /// [`CentreMotion::influence_radius`](crate::galaxy::motion::CentreMotion::influence_radius).
     #[must_use]
     pub fn influence_radius(&self) -> LightYears {
         self.profile.influence_radius()
