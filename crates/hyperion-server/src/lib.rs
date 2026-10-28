@@ -465,9 +465,14 @@ mod tests {
     async fn start_creates_no_files() {
         let dir = tempfile::tempdir().unwrap();
         let data_dir = dir.path().join("hyperion-data");
-        let server = Server::start(ServerConfig::builder().data_dir(&data_dir).build())
-            .await
-            .unwrap();
+        let server = Server::start(
+            ServerConfig::builder()
+                .data_dir(&data_dir)
+                .workers(std::num::NonZeroUsize::MIN)
+                .build(),
+        )
+        .await
+        .unwrap();
         let _router = server.router();
         server.shutdown().await.unwrap();
         assert!(!data_dir.exists());

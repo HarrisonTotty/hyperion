@@ -411,6 +411,8 @@ fn the_refit_manifest_runs_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("mge.rs");
     let manifest = refit_manifest_path();
+    // A fixed few threads, not every core. The task ignores the count, which is named so that the
+    // test stays small beside the others if the task ever uses it.
     let cli = Cli::try_parse_from([
         "hyperion-fit",
         "run",
@@ -419,6 +421,8 @@ fn the_refit_manifest_runs_end_to_end() {
         manifest.to_str().unwrap(),
         "--out",
         out.to_str().unwrap(),
+        "--threads",
+        "2",
     ])
     .unwrap();
     let mut log = Vec::new();
