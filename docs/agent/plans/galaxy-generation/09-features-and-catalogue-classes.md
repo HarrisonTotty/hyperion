@@ -1179,6 +1179,9 @@ Tests: r_full of 0.31 ly and about 37,000 systems at a century (42,000 under Kro
 = ±100 yr equals a brute-force scan of the inner 2 ly; bench: the century query with cached orbits,
 target about 10 ms.
 
+_Done (lane `p09-centre`, 2026-10-28, at `GENERATOR_VERSION` 23, no output moved): see Risks, "P09.T29
+as built"._
+
 #### P09.T30 The black hole's own events
 
 - **P09.T30.a Flares and disruptions.** On the black hole's event key (`EventKey::derive` with the
@@ -3596,3 +3599,144 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _No shared position draw for a class cell._ No helper draws a uniform position in a class cell
     (plan 01's `GenCell::position_from_words` stops at 128 ly), so each class lays out its own site
     draw; T33.a's is the first.
+- **P09.T29 as built (lane `p09-centre`, 2026-10-28, on 820e5431 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §2.2).** No output moves: nothing registers `CentreMemberSource`
+  (P09.T37 does) and no walk reads `kepler_pad_for`; `position_velocity_at` is
+  `Trajectory::of(..).state_at(t)`, the same operations in the same order; `resolve` of a centre
+  member reads the galaxy's held model, equal to `CentreModel::new`'s (`the_galaxy_holds_its_centre`);
+  and `NestedGrid::cells_touching` yields the same cells in the same order through its new per-level
+  walk. No golden moves (`golden_diff.py`: "No golden files changed"), no tag is added, and
+  T28.b.a's pre-pin passes by name. `Galaxy`'s `Debug` text gains a fixed `centre: CentreModelCell`
+  field, which no persisted digest reads. Files: in `galaxy/features/centre/`, `source.rs` (new),
+  `mod.rs`, `profile.rs`, `df.rs`, `classes.rs` and `members.rs`; `galaxy/features/nested.rs`,
+  `galaxy/features/interior/table.rs`, `galaxy/motion.rs`, `galaxy/mod.rs`, `galaxy/query/mod.rs`,
+  `galaxy/query/motion.rs`, `tests/galaxy_centre_query.rs` (new) and `benches/centre.rs`.
+  - _Signatures._ In `features::centre`: `CentreMemberSource`, `CentreOrbitCache`,
+    `CentreCellOrbits`, `NoCentreOrbitCache` and `KeepCentreOrbits`.
+    - `CentreMemberSource::new(&Galaxy, &dyn CentreOrbitCache)` returns a `Result` over
+      `BuildCentreError`, with `placement()`; its `SystemSource` methods panic if asked about
+      another galaxy, as `KeepInteriors` does, and it suppresses nothing.
+    - `CentreOrbitCache::orbits(&self, &Galaxy, &CentrePlacement, MassBand, NestedCell)` lends an
+      `Arc<CentreCellOrbits>`: the sim's caller-supplied trait, as `FeatureCellCache` is; the
+      server's byte-bounded cache is P09.T40.a's.
+    - `KeepCentreOrbits` keeps one galaxy's cells and asserts that the placement is the galaxy's
+      own. Its key is one integer: 46 ms against the tuple key's 61 ms over a century's 480,000
+      band-cells (opt-level 2).
+    - `CentreCellOrbits` (`new`, `trajectories`, `heap_bytes`) holds each member's `Trajectory`
+      and its shell.
+    - `Galaxy::centre()` returns `Result<&CentreModel, BuildCentreError>` (Provides: a bare
+      `&CentreModel`): the inversions can fail.
+    - `motion::plunge_pad(mu, r0, dt)` returns an `Option<LightYears>` (`None` inside the full
+      scan), and it and `full_scan_radius(mu, dt)` take μ (Provides: `(r0, dt)` and `(dt)`), since
+      the source pads about a μ of its own per cell.
+    - Added: `motion::Trajectory` (`new`, `of`, `start`, `regime`, `orbit`, `state_at`: the law
+      prepared once, for the cache), `KeplerOrbit::apocentre` and `query::kepler_pad_for`; and,
+      crate-internal, `motion::SpeedBound`, `CentreProfile::outer_psi`,
+      `LocalCell::farthest_radius`, `NestedGrid::level_cells_touching` and `level_touches`,
+      `CentreModel::from_parts` and the model's `heap_bytes`.
+    - Not built: `as_global_entry()` (P10.T4 adds it, decision §2.2). Nothing calls
+      `CentrePlacement::check_index_headroom` (P09.T40.a, below).
+  - _Design note 15's choice for the model: a memo in the galaxy_, built on first read from
+    `centre_motion()`'s profile and the galaxy's mass function, boxed, equal always, with a fixed
+    `Debug` text, as T28.b.a's motion; `with_full_potential` and `with_substellar_params` carry it,
+    since neither changes what it reads. Once read with the motion it adds 470 kB to `heap_bytes`.
+    `resolve` of a centre member now rests on `centre_motion()`'s `expect` (the mass inside
+    10⁻³–10⁴ ly brackets the black hole's at every seed of T28.b.a's sweep), where it mapped every
+    `BuildCentreError` to "no such system".
+  - _The plunge pad, per cell, about an effective μ (a deviation from "per level ... √(2GM)")._
+    Members are drawn in the galaxy's whole potential (`v < √(2(Ψ − E_out))`, the distribution
+    function's outer cut) and orbit the mass inside their epoch radius, so they can be unbound
+    about it and the pad about the black hole's √(2GM) does not hold them. A cell's members have
+    μ ≤ G M(< r_far) (`CentreMotion::enclosed_mass`, r_far its farthest corner) and a Kepler energy
+    under ε = Ψ_out(r_near) − E_out (`outer_psi`, the potential of the mass outside the cell's
+    nearest radius and of the rest of the galaxy, non-increasing; E_out the four floors' least),
+    so inside r_far they move below the escape speed of μ′ = μ + ε r_far, and their path is under
+    Δ about μ′ from r_near; members beyond r_h move in straight lines under the same bound. A
+    bound per level, over its nearest radius and far corner, chooses the walk's radius; each cell
+    is then tested at its own pad. Margins: 10⁻⁹ on the closed forms, 10⁻⁶ on the tables' inputs
+    and on the shells. The science check confirmed each step (the comparison argument, μ′, the
+    outward fixed point, the energy bound, the grid pad's three cases).
+  - _The full scan._ A cell whose nearest radius is inside the full scan about its own μ′ is
+    scanned in full whenever the sphere comes within its members' outward reach of the black hole
+    (a fixed-point bound on r^(3⁄2) over their Kepler orbits, or the straight lines beyond r_h),
+    and not otherwise, so a sphere away from the black hole scans none of it. At a century it
+    reaches a nearest radius of 0.389 ly over 95,696 cells (`each_level_s_reach_holds_its_cells`),
+    against the plan's 0.31 ly, which is `full_scan_radius` about 4.30 × 10⁶ M☉ (0.3114 ly); at
+    ±1,000 yr it reaches 2.88 ly over 179,208 cells. A member whose shell (pericentre to
+    apocentre; its epoch distance with no orbit; none for a straight line) misses the sphere's is
+    not propagated.
+  - _The grid's Kepler-regime pad: built, not wired (decision §2.2 said it reads
+    `galaxy.rules().kepler_regime`)._ `kepler_pad_for` (μ = G M(< r_h), ε = V²⁄2 at the layer's pad
+    speed) is read by no walk: under the law in force every grid record moves in a straight line,
+    which `pad_for` covers; `GalaxyRules` does not exist yet; and `decide_census` counts the padded
+    sphere's cells against the cell budget (`query/census.rs`), so wiring it can move the census
+    near the centre, against §2.2's "padding moves no output either way". It pads a 1 ly sphere at
+    the black hole 1.23 ly at a century and 5.71 ly at ±1,000 yr (layers A–D), against the
+    straight lines' 0.33 and 3.34. Its test holds every Kepler-regime record of layers A and D of
+    the fixture, under the Kepler arm called directly, at ±100 and ±1,000 yr, each in a 0.01 ly
+    sphere about where it ends and in five near the black hole; in this fixture none moved farther
+    than the straight pad (the farthest 2.95 ly), so the test does not show the pad's need, which
+    T28.b.a's seeds do (4.6 ly from the straight line); layer E (1.7 million records in its central
+    cells) is not exercised.
+  - _"The brute-force test runs under both rules" (decision §2.2)._ The members have one law, the
+    Kepler orbit inside r_h, under either rule; the grid's Kepler arm is held by the pad's test;
+    the range query's brute force under both arms is T28.b.b's (below).
+  - _Figures (Milky Way fixture)._ Systems inside 0.31 ly from the model's classes: 62,443 (Kroupa's
+    75,285) against "about 37,000" (brainstorm) and "42,000 under Kroupa's" (this plan), pinned at
+    1%; realised members inside 0.312 ly: 62,534. Split: old stars 48,462, black holes 1,563, the
+    young disc 8,074, the isotropic young 4,345 (Kroupa's: 58,971, 1,277, 9,773, 5,264). The old
+    stars' own share is the brainstorm's 37,000 raised by the joint revision's normalisation (×1.32
+    on the cusp: M(<1 pc) 8.47 × 10⁵ → 1.120 × 10⁶ M☉, not the 28% "The joint revision as built"
+    quotes) at the class device's mean mass; ruling 144's young population and the black holes add
+    the rest (science check). The observed cusp allows 27,000–66,000 inside that radius (Schödel et
+    al. 2018, A&A 609, A27, §4.5 and Table 3; science check, rough).
+  - _Tests (as run)._ `tests/galaxy_centre_query.rs`:
+    `a_query_a_decade_either_way_finds_what_a_scan_of_the_inner_fifth_of_a_light_year_finds` (fast:
+    ±10 yr, the inner 0.2 ly, cached and uncached, a second build of the galaxy, and
+    `assert_order_independent` warm and cold); `a_query_a_century_either_way_finds_what_a_scan_of_the_inner_2_ly_finds`
+    (the plan's test, `#[ignore = "slow: …"]`: five spheres at ±100 yr, 1,190,151 members, 65,178
+    hits that moved in from outside their sphere, 303 s; its peak memory is not measured, some
+    300 MB by estimate); `the_census_counts_the_cells_touching_the_sphere_and_the_black_hole`;
+    `the_full_scan_radius_and_the_systems_inside_it_at_a_century`; `the_galaxy_holds_its_centre`;
+    `a_centre_source_merges_into_the_range_query` (registered in the test only);
+    `the_kepler_pad_holds_every_kepler_regime_grid_record`. Unit tests:
+    `each_level_s_reach_holds_its_cells` (every owned cell at six times),
+    `a_cell_s_orbits_are_its_members_on_their_shells`, `the_excess_holds_the_fastest_member_s_orbit`,
+    `the_pads_bound_every_orbit_and_straight_line` (T28.a's stress set), `the_plunge_pad_is_its_closed_form`,
+    `the_outer_potential_is_the_potential_less_the_pull_from_inside`,
+    `a_cell_s_farthest_radius_is_its_farthest_corner_s`, and the nested walk level by level. The
+    integration file's fast tests take some 14 s of test time natively.
+  - _The bench_ `centre_query/century_query_cached` (0.1 ly at the black hole, +100 yr, a warm
+    `KeepCentreOrbits`): **not run**, pending main's quiet window. A probe at opt-level 2 on a
+    shared machine measured 102 ms warm, after the shell test, the integer key and one
+    classification per cell (160 ms before), against "about 10 ms": the 480,000 band-cell lookups
+    of the full scan some 45 ms, the cell choice and the propagation of some 110,000 members the
+    rest. Cold it took 17.6 s, nearly all member placement (about 160 µs a member, P09.T27's
+    draws). `CentreModel::new` is not re-benched either.
+  - _For P09.T28.b.b._ Wire `kepler_pad_for` into `sphere_for_layer` behind `kepler_regime`, with
+    its census moves in C1; run a range-query brute force near the centre under both arms; if a
+    centre member's `position_at` is gated on the rule, gate the source's `Trajectory` with it, so
+    the two agree under the held arm once P09.T37 registers the source.
+  - _For P09.T40.a._ Call `CentrePlacement::check_index_headroom` beside the grid's (an
+    overflowing cell clamps at 8,192 in release, a debug assertion otherwise); the server's
+    `GalaxyCache` sums `heap_bytes` at insertion and misses the model read later (470 kB with the
+    motion); at ±1,000 yr the full scan reaches every member within about 3 ly, some two million
+    members, some 400 MB at 200 bytes each and minutes cold.
+  - _For plan 10._ P10.T4 can read `Galaxy::centre()` rather than build a second model; P10.T9
+    wraps `CentreMemberSource::new`, a `Result`; R06.T16.a's census reads the source through
+    `SystemSource` with a shared `CentreOrbitCache`, and pays the cold placement above near the
+    centre.
+- **Deferred findings (2026-10-13 rule)**, from P09.T29: (1) 62,443 systems inside r_full at a
+  century against the brainstorm's 37,000 (75,285 against 42,000 under Kroupa's), split above:
+  drafted for the brainstorm's sign-off. (2) The full scan reaches 0.389 ly at a century against
+  0.31, and the warm century query took 102 ms (opt-level 2) against "about 10 ms": the
+  brainstorm's figures assume the black hole's escape speed bounds the members. (3) Members are
+  drawn in the galaxy's whole potential but follow Kepler orbits about the mass inside their epoch
+  radius (T28.b.a's law), so many are unbound about it: in single cells along the axis, 31% at
+  0.6 ly, 29% at 1.2 ly, 39% at 2.4 ly and 27% at 4.7 ly of the Kepler-regime members (samples of
+  13–557). Over the clock window they leave on hyperbolae, so the density is not stationary, where
+  the brainstorm says "Kepler motion preserves [the distribution function], so the density is
+  exactly the profile at every time"; P09.T31's profile test at ±1,000 yr will meet it, and it
+  bears on T28.b.b's wiring: for main and the brainstorm's owner. (4) Decision §2.2's "padding
+  moves no output either way" does not hold through the census's cell budget. (5) "The joint
+  revision as built" says the normalisation raised the cusp by 28%; its own figures give ×1.32.

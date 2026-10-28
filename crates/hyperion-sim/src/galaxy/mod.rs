@@ -47,6 +47,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::OnceLock;
 
+use self::features::centre::{BuildCentreError, CentreModel};
 use self::features::shares::FeatureShares;
 use self::fields::Fields;
 use self::gas::field::GasField;
@@ -166,9 +167,10 @@ impl Population {
 /// A galaxy is immutable and `Send + Sync`, so one build can be shared between threads behind an
 /// `Arc`, as the server's galaxy cache holds it (plan 04). Its only interior mutability is the
 /// parameters' black hole ([`GalaxyParams::black_hole`]), solved once from the parameters when first
-/// read, which the mass model does while the galaxy is built, and the centre's motion
+/// read, which the mass model does while the galaxy is built, the centre's motion
 /// ([`centre_motion`](Self::centre_motion)), built from the parameters and the mass model when
-/// first read (plan 09, P09.T28.b.a); the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
+/// first read (plan 09, P09.T28.b.a), and the centre's model ([`centre`](Self::centre)), built
+/// from that motion's profile when first read (plan 09, P09.T29); the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
 /// 100 ms, two thirds of it the discs' vertical Jeans solve in [`Fields::new`] (plan 02, Risks,
 /// R19); the gas field adds its two radial quadratures, some tens of microseconds, and nothing on
 /// the heap (plan 07), and the shell window's caps their scan, about 1% (plan 09,
@@ -211,6 +213,7 @@ pub struct Galaxy {
     substellar: SubstellarAbundance,
     window_caps: WindowCaps,
     centre_motion: CentreMotionCell,
+    centre: CentreModelCell,
 }
 
 impl Galaxy {
@@ -301,6 +304,7 @@ impl Galaxy {
             substellar,
             window_caps,
             centre_motion: CentreMotionCell::default(),
+            centre: CentreModelCell::default(),
         })
     }
 
@@ -408,6 +412,48 @@ impl Galaxy {
         })
     }
 
+    /// The galactic centre's model: the nuclear cluster's profile, its four distribution
+    /// functions, marks and classes, what its members are placed from (plan 09, Design note 15;
+    /// P09.T29).
+    ///
+    /// Held with the galaxy and built when first read, as [`centre_motion`](Self::centre_motion)
+    /// is, from that motion's profile and the galaxy's mass function: the same bits as
+    /// [`CentreModel::new`] gives (a test holds them equal), whichever caller reads it first and
+    /// whenever, and the galaxy's equality and `Debug` text do not depend on whether it has been
+    /// read. Building it takes the motion's 64 ms, if not yet paid, and the four inversions, the
+    /// marks' acceptances and the classes (`CentreModel::new`: 91 ms in release with three
+    /// inversions, P09.T27 as built; not benched since ruling 144's fourth); a galaxy that never
+    /// asks about its centre pays nothing. The range query's centre source and `resolve` of a
+    /// centre member read it. [`with_full_potential`](Self::with_full_potential) and
+    /// [`with_substellar_params`](Self::with_substellar_params) carry it, built or not, as they
+    /// carry the motion: neither changes the parameters, the mass model or the mass function it
+    /// reads.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildCentreError::NegativeDistribution`] if a tracer has no isotropic distribution
+    /// function in the galaxy's potential, which no galaxy the builder allows does
+    /// ([`CentreModel::new`]'s documentation), the same error at every read.
+    ///
+    /// # Panics
+    ///
+    /// As [`centre_motion`](Self::centre_motion), which it reads: if the mass inside 10⁻³–10⁴ ly
+    /// does not bracket the black hole's, which no seed of P09.T28.b.a's sweep (1–300) does, or a
+    /// mass is not finite and positive, which the parameters never derive.
+    pub fn centre(&self) -> Result<&CentreModel, BuildCentreError> {
+        self.centre
+            .0
+            .get_or_init(|| {
+                CentreModel::from_parts(
+                    self.centre_motion().profile().clone(),
+                    self.mass_function(),
+                )
+                .map(Box::new)
+            })
+            .as_deref()
+            .map_err(|e| *e)
+    }
+
     /// The free-floating brown dwarfs and rogue planets per system, with the rogue planets' cap
     /// (plan 13, P13.T2), built with the galaxy. The share matrix's substellar rows hold these
     /// figures.
@@ -512,7 +558,9 @@ impl Galaxy {
     /// three to six components. Most of it is the mass model's Gaussians (some 770, each with its
     /// quadrature nodes); the (R, |z|) grid adds 128 KiB and the kinematic tables that read it
     /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing. The centre's
-    /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a).
+    /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a), and the centre's
+    /// model, once built, its distribution functions' tables, about 0.5 MiB (P09.T29), so the
+    /// figure depends on what has been read.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()
@@ -526,6 +574,14 @@ impl Galaxy {
                 .0
                 .get()
                 .map_or(0, CentreMotion::heap_bytes)
+            + self
+                .centre
+                .0
+                .get()
+                // A centre that failed to build holds no tables, so it owns no heap: the error
+                // is not lost, `centre` returns it at every read.
+                .and_then(|built| built.as_deref().ok())
+                .map_or(0, |model| size_of::<CentreModel>() + model.heap_bytes())
             + self
                 .kinematics
                 .as_ref()
@@ -583,6 +639,26 @@ impl PartialEq for CentreMotionCell {
 impl fmt::Debug for CentreMotionCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("CentreMotionCell")
+    }
+}
+
+/// [`Galaxy::centre`]'s value, built when first read, as [`CentreMotionCell`] is; boxed, since the
+/// model's tables and arrays would otherwise add some kilobytes to every galaxy moved.
+#[derive(Clone, Default)]
+struct CentreModelCell(OnceLock<Result<Box<CentreModel>, BuildCentreError>>);
+
+/// Equal always, as [`CentreMotionCell`]: the model is a pure function of what the galaxy's
+/// equality compares.
+impl PartialEq for CentreModelCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CentreModelCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CentreModelCell")
     }
 }
 

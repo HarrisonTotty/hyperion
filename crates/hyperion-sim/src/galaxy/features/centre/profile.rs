@@ -730,6 +730,25 @@ impl CentreProfile {
         self.cluster_psi(r) + rest
     }
 
+    /// The relative potential at `r` ly of all but the black hole and the cluster's stars inside
+    /// `r`, (km/s)².
+    ///
+    /// That is the cluster's mass outside `r`, `4πG ∫ᵣ^∞ ρ r′ dr′`, and the rest of the galaxy's
+    /// whole monopole: [`psi`](Self::psi) less `G (M_bh + M★(<r)) ÷ r`, computed without that
+    /// difference's cancellation near the black hole, and non-increasing in `r` (each term is).
+    /// It is defined for `r ≥ 0`: at `r = 0` the cluster's term is its inner power law's integral
+    /// from zero, finite because the inner slope γ₀ is under 2 (1.3 for the stars,
+    /// [`TracerShape::nuclear_cluster`]), and the monopole's is its central value.
+    ///
+    /// A centre member drawn at `r` from its distribution function, with a binding energy above
+    /// the outer cut's `E_out`, has `v² ÷ 2 − G (M_bh + M★(<r)) ÷ r < outer_psi(r) − E_out`: what
+    /// bounds the energy of its Kepler orbit, which the range query's pads read (P09.T29).
+    #[must_use]
+    pub(crate) fn outer_psi(&self, r: f64) -> f64 {
+        let rest = self.galaxy.as_ref().map_or(0.0, |g| g.psi(r));
+        G * self.mass.value() * self.stars.outer_moment(r) + rest
+    }
+
     /// `dΨ ÷ dr` at `r` ly, (km/s)² per light-year: `−G M(<r) ÷ r²` of everything that pulls.
     #[must_use]
     pub fn psi_slope(&self, r: f64) -> f64 {
@@ -797,6 +816,26 @@ mod tests {
 
     fn milky_way() -> (GalaxyParams, &'static CentreProfile) {
         (GalaxyParams::milky_way_like(), milky_way_profile())
+    }
+
+    /// `outer_psi` is the potential less the pull from inside: `psi(r) − G (M_bh + M★(<r)) ÷ r`
+    /// to rounding where that difference keeps its precision, finite at the black hole, and
+    /// falling outward.
+    #[test]
+    fn the_outer_potential_is_the_potential_less_the_pull_from_inside() {
+        let (_, p) = milky_way();
+        let mut last = p.outer_psi(0.0);
+        assert!(last.is_finite() && last > 0.0, "{last}");
+        for r in [1e-3, 0.1, 1.0, 7.0, 30.0, 128.0, 1e3] {
+            let direct = p.psi(r) - G * p.enclosed_mass(r).value() / r;
+            let outer = p.outer_psi(r);
+            assert!(
+                (outer / direct - 1.0).abs() < 1e-9,
+                "{r} ly: {outer} against {direct}"
+            );
+            assert!(outer <= last, "{r} ly");
+            last = outer;
+        }
     }
 
     #[test]

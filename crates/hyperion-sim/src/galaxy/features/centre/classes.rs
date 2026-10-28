@@ -480,6 +480,12 @@ fn tabulated_progenitors(
 }
 
 impl CentreClasses {
+    /// The bytes its class list owns on the heap.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        size_of_val(&*self.classes)
+    }
+
     /// The classes of the cluster of `profile` for primaries on `mass_function` under the default
     /// kick law, whose retention table (ruling 139.5) it reads (module documentation).
     ///

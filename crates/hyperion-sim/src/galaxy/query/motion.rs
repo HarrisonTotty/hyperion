@@ -26,11 +26,14 @@ use super::walk::QuerySphere;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::kinematics::draw_velocity;
+use crate::galaxy::motion::SpeedBound;
 use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::id::Layer;
 use crate::time::UniverseTime;
 use crate::units::consts::SPEED_OF_LIGHT;
-use crate::units::{KilometresPerSecond, LightYears, MetresPerSecond, Seconds};
+use crate::units::{
+    GravitationalParameter, KilometresPerSecond, LightYears, MetresPerSecond, Seconds,
+};
 
 /// The speed a sphere is padded by, 1,000 km/s: above any escape speed where the grid places a
 /// system (brainstorm, "The range query").
@@ -134,6 +137,104 @@ pub const fn escape_cut_holds(layer: Layer) -> bool {
 pub fn pad_for(t: UniverseTime, speed: KilometresPerSecond) -> LightYears {
     let beta = MetresPerSecond::from(speed).value() / SPEED_OF_LIGHT;
     LightYears::new(beta * t.since_epoch().as_julian_years_f64().abs())
+}
+
+/// The pad a walk of `layer`'s cells needs about a sphere of `radius` at `centre` at `t` once the
+/// layer's grid records in the Kepler regime follow their orbits (plan 09, P09.T29: "the same pad
+/// applies to grid systems in the Kepler regime"), ly: at least [`pad_for`] at the layer's
+/// [`pad_speed`], and more where the sphere comes near the black hole.
+///
+/// **The walk does not read it yet.** Under the motion law in force every grid record moves in a
+/// straight line, which [`pad_for`] covers; plan 09's P09.T28.b.b swaps the Kepler law into
+/// [`position_at`] behind its galaxy hold, and reads this there, by the same rule, so that the
+/// walk's reach follows the law in force (decision-galaxy-25-train §2.2). Padding chooses cells
+/// and moves no output by itself, but the census counts the walk's cells.
+///
+/// The bound is P09.T29's for the centre's members (the centre source's module documentation),
+/// over the whole regime at once: a Kepler-regime record starts inside the influence radius
+/// `r_h`, with a speed under the layer's pad speed `V`, so its orbit's energy is under `V² ÷ 2`
+/// and its μ under G M(< `r_h`) ([`CentreMotion::enclosed_mass`]), and its speed at every radius r
+/// is under the escape speed of `μ′ = G M(< r_h) + V² r_h ÷ 2` inside `r_h`. So:
+///
+/// - a record starting at `r₀` beyond the plunge's full-scan radius `r_s` about μ′ moves at most
+///   the plunge pad Δ(r₀), which falls with `r₀`; one that reaches the sphere starts at
+///   `r₀ ≥ d − R − r_s` (`d` the sphere's distance from the black hole, R its radius), since
+///   Δ ≤ `r_s` there, and so moves at most Δ(max(`r_s`, d − R − `r_s`));
+/// - a record starting inside `r_s` stays within the outward reach of `r_s`, so it can reach the
+///   sphere only if d is within R of that reach, and then it starts within `d + r_s − R` of the
+///   sphere's radius.
+///
+/// The pad is the largest of the three. It is the walk's for the whole layer, so a sphere near
+/// the centre visits more cells than its records need: at Milky Way values a 1 ly sphere at the
+/// black hole is padded by 1.23 ly at a century and 5.71 ly at ±1,000 years for layers A–D,
+/// against the straight lines' 0.33 and 3.34 (P09.T29 as built).
+///
+/// [`CentreMotion::enclosed_mass`]: crate::galaxy::motion::CentreMotion::enclosed_mass
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::query::{PAD_SPEED, kepler_pad_for, pad_for};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::LightYears;
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let t = UniverseTime::from_julian_years(100).expect("in the clock window");
+/// let pad = |x: f64| {
+///     let centre = GalacticPosition::from_light_years([x, 0.0, 0.0]).expect("in range");
+///     kepler_pad_for(&galaxy, Layer::C, &centre, LightYears::new(1.0), t).value()
+/// };
+/// let straight = pad_for(t, PAD_SPEED).value();
+/// // Near the black hole the orbits need more room than the straight lines' pad...
+/// assert!(pad(0.5) > straight);
+/// // ...and far from it, none.
+/// assert!((pad(5_000.0) - straight).abs() < 1e-12);
+/// ```
+#[must_use]
+pub fn kepler_pad_for(
+    galaxy: &Galaxy,
+    layer: Layer,
+    centre: &GalacticPosition,
+    radius: LightYears,
+    t: UniverseTime,
+) -> LightYears {
+    let speed = pad_speed(layer);
+    let straight = pad_for(t, speed).value();
+    if t == UniverseTime::EPOCH {
+        return LightYears::new(straight);
+    }
+    let motion = galaxy.centre_motion();
+    let dt = Seconds::new(t.since_epoch().as_seconds_f64());
+    let influence = motion.influence_radius();
+    let v = MetresPerSecond::from(speed).value();
+    let bound = SpeedBound::new(
+        GravitationalParameter::from_solar_masses(motion.enclosed_mass(influence)),
+        0.5 * v * v,
+    );
+    let d = LightYears::from(centre.distance_to(&GalacticPosition::ORIGIN)).value();
+    let r = radius.value();
+    let full = bound
+        .full_scan_edge(influence, dt)
+        .value()
+        .min(influence.value());
+    let inner = if d <= r + bound.outward(LightYears::new(full), dt).value() {
+        d + full - r
+    } else {
+        0.0
+    };
+    let start = full.max(d - r - full);
+    let plunge = if start < influence.value() {
+        bound
+            .reach(LightYears::new(start), influence, dt)
+            .map_or(full, LightYears::value)
+    } else {
+        0.0
+    };
+    LightYears::new(straight.max(inner).max(plunge))
 }
 
 /// The velocity a system has at the epoch, in the galactic frame.

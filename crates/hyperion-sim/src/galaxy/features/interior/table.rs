@@ -60,6 +60,17 @@ impl LocalCell {
         sum.sqrt()
     }
 
+    /// The distance from the centre to the cell's farthest corner, ly.
+    #[must_use]
+    pub(crate) fn farthest_radius(&self) -> f64 {
+        let mut sum = 0.0;
+        for &lo in &self.min {
+            let d = lo.abs().max((lo + self.edge).abs());
+            sum += d * d;
+        }
+        sum.sqrt()
+    }
+
     /// The cell's centre and the radius of its bounding sphere, ly.
     #[must_use]
     pub fn bounding_sphere(&self) -> (PointLy, f64) {
@@ -726,6 +737,27 @@ mod tests {
     use crate::galaxy::features::testing::{M4, catalogue_parameters, named_cluster};
     use crate::galaxy::params::GalaxyParams;
     use crate::rng::Seed;
+
+    /// A cell's farthest radius is the largest distance of its eight corners, on either side of
+    /// the centre and across it.
+    #[test]
+    fn a_cell_s_farthest_radius_is_its_farthest_corner_s() {
+        for (min, edge) in [
+            ([0.25, 0.5, -1.0], 0.25),
+            ([-0.25, -0.25, -0.25], 0.25),
+            ([-2.0, 1.0, 0.0], 1.0),
+            ([0.0, 0.0, 0.0], 0.0625),
+        ] {
+            let cell = LocalCell { min, edge };
+            let mut far: f64 = 0.0;
+            for corner in 0..8 {
+                let c = [0, 1, 2].map(|a| min[a] + if corner >> a & 1 == 1 { edge } else { 0.0 });
+                far = far.max((c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt());
+            }
+            assert!((cell.farthest_radius() - far).abs() < 1e-15, "{min:?}");
+            assert!(cell.nearest_radius() <= cell.farthest_radius());
+        }
+    }
 
     #[test]
     fn the_envelope_s_radius_inverts_its_mass_on_both_sides_of_the_softening() {

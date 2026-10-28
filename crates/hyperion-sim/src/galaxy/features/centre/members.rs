@@ -718,8 +718,9 @@ fn count_from_mean(galaxy: &Galaxy, first: CentreMemberId, mean: f64) -> u16 {
     u16::try_from(drawn.min(u64::from(limit))).expect("a count clamped at 8,192 fits in u16")
 }
 
-/// The centre member `id` names in `galaxy`, building the centre's model for it (about 90 ms in
-/// release) unless it is the black hole, which needs none.
+/// The centre member `id` names in `galaxy`, from the centre's model the galaxy holds
+/// ([`Galaxy::centre`], built on its first read, about 0.1 s in release; P09.T29) unless it is
+/// the black hole, which needs none.
 ///
 /// # Errors
 ///
@@ -730,6 +731,11 @@ fn count_from_mean(galaxy: &Galaxy, first: CentreMemberId, mean: f64) -> u16 {
 /// `no_drawn_centre_of_64_fails_its_inversion`, and the builder's extremes in
 /// `no_drawn_centre_fails_its_inversion`), and a caller asking for a member can do nothing but
 /// learn there is none.
+///
+/// # Panics
+///
+/// As [`Galaxy::centre`], for a member other than the black hole: if the galaxy's mass inside
+/// 10⁻³–10⁴ ly does not bracket its black hole's, which no seed of P09.T28.b.a's sweep does.
 pub fn resolve_centre_member(
     galaxy: &Galaxy,
     id: CentreMemberId,
@@ -737,8 +743,10 @@ pub fn resolve_centre_member(
     if id == CentreMemberId::CENTRAL_BLACK_HOLE {
         return Ok(black_hole_of(galaxy.params().black_hole().mass()));
     }
-    let model = CentreModel::new(galaxy).map_err(|_| ResolveSystemError::NoSuchSystem)?;
-    resolve_centre_member_with(galaxy, &model, id)
+    let model = galaxy
+        .centre()
+        .map_err(|_| ResolveSystemError::NoSuchSystem)?;
+    resolve_centre_member_with(galaxy, model, id)
 }
 
 /// The centre member `id` names in `galaxy`, whose centre is `model`: the black hole for member

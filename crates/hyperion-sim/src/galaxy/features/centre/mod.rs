@@ -13,8 +13,10 @@
 //! [`CentreClasses`] says what the cluster holds and on which profile ([`classes`]).
 //!
 //! [`members`] places the members on the twelve-level grid under the centre's member IDs
-//! (P09.T27), and plan 03's `resolve` dispatches a centre ID there; nothing else reads the centre
-//! until the Kepler regime (P09.T28.b) and its range query (P09.T29).
+//! (P09.T27), and plan 03's `resolve` dispatches a centre ID there. [`source`] is the centre's
+//! source for the range query (P09.T29): its members on their orbits about the black hole
+//! (P09.T28), which plan 09's P09.T37 merges into the query. The galaxy holds the model and builds
+//! it when first read ([`Galaxy::centre`], Design note 15).
 //!
 //! [`events`] holds the black hole's own events, its X-ray flares and its tidal disruptions, on
 //! its own ID as their subject (P09.T30.a).
@@ -25,6 +27,7 @@ pub mod events;
 pub mod marks;
 pub mod members;
 pub mod profile;
+pub mod source;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
@@ -33,6 +36,9 @@ pub use df::{DistributionFunction, EnergyGrid};
 pub use marks::{LossCone, OrbitMarks};
 pub use members::ExceedCentreIndexError;
 pub use profile::{BuildCentreError, CentreProfile, SlopeBreak, TracerProfile, TracerShape};
+pub use source::{
+    CentreCellOrbits, CentreMemberSource, CentreOrbitCache, KeepCentreOrbits, NoCentreOrbitCache,
+};
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::imf::MassFunction;
@@ -97,7 +103,15 @@ impl CentreModel {
         Self::from_parts(CentreProfile::from_params(params)?, imf.as_ref())
     }
 
-    fn from_parts(
+    /// The centre of `profile`, the galaxy's ([`CentreProfile::in_galaxy`]), whose mass function
+    /// is `mass_function`: what [`new`](Self::new) builds from the profile it builds itself, for
+    /// a galaxy that holds the profile already ([`Galaxy::centre`] reads its
+    /// [`centre_motion`](Galaxy::centre_motion)'s, P09.T29).
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new), but for the profile's own errors, which its builder has returned.
+    pub(crate) fn from_parts(
         profile: CentreProfile,
         mass_function: &dyn MassFunction,
     ) -> Result<Self, BuildCentreError> {
@@ -160,6 +174,24 @@ impl CentreModel {
     #[must_use]
     pub fn marks(&self, tracer: CentreTracer) -> &OrbitMarks {
         &self.marks[tracer.index()]
+    }
+
+    /// The bytes it owns on the heap, about 0.5 MiB, most of it the four distribution functions'
+    /// panels: what [`Galaxy::heap_bytes`] adds once the galaxy has built its centre (P09.T29).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.profile.heap_bytes()
+            + self
+                .tracers
+                .iter()
+                .map(TracerProfile::heap_bytes)
+                .sum::<usize>()
+            + self
+                .distributions
+                .iter()
+                .map(DistributionFunction::heap_bytes)
+                .sum::<usize>()
+            + self.classes.heap_bytes()
     }
 
     /// The stars' profile and the potential.

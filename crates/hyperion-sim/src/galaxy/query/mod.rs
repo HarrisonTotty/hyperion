@@ -32,8 +32,8 @@ pub use expected::expected_counts;
 pub use mode::{QueryMode, range_query_observed};
 pub(crate) use motion::drifted;
 pub use motion::{
-    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, pad_for, pad_speed,
-    position_at,
+    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, kepler_pad_for,
+    pad_for, pad_speed, position_at,
 };
 pub use request::{
     DEFAULT_CELL_BUDGET, DEFAULT_CENSUS_LIMIT, MassFloor, RangeQuery, RangeQueryBuilder,

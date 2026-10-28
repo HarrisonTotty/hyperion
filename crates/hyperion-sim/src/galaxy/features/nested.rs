@@ -309,36 +309,90 @@ impl NestedGrid {
         centre: &PointLy,
         radius: LightYears,
     ) -> impl Iterator<Item = NestedCell> + '_ {
+        let centre = *centre;
+        self.all_levels()
+            .flat_map(move |level| self.level_cells_touching(level.level, &centre, radius))
+    }
+
+    /// The owned cells of level `level` whose closed boxes meet the closed ball of `radius` about
+    /// the local `centre`, in x, then y, then z order.
+    ///
+    /// It is one level of [`cells_touching`](Self::cells_touching), for a caller whose radius
+    /// differs by level (the galactic centre's source pads each level by its own plunge,
+    /// P09.T29). Nothing for a level past the grid's.
+    pub(crate) fn level_cells_touching<'a>(
+        &'a self,
+        level: u8,
+        centre: &PointLy,
+        radius: LightYears,
+    ) -> impl Iterator<Item = NestedCell> + use<'a> {
+        let ranges = self.index_ranges(level, centre, radius);
         let radius = radius.value();
         let centre = [centre.x, centre.y, centre.z];
+        let axis = move |a: usize| {
+            let (lo, hi) = ranges[a];
+            lo..=hi
+        };
+        axis(0).flat_map(move |x| {
+            axis(1).flat_map(move |y| {
+                axis(2).filter_map(move |z| {
+                    let cell = self.cell(level, [x, y, z])?;
+                    (box_distance(&self.local_cell(cell), centre) <= radius).then_some(cell)
+                })
+            })
+        })
+    }
+
+    /// Whether [`level_cells_touching`](Self::level_cells_touching) of `cell`'s level, `centre`
+    /// and `radius` yields `cell`, by the same test, rounding included.
+    ///
+    /// It is for a caller that walks a second ball and must leave out what the first yielded
+    /// (P09.T29).
+    #[must_use]
+    pub(crate) fn level_touches(
+        self,
+        cell: NestedCell,
+        centre: &PointLy,
+        radius: LightYears,
+    ) -> bool {
+        let ranges = self.index_ranges(cell.level, centre, radius);
+        ranges
+            .iter()
+            .zip(cell.cell)
+            .all(|(&(lo, hi), c)| (lo..=hi).contains(&c))
+            && self.owns(cell.level, cell.cell)
+            && box_distance(&self.local_cell(cell), [centre.x, centre.y, centre.z])
+                <= radius.value()
+    }
+
+    /// The bounds `(lo, hi)` of the index range `lo..=hi` on each axis of `level` whose closed
+    /// cells meet `[c − r, c + r]`, empty past the grid's levels.
+    #[must_use]
+    fn index_ranges(self, level: u8, centre: &PointLy, radius: LightYears) -> [(u8, u8); 3] {
+        let radius = radius.value();
         let n = self.cells_per_axis;
         let half = i32::from(n / 2);
-        self.all_levels().flat_map(move |level| {
-            let e = level.edge;
-            // The index range on each axis whose closed cells meet [c − r, c + r].
-            let range = centre.map(|c| {
-                let lo = ((c - radius) / e).floor();
-                let hi = ((c + radius) / e).floor();
-                let lo = (lo + f64::from(half)).max(0.0);
-                let hi = (hi + f64::from(half)).min(f64::from(n) - 1.0);
-                (lo, hi)
-            });
-            let axis = move |a: usize| to_index_range(range[a]);
-            axis(0).flat_map(move |x| {
-                axis(1).flat_map(move |y| {
-                    axis(2).filter_map(move |z| {
-                        let cell = self.cell(level.level, [x, y, z])?;
-                        (box_distance(&self.local_cell(cell), centre) <= radius).then_some(cell)
-                    })
-                })
+        let found = self.level(level);
+        [centre.x, centre.y, centre.z].map(|c| {
+            to_index_range(match found {
+                Some(level) => {
+                    let e = level.edge;
+                    let lo = ((c - radius) / e).floor();
+                    let hi = ((c + radius) / e).floor();
+                    let lo = (lo + f64::from(half)).max(0.0);
+                    let hi = (hi + f64::from(half)).min(f64::from(n) - 1.0);
+                    (lo, hi)
+                }
+                None => (1.0, 0.0),
             })
         })
     }
 }
 
-/// The distance from the local point `p` to the closed box `cell`, ly.
+/// The distance from the local point `p` to the closed box `cell`, ly: what
+/// [`NestedGrid::cells_touching`] compares with its radius.
 #[must_use]
-fn box_distance(cell: &LocalCell, p: [f64; 3]) -> f64 {
+pub(crate) fn box_distance(cell: &LocalCell, p: [f64; 3]) -> f64 {
     let mut sum = 0.0;
     for (&lo, &c) in cell.min.iter().zip(&p) {
         let hi = lo + cell.edge;
@@ -354,17 +408,18 @@ fn box_distance(cell: &LocalCell, p: [f64; 3]) -> f64 {
     sum.sqrt()
 }
 
-/// The indices `lo..=hi` of a range of whole numbers clamped to a level, empty if `lo > hi` or
-/// either is not a number.
-fn to_index_range((lo, hi): (f64, f64)) -> impl Iterator<Item = u8> + Clone {
+/// The bounds `(lo, hi)` of the indices `lo..=hi` of a range of whole numbers clamped to a level,
+/// `(1, 0)`, which is empty, if `lo > hi` or either is not a number.
+#[must_use]
+fn to_index_range((lo, hi): (f64, f64)) -> (u8, u8) {
     let valid = lo <= hi && lo.is_finite() && hi.is_finite();
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         reason = "both are whole numbers clamped to 0..=63 when the range is valid"
     )]
-    let (lo, hi) = if valid { (lo as u8, hi as u8) } else { (1, 0) };
-    lo..=hi
+    let range = if valid { (lo as u8, hi as u8) } else { (1, 0) };
+    range
 }
 
 /// The cell holding coordinate `c` of a block of `n` cells of edge `e` that holds it: `⌊c ÷ e⌋ +
@@ -583,10 +638,24 @@ mod tests {
                     .filter(|(_, b)| box_distance(b, c) <= radius)
                     .map(|(cell, _)| *cell)
                     .collect();
-                let walked: Vec<NestedCell> = grid
-                    .cells_touching(&PointLy::new(c[0], c[1], c[2]), LightYears::new(radius))
-                    .collect();
+                let at = PointLy::new(c[0], c[1], c[2]);
+                let walked: Vec<NestedCell> =
+                    grid.cells_touching(&at, LightYears::new(radius)).collect();
                 assert_eq!(walked, brute, "sphere of {radius} ly at {c:?}");
+                // Level by level, and the test that says whether a level's walk yields a cell.
+                let by_level: Vec<NestedCell> = grid
+                    .all_levels()
+                    .flat_map(|l| {
+                        grid.level_cells_touching(l.level(), &at, LightYears::new(radius))
+                    })
+                    .collect();
+                assert_eq!(by_level, walked);
+                let touched: Vec<NestedCell> = all
+                    .iter()
+                    .map(|(cell, _)| *cell)
+                    .filter(|&cell| grid.level_touches(cell, &at, LightYears::new(radius)))
+                    .collect();
+                assert_eq!(touched, walked, "sphere of {radius} ly at {c:?}");
             }
             // A sphere outside the cube touches nothing; one holding it touches everything.
             let far = PointLy::new(3.0 * reach, 0.0, 0.0);
