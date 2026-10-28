@@ -1711,7 +1711,11 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   in the window, which with some 500 such stars gives a Milky Way galaxy about 30 in ±H (the
   research figure). T31 measures the real count and retunes the constant so that the galaxy-wide
   figure is 15–60, regenerating this task's golden. Marks: ejected mass of 0.1–10 M☉ (already in the
-  mean wind; design note 14), peak of 10⁶·⁵–10⁷·⁵ L☉, duration of 1–20 years.
+  mean wind; design note 14), peak of 10⁶·⁵–10⁷·⁵ L☉, duration of 1–20 years. **Done (lane
+  `p06-events`, 2026-10-28; at version 23, no bump), retuned here to one per 12,000 years from
+  T31's 181 LBVs (30.2 in ±H):** the record is under Risks ("Deviations in T28.e, as built" and
+  "Deferred findings (2026-10-13 rule) (P06.T28.e)"); T28.g composes
+  `Eruption::luminosity_factor_at` into `summary_at`.
 - **P06.T28.f Thermal pulses.** Monotone phase on a clock whose base phase is the integral of 1 ÷
   τ_ip(M_c) along the thermally pulsing AGB segment, which T10.c stores at the segment's knots,
   interpolated in age, plus the clock time since the epoch times the epoch's pulse frequency (design
@@ -1732,8 +1736,9 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
 - **T28.a done (lane `14-p06-t28a-flares`, 2026-10-14; at version 22, no bump: new output on a
   new kind that moves nothing existing, as "Generator version" says of every task but T30.b and
   T19.e).** The record is under Risks ("Deviations in T28.a, as built" and "Deferred findings
-  (2026-10-13 rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above), and T28.c and
-  T28.e–g are open; T28.g composes `Flare::luminosity_factor_at` into `summary_at`.
+  (2026-10-13 rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above) and T28.e
+  (2026-10-28, above), and T28.c, T28.f and T28.g are open; T28.g composes
+  `Flare::luminosity_factor_at` into `summary_at`.
 
 ### Phase G: system assembly and galaxy integration
 
@@ -5785,3 +5790,121 @@ R06.
     `GoldenWriter` golden that samples the two corrections over a fixed off-node grid of
     (T<sub>eff</sub>, log g). It should cross the hand-over bands, the column's range ends and
     the white dwarfs' hot tail.
+- **Deviations in T28.e, as built (lane `p06-events`, 2026-10-28; at version 23, no bump: new
+  output on the registered tag 0x0107 and a new golden, moving nothing existing).** Giant
+  eruptions are `stellar::events::lbv`; nothing reads them yet (T28.g, P09.T43 through
+  `StarEventKind::GiantEruption`, and P12.T5.c will). `system.rs`, `sse`, `classify` and the other
+  kinds are unchanged.
+  - _API._ `LbvModel::of(&StarModel) -> Option<LbvModel<'_>>`, `None` where `StarModel::lbv_window`
+    is, a `RateModel` that borrows the star, with `star`, `start`, `end`, `rate_inside`,
+    `erupts_at(t)` and the listings `eruptions_in`, `eruptions_active_at` and `eruption`, which
+    reuse the window found once. `Eruption` (`Copy`): `id`, `onset`, `peak`, `end`, `rise`,
+    `duration` (`Span`s), `ejected_mass`, `peak_luminosity`, `quiescent_luminosity`,
+    `peak_factor`, `is_active_at(t)`, `luminosity_factor_at(t)` and `luminosity_at(t)` (the
+    quiescent luminosity times the factor, for plan 12). The free functions
+    `eruptions_in(star, series, window, out)`, `eruptions_active_at(star, series, t, out)` and
+    `eruption(star, series, id)` take the series
+    `EventSeries::new(seed, tags::STAR_LBV_ERUPTION, body.into())` beside the star, as for flares
+    (tag debug-asserted), and find the window on each call. Constants: `BIN_SECONDS` (3,155,760,000 s), `LOOK_BACK_BINS` (1), `MAX_DURATION`
+    (20 years), `ERUPTIONS_PER_YEAR`, `EJECTED_MASS_SOLAR_MASSES`,
+    `LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES` and `DURATION_YEARS` (`(lo, hi)` pairs), and
+    `RISE_SHARE`.
+  - _Who erupts._ A star inside T24.a's window, the hull from the first to the last age at which
+    `is_luminous_blue_variable` holds, in any living phase, not thinned inside it. At the median
+    draws: 50–100 M☉ at solar Z, 0.3–1.9 kyr of the Hertzsprung gap (60 M☉, 1,633 years); 150 M☉,
+    7.36 × 10⁵ years from the main sequence; at [Fe/H] = −1, 45–100 M☉, about 2 × 10⁵ years across
+    a red-supergiant stretch near 4,000 K (60 M☉, 2.13 × 10⁵); none below about 40 M☉, the lightest
+    with a window being 40 M☉ at [Fe/H] = −1, dead at 5.9 Myr.
+  - _The rate (retuned here, not by T31, which ran before T28 existed)._ One per 12,000 years,
+    ours (design note 22), constant in the window and zero outside it; a bin's bound is the
+    constant where the bin meets the window. T31's 181 LBVs × 2H ÷ 12,000 years = 30.2 in ±H; the
+    plan's 1/30,000 assumed some 500 LBVs and would give 12.1, under 15. The task text's
+    "regenerating this task's golden" when T31 retunes is moot: a later change to the rate or the
+    marks moves `stellar/lbv_eruptions` and is a bump.
+  - _Time._ Bins of 3,155,760,000 s looking back one; a bin's mean is 1/120. The window's ends are
+    `lbv_window`'s clock times and the rate compares t with them, reading no age. Listings are cut
+    to the window, which drops nothing, and `eruptions_active_at` returns at once before it and
+    from its end plus 20 years.
+  - _Marks (the laws ours; the plan gives ranges only)._ Word 0 the ejected mass, log-uniform on
+    0.1–10 M☉ (mean 2.15); word 1 log₁₀ L_peak (L☉), uniform on 6.5–7.5; word 2 the duration,
+    log-uniform on 1–20 Julian years, floored to the nanosecond; independent, one `uniform()`
+    each. Later scatter takes words 3, 4, … in order.
+  - _Light curve (ours)._ F^x with F = max(1, L_peak ÷ L_q): x rises linearly over the first
+    quarter of the duration (`RISE_SHARE`; η Carinae's 1837–1843 rise was 0.27 of its Great
+    Eruption) and falls linearly to the end, linear in magnitude as T28.d's, exactly 1 at the
+    onset and the end and continuous. L_q is `state_at(min(onset, +H))`'s, read once per
+    eruption. No Eddington cap: giant eruptions exceed it (η Carinae's by five to eight times for
+    about a decade). F's floor never binds in the tests (the 150 M☉ star's L_q is 2.55–2.57 × 10⁶
+    L☉ against the peak's floor of 3.16 × 10⁶).
+  - _Sources, recalled and not read at source (the pod reaches no literature host)._ Smith and
+    Hartigan 2006 (ApJ 638, 1045: P Cygni's ~0.1 M☉), Smith et al. 2003 (AJ 125, 1458: η
+    Carinae's ≥ 12 M☉), Davidson and Humphreys 1997 (ARA&A 35, 1: η Carinae's M_bol ≈ −14, 10^49.7
+    erg, 1838–1858), Humphreys and Davidson 1994 (PASP 106, 1025: P Cygni's six years) and Owocki,
+    Gayley and Shaviv 2004 (ApJ 616, 525: super-Eddington). The review's science check found the
+    arithmetic and conversions right (M_bol −14 is 3.13 × 10⁷ L☉) and the citations plausible.
+  - _Tests._ `cargo test -p hyperion-sim stellar::events::lbv`: 12 tests and one ignored, and the
+    doctests on `LbvModel` and `eruptions_in`: the rate and bound at the window's edges ± 1 ns for
+    three stars, with the clock window against the track's; no model for 1, 20 and 40 M☉, a brown
+    dwarf, or a 60 M☉ star at 1 Myr (its track not yet built to its window), and a long-dead star
+    lists nothing; the bound at 43 instants of every bin within 32 of each end of the window,
+    40–150 M☉ at two compositions; `eruption(id)` over 2,000 series (rejected candidates, numbers
+    beyond the count, foreign IDs, a star with no window); K–S tests of the three marks, the rise's
+    quarter, and L_q against `state_at` bit for bit; the factor's ends, peak, F^½, continuity and
+    shape, and `luminosity_at`; partitions at the window's edges and over four cut sets, in any
+    order and on threads (compiled out on wasm32-wasip1), and the free function against the
+    model's; `eruptions_active_at` against the listing; and the +900-year no-history test, at the
+    first instant from +900 years (in 10-year steps) at which an eruption runs. The golden
+    `stellar/lbv_eruptions` (325 lines, header 23, 28 eruptions): the 60 M☉ solar star over 40
+    series, and the 150 M☉ solar and 60 M☉ [Fe/H] = −1 stars over the first 1,000 bins of their
+    windows, one series each. The slow test
+    `the_mean_count_over_10_000_stars_matches_the_rate_integral` (`#[ignore]`): the first 100 LBVs
+    of T31's band-E young-thin-disc sample (1,418 drawn), each built ten years past its window,
+    100 series each, 10⁴ series rather than 10⁴ distinct stars (each LBV costs a massive track,
+    and at a constant rate the count reads only the window's length); windows of 782–680,837
+    years; expected 141,080.4, counted 141,686, interval 139,846–142,318 at α = 10⁻³.
+  - _Galaxy-wide._ `lbv_eruptions_galaxy_wide_at_milky_way_values` in `stellar::testing::tests`
+    (`#[ignore]`): `galaxy_counts`'s band-E LBV weight (4,000 primaries a component, the same
+    samples) × the rate × 2H, every component whose ages reach below 10 Myr, the rest asserted to
+    weigh nothing there. LBVs 181.29 (window 100–2,000) and giant eruptions **30.21** in ±H
+    (15–60); nothing pinned. Both slow tests took 6.5 s together under `slow-test` (pod, 4 vCPU).
+  - _Left to T28.g._ `StarEventKind::GiantEruption`, composing `luminosity_factor_at` into
+    `summary_at` (about 0.1% of eruptions overlap another, 2 r E[D] with E[D] = 6.34 years) and
+    the wire's magnitude fields. Each free call repeats `Track::window_where` (some 1,500
+    `state_at`s for a star with a window, not measured here), so T28.g should build the model once
+    per summary.
+- **Deferred findings (2026-10-13 rule) (P06.T28.e).** Recorded and deferred: each leaves the
+  algorithm and every contract as they are. The leads are unread unless said.
+  - _Design note 14 against the plan's figures._ At the retuned rate the marks' mean ejecta of 2.15
+    M☉ come to 1.79 × 10⁻⁴ M☉ a year, 1.19 times the whole modern LBV wind beyond the limit (1.5 ×
+    10⁻⁴, Belczynski et al. 2010, ApJ 714, 1217, eq. 8, which the recipe applies to evolved stars
+    only); on the main-sequence part of a window the track blows Vink's rate, not that. Over whole
+    windows the expected ejecta are 132 M☉ for the 150 M☉ solar star and 38 M☉ for 60 M☉ at
+    [Fe/H] = −1. At the plan's 1/30,000 it would have been under half the wind. Lean: accept it as
+    a mark only (nothing reads the mass into the track), and let P06.T42.b's train, which moves
+    the windows, recheck it; or weight the mass law to small ejecta.
+  - _The hull spans states that are not LBVs._ At [Fe/H] = −1 the 45–100 M☉ hulls cross a
+    red-supergiant stretch near 4,000 K, where eruptions run at the full rate; T24.a's "no gap"
+    held for its 60 M☉ solar test star. Lean: thin each candidate by the predicate (one `state_at`
+    each, as T28.a checks its phase), with T31's census and the retune weighted the same way, or
+    leave it to P06.T42.b, whose A2 winds strip cool supergiants past the limit.
+  - _Main-sequence windows._ The predicate admits any living phase, so the most massive stars
+    erupt from the main sequence (150 M☉: 7.36 × 10⁵ years), where `classify` may name them WNh;
+    such windows dominate the census (the slow test's longest is 6.8 × 10⁵ years). P09.T43 reads
+    the same window.
+  - _Short solar-Z windows and faint LBVs._ For 50–100 M☉ at solar Z, 0.3–1.9 kyr gives a 2.5–15%
+    chance of any eruption in a star's life, against observed LBV phases of 10⁴–10⁵ years, and no
+    star below about 40 M☉ (6 × 10⁵ L☉) has a window, while observed LBVs reach log L ≈ 5.4 (lead:
+    Humphreys and Davidson 1994).
+  - _The peak is absolute._ F is 1.24–12.4 for the 150 M☉ star and about 2.5–26 for 60 M☉ at
+    [Fe/H] = −1; for a star above 10^6.5 L☉ a low draw gives no brightening, where a giant
+    eruption is defined by one. The light curve has no plateau, though η Carinae stayed near its
+    peak from 1843 to about 1856 and P Cygni at third magnitude for 1600–1606, and P Cygni's span
+    back to quiet, about 26 years, exceeds the 20-year top. Only L changes: no radius,
+    temperature or colour; S Doradus cycles are T26.d's.
+  - _For P06.T42.b._ Its "What moves" does not name the LBV windows, which it moves; with them move
+    T31's 181, P09.T43's hosts and this kind's 30.2 eruptions. Its train reruns
+    `lbv_eruptions_galaxy_wide_at_milky_way_values` and retunes `ERUPTIONS_PER_YEAR` (a bump) if
+    the figure leaves 15–60.
+  - _Sources not read at source._ Every literature figure above and in the constants'
+    documentation was recalled on a machine with no literature access; a science check with
+    network access should read them and drop the "recalled" notes.

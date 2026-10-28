@@ -11,7 +11,10 @@
 //!   (P06.T28.d).
 //! - [`glitches`]: pulsar glitches, Crab-like on Poisson bins of 30 days and Vela-like on a
 //!   monotone phase (P06.T28.b).
+//! - [`lbv`]: the giant eruptions of luminous blue variables, Poisson bins of 100 years
+//!   (P06.T28.e).
 
 pub mod flares;
 pub mod fu_orionis;
 pub mod glitches;
+pub mod lbv;

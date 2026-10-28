@@ -1210,4 +1210,68 @@ mod tests {
         );
         checks.finish();
     }
+
+    /// The ages under which a star can be a luminous blue variable: every LBV window of the
+    /// generator's tracks closes before 10 Myr, the lightest such stars (40 M☉ at [Fe/H] = −1)
+    /// dying at 5.9 Myr (P06.T28.e).
+    const LBV_YOUNG_YEARS: f64 = 1e7;
+
+    /// The giant eruptions of luminous blue variables galaxy-wide in ±H at Milky Way values
+    /// (P06.T28.e): each component's system count × its band-E share × the band's mean weight of
+    /// the ages inside its stars' LBV windows, `galaxy_counts`'s "LBVs" for band E (4,000 primaries
+    /// a component, the same samples), times the eruption rate and 2H: the mean number of luminous
+    /// blue variables times the rate times 2H is the expected count in ±H whatever the windows'
+    /// lengths, since the age distributions change little over 2,000 years. Every component whose
+    /// ages reach below 10 Myr is taken, and the rest are asserted to weigh nothing there. The plan's windows: LBVs 100–2,000 (P06.T31) and giant
+    /// eruptions 15–60 in ±H, from which the rate is retuned.
+    #[test]
+    #[ignore = "slow: 4,000 band-E primaries of each young component, each with its full track"]
+    fn lbv_eruptions_galaxy_wide_at_milky_way_values() {
+        use crate::stellar::events::lbv::ERUPTIONS_PER_YEAR;
+        use crate::time::CLOCK_WINDOW_H;
+        const N: u32 = 4_000;
+        let mut checks = Checks::default();
+        let galaxy = milky_way();
+        let mut lbvs = 0.0;
+        let mut included = 0;
+        for (i, component) in galaxy.fields().components().iter().enumerate() {
+            let ages = component.ages();
+            let population = component.population();
+            if ages.min().value() >= LBV_YOUNG_YEARS {
+                assert!(
+                    weight(ages, 0.0, LBV_YOUNG_YEARS) <= 0.0,
+                    "{population:?} component {i}"
+                );
+                continue;
+            }
+            included += 1;
+            let sampling = banded(&galaxy, i, MassBand::E);
+            let t = tally(
+                u64::from(N),
+                |k| sample_inputs(&galaxy, &sampling, SEED, k),
+                |inputs, t| {
+                    let track =
+                        Track::full(inputs.initial_mass, &inputs.composition, &inputs.draws);
+                    if let Some(lbv) = track.window_where(PhasePredicate::Lbv) {
+                        let w = weight(ages, lbv.start().value(), lbv.end().value());
+                        assert!(
+                            lbv.end().value() < LBV_YOUNG_YEARS || w <= 0.0,
+                            "{} M☉: an LBV window ending at {} yr",
+                            inputs.initial_mass.value(),
+                            lbv.end().value()
+                        );
+                        t.add("LBVs", w);
+                    }
+                },
+            );
+            let per_star =
+                component.count() * galaxy.shares().share(MassBand::E, population) / f64::from(N);
+            lbvs += t.get("LBVs") * per_star;
+        }
+        assert!(included > 0);
+        let eruptions = lbvs * ERUPTIONS_PER_YEAR * 2.0 * CLOCK_WINDOW_H.as_julian_years_f64();
+        checks.within("LBVs", lbvs, (100.0, 2_000.0));
+        checks.within("giant eruptions in ±H", eruptions, (15.0, 60.0));
+        checks.finish();
+    }
 }
