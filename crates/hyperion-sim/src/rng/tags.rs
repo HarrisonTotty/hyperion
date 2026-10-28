@@ -926,6 +926,14 @@ domain_tags! {
     /// of 0.17 dex, two words, keyed by `ObjectKey::galaxy_item` of its progenitor's number, `6 +
     /// j`, as the progenitor's other draws are (P10.T7.a).
     DWARF_CORE_METALLICITY: Galaxy = "dwarf.core.metallicity";
+
+    // Plan 10, P10.T5: the particle spray, under the "Plan 10" heading's rule (scope `Galaxy`),
+    // keyed by `ObjectKey::galaxy_item` of the stream's number (Design note 14). Appended here,
+    // after P09.T32's `class.cell`, because the macro's order fixes `ALL`.
+
+    /// A stream's release schedule (P10.T5.a, `global_list::spray::ReleaseSchedule`): word `i`, one
+    /// uniform, where release `i` falls inside its stratum of the tube's mass.
+    STREAM_SPRAY_RELEASE: Galaxy = "stream.spray.release";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1325,6 +1333,7 @@ mod tests {
             DWARF_ORBIT,
             DWARF_STRIPPING,
             DWARF_CORE_METALLICITY,
+            STREAM_SPRAY_RELEASE,
         ];
         for tag in tags {
             assert_eq!(tag.scope(), crate::rng::TagScope::Galaxy, "{}", tag.name());
