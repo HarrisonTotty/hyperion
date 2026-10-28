@@ -5184,7 +5184,8 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
   and QW31. _Measured, not landed, 2026-10-27_ (Risks, "Deviations in R08.T11.f, as built": the
   form, amended to the centre's lookup with the disc's second-order term, met its acceptance on the
   twin, but cost the RTX 3080 more where it never ran than it saved where it did, so main dropped
-  it; the two x4 rows go to QW33 on origin's tip, under Electron 45).
+  it. QW33, on origin's tip under Electron 45, leaves the slab's 10⁷ m x4 over 16.67 ms and
+  `TEST SATURN`'s 9.45 × 10⁷ m x4 at 16.61, so the edged one-band march is the next R08 task).
 
 Acceptance: the record is here, and `pnpm test` passes.
 
@@ -11561,6 +11562,37 @@ SATURN`'s 5 slices and 4 bands), their medians 16.29–16.64. No x2 or x2p row i
     median of 16.29–16.38 ms (p95 16.46; another run 17.63 by its tail), and `TEST SATURN`'s
     9.45 × 10⁷ m x4 at 16.02–16.08 (p95 16.13–16.20). QW31's medians were 16.52–16.64 and
     16.29–16.35. QW33 re-judges both rows on origin's tip with no lane code, under QW31's rule.
+  - _QW33_ (main's quiet window, 2026-10-28; on origin's 5b0e2419, R08.T14.c's read path landed
+    and its route gated, with no lane code).
+    - Two timed hidden runs back to back, 02:17–02:22 local, each holding the heavy-test and GPU
+      locks for 151–152 s in a scope capped at 8 GB and `CPUQuota` 1200%. The 1-minute load went
+      from 1.81 to 0.93. The driver's cache was warmed first by an untimed run of the same build,
+      since Electron 45's compiler makes the first NVIDIA run compile cold.
+    - Clocks: P0 in 1,406 of 1,493 and 1,398 of 1,471 samples, busy at a median of 1,965 and
+      1,950 MHz, at most 67 °C. Every check of the group passed in both runs; the part's one failure
+      is R07.T16.f's spatial strokes, a hardware run's known one.
+    - Judged by QW31's rule, and by main's addition for this run: a row stalled in both runs is
+      judged by its medians, the repeat recorded. Of the judged high rows, 87 meet 15.67 ms, 4 are
+      over it and at most 16.67 ms, and 1 is over 16.67 ms:
+
+      | Row                         | Run 1 p95 (median) | Run 2 p95 (median) | QW31's judged | Verdict    |
+      | --------------------------- | ------------------ | ------------------ | ------------- | ---------- |
+      | slab 10⁷ m x4               | 18.32 (16.63)      | 16.59 (16.42)      | 16.76         | over 16.67 |
+      | TEST SATURN 9.45 × 10⁷ m x4 | 16.61 (16.31)      | 16.42 (16.10)      | 16.69         | over 15.67 |
+      | slab 400 km x4              | 15.70 (15.62)      | 15.98 (15.55)      | 16.01         | over 15.67 |
+      | measured Earth 10⁷ m x4     | 15.89 (12.91)      | 15.82 (12.65)      | 15.93         | over 15.67 |
+      | slab 10⁷ m x2               | 15.72 (15.63)      | 15.53 (15.45)      | 15.73         | over 15.67 |
+
+    - The slab's 10⁷ m x4 is over by run 1's tail: four frames of 18.3–22.2 ms over a median at the
+      line, which the rule does not count as a stall. Run 2's p95 is 16.59. Electron 45 did not move
+      it enough. Its lever is the edged one-band march, T6.f's half, by main's pre-ruling.
+    - `TEST SATURN`'s 9.45 × 10⁷ m x4 meets 16.67, so its lever, the sliced edge-free march (T6.i's
+      half), is recorded and not built.
+    - _Stalled rows._ R05's Earth's 10⁷ m x2 and x2p in run 1, and the measured Earth's 10⁸ m x2 and
+      2.55 × 10⁷ m x1 in run 2, were each judged from the other run. The measured Earth's
+      1.54 × 10⁷ m x4 stalled in both runs, judged by its medians (11.54 and 11.27), and meets. The
+      staircase began at the same frame in both runs, the reversed sweep's first timed frame: about
+      9–12 frames at 23 ms, then 13–16 at 17 ms, then back to 11.2.
 - **Deferred findings (2026-10-13 rule)** (R08.T11.f).
   - _The three-node rule's bias._ The three nodes along the disc's vertical miss half the disc's
     spread in air mass, the part across the vertical. They read about Tτρ² ÷ 8 high: 0.58% for a
@@ -11571,6 +11603,9 @@ SATURN`'s 5 slices and 4 bands), their medians 16.29–16.64. No x2 or x2p row i
     the extinction at the point: an e-folding of the column, which runs low where a low haze sits
     under a taller gas (Earth's 2.1 km against the molecular 8.4 km). A blend on the air's curvature
     that a later task builds should read an extinction-weighted H, a table layout change.
+  - _QW33's repeated staircase._ The measured Earth's 1.54 × 10⁷ m x4 stalled at the same frame in
+    both runs, the reversed sweep's first timed frame, so it is likely the harness's own: something
+    made or rebuilt when the sweep turns. For the next agent to explain.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
