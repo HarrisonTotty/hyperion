@@ -2,7 +2,7 @@
   "key": "ice_giant_haze",
   "phase": "solid",
   "variant": null,
-  "name": "ice-giant haze, an effective index retrieved from Uranus's and Neptune's spectra",
+  "name": "ice-giant haze, with the geometric mean of the absorption retrieved from Uranus's and Neptune's spectra",
   "temperatureK": null,
   "shape": "sphere",
   "provenance": "standIn",
@@ -10,7 +10,7 @@
   "source": "the preprint's source, https://arxiv.org/e-print/2201.04516v2, SHA-256 9aac82980dd91c5dacc34d5552629e113cdb8e3fb7c6d39c3dd8f324fa045259, fetched 2026-10-14, its file Neptune_Uranus_Haze.tex, SHA-256 7061326a906a8d284d40bd0d2bf0b0991e7f4a1e398de9adf6d4bd3947b8aad9, the tables \"Estimated n_imag spectra for Uranus aerosols\" and \"… for Neptune aerosols\", the Aerosol-3 (extended haze) \"Mean 1\" columns; read as data",
   "licence": "Adapted from CC BY 4.0 material (https://creativecommons.org/licenses/by/4.0/): P. G. J. Irwin et al., J. Geophys. Res. Planets 127 (2022) e2022JE007189 (arXiv:2201.04516v2). Changed: the geometric mean of the two planets' Aerosol-3 k, reduced onto this grid, with n held at the paper's 1.4; this file is offered under CC BY 4.0",
   "reduction": "at each of the tables' wavelengths, every 100 nm over 300–1,900 nm, k is the geometric mean of Uranus's and Neptune's Aerosol-3 \"Mean 1\", since one key serves every ice giant; then n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures. The two planets differ by up to a factor of 29 over 300–800 nm (Uranus 1.50 × 10⁻³ and Neptune 1.01 × 10⁻² at 400 nm, 1.91 × 10⁻⁴ and 5.47 × 10⁻³ at 500 nm). n is the paper's 1.4, which its retrieval fixes at 800 nm and carries elsewhere by Kramers–Kronig (its §3.4 and §3.6); that shape is not reproduced, and n is 1.4 throughout",
-  "standIn": "an effective index retrieved from Uranus's and Neptune's spectra for their unidentified photochemical haze, not a laboratory measurement",
+  "standIn": "an effective index retrieved from the spectra of Uranus and Neptune for their unidentified photochemical haze, its k the geometric mean of the two planets' values, which differ by up to a factor of 29, and not a laboratory measurement",
   "fit": null,
   "wavelengthsNm": [
     380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 470,

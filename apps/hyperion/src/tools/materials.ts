@@ -108,7 +108,10 @@ export interface MaterialHeader {
   readonly phase: FilePhase;
   /** A composition variant (an acid's concentration), or null for the key's only one. */
   readonly variant: string | null;
-  /** What the sample is, in words. */
+  /**
+   * What the sample is, in words. Player text, which the client's named analogue sets after a
+   * colon (`materials.ts`'s `resolveMaterial`), so it holds none (R08.T10.f).
+   */
   readonly name: string;
   /** The sample's temperature, K, or null where the source does not state one. */
   readonly temperatureK: number | null;
@@ -126,7 +129,8 @@ export interface MaterialHeader {
    * For a stand-in, what stands in and why; otherwise null. Player text, which the client shows as
    * an `ATMOSPHERE: APPROXIMATE` reason after the file's phase and name (`materials.ts`'s
    * `materialApproximations`), so it cites no paper: {@link MaterialHeader.paper}, which no screen
-   * shows, holds the citation (R08.T10.e).
+   * shows, holds the citation (R08.T10.e). It is worded to read after that head: it holds no colon
+   * and does not name its material again (R08.T10.f).
    */
   readonly standIn: string | null;
   /**
@@ -1782,7 +1786,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       key: "ice_giant_haze",
       phase: "solid",
       variant: null,
-      name: "ice-giant haze, an effective index retrieved from Uranus's and Neptune's spectra",
+      name: "ice-giant haze, with the geometric mean of the absorption retrieved from Uranus's and Neptune's spectra",
       temperatureK: null,
       shape: "sphere",
       provenance: "standIn",
@@ -1792,7 +1796,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: `Adapted from CC BY 4.0 material (${CC_BY}): P. G. J. Irwin et al., J. Geophys. Res. Planets 127 (2022) e2022JE007189 (arXiv:2201.04516v2). Changed: the geometric mean of the two planets' Aerosol-3 k, reduced onto this grid, with n held at the paper's 1.4; this file is offered under CC BY 4.0`,
       reduction: `at each of the tables' wavelengths, every 100 nm over 300–1,900 nm, k is the geometric mean of Uranus's and Neptune's Aerosol-3 "Mean 1", since one key serves every ice giant; then ${STANDARD_REDUCTION}. The two planets differ by up to a factor of 29 over 300–800 nm (${IRWIN_PLANETS_TEXT}). n is the paper's 1.4, which its retrieval fixes at 800 nm and carries elsewhere by Kramers–Kronig (its §3.4 and §3.6); that shape is not reproduced, and n is 1.4 throughout`,
       standIn:
-        "an effective index retrieved from Uranus's and Neptune's spectra for their unidentified photochemical haze, not a laboratory measurement",
+        "an effective index retrieved from the spectra of Uranus and Neptune for their unidentified photochemical haze, its k the geometric mean of the two planets' values, which differ by up to a factor of 29, and not a laboratory measurement",
       fit: null,
     },
   },
@@ -1807,7 +1811,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       key: "acid_uv_absorber",
       phase: "liquid",
       variant: null,
-      name: "ultraviolet-absorbing H2SO4: aqueous H2SO4, mass fraction 75 %, at 300 K, with Venus's unidentified absorber added",
+      name: "ultraviolet-absorbing H2SO4, as aqueous H2SO4, mass fraction 75 %, at 300 K, with Venus's unidentified absorber added",
       temperatureK: 300,
       shape: "sphere",
       provenance: "standIn",
@@ -1821,7 +1825,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: NO_TERMS,
       reduction: `the 75 wt% file's own reduction (${standardReductionOnto(ACID_GRID_NM)}, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = ${ACID_UV_K365} and L = ${ACID_UV_DECAY_NM} nm are the a-priori values (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), Spacek et al.'s decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling; k₃₆₅ is the ruling's), which R08.T5.e refits to Venus's 365 nm albedo and g′ ÷ r′ colour. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry`,
       standIn:
-        "an empirical absorber: H2SO4 droplets with an unidentified ultraviolet absorber, whose k is fitted to Venus's albedo spectrum (candidates FeCl3, S2O/OSSO, Sx, organics)",
+        "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's albedo spectrum and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
       fit: null,
     },
   },
@@ -1899,7 +1903,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       licence: `Adapted from CC BY 4.0 material (${CC_BY}): J. Martikainen et al., Astrophys. J. Suppl. 268 (2023) 47. Changed: MGS-1's k from Table 6 reduced onto this grid, with n the paper's fixed 1.5; this file is offered under CC BY 4.0`,
       reduction: `${STANDARD_REDUCTION}. Table 6's k is MGS-1's, retrieved with the paper's second Gaussian-random-sphere shapes and n fixed at 1.5; its 650 nm value, 4.33 × 10⁻⁴, is the index Martikainen et al. 2025's MGS-1 database takes (R08.T5.c's fidelity test), where Table 3's first shapes give 3.15 × 10⁻⁴. The rows are every 25 nm to 400 nm, then every 50 nm; the sample is a laboratory simulant at room temperature, unstated`,
       standIn:
-        "the absorption of MGS-1, a Mars regolith simulant, as retrieved with its real index fixed at 1.5, stands in, since no open visible index of such a basalt was found",
+        "the absorption of MGS-1, a Mars regolith simulant, as retrieved with its real index fixed at 1.5, stands in, since no openly published visible index of such a basalt was found",
       fit: null,
     },
   },
@@ -3407,7 +3411,10 @@ interface IceEstimate {
   readonly noMeasurement: string;
   /** What else the file states it leaves out (O₂'s weak bands). */
   readonly notDrawn: string | null;
-  /** Why it stands in, as its `standIn` says it, in player text. */
+  /**
+   * Why it stands in, as its `standIn` ends after `since`, in player text that does not name the
+   * ice: the head before it does (R08.T10.f).
+   */
   readonly standInReason: string;
 }
 
@@ -3430,7 +3437,7 @@ function iceEstimateFile(estimate: IceEstimate): MaterialFile {
     licence: `estimated values from cited constants and a crystal cell from the Crystallography Open Database (its entry ${cell.terms}); no data set is copied (decision-r08-t5d ruling 5)`,
     reduction:
       "n = √((1 + 2x) ÷ (1 − x)), with x the gas's molar refraction over the solid's molar volume, evaluated on 380–780 nm every 5 nm to six significant figures; k = 0",
-    standIn: `a non-absorbing crystal whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the crystal's density, since ${estimate.standInReason}: ${at(380).toFixed(3)} at 380 nm, ${at(550).toFixed(3)} at 550 nm and ${at(780).toFixed(3)} at 780 nm`,
+    standIn: `a non-absorbing crystal whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the crystal's density, ${at(380).toFixed(3)} at 380 nm, ${at(550).toFixed(3)} at 550 nm and ${at(780).toFixed(3)} at 780 nm, since ${estimate.standInReason}`,
     fit: null,
     wavelengthsNm: MATERIAL_GRID_NM,
     n: MATERIAL_GRID_NM.map((nm) => rounded(at(nm))),
@@ -3449,7 +3456,7 @@ export const ICE_ESTIMATES: ReadonlyArray<IceEstimate> = [
       "The one open measurement found, Yarnall and Hudson 2022's n at 670 nm, is of amorphous ice deposited at 19 K, a film less dense than the crystal, not the crystal's visible dispersion; it is the method's third check below.",
     notDrawn: null,
     standInReason:
-      "only one wavelength of an amorphous film's index is measured openly, not the crystal's visible dispersion",
+      "the only openly published index found is an amorphous film's at one wavelength, not the crystal's visible dispersion",
   },
   {
     key: "N2",
@@ -3459,7 +3466,7 @@ export const ICE_ESTIMATES: ReadonlyArray<IceEstimate> = [
     noMeasurement:
       "The measured visible n of N2 ice (Satorre et al. 2008, Planet. Space Sci. 56, 1748; Luna et al. 2012, Icarus 221, 186; at 632.8 nm, of films deposited cold) could not be read: closed.",
     notDrawn: null,
-    standInReason: "no open visible optical constants of N2 ice were found",
+    standInReason: "no openly published visible optical constants were found",
   },
   {
     key: "CO",
@@ -3468,7 +3475,7 @@ export const ICE_ESTIMATES: ReadonlyArray<IceEstimate> = [
     measuredNm: [480, 670.8],
     noMeasurement: "No open visible optical constants of CO ice were found.",
     notDrawn: null,
-    standInReason: "no open visible optical constants of CO ice were found",
+    standInReason: "no openly published visible optical constants were found",
   },
   {
     key: "O2",
@@ -3478,7 +3485,7 @@ export const ICE_ESTIMATES: ReadonlyArray<IceEstimate> = [
     noMeasurement:
       "No open visible optical constants of O2 ice were found (refractiveindex.info's O2 entries are of the gas).",
     notDrawn: "solid O2's weak visible absorption bands, which make it pale blue, are not drawn",
-    standInReason: "no open visible optical constants of O2 ice were found",
+    standInReason: "no openly published visible optical constants were found",
   },
 ];
 
@@ -6035,7 +6042,7 @@ const T5K_DERIVED_LIQUIDS: ReadonlyArray<MaterialFile> = [
       "estimated values from the gas dispersion view/atmosphere/rayleigh.ts cites and the NIST Chemistry WebBook's density (NIST Standard Reference Data), with two measured values cited as facts; no data set is copied",
     reduction:
       "n = √((1 + 2x) ÷ (1 − x)) with x = R(λ) ρ_m, the gas's molar refraction at the liquid's density, unscaled (c = 1), evaluated at each wavelength of 380–780 nm every 5 nm, to six significant figures; k = 0: the liquid is colourless in the visible. The stated band: +0.000 and −0.015 in n, the estimate likely high, as against Gagnon et al.'s values",
-    standIn: `a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values contradict themselves: 1.2213 at 514.5 nm and 1.2122 at 632.8 nm at 78 K, ${GAGNON_CO.map((p) => (scaledLiquidIndex(CO_DISPERSION, p.wavelengthUm * 1_000, CO_LIQUID_78K_DENSITY.molPerL, 1) - p.n).toFixed(3)).join(" and ")} below the estimate there; at ${Math.round(CO_LIQUID_DENSITY.temperatureK)} K the estimate is ${[
+    standIn: `a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values, 1.2213 at 514.5 nm and 1.2122 at 632.8 nm at 78 K, contradict each other and lie ${GAGNON_CO.map((p) => (scaledLiquidIndex(CO_DISPERSION, p.wavelengthUm * 1_000, CO_LIQUID_78K_DENSITY.molPerL, 1) - p.n).toFixed(3)).join(" and ")} below the estimate there; at ${Math.round(CO_LIQUID_DENSITY.temperatureK)} K the estimate is ${[
       380, 550, 780,
     ]
       .map(
@@ -6063,7 +6070,7 @@ const T5K_DERIVED_LIQUIDS: ReadonlyArray<MaterialFile> = [
       "estimated values from the gas dispersion view/atmosphere/rayleigh.ts cites and the NIST Chemistry WebBook's density (NIST Standard Reference Data), with two measured values cited as facts; no data set is copied",
     reduction:
       "n = √((1 + 2x) ÷ (1 − x)) with x = R(λ) ρ_m, the gas's molar refraction at the liquid's density, unscaled (c = 1), evaluated at each wavelength of 380–780 nm every 5 nm, to six significant figures; k = 0: the liquid is colourless in the visible. The stated band: −0.005 and +0.021 in n, the estimate likely low, as against Bleekrode's values",
-    standIn: `a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values contradict themselves: ${BLEEKRODE_H2S.map((value) => `${value.n.toFixed(3)} at ${Math.round(value.temperatureC + 273.15)} K`).join(" and ")}, at 589 nm, ${BLEEKRODE_H2S.map((value) => (value.n - scaledLiquidIndex(H2S_DISPERSION, SODIUM_D_NM, value.molPerL, 1)).toFixed(3)).join(" and ")} above the estimate there; at ${Math.round(H2S_LIQUID_DENSITY.temperatureK)} K the estimate is ${[
+    standIn: `a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values at 589 nm, ${BLEEKRODE_H2S.map((value) => `${value.n.toFixed(3)} at ${Math.round(value.temperatureC + 273.15)} K`).join(" and ")}, contradict each other and lie ${BLEEKRODE_H2S.map((value) => (value.n - scaledLiquidIndex(H2S_DISPERSION, SODIUM_D_NM, value.molPerL, 1)).toFixed(3)).join(" and ")} above the estimate there; at ${Math.round(H2S_LIQUID_DENSITY.temperatureK)} K the estimate is ${[
       380, 550, 780,
     ]
       .map(
@@ -6118,7 +6125,7 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
       "estimated values from cited constants and CC0 crystal data (the Crystallography Open Database's entry 1010249); no data set is copied (decision-r08-licences.md row 5)",
     reduction:
       "n = √((1 + 2x) ÷ (1 − x)), with x the raised molar refraction over the molar volume, evaluated on 380–780 nm every 5 nm to six significant figures; k = 0",
-    standIn: `a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: ${nh4shIndex(380).toFixed(3)} at 380 nm, ${nh4shIndex(550).toFixed(3)} at 550 nm and ${nh4shIndex(780).toFixed(3)} at 780 nm, within +${nh4shBandSpan().above.toFixed(3)} and -${nh4shBandSpan().below.toFixed(3)}`,
+    standIn: `a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, ${nh4shIndex(380).toFixed(3)} at 380 nm, ${nh4shIndex(550).toFixed(3)} at 550 nm and ${nh4shIndex(780).toFixed(3)} at 780 nm, within +${nh4shBandSpan().above.toFixed(3)} and -${nh4shBandSpan().below.toFixed(3)}, since no visible optical constants are published`,
     fit: null,
     wavelengthsNm: MATERIAL_GRID_NM,
     n: MATERIAL_GRID_NM.map((nm) => rounded(nh4shIndex(nm))),
@@ -6139,7 +6146,7 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     licence:
       "three published principal indices, cited as facts; no data set is copied (decision-r08-t5d ruling 5)",
     reduction: `a constant index: the principal indices averaged in the dielectric function for randomly oriented grains, n = √((n_α² + n_β² + n_γ²) ÷ 3) = ${S8_STAND_IN_INDEX.toFixed(4)}, at every wavelength of 380–780 nm, with k = 0. Sulphur's dispersion (its indices rise towards the blue) and its blue absorption edge are not drawn, so an S8 haze draws too white in the blue`,
-    standIn: `a constant index: crystalline S8's principal indices at 589 nm averaged for randomly oriented grains, ${S8_STAND_IN_INDEX.toFixed(3)} with no dispersion and k = 0, since no open visible optical constants of S8 were found; its blue absorption edge is not drawn`,
+    standIn: `a constant index, the crystal's principal indices at 589 nm averaged for randomly oriented grains, ${S8_STAND_IN_INDEX.toFixed(3)} with no dispersion and k = 0, since no openly published visible dispersion was found; its blue absorption edge is not drawn`,
     fit: null,
     wavelengthsNm: MATERIAL_GRID_NM,
     n: MATERIAL_GRID_NM.map(() => rounded(S8_STAND_IN_INDEX)),
@@ -6223,7 +6230,7 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     licence:
       "one published index cited as a fact, from a public-domain volume; no data set is copied (decision-r08-t5d ruling 5)",
     reduction: `a constant index: Becquerel's n at 589 nm, ${S8_MOLTEN_INDEX_D.toFixed(4)}, at every wavelength of 380–780 nm, with k = 0. Molten sulphur's dispersion and its blue absorption edge, which makes the melt yellow at its melting point and dark red at its boiling point (Meyer et al. 1971), are not drawn, so a sulphur lake draws too white in the blue. 387 K stands for Becquerel's 114 °C`,
-    standIn: `a constant index: liquid S8's real index at 589 nm near its melting point, ${S8_MOLTEN_INDEX_D.toFixed(3)} with no dispersion and k = 0, since no open measurement of the liquid's visible absorption was found; its blue absorption edge is not drawn`,
+    standIn: `a constant index, the real index at 589 nm near the melting point, ${S8_MOLTEN_INDEX_D.toFixed(3)} with no dispersion and k = 0, since no openly published measurement of the liquid's visible absorption was found; its blue absorption edge is not drawn`,
     fit: null,
     wavelengthsNm: MATERIAL_GRID_NM,
     n: MATERIAL_GRID_NM.map(() => rounded(S8_MOLTEN_INDEX_D)),
@@ -6259,9 +6266,10 @@ function readChecked(path: string, sha256: string): string {
 
 /**
  * Each derived file's name, by its key and phase (`CO2/solid`): since R08.T5.g a key may have a
- * derived liquid beside a derived solid.
+ * derived liquid beside a derived solid. Exported for the copy test that holds each committed
+ * file's header to the tool's (R08.T10.f).
  */
-const DERIVED_FILES: Readonly<Record<string, string>> = {
+export const DERIVED_FILES: Readonly<Record<string, string>> = {
   "CO2/solid": "carbon-dioxide-ice.json",
   "NH4SH/solid": "ammonium-hydrosulphide.json",
   "S8/solid": "sulphur.json",

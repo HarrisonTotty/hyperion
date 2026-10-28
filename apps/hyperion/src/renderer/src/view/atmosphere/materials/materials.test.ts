@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import registry from "../../../../../../../../packages/protocol/fixtures/substances.json" with { type: "json" };
-import { substanceName, UNLISTED_MATERIAL } from "../../../lib/substances";
+import { SUBSTANCE_NAMES, substanceName, UNLISTED_MATERIAL } from "../../../lib/substances";
 import { aerosolModeOptics } from "../aerosol";
 import { mieSphere } from "../mie";
 import { ICE_KEYS } from "../nonSpherical";
@@ -16,11 +16,13 @@ import {
   materialApproximations,
   materialLabels,
   parseMaterialFile,
+  phasedName,
   refractiveIndex,
   resolveMaterial,
   type ScaledMolarRefractionFit,
   variantWords,
   VOLATILE_ICE_KEYS,
+  WORDED_SOLID_KEYS,
 } from "./materials";
 import waterFile from "./water.json" with { type: "json" };
 
@@ -242,6 +244,47 @@ function marsDustK(wavelengthNm: number): number {
  */
 const CITATION = /\bet al\b|(?<![\d.,])(?:19|20)\d{2}(?!\s?(?:nm|µm|K)\b)[a-z]?(?!\d|[.,]\d)/u;
 
+/**
+ * The terms a stand-in reason may hold that contain its own substance's name as a word, though
+ * they name something else: liquid O₂'s pair absorption, `O2–O2` (R08.T10.f).
+ */
+const OTHER_TERMS_WITH_NAME: ReadonlyArray<string> = ["O2–O2"];
+
+/** A stand-in reason that is a file's own text, with the head it should follow. */
+interface OwnTextReason {
+  readonly file: (typeof MATERIAL_FILES)[number];
+  readonly head: string;
+  readonly reason: string;
+}
+
+/**
+ * Every reason a file gives as its own text, as `materialApproximations` gives it for the file's
+ * own key and form at τ 0: the sixteen stand-in files' `standIn`, and liquid O₂'s
+ * `absorptionStandIn` (R08.T10.f).
+ */
+function ownTextReasons(): ReadonlyArray<OwnTextReason> {
+  return MATERIAL_FILES.filter(
+    (file) => file.provenance === "standIn" || file.absorptionStandIn !== undefined,
+  ).flatMap((file) =>
+    materialApproximations([
+      {
+        material: file.key,
+        form: {
+          phase: file.phase,
+          ...(file.variant === undefined ? {} : { variant: file.variant }),
+        },
+        opticalDepthAbove550: 0,
+      },
+    ]).map(({ reason }) => ({ file, head: `${phasedName(file.key, file.phase)}: `, reason })),
+  );
+}
+
+/** Whether a text holds a name as a whole word: no letter or digit runs on at either end. */
+function holdsWord(text: string, name: string): boolean {
+  const escaped = name.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+  return new RegExp(String.raw`(?<![\p{L}\p{N}])${escaped}(?![\p{L}\p{N}])`, "u").test(text);
+}
+
 describe("the material files", () => {
   it("hold every key of T5.b's list", () => {
     const keys = new Set(MATERIAL_FILES.map((f) => f.key));
@@ -445,6 +488,13 @@ describe("the material files", () => {
     // The six whose stand-in text cited its paper until R08.T10.e.
     const { paper } = fileOf(key, phase);
     expect([paper.includes(author), paper.includes(year)]).toEqual([true, true]);
+  });
+
+  it("hold no colon in a name, which a named analogue's reason sets after one", () => {
+    // `no liquid Jovian chromophore on file: <name> stands in, a named analogue` (R08.T10.f).
+    expect(MATERIAL_FILES.map((file) => file.name).filter((name) => name.includes(":"))).toEqual(
+      [],
+    );
   });
 });
 
@@ -712,7 +762,7 @@ describe("NH₄SH, a stated stand-in", () => {
   it("stays a stand-in that states its estimate", () => {
     expect(refractiveIndex("NH4SH", 550).provenance).toBe("standIn");
     expect(resolveMaterial("NH4SH").standIn).toBe(
-      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022",
+      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022, since no visible optical constants are published",
     );
     expect(fileOf("NH4SH").source).toContain(
       "1.80 would need a molar refraction 22% above the additive one.",
@@ -841,7 +891,8 @@ describe("the stand-in label", () => {
   });
 
   it("puts a file's own stand-in text after its phase and name: liquid CO's, the chromophore's", () => {
-    // decision-r08-approximate-plate.md §8.3 (R08.T10.e): neither text names its material.
+    // decision-r08-approximate-plate.md §8.3 (R08.T10.e): neither text names its material. The
+    // chromophore, named in words and held as a solid alone, takes no phase word (R08.T10.f).
     expect(
       materialApproximations([
         { material: "CO", form: { phase: "liquid" }, opticalDepthAbove550: 0 },
@@ -849,7 +900,7 @@ describe("the stand-in label", () => {
       ]).map(({ reason }) => reason),
     ).toEqual([
       `liquid CO: ${liquidOf("CO").standIn ?? ""}`,
-      `solid Jovian chromophore: ${fileOf("chromophore").standIn ?? ""}`,
+      `Jovian chromophore: ${fileOf("chromophore").standIn ?? ""}`,
     ]);
   });
 
@@ -867,6 +918,38 @@ describe("the stand-in label", () => {
       "no liquid Jovian chromophore on file: Jovian chromophore, an effective index retrieved from Jupiter's spectrum stands in, a named analogue",
       "no index file for Xx9: the generic stand-in, a non-absorbing sphere of real index 1.5, a stated convention",
     ]);
+  });
+
+  // decision-r08-approximate-plate.md §8.3 (R08.T10.f): the head names the material, so the text
+  // after it holds no colon that a comma or "since" would serve, and names the material nowhere.
+  it("sets each file's own text after its head with no second colon", () => {
+    const reasons = ownTextReasons();
+    expect(reasons).toHaveLength(17);
+    expect(
+      reasons
+        .filter(
+          ({ head, reason }) => !reason.startsWith(head) || reason.slice(head.length).includes(":"),
+        )
+        .map(({ reason }) => reason),
+    ).toEqual([]);
+  });
+
+  it("names no file's material again in its own text after its head", () => {
+    const reasons = ownTextReasons();
+    expect(reasons).toHaveLength(17);
+    expect(
+      reasons
+        .filter(({ file, head, reason }) =>
+          holdsWord(
+            OTHER_TERMS_WITH_NAME.reduce(
+              (text, term) => text.replaceAll(term, ""),
+              reason.slice(head.length),
+            ),
+            substanceName(file.key),
+          ),
+        )
+        .map(({ reason }) => reason),
+    ).toEqual([]);
   });
 
   it("is not given by measured or derived materials", () => {
@@ -949,6 +1032,42 @@ describe("a named analogue's phase word (signoff-12.md, item 39(c))", () => {
   });
 });
 
+describe("a material named in words, solid alone (R08.T10.f; decision-r08-approximate-plate.md §8.3)", () => {
+  it("takes no phase word for its solid: Jovian chromophore, tholin, Fe-rich basalt", () => {
+    expect(["chromophore", "tholin", "basalt_fe"].map((key) => phasedName(key, "solid"))).toEqual([
+      "Jovian chromophore",
+      "tholin",
+      "Fe-rich basalt",
+    ]);
+  });
+
+  it("keeps liquid for its liquid: liquid Jovian chromophore", () => {
+    expect(phasedName("chromophore", "liquid")).toBe("liquid Jovian chromophore");
+  });
+
+  it("leaves the formulas' phase words and a liquid named in words as they are", () => {
+    expect([
+      phasedName("Fe", "solid"),
+      phasedName("CaTiO3", "solid"),
+      phasedName("NH3", "solid"),
+      phasedName("acid_uv_absorber", "liquid"),
+    ]).toEqual(["solid Fe", "solid CaTiO3", "NH3 ice", "liquid ultraviolet-absorbing H2SO4"]);
+  });
+
+  it("holds the registry's name keys with a solid grain density and no liquid one", () => {
+    const solidAlone = registry.substances
+      .filter(
+        (row) =>
+          Object.hasOwn(SUBSTANCE_NAMES, row.key) &&
+          row.solid_grain_density !== null &&
+          row.liquid_grain_density === null,
+      )
+      .map((row) => row.key);
+    expect(solidAlone).toHaveLength(28);
+    expect([...WORDED_SOLID_KEYS].toSorted()).toEqual(solidAlone.toSorted());
+  });
+});
+
 describe("the registry's aerosol materials (R08.T5.d)", () => {
   // That every aerosol-material row has a file of its own, and every file's key is a row, is
   // R08.T19's parity check (`../parity.test.ts`).
@@ -999,7 +1118,7 @@ describe("acid_uv_absorber, Venus's empirical ultraviolet absorber (decision-r08
       "standIn",
     ]);
     expect(absorber.standIn).toBe(
-      "an empirical absorber: H2SO4 droplets with an unidentified ultraviolet absorber, whose k is fitted to Venus's albedo spectrum (candidates FeCl3, S2O/OSSO, Sx, organics)",
+      "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's albedo spectrum and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
     );
   });
 
@@ -1610,7 +1729,7 @@ describe("the liquids from their gases and their measurements (R08.T5.k)", () =>
         { material: key, reason: `liquid ${key}: ${file.standIn ?? ""}` },
       ]);
       expect(file.standIn).toMatch(
-        /^a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values contradict themselves: /u,
+        /^a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values[^;]*, contradict each other and lie /u,
       );
       expect(file.name).toMatch(/ \(an estimated index\)$/u);
     },
