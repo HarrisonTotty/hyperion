@@ -80,8 +80,8 @@ use hyperion_protocol::{
     EyeDto, GalacticPosition, OpenUniverseRequest, RequestBody, RequestId, ResponseBody,
     SKY_STAR_BYTES, ServerMessage, SkyRequest, SkyResponse, UniverseIdHex, UniverseTime,
 };
-use hyperion_server::SkyService;
 use hyperion_server::config::ENV_WORKERS;
+use hyperion_server::{ServerConfig, SkyService};
 use hyperion_sim::sky::EyeObserver;
 use tokio::runtime::Runtime;
 use tracing_subscriber::EnvFilter;
@@ -223,14 +223,15 @@ fn sky(universe: UniverseIdHex) -> SkyRequest {
 }
 
 /// A fresh server serving the sky, a client of it and a universe of [`SEED`] created, not opened;
-/// its pool [`workers`]' where the variable sets them.
+/// its pool [`workers`]' where the variable sets them, and the server's default otherwise, not the
+/// test harness's fixed count.
 async fn fresh() -> (tempfile::TempDir, TestServer, TestClient, UniverseIdHex) {
     let data_dir = tempfile::tempdir().expect("a temporary directory");
-    let mut config = TestServer::config(data_dir.path()).sky_service(SkyService::Served);
-    if let Some(workers) = workers() {
-        config = config.workers(workers);
-    }
-    let config = config.build();
+    let workers = workers().unwrap_or_else(|| ServerConfig::builder().build().workers());
+    let config = TestServer::config(data_dir.path())
+        .sky_service(SkyService::Served)
+        .workers(workers)
+        .build();
     let server = TestServer::start_with(config).await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Sky", SEED).await.id;

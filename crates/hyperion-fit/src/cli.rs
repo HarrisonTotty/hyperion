@@ -722,6 +722,8 @@ mod tests {
         assert_eq!(reference.to_json(), written);
 
         // The Stokes mode of a case with an aerosol is a bad command line; a missing case is not.
+        // Every command line here that reaches `threads_or_all` names its threads, so that none
+        // takes every core while other tests run beside it.
         let stokes = Cli::try_parse_from([
             "hyperion-fit",
             "atmosphere-reference",
@@ -729,6 +731,8 @@ mod tests {
             "--out",
             out_path.to_str().unwrap(),
             "--stokes",
+            "--threads",
+            "1",
         ])
         .unwrap();
         let error = run(&stokes, &mut Vec::new()).unwrap_err();
@@ -759,6 +763,8 @@ mod tests {
             nowhere.to_str().unwrap(),
             "--samples",
             "2",
+            "--threads",
+            "1",
         ])
         .unwrap();
         let error = run(&unwritable, &mut Vec::new()).unwrap_err();
@@ -939,6 +945,8 @@ mod tests {
             "--pilot-only",
             "--points",
             "999999",
+            "--threads",
+            "1",
         ])
         .unwrap();
         let error = run(&unknown, &mut Vec::new()).unwrap_err();
@@ -995,12 +1003,17 @@ mod tests {
 
     #[test]
     fn writing_into_the_tables_needs_since() {
+        // The task runs before the table is refused. It ignores the count, which each run names
+        // so that the test stays small beside the others if the task ever uses it.
         let mut out = Vec::new();
-        match run(&parse(&["run", "mge"]).unwrap(), &mut out) {
+        match run(&parse(&["run", "mge", "--threads", "1"]).unwrap(), &mut out) {
             Err(RunFitError::Emit(crate::emit::EmitTableError::SinceRequired)) => {}
             other => panic!("{other:?}"),
         }
-        match run(&parse(&["run", "mge", "--since", "1"]).unwrap(), &mut out) {
+        match run(
+            &parse(&["run", "mge", "--since", "1", "--threads", "1"]).unwrap(),
+            &mut out,
+        ) {
             Err(RunFitError::Emit(crate::emit::EmitTableError::SinceNotCurrent {
                 since: 1,
                 ..

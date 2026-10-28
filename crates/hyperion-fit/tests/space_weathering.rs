@@ -23,16 +23,19 @@ use hyperion_surface::tables::space_weathering::REGOLITH_LAMBDA_M;
 /// The table the surface crate compiles, as committed.
 const COMMITTED: &str = include_str!("../../hyperion-surface/src/tables/space_weathering.rs");
 
+/// The task's threads: a fixed few, not the machine's.
+///
+/// The task ignores the count, which is fixed so that the test stays small beside the others if the
+/// task ever uses it.
+const THREADS: NonZeroUsize = NonZeroUsize::new(2).expect("2 is not zero");
+
 #[test]
 fn space_weathering_table_is_reproduced() {
-    let threads = std::thread::available_parallelism().map_or(NonZeroUsize::MIN, |n| {
-        n.min(NonZeroUsize::new(4).expect("four"))
-    });
     let planned = rerender(
         registry(),
         find("space_weathering").expect("space_weathering is registered"),
         &Workspace::repository(),
-        threads,
+        THREADS,
         GENERATOR_VERSION.get(),
     )
     .expect("the space_weathering task runs");

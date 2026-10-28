@@ -769,9 +769,14 @@ mod tests {
     #[tokio::test]
     async fn the_server_holds_its_connections_to_the_limits_of_the_limits_module() {
         let data_dir = tempfile::tempdir().unwrap();
-        let server = Server::start(ServerConfig::builder().data_dir(data_dir.path()).build())
-            .await
-            .unwrap();
+        let server = Server::start(
+            ServerConfig::builder()
+                .data_dir(data_dir.path())
+                .workers(std::num::NonZeroUsize::MIN)
+                .build(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             server.state().connection_limits,
             ConnectionLimits {

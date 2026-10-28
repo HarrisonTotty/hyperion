@@ -12,6 +12,7 @@ pub mod surface;
 
 use std::future::IntoFuture;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -95,6 +96,17 @@ pub async fn patiently<T>(what: &str, future: impl Future<Output = T>) -> T {
     })
 }
 
+/// The CPU pool's workers in a server on [`TestServer::config`], unless the test sets its own.
+///
+/// A fixed count, not the server's default of the machine's parallelism less one: nextest runs
+/// several tests at once, each with a server of its own, and caps only how many tests run, not the
+/// threads each one starts. Two rather than one: a worker takes interactive work first but finishes
+/// the job in hand, so on one worker a query or a galaxy build waits out a whole band of a map or a
+/// surface pass. On two, the coarse surface passes run at once fall to one
+/// ([`ServerConfig::surface_passes`]), which leaves a worker for them. A test that needs work
+/// queued behind a single job sets one worker itself.
+const TEST_SERVER_WORKERS: NonZeroUsize = NonZeroUsize::new(2).expect("2 is not zero");
+
 /// How often [`TestServer::stats_until`] looks at the server's counters again.
 ///
 /// Short beside every state it waits for (a job reaching a worker, a connection closing, a queue
@@ -149,9 +161,13 @@ impl TestServer {
     /// the pool (R06.T11.g), 31 CPU-s built serially and 47 on 15 workers (R06's Risks,
     /// "Deviations in T11.g, as built"), which a test of something else would share its workers
     /// with. The sky's own tests turn it on.
+    ///
+    /// Its pool has [`TEST_SERVER_WORKERS`] workers, not the server's default, which is sized from
+    /// the machine; a test's own [`workers`](ServerConfigBuilder::workers) after it wins.
     pub fn config(data_dir: &Path) -> ServerConfigBuilder {
         ServerConfig::builder()
             .data_dir(data_dir)
+            .workers(TEST_SERVER_WORKERS)
             .entropy(SequenceEntropy::new(test_entropy()))
             .sky_service(SkyService::Unsupported)
     }
