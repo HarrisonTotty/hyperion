@@ -2,7 +2,7 @@
   "key": "acid_uv_absorber",
   "phase": "liquid",
   "variant": null,
-  "name": "ultraviolet-absorbing H2SO4: aqueous H2SO4, mass fraction 75 %, at 300 K, with Venus's unidentified absorber added",
+  "name": "ultraviolet-absorbing H2SO4, as aqueous H2SO4, mass fraction 75 %, at 300 K, with Venus's unidentified absorber added",
   "temperatureK": 300,
   "shape": "sphere",
   "provenance": "standIn",
@@ -10,7 +10,7 @@
   "source": "the Aerosol Refractive Index Archive (ARIA), University of Oxford, H2SO4_75%_300K_R_Palmer_1975.ri, the 75 wt% file's source, https://eodg.atm.ox.ac.uk/ARIA/data_files/Acids/Sulphuric/70%25_to_79%25/Sulphuric_acid_75%25_300K_(Palmer_and_Williams_1975)/original/H2SO4_75%25_300K_R_Palmer_1975.ri, SHA-256 ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe, fetched 2026-10-09",
   "licence": "reduced values; the source states no terms (decision-r08-licences.md)",
   "reduction": "the 75 wt% file's own reduction (n linear and k linear in log k in wavelength between the source's rows, onto 360–780 nm every 5 nm, to six significant figures, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = 0.0012 and L = 26.9 nm are the a-priori values (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), Spacek et al.'s decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling; k₃₆₅ is the ruling's), which R08.T5.e refits to Venus's 365 nm albedo and g′ ÷ r′ colour. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry",
-  "standIn": "an empirical absorber: H2SO4 droplets with an unidentified ultraviolet absorber, whose k is fitted to Venus's albedo spectrum (candidates FeCl3, S2O/OSSO, Sx, organics)",
+  "standIn": "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's albedo spectrum and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
   "fit": null,
   "wavelengthsNm": [
     360, 365, 370, 375, 380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450,

@@ -10,7 +10,7 @@
   "source": "the article's machine-readable Table 6, https://iopscience.iop.org/0067-0049/268/2/47/suppdata/apjsacf0bet6_ascii.txt?doi=10.3847/1538-4365/acf0be, SHA-256 a5ed6861dba6eb68aa310936854a29b1c772687fc4b4634ef8321dec3f806cd3, fetched 2026-10-14, its MGS-1 column; read as data",
   "licence": "Adapted from CC BY 4.0 material (https://creativecommons.org/licenses/by/4.0/): J. Martikainen et al., Astrophys. J. Suppl. 268 (2023) 47. Changed: MGS-1's k from Table 6 reduced onto this grid, with n the paper's fixed 1.5; this file is offered under CC BY 4.0",
   "reduction": "n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures. Table 6's k is MGS-1's, retrieved with the paper's second Gaussian-random-sphere shapes and n fixed at 1.5; its 650 nm value, 4.33 × 10⁻⁴, is the index Martikainen et al. 2025's MGS-1 database takes (R08.T5.c's fidelity test), where Table 3's first shapes give 3.15 × 10⁻⁴. The rows are every 25 nm to 400 nm, then every 50 nm; the sample is a laboratory simulant at room temperature, unstated",
-  "standIn": "the absorption of MGS-1, a Mars regolith simulant, as retrieved with its real index fixed at 1.5, stands in, since no open visible index of such a basalt was found",
+  "standIn": "the absorption of MGS-1, a Mars regolith simulant, as retrieved with its real index fixed at 1.5, stands in, since no openly published visible index of such a basalt was found",
   "fit": null,
   "wavelengthsNm": [
     380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 470,

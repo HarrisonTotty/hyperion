@@ -4813,6 +4813,26 @@ each after its file's phase and name.
   provenance or grid changes; and no GENERATOR_VERSION, `ATMOSPHERE_OPTICS_VERSION`, PROTOCOL,
   wire, table, shader, kernel or engine change. _Built 2026-10-27_ (Risks, "Deviations in
   R08.T10.e, as built", and its "Deferred findings (2026-10-13 rule)" (R08.T10.e)).
+- **R08.T10.f The stand-in texts' voice pass.** From `decision-r08-approximate-plate.md` §8.3
+  (2026-10-27: a later voice pass, recorded), on T10.e's deferred findings _`solid` before a
+  particle or a rock_, _The other ten texts after their head_, _"Open"_ and _The ice-giant haze's
+  one index from two_. `phasedName` gives a material named in words that the registry holds as a
+  solid alone no phase word for its solid, by a closed key set held to the registry's fixture
+  (`WORDED_SOLID_KEYS`, 28 keys: `Jovian chromophore`, `Fe-rich basalt`, `tholin particles`); its
+  liquid keeps `liquid` (`materials.ts`). The stand-in texts read after their head with no second
+  colon and no repeat of their name, say "openly published" for "open", and the ice-giant haze's
+  text and name give its k as the mean of two planets' retrievals, and the acid's name holds no
+  colon; in the files and in the tool that writes them (`src/tools/materials.ts`), whose test now
+  holds the derived files' headers to the files too. A test holds every stand-in reason to its
+  head's colon alone and to no repeat of its substance's name, and every file's name to no colon
+  (`materials.test.ts`). Acceptance: `pnpm --filter hyperion exec vitest run` over
+  `view/atmosphere/materials`, `view/atmosphere/assembleAerosols`, `view/atmosphere/parity` and
+  `src/tools/materials.test.ts`, and `pnpm typecheck`, `pnpm lint` and `pnpm test`, pass; the
+  `console-ux` skill's checks pass on the changed files; the fit check finds no table stale; no
+  file's n, k, key, phase, shape, provenance or grid changes; and no GENERATOR_VERSION,
+  `ATMOSPHERE_OPTICS_VERSION`, PROTOCOL, wire, table, shader, kernel, engine, label or figure
+  change. _Built 2026-10-27_ (Risks, "Deviations in R08.T10.f, as built", and its "Deferred
+  findings (2026-10-13 rule)" (R08.T10.f)).
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
@@ -21120,3 +21140,165 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
     text from the texts `resolveMaterial` builds by its equality with the file's `standIn`, which
     holds while no built text is a file's. A `kind` on `ResolvedMaterial` (its own file, a named
     analogue, the generic stand-in) would make the choice a type; the brief added no field.
+- **Deviations in R08.T10.f, as built** (2026-10-27; `decision-r08-approximate-plate.md` §8.3's
+  later voice pass, on R08.T10.e's deferred findings _`solid` before a particle or a rock_, _The
+  other ten texts after their head_, _"Open"_ and _The ice-giant haze's one index from two_).
+  Edited in `view/atmosphere/materials/`: twelve files' `standIn` lines, and the `name` lines of
+  `ice-giant-haze.json` and `sulphuric-acid-uv-absorber.json`, alone; `materials.ts`
+  (`WORDED_SOLID_KEYS`, `phasedName` and its TSDoc, the TSDoc of `MaterialIndexFile.name` and
+  `standIn`); `materials.test.ts`; two expectations of `assembleAerosols.test.ts`; and
+  `src/tools/materials.ts` (the same texts, `DERIVED_FILES` exported, the TSDoc of
+  `MaterialHeader.name` and `standIn` and of `IceEstimate.standInReason`) and its test. The tool
+  is not rerun. No file's n, k, key, phase, shape, provenance or grid changes, and no
+  GENERATOR_VERSION, `ATMOSPHERE_OPTICS_VERSION`, PROTOCOL, wire, table, shader, kernel, engine,
+  label or figure change, so the gate ran no `just test-render`; the fit's inputs hash reads no
+  prose, so no table is stale. `ux_lint.py` reads no JSON: the texts were read against the guide
+  by hand, in the UX review.
+  - _The rule._ `phasedName`'s solid case gives the name alone for a key of `WORDED_SOLID_KEYS`
+    (`materials.ts`, beside `VOLATILE_ICE_KEYS` and `ATOMIC_SOLID_KEYS`): the registry fixture's
+    name keys (named by `SUBSTANCE_NAMES`, not a formula) with a `solid_grain_density` and no
+    `liquid_grain_density`, 28 at the base: graphite, tholin, soot, chromophore, ice_giant_haze,
+    mars_dust, basalt, basalt_fe, lava_glass, anorthosite, feldspathic, komatiite,
+    basalt_reduced, granite, ultramafic, ferric, phyllosilicate, ca_al_residue, iron_nickel,
+    carbonaceous, the seven chondrites and cometary. The solutions, which the fixture holds as
+    liquids alone, are not in it. A liquid keeps `liquid` (`no liquid Jovian chromophore on
+file`), and formula keys are unchanged (`solid CaTiO3`, `solid Fe`, `solid S8`, `NH3 ice`).
+    The plate lines it changes: `Solid Jovian chromophore: …`, `Solid ice-giant haze: …` and
+    `Solid Fe-rich basalt: …` become `Jovian chromophore: …`, `Ice-giant haze: …` and
+    `Fe-rich basalt: …`; and every particle note of a solid mode of the 28 (`assemble.ts`'s
+    `particlesName`: their fractal dimension or sizes outside the optics on file, sizes summed
+    short of convergence, above the air drawn, sizes or optical depth not modelled, left out)
+    drops `solid`, as `Tholin particles: their sizes lie outside the optics on file, not drawn`.
+    No named analogue changes: each of the 28 keys has a solid file or none.
+  - _The texts_, each before and after, its head (as after the rule) in brackets:
+    - `ammonium-hydrosulphide.json` [NH4SH ice]: "a non-absorbing particle whose real index is a
+      Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674
+      at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022" becomes "a
+      non-absorbing particle whose real index is a Lorentz–Lorenz estimate, 1.674 at 380 nm,
+      1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022, since no visible optical
+      constants are published".
+    - `carbon-monoxide-ice.json` [CO ice], `nitrogen-ice.json` [N2 ice] and `oxygen-ice.json`
+      [O2 ice], from `iceEstimateFile`'s template: "… at the crystal's density, since no open
+      visible optical constants of CO ice were found: 1.310 at 380 nm, 1.300 at 550 nm and 1.295
+      at 780 nm" becomes "… at the crystal's density, 1.310 at 380 nm, 1.300 at 550 nm and 1.295
+      at 780 nm, since no openly published visible optical constants were found", N2's and O2's
+      alike with their own figures.
+    - `hydrogen-sulphide-ice.json` [H2S ice]: "… since only one wavelength of an amorphous film's
+      index is measured openly, not the crystal's visible dispersion: 1.602 at 380 nm, 1.570 at
+      550 nm and 1.557 at 780 nm" becomes "… at the crystal's density, 1.602 at 380 nm, 1.570 at
+      550 nm and 1.557 at 780 nm, since the only openly published index found is an amorphous
+      film's at one wavelength, not the crystal's visible dispersion".
+    - `carbon-monoxide-liquid.json` [liquid CO]: "… since its measured values contradict
+      themselves: 1.2213 at 514.5 nm and 1.2122 at 632.8 nm at 78 K, 0.008 and 0.014 below the
+      estimate there; …" becomes "… since its measured values, 1.2213 at 514.5 nm and 1.2122 at
+      632.8 nm at 78 K, contradict each other and lie 0.008 and 0.014 below the estimate there;
+      …", the rest unchanged.
+    - `hydrogen-sulphide-liquid.json` [liquid H2S]: "… since its measured values contradict
+      themselves: 1.380 at 286 K and 1.384 at 292 K, at 589 nm, 0.010 and 0.021 above the
+      estimate there; …" becomes "… since its measured values at 589 nm, 1.380 at 286 K and
+      1.384 at 292 K, contradict each other and lie 0.010 and 0.021 above the estimate there;
+      …", the rest unchanged.
+    - `sulphur.json` [solid S8]: "a constant index: crystalline S8's principal indices at 589 nm
+      averaged for randomly oriented grains, 2.084 with no dispersion and k = 0, since no open
+      visible optical constants of S8 were found; its blue absorption edge is not drawn" becomes
+      "a constant index, the crystal's principal indices at 589 nm averaged for randomly oriented
+      grains, 2.084 with no dispersion and k = 0, since no openly published visible dispersion
+      was found; its blue absorption edge is not drawn".
+    - `sulphur-liquid.json` [liquid S8]: "a constant index: liquid S8's real index at 589 nm near
+      its melting point, 1.929 with no dispersion and k = 0, since no open measurement of the
+      liquid's visible absorption was found; …" becomes "a constant index, the real index at
+      589 nm near the melting point, 1.929 with no dispersion and k = 0, since no openly
+      published measurement of the liquid's visible absorption was found; …".
+    - `sulphuric-acid-uv-absorber.json` [liquid ultraviolet-absorbing H2SO4]: "an empirical
+      absorber: H2SO4 droplets with an unidentified ultraviolet absorber, whose k is fitted to
+      Venus's albedo spectrum (candidates FeCl3, S2O/OSSO, Sx, organics)" becomes "an empirical
+      absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to
+      Venus's albedo spectrum and whose candidates are FeCl3, S2O, OSSO, Sx and organics". Its
+      name, "ultraviolet-absorbing H2SO4: aqueous H2SO4, mass fraction 75 %, at 300 K, with
+      Venus's unidentified absorber added", becomes "ultraviolet-absorbing H2SO4, as aqueous
+      H2SO4, …", the rest unchanged, as the basalt's name reads.
+    - `mars-regolith-simulant.json` [Fe-rich basalt]: "… since no open visible index of such a
+      basalt was found" becomes "… since no openly published visible index of such a basalt was
+      found".
+    - `ice-giant-haze.json` [ice-giant haze]: "an effective index retrieved from Uranus's and
+      Neptune's spectra for their unidentified photochemical haze, not a laboratory measurement"
+      becomes "an effective index retrieved from the spectra of Uranus and Neptune for their
+      unidentified photochemical haze, its k the geometric mean of the two planets' values,
+      which differ by up to a factor of 29, and not a laboratory measurement". Its name, "ice-giant
+      haze, an effective index retrieved from Uranus's and Neptune's spectra", becomes
+      "ice-giant haze, with the geometric mean of the absorption retrieved from Uranus's and
+      Neptune's spectra". The factor is the file's own: Neptune's 5.47 × 10⁻³ over Uranus's
+      1.91 × 10⁻⁴ at 500 nm, 28.6, the largest ratio over 300–800 nm in Irwin et al.'s Aerosol-3
+      "Mean 1" columns (the science check, from the source; 2.08, 6.73, 28.6, 20.9, 12.4 and 4.66
+      at 300–800 nm).
+
+    Departures from the brief's leans, from the reviews: solid S8's says "visible dispersion",
+    since its 2.084 is drawn from openly published visible indices at 589 nm and its `source`
+    records no open visible dispersion (the science check); H2S ice's reason keeps "found", as
+    its `source` records a search, and no longer says a wavelength is published (the science
+    check, the UX review); the liquids' figures stand beside "its measured values", which
+    "contradict each other", where the lean's comma left them a list after "themselves" (the UX
+    review); the acid's text drops "aqueous H2SO4", a second phase word beside the head's
+    `liquid` and its formula again (the UX and plan-conformance reviews), splits the slash,
+    which on this line reads as a ratio or a body index (the UX review; the brief leaves the
+    slash to it), and names its candidates in a clause of their own; the haze's text ends on
+    "and not a laboratory measurement", as the chromophore's does, so that "which differ"
+    follows the plural "values" and the bodies do not read as the factor's (the UX review), and
+    its name says the geometric mean of the absorption, since only k is averaged, n being the
+    paper's 1.4 for both planets (the science check, the UX review).
+
+  - _The tests._ In `materials.test.ts`, `describe("the stand-in label")`: "sets each file's own
+    text after its head with no second colon" and "names no file's material again in its own
+    text after its head", over the seventeen reasons `materialApproximations` gives for each
+    stand-in file's own key and form, and liquid O₂'s absorption text, at τ 0 (`ownTextReasons`;
+    the name as a whole word, `holdsWord`, `O2–O2` the one term allowed,
+    `OTHER_TERMS_WITH_NAME`). The brief's one test is two, one reason to fail each (the
+    TypeScript review). Run once by hand before the edits, as one test, it failed on exactly the
+    ten texts of the brief's items 1–7; of those, all ten hold a second colon and six their name
+    (NH4SH, CO, N2 and O2 ice, both S8). In `describe("the material files")`: "hold no colon in a
+    name, which a named analogue's reason sets after one", which failed on the acid's name
+    alone before the edits. The rule's own tests are in a `describe` of their own, "a material
+    named in words, solid alone": the three names, `liquid Jovian chromophore`, the unchanged
+    four and the set held to the fixture. Updated: NH4SH's text, the chromophore's head, the
+    acid's text and the liquid CO and H2S pattern (now `… since its measured values[^;]*,
+contradict each other and lie `). In the tool's test: NH4SH's text, and the ice estimates'
+    reasons now held to end the text after their figures. `describe("the derived files'
+headers (R08.T10.f)")` holds every `DERIVED_MATERIALS` file outside `T5K_FILES`, eleven
+    (CO2 ice, NH4SH, solid S8, the four ices, liquid N2, NH3, C2H6 and S8), to its committed
+    file in all fourteen header fields, `key` to `fit`: every field agreed at the base, so none
+    is left out, and `DERIVED_FILES` is exported for it. With the fetched files' test and T5.k's,
+    every one of the twelve files edited is held to the tool.
+- **Deferred findings (2026-10-13 rule)** (R08.T10.f). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The acid's k "fitted"_ (the science check, predating R08.T10.f). Its text says its k "is
+    fitted to Venus's albedo spectrum", as R08.T5.d prescribes, but until R08.T5.e runs k₃₆₅ and
+    L are the a-priori values (`fit` null), and T5.e fits two figures, p(365) and
+    p(g′) ÷ p(r′), not a spectrum. Lean: T5.e, which rewrites the file, words it "whose k is
+    fitted to Venus's 365 nm albedo and visible colour".
+  - _"Openly published" read as "published"_ (the science check). N2 ice's and liquid S8's
+    sources name published measurements that are closed (Satorre et al. 2008 and Luna et al.
+    2012; Sasson and Arakawa 1986), so a reader who takes "openly published" for "published at
+    all" reads both texts as false. The brief's lean stands in all seven, and the UX review finds
+    it literal; the science check's lean is "open-access".
+  - _`OSSO`_ (the UX review). The acid's candidate `OSSO` is a structural formula of S2O2, as
+    the literature names the candidate; kept as listed.
+  - _The guide's rule_ (the UX review). Voice and nomenclature's phase bullet does not state
+    R08.T10.f's rule, and its `solid Fe` example invites a later pass to put back `solid
+tholin`. Lean, appended to it: "A material named in words that the simulation holds only as
+    a solid takes no phase word, since none of its other phases can be shown: `tholin
+particles`, `Fe-rich basalt`, `Jovian chromophore`. A formula keeps its phase word in every
+    phase (`solid Fe`, `solid S8`, `NH3 ice`), and a name in words keeps one where a note names a
+    phase it lacks (`no liquid Jovian chromophore on file`)."
+  - _A named analogue after a name with a clause_ (the UX review). `resolveMaterial`'s
+    `<name> stands in, a named analogue` misreads after a name that ends on a clause
+    (`… a Mars regolith simulant stands in`); none arises today for the haze or the acid, which
+    have no other phase on file. Lean: `no <phased name> on file, drawn with <name>, a named
+analogue`.
+  - _`liquid` for a solution_ (the UX review). `phasedName` writes `liquid` before a solution's
+    name (`liquid ultraviolet-absorbing H2SO4`), where the guide writes `aqueous H2SO4`.
+  - _The basalt's search_ (the science check). Its text says no openly published visible index
+    of such a basalt was found; its `source` records no search.
+  - _A lead for H2S ice_ (the science check, unread: the publisher refused the fetch). Yarnall
+    and Hudson 2022, Icarus 373, 114799 ("Crystalline ices – Densities and comparisons …"),
+    reported open to read, may give crystalline H2S's index at 670 nm; if it does, H2S ice's text
+    and estimate want revisiting.

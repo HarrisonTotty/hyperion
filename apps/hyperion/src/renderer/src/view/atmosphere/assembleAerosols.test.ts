@@ -404,7 +404,7 @@ describe("a mode outside its optics' range (R08.T10.b)", () => {
     const result = earthWith(modes(tholinAggregates(1)));
     expect(aerosolTerms(result)).toEqual([]);
     expect(result.reasons).toContain(
-      "solid tholin particles: their fractal dimension lies outside the optics on file, not drawn",
+      "tholin particles: their fractal dimension lies outside the optics on file, not drawn",
     );
   });
 
@@ -429,7 +429,7 @@ describe("a mode outside its optics' range (R08.T10.b)", () => {
     );
     expect(aerosolTerms(result)).toEqual([]);
     expect(result.reasons).toContain(
-      "solid tholin particles: their sizes lie outside the optics on file, not drawn",
+      "tholin particles: their sizes lie outside the optics on file, not drawn",
     );
   });
 

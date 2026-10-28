@@ -91,6 +91,7 @@ import {
   XE_LIQUID_TAIL,
   DAIMON_24C,
   daimonExcess,
+  DERIVED_FILES,
   DERIVED_MATERIALS,
   ethaneBurtonIndex,
   ethaneLiquidEstimate,
@@ -483,7 +484,7 @@ describe("the derived files", () => {
     // The foot is 0.02247: science-r08-gases-2.md §2.2's −0.023 rounded its 4-figure 0.0225.
     const nh4sh = DERIVED_MATERIALS.find((file) => file.key === "NH4SH");
     expect(nh4sh?.standIn).toBe(
-      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022",
+      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022, since no visible optical constants are published",
     );
     expect(nh4sh?.source).toContain(
       "1.80 would need a molar refraction 22% above the additive one.",
@@ -1007,10 +1008,12 @@ describe("the molecular ices' estimates (decision-r08-t5d rulings 3 and 5)", () 
     ]);
   });
 
-  it("state each estimate's own reason in its file's standIn", () => {
+  it("state each estimate's own reason at the end of its file's standIn, after its figures", () => {
+    // R08.T10.f: the figures, then "since" and the reason, with no colon after the head's.
     for (const estimate of ICE_ESTIMATES) {
       const file = DERIVED_MATERIALS.find((f) => f.key === estimate.key);
-      expect(file?.standIn).toContain(`since ${estimate.standInReason}:`);
+      expect(file?.standIn).toMatch(/ at 780 nm, since /u);
+      expect(file?.standIn?.endsWith(`, since ${estimate.standInReason}`)).toBe(true);
     }
   });
 });
@@ -2232,5 +2235,58 @@ describe("R08.T5.j's liquid methane (decision-p14-t49h-liquids §2.4)", () => {
       expect(options.filter((o) => o === option)).toHaveLength(1);
     }
     expect(FETCHED_MATERIALS.some((spec) => spec.file === "methane-liquid.json")).toBe(false);
+  });
+});
+
+describe("the derived files' headers (R08.T10.f)", () => {
+  // Every file DERIVED_MATERIALS writes that the T5.k test does not hold, the derived stand-ins
+  // among them: their player text is edited by hand in both places, since the tool is not rerun.
+  const t5kFiles = new Set<string>(T5K_FILES.map(([file]) => file));
+  const derived = DERIVED_MATERIALS.map((material) => {
+    const file = DERIVED_FILES[`${material.key}/${material.phase}`];
+    if (file === undefined) {
+      throw new Error(`the tool names no file for ${material.key}, ${material.phase}`);
+    }
+    return [file, material] as const;
+  }).filter(([file]) => !t5kFiles.has(file));
+  const FIELDS = [
+    "key",
+    "phase",
+    "variant",
+    "name",
+    "temperatureK",
+    "shape",
+    "provenance",
+    "paper",
+    "source",
+    "licence",
+    "reduction",
+    "standIn",
+    "absorptionStandIn",
+    "fit",
+  ] as const;
+
+  it("cover every derived file the T5.k copy test does not hold, the derived stand-ins among them", () => {
+    expect(derived.map(([file]) => file)).toEqual([
+      "carbon-dioxide-ice.json",
+      "ammonium-hydrosulphide.json",
+      "sulphur.json",
+      "hydrogen-sulphide-ice.json",
+      "nitrogen-ice.json",
+      "carbon-monoxide-ice.json",
+      "oxygen-ice.json",
+      "nitrogen-liquid.json",
+      "ammonia-liquid.json",
+      "ethane-liquid.json",
+      "sulphur-liquid.json",
+    ]);
+  });
+
+  it.each(derived)("write %s's header as the tool states it", (file, material) => {
+    // The by-hand regeneration's text half, which needs no fetched source.
+    const raw: unknown = JSON.parse(readFileSync(fileURLToPath(new URL(file, MATERIALS)), "utf8"));
+    const read = (field: (typeof FIELDS)[number]): unknown =>
+      typeof raw === "object" && raw !== null ? Reflect.get(raw, field) : undefined;
+    expect(FIELDS.map(read)).toEqual(FIELDS.map((field) => material[field]));
   });
 });

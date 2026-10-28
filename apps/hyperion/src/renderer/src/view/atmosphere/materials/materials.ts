@@ -166,7 +166,11 @@ export interface MaterialIndexFile {
    * or undefined for the key's only one.
    */
   readonly variant: string | undefined;
-  /** What the sample is. */
+  /**
+   * What the sample is. Player text, which a named analogue's reason sets after a colon
+   * ({@link resolveMaterial}: `no liquid Jovian chromophore on file: <name> stands in`), so it
+   * holds none (R08.T10.f).
+   */
   readonly name: string;
   /** The sample's temperature, K, where the source states one. */
   readonly temperatureK: number | undefined;
@@ -183,7 +187,8 @@ export interface MaterialIndexFile {
    * For a stand-in file, what stands in and why. Player text, shown as an
    * `ATMOSPHERE: APPROXIMATE` reason after the file's phase and name
    * ({@link materialApproximations}), so it cites no paper: the file's `paper`, which no screen
-   * shows, holds the citation (R08.T10.e).
+   * shows, holds the citation (R08.T10.e). It is worded to read after that head: it holds no colon
+   * and does not name its material again (R08.T10.f).
    */
   readonly standIn: string | undefined;
   /**
@@ -585,10 +590,63 @@ export const VOLATILE_ICE_KEYS: ReadonlySet<string> = new Set([
 export const ATOMIC_SOLID_KEYS: ReadonlySet<string> = new Set(["Ar", "Kr", "Xe"]);
 
 /**
+ * The materials named in words that the registry holds as a solid alone, whose solid
+ * {@link phasedName} names with no phase word, since the name already names a particle or a rock
+ * (`tholin`, `Fe-rich basalt`): every name key of the registry's fixture
+ * (`packages/protocol/fixtures/substances.json`), named in words by `lib/substances.ts`'s
+ * `SUBSTANCE_NAMES`, with a solid grain density and no liquid one (R08.T10.f).
+ *
+ * @remarks
+ * Closed set, held to the fixture by `materials.test.ts`: a name key the registry adds as a solid
+ * alone belongs here. A solution, which the registry holds as a liquid (`acid_uv_absorber`, the
+ * brines, `nh3_h2o`, `ch4_c2h6_n2`), does not. It is chosen by key, not by name, so a renamed
+ * material keeps its phase word.
+ */
+export const WORDED_SOLID_KEYS: ReadonlySet<string> = new Set([
+  // The aerosol materials.
+  "graphite",
+  "tholin",
+  "soot",
+  "chromophore",
+  "ice_giant_haze",
+  "mars_dust",
+  "basalt",
+  "basalt_fe",
+  "lava_glass",
+  // The other lithologies and organics.
+  "anorthosite",
+  "feldspathic",
+  "komatiite",
+  "basalt_reduced",
+  "granite",
+  "ultramafic",
+  "ferric",
+  "phyllosilicate",
+  "ca_al_residue",
+  "iron_nickel",
+  "carbonaceous",
+  "chondrite_ci",
+  "chondrite_cm",
+  "chondrite_cv",
+  "chondrite_h",
+  "chondrite_l",
+  "chondrite_ll",
+  "chondrite_e",
+  "cometary",
+]);
+
+/**
  * A material's name with its phase word, as every atmosphere note writes it (`signoff-12.md`, item
  * 39(c); the guide, Voice and nomenclature): `SO2 ice` for a volatile molecular solid, `solid Kr`
  * for an atomic one and `solid Fe` for a refractory, `liquid SO2` for a liquid, and the name alone
  * with no phase. The stand-in notes here and `assemble.ts`'s particle notes take it.
+ *
+ * @remarks
+ * The solid of a material named in words that the registry holds as a solid alone
+ * ({@link WORDED_SOLID_KEYS}) takes no phase word, since its name already names a particle or a
+ * rock: `Jovian chromophore`, `Fe-rich basalt`, and `tholin particles` in the particle notes. Its
+ * liquid keeps `liquid`, as a named analogue writes it: `no liquid Jovian chromophore on file`
+ * (`decision-r08-approximate-plate.md` §8.3's later voice pass; R08.T10.f).
  */
 export function phasedName(material: string, phase: MaterialPhase | undefined): string {
   const name = substanceName(material);
@@ -601,10 +659,14 @@ export function phasedName(material: string, phase: MaterialPhase | undefined): 
       phased = `liquid ${name}`;
       break;
     case "solid":
-      phased =
-        VOLATILE_ICE_KEYS.has(material) && !ATOMIC_SOLID_KEYS.has(material)
-          ? `${name} ice`
-          : `solid ${name}`;
+      if (WORDED_SOLID_KEYS.has(material)) {
+        phased = name;
+      } else {
+        phased =
+          VOLATILE_ICE_KEYS.has(material) && !ATOMIC_SOLID_KEYS.has(material)
+            ? `${name} ice`
+            : `solid ${name}`;
+      }
       break;
   }
   return phased;
