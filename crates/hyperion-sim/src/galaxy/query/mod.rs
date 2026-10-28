@@ -30,6 +30,7 @@ use std::fmt;
 pub use census::decide_census;
 pub use expected::expected_counts;
 pub use mode::{QueryMode, range_query_observed};
+pub(crate) use motion::drifted;
 pub use motion::{
     PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, pad_for, pad_speed,
     position_at,

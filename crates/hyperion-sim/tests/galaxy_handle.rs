@@ -95,8 +95,10 @@ fn points() -> impl Iterator<Item = PointLy> {
 fn the_galaxy_handle_is_send_sync_and_unwind_safe() {
     // A `Cell`, `RefCell` or `OnceCell` anywhere inside would make it neither `Sync` nor
     // `RefUnwindSafe`; a `Box<dyn …>` without those bounds would fail the latter too. Locks,
-    // `OnceLock` and atomics would pass; the sim holds one `OnceLock`, the parameters' black hole,
-    // a pure function of the parameters solved as the galaxy is built.
+    // `OnceLock` and atomics would pass; the sim holds two `OnceLock`s, the parameters' black hole,
+    // a pure function of the parameters solved as the galaxy is built, and the galaxy's centre
+    // motion, a pure function of the parameters and the mass model built on first read (plan 09,
+    // P09.T28.b.a).
     fn shareable<T: Send + Sync + RefUnwindSafe + UnwindSafe + Clone + Debug + PartialEq>() {}
     shareable::<Galaxy>();
     shareable::<ShareMatrix>();

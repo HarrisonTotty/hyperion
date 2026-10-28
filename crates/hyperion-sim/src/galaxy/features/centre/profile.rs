@@ -112,6 +112,9 @@ pub enum BuildCentreError {
     /// The distribution function of a profile is not positive and finite at the energy of the
     /// radius given, ly: no isotropic cluster has that profile in that potential (P09.T24.b).
     NegativeDistribution(f64),
+    /// The mass inside 10⁻³–10⁴ ly of the black hole does not bracket the black hole's own, so
+    /// the centre has no influence radius (P09.T28.b.a); no galaxy of the sweep is one.
+    NoInfluenceRadius,
 }
 
 impl fmt::Display for BuildCentreError {
@@ -130,6 +133,10 @@ impl fmt::Display for BuildCentreError {
                 f,
                 "the distribution function is negative at the energy of {r} ly: no isotropic \
                  cluster has this profile"
+            ),
+            Self::NoInfluenceRadius => f.write_str(
+                "the mass inside 1e-3 to 1e4 ly of the black hole does not bracket its own: the \
+                 centre has no influence radius",
             ),
         }
     }
@@ -421,6 +428,16 @@ impl TracerProfile {
         &self.shape
     }
 
+    /// The bytes the profile owns on the heap: its knots, its two tables and its shape's breaks,
+    /// for [`Galaxy::heap_bytes`](crate::galaxy::Galaxy::heap_bytes) (P09.T28.b.a).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        size_of_val(&*self.ln_knots)
+            + size_of_val(&*self.inner)
+            + size_of_val(&*self.outer)
+            + size_of_val(&*self.shape.breaks)
+    }
+
     /// The panel `k` with `ln_knots[k] ≤ x < ln_knots[k + 1]` and the position `t` in it, for
     /// `x = ln r` inside the table.
     fn locate(&self, x: f64) -> (usize, f64) {
@@ -630,6 +647,14 @@ impl CentreProfile {
         self.galaxy.as_ref()
     }
 
+    /// The bytes it owns on the heap: the stars' tables and the galaxy's monopole, if any, for
+    /// plan 09's [`CentreMotion`](crate::galaxy::motion::CentreMotion), which a galaxy holds
+    /// (P09.T28.b.a).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.stars.heap_bytes() + self.galaxy.as_ref().map_or(0, SphericalAverage::heap_bytes)
+    }
+
     /// The stars' profile, normalised to one.
     #[must_use]
     pub fn stars(&self) -> &TracerProfile {
@@ -736,8 +761,13 @@ impl CentreProfile {
         KilometresPerSecond::new((2.0 * self.cluster_psi(r)).sqrt())
     }
 
-    /// The radius where the stars inside weigh as much as the black hole, ly: the influence
-    /// radius (plan 09, P09.T28.b), by a fixed bisection in `ln r` over 10⁻³–10⁴ ly.
+    /// The radius where the cluster's stars inside weigh as much as the black hole, ly, by a fixed
+    /// bisection in `ln r` over 10⁻³–10⁴ ly.
+    ///
+    /// The cluster alone: where the black hole outweighs the whole cluster, as in a fifth of drawn
+    /// galaxies, there is no such radius, and this gives the bracket's end, 10⁴ ly (P09.T28.b.a as
+    /// built). The Kepler regime's edge counts every mass inside, the rest of the galaxy's too
+    /// ([`CentreMotion::influence_radius`](crate::galaxy::motion::CentreMotion::influence_radius)).
     #[must_use]
     pub fn influence_radius(&self) -> LightYears {
         let m = self.black_hole.value();
