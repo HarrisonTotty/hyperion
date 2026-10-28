@@ -633,7 +633,9 @@ T1 as soon as they exist; T34 also needs plan 04's P04.T14 (the range handler) a
 plan (plan 15's P15.T5.a) and is done last; the plan is otherwise complete without it. T38, from
 ruling 89, needs T29.b and ruling 77.1's `powf_positive`. T38.a completes T32's benches, and
 T38.b–e need it. T38's subtasks run in order, and T38.a is a stop point. T34's range briefs, T35.b,
-T37 and plan 13's P13.T7 wait on T38.e.
+T37 and plan 13's P13.T7 wait on T38.e. Phase I holds rendering plan R06's accepted asks: T41
+needs T38.e, T42 needs T10.b and T39, and T43 needs T20.a and T23.a; T42 and T43 each land their
+pure part (a) before their swap (b).
 
 Where a task's acceptance says only that its tests pass, the command is
 `cargo test -p hyperion-sim -- <module paths of its Files>`, for instance
@@ -1640,10 +1642,62 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   output on the two glitch tags and the new domain tag `star.ns.glitch_class`, moving nothing
   existing).** The record is under Risks ("Deviations in T28.b, as built" and "Deferred findings
   (2026-10-13 rule) (P06.T28.b)").
-- **P06.T28.c Magnetar bursts and giant flares.** Poisson bins at two levels: active episodes (Δ =
-  30 days, rate falling with the decaying field), and within an episode short bursts (Δ = 1 hour,
-  look-back to the episode's bin); giant flares as a separate rare kind (about one per 50–100 years
-  per young magnetar; re-check), energy 10⁴⁴–10⁴⁷ erg.
+- **P06.T28.c Magnetar bursts and giant flares** (rates ruled 2026-10-27, decision-galaxy-25-train
+  §5.1; new output on the registered tags 0x0103–0x0105, moving nothing existing, so no bump).
+  Every rate is zero unless `PulsarState::is_magnetar` holds, and zero once the field sits at its
+  floor. Each scales with the field's fractional decay rate: an outburst releases crustal stress
+  that the decaying field builds, its energy scales with B², and the field releases energy at
+  L_B ∝ B |Ḃ|, so the event rate per magnetar scales as |Ḃ| ÷ B. Under T21's law (Colpi et al.
+  2000, α = 1, with B₀τ = 10¹⁹ G yr by ruling 110.4) that is |d ln B ÷ dt| = 1 ÷ (τ + t) =
+  B(t) ÷ (10¹⁹ G yr): it falls with the decaying field, and is higher for the stronger fields.
+  The figures marked [S] were cited from memory in the ruling: the task's science check reads each
+  at source before commit, and a source that differs moves the figure to the source's value
+  within the same form, recorded, with no new ruling unless it is a blocker.
+  - **Episodes** (`star.ev.magnetar_episode`, Poisson bins, Δ = 30 days):
+    r_ep = N_EP × B(t) ÷ (10¹⁹ G yr), with N_EP = 2,000 episodes per e-fold of the field (ours).
+    That is 0.2 a year at 10¹⁵ G, 0.02 at 10¹⁴ G and 0.009 at 4.4 × 10¹³ G.
+    - The check: Coti Zelati et al. 2018 (MNRAS 474, 961) catalogue 23 outbursts from 17
+      magnetars over 2003–2016 [S], about 0.05 per magnetar-year among the ~30 known, whose
+      dipole fields lie mostly between 10¹⁴ and 10¹⁵ G (Olausen and Kaspi 2014's McGill catalogue
+      [S]). The law gives 0.05 at 2.5 × 10¹⁴ G.
+    - The bound per bin is the rate at the bin's start, since the field only falls, thinned to
+      zero where the star is not a magnetar.
+    - Marks: the episode's burst count N_b, log-uniform on [3, 1,000] (ours; median 55, mean
+      172), against over 400 bursts in a day from SGR J1550−5418 in January 2009 (Kaneko et al.
+      2010 and van der Horst et al. 2012 [S]), hundreds from SGR 1935+2154 in April 2020 (Younes
+      et al. 2020 [S]) and about 440 bursts from 8 magnetars in 5 years of Fermi GBM (Collazzi et
+      al. 2015 [S]); its e-folding τ_b, log-uniform on 0.3–10 days (ours).
+    - Recorded, not tested: an episode's energy, about R³B² ÷ (3 N_EP), roughly 10⁴⁴ erg at
+      5 × 10¹⁴ G, above X-ray outbursts' 10⁴⁰–10⁴³ erg: a radiative efficiency of 10⁻⁴–10⁻¹,
+      plausible.
+  - **Short bursts** (`star.ev.magnetar_burst`, Poisson bins, Δ = 1 hour): inside an episode,
+    r_b(Δt) = (N_b ÷ τ_b) e^(−Δt ÷ τ_b) for Δt ≥ 0 since its onset. Each hour bin looks back over
+    the 30-day bins whose onsets lie within 10 τ_b,max (100 days, so 4 bins), and the episodes are
+    regenerated from their own series, which is pure: no event list is ever an input. The bound is
+    the sum, over the looked-back episodes, of N_b ÷ τ_b at the bin's start. Marks: energy
+    dN/dE ∝ E^(−5/3) on 10³⁷–10⁴¹ erg (Göğüş et al. 1999, ApJ 526, L93; 2000, ApJ 532, L121;
+    Cheng et al. 1996, Nature 382, 518 [S]); duration log-normal about 0.1 s, σ 0.3 dex (Göğüş et
+    al. 2001, ApJ 558, 228 [S]).
+  - **Giant flares** (`star.ev.magnetar_giant`, Poisson bins, Δ = 1 Julian year):
+    r_gf = N_GF × B(t) ÷ (10¹⁹ G yr).
+    - N_GF is derived by the task from the model's own Milky Way census of active magnetars
+      (T21's, 84), so that the Galaxy's rate is 0.044 a year: two Galactic giant flares, SGR
+      1900+14 (1998-08-27) and SGR 1806−20 (2004-12-27), in about 45 years of all-sky coverage
+      since 1979 [S]. SGR 0526−66's 1979 flare was the LMC's, and is not counted. The expected
+      N_GF is about 30, from Σ |d ln B ÷ dt| ≈ 84 × 1.5 × 10⁻⁵ a year, which gives a 10¹⁵ G
+      magnetar one flare in about 330 years.
+    - This replaces "about one per 50–100 years per young magnetar; re-check", which describes
+      only the youngest, and over the population would overshoot the Galactic record three to
+      five times.
+    - Energy: dN/dE ∝ E^(−1.7) [S] on 10⁴⁴–10⁴⁷ erg. Cross-check, recorded: Burns et al. 2021
+      (ApJL 907, L28), a volumetric rate of about 3.8 × 10⁵ Gpc⁻³ yr⁻¹ above 4 × 10⁴⁴ erg [S].
+  - **Tests**, besides T28's shared tests below: no episode, burst or giant flare while the star
+    is not a magnetar; each rate non-increasing in age while it is one; every burst after its
+    episode's onset and within 10 τ_b of it; the Galaxy's giant-flare rate at Milky Way values
+    within 0.02–0.09 a year; energies inside their ranges; each [S] figure read at source, with
+    its basis in its doc comment.
+  - T28.c lands before T28.g's wiring. If it lands after, adding it to `active_events` moves
+    summary output at a later train.
 - **P06.T28.d FU Orionis outbursts.** Poisson bins (Δ = 500 years, look-back 1 bin): one per 5,000
   years while a protostar (age < 0.5 Myr), one per 112,000 years afterwards while the disc of T15.c
   lasts, the rate stepping smoothly over 0.05 Myr so the bound stays tight. Marks: luminosity factor
@@ -2298,6 +2352,109 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
   renders with zero points; the caption counts.
 - **Accept:** TypeScript checks and tests green; the by-eye checks of "Verification".
 
+### Phase I: rendering plan R06's asks
+
+Rendering plan R06's asks A1, A2 and A4 ("Asked by rendering plan R06", under Risks), accepted on
+2026-10-19 (signoff-12 item 29) and numbered here by decision-galaxy-25-train §1.7 (2026-10-27).
+A3 needs no task: its rule is this plan's, as built in `stellar/photometry.rs`. P06.T40 stays
+reserved for finding F13 (Risks, "Deferred findings (2026-10-13 rule) (P11's F13 …)"). A2 and A4
+move stellar output, so each lands its pure part first and holds its swap on a lane branch:
+stellar evaluation takes no `Galaxy`, feeds process-wide statics such as
+`galaxy::fates::fates_for`'s `FATES`, and moves fitted tables, so it cannot sit behind a hold on
+integration.
+
+#### P06.T41 `BriefModel` over the retarded interval (ask A1)
+
+- **Build:** a constructor such as `BriefModel::new_for(galaxy, record, earliest_emitted)` whose
+  routes are tested from the earliest emitted time to +H. The sky places every star at its emitted
+  time, up to some 2.6 × 10⁵ years before the query's (the light time across the galaxy), where
+  `BriefModel`'s routes are tested only over the clock window today. Over the wider interval each
+  route keeps the module's contract: the exact, main-sequence and paired routes give
+  `SystemStars::brief_at`'s brief bit for bit, and the fate table's route its kind and class
+  exactly and its L and T_eff within `BriefModel::stated_error_at`. `BriefModel::new` and its
+  clock window are unchanged.
+- **Files:** `stellar/brief.rs` and its tests.
+- **Tests:** every route against `SystemStars::brief_at` at times from `earliest_emitted` to +H,
+  with `earliest_emitted` at the clock window's start and 2.6 × 10⁵ years before it; a route
+  certified over the clock window but not over the wider interval falls back to a dearer one.
+- **Accept:** tests pass. **No output moves** and there is no bump (signoff-12 item 29).
+- **Its reader.** The ask names R06.T8.b's brief as its one call site, switched once T41 lands.
+  As built, R06.T8.b reads no brief: its flux bound reads R06's brightness envelope
+  (`sky/census/cell.rs`'s module text), so no call site switches today.
+- **Held** (decision-galaxy-25-train §11, 2026-10-27). With no reader, T41 is not briefed, and it
+  is not a close-out item of this plan: plan 06 closes without it. A task that needs a brief at
+  an emitted time outside the clock window, at a cost the exact path can't meet (plan 12's
+  observed mode, or a later R06 cost task), names T41, and T41 is briefed with it.
+
+#### P06.T42 The Humphreys–Davidson limit in the modern winds (ask A2)
+
+Ruled 2026-10-19 (signoff-12 item 29): the tracks must not keep cool supergiants past the limit.
+No cool supergiant is observed above log L ≈ 5.5 (Davies, Crowther and Beasor 2018, MNRAS 478,
+3138: 5.4 in the SMC, 5.5 in the LMC; Humphreys and Davidson 1979's line at 5.7–5.9, revised to
+5.66, as they quote it). Under `WindRecipe::Modern` a star past the limit loses the constant
+`MODERN_LBV`, 1.5 × 10⁻⁴ M☉/yr (Belczynski et al. 2010, eq. 8), about five times below the
+Nieuwenhuijzen–de Jager rate it replaces on the cool side, so the tracks keep cool supergiants up
+to about 0.5 dex above the observed ceiling for some 2 × 10⁵ years. Flooring at the cool-side rate
+alone changes nothing at log L 5.8–5.9, where that rate (1.1–1.6 × 10⁻⁴) is about the constant.
+Hurley, Pols and Tout's term, about 9 M☉/yr at log L 5.80 and 120 at 5.90 at 4,000 K, a wall at
+log L 5.78–5.80, does the enforcing.
+
+- **P06.T42.a The rate, pure** (no output moves, no bump). Past the limit the Modern rate is
+  max(`MODERN_LBV`, the cool- or hot-side rate) plus Hurley, Pols and Tout's LBV term,
+  Ṁ_LBV = 0.1 (10⁻⁵ R L^½ − 1)³ (L ÷ 6 × 10⁵ − 1) M☉/yr where L > 6 × 10⁵ L☉ and
+  10⁻⁵ R L^½ > 1 (HPT 2000 §7.1; `wind.rs`'s `hurley_lbv`), as COMPAS's `HURLEY_ADD` combines
+  them. The term is added after the Eddington boost (P06.T39), not inside `modern_below_kink`, and
+  the doc says that the rate departs from Belczynski et al.'s "full amount of LBV mass loss". It
+  lands as a function that nothing on the record calls.
+  - **Files:** `stellar/sse/wind.rs`.
+  - **Tests:** below the limit the function gives today's Modern rate to the bit; past it the rate
+    is at least `MODERN_LBV` and at least the side rate; the term's figures above, at 4,000 K.
+  - **Accept:** tests pass; nothing on the record calls the rate, so no golden moves.
+- **P06.T42.b The swap** (output moves; held on a lane branch, it rides version 25 (S1) if it is
+  ready when that train's wiring starts, else the next galaxy train; decision-galaxy-25-train
+  §1.7). `WindRecipe::Modern` reads T42.a's rate past the limit. Its builder:
+  - re-checks the remnant masses, since the added term undoes part of Belczynski et al.'s
+    black-hole calibration at solar metallicity;
+  - checks `envelope_knots` against the term's stiffness (about 10⁴ M☉/yr deep past the line),
+    where a knot-cap fault was found before (Risks, "The envelope integrator's past-the-grid
+    branch had no knot cap");
+  - re-measures R06's brightness envelope and caps, which read the tracks with no change in R06.
+  - **What moves:** every track past the limit, and through them `FATES`, `kick_rank`'s
+    fingerprint (core and remnant masses at eight initial masses, 8–150 M☉, so P06.T19.e re-runs
+    its production manifest at 25), and the pair-light and sky tables. Refits follow
+    `just fit-check`'s flags in the train's wiring.
+  - **Accept:** T42.a's tests pass against the swapped recipe; the three checks above recorded in
+    Risks.
+
+#### P06.T43 White dwarfs' V and cool giants' bolometric corrections (ask A4)
+
+Accepted 2026-10-19 (signoff-12 item 29): a white dwarf with no V is dropped from the sky's
+census, and a late M giant reads up to 1.7 mag too bright at M6 III by `photometry.rs`'s own note.
+Both are wrong skies.
+
+- **P06.T43.a V and BC_V, pure** (no output moves, no bump). An absolute V for white dwarfs from
+  the Montreal grids (Bédard et al. 2020, ApJ 901, 93), and a gravity-dependent BC_V for cool
+  giants (Fluks et al. 1994 or Worthey and Lee 2011 for M giants; Levesque et al. 2005's column
+  for supergiants), as functions that nothing on the record calls. With them, the check of the
+  module's "Straižys and Kuriliene (1981, Ap&SS 80, 353, Table III)" citation for the M giants'
+  corrections.
+  - **Files:** `stellar/photometry.rs` and its tests.
+  - **Tests:** a white dwarf's V at the grid's nodes, to the grid's printed precision; the cool
+    giants' BC_V against the chosen source's table at three gravities; the M6 III case of the
+    module's note recorded before and after.
+  - **Accept:** tests pass, and the citation check's result recorded in Risks; nothing on the
+    record calls the functions, so no golden moves.
+- **P06.T43.b The swap** (output moves; held on a lane branch, it rides version 25 (S1) if it is
+  built when that train's wiring starts, else the next galaxy train; decision-galaxy-25-train
+  §1.7). `absolute_magnitude_v` reads T43.a's V and BC_V, and `absolute_v_of_state` drops A4's
+  interim, a white dwarf dark in V. R06's census and luminosity function follow with no other
+  change.
+  - **What moves:** the census (white dwarfs gain a V, and late M giants dim),
+    `binary_cooling_floor`'s fresh-build test, and the sky tables. Refits follow
+    `just fit-check`'s flags in the train's wiring.
+  - **Accept:** T43.a's tests pass through `absolute_magnitude_v`; the census's change recorded in
+    Risks.
+
 ## Verification
 
 - **Backbone:** T12's comparison with published SSE output passes at the stated tolerances for all
@@ -2345,8 +2502,11 @@ This plan changes generated output once for certain: T30.b changes the mean mass
 the system count and every candidate draw, and bumps `GENERATOR_VERSION` with all goldens. T19.e
 bumps it again when plan 15's rank table replaces the provisional one (only kicks change). T19.e
 rides version 25 (S1), a held swap that lands with the train (decision-bump-plan-after-22,
-2026-10-14; updated 2026-10-15). Every other task adds output on new streams and moves nothing
-that existed. Any later change to a formula,
+2026-10-14; updated 2026-10-15). P06.T42.b (ask A2's winds) and P06.T43.b (ask A4's V) move
+stellar output too: each is a swap held on a lane branch, which rides version 25 (S1) if it is
+ready when that train's wiring starts, else the next galaxy train (decision-galaxy-25-train §1.7,
+2026-10-27). Every other task adds output on new streams and moves nothing that existed. Any later
+change to a formula,
 coefficient, recipe default, knot count or bridge time of this plan changes stellar output and is a
 version bump.
 
@@ -5221,7 +5381,8 @@ R06.
   tested from the earliest emitted time to +H. **R06's interim:** for an emitted time outside the
   clock window the census reads `SystemStars::generate(..).brief_at`, as plan 12's observed mode
   does (P12.T0's finding), which is exact and dearer. **Switched by:** R06.T8.b's brief, the one
-  call site, once A1 lands. _Accepted 2026-10-19 (`signoff-12.md`, item 29); no output moves._
+  call site, once A1 lands. _Accepted 2026-10-19 (`signoff-12.md`, item 29); no output moves.
+  Its task is P06.T41._
 - **A2, the Humphreys–Davidson limit** (R06's open questions 13 and 17). Under the default
   `WindRecipe::Modern` (`stellar/sse/wind.rs`), a star beyond the limit loses the constant
   `MODERN_LBV` (1.5 × 10⁻⁴ M☉/yr), below the Nieuwenhuijzen–de Jager rate it replaces on the cool
@@ -5239,7 +5400,9 @@ R06.
   Modern rate is max(`MODERN_LBV`, the cool- or hot-side rate) plus Hurley, Pols and Tout's LBV
   term (HPT 2000 §7.1), as COMPAS's `HURLEY_ADD`; the builder re-checks the remnant masses, adds
   the term after the Eddington boost, checks `envelope_knots`, and R06's envelope and caps are
-  re-measured. A bump: a rider on 22 → 23 if built in time._
+  re-measured. Its task is P06.T42: the rate lands pure (T42.a), and the swap, held on a lane
+  branch, rides version 25 (S1) if ready, else the next galaxy train (decision-galaxy-25-train
+  §1.7, 2026-10-27)._
 - **A3, protostars dark in V** (R06's open question 13). `absolute_magnitude_v` treats a Class 0/I
   protostar (`premain::protostar_class`) as a living star with a V magnitude, but its envelope's
   extinction (A_V ≳ 100 for Class 0, tens to about 100 for Class I; André, Ward-Thompson and
@@ -5262,7 +5425,9 @@ R06.
   response reports (and the view labels `WD NOT MODELLED`); M giants are as bright as this plan
   says. **Switched by:** R06.T5.a's `sky::photometry::absolute_v_of_state`, which then reads this
   plan's V for white dwarfs; R06's census and luminosity function follow it with no other change.
-  _Accepted 2026-10-19 (`signoff-12.md`, item 29); a bump._
+  _Accepted 2026-10-19 (`signoff-12.md`, item 29); a bump. Its task is P06.T43: V and BC_V land
+  pure (T43.a), and the swap in `absolute_magnitude_v`, held on a lane branch, rides version 25
+  (S1) if built, else the next galaxy train (decision-galaxy-25-train §1.7, 2026-10-27)._
 - **The envelope integrator's past-the-grid branch had no knot cap (found by P11.T4.h,
   2026-10-04; resolved 2026-10-05 by a guard that moves no output, see "Resolved, as built"
   below).** In `track/build.rs` `envelope_knots`, a knot past the clustered grid steps in age to

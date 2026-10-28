@@ -865,10 +865,11 @@ P11.T4, as built"._
     `cargo nextest run -p hyperion-sim --run-ignored only -E 'test(binary_system) | test(binary_carve)'`
     passes with the figures recorded in Risks; determinism-auditor and science-checker reviews
     clean; the version-20 commit (P14 Phase J's T46.f/T47.d) carries this task's goldens.
-  - **Finding left open (not this task):** `swell` (`rlof.rs`) places the new giant with
-    core = its whole mass. BSE `evolv2` keeps the accretor's core and gives it the accreted
-    envelope (`gntage`). Measured to change white-dwarf and helium-star accretors in 1.6% of
-    layer-D systems (epoch state 1.1%). Its ruling needs the BSE source checked first.
+  - **Finding C2, ruled** (ruling p11-c2-swell, 2026-10-06): `swell` places the new giant with
+    core = its whole mass after the step, and swells any fed helium star, so a helium star losing
+    mass to its wind is made a giant whose envelope is the placement's miss, and is stripped back
+    at once. BSE keeps the accretor's own core and gives it the step's net gain as envelope,
+    behind a gate (`evolv2.f` 1480–1491). Built by P11.T4.m.
 
 - **P11.T4.i Start at the first arrival** (ruling p11-channels, 2026-10-06; output moves;
   version-21 batch, re-blessed at 20, held out of integration like T4.h and 9a0950e). Hurley,
@@ -1260,6 +1261,253 @@ P11.T4, as built"._
     batch, after plan 14's 23 → 24: version 25, S1, by decision-bump-plan-after-22, 2026-10-14;
     updated 2026-10-15) with every golden re-blessed, and P11.T10's agreement test, if it then
     exists, re-baselined.
+
+- **P11.T4.m A fed helium star or white dwarf swells around its own core** (ruling p11-c2-swell,
+  2026-10-06; finding C2 of P11.T4.g, and F15; output moves; an anchor of version 25 (S1), built
+  after P11.T4.l on its lane branch and landed only with the train, by decision-bump-plan-after-22
+  §2.2; the binary engine stays on lane branches, decision-galaxy-25-train §1.7). The ruling's
+  figures below were measured on T4.k's prototype engine at version 21: T4.m re-measures them on
+  the engine as T4.l leaves it, and records each one that moves.
+  - **The rule** (Hurley, Tout and Pols 2002, §2.6.6, §2.7.4, eq. 82–84; BSE `evolv2.f`
+    1471–1560, `gntage.f` 99–160, `hrdiag.f` 357–367):
+    - A star the binary carries that accretes hydrogen-rich matter (a donor of `Surface::Hydrogen`)
+      becomes a giant around its own core when the hydrogen accumulates:
+      - a helium main-sequence star: core-helium-burning, core = its mass at the step's start,
+        its fraction burnt kept;
+      - a helium giant: thermally pulsing AGB around its CO core;
+      - a white dwarf above 2.71 × 10⁻⁷ M☉/yr: first giant branch (He) or thermally pulsing
+        AGB (CO, ONe) around its mass at the step's start.
+    - Its mass is the mass after the step, so its envelope is the step's net gain.
+    - The hydrogen accumulates when both gates pass:
+      - (a) BSE's: the step's accretion exceeds 1.05 × the accretor's own net wind over it;
+      - (b) the burn gate: the step's net gain exceeds the new giant's core growth over the same
+        step. It replaces BSE's per-orbit 10⁻⁴ guard, whose threshold scales as 1 ÷ P.
+    - Otherwise the star keeps its type and the step's mass change (BSE below its gate; COMPAS
+      always).
+    - A helium main-sequence accretor keeps its fraction burnt (BSE `evolv2.f` 1889–1900;
+      COMPAS's `HURLEY` default): no m₀ ÷ m₁ factor.
+  - **`binary/rlof.rs`:**
+    - `accretor_events` receives the accretor's mass at the step's start and the step's dt, and
+      passes them, with `gained`, to `swell`.
+    - `swell`: the core and the gates above, in this order: the donor's surface, gate (a), the
+      exact placement, gate (b), then the segment closed and the member set. A refusal closes no
+      segment.
+    - `accretion`: only a hydrogen-rich donor swells a helium star (BSE `kstar(j1).le.6`). Any
+      other donor gives the thermally limited share.
+    - `rejuvenated_tau`: `mixed` is `!helium && !(0.35..=1.25).contains(&m1)`.
+    - Docs: the module's accretion paragraph, `swell`, `accretor_events` and `rejuvenated_tau`,
+      citing the BSE lines and this ruling.
+  - **`binary/common_envelope.rs`:** a placement for the swell whose built track's core at the
+    placement equals the core asked for to 10⁻⁹ relative.
+    - Bracket the asked core in [core, 1.1 core] among the asks that place a star, then use
+      secant or bisection, at most 12 track builds.
+    - Where none reproduces it, the swell is refused: the accretor keeps its type, as where no
+      star of the kind has such a core. The ruling's probe refused 6 of 190 white-dwarf requests
+      in layer D, about 3%. Record the count of refusals in Risks.
+    - Every other caller of `placed_star` is unchanged. Finding F16, that every placed star
+      misses its core by up to 8% (an exact placement for every caller moves 264 of the pinned
+      thousand's digests), has its own task and bump (ruling p11-c2-swell §6).
+  - **Not in it:** the engine fixes for finding F18, for a transfer donor that dies inside a step
+    (the `transfer_phase` debug assertion) and for finding F17 are P11.T4.o's, after P11.T4.n
+    (decision-galaxy-25-train §11, 2026-10-27).
+  - **Tests** (`stellar/binary/tests.rs`, unless said):
+    - `a_helium_star_fed_less_than_its_wind_stays_a_helium_star`: pairs 1723 and 8002 of
+      `binary_classes`' prior sampler (band 4; in `tests/binary_classes.rs`, beside the sampler).
+      - Neither is capped.
+      - The helium star stays on its own track from its strip to its pin.
+      - 1723: a 1.188 M☉ neutron star at 36.342 Myr, bound, in about 16 segments.
+      - 8002: a 1.208 M☉ neutron star at 37.709 Myr, bound, in about 18.
+      - Before T4.m both reached the 64-segment cap.
+    - `a_fed_helium_star_swells_around_its_own_core`: pinned pair 0255 (or 0267).
+      - At the swell (about 8.611 Myr) the primary is core-helium-burning.
+      - Its core is its helium mass at the step's start (5.530251 M☉) to 10⁻⁹ relative.
+      - M − Mc is the step's net gain (about 3.2 × 10⁻⁴ M☉) to 10⁻⁹ of M.
+      - The fraction burnt is the helium star's τ, and R < 1 R☉.
+      - Before T4.m: a 1,076 R☉ giant at 8.6095 Myr, with nothing accreted.
+    - `a_fed_white_dwarf_swells_around_itself`: one pinned pair whose white dwarf swells (the
+      ruling's probe found 20 in the thousand).
+      - The giant's core is the dwarf's mass at the step's start to 10⁻⁹.
+      - M − Mc is the step's net gain.
+      - Pair 0305 shows no CO white dwarf above the Chandrasekhar mass.
+    - `a_swell_the_shell_would_burn_is_refused` (unit, on `swell`): a helium main-sequence member
+      whose net gain is below the placed giant's core growth over dt stays a helium star with the
+      step's mass, and so does one whose wind beats its accretion.
+    - `a_white_dwarf_donor_does_not_swell_a_helium_star` (unit, on `accretion`).
+    - `a_helium_accretor_keeps_its_fraction_burnt` (unit, on `rejuvenated_tau`), and pair 6695 of
+      band 3 is not capped (`tests/binary_classes.rs`).
+    - `the_swells_placement_is_exact` (unit): CHeB at y = 0.1, 0.5, 0.9 for cores of 0.8–8 M☉, and
+      TP-AGB for 0.55–1.3 M☉, at Z = 0.02 and 0.004. The built core equals the asked one to 10⁻⁹,
+      or the placement is refused. Before T4.m the miss was up to −7% (CHeB, 8 M☉, Z = 0.02).
+    - `tests/stellar_system.rs`, `a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star`:
+      drop the allowance for "a core-helium-burning giant with a thin envelope again and again".
+      - From 15.457 Myr to the collapse the primary is HeMS, HeHG or HeGB at every knot.
+      - If a gate passes there, the swelled giant's M − Mc equals its step's net gain. Record
+        which.
+    - The 10³-pair suites: no capped timeline (as now). At the start of every segment that begins
+      with a swelled giant, M − Mc > 0.
+  - **Goldens** (blessed at header 24 in T4.m's own checkpoint on the lane branch, for the
+    version-25 batch, by decision-bump-plan-after-22 §2.2's wiring):
+    - `stellar/binary_timelines`: about 27 of 1,000 digests (the ruling's prototype).
+      - By cause: 21 white-dwarf swells, 2 helium-star swells (0255, 0267), and 4 by the helium
+        accretor's clock (0050, 0138, 0841, 0960, in their bits).
+      - 5 change their outcomes (0080, 0255, 0267, 0305, 0487).
+    - `stellar/held_bare_core_helium_star`, `stellar/summaries` and the system goldens: run
+      `golden_diff`, and attribute any move.
+  - **Statistics** (slow; record, and assert where they are asserted now). Expected, from the
+    ruling's probe on 10,000 layer-D and 12,000 layer-E prior pairs:
+    - capped timelines 1 + 2 → 0;
+    - layer E: records 8,393 → 8,396, hydrogen-poor share 0.5376 → 0.5380;
+    - layer D: accretion-induced collapses (bound NS after the primary's collapse) 158 → 140,
+      persistent NS LMXBs 104 → 86, millisecond pulsars 43 → 29, hot-subdwarf time −30% (pair
+      6695's capped segment);
+    - swell requests, refusals by each gate, placements refused and swells made, recorded;
+    - `binary_system`'s marks, `binary_carve` within Poisson, the R06 census with its time, and
+      `just fit-check`, whose flagged tables are refitted in the train's wiring.
+  - **Acceptance:**
+    - `cargo nextest run -p hyperion-sim -E 'test(binary::)'`;
+    - the slow `binary_system`, `binary_carve` and `binary_classes` suites, the 10³-pair suites
+      and the R06 census, with the figures recorded in Risks;
+    - `the_gate_is_conservative` (`stellar/brief.rs`) and P11.T17.a's agreement test,
+      `detached_generated_pairs_are_passed_over` (`binary/light.rs`), re-run and passing
+      (decision-observed-class-findings §A.5);
+    - determinism-auditor, science-checker and rust-reviewer reviews.
+
+- **P11.T4.n A pinned main sequence ends at its own** (decision-observed-class-findings §B,
+  2026-10-21; a physically absurd collapse; output moves; an anchor of version 25 (S1), after
+  P11.T4.l and T4.m on their lane branch and landed only with the train, by
+  decision-bump-plan-after-22's addendum of 2026-10-21; decision-galaxy-25-train §1.7).
+  - **The fault.** Record 822C72E00000008C's pinned case-A donor collapses on its hydrogen main
+    sequence, at plan 06's death age.
+    - A death age of 24.62 Myr means m₀ ≈ 10.5 M☉ at Z 0.02 (10.9 at 0.014, 11.2 at 0.008), with
+      t_MS ≈ 22.3 Myr. Core collapse needs a degenerate iron (or ONe) core, which forms only after
+      carbon, neon, oxygen and silicon burning; a main-sequence core is hot, non-degenerate
+      hydrogen.
+    - At 24.6 Myr a real case-A donor is at its terminal-age main sequence, in rapid case AB
+      (about 0.3 Myr), or a young stripped helium star, and most likely ends as an ONe or CO white
+      dwarf, or in an electron-capture supernova, after 30 Myr (Wellstein, Langer and Braun 2001,
+      system 31). Real case-A main sequences extend only about 5–10%. BSE's τ-preserving rule
+      (HPT §7.1, `aged_tau`) overstates the extension by an order of magnitude, because real
+      donors are overluminous (Sen et al. 2022: about 7 times).
+    - The pin stays (Design note 16; Risks, "Deaths the engine cannot move"): plan 08's placement
+      class and plan 09's supernova test read the primary's single-star death in placement,
+      before the engine runs, so moving the death age, or ending the timeline any other way, is
+      rejected.
+    - This supersedes ruling p11-t4k-faults' "recorded, not routed" (its §2.1 C and §7). A
+      collapse from a post-main-sequence state that has not finished helium burning (a
+      supergiant or a stripped helium star) is no blocker: a shift of about 10% of the life, from
+      a real class of progenitor, recorded.
+  - **The switch.**
+    - The pinned primary's own track's main-sequence end age (from `PinnedTrack`'s track) becomes
+      an engine stop. If, at that age, member 0 (or the merger product that holds the pin) is
+      still a carried hydrogen main-sequence star (`Member::MainSequence { helium: false }`), the
+      engine closes the segment there, a listed event. It then carries the star on the pin's own
+      track: `Member::Shaped` at offset 0, at the binary's mass, the form a case-B donor already
+      takes.
+    - What follows is existing machinery: the radius at the star's mass (HPT §7.1), the
+      small-envelope perturbation, a naked helium star once M ≤ Mc, and case AB. The pin falls at
+      the own track's death through the existing carried tie. The core becomes Mc,TMS(10.5 M☉)
+      ≈ 2.3 M☉, which can make plan 06's neutron star (BSE sends a helium star above 2.25 M☉ to
+      core collapse).
+    - Unchanged: the pin's age, remnant and kick; a star already off its main sequence at that
+      age; a helium main sequence; a star that is not pinned; pairs whose run ends before that
+      age. No draw, stream or tag changes.
+    - A τ floor was rejected: it leaves a helium star of about 1.2 M☉, early in helium burning,
+      which BSE itself would make a CO white dwarf, so plan 06's neutron star would come out of
+      an explosion with no ejecta.
+  - **Files** (the ruling names none): where the build puts the stop, about `binary/evolve.rs`
+    (`PinnedTrack`, `pinned_death`), the engine's stops (`binary/detached.rs`'s `Stop`,
+    `binary/rlof.rs`) and `binary/star.rs` (`Member`); the tests below.
+  - **Tests:**
+    - 822C72E00000008C, and pairs 0223 and 0277 of the pinned thousand: no pinned collapse from
+      the hydrogen main sequence. The progenitor is a supergiant or a naked helium star, and the
+      remnant is plan 06's bit for bit.
+    - A new invariant in the 10³-pair suite and the slow invariant suites: pinned collapses from
+      a hydrogen main-sequence state = 0.
+    - `check_invariants`' continuity inside a segment lists the switch as an event: the step in
+      L falls on a segment's edge.
+  - **What moves** (the ruling's blast radius): the timelines of pinned primaries (m_cc − 1 M☉
+    and up) whose binary main sequence outlasts their own, at ages past their own terminal-age
+    main sequence: case-A donors; member-0 main-sequence accretors that were rejuvenated;
+    main-sequence merger products that hold the pin; contact pairs (0223, 0277). The 2026-10-06
+    rulings counted 2 of the pinned thousand collapsing on the main sequence, and 0 of 12,000
+    layer-E prior pairs. The switch also moves case-A pairs that did not collapse on the main
+    sequence: count every moved timeline.
+  - **Goldens** (blessed at header 24 in T4.n's own checkpoint, for the version-25 batch):
+    `stellar/binary_timelines` (some of the 10³ digests), and possibly `stellar/summaries`, the
+    brief goldens and the server's goldens that hold such a system. Run `golden_diff`, and
+    attribute every move.
+  - **Tables and statistics:** `just fit-check`: `pair_light` (P11.T17.b), and R06's
+    `sky_binary_light_c/d/e` if stale, refitted in the train's wiring. Re-measured and recorded:
+    `binary_classes`, the stripped share, the double neutron stars, and the R06 census.
+  - **Departures to record in Risks:**
+    - L steps up about 0.75 dex at the switch, from log L 3.56 to 4.31. Real donors are
+      overluminous, so the direction is right; easing it over a thermal time is deferred.
+    - The core is case-B-like, about twice a real case-A core.
+    - Real donors of this mass most likely end as white dwarfs or in an electron-capture
+      supernova, later than the pin: Design note 16's departure.
+    - A case-A-stripped remnant belongs to finding F13's stripped-mark remnant law (plan 06's
+      deferred findings), not here.
+  - **Acceptance:** as T4.m's: `cargo nextest run -p hyperion-sim -E 'test(binary::)'`; the slow
+    suites above, with the figures recorded in Risks; `the_gate_is_conservative` and
+    `detached_generated_pairs_are_passed_over` re-run and passing; determinism-auditor,
+    science-checker and rust-reviewer reviews.
+
+- **P11.T4.o The transfer loop's steps: the boundary, a donor dead inside a step, and the step's
+  size** (findings F18 and F17, and the engine finding of "P11.T17.b as built";
+  decision-galaxy-25-train §11, 2026-10-27; output moves; an anchor of version 25 (S1), after
+  P11.T4.n on the same lane branch and landed only with the train; the binary engine stays on lane
+  branches, decision-galaxy-25-train §1.7).
+  - **F18, the receding boundary.** A boundary stop closes a segment whether or not the boundary
+    is reached, while `after_boundary` acts only at τ ≥ 1. A rejuvenated accretor's landings
+    therefore fall short and close a segment each, until `MAX_SEGMENTS`.
+    - The rule, in `detached_phase` and `transfer_phase`: a step limited by a member's
+      main-sequence boundary takes that boundary at its end if the member aged over the step (τ
+      at the end above τ at the start). Its τ is set to 1, and the segment closes and
+      `after_boundary` acts.
+    - A member that did not age over the step (its rejuvenation at or above its ageing) does not
+      take the boundary: no segment closes, and the phase goes on.
+    - The main sequence then ends early by at most the last step's rejuvenation, under one step's
+      τ increment. Record the largest measured value in Risks.
+    - BSE's least step of 10⁻⁷ Myr is not used: it still closes a segment at every short landing.
+  - **A donor that dies inside a step** (the engine finding of "P11.T17.b as built"). At the top
+    of `transfer_phase`'s loop, a donor whose structure is neither living nor a white dwarf has
+    died inside the last step.
+    - The engine acts on its death there as on `Stop::Death`: `die(d)`, BSE §2.5's collapse with
+      its mass loss and kick, then `end_without_a_living_donor(d)`, at the step's end.
+    - This replaces the debug assertion "a transfer step from a donor with nothing living".
+    - The death is dated at the step's end, at most one step late (about 0.5% of the donor's
+      mass), a departure recorded in Risks.
+    - Find why that step's limit missed the death, and record it. If a limit fix makes the branch
+      unreachable, keep it as the backstop.
+  - **F17, the step's size** (ruling p11-c2-swell §4.4). A transfer step whose solved transfer
+    moves more than 2 × `TRANSFER_STEP` (1%) of the donor's mass is repeated at half its dt, up to
+    8 times, the same inputs giving the same halvings. `dt_hint` starts from the accepted dt.
+  - **Tests:**
+    - F18:
+      - P11.T17.c's follow-up gainer in layer D (8.88 M☉, fed by a 0.97 M☉ helium giant) ends
+        its main sequence in one boundary step and is not capped;
+      - a fed mixed accretor that does not age over a step keeps its main sequence and closes no
+        segment;
+      - an unfed star's main sequence ends at the same age as before to 10⁻⁹ relative.
+    - The dead donor:
+      - E's cell 3579, sample 49 under `FIT_SEED` (32.75 + 31.83 M☉ at [Fe/H] −1.98, circular
+        at 65.8 R☉), leaves a black-hole pair or a disrupted one at about 8.51 Myr, not one
+        31.65 M☉ black hole;
+      - no transfer step starts from a dead donor over the pinned thousand and the 10³-pair
+        suites.
+    - F17: pinned pair 0305's 1.57 Myr step moves at most 1% of its donor, and no accepted step
+      over the pinned thousand moves more.
+  - **The held floor.** Re-run P11.T17.c's follow-up probes, its capped timelines in C, D and E.
+    - If none is capped, the held floor is dropped in version 25's wiring with the pair-light
+      refits, which restores D's and E's `Remnants`.
+    - Otherwise give main the count by pair.
+  - **Goldens** (blessed at header 24 in T4.o's own checkpoint, for the version-25 batch):
+    `stellar/binary_timelines` and what reads it. Run `golden_diff`, and attribute every move to
+    F18, the dead donor or F17.
+  - **Acceptance:** as T4.m's: `cargo nextest run -p hyperion-sim -E 'test(binary::)'`; the slow
+    suites, with the figures recorded in Risks; `the_gate_is_conservative` and P11.T17.a's
+    agreement test re-run and passing; determinism-auditor, science-checker and rust-reviewer
+    reviews.
 
 ### P11.T5 Classes from state
 
@@ -2032,7 +2280,9 @@ fitted tables, which were refitted at `--since 21` on the same branch and land w
 
 T4.l moves output in a later bump batch, after plan 14's 23 → 24, with its own bump, and T4.m
 rides it (ruling p11-c2-swell): version 25 (S1), the first galaxy train after plan 14's 23 → 24
-(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). T1.d moves every star once,
+(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). T4.n rides it too, after T4.m, and
+T4.o after T4.n (decision-observed-class-findings §B.4, 2026-10-21; decision-galaxy-25-train
+§11, 2026-10-27). T1.d moves every star once,
 because the mean mass per system changes the system count (plan 02 lists it among its known
 future bumps). After that no primary
 moves: IDs, positions, primary masses, ages, primary draws, death times and kicks are untouched,
@@ -4239,6 +4489,28 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - T4.k's collapse invariants skip capped timelines, as the 10³ suites assert none.
   - BSE keeps the accretor's own core and gives it the step's net gain as envelope, behind a gate
     (`evolv2.f` 1480–1491): P11.T4.m's rule, which removes both caps.
+- **Finding F16: a placed star misses its core** (ruling p11-c2-swell, 2026-10-06; not fixed;
+  recorded and deferred under the 2026-10-13 rule; P11.T4.p reserved for it,
+  decision-galaxy-25-train §11, 2026-10-27).
+  - `placed_star` builds the new star's track from zero age with its winds, so it enters the
+    placed phase at a wind-reduced effective initial mass (HPT §7.1). Its core there falls short of
+    the one asked for:
+    - core-helium-burning at Z = 0.02: −0.07% at 0.8 M☉, −0.7% at 1.5, −2.5% at 2.5, −7% at 8;
+    - thermally pulsing AGB: up to −0.6%;
+    - a fifth to a third as much at Z = 0.004.
+  - BSE's `gntage` starts the star at the placement, exact (`gntage.f` 159).
+  - It touches every merger and common-envelope product (BSE §2.7.4's Mc3). An exact placement
+    for every caller moves 264 of the 1,000 digests. It is a figure, not a wrong state.
+  - P11.T4.m makes the swell's placement exact by its own solve.
+  - The general fix, P11.T4.p when a ruling schedules it: a plan 06 track that starts at the
+    placed phase with the solved M₀, beside P06.T9's helium-star entry point, then `placed_star`
+    for every caller, with its own bump.
+- **Finding F17: a transfer step can move far more than BSE eq. 92's 0.5% of its donor** (ruling
+  p11-c2-swell, 2026-10-06; fixed by P11.T4.o at version 25, decision-galaxy-25-train §11).
+  - In pinned pair 0305, one 1.57 Myr step moved 0.49 M☉, about 25% of its donor, onto a white
+    dwarf, after a slower step had lengthened `dt_hint`.
+  - So the accretion regime (nova, steady, giant) and the swell are decided once for that mass.
+  - P11.T4.o repeats a step that moves more than 2 × `TRANSFER_STEP` of the donor at half its dt.
 - **The local V light is low, and the pair light (a pointer from rendering plan R06, 2026-10-06,
   `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
   the fixture's V light is 26% under Flynn et al. 2006's 0.056 ± 10% L☉ pc⁻³ (plan 02's Risks,

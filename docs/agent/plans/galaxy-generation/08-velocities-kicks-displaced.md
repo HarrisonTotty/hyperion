@@ -570,9 +570,9 @@ anisotropy and the net rotation. `ellipsoid` returns spherical axes. **Files.**
 `galaxy/kinematics/halo.rs`. **Tests.** A pure power law of slope 3.5 in a flat curve gives v_c ÷
 √(3.5 − 2β) to 1% between 5 and 50 core radii; σ_r is finite and positive at r = 0; at Milky Way
 values the mixture, weighted by component density over galactocentric radii of 15,000–65,000 ly, has
-σ_r within 135–155 km/s and an anisotropy within 0.5–0.7; the dominant merger has zero mean rotation
-and the in-situ component a prograde one; over 200 seeds no component's σ_r exceeds the local escape
-speed ÷ 2. **Acceptance.** Tests pass.
+σ_r within 140–180 km/s (ruling 111) and an anisotropy within 0.5–0.7; the dominant merger has zero
+mean rotation and the in-situ component a prograde one; over 200 seeds no component's σ_r exceeds
+the local escape speed ÷ 2. **Acceptance.** Tests pass.
 
 ### P08.T4 Bulge, bar and nuclear disc
 
@@ -599,7 +599,7 @@ speed ÷ 2. **Acceptance.** Tests pass.
   black hole and the nuclear cluster, as plan 02 does. Replace the body of plan 02's D8 estimator in
   `potential/sigma.rs` with a call to it. Bumps the version (the black hole's mass changes, and with
   it the potential). `KinematicTables::bulge_projected_sigma` is the same quantity from the final 64
-  × 64 table. Tests: 105–115 km/s at Milky Way values (accept 100–120); black-hole mass within a
+  × 64 table. Tests: 100–120 km/s at Milky Way values (ruling 111); black-hole mass within a
   factor of three of 4.3 × 10⁶ M☉ before scatter; the reduced grid and the final table agree to 3%;
   plan 02's seed-sweep tests still pass; they are slow tests already (P02.T11), and the fast suite's
   32-seed versions stay within a few seconds. Bench: under 100 ms per parameter set (a finding if
@@ -1355,8 +1355,8 @@ last two.
 
 All at `GalaxyParams::milky_way_like()`, fixed seeds, under `just test-slow`:
 
-1. Halo: σ_r within 135–155 km/s and anisotropy 0.5–0.7 from 10⁵ sampled halo systems (the draw, not
-   the table).
+1. Halo: σ_r within 140–180 km/s (ruling 111) and anisotropy 0.5–0.7 from 10⁵ sampled halo systems
+   (the draw, not the table).
 2. Bulge: line-of-sight dispersion from `sunlike_point` on the minor axis at b = 1° within 116–134
    km/s, and the ratio to the GIBS values (Zoccali et al. 2014, entered in the test with their
    citation) flat within ±7% over b from 1° to 4°.
@@ -1449,6 +1449,7 @@ the tags listed under Provides.
   halo's inner slopes are now 2.2–2.8, not near 3.5. A spherical Jeans estimate at β 0.6–0.7 in a
   flat 230 km/s curve then gives σ_r of about 155–185 km/s at the Sun's radius, not 145, so P08.T3's
   135–155 km/s may fail. A miss is a finding for the owner, never a reason to steepen the slopes.
+  _Ruling 111 (2026-09-26) has since made T3's window 140–180 km/s ("Ruling 111 as built")._
 - **Contradiction: "retained" against "56 classes", and own-form shares below 1 in the lowest bin.**
   Resolved in Design note 13. If the owner prefers the literal reading of either sentence, only the
   class table's assignment of the lowest row changes.
