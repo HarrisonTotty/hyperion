@@ -62,10 +62,6 @@ pub(crate) use track::{
 pub(crate) use track::{early_agb_core_radius_bound, helium_zams_radius};
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.
-#[cfg_attr(
-    not(test),
-    expect(unused_imports, reason = "P06.T18.b and T28.f are the first callers")
-)]
 pub(crate) use agb::interpulse_period;
 pub(crate) use gb::mc_bagb as m_c_bagb;
 

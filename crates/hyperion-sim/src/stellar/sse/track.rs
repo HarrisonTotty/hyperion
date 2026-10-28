@@ -1073,21 +1073,42 @@ impl Track {
         self.options
     }
 
-    /// The number of thermal pulses since the start of the thermally pulsing AGB at `age`, the
-    /// integral of 1 ÷ `τ_ip`(Mc, `M_env`) (P06.T8.b's interpulse period) over the phase, or `None`
-    /// outside it (for P06.T24.b and T28.f).
+    /// The thermally pulsing AGB's segment, if the track is built to it.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P06.T24.b and T28.f are the first callers")
-    )]
-    pub(crate) fn pulse_phase_at(&self, age: Years) -> Option<f64> {
-        let age = self.checked_age(age);
-        let segment = self.segment_at(age);
-        match segment.model {
-            Model::ThermallyPulsingAgb { .. } => Some(segment.pulse_phase(age)),
-            _ => None,
-        }
+    fn pulsing_agb_segment(&self) -> Option<&Segment> {
+        self.segments
+            .iter()
+            .find(|segment| matches!(segment.model, Model::ThermallyPulsingAgb { .. }))
+    }
+
+    /// The ages of the thermally pulsing AGB, from its start, the first pulse, to its end, if the
+    /// track is built to it (for P06.T28.f's pulse clock).
+    #[must_use]
+    pub(crate) fn pulsing_agb(&self) -> Option<AgeInterval> {
+        self.pulsing_agb_segment().map(|segment| AgeInterval {
+            start: Years::new(segment.start),
+            end: Years::new(segment.end),
+        })
+    }
+
+    /// The number of thermal pulses since the start of the thermally pulsing AGB at the age
+    /// `base_years + offset_years`, the integral of 1 ÷ `τ_ip`(Mc, `M_env`) (P06.T8.b's interpulse
+    /// period) over the phase, or `None` where that age lies outside the phase, its ends included
+    /// (for P06.T28.f's pulse clock, whose pulse number P06.T24.b reads).
+    ///
+    /// The segment's knots hold the count and its rate, and the monotone cubic between two of them
+    /// is read at the age's two parts, as [`Track::mass_at_split`] reads the mass: with
+    /// `base_years` the star's age at the epoch and `offset_years` the Julian years since, the
+    /// interval's fraction is (`base_years` − the knot's age) + `offset_years`, so that the count
+    /// follows an offset finer than the summed age can hold. With the offset zero it is the count
+    /// at the age `base_years`. The interval is chosen at the summed age; a segment without knots
+    /// has no pulses.
+    #[must_use]
+    pub(crate) fn pulse_phase_at(&self, base_years: f64, offset_years: f64) -> Option<f64> {
+        let segment = self.pulsing_agb_segment()?;
+        let age = base_years + offset_years;
+        (segment.start <= age && age <= segment.end)
+            .then(|| segment.pulse_phase_at_split(base_years, offset_years))
     }
 
     /// The ages at which the track's state may step, with what steps there: every sudden death,
@@ -1778,13 +1799,14 @@ impl Segment {
         .at_offset((base - a.age) + offset)
     }
 
-    /// The thermal pulses at `age`, interpolated between the knots (zero without them).
+    /// The thermal pulses at the age `base_years + offset_years`, interpolated between the knots
+    /// at the age's two parts (see [`Track::pulse_phase_at`]; zero without knots).
     #[must_use]
-    pub(crate) fn pulse_phase(&self, age: f64) -> f64 {
+    pub(crate) fn pulse_phase_at_split(&self, base_years: f64, offset_years: f64) -> f64 {
         if self.knots.len() < 2 {
             return 0.0;
         }
-        let (a, b) = self.knot_interval(age);
+        let (a, b) = self.knot_interval(base_years + offset_years);
         Interval {
             x0: a.age,
             x1: b.age,
@@ -1793,7 +1815,7 @@ impl Segment {
             d0: a.pulse_rate,
             d1: b.pulse_rate,
         }
-        .at(age)
+        .at_offset((base_years - a.age) + offset_years)
     }
 
     /// The two knots around `age`: the interval whose start is the last knot at or before it.

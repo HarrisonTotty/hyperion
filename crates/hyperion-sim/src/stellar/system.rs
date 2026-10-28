@@ -713,6 +713,16 @@ impl StarModel {
         }
     }
 
+    /// The star's track, or `None` below 0.1 M☉: what P06.T28.f's pulse clock reads its thermally
+    /// pulsing AGB from.
+    #[must_use]
+    pub(crate) fn track(&self) -> Option<&Track> {
+        match &self.evolution {
+            Evolution::Track(track) => Some(track),
+            Evolution::Cooling => None,
+        }
+    }
+
     /// The star's track, shared, or `None` below 0.1 M☉: what the binary engine takes instead of
     /// building it again (P11.T11, ruling 111.5).
     #[must_use]

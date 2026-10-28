@@ -529,13 +529,6 @@ impl ThermallyPulsingAgb {
 /// interpulse period. The relation was fitted to 0.8–7 M☉ at Z = 0.0001–0.02 and core masses up to
 /// about 1 M☉; beyond those it is extrapolated.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "P06.T28.f's thermal-pulse events are the first caller"
-    )
-)]
 pub(crate) fn interpulse_period(
     mc: SolarMasses,
     mc_first: SolarMasses,

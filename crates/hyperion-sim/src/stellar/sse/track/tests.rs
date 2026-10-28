@@ -986,14 +986,29 @@ fn the_thermal_pulses_count_up_through_the_pulsing_agb() {
     let mut last = -1.0;
     for i in 0..100 {
         let a = segment.start + (segment.end - segment.start) * f64::from(i) / 100.0;
-        let p = track
-            .pulse_phase_at(Years::new(a))
-            .expect("inside the phase");
+        let p = track.pulse_phase_at(a, 0.0).expect("inside the phase");
         assert!(p >= last, "{p} after {last}");
         last = p;
     }
     assert!(last > 3.0, "{last} pulses");
-    assert_eq!(track.pulse_phase_at(Years::new(segment.start * 0.5)), None);
+    assert!(track.pulse_phase_at(segment.start * 0.5, 0.0).is_none());
+    assert!(track.pulse_phase_at(segment.start, -1.0).is_none());
+    assert!(track.pulse_phase_at(segment.end, 1.0).is_none());
+    let span = track.pulsing_agb().expect("the phase");
+    assert_eq!(
+        (span.start().value(), span.end().value()),
+        (segment.start, segment.end)
+    );
+    // The two-part reading is the summed age's where the offset is exact in the sum.
+    let middle = f64::midpoint(segment.start, segment.end);
+    assert_eq!(
+        bits(track.pulse_phase_at(middle, 0.0).expect("inside the phase")),
+        bits(
+            track
+                .pulse_phase_at(middle - 1_024.0, 1_024.0)
+                .expect("inside the phase")
+        )
+    );
 }
 
 /// A main sequence or helium main sequence rebuilt at its current mass carries the lifetime the
