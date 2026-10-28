@@ -1222,6 +1222,8 @@ orbits (periods of 10–20 yr occur); mean spacing about 0.05 ly at 3 ly.
 
 #### P09.T32 The catalogue-class grid
 
+**Built** (2026-10-27; no output moves): see "P09.T32 as built" under Risks.
+
 `ClassProcess`: a trait with a class ID, a cell size (512 ly × 2ᵏ, low cell bits zero for coarser
 classes), a bound over a cell, a candidate draw under a cap, and the class's test.
 `CatalogueClassCell` generation by thinning as everywhere else; plan 01's `CatalogueSystemId` with
@@ -3406,3 +3408,191 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     μ uses all the mass inside, and at ±H the two laws part by 0.013 ly at the fixture's edge
     (0.02 ly at seed 0x2's). Drafted for the brainstorm's sign-off: which convention it means, and
     that this jump is the regime's continuity.
+- **P09.T32 as built (issue #127, `lane/127-p09-t32-class-grid`, 2026-10-27, at
+  `GENERATOR_VERSION` 23, no output moves).** The class grid, tested on toy classes; no
+  production class is registered, so nothing generated moves and there is no bump
+  (decision-bump-plan-after-22, §3). Files: `galaxy/catalogue_classes/grid.rs` (the grid) with
+  `grid/tests.rs` (its tests and the toys), `galaxy/catalogue_classes/ids.rs` (`CatalogueCellKey`,
+  moved from `mod.rs`, and the `111` checks), `mod.rs` (declarations and re-exports, every old
+  path kept), `rng/tags.rs` (`class.cell`, scope `Cell`, keyed by
+  `ObjectKey::cell(CatalogueCellKey::word())`: one Poisson draw from word 0, of mean the class's
+  bound × the cell's volume). `registry.rs` is unchanged. The desktop accepted design points
+  (a)–(e), the lookup, the headroom check and the one-velocity rule as built, on the issue
+  (2026-10-27); P09.T33.a's brief inherits (a).
+  - _Signatures, the Provides that P09.T33–T38, T43 and plan 11 consume_ (all re-exported from
+    `catalogue_classes`):
+    - `trait ClassProcess`, with `type Candidate` and `type Entry`, and five methods:
+      - `class(&self) -> ClassId`;
+      - `bound(&self, &Galaxy, &CatalogueCellKey) -> PerCubicLightYear`;
+      - `candidate(&self, &Galaxy, &CatalogueCellKey, CatalogueSystemId, PerCubicLightYear)`,
+        which returns `Option<Self::Candidate>`;
+      - `test(&self, &Galaxy, Self::Candidate) -> Option<Self::Entry>`;
+      - `members(&self, &Self::Entry) -> u8`.
+
+      The candidate's ID is its member 0, which keys its streams. `test` both tests and builds the
+      entry, because P09.T33.a's test, `claimed_window`, returns the window its `SupernovaEntry` is
+      built with. `members` is 1–16, numbered without gaps (debug-asserted, then clamped). The
+      trait's doc states the contract in eight rules: purity, streams, the bound, the test, the
+      reach, one velocity, headroom and a placed class.
+
+    - `CatalogueClassCell::<E>::generate(&Galaxy, &P, CatalogueCellKey)`, which panics on a key of
+      another class, with `key`, `candidates` and `entries` (or `into_entries`) in index order.
+      `CatalogueEntry<E>` has `id` (member 0), `members`, `value` (or `into_value`) and
+      `member_id(u8) -> Option<CatalogueSystemId>`. `CatalogueMember<E>` has `id`, `member` and
+      `entry` (or `into_entry`).
+    - `resolve_entry(&Galaxy, &P, CatalogueSystemId)`, one process's resolve, returns
+      `Result<CatalogueMember<P::Entry>, ResolveSystemError>`.
+    - The `111` prefix's `resolve(&Galaxy, &L, CatalogueSystemId, V)`, with `L: ClassLookup` and
+      `V: MemberVisitor`, returns `Result<V::Output, ResolveSystemError>`.
+    - `ClassLookup::visit_class(&Galaxy, ClassId, V)`, with `V: ClassVisitor`, returns
+      `Option<V::Output>`. `ClassVisitor::visit<P: ClassProcess>(self, &P)` and
+      `MemberVisitor::visit<P: ClassProcess>(self, &P, CatalogueMember<P::Entry>)` each return
+      their `Output`. `ProductionClasses` is the production lookup, with no process.
+    - `cells_in_sphere(ClassId, &QuerySphere) -> impl Iterator<Item = CatalogueCellKey>`.
+    - `check_class_headroom(ClassId, PerCubicLightYear)`, the class and its largest bound, returns
+      `Result<(), CheckClassHeadroomError>`: `NotPlaced(ClassId)`, or `ClassTooDense` with the
+      class, the largest mean and the capacity.
+    - On `CatalogueCellKey`: `of(CatalogueSystemId)` returns
+      `Result<Self, BuildCatalogueCellKeyError>`, whose error gains `FreeClass(u8)` and
+      `Misaligned { class, cell }`; `candidate_id(index, member)` returns
+      `Result<CatalogueSystemId, BuildSystemIdError>`; `origin_ly() -> [i32; 3]`;
+      `volume_ly3() -> f64`.
+  - _Design points._
+    - (a) `placement::resolve`'s `Catalogue(_)` arm is unchanged and still answers
+      `KindNotGenerated`, which a test pins. The class grid's resolve is its own. Wiring the arm now
+      would turn every `111` answer into `NoSuchSystem` with no class to resolve, and a resolved
+      entry needs a `SystemRecord` whose `SystemOrigin::CatalogueSystem` does not exist yet, which
+      means deciding what a catalogue system is in every match on `SystemOrigin`. That is P09.T33.a's:
+      it registers the first class, wires the dispatch, adds the origin variant and says what the
+      record's stars and motion are.
+    - (b) Associated types with static dispatch, no `dyn`. An entry's type differs by class
+      (T33.a's carries `SystemStars`, T34.a's an `IaProgenitor` and a survivor), and T32 has no
+      common entry type to put behind an object-safe trait: the record with a catalogue origin is
+      T33.a's. A dispatch on `ClassId` is one `match` in a `ClassLookup` that hands the class's
+      process to a generic `ClassVisitor`, as `count_tag` matches on `FeatureProcess`; `resolve`
+      hands its `CatalogueMember` to a second generic visitor, `MemberVisitor`, so the caller
+      decides what a member becomes (T33.a's a `SystemRecord`). T37's merge and plan 12's walk
+      visit each class in turn and turn entries into records there; if T37's merge needs a common
+      entry type, T37 introduces it (the desktop, 2026-10-27). The bound, the candidate and the
+      test are separate methods, as P11.T8 expects.
+    - (c) One `Cell` tag, `class.cell`, for every class's count: design note 23 gives each feature
+      process a tag because processes share a feature cell, but class cells share nothing and the
+      word carries the class. Each class adds its candidates' `System` tags under `class.` in its
+      own task.
+    - (d) `ids.rs` holds `CatalogueCellKey` (moved from `mod.rs`; its path and doctest kept), the
+      canonical check `CatalogueCellKey::of` and the conversions between a key and its IDs.
+      `BuildCatalogueCellKeyError` gains two variants rather than a second error type, since
+      `of` builds a key; nothing outside the module named it.
+    - (e) Two toy processes in `grid/tests.rs`, not physics: `CORE_COLLAPSE` at 512 ly (12
+      candidates expected per cell, entries of two members, as T34.a's survivor) and
+      `STELLAR_MERGER` at 4,096 ly (40, one member). A candidate draws its position uniformly in
+      the cell, is accepted with probability its x fraction across the cell, and is kept by the
+      test if it moves upwards (v_z > 0), so a cell's entries are Poisson of mean `mean` ÷ 4,
+      checked by hand; every toy draw is on `selftest.stream`. The golden adds two more, at means
+      of 0.7 (`XRAY_BINARY`) and 0 (`ACCRETING_WHITE_DWARF`).
+  - _The lookup._ `cells_in_sphere` yields every cell of the class whose closed box meets the
+    sphere of `sphere.radius()` + `LIFETIME_REACH` about its centre, clipped to the root cube, in
+    ascending x, then y, then z (the key's order). It reads the sphere's radius, not its
+    `padded_radius`, the grid layers' pad for drift: the reach is the class's pad (a test). The gap
+    test is plan 03's walk's, whole light-years and the centre's fraction, written again here
+    because `query::Walk` is private and keyed by `Layer`; each column's run grows outwards from
+    its nearest cell. 4,096 ly ÷ 512 ly is eight rings of 512 ly cells and one of 4,096 ly cells,
+    which a test checks from a cell's middle. A 50 ly sphere visits 2,902 cells of 512 ly and 20 of
+    4,096 ly at (0, 26,000, 20) ly, and 2,890 and 20 at (1,234.4, 26,000.6, 17.2) ly, as a Minkowski
+    sum of the cell and the 4,146 ly sphere estimates (1 + 6r + 3πr² + 4πr³ ÷ 3 cells for r = R ÷
+    a: 2,892 and 21).
+  - _Headroom._ The count debug-asserts its draw against `CatalogueSystemId::INDEX_LIMIT` and
+    clamps it, as `candidate_count_from_bound` does. `check_class_headroom(class, largest_bound)`
+    asks the fullest cell's mean, the bound × the class's cell volume, plus eight standard
+    deviations to stay within 2²⁴, plan 03's eight (repeated as a private constant, since
+    `placement`'s is private): the largest mean that passes is (√(16 + 2²⁴) − 4)² = 16,744,480.
+    Each class's task finds its largest bound and calls it in its tests.
+  - _One velocity on every side (T17's deferred finding)._ Rule 6 of `ClassProcess`'s contract:
+    each kind of candidate takes its velocity from one function, a class candidate's drawn once
+    and carried into its test and its entry, the grid side's plan 08's `epoch_velocity`, naming
+    `DeathMarks::of`'s `velocity` argument; or a test shows that two routes give the same bits.
+    The toy carries a velocity drawn by one function (`Toy::velocity`) and its test reads it;
+    `the_velocity_has_one_route` checks that the cell, `resolve_entry` and that function see the
+    same bits.
+  - _Against the task text._ The trait has no cell-size method: the size is
+    `ClassId::cell_log2_ly()`, read wherever a key is built, so no second copy can disagree, and a
+    process for `TIDAL_DISRUPTION_VICTIM` has no `CatalogueCellKey`, so it generates and resolves
+    nothing. "A candidate draw under a cap" is `candidate(.., bound)`, the cell's bound handed to
+    the count and to every candidate. `members` is added, since P09.T34.a's survivor is member 1.
+    `CatalogueClassCell` is `CatalogueClassCell<E>`, generic in the class's entry type, the price of
+    static dispatch (point (b)); plan 11's Consumes names it without the parameter. `resolve`
+    takes a `MemberVisitor` beside the lookup, for the same reason. Its checks run in this order:
+    `CatalogueCellKey::of` (a free value, the unplaced class, a misaligned cell), the lookup's
+    process, the index against the count, the thinning, the test, the member. Every one answers
+    `NoSuchSystem`.
+  - _Registration._ A class registers by one arm in `ProductionClasses::visit_class`,
+    `ClassId::X => Some(visitor.visit(&XProcess::new(galaxy)))`, and not with
+    `CatalogueClassSource`, which is P09.T37's and wraps the lookup: P11.T8's "registers its
+    `ClassId` with plan 09's `CatalogueClassSource`" means that arm. At T32 the lookup has no arm,
+    and every `111` ID answers `NoSuchSystem` from the grid; `placement::resolve` keeps
+    `KindNotGenerated` for `111` (point (a)) until P09.T33.a points its arm at
+    `resolve(.., &ProductionClasses, ..)` and adds the record's origin.
+  - _Tests_ (`grid/tests.rs`, 26, each on seed `0x0932_0000_6772_6964`'s galaxy, shared through a
+    `OnceLock`; `ids.rs`, 7; the plan-09 tag test; eight doctests, on `ClassProcess`,
+    `CatalogueClassCell::generate`, `resolve_entry`, `ClassLookup` with a `ClassVisitor`,
+    `resolve`, `check_class_headroom`, `cells_in_sphere` and `CatalogueCellKey::of`):
+    - order independence: the cells forwards against backwards with every entry of the cell before
+      resolved and a stray ID of the other class asked between, bit for bit;
+      `assert_order_independent` over the cells and over 16 resolves per cell; the same seed on a
+      fresh galaxy twice, and another seed's counts differ;
+    - the toys' counts and entries over 576 cells each, Poisson of mean `mean` and `mean` ÷ 4 at α
+      = 10⁻³;
+    - resolution: every entry and member resolves to itself bit for bit, and through the toys'
+      lookup; each `NoSuchSystem` case in a test of its own (a free class value, the
+      tidal-disruption victims with a toy registered for them, a class with no process, a
+      misaligned cell, an index at the count and at 2²⁴ − 1, a thinned candidate, one failing the
+      test, a missing member);
+    - one velocity: the cell's, `resolve_entry`'s and `Toy::velocity`'s bits agree, and the test
+      kept only upward movers;
+    - canonical IDs: aligned, member 0, round-trips through `SystemId::from_raw`, `cell_word` the
+      key's word, entries in index order below the count; every low cell bit of a 4,096 ly entry
+      names nothing while its aligned twin resolves;
+    - headroom: the clamp, a debug assertion past 2²⁴ (`should_panic`), a cell of another class
+      refused (`should_panic`), the check passes the toys and refuses a mean at 2²⁴, either side of
+      16,744,480, and a NaN, infinite or negative bound; `NotPlaced` for the victims;
+    - the lookup against a brute-force scan and against a plain float distance, over 47 centres
+      (the Sun-like point, the origin, the root cube's faces and corners, 3,000 ly outside a face,
+      40 sampled) at radii of 0.001–2,000 ly, at 512 and 4,096 ly, ascending; eight rings and one;
+      the sphere's pad not read; the 50 ly counts pinned;
+    - the production lookup: no class visited, and 2,000 sampled `111` IDs of every class value
+      answer `NoSuchSystem`, while `placement::resolve` still answers `KindNotGenerated`;
+    - `ids.rs`: `of` inverts `candidate_id` over 1,800 sampled IDs and refuses each non-canonical
+      kind with its own variant; the cell field's figures; the index and member limits.
+  - _Goldens._ golden_diff against `origin/rendering-and-planets` (`ae64fa92`): `rng/tags.golden`
+    extended only (+1 −0, `class.cell (Cell) = 0xd675c50fb0714e5f`), no changed value;
+    `catalogue_classes/grid.golden` new, at header 23, pinning four toys' cells (the key words,
+    the counts on `class.cell`, the entries' IDs; means of 12, 40, 0.7 and 0, so that the Poisson
+    draw's two-word, one-word and no-word paths are all pinned) and the 50 ly lookup's 20 cells
+    of 4,096 ly and the count, first and last three of its 2,902 of 512 ly; no other golden;
+    `GENERATOR_VERSION` 23 → 23.
+  - _Not here (P09.T33–T38's)._ Every class's process, list and tags (T33–T36, T43, P11.T8);
+    `recent_death_claims` and `RECENT_DEATH_CLAIM` (T35); `CatalogueClassSource`,
+    `expected_hosts_in_sphere` and the merge (T37), T38, and T40's `CatalogueClassCellCache`; the
+    wiring of `placement::resolve` and `SystemOrigin::CatalogueSystem` (T33.a); plan 12's
+    source-horizon sweep, whose row the task that places the first production class adds
+    (T33.a).
+- **Deferred findings (2026-10-13 rule)**, from P09.T32:
+  - _Two copies of plan 03's code._ `cells_in_sphere`'s gap test repeats `query::walk`'s (private
+    and keyed by `Layer`), and `check_class_headroom` repeats `placement::headroom`'s private eight
+    sigmas and its fit test, since `query/` and `placement/` were out of scope. Each copy has its
+    own tests; a later task in those modules could give both a `pub(crate)` home (Rust review).
+  - _The 50 ly query's cells._ A 50 ly sphere visits 2,902 cells of each 512 ly class and 20 of
+    each 4,096 ly class, so with the five 512 ly classes and the three 4,096 ly ones registered a
+    cold 50 ly query evaluates some 14,600 class bounds and counts. P09.T37's 5 ms budget leaves
+    about 0.34 µs a cell, so T37 or T40's `CatalogueClassCellCache` will need the cache warm or a
+    cheaper bound for empty cells.
+  - _A contract check for every class._ Each class's task re-proves the same three properties on
+    its own process: order independence, every entry resolving to its cell's bits, and the same
+    seed twice. A `pub(crate)` test helper generic over `ClassProcess`, run over a list of keys,
+    would let T33.a, T34.a, T43 and P11.T8 call one check (determinism review).
+  - _A checked member count._ `members` returns a bare `u8` that the grid debug-asserts to 1–16
+    and clamps; a `MemberCount` newtype with a checked constructor would carry the proof, and is
+    cheapest before any class implements the trait (Rust review).
+  - _No shared position draw for a class cell._ No helper draws a uniform position in a class cell
+    (plan 01's `GenCell::position_from_words` stops at 128 ly), so each class lays out its own site
+    draw; T33.a's is the first.
