@@ -389,7 +389,8 @@ function caseOf(cases: AtmosphereFixtureCases, name: AtmosphereFixtureCase): Ref
  * figure, a sphere of the case's ground radius with one slice and one band (`body` `null`), or its
  * spheroid with its gravity, on R05's `tableRadiusM` of it, (2a + c) ÷ 3, as the assembly puts a
  * server body's (`assemble.ts`'s `mediumTableRadiusM`); its curves the case's, light slot 0's, where
- * the medium has an absorber, and none where it has none.
+ * the medium has an absorber, and none where it has none; and its medium's sources, for its thick
+ * bake (R08.T14.c), where the case has them.
  *
  * @throws Error for a case named otherwise than `expected`, whose medium would be another's.
  */
@@ -400,12 +401,13 @@ export function builtOfCase(
   if (referenceCase.name !== expected) {
     throw new Error(`ATMOSPHERE TEST takes case ${expected}, not ${referenceCase.name}`);
   }
-  const { medium, figure, curves } = referenceCase;
+  const { medium, figure, curves, sources } = referenceCase;
   const slots = curves.length === 0 ? [] : [curves];
+  const withSources = sources === undefined ? {} : { sources };
   let built: BuiltAtmosphere;
   switch (figure.kind) {
     case "sphere":
-      built = { medium, bottomRadiusM: figure.radiusM, curves: slots, body: null };
+      built = { medium, bottomRadiusM: figure.radiusM, curves: slots, body: null, ...withSources };
       break;
     case "spheroid": {
       const { equatorialRadiusM, polarRadiusM } = figure.gravity.spheroid;
@@ -414,6 +416,7 @@ export function builtOfCase(
         bottomRadiusM: (2 * equatorialRadiusM + polarRadiusM) / 3,
         curves: slots,
         body: { figure: { equatorialRadiusM, polarRadiusM }, gravity: figure.gravity },
+        ...withSources,
       };
       break;
     }

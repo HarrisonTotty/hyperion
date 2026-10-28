@@ -17,13 +17,18 @@
 import { describe, expect, test } from "vitest";
 
 import { bakeMultipleScattering, prepareBake } from "./bake";
-import { lightOf, titanClassFixture, type ThickFixture, venusClassFixture } from "./bakeFixtures";
+import {
+  lightOf,
+  titanClassFixture,
+  type ThickFixture,
+  venusClassFixture,
+} from "../../../test/bakeFixtures";
 import {
   bakePolarisationCorrection,
   polarisationSources,
   preparePolarisation,
 } from "./polarisation";
-import { earthFixture, threeBarFixture } from "./polarisationFixtures";
+import { earthFixture, threeBarFixture } from "../../../test/polarisationFixtures";
 
 /** Each phase's runs: a few, since one takes seconds. */
 const RUNS = { iterations: 3, time: 0, warmup: false } as const;

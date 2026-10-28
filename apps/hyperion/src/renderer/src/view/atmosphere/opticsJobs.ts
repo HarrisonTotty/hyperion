@@ -23,6 +23,9 @@
  *   them, each of the column's absorber terms matched to the spec of its name, its bin curves under
  *   the lights asked formed here (`absorberCurvesBySun`, the lines' exponentials shared by the
  *   lights), the column's optics and the fits prepared once a request, and one table a band asked.
+ * - **A kept body's bake** (R08.T14.c): its request carries the medium's absorber specs and its
+ *   lights' spectra (`opticsMessages.ts`'s `KeptBakeLights`), which a kept input's assembly cannot
+ *   give, and its lights are formed from those as an assembled body's are.
  * - **The polarisation correction** (R08.T14.e; `thick/polarisation.ts`): its lights formed as the
  *   thick bake's, its own preparation (the column's optics at the render channels and the reference
  *   bin, the thick bake's layers, and the fits in the channels' three bins) once a request, and one
@@ -38,12 +41,7 @@
  * that cannot be loaded rejects, so that the worker raises its error and the pool replaces it.
  */
 
-import {
-  absorberCurvesBySun,
-  absorberCurvesFromSums,
-  absorberCurveSums,
-  type AbsorberSpec,
-} from "./absorbers";
+import { absorberCurvesFromSums, absorberCurveSums, type AbsorberSpec } from "./absorbers";
 import type { KDistributionTable } from "./absorbers/kDistribution";
 import {
   absorberSpecsOf,
@@ -61,7 +59,12 @@ import {
   transferablesOf,
 } from "./opticsMessages";
 import type { BakeSpectrum } from "./spectralColour";
-import { bakeMultipleScattering, prepareBake, type ThickBakeLight } from "./thick/bake";
+import {
+  bakeMultipleScattering,
+  prepareBake,
+  type ThickBakeLight,
+  thickBakeLights,
+} from "./thick/bake";
 import { bakePolarisationCorrection, preparePolarisation } from "./thick/polarisation";
 
 /** How many bodies' assemblies, or absorber specs, a worker keeps, by key, the latest asked. */
@@ -236,37 +239,20 @@ export class OpticsJobs {
   }
 
   /**
-   * A bake's lights (the module's remarks): each light asked, with the bin curves of the column's
-   * absorber terms, each the body's absorber spec of its name; throws for a column absorber the
-   * body does not have.
+   * A bake's lights (the module's remarks; `thick/bake.ts`'s `thickBakeLights`): each light asked,
+   * with the bin curves of the column's absorber terms, each the body's absorber spec of its name,
+   * the body's as assembled or, for a kept body, the request's `kept` ones; throws for a column
+   * absorber the body does not have.
    */
   #bakeLights(
     request: Extract<OpticsRequest, { kind: "thick-bake" | "polarisation-bake" }>,
     options: AssembleOptions,
   ): ReadonlyArray<ThickBakeLight> {
-    const { specs, spectra } = this.#heldAbsorbers(request, options);
-    const suns = spectraOf(spectra, request.slots);
-    const absorbers = request.column.terms.flatMap((term) => {
-      if (term.source.kind !== "absorber") {
-        return [];
-      }
-      const spec = specs.find((each) => each.name === term.name);
-      if (spec === undefined) {
-        throw new RangeError(`the body has no absorber ${term.name} for the bake's column`);
-      }
-      return [spec];
-    });
-    const curves = absorbers.map((spec) => absorberCurvesBySun(spec, suns));
-    return suns.map((spectrum, j): ThickBakeLight => ({
-      spectrum,
-      absorbers: curves.map((bySun) => {
-        const bins = bySun[j]?.bins;
-        if (bins === undefined) {
-          throw new RangeError(`an absorber has no curves for light ${j}`);
-        }
-        return bins;
-      }),
-    }));
+    const { specs, spectra } =
+      request.kept === undefined
+        ? this.#heldAbsorbers(request, options)
+        : { specs: request.kept.absorbers, spectra: request.kept.spectra };
+    return thickBakeLights(request.column, specs, spectraOf(spectra, request.slots));
   }
 
   /** The body kept under `key`, made the most recently asked. */

@@ -1,0 +1,522 @@
+{
+  "description": "R08.T14.c's recorded runs: R08.T13.c1's scalar case gate with each case's twin reading its thick bake in place of Psi_ms from the table's first sun cosine cell up, beside c1's (caseGate.json), against the same committed references; the bakes' half floats; R08.T6.c's Venus-class analytic table at its largest 1 / mean(escape); the control at four times Psi_ms's mu_s and the sky view's rows. Recorded, never gated. Written by thickRuns.test.ts; do not edit by hand.",
+  "format": 1,
+  "cases": {
+    "earth": {
+      "bake": {
+        "bands": 1,
+        "slots": 1,
+        "solves": 26,
+        "doubleForwardShare": 1.570249e-7,
+        "halfFloats": {
+          "e0PerMSr": [2.458785e-15, 0.000007505127],
+          "e1MostPerMSr": 0.000002279517,
+          "j0PerSr": [0.0007753372, 0.05563354],
+          "slopeMostPerSr": 0.06799316,
+          "j0BelowLeastNormal": 0,
+          "entries": 50688
+        }
+      },
+      "thick": {
+        "all": {
+          "comparisons": 360,
+          "passes": 245,
+          "misses": 47,
+          "refusals": 68,
+          "worstRatio": 2.920988,
+          "worstAt": "ground-s80-v85-a90/r",
+          "missed": ["ground-s30-v85-a180/b", "ground-s60-v60-a180/rb", "ground-s60-v75-a90/rg", "ground-s60-v75-a180/rgb", "ground-s60-v85-a90/rg", "ground-s60-v85-a180/rgb", "ground-s80-v60-a90/rg", "ground-s80-v60-a180/r", "ground-s80-v75-a90/rg", "ground-s80-v75-a180/rb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v60-a0/rg", "ground-s90-v60-a45/rg", "ground-s90-v75-a0/rgb", "ground-s90-v75-a45/rgb", "ground-s90-v75-a180/b", "ground-s90-v85-a0/rg", "ground-s90-v85-a45/rg", "ground-s90-v85-a135/g", "ground-s90-v85-a180/g", "aerial-10km/rg", "aerial-32km/rg"]
+        },
+        "images": [
+          ["ground-s0", 12, 12, 0, 0, 0.7277171, "ground-s0-v85-a0", "b"],
+          ["ground-s30", 60, 59, 1, 0, 1.012633, "ground-s30-v85-a180", "b"],
+          ["ground-s60", 60, 48, 12, 0, 1.734584, "ground-s60-v85-a90", "g"],
+          ["ground-s80", 63, 50, 13, 0, 2.920988, "ground-s80-v85-a90", "r"],
+          ["ground-s90", 63, 41, 17, 5, 2.000505, "ground-s90-v85-a0", "g"],
+          ["ground-s95", 63, 0, 0, 63, null, null, null],
+          ["disc-p0", 3, 3, 0, 0, 0.9919686, "disc-p0", "r"],
+          ["disc-p30", 3, 3, 0, 0, 0.9925392, "disc-p30", "r"],
+          ["disc-p60", 3, 3, 0, 0, 0.8650647, "disc-p60", "r"],
+          ["disc-p75", 3, 3, 0, 0, 0.8138616, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.6689821, "disc-p85", "r"],
+          ["limb", 15, 15, 0, 0, 0.4183249, "limb-10H", "r"],
+          ["aerial", 9, 5, 4, 0, 1.66161, "aerial-10km", "g"]
+        ]
+      },
+      "c1": {
+        "all": {
+          "comparisons": 360,
+          "passes": 183,
+          "misses": 109,
+          "refusals": 68,
+          "worstRatio": 3.684342,
+          "worstAt": "ground-s80-v85-a45/b",
+          "missed": ["ground-s30-v30-a135/rg", "ground-s30-v30-a180/rg", "ground-s30-v60-a135/r", "ground-s30-v60-a180/rg", "ground-s30-v75-a0/b", "ground-s30-v75-a135/r", "ground-s30-v75-a180/r", "ground-s30-v85-a0/gb", "ground-s30-v85-a45/gb", "ground-s30-v85-a90/b", "ground-s60-v30-a135/r", "ground-s60-v30-a180/r", "ground-s60-v60-a45/b", "ground-s60-v60-a90/b", "ground-s60-v75-a0/b", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/b", "ground-s60-v75-a135/b", "ground-s60-v75-a180/b", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/b", "ground-s60-v85-a180/gb", "ground-s80-v30-a0/b", "ground-s80-v30-a45/b", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/gb", "ground-s80-v60-a135/gb", "ground-s80-v60-a180/gb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/rg", "ground-s90-v75-a0/rgb", "ground-s90-v75-a45/rgb", "ground-s90-v75-a180/b", "ground-s90-v85-a0/rg", "ground-s90-v85-a45/rg", "ground-s90-v85-a135/g", "ground-s90-v85-a180/g", "disc-p0/b", "disc-p30/b", "aerial-1km/b", "aerial-10km/rgb", "aerial-32km/rgb"]
+        },
+        "images": [
+          ["ground-s0", 12, 12, 0, 0, 0.9540512, "ground-s0-v60-a0", "r"],
+          ["ground-s30", 60, 45, 15, 0, 2.023616, "ground-s30-v85-a0", "b"],
+          ["ground-s60", 60, 37, 23, 0, 2.855169, "ground-s60-v85-a45", "b"],
+          ["ground-s80", 63, 19, 44, 0, 3.684342, "ground-s80-v85-a45", "b"],
+          ["ground-s90", 63, 40, 18, 5, 2.286664, "ground-s90-v85-a0", "g"],
+          ["ground-s95", 63, 0, 0, 63, null, null, null],
+          ["disc-p0", 3, 2, 1, 0, 1.451998, "disc-p0", "b"],
+          ["disc-p30", 3, 2, 1, 0, 1.283026, "disc-p30", "b"],
+          ["disc-p60", 3, 3, 0, 0, 0.9556815, "disc-p60", "b"],
+          ["disc-p75", 3, 3, 0, 0, 0.6544189, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.5463642, "disc-p85", "b"],
+          ["limb", 15, 15, 0, 0, 0.3366288, "limb-1H", "r"],
+          ["aerial", 9, 2, 7, 0, 2.439795, "aerial-32km", "b"]
+        ]
+      },
+      "thickRatios": [
+        ["ground-s0", 0.9484987, "ground-s0-v85-a0/b", 1.001134, "ground-s0-v75-a0/g"],
+        ["ground-s30", 0.9281174, "ground-s30-v85-a180/b", 1.03246, "ground-s30-v85-a90/g"],
+        ["ground-s60", 0.8850565, "ground-s60-v85-a180/b", 1.120017, "ground-s60-v85-a90/g"],
+        ["ground-s80", 0.8462628, "ground-s80-v85-a180/r", 1.20111, "ground-s80-v85-a90/r"],
+        ["ground-s90", 0.7801049, "ground-s90-v85-a0/b", 1.030485, "ground-s90-v0-a0/g"],
+        ["ground-s95", 1.070565, "ground-s95-v85-a0/r", 4.92216, "ground-s95-v85-a180/r"],
+        ["disc-p0", 0.9384156, "disc-p0/r", 1.035401, "disc-p0/b"],
+        ["disc-p30", 0.9379753, "disc-p30/r", 1.024931, "disc-p30/b"],
+        ["disc-p60", 0.944436, "disc-p60/r", 1.005068, "disc-p60/b"],
+        ["disc-p75", 0.9448855, "disc-p75/r", 0.9809738, "disc-p75/b"],
+        ["disc-p85", 0.9535202, "disc-p85/r", 0.9896295, "disc-p85/b"],
+        ["limb", 0.9739058, "limb-3H/b", 1.029353, "limb-10H/r"],
+        ["aerial", 1.033704, "aerial-1km/r", 1.113978, "aerial-10km/g"]
+      ],
+      "c1Ratios": [
+        ["ground-s0", 0.933354, "ground-s0-v85-a0/b", 1.063879, "ground-s0-v60-a0/r"],
+        ["ground-s30", 0.858948, "ground-s30-v85-a0/b", 1.116021, "ground-s30-v60-a180/r"],
+        ["ground-s60", 0.7976714, "ground-s60-v85-a45/b", 1.105681, "ground-s60-v30-a180/r"],
+        ["ground-s80", 0.7427478, "ground-s80-v85-a45/b", 1.009816, "ground-s80-v0-a0/r"],
+        ["ground-s90", 0.7613785, "ground-s90-v85-a0/b", 1.030479, "ground-s90-v0-a0/g"],
+        ["ground-s95", 1.070564, "ground-s95-v85-a0/r", 4.92216, "ground-s95-v85-a180/r"],
+        ["disc-p0", 0.9413709, "disc-p0/r", 1.099124, "disc-p0/b"],
+        ["disc-p30", 0.94141, "disc-p30/r", 1.088599, "disc-p30/b"],
+        ["disc-p60", 0.952143, "disc-p60/r", 1.067598, "disc-p60/b"],
+        ["disc-p75", 0.9556829, "disc-p75/r", 1.033862, "disc-p75/b"],
+        ["disc-p85", 0.9727403, "disc-p85/r", 1.039082, "disc-p85/b"],
+        ["limb", 0.9755419, "limb-1H/r", 1.014994, "limb-10H/r"],
+        ["aerial", 0.8258446, "aerial-32km/b", 0.954551, "aerial-1km/r"]
+      ]
+    },
+    "earth-ozone-slab": {
+      "bake": {
+        "bands": 1,
+        "slots": 1,
+        "solves": 26,
+        "doubleForwardShare": 1.571714e-7,
+        "halfFloats": {
+          "e0PerMSr": [2.265346e-15, 0.000007505636],
+          "e1MostPerMSr": 0.000002279497,
+          "j0PerSr": [0.0007581711, 0.05563354],
+          "slopeMostPerSr": 0.06799316,
+          "j0BelowLeastNormal": 0,
+          "entries": 50688
+        }
+      },
+      "thick": {
+        "all": {
+          "comparisons": 360,
+          "passes": 248,
+          "misses": 44,
+          "refusals": 68,
+          "worstRatio": 2.976511,
+          "worstAt": "ground-s80-v85-a90/r",
+          "missed": ["ground-s60-v60-a180/b", "ground-s60-v75-a90/rg", "ground-s60-v75-a180/rb", "ground-s60-v85-a90/rg", "ground-s60-v85-a180/rgb", "ground-s80-v60-a90/rg", "ground-s80-v60-a180/r", "ground-s80-v75-a90/rg", "ground-s80-v75-a180/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v60-a0/rg", "ground-s90-v60-a45/rg", "ground-s90-v75-a0/rgb", "ground-s90-v75-a45/rgb", "ground-s90-v85-a0/rg", "ground-s90-v85-a45/rg", "ground-s90-v85-a180/rg", "aerial-10km/rg", "aerial-32km/rg"]
+        },
+        "images": [
+          ["ground-s0", 12, 12, 0, 0, 0.7835652, "ground-s0-v85-a0", "b"],
+          ["ground-s30", 60, 60, 0, 0, 0.9446185, "ground-s30-v85-a180", "b"],
+          ["ground-s60", 60, 50, 10, 0, 1.692153, "ground-s60-v85-a90", "g"],
+          ["ground-s80", 63, 49, 14, 0, 2.976511, "ground-s80-v85-a90", "r"],
+          ["ground-s90", 63, 42, 16, 5, 1.944884, "ground-s90-v85-a0", "g"],
+          ["ground-s95", 63, 0, 0, 63, null, null, null],
+          ["disc-p0", 3, 3, 0, 0, 0.9738832, "disc-p0", "r"],
+          ["disc-p30", 3, 3, 0, 0, 0.9779811, "disc-p30", "r"],
+          ["disc-p60", 3, 3, 0, 0, 0.9710564, "disc-p60", "r"],
+          ["disc-p75", 3, 3, 0, 0, 0.9766966, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.6096371, "disc-p85", "r"],
+          ["limb", 15, 15, 0, 0, 0.5454775, "limb-0.3H", "r"],
+          ["aerial", 9, 5, 4, 0, 1.568134, "aerial-32km", "g"]
+        ]
+      },
+      "c1": {
+        "all": {
+          "comparisons": 360,
+          "passes": 184,
+          "misses": 108,
+          "refusals": 68,
+          "worstRatio": 3.648849,
+          "worstAt": "ground-s80-v85-a45/b",
+          "missed": ["ground-s0-v85-a0/b", "ground-s30-v30-a135/r", "ground-s30-v30-a180/rg", "ground-s30-v60-a135/r", "ground-s30-v60-a180/r", "ground-s30-v75-a0/b", "ground-s30-v75-a45/b", "ground-s30-v85-a0/rgb", "ground-s30-v85-a45/b", "ground-s30-v85-a90/b", "ground-s30-v85-a135/b", "ground-s60-v30-a135/r", "ground-s60-v30-a180/r", "ground-s60-v60-a45/b", "ground-s60-v60-a135/b", "ground-s60-v60-a180/b", "ground-s60-v75-a0/gb", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/b", "ground-s60-v75-a135/b", "ground-s60-v75-a180/b", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/gb", "ground-s60-v85-a135/b", "ground-s60-v85-a180/gb", "ground-s80-v30-a0/b", "ground-s80-v30-a45/b", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/gb", "ground-s80-v60-a135/gb", "ground-s80-v60-a180/gb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/rg", "ground-s90-v75-a0/rgb", "ground-s90-v75-a45/rgb", "ground-s90-v85-a0/rg", "ground-s90-v85-a45/rg", "ground-s90-v85-a180/rg", "disc-p0/b", "disc-p30/b", "aerial-1km/b", "aerial-10km/rgb", "aerial-32km/rgb"]
+        },
+        "images": [
+          ["ground-s0", 12, 11, 1, 0, 1.003189, "ground-s0-v85-a0", "b"],
+          ["ground-s30", 60, 47, 13, 0, 1.922796, "ground-s30-v85-a0", "b"],
+          ["ground-s60", 60, 36, 24, 0, 2.793127, "ground-s60-v85-a45", "b"],
+          ["ground-s80", 63, 19, 44, 0, 3.648849, "ground-s80-v85-a45", "b"],
+          ["ground-s90", 63, 41, 17, 5, 2.232285, "ground-s90-v85-a0", "g"],
+          ["ground-s95", 63, 0, 0, 63, null, null, null],
+          ["disc-p0", 3, 2, 1, 0, 1.151953, "disc-p0", "b"],
+          ["disc-p30", 3, 2, 1, 0, 1.158615, "disc-p30", "b"],
+          ["disc-p60", 3, 3, 0, 0, 0.9155355, "disc-p60", "b"],
+          ["disc-p75", 3, 3, 0, 0, 0.8436487, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.6089406, "disc-p85", "b"],
+          ["limb", 15, 15, 0, 0, 0.3280726, "limb-0.3H", "g"],
+          ["aerial", 9, 2, 7, 0, 2.334601, "aerial-32km", "b"]
+        ]
+      },
+      "thickRatios": [
+        ["ground-s0", 0.9445965, "ground-s0-v85-a0/b", 0.9993623, "ground-s0-v60-a0/g"],
+        ["ground-s30", 0.9331655, "ground-s30-v85-a180/b", 1.027367, "ground-s30-v85-a90/g"],
+        ["ground-s60", 0.8859868, "ground-s60-v85-a180/b", 1.117578, "ground-s60-v85-a90/g"],
+        ["ground-s80", 0.8480367, "ground-s80-v85-a180/r", 1.205102, "ground-s80-v85-a90/r"],
+        ["ground-s90", 0.7884396, "ground-s90-v85-a0/b", 1.035624, "ground-s90-v0-a0/b"],
+        ["ground-s95", 1.064493, "ground-s95-v85-a0/r", 4.494739, "ground-s95-v85-a180/r"],
+        ["disc-p0", 0.9397451, "disc-p0/r", 1.018186, "disc-p0/b"],
+        ["disc-p30", 0.9390813, "disc-p30/r", 1.01857, "disc-p30/b"],
+        ["disc-p60", 0.9370941, "disc-p60/r", 1.003814, "disc-p60/b"],
+        ["disc-p75", 0.9337207, "disc-p75/r", 0.9928075, "disc-p75/b"],
+        ["disc-p85", 0.9573838, "disc-p85/r", 0.9945235, "disc-p85/b"],
+        ["limb", 0.9695087, "limb-10H/b", 1.038843, "limb-0.3H/r"],
+        ["aerial", 1.030733, "aerial-1km/r", 1.109377, "aerial-32km/g"]
+      ],
+      "c1Ratios": [
+        ["ground-s0", 0.9290675, "ground-s0-v85-a0/b", 1.060857, "ground-s0-v60-a0/r"],
+        ["ground-s30", 0.8656944, "ground-s30-v85-a0/b", 1.122769, "ground-s30-v60-a180/r"],
+        ["ground-s60", 0.8036547, "ground-s60-v85-a45/b", 1.104961, "ground-s60-v30-a180/r"],
+        ["ground-s80", 0.7457759, "ground-s80-v85-a45/b", 1.011448, "ground-s80-v0-a0/r"],
+        ["ground-s90", 0.7698631, "ground-s90-v85-a0/b", 1.035618, "ground-s90-v0-a0/b"],
+        ["ground-s95", 1.064492, "ground-s95-v85-a0/r", 4.494739, "ground-s95-v85-a180/r"],
+        ["disc-p0", 0.9424888, "disc-p0/r", 1.079662, "disc-p0/b"],
+        ["disc-p30", 0.9422061, "disc-p30/r", 1.080541, "disc-p30/b"],
+        ["disc-p60", 0.9439075, "disc-p60/r", 1.064633, "disc-p60/b"],
+        ["disc-p75", 0.9427494, "disc-p75/r", 1.044662, "disc-p75/b"],
+        ["disc-p85", 0.9737816, "disc-p85/r", 1.043447, "disc-p85/b"],
+        ["limb", 0.9773331, "limb-0.3H/g", 1.010974, "limb-10H/r"],
+        ["aerial", 0.833623, "aerial-32km/b", 0.9503877, "aerial-1km/r"]
+      ]
+    },
+    "mars": {
+      "bake": {
+        "bands": 1,
+        "slots": 1,
+        "solves": 15,
+        "doubleForwardShare": 0.1097201,
+        "halfFloats": {
+          "e0PerMSr": [9.764411e-15, 0.000007517593],
+          "e1MostPerMSr": 0.00000619838,
+          "j0PerSr": [0.001662254, 0.1688232],
+          "slopeMostPerSr": 1.807617,
+          "j0BelowLeastNormal": 0,
+          "entries": 50688
+        }
+      },
+      "thick": {
+        "all": {
+          "comparisons": 384,
+          "passes": 91,
+          "misses": 197,
+          "refusals": 96,
+          "worstRatio": 27.95086,
+          "worstAt": "ground-s80-v85-a90/b",
+          "missed": ["ground-s0-v30-a0/rgb", "ground-s30-v0-a0/rgb", "ground-s30-v30-a45/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a45/r", "ground-s30-v60-a90/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a90/rgb", "ground-s30-v85-a90/rgb", "ground-s60-v0-a0/r", "ground-s60-v30-a0/b", "ground-s60-v30-a90/rgb", "ground-s60-v30-a180/rg", "ground-s60-v60-a45/rgb", "ground-s60-v60-a90/rgb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/rgb", "ground-s60-v75-a135/rgb", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/gb", "ground-s60-v85-a180/rgb", "ground-s80-v0-a0/r", "ground-s80-v30-a90/rgb", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v0-a0/rg", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/rgb", "ground-s90-v30-a90/rg", "ground-s90-v60-a0/rgb", "ground-s90-v60-a90/rg", "ground-s90-v85-a45/rg", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "disc-p85/r", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rgb", "limb-10H/rgb", "aerial-10km/rgb", "aerial-32km/rgb", "aureole-s85-d3/rgb", "aureole-s85-d5/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb", "aureole-s60-d3/rgb", "aureole-s60-d5/rgb", "aureole-s60-d8/rgb", "aureole-s60-d12/rgb"]
+        },
+        "images": [
+          ["ground-s0", 12, 9, 3, 0, 1.561389, "ground-s0-v30-a0", "b"],
+          ["ground-s30", 60, 32, 28, 0, 7.084363, "ground-s30-v30-a180", "g"],
+          ["ground-s60", 72, 12, 60, 0, 12.94424, "ground-s60-v60-a90", "b"],
+          ["ground-s80", 63, 14, 49, 0, 27.95086, "ground-s80-v85-a90", "b"],
+          ["ground-s90", 63, 9, 17, 37, 5.890101, "ground-s90-v0-a0", "r"],
+          ["ground-s95", 63, 0, 6, 57, 4.163145, "ground-s95-v75-a0", "r"],
+          ["disc-p0", 3, 3, 0, 0, 0.2695999, "disc-p0", "r"],
+          ["disc-p30", 3, 2, 0, 1, 0.2320799, "disc-p30", "g"],
+          ["disc-p60", 3, 3, 0, 0, 0.4269601, "disc-p60", "b"],
+          ["disc-p75", 3, 3, 0, 0, 0.7058224, "disc-p75", "r"],
+          ["disc-p85", 3, 2, 1, 0, 1.235438, "disc-p85", "r"],
+          ["limb", 15, 0, 15, 0, 5.922012, "limb-3H", "b"],
+          ["aerial", 9, 2, 6, 1, 2.928621, "aerial-32km", "r"],
+          ["ground-s85", 12, 0, 12, 0, 6.416054, "aureole-s85-d8", "b"]
+        ]
+      },
+      "c1": {
+        "all": {
+          "comparisons": 384,
+          "passes": 75,
+          "misses": 213,
+          "refusals": 96,
+          "worstRatio": 7.478693,
+          "worstAt": "ground-s30-v60-a180/b",
+          "missed": ["ground-s0-v30-a0/rgb", "ground-s0-v60-a0/rgb", "ground-s0-v75-a0/b", "ground-s0-v85-a0/rg", "ground-s30-v0-a0/rgb", "ground-s30-v30-a45/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a90/rgb", "ground-s30-v60-a135/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a0/rgb", "ground-s30-v75-a45/rg", "ground-s30-v75-a90/b", "ground-s30-v75-a135/rgb", "ground-s30-v75-a180/rgb", "ground-s30-v85-a0/rgb", "ground-s30-v85-a45/rgb", "ground-s30-v85-a90/rgb", "ground-s30-v85-a135/rg", "ground-s30-v85-a180/rg", "ground-s60-v0-a0/rgb", "ground-s60-v30-a0/gb", "ground-s60-v30-a45/gb", "ground-s60-v30-a90/rgb", "ground-s60-v30-a135/rgb", "ground-s60-v30-a180/rgb", "ground-s60-v60-a45/rg", "ground-s60-v60-a90/gb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/rg", "ground-s60-v75-a135/b", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/rg", "ground-s60-v85-a180/rg", "ground-s80-v0-a0/rgb", "ground-s80-v30-a0/r", "ground-s80-v30-a45/rgb", "ground-s80-v30-a90/rgb", "ground-s80-v30-a135/rgb", "ground-s80-v30-a180/rgb", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a180/gb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s90-v0-a0/rg", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/rgb", "ground-s90-v30-a90/rg", "ground-s90-v60-a0/rgb", "ground-s90-v60-a90/rg", "ground-s90-v75-a45/rgb", "ground-s90-v85-a45/rgb", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "disc-p0/rgb", "disc-p30/gb", "disc-p60/rg", "disc-p85/rgb", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rg", "aerial-10km/rg", "aerial-32km/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb"]
+        },
+        "images": [
+          ["ground-s0", 12, 3, 9, 0, 4.02376, "ground-s0-v60-a0", "b"],
+          ["ground-s30", 60, 11, 49, 0, 7.478693, "ground-s30-v60-a180", "b"],
+          ["ground-s60", 72, 21, 51, 0, 5.219207, "ground-s60-v85-a45", "r"],
+          ["ground-s80", 63, 18, 45, 0, 5.506116, "ground-s80-v30-a180", "r"],
+          ["ground-s90", 63, 5, 21, 37, 5.891402, "ground-s90-v0-a0", "r"],
+          ["ground-s95", 63, 0, 6, 57, 4.163332, "ground-s95-v75-a0", "r"],
+          ["disc-p0", 3, 0, 3, 0, 1.478895, "disc-p0", "b"],
+          ["disc-p30", 3, 0, 2, 1, 1.458085, "disc-p30", "b"],
+          ["disc-p60", 3, 1, 2, 0, 1.093049, "disc-p60", "g"],
+          ["disc-p75", 3, 3, 0, 0, 0.3833156, "disc-p75", "b"],
+          ["disc-p85", 3, 0, 3, 0, 3.474662, "disc-p85", "r"],
+          ["limb", 15, 4, 11, 0, 3.537347, "limb-0.1H", "r"],
+          ["aerial", 9, 3, 5, 1, 2.301368, "aerial-32km", "r"],
+          ["ground-s85", 12, 6, 6, 0, 2.327671, "aureole-s85-d12", "r"]
+        ]
+      },
+      "thickRatios": [
+        ["ground-s0", 1.014329, "ground-s0-v85-a0/g", 1.110102, "ground-s0-v30-a0/b"],
+        ["ground-s30", 0.5289332, "ground-s30-v30-a180/g", 1.39364, "ground-s30-v30-a90/b"],
+        ["ground-s60", 0.2389864, "ground-s60-v75-a180/g", 2.18025, "ground-s60-v60-a90/b"],
+        ["ground-s80", 0.08258449, "ground-s80-v85-a180/r", 2.972761, "ground-s80-v85-a90/b"],
+        ["ground-s90", 0.4964834, "ground-s90-v85-a0/b", 1.612217, "ground-s90-v30-a180/r"],
+        ["ground-s95", 0.2988195, "ground-s95-v85-a45/b", 1.384831, "ground-s95-v30-a180/r"],
+        ["disc-p0", 1.010207, "disc-p0/b", 1.017223, "disc-p0/r"],
+        ["disc-p30", 1.013132, "disc-p30/r", 1.015186, "disc-p30/g"],
+        ["disc-p60", 1.014854, "disc-p60/g", 1.02994, "disc-p60/b"],
+        ["disc-p75", 1.026201, "disc-p75/b", 1.046427, "disc-p75/r"],
+        ["disc-p85", 1.040128, "disc-p85/g", 1.085323, "disc-p85/r"],
+        ["limb", 1.257466, "limb-0.1H/g", 1.816806, "limb-10H/b"],
+        ["aerial", 1.034563, "aerial-1km/g", 1.190562, "aerial-32km/r"],
+        ["ground-s85", 0.5497522, "aureole-s85-d8/b", 0.7052758, "aureole-s85-d3/r"]
+      ],
+      "c1Ratios": [
+        ["ground-s0", 0.835155, "ground-s0-v85-a0/r", 1.278516, "ground-s0-v60-a0/b"],
+        ["ground-s30", 0.713432, "ground-s30-v85-a0/r", 1.496981, "ground-s30-v60-a180/b"],
+        ["ground-s60", 0.6392493, "ground-s60-v85-a45/r", 1.504549, "ground-s60-v30-a180/b"],
+        ["ground-s80", 0.6692905, "ground-s80-v85-a45/b", 1.390816, "ground-s80-v30-a180/r"],
+        ["ground-s90", 0.5993486, "ground-s90-v85-a45/b", 1.612217, "ground-s90-v30-a180/r"],
+        ["ground-s95", 0.2986679, "ground-s95-v85-a45/b", 1.384831, "ground-s95-v30-a180/r"],
+        ["disc-p0", 0.8974889, "disc-p0/b", 0.9079923, "disc-p0/r"],
+        ["disc-p30", 0.8996643, "disc-p30/b", 0.9084366, "disc-p30/g"],
+        ["disc-p60", 0.9275532, "disc-p60/g", 0.9325373, "disc-p60/b"],
+        ["disc-p75", 0.9722158, "disc-p75/b", 0.9966034, "disc-p75/g"],
+        ["disc-p85", 1.163106, "disc-p85/b", 1.239971, "disc-p85/r"],
+        ["limb", 0.7669985, "limb-0.1H/r", 1.261253, "limb-10H/b"],
+        ["aerial", 0.8502525, "aerial-32km/r", 0.9846983, "aerial-1km/b"],
+        ["ground-s85", 0.9966035, "aureole-s85-d3/b", 1.164169, "aureole-s85-d12/r"]
+      ]
+    },
+    "saturn-oblate": {
+      "bake": {
+        "bands": 4,
+        "slots": 1,
+        "solves": 60,
+        "doubleForwardShare": 0,
+        "halfFloats": {
+          "e0PerMSr": [1.668588e-15, 0.000001302291],
+          "e1MostPerMSr": 7.968813e-9,
+          "j0PerSr": [0.002117157, 0.1012573],
+          "slopeMostPerSr": 0.003360748,
+          "j0BelowLeastNormal": 0,
+          "entries": 202752
+        }
+      },
+      "thick": {
+        "all": {
+          "comparisons": 474,
+          "passes": 330,
+          "misses": 122,
+          "refusals": 22,
+          "worstRatio": 38.83135,
+          "worstAt": "pole-s95-v30-a0/g",
+          "missed": ["equator-s0-v30-a0/b", "equator-s0-v30-a90/b", "equator-s0-v60-a0/b", "equator-s0-v60-a90/b", "equator-s0-v75-a0/b", "equator-s0-v75-a90/b", "equator-s0-v85-a0/b", "equator-s0-v85-a90/b", "equator-s30-v30-a0/b", "equator-s30-v60-a0/b", "equator-s30-v60-a90/b", "equator-s30-v75-a0/b", "equator-s30-v75-a90/b", "equator-s30-v85-a0/b", "equator-s30-v85-a90/b", "equator-s60-v75-a90/b", "equator-s60-v85-a90/b", "equator-s90-v60-a0/b", "equator-s90-v60-a90/b", "equator-s90-v75-a0/b", "equator-s90-v75-a90/b", "equator-s90-v85-a0/gb", "equator-s90-v85-a90/gb", "equator-s95-v0-a0/rgb", "equator-s95-v30-a0/rgb", "equator-s95-v30-a90/rgb", "equator-s95-v60-a0/rgb", "equator-s95-v60-a90/rgb", "equator-s95-v75-a0/rgb", "equator-s95-v75-a90/rgb", "equator-s95-v85-a0/rgb", "equator-s95-v85-a90/rgb", "lat60-s0-v30-a0/b", "lat60-s0-v30-a90/b", "lat60-s0-v60-a0/b", "lat60-s0-v60-a90/b", "lat60-s0-v75-a0/b", "lat60-s0-v75-a90/b", "lat60-s0-v85-a0/b", "lat60-s0-v85-a90/b", "lat60-s30-v60-a0/b", "lat60-s30-v60-a90/b", "lat60-s30-v75-a0/b", "lat60-s30-v75-a90/b", "lat60-s30-v85-a0/b", "lat60-s30-v85-a90/b", "lat60-s60-v75-a90/b", "lat60-s60-v85-a90/b", "lat60-s90-v75-a0/b", "lat60-s90-v75-a90/b", "lat60-s90-v85-a0/b", "lat60-s90-v85-a90/rb", "lat60-s95-v0-a0/rg", "lat60-s95-v30-a0/rgb", "lat60-s95-v30-a90/rg", "lat60-s95-v60-a0/rgb", "lat60-s95-v60-a90/rg", "lat60-s95-v75-a0/rgb", "lat60-s95-v75-a90/rg", "lat60-s95-v85-a0/rg", "lat60-s95-v85-a90/r", "pole-s0-v60-a0/b", "pole-s0-v75-a0/b", "pole-s0-v85-a0/b", "pole-s30-v30-a90/b", "pole-s30-v60-a0/b", "pole-s30-v60-a90/b", "pole-s30-v75-a0/b", "pole-s30-v75-a90/b", "pole-s30-v85-a0/b", "pole-s30-v85-a90/b", "pole-s60-v30-a90/b", "pole-s60-v85-a0/b", "pole-s60-v85-a90/b", "pole-s90-v75-a0/b", "pole-s90-v75-a90/b", "pole-s90-v85-a0/b", "pole-s90-v85-a90/b", "pole-s95-v0-a0/r", "pole-s95-v30-a0/rg", "pole-s95-v30-a90/r", "pole-s95-v60-a0/rg", "pole-s95-v60-a90/r", "pole-s95-v75-a0/rg", "pole-s95-v75-a90/r", "pole-s95-v85-a0/rg"]
+        },
+        "images": [
+          ["equator-s0", 24, 16, 8, 0, 1.356408, "equator-s0-v85-a0", "b"],
+          ["equator-s30", 24, 17, 7, 0, 1.21928, "equator-s30-v60-a0", "b"],
+          ["equator-s60", 24, 22, 2, 0, 1.028356, "equator-s60-v75-a90", "b"],
+          ["equator-s80", 27, 27, 0, 0, 0.6498977, "equator-s80-v30-a0", "b"],
+          ["equator-s90", 27, 19, 8, 0, 6.886997, "equator-s90-v85-a0", "b"],
+          ["equator-s95", 27, 0, 27, 0, 28.51872, "equator-s95-v0-a0", "b"],
+          ["lat60-s0", 24, 16, 8, 0, 1.318804, "lat60-s0-v75-a0", "b"],
+          ["lat60-s30", 24, 18, 6, 0, 1.17662, "lat60-s30-v75-a90", "b"],
+          ["lat60-s60", 24, 22, 2, 0, 1.051306, "lat60-s60-v75-a90", "b"],
+          ["lat60-s80", 27, 27, 0, 0, 0.7948614, "lat60-s80-v30-a90", "b"],
+          ["lat60-s90", 27, 22, 5, 0, 5.813742, "lat60-s90-v85-a90", "b"],
+          ["lat60-s95", 27, 0, 20, 7, 35.29986, "lat60-s95-v30-a0", "b"],
+          ["pole-s0", 12, 9, 3, 0, 1.247421, "pole-s0-v85-a0", "b"],
+          ["pole-s30", 24, 17, 7, 0, 1.114595, "pole-s30-v75-a0", "b"],
+          ["pole-s60", 24, 21, 3, 0, 1.112115, "pole-s60-v85-a90", "b"],
+          ["pole-s80", 27, 27, 0, 0, 0.7606873, "pole-s80-v85-a0", "b"],
+          ["pole-s90", 27, 23, 4, 0, 4.695918, "pole-s90-v85-a90", "b"],
+          ["pole-s95", 27, 0, 12, 15, 38.83135, "pole-s95-v30-a0", "g"],
+          ["limb-lat0", 9, 9, 0, 0, 0.7392766, "limb-lat0-0.3H", "r"],
+          ["limb-lat45", 9, 9, 0, 0, 0.6453597, "limb-lat45-1H", "r"],
+          ["limb-lat90", 9, 9, 0, 0, 0.5161796, "limb-lat90-0.3H", "r"]
+        ]
+      },
+      "c1": {
+        "all": {
+          "comparisons": 474,
+          "passes": 197,
+          "misses": 255,
+          "refusals": 22,
+          "worstRatio": 38.83135,
+          "worstAt": "pole-s95-v30-a0/g",
+          "missed": ["equator-s0-v30-a0/b", "equator-s0-v30-a90/b", "equator-s0-v60-a0/b", "equator-s0-v60-a90/b", "equator-s0-v75-a0/gb", "equator-s0-v75-a90/gb", "equator-s0-v85-a0/gb", "equator-s0-v85-a90/gb", "equator-s30-v0-a0/b", "equator-s30-v30-a0/b", "equator-s30-v60-a0/gb", "equator-s30-v60-a90/b", "equator-s30-v75-a0/gb", "equator-s30-v75-a90/gb", "equator-s30-v85-a0/gb", "equator-s30-v85-a90/gb", "equator-s60-v0-a0/b", "equator-s60-v30-a0/gb", "equator-s60-v30-a90/b", "equator-s60-v60-a0/rgb", "equator-s60-v75-a0/rgb", "equator-s60-v75-a90/gb", "equator-s60-v85-a0/rgb", "equator-s60-v85-a90/rgb", "equator-s80-v0-a0/gb", "equator-s80-v30-a0/gb", "equator-s80-v30-a90/gb", "equator-s80-v60-a0/rgb", "equator-s80-v60-a90/rgb", "equator-s80-v75-a0/rgb", "equator-s80-v75-a90/rgb", "equator-s80-v85-a0/rgb", "equator-s80-v85-a90/rgb", "equator-s90-v60-a0/b", "equator-s90-v60-a90/b", "equator-s90-v75-a0/b", "equator-s90-v75-a90/b", "equator-s90-v85-a0/gb", "equator-s90-v85-a90/rgb", "equator-s95-v0-a0/rgb", "equator-s95-v30-a0/rgb", "equator-s95-v30-a90/rgb", "equator-s95-v60-a0/rgb", "equator-s95-v60-a90/rgb", "equator-s95-v75-a0/rgb", "equator-s95-v75-a90/rgb", "equator-s95-v85-a0/rgb", "equator-s95-v85-a90/rgb", "lat60-s0-v30-a0/b", "lat60-s0-v30-a90/b", "lat60-s0-v60-a0/b", "lat60-s0-v60-a90/b", "lat60-s0-v75-a0/b", "lat60-s0-v75-a90/b", "lat60-s0-v85-a0/gb", "lat60-s0-v85-a90/b", "lat60-s30-v30-a90/b", "lat60-s30-v60-a0/b", "lat60-s30-v60-a90/b", "lat60-s30-v75-a0/gb", "lat60-s30-v75-a90/gb", "lat60-s30-v85-a0/gb", "lat60-s30-v85-a90/gb", "lat60-s60-v0-a0/b", "lat60-s60-v30-a0/b", "lat60-s60-v30-a90/b", "lat60-s60-v60-a90/gb", "lat60-s60-v75-a0/gb", "lat60-s60-v75-a90/rgb", "lat60-s60-v85-a0/gb", "lat60-s60-v85-a90/rgb", "lat60-s80-v0-a0/b", "lat60-s80-v30-a0/gb", "lat60-s80-v30-a90/gb", "lat60-s80-v60-a0/gb", "lat60-s80-v60-a90/rgb", "lat60-s80-v75-a0/rgb", "lat60-s80-v75-a90/rgb", "lat60-s80-v85-a0/rgb", "lat60-s80-v85-a90/rgb", "lat60-s90-v75-a0/b", "lat60-s90-v75-a90/b", "lat60-s90-v85-a0/gb", "lat60-s90-v85-a90/rgb", "lat60-s95-v0-a0/rg", "lat60-s95-v30-a0/rgb", "lat60-s95-v30-a90/rg", "lat60-s95-v60-a0/rgb", "lat60-s95-v60-a90/rg", "lat60-s95-v75-a0/rgb", "lat60-s95-v75-a90/rg", "lat60-s95-v85-a0/rg", "lat60-s95-v85-a90/r", "pole-s0-v60-a0/b", "pole-s0-v75-a0/b", "pole-s0-v85-a0/gb", "pole-s30-v30-a90/b", "pole-s30-v60-a0/b", "pole-s30-v60-a90/b", "pole-s30-v75-a0/b", "pole-s30-v75-a90/gb", "pole-s30-v85-a0/gb", "pole-s30-v85-a90/gb", "pole-s60-v0-a0/b", "pole-s60-v30-a0/b", "pole-s60-v30-a90/b", "pole-s60-v60-a90/gb", "pole-s60-v75-a0/gb", "pole-s60-v75-a90/rgb", "pole-s60-v85-a0/gb", "pole-s60-v85-a90/rgb", "pole-s80-v0-a0/gb", "pole-s80-v30-a0/gb", "pole-s80-v30-a90/gb", "pole-s80-v60-a0/gb", "pole-s80-v60-a90/rgb", "pole-s80-v75-a0/rgb", "pole-s80-v75-a90/rgb", "pole-s80-v85-a0/rgb", "pole-s80-v85-a90/rgb", "pole-s90-v75-a0/b", "pole-s90-v75-a90/b", "pole-s90-v85-a0/b", "pole-s90-v85-a90/b", "pole-s95-v0-a0/r", "pole-s95-v30-a0/rg", "pole-s95-v30-a90/r", "pole-s95-v60-a0/rg", "pole-s95-v60-a90/r", "pole-s95-v75-a0/rg", "pole-s95-v75-a90/r", "pole-s95-v85-a0/rg"]
+        },
+        "images": [
+          ["equator-s0", 24, 12, 12, 0, 3.426909, "equator-s0-v85-a0", "b"],
+          ["equator-s30", 24, 11, 13, 0, 3.786093, "equator-s30-v85-a0", "b"],
+          ["equator-s60", 24, 6, 18, 0, 4.909002, "equator-s60-v85-a0", "b"],
+          ["equator-s80", 27, 3, 24, 0, 7.452988, "equator-s80-v85-a0", "b"],
+          ["equator-s90", 27, 18, 9, 0, 6.958872, "equator-s90-v85-a90", "b"],
+          ["equator-s95", 27, 0, 27, 0, 28.51872, "equator-s95-v0-a0", "b"],
+          ["lat60-s0", 24, 15, 9, 0, 2.610378, "lat60-s0-v85-a0", "b"],
+          ["lat60-s30", 24, 13, 11, 0, 2.917139, "lat60-s30-v85-a90", "b"],
+          ["lat60-s60", 24, 9, 15, 0, 3.954962, "lat60-s60-v85-a90", "b"],
+          ["lat60-s80", 27, 5, 22, 0, 5.854287, "lat60-s80-v85-a90", "b"],
+          ["lat60-s90", 27, 20, 7, 0, 5.829063, "lat60-s90-v85-a0", "b"],
+          ["lat60-s95", 27, 0, 20, 7, 35.29986, "lat60-s95-v30-a0", "b"],
+          ["pole-s0", 12, 8, 4, 0, 2.356433, "pole-s0-v85-a0", "b"],
+          ["pole-s30", 24, 14, 10, 0, 2.586157, "pole-s30-v85-a90", "b"],
+          ["pole-s60", 24, 9, 15, 0, 3.723503, "pole-s60-v85-a90", "b"],
+          ["pole-s80", 27, 4, 23, 0, 5.366414, "pole-s80-v85-a90", "b"],
+          ["pole-s90", 27, 23, 4, 0, 4.825539, "pole-s90-v85-a0", "b"],
+          ["pole-s95", 27, 0, 12, 15, 38.83135, "pole-s95-v30-a0", "g"],
+          ["limb-lat0", 9, 9, 0, 0, 0.7869065, "limb-lat0-0.3H", "r"],
+          ["limb-lat45", 9, 9, 0, 0, 0.6808799, "limb-lat45-1H", "r"],
+          ["limb-lat90", 9, 9, 0, 0, 0.5518064, "limb-lat90-0.3H", "r"]
+        ]
+      },
+      "thickRatios": [
+        ["equator-s0", 0.9075561, "equator-s0-v85-a0/b", 0.9833347, "equator-s0-v30-a90/r"],
+        ["equator-s30", 0.9164586, "equator-s30-v60-a0/b", 0.9893817, "equator-s30-v60-a0/r"],
+        ["equator-s60", 0.9314792, "equator-s60-v75-a90/b", 0.9935366, "equator-s60-v0-a0/g"],
+        ["equator-s80", 0.9552853, "equator-s80-v30-a0/b", 1.015266, "equator-s80-v85-a0/g"],
+        ["equator-s90", 0.5346937, "equator-s90-v85-a0/b", 1.038076, "equator-s90-v0-a0/g"],
+        ["equator-s95", 1.216659, "equator-s95-v85-a90/r", 3.03621, "equator-s95-v0-a0/b"],
+        ["lat60-s0", 0.9091483, "lat60-s0-v75-a0/b", 0.9865993, "lat60-s0-v30-a0/r"],
+        ["lat60-s30", 0.9197189, "lat60-s30-v75-a90/b", 0.9950408, "lat60-s30-v75-a0/r"],
+        ["lat60-s60", 0.9286751, "lat60-s60-v75-a90/b", 0.9905002, "lat60-s60-v0-a0/r"],
+        ["lat60-s80", 0.944513, "lat60-s80-v30-a90/b", 1.01018, "lat60-s80-v0-a0/g"],
+        ["lat60-s90", 0.6002019, "lat60-s90-v85-a90/b", 1.019792, "lat60-s90-v0-a0/g"],
+        ["lat60-s95", 1.216036, "lat60-s95-v85-a0/r", 4.276127, "lat60-s95-v0-a0/b"],
+        ["pole-s0", 0.9133409, "pole-s0-v85-a0/b", 0.9866109, "pole-s0-v30-a0/r"],
+        ["pole-s30", 0.9230556, "pole-s30-v75-a0/b", 0.9977576, "pole-s30-v0-a0/r"],
+        ["pole-s60", 0.9250949, "pole-s60-v85-a90/b", 0.9928091, "pole-s60-v0-a0/g"],
+        ["pole-s80", 0.9479735, "pole-s80-v85-a0/b", 1.015513, "pole-s80-v75-a90/g"],
+        ["pole-s90", 0.6796654, "pole-s90-v85-a90/b", 1.043593, "pole-s90-v0-a0/b"],
+        ["pole-s95", 1.304771, "pole-s95-v85-a0/r", 6.769005, "pole-s95-v0-a0/b"],
+        ["limb-lat0", 0.9516258, "limb-lat0-0.3H/r", 1.008564, "limb-lat0-3H/b"],
+        ["limb-lat45", 0.956589, "limb-lat45-1H/r", 1.017537, "limb-lat45-0.3H/b"],
+        ["limb-lat90", 0.9654724, "limb-lat90-0.3H/r", 1.013418, "limb-lat90-3H/b"]
+      ],
+      "c1Ratios": [
+        ["equator-s0", 0.7664448, "equator-s0-v85-a0/b", 0.977808, "equator-s0-v30-a90/r"],
+        ["equator-s30", 0.745768, "equator-s30-v85-a0/b", 0.9779631, "equator-s30-v0-a0/r"],
+        ["equator-s60", 0.6716909, "equator-s60-v85-a0/b", 0.9648388, "equator-s60-v0-a0/r"],
+        ["equator-s80", 0.5111696, "equator-s80-v85-a0/b", 0.952177, "equator-s80-v0-a0/r"],
+        ["equator-s90", 0.5267676, "equator-s90-v85-a90/b", 1.038062, "equator-s90-v0-a0/g"],
+        ["equator-s95", 1.216657, "equator-s95-v85-a90/r", 3.03621, "equator-s95-v0-a0/b"],
+        ["lat60-s0", 0.8193655, "lat60-s0-v85-a0/b", 0.9824828, "lat60-s0-v30-a0/r"],
+        ["lat60-s30", 0.8022344, "lat60-s30-v85-a90/b", 0.9792518, "lat60-s30-v0-a0/r"],
+        ["lat60-s60", 0.7357554, "lat60-s60-v85-a90/b", 0.9703436, "lat60-s60-v0-a0/r"],
+        ["lat60-s80", 0.6047847, "lat60-s80-v85-a90/b", 0.9520413, "lat60-s80-v0-a0/r"],
+        ["lat60-s90", 0.6000059, "lat60-s90-v85-a90/b", 1.019783, "lat60-s90-v0-a0/g"],
+        ["lat60-s95", 1.216036, "lat60-s95-v85-a0/r", 4.276127, "lat60-s95-v0-a0/b"],
+        ["pole-s0", 0.8362973, "pole-s0-v85-a0/b", 0.9829361, "pole-s0-v30-a0/r"],
+        ["pole-s30", 0.8231499, "pole-s30-v85-a90/b", 0.9880919, "pole-s30-v0-a0/r"],
+        ["pole-s60", 0.7492084, "pole-s60-v85-a90/b", 0.9694984, "pole-s60-v0-a0/r"],
+        ["pole-s80", 0.6389819, "pole-s80-v85-a90/b", 0.9554706, "pole-s80-v0-a0/r"],
+        ["pole-s90", 0.6646335, "pole-s90-v85-a0/b", 1.043586, "pole-s90-v0-a0/b"],
+        ["pole-s95", 1.304771, "pole-s95-v85-a0/r", 6.769005, "pole-s95-v0-a0/b"],
+        ["limb-lat0", 0.9485092, "limb-lat0-0.3H/r", 1.007151, "limb-lat0-3H/b"],
+        ["limb-lat45", 0.9541997, "limb-lat45-1H/r", 1.016248, "limb-lat45-0.3H/b"],
+        ["limb-lat90", 0.9630893, "limb-lat90-0.3H/r", 1.012095, "limb-lat90-3H/b"]
+      ]
+    }
+  },
+  "venusClass": {
+    "everyTexel": {
+      "texel": [0, 4],
+      "channel": 2,
+      "heightM": 12878.88,
+      "muSun": -1,
+      "inverseMeanEscape": 596766300000,
+      "psiMsPerSr": 0,
+      "bakeMeanJ0PerSr": null
+    },
+    "sunAboveTheHorizontal": {
+      "texel": [16, 4],
+      "channel": 2,
+      "heightM": 12878.88,
+      "muSun": 0.03225806,
+      "inverseMeanEscape": 596766300000,
+      "psiMsPerSr": 3.180228e-17,
+      "bakeMeanJ0PerSr": 0.0006552396
+    },
+    "halfFloats": {
+      "e0PerMSr": [1.590273e-12, 0.0004069279],
+      "e1MostPerMSr": 0.0001183119,
+      "j0PerSr": [0.000012815, 0.340332],
+      "slopeMostPerSr": 0.9941406,
+      "j0BelowLeastNormal": 80,
+      "entries": 50688
+    }
+  },
+  "control": {
+    "earth": {
+      "twin": "c1's analytic twin, Psi_ms 128 x 32 (four times its mu_s), the sky view 192 x 432 (four times its rows)",
+      "fine": {
+        "all": {
+          "comparisons": 360,
+          "passes": 160,
+          "misses": 132,
+          "refusals": 68,
+          "worstRatio": 3.66375,
+          "worstAt": "ground-s80-v85-a45/b",
+          "missed": ["ground-s30-v30-a135/rg", "ground-s30-v30-a180/rg", "ground-s30-v60-a135/r", "ground-s30-v60-a180/rg", "ground-s30-v75-a0/b", "ground-s30-v75-a135/r", "ground-s30-v75-a180/r", "ground-s30-v85-a0/gb", "ground-s30-v85-a45/gb", "ground-s30-v85-a90/b", "ground-s60-v30-a135/r", "ground-s60-v30-a180/r", "ground-s60-v60-a45/b", "ground-s60-v60-a90/b", "ground-s60-v75-a0/b", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/b", "ground-s60-v75-a135/b", "ground-s60-v75-a180/b", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/b", "ground-s60-v85-a180/gb", "ground-s80-v30-a0/b", "ground-s80-v30-a45/b", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/gb", "ground-s80-v60-a135/gb", "ground-s80-v60-a180/gb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v30-a0/b", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/rgb", "ground-s90-v60-a90/rgb", "ground-s90-v60-a135/rgb", "ground-s90-v60-a180/rgb", "ground-s90-v75-a0/rgb", "ground-s90-v75-a45/rgb", "ground-s90-v75-a90/rgb", "ground-s90-v75-a135/rgb", "ground-s90-v75-a180/rgb", "ground-s90-v85-a0/rg", "ground-s90-v85-a45/rg", "ground-s90-v85-a90/rg", "ground-s90-v85-a135/rg", "ground-s90-v85-a180/rg", "disc-p0/b", "disc-p30/b", "aerial-1km/b", "aerial-10km/rgb", "aerial-32km/rgb"]
+        },
+        "images": [
+          ["ground-s0", 12, 12, 0, 0, 0.9443326, "ground-s0-v60-a0", "r"],
+          ["ground-s30", 60, 45, 15, 0, 2.020125, "ground-s30-v85-a0", "b"],
+          ["ground-s60", 60, 37, 23, 0, 2.849112, "ground-s60-v85-a45", "b"],
+          ["ground-s80", 63, 19, 44, 0, 3.66375, "ground-s80-v85-a45", "b"],
+          ["ground-s90", 63, 17, 41, 5, 2.974264, "ground-s90-v85-a45", "g"],
+          ["ground-s95", 63, 0, 0, 63, null, null, null],
+          ["disc-p0", 3, 2, 1, 0, 1.451998, "disc-p0", "b"],
+          ["disc-p30", 3, 2, 1, 0, 1.283215, "disc-p30", "b"],
+          ["disc-p60", 3, 3, 0, 0, 0.9584814, "disc-p60", "b"],
+          ["disc-p75", 3, 3, 0, 0, 0.6478978, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.5539498, "disc-p85", "b"],
+          ["limb", 15, 15, 0, 0, 0.3355875, "limb-1H", "r"],
+          ["aerial", 9, 2, 7, 0, 2.436488, "aerial-32km", "b"]
+        ]
+      },
+      "fineRatios": [
+        ["ground-s0", 0.933679, "ground-s0-v85-a0/b", 1.063229, "ground-s0-v60-a0/r"],
+        ["ground-s30", 0.8591912, "ground-s30-v85-a0/b", 1.115377, "ground-s30-v60-a180/r"],
+        ["ground-s60", 0.7981006, "ground-s60-v85-a45/b", 1.105299, "ground-s60-v30-a180/r"],
+        ["ground-s80", 0.7441856, "ground-s80-v85-a45/b", 1.010522, "ground-s80-v0-a0/r"],
+        ["ground-s90", 0.6756102, "ground-s90-v85-a180/b", 0.9732163, "ground-s90-v0-a0/g"],
+        ["ground-s95", 0.6399478, "ground-s95-v85-a90/b", 1.03438, "ground-s95-v85-a180/r"],
+        ["disc-p0", 0.9413709, "disc-p0/r", 1.099124, "disc-p0/b"],
+        ["disc-p30", 0.9414119, "disc-p30/r", 1.088612, "disc-p30/b"],
+        ["disc-p60", 0.9521783, "disc-p60/r", 1.067796, "disc-p60/b"],
+        ["disc-p75", 0.9561245, "disc-p75/r", 1.035426, "disc-p75/b"],
+        ["disc-p85", 0.9744886, "disc-p85/r", 1.039625, "disc-p85/b"],
+        ["limb", 0.9756176, "limb-1H/r", 1.015068, "limb-10H/r"],
+        ["aerial", 0.8260807, "aerial-32km/b", 0.9545916, "aerial-1km/r"]
+      ]
+    },
+    "sweep": [
+      {
+        "tau": 0.125,
+        "comparisons": 54,
+        "kernels": ["ground-s80-v75-a90", "ground-s80-v85-a90"],
+        "fine": ["ground-s80-v75-a90", "ground-s80-v85-a90"]
+      },
+      {
+        "tau": 0.25,
+        "comparisons": 54,
+        "kernels": ["ground-s30-v85-a0", "ground-s30-v85-a180", "ground-s60-v60-a180", "ground-s60-v75-a0", "ground-s60-v75-a90", "ground-s60-v75-a180", "ground-s60-v85-a0", "ground-s60-v85-a90", "ground-s60-v85-a180", "ground-s80-v30-a180", "ground-s80-v60-a0", "ground-s80-v60-a90", "ground-s80-v60-a180", "ground-s80-v75-a0", "ground-s80-v75-a90", "ground-s80-v75-a180", "ground-s80-v85-a0", "ground-s80-v85-a90", "ground-s80-v85-a180", "limb-1H", "aerial-32km"],
+        "fine": ["ground-s30-v85-a0", "ground-s30-v85-a180", "ground-s60-v60-a180", "ground-s60-v75-a0", "ground-s60-v75-a90", "ground-s60-v75-a180", "ground-s60-v85-a0", "ground-s60-v85-a90", "ground-s60-v85-a180", "ground-s80-v30-a180", "ground-s80-v60-a0", "ground-s80-v60-a90", "ground-s80-v60-a180", "ground-s80-v75-a0", "ground-s80-v75-a90", "ground-s80-v75-a180", "ground-s80-v85-a0", "ground-s80-v85-a90", "ground-s80-v85-a180", "limb-1H", "aerial-32km"]
+      }
+    ]
+  }
+}

@@ -10,6 +10,7 @@
 
 import {
   AERIAL_PERSPECTIVE_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
   COMPOSITE_MATERIAL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_FILL_KERNEL,
@@ -17,8 +18,13 @@ import {
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_KERNEL,
+  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
   RAY_MARCH_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_KERNEL,
+  RAY_MARCH_THICK_SPECIAL_KERNEL,
   SKY_VIEW_KERNEL,
+  SKY_VIEW_THICK_KERNEL,
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS, SMOOTH_MESH_MATERIAL } from "../bodies/draw";
@@ -136,6 +142,21 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ];
 
 /**
+ * R08.T14.c's per-frame atmosphere over the thick multiple-scattering table (`hillaire.ts`'s
+ * `withThickRead`): the sky view, the aerial perspective and both marches' footprints, each with
+ * its form specialised for one band and no layer edge. The smoke page compiles them in a part of
+ * their own (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ */
+export const ATMOSPHERE_THICK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  SKY_VIEW_THICK_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
+  RAY_MARCH_THICK_KERNEL,
+  RAY_MARCH_SLOTS_THICK_KERNEL,
+  RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
+
+/**
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
  * R10.T10.b's lit terrain, one material per vertex path, R10.T16.c's lit terrain as depth
  * alone for the symbology's pass, one per vertex path, R10.T11's wireframe terrain, one per
@@ -213,6 +234,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_TABLE_ENTRIES,
   ...POST_ENTRIES,
   ...ATMOSPHERE_VIEW_ENTRIES,
+  ...ATMOSPHERE_THICK_ENTRIES,
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,

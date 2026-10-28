@@ -39,7 +39,7 @@ import {
   titanClassColumn,
   titanClassFixture,
   venusClassFixture,
-} from "./bakeFixtures";
+} from "../../../test/bakeFixtures";
 import { doubleGaussQuadrature } from "./discreteOrdinates";
 import { type SpectralColumn, spectralOptics, type SpectralTerm } from "./spectralColumn";
 

@@ -16,9 +16,10 @@ import type { ViewBody, ViewScene } from "../../view/scene/model";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import { atmosphereFrameOf, atmosphereShownOf, ViewAtmosphereHandle } from "./viewAtmosphere";
 
-/** A builder that never lands: a kept scene's bodies are never built. */
+/** A builder that never lands: a kept scene's bodies are never built, nor baked. */
 const NEVER: AtmosphereBuilder = {
   build: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
+  bakeThick: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
   terminate: () => undefined,
 };
 

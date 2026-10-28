@@ -26,14 +26,30 @@
  * With every worker given up, every build fails. A job that throws is answered `failed` and fails
  * its build: a bug (`decision-r08-t10a-leans.md` item 6).
  *
- * The workers start at the first build, so a session that draws no disc loads none of the optics.
- * This module takes only types of `assemble.ts`, whose tables stay in the workers.
+ * **A thick bake** ({@link OpticsWorkerPool.bakeThick}; R08.T14.c) is one `thick-bake` job, every
+ * band asked in its one request, queued as a build's jobs are. Its failures are the bake's own,
+ * never a build's: a `thick-bake-failed` answer, a job that throws, and every worker given up each
+ * settle it `failed` with their message, which the atmosphere cache reads as
+ * `ATMOSPHERE: APPROXIMATE`, never as `ATMOSPHERE NOT AVAILABLE` (decision-r08-t10a-leans, UX
+ * review item 1). Its request transfers nothing, so a worker that fails with it is replaced and
+ * the bake asked again of the next free worker, as an assembly is.
+ *
+ * The workers start at the first build or bake, so a session that draws no disc loads none of the
+ * optics. This module takes only types of `assemble.ts` and of the thick bake's modules, whose
+ * tables stay in the workers.
  */
 
 import type { AbsorberCurve, AbsorberCurveSums } from "./absorbers";
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
-import { type OpticsReply, type OpticsRequest, transferablesOf } from "./opticsMessages";
+import {
+  type KeptBakeLights,
+  type OpticsReply,
+  type OpticsRequest,
+  transferablesOf,
+} from "./opticsMessages";
+import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import type { SpectralColumn } from "./thick/spectralColumn";
 
 /** The part of a `Worker` the pool uses, so that tests can stand in for one. */
 export interface OpticsWorkerLike {
@@ -101,11 +117,52 @@ export interface OpticsBuild {
   cancel(): void;
 }
 
+/**
+ * What a thick bake asks (plan R08, R08.T14.c): a `thick-bake` request's fields
+ * (`opticsMessages.ts`'s {@link OpticsRequest}), every band in one request.
+ */
+export interface ThickBakeAsk {
+  /**
+   * The body's input: a server body's as its build took it, whose absorber specs and light spectra
+   * the worker forms; a kept body's stands for no medium (its `kept` lights carry them).
+   */
+  readonly input: BodyAtmosphereInput;
+  /** The light slots to bake, indices of the input's lights or of `kept.spectra`. */
+  readonly slots: ReadonlyArray<number>;
+  /** The latitude bands to bake, indices of `thick/bake.ts`'s `thickBakeBands(body)`. */
+  readonly bands: ReadonlyArray<number>;
+  readonly column: SpectralColumn;
+  readonly body: ThickBakeBody;
+  /** A kept body's absorber specs and light spectra, in place of the input's. */
+  readonly kept?: KeptBakeLights;
+}
+
+/** How a thick bake ended. */
+export type ThickBakeOutcome =
+  /** One table a band asked, in their order, each with a slot a light asked, in theirs. */
+  | { readonly kind: "baked"; readonly tables: ReadonlyArray<MsSourceTable> }
+  /**
+   * The bake failed: its job's own failure, a job that threw, its worker lost or every worker given
+   * up, with the message for the console's log. The bake's failure alone, never the medium's.
+   */
+  | { readonly kind: "failed"; readonly message: string }
+  | { readonly kind: "cancelled" };
+
+/** A thick bake under way. */
+export interface ThickBake {
+  /** Settles once with how the bake ended; never rejects. */
+  readonly outcome: Promise<ThickBakeOutcome>;
+  /** Drops its job if not yet sent and ignores its answer if sent; settles it `cancelled`. */
+  cancel(): void;
+}
+
 /** What builds a body's medium and its curves for the atmosphere cache: the pool, or a test's. */
 export interface AtmosphereBuilder {
   /** Builds a body's assembly and its light slots' curves. */
   build(input: BodyAtmosphereInput): OpticsBuild;
-  /** Stops every worker; builds under way settle `cancelled`. */
+  /** Bakes a thick body's multiple-scattering tables (R08.T14.c), every band in one request. */
+  bakeThick(ask: ThickBakeAsk): ThickBake;
+  /** Stops every worker; builds and bakes under way settle `cancelled`. */
   terminate(): void;
 }
 
@@ -365,6 +422,35 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
     };
   }
 
+  /**
+   * Bakes a thick body's multiple-scattering tables (see the module's remarks): one `thick-bake`
+   * job asking every band and slot of `ask`.
+   *
+   * @throws Error once the pool is terminated.
+   */
+  bakeThick(ask: ThickBakeAsk): ThickBake {
+    if (this.#terminated) {
+      throw new Error("the optics-worker pool was terminated");
+    }
+    this.#start();
+    const job = this.#submit((id) => ({ kind: "thick-bake", id, ...ask }), []);
+    let cancelled = false;
+    const settled = job.outcome.then(
+      (outcome): ThickBakeOutcome => (cancelled ? CANCELLED : bakeOutcomeOf(outcome, ask)),
+      (error: unknown): ThickBakeOutcome => ({
+        kind: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return {
+      outcome: settled,
+      cancel: () => {
+        cancelled = true;
+        job.cancel();
+      },
+    };
+  }
+
   /** Stops every worker; every job settles `cancelled`, and the pool cannot be used afterwards. */
   terminate(): void {
     if (this.#terminated) {
@@ -564,6 +650,42 @@ function assemblyOf(
     return { kind: "failed", message: `an assembly was answered ${outcome.reply.kind}` };
   }
   return { kind: "assembled", assembled: outcome.reply.assembled };
+}
+
+/** A thick bake's job's outcome as the bake's (see the module's remarks). */
+function bakeOutcomeOf(outcome: JobOutcome, ask: ThickBakeAsk): ThickBakeOutcome {
+  let baked: ThickBakeOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "thick-baked") {
+        baked =
+          reply.tables.length === ask.bands.length
+            ? { kind: "baked", tables: reply.tables }
+            : {
+                kind: "failed",
+                message: `a thick bake of ${ask.bands.length} bands was answered with ${reply.tables.length} tables`,
+              };
+      } else if (reply.kind === "thick-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a thick bake was answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      // A bake's request transfers nothing, so the pool asks it again rather than losing it: held
+      // here for a request that would.
+      baked = { kind: "failed", message: "an optics worker failed with the thick bake's request" };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
 }
 
 /** A job's outcome other than an answer, as its build's. */

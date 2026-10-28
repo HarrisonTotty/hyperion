@@ -85,7 +85,9 @@ import {
   type AbsorberCurveSlots,
   IRRADIANCE_SIZE,
   kernelMedium,
+  MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
+  type TableSize,
 } from "../tables";
 import {
   aerialPerspectiveTwin,
@@ -116,6 +118,8 @@ import {
   twinView,
   type TwinView,
 } from "../tablesCpu";
+import type { MsSourceTable, ThickBakeBody } from "../thick/bake";
+import { packThickTable } from "../thick/read";
 import type { CaseFigure } from "./cases";
 import {
   geodeticPoint,
@@ -177,6 +181,19 @@ export interface TwinOptions {
   readonly marchSteps: TwinMarchSteps;
   /** The multiple scattering every read takes: as drawn by default. */
   readonly multipleScattering: TwinMultipleScattering;
+  /**
+   * The thick bake the reads take in place of Ψ_ms from the table's first sun cosine cell up (plan
+   * R08, R08.T14.c; `thick/read.ts`), one table a band of the twin's slicing, in its order, as a
+   * body's tables hold it once its bake lands: none by default. Taken with `drawn` multiple
+   * scattering only; the sky's irradiance reads Ψ_ms either way, as the kernels' does.
+   */
+  readonly thick: ReadonlyArray<MsSourceTable> | null;
+  /**
+   * The multiple-scattering table's size, its μ_s across and its height down: the kernels'
+   * `MULTI_SCATTERING_SIZE` by default; R08.T14.c's resolution control takes four times its μ_s
+   * (`decision-r08-t13c2-classes.md` §1).
+   */
+  readonly multiScatteringSize: TableSize;
 }
 
 /** The options a twin takes where its caller gives none. */
@@ -189,6 +206,8 @@ export const DEFAULT_TWIN_OPTIONS: TwinOptions = {
   transmittanceSteps: "split",
   marchSteps: "pieces",
   multipleScattering: "drawn",
+  thick: null,
+  multiScatteringSize: MULTI_SCATTERING_SIZE,
 };
 
 /**
@@ -479,6 +498,17 @@ function bodyOf(figure: TwinFigure, datum: SpheroidFigure, slicing: TwinSlicing)
 }
 
 /**
+ * The body a thick bake for a figure's twin is made on (plan R08, R08.T14.c): the twin's own body
+ * under `slicing`, its R_ref `tableRadiusM` of its datum, so that the bake's bands (`bake.ts`'s
+ * `thickBakeBands`) are the twin's bands, at their s and on their spheres, as {@link TwinOptions.thick}
+ * takes them.
+ */
+export function twinBakeBody(figure: TwinFigure, slicing: TwinSlicing = "body"): ThickBakeBody {
+  const datum = twinDatum(figure);
+  return { ...bodyOf(figure, datum, slicing), bottomRadiusM: tableRadiusM(datum) };
+}
+
+/**
  * The slices and bands of `drawn` on `body` under the options' steps (the module's remarks):
  * `oblatePlanetTwin`'s with the kernels' steps, or for a medium with layer edges under another
  * setting, one slice and one band built as `oblatePlanetTwin` builds them, the transmittance from
@@ -493,8 +523,13 @@ function tablesOf(
   settings: TwinOptions,
 ): OblatePlanetTwin {
   const kernels = settings.transmittanceSteps === "split" && settings.marchSteps === "pieces";
+  // The kernels' sizes, the multiple scattering's at the options' size (R08.T14.c's control).
+  const kernelSizes: OblateTwinSizes = {
+    ...OBLATE_KERNEL_SIZES,
+    multiScattering: { ...OBLATE_KERNEL_SIZES.multiScattering, size: settings.multiScatteringSize },
+  };
   if (kernels || !hasLayerEdges(drawn)) {
-    return oblatePlanetTwin(drawn, body, settings.curves, OBLATE_KERNEL_SIZES);
+    return oblatePlanetTwin(drawn, body, settings.curves, kernelSizes);
   }
   const { kappa, bandGravityRatio } = body.gravity.slicing;
   const [k] = kappa;
@@ -507,10 +542,10 @@ function tablesOf(
   const sizes: OblateTwinSizes =
     settings.marchSteps === "placed"
       ? {
-          ...OBLATE_KERNEL_SIZES,
-          multiScattering: { ...OBLATE_KERNEL_SIZES.multiScattering, placement: "placed" },
+          ...kernelSizes,
+          multiScattering: { ...kernelSizes.multiScattering, placement: "placed" },
         }
-      : OBLATE_KERNEL_SIZES;
+      : kernelSizes;
   const referenceRadiusM = tableRadiusM(body.figure);
   const slice = transmittanceTablesTwin(
     tablesMedium,
@@ -573,8 +608,19 @@ export function referenceTwin(
       oblate = asBuilt;
       break;
     case "zeroed":
+      if (settings.thick !== null) {
+        throw new RangeError("a twin with its multiple scattering zeroed takes no thick bake");
+      }
       oblate = withoutMultipleScattering(asBuilt);
       break;
+  }
+  if (settings.thick !== null) {
+    if (settings.thick.length !== oblate.bands.length) {
+      throw new RangeError(
+        `a thick bake of ${settings.thick.length} bands for a twin of ${oblate.bands.length}`,
+      );
+    }
+    oblate = { ...oblate, thick: packThickTable(settings.thick, drawn) };
   }
   const marched = oblate.medium;
   const [band] = oblate.bands;
@@ -588,6 +634,7 @@ export function referenceTwin(
     ...band.transmittance,
     multiScattering: first,
     ...(more.length > 0 ? { multiScatteringBySlot: band.multiScatteringBySlot } : {}),
+    ...(oblate.thick === undefined ? {} : { thick: oblate.thick }),
   };
   // The sky's irradiance at the ground: the table's ground row, which the ground reads alone.
   const groundRow = Array.from({ length: IRRADIANCE_SIZE.widthTexels }, (_, x) => [x, 0] as const);

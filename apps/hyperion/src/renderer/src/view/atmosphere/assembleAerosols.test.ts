@@ -19,6 +19,7 @@ import {
   withSurface,
 } from "../../test/atmosphereRecords";
 import { earthDetail } from "../../test/planetaryFixture";
+import { sourceMisses } from "../../test/sourceChecks";
 import {
   AEROSOL_TERM_WAVELENGTHS_NM,
   aerosolModeInRange,
@@ -197,6 +198,25 @@ const STRADDLING = layerAbsorber("O3", 1e22, 1_000, 1e-4);
 /** Liquid O2's reason, as its file states it (signoff-12.md, item 38(c)). */
 const O2_REASON =
   "liquid O2: its absorption is the gas's O2–O2 pair absorption at 203 K carried to the liquid's density; no measurement of the liquid's is read";
+
+describe("a mode's source (R08.T14.c)", () => {
+  // A water deck's Mie at the channels and 550 nm, twice, the assembly's and the sources': 11 s at
+  // load 3 (2026-10-27).
+  it(
+    "gives the deck's droplets their particles and σ_ext(550), at the channels to the bit",
+    { timeout: 60_000 },
+    () => {
+      const assembled = earthWith(modes(liquidDeck("H2O")));
+      if (assembled.medium === undefined) {
+        throw new Error("the Earth with a deck draws a medium");
+      }
+      const { sources } = assembled.drawn;
+      const aerosol = sources.at(-1);
+      expect([sources.length, aerosol?.kind]).toEqual([assembled.medium.terms.length, "aerosol"]);
+      expect(sourceMisses(assembled.medium, sources)).toEqual([]);
+    },
+  );
+});
 
 describe("liquid O₂'s colour (signoff-12.md, item 38(c))", () => {
   it("gives APPROXIMATE its own reason in a deck of τ 1", () => {

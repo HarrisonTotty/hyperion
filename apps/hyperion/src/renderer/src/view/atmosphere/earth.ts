@@ -55,6 +55,7 @@ import { type LevelSpheroid, referenceGravity } from "./oblate";
 import { type GasFractions, molecularTerm } from "./rayleigh";
 import { bakeSpectrumOf } from "./spectralColour";
 import type { AbsorberCurveSlots } from "./tables";
+import type { SpectralSource } from "./thick/spectralColumn";
 
 /**
  * Dry air's Rayleigh scattering coefficients at sea level, m⁻¹, at 680, 550 and 440 nm:
@@ -537,6 +538,12 @@ const EARTH_AEROSOL_TERM: MediumTerm = {
   phase: { kind: "cornette-shanks", asymmetry: AEROSOL_ASYMMETRY },
 };
 
+/** The rebuilt Earth's ozone term, {@link EARTH_OZONE} on its column. */
+const EARTH_OZONE_TERM: MediumTerm = absorberTerm(EARTH_OZONE, EARTH_COLUMN);
+
+/** T6.d's ozone slab's term, {@link EARTH_OZONE_SLAB} on the column. */
+const EARTH_OZONE_SLAB_TERM: MediumTerm = absorberTerm(EARTH_OZONE_SLAB, EARTH_COLUMN);
+
 /**
  * Earth's reference atmosphere, rebuilt (plan R08, R08.T6.d; its ozone measured since R08.T6.h):
  * R08.T3.c's molecular term of {@link EARTH_DRY_AIR} on {@link EARTH_COLUMN} (`rayleigh`, tabulated,
@@ -549,7 +556,7 @@ export const EARTH_REFERENCE: AtmosphereMedium = {
   name: "earth",
   topHeightM: EARTH_TOP_HEIGHT_M,
   groundAlbedo: [EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO],
-  terms: [EARTH_MOLECULAR_TERM, EARTH_AEROSOL_TERM, absorberTerm(EARTH_OZONE, EARTH_COLUMN)],
+  terms: [EARTH_MOLECULAR_TERM, EARTH_AEROSOL_TERM, EARTH_OZONE_TERM],
 };
 
 /**
@@ -560,8 +567,60 @@ export const EARTH_REFERENCE: AtmosphereMedium = {
 export const EARTH_SLAB_REFERENCE: AtmosphereMedium = {
   ...EARTH_REFERENCE,
   name: "earth (ozone slab)",
-  terms: [EARTH_MOLECULAR_TERM, EARTH_AEROSOL_TERM, absorberTerm(EARTH_OZONE_SLAB, EARTH_COLUMN)],
+  terms: [EARTH_MOLECULAR_TERM, EARTH_AEROSOL_TERM, EARTH_OZONE_SLAB_TERM],
 };
+
+/**
+ * The rebuilt Earth's molecular source: {@link EARTH_DRY_AIR}'s fractions and
+ * {@link EARTH_COLUMN}'s n_s, from which `molecularTerm` forms its term.
+ */
+const EARTH_MOLECULAR_SOURCE: SpectralSource = {
+  kind: "molecular",
+  fractions: EARTH_DRY_AIR,
+  numberDensityPerM3: EARTH_COLUMN.surfaceNumberDensityPerM3,
+};
+
+/**
+ * The rebuilt Earth's aerosol's source: its own channel optics and its Cornette–Shanks phase
+ * (`thick/spectralColumn.ts`'s `channelSource` of the term, written out here so that this module
+ * takes none of the bake's optics at run time; `keptSources.test.ts` holds them equal), since R05's
+ * aerosol has no particles (`decision-r08-t13c2-classes.md` §6).
+ */
+const EARTH_AEROSOL_SOURCE: SpectralSource = {
+  kind: "channels",
+  scattering: EARTH_AEROSOL_TERM.scattering,
+  absorption: EARTH_AEROSOL_TERM.absorption,
+  phase: EARTH_AEROSOL_TERM.phase,
+};
+
+/** An absorber term's source: its number density at relative density 1, as its term carries it. */
+function ozoneSource(term: MediumTerm): SpectralSource {
+  if (term.absorber?.kind !== "column") {
+    throw new Error(`Earth's ozone term ${term.name} is a column absorber`);
+  }
+  return {
+    kind: "absorber",
+    amount: { kind: "column", numberDensityPerM3: term.absorber.numberDensityPerM3 },
+  };
+}
+
+/**
+ * {@link EARTH_REFERENCE}'s sources, one a term in its order, for the thick bake's spectral column
+ * (plan R08, R08.T14.c; `thick/spectralColumn.ts`'s `spectralColumnOf`): the molecular term's
+ * gases and n_s, the aerosol's channel optics, and the ozone's amount.
+ */
+export const EARTH_REFERENCE_SOURCES: ReadonlyArray<SpectralSource> = [
+  EARTH_MOLECULAR_SOURCE,
+  EARTH_AEROSOL_SOURCE,
+  ozoneSource(EARTH_OZONE_TERM),
+];
+
+/** {@link EARTH_SLAB_REFERENCE}'s sources, as {@link EARTH_REFERENCE_SOURCES}' with its slab's amount. */
+export const EARTH_SLAB_REFERENCE_SOURCES: ReadonlyArray<SpectralSource> = [
+  EARTH_MOLECULAR_SOURCE,
+  EARTH_AEROSOL_SOURCE,
+  ozoneSource(EARTH_OZONE_SLAB_TERM),
+];
 
 /**
  * R06's solar colour, linear Rec. 709 at unit luminance: `hyperion_sim::sky::colour::solar_colour()`,

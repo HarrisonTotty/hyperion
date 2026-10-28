@@ -56,6 +56,13 @@ import {
   lobeIsDrawn,
 } from "./forwardLobe";
 import { forwardPeakEntry } from "./forwardPeak";
+import type { MsSourceTable } from "./thick/bake";
+import {
+  packThickTable,
+  type PackedThickTable,
+  THICK_TABLE_FORMAT,
+  thickTableBytes,
+} from "./thick/read";
 import type { SpheroidFigure } from "./hillaire";
 import { MARCH_EDGES_MAX, marchEdgesM } from "./marchSteps";
 import {
@@ -2219,6 +2226,11 @@ export class AtmosphereTables {
   #slotDepthsRefusal: SlotDepthsRefusal | null = { kind: "noAbsorber" };
   /** The last build's per-planet row (R08.T8.e, `decision-r08-t8-leans.md` §13, point 2). */
   #row: PerPlanetRow = EMPTY_ROW;
+  /**
+   * The thick multiple-scattering table the kernels read in place of Ψ_ms (R08.T14.c,
+   * {@link AtmosphereTables.setThickTables}), packed and uploaded, or `null`.
+   */
+  #thick: { readonly packed: PackedThickTable; texture: TextureHandle } | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -2265,7 +2277,13 @@ export class AtmosphereTables {
       this.#slotDepthsKernel = null;
       this.#armSlotDepthsKernel = null;
       this.#key = null;
+      // The thick table belongs to the medium, which the restore builds again: uploaded anew after it.
+      const thick = this.#thick?.packed ?? null;
+      this.#thick = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
+      if (thick !== null) {
+        this.#thick = { packed: thick, texture: this.#uploadThick(thick) };
+      }
     });
   }
 
@@ -2387,9 +2405,106 @@ export class AtmosphereTables {
     return this.#row;
   }
 
-  /** The bytes the tables allocate, B: the row's base, and the slot layers where they are made. */
+  /**
+   * The bytes the tables allocate, B: the row's base, the slot layers where they are made, and the
+   * thick table where it is held ({@link AtmosphereTables.thickBytes}).
+   */
   get rowBytes(): number {
-    return this.#row.baseBytes + (this.#slotDepthsRefusal === null ? this.#row.slotDepthBytes : 0);
+    return (
+      this.#row.baseBytes +
+      (this.#slotDepthsRefusal === null ? this.#row.slotDepthBytes : 0) +
+      this.thickBytes
+    );
+  }
+
+  /**
+   * The thick table's bytes as allocated, B (R08.T14.c; `thick/read.ts`'s `thickTableBytes`):
+   * 270,592 a band and light slot, the table's 270,336 and its info row; 0 without one.
+   */
+  get thickBytes(): number {
+    return this.#thick === null ? 0 : thickTableBytes(this.#thick.packed);
+  }
+
+  /**
+   * The thick multiple-scattering table, `rgba32uint`, one layer a band and light slot
+   * (`thick/read.ts`; plan R08, R08.T14.c), which the kernels read in place of Ψ_ms
+   * (`hillaire.ts`'s `withThickRead`), or `null`, and the body draws by Ψ_ms; a new handle after a
+   * restore.
+   */
+  get thickTable(): TextureHandle | null {
+    return this.#thick?.texture ?? null;
+  }
+
+  /** The thick table as packed, for its CPU twin (the smoke's), or `null` (R08.T14.c). */
+  get thickPacked(): PackedThickTable | null {
+    return this.#thick?.packed ?? null;
+  }
+
+  /**
+   * Gives the tables the body's thick bake to read in place of Ψ_ms (plan R08, R08.T14.c), packed
+   * against the medium as the kernels read it (`thick/read.ts`'s `packThickTable`), or takes it
+   * away (`null`). A rebuild for another medium takes it away too, since it belongs to the medium.
+   *
+   * @param bands - The bake's tables, one a latitude band of the tables' plan, in its order, each
+   *   at its band's s.
+   * @throws RangeError for bands that are not the plan's, as `packThickTable` refuses them, and the
+   *   tables keep what they held; `EngineUnavailable` while the engine has no device (a loss); or
+   *   Error once they are disposed.
+   */
+  setThickTables(bands: ReadonlyArray<MsSourceTable> | null): void {
+    if (this.#disposed) {
+      throw new Error(
+        "the atmosphere's tables were disposed: a caller holds them past their release",
+      );
+    }
+    if (bands === null) {
+      this.#releaseThick();
+      return;
+    }
+    const plan = this.#plan.bands;
+    if (
+      bands.length !== plan.length ||
+      bands.some(
+        (band, b) =>
+          Math.abs(band.band.gravityRatio - (plan[b]?.gravityRatio ?? Number.NaN)) >
+          1e-12 * Math.abs(band.band.gravityRatio),
+      )
+    ) {
+      throw new RangeError(
+        `a thick bake of ${bands.length} bands at s ${bands.map((band) => band.band.gravityRatio).join(", ")} is not the tables' ${plan.length} at ${plan.map((band) => band.gravityRatio).join(", ")}`,
+      );
+    }
+    const packed = packThickTable(bands, kernelMedium(this.#medium));
+    const texture = this.#uploadThick(packed);
+    this.#releaseThick();
+    this.#thick = { packed, texture };
+  }
+
+  /** Makes and fills a texture for a packed thick table. */
+  #uploadThick(packed: PackedThickTable): TextureHandle {
+    const texture = this.#engine.createTexture({
+      name: "atmosphere thick table",
+      size: [packed.widthTexels, packed.heightTexels, packed.layers],
+      dimension: "2d",
+      format: THICK_TABLE_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "atmosphere-tables",
+    });
+    this.#engine.writeTexture(
+      texture,
+      [0, 0, 0],
+      [packed.widthTexels, packed.heightTexels, packed.layers],
+      packed.texels,
+    );
+    return texture;
+  }
+
+  #releaseThick(): void {
+    if (this.#thick !== null) {
+      this.#engine.releaseTexture(this.#thick.texture);
+      this.#thick = null;
+    }
   }
 
   /** The slices and bands the tables are built in ({@link tablesPlanOf}). */
@@ -2529,6 +2644,8 @@ export class AtmosphereTables {
     this.#row = row;
     this.#key = null;
     this.#irradianceBuilt = false;
+    // A thick table belongs to the medium it was baked for (R08.T14.c).
+    this.#releaseThick();
     const engine = this.#engine;
     const r = this.#resources;
     engine.writeBuffer(r.terms, 0, terms);
@@ -2916,6 +3033,7 @@ export class AtmosphereTables {
     }
     this.#disposed = true;
     this.#offRestored();
+    this.#releaseThick();
     releaseResources(this.#engine, this.#resources);
   }
 

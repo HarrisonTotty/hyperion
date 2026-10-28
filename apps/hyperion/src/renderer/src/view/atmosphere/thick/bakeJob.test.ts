@@ -1,6 +1,7 @@
 /**
  * The thick bake as the optics worker answers it (plan R08, R08.T14.b): a `thick-bake` request
- * through `opticsJobs.ts`'s `OpticsJobs`, in process, on the generated Earth's toy line tables.
+ * through `opticsJobs.ts`'s `OpticsJobs`, in process, on the generated Earth's toy line tables; and
+ * a kept `TEST EARTH`'s, its lights carried by the request (R08.T14.c).
  */
 import { describe, expect, it } from "vitest";
 
@@ -10,11 +11,14 @@ import { earthDetail } from "../../../test/planetaryFixture";
 import { absorberCurvesBySun } from "../absorbers";
 import type { AssembledMedium } from "../assemble";
 import type { BodyAtmosphereInput } from "../atmosphereInput";
+import { EARTH_COLUMN } from "../earth";
 import { CHANNEL_WAVELENGTHS_NM, type MediumTerm } from "../medium";
 import { OpticsJobs } from "../opticsJobs";
-import type { OpticsRequest } from "../opticsMessages";
+import type { KeptBakeLights, OpticsRequest } from "../opticsMessages";
 import { molecularMixture } from "../rayleigh";
-import { bakeMultipleScattering, prepareBake, type ThickBakeBody } from "./bake";
+import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "../reference/cases";
+import { bakeMultipleScattering, prepareBake, THICK_BAKE_MODES, type ThickBakeBody } from "./bake";
+import { keptColumnOf, sphereBakeBody } from "./keptBake";
 import type { SpectralColumn } from "./spectralColumn";
 
 /** The generated Earth under the Sun, its water's and CO₂'s lines on the toy tables. */
@@ -90,6 +94,23 @@ function columnOf(
     },
     body: { ...drawn.body, bottomRadiusM: drawn.bottomRadiusM },
     absorber,
+  };
+}
+
+/**
+ * A kept `TEST EARTH`'s bake request: a kept input, which no assembly gives specs or spectra, its
+ * column by the case's sources, one band on the case's sphere, and its lights where given.
+ */
+function keptEarthRequest(kept?: KeptBakeLights): OpticsRequest {
+  return {
+    kind: "thick-bake",
+    id: 7,
+    input: { kind: "kept", atmosphere: { kind: "unset" } },
+    slots: [0],
+    bands: [0],
+    column: keptColumnOf(EARTH_CASE),
+    body: sphereBakeBody(EARTH_REFERENCE_RADIUS_M, EARTH_COLUMN.referenceGravityMS2),
+    ...(kept === undefined ? {} : { kept }),
   };
 }
 
@@ -171,6 +192,41 @@ describe("the optics worker's thick bake", () => {
       id: 5,
       bands: [0],
       message: expect.stringMatching(/absorber:not-on-the-body/u),
+    });
+  });
+
+  it(
+    "answers a kept TEST EARTH's bake from its request's own absorbers and spectra, finite, E⁰ at least 0",
+    // The job takes no grid of its own: the full grid, 1.3 s at load 2.4 (2026-10-27).
+    { timeout: 60_000 },
+    async () => {
+      const jobs = new OpticsJobs(toyLoader());
+      const request = keptEarthRequest(referenceCaseBakeLights(EARTH_CASE));
+      const { reply } = await jobs.answer(request);
+      if (reply.kind !== "thick-baked") {
+        throw new Error(`the kept bake was answered ${reply.kind}`);
+      }
+      const values = reply.tables[0]?.slots[0]?.values;
+      expect([reply.tables.length, reply.tables[0]?.slots.length]).toEqual([1, 1]);
+      expect(values?.every(Number.isFinite)).toBe(true);
+      let least = Number.POSITIVE_INFINITY;
+      for (const [i, value] of (values ?? []).entries()) {
+        // m = 0 of `[altitude][μ₀][μ_v][m][RGB]`, m = 0 and 1.
+        if (Math.floor(i / 3) % THICK_BAKE_MODES === 0) {
+          least = Math.min(least, value);
+        }
+      }
+      expect(least).toBeGreaterThanOrEqual(0);
+    },
+  );
+
+  it("answers a kept body's bake that carries no lights of its own as failed: a kept input has none", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    expect((await jobs.answer(keptEarthRequest())).reply).toEqual({
+      kind: "thick-bake-failed",
+      id: 7,
+      bands: [0],
+      message: expect.stringMatching(/light slot 0/u),
     });
   });
 

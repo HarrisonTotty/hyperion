@@ -8,9 +8,23 @@
 import { describe, expect, it } from "vitest";
 
 import { METRIC_FLOOR } from "../gate";
-import { BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM, densityAt, phaseAt } from "../medium";
+import {
+  BAKE_WAVELENGTHS_NM,
+  CHANNEL_WAVELENGTHS_NM,
+  densityAt,
+  phaseAt,
+  type PhaseFunction,
+  type PhaseMatrixElement,
+  type PhaseMatrixTable,
+  phaseTable,
+} from "../medium";
 import { bakeMultipleScattering, prepareBake, THICK_BAKE_GRID } from "./bake";
-import { lightOf, titanClassFixture, type ThickFixture, venusClassFixture } from "./bakeFixtures";
+import {
+  lightOf,
+  titanClassFixture,
+  type ThickFixture,
+  venusClassFixture,
+} from "../../../test/bakeFixtures";
 import { binConversion } from "./binConversion";
 import {
   bakePolarisationCorrection,
@@ -22,8 +36,8 @@ import {
   type PreparedPolarisation,
   preparePolarisation,
 } from "./polarisation";
-import { earthFixture, threeBarFixture } from "./polarisationFixtures";
-import type { SpectralColumn } from "./spectralColumn";
+import { earthFixture, threeBarFixture } from "../../../test/polarisationFixtures";
+import type { SpectralColumn, SpectralSource } from "./spectralColumn";
 
 /** A value computed on its first use, so that a describe block's setup runs inside its tests. */
 function once<T>(make: () => T): () => T {
@@ -163,6 +177,22 @@ function phaseOf(term: PolarisedTermOptics, cosTheta: number): number {
     case "none":
       value = 0;
       break;
+    case "moments": {
+      // The phase as its Legendre series, Σ (2l + 1) ÷ 4π χ_l P_l(cos Θ).
+      let p0 = 1;
+      let p1 = cosTheta;
+      value = 0;
+      for (const [l, chi] of term.phase.moments.entries()) {
+        const p = l === 0 ? p0 : p1;
+        value += ((2 * l + 1) / (4 * Math.PI)) * chi * p;
+        if (l > 0) {
+          const next = ((2 * l + 1) * cosTheta * p1 - l * p0) / (l + 1);
+          p0 = p1;
+          p1 = next;
+        }
+      }
+      break;
+    }
   }
   return value;
 }
@@ -686,6 +716,65 @@ describe("which worlds need it", () => {
     const earth = await earthFixture();
     const absorbers = earth.column.terms.filter((term) => term.source.kind === "absorber");
     expect(needsPolarisationCorrection({ ...earth.column, terms: absorbers })).toBe(false);
+  });
+
+  it("reads a channel source by its phase: Rayleigh's yes, a table's by its green b₁, Cornette–Shanks's and none's no", () => {
+    const scattering = [1e-5, 1e-5, 1e-5] as const;
+    const channels = (phase: PhaseFunction): SpectralSource => ({
+      kind: "channels",
+      scattering,
+      absorption: [0, 0, 0],
+      phase,
+    });
+    const u = Float64Array.of(0, 1);
+    const flat = Float64Array.of(1 / (4 * Math.PI), 1 / (4 * Math.PI));
+    const zeros = Float64Array.of(0, 0);
+    const element = (red: Float64Array, green: Float64Array): PhaseMatrixElement => [
+      red,
+      green,
+      zeros,
+    ];
+    const matrixWith = (b1: PhaseMatrixElement): PhaseMatrixTable => ({
+      a2: element(flat, flat),
+      a3: element(flat, flat),
+      a4: element(flat, flat),
+      b1,
+      b2: element(zeros, zeros),
+    });
+    const polarising = Float64Array.of(0, -0.01);
+    const table = (matrix?: PhaseMatrixTable): PhaseFunction => ({
+      kind: "tabulated",
+      table: phaseTable(u, [flat, flat, flat], matrix),
+    });
+    expect(
+      [
+        channels({ kind: "rayleigh", depolarisation: [0.03, 0.03, 0.03] }),
+        channels(table(matrixWith(element(zeros, polarising)))),
+        channels(table(matrixWith(element(polarising, zeros)))),
+        channels(table()),
+        channels({ kind: "cornette-shanks", asymmetry: 0.584 }),
+        channels({ kind: "none" }),
+      ].map((source) => needsPolarisationCorrection(columnOf(source))),
+    ).toEqual([true, true, false, false, false, false]);
+  });
+
+  it("takes a channel source's Cornette–Shanks phase, known by its moments, as a total depolariser", () => {
+    const prepared = preparePolarisation(
+      columnOf({
+        kind: "channels",
+        scattering: [1e-5, 2e-5, 3e-5],
+        absorption: [0, 0, 0],
+        phase: { kind: "cornette-shanks", asymmetry: 0.584 },
+      }),
+      [],
+    );
+    expect(
+      prepared.points.map((point) => [point.terms[0]?.phase.kind, point.terms[0]?.polarising]),
+    ).toEqual([
+      ["moments", false],
+      ["moments", false],
+      ["moments", false],
+    ]);
   });
 });
 

@@ -4,16 +4,18 @@
  * 14).
  *
  * @remarks
- * A light module: beside type imports it holds only {@link transferablesOf}, so that the render
- * thread's pool takes nothing of the optics' tables. Each request carries the body's input
+ * A light module: beside type imports it holds only {@link transferablesOf} and
+ * {@link keptBakeLightsOf}, so that the render thread's pool takes nothing of the optics' tables. Each request carries the body's input
  * whole, so that any worker can serve it from its own k-tables and its own assembly
  * (`opticsJobs.ts`); a join's request carries the shares' sums, transferred from the render
  * thread, which received them transferred.
  */
 
-import type { AbsorberCurve, AbsorberCurveSums, CurveShare } from "./absorbers";
+import type { AbsorberCurve, AbsorberCurveSums, AbsorberSpec, CurveShare } from "./absorbers";
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
+import type { AtmosphereMedium } from "./medium";
+import type { BakeSpectrum } from "./spectralColour";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import type { PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
@@ -35,7 +37,9 @@ import type { SpectralColumn } from "./thick/spectralColumn";
  *   (`thick/polarisation.ts`) of `column` on `body`, laid out as `thick-bake`'s and with its
  *   absorbers formed the same way, for any world with air, thin or thick.
  *
- * `slots` index the input's lights, which are its light slots in `lightsAt`'s order.
+ * `slots` index the input's lights, which are its light slots in `lightsAt`'s order. A kept
+ * body's bake (`input.kind === "kept"`, whose medium the scene built and no assembly gives specs or
+ * spectra) carries its own in `kept` ({@link KeptBakeLights}), which `slots` then index.
  */
 export type OpticsRequest =
   | { readonly kind: "assemble"; readonly id: number; readonly input: BodyAtmosphereInput }
@@ -61,6 +65,8 @@ export type OpticsRequest =
       readonly bands: ReadonlyArray<number>;
       readonly column: SpectralColumn;
       readonly body: ThickBakeBody;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
     }
   | {
       readonly kind: "polarisation-bake";
@@ -70,7 +76,41 @@ export type OpticsRequest =
       readonly bands: ReadonlyArray<number>;
       readonly column: SpectralColumn;
       readonly body: ThickBakeBody;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
     };
+
+/**
+ * A kept body's bake lights (plan R08, R08.T14.c): what an assembled body's input gives a bake and a
+ * kept body's cannot (`assemble.ts`'s `absorberSpecsOf` gives a kept input none), plain data that a
+ * structured clone carries.
+ */
+export interface KeptBakeLights {
+  /**
+   * The medium's absorber terms' specs (`medium.ts`'s `TermAbsorber.spec`), each matched to the
+   * column's absorber term of its name, as an assembled body's are.
+   */
+  readonly absorbers: ReadonlyArray<AbsorberSpec>;
+  /** The light slots' spectra in the bake bins, in `lightsAt`'s order, which `slots` index. */
+  readonly spectra: ReadonlyArray<BakeSpectrum>;
+}
+
+/**
+ * A kept medium's bake lights: its absorber terms' specs in their order, and the spectra of the
+ * lights it is drawn under (a kept scene's own suns; `reference/cases.ts`'s
+ * `referenceCaseBakeLights` gives a case's).
+ */
+export function keptBakeLightsOf(
+  medium: AtmosphereMedium,
+  spectra: ReadonlyArray<BakeSpectrum>,
+): KeptBakeLights {
+  return {
+    absorbers: medium.terms.flatMap((term) =>
+      term.absorber === undefined ? [] : [term.absorber.spec],
+    ),
+    spectra,
+  };
+}
 
 /**
  * What an optics worker answers, by its request's `id`.

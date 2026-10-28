@@ -74,13 +74,12 @@
  */
 
 import type { Rgb } from "../../photometry/toneCurve";
-import type { AbsorberBinCurves } from "../absorbers";
+import { type AbsorberBinCurves, absorberCurvesBySun, type AbsorberSpec } from "../absorbers";
 import { gaussLegendre } from "../irradianceQuadrature";
 import {
   ABSORBER_PRESSURE_REFERENCE_PA,
   BAKE_BIN_COUNT,
   BAKE_WAVELENGTHS_NM,
-  CHANNEL_WAVELENGTHS_NM,
   columnLengthM,
   densityAt,
   type TabulatedDensity,
@@ -106,6 +105,7 @@ import {
 } from "./expSum";
 import { type SphericalBeam, sphericalBeamPath } from "./sphericalBeam";
 import {
+  channelRuleAt,
   forwardDeltaShare,
   phaseMoments,
   type SpectralColumn,
@@ -303,6 +303,43 @@ export interface ThickBakeLight {
   readonly absorbers: ReadonlyArray<AbsorberBinCurves>;
 }
 
+/**
+ * A bake's lights from its column, its body's absorber specs and its lights' spectra: each of the
+ * column's absorber terms takes the spec of its name, and each light the bin curves of those specs
+ * under its spectrum (`absorbers.ts`'s `absorberCurvesBySun`, the lines' exponentials shared by
+ * the lights), as the optics worker forms them for a `thick-bake` or `polarisation-bake`.
+ *
+ * @param spectra - The lights' spectra, one a light, in the lights' order.
+ * @throws RangeError for a column absorber term whose name no spec has, or as the curves refuse.
+ */
+export function thickBakeLights(
+  column: SpectralColumn,
+  absorbers: ReadonlyArray<AbsorberSpec>,
+  spectra: ReadonlyArray<BakeSpectrum>,
+): ReadonlyArray<ThickBakeLight> {
+  const specs = column.terms.flatMap((term) => {
+    if (term.source.kind !== "absorber") {
+      return [];
+    }
+    const spec = absorbers.find((each) => each.name === term.name);
+    if (spec === undefined) {
+      throw new RangeError(`the body has no absorber ${term.name} for the bake's column`);
+    }
+    return [spec];
+  });
+  const curves = specs.map((spec) => absorberCurvesBySun(spec, spectra));
+  return spectra.map((spectrum, j): ThickBakeLight => ({
+    spectrum,
+    absorbers: curves.map((bySun) => {
+      const bins = bySun[j]?.bins;
+      if (bins === undefined) {
+        throw new RangeError(`an absorber has no curves for light ${j}`);
+      }
+      return bins;
+    }),
+  }));
+}
+
 /** A term's optics in one bin, at relative density 1. */
 interface BinTermOptics {
   readonly scatteringPerM: number;
@@ -390,27 +427,14 @@ export interface PreparedBake {
   readonly lights: ReadonlyArray<PreparedLight>;
 }
 
-/** The ground's albedo at a wavelength from its channels' (the module's remarks). */
+/**
+ * The ground's albedo at a wavelength from its channels' (the module's remarks): the ground rule
+ * that a channel source's optics take too (`spectralColumn.ts`'s `channelRuleAt`), linear in
+ * wavelength between the channels' wavelengths, each channel's own at its wavelength, and held at
+ * the nearer channel outside them.
+ */
 export function binGroundAlbedo(albedo: Rgb, wavelengthNm: number): number {
-  const [red, green, blue] = CHANNEL_WAVELENGTHS_NM;
-  const points: Array<readonly [number, number]> = [
-    [red, albedo[0]],
-    [green, albedo[1]],
-    [blue, albedo[2]],
-  ];
-  points.sort((x, y) => x[0] - y[0]);
-  const [first, second, third] = points;
-  if (first === undefined || second === undefined || third === undefined) {
-    throw new Error("an albedo has three channels");
-  }
-  if (wavelengthNm <= first[0]) {
-    return first[1];
-  }
-  if (wavelengthNm >= third[0]) {
-    return third[1];
-  }
-  const [low, high] = wavelengthNm <= second[0] ? [first, second] : [second, third];
-  return low[1] + ((high[1] - low[1]) * (wavelengthNm - low[0])) / (high[0] - low[0]);
+  return channelRuleAt(albedo, wavelengthNm);
 }
 
 /** A term's extinction at relative density 1 in the bin the layers are placed by, m⁻¹. */

@@ -99,6 +99,7 @@ import rayMarchSlotsWgsl from "./shaders/rayMarchSlots.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
+import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   absorberCount,
@@ -115,6 +116,12 @@ import {
   TRANSMITTANCE_SIZE,
   withKernelArmFormat,
 } from "./tables";
+import {
+  THICK_ALTITUDES,
+  THICK_MODES,
+  THICK_SUN_COSINES,
+  THICK_TRAVEL_COSINES,
+} from "./thick/read";
 
 /** A 3D table's size, texels. */
 export interface VolumeSize {
@@ -175,7 +182,35 @@ export interface TableSizes {
    * setting's count.
    */
   readonly marchDepthSteps: MarchDepthSteps | null;
+  /**
+   * The thick multiple-scattering table's grid, a band and light slot (plan R08, Design note 9;
+   * R08.T14.c): the bake's, the same on both settings, since the bake costs CPU at arrival and not
+   * frame time (Design note 11).
+   */
+  readonly thick: ThickTableSize;
 }
+
+/**
+ * The thick table's grid (plan R08, Design note 9; R08.T14.c; `thick/read.ts`): its altitudes, sun
+ * cosines, travel cosines and azimuthal modes, the bake's `THICK_BAKE_GRID` and `THICK_BAKE_MODES`.
+ */
+export interface ThickTableSize {
+  readonly altitudes: number;
+  readonly sunCosines: number;
+  readonly travelCosines: number;
+  readonly modes: number;
+}
+
+/**
+ * The thick table's grid as built (R08.T14.c): 33 altitudes, 32 μ₀ and 16 μ_v, m = 0 and 1,
+ * 270,336 B a band and light slot as `rgba16float` (`thick/read.ts`'s `THICK_TABLE_BYTES_A_SLOT`).
+ */
+export const THICK_TABLE_SIZE: ThickTableSize = {
+  altitudes: THICK_ALTITUDES,
+  sunCosines: THICK_SUN_COSINES,
+  travelCosines: THICK_TRAVEL_COSINES,
+  modes: THICK_MODES,
+};
 
 /**
  * The band of camera heights over which the per-pixel ray march takes over from the sky-view table
@@ -306,6 +341,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
       thinSky: { samples: 28, depthG: 0.05 },
       drawnBandM: DRAWN_SURFACE_BAND_M,
     },
+    thick: THICK_TABLE_SIZE,
   },
   low: {
     transmittance: TRANSMITTANCE_SIZE,
@@ -321,6 +357,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     marchBand: { lowerShareOfTop: 0.2, upperShareOfTop: 0.3 },
     marchSourceCap: 2,
     marchDepthSteps: null,
+    thick: THICK_TABLE_SIZE,
   },
 };
 
@@ -954,6 +991,94 @@ export const RAY_MARCH_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_KERNEL);
 export const RAY_MARCH_SLOTS_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_SLOTS_KERNEL);
 
 /**
+ * The thick read's rewrites of a per-frame kernel's sources (plan R08, R08.T14.c): each source's
+ * multiple scattering taken by `thickRead.wgsl`'s `thickSourceAt` in place of `source.wgsl`'s
+ * `sourceAt`, and the forward lobes' higher orders at the analytic term's share. Each is one line;
+ * the second stands once in every kernel (`source.wgsl`'s `sourceInScatteringAt`), the third only
+ * in a march by slot (`rayMarchSlots.wgsl`), and the first in each of them.
+ */
+const THICK_READ: ReadonlyArray<{
+  readonly general: string;
+  readonly thick: string;
+  readonly least: number;
+  readonly most: number;
+}> = [
+  {
+    general: "phased += lobeOrdersOf(local, angle, light.depth);",
+    thick: "phased += thickAnalyticShare(muSun) * lobeOrdersOf(local, angle, light.depth);",
+    least: 1,
+    most: 2,
+  },
+  {
+    general: "return sourceAt(body, start, light, muSun, slot, local, phased);",
+    thick: "return thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);",
+    least: 1,
+    most: 1,
+  },
+  {
+    general: "let one = sourceAt(body, start, light, muSun, slot, local, phased);",
+    thick: "let one = thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);",
+    least: 0,
+    most: 1,
+  },
+];
+
+/**
+ * `pair`, a per-frame kernel (the sky view, the aerial perspective or a ray march), reading the
+ * thick multiple-scattering table (plan R08, R08.T14.c; Design note 9; `thick/read.ts`): its
+ * sources' multiple scattering is `thickRead.wgsl`'s, the bake's J_ms from the table's first sun
+ * cosine cell up and Hillaire's Ψ_ms below the horizon, blended across that cell, and the forward
+ * lobes' higher orders take Ψ_ms's share ({@link THICK_READ}). Every other line is the kernel's own,
+ * so that the thin kernel stays as it was to the byte and the thick one differs from it only there;
+ * the table binds at `thickTable` beside the kernel's own bindings.
+ *
+ * @throws Error naming the kernel when its sources hold a rewritten line more or fewer times than
+ *   {@link THICK_READ} allows, or still call `sourceAt` after them.
+ */
+export function withThickRead(pair: KernelPair): KernelPair {
+  const rewrite = (wgsl: string): string => {
+    const code = THICK_READ.reduce((text, { general, thick, least, most }) => {
+      const count = text.split(general).length - 1;
+      if (count < least || count > most) {
+        throw new Error(
+          `kernel ${pair.name} holds ${count} places for: ${general}, not ${least} to ${most}`,
+        );
+      }
+      return text.replaceAll(general, thick);
+    }, wgsl);
+    if (/[^\w]sourceAt\(/u.test(code.replaceAll("fn sourceAt(", ""))) {
+      throw new Error(`kernel ${pair.name} still calls sourceAt after the thick read's rewrites`);
+    }
+    return `${code}\n${thickReadWgsl}`;
+  };
+  return {
+    ...pair,
+    name: `${pair.name}, thick`,
+    reference: rewrite(pair.reference),
+    subgroup: pair.subgroup === null ? null : rewrite(pair.subgroup),
+  };
+}
+
+/** {@link SKY_VIEW_KERNEL} reading the thick table ({@link withThickRead}; R08.T14.c). */
+export const SKY_VIEW_THICK_KERNEL = withThickRead(SKY_VIEW_KERNEL);
+/** {@link AERIAL_PERSPECTIVE_KERNEL} reading the thick table (R08.T14.c). */
+export const AERIAL_PERSPECTIVE_THICK_KERNEL = withThickRead(AERIAL_PERSPECTIVE_KERNEL);
+/** {@link RAY_MARCH_KERNEL} reading the thick table (R08.T14.c). */
+export const RAY_MARCH_THICK_KERNEL = withThickRead(RAY_MARCH_KERNEL);
+/** {@link RAY_MARCH_SLOTS_KERNEL} reading the thick table (R08.T14.c). */
+export const RAY_MARCH_SLOTS_THICK_KERNEL = withThickRead(RAY_MARCH_SLOTS_KERNEL);
+/**
+ * {@link RAY_MARCH_THICK_KERNEL} specialised for one band and no layer edge, as
+ * {@link RAY_MARCH_SPECIAL_KERNEL} is ({@link withMarchSpecialised}; R08.T14.c): the thick read
+ * takes its bands' count through `oblateBandCount`, which the rewrite folds to 1.
+ */
+export const RAY_MARCH_THICK_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_THICK_KERNEL);
+/** {@link RAY_MARCH_SLOTS_THICK_KERNEL} specialised likewise (R08.T14.c). */
+export const RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL = withMarchSpecialised(
+  RAY_MARCH_SLOTS_THICK_KERNEL,
+);
+
+/**
  * Whether a body's tables take the specialised march ({@link withMarchSpecialised}; plan R08,
  * R08.T11.d): one slice and one band in their plan, and no layer edge in their medium's, from the
  * tables alone, never the body's class.
@@ -1124,6 +1249,115 @@ interface FrameKernels {
    * the first reader's ask (R08.T11.d).
    */
   readonly rayMarchFill: () => ComputeHandle;
+  /**
+   * The kernels that read the thick table ({@link withThickRead}; plan R08, R08.T14.c), for a body
+   * whose tables hold one ({@link AtmosphereTables.thickTable}): made at the first frame of such
+   * tables where they were not made ahead ({@link FrameKernelsAhead.thick}), so that a view of thin
+   * bodies alone compiles none of them.
+   */
+  readonly thick: () => ThickKernels;
+}
+
+/**
+ * A march's entry points over the thick table (R08.T14.c): the footprint's, and its form
+ * specialised for one band and no layer edge. A thick body's march takes no tile cull: under the
+ * `tiles` cover its area takes the footprint's every tile, which is exact as the cull is.
+ */
+interface ThickMarchKernels {
+  readonly footprint: ComputeHandle;
+  readonly special: () => ComputeHandle;
+}
+
+/** A frame's march kernels: the thin read's or the thick read's (R08.T14.c). */
+type FrameMarch =
+  | { readonly kind: "thin"; readonly kernels: MarchKernels }
+  | { readonly kind: "thick"; readonly kernels: ThickMarchKernels };
+
+/** The per-frame kernels over the thick table (R08.T14.c; {@link FrameKernels.thick}). */
+interface ThickKernels {
+  readonly skyView: ComputeHandle;
+  readonly aerial: ComputeHandle;
+  /** The march over the shared read ({@link RAY_MARCH_THICK_KERNEL}). */
+  readonly rayMarch: () => ThickMarchKernels;
+  /** The march by slot ({@link RAY_MARCH_SLOTS_THICK_KERNEL}). */
+  readonly rayMarchSlots: () => ThickMarchKernels;
+}
+
+/**
+ * The thick kernels made synchronously on `engine` at their first ask, each pair through `as`
+ * (the kernel arm's format, or as shipped), each march's at the first frame that takes it.
+ */
+function thickKernelsOf(
+  engine: RenderEngine,
+  as: (pair: KernelPair) => KernelPair,
+): () => ThickKernels {
+  let made: ThickKernels | null = null;
+  const marchOf = (footprint: KernelPair, specialPair: KernelPair): ThickMarchKernels => {
+    let special: ComputeHandle | null = null;
+    return {
+      footprint: engine.createCompute(as(footprint)),
+      special: () => (special ??= engine.createCompute(as(specialPair))),
+    };
+  };
+  return () =>
+    (made ??= (() => {
+      let shared: ThickMarchKernels | null = null;
+      let slots: ThickMarchKernels | null = null;
+      return {
+        skyView: engine.createCompute(as(SKY_VIEW_THICK_KERNEL)),
+        aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_THICK_KERNEL)),
+        rayMarch: () =>
+          (shared ??= marchOf(RAY_MARCH_THICK_KERNEL, RAY_MARCH_THICK_SPECIAL_KERNEL)),
+        rayMarchSlots: () =>
+          (slots ??= marchOf(RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL)),
+      };
+    })());
+}
+
+/**
+ * The thick kernels made up front by `createComputeAsync` (R08.T14.c; {@link FrameKernelsAhead.thick}):
+ * the sky view, the aerial perspective and each read's march with its specialised form, as `reads`
+ * asks; a read not asked is made at its first frame.
+ */
+async function thickKernelsAhead(
+  engine: RenderEngine,
+  reads: MarchReads,
+): Promise<() => ThickKernels> {
+  const marchOf = async (
+    made: boolean,
+    footprintPair: KernelPair,
+    specialPair: KernelPair,
+  ): Promise<() => ThickMarchKernels> => {
+    if (!made) {
+      let late: ThickMarchKernels | null = null;
+      return () =>
+        (late ??= (() => {
+          let special: ComputeHandle | null = null;
+          return {
+            footprint: engine.createCompute(footprintPair),
+            special: () => (special ??= engine.createCompute(specialPair)),
+          };
+        })());
+    }
+    const [footprint, special] = await Promise.all([
+      engine.createComputeAsync(footprintPair),
+      engine.createComputeAsync(specialPair),
+    ]);
+    const kernels: ThickMarchKernels = { footprint, special: () => special };
+    return () => kernels;
+  };
+  const [skyView, aerial, rayMarch, rayMarchSlots] = await Promise.all([
+    engine.createComputeAsync(SKY_VIEW_THICK_KERNEL),
+    engine.createComputeAsync(AERIAL_PERSPECTIVE_THICK_KERNEL),
+    marchOf(reads !== "by slot", RAY_MARCH_THICK_KERNEL, RAY_MARCH_THICK_SPECIAL_KERNEL),
+    marchOf(
+      reads !== "shared read",
+      RAY_MARCH_SLOTS_THICK_KERNEL,
+      RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+    ),
+  ]);
+  const kernels: ThickKernels = { skyView, aerial, rayMarch, rayMarchSlots };
+  return () => kernels;
 }
 
 /**
@@ -1172,6 +1406,12 @@ export interface FrameKernelsAhead {
    * `tiles` frame.
    */
   readonly tiles?: boolean;
+  /**
+   * Whether the kernels that read the thick table are made too (plan R08, R08.T14.c): for a caller
+   * that draws a body with one, as the smoke's frame timing with the thick read forced does. Not
+   * where absent; then made at the first frame of tables that hold one.
+   */
+  readonly thick?: boolean;
 }
 
 /**
@@ -1240,6 +1480,10 @@ export async function createAtmosphereFrameKernels(
     ),
     engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"], [triangle]),
   ]);
+  const thick =
+    ahead.thick === true
+      ? await thickKernelsAhead(engine, reads)
+      : thickKernelsOf(engine, (pair) => pair);
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
   let fill: ComputeHandle | null = null;
   return {
@@ -1248,6 +1492,7 @@ export async function createAtmosphereFrameKernels(
     rayMarch,
     rayMarchSlots,
     rayMarchFill: () => (fill ??= engine.createCompute(RAY_MARCH_FILL_KERNEL)),
+    thick,
     composite,
     triangle,
   };
@@ -1678,6 +1923,7 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
         RAY_MARCH_SLOTS_SPECIAL_KERNEL,
       )),
     rayMarchFill: () => (fill ??= engine.createCompute(as(RAY_MARCH_FILL_KERNEL))),
+    thick: thickKernelsOf(engine, as),
   };
 }
 
@@ -2286,6 +2532,9 @@ export class HillaireAtmosphere {
     const medium = tables.medium;
     const curvature = this.#fillView(view, suns, scene, inputs, medium);
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
+    // A body whose tables hold the thick table draws by the kernels that read it (R08.T14.c).
+    const thickTable = tables.thickTable;
+    const thick = thickTable === null ? null : kernels.thick();
     const common = {
       buffers: { terms: tables.terms },
       sampled: {
@@ -2299,6 +2548,7 @@ export class HillaireAtmosphere {
         absorberPressureColumns: tables.absorberPressureColumns,
         lastAbsorberPressureColumn: tables.lastAbsorberPressureColumn,
         oblateBody: tables.oblateBody,
+        ...(thickTable === null ? {} : { thickTable }),
       },
     };
     const viewUniforms = this.#viewBlock();
@@ -2307,7 +2557,7 @@ export class HillaireAtmosphere {
     const marchUniforms = this.#marchBlock(viewUniforms, suns, scene, medium);
     const skyView = (): void => {
       engine.dispatch(
-        kernels.skyView,
+        thick?.skyView ?? kernels.skyView,
         {
           ...common,
           uniforms: { medium: perFrameMedium, view: viewUniforms, layerEdges: tables.layerEdges },
@@ -2319,7 +2569,7 @@ export class HillaireAtmosphere {
     };
     const aerial = (): void => {
       engine.dispatch(
-        kernels.aerial,
+        thick?.aerial ?? kernels.aerial,
         {
           ...common,
           uniforms: { medium: perFrameMedium, view: viewUniforms },
@@ -2344,7 +2594,8 @@ export class HillaireAtmosphere {
     // no air. Under the tile cull the centre ray's entry point, first, classes every tile and takes
     // those no footprint can blend in, and the footprint's the rest; on the area and the whole
     // frame the footprint's takes every tile, as the one kernel did.
-    const tileCull = this.#cover === "tiles";
+    // A thick body's march takes no cull (R08.T14.c): its area's every tile, exact as the cull is.
+    const tileCull = this.#cover === "tiles" && thick === null;
     const shell = topShellOf(this.#figure, medium.topHeightM, this.#gravity);
     const area =
       this.#cover === "whole frame"
@@ -2356,7 +2607,17 @@ export class HillaireAtmosphere {
     // A body whose tables hold the slot layers marches by slot, each source's light one read of
     // its slot's layer (R08.T8.e, lever 5); every other the shared read.
     const slotDepths = tables.slotDepths;
-    const march = slotDepths === null ? kernels.rayMarch() : kernels.rayMarchSlots();
+    // The march's kernels: the thin read's, with the tile cull's centre ray, or the thick read's.
+    const march: FrameMarch =
+      thick === null
+        ? {
+            kind: "thin",
+            kernels: slotDepths === null ? kernels.rayMarch() : kernels.rayMarchSlots(),
+          }
+        : {
+            kind: "thick",
+            kernels: slotDepths === null ? thick.rayMarch() : thick.rayMarchSlots(),
+          };
     if (area.tilesAcross > 0 && area.tilesDown > 0) {
       const bindings = {
         buffers: { ...common.buffers, marchTiles: this.#marchTiles(area) },
@@ -2374,14 +2635,14 @@ export class HillaireAtmosphere {
         storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
       };
       const tiles = [area.tilesAcross, area.tilesDown, 1] as const;
-      if (tileCull) {
-        engine.dispatch(march.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
+      if (tileCull && march.kind === "thin") {
+        engine.dispatch(march.kernels.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
       }
       // A view's area over a body of one band with no layer edge takes the specialised march
       // (R08.T11.d): exact there, and the general one on the reference path and under the cull.
       const specialised = this.#cover === "area" && marchSpecialisedFor(tables);
       engine.dispatch(
-        specialised ? march.special() : march.footprint,
+        specialised ? march.kernels.special() : march.kernels.footprint,
         bindings,
         tiles,
         ATMOSPHERE_VIEW_PASS,

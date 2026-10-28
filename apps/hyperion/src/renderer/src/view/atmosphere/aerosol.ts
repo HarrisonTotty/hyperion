@@ -395,6 +395,11 @@ export interface AerosolTerm {
   readonly channels: readonly [ModeOptics, ModeOptics, ModeOptics];
   /** At 550 nm, which sets the column's scale. */
   readonly at550: ModeOptics;
+  /**
+   * σ_ext(550) at relative density 1, m⁻¹: τ(550) ÷ ∫ρ dz over the column, the scale the channels'
+   * coefficients are set by (`thick/spectralColumn.ts`'s `aerosol` source takes it).
+   */
+  readonly extinction550PerM: number;
 }
 
 /** ln p at a level of the column. */
@@ -514,6 +519,7 @@ export function aerosolTerm(spec: AerosolModeSpec, column: AtmosphereColumn): Ae
     },
     channels,
     at550,
+    extinction550PerM: extinction550,
   };
 }
 

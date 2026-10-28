@@ -46,9 +46,15 @@ import {
   RAY_MARCH_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_KERNEL,
+  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
   RAY_MARCH_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_KERNEL,
+  RAY_MARCH_THICK_SPECIAL_KERNEL,
   SKY_VIEW_KERNEL,
+  SKY_VIEW_THICK_KERNEL,
   tableRadiusM,
 } from "../atmosphere/hillaire";
 import { EngineUnavailable } from "../engine/resilientEngine";
@@ -59,6 +65,7 @@ import {
   type AtmosphereBody,
   AtmosphereTables,
   IRRADIANCE_KERNEL,
+  kernelMedium,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
   TRANSMITTANCE_KERNEL,
@@ -67,6 +74,7 @@ import type { KernelPair } from "../engine/kernels";
 import { kernelKey, prepareKernel } from "../engine/webgpu/compute";
 import { BAKE_KERNELS } from "../sky/bake";
 import { between, seededRandom } from "../../test/seededRandom";
+import { patternedThickBake } from "../../test/thickTables";
 import {
   type FrameAtmosphere,
   type PhotorealFrame,
@@ -819,11 +827,13 @@ async function overlayDatums(
  * and disc cells; the atmosphere's per-frame kernels, its sky view, aerial perspective, its two
  * marches' footprint entry points, each general and specialised for one band and no layer edge
  * (R08.T11.d), their centre ray's entry points under R08.T11.d's tile cull (off for a view) and the
- * march's fill; its per-planet tables' four; and the sky bake's four. Each is a module constant, its
+ * march's fill; since R08.T14.c the sky view, the aerial perspective and both marches' footprints,
+ * general and specialised, reading the thick table (`withThickRead`), for a body whose tables hold
+ * one; its per-planet tables' four; and the sky bake's four. Each is a module constant, its
  * WGSL fixed text with no value of a medium, a body or a setting in it (term counts, slices, bands
- * and light slots are uniforms; the specialised march is one variant of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 19,
- * however many bodies a session visits. The smoke's kernel arm (`withKernelArmFormat`, twelve more)
+ * and light slots are uniforms; the specialised march and the thick read are variants of fixed
+ * text, chosen from the tables), so the records a device's cache holds for VIEW are bounded by this
+ * list's length, 25, however many bodies a session visits. The smoke's kernel arm (`withKernelArmFormat`, twelve more)
  * and its probes are the smoke's alone.
  */
 const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
@@ -838,6 +848,12 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
+  SKY_VIEW_THICK_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
+  RAY_MARCH_THICK_KERNEL,
+  RAY_MARCH_SLOTS_THICK_KERNEL,
+  RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
   TRANSMITTANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
@@ -950,7 +966,7 @@ function sessionAirs(
 }
 
 describe("the device's kernels over a session's bodies (R01.T15)", () => {
-  it("stay within VIEW's fixed set, and stop growing after the first of each kind of air, over 50 bodies", async () => {
+  it("stay within VIEW's fixed set, and stop growing after the first of each kind of air, thin and thick, over 50 bodies", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     const keyOf = (pair: KernelPair): string =>
       kernelKey(pair, prepareKernel(pair, engine.capabilities));
@@ -981,6 +997,16 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
         air.curves,
         air.body,
       );
+      // The second pass over the kinds has its bodies' thick bakes landed (R08.T14.c).
+      if (Math.floor(i / kinds.length) === 1) {
+        tables.setThickTables(
+          patternedThickBake(
+            tables.plan.bands,
+            kernelMedium(tables.medium),
+            Math.max(1, air.curves.length),
+          ),
+        );
+      }
       renderer.render(view, {
         ...frameWith([]),
         bodies: [planet],
@@ -992,11 +1018,15 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     const bound = new Set(VIEW_KERNELS.map(keyOf));
     expect(bound.size).toBe(VIEW_KERNELS.length);
     expect([...distinct].filter((key) => !bound.has(key))).toEqual([]);
-    // Every kind of air has been met by its first body; none after adds a kernel. All but seven
-    // are made: the sky bake's four are the sky's, the march's fill a reader's, which no frame
-    // asks, and the tile cull's two centre ray's kernels its own cover's, which a view never takes
-    // (R08.T11.d).
-    expect(new Set(held.slice(kinds.length - 1))).toEqual(new Set([held.at(-1)]));
+    // Every kind of air has been met by its first body thin, and by its first thick (the second
+    // pass); none after adds a kernel. The thin first pass makes 12, and the thick pass 6 more, 18
+    // in all, bounded however many bodies follow. All but seven are made: the sky bake's four are
+    // the sky's, the march's fill a reader's, which no frame asks, and the tile cull's two centre
+    // ray's kernels its own cover's, which a view never takes (R08.T11.d).
+    expect(new Set(held.slice(0, kinds.length).slice(-1))).toEqual(
+      new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 3 - 6]),
+    );
+    expect(new Set(held.slice(2 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));
     expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 3);
     // Each body's tables made their own handles all the while.
     expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);

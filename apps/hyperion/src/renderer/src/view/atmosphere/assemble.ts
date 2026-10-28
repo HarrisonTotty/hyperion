@@ -84,7 +84,7 @@ import {
   absorberTerm,
   layerMoments,
   THOMSON_CROSS_SECTION_M2,
-  thomsonTerm,
+  thomsonTermOf,
 } from "./absorbers";
 import { committedLineSpecies, type KDistributionTable } from "./absorbers/kDistribution";
 import {
@@ -117,6 +117,7 @@ import { molecularMixture, molecularTerm, type RayleighApproximation } from "./r
 import { REGISTRY_OPTICS_FLAGS } from "./registryFlags";
 import type { ModeOptics, SizeDistribution } from "./sizeDistribution";
 import type { BakeSpectrum } from "./spectralColour";
+import { absorberSourceOf, type SpectralSource } from "./thick/spectralColumn";
 import {
   approximateRegime,
   type AtmosphereRegime,
@@ -181,6 +182,14 @@ export interface DrawnMedium {
    * {@link withCurves} with {@link absorberCurveSlots}' or the worker pool's.
    */
   readonly curves: CurveSlots;
+  /**
+   * The source of each of the medium's terms, in their order, for the thick bake's spectral column
+   * (`thick/spectralColumn.ts`'s `spectralColumnOf`; plan R08, R08.T14.b's hand-off to T14.c),
+   * formed where the terms are: the molecular term's gases and the column's n_s, Thomson's n_e
+   * (`absorbers.ts`'s `thomsonTermOf`), each absorber term's amount, and each mode's particles
+   * and σ_ext(550) (`aerosol.ts`'s `aerosolTerm`).
+   */
+  readonly sources: ReadonlyArray<SpectralSource>;
 }
 
 /** What every assembly gives, drawn or not. */
@@ -1255,7 +1264,9 @@ export function assembleMedium(
     planned,
     term: aerosolTerm(planned.spec, column),
   }));
-  const thomson = plan.thomson === undefined ? undefined : thomsonTerm(plan.thomson, column);
+  const electrons = plan.thomson === undefined ? undefined : thomsonTermOf(plan.thomson, column);
+  const thomson = electrons?.term;
+  const absorberTerms = plan.specs.map((spec) => absorberTerm(spec, column));
   const lines = plan.specs.some(
     (spec) => spec.kind === "column" && spec.species.some((s) => s.lines !== undefined),
   );
@@ -1266,12 +1277,29 @@ export function assembleMedium(
     terms: [
       plan.molecular,
       ...(thomson === undefined ? [] : [thomson]),
-      ...plan.specs.map((spec) => absorberTerm(spec, column)),
+      ...absorberTerms,
       ...aerosols.map(({ term }) => term.term),
     ],
     ...(lines ? { pressureBar: columnPressureBar(column) } : {}),
   };
   checkTabulatedTops(medium);
+  // Each term's source, in the terms' order, from what each term was formed from.
+  const sources: ReadonlyArray<SpectralSource> = [
+    {
+      kind: "molecular",
+      fractions: plan.air.surface.gases,
+      numberDensityPerM3: column.surfaceNumberDensityPerM3,
+    },
+    ...(electrons === undefined
+      ? []
+      : [{ kind: "thomson", electronDensityPerM3: electrons.electronDensityPerM3 } as const]),
+    ...absorberTerms.map(absorberSourceOf),
+    ...aerosols.map(({ planned, term }): SpectralSource => ({
+      kind: "aerosol",
+      particles: planned.spec.particles,
+      extinction550PerM: term.extinction550PerM,
+    })),
+  ];
 
   const sigma550M2 = molecularMixture(plan.air.surface.gases).crossSectionM2(TAU_WAVELENGTH_NM);
   const above = depthAbove(column, medium.topHeightM, [
@@ -1323,6 +1351,7 @@ export function assembleMedium(
       absorbers: plan.specs,
       spectra: plan.spectra,
       curves: [],
+      sources,
     },
     labels: ordered([...plan.air.labels, ...approximate]),
     reasons: reasonsShown,

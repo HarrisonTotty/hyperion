@@ -19,8 +19,9 @@ import {
 } from "vitest";
 
 import { toBodyDetail } from "../../lib/system/bodiesWire";
-import { earthBody, venusClassMedium } from "../../test/atmosphereFixtures";
+import { earthBody, saturnBody, venusClassMedium } from "../../test/atmosphereFixtures";
 import { type DetailAnswer, SUN_LIGHT, withRecord } from "../../test/atmosphereRecords";
+import { FakeTables } from "../../test/atmosphereCacheFakes";
 import { sweepMedium } from "../../test/atmosphereSweep";
 import { BodyDetailSeam } from "../../test/bodyDetailSeam";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
@@ -33,12 +34,15 @@ import {
   FIXTURE_UNIVERSE,
 } from "../../test/planetaryFixture";
 import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
+import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
 import { between, seededRandom } from "../../test/seededRandom";
+import { patternedThickBake } from "../../test/thickTables";
 import { heldAppearanceOf } from "../appearance/fromWire";
 import type { LitRegime } from "../bodies/regime";
 import { EngineUnavailable } from "../engine/resilientEngine";
+import { builtOfCase } from "../scenes/atmosphereScene";
 import { ANNUNCIATION_CLEAR_MS, ANNUNCIATION_ONSET_MS } from "../terrain/annunciation";
-import { type AssembledMedium, assembleMedium } from "./assemble";
+import { type AssembledMedium, assembleMedium, mediumTableRadiusM } from "./assemble";
 import {
   ATMOSPHERE_CACHE_BYTES,
   AtmosphereCache,
@@ -47,7 +51,6 @@ import {
   type AtmosphereView,
   type AtmosphereViewReport,
   type BuiltAtmosphere,
-  type CachedTables,
   type KeptBodyAtmosphere,
   PendingLineHold,
 } from "./AtmosphereCache";
@@ -57,32 +60,27 @@ import {
   type BodyLight,
   clampedGroundAlbedo,
 } from "./atmosphereInput";
-import { R05_EARTH_REFERENCE } from "./earth";
+import { EARTH_COLUMN, R05_EARTH_REFERENCE } from "./earth";
 import { ATMOSPHERE_ANSWER_UNREADABLE, type AtmosphereLabel } from "./labels";
+import { keptBakeLightsOf, type OpticsRequest } from "./opticsMessages";
 import {
   type AtmosphereBuilder,
+  MAX_CONSECUTIVE_OPTICS_FAILURES,
   type OpticsBuild,
   type OpticsBuildOutcome,
   OpticsWorkerPool,
+  type ThickBake,
+  type ThickBakeAsk,
+  type ThickBakeOutcome,
 } from "./opticsPool";
-import { perPlanetRowOf, tablesPlanOf } from "./tables";
+import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "./reference/cases";
+import { type AtmosphereBody, perPlanetRowOf, tablesPlanOf } from "./tables";
+import { type MsSourceTable, thickBakeBands } from "./thick/bake";
+import { spectralColumnOf } from "./thick/columnLayout";
+import { keptColumnOf, sphereBakeBody } from "./thick/keptBake";
 import { type AtmosphereRegime, THICK_REASON } from "./thick/regime";
-
-/** A body's per-planet tables as the fake factory makes them, with the bytes it reports. */
-class FakeTables implements CachedTables {
-  readonly built: BuiltAtmosphere;
-  readonly rowBytes: number;
-  disposed = false;
-
-  constructor(built: BuiltAtmosphere, rowBytes: number) {
-    this.built = built;
-    this.rowBytes = rowBytes;
-  }
-
-  dispose(): void {
-    this.disposed = true;
-  }
-}
+import { thickBakeRouted } from "./thick/routing";
+import { channelSource } from "./thick/spectralColumn";
 
 /** A build the scripted builder holds, landed by the test. */
 interface ScriptedBuild {
@@ -92,10 +90,46 @@ interface ScriptedBuild {
   readonly settle: (outcome: OpticsBuildOutcome) => void;
 }
 
-/** A builder in the optics pool's place, whose builds the test lands, fails or leaves running. */
+/** A thick bake the scripted builder holds, landed by the test (R08.T14.c). */
+interface ScriptedBake {
+  readonly ask: ThickBakeAsk;
+  settled: boolean;
+  cancelled: boolean;
+  readonly settle: (outcome: ThickBakeOutcome) => void;
+}
+
+/**
+ * A builder in the optics pool's place, whose builds and thick bakes the test lands, fails or
+ * leaves running.
+ */
 class ScriptedBuilder implements AtmosphereBuilder {
   readonly builds: ScriptedBuild[] = [];
+  readonly bakes: ScriptedBake[] = [];
   terminated = false;
+
+  bakeThick(ask: ThickBakeAsk): ThickBake {
+    let resolve: (outcome: ThickBakeOutcome) => void = ignore;
+    const outcome = new Promise<ThickBakeOutcome>((settleWith) => {
+      resolve = settleWith;
+    });
+    const bake: ScriptedBake = {
+      ask,
+      settled: false,
+      cancelled: false,
+      settle: (result) => {
+        bake.settled = true;
+        resolve(result);
+      },
+    };
+    this.bakes.push(bake);
+    return {
+      outcome,
+      cancel: () => {
+        bake.cancelled = true;
+        bake.settle({ kind: "cancelled" });
+      },
+    };
+  }
 
   build(input: BodyAtmosphereInput): OpticsBuild {
     let resolve: (outcome: OpticsBuildOutcome) => void = ignore;
@@ -124,6 +158,9 @@ class ScriptedBuilder implements AtmosphereBuilder {
     this.terminated = true;
     for (const build of this.builds) {
       build.settle({ kind: "cancelled" });
+    }
+    for (const bake of this.bakes) {
+      bake.settle({ kind: "cancelled" });
     }
   }
 
@@ -159,8 +196,11 @@ interface Harness {
   readonly factory: { throws: Error | null };
 }
 
-/** A cache over the fakes, its tables reporting `rowBytes` each, or their per-planet row's. */
-function harness(rowBytes?: number): Harness {
+/**
+ * A cache over the fakes, its tables reporting `rowBytes` each, or their per-planet row's, routing
+ * its thick bakes by `routes`, or by the product's routing if absent.
+ */
+function harness(rowBytes?: number, routes?: (regime: AtmosphereRegime) => boolean): Harness {
   const seam = new BodyDetailSeam();
   const builder = new ScriptedBuilder();
   const made: FakeTables[] = [];
@@ -168,6 +208,7 @@ function harness(rowBytes?: number): Harness {
   const cache = new AtmosphereCache<FakeTables>({
     requests: seam.client,
     builder,
+    ...(routes === undefined ? {} : { routes }),
     tables: (built) => {
       if (factory.throws !== null) {
         throw factory.throws;
@@ -262,11 +303,47 @@ function earthAssembly(
       absorbers: [],
       spectra: [SUN_LIGHT.spectrum],
       curves: [[]],
+      sources: [],
     },
     labels,
     reasons: [],
     negligible: [],
     regime,
+  };
+}
+
+/** A routing whose `thickScattering` gate has passed, as R08.T14.d's will (R08.T14.c). */
+function routedThick(regime: AtmosphereRegime): boolean {
+  return thickBakeRouted(regime, new Set(["thickScattering"]));
+}
+
+/** An NH₄SH stand-in's reason, which a thick bake does not clear (R08.T14.c). */
+const STAND_IN = "NH4SH: drawn with a stated stand-in";
+
+/**
+ * R05's Earth routed `thickScattering`, as a server body's assembly under `atmosphereApproximate`
+ * with `reasons`, its terms' sources by their channels, on `body`'s figure and lit by `lights`
+ * (R08.T14.c).
+ */
+function thickAssembly(
+  reasons: ReadonlyArray<string> = [THICK_REASON],
+  body: AtmosphereBody = earthBody(),
+  lights: ReadonlyArray<BodyLight> = [SUN_LIGHT],
+): AssembledMedium {
+  return {
+    medium: R05_EARTH_REFERENCE,
+    drawn: {
+      body,
+      bottomRadiusM: mediumTableRadiusM(body.figure),
+      absorbers: [],
+      spectra: lights.map((light) => light.spectrum),
+      curves: lights.map(() => []),
+      sources: R05_EARTH_REFERENCE.terms.map(channelSource),
+    },
+    labels: ["atmosphereApproximate"],
+    reasons,
+    negligible: [],
+    regime: { kind: "thickScattering" },
   };
 }
 
@@ -1263,6 +1340,297 @@ describe("the cache's disposal", () => {
   });
 });
 
+/** The latest bake the cache asked, or a test failure. */
+function latestBake(h: Harness): ScriptedBake {
+  const bake = h.builder.bakes.at(-1);
+  if (bake === undefined) {
+    throw new Error("no thick bake was asked");
+  }
+  return bake;
+}
+
+/** The tables made `n`th, or a test failure. */
+function madeAt(h: Harness, n: number): FakeTables {
+  const tables = h.made[n];
+  if (tables === undefined) {
+    throw new Error(`no tables were made ${n}th`);
+  }
+  return tables;
+}
+
+describe("a thick body's bake (R08.T14.c)", () => {
+  /** A routed cache with A drawn thick from `assembled`, its bake asked and running. */
+  async function baking(assembled = thickAssembly(), rowBytes?: number): Promise<Harness> {
+    const h = harness(rowBytes, routedThick);
+    await drawn(h, [lit(A)], assembled);
+    return h;
+  }
+
+  /** Lands A's latest bake with a bake of its first tables' plan, one slot, and returns it. */
+  async function landBake(h: Harness): Promise<ReadonlyArray<MsSourceTable>> {
+    const tables = patternedThickBake(madeAt(h, 0).plan.bands, R05_EARTH_REFERENCE, 1);
+    latestBake(h).settle({ kind: "baked", tables });
+    await microtasks();
+    return tables;
+  }
+
+  it("asks no bake by default, a thick body drawn under APPROXIMATE with its reason as before", async () => {
+    const h = harness();
+    const report = await drawn(h, [lit(A)], thickAssembly());
+    expect([h.builder.bakes.length, report.labels, [...report.reasons]]).toEqual([
+      0,
+      ["atmosphereApproximate"],
+      [[A, [THICK_REASON]]],
+    ]);
+  });
+
+  it("shows COMPUTING in APPROXIMATE's place while the bake runs, never beside it and with no reason, though a stand-in holds it", async () => {
+    const h = harness(undefined, routedThick);
+    const first = await drawn(h, [lit(A)], thickAssembly([STAND_IN, THICK_REASON]));
+    const later = note(h, [lit(A)]);
+    expect([
+      [first.labels, [...first.reasons]],
+      [later.labels, [...later.reasons], later.problems.size],
+      h.cache.entryOf(A)?.reasons,
+    ]).toEqual([[["atmosphereComputing"], []], [["atmosphereComputing"], [], 0], []]);
+  });
+
+  it("asks its bake once its tables are made, every band of their plan and every light slot in one request", async () => {
+    const h = harness(undefined, routedThick);
+    const second: BodyLight = { star: `${FIXTURE_SYSTEM}.0101`, spectrum: SUN_LIGHT.spectrum };
+    const lights = [SUN_LIGHT, second];
+    const saturn = saturnBody();
+    await drawn(h, [lit(A, "disc", lights)], thickAssembly([THICK_REASON], saturn, lights));
+    note(h, [lit(A, "disc", lights)]);
+    const { ask } = latestBake(h);
+    expect([
+      h.builder.bakes.length,
+      ask.bands,
+      thickBakeBands(ask.body).map((band) => band.gravityRatio),
+      ask.slots,
+      ask.input === h.builder.latestOf(A).input,
+      ask.body,
+      ask.column,
+      ask.kept,
+    ]).toEqual([
+      1,
+      [0, 1, 2, 3],
+      madeAt(h, 0).plan.bands.map((band) => band.gravityRatio),
+      [0, 1],
+      true,
+      { ...saturn, bottomRadiusM: mediumTableRadiusM(saturn.figure) },
+      spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      undefined,
+    ]);
+  });
+
+  it("gives its tables the bake once it lands, every band in its order, and drops APPROXIMATE", async () => {
+    const h = await baking(thickAssembly([THICK_REASON], saturnBody()));
+    const tables = patternedThickBake(madeAt(h, 0).plan.bands, R05_EARTH_REFERENCE, 1);
+    latestBake(h).settle({ kind: "baked", tables });
+    await microtasks();
+    const report = note(h, [lit(A)]);
+    expect([
+      madeAt(h, 0).thick.length,
+      madeAt(h, 0).thickHeld === tables,
+      tables.map((table) => table.band.gravityRatio),
+      report.labels,
+      [...report.reasons],
+      h.builder.bakes.length,
+    ]).toEqual([1, true, madeAt(h, 0).plan.bands.map((band) => band.gravityRatio), [], [], 1]);
+  });
+
+  it("keeps APPROXIMATE after the bake where a stand-in still holds it, with that reason alone", async () => {
+    const h = await baking(thickAssembly([STAND_IN, THICK_REASON]));
+    await landBake(h);
+    const report = note(h, [lit(A)]);
+    expect([report.labels, [...report.reasons]]).toEqual([
+      ["atmosphereApproximate"],
+      [[A, [STAND_IN]]],
+    ]);
+  });
+
+  it("falls back to APPROXIMATE with every reason where the bake fails, raising no fault and asking no bake again", async () => {
+    const h = await baking(thickAssembly([STAND_IN, THICK_REASON]));
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    latestBake(h).settle({ kind: "failed", message: "the solver refused a layer" });
+    await microtasks();
+    const reports = [note(h, [lit(A)]), note(h, [lit(A)])];
+    expect([
+      reports.map((report) => [report.labels, [...report.reasons], report.problems.size]),
+      h.cache.problemOf(A),
+      h.cache.entryOf(A)?.tables === h.made[0],
+      h.builder.bakes.length,
+      errors.mock.calls.length,
+    ]).toEqual([
+      Array.from({ length: 2 }, () => [
+        ["atmosphereApproximate"],
+        [[A, [STAND_IN, THICK_REASON]]],
+        0,
+      ]),
+      null,
+      true,
+      1,
+      1,
+    ]);
+  });
+
+  it("fails the bake where its tables refuse it, with one console.error and no fault", async () => {
+    const h = await baking();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    madeAt(h, 0).thickThrows = new RangeError("a thick bake of 2 bands is not the tables' 1");
+    await landBake(h);
+    const report = note(h, [lit(A)]);
+    expect([
+      report.labels,
+      [...report.reasons],
+      report.problems.size,
+      errors.mock.calls.length,
+    ]).toEqual([["atmosphereApproximate"], [[A, [THICK_REASON]]], 0, 1]);
+  });
+
+  it("gives its tables the bake at a later frame where the device was lost as it landed", async () => {
+    const h = await baking();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    const tables = madeAt(h, 0);
+    tables.thickThrows = new EngineUnavailable("createTexture");
+    const baked = await landBake(h);
+    note(h, [lit(A)]);
+    const during = tables.thick.length;
+    tables.thickThrows = null;
+    note(h, [lit(A)]);
+    expect([
+      during,
+      tables.thick.length,
+      tables.thickHeld === baked,
+      errors.mock.calls.length,
+    ]).toEqual([0, 1, true, 0]);
+  });
+
+  it("gives tables made again after an eviction the bake, asking no bake and no record again", async () => {
+    const h = await baking(thickAssembly(), 20_000_000);
+    const baked = await landBake(h);
+    await drawn(h, [lit(bodyId(1))]);
+    const evicted = madeAt(h, 0).disposed;
+    const report = note(h, [lit(A)]);
+    expect([
+      evicted,
+      h.made.length,
+      madeAt(h, 2).built === madeAt(h, 0).built,
+      madeAt(h, 2).thickHeld === baked,
+      h.builder.bakes.length,
+      h.seam.askedFor(A),
+      report.labels,
+    ]).toEqual([true, 3, true, true, 1, 1, []]);
+  });
+
+  it("cancels the bake when a new key's build lands, asking the new entry's", async () => {
+    const h = await baking();
+    const first = latestBake(h);
+    const second: BodyLight = { star: `${FIXTURE_SYSTEM}.0101`, spectrum: SUN_LIGHT.spectrum };
+    const lights = [SUN_LIGHT, second];
+    note(h, [lit(A, "disc", lights)]);
+    await land(h, A, {
+      kind: "built",
+      assembled: thickAssembly([THICK_REASON], earthBody(), lights),
+    });
+    const report = note(h, [lit(A, "disc", lights)]);
+    expect([
+      first.cancelled,
+      h.builder.bakes.length,
+      latestBake(h).ask.slots,
+      report.labels,
+    ]).toEqual([true, 2, [0, 1], ["atmosphereComputing"]]);
+  });
+
+  it.each([
+    [
+      "its draw is reported failed",
+      (h: Harness): void => {
+        h.view.reportDrawFailure(A, new Error("a bug in the draw"), "VIEW 1");
+      },
+    ],
+    [
+      "its record is refused",
+      (h: Harness): void => {
+        note(h, [lit(A)], 0, sceneOf({ arrival: {} }));
+        h.seam.refuse(h.seam.latestFor(A).id, "unknown_body", "no such body");
+      },
+    ],
+    [
+      "the cache is disposed",
+      (h: Harness): void => {
+        h.cache.dispose();
+      },
+    ],
+  ])("cancels the bake when %s", async (_, drop) => {
+    const h = await baking();
+    vi.spyOn(console, "error").mockImplementation(ignore);
+    drop(h);
+    await microtasks();
+    expect(latestBake(h).cancelled).toBe(true);
+  });
+
+  describe("of a kept scene's medium", () => {
+    /** A kept body's frame entry, lit by `lights`. */
+    function keptBody(
+      setting: KeptBodyAtmosphere,
+      lights: ReadonlyArray<BodyLight> = [SUN_LIGHT],
+    ): AtmosphereFrameBody {
+      return { ...lit(A, "disc", lights), kept: setting };
+    }
+
+    it("asks TEST EARTH's bake with its own lights, its scene's sun, on its sphere's one band", () => {
+      const h = harness(undefined, routedThick);
+      const built = builtOfCase(EARTH_CASE, "earth");
+      const report = note(h, [keptBody({ kind: "medium", built, labels: [] })], 0, null);
+      const { ask } = latestBake(h);
+      expect([
+        report.labels,
+        h.builder.bakes.length,
+        ask.input,
+        ask.slots,
+        ask.bands,
+        thickBakeBands(ask.body),
+        ask.column,
+        ask.kept,
+      ]).toEqual([
+        ["atmosphereComputing"],
+        1,
+        { kind: "kept", atmosphere: { kind: "unset" } },
+        [0],
+        [0],
+        thickBakeBands(sphereBakeBody(EARTH_REFERENCE_RADIUS_M, EARTH_COLUMN.referenceGravityMS2)),
+        keptColumnOf(EARTH_CASE),
+        keptBakeLightsOf(EARTH_CASE.medium, [SUN_LIGHT.spectrum]),
+      ]);
+    });
+
+    it("asks a kept body lit by no star of its scene's under the reference Sun, as the kept cases' curves were formed", () => {
+      const h = harness(undefined, routedThick);
+      const built = builtOfCase(EARTH_CASE, "earth");
+      note(h, [keptBody({ kind: "medium", built, labels: [] }, [])], 0, null);
+      const { ask } = latestBake(h);
+      expect([ask.slots, ask.kept]).toEqual([[0], referenceCaseBakeLights(EARTH_CASE)]);
+    });
+
+    it("holds a kept medium with no sources as a failed bake, under APPROXIMATE with its reason, warning once", () => {
+      const h = harness(undefined, routedThick);
+      const warnings = vi.spyOn(console, "warn").mockImplementation(ignore);
+      const setting: KeptBodyAtmosphere = { kind: "medium", built: keptEarth(), labels: [] };
+      note(h, [keptBody(setting)], 0, null);
+      const report = note(h, [keptBody(setting)], 0, null);
+      expect([
+        h.builder.bakes.length,
+        report.labels,
+        [...report.reasons],
+        report.problems.size,
+        warnings.mock.calls.length,
+      ]).toEqual([0, ["atmosphereApproximate"], [[A, [THICK_REASON]]], 0, 1]);
+    });
+  });
+});
+
 describe("the cache and the pool on the render thread", () => {
   const graph = [
     ...runTimeGraph(`${RENDERER_ROOT}view/atmosphere/AtmosphereCache.ts`),
@@ -1281,6 +1649,15 @@ describe("the cache and the pool on the render thread", () => {
         ) || /\/view\/atmosphere\/(absorbers|materials)\//u.test(path),
     );
     expect(optics).toEqual([]);
+  });
+
+  it("load none of the thick bake's solver, its column's optics or the reference media, which stay in the optics workers (R08.T14.c)", () => {
+    const thick = graph.filter((path) =>
+      /\/view\/atmosphere\/(thick\/(bake|binConversion|discreteOrdinates|keptBake|polarisation|spectralColumn)|earth|reference\/[^/]+)\.ts$/u.test(
+        path,
+      ),
+    );
+    expect(thick).toEqual([]);
   });
 });
 
@@ -1323,5 +1700,139 @@ describe("the cache over the optics pool", () => {
       built?.curves[0]?.length,
       cache.entryOf(A)?.tables === made[0],
     ]).toEqual([true, 1, absorbing, true]);
+  });
+});
+
+/** The worker at `index`, or a test failure. */
+function workerAt(
+  workers: ReadonlyArray<ScriptedOpticsWorker>,
+  index: number,
+): ScriptedOpticsWorker {
+  const worker = workers[index];
+  if (worker === undefined) {
+    throw new Error(`no worker ${index} was started`);
+  }
+  return worker;
+}
+
+/** The request a worker was last posted, or a test failure. */
+function lastPosted(worker: ScriptedOpticsWorker): OpticsRequest {
+  const request = worker.received.at(-1);
+  if (request === undefined) {
+    throw new Error("the worker was posted nothing");
+  }
+  return request;
+}
+
+describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
+  /** What a test drives: the cache, its view, and the pool's scripted workers. */
+  interface OverPool {
+    readonly workers: ScriptedOpticsWorker[];
+    readonly view: AtmosphereView;
+    readonly cache: AtmosphereCache<FakeTables>;
+  }
+
+  /**
+   * A routed cache over a pool of one scripted worker, with A assembled thick in it and drawn, its
+   * bake posted to the worker.
+   */
+  async function bakingOverPool(): Promise<OverPool> {
+    const seam = new BodyDetailSeam();
+    const workers: ScriptedOpticsWorker[] = [];
+    const pool = new OpticsWorkerPool({
+      workers: 1,
+      createWorker: () => {
+        const worker = new ScriptedOpticsWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+    const cache = new AtmosphereCache<FakeTables>({
+      requests: seam.client,
+      builder: pool,
+      routes: routedThick,
+      tables: (built) => new FakeTables(built, 1),
+    });
+    onTestFinished(() => {
+      cache.dispose();
+    });
+    const view = cache.openView();
+    view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
+    seam.answer(seam.latestFor(A).id, answerFor(A));
+    await microtasks();
+    const worker = workerAt(workers, 0);
+    worker.reply({ kind: "assembled", id: lastPosted(worker).id, assembled: thickAssembly() });
+    await microtasks();
+    // The light's curve share, sent once the assembly freed the worker and dropped by the build,
+    // which needs no curves: its late answer frees the worker for the bake.
+    worker.reply({ kind: "curve-sums", id: lastPosted(worker).id, sums: [] });
+    await microtasks();
+    view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
+    return { workers, view, cache };
+  }
+
+  /** The view's frame of A, after the replies given have been taken. */
+  async function frame(over: OverPool): Promise<AtmosphereViewReport> {
+    await microtasks();
+    return over.view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
+  }
+
+  it("posts the bake, every band in one thick-bake request, once the body is drawn", async () => {
+    const { workers } = await bakingOverPool();
+    const worker = workerAt(workers, 0);
+    const posted = lastPosted(worker);
+    expect([
+      worker.received.map((request) => request.kind),
+      posted.kind === "thick-bake" ? posted.bands : [],
+    ]).toEqual([["assemble", "curve-sums", "thick-bake"], [0]]);
+  });
+
+  it("gives APPROXIMATE with THICK_REASON and no fault for a thick-bake-failed answer", async () => {
+    const over = await bakingOverPool();
+    vi.spyOn(console, "error").mockImplementation(ignore);
+    const worker = workerAt(over.workers, 0);
+    worker.reply({
+      kind: "thick-bake-failed",
+      id: lastPosted(worker).id,
+      bands: [0],
+      message: "the solver refused a layer",
+    });
+    const report = await frame(over);
+    expect([
+      report.labels,
+      [...report.reasons],
+      report.problems.size,
+      over.cache.problemOf(A),
+    ]).toEqual([["atmosphereApproximate"], [[A, [THICK_REASON]]], 0, null]);
+  });
+
+  it("keeps COMPUTING where the bake's worker is lost, the bake asked again of its replacement", async () => {
+    const over = await bakingOverPool();
+    workerAt(over.workers, 0).fail();
+    const report = await frame(over);
+    expect([lastPosted(workerAt(over.workers, 1)).kind, report.labels]).toEqual([
+      "thick-bake",
+      ["atmosphereComputing"],
+    ]);
+  });
+
+  it("gives APPROXIMATE with THICK_REASON and no fault once every worker is given up", async () => {
+    const over = await bakingOverPool();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    for (let n = 0; n < MAX_CONSECUTIVE_OPTICS_FAILURES; n += 1) {
+      workerAt(over.workers, n).fail();
+    }
+    const report = await frame(over);
+    expect([
+      report.labels,
+      [...report.reasons],
+      report.problems.size,
+      errors.mock.calls.map(([text]) => String(text)),
+    ]).toEqual([
+      ["atmosphereApproximate"],
+      [[A, [THICK_REASON]]],
+      0,
+      [`the thick bake of ${A} failed: every optics worker was given up`],
+    ]);
   });
 });

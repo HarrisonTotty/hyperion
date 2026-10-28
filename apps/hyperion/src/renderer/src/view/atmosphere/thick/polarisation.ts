@@ -28,7 +28,9 @@
  * in d^l_2,−2, and b₁ and b₂ in d^l_02 ({@link MatrixMoments}, each coefficient over 2l + 1, the
  * scalar solver's χ_l for a₁). Rayleigh's are closed ({@link rayleighMatrixMoments}); a tabulated
  * term's are its table's quadrature ({@link tableMatrixMoments}); a term with no matrix is a total
- * depolariser, a₁ alone.
+ * depolariser, a₁ alone. A phase known by its moments alone (`spectralColumn.ts`'s `moments`: a
+ * kept scene's Cornette–Shanks aerosol, and a channel source's blend between two channels) is one
+ * too, a stated approximation (R08.T14.c): the blend carries no matrix.
  *
  * **The azimuthal modes** (derived here through the circular-polarisation representation and the
  * addition theorem of the d-functions, the route Hovenier and van der Mee 1983 take, and held by
@@ -147,6 +149,7 @@ import {
   type SpectralColumn,
   spectralOptics,
   type SpectralPhase,
+  type SpectralSource,
   type SpectralTerm,
   type SpectralTermOptics,
 } from "./spectralColumn";
@@ -2195,6 +2198,12 @@ function polarisedTermOptics(
       polarising = false;
       moments = depolarisingMoments(order, a1);
       break;
+    case "moments":
+      // A stated approximation (R08.T14.c): a channel source's Cornette–Shanks phase, and its
+      // blend between two channels, carry no matrix, so the term is a total depolariser.
+      polarising = false;
+      moments = depolarisingMoments(order, a1);
+      break;
   }
   return {
     scatteringPerM: optics.scatteringPerM,
@@ -2265,10 +2274,37 @@ export function preparePolarisation(
 }
 
 /**
+ * Whether a channel source scatters by a matrix whose b₁ is not 0, read by its phase: Rayleigh's
+ * does wherever it scatters, as a molecular term's; a table's where it scatters in green and its
+ * matrix's b₁ there is not 0, as an aerosol's is read; Cornette–Shanks's and none's never (the
+ * correction takes them as depolarisers).
+ */
+function channelSourcePolarises(source: Extract<SpectralSource, { kind: "channels" }>): boolean {
+  const { phase } = source;
+  let polarises: boolean;
+  switch (phase.kind) {
+    case "rayleigh":
+      polarises = source.scattering.some((s) => s > 0);
+      break;
+    case "tabulated":
+      polarises =
+        source.scattering[1] > 0 && phase.table.matrix?.b1[1].some((value) => value !== 0) === true;
+      break;
+    case "cornette-shanks":
+    case "none":
+      polarises = false;
+      break;
+  }
+  return polarises;
+}
+
+/**
  * Whether a column needs the correction: whether some term scatters by a matrix whose b₁ is not 0
  * (Design note 10: "every world with a term whose b₁ ≠ 0, thin or thick"). A molecular or Thomson
  * term does, by Rayleigh's matrix (b₁ = −¾Δ sin²Θ, Δ > 0 for every ρ < 1), so every world with air;
- * an aerosol does where its optics at the green channel carry a matrix with a b₁ not 0.
+ * an aerosol does where its optics at the green channel carry a matrix with a b₁ not 0; a channel
+ * source by its phase, Rayleigh's as a molecular term's, a table's by its green channel's b₁ as an
+ * aerosol's, and Cornette–Shanks's and none's never.
  *
  * @remarks
  * Calling it is R08.T14.f's. Only a column with no molecular or Thomson term takes optics here: its
@@ -2298,6 +2334,11 @@ export function needsPolarisationCorrection(column: SpectralColumn): boolean {
         }
         break;
       case "absorber":
+        break;
+      case "channels":
+        if (channelSourcePolarises(source)) {
+          return true;
+        }
         break;
     }
   }

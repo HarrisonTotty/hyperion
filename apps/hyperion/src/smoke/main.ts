@@ -9,7 +9,7 @@
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
  * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
- * its groups to run as `--smoke-part=1` to `12` (every group without it), and
+ * its groups to run as `--smoke-part=1` to `13` (every group without it), and
  * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
  * threads, at most 4, without it);
  * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
@@ -74,6 +74,11 @@ const part = argument("smoke-part", "all");
 /** The twin workers the page starts, or "" for its default (`twinPool.ts`). */
 const twinWorkers = argument("smoke-twin-workers", "");
 const gpuTiming = argument("smoke-gpu-timing", "0");
+/**
+ * Whether the frame's timings also draw the measured Earth through the thick read, its bake
+ * forced on (plan R08, R08.T14.c's frame record): a smoke-only override, the route staying gated.
+ */
+const thickRead = argument("smoke-thick-read", "0");
 /** The soak's length in seconds (T11, T12); 0 runs the checks. */
 const soakSeconds = Number(argument("smoke-soak", "0"));
 const show = argument("smoke-show", "0") === "1";
@@ -383,6 +388,7 @@ void app
         ...(twinWorkers === "" ? {} : { twinWorkers }),
         // The child-window run lifts the quantization with the client's own timing switch.
         gpuTiming: child === null ? gpuTiming : "1",
+        ...(thickRead === "1" ? { thickRead } : {}),
         soak: String(soakSeconds),
         child: String(childSeconds),
         ...(child === null

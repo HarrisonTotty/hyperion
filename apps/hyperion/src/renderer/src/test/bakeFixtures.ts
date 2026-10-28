@@ -4,9 +4,8 @@
  * sources as its drawn terms.
  *
  * @remarks
- * A test fixture, not used at run time. It sits here rather than in `test/`, the shared fixtures'
- * home, because R08.T14.b's lane may not edit `test/`; it moves there when a later task can (plan
- * R08's Risks, "Deferred findings (2026-10-13 rule)" of R08.T14.b).
+ * A test fixture, not used at run time, in `test/` since R08.T14.c (plan R08's Risks, "Deferred
+ * findings (2026-10-13 rule)" of R08.T14.b, _The fixtures' home_).
  *
  * The sources a drawn medium's terms come from are `assemble.ts`'s own and private (R08.T14.c
  * exposes them). Here they are the inputs each term was built from: for the record fixture, the
@@ -19,8 +18,8 @@ import type {
   AerosolInventory,
   AerosolMode as RecordAerosolMode,
   BodyDetail,
-} from "../../../lib/system/model";
-import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../../lib/system/constants";
+} from "../lib/system/model";
+import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../lib/system/constants";
 import {
   planckBakeSpectrum,
   SUN_TEFF_K,
@@ -29,32 +28,40 @@ import {
   TITAN_RADIUS_M,
   TITAN_SURFACE,
   titanClassMethaneMedium,
-} from "../../../test/atmosphereFixtures";
-import { recordInput, venus92Detail } from "../../../test/atmosphereRecords";
-import { inlinePart } from "../../../test/kDistributionFixtures";
-import type { AbsorberBinCurves, AbsorberSpec } from "../absorbers";
-import { absorberBinCurves } from "../absorbers";
-import { loadKDistributions } from "../absorbers/kDistribution";
-import { type AerosolModeSpec, type AerosolParticles, aerosolTerm } from "../aerosol";
-import { assembleMedium, lineSpeciesOf } from "../assemble";
-import type { BodyAtmosphereInput } from "../atmosphereInput";
+} from "./atmosphereFixtures";
+import { recordInput, venus92Detail } from "./atmosphereRecords";
+import { inlinePart } from "./kDistributionFixtures";
+import type { AbsorberBinCurves, AbsorberSpec } from "../view/atmosphere/absorbers";
+import { absorberBinCurves } from "../view/atmosphere/absorbers";
+import { loadKDistributions } from "../view/atmosphere/absorbers/kDistribution";
+import {
+  type AerosolModeSpec,
+  type AerosolParticles,
+  aerosolTerm,
+} from "../view/atmosphere/aerosol";
+import { assembleMedium, lineSpeciesOf } from "../view/atmosphere/assemble";
+import type { BodyAtmosphereInput } from "../view/atmosphere/atmosphereInput";
 import {
   type AtmosphereColumn,
   gasProperties,
   hydrostaticColumn,
   meanMolarMassGPerMol,
-} from "../column";
+} from "../view/atmosphere/column";
 import {
   type AtmosphereMedium,
   CHANNEL_WAVELENGTHS_NM,
   columnLengthM,
   type MediumTerm,
-} from "../medium";
-import { bodyGravity } from "../oblate";
-import { molecularMixture } from "../rayleigh";
-import type { BakeSpectrum } from "../spectralColour";
-import type { ThickBakeBody, ThickBakeLight } from "./bake";
-import { type SpectralColumn, type SpectralSource, spectralColumnOf } from "./spectralColumn";
+} from "../view/atmosphere/medium";
+import { bodyGravity } from "../view/atmosphere/oblate";
+import { molecularMixture } from "../view/atmosphere/rayleigh";
+import type { BakeSpectrum } from "../view/atmosphere/spectralColour";
+import type { ThickBakeBody, ThickBakeLight } from "../view/atmosphere/thick/bake";
+import {
+  type SpectralColumn,
+  type SpectralSource,
+  spectralColumnOf,
+} from "../view/atmosphere/thick/spectralColumn";
 
 /** A fixture: its drawn medium, its spectral column, its body and its light. */
 export interface ThickFixture {

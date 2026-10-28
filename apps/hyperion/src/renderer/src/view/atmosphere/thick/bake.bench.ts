@@ -16,7 +16,12 @@ import { describe, expect, test } from "vitest";
 
 import { BAKE_WAVELENGTHS_NM } from "../medium";
 import { bakeMultipleScattering, prepareBake } from "./bake";
-import { lightOf, type ThickFixture, titanClassFixture, venusClassFixture } from "./bakeFixtures";
+import {
+  lightOf,
+  type ThickFixture,
+  titanClassFixture,
+  venusClassFixture,
+} from "../../../test/bakeFixtures";
 import { spectralOptics } from "./spectralColumn";
 
 /** Each phase's runs: a few, since one takes seconds. */

@@ -30,26 +30,36 @@ import {
 } from "../../../lib/system/constants";
 import type { Rgb } from "../../photometry/toneCurve";
 import type { AbsorberCurve } from "../absorbers";
-import { aerosolTerm } from "../aerosol";
+import { type AerosolParticles, aerosolTerm } from "../aerosol";
 import {
   MARS_AIR,
   MARS_DUST_MODE,
   MARS_DUST_OPTICAL_DEPTH_550,
   MARS_FIT_COLUMN,
 } from "../channels";
-import { gasProperties, hydrostaticColumn, meanMolarMassGPerMol } from "../column";
+import {
+  type AtmosphereColumn,
+  gasProperties,
+  hydrostaticColumn,
+  meanMolarMassGPerMol,
+} from "../column";
 import {
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
+  EARTH_REFERENCE_SOURCES,
   EARTH_SLAB_REFERENCE,
   EARTH_SLAB_REFERENCE_CURVES,
+  EARTH_SLAB_REFERENCE_SOURCES,
+  R06_SOLAR_BAKE_SPECTRUM,
   referenceSunIlluminanceLx,
   WGS84_LEVEL_SPHEROID,
 } from "../earth";
 import { tableRadiusM } from "../hillaire";
 import { type AtmosphereMedium, localScaleHeightM, type MediumTerm } from "../medium";
 import { bodyGravity, type BodyGravity, gravityRatio, type LevelSpheroid } from "../oblate";
+import { type KeptBakeLights, keptBakeLightsOf } from "../opticsMessages";
 import { BOLTZMANN_J_PER_K, type GasFractions, molecularTerm } from "../rayleigh";
+import type { SpectralSource } from "../thick/spectralColumn";
 import {
   aerialSet,
   discSet,
@@ -102,6 +112,12 @@ export interface ReferenceCase {
   readonly detectorHalfAngleDeg: number;
   readonly geometries: ReadonlyArray<ReferenceGeometry>;
   readonly aggregates: ReadonlyArray<ReferenceAggregate>;
+  /**
+   * The source of each of the medium's terms, in their order, for the thick bake's spectral column
+   * (plan R08, R08.T14.c; `thick/spectralColumn.ts`'s `spectralColumnOf`), absent for a case that
+   * is never baked.
+   */
+  readonly sources?: ReadonlyArray<SpectralSource>;
 }
 
 /**
@@ -144,10 +160,11 @@ function sphereGeometries(medium: AtmosphereMedium, radiusM: number): ReferenceG
   ];
 }
 
-/** A case on a sphere under the reference Sun, at its own seed. */
+/** A case on a sphere under the reference Sun, at its own seed, with its medium's sources. */
 function sphereCase(
   name: string,
   medium: AtmosphereMedium,
+  sources: ReadonlyArray<SpectralSource>,
   radiusM: number,
   curves: ReadonlyArray<AbsorberCurve>,
   phaseAsymmetry: Readonly<Record<string, Rgb>>,
@@ -164,6 +181,7 @@ function sphereCase(
     detectorHalfAngleDeg: REFERENCE_DETECTOR_HALF_ANGLE_DEG,
     geometries: [...sphereGeometries(medium, radiusM), ...extra],
     aggregates: sphereAggregates(),
+    sources,
   };
 }
 
@@ -191,6 +209,9 @@ export const MARS_GROUND_ALBEDO = 0.25;
 /** Mars's sphere: {@link MARS_FIT_COLUMN}'s volumetric mean radius, 3,389.5 km. */
 export const MARS_REFERENCE_RADIUS_M = MARS_FIT_COLUMN.referenceRadiusM;
 
+/** Mars's dust's particles: {@link MARS_DUST_MODE}'s size distribution of TAMUdust hexahedra. */
+const MARS_DUST_PARTICLES: AerosolParticles = { kind: "distribution", mode: MARS_DUST_MODE };
+
 /**
  * Mars's dust as a medium term: `aerosol.ts`'s `aerosolTerm` of {@link MARS_DUST_MODE} at
  * τ(550) = {@link MARS_DUST_OPTICAL_DEPTH_550}, well mixed (f = 0, the gas's density, as
@@ -201,7 +222,7 @@ export const MARS_REFERENCE_RADIUS_M = MARS_FIT_COLUMN.referenceRadiusM;
 const MARS_DUST = aerosolTerm(
   {
     name: "dust",
-    particles: { kind: "distribution", mode: MARS_DUST_MODE },
+    particles: MARS_DUST_PARTICLES,
     opticalDepth550: MARS_DUST_OPTICAL_DEPTH_550,
     basePa: MARS_FIT_COLUMN.pressuresPa[0] ?? Number.NaN,
     topPa: MARS_FIT_COLUMN.pressuresPa.at(-1) ?? Number.NaN,
@@ -232,6 +253,25 @@ export const MARS_REFERENCE: AtmosphereMedium = {
   groundAlbedo: [MARS_GROUND_ALBEDO, MARS_GROUND_ALBEDO, MARS_GROUND_ALBEDO],
   terms: [molecularTerm(MARS_FIT_COLUMN, MARS_AIR).term, MARS_DUST.term],
 };
+
+/**
+ * {@link MARS_REFERENCE}'s sources, one a term in its order (plan R08, R08.T14.c): {@link MARS_AIR}
+ * on {@link MARS_FIT_COLUMN}'s n_s, and the dust's particles and its σ_ext(550) as `aerosolTerm`
+ * formed it, so that the dust bakes on its own optics in every bin (`aerosolModeOptics` covers
+ * 380–780 nm).
+ */
+export const MARS_REFERENCE_SOURCES: ReadonlyArray<SpectralSource> = [
+  {
+    kind: "molecular",
+    fractions: MARS_AIR,
+    numberDensityPerM3: MARS_FIT_COLUMN.surfaceNumberDensityPerM3,
+  },
+  {
+    kind: "aerosol",
+    particles: MARS_DUST_PARTICLES,
+    extinction550PerM: MARS_DUST.extinction550PerM,
+  },
+];
 
 /** The dust's mean cosine per channel, from its optics (the mode's g). */
 const MARS_DUST_ASYMMETRY: Rgb = [
@@ -341,6 +381,19 @@ export const SATURN_OBLATE_SCALE_HEIGHT_M =
     SATURN_OBLATE_GRAVITY.referenceGravityMS2);
 
 /**
+ * The Saturn-class air's column: isothermal at {@link SATURN_OBLATE_TEMPERATURE_K} from 1 bar, at
+ * {@link SATURN_OBLATE_GRAVITY}'s g_ref on R05's `tableRadiusM` of its figure, whose n_s the
+ * molecular term takes (its density is the medium's own exponential).
+ */
+export const SATURN_OBLATE_COLUMN: AtmosphereColumn = hydrostaticColumn({
+  surfacePa: 1e5,
+  temperature: { kind: "isothermal", temperatureK: SATURN_OBLATE_TEMPERATURE_K },
+  meanMolarMassGPerMol: SATURN_OBLATE_MOLAR_MASS_G_PER_MOL,
+  referenceGravityMS2: SATURN_OBLATE_GRAVITY.referenceGravityMS2,
+  referenceRadiusM: tableRadiusM(SATURN_OBLATE_SPHEROID),
+});
+
+/**
  * The Saturn-class medium (`decision-r08-t12b-scope.md`, ruling 3): the test fixture's
  * `saturnClassMedium()`, which R08.T6.e's and T6.f's twin tests run on, rebuilt term for term from
  * the same constants. The H₂–He–CH₄ air's molecular term (R08.T3.c) at its 1-bar number density on
@@ -360,20 +413,23 @@ export const SATURN_OBLATE_REFERENCE: AtmosphereMedium = {
   ],
   terms: [
     {
-      ...molecularTerm(
-        hydrostaticColumn({
-          surfacePa: 1e5,
-          temperature: { kind: "isothermal", temperatureK: SATURN_OBLATE_TEMPERATURE_K },
-          meanMolarMassGPerMol: SATURN_OBLATE_MOLAR_MASS_G_PER_MOL,
-          referenceGravityMS2: SATURN_OBLATE_GRAVITY.referenceGravityMS2,
-          referenceRadiusM: tableRadiusM(SATURN_OBLATE_SPHEROID),
-        }),
-        SATURN_OBLATE_AIR,
-      ).term,
+      ...molecularTerm(SATURN_OBLATE_COLUMN, SATURN_OBLATE_AIR).term,
       density: { kind: "exponential", scaleHeightM: SATURN_OBLATE_SCALE_HEIGHT_M },
     } satisfies MediumTerm,
   ],
 };
+
+/**
+ * {@link SATURN_OBLATE_REFERENCE}'s sources (plan R08, R08.T14.c): its one molecular term's
+ * {@link SATURN_OBLATE_AIR} on {@link SATURN_OBLATE_COLUMN}'s n_s.
+ */
+export const SATURN_OBLATE_REFERENCE_SOURCES: ReadonlyArray<SpectralSource> = [
+  {
+    kind: "molecular",
+    fractions: SATURN_OBLATE_AIR,
+    numberDensityPerM3: SATURN_OBLATE_COLUMN.surfaceNumberDensityPerM3,
+  },
+];
 
 /** One of the spheroid ruling's ground sites. */
 interface SaturnSite {
@@ -458,6 +514,7 @@ function saturnGeometries(): ReferenceGeometry[] {
 export const EARTH_CASE: ReferenceCase = sphereCase(
   "earth",
   EARTH_REFERENCE,
+  EARTH_REFERENCE_SOURCES,
   EARTH_REFERENCE_RADIUS_M,
   slotZero(EARTH_REFERENCE_CURVES),
   {},
@@ -467,6 +524,7 @@ export const EARTH_CASE: ReferenceCase = sphereCase(
 export const EARTH_OZONE_SLAB_CASE: ReferenceCase = sphereCase(
   "earth-ozone-slab",
   EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_SOURCES,
   EARTH_REFERENCE_RADIUS_M,
   slotZero(EARTH_SLAB_REFERENCE_CURVES),
   {},
@@ -476,6 +534,7 @@ export const EARTH_OZONE_SLAB_CASE: ReferenceCase = sphereCase(
 export const MARS_CASE: ReferenceCase = sphereCase(
   "mars",
   MARS_REFERENCE,
+  MARS_REFERENCE_SOURCES,
   MARS_REFERENCE_RADIUS_M,
   [],
   { [MARS_DUST.term.name]: MARS_DUST_ASYMMETRY },
@@ -494,7 +553,19 @@ export const SATURN_OBLATE_CASE: ReferenceCase = {
   detectorHalfAngleDeg: REFERENCE_DETECTOR_HALF_ANGLE_DEG,
   geometries: saturnGeometries(),
   aggregates: [],
+  sources: SATURN_OBLATE_REFERENCE_SOURCES,
 };
+
+/**
+ * A case's bake lights (plan R08, R08.T14.c): every case lies under the reference Sun, its one
+ * light, whose spectrum in the bake bins, `earth.ts`'s `R06_SOLAR_BAKE_SPECTRUM` (`REFERENCE_SUN`'s
+ * `bake_spectrum`), its curves of growth were formed under (`EARTH_REFERENCE_CURVES`); and its
+ * medium's absorber terms' specs ({@link keptBakeLightsOf}), for a kept body's `thick-bake` or a
+ * recorded run.
+ */
+export function referenceCaseBakeLights(referenceCase: ReferenceCase): KeptBakeLights {
+  return keptBakeLightsOf(referenceCase.medium, [R06_SOLAR_BAKE_SPECTRUM]);
+}
 
 /** The cloud-free cases, in the order their files are listed (R08.T12.b.1). */
 export const REFERENCE_CASES: ReadonlyArray<ReferenceCase> = [

@@ -22,6 +22,7 @@ import {
   withInventory,
   withSurface,
 } from "../../test/atmosphereRecords";
+import { FakeTables } from "../../test/atmosphereCacheFakes";
 import { sweepMedium } from "../../test/atmosphereSweep";
 import { earthDetail, FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import { ATMOSPHERE_FIXTURES, AtmosphereFixtures } from "../scenes/atmosphereScene";
@@ -136,9 +137,12 @@ function keptCache(): AtmosphereCache<CachedTables> {
       build: () => {
         throw new Error("a kept scene's medium is built by the scene");
       },
+      bakeThick: () => {
+        throw new Error("the product's routing routes no body to its bake");
+      },
       terminate: () => undefined,
     },
-    tables: () => ({ rowBytes: 0, dispose: () => undefined }),
+    tables: (built) => new FakeTables(built, 0),
   });
 }
 

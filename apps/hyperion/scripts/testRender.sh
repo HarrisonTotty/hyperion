@@ -8,15 +8,18 @@
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
 #                 [--drop-adapter-switches] [--captures=DIR]
 #
-# The page's groups are in twelve parts (`src/renderer/src/smoke/page.ts`), each a run of its own
-# under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6 and 8
-# to 12 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3 R08.T6.g, 4
-# R08.T8.b's far limb, 5 R08.T6.f's Saturn-class figure and R08.T6.i, 6 R08.T6.b's four absorbers,
-# 8 R08.T6.f's Earth and R07.T8.e–f's cell pass, 9 R08.T8.a's march band and R08.T11.e's giant, 10
-# R08.T7 and R08.T8.e's slot layers on its binary, 11 R08.T9.b's two and R08.T8.c's far limb's
-# footprint, 12 R08.T11.b's face count, which took part 8 to its watchdog, and R08.T11.e's Earth,
-# 2026-10-27), part 4 also R05.T12.e's marches and
-# part 6 R05.T12.c's frames, each first, part 7 R10's terrain groups, and part 1 every other group.
+# The page's groups are in thirteen parts (`src/renderer/src/smoke/page.ts`), each a run of its
+# own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6 and
+# 8 to 13 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3 R08.T6.g and
+# R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
+# Saturn-class figure and R08.T6.i, 6 R08.T6.b's four absorbers, 8 R08.T6.f's Earth and
+# R07.T8.e–f's cell pass, 9 R08.T8.a's march band and R08.T11.e's giant, 10 R08.T7 and R08.T8.e's
+# slot layers on its binary, 11 R08.T9.b's two and R08.T8.c's far limb's footprint, 12 R08.T11.b's
+# face count, which took part 8 to its watchdog, and R08.T11.e's Earth, 13 R08.T14.c's thick read,
+# its kernels' catalogue, its Earth and its specialised march, which would have taken parts 9, 11
+# and 12 to some 160 to 166 s at their slowest gates, 2026-10-27), part 4 also R05.T12.e's marches
+# and part 6 R05.T12.c's frames, each first, part 7 R10's terrain groups, and part 1 every other
+# group.
 # SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
 # (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
 # smoke, a run of the whole page outlasted the 180 s watchdog however its work overlapped. Three
@@ -78,7 +81,7 @@ captures=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=[1-9] | --part=1[012]) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[0-3]) parts+=("${arg#--part=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -89,7 +92,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9 10 11 12)
+    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13)
 fi
 
 # Each run's outer limit, s: 120 s over its watchdog (`src/smoke/result.ts`'s

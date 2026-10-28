@@ -1,8 +1,8 @@
 /**
  * The generated Earth's medium with its line tables (plan R08, R08.T10.a): its terms, its sun's
  * curves and the labels the bound and today's tables give it; a Mars-like record's pending CO
- * overtones; and the cases of six absorber profiles (`decision-r08-cmf-licence.md` §2.3) and of
- * more terms than a medium holds.
+ * overtones; the cases of six absorber profiles (`decision-r08-cmf-licence.md` §2.3) and of
+ * more terms than a medium holds; and the drawn terms' sources (R08.T14.c).
  */
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -19,6 +19,7 @@ import {
 } from "../../test/atmosphereRecords";
 import { inlinePart } from "../../test/kDistributionFixtures";
 import { testPatienceMs } from "../../test/patience";
+import { sourceMisses } from "../../test/sourceChecks";
 import { earthDetail } from "../../test/planetaryFixture";
 import { type KDistributionTable, loadKDistributions } from "./absorbers/kDistribution";
 import {
@@ -247,5 +248,43 @@ describe("more terms than a medium holds", () => {
   it("gives a curve job the specs the medium draws, the term limit applied", () => {
     const input = recordInput(pastTheCapDetail());
     expect(absorberSpecsOf(input).specs).toEqual(assembleMedium(input).drawn?.absorbers);
+  });
+});
+
+/** An assembly's terms' sources' kinds, in their order, and where they miss the drawn terms. */
+function sourcesOf(assembled: AssembledMedium): {
+  readonly kinds: ReadonlyArray<string>;
+  readonly misses: ReadonlyArray<string>;
+} {
+  if (assembled.medium === undefined) {
+    throw new Error("the record draws a medium");
+  }
+  const { sources } = assembled.drawn;
+  return {
+    kinds: sources.map((source) => source.kind),
+    misses: sourceMisses(assembled.medium, sources),
+  };
+}
+
+describe("the drawn terms' sources (R08.T14.c)", () => {
+  it("give the generated Earth's molecular and absorber terms at the channels to the bit", () => {
+    const { kinds, misses } = sourcesOf(earth);
+    expect(kinds).toEqual(["molecular", ...(earth.drawn?.absorbers.map(() => "absorber") ?? [])]);
+    expect(misses).toEqual([]);
+  });
+
+  it("give a Mars-like record's terms at the channels to the bit", () => {
+    const { kinds, misses } = sourcesOf(withTables(marsLikeDetail()));
+    expect([kinds[0], misses]).toEqual(["molecular", []]);
+  });
+
+  it("give free electrons' Thomson term its n_e, at the channels to the bit", () => {
+    const { kinds, misses } = sourcesOf(withTables(electronsDetail()));
+    expect([kinds.filter((kind) => kind === "thomson").length, misses]).toEqual([1, []]);
+  });
+
+  it("travel with the assembly through a structured clone, as the worker answers it", () => {
+    const sources = earth.drawn?.sources;
+    expect(structuredClone(sources)).toEqual(sources);
   });
 });

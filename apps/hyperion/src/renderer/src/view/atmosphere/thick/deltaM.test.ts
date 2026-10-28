@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { aerosolModeOptics, aerosolPhaseTable } from "../aerosol";
 import { deltaMLayer, THICK_BAKE_STREAMS } from "./bake";
-import { VENUS_CLOUD_PARTICLES } from "./bakeFixtures";
+import { VENUS_CLOUD_PARTICLES } from "../../../test/bakeFixtures";
 import { type BeamSolution, type OrdinateLayer, solveDiscreteOrdinates } from "./discreteOrdinates";
 import { phaseMoments } from "./spectralColumn";
 

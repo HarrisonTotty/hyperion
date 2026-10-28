@@ -2053,6 +2053,27 @@ export const THOMSON_CROSS_SECTION_M2 = 6.652_458_7321e-29;
  *   lies outside the column, or whose profile is not one {@link absorberSpecs} accepts.
  */
 export function thomsonTerm(electrons: AbsorberLayer, column: AtmosphereColumn): MediumTerm {
+  return thomsonTermOf(electrons, column).term;
+}
+
+/** A Thomson term and the electrons' number density it is formed from. */
+export interface ThomsonTerm {
+  /** {@link thomsonTerm}'s term. */
+  readonly term: MediumTerm;
+  /**
+   * n_e at relative density 1, electrons m⁻³: U ÷ ∫ρ dz, whose product with
+   * {@link THOMSON_CROSS_SECTION_M2} is the term's coefficient in every channel.
+   */
+  readonly electronDensityPerM3: number;
+}
+
+/**
+ * {@link thomsonTerm}'s term with the electrons' number density it is formed from, for the thick
+ * bake's spectral column (`thick/spectralColumn.ts`'s `thomson` source).
+ *
+ * @throws RangeError as {@link thomsonTerm}.
+ */
+export function thomsonTermOf(electrons: AbsorberLayer, column: AtmosphereColumn): ThomsonTerm {
   if (electrons.species !== "e-") {
     throw new RangeError(`Thomson scattering is by e-, not ${electrons.species}`);
   }
@@ -2070,11 +2091,14 @@ export function thomsonTerm(electrons: AbsorberLayer, column: AtmosphereColumn):
   const numberDensityPerM3 = electrons.columnPerM2 / lengthM;
   const scattering = numberDensityPerM3 * THOMSON_CROSS_SECTION_M2;
   return {
-    name: "thomson",
-    density,
-    scattering: [scattering, scattering, scattering],
-    absorption: [0, 0, 0],
-    phase: { kind: "rayleigh", depolarisation: [0, 0, 0] },
+    term: {
+      name: "thomson",
+      density,
+      scattering: [scattering, scattering, scattering],
+      absorption: [0, 0, 0],
+      phase: { kind: "rayleigh", depolarisation: [0, 0, 0] },
+    },
+    electronDensityPerM3: numberDensityPerM3,
   };
 }
 

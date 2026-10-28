@@ -60,6 +60,7 @@
     "src/renderer/src/view/atmosphere/thick/regime.ts",
     "src/renderer/src/view/atmosphere/thick/bake.ts",
     "src/renderer/src/view/atmosphere/thick/binConversion.ts",
+    "src/renderer/src/view/atmosphere/thick/columnLayout.ts",
     "src/renderer/src/view/atmosphere/thick/discreteOrdinates.ts",
     "src/renderer/src/view/atmosphere/thick/expSum.ts",
     "src/renderer/src/view/atmosphere/thick/linearAlgebra.ts",

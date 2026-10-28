@@ -4,26 +4,25 @@
  * `bakeFixtures.ts`'s Venus-class and Titan-class columns.
  *
  * @remarks
- * A test fixture, not used at run time, beside `bakeFixtures.ts` and for the same reason:
- * R08.T14.e's lane may not edit `test/`, the shared fixtures' home (plan R08's Risks, T14.b's
- * deferred finding "The fixtures' home").
+ * A test fixture, not used at run time, beside `bakeFixtures.ts` in `test/` since R08.T14.c (plan
+ * R08's Risks, T14.b's and T14.e's deferred findings "The fixtures' home").
  */
 
-import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../../lib/system/constants";
-import { planckBakeSpectrum, SUN_TEFF_K, WGS84_SPHEROID } from "../../../test/atmosphereFixtures";
-import { detailOf, recordInput } from "../../../test/atmosphereRecords";
-import { toyLoader } from "../../../test/opticsFakes";
-import { earthDetail } from "../../../test/planetaryFixture";
-import type { AbsorberSpec } from "../absorbers";
-import { type AssembledMedium, assembleMedium, lineSpeciesOf } from "../assemble";
-import type { BodyAtmosphereInput } from "../atmosphereInput";
-import { gasProperties, hydrostaticColumn, meanMolarMassGPerMol } from "../column";
-import { type AtmosphereMedium, CHANNEL_WAVELENGTHS_NM } from "../medium";
-import { bodyGravity } from "../oblate";
-import { molecularMixture, molecularTerm } from "../rayleigh";
-import type { ThickBakeBody } from "./bake";
+import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../lib/system/constants";
+import { planckBakeSpectrum, SUN_TEFF_K, WGS84_SPHEROID } from "./atmosphereFixtures";
+import { detailOf, recordInput } from "./atmosphereRecords";
+import { toyLoader } from "./opticsFakes";
+import { earthDetail } from "./planetaryFixture";
+import type { AbsorberSpec } from "../view/atmosphere/absorbers";
+import { type AssembledMedium, assembleMedium, lineSpeciesOf } from "../view/atmosphere/assemble";
+import type { BodyAtmosphereInput } from "../view/atmosphere/atmosphereInput";
+import { gasProperties, hydrostaticColumn, meanMolarMassGPerMol } from "../view/atmosphere/column";
+import { type AtmosphereMedium, CHANNEL_WAVELENGTHS_NM } from "../view/atmosphere/medium";
+import { bodyGravity } from "../view/atmosphere/oblate";
+import { molecularMixture, molecularTerm } from "../view/atmosphere/rayleigh";
+import type { ThickBakeBody } from "../view/atmosphere/thick/bake";
 import type { ThickFixture } from "./bakeFixtures";
-import type { SpectralColumn } from "./spectralColumn";
+import type { SpectralColumn } from "../view/atmosphere/thick/spectralColumn";
 
 /** The generated Earth's fixture, with the record input and the assembly it was formed from. */
 export interface EarthFixture extends ThickFixture {

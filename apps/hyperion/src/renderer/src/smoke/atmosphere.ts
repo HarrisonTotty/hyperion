@@ -126,6 +126,7 @@ import {
   type TransmittanceTextures,
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
+import type { PackedThickTable } from "../view/atmosphere/thick/read";
 import {
   type FarLimbShells,
   farLimbFootprintTwin,
@@ -166,10 +167,12 @@ import {
   earthBody,
   fourAbsorberMedium,
   lineAbsorberMedium,
+  SATURN_SPHEROID,
   saturnBody,
   saturnClassMedium,
   venusClassMedium,
 } from "../test/atmosphereFixtures";
+import { patternedThickBake } from "../test/thickTables";
 import {
   type DrawItem,
   type PassTimes,
@@ -1867,8 +1870,18 @@ async function planetOf(
       ...storedTransmittance(tables, read, atmosphere.tables.curves),
       multiScattering: first,
       ...(bySlot.length > 1 ? { multiScatteringBySlot: bySlot } : {}),
+      ...thickOf(atmosphere.tables),
     },
   };
+}
+
+/**
+ * The thick table the tables hold, as packed, for a twin's planet (R08.T14.c): the bits the kernels
+ * read, so that the twin is judged on the read's arithmetic alone; nothing where they hold none.
+ */
+function thickOf(tables: AtmosphereTables): { readonly thick?: PackedThickTable } {
+  const packed = tables.thickPacked;
+  return packed === null ? {} : { thick: packed };
 }
 
 /**
@@ -1906,6 +1919,7 @@ function oblatePlanetOf(
       transmittance: first,
       multiScatteringBySlot: layers.slice(b * perBand, (b + 1) * perBand),
     })),
+    ...thickOf(tables),
   };
 }
 
@@ -2063,6 +2077,136 @@ async function checkFrameTwins(
   } finally {
     atmosphere.dispose();
   }
+}
+
+/** A body whose frames the thick read's kernels draw, held to their twins (R08.T14.c). */
+interface ThickTwinBody {
+  readonly name: string;
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+  readonly figure: SpheroidFigure;
+  readonly gravity: BodyGravity;
+  readonly frames: ReadonlyArray<TwinFrame>;
+}
+
+/**
+ * R08.T14.c's frames: R08.T6.b's two (from 2 km at a sun 20° up with a surface 60 km ahead, and
+ * from 400 km with the sun 5° up, the limb), and from 2 km with the sun 1° up, inside the table's
+ * first sun cosine cell, where the read blends the analytic term and the table, and 2° down, where
+ * the analytic term reads alone and the lit upper air is outside the table.
+ */
+const THICK_TWIN_FRAMES: ReadonlyArray<TwinFrame> = [
+  { name: "2 km, a surface 60 km ahead", heightM: 2_000, suns: [sunAt(20)], surfaceM: 60_000 },
+  { name: "400 km, the limb", heightM: 400_000, suns: [sunAt(5)], surfaceM: null },
+  { name: "2 km, the sun 1° up", heightM: 2_000, suns: [sunAt(1)], surfaceM: null },
+  { name: "2 km, the sun 2° down", heightM: 2_000, suns: [sunAt(-2)], surfaceM: null },
+];
+
+/**
+ * R08.T14.c: the sky-view, aerial-perspective and march kernels reading the thick table, each
+ * held to its CPU twin over the GPU's own per-planet tables and the same packed table, to 10⁻³
+ * above 10⁻⁶ of the largest (R08.T6.b's bound): R05's Earth on WGS 84 with its normal gravity (one
+ * band) over {@link THICK_TWIN_FRAMES}, on high.
+ */
+export async function checkThickFrameTwinsEarth(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkThickTwinBodies(engine, checks, twins, [
+    {
+      name: "R05's Earth",
+      medium: R05_EARTH_REFERENCE,
+      curves: NO_ABSORBER_CURVES,
+      figure: WGS84,
+      gravity: EARTH_GRAVITY,
+      frames: THICK_TWIN_FRAMES,
+    },
+  ]);
+}
+
+/**
+ * {@link checkThickFrameTwinsEarth} on the Saturn-class figure (five slices, four bands, the read
+ * linear in ln s between them), from 2 km at the sun 20° up over a surface and 1° up, on high: a
+ * group of its own, in another part, for the smoke's watchdog.
+ */
+export async function checkThickFrameTwinsSaturn(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkThickTwinBodies(engine, checks, twins, [
+    {
+      name: "the Saturn-class figure",
+      medium: saturnClassMedium(),
+      curves: NO_ABSORBER_CURVES,
+      figure: SATURN_SPHEROID,
+      gravity: saturnBody().gravity,
+      frames: THICK_TWIN_FRAMES.filter(
+        (frame) =>
+          frame.heightM === 2_000 && frame.suns.every((sun) => sun.directionBodyFixed.x > 0.01),
+      ),
+    },
+  ]);
+}
+
+/** {@link checkThickFrameTwinsEarth}'s and {@link checkThickFrameTwinsSaturn}'s frames, in order. */
+async function checkThickTwinBodies(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+  bodies: ReadonlyArray<ThickTwinBody>,
+): Promise<void> {
+  await inOrder(checks, async (ordered) => {
+    for (const body of bodies) {
+      const sizes = twinSizes(TABLE_SIZES.high);
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        body.medium,
+        sizes,
+        body.figure,
+        body.curves,
+        body.gravity,
+      );
+      try {
+        withThickTable(atmosphere.tables, body.curves.length);
+        const read = kernelMedium(body.medium);
+        // The harness's GPU work runs in order: each body's tables are read back before the next's.
+        // oxlint-disable-next-line no-await-in-loop
+        const planet = await planetOf(engine, atmosphere, read, body.figure);
+        for (const frame of body.frames) {
+          // The harness's GPU work runs in order: each frame is read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const agreements = await frameAgreements(
+            engine,
+            atmosphere,
+            planet,
+            body.figure,
+            sizes,
+            frame,
+            twins,
+          );
+          void ordered.later(async (later) => {
+            const result = await agreements();
+            const label = `${body.name}, high, ${frame.name}`;
+            for (const [what, held] of [
+              ["the sky view", result.skyView],
+              ["the aerial perspective", result.aerial],
+              ["the ray march", result.rayMarch],
+            ] as const) {
+              later.check(
+                `R08.T14.c ${label}: ${what}, over the thick table, agrees with the CPU twin to 10⁻³`,
+                held.worst <= 1 && held.above > 0,
+                `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
+              );
+            }
+          });
+        }
+      } finally {
+        atmosphere.dispose();
+      }
+    }
+  });
 }
 
 // --- R08.T11.b: the face's count on a drawn surface -----------------------------------------------
@@ -2434,6 +2578,11 @@ interface AreaBody {
    * (`hillaire.ts`'s `marchSpecialisedFor`), which the check then holds to the general march.
    */
   readonly specialised: boolean;
+  /**
+   * Whether its tables hold a thick table ({@link withThickTable}, R08.T14.c), so that its frames
+   * are drawn by the thick read's kernels; none where absent.
+   */
+  readonly thick?: boolean;
 }
 
 /**
@@ -2702,6 +2851,74 @@ export async function checkMarchSpecialised(
 }
 
 /**
+ * A smoke check's thick table for `tables` (R08.T14.c): `test/thickTables.ts`'s pattern, one layer
+ * a light slot of `slots` (at least one), on the tables' own bands, against the medium as the
+ * kernels read it. The read's cost and arithmetic do not depend on the values, so a pattern that
+ * varies in every axis holds the kernels to their twin, and to each other, as a bake's would.
+ */
+function withThickTable(tables: AtmosphereTables, slots: number): void {
+  tables.setThickTables(
+    patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), Math.max(1, slots)),
+  );
+}
+
+/**
+ * R08.T14.c's frames for the thick read's specialised march: {@link checkMarchSpecialised}'s on
+ * high, from 400 km and from 10⁷ m over a surface, whose discs hold the night side, the terminator
+ * and the day, so that the read's seam across the table's first sun cosine cell is drawn.
+ */
+const THICK_AREA_FRAMES: ReadonlyArray<AreaFrame> = AREA_FRAMES.filter(
+  (frame) => frame.setting === "high" && frame.distanceM !== 1e8,
+);
+
+/** R05's Earth on WGS 84 with a thick table: its area by the thick read's specialised march. */
+const THICK_SPECIALISED_BODIES: ReadonlyArray<AreaBody> = [
+  {
+    name: "R05's Earth over the thick table",
+    medium: R05_EARTH_REFERENCE,
+    curves: NO_ABSORBER_CURVES,
+    body: earthBody,
+    frames: THICK_AREA_FRAMES,
+    specialised: true,
+    thick: true,
+  },
+];
+
+/**
+ * R08.T14.c: the thick read's march specialised for one band and no layer edge, exact (`hillaire.ts`'s
+ * `withThickRead` under `withMarchSpecialised`): R05's Earth over a thick table, its frames over the
+ * air's area by the specialised thick march held to the general thick march over the whole frame,
+ * as {@link checkMarchSpecialised} holds the thin one, byte for byte on a fallback adapter and
+ * within T8.d's ulp on hardware.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkThickMarchSpecialised(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  const kernels = await createAtmosphereFrameKernels(engine, {
+    reads: "shared read",
+    thick: true,
+  });
+  try {
+    await checkAreaBodies(
+      engine,
+      checks,
+      fallback,
+      kernels,
+      THICK_SPECIALISED_BODIES,
+      false,
+      "R08.T14.c",
+    );
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
  * {@link checkMarchArea}'s and {@link checkMarchSpecialised}'s bodies and frames over the device's
  * shared kernels, each frame over the area and, where `tileCull`, under the tile cull, each held
  * to the whole frame's.
@@ -2713,6 +2930,7 @@ async function checkAreaBodies(
   kernels: AtmosphereFrameKernels,
   bodies: ReadonlyArray<AreaBody>,
   tileCull: boolean,
+  task = "R08.T11.d",
 ): Promise<void> {
   const met = { miss: 0, centre: 0, footprint: 0, unknown: 0 };
   for (const body of bodies) {
@@ -2725,6 +2943,9 @@ async function checkAreaBodies(
       sliced,
     );
     try {
+      if (body.thick === true) {
+        withThickTable(tables, body.curves.length);
+      }
       // Whether the area's frames take the specialised march, as the body is listed to.
       const specialised = marchSpecialisedFor(tables);
       const march = specialised ? "the specialised march" : "the general march";
@@ -2767,7 +2988,7 @@ async function checkAreaBodies(
           const same = composite.texels === 0 && marched.texels === 0;
           const withinUlp = composite.ulps <= 1 && marched.ulps <= 1;
           checks.check(
-            `R08.T11.d ${body.name}, ${frame.setting}, ${frame.name}: ${what} reads back as the general march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
+            `${task} ${body.name}, ${frame.setting}, ${frame.name}: ${what} reads back as the general march over the whole frame, byte for byte on a fallback adapter and within 1 ulp on hardware`,
             chosen && (fallback ? same : withinUlp),
             `${differenceOf("the composite's output", composite)}, ${differenceOf("the march's target", marched)} (${fallback ? "SwiftShader: byte for byte" : "hardware: within T8.d's fused-multiply-add ulp"}); ${how}`,
           );

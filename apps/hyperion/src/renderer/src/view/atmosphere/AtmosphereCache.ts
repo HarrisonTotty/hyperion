@@ -61,6 +61,29 @@
  * `AtmosphereTables.dispose` releases the tables' buffer and textures (R08.T10.b), so an eviction
  * frees the body's per-planet memory; each view takes a body's tables afresh every frame
  * (`PhotorealFrame.atmospheres`), so none draws with tables disposed.
+ *
+ * **The thick bake** (R08.T14.c; Design note 9's routing). A drawn body whose regime the router
+ * routes to its bake ({@link AtmosphereCacheOptions.routes}, `thick/routing.ts`'s
+ * `thickBakeRouted`, which routes none until R08.T14.d's gates pass) has its bake asked once its
+ * tables are made, every band in one request ({@link AtmosphereBuilder.bakeThick}), and the bake
+ * given to its tables when it lands (`AtmosphereTables.setThickTables`). Its labels follow the
+ * bake, at most one of `ATMOSPHERE: COMPUTING` and `ATMOSPHERE: APPROXIMATE` (`labels.ts`'s
+ * precedence; the guide's rows):
+ *
+ * - while it bakes, `atmosphereComputing` stands in `atmosphereApproximate`'s place, and no reason
+ *   is reported;
+ * - baked, `THICK_REASON` is dropped, and `atmosphereApproximate` stands only where another reason
+ *   still holds it, such as an NH₄SH stand-in's;
+ * - failed, `atmosphereApproximate` stands with every reason, `THICK_REASON` among them, until the
+ *   body's atmosphere is next computed: a new entry drawn for it (its new key's build landed, or a
+ *   kept scene's new setting), or a new cache. A failed bake is never item 6's fault: it raises no
+ *   `ATMOSPHERE NOT AVAILABLE` and no problem (decision-r08-t10a-leans, UX review item 1, "For
+ *   T14.c").
+ *
+ * The baked tables are kept with the entry, so that its tables made again after an eviction, or
+ * refused them while the device was lost, are given them with no new bake. A new entry drawn for the
+ * body, the body dropped, or the cache disposed cancels its bake. A body the router does not route
+ * asks for none and is drawn as before.
  */
 
 import type {
@@ -82,6 +105,7 @@ import { heldAppearanceOf } from "../appearance/fromWire";
 import type { LitRegime } from "../bodies/regime";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine } from "../engine/types";
+import { SUN_BAKE_SPECTRUM } from "../lighting/hostDisc";
 import type { Rgb } from "../photometry/toneCurve";
 import { ANNUNCIATION_CLEAR_MS, ANNUNCIATION_ONSET_MS } from "../terrain/annunciation";
 import { FIELD_RETRY_DELAY_MS, FIELD_RETRY_MAX_DELAY_MS } from "../terrain/coarseFieldStore";
@@ -101,8 +125,13 @@ import {
   type AtmosphereProblem,
 } from "./labels";
 import type { AtmosphereMedium } from "./medium";
-import type { AtmosphereBuilder, OpticsBuild } from "./opticsPool";
+import { bodyGravity } from "./oblate";
+import { keptBakeLightsOf } from "./opticsMessages";
+import type { AtmosphereBuilder, OpticsBuild, ThickBake, ThickBakeAsk } from "./opticsPool";
+import type { BakeSpectrum } from "./spectralColour";
 import { type AbsorberCurveSlots, type AtmosphereBody, AtmosphereTables } from "./tables";
+import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import { spectralColumnOf } from "./thick/columnLayout";
 import {
   approximateRegime,
   type AtmosphereRegime,
@@ -111,6 +140,8 @@ import {
   classifyRegime,
   THICK_REASON,
 } from "./thick/regime";
+import { thickBakeRouted } from "./thick/routing";
+import type { SpectralSource } from "./thick/spectralColumn";
 
 /**
  * The cache's size, B: 32,000,000 of per-planet rows, decimal as `PER_PLANET_ROW_BYTES` is,
@@ -131,8 +162,15 @@ export interface AtmosphereRequests {
   request(body: RequestOf<"body_detail">): PendingRequest<"body_detail">;
 }
 
-/** What the cache needs of a body's per-planet tables (item 3): `AtmosphereTables`' own. */
-export type CachedTables = Pick<AtmosphereTables, "rowBytes" | "dispose">;
+/**
+ * What the cache needs of a body's per-planet tables (item 3): `AtmosphereTables`' own, with what
+ * the thick bake's route reads of them, their plan's bands and the body and ground they are built
+ * for, and gives them, its bake (R08.T14.c).
+ */
+export type CachedTables = Pick<
+  AtmosphereTables,
+  "rowBytes" | "dispose" | "setThickTables" | "plan" | "body" | "bottomRadiusM"
+>;
 
 /** What a body's per-planet tables are made from. */
 export interface BuiltAtmosphere {
@@ -143,6 +181,12 @@ export interface BuiltAtmosphere {
   readonly curves: AbsorberCurveSlots;
   /** The body the tables are sliced for; `null` for one slice and one band. */
   readonly body: AtmosphereBody | null;
+  /**
+   * The source of each of the medium's terms, in their order, for its thick bake's spectral column
+   * (`thick/columnLayout.ts`'s `spectralColumnOf`; R08.T14.c): a server body's assembly's
+   * (`DrawnMedium.sources`), a kept case's; absent for a kept medium that cannot bake.
+   */
+  readonly sources?: ReadonlyArray<SpectralSource>;
 }
 
 /**
@@ -313,6 +357,12 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
   readonly tables: AtmosphereTablesFactory<T>;
   /** How the busy re-asks wait; `setTimeout` if absent. */
   readonly schedule?: AtmosphereSchedule;
+  /**
+   * Whether a body drawn in `regime` takes its thick bake (R08.T14.c): `thick/routing.ts`'s
+   * `thickBakeRouted` if absent, which routes no regime until R08.T14.d's gates pass; a test's
+   * routing otherwise.
+   */
+  readonly routes?: (regime: AtmosphereRegime) => boolean;
 }
 
 /**
@@ -368,20 +418,57 @@ interface BusyFetch {
   cancel: (() => void) | null;
 }
 
-/** An entry to draw, its tables not yet made. */
-interface ToDraw {
-  readonly key: string;
+/** An entry's labels and the reasons behind its `atmosphereApproximate`. */
+interface Labelled {
   readonly labels: ReadonlyArray<AtmosphereLabel>;
   readonly reasons: ReadonlyArray<string>;
+}
+
+/** An entry to draw, its tables not yet made. */
+interface ToDraw extends Labelled {
+  readonly key: string;
   readonly regime: AtmosphereRegime | null;
   readonly built: BuiltAtmosphere | null;
+  /**
+   * The input a server body was built from, which its thick bake asks with; `null` for a kept
+   * scene's body, whose bake carries its own lights.
+   */
+  readonly input: BodyAtmosphereInput | null;
+}
+
+/** A server body's build under way. */
+interface Building {
+  readonly kind: "building";
+  readonly key: string;
+  readonly input: BodyAtmosphereInput;
+  readonly handle: OpticsBuild;
 }
 
 /** Where a body's build stands. */
 type Build =
-  | { readonly kind: "building"; readonly key: string; readonly handle: OpticsBuild }
+  | Building
   /** Built, to be drawn at the next frame that wants the body. */
   | { readonly kind: "landed"; readonly key: string; readonly entry: ToDraw };
+
+/** Where a drawn entry's thick bake stands (R08.T14.c). */
+type BakeState<T> =
+  | { readonly kind: "baking"; readonly handle: ThickBake }
+  | {
+      readonly kind: "baked";
+      /** The bake's tables, one a band of the tables' plan, kept for tables made again. */
+      readonly tables: ReadonlyArray<MsSourceTable>;
+      /** The tables that hold them; `null` before any did, or once another set stands. */
+      given: T | null;
+    }
+  /** Its bake failed: `atmosphereApproximate` stands with every reason. */
+  | { readonly kind: "failed" };
+
+/** A drawn entry's thick bake, with the labels and reasons the entry was made with. */
+interface HeldBake<T> {
+  /** The entry's labels and reasons before the bake's state is read into them. */
+  readonly made: Labelled;
+  readonly state: BakeState<T>;
+}
 
 /** A body as the cache holds it. */
 interface HeldBody<T> {
@@ -404,6 +491,8 @@ interface HeldBody<T> {
   reply: BodyDetail | null;
   build: Build | null;
   drawn: AtmosphereEntry<T> | null;
+  /** The drawn entry's thick bake; `null` where none is asked, or nothing is drawn. */
+  bake: HeldBake<T> | null;
   problem: AtmosphereProblem | null;
 }
 
@@ -411,6 +500,32 @@ const IDLE: Fetch = { kind: "idle" };
 const WAITING: Fetch = { kind: "waiting" };
 const FAILED: AtmosphereProblem = { kind: "failed" };
 const LOAD_FAILED: AtmosphereProblem = { kind: "loadFailed" };
+const BAKE_FAILED = { kind: "failed" } as const;
+
+/**
+ * What a kept body's thick bake carries as its input (R08.T14.c): no medium of its own, since a
+ * scene's medium is handed to the cache whole and never assembled, so that no `KeptAtmosphere`
+ * names it. The worker reads only its line species from it, none for a kept input, and takes the
+ * body's absorber specs and light spectra from the request's `kept` lights in its place
+ * (`opticsJobs.ts`'s `#bakeLights`). Its key, `kept/unset/v<version>`, is no body's: the cache
+ * keys a kept medium itself (`kept/medium/v<version>`).
+ */
+const KEPT_BAKE_INPUT: BodyAtmosphereInput = { kind: "kept", atmosphere: { kind: "unset" } };
+
+/**
+ * The reference Sun's spectrum in the bake bins, under which the kept cases' curves of growth were
+ * formed: R07's `SUN_BAKE_SPECTRUM`, of which `earth.ts`'s `R06_SOLAR_BAKE_SPECTRUM` is the same
+ * values through `bakeSpectrumOf` (`reference/cases.ts`'s `referenceCaseBakeLights`), taken from
+ * the host disc's module since `earth.ts` would load the absorbers' data on the render thread.
+ */
+const REFERENCE_SUN_BAKE_SPECTRUM: BakeSpectrum = SUN_BAKE_SPECTRUM;
+
+/**
+ * The bulk gravity a sphere's bake body is given, m s⁻² (standard gravity): a sphere with no spin
+ * has one band at s = 1 whatever it is, which the bake reads nowhere (`thick/keptBake.ts`'s
+ * `sphereBakeBody`, `hillaire.ts`'s `bodyOfFigure`).
+ */
+const SPHERE_BAKE_GRAVITY_MS2 = 9.806_65;
 
 /** A report of nothing: a closed view's, or a disposed cache's. */
 const NO_REPORT: AtmosphereViewReport = {
@@ -529,13 +644,13 @@ function ordered(labels: Iterable<AtmosphereLabel>): ReadonlyArray<AtmosphereLab
 }
 
 /**
- * What an assembly draws: no medium; or its medium, whose tables need each absorber's curves under
- * at least one light.
+ * What an assembly of `input` draws: no medium; or its medium, whose tables need each absorber's
+ * curves under at least one light, with its terms' sources for its thick bake.
  */
-function toDrawOf(key: string, assembled: AssembledMedium): ToDraw {
+function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledMedium): ToDraw {
   const { labels, reasons } = assembled;
   if (assembled.medium === undefined) {
-    return { key, labels, reasons, regime: null, built: null };
+    return { key, labels, reasons, regime: null, built: null, input };
   }
   const { drawn } = assembled;
   const curved = drawn.absorbers.length === 0 || drawn.curves.length > 0;
@@ -550,8 +665,124 @@ function toDrawOf(key: string, assembled: AssembledMedium): ToDraw {
           bottomRadiusM: drawn.bottomRadiusM,
           curves: drawn.curves,
           body: drawn.body,
+          sources: drawn.sources,
         }
       : null,
+    input,
+  };
+}
+
+/**
+ * An entry's labels and reasons under its thick bake's state (the module's remarks): while it
+ * bakes, `atmosphereComputing` in `atmosphereApproximate`'s place and no reason; baked, the made
+ * reasons but `THICK_REASON`, and `atmosphereApproximate` only where one remains; failed,
+ * `atmosphereApproximate` with every made reason and `THICK_REASON`.
+ */
+function bakeLabelsOf(made: Labelled, state: BakeState<unknown>["kind"]): Labelled {
+  const others = made.labels.filter((label) => label !== "atmosphereApproximate");
+  let labelled: Labelled;
+  switch (state) {
+    case "baking":
+      labelled = { labels: ordered([...others, "atmosphereComputing"]), reasons: [] };
+      break;
+    case "baked": {
+      const reasons = made.reasons.filter((reason) => reason !== THICK_REASON);
+      labelled = {
+        labels: ordered(reasons.length > 0 ? [...others, "atmosphereApproximate"] : others),
+        reasons,
+      };
+      break;
+    }
+    case "failed":
+      labelled = {
+        labels: ordered([...made.labels, "atmosphereApproximate"]),
+        reasons: made.reasons.includes(THICK_REASON)
+          ? made.reasons
+          : [...made.reasons, THICK_REASON],
+      };
+      break;
+  }
+  return labelled;
+}
+
+/**
+ * The body a thick bake of `tables` is for: their built body, its slicing widened over the 2 MB row
+ * where `tables.ts`'s `rowBodyOf` widened it, on their ground R_ref; or, for tables of one slice
+ * and one band (`body` `null`), a sphere of their ground's radius with no spin, as
+ * `thick/keptBake.ts`'s `sphereBakeBody` makes it, whose one band stands at s = 1 on R_ref.
+ */
+function bakeBodyOf(tables: CachedTables): ThickBakeBody {
+  const { body, bottomRadiusM } = tables;
+  if (body !== null) {
+    return { figure: body.figure, gravity: body.gravity, bottomRadiusM };
+  }
+  const figure = { equatorialRadiusM: bottomRadiusM, polarRadiusM: bottomRadiusM };
+  return {
+    figure,
+    gravity: bodyGravity(
+      {
+        figure,
+        massKg: 1,
+        angularVelocityRadS: null,
+        bulkGravityMS2: SPHERE_BAKE_GRAVITY_MS2,
+        figureLaw: null,
+      },
+      bottomRadiusM,
+    ),
+    bottomRadiusM,
+  };
+}
+
+/**
+ * A routed body's thick bake request (R08.T14.c), every band and light slot in one, or `null`
+ * where no light lights it to bake under.
+ *
+ * @remarks
+ * - **The column** is `spectralColumnOf` of the medium and its terms' sources.
+ * - **The body** is {@link bakeBodyOf}'s, and **the bands** every band of the tables' plan, in its
+ *   order: `thick/bake.ts`'s `thickBakeBands(body)`, one a band of the same slicing by the same
+ *   rule (held equal by `bake.test.ts`), so that `setThickTables` takes the bake as it lands.
+ * - **The slots** are the light slots in the order the kernels number them, a source's slot k
+ *   reading the table's layer b × slots + k (`thick/read.ts`). A server body's are its build's
+ *   input's lights in `lightsAt`'s order: the assembly's `DrawnMedium.spectra[k]` is
+ *   `input.lights[k]`'s spectrum, `DrawnMedium.curves[k]` that light's curves (the pool's join,
+ *   one a slot), and the worker's `absorberSpecsOf(input).spectra`, which a request's slots index,
+ *   the same list as `DrawnMedium.spectra`. So slot k is `input.lights[k]`.
+ * - **A kept body's lights** go in `kept`: its medium's absorber specs (`keptBakeLightsOf`) and the
+ *   spectra of the lights it is drawn under. Those are the scene's own suns where the frame gives
+ *   the body lights, each `BodyLight.spectrum`, R06's bake spectrum, one slot a light in
+ *   `lightsAt`'s order; with none, the reference Sun alone
+ *   ({@link REFERENCE_SUN_BAKE_SPECTRUM}), under which the kept cases' curves were formed. Its
+ *   input is {@link KEPT_BAKE_INPUT}.
+ *
+ * @param input - A server body's build's input; `null` for a kept body.
+ * @param lights - The body's lights as last noted, a kept body's spectra.
+ * @throws RangeError as `spectralColumnOf` refuses the sources: a bug in what the body was built
+ *   from.
+ */
+function thickBakeAskOf(
+  input: BodyAtmosphereInput | null,
+  built: BuiltAtmosphere,
+  sources: ReadonlyArray<SpectralSource>,
+  tables: CachedTables,
+  lights: ReadonlyArray<BodyLight>,
+): ThickBakeAsk | null {
+  const column = spectralColumnOf(built.medium, sources);
+  const body = bakeBodyOf(tables);
+  const bands = tables.plan.bands.map((_, band) => band);
+  if (input !== null) {
+    const slots = input.kind === "record" ? input.lights.map((_, slot) => slot) : [];
+    return slots.length === 0 ? null : { input, slots, bands, column, body };
+  }
+  const spectra =
+    lights.length > 0 ? lights.map((light) => light.spectrum) : [REFERENCE_SUN_BAKE_SPECTRUM];
+  return {
+    input: KEPT_BAKE_INPUT,
+    slots: spectra.map((_, slot) => slot),
+    bands,
+    column,
+    body,
+    kept: keptBakeLightsOf(built.medium, spectra),
   };
 }
 
@@ -569,6 +800,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #builder: AtmosphereBuilder;
   readonly #tables: AtmosphereTablesFactory<T>;
   readonly #schedule: AtmosphereSchedule;
+  readonly #routes: (regime: AtmosphereRegime) => boolean;
   /** Every body held, least recently wanted first. */
   readonly #bodies = new Map<BodyIdHex, HeldBody<T>>();
   /** Each open view's wanted bodies, as its latest frame noted them. */
@@ -582,6 +814,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#builder = opts.builder;
     this.#tables = opts.tables;
     this.#schedule = opts.schedule ?? scheduleTimeout;
+    this.#routes = opts.routes ?? ((regime): boolean => thickBakeRouted(regime));
   }
 
   /** How many bodies the cache holds, drawn or not. */
@@ -705,6 +938,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     for (const body of wanted.values()) {
       const held = this.#heldFor(body);
       if (body.kept !== undefined) {
+        // A kept body's lights, which its scene's medium does not depend on, are its bake's.
+        held.lights = body.lights;
         this.#keep(held, body.kept);
       } else if (scene !== null) {
         this.#want(held, body, scene);
@@ -764,6 +999,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       reply: null,
       build: null,
       drawn: null,
+      bake: null,
       problem: null,
     };
     this.#bodies.set(body.id, held);
@@ -787,6 +1023,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           reasons: [],
           regime: null,
           built: null,
+          input: null,
         };
         break;
       case "loading":
@@ -813,6 +1050,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           reasons: approximate ? [THICK_REASON] : [],
           regime,
           built: kept.built,
+          input: null,
         };
         break;
       }
@@ -981,7 +1219,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       this.#fail(held, error);
       return;
     }
-    const building: Build = { kind: "building", key, handle };
+    const building: Building = { kind: "building", key, input, handle };
     held.build = building;
     void this.#land(held, building, handle).catch((error: unknown) => {
       // A bug in taking the build: the body is held failed, with the error in the log, rather
@@ -996,7 +1234,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   }
 
   /** Takes a build's outcome, unless the body has moved on from it. */
-  async #land(held: HeldBody<T>, building: Build, handle: OpticsBuild): Promise<void> {
+  async #land(held: HeldBody<T>, building: Building, handle: OpticsBuild): Promise<void> {
     const outcome = await handle.outcome;
     if (this.#disposed || this.#bodies.get(held.id) !== held || held.build !== building) {
       return;
@@ -1006,7 +1244,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         held.build = {
           kind: "landed",
           key: building.key,
-          entry: toDrawOf(building.key, outcome.assembled),
+          entry: toDrawOf(building.key, building.input, outcome.assembled),
         };
         break;
       case "failed":
@@ -1019,7 +1257,10 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
   }
 
-  /** Draws a wanted body's landed build, or makes its tables again after an eviction. */
+  /**
+   * Draws a wanted body's landed build, asking its thick bake where it is routed, or makes its
+   * tables again after an eviction; and gives its tables its bake where they do not hold it.
+   */
   #draw(held: HeldBody<T>): void {
     const { build, drawn } = held;
     if (build?.kind === "landed") {
@@ -1036,14 +1277,139 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       if (drawn !== null && drawn.tables !== null) {
         drawn.tables.dispose();
       }
+      // The entry replaced takes its bake with it: the new one is another computation.
+      this.#cancelBake(held);
       held.build = null;
       held.problem = null;
       held.drawn = { ...entry, tables };
+      if (
+        tables !== null &&
+        entry.built !== null &&
+        entry.regime !== null &&
+        this.#routes(entry.regime)
+      ) {
+        this.#bake(held, entry, entry.built, tables);
+      }
     } else if (drawn !== null && drawn.built !== null && drawn.tables === null) {
       const made = this.#make(held, drawn.built);
       if (made !== "unavailable" && made !== "failed") {
         held.drawn = { ...drawn, tables: made };
       }
+    }
+    this.#giveBake(held);
+  }
+
+  /**
+   * Asks a routed entry's thick bake (the module's remarks), drawn meanwhile under
+   * `atmosphereComputing`; a kept medium with no sources to bake from, or a request that cannot be
+   * formed or asked, is a failed bake, with one `console.warn` or `console.error`.
+   */
+  #bake(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere, tables: T): void {
+    const made: Labelled = { labels: entry.labels, reasons: entry.reasons };
+    if (built.sources === undefined) {
+      console.warn(
+        `the atmosphere of ${held.id} has no sources to bake: drawn by the thin-atmosphere method`,
+      );
+      this.#showBake(held, { made, state: BAKE_FAILED });
+      return;
+    }
+    let ask: ThickBakeAsk | null;
+    let handle: ThickBake;
+    try {
+      ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights);
+      if (ask === null) {
+        // No light to bake under: drawn as a body the router does not route.
+        return;
+      }
+      handle = this.#builder.bakeThick(ask);
+    } catch (error: unknown) {
+      console.error(`the thick bake of ${held.id} could not be asked:`, error);
+      this.#showBake(held, { made, state: BAKE_FAILED });
+      return;
+    }
+    const bake: HeldBake<T> = { made, state: { kind: "baking", handle } };
+    this.#showBake(held, bake);
+    void this.#bakeLanded(held, bake, handle).catch((error: unknown) => {
+      // A bug in taking the bake: the bake failed, and the body is drawn by the analytic term.
+      console.error(`the thick bake of ${held.id} could not be taken:`, error);
+      if (!this.#disposed && this.#bodies.get(held.id) === held && held.bake === bake) {
+        this.#showBake(held, { made, state: BAKE_FAILED });
+      }
+    });
+  }
+
+  /** Takes a thick bake's outcome, unless the body has moved on from it. */
+  async #bakeLanded(held: HeldBody<T>, bake: HeldBake<T>, handle: ThickBake): Promise<void> {
+    const outcome = await handle.outcome;
+    if (this.#disposed || this.#bodies.get(held.id) !== held || held.bake !== bake) {
+      return;
+    }
+    switch (outcome.kind) {
+      case "baked":
+        this.#showBake(held, {
+          made: bake.made,
+          state: { kind: "baked", tables: outcome.tables, given: null },
+        });
+        this.#giveBake(held);
+        break;
+      case "failed":
+        // The bake's failure alone: the body stays drawn, under APPROXIMATE, with no fault.
+        console.error(`the thick bake of ${held.id} failed: ${outcome.message}`);
+        this.#showBake(held, { made: bake.made, state: BAKE_FAILED });
+        break;
+      case "cancelled":
+        this.#cancelBake(held);
+        break;
+    }
+  }
+
+  /**
+   * Gives a baked body's tables its bake where they do not hold it: tables made again after an
+   * eviction, or that refused it while the device was lost, which a later frame gives it again. A
+   * bake its tables refuse otherwise is a failed bake, with one `console.error`.
+   */
+  #giveBake(held: HeldBody<T>): void {
+    const { bake } = held;
+    const tables = held.drawn?.tables ?? null;
+    if (bake === null || bake.state.kind !== "baked" || tables === null) {
+      return;
+    }
+    const { state } = bake;
+    if (state.given === tables) {
+      return;
+    }
+    try {
+      tables.setThickTables(state.tables);
+      state.given = tables;
+    } catch (error: unknown) {
+      if (error instanceof EngineUnavailable) {
+        return;
+      }
+      console.error(`the thick bake of ${held.id} could not be given to its tables:`, error);
+      this.#showBake(held, { made: bake.made, state: BAKE_FAILED });
+    }
+  }
+
+  /** Sets a body's thick bake, its drawn entry's labels and reasons read from its state. */
+  #showBake(held: HeldBody<T>, bake: HeldBake<T>): void {
+    held.bake = bake;
+    if (held.drawn !== null) {
+      held.drawn = { ...held.drawn, ...bakeLabelsOf(bake.made, bake.state.kind) };
+    }
+  }
+
+  /** Cancels a body's thick bake under way, or drops one held, its entry's labels as made. */
+  #cancelBake(held: HeldBody<T>): void {
+    const { bake } = held;
+    if (bake === null) {
+      return;
+    }
+    if (bake.state.kind === "baking") {
+      bake.state.handle.cancel();
+    }
+    held.bake = null;
+    if (held.drawn !== null) {
+      held.drawn = { ...held.drawn, labels: bake.made.labels, reasons: bake.made.reasons };
     }
   }
 
@@ -1164,8 +1530,9 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     held.build = null;
   }
 
-  /** Disposes a body's tables and draws nothing of it. */
+  /** Disposes a body's tables, cancels its thick bake and draws nothing of it. */
   #dropDrawn(held: HeldBody<T>): void {
+    this.#cancelBake(held);
     held.drawn?.tables?.dispose();
     held.drawn = null;
   }

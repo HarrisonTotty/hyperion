@@ -143,8 +143,8 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the captures to parts 2 to 12, which take none", () => {
-    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]) {
+  it("adds nothing for the captures to parts 2 to 13, which take none", () => {
+    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]) {
       expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
     }
   });
@@ -160,8 +160,8 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the GPU timings to parts 2 to 12, which take none", () => {
-    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]) {
+  it("adds nothing for the GPU timings to parts 2 to 13, which take none", () => {
+    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]) {
       expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(180_000);
     }
   });

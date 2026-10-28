@@ -82,7 +82,7 @@ export const GPU_TIMING_WATCHDOG_MS = 480_000;
 
 /** What sets a run's watchdog: the main process's switches. */
 export interface SmokeWatchdogInputs {
-  /** `--smoke-part`'s value: `1` to `12`, or `all`. */
+  /** `--smoke-part`'s value: `1` to `13`, or `all`. */
   readonly part: string;
   /** Whether `--smoke-captures` asks for the capture frames. */
   readonly captures: boolean;

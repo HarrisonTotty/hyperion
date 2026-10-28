@@ -11,7 +11,7 @@ import { OpticsJobs } from "../opticsJobs";
 import type { OpticsRequest } from "../opticsMessages";
 import type { ThickBakeBody } from "./bake";
 import { bakePolarisationCorrection, preparePolarisation } from "./polarisation";
-import { earthFixture, type EarthFixture } from "./polarisationFixtures";
+import { earthFixture, type EarthFixture } from "../../../test/polarisationFixtures";
 import type { SpectralColumn } from "./spectralColumn";
 
 /** A correction request of a column. */

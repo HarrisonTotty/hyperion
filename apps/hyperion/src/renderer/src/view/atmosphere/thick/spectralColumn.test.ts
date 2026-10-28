@@ -3,19 +3,29 @@ import { describe, expect, it } from "vitest";
 import { TITAN_FRACTIONS, titanClassMethaneMedium } from "../../../test/atmosphereFixtures";
 import type { Rgb } from "../../photometry/toneCurve";
 import { absorberTerm, thomsonTerm } from "../absorbers";
-import { type AerosolModeSpec, aerosolTerm } from "../aerosol";
+import { type AerosolModeSpec, aerosolTerm, deltaMTruncation } from "../aerosol";
 import { gaussLegendre } from "../irradianceQuadrature";
 import {
   type AtmosphereMedium,
+  BAKE_WAVELENGTHS_NM,
   CHANNEL_WAVELENGTHS_NM,
   columnLengthM,
   type MediumTerm,
   phaseAt,
 } from "../medium";
 import { molecularTerm } from "../rayleigh";
-import { TITAN_HAZE, titanClassColumn, VENUS_CLOUD_PARTICLES } from "./bakeFixtures";
+import { binGroundAlbedo } from "./bake";
+import { TITAN_HAZE, titanClassColumn, VENUS_CLOUD_PARTICLES } from "../../../test/bakeFixtures";
+import { cornetteShanksMeanCosine } from "./regime";
 import {
+  absorberSourceOf,
+  CHANNEL_SOURCE_MOMENT_ORDER,
+  channelBlendAt,
+  channelSource,
+  cornetteShanksMoments,
+  forwardDeltaShare,
   phaseMoments,
+  type SpectralPhase,
   type SpectralSource,
   spectralColumnOf,
   spectralOptics,
@@ -58,6 +68,9 @@ function phaseNumbers(
       break;
     case "none":
       values = [];
+      break;
+    case "moments":
+      values = [...phase.moments, phase.forwardDelta];
       break;
   }
   return { kind: phase.kind, values };
@@ -265,5 +278,302 @@ describe("the spectral column", () => {
     }
     // The absorber's source on the molecular term, and the molecular source on the absorber.
     expect(() => spectralColumnOf(medium, [third, second, first, ...rest])).toThrow(RangeError);
+  });
+});
+
+/** P_0 … P_order at μ by the three-term recurrence. */
+function legendreSeries(order: number, mu: number): Float64Array {
+  const p = new Float64Array(order + 1);
+  p[0] = 1;
+  if (order >= 1) {
+    p[1] = mu;
+  }
+  for (let l = 1; l < order; l += 1) {
+    p[l + 1] = ((2 * l + 1) * mu * (p[l] ?? Number.NaN) - l * (p[l - 1] ?? Number.NaN)) / (l + 1);
+  }
+  return p;
+}
+
+describe("Cornette and Shanks's moments", () => {
+  it("are a 400-node Gauss–Legendre quadrature of phaseAt's phase to 10⁻¹⁰ for l ≤ 32 at g 0, 0.3, 0.584 and 0.85", () => {
+    const order = 32;
+    const rule = gaussLegendre(400);
+    let worst = 0;
+    for (const g of [0, 0.3, 0.584, 0.85]) {
+      const moments = cornetteShanksMoments(g, order);
+      const integrals = new Float64Array(order + 1);
+      for (const [i, t] of rule.nodes.entries()) {
+        const mu = 2 * t - 1;
+        const weight =
+          2 *
+          (rule.weights[i] ?? Number.NaN) *
+          2 *
+          Math.PI *
+          phaseAt({ kind: "cornette-shanks", asymmetry: g }, mu)[0];
+        for (const [l, p] of legendreSeries(order, mu).entries()) {
+          integrals[l] = (integrals[l] ?? 0) + weight * p;
+        }
+      }
+      for (const [l, integral] of integrals.entries()) {
+        worst = Math.max(worst, Math.abs((moments[l] ?? Number.NaN) - integral));
+      }
+    }
+    // Measured 6.9 × 10⁻¹⁵ (2026-10-27).
+    expect(worst).toBeLessThan(1e-10);
+  });
+
+  it("take χ₀ as 1 and χ₁ as the phase's mean cosine, and at g = 0 Rayleigh's χ₂ of 1 ÷ 10 alone", () => {
+    const misses = [0.3, 0.584, 0.85, -0.4].map((g) => {
+      const moments = cornetteShanksMoments(g, 4);
+      return [moments[0], ulps(moments[1] ?? Number.NaN, cornetteShanksMeanCosine(g)) <= 2];
+    });
+    expect(misses).toEqual([
+      [1, true],
+      [1, true],
+      [1, true],
+      [1, true],
+    ]);
+    const isotropicShape = cornetteShanksMoments(0, 8);
+    expect(Math.abs((isotropicShape[2] ?? Number.NaN) - 0.1)).toBeLessThanOrEqual(2e-17);
+    expect([...isotropicShape].filter((_, l) => l !== 2)).toEqual([1, 0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it("refuses a g outside (−1, 1) and an order that is not whole", () => {
+    expect(() => cornetteShanksMoments(1, 4)).toThrow(RangeError);
+    expect(() => cornetteShanksMoments(Number.NaN, 4)).toThrow(RangeError);
+    expect(() => cornetteShanksMoments(0.5, 2.5)).toThrow(RangeError);
+  });
+});
+
+describe("a phase known by its moments", () => {
+  const moments = cornetteShanksMoments(0.584, CHANNEL_SOURCE_MOMENT_ORDER);
+  const phase: SpectralPhase = { kind: "moments", moments, forwardDelta: 0.25 };
+
+  it("gives its first moments to any even order up to its own, and its forward delta", () => {
+    expect([...phaseMoments(phase, 16)]).toEqual([...moments.subarray(0, 17)]);
+    expect(phaseMoments(phase, CHANNEL_SOURCE_MOMENT_ORDER)).toEqual(moments);
+    expect(forwardDeltaShare(phase)).toBe(0.25);
+  });
+
+  it("refuses an order past its own", () => {
+    expect(() => phaseMoments(phase, CHANNEL_SOURCE_MOMENT_ORDER + 2)).toThrow(RangeError);
+  });
+});
+
+/** A term of a medium by name, or a test failure. */
+function termNamed(medium: AtmosphereMedium, name: string): MediumTerm {
+  const term = medium.terms.find((t) => t.name === name);
+  if (term === undefined) {
+    throw new Error(`the medium has no term ${name}`);
+  }
+  return term;
+}
+
+/** A phase's moments, or a test failure for a phase of another kind. */
+function momentsOf(phase: SpectralPhase): Extract<SpectralPhase, { kind: "moments" }> {
+  if (phase.kind !== "moments") {
+    throw new Error(`a ${phase.kind} phase, not one of moments`);
+  }
+  return phase;
+}
+
+/** A phase's table, or a test failure for a phase of another kind. */
+function tableOf(phase: SpectralPhase): Extract<SpectralPhase, { kind: "tabulated" }>["table"] {
+  if (phase.kind !== "tabulated") {
+    throw new Error(`a ${phase.kind} phase, not a table`);
+  }
+  return phase.table;
+}
+
+/**
+ * The channel source's test wavelengths, nm: the three channels' (645, 544, 433.625), one beyond
+ * each end of their range, and one between each neighbouring pair.
+ */
+const BLEND_WAVELENGTHS_NM = [...CHANNEL_WAVELENGTHS_NM, 400, 700, 500, 600] as const;
+
+/** Rayleigh's χ₂ at the depolarisation ratio ρ: (1 − ρ) ÷ (5(2 + ρ)). */
+function chi2(rho: number): number {
+  return (1 - rho) / (5 * (2 + rho));
+}
+
+/** One drawn term's channel source's optics at {@link BLEND_WAVELENGTHS_NM}. */
+function channelOpticsOf(term: MediumTerm): ReadonlyArray<SpectralTermOptics> {
+  const column = spectralColumnOf(
+    { name: "one term", topHeightM: 100_000, groundAlbedo: [0, 0, 0], terms: [term] },
+    [channelSource(term)],
+  );
+  return spectralOptics(column, BLEND_WAVELENGTHS_NM).map(([optics]) => {
+    if (optics === undefined) {
+      throw new Error("the column has its one term");
+    }
+    return optics;
+  });
+}
+
+/** An array's entry, or NaN. */
+function at(values: ArrayLike<number>, i: number): number {
+  return values[i] ?? Number.NaN;
+}
+
+describe("a channel source", () => {
+  /** The Venus-class droplets' drawn term, its table with a matrix, and its source's optics. */
+  const droplets = once(() => {
+    const term = termNamed(fixture().medium, DROPLETS.name);
+    if (term.phase.kind !== "tabulated" || term.phase.table.matrix === undefined) {
+      throw new Error("the droplets' phase is a table with a matrix");
+    }
+    return { term, table: term.phase.table, optics: channelOpticsOf(term) };
+  });
+
+  it(
+    "gives at a channel's wavelength the term's coefficients to the bit and its table's channel as a table of its own",
+    { timeout: 60_000 },
+    () => {
+      const { term, table, optics } = droplets();
+      for (const c of [0, 1, 2] as const) {
+        const own = optics[c];
+        const copy = tableOf(own?.phase ?? { kind: "none" });
+        expect([own?.scatteringPerM, own?.absorptionPerM]).toEqual([
+          term.scattering[c],
+          term.absorption[c],
+        ]);
+        expect([...copy.values, copy.matrix?.b1[0], copy.matrix?.a2[2]]).toEqual([
+          table.values[c],
+          table.values[c],
+          table.values[c],
+          table.matrix?.b1[c],
+          table.matrix?.a2[c],
+        ]);
+        expect(forwardDeltaShare(own?.phase ?? { kind: "none" })).toBe(table.forwardPeak[c]);
+        expect(phaseMoments(own?.phase ?? { kind: "none" }, 16)).toEqual(
+          deltaMTruncation(table, c, 8).fullMoments,
+        );
+      }
+    },
+  );
+
+  it("holds the nearer channel's own beyond the channels' range: blue below 433.625 nm, red above 645 nm", () => {
+    const { term, optics } = droplets();
+    const [, , , below, above] = optics;
+    expect([below?.scatteringPerM, tableOf(below?.phase ?? { kind: "none" }).values[0]]).toEqual([
+      term.scattering[2],
+      tableOf(optics[2]?.phase ?? { kind: "none" }).values[0],
+    ]);
+    expect([above?.scatteringPerM, tableOf(above?.phase ?? { kind: "none" }).values[0]]).toEqual([
+      term.scattering[0],
+      tableOf(optics[0]?.phase ?? { kind: "none" }).values[0],
+    ]);
+  });
+
+  it("blends two channels between their wavelengths by the ground rule: its coefficients and forward delta the ground's own rule to the bit, its moments Σ w_c χ_l,c to 10⁻¹⁵", () => {
+    const { term, table, optics } = droplets();
+    let worst = 0;
+    for (const [k, nm] of [
+      [5, 500],
+      [6, 600],
+    ] as const) {
+      const blend = channelBlendAt(nm);
+      if (blend.kind !== "two") {
+        throw new Error(`${nm} nm lies between two channels`);
+      }
+      const own = optics[k];
+      const phase = momentsOf(own?.phase ?? { kind: "none" });
+      expect([own?.scatteringPerM, own?.absorptionPerM, phase.forwardDelta]).toEqual([
+        binGroundAlbedo(term.scattering, nm),
+        binGroundAlbedo(term.absorption, nm),
+        binGroundAlbedo(table.forwardPeak, nm),
+      ]);
+      const w = blend.offsetNm / blend.spanNm;
+      const low = deltaMTruncation(table, blend.low, CHANNEL_SOURCE_MOMENT_ORDER / 2).fullMoments;
+      const high = deltaMTruncation(table, blend.high, CHANNEL_SOURCE_MOMENT_ORDER / 2).fullMoments;
+      expect(phase.moments.length).toBe(CHANNEL_SOURCE_MOMENT_ORDER + 1);
+      expect(phase.moments[0]).toBe(1);
+      for (let l = 1; l <= CHANNEL_SOURCE_MOMENT_ORDER; l += 1) {
+        const expected = (1 - w) * at(low, l) + w * at(high, l);
+        worst = Math.max(worst, Math.abs(at(phase.moments, l) - expected));
+      }
+    }
+    // Measured 5.6 × 10⁻¹⁷: the ground rule's order of operations against the weights' (2026-10-27).
+    expect(worst).toBeLessThanOrEqual(1e-15);
+  });
+
+  it("takes a Rayleigh term's own ρ at a channel and, between two, the blend of their χ₂ alone", () => {
+    const molecular = termNamed(fixture().medium, "rayleigh");
+    if (molecular.phase.kind !== "rayleigh") {
+      throw new Error("the molecular term's phase is Rayleigh's");
+    }
+    const rho = molecular.phase.depolarisation;
+    const optics = channelOpticsOf(molecular);
+    expect(optics.slice(0, 3).map((o) => o.phase)).toEqual([
+      { kind: "rayleigh", depolarisation: rho[0] },
+      { kind: "rayleigh", depolarisation: rho[1] },
+      { kind: "rayleigh", depolarisation: rho[2] },
+    ]);
+    const w =
+      (500 - CHANNEL_WAVELENGTHS_NM[2]) / (CHANNEL_WAVELENGTHS_NM[1] - CHANNEL_WAVELENGTHS_NM[2]);
+    const between = momentsOf(optics[5]?.phase ?? { kind: "none" });
+    expect(
+      Math.abs(at(between.moments, 2) - ((1 - w) * chi2(rho[2]) + w * chi2(rho[1]))),
+    ).toBeLessThan(1e-16);
+    expect([...between.moments].filter((_, l) => l !== 0 && l !== 2).every((m) => m === 0)).toBe(
+      true,
+    );
+  });
+
+  it("takes a Cornette–Shanks term by its closed-form moments at every wavelength, with no forward delta", () => {
+    const optics = channelOpticsOf({
+      name: "aerosol",
+      density: { kind: "exponential", scaleHeightM: 1_200 },
+      scattering: [1e-5, 2e-5, 3e-5],
+      absorption: [1e-6, 2e-6, 3e-6],
+      phase: { kind: "cornette-shanks", asymmetry: 0.584 },
+    });
+    const closed = cornetteShanksMoments(0.584, CHANNEL_SOURCE_MOMENT_ORDER);
+    let worst = 0;
+    for (const o of optics) {
+      const phase = momentsOf(o.phase);
+      expect(phase.forwardDelta).toBe(0);
+      for (const [l, m] of phase.moments.entries()) {
+        worst = Math.max(worst, Math.abs(m - at(closed, l)));
+      }
+    }
+    expect(momentsOf(optics[1]?.phase ?? { kind: "none" }).moments).toEqual(closed);
+    // A blend of one set of moments with itself is exact.
+    expect(worst).toBe(0);
+  });
+
+  it("is refused on an absorber term, which takes its amount", () => {
+    const absorber = fixture().medium.terms.find((t) => t.absorber !== undefined);
+    if (absorber === undefined) {
+      throw new Error("the medium has an absorber");
+    }
+    const one: AtmosphereMedium = {
+      name: "one absorber",
+      topHeightM: 100_000,
+      groundAlbedo: [0, 0, 0],
+      terms: [absorber],
+    };
+    expect(() => spectralColumnOf(one, [channelSource(absorber)])).toThrow(RangeError);
+    expect(spectralColumnOf(one, [absorberSourceOf(absorber)]).terms[0]?.source.kind).toBe(
+      "absorber",
+    );
+  });
+});
+
+describe("the ground rule", () => {
+  it("takes each channel's own value at its wavelength, and blends its neighbours between", () => {
+    const albedo = [0.1, 0.5, 0.9] as const;
+    expect(CHANNEL_WAVELENGTHS_NM.map((nm) => binGroundAlbedo(albedo, nm))).toEqual([...albedo]);
+    expect(CHANNEL_WAVELENGTHS_NM.map((nm) => channelBlendAt(nm))).toEqual([
+      { kind: "one", channel: 0 },
+      { kind: "one", channel: 1 },
+      { kind: "one", channel: 2 },
+    ]);
+    // 392.67 and 418 nm under blue's 433.625, 646 nm and up over red's 645.
+    expect(BAKE_WAVELENGTHS_NM.map((nm) => channelBlendAt(nm).kind)).toEqual([
+      ...Array.from({ length: 2 }, () => "one"),
+      ...Array.from({ length: 8 }, () => "two"),
+      ...Array.from({ length: 5 }, () => "one"),
+    ]);
   });
 });

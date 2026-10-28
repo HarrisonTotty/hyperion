@@ -48,6 +48,16 @@
  *   since R08.T11.c, `x2p` and the whole count since R08.T11.d (for QW30), its giants placed as
  *   (A)'s but at `SATURN_GIANT_DISTANCE_M`, beyond the farthest of its cameras.
  *
+ * R08.T14.c adds two under `--smoke-thick-read=1` alone (the smoke's override; the route stays
+ * gated, `thick/routing.ts`), timed and reported as (A) and (I) are:
+ *
+ * - (K) the measured Earth through the thick read: (A)'s combinations on both settings, its tables
+ *   (its own, beside (A)'s) holding its bake under the reference Sun on both light slots
+ *   (`thick/keptBake.ts`, made on the page before the renderer), so that the sky view, the aerial
+ *   perspective and the march read the thick table (`hillaire.ts`'s `withThickRead`), and its J_ms
+ *   bytes beside its rows;
+ * - (L) the same tables under R10's smoke class map, (I)'s judged rows.
+ *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
  * timed, back to back; two sweeps over every combination, the second in the reverse order. There
@@ -76,12 +86,17 @@ import {
 import {
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
+  EARTH_REFERENCE_SOURCES,
   EARTH_SLAB_REFERENCE,
   EARTH_SLAB_REFERENCE_CURVES,
   R05_EARTH_REFERENCE,
+  R06_SOLAR_BAKE_SPECTRUM,
 } from "../view/atmosphere/earth";
 import { forwardLobeOf } from "../view/atmosphere/forwardLobe";
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
+import { keptBakeLightsOf } from "../view/atmosphere/opticsMessages";
+import { bakeKeptCase } from "../view/atmosphere/thick/keptBake";
+import { THICK_TABLE_BYTES_A_SLOT } from "../view/atmosphere/thick/read";
 import {
   absorberCount,
   type AbsorberCurveSlots,
@@ -233,6 +248,8 @@ const EARTH_IDS = {
   classMap: "0200080020000000.0314",
   saturn: "0200080020000000.0315",
   palette: "0200080020000000.0316",
+  thick: "0200080020000000.0317",
+  thickClassMap: "0200080020000000.0318",
 } as const;
 
 /** (H)'s three small bodies' ids, in `SMALL_TRIO`'s order. */
@@ -2176,14 +2193,73 @@ function summaryCheckNames(): string[] {
   ];
 }
 
+/** What a run of {@link timeAtmosphereFrame} takes beyond its checks. */
+export interface FrameTimingOptions {
+  /**
+   * Whether (K) and (L) run: the measured Earth through the thick read, its bake forced on (plan
+   * R08, R08.T14.c; the page's `thickRead`, `--smoke-thick-read=1`).
+   */
+  readonly thickRead: boolean;
+}
+
+/** (K)'s medium's name in its checks. */
+const THICK_EARTH_NAME = "the measured Earth through the thick read";
+
+/** (L)'s medium's name in its checks. */
+const THICK_CLASS_MAP_NAME =
+  "the measured Earth under R10's smoke class map, through the thick read";
+
+/**
+ * (K)'s medium: the measured Earth as (A) draws it, its own tables holding its thick bake on both
+ * light slots under the reference Sun (`R06_SOLAR_BAKE_SPECTRUM`, the spectrum its curves were
+ * formed under), made on the page (`thick/keptBake.ts`), held by `releases`, with what its rows say
+ * of the table.
+ */
+function thickMeasuredMedium(
+  engine: RenderEngine,
+  releases: Releases,
+  measured: FrameMedium,
+): { readonly medium: FrameMedium; readonly about: string } {
+  const tables = releases.hold(
+    earthTables(engine, measured.medium, measured.tables.curves),
+    (made) => {
+      made.dispose();
+    },
+  );
+  const slots = measured.tables.curves.length;
+  const start = performance.now();
+  const body = earthBody();
+  const bands = bakeKeptCase(
+    { medium: measured.medium, sources: EARTH_REFERENCE_SOURCES },
+    keptBakeLightsOf(
+      measured.medium,
+      Array.from({ length: slots }, () => R06_SOLAR_BAKE_SPECTRUM),
+    ),
+    { ...body, bottomRadiusM: tableRadiusM(body.figure) },
+  );
+  const bakeMs = performance.now() - start;
+  tables.setThickTables(bands);
+  const packed = tables.thickPacked;
+  const layers = packed?.layers ?? 0;
+  return {
+    medium: { ...measured, name: THICK_EARTH_NAME, id: EARTH_IDS.thick, tables },
+    about: `its tables (its own, beside (A)'s) hold its thick bake (R08.T14.c's smoke-only override; the route stays gated): ${packed?.bands ?? 0} band and ${packed?.slots ?? 0} light slots, both under the reference Sun, baked on the page in ${(bakeMs / 1_000).toFixed(1)} s; its J_ms ${layers} × ${THICK_TABLE_BYTES_A_SLOT.toLocaleString("en-GB")} B as rgba16float would hold it (${(layers * THICK_TABLE_BYTES_A_SLOT).toLocaleString("en-GB")} B), ${tables.thickBytes.toLocaleString("en-GB")} B allocated with the info rows, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view, the aerial perspective and the march read it (withThickRead), the analytic term below the horizon`,
+  };
+}
+
 /**
  * R08.T11's photorealistic frame's timings (the module's remarks): (D) first, so that its cold
  * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), R08.T11.c's
- * (H), (I) and (J), then (E) and (F);
+ * (H), (I) and (J), R08.T14.c's (K) and (L) where `options.thickRead` asks (their bake made before
+ * the renderer, with (I)'s and (J)'s media), then (E) and (F);
  * a check a table, one per combination with its per-frame sums, and one that no timed frame was
  * dropped. Without `timestamp-query` each check fails with the reason.
  */
-export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks): Promise<void> {
+export async function timeAtmosphereFrame(
+  engine: RenderEngine,
+  checks: Checks,
+  options: FrameTimingOptions = { thickRead: false },
+): Promise<void> {
   if (!engine.capabilities.timestampQuery) {
     for (const name of summaryCheckNames()) {
       checks.check(name, false, "no timestamp-query, so no pass times");
@@ -2214,6 +2290,24 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
     const specs = classMapSpecs();
     const mapped = specs.map((spec) => classMapMedium(engine, releases, measured, spec));
     const saturn = await saturnMedium(engine, releases);
+    // (K)'s and (L)'s media before the renderer, as (I)'s and (J)'s, its bake made here.
+    const thick = options.thickRead
+      ? await timedPart("(K)'s bake", () =>
+          Promise.resolve(thickMeasuredMedium(engine, releases, measured)),
+        )
+      : null;
+    const judged = specs.find((spec) => spec.name === CLASS_MAP_NAME);
+    if (judged === undefined) {
+      throw new Error("(I)'s judged class map is among its specs");
+    }
+    const thickMapped =
+      thick === null
+        ? null
+        : classMapMedium(engine, releases, thick.medium, {
+            ...judged,
+            name: THICK_CLASS_MAP_NAME,
+            id: EARTH_IDS.thickClassMap,
+          });
     const firstPlace = FAR_LIMB_TIMING_PLACES[0];
     const firstSet = sourceSetsOf("high")[0];
     if (firstPlace === undefined || firstSet === undefined) {
@@ -2252,6 +2346,21 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       () =>
         `${SATURN_NAME}: ATMOSPHERE TEST's saturn-oblate on Saturn's spheroid, ${saturn.tables.plan.kappa.length} slices and ${saturn.tables.plan.bands.length} bands, its body a grey Lambert sphere of its ground albedo; (A)'s five cameras with every distance scaled by its equatorial radius over WGS 84's (${ratio.toFixed(4)}), so that its disc and limb fill the frame as the Earth's do; the setting's sets as the Earth's, its giants placed as the Earth's but ${(SATURN_GIANT_DISTANCE_M / GIANT_EQUATORIAL_RADIUS_M).toFixed(0)} of their radii off (${SATURN_GIANT_DISTANCE_M.toExponential(2)} m), beyond its farthest camera, so that their planetshine stays past the sky's negligible skip at every camera`,
     );
+    let thickMissing = 0;
+    if (thick !== null && thickMapped !== null) {
+      const thickFrames = await timedPart("(K)", () => timeFrames(on, ledger, [thick.medium]));
+      reportFrames(checks, thickFrames, () => thick.about);
+      const thickMappedFrames = await timedPart("(L)", () =>
+        timeClassMap(on, ledger, [thickMapped]),
+      );
+      reportFrames(
+        checks,
+        thickMappedFrames,
+        () =>
+          `${MEASURED_EARTH_NAME}'s body under ${judged.about}, under its own id, over (K)'s tables: ${thick.about}`,
+      );
+      thickMissing = missingOf(thickFrames) + missingOf(thickMappedFrames);
+    }
     const frameMissing = missingOf(frames);
     const mappedMissing = missingOf(mappedFrames);
     const saturnMissing = missingOf(saturnFrames);
@@ -2262,11 +2371,12 @@ export async function timeAtmosphereFrame(engine: RenderEngine, checks: Checks):
       bareMissing +
       trioMissing +
       mappedMissing +
-      saturnMissing;
+      saturnMissing +
+      thickMissing;
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) and (L) ${thickMissing}`}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>

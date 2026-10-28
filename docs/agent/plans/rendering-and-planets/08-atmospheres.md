@@ -5660,7 +5660,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     16.67 ms, each Earth-class row's J_ms bytes beside it: 270,336 B a band and light, as
     `rgba16float`.
 
-  Acceptance: `pnpm test` and `just test-render` pass.
+  Acceptance: `pnpm test` and `just test-render` pass. _Built 2026-10-27_ (Risks, "Deviations in
+  T14.c, as built", its recorded runs and frame record, and "Preconditions of R08.T14.d's
+  routing").
 
 - **R08.T14.e The polarisation correction** (Design note 10; ruled 2026-10-09,
   `decision-r08-vector.md` item 2). It needs R08.T14.a and R08.T14.b.
@@ -20391,6 +20393,267 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
   - _A Cholesky that does not throw._ `expSum.ts` keeps its own `definiteSolve` for the fit's damped
     steps, where a matrix that is not positive definite is an outcome, since `linearAlgebra.ts`'s
     `choleskyLower` throws; T14.a's module could give both the non-throwing form.
+- **Deviations in T14.c, as built** (2026-10-27; `thick/read.ts`, `shaders/thickRead.wgsl`,
+  `hillaire.ts`, `tables.ts`, `tablesCpu.ts`, `reference/twin.ts`, `thick/spectralColumn.ts`,
+  `thick/columnLayout.ts`, `thick/keptBake.ts`, `thick/routing.ts`, `thick/bake.ts`,
+  `thick/polarisation.ts`, `assemble.ts`, `aerosol.ts`, `absorbers.ts`, `earth.ts`,
+  `reference/cases.ts`, `opticsMessages.ts`, `opticsJobs.ts`, `opticsPool.ts`,
+  `AtmosphereCache.ts`, `view/engine/catalogue.ts`, `view/scenes/atmosphereScene.ts`, the smoke's
+  `atmosphere.ts`, `page.ts`, `frameTiming.ts`, `main.ts` and `result.ts`, `testRender.sh`,
+  `tsconfig.worker.json`, each with its
+  tests; `reference/thickRuns.test.ts` and `thickRuns.json`; `decision-r08-t13c2-classes.md` §1 and
+  §6, and main's rulings on the lane's five leans, 2026-10-27).
+  - _What the table holds_ (`thick/read.ts`'s `packThickTable`; main's lean 4). Not E: J⁰ = E⁰ ÷
+    σ_s,k(h) and G = E¹ ÷ (σ_s,k(h) sin θ_v sin θ₀) per channel, σ_s,k the kernels' own scattering
+    at the table's altitude (`kernelMedium`'s, every forward delta out), sin θ at the cell's centre.
+    The read is J = max(J⁰ + G·h⊥, 0), h⊥ = v·s − (v·n)(s·n), E¹ cos Δφ ÷ σ_s,k exactly at the
+    centres, times the sample's scattering, as Ψ_ms is. Dividing by σ_s,k gives J Ψ_ms's order and
+    lets it vary slowly between the rows, 1.3–24 km apart. G makes the read continuous at the
+    zenith and under an overhead sun, where E¹ (a sum of P_l¹(μ_v) P_l¹(μ₀)) falls as
+    sin θ_v sin θ₀. The dips of E⁰ + E¹ cos Δφ below 0 are held at 0 (T14.b's lean).
+  - _The half floats_ (T14.b's deferred finding, settled). Over the recorded bakes E⁰ runs
+    2.5 × 10⁻¹⁵–7.5 × 10⁻⁶ m⁻¹ sr⁻¹ on `earth` (4.1 × 10⁻⁴ at most on R08.T6.c's Venus-class
+    medium), mostly under `rgba16float`'s least normal (6.1 × 10⁻⁵). J⁰ runs 7.8 × 10⁻⁴–0.056 sr⁻¹
+    on `earth`, 1.7 × 10⁻³–0.17 on `mars`, 2.1 × 10⁻³–0.10 on `saturn-oblate` and 1.3 × 10⁻⁵–0.34 on
+    the Venus-class medium. |G| ≤ 0.068, 1.8, 0.0034 and 0.99. Only the Venus-class medium has
+    entries under the least normal: 80 of 50,688, each under 4 × 10⁻⁵ of its largest. The packed
+    table reads back within 1.2 half ulps (2⁻¹¹) of its values (`thick/read.test.ts`).
+  - _The texture._ `rgba32uint`, not `rgba16float`: six halves a texel (J⁰ rgb, G rgb, two to a
+    word, `pack2x16float`'s order) and a spare word, so that one load gives both modes. 16 texels
+    across (μ_v), 33 × 32 rows (altitude, μ₀) and an info row (the altitudes as `f32` bits and the
+    slots a band), one layer a band and light slot, `multiScattering`'s order. A band and light is
+    270,336 B, as `rgba16float` would hold it (`THICK_TABLE_BYTES_A_SLOT`), and 270,592 B
+    allocated (`THICK_LAYER_BYTES`). The read is linear in h (rows by five halvings of the
+    altitudes), μ₀ = (s + ½) ÷ 32 and μ_v = (v + ½) ÷ 8 − 1, held at the edges, and in ln s
+    between bands as `bandTableAt` is: eight loads a band and source.
+  - _The kernels_ (main's lean 3). `withThickRead(pair)` rewrites three lines of a kernel's sources
+    (`THICK_READ`) and appends `thickRead.wgsl`. `sourceAt`'s calls become `thickSourceAt`'s, and the
+    forward lobes' orders are taken at the analytic term's share. The table binds at
+    `@group(0) @binding(24)`. Six variants: `SKY_VIEW_THICK_KERNEL`,
+    `AERIAL_PERSPECTIVE_THICK_KERNEL`, `RAY_MARCH_THICK_KERNEL`, `RAY_MARCH_SLOTS_THICK_KERNEL`, and
+    `RAY_MARCH_THICK_SPECIAL_KERNEL` and `RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL` (`withMarchSpecialised`
+    of them, the read's band count through `oblateBandCount`).
+    - The thin kernels are unchanged to the byte: `thickKernels.test.ts` pins their sources'
+      digests as at e8b5c6f3.
+    - A thick body's march takes no tile cull, so there are no thick centre-ray kernels. Under the
+      `tiles` cover its area takes the footprint's every tile, exact as the cull is.
+    - `FrameKernels.thick` makes them at the first frame of tables that hold one, unless made
+      ahead (`FrameKernelsAhead.thick`, the frame timing's).
+    - `VIEW_KERNELS` grows from 19 to 25. Over the 50 bodies, whose second pass has thick tables,
+      the distinct kernels are 12 after the first pass and 18 after the second, then none more
+      (`renderer.test.ts`), bounded by the list.
+    - `ATMOSPHERE_THICK_ENTRIES` are catalogued in `WGSL_CATALOGUE`. The smoke compiles them in
+      part 13 (below), since with them part 1's catalogue took 33 s more under load.
+  - _Below the horizon_ (as ruled). The analytic term's share is 1 − clamp(32 μ₀, 0, 1)
+    (`thickAnalyticShare`): Ψ_ms alone at μ₀ ≤ 0, the table alone from 1/32, linear across the
+    first cell. At μ₀ ≤ 0 the thick kernels' arithmetic is the thin kernels', the lobes'
+    included.
+  - _The lobes_ (main's lean 2). The bake's E holds the aureole scattered once more by the smooth
+    part, which the R08.T7 orders' tail also adds, so the orders take the analytic share and drop
+    on the table's side. Their in-lobe part (T14.b's IMS: the aureole scattered again within the
+    lobe) is not in E, so the table's side leaves it out wherever a lobe is drawn: Mars-class dust
+    and generated Mie aerosols. Earth's Cornette–Shanks aerosol and the gases draw none. On `mars`
+    the bake's own measure of that share is 11% (`doubleForwardShare`), against T14.b's 1.2% and
+    5.0%. The aureole reads 0.55–0.71 of the reference through the table (c1, with the orders at
+    full weight, 1.00–1.16).
+  - _The tables_ (`tables.ts`). `AtmosphereTables.setThickTables(bands | null)` packs against
+    `kernelMedium(medium)` and refuses bands that are not the plan's (count and s). It adds
+    `thickTable`, `thickPacked` and `thickBytes`, which `rowBytes` counts. A rebuild for another
+    medium drops the table, a restore uploads it again, and `dispose` releases it.
+    `TABLE_SIZES[s].thick` is `THICK_TABLE_SIZE` (33, 32, 16, 2) on both settings.
+  - _The twin_ (`tablesCpu.ts`, `reference/twin.ts`). `PlanetTwin.thick` and
+    `OblatePlanetTwin.thick` hold the packed table. `TwinSources.thickSource` and
+    `OblateReader.thickInto` read it as the WGSL does, and the `Marcher` mixes it with Ψ_ms and
+    takes the lobes at the same share. `TwinOptions.thick` gives a twin its bake, refused with
+    `zeroed` multiple scattering, and `TwinOptions.multiScatteringSize` takes the control's Ψ_ms.
+    `twinBakeBody(figure)` is the twin's own body for a bake.
+    - The sky's irradiance (T9.b's surface lighting) still integrates Ψ_ms on a thick body: the
+      task names the three kernels alone (main's lean 5; a precondition below).
+  - _The kept scenes' bake_ (§6; main's lean 1).
+    - `SpectralSource` gains `channels` (a term's channel optics and phase, `channelSource`), and
+      `SpectralPhase` gains `moments`. Outside the channels' span, and at a channel's own
+      wavelength, a bin takes that channel's own phase, a table's matrix included. Between two
+      channels it takes the ground rule's blend of every coefficient, moment and forward delta,
+      which the vector bake reads as a depolariser, a stated approximation. The rule moved from
+      `binGroundAlbedo` to `spectralColumn.ts`'s `channelRuleAt`/`channelBlendAt`, which
+      `binGroundAlbedo` now calls; `binConversion.ts` holds none of it.
+    - Cornette–Shanks moments in closed form (`cornetteShanksMoments`): p_CS = A(1 + μ²) p_HG,
+      A = 3 ÷ (2(2 + g²)), so χ_l = A[g^l(1 + β_l) + α_l g^(l+2) + γ_l g^(l−2)] from μ²P_l's
+      three-term recurrence. They agree with a quadrature of `phaseAt` to 6.9 × 10⁻¹⁵ (l ≤ 32).
+    - `TEST MARS`'s dust bakes on its exact `aerosol` source: `MARS_DUST_MODE`'s particles exist,
+      and `aerosolModeOptics` covers 380–780 nm. The ruling took it to have none. `TEST EARTH`'s
+      aerosol takes the channels source. The kept media's sources (`EARTH_REFERENCE_SOURCES`,
+      `EARTH_SLAB_REFERENCE_SOURCES`, `MARS_REFERENCE_SOURCES`, `SATURN_OBLATE_REFERENCE_SOURCES`,
+      `ReferenceCase.sources`, `BuiltAtmosphere.sources`) reproduce every drawn coefficient and
+      phase at the channels to the bit. `earth.ts` writes its aerosol's channels source out (no
+      import of `aerosol.ts`'s 4 MB), held equal to `channelSource` by a test.
+    - `DrawnMedium.sources` is built (T14.b's hand-off), formed where the terms are, and holds the
+      assembled records to the bit.
+    - `keptBake.ts`: `bakeKeptCase`, `keptColumnOf` and `sphereBakeBody`. A kept bake's lights ride
+      in the `thick-bake` request's new `kept` field (`KeptBakeLights`, `keptBakeLightsOf`,
+      `referenceCaseBakeLights`), and `thickBakeLights` is factored out of `opticsJobs.ts`.
+    - Bake times, one band and the full grid at a load of about 2.4: `TEST EARTH` 1.37 s,
+      `TEST MARS` 0.88 s, `TEST EARTH` through `OpticsJobs` 1.27 s.
+  - _The route, gated_ (`thick/routing.ts`, `opticsPool.ts`, `AtmosphereCache.ts`).
+    `GATED_REGIMES` is empty, and `thickBakeRouted(regime)` is true only for `thickScattering` in it
+    (R08.T14.d adds it; `cloudDeck`'s bake is R08.T15's). The cache takes `routes` for its tests.
+    - A routed body's bake is asked once its tables are made: every band of the tables' plan and
+      every light slot in one `bakeThick`, its tables' built body, its column from its sources. A
+      kept body uses its own lights, or the reference Sun.
+    - Labels: COMPUTING in APPROXIMATE's place with no reasons while it bakes. Once baked,
+      `THICK_REASON` drops, and APPROXIMATE stands only on another reason. A failed bake gives
+      APPROXIMATE with every reason, never a problem or NOT AVAILABLE (a `thick-bake-failed`, an
+      exhausted pool, tables that refuse it). A lost worker re-bakes under COMPUTING.
+    - The baked tables are kept with the entry for tables made again. A new entry, the body
+      dropped, or the cache disposed cancels the bake.
+    - A lost worker's bake is asked again of its replacement under COMPUTING, and APPROXIMATE
+      stands only once every worker is given up. This departs from T14.b's _Also for T14.c_ ("a
+      bake whose worker is lost … T14.c shows APPROXIMATE"): a loss the pool retries is not a
+      failed computation (the guide: APPROXIMATE stands "if the computation fails"). A k-table
+      that fails to load reaches the pool as a lost worker, and so is retried until the pool gives
+      up.
+    - `spectralColumnOf` moved to `thick/columnLayout.ts`, re-exported, so that the cache loads no
+      absorber data on the render thread.
+  - _The smoke._ The kernels against their twins over a patterned table (`test/thickTables.ts`):
+    R05's Earth in part 13 at four frames (2 km over a surface, the limb, the sun 1° up and 2°
+    down) and the Saturn-class figure in part 3, all within R08.T6.b's 10⁻³. The thick
+    specialised march against the general one over the whole frame, byte for byte on SwiftShader,
+    in part 13. `--smoke-thick-read=1` adds the frame timing's (K) and (L) (below).
+    - Part 13 joined for them (main, 2026-10-27), first its kernels' catalogue, then the Earth's
+      twins, then the specialised march (`page.ts`, `testRender.sh`, the smoke's `main.ts`,
+      `result.ts` and `result.test.ts`, on part 12's pattern). At the last four gates parts 9,
+      11 and 12 had run 51–131 s, 86–133 s and 46–135 s. The catalogue (some 33 s at part 1's
+      pace), the Earth's twins and the specialised march would have taken them to some 160–166 s
+      at their slowest. The Saturn-class figure's twins, the smallest, stay in part 3
+      (67–126 s).
+  - _The fixtures' home_ (T14.b's and T14.e's deferred findings). `bakeFixtures.ts` and
+    `polarisationFixtures.ts` moved from `thick/` to `test/`, their imports only.
+  - _Departures from the brief._ The tile cull is not built for thick bodies. The smoke gains a
+    part 13, for the thick read's groups. The kept bake's input is `{kind: "kept", atmosphere:
+{kind: "unset"}}`, its lights in `kept`. The recorded runs are a by-hand test
+    (`HYPERION_THICK_RUNS=1`) writing `thickRuns.json` through `bless.ts`, recorded and never
+    gated; `.prettierignore` leaves it as written, as it does `caseGate.json`.
+- **R08.T14.c's recorded runs** (`reference/thickRuns.json`; §1, nothing re-traced). c1's scalar
+  gate through the twin with each case's bake in place of Ψ_ms, beside c1's (misses of the
+  comparisons; worst |ΔL| ÷ (T + 4σ)):
+
+  | Case               | c1               | Through the bake |
+  | ------------------ | ---------------- | ---------------- |
+  | `earth`            | 109 of 360, 3.68 | 47, 2.92         |
+  | `earth-ozone-slab` | 108 of 360, 3.65 | 44, 2.98         |
+  | `mars`             | 213 of 384, 7.48 | 197, 27.95       |
+  | `saturn-oblate`    | 255 of 474, 38.8 | 122, 38.8        |
+  - `earth`: by image, misses go 15 → 1 at ground-s30, 23 → 12 at s60, 44 → 13 at s80 and 7 → 4
+    on the aerial paths. The discs now pass and s90 is unchanged (18 → 17). The views at s80 read
+    0.85–1.20 of the reference (c1 0.74–1.01).
+  - `saturn-oblate`'s daylit images: equator-s80 goes from 24 misses to 0 (ratios 0.955–1.015),
+    lat60-s80 from 22 to 0 and pole-s80 from 23 to 0. Its twilight (s90, s95) is unchanged, since
+    the sun is at or below the observer's horizon and the analytic term reads.
+  - **Earth's remaining misses are the bake's m ≤ 1.** At grazing views under a low sun, thick ÷
+    ref at s80 v85 is 0.96, 1.03, 1.20, 0.95 and 0.85 at a0–a180. That is what a + b cos Δφ makes
+    of a source peaked toward the sun: too low at 0° and 180°, too high at 90°. The source is the
+    forward-peaked Cornette–Shanks aerosol's second-order source, whose m-th harmonics fall as
+    sin^m θ_v sin^m θ₀, and `THICK_BAKE_MODES` 2 leaves out m ≥ 2.
+    - The science check's plane-parallel second-order estimate (red: τ_R 0.05, aerosol τ 0.081,
+      ω 0.92, g 0.584; sun 10° and view 5° up) gives 0.97, 1.01, 1.18, 0.97 and 0.89. Its m = 1
+      to 5 harmonics are 1.25, 0.71, 0.32, 0.13 and 0.05 of m = 0. Keeping m ≤ 2 brings the row to
+      0.97–1.04, and m ≤ 3 to 0.97–1.01 (an estimate, moderate confidence on the numbers).
+    - Rayleigh's P2 adds a cos 2Δφ part ∝ sin²θ_v sin²θ₀ worth about 5% of its own source: under
+      1% of the radiance in red and 1.6% in blue.
+    - `saturn-oblate`, pure H₂–He Rayleigh, caps the dropped part at that m = 2. So it shows
+      little, mainly because it has no forward-peaked scatterer; depth is secondary.
+  - **Mars is worse through the bake**: 0.08 (s80 v85 a180) to 2.97 (a90), the limb 1.26–1.82, the
+    aureole 0.55–0.70. Its forward-peaked dust needs far more modes than two, and the lobes'
+    orders dropped leave out its in-lobe light.
+  - **The control** (run since Earth's s60 and s80 still miss). c1's analytic twin with Ψ_ms at
+    four times its μ_s (128 × 32) and the sky view at four times its rows (192 × 432) misses as
+    c1 does: 23 at s60 and 44 at s80 (132 of 360 in all, s90 41 from 18). On the (1, 0) points it
+    fails 2 of 54 geometries at τ 1/8 and 21 at ¼, as at the kernels' sizes. The cause is the
+    route, not the tables' size.
+  - _What the label covered_ (`decision-r08-t6b-floor.md` §9.4.3). On R08.T6.c's Venus-class
+    medium the analytic table's largest 1 ÷ mean(escape) is 6.0 × 10¹¹, in blue at 12.9 km. At
+    μ_s −1 its Ψ_ms is 0, and the bake holds no sun. At μ_s 0.032, the first daylit texel, its
+    Ψ_ms is 3.2 × 10⁻¹⁷ sr⁻¹ against the bake's J⁰ of 6.6 × 10⁻⁴ sr⁻¹ averaged over μ_v. There the
+    analytic term had lost the multiply scattered light whole.
+
+- **R08.T14.c's frame record** (QW32, two timed runs, 17:52–17:59 at loads of 0.6–1.5; the RTX
+  3080, P0, busy median 1,965 MHz; `docs/measurements/atmosphere-frame/2026-10-27-qw32-thick-read-frame-timings.md`
+  and its `.txt`). The measured Earth went through the thick read with the smoke-only override
+  (`--smoke-thick-read=1`): (K) at (A)'s rows and (L) under R10's judged class map at (I)'s.
+  - Its bake took one band and two slots under the reference Sun, made on the page in 2.6 s. J_ms
+    is 2 × 270,336 B as `rgba16float` would hold it, and 541,184 B allocated; the row is 1,139,888
+    B in all.
+  - Judged by QW31's rule (a row stalled in one run, at least 5 consecutive frames over 1.5 times
+    its median, is judged from the other; every other row on the worse p95): the thin measured
+    Earth's 10⁷ m x2 (run 1) and 1.54 × 10⁷ m x4 (run 2) stalled, and the thick one's 400 km x1
+    (run 1), and 10⁷ m x1 and x2 (run 2).
+  - At the binding rows, thin → thick p95, ms:
+
+    | Medium    | Camera | x2            | x2p           | x4            |
+    | --------- | ------ | ------------- | ------------- | ------------- |
+    | measured  | 400 km | 10.66 → 16.11 | 9.30 → 10.12  | 11.43 → 13.06 |
+    | measured  | 10⁷ m  | 12.06 → 13.85 | 13.85 → 15.61 | 15.97 → 14.85 |
+    | class map | 400 km | 12.66 → 17.51 | 10.94 → 11.70 | 13.48 → 18.75 |
+    | class map | 10⁷ m  | 13.34 → 18.79 | 12.51 → 13.98 | 14.75 → 16.51 |
+
+    The measured Earth's other high rows meet 15.67 thick (worst 15.22, 1.54 × 10⁷ m x2).
+
+  - The three class-map rows over 16.67 are run 1's tails against steady medians. 14, 16 and 6
+    of their 60 frames were over 16.67, with the atmosphere pass's p95 at 12.0–13.8 ms over a
+    median of 8.1–9.9. Run 2's same rows are clean: 13.79, 15.61 and 15.14. The measured Earth's
+    400 km x2 16.11 is the same tail (run 2 12.23).
+  - The cost is the atmosphere pass's median: +0.8 to +1.8 ms, +1.5 to +1.8 at x2 and x4 at
+    400 km and 10⁷ m. The bodies', disc cells' and discs' passes move by under 0.04 ms.
+  - Class map 10⁷ m x4 sits at 16.22–16.32 on its median and 16.45–16.51 p95 in both runs. So the
+    route does not meet `decision-r08-t11-frame.md`'s blocker as built, and T14.f's lever (its
+    frame over 15.67 ms) is triggered (main, 2026-10-27).
+  - Two levers, recorded and not built:
+    - the altitude row found once a sample, not by five dependent loads a source;
+    - T14.f's summed table of m = 0..2, the bake's E and ΔJ_pol on T14.b's grid, one read where a
+      thin world makes two.
+- **Preconditions of R08.T14.d's routing** (main, 2026-10-27). Recorded here, binding T14.d:
+  1. The bake holds m ≥ 2 (m = 3 if the gate needs it), because of the aerosol's forward-peaked
+     second-order source (the recorded runs above). That is a contract change: `MsSourceTable`
+     gains modes, and the read takes a second texel a cell. Its frame cost is measured at T14.d.
+  2. Mars is not routed through the bake as it is: its forward-peaked dust is worse through it
+     (0.08–2.97 at s80 v85, the aureole 30–45% dim). T14.d takes one of the science check's two
+     options and routes Mars only if its gate passes:
+     - (a) bake E without its aureole term (1 − f) p′(Θ₀)(T′ − T_k) and keep the lobes' orders at
+       full weight at every μ₀;
+     - (b) keep E, and on the table's side add the lobes' orders less their wide-angle tail.
+       Either way, the Mars aureole rows are re-run to measure the gap and any double count.
+  3. The surface lighting's irradiance reads the multiple scattering the sky reads, or T14.d's
+     gate measures the ground's irradiance error and passes it. Otherwise ground and sky disagree
+     on a routed world.
+  4. A routed body's 2 MB row counts its J_ms bands (`rowBodyOf` decides on the base bytes today,
+     and `setThickTables` adds 270,592 B a band and light afterwards). A routed Saturn-class body
+     under two suns would hold about 1.25 + 2.16 MB with no widening (plan-conformance review).
+  5. The frame blocker: the route meets p95 ≤ 16.67 ms at every high row, 15.67 the target (the
+     frame record above, class map 10⁷ m x4 at a 16.2–16.3 median as built).
+- **Deferred findings (2026-10-13 rule)** (R08.T14.c). Recorded and deferred:
+  - _The first thick frame compiles._ A view whose shared kernels were not made ahead
+    (`FrameKernelsAhead.thick`) compiles the thick kernels at the first frame of a body with a
+    table. T14.d's routing makes them ahead when it routes a body.
+  - _The read's cost._ Five dependent loads find the rows for every source, and eight more read a
+    band. The rows could be found once a sample, which the thin text's loop leaves no place for
+    without changing it.
+  - _The smoke's parts._ The lane's own SwiftShader runs, at a CPU quota of 400% and loads of
+    6–22, ran the existing groups at about twice the gates' times (R08.T6.g alone 127–166 s, the
+    gates' part 3 67–126 s). There, with the new groups, parts 3, 11 and 12 overran the watchdog
+    before part 13 joined. Part 13 then took 188 s on `no-subgroups` (the catalogue 68 s, the
+    specialised march 55 s, the Earth's twins 51 s) and overran it on `default`, at a load of 11
+    rising to 34. Parts 3 and 13 are to be re-read at the gate.
+  - _The fine sky view at twilight._ The control's 192 × 432 sky view misses s90 at 41 views
+    where 192 × 108 misses 18.
+  - _A kept bake's input._ No `KeptAtmosphere` names a scene's own medium. The kept bake's input
+    is `unset`, read for its line species alone.
+  - _`polarisation-bake` with `kept`_ goes through the same lights, with no test of its own.
+  - _Baked tables past an eviction._ A cache entry keeps its bake's `f32` tables (405,504 B a band
+    and light) after its GPU tables are evicted, uncounted by the 32 MB budget.
+  - _A blend's matrix._ Between two channels a channels source's phase is a moments blend, which
+    the vector bake reads as a depolariser; no current medium meets it (the kept channel sources
+    are Cornette–Shanks, and the correction solves at the channels), but T14.e's 15-bin route
+    would.
 - **Deviations in T14.e, as built** (2026-10-27; `thick/polarisation.ts`,
   `thick/polarisationFixtures.ts`, `thick/polarisation.test.ts`, `thick/polarisationBake.test.ts`,
   `thick/polarisationJob.test.ts` and `thick/polarisation.bench.ts`; `thick/linearAlgebra.ts` and

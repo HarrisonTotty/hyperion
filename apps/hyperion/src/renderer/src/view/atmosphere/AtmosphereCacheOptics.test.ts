@@ -1,8 +1,9 @@
 /**
  * The atmosphere cache's optics workers (plan R08, R08.T10.a): a worker's answers
  * (`opticsJobs.ts`), their transfer, and the pool that splits a body's curves of growth between
- * its workers (`opticsPool.ts`; `decision-r08-t4d-kdist-chain.md` §15, ruling 3). The workers here
- * are the real job logic run in process, on toy line tables, or scripted for their failures.
+ * its workers (`opticsPool.ts`; `decision-r08-t4d-kdist-chain.md` §15, ruling 3), and asks a thick
+ * body's bake (R08.T14.c). The workers here are the real job logic run in process, on toy line
+ * tables, or scripted for their answers and failures.
  */
 import { describe, expect, it, onTestFinished } from "vitest";
 
@@ -10,6 +11,7 @@ import {
   earthBody,
   planckBakeSpectrum,
   r05EarthWithOzoneAbsorber,
+  saturnBody,
 } from "../../test/atmosphereFixtures";
 import { detailOf, recordInput, SUN_LIGHT } from "../../test/atmosphereRecords";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
@@ -20,6 +22,7 @@ import {
   FIXTURE_SYSTEM,
 } from "../../test/planetaryFixture";
 import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
+import { patternedThickBake } from "../../test/thickTables";
 import {
   type AbsorberCurve,
   type AbsorberCurveSums,
@@ -28,14 +31,21 @@ import {
 } from "./absorbers";
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput, BodyLight } from "./atmosphereInput";
+import { R05_EARTH_REFERENCE } from "./earth";
 import { OpticsJobs } from "./opticsJobs";
-import { type OpticsRequest, transferablesOf } from "./opticsMessages";
+import { type OpticsReply, type OpticsRequest, transferablesOf } from "./opticsMessages";
 import {
   defaultOpticsWorkers,
   MAX_CONSECUTIVE_OPTICS_FAILURES,
   type OpticsBuildOutcome,
   OpticsWorkerPool,
+  type ThickBakeAsk,
+  type ThickBakeOutcome,
 } from "./opticsPool";
+import { type MsSourceTable, thickBakeBands } from "./thick/bake";
+import { spectralColumnOf } from "./thick/columnLayout";
+import { sphereBakeBody } from "./thick/keptBake";
+import { channelSource } from "./thick/spectralColumn";
 
 /** A second star, cooler than the Sun. */
 const RED_DWARF_LIGHT: BodyLight = {
@@ -343,6 +353,7 @@ describe("the optics-worker pool", () => {
           absorbers: [],
           spectra: [SUN_LIGHT.spectrum],
           curves: [],
+          sources: [],
         },
         labels: [],
         reasons: [],
@@ -370,6 +381,7 @@ describe("the optics-worker pool", () => {
           absorbers: [],
           spectra: [SUN_LIGHT.spectrum],
           curves: [],
+          sources: [],
         },
         labels: ["atmosphereApproximate"],
         reasons: [],
@@ -526,6 +538,128 @@ describe("the optics-worker pool", () => {
   });
 });
 
+/** A bake's tables for `ask`, one a band it asks, on the bake's grid. */
+function tablesFor(ask: ThickBakeAsk): ReadonlyArray<MsSourceTable> {
+  return patternedThickBake(thickBakeBands(ask.body), R05_EARTH_REFERENCE, ask.slots.length);
+}
+
+describe("the optics-worker pool's thick bake (R08.T14.c)", () => {
+  /** R_ref of the asks' sphere, m: R05's Earth's. */
+  const RADIUS_M = 6_371_008.8;
+
+  /** A bake of R05's Earth's column, by its channels, on a sphere's one band, or on Saturn's four. */
+  function bakeAsk(saturn = false): ThickBakeAsk {
+    const body = saturn
+      ? { ...saturnBody(), bottomRadiusM: RADIUS_M }
+      : sphereBakeBody(RADIUS_M, 9.806_65);
+    return {
+      input: KEPT_UNSET,
+      slots: [0],
+      bands: thickBakeBands(body).map((_, band) => band),
+      column: spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      body,
+    };
+  }
+
+  it("asks every band in one thick-bake request and lands its tables as baked", async () => {
+    const { pool, workers } = scriptedPool(2);
+    const ask = bakeAsk(true);
+    const bake = pool.bakeThick(ask);
+    const worker = workerAt(workers, 0);
+    const posted = lastPosted(worker);
+    const tables = tablesFor(ask);
+    worker.reply({ kind: "thick-baked", id: posted.id, tables });
+    const outcome = await bake.outcome;
+    expect([
+      workers.map((each) => each.received.length),
+      posted,
+      outcome.kind === "baked" && outcome.tables === tables,
+    ]).toEqual([[1, 0], { kind: "thick-bake", id: posted.id, ...ask }, true]);
+  });
+
+  it.each([
+    [
+      "thick-bake-failed, as failed with its message",
+      (id: number): OpticsReply => ({
+        kind: "thick-bake-failed",
+        id,
+        bands: [0],
+        message: "the solver refused a layer",
+      }),
+      { kind: "failed", message: "the solver refused a layer" },
+    ],
+    [
+      "failed, a job that threw, as failed with its message",
+      (id: number): OpticsReply => ({ kind: "failed", id, message: "a bug in the bake" }),
+      { kind: "failed", message: "a bug in the bake" },
+    ],
+    [
+      "with another kind's answer, as failed",
+      (id: number): OpticsReply => ({ kind: "curves", id, curves: [] }),
+      { kind: "failed", message: "a thick bake was answered curves" },
+    ],
+    [
+      "with a table fewer than its bands, as failed",
+      (id: number): OpticsReply => ({ kind: "thick-baked", id, tables: [] }),
+      { kind: "failed", message: "a thick bake of 1 bands was answered with 0 tables" },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, (id: number) => OpticsReply, ThickBakeOutcome]>)(
+    "settles a bake answered %s",
+    async (_, replyOf, expected) => {
+      const { pool, workers } = scriptedPool(1);
+      const bake = pool.bakeThick(bakeAsk());
+      const worker = workerAt(workers, 0);
+      worker.reply(replyOf(lastPosted(worker).id));
+      expect(await bake.outcome).toEqual(expected);
+    },
+  );
+
+  it("asks the bake again of a replacement when its worker fails, and lands the answer", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = bakeAsk();
+    const bake = pool.bakeThick(ask);
+    workerAt(workers, 0).fail();
+    const replacement = workerAt(workers, 1);
+    const asked = lastPosted(replacement);
+    replacement.reply({ kind: "thick-baked", id: asked.id, tables: tablesFor(ask) });
+    expect([asked.kind, (await bake.outcome).kind]).toEqual(["thick-bake", "baked"]);
+  });
+
+  it("fails the bake once every worker is given up, saying so", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const bake = pool.bakeThick(bakeAsk());
+    failEveryTime(workers);
+    expect(await bake.outcome).toEqual({
+      kind: "failed",
+      message: "every optics worker was given up",
+    });
+  });
+
+  it("settles a bake cancelled at once, its late answer taken by none", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = bakeAsk();
+    const bake = pool.bakeThick(ask);
+    const worker = workerAt(workers, 0);
+    const late = lastPosted(worker);
+    bake.cancel();
+    worker.reply({ kind: "thick-baked", id: late.id, tables: tablesFor(ask) });
+    expect(await bake.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("settles a bake under way cancelled when the pool is terminated", async () => {
+    const { pool } = scriptedPool(1);
+    const bake = pool.bakeThick(bakeAsk());
+    pool.terminate();
+    expect(await bake.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("refuses a bake once the pool is terminated", () => {
+    const { pool } = scriptedPool(1);
+    pool.terminate();
+    expect(() => pool.bakeThick(bakeAsk())).toThrow(/terminated/u);
+  });
+});
+
 /** Fails the pool's one worker, and each replacement, until its place is given up. */
 function failEveryTime(workers: ReadonlyArray<ScriptedOpticsWorker>): void {
   for (let n = 0; n < MAX_CONSECUTIVE_OPTICS_FAILURES; n += 1) {
@@ -546,6 +680,7 @@ function absorbing(spec: AbsorberSpec, medium: AssembledMedium["medium"]): Assem
       absorbers: [spec],
       spectra: [SUN_LIGHT.spectrum],
       curves: [],
+      sources: [],
     },
     labels: [],
     reasons: [],

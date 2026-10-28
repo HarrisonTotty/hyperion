@@ -8,11 +8,12 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in twelve parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6 and 8 to 12 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
- * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11), part 4 with R05.T12.e's marches
- * before them and part 6 with R05.T12.c's frames, part 7 R10's terrain groups, and part 1 every other; with no
- * part given the page runs them all, in its order.
+ * groups are in thirteen parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 6 and 8 to 13 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c), part 4 with R05.T12.e's
+ * marches before them and part 6 with R05.T12.c's frames, part 7 R10's terrain groups, part 13
+ * R08.T14.c's thick read, and part 1 every other; with no part given the page runs them all, in
+ * its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -29,8 +30,10 @@
  * `TEST SATURN`'s spheroid (`datumFrame.ts`); R08.T8.b's far limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
- * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
- * frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
+ * R08.T14.c's thick read in part 13, its kernels' catalogue first, then its kernels against their
+ * twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
+ * figure in part 3 after R08.T6.g's heights; and part 7 R10.T10.b's lit terrain, R10.T10.c's
+ * survey edge, R10.T16.c's frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
  * engine of its own, whose device it destroys). Three groups of part 1 run only when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
@@ -38,7 +41,7 @@
  * captures, with the other captures; a plain `just test-render` runs none of them.
  */
 
-import { WGSL_CATALOGUE } from "../view/engine/catalogue";
+import { ATMOSPHERE_THICK_ENTRIES, WGSL_CATALOGUE } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
 import {
   type CapabilityOverrides,
@@ -69,6 +72,9 @@ import {
   checkMarchArea,
   checkMarchBand,
   checkMarchSpecialised,
+  checkThickFrameTwinsEarth,
+  checkThickFrameTwinsSaturn,
+  checkThickMarchSpecialised,
   checkSeveralSuns,
   checkSurfaceLightingEarth,
   checkSurfaceLightingSaturn,
@@ -196,9 +202,14 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * to 7, part 10 held 81 and 85 s and part 11 130 and 135 s, the group 27 and 31 s of it (part 11
  * 153 to 154 s at e64fcb9b's). With the move, on R02.T19's tree before its gate at a load of 3 to
  * 8, part 10 held 116 and 119 s (the group 36 and 34 s) and part 11 119 s on both variants
- * (2026-10-27).
+ * (2026-10-27). R08.T14.c's thick read then brought its kernels' catalogue (some 33 s at part 1's
+ * pace, which took part 1 past the watchdog), its twins on Earth and on a Saturn-class figure and
+ * its specialised march. At the last four gates parts 9, 11 and 12 had run 51 to 131 s, 86 to
+ * 133 s and 46 to 135 s, which the catalogue, the Earth's twins and the specialised march would
+ * take to some 160 to 166 s at their slowest, so part 13 joined, with those three; the
+ * Saturn-class figure's twins, the smallest, went to part 3 (67 to 126 s) (2026-10-27).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -230,6 +241,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 11;
     case "12":
       return 12;
+    case "13":
+      return 13;
     default:
       return null;
   }
@@ -284,7 +297,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 12 or all");
+    return failed("the part asked for is not 1 to 13 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -345,8 +358,14 @@ async function run(
     }
   };
 
-  const entries = fixture === "broken-wgsl" ? [...WGSL_CATALOGUE, BROKEN_ENTRY] : WGSL_CATALOGUE;
+  // R08.T14.c's thick read's kernels are compiled in part 13, first: with them part 1's catalogue
+  // took 33 s more under load, the part past its watchdog.
+  const thin = WGSL_CATALOGUE.filter((entry) => !ATMOSPHERE_THICK_ENTRIES.includes(entry));
+  const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
+  await group(13, "T9.b catalogue: the thick read's kernels", () =>
+    checkCatalogue(engine, status, ATMOSPHERE_THICK_ENTRIES, checks),
+  );
   await group(1, "T9.a clear and triangle", () => checkClearAndTriangle(engine, checks));
   await group(1, "T9.d three canvases", () => checkThreeCanvases(engine, checks));
   await group(1, "T9.f depth, culling and bias", () => checkDepthCullBias(engine, checks));
@@ -386,7 +405,7 @@ async function run(
   if (gpuTiming) {
     await group(1, "R08.T8.c the far limb's timings", () => timeFarLimb(engine, checks));
     await group(1, "R08.T11 the photorealistic frame's timings", () =>
-      timeAtmosphereFrame(engine, checks),
+      timeAtmosphereFrame(engine, checks, { thickRead }),
     );
   }
   await group(1, "R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
@@ -416,6 +435,11 @@ async function run(
   await group(3, "R08.T6.g heights and angles in f32", () =>
     checkAtmosphereHeights(engine, checks, twins),
   );
+  await group(
+    3,
+    "R08.T14.c the thick read's kernels against their twins on a Saturn-class figure",
+    () => checkThickFrameTwinsSaturn(engine, checks, twins),
+  );
   await group(8, "R08.T6.f slices and bands on Earth", () =>
     checkAtmosphereSlicesEarth(engine, checks, twins),
   );
@@ -441,6 +465,11 @@ async function run(
     checkSurfaceLightingSaturn(engine, checks, twins),
   );
   await group(9, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
+  // In part 13 after the thick read's catalogue; the Saturn-class figure's in part 3, for the
+  // watchdog: both in part 9 took it to 165 s under load.
+  await group(13, "R08.T14.c the thick read's kernels against their twins on Earth", () =>
+    checkThickFrameTwinsEarth(engine, checks, twins),
+  );
   await group(9, "R08.T11.e the unread column tables at one texel on a giant", () =>
     checkUnreadGiant(engine, checks),
   );
@@ -477,6 +506,11 @@ async function run(
   // march by slot, so that neither part's GPU process compiles both reads' marches.
   await group(12, "R08.T11.d the specialised march over the shared read", () =>
     checkMarchSpecialised(engine, checks, summary.fallback),
+  );
+  // In part 13, last: in part 6 it took the part to its watchdog (180 s), and beside the thin one
+  // in part 12 to 166 to 172 s under load.
+  await group(13, "R08.T14.c the thick read's specialised march", () =>
+    checkThickMarchSpecialised(engine, checks, summary.fallback),
   );
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
   await group(11, "R08.T8.c the far limb's footprint", () =>
@@ -615,6 +649,11 @@ const variant = parameters.get("variant") ?? "default";
 const fixtureName = parameters.get("fixture") ?? "none";
 /** Whether the run lifted timestamp quantization, so that pass times read `full`. */
 const gpuTiming = parameters.get("gpuTiming") === "1";
+/**
+ * Whether the frame's timings also draw the measured Earth through the thick read, its bake forced
+ * on (`--smoke-thick-read=1`; R08.T14.c's frame record): the smoke's override alone.
+ */
+const thickRead = parameters.get("thickRead") === "1";
 /** Whether the run renders R05.T12.c's comparison frames for the main process to save. */
 const captures = parameters.get("captures") === "1";
 /** The twin workers the run asked for (`--smoke-twin-workers`), or `null` for the default. */

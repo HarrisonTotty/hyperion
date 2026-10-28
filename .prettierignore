@@ -86,3 +86,6 @@ apps/hyperion/src/renderer/src/view/atmosphere/reference/caseGate.json
 # R08.T13's recompute of the sweep, its boundary, attribution and classes, written by
 # `reference/sweepBoundary.test.ts` through `bless.ts`, a row a line (plan R08, R08.T13.c2)
 apps/hyperion/src/renderer/src/view/atmosphere/reference/sweepBoundary.json
+# R08.T14.c's recorded runs, written by `reference/thickRuns.test.ts` through `bless.ts` under
+# HYPERION_THICK_RUNS=1, each list on a line (plan R08, R08.T14.c)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/thickRuns.json
