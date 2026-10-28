@@ -425,15 +425,46 @@ function atPressure(column: AtmosphereColumn, values: Float64Array, pressurePa: 
   throw new RangeError(`pressure ${pressurePa} Pa lies outside the column`);
 }
 
+/** A mode's optics at the three channels and at 550 nm, which {@link aerosolTerm} is built from. */
+export interface AerosolTermOptics {
+  /** Red, green and blue. */
+  readonly channels: readonly [ModeOptics, ModeOptics, ModeOptics];
+  readonly at550: ModeOptics;
+}
+
+/**
+ * A mode's particles' optics at the three channels and at 550 nm, as {@link aerosolTerm} computes
+ * them: for a caller that lays one mode on several columns (plan R08, R08.T12.b.2's two Venus
+ * cases), so that its Mie runs once.
+ *
+ * @throws RangeError as {@link aerosolModeOptics}.
+ */
+export function aerosolTermOptics(particles: AerosolParticles): AerosolTermOptics {
+  const [red, green, blue] = CHANNEL_WAVELENGTHS_NM;
+  const channels: readonly [ModeOptics, ModeOptics, ModeOptics] = [
+    aerosolModeOptics(particles, red),
+    aerosolModeOptics(particles, green),
+    aerosolModeOptics(particles, blue),
+  ];
+  const at550 = channels.find((c) => c.wavelengthNm === 550) ?? aerosolModeOptics(particles, 550);
+  return { channels, at550 };
+}
+
 /**
  * A mode as a medium term on its column (the module's remarks): its density between its base and
  * top, its coefficients per channel at relative density 1 so that the column's τ(550) is the
  * mode's, and its tabulated phase.
  *
+ * @param optics - The mode's particles' optics ({@link aerosolTermOptics}), computed here when not
+ *   given; a caller that gives them gives the same particles' own.
  * @throws RangeError for a non-positive or non-finite optical depth, a profile whose base is not
  *   above its top or that lies outside the column, or as {@link aerosolModeOptics}.
  */
-export function aerosolTerm(spec: AerosolModeSpec, column: AtmosphereColumn): AerosolTerm {
+export function aerosolTerm(
+  spec: AerosolModeSpec,
+  column: AtmosphereColumn,
+  optics?: AerosolTermOptics,
+): AerosolTerm {
   const { opticalDepth550: tau, mixingExponent: f } = spec;
   if (!(tau > 0 && Number.isFinite(tau))) {
     throw new RangeError(`a mode's optical depth ${tau} must be finite and > 0`);
@@ -489,14 +520,7 @@ export function aerosolTerm(spec: AerosolModeSpec, column: AtmosphereColumn): Ae
     Float64Array.from(values, (v) => v / peak),
   );
   const lengthM = columnLengthM(density, column.topHeightM);
-  const [red, green, blue] = CHANNEL_WAVELENGTHS_NM;
-  const channels: readonly [ModeOptics, ModeOptics, ModeOptics] = [
-    aerosolModeOptics(spec.particles, red),
-    aerosolModeOptics(spec.particles, green),
-    aerosolModeOptics(spec.particles, blue),
-  ];
-  const at550 =
-    channels.find((c) => c.wavelengthNm === 550) ?? aerosolModeOptics(spec.particles, 550);
+  const { channels, at550 } = optics ?? aerosolTermOptics(spec.particles);
   const extinction550 = tau / lengthM;
   const scale = (c: ModeOptics): number =>
     (extinction550 * c.extinctionCrossSectionM2) / at550.extinctionCrossSectionM2;

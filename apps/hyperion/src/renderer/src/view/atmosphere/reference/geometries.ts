@@ -217,7 +217,7 @@ export function limbGeometry(
 }
 
 /** A number as it reads in a geometry's name: at most three decimals, no trailing zeros. */
-function label(value: number): string {
+export function nameLabel(value: number): string {
   return String(Math.round(value * 1000) / 1000);
 }
 
@@ -253,8 +253,8 @@ export function groundSet(
           continue;
         }
         set.push({
-          name: `${prefix}-s${label(sunZenith)}-v${label(viewZenith)}-a${label(azimuth)}`,
-          image: `${prefix}-s${label(sunZenith)}`,
+          name: `${prefix}-s${nameLabel(sunZenith)}-v${nameLabel(viewZenith)}-a${nameLabel(azimuth)}`,
+          image: `${prefix}-s${nameLabel(sunZenith)}`,
           observer,
           view,
           sun,
@@ -286,8 +286,8 @@ export const DISC_PHASES_DEG: ReadonlyArray<number> = [0, 30, 60, 75, 85];
  */
 export function discSet(orbitHeightM: number): ReferenceGeometry[] {
   return DISC_PHASES_DEG.map((phase) => ({
-    name: `disc-p${label(phase)}`,
-    image: `disc-p${label(phase)}`,
+    name: `disc-p${nameLabel(phase)}`,
+    image: `disc-p${nameLabel(phase)}`,
     observer: { heightM: orbitHeightM, latitudeDeg: 0 },
     view: { zenithDeg: 180, azimuthDeg: 0 },
     sun: { zenithDeg: phase, azimuthDeg: 0 },
@@ -304,6 +304,31 @@ export const SPHERE_LIMB_SCALE_HEIGHTS: ReadonlyArray<number> = [0.1, 0.3, 1, 3,
  */
 export const SPHERE_LIMB_SUN: LocalDirection = { zenithDeg: 60, azimuthDeg: 90 };
 
+/** One limb geometry's tangent: its name and its height over the equator, m. */
+export interface LimbTangent {
+  readonly name: string;
+  readonly heightM: number;
+}
+
+/**
+ * A limb image on a sphere of radius `radiusM`: one geometry a tangent of `tangents` over the
+ * equator, seen looking north from `orbitHeightM`, under {@link SPHERE_LIMB_SUN}, all in `image`,
+ * one sun's.
+ */
+export function sphereLimbImage(
+  radiusM: number,
+  tangents: ReadonlyArray<LimbTangent>,
+  image: string,
+  orbitHeightM: number,
+): ReferenceGeometry[] {
+  const figure = { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
+  return tangents.map(({ name, heightM }) => {
+    const distanceM = Math.sqrt((radiusM + orbitHeightM) ** 2 - (radiusM + heightM) ** 2);
+    const placed = limbGeometry(figure, 0, heightM, 0, SPHERE_LIMB_SUN, distanceM);
+    return { name, image, observer: placed.observer, view: placed.view, sun: placed.sun };
+  });
+}
+
 /**
  * Design note 10's limb on a sphere of radius `radiusM`: tangent at
  * {@link SPHERE_LIMB_SCALE_HEIGHTS} times `scaleHeightM` over the equator, seen looking north from
@@ -314,19 +339,15 @@ export function sphereLimbSet(
   scaleHeightM: number,
   orbitHeightM: number,
 ): ReferenceGeometry[] {
-  const figure = { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
-  return SPHERE_LIMB_SCALE_HEIGHTS.map((n) => {
-    const tangentHeightM = n * scaleHeightM;
-    const distanceM = Math.sqrt((radiusM + orbitHeightM) ** 2 - (radiusM + tangentHeightM) ** 2);
-    const placed = limbGeometry(figure, 0, tangentHeightM, 0, SPHERE_LIMB_SUN, distanceM);
-    return {
-      name: `limb-${label(n)}H`,
-      image: "limb",
-      observer: placed.observer,
-      view: placed.view,
-      sun: placed.sun,
-    };
-  });
+  return sphereLimbImage(
+    radiusM,
+    SPHERE_LIMB_SCALE_HEIGHTS.map((n) => ({
+      name: `limb-${nameLabel(n)}H`,
+      heightM: n * scaleHeightM,
+    })),
+    "limb",
+    orbitHeightM,
+  );
 }
 
 /** Design note 10's aerial perspective paths, m. */
@@ -347,7 +368,7 @@ export const AERIAL_SUN: LocalDirection = { zenithDeg: 60, azimuthDeg: 0 };
 /** Design note 10's aerial perspective: {@link AERIAL_DISTANCES_M} to a black target, one image. */
 export function aerialSet(): ReferenceGeometry[] {
   return AERIAL_DISTANCES_M.map((distance) => ({
-    name: `aerial-${label(distance / 1000)}km`,
+    name: `aerial-${nameLabel(distance / 1000)}km`,
     image: "aerial",
     observer: { heightM: AERIAL_OBSERVER_HEIGHT_M, latitudeDeg: 0 },
     view: AERIAL_VIEW,
@@ -362,7 +383,7 @@ export function aerialSet(): ReferenceGeometry[] {
  */
 export function sphereAggregates(): ReferenceAggregate[] {
   return GROUND_SUN_ZENITHS_DEG.filter((zenith) => zenith < 90).map((zenith) => ({
-    name: `flux-s${label(zenith)}`,
+    name: `flux-s${nameLabel(zenith)}`,
     latitudeDeg: 0,
     sun: { zenithDeg: zenith, azimuthDeg: 0 },
   }));

@@ -1,22 +1,23 @@
 /**
- * The case writer's rules and refusals (plan R08, R08.T12.b.1; `decision-r08-t12b-scope.md`,
- * rulings 4, 6 and 10), on small variations of the cases' own terms: the branches the four
- * committed cases do not reach.
+ * The case writer's rules and refusals (plan R08, R08.T12.b.1 and b.2; `decision-r08-t12b-scope.md`,
+ * rulings 4, 6 and 10), on small variations of the cases' own terms and on a line absorber's medium:
+ * the branches the committed cases do not reach.
  */
 
 import { describe, expect, it } from "vitest";
 
 import type { MediumTerm, PhaseTable } from "../view/atmosphere/medium";
-import { EARTH_CASE, MARS_CASE } from "../view/atmosphere/reference/cases";
+import { EARTH_CASE, MARS_CASE, type ReferenceCase } from "../view/atmosphere/reference/cases";
 import {
   absorberCurveJson,
   caseJson,
   densityJson,
+  roundedTermJson,
   tabulatedPhaseJson,
   termJson,
   traceCommand,
 } from "./atmosphereCases";
-import { fourAbsorberMedium } from "./atmosphereFixtures";
+import { fourAbsorberMedium, lineAbsorberMedium } from "./atmosphereFixtures";
 import { linearInUMoments } from "./mieMatrices";
 
 /** A case's term by name, or a thrown error naming it. */
@@ -115,20 +116,53 @@ describe("the case writer's absorbers", () => {
     ]);
   });
 
-  it("refuses a curve of several pressure rows until R08.T12.b.2", () => {
+  it("writes a curve of one row with no rows, as before R08.T12.b.2", () => {
     if (OZONE_CURVE === undefined) {
       throw new Error("Earth's case has its ozone's curve");
     }
-    const rows = { ...OZONE_CURVE, logPressures: new Float64Array([9, 10]) };
-    expect(() => absorberCurveJson(rows)).toThrow(/2 pressure rows/u);
+    expect(Object.keys(absorberCurveJson(OZONE_CURVE))).toEqual(["logColumns", "opticalDepth"]);
   });
 
-  it("refuses a pair absorber until R08.T12.b.2", () => {
+  it("writes a curve of several rows with their ln p, its read's top and its depths row-major", () => {
+    const { curves } = lineAbsorberMedium();
+    const line = curves[0]?.find((c) => c.logPressures.length > 1);
+    if (line === undefined) {
+      throw new Error("the line medium has a curve with pressure rows");
+    }
+    const json = absorberCurveJson(line);
+    expect([
+      json.logPressures,
+      json.readTopLogPressure,
+      json.opticalDepth.map((row) => row.length),
+    ]).toEqual([
+      Array.from(line.logPressures),
+      line.readTopLogPressure,
+      [0, 1, 2].map(() => line.logPressures.length * line.logColumns.length),
+    ]);
+  });
+
+  it("writes a pair absorber's pair density with its curve", () => {
+    const { medium, curves } = fourAbsorberMedium();
+    const terms = medium.terms.filter((t) => t.absorber !== undefined);
+    const k = terms.findIndex((t) => t.absorber?.kind === "pair");
+    const pair = terms[k];
+    if (pair?.absorber?.kind !== "pair") {
+      throw new Error("the four-absorber medium has its pair");
+    }
+    const json = termJson(pair, curves[0]?.[k], undefined);
+    expect(json.absorber).toEqual({
+      kind: "pair",
+      pairDensityPerM6: pair.absorber.pairDensityPerM6,
+      curves: [expect.objectContaining({ logColumns: expect.any(Array) })],
+    });
+  });
+
+  it("refuses an absorber given a curve of the other kind", () => {
     const pair = fourAbsorberMedium().medium.terms.find((t) => t.absorber?.kind === "pair");
     if (pair === undefined) {
       throw new Error("the four-absorber medium has its pair");
     }
-    expect(() => termJson(pair, OZONE_CURVE, undefined)).toThrow(/pair absorber/u);
+    expect(() => termJson(pair, OZONE_CURVE, undefined)).toThrow(/pair absorber .* column curve/u);
   });
 
   it("refuses a column absorber given no curve", () => {
@@ -139,6 +173,58 @@ describe("the case writer's absorbers", () => {
     expect(() => caseJson({ ...EARTH_CASE, curves: [] }, undefined)).toThrow(
       /0 curves for 1 absorbers/u,
     );
+  });
+});
+
+describe("the case writer's line media (R08.T12.b.2)", () => {
+  const { medium, curves } = lineAbsorberMedium();
+  const lineCase: ReferenceCase = { ...EARTH_CASE, medium, curves: curves[0] ?? [] };
+
+  it("writes the medium's pressure profile beside its terms", () => {
+    const json = caseJson(lineCase, undefined);
+    expect([
+      Object.keys(json).indexOf("pressureBar") === Object.keys(json).indexOf("terms") - 1,
+      json.pressureBar,
+    ]).toEqual([
+      true,
+      medium.pressureBar === undefined ? undefined : densityJson(medium.pressureBar),
+    ]);
+  });
+
+  it("writes no pressure profile for a medium without one", () => {
+    expect(caseJson(EARTH_CASE, undefined).pressureBar).toBeUndefined();
+  });
+});
+
+describe("the case writer's figures (R08.T12.b.2)", () => {
+  it("writes a case's terms to its figures and its geometries in full", () => {
+    const json = caseJson({ ...MARS_CASE, significantFigures: 3 }, undefined);
+    const full = caseJson(MARS_CASE, undefined);
+    const dust = json.terms.find((t) => t.name === "dust");
+    expect([
+      dust?.scattering.every((v) => Number(v.toPrecision(3)) === v),
+      json.geometries,
+    ]).toEqual([true, full.geometries]);
+  });
+
+  it("keeps each matrix element no larger than a₁ when rounded", () => {
+    const rounded = roundedTermJson(termJson(DUST, undefined, DUST_ASYMMETRY), 2);
+    const phase = rounded.phase;
+    if (phase.kind !== "tabulated" || phase.matrix === undefined) {
+      throw new Error("Mars's dust keeps its table's matrix");
+    }
+    const { a1, matrix } = phase;
+    const past = (["a2", "a3", "a4", "b1", "b2"] as const).flatMap((element) =>
+      matrix[element].flatMap((row, c) =>
+        row.filter((value, j) => Math.abs(value) > (a1[c]?.[j] ?? Number.NaN)),
+      ),
+    );
+    expect(past).toEqual([]);
+  });
+
+  it("writes every term field it rounds in the order the full term has it", () => {
+    const term = termJson(DUST, undefined, DUST_ASYMMETRY);
+    expect(Object.keys(roundedTermJson(term, 9))).toEqual(Object.keys(term));
   });
 });
 

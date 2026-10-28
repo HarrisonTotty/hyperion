@@ -1,8 +1,9 @@
 /**
- * The reference tracer's cloud-free cases (plan R08, R08.T12.b.1): each `<name>.case.json` is the
- * case the client's optics write now, through `bless.ts`; each file here stays under the
- * repository's added-file hook; and the geometry sets are Design note 10's and the spheroid
- * ruling's.
+ * The reference tracer's cloud-free cases (plan R08, R08.T12.b.1) and Earth's higher limb
+ * (R08.T12.b.2): each `<name>.case.json` is the case the client's optics write now, through
+ * `bless.ts`; each file here stays under the repository's added-file hook; and the geometry sets are
+ * Design note 10's, the spheroid ruling's and the higher limb's. The thick cases' are
+ * `thickCases.test.ts`'s.
  *
  * @remarks
  * A changed case is rewritten by `HYPERION_BLESS=1 pnpm --filter hyperion exec vitest run
@@ -32,12 +33,18 @@ import { geodeticOf } from "../hillaire";
 import { localScaleHeightM } from "../medium";
 import { gravityRatio } from "../oblate";
 import earthCase from "./earth.case.json" with { type: "json" };
+import earthHighLimbCase from "./earth-high-limb.case.json" with { type: "json" };
 import earthOzoneSlabCase from "./earth-ozone-slab.case.json" with { type: "json" };
+import earthOzoneSlabHighLimbCase from "./earth-ozone-slab-high-limb.case.json" with { type: "json" };
 import marsCase from "./mars.case.json" with { type: "json" };
 import saturnOblateCase from "./saturn-oblate.case.json" with { type: "json" };
 import sampleCounts from "./sampleCounts.json" with { type: "json" };
 import {
+  EARTH_AIR_SCALE_HEIGHT_M,
   EARTH_CASE,
+  EARTH_HIGH_LIMB_CASE,
+  EARTH_OZONE_SLAB_HEIGHTS_M,
+  HIGH_LIMB_CASES,
   MARS_CASE,
   REFERENCE_CASES,
   type ReferenceCase,
@@ -66,12 +73,14 @@ const COMMITTED: Readonly<Record<string, unknown>> = {
   "earth-ozone-slab": earthOzoneSlabCase,
   mars: marsCase,
   "saturn-oblate": saturnOblateCase,
+  "earth-high-limb": earthHighLimbCase,
+  "earth-ozone-slab-high-limb": earthOzoneSlabHighLimbCase,
 };
 
 /** Every file in this directory, by path, as its text. */
 const FILES = import.meta.glob<string>("./*", { query: "?raw", import: "default", eager: true });
 
-const CASES = REFERENCE_CASES.map((c) => [c.name, c] as const);
+const CASES = [...REFERENCE_CASES, ...HIGH_LIMB_CASES].map((c) => [c.name, c] as const);
 
 describe("the reference cases", () => {
   it.each(CASES)("%s.case.json is the case the client's optics write now", async (name, c) => {
@@ -203,6 +212,29 @@ describe("the geometry sets", () => {
         tM: expect.any(Number),
       })),
     );
+  });
+
+  it("put the higher limb at n of the air's scale height and at the slab's base and top", () => {
+    expect(
+      EARTH_HIGH_LIMB_CASE.geometries.map((g) => lowestPoint(EARTH_HIGH_LIMB_CASE, g)),
+    ).toEqual(
+      [
+        ...SPHERE_LIMB_SCALE_HEIGHTS.map((n) => n * EARTH_AIR_SCALE_HEIGHT_M),
+        ...EARTH_OZONE_SLAB_HEIGHTS_M,
+      ].map((heightM) => ({
+        latitudeDeg: expect.closeTo(0, 4),
+        heightM: expect.closeTo(heightM, 3),
+        tM: expect.any(Number),
+      })),
+    );
+  });
+
+  it("take the air's own scale height for the higher limb, about 85 km at 10 H", () => {
+    expect([
+      EARTH_AIR_SCALE_HEIGHT_M,
+      EARTH_OZONE_SLAB_HEIGHTS_M[0],
+      EARTH_OZONE_SLAB_HEIGHTS_M[1],
+    ]).toEqual([expect.closeTo(8450, -2), expect.closeTo(18_600, -2), expect.closeTo(38_500, -2)]);
   });
 
   it("put saturn-oblate's limbs at n H ÷ s(φ) over the equator, 45° and the pole", () => {

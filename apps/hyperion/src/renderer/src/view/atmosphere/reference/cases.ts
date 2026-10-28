@@ -17,6 +17,12 @@
  *   a sphere of the column's 3,389.5 km.
  * - `saturn-oblate`: {@link SATURN_OBLATE_REFERENCE}, the Saturn-class air on Saturn's level
  *   spheroid, Design note 17's thin case.
+ * - `earth-high-limb` and `earth-ozone-slab-high-limb` (R08.T12.b.2; main, 2026-10-21 and
+ *   2026-10-22): `earth`'s and `earth-ozone-slab`'s media and sphere, with one limb image at the
+ *   air's own scale height, tangent to about 85 km, and at the slab's base and top, for R08.T13's
+ *   layer-edge checks at the limb: their own cases, so that T12.b.1's references stand.
+ *
+ * R08.T12.b.2's cloudy and hazy cases, whose Mie runs for about a minute, are `thickCases.ts`'s.
  *
  * Every case traces at the fitted channels, `medium.ts`'s `CHANNEL_WAVELENGTHS_NM`, under the
  * reference Sun (`earth.ts`'s `REFERENCE_SUN`) at its per-channel illuminance at 1 au
@@ -44,6 +50,8 @@ import {
   meanMolarMassGPerMol,
 } from "../column";
 import {
+  EARTH_COLUMN,
+  EARTH_OZONE_LAYER_PA,
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
   EARTH_REFERENCE_SOURCES,
@@ -67,11 +75,14 @@ import {
   groundSet,
   limbGeometry,
   type LocalDirection,
+  nameLabel,
   type ReferenceAggregate,
   REFERENCE_DETECTOR_HALF_ANGLE_DEG,
   type ReferenceGeometry,
+  SPHERE_LIMB_SCALE_HEIGHTS,
   sphereAggregates,
   sphereGroundSet,
+  sphereLimbImage,
   sphereLimbSet,
 } from "./geometries";
 
@@ -118,6 +129,12 @@ export interface ReferenceCase {
    * is never baked.
    */
   readonly sources?: ReadonlyArray<SpectralSource>;
+  /**
+   * The significant figures its case file writes its terms' and pressure profile's numbers to,
+   * where a full-precision file would pass the added-file hook (R08.T12.b.2's cases of several
+   * tabulated phases); absent, every number in full.
+   */
+  readonly significantFigures?: number;
 }
 
 /**
@@ -131,10 +148,20 @@ export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   "earth-ozone-slab": 1,
   mars: 2,
   "saturn-oblate": 3,
+  "venus-92bar": 4,
+  "venus-58bar": 5,
+  "titan-class": 6,
+  "giant-deck": 7,
+  "earth-high-limb": 8,
+  "earth-ozone-slab-high-limb": 9,
 };
 
-/** A case's seed, from {@link REFERENCE_SEEDS}. */
-function seedOf(name: string): number {
+/**
+ * A case's seed, from {@link REFERENCE_SEEDS}.
+ *
+ * @throws Error for a case with no seed.
+ */
+export function seedOf(name: string): number {
   const seed = REFERENCE_SEEDS[name];
   if (seed === undefined) {
     throw new Error(`case ${name} has no seed`);
@@ -151,7 +178,7 @@ export const SPHERE_ORBIT_HEIGHT_M = 1_000_000;
 export const EARTH_REFERENCE_RADIUS_M = tableRadiusM(WGS84_LEVEL_SPHEROID);
 
 /** A sphere case's geometries: Design note 10's ground set, disc, limb and aerial perspective. */
-function sphereGeometries(medium: AtmosphereMedium, radiusM: number): ReferenceGeometry[] {
+export function sphereGeometries(medium: AtmosphereMedium, radiusM: number): ReferenceGeometry[] {
   return [
     ...sphereGroundSet(),
     ...discSet(SPHERE_ORBIT_HEIGHT_M),
@@ -161,7 +188,7 @@ function sphereGeometries(medium: AtmosphereMedium, radiusM: number): ReferenceG
 }
 
 /** A case on a sphere under the reference Sun, at its own seed, with its medium's sources. */
-function sphereCase(
+export function sphereCase(
   name: string,
   medium: AtmosphereMedium,
   sources: ReadonlyArray<SpectralSource>,
@@ -186,7 +213,7 @@ function sphereCase(
 }
 
 /** The light slot 0 curves of a medium's tables. */
-function slotZero(
+export function slotZero(
   slots: ReadonlyArray<ReadonlyArray<AbsorberCurve>>,
 ): ReadonlyArray<AbsorberCurve> {
   const [curves] = slots;
@@ -555,6 +582,101 @@ export const SATURN_OBLATE_CASE: ReferenceCase = {
   aggregates: [],
   sources: SATURN_OBLATE_REFERENCE_SOURCES,
 };
+
+// --- Earth's higher limb (R08.T12.b.2) ---------------------------------------------------------
+
+/**
+ * A column's height at a pressure, m: linear in ln p between the levels about it, as `aerosol.ts`
+ * lays a mode's base and top.
+ *
+ * @throws RangeError for a pressure outside the column.
+ */
+export function heightAtPressureM(column: AtmosphereColumn, pressurePa: number): number {
+  const target = Math.log(pressurePa);
+  for (let i = 0; i + 1 < column.pressuresPa.length; i += 1) {
+    const a = Math.log(column.pressuresPa[i] ?? Number.NaN);
+    const b = Math.log(column.pressuresPa[i + 1] ?? Number.NaN);
+    if (target <= a && target >= b) {
+      const low = column.altitudesM[i] ?? Number.NaN;
+      const high = column.altitudesM[i + 1] ?? Number.NaN;
+      return low + ((target - a) / (b - a)) * (high - low);
+    }
+  }
+  throw new RangeError(`pressure ${pressurePa} Pa lies outside the column`);
+}
+
+/**
+ * The air's own scale height at Earth's ground, m: the green extinction's e-folding of
+ * {@link EARTH_REFERENCE}'s molecular term alone (`localScaleHeightM`), 8.45 km, where the medium's
+ * whole, `earth`'s limb's, is 2.10 km with its aerosol (main, 2026-10-21).
+ */
+export const EARTH_AIR_SCALE_HEIGHT_M: number = (() => {
+  const rayleigh = EARTH_REFERENCE.terms.find((t) => t.name === "rayleigh");
+  if (rayleigh === undefined) {
+    throw new Error("EARTH_REFERENCE has its molecular term");
+  }
+  return localScaleHeightM({ ...EARTH_REFERENCE, terms: [rayleigh] }, 0);
+})();
+
+/**
+ * The slab's base and top over Earth's sphere, m: {@link EARTH_OZONE_LAYER_PA}'s 70 and 3 hPa on
+ * {@link EARTH_COLUMN}, about 18.6 and 38.5 km.
+ */
+export const EARTH_OZONE_SLAB_HEIGHTS_M: readonly [number, number] = [
+  heightAtPressureM(EARTH_COLUMN, EARTH_OZONE_LAYER_PA[0]),
+  heightAtPressureM(EARTH_COLUMN, EARTH_OZONE_LAYER_PA[1]),
+];
+
+/** The higher limb's image, its own name beside `earth`'s `limb`. */
+export const HIGH_LIMB_IMAGE = "limb-air";
+
+/**
+ * The higher limb (main, 2026-10-21 and 2026-10-22): tangent at Design note 10's 0.1, 0.3, 1, 3 and
+ * 10 of {@link EARTH_AIR_SCALE_HEIGHT_M} (0.85 to 84.5 km), and at the slab's base and top
+ * ({@link EARTH_OZONE_SLAB_HEIGHTS_M}), seen from {@link SPHERE_ORBIT_HEIGHT_M} as `earth`'s limb is,
+ * one image under its sun.
+ */
+function highLimbGeometries(): ReferenceGeometry[] {
+  return sphereLimbImage(
+    EARTH_REFERENCE_RADIUS_M,
+    [
+      ...SPHERE_LIMB_SCALE_HEIGHTS.map((n) => ({
+        name: `${HIGH_LIMB_IMAGE}-${nameLabel(n)}H`,
+        heightM: n * EARTH_AIR_SCALE_HEIGHT_M,
+      })),
+      { name: `${HIGH_LIMB_IMAGE}-slab-base`, heightM: EARTH_OZONE_SLAB_HEIGHTS_M[0] },
+      { name: `${HIGH_LIMB_IMAGE}-slab-top`, heightM: EARTH_OZONE_SLAB_HEIGHTS_M[1] },
+    ],
+    HIGH_LIMB_IMAGE,
+    SPHERE_ORBIT_HEIGHT_M,
+  );
+}
+
+/** A case of `base`'s medium named `name`, with the higher limb alone and no aggregates. */
+function highLimbCase(name: string, base: ReferenceCase): ReferenceCase {
+  return {
+    ...base,
+    name,
+    seed: seedOf(name),
+    geometries: highLimbGeometries(),
+    aggregates: [],
+  };
+}
+
+/** `earth-high-limb`: {@link EARTH_CASE}'s medium and sphere with the higher limb. */
+export const EARTH_HIGH_LIMB_CASE: ReferenceCase = highLimbCase("earth-high-limb", EARTH_CASE);
+
+/** `earth-ozone-slab-high-limb`: {@link EARTH_OZONE_SLAB_CASE}'s with the higher limb. */
+export const EARTH_OZONE_SLAB_HIGH_LIMB_CASE: ReferenceCase = highLimbCase(
+  "earth-ozone-slab-high-limb",
+  EARTH_OZONE_SLAB_CASE,
+);
+
+/** The higher limb's cases, in the order their files are listed (R08.T12.b.2). */
+export const HIGH_LIMB_CASES: ReadonlyArray<ReferenceCase> = [
+  EARTH_HIGH_LIMB_CASE,
+  EARTH_OZONE_SLAB_HIGH_LIMB_CASE,
+];
 
 /**
  * A case's bake lights (plan R08, R08.T14.c): every case lies under the reference Sun, its one

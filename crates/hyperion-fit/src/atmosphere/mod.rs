@@ -132,12 +132,25 @@ pub enum TraceReferenceError {
 }
 
 /// The case's shells: split at every kink of a term's profile and every scale height of an
-/// exponential one.
+/// exponential one, and at every node of the case's pressure profile where a curve reads it
+/// (R08.T12.b.2).
 fn shell_grid(case: &AtmosphereCase) -> ShellGrid {
     let mut heights_m = Vec::new();
     for term in case.terms() {
         term.density
             .shell_heights(case.top_height_m(), &mut heights_m);
+    }
+    let reads_pressure = case
+        .terms()
+        .iter()
+        .filter_map(|t| t.absorber.as_ref())
+        .any(|a| {
+            a.curves()
+                .iter()
+                .any(case::AbsorberCurve::has_pressure_rows)
+        });
+    if let Some(pressure) = case.pressure_bar().filter(|_| reads_pressure) {
+        pressure.shell_heights(case.top_height_m(), &mut heights_m);
     }
     ShellGrid::new(case.figure(), case.top_height_m(), heights_m)
 }
@@ -1976,6 +1989,211 @@ mod tests {
                 (beam / expected - 1.0).abs() < 1e-8,
                 "{w}: {beam} against {expected}"
             );
+        }
+    }
+
+    /// `case` with term `term`'s column absorber (as [`as_absorber`] makes it) a pair absorber of
+    /// the same density and curves: the term's relative density is then read as the square of its
+    /// column's, which the format does not check.
+    fn as_pair(case: &Value, term: usize) -> Value {
+        let mut with = case.clone();
+        let absorber = &mut with["terms"][term]["absorber"];
+        let n = absorber["numberDensityPerM3"].clone();
+        let curves = absorber["curves"].clone();
+        *absorber = json!({ "kind": "pair", "pairDensityPerM6": n, "curves": curves });
+        with
+    }
+
+    #[test]
+    fn atmosphere_a_pair_absorber_traces_as_its_column_twin() {
+        // R08.T12.b.2: a pair absorber is read as a column absorber is, its amount n_A n_B ∫ρ ds
+        // in molecule pairs m⁻⁵ on its curve's ln(u ÷ 1 m⁻⁵): the same density and curves given as
+        // a pair trace bit for bit as the column absorber, which traces as its absorption.
+        let absorbing = json!({
+            "format": 1, "name": "absorbing",
+            "wavelengthsNm": [550, 440],
+            "shells": { "kind": "sphere", "radiusM": 6_371_000.0 },
+            "topHeightM": 100_000.0,
+            "groundAlbedo": [0.3, 0.6],
+            "terms": [{
+                "name": "pair", "density": { "kind": "exponential", "scaleHeightM": 4000.0 },
+                "scattering": [0.0, 0.0], "absorption": [1e-5, 3e-5], "phase": { "kind": "none" }
+            }],
+            "suns": [{ "name": "sun", "irradiance": [1.7, 2.0] }],
+            "detectorHalfAngleDeg": 0.0,
+            "geometries": [
+                geometry("nadir", 400_000.0, (180.0, 0.0), (60.0, 0.0)),
+                geometry("ground", 0.0, (0.0, 0.0), (60.0, 0.0))
+            ],
+            "aggregates": [{ "name": "low", "sunDirections": [{ "zenithDeg": 70.0, "azimuthDeg": 0.0 }] }]
+        });
+        let n = 1e20;
+        let column = as_absorber(&absorbing, 0, n, n * 4000.0);
+        let pair = as_pair(&column, 0);
+        let [a, b, c] = [&absorbing, &column, &pair].map(|c| trace(c, Polarisation::Stokes, 64, 2));
+        assert_same_reference(&a, &c, 1e-12);
+        assert_eq!(
+            serde_json::to_string(&b).unwrap(),
+            serde_json::to_string(&c).unwrap()
+        );
+    }
+
+    /// A curve of `rows` pressure rows at ln p, its read top at `read_top`, on 241 nodes about
+    /// `vertical_per_m2` as [`curve_json`]'s, each row's depth at each wavelength `depth(w, u, ln p)`.
+    fn pressure_curve_json(
+        vertical_per_m2: f64,
+        wavelengths: usize,
+        log_pressures: &[f64],
+        read_top: f64,
+        depth: impl Fn(usize, f64, f64) -> f64,
+    ) -> Value {
+        let columns: Vec<f64> = (0..=240)
+            .map(|k| vertical_per_m2 * math::powf(10.0, -3.0 + f64::from(k) / 40.0))
+            .collect();
+        json!({
+            "logColumns": columns.iter().map(|&u| math::ln(u)).collect::<Vec<f64>>(),
+            "logPressures": log_pressures,
+            "readTopLogPressure": read_top,
+            "opticalDepth": (0..wavelengths)
+                .map(|w| {
+                    log_pressures
+                        .iter()
+                        .flat_map(|&y| columns.iter().map(move |&u| (u, y)))
+                        .map(|(u, y)| depth(w, u, y))
+                        .collect::<Vec<f64>>()
+                })
+                .collect::<Vec<Vec<f64>>>()
+        })
+    }
+
+    #[test]
+    fn atmosphere_a_curve_with_pressure_rows_reads_the_whole_paths_curtis_godson_pressure() {
+        // R08.T12.b.2: an absorbing-only slab seen from above on a grey ground, its absorber's
+        // density falling linearly from 1 at the ground to 0 at the top and the pressure from 1 to
+        // 0.5 bar, so that a chord's absorber-weighted pressure is ∫ρp ÷ ∫ρ over the heights it
+        // crosses: 5 ÷ 6 bar through the whole slab and 2 ÷ 3 bar from its middle up. The curve is
+        // τ = k (u ÷ U)(a + b ln p) on five rows, linear in u and in ln p, so that the log–log read
+        // and the rows' 4-point Lagrange are exact; the ground seen directly scores at T(u₁ + u₂,
+        // p̄) of the two legs together, and each beam at its own column's p̄.
+        let (n, length, albedo, irradiance) = (1e20, 1000.0, 0.5, 1.6);
+        // The vertical column: n ∫ρ dz with ρ = 1 − z ÷ L.
+        let vertical = 0.5 * n * length;
+        let (a, b) = (0.2, 0.1);
+        let k = |w: usize| [1.0, 2.0][w];
+        let rows: Vec<f64> = [1e3, 1e4, 3e4, 1e5, 3e5]
+            .iter()
+            .map(|&p| math::ln(p))
+            .collect();
+        let depth = |w: usize, u: f64, y: f64| k(w) * (u / vertical) * (a + b * y);
+        let mut case = slab(
+            &json!([{
+                "name": "layer",
+                "density": {
+                    "kind": "tabulated", "altitudesM": [0.0, length], "relative": [1.0, 0.0]
+                },
+                "scattering": [0.0, 0.0], "absorption": [0.0, 0.0], "phase": { "kind": "none" },
+                "absorber": {
+                    "kind": "column", "numberDensityPerM3": n,
+                    "curves": [pressure_curve_json(vertical, 2, &rows, math::ln(2e5), depth)]
+                }
+            }]),
+            &json!([albedo, albedo]),
+            &json!([
+                geometry("down", 1001.0, (150.0, 0.0), (60.0, 0.0)),
+                geometry("middle", 500.0, (0.0, 0.0), (60.0, 0.0))
+            ]),
+        );
+        case["suns"] = json!([{ "name": "sun", "irradiance": [irradiance, irradiance] }]);
+        case["pressureBar"] = json!({
+            "kind": "tabulated", "altitudesM": [0.0, length], "relative": [1.0, 0.5]
+        });
+        let reference = trace(&case, Polarisation::Scalar, 16, 1);
+        let (mu_view, mu_sun) = (math::cos(radians(30.0)), math::cos(radians(60.0)));
+        let whole = math::ln(1e5 * 5.0 / 6.0);
+        let (u1, u2) = (vertical / mu_view, vertical / mu_sun);
+        let down = &reference.geometries()[0];
+        for w in 0..2 {
+            let tau = depth(w, u1 + u2, whole);
+            let expected = albedo / PI * mu_sun * irradiance * math::exp(-tau);
+            // As in `atmosphere_a_saturated_curve_takes_the_whole_paths_column`, the chords are
+            // plane-parallel to about 2 × 10⁻⁹, which moves e^(−τ) by that much of τ.
+            assert!(
+                (down.radiance()[w] / expected - 1.0).abs() < 1e-8 * tau.max(1.0),
+                "{w}: {} against {expected}",
+                down.radiance()[w]
+            );
+        }
+        // From the middle the beam crosses the upper half: a quarter of the column at 2 ÷ 3 bar.
+        let middle = &reference.geometries()[1];
+        for w in 0..2 {
+            let beam = middle.sun_optical_depth()[0][w].unwrap();
+            let expected = depth(w, 0.25 * vertical / mu_sun, math::ln(1e5 * 2.0 / 3.0));
+            assert!(
+                (beam / expected - 1.0).abs() < 1e-8,
+                "{w}: {beam} against {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn atmosphere_a_curve_of_like_rows_traces_as_its_one_row() {
+        // R08.T12.b.2: a curve whose four pressure rows are all its one row's reads that row's
+        // depth at any pressure (the Lagrange weights sum to 1), so a scattering case traces as
+        // with the one row, to rounding: carrying the paths' pressure-weighted amounts moves no
+        // draw.
+        let n = 1e20;
+        let mut base = slab(
+            &json!([
+                {
+                    "name": "gas", "density": uniform(),
+                    "scattering": [3e-4, 5e-4], "absorption": [0.0, 0.0],
+                    "phase": { "kind": "rayleigh", "depolarisation": [0.03, 0.03] }
+                },
+                {
+                    "name": "layer",
+                    "density": {
+                        "kind": "tabulated", "altitudesM": [0.0, 200.0, 600.0, 1000.0],
+                        "relative": [0.0, 1.0, 1.0, 0.2]
+                    },
+                    "scattering": [0.0, 0.0], "absorption": [2e-5, 4e-5], "phase": { "kind": "none" }
+                }
+            ]),
+            &json!([0.0, 0.0]),
+            &json!([
+                geometry("down", 0.0, (40.0, 120.0), (30.0, 0.0)),
+                geometry("up", 1000.0, (130.0, 60.0), (30.0, 0.0))
+            ]),
+        );
+        base["aggregates"] =
+            json!([{ "name": "sun", "sunDirections": [{ "zenithDeg": 30.0, "azimuthDeg": 0.0 }] }]);
+        let one_row = as_absorber(&base, 1, n, n * 640.0);
+        let mut rows = one_row.clone();
+        let curve = &mut rows["terms"][1]["absorber"]["curves"][0];
+        let depths: Vec<Vec<f64>> = curve["opticalDepth"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                let row: Vec<f64> = row
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|d| d.as_f64().unwrap())
+                    .collect();
+                row.repeat(4)
+            })
+            .collect();
+        curve["opticalDepth"] = json!(depths);
+        curve["logPressures"] = json!([4.0, 7.0, 10.0, 12.0]);
+        curve["readTopLogPressure"] = json!(11.5);
+        // At the layer's own nodes, so that the profile's kinks add no shell boundary.
+        rows["pressureBar"] = json!({
+            "kind": "tabulated", "altitudesM": [0.0, 200.0, 600.0, 1000.0],
+            "relative": [1.0, 0.9, 0.86, 0.85]
+        });
+        for polarisation in [Polarisation::Scalar, Polarisation::Stokes] {
+            let [a, b] = [&one_row, &rows].map(|c| trace(c, polarisation, 2000, 2));
+            assert_same_reference(&a, &b, 1e-12);
         }
     }
 

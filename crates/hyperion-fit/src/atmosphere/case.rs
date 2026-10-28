@@ -15,6 +15,7 @@
 //!   "shells": { "kind": "sphere", "radiusM": 6371000 },  // or a level spheroid, below
 //!   "topHeightM": 100000,
 //!   "groundAlbedo": [0.3, 0.3, 0.3],             // Lambertian, per wavelength
+//!   "pressureBar": { "kind": "tabulated", ... }, // optional: p ÷ 1 bar over the heights
 //!   "terms": [{
 //!     "name": "rayleigh",
 //!     "density": { "kind": "exponential", "scaleHeightM": 8000 },
@@ -67,17 +68,28 @@
 //!     (1 ÷ 4π) Σ βₗ Pₗ(cos Θ) (Garcia and Siewert 1985's form): β₀ within 10⁻⁴ of 1 (the series
 //!     is divided by it), and the series positive at every entry of the table its directions are
 //!     drawn from and midway between each two (the `optics` module).
-//! - **Absorbers** (R08.T12.b.1; Design note 5's curves of growth). A term may carry the client's
+//! - **Absorbers** (R08.T12.b; Design note 5's curves of growth). A term may carry the client's
 //!   `absorber` in the case's own form, `{ "kind": "column", "numberDensityPerM3": n, "curves": [{
 //!   "logColumns": [...], "opticalDepth": [[...], ...] }, ...] }`: n, molecules m⁻³ at relative
 //!   density 1, so that a path's column is u = n ∫ρ ds molecules m⁻²; and one curve per sun, in
 //!   the case's order of them, each ln(u ÷ 1 m⁻²) at its nodes (at least two, strictly ascending)
-//!   and its optical depth −ln T at each node per wavelength, finite and not negative, one row of
-//!   the client's `AbsorberCurve`. Such a term has no scattering, no absorption and the phase
-//!   `none`: it absorbs by the curve alone, which the estimator applies to the whole column a path
-//!   crosses (the `absorber` module), and a case has at most five. A curve with pressure rows
-//!   (`"logPressures"` of more than one row) and a `pair` absorber are refused until R08.T12.b.2;
-//!   `"logPressures"` of one row is accepted and changes nothing.
+//!   and its optical depth −ln T at each node per wavelength, finite and not negative, the client's
+//!   `AbsorberCurve`. Such a term has no scattering, no absorption and the phase `none`: it absorbs
+//!   by the curve alone, which the estimator applies to the whole amount a path crosses (the
+//!   `absorber` module), and a case has at most five. Since R08.T12.b.2:
+//!   - a `pair` absorber (R08.T4.c), `{ "kind": "pair", "pairDensityPerM6": n, "curves": [...] }`:
+//!     molecule pairs absorbing as σ `n_A n_B`, n their `n_A n_B` at relative density 1, molecule
+//!     pairs m⁻⁶, the term's relative density already the square of its column's, so that a path's
+//!     pair column is u = n ∫ρ ds molecule pairs m⁻⁵, which its curves' ln(u ÷ 1 m⁻⁵) read as a
+//!     column curve's ln(u ÷ 1 m⁻²);
+//!   - a curve with pressure rows (R08.T4.d's line absorbers): `"logPressures"`, ln(p ÷ 1 Pa) at
+//!     each row, strictly ascending, `"readTopLogPressure"`, the ln p above which the read holds p̄,
+//!     and each wavelength's `opticalDepth` row-major, `[r × nodes + j]`, read at each path's
+//!     absorber-weighted (Curtis–Godson) pressure, which the case's `pressureBar` gives: the
+//!     column's pressure at each level over 1 bar, the client's `AtmosphereMedium.pressureBar`, a
+//!     `tabulated` profile over the heights, read as a density profile is, its nodes shell
+//!     boundaries. A curve of several rows needs it. `"logPressures"` of one row is accepted and
+//!     changes nothing.
 //! - **Samples.** A geometry or an aggregate may give its own `samples`, from 1 to 2⁵³, which it
 //!   takes in place of the command's `--samples` (R08.T12.b.1). A sample's draws are keyed by its
 //!   wavelength, its geometry or aggregate and its number alone, so one's count leaves the
@@ -276,7 +288,8 @@ pub(crate) enum TermAbsorber {
         /// One curve per sun, in the case's order of them.
         curves: Vec<AbsorberCurve>,
     },
-    /// Molecule pairs (the client's `pair`, R08.T4.c): refused until R08.T12.b.2.
+    /// Molecule pairs (the client's `pair`, R08.T4.c): u = `n_A n_B` ∫ρ ds, molecule pairs m⁻⁵,
+    /// the term's ρ the square of its column's relative density (R08.T12.b.2).
     Pair {
         /// `n_A n_B` at relative density 1, molecule pairs m⁻⁶.
         pair_density_per_m6: f64,
@@ -285,18 +298,61 @@ pub(crate) enum TermAbsorber {
     },
 }
 
-/// One sun's curve of growth: one row of the client's `AbsorberCurve` per wavelength.
+impl TermAbsorber {
+    /// Its curves, one per sun.
+    #[must_use]
+    pub(crate) fn curves(&self) -> &[AbsorberCurve] {
+        match self {
+            Self::Column { curves, .. } | Self::Pair { curves, .. } => curves,
+        }
+    }
+
+    /// Its density at relative density 1: n, molecules m⁻³, or `n_A n_B`, molecule pairs m⁻⁶.
+    #[must_use]
+    pub(crate) fn density(&self) -> f64 {
+        match self {
+            Self::Column {
+                number_density_per_m3,
+                ..
+            } => *number_density_per_m3,
+            Self::Pair {
+                pair_density_per_m6,
+                ..
+            } => *pair_density_per_m6,
+        }
+    }
+}
+
+/// One sun's curve of growth: the client's `AbsorberCurve` per wavelength.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AbsorberCurve {
-    /// ln(u ÷ 1 m⁻²) at each node, strictly ascending.
+    /// ln(u ÷ 1 m⁻²) at each node (ln(u ÷ 1 m⁻⁵) for a pair absorber), strictly ascending.
     pub(crate) log_columns: Vec<f64>,
-    /// ln(p ÷ 1 Pa) at each pressure row: one row or none, since a curve with pressure rows is
-    /// refused until R08.T12.b.2.
+    /// ln(p ÷ 1 Pa) at each pressure row, strictly ascending: none or one for a curve without
+    /// lines (R08.T12.b.2).
     #[serde(default)]
     pub(crate) log_pressures: Option<Vec<f64>>,
-    /// −ln T at each node, per wavelength.
+    /// ln(p ÷ 1 Pa) above which the read holds p̄, the client's `readTopLogPressure`: given for, and
+    /// only for, a curve of several rows.
+    #[serde(default)]
+    pub(crate) read_top_log_pressure: Option<f64>,
+    /// −ln T at each row and node, row-major, per wavelength.
     pub(crate) optical_depth: Vec<Vec<f64>>,
+}
+
+impl AbsorberCurve {
+    /// The curve's pressure rows: empty for one without lines.
+    #[must_use]
+    pub(crate) fn log_pressures(&self) -> &[f64] {
+        self.log_pressures.as_deref().unwrap_or(&[])
+    }
+
+    /// Whether the curve has several pressure rows, and so reads a path's pressure.
+    #[must_use]
+    pub(crate) fn has_pressure_rows(&self) -> bool {
+        self.log_pressures().len() > 1
+    }
 }
 
 /// A sun's spectrum.
@@ -378,6 +434,10 @@ struct CaseFile {
     shells: Shells,
     top_height_m: f64,
     ground_albedo: Vec<f64>,
+    /// The column's pressure over 1 bar as a profile over the heights, for curves with pressure
+    /// rows (module documentation).
+    #[serde(default)]
+    pressure_bar: Option<DensityProfile>,
     terms: Vec<Term>,
     suns: Vec<Sun>,
     detector_half_angle_deg: f64,
@@ -443,8 +503,10 @@ impl AtmosphereCase {
     /// absorbers (module documentation): an absorber on a term that scatters, absorbs or has a
     /// phase, a density that is not positive, curves that are not one per sun, ln u that does not
     /// ascend strictly, a depth row that has not one finite depth at least 0 per node and
-    /// wavelength, more than five absorber terms, and, until R08.T12.b.2, a `pair` absorber or a
-    /// curve with pressure rows. And an observation's `samples` outside 1 to 2⁵³.
+    /// wavelength, more than five absorber terms, a curve whose pressure rows do not ascend strictly
+    /// or lack a read top or its depths, a read top on a curve of one row, a curve of several rows
+    /// in a case with no `pressureBar`, and a `pressureBar` that is not a `tabulated` profile. And an
+    /// observation's `samples` outside 1 to 2⁵³.
     pub fn from_json(text: &str) -> Result<Self, ReadCaseError> {
         let file: CaseFile = serde_json::from_str(text).map_err(ReadCaseError::Json)?;
         let figure = validate(&file)?;
@@ -513,6 +575,14 @@ impl AtmosphereCase {
         self.file.aggregates.len()
     }
 
+    /// The column's pressure over 1 bar over the heights, a `tabulated` profile, where the case
+    /// gives it (module documentation).
+    #[must_use]
+    pub(crate) fn pressure_bar(&self) -> Option<&DensityProfile> {
+        self.file.pressure_bar.as_ref()
+    }
+
+    /// The ground's albedo per wavelength.
     #[must_use]
     pub(crate) fn ground_albedo(&self) -> &[f64] {
         &self.file.ground_albedo
@@ -818,21 +888,19 @@ fn absorber(
     suns: usize,
     field: &str,
 ) -> Result<(), ReadCaseError> {
-    let (number_density_per_m3, curves) = match absorber {
+    let (density, density_field, curves) = match absorber {
         TermAbsorber::Column {
             number_density_per_m3,
             curves,
-        } => (*number_density_per_m3, curves),
-        TermAbsorber::Pair { .. } => {
-            return Err(invalid(
-                format!("{field}.kind"),
-                "must be column: pair absorbers are traced from R08.T12.b.2",
-            ));
-        }
+        } => (*number_density_per_m3, "numberDensityPerM3", curves),
+        TermAbsorber::Pair {
+            pair_density_per_m6,
+            curves,
+        } => (*pair_density_per_m6, "pairDensityPerM6", curves),
     };
     require(
-        number_density_per_m3.is_finite() && number_density_per_m3 > 0.0,
-        || format!("{field}.numberDensityPerM3"),
+        density.is_finite() && density > 0.0,
+        || format!("{field}.{density_field}"),
         "must be positive",
     )?;
     require(
@@ -842,13 +910,20 @@ fn absorber(
     )?;
     for (s, curve) in curves.iter().enumerate() {
         let field = format!("{field}.curves[{s}]");
-        if let Some(rows) = &curve.log_pressures {
-            require(
-                rows.len() == 1 && rows.iter().all(|p| p.is_finite()),
-                || format!("{field}.logPressures"),
-                "must have one finite row: curves with pressure rows are traced from R08.T12.b.2",
-            )?;
-        }
+        let rows = curve.log_pressures();
+        require(
+            curve.log_pressures.as_ref().is_none_or(|r| !r.is_empty())
+                && rows.iter().all(|p| p.is_finite())
+                && rows.windows(2).all(|pair| pair[0] < pair[1]),
+            || format!("{field}.logPressures"),
+            "must have at least one entry, finite and strictly ascending",
+        )?;
+        require(
+            curve.read_top_log_pressure.is_some() == curve.has_pressure_rows()
+                && curve.read_top_log_pressure.is_none_or(f64::is_finite),
+            || format!("{field}.readTopLogPressure"),
+            "must be given, finite, for and only for a curve of several pressure rows",
+        )?;
         let nodes = &curve.log_columns;
         require(
             nodes.len() >= 2
@@ -860,7 +935,7 @@ fn absorber(
         per_wavelength_rows(
             &curve.optical_depth,
             wavelengths,
-            nodes.len(),
+            nodes.len() * rows.len().max(1),
             &format!("{field}.opticalDepth"),
         )?;
         for (w, row) in curve.optical_depth.iter().enumerate() {
@@ -1076,7 +1151,20 @@ fn validate(file: &CaseFile) -> Result<Figure, ReadCaseError> {
     for (i, t) in file.terms.iter().enumerate() {
         if let Some(a) = &t.absorber {
             absorber(a, count, file.suns.len(), &format!("terms[{i}].absorber"))?;
+            require(
+                file.pressure_bar.is_some() || a.curves().iter().all(|c| !c.has_pressure_rows()),
+                || format!("terms[{i}].absorber.curves"),
+                "must be of one pressure row each in a case with no pressureBar",
+            )?;
         }
+    }
+    if let Some(profile) = &file.pressure_bar {
+        require(
+            matches!(profile, DensityProfile::Tabulated { .. }),
+            || "pressureBar.kind".to_owned(),
+            "must be tabulated",
+        )?;
+        density(profile, "pressureBar")?;
     }
     require(
         file.terms.iter().filter(|t| t.absorber.is_some()).count() <= MAX_ABSORBERS,
@@ -1615,22 +1703,6 @@ pub(crate) mod tests {
             edit(&mut case);
             invalid_field(&case)
         };
-        // Until R08.T12.b.2: pressure rows, and a pair absorber.
-        assert_eq!(
-            refused(
-                &|c| c["terms"][2]["absorber"]["curves"][0]["logPressures"] = json!([10.0, 11.0])
-            ),
-            format!("{field}.curves[0].logPressures")
-        );
-        assert_eq!(
-            refused(&|c| {
-                c["terms"][2]["absorber"] = json!({
-                    "kind": "pair", "pairDensityPerM6": 1e40,
-                    "curves": c["terms"][2]["absorber"]["curves"].clone()
-                });
-            }),
-            format!("{field}.kind")
-        );
         // An absorber on a term that absorbs, scatters or has a phase.
         assert_eq!(
             refused(&|c| c["terms"][2]["absorption"] = json!([1e-7, 0.0])),
@@ -1681,6 +1753,110 @@ pub(crate) mod tests {
         let mut stray = with_ozone_absorber();
         stray["terms"][2]["absorber"]["transmittance"] = json!([]);
         assert!(matches!(read(&stray), Err(ReadCaseError::Json(_))));
+    }
+
+    #[test]
+    fn an_atmosphere_case_reads_pair_absorbers_and_pressure_rows_and_refuses_bad_ones() {
+        let field = "terms[2].absorber";
+        let refused = |edit: &dyn Fn(&mut Value)| {
+            let mut case = with_ozone_absorber();
+            edit(&mut case);
+            invalid_field(&case)
+        };
+        // A pair absorber (R08.T12.b.2), and its density.
+        let as_pair = |c: &mut Value| {
+            c["terms"][2]["absorber"] = json!({
+                "kind": "pair", "pairDensityPerM6": 1e40,
+                "curves": c["terms"][2]["absorber"]["curves"].clone()
+            });
+        };
+        let mut pair = with_ozone_absorber();
+        as_pair(&mut pair);
+        assert!(matches!(
+            read(&pair).unwrap().terms()[2].absorber,
+            Some(TermAbsorber::Pair { pair_density_per_m6, ref curves })
+                if (pair_density_per_m6 / 1e40 - 1.0).abs() < 1e-15 && curves.len() == 1
+        ));
+        assert_eq!(
+            refused(&|c| {
+                as_pair(c);
+                c["terms"][2]["absorber"]["pairDensityPerM6"] = json!(-1.0);
+            }),
+            format!("{field}.pairDensityPerM6")
+        );
+        // Pressure rows (R08.T12.b.2), read through the case's pressure profile.
+        let rows = |c: &mut Value| {
+            let curve = &mut c["terms"][2]["absorber"]["curves"][0];
+            curve["logPressures"] = json!([2.3, 9.2, 16.1]);
+            curve["readTopLogPressure"] = json!(16.0);
+            curve["opticalDepth"] = json!([
+                [0.0, 0.1, 0.8, 0.0, 0.2, 1.6, 0.0, 0.3, 2.4],
+                [0.0, 0.0, 0.05, 0.0, 0.0, 0.1, 0.0, 0.0, 0.15]
+            ]);
+            c["pressureBar"] = json!({
+                "kind": "tabulated", "altitudesM": [0.0, 50_000.0, 100_000.0],
+                "relative": [1.0, 0.002, 0.0]
+            });
+        };
+        let mut with_rows = with_ozone_absorber();
+        rows(&mut with_rows);
+        let case = read(&with_rows).unwrap();
+        assert!(case.terms()[2].absorber.as_ref().unwrap().curves()[0].has_pressure_rows());
+        assert!(case.pressure_bar().is_some());
+        let curve = format!("{field}.curves[0]");
+        assert_eq!(
+            refused(&|c| {
+                rows(c);
+                c.as_object_mut().unwrap().remove("pressureBar");
+            }),
+            format!("{field}.curves")
+        );
+        assert_eq!(
+            refused(&|c| {
+                rows(c);
+                c["pressureBar"] = json!({ "kind": "exponential", "scaleHeightM": 8000.0 });
+            }),
+            "pressureBar.kind"
+        );
+        assert_eq!(
+            refused(&|c| {
+                rows(c);
+                c["pressureBar"]["relative"][1] = json!(-0.1);
+            }),
+            "pressureBar.relative"
+        );
+        assert_eq!(
+            refused(&|c| {
+                rows(c);
+                c["terms"][2]["absorber"]["curves"][0]["logPressures"] = json!([2.3, 16.1, 9.2]);
+            }),
+            format!("{curve}.logPressures")
+        );
+        assert_eq!(
+            refused(&|c| c["terms"][2]["absorber"]["curves"][0]["logPressures"] = json!([])),
+            format!("{curve}.logPressures")
+        );
+        assert_eq!(
+            refused(&|c| {
+                rows(c);
+                let curve = c["terms"][2]["absorber"]["curves"][0]
+                    .as_object_mut()
+                    .unwrap();
+                curve.remove("readTopLogPressure");
+            }),
+            format!("{curve}.readTopLogPressure")
+        );
+        assert_eq!(
+            refused(&|c| c["terms"][2]["absorber"]["curves"][0]["readTopLogPressure"] = json!(9.0)),
+            format!("{curve}.readTopLogPressure")
+        );
+        assert_eq!(
+            refused(&|c| {
+                rows(c);
+                c["terms"][2]["absorber"]["curves"][0]["opticalDepth"][1] = json!([0.0, 0.1, 0.2]);
+            }),
+            format!("{curve}.opticalDepth[1]")
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
 /**
- * The client's writer of the reference tracer's case format (plan R08, R08.T12.b.1): a case of
- * `view/atmosphere/reference/cases.ts` as the JSON `hyperion-fit atmosphere-reference` reads
- * (`crates/hyperion-fit/src/atmosphere/case.rs`, `CASE_FORMAT` 1), every term written from the full
- * medium.
+ * The client's writer of the reference tracer's case format (plan R08, R08.T12.b): a case of
+ * `view/atmosphere/reference/cases.ts` or `thickCases.ts` as the JSON `hyperion-fit
+ * atmosphere-reference` reads (`crates/hyperion-fit/src/atmosphere/case.rs`, `CASE_FORMAT` 1), every
+ * term written from the full medium.
  *
  * @remarks
  * - **Terms** are the medium's `MediumTerm`s at the three fitted channels, the case's wavelengths.
@@ -15,8 +15,14 @@
  *   table without a matrix, and Cornette and Shanks's function, marked `depolarising`, a stated
  *   approximation (`decision-r08-vector.md`).
  * - **Absorbers** (`decision-r08-t12b-scope.md`, ruling 4) carry n at relative density 1 and each
- *   sun's curve row, ln u at the nodes and −ln T per channel, the client's `AbsorberCurve` of one
- *   pressure row. A curve with pressure rows, or a pair absorber, is refused until R08.T12.b.2.
+ *   sun's curve, ln u at the nodes and −ln T per channel, the client's `AbsorberCurve`: a column
+ *   absorber's n in molecules m⁻³, or since R08.T12.b.2 a pair absorber's n_A n_B in molecule pairs
+ *   m⁻⁶; and a curve of several pressure rows with its rows' ln p, its read's top and its depths
+ *   row-major, the medium's `pressureBar` written beside the terms for it.
+ * - **Figures** (R08.T12.b.2). A case that gives its `significantFigures` has every number of its
+ *   terms and its pressure profile written rounded to that many, its geometries in full, so that a
+ *   medium of several tabulated phases stays under the added-file hook; rounding is monotone, so a
+ *   matrix element no larger than a₁ stays so.
  * - **Counts.** A geometry or aggregate takes its own `samples` where the case's counts give one
  *   (`decision-r08-t12b-scope.md`, ruling 6).
  *
@@ -74,11 +80,26 @@ export type PhaseJson =
       >;
     };
 
-/** One sun's curve of growth as the format writes it. */
+/** One sun's curve of growth as the format writes it: rows only for a curve of several. */
 export interface AbsorberCurveJson {
   readonly logColumns: readonly number[];
+  readonly logPressures?: readonly number[];
+  readonly readTopLogPressure?: number;
   readonly opticalDepth: readonly (readonly number[])[];
 }
+
+/** An absorber as the format writes it. */
+export type AbsorberJson =
+  | {
+      readonly kind: "column";
+      readonly numberDensityPerM3: number;
+      readonly curves: readonly AbsorberCurveJson[];
+    }
+  | {
+      readonly kind: "pair";
+      readonly pairDensityPerM6: number;
+      readonly curves: readonly AbsorberCurveJson[];
+    };
 
 /** A term as the format writes it. */
 export interface TermJson {
@@ -88,11 +109,7 @@ export interface TermJson {
   readonly absorption: readonly number[];
   readonly phase: PhaseJson;
   readonly depolarising?: true;
-  readonly absorber?: {
-    readonly kind: "column";
-    readonly numberDensityPerM3: number;
-    readonly curves: readonly AbsorberCurveJson[];
-  };
+  readonly absorber?: AbsorberJson;
 }
 
 /** A geometry as the format writes it. */
@@ -132,6 +149,7 @@ export interface CaseJson {
       };
   readonly topHeightM: number;
   readonly groundAlbedo: readonly number[];
+  readonly pressureBar?: DensityJson;
   readonly terms: readonly TermJson[];
   readonly suns: readonly { readonly name: string; readonly irradiance: readonly number[] }[];
   readonly detectorHalfAngleDeg: number;
@@ -193,18 +211,21 @@ export function tabulatedPhaseJson(table: PhaseTable, asymmetry: Rgb): PhaseJson
 }
 
 /**
- * One sun's curve of growth in the format.
- *
- * @throws RangeError for a curve with pressure rows, refused until R08.T12.b.2.
+ * One sun's curve of growth in the format: a curve of one row as before R08.T12.b.2, and one of
+ * several with its rows' ln p and its read's top, its depths row-major, `[r × nodes + j]`, as the
+ * client holds them.
  */
 export function absorberCurveJson(curve: AbsorberCurve): AbsorberCurveJson {
-  if (curve.logPressures.length !== 1) {
-    throw new RangeError(
-      `a curve of ${curve.logPressures.length} pressure rows is traced from R08.T12.b.2, not here`,
-    );
-  }
+  const rows =
+    curve.logPressures.length > 1
+      ? {
+          logPressures: Array.from(curve.logPressures),
+          readTopLogPressure: curve.readTopLogPressure,
+        }
+      : {};
   return {
     logColumns: Array.from(curve.logColumns),
+    ...rows,
     opticalDepth: curve.opticalDepth.map((channel) => Array.from(channel)),
   };
 }
@@ -212,8 +233,8 @@ export function absorberCurveJson(curve: AbsorberCurve): AbsorberCurveJson {
 /**
  * A term in the format, `curve` its absorber's curve under the case's sun.
  *
- * @throws RangeError for a pair absorber, a column absorber with no curve, or a table with no
- *   asymmetry given, as {@link absorberCurveJson}.
+ * @throws RangeError for an absorber with no curve or with a curve of the other kind, or a table
+ *   with no asymmetry given.
  */
 export function termJson(
   term: MediumTerm,
@@ -229,17 +250,21 @@ export function termJson(
   const absorber = term.absorber;
   let absorberJson: TermJson["absorber"];
   if (absorber !== undefined) {
-    if (absorber.kind === "pair") {
-      throw new RangeError(`pair absorber ${term.name} is traced from R08.T12.b.2, not here`);
-    }
     if (curve === undefined) {
       throw new RangeError(`absorber ${term.name} has no curve`);
     }
-    absorberJson = {
-      kind: "column",
-      numberDensityPerM3: absorber.numberDensityPerM3,
-      curves: [absorberCurveJson(curve)],
-    };
+    if (curve.kind !== absorber.kind) {
+      throw new RangeError(`${absorber.kind} absorber ${term.name} has a ${curve.kind} curve`);
+    }
+    const curves = [absorberCurveJson(curve)];
+    switch (absorber.kind) {
+      case "column":
+        absorberJson = { kind: "column", numberDensityPerM3: absorber.numberDensityPerM3, curves };
+        break;
+      case "pair":
+        absorberJson = { kind: "pair", pairDensityPerM6: absorber.pairDensityPerM6, curves };
+        break;
+    }
   }
   const withAbsorber = absorberJson === undefined ? {} : { absorber: absorberJson };
   const { phase } = term;
@@ -277,6 +302,138 @@ export function termJson(
     }
   }
   return json;
+}
+
+/** A number rounded to `figures` significant figures. */
+function roundedNumber(value: number, figures: number): number {
+  return Number(value.toPrecision(figures));
+}
+
+/** Numbers rounded to `figures` significant figures. */
+function roundedNumbers(values: readonly number[], figures: number): number[] {
+  return values.map((v) => roundedNumber(v, figures));
+}
+
+/** Rows of numbers rounded to `figures` significant figures. */
+function roundedRows(rows: readonly (readonly number[])[], figures: number): number[][] {
+  return rows.map((row) => roundedNumbers(row, figures));
+}
+
+/** A profile with its numbers rounded to `figures` significant figures. */
+function roundedDensity(density: DensityJson, figures: number): DensityJson {
+  let rounded: DensityJson;
+  switch (density.kind) {
+    case "exponential":
+      rounded = { kind: "exponential", scaleHeightM: roundedNumber(density.scaleHeightM, figures) };
+      break;
+    case "tent":
+      rounded = {
+        kind: "tent",
+        bottomM: roundedNumber(density.bottomM, figures),
+        peakM: roundedNumber(density.peakM, figures),
+        topM: roundedNumber(density.topM, figures),
+      };
+      break;
+    case "tabulated":
+      rounded = {
+        kind: "tabulated",
+        altitudesM: roundedNumbers(density.altitudesM, figures),
+        relative: roundedNumbers(density.relative, figures),
+      };
+      break;
+  }
+  return rounded;
+}
+
+/** A phase with its numbers rounded to `figures` significant figures. */
+function roundedPhase(phase: PhaseJson, figures: number): PhaseJson {
+  let rounded: PhaseJson;
+  switch (phase.kind) {
+    case "rayleigh":
+      rounded = { kind: "rayleigh", depolarisation: roundedNumbers(phase.depolarisation, figures) };
+      break;
+    case "cornette-shanks":
+      rounded = { kind: "cornette-shanks", asymmetry: roundedNumber(phase.asymmetry, figures) };
+      break;
+    case "none":
+      rounded = phase;
+      break;
+    case "tabulated": {
+      const { matrix } = phase;
+      rounded = {
+        kind: "tabulated",
+        u: roundedNumbers(phase.u, figures),
+        a1: roundedRows(phase.a1, figures),
+        asymmetry: roundedNumbers(phase.asymmetry, figures),
+        ...(matrix === undefined
+          ? {}
+          : {
+              matrix: {
+                a2: roundedRows(matrix.a2, figures),
+                a3: roundedRows(matrix.a3, figures),
+                a4: roundedRows(matrix.a4, figures),
+                b1: roundedRows(matrix.b1, figures),
+                b2: roundedRows(matrix.b2, figures),
+              },
+            }),
+      };
+      break;
+    }
+  }
+  return rounded;
+}
+
+/** A curve with its numbers rounded to `figures` significant figures. */
+function roundedCurve(curve: AbsorberCurveJson, figures: number): AbsorberCurveJson {
+  const { logPressures, readTopLogPressure } = curve;
+  return {
+    logColumns: roundedNumbers(curve.logColumns, figures),
+    ...(logPressures === undefined ? {} : { logPressures: roundedNumbers(logPressures, figures) }),
+    ...(readTopLogPressure === undefined
+      ? {}
+      : { readTopLogPressure: roundedNumber(readTopLogPressure, figures) }),
+    opticalDepth: roundedRows(curve.opticalDepth, figures),
+  };
+}
+
+/** An absorber with its numbers rounded to `figures` significant figures. */
+function roundedAbsorber(absorber: AbsorberJson, figures: number): AbsorberJson {
+  const curves = absorber.curves.map((c) => roundedCurve(c, figures));
+  let rounded: AbsorberJson;
+  switch (absorber.kind) {
+    case "column":
+      rounded = {
+        kind: "column",
+        numberDensityPerM3: roundedNumber(absorber.numberDensityPerM3, figures),
+        curves,
+      };
+      break;
+    case "pair":
+      rounded = {
+        kind: "pair",
+        pairDensityPerM6: roundedNumber(absorber.pairDensityPerM6, figures),
+        curves,
+      };
+      break;
+  }
+  return rounded;
+}
+
+/**
+ * A term with every number rounded to `figures` significant figures (the module's remarks), its
+ * fields in their order.
+ */
+export function roundedTermJson(term: TermJson, figures: number): TermJson {
+  const { depolarising, absorber } = term;
+  return {
+    name: term.name,
+    density: roundedDensity(term.density, figures),
+    scattering: roundedNumbers(term.scattering, figures),
+    absorption: roundedNumbers(term.absorption, figures),
+    phase: roundedPhase(term.phase, figures),
+    ...(depolarising === undefined ? {} : { depolarising }),
+    ...(absorber === undefined ? {} : { absorber: roundedAbsorber(absorber, figures) }),
+  };
 }
 
 /** An observation's own `samples`, where its case's counts give one. */
@@ -318,14 +475,21 @@ export function caseJson(referenceCase: ReferenceCase, counts: SampleCounts | un
       `case ${referenceCase.name} has ${referenceCase.curves.length} curves for ${absorbers.length} absorbers`,
     );
   }
+  const figures = referenceCase.significantFigures;
   const terms = medium.terms.map((term) => {
     const slot = absorbers.indexOf(term);
-    return termJson(
+    const json = termJson(
       term,
       slot < 0 ? undefined : referenceCase.curves[slot],
       referenceCase.phaseAsymmetry[term.name],
     );
+    return figures === undefined ? json : roundedTermJson(json, figures);
   });
+  const profile = medium.pressureBar === undefined ? undefined : densityJson(medium.pressureBar);
+  const pressure =
+    profile === undefined
+      ? {}
+      : { pressureBar: figures === undefined ? profile : roundedDensity(profile, figures) };
   return {
     format: CASE_FORMAT,
     name: referenceCase.name,
@@ -334,6 +498,7 @@ export function caseJson(referenceCase: ReferenceCase, counts: SampleCounts | un
     shells: shellsJson(referenceCase.figure),
     topHeightM: medium.topHeightM,
     groundAlbedo: rgbArray(medium.groundAlbedo),
+    ...pressure,
     terms,
     suns: [{ name: "sun", irradiance: rgbArray(referenceCase.sunIlluminanceLx) }],
     detectorHalfAngleDeg: referenceCase.detectorHalfAngleDeg,
