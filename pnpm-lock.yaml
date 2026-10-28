@@ -222,8 +222,8 @@ importers:
         specifier: ^6.1.1
         version: 6.1.1(vite@8.3.0(@types/node@24.13.6))
       electron:
-        specifier: ^44.4.3
-        version: 44.4.3
+        specifier: ^45.1.0
+        version: 45.1.0
       electron-vite:
         specifier: 6.0.0-beta.1
         version: 6.0.0-beta.1(vite@8.3.0(@types/node@24.13.6))
@@ -1141,8 +1141,8 @@ packages:
       '@swc/core':
         optional: true
 
-  electron@44.4.3:
-    resolution: {integrity: sha512-LTpSFTB40qVCXIX5xMo+cgHI/Jjkbjw7VpB26PccEbroqOn72LBukeaDwPVo1fBYzSzs0c9iPuAucFCO7Tw81Q==}
+  electron@45.1.0:
+    resolution: {integrity: sha512-i7qKVAh/KR5v1pf56NhGGX2QYHcdjvLgS7koL6ui50c+zUDGLRunR95nXcTpHPURKOQ4GDBG8BmXiDgOQ8DD0A==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -2233,7 +2233,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@44.4.3:
+  electron@45.1.0:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0
