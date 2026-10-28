@@ -5589,3 +5589,42 @@ R06.
   simplification, not a wrong class. If a ruling schedules it, it takes P06.T40, rides the first
   galaxy train after its gate, and reruns P06.T19.d, P09.T9.b's retention test and the
   `cluster_retention` fit.
+
+- **Deviations in P06.T42.a, as built (lane `p06-asks`, 2026-10-28; at version 23, no bump; pure,
+  nothing on the record calls it).** Ask A2's rate, for P06.T42.b's swap.
+  - _API._ A private `wind::modern_limited(regime, surface, eta)`, beside `modern`, under
+    `#[cfg_attr(not(test), expect(dead_code))]` until T42.b; the swap is `rate`'s
+    `WindRecipe::Modern` arm calling it in place of `modern`. `modern`'s choice of where P06.T39's
+    steepening acts moved into `with_eddington_kink(regime, surface, recipe)`, which both call;
+    the record's rate is the same arithmetic in the same order (`golden_diff`: no golden changed).
+  - _As the plan has it._ For an evolved hydrogen-rich star (HG to TP-AGB, SSE's types 2–6)
+    beyond the limit (HPT's form, L > 6 × 10⁵ L☉ and 10⁻⁵ R L^½ > 1): max(`MODERN_LBV`,
+    `hot_or_cool(s, hurley_evolved(s, η, agb))`), steepened as `modern` steepens (not on the
+    AGB), then `hurley_lbv(s)` added at the star's own state, so the Γₑ = 0.7 twin carries no
+    term. Everything else, the main sequence beyond the limit included, is `modern_below_kink`,
+    so the rate is `modern`'s to the bit there by construction. The module documentation's new
+    section cites the ruling, the observed ceiling and Belczynski et al.'s "full amount of LBV
+    mass loss", from which the rate departs.
+  - _Figures re-checked_ (arXiv copies read through the Internet Archive; the pod reaches no
+    journal): Davies, Crowther and Beasor (2018) give log L = 5.4 (SMC) and 5.5 (LMC), and quote
+    Humphreys and Davidson's 5.7–5.9 revised to 5.66 by Humphreys (1983) and Elias et al. (1985).
+    At 4,000 K and 40 M☉ (Γₑ 0.24–0.30), HPT's term is 0.657 M☉/yr at log L 5.78, 9.227 at 5.80
+    and 121.5 at 5.90, zero up to L = 6 × 10⁵ L☉ (log L 5.778); the cool side's rate is
+    1.09 × 10⁻⁴ at 5.80 and 1.59 × 10⁻⁴ at 5.90, so the floor binds at the first and the side
+    rate at the second. COMPAS's `HURLEY_ADD` (`BaseStar::CalculateMassLossRateBelczynski2010`,
+    read on its `dev` branch) adds `CalculateMassLossRateLBVHurley`'s term,
+    0.1 (x − 1)³ (L ÷ 6 × 10⁵ − 1), to the other winds, with no `MODERN_LBV` floor: the floor is
+    the ruling's.
+  - _Finding, no change: a fifth place where HPT's text and SSE's code differ._ HPT's text
+    (astro-ph/0001295v1, §7.1) prints the term as 0.1 (10⁻⁵ R L^½)³ (L ÷ 6 × 10⁵ − 1.0), with no
+    − 1 in the cube, which steps to 0.1 (L ÷ 6 × 10⁵ − 1) at the limit; SSE's code, COMPAS and
+    Belczynski et al. (2010, equation 5) cube x − 1, which vanishes on it, as `hurley_lbv` always
+    has. The module's list of four text–code differences under `Hurley2000` did not name it; the
+    new section does. The printed MNRAS text was not seen.
+  - _Tests_ (`stellar::sse::wind`):
+    `within_the_humphreys_davidson_limit_the_limited_rate_is_the_modern_rate` (a grid of 2,160
+    states in nine phases at four metallicities, each that is not an evolved star beyond the limit
+    bit for bit, the main sequence and helium stars beyond it included),
+    `beyond_the_limit_the_limited_rate_is_at_least_belczynskis_and_the_side_rate`
+    (also at least today's rate, and below the kink exactly the floor plus the term) and
+    `at_4000_k_hurleys_term_is_a_wall_at_log_l_5_8`.
