@@ -5181,7 +5181,10 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
   R08.T11.e, as built").
 - **R08.T11.f Planetshine's nodes by the horizon,** only if an x4 row alone stays over 16.67 ms
   after QW30. Acceptance: within today's three-node error plus 0.1% on the twin's night-side set,
-  and QW31.
+  and QW31. _Measured, not landed, 2026-10-27_ (Risks, "Deviations in R08.T11.f, as built": the
+  form, amended to the centre's lookup with the disc's second-order term, met its acceptance on the
+  twin, but cost the RTX 3080 more where it never ran than it saved where it did, so main dropped
+  it; the two x4 rows go to QW33 on origin's tip, under Electron 45).
 
 Acceptance: the record is here, and `pnpm test` passes.
 
@@ -11475,6 +11478,97 @@ SATURN`'s 5 slices and 4 bands), their medians 16.29–16.64. No x2 or x2p row i
   - _A production leak, found by the first series_: `WebGpuEngine` kept every dispatched kernel's
     record, its pipeline and uniform buffers, in a strong `Map` for the engine's life. R01.T15
     (c183b046) fixed it with the per-device kernel cache and `releaseCompute`.
+- **Deviations in R08.T11.f, as built** (2026-10-27; `decision-r08-t11-frame.md` §3 and §7;
+  main's rulings of 2026-10-27). **Measured and not landed.** The form cost the RTX 3080 more than
+  it saved, so main dropped the kernel and twin change: no kernel, twin, table, golden, wire or
+  version moves. This record keeps what was found, and the lane's handoff
+  (`handoff-r08-t11f.md`) where its patch is kept.
+  - _The literal form fails its own acceptance._ §3's form takes the centre's node alone clear of
+    the horizon. A uniform disc's irradiance-weighted mean transmittance spreads in zenith angle
+    and in air mass across the whole disc. The three nodes along the vertical carry the first part
+    and half of the second; the centre alone carries neither.
+    - Near the zenith (τ tan² z ≪ 1) the centre alone reads high, its error over the three nodes'
+      about Tτρ² ÷ 8.
+    - On the twin, against a converged disc integral (16 Gauss–Legendre radii by 64 azimuths,
+      within 1.2 × 10⁻⁶ of twice each), that is 0.58% at ρ 20°, 0.33% at 15° and 0.14–0.15% at
+      10°, on all three media, against the 0.1% allowed. The timing scene's 9.7° giants fail in
+      blue (τ_v 0.39).
+  - _The form, amended_ (main's ruling). The centre's lookup T_c times 1 + (ρ² ÷ 8)(τ² tan² z − 2τ),
+    with τ = −ln T_c the centre's slant depth per channel: one lookup, no further read.
+    - _The derivation._ A direction r from the centre at the angle φ about it has
+      μ′ = μ cos r + sin z sin r cos φ, so δ = μ′ − μ = sin z · r cos φ − μr² ÷ 2 + O(r³). Over the
+      uniform disc E[δ] = −μρ² ÷ 4 and E[δ²] = sin² z · ρ² ÷ 4. With f = μT, T = exp(−τ_v ÷ μ),
+      f′ = T(1 + τ_v ÷ μ) and f″ = Tτ_v² ÷ μ³:
+      R = (f + f′E[δ] + f″E[δ²] ÷ 2) ÷ (μ + E[δ]) = T[1 + (ρ² ÷ 8)(τ² tan² z − 2τ)] + O(ρ⁴).
+    - _Its assumptions:_ a uniform disc wholly up, a plane-parallel air about the point, the second
+      order in ρ, and absorbers linear in air mass across the disc. The science check confirmed
+      the steps analytically and numerically. Its residual scales as ρ⁴.
+    - _Three blends, their shares multiplied._
+      - By the horizon: the three nodes while the disc's lowest point stands under 0.1 rad up,
+        linear to the form whole at 0.2 rad.
+      - By the air's curvature (the science check's finding, the third blend): (H ÷ R) tan² z from
+        0.01 to 0.02, H the body's table's local scale height at the point over s and R the
+        equatorial radius. Without it, the measured Earth's air on a 500 km sphere drifted to 0.12%
+        over the three nodes' error.
+      - By the term's size: 2% to 4% (thick air, a strong band, or the horizon).
+    - _On the twin it met main's bound with room._ At most +0.0026% over the three nodes' error on
+      R05's, the measured and the slab Earth (main's 0.01%). It was never worse under the measured
+      Earth's aerosol × 5 and × 20. The Titan-class methane column came to +0.0007% and Earth's air
+      on a 1,500 km sphere to +0.020% (§3's 0.1%). It was up to 0.9% nearer than the three nodes.
+      On the tone-mapped night-side face it stayed within 0.66 code of them, with no step over
+      0.004 code they did not take.
+  - _Why it is not landed: presence costs, execution does not pay._ These are untimed hidden RTX
+    runs of part 1 at ae64fa92 (Electron 45), under the GPU lock only, CPUQuota 400%, busy at a
+    median of 1,965 MHz and at most 66 °C, 2026-10-27, run back to back:
+    - base3: origin's tip, 23:34, load 5.4;
+    - mine3: the form as last built, its nodes read in a loop with no private array, 23:31,
+      load 2.5;
+    - d1: mine3 with the centre's form never taken (the horizon's ends out of reach), its code
+      present, 23:37, load 5.7.
+
+    | Row (frame sum, median, ms)            | base3 x1 / x2 / x4    | mine3 − base3         | d1 − base3            |
+    | -------------------------------------- | --------------------- | --------------------- | --------------------- |
+    | R05's Earth, 10⁷ m                     | 7.30 / 9.76 / 10.71   | +0.15 / +0.24 / +0.05 | +0.13 / +0.16 / +0.02 |
+    | the measured Earth, 10⁷ m              | 8.33 / 11.65 / 12.42  | +0.25 / +0.22 / +0.23 | +0.21 / +0.23 / +0.23 |
+    | the slab Earth, 10⁷ m                  | 11.14 / 15.44 / 16.38 | +0.20 / +0.20 / +0.02 | +0.22 / +0.26 / +0.11 |
+    | the slab Earth, 1.54 × 10⁷ m           | 9.94 / 13.60 / 14.48  | +0.17 / +0.17 / +0.01 | +0.22 / +0.23 / +0.08 |
+    | `TEST SATURN`, 9.45 × 10⁷ m            | 10.32 / 15.28 / 16.08 | +0.25 / +0.27 / +0.13 | +0.26 / +0.31 / +0.14 |
+    | R10's smoke class map, 10⁷ m (x2 / x4) | 12.51 / 13.74         | +0.47 / +0.47         | +0.50 / +0.54         |
+    | the generated palette, 10⁷ m (x2 / x4) | 13.01 / 14.14         | +0.69 / +0.64         | +0.73 / +0.71         |
+    - The cost is `disc cells` (+0.08 to +0.20 ms on the Earths, +0.26 to +0.58 on the class maps)
+      and `bodies` at x1 and x2 (+0.03 to +0.09). It falls at x1 as at x4, though x1 has no
+      planetshine source and the block never runs. The atmosphere passes are within noise.
+    - d1 matches mine3 row for row. The form's own saving, mine3 against d1, is 0 to −0.09 ms at
+      x4 and nil elsewhere. `bodies` at x4 fell 0.04–0.12 ms in both, from the loop's rewrite, not
+      from the lookups skipped.
+    - _The presence finding._ On the RTX at this shader size, extra live state in `shade`'s
+      planetshine block costs every kernel that inlines it (the face's fragment shader and
+      `disc cells`), whether or not the block runs. The reading is register pressure, the kernel's
+      registers being set by its heaviest block. No register count is reachable through Dawn on
+      Vulkan, which surfaces no pipeline statistics, so the evidence is d1's.
+    - The form as first measured, its nodes and their sums held in private arrays across the loop,
+      was slower again: `bodies` x4 +0.15–0.21 ms and `disc cells` +0.10–0.26 ms at x2 and x4.
+    - SwiftShader's part 11, with R08.T9.b's wide-source cases widened to the form's blends (720
+      points a body, against the twin to 0.008 and 0.067 × 10⁻³), was unchanged: 108.3 s against
+      115.3, a single variant at load 5–10.
+    - Main dropped it, and refused a switch: a runtime switch keeps the static cost, and a
+      compile-time variant across the disc materials, the mesh, `disc cells` and the terrain
+      would not be worth 0.1 ms.
+
+  - _Electron 45 moved the two rows._ The base at ae64fa92, untimed: the slab's 10⁷ m x4 at a
+    median of 16.29–16.38 ms (p95 16.46; another run 17.63 by its tail), and `TEST SATURN`'s
+    9.45 × 10⁷ m x4 at 16.02–16.08 (p95 16.13–16.20). QW31's medians were 16.52–16.64 and
+    16.29–16.35. QW33 re-judges both rows on origin's tip with no lane code, under QW31's rule.
+- **Deferred findings (2026-10-13 rule)** (R08.T11.f).
+  - _The three-node rule's bias._ The three nodes along the disc's vertical miss half the disc's
+    spread in air mass, the part across the vertical. They read about Tτρ² ÷ 8 high: 0.58% for a
+    20° disc near the zenith in blue on Earth, 0.15% at 10°. On the tone-mapped face that is under
+    0.7 code at 20°, and nothing a viewer sees. The second-order term above corrects it. It would
+    cost the static price measured above, so it waits for a shader with the registers to spare.
+  - _The curvature's scale height._ The body's table's local scale height is the green column over
+    the extinction at the point: an e-folding of the column, which runs low where a low haze sits
+    under a taller gas (Earth's 2.1 km against the molecular 8.4 km). A blend on the air's curvature
+    that a later task builds should read an extinction-weighted H, a table layout change.
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
   filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
