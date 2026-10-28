@@ -1111,12 +1111,51 @@ hundred innermost members.
   axis 0.0158 ly, e = 0.88) gives a 16-year period, 120 au at pericentre and 7,800 km/s there;
   energy and angular momentum conserved to 10⁻¹² over ±1,000 yr; propagating by dt and then by −dt
   returns the start to 10⁻¹² relative; bit-identical goldens on both CI architectures.
-- **P09.T28.b Regime and the drift hook.** `regime_of(record)` per design note 12, with the
+- **P09.T28.b Regime and the drift hook** (split in two by decision-galaxy-25-train §2,
+  2026-10-27: T28.b.a, the new functions, lands pure; T28.b.b, the two swaps that move output, lands
+  behind a galaxy hold for version 25). `regime_of(record)` per design note 12, with the
   influence radius where the enclosed stars equal the black hole's mass. `position_velocity_at`
   replaces the straight line for Kepler-regime systems in plan 08's drift hook, for members and grid
   systems alike, and the grid's loss-cone carve-out. Bump `GENERATOR_VERSION`. Tests: positions at t
   = 0 unchanged for every golden system; at 9.9 and 10.1 ly the two regimes differ by less than 0.01
   ly after 1,000 yr.
+  - **P09.T28.b.a Regime and the Kepler state, pure** (no output moves, no bump; after T28.a;
+    before T28.b.b, T28.c and T29; decision-galaxy-25-train §2). `motion::Regime` and
+    `regime_of(..)` per design note 12: a system is in the Kepler regime if its epoch distance from
+    the black hole is inside the influence radius (`CentreProfile::influence_radius`, where the
+    enclosed stars weigh the black hole's mass), whatever the query's time.
+    `position_velocity_at(galaxy, record, t)`: the `KeplerOrbit` from the record's epoch state (a
+    member's own; for a grid system, plan 08's epoch velocity as the initial condition), μ = G
+    (M_bh + M★(< r₀)), propagated to t. A pericentre inside the loss cone gives the "no such
+    system" verdict as a value, as a member's would. A galaxy without kinematic tables, or a
+    `Radial` orbit, keeps the epoch position.
+    - **Design note 15's choice is this task's.** The regime needs only the influence radius. The
+      task picks how a galaxy carries it: a scalar computed at build from the profile, or a memo
+      left out of the derived equality. Either way, no output and no `Debug` digest moves, and the
+      fast suite's added time is recorded.
+    - **Nothing on the record calls these:** `position_at`, `hit_at` and `resolve` are unchanged.
+    - **Tests:** the two regimes at 9.9 and 10.1 ly differ by under 0.01 ly after 1,000 years
+      (continuity at the regime's edge); t = 0 returns the epoch state to the bit; an S2-like
+      member agrees with T28.a's `KeplerOrbit`; a galaxy without kinematic tables keeps the epoch
+      position; the loss-cone verdict on a pinned plunging orbit.
+    - **New golden `galaxy/motion/regime.golden`** (the pre-pin of decision-galaxy-25-train §1.5,
+      D1). For three seeds, each grid record within 1.5 influence radii: its regime, and today's
+      `position_at` at t = ±100, ±1,000 yr and ±H. An extension at the version in force.
+    - **Files:** `galaxy/motion.rs`, `galaxy/features/centre/` as the carrier needs,
+      `galaxy/mod.rs`, `tests/galaxy_motion.rs`, the golden.
+  - **P09.T28.b.b The drift hook and the loss cone** (behind `KEPLER_REGIME_VERSION` = 25 and
+    `GalaxyRules::kepler_regime`; rides version 25, else 26; decision-galaxy-25-train §1).
+    - **The swap.** `position_at` (through `epoch_velocity`) takes `position_velocity_at` for
+      Kepler-regime systems, members and grid systems alike. `resolve` answers "no such system" for
+      a grid record whose pericentre falls inside the loss cone.
+    - **Under the held arm**, today's code runs.
+    - **The bump** is the 25 wiring lane's, which deletes the hold.
+    - **Tests:** the tripwire; `regime.golden` unchanged; under `GalaxyRules::every_25_hold()`:
+      positions at t = 0 unchanged for every golden system (the plan's test), records inside the
+      radius move and records outside it don't, and the loss cone's carve-outs counted and listed;
+      the same seed twice.
+    - **Census C1:** over the three seeds, at t = ±100, ±1,000 yr and ±H. The movers, the largest
+      displacement, every mover finite, and the carve-outs by ID.
 - **P09.T28.c Sphere of influence at pericentre.** A Kepler-regime system's tidal radius is taken at
   its pericentre and is constant in time: 2.7 au for a semi-major axis of 0.01 ly. Test: that
   figure, and about 0.01 ly for a near-circular orbit at 3 ly.
@@ -3181,3 +3220,189 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _A stale Consumes line._ This plan's Consumes bullet for plan 08 still says "only P08.T1–T7
     are built" at `d2787a2`; P08.T9, T12 and T13 are built. Left for the plan's next
     re-validation.
+- **P09.T28.a's propagator: a solve the iteration leaves unsolved is bisected (found and fixed in
+  P09.T28.b.a, lane `p09-centre`, 2026-10-27, at `GENERATOR_VERSION` 23; main's ruling of
+  2026-10-27).** No output moves: nothing generated reads the propagator yet, and every state
+  that the ten Laguerre–Conway steps solve keeps its bits (`kepler.golden` and T28.a's tests
+  unchanged).
+  - _The defect._ The fixed `UNIVERSAL_ITERATIONS` = 10 do not solve every state the centre
+    holds. P09.T28.b.a's pre-pin found a rogue planet of seed 0x5eed0000c0ffee00
+    (`0xcfffdfffc0005f87`: 1.50 ly out, leaving at 958 km/s on a nearly radial hyperbola, e =
+    1.449, q = 0.0875 ly) whose state 1,000 yr back came out 26,480 ly away (3,953 ly at −999 yr),
+    where the orbit is some 2 ly out; its energy was conserved, since any χ gives a point of the
+    conic, but at the wrong time. Run backward, the flyby falls in through its pericentre: the
+    starter (the parabolic cubic's, below the root as designed) lies near the pericentre, where
+    `F′ = r` is least, the first step overshoots into the hyperbolic branch, and from there each
+    step gains only about `1 ÷ √−α`. A scale-free scan (e from 1 to 2, the start's true anomaly,
+    τ in units of `√(q³ ÷ μ)`) finds two such regions, neither in T28.a's stress set: a solve
+    towards the pericentre from 20–220 pericentres out at e of 1.05–2 and τ′ of 60–3,000, and a
+    nearly parabolic flyby (e ≈ 1.01) over τ′ of 10⁶–10⁷, which within the clock window means
+    pericentres inside about 10⁻⁴ ly.
+  - _The fix._ `propagate` solves through `universal_anomaly`: the ten steps as before, then
+    `solves` checks Kepler's universal equation to `UNSOLVED_RESIDUAL` = 10⁻⁸ of its largest term
+    (a solved χ leaves 10⁻¹³ even far out on a hyperbola; the unsolved ones leave 10³–10⁴ times
+    √μτ; an overflowed one is never solved), and an unsolved χ is found again by `bisect_anomaly`,
+    `BISECTION_STEPS` = 128 halvings of `[0, √μτ ÷ q]`. The bracket holds the one root:
+    `dF ÷ dχ = r ≥ q > 0` (Battin 1999, §4.5), so F is increasing, `F(0) = 0` and
+    `F(√μτ ÷ q) ≥ √μτ`. Far out on a hyperbola the bracket's end can
+    lie where the Stumpff terms overflow and their sum is not a number; such a χ is beyond the root
+    (the terms grow with |χ|, and every root the clock window reaches is finite), so the far end
+    moves in to it. Only IEEE operations and `math` functions, fixed counts; the residual test is a
+    comparison of deterministic values, so native and wasip1 agree bit for bit (the tests run in
+    the wasip1 suite).
+  - _Tests (new, in `galaxy/motion.rs`)._
+    `an_inbound_flyby_through_its_pericentre_is_solved_pinned` (the rogue planet: the ten steps
+    leave it unsolved, the fallback solves it, 1.5–2.5 ly at −1,000 yr, within 10⁻⁹ of the
+    hyperbolic anomaly's position, energy to 10⁻¹²);
+    `nearly_radial_flybys_match_independent_references_pinned` (e = 1, 1 + 10⁻⁶, 1 + 10⁻⁴, 1.01,
+    1.05, 1.2, 1.45, 2; pericentres 10⁻⁴–1 ly; starts 1–300 pericentres out, inbound and outbound;
+    ±1 to ±10⁴ yr; against Barker's equation for the parabolas and the hyperbolic anomaly for the
+    rest, both by bisection and sharing no algebra with the universal variables (Vallado 2013,
+    §2.2); 2,016 propagations, 14 by the fallback, worst 3.5 × 10⁻¹⁰ of the farther radius,
+    held to 10⁻⁹; it fails if the fallback is never reached); and T28.a's
+    `the_fixed_iteration_count_converges` now asserts that its stress set never takes the
+    fallback, so those states keep the iterated χ. Both constants belong to the generator version
+    once P09.T28.b.b wires the propagator in. This supersedes "P09.T28.a as built"'s _Method_ (the
+    ten steps alone); its _Domain_ case (e = 100, q = 10⁻³ ly, solved back from 160 ly) was not
+    re-run.
+  - _In P09.T28.b.a's pre-pin sample_ (three galaxies, 453,819 Kepler-regime grid records at four
+    times each), 5 records take the fallback, each at one of its times; with it, the Kepler arm
+    moves no record more than 4.6 ly from its straight line over 1,000 yr (fast flybys deflected
+    by the black hole), where it had moved one 26,480 ly.
+- **P09.T28.b.a as built (lane `p09-centre`, 2026-10-27, on e8b5c6f3 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §2, with main's rulings of 2026-10-27 on the influence radius and the
+  pre-pin).** No output moves: nothing on the record calls the new functions (`position_at`,
+  `hit_at` and `resolve` are unchanged; plan 03's `drifted` is only made `pub(crate)`), no golden
+  moves, and `golden_diff.py` finds only new labels. New goldens `galaxy/motion/regime.golden` (the
+  pre-pin, slow) and `galaxy/motion/centre_motion.golden` (fast), extensions at 23. `Galaxy`'s
+  `Debug` text gains a fixed `centre_motion: CentreMotionCell` field, which no persisted digest
+  reads. Files: `galaxy/motion.rs`, `galaxy/mod.rs`, `galaxy/features/centre/{profile,mod}.rs`
+  (`BuildCentreError::NoInfluenceRadius`, a crate-internal `heap_bytes`, doc pointers),
+  `galaxy/potential/monopole.rs` (a crate-internal `heap_bytes`), `galaxy/query/{mod,motion}.rs`,
+  `tests/galaxy_motion.rs`, `tests/galaxy_handle.rs` (a comment), the goldens.
+  - _Signatures._ In `motion`: `Regime { Straight, Kepler }`,
+    `regime_of(&Galaxy, &SystemRecord) -> Regime`,
+    `position_velocity_at(&Galaxy, &EpochState, UniverseTime) -> StateAt`,
+    `loss_cone_verdict(&Galaxy, &EpochState) -> LossConeVerdict`, `CentreMotion`, `EpochState`,
+    `BuildEpochStateError`, `MotionState`, `StateAt { Exists(MotionState), NoSuchSystem }` and
+    `LossConeVerdict { Clear, Inside }`; and `Galaxy::centre_motion() -> &CentreMotion`.
+    `position_velocity_at` takes an `EpochState`, the record with its epoch velocity, not the
+    record alone, so that one function serves T28.b.b's grid records, T29's members and plan 12:
+    `EpochState::of_grid_record` (plan 08's `epoch_velocity`, zero without kinematic tables),
+    `of_centre_member` (the member's own) and `new` (any source with its own velocity; refuses a
+    non-finite velocity or one not below light's, so no law can leave the addressable range).
+    `CentreMotion`: `new(&GalaxyParams, &MassModel)`, `profile`, `influence_radius`,
+    `stars_within`, `enclosed_mass`, `loss_cone`, `regime_at` and `kepler_orbit`, the orbit
+    `position_velocity_at` propagates, bit for bit, for T28.c's pericentre and T29's cache. A
+    crate-internal `KeplerOrbit::displacement` (its state in metres); `Regime::name`.
+  - _Design note 15's choice: a memo in the galaxy._ `Galaxy` holds `CentreMotion` in a
+    `OnceLock`, built on first read from the parameters and the mass model; it compares equal
+    always and prints a fixed `Debug` text (the sim-determinism skill's lazy exception, as
+    `BlackHoleCell`), and `the_motion_is_order_independent_pinned` holds its three readers to the
+    same answers in any order and cold or warm. Built eagerly it added 64 ms to every galaxy build
+    (test profile, the sim at opt-level 2; `Galaxy::new` 328 → 392 ms on a loaded machine), nearly
+    all `SphericalAverage::of_extended`, against Design note 15's 100 ms; `CentreProfile::new` is
+    under a microsecond once the cluster's shape is built. The galaxy holds this part, not the
+    whole `CentreModel` (91 ms): `resolve` still builds the model per call, and T29 decides its
+    cache. Once read, the memo adds about 20 KiB to `heap_bytes`, which then depends on whether it
+    has been read; the server's `GalaxyCache` sums it at insertion, and `galaxy_handle.rs`'s exact
+    byte difference holds while neither galaxy has read it. The fast suite gains the nine new fast tests of `galaxy_motion`, 9.7 s of test time (each its own
+    nextest process, which builds its galaxy in about 0.6 s; the order test 3.0 s), the motion
+    module's new unit tests (its twelve take 0.02 s) and two doctests; a galaxy build pays nothing
+    until the memo is read.
+  - _The influence radius (main's ruling, a blocker as found)._ The ruling's
+    `CentreProfile::influence_radius` counts the nuclear cluster alone, and for 60 of seeds 1–300
+    (default mass function) the black hole outweighs the whole cluster (seed 1: 4.16 × 10⁷ against
+    8.3 × 10⁶ M☉), so it has no root and returns its bracket's end, 10⁴ ly: every system within
+    10⁴ ly would have been in the regime. The edge is instead where all the mass inside weighs the
+    black hole, the brainstorm's "where it outweighs the stars inside": the cluster plus the
+    centre's spherical average of the discs, bar and bulge (`SphericalAverage::extended_mass`), gas
+    included, dark halo not. That is M(< r_h) = `M_bh`, the convention of Baumgardt, Amaro-Seoane
+    and Schödel (2018, A&A 609, A28, §3), not Merritt's r_m, M★(< r_m) = 2 `M_bh`, nor G `M_bh` ÷ σ²
+    (Merritt 2004; Merritt 2013, CQG 30, 244005), which agree in a singular isothermal sphere,
+    where this radius is half of them (science check). μ takes the same mass. At Milky Way values
+    r_h = 7.19 ly (2.20 pc, against the 2.18 pc of Schödel et al. 2018's masses; the cluster-only
+    radius 7.20 ly); seeds 1–300 give 1.9–177 ly, median 11.8 ly. The brainstorm's "about 10 ly" is
+    the literature's ~3 pc, which is r_m, some 11 ly here. Gas is 2.2 × 10⁻⁶ of the mass inside the
+    fixture's edge and 1.0 × 10⁻⁴ inside seed 1's (78.3 ly, where the rest of the galaxy is 81% of
+    the mass inside); an NFW halo of Milky Way normalisation holds about 0.1% of `M_bh` inside the
+    fixture's edge (science check, estimate). A bracket with no root is
+    `BuildCentreError::NoInfluenceRadius`, which no seed of the sweep gives.
+    - _Finding, for its owner (P09.T24.a's `CentreProfile::influence_radius` and
+      `CentreModel::influence_radius`, which Provides lists for plan 10):_ unchanged, it has no
+      root for a fifth of drawn galaxies and returns 10⁴ ly (seed 1's is pinned by
+      `the_centre_motion_weighs_every_star_inside`); its docs now say so and point at the
+      regime's edge. Its only reader is the centre's golden.
+  - _The law._ The Kepler arm applies strictly inside r_h. At the epoch either arm gives the epoch
+    state to the bit; outside, the straight arm is plan 03's `position_at`, bit for bit (held for
+    every pre-pin record at all four times). A state with no orbit (the black hole itself, or one
+    with no angular momentum) keeps its epoch position, which is how a galaxy without kinematic
+    tables keeps its grid systems still. A centre member's `EpochState` carries its
+    distribution-function velocity, which exists without those tables, so in such a galaxy the
+    member follows its orbit: the plan's "a galaxy without kinematic tables keeps the epoch
+    position" is built as the grid systems'. T28.b.b decides what `position_at` gives a member
+    there.
+  - _The loss cone._ The verdict is the members' own test (`LossCone::contains`: the Kepler
+    pericentre about the black hole alone, about 2 au), not the pericentre of the orbit followed
+    about μ: a nearly radial orbit's pericentre `J² ÷ 2G M_bh` depends only on the black hole,
+    all the mass within a few au (Alexander 2017, ARA&A 55, 17, §3.1; science check). It applies
+    to Kepler-regime grid records and feature members that have an orbit; a centre member is
+    always `Clear` (its placement passed the same test), and so is a state with no orbit.
+  - _The edge (main's ruling: a figure, not a blocker)._ Across the edge the two laws part by
+    `½ μ t² ÷ r²` to leading order, G `M_bh` t² ÷ r_h² at the edge: 0.0130 ly over 1,000 yr at the
+    fixture's 7.19 ly, and 0.0136 ly at worst over four velocities to 440 km/s, against the plan's
+    0.01 ly, which was written for the brainstorm's "about 10 ly". The test holds 0.014 ly there and
+    the closed form to 2% for a slow state 0.1 ly inside; at the plan's 9.9 and 10.1 ly the two
+    laws part by under 0.01 ly (four velocities; M(< 10 ly) = 7.38 × 10⁶ M☉ against the black hole's
+    4.30 × 10⁶, not the plan's version-15 5.29 × 10⁶). The gap scales as `M_bh ÷ r_h²`: about
+    0.020 ly at seed 0x2's 4.09 ly edge (closed form, ours).
+  - _Tests (as run)._ `tests/galaxy_motion.rs`: `the_two_regimes_meet_at_the_influence_radius`;
+    `the_epoch_state_comes_back_to_the_bit` (members and grid systems on both sides, the black
+    hole, a grid system with no velocity); `an_s2_like_member_follows_its_kepler_orbit` (GRAVITY
+    2020's a and e about the model's μ: 16 ± 0.1 yr, the position to 10⁻¹² of the apocentre and the
+    velocity to the bit over ±1,000 yr, the same state twice);
+    `a_galaxy_without_kinematic_tables_keeps_its_grid_systems_still`;
+    `the_loss_cone_carves_out_a_plunging_grid_orbit` (1 ly out, 200 km/s in and 1.38 km/s across:
+    about 1 au against the 2 au cone, no such system at any time; a grazing one, a centre member
+    and the same state outside the regime clear);
+    `the_centre_motion_weighs_every_star_inside` (the model's profile and loss cone bit for bit,
+    the memo equal to a direct build, equality and `Debug` text unchanged by the read, the edge
+    weighing the black hole to 10⁻⁹, seed 1's cluster-only radius at its bracket's end);
+    `the_centre_motion_s_tables_count_once_read`; `the_motion_is_order_independent_pinned`;
+    `centre_motion_figures_are_pinned` (the fast golden: the fixture's edge, the mass inside eight
+    radii, one orbit at ±1,000 yr); and the slow `regime_records_near_the_centre_are_pinned`.
+  - _The pre-pin (decision-galaxy-25-train §1.5, D1; main's ruling)._ `regime.golden`: the Milky
+    Way fixture (seed 0x0928b0a000000001) and seeds 0x5eed0000c0ffee00 and 0x2, each with its full
+    potential, edges 7.19, 10.14 and 4.09 ly. The stellar layers A–E within 1.5 r_h; the brown
+    dwarfs and rogue planets within min(1.5 r_h, 4 ly), the reach of the rogue planets' eight
+    central cells, since 1.5 r_h holds some 10⁵ brown dwarfs and 10⁷ rogue planets in a drawn
+    galaxy, so the substellar records between 4 ly and 1.5 r_h of the fixture and of 0x5eed are not
+    pinned. Per layer: the record count, the Kepler count, digests (`f64_digest`) of the IDs, the
+    regimes and `position_at` at −1,000, −100, +100 and +1,000 yr (±H is ±1,000 yr, so the ruling's
+    "±1,000 yr and ±H" are one pair), and the four records nearest the black hole in full: 790,511
+    records, 453,819 in the regime, 1,818 lines, 131 kB. `#[ignore = "slow: …"]`, about 112 s,
+    blessed by name; T28.b.b runs it by name at its hold, and the slow pass's wasip1 part runs it.
+    A drawn galaxy with an edge near 177 ly would mean some 10⁸ records and was not used.
+  - _For P09.T28.b.b._ Over the pre-pin, the Kepler arm (with P09.T28.a's fix) moves records at
+    most 4.04, 4.63 and 3.94 ly from their straight lines over ±1,000 yr (fast flybys deflected by
+    the black hole) and carves out one record, in 0x5eed (its C1 census lists the ID).
+    `EpochState::of_grid_record` reads `epoch_velocity`, which panics for a non-grid record in a
+    galaxy with tables, so the swap dispatches on the record's origin (plan 03's Risks). The memo
+    makes `heap_bytes` depend on what has been read.
+  - _For P09.T29 (may start)._ It reads `regime_of`, `position_velocity_at` with
+    `EpochState::of_centre_member`, `loss_cone_verdict`, `CentreMotion::kepler_orbit` (the same
+    orbit, for its cache) and `galaxy.centre_motion().{influence_radius, enclosed_mass}` (not
+    `CentreModel::influence_radius`), with T28.a's `KeplerOrbit` and T27's `CentrePlacement`.
+    Kepler-regime grid records move up to 4.6 ly from their straight lines over ±H, so they need
+    the grid-side pad, whose reach `GalaxyRules` (T28.b.b) sets. The regime's edge can lie beyond
+    the centre's 128 ly reach (up to 177 ly at the sweep's seeds).
+  - _Deferred findings (2026-10-13 rule)_, from P09.T28.b.a's science check: (1) T25's
+    `LOSS_CONE_AU` doc calls 2 au "the tidal radius of a Sun-like star", which is about 0.76 au at
+    4.3 × 10⁶ M☉ (r_t ≃ (M_bh ÷ M★)^⅓ R★; Alexander 2017, §1.2): 2 au is about 2.6 r_t, a sound
+    loss-cone radius described wrongly (`marks.rs`, T25's; the figure is the brainstorm's).
+    (2) The brainstorm's "Orbits and time" says the edge is "about 10 ly", μ "the cluster mass
+    inside its own radius" and the regime "passes smoothly into drift"; as built under main's
+    ruling the edge is M(< r_h) = `M_bh` over all the mass inside (7.19 ly at Milky Way values),
+    μ uses all the mass inside, and at ±H the two laws part by 0.013 ly at the fixture's edge
+    (0.02 ly at seed 0x2's). Drafted for the brainstorm's sign-off: which convention it means, and
+    that this jump is the regime's continuity.

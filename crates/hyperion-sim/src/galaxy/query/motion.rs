@@ -199,16 +199,23 @@ pub fn position_at(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime) -> G
     drifted(record, epoch_velocity(galaxy, record), t)
 }
 
-/// [`position_at`] with the velocity given.
+/// [`position_at`] with the velocity given: the straight line plan 08's drift follows, which the
+/// Kepler regime's [`position_velocity_at`](crate::galaxy::motion::position_velocity_at) takes
+/// outside the influence radius, bit for bit (plan 09, P09.T28.b.a).
 #[must_use]
-fn drifted(record: &SystemRecord, velocity: GalacticVelocity, t: UniverseTime) -> GalacticPosition {
+pub(crate) fn drifted(
+    record: &SystemRecord,
+    velocity: GalacticVelocity,
+    t: UniverseTime,
+) -> GalacticPosition {
     let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
     record
         .epoch_position()
         .translated(velocity.displacement_over(elapsed))
         .expect(
-            "a speed under 3,000 km/s over the clock window moves a position by at most 10.01 ly, \
-             which no cell of the root cube can leave the addressable range by",
+            "a grid speed under 3,000 km/s moves a position by at most 10.01 ly over the clock \
+             window, and any speed under light's by 1,000 ly, which no position in the root cube \
+             can leave the addressable range by",
         )
 }
 
