@@ -35,9 +35,9 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use super::tests::{
-    EnvelopeBody, GOLDEN_SYSTEMS_SEED, HOTHOUSE_BODY, LOOK72_OCEANS, SEED, envelope_tag_faults,
-    every_record_batch, golden_contexts, limit_now, look72_audit_contexts, look72_galaxy,
-    runaway_at_peak, runaway_now, sample,
+    CLOSURE_HOTHOUSE_BODY, EnvelopeBody, GOLDEN_SYSTEMS_SEED, HOTHOUSE_BODY, LOOK72_OCEANS, SEED,
+    envelope_tag_faults, every_record_batch, golden_contexts, limit_now, look72_audit_contexts,
+    look72_galaxy, runaway_at_peak, runaway_now, sample,
 };
 use super::*;
 use crate::planetary::chem::partition::CondensatePhase;
@@ -301,7 +301,11 @@ impl Saturation {
 /// and its side of water's saturation temperature, none unjudged.
 ///
 /// Each is a dry past runaway between the limits now, judged on its first, deckless solve
-/// (decision-p14-t54b-k-hothouses §1, §3).
+/// (decision-p14-t54b-k-hothouses §1, §3). Under P14.T53.a's thick-air closure
+/// (decision-p14-t53a-thick-co2 §6, pre-ruled): 02000b2d5ffd0000.0200 leaves (c) as a dry
+/// `Temperate` at 579.0 K under its 626.6 K; [`HOTHOUSE_BODY`], decked at 622.4 K, lies under
+/// water's saturation temperature, 647.096 K, its first solve 799.8 K above it; and
+/// [`CLOSURE_HOTHOUSE_BODY`], a `MagmaOcean` before it, joins (c) decked at 716.0 K above it.
 const AUDIT_SET_HOTHOUSES: [(&str, RunawayDeck, Saturation); 6] = [
     (
         "02002b2ca0010000.0200",
@@ -323,12 +327,8 @@ const AUDIT_SET_HOTHOUSES: [(&str, RunawayDeck, Saturation); 6] = [
         RunawayDeck::Deckless,
         Saturation::Above,
     ),
-    (
-        "02000b2d5ffd0000.0200",
-        RunawayDeck::Deckless,
-        Saturation::Above,
-    ),
-    (HOTHOUSE_BODY, RunawayDeck::Kept, Saturation::Above),
+    (HOTHOUSE_BODY, RunawayDeck::Kept, Saturation::Under),
+    (CLOSURE_HOTHOUSE_BODY, RunawayDeck::Kept, Saturation::Above),
 ];
 
 /// The ocean of P14.T51.g.b's deepest ice V floor over design-k §0's set A, a sample planet's,
@@ -1173,8 +1173,9 @@ fn assert_hothouses(
 /// The audit's MUST-FIX asserts (P14.T54.b.k; design-k §3.1) over design-k §0's set C
 /// ([`census_sets`]), every 24 hold in force and the record's rules at their batch.
 ///
-/// M1 (part 1's runaways, (c)'s hothouse [`HOTHOUSE_BODY`] alone, decked and above water's
-/// saturation temperature), M3 (K4's ceiling), M4 (part 2's tags), M6 (T56.g's lag), M7
+/// M1 (part 1's runaways, (c)'s hothouses [`HOTHOUSE_BODY`], decked and under water's saturation
+/// temperature under the thick-air closure, and [`CLOSURE_HOTHOUSE_BODY`], decked and above it;
+/// decision-p14-t53a-thick-co2 §6), M3 (K4's ceiling), M4 (part 2's tags), M6 (T56.g's lag), M7
 /// (T51.g.b's invariants, its own floor bound, the ice III floors by count), M9 (e's young lava),
 /// M10 (a tenuous air's aerosols) and M11 (every new member finite and in range), each failure a
 /// `TO MAIN:` line ([`assert_must_fix`]); the walk's time is printed.
@@ -1187,7 +1188,10 @@ fn under_every_24_hold_no_record_shows_a_must_fix_item() {
     assert_hothouses(
         what,
         &census.0,
-        &[(HOTHOUSE_BODY, RunawayDeck::Kept, Saturation::Above)],
+        &[
+            (HOTHOUSE_BODY, RunawayDeck::Kept, Saturation::Under),
+            (CLOSURE_HOTHOUSE_BODY, RunawayDeck::Kept, Saturation::Above),
+        ],
     );
 }
 

@@ -819,9 +819,17 @@ fn segment_count(span: f64) -> Option<u32> {
 /// [`NEWTON_STEPS`] Newton steps in ln T from `start`.
 ///
 /// In u = ln T, dS̃ ÷ du = `c_p` ÷ R, at least 5/2 of a gas, so each step is
-/// u ← u − (S̃(T) − target) ÷ (`c_p` ÷ R).
+/// u ← u − (S̃(T) − target) ÷ (`c_p` ÷ R). Every row a gas and the temperatures positive, or the
+/// result is not a number. P14.T53.a's thick-air closure solves its surface by it too
+/// (`GreenhouseConstants::thick_air` in [`derive::atmosphere`]; decision-p14-t53a-thick-co2 §3).
+///
+/// [`derive::atmosphere`]: crate::planetary::derive::atmosphere
 #[must_use]
-fn adiabat_temperature(gases: &[(SubstanceId, f64)], target: f64, start: Kelvin) -> Kelvin {
+pub(crate) fn adiabat_temperature(
+    gases: &[(SubstanceId, f64)],
+    target: f64,
+    start: Kelvin,
+) -> Kelvin {
     let mut u = math::ln(start.value());
     for _ in 0..NEWTON_STEPS {
         let t = Kelvin::new(math::exp(u));

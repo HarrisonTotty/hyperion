@@ -13201,10 +13201,19 @@ const LOOK72_106_K_RUNAWAY: &str = "820e6ee00000008d.0900";
 
 /// The census's hothouse between the limits (decision-t53b-arm-c §1): about a 2,456 K substellar
 /// host, its runaway ratio 61.9 at the peak and 0.547 now, its maximum-greenhouse ratio 2.11 now;
-/// under P14.T53.a's batch a `RunawayGreenhouse` under Venus's deck at 934.6 K, A 0.76 and 414.8
-/// bar of carbon dioxide, and under P14.T53.b part 1 (a) alone a `Temperate` at 1,221.6 K and A
-/// 0.30.
+/// under P14.T53.a's batch a `RunawayGreenhouse` under Venus's deck and 414.8 bar of carbon
+/// dioxide, A 0.76, and under P14.T53.b part 1 (a) alone a `Temperate`, A 0.30. Under the
+/// thick-air closure (decision-p14-t53a-thick-co2 §6) its decked solve is 622.4 K, now under
+/// water's saturation temperature, 647.096 K, and its first solve 799.8 K; before it, 934.6 K and
+/// 1,221.6 K.
 pub(super) const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
+
+/// The hothouse between the limits that joins (c) under the thick-air closure, by (c)'s test
+/// (decision-p14-t53a-thick-co2 §6, pre-ruled): its runaway ratio 31.2 at the peak and 0.522 now,
+/// its maximum-greenhouse ratio 2.00 now; its first solve a `Temperate` at
+/// 850.5 K and A 0.49 under 989.2 bar, 203 K above water's saturation temperature, and published
+/// under Venus's deck at 716.0 K and A 0.76; before the closure a `MagmaOcean` at 1,759.7 K.
+pub(super) const CLOSURE_HOTHOUSE_BODY: &str = "01ffeb2c5fff0000.0100";
 
 /// P14.T53.b part 1's assertions over [`present_census`]'s set, with every 24 hold in force
 /// (decision-absurd-states-24 R3.4, R4.1 and R4.2; decision-t53b-arm-c §5.4–5.5; bless-note-23's
@@ -13214,7 +13223,8 @@ pub(super) const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
 ///   and none between the limits now ([`runaway_now`] below 1) but (c)'s hothouses, each listed by
 ///   name with its present ratios, both solves' state, `T_s`, Bond albedo and `p_s`, and water's
 ///   saturation temperature there: its first solve, with (c) off, a `Temperate` that (c) judges a
-///   hothouse (`solved_as_a_hothouse`), and at 24 the census's [`HOTHOUSE_BODY`] alone;
+///   hothouse (`solved_as_a_hothouse`), and at 24 the census's [`HOTHOUSE_BODY`] and, under the
+///   thick-air closure, [`CLOSURE_HOTHOUSE_BODY`];
 /// - no `Temperate` lies at or above water's saturation temperature at its `p_s` by (c)'s
 ///   convention (`water_saturation_temperature`: the liquid–vapour curve, 647.096 K at or above
 ///   22.064 MPa, not judged below 611.657 Pa; R4.2's serve-gate test);
@@ -13240,7 +13250,8 @@ pub(super) const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
 /// The bodies solved without the deck whose deckless `T_s` is at or above the cycling temperature
 /// (a partial deck, not modelled, for P14.T53.e) are counted, not failed; and so (count (xi),
 /// brief-notes-24) are (c)'s bodies that end deckless or whose published `T_s` lies under water's
-/// saturation temperature, by name (none at 24).
+/// saturation temperature, by name (at 24, under the thick-air closure, [`HOTHOUSE_BODY`], its
+/// published `T_s` under water's saturation temperature; decision-p14-t53a-thick-co2 §6).
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -13322,7 +13333,9 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
             .iter()
             .map(|b| b.label.clone())
             .collect::<Vec<_>>(),
-        vec![format!("sample {HOTHOUSE_BODY} planets")],
+        [HOTHOUSE_BODY, CLOSURE_HOTHOUSE_BODY]
+            .map(|id| format!("sample {id} planets"))
+            .to_vec(),
         "(c)'s hothouses at 24"
     );
     // Count (xi): a hothouse that ends deckless, or whose published `T_s` lies under water's
@@ -13658,11 +13671,13 @@ fn under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperatur
 /// first arm, which `hooks/sulphur.rs`'s own example pins: the record's tests do not call the hook
 /// before P14.T54.b, `nothing_on_the_record_calls_the_inventory_yet`), its record and derivation
 /// P14.T53.a's batch's to the bit (its solve
-/// under the runaway's branches is that batch's decked solve again), its `T_s`, A and `p_s` stated
-/// against T53.a's batch's 934.6 K, 0.76 and 414.8 bar. Its first solve, with (c) off
-/// (`PresentState::WithoutHothouse`), is a `Temperate` at about 1,221.6 K and A 0.30, which (c)
-/// judges a hothouse; both lie above water's critical pressure, so its saturation temperature is
-/// 647.096 K. Its passes are counted as one hothouse re-solve, with no third solve.
+/// under the runaway's branches is that batch's decked solve again), its `T_s`, A and `p_s` stated:
+/// under the thick-air closure (decision-p14-t53a-thick-co2 §6) 622.4 K, 0.76 and 414.8 bar, its
+/// `T_s` now under water's saturation temperature, where T53.a's batch as built had 934.6 K above
+/// it. Its first solve, with (c) off (`PresentState::WithoutHothouse`), is a `Temperate` at about
+/// 799.8 K (1,221.6 K before the closure) and A 0.30, which (c) judges a hothouse; both lie above
+/// water's critical pressure, so its saturation temperature is 647.096 K. Its passes are counted as
+/// one hothouse re-solve, with no third solve.
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -13730,8 +13745,8 @@ fn under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck(
         eprintln!(
             "{HOTHOUSE_BODY}: first solve {:?} {:?} T_s {:.3} K, A {:.4}, p_s {:.4} bar (water's \
              T_sat {:.3} K), {} passes; published {:?} {:?} T_s {:.3} K (the record's {:.3} K), \
-             A {:.4}, p_s {:.4} bar (water's T_sat {:.3} K), {} passes (T53.a's batch: 934.6 K, \
-             A 0.76, 414.8 bar); counts {counts:?}",
+             A {:.4}, p_s {:.4} bar (water's T_sat {:.3} K), {} passes (T53.a's batch before the \
+             thick-air closure: 934.6 K, A 0.76, 414.8 bar); counts {counts:?}",
             first_air.state(),
             first_air.runaway_deck(),
             first_air.surface_temperature().value(),
@@ -13756,14 +13771,14 @@ fn under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck(
             bits, &peak[0].0,
             "P14.T53.a's batch's decked solve, to the bit"
         );
-        assert!((t_s - 934.6).abs() < 0.1, "{t_s} K");
+        assert!((t_s - 622.4).abs() < 0.1, "{t_s} K");
         assert!((derived.albedo().value() - 0.76).abs() < 0.005);
         assert!((bar(air) - 414.8).abs() < 0.1, "{} bar", bar(air));
         assert_same_bits(saturation(air), 647.096);
-        assert!(air.surface_temperature().value() >= saturation(air));
+        assert!(air.surface_temperature().value() < saturation(air));
         assert_eq!(first_air.state(), SurfaceState::Temperate);
         assert_eq!(first_air.water_state(), SurfaceState::RunawayGreenhouse);
-        assert!((first_air.surface_temperature().value() - 1_221.6).abs() < 0.5);
+        assert!((first_air.surface_temperature().value() - 799.8).abs() < 0.5);
         assert!((first.albedo().value() - 0.30).abs() < 0.005);
         assert_same_bits(saturation(first_air), 647.096);
         assert!(solved_as_a_hothouse(first_air));
@@ -15279,4 +15294,354 @@ fn under_every_24_hold_no_golden_record_lists_an_ocean_under_its_ice() {
             body.misread
         );
     }
+}
+
+/// One body of P14.T53.a's thick-air closure's census ([`thick_air_walk`]): its set, ID and kind,
+/// its record's section tags and a hash of its record, its derivation, its hottest host's
+/// effective temperature, and its runaway and maximum-greenhouse ratios now ([`runaway_now`],
+/// [`limit_now`]), a moon's its planet's.
+struct ThickAirCase {
+    label: String,
+    id: String,
+    sections: (SectionState, SectionState),
+    record_bits: u64,
+    derived: DerivedBody,
+    hottest: Kelvin,
+    ratios: (f64, f64),
+}
+
+impl ThickAirCase {
+    /// Its census line (the guard twin's `thick_air_line`), with its surface's and envelope's
+    /// tags.
+    fn line(&self) -> String {
+        format!(
+            "{}; surface {:?}, envelope {:?}",
+            crate::planetary::derive::atmosphere::guard_twin::thick_air_line(
+                &self.derived,
+                self.hottest,
+                self.ratios
+            ),
+            self.sections.0,
+            self.sections.1
+        )
+    }
+
+    /// Whether it is one of arm (c)'s hothouses: a published `RunawayGreenhouse` between the
+    /// limits now (decision-t53b-arm-c).
+    fn hothouse(&self) -> bool {
+        self.derived.atmosphere().state() == SurfaceState::RunawayGreenhouse
+            && self.ratios.0 < 1.0
+            && self.ratios.1 >= 1.0
+    }
+}
+
+/// Every present planet, member and moon of `system` with a derivation and a bulk section at the
+/// epoch, whatever its surface's tag ([`envelope_walk`]'s), in body order, each as a
+/// [`ThickAirCase`] of the set `set`.
+fn thick_air_walk(set: &str, ctx: &SystemContext, system: &PlanetarySystem) -> Vec<ThickAirCase> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let t = UniverseTime::EPOCH;
+    let mut cases = Vec::new();
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return cases;
+    }
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    let case = |kind: &str, record: &BodyRecord, derived: &DerivedBody, hottest, ratios| {
+        let mut hasher = DefaultHasher::new();
+        format!("{record:?}").hash(&mut hasher);
+        let id = record.identity().id().to_string();
+        ThickAirCase {
+            label: format!("{set} {id} {kind}"),
+            id,
+            sections: (
+                record.section_state(RecordSection::Surface),
+                record.section_state(RecordSection::Envelope),
+            ),
+            record_bits: hasher.finish(),
+            derived: *derived,
+            hottest,
+            ratios,
+        }
+    };
+    for body in system.bodies() {
+        let kind = match body.part {
+            Part::Planet(_) => "planets",
+            Part::Member(_) => "members",
+            Part::Moon(_) | Part::Ring(_) => continue,
+        };
+        let zone = system.zone_of(body);
+        let host = fate_host(ctx, zone);
+        let fate = system.fate_of(body, &host);
+        let at = fate.at(t);
+        let hottest = zone
+            .members()
+            .filter_map(|member| ctx.stars()[usize::from(member)].state_at(t))
+            .map(|state| state.effective_temperature().value())
+            .fold(0.0, f64::max);
+        let ratios = at.orbit().map_or((f64::NAN, f64::NAN), |orbit| {
+            (
+                runaway_now(&epoch, zone, orbit),
+                limit_now(
+                    habitable_zone::HabitableLimit::MaximumGreenhouse,
+                    &epoch,
+                    zone,
+                    orbit,
+                ),
+            )
+        });
+        let hottest = Kelvin::new(hottest);
+        let label = label::label(system, body.index).unwrap();
+        let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+        if let (Section::Ok(_), Some(derived)) = (record.bulk(), now.derived.as_ref()) {
+            cases.push(case(kind, &record, derived, hottest, ratios));
+        }
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let label = label::label(system, child.index).unwrap();
+            let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+            if record.bulk().ok().is_none() {
+                continue;
+            }
+            if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                cases.push(case("moons", &record, moon.body(), hottest, ratios));
+            }
+        }
+    }
+    cases
+}
+
+/// The six arm (c) hothouses over set A, the 400 (decision-p14-t54b-k-hothouses §1), which
+/// decision-p14-t53a-thick-co2 §6 states by name under the thick-air closure.
+const SET_A_HOTHOUSES: [&str; 6] = [
+    "01ffeb2c5ffe0000.0100",
+    "02002b2ca0010000.0200",
+    "02002b2ca0030001.0300",
+    "02000b2d5ffd0000.0100",
+    "02000b2d5ffd0000.0200",
+    "02002b2bdffd0000.0100",
+];
+
+/// P14.T53.a's thick-air closure's census (decision-p14-t53a-thick-co2 §7.5), a measurement for
+/// the record, run by name over set A (the 400 sample systems), the golden systems and the 27
+/// systems of LOOK72's triaged bodies, each generated and derived afresh with every 24 hold in
+/// force, with the closure and with it lifted
+/// ([`without_thick_air`](crate::planetary::derive::atmosphere::without_thick_air)): every body
+/// that moves, both lines; the counts by flip (state, `MagmaOcean` to solid, into or out of arm
+/// (c), into or out of part 2's section, decked to deckless); the movers by dominant gas; the
+/// knife edges within 20 K of the silicate solidus, water's critical temperature and the acid's
+/// 430 K; any new jump or new bracketed residual above 10⁻⁶; the six of set A by name; and arm
+/// (c)'s set as it ends. The guard's samples are the guard twin's
+/// (`under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_are_stated`).
+#[test]
+#[ignore = "a measurement for P14.T53.a's thick-air closure's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the census's sets, each mover listed and tallied"
+)]
+fn under_every_24_hold_the_thick_air_closure_s_movers_are_stated() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::atmosphere::{SILICATE_SOLIDUS, without_thick_air};
+    use crate::planetary::testing::with_every_24_hold;
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let run = || {
+        sets.iter()
+            .flat_map(|&(set, seed, ctx)| thick_air_walk(set, ctx, &generate(seed, ctx)))
+            .collect::<Vec<_>>()
+    };
+    let after = with_every_24_hold(run);
+    let before = with_every_24_hold(|| without_thick_air(run));
+    assert_eq!(after.len(), before.len());
+    // Each line reads the closure and part 2's section, so it is built under the rules in force.
+    with_every_24_hold(|| {
+        let mut flips = BTreeMap::<String, u32>::new();
+        let mut by_gas = BTreeMap::<String, u32>::new();
+        let (mut edges, mut convergence) = (Vec::new(), Vec::new());
+        let mut movers = 0;
+        eprintln!("MOVERS:");
+        for (a, b) in after.iter().zip(&before) {
+            assert_eq!(a.label, b.label);
+            if a.derived == b.derived && a.record_bits == b.record_bits {
+                continue;
+            }
+            movers += 1;
+            eprintln!(
+                "  {}\n    before {}\n    after  {}",
+                a.label,
+                b.line(),
+                a.line()
+            );
+            let (air, was) = (a.derived.atmosphere(), b.derived.atmosphere());
+            let moles =
+                |gas: Gas| air.partial_pressures().of(gas).value() / gas.molar_mass_g_per_mol();
+            let dominant = Gas::ALL
+                .into_iter()
+                .max_by(|x, y| moles(*x).total_cmp(&moles(*y)))
+                .expect("nine gases");
+            *by_gas.entry(format!("{dominant:?}")).or_default() += 1;
+            let molten =
+                |case: &ThickAirCase| case.derived.atmosphere().state() == SurfaceState::MagmaOcean;
+            for (what, then, now) in [
+                (
+                    "state",
+                    format!("{:?}", was.state()),
+                    format!("{:?}", air.state()),
+                ),
+                ("molten", format!("{}", molten(b)), format!("{}", molten(a))),
+                (
+                    "arm (c)",
+                    format!("{}", b.hothouse()),
+                    format!("{}", a.hothouse()),
+                ),
+                (
+                    "surface",
+                    format!("{:?}", b.sections.0),
+                    format!("{:?}", a.sections.0),
+                ),
+                (
+                    "deck",
+                    format!("{:?}", was.runaway_deck()),
+                    format!("{:?}", air.runaway_deck()),
+                ),
+            ] {
+                if then != now {
+                    *flips.entry(format!("{what}: {then} → {now}")).or_default() += 1;
+                }
+            }
+            let t = air.surface_temperature().value();
+            for (edge, at) in [
+                ("the solidus", SILICATE_SOLIDUS.value()),
+                ("water's T_c", 647.096),
+                ("the acid's 430 K", 430.0),
+            ] {
+                if (t - at).abs() <= 20.0 {
+                    edges.push(format!("{}: {t:.2} K within 20 K of {edge}", a.label));
+                }
+            }
+            let residual = |case: &ThickAirCase| match case.derived.convergence() {
+                crate::planetary::derive::passes::Convergence::Converged => 0.0,
+                crate::planetary::derive::passes::Convergence::Bracketed { residual, .. } => {
+                    residual
+                }
+            };
+            if (a.derived.convergence().is_jump() && !b.derived.convergence().is_jump())
+                || (residual(a) > 1e-6 && residual(b) <= 1e-6)
+            {
+                convergence.push(format!("{}: {:?}", a.label, a.derived.convergence()));
+            }
+        }
+        eprintln!("{movers} of {} bodies move under the closure", after.len());
+        eprintln!("FLIPS: {flips:?}");
+        eprintln!("BY DOMINANT GAS: {by_gas:?}");
+        eprintln!("KNIFE EDGES: {edges:#?}");
+        eprintln!("NEW JUMPS OR BRACKETED ABOVE 1e-6 (to main): {convergence:#?}");
+        eprintln!("THE SIX OF SET A:");
+        for id in SET_A_HOTHOUSES {
+            for (a, b) in after.iter().zip(&before).filter(|(a, _)| a.id == id) {
+                eprintln!(
+                    "  {}\n    before {}\n    after  {}",
+                    a.label,
+                    b.line(),
+                    a.line()
+                );
+            }
+        }
+        eprintln!("ARM (C) AS IT ENDS:");
+        for case in after.iter().filter(|case| case.hothouse()) {
+            eprintln!("  {} {}", case.label, case.line());
+        }
+        assert!(movers > 0);
+    });
+}
+
+/// Arm (c)'s hothouses over set A under the thick-air closure, by name (decision-p14-t53a-thick-co2
+/// §6, run by name): the six of set A ([`SET_A_HOTHOUSES`]) and [`CLOSURE_HOTHOUSE_BODY`], each
+/// generated afresh with every 24 hold in force, its published solve and its first solve with (c)
+/// off (`PresentState::WithoutHothouse`, the solve (c) judges) stated with water's saturation
+/// temperature at its `p_s` and the margin. A (c) body's first solve within 10 K of it goes to
+/// main; none may lie under it.
+#[test]
+#[ignore = "a measurement for P14.T53.a's thick-air closure's record, run by name"]
+fn under_every_24_hold_arm_c_s_first_solves_over_set_a_are_stated() {
+    use crate::planetary::derive::atmosphere::{
+        PresentState, water_saturation_temperature, with_present_state,
+    };
+    use crate::planetary::testing::with_every_24_hold;
+    let ids: Vec<&str> = SET_A_HOTHOUSES
+        .iter()
+        .copied()
+        .chain(core::iter::once(CLOSURE_HOTHOUSE_BODY))
+        .collect();
+    let systems: std::collections::BTreeSet<&str> = ids
+        .iter()
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    let find = |run: &dyn Fn() -> Vec<ThickAirCase>| {
+        run()
+            .into_iter()
+            .filter(|case| ids.contains(&case.id.as_str()))
+            .collect::<Vec<_>>()
+    };
+    let walk = || {
+        sample()
+            .iter()
+            .filter(|ctx| systems.contains(ctx.id().to_string().as_str()))
+            .flat_map(|ctx| thick_air_walk("sample", ctx, &generate(SEED, ctx)))
+            .collect::<Vec<_>>()
+    };
+    let published = with_every_24_hold(|| find(&walk));
+    let first =
+        with_every_24_hold(|| with_present_state(PresentState::WithoutHothouse, || find(&walk)));
+    assert_eq!(
+        published.len(),
+        ids.len(),
+        "every body is present at the epoch"
+    );
+    let saturation = |case: &ThickAirCase| {
+        case.derived
+            .atmosphere()
+            .surface_pressure()
+            .and_then(water_saturation_temperature)
+            .map_or(f64::NAN, Kelvin::value)
+    };
+    with_every_24_hold(|| {
+        for (now, judged) in published.iter().zip(&first) {
+            assert_eq!(now.id, judged.id);
+            let judged_air = judged.derived.atmosphere();
+            let margin = judged_air.surface_temperature().value() - saturation(judged);
+            eprintln!(
+                "{}: arm (c) {}; first solve {:?} T_s {:.2} K (T_sat {:.3} K, margin {margin:+.2} \
+                 K{}); published {}",
+                now.label,
+                now.hothouse(),
+                judged_air.state(),
+                judged_air.surface_temperature().value(),
+                saturation(judged),
+                if margin.abs() < 10.0 {
+                    ", WITHIN 10 K: to main"
+                } else {
+                    ""
+                },
+                now.line()
+            );
+            if now.hothouse() {
+                assert_eq!(judged_air.state(), SurfaceState::Temperate, "{}", now.label);
+                assert!(margin >= 0.0, "{}: its first solve under T_sat", now.label);
+            }
+        }
+    });
 }

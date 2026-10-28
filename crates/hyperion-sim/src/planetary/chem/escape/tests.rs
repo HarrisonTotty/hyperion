@@ -10,7 +10,8 @@ fn the_escape_is_held_only_until_the_24_bump() {
     assert!(
         GENERATOR_VERSION < ESCAPE_VERSION,
         "the 23 → 24 bump (P14.T54.b) puts P14.T53.a on the record: the greenhouse's broadened \
-         carbon dioxide term with its refits (`GreenhouseConstants::BATCH`, Earth's \
+         carbon dioxide term with its refits and its thick-air closure beyond 100 bar \
+         (`GreenhouseConstants::BATCH`, `THICK_AIR_ANCHOR_PRESSURE`, Earth's \
          `BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`) and the greenhouse gain's (1 − x)(1 \
          − d) weight. Delete `ESCAPE_VERSION`, `EscapeRules` and its `Held` arm (every `match` on \
          it keeps its `Batch` arm), `GreenhouseConstants::FITTED`'s role as the record's (its \

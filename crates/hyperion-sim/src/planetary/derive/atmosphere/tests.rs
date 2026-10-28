@@ -1,4 +1,5 @@
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::lcg::Lcg;
 
 use super::*;
 use crate::planetary::context::XUV_SATURATION_FGK;
@@ -5274,62 +5275,69 @@ fn a_trial_end_whose_full_solve_reads_hot_gives_way_to_a_colder_one() {
 /// grey surface is [`grey_surface_temperature`]'s to the bit; beyond it `T_s` = min(`T_grey`,
 /// max(273.15 K, `T_rest`)), continuous through the switch as carbon dioxide is added; and a thick
 /// H₂ air beyond the limit keeps its `T_rest`, the carbon dioxide's warming above it lost.
+///
+/// The scan's last air, 100 bar of carbon dioxide over 1 bar of nitrogen, lies beyond the
+/// thick-air closure's anchor (decision-p14-t53a-thick-co2), which would hold it 1.2 K under its
+/// grey; this test is the ceiling's alone, so the closure is lifted ([`without_thick_air`]), and
+/// the closure's own tests take it beside the ceiling.
 #[test]
 fn under_the_escape_batch_the_maximum_greenhouse_ceiling_is_continuous_and_keeps_t_rest() {
     with_rules(EscapeRules::Batch, || {
-        let constants = GreenhouseConstants::in_force();
-        let (equilibrium, gravity) = (Kelvin::new(150.0), STANDARD_GRAVITY);
-        let air = |co2_bar: f64, h2_bar: f64| {
-            PartialPressures::from_fn(|gas| match gas {
-                Gas::CarbonDioxide => Pascals::new(co2_bar * PASCALS_PER_BAR),
-                Gas::Nitrogen => Pascals::new(PASCALS_PER_BAR),
-                Gas::Hydrogen => Pascals::new(h2_bar * PASCALS_PER_BAR),
-                _ => Pascals::ZERO,
-            })
-        };
-        let at = |ceiling: GreenhouseCeiling, partials: &PartialPressures| {
-            let tau = constants.optical_depth(partials, equilibrium, gravity);
-            (
-                ceiling
-                    .surface_temperature(&constants, (partials, tau), equilibrium, gravity)
-                    .value(),
-                grey_surface_temperature(equilibrium, tau).value(),
-                ceiling.binds(&constants, (partials, tau), equilibrium, gravity),
-            )
-        };
-        let (mut last, mut largest_step, mut bound) = (None::<f64>, 0.0_f64, 0);
-        for k in 0..=400 {
-            let partials = air(math::exp10(-3.0 + 0.0125 * f64::from(k)), 0.0);
-            let (none, grey, never) = at(GreenhouseCeiling::None, &partials);
-            assert_same_bits(none, grey);
-            assert!(!never);
-            let (capped, _, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &partials);
-            assert!(capped <= grey, "{k}");
-            assert_eq!(binds, grey > capped, "{k}");
-            bound += u32::from(binds);
-            if let Some(before) = last {
-                largest_step = largest_step.max((capped - before).abs());
+        without_thick_air(|| {
+            let constants = GreenhouseConstants::in_force();
+            let (equilibrium, gravity) = (Kelvin::new(150.0), STANDARD_GRAVITY);
+            let air = |co2_bar: f64, h2_bar: f64| {
+                PartialPressures::from_fn(|gas| match gas {
+                    Gas::CarbonDioxide => Pascals::new(co2_bar * PASCALS_PER_BAR),
+                    Gas::Nitrogen => Pascals::new(PASCALS_PER_BAR),
+                    Gas::Hydrogen => Pascals::new(h2_bar * PASCALS_PER_BAR),
+                    _ => Pascals::ZERO,
+                })
+            };
+            let at = |ceiling: GreenhouseCeiling, partials: &PartialPressures| {
+                let tau = constants.optical_depth(partials, equilibrium, gravity);
+                (
+                    ceiling
+                        .surface_temperature(&constants, (partials, tau), equilibrium, gravity)
+                        .value(),
+                    grey_surface_temperature(equilibrium, tau).value(),
+                    ceiling.binds(&constants, (partials, tau), equilibrium, gravity),
+                )
+            };
+            let (mut last, mut largest_step, mut bound) = (None::<f64>, 0.0_f64, 0);
+            for k in 0..=400 {
+                let partials = air(math::exp10(-3.0 + 0.0125 * f64::from(k)), 0.0);
+                let (none, grey, never) = at(GreenhouseCeiling::None, &partials);
+                assert_same_bits(none, grey);
+                assert!(!never);
+                let (capped, _, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &partials);
+                assert!(capped <= grey, "{k}");
+                assert_eq!(binds, grey > capped, "{k}");
+                bound += u32::from(binds);
+                if let Some(before) = last {
+                    largest_step = largest_step.max((capped - before).abs());
+                }
+                last = Some(capped);
             }
-            last = Some(capped);
-        }
-        eprintln!(
-            "CO₂ from 1 mbar to 100 bar over 1 bar of N₂ at T_eq 150 K: capped at {bound} of 401, \
-             the largest step {largest_step:.4} K"
-        );
-        assert!(bound > 0 && bound < 401);
-        assert!(largest_step < 5.0, "{largest_step}");
-        // 10 bar of H₂: its own greenhouse holds the surface above freezing, at T_rest.
-        let hydrogen = air(1.0, 10.0);
-        let (capped, grey, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &hydrogen);
-        let rest = constants
-            .terms(&hydrogen, equilibrium, gravity)
-            .iter()
-            .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
-            .fold(0.0, |sum, term| sum + term.depth());
-        let t_rest = grey_surface_temperature(equilibrium, rest).value();
-        eprintln!("10 bar of H₂ beyond the limit: T_grey {grey:.3} K, T_rest {t_rest:.3} K");
-        assert!(binds && t_rest > WATER_MELTING_POINT.value());
-        assert_same_bits(capped, t_rest);
+            eprintln!(
+                "CO₂ from 1 mbar to 100 bar over 1 bar of N₂ at T_eq 150 K: capped at {bound} of \
+                 401, the largest step {largest_step:.4} K"
+            );
+            assert!(bound > 0 && bound < 401);
+            assert!(largest_step < 5.0, "{largest_step}");
+            // 10 bar of H₂: its own greenhouse holds the surface above freezing, at T_rest.
+            let hydrogen = air(1.0, 10.0);
+            let (capped, grey, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &hydrogen);
+            let rest = constants
+                .terms(&hydrogen, equilibrium, gravity)
+                .iter()
+                .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
+                .fold(0.0, |sum, term| sum + term.depth());
+            let t_rest = grey_surface_temperature(equilibrium, rest).value();
+            eprintln!("10 bar of H₂ beyond the limit: T_grey {grey:.3} K, T_rest {t_rest:.3} K");
+            assert!(binds && t_rest > WATER_MELTING_POINT.value());
+            assert_same_bits(capped, t_rest);
+        });
     });
 }
 
@@ -6840,4 +6848,476 @@ fn under_every_25_hold_a_steam_envelope_has_no_surface_under_any_gravity() {
     assert!(Surface::refuses(SurfaceState::SteamEnvelope));
     assert!(Surface::refuses(SurfaceState::GasEnvelope));
     assert!(!Surface::refuses(SurfaceState::RunawayGreenhouse));
+}
+
+// P14.T53.a's thick-air closure (decision-p14-t53a-thick-co2 §3, §7.3): beyond 100 bar the air
+// beneath its top 100 bar follows the dry adiabat, `T_s` = min(`T_grey`, `T_ad`).
+
+/// The partial pressures of the gases `bars`, each its column weight in bar, the rest none.
+fn air_of(bars: &[(Gas, f64)]) -> PartialPressures {
+    PartialPressures::from_fn(|gas| {
+        Pascals::new(
+            bars.iter()
+                .filter(|(g, _)| *g == gas)
+                .fold(0.0, |sum, (_, bar)| sum + bar * PASCALS_PER_BAR),
+        )
+    })
+}
+
+/// An air drawn by `lcg` of the surface pressure `bar` by weight: carbon dioxide, nitrogen,
+/// water, hydrogen, methane, oxygen and argon in drawn shares, one of them dominant, each share a
+/// draw cubed so that minor gases span decades; over a base temperature of 100–800 K and a surface
+/// gravity of 2–30 m s⁻².
+fn drawn_air(lcg: &mut Lcg, bar: f64) -> (PartialPressures, Kelvin, MetresPerSecondSquared) {
+    const GASES: [Gas; 7] = [
+        Gas::CarbonDioxide,
+        Gas::Nitrogen,
+        Gas::Water,
+        Gas::Hydrogen,
+        Gas::Methane,
+        Gas::Oxygen,
+        Gas::Argon,
+    ];
+    let dominant = usize::try_from(lcg.next_below(7)).expect("under 7");
+    let mut shares = [0.0; 7];
+    for (k, share) in shares.iter_mut().enumerate() {
+        let u = lcg.next_f64();
+        *share = u * u * u * if k == dominant { 50.0 } else { 1.0 };
+    }
+    let total = shares.iter().fold(0.0, |sum, s| sum + s);
+    let bars: Vec<(Gas, f64)> = GASES
+        .iter()
+        .zip(shares)
+        .map(|(&gas, share)| (gas, bar * share / total))
+        .collect();
+    let base = Kelvin::new(100.0 + 700.0 * lcg.next_f64());
+    let gravity = MetresPerSecondSquared::new(2.0 + 28.0 * lcg.next_f64());
+    (air_of(&bars), base, gravity)
+}
+
+/// The surface of the air `partials` over the base `base` under the gravity `gravity`, its grey
+/// surface, whether the closure or the ceiling `ceiling` binds, and the closure's (`τ_a`, `T_a`,
+/// `T_ad`), under the greenhouse constants in force.
+fn closure_at(
+    ceiling: GreenhouseCeiling,
+    partials: &PartialPressures,
+    base: Kelvin,
+    gravity: MetresPerSecondSquared,
+) -> (f64, f64, bool, Option<(f64, Kelvin, Kelvin)>) {
+    let constants = GreenhouseConstants::in_force();
+    let tau = constants.optical_depth(partials, base, gravity);
+    (
+        ceiling
+            .surface_temperature(&constants, (partials, tau), base, gravity)
+            .value(),
+        grey_surface_temperature(base, tau).value(),
+        ceiling.binds(&constants, (partials, tau), base, gravity),
+        constants.thick_air(partials, base, gravity),
+    )
+}
+
+/// The measured Venus's air by weight (90.42 bar of carbon dioxide and 2.088 of nitrogen) made
+/// `bar` thick, at its gravity, 8.870 m s⁻², and the generator's equilibrium temperature for it,
+/// 229.06 K (decision-p14-t53a-thick-co2 §5).
+fn venus_column(bar: f64) -> (PartialPressures, Kelvin, MetresPerSecondSquared) {
+    let co2 = 90.42 / (90.42 + 2.088);
+    (
+        air_of(&[
+            (Gas::CarbonDioxide, bar * co2),
+            (Gas::Nitrogen, bar * (1.0 - co2)),
+        ]),
+        Kelvin::new(229.06),
+        MetresPerSecondSquared::new(8.870),
+    )
+}
+
+/// The closure leaves every air at or under 100 bar to the bit (decision-p14-t53a-thick-co2 §7.3):
+/// over 4,000 drawn airs from 1 mbar to just under the anchor and an air at it exactly, under
+/// either ceiling, the surface and whether either binds are the lifted closure's, and with no
+/// ceiling the surface is the grey's.
+#[test]
+fn under_the_escape_batch_the_thick_air_closure_leaves_every_air_to_100_bar_to_the_bit() {
+    with_rules(EscapeRules::Batch, || {
+        let mut lcg = Lcg::new(0x0053_a0c1_0000_0001);
+        let mut airs: Vec<_> = (0..4_000)
+            .map(|_| {
+                let bar = math::exp10(-3.0 + 4.999_99 * lcg.next_f64());
+                drawn_air(&mut lcg, bar)
+            })
+            .collect();
+        // At the anchor exactly: carbon dioxide and its nitrogen summing to 10⁷ Pa to the bit.
+        let co2 = 9.774e6;
+        airs.push((
+            PartialPressures::from_fn(|gas| match gas {
+                Gas::CarbonDioxide => Pascals::new(co2),
+                Gas::Nitrogen => Pascals::new(1e7 - co2),
+                _ => Pascals::ZERO,
+            }),
+            Kelvin::new(229.06),
+            MetresPerSecondSquared::new(8.870),
+        ));
+        assert_same_bits(
+            airs.last().expect("the anchor's air").0.total().value(),
+            THICK_AIR_ANCHOR_PRESSURE.value(),
+        );
+        for (partials, base, gravity) in &airs {
+            assert!(partials.total() <= THICK_AIR_ANCHOR_PRESSURE);
+            for ceiling in [
+                GreenhouseCeiling::None,
+                GreenhouseCeiling::MaximumGreenhouse,
+            ] {
+                let (t, grey, binds, closure) = closure_at(ceiling, partials, *base, *gravity);
+                let (lifted, _, lifted_binds, _) =
+                    without_thick_air(|| closure_at(ceiling, partials, *base, *gravity));
+                assert!(closure.is_none(), "{partials:?}");
+                assert_same_bits(t, lifted);
+                assert_eq!(binds, lifted_binds);
+                if ceiling == GreenhouseCeiling::None {
+                    assert_same_bits(t, grey);
+                }
+            }
+        }
+    });
+}
+
+/// The closure is continuous through its anchor (decision-p14-t53a-thick-co2 §3, §7.3): a Venus
+/// column at 100 bar is the grey to the bit, and at 100 (1 ± 10⁻⁹) bar its surface moves under
+/// 10⁻⁸ of it, the adiabat just beyond it within 10⁻⁸ of its grey top.
+#[test]
+fn under_the_escape_batch_the_thick_air_closure_is_continuous_through_its_anchor() {
+    with_rules(EscapeRules::Batch, || {
+        let at = |bar: f64| {
+            let (partials, base, gravity) = venus_column(bar);
+            closure_at(GreenhouseCeiling::None, &partials, base, gravity)
+        };
+        // At the anchor the column's carbon dioxide and nitrogen sum to its pressure to the bit.
+        let (partials, ..) = venus_column(100.0);
+        assert_same_bits(partials.total().value(), THICK_AIR_ANCHOR_PRESSURE.value());
+        let (anchor, grey, binds, closure) = at(100.0);
+        assert!(closure.is_none() && !binds);
+        assert_same_bits(anchor, grey);
+        for bar in [100.0 * (1.0 - 1e-9), 100.0 * (1.0 + 1e-9)] {
+            let (t, grey, _, closure) = at(bar);
+            eprintln!("{bar:.10} bar: T_s {t:.12} K, grey {grey:.12} K, closure {closure:?}");
+            assert!(relative(t, anchor) < 1e-8, "{bar}: {t} against {anchor}");
+            if let Some((_, top, adiabat)) = closure {
+                assert!(relative(adiabat.value(), top.value()) < 1e-8);
+                assert!(relative(top.value(), grey) < 1e-8);
+            }
+        }
+        assert!(at(100.0 * (1.0 + 1e-9)).3.is_some());
+    });
+}
+
+/// The closure never warms (decision-p14-t53a-thick-co2 §3, §7.3): over 4,000 drawn airs from 100
+/// bar to 20 kbar the surface is finite, positive and at most the grey; at least the top's grey
+/// temperature `T_a`, which the adiabat warms downward from; and `binds` holds exactly where the
+/// surface lies under the grey. Under the maximum-greenhouse ceiling too, its surface is the
+/// lesser of the closure's and the ceiling, to the bit, and `binds` holds where either binds. The
+/// shares that bind are printed.
+#[test]
+fn under_the_escape_batch_the_thick_air_closure_never_warms() {
+    with_rules(EscapeRules::Batch, || {
+        let mut lcg = Lcg::new(0x0053_a0c1_0000_0002);
+        let (mut bound, mut capped_bound) = (0, 0);
+        let n = 4_000;
+        for _ in 0..n {
+            let bar = math::exp10(2.0 + 2.301 * lcg.next_f64());
+            let (partials, base, gravity) = drawn_air(&mut lcg, bar);
+            let (t, grey, binds, closure) =
+                closure_at(GreenhouseCeiling::None, &partials, base, gravity);
+            let (_, top, adiabat) = closure.expect("beyond the anchor");
+            assert!(t.is_finite() && t > 0.0, "{partials:?}: {t}");
+            assert!(t <= grey, "{partials:?}: {t} above its grey {grey}");
+            assert!(
+                top.value() <= t,
+                "{partials:?}: {t} under its top's {top:?}"
+            );
+            assert!(adiabat.value().is_finite(), "{partials:?}");
+            assert_eq!(binds, t < grey, "{partials:?}");
+            bound += u32::from(binds);
+            // Beside the maximum-greenhouse ceiling: the lesser of the closure's surface and the
+            // ceiling, which binds where either does.
+            let (capped, _, capped_binds, _) = closure_at(
+                GreenhouseCeiling::MaximumGreenhouse,
+                &partials,
+                base,
+                gravity,
+            );
+            let ceiling = GreenhouseCeiling::MaximumGreenhouse
+                .temperature(&GreenhouseConstants::in_force(), &partials, base, gravity)
+                .value();
+            assert_same_bits(capped, t.min(ceiling));
+            assert_eq!(capped_binds, capped < grey, "{partials:?}");
+            capped_bound += u32::from(capped_binds && !binds);
+        }
+        eprintln!(
+            "the closure binds on {bound} of {n} drawn airs at 100 bar–20 kbar; beside the \
+             ceiling, the ceiling alone on {capped_bound} more"
+        );
+        assert!(bound > 0 && bound < n);
+    });
+}
+
+/// A kilobar of nitrogen is the grey to the bit, its √p greenhouse subadiabatic; a kilobar of
+/// hydrogen, whose term grows as p, moves a little, stated (decision-p14-t53a-thick-co2 §7.3).
+/// Both over a base of 300 K at standard gravity.
+///
+/// The ruling expected hydrogen to move under 5%; it moves 5.87%, from a grey of 2,153.7 K to
+/// 2,027.3 K (recorded in plan 14's record, not re-ruled). Its grey profile's deep slope is the
+/// linear term's ¼ (2,153.7 K at 1 kbar over its top's 1,212.1 K at 100 bar, a slope of 0.2496),
+/// against hydrogen's dry adiabat's α R ÷ `c_p` of 0.223 over 1,200–2,000 K, where its `c_p` ÷ R
+/// is about 3.9: slightly superadiabatic, so the closure binds.
+#[test]
+fn under_the_escape_batch_a_kilobar_of_nitrogen_is_the_grey_and_of_hydrogen_moves_a_little() {
+    with_rules(EscapeRules::Batch, || {
+        let (base, gravity) = (Kelvin::new(300.0), STANDARD_GRAVITY);
+        let nitrogen = air_of(&[(Gas::Nitrogen, 1_000.0)]);
+        let (t, grey, binds, closure) =
+            closure_at(GreenhouseCeiling::None, &nitrogen, base, gravity);
+        eprintln!("1 kbar of N₂: T_s {t:.3} K, grey {grey:.3} K, closure {closure:?}");
+        assert!(!binds);
+        assert_same_bits(t, grey);
+        let hydrogen = air_of(&[(Gas::Hydrogen, 1_000.0)]);
+        let (t, grey, binds, closure) =
+            closure_at(GreenhouseCeiling::None, &hydrogen, base, gravity);
+        eprintln!(
+            "1 kbar of H₂: T_s {t:.3} K, grey {grey:.3} K ({:.4}% under it), closure {closure:?}",
+            100.0 * (1.0 - t / grey)
+        );
+        assert!(t <= grey && relative(t, grey) < 0.06, "{t} against {grey}");
+        assert_eq!(binds, t < grey);
+    });
+}
+
+/// The measured Venus's air made 150–1,000 bar thick (decision-p14-t53a-thick-co2 §5): the
+/// closure's surface within 3% of the ruling's replica (on NIST's `c_p`, against P14.T49.b's
+/// here), far under the batch's grey, and 3.1–6.1% above version 23's √p form, each stated. At the
+/// measured Venus's own 92.51 bar the closure is absent.
+#[test]
+fn under_the_escape_batch_a_thicker_venus_takes_the_dry_adiabat_beyond_100_bar() {
+    let replica = [
+        (150.0, 807.0),
+        (200.0, 841.0),
+        (300.0, 890.0),
+        (500.0, 956.0),
+        (1_000.0, 1_051.0),
+    ];
+    let held: Vec<f64> = replica
+        .iter()
+        .map(|&(bar, _)| {
+            let (partials, base, gravity) = venus_column(bar);
+            closure_at(GreenhouseCeiling::None, &partials, base, gravity).0
+        })
+        .collect();
+    with_rules(EscapeRules::Batch, || {
+        let (partials, base, gravity) = venus_column(92.51);
+        assert!(
+            closure_at(GreenhouseCeiling::None, &partials, base, gravity)
+                .3
+                .is_none()
+        );
+        for (&(bar, expected), version_23) in replica.iter().zip(held) {
+            let (partials, base, gravity) = venus_column(bar);
+            let (t, grey, binds, closure) =
+                closure_at(GreenhouseCeiling::None, &partials, base, gravity);
+            let (tau_a, top, _) = closure.expect("beyond the anchor");
+            eprintln!(
+                "Venus at {bar} bar: T_s {t:.1} K (the replica's {expected} K), the batch's grey \
+                 {grey:.1} K, version 23's {version_23:.1} K ({:+.2}%); τ_a {tau_a:.2}, T_a {:.2} \
+                 K",
+                100.0 * (t / version_23 - 1.0),
+                top.value()
+            );
+            assert!(binds);
+            assert!(relative(t, expected) < 0.03, "{bar} bar: {t} K");
+        }
+    });
+}
+
+/// Where the closure binds, P14.T24.e's published profile, which leaves the ground at (`T_s`,
+/// `p_s`) on the same α and `c_p`(T), passes through the anchor at the top's grey temperature,
+/// (`p_a`, `T_a`), within its 5 × 10⁻⁴ (decision-p14-t53a-thick-co2 §3, §7.3): Venus's air at
+/// 150 bar to 3 kbar and carbon dioxide at 10 kbar.
+#[test]
+fn under_the_escape_batch_the_published_profile_passes_through_the_closure_s_anchor() {
+    use crate::planetary::hooks::structure::{
+        RadiativeConvective, StructureInputs, VerticalStructure, effective_temperature,
+        skin_temperature, temperature_at,
+    };
+    with_rules(EscapeRules::Batch, || {
+        let mut columns: Vec<_> = [150.0, 300.0, 1_000.0, 3_000.0]
+            .into_iter()
+            .map(venus_column)
+            .collect();
+        columns.push((
+            air_of(&[(Gas::CarbonDioxide, 10_000.0)]),
+            Kelvin::new(132.4),
+            MetresPerSecondSquared::new(8.24),
+        ));
+        for (partials, base, gravity) in &columns {
+            let (t, _, binds, closure) =
+                closure_at(GreenhouseCeiling::None, partials, *base, *gravity);
+            let (_, top, _) = closure.expect("beyond the anchor");
+            assert!(binds);
+            let (fractions, len) = air_mixture(partials);
+            let profile = RadiativeConvective::derive(&StructureInputs {
+                surface_temperature: Kelvin::new(t),
+                surface_pressure: partials.total(),
+                gases: &fractions[..len],
+                condensable: None,
+                skin_temperature: skin_temperature(effective_temperature(*base, Kelvin::ZERO)),
+            })
+            .expect("a thick air's profile");
+            let at_anchor = temperature_at(
+                &VerticalStructure::RadiativeConvective(profile),
+                THICK_AIR_ANCHOR_PRESSURE,
+            );
+            eprintln!(
+                "{:.0} bar: T_s {t:.3} K; the profile at 100 bar {:.4} K, T_a {:.4} K",
+                partials.total().value() / PASCALS_PER_BAR,
+                at_anchor.value(),
+                top.value()
+            );
+            assert!(relative(at_anchor.value(), top.value()) < 5e-4);
+        }
+    });
+}
+
+/// A runaway Earth at `T_eq` 300 K holding thirty times Earth's carbon dioxide per unit mass, all
+/// of it airborne: about 2.1 kbar.
+fn kilobar_runaway() -> AtmosphereInputs {
+    let earth = earth_inputs(300.0, Insolation::InsideRunaway);
+    AtmosphereInputs {
+        inventory: VolatileInventory::new(
+            earth.inventory.water(),
+            Kilograms::new(30.0 * earth.inventory.carbon_dioxide().value()),
+            earth.inventory.nitrogen(),
+            earth.inventory.argon(),
+        ),
+        ..earth
+    }
+}
+
+/// The closure's figures under the batch are pinned to the bit, and a body it binds on derives
+/// the same twice (the sim-determinism skill: an algebraically equal rewrite moves the bits):
+/// `τ_a`, `T_a`, `T_ad` and `T_s` of the Venus column at 150, 300 and 1,000 bar and of 10 kbar of
+/// carbon dioxide at the guard's 42002cb200000015.0700's `T_eq` and gravity, each printed in full;
+/// and the kilobar runaway ([`kilobar_runaway`]), derived twice.
+#[test]
+fn under_the_escape_batch_the_thick_air_closure_s_figures_are_pinned_and_the_same_twice() {
+    const PINNED: [(f64, f64, f64, f64); 4] = [
+        (
+            160.915_677_727_055_42,
+            760.781_751_462_361_6,
+            806.913_823_706_265,
+            806.913_823_706_265,
+        ),
+        (
+            160.915_677_727_055_42,
+            760.781_751_462_361_6,
+            890.575_185_189_469,
+            890.575_185_189_469,
+        ),
+        (
+            160.915_677_727_055_45,
+            760.781_751_462_361_6,
+            1_051.574_189_117_547_1,
+            1_051.574_189_117_547_1,
+        ),
+        (
+            177.192_211_659_632_53,
+            450.379_270_191_318_37,
+            906.484_658_827_244,
+            906.484_658_827_244,
+        ),
+    ];
+    with_rules(EscapeRules::Batch, || {
+        let mut columns: Vec<_> = [150.0, 300.0, 1_000.0]
+            .into_iter()
+            .map(venus_column)
+            .collect();
+        columns.push((
+            air_of(&[(Gas::CarbonDioxide, 10_000.0)]),
+            Kelvin::new(132.4),
+            MetresPerSecondSquared::new(8.24),
+        ));
+        let figures: Vec<(f64, f64, f64, f64)> = columns
+            .iter()
+            .map(|(partials, base, gravity)| {
+                let (t, _, _, closure) =
+                    closure_at(GreenhouseCeiling::None, partials, *base, *gravity);
+                let (tau_a, top, adiabat) = closure.expect("beyond the anchor");
+                (tau_a, top.value(), adiabat.value(), t)
+            })
+            .collect();
+        for figures in &figures {
+            eprintln!("{figures:?},");
+        }
+        for (figures, pinned) in figures.iter().zip(PINNED) {
+            for (actual, expected) in [
+                (figures.0, pinned.0),
+                (figures.1, pinned.1),
+                (figures.2, pinned.2),
+                (figures.3, pinned.3),
+            ] {
+                assert_same_bits(actual, expected);
+            }
+        }
+        let inputs = kilobar_runaway();
+        assert_eq!(atmosphere(&inputs), atmosphere(&inputs));
+    });
+}
+
+/// Under the escape's hold, to version 23, the closure is absent: P14.T57.a's constants carry no
+/// anchor, so a kilobar carbon dioxide air's surface is the grey's to the bit, and a kilobar
+/// carbon dioxide runaway derives the same with the closure lifted. Under the batch the same body
+/// takes it: its surface under the lifted one's, and at most its grey and its host (stated).
+#[test]
+fn under_the_escape_s_hold_the_thick_air_closure_is_absent() {
+    let thick = air_of(&[(Gas::CarbonDioxide, 1_000.0), (Gas::Nitrogen, 3.0)]);
+    let (base, gravity) = (Kelvin::new(300.0), STANDARD_GRAVITY);
+    assert_eq!(EscapeRules::in_force(), EscapeRules::Held);
+    assert!(
+        GreenhouseConstants::FITTED
+            .thick_air(&thick, base, gravity)
+            .is_none()
+    );
+    let (t, grey, binds, _) = closure_at(GreenhouseCeiling::None, &thick, base, gravity);
+    assert!(!binds);
+    assert_same_bits(t, grey);
+    assert!(
+        GreenhouseConstants::BATCH
+            .thick_air(&thick, base, gravity)
+            .is_some()
+    );
+    let inputs = kilobar_runaway();
+    let held = atmosphere(&inputs);
+    assert_eq!(held, without_thick_air(|| atmosphere(&inputs)));
+    let (batch, lifted) = with_rules(EscapeRules::Batch, || {
+        (
+            atmosphere(&inputs),
+            without_thick_air(|| atmosphere(&inputs)),
+        )
+    });
+    let line = |air: &Atmosphere| {
+        format!(
+            "{:?} T_s {:.2} K, p_s {:.2} bar, τ {:.4e}",
+            air.state(),
+            air.surface_temperature().value(),
+            air.surface_pressure()
+                .map_or(0.0, |p| p.value() / PASCALS_PER_BAR),
+            air.optical_depth()
+        )
+    };
+    eprintln!(
+        "a kilobar runaway: held {}\n  batch {}\n  batch, lifted {}",
+        line(&held),
+        line(&batch),
+        line(&lifted)
+    );
+    assert!(batch.surface_pressure().expect("an air") > THICK_AIR_ANCHOR_PRESSURE);
+    assert!(batch.surface_temperature() < lifted.surface_temperature());
+    assert!(batch.surface_temperature().value().is_finite());
+    assert!(batch.surface_temperature() < inputs.hottest_host);
 }

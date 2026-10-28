@@ -111,13 +111,16 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, WaterGate};
 use crate::planetary::derive::photometry::area_mix::reference_cloud_column;
 use crate::planetary::hooks::crust::CrustLid;
+use crate::planetary::hooks::structure::{DRY_LAPSE_FACTOR, adiabat_temperature};
 use crate::planetary::hooks::surface::{
     ClimateBody, GroundInertia, STANDARD_GRAVITY, step_climate,
 };
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
-use crate::substance::Element;
+use crate::substance::{
+    Element, SubstanceId, mixture_entropy_over_r, mixture_heat_capacity_over_r_at,
+};
 use crate::units::consts::{
     BOLTZMANN_CONSTANT, EARTH_MASS_KG, EARTH_RADIUS_M, GRAVITATIONAL_CONSTANT, METRES_PER_AU,
     SECONDS_PER_JULIAN_YEAR,
@@ -981,6 +984,15 @@ pub const NITROGEN_REFERENCE_TEMPERATURE: Kelvin = Kelvin::new(75.6);
 /// (Robinson and Catling 2012, §4.1: Venus's lower air at 0.8 of a γ = 1.3 adiabat), which puts a
 /// 57.8-bar Venus near 676 K. No power form in X holds both Kopparapu's points and that slope; the
 /// fix is a radiative–convective closure.
+///
+/// Built beyond 100 bar (decision-p14-t53a-thick-co2): there the pair term, which grows as
+/// `P_CO₂`², still sets the published τ (its column depth is right: it has no grey saturation, K3),
+/// but no longer the surface, which the thick-air closure takes down the dry adiabat from the air's
+/// own top 100 bar ([`THICK_AIR_ANCHOR_PRESSURE`]; `GreenhouseCeiling`). Without it the grey put
+/// 39 thick CO₂ airs of the guard's sample (764–16,400 bar, τ up to 2.1 × 10⁶) at their star's
+/// effective temperature. The pair term is calibrated far below even 100 bar: Wordsworth, Forget
+/// and Eymet (2010, Icarus 210, 992) tabulate it to 10 bar. The closure from the emission level, its refit, carbon
+/// dioxide condensing aloft, the moist deep column and the real fluid's adiabat stay deferred (C1).
 pub const BROADENED_CARBON_DIOXIDE_BAND: f64 = 1.95;
 
 /// The exponent n of the broadened carbon dioxide term's band ([`BROADENED_CARBON_DIOXIDE_BAND`]):
@@ -1281,9 +1293,10 @@ impl GreyTerm {
 
 /// The grey greenhouse's constants (P14.T13.c, P14.T57.a, P14.T53.a): carbon dioxide's term,
 /// water vapour's constant per √bar, water cloud's depth, nitrogen's constant per √bar at
-/// [`NITROGEN_REFERENCE_TEMPERATURE`] and hydrogen's: P14.T57.a's fits
-/// ([`GreenhouseConstants::FITTED`]), which have no cloud or hydrogen term, to version 23, and
-/// P14.T53.a's ([`GreenhouseConstants::BATCH`]) from 24, as the escape's hold gives them
+/// [`NITROGEN_REFERENCE_TEMPERATURE`], hydrogen's, and the thick-air closure's anchor
+/// ([`THICK_AIR_ANCHOR_PRESSURE`]): P14.T57.a's fits ([`GreenhouseConstants::FITTED`]), which
+/// have no cloud or hydrogen term and no closure, to version 23, and P14.T53.a's
+/// ([`GreenhouseConstants::BATCH`]) from 24, as the escape's hold gives them
 /// ([`GreenhouseConstants::in_force`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GreenhouseConstants {
@@ -1292,6 +1305,9 @@ pub(crate) struct GreenhouseConstants {
     water_cloud: Option<f64>,
     nitrogen: f64,
     hydrogen: Option<f64>,
+    /// The thick-air closure's anchor `p_a` ([`GreenhouseConstants::thick_air`]): `None` under
+    /// P14.T57.a's constants, which have none.
+    thick_air_anchor: Option<Pascals>,
 }
 
 impl GreenhouseConstants {
@@ -1305,13 +1321,15 @@ impl GreenhouseConstants {
         water_cloud: None,
         nitrogen: GREENHOUSE_NITROGEN,
         hydrogen: None,
+        thick_air_anchor: None,
     };
 
     /// P14.T53.a's: the broadened carbon dioxide term ([`BROADENED_CARBON_DIOXIDE_BAND`],
     /// [`BROADENED_CARBON_DIOXIDE_EXPONENT`], [`BROADENED_CARBON_DIOXIDE_COLLISIONS`]), water split
     /// and refitted after it ([`BROADENED_GREENHOUSE_WATER_VAPOUR`],
-    /// [`BROADENED_GREENHOUSE_WATER_CLOUD`]), [`GREENHOUSE_NITROGEN`], unchanged, and hydrogen's
-    /// ([`BROADENED_GREENHOUSE_HYDROGEN`]).
+    /// [`BROADENED_GREENHOUSE_WATER_CLOUD`]), [`GREENHOUSE_NITROGEN`], unchanged, hydrogen's
+    /// ([`BROADENED_GREENHOUSE_HYDROGEN`]), and the thick-air closure beyond
+    /// [`THICK_AIR_ANCHOR_PRESSURE`] (decision-p14-t53a-thick-co2).
     pub(crate) const BATCH: Self = Self {
         carbon_dioxide: CarbonDioxideTerm::Broadened {
             band: BROADENED_CARBON_DIOXIDE_BAND,
@@ -1322,6 +1340,7 @@ impl GreenhouseConstants {
         water_cloud: Some(BROADENED_GREENHOUSE_WATER_CLOUD),
         nitrogen: GREENHOUSE_NITROGEN,
         hydrogen: Some(BROADENED_GREENHOUSE_HYDROGEN),
+        thick_air_anchor: Some(THICK_AIR_ANCHOR_PRESSURE),
     };
 
     /// The constants the rules in force give ([`EscapeRules::in_force`]): [`Self::FITTED`] under
@@ -1335,8 +1354,9 @@ impl GreenhouseConstants {
     }
 
     /// The batch's form at carbon dioxide's (a, n, b) `(band, exponent, collisions)` and water's
-    /// (`k_v`, `τ_c`) `(vapour, cloud)`, with [`GREENHOUSE_NITROGEN`] and
-    /// [`BROADENED_GREENHOUSE_HYDROGEN`]: the trial constants of the tests' fits.
+    /// (`k_v`, `τ_c`) `(vapour, cloud)`, with [`GREENHOUSE_NITROGEN`],
+    /// [`BROADENED_GREENHOUSE_HYDROGEN`] and the batch's thick-air closure: the trial constants of
+    /// the tests' fits, every one of whose airs lies under its anchor.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn broadened(
@@ -1353,6 +1373,7 @@ impl GreenhouseConstants {
             water_cloud: Some(cloud),
             nitrogen: GREENHOUSE_NITROGEN,
             hydrogen: Some(BROADENED_GREENHOUSE_HYDROGEN),
+            thick_air_anchor: Some(THICK_AIR_ANCHOR_PRESSURE),
         }
     }
 
@@ -1492,6 +1513,106 @@ impl GreenhouseConstants {
             ),
         ]
     }
+
+    /// P14.T53.a's thick-air closure over the partial pressures `partials` (column weights) above
+    /// a surface whose base temperature is `base` (the greenhouse steps' start,
+    /// [`optical_depth`]'s) under the surface gravity `gravity` (decision-p14-t53a-thick-co2 §3):
+    /// (`τ_a`, `T_a`, `T_ad`) where these constants carry its anchor `p_a`
+    /// ([`THICK_AIR_ANCHOR_PRESSURE`]) and the surface pressure `p_s`, the partial pressures'
+    /// total, lies beyond it; `None` elsewhere, and so under P14.T57.a's constants, to version 23.
+    ///
+    /// - `τ_a` is the grey depth of the air's own top `p_a`: every partial pressure scaled by f =
+    ///   `p_a` ÷ `p_s`, at the same base and gravity ([`optical_depth`](Self::optical_depth)).
+    /// - `T_a` = `T_base` (1 + ¾`τ_a`)^¼ is its grey temperature there
+    ///   ([`grey_surface_temperature`]). Eddington's air temperature at that level would read
+    ///   ½ + ¾`τ_a` for 1 + ¾`τ_a`, 0.07–0.61% lower in T at the `τ_a` of 26–256 the guard's 39
+    ///   thick carbon dioxide airs take (recorded; the ruling's "under 0.25% at 50–260" is 0.33%
+    ///   at 50).
+    /// - `T_ad` continues the dry adiabat down from it to the surface, S̃(`T_ad`) = S̃(`T_a`) + α
+    ///   ln(`p_s` ÷ `p_a`) with α [`DRY_LAPSE_FACTOR`] (Robinson and Catling 2012, ApJ 757, 104,
+    ///   Eq. 10, §4.1; refitted on VIRA's Venus on P14.T49.b's `c_p`(T)), S̃ and `c_p` P14.T49.b's
+    ///   statistical sums over the air's mole fractions ([`mixture_entropy_over_r`],
+    ///   [`mixture_heat_capacity_over_r_at`]; each partial pressure over its gas's molar mass, in
+    ///   [`Gas::ALL`]'s order), which f leaves as they are. It is solved as P14.T24.e's adiabat is
+    ///   ([`adiabat_temperature`]), by
+    ///   [`NEWTON_STEPS`](crate::planetary::hooks::structure::NEWTON_STEPS) Newton steps in ln T
+    ///   from the power law `T_a` (`p_s` ÷ `p_a`)^(α ÷ (`c_p` ÷ R)(`T_a`)): a fixed count, every
+    ///   sum in a fixed order.
+    ///
+    /// Why: with τ ∝ pᵐ the grey profile's slope d ln T ÷ d ln p tends to m ÷ 4 where τ ≫ 1
+    /// (Robinson and Catling 2012, Eq. 32), ½ for the broadened term's pairs, against carbon
+    /// dioxide's dry adiabat's α R ÷ `c_p`, 0.12–0.20 over 300–2,000 K. So a grey profile deeper
+    /// than the fit is superadiabatic, which convection forbids, and the air below the
+    /// radiative–convective boundary follows the adiabat (their Eq. 10). Magma-ocean airs' lower
+    /// air follows the dry adiabat from the surface (Marcq et al. 2017, JGR Planets 122, 1539;
+    /// Lichtenberg et al. 2021, JGR Planets 126, e2020JE006711, to 260 bar of CO₂), and carbon
+    /// dioxide has no radiation limit there, so `T_s` keeps rising with `p_s`, along the adiabat.
+    /// The dry factor is always the one taken, never a moist one: beyond 100 bar a condensable is
+    /// supercritical or at its saturation, and the dry α gives the warmest adiabat, which binds
+    /// least (a moist deep column is the full closure's, deferred).
+    ///
+    /// The surface takes min(`T_grey`, `T_ad`) ([`GreenhouseCeiling::surface_temperature`]):
+    /// never warmer than the grey, which a subadiabatic grey profile keeps (thick nitrogen, whose
+    /// τ grows as √p, does), and the grey where `T_ad` is not a number (`f64::min`'s rule). A
+    /// statistical sum is defined on any air beyond the anchor, which holds a gas at a positive
+    /// `T_a`; where one is not (a base that is not positive and finite), the closure gives none.
+    /// Recorded, not built: above about 1 kbar carbon dioxide is a dense fluid (its
+    /// compressibility factor 3.5–5.8 at 0.5–1 GPa and 700 K, Giordano, Datchi and Dewaele 2006, J.
+    /// Chem. Phys. 125, 054504),
+    /// whose adiabat is probably steeper than the ideal gas's, so the deepest airs' `T_s` may lie
+    /// 15–30% above `T_ad`, still far under their stars.
+    #[must_use]
+    pub(crate) fn thick_air(
+        &self,
+        partials: &PartialPressures,
+        base: Kelvin,
+        gravity: MetresPerSecondSquared,
+    ) -> Option<(f64, Kelvin, Kelvin)> {
+        #[cfg(test)]
+        if THICK_AIR_LIFTED.with(core::cell::Cell::get) {
+            return None;
+        }
+        let anchor = self.thick_air_anchor?.value();
+        let surface = partials.total().value();
+        // By comparison, so that a surface pressure that is not a number takes none.
+        if surface.is_nan() || surface <= anchor {
+            return None;
+        }
+        let share = anchor / surface;
+        let top = PartialPressures(partials.0.map(|p| p * share));
+        let depth = self.optical_depth(&top, base, gravity);
+        let at_anchor = grey_surface_temperature(base, depth);
+        let (fractions, len) = air_mixture(partials);
+        let gases = &fractions[..len];
+        let span = DRY_LAPSE_FACTOR * math::ln(surface / anchor);
+        let target = mixture_entropy_over_r(gases, at_anchor)? + span;
+        let heat_capacity = mixture_heat_capacity_over_r_at(gases, at_anchor)?;
+        let start = Kelvin::new(at_anchor.value() * math::exp(span / heat_capacity));
+        let adiabat = adiabat_temperature(gases, target, start);
+        Some((depth, at_anchor, adiabat))
+    }
+}
+
+/// The mole fractions of the partial pressures `partials`, column weights: each gas of positive
+/// weight, in [`Gas::ALL`]'s order, counted as its weight over its molar mass, then the counts over
+/// their sum, added in that order; with how many there are. The mixture P14.T49.b's statistical
+/// sums read for the thick-air closure ([`GreenhouseConstants::thick_air`]).
+#[must_use]
+fn air_mixture(partials: &PartialPressures) -> ([(SubstanceId, f64); Gas::ALL.len()], usize) {
+    let mut list = [(Gas::Hydrogen.substance(), 0.0); Gas::ALL.len()];
+    let mut len = 0;
+    for gas in Gas::ALL {
+        let p = partials.of(gas).value();
+        if p > 0.0 {
+            list[len] = (gas.substance(), p / gas.molar_mass_g_per_mol());
+            len += 1;
+        }
+    }
+    let total = list[..len].iter().fold(0.0, |sum, &(_, n)| sum + n);
+    for entry in &mut list[..len] {
+        entry.1 /= total;
+    }
+    (list, len)
 }
 
 /// Nitrogen's collision-induced scaling at the base temperature `base`: (`T_ref` ÷ `T_base`)² with
@@ -1542,9 +1663,27 @@ pub fn grey_surface_temperature(equilibrium: Kelvin, tau: f64) -> Kelvin {
     Kelvin::new(equilibrium.value() * math::powf(1.0 + 0.75 * tau.max(0.0), 0.25))
 }
 
+/// The anchor of P14.T53.a's thick-air closure, Pa: 100 bar, 10⁷ Pa, beyond which a thick air
+/// beneath its top 100 bar follows the dry adiabat (`GreenhouseConstants::thick_air`;
+/// decision-p14-t53a-thick-co2 §3), from generator version 24, behind the escape's hold
+/// (`ESCAPE_VERSION`).
+///
+/// The grey greenhouse's deepest fitted column is the measured Venus's, 92.51 bar by weight (the
+/// Venus International Reference Atmosphere's 92.1 bar, Seiff et al. 1985, Adv. Space Res. 5(11),
+/// 3), on which the broadened carbon dioxide term's pairs' constant is fitted
+/// ([`BROADENED_CARBON_DIOXIDE_COLLISIONS`]). The anchor rounds it up to its order, so that the
+/// measured Venus, the table's median Venus (57.8 bar) and every other air under it stay inside
+/// the fit, to the bit. The closure is continuous through it: at `p_s` = `p_a` the top is the whole
+/// air and the adiabat has no length, so the round figure makes no knife edge. Over 92.5–100 bar
+/// the grey is still extrapolated, by at most (100 ÷ 92.5)^(0.44 − 0.15) − 1 = 2.3% in `T_s`,
+/// about 17 K on a Venus (recorded); the anchor at 92.5 bar would move the guard's 39 thick
+/// carbon dioxide airs (764–16,400 bar) by 1–2%.
+pub const THICK_AIR_ANCHOR_PRESSURE: Pascals = Pascals::new(1e7);
+
 /// The maximum-greenhouse ceiling on a grey surface (P14.T53.a; decision-bump-plan-after-22,
 /// "T53.a's thick-air ceiling", K4), which a body's derivation takes under the escape's batch rules
-/// ([`GreenhouseCeiling::of`]), held at 24 with them.
+/// ([`GreenhouseCeiling::of`]), held at 24 with them, beside the thick-air closure, which its
+/// methods take first for both variants ([`GreenhouseCeiling::surface_temperature`]).
 ///
 /// Beyond the maximum-greenhouse limit carbon dioxide and water cannot hold a surface above
 /// freezing. Kopparapu et al. (2013, ApJ 765, 131, §2) find the outer edge with "the surface
@@ -1568,6 +1707,17 @@ pub fn grey_surface_temperature(equilibrium: Kelvin, tau: f64) -> Kelvin {
 /// which the grey model lacks, and a body that starts cold beyond the limit
 /// (decision-p14-t54a-states §7, item 1) is that closure's option. Any carbon dioxide warming above
 /// a nitrogen or hydrogen `T_rest` is lost.
+///
+/// The thick-air closure (decision-p14-t53a-thick-co2) is the part of C1's closure beyond the fit's
+/// reach: an air beyond [`THICK_AIR_ANCHOR_PRESSURE`] takes `T_s` = min(`T_grey`, `T_ad`), `T_ad`
+/// the dry adiabat down from the grey temperature of its own top 100 bar
+/// ([`GreenhouseConstants::thick_air`]), and then the ceiling where it applies. The constants
+/// carry it, the batch's alone, so it reaches both variants, a molten crust's air too (it is the
+/// air's physics, not the ground's), and under the escape's hold every figure is version 23's to
+/// the bit. Where it binds `T_s` reads the top's τ, not the surface's, so the greenhouse gain is 0
+/// there as where the ceiling binds ([`GreenhouseCeiling::binds`]); a condensable's feedback
+/// through the top's column is dropped (recorded: a column this deep holds its carbon dioxide and
+/// water supercritical in nearly every case).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum GreenhouseCeiling {
     /// No ceiling: inside the maximum-greenhouse limit now, on a molten crust, or under the
@@ -1631,8 +1781,10 @@ impl GreenhouseCeiling {
 
     /// The surface of a grey air of optical depth `tau` over the partial pressures `partials`, at
     /// the base temperature `base` (the greenhouse steps' start, [`optical_depth`]'s) and surface
-    /// gravity `gravity` under `constants`, held under the ceiling: [`grey_surface_temperature`]'s,
-    /// to the bit, with none.
+    /// gravity `gravity` under `constants`: beyond the thick-air closure's anchor, where the
+    /// constants carry it, the lesser of the grey and its adiabat's
+    /// ([`GreenhouseConstants::thick_air`]); then held under the ceiling.
+    /// [`grey_surface_temperature`]'s, to the bit, with neither.
     #[must_use]
     pub(crate) fn surface_temperature(
         self,
@@ -1642,6 +1794,12 @@ impl GreenhouseCeiling {
         gravity: MetresPerSecondSquared,
     ) -> Kelvin {
         let grey = grey_surface_temperature(base, tau);
+        // Never warmer than the grey, and the grey where the adiabat is not a number.
+        let grey = constants
+            .thick_air(partials, base, gravity)
+            .map_or(grey, |(_, _, adiabat)| {
+                Kelvin::new(grey.value().min(adiabat.value()))
+            });
         match self {
             Self::None => grey,
             Self::MaximumGreenhouse => Kelvin::new(
@@ -1651,9 +1809,10 @@ impl GreenhouseCeiling {
         }
     }
 
-    /// Whether the ceiling binds on a grey air of optical depth `tau` over the partial pressures
-    /// `partials` ([`surface_temperature`](Self::surface_temperature)): its grey surface above the
-    /// ceiling, where `T_s` reads no τ.
+    /// Whether the ceiling or the thick-air closure binds on a grey air of optical depth `tau` over
+    /// the partial pressures `partials` ([`surface_temperature`](Self::surface_temperature)): its
+    /// grey surface above the closure's adiabat ([`GreenhouseConstants::thick_air`]), where `T_s`
+    /// reads the top's τ and not the surface's, or above the ceiling, where `T_s` reads no τ.
     #[must_use]
     pub(crate) fn binds(
         self,
@@ -1662,13 +1821,17 @@ impl GreenhouseCeiling {
         base: Kelvin,
         gravity: MetresPerSecondSquared,
     ) -> bool {
-        match self {
-            Self::None => false,
-            Self::MaximumGreenhouse => {
-                grey_surface_temperature(base, tau).value()
-                    > self.temperature(constants, partials, base, gravity).value()
+        let grey = grey_surface_temperature(base, tau).value();
+        let closure = constants
+            .thick_air(partials, base, gravity)
+            .is_some_and(|(_, _, adiabat)| adiabat.value() < grey);
+        closure
+            || match self {
+                Self::None => false,
+                Self::MaximumGreenhouse => {
+                    grey > self.temperature(constants, partials, base, gravity).value()
+                }
             }
-        }
     }
 }
 
@@ -1693,6 +1856,29 @@ pub(crate) fn without_ceiling<R>(run: impl FnOnce() -> R) -> R {
         }
     }
     let _restore = Restore(CEILING_LIFTED.with(|cell| cell.replace(true)));
+    run()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether a test has lifted the thick-air closure on this thread ([`without_thick_air`]).
+    static THICK_AIR_LIFTED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with the thick-air closure lifted on this thread
+/// ([`GreenhouseConstants::thick_air`] gives none), so that a test or a census can show what it
+/// moves; the switch before is set back after, a panic in `run` included, as [`without_ceiling`]
+/// sets its own back.
+#[cfg(test)]
+pub(crate) fn without_thick_air<R>(run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's switch back as it drops.
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            THICK_AIR_LIFTED.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(THICK_AIR_LIFTED.with(|cell| cell.replace(true)));
     run()
 }
 
@@ -4109,5 +4295,7 @@ pub(crate) fn count_hothouse(temperate: u32, hothouse: u32, deckless: Option<u32
     });
 }
 
+#[cfg(test)]
+pub(crate) mod guard_twin;
 #[cfg(test)]
 pub(crate) mod tests;

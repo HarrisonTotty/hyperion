@@ -228,6 +228,59 @@ fn the_greenhouse_gain_takes_nothing_from_a_gas_at_or_above_its_critical_tempera
     }
 }
 
+/// P14.T53.a's thick-air closure (decision-p14-t53a-thick-co2 §3): where it binds, the column's
+/// greenhouse gain is 0, as where the maximum-greenhouse ceiling binds, its surface reading the top
+/// 100 bar's τ and not its own. A kilobar of nitrogen over 200 bar of carbon dioxide held at its
+/// cap, at 300 K below carbon dioxide's critical temperature: its gain is the gain's with the
+/// closure lifted, and 0 under it.
+#[test]
+fn under_the_escape_batch_the_gain_is_0_where_the_thick_air_closure_binds() {
+    use crate::planetary::derive::atmosphere::{GreenhouseCeiling, without_thick_air};
+    let weights = |carbon_dioxide: f64| {
+        PartialPressures::from_fn(|gas| match gas {
+            Gas::CarbonDioxide => Pascals::new(carbon_dioxide),
+            Gas::Nitrogen => Pascals::new(1e8),
+            _ => Pascals::ZERO,
+        })
+    };
+    let (air, inventory) = (weights(2e7), weights(4e7));
+    with_rules(EscapeRules::Batch, || {
+        let constants = GreenhouseConstants::in_force();
+        let equilibrium = Kelvin::new(250.0);
+        let tau = constants.optical_depth(&air, equilibrium, STANDARD_GRAVITY);
+        let gain = || {
+            StepColumn {
+                surface_temperature: Kelvin::new(300.0),
+                partials: &air,
+                surface_pressure: air.total(),
+                optical_depth: tau,
+                airless: false,
+                equilibrium_temperature: equilibrium,
+                surface_gravity: STANDARD_GRAVITY,
+                radius: Metres::new(6.371e6),
+                inventory: &inventory,
+                ceiling: GreenhouseCeiling::None,
+            }
+            .column()
+            .expect("a column of nitrogen and carbon dioxide")
+            .0
+            .greenhouse_gain
+        };
+        let binds = |ceiling: GreenhouseCeiling| {
+            ceiling.binds(&constants, (&air, tau), equilibrium, STANDARD_GRAVITY)
+        };
+        assert!(binds(GreenhouseCeiling::None));
+        assert!(!without_thick_air(|| binds(GreenhouseCeiling::None)));
+        let lifted = without_thick_air(gain);
+        eprintln!(
+            "the gain lifted {lifted:.6}, under the closure {:.6}",
+            gain()
+        );
+        assert!(lifted > 0.0, "{lifted}");
+        assert_same_bits(gain(), 0.0);
+    });
+}
+
 #[test]
 fn a_locked_airless_body_s_day_night_contrast_exceeds_300_k_and_venus_s_is_under_10_k() {
     let table = table();
