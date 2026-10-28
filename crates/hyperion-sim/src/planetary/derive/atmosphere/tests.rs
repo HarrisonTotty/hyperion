@@ -7063,8 +7063,10 @@ fn under_the_escape_batch_the_thick_air_closure_never_warms() {
 /// hydrogen, whose term grows as p, moves a little, stated (decision-p14-t53a-thick-co2 §7.3).
 /// Both over a base of 300 K at standard gravity.
 ///
-/// The ruling expected hydrogen to move under 5%; it moves 5.87%, from a grey of 2,153.7 K to
-/// 2,027.3 K (recorded in plan 14's record, not re-ruled). Its grey profile's deep slope is the
+/// At this 300 K base it moves 5.87%, from a grey of 2,153.7 K to 2,027.3 K, pinned under 6%
+/// (decision-p14-t53a-thick-co2 §11.3, which confirms the pin: the ruling's "under 5%" was set
+/// from a 200 K case, and the move grows with the base as hydrogen's `c_p` rises, −3.1% at 200 K
+/// and −6.7% at 350 K on NIST's). Its grey profile's deep slope is the
 /// linear term's ¼ (2,153.7 K at 1 kbar over its top's 1,212.1 K at 100 bar, a slope of 0.2496),
 /// against hydrogen's dry adiabat's α R ÷ `c_p` of 0.223 over 1,200–2,000 K, where its `c_p` ÷ R
 /// is about 3.9: slightly superadiabatic, so the closure binds.
@@ -7082,7 +7084,9 @@ fn under_the_escape_batch_a_kilobar_of_nitrogen_is_the_grey_and_of_hydrogen_move
         let (t, grey, binds, closure) =
             closure_at(GreenhouseCeiling::None, &hydrogen, base, gravity);
         eprintln!(
-            "1 kbar of H₂: T_s {t:.3} K, grey {grey:.3} K ({:.4}% under it), closure {closure:?}",
+            "1 kbar of H₂ at a {:.0} K base: T_s {t:.3} K, grey {grey:.3} K ({:.4}% under it), \
+             closure {closure:?}",
+            base.value(),
             100.0 * (1.0 - t / grey)
         );
         assert!(t <= grey && relative(t, grey) < 0.06, "{t} against {grey}");

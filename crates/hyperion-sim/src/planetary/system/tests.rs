@@ -15432,8 +15432,11 @@ const SET_A_HOTHOUSES: [&str; 6] = [
 /// that moves, both lines; the counts by flip (state, `MagmaOcean` to solid, into or out of arm
 /// (c), into or out of part 2's section, decked to deckless); the movers by dominant gas; the
 /// knife edges within 20 K of the silicate solidus, water's critical temperature and the acid's
-/// 430 K; any new jump or new bracketed residual above 10⁻⁶; the six of set A by name; and arm
-/// (c)'s set as it ends. The guard's samples are the guard twin's
+/// 430 K; any new jump or new bracketed residual above 10⁻⁶, each one of the closure's recorded
+/// nine (`guard_twin::CLOSURE_JUMPS`; decision-p14-t53a-thick-co2 §11.1), in part 2's section and
+/// in its state as before, any other to main; count (xvii) over every body
+/// (`guard_twin::MeltOxygen`, §11.2); the six of set A by name; and arm (c)'s set as it ends. The
+/// guard's samples are the guard twin's
 /// (`under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_are_stated`).
 #[test]
 #[ignore = "a measurement for P14.T53.a's thick-air closure's record, run by name"]
@@ -15444,6 +15447,7 @@ const SET_A_HOTHOUSES: [&str; 6] = [
 fn under_every_24_hold_the_thick_air_closure_s_movers_are_stated() {
     use std::collections::BTreeMap;
 
+    use crate::planetary::derive::atmosphere::guard_twin::{MeltOxygen, closure_jump_exempt};
     use crate::planetary::derive::atmosphere::{SILICATE_SOLIDUS, without_thick_air};
     use crate::planetary::testing::with_every_24_hold;
     let look72 = look72_triaged_contexts();
@@ -15470,7 +15474,7 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_are_stated() {
     with_every_24_hold(|| {
         let mut flips = BTreeMap::<String, u32>::new();
         let mut by_gas = BTreeMap::<String, u32>::new();
-        let (mut edges, mut convergence) = (Vec::new(), Vec::new());
+        let (mut edges, mut convergence, mut to_main) = (Vec::new(), Vec::new(), Vec::new());
         let mut movers = 0;
         eprintln!("MOVERS:");
         for (a, b) in after.iter().zip(&before) {
@@ -15541,14 +15545,26 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_are_stated() {
             if (a.derived.convergence().is_jump() && !b.derived.convergence().is_jump())
                 || (residual(a) > 1e-6 && residual(b) <= 1e-6)
             {
-                convergence.push(format!("{}: {:?}", a.label, a.derived.convergence()));
+                let line = format!("{}: {:?}", a.label, a.derived.convergence());
+                if closure_jump_exempt(&a.id, &b.derived, &a.derived) {
+                    convergence.push(line);
+                } else {
+                    to_main.push(line);
+                }
             }
         }
         eprintln!("{movers} of {} bodies move under the closure", after.len());
         eprintln!("FLIPS: {flips:?}");
         eprintln!("BY DOMINANT GAS: {by_gas:?}");
         eprintln!("KNIFE EDGES: {edges:#?}");
-        eprintln!("NEW JUMPS OR BRACKETED ABOVE 1e-6 (to main): {convergence:#?}");
+        eprintln!(
+            "NEW JUMPS OR BRACKETED ABOVE 1e-6, the closure's recorded ones: {convergence:#?}"
+        );
+        let mut melt_oxygen = MeltOxygen::default();
+        for case in &after {
+            melt_oxygen.add(&case.label, &case.derived, case.hottest);
+        }
+        eprintln!("COUNT (xvii) over the systems: {}", melt_oxygen.line());
         eprintln!("THE SIX OF SET A:");
         for id in SET_A_HOTHOUSES {
             for (a, b) in after.iter().zip(&before).filter(|(a, _)| a.id == id) {
@@ -15565,6 +15581,12 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_are_stated() {
             eprintln!("  {} {}", case.label, case.line());
         }
         assert!(movers > 0);
+        assert_eq!(
+            to_main,
+            Vec::<String>::new(),
+            "TO MAIN: a new jump outside the closure's named nine, out of part 2's section or \
+             whose state moved (decision-p14-t53a-thick-co2 §11.1)"
+        );
     });
 }
 

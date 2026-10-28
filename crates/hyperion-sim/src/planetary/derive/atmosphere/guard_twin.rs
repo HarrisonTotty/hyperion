@@ -17,7 +17,7 @@
 use hyperion_testkit::lcg::Lcg;
 
 use super::{
-    Gas, GreenhouseConstants, PASCALS_PER_BAR, SILICATE_SOLIDUS, SurfaceState,
+    Gas, GreenhouseCeiling, GreenhouseConstants, PASCALS_PER_BAR, SILICATE_SOLIDUS, SurfaceState,
     THICK_AIR_ANCHOR_PRESSURE, VolatileDraws, grey_surface_temperature,
     water_saturation_temperature, without_thick_air,
 };
@@ -103,6 +103,107 @@ const SATURATED_UNDER_THE_BATCH: [(&str, u16); 39] = [
     ("42002cb200049487", 0x0e00),
     ("42002cb2000495a9", 0x0100),
 ];
+
+/// The nine bodies the thick-air closure puts on a bracketed jump, each with its first round's
+/// residual on P14.T54.b.k's tree (decision-p14-t53a-thick-co2 §11.1; 42002cb200018844.0400 jumps
+/// there without the closure too, at 0.0026): the guard's six and the systems' three, every one
+/// an icy water world published `Snowball` at 647–811 K under 2.9 kbar to 2.2 Mbar, in P14.T53.b
+/// part 2's section, where the column's water steps from its saturation to all airborne at its
+/// critical point. Recorded jumps, as `close_binary` 0800's is; their owner is P14.T53.b part 3 at
+/// 25, whose cap at the critical isochore removes the step. A new jump elsewhere, one that leaves
+/// the section, or one whose state moves goes to main.
+pub(crate) const CLOSURE_JUMPS: [(&str, f64); 9] = [
+    ("42002cb20000010c.0900", 0.009_17),
+    ("42002cb2000001b1.0500", 0.013_51),
+    ("42002cb2000187b7.0700", 0.027_70),
+    ("42002cb200018844.0400", 0.054_49),
+    ("42002cb200030f55.0500", 0.021_84),
+    ("42002cb200049556.0500", 0.039_41),
+    ("02001b2ca0020000.0200", 0.011_73),
+    ("02000b2ce0040000.0600", 0.020_37),
+    ("02000b2d9ffe0000.0700", 0.028_64),
+];
+
+/// Whether the body `id` may take a new jump under the thick-air closure ([`CLOSURE_JUMPS`]), the
+/// twin's jump exemption: by name, and only where its published state is the one it had without
+/// the closure and a supercritical reservoir hides its surface (part 2's section).
+pub(crate) fn closure_jump_exempt(id: &str, before: &DerivedBody, after: &DerivedBody) -> bool {
+    CLOSURE_JUMPS.iter().any(|&(name, _)| name == id)
+        && before.atmosphere().state() == after.atmosphere().state()
+        && after
+            .atmosphere()
+            .supercritical_reservoir(after.surface_gravity())
+            .is_some()
+}
+
+/// Count (xvii)'s tally (decision-p14-t53a-thick-co2 §11.2): the `MagmaOcean` bodies whose
+/// greenhouse solve held O₂, which the melt takes only as the published air is finished
+/// (`escaping::finish`), each's published `T_s` against its published air's own surface: how many,
+/// how many differ by more than 1%, the largest difference, and how many of those airs lie under
+/// the silicate solidus, by name.
+#[derive(Debug, Default)]
+pub(crate) struct MeltOxygen {
+    bodies: u32,
+    above_one_percent: u32,
+    largest: (f64, String),
+    under_solidus: Vec<String>,
+}
+
+impl MeltOxygen {
+    /// Counts the derived body `body` of the ID `id` about a hottest host at `hottest`, if it is
+    /// a `MagmaOcean` whose airborne inventory holds O₂: its published air's surface is
+    /// `GreenhouseCeiling::surface_temperature` over that air's τ at its equilibrium temperature,
+    /// no ceiling on a molten crust, held at `hottest` (the ruled follow-up's evaluation, before
+    /// its solidus).
+    pub(crate) fn add(&mut self, id: &str, body: &DerivedBody, hottest: Kelvin) {
+        let air = body.atmosphere();
+        if air.state() != SurfaceState::MagmaOcean
+            || air.inventory_weights().of(Gas::Oxygen).value() <= 0.0
+        {
+            return;
+        }
+        let constants = GreenhouseConstants::in_force();
+        let (partials, base, gravity) = (
+            air.partial_pressures(),
+            body.equilibrium_temperature(),
+            body.surface_gravity(),
+        );
+        let tau = constants.optical_depth(partials, base, gravity);
+        let published_air = GreenhouseCeiling::None
+            .surface_temperature(&constants, (partials, tau), base, gravity)
+            .value()
+            .min(hottest.value());
+        let t_s = air.surface_temperature().value();
+        self.bodies += 1;
+        self.above_one_percent += u32::from((t_s / published_air - 1.0).abs() > 0.01);
+        if (t_s - published_air).abs() > self.largest.0 {
+            self.largest = (
+                (t_s - published_air).abs(),
+                format!("{id}: {t_s:.1} K against {published_air:.1} K"),
+            );
+        }
+        if published_air < SILICATE_SOLIDUS.value() {
+            self.under_solidus.push(format!(
+                "{id}: {t_s:.1} K, its published air {published_air:.1} K"
+            ));
+        }
+    }
+
+    /// The tally, for a census line.
+    pub(crate) fn line(&self) -> String {
+        format!(
+            "{} molten bodies with O₂ in their solve; {} differ by more than 1% from their \
+             published air's surface, the largest by {:.1} K ({}); {} whose published air lies \
+             under the solidus: [{}]",
+            self.bodies,
+            self.above_one_percent,
+            self.largest.0,
+            self.largest.1,
+            self.under_solidus.len(),
+            self.under_solidus.join("; ")
+        )
+    }
+}
 
 /// The Milky Way fixture every sample is drawn in (`planetary_support::galaxy`).
 fn galaxy() -> Galaxy {
@@ -673,8 +774,11 @@ fn under_every_24_hold_the_guard_s_39_thick_carbon_dioxide_airs_are_finite_and_u
 /// derived with the closure and with it lifted ([`without_thick_air`]), every one that differs
 /// listed with both lines, counted by flip (state, into or out of part 2's section and arm (c),
 /// decked to deckless, a new jump or bracketed residual above 10⁻⁶), by dominant gas; any that
-/// derives under one rule alone; and the knife edges,
+/// derives under one rule alone; count (xvii) over every sample ([`MeltOxygen`], §11.2); and the
+/// knife edges,
 /// within 20 K of the silicate solidus, of water's critical temperature and of the acid's 430 K.
+/// Every new jump is one of the closure's recorded nine ([`CLOSURE_JUMPS`]), in part 2's section
+/// and in its state as before; any other goes to main.
 #[test]
 #[ignore = "a measurement for P14.T53.a's thick-air closure's record, run by name"]
 #[expect(
@@ -687,6 +791,7 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
     let mut by_gas = BTreeMap::<String, u32>::new();
     let mut edges = Vec::new();
     let (mut samples, mut movers) = (0_u32, 0_u32);
+    let (mut melt_oxygen, mut to_main) = (MeltOxygen::default(), Vec::new());
     with_every_24_hold(|| {
         guard_walk(&mut |sample| {
             let (after, before) = (sample.derive(), without_thick_air(|| sample.derive()));
@@ -710,6 +815,11 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
                 }
             };
             samples += 1;
+            melt_oxygen.add(
+                &format!("{} at {:+} yr", sample.id(), sample.years),
+                &after,
+                hottest,
+            );
             if after == before {
                 return;
             }
@@ -752,6 +862,11 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
                 Convergence::Converged => 0.0,
                 Convergence::Bracketed { residual, .. } => residual,
             };
+            let new_jump = (after.convergence().is_jump() && !before.convergence().is_jump())
+                || (residual(&after) > 1e-6 && residual(&before) <= 1e-6);
+            if new_jump && !closure_jump_exempt(&sample.id(), &before, &after) {
+                to_main.push(format!("{id}: {:?}", after.convergence()));
+            }
             for (what, was, now) in [
                 (
                     "state",
@@ -807,5 +922,15 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
     for edge in &edges {
         eprintln!("  {edge}");
     }
+    eprintln!(
+        "COUNT (xvii) over the guard's samples: {}",
+        melt_oxygen.line()
+    );
     assert!(movers > 0);
+    assert_eq!(
+        to_main,
+        Vec::<String>::new(),
+        "TO MAIN: a new jump outside the closure's named nine, out of part 2's section or whose \
+         state moved (decision-p14-t53a-thick-co2 §11.1)"
+    );
 }

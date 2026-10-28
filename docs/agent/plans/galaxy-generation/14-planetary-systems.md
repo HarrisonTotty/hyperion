@@ -27740,7 +27740,7 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
         surface moves under 10⁻⁸); never warmer than the grey and never under T_a over 4,000
         drawn airs at 100 bar–20 kbar, on 2,797 of which it binds, `binds` true exactly there;
       - 1 kbar of N₂ the grey to the bit (405.4 K at a 300 K base); 1 kbar of H₂ 5.87% under its
-        grey (2,027.3 K against 2,153.7 K; recorded below);
+        grey at the same base (2,027.3 K against 2,153.7 K), pinned under 6% (below);
       - Venus's air made thicker (its T_eq 229.06 K and g 8.870 m s⁻²): 806.9, 840.9, 890.6,
         956.3 and 1,051.6 K at 150, 200, 300, 500 and 1,000 bar, against the replica's 807, 841,
         890, 956 and 1,051 K; 3.1–6.1% above version 23's √p form (782.5–990.8 K), where the
@@ -27780,9 +27780,12 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
         four named cases stand. By dominant gas: CO₂ 74, O₂ 16, H₂ 8, water 5, CH₄ 1, N₂ 1. Knife
         edges: 9 within 20 K of water's 647.096 K (630.3–666.3 K), 02004b2ca0000000.1600 held at
         the solidus on its molten crust, and 02002b2c9ffb0000.0600 at 414.6 K, 15 K under 430 K.
-        **One new bracketed body, to main:** 02001b2ca0020000.0200, an icy `Snowball` at 755.6 K
-        under 792 kbar, mostly methane, in part 2's section, now `Bracketed` at a residual of
-        7.2 × 10⁻³ (`FirstRound`, 39 passes; it converged in 4 without the closure).
+        **Three new bracketed jumps, recorded (decision-p14-t53a-thick-co2 §11.1):**
+        02001b2ca0020000.0200 (an icy `Snowball` at 755.6 K under 792 kbar, residual 7.2 × 10⁻³),
+        02000b2ce0040000.0600 (811.0 K under 368 kbar, 0.024) and 02000b2d9ffe0000.0700 (799.5 K
+        under 2.17 Mbar, 0.027), each `FirstRound`, in part 2's section and `Snowball` as without
+        the closure, under which each converged in 4 passes. The lane's first report named only
+        the first.
       - _Arm (c) as it ends over set A_, six, each first solve's margin over T_sat:
         01ffeb2c5ffe0000.0100 decked at 622.4 K (+152.7 K); 01ffeb2c5fff0000.0100 decked at
         716.0 K (+203.4 K); 02002b2ca0030001.0300 deckless at 730.1 K, 956.1 K before (+83.0 K; its
@@ -27790,21 +27793,48 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
         (+44.0 K; it stays, where §6 estimated it would leave, at g₀ and without its 242 bar of O₂);
         02002b2ca0010000.0200 and 02002b2bdffd0000.0100 to the bit (+20.4 and +17.0 K). None lies
         within 10 K of T_sat. No mover of either census is a `Temperate` at or above its T_sat.
-      - _The guard's samples_: 2,971 samples of 991 bodies move: 951 samples `MagmaOcean` to
+      - _The guard's samples_ (on 16b70257; on P14.T54.b.k's tree 2,970 move, 15 samples gain a
+        jump, 42002cb200018844.0400 jumping already, and 14 bodies enter part 2's section,
+        42002cb20004944e.0500 the one more; every other count as here): 2,971 samples of 991
+        bodies move: 951 samples `MagmaOcean` to
         runaway; 18 (6 bodies) runaway to `Temperate`, each under its T_sat (572.2–635.8 K, the
         closest 42002cb2000494c6.0100, 11.3 K under); by its ratios 81 samples into (c) and 18 out;
         13 bodies into part 2's section and 7 out; 6 decks each way. By dominant gas: CO₂ 1,599,
         O₂ 1,011, H₂ 195, CH₄ 133, water 27, N₂ 6, the O₂ airs the band term's (C5's) as §4
         foresaw. Knife edges: 77 bodies within 20 K of water's T_c, 6 of 430 K, 5 of the solidus.
-        No sample derives under one rule alone. 7 bodies lose a jump. **Six new jumps, to main**,
-        each at all three times: 42002cb20000010c.0900 (an icy runaway at 1,024.3 K under 39.8
+        No sample derives under one rule alone. 7 bodies lose a jump. **Six new jumps, recorded
+        (§11.1)**, each at all three times: 42002cb20000010c.0900 (an icy runaway at 1,024.3 K under 39.8
         kbar), 42002cb2000001b1.0500 (807.1 K, 944 kbar), 42002cb2000187b7.0700 (647.1 K, its
         1.77 Mbar inventory down to 14.8 kbar at water's T_c), 42002cb200018844.0400 (765.5 K, 677
         kbar), 42002cb200030f55.0500 (647.1 K, 2.9 kbar) and 42002cb200049556.0500 (800.1 K,
         1.35 Mbar): icy steam and methane airs, every one in part 2's section, its surface hidden,
         `FirstRound` residuals 0.009–0.051, where each converged in 3 passes without the closure.
-        Near their condensables' critical points, as the column condenses or not, the passes
-        turn bistable (P14.T53.b part 3's steam case, at 25).
+        Near water's critical point the column steps from its saturation to all airborne, and the
+        passes turn bistable there.
+      - _The nine jumps_ (§11.1): recorded, not a blocker, like close_binary 0800's: no state
+        moves, each is finite and deterministic, and none publishes a surface. They are
+        `CLOSURE_JUMPS` (`guard_twin.rs`), each with its residual, the censuses' jump exemption:
+        a new jump elsewhere, one out of part 2's section or one whose state moves fails, to main.
+        For l's bless note, with their residuals on P14.T54.b.k's tree: 42002cb20000010c.0900
+        0.0092, 42002cb2000001b1.0500 0.0135, 42002cb2000187b7.0700 0.0277,
+        42002cb200018844.0400 0.0545 (a jump there without the closure too, at 0.0026),
+        42002cb200030f55.0500 0.0218, 42002cb200049556.0500 0.0394, 02001b2ca0020000.0200 0.0117,
+        02000b2ce0040000.0600 0.0204 and 02000b2d9ffe0000.0700 0.0286. Their owner is P14.T53.b
+        part 3 at 25, whose cap at the critical isochore removes the step and whose
+        `SteamEnvelope` label replaces their `Snowball`; its boarding census names these nine
+        first.
+      - _Count (xvii)_ (§11.2; `MeltOxygen`, both censuses): the `MagmaOcean` bodies whose solve
+        held O₂, each's published T_s against its published air's own surface (the closure over
+        that air's τ, no ceiling, at its T_eq). Over the guard's samples, 222 such samples; 180
+        differ by more than 1%, the largest 42002cb2000188e8.0100 by 733.0 K (2,565.4 K against
+        1,832.4 K); 13 bodies' published air lies under the solidus, the 49423 class:
+        42002cb2000000e9.0200, 42002cb200000141.0100, 42002cb200000177.0100,
+        42002cb200000194.0200, 42002cb200018726.0100, 42002cb200018737.0300,
+        42002cb2000187fc.0100, 42002cb20001885b.0100, 42002cb200030d77.0100,
+        42002cb200030e36.0100, 42002cb200030f68.0100, 42002cb200049423.0100 and
+        42002cb2000494fc.0b00. Over the systems, 3 bodies; 2 differ by more than 1%, the largest
+        01ffeb2b60010000.0100 by 340.3 K (1,609.0 K against 1,268.8 K), whose published air lies
+        under the solidus.
     - _Restated by name, pre-ruled (§6):_ the census's hothouse 01ffeb2c5ffe0000.0100 publishes
       decked at 622.4 K, now under water's saturation temperature, 647.096 K (934.6 K before),
       its first solve 799.8 K (1,221.6 K), so it stays (c); 01ffeb2c5fff0000.0100 joins (c) by
@@ -27832,12 +27862,15 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
       - the twin copies `tests/planetary_support` and the guard's helpers (about 250 lines), kept
         in step by hand; the 39's test finds each by name and fails if they drift.
     - _Recorded:_
-      - **1 kbar of H₂ moves 5.87%, not under 5%** as the ruling expected (§7.3): its grey's deep
-        slope is the linear term's ¼, against hydrogen's dry adiabat's 0.223 (c_p ÷ R about 3.9
-        at 1,200–2,000 K). The science check finds 5.69% on NIST's c_p: the estimate was low, not
-        the build. Pinned under 6%.
+      - **1 kbar of H₂ moves 5.87% at a 300 K base and g₀, not under 5%** as §7.3 expected: its
+        grey's deep slope is the linear term's ¼, against hydrogen's dry adiabat's 0.223 (c_p ÷ R
+        about 3.9 at 1,200–2,000 K). The science check finds 5.69% on NIST's c_p. **Ruled**
+        (§11.3): the pin under 6% is confirmed; §7.3's 5% came from a 200 K case, and the move
+        grows with the base as H₂'s c_p rises (−3.1% at 200 K, −6.7% at 350 K). The test states
+        its base beside the figure.
       - **Eddington's air temperature at the anchor** lies 0.07–0.61% under T_a over the 39's τ_a
-        of 26–256, not "under 0.25% at 50–260" (§3; 0.33% at 50). The 39's τ_a run lower than the
+        of 26–256, and 0.33% at 50, not "under 0.25% at 50–260"; §3 is amended to these figures
+        (§11.3), and the doc states them. The 39's τ_a run lower than the
         replica's since a solid body keeps its O₂ airborne, which dilutes the top's CO₂.
       - **A molten body's closure reads the steps' column**, which still holds the oxygen its melt
         takes only as the published air is finished (`escaping::finish`), so its T_s lies above
@@ -27845,9 +27878,14 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
         23.4 kbar of O₂ in 25.4 kbar, against 1,832.4 K over its published 1,946 bar; and
         42002cb200049423.0100 molten at 1,471.0 K (5.5 kbar of O₂) where its published air gives
         1,308.0 K, under the solidus. The closure over each molten body's airborne inventory gives
-        its published T_s to the printed digit. Not a blocker: finite, under its star, the guard
-        passes, and the melt's timing is T53.a's as built. The consistent form, the melt's uptake
-        inside the steps, is deferred; sent to main as a finding.
+        its published T_s to the printed digit. **Ruled** (§11.2): a figure, not a state, recorded.
+        49423 has no fixed point between the two (molten, its air without O₂ freezes it; frozen,
+        its O₂ returns and melts it), so its consistent state is the melt at the solidus, the
+        `MagmaOcean` published. The follow-up rides after 24, on p14-escape, behind its own hold:
+        `finish` evaluates a molten body whose melt takes its O₂ again on its published partials
+        (`GreenhouseCeiling::surface_temperature` over their τ, then `saturate`) and publishes
+        max(that, the solidus) with that τ, one evaluation and no new steps; 188e8 goes to about
+        1,832 K and 49423 to 1,394 K. Count (xvii) above states the class.
       - The ruling's deferred items stand: the closure from the emission level and its refit, CO₂
         condensing aloft with the nine between-limits hothouses' cold branch, the moist deep
         column and the real fluid's adiabat above about 1 kbar (Z 3.5–5.8 at 0.5–1 GPa).
