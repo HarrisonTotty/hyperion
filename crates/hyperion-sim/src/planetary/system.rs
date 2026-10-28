@@ -211,7 +211,7 @@ use crate::units::{
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
 use air::{AirRules, AirSurface, record_aerosols, record_structure};
-use envelope::{EnvelopeOf, record_envelope};
+use envelope::{DeriveEnvelopeError, EnvelopeOf, record_envelope};
 use modifiers::{
     ModifierCase, ModifierStar, ModifierSurface, PlanetField, RecordPrimary, planet_field,
     planet_field_rules, reads_modifier_star, record_modifiers, weathering_case,
@@ -2570,23 +2570,27 @@ impl PlanetarySystem {
 
     /// Where the planet or member `body` formed in its host's disc (P14.T50.a's formation zone, as
     /// its derivation's volatiles read it, `PlacedBody::air_of`): a planet's formation distance
-    /// and a member's (its semi-major axis), against its zone's host's disc's snow line. `None`
-    /// for a moon or a ring, and for a body whose host has no disc.
-    #[must_use]
-    fn formation_zone(&self, body: &Body) -> Option<FormationZone> {
+    /// and a member's (its semi-major axis), against its zone's host's disc's snow line.
+    ///
+    /// # Errors
+    ///
+    /// [`DeriveEnvelopeError::NoDisc`] for a moon or a ring, which forms in no disc of its host's,
+    /// and for a body whose host has no disc; [`DeriveEnvelopeError::FormationZone`] for a zone
+    /// refused, which a placed planet's positive, finite formation distance and a member's
+    /// semi-major axis against a disc's snow line never give: a refusal is not modelled, never a
+    /// default.
+    fn formation_zone(&self, body: &Body) -> Result<FormationZone, DeriveEnvelopeError> {
         let distance = match &body.part {
             Part::Planet(planet) => planet.placed.formation_distance(),
             Part::Member(member) => member.member.placed_body().formation_distance(),
-            Part::Moon(_) | Part::Ring(_) => return None,
+            Part::Moon(_) | Part::Ring(_) => return Err(DeriveEnvelopeError::NoDisc),
         };
         let snow_line = self
-            .host(self.zone_of(body).host())?
-            .disc
-            .profile()?
+            .host(self.zone_of(body).host())
+            .and_then(|host| host.disc.profile())
+            .ok_or(DeriveEnvelopeError::NoDisc)?
             .snow_line();
-        // A placed planet's formation distance and a member's semi-major axis are positive and
-        // finite, and so is a disc's snow line: a zone refused is none to read, never a default.
-        FormationZone::new(distance, snow_line).ok()
+        FormationZone::new(distance, snow_line).map_err(DeriveEnvelopeError::FormationZone)
     }
 
     /// The surface section of the planet, member or moon `body` at the epoch's time

@@ -1,8 +1,9 @@
-//! P14.T54.b.k's audit of the 23 → 24 batch (design-k §2.1, §3.1): the MUST-FIX items of
-//! brief-notes-24 that a record shows, asserted over one walk with every 24 hold in force and the
-//! record's rules at their batch ([`every_record_batch`]), so that the air's sections, the
-//! envelope, the modifiers and the taxonomic class are on every record the walk reads, as 24 will
-//! publish them:
+//! P14.T54.b.k's audit of the 23 → 24 batch (design-k §2.1, §3.1), brief-notes-24's MUST-FIX
+//! items that a record shows.
+//!
+//! They are asserted over one walk with every 24 hold in force and the record's rules at their
+//! batch ([`every_record_batch`]), so that the air's sections, the envelope, the modifiers and the
+//! taxonomic class are on every record the walk reads, as 24 will publish them:
 //!
 //! - **M1**, P14.T53.b part 1 (V3.9 part 1): no runaway beyond the maximum-greenhouse limit now
 //!   or under Venus's deck below 430 K, and every runaway between the limits (c)'s, its hothouses
@@ -12,7 +13,7 @@
 //!   max(273.15 K, `T_rest`) (decision-absurd-states-24 R4.2; decision-bump-plan-after-22 K4's
 //!   test 3);
 //! - **M4**, P14.T53.b part 2: no `Ok` surface under a supercritical reservoir
-//!   (`assert_envelope_tags`' rule, under the air's batch);
+//!   ([`envelope_tag_faults`], `assert_envelope_tags`' rule, under the air's batch);
 //! - **M6**, P14.T56.g: every lagged record's surface rock, `Mercury`'s where airless, and no
 //!   airless record with an `Ice` surface above the melting point at T0;
 //! - **M7**, P14.T51.g.b's invariants on every published ocean, its floor under its own bound
@@ -32,8 +33,6 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;
-
-use hyperion_testkit::float::bits;
 
 use super::tests::{
     EnvelopeBody, GOLDEN_SYSTEMS_SEED, HOTHOUSE_BODY, LOOK72_OCEANS, SEED, envelope_tag_faults,
@@ -266,20 +265,43 @@ enum Item {
     M11,
 }
 
-/// A runaway's side of water's saturation temperature at its surface pressure, its passes' mean
-/// surface temperature against `water_saturation_temperature` there (P14.T53.b part 1 (c)'s
-/// convention; count (xi)).
+/// A runaway's side of water's saturation temperature at its surface pressure.
+///
+/// Its passes' mean surface temperature is read against [`water_saturation_temperature`] there
+/// (P14.T53.b part 1 (c)'s convention; count (xi)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Saturation {
     /// Below it.
     Under,
-    /// At or above it, or not judged (a pressure under water's triple point).
+    /// At or above it.
     Above,
+    /// Not judged: a surface pressure under water's triple point, where there is no saturation
+    /// temperature, or a temperature or pressure that is not a number.
+    Unjudged,
+}
+
+impl Saturation {
+    /// The side of the mean surface temperature `t_s`, K, at the surface pressure `p_s`, Pa.
+    #[must_use]
+    fn of(t_s: f64, p_s: f64) -> Self {
+        match water_saturation_temperature(Pascals::new(p_s)).map(Kelvin::value) {
+            Some(t_sat) if !(t_s.is_nan() || t_sat.is_nan()) => {
+                if t_s < t_sat {
+                    Self::Under
+                } else {
+                    Self::Above
+                }
+            }
+            Some(_) | None => Self::Unjudged,
+        }
+    }
 }
 
 /// Arm (c)'s hothouses over design-k §0's set A, by their sample planets' IDs, each with its deck
-/// and its side of water's saturation temperature (decision-p14-t54b-k-hothouses §1, §3: each a
-/// dry past runaway between the limits now, judged on its first, deckless solve).
+/// and its side of water's saturation temperature, none unjudged.
+///
+/// Each is a dry past runaway between the limits now, judged on its first, deckless solve
+/// (decision-p14-t54b-k-hothouses §1, §3).
 const AUDIT_SET_HOTHOUSES: [(&str, RunawayDeck, Saturation); 6] = [
     (
         "02002b2ca0010000.0200",
@@ -362,15 +384,16 @@ impl AuditBody {
             .push((item, list, format!("{}: {line}", self.label)));
     }
 
-    /// M1, P14.T53.b part 1 (V3.9 part 1; decision-t53b-arm-c §5.4–5.5; decision-p14-t54b-k-hothouses
-    /// §3), on a record whose surface is a `RunawayGreenhouse`: (a) it lies inside the
-    /// maximum-greenhouse limit now ([`limit_now`] at least 1); (b) under Venus's deck its mean
-    /// surface temperature is at least the acid's cycling temperature, 430 K; (c) between the limits
-    /// now ([`runaway_now`] below 1) it is (c)'s, its first solve with (c) off
-    /// (`PresentState::WithoutHothouse`) a `Temperate` that (c) judges a hothouse
-    /// (`solved_as_a_hothouse`). Each of (c)'s is stated by name with both solves' figures, and its
-    /// deck and its side of water's saturation temperature are held
-    /// ([`hothouse`](Self::hothouse)).
+    /// M1, P14.T53.b part 1, on a record whose surface is a `RunawayGreenhouse` (V3.9 part 1;
+    /// decision-t53b-arm-c §5.4–5.5; decision-p14-t54b-k-hothouses §3).
+    ///
+    /// (a) It lies inside the maximum-greenhouse limit now ([`limit_now`] at least 1); (b) under
+    /// Venus's deck its mean surface temperature is at least the acid's cycling temperature, 430 K
+    /// ([`ACID_CYCLING_TEMPERATURE`]); (c) between the limits now ([`runaway_now`] below 1) it is
+    /// (c)'s, its first solve with (c) off ([`PresentState::WithoutHothouse`]) a `Temperate` that
+    /// (c) judges a hothouse ([`solved_as_a_hothouse`]). Each of (c)'s is stated by name with both
+    /// solves' figures, and its deck and its side of water's saturation temperature
+    /// ([`Saturation::of`]) are held ([`hothouse`](AuditBody::hothouse)).
     fn runaway(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -431,23 +454,21 @@ impl AuditBody {
                 &format!("(c) a runaway between the limits not (c)'s: {line}"),
             );
         }
-        let side = if air_t_s < saturation(p_s) {
-            Saturation::Under
-        } else {
-            Saturation::Above
-        };
-        self.hothouse = Some((deck, side));
+        self.hothouse = Some((deck, Saturation::of(air_t_s, p_s)));
         self.state(Item::M1, "(c)'s hothouses between the limits", &line);
     }
 
-    /// M3, K4's ceiling (decision-bump-plan-after-22 K4, test 3; decision-absurd-states-24 R4.2):
-    /// a body beyond the maximum-greenhouse limit now (its ratio below 1) on a solid crust takes
+    /// M3, K4's ceiling on the body (decision-bump-plan-after-22 K4, test 3;
+    /// decision-absurd-states-24 R4.2).
+    ///
+    /// A body beyond the maximum-greenhouse limit now (its ratio below 1) on a solid crust takes
     /// the ceiling, and its passes' `T_s` lies at or under max(273.15 K, `T_rest`), `T_rest` the
     /// grey surface of nitrogen's and hydrogen's terms alone over its published partial pressures
     /// from its base temperature, the larger of `T_eq` and the night floor at the heat flow its
     /// published pass read (`surface_mix::airless_mean` under the unlit mean's rules, recomputed
-    /// here, not read from the ceiling); a body the ceiling reaches lies beyond the limit, and one
-    /// beyond it the ceiling does not reach is a magma ocean (a molten crust's, which K4 excepts).
+    /// here with [`night_floor`] and [`grey_surface_temperature`], not read from the ceiling); a
+    /// body the ceiling reaches lies beyond the limit, and one beyond it the ceiling does not reach
+    /// is a magma ocean (a molten crust's, which K4 excepts).
     fn ceiling(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -521,8 +542,8 @@ impl AuditBody {
         }
     }
 
-    /// M4, P14.T53.b part 2's tags under the air's batch (`envelope_tag_faults`), with every body a
-    /// supercritical reservoir hides stated.
+    /// M4, P14.T53.b part 2's tags under the air's batch ([`envelope_tag_faults`]), with every body
+    /// a supercritical reservoir hides stated.
     fn envelope_tags(&mut self, case: &AuditCase<'_>) {
         let body = EnvelopeBody::of(case.set, case.kind, case.record, case.derived);
         for fault in envelope_tag_faults(&body, AirRules::Batch) {
@@ -533,11 +554,13 @@ impl AuditBody {
         }
     }
 
-    /// M6, P14.T56.g (decision-p14-t56g §4, §7.2): a lagged record's surface is rock, `Mercury`'s
-    /// template where airless, under a lid that is not `H2O`; no airless record has an `Ice` surface
-    /// above the melting point at T0, a planet's above all; an icy belt member is lagged exactly
-    /// above it and a planet never (the code's own rule). Count (ix), every other `Ice` surface
-    /// above it, is stated.
+    /// M6, P14.T56.g's lag on the body (decision-p14-t56g §4, §7.2).
+    ///
+    /// A lagged record's surface is rock, `Mercury`'s template where airless, under a lid that is
+    /// not `H2O`; no airless record has an `Ice` surface above the melting point at T0
+    /// ([`HOT_ICE_LIMIT`]), a planet's above all; an icy belt member is lagged exactly above it and
+    /// a planet never (the code's own rule). Count (ix), every other `Ice` surface above it, is
+    /// stated.
     fn lag(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -605,17 +628,19 @@ impl AuditBody {
         }
     }
 
-    /// M7, P14.T51.g.b's invariants on every published ocean, every 24 hold in force (main's
-    /// rulings, 2026-10-27, on T51.g.a's MUST-FIX and on k-1's audit: T51.g.a's narrower floor,
-    /// 626.09 MPa, applies under its own hold alone): its floor rock, ice III or ice V, at most
-    /// T51.g.b's own bound, the melting pressure of water's high-pressure ice at the floor's
+    /// M7, P14.T51.g.b's invariants on the body's published ocean, every 24 hold in force.
+    ///
+    /// Main's rulings, 2026-10-27, on T51.g.a's MUST-FIX and on k-1's audit (T51.g.a's narrower
+    /// floor, 626.09 MPa, applies under its own hold alone): its floor rock, ice III or ice V, at
+    /// most T51.g.b's own bound, the melting pressure of water's high-pressure ice at the floor's
     /// temperature in the solve, T*, ice Ih's melting point at the shell's base's pressure
-    /// (`high_pressure_melting`, as `Hydrosphere::base_at` reads it, to `implausibility`'s 10⁻⁶);
-    /// a positive thickness; shell and depth within R − `r_w` (to 1 m); its mass at 1,000 kg m⁻³
-    /// at most x M, x its record's water (its bulk's, or its condensed water's where larger, as the
-    /// rule reads it); and the plan's own list (`implausibility`); no lagged record with an ocean or
-    /// an ice shell's regime. The oceans are stated by floor (the ice III floors by count), and
-    /// LOOK72's three named oceans and [`DEEPEST_ICE_V_FLOOR`] by name.
+    /// ([`high_pressure_melting`] at [`ice_ih_melting_temperature`], as `Hydrosphere::base_at`
+    /// reads it, to [`implausibility`]'s 10⁻⁶); a positive thickness; shell and depth within
+    /// R − `r_w` (to 1 m); its mass at 1,000 kg m⁻³ at most x M, x its record's water (its bulk's,
+    /// or its condensed water's where larger, as the rule reads it); and the plan's own list
+    /// ([`implausibility`]); no lagged record with an ocean or an ice shell's regime. The oceans
+    /// are stated by floor (the ice III floors by count), and LOOK72's three named oceans
+    /// ([`LOOK72_OCEANS`]) and [`DEEPEST_ICE_V_FLOOR`] by name.
     #[expect(
         clippy::too_many_lines,
         reason = "one check of main's list and the plan's on each ocean, in turn"
@@ -752,9 +777,9 @@ impl AuditBody {
     }
 
     /// M9, P14.T54.b.e's young lava (decision-p14-t54b-e-findings §A): a published pass that took
-    /// a maturity on an airless (or tenuous) silicate lid outside `CAPPED_ROWS` whose surface is
-    /// younger than `REGOLITH_FORMATION_TIME` publishes its regolith at most 0.11 about a Sun, on
-    /// its stand-in's arm (`StandIn::UnweatheredLava`), as `young_lava_census` asserts.
+    /// a maturity on an airless (or tenuous) silicate lid outside [`CAPPED_ROWS`] whose surface is
+    /// younger than [`REGOLITH_FORMATION_TIME`] publishes its regolith at most 0.11 about a Sun, on
+    /// its stand-in's arm ([`StandIn::UnweatheredLava`]), as `young_lava_census` asserts.
     fn young_lava(&mut self, case: &AuditCase<'_>) {
         let state = case.derived.atmosphere().state();
         let Ok(pass) = case.derived.weathered() else {
@@ -810,13 +835,16 @@ impl AuditBody {
         }
     }
 
-    /// M11, every member P14.T54.b first sends finite and in its range: the surface's vertical
-    /// structure (starting at the published conditions, its skin at most `T_s`, its adiabat cooling
-    /// aloft), its aerosol inventory (each deck's top above its base, each mode's τ(550), column,
-    /// coverage and profile, each absorber's column), its modifiers (k, the maturity, the covers
-    /// and the deposits' shares), and the envelope (`T_int`, `T_irr`, the join and the adiabat, the
-    /// composition summing to 1, the decks' and modes' figures, no supercritical condensable at
-    /// 24); and no member's `Debug` holding a NaN or an infinity.
+    /// M11, every member P14.T54.b first sends finite and in its range.
+    ///
+    /// The members: the surface's vertical structure (starting at the published conditions, to the
+    /// bit, its skin at most `T_s`, its adiabat cooling aloft), its aerosol inventory (each deck's
+    /// top above its base, each mode's τ(550), column, coverage and profile, each absorber's
+    /// column), its modifiers (k, the maturity, the covers and the deposits' shares), and the
+    /// envelope (`T_int`, `T_irr`, the join and the adiabat, the composition summing to 1, the
+    /// decks' and modes' figures, no supercritical condensable at 24); and no member's `Debug`
+    /// holding a NaN or an infinity ([`not_finite`]). A NaN in the structure's or the conditions'
+    /// surface figures is a fault, not a panic.
     #[expect(
         clippy::too_many_lines,
         reason = "one check of each new member's figures, in turn"
@@ -831,11 +859,21 @@ impl AuditBody {
             match surface.vertical_structure() {
                 Modelled::Ok(Some(VerticalStructure::RadiativeConvective(profile))) => {
                     let t_s = conditions.mean_surface_temperature().value();
-                    if bits(profile.surface_temperature().value()) != bits(t_s)
-                        || bits(profile.surface_pressure().value())
-                            != bits(conditions.surface_pressure().value())
-                    {
-                        faults.push("a structure off its surface's conditions".to_owned());
+                    let starts = [
+                        (profile.surface_temperature().value(), t_s),
+                        (
+                            profile.surface_pressure().value(),
+                            conditions.surface_pressure().value(),
+                        ),
+                    ];
+                    if starts.iter().any(|(a, b)| a.is_nan() || b.is_nan()) {
+                        faults.push(format!(
+                            "a structure's or its surface's T_s or p_s not a number: {starts:?}"
+                        ));
+                    } else if starts.iter().any(|(a, b)| !a.total_cmp(b).is_eq()) {
+                        faults.push(format!(
+                            "a structure off its surface's conditions: {starts:?}"
+                        ));
                     }
                     let skin = profile.skin_temperature().value();
                     if !(positive(skin) && skin <= t_s) {
@@ -1009,6 +1047,7 @@ impl AuditBody {
 }
 
 /// Whether the `Debug` text `text` holds a NaN or an infinity: a word `NaN`, `inf` or `-inf`.
+#[must_use]
 fn not_finite(text: &str) -> bool {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_'))
         .any(|word| matches!(word, "NaN" | "inf" | "-inf"))
@@ -1131,14 +1170,16 @@ fn assert_hothouses(
     assert_eq!(faults, Vec::<String>::new(), "M1's named hothouses");
 }
 
-/// The audit's MUST-FIX asserts (P14.T54.b.k; design-k §3.1) over design-k §0's set C, every 24
-/// hold in force and the record's rules at their batch: M1 (part 1's runaways, (c)'s hothouse
-/// [`HOTHOUSE_BODY`] alone, decked and above water's saturation temperature), M3 (K4's ceiling),
-/// M4 (part 2's tags), M6 (T56.g's lag), M7 (T51.g.b's invariants, its own floor bound, the ice
-/// III floors by count), M9 (e's young lava), M10 (a tenuous air's aerosols) and M11 (every new
-/// member finite and in range), each failure a `TO MAIN:` line; the walk's time is printed.
+/// The audit's MUST-FIX asserts (P14.T54.b.k; design-k §3.1) over design-k §0's set C
+/// ([`census_sets`]), every 24 hold in force and the record's rules at their batch.
+///
+/// M1 (part 1's runaways, (c)'s hothouse [`HOTHOUSE_BODY`] alone, decked and above water's
+/// saturation temperature), M3 (K4's ceiling), M4 (part 2's tags), M6 (T56.g's lag), M7
+/// (T51.g.b's invariants, its own floor bound, the ice III floors by count), M9 (e's young lava),
+/// M10 (a tenuous air's aerosols) and M11 (every new member finite and in range), each failure a
+/// `TO MAIN:` line ([`assert_must_fix`]); the walk's time is printed.
 #[test]
-fn under_every_24_hold_the_audit_s_must_fix_asserts_hold() {
+fn under_every_24_hold_no_record_shows_a_must_fix_item() {
     let census = census();
     assert!(census.0.len() > 1_500, "{} bodies", census.0.len());
     let what = "the census set (the first 60, the goldens, LOOK72's 30)";
@@ -1150,22 +1191,24 @@ fn under_every_24_hold_the_audit_s_must_fix_asserts_hold() {
     );
 }
 
-/// The same over design-k §0's set A (the 400, the goldens, LOOK72's 30), a measurement for the
-/// bless note; [`DEEPEST_ICE_V_FLOOR`] is stated by name.
+/// The same over design-k §0's set A ([`audit_sets`]: the 400, the goldens, LOOK72's 30), a
+/// measurement for the bless note; [`DEEPEST_ICE_V_FLOOR`] is stated by name.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
-fn under_every_24_hold_the_audit_s_must_fix_asserts_hold_over_the_audit_set() {
+fn under_every_24_hold_no_record_shows_a_must_fix_item_over_the_audit_set() {
     let census = audit_set_census();
     assert!(census.0.len() > 6_000, "{} bodies", census.0.len());
     assert_must_fix("the audit set (the 400, the goldens, LOOK72's 30)", census);
 }
 
 /// M1 over design-k §0's set A, as main rules it (decision-p14-t54b-k-hothouses §3), a measurement
-/// for the bless note: no runaway beyond the maximum-greenhouse limit now or under Venus's deck
-/// below 430 K, every runaway between the limits now (c)'s (its first solve a `Temperate` that (c)
-/// judges a hothouse), and (c)'s hothouses exactly [`AUDIT_SET_HOTHOUSES`]' six with their decks
-/// and their sides of water's saturation temperature: any seventh, a lost one, or a changed deck
-/// or side fails, by name. Its walk is the audit's ([`audit_set_census`]).
+/// for the bless note.
+///
+/// No runaway lies beyond the maximum-greenhouse limit now or under Venus's deck below 430 K,
+/// every runaway between the limits now is (c)'s (its first solve a `Temperate` that (c) judges a
+/// hothouse), and (c)'s hothouses are exactly [`AUDIT_SET_HOTHOUSES`]' six with their decks and
+/// their sides of water's saturation temperature ([`assert_hothouses`]): any seventh, a lost one,
+/// or a changed deck or side fails, by name. Its walk is the audit's ([`audit_set_census`]).
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn under_every_24_hold_m1_s_six_hothouses_hold_over_the_audit_set() {

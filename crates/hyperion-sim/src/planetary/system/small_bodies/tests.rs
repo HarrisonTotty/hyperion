@@ -19,8 +19,7 @@ use crate::planetary::hooks::modifiers::PlanetMagnetosphere;
 use crate::planetary::hooks::small_bodies::{Q_TYPE_WEATHERING_TIME, VENEER_SHARE};
 use crate::planetary::record::{BodyRecord, Section, SystemSnapshot};
 use crate::planetary::system::RecordRules;
-use crate::planetary::system::air::AirRules;
-use crate::planetary::system::tests::{SEED, golden_systems, sample};
+use crate::planetary::system::tests::{SEED, every_record_batch, golden_systems, sample};
 use crate::planetary::testing::with_every_24_hold;
 use crate::planetary::{BodyIndex, SystemContext, generate};
 use crate::time::{ClockWindow, UniverseTime};
@@ -47,16 +46,6 @@ const NESVORNY_FACTOR: f64 = 6.25;
 const INNER_BELT_EDGE_AU: f64 = 2.5;
 /// See [`INNER_BELT_EDGE_AU`].
 const OUTER_BELT_EDGE_AU: f64 = 2.82;
-
-/// The record's rules at 24 for a system generated under [`with_every_24_hold`]: the thread's
-/// (the cold traps' and the small bodies' batches among them), with the air's sections' batch,
-/// which only [`PlanetarySystem::with_record_rules`] reaches, so that the modifiers are modelled.
-fn every_record_batch() -> RecordRules {
-    RecordRules {
-        air: AirRules::Batch,
-        ..RecordRules::in_force()
-    }
-}
 
 /// The modifiers' inputs of an airless body with no field orbiting `primary` on `orbit` about
 /// `ModifierHost::sun()`, the rest as [`reference_inputs`]'s.

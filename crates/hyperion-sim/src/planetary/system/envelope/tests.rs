@@ -632,7 +632,7 @@ fn table_envelope(name: &str) -> (EnvelopeOf, Envelope) {
         internal_luminosity: body.internal_luminosity(),
         age: SOLAR_AGE,
         formation: FormationZone::new(Metres::new(a * METRES_PER_AU), solar_disc().snow_line())
-            .ok(),
+            .map_err(DeriveEnvelopeError::FormationZone),
         fe_h: Dex::ZERO,
         alpha_fe: Some(Dex::ZERO),
         host: HostAbundances::protosolar(),

@@ -58,8 +58,8 @@ use crate::surface::ClimateModelDto;
 /// insolation's but for part 1 (c)'s hothouse, both limits read at the hosts' luminosities now,
 /// and only the water's loss, with its oxygen and the carbon left airborne, reads the largest past
 /// luminosity: a world inside the runaway limit at its hosts' peak alone is `Temperate` or
-/// `Snowball` with its water lost, and a dry world between the limits too hot for liquid water at
-/// its surface pressure is `RunawayGreenhouse`.
+/// `Snowball` with its water lost, and a dry world between the limits whose surface would, without
+/// Venus's deck, be too hot for liquid water at its surface pressure is `RunawayGreenhouse`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -81,18 +81,20 @@ pub enum SurfaceStateDto {
     /// cloud's. Only the water's loss, with its oxygen and the carbon left airborne, reads the
     /// hosts' largest past luminosity. From 24 it is also a world between the limits now that
     /// stores no carbon for want of water and holds no liquid water, its mean surface temperature
-    /// at or above water's saturation temperature at its surface pressure (647.096 K at or above
-    /// 22.064 megapascals; not judged below 611.657 Pa): a desiccated hothouse, Venus's state,
-    /// whatever its present insolation, with Venus's deck where the air beneath can cycle it
-    /// (P14.T53.b part 1 (c)).
+    /// without Venus's deck at or above water's saturation temperature at its surface pressure
+    /// (647.096 K at or above 22.064 megapascals; not judged below 611.657 Pa): a desiccated
+    /// hothouse, Venus's state, whatever its present insolation, with Venus's deck where the air
+    /// beneath can cycle it (P14.T53.b part 1 (c)). Under the deck a runaway's mean surface
+    /// temperature can lie below water's saturation temperature at its surface pressure, with no
+    /// water to condense.
     RunawayGreenhouse,
     /// Between the runaway limit and the maximum-greenhouse limit now, as on Earth and Mars. Below
     /// generator version 24 the runaway limit is read at the hosts' largest past luminosity; from
     /// 24 now, so that a world inside it at its hosts' peak alone is `Temperate` here, its water
     /// lost and its carbon airborne (P14.T53.b part 1). A world here can be ice-covered, on the
     /// cold side of the ice-albedo bistability (decision-pre-23-review item 26). From 24 a dry
-    /// world here too hot for liquid water at its surface pressure is sent as `runaway_greenhouse`
-    /// instead (P14.T53.b part 1 (c)).
+    /// world here whose surface would, without Venus's deck, be too hot for liquid water at its
+    /// surface pressure is sent as `runaway_greenhouse` instead (P14.T53.b part 1 (c)).
     Temperate,
     /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
     /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. From generator

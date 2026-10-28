@@ -124,7 +124,7 @@ pub fn envelope_by_hand(inputs: &EnvelopeByHand) -> Result<Envelope, DeriveEnvel
         equilibrium_temperature: inputs.equilibrium_temperature,
         internal_luminosity: inputs.internal_luminosity,
         age: inputs.age,
-        formation: Some(formation),
+        formation: Ok(formation),
         fe_h: inputs.fe_h,
         alpha_fe: Some(inputs.alpha_fe),
         host: inputs.host,

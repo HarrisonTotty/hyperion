@@ -8007,13 +8007,22 @@ const DARK_THICK_AIRS: [&str; 13] = [
     "wide_binary 0600",
 ];
 
-/// P14.T24.h.a's second test (decision-p14-t54a-passes §G3.5): §G3.3's 13 dark thick airs of the
-/// golden systems ([`DARK_THICK_AIRS`]) each take at least their air's own Rayleigh layer's Bond
-/// albedo under the floor, stated with `p_s` ÷ g against Earth's and the hosts, and `filler_c`
-/// e201's is at least 0.25 under its F8 host (§G3.2's bound, with CH₄ black beyond 0.6 µm). Every
-/// body with a surface of those systems publishes at least its published pass's floor, to the
-/// passes' settling ([`FLOOR_SETTLING`]), and those the area mix alone leaves dark under 1 bar or
-/// more are among the 13.
+/// P14.T24.h.a's second test (decision-p14-t54a-passes §G3.5): the floor lifts §G3.3's 13 dark
+/// thick airs of the golden systems ([`DARK_THICK_AIRS`]) to their own Rayleigh layers.
+///
+/// Each takes at least its air's own Rayleigh layer's Bond albedo under the floor, stated with
+/// `p_s` ÷ g against Earth's and the hosts, and `filler_c` e201's is at least 0.25 under its F8
+/// host (§G3.2's bound, with CH₄ black beyond 0.6 µm). Every body with a surface of those systems
+/// publishes at least its published pass's floor, to the passes' settling ([`FLOOR_SETTLING`]),
+/// but a jump (its solve bracketed past the jump residual or at a context jump,
+/// [`Convergence::is_jump`](crate::planetary::derive::passes::Convergence::is_jump)), which
+/// publishes the lower albedo of its bistable pair (P14.T51.h) and is listed with its floor and its
+/// residual, not asserted, as the sample's census lists it
+/// ([`the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it`]). At 23, the
+/// escape held, no golden body is a jump, so none is exempt; under the escape's batch
+/// `close_binary` 0800 is one, its Bond 0.595062 under its floor 0.611784 by its residual, and
+/// 0900 another, above its floor (main, 2026-10-27). Those the area mix alone leaves dark under
+/// 1 bar or more are among the 13.
 #[test]
 fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
     use std::collections::BTreeMap;
@@ -8042,15 +8051,29 @@ fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
             .flat_map(|(name, ctx, system)| floored_census(name, ctx, system))
             .collect()
     });
-    let mut lifted = Vec::new();
+    let (mut lifted, mut below, mut jumpers) = (Vec::new(), Vec::new(), Vec::new());
     for case in &cases {
-        assert!(
-            case.bond >= case.floor * (1.0 - FLOOR_SETTLING),
-            "{}: Bond {} under its floor {}",
-            case.name,
-            case.bond,
-            case.floor
-        );
+        if case.convergence.is_jump() {
+            // A jump publishes the lower albedo of its bistable pair (P14.T51.h), not a pass's
+            // own: its published pass reads the floor at that albedo, and its output is the
+            // other end. Listed, with its floor and its residual, not asserted.
+            jumpers.push(format!(
+                "{}: {} {:?}, p_s {:.4} bar, T_s {:.2} K, Bond {:.6} (floor {:.6}), {:?}",
+                case.name,
+                case.kind,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.surface_temperature.value(),
+                case.bond,
+                case.floor,
+                case.convergence
+            ));
+        } else if case.bond < case.floor * (1.0 - FLOOR_SETTLING) {
+            below.push(format!(
+                "{}: {:?}: Bond {} under its floor {}",
+                case.name, case.convergence, case.bond, case.floor
+            ));
+        }
         if !DARK_THICK_AIRS.contains(&case.name.as_str()) {
             continue;
         }
@@ -8081,10 +8104,14 @@ fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
         }
     }
     eprintln!(
-        "§G3.3's dark thick airs under the floor ({} bodies with a surface):\n  {}",
+        "§G3.3's dark thick airs under the floor ({} bodies with a surface):\n  {}\nthe jumps, \
+         exempt from the floor: {}\n  {}",
         cases.len(),
-        lifted.join("\n  ")
+        lifted.join("\n  "),
+        jumpers.len(),
+        jumpers.join("\n  ")
     );
+    assert_eq!(below, Vec::<String>::new(), "bodies under their floor");
     assert_eq!(lifted.len(), DARK_THICK_AIRS.len(), "{lifted:#?}");
 }
 
@@ -10730,7 +10757,7 @@ pub(super) fn look72_galaxy() -> &'static crate::galaxy::Galaxy {
 }
 
 /// The contexts of the systems of [`LOOK72_TRIAGED`]'s bodies, each once, in ID order.
-pub(super) fn look72_triaged_contexts() -> Vec<SystemContext> {
+fn look72_triaged_contexts() -> Vec<SystemContext> {
     let galaxy = look72_galaxy();
     let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
         .iter()
@@ -13798,34 +13825,34 @@ fn supercritical_methane_context() -> &'static SystemContext {
 /// against its critical isochore under its bulk's gravity (P14.T53.b part 2).
 pub(super) struct EnvelopeBody {
     /// Its set ("sample", the golden system's name, or "look72"), its ID and its kind.
-    pub(super) label: String,
+    label: String,
     /// Its ID, as its record gives it.
-    pub(super) id: String,
+    id: String,
     /// Its bulk's class.
-    pub(super) class: PlanetClass,
+    class: PlanetClass,
     /// Its record's surface section's tag.
-    pub(super) surface: SectionState,
+    surface: SectionState,
     /// Its record's envelope section's tag.
-    pub(super) envelope: SectionState,
+    envelope: SectionState,
     /// Its derivation's surface state.
-    pub(super) state: SurfaceState,
+    state: SurfaceState,
     /// The state its derivation publishes, a steam envelope's label included (P14.T53.b part 3).
-    pub(super) published: SurfaceState,
+    published: SurfaceState,
     /// Its atmosphere's mean surface temperature, K.
-    pub(super) t_s: f64,
+    t_s: f64,
     /// Its atmosphere's surface pressure, Pa.
-    pub(super) p_s: f64,
+    p_s: f64,
     /// Its bulk's surface gravity, m s⁻².
-    pub(super) g: f64,
+    g: f64,
     /// Its condensables at or above their critical temperatures, whatever their shares.
-    pub(super) columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
     /// The reservoir that hides its surface, as the record reads it.
     pub(super) hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
     /// Under P14.T53.b part 3, its partition's reservoir with the most liquid-like fluid under its
     /// bulk's gravity, whatever its share: the one the record reads.
-    pub(super) partitioned: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    partitioned: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
     /// Whether part 3 was in force as it was derived.
-    pub(super) part_three: bool,
+    part_three: bool,
 }
 
 impl EnvelopeBody {
@@ -13879,7 +13906,7 @@ impl EnvelopeBody {
     }
 
     /// Its tags, state, `T_s`, `p_s`, g and columns, for a census line.
-    pub(super) fn line(&self) -> String {
+    fn line(&self) -> String {
         format!(
             "{:?} {:?} (published {:?}), T_s {:.3} K, p_s {:.4e} bar, g {:.4} m s⁻²; surface {:?}, \
              envelope {:?}; partition's {}; [{}]",
@@ -14043,18 +14070,20 @@ fn assert_envelope_tags(body: &EnvelopeBody) {
     );
 }
 
-/// P14.T53.b part 2's and part 3's tags on `body`, whose record was built under the air's sections'
-/// rules `air`, each that fails as a line by name: a solid class has its surface `Ok` and its
-/// envelope not applicable exactly where no supercritical envelope hides its surface and its
-/// published state is no steam envelope (part 3's label, the section's whatever the bulk's
-/// gravity), and its surface not applicable and its envelope not modelled where either holds;
-/// every other class its surface not applicable and its envelope not modelled under
-/// [`AirRules::Held`], and `Ok` or not modelled under [`AirRules::Batch`] (P14.T54.b.i's envelope,
-/// `system::envelope`'s tests; a supercritical envelope's section stays not modelled at 24,
-/// decision-p14-t53b-part3 §5). So no `Ok` surface lies under a supercritical envelope, and exactly
-/// one of the two applies. No derivation's own state is a steam envelope; a hidden surface's
-/// reservoir hides it, and its share is, to the bit, the air's largest column's under part 2 alone
-/// and the partition's reservoir's under part 3.
+/// The faults of P14.T53.b part 2's and part 3's tags on `body` ([`EnvelopeBody`]), whose record
+/// was built under the air's sections' rules `air`, each a line by name.
+///
+/// A solid class has its surface `Ok` and its envelope not applicable exactly where no
+/// supercritical envelope hides its surface and its published state is no steam envelope (part 3's
+/// label, the section's whatever the bulk's gravity), and its surface not applicable and its
+/// envelope not modelled where either holds; every other class its surface not applicable and its
+/// envelope not modelled under [`AirRules::Held`], and `Ok` or not modelled under
+/// [`AirRules::Batch`] (P14.T54.b.i's envelope, `system::envelope`'s tests; a supercritical
+/// envelope's section stays not modelled at 24, decision-p14-t53b-part3 §5). So no `Ok` surface
+/// lies under a supercritical envelope, and exactly one of the two applies. No derivation's own
+/// state is a steam envelope; a hidden surface's reservoir hides it, and its share is, to the bit,
+/// the air's largest column's under part 2 alone and the partition's reservoir's under part 3.
+#[must_use]
 pub(super) fn envelope_tag_faults(body: &EnvelopeBody, air: AirRules) -> Vec<String> {
     let at = || format!("{}: {}", body.label, body.line());
     let mut faults = Vec::new();

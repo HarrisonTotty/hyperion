@@ -13,7 +13,7 @@
  * insolation's but for part 1 (c)'s hothouse, both limits read at the hosts' luminosities now,
  * and only the water's loss, with its oxygen and the carbon left airborne, reads the largest past
  * luminosity: a world inside the runaway limit at its hosts' peak alone is `Temperate` or
- * `Snowball` with its water lost, and a dry world between the limits too hot for liquid water at
- * its surface pressure is `RunawayGreenhouse`.
+ * `Snowball` with its water lost, and a dry world between the limits whose surface would, without
+ * Venus's deck, be too hot for liquid water at its surface pressure is `RunawayGreenhouse`.
  */
 export type SurfaceStateDto = "magma_ocean" | "airless" | "runaway_greenhouse" | "temperate" | "snowball" | "steam_envelope" | "tenuous";

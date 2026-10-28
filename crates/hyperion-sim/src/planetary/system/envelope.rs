@@ -56,8 +56,10 @@ pub(crate) struct EnvelopeOf {
     pub(crate) internal_luminosity: Watts,
     /// Its age at the time.
     pub(crate) age: Years,
-    /// Where it formed in its host's disc, `None` for a host with no disc.
-    pub(crate) formation: Option<FormationZone>,
+    /// Where it formed in its host's disc: [`DeriveEnvelopeError::NoDisc`] for a host with no disc,
+    /// and [`DeriveEnvelopeError::FormationZone`] for a zone refused, a formation distance or snow
+    /// line that is not positive and finite.
+    pub(crate) formation: Result<FormationZone, DeriveEnvelopeError>,
     /// Its host's \[Fe/H\], dex.
     pub(crate) fe_h: Dex,
     /// Its host's \[α/Fe\], dex, `None` for a host with no abundances of its own (ruling 33),
@@ -82,7 +84,8 @@ pub enum DeriveEnvelopeError {
     /// The host has no disc to place the body's formation in.
     NoDisc,
     /// The body's formation zone is not one: a formation distance or snow line that is not
-    /// positive, which only an envelope stated by hand gives (a record's zone is its disc's).
+    /// positive and finite, which a record's zone, a placed body's distance against its disc's
+    /// snow line, never gives.
     FormationZone(BuildFormationZoneError),
     /// P14.T24.d's internal temperature refused its inputs.
     InternalTemperature(DeriveInternalTemperatureError),
@@ -162,7 +165,7 @@ pub(crate) fn envelope_of(
     network: &Network,
 ) -> Result<Envelope, DeriveEnvelopeError> {
     let alpha_fe = of.alpha_fe.ok_or(DeriveEnvelopeError::NoAlphaFe)?;
-    let formation = of.formation.ok_or(DeriveEnvelopeError::NoDisc)?;
+    let formation = of.formation?;
     let internal_temperature =
         envelope_internal_temperature(of.internal_luminosity, of.radius, of.mass, of.age)
             .map_err(DeriveEnvelopeError::InternalTemperature)?;

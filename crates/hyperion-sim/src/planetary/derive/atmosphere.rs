@@ -2042,8 +2042,8 @@ pub const GREENHOUSE_STEPS: u32 = 32;
 /// luminosities now, and only the water's loss, with its oxygen and the carbon left airborne,
 /// reads the largest past luminosity: a world inside the runaway limit at its hosts' peak alone
 /// keeps its water lost under `Temperate` or `Snowball` (its atmosphere's `water_state` gates its
-/// surface water), and a dry world between the limits too hot for liquid water at its surface
-/// pressure is `RunawayGreenhouse`.
+/// surface water), and a dry world between the limits whose surface would, without Venus's deck,
+/// be too hot for liquid water at its surface pressure is `RunawayGreenhouse`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SurfaceState {
     /// A hydrogen and helium envelope of at least 0.1% of the mass: no solid surface (a gas giant,
@@ -2068,21 +2068,23 @@ pub enum SurfaceState {
     ///   it ([`Atmosphere::runaway_deck`]). Only the water's loss, with its oxygen and the carbon
     ///   left airborne, reads the hosts' largest past luminosity.
     /// - From 24 it is also a world between the limits now whose climate's division stores no
-    ///   carbon for want of water, and whose solve holds no liquid water at a mean surface
-    ///   temperature at or above water's saturation temperature at its surface pressure (its
-    ///   critical temperature, 647.096 K, at or above 22.064 MPa; not judged below its
-    ///   triple-point pressure, 611.657 Pa): a desiccated hothouse, Venus's state, whatever its
-    ///   present insolation, solved again under the runaway's branches, Venus's deck among them
-    ///   (P14.T53.b part 1 (c); decision-t53b-arm-c).
+    ///   carbon for want of water, and whose first solve, without Venus's deck, holds no liquid
+    ///   water at a mean surface temperature at or above water's saturation temperature at its
+    ///   surface pressure (its critical temperature, 647.096 K, at or above 22.064 MPa; not judged
+    ///   below its triple-point pressure, 611.657 Pa): a desiccated hothouse, Venus's state,
+    ///   whatever its present insolation, solved again under the runaway's branches, Venus's deck
+    ///   among them, under which its published mean surface temperature can lie below that
+    ///   saturation temperature, with no water to condense (P14.T53.b part 1 (c);
+    ///   decision-t53b-arm-c, decision-p14-t54b-k-hothouses).
     RunawayGreenhouse,
     /// Between the runaway limit and the maximum-greenhouse limit now, as on Earth and Mars.
     ///
     /// To version 23 the runaway limit is read at the hosts' largest past luminosity; from 24 now,
     /// so that a world inside it at its hosts' peak alone is `Temperate` here, its water lost and
     /// its carbon airborne (P14.T53.b part 1). A world here can be ice-covered, on the cold side of
-    /// the ice-albedo bistability (decision-pre-23-review item 26). From 24 a dry world here too
-    /// hot for liquid water at its surface pressure is not: such a world is `RunawayGreenhouse`
-    /// (P14.T53.b part 1 (c)).
+    /// the ice-albedo bistability (decision-pre-23-review item 26). From 24 a dry world here whose
+    /// surface would, without Venus's deck, be too hot for liquid water at its surface pressure is
+    /// not: such a world is `RunawayGreenhouse` (P14.T53.b part 1 (c)).
     Temperate,
     /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
     /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan.

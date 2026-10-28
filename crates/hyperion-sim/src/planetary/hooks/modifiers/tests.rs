@@ -915,10 +915,11 @@ fn scanned_code(text: &str) -> String {
 /// (`system/small_bodies.rs`, behind its own hold, `SmallBodyRules`), and its tests
 /// (decision-p14-t51e-contract §3.7); and P14.T54.b.e's weathered area mix (behind its own hold,
 /// `AreaMixWeathering`): the passes' maturity and deposit (`derive/atmosphere/surface_mix.rs`),
-/// the record's reading of them and the passes' case (`system/modifiers.rs` again) and the tests.
-/// A file may be listed under two holds. **P14.T54.b.l deletes this list** with the tripwire
-/// below.
-const HELD: [(&str, &str); 7] = [
+/// the record's reading of them and the passes' case (`system/modifiers.rs` again) and the tests;
+/// and P14.T54.b.k's audit (`system/audit_tests.rs`), which reads the record's modifiers under the
+/// air's sections' batch. A file may be listed under two holds. **P14.T54.b.l deletes this list**
+/// with the tripwire below.
+const HELD: [(&str, &str); 8] = [
     ("planetary/system/modifiers.rs", "AirRules"),
     ("planetary/system/modifiers/tests.rs", "AirRules"),
     ("planetary/system/small_bodies.rs", "SmallBodyRules"),
@@ -929,6 +930,7 @@ const HELD: [(&str, &str); 7] = [
     ),
     ("planetary/system/modifiers.rs", "AreaMixWeathering"),
     ("planetary/system/modifiers/tests.rs", "AreaMixWeathering"),
+    ("planetary/system/audit_tests.rs", "AirRules"),
 ];
 
 /// Whether the code of `text` as the tripwire scans it ([`scanned_code`]) names `hold`.

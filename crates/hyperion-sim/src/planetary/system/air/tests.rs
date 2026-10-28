@@ -26,7 +26,9 @@ use crate::planetary::hooks::surface::tests::table;
 use crate::planetary::record::{BodyRecord, Section, Surface, SystemSnapshot};
 use crate::planetary::surface::CoarseInputs;
 use crate::planetary::system::RecordRules;
-use crate::planetary::system::tests::{SEED, golden_systems, golden_systems_afresh, sample, whole};
+use crate::planetary::system::tests::{
+    SEED, every_record_batch, golden_systems, golden_systems_afresh, sample, whole,
+};
 use crate::planetary::testing::with_every_24_hold;
 use crate::planetary::{PlanetarySystem, SystemContext, generate};
 use crate::substance::{CondensedPhase, SubstanceId, by_key};
@@ -1182,19 +1184,6 @@ fn tally_liquids(
             let top = structure.temperature_at(mode.profile().top()).value();
             tally.supercooled_tops += usize::from(top < triple);
         }
-    }
-}
-
-/// The record's rules at 24: the cold traps' and the air's sections' batches, which a system takes
-/// with [`PlanetarySystem::with_record_rules`] beside the thread's holds
-/// (`planetary::testing::with_every_24_hold`).
-fn every_record_batch() -> RecordRules {
-    use crate::planetary::hooks::cold_traps::ColdTrapRules;
-
-    RecordRules {
-        cold_traps: ColdTrapRules::Batch,
-        air: AirRules::Batch,
-        ..RecordRules::in_force()
     }
 }
 
