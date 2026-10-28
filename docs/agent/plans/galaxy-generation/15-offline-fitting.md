@@ -994,6 +994,65 @@ one core, so CI never reruns them and relies on the hash, the fingerprint and th
   P06.T19.e moves the production parameters into `kick_rank.toml` (its inputs hash changes with
   them, as it should), bumps the generator version, and either reruns `just fit kick_rank` or
   commits the scratch file after correcting its `manifest:` line.
+- **The production run (2026-10-28, lane `p15-kick-rank`, at version 23, task revision 1; pod,
+  4 vCPU).**
+  - _The run._ `kick_rank.production.toml` as committed, with `--threads 4 --out` to a scratch
+    path: 10⁷ scores, and 10⁶ fresh ones for the header.
+    - Cost: 78 min wall and 5.2 CPU-hours, with a peak RSS of 123 MB. The 10⁵-score pilot (48.5 s)
+      predicted 81 min.
+    - No code change. Plan 06's module already had the per-chunk scorer and the quantile step, so
+      nothing was split.
+    - The file is 10,267 bytes, sha256
+      `c199015563f8bbdc4d38ae6f1b31944a44874bcbe0fef6c56489acae5c8c97f1`.
+    - `inputs-sha256` is `fb1d96b1e3bb438eef561e343ce41924f34d159e5d8ae1bfcdd6617cffbdfda3`.
+      `sim-fingerprint` is `a57a7c1851965ce5954a844309edaa7f0071ba8cf33f6802c26ecfa15e59c15b`,
+      the committed table's.
+  - _Acceptance: passed._ Fresh scores were mapped through the table, with the rank clamped to
+    0.001–0.999 and no truncation. The target is a mean of 5.60 ± 0.01 and σ of 0.68 ± 0.01, with
+    the clamp's analytic σ at 0.6787.
+    - 10⁷ fresh scores (seed `0x0619_b000_0000_0001`): mean **5.5993**, σ **0.6769**.
+    - The header's first 10⁶ of them: 5.5996 and 0.6775.
+    - An independent 10⁶ (seed `…0002`): 5.5989 and 0.6768.
+    - The knots are strictly increasing.
+    - The 10⁷ figures come from a scratch driver. It takes `kick_rank::acceptance`'s moments in one
+      pass, and was checked bit for bit against `acceptance` on 3,000 scores.
+  - _Largest change from the provisional table._
+    - In rank: knot 161, where F_committed(q₁₆₁) − 161/256 = +0.00092 (0.720111 → 0.721610).
+      That is the provisional table's own sampling noise: as a Kolmogorov sup over the 10⁶ scores
+      the tables do not share, λ = 0.97 and p = 0.31.
+    - In value: the ends, which are the sample's extremes (knot 256: 7.490 → 9.075; knot 0:
+      2.1×10⁻⁵ → 2.3×10⁻⁶). The largest interior change is knot 1, +1.6%.
+  - _Fingerprint_ (core and remnant masses, M☉, at median draws and Z = 0.02):
+
+    | M₀ (M☉) | 8    | 10     | 12     | 15     | 20     | 30     | 50      | 100     |
+    | ------- | ---- | ------ | ------ | ------ | ------ | ------ | ------- | ------- |
+    | `M_CO`  | 1.37 | 1.8423 | 2.4086 | 3.3258 | 5.0077 | 6.7477 | 7.9723  | 11.9277 |
+    | `M_rem` | 1.37 | 1.2000 | 1.6043 | 1.4326 | 6.8120 | 8.8772 | 10.4098 | 15.6920 |
+
+    The full-precision values and the task's other probes are in the lane's outbox.
+
+  - _Chunking._ `kick_rank.toml` (10⁶) was run at 4 threads and at 3.
+    - The two files are byte-identical.
+    - Their quantiles are the committed table's bit for bit; that table was made serially by
+      `score_quantiles`.
+    - Of the header, only `since-generator-version` (16 → 23) and the shift figure (0.06227, which
+      was measured against the pre-147.2 table, → 0.00000) differ.
+  - _Deferred finding (2026-10-13 rule; not a blocker): the end bins' linear interpolation compresses
+    the tails._
+    - The top bin runs from knot 255 (4.21) to the sample's maximum (9.08). Fresh ranks above 0.999
+      come once in 10⁷, and K–S D of the fresh ranks stays at about 0.0026 at every n.
+    - That accounts for σ's −0.0018 and the mean's −0.0007 from the clamp's analytic figures,
+      inside ±0.01.
+    - After the rank-rescaled truncation, the top bin is the speeds 962–990 km/s and the bottom
+      bin 33–44 km/s, each 1/256 of ordinary-mode neutron stars.
+    - P06's `ranks_of_fresh_reference_scores_are_uniform` (10⁵ fresh) passes: D = 0.0025, p = 0.55.
+      A fresh-rank K–S test would fail at α = 10⁻³ beyond about 5.7×10⁵ fresh scores, on this table
+      and on the committed one.
+    - Lean: no change. It would be a change to plan 06's 257-knot format, with a bump. (lean,
+      2026-10-28)
+  - _For P06.T19.e._ It re-runs the production parameters at 25 (decision-galaxy-25-train §4). If
+    `hyperion-fit fingerprint kick_rank` still hashes to `a57a7c18…`, the rerun gives these
+    quantiles bit for bit.
 
 ### P15.T6 Displaced-population form table
 
@@ -2079,8 +2138,8 @@ fit-check`; review-changes on this lane's diff.
       `cluster_bh`, `equipartition` and `pulsars` at 15, `kick_rank` at 16, `mge` at 11 and
       `displaced_forms` at 22.
     - T5.a's record. Ruling 147.2 rebuilt the committed table at task revision 1 (P06's
-      "Ruling 147.2, as built"), and no run of `kick_rank.production.toml` is recorded, so the
-      production run is made at revision 1, and P06.T19.e reruns it rather than committing an older
+      "Ruling 147.2, as built"), and the production run is made at revision 1 (recorded
+      2026-10-28; see T5.a's as-built), so P06.T19.e reruns it rather than committing an older
       scratch file.
     - T7.a's record: its research notes are not in the repository, and T7.b's text now stands
       without them.
