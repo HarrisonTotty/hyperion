@@ -1,0 +1,120 @@
+# generator_version = 23
+toy CORE_COLLAPSE: 512 ly cells, 12 candidates expected per cell, entries of 2 member(s)
+cell (0, 50, 0) word = 0xfc080b2800000000
+cell (0, 50, 0) candidates = 12
+  entry 0 = 0xfc080b2800000000
+  entry 1 = 0xfc080b2800000010
+  entry 3 = 0xfc080b2800000030
+  entry 11 = 0xfc080b28000000b0
+cell (0, 50, -1) word = 0xfc080b27f0000000
+cell (0, 50, -1) candidates = 10
+  entry 5 = 0xfc080b27f0000050
+  entry 7 = 0xfc080b27f0000070
+cell (-1, 50, 0) word = 0xfc07fb2800000000
+cell (-1, 50, 0) candidates = 13
+  entry 1 = 0xfc07fb2800000010
+  entry 6 = 0xfc07fb2800000060
+  entry 12 = 0xfc07fb28000000c0
+cell (3, -60, 1) word = 0xfc08344810000000
+cell (3, -60, 1) candidates = 7
+  entry 5 = 0xfc08344810000050
+cell (-128, -128, -128) word = 0xfc00000000000000
+cell (-128, -128, -128) candidates = 19
+  entry 4 = 0xfc00000000000040
+  entry 6 = 0xfc00000000000060
+  entry 7 = 0xfc00000000000070
+  entry 15 = 0xfc000000000000f0
+  entry 16 = 0xfc00000000000100
+  entry 18 = 0xfc00000000000120
+cell (127, 127, 127) word = 0xfc0ffffff0000000
+cell (127, 127, 127) candidates = 8
+  entry 4 = 0xfc0ffffff0000040
+  entry 5 = 0xfc0ffffff0000050
+toy STELLAR_MERGER: 4096 ly cells, 40 candidates expected per cell, entries of 1 member(s)
+cell (0, 6, 0) word = 0xfc280b0800000000
+cell (0, 6, 0) candidates = 41
+  entry 1 = 0xfc280b0800000010
+  entry 3 = 0xfc280b0800000030
+  entry 7 = 0xfc280b0800000070
+  entry 17 = 0xfc280b0800000110
+  entry 30 = 0xfc280b08000001e0
+  entry 32 = 0xfc280b0800000200
+  entry 33 = 0xfc280b0800000210
+  entry 38 = 0xfc280b0800000260
+cell (-1, 6, -1) word = 0xfc278b0780000000
+cell (-1, 6, -1) candidates = 32
+  entry 2 = 0xfc278b0780000020
+  entry 11 = 0xfc278b07800000b0
+  entry 13 = 0xfc278b07800000d0
+  entry 19 = 0xfc278b0780000130
+  entry 27 = 0xfc278b07800001b0
+cell (-16, -16, -16) word = 0xfc20000000000000
+cell (-16, -16, -16) candidates = 37
+  entry 2 = 0xfc20000000000020
+  entry 3 = 0xfc20000000000030
+  entry 14 = 0xfc200000000000e0
+  entry 22 = 0xfc20000000000160
+  entry 25 = 0xfc20000000000190
+  entry 26 = 0xfc200000000001a0
+  entry 30 = 0xfc200000000001e0
+  entry 32 = 0xfc20000000000200
+cell (15, 15, 15) word = 0xfc2f8f8f80000000
+cell (15, 15, 15) candidates = 29
+  entry 1 = 0xfc2f8f8f80000010
+  entry 5 = 0xfc2f8f8f80000050
+  entry 7 = 0xfc2f8f8f80000070
+  entry 10 = 0xfc2f8f8f800000a0
+  entry 16 = 0xfc2f8f8f80000100
+  entry 17 = 0xfc2f8f8f80000110
+  entry 24 = 0xfc2f8f8f80000180
+toy XRAY_BINARY: 512 ly cells, 0.7 candidates expected per cell, entries of 1 member(s)
+cell (0, 50, 0) word = 0xfc580b2800000000
+cell (0, 50, 0) candidates = 2
+cell (1, 50, 0) word = 0xfc581b2800000000
+cell (1, 50, 0) candidates = 1
+  entry 0 = 0xfc581b2800000000
+cell (2, 50, 0) word = 0xfc582b2800000000
+cell (2, 50, 0) candidates = 0
+cell (3, 50, 0) word = 0xfc583b2800000000
+cell (3, 50, 0) candidates = 1
+cell (0, 51, 0) word = 0xfc580b3800000000
+cell (0, 51, 0) candidates = 1
+cell (-5, 20, 3) word = 0xfc57b94830000000
+cell (-5, 20, 3) candidates = 1
+cell (10, -10, -1) word = 0xfc58a767f0000000
+cell (10, -10, -1) candidates = 2
+cell (-128, 127, 0) word = 0xfc500ff800000000
+cell (-128, 127, 0) candidates = 1
+toy ACCRETING_WHITE_DWARF: 512 ly cells, 0 candidates expected per cell, entries of 1 member(s)
+cell (0, 50, 0) word = 0xfc680b2800000000
+cell (0, 50, 0) candidates = 0
+cell (-128, -128, -128) word = 0xfc60000000000000
+cell (-128, -128, -128) candidates = 0
+lookup STELLAR_MERGER, 50 ly about (0, 26000, 20) ly: 20 cells
+  (-2, 6, -1)
+  (-2, 6, 0)
+  (-1, 5, -1)
+  (-1, 5, 0)
+  (-1, 6, -2)
+  (-1, 6, -1)
+  (-1, 6, 0)
+  (-1, 6, 1)
+  (-1, 7, -1)
+  (-1, 7, 0)
+  (0, 5, -1)
+  (0, 5, 0)
+  (0, 6, -2)
+  (0, 6, -1)
+  (0, 6, 0)
+  (0, 6, 1)
+  (0, 7, -1)
+  (0, 7, 0)
+  (1, 6, -1)
+  (1, 6, 0)
+lookup CORE_COLLAPSE, 50 ly about (0, 26000, 20) ly: 2902 cells
+  (-9, 49, -1)
+  (-9, 49, 0)
+  (-9, 49, 1)
+  (8, 51, 1)
+  (8, 52, -1)
+  (8, 52, 0)

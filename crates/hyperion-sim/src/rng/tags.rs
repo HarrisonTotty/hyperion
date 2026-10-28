@@ -895,6 +895,18 @@ domain_tags! {
     /// `ExplosionEnergy::electron_capture_from_uniform` for an electron-capture supernova and
     /// `ExplosionEnergy::iax_from_uniform` for a Type Iax); words 1–7 are reserved.
     SNR_ENERGY: System = "snr.energy";
+
+    // Plan 09, phase 7 (P09.T32): the catalogue-class grid's candidate count, shared by every
+    // class, since a class cell's word carries its class (Design note 23). Each class adds its
+    // candidates' own `System` tags under `class.` in its own task. Appended here, after
+    // P09.T17's `snr.energy`, because the macro's order fixes `ALL`.
+
+    /// A catalogue-class cell's candidate count (P09.T32, `CatalogueClassCell`), opened with
+    /// `ObjectKey::cell(CatalogueCellKey::word())`, the raw ID of the cell's candidate 0 with its
+    /// index and member zeroed: one Poisson draw from word 0, of mean the class's bound × the
+    /// cell's volume (`Stream::poisson`: no word at a mean of 0, one below 10, two per attempt
+    /// from 10).
+    CLASS_CELL: Cell = "class.cell";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1278,6 +1290,11 @@ mod tests {
         assert_eq!(SNR_ENERGY.scope(), crate::rng::TagScope::System);
         assert!(SNR_ENERGY.name().starts_with("snr."));
         assert!(ALL.contains(&SNR_ENERGY));
+        // P09.T32: the class grid's candidate count, one `Cell` tag for every class.
+        assert_eq!(CLASS_CELL.name(), "class.cell");
+        assert_eq!(CLASS_CELL.scope(), crate::rng::TagScope::Cell);
+        assert!(CLASS_CELL.name().starts_with("class."));
+        assert!(ALL.contains(&CLASS_CELL));
     }
 
     #[test]

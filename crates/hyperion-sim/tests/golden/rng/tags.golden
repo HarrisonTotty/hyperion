@@ -198,3 +198,4 @@ system.comet (Event) = 0x202ddc74fefacbe6
 body.storm (Event) = 0xaf34260e90978442
 body.duststorm (Event) = 0x897bfe1cca8063ea
 snr.energy (System) = 0xc77e73f30ba691e8
+class.cell (Cell) = 0xd675c50fb0714e5f
