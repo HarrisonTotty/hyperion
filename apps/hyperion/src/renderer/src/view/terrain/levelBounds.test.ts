@@ -6,12 +6,13 @@
  *
  * @remarks
  * Each world's level table is composed from the fixture as the worker's `level_table` makes it
- * (`crates/hyperion-surface/src/worker.rs`): the cells' lowest and highest elevation, widened by a
- * micrometre and a part in 10¹², plus the most the level's and its parent's contributions can add,
- * stretched to the datum; the stated bound; the largest vertex spacing on the radius. Its σ is the
- * fixture's `sigma_m`, the largest `omitted_rms` over up to 16,384 of the field's cells, the
- * worker's σ over a whole surveyed field but for that sample. Levels past the complete level take
- * its row (bound and σ 0). Each world is a sphere of its radius: the fixture holds no flattening.
+ * (`levelBoundsCounts.ts`' `sampleWorld`, which R10.T4.b's counts read too): the cells' lowest and
+ * highest elevation, widened by a micrometre and a part in 10¹², plus the most the level's and its
+ * parent's contributions can add, stretched to the datum; the stated bound; the largest vertex
+ * spacing on the radius. Its σ is the fixture's `sigma_m`, the largest `omitted_rms` over up to
+ * 16,384 of the field's cells, the worker's σ over a whole surveyed field but for that sample.
+ * Levels past the complete level take its row (bound and σ 0). Each world is a sphere of its
+ * radius: the fixture holds no flattening.
  * No patch is baked, so each box takes its level's subtree range, as an unbaked patch's does,
  * except where a test bakes the boxes flat.
  *
@@ -34,7 +35,7 @@ import {
 import { RECORD_SEED } from "../spike/demandRecord";
 import { DescentProfile, landingSiteOf } from "../spike/descentProfile";
 import { distanceToBoxM, type PatchBounds, patchBounds, relativeBounds } from "./bounds";
-import { vertexDir, vertexSpacing } from "./cube";
+import { vertexDir } from "./cube";
 import { aboveHorizon, frustumOf, horizonCone, inFrustum } from "./cull";
 import fixture from "./fixtures/level-bounds.json" with { type: "json" };
 import type { GroundContact } from "./grounded";
@@ -46,6 +47,7 @@ import {
   SIGMA_MULTIPLE,
   sigmaSurveyOf,
 } from "./levelBounds";
+import { type SampleWorld, sampleWorld } from "./levelBoundsCounts";
 import {
   cornerNeighbours,
   EDGES,
@@ -56,7 +58,6 @@ import {
   patchKeyString,
 } from "./patchKey";
 import {
-  type BodyFigure,
   LEVEL_TABLE_STRIDE,
   levelBoundM,
   type PlanetGeometry,
@@ -109,84 +110,6 @@ const STYLES: ReadonlyArray<Style> = [
     maxPatches: Math.floor(WIREFRAME_TERRAIN_SLOTS / 2),
   },
 ];
-
-type FixtureWorld = (typeof fixture.worlds)[number];
-
-/** A sample world as selection reads it, with T4.a's per-patch counts. */
-interface SampleWorld {
-  readonly name: string;
-  readonly figure: BodyFigure;
-  readonly finestLevel: number;
-  readonly completeLevel: number;
-  readonly table: Float64Array;
-  readonly sigmaM: Float64Array;
-  /**
-   * T4.a's per-patch maximum deviation by level, metres: its `patch_max_over_bound` × ε_n, 0 from
-   * the complete level on, where nothing is omitted.
-   */
-  readonly patchMaxM: Float64Array;
-  /** T4.a's patches sampled over every level, and those whose maximum passed 4σ_body. */
-  readonly patches: number;
-  readonly pastBodySigma: number;
-}
-
-/** The worker's slack on a held elevation, metres: a micrometre and a part in 10¹². */
-function slackM(x: number): number {
-  return 1e-6 + 1e-12 * Math.abs(x);
-}
-
-function sampleWorld(world: FixtureWorld): SampleWorld {
-  const a = world.radius_m;
-  const complete = world.complete_level;
-  const row = (level: number): FixtureWorld["levels"][number] => {
-    const found = world.levels[Math.min(level, complete)];
-    if (found === undefined) {
-      throw new Error(`${world.name} has no level ${String(level)}`);
-    }
-    return found;
-  };
-  const baseLowM = world.elevation_lowest_m - slackM(world.elevation_lowest_m);
-  const baseHighM = world.elevation_highest_m + slackM(world.elevation_highest_m);
-  const table = new Float64Array(LEVEL_TABLE_STRIDE * (MAX_LEVEL + 1));
-  const sigmaM = new Float64Array(LEVEL_SIGMA_LENGTH);
-  for (let level = 0; level <= MAX_LEVEL; level += 1) {
-    const own = row(level);
-    const parent = row(Math.max(0, level - 1));
-    const lowM = Math.min(own.contribution_low_m, parent.contribution_low_m);
-    const highM = Math.max(own.contribution_high_m, parent.contribution_high_m);
-    table.set(
-      [
-        own.bound_m,
-        Math.min(baseLowM + lowM, 0),
-        Math.max(baseHighM + highM, 0),
-        vertexSpacing(a, level).maxM,
-      ],
-      LEVEL_TABLE_STRIDE * level,
-    );
-    sigmaM[level] = own.sigma_m;
-  }
-  let patches = 0;
-  let pastBodySigma = 0;
-  const patchMaxM = new Float64Array(LEVEL_SIGMA_LENGTH);
-  for (const measured of world.measured) {
-    patches += measured.patches;
-    pastBodySigma += measured.patches_over_4sigma_body;
-    if (measured.level < complete) {
-      patchMaxM[measured.level] = measured.patch_max_over_bound * row(measured.level).bound_m;
-    }
-  }
-  return {
-    name: world.name,
-    figure: { equatorialRadiusM: a, polarRadiusM: a, pole: null },
-    finestLevel: world.finest_level,
-    completeLevel: complete,
-    table,
-    sigmaM,
-    patchMaxM,
-    patches,
-    pastBodySigma,
-  };
-}
 
 const WORLDS: ReadonlyArray<SampleWorld> = fixture.worlds.map(sampleWorld);
 
