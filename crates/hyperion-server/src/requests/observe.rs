@@ -11,10 +11,9 @@ use std::sync::Arc;
 use hyperion_protocol::{ObservedDto, RequestError, ResolveSystemRequest, ResponseBody};
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{SystemKind, SystemOrigin, resolve};
-use hyperion_sim::galaxy::query::{QueryMode, SystemHit, epoch_velocity, position_at};
+use hyperion_sim::galaxy::query::{QueryMode, SystemHit};
 use hyperion_sim::observe::{
-    Drift, Observer, StarsCache, TraceMotionError, Trajectory, curvature_error, observe_hit,
-    retarded,
+    Drift, Observer, StarsCache, TraceMotionError, curvature_error, observe_hit, retarded,
 };
 use hyperion_sim::stellar::system::StellarBrief;
 use hyperion_sim::units::LightYears;
@@ -23,7 +22,7 @@ use super::universe::openable_universe;
 use crate::AppState;
 use crate::compute::{CancelToken, JobError, Priority, SystemStarsHandle};
 use crate::convert::{
-    ResolveRequest, observed_dto, resolved_system, unknown_system, untraced_system,
+    ResolveRequest, observed_dto, resolved_system, system_motion, unknown_system, untraced_system,
 };
 
 /// One system by its ID at the request's time: its range row, and in observed mode what the
@@ -62,18 +61,10 @@ pub(crate) async fn resolve_system(
             .map_err(|error| unknown_system(&request.system, error))?;
         let time = wanted.time();
         // A grid system is placed as the range query places it, bit for bit; a feature member moves
-        // on its own line, which plan 08's draw is not. A centre member has no line until plan 09's
-        // P09.T28 builds its orbit, and is refused as `system_summary` refuses it.
-        let (position, velocity) = if let SystemOrigin::Grid(_) = record.origin() {
-            (
-                position_at(&galaxy, &record, time),
-                epoch_velocity(&galaxy, &record),
-            )
-        } else {
-            let line = Drift::of_record(&galaxy, &record)
-                .map_err(|error| untraced_system(&request.system, error))?;
-            (line.position_at(time), line.velocity())
-        };
+        // on its own line, which plan 08's draw is not. A centre member is refused at every time,
+        // as `system_summary` refuses it.
+        let (position, velocity) = system_motion(&galaxy, &record, time)
+            .map_err(|error| untraced_system(&request.system, error))?;
         // The system's own sphere: its hit is at its present position, no distance from the centre.
         let hit = SystemHit::new(record, position, LightYears::ZERO);
         let observed = match wanted.mode() {

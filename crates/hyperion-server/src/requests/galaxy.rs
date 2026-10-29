@@ -16,9 +16,7 @@ use hyperion_protocol::{
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, resolve};
-use hyperion_sim::galaxy::query::{
-    QueryMode, RangeQuery, RangeResult, SystemHit, position_at, range_query,
-};
+use hyperion_sim::galaxy::query::{QueryMode, RangeQuery, RangeResult, SystemHit, range_query};
 use hyperion_sim::observe::{Observer, TraceMotionError};
 use hyperion_sim::time::UniverseTime;
 
@@ -31,7 +29,7 @@ use crate::compute::{
 };
 use crate::convert::{
     ExtinctionMapQuery, ExtinctionQuery, LineEnd, MapRequest, RangeRequest, brief_dto, density_map,
-    extinction_map as extinction_map_answer, extinction_result, galaxy_parameters,
+    extinction_map as extinction_map_answer, extinction_result, galaxy_parameters, system_motion,
     systems_in_range, target_extinction, untraced,
 };
 use crate::limits::BRIEF_CHUNK_ROWS;
@@ -134,12 +132,14 @@ pub(crate) async fn extinction_map(
 /// P07.T10.c).
 ///
 /// All the lines are one interactive pool job's: each system target is resolved by plan 03's
-/// [`resolve`] and placed at the request's time by [`position_at`], as every ID from a client is,
-/// and each line is the [`SharedSightlineCache`](crate::compute::SharedSightlineCache)'s or is
-/// marched in the seed's own gas at a fixed budget of steps, through one noise cache the job owns.
-/// A target whose ID names no system, or one of a kind or layer this generator does not place yet,
-/// is answered `no_such_system`, and the rest are still answered.
-/// The answer is small, so its frame is serialised on the runtime.
+/// [`resolve`] and placed at the request's time by [`system_motion`], by its origin, as every ID
+/// from a client is, and each line is the
+/// [`SharedSightlineCache`](crate::compute::SharedSightlineCache)'s or is marched in the seed's own
+/// gas at a fixed budget of steps, through one noise cache the job owns. A target whose ID names no
+/// system, one of a kind or layer this generator does not place yet, or one `system_motion` cannot
+/// place yet (a member of the galactic centre, at every time, the epoch included) is answered
+/// `no_such_system`, and the rest are still answered. The answer is small, so its frame is
+/// serialised on the runtime.
 ///
 /// # Errors
 ///
@@ -167,7 +167,14 @@ pub(crate) async fn extinction(
                 let end = match *end {
                     LineEnd::Position(position) => position,
                     LineEnd::System(id) => match resolve(&galaxy, id) {
-                        Ok(record) => position_at(&galaxy, &record, wanted.time()),
+                        Ok(record) => match system_motion(&galaxy, &record, wanted.time()) {
+                            Ok((position, _)) => position,
+                            // Nor has a system the server cannot place yet: a centre member,
+                            // refused at every time so that no answer depends on the time.
+                            Err(TraceMotionError::CentreOrbitNotBuilt(_)) => {
+                                return TargetExtinction::NoSuchSystem;
+                            }
+                        },
                         // A kind or layer this generator does not place yet has no position
                         // either, so to a line of sight it is no system at all.
                         Err(

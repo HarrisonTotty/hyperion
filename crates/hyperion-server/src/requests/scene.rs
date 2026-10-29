@@ -8,7 +8,6 @@ use hyperion_protocol::{
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::resolve;
-use hyperion_sim::galaxy::query::position_at;
 use hyperion_sim::id::BodyId;
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use tokio::time::Instant;
@@ -17,7 +16,9 @@ use super::system::bodies_of;
 use super::universe::openable_universe;
 use crate::AppState;
 use crate::compute::{CancelToken, GalaxyKey, GenerateBodiesError, JobError, Priority};
-use crate::convert::{ShipRequest, unknown_frame_body, unknown_frame_system};
+use crate::convert::{
+    ShipRequest, system_motion, unknown_frame_body, unknown_frame_system, untraced_frame_system,
+};
 use crate::scene::{SceneClock, SceneSetting, ShipPosition, ShipStandIn};
 
 /// Sets the universe's ship stand-in and scene clock, and answers the clock as set (Design
@@ -30,11 +31,12 @@ use crate::scene::{SceneClock, SceneSetting, ShipPosition, ShipStandIn};
 ///
 /// Those of [`openable_universe`]; the field checks of [`ShipRequest`] (`bad_request` naming
 /// `time_rate`, `ship.time`, `ship.velocity_m_s` or `ship.position`); for a system frame,
-/// `unknown_system` naming `ship.position` if plan 03's `resolve` refuses the ID, and
-/// `bad_request` if the offset takes the ship out of the galactic frame's range; for a body frame,
-/// `unknown_system` likewise and `unknown_body` if the system holds no such body or the body is not
-/// present at the pose's time; those of the galaxy cache; and `queue_full`, `internal` or
-/// `cancelled` from the pool job that resolves the frame.
+/// `unknown_system` naming `ship.position` if plan 03's `resolve` refuses the ID or the system
+/// cannot be placed yet (a member of the galactic centre, at every time, the epoch included;
+/// P07.T10.c), and `bad_request` if the offset takes the ship out of the galactic frame's range;
+/// for a body frame, `unknown_system` likewise and `unknown_body` if the system holds no such body
+/// or the body is not present at the pose's time; those of the galaxy cache; and `queue_full`,
+/// `internal` or `cancelled` from the pool job that resolves the frame.
 pub(crate) async fn ship(
     state: Arc<AppState>,
     request: SceneShipRequest,
@@ -57,8 +59,9 @@ pub(crate) async fn ship(
     }))
 }
 
-/// Resolves the frame the pose is in, as plan 04 requires of every ID read from a client, and
-/// checks that the pose can be placed in the galactic frame at its time.
+/// Resolves the frame the pose is in, as plan 04 requires of every ID read from a client, places
+/// its system by its origin ([`system_motion`]), and checks that the pose can be placed in the
+/// galactic frame at its time.
 async fn check_frame(
     state: &Arc<AppState>,
     key: GalaxyKey,
@@ -107,11 +110,14 @@ async fn check_frame(
     };
     let galaxy = Arc::clone(galaxy);
     let check = move |_: &CancelToken| {
-        let record = resolve(&galaxy, system).map_err(|error| {
-            let what = body.map_or_else(|| format!("system {:016x}", system.raw()), body_name);
-            unknown_frame_system(&what, error)
-        })?;
-        let barycentre = position_at(&galaxy, &record, t);
+        let what = || body.map_or_else(|| format!("system {:016x}", system.raw()), body_name);
+        let record =
+            resolve(&galaxy, system).map_err(|error| unknown_frame_system(&what(), error))?;
+        // Placed by its origin, as every system named by a client: a feature member on its own
+        // line, and a member of the galactic centre refused at every time, the epoch included, so
+        // that the scene's core can place every frame this accepts at every later time.
+        let (barycentre, _) = system_motion(&galaxy, &record, t)
+            .map_err(|error| untraced_frame_system(&what(), error))?;
         offset
             .to_galactic(&barycentre)
             .map(|_| ())

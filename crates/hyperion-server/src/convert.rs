@@ -8,9 +8,11 @@
 //! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], plan 07's
 //! `extinction_map` and `extinction` in [`extinction`], plan 12's query mode, observed rows and
 //! `resolve_system` in [`observe`], the scene's requests (rendering plan R03) in [`scene`], and the
-//! surface's (rendering plan R09) in [`surface`].
+//! surface's (rendering plan R09) in [`surface`]. Where a system a client names is, by its origin,
+//! is in [`motion`] (P07.T10.c).
 
 mod extinction;
+mod motion;
 mod observe;
 mod planetary;
 mod scene;
@@ -57,6 +59,9 @@ pub(crate) use self::extinction::{
     ExtinctionMapQuery, ExtinctionQuery, LineEnd, extinction_map, extinction_result,
     target_extinction,
 };
+#[cfg(test)]
+pub(crate) use self::motion::origins;
+pub(crate) use self::motion::system_motion;
 pub(crate) use self::observe::{
     ResolveRequest, observed_dto, resolved_system, untraced, untraced_system,
 };
@@ -64,7 +69,9 @@ pub(crate) use self::planetary::{
     BodiesRequest, DetailRequest, ListedBody, body_detail, body_refusal, detail_level,
     hosts_request, scene_body, scene_system, system_bodies,
 };
-pub(crate) use self::scene::{ShipRequest, unknown_frame_body, unknown_frame_system};
+pub(crate) use self::scene::{
+    ShipRequest, unknown_frame_body, unknown_frame_system, untraced_frame_system,
+};
 pub(crate) use self::stellar::{
     SummaryRequest, brief_dto, system_summary, system_summary_observed, unknown_system, wire_time,
 };

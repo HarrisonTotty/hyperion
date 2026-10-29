@@ -2629,3 +2629,72 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
       `Q` pressed on a focused picture already does; `RETRY` takes the focus to the page's tab.
     - The guide's stale state has "the age is available on request"; no stale value on the console
       offers its age (the chart and `SYSTEMS` likewise).
+- **Fixed in P07.T10.c (lane `fix-server-positions`, 2026-10-29, at `GENERATOR_VERSION` 23): a
+  member's ID as a target.** A `{ system }` target naming a catalogue feature's member or a member
+  of the galactic centre (a member of its grid, the black hole or a tidal disruption's victim) was
+  placed by plan 03's `position_at`, which in a galaxy with kinematic tables (every server galaxy)
+  panics for any record but a grid record's away from the epoch (`kinematics::draw`'s
+  `record.component()`): the job panicked, the request answered `internal`, and every other
+  target was lost. `scene_ship` and the scene's core had the same fault (rendering plan R03's
+  Risks, "Fixed in P07.T10.c"). No sim, protocol or golden change; `PROTOCOL_VERSION` stays 3.
+  - _One routing function._ `convert::system_motion(galaxy, record, t)`, in a new
+    `convert/motion.rs`, gives the position and the velocity or a `TraceMotionError`. It is the
+    one place the server places a system it resolved from a client's ID: a grid record by
+    `position_at` and `epoch_velocity` (the range query's bits), a feature member by
+    `observe::Drift::of_record`'s line, and a centre member refused, `CentreOrbitNotBuilt`, at
+    every time. `resolve_system` calls it in place of its own `if let`, with nothing it answers
+    changed. Its doc says that version 25's wiring of the Kepler regime
+    changes the grid arm (P09.T28.b.b's deferred finding (2)).
+  - _A wildcard arm, against the brief's "no `_` arm"._ `SystemOrigin` is `#[non_exhaustive]`
+    and the server is another crate, so its `match` cannot compile without one, and
+    `non_exhaustive_omitted_patterns` is unstable on the pinned 1.99.1. The `_` arm takes
+    `Drift::of_record`'s line, whose own `match` in the sim is exhaustive: an origin the sim adds
+    fails to compile there first, and here is placed on the sim's line for it or refused by its
+    error, never through a grid record's draw. The feature member keeps its own arm, with an
+    `#[expect(clippy::match_same_arms)]` that says why.
+  - _Answers changed._ A centre member's target is `no_such_system` at every time; at the epoch it
+    was a line to the member's epoch position, which for a victim is only formal (all nine of seed
+    0x4d2's were disrupted 43,000–227,000 years before the epoch) and which `resolve_system`
+    already refused. A feature member's target away from the epoch is answered, on its own line.
+    `LineEnd::System`'s doc and the handler's say so.
+  - _The centre's members are not placed here (lean, 2026-10-29)._ The sim could place them
+    (`EpochState::of_centre_member` and its `Trajectory` for a Kepler member and the black hole, a
+    victim's own `TidalDisruptionVictim::state_at`, whose `NoSuchSystem` after the disruption
+    would become "no such system at `t`"), but victims, the black hole and the centre's grid
+    members share `SystemOrigin::CentreMember`, so that arm would dispatch on the ID's slot. That
+    is P09.T37's and P09.T40's (the source's registration and the server's centre cache), which
+    turn the centre arm on in this one function.
+  - _Tests (pod, 4 vCPU, test profile; each in its own nextest process, most of it the galaxy's
+    full potential)._ In `convert/motion.rs`, fast, over a `with_full_potential` galaxy of seed
+    0x4d2 at the epoch, +100 and −999 yr: `a_grid_system_is_placed_as_the_range_query_places_it`
+    (8.2 s), `a_feature_member_moves_on_its_own_line` (8.3 s) and
+    `the_centre_s_members_are_refused_at_every_time` (8.3 s: the first member of
+    `CentrePlacement::peak_candidates`'s band and cell, the black hole and the first victim). The
+    IDs come from the sim at test time, through a `#[cfg(test)]` module `convert::origins` that
+    the scene core's test shares. Over the socket, on one server, a new `tests/system_origins.rs`,
+    `a_client_s_system_is_placed_by_its_origin_in_every_request` (19.0 s), runs four properties:
+    `extinction` with the five IDs as targets of one request at the epoch and +100 yr (the grid
+    target is the sim's line to `position_at`, the feature member's equals a `Position` target at
+    its line's position, the three centre IDs are `no_such_system`, and the next request is
+    answered); and the three `scene_ship` and scene properties of R03's record. `observed.rs`'s
+    `a_feature_member` moved to `tests/common/origins.rs`, beside `the_centre_s_members`, for both
+    files. This supersedes "P07.T10.a–c, as built"'s _T10.c, tests_, which compared the system
+    target at the epoch only so as not to build the full potential in a debug test:
+    `tests/system_origins.rs` builds seed 0x4d2's in the test process, as `tests/observed.rs`
+    already did (4.4 s in the test profile), and compares the grid target at +100 yr too. Run on
+    BASE, split into its four properties, each failed: `extinction` answered the centre's three
+    IDs with lines at the epoch, `scene_ship` accepted a centre frame at the epoch, and the body
+    frame and the scene answered `internal` on the panic at `kinematics/draw.rs:105`.
+  - _Deferred findings (2026-10-13 rule)._ (1) _Cost:_ a feature member is resolved twice on each
+    path, by `resolve` and again inside `Drift::of_record`, each building its feature's interior
+    (14–17 ms by plan 09's record of its cluster table; not re-measured): up to 64 extra builds
+    in one `extinction` job, and in the scene's core up to three a heartbeat for a ship framed on
+    a member (`ship_galactic`, then `drift` and `ship_galactic` again in an arrival's observer). No
+    range row carries a member until P09.T40.a registers the features' source; when member IDs
+    reach the chart, resolve the member once (`resolve_member` and `Drift::of_member`, as
+    `compute/systems.rs` does for the stars) or pass an interior cache. Not a blocker: before the
+    fix those IDs crashed the job. (2) _Wire docs:_ `TargetExtinction::NoSuchSystem` ("names no
+    system of this universe") and `ErrorCode::UnknownSystem` do not say that a system that
+    resolves but cannot be placed yet is answered so too, as `resolve_system` has answered it
+    since P12.T6; widen both at the next protocol change and run `just gen-protocol`. The protocol
+    is unchanged here.

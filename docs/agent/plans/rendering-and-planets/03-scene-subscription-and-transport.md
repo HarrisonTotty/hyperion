@@ -2184,3 +2184,45 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
   64 KiB × 5/4 as 80 KiB, below XNU's 128 KiB start. The off-Linux leg is compiled by cross-clippy
   only, and untested until a macOS or Windows runner exists; R03.T17.b's macOS figures are still
   owed.
+- **Fixed in P07.T10.c (lane `fix-server-positions`, 2026-10-29, at `GENERATOR_VERSION` 23): a
+  member's ID as the ship's frame.** `scene_ship`'s `check_frame` placed the frame's system by plan
+  03's `position_at`, and the core's `ship_galactic` and `drift` by `position_at` and
+  `epoch_velocity`. In a server galaxy, which has kinematic tables, those panic for a catalogue
+  feature's member or a member of the galactic centre: away from the epoch for `position_at`, and
+  at every time for `epoch_velocity`. So a `system` frame on a member, or a `body` frame in a
+  feature member's system, answered `internal` away from the epoch. A frame accepted at the epoch
+  made `subscribe` answer `internal` once the clock ran, and `drift` panicked at the epoch too
+  when the scene's system was a grid system other than the ship's frame (the observer's
+  "elsewhere" branch). All three now place the frame's system through plan 07's
+  `convert::system_motion` (plan 07's Risks, "Fixed in P07.T10.c"), by its origin.
+  - _`scene_ship`._ A `system` frame and a `body` frame both place their system through it. A
+    refusal is `unknown_system` naming `ship.position`, through a new `untraced_frame_system`
+    beside `unknown_frame_system` in `convert/scene.rs`, worded as `untraced_system` words
+    `resolve_system`'s ("… cannot be placed yet: …"). A centre member is refused at every time,
+    the epoch included, where it was accepted before; a feature member's frame is placed on its
+    line at every time. `bodies_of` still refuses the centre's members first for a body frame.
+  - _The core._ `ship_galactic` and `drift` call it too. `drift` now takes the time as a third
+    argument, which the function needs and which the 25 wiring will read. Their `expect`s
+    are now real invariants, said in each message and in a `# Panics` section: the scene's
+    setting lives only in memory and is set only by `scene_ship` (`SceneService::set`), which
+    refuses every frame the function refuses, and the refusal does not depend on the time.
+  - _Tests (pod, 4 vCPU, test profile)._ `scene::core`'s
+    `a_ship_framed_on_a_feature_member_rides_the_member_s_line` (8.5 s, fast): in the seed's
+    `with_full_potential` galaxy, `ship_galactic` puts a ship framed on a feature member at its
+    line's position plus the offset, bit for bit, and `drift` is the line's velocity, at the
+    epoch, +100 and −999 yr. Over the socket, in `tests/system_origins.rs`'s shared server (19.0 s
+    with `extinction`'s property): a `system` frame on the grid system and the feature member is
+    accepted at the epoch and +100 yr, and on each centre ID is `unknown_system` naming
+    `ship.position`; a `body` frame on the feature member's first body at +100 yr is accepted;
+    and a ship framed on the feature member at the epoch, offset to 1 au from the grid system,
+    with `time_rate` 100,000, subscribes, is in the grid system, and takes two advances with no
+    `subscription_ended`, the clock moving on.
+  - _The scene property's placement, as tested (against the brief's "its ship where the member's
+    line plus the offset puts it")._ The wire carries no galactic position for the ship, so over
+    the socket the scene's arrival in the grid system shows only that the ship lies inside that
+    system's entry sphere (0.9 of a tidal radius of over 10¹⁵ m): placed from the member, not
+    grossly misplaced. Over the seconds before `subscribe` the member's line and its epoch
+    position differ by under an au, which that cannot tell apart. The arrival's observer does go
+    through `drift` on the member (the "elsewhere" branch, which panicked at BASE), but its
+    value is not read there. The bit-for-bit placement and the drift's value are the core's unit
+    test above.

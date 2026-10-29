@@ -35,7 +35,7 @@ use hyperion_sim::coords::{
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::frame::{candidate_at, frame_at};
 use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
-use hyperion_sim::galaxy::query::{epoch_velocity, position_at};
+use hyperion_sim::galaxy::query::position_at;
 use hyperion_sim::id::{BodyId, SystemId};
 use hyperion_sim::observe::{BodyTrack, SystemObserver, retarded_in_system};
 use hyperion_sim::planetary::BodyIndex;
@@ -47,7 +47,8 @@ use super::sensing::{CraftState, SceneKnowledge};
 use super::{ClockReading, Ship, ShipPosition};
 use crate::compute::{GalaxyKey, GeneratedSystem, SharedCellCache, SharedSystemCache};
 use crate::convert::{
-    BodiesRequest, ListedBody, scene_body, scene_system, system_place, system_summary, wire_time,
+    BodiesRequest, ListedBody, scene_body, scene_system, system_motion, system_place,
+    system_summary, wire_time,
 };
 use crate::limits::MAX_SCENE_CAMERAS;
 
@@ -613,7 +614,17 @@ fn select<'w>(
     }))
 }
 
-/// Where the ship is at `t` in the galactic frame.
+/// Where the ship is at `t` in the galactic frame: its frame's system placed by its origin
+/// ([`system_motion`]), and its offset from there.
+///
+/// # Panics
+///
+/// If the ship's frame names a system that does not resolve or that `system_motion` cannot place,
+/// or its offset takes the ship out of the galactic frame's range; none can. The scene's setting
+/// lives only in memory and is set only by `scene_ship` ([`SceneService::set`]), which refuses
+/// every such frame at the pose's time, and `system_motion`'s refusal does not depend on the time.
+///
+/// [`SceneService::set`]: super::SceneService::set
 fn ship_galactic(
     world: &SceneWorld<'_>,
     position: ShipPosition,
@@ -628,8 +639,11 @@ fn ship_galactic(
         }
     };
     let record = resolve(world.galaxy, system).expect("scene_ship resolved the ship's frame");
+    let (barycentre, _) = system_motion(world.galaxy, &record, t).expect(
+        "scene_ship placed the ship's frame, and a system it places is placed at every time",
+    );
     Ok(offset
-        .to_galactic(&position_at(world.galaxy, &record, t))
+        .to_galactic(&barycentre)
         .expect("scene_ship placed the ship in the root cube, which drift cannot leave the range"))
 }
 
@@ -668,28 +682,40 @@ fn observer(
             // added, and this system's drift taken away.
             let frame_velocity = match elsewhere {
                 ShipPosition::Galactic(_) => SystemVelocity::ZERO,
-                ShipPosition::System { system, .. } => drift(world.galaxy, system),
+                ShipPosition::System { system, .. } => drift(world.galaxy, system, t),
                 ShipPosition::Body { body, .. } => {
                     let (_, moving) = body_state(world.system(body.system())?, body, t);
-                    drift(world.galaxy, body.system()) + moving
+                    drift(world.galaxy, body.system(), t) + moving
                 }
             };
             let galactic = ship_galactic(world, elsewhere, t)?;
             let barycentre = position_at(world.galaxy, record, t);
             (
                 SystemPosition::from_galactic(&galactic, &barycentre),
-                velocity + frame_velocity - drift(world.galaxy, record.id()),
+                velocity + frame_velocity - drift(world.galaxy, record.id(), t),
             )
         }
     };
     Ok(SystemObserver::new(position, velocity, t).ok())
 }
 
-/// A system's drift through the galaxy, m/s along the galactic axes (plan 08's epoch velocity).
+/// A system's drift through the galaxy at `t`, m/s along the galactic axes: its velocity by its
+/// origin ([`system_motion`]), plan 08's epoch velocity for a grid system and a feature member's
+/// own for a member.
+///
+/// # Panics
+///
+/// If `system` does not resolve or `system_motion` cannot place it; neither can happen. The
+/// scene's own system is a grid system that `frame_at` names, and the ship's frame one that
+/// `scene_ship` placed, as [`ship_galactic`] says.
 #[must_use]
-fn drift(galaxy: &Galaxy, system: SystemId) -> SystemVelocity {
+fn drift(galaxy: &Galaxy, system: SystemId, t: UniverseTime) -> SystemVelocity {
     let record = resolve(galaxy, system).expect("the scene's systems resolve");
-    SystemVelocity::new(epoch_velocity(galaxy, &record).metres_per_second())
+    let (_, velocity) = system_motion(galaxy, &record, t).expect(
+        "the scene's system is a grid system frame_at names, and the ship's frame one scene_ship \
+         placed, which is placed at every time",
+    );
+    SystemVelocity::new(velocity.metres_per_second())
 }
 
 /// Where the ship sees body `index`: its apparent position, light time and aberration together,
@@ -834,14 +860,16 @@ mod tests {
     use hyperion_sim::GENERATOR_VERSION;
     use hyperion_sim::coords::GalacticDisplacement;
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    use hyperion_sim::galaxy::query::epoch_velocity;
     use hyperion_sim::id::Layer;
+    use hyperion_sim::observe::{Drift, Trajectory};
     use hyperion_sim::planetary::record::BodyRecord;
     use hyperion_sim::planetary::{SystemContext, generate};
     use hyperion_sim::time::Span;
     use tokio::time::Instant;
 
     use super::*;
-    use crate::convert::system_bodies;
+    use crate::convert::{origins, system_bodies};
     use crate::scene::sensing::GrantAsked;
     use crate::scene::{SceneClock, ShipStandIn, TimeRate};
     use crate::subscriptions::{Merge, ScenePush};
@@ -1770,6 +1798,52 @@ mod tests {
             system_of(&state).system.hosts.system.to_u64(),
             fixture.id().raw()
         );
+    }
+
+    /// In the galaxy the server builds, whose kinematic tables plan 03's `position_at` and plan
+    /// 08's draw panic on for a member, a ship framed on a feature member is placed on the
+    /// member's own line, its offset from there, and drifts with it, away from the epoch
+    /// (P07.T10.c).
+    #[test]
+    fn a_ship_framed_on_a_feature_member_rides_the_member_s_line() {
+        let galaxy = origins::galaxy();
+        let member = origins::a_feature_member();
+        let line = Drift::of_record(galaxy, &member).unwrap();
+        let (universe, systems) = (UniverseIdHex::from_u64(1), BTreeMap::new());
+        let (cells, stars) = (
+            SharedCellCache::new(64 << 20),
+            SharedSystemCache::new(64 << 20),
+        );
+        let world = SceneWorld {
+            universe: &universe,
+            galaxy,
+            key: GalaxyKey::new(origins::SEED, GENERATOR_VERSION),
+            cells: &cells,
+            stars: &stars,
+            systems: &systems,
+        };
+        let offset = SystemPosition::new([1.496e11, -2.0e10, 3.0e9]);
+        let framed = ShipPosition::System {
+            system: member.id(),
+            offset,
+        };
+        for years in [0, 100, -999] {
+            let t = UniverseTime::from_julian_years(years).unwrap();
+            let ship = ship_galactic(&world, framed, t).unwrap();
+            let expected = offset.to_galactic(&line.position_at(t)).unwrap();
+            assert_eq!(
+                (ship.cell(), ship.offset_metres().map(f64::to_bits)),
+                (expected.cell(), expected.offset_metres().map(f64::to_bits)),
+                "{t}"
+            );
+            assert_eq!(
+                drift(galaxy, member.id(), t)
+                    .metres_per_second()
+                    .map(f64::to_bits),
+                line.velocity().metres_per_second().map(f64::to_bits),
+                "{t}"
+            );
+        }
     }
 
     fn camera(view: u8, position: FramePositionDto) -> CameraReportDto {

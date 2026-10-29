@@ -8,6 +8,7 @@ mod common;
 use std::num::NonZeroU32;
 use std::sync::OnceLock;
 
+use common::origins::a_feature_member;
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
     ErrorCode, GalacticPosition, MassLayer, ObjectKindDto, ObservedDto, QueryModeDto, RequestBody,
@@ -517,28 +518,6 @@ async fn the_central_black_hole_is_refused_until_its_orbit_is_built() {
 
     client.close().await;
     server.stop().await;
-}
-
-/// A member of band C of the first feature with members within 3,000 ly of the Sun-like point.
-fn a_feature_member(galaxy: &Galaxy) -> hyperion_sim::galaxy::features::members::MemberRecord {
-    use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
-    use hyperion_sim::galaxy::features::members::FeatureInterior;
-    use hyperion_sim::galaxy::imf::MassBand;
-
-    let sun = hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 0.0])
-        .expect("in the root cube");
-    let interior = FeatureCatalogue::near(galaxy, &sun, LightYears::new(3_000.0), &NoFeatureCache)
-        .find_map(|feature| FeatureInterior::of(galaxy, &feature))
-        .expect("a feature with members lies within 3,000 ly of the Sun");
-    let mut members = Vec::new();
-    interior
-        .grid()
-        .owned_cells()
-        .find_map(|cell| {
-            interior.members_in_cell(galaxy, MassBand::C, cell, &mut members);
-            members.first().map(|(member, _)| *member)
-        })
-        .expect("the feature has a member in band C")
 }
 
 /// A catalogue feature's member resolves on its own line, its cluster's motion and its own, not

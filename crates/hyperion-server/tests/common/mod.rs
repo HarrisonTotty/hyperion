@@ -6,6 +6,7 @@
     reason = "each test binary compiles this module and uses its own subset of the helpers"
 )]
 
+pub mod origins;
 pub mod process;
 pub mod scene;
 pub mod surface;

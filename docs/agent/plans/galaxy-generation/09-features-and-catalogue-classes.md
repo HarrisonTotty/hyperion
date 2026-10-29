@@ -3946,7 +3946,13 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     request (`requests/galaxy.rs`, `LineEnd::System`) resolves any ID and calls `position_at`, so a
     feature or centre member's ID away from the epoch panics in its job; `resolve_system` already
     dispatches on the origin. Lean: route it through the origin as `resolve_system` does, a fix of
-    its own outside this hold.
+    its own outside this hold. _Closed by P07.T10.c (lane `fix-server-positions`, 2026-10-29;
+    plan 07's Risks, "Fixed in P07.T10.c"):_ the crash had three paths, `extinction`,
+    `scene_ship` and the scene's core, and each now places a client's ID through one function,
+    `convert::system_motion`, by its origin, as `resolve_system` now does too: the centre's
+    members are refused at every time until P09.T37 and P09.T40 place them. Deferred finding (2)
+    below then reads, for a client's ID, that function's grid arm alone (`requests/observe.rs` and
+    `scene/core.rs` call it), with `convert.rs`'s `system_place` and range rows for the grid.
   - _The carve-out, where `resolve` and the walk both see it (lean, 2026-10-29)._ The task text
     names `resolve` alone. The carve-out sits in the candidate evaluation that `generate_cell` and
     `resolve` share, after the catalogue hook, as a new `CandidateOutcome::InLossCone`, so that a

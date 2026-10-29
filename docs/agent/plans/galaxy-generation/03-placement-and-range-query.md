@@ -1095,6 +1095,17 @@ Reserved so that later plans move no star they need not:
   its `MemberRecord` carries. Nothing calls it for a member yet. Plan 12 moves every record through
   `observe::Drift::of_record`, which resolves the member; whoever next wires members into the drift
   hook (plan 08's P08.T12.d or plan 09's P09.T28.b) should make the hook dispatch on the origin.
+  - _As built in the server (P07.T10.c, lane `fix-server-positions`, 2026-10-29, at
+    `GENERATOR_VERSION` 23)._ Three server paths did call it for a member, each with a client's
+    ID: `extinction`'s system targets, `scene_ship`'s frame, and the scene core's `ship_galactic`
+    and `drift` (the latter through `epoch_velocity`, which panics at every time). Each answered
+    `internal` for a feature member's or a centre member's ID away from the epoch, and `drift` at
+    the epoch too. The server now places every system it resolves from a client's ID in one
+    function, `convert::system_motion`, by `record.origin()`: a grid record by `position_at` and
+    `epoch_velocity`, a feature member by `Drift::of_record`, and a centre member refused at every
+    time (`TraceMotionError::CentreOrbitNotBuilt`); `resolve_system` takes it too. `position_at`'s
+    documented panic stays, and so do `system_place` and the range rows, which read grid records
+    alone. See plan 07's Risks, "Fixed in P07.T10.c".
 - **T11's long-range pin re-measured (lane `perf08`, 2026-09-29, at `GENERATOR_VERSION` 15).**
   `benches/range_query.rs`'s `long_range` asserted 41,925 systems and stopped before measuring,
   since nothing in CI runs the benches. At version 15 the query walks **37,675 systems (29,424 in
