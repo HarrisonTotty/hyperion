@@ -839,9 +839,11 @@ impl Engine {
     /// (P11.T4.k, ruling p11-t4k-faults of 2026-10-06, finding C: before it the contact ran to its
     /// coalescence past the pin, and the merger's product died at its own later age). The pin is
     /// acted on ([`Engine::pinned_collapse`]) where it lies before the pair's age; otherwise the
-    /// pair is left in contact, as a contact outlasting the age is. A primary the binary keeps on
-    /// its main sequence then explodes from it at plan 06's age (design note 16, a departure
-    /// recorded in plan 11's Risks).
+    /// pair is left in contact, as a contact outlasting the age is. The pinned primary's own
+    /// main-sequence end stops the knots the same way, before the pin (P11.T4.n): a primary the
+    /// binary keeps on its main sequence leaves it there, and the pair coalesces
+    /// ([`Engine::end_pinned_main_sequence`]). So no pinned primary in contact meets its pin there
+    /// now; before T4.n it exploded from its main sequence at plan 06's age.
     pub(super) fn contact_phase(&mut self) {
         let end = if self.contact_until.is_finite() {
             self.contact_until
@@ -854,9 +856,17 @@ impl Engine {
             .pin
             .map(|pin| pin.death.age().value())
             .filter(|&at| at > start && at <= end);
+        // The pinned primary's own main sequence's end stops the knots as the pin does, before it
+        // (P11.T4.n): the contact coalesces there (`Engine::end_pinned_main_sequence`).
+        let (m0, tau0) = self.current(0);
+        let phase = self.structure(0, start, m0, tau0).map(|s| s.state.phase());
+        let own_end = self
+            .own_main_sequence_end_after(start, phase)
+            .filter(|&at| at <= end);
         for k in 1..=steps {
             let age = start + (end - start) * f64::from(k) / f64::from(steps);
             let age = pin.map_or(age, |at| age.min(at));
+            let age = own_end.map_or(age, |at| age.min(at));
             for i in 0..2 {
                 let (m, tau) = self.current(i);
                 let tau = match &self.members[i] {
@@ -878,6 +888,12 @@ impl Engine {
                 orbit.set(age, a, e);
             }
             self.age = age;
+            if own_end.is_some_and(|at| age >= at) {
+                if age < self.until {
+                    self.end_pinned_main_sequence();
+                }
+                return;
+            }
             if pin.is_some_and(|at| age >= at) {
                 if age < self.until {
                     self.contact_until = 0.0;

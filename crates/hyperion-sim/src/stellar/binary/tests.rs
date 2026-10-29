@@ -584,7 +584,12 @@ fn check_no_repeated_instants(timeline: &BinaryTimeline, what: &impl Fn() -> Str
 /// Checks P11.T4's invariants on the timeline of `input`: inside every segment the state is
 /// continuous (no jump above 1% between samples 10⁻⁶ of the segment apart); no main-sequence star
 /// is older than its effective lifetime; the pair's total mass never rises; the timeline never
-/// reaches the cap on segments; no detached segment widens the orbit past its mass loss.
+/// reaches the cap on segments; no detached segment widens the orbit past its mass loss; no
+/// pinned primary collapses from its hydrogen main sequence ([`check_no_main_sequence_collapse`]).
+///
+/// The continuity's events are each a segment's edge: a change of kind, a change of phase, a
+/// death, a strip, and the pinned primary's own main-sequence end, where a main sequence the pair
+/// has prolonged steps onto the pin's own track in L and R (P11.T4.n).
 #[expect(
     clippy::many_single_char_names,
     reason = "a sample's two states and their values"
@@ -660,6 +665,7 @@ fn check_invariants(input: &BinaryInput, until: Years) {
     check_no_repeated_instants(&timeline, &what);
     check_no_bare_giant(&timeline, &what);
     check_collapses(input, &timeline, &what);
+    check_no_main_sequence_collapse(input, &timeline, &what);
     // Ruling 108.1: no contact pair lives below Rasio's (1995) mass ratio.
     for segment in timeline.segments() {
         if segment.kind() == SegmentKind::Contact {
@@ -910,6 +916,38 @@ fn check_collapses(input: &BinaryInput, timeline: &BinaryTimeline, what: &impl F
             }
         }
     }
+}
+
+/// P11.T4.n's invariant on `timeline`, the pair of `input` (decision-observed-class-findings §B):
+/// no pinned primary collapses from its hydrogen main sequence, a hot, non-degenerate core. Where
+/// its pin is recorded, the primary just before it is a supergiant or a naked helium star, or held
+/// at one (`Member::Frozen`). `what` describes the pair for the failure message.
+fn check_no_main_sequence_collapse(
+    input: &BinaryInput,
+    timeline: &BinaryTimeline,
+    what: &impl Fn() -> String,
+) {
+    let Some(pin) =
+        super::evolve::pinned_death_age_years(input).filter(|&pin| pin < timeline.until().value())
+    else {
+        return;
+    };
+    let recorded = timeline.supernovae().iter().any(|r| {
+        r.component() == Component::Primary && (r.age().value() - pin).abs() <= 1e-9 * pin
+    });
+    if !recorded {
+        return;
+    }
+    let before = timeline.state_at(Years::new(super::detached::last_living(pin)));
+    let star = before.stars()[0];
+    assert_ne!(
+        star.phase(),
+        Phase::MainSequence,
+        "the pinned primary collapses at {pin} yr from its main sequence, {} M☉ at log L {}: {}",
+        star.mass().value(),
+        crate::math::log10(star.luminosity().value()),
+        what()
+    );
 }
 
 /// P11.T4's invariants over a sample of close pairs (the plan's 10³ in the slow suite).
@@ -1238,7 +1276,8 @@ fn pinned_pair(mix: &mut Mix, i: u32) -> BinaryInput {
 
 /// The engine's output is pinned bit for bit over 10³ pairs (written before the engine was sped
 /// up, and kept so that no optimisation moves a result): each line is one pair's [`digest`]. Every
-/// timeline also keeps P11.T4.k's invariants ([`check_collapses`]).
+/// timeline also keeps P11.T4.k's invariants ([`check_collapses`]) and P11.T4.n's
+/// ([`check_no_main_sequence_collapse`]).
 #[test]
 fn a_thousand_timelines_are_pinned() {
     use hyperion_testkit::golden;
@@ -1251,9 +1290,9 @@ fn a_thousand_timelines_are_pinned() {
     for i in 0..1_000_u32 {
         let input = pinned_pair(&mut mix, i);
         let timeline = evolve(&input, until);
-        check_collapses(&input, &timeline, &|| {
-            format!("pinned pair {i:04}: {}", describe(&timeline))
-        });
+        let what = || format!("pinned pair {i:04}: {}", describe(&timeline));
+        check_collapses(&input, &timeline, &what);
+        check_no_main_sequence_collapse(&input, &timeline, &what);
         let [m1, m2] = input.masses().map(SolarMasses::value);
         w.u64_hex(
             &format!(
@@ -3820,44 +3859,29 @@ fn a_transfers_last_step_applies_the_death() {
     assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
 }
 
-/// P11.T4.k, finding C (ruling p11-t4k-faults, 2026-10-06, §1.2): pair 0277 of the pinned thousand
-/// (7.68 + 3.88 M☉, 0.674 d, Z = 0.004). After its Case A transfer the pair is in contact from
-/// 19.67 Myr, and its primary, kept on its main sequence by the mass it lost, is still there at
-/// plan 06's death, 46.831 Myr. The contact's knots stop at the pin, and the primary collapses
-/// from its main sequence (design note 16): a 1.188 M☉ neutron star, which the kick unbinds. A run
-/// to 30 Myr, inside the contact and before the pin, records nothing, stays in contact, and is the
-/// full run's to 30 Myr bit for bit, as runs to 46 and 46.9 Myr are, just before the pin and just
-/// past it. Before T4.k the contact ran to its coalescence at 47.51 Myr,
-/// past the pin, and the merger's product died at 69.05 Myr.
+/// P11.T4.k, finding C (ruling p11-t4k-faults, 2026-10-06, §1.2), as P11.T4.n leaves it: pair
+/// 0277 of the pinned thousand (7.68 + 3.88 M☉, 0.674 d, Z = 0.004). After its Case A transfer the
+/// pair is in contact from 19.67 Myr, and its primary, kept on its main sequence by the mass it
+/// lost, would be there still at plan 06's death, 46.831 Myr. The contact's knots stop at the
+/// primary's own main-sequence end, 41.914 Myr, as they stop at the pin (T4.k): the primary goes on
+/// along its own track there, and the pair coalesces
+/// ([`pinned_contact_pairs_collapse_from_past_their_main_sequences`]). A run to 30 Myr, inside the
+/// contact, records nothing, stays in contact, and is the full run's to 30 Myr bit for bit, as
+/// runs to 41 and 41.95 Myr are, after the contact's last knot before the end (40.55 Myr) and just
+/// past the end, and one to 46.9 Myr, past the pin. Before T4.k the contact ran to its coalescence
+/// at 47.51 Myr, past the pin, and the merger's product died at 69.05 Myr; before T4.n its knots
+/// stopped at the pin, and the primary collapsed from its main sequence there.
 #[test]
-fn a_contact_stops_at_the_pin() {
+fn a_contact_stops_at_its_primarys_own_main_sequence_end() {
     let input = pinned_sample_pair(277);
-    let pin = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
-    assert!((pin - 46.831e6).abs() < 1.0e3, "{pin}");
+    let (track, _) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end = track.main_sequence_end().expect("a main sequence").value();
+    assert!((end - 41.914e6).abs() < 1.0e3, "{end}");
     let timeline = evolve(&input, Years::new(1.2e10));
-    let record = primary_record(&timeline);
-    assert!(
-        (record.age().value() - pin).abs() <= 1e-9 * pin,
-        "{:?} against the pin at {pin} yr",
-        record.age()
-    );
     assert_eq!(
-        segment_ending_at(&timeline, pin).kind(),
+        segment_ending_at(&timeline, end).kind(),
         SegmentKind::Contact
     );
-    let before = timeline.state_at(Years::new(super::detached::last_living(pin)));
-    assert_eq!(before.stars()[0].phase(), Phase::MainSequence);
-    assert_eq!(
-        record.remnant().kind(),
-        crate::stellar::remnant::RemnantKind::NeutronStar
-    );
-    assert!(
-        (record.remnant().mass().value() - 1.188).abs() < 1e-3,
-        "{:?}",
-        record.remnant()
-    );
-    assert!(!record.bound(), "{}", describe(&timeline));
-    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
     let early = Years::new(3.0e7);
     let short = evolve(&input, early);
     assert!(short.supernovae().is_empty(), "{}", describe(&short));
@@ -3865,14 +3889,297 @@ fn a_contact_stops_at_the_pin() {
         short.segments().last().map(Segment::kind),
         Some(SegmentKind::Contact)
     );
-    // The build-age contract either side of the pin: at 46 Myr, after the contact's last knot
-    // before the pin (45.8 Myr), whose next knot is clamped to the pin past that age; and at
-    // 46.9 Myr, past the collapse.
-    for until in [early, Years::new(4.6e7), Years::new(4.69e7)] {
+    // The build-age contract either side of the end: at 41 Myr, after the contact's last knot
+    // before it, whose next knot is clamped to the end past that age; at 41.95 Myr, past the
+    // coalescence; and at 46.9 Myr, past the collapse.
+    for until in [
+        early,
+        Years::new(4.1e7),
+        Years::new(4.195e7),
+        Years::new(4.69e7),
+    ] {
         assert_eq!(
             check_any_age(&input, until, Years::new(1.2e10)),
             EarlierRun::Same,
             "to {until:?}"
+        );
+    }
+}
+
+/// P11.T4.n (decision-observed-class-findings §B): pairs 0223 (14.16 + 6.00 M☉, 0.996 d) and 0277
+/// (7.68 + 3.88 M☉, 0.674 d) of the pinned thousand, both at Z = 0.004, are contact pairs whose
+/// primaries the binary kept on their main sequences to plan 06's deaths, where they collapsed at
+/// τ 0.999 and 0.987 (Risks, "P11.T4.k's known departures"). Each contact now ends at its
+/// primary's own main-sequence end, 15.521 and 41.914 Myr: the primary goes on along the pin's own
+/// track at offset 0, and the pair coalesces, as a contact does when a star leaves its main
+/// sequence, through a common envelope into a Hertzsprung-gap product of 20.00 and 11.50 M☉. That
+/// product's own track dies before the pin, and it is held there, an early-AGB supergiant, until
+/// the pin collapses it into plan 06's neutron star, bit for bit: 1.4222 and 1.1881 M☉, at 17.195
+/// and 46.831 Myr.
+#[test]
+fn pinned_contact_pairs_collapse_from_past_their_main_sequences() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+
+    for (i, end_myr, product_msun) in [(223, 15.5205, 19.997), (277, 41.9137, 11.500)] {
+        let input = pinned_sample_pair(i);
+        let timeline = evolve(&input, Years::new(1.2e10));
+        let what = || format!("pinned pair {i:04}: {}", describe(&timeline));
+        let (track, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+        let end = track.main_sequence_end().expect("a main sequence").value();
+        assert!((end / 1e6 - end_myr).abs() < 1e-4, "{end}: {}", what());
+        assert_eq!(
+            segment_ending_at(&timeline, end).kind(),
+            SegmentKind::Contact
+        );
+        let envelope = timeline
+            .segments()
+            .iter()
+            .find(|s| s.kind() == SegmentKind::CommonEnvelope)
+            .unwrap_or_else(|| panic!("the contact coalesces: {}", what()));
+        assert_eq!(bits(envelope.start().value()), bits(end), "{}", what());
+        let Member::Shaped { offset, .. } = &envelope.members()[0] else {
+            panic!("the primary on the pin's own track: {}", what());
+        };
+        assert_eq!(bits(*offset), bits(0.0), "at offset {offset}");
+        let after = timeline.state_at(Years::new(end));
+        assert_eq!(after.kind(), SegmentKind::Merged, "{}", what());
+        assert_eq!(after.stars()[0].phase(), Phase::HertzsprungGap);
+        assert!(
+            (after.stars()[0].mass().value() - product_msun).abs() < 1e-3,
+            "{:?}",
+            after.stars()[0]
+        );
+        let at = pin.death.age().value();
+        let record = primary_record(&timeline);
+        assert!(
+            (record.age().value() - at).abs() <= 1e-9 * at,
+            "{record:?} against {at}"
+        );
+        let before = timeline.state_at(Years::new(super::detached::last_living(at)));
+        assert_eq!(before.stars()[0].phase(), Phase::EarlyAgb, "{}", what());
+        assert_eq!(Some(record.remnant()), plan_06_star(&input).remnant());
+        assert_eq!(record.kick(), pin.kick);
+        check_no_main_sequence_collapse(&input, &timeline, &what);
+    }
+}
+
+/// P11.T4.n (decision-observed-class-findings §B): pair 0040 of the pinned thousand (14.77 +
+/// 2.93 M☉, 2.23 d, Z = 0.004), whose stars merge on their main sequences into a 17.656 M☉ star on
+/// a track of its own, younger than the primary (BSE equation 80), that holds the pin. At the
+/// primary's own main-sequence end, 14.637 Myr, a step of the merged star lands on it, and the
+/// product goes on along the pin's own track at offset 0: a Hertzsprung-gap star of its mass with
+/// that track's 3.62 M☉ core, its L up 0.21 dex, from log L 4.522 to 4.734. It collapses at the
+/// pin, 16.210 Myr, an early-AGB supergiant, into plan 06's remnant with plan 06's kick, bit for
+/// bit. Before T4.n the product collapsed there from its main sequence.
+#[test]
+fn a_pinned_merger_product_leaves_its_main_sequence_at_the_primarys_end() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+
+    let input = pinned_sample_pair(40);
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let what = || format!("pinned pair 0040: {}", describe(&timeline));
+    let (track, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end = track.main_sequence_end().expect("a main sequence").value();
+    assert!((end - 14.6366e6).abs() < 1.0e2, "{end}");
+    let closed = segment_ending_at(&timeline, end);
+    assert_eq!(closed.kind(), SegmentKind::Merged, "{}", what());
+    let Member::Track {
+        track: product,
+        offset,
+    } = &closed.members()[0]
+    else {
+        panic!("the merger's product on its own track: {}", what());
+    };
+    let own = product
+        .main_sequence_end()
+        .expect("built past its main sequence");
+    assert!(
+        offset + own.value() > end,
+        "its main sequence outlasts the primary's"
+    );
+    let next = timeline
+        .segments()
+        .iter()
+        .find(|s| (s.start().value() - end).abs() <= 1e-9 * end && s.end() > s.start())
+        .unwrap_or_else(|| panic!("a segment starts at the end: {}", what()));
+    assert_eq!(bits(next.start().value()), bits(end));
+    let Member::Shaped {
+        track: shaped,
+        offset,
+        ..
+    } = &next.members()[0]
+    else {
+        panic!("the product on the pin's own track: {}", what());
+    };
+    assert_eq!(bits(*offset), bits(0.0), "at offset {offset}");
+    assert_eq!(shaped.initial_mass(), track.initial_mass());
+    let [was, now] =
+        [end * (1.0 - 1e-12), end].map(|t| timeline.state_at(Years::new(t)).stars()[0]);
+    assert_eq!(was.phase(), Phase::MainSequence);
+    assert_eq!(now.phase(), Phase::HertzsprungGap);
+    assert!((was.mass().value() - 17.656).abs() < 1e-3, "{was:?}");
+    assert!(
+        (now.mass().value() / was.mass().value() - 1.0).abs() < 1e-9,
+        "{now:?}"
+    );
+    let log_l = |s: &crate::stellar::StarState| crate::math::log10(s.luminosity().value());
+    assert!((log_l(&was) - 4.522).abs() < 1e-3, "{was:?}");
+    assert!((log_l(&now) - 4.734).abs() < 1e-3, "{now:?}");
+    assert!((now.core_mass().value() - 3.623).abs() < 1e-3, "{now:?}");
+    let at = pin.death.age().value();
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - at).abs() <= 1e-9 * at,
+        "{record:?} against {at}"
+    );
+    let before = timeline.state_at(Years::new(super::detached::last_living(at)));
+    assert_eq!(before.stars()[0].phase(), Phase::EarlyAgb, "{}", what());
+    assert_eq!(Some(record.remnant()), plan_06_star(&input).remnant());
+    assert_eq!(record.kick(), pin.kick);
+    check_no_main_sequence_collapse(&input, &timeline, &what);
+    for until in [end * (1.0 - 1e-6), end * (1.0 + 1e-6)] {
+        assert_eq!(
+            check_any_age(&input, Years::new(until), Years::new(1.2e10)),
+            EarlierRun::Same,
+            "to {until} yr"
+        );
+    }
+}
+
+/// The pair of record 822C72E00000008C's primary in the universe LOOK72 (seed
+/// `0xa49f_649b_ef43_4b20`, the full potential), as `SystemStars` runs it: its input, its timeline
+/// and the primary's model.
+fn look72_case_a_pair() -> (
+    BinaryInput,
+    BinaryTimeline,
+    crate::stellar::system::StarModel,
+) {
+    use crate::galaxy::Galaxy;
+    use crate::galaxy::placement::resolve;
+    use crate::stellar::multiplicity::{HierarchyNode, StarIndex};
+    use crate::stellar::system::SystemStars;
+
+    let galaxy = Galaxy::new(crate::Seed::new(0xa49f_649b_ef43_4b20)).with_full_potential();
+    let id: crate::id::SystemId = "822c72e00000008c".parse().expect("a system ID");
+    let record = resolve(&galaxy, id).expect("a grid system of LOOK72");
+    let stars = SystemStars::generate(&galaxy, &record);
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|pair| pair.stars()[0] == StarIndex::PRIMARY)
+        .expect("the engine runs the primary's pair");
+    let HierarchyNode::Pair { orbit, .. } = *stars.hierarchy().node(pair.node()) else {
+        panic!("a pair's node is a pair");
+    };
+    let [primary, companion] = pair.stars().map(|s| &stars.stars()[usize::from(s.get())]);
+    let input = BinaryInput::new(
+        primary.initial_mass(),
+        companion.initial_mass(),
+        *primary.composition(),
+        orbit,
+        [primary.draws().clone(), companion.draws().clone()],
+        primary.age_at_epoch(),
+    )
+    .expect("a pair");
+    (input, pair.timeline().clone(), primary.clone())
+}
+
+/// P11.T4.n (decision-observed-class-findings §B): record 822C72E00000008C of the universe LOOK72
+/// ([`look72_case_a_pair`]), a pinned primary of 10.486 M☉ at Z = 0.03
+/// whose companion keeps it on its main sequence through a case-A transfer. At its own track's
+/// main-sequence end, 21.8206 Myr, the segment closes inside the transfer, and the donor, a
+/// 6.674 M☉ main-sequence star the binary carries, goes on along the pin's own track at offset 0:
+/// a Hertzsprung-gap star of that mass with the track's 2.196 M☉ core (Mc,TMS at the track's own
+/// mass there, 10.15 M☉ after its wind; the ruling's ≈ 2.3 M☉ is that of 10.49 M☉). L steps up
+/// 0.766 dex there, from log L 3.517 to 4.282 (the ruling's 3.56 to 4.31). Case AB strips it to a
+/// naked helium star of 2.24 M☉ by 21.866 Myr, which collapses at its pin, 24.6187 Myr, into plan
+/// 06's 1.1927 M☉ neutron star with plan 06's kick, bit for bit. Before T4.n it collapsed from its
+/// main sequence, a 5.80 M☉ star at log L 3.31.
+#[test]
+fn a_pinned_case_a_donor_leaves_its_main_sequence_at_its_own_end() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+
+    let (input, timeline, primary) = look72_case_a_pair();
+    let timeline = &timeline;
+    let what = || format!("822C72E00000008C: {}", describe(timeline));
+    let (track, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end = track.main_sequence_end().expect("a main sequence").value();
+    assert!((end - 21.8206e6).abs() < 1.0e2, "{end}");
+    let closed = segment_ending_at(timeline, end);
+    assert_eq!(
+        closed.kind(),
+        SegmentKind::StableTransfer {
+            donor: Component::Primary
+        },
+        "{}",
+        what()
+    );
+    assert!(matches!(
+        closed.members()[0],
+        Member::MainSequence { helium: false, .. }
+    ));
+    let next = timeline
+        .segments()
+        .iter()
+        .find(|s| (s.start().value() - end).abs() <= 1e-9 * end && s.end() > s.start())
+        .unwrap_or_else(|| panic!("a segment starts at the end: {}", what()));
+    // The step lands on the end exactly, and the track is placed at zero there.
+    assert_eq!(bits(next.start().value()), bits(end));
+    let Member::Shaped {
+        track: shaped,
+        offset,
+        ..
+    } = &next.members()[0]
+    else {
+        panic!("the donor on the pin's own track: {}", what());
+    };
+    assert_eq!(bits(*offset), bits(0.0), "at offset {offset}");
+    assert_eq!(shaped.initial_mass(), track.initial_mass());
+    assert_eq!(shaped.main_sequence_end(), track.main_sequence_end());
+    let [was, now] =
+        [end * (1.0 - 1e-12), end].map(|t| timeline.state_at(Years::new(t)).stars()[0]);
+    assert_eq!(was.phase(), Phase::MainSequence);
+    assert_eq!(now.phase(), Phase::HertzsprungGap);
+    assert!((was.mass().value() - 6.674).abs() < 1e-3, "{was:?}");
+    assert!(
+        (now.mass().value() / was.mass().value() - 1.0).abs() < 1e-9,
+        "{now:?}"
+    );
+    let log_l = |s: &crate::stellar::StarState| crate::math::log10(s.luminosity().value());
+    assert!((log_l(&was) - 3.517).abs() < 1e-3, "{was:?}");
+    assert!((log_l(&now) - 4.282).abs() < 1e-3, "{now:?}");
+    assert!((now.core_mass().value() - 2.196).abs() < 1e-3, "{now:?}");
+    let stripped = timeline.state_at(Years::new(2.2e7)).stars()[0];
+    assert_eq!(stripped.phase(), Phase::HeliumMainSequence, "{}", what());
+    assert!(
+        (stripped.mass().value() - 2.24).abs() < 0.01,
+        "{stripped:?}"
+    );
+    let at = pin.death.age().value();
+    assert!((at - 24.6187e6).abs() < 1.0e2, "{at}");
+    let collapse = primary_record(timeline);
+    assert!(
+        (collapse.age().value() - at).abs() <= 1e-9 * at,
+        "{collapse:?} against {at}"
+    );
+    let before = timeline.state_at(Years::new(super::detached::last_living(at)));
+    assert_eq!(before.stars()[0].phase(), Phase::HeliumMainSequence);
+    assert_eq!(Some(collapse.remnant()), primary.remnant());
+    assert_eq!(collapse.kick(), primary.natal_kick());
+    check_no_main_sequence_collapse(&input, timeline, &what);
+    // The build-age contract either side of the end: a run to just before it, whose last step
+    // lands on it past the age asked, and one to just past it.
+    for until in [end * (1.0 - 1e-6), end * (1.0 + 1e-6)] {
+        assert_eq!(
+            check_any_age(&input, Years::new(until), timeline.until()),
+            EarlierRun::Same,
+            "to {until} yr"
         );
     }
 }
@@ -3914,6 +4221,71 @@ fn engine_with_its_pin(input: &BinaryInput, age_years: f64, a_rsun: f64) -> supe
         orbit,
         Some(pin),
     )
+}
+
+/// P11.T4.n's backstop: the pinned primary's own main-sequence end, still pending at the engine's
+/// age as a phase's exit before its stop leaves it (a transfer that detaches on the step that
+/// lands on the end), is acted on before the next phase. An engine at that end on the 17 + 12 M☉
+/// pair's 4,396 R☉ orbit, its primary a carried main-sequence star of its own mass at τ 0.9, takes
+/// the primary onto the pin's own track there, at offset 0 and its mass, where no step could land
+/// on the end, and the pin collapses it later, once.
+#[test]
+fn a_main_sequence_end_due_at_the_engines_age_is_applied() {
+    use super::star::{Member, Path};
+
+    let (input, at) = untouched_pinned_pair();
+    let end = super::evolve::own_main_sequence_end_of(&input);
+    let (track, _) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end_years = track.main_sequence_end().expect("a main sequence").value();
+    let mut engine =
+        engine_with_its_pin(&input, end_years.next_down(), 4_396.0).with_own_main_sequence_end(end);
+    let mass = input.masses()[0].value();
+    engine.members[0] = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(engine.age, mass),
+        tau: Path::starting(engine.age, 0.9),
+    };
+    // The engine reaches the end by an exit other than its stop.
+    engine.age = end_years;
+    engine.run();
+    let timeline = engine.finish();
+    let next = timeline
+        .segments()
+        .iter()
+        .find(|s| s.start().value() >= end_years && s.end() > s.start())
+        .unwrap_or_else(|| panic!("a segment from the end: {}", describe(&timeline)));
+    assert!(
+        (next.start().value() - end_years).abs() <= 1e-9 * end_years,
+        "{}",
+        describe(&timeline)
+    );
+    let Member::Shaped {
+        track: shaped,
+        offset,
+        mass: carried,
+    } = &next.members()[0]
+    else {
+        panic!(
+            "the primary on the pin's own track: {}",
+            describe(&timeline)
+        );
+    };
+    assert!(offset.abs() <= 1e-9 * end_years, "at offset {offset}");
+    assert_eq!(shaped.initial_mass(), track.initial_mass());
+    assert!((carried.at(end_years) / mass - 1.0).abs() < 1e-12);
+    let after = timeline.state_at(Years::new(end_years));
+    assert_eq!(after.stars()[0].phase(), Phase::HertzsprungGap);
+    let records = timeline
+        .supernovae()
+        .iter()
+        .filter(|s| s.component() == Component::Primary)
+        .count();
+    assert_eq!(records, 1, "{}", describe(&timeline));
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - at).abs() <= 1e-9 * at,
+        "{record:?} against {at}"
+    );
 }
 
 /// P11.T4.k's backstop (ruling p11-t4k-faults, 2026-10-06, §2.1): a pin still pending at the

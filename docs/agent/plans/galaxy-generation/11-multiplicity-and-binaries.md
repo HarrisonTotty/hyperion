@@ -1112,7 +1112,9 @@ P11.T4, as built"._
         death: a 1.411 M☉ neutron star at 18.6316 Myr, bound.
       - No merger follows.
       - Before T4.k there was no record, and the pair merged at 985.7 Myr.
-    - `a_contact_stops_at_the_pin` (C): pair 0277.
+    - `a_contact_stops_at_the_pin` (C): pair 0277. _(Restated by P11.T4.n as
+      `a_contact_stops_at_its_primarys_own_main_sequence_end`: the contact now ends at the
+      primary's own main-sequence end, before the pin.)_
       - The record is at 46.831 Myr, from the main-sequence primary in contact.
       - A run to 30 Myr, inside the contact and before the pin, records nothing, stays in
         contact, and equals the full run up to 30 Myr bit for bit.
@@ -1460,6 +1462,9 @@ P11.T4, as built"._
     suites above, with the figures recorded in Risks; `the_gate_is_conservative` and
     `detached_generated_pairs_are_passed_over` re-run and passing; determinism-auditor,
     science-checker and rust-reviewer reviews.
+
+  _As built (lane p11-t4n, 2026-10-29; at version 23 on its lane branch beside T4.l's, held for
+  25's train): see Risks, "P11.T4.n as built"._
 
 - **P11.T4.o The transfer loop's steps: the boundary, a donor dead inside a step, and the step's
   size** (findings F18 and F17, and the engine finding of "P11.T17.b as built";
@@ -2363,7 +2368,10 @@ that brown-dwarf companions can be retuned without touching a star; the shapes o
   depend on the binary engine, inside placement. A companion that dies within the supernova interval
   is not a catalogue entry, because the brainstorm's test is on "its primary's death"; it explodes
   in place with its shell and is found only by going there. If that proves visible (a second
-  supernova class for companions), it is a change to plan 09's `DeathMarks`.
+  supernova class for companions), it is a change to plan 09's `DeathMarks`. P11.T4.n keeps the pin
+  where a pair prolongs the primary's main sequence past it, by ending that main sequence at the
+  primary's own; such a donor would really end later, and as a white dwarf or in an
+  electron-capture supernova, a larger departure than a few per cent ("P11.T4.n as built").
 - **The centre's feature-level index** (T8.e). Scratch arithmetic says 13 bits are tight for the
   centre's accreting white dwarfs, and plan 09 has reported it to the brainstorm's owner. Neither
   way out is this plan's to choose. P11.T8.e measured it: the Milky Way fixture's centre fits, but
@@ -4503,6 +4511,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - Pairs 0223 and 0277 of the thousand collapse at τ 0.999 and 0.987, 18.5 kyr and 0.68 Myr
       before their binary main sequences would end. Their merger products would have died 10
       and 22 Myr later.
+    - _Closed by P11.T4.n (lane p11-t4n, 2026-10-29), on its lane branch for version 25's train
+      (decision-observed-class-findings §B): no pinned primary collapses from its main sequence.
+      See "P11.T4.n as built"._
   - **Pinned primaries stripped by the binary keep plan 06's single-star remnant**, capped at
     their mass (design note 16).
     - Binary-stripped stars have smaller carbon–oxygen cores. For case B strips, Schneider,
@@ -5724,7 +5735,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       `REJUVENATED`, after a case-A mass-ratio reversal, each re-aged so that the epoch falls
       5,000 years before the change, in its middle and 20,000 years after it; at both ends of the
       window and the epoch each row is its summary's primary, bit for bit, and paired during and
-      after) and `certified_rows_are_their_single_star_briefs` (every certified row of 300 random
+      after; _P11.T4.n moved the second, restated: see "P11.T4.n as built"_) and
+      `certified_rows_are_their_single_star_briefs` (every certified row of 300 random
       systems is the brief of its primary alone, bit for bit, the table's its kind and class);
       `observe_brief.rs`'s `look72_now_rows_read_the_pair`, run by its
       `observed_rows_and_summaries_read_one_state` (820E6EE00000008D and 822C72E00000008C of
@@ -6553,3 +6565,203 @@ galaxy_sweeps`.
     - **Citations not re-read in the pod** (no web access): HTP02 §2.2 for Jeans's mode (the
       plan's), HPT equations 107–110 and BSE equation 35. The science check derived every formula
       (all ok) and leaves the section and equation numbers to a check against the sources.
+- **P11.T4.n as built** (lane p11-t4n, 2026-10-29; decision-observed-class-findings §B, which
+  supersedes ruling p11-t4k-faults' "recorded, not routed", its §2.1 C and §7). A pinned primary's
+  own track's main-sequence end is an engine stop, where a hydrogen main sequence the pair has
+  prolonged goes on along the pin's own track. **Built as version 25's behaviour at version 23, on
+  its lane branch beside T4.l's patch, with no hold and no bump**: an anchor of version 25's train
+  (decision-bump-plan-after-22 §2.2 and its 2026-10-21 addendum; decision-galaxy-25-train §1.7;
+  §B.4's "a held patch on T4.l's patches"). T4.m was built in parallel on the same base, so the
+  patch is re-cut onto T4.l and T4.m before the 25 wiring. Its goldens are re-blessed by name at
+  header 23 (not the task text's 24), which the train's bump re-blesses at 25: `golden_diff.py`
+  reports "changed values, not bumped", as the ruling expects.
+  - _The rule, as built._
+    - `evolve.rs`: `PinnedTrack::main_sequence_end` reads the pin's own full track's
+      `Track::main_sequence_end` (the start of the segment after its last main-sequence one) into
+      `OwnMainSequenceEnd { track, age_years }`. `run_pair` gives it to the engine
+      (`Engine::with_own_main_sequence_end`, kept only if it lies after the engine's start) and to
+      `Engine::passed_over`, which gives it to an engine that takes a pair over after a collapse.
+    - The stop is `detached.rs`'s `Stop::PinnedMainSequenceEnd`. `step_limit` and `rlof.rs`'s
+      `transfer_limit` register it just after the pin while member 0, of its phase at the step's
+      start, holds a hydrogen main sequence that outlasts it (`own_main_sequence_end_after`,
+      `outlasts_its_own`): a carried `Member::MainSequence { helium: false }`, or a star on a track
+      whose main-sequence segment (`phase_ahead`'s, which a track holds whole however far it is
+      built) ends later, a merger's product. A primary on its own track ends there by itself, at its own
+      boundary, and never registers it, so no other pair's steps move. The first registered wins
+      a tie (`StepLimit`): the pin, always later, then the stop, then the members' events.
+    - `contact_phase` (`common_envelope.rs`) stops its knots at it as at the pin, whatever the age
+      asked.
+    - `Engine::end_pinned_main_sequence` acts on it. The segment closes, an event, and member 0
+      becomes a `Member::Shaped` on the pin's own track, at `offset_for(age, end)` and its own
+      mass, the form `carry` gives a case-B donor. Every step lands on the end exactly (the step
+      is `end − age`, exact by Sterbenz), so the offset is 0.0. A contact pair then coalesces
+      (below).
+    - `Engine::run` acts on one due at the engine's age (to `clock_resolution_years`) before each
+      phase, as on the pin (`own_main_sequence_end_due_now`): a step that lands on it and leaves
+      its phase by another exit (a transfer that detaches on it, a strip or an onset found inside
+      it). One the engine has passed is dropped, debug-asserted to leave no main sequence that
+      outlasts it.
+    - Unchanged: the pin's age, remnant and kick; a star off its main sequence then; a helium main
+      sequence; an unpinned member 0; a run that ends before the end (the stop does not depend on
+      the age asked, as the pin's does not). No draw, stream or tag.
+  - _Deviations from the ruling's text, and the lane's choices (lean, 2026-10-29)._
+    - **Merger products are switched too.** The ruling's test names the carried form,
+      `Member::MainSequence { helium: false }`, "or the merger product that holds the pin". The
+      engine's main-sequence merger product is a `Member::Track` on a track of its own mass,
+      young by BSE's equation 80 (`main_sequence_star`), not a carried main sequence, and 34 of the
+      pinned thousand's 53 main-sequence collapses were such products. The build reads the
+      ruling's intent: any hydrogen main sequence of member 0 that outlasts the pin's own. The
+      product goes on along the pin's own track at its own mass.
+    - **A contact pair coalesces at the switch**, as the engine's contact does when a star leaves
+      its main sequence (Nelson and Eggleton 2001's slow case, `Engine::contact`; L2 overflow,
+      Marchant et al. 2016, A&A 588, A50): `mix` of the Hertzsprung-gap star and its main-sequence
+      companion is a common envelope, which in every sampled pair ends in a coalesced
+      Hertzsprung-gap product of the pair's mass on its own full track (`new_star`). In 0223 and
+      0277 that product's own track dies before the pin (16.56 and 44.24 Myr), and it is held there
+      (`Engine::hold`), an early-AGB supergiant, until the pin collapses it.
+    - **The stop is registered only while member 0 holds such a main sequence**, so that it moves
+      no step of any other pair.
+    - **T4.k's pin inside a contact** is now a backstop that no pinned contact reaches: a contact
+      needs both stars on their main sequences, and member 0's ends at the switch, before its pin.
+      `a_contact_stops_at_the_pin` (T4.k's finding C) is restated as
+      `a_contact_stops_at_its_primarys_own_main_sequence_end`.
+  - _Tests_ (`stellar/binary/tests.rs`):
+    - `a_pinned_case_a_donor_leaves_its_main_sequence_at_its_own_end`: record 822C72E00000008C of
+      LOOK72 (seed 0xa49f_649b_ef43_4b20, the full potential; 10.486 M☉, Z = 0.03). Its own main
+      sequence ends at 21.8206 Myr inside its case-A transfer; the 6.674 M☉ carried donor goes on
+      along the pin's own track, a Hertzsprung-gap star with a 2.196 M☉ core, L up 0.766 dex (log
+      L 3.517 → 4.282); case AB strips it to a 2.24 M☉ helium star by 21.866 Myr, which collapses
+      at its pin, 24.6187 Myr, into plan 06's 1.1927 M☉ neutron star with plan 06's kick, bit for
+      bit. Before: it collapsed from its main sequence, 5.80 M☉ at log L 3.31. The build-age
+      contract either side of the end.
+    - `pinned_contact_pairs_collapse_from_past_their_main_sequences`: pairs 0223 and 0277. Their
+      contacts end at 15.5205 and 41.9137 Myr in a common envelope and Hertzsprung-gap products of
+      20.00 and 11.50 M☉; at their pins (17.195 and 46.831 Myr) they are early-AGB supergiants,
+      held, and leave plan 06's 1.4222 and 1.1881 M☉ neutron stars with plan 06's kicks.
+    - `a_pinned_merger_product_leaves_its_main_sequence_at_the_primarys_end`: pair 0040 (14.77 +
+      2.93 M☉, 2.23 d, Z = 0.004), the detached route and the merger-product branch. The 17.656 M☉
+      product's step lands on the primary's own end, 14.637 Myr; it goes on along the pin's own
+      track (log L 4.522 → 4.734, a 3.62 M☉ core) and collapses at its pin, 16.210 Myr, an
+      early-AGB supergiant, into plan 06's remnant. The build-age contract either side of the end.
+    - `a_main_sequence_end_due_at_the_engines_age_is_applied`: the backstop, on the 17 + 12 M☉
+      pair with its primary set to a carried main sequence at the end.
+    - `a_contact_stops_at_its_primarys_own_main_sequence_end` (restated, above): pair 0277's runs
+      to 30, 41, 41.95 and 46.9 Myr are the full run's bit for bit.
+    - **A fixture moved, restated** (`tests/stellar_briefs.rs`, P11.T11.a's `REJUVENATED`):
+      `0x826c_b2e0_0000_0013`, a primary its companion fed on its main sequence after a case-A
+      transfer (19.3 M☉ then), now leaves that main sequence at its own end, just before its
+      companion's overflow returns (8.8257 Myr). It is replaced by `0x821e_b320_0000_001b` (26.0
+      M☉ then), found in the row of 150 layer-E cells above the original row: among the 7,900
+      systems of the two rows the engine feeds a hydrogen main-sequence primary in only these two,
+      each for under 120 years before its own end. T11.a's "the only two of 4,000" no longer
+      holds.
+    - **Untested now:** T4.k's pin inside a contact (`contact_phase`'s pin branch), which no
+      pinned contact reaches (above); it stays as the backstop.
+    - **The new invariant**, `check_no_main_sequence_collapse` (no recorded pin from a hydrogen
+      main-sequence state), in `check_invariants` (the 60 close pairs, the slow 10³ close pairs,
+      the two widening pairs) and in `a_thousand_timelines_are_pinned` (the pinned thousand).
+      `check_invariants`' doc lists the switch among the continuity's events: its step in L and R
+      falls on a segment's edge.
+  - _What moves_ (the lane's census against its base, T4.l at version 23; pod, 4 vCPU, x86_64).
+    Every moved timeline is one whose member 0 is on a hydrogen main sequence at its own end, and
+    every such timeline moves. By kind, at the switch (case-A donors, rejuvenated member-0
+    accretors, main-sequence merger products, contact pairs):
+    - **the pinned thousand: 66** = 17 + 0 + 35 (19 merged directly, 16 after a contact) + 14
+      (0223 and 0277 among them);
+    - the 10³ close pairs (`sample_pairs(1_000, 0x5eed_0002)`): 80 = 32 + 0 + 41 (23 + 18) + 7;
+    - the 60 close pairs (`0x5eed_0001`): 5 = 4 + 0 + 1 (after a contact) + 0.
+    - Every case-A donor is in its transfer at the switch, so every one goes through case AB.
+      None of the samples has a rejuvenated member-0 accretor still on its main sequence at the
+      end. The 12 contact pairs other than 0223 and 0277 merged at their binary main sequence's
+      end before T4.n, after their primary's own, and their products collapsed from it.
+    - **Main-sequence collapses, before → after:** the pinned thousand **53 → 0** (34 merger
+      products, 14 contact pairs, 5 case-A donors), the 10³ close pairs 57 → 0 (40, 7, 10), the 60
+      close pairs 3 → 0. The rulings of 2026-10-06 counted 2 in the pinned thousand (0223 and
+      0277, the carried contact stars): the merger products, `Member::Track`s on tracks of their
+      own, were not counted.
+    - **Progenitors at the pin** (the pinned thousand's 66): case-A donors 15 helium
+      main-sequence and 2 helium Hertzsprung-gap stars; merger products 31 early-AGB, 1
+      thermally pulsing AGB and 3 helium Hertzsprung-gap stars; contact pairs 9 early-AGB, 3 helium
+      Hertzsprung-gap and 2 helium main-sequence stars. None is on a main sequence.
+    - **Remnants:** plan 06's bit for bit in 60. In 6 case-A donors, pairs 0097, 0192, 0533,
+      0535, 0551 and 0681, plan 06's black hole is capped at the helium star's living mass
+      (`held_to`, T4.k), as it was before; their helium stars are heavier now (0192: 4.50 → 7.67
+      M☉).
+  - _The ruling's departures, as measured_ (recorded, not routed):
+    - **L steps at the switch**, on a segment's edge. Record 822C72E00000008C's donor: +0.766 dex,
+      log L 3.517 → 4.282 (the ruling's 3.56 → 4.31). Case-A donors in the pinned thousand +0.006
+      to +1.009 dex (median +0.54), and to +1.31 in the close pairs. Real donors are overluminous,
+      so the direction is right; easing the step over a thermal time is deferred. **New:** a merger
+      product heavier than the pin's track steps by −0.46 to +0.35 dex (median +0.02), since the
+      Hertzsprung gap's L reads the track's initial mass (HPT section 7.1), so a heavy product
+      dims at the switch.
+    - **The core is the own track's at its end**, case-B-like, about twice a real case-A core:
+      822C72E00000008C 2.196 M☉, Mc,TMS of the track at its own mass there, 10.15 M☉ after its
+      main-sequence wind (the ruling's 2.3 M☉ is that of 10.49 M☉, the science check); the pinned
+      thousand's case-A donors 1.40–13.2 M☉ (median 2.94).
+    - **Real donors of this mass most likely end as white dwarfs or in an electron-capture
+      supernova, later than the pin** (Wellstein, Langer and Braun 2001, system 31): design note
+      16's departure. **Finding (the science check):** 822C72E00000008C's helium star is 2.24 M☉,
+      just under the 2.25 M☉ that BSE sends to core collapse (HPT section 6 after equation 75,
+      Mc,BAGB, a helium star's mass in its place), in the band where BSE makes an electron-capture
+      collapse, of a neutron star of about 1.3 M☉. So the ruling's "≈ 2.3 M☉, above 2.25 M☉" does
+      not hold as built; the pin still gives plan 06's 1.1927 M☉ neutron star. For the owner, if a
+      ruling is wanted.
+    - **A case-A-stripped remnant** belongs to finding F13's stripped-mark remnant law (P15.T5.c;
+      plan 06's deferred findings), not here.
+  - _Goldens_ (blessed by name at header 23, `uname -m` x86_64; `golden_diff.py` against the base:
+    changed values, not bumped, as the ruling expects):
+    - `stellar/binary_timelines`: **66 of 1,000 digests**, the pinned thousand's moved set above
+      (63 change their segment count; 0533, 0535 and 0724 keep it).
+    - `stellar/summaries`: system 8200B2E000000002 (layer E, Z = 0.03), both of whose pairs are
+      case-A donors switched at their own ends (4.151 and 4.495 Myr). Its 52.36 M☉ primary's black
+      hole is 7.5372 M☉, capped at its stripped helium star's living mass, where it was 9.2749 M☉
+      after collapsing from its main sequence and accreting; star 2's black hole is 6.0091 M☉
+      (5.9660), fed by star 3's helium star, which a common envelope now leaves; and star 3 is a
+      1.6017 M☉ neutron star (a pulsar), where it was swallowed before.
+    - Not moved (run by name, or in a targeted run of 1,043 sim and server tests): `stellar/briefs`,
+      `classify`, `hierarchies`, `kicks`, `passed_over_collapses`, `held_bare_core_helium_star`,
+      `pair_light`, and the server's `systems_in_range`, `systems_in_range_briefs` and
+      `scene_systems`. The gate ran every test the change reaches.
+  - _Statistics_ (the slow suites, run by name in the test profile, four at a time; pod, 4 vCPU):
+    - **The layer-E prior pairs** (`binary_classes`' sampler, the 12,000 of band 4, run to 13.8
+      Gyr; a lane probe): of 7,375 pairs the pre-test runs, 7,204 record their primary's collapse,
+      and **737 of those collapsed from a hydrogen main sequence at the base, 0 now**. The
+      rulings of 2026-10-06 counted 0 of these 12,000.
+    - `binary_classes` (4 of 4): every class reached; **108 bound double neutron stars** in the
+      window test (T4.l: 115), 66 (61%) at e < 0.3, 25 merging, about 29 a Myr by VG18's yield
+      (Pol et al. 28–72); the shown class 108 against 108 by record; recycled pulsars' median
+      periods 27.7 ms beside CO/ONe white dwarfs (T4.l 27.7) and 71.4 ms beside neutron stars
+      (70.3).
+    - `binary_system` (3 of 3): **ruling 137's hydrogen-poor share per exploding star 0.509**
+      (2,920 of 5,737 collapses; T4.l 0.472, 2,723 of 5,765), not asserted, as the switched donors
+      now collapse stripped; marked primaries stripped and not merged 1,408 of 1,752, merged 299;
+      Rucinski's contact pairs 2.84 × 10⁻³ a star and the bright exception 4 of 86,184, as at
+      T4.l.
+    - `binary_carve` (1 of 1): redrawn A 0, B 0, C 1.0 × 10⁻³, D 6.85 × 10⁻³, E 4.0 × 10⁻³, as
+      at T4.l.
+    - **The R06 census** (`a_hundred_thousand_systems_live_and_die_in_order`) passes, in 424 s
+      beside three other tests (T4.l: 381 s alone), and
+      `multiple_systems_follow_the_model_over_ten_thousand_systems` passes.
+    - The 10³ close pairs keep the engine's invariants, the new one included; the build-age
+      suites: 3,873 runs just past events (T4.l: 3,803, the switch's edges added) and 30 between
+      arrivals; at any age 397 run, 598 passed over, 5 through collapses, 0 missed; between
+      arrivals 60 run, 661 passed over, 0 missed; the 100 wide massive pairs 10 passed over and 90
+      through collapses, 0 missed.
+    - `the_gate_is_conservative` (P11.T11.a; decision-observed-class-findings §A.5) and P11.T17.a's
+      `detached_generated_pairs_are_passed_over` re-run and pass. The acceptance's
+      `test(binary::)` does not select `tests/stellar_briefs.rs` or `tests/observe_brief.rs`,
+      which were run beside it.
+    - **`just fit-check`: 45 fresh, 5 provisional as at the base, 1 stale, P11.T17.b's
+      `binary_pair_light_d`** (its sim fingerprint probe `cell([11, 2, 2, 3]).living` moved). R06's
+      `sky_binary_light_c`, `_d` and `_e` stay fresh. Not refitted here: the train's wiring refits
+      the pair-light tables once, at `--since 25` (the task's "Tables and statistics"; a lean,
+      2026-10-29, for main to confirm).
+  - _Findings_ (recorded; not this task's):
+    - **The blast radius is larger than the rulings' census:** 53 main-sequence collapses in the
+      pinned thousand (the ruling's 2) and 737 in the 12,000 layer-E prior pairs (the ruling's
+      0), most of them main-sequence merger products.
+    - **822C72E00000008C's helium star is below BSE's core-collapse line** (above, the third
+      departure).
+    - **A merger product heavier than the pin's track dims at the switch** (above, the first
+      departure).

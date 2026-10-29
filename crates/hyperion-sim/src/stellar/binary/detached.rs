@@ -108,6 +108,9 @@ pub(super) enum Stop {
     Death(usize),
     /// The primary's pinned death (design note 16).
     Pinned,
+    /// The pinned primary's own track's main sequence ends while member 0 holds a hydrogen main
+    /// sequence that outlasts it (P11.T4.n; [`Engine::end_pinned_main_sequence`]).
+    PinnedMainSequenceEnd,
     /// Member `i` fills its Roche lobe.
     Roche(usize),
     /// The stars touch at periastron.
@@ -208,6 +211,7 @@ impl Engine {
             }
             Stop::Death(i) => self.die(i),
             Stop::Pinned => self.pinned_collapse(),
+            Stop::PinnedMainSequenceEnd => self.end_pinned_main_sequence(),
             Stop::Roche(i) => self.roche_onset(i),
             Stop::Collision | Stop::Coalescence => self.collide(),
             Stop::Stripped(i) => self.strip(i),
@@ -727,6 +731,10 @@ impl Engine {
             if at > s.age {
                 limits.event(at - s.age, Stop::Pinned);
             }
+        }
+        let phase = structures[0].as_ref().map(|st| st.state.phase());
+        if let Some(at) = self.own_main_sequence_end_after(s.age, phase) {
+            limits.event(at - s.age, Stop::PinnedMainSequenceEnd);
         }
         for (i, structure) in structures.iter().enumerate() {
             match &self.members[i] {

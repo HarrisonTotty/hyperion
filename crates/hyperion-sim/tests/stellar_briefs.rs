@@ -340,10 +340,12 @@ fn change_in(stars: &SystemStars, change: Change) -> Option<(f64, f64)> {
 }
 
 /// Two primaries of the test galaxy whose companions, grown past them after a case-A transfer,
-/// overflow back onto them while they are still on their main sequences (24.5 and 19.3 M☉ then),
-/// found among the 4,000 systems of 150 layer-E cells near the solar circle, two of them: the
-/// engine feeds a main-sequence primary that rarely.
-const REJUVENATED: [u64; 2] = [0x8211_b2e0_0000_0010, 0x826c_b2e0_0000_0013];
+/// overflow back onto them while they are still on their main sequences (24.5 and 26.0 M☉ then),
+/// found among the 7,900 systems of two rows of 150 layer-E cells near the solar circle: the
+/// engine feeds a main-sequence primary that rarely. The second was `0x826c_b2e0_0000_0013`
+/// (19.3 M☉ then) until P11.T4.n ended a pinned primary's main sequence at its own track's end:
+/// its primary has left it when its companion's overflow returns, at 8.8257 Myr.
+const REJUVENATED: [u64; 2] = [0x8211_b2e0_0000_0010, 0x821e_b320_0000_001b];
 
 /// `record` with its age at the epoch `age` years and nothing else changed: a real record whose
 /// history moves on the clock, so that one of its ages falls at the epoch.

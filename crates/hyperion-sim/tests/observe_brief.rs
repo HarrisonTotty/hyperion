@@ -39,8 +39,9 @@ const LOOK72: u64 = 0xa49f_649b_ef43_4b20;
 /// 20.195 Myr, and a neutron star at the epoch.
 const STRIPPED: &str = "820e6ee00000008d";
 
-/// A pinned case-A donor of LOOK72 whose companion strips it on its main sequence, and which
-/// collapses there at its pin (`decision-observed-class-findings.md` §B).
+/// A pinned case-A donor of LOOK72 whose companion strips it on its main sequence. It collapsed
+/// there at its pin until P11.T4.n ended that main sequence at its own track's end, from which case
+/// AB strips it to a helium star (`decision-observed-class-findings.md` §B).
 const CASE_A: &str = "822c72e00000008c";
 
 /// LOOK72's galaxy, as the server builds it ([`Galaxy::with_full_potential`]), once per process.
@@ -359,7 +360,7 @@ fn pair_has_changed_primary(stars: &SystemStars, t: UniverseTime) -> bool {
 
 /// P11.T11.a: the now-mode rows of look-72's two systems read the summary's primary. Each of GDG
 /// 0E0V00 E-141 (820E6EE00000008D, stripped in a common envelope) and 822C72E00000008C (a case-A
-/// donor that collapses on its main sequence) is re-aged so that an age at which its pair has
+/// donor, stripped to a helium star in case AB) is re-aged so that an age at which its pair has
 /// changed its primary, the first such at the start or middle of a segment of its pair's
 /// timeline, falls at the epoch, a real record with only its age at the epoch changed. Its range
 /// row's model takes the paired route, and the row at both ends of the clock window and at the

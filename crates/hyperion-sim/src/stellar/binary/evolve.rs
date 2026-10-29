@@ -18,7 +18,10 @@
 //! A primary of `m_cc(Z) − 1` M☉ or more whose single-star death is a collapse dies when plan 06
 //! says, with plan 06's remnant and kick (design note 16): the engine takes that age as a fixed
 //! boundary, holds the star at its last living state if its own binary history would end it
-//! sooner, and explodes whatever the pair has made of it then.
+//! sooner, and explodes whatever the pair has made of it then. Its own track's main sequence ends
+//! at an age the engine stops at too, where a hydrogen main sequence the pair has prolonged goes on
+//! along that track (P11.T4.n, [`Engine::end_pinned_main_sequence`]), so that nothing collapses
+//! from a main sequence.
 //!
 //! The engine starts where the first star arrives on its main sequence ([`arrival`], P11.T4.i).
 //! A companion still contracting then, as a low-mass companion of a massive primary is through
@@ -37,7 +40,7 @@ use crate::stellar::remnant::{
     CompactRemnant, Death, NatalKick, StandardKickLaw, stripped_mark_applied_under,
 };
 use crate::stellar::sse::{self, Track};
-use crate::stellar::substellar;
+use crate::stellar::{Phase, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, Radians, SolarMasses, Years};
 
@@ -238,6 +241,7 @@ fn run_pair(
         .filter(|track| track.built_until().value().is_infinite())
         .map(Arc::clone);
     let pin = pinned_death(input, full_primary);
+    let own_end = pin.as_ref().and_then(PinnedTrack::main_sequence_end);
     let primary_track = pin.as_ref().map(|p| Arc::clone(&p.track)).or(own_primary);
     let members = own_members_with(input, until, [primary_track, own_secondary]);
     let gated = match pre_test {
@@ -248,14 +252,16 @@ fn run_pair(
         PreTest::Past => false,
     };
     if gated && !interacts(input, &members, until) {
-        return Engine::passed_over(input, ctx, until, members, pin.map(|p| p.pin), pre_test);
+        let pin = pin.map(|p| p.pin);
+        return Engine::passed_over(input, ctx, until, members, pin, own_end, pre_test);
     }
     // Before the start the stars are their own and the orbit the drawn one (`arrival`): the paths
     // the engine carries begin there, so that nothing before it depends on the steps after it.
     let start = arrival(&members, until);
     let members = members.map(|member| member.restarted(start));
     let orbit = LiveOrbit::of(input, Years::new(start));
-    let mut engine = Engine::new(ctx, start, until, members, orbit, pin.map(|p| p.pin));
+    let mut engine = Engine::new(ctx, start, until, members, orbit, pin.map(|p| p.pin))
+        .with_own_main_sequence_end(own_end);
     engine.run();
     engine.finish()
 }
@@ -507,12 +513,37 @@ struct PinnedTrack {
     pin: Pin,
 }
 
+impl PinnedTrack {
+    /// Where the pin's own track's main sequence ends, if it has one: the engine's stop of
+    /// P11.T4.n ([`Engine::end_pinned_main_sequence`]).
+    #[must_use]
+    fn main_sequence_end(&self) -> Option<OwnMainSequenceEnd> {
+        self.track
+            .main_sequence_end()
+            .map(|end| OwnMainSequenceEnd {
+                track: Arc::clone(&self.track),
+                age_years: end.value(),
+            })
+    }
+}
+
 /// A primary's death as plan 06 gives it: when, what it leaves, its kick.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Pin {
     pub(super) death: Death,
     pub(super) remnant: CompactRemnant,
     pub(super) kick: Option<NatalKick>,
+}
+
+/// The pinned primary's own track (design note 16's, [`PinnedTrack`]'s) and the age its main
+/// sequence ends on it, which the engine stops at (P11.T4.n, decision-observed-class-findings
+/// §B.3): [`Engine::end_pinned_main_sequence`].
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct OwnMainSequenceEnd {
+    track: Arc<Track>,
+    /// The track's age at the end of its last main-sequence segment
+    /// ([`Track::main_sequence_end`]), years: the engine's age there, the track placed at zero.
+    age_years: f64,
 }
 
 /// The primary's single-star death if design note 16 pins it: a primary of `m_cc(Z) − 1` M☉ or
@@ -570,6 +601,14 @@ pub(super) fn pinned_death_age_years(input: &BinaryInput) -> Option<f64> {
 #[must_use]
 pub(super) fn pinned_track_and_pin(input: &BinaryInput) -> Option<(Arc<Track>, Pin)> {
     pinned_death(input, None).map(|pinned| (pinned.track, pinned.pin))
+}
+
+/// The pinned primary's own main-sequence end ([`PinnedTrack::main_sequence_end`]), for the tests
+/// that start an engine before it.
+#[cfg(test)]
+#[must_use]
+pub(super) fn own_main_sequence_end_of(input: &BinaryInput) -> Option<OwnMainSequenceEnd> {
+    pinned_death(input, None).and_then(|pinned| pinned.main_sequence_end())
 }
 
 /// The orbit as the engine carries it: its semi-major axis (R☉) and eccentricity now, its
@@ -683,6 +722,8 @@ pub(super) struct Engine {
     pub(super) accreted_helium: [f64; 2],
     /// The primary's pinned death, until it happens.
     pub(super) pin: Option<Pin>,
+    /// The pinned primary's own main sequence's end, until the engine reaches it (P11.T4.n).
+    own_main_sequence_end: Option<OwnMainSequenceEnd>,
     pub(super) capped: bool,
     /// The last step's length, years, from which the next one starts.
     pub(super) dt_hint: f64,
@@ -728,6 +769,7 @@ impl Engine {
             stripped: [false; 2],
             accreted_helium: [0.0; 2],
             pin,
+            own_main_sequence_end: None,
             capped: false,
             dt_hint: 0.0,
             contact_until: 0.0,
@@ -751,7 +793,9 @@ impl Engine {
     /// ([`clock_resolution_years`]), is acted on (P11.T4.k, ruling p11-t4k-faults of 2026-10-06):
     /// a backstop for any exit that a step landing on the pin takes before its stop, such as
     /// T4.g's strip, which wins that step ([`Engine::integrate`]) and leaves the pin no longer
-    /// ahead. No phase passes a pin it has not acted on (debug-asserted).
+    /// ahead. No phase passes a pin it has not acted on (debug-asserted). The pinned primary's own
+    /// main-sequence end has the same backstop (P11.T4.n,
+    /// [`Engine::own_main_sequence_end_due_now`]).
     pub(super) fn run(&mut self) {
         let mut events = 0_u32;
         while self.age < self.until && !self.capped {
@@ -760,6 +804,7 @@ impl Engine {
                 self.capped = true;
                 break;
             }
+            self.own_main_sequence_end_due_now();
             self.pin_due_now();
             match self.kind {
                 SegmentKind::StableTransfer { donor } => self.transfer_phase(donor.index()),
@@ -946,6 +991,143 @@ impl Engine {
         if self.pooled.is_none() {
             self.pooled = Some(event);
         }
+    }
+}
+
+/// P11.T4.n: a pinned main sequence ends at its own (decision-observed-class-findings §B, which
+/// supersedes ruling p11-t4k-faults' "recorded, not routed").
+impl Engine {
+    /// The engine with the pinned primary's own main-sequence end `end` as a stop, if it lies
+    /// after the engine's age ([`Engine::end_pinned_main_sequence`]).
+    #[must_use]
+    pub(super) fn with_own_main_sequence_end(mut self, end: Option<OwnMainSequenceEnd>) -> Self {
+        self.own_main_sequence_end = end.filter(|end| end.age_years > self.age);
+        self
+    }
+
+    /// The age of the pinned primary's own main-sequence end, years, if it lies after `age` and
+    /// member 0, of `phase` at `age`, holds a hydrogen main sequence that outlasts it: an event of
+    /// the step from `age` ([`Stop::PinnedMainSequenceEnd`]).
+    ///
+    /// [`Stop::PinnedMainSequenceEnd`]: super::detached::Stop::PinnedMainSequenceEnd
+    #[must_use]
+    pub(super) fn own_main_sequence_end_after(
+        &self,
+        age: f64,
+        phase: Option<Phase>,
+    ) -> Option<f64> {
+        let end = self.own_main_sequence_end.as_ref()?;
+        (end.age_years > age && self.outlasts_its_own(end, age, phase)).then_some(end.age_years)
+    }
+
+    /// Whether member 0, of `phase` at the engine's age `age`, is a hydrogen main-sequence star
+    /// whose main sequence outlasts the pin's own, which ends at `end`.
+    ///
+    /// It is one the binary carries ([`Member::MainSequence`]: a case-A donor, a rejuvenated
+    /// accretor, a contact pair's star), or a star on a track whose main-sequence segment ends
+    /// later (a merger's product, `common_envelope.rs`'s `main_sequence_star`). The segment is the
+    /// one [`phase_ahead`] reads at `age`, which a track holds whole however far it is built, so
+    /// the answer does not depend on the age the pair is run to. A primary on its own track ends
+    /// its main sequence there by itself, at its own boundary.
+    #[must_use]
+    fn outlasts_its_own(&self, end: &OwnMainSequenceEnd, age: f64, phase: Option<Phase>) -> bool {
+        phase == Some(Phase::MainSequence)
+            && self.members[0].track().is_none_or(|(track, offset)| {
+                let (_, segment_end, _) = phase_ahead(track, offset, age);
+                offset + segment_end > end.age_years + clock_resolution_years(end.age_years)
+            })
+    }
+
+    /// The pinned primary's own main sequence ends now (P11.T4.n, decision-observed-class-findings
+    /// §B.3).
+    ///
+    /// If member 0 still holds a hydrogen main sequence that outlasts it
+    /// ([`Engine::own_main_sequence_end_after`]), the segment closes here, an event, and the star
+    /// goes on along the pin's own track from that end, on its closed forms at the mass the binary
+    /// gives it ([`Member::Shaped`] at offset 0, as [`offset_for`] places it): the form a case-B
+    /// donor already takes. A contact pair coalesces then, as a contact does when a star leaves its
+    /// main sequence ([`Engine::contact`]; its expansion overflows the outer Lagrangian point,
+    /// Marchant et al. 2016, A&A 588, A50).
+    ///
+    /// What follows is the engine's own: the radius at the star's mass (HPT section 7.1), the
+    /// small-envelope perturbation (HPT section 6.3), a naked helium star once M ≤ Mc, and case AB
+    /// in a transfer. The pin falls at the own track's death through the carried tie
+    /// ([`Engine::pinned_collapse`]), with plan 06's age, remnant and kick unchanged.
+    ///
+    /// Without it, a main sequence the binary prolonged outlasted the pin, and the star collapsed
+    /// from it, a hot, non-degenerate hydrogen core (decision-observed-class-findings §B.1). The
+    /// prolonging is the τ-preserving rule of HPT section 7.1, which BSE (Hurley, Tout and Pols
+    /// 2002, section 2.6) applies to a donor that loses mass (`rlof.rs`'s `aged_tau`), or for a
+    /// merger's product BSE's equation 80, which starts it young. By the ruling's science check,
+    /// real case-A main sequences extend by only about 5–10%, and the τ rule overstates it by an
+    /// order of magnitude because real donors are overluminous for their mass (Sen et al. 2022,
+    /// A&A 659, A98: about 7 times). The departures (plan 11's Risks, "P11.T4.n as built"): L steps
+    /// at the switch, up by 0.77 dex for record 822C72E00000008C's donor; the core is the own
+    /// track's, case-B-like, about twice a real case-A donor's; such donors most likely end as
+    /// white dwarfs or in an electron-capture supernova after the pin (Wellstein, Langer and Braun
+    /// 2001, A&A 369, 939, system 31: an oxygen–neon–magnesium white dwarf), design note 16's departure; and a
+    /// case-A-stripped remnant is finding F13's.
+    pub(super) fn end_pinned_main_sequence(&mut self) {
+        let Some(end) = self.own_main_sequence_end.take() else {
+            return;
+        };
+        let (mass, tau) = self.current(0);
+        let phase = self
+            .structure(0, self.age, mass, tau)
+            .map(|s| s.state.phase());
+        if !self.outlasts_its_own(&end, self.age, phase) {
+            return;
+        }
+        self.close_segment();
+        let offset = offset_for(self.age, end.age_years);
+        self.set_member(
+            0,
+            Member::Shaped {
+                track: end.track,
+                offset,
+                mass: Path::starting(self.age, mass),
+            },
+        );
+        if self.kind == SegmentKind::Contact {
+            self.contact_until = 0.0;
+            self.mix();
+        }
+    }
+
+    /// Acts on the pinned primary's own main-sequence end if it is due at the engine's age, to the
+    /// resolution of its clock ([`clock_resolution_years`]), as [`Engine::pin_due_now`] acts on
+    /// the pin.
+    ///
+    /// It is a backstop for a step that lands on the end and leaves its phase by another exit (a
+    /// transfer that detaches, say). One the engine has passed is dropped: no phase passes it while
+    /// member 0 holds a main sequence that outlasts it (debug-asserted).
+    fn own_main_sequence_end_due_now(&mut self) {
+        let Some(end) = &self.own_main_sequence_end else {
+            return;
+        };
+        let at = end.age_years;
+        let resolution = clock_resolution_years(self.age);
+        if at > self.age + resolution {
+            return;
+        }
+        if at >= self.age - resolution {
+            self.end_pinned_main_sequence();
+            return;
+        }
+        if cfg!(debug_assertions) {
+            let (mass, tau) = self.current(0);
+            let phase = self
+                .structure(0, self.age, mass, tau)
+                .map(|s| s.state.phase());
+            debug_assert!(
+                !self.outlasts_its_own(end, self.age, phase),
+                "the pinned primary's own main sequence ended at {at} yr, behind the engine at {} \
+                 yr ({:?}), with member 0 a {phase:?} of {mass} M☉ whose main sequence outlasts it",
+                self.age,
+                self.kind
+            );
+        }
+        self.own_main_sequence_end = None;
     }
 }
 

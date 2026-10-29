@@ -10,7 +10,9 @@
 //!   takes the star's last living mass, never its remnant's (P11.T4.k, ruling p11-supernova-pins of
 //!   2026-10-06): a primary still on its own track then is the pin's own track at its death, which
 //!   explodes from the death's progenitor mass (helium core plus envelope), losing that less plan
-//!   06's remnant (BSE appendix A1's ΔM₁), and goes on showing its own remnant, plan 06's.
+//!   06's remnant (BSE appendix A1's ΔM₁), and goes on showing its own remnant, plan 06's. A main
+//!   sequence the binary has prolonged past the pin's own ends at that track's end first, so the
+//!   star collapses from past its main sequence (P11.T4.n, [`Engine::end_pinned_main_sequence`]).
 //! - **Any other death** sheds its mass at the death, through appendix A1 or the white dwarf's
 //!   quiet loss, and never before it: the step that lands on it keeps the dying star's living mass
 //!   (ruling 129.4a).
@@ -62,7 +64,7 @@ use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Years};
 
 use super::detached::last_living;
-use super::evolve::{Engine, LiveOrbit, Pin, PreTest, clock_resolution_years};
+use super::evolve::{Engine, LiveOrbit, OwnMainSequenceEnd, Pin, PreTest, clock_resolution_years};
 use super::star::{Member, Path, positive};
 use super::timeline::{
     BinaryInput, BinaryTimeline, Component, Context, FixedOrbit, MAX_REPORTED_ECCENTRICITY,
@@ -459,8 +461,9 @@ impl Engine {
     ///   collapse to `until_years` ([`interacts_after_collapse`]), unless `second` says to run
     ///   every such pair through the engine (the tests' check of that pre-test). If it passes, the
     ///   engine runs the pair from the collapse on that orbit, each living star carried with its
-    ///   zero-age spin's angular momentum ([`Engine::zero_age_spin`]); otherwise the orbit stays
-    ///   fixed.
+    ///   zero-age spin's angular momentum ([`Engine::zero_age_spin`]), and with the pinned
+    ///   primary's own main-sequence end still ahead as its stop (`own_end`, P11.T4.n); otherwise
+    ///   the orbit stays fixed.
     ///
     /// The build-age contract: up to its first collapse the pair shows the drawn orbit whatever age
     /// it is run to, and from a collapse on the closed form and any engine run start at the
@@ -477,6 +480,7 @@ impl Engine {
         until_years: f64,
         members: [Member; 2],
         pin: Option<Pin>,
+        own_end: Option<OwnMainSequenceEnd>,
         second: PreTest,
     ) -> BinaryTimeline {
         let until = until_years;
@@ -560,7 +564,8 @@ impl Engine {
             {
                 let pending = pin.filter(|p| p.death.age().value() > age);
                 let members = members.map(|m| m.restarted(age));
-                let mut engine = Self::new(Arc::clone(&ctx), age, until, members, live, pending);
+                let mut engine = Self::new(Arc::clone(&ctx), age, until, members, live, pending)
+                    .with_own_main_sequence_end(own_end);
                 engine.take_over(segments, records);
                 engine.run();
                 return engine.finish();

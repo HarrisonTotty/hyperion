@@ -488,6 +488,10 @@ impl Engine {
                         self.end_without_a_living_donor(d);
                         return;
                     }
+                    super::detached::Stop::PinnedMainSequenceEnd => {
+                        self.end_pinned_main_sequence();
+                        return;
+                    }
                     super::detached::Stop::Stripped(i) => {
                         self.strip(i);
                         return;
@@ -546,6 +550,10 @@ impl Engine {
             }
         }
         let structures = [if d == 0 { sd } else { sa }, if d == 0 { sa } else { sd }];
+        if let Some(at) = self.own_main_sequence_end_after(s.age, Some(structures[0].state.phase()))
+        {
+            limits.event(at - s.age, Stop::PinnedMainSequenceEnd);
+        }
         let mut phase_limit = f64::INFINITY;
         for i in 0..2 {
             match &self.members[i] {
