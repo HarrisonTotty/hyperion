@@ -1057,6 +1057,13 @@ pub struct MotionState {
 }
 
 impl MotionState {
+    /// The state at `position` moving at `velocity`, for a source whose motion is its own (the
+    /// centre's tidal-disruption victims, P09.T30.b).
+    #[must_use]
+    pub(crate) const fn new(position: GalacticPosition, velocity: GalacticVelocity) -> Self {
+        Self { position, velocity }
+    }
+
     /// The position, galactic.
     #[must_use]
     pub const fn position(&self) -> &GalacticPosition {

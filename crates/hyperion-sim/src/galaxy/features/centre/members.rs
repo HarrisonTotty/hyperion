@@ -53,8 +53,9 @@
 //!
 //! Member zero of the centre's feature-level list, `0xF000_0007_0000_0000`
 //! ([`CentreMemberId::CENTRAL_BLACK_HOLE`]), at the galactic origin and at rest, with the mass of
-//! [`GalaxyParams`](crate::galaxy::params::GalaxyParams)' black hole. It counts in layer E. The
-//! centre's list registers no class yet (the tidal-disruption victims are P09.T30.b's).
+//! [`GalaxyParams`](crate::galaxy::params::GalaxyParams)' black hole. It counts in layer E. From
+//! index 1 come the tidal disruptions' victims, the first class of the centre's list (P09.T30.b,
+//! [`events::victims`](super::events::victims)); no other class is registered on it yet.
 //!
 //! [`CentreClasses`]: super::CentreClasses
 
@@ -75,6 +76,7 @@ use super::super::interior::{ClassKind, LocalCell};
 use super::super::members::{ATTEMPT_WORDS, MAX_ATTEMPTS, remnant_fits, systemic_speed};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::classes::{CENTRE_FE_H, CentreClass, CentreClassKind, CentreTracer, age_components};
+use super::events::victims::CentreVictims;
 use super::profile::REACH;
 use super::{CentreModel, DistributionFunction};
 
@@ -216,6 +218,24 @@ pub struct CentreMemberRecord {
 }
 
 impl CentreMemberRecord {
+    /// A member of `class` from its parts: its record, its composition and its velocity at the
+    /// epoch relative to the black hole, km/s, galactic axes. For the centre's feature-level
+    /// members, whose draws are their own (the tidal-disruption victims, P09.T30.b).
+    #[must_use]
+    pub(crate) const fn from_parts(
+        record: SystemRecord,
+        class: CentreClass,
+        composition: Composition,
+        velocity_km_s: [f64; 3],
+    ) -> Self {
+        Self {
+            record,
+            class: Some(class),
+            composition,
+            velocity: velocity_km_s,
+        }
+    }
+
     /// Its plan 03 record, of origin `CentreMember`.
     #[must_use]
     pub const fn record(&self) -> &SystemRecord {
@@ -625,7 +645,8 @@ fn pick(mark: Mark, weights: &[f64], bound: f64) -> Option<usize> {
 }
 
 /// The centre's composition.
-fn centre_composition() -> Composition {
+#[must_use]
+pub(crate) fn centre_composition() -> Composition {
     Composition::from_fe_h(CENTRE_FE_H, HeliumExcess::ZERO)
 }
 
@@ -750,14 +771,15 @@ pub fn resolve_centre_member(
 }
 
 /// The centre member `id` names in `galaxy`, whose centre is `model`: the black hole for member
-/// zero, a candidate for an ID in a cell.
+/// zero, a tidal disruption's victim for a feature-level index from 1 (P09.T30.b), a candidate for
+/// an ID in a cell.
 ///
 /// # Errors
 ///
-/// [`ResolveSystemError::NoSuchSystem`] for a feature-level index other than the black hole's
-/// (no class is registered on the centre's list yet), a band that is not stellar, a cell the
-/// grid does not own, an index at or past its cell's count, or a candidate the thinning, the
-/// marks or its draw reject.
+/// [`ResolveSystemError::NoSuchSystem`] for a feature-level index past the victims (no other
+/// class is registered on the centre's list yet), a band that is not stellar, a cell the grid
+/// does not own, an index at or past its cell's count, or a candidate the thinning, the marks or
+/// its draw reject.
 pub fn resolve_centre_member_with(
     galaxy: &Galaxy,
     model: &CentreModel,
@@ -766,7 +788,12 @@ pub fn resolve_centre_member_with(
     let placement = CentrePlacement::new(model);
     match id.slot() {
         MemberSlot::FeatureLevel { index: 0 } => Ok(placement.black_hole()),
-        MemberSlot::FeatureLevel { .. } => Err(ResolveSystemError::NoSuchSystem),
+        // The disruptions' model refuses only a black hole no galaxy the builder allows has.
+        MemberSlot::FeatureLevel { index } => CentreVictims::one(galaxy, model, index)
+            .ok()
+            .flatten()
+            .map(|v| *v.member())
+            .ok_or(ResolveSystemError::NoSuchSystem),
         MemberSlot::InCell {
             band,
             level,

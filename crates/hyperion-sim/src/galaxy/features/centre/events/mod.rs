@@ -1,5 +1,5 @@
 //! The central black hole's own events: its X-ray flares and its tidal disruptions of stars (plan
-//! 09, P09.T30.a).
+//! 09, P09.T30.a), the disruptions' victims and the black hole's luminosity (P09.T30.b).
 //!
 //! Both kinds are plan 06's Poisson bins ([`PoissonBins`](crate::events::PoissonBins)) on the black
 //! hole's own event key. The subject is the black hole's ID, `0xF000_0007_0000_0000`
@@ -15,17 +15,31 @@
 //!   [`TIDAL_DISRUPTION`](crate::id::event_tags::TIDAL_DISRUPTION) (`0x0201`), each an ID and a
 //!   time.
 //!
-//! Nothing reads them yet: P09.T30.b gives each disruption its victim and composes the black
-//! hole's luminosity, and plan 12's alerts list both kinds.
+//! P09.T30.b reads them:
+//!
+//! - [`victims`](mod@victims): each disruption in the source horizon has a victim, the first class
+//!   of the centre's feature-level list, drawn from word 0 of its disruption's own event stream:
+//!   a star of the centre's living classes on a parabola whose pericentre passage is the
+//!   disruption, disrupted or swallowed whole by its Hills mass;
+//! - [`luminosity`](mod@luminosity): the black hole's 2–10 keV luminosity at any time, its
+//!   quiescence, its flares and its disrupted victims' t^(−5⁄3) tails.
+//!
+//! Plan 12's alerts list both kinds.
 
 pub mod disruptions;
 pub mod flares;
+pub mod luminosity;
+pub mod victims;
 
 pub use disruptions::{
     BuildTidalDisruptionModelError, TidalDisruption, TidalDisruptionModel, disruption_rate,
     tidal_disruption, tidal_disruptions,
 };
 pub use flares::{CentreFlare, CentreFlareModel, flare, flares, flares_active_at};
+pub use luminosity::{CentreLuminosity, CentreLuminosityModel, DisruptionTail, luminosity_at};
+pub use victims::{
+    BuildCentreVictimsError, CentreVictims, DisruptionOutcome, TidalDisruptionVictim,
+};
 
 use crate::id::{CentreMemberId, EventSubject, SystemId};
 

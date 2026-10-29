@@ -1214,6 +1214,9 @@ as built"._
   disruption (Ponti et al. 2010); the Kepler members' loss cone stays empty; at Milky Way values
   every main-sequence victim is disrupted.
 
+  _Done (lane `p09-victims`, 2026-10-29, at `GENERATOR_VERSION` 23, no output moved): see Risks,
+  "P09.T30.b as built", and the findings after it._
+
 #### P09.T31 Centre tests
 
 Slow tests. Members sampled in six radial shells from 0.01 to 100 ly keep the profile at t = −1,000,
@@ -3740,3 +3743,140 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   bears on T28.b.b's wiring: for main and the brainstorm's owner. (4) Decision §2.2's "padding
   moves no output either way" does not hold through the census's cell budget. (5) "The joint
   revision as built" says the normalisation raised the cusp by 28%; its own figures give ×1.32.
+- **P09.T30.b as built (lane `p09-victims`, 2026-10-29, on 3161136a at `GENERATOR_VERSION` 23;
+  the brief's "ext").** No output moves and there is no bump: the victims take the centre's
+  feature-level IDs from index 1, which `resolve` answered "no such system" before; no T30.a ID
+  or time, no cell member and no existing golden moves (`golden_diff.py`: two new goldens, no
+  changed value), and no tag is added. New goldens `galaxy/features/centre_victims` and
+  `galaxy/features/centre_luminosity` at 23. Files: `galaxy/features/centre/events/victims.rs`
+  and `events/luminosity.rs` (new), `events/mod.rs`, `centre/{members,mod,source}.rs`,
+  `features/members/headroom.rs`, `features/members/{level_list,placement}.rs` (docs),
+  `galaxy/motion.rs` (a crate-private `MotionState::new`), `tests/galaxy_sweeps.rs` (a doc figure).
+  - _API_, in `features::centre::events` (re-exported there):
+    - In `victims`: `CentreVictims`, `TidalDisruptionVictim`, `DisruptionOutcome` (`Disrupted`,
+      `SwallowedWhole`), `BuildCentreVictimsError`, `tidal_radius`, `schwarzschild_radius`,
+      `hills_mass`, `outcome_of`, `expected_victims` and the word constants `ORBIT_WORDS`,
+      `STAR_ATTEMPT_WORDS`, `STAR_ATTEMPTS`, `MIN_STAR_AGE`. `CentreVictims`:
+      `new(&Galaxy, &CentreModel)`, `of(&Galaxy)`, `from_parts(seed, mass, centre, mass function)`,
+      `one(galaxy, centre, index)`, `victims`, `victim(index)`, `of_disruption(EventId)`, `count`,
+      `at(t)`, `model`; a victim's `id`, `index`,
+      `disruption`, `time`, `member`, `record`, `class`, `star_mass`, `star_radius`, `star_phase`,
+      `outcome`, `tidal_radius`, `hills_mass`, `pericentre`, `orbit_at_disruption`, `tail`,
+      `state_at` and `reach_at`.
+    - In `luminosity`: `luminosity_at(&CentreLuminosityModel, t) -> CentreLuminosity`,
+      `CentreLuminosityModel::{new, of}`, `DisruptionTail`, `fallback_time`,
+      `eddington_luminosity_watts` and the constants `QUIESCENT_LUMINOSITY_WATTS`,
+      `RADIATIVE_EFFICIENCY`, `BOLOMETRIC_CORRECTION`, `XRAY_SHARE` and `TAIL_LOOK_BACK_BINS`.
+      Provides' `luminosity_at(t)` takes the model, which lists the
+      horizon's victims once; the result is by part (quiescence, flares, tails), in watts.
+    - Crate-private: `CentreMemberRecord::from_parts`, `members::centre_composition`,
+      `MotionState::new`. `resolve_centre_member_with` answers a feature-level index from 1
+      through `CentreVictims::one`, which draws that victim alone.
+  - _Not a `ListClass` (a deviation)._ The victims' count is the horizon's disruptions, not a
+    `member.list` draw, and their places are their parabolas, not a profile's, so the centre lists
+    them itself at indices 1 to N after its black hole (N = `CentreVictims::count()`, by time, then
+    event ID); `registered_classes` stays empty. _For P11.T8.f, T36 and T43:_ a class listed on
+    the centre after the victims starts at N + 1. `FeatureLevelList::with_classes` numbers from 1
+    and its clamp does not count them, so it needs a first-index offset at the centre.
+  - _Draws_, the disruption's event stream from word 0. Words 0–2: the pericentre's direction
+    (isotropic) and the velocity's angle about it. From word 3, attempt k at 3 + 3k:
+    - a `Mark` picking a living class (kind `Living`, expected above 0, in the classes' order) by
+      its expected count over the whole cluster (lean, below);
+    - the age at the disruption, uniform in the class's component from `MIN_STAR_AGE` (10⁴ yr);
+    - the initial mass on the galaxy's mass function in the class's range below the turn-off at
+      that age, as P09.T27's members draw theirs. An empty range passes the attempt; at most 64,
+      never reached in practice (a debug assertion, then the first class).
+
+    The star is plan 06's at its age with `StarDraws::median()` (lean: its own draws are keyed by
+    its ID). The record's epoch position and velocity are its parabola's at the epoch, formal for
+    a victim gone by then (59 ly out for the oldest); its origin `CentreMember { attempt }`, its
+    population `NuclearDisc`, its age the drawn one plus the time since the disruption, its layer
+    its initial mass's.
+
+  - _The outcome._ SM16 §2.2's Hills mass with the IAU 2015 nominal R☉ and GM☉, 1.1434 × 10⁸ M☉
+    for 1 M☉ and 1 R☉; swallowed whole at M• ≥ M_H. It is the victim's (`of_disruption` finds it
+    from the event's ID); T30.a's `TidalDisruption` is unchanged.
+  - _The orbit (lean)._ An exact parabola about G M• alone, not T28.b.a's μ from the epoch
+    radius: the "near-parabolic" orbit as the theory of disruption takes it. Its pericentre is r_t
+    when disrupted (β = 1, not SM16 equation 28's pinhole share ∝ β⁻² with f_pinhole ≈ 0.3), and
+    2 r_g when swallowed, so the parabola is slower than light before the event. The state at the
+    disruption is held exactly, at pericentre; `state_at(t)` propagates it up to t_d and is
+    `StateAt::NoSuchSystem` after. _For P09.T28.b.b and T37:_ a victim's record says `Exists`
+    after its disruption (plan 03's `Existence` has no end), and `position_velocity_at` on its
+    `EpochState` would follow the Kepler regime's law, so a victim is asked through its own
+    `state_at`.
+  - _The tails (lean on the efficiency and the band)._
+    `t_fb = (π ÷ √2) R★^{3⁄2} M• ÷ (M★ √(G M•))`, 3.54 × 10⁶ s M₆^½ m★⁻¹ r★^{3⁄2} (SM16
+    equation 23; Stone, Sari and Loeb 2013,
+    equation 49), then `Ṁ = (M★ ÷ 3t_fb)(Δt ÷ t_fb)^(−5⁄3)` (SSL13 equation 50), radiating
+    `min(η Ṁ c², L_Edd)` with η = 0.1 (SM16 §3) and L_Edd for ionised hydrogen, 1.257 × 10³⁸
+    erg/s per M☉. A share 1 ÷ 15.8 (Ho 2009's median C_X) is in 2–10 keV, so that a tail adds to
+    T30.a's flares in their band, above a quiescence of 3.6 × 10³³ erg/s (Nowak et al. 2012,
+    Table 1, as Neilsen et al. 2013 §4 take it), the same for every black hole. The look-back is
+    the horizon, `TAIL_LOOK_BACK_BINS` = 257 (bin −257 from +H's bin 0, not T30.a's 258 bins
+    counted from its edge); `luminosity_at` sums the held victims, which a test holds equal to
+    `active_at` with that look-back, cut to the horizon, from −H, 0 and +H. A disruption before
+    the horizon has no victim and adds no tail.
+  - _For P12.T5.a._ The tails' bound is `DisruptionTail::peak_luminosity_watts`,
+    `XRAY_SHARE × L_Edd(M•)`, 3.42 × 10⁴³ erg/s at the fixture; their duration is unbounded
+    within the horizon (`TAIL_LOOK_BACK_BINS`); their light curve is
+    `DisruptionTail::luminosity_watts_at`.
+  - _The speed bound (the brief)._ `FeatureInterior::member_speed_bound` covers catalogue
+    features, whose lists hold no victim (the class is the centre's alone), and its doc says so.
+    `CentreMemberSource` (still unregistered) lists the victims that exist at the sphere's time,
+    on their own parabolas, and passes over one whose reach misses the sphere: its pericentre plus
+    `full_scan_radius(G M•, t_d − t)`, widened by 10⁻⁹, since a victim moves below the black
+    hole's own escape speed. The reach changes no hit (`a_victim_s_reach_changes_no_hit`: 312
+    hits, 156 passed over); the census adds one in its layer for each victim inbound at the epoch
+    inside the radius. `CentreMemberSource::new` `expect`s the victims (refused only for a black
+    hole below 0.56 M☉).
+  - _Headroom_ (plan 11's P11.T8.e record: "each must join the candidates when it registers").
+    `CentreListForecast` gains `victims()` (`expected_victims`: SM16 equation 27 over the
+    horizon's 264,144 years, 27.31 at the fixture, 125 at 10⁵ M☉) and `entries()`, the victims
+    then the candidates; `fits`, `margin` and the check's error read the entries, and
+    `candidates()` is unchanged. `CentreListTooFull { candidates }` keeps its field's name, holds
+    the entries and says "entries". Re-pinned margins at eight standard deviations: 57,685.18 and
+    58,394.90 at the fixture under Chabrier's and Kroupa's functions, 46,112.75 and 52,449.08 at
+    the caps (from 57,713.79, 58,423.57, 46,140.86 and 52,477.38); the 10³-seed sweep passes, its
+    worst margin 46,074.8 (from 46,130.9; 407 s in the slow-test profile, pod, 4 vCPU). The
+    twice-the-cap tripwire still doubles the candidates alone.
+  - _Figures_, at the fixture (seed `0x0926_0000`): 26 victims (27.31 expected), all disrupted,
+    of bands A–C and components 0–2, the latest 1,294 yr before the epoch (a 1.16 M☉ star), so
+    the black hole is at 3.47 × 10³⁸ erg/s now, nearly all that tail. Over 200 seeds, 5,524
+    victims: 4,962 on the main sequence, 89 before it, 473 below 0.1 M☉ on plan 06's cooling fits
+    (phase `Substellar`); the least Hills mass 2.87 M•. At 1.36 × 10⁸ M☉, 276 of 286 are
+    swallowed whole. A Sun-like tail at 4.30 × 10⁶ M☉: t_fb 84.9 d; 2.10 × 10⁴⁰ erg/s at 100 yr,
+    4.52 × 10³⁸ at 1,000 yr (inside 0.3–3 × 10³⁹), 9.73 × 10³⁶ at 10⁴ yr.
+  - _Tests._ `victims::tests` (8): the Hills mass; the plan's resolve-and-pericentre test (with
+    `one`, `of_disruption` and the epoch state on its parabola); the words from 0; every
+    main-sequence victim disrupted at Milky Way values (200 seeds, and a main-sequence star of
+    0.1–150 M☉ at five ages); swallowed whole above the Hills mass; the Kepler members' loss cone
+    stays empty (3,268 members of the cells about the black hole, levels 0–5, none inside it, and
+    no victim on a cell); order independence; the golden (with a seed of both outcomes at 1.36 ×
+    10⁸ M☉, a victim inbound at the epoch and states before a disruption). `luminosity::tests`
+    (6): the closed forms; the Ponti bracket on a Sun-like tail, with the drawn tails pinned as
+    they stand; the sum by part; the look-back; order independence; the golden. `source::tests`
+    (2): the reach changes no hit; an inbound victim counted and found, the same in any order and
+    with either cache. `cargo test -p hyperion-sim --lib -- features::centre features::members`:
+    112 passed, 7 ignored, 36.8 s of tests (pod, 4 vCPU).
+- **Findings of P09.T30.b (for the owner's ruling; nothing built on them moves output).**
+  1. _The Ponti bracket's subject._ The plan's 0.3–3 × 10³⁹ erg/s a thousand years on holds for
+     a Sun-like victim (4.52 × 10³⁸) and is asserted there. The drawn victims are mostly M dwarfs,
+     and a tail scales as M★^⅓ R★: their median is 8.2 × 10³⁷ erg/s over 200 seeds (7.5 × 10³⁷ at
+     the fixture), 9.7% inside (5 of the fixture's 26), pinned as they stand. Ponti et al. 2010
+     state no band (their figure is Terrier et al. 2010's 1–100 keV) and no disruption; Ponti et
+     al.'s 2013 review (§4.4) has flares "of the order of 10³⁹ erg s⁻¹ or higher, between ∼100
+     and ∼1000 years ago". Lean: the bracket stays on the Sun-like star.
+  2. _The tails at late times._ η = 0.1 is SM16's figure for super-Eddington accretion. A tail is
+     below a tenth of Eddington after about five years and at 1.3 × 10⁻⁵ of it by 1,000, where
+     low-luminosity nuclei radiate "much less than the canonical value of 0.1" (Ho 2009). With
+     t^(−5⁄3) for ever, the horizon's tails keep a Milky Way centre at 10³⁵–10³⁸ erg/s, the
+     fixture at 3.47 × 10³⁸ now, 10⁵ times Sgr A*'s 3.6 × 10³³; Ponti et al. 2010 put Sgr A*
+     below 8 × 10³⁵ erg/s until 60–90 years ago. Lean: the plan's law stands now; a ruling may let
+     η fall with Ṁ below about 10⁻² Ṁ_Edd (an advection-dominated law, not checked) or end the
+     tails, a version bump.
+  3. _Weights and β (leans)._ A victim's class is drawn by its count over the whole cluster, not
+     by the loss-cone flux, which favours stars near the influence radius; β is 1, not SM16's
+     pinhole tail. Neither moves a figure the plan names.
+  4. _Minor._ L_Edd is for ionised hydrogen; SM16 equation 24 takes 0.34 cm² g⁻¹, 17% higher.
+     Ho's C_X applies below a tenth of Eddington, so not to a tail's first five years.

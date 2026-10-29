@@ -19,7 +19,8 @@
 //! it when first read ([`Galaxy::centre`], Design note 15).
 //!
 //! [`events`] holds the black hole's own events, its X-ray flares and its tidal disruptions, on
-//! its own ID as their subject (P09.T30.a).
+//! its own ID as their subject (P09.T30.a), each disruption's victim, the first class of the
+//! centre's feature-level list, and the black hole's luminosity (P09.T30.b).
 
 pub mod classes;
 pub mod df;

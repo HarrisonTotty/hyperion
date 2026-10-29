@@ -29,21 +29,25 @@
 //! - **Candidates**: each class's hosts over [`CLASS_ACCEPTANCE_FLOOR`], summed in the rows'
 //!   ([`CarvedClass`]) order. A candidate that fails its class's test is thinned, and P11.T8 keeps
 //!   that under one in ten, so the floor bounds what the thinning adds.
+//! - **Victims**: the tidal disruptions' victims, the first class of the centre's list (P09.T30.b),
+//!   one per disruption in the source horizon ([`expected_victims`]): 27.31 at the Milky Way's
+//!   black hole, 125 at 10⁵ M☉.
 //!
 //! # The bound
 //!
-//! The list's own: the candidates plus eight standard deviations of their Poisson count, plus
-//! index 0, under the centre's 65,536, which [`FeatureLevelList::with_classes`] asserts through the
-//! same function. It holds up to 63,518.8 candidates. A centre that passed a looser bound could
+//! The list's own: its entries, the victims and the candidates, plus eight standard deviations of
+//! their Poisson count, plus index 0, under the centre's 65,536, the bound that
+//! [`FeatureLevelList::with_classes`] asserts on its own classes through the same function. It
+//! holds up to 63,518.8 entries. A centre that passed a looser bound could
 //! panic as soon as T8.f built its list, so the plan's five standard deviations are reported
 //! ([`CentreListForecast::margin`]), not checked.
 //!
 //! # What it leaves out
 //!
-//! - **Plan 09's classes** on the centre's list, the tidal-disruption victims (P09.T30.b), the
-//!   supernovae (P09.T36) and the luminous blue variables (P09.T43), are not built and register
-//!   nothing ([`registered_classes`]), so they add nothing yet; plan 09 expects tens. Each must
-//!   join the candidates when it registers.
+//! - **Plan 09's other classes** on the centre's list, the supernovae (P09.T36) and the luminous
+//!   blue variables (P09.T43), are not built and register nothing ([`registered_classes`]), so
+//!   they add nothing yet; plan 09 expects tens. Each must join the entries when it registers, as
+//!   the victims have.
 //! - **Catalogue features** are not walked. A nursery's or an open cluster's initial mass is at
 //!   most [`NURSERY_MASS_MAX`], 10⁵ M☉, about 11 candidates at these rates. A globular's count is
 //!   P09.T9.e's encounter law under T8.f, which this module cannot forecast; T8.f brings it in.
@@ -59,9 +63,10 @@
 //! # As measured
 //!
 //! At `GENERATOR_VERSION` 23, against the 16-bit index, the Milky Way fixture's centre fits, at
-//! 7,145.0 candidates with 57,713.8 indices to spare at eight standard deviations, and so do both
-//! mass functions' capped clusters, the heaviest plan 02 draws, at 18,311.6 and 12,174.9
-//! candidates (46,140.9 and 52,477.4 to spare), and every one of the first 10³ of plan 02's seeds
+//! 7,145.0 candidates and 27.3 victims with 57,685.2 indices to spare at eight standard deviations
+//! (57,713.8 before the victims joined, P09.T30.b), and so do both mass functions' capped
+//! clusters, the heaviest plan 02 draws, at 18,311.6 and 12,174.9 candidates (46,112.7 and
+//! 52,449.1 to spare), and every one of the first 10³ of plan 02's seeds
 //! (`tests/galaxy_sweeps.rs`). The cap bounds every drawn cluster, so no seed fails while it holds.
 //! Twice either cap's candidates still fit, which a test keeps as the tripwire for the ruling's
 //! fallback: a refit or a new class that brings the capped forecast within a factor of two of the
@@ -69,6 +74,7 @@
 //! "P11.T8.e.b as built", after "The centre's feature-level index, ruled"). Against 13 bits, 393
 //! of the 10³ seeds failed (P11.T8.e, "as measured").
 
+use crate::galaxy::features::centre::events::victims::expected_victims;
 use crate::galaxy::features::centre::{BuildCentreError, CentreClasses, CentreProfile};
 #[cfg(doc)]
 use crate::galaxy::features::kinds::open_cluster::NURSERY_MASS_MAX;
@@ -126,6 +132,8 @@ pub struct CentreListForecast {
     /// Each carved class's hosts, in [`CLASS_SHARES`]' row order.
     hosts: [(CarvedClass, f64); 5],
     candidates: f64,
+    /// The tidal disruptions' victims expected in the source horizon.
+    victims: f64,
 }
 
 impl CentreListForecast {
@@ -153,6 +161,7 @@ impl CentreListForecast {
             formed_mass: SolarMasses::new(formed),
             hosts,
             candidates,
+            victims: expected_victims(profile.black_hole()),
         }
     }
 
@@ -204,19 +213,33 @@ impl CentreListForecast {
         self.candidates
     }
 
-    /// Whether the candidates fit the centre's list index: plus eight standard deviations and
-    /// index 0, under 65,536 ([`ListIndex::Centre`]; module documentation).
+    /// The tidal disruptions' victims the centre's list expects ([`expected_victims`]), ahead of
+    /// the carved classes in its order.
     #[must_use]
-    pub fn fits(&self) -> bool {
-        fits_list_index(self.candidates, ListIndex::Centre.limit())
+    pub fn victims(&self) -> f64 {
+        self.victims
     }
 
-    /// The indices left free under the centre's 65,536 once the candidates, `sigmas` standard
+    /// The entries the centre's list expects after index 0: the victims, then the carved classes'
+    /// candidates, added in that order.
+    #[must_use]
+    pub fn entries(&self) -> f64 {
+        self.victims + self.candidates
+    }
+
+    /// Whether the entries fit the centre's list index: plus eight standard deviations and index
+    /// 0, under 65,536 ([`ListIndex::Centre`]; module documentation).
+    #[must_use]
+    pub fn fits(&self) -> bool {
+        fits_list_index(self.entries(), ListIndex::Centre.limit())
+    }
+
+    /// The indices left free under the centre's 65,536 once the entries, `sigmas` standard
     /// deviations of their count and index 0 are counted: positive at eight exactly where
     /// [`fits`](Self::fits) holds.
     #[must_use]
     pub fn margin(&self, sigmas: f64) -> f64 {
-        list_index_margin(self.candidates, sigmas, ListIndex::Centre.limit())
+        list_index_margin(self.entries(), sigmas, ListIndex::Centre.limit())
     }
 
     /// The check's verdict on the forecast.
@@ -225,7 +248,7 @@ impl CentreListForecast {
             Ok(())
         } else {
             Err(ExceedFeatureListError::CentreListTooFull {
-                candidates: self.candidates,
+                candidates: self.entries(),
             })
         }
     }
@@ -252,9 +275,11 @@ fn largest_rate(row: &ClassShareRow) -> f64 {
 /// deviations and index 0, under its index's limit, 65,536 at the centre (module documentation).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExceedFeatureListError {
-    /// The galactic centre's list: plan 11's carved classes expect `candidates` there.
+    /// The galactic centre's list: its tidal disruptions' victims and plan 11's carved classes
+    /// expect `candidates` entries there.
     CentreListTooFull {
-        /// The expected candidates of the carved classes on the centre's list.
+        /// The expected entries of the centre's list ([`CentreListForecast::entries`]): the
+        /// victims and the carved classes' candidates.
         candidates: f64,
     },
 }
@@ -264,7 +289,7 @@ impl core::fmt::Display for ExceedFeatureListError {
         match self {
             Self::CentreListTooFull { candidates } => write!(
                 f,
-                "the galactic centre's feature-level list expects {candidates:.0} candidates, \
+                "the galactic centre's feature-level list expects {candidates:.0} entries, \
                  within eight standard deviations of its index's {}",
                 ListIndex::Centre.limit()
             ),
@@ -315,18 +340,20 @@ fn galaxy_centre_forecast(galaxy: &Galaxy) -> Result<CentreListForecast, BuildCe
     ))
 }
 
-/// Checks that `galaxy`'s centre has room on its feature-level list for plan 11's carved classes:
-/// their expected candidates ([`CentreListForecast::candidates`]: the centre's formed mass times
-/// [`CLASS_SHARES`]' rates, over [`CLASS_ACCEPTANCE_FLOOR`]) plus eight standard deviations of
-/// their Poisson count (plan 03, Design note 6) and index 0 stay under the centre's 16-bit index,
-/// 65,536 (module documentation).
+/// Checks that `galaxy`'s centre has room on its feature-level list for plan 11's carved classes
+/// after its tidal disruptions' victims: the list's expected entries
+/// ([`CentreListForecast::entries`]: the victims, then the candidates, the centre's formed mass
+/// times [`CLASS_SHARES`]' rates over [`CLASS_ACCEPTANCE_FLOOR`]) plus eight standard deviations
+/// of their Poisson count (plan 03, Design note 6) and index 0 stay under the centre's 16-bit
+/// index, 65,536 (module documentation).
 ///
 /// It reads the galaxy's mass model and mass function, and builds the centre's classes but no
 /// distribution function. Nothing calls it yet (module documentation, "Not yet called").
 ///
 /// # Errors
 ///
-/// [`ExceedFeatureListError::CentreListTooFull`] with the expected candidates if they do not fit.
+/// [`ExceedFeatureListError::CentreListTooFull`] with the expected entries, the victims and the
+/// candidates, if they do not fit.
 ///
 /// # Panics
 ///
@@ -395,8 +422,8 @@ mod tests {
         eprintln!(
             "{label}: primaries formed {:.5e}, systems {:.5e}, mean formed mass {:.6} M_sun, \
              formed mass {:.5e} M_sun; hosts: AWD fast {:.1}, AWD slow {:.1}, XRB {:.2}, stellar \
-             mergers {:.2}, NS mergers {:.4}; candidates {:.1}; +8 sigma +1 {:.1} (margin {:.1}), \
-             +5 sigma +1 {:.1} (margin {:.1})",
+             mergers {:.2}, NS mergers {:.4}; candidates {:.1}, victims {:.2}; +8 sigma +1 {:.1} \
+             (margin {:.1}), +5 sigma +1 {:.1} (margin {:.1})",
             f.primaries_formed(),
             f.systems(),
             f.mean_formed_mass().value(),
@@ -407,6 +434,7 @@ mod tests {
             f.hosts(CarvedClass::StellarMerger),
             f.hosts(CarvedClass::NeutronStarMerger),
             f.candidates(),
+            f.victims(),
             LIMIT - f.margin(8.0),
             f.margin(8.0),
             LIMIT - f.margin(5.0),
@@ -445,7 +473,8 @@ mod tests {
 
     /// The forecast at the Milky Way fixture is its primaries formed times its mass formed per
     /// system times the five rates, over the acceptance floor, and its classes' hosts are in the
-    /// rows' proportion.
+    /// rows' proportion; its entries add the 27.31 victims of its black hole's disruptions in the
+    /// source horizon (P09.T30.b).
     #[test]
     fn the_milky_way_s_forecast_is_its_formed_mass_at_the_classes_rates() {
         let params = GalaxyParams::milky_way_like();
@@ -463,6 +492,8 @@ mod tests {
             "{} {want}",
             f.candidates()
         );
+        assert!((f.victims() - 27.309).abs() < 1e-3, "{}", f.victims());
+        assert_same_bits(f.entries(), f.victims() + f.candidates());
         let hosts: f64 = CLASS_SHARES
             .rows()
             .iter()
@@ -535,10 +566,10 @@ mod tests {
     }
 
     /// The check at the Milky Way fixture, under either mass function, against the centre's 16-bit
-    /// index: the default function's centre, 7,145.0 candidates, fits with 57,713.8 indices to
-    /// spare at eight standard deviations, and Kroupa's, 6,468.0, with 58,423.6, as measured at
-    /// `GENERATOR_VERSION` 23 and pinned to 10⁻⁵, with the primaries' share of `m̄_f` (module
-    /// documentation) to 10⁻⁴.
+    /// index: the default function's centre, 7,145.0 candidates and 27.3 victims, fits with
+    /// 57,685.2 indices to spare at eight standard deviations, and Kroupa's, 6,468.0 and 27.3, with
+    /// 58,394.9, as measured at `GENERATOR_VERSION` 23 and pinned to 10⁻⁵, with the primaries'
+    /// share of `m̄_f` (module documentation) to 10⁻⁴.
     #[test]
     fn the_milky_way_s_centre_list_fits_under_either_mass_function() {
         let galaxy = milky_way_galaxy();
@@ -553,15 +584,15 @@ mod tests {
             (
                 MassFunctionKind::Chabrier,
                 7_144.99,
-                57_713.79,
-                57_967.37,
+                57_685.18,
+                57_939.25,
                 0.703_48,
             ),
             (
                 MassFunctionKind::Kroupa,
                 6_468.04,
-                58_423.57,
-                58_664.84,
+                58_394.90,
+                58_636.68,
                 0.713_27,
             ),
         ] {
@@ -584,8 +615,8 @@ mod tests {
     }
 
     /// The check at plan 02's cap on the cluster's mass, under either mass function: a capped
-    /// centre fits the 16-bit index, with 46,140.9 indices to spare under Chabrier's function and
-    /// 52,477.4 under Kroupa's at eight standard deviations, as measured at `GENERATOR_VERSION` 23
+    /// centre fits the 16-bit index, with 46,112.7 indices to spare under Chabrier's function and
+    /// 52,449.1 under Kroupa's at eight standard deviations, the victims counted, as measured at `GENERATOR_VERSION` 23
     /// and pinned to 10⁻⁵ with the candidates. The cap bounds every drawn cluster.
     #[test]
     fn the_cap_s_centre_list_fits_under_either_mass_function() {
@@ -594,13 +625,13 @@ mod tests {
                 MassFunctionKind::Chabrier,
                 0x1108_e000,
                 18_311.574_542_824_812,
-                46_140.86,
+                46_112.75,
             ),
             (
                 MassFunctionKind::Kroupa,
                 0x1108_e001,
                 12_174.902_962_021_803,
-                52_477.38,
+                52_449.08,
             ),
         ] {
             let params = scattered(kind, 1.0);
@@ -656,6 +687,8 @@ mod tests {
         let largest = largest_fitting();
         let (under, over) = (largest * (1.0 - 1e-9), largest * (1.0 + 1e-9));
         let mut f = centre_list_forecast(milky_way_galaxy().params()).unwrap();
+        // The bound is the entries', here the candidates' alone.
+        f.victims = 0.0;
         f.candidates = under;
         assert!(f.fits());
         assert!(f.margin(8.0) > 0.0, "{}", f.margin(8.0));
@@ -729,7 +762,7 @@ mod tests {
         .to_string();
         assert_eq!(
             message,
-            "the galactic centre's feature-level list expects 64000 candidates, within eight \
+            "the galactic centre's feature-level list expects 64000 entries, within eight \
              standard deviations of its index's 65536"
         );
         assert!(!message.ends_with(['.', '!', '?']), "{message}");

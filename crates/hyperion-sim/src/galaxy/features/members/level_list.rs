@@ -34,7 +34,11 @@
 //! at 65,536.
 //!
 //! This task registers no class: [`FeatureLevelList::of`] lists none, and the classes' tasks
-//! (P09.T30.b, T36 and T43) register theirs in [`registered_classes`].
+//! (P09.T36 and T43) register theirs in [`registered_classes`]. The first class of the order, the
+//! tidal disruptions' victims (P09.T30.b), is the galactic centre's alone and is listed by the
+//! centre itself, at indices 1 upward after its black hole
+//! ([`events::victims`](crate::galaxy::features::centre::events::victims)), so a class listed on
+//! the centre after them starts past their count.
 
 use crate::coords::{GalacticDisplacement, GalacticPosition};
 use crate::galaxy::Galaxy;
@@ -198,7 +202,8 @@ pub enum MemberZero {
 }
 
 /// The classes registered on `feature`'s list, in list order, with their counts and profiles:
-/// none until P09.T30.b, T36 and T43 register theirs.
+/// none until P09.T36 and T43 register theirs (the tidal disruptions' victims, P09.T30.b, are on
+/// the galactic centre's list alone, which the centre lists itself).
 #[must_use]
 pub fn registered_classes(_galaxy: &Galaxy, _feature: &FeatureRecord) -> Vec<ListClass> {
     Vec::new()

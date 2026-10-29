@@ -8,12 +8,18 @@
 //!   ([`CentrePlacement::expected_candidates`]) of the owned cells touching the sphere's unpadded
 //!   radius, which errs high, as [`SystemSource`]'s contract allows, and does not depend on the
 //!   query's time; each band counts in the layer of its band, and the black hole, if the sphere
-//!   holds it, one in layer E.
+//!   holds it, one in layer E. A tidal disruption's victim (P09.T30.b) still on its way in at the
+//!   epoch counts one in its layer if its epoch position is inside the radius.
 //! - **Hits.** Members move on their orbits (P09.T28.b.a's [`Trajectory`]: the Kepler orbit
 //!   inside the influence radius, a straight line outside it), so the cells are chosen by how far
 //!   their members can go, and every member of a chosen cell is propagated to the sphere's time
 //!   and tested there against the unpadded radius. Members not yet born at that time (the young
 //!   disc's, with ages from −H) are dropped.
+//! - **Victims.** The centre's feature-level members after the black hole, the tidal disruptions'
+//!   victims ([`CentreVictims`]), are on no cell: each one that still exists at the sphere's time,
+//!   its disruption not yet passed, is propagated on its own parabola and tested there, unless its
+//!   reach ([`TidalDisruptionVictim::reach_at`](super::events::victims::TidalDisruptionVictim::reach_at),
+//!   below) misses the sphere.
 //!
 //! # Which cells
 //!
@@ -45,6 +51,11 @@
 //!   `3⁄2 |t| √(2εr + 2μ)`, so it stays within an outward reach of the black hole; every such
 //!   cell is scanned in full whenever the sphere comes within that reach of the black hole, and
 //!   none of them otherwise.
+//!
+//! - **The victims' bound.** A victim moves at most at the escape speed from the black hole alone,
+//!   `√(2 G M• ÷ r)`, under every cell's bound above, so before its disruption it lies within its
+//!   pericentre plus the radial plunge about `G M•` over the span to it: a reach of its own, which
+//!   passes over a victim that cannot be inside the sphere and changes no hit.
 //!
 //! Every pad and reach is an upper bound, so a cell that can hold a member inside the sphere at
 //! its time is always visited: the hits equal a brute-force scan of every member, which a test
@@ -78,6 +89,7 @@ use crate::units::consts::METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND;
 use crate::units::{GravitationalParameter, LightYears, Seconds};
 
 use super::super::nested::{NestedCell, NestedLevel, box_distance};
+use super::events::victims::{CentreVictims, TidalDisruptionVictim};
 use super::members::CentrePlacement;
 use super::{BuildCentreError, CentreProfile, CentreTracer};
 
@@ -340,6 +352,8 @@ pub struct CentreMemberSource<'a> {
     /// `E_out`, the least binding energy any member has, (km/s)²: the four distribution
     /// functions' outer cut.
     floor_km2_s2: f64,
+    /// The feature-level members after the black hole: the tidal disruptions' victims.
+    victims: CentreVictims,
 }
 
 impl std::fmt::Debug for CentreMemberSource<'_> {
@@ -350,12 +364,18 @@ impl std::fmt::Debug for CentreMemberSource<'_> {
 
 impl<'a> CentreMemberSource<'a> {
     /// The source of `galaxy`'s centre, whose model the galaxy holds ([`Galaxy::centre`]), reading
-    /// cells through `orbits`.
+    /// cells through `orbits`, with its tidal disruptions' victims ([`CentreVictims::new`]).
     ///
     /// # Errors
     ///
     /// The [`BuildCentreError`] of a centre that cannot be built, which no galaxy the builder
     /// allows has ([`Galaxy::centre`]).
+    ///
+    /// # Panics
+    ///
+    /// If the galaxy's black hole is below the 0.56 M☉ at which its disruptions' bins would pass
+    /// their limit ([`CentreVictims::new`]'s error), which no galaxy the builder allows has: its
+    /// least black hole, 8.58σ below the M–σ relation, is some 4 × 10³ M☉ (P09.T30.a as built).
     pub fn new(
         galaxy: &'a Galaxy,
         orbits: &'a dyn CentreOrbitCache,
@@ -365,11 +385,15 @@ impl<'a> CentreMemberSource<'a> {
             .iter()
             .map(|&t| model.distribution(t).floor_energy())
             .fold(f64::INFINITY, f64::min);
+        let victims = CentreVictims::new(galaxy, model).expect(
+            "a galaxy the builder allows has a black hole above the disruptions' 0.56 M_sun floor",
+        );
         Ok(Self {
             galaxy,
             placement: CentrePlacement::new(model),
             orbits,
             floor_km2_s2,
+            victims,
         })
     }
 
@@ -377,6 +401,12 @@ impl<'a> CentreMemberSource<'a> {
     #[must_use]
     pub fn placement(&self) -> &CentrePlacement<'a> {
         &self.placement
+    }
+
+    /// The tidal disruptions' victims, the feature-level members it returns after the black hole.
+    #[must_use]
+    pub fn victims(&self) -> &CentreVictims {
+        &self.victims
     }
 
     /// Panics unless `galaxy` is the source's own.
@@ -588,6 +618,16 @@ impl SystemSource for CentreMemberSource<'_> {
         if holds_black_hole(sphere) {
             counts.set(Layer::E, counts.get(Layer::E) + 1.0);
         }
+        for victim in self.victims.at(UniverseTime::EPOCH) {
+            let record = victim.record();
+            let distance = LightYears::from(sphere.centre().distance_to(record.epoch_position()));
+            if record.existence_at(UniverseTime::EPOCH) == Existence::Exists
+                && distance.value() <= sphere.radius().value()
+            {
+                let layer = record.layer();
+                counts.set(layer, counts.get(layer) + 1.0);
+            }
+        }
         counts
     }
 
@@ -609,6 +649,11 @@ impl SystemSource for CentreMemberSource<'_> {
         }
         let from_black_hole =
             LightYears::from(sphere.centre().distance_to(&GalacticPosition::ORIGIN)).value();
+        for victim in self.victims.at(sphere.time()) {
+            if layers.contains(victim.record().layer()) {
+                out.extend(victim_hit(victim, sphere, from_black_hole));
+            }
+        }
         self.cells_reaching(sphere, |cell| {
             for band in BANDS_COARSEST_FIRST {
                 if !layers.contains(band.layer()) {
@@ -652,6 +697,30 @@ fn hit_at(trajectory: &Trajectory, sphere: &QuerySphere, t: UniverseTime) -> Opt
     let distance = LightYears::from(sphere.centre().distance_to(state.position()));
     (distance.value() <= sphere.radius().value())
         .then(|| SystemHit::new(*record, *state.position(), distance))
+}
+
+/// The hit `victim` makes in `sphere` at its time, `from_black_hole` ly from the black hole, or
+/// `None` if it is outside the unpadded radius then, not yet born, or disrupted already; a victim
+/// whose reach misses the sphere is not propagated (module documentation).
+#[must_use]
+fn victim_hit(
+    victim: &TidalDisruptionVictim,
+    sphere: &QuerySphere,
+    from_black_hole: f64,
+) -> Option<SystemHit> {
+    let t = sphere.time();
+    let record = victim.record();
+    let radius = sphere.radius().value();
+    if record.existence_at(t) == Existence::NoSystemYet
+        || from_black_hole - radius > victim.reach_at(t)?.value()
+    {
+        return None;
+    }
+    let StateAt::Exists(state) = victim.state_at(t) else {
+        return None;
+    };
+    let distance = LightYears::from(sphere.centre().distance_to(state.position()));
+    (distance.value() <= radius).then(|| SystemHit::new(*record, *state.position(), distance))
 }
 
 /// Whether `sphere` holds the black hole, at rest at the galactic origin.
@@ -774,6 +843,184 @@ mod tests {
             orbits.heap_bytes(),
             members.len() * (size_of::<Trajectory>() + size_of::<[f64; 2]>())
         );
+    }
+
+    /// The victims' reach changes no hit (P09.T30.b): for every victim of the fixture, at instants
+    /// up to its disruption, it lies within its reach, and in spheres about it, about the black
+    /// hole and beyond its reach the source's test equals the plain test of its state; after its
+    /// disruption it makes no hit. The census counts the victims on their way in at the epoch.
+    #[test]
+    fn a_victim_s_reach_changes_no_hit() {
+        let galaxy = testing::milky_way_galaxy();
+        let source = CentreMemberSource::new(galaxy, &NoCentreOrbitCache).unwrap();
+        let victims = source.victims();
+        assert!(victims.count() > 0);
+        let (mut hits, mut passed_over) = (0_u32, 0_u32);
+        for v in victims.victims() {
+            for back in [0_i64, 1, 3_600, 31_557_600, 3_155_760_000, 63_115_200_000] {
+                let t = v
+                    .time()
+                    .checked_sub(crate::time::Span::new(back, 0).unwrap())
+                    .unwrap();
+                let StateAt::Exists(state) = v.state_at(t) else {
+                    panic!("{:?} exists before its disruption", v.id());
+                };
+                let at = state.position();
+                let r = LightYears::from(at.distance_to(&GalacticPosition::ORIGIN)).value();
+                let reach = v.reach_at(t).unwrap().value();
+                assert!(
+                    r <= reach,
+                    "{:?} {back} s before: {r} ly beyond its reach {reach}",
+                    v.id()
+                );
+                let outward = PointLy::from(at);
+                let beyond = |k: f64| {
+                    GalacticPosition::from_light_years([
+                        outward.x * k / r,
+                        outward.y * k / r,
+                        outward.z * k / r,
+                    ])
+                    .unwrap()
+                };
+                for (centre, radius) in [
+                    (*at, (0.01 * r).max(1e-12)),
+                    (GalacticPosition::ORIGIN, 0.5 * r),
+                    (GalacticPosition::ORIGIN, 2.0 * r),
+                    (beyond(3.0 * reach + 1.0), reach + 0.5),
+                ] {
+                    let sphere =
+                        QuerySphere::new(centre, LightYears::new(radius), t, LightYears::ZERO)
+                            .unwrap();
+                    let from_black_hole =
+                        LightYears::from(centre.distance_to(&GalacticPosition::ORIGIN)).value();
+                    let plain = LightYears::from(centre.distance_to(at)).value() <= radius;
+                    let got = victim_hit(v, &sphere, from_black_hole);
+                    assert_eq!(got.is_some(), plain, "{:?} {back} s before", v.id());
+                    if let Some(hit) = got {
+                        assert_eq!(hit.record(), v.record());
+                        hits += 1;
+                    } else if from_black_hole - radius > reach {
+                        passed_over += 1;
+                    }
+                }
+            }
+            let after = v
+                .time()
+                .checked_add(crate::time::Span::new(0, 1).unwrap())
+                .unwrap();
+            let sphere = QuerySphere::new(
+                GalacticPosition::ORIGIN,
+                LightYears::new(100.0),
+                after,
+                LightYears::ZERO,
+            )
+            .unwrap();
+            assert_eq!(victim_hit(v, &sphere, 0.0), None);
+        }
+        eprintln!("{hits} hits, {passed_over} passed over by their reach");
+        assert!(hits > 0 && passed_over > 0);
+    }
+
+    /// A victim still on its way in at the epoch is found where it is then and counted there: the
+    /// census adds one in its layer to the cells' expected candidates, and the hits hold it. The
+    /// fixture's victims are all disrupted before the epoch, so the source takes the victims of
+    /// the first seed of family `0x0930_c000_0000_0000` that has one inbound, about the fixture's
+    /// centre.
+    #[test]
+    fn a_victim_on_its_way_in_is_counted_and_found_where_it_is() {
+        let galaxy = testing::milky_way_galaxy();
+        let mut source = CentreMemberSource::new(galaxy, &NoCentreOrbitCache).unwrap();
+        assert_eq!(source.victims().at(UniverseTime::EPOCH).count(), 0);
+        source.victims = (0..1_000_u64)
+            .map(|i| {
+                CentreVictims::from_parts(
+                    crate::Seed::new(0x0930_c000_0000_0000 | i),
+                    galaxy.params().black_hole().mass(),
+                    source.placement().model(),
+                    galaxy.mass_function(),
+                )
+                .unwrap()
+            })
+            .find(|v| v.at(UniverseTime::EPOCH).count() > 0)
+            .expect("a seed in a thousand has a victim inbound at the epoch");
+        let coming = source
+            .victims()
+            .at(UniverseTime::EPOCH)
+            .next()
+            .unwrap()
+            .clone();
+        let at = *coming.record().epoch_position();
+        let radius = LightYears::new(1e-4);
+        let sphere = QuerySphere::new(at, radius, UniverseTime::EPOCH, LightYears::ZERO).unwrap();
+        let counts = source.expected_in_sphere(galaxy, &sphere);
+        let mut cells = LayerCounts::ZERO;
+        for cell in source
+            .placement()
+            .grid()
+            .cells_touching(&local_of(&at), radius)
+        {
+            for band in BANDS_COARSEST_FIRST {
+                let layer = band.layer();
+                cells.set(
+                    layer,
+                    cells.get(layer) + source.placement().expected_candidates(band, cell),
+                );
+            }
+        }
+        let layer = coming.record().layer();
+        for l in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+            let want = cells.get(l) + if l == layer { 1.0 } else { 0.0 };
+            assert!(
+                (counts.get(l) - want).abs() <= 1e-12 * want.max(1.0),
+                "{l:?}: {} against {want}",
+                counts.get(l)
+            );
+        }
+        let mut hits = Vec::new();
+        source.systems_in_sphere(galaxy, &sphere, LayerSet::EMPTY.with(layer), &mut hits);
+        let found: Vec<_> = hits
+            .iter()
+            .filter(|h| h.record().id() == coming.record().id())
+            .collect();
+        assert_eq!(found.len(), 1, "{:?}", coming.id());
+        assert!(
+            found[0].distance().value() < 1e-9,
+            "{:?}",
+            found[0].distance()
+        );
+        eprintln!(
+            "{:?}, disrupted {} from now, is {:.4} ly from the black hole at the epoch",
+            coming.id(),
+            coming.time(),
+            LightYears::from(at.distance_to(&GalacticPosition::ORIGIN)).value()
+        );
+        // The same hits in any order of asking, cold or through a keeping cache, about where the
+        // victim is at the epoch and a decade either side.
+        let kept = KeepCentreOrbits::new(galaxy);
+        let mut keeping = CentreMemberSource::new(galaxy, &kept).unwrap();
+        keeping.victims = source.victims.clone();
+        let spheres: Vec<QuerySphere> = [-10, 0, 10]
+            .into_iter()
+            .map(|years| {
+                let t = UniverseTime::from_julian_years(years).unwrap();
+                let StateAt::Exists(state) = coming.state_at(t) else {
+                    panic!("the victim exists a decade either side of the epoch");
+                };
+                QuerySphere::new(*state.position(), radius, t, LightYears::ZERO).unwrap()
+            })
+            .collect();
+        let hits_of = |source: &CentreMemberSource<'_>, sphere: &QuerySphere| {
+            let mut hits = Vec::new();
+            source.systems_in_sphere(galaxy, sphere, LayerSet::EMPTY.with(layer), &mut hits);
+            hits
+        };
+        hyperion_testkit::order::assert_order_independent(&spheres, |s| hits_of(&source, s));
+        hyperion_testkit::order::assert_order_independent(&spheres, |s| hits_of(&keeping, s));
+        for sphere in &spheres {
+            let hits = hits_of(&source, sphere);
+            assert_eq!(hits, hits_of(&keeping, sphere));
+            assert!(hits.iter().any(|h| h.record().id() == coming.record().id()));
+        }
     }
 
     /// The excess energy falls outward, is positive near the black hole, and holds the energy of

@@ -140,8 +140,10 @@ impl FeatureInterior {
     ///   at most 8.58 √2 times the largest over the bands' tails.
     ///
     /// It does not cover the classes of the feature-level list ([`MemberSlot::FeatureLevel`],
-    /// registered by P09.T30.b, T36 and T43): a task that registers one with its own velocity law
-    /// extends this bound.
+    /// registered by P09.T36 and T43): a task that registers one with its own velocity law
+    /// extends this bound. P09.T30.b's tidal-disruption victims are the galactic centre's alone,
+    /// and the centre's source bounds their motion itself
+    /// ([`CentreMemberSource`](crate::galaxy::features::centre::CentreMemberSource)).
     #[must_use]
     pub const fn member_speed_bound(&self) -> KilometresPerSecond {
         self.speed_bound

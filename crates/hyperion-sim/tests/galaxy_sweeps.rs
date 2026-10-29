@@ -511,8 +511,9 @@ fn the_densities_over_a_thousand_seeds() {
 /// **Every seed passes**, which meets T8.e's acceptance ("the check passes for every seed of the
 /// sweep"). Measured at `GENERATOR_VERSION` 23: none of the 10³ fails at eight standard deviations
 /// or at five, none expects 65,535 candidates, and the worst seed, `0x02005ee900000339`, a cluster
-/// at the cap of 6.4 × 10⁷ M☉, expects 18,321.3 candidates and leaves 46,130.9 indices at eight
-/// standard deviations. The cap bounds every drawn cluster, and the bound holds up to 63,518.8
+/// at the cap of 6.4 × 10⁷ M☉, expects 18,321.3 candidates and leaves 46,074.8 indices at eight
+/// standard deviations once its tidal disruptions' victims are counted (46,130.9 before them,
+/// P09.T30.b; 407 s in the slow-test profile in a 4-vCPU pod). The cap bounds every drawn cluster, and the bound holds up to 63,518.8
 /// candidates, 3.47 times the worst. Against 13 bits, 393 failed (plan 11's Risks, "The centre's
 /// feature-level index, as measured (P11.T8.e)", and "The centre's feature-level index, ruled").
 #[test]
