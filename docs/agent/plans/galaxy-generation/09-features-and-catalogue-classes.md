@@ -1172,6 +1172,16 @@ hundred innermost members.
   the S2-like orbit; against a direct integration in the smooth potential of black hole plus
   cluster, position error under a tenth of the tidal radius after 1,000 yr at 0.1, 1 and 5 ly; the
   profile test of P09.T31 is the acceptance of the pair.
+  - **P09.T28.d.a The rates, pure** (no output moves, no bump; decision-galaxy-25-train §2.2).
+    `schwarzschild_rate`, `mass_precession_rate` and the eccentricity table (built once per galaxy)
+    land pure. `KeplerOrbit::propagate` keeps the two-body law, and T28.a's `kepler.golden` stays.
+    The secular step is a method of its own. _Built (lane `p09-secular`, 2026-10-29, at
+    `GENERATOR_VERSION` 23, no output moved): see Risks, "P09.T28.d.a as built"._
+  - **P09.T28.d.b The term** (behind `KEPLER_SECULAR_VERSION` = 25; after P09.T28.b.b). Its term in
+    `position_velocity_at` sits behind `KEPLER_SECULAR_VERSION` = 25, apart from T28.b.b's hold for
+    attribution, and may re-pin T28.b.b's 25-arm figures by name (§1.3). The plan's "Bump
+    `GENERATOR_VERSION`" becomes the 25 wiring's. Its D2 and C1 run with `kepler_regime` on, under
+    `every_25_hold()`; its term reaches generated output only through T28.b.b's swap.
 
 #### P09.T29 The range query at the centre
 
@@ -4243,3 +4253,91 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `Galaxy::centre_motion`, which builds on first read (about 64 ms, once a galaxy). It moves
     output only within the influence radius (7.19 ly at the fixture), which removes the README's
     relaxation "no pericentre stripping within about 10 ly of the centre".
+- **P09.T28.d.a as built (lane `p09-secular`, 2026-10-29, on 5bec9f1 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §2.2: the rates pure, the term held).** No output moves: nothing calls
+  the rates or the step (the term is P09.T28.d.b's), `propagate` is unchanged and `kepler.golden`
+  with it, and no golden is added. Files: `galaxy/motion/secular.rs` (new) and one
+  `pub mod secular;` line in `galaxy/motion.rs`.
+  - _Signatures._ In `motion::secular`: `SecularTable` (`new(&CentreMotion)`), the eccentricity
+    table, a value built from the centre's motion and held by no `Galaxy` field (the held half adds
+    the carrier with `GalaxyRules`); `SecularRates` (`schwarzschild`, `mass_precession`, `apsidal`,
+    `mean_motion_correction`, each a `PerYear`). On `KeplerOrbit`, in the child module:
+    `schwarzschild_rate(GravitationalParameter) -> Option<PerYear>` (it takes the black hole's μ,
+    since the orbit's own μ holds the stars inside r₀: Provides named no argument),
+    `mass_precession_rate(&SecularTable) -> Option<PerYear>`,
+    `secular_rates(&SecularTable) -> Option<SecularRates>` and the secular step
+    `propagate_secular(Seconds, &SecularRates) -> KeplerOrbit`. Parabolic and unbound orbits take
+    `None`, and their step is `propagate`.
+  - _The rates._ Schwarzschild: `3 G M_bh n ÷ (c² a (1 − e²))`, `6π G M_bh ÷ (c² a (1 − e²))` a
+    radial period, about the black hole alone. The stars: Lagrange's equations for the
+    orbit-averaged `ΔΦ = Φ + μ ÷ r` about T28.b.a's μ = G M(<r₀), whose partial derivatives reduce
+    to orbit averages of the stars' pull `g★ = G M★(<r) ÷ r²`, so that `ω̇★ = −n √(1 − e²) β★ ÷ μ`,
+    `β★ = (a² ÷ πe) ∫₀^π g★ (e − cos E) dE`, retrograde.
+  - _Deviation: the mean motion (lean, 2026-10-29)._ The plan turns the orbit "by two rates × dt".
+    That alone moves a circular orbit along its track by ω̇★ t r, though about μ = G M(<r₀) the
+    circular orbit is exact: 36–68 tenths of its tidal radius in 1,000 yr at 0.1–5 ly. So the step
+    also advances the mean anomaly at the rate Lagrange's equations give,
+    `Ṁ − n = n (2 (G M_bh − μ) + 2 α★ + (1 − e²) β★) ÷ μ` with
+    `α★ = (a² ÷ π) ∫₀^π g★ (1 − e cos E)² dE`, which cancels the precession on a circular orbit, and
+    takes the mean orbit's mean motion from the energy integral,
+    `1 ÷ ā = 1 ÷ a − 2 (ΔΦ(r₀) − ⟨ΔΦ⟩) ÷ μ` (the epoch's osculating a is not the mean one). The step
+    is the two-body orbit propagated by dt (1 + δn ÷ n), then turned about its angular momentum by
+    the two precession rates × dt. With the GR advance it changes no radial period, which is
+    gauge-dependent at order G M ÷ (c² a).
+  - _The table's design point (lean, 2026-10-29)._ On (a, e), of the profile itself: `α★`, `β★` and
+    `⟨Γ★⟩ − Γ★(a)` (Γ★ the stars' potential), each over its scale G M★(<a) (or ÷ a), at 16 knots a
+    decade from 10⁻⁴ to 10⁴ ly and 32 eccentricities `(j + ½) ÷ 32` (mirrored across e = 0), read by
+    cubic Lagrange interpolation; each entry an 80-node quadrature in E over five panels graded
+    towards pericentre, of `M★(<r)` and Γ★ tabulated at 32 knots a decade from 10⁻⁷ to 10⁶ ly.
+    Values of a and r outside are clamped, and e above 63 ÷ 64 takes the last node's averages.
+    Measured: the orbit averages to 3.6 × 10⁻⁴ of a 2,048-node quadrature on the exact mass for a
+    under 100 ly, and 2.3 × 10⁻³ beyond (orbits of e above 0.93 from inside the 10 ly break to
+    beyond the 100 ly taper); a harmonic core's closed forms to 6 × 10⁻⁵ (4 × 10⁻⁴ for the
+    potential's average). At 8 knots a decade the break's orbits were read 4 × 10⁻³ off. The
+    alternative, the power law's averages at the slope read at a, agrees to 10⁻⁴ inside 3 ly at
+    Milky Way values (the cusp is a clean 1.3 there) and is 0.3–0.7% off at 5 ly, 3–14% at 8 ly and
+    up to 21% at 12 to 30 ly, across the break, which seeds with influence radii of 10–177 ly hold.
+    The table builds in about 54 ms (release, pod, 4 vCPU) and holds 106 kB: T28.d.b's carrier pays
+    it once.
+  - _Figures._ S2 (a = 0.0163 ly, e = 0.8846) advances **12.260′** an orbit about 4.297 × 10⁶ M☉
+    (GRAVITY 2020's 12.1′ is about their 4.261 × 10⁶ M☉), the plan's a = 0.0158 ly, e = 0.88
+    12.192′. A circular orbit's precession and mean-motion shift cancel to 10⁻⁴: at 0.1, 1 and 5 ly
+    ω̇★ is −1.53, −2.39 and −2.71 × 10⁻⁵ rad yr⁻¹.
+  - _The direct integration (the plan's test; a finding, pinned as it stands)._ The step, with the
+    stars' rates alone, and the two-body law, against a fourth-order Runge–Kutta integration in
+    `CentreMotion`'s M(<r) (steps of 2 × 10⁻³ local dynamical times, agreeing with steps of 10⁻³ to
+    10⁻³ of the bound), after ±1,000 yr from 0.1, 1 and 5 ly, on a circular orbit and four eccentric
+    ones (e 0.51–0.85), in tenths of the orbit's T28.c tidal radius for a solar mass (the bound is
+    1):
+
+    | From   | Step as built | No mean orbit | Precession alone | Two-body |
+    | ------ | ------------- | ------------- | ---------------- | -------- |
+    | 0.1 ly | 65.4          | 875           | 1,838            | 1,805    |
+    | 1 ly   | 3,181         | 1,990         | 323              | 380      |
+    | 5 ly   | 1,953         | 962           | 276              | 1.09     |
+
+    Circular orbits meet the bound under the step and the two-body law (under 0.001). No eccentric
+    orbit does under any of them. At 0.1 ly the span holds one to eight radial periods (P 131–838
+    yr) and the step beats the two-body law on every orbit, some thirtyfold at worst; at 1 and 5 ly
+    it holds a fraction of one (P 4,000–240,000 yr), the averages are not what a short arc feels,
+    and the two-body law is the closer on every eccentric orbit, the step putting a star 0.1–2.5 ly
+    from where it is. The step is first-order secular theory: its error is the short-period terms,
+    of order the variation of M(<r) over the orbit times a, which only an orbit inside some 0.03 ly
+    keeps under a tenth of its tidal radius. The two-body law's own miss (380 at 1 ly) is T28.b.a's
+    fixed μ = G M(<r₀) on an orbit whose enclosed mass changes by percents. The test
+    (`the_secular_step_against_a_direct_integration`, fast, 1.5 s with the module's others) pins
+    each worst to 10% and holds the order above.
+
+  - _For P09.T28.d.b (lean, 2026-10-29; QUESTION for main)._ The term as the plan has it would move
+    Kepler-regime records at 1–7 ly by up to a few light-years more than the two-body law, a move
+    larger than any T28.b.b's census found. Lean: apply the term only to a bound orbit whose radial
+    period is under the clock window's half-width H (1,000 yr; a ≲ 0.25 ly at Milky Way values), a
+    property of the system and so continuous in time, and keep the two-body law elsewhere; the
+    plan's bound itself needs the short-period terms (first-order variation of parameters along the
+    arc) or a propagator in the spherical potential, a task of its own.
+  - _Tests (in `motion/secular.rs`, fast):_ `an_s2_like_orbit_advances_12_arcminutes_an_orbit`,
+    `the_table_holds_a_harmonic_core_s_closed_forms`,
+    `the_table_holds_the_profile_s_orbit_averages`, `a_circular_orbit_keeps_its_two_body_motion`,
+    `unbound_orbits_take_neither_rate_and_the_step_repeats_to_the_bit` (with the same table twice,
+    dt = 0 the orbit itself, the energy kept) and `the_secular_step_against_a_direct_integration`; a
+    doctest on `SecularTable`. T28.a's `kepler.golden` is unchanged (`golden_diff.py`).

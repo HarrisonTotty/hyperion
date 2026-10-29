@@ -1668,6 +1668,7 @@ impl SpeedBound {
     }
 }
 
+pub mod secular;
 pub mod tidal;
 
 #[cfg(test)]
