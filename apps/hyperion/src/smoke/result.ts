@@ -88,7 +88,7 @@ export const GPU_TIMING_WATCHDOG_MS = 480_000;
  * @remarks
  * For a machine much slower than the development one. Measured 2026-10-29 on a cloud machine
  * (an AMD EPYC 7571, Zen 1 at 2.5 GHz, 4 cores with SMT, no GPU): with both variants side by
- * side, as `just test-render` runs them, 7 of the 13 parts outlasted 180 s at a 1-minute load of
+ * side, as `just test-render` runs them, 8 of the 13 parts outlasted 180 s at a 1-minute load of
  * 9 to 17, with no check failing; at a scale of 2 the longest, part 7, took 255 s of its 360 s. A
  * scale is a hang detector's margin, not a budget: no check reads it. Four is a cap, so that a
  * hung part of `just test-render` still ends within 12 minutes (part 1 with the captures within
