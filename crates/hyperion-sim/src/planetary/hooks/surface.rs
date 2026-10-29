@@ -33,23 +33,23 @@
 //! plan 14's Risks ("Deviations in P14.T24.a, as built") records how they compare with the Solar
 //! System's bodies.
 //!
-//! - **Equator–pole**, T(0°) − T(90°), as rendering plan R09 imposes it on its annual field's
-//!   `P₂` term (its Design note 8). With no transport each latitude is in radiative balance with
-//!   its annual-mean insolation, which relative to the mean S ÷ 4 is (8 ÷ π²) E(sin β) at the
-//!   equator and (4 ÷ π) sin β at a pole, at obliquity β, E the complete elliptic integral of
-//!   the second kind ([`annual_insolation`]). An eccentric orbit changes only the mean flux, since
-//!   by Kepler's second law (a ÷ r)² dt runs uniformly in the sun's longitude. The grey column
-//!   scales each to the surface (P14.T13.c's `T_s` = `T_eq` (1 + ¾τ)^¼), so the radiative ends
-//!   are `T_s` `q_eq`^¼ and `T_s` `q_pole`^¼. Transport damps the insolation's Legendre modes,
-//!   each at its own rate n(n + 1)D as in North's (1975, J. Atmos. Sci. 32, 2033) diffusive model,
-//!   in the emitted flux and at each end's own restoring. The contrast is the difference of the
-//!   ends this gives (`zonal_ends_k`; science-p14-t24a-climate.md §7), with each mode damped by
-//!   `B_P` ÷ (`B_eff` + max(n(n + 1)D, W `B_P`)). Its Earth is fitted by North, Cahalan and
-//!   Coakley's (1981) procedure (decision-p14-t54a-bands §2.6): Φ⊕ in their measured balance, B =
-//!   2.09 W m⁻² K⁻¹ ([`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`]) and D ÷ B = 0.310
-//!   ([`EARTH_TRANSPORT_PARTITION`]), and then D⊕ to Earth's contrast at its own restoring, D
-//!   "left as an adjustable parameter" as they left it. 6D⊕ ÷ `B_eff`⊕ is then 2.14, against their
-//!   1.86 at their B; their own balance, B + 6D = 5.98 W m⁻² K⁻¹, gives 2.15 at the model's 1.898.
+//! - **Equator–pole**, T(0°) − T(90°), as rendering plan R09 imposes it on its annual field's ends,
+//!   by a correction shaped like `P₂` (its Design note 8). With no transport each latitude is in
+//!   radiative balance with its annual-mean insolation, which relative to the mean S ÷ 4 is
+//!   (8 ÷ π²) E(sin β) at the equator and (4 ÷ π) sin β at a pole, at obliquity β, E the complete
+//!   elliptic integral of the second kind ([`annual_insolation`]). An eccentric orbit changes only
+//!   the mean flux, since by Kepler's second law (a ÷ r)² dt runs uniformly in the sun's longitude.
+//!   The grey column scales each to the surface (P14.T13.c's `T_s` = `T_eq` (1 + ¾τ)^¼), so the
+//!   radiative ends are `T_s` `q_eq`^¼ and `T_s` `q_pole`^¼. Transport damps the insolation's
+//!   Legendre modes, each at its own rate n(n + 1)D as in North's (1975, J. Atmos. Sci. 32, 2033)
+//!   diffusive model, in the emitted flux and at each end's own restoring. The contrast is the
+//!   difference of the ends this gives (`zonal_ends_k`; science-p14-t24a-climate.md §7), with each
+//!   mode damped by `B_P` ÷ (`B_eff` + max(n(n + 1)D, W `B_P`)). Its Earth is fitted by North,
+//!   Cahalan and Coakley's (1981) procedure (decision-p14-t54a-bands §2.6): Φ⊕ in their measured
+//!   balance, B = 2.09 W m⁻² K⁻¹ ([`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`]) and D ÷ B = 0.310
+//!   ([`EARTH_TRANSPORT_PARTITION`]), and then D⊕ to Earth's contrast at its own restoring, D "left
+//!   as an adjustable parameter" as they left it. 6D⊕ ÷ `B_eff`⊕ is then 2.14, against their 1.86
+//!   at their B; their own balance, B + 6D = 5.98 W m⁻² K⁻¹, gives 2.15 at the model's 1.898.
 //!   - `B_P` = 4F ÷ `T_s` is the grey column's restoring at fixed τ, F the absorbed mean flux.
 //!     `B_eff` = `B_P` (1 − g) is its restoring with its own vapour feedback, g the gain of the
 //!     gases the surface holds at their cap (0.431 on the batch's measured Earth as its fit takes
@@ -460,10 +460,13 @@ impl OceanWeight {
     }
 }
 
-/// Earth's rotation period against the stars, s: 86,164.0989, 2π over the nominal rotation rate
-/// Ω = 7.292 115 × 10⁻⁵ rad s⁻¹ (IERS Conventions 2010, TN 36, Table 1.1), the rate Ω⊕ that
-/// [`rotation_transport_factor`] is relative to. The sidereal day against the equinox is
-/// 86,164.0905 s.
+/// Earth's rotation period against the stars, s: the stellar day, 86,164.0989.
+///
+/// Its rate 2π ÷ it, 7.292 115 1 × 10⁻⁵ rad s⁻¹, is the nominal rotation rate
+/// Ω = 7.292 115 × 10⁻⁵ rad s⁻¹ (IERS Conventions 2010, TN 36, Table 1.2, GRS80's) to Ω's digits,
+/// the rate Ω⊕ that [`rotation_transport_factor`] is relative to. 2π over the nominal Ω itself is
+/// 86,164.1006 s, which would move the transport's rotation ratio by 2 × 10⁻⁸. The sidereal day
+/// against the equinox is 86,164.0905 s.
 pub const EARTH_SIDEREAL_DAY: Seconds = Seconds::new(86_164.098_9);
 
 /// The rotation rates, relative to Earth's, between which [`rotation_transport_factor`] follows
@@ -1191,8 +1194,8 @@ impl SurfaceConditions {
     }
 
     /// The annual-mean equator–pole contrast T(0°) − T(90°), K, which rendering plan R09 imposes
-    /// on its zonal temperature's `P₂` term: negative where the poles are warmer, as from 53.9° to
-    /// 126.1° of obliquity (the [module](self)'s model; P14.T48.e's sign).
+    /// on its annual field's ends, by a correction shaped like `P₂`: negative where the poles are
+    /// warmer, as from 53.9° to 126.1° of obliquity (the [module](self)'s model; P14.T48.e's sign).
     #[must_use]
     pub const fn equator_pole_contrast_k(&self) -> f64 {
         self.equator_pole_contrast_k
