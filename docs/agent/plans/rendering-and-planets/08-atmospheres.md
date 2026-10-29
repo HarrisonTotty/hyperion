@@ -5198,6 +5198,15 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
   twin, but cost the RTX 3080 more where it never ran than it saved where it did, so main dropped
   it. QW33, on origin's tip under Electron 45, leaves the slab's 10⁷ m x4 over 16.67 ms and
   `TEST SATURN`'s 9.45 × 10⁷ m x4 at 16.61, so the edged one-band march is the next R08 task).
+- **R08.T11.g The one-band march with layer edges,** T6.f's half of T11.d's specialised march, for
+  media of one slice and one band with layer edges (the slab Earth), so that the slab's 10⁷ m x4
+  comes under 16.67 ms (main's pre-ruling of 2026-10-28, after QW33): the slices' and bands'
+  counts held at 1 and the march's edges left on their uniform, chosen from the tables alone on the
+  `area` cover, two more module constants in R01.T15's bound. Acceptance: byte-identical read-backs
+  on SwiftShader (smoke part 8), within T8.d's ulp on the RTX 3080, `pnpm test`,
+  `just test-render`, and QW34. _Built 2026-10-29; the RTX runs pending: the owner's RTX run_
+  (Risks, "Deviations in R08.T11.g, as built": the thin read only, R01.T15's bound 25 → 27, part
+  8's check byte for byte on SwiftShader, the parts' times taken in a pod).
 
 Acceptance: the record is here, and `pnpm test` passes.
 
@@ -22664,3 +22673,115 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     R08.T11's arrival budget.
   - _Isotopologue names in `NOTICE`._ AYT2's is written `H2-32S`, the others by mass number before
     each atom (`12C16O`, `28Si16O`), the line being full.
+- **Deviations in R08.T11.g, as built** (2026-10-29; main's pre-ruling of 2026-10-28, after QW33;
+  "Deviations in R08.T11.f, as built", _QW33_; `decision-r08-t11-frame.md` §7). The edged one-band
+  march: T6.f's half of R08.T11.d's specialised march, for a body of one slice and one band under a
+  medium with layer edges (the slab Earth), exact. **Its RTX runs are pending: the owner's RTX
+  run** (below).
+  - _Files._ Edited: `hillaire.ts` and its test, `view/engine/catalogue.ts`,
+    `photoreal/renderer.test.ts` (R01.T15's bound), `smoke/atmosphere.ts` and `smoke/page.ts`. No
+    shader file, table, golden, wire or version moves.
+  - _The form._ `ONE_BAND_MARCH` is `SPECIALISED_MARCH`'s first two rewrites, `oblateSliceCount`'s
+    and `oblateBandCount`'s bodies returning 1, each made exactly once and within a line, so that a
+    CRLF checkout cannot matter. `withMarchOneBand` names its pair `<its name> for one band, edged`:
+    `RAY_MARCH_ONE_BAND_KERNEL` and `RAY_MARCH_SLOTS_ONE_BAND_KERNEL`.
+    - The march's edges' count stays on its uniform, so the compiler drops T6.f's sliced and banded
+      code and keeps T6.i's cut at the edges. It is exact: such a body's uniforms already hold 1 and
+      1. The bindings are the general kernel's.
+    - `hillaire.test.ts` pins the two lines that differ from the general march, the one line (the
+      edges' count) that differs from T11.d's, a single `marchRay` call site, and every binding
+      reached and bound, over both reads.
+    - `withMarchSpecialised` is now `withMarchRewrites` over
+      `SPECIALISED_MARCH = [...ONE_BAND_MARCH, the edges' count]`, its kernels unchanged to the
+      byte: `thickKernels.test.ts`'s thin digests hold, and a digest of every catalogue entry and
+      kernel export before and after (scratch, 76 entries) differs only by the two new kernels'.
+  - _The choice_ (`marchOneBandFor`), from the tables alone, never the body's class:
+    `plan.kappa.length` 1, `plan.bands.length` 1 and `marchEdgeCountOf(layerEdges)` over 0. No
+    tables take both variants. The slab Earth on WGS 84 and the Venus-class deck take it; R05's
+    Earth, the measured Earth and the Saturn-class figure do not. T11.d's test of the general march
+    over the area now takes the Saturn-class figure, since the slab takes the one-band march.
+  - _The dispatch_, on the `area` cover only, as T11.d's: an edge-free body of one band takes
+    T11.d's march, an edged one the one-band march, every other the general march. The reference
+    path and the tile cull keep the general march.
+  - _The thin read only._ A thick body of one band and layer edges keeps the thick read's general
+    march over its area (`hillaire.test.ts`): there is no thick one-band kernel. The pre-ruling put
+    the variant in `MarchKernels`, and R08.T14.f is changing the thick read path. A thick form would
+    be two more constants; not built, not measured.
+  - _Made_ as T11.d's variants are: up front with the device's shared kernels for each read asked
+    (`createComputeAsync`, which SwiftShader needs), and over an atmosphere's own at its first
+    `area` frame. A view now compiles six large march kernels up front (two reads, each general,
+    specialised and one-band), against four. So does every smoke group over the shared kernels,
+    those that never take it among them (R08.T11.d's two checks and R08.T14.c's).
+  - _R01.T15's bound._ The keys are `atmosphere ray march for one band, edged` and
+    `atmosphere ray march by slot for one band, edged`, module constants. `VIEW_KERNELS` grows from
+    25 to 27: the pre-ruling's 19 → 21 predates R08.T14.c's six thick kernels. `airKinds` gains the
+    slab Earth, so that the session dispatches the variant by slot (the deck takes it over the
+    shared read). The distinct kernels made are 14 after the thin first pass and 20 after the thick
+    second, then none more, all but seven. The view makes both one-band marches up front, so the
+    count does not hang on the dispatch. The kernel arm may now make 20 of its own
+    (`withKernelArmFormat`; the TSDoc's "twelve" had not counted R08.T14.c's six).
+  - _The catalogue._ Both kernels are catalogued (`ATMOSPHERE_ONE_BAND_ENTRIES`), in a list of their
+    own that the smoke page compiles in part 9, first, as R08.T14.c's thick kernels are in part 13.
+    In part 1 beside the rest they took the part from 170 s to past its 180 s watchdog on one
+    variant (below).
+  - _The check_ (`checkMarchOneBand`, part 8 after T11.d's march area, whose by-slot march it shares,
+    so that no part's GPU process compiles both reads' marches). The slab Earth on WGS 84, by slot,
+    at 160 × 90 under T8.c's timed Sun, in `SPECIALISED_BODIES`' frames (from 400 km, from 10⁷ m
+    over a surface 2 × 10⁷ m ahead, from 10⁷ m on low), each drawn on `area` (by the one-band march)
+    and on the reference path.
+    - On SwiftShader every frame matches byte for byte: the composite's output and the march's
+      whole target, over areas of 20 × 8 tiles of 240, 20 × 7 of 240 and 10 × 4 of 60. The check
+      allows T8.d's 1 ulp on hardware.
+    - The shared read's one-band march (the deck's) is held by its text and bindings alone: no smoke
+      frame draws it.
+  - _The parts' times_ (SwiftShader in a pod, 4 vCPU, an AMD EPYC 7571 with no GPU; each part on
+    the `default` variant alone, base then lane, the 1-minute load 2–8; s):
+
+    | Part | Base | Lane | What moved                                                        |
+    | ---- | ---- | ---- | ----------------------------------------------------------------- |
+    | 1    | 170  | 172  | (with the catalogue in it: over the watchdog, 181)                |
+    | 2–6  | —    | —    | within ±14 of the base, nothing of T11.g's in them                |
+    | 7    | over | over | the watchdog in both (R10.T16's frame, 95 s of it)                |
+    | 8    | 152  | 175  | T11.g's group 18.4–18.9; T11.d's march area 43.5–43.7 → 49.0–49.1 |
+    | 9    | 78   | 93   | the catalogue's two, 14.7                                         |
+    | 10   | 137  | 158  | R10.T16.g's datum 48.3 → 60.5 (its view's up-front compile)       |
+    | 11   | 145  | 157  | R08.T10.b's drawn ground 41.6 → 52.5                              |
+    | 12   | 99   | 112  | T11.d's specialised march 33.7 → 40.6; T11.e's Earth 16.4 → 22.0  |
+    | 13   | 107  | 114  | R08.T14.c's thick specialised march 34.8 → 42.0                   |
+    - Each group over the shared kernels pays the one more up-front compile, 6–11 s here. Parts 2–6
+      ran 108, 149, 125, 142 and 75 s on the base and 94, 149, 127, 143 and 81 on the lane.
+    - _Both variants at once_, as `just test-render` runs them, part 8 passes its watchdog in the
+      pod on neither tree: R08.T6.f's Earth group alone takes 118–130 s, against 82 on one variant,
+      so the part stops at 180 s before R08.T11.d's group. The pod's parts are not the owner's
+      machine's: T11.d's march area took 27–28 s at its gate there, 43.5–43.7 here, so at that ratio
+      part 8 would take about 110 s and part 9 about 59 (estimates), under 150 s.
+
+  - _Pending: the owner's RTX run._
+    - `just test-render` in full on the owner's machine, both variants, with each part's time.
+    - The untimed hidden pair on the RTX 3080, base and lane back to back, x1/x2 rows as the
+      control, `disc cells` and `bodies` checked for a static cost as R08.T11.f's d1 was; and part
+      8's check on the RTX, within T8.d's ulp.
+    - Then QW34 in main's quiet window: two timed runs judged by QW31's rule and main's addition (a
+      row stalled in both runs is judged by its medians), the driver's cache warmed first by one
+      untimed run of the same build.
+    - The estimate: the slab's 10⁷ m x4 from about 16.4–16.6 ms to about 14.5–15.4 ms, from T6.f's
+      half compiled out (−1.15 to −1.95 ms off the measured Earth's `atmosphere view` median,
+      R08.T11.d) on the slab's march, its largest pass (11.9 ms at that row in QW31).
+  - _Recorded only._ `TEST SATURN`'s lever, the sliced edge-free march (T6.i's half, the edges'
+    count alone set to 0; −0.4 to −0.9 ms untimed; two more constants, 27 → 29): its row met
+    16.67 ms in QW33 (16.61). Nor, as in T11.d (main's condition 4), the sky view and the aerial
+    perspective in the same form.
+- **Deferred findings (2026-10-13 rule)** (R08.T11.g). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The area bodies' two flags_ (the TypeScript review). The smoke's `AreaBody` names its march by
+    `specialised` and `oneBand?`, two booleans for one three-way choice, where the rules want a
+    string-literal union (`march: "specialised" | "one band, edged" | "general"`). Kept, since the
+    union rewrites R08.T14.c's thick bodies, which R08.T14.f is editing at the same time. Lean: the
+    union once R08.T14.f lands.
+  - _The up-front compile in checks that never take it_ (the plan review). An opt-out beside
+    `FrameKernelsAhead.tiles` would spare R08.T11.d's two checks and R08.T14.c's their one-band
+    compile, 6–7 s each in the pod. Not taken, the pre-ruling naming the up-front compile. Lean:
+    only if one of parts 8, 12 or 13 nears its watchdog on the owner's machine.
+  - _The deck's one-band march has no GPU frame._ Its text and bindings are pinned, and the slab's
+    frames hold the transform byte for byte, but no smoke frame draws the shared read's variant.
+    Lean: a Venus-class deck frame beside R05's Earth in part 12, if main wants one.
