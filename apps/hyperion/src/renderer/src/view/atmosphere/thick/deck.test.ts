@@ -19,6 +19,7 @@ import {
 import { BAKE_WAVELENGTHS_NM } from "../medium";
 import {
   bakeBinSolve,
+  THICK_BAKE_GRID,
   THICK_BAKE_MODES,
   THICK_BAKE_STREAMS,
   type ThickBakeBand,
@@ -30,7 +31,9 @@ import {
 import {
   bakeDeck,
   bakeDeckPolarisation,
+  type BelowDeckTable,
   DECK_FLOOR_OPTICAL_DEPTH,
+  deckColumnSolve,
   deckGround,
   deckPolarisationGround,
   type DeckTables,
@@ -344,6 +347,158 @@ describe("the polarisation correction over the deck", () => {
       Array.from(above.altitudesM),
       true,
     ]);
+  });
+});
+
+/** A band's table below the deck, or a test failure. */
+function belowOf(table: DeckTables | undefined): BelowDeckTable {
+  if (table?.below === undefined || table.below === null) {
+    throw new Error("a deck over a surface has a table below it");
+  }
+  return table.below;
+}
+
+describe("below a deck over a surface (R08.T15.b.1)", () => {
+  const fixture = once(nh3DeckFixture);
+  const prepared = once(() => preparedOf(fixture(), "ground"));
+  const body = saturnBakeBody();
+  const tables = once((): ReadonlyArray<DeckTables> =>
+    thickBakeBands(body).map((_, band) => bakeDeck(prepared(), body, band)),
+  );
+
+  it("lays a table by altitude, view angle and sun angle, one a band, from the ground to the split", () => {
+    const shapes = tables().map((table) => {
+      const below = belowOf(table);
+      const altitudes = below.altitudesM.length;
+      const suns = below.sunCosines.length;
+      const slot = below.slots[0];
+      return [
+        below.altitudesM[0],
+        below.altitudesM[altitudes - 1] === table.deckAltitudeM,
+        Array.from(below.travelCosines),
+        slot?.radiance.length === altitudes * suns * 4 * THICK_BAKE_MODES * 3,
+        slot?.irradiance.length === altitudes * suns * 3,
+        slot?.direct.length === altitudes * suns * 3,
+        [...(slot?.radiance ?? []), ...(slot?.irradiance ?? []), ...(slot?.direct ?? [])].every(
+          Number.isFinite,
+        ),
+      ];
+    });
+    expect(shapes).toEqual(
+      Array.from({ length: 4 }, () => [
+        0,
+        true,
+        [-0.75, -0.25, 0.25, 0.75],
+        true,
+        true,
+        true,
+        true,
+      ]),
+    );
+  });
+
+  it("has none under an envelope, which has no view from below", () => {
+    expect(bakeDeck(preparedOf(fixture(), "envelope"), body, 0).below).toBeNull();
+  });
+
+  it("gives the table's surface flux as the solver's, bin by bin through the conversion, to f32", () => {
+    const table = tables()[0];
+    const below = belowOf(table);
+    const slot = below.slots[0];
+    const conversion = prepared().upper.lights[0]?.conversion;
+    if (table === undefined || slot === undefined || conversion === undefined) {
+      throw new Error("a band, a slot and its conversion");
+    }
+    const ground = GRID.layers + DECK_LAYERS;
+    const fluxes = BAKE_WAVELENGTHS_NM.map((_, b) =>
+      deckColumnSolve(prepared(), table.band, b, onlyTerm(prepared(), b)).solution.beams.map(
+        (beam) => entry(beam.fluxes.diffuseDown, ground),
+      ),
+    );
+    let worst = 0;
+    GRID.sunCosines.forEach((_, s) => {
+      conversion.factors.forEach((factors, c) => {
+        let expected = 0;
+        fluxes.forEach((perSun, b) => {
+          expected += entry(factors, b) * entry(perSun, s);
+        });
+        const stored = entry(slot.irradiance, s * 3 + c);
+        worst = Math.max(worst, Math.abs(stored - expected) / expected);
+      });
+    });
+    // Measured 2026-10-29: 4.7 × 10⁻⁸, the f32's rounding.
+    expect(worst).toBeLessThan(1e-6);
+  });
+
+  it("integrates its surface radiance over the sky to its surface flux on its cells, to 1%", () => {
+    // The default grid's eight view cosines, the cells' centres of an even division of μ.
+    const grid: ThickBakeGrid = { ...GRID, upwardCosines: THICK_BAKE_GRID.upwardCosines };
+    const deck = prepareDeck(
+      fixture().column,
+      [SUN],
+      { altitudeM: fixture().deckAltitudeM, floor: "ground" },
+      { grid, deckLayers: DECK_LAYERS },
+    );
+    const below = belowOf(bakeDeck(deck, body, 0));
+    const slot = below.slots[0];
+    if (slot === undefined) {
+      throw new Error("a slot");
+    }
+    const views = grid.upwardCosines.length;
+    const v2 = 2 * views;
+    let worst = 0;
+    grid.sunCosines.forEach((_, s) => {
+      for (let c = 0; c < 3; c += 1) {
+        let integral = 0;
+        for (let v = 0; v < views; v += 1) {
+          const mu = -entry(below.travelCosines, v);
+          const i = (s * v2 + v) * THICK_BAKE_MODES * 3 + c;
+          integral += 2 * Math.PI * entry(slot.radiance, i) * mu * (1 / views);
+        }
+        const flux = entry(slot.irradiance, s * 3 + c);
+        worst = Math.max(worst, Math.abs(integral - flux) / flux);
+      }
+    });
+    // Measured 2026-10-29: 0.18%, the midpoint rule's error on eight cells.
+    expect(worst).toBeLessThan(0.01);
+  });
+
+  it("meets the field the deck's reflectance gives above it at the split, to 0.1%", () => {
+    const table = tables()[0];
+    if (table === undefined) {
+      throw new Error("a band");
+    }
+    const geometry = table.band;
+    const term = onlyTerm(prepared(), BIN);
+    const whole = deckColumnSolve(prepared(), geometry, BIN, term);
+    const split = bakeBinSolve(
+      prepared().upper,
+      geometry,
+      BIN,
+      term,
+      deckGround(prepared(), geometry),
+    );
+    const k = GRID.layers;
+    let worst = 0;
+    let largest = 0;
+    whole.solution.beams.forEach((beam, s) => {
+      beam.modes.forEach((mode, m) => {
+        const other = split.solution.beams[s]?.modes[m];
+        for (const [one, two] of [
+          [mode.quadratureDown, other?.quadratureDown],
+          [mode.quadratureUp, other?.quadratureUp],
+        ] as const) {
+          const n = THICK_BAKE_STREAMS / 2;
+          for (let i = 0; i < n; i += 1) {
+            largest = Math.max(largest, Math.abs(entry(one, k * n + i)));
+            worst = Math.max(worst, Math.abs(entry(one, k * n + i) - entry(two ?? [], k * n + i)));
+          }
+        }
+      });
+    });
+    // Measured 2026-10-29: 1.9 × 10⁻⁴ of the largest intensity there, the deck's reflectance
+    // being plane-parallel where the whole column's beam inside it is pseudo-spherical.
+    expect(worst / largest).toBeLessThan(1e-3);
   });
 });
 

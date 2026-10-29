@@ -22034,3 +22034,61 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
       keep `bake.ts`'s changes to added optional parameters.
     - The tests add the split's identity with the whole column (solver and vector solver) and the
       correction's scalar half against the bake over the deck, beside the brief's three.
+- **Deviations in T15.b.1, as built** (2026-10-29; `thick/deck.ts`, its test and benchmark; main's
+  split of R08.T15, 2026-10-29).
+  - _The table_ (`BelowDeckTable`, `DeckTables.below`; `null` under an envelope, which has no view
+    from below). One a band, as `bakeDeck` gives it, for a deck over a surface:
+    - `radiance`, the diffuse I^m(h, μ, μ₀), m = 0 and 1, at the grid's travel cosines (the
+      downward half first, as T14.b's `MsSourceTable`), sr⁻¹ per unit of the star's irradiance
+      normal to its beam at the top;
+    - `irradiance`, the diffuse downward flux on the quadrature, per unit of that irradiance;
+    - `direct`, the kernels' beam's transmission from the top (extinction less the forward delta,
+      pseudo-spherical): the deck's direct transmittance, for T15.b.2's read.
+    - Its altitudes are every second interface of the deck's 32 layers, from the ground to the
+      split: 17 rows. Each bin's values are weighted over its gases' terms, then converted.
+    - Bytes, as `f32`: 208,896 B of radiance and 6,528 B each of irradiance and transmittance a
+      band and light; with T15.a.1's, 639,744 B a band and light.
+  - _The solve_ (`deckColumnSolve`, exported for the tests): the whole column as one stack, the
+    upper medium's layers and the deck's by `bake.ts`'s arithmetic, the pseudo-spherical beam
+    through all of them, the ground's albedo beneath, once a bin and term beside the bake's two.
+    - Lean (2026-10-29): the whole column, not the deck alone lit by the upper solve's field at the
+      split, which would need the solver to take a diffuse field at its top, a seam of its own.
+    - The table is the field itself, not a source: the plane-parallel field gives the sky beneath
+      directly and the aerial perspective by I (1 − T) along a path (lean; T15.b.2's read).
+  - _The tests' figures_ (deterministic, no α), on the NH₃-like deck over the Saturn-class datum's
+    ground (albedo 0.3), four bands:
+    - the table's surface flux against the solver's, Σ_b f_cb F↓_b through the bins' conversion:
+      4.7 × 10⁻⁸, the `f32`'s rounding (held to 10⁻⁶);
+    - its surface radiance integrated over the sky on the default grid's eight cells, against its
+      flux: 0.18% (held to 1%), the midpoint rule's error;
+    - the whole column's intensities at the split against the solve above the deck over its
+      reflectance: 1.9 × 10⁻⁴ of the largest (held to 10⁻³), the deck reflecting plane-parallel
+      where the whole column's beam inside it is pseudo-spherical. With plane-parallel beams the
+      two are one to rounding (T15.a.1's solver test).
+    - The m = 1 share below the deck (recorded, not asserted), its largest |I¹| over the largest
+      I⁰ at each row: 1.2 × 10⁻⁴ at the ground, 1.2 × 10⁻³, 0.012, 0.14, and 0.52 at the split,
+      where the sky above the deck is seen. m = 1 is kept.
+  - _Timing_ (pod, 4 vCPU, as T15.a.1's: one thread at `nice 10`, load 2.0–2.6, means of 3;
+    provisional). The Venus-class band with the table below takes 9.04 s (34 solves of each of
+    three), against 4.89 s without it and T14.b's own bake of the whole column, 3.04 s, on the same
+    pod (its preparation 12.9 s, 9.8 s of it the cloud's optics in the 15 bins; T14.b's Titan-class
+    band 4.32 s). Over `BAKE_CEILING_S` = 5 s a world: a finding, and the UHD 620 host's time is
+    pending: the owner's run. Levers, recorded only: the deck alone lit at the split (a third of the
+    whole column's layers), or fewer μ₀ below a deck whose direct beam is near 0.
+- **Deferred findings (2026-10-13 rule)** (R08.T15.a.1 and T15.b.1). Recorded and deferred: each
+  leaves the algorithm and every contract as they are.
+  - _The cost._ A deck band takes one solve beside each of T14.b's (the deck's, about as long),
+    and a deck over a surface a third (the whole column's): about 1.6 and 3 times T14.b's band on
+    the pod. With the cloud's Mie, a Venus-class world is over `BAKE_CEILING_S` on one band; T14.d's
+    fallbacks apply.
+  - _No TMS for the deck._ Its reflectance's single scattering is delta-M's, the truncated phase
+    function's, so a cloud top's glory and backscatter lobe are smoothed: the `giant-deck` and
+    Venus-class gates (T15.a.2, T15.b.2) judge it.
+  - _The deck's sphericity._ It reflects as a plane-parallel slab at the upper medium's μ₀: against
+    the whole pseudo-spherical column, 1.9 × 10⁻⁴ at the split on the test deck, larger at low suns
+    and on thicker decks, unmeasured.
+  - _The deck's 32 layers_ are a lean, not a convergence: a deck's layer count moves only how its
+    optics vary within a layer, since each layer's terms are their exact integrals.
+  - _Two layer mixers._ `deck.ts`'s mirrors `bake.ts`'s private `bandBinOf` with its delta-M step
+    (held equal by the scalar-half test, bit for bit); one exported from `bake.ts` would serve both
+    once its lane is quiet.
