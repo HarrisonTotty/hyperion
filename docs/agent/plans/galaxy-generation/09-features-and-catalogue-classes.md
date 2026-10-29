@@ -1161,6 +1161,8 @@ hundred innermost members.
 - **P09.T28.c Sphere of influence at pericentre.** A Kepler-regime system's tidal radius is taken at
   its pericentre and is constant in time: 2.7 au for a semi-major axis of 0.01 ly. Test: that
   figure, and about 0.01 ly for a near-circular orbit at 3 ly.
+  _Built (lane `p09-secular`, 2026-10-29, at `GENERATOR_VERSION` 23, no output moved): see Risks,
+  "P09.T28.c as built"._
 - **P09.T28.d The two secular rates.** `propagate` turns the orbit in its plane by two rates × dt:
   the Schwarzschild advance 6πGM ÷ (c² a (1 − e²)) per orbit (`schwarzschild_rate`) and the
   retrograde precession from the enclosed stars (`mass_precession_rate`), from the orbit-averaged
@@ -4191,3 +4193,53 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
       (Vasudevan and Fabian 2007; recalled, not read at source).
     - For P09.T30.c, whose law replaces T30.b's. The three corrections to that file's docs that
       plan 12's record lists, (c) to (e), ride with it.
+- **P09.T28.c as built (lane `p09-secular`, 2026-10-29, on 5bec9f1 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §1.7 and §2.2: pure, no hold).** No output moves: nothing calls the new
+  functions (P14.T29 wires them in plan 14's train), no golden is added or changed, and no tag or
+  stream is touched. Files: `galaxy/motion/tidal.rs` (new) and one `pub mod tidal;` line in
+  `galaxy/motion.rs`.
+  - _Signatures._ An inherent method in the child module,
+    `CentreMotion::tidal_radius_at_pericentre(&self, &KeplerOrbit, SolarMasses) -> Metres`, and
+    the one call for P14.T29, `motion::tidal::tidal_radius(&Galaxy, &EpochState, SolarMasses) -> Metres`:
+    in the Kepler regime with an orbit (`CentreMotion::kepler_orbit`), the radius at that orbit's
+    pericentre; otherwise (the straight regime, or a Kepler-regime state with no orbit, which is
+    every grid system of a galaxy without kinematic tables) plan 02's
+    `galaxy.potential().tidal_radius(m, &PointLy::from(record.epoch_position()))`, bit for bit.
+    It takes an `EpochState` (Provides names no signature): a grid record's is
+    `EpochState::of_grid_record`, a centre member's `of_centre_member`.
+  - _The form (lean, 2026-10-29; science check below)._ `r_t = (G m ÷ (ω_p² − Φ″(r_p)))^⅓` at the
+    Kepler pericentre `r_p` (`KeplerOrbit::pericentre`), with `ω_p = h ÷ r_p²` the orbit's own
+    angular speed there and Φ″ the centre's spherical potential's (`CentreProfile::psi_curvature`:
+    the black hole, the cluster and the galaxy's monopole, dark halo included), which carries King's
+    d ln M ÷ d ln r term. It is King's (1962) radius at perigalacticon in its general form: about a
+    point mass it is `r_p (m ÷ ((3 + e) M))^⅓`, and for a circular orbit `ω² − Φ″ = 4Ω² − κ²`, the
+    brainstorm's formula, so the rule and plan 02's radius agree where the orbit is circular. The
+    denominator is floored at 0.05 ω_p², plan 02's own floor, which no orbit about the black hole
+    reaches. μ excludes the dark halo (P09.T28.b.a) and Φ″ includes it, some 10⁻³ of the mass
+    inside the fixture's edge.
+  - _Figures (Milky Way fixture, a solar mass)._ A circular orbit at 0.01 ly keeps **2.6965 au**
+    (the plan's 2.7 au; M(<0.01 ly) = 4.300 × 10⁶ M☉, so King's term is under 10⁻⁴), and one at
+    3 ly **0.01240 ly**, where plan 02's radius at that position is also 0.01240 ly (about 0.01 ly,
+    the plan's); at 0.99 and 1.01 times the circular speed (e = 0.02) 0.01189 and 0.01237 ly. S2's
+    orbit keeps about 0.47 au (King's point-mass form, e = 0.8846).
+  - _Leans (2026-10-29)._ (1) An unbound Kepler-regime orbit takes the rule too: a flyby is stripped
+    at its one pericentre passage, before or after the epoch. (2) The call reads neither the
+    galaxy's rules nor the loss cone: the radius is the planets' whatever the drift hook draws
+    (`KEPLER_REGIME_VERSION`), and a system the loss cone carves out is not asked about. (3) The
+    plan's 2.7 au "for a semi-major axis of 0.01 ly" is the circular orbit's; an eccentric orbit
+    of that a keeps less, `a (1 − e) (m ÷ ((3 + e) M))^⅓`, so P14.T29's test ("nothing beyond 2.7
+    au") holds for a circular one.
+  - _Tests (in `motion/tidal.rs`, fast, 1.2 s together):_
+    `a_circular_orbit_a_hundredth_of_a_light_year_out_keeps_2_7_au`,
+    `a_near_circular_orbit_at_3_ly_keeps_about_a_hundredth_of_a_light_year` (against plan 02's
+    radius to 10%), `about_a_point_mass_the_radius_is_king_s` (to 10⁻¹², bound and unbound),
+    `the_radius_is_the_same_at_every_time` (from the orbit propagated ±1,000 yr, to 10⁻⁹), and
+    `the_rule_follows_the_regime` (plan 02's radius to the bit outside the regime and with no
+    orbit, the pericentre rule inside, the same bits twice); and a doctest on each function.
+  - _For P14.T29._ Replace `SystemContext::from_stars`' `galaxy.potential().tidal_radius(..)` with
+    `motion::tidal::tidal_radius(galaxy, &EpochState::of_grid_record(galaxy, record), mass)` for a
+    grid record (`of_grid_record` panics for any other record in a galaxy with kinematic tables),
+    and take the smaller of it and the feature's radius for a feature member. It reads
+    `Galaxy::centre_motion`, which builds on first read (about 64 ms, once a galaxy). It moves
+    output only within the influence radius (7.19 ly at the fixture), which removes the README's
+    relaxation "no pericentre stripping within about 10 ly of the centre".

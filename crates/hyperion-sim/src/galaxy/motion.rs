@@ -1668,6 +1668,8 @@ impl SpeedBound {
     }
 }
 
+pub mod tidal;
+
 #[cfg(test)]
 mod kepler_regime_hold;
 
