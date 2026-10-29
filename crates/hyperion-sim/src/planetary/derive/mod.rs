@@ -980,9 +980,9 @@ impl DerivedBody {
     /// (P14.T54.b.h): `helium_before_passes`'s, taken once before them (its He/H, its helium mass
     /// fraction, the shares of hydrogen and helium kept and the start they were fractionated from,
     /// the host star's own from generator version 24), the one the thin envelope's air was built at
-    /// and the escape's outcome carries (`EscapeOutcome::envelope`); `None` under the escape's
-    /// hold, which reads none, and for a body that formed with no envelope. The record's envelope
-    /// section passes its He/H to T50.b (P14.T54.b.i; decision-p14-t50b-envelope §5).
+    /// and the escape's outcome carries (`EscapeOutcome::envelope`); `None` for a body that formed
+    /// with no envelope. The record's envelope section passes its He/H to T50.b (P14.T54.b.i;
+    /// decision-p14-t50b-envelope §5).
     #[must_use]
     pub(crate) const fn envelope_helium(
         &self,
@@ -992,9 +992,9 @@ impl DerivedBody {
 
     /// The Bond albedo of the body's bare regolith about its hosts' bands, airless (P14.T51.i): the
     /// published pass's regolith (T51.b's `Regolith`, its lid's row from P14.T54.a, or its
-    /// material's where no lid is known, by the stand-in, and from the weathered area mix's
-    /// generator version its lid's row weathered at its maturity, P14.T54.b.e, the one its area mix
-    /// read: `atmosphere::pass_regolith`) on an airless body, by the area mix's one predicate for
+    /// material's where no lid is known, by the stand-in, and from generator version 24 its lid's
+    /// row weathered at its maturity, P14.T54.b.e, the one its area mix read:
+    /// `atmosphere::pass_regolith`) on an airless body, by the area mix's one predicate for
     /// the space-weathering cap (`capped_lid`), which its cold traps' flat ground and shadows read,
     /// so that their field does not move with the area mix (decision-p14-t51-batch §6).
     /// Dimensionless, 0 to 1.
@@ -1015,8 +1015,8 @@ impl DerivedBody {
 
     /// The published pass's maturity's outcome (P14.T54.b.e; rule (f)): the modifiers' parts its
     /// context and its own air gave, its water and its weathered regolith, which the record's
-    /// modifiers read, or why it took none (the hold, the passes' stand-in, no figures in its
-    /// context, no lid, no host or no planet's field on the record, a refusal).
+    /// modifiers read, or why it took none (the passes' stand-in, no figures in its context, no
+    /// lid, no host or no planet's field on the record, a refusal).
     #[must_use]
     pub(crate) const fn weathered(&self) -> &PassMaturity {
         &self.weathered
@@ -1024,8 +1024,8 @@ impl DerivedBody {
 
     /// The published pass's cold traps (P14.T54.b.f; decision-p14-t54b-f-coldtraps §3): the field
     /// it read with that field's inputs, which the record publishes over and builds none, or why it
-    /// read none (the hold, the passes' stand-in, no sky, no figures in its context, a pass that
-    /// does not qualify).
+    /// read none (the passes' stand-in, no sky, no figures in its context, a pass that does not
+    /// qualify).
     #[must_use]
     pub(crate) const fn cold_traps(&self) -> &PassTraps {
         &self.cold_traps
@@ -1042,7 +1042,7 @@ impl DerivedBody {
 
     /// What the body's ocean would dissolve (P14.T51.g.b; [`OceanSolutes`]), its air's bulk's,
     /// built once before its passes: its record's subsurface ocean reads them, as a moon's tidal
-    /// branch did at its passes. No output reads them below `OCEAN_VERSION`.
+    /// branch did at its passes.
     #[must_use]
     pub(crate) const fn ocean_solutes(&self) -> OceanSolutes {
         self.ocean_solutes
@@ -1702,11 +1702,9 @@ fn envelope_and_helium(
 }
 
 /// The helium the envelope of history `history` of the body of bulk `bulk` under the sky `sky`
-/// keeps by `age`, taken once before its passes, which do not move it, under the escape's batch
-/// rules ([`AtmosphereInputs::envelope_helium`]): fractionated from the helium its host of
-/// composition `composition` gives it, the protosolar to generator version 23 and the host star's
-/// own from 24 (`fractionation_start`, behind `PRIMORDIAL_HELIUM_VERSION`; P14.T54.b.i). None under
-/// the escape's hold, which reads none and computes no start.
+/// keeps by `age`, taken once before its passes, which do not move it
+/// ([`AtmosphereInputs::envelope_helium`]): fractionated from the helium its host of composition
+/// `composition` gives it, the host star's own (`fractionation_start`; P14.T54.b.i).
 #[must_use]
 fn helium_before_passes(
     history: EnvelopeHistory,
@@ -1714,24 +1712,21 @@ fn helium_before_passes(
     sky: &Sky,
     (age, composition): (Years, &Composition),
 ) -> Option<crate::planetary::chem::escape::EnvelopeHelium> {
-    use crate::planetary::chem::escape::{EscapeRules, XuvExposure, fractionation_start};
-    match EscapeRules::in_force() {
-        EscapeRules::Held => None,
-        EscapeRules::Batch => helium_left(
-            history,
-            (bulk.mass, bulk.radius),
-            &XuvExposure::new(sky.saturated_xuv_flux, sky.xuv_saturation_time),
-            age,
-            fractionation_start(composition),
-        ),
-    }
+    use crate::planetary::chem::escape::{XuvExposure, fractionation_start};
+    helium_left(
+        history,
+        (bulk.mass, bulk.radius),
+        &XuvExposure::new(sky.saturated_xuv_flux, sky.xuv_saturation_time),
+        age,
+        fractionation_start(composition),
+    )
 }
 
 /// The mean speed at which the body `placed` about `hosts` is struck, its air weighed at the mass
-/// and radius `bulk` (P14.T53.a, read by the cosmic shoreline's impact term under the escape's
-/// batch rules, [`AtmosphereInputs::impact_speed`]): its escape speed √(2 G M ÷ R) against its
-/// circular orbital speed √(G `M_p` ÷ a) about the mass `M_p` its hosts give it, at its present
-/// semi-major axis; for a moon, whose hosts carry its planet's orbital speed about its star
+/// and radius `bulk` (P14.T53.a, read by the cosmic shoreline's impact term,
+/// [`AtmosphereInputs::impact_speed`]): its escape speed √(2 G M ÷ R) against its circular orbital
+/// speed √(G `M_p` ÷ a) about the mass `M_p` its hosts give it, at its present semi-major axis; for
+/// a moon, whose hosts carry its planet's orbital speed about its star
 /// ([`BodyHosts::with_parent_orbital_speed`]), Zahnle et al.'s (2003) eq. 1
 /// ([`moon_impact_speed`]), and otherwise Zahnle and Catling's (2017) eq. 41 at `v_enc` = `v_orb`
 /// ([`planet_impact_speed`]). A speed that is not finite and positive counts as none.
@@ -1882,9 +1877,9 @@ pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
 /// bulk its air reads, its bulk at the time (which its record's bulk rule reads, P14.T54.a), its
 /// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, its age,
 /// the side of the snow line it formed on (which its crust's basis reads, P14.T54.a), and what
-/// P14.T53.a's escape reads under its batch rules: its mean impact speed and its envelope's
-/// history; the deck a runaway's cloud takes (P14.T53.b part 1 (b)); and the state its passes
-/// publish (P14.T53.b part 1 (c)).
+/// P14.T53.a's escape reads: its mean impact speed and its envelope's history; the deck a
+/// runaway's cloud takes (P14.T53.b part 1 (b)); and the state its passes publish (P14.T53.b part
+/// 1 (c)).
 #[derive(Debug, Clone, Copy)]
 struct PassBody<'a> {
     placed: &'a PlacedBody,
@@ -1899,8 +1894,8 @@ struct PassBody<'a> {
     formed: SnowLineSide,
     impact_speed: MetresPerSecond,
     envelope_history: EnvelopeHistory,
-    /// The helium its envelope's escape left, taken once before the passes under the escape's
-    /// batch rules ([`AtmosphereInputs::envelope_helium`]); `None` under its hold, which reads none.
+    /// The helium its envelope's escape left, taken once before the passes
+    /// ([`AtmosphereInputs::envelope_helium`]); `None` for a body that formed with no envelope.
     envelope_helium: Option<crate::planetary::chem::escape::EnvelopeHelium>,
     /// The deck a runaway's cloud takes in every pass ([`PassSurface::deck`]): Venus's
     /// ([`RunawayDeck::Kept`]) for the passes' first solve, and [`RunawayDeck::Deckless`] for a
@@ -2330,21 +2325,17 @@ impl PassBody<'_> {
             .and_then(|crust| self.crust_basis(&crust));
         #[cfg(test)]
         let basis = basis.filter(|_| !NO_CRUST.with(core::cell::Cell::get));
-        // What the passes' maturity reads of the record, once a body before them, nothing of it
-        // under the weathered area mix's hold (P14.T54.b.e).
+        // What the passes' maturity reads of the record, once a body before them (P14.T54.b.e).
         let wet_epoch =
             |air: &Atmosphere, equilibrium: Kelvin| of.wet_epoch(self.pass_bulk, air, equilibrium);
-        let weathering = PassWeathering::in_force(|| {
-            Ok(PassWeathering {
-                case: of.weathering(self.pass_bulk)?,
-                gravity: record.surface_gravity,
-                mantle_sulphur: self.bulk.elements.mass(Element::S, Reservoir::Mantle),
-                wet_epoch: &wet_epoch,
-            })
+        let weathering = of.weathering(self.pass_bulk).map(|case| PassWeathering {
+            case,
+            gravity: record.surface_gravity,
+            mantle_sulphur: self.bulk.elements.mass(Element::S, Reservoir::Mantle),
+            wet_epoch: &wet_epoch,
         });
         // The cold traps' sky and the derivation's one field slot, once a body before its passes,
-        // a local dropped when this solve returns (P14.T54.b.f; decision-p14-t54b-f-coldtraps §4):
-        // nothing of them under the record's hold.
+        // a local dropped when this solve returns (P14.T54.b.f; decision-p14-t54b-f-coldtraps §4).
         let slot = FieldSlot::new();
         let stellar_flux = WattsPerSquareMetre::from(self.sky.flux);
         let cold_traps = of

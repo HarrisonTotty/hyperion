@@ -1,6 +1,6 @@
 //! A small body's taxonomic class on the record (plan 14, P14.T51.e's wiring;
-//! decision-p14-t51e-contract §1.4), held off the record until the 23 → 24 bump
-//! ([`SMALL_BODY_TYPES_VERSION`]), a P14.T54.b.j rider with its own hold.
+//! decision-p14-t51e-contract §1.4), on the record from generator version 24 (the 23 → 24 bump,
+//! P14.T54.b.l, a P14.T54.b.j rider).
 //!
 //! The record's builders (`primary_record` for a planet or a belt's member, `satellite_record` for
 //! a moon) fill it here from the body's **built** surface, after the surface is built and outside
@@ -30,18 +30,11 @@
 //! no field and no air (main's ruling, 2026-10-26, on decision-p14-t51e-qs §1.2). It is derived by
 //! `SurfaceModifiers::derive`, the rule every record's term comes from, once a query, and only by
 //! a query that builds records (`snapshot_at`, `body_at` and `hooks_at`, each opting its epoch in
-//! with `Epoch::with_small_bodies`, [`SmallBodyTypes::under`]); never once a body, never by a query
-//! that builds none, nothing under the hold, and never cached: 0.15998 by the ruling's table.
+//! with `Epoch::with_small_bodies`, [`SmallBodyTypes::new`]); never once a body, never by a query
+//! that builds none, and never cached: 0.15998 by the ruling's table.
 //!
-//! # The hold
-//!
-//! Below [`SMALL_BODY_TYPES_VERSION`] the rules in force are [`SmallBodyRules::Held`], under which
-//! nothing of the class is computed and every record's member is not modelled, so that every
-//! golden keeps its bits. Every reach of the record into the pure module and into the modifiers'
-//! getters for it is in this file, behind the hold (the source scans' lists:
-//! `small_bodies_nothing_on_the_record_reads_the_types_yet` and
-//! `modifiers_nothing_on_the_record_reads_the_modifiers_yet`). P14.T54.b.l deletes the hold with
-//! its tripwire (`the_small_body_types_are_held_only_until_the_24_bump`).
+//! Every reach of the record into the pure module and into the modifiers' getters for it is in
+//! this file.
 
 use crate::planetary::chem::partition::{CondensatePhase, Condensates};
 use crate::planetary::derive::atmosphere::PartialPressures;
@@ -61,104 +54,27 @@ use crate::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::{Body, Part, PlanetarySystem};
 
-/// The generator version from which a small body's taxonomic class is on the record: 24, the
-/// 23 → 24 batch's bump, as a P14.T54.b.j rider with its own hold (decision-p14-t51e-contract §4).
-///
-/// Below it [`SmallBodyRules::in_force`] is [`SmallBodyRules::Held`], so that every record's class
-/// is not modelled, as at 23, and every golden keeps its bits. The bump, P14.T54.b.l, deletes this
-/// hold, [`SmallBodyRules`] with its `Held` arm, [`SmallBodyTypes::Held`], the switch
-/// [`with_small_body_rules`] with its arm in `planetary::testing::with_every_24_hold`,
-/// `RecordRules::small_bodies`, the source scan
-/// `small_bodies_nothing_on_the_record_reads_the_types_yet` with its `HELD` list and its hold check,
-/// this file's `HELD` lines in `modifiers_nothing_on_the_record_reads_the_modifiers_yet`, and its
-/// tripwire (`the_small_body_types_are_held_only_until_the_24_bump`). If the rider misses
-/// P14.T54.b.i's commit, the hold renumbers to 25.
-pub(crate) const SMALL_BODY_TYPES_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether the record's surface carries its taxonomic class (the hold,
-/// [`SMALL_BODY_TYPES_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SmallBodyRules {
-    /// Versions 23's and before: the class is not modelled, and nothing of it is computed.
-    Held,
-    /// The 23 → 24 batch's: every planet's, member's and moon's surface carries its class
-    /// ([`record_taxonomic_class`]).
-    Batch,
-}
-
-impl SmallBodyRules {
-    /// The rules this generator version gives: the batch's from [`SMALL_BODY_TYPES_VERSION`], 23's
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_small_body_rules`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = SMALL_BODY_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= SMALL_BODY_TYPES_VERSION {
-            Self::Batch
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The small bodies' rules a test sets on its thread, `None` for the version's.
-    static SMALL_BODY_RULES: core::cell::Cell<Option<SmallBodyRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the small bodies' rules `rules` on this thread, for the tests to reach 24's
-/// record path ahead of the bump (every 24 hold in force together,
-/// `planetary::testing::with_every_24_hold`); the version's rules are set back after, a panic in
-/// `run` included. A system reads them as it is generated (`RecordRules::in_force`). P14.T54.b.l
-/// deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_small_body_rules<R>(rules: SmallBodyRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SmallBodyRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            SMALL_BODY_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(SMALL_BODY_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// What one query's records' classes share, its epoch's: the rules, and under
-/// [`SmallBodyRules::Batch`] the reference wind term, derived once for the query. An epoch holds
-/// [`Held`](Self::Held) until a query that builds records opts it in (`Epoch::with_small_bodies`),
-/// so that a record built on an epoch that did not opt in is not modelled, never wrong.
+/// What one query's records' classes share, its epoch's: the reference wind term, derived once
+/// for the query. An epoch holds none until a query that builds records opts it in
+/// (`Epoch::with_small_bodies`), so that a record built on an epoch that did not opt in is not
+/// modelled, never wrong.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum SmallBodyTypes {
-    /// [`SmallBodyRules::Held`]: nothing of the class is computed.
-    Held,
-    /// [`SmallBodyRules::Batch`], with `w_ref` ([`reference_wind_term`]).
-    Batch {
-        /// The reference wind term `w_ref`, dimensionless, finite and positive.
-        reference_wind_term: f64,
-    },
+pub(super) struct SmallBodyTypes {
+    /// The reference wind term `w_ref`, dimensionless, finite and positive
+    /// ([`reference_wind_term`]).
+    reference_wind_term: f64,
 }
 
 impl SmallBodyTypes {
-    /// What a query under the rules `rules` shares: under [`SmallBodyRules::Batch`] the
-    /// reference wind term, derived here, once for the query; nothing under
-    /// [`SmallBodyRules::Held`].
+    /// What a query that builds records shares: the reference wind term, derived here, once for
+    /// the query.
     #[must_use]
-    pub(super) fn under(rules: SmallBodyRules) -> Self {
-        match rules {
-            SmallBodyRules::Held => Self::Held,
-            SmallBodyRules::Batch => Self::Batch {
-                reference_wind_term: reference_wind_term(),
-            },
+    pub(super) fn new() -> Self {
+        Self {
+            reference_wind_term: reference_wind_term(),
         }
     }
 }
@@ -213,11 +129,12 @@ fn reference_inputs(none: &Condensates) -> ModifierInputs<'_> {
 /// The record's surface section `surface` of the body `body` of `system`, as its builder built it,
 /// with its taxonomic class ([`record_taxonomic_class`], through
 /// [`Surface::with_taxonomic_class`]), whose bulk section is `bulk` (`None` where it is not
-/// modelled), under what its query shares `types`: the record builders' one call, after the
-/// surface is built (decision-p14-t51e-contract §1.4). A section that is not `Ok` is unchanged.
+/// modelled), under what its query shares `types` (`None` where it did not opt in): the record
+/// builders' one call, after the surface is built (decision-p14-t51e-contract §1.4). A section that
+/// is not `Ok` is unchanged.
 #[must_use]
 pub(super) fn with_class(
-    types: SmallBodyTypes,
+    types: Option<SmallBodyTypes>,
     (system, body): (&PlanetarySystem, &Body),
     bulk: Option<&BulkProperties>,
     surface: Section<Surface>,
@@ -231,26 +148,26 @@ pub(super) fn with_class(
 
 /// The taxonomic class of the record's body `body` of `system`, whose built surface is `surface`
 /// and whose bulk section's surface gravity is `gravity` (`None` where its bulk section is not
-/// modelled), under what its query shares `types` (the [module](self) documentation).
-///
-/// Under [`SmallBodyTypes::Held`] it is not modelled, and nothing of it is computed. Under
-/// [`SmallBodyTypes::Batch`] it is `TaxonomicClass::of` over the surface's members, not
-/// modelled where the body's rule reads a member the record does not give, never none.
+/// modelled), under what its query shares `types` (the [module](self) documentation):
+/// `TaxonomicClass::of` over the surface's members, not modelled where the body's rule reads a
+/// member the record does not give, never none, and not modelled where its query shares nothing
+/// (`types` `None`), which computes nothing of it.
 #[must_use]
 fn record_taxonomic_class(
-    types: SmallBodyTypes,
+    types: Option<SmallBodyTypes>,
     (system, body): (&PlanetarySystem, &Body),
     gravity: Option<MetresPerSecondSquared>,
     surface: &Surface,
 ) -> Modelled<Option<TaxonomicClass>> {
-    match types {
-        SmallBodyTypes::Held => Modelled::NotModelled,
-        SmallBodyTypes::Batch {
-            reference_wind_term,
-        } => taxonomy_kind(system, body).map_or(Modelled::NotModelled, |kind| {
-            surface_class(kind, reference_wind_term, gravity, surface)
-        }),
-    }
+    let Some(SmallBodyTypes {
+        reference_wind_term,
+    }) = types
+    else {
+        return Modelled::NotModelled;
+    };
+    taxonomy_kind(system, body).map_or(Modelled::NotModelled, |kind| {
+        surface_class(kind, reference_wind_term, gravity, surface)
+    })
 }
 
 /// The kind of `body` of `system` as its class reads it: a planet; a member of a

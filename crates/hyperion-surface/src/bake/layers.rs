@@ -65,8 +65,9 @@ impl TerrainLayers {
     /// of the octaves each level resolves, drawn crater by crater (R10.T1.c's client half;
     /// decision-r10-t1c-client-scope §1.4), so that the client morphs it as it morphs the heights.
     /// A vertex without weights takes `m_body`, code 0, for both. Empty where the header carries
-    /// no maturity or no weathering rate, as no body's does until P14.T54.b, or where the weights
-    /// are not baked ([`WeightsLayer::Skipped`](super::WeightsLayer::Skipped)).
+    /// no maturity or no weathering rate, as no body's did below generator version 24 (P14.T54.b),
+    /// or where the weights are not baked
+    /// ([`WeightsLayer::Skipped`](super::WeightsLayer::Skipped)).
     #[must_use]
     pub fn maturity(&self) -> &[[u16; 2]] {
         &self.maturity

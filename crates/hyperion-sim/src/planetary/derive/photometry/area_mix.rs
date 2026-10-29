@@ -78,7 +78,7 @@
 //! regolith at most 0.11 (and, under the weathered area mix, a lava younger than a regolith), any
 //! other lid not known a row by its material; a body with no luminous host a Sun's light.
 //!
-//! # The weathered area mix (P14.T54.b.e; held at 24, [`WEATHERED_AREA_MIX_VERSION`])
+//! # The weathered area mix (P14.T54.b.e; from generator version 24)
 //!
 //! R10.T1.d's law ([`weathered_spherical_albedo`]) weathers a known lid's row at the body's
 //! maturity m (P14.T51.d's, which a pass computes from the context it reads), each of the optics'
@@ -108,8 +108,8 @@
 //! optics' twelve bins at λ^−4.08, and each bin's conservative layer in the Eddington closure
 //! ([`conservative_spherical_albedo`]), weighted by the hosts' light ([`HostShade::bands`]). The
 //! snapshot path's Bond albedo is the larger of the area mix and the floor
-//! (`surface_mix::floored`), held at 24 ([`RAYLEIGH_FLOOR_VERSION`]). P14.T24.h.b replaces the max
-//! with the adding rule, and adds the haze and the absorbers.
+//! (`surface_mix::floored`), from version 24. P14.T24.h.b replaces the max with the adding rule,
+//! and adds the haze and the absorbers.
 //!
 //! [`liquid_properties`]: crate::substance::liquid_properties
 
@@ -138,7 +138,6 @@ use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 use crate::units::{
     EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
@@ -910,13 +909,12 @@ pub(crate) enum StandIn {
     RecordAtItsFirstMelt,
     /// An airless regolith of a known lid whose row is of the `Silicate` family takes at most the
     /// Moon's 0.11: space weathering's stand-in ([`airless_silicate_stand_in`], [`capped_lid`]),
-    /// every such lid's while the weathered area mix is held; under it
-    /// ([`AreaMixWeathering::Weathered`]) only where R10.T1.d's law cannot weather the lid:
+    /// only where R10.T1.d's law cannot weather the lid (P14.T54.b.e's weathered area mix):
     /// [`CAPPED_ROWS`]' `basalt_reduced`, whose darkening is its carbon (decision-p14-t49k Q5), a
-    /// row whose `FeO_T` is not modelled, and a pass with no maturity. It stays past P14.T54.b.l.
+    /// row whose `FeO_T` is not modelled, and a pass with no maturity.
     SpaceWeathering,
-    /// Under the weathered area mix ([`AreaMixWeathering::Weathered`]), an airless lid whose row is
-    /// of the `Silicate` family ([`capped_lid`]) on a surface younger than
+    /// Under the weathered area mix (P14.T54.b.e), an airless lid whose row is of the `Silicate`
+    /// family ([`capped_lid`]) on a surface younger than
     /// [`REGOLITH_FORMATION_TIME`] keeps T51.b's cap, the smaller of its row's Bond albedo and the
     /// Moon's 0.11 ([`airless_silicate_stand_in`]): it is a lava with no regolith yet, whose glassy
     /// or slab surface is not modelled, and its row is a fine powder's (decision-p14-t54b-e-findings
@@ -1058,12 +1056,12 @@ impl LiquidRecord {
 /// - for a row not modelled as a liquid, a member its record needs not modelled (there, or at the
 ///   bound), or a composition not modelled, none.
 ///
-/// Each record is the one the palette's liquid entry reads (`liquid_properties_at_pressure`):
-/// [`liquid_properties`]' saturated record to the bit until generator version 24, and from it a
+/// Each record is the one the palette's liquid entry reads (`liquid_properties_at_pressure`): a
 /// pure liquid's compressed to `pressure`, Pa, its index, scattering and viscosity at that density
-/// (P14.T49.n's hold, `COMPRESSED_LIQUIDS_VERSION`), so that the Bond albedo's liquid and the
-/// palette's read one `ρ_l`(T, p) at one state (decision-p14-t54a-water-consistency's W4). A
-/// pressure at or under the liquid's vapour's, zero included, gives the saturated record.
+/// (P14.T49.n's, from generator version 24; to 23 [`liquid_properties`]' saturated record), so that
+/// the Bond albedo's liquid and the palette's read one `ρ_l`(T, p) at one state
+/// (decision-p14-t54a-water-consistency's W4). A pressure at or under the liquid's vapour's, zero
+/// included, gives the saturated record.
 ///
 /// [`liquid_properties`]: crate::substance::liquid_properties
 #[must_use]
@@ -1217,8 +1215,8 @@ fn moon_bond() -> f64 {
 /// lithology would make an airless rocky body far too bright; so it never brightens an airless
 /// silicate body against today's value, and it lets an intrinsically dark row go darker. Labelled
 /// ([`StandIn::SpaceWeathering`]). P14.T54.b.e weathers the area mix with R10.T1.d's law over
-/// P14.T51.d's maturity instead ([`Regolith::weathered_lid`], behind
-/// [`WEATHERED_AREA_MIX_VERSION`]; decision-p14-t51d-weathering), and keeps this cap on
+/// P14.T51.d's maturity instead ([`Regolith::weathered_lid`], from generator version 24;
+/// decision-p14-t51d-weathering), and keeps this cap on
 /// `basalt_reduced` alone ([`CAPPED_ROWS`]; decision-p14-t49k Q5: the law, npFe⁰ per `FeO_T`, does
 /// not weather its Fe-poor, graphite-bearing row, which would leave a Mercury too bright), on a
 /// known lid whose maturity is not modelled, and on a lava younger than a regolith
@@ -1237,15 +1235,14 @@ pub(crate) enum RegolithWeathering {
     /// space-weathering stand-in, the smaller of its row's Bond albedo and the Moon's 0.11
     /// ([`airless_silicate_stand_in`], labelled), and an airless rocky body's of a lid not known
     /// the Moon's 0.11 exactly; any other lid's row, or one under air, as it is
-    /// ([`Regolith::bond`]). Every regolith's while the weathered area mix is held, and under it a
-    /// lid's that R10.T1.d's law cannot weather ([`Regolith::weathered_lid`]: `basalt_reduced`, a
-    /// row whose `FeO_T` is not modelled, a pass with no maturity). It stays past P14.T54.b.l.
+    /// ([`Regolith::bond`]). Under the weathered area mix, from generator version 24, it is a lid's
+    /// that R10.T1.d's law cannot weather ([`Regolith::weathered_lid`]: `basalt_reduced`, a row
+    /// whose `FeO_T` is not modelled, a pass with no maturity); to 23 it was every regolith's.
     StandIn,
     /// Not yet a regolith (decision-p14-t54b-e-findings §A.5): under the weathered area mix, an
     /// airless silicate lid on a surface younger than [`REGOLITH_FORMATION_TIME`] keeps the
     /// stand-in's arm, the smaller of its row's Bond albedo and the Moon's 0.11, under its own
     /// label ([`StandIn::UnweatheredLava`]), and is not weathered ([`Regolith::weathered_lid`]).
-    /// It outlives the weathered area mix's hold.
     UnweatheredLava,
     /// Weathered: its spherical albedos by bin, `spherical_bins`, which P14.T54.b.e computes from
     /// the lid's row by R10.T1.d's law at P14.T51.d's maturity ([`Regolith::weathered_lid`]), and
@@ -1525,8 +1522,7 @@ pub(crate) const CAPPED_ROWS: [&str; 1] = ["basalt_reduced"];
 ///   not a clock scaled by the body's own micrometeoroid term: both are deferred, with the lava's
 ///   own slab or glass row, to the composition audit (decision-p14-t54b-e-findings §A.6).
 ///
-/// It is part of the weathered area mix's behaviour and outlives its hold
-/// ([`WEATHERED_AREA_MIX_VERSION`]); under the hold nothing reads it.
+/// It is part of the weathered area mix's behaviour (P14.T54.b.e).
 pub(crate) const REGOLITH_FORMATION_TIME: Years = Years::new(1.0e6);
 
 /// What a pass's weathered regolith reads beside its lid's row (P14.T54.b.e;
@@ -1645,71 +1641,6 @@ pub(crate) fn surface_bond(
     deposits.iter().fold(ground, |sum, &(row, area)| {
         sum + area * scale * solid_bond(row, &shade.bands).bond
     })
-}
-
-/// The generator version from which the area mix weathers its regolith at the body's maturity and
-/// adds `ferric`'s deposit (P14.T54.b.e; the [module](self)'s "The weathered area mix"): 24, the
-/// 23 → 24 batch's bump, P14.T54.b, its own hold (decision-p14-t54b-open §1.2), so that it moves
-/// the published albedos alone.
-///
-/// Below it [`AreaMixWeathering::in_force`] is [`AreaMixWeathering::Held`], so that every area mix
-/// is 23's bit for bit and nothing of the weathering is computed. P14.T54.b.l deletes this hold,
-/// [`AreaMixWeathering`] with its `Held` arm, the tests' switch ([`with_area_mix_weathering`]) and
-/// its tripwire (`the_weathered_area_mix_is_held_only_until_the_24_bump`).
-pub(crate) const WEATHERED_AREA_MIX_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether the area mix weathers its regolith and adds `ferric` (the hold,
-/// [`WEATHERED_AREA_MIX_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum AreaMixWeathering {
-    /// Versions 23's and before: T51.b's stand-in on every regolith and no deposit; the passes
-    /// compute no maturity and no modifiers.
-    Held,
-    /// The 23 → 24 batch's: the regolith weathered at its body's maturity and `ferric`'s area in
-    /// the mix.
-    Weathered,
-}
-
-impl AreaMixWeathering {
-    /// The rules this generator version gives: the weathered area mix from
-    /// [`WEATHERED_AREA_MIX_VERSION`], held below it; in the tests, the rules a test's switch sets
-    /// on its thread ([`with_area_mix_weathering`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = WEATHERING_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= WEATHERED_AREA_MIX_VERSION {
-            Self::Weathered
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The weathered area mix's rules a test sets on its thread, `None` for the version's.
-    static WEATHERING_RULES: core::cell::Cell<Option<AreaMixWeathering>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the weathered area mix's rules `rules` on this thread, for the tests to
-/// reach 24's area mix ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. P14.T54.b.l deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_area_mix_weathering<R>(rules: AreaMixWeathering, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<AreaMixWeathering>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            WEATHERING_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(WEATHERING_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// The share of the disc under cloud of a body in the state `state` before its condensable's
@@ -1933,68 +1864,6 @@ pub(crate) fn water_cloud_albedo() -> f64 {
 #[must_use]
 pub(crate) fn under_cloud(surface: f64, cloud: f64, cloud_albedo: f64) -> f64 {
     cloud * cloud_albedo + (1.0 - cloud) * surface
-}
-
-/// The generator version from which the snapshot path's Bond albedo is floored at its air's own
-/// Rayleigh layer's ([`rayleigh_floor`]): 24, the 23 → 24 batch's bump, P14.T54.b (P14.T24.h.a, an
-/// anchor of 24; decision-p14-t54a-passes §G3.5; decision-bump-plan-after-22 §6).
-///
-/// Below it [`RayleighFloorRules::in_force`] is [`RayleighFloorRules::Held`], so that every Bond
-/// albedo is the area mix's bit for bit. P14.T54.b deletes this hold, [`RayleighFloorRules`] with
-/// its `Held` arm and the tests' switch, and its tripwire
-/// (`the_rayleigh_floor_is_held_only_until_the_24_bump`).
-pub(crate) const RAYLEIGH_FLOOR_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether the snapshot path's Bond albedo is floored at its air's own Rayleigh layer's (the
-/// floor's hold, [`RAYLEIGH_FLOOR_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum RayleighFloorRules {
-    /// Versions 23's and before: the area mix's Bond albedo, unfloored.
-    Held,
-    /// The 23 → 24 batch's: the larger of the area mix's and the air's own ([`rayleigh_floor`]).
-    Floored,
-}
-
-impl RayleighFloorRules {
-    /// The rules this generator version gives: the floor from [`RAYLEIGH_FLOOR_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_rayleigh_floor`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = FLOOR_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= RAYLEIGH_FLOOR_VERSION {
-            Self::Floored
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The floor's rules a test sets on its thread, `None` for the version's: tests run on threads
-    /// of one process.
-    static FLOOR_RULES: core::cell::Cell<Option<RayleighFloorRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the floor's rules `rules` on this thread, for the tests to reach 24's Bond
-/// albedo ahead of the bump; the version's rules are set back after. P14.T54.b deletes it with
-/// the hold.
-#[cfg(test)]
-pub(crate) fn with_rayleigh_floor<R>(rules: RayleighFloorRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops, a panic in `run` included.
-    struct Restore(Option<RayleighFloorRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            FLOOR_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(FLOOR_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// The exponent of a Rayleigh optical depth's fall with wavelength, τ ∝ λ^−4.08: the local slope

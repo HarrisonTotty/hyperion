@@ -26,8 +26,7 @@
 //!   equation for a row with a phase diagram, a stated value otherwise. A pure liquid with a
 //!   reference equation of state is compressed to a pressure by it
 //!   (`Substance::compressed_liquid_density`, P14.T49.n), which the record's readers take from
-//!   generator version 24 (`COMPRESSED_LIQUIDS_VERSION`), its body's surface pressure; every
-//!   other liquid is incompressible;
+//!   generator version 24, at its body's surface pressure; every other liquid is incompressible;
 //! - **the specific heat** of the saturated liquid, `c_l`(T), J kg⁻¹ K⁻¹, is the row's reference
 //!   equation of state's `c_p` at its own saturated liquid over a range, held at its ends
 //!   ([`LiquidSpecificHeat`]; decision-r09-t13i §2.1, for the climate's sea of another liquid;
@@ -116,7 +115,6 @@ use super::{Source, Substance, SubstanceId};
 use crate::math;
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 mod melt;
 mod solution;
@@ -127,82 +125,6 @@ pub(crate) use solution::{
     LaliberteViscosity, MixingModel, MyhreDensity, RowlessSolute, SoluteAbsorption,
     SolutionColumns, VehkamakiSurfaceTension, WilliamsLongViscosity,
 };
-
-/// The generator version from which the record's liquids are compressed to their body's surface
-/// pressure (P14.T49.n): 24, the 23 → 24 batch's bump, P14.T54.b
-/// (decision-p14-t54a-water-consistency, its Batch B follow-up of 2026-10-20, F.1 and C;
-/// decision-bump-plan-after-22, "Version-24 lanes after 23", §6's holds).
-///
-/// Below it [`CompressedLiquidsRules::in_force`] is [`CompressedLiquidsRules::Saturated`]: every
-/// reader of a liquid's density on the record, the partition's layers, its seas' and its other
-/// liquids' areas and its own-ocean weight (`planetary::chem::partition`), the palette's liquid
-/// entry with its record (`planetary::surface::palette`), and the photometry's liquid record
-/// (`planetary::derive::photometry::area_mix`), reads the saturated liquid's
-/// ([`Substance::liquid_density_at_pressure`], [`liquid_properties_at_pressure`]), so that every
-/// golden keeps 23's bits. The five move together, so that a liquid's layer, its area, its palette
-/// entry and its Bond albedo's liquid read one `ρ_l`(T, p) (decision-p14-t54a-water-consistency's
-/// W4). P14.T54.b deletes this hold, [`CompressedLiquidsRules`] with its `Saturated` arm,
-/// [`with_compressed_liquids`] (and the switch in every test that sets it) and its tripwires
-/// (`the_compressed_liquids_are_held_only_until_the_24_bump` and
-/// `a_panic_inside_the_compressed_liquids_switch_sets_the_rules_back`).
-pub(crate) const COMPRESSED_LIQUIDS_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether the record's liquids are compressed to their body's surface pressure (the hold,
-/// [`COMPRESSED_LIQUIDS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum CompressedLiquidsRules {
-    /// Versions 23's and before: every reader takes the saturated liquid's density, under its own
-    /// vapour's pressure, at its temperature.
-    Saturated,
-    /// The 23 → 24 batch's: every reader takes its liquid compressed to the body's surface
-    /// pressure ([`Substance::compressed_liquid_density`]).
-    Compressed,
-}
-
-impl CompressedLiquidsRules {
-    /// The rules this generator version gives: the compression from
-    /// [`COMPRESSED_LIQUIDS_VERSION`], the saturated liquid below it; in the tests, the rules a
-    /// test's switch sets on its thread ([`with_compressed_liquids`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = COMPRESSED_LIQUIDS_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= COMPRESSED_LIQUIDS_VERSION {
-            Self::Compressed
-        } else {
-            Self::Saturated
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The compressed liquids' rules a test sets on its thread, `None` for the version's.
-    static COMPRESSED_LIQUIDS_RULES: core::cell::Cell<Option<CompressedLiquidsRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the compressed liquids' rules `rules` on this thread, for the tests to
-/// reach 24's liquids ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. P14.T54.b deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_compressed_liquids<R>(
-    rules: CompressedLiquidsRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<CompressedLiquidsRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            COMPRESSED_LIQUIDS_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(COMPRESSED_LIQUIDS_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The edges of the liquid bins, nm: 380 + 25.33 k for k = 0 to 15, R08's bake bins (Design note
 /// 5), whose centres are `hyperion_surface::field::LIQUID_BIN_CENTRES_NM`.
@@ -1756,9 +1678,6 @@ impl Substance {
     /// `water_s_compressed_liquid_meets_nist_s_isotherms` holds water at 596.41 K under a steam
     /// world's 22.5 MPa to the NIST Chemistry WebBook's 690.48 kg m⁻³ (SRD 69, its evaluation of
     /// IAPWS-95), about 4.8% denser than its saturated liquid under its vapour's 11.78 MPa.
-    ///
-    /// Crate-private while [`COMPRESSED_LIQUIDS_VERSION`] holds the record's liquids saturated,
-    /// so that no caller outside the crate publishes 24's law at 23.
     #[must_use]
     pub(crate) fn compressed_liquid_density(
         &self,
@@ -1770,23 +1689,16 @@ impl Substance {
     }
 
     /// Its liquid's grain density at `temperature` under `pressure`, kg m⁻³, as the record's
-    /// readers take it ([`COMPRESSED_LIQUIDS_VERSION`]'s hold): the saturated liquid's
-    /// ([`Substance::grain_density`]) under [`CompressedLiquidsRules::Saturated`], 23's to the bit,
-    /// and [`Substance::compressed_liquid_density`] under [`CompressedLiquidsRules::Compressed`].
+    /// readers take it from generator version 24 (P14.T49.n):
+    /// [`Substance::compressed_liquid_density`]. To version 23 they read the saturated liquid's
+    /// ([`Substance::grain_density`]).
     #[must_use]
     pub(crate) fn liquid_density_at_pressure(
         &self,
         temperature: Kelvin,
         pressure: Pascals,
     ) -> Option<KilogramsPerCubicMetre> {
-        match CompressedLiquidsRules::in_force() {
-            CompressedLiquidsRules::Saturated => {
-                self.grain_density(CondensedPhase::Liquid, temperature)
-            }
-            CompressedLiquidsRules::Compressed => {
-                self.compressed_liquid_density(temperature, pressure)
-            }
-        }
+        self.compressed_liquid_density(temperature, pressure)
     }
 }
 
@@ -2183,14 +2095,13 @@ pub fn liquid_properties(
 }
 
 /// The liquid's record for row `id` at `temperature` and `composition` under `pressure`, as the
-/// palette's liquid entry reads it ([`COMPRESSED_LIQUIDS_VERSION`]'s hold): [`liquid_properties`]
-/// to the bit under [`CompressedLiquidsRules::Saturated`]; under
-/// [`CompressedLiquidsRules::Compressed`], its record with a pure liquid's density compressed to
-/// `pressure`, Pa ([`Substance::compressed_liquid_density`]'s law, at the record's temperature),
-/// so that the members read at the record's density move with it: the index carried to it by
+/// palette's liquid entry reads it from generator version 24 (P14.T49.n; to version 23 it read
+/// [`liquid_properties`]): its record with a pure liquid's density compressed to `pressure`, Pa
+/// ([`Substance::compressed_liquid_density`]'s law, at the record's temperature), so that the
+/// members read at the record's density move with it: the index carried to it by
 /// Lorentz–Lorenz, the scattering's `κ_T`, depolarisation and critical-region basis there, and the
-/// viscosity there. A solution's and a melt's record is [`liquid_properties`]' under either, the
-/// law holding them incompressible.
+/// viscosity there. A solution's and a melt's record is [`liquid_properties`]', the law holding
+/// them incompressible.
 ///
 /// # Errors
 ///
@@ -2201,10 +2112,7 @@ pub(crate) fn liquid_properties_at_pressure(
     composition: Composition<'_>,
     pressure: Pascals,
 ) -> Result<LiquidProperties, ResolveLiquidError> {
-    match CompressedLiquidsRules::in_force() {
-        CompressedLiquidsRules::Saturated => liquid_properties(id, temperature, composition),
-        CompressedLiquidsRules::Compressed => resolve(id, temperature, composition, pressure),
-    }
+    resolve(id, temperature, composition, pressure)
 }
 
 /// [`liquid_properties`] under `pressure`, a pure liquid's density compressed to it

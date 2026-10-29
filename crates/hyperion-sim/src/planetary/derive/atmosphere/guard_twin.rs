@@ -1,7 +1,8 @@
 //! A twin of ruling 133.5's guard, `planetary_properties::no_planet_hotter_than_its_star`
-//! (P14.T16.b), inside the crate, so that it runs under the escape's batch and with every 24 hold
-//! in force, which an integration test cannot set: P14.T53.a's thick-air closure's acceptance
-//! (decision-p14-t53a-thick-co2 §7.1, §7.2 and the guard's part of §7.5).
+//! (P14.T16.b), inside the crate, built while P14.T53.a's rules were held at 24, which an
+//! integration test could not set, and kept for what only the crate reaches: P14.T53.a's thick-air
+//! closure's acceptance (decision-p14-t53a-thick-co2 §7.1, §7.2 and the guard's part of §7.5), the
+//! 39 bodies by name and the closure's movers (`without_thick_air`).
 //!
 //! Its systems, hosts, stars and draws are the integration test's, built as
 //! `tests/planetary_support` builds them and walked in the same order, so that every sample is
@@ -39,7 +40,6 @@ use crate::planetary::placement::{
     HostPlacement, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs,
     ZoneHierarchy, ZoneStar, place, stable_zones,
 };
-use crate::planetary::testing::with_every_24_hold;
 use crate::stellar::Composition;
 use crate::stellar::draws::{StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
@@ -686,25 +686,23 @@ fn guard(step: &str) -> (u32, f64, String, u32) {
 }
 
 /// The guard's twin under P14.T53.a's thick-air closure (decision-p14-t53a-thick-co2 §7.1), run by
-/// name: under the escape's batch alone (B3's step 02, the Rayleigh floor switched with it) and
-/// with every 24 hold in force (step F), no surface saturates at its host's effective temperature,
-/// where 117 of the 30,063 samples did before it; the largest `T_s` ÷ `T★` of an air is printed
-/// (the replica's 0.69).
+/// name, under the generator's rules from 24 (B3's step F, every hold of 24 deleted): no surface
+/// saturates at its host's effective temperature, where 117 of the 30,063 samples did before the
+/// closure; the largest `T_s` ÷ `T★` of an air is printed (the replica's 0.69). From the bump the
+/// integration test `planetary_properties::no_planet_hotter_than_its_star` is the guard itself,
+/// held to 10⁻³.
 #[test]
-#[ignore = "slow: the guard's 30,063 samples twice, under the escape's batch and every 24 hold"]
+#[ignore = "slow: the guard's 30,063 samples"]
 fn under_the_escape_batch_and_every_24_hold_no_planet_is_hotter_than_its_star() {
-    use crate::planetary::chem::escape::{EscapeRules, with_rules};
-    let (step_02, ..) = with_rules(EscapeRules::Batch, || guard("02"));
-    let (step_f, largest, at, samples) = with_every_24_hold(|| guard("F"));
+    let (saturated, largest, at, samples) = guard("24");
     eprintln!(
-        "the guard: {step_02} saturated at step 02, {step_f} at F, of {samples}; the largest \
-         ratio {largest:.4} ({at})"
+        "the guard: {saturated} saturated of {samples}; the largest ratio {largest:.4} ({at})"
     );
-    assert_eq!((step_02, step_f), (0, 0));
+    assert_eq!(saturated, 0);
 }
 
 /// The 39 bodies the escape's batch saturated ([`SATURATED_UNDER_THE_BATCH`]), each by name at
-/// all three times with every 24 hold in force (decision-p14-t53a-thick-co2 §7.2): finite, under
+/// all three times (decision-p14-t53a-thick-co2 §7.2): finite, under
 /// its star, its surface at least its top's grey temperature and at most its grey and its star.
 /// Each is stated (`T_s`, `p_s`, τ, `τ_a`, `T_a`, its crust's state, its deck, part 2's section and
 /// both limit ratios), with the count that stay molten against the replica's 13 ± 5.
@@ -717,48 +715,46 @@ fn under_every_24_hold_the_guard_s_39_thick_carbon_dioxide_airs_are_finite_and_u
     let mut seen = std::collections::BTreeMap::<String, u32>::new();
     let (mut molten, mut solid, mut sectioned) = (0_u32, 0_u32, 0_u32);
     let mut largest = 0.0_f64;
-    with_every_24_hold(|| {
-        guard_walk(&mut |sample| {
-            let id = sample.id();
-            if !named.contains(&id) {
-                return;
+    guard_walk(&mut |sample| {
+        let id = sample.id();
+        if !named.contains(&id) {
+            return;
+        }
+        let (body, hottest) = sample.derive().expect("each of the 39 is derived");
+        let air = body.atmosphere();
+        let t_s = air.surface_temperature().value();
+        let (grey, closure) = thick_air_figures(&body);
+        eprintln!(
+            "{id} at {:+} yr, {:.1e} yr old: {}",
+            sample.years,
+            sample.system.age.value(),
+            body_line(&body, hottest)
+        );
+        let (_, top, _) = closure.expect("each lies beyond the anchor");
+        assert!(t_s.is_finite() && t_s < hottest.value(), "{id}: {t_s}");
+        assert!(
+            top.value() <= t_s * (1.0 + 1e-9),
+            "{id}: {t_s} under its top's {top:?}"
+        );
+        assert!(
+            t_s <= grey * (1.0 + 1e-9),
+            "{id}: {t_s} above its grey {grey}"
+        );
+        assert!(air.surface_pressure().expect("an air") > THICK_AIR_ANCHOR_PRESSURE);
+        largest = largest.max(t_s / hottest.value());
+        if sample.years == 0 {
+            if air.state() == SurfaceState::MagmaOcean {
+                assert!(t_s >= SILICATE_SOLIDUS.value(), "{id}");
+                molten += 1;
+            } else {
+                solid += 1;
             }
-            let (body, hottest) = sample.derive().expect("each of the 39 is derived");
-            let air = body.atmosphere();
-            let t_s = air.surface_temperature().value();
-            let (grey, closure) = thick_air_figures(&body);
-            eprintln!(
-                "{id} at {:+} yr, {:.1e} yr old: {}",
-                sample.years,
-                sample.system.age.value(),
-                body_line(&body, hottest)
+            sectioned += u32::from(
+                air.supercritical_reservoir(body.surface_gravity())
+                    .is_some(),
             );
-            let (_, top, _) = closure.expect("each lies beyond the anchor");
-            assert!(t_s.is_finite() && t_s < hottest.value(), "{id}: {t_s}");
-            assert!(
-                top.value() <= t_s * (1.0 + 1e-9),
-                "{id}: {t_s} under its top's {top:?}"
-            );
-            assert!(
-                t_s <= grey * (1.0 + 1e-9),
-                "{id}: {t_s} above its grey {grey}"
-            );
-            assert!(air.surface_pressure().expect("an air") > THICK_AIR_ANCHOR_PRESSURE);
-            largest = largest.max(t_s / hottest.value());
-            if sample.years == 0 {
-                if air.state() == SurfaceState::MagmaOcean {
-                    assert!(t_s >= SILICATE_SOLIDUS.value(), "{id}");
-                    molten += 1;
-                } else {
-                    solid += 1;
-                }
-                sectioned += u32::from(
-                    air.supercritical_reservoir(body.surface_gravity())
-                        .is_some(),
-                );
-            }
-            *seen.entry(id).or_default() += 1;
-        });
+        }
+        *seen.entry(id).or_default() += 1;
     });
     eprintln!(
         "the 39 at the epoch: {molten} MagmaOcean (the replica's 13 ± 5), {solid} solid, \
@@ -792,128 +788,125 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
     let mut edges = Vec::new();
     let (mut samples, mut movers) = (0_u32, 0_u32);
     let (mut melt_oxygen, mut to_main) = (MeltOxygen::default(), Vec::new());
-    with_every_24_hold(|| {
-        guard_walk(&mut |sample| {
-            let (after, before) = (sample.derive(), without_thick_air(|| sample.derive()));
-            let ((after, hottest), (before, _)) = match (after, before) {
-                (Some(after), Some(before)) => (after, before),
-                (None, None) => return,
-                (after, before) => {
-                    eprintln!(
-                        "MOVER {} at {:+} yr derives under one rule alone: with the closure {}, \
+    guard_walk(&mut |sample| {
+        let (after, before) = (sample.derive(), without_thick_air(|| sample.derive()));
+        let ((after, hottest), (before, _)) = match (after, before) {
+            (Some(after), Some(before)) => (after, before),
+            (None, None) => return,
+            (after, before) => {
+                eprintln!(
+                    "MOVER {} at {:+} yr derives under one rule alone: with the closure {}, \
                          without it {}",
-                        sample.id(),
-                        sample.years,
-                        after.is_some(),
-                        before.is_some()
-                    );
-                    movers += 1;
-                    *flips
-                        .entry("derived under one rule alone".to_owned())
-                        .or_default() += 1;
-                    return;
-                }
-            };
-            samples += 1;
-            melt_oxygen.add(
-                &format!("{} at {:+} yr", sample.id(), sample.years),
-                &after,
-                hottest,
-            );
-            if after == before {
+                    sample.id(),
+                    sample.years,
+                    after.is_some(),
+                    before.is_some()
+                );
+                movers += 1;
+                *flips
+                    .entry("derived under one rule alone".to_owned())
+                    .or_default() += 1;
                 return;
             }
-            movers += 1;
-            let (a, b) = (after.atmosphere(), before.atmosphere());
-            let id = format!(
-                "{} at {:+} yr ({:.1e} yr old)",
-                sample.id(),
-                sample.years,
-                sample.system.age.value()
-            );
-            eprintln!(
-                "MOVER {id}\n  before {}\n  after  {}",
-                body_line(&before, hottest),
-                body_line(&after, hottest)
-            );
-            let dominant = Gas::ALL
-                .into_iter()
-                .max_by(|x, y| {
-                    let moles = |gas: Gas| {
-                        a.partial_pressures().of(gas).value() / gas.molar_mass_g_per_mol()
-                    };
-                    moles(*x).total_cmp(&moles(*y))
-                })
-                .expect("nine gases");
-            *by_gas.entry(format!("{dominant:?}")).or_default() += 1;
-            let section = |body: &DerivedBody| {
-                body.atmosphere()
-                    .supercritical_reservoir(body.surface_gravity())
-                    .is_some()
-            };
-            // Arm (c)'s: a published runaway between the limits now.
-            let hothouse = |body: &DerivedBody| {
-                let (runaway, maximum) = limit_ratios(body, hottest);
-                body.atmosphere().state() == SurfaceState::RunawayGreenhouse
-                    && runaway < 1.0
-                    && maximum >= 1.0
-            };
-            let residual = |body: &DerivedBody| match body.convergence() {
-                Convergence::Converged => 0.0,
-                Convergence::Bracketed { residual, .. } => residual,
-            };
-            let new_jump = (after.convergence().is_jump() && !before.convergence().is_jump())
-                || (residual(&after) > 1e-6 && residual(&before) <= 1e-6);
-            if new_jump && !closure_jump_exempt(&sample.id(), &before, &after) {
-                to_main.push(format!("{id}: {:?}", after.convergence()));
+        };
+        samples += 1;
+        melt_oxygen.add(
+            &format!("{} at {:+} yr", sample.id(), sample.years),
+            &after,
+            hottest,
+        );
+        if after == before {
+            return;
+        }
+        movers += 1;
+        let (a, b) = (after.atmosphere(), before.atmosphere());
+        let id = format!(
+            "{} at {:+} yr ({:.1e} yr old)",
+            sample.id(),
+            sample.years,
+            sample.system.age.value()
+        );
+        eprintln!(
+            "MOVER {id}\n  before {}\n  after  {}",
+            body_line(&before, hottest),
+            body_line(&after, hottest)
+        );
+        let dominant = Gas::ALL
+            .into_iter()
+            .max_by(|x, y| {
+                let moles =
+                    |gas: Gas| a.partial_pressures().of(gas).value() / gas.molar_mass_g_per_mol();
+                moles(*x).total_cmp(&moles(*y))
+            })
+            .expect("nine gases");
+        *by_gas.entry(format!("{dominant:?}")).or_default() += 1;
+        let section = |body: &DerivedBody| {
+            body.atmosphere()
+                .supercritical_reservoir(body.surface_gravity())
+                .is_some()
+        };
+        // Arm (c)'s: a published runaway between the limits now.
+        let hothouse = |body: &DerivedBody| {
+            let (runaway, maximum) = limit_ratios(body, hottest);
+            body.atmosphere().state() == SurfaceState::RunawayGreenhouse
+                && runaway < 1.0
+                && maximum >= 1.0
+        };
+        let residual = |body: &DerivedBody| match body.convergence() {
+            Convergence::Converged => 0.0,
+            Convergence::Bracketed { residual, .. } => residual,
+        };
+        let new_jump = (after.convergence().is_jump() && !before.convergence().is_jump())
+            || (residual(&after) > 1e-6 && residual(&before) <= 1e-6);
+        if new_jump && !closure_jump_exempt(&sample.id(), &before, &after) {
+            to_main.push(format!("{id}: {:?}", after.convergence()));
+        }
+        for (what, was, now) in [
+            (
+                "state",
+                format!("{:?}", b.state()),
+                format!("{:?}", a.state()),
+            ),
+            (
+                "deck",
+                format!("{:?}", b.runaway_deck()),
+                format!("{:?}", a.runaway_deck()),
+            ),
+            (
+                "section",
+                format!("{}", section(&before)),
+                format!("{}", section(&after)),
+            ),
+            (
+                "arm (c)",
+                format!("{}", hothouse(&before)),
+                format!("{}", hothouse(&after)),
+            ),
+            (
+                "jump",
+                format!("{}", before.convergence().is_jump()),
+                format!("{}", after.convergence().is_jump()),
+            ),
+            (
+                "bracketed above 1e-6",
+                format!("{}", residual(&before) > 1e-6),
+                format!("{}", residual(&after) > 1e-6),
+            ),
+        ] {
+            if was != now {
+                *flips.entry(format!("{what} {was} → {now}")).or_default() += 1;
             }
-            for (what, was, now) in [
-                (
-                    "state",
-                    format!("{:?}", b.state()),
-                    format!("{:?}", a.state()),
-                ),
-                (
-                    "deck",
-                    format!("{:?}", b.runaway_deck()),
-                    format!("{:?}", a.runaway_deck()),
-                ),
-                (
-                    "section",
-                    format!("{}", section(&before)),
-                    format!("{}", section(&after)),
-                ),
-                (
-                    "arm (c)",
-                    format!("{}", hothouse(&before)),
-                    format!("{}", hothouse(&after)),
-                ),
-                (
-                    "jump",
-                    format!("{}", before.convergence().is_jump()),
-                    format!("{}", after.convergence().is_jump()),
-                ),
-                (
-                    "bracketed above 1e-6",
-                    format!("{}", residual(&before) > 1e-6),
-                    format!("{}", residual(&after) > 1e-6),
-                ),
-            ] {
-                if was != now {
-                    *flips.entry(format!("{what} {was} → {now}")).or_default() += 1;
-                }
+        }
+        let t = a.surface_temperature().value();
+        for (edge, at) in [
+            ("solidus", SILICATE_SOLIDUS.value()),
+            ("water's T_c", 647.096),
+            ("the acid's 430 K", 430.0),
+        ] {
+            if (t - at).abs() <= 20.0 {
+                edges.push(format!("{id}: {t:.2} K within 20 K of {edge}"));
             }
-            let t = a.surface_temperature().value();
-            for (edge, at) in [
-                ("solidus", SILICATE_SOLIDUS.value()),
-                ("water's T_c", 647.096),
-                ("the acid's 430 K", 430.0),
-            ] {
-                if (t - at).abs() <= 20.0 {
-                    edges.push(format!("{id}: {t:.2} K within 20 K of {edge}"));
-                }
-            }
-        });
+        }
     });
     eprintln!("{movers} of {samples} samples move under the closure");
     eprintln!("FLIPS: {flips:?}");

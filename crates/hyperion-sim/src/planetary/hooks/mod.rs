@@ -24,37 +24,35 @@
 //!   which the flight model's drag and rendering plan R08 read, and of a gas envelope
 //!   ([`EnvelopeProfile`], P14.T24.d), Guillot's grey profile joined to its dry adiabat.
 //!   P14.T54.b's wiring puts the surface's in the record's surface section and the envelope's in
-//!   its envelope section (P14.T54.b.i), each held off the record until the 23 → 24 bump.
+//!   its envelope section (P14.T54.b.i), each from the 23 → 24 bump.
 //! - [`envelope_atmosphere`]: a gas envelope's visible atmosphere (P14.T24.d with P14.T52.d): its
 //!   internal temperature, the record's giant cooling blended with a stated cooling law
 //!   ([`envelope_internal_temperature`]), and its [`EnvelopeAtmosphere`], Guillot's profile on the
 //!   envelope's own gas, its quenched and cold-trapped composition at 1 bar, its decks, its
-//!   photochemical hazes and its absorbers at 10 mbar. It is pure: the record calls it behind the
-//!   air's hold (`system::envelope`, P14.T54.b.i), its envelope section, held off the record until
-//!   the 23 → 24 bump.
+//!   photochemical hazes and its absorbers at 10 mbar. It is pure: the record calls it for its
+//!   envelope section (`system::envelope`, P14.T54.b.i) from the 23 → 24 bump.
 //! - [`modifiers`]: a solid surface's [`SurfaceModifiers`] (P14.T51.d, T51.j), its
 //!   space-weathering rate and maturity, organic cover, resurfacing rate, an Io's volcanic
 //!   deposits and an oxidised surface's `ferric`. It is pure: P14.T54.b's wiring puts it in the
-//!   record's surface section, held off the record until the 23 → 24 bump.
+//!   record's surface section from the 23 → 24 bump.
 //! - [`aerosols`]: a surface's [`AerosolInventory`] (P14.T24.c), its condensate decks from
 //!   P14.T52.c's loop, its hazes and dust as modes of particles and its absorbers. It is pure:
-//!   P14.T54.b's wiring puts it in the record's surface section, held off the record until the
-//!   23 → 24 bump.
+//!   P14.T54.b's wiring puts it in the record's surface section from the 23 → 24 bump.
 //! - [`sulphur`]: a body's sulphur (P14.T24.g), the acid deck of a runaway greenhouse, the
 //!   sulphate layer of a temperate or snowball world and SO₂ as an absorber, which
-//!   [`aerosols`] calls. It is pure until P14.T54.b.
+//!   [`aerosols`] calls. It is pure; the record reads it through the aerosols from P14.T54.b.
 //! - [`cold_traps`]: an airless body's cold traps (P14.T51.f): the exposed fraction of their ice,
 //!   `f_x`, drawn once a body on `body.cold_traps`, the zonal annual maximum and the cold-trap
-//!   fraction of each condensable, which the record's published condensates take behind a hold at
-//!   generator version 24, until P14.T54.b's bump.
+//!   fraction of each condensable, which the record's published condensates take from generator
+//!   version 24 (P14.T54.b's bump).
 //! - `ocean`: a body's subsurface ocean beyond its flag (P14.T51.g): the floor of a regular moon's
 //!   ocean at the liquidus of its base (P14.T51.g.a), and every solid body's ice shell and ocean by
 //!   a conductive solve with its chlorine and ammonia, which a moon's tidal ocean branch reads too
-//!   (P14.T51.g.b). Its figures' [`SubsurfaceOcean`] takes them behind holds at generator version
-//!   24, until P14.T54.b's bump.
+//!   (P14.T51.g.b). Its figures' [`SubsurfaceOcean`] takes them from generator version 24
+//!   (P14.T54.b's bump).
 //! - [`small_bodies`]: a small body's [`TaxonomicClass`] (P14.T51.e), a label and not a substance,
 //!   from its kind, its lid's lithology, its veneer and its weathering clocks. It is pure; its
-//!   wiring puts it on the record behind a hold at generator version 24.
+//!   wiring puts it on the record from generator version 24.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's

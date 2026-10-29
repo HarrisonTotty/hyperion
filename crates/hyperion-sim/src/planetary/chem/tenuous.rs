@@ -2,9 +2,8 @@
 //! volatiles' retention and their ice's own temperature, and the `Tenuous` state's floor.
 //!
 //! Every piece is a closed form of plain quantities, read by
-//! [`atmosphere`](crate::planetary::derive::atmosphere) on the snapshot path under the escape's
-//! batch rules and this module's own hold (`TenuousRules`, `TENUOUS_VERSION`). Under the hold, to
-//! generator version 23, none of it is read.
+//! [`atmosphere`](crate::planetary::derive::atmosphere) on the snapshot path from generator version
+//! 24 (the 23 → 24 bump, P14.T54.b). To version 23 none of it was read.
 //!
 //! - **An ice-held volatile's retention.** P14.T13.b's threshold (`JEANS_RETENTION_THRESHOLD`) is
 //!   a calibrated classifier of whether a bulk air survives, not a flux. A condensable that fails
@@ -46,70 +45,9 @@ use crate::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
-
-/// The generator version from which P14.T53.c is on the record: 24, the 23 → 24 batch's bump,
-/// P14.T54.b, if it rides it (a rider; else the next planetary bump, its hold renumbered).
-///
-/// It is P14.T53.c's one hold. Below it [`TenuousRules::in_force`] is [`TenuousRules::Held`], so
-/// that every figure on the record is version 23's bit for bit; its rules are read only under the
-/// escape's batch rules too (`EscapeRules::Batch`), whose path they amend. P14.T54.b deletes this
-/// hold, [`TenuousRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_tenuous_air_is_held_only_until_the_24_bump`).
-pub(crate) const TENUOUS_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether P14.T53.c's thin and transient air is in force (the hold, [`TENUOUS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum TenuousRules {
-    /// Version 23's and before: P14.T54.a's ice-held stand-in, no `Tenuous` state, the
-    /// greenhouse from the whole column.
-    Held,
-    /// The 23 → 24 batch's: the ice-held retention at the ice's own temperature, the `Tenuous`
-    /// state above its floor, and no ocean under a `Snowball`'s ice among its liquids.
-    Tenuous,
-}
-
-impl TenuousRules {
-    /// The rules this generator version gives: P14.T53.c's from [`TENUOUS_VERSION`], none below
-    /// it; in the tests, the rules a test's switch sets on its thread ([`with_tenuous`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= TENUOUS_VERSION {
-            Self::Tenuous
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The tenuous air's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<TenuousRules>> = const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the tenuous air's rules `rules` on this thread, for the tests to reach 24's
-/// thin airs ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. P14.T54.b deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_tenuous<R>(rules: TenuousRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<TenuousRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The thermal emissivity of nitrogen ice: 0.59 (Hillier et al. 1990, Science 250, 419, abstract:
 /// "our Bond albedo implies a surface emissivity of 0.59 ± 0.16", Triton's 14 µbar N₂ air in vapour

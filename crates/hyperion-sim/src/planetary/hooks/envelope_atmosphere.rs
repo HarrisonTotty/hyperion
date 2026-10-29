@@ -219,11 +219,11 @@
 //!
 //! # On the record from 24
 //!
-//! This module is pure. The record calls it behind the air's sections' hold
-//! (`system::envelope`, P14.T54.b.i; `AIR_SECTIONS_VERSION`), so that at generator version 23
-//! nothing on the record calls it (decision-bump-plan-after-22 §1.3): from 24 the record's
-//! envelope section of every sub-Neptune and giant is its [`EnvelopeAtmosphere`] on P14.T50.b's
-//! abundances, at the envelope's `T_eff` (`T_eq`⁴ + `T_int`⁴)^¼ with this module's `T_int`.
+//! This module is pure. The record calls it (`system::envelope`, P14.T54.b.i); to generator
+//! version 23 nothing on the record called it (decision-bump-plan-after-22 §1.3): from 24 the
+//! record's envelope section of every sub-Neptune and giant is its [`EnvelopeAtmosphere`] on
+//! P14.T50.b's abundances, at the envelope's `T_eff` (`T_eq`⁴ + `T_int`⁴)^¼ with this module's
+//! `T_int`.
 //!
 //! # Determinism
 //!

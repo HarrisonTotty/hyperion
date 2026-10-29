@@ -1,137 +1,11 @@
-//! The escape's tests: its hold's tripwire, and the rules a test sets on its thread.
+//! The escape's tests: the host star's primordial helium, and the pure laws.
 
 use super::*;
-use crate::planetary::derive::atmosphere::GreenhouseConstants;
-
-/// P14.T53.a is held until the 23 → 24 bump: the rules in force are versions 22's and 23's, and
-/// the record's greenhouse is P14.T57.a's fits.
-#[test]
-fn the_escape_is_held_only_until_the_24_bump() {
-    assert!(
-        GENERATOR_VERSION < ESCAPE_VERSION,
-        "the 23 → 24 bump (P14.T54.b) puts P14.T53.a on the record: the greenhouse's broadened \
-         carbon dioxide term with its refits and its thick-air closure beyond 100 bar \
-         (`GreenhouseConstants::BATCH`, `THICK_AIR_ANCHOR_PRESSURE`, Earth's \
-         `BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`) and the greenhouse gain's (1 − x)(1 \
-         − d) weight. Delete `ESCAPE_VERSION`, `EscapeRules` and its `Held` arm (every `match` on \
-         it keeps its `Batch` arm), `GreenhouseConstants::FITTED`'s role as the record's (its \
-         `in_force` then gives `BATCH` alone, and the tests that pin version 23's figures under \
-         `FITTED` move to the batch's), the tests' `with_rules`, and this test. From P14.T53.b \
-         part 1: delete the tests' `with_present_state` and `PresentState` (its `Present` arm \
-         stands), so that `present_state_in_force` reads the batch alone, and settle the tests \
-         that compare part 1 against P14.T53.a's batch as built (`PresentState::Peak`): \
-         `under_every_24_hold_a_past_only_runaway_publishes_its_present_class`, \
-         `under_every_24_hold_only_a_runaway_under_its_deck_below_430_k_is_solved_again`, \
-         `under_every_24_hold_a_cold_runaway_is_solved_again_without_its_deck` and \
-         `under_every_24_hold_part_one_leaves_venus_earth_mars_and_titan_to_the_bit` \
-         (derive/atmosphere/tests.rs), and `present_census`'s `peak` run, read by \
-         `under_every_24_hold_part_one_s_moved_bodies_are_stated` and \
-         `under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_on_a_cold_deck` \
-         (system/tests.rs), each keeping its present half. Part 1 (c)'s rule stays: the hothouse \
-         between the limits (`solved_as_a_hothouse`, `water_saturation_temperature`, \
-         `PublishedState` and its re-solve in `PassBody::passes`); only its test-only switch \
-         goes, `PresentState::WithoutHothouse` (so that `hothouse_in_force` reads \
-         `present_state_in_force` alone), with the tests that state (c)'s first solve by it: \
-         `under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is_a_hothouse` \
-         (derive/atmosphere/tests.rs), \
-         `under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck` and \
-         `PresentBody::first_solve` (system/tests.rs), each keeping its present half. From \
-         P14.T53.b part 2: keep the \
-         supercritical envelope's test (`Atmosphere::supercritical_reservoir`, read by \
-         `has_surface_section` at the record's three section tags) and delete only its hold, \
-         `supercritical_section_in_force`, so that it reads the batch alone"
-    );
-    assert_eq!(EscapeRules::in_force(), EscapeRules::Held);
-    assert_eq!(GreenhouseConstants::in_force(), GreenhouseConstants::FITTED);
-    assert!(!crate::planetary::derive::atmosphere::present_state_in_force());
-    assert!(!crate::planetary::derive::atmosphere::supercritical_section_in_force());
-}
-
-/// A test's rules hold on its thread inside [`with_rules`], nested or not, and the rules before
-/// come back after; the greenhouse follows them, and the Rayleigh floor's hold is switched with
-/// them (version 24 lifts both).
-#[test]
-fn under_the_escape_batch_a_test_s_rules_hold_inside_with_rules_and_are_set_back_after() {
-    use crate::planetary::derive::photometry::area_mix::RayleighFloorRules;
-    let outside = (EscapeRules::in_force(), RayleighFloorRules::in_force());
-    let (batch, held, constants) = with_rules(EscapeRules::Batch, || {
-        let held = with_rules(EscapeRules::Held, || {
-            (EscapeRules::in_force(), RayleighFloorRules::in_force())
-        });
-        (
-            (EscapeRules::in_force(), RayleighFloorRules::in_force()),
-            held,
-            GreenhouseConstants::in_force(),
-        )
-    });
-    assert_eq!(batch, (EscapeRules::Batch, RayleighFloorRules::Floored));
-    assert_eq!(held, (EscapeRules::Held, RayleighFloorRules::Held));
-    assert_eq!(constants, GreenhouseConstants::BATCH);
-    assert_eq!(
-        (EscapeRules::in_force(), RayleighFloorRules::in_force()),
-        outside
-    );
-}
-
-/// The host star's primordial helium is held until the 23 → 24 bump (P14.T54.b.i): below
-/// `PRIMORDIAL_HELIUM_VERSION` the rules in force are the protosolar start's, so that, with the
-/// escape held too, every figure on the record is version 23's; the switch sets its rules back.
-#[test]
-fn the_host_s_primordial_helium_is_held_only_until_the_24_bump() {
-    assert_eq!(PRIMORDIAL_HELIUM_VERSION, GeneratorVersion::new(24));
-    assert!(
-        GENERATOR_VERSION < PRIMORDIAL_HELIUM_VERSION,
-        "the 23 → 24 bump (P14.T54.b.l) starts every envelope's helium at its host star's own \
-         He/H (`primordial_helium_per_hydrogen`): the fractionation's start under the escape's \
-         batch (`fractionation_start` in `helium_before_passes`) and the record's envelope's T50.b \
-         input (`host_helium_per_hydrogen`). Delete `PRIMORDIAL_HELIUM_VERSION`, \
-         `PrimordialHeliumRules` with its `Protosolar` arm (so that `fractionation_start` and \
-         `host_helium_per_hydrogen` read the host's alone), `with_primordial_helium` and its \
-         thread's rules, its line in `with_every_24_hold` and its member of \
-         `every_24_hold_is_in_force_inside_the_helper`'s rules, \
-         `under_the_host_helium_only_envelope_bearing_bodies_about_other_hosts_move`'s \
-         `Protosolar` run (its movers then stated against 23), and this test"
-    );
-    assert_eq!(
-        PrimordialHeliumRules::in_force(),
-        PrimordialHeliumRules::Protosolar
-    );
-    let switched = with_primordial_helium(PrimordialHeliumRules::Host, || {
-        (
-            PrimordialHeliumRules::in_force(),
-            with_primordial_helium(
-                PrimordialHeliumRules::Protosolar,
-                PrimordialHeliumRules::in_force,
-            ),
-        )
-    });
-    assert_eq!(
-        switched,
-        (
-            PrimordialHeliumRules::Host,
-            PrimordialHeliumRules::Protosolar
-        )
-    );
-    assert_eq!(
-        PrimordialHeliumRules::in_force(),
-        PrimordialHeliumRules::Protosolar
-    );
-    let rich = Composition::from_fe_h(
-        crate::units::Dex::new(0.3),
-        crate::units::HeliumExcess::ZERO,
-    );
-    let protosolar = Element::He.protosolar_abundance_per_hydrogen();
-    assert_same_bits(host_helium_per_hydrogen(&rich), protosolar);
-    assert_same_bits(
-        fractionation_start(&rich),
-        crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction(),
-    );
-}
+use crate::GENERATOR_VERSION;
 
 /// A solar host's primordial helium is the protosolar to the bit (main's ruling Q2, 2026-10-27): its
 /// He/H n☉, the registry's 0.0968, and its Y the protosolar helium mass fraction the
-/// fractionation started from to 23, under either arm, so that a solar host's envelope keeps its
-/// bits at 24.
+/// fractionation started from to 23, so that a solar host's envelope keeps its bits at 24.
 #[test]
 fn a_solar_host_s_primordial_helium_is_protosolar_to_the_bit() {
     let protosolar = Element::He.protosolar_abundance_per_hydrogen();
@@ -144,15 +18,8 @@ fn a_solar_host_s_primordial_helium_is_protosolar_to_the_bit() {
             helium_mass_fraction_of(primordial_helium_per_hydrogen(&host)),
             y,
         );
-        for rules in [
-            PrimordialHeliumRules::Protosolar,
-            PrimordialHeliumRules::Host,
-        ] {
-            with_primordial_helium(rules, || {
-                assert_same_bits(host_helium_per_hydrogen(&host), protosolar);
-                assert_same_bits(fractionation_start(&host), y);
-            });
-        }
+        assert_same_bits(host_helium_per_hydrogen(&host), protosolar);
+        assert_same_bits(fractionation_start(&host), y);
     }
     assert!((protosolar - 0.0968).abs() < 5e-5, "{protosolar}");
     assert!((y - 0.278).abs() < 5e-4, "{y}");
@@ -235,8 +102,7 @@ fn the_primordial_helium_follows_the_host_s_y_over_x() {
 /// The host star's primordial helium pinned by its bits (P14.T54.b.i; the sim-determinism skill's
 /// goldens): `primordial_helium_per_hydrogen` and `helium_mass_fraction_of` at five hosts, solar,
 /// \[Fe/H\] −1, +0.1, +0.3 (past the clamp at Z 0.03) and a helium excess of 0.05 at solar Z, each
-/// its He/H and its Y. Nothing on the record reads them until the 24 bump
-/// (`PRIMORDIAL_HELIUM_VERSION`), so they move no other golden.
+/// its He/H and its Y, which every envelope's helium starts from at 24.
 #[test]
 fn the_primordial_helium_is_pinned() {
     use crate::units::{Dex, HeliumExcess};

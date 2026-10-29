@@ -77,7 +77,8 @@
 //!      from the innermost giant's `a_g`; with neither, [`COMET_EXCITATION`]². The nearest belt is
 //!      the one of the least ratio max(a, `a_b`) ÷ min(a, `a_b`), the first in the given order on a
 //!      tie; the cube is continuous at `a_b` but not at a belt's edges, where rule 1 takes over.
-//! - **From P14.T48.g's bump** (`BELT_POPULATION_VERSION`, 24; decision-p14-t48g-opik), a belt's
+//! - **From P14.T48.g's bump** (generator version 24, where the widths above were 23's;
+//!   decision-p14-t48g-opik), a belt's
 //!   `U_b`² is its population's: Öpik's mean U² over the part's orbits that cross the body's a,
 //!   weighted by their collision probability ([`PopulationLaw::encounter_excitation`], over each
 //!   source belt's [`BeltPopulation`]), at the body's a for rule 1 and at the belt proper's
@@ -133,9 +134,7 @@ use hyperion_surface::craters::{
 };
 
 use crate::math;
-use crate::planetary::belts::population::{
-    AxisSpread, EccentricityLaw, PopulationParts, PopulationRules,
-};
+use crate::planetary::belts::population::{AxisSpread, EccentricityLaw, PopulationParts};
 use crate::planetary::belts::{
     BELT_GIANT_MASS, Belt, BeltComposition, BeltPart, BeltPopulation, MEMBER_ECCENTRICITY_WIDTH,
     MEMBER_INCLINATION_WIDTH_DEG, PopulationLaw, SCATTERED_ECCENTRICITY_WIDTH,
@@ -145,13 +144,11 @@ use crate::planetary::chem::partition::{
     Basins, ClimateSpan, ColumnInventory, CondensatePhase, Condensates, Cover, CrustWater, Ground,
     Partition, WaterCover, partition,
 };
-use crate::planetary::derive::atmosphere::{
-    Atmosphere, Gas, SurfaceMaterial, SurfaceState, tenuous_in_force,
-};
+use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 #[cfg(test)]
 use crate::planetary::hooks::cold_traps::ColdTrapBody;
-use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, RecordColdTraps, RecordField};
+use crate::planetary::hooks::cold_traps::{self, RecordColdTraps, RecordField};
 use crate::planetary::hooks::ocean;
 use crate::planetary::hooks::surface::{
     ColdProfile, OceanWeight, SurfaceConditions, ZonalInsolation,
@@ -341,23 +338,19 @@ pub const APPROACH_EXPONENT: f64 = 1.5;
 /// science-p14-t24b-laws §2.2).
 pub const LEFTOVER_DENSITY: f64 = 0.01;
 
-/// The Moon's encounter factor V☾, m/s: 16,922, the moon formula of [`Impactors::rate`] for the
-/// Moon about an Earth at 1 au with the Sun's belts, so that the Moon's `R_b` is 1
-/// (science-p14-t24b-laws §2.2, with §2.7's parent focusing; the re-rule's replica gives
-/// 16,921.79). `Fitted`: a test refits it.
+/// The Moon's encounter factor V☾, m/s: the moon formula of [`Impactors::rate`] for the Moon about
+/// an Earth at 1 au with the Sun's belts, so that the Moon's `R_b` is 1 (science-p14-t24b-laws
+/// §2.2, with §2.7's parent focusing), its belt the Solar main belt's population between Mars's
+/// chaotic zone and Jupiter's ([`BeltPopulation`]), under Öpik's mean and rule 3's refitted
+/// approach ([`ENCOUNTER_APPROACH_COEFFICIENT`]) (P14.T48.g, from generator version 24;
+/// decision-p14-t48g-opik §3). `Fitted`: a test refits it. Version 23's, P14.T48.f's 16,921.79 m/s
+/// over the untruncated laws' widths, went with the 23 → 24 bump.
 ///
 /// The configuration: the Sun's nominal GM; an Earth of 1 M⊕ at 1 au, eccentricity 0.016 710 22
 /// (NASA's Earth fact sheet) and no inclination, inside the Solar main belt
 /// ([`SOLAR_MAIN_BELT_EDGES_AU`], [`SOLAR_MAIN_BELT_MASS`]); the Moon at 384,400 km, of GM
 /// 4,902.800 km³ s⁻² and mean radius 1,737.4 km (JPL's mean elements and physical parameters,
 /// DE440).
-pub const LUNAR_ENCOUNTER_SPEED: MetresPerSecond = MetresPerSecond::new(16_921.789_060_825_588);
-
-/// The Moon's encounter factor V☾ from P14.T48.g's bump (`BELT_POPULATION_VERSION`), m/s: the
-/// same configuration as [`LUNAR_ENCOUNTER_SPEED`]'s, its belt the Solar main belt's population
-/// between Mars's chaotic zone and Jupiter's ([`BeltPopulation`]), under Öpik's mean and rule 3's
-/// refitted approach ([`ENCOUNTER_APPROACH_COEFFICIENT`]), so that the Moon's `R_b` stays 1
-/// (decision-p14-t48g-opik §3). `Fitted`: a test refits it.
 pub const POPULATION_LUNAR_ENCOUNTER_SPEED: MetresPerSecond =
     MetresPerSecond::new(17_004.271_408_862_347);
 
@@ -998,25 +991,9 @@ impl ImpactorSource {
 
     /// The source of the impactors striking `orbiter`, or a moon of it, under `sources`, with
     /// their abundance Ψ over the Moon's by the same rule, before the floor
-    /// ([`floored_abundance`]): the rate and the velocity read one population. The tests' entry,
-    /// under the rules in force; [`impactors`] reads the rules once itself.
-    #[cfg(test)]
+    /// ([`floored_abundance`]): the rate and the velocity read one population.
     #[must_use]
     fn with_abundance(orbiter: &HostOrbiter, sources: &ImpactorSources) -> (Self, f64) {
-        Self::with_abundance_under(orbiter, sources, PopulationRules::in_force())
-    }
-
-    /// The source of the impactors striking `orbiter`, or a moon of it, under `sources` and the
-    /// belt population's rules `rules`, with their abundance Ψ over the Moon's by the same rule,
-    /// before the floor ([`floored_abundance`]): the rate and the velocity read one population,
-    /// and the caller reads the rules once, so that the source and the rate's lunar factor follow
-    /// one set.
-    #[must_use]
-    fn with_abundance_under(
-        orbiter: &HostOrbiter,
-        sources: &ImpactorSources,
-        rules: PopulationRules,
-    ) -> (Self, f64) {
         let a = orbiter.orbit.semi_major_axis;
         // Rule 1: a member shares its part's excitation; any body orbiting in an annulus, that
         // annulus's.
@@ -1027,7 +1004,6 @@ impl ImpactorSource {
                     component.map(|(belt, ..)| belt),
                     membership.part,
                     a,
-                    rules,
                 ),
                 composition: membership.composition,
             };
@@ -1044,7 +1020,7 @@ impl ImpactorSource {
             for (part, annulus, mass) in parts {
                 if let Some(annulus) = annulus.filter(|annulus| annulus.holds(a)) {
                     let source = Self::InBelt {
-                        excitation: in_belt_excitation(Some(belt), part, a, rules),
+                        excitation: in_belt_excitation(Some(belt), part, a),
                         composition: belt.composition,
                     };
                     let abundance = in_belt_abundance(annulus, mass, part, belt.composition);
@@ -1073,7 +1049,7 @@ impl ImpactorSource {
         );
         if let Some(belt) = asteroid.or_else(|| nearest_belt(sources.belts.iter(), a)) {
             let source = Self::NearestBelt {
-                excitation: nearest_belt_excitation(belt, a, rules),
+                excitation: nearest_belt_excitation(belt, a),
                 composition: belt.composition,
             };
             let abundance = match belt.kind {
@@ -1252,10 +1228,10 @@ fn approach_abundance(belt: &SourceBelt, a: Metres) -> f64 {
 ///
 /// To second order it is Öpik's U² = 2 − 2√(1 − e²) cos i at equal semi-major axes. Over the same
 /// untruncated laws, that U²'s exact mean is 0.0586 and 0.408, within 0.2% and 1.4% of these. The
-/// exact ⟨e²⟩ + ⟨sin² i⟩, 0.0580 and 0.388, lies 1.0% and 5.0% below it (F5.6). It is the
-/// excitation below P14.T48.g's bump, where the record's population moments are the untruncated
-/// laws'; from it the impactors read each population's truncated laws through Öpik's mean
-/// ([`PopulationLaw::encounter_excitation`]).
+/// exact ⟨e²⟩ + ⟨sin² i⟩, 0.0580 and 0.388, lies 1.0% and 5.0% below it (F5.6). It was the
+/// excitation to version 23; from P14.T48.g's bump at 24 the impactors read each population's
+/// truncated laws through Öpik's mean ([`PopulationLaw::encounter_excitation`]), and this only
+/// where a belt has no population law.
 #[must_use]
 pub fn belt_excitation(part: BeltPart) -> f64 {
     let (sigma_e, sigma_i_deg) = match part {
@@ -1269,8 +1245,9 @@ pub fn belt_excitation(part: BeltPart) -> f64 {
     2.0 * sigma_e * sigma_e + 2.0 * sin_i * sin_i
 }
 
-/// The approach term of rule 3, (1 − a ÷ `a_b`)³ inside the reference radius `a_b` and
-/// (1 − `a_b` ÷ a)³ outside it: the cube of the fractional distance, zero at `a_b`.
+/// The approach term of rule 3's comets from the innermost giant, (1 − a ÷ `a_b`)³ inside the
+/// reference radius `a_b` and (1 − `a_b` ÷ a)³ outside it: the cube of the fractional distance,
+/// zero at `a_b`.
 #[must_use]
 fn approach(a: Metres, a_b: Metres) -> f64 {
     let x = fractional_distance(a, a_b);
@@ -1288,45 +1265,30 @@ fn fractional_distance(a: Metres, a_b: Metres) -> f64 {
     }
 }
 
-/// Rule 1's excitation `U_b`² for a body at a semi-major axis `a` in the part `part` of `belt`,
-/// under the belt population's rules `rules`: from P14.T48.g's bump its population's Öpik mean at
-/// a ([`PopulationLaw::encounter_excitation`]), and below it, or for a member whose belt is not
-/// among the sources, the part's untruncated widths' [`belt_excitation`].
+/// Rule 1's excitation `U_b`² for a body at a semi-major axis `a` in the part `part` of `belt`
+/// (P14.T48.g): its population's Öpik mean at a ([`PopulationLaw::encounter_excitation`]), and for
+/// a member whose belt is not among the sources the part's untruncated widths'
+/// [`belt_excitation`].
 #[must_use]
-fn in_belt_excitation(
-    belt: Option<&SourceBelt>,
-    part: BeltPart,
-    a: Metres,
-    rules: PopulationRules,
-) -> f64 {
-    match rules {
-        PopulationRules::Held => belt_excitation(part),
-        PopulationRules::Laws => belt
-            .and_then(|belt| belt.population_of(part))
-            .map_or_else(|| belt_excitation(part), |law| law.encounter_excitation(a)),
-    }
+fn in_belt_excitation(belt: Option<&SourceBelt>, part: BeltPart, a: Metres) -> f64 {
+    belt.and_then(|belt| belt.population_of(part))
+        .map_or_else(|| belt_excitation(part), |law| law.encounter_excitation(a))
 }
 
-/// Rule 3's excitation for a body at a semi-major axis `a` from the nearest belt `belt`, under
-/// the belt population's rules `rules`: its belt proper's `U_b`² plus the approach from its
-/// mid-radius `a_b`. Below P14.T48.g's bump that is
-/// [`belt_excitation`]'s 2σₑ² + 2 sin² σᵢ plus the cube of the fractional distance x; from it,
-/// the belt proper's Öpik mean at `a_b` plus c xⁿ, [`ENCOUNTER_APPROACH_COEFFICIENT`] and
-/// [`ENCOUNTER_APPROACH_EXPONENT`] (decision-p14-t48g-opik §3).
+/// Rule 3's excitation for a body at a semi-major axis `a` from the nearest belt `belt`
+/// (P14.T48.g): its belt proper's Öpik mean at its mid-radius `a_b` plus the approach c xⁿ from it,
+/// x the fractional distance, [`ENCOUNTER_APPROACH_COEFFICIENT`] and
+/// [`ENCOUNTER_APPROACH_EXPONENT`] (decision-p14-t48g-opik §3). To version 23 it was
+/// [`belt_excitation`]'s 2σₑ² + 2 sin² σᵢ plus x³.
 #[must_use]
-fn nearest_belt_excitation(belt: &SourceBelt, a: Metres, rules: PopulationRules) -> f64 {
+fn nearest_belt_excitation(belt: &SourceBelt, a: Metres) -> f64 {
     let a_b = belt.main.mid_radius();
-    match rules {
-        PopulationRules::Held => belt_excitation(BeltPart::Main) + approach(a, a_b),
-        PopulationRules::Laws => {
-            let own = belt.population_of(BeltPart::Main).map_or_else(
-                || belt_excitation(BeltPart::Main),
-                |law| law.encounter_excitation(a_b),
-            );
-            own + ENCOUNTER_APPROACH_COEFFICIENT
-                * math::powf(fractional_distance(a, a_b), ENCOUNTER_APPROACH_EXPONENT)
-        }
-    }
+    let own = belt.population_of(BeltPart::Main).map_or_else(
+        || belt_excitation(BeltPart::Main),
+        |law| law.encounter_excitation(a_b),
+    );
+    own + ENCOUNTER_APPROACH_COEFFICIENT
+        * math::powf(fractional_distance(a, a_b), ENCOUNTER_APPROACH_EXPONENT)
 }
 
 /// The nearest of `belts` to a semi-major axis `a`, by its belt proper's mid-radius `a_b`: the
@@ -1370,10 +1332,6 @@ pub struct Impactors {
     crust: Crust,
     abundance: f64,
     encounter: MetresPerSecond,
-    /// The Moon's encounter factor the rate is taken over: [`LUNAR_ENCOUNTER_SPEED`], or
-    /// [`POPULATION_LUNAR_ENCOUNTER_SPEED`] from P14.T48.g's bump, by the rules the impactors were
-    /// derived under.
-    lunar: MetresPerSecond,
 }
 
 impl Impactors {
@@ -1386,7 +1344,7 @@ impl Impactors {
     /// `R_b`, the impact rate per unit area on the body over the Moon's for projectiles of one
     /// size (P14.T48.c; science-p14-t24b-laws §2.2), dimensionless and positive: the projectile
     /// abundance Ψ over the Moon's times the encounter factor V over the Moon's
-    /// [`LUNAR_ENCOUNTER_SPEED`], in particle-in-a-box form (Öpik 1951).
+    /// [`POPULATION_LUNAR_ENCOUNTER_SPEED`], in particle-in-a-box form (Öpik 1951).
     ///
     /// - V is v∞ (1 + `v_esc`² ÷ v∞²) for a body that goes round the host, the encounter speed
     ///   with the escape speed's focusing; and for a moon `v_enc` √(1 + 2 `v_K,s`² ÷ v∞,P²)
@@ -1412,7 +1370,7 @@ impl Impactors {
     /// lunar-equivalent N☾(>1 km), as R09's reference worlds read it.
     #[must_use]
     pub fn rate(&self) -> f64 {
-        self.abundance * (self.encounter / self.lunar)
+        self.abundance * (self.encounter / POPULATION_LUNAR_ENCOUNTER_SPEED)
     }
 
     /// The projectile abundance Ψ over the Moon's, dimensionless, at least [`LEFTOVER_DENSITY`]:
@@ -1423,7 +1381,7 @@ impl Impactors {
     }
 
     /// The encounter factor V, m/s, finite and positive: the second factor of
-    /// [`rate`](Self::rate), over [`LUNAR_ENCOUNTER_SPEED`].
+    /// [`rate`](Self::rate), over [`POPULATION_LUNAR_ENCOUNTER_SPEED`].
     #[must_use]
     pub const fn encounter_speed(&self) -> MetresPerSecond {
         self.encounter
@@ -1735,10 +1693,7 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
         return Err(DeriveImpactorsError::Water(body.water));
     }
 
-    // The belt population's rules are read once, so that the source and the rate's lunar factor
-    // follow one set.
-    let rules = PopulationRules::in_force();
-    let (source, abundance) = ImpactorSource::with_abundance_under(&orbiter, body.sources, rules);
+    let (source, abundance) = ImpactorSource::with_abundance(&orbiter, body.sources);
     let escape_squared = 2.0 * gravity.value() * radius.value();
     let speeds = speeds(
         source,
@@ -1786,10 +1741,6 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
         crust,
         abundance: floored_abundance(abundance),
         encounter: speeds.encounter,
-        lunar: match rules {
-            PopulationRules::Held => LUNAR_ENCOUNTER_SPEED,
-            PopulationRules::Laws => POPULATION_LUNAR_ENCOUNTER_SPEED,
-        },
     })
 }
 
@@ -1833,15 +1784,15 @@ impl SubsurfaceOcean {
     /// [`has_subsurface_ocean`](crate::planetary::moons::regular::has_subsurface_ocean), with the
     /// inputs its derivation gives it), as [`Subsurface::of_regular_moon`] gives it; `None` where
     /// the flag says there is none, and where the ocean is not modelled
-    /// ([`Subsurface::NotComputed`]: its shell's base lies at or beyond ice V's melting pressure,
-    /// from P14.T51.g.a's bump). So `None` does not mean "no ocean":
-    /// [`Subsurface::of_regular_moon`] tells the two apart.
+    /// ([`Subsurface::NotComputed`]: its shell's base lies at or beyond ice V's melting pressure).
+    /// So `None` does not mean "no ocean": [`Subsurface::of_regular_moon`] tells the two apart.
     ///
-    /// Its shell is the flag's own, 651 ln(273 K ÷ `T_s`) ÷ F. It is pure water at 273 K at its base
-    /// ([`ICE_MELTING_POINT`]), the flag's model, until P14.T51.g.b's liquidus and solutes. To
-    /// version 23 its depth is the moon's water layer less that shell, on rock; from P14.T51.g.a's
-    /// bump (23 → 24) the layer ends at the shallower of the rock and ice V's melting pressure at
-    /// 273 K, 626.09 MPa, on [`OceanFloor::IceV`] there.
+    /// Its shell is the flag's own, 651 ln(273 K ÷ `T_s`) ÷ F. It is pure water at 273 K at its
+    /// base ([`ICE_MELTING_POINT`]), the flag's model, and its layer ends at the shallower of the
+    /// rock and ice V's melting pressure at 273 K, 626.09 MPa, on [`OceanFloor::IceV`] there
+    /// (P14.T51.g.a). It is the flag's pure law: from generator version 24 the record and the
+    /// moons' tides read P14.T51.g.b's solve instead (`hooks::ocean`), and nothing on the record
+    /// reads this.
     ///
     /// # Examples
     ///
@@ -1960,10 +1911,9 @@ impl SubsurfaceOcean {
 /// `subsurface_ocean`: none for a body computed to have none, and absent for one no rule computes).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Subsurface {
-    /// No rule computes it for this body: until P14.T51.g.b's bump, every body but a regular
-    /// moon; and, from P14.T51.g.a's (23 → 24), a regular moon whose flag holds an ocean but whose
-    /// shell's base lies at or beyond ice V's melting pressure, so that any liquid lies under
-    /// high-pressure ice (P14.T55.k's). It must never be read as "no ocean".
+    /// No rule computes it for this body: from P14.T51.g.b's bump at generator version 24, one
+    /// whose solve gives none it models (an ocean under high-pressure ice, or on a floor of ice II,
+    /// P14.T55.k's; `hooks::ocean`'s solve). It must never be read as "no ocean".
     NotComputed,
     /// A rule computes that the body holds none.
     NoOcean,
@@ -1977,17 +1927,14 @@ impl Subsurface {
     /// or the flag has no layers (no water, no heat from below, or a surface at or above 273 K),
     /// and otherwise its ocean under the flag's shell.
     ///
-    /// To version 23 the ocean is the whole layer below the shell, on rock. From P14.T51.g.a's
-    /// bump (23 → 24; decision-p14-t51g Q9) it ends at the shallower of the rock and the radius at
-    /// which the layer's pressure, P(r) over the flag's water at [`WATER_DENSITY`] with M = (4π/3)
-    /// R³ ρ̄, reaches ice V's melting pressure at its 273 K base, 626.09 MPa from the registry's
-    /// water row (IAPWS R14-08): on [`OceanFloor::Rock`] with 23's depth where the rock lies at
-    /// or under it, else on [`OceanFloor::IceV`] there. Where the shell's base itself lies at or
-    /// beyond it the ocean is [`NotComputed`](Self::NotComputed). The flag and the shell are 23's
-    /// either way. An absent member gives the tectonic regime no shell, which leaves it the
-    /// branch's wherever its shell is beyond the 60 km an ice shell's regime needs
-    /// ([`ICE_SHELL_LIMIT`](interior::ICE_SHELL_LIMIT)): at a gravity in the shell under 10.4 m
-    /// s⁻², every icy regular moon short of some 4–6 M⊕.
+    /// It ends at the shallower of the rock and the radius at which the layer's pressure
+    /// (P14.T51.g.a; decision-p14-t51g Q9), P(r) over the flag's water at [`WATER_DENSITY`] with M
+    /// = (4π/3) R³ ρ̄, reaches ice V's melting pressure at its 273 K base, 626.09 MPa from the
+    /// registry's water row (IAPWS R14-08): on [`OceanFloor::Rock`] with 23's depth where the rock
+    /// lies at or under it, else on [`OceanFloor::IceV`] there. Where the shell's base itself lies
+    /// at or beyond it the ocean is [`NotComputed`](Self::NotComputed). It is the flag's pure law:
+    /// from generator version 24 the record and the moons' tides read P14.T51.g.b's solve instead
+    /// (`hooks::ocean`), and nothing on the record reads this.
     ///
     /// [`WATER_DENSITY`]: crate::planetary::moons::regular::WATER_DENSITY
     #[must_use]
@@ -2010,21 +1957,16 @@ impl Subsurface {
         let whole = Metres::new(layers.water_depth.value() - shell.value());
         let flag =
             |thickness, floor| Self::Ocean(SubsurfaceOcean::of_the_flag(shell, thickness, floor));
-        match ocean::OceanFloorRules::in_force() {
-            ocean::OceanFloorRules::Held => flag(whole, OceanFloor::Rock),
-            ocean::OceanFloorRules::Floored => {
-                let column = ocean::WaterColumn::new(radius, density, layers.water_depth);
-                let shell_base = Metres::new(radius.value() - shell.value());
-                let liquidus = ocean::base_liquidus(ICE_MELTING_POINT);
-                match ocean::ocean_end(&column, shell_base, liquidus) {
-                    ocean::OceanEnd::Rock => flag(whole, OceanFloor::Rock),
-                    ocean::OceanEnd::Ice(floor) => flag(
-                        Metres::new(shell_base.value() - floor.value()),
-                        OceanFloor::IceV,
-                    ),
-                    ocean::OceanEnd::Beyond => Self::NotComputed,
-                }
-            }
+        let column = ocean::WaterColumn::new(radius, density, layers.water_depth);
+        let shell_base = Metres::new(radius.value() - shell.value());
+        let liquidus = ocean::base_liquidus(ICE_MELTING_POINT);
+        match ocean::ocean_end(&column, shell_base, liquidus) {
+            ocean::OceanEnd::Rock => flag(whole, OceanFloor::Rock),
+            ocean::OceanEnd::Ice(floor) => flag(
+                Metres::new(shell_base.value() - floor.value()),
+                OceanFloor::IceV,
+            ),
+            ocean::OceanEnd::Beyond => Self::NotComputed,
         }
     }
 }
@@ -2529,10 +2471,9 @@ impl GlobalFigures {
     /// - The liquids are the condensates' ([`Condensates::surface_liquids`]), in the entries'
     ///   order, with water's ocean under a `Snowball`'s ice ([`cover::under_ice_ocean`]) at its
     ///   potential ocean appended where they hold no liquid water, its water inside the `H2O`
-    ///   solid (W3 (b)), to generator version 23: from 24 (P14.T53.c, behind its hold) the ocean
-    ///   under the ice is no surface liquid and is not appended, so that every list item that is
-    ///   an entry has its own area where the entries' total is at most 1 (decision-absurd-states-24
-    ///   R1).
+    ///   solid (W3 (b)), to generator version 23: from 24 (P14.T53.c) the ocean under the ice is
+    ///   no surface liquid and is not appended, so that every list item that is an entry has its
+    ///   own area where the entries' total is at most 1 (decision-absurd-states-24 R1).
     /// - The ices are the condensates' ([`Condensates::surface_ices`]), in the entries' order, with
     ///   T24.b's water ice ([`cover::ice_fraction`]) appended where they hold none, as a
     ///   `Snowball`'s cover is, whose water the partition does not hold, or an ice-rich crust whose
@@ -2612,16 +2553,10 @@ impl GlobalFigures {
                 (vec![(water, ocean)], vec![(water, ice())])
             }
             Some(condensates) => {
-                let mut liquids = condensates.surface_liquids();
-                // From P14.T53.c (its hold) the ocean under a `Snowball`'s ice is not a liquid
-                // at the surface: its water stays inside the `H2O` solid (W3 (b)'s end;
+                // From P14.T53.c the ocean under a `Snowball`'s ice is not a liquid at the
+                // surface: its water stays inside the `H2O` solid (W3 (b)'s end;
                 // decision-absurd-states-24 R1).
-                if under_ice
-                    && !tenuous_in_force()
-                    && condensates.entry(water, CondensatePhase::Liquid).is_none()
-                {
-                    liquids.push((water, self.potential_ocean));
-                }
+                let liquids = condensates.surface_liquids();
                 let mut ices = condensates.surface_ices();
                 if condensates.entry(water, CondensatePhase::Solid).is_none() {
                     ices.push((water, ice()));
@@ -2643,8 +2578,8 @@ impl GlobalFigures {
 
     /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere`,
     /// whose conditions are `conditions` and whose surface gravity is `gravity` (P14.T51.a's second
-    /// part), under the cold traps' rules, sky and regolith `traps` (P14.T51.f and P14.T51.i, held
-    /// by [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)), on these figures' own ground
+    /// part), under the cold traps' sky and regolith `traps` (P14.T51.f and P14.T51.i), on these
+    /// figures' own ground
     /// ([`partition_ground`](Self::partition_ground)): its partition and its published condensates.
     /// The conditions' cold profile reads the body's insolation table `table`, built once a body
     /// (lever (h), [`SurfaceConditions::cold_profile_over`]).
@@ -2666,22 +2601,20 @@ impl GlobalFigures {
             atmosphere,
             conditions,
             &self.partition_ground(gravity, self.stand_in_material),
-            traps,
+            *traps,
             table,
         )
     }
 
-    /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere`
-    /// and whose conditions are `conditions`, on the ground `ground`, under the cold traps' rules,
-    /// sky and regolith `traps` (P14.T51.f and P14.T51.i, held by
-    /// [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): its partition and its
-    /// published condensates. The conditions' cold profile reads the body's insolation table
-    /// `table`, built once a body (lever (h), [`SurfaceConditions::cold_profile_over`]).
+    /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere` and
+    /// whose conditions are `conditions`, on the ground `ground`, under the cold traps' field
+    /// `traps` (P14.T51.f and P14.T51.i): its partition and its published condensates. The
+    /// conditions' cold profile reads the body's insolation table `table`, built once a body (lever
+    /// (h), [`SurfaceConditions::cold_profile_over`]).
     ///
     /// The partition and water's cover are [`partition_over`]'s, the one computation a pass's area
     /// mix publishes over (P14.T54.a, rule (f)). The condensates are published over that cover
-    /// ([`Cover`]): the conditions' cold area, the state and water's cover. Under
-    /// [`ColdTrapRules::Held`] they are P14.T51.a's; under [`ColdTrapRules::Batch`] a body whose
+    /// ([`Cover`]): the conditions' cold area, the state and water's cover. A body whose
     /// published pass read a cold-trap field takes the cold traps' airless branch and their ices
     /// over that field, carried ([`cold_traps::publish_over`], [`RecordField::Carried`];
     /// P14.T54.b.f), with that pass's heat flow, crust and craters, so that they are that pass's
@@ -2710,7 +2643,7 @@ impl GlobalFigures {
         atmosphere: &Atmosphere,
         conditions: &SurfaceConditions,
         ground: &PartitionGround,
-        traps: &RecordColdTraps<'_>,
+        traps: RecordColdTraps<'_>,
         table: &ZonalInsolation,
     ) -> (Partition, Condensates, WaterIce) {
         let PartitionOver {
@@ -2734,13 +2667,11 @@ impl GlobalFigures {
             state: atmosphere.state(),
             water,
         };
-        let published = match (traps.rules, traps.field) {
-            (ColdTrapRules::Held, _) | (ColdTrapRules::Batch, RecordField::Carried(None)) => {
-                solved.publish(&cover)
-            }
+        let published = match traps.field {
+            RecordField::Carried(None) => solved.publish(&cover),
             // The published pass's field, carried, over its own heat flow, crust and craters
             // (P14.T54.b.f; decision-p14-t54b-f-coldtraps §3): the record builds none.
-            (ColdTrapRules::Batch, RecordField::Carried(Some(carried))) => {
+            RecordField::Carried(Some(carried)) => {
                 #[cfg(test)]
                 let before = cold_traps::field_log::builds();
                 let published = cold_traps::publish_over(
@@ -2756,13 +2687,10 @@ impl GlobalFigures {
                 published
             }
             #[cfg(test)]
-            (
-                ColdTrapRules::Batch,
-                RecordField::Built {
-                    sky,
-                    regolith_albedo,
-                },
-            ) => cold_traps::publish(
+            RecordField::Built {
+                sky,
+                regolith_albedo,
+            } => cold_traps::publish(
                 &solved,
                 &cover,
                 &ColdTrapBody {

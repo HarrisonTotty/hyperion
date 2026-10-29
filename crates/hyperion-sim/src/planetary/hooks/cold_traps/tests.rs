@@ -143,33 +143,20 @@ fn midpoint(f: impl Fn(Radians) -> f64, (lo, hi): (f64, f64), step: f64) -> f64 
     sum
 }
 
-/// The cold traps are held until P14.T54.b's bump, and held they publish P14.T51.a's entries bit
-/// for bit; under the batch every body of the table that is not an airless one with no
-/// collisional air is P14.T51.a's too.
+/// The record's cold traps with no field (`RecordField::Carried(None)`): what a body whose pass
+/// read none publishes, P14.T51.a's entries, as the cold traps' hold published them to version 23.
+const fn no_traps() -> RecordColdTraps<'static> {
+    RecordColdTraps {
+        field: RecordField::Carried(None),
+    }
+}
+
+/// With no field the record publishes P14.T51.a's entries bit for bit; with its traps built every
+/// body of the table that is not an airless one with no collisional air is P14.T51.a's too.
 #[test]
-fn the_cold_traps_are_held_only_until_the_24_bump() {
-    assert!(
-        GENERATOR_VERSION < COLD_TRAPS_VERSION,
-        "the 23 → 24 bump (P14.T54.b) puts the cold traps on the record: every airless body with \
-         no collisional air that is not locked to its star takes the zonal annual maximum's \
-         airless branch and its cold-trapped ices. Delete `COLD_TRAPS_VERSION`, `ColdTrapRules` \
-         and its `Held` arm, `RecordColdTraps::rules` and `condensates_and_ice_over`'s `Held` \
-         branch, `NoColdTraps::Held` and `ColdTrapCase::rules` with `SurfaceFrame::cold_trap_sky`'s \
-         `Held` arm (the passes then always read their sky), `RecordRules` with \
-         `SurfaceCase::record` and `PlanetarySystem::with_record_rules` (the record's partition \
-         then follows the snapshot's hold, deleted at 23), the tests' switch \
-         `with_cold_trap_rules` and its thread's rules (and its place in \
-         `planetary::testing::with_every_24_hold`), R09's Held half \
-         (`under_the_cold_traps_hold_the_record_gives_no_cold_traps`), the tests' Held arms of \
-         `held_the_passes_build_no_field`, and this test. Delete too what holds T13.c's \
-         passes (`surface_mix::spun_partition`) to 23's at the hold: `can_take_cold_traps`' test \
-         of the hold, so that L2 (nothing condenses, no conditions read) stands only for a pass \
-         that cannot qualify, and the `Err(NoColdTraps::Held)` arms of `pass_cold_traps` and \
-         `no_cold_traps` (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (d) and §7)"
-    );
-    assert_eq!(ColdTrapRules::in_force(), ColdTrapRules::Held);
+fn a_table_body_that_does_not_qualify_publishes_t51a_s_entries() {
     let sky = lunar_sky();
-    let mut held_bodies = 0;
+    let mut unqualified = 0;
     for (name, body) in historic_table() {
         let Some(figures) = table_figures(&body) else {
             continue;
@@ -184,16 +171,10 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
         };
         let (air, g) = (body.atmosphere(), body.surface_gravity());
         let table = conditions.zonal_insolation();
-        let under = |traps| {
-            figures.condensates_under(
-                air,
-                &conditions,
-                g,
-                &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
-                &table,
-            )
+        let under = |traps: &RecordColdTraps<'_>| {
+            figures.condensates_under(air, &conditions, g, traps, &table)
         };
-        let (solved, held) = under(ColdTrapRules::Held);
+        let (solved, none) = under(&no_traps());
         let profile = conditions.cold_profile();
         let cold_area = |t: Kelvin| profile.area_below(t);
         let t51a = solved.publish(&Cover {
@@ -201,16 +182,16 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
             state: air.state(),
             water: figures.water_cover(&conditions, &profile),
         });
-        assert_eq!(format!("{held:?}"), format!("{t51a:?}"), "{name}");
-        let (_, batch) = under(ColdTrapRules::Batch);
+        assert_eq!(format!("{none:?}"), format!("{t51a:?}"), "{name}");
+        let (_, batch) = under(&RecordColdTraps::at_the_albedo_of(&sky, air));
         let qualifies = air.state() == SurfaceState::Airless && !is_collisional(air, g);
         if !qualifies {
-            assert_eq!(format!("{batch:?}"), format!("{held:?}"), "{name}");
-            held_bodies += 1;
+            assert_eq!(format!("{batch:?}"), format!("{none:?}"), "{name}");
+            unqualified += 1;
         }
-        eprintln!("{name}: qualifies {qualifies}; held {held:?}; batch {batch:?}");
+        eprintln!("{name}: qualifies {qualifies}; with no field {none:?}; built {batch:?}");
     }
-    assert!(held_bodies >= 3, "{held_bodies}");
+    assert!(unqualified >= 3, "{unqualified}");
 }
 
 /// The Moon and Pluto parted by the collisional test (decision-p14-t51a-part2 §3.3): the Moon's
@@ -747,22 +728,14 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
     let (air, g) = (moon.atmosphere(), moon.surface_gravity());
     let sky = lunar_sky();
     let table = conditions.zonal_insolation();
-    let under = |traps| {
+    let under = |traps: &RecordColdTraps<'_>| {
         figures
-            .condensates_under(
-                air,
-                &conditions,
-                g,
-                &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
-                &table,
-            )
+            .condensates_under(air, &conditions, g, traps, &table)
             .1
     };
-    let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
-    assert_eq!(
-        format!("{batch:?}"),
-        format!("{:?}", under(ColdTrapRules::Batch))
-    );
+    let built = RecordColdTraps::at_the_albedo_of(&sky, air);
+    let (held, batch) = (under(&no_traps()), under(&built));
+    assert_eq!(format!("{batch:?}"), format!("{:?}", under(&built)));
     let ground = Sunlit::new(sky, air.albedo().value(), figures.heat_flow());
     let shadows = ground.shadows().unwrap();
     let terrain = terrain_of(figures.craters());
@@ -837,19 +810,14 @@ fn time_the_cold_traps() {
         let mut entries = 0;
         // The best of five rounds of each, interleaved, so that the machine's load moves both.
         for _ in 0..5 {
-            for (k, traps) in [ColdTrapRules::Held, ColdTrapRules::Batch]
+            for (k, traps) in [no_traps(), RecordColdTraps::at_the_albedo_of(&sky, air)]
                 .into_iter()
                 .enumerate()
             {
                 let start = std::time::Instant::now();
                 for _ in 0..n {
-                    let (_, published) = figures.condensates_under(
-                        air,
-                        &conditions,
-                        g,
-                        &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
-                        &table,
-                    );
+                    let (_, published) =
+                        figures.condensates_under(air, &conditions, g, &traps, &table);
                     entries += published.entries().len();
                 }
                 let ms = start.elapsed().as_secs_f64() / f64::from(n) * 1e3;
@@ -935,7 +903,7 @@ fn the_trap_fraction_is_the_latitude_integral_of_fractions_at() {
         air,
         &conditions,
         g,
-        &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Batch, &sky, air),
+        &RecordColdTraps::at_the_albedo_of(&sky, air),
         &conditions.zonal_insolation(),
     );
     let ground = ColdTrapGround::new(&ColdTrapGroundParts {
@@ -1367,7 +1335,7 @@ impl RecordMoon {
     /// Its published condensates under the batch's cold traps, its atmosphere `air` and its
     /// regolith's albedo `regolith`.
     fn published(&self, air: &Atmosphere, regolith: f64, sky: &ColdTrapSky) -> Condensates {
-        let traps = RecordColdTraps::built(ColdTrapRules::Batch, sky, regolith);
+        let traps = RecordColdTraps::built(sky, regolith);
         self.figures
             .condensates_under(
                 air,
@@ -1414,7 +1382,7 @@ fn one_field_built_once_serves_every_publish() {
         &moon.air,
         &moon.conditions,
         moon.gravity,
-        &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
+        &no_traps(),
         &moon.conditions.zonal_insolation(),
     );
     let profile = moon.conditions.cold_profile();
@@ -1476,7 +1444,7 @@ fn a_field_s_key_is_every_input_to_the_bit() {
         &moon.air,
         &moon.conditions,
         moon.gravity,
-        &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
+        &no_traps(),
         &moon.conditions.zonal_insolation(),
     );
     let profile = moon.conditions.cold_profile();

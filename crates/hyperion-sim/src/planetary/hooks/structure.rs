@@ -67,8 +67,8 @@
 //! ([`record::Surface::vertical_structure`](crate::planetary::record::Surface::vertical_structure))
 //! and on the wire, from the conditions, the bulk section's `T_eq` and the figures' heat flow
 //! ([`StructureInputs::of_surface`]), and an airless surface's as none
-//! ([`DeriveStructureError::NoAir`]). The record holds it off until the 23 → 24 bump, so that below
-//! generator version 24 it is not modelled (decision-bump-plan-after-22 §1.3). P14.T24.d's gas
+//! ([`DeriveStructureError::NoAir`]), from the 23 → 24 bump: below generator version 24 it was
+//! not modelled (decision-bump-plan-after-22 §1.3). P14.T24.d's gas
 //! envelope's profile ([`envelope`]) is its second variant, [`VerticalStructure::Envelope`], so
 //! that one [`temperature_at`] serves both; P14.T54.b.i puts it in the record's envelope section.
 //!

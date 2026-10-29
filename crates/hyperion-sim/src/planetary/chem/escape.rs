@@ -1,10 +1,7 @@
-//! Escape by regime and fractionation (plan 14, P14.T53.a): its hold, and its pure laws, which
-//! the atmosphere's derivation reads under the hold's batch rules alone.
+//! Escape by regime and fractionation (plan 14, P14.T53.a): its pure laws, which the atmosphere's
+//! derivation reads.
 //!
-//! P14.T53.a's laws join the snapshot path at the 23 → 24 batch's bump (P14.T54.b). All of
-//! P14.T53.a is held at generator version 24 (`ESCAPE_VERSION`; decision-bump-plan-after-22 §1.3,
-//! and §5 "For 24": "chem/escape.rs ... stay pure, with the greenhouse refits behind a hold at
-//! 24"), so that nothing on the record moves before that bump. Behind it:
+//! P14.T53.a's laws joined the snapshot path at the 23 → 24 batch's bump (P14.T54.b), with:
 //!
 //! - the laws below, wired into
 //!   [`derive::atmosphere`](crate::planetary::derive::atmosphere)'s steps (the shoreline, the thin
@@ -27,7 +24,6 @@
 //! Each law is a pure function of plain quantities, continuous in its inputs and, where it takes an
 //! age or a fluence, monotone in it as its documentation states; an input that is not finite or
 //! not positive gives the law's documented "nothing", never a number that is not one.
-//! [`derive::atmosphere`](crate::planetary::derive::atmosphere) reads them behind the hold.
 //!
 //! - **The cosmic shoreline** (Zahnle and Catling 2017, ApJ 843, 122): the share of a body's bulk
 //!   air lost to the non-thermal escape its X-ray and ultraviolet fluence drives
@@ -84,146 +80,6 @@ use crate::units::{
     Gigayears, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, MetresPerSecond,
     MetresPerSecondSquared, Pascals, WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which P14.T53.a is on the record: 24, the 23 → 24 batch's bump,
-/// P14.T54.b (decision-bump-plan-after-22 §1.3 and §5, "For 24").
-///
-/// It is P14.T53.a's one hold. Below it [`EscapeRules::in_force`] is [`EscapeRules::Held`], so
-/// that every figure on the record is version 23's bit for bit. P14.T54.b deletes this hold,
-/// [`EscapeRules`] and its `Held` arm, and its tripwire (`the_escape_is_held_only_until_the_24_bump`).
-pub(crate) const ESCAPE_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Which rules the greenhouse and P14.T53.a's escape follow (the escape's hold,
-/// [`ESCAPE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum EscapeRules {
-    /// Versions 22's and 23's: P14.T13.c's √p terms at P14.T57.a's constants, the greenhouse
-    /// gain's (1 − x) ½τᵢ, and P14.T24.a's D⊕.
-    Held,
-    /// The 23 → 24 batch's: P14.T53.a's broadened carbon dioxide term with its refits, and the
-    /// gain's (1 − x)(1 − d) ∂τᵢ ÷ ∂ln pᵢ.
-    Batch,
-}
-
-impl EscapeRules {
-    /// The rules this generator version gives: the batch's from [`ESCAPE_VERSION`], and versions
-    /// 22's and 23's below it. A test may set them on its thread ([`with_rules`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= ESCAPE_VERSION {
-            Self::Batch
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The rules a test set on this thread ([`with_rules`]), consulted before the version: tests
-    /// run on threads of one process.
-    static RULES: core::cell::Cell<Option<EscapeRules>> = const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result under the rules `rules` on this thread ([`EscapeRules::in_force`]), with the
-/// Rayleigh floor's hold (P14.T24.h.a, `RAYLEIGH_FLOOR_VERSION`) switched with them, since version
-/// 24 lifts both: [`EscapeRules::Batch`] floors the snapshot path's Bond albedo
-/// (`RayleighFloorRules::Floored`) and [`EscapeRules::Held`] does not (`RayleighFloorRules::Held`),
-/// so that a test under either reads that version's whole state (decision-bump-plan-after-22 V3.2).
-/// The rules before are set back after, a panic in `run` included, as the partition's test-only
-/// switch of its exits is (`partition::with_exits`). The floor's own tests switch it alone
-/// (`area_mix::with_rayleigh_floor`).
-#[cfg(test)]
-pub(crate) fn with_rules<R>(rules: EscapeRules, run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::photometry::area_mix::{RayleighFloorRules, with_rayleigh_floor};
-    /// Sets the thread's escape rules back as it drops.
-    struct Restore(Option<EscapeRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let floor = match rules {
-        EscapeRules::Held => RayleighFloorRules::Held,
-        EscapeRules::Batch => RayleighFloorRules::Floored,
-    };
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    with_rayleigh_floor(floor, run)
-}
-
-/// The generator version from which every envelope's helium starts at its host star's own
-/// primordial He/H ([`primordial_helium_per_hydrogen`]), not the protosolar value (P14.T54.b.i;
-/// decision-p14-t50b-envelope §5): 24.
-///
-/// It moves the thin envelopes' helium under the escape's batch, the fractionation's start
-/// (`helium_before_passes`), and the He/H P14.T50.b's envelope reads, so it has its own arm, for
-/// P14.T54.b.k's attribution, rather than an arm of [`EscapeRules`]. Below it
-/// [`PrimordialHeliumRules::in_force`] is [`PrimordialHeliumRules::Protosolar`]; under the escape's
-/// hold no start is computed at all, so version 23's figures keep their bits. P14.T54.b.l deletes
-/// it, [`PrimordialHeliumRules`] with its `Protosolar` arm, `with_primordial_helium`, its line in
-/// `with_every_24_hold` and its tripwire
-/// (`the_host_s_primordial_helium_is_held_only_until_the_24_bump`).
-pub(crate) const PRIMORDIAL_HELIUM_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Which helium an envelope forms with (the hold, [`PRIMORDIAL_HELIUM_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum PrimordialHeliumRules {
-    /// Versions 23's and before: the protosolar He/H, 0.0968, about every host
-    /// (`protosolar_helium_mass_fraction`).
-    Protosolar,
-    /// The 23 → 24 batch's: the host star's own ([`primordial_helium_per_hydrogen`]).
-    Host,
-}
-
-impl PrimordialHeliumRules {
-    /// The rules this generator version gives: the host's helium from
-    /// [`PRIMORDIAL_HELIUM_VERSION`], the protosolar below it; in the tests, the rules a test's
-    /// switch sets on its thread (`with_primordial_helium`).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = PRIMORDIAL_HELIUM_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= PRIMORDIAL_HELIUM_VERSION {
-            Self::Host
-        } else {
-            Self::Protosolar
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The primordial helium's rules a test sets on its thread, `None` for the version's.
-    static PRIMORDIAL_HELIUM_RULES: core::cell::Cell<Option<PrimordialHeliumRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the primordial helium's rules `rules` on this thread
-/// ([`PrimordialHeliumRules::in_force`]), for the tests to reach 24's start ahead of the bump; the
-/// rules before are set back after, a panic in `run` included. A system derives lazily, so a test
-/// generates and reads it inside the switch. P14.T54.b.l deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_primordial_helium<R>(
-    rules: PrimordialHeliumRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<PrimordialHeliumRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            PRIMORDIAL_HELIUM_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(PRIMORDIAL_HELIUM_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The smooth step 3u² − 2u³ of `u` held to [0, 1], continuous with its slope at both ends: 0 at
 /// and below 0, 1 at and above 1, and 0 for a `u` that is not a number. Every ramp of the laws is
@@ -1040,40 +896,27 @@ pub(crate) fn helium_mass_fraction_of(per_hydrogen: f64) -> f64 {
 }
 
 /// The helium mass fraction an envelope of a host of composition `composition` starts its
-/// fractionation from under the rules in force ([`PrimordialHeliumRules`]): the protosolar
-/// (`protosolar_helium_mass_fraction`) below [`PRIMORDIAL_HELIUM_VERSION`], and the host's own
-/// from it, [`helium_mass_fraction_of`] its [`primordial_helium_per_hydrogen`]. Only the escape's
-/// batch reads it (`helium_before_passes`), so that under the escape's hold none is computed.
+/// fractionation from: the host's own, [`helium_mass_fraction_of`] its
+/// [`primordial_helium_per_hydrogen`] (P14.T54.b.i; decision-p14-t50b-envelope §5), which
+/// `helium_before_passes` reads.
 #[must_use]
 pub(crate) fn fractionation_start(composition: &Composition) -> f64 {
-    match PrimordialHeliumRules::in_force() {
-        PrimordialHeliumRules::Protosolar => {
-            crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction()
-        }
-        PrimordialHeliumRules::Host => {
-            helium_mass_fraction_of(primordial_helium_per_hydrogen(composition))
-        }
-    }
+    helium_mass_fraction_of(primordial_helium_per_hydrogen(composition))
 }
 
-/// The He/H by number an envelope of a host of composition `composition` forms with under the
-/// rules in force ([`PrimordialHeliumRules`]), before any escape: the protosolar He/H below
-/// [`PRIMORDIAL_HELIUM_VERSION`] and the host's own, [`primordial_helium_per_hydrogen`], from it.
-/// The record's envelope reads it where the escape is held, which fractionates nothing and carries
-/// no helium (P14.T54.b.i).
+/// The He/H by number an envelope of a host of composition `composition` forms with, before any
+/// escape: the host's own, [`primordial_helium_per_hydrogen`]. The record's envelope reads it where
+/// its body's derivation carries no helium (P14.T54.b.i).
 #[must_use]
 pub(crate) fn host_helium_per_hydrogen(composition: &Composition) -> f64 {
-    match PrimordialHeliumRules::in_force() {
-        PrimordialHeliumRules::Protosolar => Element::He.protosolar_abundance_per_hydrogen(),
-        PrimordialHeliumRules::Host => primordial_helium_per_hydrogen(composition),
-    }
+    primordial_helium_per_hydrogen(composition)
 }
 
 /// The helium a hydrogen and helium envelope keeps as escape takes its hydrogen preferentially
 /// (P14.T53.a; Hu, Seager and Yung 2015, ApJ 807, 8, read; Malsky et al. 2023, Nat. Astron. 7, 57,
 /// read): the envelope of `initial_envelope`, helium mass fraction `helium_mass_fraction_initial`
-/// (helium's share of its hydrogen and helium, which the caller gives: from generator version 24
-/// the host star's own, behind `PRIMORDIAL_HELIUM_VERSION`, decision-p14-t50b-envelope §5), on a
+/// (helium's share of its hydrogen and helium, which the caller gives: the host star's own from
+/// generator version 24, decision-p14-t50b-envelope §5), on a
 /// body of mass `mass` and radius `radius` under the exposure `exposure`, that loses `lost` by
 /// `age`.
 ///
@@ -2254,9 +2097,8 @@ impl std::error::Error for BuildEscapeOutcomeError {}
 /// recorded"): the outcomes of hydrogen, helium, carbon, nitrogen, oxygen and argon, its
 /// envelope's helium where it has an envelope, the shoreline's shares, its water's oxygen, the
 /// carbon monoxide its carbon dioxide's photolysis made, the share of its carbon the weathering
-/// thermostat left airborne and its methane's outcome. The derivation fills it under the escape's
-/// batch rules
-/// ([`Atmosphere::escape`](crate::planetary::derive::atmosphere::Atmosphere::escape)).
+/// thermostat left airborne and its methane's outcome. The derivation fills it from generator
+/// version 24 ([`Atmosphere::escape`](crate::planetary::derive::atmosphere::Atmosphere::escape)).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct EscapeOutcome {
     elements: [ElementOutcome; 6],

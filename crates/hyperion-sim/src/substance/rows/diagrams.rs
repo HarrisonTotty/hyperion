@@ -168,7 +168,6 @@ pub(in crate::substance) const WATER: PhaseDiagram = PhaseDiagram {
         name: "ice Ih",
         start: Kelvin::ZERO,
         density: Some(SolidDensity::IceIh),
-        held: false,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 45_054.726,
     triple_fusion_enthalpy_j_per_mol: Some(6_007.099),
@@ -287,7 +286,6 @@ pub(in crate::substance) const METHANE: PhaseDiagram = PhaseDiagram {
                 molar_mass_g_per_mol: 16.043,
                 volume_cubic_angstrom: &[1_597.17, 0.0, 0.0, -1.57e-3, 1.04e-4],
             }),
-            held: false,
         },
         SolidPhase {
             name: "I",
@@ -297,7 +295,6 @@ pub(in crate::substance) const METHANE: PhaseDiagram = PhaseDiagram {
                 molar_mass_g_per_mol: 16.043,
                 volume_cubic_angstrom: &[200.2, 0.03, 0.0015],
             }),
-            held: false,
         },
     ],
     triple_vaporisation_enthalpy_j_per_mol: 8_731.45,
@@ -424,7 +421,6 @@ pub(in crate::substance) const AMMONIA: PhaseDiagram = PhaseDiagram {
             density: KilogramsPerCubicMetre::new(822.0),
             at: Some(Kelvin::new(195.49)),
         }),
-        held: false,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 25_359.65,
     triple_fusion_enthalpy_j_per_mol: Some(5_655.1),
@@ -552,7 +548,6 @@ pub(in crate::substance) const NITROGEN: PhaseDiagram = PhaseDiagram {
                 molar_mass_g_per_mol: 28.014,
                 volume_cubic_angstrom: &[179.484, 0.0, 0.0, 8.51e-5],
             }),
-            held: false,
         },
         SolidPhase {
             name: "β",
@@ -562,7 +557,6 @@ pub(in crate::substance) const NITROGEN: PhaseDiagram = PhaseDiagram {
                 molar_mass_g_per_mol: 28.014,
                 volume_cubic_angstrom: &[86.5, 0.170],
             }),
-            held: false,
         },
     ],
     triple_vaporisation_enthalpy_j_per_mol: 6_037.3,
@@ -678,13 +672,12 @@ pub(in crate::substance) const OXYGEN: PhaseDiagram = PhaseDiagram {
                 density: KilogramsPerCubicMetre::new(1_530.39),
                 at: None,
             }),
-            held: false,
         },
         SolidPhase {
             name: "β",
             start: Kelvin::new(23.14),
             // Roder 1978's Table 4 on the sublimation curve, ρ = M ÷ V in kg m⁻³ (the `ρ_s`
-            // source); read by P14.T49.n and held until 24.
+            // source); read by P14.T49.n, served from 24.
             density: Some(SolidDensity::Measured(&[
                 (Kelvin::new(23.88), KilogramsPerCubicMetre::new(1_527.39)),
                 (Kelvin::new(26.0), KilogramsPerCubicMetre::new(1_522.30)),
@@ -698,7 +691,6 @@ pub(in crate::substance) const OXYGEN: PhaseDiagram = PhaseDiagram {
                 (Kelvin::new(42.0), KilogramsPerCubicMetre::new(1_471.21)),
                 (Kelvin::new(43.801), KilogramsPerCubicMetre::new(1_463.14)),
             ])),
-            held: true,
         },
         SolidPhase {
             name: "γ",
@@ -707,7 +699,6 @@ pub(in crate::substance) const OXYGEN: PhaseDiagram = PhaseDiagram {
                 density: KilogramsPerCubicMetre::new(1_363.87),
                 at: Some(Kelvin::new(46.0)),
             }),
-            held: false,
         },
     ],
     triple_vaporisation_enthalpy_j_per_mol: 7_766.8,
@@ -744,7 +735,7 @@ pub(in crate::substance) const OXYGEN: PhaseDiagram = PhaseDiagram {
                        (J. Chem. Phys. 47, 592; COD 1528336), its temperature not read; γ: \
                        1,363.87 kg m⁻³ at 46 K from Cox, Samuelsen and Beckurts 1973's neutron \
                        cell, a = 6.78 Å, Z = 8 (Phys. Rev. B 7, 3102; COD 9011647); β (read by \
-                       P14.T49.n, held until 24): Roder 1978's recommended molar volumes on the \
+                       P14.T49.n from 24): Roder 1978's recommended molar volumes on the \
                        sublimation curve (J. Phys. Chem. Ref. Data 7, 949, doi:10.1063/1.555582, \
                        Table 4, IPTS-68, M = 31.9988 g mol⁻¹), ρ = M ÷ V at its 11 β points from \
                        23.880 K (20.95 ± 0.11 cm³ mol⁻¹, 1,527.39 kg m⁻³) to 43.801 K (21.87 ± \
@@ -830,7 +821,6 @@ pub(in crate::substance) const CARBON_DIOXIDE: PhaseDiagram = PhaseDiagram {
             coefficients: &[1_723.91, -0.253, -2.87e-3],
             held_below: Kelvin::new(80.0),
         }),
-        held: false,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 15_419.98,
     triple_fusion_enthalpy_j_per_mol: None,
@@ -930,8 +920,8 @@ pub(in crate::substance) const ARGON: PhaseDiagram = PhaseDiagram {
         name: "fcc",
         start: Kelvin::ZERO,
         // Maltby, Hammer and Wilhelmsen 2024's Eq. (27) on the sublimation curve, ρ = M ÷ v in
-        // kg m⁻³ at 5 K steps and the triple point (the `ρ_s` source); read by P14.T49.n and held
-        // until 24.
+        // kg m⁻³ at 5 K steps and the triple point (the `ρ_s` source); read by P14.T49.n, served
+        // from 24.
         density: Some(SolidDensity::Measured(&[
             (Kelvin::new(5.0), KilogramsPerCubicMetre::new(1_770.74)),
             (Kelvin::new(10.0), KilogramsPerCubicMetre::new(1_770.17)),
@@ -951,7 +941,6 @@ pub(in crate::substance) const ARGON: PhaseDiagram = PhaseDiagram {
             (Kelvin::new(80.0), KilogramsPerCubicMetre::new(1_634.74)),
             (Kelvin::new(83.8058), KilogramsPerCubicMetre::new(1_621.60)),
         ])),
-        held: true,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 6_539.89,
     triple_fusion_enthalpy_j_per_mol: None,
@@ -1058,7 +1047,6 @@ pub(in crate::substance) const KRYPTON: PhaseDiagram = PhaseDiagram {
             density: KilogramsPerCubicMetre::new(2_972.53),
             at: Some(Kelvin::new(58.0)),
         }),
-        held: false,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 9_083.644,
     triple_fusion_enthalpy_j_per_mol: None,
@@ -1161,7 +1149,6 @@ pub(in crate::substance) const XENON: PhaseDiagram = PhaseDiagram {
             (Kelvin::new(70.0), KilogramsPerCubicMetre::new(3_668.87)),
             (Kelvin::new(75.0), KilogramsPerCubicMetre::new(3_655.04)),
         ])),
-        held: false,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 12_657.589,
     triple_fusion_enthalpy_j_per_mol: None,
@@ -1252,7 +1239,6 @@ pub(in crate::substance) const NITROUS_OXIDE: PhaseDiagram = PhaseDiagram {
             density: KilogramsPerCubicMetre::new(1_562.08),
             at: None,
         }),
-        held: false,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 16_589.429,
     triple_fusion_enthalpy_j_per_mol: None,
@@ -1355,13 +1341,11 @@ pub(in crate::substance) const CARBON_MONOXIDE: PhaseDiagram = PhaseDiagram {
                 density: KilogramsPerCubicMetre::new(1_042.55),
                 at: None,
             }),
-            held: false,
         },
         SolidPhase {
             name: "β",
             start: Kelvin::new(61.585),
             density: None,
-            held: false,
         },
     ],
     triple_vaporisation_enthalpy_j_per_mol: 6_496.968,
@@ -1454,7 +1438,6 @@ pub(in crate::substance) const SULPHUR_DIOXIDE: PhaseDiagram = PhaseDiagram {
             density: KilogramsPerCubicMetre::new(1_921.94),
             at: Some(Kelvin::new(143.15)),
         }),
-        held: false,
     }],
     triple_vaporisation_enthalpy_j_per_mol: 28_462.016,
     triple_fusion_enthalpy_j_per_mol: None,
@@ -1552,8 +1535,8 @@ pub(in crate::substance) const HYDROGEN_SULPHIDE: PhaseDiagram = PhaseDiagram {
     melting: None,
     solids: &[
         // Phase III from 0 K, II from 103.52 K and I from 126.22 K (Giauque and Blue 1936's
-        // transitions); III's and I's densities are read by P14.T49.n and held until 24, II's is
-        // not read (the `ρ_s` source).
+        // transitions); III's and I's densities are read by P14.T49.n, served from 24, II's is not
+        // read (the `ρ_s` source).
         SolidPhase {
             name: "III",
             start: Kelvin::ZERO,
@@ -1561,13 +1544,11 @@ pub(in crate::substance) const HYDROGEN_SULPHIDE: PhaseDiagram = PhaseDiagram {
                 density: KilogramsPerCubicMetre::new(1_230.0),
                 at: Some(Kelvin::new(80.0)),
             }),
-            held: true,
         },
         SolidPhase {
             name: "II",
             start: Kelvin::new(103.52),
             density: None,
-            held: false,
         },
         SolidPhase {
             name: "I",
@@ -1576,7 +1557,6 @@ pub(in crate::substance) const HYDROGEN_SULPHIDE: PhaseDiagram = PhaseDiagram {
                 density: KilogramsPerCubicMetre::new(1_162.01),
                 at: None,
             }),
-            held: true,
         },
     ],
     triple_vaporisation_enthalpy_j_per_mol: 19_596.339,
@@ -1610,7 +1590,7 @@ pub(in crate::substance) const HYDROGEN_SULPHIDE: PhaseDiagram = PhaseDiagram {
         ANCHORED,
         Source {
             covers: "ρ_s",
-            citation: "read by P14.T49.n, held until 24: phase III 1,230 kg m⁻³ at 80 K, Yarnall \
+            citation: "read by P14.T49.n from 24: phase III 1,230 kg m⁻³ at 80 K, Yarnall \
                        and Hudson 2022 (Icarus 373, 114799, Table 1), 'calculated from Cockcroft \
                        and Fitch (1990)' (Z. Kristallogr. 193, 1), a D₂S cell, its conversion to \
                        H₂S not stated; their own film's 1,224 at 80 K agrees; phase I 1,162.01 kg \
@@ -1681,7 +1661,7 @@ pub(in crate::substance) const ETHANE: PhaseDiagram = PhaseDiagram {
     solids: &[
         // Phase III (monoclinic) from 0 K and the plastic bcc phase I from 89.813 K (Atake and
         // Chihara 1976's transition; the intermediate phase II, metastable by Klimenko, Gal'tsov
-        // and Prokhvatilov 2008, is not kept); both densities read by P14.T49.n and held until 24
+        // and Prokhvatilov 2008, is not kept); both densities read by P14.T49.n, served from 24
         // (the `ρ_s` source).
         SolidPhase {
             name: "III",
@@ -1690,7 +1670,6 @@ pub(in crate::substance) const ETHANE: PhaseDiagram = PhaseDiagram {
                 density: KilogramsPerCubicMetre::new(719.0),
                 at: Some(Kelvin::new(85.0)),
             }),
-            held: true,
         },
         SolidPhase {
             name: "I",
@@ -1699,7 +1678,6 @@ pub(in crate::substance) const ETHANE: PhaseDiagram = PhaseDiagram {
                 density: KilogramsPerCubicMetre::new(657.8),
                 at: None,
             }),
-            held: true,
         },
     ],
     triple_vaporisation_enthalpy_j_per_mol: 17_884.191,
@@ -1730,7 +1708,7 @@ pub(in crate::substance) const ETHANE: PhaseDiagram = PhaseDiagram {
         ANCHORED,
         Source {
             covers: "ρ_s",
-            citation: "read by P14.T49.n, held until 24: phase III 719 kg m⁻³ at 85 K, van Nes and \
+            citation: "read by P14.T49.n from 24: phase III 719 kg m⁻³ at 85 K, van Nes and \
                        Vos 1978's monoclinic cell (Acta Cryst. B34, 1947) as Yarnall and Hudson \
                        2022 tabulate it (Icarus 373, 114799, Table 1); phase I 657.8 kg m⁻³ near \
                        90 K, Klimenko, Gal'tsov and Prokhvatilov 2008 (Fiz. Nizk. Temp. 34, 1319; \

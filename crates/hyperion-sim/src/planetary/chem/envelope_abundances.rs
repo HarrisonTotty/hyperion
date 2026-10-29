@@ -151,9 +151,8 @@
 //! # On the record from 24
 //!
 //! This module is pure. P14.T52.a speciates its abundances and P14.T52.d publishes them in the
-//! record's envelope section, which the record builds behind the air's sections' hold
-//! (P14.T54.b.i), so that at generator version 23 nothing on the record calls it
-//! (decision-bump-plan-after-22 §1.3).
+//! record's envelope section, which the record builds from generator version 24 (P14.T54.b.i; at
+//! 23 nothing on the record called it; decision-bump-plan-after-22 §1.3).
 //!
 //! # Determinism
 //!

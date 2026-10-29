@@ -916,8 +916,8 @@ pub(crate) enum CriticalCap {
 }
 
 impl CriticalCap {
-    /// The cap the rules in force give: the isochore under P14.T53.b part 3's hold and the
-    /// escape's batch rules ([`steam_envelope_in_force`]), nothing otherwise.
+    /// The cap the rules in force give: the isochore where P14.T53.b part 3 is in force
+    /// ([`steam_envelope_in_force`]), nothing under its hold.
     #[must_use]
     pub(crate) fn in_force() -> Self {
         if steam_envelope_in_force() {
@@ -2277,7 +2277,7 @@ pub(crate) enum SolidEdges {
     /// annual mean's, its mass its whole reservoir where it lies as a solid; and water T24.b's
     /// ([`WaterCover`]).
     Partition,
-    /// P14.T51.f's on a body with no collisional atmosphere (from generator version 24, its hold):
+    /// P14.T51.f's on a body with no collisional atmosphere (from generator version 24):
     /// each solid's edge is its cold-trap threshold, its sublimation edge into vacuum
     /// ([`exosphere_threshold`] at [`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`]), against the cover's cold
     /// area, which the caller gives as the zonal annual maximum's; and its mass is what that area
@@ -2700,7 +2700,7 @@ impl Partition {
 
     /// [`publish`](Self::publish) with the solids' edges `edges`: under
     /// [`SolidEdges::Partition`] it is `publish` to the bit, and under [`SolidEdges::Exosphere`]
-    /// P14.T51.f's airless branch, which its hold at 24 keeps off the record until then.
+    /// P14.T51.f's airless branch, on the record from 24.
     #[must_use]
     pub(crate) fn publish_with(&self, cover: &Cover<'_>, edges: SolidEdges) -> Condensates {
         let mut entries: Vec<CondensateEntry> = Vec::new();
@@ -2887,8 +2887,8 @@ fn crust_ice(c: &Condensate, water: &WaterCover) -> Option<Part> {
 /// temperature it lies at, held within its liquid range, from its first melt to its critical point,
 /// under the body's surface pressure `surface_pressure`: the saturated liquid's until generator
 /// version 24, and from it the liquid compressed to that pressure
-/// (`Substance::liquid_density_at_pressure`, P14.T49.n's hold), which the entry's layer, the
-/// sea's area and the other liquids' shared area all read.
+/// (`Substance::liquid_density_at_pressure`, P14.T49.n), which the entry's layer, the sea's area
+/// and the other liquids' shared area all read.
 #[must_use]
 fn liquid_density_kg_per_m3(
     c: &Condensate,

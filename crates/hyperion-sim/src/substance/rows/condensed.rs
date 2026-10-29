@@ -9,7 +9,7 @@
 //! and triple point ([`GrainDensity::OfDiagram`]). Six rows whose liquids lie hundreds of kelvin
 //! above their melting points, as cloud decks or lava, give their liquid by temperature beside a
 //! fixed solid ([`GrainDensity::MeasuredLiquid`]: `Fe`, `MgSiO3`, `Mg2SiO4`, `Al2O3`, `CaTiO3`
-//! and `S8`, each its source's `liquid grain density`; P14.T49.n, held until generator version
+//! and `S8`, each its source's `liquid grain density`; P14.T49.n, read from generator version
 //! 24). R09's reference rows (`basalt`, `basalt_fe`,
 //! `granite`, `feldspathic`, `phyllosilicate`, `Na2CO3`, `mars_dust`) are
 //! `planetary::surface::reference`'s, to the bit, which its tests hold.
@@ -64,7 +64,7 @@ const fn liquid(kg_m3: f64, at_k: f64) -> GrainDensity {
 }
 
 /// A [`GrainDensity::MeasuredLiquid`]: the solid's `kg_m3` kg m⁻³ at `at_k` kelvin and the
-/// liquid's `nodes`, rising in temperature (P14.T49.n; held until generator version 24).
+/// liquid's `nodes`, rising in temperature (P14.T49.n; read from generator version 24).
 #[must_use]
 const fn solid_and_liquid(
     kg_m3: f64,
@@ -291,8 +291,8 @@ pub(in crate::substance) const METHANOL: CondensedColumns = CondensedColumns {
 };
 
 /// Iron's condensed phase, a giant's metal cloud: bcc iron, and its liquid by temperature,
-/// Assael et al. 2006's reference correlation in kg m⁻³ (the `liquid grain density` source; held
-/// until generator version 24).
+/// Assael et al. 2006's reference correlation in kg m⁻³ (the `liquid grain density` source; read
+/// from generator version 24).
 pub(in crate::substance) const IRON: CondensedColumns = CondensedColumns {
     grain_density: solid_and_liquid(
         7_874.0,
@@ -487,7 +487,7 @@ pub(in crate::substance) const ACID_UV_ABSORBER: CondensedColumns = CondensedCol
 /// Its liquid, Io's flows and lakes, is the measured series decision-r11-palette-liquids §1.8 asks
 /// for, Kellas 1918's densities in kg m⁻³ as the International Critical Tables compile them, in
 /// three lines that change slope at the λ-transition (the `liquid grain density` source; read by
-/// P14.T49.n and held until generator version 24).
+/// P14.T49.n from generator version 24).
 pub(in crate::substance) const SULPHUR: CondensedColumns = CondensedColumns {
     grain_density: solid_and_liquid(
         2_067.0,
@@ -700,7 +700,7 @@ pub(in crate::substance) const IRON_SULPHIDE: CondensedColumns = CondensedColumn
 };
 
 /// Enstatite, a silicate cloud: orthoenstatite, and its liquid by temperature, Lange 1997's
-/// partial molar volumes' M ÷ V in kg m⁻³ (the `liquid grain density` source; held until
+/// partial molar volumes' M ÷ V in kg m⁻³ (the `liquid grain density` source; read from
 /// generator version 24).
 pub(in crate::substance) const ENSTATITE: CondensedColumns = CondensedColumns {
     grain_density: solid_and_liquid(
@@ -756,7 +756,7 @@ pub(in crate::substance) const ENSTATITE: CondensedColumns = CondensedColumns {
 };
 
 /// Forsterite, a silicate cloud, and its liquid by temperature, Lange 1997's partial molar
-/// volumes' M ÷ V in kg m⁻³ (the `liquid grain density` source; held until generator version 24).
+/// volumes' M ÷ V in kg m⁻³ (the `liquid grain density` source; read from generator version 24).
 pub(in crate::substance) const FORSTERITE: CondensedColumns = CondensedColumns {
     grain_density: solid_and_liquid(
         3_219.0,
@@ -836,7 +836,7 @@ pub(in crate::substance) const SILICA: CondensedColumns = CondensedColumns {
 };
 
 /// Corundum, a hot giant's first condensate, and its liquid by temperature, Langstaff et al.
-/// 2013's levitated melt in kg m⁻³ (the `liquid grain density` source; held until generator
+/// 2013's levitated melt in kg m⁻³ (the `liquid grain density` source; read from generator
 /// version 24).
 pub(in crate::substance) const CORUNDUM: CondensedColumns = CondensedColumns {
     grain_density: solid_and_liquid(
@@ -877,7 +877,7 @@ pub(in crate::substance) const CORUNDUM: CondensedColumns = CondensedColumns {
 };
 
 /// Perovskite, `CaTiO3`, and its liquid by temperature, the code's melt model's M ÷ V in kg m⁻³
-/// (the `liquid grain density` source; held until generator version 24).
+/// (the `liquid grain density` source; read from generator version 24).
 pub(in crate::substance) const PEROVSKITE: CondensedColumns = CondensedColumns {
     grain_density: solid_and_liquid(
         4_040.0,

@@ -1070,7 +1070,7 @@ impl SurveyedMaterial {
     /// The space-weathering maturity of the point's ground, `m_local`, dimensionless in [0, 1]:
     /// the header's `m_body` less the largest deficit a young crater's fresh ejecta leave there
     /// ([`maturity_at`], R10.T1.c), or `None` where the header carries no maturity, as every
-    /// header does before P14.T54.b.
+    /// header did below generator version 24 (P14.T54.b).
     #[must_use]
     pub const fn maturity(&self) -> Option<f64> {
         self.maturity
@@ -1745,7 +1745,7 @@ impl WorkerFields {
     /// [`FieldHeaderParts::albedo_scale`](crate::field::FieldHeaderParts::albedo_scale)'s contract
     /// has it), and its law's L(0) there. It reads the header alone, so it answers wherever the
     /// body's field is held, surveyed or not; where the header carries neither a maturity nor a
-    /// cover, as every header does before P14.T54.b, the properties are
+    /// cover, as every header did below generator version 24 (P14.T54.b), the properties are
     /// [`properties()`](crate::material::properties())'.
     ///
     /// # Errors
@@ -1775,7 +1775,8 @@ impl WorkerFields {
     /// ([`GroundExposure::of_header`]) at maturity m, under the header's scale (1 where it holds
     /// none), the clamp [`photometry`](Self::photometry) takes, at min(`m_j`, μ). The parent of
     /// level 0 is level 0. Where the header carries no maturity or no weathering rate, as every
-    /// header does before P14.T54.b, every node of both is `photometry`'s albedo to the bit.
+    /// header did below generator version 24 (P14.T54.b), every node of both is `photometry`'s
+    /// albedo to the bit.
     ///
     /// The body's unresolved terms ([`unresolved_terms`], some tens of milliseconds) are built on
     /// the first ask and kept with the field, and each material's G at the maturities read, so that

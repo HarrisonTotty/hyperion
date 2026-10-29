@@ -326,7 +326,7 @@ fn a_tenuous_air_takes_no_rule_of_the_inventory() {
     );
 }
 
-/// P14.T53.c's Pluto (decision-p14-t53c-tenuous-aerosols §3), every 24 hold in force: `Tenuous`
+/// P14.T53.c's Pluto (decision-p14-t53c-tenuous-aerosols §3): `Tenuous`
 /// through its passes and at its measured 0.72 Bond albedo by hand, its haze not modelled at 24
 /// (P14.T55.n). Stated, not asserted: its x(CH₄), T24.c's haze index and the τ(550) that rule would
 /// give it. Its CH₄, on the minor branch at its mean, some 3 × 10⁻⁷ Pa against a measured x of
@@ -335,31 +335,29 @@ fn a_tenuous_air_takes_no_rule_of_the_inventory() {
 fn under_every_24_hold_pluto_s_haze_is_not_modelled_at_24() {
     use crate::planetary::derive::atmosphere::tests::{on_pluto_s_orbit, on_pluto_s_orbit_at};
     use crate::planetary::derive::atmosphere::{Gas, atmosphere};
-    crate::planetary::testing::with_every_24_hold(|| {
-        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
-        for (label, air) in [
-            ("through its passes", *pluto.atmosphere()),
-            (
-                "at its measured 0.72",
-                atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72)),
-            ),
-        ] {
-            let partials = air.partial_pressures();
-            let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
-            let all = Gas::ALL.iter().fold(0.0, |sum, &gas| sum + moles(gas));
-            let (methane, carbon_dioxide) =
-                (moles(Gas::Methane) / all, moles(Gas::CarbonDioxide) / all);
-            let index = haze_index(methane, carbon_dioxide);
-            eprintln!(
-                "Pluto {label}: {:?} at {:.4e} Pa, x(CH4) {methane:.4e}, T24.c's haze index \
-                 {index:.4e}, its rule's τ(550) {:.4}; its haze not modelled at 24 (P14.T55.n)",
-                air.state(),
-                air.surface_pressure().map_or(f64::NAN, Pascals::value),
-                haze_optical_depth(index),
-            );
-            assert_eq!(air.state(), SurfaceState::Tenuous, "{label}: {air:?}");
-        }
-    });
+    let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+    for (label, air) in [
+        ("through its passes", *pluto.atmosphere()),
+        (
+            "at its measured 0.72",
+            atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72)),
+        ),
+    ] {
+        let partials = air.partial_pressures();
+        let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
+        let all = Gas::ALL.iter().fold(0.0, |sum, &gas| sum + moles(gas));
+        let (methane, carbon_dioxide) =
+            (moles(Gas::Methane) / all, moles(Gas::CarbonDioxide) / all);
+        let index = haze_index(methane, carbon_dioxide);
+        eprintln!(
+            "Pluto {label}: {:?} at {:.4e} Pa, x(CH4) {methane:.4e}, T24.c's haze index \
+             {index:.4e}, its rule's τ(550) {:.4}; its haze not modelled at 24 (P14.T55.n)",
+            air.state(),
+            air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            haze_optical_depth(index),
+        );
+        assert_eq!(air.state(), SurfaceState::Tenuous, "{label}: {air:?}");
+    }
 }
 
 /// The inventory refuses bad inputs by their variants: its cloud fraction, gravity and molar mass.
@@ -700,134 +698,6 @@ fn the_inventory_is_deterministic_and_continuous() {
         make(288.001).deck_optical_depth(water).unwrap(),
     );
     assert!((two / one - 1.0).abs() < 1e-3, "{one} against {two}");
-}
-
-/// The files outside this module and P14.T24.g's whose code names the inventory behind a named
-/// hold, each with the name of its hold, which its code (outside an inline test module) must name:
-/// P14.T54.b.b's wiring of the record's inventory, and the hold's own tests (decision-p14-t54b-open
-/// §3.3). **P14.T54.b.l deletes this list** with the tripwire below.
-const HELD: [(&str, &str); 2] = [
-    ("planetary/system/air.rs", "AIR_SECTIONS_VERSION"),
-    ("planetary/system/air/tests.rs", "AIR_SECTIONS_VERSION"),
-];
-
-/// Whether the code of `text` (its lines before an inline `mod tests {`, comments left out) names
-/// `hold`.
-fn names_its_hold(text: &str, hold: &str) -> bool {
-    text.lines()
-        .map(str::trim_start)
-        .take_while(|code| !code.starts_with("mod tests {"))
-        .filter(|code| !code.starts_with("//"))
-        .any(|code| code.contains(hold))
-}
-
-/// The hold check reads the code alone: a comment naming the hold, or code inside an inline test
-/// module, does not count.
-#[test]
-fn the_held_files_hold_check_reads_the_code_alone() {
-    let hold = "AIR_SECTIONS_VERSION";
-    assert!(names_its_hold("if v >= AIR_SECTIONS_VERSION {\n", hold));
-    assert!(!names_its_hold(
-        "// AIR_SECTIONS_VERSION\nfn f() {}\n",
-        hold
-    ));
-    assert!(!names_its_hold(
-        "fn f() {}\n#[cfg(test)]\nmod tests {\n    const A: u32 = AIR_SECTIONS_VERSION;\n}\n",
-        hold
-    ));
-}
-
-/// Nothing on the record reaches the inventory before P14.T54.b's bump (decision-bump-plan-after-22
-/// §1.3): no code of the crate's `src/` outside this module, P14.T24.g's, their tests and
-/// [`HELD`]'s files names it, comments and the modules' own declarations (with the inventory's
-/// re-export from `hooks`) left out; each of [`HELD`]'s files is a source file whose code names its
-/// hold, so that a caller in any other file fails, and so does a listed file that drops its hold
-/// (decision-p14-t54b-open §3.3). Under the hold's `Held` arm the record calls nothing here
-/// (`the_air_sections_are_held_only_until_the_24_bump`). **P14.T54.b.l deletes this tripwire.**
-#[test]
-fn nothing_on_the_record_calls_the_inventory_yet() {
-    fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
-        let mut entries: Vec<_> = std::fs::read_dir(dir)
-            .expect("a source directory")
-            .map(|e| e.expect("an entry").path())
-            .collect();
-        entries.sort();
-        for path in entries {
-            if path.is_dir() {
-                walk(&path, files);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                files.push(path);
-            }
-        }
-    }
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    walk(&src, &mut files);
-    assert!(files.len() > 100, "the walk found the crate's sources");
-    let own = [
-        "planetary/hooks/aerosols",
-        "planetary/hooks/sulphur",
-        "planetary/hooks/envelope_atmosphere",
-    ];
-    // The record's `AerosolInventory` is this module's, re-exported from `hooks`: a file that names
-    // the type through it stores the member, and the calls and the inputs it would build one with
-    // are caught by name.
-    let patterns = [
-        "hooks::aerosols",
-        "aerosols::",
-        "hooks::sulphur",
-        "sulphur::",
-        "AerosolInventory::derive",
-        "AerosolInputs",
-    ];
-    // The atmosphere re-exports the acid's cycling temperature for P14.T53.b part 1 (b)'s deckless
-    // re-solve and its docs (`RunawayDeck`): a constant, which calls nothing of the inventory.
-    let declarations = [
-        "pub mod aerosols;",
-        "pub mod sulphur;",
-        "pub use crate::planetary::hooks::sulphur::ACID_CYCLING_TEMPERATURE;",
-        "pub use aerosols::AerosolInventory;",
-    ];
-    let relative_of = |path: &std::path::Path| {
-        path.strip_prefix(&src)
-            .expect("under src")
-            .to_string_lossy()
-            .replace('\\', "/")
-    };
-    for (held, hold) in HELD {
-        let path = files
-            .iter()
-            .find(|path| relative_of(path.as_path()) == held)
-            .unwrap_or_else(|| panic!("{held} is a source file"));
-        let text = std::fs::read_to_string(path).expect("a readable source");
-        assert!(
-            names_its_hold(&text, hold),
-            "{held} reads the inventory behind {hold}, which its code no longer names"
-        );
-    }
-    let mut found = Vec::new();
-    for path in &files {
-        let relative = relative_of(path);
-        if own.iter().any(|o| relative.starts_with(o))
-            || HELD.iter().any(|(held, _)| *held == relative)
-        {
-            continue;
-        }
-        let text = std::fs::read_to_string(path).expect("a readable source");
-        for (n, line) in text.lines().enumerate() {
-            let code = line.trim_start();
-            if code.starts_with("//") || declarations.contains(&code) {
-                continue;
-            }
-            if patterns.iter().any(|p| code.contains(p)) {
-                found.push(format!("{relative}:{}: {code}", n + 1));
-            }
-        }
-    }
-    assert!(
-        found.is_empty(),
-        "nothing on the record calls the inventory before P14.T54.b: {found:#?}"
-    );
 }
 
 /// A measured deck's column, set by hand: its body, its deck's condensate, its gas below the
@@ -1634,7 +1504,7 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
 }
 
 /// P14.T53.c's census over the 400 whole systems, the golden systems and LOOK72's triaged systems
-/// (a measurement, run by name), every 24 hold in force, against T53.c's own hold held:
+/// (a measurement, run by name):
 ///
 /// - every `Tenuous` record, with count (xiv)'s figures (decision-p14-t53c-tenuous-aerosols §5):
 ///   its `p_s`, p ÷ g, x(CH₄), T24.c's haze index and the τ(550) its rule would give, and the dust's
@@ -1642,12 +1512,8 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
 ///   (P14.T54.b), every `Tenuous` record's aerosols not modelled, never the empty inventory, and
 ///   its structure never computed as no air (decision-p14-t53c-tenuous-aerosols §2: its gases
 ///   are listed and its structure published);
-/// - the moved states and pressures;
 /// - asserted, the record says `Tenuous`, not `Airless`, where a gas is held above the floor, and
 ///   every `Airless` record lists no gas;
-/// - asserted (decision-p14-t53c-collapse §5): with no collapse-first start, the bodies the start
-///   as built moved keep their whole-column solve, as with T53.c held, to the bit
-///   (02000b2cdfff0000.0200, 21fff6587ff80000.0100, 02000b2ca0000001.1000 named);
 /// - asserted, the airs whose dominant condensable lies at or above 10 times its saturation
 ///   pressure over its ice (decision-t24i-airless-state D4) are [`ITEM_33_WORLD`] and count
 ///   (vii)'s two, 01ffeb2d20000000.e101 and 02002b2d1ffe0000.e103, by name. [`ITEM_33_WORLD`],
@@ -1669,30 +1535,18 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
 fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
     use std::collections::BTreeMap;
 
-    use crate::planetary::chem::tenuous::{TenuousRules, holds_tenuous_air, with_tenuous};
+    use crate::planetary::chem::tenuous::holds_tenuous_air;
     use crate::planetary::derive::atmosphere::{AIRLESS_PRESSURE, Gas};
     use crate::planetary::system::tests::{
         ITEM_33_WORLD, ThinAirBody, thin_air_census, thin_air_sets,
     };
     /// Count (vii)'s two members (decision-p14-t53c-collapse §2.2).
     const COUNT_VII: [&str; 2] = ["01ffeb2d20000000.e101", "02002b2d1ffe0000.e103"];
-    /// The bodies the collapse-first start as built moved that the ruling names.
-    const RESTORED: [&str; 3] = [
-        "02000b2cdfff0000.0200",
-        "21fff6587ff80000.0100",
-        "02000b2ca0000001.1000",
-    ];
     /// The record the ice-held line keeps T13.b's verdict on.
     const KEPT_AIRLESS: &str = "01ffeb2c20010000.0200";
     let sets = thin_air_sets();
-    let (held, tenuous) = crate::planetary::testing::with_every_24_hold(|| {
-        (
-            with_tenuous(TenuousRules::Held, || thin_air_census(&sets)),
-            thin_air_census(&sets),
-        )
-    });
+    let tenuous = thin_air_census(&sets);
     let id_of = |b: &ThinAirBody| b.label.rsplit(' ').next().unwrap_or_default().to_owned();
-    let before: BTreeMap<&str, &ThinAirBody> = held.iter().map(|b| (b.label.as_str(), b)).collect();
     let mut states: BTreeMap<String, u32> = BTreeMap::new();
     for body in &tenuous {
         *states.entry(format!("{:?}", body.state)).or_default() += 1;
@@ -1736,21 +1590,6 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
     eprintln!(
         "the tenuous records' structures (None not modelled, Some(true) a profile): {structures:?}"
     );
-    eprintln!("MOVED from T53.c held (state, or p_s by more than 10⁻⁶):");
-    for body in &tenuous {
-        let Some(was) = before.get(body.label.as_str()) else {
-            eprintln!("  {} new: {}", body.label, body.line());
-            continue;
-        };
-        if was.state != body.state || ((body.p - was.p) / was.p.max(1e-30)).abs() > 1e-6 {
-            eprintln!(
-                "  {}\n    held: {}\n    now:  {}",
-                body.label,
-                was.line(),
-                body.line()
-            );
-        }
-    }
     let supersaturated: Vec<&ThinAirBody> = tenuous
         .iter()
         .filter(|b| b.factor().is_some_and(|f| f >= 10.0))
@@ -1759,26 +1598,11 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
     for body in &supersaturated {
         eprintln!("  {}: {}", body.label, body.line());
     }
-    let under_ice_held = held.iter().filter(|b| b.under_ice_item).count();
-    let misread_held = held.iter().filter(|b| !b.misread.is_empty()).count();
     eprintln!(
-        "OCEANS UNDER ICE LISTED: {} (T53.c held: {under_ice_held}); LIQUIDS AT OTHER THAN \
-         THEIR OWN EXTENT: {} (T53.c held: {misread_held})",
+        "OCEANS UNDER ICE LISTED: {}; LIQUIDS AT OTHER THAN THEIR OWN EXTENT: {}",
         tenuous.iter().filter(|b| b.under_ice_item).count(),
         tenuous.iter().filter(|b| !b.misread.is_empty()).count(),
     );
-    for id in RESTORED {
-        let body = tenuous
-            .iter()
-            .find(|b| b.label.ends_with(id))
-            .unwrap_or_else(|| panic!("{id} is in the census"));
-        assert_eq!(
-            body.bits,
-            before[body.label.as_str()].bits,
-            "{id}: {}",
-            body.line()
-        );
-    }
     // Main's 24 gate item (decision-p14-t53c-collapse §2.1), closed as a state by
     // decision-p14-t54b-e-findings §C: P14.T54.b.e's weathered area mix, with T53.c in force, moved
     // it from a `Snowball` at 100.03 Pa (P14.T54.b.k's restatement) to `Tenuous` at 1.68 Pa, about
@@ -1802,9 +1626,8 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
         .iter()
         .find(|b| b.label.ends_with(KEPT_AIRLESS))
         .unwrap_or_else(|| panic!("{KEPT_AIRLESS} is in the census"));
-    let was = before[kept.label.as_str()];
     assert!(kept.held_ice.is_empty(), "{}", kept.line());
-    assert_eq!(kept.state, was.state, "{}", kept.line());
+    assert_eq!(kept.state, SurfaceState::Airless, "{}", kept.line());
     for body in &tenuous {
         let at = || format!("{}: {}", body.label, body.line());
         for &(gas, p_sat) in &body.held_ice {

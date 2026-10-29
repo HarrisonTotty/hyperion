@@ -8,30 +8,31 @@
 //!   [`RedoxClass`](redox::RedoxClass).
 //! - [`envelope_abundances`]: a gas envelope's elements relative to hydrogen
 //!   ([`EnvelopeAbundances`](envelope_abundances::EnvelopeAbundances), P14.T50.b), on the Surface
-//!   path, which nothing on the record reads until P14.T54.b.
+//!   path, which the record reads from generator version 24 (P14.T54.b).
 //! - [`equilibrium`]: the equilibrium speciation of a hydrogen-dominated gas
 //!   ([`Network`](equilibrium::Network) and [`GasEquilibrium`](equilibrium::GasEquilibrium),
 //!   P14.T52.a), on the Surface path, from the element abundances at one temperature and pressure;
-//!   nothing on the record reads it until P14.T54.b.
+//!   the record reads it from generator version 24 (P14.T54.b).
 //! - [`photochem`]: an envelope's photochemical SO₂, its sulphur, soot, ice-giant and
 //!   chromophore hazes, and the thermal dissociation of H₂O, TiO and VO on ultra-hot daysides
-//!   (P14.T52.b), each rule with its source and range, on the Surface path; nothing on the record
-//!   reads them until P14.T54.b.
+//!   (P14.T52.b), each rule with its source and range, on the Surface path; the record reads them
+//!   from generator version 24 (P14.T54.b).
 //! - [`condense`]: condensation aloft ([`Condensation`](condense::Condensation), P14.T52.c): each
 //!   condensate's deck along a gas's temperature profile, over the registry's laws aloft, its
 //!   cold trap, its column by Ackerman and Marley's (2001) sedimentation and its mode of particles,
-//!   on the Surface path; nothing on the record reads it until P14.T54.b.
+//!   on the Surface path; the record reads it from generator version 24 (P14.T54.b).
 //! - [`quench`]: where an envelope's CO, CH₄, NH₃, HCN and CO₂ stop following the equilibrium
 //!   as the gas rises ([`Quench`](quench::Quench), P14.T52.b), by Zahnle and Marley's (2014)
-//!   relations, and the gas above those levels, on the Surface path; nothing on the record reads
-//!   it until P14.T54.b.
+//!   relations, and the gas above those levels, on the Surface path; the record reads it from
+//!   generator version 24 (P14.T54.b).
 //! - [`partition`]: the condensate partition at the ground (P14.T51.a), how much of each
 //!   condensable a body's air holds over its climate, how much lies on its surface, and in which
 //!   phase.
-//! - [`escape`]: escape by regime and fractionation (P14.T53.a, in progress), held with the
-//!   greenhouse's refits at generator version 24.
+//! - [`escape`]: escape by regime and fractionation (P14.T53.a), on the record with the
+//!   greenhouse's refits from generator version 24.
 //! - [`tenuous`]: thin and transient air (P14.T53.c): an ice-held volatile's retention at its
-//!   ice's own temperature and the `Tenuous` state's floor, held at generator version 24.
+//!   ice's own temperature and the `Tenuous` state's floor, on the record from generator version
+//!   24.
 //! - Here, the host's C/O and Mg/Si ([`HostAbundances`]), drawn per system on
 //!   `system.abundances` ([`AbundanceDraws`]), since a star's planets share its photospheric
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving
@@ -40,7 +41,7 @@
 //! P14.T54.a's 22 → 23 batch wires it to the record: every derived body's inventory and its bulk
 //! composition, the partition's published condensates, and through the crust (its Batch D's C3)
 //! the mantle's ΔIW and the host's Mg/Si ([`HostAbundances`]), which the crust's basis reads.
-//! [`envelope_abundances`] waits for P14.T54.b.
+//! P14.T54.b's 23 → 24 batch wires [`envelope_abundances`] to the record's envelope section.
 //!
 //! # The host's ratios
 //!

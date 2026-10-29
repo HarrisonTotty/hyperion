@@ -30,7 +30,7 @@
 //! reads. Its light is the body's hosts', built once per body before its passes, or for a single
 //! pass a host at the hottest host's temperature ([`PassLight`]).
 //!
-//! **The weathered regolith** (P14.T54.b.e, held at 24, `area_mix::WEATHERED_AREA_MIX_VERSION`):
+//! **The weathered regolith** (P14.T54.b.e, from generator version 24):
 //! under the body's own climate each pass takes its maturity from the context it reads, P14.T51.d's
 //! law over that context's field, surface age, resurfacing time and heat flow, its own air and lid,
 //! and what its record gives once a body ([`PassWeathering`]), before it publishes its condensates
@@ -41,17 +41,16 @@
 //! that they are that pass's to the bit. Where a pass takes no maturity, its regolith is the
 //! stand-in's, with why ([`NoMaturity`]).
 //!
-//! **The cold traps** (P14.T54.b.f, held at 24, `cold_traps::COLD_TRAPS_VERSION`; the record's
-//! rules): under the body's own climate a pass that qualifies (a zonal profile, airless, its air
-//! not collisional) reads a cold-trap field of its own inputs after its regolith and before it
-//! publishes: the derivation's sky, the heat flow, crater contract and crust of the context it
-//! reads, its weathered regolith's Bond albedo, airless, and its partition's condensables
-//! ([`SpunColdTraps`], `cold_traps::FieldInputs`), reused from the derivation's one slot where they
-//! are the same bits. It publishes over it (`cold_traps::publish_over`), and its field rides to the
-//! record (`cold_traps::PassColdTraps`). Such a pass reads its conditions even where nothing in its
-//! column condenses, so that the delivered water and carbon dioxide traps are its own (L2 closed,
-//! decision-p14-t54b-f-coldtraps §2 (d)). A pass that reads no field publishes P14.T51.a's, with
-//! why (`cold_traps::NoColdTraps`).
+//! **The cold traps** (P14.T54.b.f, from generator version 24): under the body's own climate a pass
+//! that qualifies (a zonal profile, airless, its air not collisional) reads a cold-trap field of
+//! its own inputs after its regolith and before it publishes: the derivation's sky, the heat flow,
+//! crater contract and crust of the context it reads, its weathered regolith's Bond albedo,
+//! airless, and its partition's condensables ([`SpunColdTraps`], `cold_traps::FieldInputs`), reused
+//! from the derivation's one slot where they are the same bits. It publishes over it
+//! (`cold_traps::publish_over`), and its field rides to the record (`cold_traps::PassColdTraps`).
+//! Such a pass reads its conditions even where nothing in its column condenses, so that the
+//! delivered water and carbon dioxide traps are its own (L2 closed, decision-p14-t54b-f-coldtraps
+//! §2 (d)). A pass that reads no field publishes P14.T51.a's, with why (`cold_traps::NoColdTraps`).
 
 use super::{
     Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, PublishedState, RunawayDeck,
@@ -63,9 +62,7 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
-use crate::planetary::derive::photometry::area_mix::{
-    self, AreaMixWeathering, HostShade, LidWeathering, RayleighFloorRules, Regolith,
-};
+use crate::planetary::derive::photometry::area_mix::{self, HostShade, LidWeathering, Regolith};
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
     is_collisional, qualifies_by,
@@ -87,7 +84,6 @@ use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, MetresPerSecondSquared, WattsPerSquareMetre,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(doc)]
 use super::atmosphere_under;
@@ -177,8 +173,8 @@ pub(crate) enum PassClimate<'a> {
 ///   bulk's crust listed ([`CrustWater::Unlisted`]: the area mix reads it as the regolith). A
 ///   column with nothing that condenses reads no climate there (lever (p), L2): its partition is
 ///   solved over the mean's isothermal span, which no part of it reads, and nothing of the cover
-///   is read; but not, under the cold traps' batch, a pass that can qualify for them, which reads
-///   its conditions all the same (P14.T54.b.f).
+///   is read; but not a pass that can qualify for the cold traps, which reads its conditions all
+///   the same (P14.T54.b.f).
 /// - **The pass's lid** is its crust's basis's at the pass's climate ([`spun_lid`]): its regolith
 ///   is that lid's row.
 ///
@@ -199,11 +195,11 @@ pub(crate) struct SpunClimate<'a> {
     /// body with no crust, whose passes take no lid.
     pub(crate) basis: Option<CrustBasis>,
     /// What its passes' maturity reads beyond each pass, once a body before them (P14.T54.b.e;
-    /// [`PassWeathering::in_force`]), or why it takes none.
+    /// [`PassWeathering`]), or why it takes none.
     pub(crate) weathering: Result<PassWeathering<'a>, NoMaturity>,
     /// What its passes' cold traps read beyond each pass, once a derivation before them
-    /// (P14.T54.b.f): the derivation's sky and its one field slot, or why they read none (the
-    /// record's hold, or no seasonal orbit).
+    /// (P14.T54.b.f): the derivation's sky and its one field slot, or why they read none (no
+    /// seasonal orbit).
     pub(crate) cold_traps: Result<SpunColdTraps<'a>, NoColdTraps>,
 }
 
@@ -240,8 +236,6 @@ pub(crate) struct WeatheringCase {
 /// labelled and counted (the weathered area mix's census).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum NoMaturity {
-    /// The weathered area mix's hold, [`AreaMixWeathering::Held`]: nothing of it is computed.
-    Held,
     /// The passes' stand-in, with no rotation law, or a pass whose area mix reads no regolith (a
     /// gas envelope, a magma ocean, a body of no mass or radius).
     NoRegolith,
@@ -258,16 +252,6 @@ pub(crate) enum NoMaturity {
 }
 
 impl NoMaturity {
-    /// Why a pass whose area mix reads no regolith takes no maturity: [`NoMaturity::NoRegolith`],
-    /// or under the hold [`NoMaturity::Held`], as every pass's is there.
-    #[must_use]
-    fn no_regolith() -> Self {
-        match AreaMixWeathering::in_force() {
-            AreaMixWeathering::Held => Self::Held,
-            AreaMixWeathering::Weathered => Self::NoRegolith,
-        }
-    }
-
     /// The label a reader states.
     #[cfg_attr(
         not(test),
@@ -279,7 +263,6 @@ impl NoMaturity {
     #[must_use]
     pub(crate) const fn label(self) -> &'static str {
         match self {
-            Self::Held => "the weathered area mix is held",
             Self::NoRegolith => {
                 "no regolith in the area mix (the passes' stand-in, a gas envelope, a \
                  magma ocean)"
@@ -311,24 +294,6 @@ pub(crate) struct PassWeathering<'a> {
     /// Its wet epoch at a pass, read only where an oxidised deposit's other conditions hold
     /// ([`oxidisable`]).
     pub(crate) wet_epoch: &'a WetEpochOf<'a>,
-}
-
-impl PassWeathering<'_> {
-    /// What the passes' maturity reads under the weathered area mix's rules in force: `of()` under
-    /// [`AreaMixWeathering::Weathered`], and nothing computed under [`AreaMixWeathering::Held`]
-    /// ([`NoMaturity::Held`]). The one place the passes read the hold.
-    ///
-    /// # Errors
-    ///
-    /// [`NoMaturity::Held`] under the hold, and `of`'s error otherwise.
-    pub(crate) fn in_force(
-        of: impl FnOnce() -> Result<Self, NoMaturity>,
-    ) -> Result<Self, NoMaturity> {
-        match AreaMixWeathering::in_force() {
-            AreaMixWeathering::Held => Err(NoMaturity::Held),
-            AreaMixWeathering::Weathered => of(),
-        }
-    }
 }
 
 /// What a pass's maturity gave (P14.T54.b.e), which the published pass's carries to the record
@@ -689,9 +654,9 @@ impl SpunPartition {
 /// ([`spun_conditions`]), and the partition and its cover are [`partition_over`]'s. A column with
 /// nothing that condenses is solved over the mean's isothermal span instead, which its partition
 /// does not read, and no part of its cover is read: it publishes nothing, and reads no
-/// conditions (L2). Under the cold traps' batch a pass that can qualify for them
-/// ([`can_take_cold_traps`]) is not: it reads its conditions, so that its delivered water and
-/// carbon dioxide traps are published by it (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (d)).
+/// conditions (L2). A pass that can qualify for the cold traps ([`can_take_cold_traps`]) is not:
+/// it reads its conditions, so that its delivered water and carbon dioxide traps are published by
+/// it (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (d)).
 #[must_use]
 fn spun_partition(
     air: &Atmosphere,
@@ -744,10 +709,9 @@ fn spun_partition(
 
 /// Whether a pass of the atmosphere `air` under its body's own climate `spun`, of surface gravity
 /// `gravity`, can qualify for the cold traps before it reads its conditions (P14.T54.b.f;
-/// decision-p14-t54b-f-coldtraps §2 (d)): the cold traps' batch with a sky
-/// ([`SpunClimate::cold_traps`]), a spin that turns under its seasonal host (the conditions'
-/// zonal profile, [`rotates`]), the airless state and an air that is not collisional. False under
-/// the hold, so that L2 stands there to the bit.
+/// decision-p14-t54b-f-coldtraps §2 (d)): a sky ([`SpunClimate::cold_traps`]), a spin that turns
+/// under its seasonal host (the conditions' zonal profile, [`rotates`]), the airless state and an
+/// air that is not collisional.
 #[must_use]
 fn can_take_cold_traps(
     air: &Atmosphere,
@@ -764,7 +728,7 @@ fn can_take_cold_traps(
 /// it publishes the partition `pending`, whose bare regolith is `regolith` under the light `shade`
 /// (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2): the field of its own inputs, from the
 /// derivation's slot ([`FieldSlot::traps`]) where it qualifies, its context holds figures and its
-/// cold traps are under the batch with a sky; otherwise why it reads none.
+/// cold traps have a sky; otherwise why it reads none.
 ///
 /// The inputs are the derivation's sky, the context's heat flow, crater contract and crust (its
 /// ground's), the regolith's Bond albedo in the airless state about the hosts' bands (the one
@@ -800,7 +764,7 @@ fn pass_cold_traps(
 }
 
 /// Why a pass over the surface `surface` that reads no partition reads no cold-trap field, `why`:
-/// a climate given's, or the hold's and no sky's where its spun climate's cold traps read none.
+/// a climate given's, or no sky's where its spun climate's cold traps read none.
 #[must_use]
 fn no_cold_traps(surface: &PassSurface<'_>, why: NoColdTraps) -> NoColdTraps {
     match surface.climate {
@@ -889,8 +853,8 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 ///   cloud's albedo ([`area_mix::under_cloud`]), a runaway's Venus's deck or, solved without it,
 ///   the water cloud's (the surface's [`deck`](PassSurface::deck), P14.T53.b part 1 (b)), which
 ///   the atmosphere then publishes ([`Atmosphere::runaway_deck`]: kept for every other state);
-/// - and every state but a gas envelope floored at its air's own Rayleigh layer's, from
-///   [`RAYLEIGH_FLOOR_VERSION`](area_mix::RAYLEIGH_FLOOR_VERSION) (P14.T24.h.a; [`floored`]).
+/// - and every state but a gas envelope floored at its air's own Rayleigh layer's, from version 24
+///   (P14.T24.h.a; [`floored`]).
 ///
 /// The atmosphere also carries whether the condensates the pass published list liquid water,
 /// which P14.T53.b part 1 (c)'s test reads ([`solved_as_a_hothouse`]): none for a gas envelope
@@ -925,7 +889,7 @@ pub(super) fn area_mixed(
             cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
             lid: None,
             liquid_water: false,
-            maturity: Err(NoMaturity::no_regolith()),
+            maturity: Err(NoMaturity::NoRegolith),
             cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
         },
         SurfaceState::MagmaOcean => {
@@ -938,7 +902,7 @@ pub(super) fn area_mixed(
                 cloud_fraction: 0.0,
                 lid,
                 liquid_water: false,
-                maturity: Err(NoMaturity::no_regolith()),
+                maturity: Err(NoMaturity::NoRegolith),
                 cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
             }
         }
@@ -987,72 +951,10 @@ struct SurfaceMix {
     cold_traps: PassTraps,
 }
 
-/// The generator version from which an airless body's mean surface temperature is at least its
-/// night floor at its heat flow ([`airless_mean`]): 24, the 23 → 24 batch's bump, P14.T54.b
-/// (P14.T24.i, before the serve gate; decision-bump-plan-after-22, "Version-24 lanes after 23",
-/// V3.3).
-///
-/// Below it [`UnlitMeanRules::in_force`] is [`UnlitMeanRules::Held`], so that every airless mean
-/// is its equilibrium temperature bit for bit. P14.T54.b deletes this hold, [`UnlitMeanRules`]
-/// with its `Held` arm and the tests' switch, and its tripwire
-/// (`the_unlit_mean_is_held_only_until_the_24_bump`).
-pub(crate) const UNLIT_MEAN_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether an airless body's mean surface temperature is floored at its night floor (the hold,
-/// [`UNLIT_MEAN_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum UnlitMeanRules {
-    /// Versions 23's and before: an airless mean is its equilibrium temperature, 0 K unlit.
-    Held,
-    /// The 23 → 24 batch's: the larger of the equilibrium temperature and the night floor.
-    Floored,
-}
-
-impl UnlitMeanRules {
-    /// The rules this generator version gives: the floor from [`UNLIT_MEAN_VERSION`], none below
-    /// it; in the tests, the rules a test's switch sets on its thread ([`with_unlit_mean`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = UNLIT_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= UNLIT_MEAN_VERSION {
-            Self::Floored
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The unlit mean's rules a test sets on its thread, `None` for the version's.
-    static UNLIT_RULES: core::cell::Cell<Option<UnlitMeanRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the unlit mean's rules `rules` on this thread, for the tests to reach 24's
-/// airless means ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. P14.T54.b deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_unlit_mean<R>(rules: UnlitMeanRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<UnlitMeanRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            UNLIT_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(UNLIT_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
 /// The mean surface temperature of an airless body of equilibrium temperature `equilibrium` over
 /// the surface `surface` (P14.T24.i): the larger of `equilibrium` and the night floor at the heat
 /// flow of the context the pass reads, (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼
-/// ([`night_floor`](crate::planetary::hooks::surface::night_floor)), where the floor's rules are in
-/// force ([`UnlitMeanRules`], held at 24), and `equilibrium` otherwise.
+/// ([`night_floor`](crate::planetary::hooks::surface::night_floor)), from generator version 24.
 ///
 /// A record with no host light publishes `T_eq` = 0 K, under its own night floor of 12–20 K, and
 /// `for_body` refuses it (P14.T54.a's labelled refusals); the floor gives it the mean its
@@ -1061,8 +963,8 @@ pub(crate) fn with_unlit_mean<R>(rules: UnlitMeanRules, run: impl FnOnce() -> R)
 /// so its floor is the cosmic background's. The flux sum (`T_eq`⁴ + `T_floor`⁴)^¼ for lit bodies is a
 /// later refinement, since it moves every airless body (recorded).
 ///
-/// It is the base temperature `T_base` of every body with a surface, on both paths of
-/// `state_and_greenhouse` (P14.T24.i's follow-up, decision-t24i-airless-state D1.3): the
+/// It is the base temperature `T_base` of every body with a surface, in `state_and_greenhouse`
+/// (P14.T24.i's follow-up, decision-t24i-airless-state D1.3): the
 /// greenhouse's temperature argument, so that its steps start at it and its grey surface is
 /// `T_base` (1 + ¾τ)^¼; the 100 Pa test reads that greenhouse's partial pressures and an airless
 /// body publishes them at it; and the ice-held stand-in reads it. The floor is every point's lower
@@ -1075,9 +977,6 @@ pub(crate) fn with_unlit_mean<R>(rules: UnlitMeanRules, run: impl FnOnce() -> R)
 /// read it.
 #[must_use]
 pub(super) fn airless_mean(equilibrium: Kelvin, surface: &PassSurface<'_>) -> Kelvin {
-    if UnlitMeanRules::in_force() == UnlitMeanRules::Held {
-        return equilibrium;
-    }
     let floor = night_floor(heat_flow(surface));
     if floor.value() > equilibrium.value() {
         floor
@@ -1108,12 +1007,11 @@ fn surface_gravity(inputs: &AtmosphereInputs) -> Option<MetresPerSecondSquared> 
 
 /// The Bond albedo `albedo` of the atmosphere `air` of the body `inputs` describe, under the light
 /// `shade`, floored at its air's own Rayleigh layer's (P14.T24.h.a; [`area_mix::rayleigh_floor`]):
-/// the larger of the two where the floor's rules are in force ([`RayleighFloorRules`], held at 24),
-/// on every body with a surface, a gas envelope's class albedo excepted, and `albedo` itself
-/// otherwise, or where it is not a number (which [`bond_albedo`] labels) or the body has no mass
-/// or radius. The floor binds only where an air is darker than its own Rayleigh layer: a max of
-/// continuous functions, continuous in the passes' map, and `albedo` to the bit wherever it is at
-/// least the floor.
+/// the larger of the two on every body with a surface, a gas envelope's class albedo excepted, and
+/// `albedo` itself otherwise, or where it is not a number (which [`bond_albedo`] labels) or the
+/// body has no mass or radius. The floor binds only where an air is darker than its own Rayleigh
+/// layer: a max of continuous functions, continuous in the passes' map, and `albedo` to the bit
+/// wherever it is at least the floor.
 #[must_use]
 fn floored(albedo: f64, air: &Atmosphere, inputs: &AtmosphereInputs, shade: &HostShade) -> f64 {
     let surface = match air.state {
@@ -1126,7 +1024,7 @@ fn floored(albedo: f64, air: &Atmosphere, inputs: &AtmosphereInputs, shade: &Hos
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => true,
     };
-    if !surface || albedo.is_nan() || RayleighFloorRules::in_force() == RayleighFloorRules::Held {
+    if !surface || albedo.is_nan() {
         return albedo;
     }
     let Some(gravity) = surface_gravity(inputs) else {
@@ -1203,8 +1101,8 @@ pub(crate) fn pass_regolith(
 ///   state, [`published_surface_pressure`]) and mean surface temperature, its lid's row and its
 ///   air's partial pressures, the record's conditions' and gases' to the bit.
 ///
-/// It reads no condensate and no water. `Err` with why where it takes none: the hold, the
-/// record's case, no figures in the context it reads (C₀), no lid, or the parts refused.
+/// It reads no condensate and no water. `Err` with why where it takes none: the record's case, no
+/// figures in the context it reads (C₀), no lid, or the parts refused.
 fn pass_maturity<'a>(
     air: &Atmosphere,
     spun: &SpunClimate<'a>,
@@ -1334,7 +1232,7 @@ fn surface_and_cloud(
             cloud_fraction: 0.0,
             lid: None,
             liquid_water: false,
-            maturity: Err(NoMaturity::no_regolith()),
+            maturity: Err(NoMaturity::NoRegolith),
             cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
         };
     };
@@ -1343,7 +1241,7 @@ fn surface_and_cloud(
             PassClimate::Given(climate_of) => (
                 given_partition(air, inputs, surface, (climate_of, gravity)),
                 None,
-                (Vec::new(), Err(NoMaturity::no_regolith())),
+                (Vec::new(), Err(NoMaturity::NoRegolith)),
                 pass_regolith(surface.regolith, inputs.material, None),
                 Err(NoColdTraps::ClimateGiven),
             ),

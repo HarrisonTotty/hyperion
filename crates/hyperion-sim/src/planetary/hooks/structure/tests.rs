@@ -351,38 +351,18 @@ fn a_skin_as_warm_as_the_ground_leaves_an_isothermal_air() {
     assert_same_bits(profile.skin_temperature().value(), 80.0);
 }
 
-/// P14.T54.b's re-check of T24.e's 300–370 K Venus at 1 bar on P14.T57.a's Venus: made by
-/// P14.T54.b.a under the air's switch, which states it (`system::air`'s
-/// `the_table_s_earth_venus_and_titan_carry_their_structures_under_the_switch`: 356.4 K), and here
-/// on the table's structure (`the_table_s_tropopauses_skins_and_lapse_factors_fall_in_their_ranges`).
-/// This tripwire goes at P14.T54.b.l, the 23 → 24 bump, with the air's hold
-/// (decision-p14-t54b-open §1.3).
-#[test]
-fn the_venus_test_is_rechecked_at_the_23_to_24_bump() {
-    assert!(
-        crate::GENERATOR_VERSION.get() < 24,
-        "P14.T54.b.l: T24.e's 300–370 K Venus at 1 bar is re-checked on T57.a's Venus under the \
-         air's switch (P14.T54.b.a); delete this tripwire with the air's hold"
-    );
-}
-
-/// P14.T53.a: T24.e's Venus at 1 bar under the escape's batch, within T24.e's 300–370 K and stated
-/// beside the hold's, for P14.T54.b's re-check (`the_venus_test_is_rechecked_at_the_23_to_24_bump`):
-/// the table's median Venus under the broadened carbon dioxide term, about 305–310 K expected,
-/// inside 300–370 K near its floor (decision-bump-plan-after-22, "T53.a's CO₂ form", C3).
+/// P14.T53.a and P14.T54.b.l's re-check: T24.e's Venus at 1 bar, the table's median Venus under the
+/// broadened carbon dioxide term, within T24.e's 300–370 K, about 305–310 K expected, near its
+/// floor (decision-bump-plan-after-22, "T53.a's CO₂ form", C3).
 #[test]
 fn under_the_escape_batch_t24e_s_venus_at_1_bar_is_stated() {
-    use crate::planetary::chem::escape::{EscapeRules, with_rules};
     let at_1_bar =
         |profile: &RadiativeConvective| profile.temperature_at(Pascals::new(1.0e5)).value();
-    let (_, _, held) = table_structure("Venus");
-    let (venus, _, batch) = with_rules(EscapeRules::Batch, || table_structure("Venus"));
+    let (venus, _, batch) = table_structure("Venus");
     eprintln!(
-        "the table's Venus at 1 bar: {:.3} K under the batch ({:.3} K at its surface), {:.3} K \
-         under the hold",
+        "the table's Venus at 1 bar: {:.3} K ({:.3} K at its surface)",
         at_1_bar(&batch),
         venus.atmosphere().surface_temperature().value(),
-        at_1_bar(&held),
     );
     assert!(
         (300.0..=370.0).contains(&at_1_bar(&batch)),
@@ -716,12 +696,13 @@ fn table_structure(name: &str) -> (DerivedBody, SurfaceConditions, RadiativeConv
 /// The table's Earth, Venus and Titan meet the plan's tests: Earth's tropopause at 0.12–0.25 bar
 /// and 205–220 K, and Titan's below 0.3 bar at 60–75 K, with water's, the dry and methane's α.
 ///
-/// The table's Venus is P14.T57.a's, 696.3 K at 57.84 bar, and meets the plan's 300–370 K at 1
-/// bar: 356.4 K, which the golden pins. That is P14.T54.b's re-check of T24.e's test (plan 14's
-/// "Deviations in P14.T24.e, as built"), which P14.T54.b.a also makes on the record's path under
-/// the air's switch; before T57.a's refit the table's 735 K Venus gave 381.1 K. The measured Venus
-/// meets it too (`the_dry_factor_is_refitted_on_venus_s_measured_state`), and the table's, its
-/// column shallower than the measured one, ends warmer at 1 bar.
+/// The table's Venus is P14.T53.a's median Venus from generator version 24, about 619 K, and meets
+/// the plan's 300–370 K at 1 bar: 307.3 K, which the golden pins. That is P14.T54.b's re-check of
+/// T24.e's test (plan 14's "Deviations in P14.T24.e, as built"), which P14.T54.b.a also makes on
+/// the record's path; at 23, P14.T57.a's 696.3 K Venus at 57.84 bar gave 356.4 K, and before
+/// T57.a's refit the table's 735 K Venus gave 381.1 K. The measured Venus meets it too
+/// (`the_dry_factor_is_refitted_on_venus_s_measured_state`), at 347.7 K, now warmer at 1 bar than
+/// the table's.
 #[test]
 fn the_table_s_tropopauses_skins_and_lapse_factors_fall_in_their_ranges() {
     let (_, _, earth) = table_structure("Earth");
@@ -756,9 +737,10 @@ fn the_table_s_tropopauses_skins_and_lapse_factors_fall_in_their_ranges() {
         None,
     );
     let measured_one_bar = measured.temperature_at(Pascals::new(1.0e5)).value();
+    eprintln!("Venus at 1 bar: {one_bar} K, the measured {measured_one_bar} K");
     assert!(
-        one_bar > measured_one_bar,
-        "Venus at 1 bar: {one_bar} K, the measured {measured_one_bar} K"
+        (300.0..=370.0).contains(&measured_one_bar),
+        "the measured Venus at 1 bar: {measured_one_bar} K"
     );
 
     let (_, _, titan) = table_structure("Titan");
@@ -768,13 +750,15 @@ fn the_table_s_tropopauses_skins_and_lapse_factors_fall_in_their_ranges() {
     let skin = titan.skin_temperature().value();
     assert!((60.0..75.0).contains(&skin), "Titan's skin {skin} K");
 
-    // The table's Mars holds its water at about 200 ppm and takes the dry α.
+    // The table's Mars condenses water. At 23, at about 200 ppm, it took the dry α; from 24, on
+    // P14.T53.a part C's warm branch (0.22 bar at 252.9 K), its water's latent heat passes the
+    // gate and it takes water's.
     let (_, mars_conditions, mars) = table_structure("Mars");
     assert_eq!(
         mars_conditions.climate_regime().unwrap().condensable(),
         Some(row("H2O"))
     );
-    assert_same_bits(mars.lapse_factor(), DRY_LAPSE_FACTOR);
+    assert_same_bits(mars.lapse_factor(), WATER_LAPSE_FACTOR);
 }
 
 /// The skin is 2^(−1/4) `T_eff` (decision-composition §1.12): Earth's, warmed by its 36 K of

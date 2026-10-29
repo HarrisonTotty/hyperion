@@ -2,7 +2,8 @@
 //! decision-p14-t54a-ganymede §C3.2; decision-bump-plan-after-22, "Rulings before T53.a lands"
 //! R1.6 and "p14-gate-24's questions" G2, with main's corrections of 2026-10-22).
 //!
-//! Two arms read a moon's stated or derived bulk, both held at 24 ([`MOON_BULK_VERSION`]):
+//! Two arms read a moon's stated or derived bulk, from generator version 24 (the 23 → 24 bump,
+//! P14.T54.b):
 //!
 //! - **The birthplace arm** (a capture's): a capture formed inside its parent's snow line by
 //!   `MoonBirth::formed`, the rule its crust reads (the Phobos and Deimos rule), is rock, its
@@ -15,8 +16,8 @@
 //! radius stays, its density read as porosity (recorded for P14.T56.g).
 //!
 //! Where the retention arm thins a bulk, its surface is its heated shell's rock lag
-//! ([`shell_lag`], P14.T56.g; decision-p14-t56g), held with the arms: its class and interior keep
-//! the kept ice, its surface material is rock.
+//! ([`shell_lag`], P14.T56.g; decision-p14-t56g), with the arms: its class and interior keep the
+//! kept ice, its surface material is rock.
 
 use crate::math;
 use crate::orbit::KeplerElements;
@@ -26,99 +27,6 @@ use crate::planetary::hooks::figures::cover::UNDER_ICE_MELTING_POINT;
 use crate::planetary::hooks::figures::interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{EarthFluxes, Kelvin, Metres, SolarLuminosities, Years};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which a moon's bulk reads its birthplace and its ice's history
-/// (P14.T56.f): 24, the 23 → 24 batch's bump, P14.T54.b, before the serve gate
-/// (decision-bump-plan-after-22 §6).
-///
-/// Below it [`MoonBulkRules::in_force`] is [`MoonBulkRules::Held`], so that every moon's bulk is
-/// 23's bit for bit, and every surface its bulk's. P14.T54.b deletes this hold, [`MoonBulkRules`]
-/// with its `Held` and `BulkOnly` arms and the tests' switch, and its tripwire
-/// (`the_moon_bulk_is_held_only_until_the_24_bump`); P14.T56.g's lag and its carriers stay.
-pub(crate) const MOON_BULK_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether a moon's bulk reads its birthplace and its ice's history, and a hot ice bulk's surface
-/// its heated shell's rock lag (the hold, [`MOON_BULK_VERSION`]).
-///
-/// The generator reads it through [`thins`](Self::thins) and [`lags`](Self::lags) alone, so that
-/// no match outside them needs the tests' arm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum MoonBulkRules {
-    /// Versions 23's and before: a capture's bulk holds the ice its density holds, wherever it
-    /// formed, no bulk loses its ice, and every surface is its bulk's.
-    Held,
-    /// P14.T56.f's arms alone, the birthplace arm and the retention arm, with no lag: the tests'
-    /// arm, so that the bless note attributes each move by subtask (decision-p14-t56g §2).
-    #[cfg(test)]
-    BulkOnly,
-    /// The 23 → 24 batch's: P14.T56.f's arms, and P14.T56.g's lag where the retention arm thins a
-    /// bulk ([`shell_lag`]) and on a hot icy belt member.
-    Batch,
-}
-
-impl MoonBulkRules {
-    /// The rules this generator version gives: the batch's from [`MOON_BULK_VERSION`], 23's below
-    /// it; in the tests, the rules a test's switch sets on its thread ([`with_moon_bulk`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = MOON_BULK_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= MOON_BULK_VERSION {
-            Self::Batch
-        } else {
-            Self::Held
-        }
-    }
-
-    /// Whether a moon's bulk reads its birthplace and its ice's history (P14.T56.f's arms).
-    #[must_use]
-    pub(crate) const fn thins(self) -> bool {
-        match self {
-            Self::Held => false,
-            #[cfg(test)]
-            Self::BulkOnly => true,
-            Self::Batch => true,
-        }
-    }
-
-    /// Whether a bulk the retention arm thins, and a hot icy belt member, show their heated
-    /// shell's rock lag (P14.T56.g).
-    #[must_use]
-    pub(crate) const fn lags(self) -> bool {
-        match self {
-            Self::Held => false,
-            #[cfg(test)]
-            Self::BulkOnly => false,
-            Self::Batch => true,
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The moon bulk's rules a test sets on its thread, `None` for the version's.
-    static MOON_BULK_RULES: core::cell::Cell<Option<MoonBulkRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the moon bulk's rules `rules` on this thread, for the tests to reach 24's
-/// bulks ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// P14.T54.b deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_moon_bulk<R>(rules: MoonBulkRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<MoonBulkRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            MOON_BULK_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(MOON_BULK_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The temperature above which a bulk loses its ice as fast as heat reaches it: ice's melting
 /// point, [`UNDER_ICE_MELTING_POINT`]'s 273.15 K (0 °C; ice Ih melts at 273.152 519 K under
@@ -265,12 +173,12 @@ fn thinned(water: f64, radius: Metres, hot_for: Years) -> bool {
 
 /// The surface lag of a bulk of water fraction `water` and radius `radius` after `hot_for` above
 /// [`HOT_ICE_LIMIT`] (P14.T56.g; decision-p14-t56g §1, §7.2): the rock lag its heated shell left
-/// wherever the retention arm thins it ([`kept_water`]), a bulk made `Rocky` included, under the
-/// batch's rules ([`MoonBulkRules::lags`]); bare otherwise. The arm's own verdict, carried to the
-/// moon's derivation and record, not recomputed from a temperature.
+/// wherever the retention arm thins it ([`kept_water`]), a bulk made `Rocky` included; bare
+/// otherwise. The arm's own verdict, carried to the moon's derivation and record, not recomputed
+/// from a temperature.
 #[must_use]
 pub(crate) fn shell_lag(water: f64, radius: Metres, hot_for: Years) -> SurfaceLag {
-    if thinned(water, radius, hot_for) && MoonBulkRules::in_force().lags() {
+    if thinned(water, radius, hot_for) {
         SurfaceLag::Lagged
     } else {
         SurfaceLag::Bare
@@ -332,43 +240,5 @@ mod tests {
         // At 0.9 of today's light, still above the limit then.
         assert_eq!(evolved(0.9).hot_for(Kelvin::new(889.0)), age);
         assert_eq!(evolved(0.9).hot_for(Kelvin::new(200.0)), Years::new(0.0));
-    }
-
-    /// The moon bulk is held until P14.T54.b's bump: below it every moon's bulk is 23's, and the
-    /// tests' switch reaches 24's ahead of it.
-    #[test]
-    fn the_moon_bulk_is_held_only_until_the_24_bump() {
-        assert!(
-            GENERATOR_VERSION < MOON_BULK_VERSION,
-            "the 23 → 24 bump (P14.T54.b) puts P14.T56.f and P14.T56.g on the record: a capture \
-             formed inside its parent's snow line is rock, every moon's bulk keeps only the ice \
-             that survives its time above the melting point, and a bulk so thinned, or a hot icy \
-             belt member, shows its heated shell's rock lag. Delete `MOON_BULK_VERSION`, \
-             `MoonBulkRules` with its `Held` and `BulkOnly` arms and its `thins` and `lags` reads \
-             (`PlanetarySystem::moon_ice`'s `Held` return, `shell_lag`'s rules, which then always \
-             lag, and `icy_member_given_bulk`'s, which always asks `GivenLag::AboveMelting`), \
-             `with_moon_bulk` and its thread's rules, and this test. The lag's carriers stay, \
-             since they are the rule: `SurfaceLag` on `MoonBulk::Stated` and `MoonBulk::Kept`, \
-             `GivenBulk`, `AirBulk`, `PassBulk`, `DerivedBody`, `SurfaceSky` and \
-             `CrustBasisInputs`, and `surface_material`"
-        );
-        assert_eq!(MoonBulkRules::in_force(), MoonBulkRules::Held);
-        assert_eq!(
-            with_moon_bulk(MoonBulkRules::Batch, MoonBulkRules::in_force),
-            MoonBulkRules::Batch
-        );
-        assert_eq!(
-            with_moon_bulk(MoonBulkRules::BulkOnly, MoonBulkRules::in_force),
-            MoonBulkRules::BulkOnly
-        );
-        assert_eq!(MoonBulkRules::in_force(), MoonBulkRules::Held);
-        // T56.f's arms thin under its own arm and the batch, and only the batch lags.
-        let rules = [
-            MoonBulkRules::Held,
-            MoonBulkRules::BulkOnly,
-            MoonBulkRules::Batch,
-        ];
-        assert_eq!(rules.map(MoonBulkRules::thins), [false, true, true]);
-        assert_eq!(rules.map(MoonBulkRules::lags), [false, false, true]);
     }
 }

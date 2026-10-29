@@ -44,7 +44,6 @@
 //! by temperature band (312–337 ns over 273–310 K; R09.T16.a's probe, test profile, 2026-10-23),
 //! against 25–30 ns for the held curve before `032a8c5f`.
 
-use super::condensed::ReadDensitiesRules;
 use super::phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};
 use super::{Source, SubstanceId, ids};
 use crate::math;
@@ -594,10 +593,6 @@ pub struct SolidPhase {
     pub(super) name: &'static str,
     pub(super) start: Kelvin,
     pub(super) density: Option<SolidDensity>,
-    /// Whether its density is one P14.T49.n read, which [`density`](Self::density) holds until
-    /// [`READ_DENSITIES_VERSION`](super::condensed::READ_DENSITIES_VERSION). P14.T54.b deletes the
-    /// flag with the hold.
-    pub(super) held: bool,
 }
 
 impl SolidPhase {
@@ -614,14 +609,8 @@ impl SolidPhase {
     }
 
     /// How its density is given, or `None` where no density was read.
-    ///
-    /// `None` too below generator version 24 (`READ_DENSITIES_VERSION`) for a density P14.T49.n
-    /// read (fcc argon's), which 23 does not model.
     #[must_use]
-    pub fn density(&self) -> Option<&SolidDensity> {
-        if self.held && ReadDensitiesRules::in_force() == ReadDensitiesRules::Held {
-            return None;
-        }
+    pub const fn density(&self) -> Option<&SolidDensity> {
         self.density.as_ref()
     }
 }
@@ -2031,17 +2020,12 @@ mod tests {
         // Sears and Klug's 50 K cell, and an interpolation.
         assert!((at("Xe", 50.0).unwrap() - 3_719.98).abs() < 1e-9);
         assert!((at("Xe", 52.5).unwrap() - f64::midpoint(3_719.98, 3_707.88)).abs() < 1e-9);
-        // Not modelled at 23: argon's, which P14.T49.n reads and the registry holds until 24, and
-        // hydrogen sulphide's, ethane's, β-oxygen's and β-carbon monoxide's, not read.
-        for (key, t) in [
-            ("Ar", 50.0),
-            ("H2S", 150.0),
-            ("C2H6", 60.0),
-            ("O2", 30.0),
-            ("CO", 65.0),
-        ] {
-            assert_eq!(at(key, t), None, "{key} at {t} K");
+        // Read from 24 (P14.T49.n; not modelled at 23): argon's (fcc), hydrogen sulphide's,
+        // ethane's and β-oxygen's. β-carbon monoxide's is not read.
+        for (key, t) in [("Ar", 50.0), ("H2S", 150.0), ("C2H6", 60.0), ("O2", 30.0)] {
+            assert!(at(key, t).is_some_and(|rho| rho > 0.0), "{key} at {t} K");
         }
+        assert_eq!(at("CO", 65.0), None, "β-CO at 65 K");
         assert_eq!(at("SO2", 250.0), None, "above the triple point");
         assert_eq!(at("SO2", -1.0), None);
     }

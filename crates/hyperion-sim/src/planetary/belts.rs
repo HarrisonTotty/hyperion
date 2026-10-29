@@ -164,7 +164,7 @@ use crate::units::{
 pub mod population;
 mod sizes;
 
-use population::{AxisSpread, EccentricityLaw, PopulationParts, PopulationRules};
+use population::{AxisSpread, EccentricityLaw, PopulationParts};
 pub use population::{BeltPopulation, PopulationLaw};
 pub use sizes::{
     GROWTH_SPREAD, ICY_GROWTH_CAP, LARGEST_MEMBER_SHARE, MEMBER_CANDIDATES, MEMBER_MASS_SHARE_CAP,
@@ -471,14 +471,11 @@ impl BeltComponent {
     }
 
     /// The mean eccentricity of its population, as the record holds it: its laws' quadrature mean
-    /// ([`PopulationLaw::mean_eccentricity`]) from P14.T48.g's bump (`BELT_POPULATION_VERSION`),
-    /// and its part's untruncated σ√(π ÷ 2) ([`BeltPart::mean_eccentricity`]) below it.
+    /// ([`PopulationLaw::mean_eccentricity`]) from P14.T48.g's bump at generator version 24; its
+    /// part's untruncated σ√(π ÷ 2) ([`BeltPart::mean_eccentricity`]) to version 23.
     #[must_use]
     pub fn mean_eccentricity(&self) -> f64 {
-        match PopulationRules::in_force() {
-            PopulationRules::Held => self.part.mean_eccentricity(),
-            PopulationRules::Laws => self.population.mean_eccentricity(),
-        }
+        self.population.mean_eccentricity()
     }
 
     /// The mean inclination of its population to its host's plane, as the record holds it: its

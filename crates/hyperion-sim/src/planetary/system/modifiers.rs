@@ -1,9 +1,7 @@
 //! The surface's modifiers on the record (plan 14, P14.T54.b.c, the 23 → 24 batch's wiring):
 //! P14.T51.d's space-weathering rate and maturity, organic cover, resurfacing rate and an Io's
-//! volcanic deposits, with P14.T51.j's oxidised surface, held off the record until the bump behind
-//! the air's sections' hold ([`AirRules`], `AIR_SECTIONS_VERSION`; decision-p14-t54b-open §1.2
-//! item 6), since they too are a member P14.T54.b first puts on the record and move no published
-//! value.
+//! volcanic deposits, with P14.T51.j's oxidised surface, on the record from generator version 24
+//! (the 23 → 24 bump, P14.T54.b.l; decision-p14-t54b-open §1.2 item 6), with the air's sections.
 //!
 //! The record's surface section (`published_surface`) builds them here ([`record_modifiers`]) from
 //! what it publishes and what its frame reads of the system: the host star, the zone's brightest at
@@ -14,17 +12,14 @@
 //! their surface age read; the mantle's sulphur of the body's element inventory; the published
 //! condensates; the crust's lid; the air's partial pressures; and the water's history, from the
 //! conditions' liquid-water flag and the figures' wet epoch. Every reach of the record into
-//! `hooks::modifiers` is in this file, behind the hold, so that the held arm computes nothing (the
-//! source scan's `HELD` list, `modifiers_nothing_on_the_record_reads_the_modifiers_yet`,
-//! decision-p14-t54b-open §3.3).
+//! `hooks::modifiers` is in this file.
 //!
-//! **The weathered area mix** (P14.T54.b.e, behind its own hold, [`AreaMixWeathering`]): a body's
-//! passes take their maturity from the same parts of its system ([`weathering_case`], once a body
-//! before them), and from the context each reads; the published pass carries its context's field,
-//! surface age, resurfacing time and heat flow and its water to the record
-//! ([`PassWeathered`]), whose modifiers read them in place of the figures' (K(P*)), so that they
-//! are that pass's to the bit (rule (f)). Under [`AreaMixWeathering::Held`] no pass carries any,
-//! and the record reads its figures' as before.
+//! **The weathered area mix** (P14.T54.b.e): a body's passes take their maturity from the same
+//! parts of its system ([`weathering_case`], once a body before them), and from the context each
+//! reads; the published pass carries its context's field, surface age, resurfacing time and heat
+//! flow and its water to the record ([`PassWeathered`]), whose modifiers read them in place of the
+//! figures' (K(P*)), so that they are that pass's to the bit (rule (f)). Where the published pass
+//! carries none, the record reads its figures'.
 
 use crate::orbit::KeplerElements;
 use crate::planetary::chem::partition::Condensates;
@@ -33,7 +28,6 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::atmosphere::{
     NoMaturity, PartialPressures, PassWeathered, WeatheringCase,
 };
-use crate::planetary::derive::photometry::area_mix::AreaMixWeathering;
 use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::figures::surface_age::resurfacing_time;
 use crate::planetary::hooks::figures::{FieldBody, GlobalFigures, MagneticField};
@@ -44,8 +38,6 @@ use crate::planetary::hooks::modifiers::{
 use crate::planetary::hooks::surface::SurfaceConditions;
 use crate::planetary::record::{BodyRecord, Modelled, Section};
 use crate::units::{Kilograms, Metres, MetresPerSecondSquared, SolarRadii, Years};
-
-use super::air::AirRules;
 
 /// The star a body's modifiers read (P14.T51.d's `ModifierHost`): the most luminous of the stars
 /// its primary's zone orbits at the time, the first of equals in the zone's order, the star
@@ -94,9 +86,8 @@ pub(super) struct ModifierCase {
     pub(super) star: Option<ModifierStar>,
     /// What it orbits.
     pub(super) primary: RecordPrimary,
-    /// Its mantle's sulphur, P14.T50.a's element inventory's, which an Io's deposits read; `None`
-    /// under [`AirRules::Held`], which computes nothing of the modifiers.
-    pub(super) mantle_sulphur: Option<Kilograms>,
+    /// Its mantle's sulphur, P14.T50.a's element inventory's, which an Io's deposits read.
+    pub(super) mantle_sulphur: Kilograms,
 }
 
 /// What a body's record's modifiers read of its published surface and its orbit then.
@@ -120,63 +111,38 @@ pub(super) struct ModifierSurface<'a> {
     pub(super) gases: &'a PartialPressures,
     /// What the published pass's maturity carries (P14.T54.b.e; rule (f)), its context's field,
     /// surface age, resurfacing time and heat flow and its water, which the modifiers read in
-    /// place of the figures'; `None` where it took none, and under the weathered area mix's hold.
+    /// place of the figures'; `None` where it took none.
     pub(super) weathered: Option<&'a PassWeathered>,
 }
 
-/// The planet's magnetosphere its moons' records read, from its record `record` under the rules
-/// `rules`: its bulk section's radius, with its surface figures' field for a solid class, and
-/// [`MagneticField::Strong`] for a gas envelope's (`interior::magnetic_field`'s first clause, which
-/// reads the class alone: a giant's metallic hydrogen or an ice giant's ionic water convecting).
+/// The planet's magnetosphere its moons' records and passes read (P14.T54.b.c, P14.T54.b.e), from
+/// its record `record`: its bulk section's radius, with its surface figures' field for a solid
+/// class, and [`MagneticField::Strong`] for a gas envelope's (`interior::magnetic_field`'s first
+/// clause, which reads the class alone: a giant's metallic hydrogen or an ice giant's ionic water
+/// convecting).
 ///
-/// `None` under [`AirRules::Held`], which computes nothing, and where the record gives neither: a
-/// planet with no bulk section, or of a solid class whose surface section is not modelled or not
-/// applicable. Its moons' passes read it too under the weathered area mix (P14.T54.b.e), which
-/// asks for it under [`AirRules::Batch`] ([`planet_field_rules`]).
+/// `None` where the record gives neither: a planet with no bulk section, or of a solid class whose
+/// surface section is not modelled or not applicable.
 #[must_use]
-pub(super) fn planet_field(rules: AirRules, record: &BodyRecord) -> Option<PlanetField> {
-    match rules {
-        AirRules::Held => None,
-        AirRules::Batch => {
-            let Section::Ok(bulk) = record.bulk() else {
-                return None;
-            };
-            let field = match bulk.class() {
-                PlanetClass::SubNeptune | PlanetClass::IceGiant | PlanetClass::GasGiant => {
-                    MagneticField::Strong
-                }
-                PlanetClass::Rocky | PlanetClass::Icy => match record.surface() {
-                    Section::Ok(surface) => surface.figures().magnetic_field(),
-                    Section::NotResolved | Section::NotModelled | Section::NotApplicable => {
-                        return None;
-                    }
-                },
-            };
-            Some(PlanetField {
-                radius: Metres::from(bulk.radius()),
-                field,
-            })
+pub(super) fn planet_field(record: &BodyRecord) -> Option<PlanetField> {
+    let Section::Ok(bulk) = record.bulk() else {
+        return None;
+    };
+    let field = match bulk.class() {
+        PlanetClass::SubNeptune | PlanetClass::IceGiant | PlanetClass::GasGiant => {
+            MagneticField::Strong
         }
-    }
-}
-
-/// The rules [`planet_field`] is asked under for a planet whose air's sections are under `rules`:
-/// [`AirRules::Batch`] where the weathered area mix is in force too (P14.T54.b.e), whose moons'
-/// passes read their planet's magnetosphere, and `rules` otherwise.
-#[must_use]
-pub(super) fn planet_field_rules(rules: AirRules) -> AirRules {
-    match (rules, AreaMixWeathering::in_force()) {
-        (AirRules::Held, AreaMixWeathering::Held) => AirRules::Held,
-        (AirRules::Batch, _) | (AirRules::Held, AreaMixWeathering::Weathered) => AirRules::Batch,
-    }
-}
-
-/// Whether a body's frame computes the star its modifiers read, under its air's sections' rules
-/// `rules`: under [`AirRules::Batch`], whose record's modifiers read it, and under the weathered
-/// area mix (P14.T54.b.e), whose passes do; under both holds nothing of it is computed.
-#[must_use]
-pub(super) fn reads_modifier_star(rules: AirRules) -> bool {
-    planet_field_rules(rules) == AirRules::Batch
+        PlanetClass::Rocky | PlanetClass::Icy => match record.surface() {
+            Section::Ok(surface) => surface.figures().magnetic_field(),
+            Section::NotResolved | Section::NotModelled | Section::NotApplicable => {
+                return None;
+            }
+        },
+    };
+    Some(PlanetField {
+        radius: Metres::from(bulk.radius()),
+        field,
+    })
 }
 
 /// What a body's passes' maturity reads of its system, once a body before them (P14.T54.b.e;
@@ -246,12 +212,9 @@ fn primary_of(primary: RecordPrimary) -> Option<Primary> {
     }
 }
 
-/// The record's modifiers of the body `case` describes, whose published surface is `surface`,
-/// under the rules `rules` (P14.T51.d with T51.j, wired by P14.T54.b.c; plan 14's "Deviations in
-/// P14.T51.d, as built" and "Deviations in P14.T51.j, as built").
-///
-/// Under [`AirRules::Held`] they are not modelled, and nothing of them is computed. Under
-/// [`AirRules::Batch`] they are `SurfaceModifiers::derive` over [`modifier_inputs`], and not
+/// The record's modifiers of the body `case` describes, whose published surface is `surface`
+/// (P14.T51.d with T51.j, wired by P14.T54.b.c; plan 14's "Deviations in P14.T51.d, as built" and
+/// "Deviations in P14.T51.j, as built"): `SurfaceModifiers::derive` over [`modifier_inputs`], not
 /// modelled where those are none (no crust on the record, no host star at the time, a moon whose
 /// planet's field its record does not give) or the derivation refuses them: an unlit body's mean
 /// surface temperature of 0 K (`ModifierInput::SurfaceTemperature`), which the record states as its
@@ -259,18 +222,14 @@ fn primary_of(primary: RecordPrimary) -> Option<Primary> {
 /// and print every refusal). A refusal's reason is not carried: the record's member has none.
 #[must_use]
 pub(super) fn record_modifiers(
-    rules: AirRules,
     case: &ModifierCase,
     surface: &ModifierSurface<'_>,
 ) -> Modelled<SurfaceModifiers> {
-    match rules {
-        AirRules::Held => Modelled::NotModelled,
-        // A refusal carries nothing a reader could act on, and the record's member holds no
-        // reason: the surface's modifiers are then not modelled.
-        AirRules::Batch => modifier_inputs(case, surface)
-            .and_then(|inputs| SurfaceModifiers::derive(&inputs).ok())
-            .map_or(Modelled::NotModelled, Modelled::Ok),
-    }
+    // A refusal carries nothing a reader could act on, and the record's member holds no reason:
+    // the surface's modifiers are then not modelled.
+    modifier_inputs(case, surface)
+        .and_then(|inputs| SurfaceModifiers::derive(&inputs).ok())
+        .map_or(Modelled::NotModelled, Modelled::Ok)
 }
 
 /// The modifiers' inputs of the body `case` describes, whose published surface is `surface`, each
@@ -342,7 +301,7 @@ fn modifier_inputs<'a>(
         resurfacing_time: resurfacing,
         heat_flow,
         surface_temperature: conditions.mean_surface_temperature(),
-        mantle_sulphur: case.mantle_sulphur?,
+        mantle_sulphur: case.mantle_sulphur,
         condensates: surface.condensates,
         lid,
         gases: *surface.gases,

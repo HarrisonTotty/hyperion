@@ -55,11 +55,8 @@
 //! science-r09-craters.md F5.6's 0.0586 and 0.408; Öpik's weighting gives 0.0453 and 0.3205 there
 //! (decision-p14-t48g-opik).
 //!
-//! # The hold
-//!
-//! Below `BELT_POPULATION_VERSION` (24) the record's moments and the impactors' excitations are
-//! version 23's bit for bit (`PopulationRules::Held`); the laws are built whatever the version,
-//! and read only under `PopulationRules::Laws`.
+//! The record's moments and the impactors' excitations read the laws from generator version 24
+//! (the 23 → 24 bump, P14.T54.b); to version 23 they were the untruncated widths'.
 
 use core::f64::consts::{PI, SQRT_2};
 use core::fmt;
@@ -69,75 +66,9 @@ use super::{BeltPart, MEMBER_ECCENTRICITY_CAP, widths};
 use crate::math;
 use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS};
 use crate::units::{Metres, Radians};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
-
-/// The generator version from which a belt's recorded moments and its impactors' encounter speeds
-/// follow its population's laws (P14.T48.g): 24, a rider of the 23 → 24 batch (P14.T54.b) that
-/// boards if it lands before P14.T54.b.i's wiring, and takes the next bump, its hold renumbered,
-/// otherwise (decision-bump-plan-after-22).
-///
-/// Below it [`PopulationRules::in_force`] is [`PopulationRules::Held`], so that every belt's
-/// recorded mean eccentricity and inclination and every impact velocity are version 23's bit for
-/// bit. P14.T54.b deletes this hold, [`PopulationRules`] with its `Held` arms (the record's
-/// [`BeltPart`] means, `hooks::figures::belt_excitation` and its cube, and the old
-/// `LUNAR_ENCOUNTER_SPEED`), the tests' switch and its tripwire
-/// (`the_belt_population_is_held_only_until_its_bump`).
-pub(crate) const BELT_POPULATION_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether the belts' moments and encounter speeds follow their populations' laws (the hold,
-/// [`BELT_POPULATION_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum PopulationRules {
-    /// Version 23's: the untruncated laws' σ√(π ÷ 2) on the record, and P14.T48.f's 2σₑ² + 2 sin²
-    /// σᵢ for the impactors with its cube.
-    Held,
-    /// P14.T48.g's: the laws' quadrature means on the record, and Öpik's mean for the impactors.
-    Laws,
-}
-
-impl PopulationRules {
-    /// The rules this generator version gives: the laws from [`BELT_POPULATION_VERSION`], the
-    /// untruncated moments below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_population_rules`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = POPULATION_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= BELT_POPULATION_VERSION {
-            Self::Laws
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The belt population's rules a test sets on its thread, `None` for the version's.
-    static POPULATION_RULES: core::cell::Cell<Option<PopulationRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the belt population's rules `rules` on this thread, for the tests to reach
-/// 24's laws ahead of their bump; the version's rules are set back after, a panic in `run`
-/// included. Its bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_population_rules<R>(rules: PopulationRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<PopulationRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            POPULATION_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(POPULATION_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// How the crossers' encounters are counted in their mean
 /// ([`PopulationLaw::encounter_excitation`]).

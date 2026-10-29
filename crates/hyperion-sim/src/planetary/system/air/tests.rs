@@ -1,7 +1,7 @@
-//! The air's sections on the record (P14.T54.b): held at 23, so that every record is 23's; under
-//! the batch's rules, the structure of every surface with an air, and none for every airless one,
-//! and the aerosol and absorber inventory of every air, the empty one for every airless surface, on
-//! the Solar System table and over the plan-14 sample (`system::tests::whole`).
+//! The air's sections on the record (P14.T54.b), from generator version 24: the structure of every
+//! surface with an air, and none for every airless one, and the aerosol and absorber inventory of
+//! every air, the empty one for every airless surface, on the Solar System table and over the
+//! plan-14 sample (`system::tests::whole`).
 
 use std::sync::OnceLock;
 
@@ -25,11 +25,7 @@ use crate::planetary::hooks::surface::regime::{ClimateInputs, surface_reservoirs
 use crate::planetary::hooks::surface::tests::table;
 use crate::planetary::record::{BodyRecord, Section, Surface, SystemSnapshot};
 use crate::planetary::surface::CoarseInputs;
-use crate::planetary::system::RecordRules;
-use crate::planetary::system::tests::{
-    SEED, every_record_batch, golden_systems, golden_systems_afresh, sample, whole,
-};
-use crate::planetary::testing::with_every_24_hold;
+use crate::planetary::system::tests::{SEED, golden_systems_afresh, sample, whole};
 use crate::planetary::{PlanetarySystem, SystemContext, generate};
 use crate::substance::{CondensedPhase, SubstanceId, by_key};
 use crate::time::{ClockWindow, UniverseTime};
@@ -38,21 +34,9 @@ use crate::units::Pascals;
 /// How many of the sample's whole systems the record tests build under the batch's rules.
 const AIR_SAMPLE: usize = 40;
 
-/// The rules in force, with the air's sections under the batch's: the cold traps stay held, so
-/// that only the air's hold is lifted.
-fn air_batch() -> RecordRules {
-    RecordRules {
-        air: AirRules::Batch,
-        ..RecordRules::in_force()
-    }
-}
-
 /// The snapshot at the epoch of the system `system` of context `ctx` under the air's batch.
 fn batch_snapshot(ctx: &SystemContext, system: &PlanetarySystem) -> SystemSnapshot {
-    system
-        .clone()
-        .with_record_rules(air_batch())
-        .snapshot_at(ctx, UniverseTime::EPOCH)
+    system.snapshot_at(ctx, UniverseTime::EPOCH)
 }
 
 /// The first [`AIR_SAMPLE`] whole systems' snapshots at the epoch under the air's batch, built
@@ -120,94 +104,6 @@ fn check_profile(record: &BodyRecord, surface: &Surface, profile: &RadiativeConv
     }
 }
 
-/// The air's sections are held until P14.T54.b's bump (P14.T54.b.l; decision-p14-t54b-open §3.3):
-/// below it the rules in force are the held ones, and under them every golden system's record, at
-/// both times its golden pins, holds its vertical structure, its aerosol inventory and its
-/// modifiers (P14.T54.b.c, behind the same hold) not modelled, and every gas-envelope record's
-/// envelope (P14.T54.b.i, behind the same hold) not modelled. The server's
-/// `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` holds the wire's members
-/// absent on every golden body, and `every_present_planet_has_exactly_one_of_a_surface_and_an_envelope`
-/// the envelope `not_modelled`. That the held arm calls none of the pure modules is held by the
-/// source scans' `HELD` lists (`nothing_on_the_record_calls_the_inventory_yet`,
-/// `nothing_on_the_record_calls_the_condensation_yet`,
-/// `modifiers_nothing_on_the_record_reads_the_modifiers_yet`,
-/// `nothing_on_the_record_calls_the_envelope_atmosphere_yet`) and here by its arm: the table's
-/// Venus, whose inventory the batch builds, records none under `Held` (and the modifiers' arm in
-/// `system::modifiers`' tests, `the_held_record_computes_no_modifiers`, and the envelope's in
-/// `system::envelope`'s, `the_held_envelope_computes_nothing`).
-#[test]
-fn the_air_sections_are_held_only_until_the_24_bump() {
-    assert!(
-        GENERATOR_VERSION < AIR_SECTIONS_VERSION,
-        "the 23 → 24 bump (P14.T54.b.l) puts the air's sections on the record: every surface's \
-         vertical structure (P14.T24.e), `null` for one with no air, its aerosol and absorber \
-         inventory (P14.T24.c with T24.g), the empty inventory for one with no air and not \
-         modelled for a magma ocean's air, and its modifiers (P14.T51.d with T51.j, \
-         P14.T54.b.c), and every sub-Neptune's and giant's envelope section (P14.T24.d with \
-         T52.d on T50.b's abundances, P14.T54.b.i). Delete \
-         `AIR_SECTIONS_VERSION`, `AirRules` with its `Held` arm, `record_structure`'s, \
-         `record_aerosols`', `record_modifiers`', `planet_field`'s and `record_envelope`'s rules, \
-         `RecordRules::air` \
-         (and `RecordRules` with `PlanetarySystem::with_record_rules` once the cold traps' hold \
-         goes too); the five source scans with their `HELD` lists \
-         (`nothing_on_the_record_calls_the_inventory_yet`, \
-         `nothing_on_the_record_calls_the_condensation_yet`, \
-         `substance_aerosol_nothing_on_the_record_reads_the_extinction_yet`, \
-         `modifiers_nothing_on_the_record_reads_the_modifiers_yet`, \
-         `nothing_on_the_record_calls_the_envelope_atmosphere_yet`); \
-         `the_venus_test_is_rechecked_at_the_23_to_24_bump`, \
-         `the_held_record_carries_no_structure`, `the_held_record_computes_no_modifiers`, \
-         `the_held_envelope_computes_nothing` and this \
-         test. The server's \
-         `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` then takes the \
-         structure as present, `null` on an airless surface, the aerosols as present, the empty \
-         object on an airless surface, and the modifiers as present where the record models them, \
-         and `every_present_planet_has_exactly_one_of_a_surface_and_an_envelope` the envelope `ok` \
-         where modelled (decision-p14-t54b-open §1.3, §3.3)"
-    );
-    assert_eq!(AirRules::in_force(), AirRules::Held);
-    assert_eq!(RecordRules::in_force().air, AirRules::Held);
-    let (mut surfaces, mut envelopes) = (0_usize, 0_usize);
-    for (name, ctx, system) in golden_systems() {
-        for t in [UniverseTime::EPOCH, ClockWindow::END] {
-            for record in system.snapshot_at(ctx, t).bodies() {
-                if record
-                    .bulk()
-                    .ok()
-                    .is_some_and(|bulk| !bulk.class().has_solid_surface())
-                {
-                    let id = record.identity().id();
-                    assert_eq!(record.envelope(), &Section::NotModelled, "{name} {id}");
-                    envelopes += 1;
-                }
-                let Section::Ok(surface) = record.surface() else {
-                    continue;
-                };
-                let id = record.identity().id();
-                assert_eq!(
-                    surface.vertical_structure(),
-                    Modelled::NotModelled,
-                    "{name} {id}"
-                );
-                assert_eq!(surface.aerosols(), Modelled::NotModelled, "{name} {id}");
-                assert_eq!(surface.modifiers(), Modelled::NotModelled, "{name} {id}");
-                surfaces += 1;
-            }
-        }
-    }
-    assert!(surfaces > 20, "{surfaces} golden surfaces");
-    assert!(envelopes > 10, "{envelopes} golden gas envelopes");
-    let venus = table_under_the_switch()
-        .into_iter()
-        .find(|air| air.name == "Venus")
-        .expect("Venus is in the table");
-    assert!(matches!(venus.inventory(), Modelled::Ok(ref i) if !i.decks().is_empty()));
-    assert_eq!(
-        record_aerosols(AirRules::Held, &venus.surface(), &venus.structure),
-        Modelled::NotModelled
-    );
-}
-
 /// A body of the Solar System table, with what its record's structure and inventory read and its
 /// structure under the air's switch (the batch's rules).
 struct TableAir {
@@ -218,7 +114,7 @@ struct TableAir {
     equilibrium: Kelvin,
     /// Its figures' heat flow.
     heat_flow: WattsPerSquareMetre,
-    /// Its structure under [`AirRules::Batch`].
+    /// Its structure ([`record_structure`]).
     structure: Modelled<Option<VerticalStructure>>,
     /// Its state.
     state: SurfaceState,
@@ -245,9 +141,9 @@ impl TableAir {
         }
     }
 
-    /// Its inventory under [`AirRules::Batch`].
+    /// Its inventory ([`record_aerosols`]).
     fn inventory(&self) -> Modelled<AerosolInventory> {
-        record_aerosols(AirRules::Batch, &self.surface(), &self.structure)
+        record_aerosols(&self.surface(), &self.structure)
     }
 }
 
@@ -270,7 +166,7 @@ fn table_under_the_switch() -> Vec<TableAir> {
                 ice_threshold: published.ice_threshold(),
             });
             let (equilibrium, heat_flow) = (body.equilibrium_temperature(), figures.heat_flow());
-            let structure = record_structure(AirRules::Batch, &conditions, equilibrium, heat_flow);
+            let structure = record_structure(&conditions, equilibrium, heat_flow);
             TableAir {
                 name,
                 conditions,
@@ -288,7 +184,7 @@ fn table_under_the_switch() -> Vec<TableAir> {
 
 /// On the Solar System table, under the air's switch, the record's structure is the derivation's
 /// for each body with an air and none, `Ok(None)` (the wire's `null`), for each without, the Moon
-/// among them; held, it is not modelled; a skin that cannot be (no light and no internal heat), and
+/// among them; a skin that cannot be (no light and no internal heat), and
 /// conditions without their regime, are not modelled.
 #[test]
 fn the_record_s_structure_is_the_derivation_s_or_none_without_air() {
@@ -311,12 +207,8 @@ fn the_record_s_structure_is_the_derivation_s_or_none_without_air() {
                 "{name}"
             );
             // No light and no internal heat: a skin of 0 K, refused.
-            let dark = record_structure(
-                AirRules::Batch,
-                conditions,
-                Kelvin::new(0.0),
-                WattsPerSquareMetre::new(0.0),
-            );
+            let dark =
+                record_structure(conditions, Kelvin::new(0.0), WattsPerSquareMetre::new(0.0));
             assert_eq!(dark, Modelled::NotModelled, "{name}");
             airs.push(name);
         } else {
@@ -325,13 +217,7 @@ fn the_record_s_structure_is_the_derivation_s_or_none_without_air() {
             airless.push(name);
         }
         assert_eq!(
-            record_structure(AirRules::Held, conditions, equilibrium, heat_flow),
-            Modelled::NotModelled,
-            "{name}"
-        );
-        assert_eq!(
             record_structure(
-                AirRules::Batch,
                 &conditions.clone().without_climate(),
                 equilibrium,
                 heat_flow
@@ -406,38 +292,6 @@ fn the_table_s_earth_venus_and_titan_carry_their_structures_under_the_switch() {
             );
         }
     }
-}
-
-/// The record at the version in force holds no structure, no aerosol inventory and no modifiers
-/// (P14.T54.b.c), and the batch's surface is the held one with those three alone added: over the
-/// first ten whole systems, every surface held is the batch's with all three not modelled, so that
-/// every golden keeps 23's bits.
-#[test]
-fn the_held_record_carries_no_structure() {
-    let mut surfaces = 0_usize;
-    for ((ctx, system), batch) in whole().iter().zip(batch_snapshots()).take(10) {
-        let held = system.snapshot_at(ctx, UniverseTime::EPOCH);
-        assert_eq!(held.bodies().len(), batch.bodies().len());
-        for (record, other) in held.bodies().iter().zip(batch.bodies()) {
-            let id = record.identity().id();
-            match (record.surface(), other.surface()) {
-                (Section::Ok(held), Section::Ok(batch)) => {
-                    assert_eq!(held.vertical_structure(), Modelled::NotModelled, "{id}");
-                    assert_eq!(held.aerosols(), Modelled::NotModelled, "{id}");
-                    assert_eq!(held.modifiers(), Modelled::NotModelled, "{id}");
-                    let stripped = batch
-                        .clone()
-                        .with_vertical_structure(Modelled::NotModelled)
-                        .with_aerosols(Modelled::NotModelled)
-                        .with_modifiers(Modelled::NotModelled);
-                    assert_eq!(held, &stripped, "{id}");
-                    surfaces += 1;
-                }
-                (held, batch) => assert_eq!(held, batch, "{id}"),
-            }
-        }
-    }
-    assert!(surfaces > 20, "{surfaces}");
 }
 
 /// Under the batch's rules, over the first [`AIR_SAMPLE`] whole systems at the epoch, every surface
@@ -636,9 +490,8 @@ fn owned_structure(surface: &Surface) -> Modelled<Option<VerticalStructure>> {
 }
 
 /// What the record's inventory of `surface`, of record `record`, reads beside its structure, its
-/// photochemistry's star's effective temperature `star`, which the record does not hold, under the
-/// air's batch alone: 23's states, the escape's rules held, under which every runaway keeps
-/// Venus's deck ([`RunawayDeck::Kept`]; the record does not hold its deck either).
+/// photochemistry's star's effective temperature `star`, which the record does not hold, its
+/// runaway's deck Venus's ([`RunawayDeck::Kept`]; the record does not hold its deck).
 fn air_surface_of<'a>(
     record: &BodyRecord,
     surface: &'a Surface,
@@ -688,15 +541,19 @@ fn batch_inventories() -> impl Iterator<
 /// structure, the figures' cloud fraction, liquids' cover and outgassing, and the photochemistry's
 /// star), for each body with an air, and the empty inventory for each without (the Moon among
 /// them); a magma ocean's is not modelled while it holds an air (R08's S5) and empty once its
-/// volatiles are gone; a tenuous air's (P14.T53.c) is not modelled at 24 (P14.T55.n); held, or with
-/// no structure, it is not modelled.
+/// volatiles are gone; a tenuous air's (P14.T53.c: the table's Ganymede at 24) is not modelled at
+/// 24 (P14.T55.n); with no structure, it is not modelled.
 #[test]
 fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
-    let (mut airs, mut airless) = (Vec::new(), Vec::new());
+    let (mut airs, mut airless, mut tenuous) = (Vec::new(), Vec::new(), Vec::new());
     for air in table_under_the_switch() {
         let name = air.name;
         let surface = air.surface();
         match &air.structure {
+            _ if air.state == SurfaceState::Tenuous => {
+                assert_eq!(air.inventory(), Modelled::NotModelled, "{name}");
+                tenuous.push(name);
+            }
             Modelled::Ok(Some(VerticalStructure::RadiativeConvective(profile))) => {
                 let inputs = AerosolInputs {
                     state: air.state,
@@ -742,37 +599,29 @@ fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
         } else {
             Modelled::NotModelled
         };
-        assert_eq!(
-            record_aerosols(AirRules::Batch, &melt, &air.structure),
-            melt_s,
-            "{name}"
-        );
+        assert_eq!(record_aerosols(&melt, &air.structure), melt_s, "{name}");
         // P14.T53.c's tenuous air: not modelled at 24, whatever its structure (P14.T55.n).
         let tenuous = AirSurface {
             state: SurfaceState::Tenuous,
             ..surface
         };
         assert_eq!(
-            record_aerosols(AirRules::Batch, &tenuous, &air.structure),
+            record_aerosols(&tenuous, &air.structure),
             Modelled::NotModelled,
             "{name}"
         );
         assert_eq!(
-            record_aerosols(AirRules::Held, &surface, &air.structure),
-            Modelled::NotModelled,
-            "{name}"
-        );
-        assert_eq!(
-            record_aerosols(AirRules::Batch, &surface, &Modelled::NotModelled),
+            record_aerosols(&surface, &Modelled::NotModelled),
             Modelled::NotModelled,
             "{name}"
         );
     }
-    eprintln!("airs {airs:?}; airless {airless:?}");
+    eprintln!("airs {airs:?}; airless {airless:?}; tenuous {tenuous:?}");
     assert!(
         airless.contains(&"Moon") && airs.len() >= 4,
         "{airs:?} {airless:?}"
     );
+    assert!(tenuous.contains(&"Ganymede"), "{tenuous:?}");
 }
 
 /// Whether `mode` lies within `deck`, its base no deeper than the deck's and its top no shallower,
@@ -907,10 +756,12 @@ fn the_table_s_mars_carries_no_dust_and_titan_its_haze_beside_its_disc_mean_clou
 
 /// Under the batch's rules, over the first [`AIR_SAMPLE`] whole systems at the epoch, every
 /// surface with a structure carries its inventory, none refused, but a magma ocean's air, which is
-/// not modelled (R08's S5; counted), and every surface with no air the empty inventory; and each
+/// not modelled (R08's S5; counted), and from 24 a tenuous air's (P14.T53.c, P14.T55.n; counted),
+/// and every surface with no air the empty inventory; and each
 /// air's is the derivation's over its record's own
 /// members (its state, conditions, figures and bulk section's gravity) with one of its system's
-/// stars' effective temperatures, or none, which the record does not hold.
+/// stars' effective temperatures, or none, and either runaway deck (from 24 a runaway may be
+/// re-solved without its deck, P14.T53.b part 1 (b)), which the record does not hold.
 #[test]
 fn under_the_batch_every_air_carries_its_inventory_and_every_airless_surface_the_empty_one() {
     let (mut airs, mut empty) = (0_usize, 0_usize);
@@ -918,6 +769,7 @@ fn under_the_batch_every_air_carries_its_inventory_and_every_airless_surface_the
         (0_usize, 0_usize, 0_usize, 0_usize);
     let mut refused = Vec::new();
     let mut melts_with_air = Vec::new();
+    let mut tenuous = 0_usize;
     for ((ctx, _), snapshot) in whole().iter().zip(batch_snapshots()) {
         let stars: Vec<Option<Kelvin>> = ctx
             .stars()
@@ -941,6 +793,12 @@ fn under_the_batch_every_air_carries_its_inventory_and_every_airless_surface_the
                 ));
                 continue;
             }
+            // P14.T53.c's tenuous air: not modelled at 24 (P14.T55.n).
+            if surface.state() == SurfaceState::Tenuous {
+                assert_eq!(surface.aerosols(), Modelled::NotModelled, "{id}");
+                tenuous += 1;
+                continue;
+            }
             let Modelled::Ok(inventory) = surface.aerosols() else {
                 refused.push(format!(
                     "{id}: {:?} at {:.4} bar",
@@ -957,11 +815,15 @@ fn under_the_batch_every_air_carries_its_inventory_and_every_airless_surface_the
                 Modelled::Ok(Some(_)) => {
                     let structure = owned_structure(surface);
                     let rebuilt = stars.iter().any(|&star| {
-                        record_aerosols(
-                            AirRules::Batch,
-                            &air_surface_of(record, surface, star),
-                            &structure,
-                        ) == Modelled::Ok(inventory.clone())
+                        [RunawayDeck::Kept, RunawayDeck::Deckless]
+                            .into_iter()
+                            .any(|runaway_deck| {
+                                let air = AirSurface {
+                                    runaway_deck,
+                                    ..air_surface_of(record, surface, star)
+                                };
+                                record_aerosols(&air, &structure) == Modelled::Ok(inventory.clone())
+                            })
                     });
                     assert!(rebuilt, "{id}: no star of its system gives its inventory");
                     airs += 1;
@@ -976,8 +838,8 @@ fn under_the_batch_every_air_carries_its_inventory_and_every_airless_surface_the
     }
     eprintln!(
         "{airs} airs: {decks} decks, {modes} modes, {absorbers} absorbers, {not_formed} not \
-         formed; {empty} empty; {} magma oceans' airs not modelled: {melts_with_air:?}; {} \
-         refused: {refused:?}",
+         formed; {empty} empty; {} magma oceans' airs not modelled: {melts_with_air:?}; \
+         {tenuous} tenuous airs not modelled; {} refused: {refused:?}",
         melts_with_air.len(),
         refused.len()
     );
@@ -1285,26 +1147,21 @@ fn pressure_at(structure: &VerticalStructure, ground: f64, temperature: f64) -> 
 }
 
 /// The F4, F1 and count (xii) tallies of the first [`AIR_SAMPLE`] whole systems and the golden
-/// systems at the epoch with every hold at 24 in force ([`with_every_24_hold`] and
-/// [`every_record_batch`]), each system generated and read inside the switches.
+/// systems at the epoch, each system generated afresh.
 fn every_hold_tallies() -> (LiquidTally, CriticalTally) {
-    with_every_24_hold(|| {
-        let mut tallies = (LiquidTally::default(), CriticalTally::default());
-        let samples = sample()
-            .iter()
-            .take(AIR_SAMPLE)
-            .map(|ctx| (ctx.clone(), generate(SEED, ctx)));
-        let goldens = golden_systems_afresh()
-            .into_iter()
-            .map(|(_, ctx, system)| (ctx, system));
-        for (ctx, system) in samples.chain(goldens) {
-            let snapshot = system
-                .with_record_rules(every_record_batch())
-                .snapshot_at(&ctx, UniverseTime::EPOCH);
-            tally_snapshot(&snapshot, &mut tallies);
-        }
-        tallies
-    })
+    let mut tallies = (LiquidTally::default(), CriticalTally::default());
+    let samples = sample()
+        .iter()
+        .take(AIR_SAMPLE)
+        .map(|ctx| (ctx.clone(), generate(SEED, ctx)));
+    let goldens = golden_systems_afresh()
+        .into_iter()
+        .map(|(_, ctx, system)| (ctx, system));
+    for (ctx, system) in samples.chain(goldens) {
+        let snapshot = system.snapshot_at(&ctx, UniverseTime::EPOCH);
+        tally_snapshot(&snapshot, &mut tallies);
+    }
+    tallies
 }
 
 /// Adds every surface of `snapshot` that carries its structure and its inventory to `tallies`.
@@ -1328,20 +1185,18 @@ fn tally_snapshot(
 }
 
 /// F4 and F1 of decision-p14-t54a-grain-density §6, and P14.T52.f's count (xii), over the first
-/// [`AIR_SAMPLE`] whole systems and the golden systems with every hold at 24 in force
-/// ([`every_hold_tallies`]; decision-t24i-airless-state D3.3, decision-n2-critical-decks §4), over
-/// the same sample under the air's batch alone (23's states and every other hold), and over the
-/// Solar System table under the switch:
+/// [`AIR_SAMPLE`] whole systems and the golden systems ([`every_hold_tallies`];
+/// decision-t24i-airless-state D3.3, decision-n2-critical-decks §4), and over the Solar System
+/// table:
 ///
 /// - **F4:** no liquid mode published with a size or a τ lies above 0.99 of its material's
 ///   critical temperature, where the grain-density mirror holds no liquid, so that every liquid
 ///   the record publishes is one the client can evaluate: the inventory refuses those there their
-///   size and τ (`AerosolMode::of_mode`), each counted and printed. Under the air's batch alone
-///   it refuses none: the two nitrogen decks it once refused (`02001b2ca0000000.0400` and
-///   `02001b2c9ffe0000.0500`, based at nitrogen's critical point under kilobar methane airs) are
-///   P14.T52.f's, labelled `supercritical`, which is asserted. With every hold, printed, 0500's
-///   nitrogen is its bulk, and 0400's is still labelled in this tree, P14.T53.b part 2 (under
-///   whose supercritical envelope its surface does not apply) not having landed here;
+///   size and τ (`AerosolMode::of_mode`), each counted and printed. Under the air's batch alone, at
+///   23's states, it refused none: the two nitrogen decks it once refused (`02001b2ca0000000.0400`
+///   and `02001b2c9ffe0000.0500`, based at nitrogen's critical point under kilobar methane airs)
+///   were P14.T52.f's, labelled `supercritical`; at 24 0500's nitrogen is its bulk, and 0400's
+///   surface does not apply under its supercritical envelope (P14.T53.b part 2);
 /// - **Count (xii)**, printed: every condensable labelled `supercritical`, with x P ÷ `p_c`
 ///   where the structure cools through its critical temperature and the air's bulk, and every
 ///   deck based at the ground with x P ≥ `p_c` there;
@@ -1355,7 +1210,7 @@ fn tally_snapshot(
 fn no_liquid_mode_lies_near_its_critical_point_or_below_water_s_triple_point() {
     let (mut tally, critical) = every_hold_tallies();
     eprintln!(
-        "every 24 hold: {} liquid modes, {} refused near their critical point: {:?}; {} labelled \
+        "the census: {} liquid modes, {} refused near their critical point: {:?}; {} labelled \
          supercritical: {:?}; {} decks at the ground past p_c: {:?}",
         tally.modes,
         tally.refused.len(),
@@ -1365,36 +1220,6 @@ fn no_liquid_mode_lies_near_its_critical_point_or_below_water_s_triple_point() {
         critical.deep.len(),
         critical.deep
     );
-    let mut alone = (LiquidTally::default(), CriticalTally::default());
-    for snapshot in batch_snapshots() {
-        tally_snapshot(snapshot, &mut alone);
-    }
-    let (alone_liquids, alone_critical) = alone;
-    eprintln!(
-        "the air's batch alone: {} refused: {:?}; {} labelled supercritical: {:?}; {} decks at \
-         the ground past p_c: {:?}",
-        alone_liquids.refused.len(),
-        alone_liquids.refused,
-        alone_critical.labelled.len(),
-        alone_critical.labelled,
-        alone_critical.deep.len(),
-        alone_critical.deep
-    );
-    assert!(
-        alone_liquids.refused.is_empty(),
-        "{:?}",
-        alone_liquids.refused
-    );
-    for body in ["02001b2ca0000000.0400", "02001b2c9ffe0000.0500"] {
-        assert!(
-            alone_critical
-                .labelled
-                .iter()
-                .any(|line| line.starts_with(&format!("{body}: N2 "))),
-            "{body}'s N2 is labelled supercritical under the air's batch alone: {:?}",
-            alone_critical.labelled
-        );
-    }
     for air in table_under_the_switch() {
         if let (Modelled::Ok(Some(structure)), Modelled::Ok(inventory)) =
             (&air.structure, air.inventory())
@@ -1439,10 +1264,7 @@ fn moved(a: f64, b: f64) -> f64 {
 fn the_record_s_inventory_is_continuous_in_time() {
     let (mut surfaces, mut largest, mut inputs) = (0_usize, 0.0_f64, 0.0_f64);
     for ((ctx, system), first) in whole().iter().zip(batch_snapshots()).take(10) {
-        let later = system
-            .clone()
-            .with_record_rules(air_batch())
-            .snapshot_at(ctx, ClockWindow::END);
+        let later = system.snapshot_at(ctx, ClockWindow::END);
         for (a, b) in first.bodies().iter().zip(later.bodies()) {
             let (Section::Ok(sa), Section::Ok(sb)) = (a.surface(), b.surface()) else {
                 continue;
@@ -1584,7 +1406,6 @@ fn the_record_s_inventory_changes_with_the_state_only_in_its_sulphur() {
             let structure = owned_structure(surface);
             let base = air_surface_of(record, surface, sun);
             let of_deck = |state, runaway_deck| match record_aerosols(
-                AirRules::Batch,
                 &AirSurface {
                     state,
                     runaway_deck,
@@ -1626,7 +1447,7 @@ fn the_record_s_inventory_changes_with_the_state_only_in_its_sulphur() {
                 ..base
             };
             assert_eq!(
-                record_aerosols(AirRules::Batch, &melt, &structure),
+                record_aerosols(&melt, &structure),
                 Modelled::NotModelled,
                 "{id}: a magma ocean"
             );
@@ -1658,7 +1479,7 @@ fn under_the_batch_a_snapshot_is_body_at_and_body_at_keeps_no_order() {
         if !has_moons {
             continue;
         }
-        let batch = system.clone().with_record_rules(air_batch());
+        let batch = system;
         let indices = batch.indices();
         assert_eq!(snapshot.bodies().len(), indices.len());
         for (record, &index) in snapshot.bodies().iter().zip(&indices) {

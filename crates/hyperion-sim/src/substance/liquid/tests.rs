@@ -2628,81 +2628,6 @@ fn compressible_rows() -> Vec<SubstanceId> {
     rows
 }
 
-/// The liquids' compression is held until P14.T54.b's bump: below it every reader takes the
-/// saturated liquid, and the tests' switch reaches 24's compressed liquids ahead of it.
-#[test]
-fn the_compressed_liquids_are_held_only_until_the_24_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < COMPRESSED_LIQUIDS_VERSION,
-        "the 23 → 24 bump (P14.T54.b) compresses the record's liquids to their body's surface \
-         pressure (P14.T49.n). Delete `COMPRESSED_LIQUIDS_VERSION`, `CompressedLiquidsRules` with \
-         its `Saturated` arm, `with_compressed_liquids` and its thread's rules (and the switch in \
-         every test that sets it), the `Saturated` arms of `Substance::liquid_density_at_pressure` \
-         and `liquid_properties_at_pressure`, this test and \
-         `a_panic_inside_the_compressed_liquids_switch_sets_the_rules_back`. Re-bless the goldens \
-         it moves: \
-         tests/golden/planetary/systems/*.golden (every sea's layer and area, a pure liquid's \
-         compressed to its body's surface pressure: close_binary's and m_dwarf_resonant_chain's \
-         water, subgiant's nitrogen; through the area mix's sea records, which read the \
-         compressed record (planetary/derive/photometry/area_mix.rs's `liquid_record`, its \
-         reference Earth's ocean left saturated), every body's Bond albedo over a pure liquid \
-         sea and so every quantity the passes give it; and, through the own-ocean weight's \
-         dominance pull, every quantity of a body with a dominant pure liquid, methane's under \
-         Titan's seas included), tests/golden/planetary/partition.golden, \
-         tests/golden/planetary/surface_conditions_published.golden and \
-         tests/golden/planetary/surface_inputs.golden (the palette's liquid entries: their \
-         grain density, index, scattering and viscosity at the compressed density). \
-         tests/golden/substance/liquids.golden does not move (`liquid_properties` stays the \
-         saturated record). Then settle the record tests that read the saturated liquid: \
-         `an_earth_like_body_s_sea_record_is_measured` (surface/inputs.rs, \"a pure fluid's grain \
-         density is its saturated liquid's\"); and the tests that set the switch, whose held \
-         halves read 23's saturated liquid: \
-         `under_compression_earth_s_sea_reads_one_density`, \
-         `under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density` and \
-         `close_binary_s_sea_shrinks_under_its_compressed_water` (partition/tests.rs), \
-         `a_liquid_s_entry_reads_its_record_compressed_to_the_surface_pressure` (palette.rs), \
-         `under_compression_the_area_mix_s_sea_reads_its_layer_s_density` and \
-         `under_compression_the_area_mix_s_sea_reads_the_palette_s_density` \
-         (derive/photometry/area_mix/tests.rs) and \
-         `the_record_at_a_pressure_reads_the_compressed_density` (liquid/tests.rs). Delete this \
-         hold's switch from `planetary::testing::with_every_24_hold`"
-    );
-    assert_eq!(
-        CompressedLiquidsRules::in_force(),
-        CompressedLiquidsRules::Saturated
-    );
-    assert_eq!(
-        with_compressed_liquids(
-            CompressedLiquidsRules::Compressed,
-            CompressedLiquidsRules::in_force
-        ),
-        CompressedLiquidsRules::Compressed
-    );
-    assert_eq!(
-        CompressedLiquidsRules::in_force(),
-        CompressedLiquidsRules::Saturated
-    );
-}
-
-/// A panic inside the tests' switch sets the rules back. Skipped, not failed, where panics abort
-/// (wasm32-wasip1), since `catch_unwind` would abort the whole test binary there; the other CI
-/// architectures run it.
-#[test]
-#[cfg(panic = "unwind")]
-fn a_panic_inside_the_compressed_liquids_switch_sets_the_rules_back() {
-    let failed = std::panic::catch_unwind(|| {
-        with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
-            panic!("a test fails inside")
-        });
-    });
-    assert!(failed.is_err());
-    assert_eq!(
-        CompressedLiquidsRules::in_force(),
-        CompressedLiquidsRules::Saturated,
-        "a panic inside the switch sets the rules back"
-    );
-}
-
 /// The law's rows are the pure liquids with a reference equation of state, each a diagram row:
 /// the thirteen with a scattering equation, sulphur dioxide (none) and every solution and melt
 /// left incompressible.
@@ -2968,11 +2893,10 @@ fn a_step_that_is_not_finite_ends_the_compression_at_its_last_density() {
     assert_same_bits(rho.value(), start.value());
 }
 
-/// The record at a pressure is [`liquid_properties`]' to the bit under 23's rules, for a pure
-/// liquid, a solution and a melt at any pressure; under 24's, a pure liquid's density is the
-/// law's at the record's temperature to the bit (W4: the palette reads the partition's density),
-/// its index carried to it, its scattering's `κ_T` there and its viscosity there, and a
-/// solution's and a melt's record are unchanged.
+/// The record at a pressure, from 24: a pure liquid's density is the law's at the record's
+/// temperature to the bit (W4: the palette reads the partition's density), its index carried to it
+/// from the saturated record's ([`liquid_properties`]', version 23's), its scattering's `κ_T` there
+/// and its viscosity there, and a solution's and a melt's record are the saturated one's.
 #[test]
 fn the_record_at_a_pressure_reads_the_compressed_density() {
     let cases = [
@@ -2990,13 +2914,9 @@ fn the_record_at_a_pressure_reads_the_compressed_density() {
         let temperature = Kelvin::new(t);
         let pressure = Pascals::new(p);
         let saturated = liquid_properties(id, temperature, Composition::Reference).unwrap();
-        let held = liquid_properties_at_pressure(id, temperature, Composition::Reference, pressure)
-            .unwrap();
-        assert_eq!(held, saturated, "{key}");
-        let compressed = with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+        let compressed =
             liquid_properties_at_pressure(id, temperature, Composition::Reference, pressure)
-        })
-        .unwrap();
+                .unwrap();
         if equation_of_state(id.substance()).is_none() {
             assert_eq!(compressed, saturated, "{key}");
             continue;
@@ -3006,11 +2926,10 @@ fn the_record_at_a_pressure_reads_the_compressed_density() {
             .compressed_liquid_density(temperature, pressure)
             .unwrap();
         assert_same_bits(compressed.density_kg_m3, law.value());
-        let held_density = with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
-            id.substance()
-                .liquid_density_at_pressure(temperature, pressure)
-        })
-        .unwrap();
+        let held_density = id
+            .substance()
+            .liquid_density_at_pressure(temperature, pressure)
+            .unwrap();
         assert_same_bits(held_density.value(), law.value());
         assert!(compressed.density_kg_m3 > saturated.density_kg_m3, "{key}");
         let carried = carry_index(

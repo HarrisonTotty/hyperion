@@ -113,16 +113,13 @@
 //!
 //! [`record::SurfaceModifiers`](crate::planetary::record::SurfaceModifiers) is this type,
 //! re-exported, as the record's crust is P14.T51.c's. P14.T54.b.c's wiring puts it in the record's
-//! surface section (`system::modifiers`), from the published surface, behind the air's sections'
-//! hold at generator version 24 (`AIR_SECTIONS_VERSION`), so that no value on the record moves
-//! before the bump; with it R09's field header takes its `maturity`, `weathering_rate` and
-//! `organic_cover`, and the palette its entries' `FeO_T`, the `ferric` deposit and the `tholin`
-//! cover. P14.T54.b.e's weathered area mix, behind its own hold (`WEATHERED_AREA_MIX_VERSION`),
-//! has each pass take its maturity before it publishes its condensates, by the condensate-free
-//! law [`SurfaceModifiers::derive`] reads (`surface_weathering` over `ModifierParts`), and its
-//! `ferric` deposit after, and the record read the published pass's parts. The source scan
-//! `modifiers_nothing_on_the_record_reads_the_modifiers_yet` holds the wiring's files to their
-//! holds until the bump, P14.T54.b.l, deletes it with the holds.
+//! surface section (`system::modifiers`), from the published surface, from generator version 24;
+//! with it R09's field header takes its `maturity`, `weathering_rate` and `organic_cover`, and the
+//! palette its entries' `FeO_T`, the `ferric` deposit and the `tholin` cover. P14.T54.b.e's
+//! weathered area mix, from 24 too, has each pass take its maturity before it publishes its
+//! condensates, by the condensate-free law [`SurfaceModifiers::derive`] reads
+//! (`surface_weathering` over `ModifierParts`), and its `ferric` deposit after, and the record
+//! read the published pass's parts.
 //!
 //! # Determinism
 //!

@@ -491,10 +491,14 @@ fn the_ocean_worlds_take_the_ocean_branch_at_their_measured_elements() {
             tides.loss()
         );
         assert_eq!(tides.branch(), TidalBranch::Ocean, "{name}");
-        assert_same_bits(tides.heat_flow().value(), body.non_tidal().value());
+        // The solve's spherical shell (P14.T51.g.b) gives its rock's heat back within its root's
+        // settling, where the planar membrane gave it to the bit.
+        let (f, f_nt) = (tides.heat_flow().value(), body.non_tidal().value());
+        assert!((f / f_nt - 1.0).abs() < 1e-12, "{name}: {f} against {f_nt}");
         assert!((0.37..0.45).contains(&tides.k2()), "{name}: {}", tides.k2());
+        // From 24 Ganymede's loss on its spherical shell is 9.25 × 10⁻⁴ (0.002–0.008 at 23).
         assert!(
-            (0.002..0.008).contains(&tides.loss()),
+            (5e-4..0.008).contains(&tides.loss()),
             "{name}: {}",
             tides.loss()
         );
@@ -828,8 +832,9 @@ fn mimas_stays_cold_at_its_own_period() {
 
 /// A Dione past X = 1 (decision-p14-t56d-membrane §2.5): at e = 0.02 instead of its 0.0022 its stiff
 /// shell's gain is 1.6–2.5, and its hot root takes the thin-shell branch, the ocean branch at
-/// 0.035–0.08 W m⁻² under a shell under 20 km. Its cubic has a single root above `F_nt`, the
-/// largest and stable.
+/// 0.035–0.08 W m⁻² under a shell under 20 km. To version 23 the planar membrane's cubic had a
+/// single root above `F_nt`, the largest and stable; from 24 the branch reads the solve's
+/// spherical shell (P14.T51.g.b), whose root that cubic does not give.
 #[test]
 fn a_dione_past_x_one_takes_the_thin_shell_branch() {
     let dione = Measured {
@@ -849,23 +854,6 @@ fn a_dione_past_x_one_takes_the_thin_shell_branch() {
     assert_eq!(tides.branch(), TidalBranch::Ocean);
     assert!((0.035..0.08).contains(&f.value()), "{f:?}");
     assert!(dione.shell(f) < 20e3);
-    let ocean = ocean_love_number(dione.density());
-    let shell = 1.0 + ocean;
-    let stiffness = dione.stiffness();
-    let (kr, ki) = (
-        shell * stiffness.real.value(),
-        shell * stiffness.imaginary.value(),
-    );
-    let (f_nt, phi) = (dione.non_tidal().value(), dione.forcing().value());
-    let cubic = |x: f64| (x - f_nt) * ((x + kr) * (x + kr) + ki * ki) - phi * ocean * ki * x;
-    for i in 1..=400 {
-        assert!(cubic(f.value() * math::exp10(f64::from(i) * 0.01)) > 0.0);
-    }
-    // And negative all the way down to F_nt: no other root above it.
-    for i in 1..400 {
-        let x = f_nt + (f.value() - f_nt) * f64::from(i) / 400.0;
-        assert!(cubic(x) < 0.0, "{x}");
-    }
 }
 
 /// Beuthe 2019's (Icarus 332, 66) benchmark (decision-p14-t56d-membrane §4.4): at his ice of Table
@@ -943,10 +931,13 @@ fn enceladus_s_uniform_shell_dissipates_as_beuthe_2019_computes() {
     assert!((lambda.imaginary / 0.730 - 1.0).abs() < 1e-3, "{lambda:?}");
 }
 
-/// A body without water, or at its melting point, takes no ocean branch; a rocky one takes the
-/// heated branch exactly from `F_c`, and an icy one with no ocean is cold ice.
+/// A body without water, or at its water's liquidus, takes no ocean branch; a rocky one takes the
+/// heated branch exactly from `F_c`, and an icy one with no ocean is cold ice. From 24 the shell's
+/// solve reads the liquidus at its top (P14.T51.g.b), 273.16 K for pure water, so a surface at
+/// [`ICE_MELTING_POINT`], 273 K, still lies under its shell; the cases lie at 273.16 K.
 #[test]
 fn the_branches_part_where_the_rule_says() {
+    let liquidus = Kelvin::new(273.16);
     let europa = moon("Europa").inputs();
     let dry = TideInputs {
         water: 0.0,
@@ -954,7 +945,7 @@ fn the_branches_part_where_the_rule_says() {
     };
     assert_eq!(MoonTides::of(&dry).branch(), TidalBranch::Heated);
     let hot = TideInputs {
-        surface_temperature: ICE_MELTING_POINT,
+        surface_temperature: liquidus,
         ..europa
     };
     assert_eq!(MoonTides::of(&hot).branch(), TidalBranch::Heated);
@@ -976,7 +967,7 @@ fn the_branches_part_where_the_rule_says() {
     assert_eq!(iapetus.branch(), TidalBranch::Cold);
     assert_same_bits(iapetus.q(), COLD_ICE_TIDAL_Q);
     let ice = TideInputs {
-        surface_temperature: ICE_MELTING_POINT,
+        surface_temperature: liquidus,
         ..moon("Ganymede").inputs()
     };
     assert_eq!(MoonTides::of(&ice).branch(), TidalBranch::Cold);
@@ -1019,9 +1010,7 @@ fn the_measured_moons_tides_are_pinned() {
 // rock and, beyond ammonia hydrate's line, their ice's ammonia at `ACCRETED_AMMONIA`.
 
 use crate::planetary::chem::inventory::CI_CHLORINE_PER_MASS;
-use crate::planetary::hooks::ocean::{
-    ACCRETED_AMMONIA, OceanInputs, has_ocean, implausibility, with_ocean_rules,
-};
+use crate::planetary::hooks::ocean::{ACCRETED_AMMONIA, OceanInputs, has_ocean, implausibility};
 use crate::substance::Element;
 
 impl Measured {
@@ -1039,10 +1028,7 @@ impl Measured {
 
     /// Its tides and its branch's ocean under P14.T51.g.b's rules.
     fn solved(&self, ammonia: bool) -> (MoonTides, Subsurface) {
-        let (tides, ocean) = with_ocean_rules(OceanRules::Solved, || {
-            MoonTides::with_ocean(&self.inputs(), &self.solutes(ammonia))
-        });
-        (tides, ocean.expect("the solve keeps the branch's ocean"))
+        MoonTides::with_ocean(&self.inputs(), &self.solutes(ammonia))
     }
 
     /// The ocean inputs its branch read at the heat flow `flux`.
@@ -1114,9 +1100,7 @@ fn europa_s_branch_under_the_spherical_shell() {
     assert!((0.22..=0.24).contains(&tides.k2()), "{}", tides.k2());
     assert!((15.0..=35.0).contains(&flux), "{flux}");
     assert!((19.0..=39.0).contains(&shell), "{shell} km");
-    let fresh = with_ocean_rules(OceanRules::Solved, || {
-        MoonTides::with_ocean(&europa.inputs(), &OceanSolutes::FRESH).0
-    });
+    let fresh = MoonTides::with_ocean(&europa.inputs(), &OceanSolutes::FRESH).0;
     let planar = europa.tides().heat_flow().value();
     assert!(
         (fresh.heat_flow().value() / planar - 1.0).abs() < 0.10,
@@ -1178,15 +1162,13 @@ fn the_ocean_branch_reads_has_ocean_at_its_whole_heat_flow() {
         } else {
             assert_eq!(ocean, Subsurface::NoOcean, "{name}");
         }
-        let dry = with_ocean_rules(OceanRules::Solved, || {
-            MoonTides::with_ocean(
-                &TideInputs {
-                    water: 0.0,
-                    ..body.inputs()
-                },
-                &body.solutes(ammonia),
-            )
-        });
+        let dry = MoonTides::with_ocean(
+            &TideInputs {
+                water: 0.0,
+                ..body.inputs()
+            },
+            &body.solutes(ammonia),
+        );
         assert_ne!(dry.0.branch(), TidalBranch::Ocean, "{name}");
     }
 }
@@ -1245,9 +1227,7 @@ fn the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
             .filter(|pair| (pair[0].excess_w_per_m2 > 0.0) != (pair[1].excess_w_per_m2 > 0.0))
             .count();
         multiple += u32::from(changes > 1);
-        let solved = with_ocean_rules(OceanRules::Solved, || {
-            MoonTides::with_ocean(&inputs, &solutes).0
-        });
+        let solved = MoonTides::with_ocean(&inputs, &solutes).0;
         if solved.branch() != TidalBranch::Ocean {
             continue;
         }

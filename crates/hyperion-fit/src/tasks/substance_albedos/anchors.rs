@@ -12,7 +12,7 @@ use hyperion_sim::substance::optics::{
 use hyperion_sim::substance::{self, by_key};
 
 use super::lab::{EndMemberGrain, cosines};
-use super::tests::{bond_albedo, fitted_darkened_row, fitted_row, manifest};
+use super::tests::{bond_albedo, fitted_row, manifest};
 use super::*;
 
 /// The allowance of every band, `Adopted`: a class passes within [lo ÷ 1.25, 1.25 × hi]
@@ -522,25 +522,6 @@ fn substance_albedos_co_s_noise_floor_is_three_times_its_baseline_rms() {
     }
 }
 
-/// The darkened row of `key` (P14.T49.k), as `substance::optics::darkened_rows` gives it.
-fn darkened_optics_of(key: &str) -> &'static CondensedOptics {
-    substance::optics::darkened_rows()
-        .find(|(id, _)| id.substance().key().as_str() == key)
-        .map_or_else(|| panic!("{key} is a darkened row"), |(_, optics)| optics)
-}
-
-/// The darkened row `key`'s w at `nm`, at its own grains, read from the task's own manifest.
-fn darkened_w_at(key: &str, nm: f64) -> f64 {
-    let manifest = manifest();
-    let mut inputs = FitInputs::load(&manifest).unwrap();
-    let optics = darkened_optics_of(key);
-    inputs
-        .grain(by_key(key).unwrap(), optics)
-        .unwrap()
-        .as_spectral()
-        .single_scattering_albedo(nm, optics.grain_diameter())
-}
-
 /// The reason or label a stand-in row of optics `optics` states.
 fn label_of(optics: &CondensedOptics) -> &'static str {
     optics
@@ -560,53 +541,39 @@ fn label_of(optics: &CondensedOptics) -> &'static str {
 /// brighter than its mature surface, whose weathering is P14.T54.b's (decision-p14-t49k Q5).
 const FRESH_MERCURY_FLOOR: f64 = 0.085;
 
-/// Mercury's fresh row from the bump (P14.T49.k; decision-p14-t49k Q5): the darkened
-/// `basalt_reduced`'s Bond albedo under a 5,772 K blackbody within its bounds, at or above
-/// [`FRESH_MERCURY_FLOOR`] and below 23's carbon-free mixture, with no allowance, as `basalt_fe`'s
-/// bounds take none; a stand-in labelled an upper bound, which states both, and, stated and not
-/// asserted, its reflectance factor at i 30°, e 0° and 750 nm against `feldspathic`'s, their ratio
+/// Mercury's fresh row from the 23 → 24 bump (P14.T49.k; decision-p14-t49k Q5): the darkened
+/// `basalt_reduced`, the row in force from 24, its Bond albedo under a 5,772 K blackbody at or
+/// above [`FRESH_MERCURY_FLOOR`], with no allowance, as `basalt_fe`'s bounds take none, and below
+/// 23's carbon-free mixture, its label's figure (the mixture went with the bump); a stand-in
+/// labelled an upper bound, which states its own, and, stated and not asserted, its reflectance factor at i 30°, e 0° and 750 nm against `feldspathic`'s, their ratio
 /// beside Braden and Robinson 2013's (JGR Planets 118, 1903) 1.9 ± 0.4, immature lunar over
 /// immature Mercurian material, and its spherical albedo in V beside NASA's V-band 0.068 (Mallama,
 /// Wang and Howard 2002, Icarus 155, 253: p 0.142 × q 0.478).
 #[test]
 fn substance_albedos_the_darkened_basalt_reduced_lies_within_its_bounds() {
     let sun = |row: AlbedoRow| bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);
-    let carbon_free = sun(fitted_row("basalt_reduced"));
-    let darkened = fitted_darkened_row("basalt_reduced");
-    for (offset, reach) in fitted_row("basalt_reduced")
-        .into_iter()
-        .enumerate()
-        .skip(DATA_REACH_OFFSET)
-    {
-        assert!(
-            darkened[offset].total_cmp(&reach).is_eq(),
-            "the graphite part cuts no reach: {} against {reach} nm",
-            darkened[offset]
-        );
-    }
+    let darkened = fitted_row("basalt_reduced");
     let bond = sun(darkened);
     assert!(
-        bond >= FRESH_MERCURY_FLOOR && bond < carbon_free,
-        "basalt_reduced's Bond albedo {bond} against {FRESH_MERCURY_FLOOR} and {carbon_free}"
+        bond >= FRESH_MERCURY_FLOOR,
+        "basalt_reduced's Bond albedo {bond} against {FRESH_MERCURY_FLOOR}"
     );
-    let optics = darkened_optics_of("basalt_reduced");
+    let optics = optics_of("basalt_reduced");
     assert!(optics.is_stand_in());
     let label = label_of(optics);
-    let r_row = reflectance_30(darkened_w_at("basalt_reduced", 750.0));
+    let r_row = reflectance_30(w_at("basalt_reduced", 750.0));
     let r_highlands = reflectance_30(w_at("feldspathic", 750.0));
     let ratio = r_highlands / r_row;
     let a_s_v = darkened[7];
     eprintln!(
-        "darkened basalt_reduced: Sun {bond:.4} (carbon-free {carbon_free:.4}), A_N V \
-         {:.4}, A_S V {a_s_v:.4}, REFF(30°) 750 nm {r_row:.4} against feldspathic's \
-         {r_highlands:.4}, ratio {ratio:.3}",
+        "darkened basalt_reduced: Sun {bond:.4}, A_N V {:.4}, A_S V {a_s_v:.4}, REFF(30°) \
+         750 nm {r_row:.4} against feldspathic's {r_highlands:.4}, ratio {ratio:.3}",
         darkened[4]
     );
     for stated in [
         "an upper bound".to_owned(),
         format!("{bond:.4}"),
         format!("{FRESH_MERCURY_FLOOR}"),
-        format!("{carbon_free:.4}"),
         format!("{r_row:.3}"),
         format!("{r_highlands:.3}"),
         format!("ratio of {ratio:.2}"),
@@ -621,23 +588,20 @@ fn substance_albedos_the_darkened_basalt_reduced_lies_within_its_bounds() {
     }
 }
 
-/// `ferric`'s darkened row (P14.T49.k; decision-p14-t49k Q5): no band, its Bond albedo under a
-/// 5,772 K blackbody stated in its reason beside Mars's bright regions' 0.27 (Pleskot and Miner
-/// 1981, Icarus 45, 179, abstract), as context, and below 23's, its nanophase oxide fine.
+/// `ferric`'s darkened row (P14.T49.k; decision-p14-t49k Q5), the row in force from 24: no band,
+/// its Bond albedo under a 5,772 K blackbody stated in its reason beside Mars's bright regions'
+/// 0.27 (Pleskot and Miner 1981, Icarus 45, 179, abstract), as context, its nanophase oxide fine
+/// (below 23's row, which went with the bump).
 #[test]
 fn substance_albedos_the_darkened_ferric_states_its_value() {
     let sun = |row: AlbedoRow| bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);
-    let (held, darkened) = (
-        sun(fitted_row("ferric")),
-        sun(fitted_darkened_row("ferric")),
-    );
+    let row = fitted_row("ferric");
+    let darkened = sun(row);
     eprintln!(
-        "darkened ferric: Sun {darkened:.4} (23's {held:.4}), A_N V {:.4}, A_S V {:.4}",
-        fitted_darkened_row("ferric")[4],
-        fitted_darkened_row("ferric")[7]
+        "darkened ferric: Sun {darkened:.4}, A_N V {:.4}, A_S V {:.4}",
+        row[4], row[7]
     );
-    assert!(darkened < held, "{darkened} against 23's {held}");
-    let optics = darkened_optics_of("ferric");
+    let optics = optics_of("ferric");
     assert!(optics.is_stand_in());
     let label = label_of(optics);
     for stated in [

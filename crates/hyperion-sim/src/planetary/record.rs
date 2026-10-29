@@ -56,7 +56,6 @@ use crate::planetary::hooks::DetailSeed;
 use crate::planetary::hooks::EnvelopeAtmosphere;
 pub use crate::planetary::hooks::SurfaceModifiers;
 pub use crate::planetary::hooks::TaxonomicClass;
-use crate::planetary::hooks::cold_traps::ColdTrapRules;
 pub use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::figures::{GlobalFigures, PartitionGround};
@@ -605,11 +604,9 @@ impl BulkProperties {
 /// figures (P14.T24.b, T48.a–c), its condensates (P14.T51.a, from P14.T54.a) and its crust
 /// (P14.T51.c, from P14.T54.a, not modelled for a body whose passes took no lid), its air's
 /// vertical structure (P14.T24.e), its aerosol and absorber inventory (P14.T24.c with T24.g) and
-/// its modifiers (P14.T51.d with T51.j), each held off the record until P14.T54.b's bump at
-/// generator version 24, every substance in them a
-/// [`SubstanceId`], and the members
-/// whose tasks land later, each [`Modelled::NotModelled`] until they do (decision-composition
-/// §1.10).
+/// its modifiers (P14.T51.d with T51.j), each on the record from P14.T54.b's bump at generator
+/// version 24, every substance in them a [`SubstanceId`], and the members whose tasks land later,
+/// each [`Modelled::NotModelled`] until they do (decision-composition §1.10).
 ///
 /// It is the one section rendering plan R09's coarse pass reads
 /// ([`CoarseInputs::for_body`](crate::planetary::surface::CoarseInputs::for_body)). A record's
@@ -624,9 +621,8 @@ impl BulkProperties {
 /// [`SurfaceState::SteamEnvelope`] (P14.T53.b part 3), a water envelope's.
 ///
 /// It also carries the body's taxonomic class (P14.T51.e, [`TaxonomicClass`]), a label of its
-/// surface's spectrum read from its built crust, condensates, modifiers and figures, held off the
-/// record until generator version 24 behind its own hold
-/// ([`taxonomic_class`](Self::taxonomic_class)).
+/// surface's spectrum read from its built crust, condensates, modifiers and figures, on the record
+/// from generator version 24 ([`taxonomic_class`](Self::taxonomic_class)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
     state: SurfaceState,
@@ -746,8 +742,8 @@ impl Surface {
     }
 
     /// The surface with its air's vertical structure `structure` (P14.T24.e, wired by P14.T54.b):
-    /// `Ok(None)` for a surface computed to hold no air, and not modelled while the air's sections
-    /// are held off the record (`system::air::record_structure`).
+    /// `Ok(None)` for a surface computed to hold no air, and not modelled where the structure is
+    /// refused (`system::air::record_structure`).
     #[must_use]
     pub(crate) fn with_vertical_structure(
         self,
@@ -761,23 +757,24 @@ impl Surface {
 
     /// The surface with its air's aerosol and absorber inventory `aerosols` (P14.T24.c with T24.g,
     /// wired by P14.T54.b): the empty inventory for a surface with no air or a magma ocean, and not
-    /// modelled while the air's sections are held off the record (`system::air::record_aerosols`).
+    /// modelled for a tenuous air, a steam envelope or a magma ocean's air, and where the structure
+    /// is not modelled or the inventory refuses the air (`system::air::record_aerosols`).
     #[must_use]
     pub(crate) fn with_aerosols(self, aerosols: Modelled<AerosolInventory>) -> Self {
         Self { aerosols, ..self }
     }
 
     /// The surface with its modifiers `modifiers` (P14.T51.d with T51.j, wired by P14.T54.b.c):
-    /// not modelled while the air's sections' hold keeps them off the record, and for a surface
-    /// whose inputs they refuse or the record does not give (`system::modifiers::record_modifiers`).
+    /// not modelled for a surface whose inputs they refuse or the record does not give
+    /// (`system::modifiers::record_modifiers`).
     #[must_use]
     pub(crate) fn with_modifiers(self, modifiers: Modelled<SurfaceModifiers>) -> Self {
         Self { modifiers, ..self }
     }
 
     /// The surface with its taxonomic class `class` (P14.T51.e), from the built surface where the
-    /// record is built: not modelled while its hold keeps it off the record, and where the record
-    /// lacks what the body's rule reads (`system::small_bodies::record_taxonomic_class`).
+    /// record is built: not modelled where the record lacks what the body's rule reads
+    /// (`system::small_bodies::record_taxonomic_class`).
     #[must_use]
     pub(crate) fn with_taxonomic_class(self, class: Modelled<Option<TaxonomicClass>>) -> Self {
         Self {
@@ -843,8 +840,8 @@ impl Surface {
     /// adiabat from the ground to an isothermal skin): `Ok(None)` for a surface computed to hold no
     /// air, an airless body's or a melt's whose volatiles are gone, which the wire sends `null`.
     ///
-    /// It is not modelled below generator version 24, which holds it off the record until
-    /// P14.T54.b's bump, and for an air whose structure is refused for anything but having no air
+    /// It is on the record from generator version 24 (P14.T54.b's bump), and not modelled for an
+    /// air whose structure is refused for anything but having no air
     /// ([`RadiativeConvective::derive`](crate::planetary::hooks::RadiativeConvective::derive)),
     /// which no generated body gives. The structure starts at the conditions' mean surface
     /// temperature and surface pressure, and its skin is of the bulk section's equilibrium
@@ -863,9 +860,9 @@ impl Surface {
     /// surface and its vertical structure. The empty inventory, never none, for a surface with no
     /// air (an airless body, a melt whose volatiles are gone) and for a magma ocean.
     ///
-    /// It is not modelled below generator version 24, which holds it off the record until
-    /// P14.T54.b's bump, where the vertical structure is not, and for an air the inventory refuses,
-    /// which no generated body gives (`system::air::record_aerosols`).
+    /// It is on the record from generator version 24 (P14.T54.b's bump), and not modelled where
+    /// the vertical structure is not, and for an air the inventory refuses, which no generated body
+    /// gives (`system::air::record_aerosols`).
     #[must_use]
     pub const fn aerosols(&self) -> Modelled<&AerosolInventory> {
         self.aerosols.as_ref()
@@ -883,15 +880,12 @@ impl Surface {
 
     /// Whether a record's condensates carry their cold-trapped areas
     /// ([`CondensateEntry::trapped_area_fraction`](crate::planetary::chem::partition::CondensateEntry::trapped_area_fraction)):
-    /// not while P14.T51.f's cold traps are held off the record, until P14.T54.b's bump at
-    /// generator version 24, when every entry's is 0 for want of the traps, not for want of a
-    /// trap, and a reader takes it as not modelled (decision-p14-t54a-water-consistency §5.3).
+    /// from P14.T54.b's bump at generator version 24. To version 23 P14.T51.f's cold traps were
+    /// held off the record, every entry's 0 for want of the traps, not for want of a trap, and a
+    /// reader took it as not modelled (decision-p14-t54a-water-consistency §5.3).
     #[must_use]
-    pub fn cold_traps_modelled() -> bool {
-        match ColdTrapRules::in_force() {
-            ColdTrapRules::Held => false,
-            ColdTrapRules::Batch => true,
-        }
+    pub const fn cold_traps_modelled() -> bool {
+        true
     }
 
     /// The crust by substance (P14.T51.c, on the record from P14.T54.a): its primary, secondary
@@ -915,11 +909,10 @@ impl Surface {
     /// planet's, with that planet's magnetosphere from its record), its mantle's sulphur, its crust's
     /// lid, its air's gases and its water's history.
     ///
-    /// It is not modelled below generator version 24, which holds it off the record until
-    /// P14.T54.b's bump, as the air's sections are; for a body with no crust on the record, no host
-    /// star at the time, or a moon whose planet's field the record does not give; and for inputs
-    /// the derivation refuses, an unlit body's at 0 K among them
-    /// (`system::modifiers::record_modifiers`).
+    /// It is on the record from generator version 24 (P14.T54.b's bump, as the air's sections are).
+    /// It is not modelled for a body with no crust on the record, no host star at the time, or a
+    /// moon whose planet's field the record does not give; and for inputs the derivation refuses,
+    /// an unlit body's at 0 K among them (`system::modifiers::record_modifiers`).
     #[must_use]
     pub const fn modifiers(&self) -> Modelled<&SurfaceModifiers> {
         self.modifiers.as_ref()
@@ -937,9 +930,9 @@ impl Surface {
     /// its maturity and its wind (the
     /// [`small_bodies`](crate::planetary::hooks::small_bodies) module's rules).
     ///
-    /// - Not modelled below generator version 24, which holds it off the record until P14.T54.b's
-    ///   bump; for a body whose rule reads a member the record does not give (its crust, a
-    ///   Kuiper-belt body's excepted, or its modifiers); never to be read as none.
+    /// - Not modelled to generator version 23 (on the record from P14.T54.b's bump at 24), and for
+    ///   a body whose rule reads a member the record does not give (its crust, a Kuiper-belt body's
+    ///   excepted, or its modifiers); never to be read as none.
     /// - `Ok(None)`, computed as none: a planet, and a member or moon left unclassed by a majority
     ///   of uncovered ice or by a lid of the closed not-classed set.
     /// - `Ok(Some(class))` otherwise.
@@ -992,11 +985,11 @@ pub enum Biosphere {}
 /// element abundances; wired by P14.T54.b.i), the section of the bodies whose surface section is
 /// [`Section::NotApplicable`] (P14.T48.e's gas-envelope split, decision-p14-t35e-wire §2.5).
 ///
-/// A gas-envelope body's envelope is [`Section::Ok`] from generator version 24 where the generator
-/// models it, and [`Section::NotModelled`] below 24 (the air's sections' hold), for an envelope
-/// that is not hydrogen-dominated (decision-p14-t24d-profile §4), one whose 1-bar or 10-mbar level
-/// is hotter than the chemistry's records, a host with no \[α/Fe\] of its own or no disc, and inputs
-/// a step refuses; a solid body's under a supercritical envelope (P14.T53.b part 2) is not
+/// A gas-envelope body's envelope is [`Section::Ok`] from generator version 24 (to 23, not
+/// modelled) where the generator models it, and [`Section::NotModelled`] for an envelope that is
+/// not hydrogen-dominated (decision-p14-t24d-profile §4), one whose 1-bar or 10-mbar level is
+/// hotter than the chemistry's records, a host with no \[α/Fe\] of its own or no disc, and inputs a
+/// step refuses; a solid body's under a supercritical envelope (P14.T53.b part 2) is not
 /// modelled until P14.T53.f; every other body's is not applicable. Every value is the record's:
 /// the wire converts and computes none.
 ///
@@ -2312,10 +2305,7 @@ mod tests {
     /// P14.T53.b part 2 through the builder (the batch review's fixes): the census's methane
     /// snowball 02001b2ca0000000.0400, a solid body under kilobars of supercritical methane,
     /// takes the envelope's tags from [`BodyRecordBuilder::derived`], its surface not applicable
-    /// and its envelope not modelled, under the escape's batch (every 24 hold in force), as its
-    /// generated record does; under the escape's hold, to version 23, its derivation leaves its
-    /// surface to the generator, which publishes it, and its envelope not applicable; and the
-    /// batch's derivation read under the hold is tagged as the hold's. Its bulk's gravity is its
+    /// and its envelope not modelled, as its generated record does. Its bulk's gravity is its
     /// derivation's, to the bit, so that the builder and the generator decide alike.
     ///
     /// With every 25 hold in force, P14.T53.b part 3's, the partition's cap holds its nitrogen at
@@ -2324,9 +2314,8 @@ mod tests {
     /// builder alike.
     #[test]
     fn under_every_24_hold_a_supercritical_envelope_takes_the_envelope_s_tags_from_the_builder() {
-        use crate::planetary::chem::escape::{EscapeRules, with_rules};
         use crate::planetary::system::tests::supercritical_methane_body;
-        use crate::planetary::testing::{with_every_24_hold, with_every_25_hold};
+        use crate::planetary::testing::with_every_25_hold;
         let tags = |record: &BodyRecord| {
             (
                 record.section_state(RecordSection::Surface),
@@ -2335,8 +2324,7 @@ mod tests {
         };
         let built = |derived: &DerivedBody| planet_record(4, derived, 0.1);
         let enveloped = (SectionState::NotApplicable, SectionState::NotModelled);
-        let (batch_record, batch) = with_every_24_hold(supercritical_methane_body);
-        let (held_record, held) = with_rules(EscapeRules::Held, supercritical_methane_body);
+        let (batch_record, batch) = supercritical_methane_body();
         let (steam_record, steam) = with_every_25_hold(supercritical_methane_body);
         assert_eq!(
             tags(&steam_record),
@@ -2346,29 +2334,14 @@ mod tests {
             with_every_25_hold(|| tags(&built(&steam))),
             (SectionState::NotModelled, SectionState::NotApplicable)
         );
-        for (record, derived) in [(&batch_record, &batch), (&held_record, &held)] {
-            let bulk = record.bulk().ok().expect("a present body's bulk");
-            hyperion_testkit::float::assert_same_bits(
-                bulk.surface_gravity().value(),
-                derived.surface_gravity().value(),
-            );
-            assert!(bulk.class().has_solid_surface(), "{:?}", bulk.class());
-        }
+        let bulk = batch_record.bulk().ok().expect("a present body's bulk");
+        hyperion_testkit::float::assert_same_bits(
+            bulk.surface_gravity().value(),
+            batch.surface_gravity().value(),
+        );
+        assert!(bulk.class().has_solid_surface(), "{:?}", bulk.class());
         assert_eq!(tags(&batch_record), enveloped);
-        assert_eq!(with_every_24_hold(|| tags(&built(&batch))), enveloped);
-        assert_eq!(
-            tags(&held_record),
-            (SectionState::Ok, SectionState::NotApplicable)
-        );
-        let leaves = (SectionState::NotModelled, SectionState::NotApplicable);
-        assert_eq!(
-            with_rules(EscapeRules::Held, || tags(&built(&held))),
-            leaves
-        );
-        assert_eq!(
-            with_rules(EscapeRules::Held, || tags(&built(&batch))),
-            leaves
-        );
+        assert_eq!(tags(&built(&batch)), enveloped);
     }
 
     #[test]

@@ -131,12 +131,11 @@
 //! P14.T54.a wires the palette, which restamps the table `--since 23`
 //! (decision-bump-plan-after-22 §1.2). Nothing here draws from a stream.
 //!
-//! **The darkened crystalline rows** (P14.T49.k; decision-p14-t49k) are held until the bump
-//! (`ROW_DARKENING_VERSION`): `basalt_reduced` with Mercury's global carbon as fine graphite, an
-//! opaque index file's part ([`PartEndMember::Opaque`]), and `ferric` with its nanophase ferric
-//! oxide at the fine grains. Their values are fitted beside 23's ([`darkened_rows`]), and below the
-//! bump [`Substance::condensed_optics`] gives 23's rows, so that every reader gives 23's answer to
-//! the bit.
+//! **The darkened crystalline rows** (P14.T49.k; decision-p14-t49k) are the rows from generator
+//! version 24: `basalt_reduced` with Mercury's global carbon as fine graphite, an opaque index
+//! file's part ([`PartEndMember::Opaque`]), and `ferric` with its nanophase ferric oxide at the
+//! fine grains. To 23 they were fitted beside 23's rows, which the 23 → 24 bump (P14.T54.b)
+//! deleted.
 
 use hyperion_surface::field::{
     BVR_EFFECTIVE_WAVELENGTHS_NM, MechanicsFamily, PaletteEntry, PaletteRole,
@@ -147,9 +146,8 @@ use super::condensed::{CondensedColumns, CondensedPhase};
 use super::liquid::{LiquidColumns, Oxide};
 use super::{Element, Source, Substance, SubstanceId, SubstanceKey, SubstanceKind, ids};
 use crate::units::{Kelvin, Metres};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
-use super::rows::optics::{DARKENED, OPTICS};
+use super::rows::optics::OPTICS;
 
 /// The cosines of the incidences at which a row's directional-hemispherical albedo is held: 1, 0.5,
 /// 0.2 and 0.05 (decision-r10-limb §4's test).
@@ -1211,79 +1209,9 @@ impl CondensedColumns {
     }
 }
 
-/// The generator version from which the registry serves the two darkened crystalline rows,
-/// `basalt_reduced` with Mercury's global carbon as fine graphite and `ferric` with its nanophase
-/// ferric oxide at the fine grains (P14.T49.k; decision-p14-t49k Q1–Q5): 24, the 23 → 24 batch's
-/// bump, P14.T54.b, or the version P14.T49.k rides, its hold renumbered (decision-p14-t49k Q0).
-///
-/// Below it [`RowDarkeningRules::in_force`] is [`RowDarkeningRules::Held`]:
-/// [`Substance::condensed_optics`] gives 23's rows, so that every reader, every golden and every
-/// fitted table that reads the rows in force (`space_weathering`'s fingerprint among them) gives
-/// 23's answers bit for bit. The darkened rows' values are fitted beside 23's
-/// ([`darkened_rows`]), and read only under the darkened rules. The bump deletes this hold,
-/// [`RowDarkeningRules`] with its `Held` arm, the tests' switch and its tripwires
-/// (`the_rows_are_darkened_only_from_the_24_bump` and
-/// `a_panic_inside_the_row_darkening_switch_sets_the_rules_back`), swapping the two rows in.
-pub(crate) const ROW_DARKENING_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether the registry serves the darkened crystalline rows (the hold,
-/// [`ROW_DARKENING_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum RowDarkeningRules {
-    /// Version 23's and before: `basalt_reduced` and `ferric` as P14.T49.i built them, every part
-    /// at the form's grains.
-    Held,
-    /// The bump's: `basalt_reduced` with its graphite and `ferric` with its fine nanophase oxide
-    /// ([`darkened_rows`]).
-    Darkened,
-}
-
-impl RowDarkeningRules {
-    /// The rules this generator version gives: the darkened rows from [`ROW_DARKENING_VERSION`],
-    /// held below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_row_darkening`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = ROW_DARKENING_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= ROW_DARKENING_VERSION {
-            Self::Darkened
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The row darkening's rules a test sets on its thread, `None` for the version's.
-    static ROW_DARKENING_RULES: core::cell::Cell<Option<RowDarkeningRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the row darkening's rules `rules` on this thread, for the tests to reach the
-/// darkened rows ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. The bump deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_row_darkening<R>(rules: RowDarkeningRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<RowDarkeningRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            ROW_DARKENING_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(ROW_DARKENING_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
 impl Substance {
     /// Its condensed optics, for a row whose solid's optics are modelled (the [module
-    /// documentation](self)); `None` where they are not. From `ROW_DARKENING_VERSION` the
-    /// darkened rows ([`darkened_rows`]) stand in place of 23's.
+    /// documentation](self)); `None` where they are not.
     ///
     /// # Examples
     ///
@@ -1309,11 +1237,7 @@ impl Substance {
     /// ```
     #[must_use]
     pub fn condensed_optics(&self) -> Option<&'static CondensedOptics> {
-        let darkened = match RowDarkeningRules::in_force() {
-            RowDarkeningRules::Held => None,
-            RowDarkeningRules::Darkened => DARKENED.iter().find(|optics| optics.key == self.key),
-        };
-        darkened.or_else(|| OPTICS.iter().find(|optics| optics.key == self.key))
+        OPTICS.iter().find(|optics| optics.key == self.key)
     }
 
     /// Its `FeO_T`: its total non-metallic iron (silicate, oxide and sulphide) expressed as `FeO`,
@@ -1464,49 +1388,10 @@ pub(crate) fn held_at_first_melt(id: SubstanceId, temperature: Kelvin) -> Kelvin
     }
 }
 
-/// Every row with condensed optics, in registry order, with its optics: the rules' in force
-/// (`ROW_DARKENING_VERSION`).
+/// Every row with condensed optics, in registry order, with its optics as
+/// [`Substance::condensed_optics`] serves them: the darkened rows in place of 23's.
 pub fn rows() -> impl Iterator<Item = (SubstanceId, &'static CondensedOptics)> {
     ids().filter_map(|id| id.substance().condensed_optics().map(|optics| (id, optics)))
-}
-
-/// The darkened crystalline rows, in registry order, with their optics: `basalt_reduced` with
-/// Mercury's global carbon as fine graphite and `ferric` with its nanophase ferric oxide at the
-/// fine grains (P14.T49.k), which [`Substance::condensed_optics`] serves from
-/// `ROW_DARKENING_VERSION`, whatever the rules in force. `hyperion-fit`'s `substance_albedos`
-/// fits their values beside 23's rows', so that the bump swaps them in with no refit of their own;
-/// before the bump only the fit reads them.
-///
-/// # Examples
-///
-/// Before the bump the registry serves 23's `basalt_reduced`, and the fit reads its darkened row,
-/// the graphite-bearing one, here:
-///
-/// ```
-/// use hyperion_sim::substance::by_key;
-/// use hyperion_sim::substance::optics::darkened_rows;
-///
-/// # fn main() {
-/// #     assert!(example().is_some(), "every value the example reads is there");
-/// # }
-/// # fn example() -> Option<()> {
-/// let keys: Vec<_> = darkened_rows().map(|(id, _)| id.substance().key()).collect();
-/// assert_eq!(keys.len(), 2);
-/// let (_, darkened) = darkened_rows().next()?;
-/// let held = by_key("basalt_reduced")?.substance().condensed_optics()?;
-/// assert_eq!(darkened.key(), held.key());
-/// assert!(darkened.spherical_albedo_bvr()[1] < held.spherical_albedo_bvr()[1]);
-/// # Some(())
-/// # }
-/// ```
-pub fn darkened_rows() -> impl Iterator<Item = (SubstanceId, &'static CondensedOptics)> {
-    ids().filter_map(|id| {
-        let key = id.substance().key();
-        DARKENED
-            .iter()
-            .find(|optics| optics.key == key)
-            .map(|optics| (id, optics))
-    })
 }
 
 /// Why [`resolve_palette_entry`] could not give an entry.
@@ -1633,14 +1518,6 @@ mod tests {
             .unwrap_or_else(|| panic!("{key} has condensed optics"))
     }
 
-    /// `check` run under each of the row darkening's rules, 23's held rows and the darkened ones
-    /// (`ROW_DARKENING_VERSION`), so that each row test holds both sets.
-    fn under_each_rules(check: impl Fn()) {
-        for rules in [RowDarkeningRules::Held, RowDarkeningRules::Darkened] {
-            with_row_darkening(rules, &check);
-        }
-    }
-
     /// The modelled rows are rows of the registry with condensed columns, in registry order and
     /// each once, each in its family's reference form; each names its own index file once and its
     /// own infrared set, if any, once, or its laboratory spectra, or its levels.
@@ -1682,26 +1559,11 @@ mod tests {
                 assert!(!infrared.datasets().is_empty(), "{infrared:?}");
             }
         }
-        let mut last = None;
-        for optics in &DARKENED {
-            let id = by_key(optics.key.as_str()).expect("a darkened row is a registry row");
-            assert!(last < Some(id), "{} is out of order", optics.key);
-            last = Some(id);
-            let held = OPTICS
-                .iter()
-                .find(|o| o.key == optics.key)
-                .expect("a darkened row darkens a row of 23's");
-            assert_eq!(optics.reference_form(), held.reference_form());
-            assert_eq!(optics.index_file(), None, "{}", optics.key);
-            assert_eq!(optics.infrared_source(), held.infrared_source());
-        }
-        under_each_rules(|| {
-            assert_eq!(rows().count(), OPTICS.len());
-            assert!(rows().all(|(id, optics)| id.substance().key() == optics.key()));
-        });
+        assert_eq!(rows().count(), OPTICS.len());
+        assert!(rows().all(|(id, optics)| id.substance().key() == optics.key()));
     }
 
-    /// The laboratory inputs are well formed, under either rules: each spectrum's file is a
+    /// The laboratory inputs are well formed: each spectrum's file is a
     /// splib07a file named for its spectrometer; a scaled end-member's index and grain are
     /// physical; an opaque part's file is an opaque slab row's own (`graphite`'s, one index file
     /// in the registry); a mixture's parts are positive, sum to 1 within the rounding of their
@@ -1710,7 +1572,7 @@ mod tests {
     /// wavelength within [0, 1].
     #[test]
     fn substance_optics_the_laboratory_inputs_are_well_formed() {
-        under_each_rules(the_laboratory_inputs_are_well_formed);
+        the_laboratory_inputs_are_well_formed();
     }
 
     /// A laboratory end-member is well formed: each spectrum's file a splib07a file named for its
@@ -1845,13 +1707,13 @@ mod tests {
         }
     }
 
-    /// Every row's values, the darkened rows' too, are inside energy's bounds: each
+    /// Every row's values are inside energy's bounds: each
     /// directional-hemispherical albedo at most 1 in every band, each normal albedo at most R10's
     /// particulate ceiling of 1.35 (decision-r10-limb §4), w in [0, 1], and every spectral bin's
     /// spherical albedo in [0, 1].
     #[test]
     fn substance_optics_every_row_is_inside_the_energy_bound() {
-        for (_, optics) in rows().chain(darkened_rows()) {
+        for (_, optics) in rows() {
             let key = optics.key();
             for band in 0..3 {
                 let w = optics.single_scattering_albedo_bvr()[band];
@@ -1909,7 +1771,7 @@ mod tests {
     /// with k = 0 in the visible and no infrared set).
     #[test]
     fn substance_optics_the_bins_follow_the_data_s_reach() {
-        for (_, optics) in rows().chain(darkened_rows()) {
+        for (_, optics) in rows() {
             let key = optics.key();
             let [lo, hi] = optics.data_reach_nm();
             assert!(
@@ -1972,11 +1834,10 @@ mod tests {
     /// once; each end-member's description (`Reduced`), a mixture's mode (`Reduced` where its
     /// source gives it, `Adopted` and saying it is an assumption where none does, the rows of
     /// [`ADOPTED_MODES`]) and its fine grains (`Adopted`) where it has any; levels' measurement;
-    /// and a stand-in's reason, where it comes from no index file whose own source gives it; under
-    /// either rules.
+    /// and a stand-in's reason, where it comes from no index file whose own source gives it.
     #[test]
     fn substance_optics_every_row_names_its_source_and_basis() {
-        under_each_rules(every_row_names_its_source_and_basis);
+        every_row_names_its_source_and_basis();
     }
 
     /// `substance_optics_every_row_names_its_source_and_basis`'s checks under the rules in force.
@@ -2181,42 +2042,32 @@ mod tests {
         );
     }
 
-    /// The darkened rows are two, `basalt_reduced` and `ferric`, and they move nothing else: under
-    /// the held rules every row is 23's, the same static row; under the darkened rules every row
-    /// but those two is the same static row, and those two are [`darkened_rows`]', in the same
-    /// form, provenance and infrared set.
+    /// Every row in force is its static row, and from 24 (the 23 → 24 bump's swap, P14.T54.b) the
+    /// darkened crystalline rows are `basalt_reduced`'s and `ferric`'s own (P14.T49.k): each a
+    /// stand-in regolith mixture with a part at the fine grains.
     #[test]
-    fn substance_optics_the_darkened_rows_move_only_ferric_and_basalt_reduced() {
-        let darkened: Vec<String> = darkened_rows()
-            .map(|(id, _)| id.substance().key().as_str().to_owned())
-            .collect();
-        assert_eq!(darkened, ["basalt_reduced", "ferric"]);
-        let held: Vec<(SubstanceId, &'static CondensedOptics)> =
-            with_row_darkening(RowDarkeningRules::Held, || rows().collect());
-        for (id, optics) in &held {
-            let own = OPTICS.iter().find(|o| o.key == optics.key).unwrap();
-            assert!(core::ptr::eq(*optics, own), "{}", id.substance().key());
-        }
-        let in_force: Vec<(SubstanceId, &'static CondensedOptics)> =
-            with_row_darkening(RowDarkeningRules::Darkened, || rows().collect());
-        assert_eq!(in_force.len(), held.len());
-        for ((id, darkened), (_, held)) in in_force.iter().zip(&held) {
+    fn substance_optics_the_darkened_rows_are_ferric_s_and_basalt_reduced_s_own() {
+        for (id, in_force) in rows() {
             let key = id.substance().key();
-            if ["basalt_reduced", "ferric"].contains(&key.as_str()) {
-                let own = DARKENED.iter().find(|o| o.key == key).unwrap();
-                assert!(core::ptr::eq(*darkened, own), "{key}");
-                assert_eq!(darkened.reference_form(), held.reference_form());
-                assert_eq!(darkened.is_stand_in(), held.is_stand_in());
-                assert_eq!(darkened.infrared_source(), held.infrared_source());
-            } else {
-                assert!(core::ptr::eq(*darkened, *held), "{key}");
-            }
+            let own = OPTICS.iter().find(|o| o.key == key).unwrap();
+            assert!(core::ptr::eq(in_force, own), "{key}");
+        }
+        for key in ["basalt_reduced", "ferric"] {
+            let optics = of(key);
+            assert_eq!(optics.reference_form(), ReferenceForm::Regolith, "{key}");
+            assert!(optics.is_stand_in(), "{key}");
+            assert!(
+                parts_of(key)
+                    .iter()
+                    .any(|part| part.grain() == GrainClass::Fine),
+                "{key}"
+            );
         }
     }
 
-    /// The parts of row `key`'s mixture under the rules `rules`.
-    fn parts_under(rules: RowDarkeningRules, key: &str) -> &'static [MixturePart] {
-        match with_row_darkening(rules, || of(key)).input() {
+    /// The parts of row `key`'s mixture, the row in force's.
+    fn parts_of(key: &str) -> &'static [MixturePart] {
+        match of(key).input() {
             OpticsInput::Mixture { parts } => parts,
             input => panic!("{key}: {input:?}"),
         }
@@ -2233,17 +2084,14 @@ mod tests {
     }
 
     /// The darkened `ferric`'s parts are its mode's (decision-p14-t49k, its addendum's item 3):
-    /// Rocknest's, the nanophase oxide's 6.8 wt% of `Fe2O3` as ferrihydrite's own mass, 23's
-    /// end-members in 23's order, `basalt_fe`'s parts scaled by the rock's share, the nanophase
-    /// oxide alone at the fine grains.
+    /// Rocknest's, the nanophase oxide's 6.8 wt% of `Fe2O3` as ferrihydrite's own mass, eight
+    /// end-members (23's row's, in its order), `basalt_fe`'s parts scaled by the rock's share, the
+    /// nanophase oxide alone at the fine grains.
     #[test]
     fn substance_optics_the_darkened_ferric_s_parts_are_its_mode_s() {
-        let (ferric_23, ferric) = (
-            parts_under(RowDarkeningRules::Held, "ferric"),
-            parts_under(RowDarkeningRules::Darkened, "ferric"),
-        );
+        let ferric = parts_of("ferric");
         let solid = solid_density;
-        // Rocknest's mode as `FERRIC_DARKENED_MODE` gives it: hematite 1.0, magnetite 1.8, the
+        // Rocknest's mode as `FERRIC_MODE` gives it: hematite 1.0, magnetite 1.8, the
         // nanophase oxide's 6.8 wt% Fe₂O₃ as ferrihydrite Fe₅HO₈·4H₂O (2.5 Fe₂O₃ of 480.285 g
         // mol⁻¹) and 90.4 `basalt_fe`, at 5,260, 5,175, 3,700 and `basalt_fe`'s own kg m⁻³.
         let ferrihydrite_oxide = 2.5 * 159.687 / 480.285;
@@ -2259,11 +2107,10 @@ mod tests {
             (nanophase - 0.073_554).abs() < 5e-6,
             "{nanophase}: the mode states 7.355 vol%"
         );
-        let basalt_fe = parts_under(RowDarkeningRules::Held, "basalt_fe");
-        assert_eq!(ferric_23.len(), ferric.len());
-        for (was, is) in ferric_23.iter().zip(ferric) {
+        let basalt_fe = parts_of("basalt_fe");
+        assert_eq!(ferric.len(), 8);
+        for is in ferric {
             let name = is.end_member().name();
-            assert_eq!(was.end_member(), is.end_member(), "{name}");
             let of_basalt_fe = || {
                 let part = basalt_fe.iter().find(|p| p.end_member().name() == name);
                 part.map_or_else(
@@ -2279,16 +2126,16 @@ mod tests {
             };
             assert!(
                 (is.volume_fraction() - share).abs() < 5e-5,
-                "{name}: {} against {share} (23's {})",
-                is.volume_fraction(),
-                was.volume_fraction()
+                "{name}: {} against {share}",
+                is.volume_fraction()
             );
             assert_eq!(is.grain(), grain, "{name}");
         }
     }
 
-    /// The darkened `basalt_reduced`'s parts are its mode's: 23's silicates scaled by 1 less its
-    /// graphite's volume fraction, which is Mercury's global 1.4 wt% carbon at the registry's
+    /// The darkened `basalt_reduced`'s parts are its mode's: its silicates, 23's row's 0.5400,
+    /// 0.2804, 0.0909 and 0.0886 of anorthite, enstatite, diopside and forsterite, scaled by 1 less
+    /// its graphite's volume fraction, which is Mercury's global 1.4 wt% carbon at the registry's
     /// grain densities, graphite's and the rock's (decision-p14-t49k Q3: about 1.83 vol%), and the
     /// graphite, `graphite.json`'s slab, at the fine grains.
     #[test]
@@ -2300,11 +2147,7 @@ mod tests {
             (graphite_share - 0.01831).abs() < 5e-6,
             "{graphite_share}: the mode states 1.831 vol%"
         );
-        let (reduced_23, reduced) = (
-            parts_under(RowDarkeningRules::Held, "basalt_reduced"),
-            parts_under(RowDarkeningRules::Darkened, "basalt_reduced"),
-        );
-        let (graphite, silicates) = reduced.split_last().unwrap();
+        let (graphite, silicates) = parts_of("basalt_reduced").split_last().unwrap();
         assert!(
             matches!(graphite.end_member(), PartEndMember::Opaque(e) if e.file() == "graphite.json"),
             "the last part is graphite.json's slab, not {:?}",
@@ -2316,16 +2159,12 @@ mod tests {
             "graphite: {} against {graphite_share}",
             graphite.volume_fraction()
         );
-        assert_eq!(silicates.len(), reduced_23.len());
-        for (was, is) in reduced_23.iter().zip(silicates) {
+        let silicate_mode = [0.5400, 0.2804, 0.0909, 0.0886];
+        assert_eq!(silicates.len(), silicate_mode.len());
+        for (&was, is) in silicate_mode.iter().zip(silicates) {
             let name = is.end_member().name();
-            assert_eq!(was.end_member(), is.end_member(), "{name}");
-            assert_eq!(
-                (was.grain(), is.grain()),
-                (GrainClass::Form, GrainClass::Form),
-                "{name}"
-            );
-            let scaled = was.volume_fraction() * (1.0 - graphite_share);
+            assert_eq!(is.grain(), GrainClass::Form, "{name}");
+            let scaled = was * (1.0 - graphite_share);
             assert!(
                 (is.volume_fraction() - scaled).abs() < 5e-5,
                 "{}: {} against {scaled}",
@@ -2333,66 +2172,5 @@ mod tests {
                 is.volume_fraction()
             );
         }
-    }
-
-    /// The darkened rows are held until the bump: below it the registry gives 23's rows, and the
-    /// tests' switch reaches the darkened ones ahead of it.
-    #[test]
-    fn the_rows_are_darkened_only_from_the_24_bump() {
-        assert!(
-            GENERATOR_VERSION < ROW_DARKENING_VERSION,
-            "the 23 → 24 bump (P14.T54.b, or the version P14.T49.k rides, decision-p14-t49k Q0) \
-             serves the darkened crystalline rows, `basalt_reduced` with its fine graphite and \
-             `ferric` with its fine nanophase oxide. Swap `DARKENED`'s two rows into `OPTICS` in \
-             place of 23's (their parts `BASALT_REDUCED_DARKENED` and `FERRIC_DARKENED` and their \
-             sources renamed to the rows' own, 23's parts, mode and labels deleted), and delete \
-             `ROW_DARKENING_VERSION`, `RowDarkeningRules` with its `Held` arm, \
-             `with_row_darkening` and its thread's rules (and the switch in every test that sets \
-             it, `planetary::testing::with_every_24_hold`'s among them), `DARKENED` and \
-             `darkened_rows`, this test and \
-             `a_panic_inside_the_row_darkening_switch_sets_the_rules_back`. In hyperion-fit's \
-             `substance_albedos`, drop the superseded items `BASALT_REDUCED_ALBEDO` and \
-             `FERRIC_ALBEDO`, fit the swapped rows as their own items (ITEMS back to 55, the fit's \
-             darkened half and `render`'s gone), and restamp tables/substance_albedo.rs with \
-             `hyperion-fit run substance_albedos --since 24`; refit `space_weathering --since \
-             24`, whose fingerprint probes every regolith row's w and A_N, and check its Λ to the \
-             bit against 23's, since it is fitted on `feldspathic` and `basalt_fe`, which do not \
-             change (a moved Λ is a leak, to main). Re-bless tests/golden/substance/registry.golden \
-             (`[albedo]`'s `basalt_reduced` and `ferric`: their parts, values and bins) and every \
-             planetary golden that reads a `ferric` deposit or a `basalt_reduced` lid under air \
-             (Mars's Bond albedo and T_eq, those lids' bodies and the palette's B, V and R of the \
-             two rows; Mercury and the capped airless `basalt_reduced` bodies keep the cap's \
-             0.11). Then settle the tests that read 23's rows: `under_each_rules` here and its \
-             held halves, `substance_optics_the_darkened_rows_move_only_ferric_and_basalt_reduced` \
-             (its 24 rows only), area_mix's \
-             `under_24_s_rows_the_airless_cap_holds_mercury_and_a_vesta_like_basalt` (its 24 case \
-             only), and the fit's `substance_albedos_the_darkened_*` anchors and items tests, \
-             which read the swapped rows as the rows in force"
-        );
-        assert_eq!(RowDarkeningRules::in_force(), RowDarkeningRules::Held);
-        assert_eq!(
-            with_row_darkening(RowDarkeningRules::Darkened, RowDarkeningRules::in_force),
-            RowDarkeningRules::Darkened
-        );
-        assert_eq!(RowDarkeningRules::in_force(), RowDarkeningRules::Held);
-    }
-
-    /// A panic inside the tests' switch sets the rules back. Skipped, not failed, where panics
-    /// abort (wasm32-wasip1), since `catch_unwind` would abort the whole test binary there; the
-    /// other CI architectures run it.
-    #[test]
-    #[cfg(panic = "unwind")]
-    fn a_panic_inside_the_row_darkening_switch_sets_the_rules_back() {
-        let failed = std::panic::catch_unwind(|| {
-            with_row_darkening(RowDarkeningRules::Darkened, || {
-                panic!("a test fails inside")
-            });
-        });
-        assert!(failed.is_err());
-        assert_eq!(
-            RowDarkeningRules::in_force(),
-            RowDarkeningRules::Held,
-            "a panic inside the switch sets the rules back"
-        );
     }
 }

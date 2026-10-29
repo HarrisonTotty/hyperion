@@ -2,8 +2,8 @@
 //! envelope's CO, CH₄, NH₃, HCN and CO₂ stop following the local equilibrium as the gas rises, by
 //! Zahnle and Marley's quench relations, and the gas above those levels, on the Surface path.
 //!
-//! Nothing on the record reads it until P14.T54.b (P14.T52.d calls it), so no generated output
-//! moves with it.
+//! The record reads it from generator version 24 (P14.T54.b; P14.T52.d calls it), so its rules
+//! are output, and a change to any of them a generator-version change.
 //!
 //! # The quench approximation
 //!

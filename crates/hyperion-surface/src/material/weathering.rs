@@ -59,10 +59,11 @@
 //! interpolation, every clamp an explicit comparison; no `f32`, no `min` or `max`. Out-of-range
 //! inputs panic (the server and the sim validate them at the palette's and the header's build).
 //!
-//! # Not on the record yet
+//! # On the record from 24
 //!
-//! Nothing on the record reads this module at generator version 22, and the albedo scale it enters
-//! is solved only on a header that carries a maturity, which none does before P14.T54.b.
+//! The albedo scale this module enters is solved only on a header that carries a maturity, which
+//! P14.T54.b gives from generator version 24; below it no header did, and nothing on the record
+//! read this module.
 
 use hyperion_base::math;
 

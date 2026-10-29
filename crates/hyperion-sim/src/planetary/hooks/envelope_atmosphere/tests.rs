@@ -1366,135 +1366,6 @@ fn every_table_envelope_s_internal_temperature_is_finite_and_positive() {
     assert!(sub_neptune.is_ok_and(|t| t.value() > 0.0));
 }
 
-/// The files outside this module whose code reaches the envelope's atmosphere behind a named
-/// hold, each with the name of its hold, which its code (outside an inline test module, comments
-/// left out) must name: P14.T54.b.i's wiring of the record's envelope section, behind the air's
-/// sections' hold (`AirRules`), and its tests (decision-p14-t54b-open §3.3). **P14.T54.b.l deletes
-/// this list** with the tripwire below.
-const HELD: [(&str, &str); 2] = [
-    ("planetary/system/envelope.rs", "AirRules"),
-    ("planetary/system/envelope/tests.rs", "AirRules"),
-];
-
-/// Whether the code of `text` (its lines before an inline `mod tests {`, comments left out) names
-/// `hold`.
-fn names_its_hold(text: &str, hold: &str) -> bool {
-    text.lines()
-        .map(str::trim_start)
-        .take_while(|code| !code.starts_with("mod tests {"))
-        .filter(|code| !code.starts_with("//"))
-        .any(|code| code.contains(hold))
-}
-
-/// The hold check reads the code alone: a comment naming the hold, or code inside an inline test
-/// module, does not count.
-#[test]
-fn the_envelope_s_hold_check_reads_the_code_alone() {
-    assert!(names_its_hold(
-        "match rules { AirRules::Held => 0 }\n",
-        "AirRules"
-    ));
-    assert!(!names_its_hold("// AirRules\nfn f() {}\n", "AirRules"));
-    assert!(!names_its_hold(
-        "fn f() {}\n#[cfg(test)]\nmod tests {\n    use super::AirRules;\n}\n",
-        "AirRules"
-    ));
-}
-
-/// Nothing on the record calls the envelope's atmosphere but through its hold before P14.T54.b's
-/// bump (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside this module, its
-/// tests and [`HELD`]'s files calls it or builds its inputs, comments, its module line and
-/// `hooks`' re-export (whatever lines it takes) left out; each of [`HELD`]'s files is a source file
-/// whose code names its hold, so that a caller in any other file fails, and so does a listed file
-/// that drops its hold (decision-p14-t54b-open §3.3). The bare type is not matched: the record's
-/// envelope (`record::Envelope`) stores an [`EnvelopeAtmosphere`] and reads only what it holds, as
-/// the inventory's scan reads its type; under the hold's `Held` arm the record calls nothing here
-/// (`the_held_envelope_computes_nothing`). **P14.T54.b.l deletes this tripwire.**
-#[test]
-fn nothing_on_the_record_calls_the_envelope_atmosphere_yet() {
-    fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
-        let mut entries: Vec<_> = std::fs::read_dir(dir)
-            .expect("a source directory")
-            .map(|e| e.expect("an entry").path())
-            .collect();
-        entries.sort();
-        for path in entries {
-            if path.is_dir() {
-                walk(&path, files);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                files.push(path);
-            }
-        }
-    }
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    walk(&src, &mut files);
-    assert!(files.len() > 100, "the walk found the crate's sources");
-    // Its calls and the inputs it would be called with, by name.
-    let patterns = [
-        "EnvelopeAtmosphere::derive",
-        "EnvelopeAtmosphereInputs",
-        "envelope_atmosphere::",
-        "envelope_internal_temperature",
-        "cooling_law_temperature",
-        "DeckKind",
-    ];
-    let relative_of = |path: &std::path::Path| {
-        path.strip_prefix(&src)
-            .expect("under src")
-            .to_string_lossy()
-            .replace('\\', "/")
-    };
-    for (held, hold) in HELD {
-        let path = files
-            .iter()
-            .find(|path| relative_of(path.as_path()) == held)
-            .unwrap_or_else(|| panic!("{held} is a source file"));
-        let text = std::fs::read_to_string(path).expect("a readable source");
-        assert!(
-            names_its_hold(&text, hold),
-            "{held} calls the envelope's atmosphere behind {hold}, which its code no longer names"
-        );
-    }
-    let mut found = Vec::new();
-    for path in &files {
-        let relative = relative_of(path);
-        if relative.starts_with("planetary/hooks/envelope_atmosphere")
-            || HELD.iter().any(|(held, _)| *held == relative)
-        {
-            continue;
-        }
-        let text = std::fs::read_to_string(path).expect("a readable source");
-        let mut in_reexport = false;
-        for (n, line) in text.lines().enumerate() {
-            let code = line.trim_start();
-            if in_reexport {
-                in_reexport = !code.trim_end().ends_with(';');
-                continue;
-            }
-            if relative == "planetary/hooks/mod.rs" {
-                if code == "pub mod envelope_atmosphere;" {
-                    continue;
-                }
-                if code.starts_with("pub use envelope_atmosphere::") {
-                    in_reexport = !code.trim_end().ends_with(';');
-                    continue;
-                }
-            }
-            if code.starts_with("//") {
-                continue;
-            }
-            if patterns.iter().any(|p| code.contains(p)) {
-                found.push(format!("{relative}:{}: {code}", n + 1));
-            }
-        }
-    }
-    assert!(
-        found.is_empty(),
-        "nothing on the record calls it but through its hold before P14.T54.b: {found:#?}"
-    );
-}
-
 /// No haze's material can be a deck's condensate, so that every mode of an envelope is a deck's or
 /// a haze's by whether its deck is a listed deck's condensate (the record's and the server's rule,
 /// P14.T54.b.i): P14.T52.c's loop forms decks of the rows with a law aloft alone
@@ -1663,9 +1534,10 @@ fn deep_deck_lines(name: &str, atmosphere: &EnvelopeAtmosphere) -> (Vec<String>,
 /// Printed, not asserted beyond being finite (decision-deep-decks-split §5, §8.1): on the table's
 /// Jupiter and Saturn and Sudarsky's giants at `T_eff` 900, 1,200 and 1,500 K, each refractory or
 /// salt deck below the join (and, beside them, those above it), its τ(550), base, top, `f_sed` and
-/// the τ its profile puts above 1 bar, at 23's densities and at P14.T49.n's read ones (24's). The read ones give the liquid refractories
-/// a density but no optics (no index file is a liquid's), so their τ is not modelled even then; where
-/// a size and a density are known, a geometric-limit stand-in is printed beside it.
+/// the τ its profile puts above 1 bar, at P14.T49.n's read densities (24's), which give the liquid
+/// refractories a density but no optics (no index file is a liquid's), so that their τ is not
+/// modelled; where a size and a density are known, a geometric-limit stand-in is printed beside
+/// it.
 /// The stop line: a deck that puts τ 1 or more above 1 bar clouds the visible column, which main
 /// rules on (eq. 5 by per-deck K).
 #[test]
@@ -1697,12 +1569,8 @@ fn the_deep_decks_put_little_above_one_bar() {
         );
         largest[0].max(largest[1]).max(largest[2])
     };
-    let held = print("23's densities");
-    let read =
-        crate::substance::with_read_densities(crate::substance::ReadDensitiesRules::Read, || {
-            print("24's read densities")
-        });
-    assert!(held.is_finite() && read.is_finite());
+    let read = print("24's read densities");
+    assert!(read.is_finite());
 }
 
 /// The golden's envelopes, by name: the Solar System table's four giants, the KELT-9b-like dayside

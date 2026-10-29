@@ -8,7 +8,6 @@ use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::solar::{
     PLANETS, SOLAR_AGE, derive_historic, placed_about_the_sun, solar_disc,
 };
-use crate::planetary::hooks::figures::cover::PERENNIAL_ICE_TEMPERATURE;
 use crate::planetary::hooks::figures::{VolatileHistory, table_figures};
 use crate::planetary::hooks::surface::tests::{conditions_of, inputs_of, spin_of, table};
 use crate::planetary::hooks::surface::{
@@ -226,35 +225,46 @@ fn earth_at(a_au: f64) -> DerivedBody {
 
 #[test]
 fn a_ninety_degree_world_started_cold_has_an_equatorial_belt_and_one_started_warm_has_none() {
-    // An Earth at 1.12 au, tilted to 90°: a temperate world at 271.1 K, whose equator's annual
-    // mean, 262.9 K, lies under the perennial ice edge and whose poles, at 286.8 K, lie above it.
-    // It is a test of the model's own profile: at 0.80 S⊕ it lies under the fluxes at which Kilic
-    // et al. 2018 found their belts (0.93–1.10 of the solar constant). (At 1.1 au, version 22's
-    // distance, the batch's Earth at the passes' stand-ins puts its equator at 263.9 K, above the
-    // edge.)
+    // An Earth at 1.12 au, tilted to 90°, at 0.80 S⊕, under the fluxes at which Kilic et al. 2018
+    // found their belts (0.93–1.10 of the solar constant). At 23 it was a temperate world at
+    // 271.1 K whose equator's annual mean, 262.9 K, lay under the perennial ice edge and whose
+    // poles, at 286.8 K, lay above it. From 24 P14.T53.a's weathering thermostat holds it at
+    // 273.2 K, its equator at 265.4 K and its poles at 288.3 K, both above the edge, with no ice;
+    // without the thermostat its warm branch collapses between 1.08 and 1.10 au, so no Earth moved
+    // out keeps its equator under the edge there. The belt is a test of the model's own profile,
+    // so it is taken at a cover whose threshold, 270 K, lies between the equator's annual mean and
+    // the poles'.
     let spin = SeasonalSpin {
         obliquity: Radians::from(Degrees::new(90.0)),
         ..spin_of("Earth")
     };
     let body = earth_at(1.12);
     let conditions = conditions_of(&body, spin).unwrap();
-    let figures = table_figures(&body)
-        .unwrap()
-        .with_surface(&conditions, VolatileHistory::NONE);
     eprintln!(
-        "an Earth at 1.12 au tilted to 90°: {:?}, T_s {:.1} K, equator {:.1} K, pole {:.1} K, ice {:.3}",
+        "an Earth at 1.12 au tilted to 90°: {:?}, T_s {:.1} K, equator {:.1} K, pole {:.1} K",
         body.atmosphere().state(),
         conditions.mean_surface_temperature().value(),
         conditions.zonal_temperature(0.0).value(),
         conditions.zonal_temperature(1.0).value(),
-        figures.ice_fraction(),
     );
     assert_eq!(body.atmosphere().state(), SurfaceState::Temperate);
-    assert!(conditions.zonal_temperature(0.0) < PERENNIAL_ICE_TEMPERATURE);
-    assert!(conditions.zonal_temperature(1.0) > PERENNIAL_ICE_TEMPERATURE);
-    assert!(figures.ice_fraction() > 0.0 && figures.ice_fraction() < 1.0);
-    let cold = regime_of(&body, &conditions, true);
-    let warm = regime_of(&body, &conditions, false);
+    let threshold = Kelvin::new(270.0);
+    assert!(conditions.zonal_temperature(0.0) < threshold);
+    assert!(conditions.zonal_temperature(1.0) > threshold);
+    let reservoirs = surface_reservoirs(body.atmosphere());
+    let regime = |from_colder: bool, ice_threshold: Kelvin| {
+        ClimateRegime::of(
+            &conditions,
+            &ClimateInputs {
+                mass: body.mass(),
+                reservoirs: &reservoirs,
+                from_colder,
+                ice_fraction: 0.5,
+                ice_threshold,
+            },
+        )
+    };
+    let (cold, warm) = (regime(true, threshold), regime(false, threshold));
     assert_eq!(cold.forcing(), Forcing::IceBelt);
     assert_eq!(warm.forcing(), Forcing::Seasonal);
     // The belt is the profile's cold equator, with no extra hysteresis: the cover is the same
@@ -264,18 +274,10 @@ fn a_ninety_degree_world_started_cold_has_an_equatorial_belt_and_one_started_war
     assert_eq!(cold.model(), warm.model());
     // A cover whose threshold lies above the poles' annual mean ices the poles too: caps and a
     // band together are no belt, whatever the history.
-    let reservoirs = surface_reservoirs(body.atmosphere());
-    let iced_poles = ClimateRegime::of(
-        &conditions,
-        &ClimateInputs {
-            mass: body.mass(),
-            reservoirs: &reservoirs,
-            from_colder: true,
-            ice_fraction: 0.5,
-            ice_threshold: Kelvin::new(290.0),
-        },
+    assert_eq!(
+        regime(true, Kelvin::new(290.0)).forcing(),
+        Forcing::Seasonal
     );
-    assert_eq!(iced_poles.forcing(), Forcing::Seasonal);
     // At Earth's own obliquity the same world, started cold, has caps and no belt.
     let upright = conditions_of(&body, spin_of("Earth")).unwrap();
     assert_eq!(

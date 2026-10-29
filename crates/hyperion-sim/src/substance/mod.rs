@@ -81,8 +81,6 @@ pub use aerosol::{
 pub use condensed::{
     CondensedColumns, CondensedPhase, DensityAt, GrainDensity, Transition, TransitionKind,
 };
-#[cfg(test)]
-pub(crate) use condensed::{ReadDensitiesRules, with_read_densities};
 pub use diagram::{
     DensityEquation, DensityForm, MeltingCurve, MeltingEquation, MeltingPiece, PhaseDiagram,
     SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation, condensables,
@@ -98,8 +96,6 @@ pub use liquid::{
     LiquidComposition, LiquidMember, ResolveLiquidError, liquid_properties,
     pure_liquid_scattering_per_m,
 };
-#[cfg(test)]
-pub(crate) use liquid::{CompressedLiquidsRules, with_compressed_liquids};
 pub use mix::{GasColumns, mean_molar_mass_g_per_mol};
 pub use optics::{CondensedOptics, ReferenceForm, ResolvePaletteEntryError, resolve_palette_entry};
 pub use phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};
@@ -860,7 +856,7 @@ mod tests {
             if let Some(condensed) = row.condensed() {
                 named(condensed.sources());
                 let measured_liquid = matches!(
-                    with_read_densities(ReadDensitiesRules::Read, || condensed.grain_density()),
+                    condensed.grain_density(),
                     GrainDensity::MeasuredLiquid { .. }
                 );
                 let liquid = measured_liquid.then_some("liquid grain density");
@@ -903,7 +899,7 @@ mod tests {
             let transition = condensed.transition();
             let t = transition.temperature().value();
             assert!(t.is_finite() && t > 0.0, "{key}: transition {t} K");
-            let given = with_read_densities(ReadDensitiesRules::Read, || condensed.grain_density());
+            let given = condensed.grain_density();
             match (given, row.phase_diagram()) {
                 (GrainDensity::OfDiagram, Some(diagram)) => {
                     assert_eq!(transition.kind(), TransitionKind::TriplePoint, "{key}");
@@ -1034,10 +1030,17 @@ mod tests {
             water.grain_density(CondensedPhase::Liquid, Kelvin::new(250.0)),
             None
         );
-        // Argon's solid density was not read: not modelled.
+        // Argon's solid density (fcc), read from 24 (P14.T49.n), and β-carbon monoxide's, not read:
+        // not modelled.
         let argon = Gas::Argon.substance().substance();
+        assert!(
+            argon
+                .grain_density(CondensedPhase::Solid, Kelvin::new(60.0))
+                .is_some_and(|rho| rho.value() > 0.0)
+        );
+        let carbon_monoxide = by_key("CO").unwrap().substance();
         assert_eq!(
-            argon.grain_density(CondensedPhase::Solid, Kelvin::new(60.0)),
+            carbon_monoxide.grain_density(CondensedPhase::Solid, Kelvin::new(65.0)),
             None
         );
         let brine = by_key("brine_nacl").unwrap().substance();

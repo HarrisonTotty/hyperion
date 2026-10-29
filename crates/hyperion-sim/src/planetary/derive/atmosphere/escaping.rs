@@ -1,17 +1,14 @@
-//! P14.T53.a's escape on the snapshot path: the atmosphere's steps 1 to 5 under the escape's batch
-//! rules ([`EscapeRules::Batch`](crate::planetary::chem::escape::EscapeRules)), which read
-//! [`chem::escape`](crate::planetary::chem::escape)'s laws. Under the hold, to generator version
-//! 23, none of it is read, and the steps are version 23's to the bit (`held_state_and_greenhouse`);
-//! P14.T54.b deletes that arm.
+//! P14.T53.a's escape on the snapshot path: the atmosphere's steps 1 to 5, which read
+//! [`chem::escape`](crate::planetary::chem::escape)'s laws, from generator version 24 (the 23 → 24
+//! bump, P14.T54.b, deleted version 23's steps).
 //!
 //! The order, as P14.T53.a's wiring gives it:
 //!
 //! 1. **A gas envelope** (at least `THIN_ENVELOPE_FRACTION` of the mass) is as it was, with the
 //!    helium its escape left ([`envelope_helium`]) on its outcome.
-//! 2. **Retention**: Jeans's test and the ice-held volatiles: P14.T54.a's stand-in under
-//!    P14.T53.c's hold, and from 24 an ice-held nitrogen's and argon's own rule, their inventory
-//!    less their vapour air's escape at their ice's own temperature, on any solid surface
-//!    (`chem::tenuous`).
+//! 2. **Retention**: Jeans's test and the ice-held volatiles: P14.T54.a's stand-in for an ice
+//!    crust's water, and an ice-held nitrogen's and argon's own rule, their inventory less their
+//!    vapour air's escape at their ice's own temperature, on any solid surface (`chem::tenuous`).
 //! 3. **The cosmic shoreline** ([`Shoreline`]; Zahnle and Catling 2017, ApJ 843, 122): every
 //!    airborne inventory gas is multiplied by the share it keeps, at the body's X-ray and
 //!    ultraviolet fluence over Earth's, its escape speed √(2GM ÷ R), its mean impact speed and its
@@ -46,13 +43,12 @@
 //! 6. **Gao et al. 2015**: a carbon dioxide air's photolysis under an M dwarf
 //!    ([`desiccated_carbon_dioxide`]), on the outcome only: the carbon monoxide has no gas row, so
 //!    the air keeps its carbon dioxide until P14.T54.b carries the CO and its O₂ (recorded).
-//! 7. **The greenhouse**: P14.T53.a's broadened form, in force under the batch, from the body's
-//!    base temperature, the airless mean (`surface_mix::airless_mean`: the larger of `T_eq` and
-//!    the night floor under the unlit mean's rules, `T_eq` to the bit under their hold; P14.T24.i's
-//!    follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of step 2 read
-//!    too, their vapour held at their ice's own temperature from 24 (P14.T53.c). Under 100 Pa of
-//!    its partial pressures the body is airless at that base; from 24 `Tenuous` there instead
-//!    where its column reaches the tenuous floor, its gases listed (P14.T53.c).
+//! 7. **The greenhouse**: P14.T53.a's broadened form, from the body's base temperature, the
+//!    airless mean (`surface_mix::airless_mean`: the larger of `T_eq` and the night floor;
+//!    P14.T24.i's follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of
+//!    step 2 read too, their vapour held at their ice's own temperature (P14.T53.c). Under 100 Pa
+//!    of its partial pressures the body is airless at that base, or `Tenuous` there where its
+//!    column reaches the tenuous floor, its gases listed (P14.T53.c).
 //! 8. **The outcome** ([`EscapeOutcome`]): each element's, mass-conserving (tested).
 //! 9. **The state published** (P14.T53.b part 1 (a) and (c), `present_state`): a world inside the
 //!    runaway limit at its hosts' largest past luminosity publishes its present class, a runaway
@@ -89,8 +85,8 @@ use super::{
     EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, IceHeld, Insolation,
     PartialPressures, PassSurface, PublishedState, Retention, RunawayDeck, SILICATE_SOLIDUS,
     StepClimate, SupercriticalReservoir, SurfaceState, TEMPERATE_AIRBORNE_CARBON,
-    earth_xuv_fluence, exobase_temperature, mole_fraction_of, partitioned_greenhouse,
-    present_state_in_force, retained, steam_envelope_in_force, surface_mix, tenuous_in_force,
+    earth_xuv_fluence, exobase_temperature, mole_fraction_of, partitioned_greenhouse, retained,
+    steam_envelope_in_force, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -195,9 +191,9 @@ pub(crate) fn melt_oxygen_capacity(mass: Kilograms) -> Kilograms {
 /// n the element registry's protosolar He/H, 10^(10.986 − 12) = 0.0968 (Lodders 2010, Table 6, as
 /// [`Element::protosolar_abundance_per_hydrogen`] holds it), at its standard atomic weights, 0.278
 /// ([`helium_mass_fraction_of`]). It is the helium an envelope forms with, from which P14.T53.a's
-/// fractionation starts, to generator version 23 and for a body its derivation gives no helium;
-/// from 24 the derivation starts from the host star's own (`PRIMORDIAL_HELIUM_VERSION`,
-/// `fractionation_start`; decision-p14-t50b-envelope §5), and a solar host's is this to the bit.
+/// fractionation starts, for a body its derivation gives no helium; from generator version 24 the
+/// derivation starts from the host star's own (`fractionation_start`;
+/// decision-p14-t50b-envelope §5), and a solar host's is this to the bit.
 #[must_use]
 pub(crate) fn protosolar_helium_mass_fraction() -> f64 {
     helium_mass_fraction_of(Element::He.protosolar_abundance_per_hydrogen())
@@ -653,12 +649,6 @@ impl ThermostatCounts {
         taken_below: 0.0,
         taken_above: 0.0,
     };
-
-    /// The batch's greenhouse solves beyond each atmosphere's first.
-    #[must_use]
-    pub(crate) const fn extra_solves(&self) -> u64 {
-        self.solves + self.cold_trap + self.methane
-    }
 }
 
 /// The greenhouse steps this test thread has taken so far ([`exit_counts`](crate::planetary::chem::partition::exit_counts)).
@@ -685,8 +675,7 @@ thread_local! {
 
 /// `run`'s result with every saturated methane reservoir's loss solved again and compared with the
 /// state that stands (P14.T53.a's cost lever), and the largest share by which a temperature or a
-/// partial pressure moved; the switch before is set back after, a panic in `run` included, as
-/// [`with_rules`](crate::planetary::chem::escape::with_rules) sets its rules back.
+/// partial pressure moved; the switch before is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_resolve_check<R>(run: impl FnOnce() -> R) -> (R, f64) {
     /// Sets the thread's check back as it drops.
@@ -704,8 +693,7 @@ pub(crate) fn with_resolve_check<R>(run: impl FnOnce() -> R) -> (R, f64) {
 }
 
 /// `run`'s result with the thermostat as `thermostat` sets it on this thread, and what the batch
-/// counted meanwhile; the switch before is set back after, a panic in `run` included, as
-/// [`with_rules`](crate::planetary::chem::escape::with_rules) sets its rules back.
+/// counted meanwhile; the switch before is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_thermostat<R>(
     thermostat: Thermostat,
@@ -1107,9 +1095,8 @@ struct Body<'a> {
     exobase: Kelvin,
     /// Its base temperature, `T_base`: the airless mean over the pass's surface
     /// (`surface_mix::airless_mean`; P14.T24.i's follow-up, decision-t24i-airless-state D1.3),
-    /// the larger of `T_eq` and the night floor under the unlit mean's rules and `T_eq` to the bit
-    /// under their hold. The greenhouse starts from it, an airless body publishes at it, and the
-    /// ice-held stand-in reads it.
+    /// the larger of `T_eq` and the night floor. The greenhouse starts from it, an airless body
+    /// publishes at it, and the ice-held stand-in reads it.
     base: Kelvin,
     retention: Retention,
     held: IceHeld,
@@ -1209,7 +1196,7 @@ impl<'a> Body<'a> {
     }
 
     /// The body as one that holds nothing, airless at its base temperature, the airless mean (its
-    /// `base`, as the held path's airless arms publish; decision-t24i-airless-state D1.3), every
+    /// `base`; decision-t24i-airless-state D1.3), every
     /// element escaped: its envelope's hydrogen and helium `formed` and its inventory.
     #[must_use]
     fn holding_nothing(&self, (hydrogen, helium): (f64, f64)) -> Atmosphere {
@@ -1724,8 +1711,9 @@ impl<'b> Solver<'_, 'b> {
     }
 }
 
-/// Steps 1 to 5 of the atmosphere ([`atmosphere_under`](super::atmosphere_under)) under the
-/// escape's batch rules, over the surface `surface`, with the escape's outcome
+/// Steps 1 to 5 of the atmosphere ([`atmosphere_under`](super::atmosphere_under)), over the surface
+/// `surface`: the state, the greenhouse and the partial pressures, with T13.c's table's Bond albedo
+/// and cloud fraction of the state, which the area mix then replaces, and the escape's outcome
 /// ([`Atmosphere::escape`]): the [module documentation](self)'s order.
 #[must_use]
 pub(super) fn state_and_greenhouse(
@@ -1832,8 +1820,7 @@ pub(super) fn state_and_greenhouse(
 ///   [`SurfaceState::RunawayGreenhouse`], its division and its water's state unchanged. The state
 ///   is fixed within that solve: no feedback.
 ///
-/// Every other state is its own, `Airless` and `MagmaOcean` by their own tests, and so is every
-/// state where part 1 is not in force ([`present_state_in_force`]), whose passes judge no hothouse.
+/// Every other state is its own, `Airless` and `MagmaOcean` by their own tests.
 ///
 /// [`solved_as_a_hothouse`]: super::solved_as_a_hothouse
 #[must_use]
@@ -1843,17 +1830,14 @@ fn present_state(
     published: PublishedState,
 ) -> SurfaceState {
     let present = match state {
-        SurfaceState::RunawayGreenhouse if present_state_in_force() => {
-            match inputs.present_insolation {
-                Insolation::InsideRunaway => SurfaceState::RunawayGreenhouse,
-                Insolation::Habitable => SurfaceState::Temperate,
-                Insolation::BeyondMaximumGreenhouse => SurfaceState::Snowball,
-            }
-        }
+        SurfaceState::RunawayGreenhouse => match inputs.present_insolation {
+            Insolation::InsideRunaway => SurfaceState::RunawayGreenhouse,
+            Insolation::Habitable => SurfaceState::Temperate,
+            Insolation::BeyondMaximumGreenhouse => SurfaceState::Snowball,
+        },
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
-        | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
         | SurfaceState::Snowball
         | SurfaceState::Tenuous
@@ -1880,10 +1864,7 @@ fn present_state(
 /// runaway's.
 #[must_use]
 fn water_follows(state: SurfaceState, inputs: &AtmosphereInputs, steam: Kilograms) -> SurfaceState {
-    if state == SurfaceState::RunawayGreenhouse
-        && steam > Kilograms::ZERO
-        && present_state_in_force()
-    {
+    if state == SurfaceState::RunawayGreenhouse && steam > Kilograms::ZERO {
         match inputs.present_insolation {
             Insolation::InsideRunaway => SurfaceState::RunawayGreenhouse,
             Insolation::Habitable => SurfaceState::Temperate,
@@ -2006,10 +1987,10 @@ fn finish(
         SurfaceState::MagmaOcean
     } else if total < AIRLESS_PRESSURE {
         // Under 100 Pa of the greenhouse's own partial pressures, from the base: published at the
-        // base, the airless mean, as the held path's airless arms are (decision-t24i-airless-state
-        // D1.3). From P14.T53.c an air whose column reaches the tenuous floor is `Tenuous`, its
+        // base, the airless mean (decision-t24i-airless-state D1.3). From P14.T53.c an air whose
+        // column reaches the tenuous floor is `Tenuous`, its
         // gases listed, at the same base: its greenhouse is the airless one its steps solved.
-        let thin = if tenuous_in_force() && holds_tenuous_air(total, gravity) {
+        let thin = if holds_tenuous_air(total, gravity) {
             SurfaceState::Tenuous
         } else {
             SurfaceState::Airless

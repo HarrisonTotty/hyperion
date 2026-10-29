@@ -144,8 +144,8 @@
 //! the profile's evaluations: one per scan level, a few dozen per base, and [`SUBSTEPS`] per scan
 //! level of each deck's column, unmeasured on a quiet machine (P14.T33.a's `body_detail`).
 //!
-//! Nothing on the record reads it until P14.T54.b wires P14.T52.d's envelopes and P14.T24.c's
-//! aerosols, so no generated output moves with it.
+//! P14.T54.b wires it to the record from generator version 24, through P14.T52.d's envelopes and
+//! P14.T24.c's aerosols, so a change to it is a generator-version change.
 
 use std::error::Error;
 use std::fmt;

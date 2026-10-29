@@ -14,7 +14,6 @@ use crate::events::testing::{assert_partition_independent, partition};
 use crate::events::{EventBin, event_id};
 use crate::id::event_tags;
 use crate::planetary::hooks::figures::ICY_PROJECTILE_DENSITY;
-use crate::planetary::testing::with_every_24_hold;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 
 fn list(model: &ImpactModel, window: TimeWindow) -> Vec<Impact> {
@@ -157,7 +156,7 @@ fn an_earth_is_struck_as_the_ruling_has_it() {
 }
 
 /// The ruling's tests 1–3 on the Solar System of P14.T48.f's tests, under the rules at 23 and with
-/// every hold at 24 in force: Earth above 1 Mt once in 30–1,000 years; the Moon once in
+/// Earth above 1 Mt once in 30–1,000 years; the Moon once in
 /// 1,000–10,000; Jupiter, struck by the giants' comets, meets a Shoemaker–Levy 9 (a comet over
 /// 1.5 km; its parent's mass gives 1.5 km at 500–600 kg m⁻³) once in 50–500 years, the plan's own
 /// bound, and 10–65 impacts a year above 1 Mt (Hueso et al. 2018, A&A 617, A68: 10–65 a year of
@@ -211,7 +210,7 @@ fn the_solar_system_s_bodies_are_struck_as_observed() {
         (earth_megaton, moon_megaton, sl9_interval)
     };
     let at_23 = check();
-    let at_24 = with_every_24_hold(check);
+    let at_24 = check();
     assert!(at_23.0.is_finite() && at_24.0.is_finite());
 }
 

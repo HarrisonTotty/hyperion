@@ -28,11 +28,11 @@
 //!
 //! One palette holds one entry for each (role, key), so seas of one key at two compositions
 //! would share one entry: a recorded limitation (decision-r11-palette-liquids §1.7), unreached
-//! while P14.T51.a's entries are one a substance and phase. Below generator version 24 the record
-//! holds its modifiers off it (`AIR_SECTIONS_VERSION`), so a generated palette holds no deposit and
-//! no cover; nor a cold-trapped [`PaletteRole::Ice`] entry on an airless body, which no condensate
-//! on the record names until P14.T51.f, wired by P14.T54.b (the census, P14.T33.c, lists
-//! cold-trapped `H2O` and `CO2` as unreached until then; science-composition-crusts.md §6).
+//! while P14.T51.a's entries are one a substance and phase. From generator version 24 the record
+//! carries its modifiers (P14.T54.b.c), so a generated palette holds their deposit and cover, and
+//! its cold traps (P14.T51.f, wired by P14.T54.b), so a cold-trapped [`PaletteRole::Ice`] entry on
+//! an airless body (the census, P14.T33.c, listed cold-trapped `H2O` and `CO2` as unreached until
+//! then; science-composition-crusts.md §6).
 //!
 //! # A solid's entry
 //!
@@ -85,8 +85,8 @@
 //!   composition's liquidus the record is that composition's supercooled liquid, a stated
 //!   stand-in, basis `Derived` ([`liquid_properties`]' own rule);
 //! - **the pressure:** the record's surface pressure, to which a pure liquid with a reference
-//!   equation of state is compressed from generator version 24 (P14.T49.n's hold,
-//!   `COMPRESSED_LIQUIDS_VERSION`; `Substance::compressed_liquid_density`'s law), so that its
+//!   equation of state is compressed from generator version 24 (P14.T49.n's;
+//!   `Substance::compressed_liquid_density`'s law), so that its
 //!   density, its index, its scattering and its viscosity read the density the partition's layer
 //!   and area read at the same state (decision-p14-t54a-water-consistency's W4); until then the
 //!   saturated liquid's. A solution and a melt are incompressible under either.
@@ -484,7 +484,7 @@ fn liquid_record(
 /// range, at the bound `temperature` lies beyond: its first melt below it, a part in a million
 /// below its critical point above it; under `pressure`, the body's surface pressure, to which a
 /// pure liquid is compressed from generator version 24 (`liquid_properties_at_pressure`,
-/// P14.T49.n's hold; its saturated record, [`liquid_properties`]', until then).
+/// P14.T49.n; its saturated record, [`liquid_properties`]', to 23).
 ///
 /// # Errors
 ///
@@ -573,9 +573,7 @@ mod tests {
 
     use super::*;
     use crate::planetary::hooks::crust::tests::{mars, moon, table_conditions};
-    use crate::substance::{
-        CompressedLiquidsRules, CondensedPhase, by_key, liquid_properties, with_compressed_liquids,
-    };
+    use crate::substance::{CondensedPhase, by_key, liquid_properties};
 
     /// The registry's row of `key`, which a test knows to be one.
     fn row(key: &str) -> SubstanceId {
@@ -611,85 +609,78 @@ mod tests {
         );
     }
 
-    /// P14.T49.n's compression, held until 24 (`COMPRESSED_LIQUIDS_VERSION`): under 23's rules a
-    /// pure liquid's entry is its saturated liquid's at the record's temperature, to the bit; under
-    /// 24's its grain density is the registry's law at the record's temperature and surface
-    /// pressure to the bit, the density the partition's layer and area read at the same state
-    /// (W4), and its record is the record at that pressure, its index, scattering and viscosity at
-    /// that density: water under the table's Earth, about 3.5 × 10⁻⁵ denser under its 0.77 bar
-    /// (`κ_T` Δp, as Earth's sea's 4.6 × 10⁻⁵ at one atmosphere). Water held at its
-    /// boiling point under the table's Venus lies at its vapour pressure, so it is compressed by
-    /// no more than rounding, and a solution's entry (Titan's seas under the table's Earth, held
-    /// below their critical point) is unchanged.
+    /// P14.T49.n's compression, from 24: a pure liquid's entry's grain density is the registry's
+    /// law at the record's temperature and surface pressure to the bit, the density the
+    /// partition's layer and area read at the same state (W4), and its record is the record at that
+    /// pressure, its index, scattering and viscosity at that density: water under the table's
+    /// Earth, about 3.5 × 10⁻⁵ denser under its 0.77 bar than its saturated liquid, version 23's
+    /// entry (`κ_T` Δp, as Earth's sea's 4.6 × 10⁻⁵ at one atmosphere). Water held at its boiling
+    /// point under the table's Venus lies at its vapour pressure, so it is compressed by no more
+    /// than rounding, and a solution's entry (Titan's seas under the table's Earth, held below
+    /// their critical point) is its saturated record's.
     #[test]
     fn a_liquid_s_entry_reads_its_record_compressed_to_the_surface_pressure() {
-        let compressed = |id: SubstanceId, conditions: &SurfaceConditions| {
-            with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
-                liquid(id, conditions)
-            })
-            .unwrap()
-        };
         let water = row("H2O");
         let earth = table_conditions("Earth");
-        let held = liquid(water, &earth).unwrap();
-        let record = held.liquid.as_ref().unwrap();
-        let t = record.temperature;
+        let sea = liquid(water, &earth).unwrap();
+        let sea_record = sea.liquid.as_ref().unwrap();
+        let t = sea_record.temperature;
         let saturated = water
             .substance()
             .grain_density(CondensedPhase::Liquid, t)
             .unwrap();
-        assert_same_bits(held.grain_density_kg_m3, saturated.value());
-        assert_eq!(
-            record,
-            &liquid_properties(water, t, Composition::Reference).unwrap()
-        );
-        let sea = compressed(water, &earth);
+        let saturated_record = liquid_properties(water, t, Composition::Reference).unwrap();
         let law = water
             .substance()
             .compressed_liquid_density(t, earth.surface_pressure())
             .unwrap();
         assert_same_bits(sea.grain_density_kg_m3, law.value());
-        let sea_record = sea.liquid.as_ref().unwrap();
         assert_same_bits(sea_record.density_kg_m3, law.value());
-        assert_same_bits(sea_record.temperature.value(), t.value());
-        let at_pressure = with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
-            liquid_properties_at_pressure(
-                water,
-                t,
-                Composition::Reference,
-                earth.surface_pressure(),
-            )
-        })
+        let at_pressure = liquid_properties_at_pressure(
+            water,
+            t,
+            Composition::Reference,
+            earth.surface_pressure(),
+        )
         .unwrap();
         assert_eq!(sea_record, &at_pressure);
         assert_eq!(
             sea.normal_albedo_bvr,
             at_pressure.fresnel_normal_albedo_bvr()
         );
-        let relative = sea.grain_density_kg_m3 / held.grain_density_kg_m3 - 1.0;
+        let relative = sea.grain_density_kg_m3 / saturated.value() - 1.0;
         assert!(
             relative > 3e-5 && relative < 6e-5,
             "{relative:e} under {:?} at {t:?}",
             earth.surface_pressure()
         );
-        assert!(sea_record.refractive_index[6] > record.refractive_index[6]);
+        assert!(sea_record.refractive_index[6] > saturated_record.refractive_index[6]);
         eprintln!(
-            "water under the table's Earth, {:.2} K and {:.0} Pa: ρ {:.6} → {:.6} kg m⁻³ \
+            "water under the table's Earth, {:.2} K and {:.0} Pa: ρ {:.6} saturated → {:.6} kg m⁻³ \
              ({relative:.3e}), n(545 nm) {:.8} → {:.8}",
             t.value(),
             earth.surface_pressure().value(),
-            held.grain_density_kg_m3,
+            saturated.value(),
             sea.grain_density_kg_m3,
-            record.refractive_index[6],
+            saturated_record.refractive_index[6],
             sea_record.refractive_index[6],
         );
         let venus = table_conditions("Venus");
         let boiling = liquid(water, &venus).unwrap();
-        let boiling_compressed = compressed(water, &venus);
-        let moved = boiling_compressed.grain_density_kg_m3 / boiling.grain_density_kg_m3 - 1.0;
+        let boiling_record = boiling.liquid.as_ref().unwrap();
+        let boiling_saturated = water
+            .substance()
+            .grain_density(CondensedPhase::Liquid, boiling_record.temperature)
+            .unwrap();
+        let moved = boiling.grain_density_kg_m3 / boiling_saturated.value() - 1.0;
         assert!(moved.abs() < 1e-12, "{moved:e}");
         let seas = row("ch4_c2h6_n2");
-        assert_eq!(compressed(seas, &earth), liquid(seas, &earth).unwrap());
+        let titan_entry = liquid(seas, &earth).unwrap();
+        let titan_record = titan_entry.liquid.as_ref().unwrap();
+        assert_eq!(
+            titan_record,
+            &liquid_properties(seas, titan_record.temperature, Composition::Reference).unwrap()
+        );
     }
 
     /// A liquid's record outside its range is held inside it: a part in a million below its

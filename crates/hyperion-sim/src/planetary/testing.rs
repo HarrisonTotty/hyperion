@@ -9,8 +9,8 @@
 //! - [`sample_contexts`] draws real systems from a galaxy of the Milky Way's parameters: the
 //!   systems nearest a Sun-like point that pass a [`SampleFilter`], for the statistical tests
 //!   (design note 20).
-//! - For this crate's tests alone, `with_every_24_hold` runs a closure with every landed hold at
-//!   generator version 24 in force together, so that a test of a 24 figure reads 24 as it will
+//! - For this crate's tests alone, `with_every_25_hold` runs a closure with every landed hold at
+//!   generator version 25 in force together, so that a test of a 25 figure reads 25 as it will
 //!   ship (decision-t24i-airless-state D3.3).
 //! - [`partial_pressures`] states an air by hand, for other crates' tests of what a derivation
 //!   reads of one.
@@ -402,124 +402,11 @@ impl Error for SampleContextsError {
     }
 }
 
-/// `run`'s result with every landed hold at generator version 24 in force together on this
-/// thread, for a test that asserts a 24 figure (decision-t24i-airless-state D3.3, from P14.T24.i's
-/// follow-up): T53.a's census set the escape's rules alone, and T24.i's and T49.n's tests the unlit
-/// mean's alone, so the floor's absence on the escape's batch path fell between them. Each switch
-/// sets its rules back as it returns, a panic in `run` included, and a test may set one hold back
-/// inside it (`with_unlit_mean(UnlitMeanRules::Held, ..)`, say) to compare 24 with and without it.
-///
-/// The holds, each with its switch:
-///
-/// - the escape's, `ESCAPE_VERSION` (P14.T53.a), at `EscapeRules::Batch` through `with_rules`,
-///   which switches the Rayleigh floor's, `RAYLEIGH_FLOOR_VERSION` (P14.T24.h.a), with it;
-/// - the unlit mean's, `UNLIT_MEAN_VERSION` (P14.T24.i), at `UnlitMeanRules::Floored` through
-///   `with_unlit_mean`;
-/// - the moon bulk's, `MOON_BULK_VERSION` (P14.T56.f), at `MoonBulkRules::Batch` through
-///   `with_moon_bulk`;
-/// - the cold traps', `COLD_TRAPS_VERSION` (P14.T51.f), at `ColdTrapRules::Batch` through
-///   `with_cold_trap_rules`, which a system reads as it is generated (its `RecordRules`);
-/// - the read densities', `READ_DENSITIES_VERSION` (P14.T49.n), at `ReadDensitiesRules::Read`
-///   through `with_read_densities`: solid argon's and the other phases P14.T49.n read, and the
-///   liquids by temperature;
-/// - the compressed liquids', `COMPRESSED_LIQUIDS_VERSION` (P14.T49.n), at
-///   `CompressedLiquidsRules::Compressed` through `with_compressed_liquids`: every liquid the
-///   record reads compressed to its body's surface pressure.
-/// - the row darkening's, `ROW_DARKENING_VERSION` (P14.T49.k), at `RowDarkeningRules::Darkened`
-///   through `with_row_darkening`: the crystalline rows darkened by their cited fine phases
-///   (`basalt_reduced`'s graphite, `ferric`'s nanophase oxide);
-/// - the ocean floor's, `OCEAN_FLOOR_VERSION` (P14.T51.g.a), at `OceanFloorRules::Floored`
-///   through `with_ocean_floor`: a regular moon's published ocean ends at the shallower of its
-///   rock and ice V's melting pressure at its 273 K base;
-/// - the small bodies' types', `SMALL_BODY_TYPES_VERSION` (P14.T51.e), at
-///   `SmallBodyRules::Batch` through `with_small_body_rules`, which a system reads as it is
-///   generated (its `RecordRules`): every planet's, member's and moon's taxonomic class, not
-///   modelled where the record's modifiers are, which the air's sections' hold (`AirRules`, set
-///   through `PlanetarySystem::with_record_rules` alone) keeps off the record;
-/// - the tenuous air's, `TENUOUS_VERSION` (P14.T53.c), at `TenuousRules::Tenuous` through
-///   `with_tenuous`: the ice-held nitrogen and argon at their ice's own temperature, the `Tenuous`
-///   state above its floor, and no ocean under a `Snowball`'s ice in its liquids;
-/// - the ocean's, `OCEAN_VERSION` (P14.T51.g.b), at `OceanRules::Solved` through
-///   `with_ocean_rules`: every body's subsurface ocean is the solve's, and a moon's ocean branch
-///   its spherical shell's (it supersedes the ocean floor's arm where both are in force);
-/// - the belt population's, `BELT_POPULATION_VERSION` (P14.T48.g), at `PopulationRules::Laws`
-///   through `with_population_rules`: every belt's recorded mean eccentricity its laws' mean, and
-///   the impactors' `U_b`² Öpik's mean over the crossers, with rule 3's refitted approach;
-/// - the weathered area mix's, `WEATHERED_AREA_MIX_VERSION` (P14.T54.b.e), at
-///   `AreaMixWeathering::Weathered` through `with_area_mix_weathering`: every pass's regolith
-///   weathered at its body's maturity, but `basalt_reduced`'s, which keeps the cap, and `ferric`'s
-///   deposit in the area mix;
-/// - the primordial helium's, `PRIMORDIAL_HELIUM_VERSION` (P14.T54.b.i), at
-///   `PrimordialHeliumRules::Host` through `with_primordial_helium`: every envelope's helium starts
-///   at its host star's own He/H, under the escape's batch the fractionation's start and the
-///   record's envelope's T50.b input.
-///
-/// A system or a record is read under the rules in force when it is generated: one generated
-/// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 23's) is not
-/// 24's, so a test generates afresh inside it. A later hold at 24 adds its switch here, and every
-/// 24 test then reads it. P14.T54.b deletes this helper with the holds.
-#[cfg(test)]
-pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::belts::population::{PopulationRules, with_population_rules};
-    use crate::planetary::chem::escape::{
-        EscapeRules, PrimordialHeliumRules, with_primordial_helium, with_rules,
-    };
-    use crate::planetary::chem::tenuous::{TenuousRules, with_tenuous};
-    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-    use crate::planetary::derive::photometry::area_mix::{
-        AreaMixWeathering, with_area_mix_weathering,
-    };
-    use crate::planetary::hooks::cold_traps::{ColdTrapRules, with_cold_trap_rules};
-    use crate::planetary::hooks::ocean::{
-        OceanFloorRules, OceanRules, with_ocean_floor, with_ocean_rules,
-    };
-    use crate::planetary::system::moon_ice::{MoonBulkRules, with_moon_bulk};
-    use crate::planetary::system::small_bodies::{SmallBodyRules, with_small_body_rules};
-    use crate::substance::optics::{RowDarkeningRules, with_row_darkening};
-    use crate::substance::{
-        CompressedLiquidsRules, ReadDensitiesRules, with_compressed_liquids, with_read_densities,
-    };
-    with_rules(EscapeRules::Batch, || {
-        with_unlit_mean(UnlitMeanRules::Floored, || {
-            with_moon_bulk(MoonBulkRules::Batch, || {
-                with_cold_trap_rules(ColdTrapRules::Batch, || {
-                    with_read_densities(ReadDensitiesRules::Read, || {
-                        with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
-                            with_row_darkening(RowDarkeningRules::Darkened, || {
-                                with_ocean_floor(OceanFloorRules::Floored, || {
-                                    with_small_body_rules(SmallBodyRules::Batch, || {
-                                        with_tenuous(TenuousRules::Tenuous, || {
-                                            with_ocean_rules(OceanRules::Solved, || {
-                                                with_population_rules(PopulationRules::Laws, || {
-                                                    with_area_mix_weathering(
-                                                        AreaMixWeathering::Weathered,
-                                                        || {
-                                                            with_primordial_helium(
-                                                                PrimordialHeliumRules::Host,
-                                                                run,
-                                                            )
-                                                        },
-                                                    )
-                                                })
-                                            })
-                                        })
-                                    })
-                                })
-                            })
-                        })
-                    })
-                })
-            })
-        })
-    })
-}
-
-/// `run`'s result with every landed hold at generator version 25 in force on this thread, over
-/// every 24 hold ([`with_every_24_hold`]), for a test that asserts a 25 figure: a hold that missed
-/// 24's membership, which P14.T54.b.i closed (decision-p14-t53b-part3 §8), rides 25 behind its own
-/// version and switch, so that every 24 test and 24's census read none of it. Each switch sets its
-/// rules back as it returns, a panic in `run` included, and a test may set one hold back inside it
-/// to compare 25 with and without it.
+/// `run`'s result with every landed hold at generator version 25 in force on this thread, for a
+/// test that asserts a 25 figure: a hold that missed 24's membership, which P14.T54.b.i closed
+/// (decision-p14-t53b-part3 §8), rides 25 behind its own version and switch, so that every 24 test
+/// reads none of it. Each switch sets its rules back as it returns, a panic in `run` included, and
+/// a test may set one hold back inside it to compare 25 with and without it.
 ///
 /// The holds, each with its switch:
 ///
@@ -529,13 +416,14 @@ pub(crate) fn with_every_24_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   that reservoir, the steam a runaway keeps beyond its escape's capacity and the
 ///   `SteamEnvelope` state.
 ///
-/// As with 24's helper, a system or a record is read under the rules in force when it is
-/// generated, so a test generates afresh inside it. A later hold at 25 adds its switch here; 25's
-/// bump deletes this helper with its holds.
+/// A system or a record is read under the rules in force when it is generated: one generated
+/// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
+/// 25's, so a test generates afresh inside it. A later hold at 25 adds its switch here; 25's bump
+/// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
-    with_every_24_hold(|| with_steam_envelope(SteamEnvelopeRules::Steam, run))
+    with_steam_envelope(SteamEnvelopeRules::Steam, run)
 }
 
 #[cfg(test)]
@@ -708,197 +596,15 @@ mod tests {
         ));
     }
 
-    /// Inside [`with_every_24_hold`] every landed hold at 24 gives its 24 rules, one set back
-    /// inside it gives its hold's alone, and outside it each gives the version's, 23's (P14.T24.i's
-    /// follow-up, decision-t24i-airless-state D3.3). Each rule set is the first twelve holds' rules
-    /// and then the later ones' (P14.T51.e's small bodies' types, P14.T54.b.e's weathered area
-    /// mix, P14.T54.b.i's primordial helium), nested, since std compares and prints tuples of at
-    /// most twelve elements.
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one line per landed hold in each of the five rule sets it compares"
-    )]
-    fn every_24_hold_is_in_force_inside_the_helper() {
-        use crate::planetary::belts::population::PopulationRules;
-        use crate::planetary::chem::escape::{
-            EscapeRules, PrimordialHeliumRules, with_primordial_helium,
-        };
-        use crate::planetary::chem::tenuous::TenuousRules;
-        use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-        use crate::planetary::derive::photometry::area_mix::{
-            AreaMixWeathering, RayleighFloorRules,
-        };
-        use crate::planetary::hooks::cold_traps::ColdTrapRules;
-        use crate::planetary::hooks::ocean::{OceanFloorRules, OceanRules};
-        use crate::planetary::system::moon_ice::MoonBulkRules;
-        use crate::planetary::system::small_bodies::SmallBodyRules;
-        use crate::substance::optics::RowDarkeningRules;
-        use crate::substance::{CompressedLiquidsRules, ReadDensitiesRules, with_read_densities};
-        let rules = || {
-            (
-                (
-                    EscapeRules::in_force(),
-                    RayleighFloorRules::in_force(),
-                    UnlitMeanRules::in_force(),
-                    MoonBulkRules::in_force(),
-                    ColdTrapRules::in_force(),
-                    ReadDensitiesRules::in_force(),
-                    CompressedLiquidsRules::in_force(),
-                    RowDarkeningRules::in_force(),
-                    OceanFloorRules::in_force(),
-                    TenuousRules::in_force(),
-                    OceanRules::in_force(),
-                    PopulationRules::in_force(),
-                ),
-                (
-                    SmallBodyRules::in_force(),
-                    AreaMixWeathering::in_force(),
-                    PrimordialHeliumRules::in_force(),
-                ),
-            )
-        };
-        let at_24 = (
-            (
-                EscapeRules::Batch,
-                RayleighFloorRules::Floored,
-                UnlitMeanRules::Floored,
-                MoonBulkRules::Batch,
-                ColdTrapRules::Batch,
-                ReadDensitiesRules::Read,
-                CompressedLiquidsRules::Compressed,
-                RowDarkeningRules::Darkened,
-                OceanFloorRules::Floored,
-                TenuousRules::Tenuous,
-                OceanRules::Solved,
-                PopulationRules::Laws,
-            ),
-            (
-                SmallBodyRules::Batch,
-                AreaMixWeathering::Weathered,
-                PrimordialHeliumRules::Host,
-            ),
-        );
-        let at_23 = (
-            (
-                EscapeRules::Held,
-                RayleighFloorRules::Held,
-                UnlitMeanRules::Held,
-                MoonBulkRules::Held,
-                ColdTrapRules::Held,
-                ReadDensitiesRules::Held,
-                CompressedLiquidsRules::Saturated,
-                RowDarkeningRules::Held,
-                OceanFloorRules::Held,
-                TenuousRules::Held,
-                OceanRules::Held,
-                PopulationRules::Held,
-            ),
-            (
-                SmallBodyRules::Held,
-                AreaMixWeathering::Held,
-                PrimordialHeliumRules::Protosolar,
-            ),
-        );
-        assert_eq!(rules(), at_23, "the version's, outside the helper");
-        assert_eq!(with_every_24_hold(rules), at_24);
-        assert_eq!(
-            with_every_24_hold(|| {
-                crate::planetary::chem::tenuous::with_tenuous(TenuousRules::Held, rules)
-            })
-            .0
-            .9,
-            TenuousRules::Held,
-            "every 24 hold but the tenuous air's"
-        );
-        assert_eq!(
-            with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, rules)),
-            (
-                (
-                    EscapeRules::Batch,
-                    RayleighFloorRules::Floored,
-                    UnlitMeanRules::Held,
-                    MoonBulkRules::Batch,
-                    ColdTrapRules::Batch,
-                    ReadDensitiesRules::Read,
-                    CompressedLiquidsRules::Compressed,
-                    RowDarkeningRules::Darkened,
-                    OceanFloorRules::Floored,
-                    TenuousRules::Tenuous,
-                    OceanRules::Solved,
-                    PopulationRules::Laws,
-                ),
-                (
-                    SmallBodyRules::Batch,
-                    AreaMixWeathering::Weathered,
-                    PrimordialHeliumRules::Host,
-                ),
-            ),
-            "every 24 hold but the unlit mean's"
-        );
-        assert_eq!(
-            with_every_24_hold(|| with_read_densities(ReadDensitiesRules::Held, rules)),
-            (
-                (
-                    EscapeRules::Batch,
-                    RayleighFloorRules::Floored,
-                    UnlitMeanRules::Floored,
-                    MoonBulkRules::Batch,
-                    ColdTrapRules::Batch,
-                    ReadDensitiesRules::Held,
-                    CompressedLiquidsRules::Compressed,
-                    RowDarkeningRules::Darkened,
-                    OceanFloorRules::Floored,
-                    TenuousRules::Tenuous,
-                    OceanRules::Solved,
-                    PopulationRules::Laws,
-                ),
-                (
-                    SmallBodyRules::Batch,
-                    AreaMixWeathering::Weathered,
-                    PrimordialHeliumRules::Host,
-                ),
-            ),
-            "every 24 hold but the read densities'"
-        );
-        assert_eq!(
-            with_every_24_hold(|| with_primordial_helium(PrimordialHeliumRules::Protosolar, rules)),
-            (
-                at_24.0,
-                (
-                    SmallBodyRules::Batch,
-                    AreaMixWeathering::Weathered,
-                    PrimordialHeliumRules::Protosolar,
-                ),
-            ),
-            "every 24 hold but the host helium's"
-        );
-        assert_eq!(rules(), at_23, "set back after");
-    }
-
     /// 25's first switch, the steam envelope's (P14.T53.b part 3): in force inside 25's helper,
-    /// held inside 24's, outside both and where a test sets it back, and moving none of 24's
-    /// holds' rules.
+    /// held outside it and where a test sets it back.
     #[test]
     fn the_steam_envelope_s_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::derive::atmosphere::{
-            SteamEnvelopeRules, UnlitMeanRules, with_steam_envelope,
-        };
-        use crate::planetary::system::moon_ice::MoonBulkRules;
-        let others = || (UnlitMeanRules::in_force(), MoonBulkRules::in_force());
+        use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
         assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
-        assert_eq!(
-            with_every_24_hold(SteamEnvelopeRules::in_force),
-            SteamEnvelopeRules::Held
-        );
         assert_eq!(
             with_every_25_hold(SteamEnvelopeRules::in_force),
             SteamEnvelopeRules::Steam
-        );
-        assert_eq!(
-            with_every_25_hold(others),
-            with_every_24_hold(others),
-            "every 24 hold, and the steam envelope's"
         );
         assert_eq!(
             with_every_25_hold(|| {

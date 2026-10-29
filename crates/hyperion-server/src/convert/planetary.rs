@@ -943,9 +943,9 @@ fn substance_areas(areas: &[(SubstanceId, f64)]) -> Vec<SubstanceAreaDto> {
 /// A surface's published condensates as the wire carries them (P14.T51.a, sent from P14.T54.a):
 /// in the record's order, each substance by its registry key, its mass always sent, its layer
 /// absent where the record has none (the registry has not read its phase's density,
-/// decision-pre-23-review item 12), and its trapped area absent while the record holds no cold
-/// traps ([`Surface::cold_traps_modelled`], until P14.T54.b; decision-p14-t54a-water-consistency
-/// §5.3).
+/// decision-pre-23-review item 12), and its trapped area sent where the record holds its cold
+/// traps ([`Surface::cold_traps_modelled`], from P14.T54.b's bump at generator version 24; to 23
+/// absent, decision-p14-t54a-water-consistency §5.3).
 #[must_use]
 fn condensates(condensates: &Condensates) -> Vec<SurfaceCondensateDto> {
     let traps = Surface::cold_traps_modelled();
@@ -1034,7 +1034,7 @@ fn surface_modifiers(modifiers: &SurfaceModifiers) -> SurfaceModifiersDto {
 }
 
 /// A surface's taxonomic class member as the wire carries it (P14.T51.e, wired by P14.T54.b.j):
-/// absent where the record does not model it, every record's below generator version 24, `null`
+/// absent where the record does not model it (every record's below generator version 24), `null`
 /// for a body the rules leave unclassed (a planet among them), and otherwise its class.
 #[must_use]
 fn taxonomic_class_member(
@@ -1095,11 +1095,10 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 /// its own here when it lands, as P14.T54.a fills the condensates and the crust, which is absent
 /// only where the record holds none (a body whose passes took no lid), and P14.T54.b the vertical
 /// structure ([`vertical_structure_member`]) and the aerosol inventory ([`aerosol_inventory`],
-/// never `null`: the empty inventory for a surface with no air), both absent while the record
-/// holds the air's sections off, below generator version 24. The modifiers are held with them, and
-/// the taxonomic class ([`taxonomic_class_member`]) is absent while the record holds it off, below
-/// generator version 24. The melt's own vapour, `silicate_vapour`, has no member in the record and
-/// is sent absent from every surface until P14.T55.b.
+/// never `null`: the empty inventory for a surface with no air), with the modifiers and the
+/// taxonomic class ([`taxonomic_class_member`]), each on the record from generator version 24 and
+/// absent where the record does not model it. The melt's own vapour, `silicate_vapour`, has no
+/// member in the record and is sent absent from every surface until P14.T55.b.
 #[must_use]
 fn surface(surface: &Surface) -> BodySurfaceDto {
     let conditions = surface.conditions();
@@ -1856,9 +1855,9 @@ mod tests {
 
     /// P14.T35.e: a present planet has exactly one of its surface and its envelope other than
     /// `not_applicable`; a giant's and a sub-Neptune's surface is not applicable and its envelope
-    /// not modelled below generator version 24 (P14.T54.b.i's envelope is held off the record
-    /// until the bump), as, from 24, a solid planet's under a supercritical envelope (P14.T53.b
-    /// part 2); and every record carries the envelope.
+    /// `ok` or not modelled, the record's (P14.T54.b.i's envelope, from generator version 24); a
+    /// solid planet's under a supercritical envelope (P14.T53.b part 2) its surface not applicable
+    /// and its envelope not modelled; and every record carries the envelope.
     #[test]
     fn every_present_planet_has_exactly_one_of_a_surface_and_an_envelope() {
         let (mut solid, mut sub_neptunes, mut giants) = (0, 0, 0);
@@ -1877,18 +1876,12 @@ mod tests {
                 "{}",
                 wire.id
             );
-            // From generator version 24 a solid class under a supercritical envelope (P14.T53.b
-            // part 2) has its surface not applicable and its envelope not modelled, as a gas
-            // envelope's: the test that decides it is the simulation's own, so the tag pair alone
-            // stands for it here.
+            // A solid class under a supercritical envelope (P14.T53.b part 2) has its surface not
+            // applicable and its envelope not modelled: the test that decides it is the
+            // simulation's own, so the tag pair alone stands for it here.
             let hidden = class.has_solid_surface()
                 && wire.surface == SectionDto::NotApplicable
                 && *envelope == SectionDto::NotModelled;
-            assert!(
-                !hidden || hyperion_sim::GENERATOR_VERSION.get() >= 24,
-                "{}",
-                wire.id
-            );
             if hidden {
                 assert_eq!(sim.envelope(), &Section::NotModelled, "{}", wire.id);
             } else if class.has_solid_surface() {
@@ -1896,8 +1889,15 @@ mod tests {
                 solid += 1;
             } else {
                 assert_eq!(wire.surface, SectionDto::NotApplicable, "{}", wire.id);
-                assert_eq!(*envelope, SectionDto::NotModelled, "{}", wire.id);
-                assert_eq!(sim.envelope(), &Section::NotModelled, "{}", wire.id);
+                assert!(
+                    matches!(
+                        (sim.envelope(), envelope),
+                        (Section::Ok(_), SectionDto::Ok(_))
+                            | (Section::NotModelled, SectionDto::NotModelled)
+                    ),
+                    "{}",
+                    wire.id
+                );
                 match class {
                     PlanetClass::SubNeptune => sub_neptunes += 1,
                     PlanetClass::IceGiant | PlanetClass::GasGiant => giants += 1,
@@ -1979,42 +1979,21 @@ mod tests {
     /// ice or its base lies in ice II. An ocean rests on rock or, from those bumps, on ice III or
     /// ice V, never on ice VI or VII while it is at most 273.16 K. The condensates
     /// and the crust are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`,
-    /// `every_solid_surface_sends_its_record_s_crust`). The vertical structure and the aerosol
-    /// inventory are not modelled on every golden body's record and absent on the wire while the
-    /// sim holds the air's sections off the record, below generator version 24
-    /// (`AIR_SECTIONS_VERSION`, whose tripwire `the_air_sections_are_held_only_until_the_24_bump`
-    /// this is the wire's half of; at the bump, P14.T54.b.l, both are present here, the structure
-    /// `null` and the inventory the empty object on an airless surface;
-    /// `a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat` and
-    /// `an_aerosol_inventory_is_sent_as_the_record_holds_it` test their conversions). So are the
-    /// modifiers, held behind the same hold (P14.T54.b.c; at the bump present on every surface
-    /// whose record models them; `a_surface_s_modifiers_are_sent_as_the_record_holds_them` tests
-    /// their conversion), and the taxonomic class, held behind its own,
-    /// `SMALL_BODY_TYPES_VERSION` (P14.T51.e, wired by P14.T54.b.j: not modelled on every record
-    /// and absent on the wire below generator version 24;
-    /// `a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case` tests its conversion).
+    /// `every_solid_surface_sends_its_record_s_crust`). From generator version 24 (P14.T54.b.l)
+    /// the vertical structure and the aerosol inventory are on the record, the structure `null`
+    /// and the inventory the empty object on an airless surface, and each is absent on the wire
+    /// exactly where its record does not model it
+    /// (`a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat` and
+    /// `an_aerosol_inventory_is_sent_as_the_record_holds_it` test their conversions); so are the
+    /// modifiers (P14.T54.b.c; `a_surface_s_modifiers_are_sent_as_the_record_holds_them`) and the
+    /// taxonomic class (P14.T51.e, wired by P14.T54.b.j;
+    /// `a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case`). The biosphere and the
+    /// silicate vapour are absent on every surface.
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let (mut moons, mut absent) = (0, Vec::new());
+        let (mut structures, mut inventories) = (0, 0);
         for (sim, dto, wire) in ok_surfaces() {
-            assert_eq!(
-                (sim.vertical_structure(), sim.aerosols()),
-                (RecordModelled::NotModelled, RecordModelled::NotModelled),
-                "{}: the air's sections are held",
-                wire.id
-            );
-            assert_eq!(
-                sim.modifiers(),
-                RecordModelled::NotModelled,
-                "{}: the modifiers are held with the air's sections",
-                wire.id
-            );
-            assert_eq!(
-                sim.taxonomic_class(),
-                RecordModelled::NotModelled,
-                "{}: the taxonomic class is held below 24",
-                wire.id
-            );
             assert_eq!(
                 [
                     dto.vertical_structure.is_not_modelled(),
@@ -2024,22 +2003,29 @@ mod tests {
                     dto.biosphere.is_not_modelled(),
                     dto.silicate_vapour.is_not_modelled(),
                 ],
-                [true; 6],
+                [
+                    sim.vertical_structure() == RecordModelled::NotModelled,
+                    sim.aerosols() == RecordModelled::NotModelled,
+                    sim.modifiers() == RecordModelled::NotModelled,
+                    sim.taxonomic_class() == RecordModelled::NotModelled,
+                    true,
+                    true,
+                ],
                 "{}: the structure, aerosols, modifiers, taxonomic class, biosphere and silicate \
                  vapour",
                 wire.id
             );
+            structures += usize::from(!dto.vertical_structure.is_not_modelled());
+            inventories += usize::from(!dto.aerosols.is_not_modelled());
             let regular = wire.kind
                 == BodyKindDto::Moon {
                     origin: MoonOriginDto::Regular,
                 };
-            let not_computed = matches!(sim.figures().subsurface_ocean(), Subsurface::NotComputed);
             // From P14.T51.g.b's bump every solid surface's ocean is computed.
-            let every_body =
-                hyperion_sim::GENERATOR_VERSION >= hyperion_sim::GeneratorVersion::new(24);
+            let not_computed = matches!(sim.figures().subsurface_ocean(), Subsurface::NotComputed);
             assert_eq!(
                 dto.subsurface_ocean.is_not_modelled(),
-                (!regular && !every_body) || not_computed,
+                not_computed,
                 "{}",
                 wire.id
             );
@@ -2061,10 +2047,11 @@ mod tests {
             moons += usize::from(regular);
         }
         assert!(moons > 0, "no regular moon's ocean was checked");
-        // Version 23 holds P14.T51.g.a's floor: every regular moon's ocean is computed.
-        if hyperion_sim::GENERATOR_VERSION < hyperion_sim::GeneratorVersion::new(24) {
-            assert_eq!(absent, Vec::<String>::new(), "absent at 23");
-        }
+        assert!(
+            structures > 0 && inventories > 0,
+            "{structures} structures, {inventories} inventories"
+        );
+        eprintln!("regular moons whose ocean is not computed: {absent:?}");
     }
 
     /// P14.T54.b.c: a surface's modifiers are sent as the record holds them, each scalar to the bit
@@ -2072,8 +2059,7 @@ mod tests {
     /// moon's SO₂ frost and sulphur, with no weathering deposit, and a Mars-like world's `ferric`,
     /// with no volcanic one, each derived through the sim's public API from inputs by hand (Io's
     /// 2.5 W m⁻² at 110 K inside a Jupiter's magnetopause; Mars's 636 Pa of CO₂, N₂ and Ar over
-    /// `basalt_fe`, dry for 3.5 Gyr), since no record carries them while the sim holds them off it
-    /// (below generator version 24).
+    /// `basalt_fe`, dry for 3.5 Gyr), each named by hand where a golden record's are not.
     #[test]
     fn a_surface_s_modifiers_are_sent_as_the_record_holds_them() {
         let none = Condensates::default();
@@ -2141,8 +2127,7 @@ mod tests {
 
     /// P14.T51.e, wired by P14.T54.b.j: every taxonomic class is sent as its own variant, whose
     /// wire string is the class's name in lower case (`Cgh` as `cgh`), a class the record computes
-    /// as none as `null`, and one it does not model left off the wire. The mapping alone is
-    /// checked, since no record carries a class below generator version 24.
+    /// as none as `null`, and one it does not model left off the wire, each variant by hand.
     #[test]
     fn a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case() {
         let mut sent = Vec::new();
@@ -2252,8 +2237,7 @@ mod tests {
     /// P14.T54.b: a vertical structure is sent as its α, its skin's temperature and its adiabat's
     /// nodes, each to the bit and in the record's order, the ground first; a member computed as
     /// none is `null`, and one not modelled absent. The structure is an Earth's by hand, built
-    /// through the sim's public API, since no record carries one while the sim holds the air's
-    /// sections off it (below generator version 24).
+    /// through the sim's public API.
     #[test]
     fn a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat() {
         use hyperion_sim::planetary::derive::atmosphere::Gas;
@@ -2314,8 +2298,7 @@ mod tests {
     }
 
     /// An air by hand, as the record's inventory reads one (P14.T54.b.b), built through the sim's
-    /// public API since no record carries an inventory while the sim holds the air's sections off
-    /// it: its gases by registry key, surface temperature and pressure, skin, condensable,
+    /// public API: its gases by registry key, surface temperature and pressure, skin, condensable,
     /// gravity, state, outgassing and liquid-water flag, its decks covering two-thirds of the sky
     /// and its liquids half the ground, under a Sun of 5,772 K.
     struct HandAir {
@@ -3107,14 +3090,13 @@ mod tests {
         );
     }
 
-    /// Decision-p14-t54a-water-consistency §5.3: while the record holds no cold traps (until
-    /// P14.T54.b's bump at generator version 24), no condensate sends its trapped area, which a
-    /// reader takes as not modelled, never as none.
+    /// Decision-p14-t54a-water-consistency §5.3: from P14.T54.b's bump at generator version 24 the
+    /// record holds its cold traps, so every condensate sends its trapped area; to 23 none did,
+    /// which a reader took as not modelled, never as none.
     #[test]
     fn no_condensate_sends_its_trapped_area_while_the_cold_traps_are_held() {
-        assert_eq!(
+        assert!(
             Surface::cold_traps_modelled(),
-            hyperion_sim::GENERATOR_VERSION.get() >= 24,
             "the cold traps are on the record from P14.T54.b's bump"
         );
         let mut entries = 0;

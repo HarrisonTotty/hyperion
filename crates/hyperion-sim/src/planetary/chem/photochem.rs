@@ -3,10 +3,10 @@
 //! dissociation of H₂O, TiO and VO on ultra-hot daysides, each with its source and range, on the
 //! Surface path.
 //!
-//! Nothing on the record reads them until P14.T54.b (P14.T52.d calls them on the quenched gas,
-//! [`quench`](super::quench)), so no generated output moves with them. P14.T24.c's ozone and
-//! methane-haze rules, for secondary airs, stay its own, and a desiccated world's CO and O₂ are
-//! P14.T53.a's.
+//! The record reads them from generator version 24 (P14.T54.b; P14.T52.d calls them on the
+//! quenched gas, [`quench`](super::quench)), so they are output, and a change to any of them a
+//! generator-version change. P14.T24.c's ozone and methane-haze rules, for secondary airs, stay
+//! its own, and a desiccated world's CO and O₂ are P14.T53.a's.
 //!
 //! # The rules
 //!

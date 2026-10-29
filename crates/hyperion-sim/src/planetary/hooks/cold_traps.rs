@@ -3,10 +3,9 @@
 //! permanent shadows too small for any zonal profile to see, the share of that whose ice is
 //! exposed, and P14.T51.a's airless branch keyed on the zonal annual maximum, not the mean.
 //!
-//! All of it is held at generator version 24 (`COLD_TRAPS_VERSION`; decision-bump-plan-after-22
-//! §1.3), so that nothing on the record moves before P14.T54.b's bump; the record's partition,
-//! which the `p14-snapshot` lane's hold kept off it until P14.T54.a, publishes P14.T51.a's
-//! condensates meanwhile.
+//! All of it is on the record from generator version 24 (P14.T54.b's bump;
+//! decision-bump-plan-after-22 §1.3); to 23 the record's partition published P14.T51.a's
+//! condensates.
 //!
 //! # Which bodies
 //!
@@ -144,7 +143,7 @@
 //!   (`PassColdTraps`), which publishes over it with that pass's heat flow, crust and craters, so
 //!   that the record's condensates are the published pass's by identity, to the bit.
 //! - **No field.** A pass whose context holds no figures (C₀), a climate given (the passes'
-//!   stand-in), a pass that does not qualify and every pass under the hold read none, and publish
+//!   stand-in), a pass with no sky and a pass that does not qualify read none, and publish
 //!   P14.T51.a's condensates, the reason labelled (`NoColdTraps`).
 //!
 //! # The reservoir
@@ -217,6 +216,7 @@ use hyperion_surface::cold_trap::{
 };
 use hyperion_surface::craters::{CraterParams, Screening, cumulative_density, saturation};
 
+use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::partition::{
@@ -236,75 +236,6 @@ use crate::units::{
     Degrees, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals, Radians,
     SolarRadii, WattsPerSquareMetre,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
-
-/// The generator version from which the cold traps and their airless branch are on the record: 24,
-/// the 23 → 24 batch's bump, P14.T54.b (decision-bump-plan-after-22 §1.3, a rider "behind a hold at
-/// 24 on its change to T51.a's airless branch").
-///
-/// Below it [`ColdTrapRules::in_force`] is [`ColdTrapRules::Held`], so that every published
-/// condensate is P14.T51.a's bit for bit. P14.T54.b deletes this hold, [`ColdTrapRules`] and its
-/// `Held` arm, and its tripwire (`the_cold_traps_are_held_only_until_the_24_bump`).
-pub(crate) const COLD_TRAPS_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Which rules the published condensates follow on an airless body (the cold traps' hold,
-/// [`COLD_TRAPS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ColdTrapRules {
-    /// Versions 22's and 23's: P14.T51.a's published condensates, its airless branch keyed on the
-    /// annual mean, with no cold traps.
-    Held,
-    /// The 23 → 24 batch's: on a body with no collisional atmosphere that is not locked to its
-    /// star, the airless branch keyed on the zonal annual maximum and the cold traps
-    /// ([`publish_over`]).
-    Batch,
-}
-
-impl ColdTrapRules {
-    /// The rules this generator version gives: the batch's from [`COLD_TRAPS_VERSION`], and P14.T51.a's
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_cold_trap_rules`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = COLD_TRAP_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= COLD_TRAPS_VERSION {
-            Self::Batch
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The cold traps' rules a test sets on its thread, `None` for the version's.
-    static COLD_TRAP_RULES: core::cell::Cell<Option<ColdTrapRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the cold traps' rules `rules` on this thread, for the tests to reach 24's
-/// record path ahead of the bump (P14.T24.i's follow-up, decision-t24i-airless-state D3.3: every 24
-/// hold in force together, `planetary::testing::with_every_24_hold`); the version's rules are set
-/// back after, a panic in `run` included. A system reads them as it is generated
-/// (`RecordRules::in_force`), and a record's [`cold_traps_modelled`] as it is read.
-/// P14.T54.b deletes it with the hold.
-///
-/// [`cold_traps_modelled`]: crate::planetary::record::Surface::cold_traps_modelled
-#[cfg(test)]
-pub(crate) fn with_cold_trap_rules<R>(rules: ColdTrapRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<ColdTrapRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            COLD_TRAP_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(COLD_TRAP_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The collision cross-section `σ_c` whose inverse bounds a collisional column's number density:
 /// 3 × 10⁻¹⁹ m², a hard-sphere cross-section of N₂ and O, *from memory* (labelled). N₂'s kinetic
@@ -495,14 +426,12 @@ pub(crate) fn lunar_sky() -> ColdTrapSky {
 }
 
 /// What the record's cold traps read beyond a body's figures and conditions
-/// (`GlobalFigures::condensates_and_ice_over`; P14.T51.f, P14.T51.i, P14.T54.b.f): their rules
-/// and the field they publish over.
+/// (`GlobalFigures::condensates_and_ice_over`; P14.T51.f, P14.T51.i, P14.T54.b.f): the field they
+/// publish over.
 ///
 /// Plain data with crate-visible fields.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RecordColdTraps<'a> {
-    /// Which rules they follow, their hold at 24.
-    pub(crate) rules: ColdTrapRules,
     /// The field.
     pub(crate) field: RecordField<'a>,
 }
@@ -512,8 +441,8 @@ pub(crate) struct RecordColdTraps<'a> {
 pub(crate) enum RecordField<'a> {
     /// The field the body's published pass read, with its inputs, carried to the record
     /// (P14.T54.b.f; decision-p14-t54b-f-coldtraps §3): the record builds none. `None` where that
-    /// pass read none (the passes' stand-in, a pass that does not qualify, the hold), whose record
-    /// publishes P14.T51.a's condensates, as its pass did.
+    /// pass read none (the passes' stand-in, a pass that does not qualify), whose record publishes
+    /// P14.T51.a's condensates, as its pass did.
     Carried(Option<&'a PassColdTraps>),
     /// The tests' record path on the figures alone: a field built here ([`publish`]) under the sky
     /// `sky` at the bare regolith's Bond albedo `regolith_albedo`, over the figures' own heat flow,
@@ -529,29 +458,20 @@ pub(crate) enum RecordField<'a> {
 
 #[cfg(test)]
 impl<'a> RecordColdTraps<'a> {
-    /// The record's cold traps under `rules` and the sky `sky`, at the Bond albedo of the
-    /// atmosphere `air` as the regolith's, built on the figures ([`RecordField::Built`]): what the
-    /// tests of bodies whose regolith is the airless rock's take, the Moon's 0.11, so that their
-    /// figures are P14.T51.f's.
+    /// The record's cold traps under the sky `sky`, at the Bond albedo of the atmosphere `air` as
+    /// the regolith's, built on the figures ([`RecordField::Built`]): what the tests of bodies
+    /// whose regolith is the airless rock's take, the Moon's 0.11, so that their figures are
+    /// P14.T51.f's.
     #[must_use]
-    pub(crate) fn at_the_albedo_of(
-        rules: ColdTrapRules,
-        sky: &'a ColdTrapSky,
-        air: &Atmosphere,
-    ) -> Self {
-        Self::built(rules, sky, air.albedo().value())
+    pub(crate) fn at_the_albedo_of(sky: &'a ColdTrapSky, air: &Atmosphere) -> Self {
+        Self::built(sky, air.albedo().value())
     }
 
-    /// The record's cold traps under `rules` and the sky `sky`, at the bare regolith's albedo
+    /// The record's cold traps under the sky `sky`, at the bare regolith's albedo
     /// `regolith_albedo`, built on the figures ([`RecordField::Built`]).
     #[must_use]
-    pub(crate) const fn built(
-        rules: ColdTrapRules,
-        sky: &'a ColdTrapSky,
-        regolith_albedo: f64,
-    ) -> Self {
+    pub(crate) const fn built(sky: &'a ColdTrapSky, regolith_albedo: f64) -> Self {
         Self {
-            rules,
             field: RecordField::Built {
                 sky,
                 regolith_albedo,
@@ -589,7 +509,7 @@ pub(crate) struct ColdTrapBody<'a> {
 }
 
 /// The published condensates of the partition `partition` over the cover `cover` with the cold
-/// traps (P14.T51.f, under [`ColdTrapRules::Batch`]): P14.T51.a's publish on a body that does not
+/// traps (P14.T51.f): P14.T51.a's publish on a body that does not
 /// qualify ([`qualifies`]), and on one that does the zonal annual maximum's branch
 /// ([`SolidEdges::Exosphere`]) with each condensable's cold-trapped ice merged in, over the field
 /// it builds ([`ColdTrapField::of`], P14.T51.i). A body whose profile is not zonal, which has no
@@ -837,9 +757,6 @@ impl ColdTrapField {
 /// decision-p14-t54b-f-coldtraps §2 (c) and §7), each labelled ([`NoColdTraps::label`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum NoColdTraps {
-    /// The cold traps' hold, [`ColdTrapRules::Held`], as the record's rules give it: nothing of
-    /// them is computed.
-    Held,
     /// A climate given: the passes' stand-in, with no rotation law.
     ClimateGiven,
     /// No sky: the record holds no seasonal orbit at the time.
@@ -864,7 +781,6 @@ impl NoColdTraps {
     #[must_use]
     pub(crate) const fn label(self) -> &'static str {
         match self {
-            Self::Held => "the cold traps are held",
             Self::ClimateGiven => "the passes' stand-in: a climate given (no cold traps)",
             Self::NoSky => "no seasonal orbit at the time (no cold traps)",
             Self::NoFigures => "the context the pass read holds no figures (C0, a stage refused)",

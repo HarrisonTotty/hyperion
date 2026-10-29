@@ -1,9 +1,9 @@
 //! P14.T54.b.k's audit of the 23 → 24 batch (design-k §2.1, §3.1), brief-notes-24's MUST-FIX
 //! items that a record shows.
 //!
-//! They are asserted over one walk with every 24 hold in force and the record's rules at their
-//! batch ([`every_record_batch`]), so that the air's sections, the envelope, the modifiers and the
-//! taxonomic class are on every record the walk reads, as 24 will publish them:
+//! They are asserted over one walk of the record as generator version 24 builds it, so that the
+//! air's sections, the envelope, the modifiers and the taxonomic class are on every record the walk
+//! reads:
 //!
 //! - **M1**, P14.T53.b part 1 (V3.9 part 1): no runaway beyond the maximum-greenhouse limit now
 //!   or under Venus's deck below 430 K, and every runaway between the limits (c)'s, its hothouses
@@ -36,16 +36,16 @@ use std::time::Instant;
 
 use super::tests::{
     CLOSURE_HOTHOUSE_BODY, EnvelopeBody, GOLDEN_SYSTEMS_SEED, HOTHOUSE_BODY, LOOK72_OCEANS, SEED,
-    envelope_tag_faults, every_record_batch, golden_contexts, limit_now, look72_audit_contexts,
-    look72_galaxy, runaway_at_peak, runaway_now, sample,
+    envelope_tag_faults, golden_contexts, limit_now, look72_audit_contexts, look72_galaxy,
+    runaway_at_peak, runaway_now, sample,
 };
 use super::*;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::derive::SurfaceLag;
 use crate::planetary::derive::atmosphere::{
-    ACID_CYCLING_TEMPERATURE, Absorber, Gas, GreenhouseCeiling, GreenhouseConstants, PresentState,
-    RunawayDeck, SurfaceMaterial, SurfaceState, WATER_MELTING_POINT, grey_surface_temperature,
-    solved_as_a_hothouse, water_saturation_temperature, with_present_state,
+    ACID_CYCLING_TEMPERATURE, Absorber, Gas, GreenhouseCeiling, GreenhouseConstants, RunawayDeck,
+    SurfaceMaterial, SurfaceState, WATER_MELTING_POINT, grey_surface_temperature,
+    water_saturation_temperature, with_deck_counts,
 };
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
@@ -62,7 +62,6 @@ use crate::planetary::hooks::surface::night_floor;
 use crate::planetary::moons::regular::WATER_DENSITY;
 use crate::planetary::record::{BulkProperties, Modelled};
 use crate::planetary::system::moon_ice::HOT_ICE_LIMIT;
-use crate::planetary::testing::with_every_24_hold;
 use crate::substance::Element;
 use crate::substance::phase::{high_pressure_melting, ice_ih_melting_temperature};
 use crate::units::{Kelvin, Kilograms, Metres, Pascals};
@@ -158,7 +157,7 @@ impl AuditCase<'_> {
 
 /// Every present planet, member and moon of `system` (of the set `set` and context `ctx`) with a
 /// bulk section and a derivation at the epoch, whatever its surface's tag, in body order, each
-/// given to `visit` ([`AuditCase`]); its records under the system's own record rules.
+/// given to `visit` ([`AuditCase`]).
 fn audit_walk_system(
     set: &str,
     ctx: &SystemContext,
@@ -169,9 +168,7 @@ fn audit_walk_system(
     if ctx.age_at_epoch().value() <= 0.0 {
         return;
     }
-    let epoch = Epoch::new(system, ctx, t)
-        .with_shades()
-        .with_small_bodies(system.record.small_bodies);
+    let epoch = Epoch::new(system, ctx, t).with_shades().with_small_bodies();
     let cosines = HourCosines::new();
     for body in system.bodies() {
         let kind = match body.part {
@@ -241,13 +238,10 @@ fn audit_walk_system(
     }
 }
 
-/// Every system of `sets` generated afresh at its seed under the rules in force on the calling
-/// thread, its records under [`every_record_batch`], walked ([`audit_walk_system`]), in order; to
-/// be called inside [`with_every_24_hold`], since the tests' caches are version 23's.
+/// Every system of `sets` generated afresh at its seed, walked ([`audit_walk_system`]), in order.
 fn audit_walk(sets: &[AuditSet], visit: &mut dyn FnMut(&AuditCase<'_>)) {
-    let rules = every_record_batch();
     for (set, seed, ctx) in sets {
-        let system = generate(*seed, ctx).with_record_rules(rules);
+        let system = generate(*seed, ctx);
         audit_walk_system(set, ctx, &system, visit);
     }
 }
@@ -390,10 +384,10 @@ impl AuditBody {
     /// (a) It lies inside the maximum-greenhouse limit now ([`limit_now`] at least 1); (b) under
     /// Venus's deck its mean surface temperature is at least the acid's cycling temperature, 430 K
     /// ([`ACID_CYCLING_TEMPERATURE`]); (c) between the limits now ([`runaway_now`] below 1) it is
-    /// (c)'s, its first solve with (c) off ([`PresentState::WithoutHothouse`]) a `Temperate` that
-    /// (c) judges a hothouse ([`solved_as_a_hothouse`]). Each of (c)'s is stated by name with both
-    /// solves' figures, and its deck and its side of water's saturation temperature
-    /// ([`Saturation::of`]) are held ([`hothouse`](AuditBody::hothouse)).
+    /// (c)'s: solved again, its passes take (c)'s branch once, a first solve `Temperate` that (c)
+    /// judges a hothouse (`solved_as_a_hothouse`, counted by [`with_deck_counts`]). Each of (c)'s
+    /// is stated by name with its solves' pass counts, and its deck and its side of water's
+    /// saturation temperature ([`Saturation::of`]) are held ([`hothouse`](AuditBody::hothouse)).
     fn runaway(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -432,23 +426,17 @@ impl AuditBody {
         if !(now.is_nan() || now < 1.0) {
             return;
         }
-        let first = with_present_state(PresentState::WithoutHothouse, || {
-            (case.again)(PassDriver::Solve)
-        });
-        let first_air = first.atmosphere();
-        let first_p = first_air
-            .surface_pressure()
-            .map_or(f64::NAN, Pascals::value);
+        let (again, counts) = with_deck_counts(|| (case.again)(PassDriver::Solve));
         let line = format!(
-            "first solve {:?} T_s {:.2} K, A {:.4}, p_s {:.4e} bar (T_sat {:.3} K); published \
-             {line}",
-            first_air.state(),
-            first_air.surface_temperature().value(),
-            first.albedo().value(),
-            first_p / 1e5,
-            saturation(first_p)
+            "solved again {:?}: {} hothouse solve, {} passes Temperate, {} under the deck, {} \
+             without it; published {line}",
+            again.atmosphere().state(),
+            counts.hothouses,
+            counts.temperate_passes,
+            counts.hothouse_passes,
+            counts.hothouse_deckless_passes
         );
-        if first_air.state() != SurfaceState::Temperate || !solved_as_a_hothouse(first_air) {
+        if counts.hothouses != 1 || again.atmosphere().state() != SurfaceState::RunawayGreenhouse {
             self.fault(
                 Item::M1,
                 &format!("(c) a runaway between the limits not (c)'s: {line}"),
@@ -546,7 +534,7 @@ impl AuditBody {
     /// a supercritical reservoir hides stated.
     fn envelope_tags(&mut self, case: &AuditCase<'_>) {
         let body = EnvelopeBody::of(case.set, case.kind, case.record, case.derived);
-        for fault in envelope_tag_faults(&body, AirRules::Batch) {
+        for fault in envelope_tag_faults(&body) {
             self.faults.push((Item::M4, fault));
         }
         if let Some(hidden) = &body.hidden {
@@ -628,7 +616,7 @@ impl AuditBody {
         }
     }
 
-    /// M7, P14.T51.g.b's invariants on the body's published ocean, every 24 hold in force.
+    /// M7, P14.T51.g.b's invariants on the body's published ocean.
     ///
     /// Main's rulings, 2026-10-27, on T51.g.a's MUST-FIX and on k-1's audit (T51.g.a's narrower
     /// floor, 626.09 MPa, applies under its own hold alone): its floor rock, ice III or ice V, at
@@ -1053,15 +1041,12 @@ fn not_finite(text: &str) -> bool {
         .any(|word| matches!(word, "NaN" | "inf" | "-inf"))
 }
 
-/// The audit of every body of `sets` ([`AuditBody`]), every 24 hold in force and the record's
+/// The audit of every body of `sets` ([`AuditBody`]) and the record's
 /// rules at their batch, each system generated afresh, with the walk's wall time, s.
 fn audit_census(sets: &[AuditSet]) -> (Vec<AuditBody>, f64) {
     let start = Instant::now();
-    let bodies = with_every_24_hold(|| {
-        let mut bodies = Vec::new();
-        audit_walk(sets, &mut |case| bodies.push(AuditBody::of(case)));
-        bodies
-    });
+    let mut bodies = Vec::new();
+    audit_walk(sets, &mut |case| bodies.push(AuditBody::of(case)));
     (bodies, start.elapsed().as_secs_f64())
 }
 
@@ -1171,7 +1156,7 @@ fn assert_hothouses(
 }
 
 /// The audit's MUST-FIX asserts (P14.T54.b.k; design-k §3.1) over design-k §0's set C
-/// ([`census_sets`]), every 24 hold in force and the record's rules at their batch.
+/// ([`census_sets`]).
 ///
 /// M1 (part 1's runaways, (c)'s hothouses [`HOTHOUSE_BODY`], decked and under water's saturation
 /// temperature under the thick-air closure, and [`CLOSURE_HOTHOUSE_BODY`], decked and above it;

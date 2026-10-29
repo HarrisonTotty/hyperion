@@ -61,9 +61,8 @@
 //!   (science-r09-drainage.md §3), so a row whose density depends on temperature, or is not read
 //!   at all, is served the same way: a phase whose density was not read at that temperature is
 //!   refused, labelled ([`ResolveAerosolError::NoDensity`]): β-`CO` and `H2S`'s phase II. Solid
-//!   `Ar`, β-`O2`, `H2S`'s phases I and III, solid `C2H6` and liquid `S8` are read at generator
-//!   version 24 (P14.T49.n) and refused until then, the registry's hold
-//!   (`READ_DENSITIES_VERSION`).
+//!   `Ar`, β-`O2`, `H2S`'s phases I and III, solid `C2H6` and liquid `S8` are read from generator
+//!   version 24 (P14.T49.n).
 //! - **A variant's density.** The row's grain density is its reference composition's. A file of
 //!   another variant (the 84.5 wt% acid, seawater at S = 35) has a table entry but no density yet;
 //!   the 75 wt% acid's `75wt%` is `H2SO4`'s reference ([`density_variant`]).
@@ -84,8 +83,8 @@
 //!   ([`ResolveAerosolError::OffGrid`]): below, the Rayleigh limit; above, the geometric limit,
 //!   which `Q̄_ext` approaches as 2 + 2 x^(−2/3).
 //!
-//! Generator version 22 publishes none of it: nothing on the record reads it until P14.T54.b
-//! (decision-bump-plan-after-22 §1.3).
+//! The record reads it from generator version 24, through P14.T54.b's condensate decks and
+//! aerosols; to version 23 nothing on the record read it (decision-bump-plan-after-22 §1.3).
 
 use std::error::Error;
 use std::fmt;
@@ -866,162 +865,10 @@ pub fn aerosol_optics(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use hyperion_testkit::float::assert_same_bits;
 
-    use super::super::thermal::tests::{
-        before_inline_tests, names, out_of_line_test_modules, rust_files,
-    };
     use super::*;
-    use crate::substance::{ReadDensitiesRules, by_key, ids, with_read_densities};
-
-    /// The files outside this module and its tables whose reads of its API sit behind a named
-    /// hold, each with it: P14.T52.c's loop, a pure module. **P14.T54.b deletes this list** with
-    /// the tripwire below.
-    const HELD: [(&str, &str); 1] = [(
-        "planetary/chem/condense.rs",
-        "P14.T52.c's condensation loop, which the record calls only through P14.T24.c's \
-         inventory behind P14.T54.b's hold, AIR_SECTIONS_VERSION (planetary/system/air.rs)",
-    )];
-
-    /// The forms by which other code would read this module's extinction or its tables: its calls,
-    /// its paths and its types, and the tables' name.
-    const API_PATTERNS: [&str; 6] = [
-        "aerosol_optics(",
-        "substance::aerosol",
-        "AerosolOptics",
-        "extinction_entries(",
-        "interpolate_grid(",
-        "condensate_extinction",
-    ];
-
-    /// The lines that declare this module and its tables and re-export the module, each by its
-    /// file and the start of its line: `substance/mod.rs`'s module line and its `pub use
-    /// aerosol::{…};` statement, whatever lines that takes, and `tables/mod.rs`'s module lines and
-    /// the entries of the tables' `MANIFEST`, which `hyperion-fit` writes.
-    const DECLARATIONS: [(&str, &str); 4] = [
-        ("substance/mod.rs", "pub mod aerosol;"),
-        ("substance/mod.rs", "pub use aerosol::"),
-        ("tables/mod.rs", "pub mod condensate_extinction"),
-        ("tables/mod.rs", "name: \"condensate_extinction"),
-    ];
-
-    /// Whether the file at `relative` (under the crate's `src/`) is this module's or one of its
-    /// seven tables.
-    fn own(relative: &str) -> bool {
-        relative == "substance/aerosol.rs"
-            || (relative.starts_with("tables/condensate_extinction")
-                && Path::new(relative)
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("rs")))
-    }
-
-    /// The `(line, pattern)` pairs, 1-based, by which the code of the file at `relative`, of text
-    /// `text`, names [`API_PATTERNS`] before its inline test module: its comment lines and its
-    /// [`DECLARATIONS`] (a statement to its `;`) left out, each pattern as a whole name (`names`).
-    fn readers(relative: &str, text: &str) -> Vec<(usize, &'static str)> {
-        let mut found = Vec::new();
-        let mut in_declaration = false;
-        for (n, line) in before_inline_tests(text).iter().enumerate() {
-            let code = line.trim_start();
-            if in_declaration {
-                in_declaration = !code.trim_end().ends_with(';');
-                continue;
-            }
-            if DECLARATIONS
-                .iter()
-                .any(|(file, start)| *file == relative && code.starts_with(start))
-            {
-                in_declaration = !code.trim_end().ends_with(';') && !code.ends_with(',');
-                continue;
-            }
-            if code.starts_with("//") {
-                continue;
-            }
-            for pattern in API_PATTERNS {
-                if names(line, pattern) {
-                    found.push((n + 1, pattern));
-                }
-            }
-        }
-        found
-    }
-
-    /// The scan reads the code alone: it finds a call, a path and a type, leaves out comments, the
-    /// declarations (a re-export over several lines whole) and the inline test module, and reads
-    /// whole names only.
-    #[test]
-    fn substance_aerosol_the_tripwire_s_scan_reads_the_code_alone() {
-        let text = "// aerosol_optics(id, phase, variant, &mode, t)\n\
-                    let optics = substance::aerosol::aerosol_optics(id, p, v, &m, t)?;\n\
-                    let my_condensate_extinction = 1;\n\
-                    #[cfg(test)]\nmod tests {\n    fn f() { extinction_entries(); }\n}\n";
-        assert_eq!(
-            readers("planetary/x.rs", text),
-            [(2, "aerosol_optics("), (2, "substance::aerosol")]
-        );
-        let declarations = "pub mod aerosol;\npub use aerosol::{\n    AerosolOptics, aerosol_optics,\n};\n\
-                            pub use condensed::CondensedPhase;\nfn f(o: AerosolOptics) {}\n";
-        assert_eq!(
-            readers("substance/mod.rs", declarations),
-            [(6, "AerosolOptics")]
-        );
-        let tables = "pub mod condensate_extinction_2;\n    TableInfo {\n        name: \
-                      \"condensate_extinction_2\",\n";
-        assert_eq!(readers("tables/mod.rs", tables), Vec::new());
-        assert!(own("tables/condensate_extinction_7.rs") && !own("tables/mod.rs"));
-    }
-
-    /// Nothing on the record reads the aerosol extinction before P14.T54.b, its bump
-    /// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside this module and
-    /// its seven tables names [`API_PATTERNS`], every file read in sorted order by the substance
-    /// tripwires' walk (`substance::thermal`'s tests'), but each inline test module, every file an
-    /// out-of-line test module declares, [`DECLARATIONS`] and [`HELD`]'s files (P14.T52.c's
-    /// loop). **P14.T54.b deletes this tripwire** when P14.T52.c and T24.c first read it.
-    #[test]
-    fn substance_aerosol_nothing_on_the_record_reads_the_extinction_yet() {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = Vec::new();
-        rust_files(&src, &src, &mut files);
-        assert!(files.len() > 100, "the walk found the crate's sources");
-        let read = |path: &Path| {
-            std::fs::read_to_string(path)
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
-        };
-        assert_eq!(
-            files.iter().filter(|(relative, _)| own(relative)).count(),
-            8,
-            "the module and its seven tables"
-        );
-        for (held, hold) in HELD {
-            assert!(!hold.is_empty(), "{held} names its hold");
-            assert!(
-                files.iter().any(|(relative, _)| relative == held),
-                "{held} is a source file"
-            );
-        }
-        let mut tests = Vec::new();
-        for (relative, path) in &files {
-            tests.extend(out_of_line_test_modules(relative, &read(path)));
-        }
-        let mut found = Vec::new();
-        for (relative, path) in &files {
-            let test_file = tests
-                .iter()
-                .any(|t| relative == t || (t.ends_with('/') && relative.starts_with(t.as_str())));
-            if test_file || own(relative) || HELD.iter().any(|(held, _)| held == relative) {
-                continue;
-            }
-            for (line, pattern) in readers(relative, &read(path)) {
-                found.push(format!("{relative}:{line}: {pattern}"));
-            }
-        }
-        assert!(
-            found.is_empty(),
-            "nothing on the record reads substance::aerosol before P14.T54.b: {found:#?}"
-        );
-    }
+    use crate::substance::{by_key, ids};
 
     fn gamma(radius_m: f64, variance: f64) -> SizeDistribution {
         SizeDistribution::gamma(Metres::new(radius_m), variance).unwrap()
@@ -1289,8 +1136,8 @@ mod tests {
     /// Each refusal is its own: a row that is no aerosol material, a phase or variant with no
     /// file, a file whose density is not the row's or not read, a size off the grid, and a
     /// temperature that is not finite. Solid argon, solid hydrogen sulphide in its phase I and
-    /// liquid sulphur are refused under the registry's hold and resolve under 24's rules
-    /// (P14.T49.n); hydrogen sulphide's phase II is refused under both.
+    /// liquid sulphur resolve from 24 (P14.T49.n; refused at 23); hydrogen sulphide's phase II is
+    /// refused.
     #[test]
     fn substance_aerosol_refuses_what_it_cannot_serve() {
         let mode = gamma(1e-6, 0.1);
@@ -1331,7 +1178,7 @@ mod tests {
             ("H2O", solid, None, 300.0),
             ("H2S", solid, None, 110.0),
         ];
-        // Read at 24 (P14.T49.n), refused under the hold.
+        // Read from 24 (P14.T49.n), refused at 23.
         let read_at_24 = [
             ("Ar", solid, None, 60.0),
             ("H2S", solid, None, 150.0),
@@ -1346,18 +1193,13 @@ mod tests {
                 "{key} {phase:?} {variant:?}"
             );
         };
-        with_read_densities(ReadDensitiesRules::Held, || {
-            never.into_iter().chain(read_at_24).for_each(refused);
-        });
-        with_read_densities(ReadDensitiesRules::Read, || {
-            never.into_iter().for_each(refused);
-            for (key, phase, variant, temperature) in read_at_24 {
-                let optics = resolve(key, phase, variant, &mode, Kelvin::new(temperature))
-                    .unwrap_or_else(|e| panic!("{key} {phase:?} resolves at 24: {e:?}"));
-                let kappa = optics.mass_extinction_m2_per_kg();
-                assert!(kappa.is_finite() && kappa > 0.0, "{key} {phase:?}: {kappa}");
-            }
-        });
+        never.into_iter().for_each(refused);
+        for (key, phase, variant, temperature) in read_at_24 {
+            let optics = resolve(key, phase, variant, &mode, Kelvin::new(temperature))
+                .unwrap_or_else(|e| panic!("{key} {phase:?} resolves at 24: {e:?}"));
+            let kappa = optics.mass_extinction_m2_per_kg();
+            assert!(kappa.is_finite() && kappa > 0.0, "{key} {phase:?}: {kappa}");
+        }
         for off in [
             gamma(0.5e-9, 0.1),
             gamma(150e-6, 0.1),

@@ -672,8 +672,8 @@ impl CoarseInputs {
     ///   (P14.T49.b–c, T49.h and T49.i; decision-r11-palette-liquids §1.7): an entry for each
     ///   crust and the provinces, each ice and each liquid, the liquids with their records and a
     ///   melting crust with its melt's, by the `palette` module's rules. An airless body's palette
-    ///   carries no cold-trapped `Ice` entry until P14.T51.f, wired by P14.T54.b, since no
-    ///   condensate on the record names one.
+    ///   carries a cold-trapped `Ice` entry from generator version 24, where a condensate on the
+    ///   record names one (P14.T51.f, wired by P14.T54.b); to 23 none did.
     ///
     /// Both records are taken at [`RECORD_TIME`], the epoch, which settles the record's time
     /// (decision-backlog-2 §3; decision-bump-plan-after-22 §1.2 and §1.5).
@@ -863,14 +863,14 @@ impl CoarseInputs {
     /// regolith albedo, to the bit, and [`cold_traps`](Self::cold_traps) each solid entry's trapped
     /// area above zero (decision-r09-t13f-cold-traps §1.1, §2.2), to the bit but where the
     /// record's figures scaled every ice into the surface, whose trapped parts are scaled alike;
-    /// elsewhere, and under the cold traps' hold at generator version 23, none and `None`. Each
-    /// ice's share is the record's whole share, its cold-trapped part included.
+    /// elsewhere, and at generator version 23, none and `None`. Each ice's share is the record's
+    /// whole share, its cold-trapped part included.
     ///
     /// The ground's weathering ([`weathering`](Self::weathering), the maturity with the weathering
     /// rate) and its [`organic_cover`](Self::organic_cover) are the surface section's modifiers'
     /// (P14.T51.d, wired by P14.T54.b.c), to the bit, where the record models them, the cover +0
     /// where no ground takes one; and none of the three where it does not, every record's below
-    /// generator version 24, which holds the modifiers off the record.
+    /// generator version 24, which carried no modifiers.
     ///
     /// # Errors
     ///
@@ -1069,7 +1069,7 @@ impl CoarseInputs {
                 .cold_traps(trapped_of(surface));
         }
         // The header's weathering parts and organic cover, where the record's modifiers are
-        // modelled (P14.T54.b.c): absent together until then, so that every field keeps its bits.
+        // modelled (P14.T54.b.c): absent together elsewhere, so that every field keeps its bits.
         if let Modelled::Ok(modifiers) = surface.modifiers() {
             builder = builder
                 .weathering(GroundWeathering {
@@ -1406,7 +1406,7 @@ impl CoarseInputs {
     /// The ground's space weathering, its maturity with the weathering rate, which the field's
     /// header carries as its `maturity` and `weathering_rate` (R09's reserved parts, R10.T1.c's
     /// fade): plan 14's modifiers' (P14.T51.d), `None` where the inputs carry none, as from a
-    /// record below generator version 24, whose modifiers are held off it (P14.T54.b.c).
+    /// record below generator version 24, which carried no modifiers (P14.T54.b.c).
     #[must_use]
     pub const fn weathering(&self) -> Option<&GroundWeathering> {
         self.weathering.as_ref()
@@ -2833,7 +2833,6 @@ pub(crate) mod tests {
     use crate::planetary::derive::PlanetClass;
     use crate::planetary::derive::atmosphere::Gas;
     use crate::planetary::generate;
-    use crate::planetary::hooks::cold_traps::COLD_TRAPS_VERSION;
     use crate::planetary::record::DetailLevel;
     use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_star};
     use crate::time::UniverseTime;
@@ -3981,26 +3980,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Under the cold traps' hold, generator version 23's, the record gives no cold traps: a
-    /// generated planet's and a generated moon's inputs have none, and no cold-trap inputs
-    /// (decision-r09-t13f-cold-traps §7.2; decision-p14-t54b-f-coldtraps §5, the Held half of what
-    /// replaces R09's tripwire `the_record_gives_no_cold_traps_until_the_24_bump`).
-    #[test]
-    fn under_the_cold_traps_hold_the_record_gives_no_cold_traps() {
-        use crate::planetary::hooks::cold_traps::ColdTrapRules;
-
-        assert!(GENERATOR_VERSION < COLD_TRAPS_VERSION);
-        assert_eq!(ColdTrapRules::in_force(), ColdTrapRules::Held);
-        let (_, _, planet) = planet_reading();
-        let (_, moon, its_planet) = generated_moon();
-        let moon = read(&moon, SeasonsFromRecord::Planet(&its_planet));
-        for inputs in [planet, moon] {
-            assert!(inputs.cold_traps().is_empty(), "{:?}", inputs.cold_traps());
-            assert_eq!(inputs.cold_trap_inputs(), None);
-        }
-    }
-
-    /// Under the cold traps' batch, every 24 hold in force, R09's inputs read the record's cold
+    /// Under the cold traps' batch, R09's inputs read the record's cold
     /// traps to the bit (decision-p14-t54b-f-coldtraps §5, the Batch half): over the sample's
     /// bodies whose record's published pass read a field, `cold_trap_inputs()` is that field's
     /// star angular radius and its regolith's albedo, the carried field's inputs to the bit, and
@@ -4021,91 +4001,89 @@ pub(crate) mod tests {
         let mut refused: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let bodies = trap_bodies();
         // R09 reads the records under the rules they were built by.
-        crate::planetary::testing::with_every_24_hold(|| {
-            for body in bodies {
-                let surface = body.surface();
-                let inputs =
-                    match CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx) {
-                        Ok(inputs) => inputs,
-                        Err(error) => {
-                            // Why a surface is not modelled: no crust, unlit, or the palette's refusal.
-                            let why = match (surface.crust(), &error) {
-                                (Modelled::NotModelled, _) => "no crust".to_owned(),
-                                (Modelled::Ok(crust), ReadCoarseInputsError::Section(_)) => {
-                                    match palette::resolve(surface, crust) {
-                                        Ok(_) => "unlit".to_owned(),
-                                        Err(palette) => format!("palette {palette:?}"),
-                                    }
-                                }
-                                (Modelled::Ok(_), _) => format!("{error:?}"),
-                            };
-                            refused.entry(why).or_default().push(body.id());
-                            continue;
+        for body in bodies {
+            let surface = body.surface();
+            let inputs = match CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx)
+            {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    // Why a surface is not modelled: no crust, unlit, or the palette's refusal.
+                    let why = match (surface.crust(), &error) {
+                        (Modelled::NotModelled, _) => "no crust".to_owned(),
+                        (Modelled::Ok(crust), ReadCoarseInputsError::Section(_)) => {
+                            match palette::resolve(surface, crust) {
+                                Ok(_) => "unlit".to_owned(),
+                                Err(palette) => format!("palette {palette:?}"),
+                            }
                         }
+                        (Modelled::Ok(_), _) => format!("{error:?}"),
                     };
-                let Some(basis) = surface.basis().and_then(|basis| basis.cold_traps) else {
-                    assert!(inputs.cold_traps().is_empty(), "{}", body.id());
-                    assert_eq!(inputs.cold_trap_inputs(), None, "{}", body.id());
-                    none += 1;
+                    refused.entry(why).or_default().push(body.id());
                     continue;
-                };
-                let carried = body
-                    .traps()
-                    .as_ref()
-                    .unwrap_or_else(|why| panic!("{}: a basis with no field, {why:?}", body.id()));
-                let group = inputs
-                    .cold_trap_inputs()
-                    .unwrap_or_else(|| panic!("{}: no cold-trap inputs", body.id()));
-                assert_same_bits(group.star_angular_radius.value(), basis.star_radius.value());
-                assert_same_bits(
-                    group.star_angular_radius.value(),
-                    carried.inputs().sky().star_radius.value(),
-                );
-                assert_same_bits(group.bond_albedo, basis.regolith_albedo);
-                assert_same_bits(group.bond_albedo, carried.inputs().regolith_albedo());
-                let ices = surface.figures().surface_ices();
-                let mut expected: Vec<(String, u64)> = Vec::new();
-                for e in surface.condensates().entries() {
-                    if e.phase() != Phase::Solid || e.trapped_area_fraction() <= 0.0 {
-                        continue;
-                    }
-                    let ice = ices
-                        .iter()
-                        .find(|&&(id, _)| id == e.substance())
-                        .map_or(0.0, |&(_, share)| share);
-                    let share = if bits(ice) == bits(e.area_fraction()) {
-                        exact += 1;
-                        e.trapped_area_fraction()
-                    } else {
-                        // The figures scaled every ice into the surface: the trapped part alike.
-                        scaled += 1;
-                        let share = e.trapped_area_fraction() * (ice / e.area_fraction());
-                        assert!(ice < e.area_fraction(), "{}", body.id());
-                        if share < ice { share } else { ice }
-                    };
-                    if share > 0.0 {
-                        expected.push((
-                            e.substance().substance().key().as_str().to_owned(),
-                            bits(share),
-                        ));
-                    }
                 }
-                let mut got: Vec<(String, u64)> = inputs
-                    .cold_traps()
+            };
+            let Some(basis) = surface.basis().and_then(|basis| basis.cold_traps) else {
+                assert!(inputs.cold_traps().is_empty(), "{}", body.id());
+                assert_eq!(inputs.cold_trap_inputs(), None, "{}", body.id());
+                none += 1;
+                continue;
+            };
+            let carried = body
+                .traps()
+                .as_ref()
+                .unwrap_or_else(|why| panic!("{}: a basis with no field, {why:?}", body.id()));
+            let group = inputs
+                .cold_trap_inputs()
+                .unwrap_or_else(|| panic!("{}: no cold-trap inputs", body.id()));
+            assert_same_bits(group.star_angular_radius.value(), basis.star_radius.value());
+            assert_same_bits(
+                group.star_angular_radius.value(),
+                carried.inputs().sky().star_radius.value(),
+            );
+            assert_same_bits(group.bond_albedo, basis.regolith_albedo);
+            assert_same_bits(group.bond_albedo, carried.inputs().regolith_albedo());
+            let ices = surface.figures().surface_ices();
+            let mut expected: Vec<(String, u64)> = Vec::new();
+            for e in surface.condensates().entries() {
+                if e.phase() != Phase::Solid || e.trapped_area_fraction() <= 0.0 {
+                    continue;
+                }
+                let ice = ices
                     .iter()
-                    .map(|share| {
-                        (
-                            share.substance.as_str().to_owned(),
-                            bits(share.area_fraction),
-                        )
-                    })
-                    .collect();
-                expected.sort();
-                got.sort();
-                assert_eq!(got, expected, "{}", body.id());
-                read_in += 1;
+                    .find(|&&(id, _)| id == e.substance())
+                    .map_or(0.0, |&(_, share)| share);
+                let share = if bits(ice) == bits(e.area_fraction()) {
+                    exact += 1;
+                    e.trapped_area_fraction()
+                } else {
+                    // The figures scaled every ice into the surface: the trapped part alike.
+                    scaled += 1;
+                    let share = e.trapped_area_fraction() * (ice / e.area_fraction());
+                    assert!(ice < e.area_fraction(), "{}", body.id());
+                    if share < ice { share } else { ice }
+                };
+                if share > 0.0 {
+                    expected.push((
+                        e.substance().substance().key().as_str().to_owned(),
+                        bits(share),
+                    ));
+                }
             }
-        });
+            let mut got: Vec<(String, u64)> = inputs
+                .cold_traps()
+                .iter()
+                .map(|share| {
+                    (
+                        share.substance.as_str().to_owned(),
+                        bits(share.area_fraction),
+                    )
+                })
+                .collect();
+            expected.sort();
+            got.sort();
+            assert_eq!(got, expected, "{}", body.id());
+            read_in += 1;
+        }
         eprintln!(
             "{read_in} records' cold traps read ({exact} trapped parts to the bit, {scaled} scaled \
              with their ices into the surface), {none} with none; refused: {refused:?}"
@@ -5290,76 +5268,11 @@ pub(crate) mod tests {
             read_ok > 0 && read_ok + unmodelled == bodies,
             "{read_ok} of {bodies}"
         );
-        // The recorded gaps alone: no crust, an unlit record's 0 K, and the ices whose solid
-        // density the registry has not read under 23's rules (argon's, β-O2's: P14.T49.n reads
-        // them, held until 24; `under_24_s_densities_the_census_refuses_no_ice_for_its_density`).
+        // The recorded gap alone, no crust: from 24 an unlit record's mean is its night floor
+        // (P14.T24.i), and argon's and β-O2's solid densities are read (P14.T49.n).
         for cause in unread.keys() {
-            let known = cause == NO_CRUST
-                || cause == UNLIT
-                || ["Ar Ice", "O2 Ice"]
-                    .iter()
-                    .any(|ice| cause == &format!("{ice}: DensityNotModelled"));
+            let known = cause == NO_CRUST;
             assert!(known, "{cause}");
-        }
-    }
-
-    /// P14.T49.n's densities, held until 24 (`READ_DENSITIES_VERSION`): the census's systems,
-    /// generated and read under 24's densities, the census's walk of `for_body` alone. It refuses
-    /// no body for an ice whose solid density the registry has not read, solid argon's (fcc) and
-    /// β-O2's being read: only the census's other gaps remain, a crust not modelled and an unlit
-    /// record's 0 K. Under 23's rules the census
-    /// (`every_generated_solid_body_reads_into_inputs_the_builder_takes`) allows the "Ar Ice" and
-    /// "O2 Ice" refusals.
-    #[test]
-    fn under_24_s_densities_the_census_refuses_no_ice_for_its_density() {
-        use crate::substance::{ReadDensitiesRules, with_read_densities};
-        let contexts = sample_contexts(CENSUS, SEED, SampleFilter::ALL).unwrap();
-        let (bodies, read_ok, unread) = with_read_densities(ReadDensitiesRules::Read, || {
-            let (mut bodies, mut read_ok) = (0_usize, 0_usize);
-            let mut unread: std::collections::BTreeMap<String, usize> =
-                std::collections::BTreeMap::new();
-            for (ctx, records) in records_at_record_time(&contexts) {
-                for record in &records {
-                    let Section::Ok(surface) = record.surface() else {
-                        continue;
-                    };
-                    bodies += 1;
-                    let planet = planet_of(record, &records);
-                    match CoarseInputs::for_body(record, planet, &ctx) {
-                        Ok(_) => {
-                            assert_eq!(unread_cause(surface), None, "{:?}", record.index());
-                            read_ok += 1;
-                        }
-                        Err(error) => {
-                            assert_eq!(
-                                error,
-                                ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
-                                    RecordSection::Surface
-                                )),
-                                "{:?}",
-                                record.index()
-                            );
-                            let cause = unread_cause(surface).unwrap_or_else(|| {
-                                panic!("{:?} reads no inputs for no cause", record.index())
-                            });
-                            *unread.entry(cause).or_default() += 1;
-                        }
-                    }
-                }
-            }
-            (bodies, read_ok, unread)
-        });
-        eprintln!(
-            "census under 24's densities: {bodies} bodies, {read_ok} read by `for_body`; not \
-             modelled: {unread:?}"
-        );
-        let unmodelled: usize = unread.values().sum();
-        assert!(
-            read_ok > 0 && read_ok + unmodelled == bodies,
-            "{read_ok} of {bodies}"
-        );
-        for cause in unread.keys() {
-            assert!(cause == NO_CRUST || cause == UNLIT, "{cause}");
         }
     }
 
@@ -5395,10 +5308,12 @@ pub(crate) mod tests {
     }
 
     /// Checks the palette `for_body` resolved for a body, its inputs `inputs` (the palette
-    /// resolution's rules, P14.T54.a): an entry for each crust and the provinces, each
-    /// condensate as its phase's, each ice and liquid on the ground, and nothing else; each solid
-    /// entry its registry row's, phase row 1 or 2, with no `FeO_T`; each liquid its record's, its
-    /// grain density the record's density, its albedo its Fresnel reflectance, phase row 0; each
+    /// resolution's rules, P14.T54.a): an entry for each crust and the provinces, each condensate
+    /// as its phase's, each ice and liquid on the ground, and from 24 the modifiers' deposits and
+    /// cover (P14.T54.b.c, which `system::modifiers`' tests check against the record's modifiers),
+    /// and nothing else; each solid entry its registry row's, phase row 1 or 2, its `FeO_T` none or
+    /// its row's palette `FeO_T` (P14.T54.b.c); each liquid its record's, its grain density the
+    /// record's density, its albedo its Fresnel reflectance, phase row 0, with no `FeO_T`; each
     /// record's temperature in its liquid's range; and every phase row 0 to 2
     /// (decision-r11-palette-liquids §2 item 6).
     fn check_record_palette(inputs: &CoarseInputs) {
@@ -5422,14 +5337,21 @@ pub(crate) mod tests {
         for entry in palette.entries() {
             let key = entry.substance;
             assert!(entry.phase_row <= 2, "{key}: phase row {}", entry.phase_row);
-            assert_eq!(entry.feo_mass_fraction, None, "{key}");
             let crust_role = entry.role.is_crust();
+            let modifiers_role = matches!(entry.role, PaletteRole::Deposit | PaletteRole::Cover);
             assert!(
-                named.contains(&(crust_role, key)),
+                modifiers_role || named.contains(&(crust_role, key)),
                 "{key} in {:?} is not named by the record",
                 entry.role
             );
             let row = by_key(key.as_str()).unwrap();
+            if entry.role == PaletteRole::Liquid {
+                assert_eq!(entry.feo_mass_fraction, None, "{key}");
+            } else if let Some(feo) = entry.feo_mass_fraction {
+                let palette_feo = crate::substance::optics::palette_feo_mass_fraction(row)
+                    .unwrap_or_else(|| panic!("{key}: an FeO_T where its row has none"));
+                assert_same_bits(feo, palette_feo);
+            }
             match entry.role {
                 PaletteRole::Liquid => {
                     let record = entry.liquid.as_ref().expect("a liquid carries its record");
@@ -5777,11 +5699,16 @@ pub(crate) mod tests {
             inputs.main_liquid(),
             inputs.palette().find(PaletteRole::Liquid, sea.substance)
         );
-        // A pure fluid's grain density is its saturated liquid's at the record's temperature.
+        // A pure fluid's grain density is its liquid's at the record's temperature, compressed to
+        // its surface pressure (P14.T49.n, from generator version 24; its saturated liquid's to
+        // 23).
+        let Section::Ok(surface) = record.surface() else {
+            unreachable!("the finder read its surface");
+        };
         let rho = crate::substance::by_key("H2O")
             .unwrap()
             .substance()
-            .grain_density(crate::substance::CondensedPhase::Liquid, held.temperature)
+            .liquid_density_at_pressure(held.temperature, surface.conditions().surface_pressure())
             .unwrap();
         assert_same_bits(sea.grain_density_kg_m3, rho.value());
     }
@@ -5848,117 +5775,39 @@ pub(crate) mod tests {
         }
     }
 
-    /// The recorded gaps, each answered not modelled (the lane's ruling, Batch E): a body whose
-    /// palette names an ice the registry has no solid density of under 23's rules, solid argon's
-    /// on the coldest airless members (P14.T49.b's `ARGON` diagram reads none; P14.T49.n's fcc
-    /// density is held until 24, `under_24_s_densities_the_argon_ice_body_reads`), names the
-    /// substance and the cause in its palette's refusal; and an unlit body, whose record states
-    /// its mean surface temperature as its equilibrium temperature, 0 K, is not read.
-    #[test]
-    fn a_surface_the_registry_or_the_record_does_not_model_answers_not_modelled() {
-        use crate::substance::ResolvePaletteEntryError;
-        let not_modelled = Err(ReadCoarseInputsError::Section(
-            SurfaceInputsError::NotModelled(RecordSection::Surface),
-        ));
-        let (mut argon, mut unlit) = (None, None);
-        'systems: for (ctx, system) in crate::planetary::system::tests::whole() {
-            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
-            let records = snapshot.bodies();
-            for record in records {
-                let Section::Ok(surface) = record.surface() else {
-                    continue;
-                };
-                let Modelled::Ok(crust) = surface.crust() else {
-                    continue;
-                };
-                let mean = surface.conditions().mean_surface_temperature().value();
-                let read = || CoarseInputs::for_body(record, planet_of(record, records), ctx);
-                if unlit.is_none() && mean <= 0.0 {
-                    assert_eq!(read(), not_modelled, "{:?}", record.index());
-                    unlit = Some(record.index());
-                } else if argon.is_none()
-                    && mean > 0.0
-                    && palette::resolve(surface, crust)
-                        == Err(palette::ResolveBodyPaletteError::Solid {
-                            substance: key("Ar"),
-                            role: PaletteRole::Ice,
-                            cause: ResolvePaletteEntryError::DensityNotModelled,
-                        })
-                {
-                    assert_eq!(read(), not_modelled, "{:?}", record.index());
-                    let ar = crate::substance::by_key("Ar").unwrap().substance();
-                    assert!(
-                        ar.condensed_optics().is_some(),
-                        "argon's optics are modelled"
-                    );
-                    eprintln!(
-                        "{:?}: {:?} at T_s {mean:.1} K holds argon ice, whose solid density the \
-                         registry has not read",
-                        record.index(),
-                        surface.state()
-                    );
-                    argon = Some(record.index());
-                }
-                if argon.is_some() && unlit.is_some() {
-                    break 'systems;
-                }
-            }
-        }
-        assert!(argon.is_some() && unlit.is_some(), "{argon:?}, {unlit:?}");
-    }
-
-    /// P14.T49.n's densities, held until 24 (`READ_DENSITIES_VERSION`): the first body of the
-    /// sample whose palette 23's rules refuse for its argon ice
-    /// (`a_surface_the_registry_or_the_record_does_not_model_answers_not_modelled`'s), generated
-    /// and read under 24's densities, reads into inputs, its argon ice's entry at solid argon's
-    /// density (fcc, about 1.6–1.77 × 10³ kg m⁻³ below its triple point).
+    /// P14.T49.n's densities, read from 24: the first body of the sample whose palette holds an
+    /// argon ice, which 23's rules refused for want of its solid density (with an unlit body's 0 K
+    /// mean, version 23's two recorded gaps, which 24 closes), reads into inputs, its argon ice's
+    /// entry at solid argon's density (fcc, about 1.6–1.77 × 10³ kg m⁻³ below its triple point).
     #[test]
     fn under_24_s_densities_the_argon_ice_body_reads() {
-        use crate::planetary::system::tests::{SEED as SYSTEMS_SEED, whole};
-        use crate::substance::{ReadDensitiesRules, ResolvePaletteEntryError, with_read_densities};
-        let refused = whole().iter().find_map(|(ctx, system)| {
+        use crate::planetary::system::tests::whole;
+        let found = whole().iter().find_map(|(ctx, system)| {
             let snapshot = system.snapshot_at(ctx, RECORD_TIME);
-            snapshot.bodies().iter().find_map(|record| {
+            let records = snapshot.bodies();
+            records.iter().find_map(|record| {
                 let surface = record.surface().ok()?;
-                let Modelled::Ok(crust) = surface.crust() else {
-                    return None;
-                };
-                let mean = surface.conditions().mean_surface_temperature().value();
-                (mean > 0.0
-                    && palette::resolve(surface, crust)
-                        == Err(palette::ResolveBodyPaletteError::Solid {
-                            substance: key("Ar"),
-                            role: PaletteRole::Ice,
-                            cause: ResolvePaletteEntryError::DensityNotModelled,
-                        }))
-                .then(|| (ctx.clone(), record.index()))
+                let inputs =
+                    CoarseInputs::for_body(record, planet_of(record, records), ctx).ok()?;
+                let ice = inputs
+                    .palette()
+                    .find(PaletteRole::Ice, key("Ar"))
+                    .and_then(|at| inputs.palette().get(at))?
+                    .clone();
+                Some((
+                    record.index(),
+                    surface.conditions().mean_surface_temperature().value(),
+                    ice,
+                ))
             })
         });
-        let (ctx, index) = refused.expect("the sample holds an argon ice 23 refuses");
-        let (mean, ice) = with_read_densities(ReadDensitiesRules::Read, || {
-            let snapshot = generate(SYSTEMS_SEED, &ctx).snapshot_at(&ctx, RECORD_TIME);
-            let records = snapshot.bodies();
-            let record = records.iter().find(|r| r.index() == index).unwrap();
-            let Section::Ok(surface) = record.surface() else {
-                panic!("{index:?} has a surface under 24's densities");
-            };
-            let inputs = CoarseInputs::for_body(record, planet_of(record, records), &ctx)
-                .unwrap_or_else(|e| panic!("{index:?} reads under 24's densities: {e:?}"));
-            let ice = inputs
-                .palette()
-                .find(PaletteRole::Ice, key("Ar"))
-                .and_then(|at| inputs.palette().get(at))
-                .unwrap_or_else(|| panic!("{index:?} keeps its argon ice"))
-                .clone();
-            (surface.conditions().mean_surface_temperature().value(), ice)
-        });
+        let (index, mean, ice) = found.expect("the sample holds a body with an argon ice");
         assert!(
             (1_550.0..1_800.0).contains(&ice.grain_density_kg_m3),
             "{ice:?}"
         );
         eprintln!(
-            "{index:?} at T_s {mean:.1} K under 24's densities: its argon ice's entry at {:.1} \
-             kg m⁻³",
+            "{index:?} at T_s {mean:.1} K: its argon ice's entry at {:.1} kg m⁻³",
             ice.grain_density_kg_m3
         );
     }

@@ -1,7 +1,5 @@
 //! The thermal columns' and the regolith law's tests (P14.T49.j).
 
-use std::path::{Path, PathBuf};
-
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
@@ -516,87 +514,6 @@ fn the_tripwire_reads_whole_names_only() {
         "thermal::"
     ));
     assert!(!names("geothermal::flux()", "thermal::"));
-}
-
-/// The module the item after the `#[cfg(test)]` at `lines[index]` declares, on its line or as the
-/// next item: its name, and whether it is inline (`mod name {`) or out of line (`mod name;`).
-fn test_module(lines: &[&str], index: usize) -> Option<(String, bool)> {
-    let tail = lines[index].trim().strip_prefix("#[cfg(test)]")?.trim();
-    let item = if tail.is_empty() {
-        lines[index + 1..]
-            .iter()
-            .map(|line| line.trim())
-            .find(|line| !line.is_empty() && !line.starts_with("#["))?
-    } else {
-        tail
-    };
-    let item = ["pub(crate) ", "pub(super) ", "pub "]
-        .iter()
-        .find_map(|visibility| item.strip_prefix(visibility))
-        .unwrap_or(item);
-    let rest = item.strip_prefix("mod ")?;
-    let name: String = rest
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    let inline = rest[name.len()..].trim_start().starts_with('{');
-    Some((name, inline))
-}
-
-/// The paths, relative to the crate's `src/`, of the test modules `relative` declares out of line:
-/// each one's `name.rs` beside the declaring module's children, and its `name/` directory.
-pub(in crate::substance) fn out_of_line_test_modules(relative: &str, text: &str) -> Vec<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let directory = if relative == "lib.rs" {
-        String::new()
-    } else if let Some(parent) = relative.strip_suffix("/mod.rs") {
-        format!("{parent}/")
-    } else {
-        format!("{}/", relative.trim_end_matches(".rs"))
-    };
-    let mut modules = Vec::new();
-    for index in 0..lines.len() {
-        if let Some((name, false)) = test_module(&lines, index) {
-            modules.push(format!("{directory}{name}.rs"));
-            modules.push(format!("{directory}{name}/"));
-        }
-    }
-    modules
-}
-
-/// The lines of `text` before its inline test module, the first `#[cfg(test)]` of a `mod name {`.
-pub(in crate::substance) fn before_inline_tests(text: &str) -> Vec<&str> {
-    let lines: Vec<&str> = text.lines().collect();
-    let end = (0..lines.len())
-        .find(|&index| matches!(test_module(&lines, index), Some((_, true))))
-        .unwrap_or(lines.len());
-    lines[..end].to_vec()
-}
-
-/// Every `.rs` file under `dir`, in sorted order, as paths relative to `root` joined by `/`.
-pub(in crate::substance) fn rust_files(
-    root: &Path,
-    dir: &Path,
-    found: &mut Vec<(String, PathBuf)>,
-) {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .map(|entry| entry.expect("a directory entry reads").path())
-        .collect();
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            rust_files(root, &path, found);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            let relative: Vec<String> = path
-                .strip_prefix(root)
-                .expect("a file under the root")
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                .collect();
-            found.push((relative.join("/"), path));
-        }
-    }
 }
 
 /// The rows P14.T49.j requires (its brief, as plan 14's record "Deviations in P14.T49.j, as

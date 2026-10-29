@@ -84,13 +84,12 @@
 //! - The haze's suppression by a host's far ultraviolet (Arney et al. 2017), and any wind but
 //!   Mars's for the dust, whose rule reads no rotation.
 //!
-//! # Not on the record yet
+//! # On the record from 24
 //!
-//! This module is pure: nothing on the record calls it at generator version 23
-//! (decision-bump-plan-after-22 §1.3). P14.T54.b's wiring (`system/air.rs`, P14.T54.b.b) builds
-//! the record's inventory from the published surface behind its hold, `AIR_SECTIONS_VERSION`,
-//! whose held arm calls nothing here, so that the record and the wire carry it from the 23 → 24
-//! bump.
+//! This module is pure. P14.T54.b's wiring (`system/air.rs`, P14.T54.b.b) builds the record's
+//! inventory from the published surface, so that the record and the wire carry it from generator
+//! version 24; to version 23 nothing on the record called it (decision-bump-plan-after-22
+//! §1.3).
 
 use std::error::Error;
 use std::fmt;

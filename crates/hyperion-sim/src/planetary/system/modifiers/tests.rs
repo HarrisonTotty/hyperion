@@ -1,5 +1,4 @@
-//! The modifiers on the record (P14.T54.b.c): held at 23, so that every record is 23's; under the
-//! batch's rules (the air's sections' hold lifted, `AirRules::Batch`), every solid surface with a
+//! The modifiers on the record (P14.T54.b.c), from generator version 24: every solid surface with a
 //! crust and a host star carries `SurfaceModifiers::derive` over its published members and what its
 //! system gives beside them, R09's inputs carry them to the field's header, and its palette takes
 //! the registry's `FeO_T`, the `ferric` deposit and the `tholin` cover, over the plan-14 sample
@@ -18,11 +17,10 @@ use crate::id::BodyId;
 use crate::planetary::chem::inventory::Reservoir;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::derive::atmosphere::{
-    Gas, NoMaturity, PassMaturity, PassWeathered, SurfaceMaterial, SurfaceState,
+    Gas, PassMaturity, PassWeathered, SurfaceMaterial, SurfaceState,
 };
 use crate::planetary::derive::photometry::area_mix::{
-    AreaMixWeathering, CAPPED_ROWS, LidWeathering, REGOLITH_FORMATION_TIME, Regolith, StandIn,
-    capped_lid, sun_bands,
+    CAPPED_ROWS, LidWeathering, REGOLITH_FORMATION_TIME, Regolith, StandIn, capped_lid, sun_bands,
 };
 use crate::planetary::fate::BodyFate;
 use crate::planetary::hooks::crust::LidCrust;
@@ -34,11 +32,9 @@ use crate::planetary::hooks::surface::HourCosines;
 use crate::planetary::label;
 use crate::planetary::placement::OrbitHost;
 use crate::planetary::record::Surface;
-use crate::planetary::surface::{CoarseInputs, RECORD_TIME};
-use crate::planetary::system::tests::{SEED, golden_systems, whole};
-use crate::planetary::system::{
-    Body, Epoch, ParentNow, Part, PlanetarySystem, RecordRules, fate_host,
-};
+use crate::planetary::surface::CoarseInputs;
+use crate::planetary::system::tests::{SEED, whole};
+use crate::planetary::system::{Body, Epoch, ParentNow, Part, PlanetarySystem, fate_host};
 use crate::planetary::{BodyIndex, SystemContext, generate};
 use crate::substance::optics::palette_feo_mass_fraction;
 use crate::substance::{Element, by_key, ids};
@@ -48,15 +44,6 @@ use crate::units::consts::{GM_SUN, METRES_PER_AU};
 
 /// How many of the sample's whole systems the record tests build under the batch's rules.
 const MODIFIER_SAMPLE: usize = 40;
-
-/// The rules in force, with the air's sections, the modifiers among them, under the batch's: the
-/// cold traps stay held.
-fn air_batch() -> RecordRules {
-    RecordRules {
-        air: AirRules::Batch,
-        ..RecordRules::in_force()
-    }
-}
 
 /// A present body with a solid surface of a sample system under the batch's rules at the epoch:
 /// its record and, for a moon, its planet's, with what its modifiers read that the record does not
@@ -96,9 +83,7 @@ fn batch_bodies() -> &'static [BatchBody] {
         whole()
             .iter()
             .take(MODIFIER_SAMPLE)
-            .flat_map(|(ctx, system)| {
-                bodies_of(ctx, &system.clone().with_record_rules(air_batch()))
-            })
+            .flat_map(|(ctx, system)| bodies_of(ctx, system))
             .collect()
     })
 }
@@ -274,19 +259,24 @@ fn rebuilt_inputs(body: &BatchBody) -> Option<ModifierInputs<'_>> {
     })
 }
 
-/// Under the batch's rules every sample surface's modifiers are `SurfaceModifiers::derive` over
-/// its inputs rebuilt by hand ([`rebuilt_inputs`]), to the bit (their renderings, every `f64` at
-/// its shortest round trip), and not modelled exactly where the rebuilt inputs are none or the
-/// derivation refuses them. Every refusal is counted and printed: the unlit bodies' mean surface
+/// Every sample surface's modifiers are `SurfaceModifiers::derive` over its inputs rebuilt by hand
+/// ([`rebuilt_inputs`]), to the bit (their renderings, every `f64` at its shortest round trip),
+/// and not modelled exactly where the rebuilt inputs are none or the derivation refuses them. Where
+/// the published pass carries its maturity's parts (from 24, P14.T54.b.e), the record's are the
+/// pass's, which differ from the figures' by the solve's context residual:
+/// [`under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_s`] holds them,
+/// and they are counted here. Every refusal is counted and printed: the unlit bodies' mean surface
 /// temperature of 0 K (`OutOfRange(SurfaceTemperature)`) is the only one.
 #[test]
 fn the_record_s_modifiers_are_the_derivation_s_of_its_published_surface() {
     let (mut modelled, mut moons, mut no_inputs) = (0_usize, 0_usize, 0_usize);
+    let mut weathered = 0_usize;
     let mut refusals: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for body in batch_bodies() {
         let id = body.record.identity().id();
         let surface = body.surface();
         match (surface.modifiers(), rebuilt_inputs(body)) {
+            (Modelled::Ok(_), Some(_)) if body.weathered.is_ok() => weathered += 1,
             (Modelled::Ok(held), Some(inputs)) => {
                 let derived = SurfaceModifiers::derive(&inputs).unwrap_or_else(|e| {
                     panic!("{id}: the record holds what the inputs refuse: {e}")
@@ -312,10 +302,11 @@ fn the_record_s_modifiers_are_the_derivation_s_of_its_published_surface() {
         }
     }
     eprintln!(
-        "{modelled} surfaces carry their modifiers ({moons} moons); {no_inputs} give no inputs \
-         (no crust, star or planet's field); refusals {refusals:#?}"
+        "{modelled} surfaces carry their modifiers by hand ({moons} moons), {weathered} their \
+         passes'; {no_inputs} give no inputs (no crust, star or planet's field); refusals \
+         {refusals:#?}"
     );
-    assert!(modelled > 100, "{modelled}");
+    assert!(modelled + weathered > 100, "{modelled} and {weathered}");
     let unlit = format!(
         "{:?}",
         DeriveModifiersError::OutOfRange(ModifierInput::SurfaceTemperature)
@@ -334,53 +325,6 @@ fn the_record_s_modifiers_are_the_derivation_s_of_its_published_surface() {
 fn surface_is_unlit(surface: &Surface) -> bool {
     let mean = surface.conditions().mean_surface_temperature().value();
     !(mean.is_finite() && mean > 0.0)
-}
-
-/// Under the held rules, which the version in force gives, the record computes no modifiers: a
-/// surface whose batch record carries them gives none under `Held`, and no planet's field is read
-/// (the hold's tripwire, `the_air_sections_are_held_only_until_the_24_bump`, holds every golden
-/// surface's modifiers not modelled).
-#[test]
-fn the_held_record_computes_no_modifiers() {
-    assert_eq!(AirRules::in_force(), AirRules::Held);
-    let body = batch_bodies()
-        .iter()
-        .find(|body| matches!(body.surface().modifiers(), Modelled::Ok(_)))
-        .expect("a batch surface carries its modifiers");
-    let surface = body.surface();
-    let case = ModifierCase {
-        star: body.star,
-        primary: RecordPrimary::Star,
-        mantle_sulphur: Some(body.sulphur),
-    };
-    let Section::Ok(bulk) = body.record.bulk() else {
-        panic!("a surface has a bulk section");
-    };
-    let read = ModifierSurface {
-        seasonal: body.seasonal.as_ref().expect("an orbit"),
-        age: body.age,
-        gravity: bulk.surface_gravity(),
-        conditions: surface.conditions(),
-        figures: surface.figures(),
-        condensates: surface.condensates(),
-        crust: surface.crust().ok().copied(),
-        gases: &body.gases,
-        weathered: None,
-    };
-    assert!(matches!(
-        record_modifiers(AirRules::Batch, &case, &read),
-        Modelled::Ok(_)
-    ));
-    assert_eq!(
-        record_modifiers(AirRules::Held, &case, &read),
-        Modelled::NotModelled
-    );
-    let planet = batch_bodies()
-        .iter()
-        .find_map(|body| body.planet.as_ref())
-        .expect("a batch moon");
-    assert!(planet_field(AirRules::Batch, planet).is_some());
-    assert_eq!(planet_field(AirRules::Held, planet), None);
 }
 
 /// The Solar System table's Moon, Mercury, Mars and Titan through the record's assembly under the
@@ -434,11 +378,10 @@ fn the_table_s_moon_mercury_mars_and_titan_take_their_shapes_under_the_switch() 
             &moon_crust
         };
         let modifiers = record_modifiers(
-            AirRules::Batch,
             &ModifierCase {
                 star: Some(star),
                 primary: RecordPrimary::Star,
-                mantle_sulphur: Some(body.element_inventory().mass(Element::S, Reservoir::Mantle)),
+                mantle_sulphur: body.element_inventory().mass(Element::S, Reservoir::Mantle),
             },
             &ModifierSurface {
                 seasonal: &seasonal,
@@ -946,7 +889,7 @@ fn check_carbon_rules_registry_wide() {
 fn the_same_seed_twice_gives_the_same_modifiers() {
     let mut compared = 0;
     for (ctx, _) in whole().iter().take(4) {
-        let again = generate(SEED, ctx).with_record_rules(air_batch());
+        let again = generate(SEED, ctx);
         for body in bodies_of(ctx, &again) {
             let cached = batch_bodies()
                 .iter()
@@ -963,40 +906,6 @@ fn the_same_seed_twice_gives_the_same_modifiers() {
     }
     eprintln!("{compared} modifiers the same bits twice");
     assert!(compared > 5, "{compared}");
-}
-
-/// At the version in force, which holds the modifiers off the record, R09's inputs carry none of
-/// them on the golden systems' bodies: no weathering, no organic cover, no `FeO_T`, no `Deposit`
-/// or `Cover` entry, so that every field and palette keeps its 23 bytes.
-#[test]
-fn the_held_inputs_carry_no_modifiers() {
-    let mut read = 0;
-    for (name, ctx, system) in golden_systems() {
-        let snapshot = system.snapshot_at(ctx, RECORD_TIME);
-        let records = snapshot.bodies();
-        for record in records {
-            let planet = CoarseInputs::planet_of(record)
-                .and_then(|index| records.iter().find(|r| r.index() == index));
-            let Ok(inputs) = CoarseInputs::for_body(record, planet, ctx) else {
-                continue;
-            };
-            let id = record.identity().id();
-            assert_eq!(
-                (inputs.weathering(), inputs.organic_cover()),
-                (None, None),
-                "{name} {id}"
-            );
-            for entry in inputs.palette().entries() {
-                assert_eq!(entry.feo_mass_fraction, None, "{name} {id}");
-                assert!(
-                    !matches!(entry.role, PaletteRole::Deposit | PaletteRole::Cover),
-                    "{name} {id}"
-                );
-            }
-            read += 1;
-        }
-    }
-    assert!(read > 10, "{read}");
 }
 
 /// The rows' `FeO_T` (`Substance::feo_mass_fraction`) and the palette's: the melt rows' FeO(T)
@@ -1091,40 +1000,27 @@ fn the_registry_s_feo_t_is_its_composition_s() {
     }
 }
 
-// P14.T54.b.e: the weathered area mix, every 24 hold in force, the air's sections under the batch.
+// P14.T54.b.e: the weathered area mix.
 
-/// The batch bodies of the first `count` sample systems, generated afresh under every 24 hold
-/// with the weathered area mix at `rules` and the air's sections under the batch's rules: a
-/// system's records derive lazily, so each is built inside the switches.
-fn bodies_at_24(count: usize, rules: AreaMixWeathering) -> Vec<BatchBody> {
-    use crate::planetary::derive::photometry::area_mix::with_area_mix_weathering;
+/// The batch bodies of the first `count` sample systems, generated afresh: a system's records
+/// derive lazily, so each is built inside the caller's switches.
+fn bodies_at_24(count: usize) -> Vec<BatchBody> {
     use crate::planetary::system::tests::sample;
-    use crate::planetary::testing::with_every_24_hold;
 
-    with_every_24_hold(|| {
-        with_area_mix_weathering(rules, || {
-            sample()
-                .iter()
-                .take(count)
-                .flat_map(|ctx| {
-                    let system = generate(SEED, ctx).with_record_rules(air_batch());
-                    bodies_of(ctx, &system)
-                })
-                .collect()
+    sample()
+        .iter()
+        .take(count)
+        .flat_map(|ctx| {
+            let system = generate(SEED, ctx);
+            bodies_of(ctx, &system)
         })
-    })
+        .collect()
 }
 
-/// The first [`MODIFIER_SAMPLE`] systems' batch bodies under the weathered area mix, built once.
+/// The first [`MODIFIER_SAMPLE`] systems' batch bodies under the weathered area mix, on the record
+/// from 24: [`batch_bodies`].
 fn weathered_bodies() -> &'static [BatchBody] {
-    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
-    BODIES.get_or_init(|| bodies_at_24(MODIFIER_SAMPLE, AreaMixWeathering::Weathered))
-}
-
-/// The same under every 24 hold but the weathered area mix's, built once.
-fn held_bodies_at_24() -> &'static [BatchBody] {
-    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
-    BODIES.get_or_init(|| bodies_at_24(MODIFIER_SAMPLE, AreaMixWeathering::Held))
+    batch_bodies()
 }
 
 /// The golden systems, generated afresh under the switches, as [`golden_bodies_at_24`] keeps them:
@@ -1142,58 +1038,35 @@ enum YoungLava {
     AsBuilt,
 }
 
-/// `run`'s result under every 24 hold with the weathered area mix at `rules` and young lava as
-/// `lava` takes it.
-fn under_24<R>(rules: AreaMixWeathering, lava: YoungLava, run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::photometry::area_mix::{
-        with_area_mix_weathering, with_young_lava_weathered,
-    };
-    use crate::planetary::testing::with_every_24_hold;
+/// `run`'s result with young lava as `lava` takes it.
+fn under_24<R>(lava: YoungLava, run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::photometry::area_mix::with_young_lava_weathered;
 
-    with_every_24_hold(|| {
-        with_area_mix_weathering(rules, || match lava {
-            YoungLava::Capped => run(),
-            YoungLava::AsBuilt => with_young_lava_weathered(run),
-        })
-    })
+    match lava {
+        YoungLava::Capped => run(),
+        YoungLava::AsBuilt => with_young_lava_weathered(run),
+    }
 }
 
-/// The golden systems' batch bodies under every 24 hold, the weathered area mix at `rules` and
-/// young lava as `lava` takes it, the systems generated afresh into `systems` under the same
-/// switches.
-fn golden_bodies_at_24(
-    rules: AreaMixWeathering,
-    lava: YoungLava,
-    systems: &'static OnceLock<Goldens>,
-) -> Vec<BatchBody> {
+/// The golden systems' batch bodies with young lava as `lava` takes it, the systems generated
+/// afresh into `systems` under the same switch.
+fn golden_bodies_at_24(lava: YoungLava, systems: &'static OnceLock<Goldens>) -> Vec<BatchBody> {
     use crate::planetary::system::tests::golden_systems_afresh;
 
-    let systems = systems.get_or_init(|| under_24(rules, lava, golden_systems_afresh));
-    under_24(rules, lava, || {
+    let systems = systems.get_or_init(|| under_24(lava, golden_systems_afresh));
+    under_24(lava, || {
         systems
             .iter()
-            .flat_map(|(_, ctx, system)| {
-                bodies_of(ctx, &system.clone().with_record_rules(air_batch()))
-            })
+            .flat_map(|(_, ctx, system)| bodies_of(ctx, system))
             .collect()
     })
 }
 
-/// The golden systems' batch bodies under every 24 hold and the weathered area mix, generated
-/// afresh, built once.
+/// The golden systems' batch bodies under the weathered area mix, generated afresh, built once.
 fn golden_weathered_bodies() -> &'static [BatchBody] {
     static SYSTEMS: OnceLock<Goldens> = OnceLock::new();
     static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
-    BODIES.get_or_init(|| {
-        golden_bodies_at_24(AreaMixWeathering::Weathered, YoungLava::Capped, &SYSTEMS)
-    })
-}
-
-/// The same under every 24 hold but the weathered area mix's, built once.
-fn golden_held_bodies_at_24() -> &'static [BatchBody] {
-    static SYSTEMS: OnceLock<Goldens> = OnceLock::new();
-    static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
-    BODIES.get_or_init(|| golden_bodies_at_24(AreaMixWeathering::Held, YoungLava::Capped, &SYSTEMS))
+    BODIES.get_or_init(|| golden_bodies_at_24(YoungLava::Capped, &SYSTEMS))
 }
 
 /// The same under the weathered area mix as P14.T54.b.e built it, young lava weathered, built
@@ -1201,20 +1074,14 @@ fn golden_held_bodies_at_24() -> &'static [BatchBody] {
 fn golden_as_built_bodies() -> &'static [BatchBody] {
     static SYSTEMS: OnceLock<Goldens> = OnceLock::new();
     static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
-    BODIES.get_or_init(|| {
-        golden_bodies_at_24(AreaMixWeathering::Weathered, YoungLava::AsBuilt, &SYSTEMS)
-    })
+    BODIES.get_or_init(|| golden_bodies_at_24(YoungLava::AsBuilt, &SYSTEMS))
 }
 
 /// The first [`MODIFIER_SAMPLE`] systems' batch bodies under the weathered area mix as P14.T54.b.e
 /// built it, young lava weathered, built once.
 fn as_built_bodies() -> &'static [BatchBody] {
     static BODIES: OnceLock<Vec<BatchBody>> = OnceLock::new();
-    BODIES.get_or_init(|| {
-        under_24(AreaMixWeathering::Weathered, YoungLava::AsBuilt, || {
-            bodies_at_24(MODIFIER_SAMPLE, AreaMixWeathering::Weathered)
-        })
-    })
+    BODIES.get_or_init(|| under_24(YoungLava::AsBuilt, || bodies_at_24(MODIFIER_SAMPLE)))
 }
 
 /// The Bond albedo about a Sun of the regolith `regolith`, airless: what its bins, or the
@@ -1224,7 +1091,7 @@ fn regolith_bond(regolith: &Regolith) -> f64 {
 }
 
 /// Rule (f) under the weathered area mix (P14.T54.b.e), over the first [`MODIFIER_SAMPLE`] sample
-/// systems and the golden systems, every 24 hold in force and the air's sections under the batch:
+/// systems and the golden systems:
 /// every record whose published pass took a maturity carries its modifiers, and they are that
 /// pass's to the bit, the modifiers over its parts, the record's condensates (the pass's, rule (f))
 /// and its water; their maturity is the pass's; the pass's parts that the record publishes too
@@ -1377,9 +1244,7 @@ fn under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_
         checked += 1;
         // The field header carries the maturity, and the lid's entry the FeO_T the law read, read
         // at 24's rules (24's densities read an argon ice, which 23's refuse).
-        let read = crate::planetary::testing::with_every_24_hold(|| {
-            CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx)
-        });
+        let read = CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx);
         if let Ok(inputs) = read {
             let header = inputs
                 .weathering()
@@ -1415,7 +1280,7 @@ fn under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_
 /// passes' maturities, to the bit (their renderings), over the first six sample systems.
 #[test]
 fn under_the_weathered_area_mix_the_same_seed_twice_gives_the_same_records() {
-    let again = bodies_at_24(6, AreaMixWeathering::Weathered);
+    let again = bodies_at_24(6);
     let first: Vec<_> = weathered_bodies()
         .iter()
         .take(again.len())
@@ -1434,34 +1299,20 @@ fn under_the_weathered_area_mix_the_same_seed_twice_gives_the_same_records() {
     assert!(weathered > 0);
 }
 
-/// The weathered area mix's census (P14.T54.b.e), every 24 hold in force and the air's sections
+/// The weathered area mix's census (P14.T54.b.e) and the air's sections
 /// under the batch, over the first [`MODIFIER_SAMPLE`] sample systems, printed for the record and
 /// the bless note: the published passes' regoliths weathered, capped (`basalt_reduced`) or on the
 /// stand-in's arm for want of a modelled `FeO_T`, an optics row or a density (each lid counted),
-/// the passes that took no maturity by
-/// why, the bodies with `ferric`, and against the same systems under the weathered area mix's hold
-/// the largest moves of the Bond albedo and the equilibrium temperature, the bodies that moved
-/// though they took no maturity, and every state flip by name. Under the hold every pass took
-/// none.
+/// the passes that took no maturity by why and the bodies with `ferric`. Its moves against the same
+/// systems under the weathered area mix's hold (the largest of the Bond albedo and the equilibrium
+/// temperature, the bodies that moved though they took no maturity, and every state flip) went
+/// with the hold at the 23 → 24 bump.
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one census: each count and move stated beside its basis"
-)]
 fn the_weathered_area_mix_s_census() {
-    let (weathered, held) = (weathered_bodies(), held_bodies_at_24());
-    assert_eq!(weathered.len(), held.len());
-    assert!(
-        held.iter()
-            .all(|body| body.weathered == Err(NoMaturity::Held))
-    );
+    let weathered = weathered_bodies();
     let mut outcomes: BTreeMap<String, usize> = BTreeMap::new();
     let mut lids: BTreeMap<String, usize> = BTreeMap::new();
     let mut ferric = Vec::new();
-    let mut flips = Vec::new();
-    let mut moved_without = Vec::new();
-    let mut largest_albedo = (0.0_f64, String::new());
-    let mut largest_t_eq = (0.0_f64, String::new());
     // The airless weathered regoliths by maturity (below 10⁻³, to 0.5, above), and those that rose
     // above the cap's 0.11 with the brightest.
     let mut airless_by_maturity = [0_usize; 3];
@@ -1472,9 +1323,8 @@ fn the_weathered_area_mix_s_census() {
             |crust| crust.lid_lithology().substance().key().as_str().to_owned(),
         )
     };
-    for (body, before) in weathered.iter().zip(held) {
+    for body in weathered {
         let id = body.record.identity().id();
-        assert_eq!(id, before.record.identity().id());
         let lid = lid_of(body);
         let outcome = match &body.weathered {
             Ok(pass) if pass.regolith().is_weathered() => "weathered".to_owned(),
@@ -1490,16 +1340,13 @@ fn the_weathered_area_mix_s_census() {
             && let Some(deposit) = m.weathering_deposits().first()
         {
             ferric.push(format!(
-                "{id} ({lid}, {:?}) over {:.3}: {:.4} → {:.4}, held its lid {} ({:?})",
+                "{id} ({lid}, {:?}) over {:.3}: {:.4}",
                 body.published.2,
                 deposit.area_fraction(),
-                before.published.0,
                 body.published.0,
-                lid_of(before),
-                before.published.2,
             ));
         }
-        let (albedo, t_eq, state) = body.published;
+        let (albedo, _, state) = body.published;
         if let Ok(pass) = &body.weathered
             && pass.regolith().is_weathered()
             && state == SurfaceState::Airless
@@ -1515,28 +1362,6 @@ fn the_weathered_area_mix_s_census() {
                 }
             }
         }
-        let (was, t_was, state_was) = before.published;
-        let describe = || {
-            let pass = body.weathered.as_ref().ok();
-            format!(
-                "{id} ({lid}, {state:?}, m {:?}, k {:?}): {was:.4} → {albedo:.4}, T_eq \
-                 {t_was:.2} → {t_eq:.2} K",
-                pass.map(PassWeathered::maturity),
-                pass.map(|pass| pass.weathering().weathering().value()),
-            )
-        };
-        if (albedo - was).abs() > largest_albedo.0 {
-            largest_albedo = ((albedo - was).abs(), describe());
-        }
-        if (t_eq - t_was).abs() > largest_t_eq.0 {
-            largest_t_eq = ((t_eq - t_was).abs(), describe());
-        }
-        if body.weathered.is_err() && (albedo - was).abs() > 0.0 {
-            moved_without.push(describe());
-        }
-        if state != state_was {
-            flips.push(format!("{} {state_was:?} → {state:?}", describe()));
-        }
     }
     let shown = |list: &[String]| {
         list.iter()
@@ -1548,21 +1373,11 @@ fn the_weathered_area_mix_s_census() {
     eprintln!(
         "the weathered area mix's census over {} surfaces of {MODIFIER_SAMPLE} systems:\n  \
          outcomes {outcomes:#?}\n  lids of the passes with a maturity {lids:?}\n  ferric on {} \
-         bodies:\n    {}\n  the largest albedo move {:.4}: {}\n  the largest T_eq move {:.3} K: \
-         {}\n  moved with no maturity of their own: {}\n    {}\n  state flips: {}\n    {}\n  \
-         airless weathered regoliths by maturity (below 10⁻³, to 0.5, above) {airless_by_maturity:?}, \
+         bodies:\n    {}\n  airless weathered regoliths by maturity (below 10⁻³, to 0.5, above) {airless_by_maturity:?}, \
          {} above the cap's 0.11, the brightest {:.4}: {}",
         weathered.len(),
         ferric.len(),
         shown(&ferric),
-        largest_albedo.0,
-        largest_albedo.1,
-        largest_t_eq.0,
-        largest_t_eq.1,
-        moved_without.len(),
-        shown(&moved_without),
-        flips.len(),
-        shown(&flips),
         above_the_cap.0,
         above_the_cap.1,
         above_the_cap.2,
@@ -1574,14 +1389,9 @@ fn the_weathered_area_mix_s_census() {
     young_lava_census();
 }
 
-/// One of the young-lava census's sets: its name, and its batch bodies under the fix, as built and
-/// under the weathered area mix's hold, body by body in the same order.
-type CensusSet = (
-    &'static str,
-    &'static [BatchBody],
-    &'static [BatchBody],
-    &'static [BatchBody],
-);
+/// One of the young-lava census's sets: its name, and its batch bodies under the fix and as built,
+/// body by body in the same order.
+type CensusSet = (&'static str, &'static [BatchBody], &'static [BatchBody]);
 
 /// The key of the lid's row whose regolith the pass `pass` read.
 fn lid_key(pass: &PassWeathered) -> String {
@@ -1601,31 +1411,30 @@ fn airless_silicate(body: &BatchBody) -> Option<&PassWeathered> {
 
 /// decision-p14-t54b-e-findings §A.5's 42002cb1ffc00009.0301 and 42002cae0000000a.0101, the young
 /// lava worlds whose fresh `komatiite` rows P14.T54.b.e as built published (Bond 0.5217 and
-/// 0.3417), and their Held `T_eq`, K (31.16 and 141.30).
+/// 0.3417), and their `T_eq` under the weathered area mix's hold, K (31.16 and 141.30).
 const YOUNG_LAVA_WORLDS: [(&str, f64); 2] = [
     ("42002cb1ffc00009.0301", 31.16),
     ("42002cae0000000a.0101", 141.30),
 ];
 
-/// The census's young lava (decision-p14-t54b-e-findings §A.5's items 1–6, the assert and the
-/// stop condition; item 7, the table's Io, is `moons::regular`'s), over the first
-/// [`MODIFIER_SAMPLE`] sample systems and the golden systems, every 24 hold in force and the air's
-/// sections under the batch, each body under three views: the weathered area mix's hold
-/// (`Held`), P14.T54.b.e as built (young lava weathered as any lid) and the fix (young lava capped):
+/// The census's young lava (decision-p14-t54b-e-findings §A.5's items 1–6, the assert and the stop
+/// condition; item 7, the table's Io, is `moons::regular`'s), over the first [`MODIFIER_SAMPLE`]
+/// sample systems and the golden systems, each body under two views: P14.T54.b.e as built (young
+/// lava weathered as any lid) and the fix (young lava capped); the third, the weathered area mix's
+/// hold, went with the hold at the 23 → 24 bump:
 ///
 /// 1. the airless silicate lids on the new arm ([`StandIn::UnweatheredLava`]), by lid, with their
-///    surface ages and their Bond albedo and `T_eq` Held → as built → fixed;
+///    surface ages and their Bond albedo and `T_eq` as built → fixed;
 /// 2. as built's airless (or tenuous) weathered regoliths below m = 10⁻³, split into the new arm
 ///    and still weathered, by lid, each with its surface age and k, and how many are the sample's
 ///    `Airless` ones, P14.T54.b.e's census's basis;
-/// 3. [`YOUNG_LAVA_WORLDS`] back at the cap's 0.1100, their Bond albedo and `T_eq` Held's to the
-///    bit;
+/// 3. [`YOUNG_LAVA_WORLDS`] back at the cap's 0.1100;
 /// 4. the airless silicate lids outside [`CAPPED_ROWS`] with a maturity by surface age, below
 ///    10⁴ yr, in [10⁴ yr, 1 Myr), [1, 10) Myr and above, how sensitive the result is to
 ///    [`REGOLITH_FORMATION_TIME`], each body in [10⁴ yr, 10 Myr) listed;
 /// 5. the brightest airless silicate regolith still weathered, by its own Bond albedo about a Sun;
-/// 6. the largest Bond albedo and `T_eq` moves against Held after the fix and against as built,
-///    and every state flip against Held by name.
+/// 6. the largest Bond albedo and `T_eq` moves after the fix against as built, and every state flip
+///    against as built by name.
 ///
 /// It asserts that no airless silicate lid outside [`CAPPED_ROWS`] whose surface is younger than
 /// [`REGOLITH_FORMATION_TIME`] publishes a regolith above 0.11 (each on the new arm), and the
@@ -1654,17 +1463,11 @@ fn young_lava_census() {
             .map_or(f64::NAN, |photometry| photometry.geometric_albedo().v)
     };
     let sets: [CensusSet; 2] = [
-        (
-            "sample",
-            weathered_bodies(),
-            as_built_bodies(),
-            held_bodies_at_24(),
-        ),
+        ("sample", weathered_bodies(), as_built_bodies()),
         (
             "golden",
             golden_weathered_bodies(),
             golden_as_built_bodies(),
-            golden_held_bodies_at_24(),
         ),
     ];
     // Item 1: lid → (count, t_s range, lines).
@@ -1678,24 +1481,16 @@ fn young_lava_census() {
     let mut near_the_step = Vec::new();
     // Item 2's basis as P14.T54.b.e's census took it: the sample's `Airless` bodies alone.
     let mut below_basis = 0_usize;
-    let mut largest = [
-        (0.0_f64, String::new()),
-        (0.0, String::new()),
-        (0.0, String::new()),
-        (0.0, String::new()),
-    ];
+    let mut largest = [(0.0_f64, String::new()), (0.0, String::new())];
     let (mut flips, mut stop, mut above, mut surfaces) =
         (Vec::new(), Vec::new(), Vec::new(), 0_usize);
-    for (set, fixed, built, held) in sets {
+    for (set, fixed, built) in sets {
         assert_eq!(fixed.len(), built.len(), "{set}");
-        assert_eq!(fixed.len(), held.len(), "{set}");
         surfaces += fixed.len();
-        for ((now, was), before) in fixed.iter().zip(built).zip(held) {
+        for (now, was) in fixed.iter().zip(built) {
             let id = now.record.identity().id();
             assert_eq!(id, was.record.identity().id());
-            assert_eq!(id, before.record.identity().id());
-            let ((a, t, state), (a_was, t_was, _), (a_held, t_held, state_held)) =
-                (now.published, was.published, before.published);
+            let ((a, t, state), (a_was, t_was, state_was)) = (now.published, was.published);
             let pass = now.weathered.as_ref().ok();
             let (m, t_s, k) = pass.map_or((f64::NAN, f64::NAN, f64::NAN), |pass| {
                 (
@@ -1707,8 +1502,7 @@ fn young_lava_census() {
             let lid = pass.map_or_else(|| "none".to_owned(), lid_key);
             let line = format!(
                 "{set} {id} ({lid}, {state:?}, t_s {t_s:.3e} yr, m {m:.3e}, k {k:.3e}): A \
-                 {a_held:.4} → {a_was:.4} → {a:.4}, T_eq {t_held:.2} → {t_was:.2} → {t:.2} K, p_V \
-                 {:.4} → {:.4}",
+                 {a_was:.4} → {a:.4}, T_eq {t_was:.2} → {t:.2} K, p_V {:.4} → {:.4}",
                 p_v(was),
                 p_v(now)
             );
@@ -1717,7 +1511,7 @@ fn young_lava_census() {
             let moved = format!("{:?}", now.record) != format!("{:?}", was.record)
                 || bits(a) != bits(a_was)
                 || bits(t) != bits(t_was)
-                || state != was.published.2;
+                || state != state_was;
             if moved && !(is_young && airless(state) && t_s < formation) {
                 stop.push(line.clone());
             }
@@ -1781,22 +1575,17 @@ fn young_lava_census() {
                         was.published.2
                     ));
             }
-            for (slot, delta) in [
-                (0, (a - a_held).abs()),
-                (1, (t - t_held).abs()),
-                (2, (a - a_was).abs()),
-                (3, (t - t_was).abs()),
-            ] {
+            for (slot, delta) in [(0, (a - a_was).abs()), (1, (t - t_was).abs())] {
                 if delta > largest[slot].0 {
                     largest[slot] = (delta, line.clone());
                 }
             }
-            if state != state_held {
-                flips.push(format!("{line}: {state_held:?} → {state:?}"));
+            if state != state_was {
+                flips.push(format!("{line}: {state_was:?} → {state:?}"));
             }
         }
     }
-    // Item 3: the two named worlds, back at the cap and at their Held T_eq to the bit.
+    // Item 3: the two named worlds, back at the cap.
     let mut named = Vec::new();
     for (name, t_eq) in YOUNG_LAVA_WORLDS {
         let find = |bodies: &'static [BatchBody]| {
@@ -1805,23 +1594,20 @@ fn young_lava_census() {
                 .find(|body| body.record.identity().id().to_string() == name)
                 .unwrap_or_else(|| panic!("{name} is in the sample"))
         };
-        let (now, was, before) = (
-            find(weathered_bodies()),
-            find(as_built_bodies()),
-            find(held_bodies_at_24()),
-        );
+        let (now, was) = (find(weathered_bodies()), find(as_built_bodies()));
         assert!(young(now), "{name}");
         assert_same_bits(now.published.0, moon);
-        assert_same_bits(now.published.0, before.published.0);
-        assert_same_bits(now.published.1, before.published.1);
+        // At the cap, the fix's T_eq is the one the weathered area mix's hold gave (the ruling's).
+        assert!(
+            (now.published.1 - t_eq).abs() < 0.005,
+            "{name}: {}",
+            now.published.1
+        );
         named.push(format!(
-            "{name}: A {:.4} → as built {:.4} → fixed {:.4}, T_eq {:.2} → {:.2} → {:.2} K (the \
-             fix's A and T_eq Held's to the bit; the ruling's Held T_eq {t_eq:.2} K), p_V as built \
-             {:.4} → fixed {:.4}",
-            before.published.0,
+            "{name}: A as built {:.4} → fixed {:.4}, T_eq {:.2} → {:.2} K (the ruling's T_eq under \
+             the hold {t_eq:.2} K), p_V as built {:.4} → fixed {:.4}",
             was.published.0,
             now.published.0,
-            before.published.1,
             was.published.1,
             now.published.1,
             p_v(was),
@@ -1850,15 +1636,15 @@ fn young_lava_census() {
     let below_count: usize = below.values().map(Vec::len).sum();
     eprintln!(
         "young lava (decision-p14-t54b-e-findings §A.5) over {surfaces} surfaces of the first \
-         {MODIFIER_SAMPLE} sample systems and the golden systems, each A Held → as built → fixed:\n  \
+         {MODIFIER_SAMPLE} sample systems and the golden systems, each A as built → fixed:\n  \
          (1) the new arm, airless silicate lids under {formation:.0e} yr: {}\n    {}\n  (2) as \
          built's airless or tenuous weathered regoliths below m = 1e-3: {below_count} ({below_basis} \
          of them the sample's Airless, P14.T54.b.e's census's basis)\n    {}\n  (3) {}\n  (4) the \
          airless silicate lids outside CAPPED_ROWS with a maturity by t_s (below 1e4 yr, [1e4 yr, \
          1 Myr), [1, 10) Myr, above) {by_age:?}; within [1e4 yr, 10 Myr):\n    {}\n  (5) the \
-         brightest airless silicate regolith still weathered, about a Sun, {:.4}: {}\n  (6) the largest moves against Held: A {:.4}: {}\n      T_eq {:.3} K: {}\n    \
-         against as built: A {:.4}: {}\n      T_eq {:.3} K: {}\n    state flips against Held: \
-         {}\n      {}\n  the stop condition's moves elsewhere: {}; above 0.11 under 1 Myr: {}",
+         brightest airless silicate regolith still weathered, about a Sun, {:.4}: {}\n  (6) the \
+         largest moves against as built: A {:.4}: {}\n      T_eq {:.3} K: {}\n    state flips \
+         against as built: {}\n      {}\n  the stop condition's moves elsewhere: {}; above 0.11 under 1 Myr: {}",
         on_arm.values().map(|entry| entry.0).sum::<usize>(),
         arm_lines.join("\n    "),
         below_lines.join("\n    "),
@@ -1870,10 +1656,6 @@ fn young_lava_census() {
         largest[0].1,
         largest[1].0,
         largest[1].1,
-        largest[2].0,
-        largest[2].1,
-        largest[3].0,
-        largest[3].1,
         flips.len(),
         flips.join("\n      "),
         stop.len(),

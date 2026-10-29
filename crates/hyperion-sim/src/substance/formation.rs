@@ -70,9 +70,9 @@
 //! constants, a statistical sum; CEA's polynomials are the other. Its tests already hold the sums to
 //! NASA Glenn's `c_p`, and this module's tests compare the two on the table's own records.
 //!
-//! Nothing on the record reads these functions at generator version 23: their first reader is
+//! Nothing on the record read these functions at generator version 23: their first reader is
 //! P14.T52.a's speciation ([`planetary::chem::equilibrium`](crate::planetary::chem::equilibrium)),
-//! which nothing on the record calls until P14.T54.b, and P14.T54.b restamps the table at 24
+//! which the record calls from P14.T54.b's bump at 24, which restamps the table
 //! (decision-bump-plan-after-22 §1.3).
 
 use std::error::Error;

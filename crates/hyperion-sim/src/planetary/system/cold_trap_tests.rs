@@ -1,8 +1,7 @@
 //! P14.T54.b.f's tests over the sample: the cold traps in the passes (decision-p14-t54b-f-coldtraps
-//! §9), every 24 hold in force (`planetary::testing::with_every_24_hold`), the cold traps' batch
-//! among them, the systems generated afresh inside the switches: each pass that qualifies builds
-//! or reuses a field of its own inputs, the published pass's field rides to the record, which
-//! builds none, and the record's condensates are that pass's to the bit.
+//! §9), on the record as generator version 24 builds it: each pass that qualifies builds or reuses
+//! a field of its own inputs, the published pass's field rides to the record, which builds none,
+//! and the record's condensates are that pass's to the bit.
 
 use std::collections::BTreeMap;
 use std::num::FpCategory;
@@ -18,13 +17,11 @@ use crate::planetary::derive::passes::{ContextFit, Convergence};
 use crate::planetary::derive::{PassDriver, Under};
 use crate::planetary::hooks::cold_traps::field_log::{self, FieldEvent};
 use crate::planetary::hooks::cold_traps::{
-    ColdTrapRules, FieldInputs, NoColdTraps, PassTraps, is_collisional, same_craters,
-    with_fields_rebuilt,
+    FieldInputs, NoColdTraps, PassTraps, is_collisional, same_craters, with_fields_rebuilt,
 };
 use crate::planetary::hooks::surface::HourCosines;
 use crate::planetary::label;
-use crate::planetary::system::tests::{SEED, sample, whole};
-use crate::planetary::testing::with_every_24_hold;
+use crate::planetary::system::tests::{SEED, sample};
 use crate::time::UniverseTime;
 
 /// How many of the sample's systems the tests build: the ruling's 60 (§9 test 1).
@@ -41,7 +38,7 @@ pub(crate) enum Kind {
     Moon,
 }
 
-/// A present body of a sample system with a solid surface, under every 24 hold at the epoch: its
+/// A present body of a sample system with a solid surface, at the epoch: its
 /// system's context, its kind, its record and a moon's planet's, its derivation, the events of
 /// its derivation's fields as its record derived it ([`field_log::capture`]), and its published
 /// pass's publication, run again at the albedo and the context it read (`PassDriver::Again`).
@@ -87,38 +84,33 @@ impl TrapBody {
     }
 }
 
-/// The sample's first [`TRAP_SAMPLE`] systems, generated afresh under every 24 hold, built once:
-/// call it inside the switches (a system's records derive lazily, under the rules then in force).
+/// The sample's first [`TRAP_SAMPLE`] systems, generated afresh, built once.
 fn batch_systems() -> &'static [(&'static SystemContext, PlanetarySystem)] {
     static SYSTEMS: OnceLock<Vec<(&'static SystemContext, PlanetarySystem)>> = OnceLock::new();
     SYSTEMS.get_or_init(|| {
-        with_every_24_hold(|| {
-            sample()
-                .iter()
-                .take(TRAP_SAMPLE)
-                .map(|ctx| (ctx, generate(SEED, ctx)))
-                .collect()
-        })
+        sample()
+            .iter()
+            .take(TRAP_SAMPLE)
+            .map(|ctx| (ctx, generate(SEED, ctx)))
+            .collect()
     })
 }
 
-/// The trap bodies of the sample's first [`TRAP_SAMPLE`] systems under every 24 hold, built once.
+/// The trap bodies of the sample's first [`TRAP_SAMPLE`] systems, built once.
 pub(crate) fn trap_bodies() -> &'static [TrapBody] {
     static BODIES: OnceLock<Vec<TrapBody>> = OnceLock::new();
     BODIES.get_or_init(|| {
-        with_every_24_hold(|| {
-            let before = field_log::record_builds();
-            let bodies: Vec<TrapBody> = batch_systems()
-                .iter()
-                .flat_map(|(ctx, system)| bodies_of(ctx, system))
-                .collect();
-            assert_eq!(
-                field_log::record_builds(),
-                before,
-                "the record path builds no field"
-            );
-            bodies
-        })
+        let before = field_log::record_builds();
+        let bodies: Vec<TrapBody> = batch_systems()
+            .iter()
+            .flat_map(|(ctx, system)| bodies_of(ctx, system))
+            .collect();
+        assert_eq!(
+            field_log::record_builds(),
+            before,
+            "the record path builds no field"
+        );
+        bodies
     })
 }
 
@@ -251,7 +243,7 @@ fn trapped(condensates: &Condensates) -> Vec<(String, u64)> {
         .collect()
 }
 
-/// §9 test 1, with test 8's sample half: over the sample's first 60 systems under every 24 hold,
+/// §9 test 1, with test 8's sample half: over the sample's first 60 systems,
 /// every body's record condensates are its published pass's to the bit (keys, phases, areas,
 /// trapped areas and reservoirs, its whole entries; an ice bulk's water aside, whose crust the
 /// record lists), bracketed bodies included, and no trapped entry lies on one side alone, an ice
@@ -452,39 +444,37 @@ fn the_cold_traps_census_is_stated() {
 #[test]
 fn fields_reused_and_rebuilt_give_every_derivation_to_the_bit() {
     let (mut checked, mut fields) = (0_u32, 0_u32);
-    with_every_24_hold(|| {
-        for (ctx, system) in batch_systems() {
-            let t = UniverseTime::EPOCH;
-            let epoch = Epoch::new(system, ctx, t).with_shades();
-            let cosines = HourCosines::new();
-            let hosts: Vec<_> = system
-                .zones
-                .iter()
-                .map(|zone| fate_host(ctx, zone))
-                .collect();
-            let fates = system.fates(&hosts);
-            for (body, fate) in system.bodies.iter().zip(&fates) {
-                if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
-                    continue;
-                }
-                let fate = fate.as_ref().expect("a planet or member orbits a zone");
-                let at = fate.at(t);
-                if at.orbit().is_none() {
-                    // Not present at the time: no derivation.
-                    continue;
-                }
-                let derive = || {
-                    system
-                        .primary_derived(&epoch, &cosines, (body, fate), &at, PassDriver::Solve)
-                        .0
-                };
-                let (warm, cold) = (derive(), with_fields_rebuilt(derive));
-                assert_eq!(format!("{warm:?}"), format!("{cold:?}"), "{:?}", body.index);
-                checked += 1;
-                fields += u32::from(warm.cold_traps().is_ok());
+    for (ctx, system) in batch_systems() {
+        let t = UniverseTime::EPOCH;
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        let hosts: Vec<_> = system
+            .zones
+            .iter()
+            .map(|zone| fate_host(ctx, zone))
+            .collect();
+        let fates = system.fates(&hosts);
+        for (body, fate) in system.bodies.iter().zip(&fates) {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
             }
+            let fate = fate.as_ref().expect("a planet or member orbits a zone");
+            let at = fate.at(t);
+            if at.orbit().is_none() {
+                // Not present at the time: no derivation.
+                continue;
+            }
+            let derive = || {
+                system
+                    .primary_derived(&epoch, &cosines, (body, fate), &at, PassDriver::Solve)
+                    .0
+            };
+            let (warm, cold) = (derive(), with_fields_rebuilt(derive));
+            assert_eq!(format!("{warm:?}"), format!("{cold:?}"), "{:?}", body.index);
+            checked += 1;
+            fields += u32::from(warm.cold_traps().is_ok());
         }
-    });
+    }
     eprintln!("{checked} derivations, {fields} with a field, warm against cold");
     assert!(checked > 300 && fields > 10, "{checked} {fields}");
 }
@@ -493,24 +483,22 @@ fn fields_reused_and_rebuilt_give_every_derivation_to_the_bit() {
 /// bit, and so is one system's taken twice with another's between, on the same thread.
 #[test]
 fn under_the_batch_the_snapshots_do_not_depend_on_their_order() {
-    with_every_24_hold(|| {
-        let systems = batch_systems();
-        let snapshot = |(ctx, system): &(&SystemContext, PlanetarySystem)| -> String {
-            format!("{:?}", system.snapshot_at(ctx, UniverseTime::EPOCH))
-        };
-        let forward: Vec<String> = systems.iter().map(snapshot).collect();
-        let mut reversed: Vec<String> = systems.iter().rev().map(snapshot).collect();
-        reversed.reverse();
-        for (k, (a, b)) in forward.iter().zip(&reversed).enumerate() {
-            assert_eq!(a, b, "system {k} moved with the order");
-        }
-        let first = snapshot(&systems[0]);
-        // Another system between, whose snapshot is not read.
-        let between = snapshot(&systems[1]);
-        assert_eq!(between, forward[1], "a later run moved");
-        assert_eq!(first, snapshot(&systems[0]), "a second run moved");
-        assert_eq!(first, forward[0], "a later run moved");
-    });
+    let systems = batch_systems();
+    let snapshot = |(ctx, system): &(&SystemContext, PlanetarySystem)| -> String {
+        format!("{:?}", system.snapshot_at(ctx, UniverseTime::EPOCH))
+    };
+    let forward: Vec<String> = systems.iter().map(snapshot).collect();
+    let mut reversed: Vec<String> = systems.iter().rev().map(snapshot).collect();
+    reversed.reverse();
+    for (k, (a, b)) in forward.iter().zip(&reversed).enumerate() {
+        assert_eq!(a, b, "system {k} moved with the order");
+    }
+    let first = snapshot(&systems[0]);
+    // Another system between, whose snapshot is not read.
+    let between = snapshot(&systems[1]);
+    assert_eq!(between, forward[1], "a later run moved");
+    assert_eq!(first, snapshot(&systems[0]), "a second run moved");
+    assert_eq!(first, forward[0], "a later run moved");
 }
 
 /// §9 test 6: for every body whose published pass read a field, bracketed ones included, the
@@ -558,8 +546,8 @@ fn every_carried_field_is_its_published_pass_s() {
 }
 
 /// §9 test 7: no body whose record has figures publishes a pass whose context holds none; a pass
-/// under C₀ of a qualifying body reads no field (`NoColdTraps::NoFigures`) and publishes the
-/// condensates the hold gives it, P14.T51.a's; and a climate given (the passes' stand-in, the
+/// under C₀ of a qualifying body reads no field (`NoColdTraps::NoFigures`) and publishes
+/// P14.T51.a's condensates, none trapped; and a climate given (the passes' stand-in, the
 /// table's bodies) reads none, labelled "(no cold traps)".
 #[test]
 fn no_published_pass_reads_no_figures_and_a_figures_free_pass_publishes_t51a_s() {
@@ -579,15 +567,13 @@ fn no_published_pass_reads_no_figures_and_a_figures_free_pass_publishes_t51a_s()
         }
     }
     let c0 = qualifying_passes_under_c0_publish_t51a_s();
-    with_every_24_hold(|| {
-        for (name, body) in crate::planetary::derive::solar::historic_table() {
-            assert_eq!(
-                body.cold_traps().as_ref().err(),
-                Some(&NoColdTraps::ClimateGiven),
-                "{name}"
-            );
-        }
-    });
+    for (name, body) in crate::planetary::derive::solar::historic_table() {
+        assert_eq!(
+            body.cold_traps().as_ref().err(),
+            Some(&NoColdTraps::ClimateGiven),
+            "{name}"
+        );
+    }
     assert!(
         NoColdTraps::ClimateGiven
             .label()
@@ -599,110 +585,64 @@ fn no_published_pass_reads_no_figures_and_a_figures_free_pass_publishes_t51a_s()
 
 /// §9 test 7's second half: over the first 20 systems, each qualifying planet's and member's pass
 /// at its published albedo under C₀ (`PassDriver::Once`) reads no field, for want of figures where
-/// it qualifies, and publishes the condensates the cold traps' hold gives that pass, to the bit:
-/// how many read none for want of figures.
+/// it qualifies, and publishes P14.T51.a's condensates, none trapped: how many read none for want
+/// of figures.
 fn qualifying_passes_under_c0_publish_t51a_s() -> u32 {
     let mut c0 = 0_u32;
-    with_every_24_hold(|| {
-        for (ctx, system) in batch_systems().iter().take(20) {
-            let held = system.clone().with_record_rules(RecordRules {
-                cold_traps: ColdTrapRules::Held,
-                ..system.record
-            });
-            let t = UniverseTime::EPOCH;
-            let hosts: Vec<_> = system
-                .zones
-                .iter()
-                .map(|zone| fate_host(ctx, zone))
-                .collect();
-            let fates = system.fates(&hosts);
-            for (body, fate) in system.bodies.iter().zip(&fates) {
-                if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
-                    continue;
-                }
-                let fate = fate.as_ref().expect("a planet or member orbits a zone");
-                let at = fate.at(t);
-                if at.orbit().is_none() {
-                    continue;
-                }
-                let derive = |system: &PlanetarySystem, driver| {
-                    let epoch = Epoch::new(system, ctx, t).with_shades();
-                    let cosines = HourCosines::new();
-                    spun_read::capture(|| {
-                        system
-                            .primary_derived(&epoch, &cosines, (body, fate), &at, driver)
-                            .0
-                    })
-                };
-                let (solved, _) = derive(system, PassDriver::Solve);
-                if solved.cold_traps().is_err() {
-                    continue;
-                }
-                // One pass under C₀ at the published albedo, under the batch and under the hold.
-                let driver = PassDriver::Once(solved.albedo());
-                let ((batch, read), (_, held_read)) =
-                    (derive(system, driver), derive(&held, driver));
-                // Under C₀ its air may not qualify (its night floor reads no heat flow); where it
-                // does, it reads no field for want of figures.
-                let why = batch.cold_traps().as_ref().err().copied();
-                assert!(
-                    matches!(why, Some(NoColdTraps::NoFigures | NoColdTraps::Unqualified)),
-                    "{:?}: {why:?}",
-                    body.index
-                );
-                let (Some(read), Some(held_read)) = (read, held_read) else {
-                    panic!("{:?}: a solid surface's pass publishes", body.index);
-                };
-                assert!(
-                    same_condensates(&read.condensates, &held_read.condensates, false),
-                    "{:?}: {:?} against {:?}",
-                    body.index,
-                    read.condensates,
-                    held_read.condensates
-                );
-                c0 += u32::from(why == Some(NoColdTraps::NoFigures));
+    for (ctx, system) in batch_systems().iter().take(20) {
+        let t = UniverseTime::EPOCH;
+        let hosts: Vec<_> = system
+            .zones
+            .iter()
+            .map(|zone| fate_host(ctx, zone))
+            .collect();
+        let fates = system.fates(&hosts);
+        for (body, fate) in system.bodies.iter().zip(&fates) {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
             }
-        }
-    });
-    c0
-}
-
-/// §9 test 9: at generator version 23, the cold traps held, the passes build and reuse no field,
-/// and no record's basis carries one, over the first 20 whole systems (the cache's, version 23's).
-#[test]
-fn held_the_passes_build_no_field() {
-    assert_eq!(ColdTrapRules::in_force(), ColdTrapRules::Held);
-    let mut surfaces = 0_u32;
-    for (ctx, system) in whole().iter().take(20) {
-        let (snapshot, events) =
-            field_log::capture(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
-        assert!(
-            events
-                .iter()
-                .all(|event| matches!(event, FieldEvent::Opened)),
-            "{:?}: a field under the hold",
-            ctx.id()
-        );
-        for record in snapshot.bodies() {
-            if let Section::Ok(surface) = record.surface() {
-                surfaces += 1;
-                assert!(
-                    surface
-                        .basis()
-                        .is_none_or(|basis| basis.cold_traps.is_none()),
-                    "{}",
-                    record.identity().id()
-                );
-                assert_eq!(
-                    trapped(surface.condensates()),
-                    Vec::new(),
-                    "{}",
-                    record.identity().id()
-                );
+            let fate = fate.as_ref().expect("a planet or member orbits a zone");
+            let at = fate.at(t);
+            if at.orbit().is_none() {
+                continue;
             }
+            let derive = |system: &PlanetarySystem, driver| {
+                let epoch = Epoch::new(system, ctx, t).with_shades();
+                let cosines = HourCosines::new();
+                spun_read::capture(|| {
+                    system
+                        .primary_derived(&epoch, &cosines, (body, fate), &at, driver)
+                        .0
+                })
+            };
+            let (solved, _) = derive(system, PassDriver::Solve);
+            if solved.cold_traps().is_err() {
+                continue;
+            }
+            // One pass under C₀ at the published albedo.
+            let (batch, read) = derive(system, PassDriver::Once(solved.albedo()));
+            // Under C₀ its air may not qualify (its night floor reads no heat flow); where it
+            // does, it reads no field for want of figures.
+            let why = batch.cold_traps().as_ref().err().copied();
+            assert!(
+                matches!(why, Some(NoColdTraps::NoFigures | NoColdTraps::Unqualified)),
+                "{:?}: {why:?}",
+                body.index
+            );
+            let Some(read) = read else {
+                panic!("{:?}: a solid surface's pass publishes", body.index);
+            };
+            assert_eq!(
+                trapped(&read.condensates),
+                Vec::new(),
+                "{:?}: {:?}",
+                body.index,
+                read.condensates
+            );
+            c0 += u32::from(why == Some(NoColdTraps::NoFigures));
         }
     }
-    assert!(surfaces > 50, "{surfaces}");
+    c0
 }
 
 /// The bodies' fits under the bracket's second round, for the placement test's list.

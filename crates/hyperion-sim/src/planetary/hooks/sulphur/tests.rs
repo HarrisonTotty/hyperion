@@ -270,7 +270,9 @@ fn the_acid_modes_are_pollack_s() {
 }
 
 /// The table's median Venus carries a deck of four modes with τ(550) above 10, so that R08 classes
-/// it `cloudDeck`, its base below 3 bar and above its top. As built: printed for the bless note.
+/// it `cloudDeck`, its base below 3.5 bar and above its top. As built: printed for the bless note
+/// (from 24, under P14.T53.a's cooler median Venus, 618.9 K at 57.8 bar, the base lies at 3.36 bar
+/// and 385.7 K, deeper than 23's under 3 bar).
 #[test]
 fn the_table_s_venus_carries_a_thick_deck() {
     let (inventory, outgassing) = table_inventory("Venus");
@@ -295,7 +297,7 @@ fn the_table_s_venus_carries_a_thick_deck() {
     );
     assert_eq!(acid_modes(&inventory).len(), 4);
     assert!(tau > 10.0, "τ {tau}");
-    assert!(deck.base().value() < 3.0 * PASCALS_PER_BAR && deck.base() > deck.top());
+    assert!(deck.base().value() < 3.5 * PASCALS_PER_BAR && deck.base() > deck.top());
 }
 
 /// The table's Earth carries no acid deck, but a sulphate layer from its tropopause to a fifth of

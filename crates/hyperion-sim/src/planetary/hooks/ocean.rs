@@ -1,38 +1,18 @@
-//! A body's subsurface ocean beyond its flag (plan 14, P14.T51.g; science-p14-subsurface-ocean.md):
-//! so far the floor of a regular moon's ocean at the liquidus of its base, P14.T51.g.a, a must-fix
-//! of the 23 → 24 batch (decision-p14-t51g Q9).
+//! A body's subsurface ocean beyond its flag (plan 14, P14.T51.g; science-p14-subsurface-ocean.md).
 //!
-//! At version 23 a regular moon's published ocean is its flag's whole water layer less the flag's
-//! shell, pure water on rock at 273 K at its base
-//! ([`SubsurfaceOcean::of_regular_moon`](crate::planetary::hooks::SubsurfaceOcean::of_regular_moon)).
-//! Water at 273 K is liquid only up to ice V's melting pressure there, 626.09 MPa (IAPWS R14-08,
-//! as the registry's water row carries it), and a large icy moon's layer reaches 1.5–3.1 GPa, so
-//! the wire carried oceans 0.9–1.4 Mm deep. From [`OCEAN_FLOOR_VERSION`] the flag's shell, pure
-//! water and 273 K base stay, and the ocean ends at the shallower of the rock and that pressure
-//! ([`ocean_end`]):
-//!
-//! - **The column** ([`WaterColumn`]): the body's water spread over its rock at
-//!   [`WATER_DENSITY`], as the flag spreads it, with the hydrostatic pressure in it, P(r), and the
-//!   radius at which it reaches a pressure, found by a fixed count of halvings.
-//! - **The liquidus** ([`base_liquidus`]): water's melting pressure at the ocean's base
-//!   temperature, read from the registry's diagram (`PhaseDiagram::melting_pressure`), not copied.
-//! - **The end**: the rock where the pressure there is at most the liquidus; else ice V at the
-//!   radius where the pressure reaches it; and none modelled where the shell's base itself lies at
-//!   or beyond it, liquid under high-pressure ice being P14.T55.k's.
-//!
-//! Only the published member reads it: the flag, the passes' ocean bit and the tides read the
-//! moon's tidal branch, as at 23, and the shell is the flag's. The tectonic regime reads the
-//! published member's shell, so an absent member gives it none. That is the branch's regime
-//! wherever the absent member's shell is thicker than the 60 km an ice shell's regime needs
-//! ([`ICE_SHELL_LIMIT`](crate::planetary::hooks::figures::interior::ICE_SHELL_LIMIT)): a shell
-//! whose base reaches 626.09 MPa is thinner only where the gravity in it exceeds 626.09 MPa ÷
-//! (`ρ_w` × 60 km) = 10.4 m s⁻², an icy regular moon of some 4–6 M⊕. The tests' census asserts
-//! it over the golden systems, the 400 and LOOK72 (recorded in plan 14). P14.T51.g.b reuses the
-//! column for every body.
+//! At version 23 a regular moon's published ocean was its flag's whole water layer less the flag's
+//! shell, pure water on rock at 273 K at its base (P14.T17.b), and the wire carried oceans 0.9–1.4
+//! Mm deep, past ice V's melting pressure at 273 K, 626.09 MPa (IAPWS R14-08). P14.T51.g.a's floor,
+//! a must-fix of the 23 → 24 batch (decision-p14-t51g Q9), ended that ocean at the shallower of the
+//! rock and that pressure ([`ocean_end`], the flag's pure law, `Subsurface::of_regular_moon`);
+//! P14.T51.g.b's every-body solve below supersedes it on the record at 24, on the same column
+//! ([`WaterColumn`]): the body's water spread over its rock at [`WATER_DENSITY`], with the
+//! hydrostatic pressure in it, P(r), and the radius at which it reaches a pressure, found by a
+//! fixed count of halvings.
 //!
 //! # Every body's ocean (P14.T51.g.b)
 //!
-//! From [`OCEAN_VERSION`] every body with a solid surface takes its ocean from this module's
+//! From generator version 24 every body with a solid surface takes its ocean from this module's
 //! solve ([`Hydrosphere`]), in place of the flag's and its floor (decision-p14-t51g; science-p14-
 //! subsurface-ocean §2):
 //!
@@ -77,71 +57,9 @@ use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, Pascals, WattsPerSquareMetre,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
-
-/// The generator version from which a regular moon's published ocean ends at its liquidus
-/// (P14.T51.g.a): 24, the 23 → 24 batch's bump, P14.T54.b, a must-fix member that boards until
-/// P14.T54.b.l's blessing message (decision-p14-t51g Q9).
-///
-/// Below it [`OceanFloorRules::in_force`] is [`OceanFloorRules::Held`], so that every published
-/// ocean is version 23's bit for bit. P14.T54.b deletes this hold, [`OceanFloorRules`] with its
-/// `Held` arm and the tests' switch, and its tripwire
-/// (`the_ocean_floor_is_held_only_until_the_24_bump`).
-pub(crate) const OCEAN_FLOOR_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether a regular moon's published ocean ends at its liquidus (the hold,
-/// [`OCEAN_FLOOR_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum OceanFloorRules {
-    /// Versions 23's and before: the flag's whole water layer less its shell, on rock.
-    Held,
-    /// The 23 → 24 batch's: the layer ends at the shallower of the rock and the liquidus of its
-    /// base ([`ocean_end`]).
-    Floored,
-}
-
-impl OceanFloorRules {
-    /// The rules this generator version gives: the floor from [`OCEAN_FLOOR_VERSION`], none below
-    /// it; in the tests, the rules a test's switch sets on its thread ([`with_ocean_floor`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = OCEAN_FLOOR_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= OCEAN_FLOOR_VERSION {
-            Self::Floored
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The ocean floor's rules a test sets on its thread, `None` for the version's.
-    static OCEAN_FLOOR_RULES: core::cell::Cell<Option<OceanFloorRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the ocean floor's rules `rules` on this thread, for the tests to reach 24's
-/// oceans ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// P14.T54.b deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_ocean_floor<R>(rules: OceanFloorRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<OceanFloorRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            OCEAN_FLOOR_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(OCEAN_FLOOR_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The halvings by which [`WaterColumn::radius_at`] finds a radius: 64, a fixed count, so that the
 /// bracket of a column up to 10⁷ m deep closes past f64's resolution of its radii (10⁷ m ÷ 2⁶⁴ is
@@ -154,9 +72,7 @@ pub(crate) const RADIUS_HALVINGS: u32 = 64;
 pub(crate) const LEAST_BASE_SHARE: f64 = 0.001;
 
 /// A body's water spread over its rock at [`WATER_DENSITY`], `ρ_w`, from the base radius `r_w` to
-/// its surface R, as the flag spreads it (P14.T17.b's
-/// [`ocean_layers`](crate::planetary::moons::regular::ocean_layers)), with the body's whole mass M
-/// beneath and in it.
+/// its surface R, with the body's whole mass M beneath and in it.
 ///
 /// Its pressure at a radius r in the water is the hydrostatic column's (P14.T51.g's structure):
 ///
@@ -278,7 +194,8 @@ pub(crate) enum OceanEnd {
 }
 
 /// Where the ocean under a shell whose base is at the radius `shell_base` ends in the column
-/// `column`, its liquid freezing at and above the pressure `liquidus` (P14.T51.g.a): at the rock
+/// `column`, its liquid freezing at and above the pressure `liquidus` (P14.T51.g.a, the flag's
+/// floor, `Subsurface::of_regular_moon`): at the rock
 /// where the pressure at the column's base is at most `liquidus`; else on the high-pressure ice at
 /// the radius where it reaches `liquidus` ([`WaterColumn::radius_at`]), below the shell's base;
 /// and [`OceanEnd::Beyond`] where the pressure at the shell's base is at or beyond `liquidus`, or
@@ -322,68 +239,6 @@ pub(crate) fn base_liquidus(temperature: Kelvin) -> Pascals {
         .expect(
             "water's row carries IAPWS R14-08's melting curve over the ocean's base temperature",
         )
-}
-
-/// The generator version from which every body with a solid surface publishes its subsurface
-/// ocean by P14.T51.g.b's solve ([`Hydrosphere`]), and P14.T56.d's ocean branch reads the
-/// spherical shell over it: 24, a rider of the 23 → 24 batch (P14.T54.b.j) that boards if its
-/// commit lands before P14.T54.b.i's, and 25 otherwise (decision-p14-t51g).
-///
-/// Below it [`OceanRules::in_force`] is [`OceanRules::Held`], so that every published ocean and
-/// every moon's tides are version 23's bit for bit, with P14.T51.g.a's floor where its own hold
-/// is in force. P14.T54.b, or the next bump's wiring, deletes this hold with [`OceanRules`]'s
-/// `Held` arms, the tests' switch and its tripwire (`the_ocean_is_held_only_until_its_bump`).
-pub(crate) const OCEAN_VERSION: GeneratorVersion = GeneratorVersion::new(24);
-
-/// Whether every body's subsurface ocean is P14.T51.g.b's solve (the hold, [`OCEAN_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum OceanRules {
-    /// Version 23's: only a regular moon's ocean is computed, by its flag (with P14.T51.g.a's
-    /// floor where [`OceanFloorRules`] is in force), and P14.T56.d's ocean branch reads the flag's
-    /// planar shell.
-    Held,
-    /// P14.T51.g.b's: every body's ocean is the solve's, and the ocean branch reads its spherical
-    /// shell, its solutes and its base temperature.
-    Solved,
-}
-
-impl OceanRules {
-    /// The rules this generator version gives: the solve from [`OCEAN_VERSION`], the flag below it;
-    /// in the tests, the rules a test's switch sets on its thread ([`with_ocean_rules`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = OCEAN_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= OCEAN_VERSION {
-            Self::Solved
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The ocean's rules a test sets on its thread, `None` for the version's.
-    static OCEAN_RULES: core::cell::Cell<Option<OceanRules>> = const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the ocean's rules `rules` on this thread, for the tests to reach the solve
-/// ahead of its bump; the version's rules are set back after, a panic in `run` included. Its bump
-/// deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_ocean_rules<R>(rules: OceanRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<OceanRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            OCEAN_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(OCEAN_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// The thermal conductivity of water ice times temperature: 651 W m⁻¹ (k = 651 ÷ T; Petrenko

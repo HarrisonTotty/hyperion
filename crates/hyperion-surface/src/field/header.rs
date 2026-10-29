@@ -200,11 +200,13 @@ pub struct FieldHeaderParts {
     /// The ground's space-weathering maturity, dimensionless in [+0, 1]: 0 for fresh ground and 1
     /// for saturated weathering, which R10.T1.c's cover term reads on both sides
     /// (decision-r11-palette-liquids §2, item 4). Reserved for P14.T51.d's figure, whose builder
-    /// fixes its exact definition within this contract, and `None` until P14.T54.b fills it.
+    /// fixes its exact definition within this contract, which P14.T54.b fills from generator
+    /// version 24; `None` where the record gives none.
     pub maturity: Option<f64>,
     /// The organic cover: the covered fraction of the ground that can take one, dimensionless in
     /// [+0, 1] (decision-r11-palette-liquids §2, item 4). Reserved for P14.T51.d's figure, as
-    /// [`maturity`](Self::maturity) is, and `None` until P14.T54.b fills it.
+    /// [`maturity`](Self::maturity) is, which P14.T54.b fills from generator version 24; `None`
+    /// where the record gives none.
     pub organic_cover: Option<f64>,
     /// The weathering rate k: the body's orbit-mean, surface-reaching space-weathering dose rate
     /// relative to the Moon's present one, computed by the same rules, so that the Moon's is
@@ -217,8 +219,8 @@ pub struct FieldHeaderParts {
     /// R10.T1.c fades a crater's ejecta to the background as `min(m_body, maturity_after(t_c, k))`
     /// ([`maturity_after`](crate::material::maturity_after)), `t_c` the crater's age and `m_body`
     /// the [`maturity`](Self::maturity), which saturates on old ground, so that k cannot be
-    /// recovered from it (§2.1, §2.3). Present exactly when the maturity is, and `None` until
-    /// P14.T54.b fills both.
+    /// recovered from it (§2.1, §2.3). Present exactly when the maturity is, which P14.T54.b
+    /// fills from generator version 24, and `None` where the record gives neither.
     pub weathering_rate: Option<f64>,
 }
 

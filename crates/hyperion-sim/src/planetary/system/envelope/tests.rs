@@ -1,8 +1,7 @@
-//! The envelope section on the record (P14.T54.b.i): held at 23, so that nothing of it is computed;
-//! under every 24 hold with the record's batch rules, every sub-Neptune's and giant's envelope is
-//! its builder's on its record's own members, or not modelled for a stated reason, over the golden
-//! systems and the plan-14 sample; the table's Jupiter against the probe; the ice giants' methane
-//! decks (G3); the census of the bless note's lines (ignored).
+//! The envelope section on the record (P14.T54.b.i), from generator version 24: every sub-Neptune's
+//! and giant's envelope is its builder's on its record's own members, or not modelled for a stated
+//! reason, over the golden systems and the plan-14 sample; the table's Jupiter against the probe;
+//! the ice giants' methane decks (G3); the census of the bless note's lines (ignored).
 
 use std::sync::OnceLock;
 
@@ -17,7 +16,6 @@ use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::derive::solar::{PLANETS, SOLAR_AGE, solar_disc, solar_system};
 use crate::planetary::derive::{DerivedBody, PlanetClass};
-use crate::planetary::hooks::cold_traps::ColdTrapRules;
 use crate::planetary::hooks::envelope_atmosphere::{DECK_COLUMN_BOTTOM, DeckKind};
 use crate::planetary::hooks::structure::envelope::{
     ADIABAT_BOTTOM, MEAN_REDISTRIBUTION, OPACITY_RATIO, OPTICAL_DEPTH_EXPONENT,
@@ -27,8 +25,7 @@ use crate::planetary::hooks::surface::HourCosines;
 use crate::planetary::label;
 use crate::planetary::record::{BodyRecord, RecordSection, SectionState};
 use crate::planetary::system::tests::{SEED, golden_systems_afresh, sample, thin_air_sets};
-use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, RecordRules, fate_host};
-use crate::planetary::testing::with_every_24_hold;
+use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, fate_host};
 use crate::planetary::{SystemContext, generate};
 use crate::stellar::Composition;
 use crate::substance::{Element, SubstanceId, by_key};
@@ -52,16 +49,6 @@ fn network() -> &'static Network {
     NETWORK.get_or_init(|| Network::registry().expect("the registry's network builds"))
 }
 
-/// The record's rules at their batch (the air's sections, the cold traps), as every 24 test reads
-/// them; read inside [`with_every_24_hold`], whose small bodies' rules they take.
-fn batch_rules() -> RecordRules {
-    RecordRules {
-        cold_traps: ColdTrapRules::Batch,
-        air: AirRules::Batch,
-        ..RecordRules::in_force()
-    }
-}
-
 /// One record of a walk ([`walk`]): the body, its record, and for a present planet or member its
 /// derivation and its next change.
 struct Visit<'a> {
@@ -83,9 +70,7 @@ fn walk(
     if ctx.age_at(t).value() <= 0.0 {
         return;
     }
-    let epoch = Epoch::new(system, ctx, t)
-        .with_shades()
-        .with_small_bodies(system.record.small_bodies);
+    let epoch = Epoch::new(system, ctx, t).with_shades().with_small_bodies();
     let cosines = HourCosines::new();
     for body in system.bodies() {
         if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
@@ -370,19 +355,7 @@ fn relative(a: f64, b: f64) -> f64 {
     }
 }
 
-/// Under the air's sections' hold the record's envelope is not modelled, and neither its inputs
-/// nor its network are read (`record_envelope`'s `Held` arm).
-#[test]
-fn the_held_envelope_computes_nothing() {
-    let held = record_envelope(
-        AirRules::Held,
-        || panic!("nothing of the envelope is read under the hold"),
-        || panic!("no network is built under the hold"),
-    );
-    assert_eq!(held, Section::NotModelled);
-}
-
-/// Every 24 hold in force and the record's rules at their batch, over the golden systems and the
+/// Over the golden systems and the
 /// sample's first 10 systems at both ends of the clock window: every present sub-Neptune's and
 /// giant's envelope is `Ok` and equal to `envelope_of` rebuilt from its record's own members, to
 /// the bit, with every invariant of [`check_envelope`], or `NotModelled` for a reason
@@ -403,8 +376,7 @@ fn under_every_24_hold_every_gas_envelope_record_is_its_builder_s_or_not_modelle
     let mut figures: std::collections::BTreeMap<(String, u16), Vec<Figures>> =
         std::collections::BTreeMap::new();
     let (mut sub_neptunes, mut rocky) = (0_usize, 0_usize);
-    with_every_24_hold(|| {
-        let rules = batch_rules();
+    {
         let sets: Vec<(String, SystemContext, PlanetarySystem)> = golden_systems_afresh()
             .into_iter()
             .map(|(name, ctx, system)| (name.to_owned(), ctx, system))
@@ -416,9 +388,8 @@ fn under_every_24_hold_every_gas_envelope_record_is_its_builder_s_or_not_modelle
             )
             .collect();
         for (name, ctx, system) in &sets {
-            let system = system.clone().with_record_rules(rules);
             for t in [ClockWindow::START, ClockWindow::END] {
-                walk(ctx, &system, t, &mut |epoch, visit| {
+                walk(ctx, system, t, &mut |epoch, visit| {
                     let record = &visit.record;
                     let Section::Ok(bulk) = record.bulk() else {
                         assert_ne!(
@@ -460,7 +431,7 @@ fn under_every_24_hold_every_gas_envelope_record_is_its_builder_s_or_not_modelle
                         .derived
                         .as_ref()
                         .expect("a present primary's derivation");
-                    let of = rebuilt(epoch, &system, visit.body, (record, derived));
+                    let of = rebuilt(epoch, system, visit.body, (record, derived));
                     if let Some(helium) = derived.envelope_helium() {
                         assert_same_bits(
                             of.primordial_helium_per_hydrogen,
@@ -498,7 +469,7 @@ fn under_every_24_hold_every_gas_envelope_record_is_its_builder_s_or_not_modelle
                 });
             }
         }
-    });
+    };
     let mut deck_moves = 0.0_f64;
     let mut compared = 0_usize;
     for ((name, index), both) in &figures {
@@ -552,23 +523,21 @@ fn under_every_24_hold_every_gas_envelope_record_is_its_builder_s_or_not_modelle
 
 /// The record's envelope is the same for the same seed twice, and a body's own record
 /// (`PlanetarySystem::body_at`) holds the snapshot's envelope (`snapshot_at`), each to the bit
-/// (signed zeros included, by `Debug`), every 24 hold in force and the record's rules at their
+/// (signed zeros included, by `Debug`) and the record's rules at their
 /// batch, over three golden systems with giants; and `body_at` gives each body the same envelope
 /// whatever order its system's bodies are asked in, so that the escape batch's carried helium, read
 /// by each envelope, keeps nothing between bodies (the sim-determinism skill's call-order rule).
 #[test]
 fn under_every_24_hold_the_record_s_envelope_is_the_same_twice_and_in_both_queries() {
     let mut envelopes = 0;
-    with_every_24_hold(|| {
-        let rules = batch_rules();
+    {
         let systems: Vec<_> = golden_systems_afresh()
             .into_iter()
             .filter(|(name, ..)| matches!(*name, "hot_jupiter" | "solar_like" | "eccentric_giant"))
             .collect();
         assert_eq!(systems.len(), 3);
         for (name, ctx, system) in systems {
-            let system = system.with_record_rules(rules);
-            let again = generate(system.seed, &ctx).with_record_rules(rules);
+            let again = generate(system.seed, &ctx);
             let t = UniverseTime::EPOCH;
             let snapshot = system.snapshot_at(&ctx, t);
             let twice = again.snapshot_at(&ctx, t);
@@ -604,12 +573,12 @@ fn under_every_24_hold_the_record_s_envelope_is_the_same_twice_and_in_both_queri
                 )
             });
         }
-    });
+    };
     assert!(envelopes > 2, "{envelopes} envelopes");
 }
 
 /// The table's giant `name` as its record's envelope reads it (the Solar System through
-/// `derive_body` about the present Sun, every 24 hold in force, so that its derivation carries its
+/// `derive_body` about the present Sun, so that its derivation carries its
 /// escape's helium from the protosolar start, its host's): its derivation's mass, fractions,
 /// radius, gravity, `T_eq` and internal luminosity, the Sun's age, its formation at its own
 /// semi-major axis in the zero-age Sun's disc, a protosolar host (\[Fe/H\] and \[α/Fe\] 0,
@@ -659,7 +628,7 @@ fn share(envelope: &Envelope, key: &str) -> f64 {
 }
 
 /// The table's Jupiter, through the record's envelope (`envelope_of`) on its own derivation about
-/// a solar host, every 24 hold in force, follows the Galileo probe as P14.T52.d's table case does:
+/// a solar host, follows the Galileo probe as P14.T52.d's table case does:
 /// T(1 bar) within 10% of the probe's 166.1 K (Seiff et al. 1998), its ammonia deck's base at
 /// 0.5–1 bar and CH₄ ÷ H₂ at 1.5–3 × 10⁻³ (Wong et al. 2004's 2.4 × 10⁻³, as Guillot et al. 2022's
 /// Table 2 lists it); its join and photosphere stated. Its He/H is its carry's, fractionated from
@@ -669,7 +638,7 @@ fn share(envelope: &Envelope, key: &str) -> f64 {
 /// the two scales of one figure).
 #[test]
 fn the_table_s_jupiter_on_the_record_follows_the_probe() {
-    let (of, jupiter) = with_every_24_hold(|| table_envelope("Jupiter"));
+    let (of, jupiter) = table_envelope("Jupiter");
     check_envelope("Jupiter", &jupiter, &of);
     let one_bar = at_bar(&jupiter, 1.0);
     let ammonia = jupiter
@@ -715,14 +684,14 @@ fn the_table_s_jupiter_on_the_record_follows_the_probe() {
 const CLOUD_DECK_SPLIT_OPTICAL_DEPTH: f64 = 10.0;
 
 /// G3 (decision-bump-plan-after-22): the table's Neptune's and Uranus's CH₄ decks through the
-/// record's envelope, every 24 hold in force, each below R08's cloud-deck split of 10 and within 3
+/// record's envelope, each below R08's cloud-deck split of 10 and within 3
 /// times its range's top (G2's 0.5–4 for Neptune and 1–5 for Uranus, Irwin et al. 2022), stated:
 /// P14.T52.d's table cases at the protosolar He/H gave 5.77 and 3.76, which the carry's He/H, the
 /// escape's from the protosolar start, moves slightly.
 #[test]
 fn the_ice_giants_methane_decks_meet_g3() {
     for (name, top) in [("Neptune", 4.0), ("Uranus", 5.0)] {
-        let (of, envelope) = with_every_24_hold(|| table_envelope(name));
+        let (of, envelope) = table_envelope(name);
         check_envelope(name, &envelope, &of);
         let tau = envelope
             .atmosphere()
@@ -809,7 +778,7 @@ fn deck_tau_above(envelope: &Envelope, condensate: SubstanceId, level: f64) -> O
 }
 
 /// The census of the records' envelopes (P14.T54.b.i; decision-p14-t24d-profile §9's bless-note
-/// lines and P14.T54.b.k's count (x) inputs), every 24 hold in force and the record's rules at their
+/// lines and P14.T54.b.k's count (x) inputs) and the record's rules at their
 /// batch, at the epoch, over [`census_sets`], printed (`--nocapture`):
 ///
 /// - the envelopes by class and state, the not-modelled ones by reason;
@@ -851,201 +820,198 @@ fn the_envelopes_are_stated() {
     let built = Network::registry().expect("the registry's network builds");
     let network_build = start.elapsed().as_secs_f64();
     assert_eq!(&built, network());
-    with_every_24_hold(|| {
-        for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-            let (of, envelope) = table_envelope(name);
-            writeln!(
-                lines,
-                "  the table's {name}: T(1 bar) {:.2} K, T_int {:.2} K, join {:.4} bar, He/H {:.6}",
-                at_bar(&envelope, 1.0),
-                envelope.atmosphere().internal_temperature().value(),
-                envelope.atmosphere().profile().join_pressure().value() / 1e5,
-                of.primordial_helium_per_hydrogen
-            )
-            .expect("a string takes a line");
-        }
-        let rules = batch_rules();
-        for (set, seed, ctx) in &sets {
-            let system = generate(*seed, ctx).with_record_rules(rules);
-            walk(ctx, &system, UniverseTime::EPOCH, &mut |epoch, visit| {
-                let record = &visit.record;
-                let Section::Ok(bulk) = record.bulk() else {
-                    return;
+    for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
+        let (of, envelope) = table_envelope(name);
+        writeln!(
+            lines,
+            "  the table's {name}: T(1 bar) {:.2} K, T_int {:.2} K, join {:.4} bar, He/H {:.6}",
+            at_bar(&envelope, 1.0),
+            envelope.atmosphere().internal_temperature().value(),
+            envelope.atmosphere().profile().join_pressure().value() / 1e5,
+            of.primordial_helium_per_hydrogen
+        )
+        .expect("a string takes a line");
+    }
+    for (set, seed, ctx) in &sets {
+        let system = generate(*seed, ctx);
+        walk(ctx, &system, UniverseTime::EPOCH, &mut |epoch, visit| {
+            let record = &visit.record;
+            let Section::Ok(bulk) = record.bulk() else {
+                return;
+            };
+            let class = bulk.class();
+            if class.has_solid_surface() {
+                if record.section_state(RecordSection::Envelope) == SectionState::NotModelled {
+                    *counts.entry("solid, supercritical".to_owned()).or_default() += 1;
+                }
+                return;
+            }
+            let at = format!("{set} {} {:04x}", ctx.id(), visit.body.index.get());
+            let derived = visit
+                .derived
+                .as_ref()
+                .expect("a present primary's derivation");
+            let of = rebuilt(epoch, &system, visit.body, (record, derived));
+            let start = std::time::Instant::now();
+            let again = envelope_of(&of, network());
+            timings.push(start.elapsed().as_secs_f64());
+            let m_j = of.mass.value() / jupiter;
+            if let Some(change) = visit.changes_at
+                && change > ClockWindow::START
+                && change <= ClockWindow::END
+            {
+                let before = change.checked_sub(Span::from_seconds(1)).expect("in range");
+                let state = |t| {
+                    system
+                        .body_at(ctx, visit.body.index, t)
+                        .map(|r| r.section_state(RecordSection::Envelope))
                 };
-                let class = bulk.class();
-                if class.has_solid_surface() {
-                    if record.section_state(RecordSection::Envelope) == SectionState::NotModelled {
-                        *counts.entry("solid, supercritical".to_owned()).or_default() += 1;
+                changes.push(format!(
+                    "{at} {class:?} changes at {change:?}: {:?} before, {:?} at it",
+                    state(before),
+                    state(change)
+                ));
+            }
+            let envelope = match (record.envelope(), &again) {
+                (Section::Ok(envelope), Ok(_)) => envelope,
+                (_, Err(error)) => {
+                    let why = reason(error);
+                    *counts.entry(format!("{class:?} {why}")).or_default() += 1;
+                    if why == "not hydrogen-dominated" {
+                        not_hydrogen.push(format!("{at} {class:?} {m_j:.4} M_J: {error:?}"));
                     }
                     return;
                 }
-                let at = format!("{set} {} {:04x}", ctx.id(), visit.body.index.get());
-                let derived = visit
-                    .derived
-                    .as_ref()
-                    .expect("a present primary's derivation");
-                let of = rebuilt(epoch, &system, visit.body, (record, derived));
-                let start = std::time::Instant::now();
-                let again = envelope_of(&of, network());
-                timings.push(start.elapsed().as_secs_f64());
-                let m_j = of.mass.value() / jupiter;
-                if let Some(change) = visit.changes_at
-                    && change > ClockWindow::START
-                    && change <= ClockWindow::END
-                {
-                    let before = change.checked_sub(Span::from_seconds(1)).expect("in range");
-                    let state = |t| {
-                        system
-                            .body_at(ctx, visit.body.index, t)
-                            .map(|r| r.section_state(RecordSection::Envelope))
-                    };
-                    changes.push(format!(
-                        "{at} {class:?} changes at {change:?}: {:?} before, {:?} at it",
-                        state(before),
-                        state(change)
-                    ));
-                }
-                let envelope = match (record.envelope(), &again) {
-                    (Section::Ok(envelope), Ok(_)) => envelope,
-                    (_, Err(error)) => {
-                        let why = reason(error);
-                        *counts.entry(format!("{class:?} {why}")).or_default() += 1;
-                        if why == "not hydrogen-dominated" {
-                            not_hydrogen.push(format!("{at} {class:?} {m_j:.4} M_J: {error:?}"));
-                        }
-                        return;
-                    }
-                    (section, Ok(_)) => panic!("{at}: {section:?} against its builder's Ok"),
-                };
-                *counts.entry(format!("{class:?} ok")).or_default() += 1;
-                let atmosphere = envelope.atmosphere();
-                let profile = atmosphere.profile();
-                let (t_int, join) = (
-                    atmosphere.internal_temperature().value(),
-                    profile.join_pressure().value(),
-                );
-                if matches!(class, PlanetClass::GasGiant | PlanetClass::IceGiant) {
-                    writeln!(
-                        lines,
-                        "  {at} {class:?} {m_j:.4} M_J T_eq {:.1} K: T(1 bar) {:.2} K, T_int \
+                (section, Ok(_)) => panic!("{at}: {section:?} against its builder's Ok"),
+            };
+            *counts.entry(format!("{class:?} ok")).or_default() += 1;
+            let atmosphere = envelope.atmosphere();
+            let profile = atmosphere.profile();
+            let (t_int, join) = (
+                atmosphere.internal_temperature().value(),
+                profile.join_pressure().value(),
+            );
+            if matches!(class, PlanetClass::GasGiant | PlanetClass::IceGiant) {
+                writeln!(
+                    lines,
+                    "  {at} {class:?} {m_j:.4} M_J T_eq {:.1} K: T(1 bar) {:.2} K, T_int \
                          {t_int:.2} K, join {:.4} bar",
-                        of.equilibrium_temperature.value(),
-                        at_bar(envelope, 1.0),
-                        join / 1e5
+                    of.equilibrium_temperature.value(),
+                    at_bar(envelope, 1.0),
+                    join / 1e5
+                )
+                .expect("a string takes a line");
+            }
+            if join > 1e7 {
+                deep_joins.push(format!(
+                    "{at} {class:?} {m_j:.4} M_J: {:.1} bar",
+                    join / 1e5
+                ));
+            }
+            if m_j < 0.414 {
+                let t_eq = of.equilibrium_temperature.value();
+                let bulk_t_int = bulk.effective_temperature().map_or(0.0, |t| {
+                    math::powf(
+                        (math::powi(t.value(), 4) - math::powi(t_eq, 4)).max(0.0),
+                        0.25,
                     )
-                    .expect("a string takes a line");
-                }
-                if join > 1e7 {
-                    deep_joins.push(format!(
-                        "{at} {class:?} {m_j:.4} M_J: {:.1} bar",
-                        join / 1e5
-                    ));
-                }
-                if m_j < 0.414 {
-                    let t_eq = of.equilibrium_temperature.value();
-                    let bulk_t_int = bulk.effective_temperature().map_or(0.0, |t| {
-                        math::powf(
-                            (math::powi(t.value(), 4) - math::powi(t_eq, 4)).max(0.0),
-                            0.25,
-                        )
-                    });
-                    mismatches.push(format!(
-                        "{at} {class:?} {m_j:.4} M_J: T_int {t_int:.2} K against the bulk's \
+                });
+                mismatches.push(format!(
+                    "{at} {class:?} {m_j:.4} M_J: T_int {t_int:.2} K against the bulk's \
                          {bulk_t_int:.2} K"
-                    ));
-                }
-                // T24.d's blend reaches the giants below 0.414 M_J (`giant_share`): the bless
-                // note's 0.15–0.3 M_J and the blended 0.3–0.414 M_J alike.
-                if (0.15..0.414).contains(&m_j) {
-                    let abundances = envelope.abundances();
-                    let bulk_t_eff = bulk
-                        .effective_temperature()
-                        .unwrap_or(of.equilibrium_temperature);
-                    let formation = of.formation.expect("an Ok envelope's formation");
-                    let at_bulk = EnvelopeAbundances::derive(&EnvelopeInputs {
-                        mass: of.mass,
-                        fractions: of.fractions,
-                        formation_distance: formation.distance(),
-                        snow_line: formation.snow_line(),
-                        fe_h: of.fe_h,
-                        alpha_fe: of.alpha_fe.expect("an Ok envelope's [α/Fe]"),
-                        host: of.host,
-                        effective_temperature: bulk_t_eff,
-                        age: of.age,
-                        surface_gravity: of.gravity,
-                        primordial_helium_per_hydrogen: of.primordial_helium_per_hydrogen,
-                    })
-                    .expect("the bulk's T_eff is an input T50.b takes");
-                    light_giants.push(format!(
-                        "{at} {class:?} {m_j:.4} M_J: He/H {:.6} (depletion {:.4}) at the \
+                ));
+            }
+            // T24.d's blend reaches the giants below 0.414 M_J (`giant_share`): the bless
+            // note's 0.15–0.3 M_J and the blended 0.3–0.414 M_J alike.
+            if (0.15..0.414).contains(&m_j) {
+                let abundances = envelope.abundances();
+                let bulk_t_eff = bulk
+                    .effective_temperature()
+                    .unwrap_or(of.equilibrium_temperature);
+                let formation = of.formation.expect("an Ok envelope's formation");
+                let at_bulk = EnvelopeAbundances::derive(&EnvelopeInputs {
+                    mass: of.mass,
+                    fractions: of.fractions,
+                    formation_distance: formation.distance(),
+                    snow_line: formation.snow_line(),
+                    fe_h: of.fe_h,
+                    alpha_fe: of.alpha_fe.expect("an Ok envelope's [α/Fe]"),
+                    host: of.host,
+                    effective_temperature: bulk_t_eff,
+                    age: of.age,
+                    surface_gravity: of.gravity,
+                    primordial_helium_per_hydrogen: of.primordial_helium_per_hydrogen,
+                })
+                .expect("the bulk's T_eff is an input T50.b takes");
+                light_giants.push(format!(
+                    "{at} {class:?} {m_j:.4} M_J: He/H {:.6} (depletion {:.4}) at the \
                          envelope's T_eff, {:.6} ({:.4}) at the bulk's {:.2} K",
-                        abundances.per_hydrogen(Element::He),
-                        abundances.helium_depletion(),
-                        at_bulk.per_hydrogen(Element::He),
-                        at_bulk.helium_depletion(),
-                        bulk_t_eff.value()
+                    abundances.per_hydrogen(Element::He),
+                    abundances.helium_depletion(),
+                    at_bulk.per_hydrogen(Element::He),
+                    at_bulk.helium_depletion(),
+                    bulk_t_eff.value()
+                ));
+            }
+            for (k, deck) in atmosphere.decks().iter().enumerate() {
+                let condensate = deck.condensate();
+                let base = deck.base().value();
+                let tau = atmosphere.deck_optical_depth(condensate);
+                if let Some(tau) = tau
+                    && tau > largest_tau.0
+                {
+                    largest_tau = (tau, format!("{at} {}", key_of(condensate)));
+                }
+                if atmosphere.deck_bounds()[k] == DeckBound::Bottom {
+                    assert!(
+                        (base / DECK_COLUMN_BOTTOM.value() - 1.0).abs() < 1e-9,
+                        "{at}: {} bound at the bottom, based at {base} Pa",
+                        key_of(condensate)
+                    );
+                    bottoms += 1;
+                }
+                if condensate == row("CH4") && class == PlanetClass::IceGiant {
+                    let tau = tau.unwrap_or(f64::NAN);
+                    ice_giants.push(format!("{at}: CH4 tau {tau:.4}"));
+                    if tau.is_nan() || tau > CLOUD_DECK_SPLIT_OPTICAL_DEPTH {
+                        to_main.push(format!("{at}: an ice giant's CH4 tau {tau}"));
+                    }
+                }
+                let deep = matches!(
+                    DeckKind::of(condensate),
+                    Some(DeckKind::Refractory | DeckKind::SulphideOrSalt)
+                ) && base > join;
+                if !deep {
+                    continue;
+                }
+                let above_ten = deck_tau_above(envelope, condensate, 1e6);
+                let above_one = deck_tau_above(envelope, condensate, 1e5);
+                deep_decks.push(format!(
+                    "{at} {}: tau {tau:?}, base {:.1} bar, tau above 10 bar {above_ten:?}, \
+                         above 1 bar {above_one:?}",
+                    key_of(condensate),
+                    base / 1e5
+                ));
+                if above_one.is_some_and(|tau| tau >= 1.0) {
+                    to_main.push(format!(
+                        "{at}: {} tau above 1 bar {above_one:?}",
+                        key_of(condensate)
                     ));
                 }
-                for (k, deck) in atmosphere.decks().iter().enumerate() {
-                    let condensate = deck.condensate();
-                    let base = deck.base().value();
-                    let tau = atmosphere.deck_optical_depth(condensate);
-                    if let Some(tau) = tau
-                        && tau > largest_tau.0
+                for mode in atmosphere.modes().iter().filter(|m| m.deck() == condensate) {
+                    if let Err(error) = mode.optical_depth()
+                        && mode.profile().top().value() < 1e6
                     {
-                        largest_tau = (tau, format!("{at} {}", key_of(condensate)));
-                    }
-                    if atmosphere.deck_bounds()[k] == DeckBound::Bottom {
-                        assert!(
-                            (base / DECK_COLUMN_BOTTOM.value() - 1.0).abs() < 1e-9,
-                            "{at}: {} bound at the bottom, based at {base} Pa",
-                            key_of(condensate)
-                        );
-                        bottoms += 1;
-                    }
-                    if condensate == row("CH4") && class == PlanetClass::IceGiant {
-                        let tau = tau.unwrap_or(f64::NAN);
-                        ice_giants.push(format!("{at}: CH4 tau {tau:.4}"));
-                        if tau.is_nan() || tau > CLOUD_DECK_SPLIT_OPTICAL_DEPTH {
-                            to_main.push(format!("{at}: an ice giant's CH4 tau {tau}"));
-                        }
-                    }
-                    let deep = matches!(
-                        DeckKind::of(condensate),
-                        Some(DeckKind::Refractory | DeckKind::SulphideOrSalt)
-                    ) && base > join;
-                    if !deep {
-                        continue;
-                    }
-                    let above_ten = deck_tau_above(envelope, condensate, 1e6);
-                    let above_one = deck_tau_above(envelope, condensate, 1e5);
-                    deep_decks.push(format!(
-                        "{at} {}: tau {tau:?}, base {:.1} bar, tau above 10 bar {above_ten:?}, \
-                         above 1 bar {above_one:?}",
-                        key_of(condensate),
-                        base / 1e5
-                    ));
-                    if above_one.is_some_and(|tau| tau >= 1.0) {
                         to_main.push(format!(
-                            "{at}: {} tau above 1 bar {above_one:?}",
-                            key_of(condensate)
+                            "{at}: a {} mode with no tau topped at {:.3} bar ({error:?})",
+                            key_of(condensate),
+                            mode.profile().top().value() / 1e5
                         ));
                     }
-                    for mode in atmosphere.modes().iter().filter(|m| m.deck() == condensate) {
-                        if let Err(error) = mode.optical_depth()
-                            && mode.profile().top().value() < 1e6
-                        {
-                            to_main.push(format!(
-                                "{at}: a {} mode with no tau topped at {:.3} bar ({error:?})",
-                                key_of(condensate),
-                                mode.profile().top().value() / 1e5
-                            ));
-                        }
-                    }
                 }
-            });
-        }
-    });
+            }
+        });
+    }
     timings.sort_by(f64::total_cmp);
     let (n, total) = (timings.len(), timings.iter().sum::<f64>());
     let largest = timings.last().copied().unwrap_or(0.0);

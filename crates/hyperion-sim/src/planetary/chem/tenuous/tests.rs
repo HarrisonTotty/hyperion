@@ -1,5 +1,5 @@
-//! The tenuous air's tests: its hold's tripwire, its loss law against Pluto's measured escape, the
-//! ice's temperature against Triton's, and the floor.
+//! The tenuous air's tests: its loss law against Pluto's measured escape, the ice's temperature
+//! against Triton's, and the floor.
 
 use hyperion_testkit::float::assert_same_bits;
 
@@ -36,39 +36,6 @@ fn nitrogen_frost_point(pascals: f64) -> Kelvin {
         .phase_diagram()
         .and_then(|d| d.saturation_temperature(Pascals::new(pascals)))
         .expect("N2's curve holds 1 Pa")
-}
-
-/// P14.T53.c is held until the 23 → 24 bump: the rules in force are version 23's, P14.T54.a's
-/// ice-held stand-in, with no `Tenuous` state and the ocean under a `Snowball`'s ice listed.
-#[test]
-fn the_tenuous_air_is_held_only_until_the_24_bump() {
-    assert!(
-        GENERATOR_VERSION < TENUOUS_VERSION,
-        "the 23 → 24 bump (P14.T54.b) puts P14.T53.c on the record, if it rides it: the ice-held \
-         retention at the ice's own temperature (`IceHeld::of`'s `TenuousRules::Tenuous` arm), \
-         the `Tenuous` state above its floor (`escaping::finish`) and the end of the ocean under \
-         a `Snowball`'s ice in \
-         `surface_liquids` (`with_surface_under`). Delete `TENUOUS_VERSION`, `TenuousRules` with \
-         its `Held` arm (every `match` and test on it keeps its `Tenuous` arm), the tests' \
-         `with_tenuous`, its switch in `with_every_24_hold`, and this test; and retire the \
-         client's `oceanUnderIce` and `liquidsOnIce` (P14.T43.h's rule), which no 24 record \
-         fires"
-    );
-    assert_eq!(TenuousRules::in_force(), TenuousRules::Held);
-}
-
-/// A test's rules hold on its thread inside [`with_tenuous`], nested or not, and the rules before
-/// come back after.
-#[test]
-fn a_test_s_tenuous_rules_hold_inside_with_tenuous_and_are_set_back_after() {
-    let outside = TenuousRules::in_force();
-    let (tenuous, held) = with_tenuous(TenuousRules::Tenuous, || {
-        let held = with_tenuous(TenuousRules::Held, TenuousRules::in_force);
-        (TenuousRules::in_force(), held)
-    });
-    assert_eq!(tenuous, TenuousRules::Tenuous);
-    assert_eq!(held, TenuousRules::Held);
-    assert_eq!(TenuousRules::in_force(), outside);
 }
 
 /// P14.T53.c's check of its loss law (decision-triton-and-e101 §1.8 item 1): Pluto's vapour air

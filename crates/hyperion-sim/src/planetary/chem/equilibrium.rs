@@ -5,8 +5,8 @@
 //! A [`Network`] holds the registry's gas rows that have a thermochemical record (P14.T49.d's
 //! [`substance::formation`](crate::substance::formation)), and [`Network::solve`] gives their
 //! [`GasEquilibrium`] at one level: the 1-bar level, the quench level or the photosphere of an
-//! envelope (P14.T52.d chooses them), or a thin H₂ air once P14.T53.a keeps one. Nothing on the
-//! record reads it until P14.T54.b, so no generated output moves with it.
+//! envelope (P14.T52.d chooses them), or a thin H₂ air once P14.T53.a keeps one. The record reads
+//! it from generator version 24 (P14.T54.b), so a change to it is a generator-version change.
 //!
 //! # The network
 //!
@@ -207,9 +207,9 @@
 //!   10 mbar, C₂H holds 9% of the carbon at 2,500 K and 13% at 3,000 K, CN 7% of the nitrogen and
 //!   HNC 3–5% (FastChem's C, H, O, N and He run), none of them rows (P14.T52.e).
 //!
-//! The network being every gas row with a record, a gas row added later moves this output: after
-//! P14.T54.b first reads it, that is a `GENERATOR_VERSION` change, which the goldens and P14.T49.d's
-//! fingerprint of the rows catch.
+//! The network being every gas row with a record, a gas row added later moves this output: since
+//! P14.T54.b reads it on the record from 24, that is a `GENERATOR_VERSION` change, which the
+//! goldens and P14.T49.d's fingerprint of the rows catch.
 
 use std::cmp::Ordering;
 use std::error::Error;

@@ -81,7 +81,7 @@ pub(crate) struct PassBulk {
     /// reads ([`surface_material`](super::surface_material)).
     pub(crate) lag: SurfaceLag,
     /// What its ocean would dissolve (P14.T51.g.b), its air's bulk's, which a moon's tidal branch
-    /// reads at each pass from `OCEAN_VERSION`.
+    /// reads at each pass.
     pub(crate) ocean_solutes: OceanSolutes,
 }
 
@@ -160,9 +160,7 @@ pub(crate) trait PassRecordOf {
     ///
     /// # Errors
     ///
-    /// [`NoColdTraps::Held`] under the cold traps' hold as its record's rules give it, so that the
-    /// passes and the record follow one rule, and [`NoColdTraps::NoSky`] where its record holds no
-    /// seasonal orbit at the time.
+    /// [`NoColdTraps::NoSky`] where its record holds no seasonal orbit at the time.
     fn cold_trap_sky(&self, flux: WattsPerSquareMetre) -> Result<ColdTrapSky, NoColdTraps>;
 }
 

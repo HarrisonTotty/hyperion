@@ -1,5 +1,5 @@
-//! P14.T51.g.a's tests: a regular moon's published ocean ends at the shallower of its rock and ice
-//! V's melting pressure at its 273 K base (decision-p14-t51g Q9), behind its hold.
+//! P14.T51.g.a's tests: a regular moon's ocean by its floored law ends at the shallower of its rock
+//! and ice V's melting pressure at its 273 K base (decision-p14-t51g Q9).
 
 use hyperion_testkit::float::assert_same_bits;
 
@@ -24,25 +24,23 @@ const GANYMEDE: (f64, f64, f64, f64, f64) = (
     0.004_36,
 );
 
-/// The moon `(radius, density, water, surface, flux)`'s ocean under the rules `rules`.
-fn ocean_under(rules: OceanFloorRules, moon: (f64, f64, f64, f64, f64)) -> Subsurface {
+/// The moon `(radius, density, water, surface, flux)`'s ocean by the floored law.
+fn ocean_under(moon: (f64, f64, f64, f64, f64)) -> Subsurface {
     let (radius, density, water, surface, flux) = moon;
-    with_ocean_floor(rules, || {
-        Subsurface::of_regular_moon(
-            Metres::new(radius),
-            KilogramsPerCubicMetre::new(density),
-            water,
-            Kelvin::new(surface),
-            WattsPerSquareMetre::new(flux),
-        )
-    })
+    Subsurface::of_regular_moon(
+        Metres::new(radius),
+        KilogramsPerCubicMetre::new(density),
+        water,
+        Kelvin::new(surface),
+        WattsPerSquareMetre::new(flux),
+    )
 }
 
-/// The moon's ocean under `rules`, which must be one.
-fn an_ocean(rules: OceanFloorRules, moon: (f64, f64, f64, f64, f64)) -> SubsurfaceOcean {
-    match ocean_under(rules, moon) {
+/// The moon's ocean, which must be one.
+fn an_ocean(moon: (f64, f64, f64, f64, f64)) -> SubsurfaceOcean {
+    match ocean_under(moon) {
         Subsurface::Ocean(ocean) => ocean,
-        other => panic!("an ocean under {rules:?}: {other:?}"),
+        other => panic!("an ocean: {other:?}"),
     }
 }
 
@@ -62,32 +60,6 @@ fn column_of(moon: (f64, f64, f64, f64, f64)) -> WaterColumn {
         KilogramsPerCubicMetre::new(density),
         layers.water_depth,
     )
-}
-
-/// The ocean floor is held until P14.T54.b's bump: below it every published ocean is 23's, and the
-/// tests' switch reaches 24's ahead of it.
-#[test]
-fn the_ocean_floor_is_held_only_until_the_24_bump() {
-    assert!(
-        GENERATOR_VERSION < OCEAN_FLOOR_VERSION,
-        "the 23 → 24 bump (P14.T54.b) puts P14.T51.g.a on the record: a regular moon's published \
-         ocean ends at the shallower of its rock and ice V's melting pressure at its 273 K base, \
-         and is not modelled where its shell's base lies beyond it. Delete `OCEAN_FLOOR_VERSION`, \
-         `OceanFloorRules` with its `Held` arm (`Subsurface::of_regular_moon`'s `Held` return and \
-         the `Held` arm of `own_tides`' debug assertion), `with_ocean_floor` and its thread's \
-         rules, the census's held twin and rock-floor check (`system/moon_ice/lag_tests.rs`), the \
-         server test's version guard (`the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_\
-         is_computed`), and this test; and let system/tests.rs's two \"a regular moon's ocean is \
-         computed\" assertions take the absent case. The column, the liquidus and `ocean_end` \
-         stay, since they are the rule, and so does the lag's gate on the ocean branch \
-         (`ocean_branch_open`), which rides `MOON_BULK_VERSION`"
-    );
-    assert_eq!(OceanFloorRules::in_force(), OceanFloorRules::Held);
-    assert_eq!(
-        with_ocean_floor(OceanFloorRules::Floored, OceanFloorRules::in_force),
-        OceanFloorRules::Floored
-    );
-    assert_eq!(OceanFloorRules::in_force(), OceanFloorRules::Held);
 }
 
 /// The liquidus is the registry's: water's melting pressure at the ocean's 273 K base is ice V's
@@ -182,13 +154,11 @@ fn the_radius_at_a_pressure_is_found_by_fixed_halvings() {
     }
 }
 
-/// The doctest's Europa keeps its ocean on rock, to the bit: its rock lies at 189 MPa, under ice
-/// V's liquidus, so the whole layer below its 12.8 km shell is liquid, 124.3 km deep.
+/// The doctest's Europa keeps its ocean on rock, as 23's rule did: its rock lies at 189 MPa, under
+/// ice V's liquidus, so the whole layer below its 12.8 km shell is liquid, 124.3 km deep.
 #[test]
 fn europa_keeps_its_whole_ocean_on_rock() {
-    let held = an_ocean(OceanFloorRules::Held, EUROPA);
-    let floored = an_ocean(OceanFloorRules::Floored, EUROPA);
-    assert_eq!(floored, held);
+    let floored = an_ocean(EUROPA);
     assert_eq!(floored.floor(), OceanFloor::Rock);
     assert!(
         (floored.thickness().value() / 1e3 - 124.28).abs() < 0.01,
@@ -201,29 +171,18 @@ fn europa_keeps_its_whole_ocean_on_rock() {
 
 /// The ruling's Ganymede: under 23's rule 1,167.8 km of water on rock under its 135.7 km shell, to
 /// 2.5 GPa; under the floor it ends on ice V 280–285 km below its shell (the prototype's 282.5
-/// km), at ice V's melting pressure to 10⁻⁹, its shell and its other members unchanged, its mass
-/// at most its water's and its depth within its layer.
+/// km), at ice V's melting pressure to 10⁻⁹, its shell 23's, its mass at most its water's and its
+/// depth within its layer.
 #[test]
 fn a_ganymede_s_ocean_ends_on_ice_v() {
-    let held = an_ocean(OceanFloorRules::Held, GANYMEDE);
-    let floored = an_ocean(OceanFloorRules::Floored, GANYMEDE);
-    eprintln!("Ganymede: 23's {held:?}\n  24's {floored:?}");
+    let floored = an_ocean(GANYMEDE);
+    eprintln!("Ganymede: {floored:?}");
     let shell = ICE_CONDUCTIVITY_COEFFICIENT * crate::math::ln(273.0 / GANYMEDE.3) / GANYMEDE.4;
-    assert_same_bits(held.shell_thickness().value(), shell);
+    assert_same_bits(floored.shell_thickness().value(), shell);
     assert!((shell / 1e3 - 135.7).abs() < 0.05, "{shell}");
-    assert_eq!(held.floor(), OceanFloor::Rock);
-    assert!(
-        (held.thickness().value() / 1e3 - 1_167.8).abs() < 0.1,
-        "{held:?}"
-    );
     assert_eq!(floored.floor(), OceanFloor::IceV);
     let km = floored.thickness().value() / 1e3;
     assert!((280.0..=285.0).contains(&km), "{km} km");
-    assert_same_bits(
-        floored.shell_thickness().value(),
-        held.shell_thickness().value(),
-    );
-    assert_eq!(floored.liquid(), held.liquid());
     assert_same_bits(floored.solute_mass_fraction(), 0.0);
     assert_eq!(floored.base_temperature(), ICE_MELTING_POINT);
     let column = column_of(GANYMEDE);
@@ -247,8 +206,7 @@ fn a_ganymede_s_ocean_ends_on_ice_v() {
 /// Where the shell's base itself lies at or beyond ice V's liquidus, the ocean is not modelled
 /// (P14.T55.k's liquid under high-pressure ice): the ruling's Ganymede with less heat from below.
 /// Its ice-V ocean thins to the edge, where the shell's base reaches the liquidus, and beyond it
-/// the member is absent; under 23's rule the same moon keeps its ocean on rock. The flag holds an
-/// ocean throughout.
+/// the member is absent; under 23's rule the same moon kept its ocean on rock.
 #[test]
 fn an_ocean_under_a_shell_past_ice_v_is_not_modelled() {
     let column = column_of(GANYMEDE);
@@ -262,7 +220,7 @@ fn an_ocean_under_a_shell_past_ice_v_is_not_modelled() {
         edge * 1e3
     );
     let at = |flux: f64| (GANYMEDE.0, GANYMEDE.1, GANYMEDE.2, GANYMEDE.3, flux);
-    let near = an_ocean(OceanFloorRules::Floored, at(edge * 1.000_1));
+    let near = an_ocean(at(edge * 1.000_1));
     assert_eq!(near.floor(), OceanFloor::IceV);
     assert!(
         near.thickness().value() < 2e-4 * near.shell_thickness().value(),
@@ -270,35 +228,27 @@ fn an_ocean_under_a_shell_past_ice_v_is_not_modelled() {
     );
     for flux in [edge * 0.999_9, edge * 0.5] {
         assert_eq!(
-            ocean_under(OceanFloorRules::Floored, at(flux)),
+            ocean_under(at(flux)),
             Subsurface::NotComputed,
             "{flux} W m⁻²"
         );
-        let none = with_ocean_floor(OceanFloorRules::Floored, || {
-            SubsurfaceOcean::of_regular_moon(
-                Metres::new(GANYMEDE.0),
-                KilogramsPerCubicMetre::new(GANYMEDE.1),
-                GANYMEDE.2,
-                Kelvin::new(GANYMEDE.3),
-                WattsPerSquareMetre::new(flux),
-            )
-        });
-        assert_eq!(none, None);
-        assert_eq!(
-            an_ocean(OceanFloorRules::Held, at(flux)).floor(),
-            OceanFloor::Rock
+        let none = SubsurfaceOcean::of_regular_moon(
+            Metres::new(GANYMEDE.0),
+            KilogramsPerCubicMetre::new(GANYMEDE.1),
+            GANYMEDE.2,
+            Kelvin::new(GANYMEDE.3),
+            WattsPerSquareMetre::new(flux),
         );
+        assert_eq!(none, None);
     }
 }
 
 /// The floored ocean pinned to the bit (the determinism review): the ruling's Ganymede, whose
-/// floor the 64 halvings find, its shell and 23's depth with it, and its absent case, which no
-/// golden prints until the bump. A change to the column's arithmetic, the halvings or the liquidus
-/// moves these bits.
+/// floor the 64 halvings find, its shell with it, and its absent case. A change to the column's
+/// arithmetic, the halvings or the liquidus moves these bits.
 #[test]
 fn the_floored_ocean_is_pinned_to_the_bit() {
-    let held = an_ocean(OceanFloorRules::Held, GANYMEDE);
-    let floored = an_ocean(OceanFloorRules::Floored, GANYMEDE);
+    let floored = an_ocean(GANYMEDE);
     assert_same_bits(
         floored.shell_thickness().value(),
         f64::from_bits(0x4100_915a_17bc_c186),
@@ -308,13 +258,9 @@ fn the_floored_ocean_is_pinned_to_the_bit() {
         f64::from_bits(0x4111_3d6d_ef20_62c0),
     );
     assert_eq!(floored.floor(), OceanFloor::IceV);
-    assert_same_bits(
-        held.thickness().value(),
-        f64::from_bits(0x4131_d1cb_f86e_b353),
-    );
     let (r, rho, w, t, f) = GANYMEDE;
     assert_eq!(
-        ocean_under(OceanFloorRules::Floored, (r, rho, w, t, f * 0.25)),
+        ocean_under((r, rho, w, t, f * 0.25)),
         Subsurface::NotComputed
     );
 }
@@ -331,13 +277,7 @@ fn the_flag_s_none_is_none_under_both_rules() {
         (r, rho, w, 273.0, f),
         (r, rho, w, t, f64::NAN),
     ] {
-        for rules in [OceanFloorRules::Held, OceanFloorRules::Floored] {
-            assert_eq!(
-                ocean_under(rules, moon),
-                Subsurface::NoOcean,
-                "{moon:?} {rules:?}"
-            );
-        }
+        assert_eq!(ocean_under(moon), Subsurface::NoOcean, "{moon:?}");
     }
 }
 
@@ -489,34 +429,6 @@ mod solar {
 /// W kg⁻¹ of rock (science-p14-subsurface-ocean §3).
 fn radiogenic(body: &ByHand) -> f64 {
     4.9e-12 * (1.0 - body.water) * body.mass / body.area()
-}
-
-/// The ocean is held until its bump: below it every body's ocean is version 23's, and the tests'
-/// switch reaches the solve ahead of it.
-#[test]
-fn the_ocean_is_held_only_until_its_bump() {
-    assert!(
-        GENERATOR_VERSION < OCEAN_VERSION,
-        "P14.T51.g.b's bump (24 with P14.T54.b, or 25) puts every body's subsurface ocean on the \
-         record by the solve, and T56.d's ocean branch on its spherical shell. Delete \
-         `OCEAN_VERSION`, `OceanRules` with its `Held` arms (`MoonTides::with_ocean`'s, with \
-         `on_an_ocean`, the planar `shell_stiffness` and `ocean_heat_flow` arm it reads and 23's \
-         `shell_modulus` to 273 K; `own_tides`' flag arm and its debug assertion's; `moon_ocean`'s; \
-         `published_surface`'s), `with_ocean_rules` and its thread's rules, its arm in \
-         `with_every_24_hold`, and this test; with them P14.T17.b's flag, `has_subsurface_ocean`, \
-         `ocean_layers` and `OceanLayers`, `SubsurfaceOcean::of_regular_moon`, \
-         `Subsurface::of_regular_moon` and `DerivedMoon::subsurface_ocean`, which the plan says go, \
-         and P14.T51.g.a's floored arm (`OCEAN_FLOOR_VERSION`'s tripwire). Let system/tests.rs's \
-         two \"a regular moon's ocean is computed\" assertions read every body's, and the server \
-         test's version guard (`the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_\
-         computed`) every kind's"
-    );
-    assert_eq!(OceanRules::in_force(), OceanRules::Held);
-    assert_eq!(
-        with_ocean_rules(OceanRules::Solved, OceanRules::in_force),
-        OceanRules::Solved
-    );
-    assert_eq!(OceanRules::in_force(), OceanRules::Held);
 }
 
 /// The ammonia's nitrogen multiple is the volatile inventory's own, to the bit, on a grid of

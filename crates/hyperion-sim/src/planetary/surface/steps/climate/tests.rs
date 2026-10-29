@@ -774,12 +774,14 @@ fn the_extrapolated_run_lies_within_twice_the_stop_of_the_marched_one() {
 /// the physics near a fold no longer has): the reference Earth with every band sea over a deep sea,
 /// on the zonal grid, keeps to the search's rules. Every secant point met the search's stop; every
 /// predicted run's start, its state and return temperatures, is its pair's linear prediction to the
-/// bit, and only secant runs are predicted; the answer is the search's ruled choice, the run nearest
-/// plan 14's mean among those that met the climate's stop, the earlier on a tie; and two calls are
-/// equal to the bit. Every run, the fit's label and the answer's miss are printed; neither a run
-/// count nor a miss is asserted (its 0.83 K is I12's and I13's case). Its ocean's tropical peak is
-/// printed beside Enderton and Marshall 2009's Aqua, 2.4 PW at 15° (not asserted: theirs is a colder
-/// world, iced to about 61°; decision-r09-t13i's §2.2/§2.3 follow-up 5 §1).
+/// bit, and only secant runs are predicted; the answer is the search's ruled choice, the run
+/// nearest plan 14's mean among those that met the climate's stop, the earlier on a tie, or the
+/// nearest where none did (at 24 its one run, Z0, a steady fit at 291.30 K, meets neither stop);
+/// and two calls are equal to the bit. Every run, the fit's label and the answer's miss are
+/// printed; neither a run count nor a miss is asserted (its 0.83 K is I12's and I13's case). Its
+/// ocean's tropical peak is printed beside Enderton and Marshall 2009's Aqua, 2.4 PW at 15° (not
+/// asserted: theirs is a colder world, iced to about 61°; decision-r09-t13i's §2.2/§2.3 follow-up 5
+/// §1).
 #[test]
 fn the_deep_aquaplanet_s_search_keeps_to_its_rules() {
     let inputs = reference::earth_like();
@@ -810,22 +812,24 @@ fn the_deep_aquaplanet_s_search_keeps_to_its_rules() {
     );
     assert_each_search_run_keeps_its_rules(search, &states);
     let mean = inputs.mean_surface_temperature().value();
-    let ruled = search
-        .iter()
-        .enumerate()
-        .filter(|(_, run)| run.run.converged && run.run.mean_k.is_finite())
-        .fold(None, |best: Option<(usize, f64)>, (i, run)| {
-            let miss = (run.run.mean_k - mean).abs();
-            match best {
-                Some((_, nearest)) if nearest <= miss => best,
-                _ => Some((i, miss)),
-            }
-        })
-        .map(|(i, _)| i);
+    let nearest = |converged: bool| {
+        search
+            .iter()
+            .enumerate()
+            .filter(|(_, run)| (run.run.converged || !converged) && run.run.mean_k.is_finite())
+            .fold(None, |best: Option<(usize, f64)>, (i, run)| {
+                let miss = (run.run.mean_k - mean).abs();
+                match best {
+                    Some((_, nearest)) if nearest <= miss => best,
+                    _ => Some((i, miss)),
+                }
+            })
+            .map(|(i, _)| i)
+    };
     assert_eq!(
         Some(answer),
-        ruled,
-        "the answer is the nearest converged run"
+        nearest(true).or_else(|| nearest(false)),
+        "the answer is the nearest converged run, or the nearest where none converged"
     );
     print_the_aquaplanet_s_cells(&inputs, &solution);
     eprintln!(

@@ -3,7 +3,7 @@
 //! cover, an Io's deposits, the units contract, and the tripwire that keeps the module off the
 //! record until P14.T54.b.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use hyperion_testkit::float::assert_same_bits;
 
@@ -872,22 +872,6 @@ fn the_modifiers_refuse_a_rate_that_is_not_finite() {
     }
 }
 
-/// Every `.rs` file under `dir`, recursively, in sorted order.
-fn source_files(dir: &Path, found: &mut Vec<PathBuf>) {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect();
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            source_files(&path, found);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            found.push(path);
-        }
-    }
-}
-
 /// The code of a source file as the tripwire scans it: its lines up to its inline test module,
 /// the first `#[cfg(test)]` whose next line opens `mod tests {`, its comment lines left out (a doc
 /// may name the module).
@@ -905,167 +889,6 @@ fn scanned_code(text: &str) -> String {
         .copied()
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// The files outside this module whose code reaches the modifiers behind a named hold, each with
-/// the name of its hold, which its code (outside an inline test module, comments left out) must
-/// name: P14.T54.b.c's wiring of the record's modifiers (`system/modifiers.rs`, behind the air's
-/// sections' hold, `AirRules`) and its tests (decision-p14-t54b-open §1.2 item 6 and §3.3);
-/// P14.T51.e's wiring of the record's taxonomic class, which reads the record's modifiers
-/// (`system/small_bodies.rs`, behind its own hold, `SmallBodyRules`), and its tests
-/// (decision-p14-t51e-contract §3.7); and P14.T54.b.e's weathered area mix (behind its own hold,
-/// `AreaMixWeathering`): the passes' maturity and deposit (`derive/atmosphere/surface_mix.rs`),
-/// the record's reading of them and the passes' case (`system/modifiers.rs` again) and the tests;
-/// and P14.T54.b.k's audit (`system/audit_tests.rs`), which reads the record's modifiers under the
-/// air's sections' batch. A file may be listed under two holds. **P14.T54.b.l deletes this list**
-/// with the tripwire below.
-const HELD: [(&str, &str); 8] = [
-    ("planetary/system/modifiers.rs", "AirRules"),
-    ("planetary/system/modifiers/tests.rs", "AirRules"),
-    ("planetary/system/small_bodies.rs", "SmallBodyRules"),
-    ("planetary/system/small_bodies/tests.rs", "SmallBodyRules"),
-    (
-        "planetary/derive/atmosphere/surface_mix.rs",
-        "AreaMixWeathering",
-    ),
-    ("planetary/system/modifiers.rs", "AreaMixWeathering"),
-    ("planetary/system/modifiers/tests.rs", "AreaMixWeathering"),
-    ("planetary/system/audit_tests.rs", "AirRules"),
-];
-
-/// Whether the code of `text` as the tripwire scans it ([`scanned_code`]) names `hold`.
-fn names_its_hold(text: &str, hold: &str) -> bool {
-    scanned_code(text).lines().any(|code| code.contains(hold))
-}
-
-/// The hold check reads the code alone: a comment naming the hold, or code inside an inline test
-/// module, does not count.
-#[test]
-fn the_modifiers_hold_check_reads_the_code_alone() {
-    assert!(names_its_hold(
-        "match rules { AirRules::Held => 0 }\n",
-        "AirRules"
-    ));
-    assert!(!names_its_hold("// AirRules\nfn f() {}\n", "AirRules"));
-    assert!(!names_its_hold(
-        "fn f() {}\n#[cfg(test)]\nmod tests {\n    use super::AirRules;\n}\n",
-        "AirRules"
-    ));
-}
-
-/// Nothing on the record reaches the surface modifiers or the shared maturity law but through
-/// their hold until the 23 → 24 bump (decision-bump-plan-after-22 §1.3: P14.T51.d is a pure rider
-/// of 24). P14.T54.b.c puts [`SurfaceModifiers`] in the record's surface section behind the air's
-/// sections' hold (`AIR_SECTIONS_VERSION`), from which R09's field header takes its `maturity`,
-/// `weathering_rate` and `organic_cover`; P14.T54.b.l deletes this test with the hold.
-///
-/// It walks the sim's `src/` outside `planetary/hooks/modifiers*` and [`HELD`]'s files and the
-/// surface crate's `src/` outside `material/maturity.rs`, in sorted order, and fails on a call
-/// form, path or name of either in each file's code (the file less its comment lines and its
-/// inline test module); each of [`HELD`]'s files must be a source file whose code names its hold,
-/// so that a caller in any other file fails, and so does a listed file that drops its hold
-/// (decision-p14-t54b-open §3.3). `hooks/mod.rs`'s `pub mod modifiers;` and its one
-/// `pub use modifiers::{…};`, and `material/mod.rs`'s `mod maturity;` and its one
-/// `pub use maturity::{…};`, are allowed. The bare name `SurfaceModifiers` is not matched, nor its
-/// getters (`maturity()`, `organic_cover()`, `weathering_deposits()`): the record's member, its
-/// re-export in `record.rs` and the readers of it there and in R09's `surface/inputs.rs` and
-/// `surface/palette.rs` read only what the record holds, which the hold keeps not modelled, and
-/// compute nothing of the modifiers; nor `modifiers::{`, the galaxy's gas modifiers' path.
-#[test]
-fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
-    // `modifiers::{` alone would match the galaxy's gas modifiers.
-    const SIM_PATTERNS: [&str; 12] = [
-        "SurfaceModifiers::derive(",
-        "ModifierInputs",
-        "hooks::modifiers",
-        "super::modifiers",
-        "solar_xuv_luminosity",
-        "wind_mass_loss_kg_per_s",
-        "organic_ground(",
-        "organic_ground_entries(",
-        "bears_organic_cover(",
-        "body_maturity",
-        "maturity_after",
-        "LUNAR_MATURATION_TIME",
-    ];
-    const SURFACE_PATTERNS: [&str; 4] = [
-        "body_maturity",
-        "maturity_after",
-        "LUNAR_MATURATION_TIME",
-        "maturity::",
-    ];
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for (held, hold) in HELD {
-        let path = manifest.join("src").join(held);
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("{held} is a source file: {e}"));
-        assert!(
-            names_its_hold(&text, hold),
-            "{held} reaches the modifiers behind {hold}, which its code no longer names"
-        );
-    }
-    let crates = [
-        (
-            manifest.join("src"),
-            "planetary/hooks/modifiers",
-            &SIM_PATTERNS[..],
-        ),
-        (
-            manifest.join("../hyperion-surface/src"),
-            "material/maturity.rs",
-            &SURFACE_PATTERNS[..],
-        ),
-    ];
-    let mut readers = Vec::new();
-    for (src, own, patterns) in &crates {
-        let mut files = Vec::new();
-        source_files(src, &mut files);
-        assert!(
-            files.len() > 20,
-            "the walk found {}'s sources",
-            src.display()
-        );
-        for path in files {
-            let relative = path
-                .strip_prefix(src)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/");
-            if relative.starts_with(own) || HELD.iter().any(|(file, _)| *file == relative) {
-                continue;
-            }
-            let code = scanned_code(&std::fs::read_to_string(&path).unwrap());
-            for line in code.lines() {
-                let trimmed = line.trim();
-                let allowed = (relative == "planetary/hooks/mod.rs"
-                    && trimmed.starts_with("pub use modifiers::{"))
-                    || (relative == "material/mod.rs"
-                        && trimmed.starts_with("pub use maturity::{"));
-                if allowed {
-                    continue;
-                }
-                for pattern in *patterns {
-                    if line.contains(pattern) {
-                        readers.push(format!("{relative}: {pattern}"));
-                    }
-                }
-            }
-        }
-    }
-    assert_eq!(
-        readers,
-        Vec::<String>::new(),
-        "the surface modifiers or the maturity law are reached on the record outside their hold \
-         before P14.T54.b's bump"
-    );
-    // The allowed declarations are there, once each.
-    let hooks = std::fs::read_to_string(manifest.join("src/planetary/hooks/mod.rs")).unwrap();
-    assert_eq!(hooks.matches("pub use modifiers::{").count(), 1);
-    assert_eq!(hooks.matches("pub mod modifiers;").count(), 1);
-    let material =
-        std::fs::read_to_string(manifest.join("../hyperion-surface/src/material/mod.rs")).unwrap();
-    assert_eq!(material.matches("pub use maturity::{").count(), 1);
-    assert_eq!(material.matches("mod maturity;").count(), 1);
 }
 
 /// P14.T53.c's tenuous floor is P14.T51.d's ion-stopping column, to the bit: the column above

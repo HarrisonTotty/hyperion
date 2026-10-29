@@ -48,18 +48,20 @@
 //!   Cahalan and Coakley's (1981) procedure (decision-p14-t54a-bands §2.6): Φ⊕ in their measured
 //!   balance, B = 2.09 W m⁻² K⁻¹ ([`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`]) and D ÷ B = 0.310
 //!   ([`EARTH_TRANSPORT_PARTITION`]), and then D⊕ to Earth's contrast at its own restoring, D "left
-//!   as an adjustable parameter" as they left it. 6D⊕ ÷ `B_eff`⊕ is then 2.14, against their 1.86
-//!   at their B; their own balance, B + 6D = 5.98 W m⁻² K⁻¹, gives 2.15 at the model's 1.898.
+//!   as an adjustable parameter" as they left it. 6D⊕ ÷ `B_eff`⊕ is then 1.99 from generator
+//!   version 24 ([`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]; 2.14 at 23), against their
+//!   1.86 at their B; their own balance, B + 6D = 5.98 W m⁻² K⁻¹, gives 2.00 at the model's 1.995.
 //!   - `B_P` = 4F ÷ `T_s` is the grey column's restoring at fixed τ, F the absorbed mean flux.
 //!     `B_eff` = `B_P` (1 − g) is its restoring with its own vapour feedback, g the gain of the
-//!     gases the surface holds at their cap (0.431 on the batch's measured Earth as its fit takes
-//!     it, `B_eff` 1.898 W m⁻² K⁻¹; decision-p14-t57a-fits §1.3).
+//!     gases the surface holds at their cap (0.4022 on the batch's measured Earth as its fit takes
+//!     it, `B_eff` 1.995 W m⁻² K⁻¹, from 24 under P14.T53.a's constants; 0.431 and 1.898 at 23,
+//!     decision-p14-t57a-fits §1.3).
 //!   - Φ multiplies a wet world's `P₂` forcing, its cold zones' brightening by ice, cloud and low
 //!     sun, which a uniform albedo misses ([`WET_ALBEDO_GRADIENT`], 1.5055, against the Earth
 //!     Radiation Budget's gradient, 1.52–1.54). It is 1 + (Φ⊕ − 1)θ at the ocean weight θ.
-//!   - D is Earth's conductance ([`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]) scaled by the air's
-//!     specific heat and by Kaspi and Showman's (2015, ApJ 804, 60) sweeps: in rotation, as R09
-//!     takes them ([`rotation_transport_factor`]), in the column's mass
+//!   - D is Earth's conductance ([`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] from 24)
+//!     scaled by the air's specific heat and by Kaspi and Showman's (2015, ApJ 804, 60) sweeps: in
+//!     rotation, as R09 takes them ([`rotation_transport_factor`]), in the column's mass
 //!     ([`COLUMN_TRANSPORT_EXPONENT`], linear to zero below a fifth of Earth's) and in gravity
 //!     ([`GRAVITY_TRANSPORT_EXPONENT`]), with no term of its own in the radius; it is ½ + ½θ of
 //!     that, halved on a dry world ([`DRY_TRANSPORT_SHARE`]).
@@ -135,7 +137,6 @@ use hyperion_surface::field::MechanicsFamily;
 
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::planetary::chem::escape::EscapeRules;
 use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates, dominance};
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
@@ -255,8 +256,8 @@ pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.676_013_14;
 /// refitted as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is, by bisection on the zonal solver
 /// with the 64-step bisection of each end as its oracle, so that Earth's measured state holds
 /// [`EARTH_EQUATOR_POLE_CONTRAST_K`] at its own restoring under the batch, `B_eff`⊕, at the
-/// unchanged Φ⊕ ([`WET_ALBEDO_GRADIENT`]; a test refits it). From generator version 24, behind the
-/// escape's hold (`ESCAPE_VERSION`), it replaces 0.6760.
+/// unchanged Φ⊕ ([`WET_ALBEDO_GRADIENT`]; a test refits it). From generator version 24 it replaces
+/// 0.6760.
 ///
 /// It is the last of P14.T53.a's chain (N₂ on Titan, CO₂'s a, n and b on Earth's forcing, Mars and
 /// Venus, water's vapour and cloud on Earth, then D⊕ on Earth's contrast; decision-pre-23-review
@@ -2142,11 +2143,11 @@ pub(crate) fn step_climate(
 /// Each condensing gas is held at its cap, so the column's outgoing flux σ `T_s`⁴ ÷ (1 + ¾τ(`T_s`))
 /// has the slope `B_P` (1 − g), with
 ///
-/// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ) ½τᵢ Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ),
+/// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ)(1 − dᵢ) (∂τᵢ ÷ ∂ln pᵢ) Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ)
 ///
-/// summed in their order over T13.c's τ terms, at the constants in force
-/// ([`GreenhouseConstants::in_force`]: P14.T57.a's to version 23), whose gas the surface holds at
-/// its cap: where P14.T51.a's
+/// (P14.T53.a, from generator version 24), summed in their order over the τ terms at the constants
+/// in force ([`GreenhouseConstants::in_force`]), whose gas the surface holds at its cap: where
+/// P14.T51.a's
 /// partition holds it at its cap, on either branch, by the partition's own state, some of its
 /// inventory condensed, so that its airborne weight lies below its inventory's. The partition holds
 /// a minor condensable's partial pressure at its humidity, below its saturation pressure (Earth's
@@ -2154,7 +2155,15 @@ pub(crate) fn step_climate(
 /// pressure would drop its feedback, which h `p_sat`(T) keeps, with the same ∂ln p ÷ ∂T
 /// (decision-p14-t57a-fits §5; P14.T51.a's fix).
 ///
-/// - ½τᵢ is ∂τᵢ ÷ ∂ln pᵢ for the terms in √pᵢ;
+/// - ∂τᵢ ÷ ∂ln pᵢ is each term's own slope ([`GreenhouseConstants::terms`]): ½τᵢ for the terms in
+///   √pᵢ, water vapour's and nitrogen's, and n a Xⁿ (1 + x) + 2 b Y for the broadened carbon
+///   dioxide term, x its share of the surface pressure, which holds it. Water's cloud term, which
+///   has no fixed relative humidity feedback, and hydrogen's, which never condenses, are not read;
+/// - dᵢ = [`dominance`] of xᵢ (decision-pre-23-review item 21). The partition takes d of a
+///   condensable's share on its minor branch, a closed form of its inventory and climate, which
+///   the published mole fraction approximates here. At d = 1 the cap is the cold trap's, set
+///   globally: a cold-trapped dominant condensable, Mars's carbon dioxide, adds no local feedback,
+///   where 1 − x alone kept 1 − x of it;
 /// - Lᵢ ÷ (R `T_s`²) is d ln `p_sat` ÷ dT at `T_s` on the gas's phase diagram, P14.T49.b's fitted
 ///   curves ([`PhaseDiagram::clausius_clapeyron_enthalpy_j_per_mol`]): the slope of the branch in
 ///   force there, sublimation's below the triple point and vaporisation's from it, on which the
@@ -2165,26 +2174,16 @@ pub(crate) fn step_climate(
 /// - xᵢ is the gas's published mole fraction: the factor 1 − xᵢ removes a dominant condensable,
 ///   whose pressure the cold trap sets globally, not locally, continuously in its share.
 ///
-/// From version 24 (P14.T53.a, behind the escape's hold, [`EscapeRules::in_force`]) the sum is
+/// To version 23 the sum was (1 − xᵢ) ½τᵢ at P14.T57.a's constants, which the 23 → 24 bump
+/// (P14.T54.b) deleted.
 ///
-/// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ)(1 − dᵢ) (∂τᵢ ÷ ∂ln pᵢ) Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ):
-///
-/// - ∂τᵢ ÷ ∂ln pᵢ is each term's own slope ([`GreenhouseConstants::terms`]): ½τᵢ for the terms in
-///   √pᵢ, water vapour's and nitrogen's, and n a Xⁿ (1 + x) + 2 b Y for the broadened carbon dioxide
-///   term, x its share of the surface pressure, which holds it. Water's cloud term, which has no
-///   fixed relative humidity feedback, and hydrogen's, which never condenses, are not read;
-/// - dᵢ = [`dominance`] of xᵢ (decision-pre-23-review item 21). The partition takes d of a
-///   condensable's share on its minor branch, a closed form of its inventory and climate, which
-///   the published mole fraction approximates here. At d = 1 the cap is the cold trap's, set
-///   globally: a cold-trapped dominant condensable, Mars's carbon dioxide, adds no local feedback,
-///   where 1 − x alone kept 1 − x of it.
-///
-/// The batch's measured Earth gives 0.4311 (`B_eff` 1.898 W m⁻² K⁻¹), as
-/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it (decision-p14-t57a-fits §1.3), the
+/// The batch's measured Earth gives 0.4022 (`B_eff` 1.995 W m⁻² K⁻¹), as
+/// [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it (0.4311 and 1.898 at 23,
+/// where [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] was; decision-p14-t57a-fits §1.3), the
 /// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
-/// with no feedback of its own. The table's Earth gives 0.4545 (`B_eff` 1.841) through the passes'
-/// stand-ins (version 22's rules gave it 0.3997, `B_eff` 1.987). Zero where no gas is held, or at a
-/// surface not above 0 K.
+/// with no feedback of its own. The table's Earth gives 0.4230 (`B_eff` 1.948) through the passes'
+/// stand-ins (0.4545 and 1.841 at 23; version 22's rules gave it 0.3997, `B_eff` 1.987). Zero where
+/// no gas is held, or at a surface not above 0 K.
 #[must_use]
 fn greenhouse_gain(
     surface: Kelvin,
@@ -2199,7 +2198,6 @@ fn greenhouse_gain(
     if t.is_nan() || t <= 0.0 {
         return 0.0;
     }
-    let rules = EscapeRules::in_force();
     let slope = GreenhouseConstants::in_force()
         .terms(partials, equilibrium, gravity)
         .into_iter()
@@ -2230,10 +2228,7 @@ fn greenhouse_gain(
                 .iter()
                 .find(|&&(gas, _)| gas == id)
                 .map_or(0.0, |&(_, x)| x);
-            let feedback = match rules {
-                EscapeRules::Held => (1.0 - share) * 0.5 * term.depth(),
-                EscapeRules::Batch => (1.0 - share) * (1.0 - dominance(share)) * term.log_slope(),
-            };
+            let feedback = (1.0 - share) * (1.0 - dominance(share)) * term.log_slope();
             sum + feedback * enthalpy / (MOLAR_GAS_CONSTANT * t * t)
         });
     grey_gain(surface, optical_depth, slope)
@@ -2285,16 +2280,12 @@ pub fn rotation_transport_factor(rotation_period: Seconds) -> f64 {
     math::powf(ratio, if ratio <= 1.0 { slow } else { fast })
 }
 
-/// Earth's meridional conductance D⊕ under the rules in force, W m⁻² K⁻¹: P14.T24.a's fit,
-/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], to version 23, and its refit at P14.T53.a's
-/// greenhouse, [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], from 24 (the escape's hold,
-/// [`EscapeRules::in_force`]).
+/// Earth's meridional conductance D⊕ in force, W m⁻² K⁻¹: P14.T24.a's fit refitted at P14.T53.a's
+/// greenhouse, [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], from version 24, where
+/// version 23 read [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`].
 #[must_use]
 fn earth_meridional_conductance_w_per_m2_k() -> f64 {
-    match EscapeRules::in_force() {
-        EscapeRules::Held => EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
-        EscapeRules::Batch => BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
-    }
+    BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
 }
 
 /// The meridional conductance D of the column `column` under the spin `spin`, W m⁻² K⁻¹ (North,

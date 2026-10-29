@@ -1,9 +1,7 @@
 //! A small body's taxonomic class on the record (P14.T51.e's wiring; decision-p14-t51e-contract
-//! §1.4 and decision-p14-t51e-qs §3.2): held at 23, so that every record is 23's; the reference wind
-//! term and the anchor by T51.d's own rule; the unshielded wind term against the shielded one, and a
-//! moon inside its planet's magnetopause; and, with every hold at 24 in force
-//! (`planetary::testing::with_every_24_hold`, the air's sections' batch beside it through
-//! `PlanetarySystem::with_record_rules`), the census of the plan-14 sample's classes by kind, the
+//! §1.4 and decision-p14-t51e-qs §3.2), from generator version 24: the reference wind term and the
+//! anchor by T51.d's own rule; the unshielded wind term against the shielded one, and a moon inside
+//! its planet's magnetopause; and the census of the plan-14 sample's classes by kind, the
 //! Q share of its ordinary chondrites, the belt's zones, its V-types, its Kuiper-belt colours, its
 //! cometary moons, its bodies without a crust and its planets, two runs equal, and `body_at`
 //! giving the snapshot's class in any order.
@@ -18,14 +16,12 @@ use super::*;
 use crate::planetary::hooks::modifiers::PlanetMagnetosphere;
 use crate::planetary::hooks::small_bodies::{Q_TYPE_WEATHERING_TIME, VENEER_SHARE};
 use crate::planetary::record::{BodyRecord, Section, SystemSnapshot};
-use crate::planetary::system::RecordRules;
-use crate::planetary::system::tests::{SEED, every_record_batch, golden_systems, sample};
-use crate::planetary::testing::with_every_24_hold;
+use crate::planetary::system::tests::{SEED, sample};
 use crate::planetary::{BodyIndex, SystemContext, generate};
-use crate::time::{ClockWindow, UniverseTime};
+use crate::time::UniverseTime;
 use crate::units::{AstronomicalUnits, EarthFluxes};
 
-/// How many of the sample's systems the census generates under every hold at 24.
+/// How many of the sample's systems the census generates.
 const CENSUS_SAMPLE: usize = 400;
 
 /// The ruling's `w_ref`, to its table's five figures (decision-p14-t51e-qs, "Computed here").
@@ -79,85 +75,6 @@ fn q_type_time(w0: f64, reference: f64) -> f64 {
         .value()
 }
 
-/// The small bodies' types are held until P14.T54.b's bump (P14.T54.b.l; decision-p14-t51e-contract
-/// §1.4 and §4): below it the rules in force are the held ones, under which every golden system's
-/// record, at both times its golden pins, holds its taxonomic class not modelled, and the held arm
-/// computes nothing (no reference wind term, and a body the batch classes is not modelled).
-#[test]
-fn the_small_body_types_are_held_only_until_the_24_bump() {
-    assert!(
-        GENERATOR_VERSION < SMALL_BODY_TYPES_VERSION,
-        "the 23 → 24 bump (P14.T54.b.l) puts every planet's, member's and moon's taxonomic class \
-         on the record (P14.T51.e, a P14.T54.b.j rider): `Ok(None)` for a planet and an unclassed \
-         body, not modelled where the record lacks what its rule reads. Delete \
-         `SMALL_BODY_TYPES_VERSION`, `SmallBodyRules` with its `Held` arm, `SmallBodyTypes::Held`, \
-         `with_small_body_rules` and its arm in `planetary::testing::with_every_24_hold`, \
-         `RecordRules::small_bodies` (and `RecordRules` with `PlanetarySystem::with_record_rules` \
-         once the other holds go too); the source scan \
-         `small_bodies_nothing_on_the_record_reads_the_types_yet` with its `HELD` list, \
-         `names_its_hold` and `the_small_bodies_hold_check_reads_the_code_alone`, and \
-         `system/small_bodies.rs`' and its tests' `HELD` lines in \
-         `modifiers_nothing_on_the_record_reads_the_modifiers_yet`; \
-         `the_small_bodies_switch_sets_its_rules_back` and this test. P14.T54.b.j's \
-         conversion then sends the member: absent for not modelled, `null` for none \
-         (decision-p14-t51e-contract §4). If the rider misses P14.T54.b.i's commit, renumber the \
-         hold to 25 instead"
-    );
-    assert_eq!(SmallBodyRules::in_force(), SmallBodyRules::Held);
-    assert_eq!(RecordRules::in_force().small_bodies, SmallBodyRules::Held);
-    assert_eq!(
-        SmallBodyTypes::under(SmallBodyRules::Held),
-        SmallBodyTypes::Held
-    );
-    let mut surfaces = 0_usize;
-    for (name, ctx, system) in golden_systems() {
-        for t in [UniverseTime::EPOCH, ClockWindow::END] {
-            for record in system.snapshot_at(ctx, t).bodies() {
-                let Section::Ok(surface) = record.surface() else {
-                    continue;
-                };
-                assert_eq!(
-                    surface.taxonomic_class(),
-                    Modelled::NotModelled,
-                    "{name} {}",
-                    record.identity().id()
-                );
-                surfaces += 1;
-            }
-        }
-    }
-    assert!(surfaces > 20, "{surfaces} golden surfaces");
-}
-
-/// The switch sets its rules on its thread and back after, and a system generated under it carries
-/// them in its record rules.
-#[test]
-fn the_small_bodies_switch_sets_its_rules_back() {
-    assert_eq!(SmallBodyRules::in_force(), SmallBodyRules::Held);
-    let inside = with_small_body_rules(SmallBodyRules::Batch, || {
-        (
-            SmallBodyRules::in_force(),
-            RecordRules::in_force().small_bodies,
-            with_small_body_rules(SmallBodyRules::Held, SmallBodyRules::in_force),
-            SmallBodyRules::in_force(),
-        )
-    });
-    assert_eq!(
-        inside,
-        (
-            SmallBodyRules::Batch,
-            SmallBodyRules::Batch,
-            SmallBodyRules::Held,
-            SmallBodyRules::Batch
-        )
-    );
-    assert_eq!(SmallBodyRules::in_force(), SmallBodyRules::Held);
-    assert_eq!(
-        with_every_24_hold(SmallBodyRules::in_force),
-        SmallBodyRules::Batch
-    );
-}
-
 /// `w_ref` by T51.d's own rule on the stated reference body (a circular 2.5 au orbit about
 /// `ModifierHost::sun()`, no field, no air) is the ruling's 0.15998 to its five figures and its
 /// pinned bits ([`REFERENCE_WIND_TERM_BITS`]), the same bits through the query's types; and its
@@ -170,12 +87,9 @@ fn the_reference_wind_term_is_the_ruling_s() {
         "w_ref {w_ref} against the ruling's {RULING_REFERENCE_WIND_TERM}"
     );
     assert_same_bits(w_ref, f64::from_bits(REFERENCE_WIND_TERM_BITS));
-    let SmallBodyTypes::Batch {
+    let SmallBodyTypes {
         reference_wind_term: shared,
-    } = SmallBodyTypes::under(SmallBodyRules::Batch)
-    else {
-        panic!("the batch's types carry the reference");
-    };
+    } = SmallBodyTypes::new();
     assert_same_bits(shared, w_ref);
     let none = Condensates::default();
     let reference = derived(&reference_inputs(&none));
@@ -329,8 +243,8 @@ struct CensusBody {
     surface: Surface,
 }
 
-/// The census: the first [`CENSUS_SAMPLE`] systems of the sample, each generated and read under
-/// every hold at 24 with the air's sections' batch, at the epoch.
+/// The census: the first [`CENSUS_SAMPLE`] systems of the sample, each generated and read at the
+/// epoch.
 struct Census {
     /// Each system with its context.
     systems: Vec<(SystemContext, PlanetarySystem)>,
@@ -338,26 +252,24 @@ struct Census {
     bodies: Vec<CensusBody>,
 }
 
-/// The census, built once (each system generated afresh inside the switches).
+/// The census, built once (each system generated afresh).
 fn census() -> &'static Census {
     static CENSUS: OnceLock<Census> = OnceLock::new();
     CENSUS.get_or_init(|| {
-        with_every_24_hold(|| {
-            let systems: Vec<(SystemContext, PlanetarySystem)> = sample()
-                .iter()
-                .take(CENSUS_SAMPLE)
-                .map(|ctx| {
-                    let system = generate(SEED, ctx).with_record_rules(every_record_batch());
-                    (ctx.clone(), system)
-                })
-                .collect();
-            let mut bodies = Vec::new();
-            for (at, (ctx, system)) in systems.iter().enumerate() {
-                let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
-                census_of(at, system, &snapshot, &mut bodies);
-            }
-            Census { systems, bodies }
-        })
+        let systems: Vec<(SystemContext, PlanetarySystem)> = sample()
+            .iter()
+            .take(CENSUS_SAMPLE)
+            .map(|ctx| {
+                let system = generate(SEED, ctx);
+                (ctx.clone(), system)
+            })
+            .collect();
+        let mut bodies = Vec::new();
+        for (at, (ctx, system)) in systems.iter().enumerate() {
+            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            census_of(at, system, &snapshot, &mut bodies);
+        }
+        Census { systems, bodies }
     })
 }
 
@@ -961,7 +873,8 @@ fn under_every_24_hold_the_unshielded_wind_term_is_the_shielded_one_where_nothin
 
 /// A member without a crust on the record is not modelled, while a Kuiper-belt body's class reads
 /// no lid (decision-p14-t51e-contract §1.5): a census member's classed surface stripped of its
-/// crust, as the rule reads it; and the held arm reads nothing of the same body.
+/// crust, as the rule reads it; and with no types, as an epoch that did not opt in, the record
+/// reads nothing of the same body.
 #[test]
 fn under_every_24_hold_a_member_without_a_crust_is_not_modelled() {
     let census = census();
@@ -1011,25 +924,21 @@ fn under_every_24_hold_a_member_without_a_crust_is_not_modelled() {
         ),
         Modelled::NotModelled
     );
-    // The held arm reads nothing: the same classed body is not modelled under it.
+    // With no types (an epoch that did not opt in) nothing is read: the same classed body is not
+    // modelled.
     let system = &census.systems[body.system].1;
     let of = system
         .body(body.index)
         .expect("a census body is of its system");
     assert_eq!(
-        record_taxonomic_class(
-            SmallBodyTypes::Held,
-            (system, of),
-            body.gravity,
-            &body.surface
-        ),
+        record_taxonomic_class(None, (system, of), body.gravity, &body.surface),
         Modelled::NotModelled
     );
     assert_eq!(
         record_taxonomic_class(
-            SmallBodyTypes::Batch {
+            Some(SmallBodyTypes {
                 reference_wind_term: w_ref
-            },
+            }),
             (system, of),
             body.gravity,
             &body.surface
@@ -1038,31 +947,27 @@ fn under_every_24_hold_a_member_without_a_crust_is_not_modelled() {
     );
 }
 
-/// Deterministic, with no draw: the first systems of the census generated and read again under
-/// the same switches give the same classes, body by body.
+/// Deterministic, with no draw: the first systems of the census generated and read again give the
+/// same classes, body by body.
 #[test]
 fn under_every_24_hold_two_runs_give_the_same_classes() {
     let census = census();
-    let again = with_every_24_hold(|| {
-        sample()
-            .iter()
-            .take(3)
-            .flat_map(|ctx| {
-                let system = generate(SEED, ctx).with_record_rules(every_record_batch());
-                let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
-                snapshot
-                    .bodies()
-                    .iter()
-                    .filter_map(|record| match record.surface() {
-                        Section::Ok(surface) => Some((record.index(), surface.taxonomic_class())),
-                        Section::NotResolved | Section::NotModelled | Section::NotApplicable => {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
-    });
+    let again = sample()
+        .iter()
+        .take(3)
+        .flat_map(|ctx| {
+            let system = generate(SEED, ctx);
+            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            snapshot
+                .bodies()
+                .iter()
+                .filter_map(|record| match record.surface() {
+                    Section::Ok(surface) => Some((record.index(), surface.taxonomic_class())),
+                    Section::NotResolved | Section::NotModelled | Section::NotApplicable => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
     let first: Vec<_> = census
         .bodies
         .iter()
@@ -1076,11 +981,11 @@ fn under_every_24_hold_two_runs_give_the_same_classes() {
     assert_eq!(first, again);
 }
 
-/// Under every hold at 24 (the census's systems, generated and read inside the switches), on the
-/// first three systems with both moons and Kuiper-belt bodies, `body_at` gives each body the class
-/// its snapshot gives it, and the same whatever order its system's bodies are asked in: the class
-/// reads its own record's members, a moon's kind its parent's belt, and its query's reference wind
-/// term, and keeps nothing between bodies (the sim-determinism skill's call-order rule).
+/// On the census's systems' first three systems with both moons and Kuiper-belt bodies, `body_at`
+/// gives each body the class its snapshot gives it, and the same whatever order its system's bodies
+/// are asked in: the class reads its own record's members, a moon's kind its parent's belt, and its
+/// query's reference wind term, and keeps nothing between bodies (the sim-determinism skill's
+/// call-order rule).
 #[test]
 fn under_every_24_hold_body_at_gives_the_snapshot_s_class_in_any_order() {
     let census = census();
@@ -1108,26 +1013,24 @@ fn under_every_24_hold_body_at_gives_the_snapshot_s_class_in_any_order() {
         "the census holds three systems with moons and Kuiper-belt bodies"
     );
     let mut classed = 0_usize;
-    with_every_24_hold(|| {
-        for &at in &chosen {
-            let (ctx, system) = &census.systems[at];
-            let snapshot = system.snapshot_at(ctx, t);
-            let indices = system.indices();
-            assert_eq!(snapshot.bodies().len(), indices.len());
-            for (record, &index) in snapshot.bodies().iter().zip(&indices) {
-                let alone = system.body_at(ctx, index, t).expect("a body of its system");
-                assert_eq!(
-                    class_of(record),
-                    class_of(&alone),
-                    "{}",
-                    record.identity().id()
-                );
-                classed += usize::from(matches!(class_of(record), Some(Modelled::Ok(Some(_)))));
-            }
-            assert_order_independent(&indices, |&index| {
-                class_of(&system.body_at(ctx, index, t).expect("a body of its system"))
-            });
+    for &at in &chosen {
+        let (ctx, system) = &census.systems[at];
+        let snapshot = system.snapshot_at(ctx, t);
+        let indices = system.indices();
+        assert_eq!(snapshot.bodies().len(), indices.len());
+        for (record, &index) in snapshot.bodies().iter().zip(&indices) {
+            let alone = system.body_at(ctx, index, t).expect("a body of its system");
+            assert_eq!(
+                class_of(record),
+                class_of(&alone),
+                "{}",
+                record.identity().id()
+            );
+            classed += usize::from(matches!(class_of(record), Some(Modelled::Ok(Some(_)))));
         }
-    });
+        assert_order_independent(&indices, |&index| {
+            class_of(&system.body_at(ctx, index, t).expect("a body of its system"))
+        });
+    }
     assert!(classed > 0, "the chosen systems class some body");
 }

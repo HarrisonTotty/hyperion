@@ -4,11 +4,8 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::orbit::{Eccentricity, Orientation};
-use crate::planetary::chem::escape::{EscapeRules, with_rules};
 use crate::planetary::derive::atmosphere::tests::water_weight_at_humidity;
-use crate::planetary::derive::atmosphere::{
-    GreenhouseConstants, NITROGEN_REFERENCE_TEMPERATURE, VolatileDraws,
-};
+use crate::planetary::derive::atmosphere::{GreenhouseConstants, VolatileDraws};
 use crate::planetary::derive::solar::{
     PLANETS, SMALL_BODIES, SOLAR_AGE, derive_historic, historic, historic_table, orbit, solar_disc,
 };
@@ -244,41 +241,39 @@ fn under_the_escape_batch_the_gain_is_0_where_the_thick_air_closure_binds() {
         })
     };
     let (air, inventory) = (weights(2e7), weights(4e7));
-    with_rules(EscapeRules::Batch, || {
-        let constants = GreenhouseConstants::in_force();
-        let equilibrium = Kelvin::new(250.0);
-        let tau = constants.optical_depth(&air, equilibrium, STANDARD_GRAVITY);
-        let gain = || {
-            StepColumn {
-                surface_temperature: Kelvin::new(300.0),
-                partials: &air,
-                surface_pressure: air.total(),
-                optical_depth: tau,
-                airless: false,
-                equilibrium_temperature: equilibrium,
-                surface_gravity: STANDARD_GRAVITY,
-                radius: Metres::new(6.371e6),
-                inventory: &inventory,
-                ceiling: GreenhouseCeiling::None,
-            }
-            .column()
-            .expect("a column of nitrogen and carbon dioxide")
-            .0
-            .greenhouse_gain
-        };
-        let binds = |ceiling: GreenhouseCeiling| {
-            ceiling.binds(&constants, (&air, tau), equilibrium, STANDARD_GRAVITY)
-        };
-        assert!(binds(GreenhouseCeiling::None));
-        assert!(!without_thick_air(|| binds(GreenhouseCeiling::None)));
-        let lifted = without_thick_air(gain);
-        eprintln!(
-            "the gain lifted {lifted:.6}, under the closure {:.6}",
-            gain()
-        );
-        assert!(lifted > 0.0, "{lifted}");
-        assert_same_bits(gain(), 0.0);
-    });
+    let constants = GreenhouseConstants::in_force();
+    let equilibrium = Kelvin::new(250.0);
+    let tau = constants.optical_depth(&air, equilibrium, STANDARD_GRAVITY);
+    let gain = || {
+        StepColumn {
+            surface_temperature: Kelvin::new(300.0),
+            partials: &air,
+            surface_pressure: air.total(),
+            optical_depth: tau,
+            airless: false,
+            equilibrium_temperature: equilibrium,
+            surface_gravity: STANDARD_GRAVITY,
+            radius: Metres::new(6.371e6),
+            inventory: &inventory,
+            ceiling: GreenhouseCeiling::None,
+        }
+        .column()
+        .expect("a column of nitrogen and carbon dioxide")
+        .0
+        .greenhouse_gain
+    };
+    let binds = |ceiling: GreenhouseCeiling| {
+        ceiling.binds(&constants, (&air, tau), equilibrium, STANDARD_GRAVITY)
+    };
+    assert!(binds(GreenhouseCeiling::None));
+    assert!(!without_thick_air(|| binds(GreenhouseCeiling::None)));
+    let lifted = without_thick_air(gain);
+    eprintln!(
+        "the gain lifted {lifted:.6}, under the closure {:.6}",
+        gain()
+    );
+    assert!(lifted > 0.0, "{lifted}");
+    assert_same_bits(gain(), 0.0);
 }
 
 #[test]
@@ -448,11 +443,9 @@ fn an_airless_body_has_no_gases_and_no_mean_molar_mass() {
         assert_eq!(conditions.surface_pressure(), Pascals::ZERO, "{name}");
         assert!(!conditions.liquid_water(), "{name}");
     }
-    // Mercury, the Moon, Ganymede and Ceres.
-    assert_eq!(airless.len(), 4, "{airless:?}");
-    for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
-        assert!(airless.contains(&name), "{name}: {airless:?}");
-    }
+    // Mercury, the Moon and Ceres; from P14.T53.c (generator version 24) the table's Ganymede is
+    // `Tenuous`, its ice's vapour listed among its gases.
+    assert_eq!(airless, ["Mercury", "Moon", "Ceres"], "{airless:?}");
 }
 
 #[test]
@@ -507,7 +500,7 @@ fn methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation() {
     assert_eq!(conditions.gases()[0].0, Gas::Oxygen.substance());
 }
 
-/// Earth's measured state as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] and
+/// Earth's measured state as [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] and
 /// [`WET_ALBEDO_GRADIENT`] are fitted to: 288 K over 240.25 W m⁻² absorbed, the grey τ that holds
 /// it, Earth's column of dry air under g₀, its radius, obliquity and sidereal day, and the gain of
 /// the batch's measured Earth ([`earth_gain`]; decision-pre-23-review item 20), under the
@@ -516,8 +509,7 @@ fn earth_column() -> (Column, SeasonalSpin) {
     earth_column_under(&GreenhouseConstants::in_force())
 }
 
-/// [`earth_column`] with its gain under the greenhouse constants `constants`, and the gain's
-/// weight the rules' in force ([`earth_gain`]).
+/// [`earth_column`] with its gain under the greenhouse constants `constants` ([`earth_gain`]).
 fn earth_column_under(constants: &GreenhouseConstants) -> (Column, SeasonalSpin) {
     let absorbed = (1.0 - 0.294) * crate::units::consts::SOLAR_CONSTANT_W_PER_M2 / 4.0;
     let surface = Kelvin::new(288.0);
@@ -551,14 +543,9 @@ fn earth_column_under(constants: &GreenhouseConstants) -> (Column, SeasonalSpin)
 fn batch_earth_air() -> &'static (PartialPressures, PartialPressures) {
     static AIR: OnceLock<(PartialPressures, PartialPressures)> = OnceLock::new();
     AIR.get_or_init(|| {
-        // Under the escape's hold whichever test asks first, so that the cell does not depend on
-        // the order: the dry gases are Earth's per unit mass under either rules, and the water is
-        // replaced (`with_water_at_humidity`).
-        with_rules(EscapeRules::Held, || {
-            let earth = historic("Earth");
-            let air = earth.atmosphere();
-            (*air.partial_pressures(), *air.inventory_weights())
-        })
+        let earth = historic("Earth");
+        let air = earth.atmosphere();
+        (*air.partial_pressures(), *air.inventory_weights())
     })
 }
 
@@ -591,11 +578,11 @@ fn with_water_at_humidity(air: &PartialPressures, surface: Kelvin) -> (PartialPr
 /// The greenhouse gain of the batch's measured Earth, by hand (decision-pre-23-review item 20;
 /// decision-p14-t57a-fits §1.3): its air ([`batch_earth_air`]) with its water at the partition's
 /// humidity at `surface` ([`with_water_at_humidity`]), under the greenhouse constants `constants`,
-/// the ones in force in [`earth_column`] (P14.T57.a's water's 4.47 to version 23,
-/// [`GreenhouseConstants::FITTED`]), in a column of grey optical depth `tau`. The water counts as
+/// the ones in force in [`earth_column`] (P14.T53.a's water vapour's 4.17,
+/// [`GreenhouseConstants::BATCH`]), in a column of grey optical depth `tau`. The water counts as
 /// the batch's rule counts a gas the partition holds at its cap, at its curve's slope at `surface`
-/// on water's phase diagram (44.47 kJ mol⁻¹ at 288 K), its weight the rules' in force: 1 − x to
-/// version 23, and P14.T53.a's (1 − x)(1 − d) from 24 ([`dominance`], 0 at Earth's x of 0.017).
+/// on water's phase diagram (44.47 kJ mol⁻¹ at 288 K), its weight P14.T53.a's (1 − x)(1 − d)
+/// ([`dominance`], 0 at Earth's x of 0.017).
 fn earth_gain(constants: &GreenhouseConstants, surface: Kelvin, tau: f64) -> f64 {
     let water = Gas::Water;
     let (air, x_w) = with_water_at_humidity(&batch_earth_air().0, surface);
@@ -605,10 +592,7 @@ fn earth_gain(constants: &GreenhouseConstants, surface: Kelvin, tau: f64) -> f64
     let enthalpy = diagram
         .clausius_clapeyron_enthalpy_j_per_mol(surface)
         .unwrap();
-    let weight = match EscapeRules::in_force() {
-        EscapeRules::Held => (1.0 - x_w) * 0.5,
-        EscapeRules::Batch => (1.0 - x_w) * (1.0 - dominance(x_w)) * 0.5,
-    };
+    let weight = (1.0 - x_w) * (1.0 - dominance(x_w)) * 0.5;
     let slope = weight * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
     t / 4.0 * 0.75 * slope / (1.0 + 0.75 * tau)
 }
@@ -634,13 +618,13 @@ pub(crate) struct ConductanceFit {
     pub(crate) planck: f64,
     /// Its `B_eff`, W m⁻² K⁻¹.
     pub(crate) effective: f64,
-    /// The conductance the zonal profile reads of its column under the rules in force
+    /// The conductance the zonal profile reads of its column
     /// ([`meridional_conductance_w_per_m2_k`]), every scaling 1 on it.
     pub(crate) read: f64,
 }
 
 /// Φ⊕ and D⊕ refitted to Earth's 42 K contrast at the measured Earth whose gain the greenhouse
-/// constants `constants` give, under the rules in force: decision-p14-t54a-bands §2.6's two steps,
+/// constants `constants` give: decision-p14-t54a-bands §2.6's two steps,
 /// as P14.T53.a's chain re-runs them. Φ⊕ in North, Cahalan and Coakley's measured balance (`B_eff`
 /// their 2.09, D their 0.310 of it), which reads none of the greenhouse chain, then D⊕ at the
 /// measured Earth's own `B_eff`⊕ and that Φ⊕.
@@ -705,9 +689,9 @@ pub(crate) fn earth_conductance_fit(constants: &GreenhouseConstants) -> Conducta
 
 /// The batch's measured Earth's gain, [`earth_gain`]'s by hand, is the code's under the batch's
 /// rule (decision-pre-23-review item 20): of its air ([`batch_earth_air`]) only its water counts,
-/// held at its cap by the partition, under P14.T57.a's constants. It is the 0.4311, and its
-/// `B_eff` the 1.898 W m⁻² K⁻¹, that [`greenhouse_gain`]'s and
-/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s documentation state.
+/// held at its cap by the partition, under P14.T53.a's constants. It is the 0.4022, and its
+/// `B_eff` the 1.995 W m⁻² K⁻¹, that [`greenhouse_gain`]'s and
+/// [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s documentation state.
 #[test]
 fn the_measured_earth_s_gain_is_the_batch_s_rule() {
     let (column, _) = earth_column();
@@ -738,8 +722,8 @@ fn the_measured_earth_s_gain_is_the_batch_s_rule() {
         column.greenhouse_gain
     );
     let effective = column.effective_restoring_w_per_m2_k();
-    assert!((rule - 0.4311).abs() < 5e-5, "{rule}");
-    assert!((effective - 1.898).abs() < 5e-4, "{effective}");
+    assert!((rule - 0.4022).abs() < 5e-5, "{rule}");
+    assert!((effective - 1.995).abs() < 5e-4, "{effective}");
 }
 
 /// P14.T24.a's Earth fits by North, Cahalan and Coakley's procedure (decision-p14-t54a-bands
@@ -750,14 +734,15 @@ fn the_measured_earth_s_gain_is_the_batch_s_rule() {
 ///    set so that its `B_eff` is their B, 2.09, and D = 0.310 × 2.09, by bisection to the 42 K
 ///    contrast on the zonal solver, with the 64-step bisection of each end, version 22's solver
 ///    kept for the tests ([`zonal_ends_bisected`]), as its oracle;
-/// 2. D⊕ at the batch's measured Earth ([`earth_gain`], `B_eff` 1.898), at that Φ⊕, by bisection
+/// 2. D⊕ at the batch's measured Earth ([`earth_gain`], `B_eff` 1.995), at that Φ⊕, by bisection
 ///    to 42 K, with the same oracle; the last of plan 14's order (N₂ on Titan, CO₂ on Venus, water
 ///    on Earth, then D⊕ on Earth's contrast).
 ///
-/// Each is held to its constant within 10⁻⁷. Then 6D⊕ ÷ `B_eff`⊕ is 2.14, against their 1.86 at
-/// their B, the contrast at Φ = 1 is 28.4 K, and Φ⊕ lies within 1.40–1.60, about the Earth
-/// Radiation Budget's gradient, 1.52–1.54. D⊕'s peak transport, 5.57 PW against the 5.5–6
-/// measured ([`earth_s_restoring_and_transport_are_the_measured_ones`]), and its diffusivity, 2.71
+/// Each is held to its constant within 10⁻⁷, D⊕ to P14.T53.a's refit,
+/// [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]. Then 6D⊕ ÷ `B_eff`⊕ is 1.99, against
+/// their 1.86 at their B, the contrast at Φ = 1 is 28.4 K, and Φ⊕ lies within 1.40–1.60, about the
+/// Earth Radiation Budget's gradient, 1.52–1.54. D⊕'s peak transport, 5.45 PW against the 5.5–6
+/// measured ([`earth_s_restoring_and_transport_are_the_measured_ones`]), and its diffusivity, 2.65
 /// × 10⁶ m² s⁻¹ against Siler, Roe and Armour's 2.70 × 10⁶, are its documentation's; and
 /// [`the_measured_earth_s_fitted_profile_meets_its_checks`] holds the fitted profile's own.
 #[test]
@@ -850,10 +835,10 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
         "{albedo}"
     );
     assert!(
-        (conductance / EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K - 1.0).abs() < 1e-7,
+        (conductance / BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K - 1.0).abs() < 1e-7,
         "{conductance}"
     );
-    assert!((ratio - 2.14).abs() < 0.005, "{ratio}");
+    assert!((ratio - 1.99).abs() < 0.005, "{ratio}");
     // Band 2 (decision-p14-t54a-bands §2.6): Φ⊕ about the Earth Radiation Budget's gradient,
     // H₂ ÷ (S₂ a₀) = 1.52–1.54, which lies 2% above it.
     assert!((1.40..1.60).contains(&albedo), "Φ⊕ {albedo}");
@@ -862,7 +847,7 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
 /// The measured Earth's profile at the fitted D⊕ and Φ⊕ ([`earth_column`];
 /// decision-p14-t54a-bands §2.5 and §4.3): every scaling of its conductance is 1, Kaspi and
 /// Showman's law governs it rather than Koll's weak gradient, its contrast is 42 K, its ends are
-/// 302.5 and 260.5 K, within 1 K of North, Cahalan and Coakley's, its dry contrast is 43.4 K, and
+/// 302.5 and 260.5 K, within 1 K of North, Cahalan and Coakley's, its dry contrast is 42.9 K, and
 /// its cover's ice, the cold area below 263.15 K, is 0.035, inside 0.02–0.07.
 #[test]
 fn the_measured_earth_s_fitted_profile_meets_its_checks() {
@@ -871,16 +856,16 @@ fn the_measured_earth_s_fitted_profile_meets_its_checks() {
     // Every scaling of the conductance is 1 on the measured Earth.
     assert!(
         (meridional_conductance_w_per_m2_k(&column, &spin)
-            - EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K)
+            - BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K)
             .abs()
             < 1e-15
     );
     // Kaspi and Showman's law governs Earth, not Koll's weak gradient.
     eprintln!(
         "W B_P {weak} against 6D {}",
-        6.0 * EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
+        6.0 * BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
     );
-    assert!(weak < 6.0 * EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K);
+    assert!(weak < 6.0 * BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K);
     let contrast = equator_pole_contrast_k(&column, &spin, OceanWeight::FULL);
     assert!(
         (contrast - EARTH_EQUATOR_POLE_CONTRAST_K).abs() < 1e-5,
@@ -891,7 +876,7 @@ fn the_measured_earth_s_fitted_profile_meets_its_checks() {
     eprintln!("the measured Earth's ends: {equator} and {pole} K");
     assert!((equator - 302.1).abs() < 1.0 && (pole - 260.1).abs() < 1.0);
     // Dry, the same Earth keeps half its transport under a uniform albedo, and a larger contrast:
-    // 43.4 K against 42.0.
+    // 42.9 K against 42.0 from 24 (43.4 K at 23).
     let dry = equator_pole_contrast_k(&column, &spin, OceanWeight::NONE);
     eprintln!("dry: {dry} K");
     assert!(dry > contrast, "{dry}");
@@ -911,8 +896,8 @@ fn the_measured_earth_s_fitted_profile_meets_its_checks() {
 }
 
 /// The measured Earth's restoring and transport against what they stand for
-/// (decision-p14-t54a-bands §1 and §2.6): its peak diffusive transport, 5.57 PW, within 4.5–6.5
-/// PW of the 5.5–6 measured, and its `B_eff`⊕, 1.898 W m⁻² K⁻¹, within 1.7–2.3, the fixed relative
+/// (decision-p14-t54a-bands §1 and §2.6): its peak diffusive transport, 5.45 PW, within 4.5–6.5
+/// PW of the 5.5–6 measured, and its `B_eff`⊕, 1.995 W m⁻² K⁻¹, within 1.7–2.3, the fixed relative
 /// humidity Planck feedback's.
 #[test]
 fn earth_s_restoring_and_transport_are_the_measured_ones() {
@@ -924,7 +909,7 @@ fn earth_s_restoring_and_transport_are_the_measured_ones() {
         * core::f64::consts::PI
         * r
         * r
-        * EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
+        * BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
         * (2.0 / 3.0_f64.sqrt())
         * 28.0
         / 1e15;
@@ -944,19 +929,19 @@ fn earth_s_restoring_and_transport_are_the_measured_ones() {
 }
 
 /// The greenhouse gain is the vapour feedback of the gases the surface holds at their cap. On the
-/// table's bodies an airless body has none, and T13.c's terms sum to its τ to the bit; no gas of
-/// Venus's or Titan's bulk is held, so neither feeds back (decision-pre-23-review item 20;
+/// table's bodies an airless body has none, nor a tenuous one, whose greenhouse is the airless one
+/// (P14.T53.c: Ganymede, Pluto and Triton at 24), and T13.c's terms sum to its τ to the bit; no gas
+/// of Venus's or Titan's bulk is held, so neither feeds back (decision-pre-23-review item 20;
 /// decision-p14-t54a-bands §3):
 ///
 /// - the generated Earth's water is held at its cap, below its inventory (some of it condensed),
-///   and its gain is that water's feedback by hand under P14.T57.a's constants;
-/// - the table's Earth gives 0.4545 (`B_eff` 1.841 W m⁻² K⁻¹) through the passes at their stand-in
-///   surface, at 290.57 K, the figures [`greenhouse_gain`]'s documentation states (version 22's
-///   rules gave 0.3997, `B_eff` 1.987);
+///   and its gain is that water's feedback by hand under P14.T53.a's constants;
+/// - the table's Earth gives 0.4230 (`B_eff` 1.948 W m⁻² K⁻¹) through the passes at their stand-in
+///   surface, at 290.38 K, the figures [`greenhouse_gain`]'s documentation states (0.4545 and
+///   1.841 at 23; version 22's rules gave 0.3997, `B_eff` 1.987);
 /// - band 3: the batch's generated Earth restores as the measured Earth does, its `B_eff` within
 ///   the fixed relative humidity Planck feedback's 1.7–2.3 W m⁻² K⁻¹ and within 0.10 of the
-///   measured Earth's `B_eff`⊕ ([`earth_column`]), 1.841 against 1.898 at the stand-ins (printed
-///   again at Batch C's real inputs);
+///   measured Earth's `B_eff`⊕ ([`earth_column`]), 1.948 against 1.995 at the stand-ins;
 /// - a wet world's gain lies within (0, 1) and rises to 330 K
 ///   ([`a_wet_world_s_gain_lies_within_zero_and_one_and_rises_to_330_k`], band 4).
 #[test]
@@ -965,7 +950,9 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
     for (name, body, _) in &table {
         let (column, _) = column_of(body, spin_of(name));
         let air = body.atmosphere();
-        if air.state() == SurfaceState::Airless {
+        if matches!(air.state(), SurfaceState::Airless | SurfaceState::Tenuous) {
+            // From P14.T53.c a tenuous air's greenhouse is the airless one its steps solved.
+            assert_same_bits(air.optical_depth(), 0.0);
             assert_same_bits(column.greenhouse_gain, 0.0);
             continue;
         }
@@ -986,7 +973,7 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
     }
     // The generated Earth holds its water at its cap: below its inventory, some of it condensed.
     // By hand, as `earth_gain` takes the measured state, at its own temperature, depth and water
-    // fraction, under P14.T57.a's constants, its curve's slope at T_s on water's phase diagram.
+    // fraction, under P14.T53.a's constants, its curve's slope at T_s on water's phase diagram.
     let spin = spin_of("Earth");
     let (_, earth, conditions) = found(&table, "Earth");
     let (column, _) = column_of(earth, spin);
@@ -1000,12 +987,12 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
         p_w < inventory_w,
         "water {p_w:?} against its inventory's {inventory_w:?}"
     );
-    let fitted = GreenhouseConstants::FITTED;
     let t = t_s.value();
-    let tau_w = fitted.water() * (p_w.value() / 1e5).sqrt();
+    let tau_w = GreenhouseConstants::BATCH.water() * (p_w.value() / 1e5).sqrt();
     let enthalpy = diagram.clausius_clapeyron_enthalpy_j_per_mol(t_s).unwrap();
-    let slope =
-        (1.0 - fraction(conditions, water)) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
+    let x_w = fraction(conditions, water);
+    let slope = (1.0 - x_w) * (1.0 - dominance(x_w)) * 0.5 * tau_w * enthalpy
+        / (MOLAR_GAS_CONSTANT * t * t);
     let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
     let effective = column.effective_restoring_w_per_m2_k();
     eprintln!(
@@ -1019,8 +1006,8 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
         "{} against {by_hand}",
         column.greenhouse_gain
     );
-    assert!((by_hand - 0.4545).abs() < 5e-5, "{by_hand}");
-    assert!((effective - 1.841).abs() < 5e-4, "{effective}");
+    assert!((by_hand - 0.4230).abs() < 5e-5, "{by_hand}");
+    assert!((effective - 1.948).abs() < 5e-4, "{effective}");
     // No gas of Venus's or Titan's bulk is held at saturation: neither feeds back.
     for name in ["Venus", "Titan"] {
         let (_, body, _) = found(&table, name);
@@ -1031,8 +1018,8 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
             column.greenhouse_gain
         );
     }
-    // Band 3 (decision-p14-t54a-bands §3.2): the generated Earth's B_eff, 1.841 W m⁻² K⁻¹ at the
-    // stand-ins, within band 1's 1.7–2.3 and within 0.10 of the measured Earth's, 1.898.
+    // Band 3 (decision-p14-t54a-bands §3.2): the generated Earth's B_eff, 1.948 W m⁻² K⁻¹ at the
+    // stand-ins, within band 1's 1.7–2.3 and within 0.10 of the measured Earth's, 1.995.
     let measured = earth_column().0.effective_restoring_w_per_m2_k();
     assert!((1.7..2.3).contains(&effective), "B_eff {effective} W/m2/K");
     assert!(
@@ -1043,45 +1030,57 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
 
 /// Band 4 (decision-p14-t54a-bands §3.3): a wet world's greenhouse gain, 0.75 bar of N₂ and 42 Pa
 /// of CO₂ over a surface in equilibrium at 255 K, its water at the partition's humidity, under
-/// P14.T57.a's constants (science-p14-t24a-climate.md §1), lies within (0, 1) from 260 to 360 K,
+/// the constants in force (science-p14-t24a-climate.md §1), lies within (0, 1) from 260 to 360 K,
 /// the feedback never reversing the restoring, and rises from 260 K through 330 K.
 ///
-/// At 260, 273.17, 288, 300, 310, 320, 330, 340, 350 and 360 K it is 0.217, 0.303, 0.432, 0.538,
-/// 0.618, 0.679, 0.712, 0.711, 0.672 and 0.602: the peak, 0.712, at 330 K, and the fall above it
-/// the (1 − x) weight's at water's mole fraction of 0.2–0.4 (P14.T53.a's). Radiative–convective
+/// At 260, 273.17, 288, 300, 310, 320, 330, 340, 350 and 360 K it is 0.215, 0.282, 0.403, 0.505,
+/// 0.582, 0.643, 0.667, 0.629, 0.519 and 0.365 from 24 (0.217–0.712 at 23): the peak, 0.667, at
+/// 330 K, and the fall above it the (1 − x)(1 − d) weight's at water's mole fraction of 0.16–0.43
+/// (P14.T53.a's). Radiative–convective
 /// models' λ falls from about 2 W m⁻² K⁻¹ to about 1 by 320–330 K, and to 0 near 340–350 K
 /// (Goldblatt et al. 2013, Nat. Geosci. 6, 661; Koll and Cronin 2018, PNAS 115, 10293; Kluft et
 /// al. 2021, GRL 48, e2021GL094649, "more negative than −1 … as high as 330 K"), where the model's
-/// local restoring is 1.01 at 330 K; no band holds that magnitude. Version 22's g < 0.57 was the
+/// local restoring is about 1 at 330 K (`the_batch_gain_s_warm_wet_figures_are_stated`); no band
+/// holds that magnitude. Version 22's g < 0.57 was the
 /// (1 − x) weight's own bound at its saturated water, not a physical one, and is gone.
 #[test]
 fn a_wet_world_s_gain_lies_within_zero_and_one_and_rises_to_330_k() {
     let water = Gas::Water;
-    let diagram = water.substance().substance().phase_diagram().unwrap();
-    let fitted = GreenhouseConstants::FITTED;
+    let equilibrium = Kelvin::new(255.0);
+    let constants = GreenhouseConstants::in_force();
     let dry_air = PartialPressures::from_fn(|gas| match gas {
         Gas::Nitrogen => Pascals::new(75_000.0),
         Gas::CarbonDioxide => Pascals::new(42.0),
         _ => Pascals::ZERO,
     });
-    let dry_depth = fitted.carbon_dioxide() * (42.0_f64 / 1e5).sqrt()
-        + fitted.nitrogen()
-            * math::powi(NITROGEN_REFERENCE_TEMPERATURE.value() / 255.0, 2)
-            * 0.75_f64.sqrt();
     let gains = [
         260.0, 273.17, 288.0, 300.0, 310.0, 320.0, 330.0, 340.0, 350.0, 360.0,
     ]
     .map(|t| {
         let surface = Kelvin::new(t);
         let (wet, x_w) = with_water_at_humidity(&dry_air, surface);
-        let w = wet.of(water).value();
-        let tau_w = fitted.water() * (w / 1e5).sqrt();
-        let enthalpy = diagram
-            .clausius_clapeyron_enthalpy_j_per_mol(surface)
-            .unwrap();
-        let slope = (1.0 - x_w) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
-        let gain = grey_gain(surface, tau_w + dry_depth, slope);
-        eprintln!("{t} K: water {w:.1} Pa, x {x_w:.4}, gain {gain:.4}");
+        // More water in the inventory than in the air: the partition holds it at its cap.
+        let inventory = PartialPressures::from_fn(|gas| {
+            if gas == water {
+                Pascals::new(f64::INFINITY)
+            } else {
+                wet.of(gas)
+            }
+        });
+        let tau = constants.optical_depth(&wet, equilibrium, STANDARD_GRAVITY);
+        let gain = greenhouse_gain(
+            surface,
+            &wet,
+            tau,
+            &[(water.substance(), x_w)],
+            equilibrium,
+            STANDARD_GRAVITY,
+            &inventory,
+        );
+        eprintln!(
+            "{t} K: water {:.1} Pa, x {x_w:.4}, gain {gain:.4}",
+            wet.of(water).value()
+        );
         (t, gain)
     });
     assert!(
@@ -1094,14 +1093,14 @@ fn a_wet_world_s_gain_lies_within_zero_and_one_and_rises_to_330_k() {
     assert!(rising.windows(2).all(|pair| pair[1] > pair[0]), "{gains:?}");
 }
 
-/// D6 and D7 (decision-p14-t54a-bands §6), stated under P14.T53.a's batch beside the hold's, not
-/// asserted: band 4's wet world (0.75 bar of N₂ and 42 Pa of CO₂ over an equilibrium of 255 K for
-/// nitrogen's collisions, its water at the partition's humidity), in equilibrium at each `T_s`
-/// from 300 to 360 K, so that its absorbed flux is its outgoing σ `T_s`⁴ ÷ (1 + ¾τ): its gain by
-/// the code's rule ([`greenhouse_gain`], its water held, under the rules' constants), its `B_P`
-/// = 4 OLR ÷ `T_s`, and its local restoring `B_eff` = `B_P` (1 − g). D6 is the gain and `B_eff` at
-/// 330–360 K, where radiative–convective models' λ falls to 0; D7 the local restoring at 300–320
-/// K, which sat 0.07–0.2 W m⁻² K⁻¹ above the sources' highest under the hold.
+/// D6 and D7 (decision-p14-t54a-bands §6), stated under P14.T53.a's batch, not asserted: band 4's
+/// wet world (0.75 bar of N₂ and 42 Pa of CO₂ over an equilibrium of 255 K for nitrogen's
+/// collisions, its water at the partition's humidity), in equilibrium at each `T_s` from 300 to 360
+/// K, so that its absorbed flux is its outgoing σ `T_s`⁴ ÷ (1 + ¾τ): its gain by the code's rule
+/// ([`greenhouse_gain`], its water held, under the constants in force), its `B_P` = 4 OLR ÷ `T_s`,
+/// and its local restoring `B_eff` = `B_P` (1 − g). D6 is the gain and `B_eff` at 330–360 K, where
+/// radiative–convective models' λ falls to 0; D7 the local restoring at 300–320 K, which sat
+/// 0.07–0.2 W m⁻² K⁻¹ above the sources' highest under version 23's rules.
 #[test]
 #[ignore = "a measurement for P14.T53.a's record, run by name"]
 fn the_batch_gain_s_warm_wet_figures_are_stated() {
@@ -1112,57 +1111,50 @@ fn the_batch_gain_s_warm_wet_figures_are_stated() {
         Gas::CarbonDioxide => Pascals::new(42.0),
         _ => Pascals::ZERO,
     });
-    for rules in [EscapeRules::Held, EscapeRules::Batch] {
-        with_rules(rules, || {
-            let constants = GreenhouseConstants::in_force();
-            for t in [300.0, 310.0, 320.0, 330.0, 340.0, 350.0, 360.0] {
-                let surface = Kelvin::new(t);
-                let (wet, x_w) = with_water_at_humidity(&dry_air, surface);
-                // More water in the inventory than in the air: the partition holds it at its cap.
-                let inventory = PartialPressures::from_fn(|gas| {
-                    if gas == water {
-                        Pascals::new(f64::INFINITY)
-                    } else {
-                        wet.of(gas)
-                    }
-                });
-                let tau = constants.optical_depth(&wet, equilibrium, STANDARD_GRAVITY);
-                let gain = greenhouse_gain(
-                    surface,
-                    &wet,
-                    tau,
-                    &[(water.substance(), x_w)],
-                    equilibrium,
-                    STANDARD_GRAVITY,
-                    &inventory,
-                );
-                let outgoing = STEFAN_BOLTZMANN * math::powi(t, 4) / (1.0 + 0.75 * tau);
-                let planck = 4.0 * outgoing / t;
-                eprintln!(
-                    "{rules:?} {t} K: x {x_w:.4}, d {:.4}, tau {tau:.4}, OLR {outgoing:.2} W/m2, gain \
-                     {gain:.4}, B_P {planck:.4}, B_eff {:.4} W/m2/K",
-                    dominance(x_w),
-                    planck * (1.0 - gain),
-                );
+    let constants = GreenhouseConstants::in_force();
+    for t in [300.0, 310.0, 320.0, 330.0, 340.0, 350.0, 360.0] {
+        let surface = Kelvin::new(t);
+        let (wet, x_w) = with_water_at_humidity(&dry_air, surface);
+        // More water in the inventory than in the air: the partition holds it at its cap.
+        let inventory = PartialPressures::from_fn(|gas| {
+            if gas == water {
+                Pascals::new(f64::INFINITY)
+            } else {
+                wet.of(gas)
             }
-            // The column's own OLR curve, σ T_s⁴ ÷ (1 + ¾τ(T_s)), at each kelvin: its peak.
-            let peak = (270..=380).fold((0.0, 0.0), |peak: (f64, f64), t| {
-                let t = f64::from(t);
-                let (wet, _) = with_water_at_humidity(&dry_air, Kelvin::new(t));
-                let tau = constants.optical_depth(&wet, equilibrium, STANDARD_GRAVITY);
-                let outgoing = STEFAN_BOLTZMANN * math::powi(t, 4) / (1.0 + 0.75 * tau);
-                if outgoing > peak.0 {
-                    (outgoing, t)
-                } else {
-                    peak
-                }
-            });
-            eprintln!(
-                "{rules:?}: the OLR peaks at {:.2} W/m2 at {} K",
-                peak.0, peak.1
-            );
         });
+        let tau = constants.optical_depth(&wet, equilibrium, STANDARD_GRAVITY);
+        let gain = greenhouse_gain(
+            surface,
+            &wet,
+            tau,
+            &[(water.substance(), x_w)],
+            equilibrium,
+            STANDARD_GRAVITY,
+            &inventory,
+        );
+        let outgoing = STEFAN_BOLTZMANN * math::powi(t, 4) / (1.0 + 0.75 * tau);
+        let planck = 4.0 * outgoing / t;
+        eprintln!(
+            "{t} K: x {x_w:.4}, d {:.4}, tau {tau:.4}, OLR {outgoing:.2} W/m2, gain \
+             {gain:.4}, B_P {planck:.4}, B_eff {:.4} W/m2/K",
+            dominance(x_w),
+            planck * (1.0 - gain),
+        );
     }
+    // The column's own OLR curve, σ T_s⁴ ÷ (1 + ¾τ(T_s)), at each kelvin: its peak.
+    let peak = (270..=380).fold((0.0, 0.0), |peak: (f64, f64), t| {
+        let t = f64::from(t);
+        let (wet, _) = with_water_at_humidity(&dry_air, Kelvin::new(t));
+        let tau = constants.optical_depth(&wet, equilibrium, STANDARD_GRAVITY);
+        let outgoing = STEFAN_BOLTZMANN * math::powi(t, 4) / (1.0 + 0.75 * tau);
+        if outgoing > peak.0 {
+            (outgoing, t)
+        } else {
+            peak
+        }
+    });
+    eprintln!("the OLR peaks at {:.2} W/m2 at {} K", peak.0, peak.1);
 }
 
 /// P14.T51.a's partition holds a minor condensable's partial pressure at its humidity, below its
@@ -1171,7 +1163,7 @@ fn the_batch_gain_s_warm_wet_figures_are_stated() {
 /// partition's own state says (some of its inventory condensed: its airborne weight below its
 /// inventory's), not where its weight reaches its saturation pressure, version 22's rule, under
 /// which the batch's Earth lost its water's feedback (decision-p14-t57a-fits §5). The Earth keeps
-/// it, by hand as `the_greenhouse_gain_is_the_held_gases_feedback` takes it, with P14.T57.a's
+/// it, by hand as `the_greenhouse_gain_is_the_held_gases_feedback` takes it, with P14.T53.a's
 /// constants, the ones its τ was taken under; Venus's and Titan's bulk, which nothing condenses,
 /// give none.
 #[test]
@@ -1188,8 +1180,10 @@ fn under_the_batch_the_greenhouse_gain_counts_the_water_the_partition_holds() {
     // Version 22's rule would not count it.
     assert!(p_w < diagram.saturation_pressure(t_s), "{p_w:?}");
     let t = t_s.value();
-    let tau_w = GreenhouseConstants::FITTED.water() * (p_w.value() / 1e5).sqrt();
-    let slope = (1.0 - fraction(&conditions, water))
+    let tau_w = GreenhouseConstants::BATCH.water() * (p_w.value() / 1e5).sqrt();
+    let x_w = fraction(&conditions, water);
+    let slope = (1.0 - x_w)
+        * (1.0 - dominance(x_w))
         * 0.5
         * tau_w
         * diagram.clausius_clapeyron_enthalpy_j_per_mol(t_s).unwrap()
@@ -2284,13 +2278,14 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
             night_floor(heat_flow_of(body)).value(),
         );
     }
-    // Under the batch the table's Venus is the median draw at P14.T57.a's constants, 696.3 K
-    // (decision-p14-t57a-fits §3), where the ruling's 733.5–736.1 K was version 22's 735.1 K.
-    // Mars and Ganymede are printed: at the passes' stand-ins Mars ices over (196.6 K;
-    // decision-p14-t51-batch E3) until P14.T54.a's Batch C, and Ganymede, airless, lies under its
-    // frost's albedo at 22.3–98.6 K (`T_eq` 78 K against 109.6 K at its measured 0.35, P14.T49.m's;
-    // decision-p14-t54a-ganymede §1.5); the ruling's [203.3, 221.2] and [17.9, 142.8] K were
-    // version 22's.
+    // Under the batch the table's Venus is the median draw at P14.T53.a's broadened carbon
+    // dioxide term, 618.9 K from 24 (696.3 K at 23 under P14.T57.a's constants,
+    // decision-p14-t57a-fits §3), where the ruling's 733.5–736.1 K was version 22's 735.1 K.
+    // Mars and Ganymede are printed: at the passes' stand-ins Mars lies at 238.2–260.4 K from 24
+    // (it iced over at 23, 196.6 K; decision-p14-t51-batch E3), and Ganymede, tenuous from 24
+    // (P14.T53.c), lies under its frost's albedo at 22.3–98.6 K (`T_eq` 78 K against 109.6 K at
+    // its measured 0.35, P14.T49.m's; decision-p14-t54a-ganymede §1.5); the ruling's
+    // [203.3, 221.2] and [17.9, 142.8] K were version 22's.
     for name in ["Mars", "Ganymede"] {
         let (cold, warm) = found(&table, name).2.climate_range();
         eprintln!(
@@ -2303,8 +2298,8 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
         ("Earth", 261.7, 305.1),
         ("Mercury", 21.1, 585.2),
         ("Moon", 20.0, 361.0),
-        // The batch's own Venus, as P14.T54.a's B3 record and its bless note measure it.
-        ("Venus", 694.9, 697.2),
+        // The batch's own Venus, as P14.T53.a's record and 24's bless note measure it.
+        ("Venus", 617.4, 619.8),
         ("Ceres", 56.7, 202.9),
     ] {
         let (cold, warm) = found(&table, name).2.climate_range();
@@ -2388,7 +2383,15 @@ fn an_airless_body_s_warmest_lies_between_its_dayside_and_its_subsolar_point() {
     let table = table();
     for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
         let (_, body, _) = found(&table, name);
-        assert_eq!(body.atmosphere().state(), SurfaceState::Airless, "{name}");
+        // The table's Ganymede is `Tenuous` from P14.T53.c, which publishes at its base as an
+        // airless body does.
+        assert!(
+            matches!(
+                body.atmosphere().state(),
+                SurfaceState::Airless | SurfaceState::Tenuous
+            ),
+            "{name}"
+        );
         let base = spin_of(name);
         for spin in [
             base,
@@ -3327,13 +3330,16 @@ fn a_profile_refuses_another_obliquity_s_table() {
 /// to the bit at the same surface water, within 0.01–0.07 (decision-p14-t54a-bands §4.3), Earth
 /// holds liquid water and the regime's reservoirs are the partition's.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the table's record path, each body's condensates checked"
+)]
 fn the_batch_publishes_the_table_s_condensates() {
     use crate::planetary::chem::partition::CondensatePhase;
-    use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
+    use crate::planetary::hooks::cold_traps::{RecordColdTraps, RecordField};
     use crate::planetary::hooks::figures::{GlobalFigures, VolatileHistory, WaterIce, cover};
 
     let water = Gas::Water.substance();
-    let sky = lunar_sky();
     let mut wet = 0;
     let mut earth_ice = None;
     for (name, body) in historic_table() {
@@ -3353,10 +3359,13 @@ fn the_batch_publishes_the_table_s_condensates() {
         };
         let gravity = body.surface_gravity();
         let atmosphere = body.atmosphere();
-        // P14.T51.a's published condensates, with the cold traps held (P14.T51.f).
+        // P14.T51.a's published condensates, on a field that publishes none (P14.T51.f's traps
+        // off: `RecordField::Carried(None)`).
         let table = conditions.zonal_insolation();
         let under = || {
-            let traps = RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, atmosphere);
+            let traps = RecordColdTraps {
+                field: RecordField::Carried(None),
+            };
             batch.condensates_under(atmosphere, &conditions, gravity, &traps, &table)
         };
         let (partition, published) = under();
@@ -3519,10 +3528,9 @@ fn the_conditions_gases_are_the_mole_fractions() {
 #[test]
 fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
     use crate::planetary::chem::partition::CondensatePhase;
-    use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
+    use crate::planetary::hooks::cold_traps::{RecordColdTraps, RecordField};
     use crate::planetary::hooks::figures::{IceReads, VolatileHistory, WaterIce, with_ice_reads};
 
-    let sky = lunar_sky();
     let (mut surfaces, mut read) = (0_u64, 0_u64);
     let ((), checked) = with_ice_reads(IceReads::Checked, || {
         for (name, body) in historic_table() {
@@ -3545,8 +3553,9 @@ fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
                 };
                 let atmosphere = body.atmosphere();
                 let table = conditions.zonal_insolation();
-                let traps =
-                    RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, atmosphere);
+                let traps = RecordColdTraps {
+                    field: RecordField::Carried(None),
+                };
                 let (_, published, ice) = batch.condensates_and_ice_under(
                     atmosphere,
                     &conditions,

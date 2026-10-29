@@ -403,8 +403,10 @@ fn an_airless_body_s_edge_is_110_k() {
             1.0 - low
         );
     }
+    // From P14.T53.c (generator version 24) the table's Ganymede is `Tenuous`, its climate an
+    // airless body's at its base.
     let (_, body, ganymede, conditions) = found(&table, "Ganymede");
-    assert_eq!(body.atmosphere().state(), SurfaceState::Airless);
+    assert_eq!(body.atmosphere().state(), SurfaceState::Tenuous);
     let cold = conditions.cold_area(AIRLESS_ICE_TEMPERATURE);
     assert!((ganymede.ice_fraction() - cold).abs() < 1e-15);
     eprintln!(
@@ -836,7 +838,7 @@ impl PassRecordOf for TableRecord<'_> {
 /// passes' stand-in and over its record ([`TableRecord`]), with its published pass's publication
 /// run again at its published albedo and context (rule (f)): what its area mix read.
 fn over_its_record(name: &'static str) -> (DerivedBody, DerivedBody, SpunRead) {
-    over_its_record_under(name, Err(NoColdTraps::Held))
+    over_its_record_under(name, Err(NoColdTraps::NoSky))
 }
 
 /// [`over_its_record`] with its passes' cold traps reading the sky `cold_traps`, or none
@@ -1065,7 +1067,6 @@ fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
     use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
     use crate::planetary::derive::atmosphere::Gas;
     use crate::planetary::hooks::cold_traps::{Sunlit, lunar_sky, terrain_of, trap_threshold};
-    use crate::planetary::testing::with_every_24_hold;
     use crate::units::consts::METRES_PER_AU;
     use crate::units::{Metres, SolarRadii, WattsPerSquareMetre};
 
@@ -1080,54 +1081,51 @@ fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
             0.035,
         )
     };
-    with_every_24_hold(|| {
-        for (name, sky) in [
-            ("Moon", lunar_sky()),
-            ("Mercury", own(0.034, (0.387_098, 0.205_63))),
-            ("Ceres", own(4.0, (2.767, 0.0785))),
-        ] {
-            let (_, derived, read) = over_its_record_under(name, Ok(sky));
-            let traps = derived
-                .cold_traps()
-                .as_ref()
-                .unwrap_or_else(|why| panic!("{name}: no field, {why:?}"));
-            let inputs = traps.inputs();
-            let context = derived.spun().expect("over its record").context();
-            let first = context.figures().expect("its context holds figures");
-            let sunlit = Sunlit::new(sky, inputs.regolith_albedo(), context.heat_flow());
-            let shadows = sunlit.shadows().expect("a lit body's shadows");
-            let terrain = terrain_of(first.craters());
-            let column = derived.atmosphere().column_inventory().condenses();
-            for gas in [Gas::Water, Gas::CarbonDioxide] {
-                let substance = gas.substance();
-                let f_ct =
-                    sunlit.trap_fraction(&shadows, &terrain, trap_threshold(substance).unwrap());
-                let entry = read.condensates.entry(substance, CondensatePhase::Solid);
-                let trapped = entry.map_or(0.0, CondensateEntry::trapped_area_fraction);
-                eprintln!(
-                    "{name} through its passes ({:?}, its column condensing {column}): {gas:?} \
+    for (name, sky) in [
+        ("Moon", lunar_sky()),
+        ("Mercury", own(0.034, (0.387_098, 0.205_63))),
+        ("Ceres", own(4.0, (2.767, 0.0785))),
+    ] {
+        let (_, derived, read) = over_its_record_under(name, Ok(sky));
+        let traps = derived
+            .cold_traps()
+            .as_ref()
+            .unwrap_or_else(|why| panic!("{name}: no field, {why:?}"));
+        let inputs = traps.inputs();
+        let context = derived.spun().expect("over its record").context();
+        let first = context.figures().expect("its context holds figures");
+        let sunlit = Sunlit::new(sky, inputs.regolith_albedo(), context.heat_flow());
+        let shadows = sunlit.shadows().expect("a lit body's shadows");
+        let terrain = terrain_of(first.craters());
+        let column = derived.atmosphere().column_inventory().condenses();
+        for gas in [Gas::Water, Gas::CarbonDioxide] {
+            let substance = gas.substance();
+            let f_ct = sunlit.trap_fraction(&shadows, &terrain, trap_threshold(substance).unwrap());
+            let entry = read.condensates.entry(substance, CondensatePhase::Solid);
+            let trapped = entry.map_or(0.0, CondensateEntry::trapped_area_fraction);
+            eprintln!(
+                "{name} through its passes ({:?}, its column condensing {column}): {gas:?} \
                      f_ct {f_ct:.4e}, A_s {trapped:.4e}, reservoir {:?}, at the regolith's \
                      {:.4} and {:.4e} W m⁻²",
-                    derived.convergence(),
-                    entry.map(|e| e.reservoir().value()),
-                    inputs.regolith_albedo(),
-                    context.heat_flow().value()
-                );
-                assert_same_bits(
-                    traps.field().trap(substance).map_or(f64::NAN, |t| t.1),
-                    f_ct,
-                );
-                // A delivered species (none in its column) lies in its traps alone, its whole
-                // trapped area `f_ct` × `f_x`; one its column holds takes what is left of its
-                // condensed reservoir (T51.f), stated.
-                let delivered = derived.atmosphere().partial_pressures().of(gas).value() <= 0.0;
-                if f_ct > 0.0 && delivered {
-                    assert_same_bits(trapped, f_ct * sky.exposed_fraction);
-                }
-                if name == "Moon" && gas == Gas::Water {
-                    assert!((0.000_24..=0.002).contains(&f_ct), "{f_ct}");
-                }
+                derived.convergence(),
+                entry.map(|e| e.reservoir().value()),
+                inputs.regolith_albedo(),
+                context.heat_flow().value()
+            );
+            assert_same_bits(
+                traps.field().trap(substance).map_or(f64::NAN, |t| t.1),
+                f_ct,
+            );
+            // A delivered species (none in its column) lies in its traps alone, its whole
+            // trapped area `f_ct` × `f_x`; one its column holds takes what is left of its
+            // condensed reservoir (T51.f), stated.
+            let delivered = derived.atmosphere().partial_pressures().of(gas).value() <= 0.0;
+            if f_ct > 0.0 && delivered {
+                assert_same_bits(trapped, f_ct * sky.exposed_fraction);
+            }
+            if name == "Moon" && gas == Gas::Water {
+                assert!((0.000_24..=0.002).contains(&f_ct), "{f_ct}");
             }
         }
-    });
+    }
 }

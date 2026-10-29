@@ -251,8 +251,10 @@ fn the_volatile_draws_read_their_three_words() {
 #[test]
 fn the_solar_system_keeps_its_atmospheres_where_it_does() {
     // P14.T13.b: Earth, Venus, Mars and Titan keep atmospheres; Mercury, the Moon, Ganymede and
-    // Ceres do not. The table's Ganymede, a body at 5.2 au, is airless under the frost's albedo
-    // because its exobase reads the irradiation, not the surface (decision-p14-t54a-ganymede §1.4).
+    // Ceres keep none of their own. The table's Ganymede, a body at 5.2 au, keeps none under the
+    // frost's albedo because its exobase reads the irradiation, not the surface
+    // (decision-p14-t54a-ganymede §1.4): from P14.T53.c (generator version 24) it is `Tenuous`,
+    // its ice's vapour alone.
     let table = table();
     for (name, body) in &table {
         let air = body.atmosphere();
@@ -270,10 +272,16 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
     for name in ["Earth", "Venus", "Mars", "Titan"] {
         let air = found(&table, name).atmosphere();
         assert!(air.keeps_atmosphere(), "{name}: {air:?}");
+        assert_ne!(air.state(), SurfaceState::Tenuous, "{name}: {air:?}");
     }
     for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
         let air = found(&table, name).atmosphere();
-        assert_eq!(air.state(), SurfaceState::Airless, "{name}: {air:?}");
+        let state = if name == "Ganymede" {
+            SurfaceState::Tenuous
+        } else {
+            SurfaceState::Airless
+        };
+        assert_eq!(air.state(), state, "{name}: {air:?}");
     }
     // The states the table's atmospheres are in.
     assert_eq!(
@@ -306,11 +314,14 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
     let venus = found(&table, "Venus").atmosphere();
     assert!(venus.partial_pressures().of(Gas::CarbonDioxide).value() > 3e6);
     assert_eq!(venus.partial_pressures().of(Gas::Water), Pascals::ZERO);
-    // Mars keeps 0.11 bar, nearly all nitrogen: its real 6 mbar needs the non-thermal loss this
-    // model has not (ruling 119.4, pinned).
+    // Mars keeps 0.22 bar from 24, nearly all carbon dioxide on the warm branch at 252.9 K
+    // (P14.T53.a part C: the shoreline keeps its share and the thermostat its carbon airborne;
+    // counted at the gate, its collapsed branch's cure after 24); its real 6 mbar needs the
+    // non-thermal loss and the CO₂ cap's own energy balance this model has not. At 23 it kept
+    // 0.11 bar, nearly all nitrogen (ruling 119.4).
     let mars = found(&table, "Mars").atmosphere();
     let mars_bar = mars.surface_pressure().unwrap().value() / 1e5;
-    assert!((0.10..0.12).contains(&mars_bar), "Mars at {mars_bar} bar");
+    assert!((0.20..0.25).contains(&mars_bar), "Mars at {mars_bar} bar");
     let titan = found(&table, "Titan").atmosphere();
     assert!(titan.partial_pressures().of(Gas::Nitrogen).value() > 1e5);
 }
@@ -665,7 +676,11 @@ fn a_dark_host_leaves_a_body_frozen_and_airless() {
     .unwrap();
     let body = derive_body(&placed, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap();
     assert_eq!(body.atmosphere().state(), SurfaceState::Airless);
-    assert_eq!(body.surface_temperature(), Kelvin::ZERO);
+    // P14.T24.i's unlit mean: the stand-in's night floor, the cosmic background's (0 K to 23).
+    assert_eq!(
+        body.surface_temperature(),
+        crate::planetary::hooks::surface::COSMIC_BACKGROUND_TEMPERATURE
+    );
     // And the radius rank at the median still reads Chen and Kipping's scatter.
     assert!(radius_chen_kipping(EarthMasses::new(1.0), UnitUniform::HALF).value() > 0.9);
 }
@@ -866,7 +881,8 @@ fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) -> Atmosphere
 fn a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks() {
     // P14.T24.f: the oxygen of the water lost, less what escapes with the hydrogen (Luger and
     // Barnes 2015, eqs. 5, 11 and 12) and what the surface takes up at Earth's rate per unit area
-    // (Catling 2014, through Luger and Barnes's §2.5.1), by hand.
+    // (Catling 2014, through Luger and Barnes's §2.5.1), by hand over the whole age; the published
+    // air carries the oxygen the escape's timed route keeps (P14.T53.a, from generator version 24).
     let (water, age, xuv) = (1.4e22, 5e8, 1.0);
     let air = runaway_earth(water, age, xuv, 255.0);
     assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
@@ -904,11 +920,21 @@ fn a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks() {
     );
     let weight = g / (4.0 * core::f64::consts::PI * math::powi(radius.value(), 2));
     let o2 = air.partial_pressures().of(Gas::Oxygen).value();
-    assert!((o2 / (kept * weight) - 1.0).abs() < 1e-12, "{o2} Pa");
+    let timed = air
+        .escape()
+        .expect("the batch records every body's escape")
+        .oxygen()
+        .kept()
+        .value();
+    assert!(
+        (o2 / (timed * weight) - 1.0).abs() < 1e-12,
+        "{o2} Pa against {timed} kg kept"
+    );
     eprintln!(
-        "ten oceans lost: {:.0} bar of O2 at {:.1} Gyr, η {eta:.3}",
+        "ten oceans lost: {:.0} bar of O2 at {:.1} Gyr, η {eta:.3} (the whole age's {:.0} bar)",
         o2 / 1e5,
-        age / 1e9
+        age / 1e9,
+        kept * weight / 1e5
     );
     // Oxygen never condenses, and the air holds it with the carbon dioxide.
     assert!(o2 > air.partial_pressures().of(Gas::CarbonDioxide).value());
@@ -1108,7 +1134,8 @@ const YOUNG_MELT: f64 = 3.16e7;
 fn a_runaway_world_with_a_young_melt_keeps_less_oxygen() {
     // Science-p14-t24f §3, through the derivation: the wet runaway world of `derive_body`'s golden,
     // about the Sun with its history, whose young magma ocean lasted 31.6 Myr (P14.T28.a's
-    // `molten_until`), keeps less O₂ than the same world with none, by the melt's share, by hand.
+    // `molten_until`), keeps less O₂ than the same world with none, each the oxygen its escape's
+    // timed route keeps (P14.T53.a; to version 23 the melt's share by hand, its whole-age rule's).
     let disc = solar_disc();
     let melt = YOUNG_MELT;
     let none = derive(&wet_runaway(None), &disc, SOLAR_AGE);
@@ -1132,21 +1159,22 @@ fn a_runaway_world_with_a_young_melt_keeps_less_oxygen() {
         "{o2_molten} Pa against {o2}"
     );
     let (mass, radius) = (Kilograms::from(none.mass()), Metres::from(none.radius()));
-    let xuv = historic_sun()
-        .xuv()
-        .saturated_flux(Metres::new(0.6 * METRES_PER_AU), 0.0);
-    let eta = oxygen_escape_parameter(mass, radius, xuv);
     let weight = GRAVITATIONAL_CONSTANT * mass.value()
         / math::powi(radius.value(), 2)
         / (4.0 * core::f64::consts::PI * math::powi(radius.value(), 2));
-    let difference = water_loss_rate(mass, radius, xuv) * melt * 31_557_600.0 * 31.998
-        / (2.0 * 18.015)
-        * (1.0 - eta)
-        * weight;
-    assert!(
-        ((o2 - o2_molten) / difference - 1.0).abs() < 1e-9,
-        "{o2} − {o2_molten} Pa against {difference}"
-    );
+    for (body, published) in [(&none, o2), (&molten, o2_molten)] {
+        let kept = body
+            .atmosphere()
+            .escape()
+            .expect("the batch records every body's escape")
+            .oxygen()
+            .kept()
+            .value();
+        assert!(
+            (published / (kept * weight) - 1.0).abs() < 1e-12,
+            "{published} Pa against {kept} kg kept"
+        );
+    }
     eprintln!(
         "the wet runaway world: {:.0} bar of O2, {:.0} with a 31.6 Myr melt",
         o2 / 1e5,
@@ -1477,13 +1505,14 @@ fn icy_worlds_beyond_the_maximum_greenhouse_hold_no_carbon_dioxide_greenhouse() 
     // batch's bump, they were carbon-dioxide greenhouses of 580 and 706 K, which no carbon-dioxide
     // air can be beyond the limit (Kopparapu et al. 2013). The two `beyond` bodies formed at 4 au,
     // between the zero-age Sun's snow line and its ammonia line (4.31 au), so their nitrogen is
-    // Earth's per unit mass (P14.T50.c): 0.90 and 0.66 bar of N₂ hold them at 128.7 and 127.2 K,
-    // where version 22's hundredfold nitrogen, 90 and 66 bar, held them at 180.1 and 174.5 K.
+    // Earth's per unit mass (P14.T50.c): 0.90 and 0.66 bar of N₂ hold them at 103.1 and 101.5 K
+    // from 24, at a `T_eq` of 89.1 K under 24's albedos (128.7 and 127.2 K at 23), where version
+    // 22's hundredfold nitrogen, 90 and 66 bar, held them at 180.1 and 174.5 K.
     let disc = solar_disc();
     for (name, placed, kelvin) in [
         ("icy", golden_placed(EARTH_MASS_KG, 5.0, 0.05, 0.9), 157.0),
-        ("beyond_dry", beyond_the_snow_line(&disc, true), 128.7),
-        ("beyond_watery", beyond_the_snow_line(&disc, false), 127.2),
+        ("beyond_dry", beyond_the_snow_line(&disc, true), 103.1),
+        ("beyond_watery", beyond_the_snow_line(&disc, false), 101.5),
     ] {
         // As `derive_body`'s golden derives its bodies: about the present Sun with no X-ray
         // history.
@@ -1547,7 +1576,10 @@ fn every_table_body_s_fractions_sum_to_one() {
 fn the_gases_are_continuous_in_time_but_at_a_recorded_state_change() {
     // P14.T24.f: Titan's methane and a water-rich runaway world's oxygen, at steps of 0.1% in age
     // over 0.2–10 Gyr: no partial pressure jumps by 10⁻³ of the surface pressure but where the
-    // state, the retained gases or the carbon's carrier change.
+    // state, the retained gases or the carbon's carrier change, or (from P14.T53.a, generator
+    // version 24) where the escape's methane reservoir runs out or the cloud deck appears or goes:
+    // Titan's air collapses at 6.39 Gyr, from 1.47 to 0.50 bar and 92.8 to 71.7 K, as its deck
+    // clears (cloud 0.67 to 0, Bond albedo 0.536 to 0.832), a recorded finding.
     let disc = solar_disc();
     let (_, kg, km, a, e) = SMALL_BODIES[2];
     let titan = placed_about_the_sun(&disc, (kg, km, a, e));
@@ -1574,9 +1606,16 @@ fn the_gases_are_continuous_in_time_but_at_a_recorded_state_change() {
             let air = *derive(&placed, &disc, Years::new(age)).atmosphere();
             oxygen_seen |= air.partial_pressures().of(Gas::Oxygen) > Pascals::ZERO;
             if let Some(before) = previous {
+                let exhausted = |air: &Atmosphere| {
+                    air.escape()
+                        .is_some_and(|escape| escape.methane().kept().value() <= 0.0)
+                };
+                let clouded = |air: &Atmosphere| air.cloud_fraction() > 0.0;
                 let recorded = before.state() != air.state()
                     || before.retention() != air.retention()
-                    || before.carbon_carrier() != air.carbon_carrier();
+                    || before.carbon_carrier() != air.carbon_carrier()
+                    || exhausted(&before) != exhausted(&air)
+                    || clouded(&before) != clouded(&air);
                 if !recorded {
                     let total = air.partial_pressures().total().value();
                     for gas in Gas::ALL {
@@ -1585,7 +1624,7 @@ fn the_gases_are_continuous_in_time_but_at_a_recorded_state_change() {
                         .abs();
                         assert!(
                             jump < 1e-3 * total,
-                            "{gas:?} jumps by {jump} Pa at {age} yr"
+                            "{gas:?} jumps by {jump} Pa at {age} yr: {before:?} to {air:?}"
                         );
                     }
                 }
@@ -2095,8 +2134,8 @@ pub(crate) fn earth_inputs(equilibrium: f64, insolation: Insolation) -> Atmosphe
 /// pressures `partials` over a mean surface at `t`, with Earth's spin (23.44° of obliquity, a
 /// sidereal day of 86,164.1 s and a solar day of 24 h), Earth's heat flow, 0.0925 W m⁻², and no
 /// ocean: the passes' climate ([`step_climate`], T24.a's own range, its greenhouse over the body's
-/// airborne inventory, as `state_and_greenhouse`'s steps 2 and 3 leave it), as P14.T54.a's wiring
-/// gives it from a body's own spin.
+/// airborne inventory as its retention and its ice keep it, `Airborne::kept`), as P14.T54.a's
+/// wiring gives it from a body's own spin.
 fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
@@ -2107,8 +2146,7 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
         inputs.equilibrium,
         WattsPerSquareMetre::ZERO,
     );
-    let mut airborne = Airborne::kept(inputs, retention, held);
-    airborne.divide(inputs, retention, held);
+    let airborne = Airborne::kept(inputs, retention, held);
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
     let body = ClimateBody {
         equilibrium_temperature: inputs.equilibrium,
@@ -2128,9 +2166,12 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
 }
 
 /// A Titan's inputs: its mass and radius, formed beyond the snow line, beyond the
-/// maximum-greenhouse limit, with the cold moon's inventory and irradiation of [`cold_moon`].
+/// maximum-greenhouse limit, with the cold moon's inventory, irradiation and XUV of [`cold_moon`]
+/// (none: from 24 the escape reads it, and Earth's fluence strips the methane).
 fn titan_inputs() -> AtmosphereInputs {
     let mut titan = earth_inputs(75.6, Insolation::BeyondMaximumGreenhouse);
+    titan.xuv_fluence = JoulesPerSquareMetre::ZERO;
+    titan.saturated_xuv_flux = WattsPerSquareMetre::ZERO;
     titan.mass = Kilograms::new(1.345e23);
     titan.radius = Metres::new(2.575e6);
     titan.material = SurfaceMaterial::Ice;
@@ -2205,74 +2246,6 @@ fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
     );
 }
 
-/// A dry Earth formed inside the snow line at 2 au of a Sun, beyond the maximum-greenhouse limit,
-/// stores no carbon: its 70 bar of carbon dioxide ran T13.c's √p greenhouse away to some 570 K
-/// (science-p14-t24f, finding 1), and P14.T51.a's cold trap was to hold it at `p_sat`(`T_cold`).
-/// Under the partition, with T24.a's own contrasts of each step's column (Earth's spin, no ocean),
-/// it does not: from its equilibrium temperature to 273 K, every surface holding its carbon dioxide
-/// at its cold trap is warmed above itself by T13.c's grey greenhouse, so no state below freezing
-/// holds itself and the iteration runs to the whole inventory's.
-///
-/// The states that fail hold 18 Pa to 0.2 bar of carbon dioxide, two to three orders of magnitude
-/// below the some 8 bar at which Kopparapu et al. (2013, arXiv:1301.6674v2, §3.3, read) put the
-/// maximum greenhouse, `S_eff` 0.325 at 1.70 au, so the cause is that the √p term, whose CO₂
-/// constant Venus fixes, overstates a thin carbon dioxide air: given Mars's measured 607 Pa it
-/// gives τ = 1.44 and 252 K at the fact sheet's 209.8 K black-body temperature, where Mars has
-/// 214 K (NASA's Mars fact sheet). This test pins the finding until its fix, a carbon dioxide
-/// greenhouse that holds Venus, Earth and Mars together, P14.T53.a's, takes the plan's test over
-/// (decision-p14-t51a-partition §1).
-#[test]
-fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap() {
-    let earth = earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse);
-    let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&earth, t, p);
-    let air = atmosphere_under(
-        &earth,
-        &PassSurface {
-            climate: PassClimate::Given(&climate),
-            ..PassSurface::stand_in(PassLight::HottestHost)
-        },
-    );
-    assert!(air.surface_temperature().value() > 500.0, "{air:?}");
-    // No state below freezing holds itself: at each, with its column held by the partition over
-    // its own climate, the greenhouse warms the surface above it.
-    let retention = air.retention();
-    let held = IceHeld::of(
-        &earth,
-        retention,
-        earth.equilibrium,
-        WattsPerSquareMetre::ZERO,
-    );
-    let mut airborne = Airborne::kept(&earth, retention, held);
-    assert_eq!(
-        airborne.divide(&earth, retention, held),
-        SurfaceState::Snowball
-    );
-    let (m, r) = (earth.mass.value(), earth.radius.value());
-    let weight_gravity = GRAVITATIONAL_CONSTANT * m / (r * r);
-    let weight = weight_gravity / (4.0 * core::f64::consts::PI * r * r);
-    let inventory = airborne.column(weight).unwrap();
-    let mut weights = AirborneWeights::new();
-    for step in 0..=107 {
-        let t = Kelvin::new(166.0 + f64::from(step));
-        // From the whole column, as the greenhouse starts.
-        let mut partials = whole_column(&inventory);
-        for _ in 0..8 {
-            let span = t24a_span(&earth, t, &partials);
-            let ground = Ground::without_basins(MetresPerSecondSquared::new(weight_gravity));
-            partials = partitioned_partials(&inventory, &span, &ground, &mut weights);
-        }
-        let warmed = grey_surface_temperature(
-            earth.equilibrium,
-            GreenhouseConstants::FITTED.optical_depth(
-                &partials,
-                earth.equilibrium,
-                MetresPerSecondSquared::new(weight_gravity),
-            ),
-        );
-        assert!(warmed > t, "{t:?} holds itself at {warmed:?}: {partials:?}");
-    }
-}
-
 // P14.T51.b: the area-mix Bond albedo in the passes.
 
 use crate::planetary::derive::passes::Convergence;
@@ -2294,7 +2267,8 @@ fn derived(placed: &PlacedBody, disc: &DiscProfile) -> DerivedBody {
 /// T51.b's loop as it was built, `PassDriver::T51b`: every body of the table, Jupiter, an icy
 /// belt member as recorded and as placed, and a Pluto, every field of their derivations the same,
 /// the count and the outcome included (the table's three-pass bodies among them, so T57.a's fits
-/// do not move).
+/// do not move). From 24 Mars does not settle: its passes bracket its albedo at a residual of
+/// about 5 × 10⁻¹¹, not a jump, and it is the only one.
 #[test]
 fn a_body_that_settles_keeps_t51b_s_bits() {
     use crate::planetary::derive::pass_record::PassRecord;
@@ -2331,6 +2305,7 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
         "Pluto",
         crate::planetary::derive::solar::placed(1.303e22, 39.48, 0.248_8, rank),
     ));
+    let mut unsettled = Vec::new();
     for (name, body) in &placed {
         let derive = |driver| {
             derive_body_driven(
@@ -2344,10 +2319,23 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
             )
             .unwrap()
         };
-        let (solved, t51b) = (derive(PassDriver::Solve), derive(PassDriver::T51b));
-        assert_eq!(solved.convergence(), Convergence::Converged, "{name}");
-        assert_eq!(format!("{solved:?}"), format!("{t51b:?}"), "{name}");
+        let solved = derive(PassDriver::Solve);
+        if solved.convergence() != Convergence::Converged {
+            unsettled.push(*name);
+            assert!(
+                !solved.convergence().is_jump(),
+                "{name}: {:?}",
+                solved.convergence()
+            );
+            continue;
+        }
+        assert_eq!(
+            format!("{solved:?}"),
+            format!("{:?}", derive(PassDriver::T51b)),
+            "{name}"
+        );
     }
+    assert_eq!(unsettled, ["Mars"]);
 }
 
 /// Decision-p14-t54a-ganymede §1.4: [`EXOBASE_MULTIPLE`] is T13.c's 5 `T_eq` at the measured
@@ -2399,9 +2387,10 @@ fn the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s() {
 /// pass at albedos from 0 to 0.95, while the equilibrium temperature each pass reads moves with
 /// its albedo. The ice-held water and nitrogen of an ice crust read that temperature, as a
 /// volatile ice's vapour does (the ruling's C0 follow-up, rule (b)), so they alone may differ
-/// between passes: the icy member as recorded, 10²¹ kg at 43 au, holds its N₂ (and the methane
-/// beside it) at 0.95, at 20 K, and not at 0.832, at 27 K, nor in its solved pass; every other
-/// body's ice holds the same at every albedo.
+/// between passes: the icy member, 10²¹ kg at 43 au, as recorded and as placed, holds its argon at
+/// 0.95, at 20 K, and not at 0.832, at 27 K, nor in its solved pass (from 24 its nitrogen and
+/// methane escape at every albedo, so no N₂ ice holds them); every other body's ice holds the same
+/// at every albedo.
 #[test]
 fn bulk_air_retention_is_independent_of_the_albedo_a_pass_reads() {
     use crate::planetary::derive::pass_record::PassRecord;
@@ -2466,21 +2455,25 @@ fn bulk_air_retention_is_independent_of_the_albedo_a_pass_reads() {
             );
             assert_eq!(bulk_air(at), bulk_air(air), "{name} at {albedo}");
             let t_eq = once.equilibrium_temperature().value();
-            if *name == "an icy member as recorded" && albedo > 0.9 {
-                // At 0.95, 20 K: its N₂ ice's vapour is too thin to escape over the age.
+            if name.starts_with("an icy member") && albedo > 0.9 {
+                // At 0.95, 20 K: its argon ice's vapour is too thin to escape over the age.
                 assert!((19.5..20.5).contains(&t_eq), "{name} at {albedo}: {t_eq} K");
+                assert!(
+                    at.ice_held().retains(Gas::Argon),
+                    "{name} at {albedo}: {at:?}"
+                );
+                assert!(!air.ice_held().retains(Gas::Argon), "{name}: {air:?}");
                 for gas in [Gas::Nitrogen, Gas::Methane] {
-                    assert!(at.ice_held().retains(gas), "{name} at {albedo}: {at:?}");
-                    assert!(!air.ice_held().retains(gas), "{name}: {air:?}");
+                    assert!(!at.ice_held().retains(gas), "{name} at {albedo}: {at:?}");
                 }
             } else {
                 // At 0.832, 27 K, as in the solved pass, it escapes.
                 assert_eq!(at.ice_held(), air.ice_held(), "{name} at {albedo}");
             }
-            if *name == "an icy member as recorded" && (albedo - 0.832).abs() < 1e-9 {
+            if name.starts_with("an icy member") && (albedo - 0.832).abs() < 1e-9 {
                 assert!((26.5..27.5).contains(&t_eq), "{name} at {albedo}: {t_eq} K");
                 assert!(
-                    !at.ice_held().retains(Gas::Nitrogen),
+                    !at.ice_held().retains(Gas::Argon),
                     "{name} at {albedo}: {at:?}"
                 );
             }
@@ -2532,7 +2525,8 @@ fn the_regolith_albedo_is_the_batch_s_bare_ground() {
 ///   of 0.48 (decision-p14-t54a-ganymede §2), recorded against Li et al. 2018's measured
 ///   0.503 ± 0.012 (Nat. Commun. 9, 3709), which supersedes Hanel et al. 1981's 0.343 ± 0.032;
 /// - every body's equilibrium temperature is its albedo's, and its passes converge within the plain
-///   passes (`Converged`, P14.T51.h); the rest are recorded.
+///   passes (`Converged`, P14.T51.h), but Mars's from 24, which bracket its albedo at a residual of
+///   about 5 × 10⁻¹¹ in 56 passes, not a jump; the rest are recorded.
 #[test]
 fn under_the_batch_the_table_takes_the_area_mix() {
     let batch = table();
@@ -2576,11 +2570,15 @@ fn under_the_batch_the_table_takes_the_area_mix() {
     );
     for (name, body) in &batch {
         let passes = body.atmosphere_passes();
-        assert_eq!(
-            body.convergence(),
-            Convergence::Converged,
-            "{name}: {passes} passes"
-        );
+        if *name == "Mars" {
+            assert!(!body.convergence().is_jump(), "{name}: {passes} passes");
+        } else {
+            assert_eq!(
+                body.convergence(),
+                Convergence::Converged,
+                "{name}: {passes} passes"
+            );
+        }
         assert_same_bits(
             body.equilibrium_temperature().value(),
             equilibrium_temperature(body.flux(), body.albedo()).value(),
@@ -2656,10 +2654,11 @@ fn an_icy_member_takes_the_albedo_of_its_record_s_ice() {
 }
 
 /// A Pluto at its own inventory (NASA's Pluto fact sheet's mass, 1.303 × 10²² kg,
-/// and mean radius, 1,188.3 km, from memory, at its 39.48 au and e 0.2488): airless with no N₂ until
-/// P14.T53.c, its albedo recorded, not asserted (decision-triton-and-e101 §1.6). Its cheap
-/// invariants are: the airless state, a finite albedo in [0, 1), and passes that converge within
-/// the plain passes (`Converged`, P14.T51.h).
+/// and mean radius, 1,188.3 km, from memory, at its 39.48 au and e 0.2488): `Tenuous` from
+/// P14.T53.c (generator version 24), its ice holding its N₂ (to version 23 airless with no N₂), its
+/// albedo recorded, not asserted (decision-triton-and-e101 §1.6). Its cheap invariants are: the
+/// tenuous state, a finite albedo in [0, 1), and passes that converge within the plain passes
+/// (`Converged`, P14.T51.h).
 #[test]
 fn a_pluto_at_its_own_inventory_is_recorded() {
     let disc = solar_disc();
@@ -2667,7 +2666,7 @@ fn a_pluto_at_its_own_inventory_is_recorded() {
     let rank = crate::planetary::derive::solar::rank_for(&disc, kg, km, a, e).clamp(0.001, 0.999);
     let placed = crate::planetary::derive::solar::placed(kg, a, e, rank);
     let batch = derived(&placed, &disc);
-    assert_eq!(batch.atmosphere().state(), SurfaceState::Airless);
+    assert_eq!(batch.atmosphere().state(), SurfaceState::Tenuous);
     let albedo = batch.albedo().value();
     assert!(
         albedo.is_finite() && (0.0..1.0).contains(&albedo),
@@ -2841,91 +2840,6 @@ fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInp
     }
 }
 
-/// P14.T57.a: the grey greenhouse's constants are their fits, in their order, each at its body's
-/// measured inventory and measured Bond albedo under the generator's own irradiation
-/// (decision-p14-t57a-fits §1.3–§1.4), recomputed here from the code, so that a change to what the
-/// fits read fails here with the refit:
-///
-/// - carbon dioxide on Venus at its measured inventory, given by hand ([`measured_venus`]), at the
-///   irradiation for 0.76, which the passes give it: its τ at [`VENUS_SURFACE_TEMPERATURE`]
-///   less the nitrogen term as built, over √p(CO₂), 14.862;
-/// - then water on the table's Earth, whose carbon dioxide and nitrogen are Earth's, at the
-///   irradiation for 0.294: its water held by the partition on the minor branch at Manabe and
-///   Wetherald's humidity (checked at its own `T_s`), solved at
-///   [`EARTH_SURFACE_TEMPERATURE`], and its τ there less the carbon dioxide and nitrogen terms, over
-///   √p(H₂O), 4.469.
-///
-/// Each constant is held to half a unit in its second decimal. The fits read no input P14.T54.a's
-/// wiring moves. Titan's nitrogen is not refitted (decision-p14-t51-batch E1;
-/// `under_the_batch_titan_is_94_k`).
-#[test]
-fn the_greenhouse_constants_are_their_fits() {
-    let fitted = GreenhouseConstants::FITTED;
-    let root = |p: f64| (p / PASCALS_PER_BAR).sqrt();
-    let nitrogen_term = |partials: &PartialPressures, equilibrium: f64| {
-        fitted.nitrogen()
-            * math::powi(NITROGEN_REFERENCE_TEMPERATURE.value() / equilibrium, 2)
-            * root(partials.of(Gas::Nitrogen).value())
-    };
-
-    let venus = measured_venus();
-    let (co2_kg, n2_kg) = venus_measured_kg();
-    assert!((venus.inventory().carbon_dioxide().value() / co2_kg - 1.0).abs() < 1e-9);
-    assert!((venus.inventory().nitrogen().value() / n2_kg - 1.0).abs() < 1e-9);
-    let air = venus.atmosphere();
-    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
-    let partials = air.partial_pressures();
-    assert_eq!(partials.of(Gas::Water), Pascals::ZERO);
-    let t_eq = at_measured_albedo(&venus, SurfaceState::RunawayGreenhouse);
-    assert_same_bits(t_eq.value(), venus.equilibrium_temperature().value());
-    let t_eq = t_eq.value();
-    let carbon_dioxide = (needed_depth(VENUS_SURFACE_TEMPERATURE, t_eq)
-        - nitrogen_term(partials, t_eq))
-        / root(partials.of(Gas::CarbonDioxide).value());
-    eprintln!(
-        "Venus measured: {:.3} bar of CO2 and {:.4} of N2 by weight, T_eq {t_eq:.4} K: k(CO2) \
-         {carbon_dioxide:.4}",
-        partials.of(Gas::CarbonDioxide).value() / PASCALS_PER_BAR,
-        partials.of(Gas::Nitrogen).value() / PASCALS_PER_BAR,
-    );
-    assert!(
-        (GREENHOUSE_CARBON_DIOXIDE - carbon_dioxide).abs() <= 0.005,
-        "refit GREENHOUSE_CARBON_DIOXIDE at Venus's measured state: {carbon_dioxide:.3}"
-    );
-
-    let batch = table();
-    let earth = found(&batch, "Earth");
-    let air = earth.atmosphere();
-    assert_eq!(air.state(), SurfaceState::Temperate);
-    let partials = air.partial_pressures();
-    // The partition holds Earth's water at its humidity on the minor branch, as the fit takes it.
-    let own = water_weight_at_humidity(
-        partials,
-        water_saturation(air.surface_temperature().value()),
-    );
-    let water = partials.of(Gas::Water).value();
-    assert!(
-        (water / own - 1.0).abs() < 1e-6,
-        "{water} Pa against {own} Pa"
-    );
-    let t_eq = at_measured_albedo(earth, SurfaceState::Temperate).value();
-    let at_target = water_weight_at_humidity(partials, water_saturation(EARTH_SURFACE_TEMPERATURE));
-    let water_constant = (needed_depth(EARTH_SURFACE_TEMPERATURE, t_eq)
-        - fitted.carbon_dioxide() * root(partials.of(Gas::CarbonDioxide).value())
-        - nitrogen_term(partials, t_eq))
-        / root(at_target);
-    eprintln!(
-        "Earth: {:.3} Pa of CO2 and {:.5} bar of N2, water {at_target:.3} Pa at \
-         {EARTH_SURFACE_TEMPERATURE} K, T_eq {t_eq:.4} K: k(H2O) {water_constant:.4}",
-        partials.of(Gas::CarbonDioxide).value(),
-        partials.of(Gas::Nitrogen).value() / PASCALS_PER_BAR,
-    );
-    assert!(
-        (GREENHOUSE_WATER - water_constant).abs() <= 0.005,
-        "refit GREENHOUSE_WATER on Earth after carbon dioxide: {water_constant:.3}"
-    );
-}
-
 /// P14.T57.a: Venus at its measured inventory, given by hand ([`measured_venus`]), is 737 K ± 2%
 /// under P14.T57.a's constants; under version 22's, fitted at the median, it was 778 K.
 #[test]
@@ -2985,10 +2899,12 @@ fn the_measured_earth_holds_288_k_under_the_batch() {
 }
 
 /// P14.T57.a: the table's Venus is a median draw of the inventory, 55–60 bar, and under the
-/// batch's constants it reaches 680–710 K, about 696 K, in place of the 735 K that version 22's
-/// constant was fitted to give it (decision-p14-moons §4.2; decision-p14-t57a-fits §3).
+/// batch's constants it reaches 590–700 K, 618.9 K from 24 under P14.T53.a's broadened carbon
+/// dioxide term (plan 14's T53.a record, against the adiabat's 676 K; about 696 K at 23), in place
+/// of the 735 K that version 22's constant was fitted to give it (decision-p14-moons §4.2;
+/// decision-p14-t57a-fits §3).
 #[test]
-fn the_table_s_median_venus_holds_55_to_60_bar_and_reaches_680_to_710_k() {
+fn the_table_s_median_venus_holds_55_to_60_bar_and_reaches_590_to_700_k() {
     let batch = table();
     let air = found(&batch, "Venus").atmosphere();
     assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
@@ -2996,7 +2912,7 @@ fn the_table_s_median_venus_holds_55_to_60_bar_and_reaches_680_to_710_k() {
     let t = air.surface_temperature().value();
     eprintln!("the table's Venus under the batch: {bar:.3} bar at {t:.3} K");
     assert!((55.0..60.0).contains(&bar), "{bar} bar");
-    assert!((680.0..710.0).contains(&t), "{t} K");
+    assert!((590.0..700.0).contains(&t), "{t} K");
 }
 
 /// P14.T57.a: under the batch the table's Titan is 94 ± 3 K. It is a check only: no constant is
@@ -3018,10 +2934,8 @@ fn under_the_batch_titan_is_94_k() {
     );
 }
 
-// P14.T53.a: the greenhouse's broadened carbon dioxide term and its refits, behind the escape's
-// hold (`ESCAPE_VERSION`).
+// P14.T53.a: the greenhouse's broadened carbon dioxide term and its refits.
 
-use crate::planetary::chem::escape::{EscapeRules, with_rules};
 use crate::planetary::hooks::surface::tests::earth_conductance_fit;
 use crate::planetary::hooks::surface::{
     BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K, EARTH_EQUATOR_POLE_CONTRAST_K,
@@ -3380,95 +3294,91 @@ const KOPPARAPU_OUTGOING_INFRARED: [(f64, f64); 9] = [
 /// clear sky (the vapour, no cloud).
 #[test]
 fn under_the_escape_batch_the_greenhouse_constants_are_their_fits() {
-    use crate::planetary::derive::photometry::area_mix::RayleighFloorRules;
-    with_rules(EscapeRules::Batch, || {
-        // Version 24's whole state: the escape's batch and the Rayleigh floor (P14.T24.h.a) both,
-        // so that the fits stay the tripwire at 24 (decision-bump-plan-after-22 V3.2).
-        assert_eq!(GreenhouseConstants::in_force(), GreenhouseConstants::BATCH);
-        assert_eq!(RayleighFloorRules::in_force(), RayleighFloorRules::Floored);
-        let states = escape_measured_states();
-        let (carbon_dioxide, water) = escape_chain(&states);
-        let (band, exponent, collisions) = carbon_dioxide;
-        state_the_measured(
-            &states,
-            &GreenhouseConstants::broadened(carbon_dioxide, water),
-        );
-        for target in [213.0, 215.0] {
-            let [venus, mars, earth] = states;
-            let mars = MeasuredState { target, ..mars };
-            let ((a, n, b), (k_v, tau_c)) = escape_chain(&[venus, mars, earth]);
-            eprintln!(
-                "a Mars of {target} K: a {a:.4}, n {n:.4}, b {b:.6}, k_v {k_v:.4}, tau_c {tau_c:.4}"
-            );
-        }
-        state_kopparapu_s_check(&GreenhouseConstants::BATCH);
-        let fit = earth_conductance_fit(&GreenhouseConstants::BATCH);
+    // Version 24's whole state: the escape's batch and the Rayleigh floor (P14.T24.h.a) both,
+    // so that the fits stay the tripwire at 24 (decision-bump-plan-after-22 V3.2).
+    assert_eq!(GreenhouseConstants::in_force(), GreenhouseConstants::BATCH);
+    let states = escape_measured_states();
+    let (carbon_dioxide, water) = escape_chain(&states);
+    let (band, exponent, collisions) = carbon_dioxide;
+    state_the_measured(
+        &states,
+        &GreenhouseConstants::broadened(carbon_dioxide, water),
+    );
+    for target in [213.0, 215.0] {
+        let [venus, mars, earth] = states;
+        let mars = MeasuredState { target, ..mars };
+        let ((a, n, b), (k_v, tau_c)) = escape_chain(&[venus, mars, earth]);
         eprintln!(
-            "the fits: a {band:.6}, n {exponent:.6}, b {collisions:.7}, k_v {:.6} per root bar, \
-             tau_c {:.6}; Phi {:.10} (the bisection's {:.10}); D {:.10} W/m2/K (the bisection's \
-             {:.10}) at the measured Earth's gain {:.6}, B_P g {:.4}, B_eff {:.6} W/m2/K, 6D/B_eff \
-             {:.4}",
-            water.0,
-            water.1,
+            "a Mars of {target} K: a {a:.4}, n {n:.4}, b {b:.6}, k_v {k_v:.4}, tau_c {tau_c:.4}"
+        );
+    }
+    state_kopparapu_s_check(&GreenhouseConstants::BATCH);
+    let fit = earth_conductance_fit(&GreenhouseConstants::BATCH);
+    eprintln!(
+        "the fits: a {band:.6}, n {exponent:.6}, b {collisions:.7}, k_v {:.6} per root bar, \
+         tau_c {:.6}; Phi {:.10} (the bisection's {:.10}); D {:.10} W/m2/K (the bisection's \
+         {:.10}) at the measured Earth's gain {:.6}, B_P g {:.4}, B_eff {:.6} W/m2/K, 6D/B_eff \
+         {:.4}",
+        water.0,
+        water.1,
+        fit.albedo,
+        fit.albedo_oracle,
+        fit.conductance,
+        fit.oracle,
+        fit.gain,
+        fit.planck * fit.gain,
+        fit.effective,
+        6.0 * fit.conductance / fit.effective,
+    );
+    assert!(band > 0.0 && collisions > 0.0, "a {band}, b {collisions}");
+    assert!(
+        (BROADENED_CARBON_DIOXIDE_BAND - band).abs() <= 0.005,
+        "refit BROADENED_CARBON_DIOXIDE_BAND on the measured Mars: {band:.4}"
+    );
+    assert!(
+        (BROADENED_CARBON_DIOXIDE_EXPONENT - exponent).abs() <= 0.000_05,
+        "refit BROADENED_CARBON_DIOXIDE_EXPONENT on Earth's forcing of doubled carbon \
+         dioxide: {exponent:.5}"
+    );
+    assert!(
+        (BROADENED_CARBON_DIOXIDE_COLLISIONS - collisions).abs() <= 0.000_005,
+        "refit BROADENED_CARBON_DIOXIDE_COLLISIONS on the measured Venus: {collisions:.6}"
+    );
+    assert!(
+        (BROADENED_GREENHOUSE_WATER_VAPOUR - water.0).abs() <= 0.005,
+        "refit BROADENED_GREENHOUSE_WATER_VAPOUR on Earth after carbon dioxide: {:.4}",
+        water.0
+    );
+    assert!(
+        (BROADENED_GREENHOUSE_WATER_CLOUD - water.1).abs() <= 0.005,
+        "refit BROADENED_GREENHOUSE_WATER_CLOUD on Earth after carbon dioxide: {:.4}",
+        water.1
+    );
+    for (fitted, oracle, committed, what) in [
+        (
             fit.albedo,
             fit.albedo_oracle,
+            WET_ALBEDO_GRADIENT,
+            "WET_ALBEDO_GRADIENT",
+        ),
+        (
             fit.conductance,
             fit.oracle,
-            fit.gain,
-            fit.planck * fit.gain,
-            fit.effective,
-            6.0 * fit.conductance / fit.effective,
-        );
-        assert!(band > 0.0 && collisions > 0.0, "a {band}, b {collisions}");
+            BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
+            "BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K",
+        ),
+    ] {
+        assert!((fitted / oracle - 1.0).abs() < 1e-9, "{what}: {fit:?}");
         assert!(
-            (BROADENED_CARBON_DIOXIDE_BAND - band).abs() <= 0.005,
-            "refit BROADENED_CARBON_DIOXIDE_BAND on the measured Mars: {band:.4}"
+            (fitted / committed - 1.0).abs() < 1e-7,
+            "refit {what} to Earth's {EARTH_EQUATOR_POLE_CONTRAST_K} K: {fitted:.10}"
         );
-        assert!(
-            (BROADENED_CARBON_DIOXIDE_EXPONENT - exponent).abs() <= 0.000_05,
-            "refit BROADENED_CARBON_DIOXIDE_EXPONENT on Earth's forcing of doubled carbon \
-             dioxide: {exponent:.5}"
-        );
-        assert!(
-            (BROADENED_CARBON_DIOXIDE_COLLISIONS - collisions).abs() <= 0.000_005,
-            "refit BROADENED_CARBON_DIOXIDE_COLLISIONS on the measured Venus: {collisions:.6}"
-        );
-        assert!(
-            (BROADENED_GREENHOUSE_WATER_VAPOUR - water.0).abs() <= 0.005,
-            "refit BROADENED_GREENHOUSE_WATER_VAPOUR on Earth after carbon dioxide: {:.4}",
-            water.0
-        );
-        assert!(
-            (BROADENED_GREENHOUSE_WATER_CLOUD - water.1).abs() <= 0.005,
-            "refit BROADENED_GREENHOUSE_WATER_CLOUD on Earth after carbon dioxide: {:.4}",
-            water.1
-        );
-        for (fitted, oracle, committed, what) in [
-            (
-                fit.albedo,
-                fit.albedo_oracle,
-                WET_ALBEDO_GRADIENT,
-                "WET_ALBEDO_GRADIENT",
-            ),
-            (
-                fit.conductance,
-                fit.oracle,
-                BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
-                "BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K",
-            ),
-        ] {
-            assert!((fitted / oracle - 1.0).abs() < 1e-9, "{what}: {fit:?}");
-            assert!(
-                (fitted / committed - 1.0).abs() < 1e-7,
-                "refit {what} to Earth's {EARTH_EQUATOR_POLE_CONTRAST_K} K: {fitted:.10}"
-            );
-        }
-        // The batch's D⊕ is the one the measured Earth's column reads, every scaling 1 on it.
-        assert!(
-            (fit.read - BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K).abs() < 1e-15,
-            "{fit:?}"
-        );
-    });
+    }
+    // The batch's D⊕ is the one the measured Earth's column reads, every scaling 1 on it.
+    assert!(
+        (fit.read - BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K).abs() < 1e-15,
+        "{fit:?}"
+    );
 }
 
 /// States Kopparapu et al.'s check under `constants` ([`KOPPARAPU_OUTGOING_INFRARED`]): at each of
@@ -3522,69 +3432,67 @@ fn state_kopparapu_s_check(constants: &GreenhouseConstants) {
 #[test]
 fn under_the_escape_batch_the_measured_venus_mars_and_earth_hold() {
     let held = table();
-    with_rules(EscapeRules::Batch, || {
-        let batch = table();
-        let venus = measured_venus().atmosphere().surface_temperature().value();
-        let mars = measured_mars(found(&batch, "Mars"));
-        let depth = GreenhouseConstants::in_force().optical_depth(
-            &mars.partials,
-            mars.equilibrium,
-            mars.gravity,
+    let batch = table();
+    let venus = measured_venus().atmosphere().surface_temperature().value();
+    let mars = measured_mars(found(&batch, "Mars"));
+    let depth = GreenhouseConstants::in_force().optical_depth(
+        &mars.partials,
+        mars.equilibrium,
+        mars.gravity,
+    );
+    let mars_t = grey_surface_temperature(mars.equilibrium, depth).value();
+    let earth = found(&batch, "Earth");
+    let at = at_measured_albedo(earth, SurfaceState::Temperate);
+    let measured = atmosphere_under(
+        &table_earth_inputs(earth, at),
+        &PassSurface::stand_in(PassLight::HottestHost),
+    );
+    assert_eq!(measured.state(), SurfaceState::Temperate);
+    let earth_t = measured.surface_temperature().value();
+    eprintln!(
+        "under the escape's batch: the measured Venus {venus:.3} K, the measured Mars \
+         {mars_t:.3} K (tau {depth:.6} at T_eq {:.4} K), the measured Earth {earth_t:.3} K \
+         (water {:.3} Pa)",
+        mars.equilibrium.value(),
+        measured.partial_pressures().of(Gas::Water).value(),
+    );
+    for name in ["Mars", "Venus", "Earth", "Titan"] {
+        let (was, now) = (
+            found(&held, name).atmosphere(),
+            found(&batch, name).atmosphere(),
         );
-        let mars_t = grey_surface_temperature(mars.equilibrium, depth).value();
-        let earth = found(&batch, "Earth");
-        let at = at_measured_albedo(earth, SurfaceState::Temperate);
-        let measured = atmosphere_under(
-            &table_earth_inputs(earth, at),
-            &PassSurface::stand_in(PassLight::HottestHost),
-        );
-        assert_eq!(measured.state(), SurfaceState::Temperate);
-        let earth_t = measured.surface_temperature().value();
+        let bar = |air: &Atmosphere| {
+            air.surface_pressure()
+                .map_or(0.0, |p| p.value() / PASCALS_PER_BAR)
+        };
         eprintln!(
-            "under the escape's batch: the measured Venus {venus:.3} K, the measured Mars \
-             {mars_t:.3} K (tau {depth:.6} at T_eq {:.4} K), the measured Earth {earth_t:.3} K \
-             (water {:.3} Pa)",
-            mars.equilibrium.value(),
-            measured.partial_pressures().of(Gas::Water).value(),
+            "the table's {name}: {:?} {:.3} K at {:.6} bar under the batch, {:?} {:.3} K at \
+             {:.6} bar under the hold",
+            now.state(),
+            now.surface_temperature().value(),
+            bar(now),
+            was.state(),
+            was.surface_temperature().value(),
+            bar(was),
         );
-        for name in ["Mars", "Venus", "Earth", "Titan"] {
-            let (was, now) = (
-                found(&held, name).atmosphere(),
-                found(&batch, name).atmosphere(),
-            );
-            let bar = |air: &Atmosphere| {
-                air.surface_pressure()
-                    .map_or(0.0, |p| p.value() / PASCALS_PER_BAR)
-            };
-            eprintln!(
-                "the table's {name}: {:?} {:.3} K at {:.6} bar under the batch, {:?} {:.3} K at \
-                 {:.6} bar under the hold",
-                now.state(),
-                now.surface_temperature().value(),
-                bar(now),
-                was.state(),
-                was.surface_temperature().value(),
-                bar(was),
-            );
-        }
-        assert!(
-            ((venus - VENUS_SURFACE_TEMPERATURE) / VENUS_SURFACE_TEMPERATURE).abs() < 0.02,
-            "the measured Venus at {venus} K"
-        );
-        assert!(
-            (mars_t - MARS_SURFACE_TEMPERATURE).abs() < 1.0,
-            "the measured Mars at {mars_t} K"
-        );
-        assert!(
-            (earth_t - EARTH_SURFACE_TEMPERATURE).abs() < 2.0,
-            "the measured Earth at {earth_t} K"
-        );
-        let median = found(&batch, "Venus").atmosphere();
-        let median_t = median.surface_temperature().value();
-        eprintln!("the table's median Venus {median_t:.3} K, against the adiabat's 676 K");
-        assert_eq!(median.state(), SurfaceState::RunawayGreenhouse);
-        assert!((590.0..700.0).contains(&median_t), "{median_t} K");
-    });
+    }
+    assert!(
+        ((venus - VENUS_SURFACE_TEMPERATURE) / VENUS_SURFACE_TEMPERATURE).abs() < 0.02,
+        "the measured Venus at {venus} K"
+    );
+    assert!(
+        (mars_t - MARS_SURFACE_TEMPERATURE).abs() < 1.0,
+        "the measured Mars at {mars_t} K"
+    );
+    assert!(
+        (earth_t - EARTH_SURFACE_TEMPERATURE).abs() < 2.0,
+        "the measured Earth at {earth_t} K"
+    );
+    let median = found(&batch, "Venus").atmosphere();
+    let median_t = median.surface_temperature().value();
+    eprintln!("the table's median Venus {median_t:.3} K, against the adiabat's 676 K");
+    assert_eq!(median.state(), SurfaceState::RunawayGreenhouse);
+    assert!((590.0..700.0).contains(&median_t), "{median_t} K");
 }
 
 /// P14.T53.a's pin of the dry Earth's cure (decision-p14-t51a-partition §1;
@@ -3611,107 +3519,103 @@ fn under_the_escape_batch_the_measured_venus_mars_and_earth_hold() {
 /// it.
 #[test]
 fn under_the_escape_batch_the_dry_earth_beyond_the_maximum_greenhouse_is_stated() {
-    with_rules(EscapeRules::Batch, || {
-        let earth = earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse);
-        let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&earth, t, p);
-        let air = atmosphere_under(
-            &earth,
-            &PassSurface {
-                climate: PassClimate::Given(&climate),
-                ..PassSurface::stand_in(PassLight::HottestHost)
-            },
-        );
-        let t_s = air.surface_temperature();
-        let co2 = Gas::CarbonDioxide;
-        let (weight, inventory) = (
-            air.partial_pressures().of(co2).value(),
-            air.inventory_weights().of(co2).value(),
-        );
-        let span = t24a_span(&earth, t_s, air.partial_pressures());
-        let partial = mole_fraction(&air, co2) * air.surface_pressure().map_or(0.0, Pascals::value);
-        let trap =
-            saturation_pressure(co2.substance(), span.coldest()).map_or(f64::NAN, Pascals::value);
-        eprintln!(
-            "the dry Earth at 2 au under the batch: {:?} {:.3} K, CO2 {weight:.4e} Pa of \
+    let earth = earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse);
+    let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&earth, t, p);
+    let air = atmosphere_under(
+        &earth,
+        &PassSurface {
+            climate: PassClimate::Given(&climate),
+            ..PassSurface::stand_in(PassLight::HottestHost)
+        },
+    );
+    let t_s = air.surface_temperature();
+    let co2 = Gas::CarbonDioxide;
+    let (weight, inventory) = (
+        air.partial_pressures().of(co2).value(),
+        air.inventory_weights().of(co2).value(),
+    );
+    let span = t24a_span(&earth, t_s, air.partial_pressures());
+    let partial = mole_fraction(&air, co2) * air.surface_pressure().map_or(0.0, Pascals::value);
+    let trap =
+        saturation_pressure(co2.substance(), span.coldest()).map_or(f64::NAN, Pascals::value);
+    eprintln!(
+        "the dry Earth at 2 au under the batch: {:?} {:.3} K, CO2 {weight:.4e} Pa of \
              {inventory:.4e} Pa by weight, its partial pressure {partial:.4e} Pa against p_sat \
              {trap:.4e} Pa at its coldest, {:.3} K; water {:.4e} Pa, tau {:.4}",
-            air.state(),
-            t_s.value(),
-            span.coldest().value(),
-            air.partial_pressures().of(Gas::Water).value(),
-            air.optical_depth(),
-        );
-        let retention = air.retention();
-        let held = IceHeld::of(
-            &earth,
-            retention,
-            earth.equilibrium,
-            WattsPerSquareMetre::ZERO,
-        );
-        let mut airborne = Airborne::kept(&earth, retention, held);
-        let divided = airborne.divide(&earth, retention, held);
-        assert_eq!(divided, SurfaceState::Snowball);
-        let (m, r) = (earth.mass.value(), earth.radius.value());
-        let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
-        // The ceiling: max(273.15 K, T_rest), T_rest the grey surface of nitrogen's and hydrogen's
-        // terms.
-        let constants = GreenhouseConstants::in_force();
-        let rest = constants
-            .terms(air.partial_pressures(), earth.equilibrium, gravity)
-            .iter()
-            .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
-            .fold(0.0, |sum, term| sum + term.depth());
-        let t_rest = grey_surface_temperature(earth.equilibrium, rest).value();
-        let cap = t_rest.max(WATER_MELTING_POINT.value());
-        eprintln!(
-            "  its ceiling {:?}: T_rest {t_rest:.3} K, the cap {cap:.3} K; CO2 airborne {:.3} bar, \
+        air.state(),
+        t_s.value(),
+        span.coldest().value(),
+        air.partial_pressures().of(Gas::Water).value(),
+        air.optical_depth(),
+    );
+    let retention = air.retention();
+    let held = IceHeld::of(
+        &earth,
+        retention,
+        earth.equilibrium,
+        WattsPerSquareMetre::ZERO,
+    );
+    let airborne = Airborne::kept(&earth, retention, held);
+    let (m, r) = (earth.mass.value(), earth.radius.value());
+    let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
+    // The ceiling: max(273.15 K, T_rest), T_rest the grey surface of nitrogen's and hydrogen's
+    // terms.
+    let constants = GreenhouseConstants::in_force();
+    let rest = constants
+        .terms(air.partial_pressures(), earth.equilibrium, gravity)
+        .iter()
+        .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
+        .fold(0.0, |sum, term| sum + term.depth());
+    let t_rest = grey_surface_temperature(earth.equilibrium, rest).value();
+    let cap = t_rest.max(WATER_MELTING_POINT.value());
+    eprintln!(
+        "  its ceiling {:?}: T_rest {t_rest:.3} K, the cap {cap:.3} K; CO2 airborne {:.3} bar, \
              condensed {:.3} bar",
-            air.greenhouse_ceiling(),
-            weight / PASCALS_PER_BAR,
-            (inventory - weight) / PASCALS_PER_BAR,
-        );
-        assert_eq!(air.state(), SurfaceState::Snowball);
-        assert_eq!(
-            air.greenhouse_ceiling(),
-            GreenhouseCeiling::MaximumGreenhouse
-        );
-        assert!(
-            t_s.value() <= cap + 1e-9,
-            "{} K over its cap {cap} K",
-            t_s.value()
-        );
-        let column = airborne
-            .column(gravity.value() / (4.0 * core::f64::consts::PI * r * r))
-            .unwrap();
-        let mut weights = AirborneWeights::new();
-        for step in 0..=107 {
-            let t = Kelvin::new(166.0 + f64::from(step));
-            let mut partials = whole_column(&column);
-            for _ in 0..8 {
-                let span = t24a_span(&earth, t, &partials);
-                partials = partitioned_partials(
-                    &column,
-                    &span,
-                    &Ground::without_basins(gravity),
-                    &mut weights,
-                );
-            }
-            let warmed = grey_surface_temperature(
-                earth.equilibrium,
-                constants.optical_depth(&partials, earth.equilibrium, gravity),
+        air.greenhouse_ceiling(),
+        weight / PASCALS_PER_BAR,
+        (inventory - weight) / PASCALS_PER_BAR,
+    );
+    assert_eq!(air.state(), SurfaceState::Snowball);
+    assert_eq!(
+        air.greenhouse_ceiling(),
+        GreenhouseCeiling::MaximumGreenhouse
+    );
+    assert!(
+        t_s.value() <= cap + 1e-9,
+        "{} K over its cap {cap} K",
+        t_s.value()
+    );
+    let column = airborne
+        .column(gravity.value() / (4.0 * core::f64::consts::PI * r * r))
+        .unwrap();
+    let mut weights = AirborneWeights::new();
+    for step in 0..=107 {
+        let t = Kelvin::new(166.0 + f64::from(step));
+        let mut partials = whole_column(&column);
+        for _ in 0..8 {
+            let span = t24a_span(&earth, t, &partials);
+            partials = partitioned_partials(
+                &column,
+                &span,
+                &Ground::without_basins(gravity),
+                &mut weights,
             );
-            if step % 10 == 0 || warmed <= t {
-                eprintln!(
-                    "  at {:.0} K: warmed to {:.3} K{}, CO2 {:.4e} Pa, water {:.4e} Pa",
-                    t.value(),
-                    warmed.value(),
-                    if warmed <= t { " (holds itself)" } else { "" },
-                    partials.of(co2).value(),
-                    partials.of(Gas::Water).value(),
-                );
-            }
         }
-    });
+        let warmed = grey_surface_temperature(
+            earth.equilibrium,
+            constants.optical_depth(&partials, earth.equilibrium, gravity),
+        );
+        if step % 10 == 0 || warmed <= t {
+            eprintln!(
+                "  at {:.0} K: warmed to {:.3} K{}, CO2 {:.4e} Pa, water {:.4e} Pa",
+                t.value(),
+                warmed.value(),
+                if warmed <= t { " (holds itself)" } else { "" },
+                partials.of(co2).value(),
+                partials.of(Gas::Water).value(),
+            );
+        }
+    }
 }
 
 // Decision-p14-t54a-ganymede, C0 follow-up: the runaway's water (rule (a)) and the ice-held
@@ -3719,8 +3623,9 @@ fn under_the_escape_batch_the_dry_earth_beyond_the_maximum_greenhouse_is_stated(
 
 /// Rule (a): a runaway world loses its whole water by photolysis and hydrogen escape, not by H₂O's
 /// molecular Jeans test. A Mars-sized world inside the runaway limit at an irradiation of 305 K,
-/// whose exobase of 1,369 K fails its water (λ ≈ 20) and passes its O₂ (λ ≈ 35.5), keeps
-/// [`runaway_oxygen`]'s O₂ of its whole drawn water, less its sinks, in its air.
+/// whose exobase of 1,369 K fails its water (λ ≈ 20) and passes its O₂ (λ ≈ 35.5), keeps in its
+/// air the O₂ its escape's timed route keeps of its whole drawn water (P14.T53.a, from generator
+/// version 24), where [`runaway_oxygen`]'s whole-age rule keeps some of it, and none of its water.
 #[test]
 fn a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed() {
     let (mass, radius) = (Kilograms::new(6.417e23), Metres::new(3.389_5e6));
@@ -3781,11 +3686,18 @@ fn a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed() 
     let g = GRAVITATIONAL_CONSTANT * mass.value() / math::powi(radius.value(), 2);
     let weight = g / (4.0 * core::f64::consts::PI * math::powi(radius.value(), 2));
     let o2 = air.partial_pressures().of(Gas::Oxygen).value();
-    eprintln!("its O₂: {:.3} bar", o2 / PASCALS_PER_BAR);
-    assert!(
-        (o2 / (kept.value() * weight) - 1.0).abs() < 1e-12,
-        "{o2} Pa"
+    let timed = air
+        .escape()
+        .expect("the batch records every body's escape")
+        .oxygen()
+        .kept()
+        .value();
+    eprintln!(
+        "its O₂: {:.3} bar, its escape's {timed:.4e} kg kept (the whole age's {:.4e} kg)",
+        o2 / PASCALS_PER_BAR,
+        kept.value()
     );
+    assert_same_bits(o2, timed * weight);
     assert_same_bits(air.partial_pressures().of(Gas::Water).value(), 0.0);
 }
 
@@ -4032,9 +3944,9 @@ struct RemnantRecord {
 /// The record's path for the body `inputs` describe, whose atmosphere is `air`, turning as Ceres
 /// does: its figures ([`remnant_figures`]), its conditions under the flux that holds its
 /// equilibrium temperature at its albedo, and its partition and published condensates
-/// (`condensates_under`, the cold traps held, under the Moon's sky).
+/// (`condensates_under`, over a field that traps nothing: P14.T51.a's condensates).
 fn remnant_record(inputs: &AtmosphereInputs, air: &Atmosphere) -> RemnantRecord {
-    use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
+    use crate::planetary::hooks::cold_traps::{RecordColdTraps, RecordField};
     use crate::planetary::hooks::surface::tests::spin_of;
     use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs};
     use crate::units::consts::STEFAN_BOLTZMANN;
@@ -4060,8 +3972,9 @@ fn remnant_record(inputs: &AtmosphereInputs, air: &Atmosphere) -> RemnantRecord 
     })
     .expect("it has a surface");
     let table = conditions.zonal_insolation();
-    let sky = lunar_sky();
-    let traps = RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, air);
+    let traps = RecordColdTraps {
+        field: RecordField::Carried(None),
+    };
     let (partition, published) =
         figures.condensates_under(air, &conditions, gravity, &traps, &table);
     RemnantRecord {
@@ -4337,7 +4250,7 @@ fn weight_per_kg(mass: Kilograms, radius: Metres) -> f64 {
 #[test]
 fn under_the_escape_batch_venus_earth_and_titan_keep_their_airs() {
     let held = table();
-    let batch = with_rules(EscapeRules::Batch, table);
+    let batch = table();
     for name in ["Venus", "Earth", "Titan"] {
         let (was, now) = (
             found(&held, name).atmosphere(),
@@ -4383,17 +4296,21 @@ fn under_the_escape_batch_venus_earth_and_titan_keep_their_airs() {
 /// P14.T53.a: under the batch Mercury and the Moon are airless, the cosmic shoreline keeping
 /// none of their air (Mercury by its X-ray and ultraviolet fluence, the Moon, placed about the Sun
 /// at Earth's distance, by its impacts at 12.5 times its escape speed), and the table's Ganymede,
-/// placed about the Sun at Jupiter's distance, is airless (stated with its shoreline: about the Sun
-/// it is struck at 4.9 times its escape speed, where the measured-moon fixture's Ganymede is struck
-/// at 7.1, `moons::regular`'s test).
+/// placed about the Sun at Jupiter's distance, keeps no air of its own (stated with its shoreline:
+/// about the Sun it is struck at 4.9 times its escape speed, where the measured-moon fixture's
+/// Ganymede is struck at 7.1, `moons::regular`'s test): from P14.T53.c (generator version 24) it
+/// is `Tenuous`, the vapour of what its ice holds at the ice's own temperature, where to version 23
+/// it was airless.
 #[test]
 fn under_the_escape_batch_mercury_the_moon_and_ganymede_are_airless() {
-    let batch = with_rules(EscapeRules::Batch, table);
+    let batch = table();
     for name in ["Mercury", "Moon", "Ganymede"] {
         let air = found(&batch, name).atmosphere();
         eprintln!("{}", air_line(name, air));
-        assert_eq!(air.state(), SurfaceState::Airless, "{name}");
-        if name != "Ganymede" {
+        if name == "Ganymede" {
+            assert_eq!(air.state(), SurfaceState::Tenuous, "{name}");
+        } else {
+            assert_eq!(air.state(), SurfaceState::Airless, "{name}");
             assert!(escape_of(air).shoreline().kept() < 1e-9, "{name}");
         }
     }
@@ -4501,61 +4418,58 @@ fn table_mars_at_its_spin() -> (DerivedBody, AtmosphereInputs, Atmosphere, Clima
 /// bistability (Wordsworth 2015).
 #[test]
 fn under_the_escape_batch_the_table_s_mars_loses_its_nitrogen() {
-    with_rules(EscapeRules::Batch, || {
-        let (mars, inputs, air, body) = table_mars_at_its_spin();
-        eprintln!(
-            "through the batch's passes at their stand-in {}",
-            air_line("Mars", mars.atmosphere())
-        );
-        let escape = escape_of(&air);
-        let shoreline = escape.shoreline();
-        let weight = weight_per_kg(inputs.mass, inputs.radius);
-        let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
-        let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
-        let partial =
-            mole_fraction(&air, Gas::CarbonDioxide) * air.surface_pressure().unwrap().value();
-        let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
-        let nitrogen_inventory = inputs.inventory.nitrogen().value() * weight;
-        let span = step_climate(
-            &body,
-            OceanWeight::NONE,
-            air.surface_temperature(),
-            air.partial_pressures(),
-        );
-        let frost = Gas::CarbonDioxide
-            .substance()
-            .substance()
-            .phase_diagram()
-            .and_then(|diagram| diagram.saturation_temperature(Pascals::new(partial)));
-        let (m, r) = (inputs.mass.value(), inputs.radius.value());
-        eprintln!(
-            "the table's Mars under the batch at its own spin: {} ; CO2 {co2:.2} Pa by weight \
+    let (mars, inputs, air, body) = table_mars_at_its_spin();
+    eprintln!(
+        "through the batch's passes at their stand-in {}",
+        air_line("Mars", mars.atmosphere())
+    );
+    let escape = escape_of(&air);
+    let shoreline = escape.shoreline();
+    let weight = weight_per_kg(inputs.mass, inputs.radius);
+    let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
+    let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
+    let partial = mole_fraction(&air, Gas::CarbonDioxide) * air.surface_pressure().unwrap().value();
+    let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
+    let nitrogen_inventory = inputs.inventory.nitrogen().value() * weight;
+    let span = step_climate(
+        &body,
+        OceanWeight::NONE,
+        air.surface_temperature(),
+        air.partial_pressures(),
+    );
+    let frost = Gas::CarbonDioxide
+        .substance()
+        .substance()
+        .phase_diagram()
+        .and_then(|diagram| diagram.saturation_temperature(Pascals::new(partial)));
+    let (m, r) = (inputs.mass.value(), inputs.radius.value());
+    eprintln!(
+        "the table's Mars under the batch at its own spin: {} ; CO2 {co2:.2} Pa by weight \
              ({partial:.2} Pa partial, its frost point {frost:?}), its column {column:.4e} Pa, so \
              {:.4e} Pa ({:.4e} kg) as CO2 ice; N2 {nitrogen:.3} Pa of its inventory's \
              {nitrogen_inventory:.3} Pa ({:.3}%); T_s {:.3} K (coldest {:.2} K, warmest {:.2} K); \
              the shoreline keeps {:.5} (xuv {:.5}, impact {:.5}, chronology {:.5}, ratio {:.3}), \
              the thermostat's share {}",
-            air_line("", &air),
-            column - co2,
-            (column - co2) / weight,
-            100.0 * nitrogen / nitrogen_inventory,
-            air.surface_temperature().value(),
-            span.coldest().value(),
-            span.warmest().value(),
-            shoreline.kept(),
-            shoreline.xuv(),
-            shoreline.impact(),
-            shoreline.chronology(),
-            inputs.impact_speed.value() / (2.0 * GRAVITATIONAL_CONSTANT * m / r).sqrt(),
-            escape.airborne_carbon_share(),
-        );
-        assert!(nitrogen < 0.05 * nitrogen_inventory, "{nitrogen} Pa of N2");
-        assert_same_bits(escape.airborne_carbon_share(), 1.0);
-    });
+        air_line("", &air),
+        column - co2,
+        (column - co2) / weight,
+        100.0 * nitrogen / nitrogen_inventory,
+        air.surface_temperature().value(),
+        span.coldest().value(),
+        span.warmest().value(),
+        shoreline.kept(),
+        shoreline.xuv(),
+        shoreline.impact(),
+        shoreline.chronology(),
+        inputs.impact_speed.value() / (2.0 * GRAVITATIONAL_CONSTANT * m / r).sqrt(),
+        escape.airborne_carbon_share(),
+    );
+    assert!(nitrogen < 0.05 * nitrogen_inventory, "{nitrogen} Pa of N2");
+    assert_same_bits(escape.airborne_carbon_share(), 1.0);
 }
 
 /// P14.T53.a's Mars test as plan 14 states it, moved to P14.T53.c (main's ruling, 2026-10-22):
-/// every 24 hold in force the table's Mars at its own spin ([`table_mars_at_its_spin`]) keeps 3–10
+/// the table's Mars at its own spin ([`table_mars_at_its_spin`]) keeps 3–10
 /// mbar of carbon dioxide by weight, lies within T13.c's 8% of 214 K, and holds the rest of its
 /// carbon as CO₂ ice. It does not hold as built (the finding
 /// [`under_the_escape_batch_the_table_s_mars_loses_its_nitrogen`] states): 0.22 bar at 243.9 K,
@@ -4579,22 +4493,20 @@ fn under_the_escape_batch_the_table_s_mars_loses_its_nitrogen() {
 #[test]
 #[ignore = "P14.T53.c's recorded miss: the model's climate holds no collapsed branch at the table's Mars's 0.22 bar (its CO2 cap's own energy balance, after 24)"]
 fn under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide() {
-    crate::planetary::testing::with_every_24_hold(|| {
-        let (_, _, air, _) = table_mars_at_its_spin();
-        let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
-        let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
-        let t = air.surface_temperature().value();
-        eprintln!(
-            "the table's Mars, every 24 hold: {}; CO2 {co2:.4} Pa of its column's {column:.4}",
-            air_line("", &air)
-        );
-        assert!((300.0..=1_000.0).contains(&co2), "Mars's CO2 at {co2} Pa");
-        assert!(
-            ((t - MARS_SURFACE_TEMPERATURE) / MARS_SURFACE_TEMPERATURE).abs() < 0.08,
-            "{t} K"
-        );
-        assert!(column > co2, "Mars holds CO2 ice");
-    });
+    let (_, _, air, _) = table_mars_at_its_spin();
+    let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
+    let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
+    let t = air.surface_temperature().value();
+    eprintln!(
+        "the table's Mars: {}; CO2 {co2:.4} Pa of its column's {column:.4}",
+        air_line("", &air)
+    );
+    assert!((300.0..=1_000.0).contains(&co2), "Mars's CO2 at {co2} Pa");
+    assert!(
+        ((t - MARS_SURFACE_TEMPERATURE) / MARS_SURFACE_TEMPERATURE).abs() < 0.08,
+        "{t} K"
+    );
+    assert!(column > co2, "Mars holds CO2 ice");
 }
 
 /// A rocky planet of `earths` M⊕ and `radii` R⊕ on a circular orbit of `au` and period `days`
@@ -4675,49 +4587,46 @@ fn m_dwarf_planet(
 ///   arXiv:2603.28237, abstract), its age taken as 5 Gyr (part B's shoreline test).
 #[test]
 fn under_the_escape_batch_trappist_1_b_and_c_and_lhs_3844_b_are_airless_or_under_a_millibar() {
-    with_rules(EscapeRules::Batch, || {
-        let trappist = (0.0898, 5.53e-4, 2_566.0);
-        for (name, inputs) in [
-            (
-                "TRAPPIST-1 b",
-                m_dwarf_planet(trappist, (1.374, 1.116, 0.011_54, 1.510_826), 7.6e9),
+    let trappist = (0.0898, 5.53e-4, 2_566.0);
+    for (name, inputs) in [
+        (
+            "TRAPPIST-1 b",
+            m_dwarf_planet(trappist, (1.374, 1.116, 0.011_54, 1.510_826), 7.6e9),
+        ),
+        (
+            "TRAPPIST-1 c",
+            m_dwarf_planet(trappist, (1.308, 1.097, 0.015_80, 2.421_937), 7.6e9),
+        ),
+        (
+            "LHS 3844 b",
+            m_dwarf_planet(
+                (0.151, 0.002_72, 3_036.0),
+                (2.27, 1.32, 0.006_23, 0.462_927_92),
+                5e9,
             ),
-            (
-                "TRAPPIST-1 c",
-                m_dwarf_planet(trappist, (1.308, 1.097, 0.015_80, 2.421_937), 7.6e9),
-            ),
-            (
-                "LHS 3844 b",
-                m_dwarf_planet(
-                    (0.151, 0.002_72, 3_036.0),
-                    (2.27, 1.32, 0.006_23, 0.462_927_92),
-                    5e9,
-                ),
-            ),
-        ] {
-            let air = atmosphere(&inputs);
-            let escape = escape_of(&air);
-            let v =
-                (2.0 * GRAVITATIONAL_CONSTANT * inputs.mass.value() / inputs.radius.value()).sqrt();
-            eprintln!(
-                "{}; {:.4} F⊕ of fluence, {:+.3} dex from the line; impact ratio {:.3}; O2 kept \
+        ),
+    ] {
+        let air = atmosphere(&inputs);
+        let escape = escape_of(&air);
+        let v = (2.0 * GRAVITATIONAL_CONSTANT * inputs.mass.value() / inputs.radius.value()).sqrt();
+        eprintln!(
+            "{}; {:.4} F⊕ of fluence, {:+.3} dex from the line; impact ratio {:.3}; O2 kept \
                  {:.3e} kg",
-                air_line(name, &air),
+            air_line(name, &air),
+            inputs.xuv_fluence.value() / earth_xuv_fluence().value(),
+            shoreline_distance_dex(
                 inputs.xuv_fluence.value() / earth_xuv_fluence().value(),
-                shoreline_distance_dex(
-                    inputs.xuv_fluence.value() / earth_xuv_fluence().value(),
-                    MetresPerSecond::new(v)
-                ),
-                inputs.impact_speed.value() / v,
-                escape.oxygen().kept().value(),
-            );
-            let p = air.surface_pressure().unwrap();
-            assert!(
-                air.state() == SurfaceState::Airless || p.value() < 100.0,
-                "{name}: {air:?}"
-            );
-        }
-    });
+                MetresPerSecond::new(v)
+            ),
+            inputs.impact_speed.value() / v,
+            escape.oxygen().kept().value(),
+        );
+        let p = air.surface_pressure().unwrap();
+        assert!(
+            air.state() == SurfaceState::Airless || p.value() < 100.0,
+            "{name}: {air:?}"
+        );
+    }
 }
 
 /// P14.T53.a (as P14.T13.b's test): under the batch a 5 M⊕ core with a 2% envelope at 0.05 au of
@@ -4725,25 +4634,23 @@ fn under_the_escape_batch_trappist_1_b_and_c_and_lhs_3844_b_are_airless_or_under
 /// escape stated.
 #[test]
 fn under_the_escape_batch_a_5_earth_mass_core_is_stripped_at_0_05_au_and_not_at_0_5_au() {
-    with_rules(EscapeRules::Batch, || {
-        let disc = solar_disc();
-        let close = derive(&two_per_cent_envelope(&disc, 0.05), &disc, Years::new(1e9));
-        let far = derive(&two_per_cent_envelope(&disc, 0.5), &disc, Years::new(1e9));
-        for (name, body) in [("0.05 au", &close), ("0.5 au", &far)] {
-            let envelope = escape_of(body.atmosphere()).envelope();
-            eprintln!(
-                "the 5 M⊕ core at {name}: envelope {:.6} of its mass, {:.5} M⊕ lost; {}; its \
+    let disc = solar_disc();
+    let close = derive(&two_per_cent_envelope(&disc, 0.05), &disc, Years::new(1e9));
+    let far = derive(&two_per_cent_envelope(&disc, 0.5), &disc, Years::new(1e9));
+    for (name, body) in [("0.05 au", &close), ("0.5 au", &far)] {
+        let envelope = escape_of(body.atmosphere()).envelope();
+        eprintln!(
+            "the 5 M⊕ core at {name}: envelope {:.6} of its mass, {:.5} M⊕ lost; {}; its \
                  helium {envelope:?}",
-                body.fractions().envelope(),
-                body.envelope_lost().value(),
-                air_line(name, body.atmosphere()),
-            );
-        }
-        assert_same_bits(close.fractions().envelope(), 0.0);
-        assert!(close.envelope_lost().value() > 0.09);
-        assert!(far.fractions().envelope() > 0.018, "{far:?}");
-        assert_eq!(far.atmosphere().state(), SurfaceState::GasEnvelope);
-    });
+            body.fractions().envelope(),
+            body.envelope_lost().value(),
+            air_line(name, body.atmosphere()),
+        );
+    }
+    assert_same_bits(close.fractions().envelope(), 0.0);
+    assert!(close.envelope_lost().value() > 0.09);
+    assert!(far.fractions().envelope() > 0.018, "{far:?}");
+    assert_eq!(far.atmosphere().state(), SurfaceState::GasEnvelope);
 }
 
 /// A Mars's inputs by hand at age `years` about the present Sun at 1.524 au, dry, so that its
@@ -4796,40 +4703,38 @@ fn dry_mars_at(years: f64) -> AtmosphereInputs {
 /// either by more than 8% of the air's first figure (both stated, with the largest step).
 #[test]
 fn under_the_escape_batch_escape_is_continuous_and_monotone_in_time() {
-    with_rules(EscapeRules::Batch, || {
-        let mut last: Option<(f64, f64)> = None;
-        let (mut first, mut steps) = (None, (0.0_f64, 0.0_f64));
-        for k in 0..=96 {
-            let years = math::exp10(7.0 + f64::from(k) / 32.0);
-            let air = atmosphere(&dry_mars_at(years));
-            let (kept, p) = (
-                escape_of(&air).shoreline().kept(),
-                air.surface_pressure().unwrap().value(),
-            );
-            if k % 8 == 0 {
-                eprintln!(
-                    "at {years:.4e} yr: kept {kept:.6}, p_s {p:.6e} Pa, {:?}",
-                    air.state()
-                );
-            }
-            let (kept_0, p_0) = *first.get_or_insert((kept, p));
-            if let Some((was_kept, was_p)) = last {
-                assert!(kept <= was_kept, "the kept share rises at {years} yr");
-                assert!(
-                    p <= was_p,
-                    "the pressure rises at {years} yr: {was_p} to {p}"
-                );
-                steps.0 = steps.0.max((was_kept - kept) / kept_0);
-                steps.1 = steps.1.max((was_p - p) / p_0);
-            }
-            last = Some((kept, p));
-        }
-        eprintln!(
-            "the largest step: {:.4} of the kept share, {:.4} of the pressure",
-            steps.0, steps.1
+    let mut last: Option<(f64, f64)> = None;
+    let (mut first, mut steps) = (None, (0.0_f64, 0.0_f64));
+    for k in 0..=96 {
+        let years = math::exp10(7.0 + f64::from(k) / 32.0);
+        let air = atmosphere(&dry_mars_at(years));
+        let (kept, p) = (
+            escape_of(&air).shoreline().kept(),
+            air.surface_pressure().unwrap().value(),
         );
-        assert!(steps.0 < 0.08 && steps.1 < 0.08, "{steps:?}");
-    });
+        if k % 8 == 0 {
+            eprintln!(
+                "at {years:.4e} yr: kept {kept:.6}, p_s {p:.6e} Pa, {:?}",
+                air.state()
+            );
+        }
+        let (kept_0, p_0) = *first.get_or_insert((kept, p));
+        if let Some((was_kept, was_p)) = last {
+            assert!(kept <= was_kept, "the kept share rises at {years} yr");
+            assert!(
+                p <= was_p,
+                "the pressure rises at {years} yr: {was_p} to {p}"
+            );
+            steps.0 = steps.0.max((was_kept - kept) / kept_0);
+            steps.1 = steps.1.max((was_p - p) / p_0);
+        }
+        last = Some((kept, p));
+    }
+    eprintln!(
+        "the largest step: {:.4} of the kept share, {:.4} of the pressure",
+        steps.0, steps.1
+    );
+    assert!(steps.0 < 0.08 && steps.1 < 0.08, "{steps:?}");
 }
 
 /// P14.T53.a's tripwire (decision-bump-plan-after-22, R3 Q1 (5)): under the batch the table's
@@ -4838,45 +4743,30 @@ fn under_the_escape_batch_escape_is_continuous_and_monotone_in_time() {
 /// thermostat's solves over the table are stated.
 #[test]
 fn under_the_escape_batch_earth_is_its_stored_state_to_the_bit() {
-    with_rules(EscapeRules::Batch, || {
-        let (on, counts) = with_thermostat(Thermostat::On, table);
-        let (off, _) = with_thermostat(Thermostat::Off, table);
-        let (with, without) = (found(&on, "Earth"), found(&off, "Earth"));
-        assert_eq!(with, without);
-        let (a, b) = (with.atmosphere(), without.atmosphere());
+    let (on, counts) = with_thermostat(Thermostat::On, table);
+    let (off, _) = with_thermostat(Thermostat::Off, table);
+    let (with, without) = (found(&on, "Earth"), found(&off, "Earth"));
+    assert_eq!(with, without);
+    let (a, b) = (with.atmosphere(), without.atmosphere());
+    assert_same_bits(
+        a.surface_temperature().value(),
+        b.surface_temperature().value(),
+    );
+    for gas in Gas::ALL {
         assert_same_bits(
-            a.surface_temperature().value(),
-            b.surface_temperature().value(),
+            a.partial_pressures().of(gas).value(),
+            b.partial_pressures().of(gas).value(),
         );
-        for gas in Gas::ALL {
-            assert_same_bits(
-                a.partial_pressures().of(gas).value(),
-                b.partial_pressures().of(gas).value(),
-            );
-        }
-        assert_same_bits(with.albedo().value(), without.albedo().value());
-        assert_same_bits(
-            escape_of(a).airborne_carbon_share(),
-            TEMPERATE_AIRBORNE_CARBON,
-        );
-        eprintln!(
-            "the table under the batch: {counts:?}; Earth {}",
-            air_line("", a)
-        );
-    });
-}
-
-/// P14.T53.a's hold: under the escape's hold, to generator version 23, no body records an escape
-/// and the batch's steps take no solve, and the table's bodies are the rules in force's, which
-/// version 23 holds (the goldens hold every figure).
-#[test]
-fn under_the_hold_no_body_records_an_escape() {
-    let (held, counts) = with_thermostat(Thermostat::On, || with_rules(EscapeRules::Held, table));
-    assert_eq!(counts, ThermostatCounts::default());
-    for (name, body) in &held {
-        assert!(body.atmosphere().escape().is_none(), "{name}");
     }
-    assert_eq!(held, table());
+    assert_same_bits(with.albedo().value(), without.albedo().value());
+    assert_same_bits(
+        escape_of(a).airborne_carbon_share(),
+        TEMPERATE_AIRBORNE_CARBON,
+    );
+    eprintln!(
+        "the table under the batch: {counts:?}; Earth {}",
+        air_line("", a)
+    );
 }
 
 /// The elements' inventory, kg, in [`ESCAPE_ELEMENTS`]'s order (hydrogen, helium, carbon,
@@ -4947,106 +4837,104 @@ fn thin_envelope_core() -> AtmosphereInputs {
 /// moon, an Earth and the remnant ice bulks. The young melt's oxygen stated against its capacity.
 #[test]
 fn under_the_escape_batch_each_element_s_outcome_sums_to_its_inventory() {
-    with_rules(EscapeRules::Batch, || {
-        let check = |name: &str, air: &Atmosphere, inventory: &VolatileInventory, envelope: f64| {
-            let expected = element_inventory_of(inventory, envelope);
-            let largest = expected.iter().fold(0.0_f64, |a, &b| a.max(b));
-            for (outcome, expected) in escape_of(air).elements().iter().zip(expected) {
-                let sum = outcome.inventory().value();
-                assert!(
-                    (sum - expected).abs() <= 1e-9 * largest,
-                    "{name}: {:?} sums to {sum} kg against {expected} kg: {outcome:?}",
-                    outcome.element()
-                );
-            }
-        };
-        // A derived body's envelope at formation: the one it holds now and what escape took.
-        let formed = |body: &DerivedBody| {
-            body.fractions().envelope() * Kilograms::from(body.mass()).value()
-                + Kilograms::from(body.envelope_lost()).value()
-        };
-        for (name, body) in &table() {
-            check(name, body.atmosphere(), body.inventory(), formed(body));
-        }
-        let disc = solar_disc();
-        for au in [0.05, 0.5] {
-            let body = derive(&two_per_cent_envelope(&disc, au), &disc, Years::new(1e9));
-            let at_formation = body.initial_envelope_fraction()
-                * Kilograms::from(body.mass() + body.envelope_lost()).value();
-            assert!((formed(&body) / at_formation - 1.0).abs() < 1e-12);
-            check(
-                "a 5 M⊕ core",
-                body.atmosphere(),
-                body.inventory(),
-                formed(&body),
+    let check = |name: &str, air: &Atmosphere, inventory: &VolatileInventory, envelope: f64| {
+        let expected = element_inventory_of(inventory, envelope);
+        let largest = expected.iter().fold(0.0_f64, |a, &b| a.max(b));
+        for (outcome, expected) in escape_of(air).elements().iter().zip(expected) {
+            let sum = outcome.inventory().value();
+            assert!(
+                (sum - expected).abs() <= 1e-9 * largest,
+                "{name}: {:?} sums to {sum} kg against {expected} kg: {outcome:?}",
+                outcome.element()
             );
         }
-        let thin = thin_envelope_core();
-        let air = atmosphere(&thin);
-        eprintln!("the thin envelope: {}", air_line("", &air));
-        assert!(
-            air.partial_pressures().of(Gas::Hydrogen) > Pascals::ZERO,
-            "{air:?}"
-        );
-        assert!(
-            air.partial_pressures().of(Gas::Helium) > Pascals::ZERO,
-            "{air:?}"
-        );
+    };
+    // A derived body's envelope at formation: the one it holds now and what escape took.
+    let formed = |body: &DerivedBody| {
+        body.fractions().envelope() * Kilograms::from(body.mass()).value()
+            + Kilograms::from(body.envelope_lost()).value()
+    };
+    for (name, body) in &table() {
+        check(name, body.atmosphere(), body.inventory(), formed(body));
+    }
+    let disc = solar_disc();
+    for au in [0.05, 0.5] {
+        let body = derive(&two_per_cent_envelope(&disc, au), &disc, Years::new(1e9));
+        let at_formation = body.initial_envelope_fraction()
+            * Kilograms::from(body.mass() + body.envelope_lost()).value();
+        assert!((formed(&body) / at_formation - 1.0).abs() < 1e-12);
         check(
-            "the thin envelope",
+            "a 5 M⊕ core",
+            body.atmosphere(),
+            body.inventory(),
+            formed(&body),
+        );
+    }
+    let thin = thin_envelope_core();
+    let air = atmosphere(&thin);
+    eprintln!("the thin envelope: {}", air_line("", &air));
+    assert!(
+        air.partial_pressures().of(Gas::Hydrogen) > Pascals::ZERO,
+        "{air:?}"
+    );
+    assert!(
+        air.partial_pressures().of(Gas::Helium) > Pascals::ZERO,
+        "{air:?}"
+    );
+    check(
+        "the thin envelope",
+        &air,
+        &thin.inventory,
+        thin.envelope_history.initial.value(),
+    );
+    let mut young = earth_inputs(300.0, Insolation::InsideRunaway);
+    young.molten_for = Years::new(5e7);
+    young.inventory = VolatileInventory::new(
+        Kilograms::new(5.0 * OCEAN),
+        young.inventory.carbon_dioxide(),
+        young.inventory.nitrogen(),
+        young.inventory.argon(),
+    );
+    let trappist = m_dwarf_planet(
+        (0.0898, 5.53e-4, 2_566.0),
+        (1.374, 1.116, 0.011_54, 1.510_826),
+        7.6e9,
+    );
+    let titan = titan_inputs();
+    let earth = earth_inputs(255.0, Insolation::Habitable);
+    for (name, inputs) in [
+        ("TRAPPIST-1 b", &trappist),
+        ("a runaway Earth with a young melt", &young),
+        ("a Titan", &titan),
+        ("an Earth", &earth),
+    ] {
+        let air = atmosphere(inputs);
+        check(
+            name,
             &air,
-            &thin.inventory,
-            thin.envelope_history.initial.value(),
+            &inputs.inventory,
+            inputs.envelope_history.initial.value(),
         );
-        let mut young = earth_inputs(300.0, Insolation::InsideRunaway);
-        young.molten_for = Years::new(5e7);
-        young.inventory = VolatileInventory::new(
-            Kilograms::new(5.0 * OCEAN),
-            young.inventory.carbon_dioxide(),
-            young.inventory.nitrogen(),
-            young.inventory.argon(),
-        );
-        let trappist = m_dwarf_planet(
-            (0.0898, 5.53e-4, 2_566.0),
-            (1.374, 1.116, 0.011_54, 1.510_826),
-            7.6e9,
-        );
-        let titan = titan_inputs();
-        let earth = earth_inputs(255.0, Insolation::Habitable);
-        for (name, inputs) in [
-            ("TRAPPIST-1 b", &trappist),
-            ("a runaway Earth with a young melt", &young),
-            ("a Titan", &titan),
-            ("an Earth", &earth),
-        ] {
-            let air = atmosphere(inputs);
-            check(
-                name,
-                &air,
-                &inputs.inventory,
-                inputs.envelope_history.initial.value(),
-            );
-            if name == "a runaway Earth with a young melt" {
-                eprintln!(
-                    "{}: {:?}, the melt's capacity {:.4e} kg",
-                    air_line(name, &air),
-                    escape_of(&air).oxygen(),
-                    melt_oxygen_capacity(inputs.mass).value()
-                );
-            }
-        }
-        for t in [3.2, 40.0, 300.0] {
-            let inputs = remnant_ice_bulk(t);
-            check(
-                "a remnant ice bulk",
-                &atmosphere(&inputs),
-                &inputs.inventory,
-                0.0,
+        if name == "a runaway Earth with a young melt" {
+            eprintln!(
+                "{}: {:?}, the melt's capacity {:.4e} kg",
+                air_line(name, &air),
+                escape_of(&air).oxygen(),
+                melt_oxygen_capacity(inputs.mass).value()
             );
         }
-        let moon = cold_moon(1e19, 94.0, SnowLineSide::Beyond, Crust::Solid);
-        assert!(moon.escape().is_some());
-    });
+    }
+    for t in [3.2, 40.0, 300.0] {
+        let inputs = remnant_ice_bulk(t);
+        check(
+            "a remnant ice bulk",
+            &atmosphere(&inputs),
+            &inputs.inventory,
+            0.0,
+        );
+    }
+    let moon = cold_moon(1e19, 94.0, SnowLineSide::Beyond, Crust::Solid);
+    assert!(moon.escape().is_some());
 }
 
 // P14.T53.a's review (spec D) and decision-bump-plan-after-22's "T53.a's thick-air ceiling": the
@@ -5282,62 +5170,60 @@ fn a_trial_end_whose_full_solve_reads_hot_gives_way_to_a_colder_one() {
 /// the closure's own tests take it beside the ceiling.
 #[test]
 fn under_the_escape_batch_the_maximum_greenhouse_ceiling_is_continuous_and_keeps_t_rest() {
-    with_rules(EscapeRules::Batch, || {
-        without_thick_air(|| {
-            let constants = GreenhouseConstants::in_force();
-            let (equilibrium, gravity) = (Kelvin::new(150.0), STANDARD_GRAVITY);
-            let air = |co2_bar: f64, h2_bar: f64| {
-                PartialPressures::from_fn(|gas| match gas {
-                    Gas::CarbonDioxide => Pascals::new(co2_bar * PASCALS_PER_BAR),
-                    Gas::Nitrogen => Pascals::new(PASCALS_PER_BAR),
-                    Gas::Hydrogen => Pascals::new(h2_bar * PASCALS_PER_BAR),
-                    _ => Pascals::ZERO,
-                })
-            };
-            let at = |ceiling: GreenhouseCeiling, partials: &PartialPressures| {
-                let tau = constants.optical_depth(partials, equilibrium, gravity);
-                (
-                    ceiling
-                        .surface_temperature(&constants, (partials, tau), equilibrium, gravity)
-                        .value(),
-                    grey_surface_temperature(equilibrium, tau).value(),
-                    ceiling.binds(&constants, (partials, tau), equilibrium, gravity),
-                )
-            };
-            let (mut last, mut largest_step, mut bound) = (None::<f64>, 0.0_f64, 0);
-            for k in 0..=400 {
-                let partials = air(math::exp10(-3.0 + 0.0125 * f64::from(k)), 0.0);
-                let (none, grey, never) = at(GreenhouseCeiling::None, &partials);
-                assert_same_bits(none, grey);
-                assert!(!never);
-                let (capped, _, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &partials);
-                assert!(capped <= grey, "{k}");
-                assert_eq!(binds, grey > capped, "{k}");
-                bound += u32::from(binds);
-                if let Some(before) = last {
-                    largest_step = largest_step.max((capped - before).abs());
-                }
-                last = Some(capped);
+    without_thick_air(|| {
+        let constants = GreenhouseConstants::in_force();
+        let (equilibrium, gravity) = (Kelvin::new(150.0), STANDARD_GRAVITY);
+        let air = |co2_bar: f64, h2_bar: f64| {
+            PartialPressures::from_fn(|gas| match gas {
+                Gas::CarbonDioxide => Pascals::new(co2_bar * PASCALS_PER_BAR),
+                Gas::Nitrogen => Pascals::new(PASCALS_PER_BAR),
+                Gas::Hydrogen => Pascals::new(h2_bar * PASCALS_PER_BAR),
+                _ => Pascals::ZERO,
+            })
+        };
+        let at = |ceiling: GreenhouseCeiling, partials: &PartialPressures| {
+            let tau = constants.optical_depth(partials, equilibrium, gravity);
+            (
+                ceiling
+                    .surface_temperature(&constants, (partials, tau), equilibrium, gravity)
+                    .value(),
+                grey_surface_temperature(equilibrium, tau).value(),
+                ceiling.binds(&constants, (partials, tau), equilibrium, gravity),
+            )
+        };
+        let (mut last, mut largest_step, mut bound) = (None::<f64>, 0.0_f64, 0);
+        for k in 0..=400 {
+            let partials = air(math::exp10(-3.0 + 0.0125 * f64::from(k)), 0.0);
+            let (none, grey, never) = at(GreenhouseCeiling::None, &partials);
+            assert_same_bits(none, grey);
+            assert!(!never);
+            let (capped, _, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &partials);
+            assert!(capped <= grey, "{k}");
+            assert_eq!(binds, grey > capped, "{k}");
+            bound += u32::from(binds);
+            if let Some(before) = last {
+                largest_step = largest_step.max((capped - before).abs());
             }
-            eprintln!(
-                "CO₂ from 1 mbar to 100 bar over 1 bar of N₂ at T_eq 150 K: capped at {bound} of \
+            last = Some(capped);
+        }
+        eprintln!(
+            "CO₂ from 1 mbar to 100 bar over 1 bar of N₂ at T_eq 150 K: capped at {bound} of \
                  401, the largest step {largest_step:.4} K"
-            );
-            assert!(bound > 0 && bound < 401);
-            assert!(largest_step < 5.0, "{largest_step}");
-            // 10 bar of H₂: its own greenhouse holds the surface above freezing, at T_rest.
-            let hydrogen = air(1.0, 10.0);
-            let (capped, grey, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &hydrogen);
-            let rest = constants
-                .terms(&hydrogen, equilibrium, gravity)
-                .iter()
-                .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
-                .fold(0.0, |sum, term| sum + term.depth());
-            let t_rest = grey_surface_temperature(equilibrium, rest).value();
-            eprintln!("10 bar of H₂ beyond the limit: T_grey {grey:.3} K, T_rest {t_rest:.3} K");
-            assert!(binds && t_rest > WATER_MELTING_POINT.value());
-            assert_same_bits(capped, t_rest);
-        });
+        );
+        assert!(bound > 0 && bound < 401);
+        assert!(largest_step < 5.0, "{largest_step}");
+        // 10 bar of H₂: its own greenhouse holds the surface above freezing, at T_rest.
+        let hydrogen = air(1.0, 10.0);
+        let (capped, grey, binds) = at(GreenhouseCeiling::MaximumGreenhouse, &hydrogen);
+        let rest = constants
+            .terms(&hydrogen, equilibrium, gravity)
+            .iter()
+            .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
+            .fold(0.0, |sum, term| sum + term.depth());
+        let t_rest = grey_surface_temperature(equilibrium, rest).value();
+        eprintln!("10 bar of H₂ beyond the limit: T_grey {grey:.3} K, T_rest {t_rest:.3} K");
+        assert!(binds && t_rest > WATER_MELTING_POINT.value());
+        assert_same_bits(capped, t_rest);
     });
 }
 
@@ -5356,51 +5242,46 @@ fn under_the_escape_batch_the_ceiling_reaches_a_solid_crust_beyond_the_limit_alo
         crust: Crust::Molten,
         ..beyond
     };
-    assert_eq!(GreenhouseCeiling::of(&beyond), GreenhouseCeiling::None);
-    with_rules(EscapeRules::Batch, || {
-        assert_eq!(
-            GreenhouseCeiling::of(&beyond),
-            GreenhouseCeiling::MaximumGreenhouse
-        );
-        assert_eq!(GreenhouseCeiling::of(&inside), GreenhouseCeiling::None);
-        assert_eq!(GreenhouseCeiling::of(&molten), GreenhouseCeiling::None);
-        assert_eq!(
-            without_ceiling(|| GreenhouseCeiling::of(&beyond)),
-            GreenhouseCeiling::None
-        );
-    });
+    assert_eq!(
+        GreenhouseCeiling::of(&beyond),
+        GreenhouseCeiling::MaximumGreenhouse
+    );
+    assert_eq!(GreenhouseCeiling::of(&inside), GreenhouseCeiling::None);
+    assert_eq!(GreenhouseCeiling::of(&molten), GreenhouseCeiling::None);
+    assert_eq!(
+        without_ceiling(|| GreenhouseCeiling::of(&beyond)),
+        GreenhouseCeiling::None
+    );
 }
 
 /// The ceiling leaves the table's Venus (inside the runaway limit), Earth, Mars (0.431 S⊕ against
 /// the Sun's 0.3507: inside) and Titan (beyond it, at 92.8 K, under the cap) to the bit under the
-/// batch, with both 24 holds (K4, test 1).
+/// batch (K4, test 1).
 #[test]
 fn under_the_escape_batch_the_ceiling_leaves_venus_earth_mars_and_titan_to_the_bit() {
-    with_rules(EscapeRules::Batch, || {
-        let (capped, lifted) = (table(), without_ceiling(table));
-        for name in ["Venus", "Earth", "Mars", "Titan"] {
-            let (with, without) = (found(&capped, name), found(&lifted, name));
-            eprintln!(
-                "{name}: {:?} {:.3} K, ceiling {:?}",
-                with.atmosphere().state(),
-                with.atmosphere().surface_temperature().value(),
-                with.atmosphere().greenhouse_ceiling()
-            );
-            // Every figure but the record of the ceiling itself, which Titan's carries.
-            let unrecorded = DerivedBody {
-                atmosphere: Atmosphere {
-                    ceiling: GreenhouseCeiling::None,
-                    ..*with.atmosphere()
-                },
-                ..*with
-            };
-            assert_eq!(&unrecorded, without, "{name}");
-        }
-        assert_eq!(
-            found(&capped, "Titan").atmosphere().greenhouse_ceiling(),
-            GreenhouseCeiling::MaximumGreenhouse
+    let (capped, lifted) = (table(), without_ceiling(table));
+    for name in ["Venus", "Earth", "Mars", "Titan"] {
+        let (with, without) = (found(&capped, name), found(&lifted, name));
+        eprintln!(
+            "{name}: {:?} {:.3} K, ceiling {:?}",
+            with.atmosphere().state(),
+            with.atmosphere().surface_temperature().value(),
+            with.atmosphere().greenhouse_ceiling()
         );
-    });
+        // Every figure but the record of the ceiling itself, which Titan's carries.
+        let unrecorded = DerivedBody {
+            atmosphere: Atmosphere {
+                ceiling: GreenhouseCeiling::None,
+                ..*with.atmosphere()
+            },
+            ..*with
+        };
+        assert_eq!(&unrecorded, without, "{name}");
+    }
+    assert_eq!(
+        found(&capped, "Titan").atmosphere().greenhouse_ceiling(),
+        GreenhouseCeiling::MaximumGreenhouse
+    );
 }
 
 /// The batch's rules are pure as the bump's are (sim-determinism): under the batch, with both 24
@@ -5408,38 +5289,11 @@ fn under_the_escape_batch_the_ceiling_leaves_venus_earth_mars_and_titan_to_the_b
 /// (`the_speciated_atmosphere_is_the_same_twice`'s, under the batch).
 #[test]
 fn under_the_escape_batch_the_speciated_atmosphere_is_the_same_twice() {
-    with_rules(
-        EscapeRules::Batch,
-        the_speciated_atmosphere_is_the_same_twice,
-    );
+    the_speciated_atmosphere_is_the_same_twice();
 }
 
 // P14.T53.b part 1: the state from the present insolation, and the runaway's deck
 // (decision-absurd-states-24 R3–R4; decision-pre-23-review item 33).
-
-/// What part 1 (a) leaves of a runaway's inventory: the greenhouse, its partial pressures, its
-/// column, its escape, its carbon's carrier and the state its water follows, to the bit.
-fn same_inventory(now: &Atmosphere, peak: &Atmosphere, at: &str) {
-    assert_same_bits(
-        now.surface_temperature().value(),
-        peak.surface_temperature().value(),
-    );
-    assert_same_bits(now.optical_depth(), peak.optical_depth());
-    for gas in Gas::ALL {
-        assert_same_bits(
-            now.partial_pressures().of(gas).value(),
-            peak.partial_pressures().of(gas).value(),
-        );
-        assert_same_bits(
-            now.inventory_weights().of(gas).value(),
-            peak.inventory_weights().of(gas).value(),
-        );
-    }
-    assert_eq!(now.escape(), peak.escape(), "{at}");
-    assert_eq!(now.carbon_carrier(), peak.carbon_carrier(), "{at}");
-    assert_eq!(now.water_state(), peak.water_state(), "{at}");
-    assert_eq!(now.retention(), peak.retention(), "{at}");
-}
 
 /// One of P14.T53.b part 1 (a)'s hand cases ([`past_only_runaways`]), for the tests of the
 /// state's readers.
@@ -5458,12 +5312,11 @@ pub(crate) struct PastOnlyRunaway {
     pub(crate) runaway: Atmosphere,
 }
 
-/// P14.T53.b part 1 (a)'s two hand cases, each derived with every 24 hold in force: an Earth inside
+/// P14.T53.b part 1 (a)'s two hand cases, each derived: an Earth inside
 /// the runaway limit at its hosts' largest past luminosity alone, `Temperate` between the limits
 /// now (at an equilibrium temperature of 255 K) and `Snowball` beyond the maximum-greenhouse limit
 /// now (at 150 K), with its control and its runaway ([`PastOnlyRunaway`]).
 pub(crate) fn past_only_runaways() -> [PastOnlyRunaway; 2] {
-    use crate::planetary::testing::with_every_24_hold;
     let case = |t_eq: f64, present: Insolation, published: SurfaceState| {
         let runaway_inputs = earth_inputs(t_eq, Insolation::InsideRunaway);
         let inputs = AtmosphereInputs {
@@ -5474,13 +5327,13 @@ pub(crate) fn past_only_runaways() -> [PastOnlyRunaway; 2] {
             insolation: present,
             ..inputs
         };
-        with_every_24_hold(|| PastOnlyRunaway {
+        PastOnlyRunaway {
             published,
             inputs,
             air: atmosphere(&inputs),
             control: atmosphere(&control_inputs),
             runaway: atmosphere(&runaway_inputs),
-        })
+        }
     };
     [
         case(255.0, Insolation::Habitable, SurfaceState::Temperate),
@@ -5519,20 +5372,18 @@ fn under_every_24_hold_the_past_only_runaways_hand_cases_are_as_stated() {
     }
 }
 
-/// P14.T53.b part 1 (a) on hand inputs, with every 24 hold in force: an Earth inside the runaway
-/// limit at its hosts' largest past luminosity alone publishes its present class, `Temperate`
-/// between the limits now (at an equilibrium temperature of 255 K) and `Snowball` beyond the
-/// maximum-greenhouse limit now (at 150 K), and a runaway only while it is inside the limit now.
-/// Its water stays lost and its carbon airborne: its greenhouse, partial pressures, column, escape
-/// and carrier are P14.T53.a's runaway's to the bit (`with_present_state(PresentState::Peak, ..)`),
-/// its water follows the runaway (`water_state`), and it holds no surface water, where the same
-/// Earth in its present class at its peak too holds some. A body whose peak class is not a
-/// runaway keeps its peak class's state whatever its present class reads, and under the hold the
-/// present class moves nothing.
+/// P14.T53.b part 1 (a) on hand inputs: an Earth inside the runaway limit at its hosts' largest
+/// past luminosity alone publishes its present class, `Temperate` between the limits now (at an
+/// equilibrium temperature of 255 K) and `Snowball` beyond the maximum-greenhouse limit now (at
+/// 150 K), and a runaway only while it is inside the limit now. Its water stays lost: its water
+/// follows the runaway (`water_state`), and it holds no surface water, where the same Earth in its
+/// present class at its peak too holds some. A body whose peak class is not a runaway keeps its
+/// peak class's state whatever its present class reads. Its comparison with P14.T53.a's runaway
+/// (its greenhouse, partial pressures, column, escape and carrier to the bit) went with the
+/// escape's hold at the 23 → 24 bump.
 #[test]
 fn under_every_24_hold_a_past_only_runaway_publishes_its_present_class() {
     use crate::planetary::hooks::figures::cover;
-    use crate::planetary::testing::with_every_24_hold;
     let surface_water = |inputs: &AtmosphereInputs, air: &Atmosphere| {
         cover::surface_water(
             air,
@@ -5565,20 +5416,13 @@ fn under_every_24_hold_a_past_only_runaway_publishes_its_present_class() {
             insolation: present,
             ..inputs
         };
-        let (now, peak, always) = with_every_24_hold(|| {
-            (
-                atmosphere(&inputs),
-                with_present_state(PresentState::Peak, || atmosphere(&inputs)),
-                atmosphere(&always_inputs),
-            )
-        });
+        let (now, always) = (atmosphere(&inputs), atmosphere(&always_inputs));
         let at = format!("{t_eq} K, {present:?} now: {now:?}");
         eprintln!(
-            "a past runaway at T_eq {t_eq} K, {present:?} now: {:?} (was {:?}), T_s {:.3} K, \
-             p_s {:.4} bar, A {:.4}, cloud {:.4}; its surface water {:.4e} kg m⁻², the same Earth \
-             {present:?} at its peak too {:?} with {:.4e}",
+            "a past runaway at T_eq {t_eq} K, {present:?} now: {:?}, T_s {:.3} K, p_s {:.4} bar, \
+             A {:.4}, cloud {:.4}; its surface water {:.4e} kg m⁻², the same Earth {present:?} at \
+             its peak too {:?} with {:.4e}",
             now.state(),
-            peak.state(),
             now.surface_temperature().value(),
             now.surface_pressure()
                 .map_or(0.0, |p| p.value() / PASCALS_PER_BAR),
@@ -5588,24 +5432,14 @@ fn under_every_24_hold_a_past_only_runaway_publishes_its_present_class() {
             always.state(),
             surface_water(&always_inputs, &always),
         );
-        assert_eq!(peak.state(), SurfaceState::RunawayGreenhouse, "{at}");
         assert_eq!(now.state(), published, "{at}");
         assert_eq!(now.water_state(), SurfaceState::RunawayGreenhouse, "{at}");
         assert_eq!(now.runaway_deck(), RunawayDeck::Kept, "{at}");
-        same_inventory(&now, &peak, &at);
         assert_same_bits(surface_water(&inputs, &now), 0.0);
-        if published == SurfaceState::RunawayGreenhouse {
-            assert_eq!(now, peak, "{at}");
-        } else {
+        if published != SurfaceState::RunawayGreenhouse {
             assert_eq!(always.state(), published, "{at}");
             assert!(surface_water(&always_inputs, &always) > 0.0, "{at}");
         }
-        // Under the hold the present class moves nothing.
-        assert_eq!(
-            atmosphere(&inputs),
-            atmosphere(&earth_inputs(t_eq, Insolation::InsideRunaway)),
-            "{at}"
-        );
     }
     // A body outside the runaway limit at its peak keeps its peak class's state.
     for insolation in [Insolation::Habitable, Insolation::BeyondMaximumGreenhouse] {
@@ -5618,68 +5452,59 @@ fn under_every_24_hold_a_past_only_runaway_publishes_its_present_class() {
             present_insolation: Insolation::InsideRunaway,
             ..inputs
         };
-        with_every_24_hold(|| assert_eq!(atmosphere(&inside_now), atmosphere(&inputs)));
+        assert_eq!(atmosphere(&inside_now), atmosphere(&inputs));
     }
 }
 
-/// P14.T53.b part 1 (b)'s test, on hand-built atmospheres with every 24 hold in force: a published
-/// runaway under Venus's deck is solved again without it only below
-/// [`ACID_CYCLING_TEMPERATURE`] (430 K), never at or above it, nor from any other state, from a
-/// deckless runaway or at a temperature that is not a number, and never under P14.T53.a's batch as
-/// built (`with_present_state(PresentState::Peak, ..)`) or under the hold.
+/// P14.T53.b part 1 (b)'s test, on hand-built atmospheres: a published runaway under Venus's deck
+/// is solved again without it only below [`ACID_CYCLING_TEMPERATURE`] (430 K), never at or above
+/// it, nor from any other state, from a deckless runaway or at a temperature that is not a
+/// number.
 #[test]
 fn under_every_24_hold_only_a_runaway_under_its_deck_below_430_k_is_solved_again() {
-    use crate::planetary::testing::with_every_24_hold;
     assert_same_bits(ACID_CYCLING_TEMPERATURE.value(), 430.0);
-    let air = with_every_24_hold(|| atmosphere(&earth_inputs(255.0, Insolation::InsideRunaway)));
+    let air = atmosphere(&earth_inputs(255.0, Insolation::InsideRunaway));
     assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
     assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
     let at = |t: f64| Atmosphere {
         surface_temperature: Kelvin::new(t),
         ..air
     };
-    with_every_24_hold(|| {
-        for t in [45.8, 273.0, 360.2, 429.999, 430.0_f64.next_down()] {
-            assert!(solved_without_the_deck(&at(t)), "{t} K");
-        }
-        for t in [430.0, 430.0_f64.next_up(), 737.0, 1_031.0, f64::NAN] {
-            assert!(!solved_without_the_deck(&at(t)), "{t} K");
-        }
-        let deckless = Atmosphere {
-            runaway_deck: RunawayDeck::Deckless,
-            ..at(300.0)
-        };
-        assert!(!solved_without_the_deck(&deckless));
-        for state in [
-            SurfaceState::GasEnvelope,
-            SurfaceState::MagmaOcean,
-            SurfaceState::Airless,
-            SurfaceState::Temperate,
-            SurfaceState::Snowball,
-        ] {
-            assert!(
-                !solved_without_the_deck(&Atmosphere { state, ..at(300.0) }),
-                "{state:?}"
-            );
-        }
-        assert!(!with_present_state(PresentState::Peak, || {
-            solved_without_the_deck(&at(300.0))
-        }));
-    });
-    assert!(!solved_without_the_deck(&at(300.0)), "under the hold");
+    for t in [45.8, 273.0, 360.2, 429.999, 430.0_f64.next_down()] {
+        assert!(solved_without_the_deck(&at(t)), "{t} K");
+    }
+    for t in [430.0, 430.0_f64.next_up(), 737.0, 1_031.0, f64::NAN] {
+        assert!(!solved_without_the_deck(&at(t)), "{t} K");
+    }
+    let deckless = Atmosphere {
+        runaway_deck: RunawayDeck::Deckless,
+        ..at(300.0)
+    };
+    assert!(!solved_without_the_deck(&deckless));
+    for state in [
+        SurfaceState::GasEnvelope,
+        SurfaceState::MagmaOcean,
+        SurfaceState::Airless,
+        SurfaceState::Temperate,
+        SurfaceState::Snowball,
+    ] {
+        assert!(
+            !solved_without_the_deck(&Atmosphere { state, ..at(300.0) }),
+            "{state:?}"
+        );
+    }
 }
 
-/// P14.T53.b part 1 (b) through the passes, with every 24 hold in force: a Venus at Venus's orbit
-/// about the Sun with its history, its carbon and nitrogen drawn low (ranks 10⁻⁹ to the median),
-/// is a runaway inside the present limit. Where its passes under Venus's deck end below 430 K
-/// (P14.T53.a's batch as built, `with_present_state(PresentState::Peak, ..)`, whose solve is the
-/// first one about a main-sequence host) it is solved once more without the deck and published so:
-/// its state a runaway, its deck `Deckless`, its cloud a temperate world's water cloud at its
-/// availability, under 0.67 for its dry air, and one re-solve counted with both solves' passes.
-/// At or above 430 K it publishes the decked solve to the bit, and counts none.
+/// P14.T53.b part 1 (b) through the passes: a Venus at Venus's orbit about the Sun with its
+/// history, its carbon and nitrogen drawn low (ranks 10⁻⁹ to the median), is a runaway inside the
+/// present limit. Where its passes under Venus's deck end below 430 K it is solved once more
+/// without the deck and published so: its state a runaway, its deck `Deckless`, its cloud a
+/// temperate world's water cloud at its availability, under 0.67 for its dry air, and one re-solve
+/// counted with its passes. At or above 430 K it publishes the decked solve, at or above 430 K,
+/// and counts none. Its comparison with P14.T53.a's batch as built, the decked solve's figures and
+/// passes, went with the escape's hold at the 23 → 24 bump.
 #[test]
 fn under_every_24_hold_a_cold_runaway_is_solved_again_without_its_deck() {
-    use crate::planetary::testing::with_every_24_hold;
     let disc = solar_disc();
     let &(_, kg, km, a, e) = table_bodies().find(|(name, ..)| *name == "Venus").unwrap();
     let placed = placed_about_the_sun(&disc, (kg, km, a, e));
@@ -5693,56 +5518,48 @@ fn under_every_24_hold_a_cold_runaway_is_solved_again_without_its_deck() {
         derived(&placed.with_volatiles(draws), &disc)
     };
     let (mut kept, mut deckless) = (0, 0);
-    with_every_24_hold(|| {
-        for rank in [1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 0.1, 0.5] {
-            let peak = with_present_state(PresentState::Peak, || body(rank));
-            let (now, counts) = with_deck_counts(|| body(rank));
-            let (was, air) = (peak.atmosphere(), now.atmosphere());
-            let bar = |air: &Atmosphere| {
-                air.surface_pressure()
-                    .map_or(0.0, |p| p.value() / PASCALS_PER_BAR)
-            };
-            eprintln!(
-                "a Venus at carbon rank {rank:e}: under the deck {:?} {:.3} K, {:.4e} bar, A {:.4} \
-                 in {} passes; published {:?} {:?} {:.3} K, {:.4e} bar, A {:.4}, cloud {:.4} in {} \
-                 passes; {counts:?}",
-                was.state(),
-                was.surface_temperature().value(),
-                bar(was),
-                peak.albedo().value(),
-                peak.atmosphere_passes(),
-                air.state(),
-                air.runaway_deck(),
-                air.surface_temperature().value(),
-                bar(air),
-                now.albedo().value(),
-                air.cloud_fraction(),
-                now.atmosphere_passes(),
+    for rank in [1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 0.1, 0.5] {
+        let (now, counts) = with_deck_counts(|| body(rank));
+        let air = now.atmosphere();
+        let bar = |air: &Atmosphere| {
+            air.surface_pressure()
+                .map_or(0.0, |p| p.value() / PASCALS_PER_BAR)
+        };
+        eprintln!(
+            "a Venus at carbon rank {rank:e}: published {:?} {:?} {:.3} K, {:.4e} bar, A {:.4}, \
+             cloud {:.4} in {} passes; {counts:?}",
+            air.state(),
+            air.runaway_deck(),
+            air.surface_temperature().value(),
+            bar(air),
+            now.albedo().value(),
+            air.cloud_fraction(),
+            now.atmosphere_passes(),
+        );
+        assert_eq!(air.state(), SurfaceState::RunawayGreenhouse, "{rank:e}");
+        if air.runaway_deck() == RunawayDeck::Deckless {
+            assert!(air.cloud_fraction() < 0.67, "{rank:e}");
+            assert_eq!(
+                counts,
+                DeckCounts {
+                    resolves: 1,
+                    decked_passes: counts.decked_passes,
+                    deckless_passes: u64::from(now.atmosphere_passes()),
+                    ..DeckCounts::default()
+                },
+                "{rank:e}"
             );
-            assert_eq!(was.state(), SurfaceState::RunawayGreenhouse, "{rank:e}");
-            if was.surface_temperature().value() < ACID_CYCLING_TEMPERATURE.value() {
-                assert_eq!(air.state(), SurfaceState::RunawayGreenhouse, "{rank:e}");
-                assert_eq!(air.runaway_deck(), RunawayDeck::Deckless, "{rank:e}");
-                assert!(air.cloud_fraction() < 0.67, "{rank:e}");
-                assert_eq!(
-                    counts,
-                    DeckCounts {
-                        resolves: 1,
-                        decked_passes: u64::from(peak.atmosphere_passes()),
-                        deckless_passes: u64::from(now.atmosphere_passes()),
-                        ..DeckCounts::default()
-                    },
-                    "{rank:e}"
-                );
-                deckless += 1;
-            } else {
-                assert_eq!(now, peak, "{rank:e}");
-                assert_eq!(air.runaway_deck(), RunawayDeck::Kept, "{rank:e}");
-                assert_eq!(counts, DeckCounts::default(), "{rank:e}");
-                kept += 1;
-            }
+            assert!(counts.decked_passes > 0, "{rank:e}");
+            deckless += 1;
+        } else {
+            assert!(
+                air.surface_temperature().value() >= ACID_CYCLING_TEMPERATURE.value(),
+                "{rank:e}"
+            );
+            assert_eq!(counts, DeckCounts::default(), "{rank:e}");
+            kept += 1;
         }
-    });
+    }
     assert!(kept > 0 && deckless > 0, "kept {kept}, deckless {deckless}");
 }
 
@@ -5775,7 +5592,7 @@ fn water_s_saturation_temperature_is_its_liquid_vapour_curve_and_its_critical_po
     assert!((two_kilopascals - 290.6).abs() < 0.1, "{two_kilopascals}");
 }
 
-/// P14.T53.b part 1 (c)'s test, with every 24 hold in force (decision-t53b-arm-c §4, §5.5's
+/// P14.T53.b part 1 (c)'s test (decision-t53b-arm-c §4, §5.5's
 /// stubs).
 ///
 /// - Through [`atmosphere`]: a wet Earth between the limits is not a dry division and lists liquid
@@ -5784,15 +5601,13 @@ fn water_s_saturation_temperature_is_its_liquid_vapour_curve_and_its_critical_po
 ///   surface pressure stays, one at it moves; a wet one, one that lists liquid water and one under
 ///   611.657 Pa stay; one above 22.064 MPa is judged at 647.096 K; the census's hothouse's first
 ///   solve (1,221.6 K under 414.8 bar) moves; a past runaway's dry division moves; no other state
-///   moves, nor a temperature that is not a number, nor a body with no surface pressure; and (c) is
-///   off under P14.T53.a's batch as built, with (c) alone off, and under the hold.
+///   moves, nor a temperature that is not a number, nor a body with no surface pressure.
 #[test]
 #[expect(
     clippy::too_many_lines,
     reason = "(c)'s wiring and each of its stubs, stated"
 )]
 fn under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is_a_hothouse() {
-    use crate::planetary::testing::with_every_24_hold;
     let dry_earth = AtmosphereInputs {
         inventory: VolatileInventory::new(
             Kilograms::ZERO,
@@ -5806,13 +5621,11 @@ fn under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is
         present_insolation: Insolation::Habitable,
         ..earth_inputs(255.0, Insolation::InsideRunaway)
     };
-    let (wet, dry, past) = with_every_24_hold(|| {
-        (
-            atmosphere(&earth_inputs(255.0, Insolation::Habitable)),
-            atmosphere(&dry_earth),
-            atmosphere(&past_runaway),
-        )
-    });
+    let (wet, dry, past) = (
+        atmosphere(&earth_inputs(255.0, Insolation::Habitable)),
+        atmosphere(&dry_earth),
+        atmosphere(&past_runaway),
+    );
     for (name, air) in [("wet", &wet), ("dry", &dry), ("past runaway", &past)] {
         eprintln!(
             "the {name} Earth: {:?} (water {:?}), T_s {:.3} K, p_s {:.4} bar, dry division {}, \
@@ -5848,78 +5661,66 @@ fn under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is
     };
     let bar = 1e5;
     let boiling = saturation(bar);
-    with_every_24_hold(|| {
-        let judged = |air: &Atmosphere| solved_as_a_hothouse(air);
-        assert!(!judged(&hand(boiling.next_down(), bar)), "just under");
-        assert!(judged(&hand(boiling, bar)), "at it");
-        assert!(judged(&hand(boiling + 500.0, bar)), "above it");
-        let wet = Atmosphere {
-            dry_division: false,
-            ..hand(boiling + 100.0, bar)
-        };
-        assert!(!judged(&wet), "a wet one");
-        let liquid = Atmosphere {
-            liquid_water: true,
-            ..hand(boiling + 100.0, bar)
-        };
-        assert!(!judged(&liquid), "one that lists liquid water");
-        for p in [611.657_f64.next_down(), 600.0, 1.0] {
-            assert!(!judged(&hand(1_000.0, p)), "{p} Pa");
-        }
-        assert!(judged(&hand(saturation(611.657), 611.657)), "at 611.657 Pa");
-        for p in [22.064e6, 41.5e6] {
-            assert!(judged(&hand(647.096, p)), "{p} Pa at 647.096 K");
-            assert!(
-                !judged(&hand(647.096_f64.next_down(), p)),
-                "{p} Pa under 647.096 K"
-            );
-        }
+    let judged = |air: &Atmosphere| solved_as_a_hothouse(air);
+    assert!(!judged(&hand(boiling.next_down(), bar)), "just under");
+    assert!(judged(&hand(boiling, bar)), "at it");
+    assert!(judged(&hand(boiling + 500.0, bar)), "above it");
+    let wet = Atmosphere {
+        dry_division: false,
+        ..hand(boiling + 100.0, bar)
+    };
+    assert!(!judged(&wet), "a wet one");
+    let liquid = Atmosphere {
+        liquid_water: true,
+        ..hand(boiling + 100.0, bar)
+    };
+    assert!(!judged(&liquid), "one that lists liquid water");
+    for p in [611.657_f64.next_down(), 600.0, 1.0] {
+        assert!(!judged(&hand(1_000.0, p)), "{p} Pa");
+    }
+    assert!(judged(&hand(saturation(611.657), 611.657)), "at 611.657 Pa");
+    for p in [22.064e6, 41.5e6] {
+        assert!(judged(&hand(647.096, p)), "{p} Pa at 647.096 K");
         assert!(
-            judged(&hand(1_221.6, 414.8 * bar)),
-            "the census's first solve"
+            !judged(&hand(647.096_f64.next_down(), p)),
+            "{p} Pa under 647.096 K"
         );
-        let runaway_division = Atmosphere {
-            water_state: SurfaceState::RunawayGreenhouse,
-            ..hand(boiling, bar)
-        };
-        assert!(judged(&runaway_division), "a past runaway's division");
-        for state in [
-            SurfaceState::GasEnvelope,
-            SurfaceState::MagmaOcean,
-            SurfaceState::Airless,
-            SurfaceState::RunawayGreenhouse,
-            SurfaceState::Snowball,
-        ] {
-            assert!(
-                !judged(&Atmosphere {
-                    state,
-                    ..hand(boiling + 100.0, bar)
-                }),
-                "{state:?}"
-            );
-        }
-        assert!(!judged(&hand(f64::NAN, bar)), "NaN K");
+    }
+    assert!(
+        judged(&hand(1_221.6, 414.8 * bar)),
+        "the census's first solve"
+    );
+    let runaway_division = Atmosphere {
+        water_state: SurfaceState::RunawayGreenhouse,
+        ..hand(boiling, bar)
+    };
+    assert!(judged(&runaway_division), "a past runaway's division");
+    for state in [
+        SurfaceState::GasEnvelope,
+        SurfaceState::MagmaOcean,
+        SurfaceState::Airless,
+        SurfaceState::RunawayGreenhouse,
+        SurfaceState::Snowball,
+    ] {
         assert!(
             !judged(&Atmosphere {
-                surface_pressure: None,
+                state,
                 ..hand(boiling + 100.0, bar)
             }),
-            "no surface pressure"
+            "{state:?}"
         );
-        for state in [PresentState::Peak, PresentState::WithoutHothouse] {
-            assert!(
-                !with_present_state(state, || judged(&hand(boiling + 100.0, bar))),
-                "{state:?}"
-            );
-        }
-    });
+    }
+    assert!(!judged(&hand(f64::NAN, bar)), "NaN K");
     assert!(
-        !solved_as_a_hothouse(&hand(boiling + 100.0, bar)),
-        "under the hold"
+        !judged(&Atmosphere {
+            surface_pressure: None,
+            ..hand(boiling + 100.0, bar)
+        }),
+        "no surface pressure"
     );
 }
 
-/// P14.T53.b part 1 (c)'s third solve through the passes, with every 24 hold in force
+/// P14.T53.b part 1 (c)'s third solve through the passes
 /// (decision-t53b-arm-c §4.3): a hothouse between the limits whose re-solve as a runaway under
 /// Venus's deck ends below the acid's 430 K is solved a third time without the deck, and that
 /// solve is published.
@@ -5931,12 +5732,11 @@ fn under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is
 /// fits (0.0130 L☉, 0.302 R☉, 3,549 K), whose largest past luminosity is twice that (the test's
 /// own figure), so that the body lay inside the runaway limit then and its water is lost.
 ///
-/// - Its first solve, with (c) off (`PresentState::WithoutHothouse`), is that past runaway's dry
-///   division published `Temperate` at about 496.0 K, A 0.176 and 19.83 bar, 10.9 K above water's
-///   saturation temperature there, 485.1 K, which (c) judges a hothouse. A dry `Temperate` of
-///   this body meets that curve between carbon ranks 0.14 and 0.15, at about 15–16 bar.
-/// - Its solve as a runaway under the deck, as P14.T53.a's batch solves it
-///   (`PresentState::Peak`), ends at about 364.6 K and A 0.76, below 430 K.
+/// - Its first solve is that past runaway's dry division published `Temperate` at about 496.0 K,
+///   A 0.176 and 19.83 bar, 10.9 K above water's saturation temperature there, 485.1 K, which (c)
+///   judges a hothouse; its solve as a runaway under the deck ends at about 364.6 K and A 0.76,
+///   below 430 K (both stated to version 23 by the escape's hold's switches, gone at the 23 → 24
+///   bump).
 /// - So its third solve, without the deck, is published: a `RunawayGreenhouse`, `Deckless`, its
 ///   water still a runaway's, at the first solve's 496.0 K and A 0.176, a dry world's water cloud
 ///   being none; at or above 430 K, so a partial deck, not modelled (P14.T53.e).
@@ -5959,7 +5759,6 @@ fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_t
     use crate::planetary::derive::{PassDriver, derive_body_driven, traced};
     use crate::planetary::hooks::figures::WetEpoch;
     use crate::planetary::hooks::surface::{HourCosines, SeasonalSpin, ZonalInsolation};
-    use crate::planetary::testing::with_every_24_hold;
     use crate::stellar::sse::{ZCoeffs, zams};
     use crate::units::GravitationalParameter;
     use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
@@ -6082,124 +5881,87 @@ fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_t
             .and_then(water_saturation_temperature)
             .map_or(f64::NAN, Kelvin::value)
     };
-    with_every_24_hold(|| {
-        let first = with_present_state(PresentState::WithoutHothouse, || derive(PassDriver::Solve));
-        let decked = with_present_state(PresentState::Peak, || derive(PassDriver::Solve));
-        let ((published, counts), trace) =
-            traced(|| with_deck_counts(|| derive(PassDriver::Traced)));
-        let solves = [
-            ("first solve", &first),
-            ("decked solve", &decked),
-            ("third solve", &published),
-        ];
-        for (name, body) in solves {
-            let air = body.atmosphere();
-            eprintln!(
-                "the hand-built hothouse's {name}: {:?} {:?} (water {:?}), T_s {:.3} K, A {:.4}, \
-                 p_s {:.4} bar (water's T_sat {:.3} K), {} passes",
-                air.state(),
-                air.runaway_deck(),
-                air.water_state(),
-                air.surface_temperature().value(),
-                body.albedo().value(),
-                bar(air),
-                saturation(air),
-                body.atmosphere_passes()
-            );
+    let ((published, counts), trace) = traced(|| with_deck_counts(|| derive(PassDriver::Traced)));
+    let air = published.atmosphere();
+    eprintln!(
+        "the hand-built hothouse's third solve: {:?} {:?} (water {:?}), T_s {:.3} K, A {:.4}, \
+         p_s {:.4} bar (water's T_sat {:.3} K), {} passes; its counts {counts:?}; {} passes \
+         traced",
+        air.state(),
+        air.runaway_deck(),
+        air.water_state(),
+        air.surface_temperature().value(),
+        published.albedo().value(),
+        bar(air),
+        saturation(air),
+        published.atmosphere_passes(),
+        trace.len()
+    );
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    assert_eq!(air.runaway_deck(), RunawayDeck::Deckless);
+    assert_eq!(air.water_state(), SurfaceState::RunawayGreenhouse);
+    assert!(air.surface_temperature().value() >= ACID_CYCLING_TEMPERATURE.value());
+    assert!((air.surface_temperature().value() - 496.0).abs() < 0.5);
+    assert!((published.albedo().value() - 0.176).abs() < 0.005);
+    assert_eq!(
+        counts,
+        DeckCounts {
+            hothouses: 1,
+            temperate_passes: counts.temperate_passes,
+            hothouse_passes: counts.hothouse_passes,
+            hothouse_deckless: 1,
+            hothouse_deckless_passes: u64::from(published.atmosphere_passes()),
+            ..DeckCounts::default()
         }
-        eprintln!("its counts {counts:?}; {} passes traced", trace.len());
-        let first_air = first.atmosphere();
-        assert_eq!(first_air.state(), SurfaceState::Temperate);
-        assert_eq!(first_air.water_state(), SurfaceState::RunawayGreenhouse);
-        assert!(first_air.dry_division && !first_air.liquid_water);
-        assert!(solved_as_a_hothouse(first_air));
-        assert!(first_air.surface_temperature().value() >= saturation(first_air));
-        assert!((first_air.surface_temperature().value() - 496.0).abs() < 0.5);
-        assert!((first.albedo().value() - 0.176).abs() < 0.005);
-        assert!(
-            (bar(first_air) - 19.83).abs() < 0.05,
-            "{} bar",
-            bar(first_air)
-        );
+    );
+    assert!(
+        counts.temperate_passes > 0 && counts.hothouse_passes > 0,
+        "{counts:?}"
+    );
 
-        let decked_air = decked.atmosphere();
-        assert_eq!(decked_air.state(), SurfaceState::RunawayGreenhouse);
-        assert_eq!(decked_air.runaway_deck(), RunawayDeck::Kept);
-        assert!(decked_air.surface_temperature().value() < ACID_CYCLING_TEMPERATURE.value());
-        assert!((decked_air.surface_temperature().value() - 364.6).abs() < 0.5);
-        assert!((decked.albedo().value() - 0.76).abs() < 0.005);
-
-        let air = published.atmosphere();
-        assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
-        assert_eq!(air.runaway_deck(), RunawayDeck::Deckless);
-        assert_eq!(air.water_state(), SurfaceState::RunawayGreenhouse);
-        assert!(air.surface_temperature().value() >= ACID_CYCLING_TEMPERATURE.value());
-        assert!((air.surface_temperature().value() - 496.0).abs() < 0.5);
-        assert!((published.albedo().value() - 0.176).abs() < 0.005);
+    assert_eq!(
+        trace.len(),
+        usize::try_from(published.atmosphere_passes()).unwrap()
+    );
+    for pass in &trace {
         assert_eq!(
-            counts,
-            DeckCounts {
-                hothouses: 1,
-                temperate_passes: u64::from(first.atmosphere_passes()),
-                hothouse_passes: u64::from(decked.atmosphere_passes()),
-                hothouse_deckless: 1,
-                hothouse_deckless_passes: u64::from(published.atmosphere_passes()),
-                ..DeckCounts::default()
-            }
+            (pass.air.state(), pass.air.runaway_deck()),
+            (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless),
+            "{pass:?}"
         );
-
-        assert_eq!(
-            trace.len(),
-            usize::try_from(published.atmosphere_passes()).unwrap()
-        );
-        for pass in &trace {
-            assert_eq!(
-                (pass.air.state(), pass.air.runaway_deck()),
-                (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless),
-                "{pass:?}"
-            );
-        }
-        assert!(
-            trace.iter().any(|pass| pass.air == *air),
-            "the published pass is traced"
-        );
-    });
+    }
+    assert!(
+        trace.iter().any(|pass| pass.air == *air),
+        "the published pass is traced"
+    );
 }
 
-/// P14.T53.b part 1 leaves the table's Venus (the median Venus), Earth, Mars and Titan and the
-/// measured Venus ([`measured_venus`]) to the bit, with every 24 hold in force: each derivation
-/// is P14.T53.a's batch's as built (`with_present_state(PresentState::Peak, ..)`), both Venuses
-/// runaways inside the present limit under Venus's deck, well above the acid's 430 K.
+/// P14.T53.b part 1 on the table's Venus (the median Venus), Earth, Mars and Titan and the
+/// measured Venus ([`measured_venus`]): both Venuses are runaways inside the present limit under
+/// Venus's deck, well above the acid's 430 K. Its comparison with P14.T53.a's batch as built, each
+/// derivation to the bit, went with the escape's hold at the 23 → 24 bump.
 #[test]
 fn under_every_24_hold_part_one_leaves_venus_earth_mars_and_titan_to_the_bit() {
-    use crate::planetary::testing::with_every_24_hold;
-    with_every_24_hold(|| {
-        let (now, peak) = (table(), with_present_state(PresentState::Peak, table));
-        for name in ["Venus", "Earth", "Mars", "Titan"] {
-            let body = found(&now, name);
-            eprintln!(
-                "the table's {name}: {:?} {:?} {:.3} K",
-                body.atmosphere().state(),
-                body.atmosphere().runaway_deck(),
-                body.atmosphere().surface_temperature().value()
-            );
-            assert_eq!(body, found(&peak, name), "{name}");
-        }
-        let (measured, measured_peak) = (
-            measured_venus(),
-            with_present_state(PresentState::Peak, measured_venus),
+    let now = table();
+    for name in ["Venus", "Earth", "Mars", "Titan"] {
+        let body = found(&now, name);
+        eprintln!(
+            "the table's {name}: {:?} {:?} {:.3} K",
+            body.atmosphere().state(),
+            body.atmosphere().runaway_deck(),
+            body.atmosphere().surface_temperature().value()
         );
-        assert_eq!(measured, measured_peak);
-        for venus in [found(&now, "Venus"), &measured] {
-            let air = venus.atmosphere();
-            assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
-            assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
-            assert!(air.surface_temperature().value() > ACID_CYCLING_TEMPERATURE.value());
-        }
-    });
+    }
+    let measured = measured_venus();
+    for venus in [found(&now, "Venus"), &measured] {
+        let air = venus.atmosphere();
+        assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+        assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
+        assert!(air.surface_temperature().value() > ACID_CYCLING_TEMPERATURE.value());
+    }
 }
 
-/// P14.T53.b part 2 (decision-absurd-states-24 R2.3): with every landed 24 hold in force, no body
+/// P14.T53.b part 2 (decision-absurd-states-24 R2.3): no body
 /// of the table and not the measured Venus lies under a supercritical envelope, so each with a
 /// solid surface keeps its surface section. Venus's carbon dioxide, above its critical
 /// temperature, lies far under its critical isochore (about 815 bar at 737 K, against its 92
@@ -6208,65 +5970,62 @@ fn under_every_24_hold_part_one_leaves_venus_earth_mars_and_titan_to_the_bit() {
 /// Every column at or above its critical temperature is printed with its margin.
 #[test]
 fn under_every_24_hold_venus_titan_and_the_table_keep_their_surfaces() {
-    use crate::planetary::testing::with_every_24_hold;
-    with_every_24_hold(|| {
-        let table = table();
-        let measured = measured_venus();
-        for (name, body) in table
-            .iter()
-            .map(|(name, body)| (*name, body))
-            .chain(core::iter::once(("the measured Venus", &measured)))
-        {
-            let (air, g) = (body.atmosphere(), body.surface_gravity());
-            let columns: Vec<String> = air
-                .critical_columns(g)
-                .map(|c| {
-                    format!(
-                        "{:?} T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar, share {:.3e}",
-                        c.gas(),
-                        c.temperature_ratio(),
-                        c.partial_pressure().value() / PASCALS_PER_BAR,
-                        c.isochore_pressure().value() / PASCALS_PER_BAR,
-                        c.share()
-                    )
-                })
-                .collect();
-            eprintln!(
-                "{name}: {:?} at {:.2} K; [{}]",
-                air.state(),
-                air.surface_temperature().value(),
-                columns.join("; ")
-            );
-            let reservoir = air.supercritical_reservoir(g);
-            assert!(reservoir.is_none(), "{name}: {reservoir:?}");
-            assert_eq!(
-                has_surface_section(body.class(), air, g),
-                body.class().has_solid_surface(),
-                "{name}"
-            );
-        }
-        for venus in [found(&table, "Venus"), &measured] {
-            let (air, g) = (venus.atmosphere(), venus.surface_gravity());
-            let co2 = air
-                .critical_columns(g)
-                .find(|c| c.gas() == Gas::CarbonDioxide)
-                .expect("Venus's carbon dioxide lies above its critical temperature");
-            assert!(
-                co2.partial_pressure().value() < 0.2 * co2.isochore_pressure().value(),
-                "{co2:?}"
-            );
-            assert_same_bits(co2.share(), 0.0);
-        }
-        let titan = found(&table, "Titan");
-        let nitrogen = titan
-            .atmosphere()
-            .critical_columns(titan.surface_gravity())
-            .find(|c| c.gas() == Gas::Nitrogen);
-        assert!(
-            nitrogen.is_none(),
-            "Titan's nitrogen lies below its critical temperature: {nitrogen:?}"
+    let table = table();
+    let measured = measured_venus();
+    for (name, body) in table
+        .iter()
+        .map(|(name, body)| (*name, body))
+        .chain(core::iter::once(("the measured Venus", &measured)))
+    {
+        let (air, g) = (body.atmosphere(), body.surface_gravity());
+        let columns: Vec<String> = air
+            .critical_columns(g)
+            .map(|c| {
+                format!(
+                    "{:?} T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar, share {:.3e}",
+                    c.gas(),
+                    c.temperature_ratio(),
+                    c.partial_pressure().value() / PASCALS_PER_BAR,
+                    c.isochore_pressure().value() / PASCALS_PER_BAR,
+                    c.share()
+                )
+            })
+            .collect();
+        eprintln!(
+            "{name}: {:?} at {:.2} K; [{}]",
+            air.state(),
+            air.surface_temperature().value(),
+            columns.join("; ")
         );
-    });
+        let reservoir = air.supercritical_reservoir(g);
+        assert!(reservoir.is_none(), "{name}: {reservoir:?}");
+        assert_eq!(
+            has_surface_section(body.class(), air, g),
+            body.class().has_solid_surface(),
+            "{name}"
+        );
+    }
+    for venus in [found(&table, "Venus"), &measured] {
+        let (air, g) = (venus.atmosphere(), venus.surface_gravity());
+        let co2 = air
+            .critical_columns(g)
+            .find(|c| c.gas() == Gas::CarbonDioxide)
+            .expect("Venus's carbon dioxide lies above its critical temperature");
+        assert!(
+            co2.partial_pressure().value() < 0.2 * co2.isochore_pressure().value(),
+            "{co2:?}"
+        );
+        assert_same_bits(co2.share(), 0.0);
+    }
+    let titan = found(&table, "Titan");
+    let nitrogen = titan
+        .atmosphere()
+        .critical_columns(titan.surface_gravity())
+        .find(|c| c.gas() == Gas::Nitrogen);
+    assert!(
+        nitrogen.is_none(),
+        "Titan's nitrogen lies below its critical temperature: {nitrogen:?}"
+    );
 }
 
 /// Pluto's semi-major axis, au, and eccentricity (NASA's Pluto fact sheet), at which the Kuiper
@@ -6331,7 +6090,7 @@ pub(crate) fn on_pluto_s_orbit_at(body: &DerivedBody, albedo: f64) -> Atmosphere
 
 /// P14.T53.c's Pluto and Charon (decision-triton-and-e101 §1.8 item 4; Johnson et al. 2015, ApJ
 /// 809, 43, as Young, Braga-Ribas and Johnson 2020 report: Pluto keeps its nitrogen and Charon has
-/// lost its), every 24 hold in force:
+/// lost its):
 ///
 /// - **a Pluto at its inventory** (1.303 × 10²² kg, 1,188.3 km, on its orbit), its N₂ held by its
 ///   ice, is `Tenuous` with N₂ and the CH₄ beside it (Gladstone et al. 2016, Science 351,
@@ -6348,53 +6107,51 @@ pub(crate) fn on_pluto_s_orbit_at(body: &DerivedBody, albedo: f64) -> Atmosphere
 ///   exobase, so its ice holds none, and T13.b's verdict, lost, stands.
 #[test]
 fn under_every_24_hold_a_pluto_keeps_its_nitrogen_ice_and_a_charon_none() {
-    crate::planetary::testing::with_every_24_hold(|| {
-        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
-        let air = pluto.atmosphere();
-        let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
-        eprintln!(
-            "Pluto through its passes: {}; its ice {:?}, Bond albedo {:.4}, T_eq {:.3} K",
-            air_line("", air),
-            air.held_ice_temperature(Gas::Nitrogen),
-            pluto.albedo().value(),
-            pluto.equilibrium_temperature().value(),
-        );
-        assert_eq!(air.state(), SurfaceState::Tenuous, "{air:?}");
-        assert!(air.ice_held().retains(Gas::Nitrogen), "{air:?}");
-        assert!(nitrogen > 0.0, "{air:?}");
-        assert!(
-            air.partial_pressures().of(Gas::Methane).value() > 0.0,
-            "{air:?}"
-        );
-        let measured = atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72));
-        let nitrogen = measured.partial_pressures().of(Gas::Nitrogen).value();
-        let methane = measured.partial_pressures().of(Gas::Methane).value();
-        eprintln!(
-            "Pluto at its measured 0.72: {}; CH4 {methane:.4e} Pa, its ice {:?}",
-            air_line("", &measured),
-            measured.held_ice_temperature(Gas::Nitrogen),
-        );
-        assert_eq!(measured.state(), SurfaceState::Tenuous, "{measured:?}");
-        assert!(
-            (1.1 / 10.0..=1.1 * 10.0).contains(&nitrogen),
-            "Pluto's N2 at {nitrogen} Pa"
-        );
-        assert!(methane > 0.0, "{measured:?}");
-        let charon = on_pluto_s_orbit(1.586e21, 606.0);
-        let air = charon.atmosphere();
-        eprintln!(
-            "a Charon on Pluto's orbit: {}; Bond albedo {:.4}",
-            air_line("", air),
-            charon.albedo().value()
-        );
-        assert!(!air.retention().retains(Gas::Nitrogen), "{air:?}");
-        assert!(!air.ice_held().retains(Gas::Nitrogen), "{air:?}");
-        assert_same_bits(air.partial_pressures().of(Gas::Nitrogen).value(), 0.0);
-        assert!(charon.inventory().nitrogen().value() > 0.0);
-    });
+    let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+    let air = pluto.atmosphere();
+    let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
+    eprintln!(
+        "Pluto through its passes: {}; its ice {:?}, Bond albedo {:.4}, T_eq {:.3} K",
+        air_line("", air),
+        air.held_ice_temperature(Gas::Nitrogen),
+        pluto.albedo().value(),
+        pluto.equilibrium_temperature().value(),
+    );
+    assert_eq!(air.state(), SurfaceState::Tenuous, "{air:?}");
+    assert!(air.ice_held().retains(Gas::Nitrogen), "{air:?}");
+    assert!(nitrogen > 0.0, "{air:?}");
+    assert!(
+        air.partial_pressures().of(Gas::Methane).value() > 0.0,
+        "{air:?}"
+    );
+    let measured = atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72));
+    let nitrogen = measured.partial_pressures().of(Gas::Nitrogen).value();
+    let methane = measured.partial_pressures().of(Gas::Methane).value();
+    eprintln!(
+        "Pluto at its measured 0.72: {}; CH4 {methane:.4e} Pa, its ice {:?}",
+        air_line("", &measured),
+        measured.held_ice_temperature(Gas::Nitrogen),
+    );
+    assert_eq!(measured.state(), SurfaceState::Tenuous, "{measured:?}");
+    assert!(
+        (1.1 / 10.0..=1.1 * 10.0).contains(&nitrogen),
+        "Pluto's N2 at {nitrogen} Pa"
+    );
+    assert!(methane > 0.0, "{measured:?}");
+    let charon = on_pluto_s_orbit(1.586e21, 606.0);
+    let air = charon.atmosphere();
+    eprintln!(
+        "a Charon on Pluto's orbit: {}; Bond albedo {:.4}",
+        air_line("", air),
+        charon.albedo().value()
+    );
+    assert!(!air.retention().retains(Gas::Nitrogen), "{air:?}");
+    assert!(!air.ice_held().retains(Gas::Nitrogen), "{air:?}");
+    assert_same_bits(air.partial_pressures().of(Gas::Nitrogen).value(), 0.0);
+    assert!(charon.inventory().nitrogen().value() > 0.0);
 }
 
-/// P14.T53.c's record of a tenuous air, every 24 hold in force: the conditions of Pluto at its
+/// P14.T53.c's record of a tenuous air: the conditions of Pluto at its
 /// measured 0.72 Bond albedo (`Tenuous`, its N₂ and argon held by their ice) publish its air's own
 /// surface pressure, to the bit, and list its gases, while their climate is that of the same air
 /// published `Airless`, to the bit, since the steps' climate holds no air under 100 Pa; and its ice
@@ -6405,83 +6162,81 @@ fn under_every_24_hold_a_tenuous_record_lists_its_air_over_an_airless_climate() 
     use crate::planetary::hooks::surface::{
         OceanWeight, SeasonalSpin, SurfaceConditions, SurfaceInputs,
     };
-    crate::planetary::testing::with_every_24_hold(|| {
-        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
-        let inputs = on_pluto_s_orbit_at(&pluto, 0.72);
-        let air = atmosphere(&inputs);
-        assert_eq!(air.state(), SurfaceState::Tenuous, "{air:?}");
-        let conditions = |air: &Atmosphere| {
-            SurfaceConditions::derive(&SurfaceInputs {
-                atmosphere: air,
-                equilibrium_temperature: inputs.equilibrium,
-                surface_gravity: pluto.surface_gravity(),
-                radius: inputs.radius,
-                material: inputs.material,
-                lid: None,
-                stellar_flux: WattsPerSquareMetre::from(pluto.flux()),
-                xuv_flux: pluto.xuv_flux(),
-                spin: SeasonalSpin {
-                    obliquity: Radians::from(Degrees::new(119.6)),
-                    rotation_period: Seconds::new(551_856.7),
-                    solar_day: Some(Seconds::new(551_856.7)),
-                },
-                heat_flow: WattsPerSquareMetre::new(0.003),
-                ocean_weight: OceanWeight::NONE,
-            })
-            .expect("Pluto has a surface")
-        };
-        let tenuous = conditions(&air);
-        let airless = conditions(&Atmosphere {
-            state: SurfaceState::Airless,
-            ..air
-        });
-        let p = air.surface_pressure().expect("a surface").value();
-        assert_same_bits(tenuous.surface_pressure().value(), p);
-        assert!(
-            tenuous
-                .gases()
-                .iter()
-                .any(|&(id, _)| id == Gas::Nitrogen.substance())
-        );
-        assert!(tenuous.mean_molar_mass_g_per_mol().is_some());
-        assert_same_bits(airless.surface_pressure().value(), 0.0);
-        assert_eq!(airless.gases(), []);
-        let (cold, warm) = (tenuous.climate_range(), airless.climate_range());
-        assert_same_bits(cold.0.value(), warm.0.value());
-        assert_same_bits(cold.1.value(), warm.1.value());
-        assert_same_bits(
-            tenuous.mean_surface_temperature().value(),
-            airless.mean_surface_temperature().value(),
-        );
-        // The argon its ice holds is not eroded by the shoreline.
-        assert!(air.ice_held().retains(Gas::Argon), "{air:?}");
-        let argon = escape_of(&air)
-            .element(Element::Ar)
-            .expect("argon's outcome");
-        let total = argon.escaped().value() + argon.airborne().value();
-        let shoreline = escape_of(&air).shoreline().kept();
-        eprintln!(
-            "Pluto at 0.72: argon escaped {:.4e} kg of {total:.4e}; the shoreline keeps \
-             {shoreline:.4}",
-            argon.escaped().value()
-        );
-        // The shoreline would take 1 − its share of an air's argon; the ice-held argon loses far
-        // less, its vapour's escape alone.
-        assert!(shoreline < 1.0, "{shoreline}");
-        assert!(
-            argon.escaped().value() < 1e-3 * (1.0 - shoreline) * total,
-            "{argon:?}"
-        );
+    let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+    let inputs = on_pluto_s_orbit_at(&pluto, 0.72);
+    let air = atmosphere(&inputs);
+    assert_eq!(air.state(), SurfaceState::Tenuous, "{air:?}");
+    let conditions = |air: &Atmosphere| {
+        SurfaceConditions::derive(&SurfaceInputs {
+            atmosphere: air,
+            equilibrium_temperature: inputs.equilibrium,
+            surface_gravity: pluto.surface_gravity(),
+            radius: inputs.radius,
+            material: inputs.material,
+            lid: None,
+            stellar_flux: WattsPerSquareMetre::from(pluto.flux()),
+            xuv_flux: pluto.xuv_flux(),
+            spin: SeasonalSpin {
+                obliquity: Radians::from(Degrees::new(119.6)),
+                rotation_period: Seconds::new(551_856.7),
+                solar_day: Some(Seconds::new(551_856.7)),
+            },
+            heat_flow: WattsPerSquareMetre::new(0.003),
+            ocean_weight: OceanWeight::NONE,
+        })
+        .expect("Pluto has a surface")
+    };
+    let tenuous = conditions(&air);
+    let airless = conditions(&Atmosphere {
+        state: SurfaceState::Airless,
+        ..air
     });
+    let p = air.surface_pressure().expect("a surface").value();
+    assert_same_bits(tenuous.surface_pressure().value(), p);
+    assert!(
+        tenuous
+            .gases()
+            .iter()
+            .any(|&(id, _)| id == Gas::Nitrogen.substance())
+    );
+    assert!(tenuous.mean_molar_mass_g_per_mol().is_some());
+    assert_same_bits(airless.surface_pressure().value(), 0.0);
+    assert_eq!(airless.gases(), []);
+    let (cold, warm) = (tenuous.climate_range(), airless.climate_range());
+    assert_same_bits(cold.0.value(), warm.0.value());
+    assert_same_bits(cold.1.value(), warm.1.value());
+    assert_same_bits(
+        tenuous.mean_surface_temperature().value(),
+        airless.mean_surface_temperature().value(),
+    );
+    // The argon its ice holds is not eroded by the shoreline.
+    assert!(air.ice_held().retains(Gas::Argon), "{air:?}");
+    let argon = escape_of(&air)
+        .element(Element::Ar)
+        .expect("argon's outcome");
+    let total = argon.escaped().value() + argon.airborne().value();
+    let shoreline = escape_of(&air).shoreline().kept();
+    eprintln!(
+        "Pluto at 0.72: argon escaped {:.4e} kg of {total:.4e}; the shoreline keeps \
+         {shoreline:.4}",
+        argon.escaped().value()
+    );
+    // The shoreline would take 1 − its share of an air's argon; the ice-held argon loses far
+    // less, its vapour's escape alone.
+    assert!(shoreline < 1.0, "{shoreline}");
+    assert!(
+        argon.escaped().value() < 1e-3 * (1.0 - shoreline) * total,
+        "{argon:?}"
+    );
 }
 
 // P14.T53.b part 3: the steam envelope and the partition's cap (decision-p14-t53b-part3).
 
-/// `run` with every landed 25 hold in force, P14.T53.b part 3's, and with every 24 hold alone, as
-/// the two results: part 3's movers against 24.
+/// `run` with every landed 25 hold in force, P14.T53.b part 3's, and at 24 alone, as the two
+/// results: part 3's movers against 24.
 fn with_part_three<R>(run: impl Fn() -> R) -> (R, R) {
-    use crate::planetary::testing::{with_every_24_hold, with_every_25_hold};
-    (with_every_25_hold(&run), with_every_24_hold(&run))
+    use crate::planetary::testing::with_every_25_hold;
+    (with_every_25_hold(&run), run())
 }
 
 /// An Earth of the Sun inside the runaway limit now ([`earth_inputs`] at `equilibrium`, K) holding
@@ -6539,15 +6294,10 @@ fn the_steam_envelope_is_held_only_until_the_25_bump() {
     );
     assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
     assert!(!steam_envelope_in_force());
-    assert!(with_steam_envelope(SteamEnvelopeRules::Steam, || {
-        !steam_envelope_in_force()
-    }));
-    assert!(with_steam_envelope(SteamEnvelopeRules::Steam, || {
-        crate::planetary::chem::escape::with_rules(
-            crate::planetary::chem::escape::EscapeRules::Batch,
-            steam_envelope_in_force,
-        )
-    }));
+    assert!(with_steam_envelope(
+        SteamEnvelopeRules::Steam,
+        steam_envelope_in_force
+    ));
 }
 
 /// The plan's test: a world of Earth's mass inside the runaway limit with a quarter of its mass in
@@ -6937,47 +6687,45 @@ fn venus_column(bar: f64) -> (PartialPressures, Kelvin, MetresPerSecondSquared) 
 /// ceiling the surface is the grey's.
 #[test]
 fn under_the_escape_batch_the_thick_air_closure_leaves_every_air_to_100_bar_to_the_bit() {
-    with_rules(EscapeRules::Batch, || {
-        let mut lcg = Lcg::new(0x0053_a0c1_0000_0001);
-        let mut airs: Vec<_> = (0..4_000)
-            .map(|_| {
-                let bar = math::exp10(-3.0 + 4.999_99 * lcg.next_f64());
-                drawn_air(&mut lcg, bar)
-            })
-            .collect();
-        // At the anchor exactly: carbon dioxide and its nitrogen summing to 10⁷ Pa to the bit.
-        let co2 = 9.774e6;
-        airs.push((
-            PartialPressures::from_fn(|gas| match gas {
-                Gas::CarbonDioxide => Pascals::new(co2),
-                Gas::Nitrogen => Pascals::new(1e7 - co2),
-                _ => Pascals::ZERO,
-            }),
-            Kelvin::new(229.06),
-            MetresPerSecondSquared::new(8.870),
-        ));
-        assert_same_bits(
-            airs.last().expect("the anchor's air").0.total().value(),
-            THICK_AIR_ANCHOR_PRESSURE.value(),
-        );
-        for (partials, base, gravity) in &airs {
-            assert!(partials.total() <= THICK_AIR_ANCHOR_PRESSURE);
-            for ceiling in [
-                GreenhouseCeiling::None,
-                GreenhouseCeiling::MaximumGreenhouse,
-            ] {
-                let (t, grey, binds, closure) = closure_at(ceiling, partials, *base, *gravity);
-                let (lifted, _, lifted_binds, _) =
-                    without_thick_air(|| closure_at(ceiling, partials, *base, *gravity));
-                assert!(closure.is_none(), "{partials:?}");
-                assert_same_bits(t, lifted);
-                assert_eq!(binds, lifted_binds);
-                if ceiling == GreenhouseCeiling::None {
-                    assert_same_bits(t, grey);
-                }
+    let mut lcg = Lcg::new(0x0053_a0c1_0000_0001);
+    let mut airs: Vec<_> = (0..4_000)
+        .map(|_| {
+            let bar = math::exp10(-3.0 + 4.999_99 * lcg.next_f64());
+            drawn_air(&mut lcg, bar)
+        })
+        .collect();
+    // At the anchor exactly: carbon dioxide and its nitrogen summing to 10⁷ Pa to the bit.
+    let co2 = 9.774e6;
+    airs.push((
+        PartialPressures::from_fn(|gas| match gas {
+            Gas::CarbonDioxide => Pascals::new(co2),
+            Gas::Nitrogen => Pascals::new(1e7 - co2),
+            _ => Pascals::ZERO,
+        }),
+        Kelvin::new(229.06),
+        MetresPerSecondSquared::new(8.870),
+    ));
+    assert_same_bits(
+        airs.last().expect("the anchor's air").0.total().value(),
+        THICK_AIR_ANCHOR_PRESSURE.value(),
+    );
+    for (partials, base, gravity) in &airs {
+        assert!(partials.total() <= THICK_AIR_ANCHOR_PRESSURE);
+        for ceiling in [
+            GreenhouseCeiling::None,
+            GreenhouseCeiling::MaximumGreenhouse,
+        ] {
+            let (t, grey, binds, closure) = closure_at(ceiling, partials, *base, *gravity);
+            let (lifted, _, lifted_binds, _) =
+                without_thick_air(|| closure_at(ceiling, partials, *base, *gravity));
+            assert!(closure.is_none(), "{partials:?}");
+            assert_same_bits(t, lifted);
+            assert_eq!(binds, lifted_binds);
+            if ceiling == GreenhouseCeiling::None {
+                assert_same_bits(t, grey);
             }
         }
-    });
+    }
 }
 
 /// The closure is continuous through its anchor (decision-p14-t53a-thick-co2 §3, §7.3): a Venus
@@ -6985,28 +6733,26 @@ fn under_the_escape_batch_the_thick_air_closure_leaves_every_air_to_100_bar_to_t
 /// 10⁻⁸ of it, the adiabat just beyond it within 10⁻⁸ of its grey top.
 #[test]
 fn under_the_escape_batch_the_thick_air_closure_is_continuous_through_its_anchor() {
-    with_rules(EscapeRules::Batch, || {
-        let at = |bar: f64| {
-            let (partials, base, gravity) = venus_column(bar);
-            closure_at(GreenhouseCeiling::None, &partials, base, gravity)
-        };
-        // At the anchor the column's carbon dioxide and nitrogen sum to its pressure to the bit.
-        let (partials, ..) = venus_column(100.0);
-        assert_same_bits(partials.total().value(), THICK_AIR_ANCHOR_PRESSURE.value());
-        let (anchor, grey, binds, closure) = at(100.0);
-        assert!(closure.is_none() && !binds);
-        assert_same_bits(anchor, grey);
-        for bar in [100.0 * (1.0 - 1e-9), 100.0 * (1.0 + 1e-9)] {
-            let (t, grey, _, closure) = at(bar);
-            eprintln!("{bar:.10} bar: T_s {t:.12} K, grey {grey:.12} K, closure {closure:?}");
-            assert!(relative(t, anchor) < 1e-8, "{bar}: {t} against {anchor}");
-            if let Some((_, top, adiabat)) = closure {
-                assert!(relative(adiabat.value(), top.value()) < 1e-8);
-                assert!(relative(top.value(), grey) < 1e-8);
-            }
+    let at = |bar: f64| {
+        let (partials, base, gravity) = venus_column(bar);
+        closure_at(GreenhouseCeiling::None, &partials, base, gravity)
+    };
+    // At the anchor the column's carbon dioxide and nitrogen sum to its pressure to the bit.
+    let (partials, ..) = venus_column(100.0);
+    assert_same_bits(partials.total().value(), THICK_AIR_ANCHOR_PRESSURE.value());
+    let (anchor, grey, binds, closure) = at(100.0);
+    assert!(closure.is_none() && !binds);
+    assert_same_bits(anchor, grey);
+    for bar in [100.0 * (1.0 - 1e-9), 100.0 * (1.0 + 1e-9)] {
+        let (t, grey, _, closure) = at(bar);
+        eprintln!("{bar:.10} bar: T_s {t:.12} K, grey {grey:.12} K, closure {closure:?}");
+        assert!(relative(t, anchor) < 1e-8, "{bar}: {t} against {anchor}");
+        if let Some((_, top, adiabat)) = closure {
+            assert!(relative(adiabat.value(), top.value()) < 1e-8);
+            assert!(relative(top.value(), grey) < 1e-8);
         }
-        assert!(at(100.0 * (1.0 + 1e-9)).3.is_some());
-    });
+    }
+    assert!(at(100.0 * (1.0 + 1e-9)).3.is_some());
 }
 
 /// The closure never warms (decision-p14-t53a-thick-co2 §3, §7.3): over 4,000 drawn airs from 100
@@ -7017,46 +6763,44 @@ fn under_the_escape_batch_the_thick_air_closure_is_continuous_through_its_anchor
 /// shares that bind are printed.
 #[test]
 fn under_the_escape_batch_the_thick_air_closure_never_warms() {
-    with_rules(EscapeRules::Batch, || {
-        let mut lcg = Lcg::new(0x0053_a0c1_0000_0002);
-        let (mut bound, mut capped_bound) = (0, 0);
-        let n = 4_000;
-        for _ in 0..n {
-            let bar = math::exp10(2.0 + 2.301 * lcg.next_f64());
-            let (partials, base, gravity) = drawn_air(&mut lcg, bar);
-            let (t, grey, binds, closure) =
-                closure_at(GreenhouseCeiling::None, &partials, base, gravity);
-            let (_, top, adiabat) = closure.expect("beyond the anchor");
-            assert!(t.is_finite() && t > 0.0, "{partials:?}: {t}");
-            assert!(t <= grey, "{partials:?}: {t} above its grey {grey}");
-            assert!(
-                top.value() <= t,
-                "{partials:?}: {t} under its top's {top:?}"
-            );
-            assert!(adiabat.value().is_finite(), "{partials:?}");
-            assert_eq!(binds, t < grey, "{partials:?}");
-            bound += u32::from(binds);
-            // Beside the maximum-greenhouse ceiling: the lesser of the closure's surface and the
-            // ceiling, which binds where either does.
-            let (capped, _, capped_binds, _) = closure_at(
-                GreenhouseCeiling::MaximumGreenhouse,
-                &partials,
-                base,
-                gravity,
-            );
-            let ceiling = GreenhouseCeiling::MaximumGreenhouse
-                .temperature(&GreenhouseConstants::in_force(), &partials, base, gravity)
-                .value();
-            assert_same_bits(capped, t.min(ceiling));
-            assert_eq!(capped_binds, capped < grey, "{partials:?}");
-            capped_bound += u32::from(capped_binds && !binds);
-        }
-        eprintln!(
-            "the closure binds on {bound} of {n} drawn airs at 100 bar–20 kbar; beside the \
-             ceiling, the ceiling alone on {capped_bound} more"
+    let mut lcg = Lcg::new(0x0053_a0c1_0000_0002);
+    let (mut bound, mut capped_bound) = (0, 0);
+    let n = 4_000;
+    for _ in 0..n {
+        let bar = math::exp10(2.0 + 2.301 * lcg.next_f64());
+        let (partials, base, gravity) = drawn_air(&mut lcg, bar);
+        let (t, grey, binds, closure) =
+            closure_at(GreenhouseCeiling::None, &partials, base, gravity);
+        let (_, top, adiabat) = closure.expect("beyond the anchor");
+        assert!(t.is_finite() && t > 0.0, "{partials:?}: {t}");
+        assert!(t <= grey, "{partials:?}: {t} above its grey {grey}");
+        assert!(
+            top.value() <= t,
+            "{partials:?}: {t} under its top's {top:?}"
         );
-        assert!(bound > 0 && bound < n);
-    });
+        assert!(adiabat.value().is_finite(), "{partials:?}");
+        assert_eq!(binds, t < grey, "{partials:?}");
+        bound += u32::from(binds);
+        // Beside the maximum-greenhouse ceiling: the lesser of the closure's surface and the
+        // ceiling, which binds where either does.
+        let (capped, _, capped_binds, _) = closure_at(
+            GreenhouseCeiling::MaximumGreenhouse,
+            &partials,
+            base,
+            gravity,
+        );
+        let ceiling = GreenhouseCeiling::MaximumGreenhouse
+            .temperature(&GreenhouseConstants::in_force(), &partials, base, gravity)
+            .value();
+        assert_same_bits(capped, t.min(ceiling));
+        assert_eq!(capped_binds, capped < grey, "{partials:?}");
+        capped_bound += u32::from(capped_binds && !binds);
+    }
+    eprintln!(
+        "the closure binds on {bound} of {n} drawn airs at 100 bar–20 kbar; beside the \
+             ceiling, the ceiling alone on {capped_bound} more"
+    );
+    assert!(bound > 0 && bound < n);
 }
 
 /// A kilobar of nitrogen is the grey to the bit, its √p greenhouse subadiabatic; a kilobar of
@@ -7072,26 +6816,22 @@ fn under_the_escape_batch_the_thick_air_closure_never_warms() {
 /// is about 3.9: slightly superadiabatic, so the closure binds.
 #[test]
 fn under_the_escape_batch_a_kilobar_of_nitrogen_is_the_grey_and_of_hydrogen_moves_a_little() {
-    with_rules(EscapeRules::Batch, || {
-        let (base, gravity) = (Kelvin::new(300.0), STANDARD_GRAVITY);
-        let nitrogen = air_of(&[(Gas::Nitrogen, 1_000.0)]);
-        let (t, grey, binds, closure) =
-            closure_at(GreenhouseCeiling::None, &nitrogen, base, gravity);
-        eprintln!("1 kbar of N₂: T_s {t:.3} K, grey {grey:.3} K, closure {closure:?}");
-        assert!(!binds);
-        assert_same_bits(t, grey);
-        let hydrogen = air_of(&[(Gas::Hydrogen, 1_000.0)]);
-        let (t, grey, binds, closure) =
-            closure_at(GreenhouseCeiling::None, &hydrogen, base, gravity);
-        eprintln!(
-            "1 kbar of H₂ at a {:.0} K base: T_s {t:.3} K, grey {grey:.3} K ({:.4}% under it), \
+    let (base, gravity) = (Kelvin::new(300.0), STANDARD_GRAVITY);
+    let nitrogen = air_of(&[(Gas::Nitrogen, 1_000.0)]);
+    let (t, grey, binds, closure) = closure_at(GreenhouseCeiling::None, &nitrogen, base, gravity);
+    eprintln!("1 kbar of N₂: T_s {t:.3} K, grey {grey:.3} K, closure {closure:?}");
+    assert!(!binds);
+    assert_same_bits(t, grey);
+    let hydrogen = air_of(&[(Gas::Hydrogen, 1_000.0)]);
+    let (t, grey, binds, closure) = closure_at(GreenhouseCeiling::None, &hydrogen, base, gravity);
+    eprintln!(
+        "1 kbar of H₂ at a {:.0} K base: T_s {t:.3} K, grey {grey:.3} K ({:.4}% under it), \
              closure {closure:?}",
-            base.value(),
-            100.0 * (1.0 - t / grey)
-        );
-        assert!(t <= grey && relative(t, grey) < 0.06, "{t} against {grey}");
-        assert_eq!(binds, t < grey);
-    });
+        base.value(),
+        100.0 * (1.0 - t / grey)
+    );
+    assert!(t <= grey && relative(t, grey) < 0.06, "{t} against {grey}");
+    assert_eq!(binds, t < grey);
 }
 
 /// The measured Venus's air made 150–1,000 bar thick (decision-p14-t53a-thick-co2 §5): the
@@ -7114,29 +6854,27 @@ fn under_the_escape_batch_a_thicker_venus_takes_the_dry_adiabat_beyond_100_bar()
             closure_at(GreenhouseCeiling::None, &partials, base, gravity).0
         })
         .collect();
-    with_rules(EscapeRules::Batch, || {
-        let (partials, base, gravity) = venus_column(92.51);
-        assert!(
-            closure_at(GreenhouseCeiling::None, &partials, base, gravity)
-                .3
-                .is_none()
+    let (partials, base, gravity) = venus_column(92.51);
+    assert!(
+        closure_at(GreenhouseCeiling::None, &partials, base, gravity)
+            .3
+            .is_none()
+    );
+    for (&(bar, expected), version_23) in replica.iter().zip(held) {
+        let (partials, base, gravity) = venus_column(bar);
+        let (t, grey, binds, closure) =
+            closure_at(GreenhouseCeiling::None, &partials, base, gravity);
+        let (tau_a, top, _) = closure.expect("beyond the anchor");
+        eprintln!(
+            "Venus at {bar} bar: T_s {t:.1} K (the replica's {expected} K), the batch's grey \
+             {grey:.1} K, version 23's {version_23:.1} K ({:+.2}%); τ_a {tau_a:.2}, T_a {:.2} \
+             K",
+            100.0 * (t / version_23 - 1.0),
+            top.value()
         );
-        for (&(bar, expected), version_23) in replica.iter().zip(held) {
-            let (partials, base, gravity) = venus_column(bar);
-            let (t, grey, binds, closure) =
-                closure_at(GreenhouseCeiling::None, &partials, base, gravity);
-            let (tau_a, top, _) = closure.expect("beyond the anchor");
-            eprintln!(
-                "Venus at {bar} bar: T_s {t:.1} K (the replica's {expected} K), the batch's grey \
-                 {grey:.1} K, version 23's {version_23:.1} K ({:+.2}%); τ_a {tau_a:.2}, T_a {:.2} \
-                 K",
-                100.0 * (t / version_23 - 1.0),
-                top.value()
-            );
-            assert!(binds);
-            assert!(relative(t, expected) < 0.03, "{bar} bar: {t} K");
-        }
-    });
+        assert!(binds);
+        assert!(relative(t, expected) < 0.03, "{bar} bar: {t} K");
+    }
 }
 
 /// Where the closure binds, P14.T24.e's published profile, which leaves the ground at (`T_s`,
@@ -7149,43 +6887,40 @@ fn under_the_escape_batch_the_published_profile_passes_through_the_closure_s_anc
         RadiativeConvective, StructureInputs, VerticalStructure, effective_temperature,
         skin_temperature, temperature_at,
     };
-    with_rules(EscapeRules::Batch, || {
-        let mut columns: Vec<_> = [150.0, 300.0, 1_000.0, 3_000.0]
-            .into_iter()
-            .map(venus_column)
-            .collect();
-        columns.push((
-            air_of(&[(Gas::CarbonDioxide, 10_000.0)]),
-            Kelvin::new(132.4),
-            MetresPerSecondSquared::new(8.24),
-        ));
-        for (partials, base, gravity) in &columns {
-            let (t, _, binds, closure) =
-                closure_at(GreenhouseCeiling::None, partials, *base, *gravity);
-            let (_, top, _) = closure.expect("beyond the anchor");
-            assert!(binds);
-            let (fractions, len) = air_mixture(partials);
-            let profile = RadiativeConvective::derive(&StructureInputs {
-                surface_temperature: Kelvin::new(t),
-                surface_pressure: partials.total(),
-                gases: &fractions[..len],
-                condensable: None,
-                skin_temperature: skin_temperature(effective_temperature(*base, Kelvin::ZERO)),
-            })
-            .expect("a thick air's profile");
-            let at_anchor = temperature_at(
-                &VerticalStructure::RadiativeConvective(profile),
-                THICK_AIR_ANCHOR_PRESSURE,
-            );
-            eprintln!(
-                "{:.0} bar: T_s {t:.3} K; the profile at 100 bar {:.4} K, T_a {:.4} K",
-                partials.total().value() / PASCALS_PER_BAR,
-                at_anchor.value(),
-                top.value()
-            );
-            assert!(relative(at_anchor.value(), top.value()) < 5e-4);
-        }
-    });
+    let mut columns: Vec<_> = [150.0, 300.0, 1_000.0, 3_000.0]
+        .into_iter()
+        .map(venus_column)
+        .collect();
+    columns.push((
+        air_of(&[(Gas::CarbonDioxide, 10_000.0)]),
+        Kelvin::new(132.4),
+        MetresPerSecondSquared::new(8.24),
+    ));
+    for (partials, base, gravity) in &columns {
+        let (t, _, binds, closure) = closure_at(GreenhouseCeiling::None, partials, *base, *gravity);
+        let (_, top, _) = closure.expect("beyond the anchor");
+        assert!(binds);
+        let (fractions, len) = air_mixture(partials);
+        let profile = RadiativeConvective::derive(&StructureInputs {
+            surface_temperature: Kelvin::new(t),
+            surface_pressure: partials.total(),
+            gases: &fractions[..len],
+            condensable: None,
+            skin_temperature: skin_temperature(effective_temperature(*base, Kelvin::ZERO)),
+        })
+        .expect("a thick air's profile");
+        let at_anchor = temperature_at(
+            &VerticalStructure::RadiativeConvective(profile),
+            THICK_AIR_ANCHOR_PRESSURE,
+        );
+        eprintln!(
+            "{:.0} bar: T_s {t:.3} K; the profile at 100 bar {:.4} K, T_a {:.4} K",
+            partials.total().value() / PASCALS_PER_BAR,
+            at_anchor.value(),
+            top.value()
+        );
+        assert!(relative(at_anchor.value(), top.value()) < 5e-4);
+    }
 }
 
 /// A runaway Earth at `T_eq` 300 K holding thirty times Earth's carbon dioxide per unit mass, all
@@ -7236,74 +6971,58 @@ fn under_the_escape_batch_the_thick_air_closure_s_figures_are_pinned_and_the_sam
             906.484_658_827_244,
         ),
     ];
-    with_rules(EscapeRules::Batch, || {
-        let mut columns: Vec<_> = [150.0, 300.0, 1_000.0]
-            .into_iter()
-            .map(venus_column)
-            .collect();
-        columns.push((
-            air_of(&[(Gas::CarbonDioxide, 10_000.0)]),
-            Kelvin::new(132.4),
-            MetresPerSecondSquared::new(8.24),
-        ));
-        let figures: Vec<(f64, f64, f64, f64)> = columns
-            .iter()
-            .map(|(partials, base, gravity)| {
-                let (t, _, _, closure) =
-                    closure_at(GreenhouseCeiling::None, partials, *base, *gravity);
-                let (tau_a, top, adiabat) = closure.expect("beyond the anchor");
-                (tau_a, top.value(), adiabat.value(), t)
-            })
-            .collect();
-        for figures in &figures {
-            eprintln!("{figures:?},");
+    let mut columns: Vec<_> = [150.0, 300.0, 1_000.0]
+        .into_iter()
+        .map(venus_column)
+        .collect();
+    columns.push((
+        air_of(&[(Gas::CarbonDioxide, 10_000.0)]),
+        Kelvin::new(132.4),
+        MetresPerSecondSquared::new(8.24),
+    ));
+    let figures: Vec<(f64, f64, f64, f64)> = columns
+        .iter()
+        .map(|(partials, base, gravity)| {
+            let (t, _, _, closure) = closure_at(GreenhouseCeiling::None, partials, *base, *gravity);
+            let (tau_a, top, adiabat) = closure.expect("beyond the anchor");
+            (tau_a, top.value(), adiabat.value(), t)
+        })
+        .collect();
+    for figures in &figures {
+        eprintln!("{figures:?},");
+    }
+    for (figures, pinned) in figures.iter().zip(PINNED) {
+        for (actual, expected) in [
+            (figures.0, pinned.0),
+            (figures.1, pinned.1),
+            (figures.2, pinned.2),
+            (figures.3, pinned.3),
+        ] {
+            assert_same_bits(actual, expected);
         }
-        for (figures, pinned) in figures.iter().zip(PINNED) {
-            for (actual, expected) in [
-                (figures.0, pinned.0),
-                (figures.1, pinned.1),
-                (figures.2, pinned.2),
-                (figures.3, pinned.3),
-            ] {
-                assert_same_bits(actual, expected);
-            }
-        }
-        let inputs = kilobar_runaway();
-        assert_eq!(atmosphere(&inputs), atmosphere(&inputs));
-    });
+    }
+    let inputs = kilobar_runaway();
+    assert_eq!(atmosphere(&inputs), atmosphere(&inputs));
 }
 
-/// Under the escape's hold, to version 23, the closure is absent: P14.T57.a's constants carry no
-/// anchor, so a kilobar carbon dioxide air's surface is the grey's to the bit, and a kilobar
-/// carbon dioxide runaway derives the same with the closure lifted. Under the batch the same body
-/// takes it: its surface under the lifted one's, and at most its grey and its host (stated).
+/// A kilobar carbon dioxide air takes the thick-air closure (P14.T53.a): the batch's constants
+/// carry its anchor, and a kilobar carbon dioxide runaway's surface lies under the one it derives
+/// with the closure lifted, and at most its host (stated). To version 23, P14.T57.a's constants
+/// carried no anchor, and the closure was absent.
 #[test]
-fn under_the_escape_s_hold_the_thick_air_closure_is_absent() {
+fn a_kilobar_runaway_takes_the_thick_air_closure() {
     let thick = air_of(&[(Gas::CarbonDioxide, 1_000.0), (Gas::Nitrogen, 3.0)]);
     let (base, gravity) = (Kelvin::new(300.0), STANDARD_GRAVITY);
-    assert_eq!(EscapeRules::in_force(), EscapeRules::Held);
-    assert!(
-        GreenhouseConstants::FITTED
-            .thick_air(&thick, base, gravity)
-            .is_none()
-    );
-    let (t, grey, binds, _) = closure_at(GreenhouseCeiling::None, &thick, base, gravity);
-    assert!(!binds);
-    assert_same_bits(t, grey);
     assert!(
         GreenhouseConstants::BATCH
             .thick_air(&thick, base, gravity)
             .is_some()
     );
     let inputs = kilobar_runaway();
-    let held = atmosphere(&inputs);
-    assert_eq!(held, without_thick_air(|| atmosphere(&inputs)));
-    let (batch, lifted) = with_rules(EscapeRules::Batch, || {
-        (
-            atmosphere(&inputs),
-            without_thick_air(|| atmosphere(&inputs)),
-        )
-    });
+    let (batch, lifted) = (
+        atmosphere(&inputs),
+        without_thick_air(|| atmosphere(&inputs)),
+    );
     let line = |air: &Atmosphere| {
         format!(
             "{:?} T_s {:.2} K, p_s {:.2} bar, τ {:.4e}",
@@ -7315,8 +7034,7 @@ fn under_the_escape_s_hold_the_thick_air_closure_is_absent() {
         )
     };
     eprintln!(
-        "a kilobar runaway: held {}\n  batch {}\n  batch, lifted {}",
-        line(&held),
+        "a kilobar runaway: {}\n  lifted {}",
         line(&batch),
         line(&lifted)
     );

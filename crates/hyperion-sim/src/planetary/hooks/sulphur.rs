@@ -45,10 +45,11 @@
 //! (`acid_uv_absorber`, science-r08-unowned-absorbers). Its vapour above is the acid's
 //! saturation at the skin over the top's pressure.
 //!
-//! # Not on the record yet
+//! # On the record from 24
 //!
-//! This module is pure: nothing on the record calls it at generator version 23
-//! (decision-bump-plan-after-22 §1.3).
+//! This module is pure. The record's aerosol inventory calls it
+//! ([`aerosols`](crate::planetary::hooks::aerosols), P14.T54.b's wiring) from generator version
+//! 24; to version 23 nothing on the record called it (decision-bump-plan-after-22 §1.3).
 
 use std::error::Error;
 use std::fmt;

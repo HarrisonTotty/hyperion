@@ -1,13 +1,13 @@
 //! P14.T48.g's population laws: the encounter kernel's limits (decision-p14-t48g-opik §4), the
-//! Solar belts' moments, the hold and its tripwire, and the laws' bits.
+//! Solar belts' moments, and the laws' bits.
 
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
+use crate::GENERATOR_VERSION;
 use crate::planetary::belts::tests::solar;
 use crate::planetary::belts::{Belt, FIRST_BELT_SLOT};
 use crate::planetary::placement::Neighbour;
-use crate::planetary::testing::with_every_24_hold;
 use crate::units::consts::METRES_PER_AU;
 use crate::units::{EarthMasses, SolarMasses};
 
@@ -201,50 +201,18 @@ fn the_encounter_speed_agrees_with_its_replica() {
     }
 }
 
-/// Below the bump the record's moments are version 23's to the bit, whatever the laws, and under
-/// every 24 hold the laws'.
+/// The record's moments are the laws' from the bump (P14.T48.g): its mean eccentricity the laws'
+/// quadrature mean, and its mean inclination the part's untruncated σᵢ√(π ÷ 2), to the bit.
 #[test]
-fn the_record_s_moments_are_23_s_below_the_bump() {
+fn the_record_s_moments_are_the_laws() {
     for belt in solar_belts() {
         for component in belt.components() {
             let part = component.part();
-            assert_same_bits(component.mean_eccentricity(), part.mean_eccentricity());
-            assert_same_bits(
-                component.mean_inclination().value(),
-                part.mean_inclination().value(),
-            );
-            let (e, i) = with_every_24_hold(|| {
-                (component.mean_eccentricity(), component.mean_inclination())
-            });
+            let (e, i) = (component.mean_eccentricity(), component.mean_inclination());
             assert_same_bits(e, component.population().mean_eccentricity());
             assert_same_bits(i.value(), part.mean_inclination().value());
         }
     }
-}
-
-/// The belt population is held until its bump: below it every belt's moments and every impact
-/// velocity are version 23's, and the tests' switch reaches the laws ahead of it.
-#[test]
-fn the_belt_population_is_held_only_until_its_bump() {
-    assert!(
-        GENERATOR_VERSION < BELT_POPULATION_VERSION,
-        "P14.T48.g's bump (24 with P14.T54.b, or the next) puts every belt's moments and impact \
-         velocity on its population's laws. Delete `BELT_POPULATION_VERSION`, `PopulationRules` \
-         with its `Held` arms (`BeltComponent::mean_eccentricity`'s, with \
-         `BeltPart::mean_eccentricity` if nothing else reads it; \
-         `hooks::figures`'s `in_belt_excitation`, `nearest_belt_excitation` with its cube \
-         `approach`, `belt_excitation`, `Impactors::lunar`'s and `with_abundance_under`'s \
-         `rules`, and `LUNAR_ENCOUNTER_SPEED` for \
-         `POPULATION_LUNAR_ENCOUNTER_SPEED`), `with_population_rules` and its thread's rules, its \
-         arm in `with_every_24_hold`, and this test; and move T48.f's below-24 tests (Ceres's 5.6 \
-         ± 0.1) to the population's"
-    );
-    assert_eq!(PopulationRules::in_force(), PopulationRules::Held);
-    assert_eq!(
-        with_population_rules(PopulationRules::Laws, PopulationRules::in_force),
-        PopulationRules::Laws
-    );
-    assert_eq!(PopulationRules::in_force(), PopulationRules::Held);
 }
 
 /// The laws' parts out of range are refused, each naming its part.

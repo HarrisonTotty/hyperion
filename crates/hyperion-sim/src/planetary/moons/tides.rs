@@ -18,22 +18,21 @@
 //! holds decides ([`MoonTides::of`]):
 //!
 //! 1. **The ocean branch** ([`TidalBranch::Ocean`]), for a moon with water, if
-//!    [`has_subsurface_ocean`] holds at
+//!    [`has_subsurface_ocean`](crate::planetary::moons::regular::has_subsurface_ocean) holds at
 //!    `F_ocean`. Its ice shell is a thin membrane over the ocean on a rigid mantle, Beuthe's own
 //!    form (2015, Icarus 248, 109, eqs. 28 and 43–44): k₂ = `k_oc` ÷ (1 + h°Λ)
 //!    ([`membrane_love_number`]), with the ocean's limit `k_oc` = 3`ρ_w` ÷ (5ρ̄ − 3`ρ_w`)
-//!    ([`ocean_love_number`]), h° = 1 + `k_oc`, and the membrane's
-//!    Λ = 8(1 + ν) ÷ (5 + ν) × μ̄ d ÷ (`ρ_w` g R²) over the ocean's density, d the conductive shell
-//!    651 ln(273 K ÷ `T_s`) ÷ F (decision-p14-t56d-membrane, which corrects decision-p14-moons
-//!    §F-ocean F2's ρ̄ and its missing h°). Λ is complex through the shell's Maxwell rigidity,
-//!    Beuthe 2019's Arrhenius ice at 10¹⁴ Pa s, averaged over its conductive profile
-//!    ([`shell_modulus`]), so its loss factor is the moon's own, from its period and surface
-//!    temperature: no loss factor is fitted. `F_ocean` is the
-//!    largest stable root of F = `F_nt` + Φ Im k₂(d(F)), the warm start a moon formed hot in its
-//!    planet's disc keeps ([`ocean_heat_flow`]). From P14.T51.g.b's bump (`OCEAN_VERSION`) the
-//!    test is the ocean's own presence test, at `F_ocean`, over the moon's water and solutes, and
-//!    d(F) its spherical shell, its modulus averaged to its base's liquidus: a bracketed root of
-//!    F − `F_nt` − Φ Im k₂(Λ(d(F))) (decision-p14-t51g's T56.d branch).
+//!    ([`ocean_love_number`]), h° = 1 + `k_oc`, and the membrane's Λ = 8(1 + ν) ÷ (5 + ν) × μ̄ d ÷
+//!    (`ρ_w` g R²) over the ocean's density, d the conductive shell 651 ln(273 K ÷ `T_s`) ÷ F
+//!    (decision-p14-t56d-membrane, which corrects decision-p14-moons §F-ocean F2's ρ̄ and its
+//!    missing h°). Λ is complex through the shell's Maxwell rigidity, Beuthe 2019's Arrhenius ice
+//!    at 10¹⁴ Pa s, averaged over its conductive profile ([`shell_modulus`]), so its loss factor is
+//!    the moon's own, from its period and surface temperature: no loss factor is fitted. `F_ocean`
+//!    is the largest stable root of F = `F_nt` + Φ Im k₂(d(F)), the warm start a moon formed hot in
+//!    its planet's disc keeps ([`ocean_heat_flow`]). From P14.T51.g.b's bump at generator version
+//!    24 the test is the ocean's own presence test, at `F_ocean`, over the moon's water and
+//!    solutes, and d(F) its spherical shell, its modulus averaged to its base's liquidus: a
+//!    bracketed root of F − `F_nt` − Φ Im k₂(Λ(d(F))) (decision-p14-t51g's T56.d branch).
 //! 2. **The heated branch** ([`TidalBranch::Heated`]), for a rocky moon if `F_nt` and its tidal
 //!    flux at Io's Im k₂ = 0.015
 //!    ([`MOON_TIDAL_RESPONSE`]) reach
@@ -64,11 +63,11 @@ use crate::math;
 use crate::planetary::derive::rotation::SpinTides;
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::ocean::{
-    Hydrosphere, ICE_CONDUCTIVITY_FLOOR, OceanRules, OceanSolutes, SHELL_BASE_HALVINGS, ShellBase,
+    Hydrosphere, ICE_CONDUCTIVITY_FLOOR, OceanSolutes, SHELL_BASE_HALVINGS, ShellBase,
 };
 use crate::planetary::moons::regular::{
     ICE_CONDUCTIVITY_COEFFICIENT, ICE_MELTING_POINT, MOON_TIDAL_RESPONSE, WATER_DENSITY,
-    has_subsurface_ocean, tidal_heating,
+    tidal_heating,
 };
 use crate::planetary::params::{
     COLD_ICE_TIDAL_Q, COLD_ROCK_TIDAL_Q, HEATED_ROCK_RIGIDITY,
@@ -907,8 +906,8 @@ impl MoonTides {
     /// Reading `F_nt` alone, not the age, the branch is read at each time: an ocean that the
     /// falling radiogenic heat freezes is a recorded state change.
     ///
-    /// From P14.T51.g.b's bump (`OCEAN_VERSION`, 24) the ocean branch is the spherical shell's over
-    /// fresh water, its base at ice Ih's melting point at its pressure; the generator's moons
+    /// From P14.T51.g.b's bump at generator version 24 the ocean branch is the spherical shell's
+    /// over fresh water, its base at ice Ih's melting point at its pressure; the generator's moons
     /// dissolve their own chlorine and ammonia, which this public form does not take.
     ///
     /// # Examples
@@ -940,36 +939,18 @@ impl MoonTides {
     }
 
     /// The tides of the moon `inputs` describe, whose ocean would dissolve `solutes`, with the ocean
-    /// its branch keeps (crate-private; [`of`](Self::of) reads it at fresh water):
-    ///
-    /// - under [`OceanRules::Held`], version 23's tides, the ocean branch on the flag's planar
-    ///   shell, whose ocean the flag's own rule gives (`None` here);
-    /// - under [`OceanRules::Solved`] (P14.T51.g.b), the ocean branch on the solve's spherical
-    ///   shell ([`on_its_shell`](Self::on_its_shell)), with the solve's ocean at the branch's root,
-    ///   and [`Subsurface::NoOcean`] off it.
+    /// its branch keeps (crate-private; [`of`](Self::of) reads it at fresh water): the ocean branch
+    /// on the solve's spherical shell ([`on_its_shell`](Self::on_its_shell), P14.T51.g.b), with the
+    /// solve's ocean at the branch's root, and [`Subsurface::NoOcean`] off it.
     #[must_use]
-    pub(crate) fn with_ocean(
-        inputs: &TideInputs,
-        solutes: &OceanSolutes,
-    ) -> (Self, Option<Subsurface>) {
+    pub(crate) fn with_ocean(inputs: &TideInputs, solutes: &OceanSolutes) -> (Self, Subsurface) {
         let (density, gravity) = Self::bulk(inputs);
-        match OceanRules::in_force() {
-            OceanRules::Held => (
-                Self::on_an_ocean(inputs, density, gravity)
-                    .unwrap_or_else(|| Self::off_an_ocean(inputs, density, gravity)),
-                None,
-            ),
-            OceanRules::Solved => {
-                let (tides, ocean) = Self::on_its_shell(inputs, solutes, density, gravity)
-                    .unwrap_or_else(|| {
-                        (
-                            Self::off_an_ocean(inputs, density, gravity),
-                            Subsurface::NoOcean,
-                        )
-                    });
-                (tides, Some(ocean))
-            }
-        }
+        Self::on_its_shell(inputs, solutes, density, gravity).unwrap_or_else(|| {
+            (
+                Self::off_an_ocean(inputs, density, gravity),
+                Subsurface::NoOcean,
+            )
+        })
     }
 
     /// The tides of a moon `inputs` describe that takes no ocean branch, whatever its water and
@@ -1028,56 +1009,6 @@ impl MoonTides {
             branch: TidalBranch::Cold,
             heat_flow: WattsPerSquareMetre::new(f_nt + forcing * loss),
         }
-    }
-
-    /// The ocean branch's tides, if the moon of `inputs`, of mean density `density` and surface
-    /// gravity `gravity`, holds an ocean at its hot root.
-    #[must_use]
-    fn on_an_ocean(
-        inputs: &TideInputs,
-        density: KilogramsPerCubicMetre,
-        gravity: MetresPerSecondSquared,
-    ) -> Option<Self> {
-        let ocean = ocean_love_number(density);
-        if inputs.water <= 0.0 || !(ocean.is_finite() && ocean > 0.0) {
-            return None;
-        }
-        let modulus = shell_modulus(inputs.surface_temperature, inputs.mean_motion_rad_per_s);
-        let stiffness = shell_stiffness(
-            modulus,
-            ICE_POISSON_RATIO,
-            inputs.surface_temperature,
-            gravity,
-            inputs.radius,
-        );
-        if stiffness.real.value() <= 0.0 {
-            return None;
-        }
-        let heat_flow =
-            ocean_heat_flow(inputs.non_tidal_heat_flow, inputs.forcing, ocean, stiffness);
-        let holds = has_subsurface_ocean(
-            inputs.radius,
-            density,
-            inputs.water,
-            inputs.surface_temperature,
-            heat_flow,
-        );
-        if !holds {
-            return None;
-        }
-        let k2 = membrane_love_number(ocean, stiffness.at(heat_flow));
-        let (modulus, loss) = (k2.modulus(), k2.loss());
-        // A shell with no loss at all, which a finite viscosity never gives, despins nothing.
-        if !(loss.is_finite() && loss > 0.0) {
-            return None;
-        }
-        Some(Self {
-            k2: modulus,
-            q: modulus / loss,
-            loss,
-            branch: TidalBranch::Ocean,
-            heat_flow,
-        })
     }
 
     /// The ocean branch's tides on the solve's spherical shell (P14.T51.g.b; decision-p14-t51g's

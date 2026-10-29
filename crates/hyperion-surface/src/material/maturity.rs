@@ -252,16 +252,16 @@
 //! then its age nodes in order, the coarse list in order, the bins in order), and it holds no
 //! cache: it is a function of the header and the coarse list alone.
 //!
-//! # Not on the record yet
+//! # On the record from 24
 //!
-//! Nothing on the record calls this module's time law at generator version 22: P14.T54.b (23 → 24)
-//! fills the header's `maturity` from P14.T51.d's `hooks/modifiers.rs`, which calls it, and deletes
-//! the sim's tripwire (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) that holds the
-//! line. No header outside the `testing` builder carries a maturity, a rate or a cover before it,
-//! so every exposure the server and the worker take is [`GroundExposure::NONE`]'s, every mix the
-//! server asks for is `None`, and every albedo and answer is as it was. The point maturity is
-//! presentation (plan R10's Generator version); the solve's per-form rule (`Melt`, the cover) and
-//! its haloes reach the header's generator-versioned `albedo_scale` at 24.
+//! Nothing on the record called this module's time law to generator version 23: P14.T54.b
+//! (23 → 24) fills the header's `maturity` from P14.T51.d's `hooks/modifiers.rs`, which calls it,
+//! and the bump deleted the sim's tripwire that held the line. Below 24 no header outside the
+//! `testing` builder carried a maturity, a rate or a cover, so every exposure the server and the
+//! worker took was [`GroundExposure::NONE`]'s, every mix the server asked for was `None`, and every
+//! albedo and answer was as it had been. The point maturity is presentation (plan R10's Generator
+//! version); the solve's per-form rule (`Melt`, the cover) and its haloes reach the header's
+//! generator-versioned `albedo_scale` at 24.
 
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
@@ -452,7 +452,8 @@ impl GroundExposure {
 
     /// The exposure of a body's ground as its field header gives it: the background maturity
     /// `m_body` ([`FieldHeader::maturity`]) and the organic cover
-    /// ([`FieldHeader::organic_cover`]), each absent until P14.T54.b fills it.
+    /// ([`FieldHeader::organic_cover`]), each absent where the header carries none (every header
+    /// below generator version 24, before P14.T54.b filled them).
     ///
     /// # Panics
     ///

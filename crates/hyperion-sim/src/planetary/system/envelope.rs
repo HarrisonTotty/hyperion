@@ -1,14 +1,12 @@
 //! The envelope section on the record (plan 14, P14.T54.b.i, the 23 → 24 batch's wiring): a
 //! sub-Neptune's or a giant's visible atmosphere, P14.T24.d's profile and internal heat with
-//! P14.T52.d's chemistry, decks, hazes and absorbers on P14.T50.b's element abundances, held off
-//! the record until the bump by the air's sections' hold ([`AirRules`], `AIR_SECTIONS_VERSION`;
-//! decision-p14-t54b-open §1.2 item 6): no hold of its own.
+//! P14.T52.d's chemistry, decks, hazes and absorbers on P14.T50.b's element abundances, on the
+//! record from generator version 24 (the 23 → 24 bump, P14.T54.b.l; decision-p14-t54b-open §1.2
+//! item 6), with the air's sections.
 //!
 //! The record's primary (`PlanetarySystem::envelope_section`) gives what it publishes
-//! ([`EnvelopeOf`]) and the query's network, each through a closure, so that under the hold
-//! nothing of it is read or computed ([`record_envelope`]). Every reach of the record into
-//! `hooks::envelope_atmosphere` is in this file, behind the hold (the envelope scan's `HELD` list,
-//! decision-p14-t54b-open §3.3).
+//! ([`EnvelopeOf`]) and the query's network ([`record_envelope`]). Every reach of the record into
+//! `hooks::envelope_atmosphere` is in this file.
 //!
 //! The chain ([`envelope_of`]): the host's \[α/Fe\] and the body's formation zone, which no
 //! default replaces; P14.T24.d's internal temperature, the record's heat blended with its cooling
@@ -21,7 +19,6 @@
 use std::error::Error;
 use std::fmt;
 
-use super::air::AirRules;
 use crate::math;
 use crate::planetary::chem::HostAbundances;
 use crate::planetary::chem::envelope_abundances::{
@@ -68,13 +65,13 @@ pub(crate) struct EnvelopeOf {
     /// Its host's C/O and Mg/Si (P14.T50.a).
     pub(crate) host: HostAbundances,
     /// Its envelope's He/H by number before any helium rain: the host star's own, fractionated by
-    /// its escape where the escape's batch carries it (P14.T53.a, P14.T54.b.h).
+    /// its escape where its derivation carries it (P14.T53.a, P14.T54.b.h).
     pub(crate) primordial_helium_per_hydrogen: f64,
     /// Whether a star's ultraviolet lights it, which drives its photochemistry.
     pub(crate) starlit: bool,
 }
 
-/// Why a record's envelope is not modelled under the air's batch, or the testing helper's
+/// Why a record's envelope is not modelled, or the testing helper's
 /// envelope by hand gives none: the census's reasons, of which the record keeps none
 /// (P14.T54.b.b's rule: `Section::NotModelled` carries no reason).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -126,28 +123,18 @@ impl Error for DeriveEnvelopeError {
     }
 }
 
-/// The record's envelope section of the body `of` describes, its network `network`, under the
-/// rules `rules` (P14.T54.b.i).
-///
-/// Under [`AirRules::Held`] it is not modelled, and neither closure runs: nothing is read or
-/// computed. Under [`AirRules::Batch`] it is [`envelope_of`]'s envelope, and not modelled for
-/// every refusal ([`DeriveEnvelopeError`]), whose reason the record does not keep.
+/// The record's envelope section of the body `of` describes, on the query's network `network`
+/// (P14.T54.b.i): [`envelope_of`]'s envelope, and not modelled for every refusal
+/// ([`DeriveEnvelopeError`]), whose reason the record does not keep.
 #[must_use]
-pub(super) fn record_envelope<'n>(
-    rules: AirRules,
-    of: impl FnOnce() -> EnvelopeOf,
-    network: impl FnOnce() -> Result<&'n Network, BuildNetworkError>,
+pub(super) fn record_envelope(
+    of: &EnvelopeOf,
+    network: Result<&Network, BuildNetworkError>,
 ) -> Section<Envelope> {
-    match rules {
-        AirRules::Held => Section::NotModelled,
-        AirRules::Batch => {
-            let of = of();
-            network()
-                .map_err(DeriveEnvelopeError::Network)
-                .and_then(|network| envelope_of(&of, network))
-                .map_or(Section::NotModelled, Section::Ok)
-        }
-    }
+    network
+        .map_err(DeriveEnvelopeError::Network)
+        .and_then(|network| envelope_of(of, network))
+        .map_or(Section::NotModelled, Section::Ok)
 }
 
 /// The envelope of the body `of` describes, on P14.T52.a's network `network` (the [module](self)'s

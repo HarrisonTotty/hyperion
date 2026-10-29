@@ -63,12 +63,12 @@
 //! - `mars_dust`: R08's index at its grains' size, 2.8 µm, a stand-in below geometric optics;
 //! - `SO2`: Nash, Fanale and Nelson 1980's measured levels, a stand-in.
 //!
-//! **The darkened crystalline rows** (P14.T49.k; decision-p14-t49k), [`DARKENED`], held until
-//! `ROW_DARKENING_VERSION`: `basalt_reduced` with Mercury's global carbon, 1.4 wt% as graphite at
-//! the fine grains, `graphite.json`'s opaque slab as a mixture's part, and `ferric` with its
-//! nanophase ferric oxide at the fine grains, a fine phase where a source gives it as fine and its
-//! share, never fitted. `basalt_fe` and `komatiite` are unchanged, no fine phase of theirs being
-//! cited, each with its reason in its label.
+//! **The darkened crystalline rows** (P14.T49.k; decision-p14-t49k), the rows from generator
+//! version 24 (the 23 → 24 bump swapped them in for 23's): `basalt_reduced` with Mercury's global
+//! carbon, 1.4 wt% as graphite at the fine grains, `graphite.json`'s opaque slab as a mixture's
+//! part, and `ferric` with its nanophase ferric oxide at the fine grains, a fine phase where a
+//! source gives it as fine and its share, never fitted. `basalt_fe` and `komatiite` are unchanged,
+//! no fine phase of theirs being cited, each with its reason in its label.
 //!
 //! **Not modelled here** (closed set, for the composition audit):
 //!
@@ -397,7 +397,7 @@ const KOMATIITE_STAND_IN: &str = "an unvalidated mixture: no band of its class's
                                   counted as augite, and no fine phase being cited \
                                   (decision-p14-t49k Q5)";
 
-/// `basalt_reduced`'s label from `ROW_DARKENING_VERSION` (P14.T49.k; decision-p14-t49k Q5).
+/// `basalt_reduced`'s label (P14.T49.k; decision-p14-t49k Q5), from generator version 24.
 const BASALT_REDUCED_UPPER_BOUND: Source = stand_in(
     "an upper bound, a mixture of clean mineral separates with Mercury's global carbon as fine \
      graphite, fresh and unweathered (decision-p14-t49k Q5), within its bounds: its Bond albedo \
@@ -416,15 +416,14 @@ const BASALT_REDUCED_UPPER_BOUND: Source = stand_in(
      p 0.142 × q 0.478); an airless body's lid of it keeps the space-weathering stand-in's 0.11",
 );
 
-/// `ferric`'s reason from `ROW_DARKENING_VERSION` (P14.T49.k; decision-p14-t49k Q5).
-const FERRIC_DARKENED_STAND_IN: &str = "an unvalidated mixture: no band of its class's albedo was \
-                                        read (decision-p14-t49i-rock-mixtures §3; \
-                                        decision-p14-t49k Q5), and clean mineral separates bound \
-                                        an anhydrous rock's albedo from above (`basalt`'s check, \
-                                        in its sources); its Bond albedo under a 5,772 K \
-                                        blackbody, 0.212, beside Mars's bright regions' clear-sky \
-                                        bolometric Lambert albedo, 0.27 (Pleskot and Miner 1981, \
-                                        Icarus 45, 179, abstract), context and not a band";
+/// `ferric`'s reason (P14.T49.k; decision-p14-t49k Q5), from generator version 24.
+const FERRIC_STAND_IN: &str = "an unvalidated mixture: no band of its class's albedo was read \
+                               (decision-p14-t49i-rock-mixtures §3; decision-p14-t49k Q5), and \
+                               clean mineral separates bound an anhydrous rock's albedo from \
+                               above (`basalt`'s check, in its sources); its Bond albedo under a \
+                               5,772 K blackbody, 0.212, beside Mars's bright regions' clear-sky \
+                               bolometric Lambert albedo, 0.27 (Pleskot and Miner 1981, Icarus \
+                               45, 179, abstract), context and not a band";
 
 /// `chondrite_ci`'s band.
 const CHONDRITE_CI_BAND: Source = source(
@@ -1181,11 +1180,13 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
         &table::BASALT_REDUCED_ALBEDO,
         lab_sources!(
             lab::BASALT_REDUCED_MODE,
+            lab::BASALT_REDUCED_FINE,
             lab::ANORTHITE.source(),
             lab::ENSTATITE.source(),
             lab::DIOPSIDE.source(),
             lab::OLIVINE_FO91.source(),
-            stand_in(UNVALIDATED),
+            lab::GRAPHITE_SLAB.source(),
+            BASALT_REDUCED_UPPER_BOUND,
         ),
     ),
     row(
@@ -1229,6 +1230,7 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
         &table::FERRIC_ALBEDO,
         lab_sources!(
             lab::FERRIC_MODE,
+            lab::FERRIC_FINE,
             lab::AUGITE.source(),
             lab::PIGEONITE.source(),
             lab::OLIVINE_FO66.source(),
@@ -1237,7 +1239,7 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
             lab::FERRIHYDRITE.source(),
             lab::HEMATITE.source(),
             lab::MAGNETITE.source(),
-            stand_in(UNVALIDATED),
+            stand_in(FERRIC_STAND_IN),
         ),
     ),
     row(
@@ -1529,56 +1531,6 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
             lab::ENSTATITE.source(),
             lab::IRON_SULPHIDE.source(),
             stand_in(COMETARY_STAND_IN),
-        ),
-    ),
-];
-
-/// The darkened crystalline rows, in registry order (P14.T49.k; decision-p14-t49k Q1–Q5): each
-/// in place of its row in [`OPTICS`] from `ROW_DARKENING_VERSION`, when
-/// [`Substance::condensed_optics`](super::super::Substance::condensed_optics) serves them, their
-/// values fitted beside 23's rows'. `basalt_reduced` carries Mercury's global carbon as graphite
-/// at the fine grains, an opaque index file's part; `ferric` its nanophase ferric oxide at the
-/// fine grains. `basalt_fe` and `komatiite` are unchanged, each with its reason in its label.
-pub(in crate::substance) static DARKENED: [CondensedOptics; 2] = [
-    row(
-        "basalt_reduced",
-        ReferenceForm::Regolith,
-        OpticsInput::Mixture {
-            parts: lab::BASALT_REDUCED_DARKENED,
-        },
-        InputProvenance::StandIn,
-        &table::BASALT_REDUCED_DARKENED_ALBEDO,
-        lab_sources!(
-            lab::BASALT_REDUCED_DARKENED_MODE,
-            lab::BASALT_REDUCED_DARKENED_FINE,
-            lab::ANORTHITE.source(),
-            lab::ENSTATITE.source(),
-            lab::DIOPSIDE.source(),
-            lab::OLIVINE_FO91.source(),
-            lab::GRAPHITE_SLAB.source(),
-            BASALT_REDUCED_UPPER_BOUND,
-        ),
-    ),
-    row(
-        "ferric",
-        ReferenceForm::Regolith,
-        OpticsInput::Mixture {
-            parts: lab::FERRIC_DARKENED,
-        },
-        InputProvenance::StandIn,
-        &table::FERRIC_DARKENED_ALBEDO,
-        lab_sources!(
-            lab::FERRIC_DARKENED_MODE,
-            lab::FERRIC_DARKENED_FINE,
-            lab::AUGITE.source(),
-            lab::PIGEONITE.source(),
-            lab::OLIVINE_FO66.source(),
-            lab::ANORTHITE.source(),
-            lab::ILMENITE.source(),
-            lab::FERRIHYDRITE.source(),
-            lab::HEMATITE.source(),
-            lab::MAGNETITE.source(),
-            stand_in(FERRIC_DARKENED_STAND_IN),
         ),
     ),
 ];

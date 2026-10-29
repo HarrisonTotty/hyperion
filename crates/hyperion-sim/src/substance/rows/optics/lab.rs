@@ -794,28 +794,9 @@ pub(in crate::substance) const BASALT_FE_MODE: Source = assumed(
      fraction being cited (decision-p14-t49i-rock-mixtures §2.2 and §2.7)",
 );
 
-/// `basalt_reduced`'s parts.
+/// `basalt_reduced`'s parts (P14.T49.k, from generator version 24): its silicates' mode scaled by
+/// 0.9817, and Mercury's global carbon as graphite at the fine grains.
 pub(in crate::substance) const BASALT_REDUCED: &[MixturePart] = &[
-    form(&ANORTHITE, 0.5400),
-    form(&ENSTATITE, 0.2804),
-    form(&DIOPSIDE, 0.0909),
-    form(&OLIVINE_FO91, 0.0886),
-];
-
-/// `basalt_reduced`'s mode.
-pub(in crate::substance) const BASALT_REDUCED_MODE: Source = assumed(
-    "an assumption inside Charlier and Namur 2017's bounds for Mercury's Intermediate Plains \
-     (IcP-HCT), whose solidus mineralogy has the most enstatite (above 25%) and much plagioclase \
-     (above 45%) (LPSC XLVIII, #1173, p. 2): 50 wt% plagioclase, 30 enstatite, 10 diopside and 10 \
-     forsterite, at the Handbook of Mineralogy's 2,760, 3,189 and 3,278 kg m⁻³ and 3,362 for the \
-     forsterite, olivine at GDS71.a's Fa8.1, linear between forsterite's D(calc.) 3.271 and \
-     fayalite's 4.40 g cm⁻³, to vol%: 0.5400, 0.2804, 0.0909 and 0.0886; the plagioclase as \
-     anorthite, the Northern Volcanic Plains' sodic melts not drawn; sulphides not drawn",
-);
-
-/// `basalt_reduced`'s parts from `ROW_DARKENING_VERSION` (P14.T49.k): 23's scaled by 0.9817, and
-/// Mercury's global carbon as graphite at the fine grains.
-pub(in crate::substance) const BASALT_REDUCED_DARKENED: &[MixturePart] = &[
     form(&ANORTHITE, 0.5301),
     form(&ENSTATITE, 0.2753),
     form(&DIOPSIDE, 0.0892),
@@ -823,8 +804,8 @@ pub(in crate::substance) const BASALT_REDUCED_DARKENED: &[MixturePart] = &[
     fine_opaque(&GRAPHITE_SLAB, 0.0183),
 ];
 
-/// `basalt_reduced`'s mode from `ROW_DARKENING_VERSION` (P14.T49.k).
-pub(in crate::substance) const BASALT_REDUCED_DARKENED_MODE: Source = assumed(
+/// `basalt_reduced`'s mode (P14.T49.k, from generator version 24).
+pub(in crate::substance) const BASALT_REDUCED_MODE: Source = assumed(
     "`basalt_reduced`'s silicate mode, an assumption inside Charlier and Namur 2017's bounds for \
      Mercury's Intermediate Plains (IcP-HCT), whose solidus mineralogy has the most enstatite \
      (above 25%) and much plagioclase (above 45%) (LPSC XLVIII, #1173, p. 2): 50 wt% plagioclase, \
@@ -844,8 +825,8 @@ pub(in crate::substance) const BASALT_REDUCED_DARKENED_MODE: Source = assumed(
      used, and carbon black is not used (decision-p14-t49k Q2 and Q3)",
 );
 
-/// `basalt_reduced`'s fine grains from `ROW_DARKENING_VERSION` (P14.T49.k).
-pub(in crate::substance) const BASALT_REDUCED_DARKENED_FINE: Source = Source {
+/// `basalt_reduced`'s fine grains (P14.T49.k, from generator version 24).
+pub(in crate::substance) const BASALT_REDUCED_FINE: Source = Source {
     covers: "fine grains",
     citation: "the graphite at 1 µm, all of it (decision-p14-t49i-rock-mixtures §2.2 and §2.3, \
                `Adopted`, never fitted): Murchie et al. 2015 (Icarus 254, 287) model Mercury's \
@@ -886,34 +867,9 @@ pub(in crate::substance) const PHYLLOSILICATE_MODE: Source = assumed(
      D(meas.)), as a volume-weighted mean, gives 82 vol% lizardite and 18 vol% saponite",
 );
 
-/// `ferric`'s parts.
+/// `ferric`'s parts (P14.T49.k, from generator version 24): Rocknest's mode with its nanophase
+/// ferric oxide as ferrihydrite's own mass ([`FERRIC_MODE`]), the oxide at the fine grains.
 pub(in crate::substance) const FERRIC: &[MixturePart] = &[
-    form(&AUGITE, 0.2842),
-    form(&PIGEONITE, 0.2842),
-    form(&OLIVINE_FO66, 0.0593),
-    form(&ANORTHITE, 0.2284),
-    form(&ILMENITE, 0.0639),
-    form(&FERRIHYDRITE, 0.0619),
-    form(&HEMATITE, 0.0064),
-    form(&MAGNETITE, 0.0117),
-];
-
-/// `ferric`'s mode.
-pub(in crate::substance) const FERRIC_MODE: Source = assumed(
-    "the registry's ferric soil (its grain density's source): Rocknest's hematite 1.0 and \
-     magnetite 1.8 wt% (Achilles et al. 2017, JGR Planets 122, 2344, Table 1) and nanophase ferric \
-     oxide 6.8 wt% (Morris et al. 2013, LPSC 44, 1653, Table 3), in 90.4 wt% `basalt_fe`, at \
-     5,260 and 5,175 kg m⁻³ (the Handbook of Mineralogy's), ferrihydrite's 3,700 (the midpoint \
-     of Hiemstra and Van Riemsdijk 2009's 3.5–3.9 g cm⁻³) and `basalt_fe`'s 3,310, to vol%: \
-     0.0064, 0.0117, 0.0619 and 0.9200, `basalt_fe`'s parts scaled by 0.9200, its pyroxene's 1:1 \
-     split among them, an assumption no source gives; the nanophase oxide as ferrihydrite GDS75, \
-     the rest at the form's grains",
-);
-
-/// `ferric`'s parts from `ROW_DARKENING_VERSION` (P14.T49.k): Rocknest's mode with its nanophase
-/// ferric oxide as ferrihydrite's own mass ([`FERRIC_DARKENED_MODE`]), the oxide at the fine
-/// grains.
-pub(in crate::substance) const FERRIC_DARKENED: &[MixturePart] = &[
     form(&AUGITE, 0.2807),
     form(&PIGEONITE, 0.2807),
     form(&OLIVINE_FO66, 0.0585),
@@ -924,9 +880,9 @@ pub(in crate::substance) const FERRIC_DARKENED: &[MixturePart] = &[
     form(&MAGNETITE, 0.0116),
 ];
 
-/// `ferric`'s mode from `ROW_DARKENING_VERSION` (P14.T49.k; decision-p14-t49k, its addendum's
-/// item 3).
-pub(in crate::substance) const FERRIC_DARKENED_MODE: Source = assumed(
+/// `ferric`'s mode (P14.T49.k, from generator version 24; decision-p14-t49k, its addendum's item
+/// 3).
+pub(in crate::substance) const FERRIC_MODE: Source = assumed(
     "the registry's ferric soil (its grain density's source): Rocknest's hematite 1.0 and \
      magnetite 1.8 wt% (Achilles et al. 2017, JGR Planets 122, 2344, Table 1) and nanophase ferric \
      oxide 6.8 wt% as Fe2O3 (Morris et al. 2013, LPSC 44, 1653, Table 3, \"Fe2O3-npOx 6.8\"), in \
@@ -941,8 +897,8 @@ pub(in crate::substance) const FERRIC_DARKENED_MODE: Source = assumed(
      fine grains, the rest at the form's",
 );
 
-/// `ferric`'s fine grains from `ROW_DARKENING_VERSION` (P14.T49.k).
-pub(in crate::substance) const FERRIC_DARKENED_FINE: Source = Source {
+/// `ferric`'s fine grains (P14.T49.k, from generator version 24).
+pub(in crate::substance) const FERRIC_FINE: Source = Source {
     covers: "fine grains",
     citation: "the nanophase ferric oxide at 1 µm, all of it (decision-p14-t49i-rock-mixtures \
                §2.2 and §2.3, `Adopted`, never fitted; decision-p14-t49k Q5): Morris et al. \

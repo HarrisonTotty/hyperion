@@ -27,9 +27,7 @@
 //! saturation, and a saturated `p_i` lies just above the line's continuation below `T_c`, so the
 //! line would fire there on every saturated air. At `T_c` the line is `p_c` itself.
 //!
-//! It is in force under the escape's batch rules ([`EscapeRules::Batch`], from its hold's
-//! version 24) and never under the hold, so that version 23's record is unchanged to the bit.
-//! P14.T54.b deletes the hold and keeps the test.
+//! It is in force from generator version 24 (the 23 → 24 bump, P14.T54.b).
 //!
 //! # Part 3: the cap and the steam envelope
 //!
@@ -68,7 +66,6 @@
 use core::f64::consts::PI;
 
 use super::{Atmosphere, Gas, PartialPressures, SurfaceState};
-use crate::planetary::chem::escape::EscapeRules;
 use crate::planetary::chem::partition::CriticalColumn;
 use crate::planetary::derive::PlanetClass;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
@@ -85,8 +82,7 @@ use crate::{GENERATOR_VERSION, GeneratorVersion};
 /// envelope's section from that reservoir, the steam a runaway keeps beyond its escape's capacity
 /// and the [`SurfaceState::SteamEnvelope`](super::SurfaceState::SteamEnvelope) state. Below it
 /// [`SteamEnvelopeRules::in_force`] is [`SteamEnvelopeRules::Held`], so that every figure on the
-/// record is version 23's, and 24's, bit for bit; its rules are read only under the escape's batch
-/// rules too ([`steam_envelope_in_force`]), whose path they amend. 25's bump deletes this hold,
+/// record is version 24's bit for bit ([`steam_envelope_in_force`]). 25's bump deletes this hold,
 /// [`SteamEnvelopeRules`] with its `Held` arm, the tests' switch and its tripwire
 /// (`the_steam_envelope_is_held_only_until_the_25_bump`).
 ///
@@ -145,12 +141,11 @@ pub(crate) fn with_steam_envelope<R>(rules: SteamEnvelopeRules, run: impl FnOnce
     run()
 }
 
-/// Whether P14.T53.b part 3 is in force: its own rules ([`SteamEnvelopeRules::Steam`]) under the
-/// escape's batch rules ([`EscapeRules::Batch`]), whose path it amends; never under either hold.
+/// Whether P14.T53.b part 3 is in force: its own rules ([`SteamEnvelopeRules::Steam`]); never
+/// under its hold.
 #[must_use]
 pub(crate) fn steam_envelope_in_force() -> bool {
     SteamEnvelopeRules::in_force() == SteamEnvelopeRules::Steam
-        && EscapeRules::in_force() == EscapeRules::Batch
 }
 
 /// A condensable at or above its critical temperature at a body's surface, against its critical
@@ -307,8 +302,8 @@ pub(crate) fn critical_columns(
 
 /// The reservoir that hides the surface ([`SupercriticalReservoir::hides_the_surface`]) with the
 /// largest share among [`critical_columns`]', the first in [`Gas::ALL`]'s order of equal shares;
-/// `None` where none does. It reads no rules: [`Atmosphere::supercritical_reservoir`] is the
-/// record's, under the escape's hold.
+/// `None` where none does. It reads no rules: [`Atmosphere::supercritical_reservoir`] gives it to
+/// the record under part 3's hold.
 #[must_use]
 pub(crate) fn hiding_reservoir(
     temperature: Kelvin,
@@ -323,22 +318,15 @@ pub(crate) fn hiding_reservoir(
         })
 }
 
-/// Whether a supercritical envelope hides a solid body's surface on the record (P14.T53.b part 2):
-/// under the escape's batch rules ([`EscapeRules::Batch`], from its hold's version 24), and never
-/// under the hold, to generator version 23.
-#[must_use]
-pub(crate) fn supercritical_section_in_force() -> bool {
-    EscapeRules::in_force() == EscapeRules::Batch
-}
-
 /// Whether a present body of class `class` whose atmosphere is `air`, under the bulk's surface
 /// gravity `gravity`, has its surface section on the record: a class with a solid surface
 /// ([`PlanetClass::has_solid_surface`]) not under a supercritical envelope
 /// ([`Atmosphere::supercritical_reservoir`]) and, from P14.T53.b part 3, not published in the
 /// [`SurfaceState::SteamEnvelope`] state its derivation found ([`Atmosphere::published_state`]),
 /// so that the tag reads the state (decision-bump-plan-after-22 R1.1) and a bulk of another gravity
-/// than the derivation's cannot give a steam envelope's state a surface. Where it has not, its envelope section applies
-/// instead (P14.T48.e; P14.T53.b parts 2 and 3), so that exactly one of the two does.
+/// than the derivation's cannot give a steam envelope's state a surface. Where it has not, its
+/// envelope section applies instead (P14.T48.e; P14.T53.b parts 2 and 3), so that exactly one of
+/// the two does.
 #[must_use]
 pub(crate) fn has_surface_section(
     class: PlanetClass,
@@ -353,9 +341,8 @@ pub(crate) fn has_surface_section(
 impl Atmosphere {
     /// The supercritical reservoir that hides the body's surface under the bulk's surface gravity
     /// `gravity` (P14.T53.b part 2; the [module documentation](self)), at least
-    /// [`THIN_ENVELOPE_FRACTION`] of the body's mass; `None` where none does, for a gas envelope,
-    /// whose partial pressures are all zero, and under the escape's hold, to generator version 23
-    /// ([`supercritical_section_in_force`]).
+    /// [`THIN_ENVELOPE_FRACTION`] of the body's mass; `None` where none does, and for a gas
+    /// envelope, whose partial pressures are all zero.
     ///
     /// - Under part 2 alone: the condensable at or above its critical temperature at the mean
     ///   surface temperature whose own column above its critical isochore holds the largest share.
@@ -369,9 +356,6 @@ impl Atmosphere {
         &self,
         gravity: MetresPerSecondSquared,
     ) -> Option<SupercriticalReservoir> {
-        if !supercritical_section_in_force() {
-            return None;
-        }
         if steam_envelope_in_force() {
             return self
                 .supercritical
@@ -426,7 +410,6 @@ mod tests {
     use hyperion_testkit::float::{assert_same_bits, bits};
 
     use super::*;
-    use crate::planetary::chem::escape::with_rules;
 
     /// Earth's standard gravity, m s⁻², for the hand-built airs.
     const G: MetresPerSecondSquared = MetresPerSecondSquared::new(9.806_65);
@@ -539,18 +522,5 @@ mod tests {
         assert!(hidden.is_none(), "{hidden:?}");
         let hidden = hiding_reservoir(t, &PartialPressures::default(), G);
         assert!(hidden.is_none(), "{hidden:?}");
-    }
-
-    /// The record's test is in force under the escape's batch rules alone.
-    #[test]
-    fn the_section_is_in_force_under_the_batch_alone() {
-        assert!(!with_rules(
-            EscapeRules::Held,
-            supercritical_section_in_force
-        ));
-        assert!(with_rules(
-            EscapeRules::Batch,
-            supercritical_section_in_force
-        ));
     }
 }

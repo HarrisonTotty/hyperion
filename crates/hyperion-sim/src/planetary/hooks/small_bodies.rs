@@ -111,11 +111,8 @@
 //!
 //! P14.T51.e's wiring, `planetary/system/small_bodies.rs`, fills the record's class
 //! ([`record::Surface::taxonomic_class`](crate::planetary::record::Surface::taxonomic_class)) from
-//! each planet's, member's and moon's built surface, behind its hold, `SMALL_BODY_TYPES_VERSION` =
-//! 24, as a P14.T54.b.j rider, so that nothing on the record moves at generator version 23. The
-//! tripwire test (`small_bodies_nothing_on_the_record_reads_the_types_yet`) holds every other file
-//! off this module's entry points until P14.T54.b.l deletes it (decision-p14-t51e-contract §1.4,
-//! §3.7 and §4).
+//! each planet's, member's and moon's built surface, from generator version 24, a P14.T54.b.j
+//! rider (decision-p14-t51e-contract §1.4, §3.7 and §4).
 //!
 //! # Determinism
 //!

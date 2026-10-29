@@ -734,67 +734,40 @@ fn the_airless_cap_is_keyed_on_the_lid_s_row() {
     );
 }
 
-/// `run`'s result with every landed hold of version 24 at its bump's rules
-/// (decision-t24i-airless-state D3.3): the darkened rows (P14.T49.k), the read densities
-/// (P14.T49.n), the compressed liquids, the unlit mean, and the escape's batch with the Rayleigh
-/// floor it switches. The moon bulk's and the cold traps' rules are the system's and the record's,
-/// which no piece of the area mix reads.
-fn under_24_s_holds<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::chem::escape::{EscapeRules, with_rules};
-    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
-    use crate::substance::optics::{RowDarkeningRules, with_row_darkening};
-    use crate::substance::{
-        CompressedLiquidsRules, ReadDensitiesRules, with_compressed_liquids, with_read_densities,
-    };
-    with_row_darkening(RowDarkeningRules::Darkened, || {
-        with_read_densities(ReadDensitiesRules::Read, || {
-            with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
-                with_unlit_mean(UnlitMeanRules::Floored, || {
-                    with_rules(EscapeRules::Batch, run)
-                })
-            })
-        })
-    })
-}
-
-/// Under 24's rows, every landed hold of 24 in force (P14.T49.k; decision-p14-t49k Q5): the
-/// darkened `basalt_reduced`, graphite-bearing, lies above the Moon's 0.11, so the cap still holds
-/// Mercury's lid at 0.11, and a Vesta-like `basalt_fe` lid too, its row unchanged, whose `A_N` in V
-/// is 23's to the bit (`reference.rs`'s 0.410); under air the two darkened rows are their own,
-/// darker than 23's, stated with Mars by decision-pre-23-review item 13's terms (its `basalt_fe`
-/// lid with `ferric` over 0.31 of the land, its ice and cloud aside).
+/// Under 24's rows (P14.T49.k; decision-p14-t49k Q5): the darkened `basalt_reduced`,
+/// graphite-bearing, lies above the Moon's 0.11, so the cap still holds Mercury's lid at 0.11, and
+/// a Vesta-like `basalt_fe` lid too, its row P14.T49.i's, whose `A_N` in V is `reference.rs`'s
+/// 0.410; under air `basalt_reduced`'s row is its own, stated with Mars by decision-pre-23-review
+/// item 13's terms (its `basalt_fe` lid with `ferric` over 0.31 of the land, its ice and cloud
+/// aside).
 #[test]
 fn under_24_s_rows_the_airless_cap_holds_mercury_and_a_vesta_like_basalt() {
     use crate::planetary::hooks::crust::CrustLithology;
 
     let sun = sun_bands();
     let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
-    let read = || {
-        let lid = |lithology: CrustLithology, state| {
-            Regolith::with_lid(lithology.substance(), SurfaceMaterial::Rock).bond(state, &sun)
-        };
-        let basalt_fe = id("basalt_fe").substance().condensed_optics().unwrap();
-        (
-            solid_bond(id("basalt_reduced"), &sun).bond,
-            solid_bond(id("ferric"), &sun).bond,
-            solid_bond(id("basalt_fe"), &sun).bond,
-            basalt_fe.normal_albedo_bvr()[1],
-            lid(CrustLithology::ReducedBasalt, SurfaceState::Airless),
-            lid(CrustLithology::IronRichBasalt, SurfaceState::Airless),
-            lid(CrustLithology::ReducedBasalt, SurfaceState::Temperate),
-        )
+    let lid = |lithology: CrustLithology, state| {
+        Regolith::with_lid(lithology.substance(), SurfaceMaterial::Rock).bond(state, &sun)
     };
-    let held = read();
-    let (reduced, ferric, basalt_fe, basalt_fe_v, mercury, vesta, under_air) =
-        under_24_s_holds(read);
-    assert!(
-        reduced > moon && reduced < held.0,
-        "basalt_reduced {reduced} against the cap {moon} and 23's {}",
-        held.0
+    let basalt_fe_v = id("basalt_fe")
+        .substance()
+        .condensed_optics()
+        .unwrap()
+        .normal_albedo_bvr()[1];
+    let (reduced, ferric, basalt_fe) = (
+        solid_bond(id("basalt_reduced"), &sun).bond,
+        solid_bond(id("ferric"), &sun).bond,
+        solid_bond(id("basalt_fe"), &sun).bond,
     );
-    assert!(ferric < held.1, "ferric {ferric} against 23's {}", held.1);
-    assert_same_bits(basalt_fe, held.2);
-    assert_same_bits(basalt_fe_v, held.3);
+    let (mercury, vesta, under_air) = (
+        lid(CrustLithology::ReducedBasalt, SurfaceState::Airless),
+        lid(CrustLithology::IronRichBasalt, SurfaceState::Airless),
+        lid(CrustLithology::ReducedBasalt, SurfaceState::Temperate),
+    );
+    assert!(
+        reduced > moon,
+        "basalt_reduced {reduced} against the cap {moon}"
+    );
     assert!((basalt_fe_v - 0.410).abs() < 5e-4, "{basalt_fe_v}");
     for (body, capped) in [("Mercury", mercury), ("a Vesta-like basalt_fe", vesta)] {
         assert_eq!(capped.stand_in, Some(StandIn::SpaceWeathering), "{body}");
@@ -804,13 +777,10 @@ fn under_24_s_rows_the_airless_cap_holds_mercury_and_a_vesta_like_basalt() {
     assert_same_bits(under_air.bond, reduced);
     let mars = |lid: f64, deposit: f64| 0.69 * lid + 0.31 * deposit;
     eprintln!(
-        "under 24's rows, about a Sun: basalt_reduced {:.4} → {reduced:.4} (airless, capped, \
-         {:.4}); ferric {:.4} → {ferric:.4}; basalt_fe {basalt_fe:.4} unchanged; Mars by item \
-         13's terms, ice and cloud aside, {:.4} → {:.4}",
-        held.0,
+        "under 24's rows, about a Sun: basalt_reduced {reduced:.4} (airless, capped, {:.4}); \
+         ferric {ferric:.4}; basalt_fe {basalt_fe:.4}; Mars by item 13's terms, ice and cloud \
+         aside, {:.4}",
         mercury.bond,
-        held.1,
-        mars(held.2, held.1),
         mars(basalt_fe, ferric),
     );
 }
@@ -1357,39 +1327,15 @@ fn the_floor_s_pieces_are_pinned() {
     golden!("planetary/rayleigh_floor", w.as_str());
 }
 
-/// The floor is held until P14.T54.b's bump: below it the rules are the area mix's alone, and the
-/// tests' switch reaches the floor ahead of it.
-#[test]
-fn the_rayleigh_floor_is_held_only_until_the_24_bump() {
-    assert!(
-        GENERATOR_VERSION < RAYLEIGH_FLOOR_VERSION,
-        "the 23 → 24 bump (P14.T54.b) puts the Rayleigh floor on the record: every body with a \
-         surface takes the larger of its area mix and its air's own Rayleigh layer \
-         (P14.T24.h.a). Delete `RAYLEIGH_FLOOR_VERSION`, `RayleighFloorRules` with its `Held` \
-         arm, `with_rayleigh_floor` and its thread's rules, the `Held` branch of \
-         `surface_mix::floored`, and this test; the floor's tests then run as the generator's"
-    );
-    assert_eq!(RayleighFloorRules::in_force(), RayleighFloorRules::Held);
-    assert_eq!(
-        with_rayleigh_floor(RayleighFloorRules::Floored, RayleighFloorRules::in_force),
-        RayleighFloorRules::Floored
-    );
-    assert_eq!(RayleighFloorRules::in_force(), RayleighFloorRules::Held);
-}
-
-/// P14.T49.n's compression, held until 24 (`COMPRESSED_LIQUIDS_VERSION`): the area mix reads a
-/// sea's record at the temperature its condensate lies at under its partition's surface pressure,
-/// so that from 24 the Bond albedo's liquid and the partition's layer read one `ρ_l`(T, p)
-/// (decision-p14-t54a-water-consistency's W4). By hand, a water sea at about 288 K under 20 bar of
-/// nitrogen: under 23's rules its Bond albedo is the saturated record's, to the bit; under 24's its
-/// record's density is the registry's law at its condensate's temperature and the surface
-/// pressure, the density its published layer reads, to the bit, about 9 × 10⁻⁴ above the
-/// saturated liquid's (`κ_T` Δp), and its Bond albedo that record's.
+/// P14.T49.n's compression, from 24: the area mix reads a sea's record at the temperature its
+/// condensate lies at under its partition's surface pressure, so that the Bond albedo's liquid and
+/// the partition's layer read one `ρ_l`(T, p) (decision-p14-t54a-water-consistency's W4). By hand,
+/// a water sea at about 288 K under 20 bar of nitrogen: its record's density is the registry's law
+/// at its condensate's temperature and the surface pressure, the density its published layer
+/// reads, to the bit, about 9 × 10⁻⁴ above the saturated liquid's (`κ_T` Δp; the saturated
+/// record's Bond albedo, version 23's, beside it), and its Bond albedo that record's.
 #[test]
 fn under_compression_the_area_mix_s_sea_reads_its_layer_s_density() {
-    use crate::substance::{CompressedLiquidsRules, with_compressed_liquids};
-
-    let compressed = CompressedLiquidsRules::Compressed;
     let water = id("H2O");
     let sun = HostShade::sun();
     // By hand: Earth's water column under 20 bar of nitrogen, its sea Earth's surface water.
@@ -1425,15 +1371,9 @@ fn under_compression_the_area_mix_s_sea_reads_its_layer_s_density() {
         let record = liquid_record(water, lies_at, pressure).in_range().unwrap();
         (sea, (lies_at, pressure), bond, record)
     };
-    let (_, (t, p), held, held_record) = by_hand();
-    let (sea, state, moved, record) = with_compressed_liquids(compressed, by_hand);
-    assert_eq!(
-        held_record,
-        liquid_properties(water, t, Composition::Reference).unwrap()
-    );
-    assert_same_bits(held.bond, liquid_bond(&held_record, &sun.bins));
-    assert_same_bits(state.0.value(), t.value());
-    assert_same_bits(state.1.value(), p.value());
+    let (sea, (t, p), moved, record) = by_hand();
+    let held_record = liquid_properties(water, t, Composition::Reference).unwrap();
+    let held = liquid_bond(&held_record, &sun.bins);
     let law = water
         .substance()
         .compressed_liquid_density(t, p)
@@ -1445,11 +1385,8 @@ fn under_compression_the_area_mix_s_sea_reads_its_layer_s_density() {
         sea.reservoir().value() / law,
     );
     assert_same_bits(moved.bond, liquid_bond(&record, &sun.bins));
-    assert_eq!((held.stand_in, moved.stand_in), (None, None));
-    assert!(
-        (moved.bond - held.bond).abs() > 1e-6,
-        "{moved:?} against {held:?}"
-    );
+    assert_eq!(moved.stand_in, None);
+    assert!((moved.bond - held).abs() > 1e-6, "{moved:?} against {held}");
     let relative = record.density_kg_m3 / held_record.density_kg_m3 - 1.0;
     assert!((5e-4..2e-3).contains(&relative), "{relative:e}");
     eprintln!(
@@ -1459,19 +1396,19 @@ fn under_compression_the_area_mix_s_sea_reads_its_layer_s_density() {
         p.value(),
         held_record.density_kg_m3,
         record.density_kg_m3,
-        held.bond,
+        held,
         moved.bond
     );
 }
 
-/// P14.T49.n's compression, held until 24 (`COMPRESSED_LIQUIDS_VERSION`): the area mix's sea
-/// record is the one the palette's liquid entry reads (`liquid_properties_at_pressure`), so that
-/// from 24 the Bond albedo's liquid and the palette's read one `ρ_l`(T, p) at one state (W4). On
-/// the record, `close_binary`'s `.0800`, a steam world's sea under 213 bar at about 583 K (the
-/// partition's record test's body): read inside the switch, the palette's liquid entry's grain
-/// density and the area mix's record at the entry's temperature under the record's surface pressure
-/// are the same bits, and so is the whole record, more than 2% above the saturated liquid's; under
-/// 23's rules both are the saturated liquid's. Each reader keeps its own temperature, the area mix
+/// P14.T49.n's compression, from 24: the area mix's sea record is the one the palette's liquid
+/// entry reads (`liquid_properties_at_pressure`), so that the Bond albedo's liquid and the
+/// palette's read one `ρ_l`(T, p) at one state (W4). On the record, `close_binary`'s `.0700`, a
+/// sea under 32.8 bar at 273.1 K (the partition's record test's body; at 23 `.0800`, a steam
+/// world's sea under 213 bar, took more than 2%): the palette's liquid entry's grain density and
+/// the area mix's record at the entry's temperature under the record's surface pressure are the
+/// same bits, and so is the whole record, more than 0.1% above the saturated liquid's, version
+/// 23's. Each reader keeps its own temperature, the area mix
 /// its condensate's `lies_at` and the palette the record's mean held at the boiling point
 /// (decision-p14-t54a-water-consistency's Batch B follow-up), and its own surface pressure, the
 /// partition's and the record's conditions'.
@@ -1486,9 +1423,8 @@ fn under_compression_the_area_mix_s_sea_reads_the_palette_s_density() {
     use crate::planetary::context::SystemContext;
     use crate::planetary::surface::{CoarseInputs, RECORD_TIME};
     use crate::planetary::system::generate;
-    use crate::substance::{CompressedLiquidsRules, CondensedPhase, with_compressed_liquids};
+    use crate::substance::CondensedPhase;
 
-    let compressed = CompressedLiquidsRules::Compressed;
     let water = id("H2O");
     // tests/planetary_golden.rs's `SYSTEMS_SEED` and close_binary's pinned ID.
     let galaxy = Galaxy::from_params(
@@ -1503,17 +1439,17 @@ fn under_compression_the_area_mix_s_sea_reads_the_palette_s_density() {
         let record = snapshot
             .bodies()
             .iter()
-            .find(|record| record.index().get() == 0x0800)
-            .expect("close_binary holds its .0800");
-        let surface = record.surface().ok().expect(".0800 has a surface");
+            .find(|record| record.index().get() == 0x0700)
+            .expect("close_binary holds its .0700");
+        let surface = record.surface().ok().expect(".0700 has a surface");
         let pressure = surface.conditions().surface_pressure();
-        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0800 reads its inputs");
+        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0700 reads its inputs");
         let entry = inputs
             .palette()
             .entries()
             .iter()
             .find(|e| e.role == PaletteRole::Liquid && e.substance.as_str() == "H2O")
-            .expect(".0800's palette holds its sea")
+            .expect(".0700's palette holds its sea")
             .clone();
         let sea = entry.liquid.expect("a sea carries its record");
         let area_mix = liquid_record(water, sea.temperature, pressure)
@@ -1521,66 +1457,27 @@ fn under_compression_the_area_mix_s_sea_reads_the_palette_s_density() {
             .expect("the entry's temperature lies in water's range");
         (entry.grain_density_kg_m3, sea, area_mix, pressure)
     };
-    let (held_grain, held_sea, held_mix, _) = on_the_record();
-    let (grain, sea, mix, pressure) = with_compressed_liquids(compressed, on_the_record);
+    let (grain, sea, mix, pressure) = on_the_record();
     let saturated = water
         .substance()
-        .grain_density(CondensedPhase::Liquid, held_sea.temperature)
+        .grain_density(CondensedPhase::Liquid, sea.temperature)
         .unwrap()
         .value();
-    for (grain, sea, mix) in [(held_grain, &held_sea, &held_mix), (grain, &sea, &mix)] {
-        assert_same_bits(mix.density_kg_m3, grain);
-        assert_eq!(mix, sea);
-    }
-    assert_same_bits(held_grain, saturated);
+    assert_same_bits(mix.density_kg_m3, grain);
+    assert_eq!(mix, sea);
     let law = water
         .substance()
         .compressed_liquid_density(sea.temperature, pressure)
         .unwrap()
         .value();
     assert_same_bits(grain, law);
-    assert!(grain > 1.02 * saturated, "{grain} against {saturated}");
+    assert!(grain > 1.001 * saturated, "{grain} against {saturated}");
     eprintln!(
-        "close_binary .0800 under {:.4} bar: the palette's sea at {:.3} K and the area mix's \
-         record there, ρ {held_grain:.4} → {grain:.4} kg m⁻³",
+        "close_binary .0700 under {:.4} bar: the palette's sea at {:.3} K and the area mix's \
+         record there, ρ {saturated:.4} saturated → {grain:.4} kg m⁻³",
         pressure.value() / 1e5,
         sea.temperature.value()
     );
-}
-
-/// The weathered area mix is held until P14.T54.b's bump (P14.T54.b.e): below it the rules are the
-/// stand-in's, no pass reads its record's case (its closure is never called), and a known airless
-/// silicate lid on the stand-in's arm is still capped at the Moon's 0.11; the tests' switch reaches
-/// the weathered arm ahead of it.
-#[test]
-fn the_weathered_area_mix_is_held_only_until_the_24_bump() {
-    use crate::planetary::derive::atmosphere::{NoMaturity, PassWeathering};
-
-    assert_eq!(WEATHERED_AREA_MIX_VERSION, GeneratorVersion::new(24));
-    assert!(
-        GENERATOR_VERSION < WEATHERED_AREA_MIX_VERSION,
-        "the 23 → 24 bump (P14.T54.b.l) weathers the area mix: every pass's known lid weathered at \
-         its body's maturity by R10.T1.d's law, `basalt_reduced`'s kept at the cap, and `ferric`'s \
-         deposit in the mix. Delete `WEATHERED_AREA_MIX_VERSION`, `AreaMixWeathering` with its \
-         `Held` arm, `with_area_mix_weathering` and its thread's rules, `NoMaturity::Held` and \
-         `PassWeathering::in_force`'s held arm, `planet_field_rules` and `reads_modifier_star`'s \
-         held arms, its line in `with_every_24_hold`, the scan's `AreaMixWeathering` lines, and \
-         this test; restamp the surface crate's `space_weathering` table `--since 24`"
-    );
-    assert_eq!(AreaMixWeathering::in_force(), AreaMixWeathering::Held);
-    let held = PassWeathering::in_force(|| panic!("nothing of the weathering is computed"));
-    assert_eq!(held.err(), Some(NoMaturity::Held));
-    assert_eq!(
-        with_area_mix_weathering(AreaMixWeathering::Weathered, AreaMixWeathering::in_force),
-        AreaMixWeathering::Weathered
-    );
-    assert_eq!(AreaMixWeathering::in_force(), AreaMixWeathering::Held);
-    let sun = sun_bands();
-    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
-    let capped = Regolith::with_lid(id("basalt_fe"), SurfaceMaterial::Rock)
-        .bond(SurfaceState::Airless, &sun);
-    assert_eq!(capped.stand_in, Some(StandIn::SpaceWeathering));
-    assert_same_bits(capped.bond, moon);
 }
 
 /// The weathering law reads each optics bin at its midpoint, 345 to 4,250 nm, in bin order.
@@ -1606,80 +1503,75 @@ fn the_law_reads_each_bin_at_its_midpoint() {
 /// rows.
 #[test]
 fn a_weathered_lid_is_the_law_s_by_bin_at_its_maturity() {
-    use crate::planetary::testing::with_every_24_hold;
-
-    with_every_24_hold(|| {
-        let sun = sun_bands();
-        let basalt_fe = id("basalt_fe");
-        let optics = basalt_fe.substance().condensed_optics().unwrap();
-        let fresh = optics.spherical_albedo_bins();
-        let law = basalt_fe.substance().condensed().unwrap().phase_law();
-        let t = kelvin(250.0);
-        let density = basalt_fe
-            .substance()
-            .grain_density(CondensedPhase::Solid, held_at_first_melt(basalt_fe, t))
-            .unwrap()
-            .value();
-        let feo = palette_feo_mass_fraction(basalt_fe).unwrap();
-        assert!((feo - 0.202).abs() < 1e-3, "{feo}");
-        for m in [0.25, 0.5, 1.0] {
-            let regolith =
-                Regolith::weathered_lid(basalt_fe, SurfaceMaterial::Rock, airless_at(m, t));
-            assert!(regolith.is_weathered());
-            let RegolithWeathering::Weathered { spherical_bins } = regolith.weathering else {
-                panic!("basalt_fe is weathered");
-            };
-            for bin in 0..OPTICS_BANDS {
-                let law = weathered_spherical_albedo(
-                    fresh[bin],
-                    bin_wavelength_nm(bin),
-                    law,
-                    density,
-                    feo,
-                    m,
-                );
-                assert_same_bits(spherical_bins[bin], law);
-                assert!(spherical_bins[bin] <= fresh[bin]);
-            }
-            let bond = regolith.bond(SurfaceState::Airless, &sun);
-            assert_eq!(bond.stand_in, None, "never capped");
-            assert_same_bits(bond.bond, band_weighted(&spherical_bins, &sun));
-        }
-        let unweathered = |key: &str, material, m: f64| {
-            let row = id(key);
-            let regolith = Regolith::weathered_lid(row, material, airless_at(m, kelvin(120.0)));
-            let fresh = row.substance().condensed_optics().unwrap();
-            assert!(regolith.is_weathered(), "{key}");
-            let RegolithWeathering::Weathered { spherical_bins } = regolith.weathering else {
-                panic!("{key} takes the weathered arm");
-            };
-            for (a, b) in spherical_bins.iter().zip(fresh.spherical_albedo_bins()) {
-                assert_same_bits(*a, b);
-            }
+    let sun = sun_bands();
+    let basalt_fe = id("basalt_fe");
+    let optics = basalt_fe.substance().condensed_optics().unwrap();
+    let fresh = optics.spherical_albedo_bins();
+    let law = basalt_fe.substance().condensed().unwrap().phase_law();
+    let t = kelvin(250.0);
+    let density = basalt_fe
+        .substance()
+        .grain_density(CondensedPhase::Solid, held_at_first_melt(basalt_fe, t))
+        .unwrap()
+        .value();
+    let feo = palette_feo_mass_fraction(basalt_fe).unwrap();
+    assert!((feo - 0.202).abs() < 1e-3, "{feo}");
+    for m in [0.25, 0.5, 1.0] {
+        let regolith = Regolith::weathered_lid(basalt_fe, SurfaceMaterial::Rock, airless_at(m, t));
+        assert!(regolith.is_weathered());
+        let RegolithWeathering::Weathered { spherical_bins } = regolith.weathering else {
+            panic!("basalt_fe is weathered");
         };
-        unweathered("basalt_fe", SurfaceMaterial::Rock, 0.0);
-        unweathered("H2O", SurfaceMaterial::Rock, 1.0);
-        assert_eq!(palette_feo_mass_fraction(id("mars_dust")), None);
-        unweathered("mars_dust", SurfaceMaterial::Rock, 1.0);
-        // A row whose FeO_T is not modelled keeps the stand-in's arm, capped where airless.
-        for key in ["phyllosilicate", "chondrite_ll", "chondrite_ci"] {
-            let row = id(key);
-            assert_eq!(row.substance().feo_mass_fraction(), None, "{key}");
-            let regolith =
-                Regolith::weathered_lid(row, SurfaceMaterial::Ice, airless_at(1.0, kelvin(160.0)));
-            assert!(!regolith.is_weathered(), "{key}");
-            assert_eq!(
-                format!("{regolith:?}"),
-                format!("{:?}", Regolith::with_lid(row, SurfaceMaterial::Ice)),
-                "{key}"
+        for bin in 0..OPTICS_BANDS {
+            let law = weathered_spherical_albedo(
+                fresh[bin],
+                bin_wavelength_nm(bin),
+                law,
+                density,
+                feo,
+                m,
             );
-            let airless = regolith.bond(SurfaceState::Airless, &sun);
-            assert_eq!(airless.stand_in, Some(StandIn::SpaceWeathering), "{key}");
+            assert_same_bits(spherical_bins[bin], law);
+            assert!(spherical_bins[bin] <= fresh[bin]);
         }
-    });
+        let bond = regolith.bond(SurfaceState::Airless, &sun);
+        assert_eq!(bond.stand_in, None, "never capped");
+        assert_same_bits(bond.bond, band_weighted(&spherical_bins, &sun));
+    }
+    let unweathered = |key: &str, material, m: f64| {
+        let row = id(key);
+        let regolith = Regolith::weathered_lid(row, material, airless_at(m, kelvin(120.0)));
+        let fresh = row.substance().condensed_optics().unwrap();
+        assert!(regolith.is_weathered(), "{key}");
+        let RegolithWeathering::Weathered { spherical_bins } = regolith.weathering else {
+            panic!("{key} takes the weathered arm");
+        };
+        for (a, b) in spherical_bins.iter().zip(fresh.spherical_albedo_bins()) {
+            assert_same_bits(*a, b);
+        }
+    };
+    unweathered("basalt_fe", SurfaceMaterial::Rock, 0.0);
+    unweathered("H2O", SurfaceMaterial::Rock, 1.0);
+    assert_eq!(palette_feo_mass_fraction(id("mars_dust")), None);
+    unweathered("mars_dust", SurfaceMaterial::Rock, 1.0);
+    // A row whose FeO_T is not modelled keeps the stand-in's arm, capped where airless.
+    for key in ["phyllosilicate", "chondrite_ll", "chondrite_ci"] {
+        let row = id(key);
+        assert_eq!(row.substance().feo_mass_fraction(), None, "{key}");
+        let regolith =
+            Regolith::weathered_lid(row, SurfaceMaterial::Ice, airless_at(1.0, kelvin(160.0)));
+        assert!(!regolith.is_weathered(), "{key}");
+        assert_eq!(
+            format!("{regolith:?}"),
+            format!("{:?}", Regolith::with_lid(row, SurfaceMaterial::Ice)),
+            "{key}"
+        );
+        let airless = regolith.bond(SurfaceState::Airless, &sun);
+        assert_eq!(airless.stand_in, Some(StandIn::SpaceWeathering), "{key}");
+    }
 }
 
-/// decision-p14-t54b-e-findings §A.5's must-fix, every 24 hold in force: an airless `komatiite`
+/// decision-p14-t54b-e-findings §A.5's must-fix: an airless `komatiite`
 /// lid on a surface 100 yr old, at m ≈ 0, is a lava with no regolith yet and keeps T51.b's cap,
 /// 0.11 exactly about a Sun (its fresh powder row lies above it), labelled
 /// [`StandIn::UnweatheredLava`], under a tenuous air too; at 2 Myr, and at
@@ -1688,73 +1580,67 @@ fn a_weathered_lid_is_the_law_s_by_bin_at_its_maturity() {
 /// `H2O` lid its frost, however young.
 #[test]
 fn an_airless_silicate_lid_younger_than_a_regolith_keeps_the_cap() {
-    use crate::planetary::testing::with_every_24_hold;
-
-    with_every_24_hold(|| {
-        let sun = sun_bands();
-        let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
-        let komatiite = id("komatiite");
-        assert!(capped_lid(komatiite, SurfaceState::Airless));
-        assert!(
-            solid_bond(komatiite, &sun).bond > moon,
-            "its fresh row lies above the cap"
-        );
-        assert_same_bits(REGOLITH_FORMATION_TIME.value(), 1.0e6);
-        let at = |age: f64, state| LidWeathering {
-            surface_age: Years::new(age),
-            ..lid_at(1e-10, kelvin(140.0), state)
-        };
-        for state in [SurfaceState::Airless, SurfaceState::Tenuous] {
-            let lava = Regolith::weathered_lid(komatiite, SurfaceMaterial::Rock, at(100.0, state));
-            assert!(!lava.is_weathered(), "{state:?}");
-            assert_eq!(lava.weathering, RegolithWeathering::UnweatheredLava);
-            let bond = lava.bond(state, &sun);
-            assert_eq!(bond.stand_in, Some(StandIn::UnweatheredLava), "{state:?}");
-            assert_same_bits(bond.bond, moon);
-            // The cold traps' bare regolith reads it airless: the same cap.
-            assert_eq!(lava.bond(SurfaceState::Airless, &sun), bond);
-        }
-        for age in [2.0e6, REGOLITH_FORMATION_TIME.value()] {
-            let at_age = at(age, SurfaceState::Airless);
-            let regolith = Regolith::weathered_lid(komatiite, SurfaceMaterial::Rock, at_age);
-            assert!(regolith.is_weathered(), "{age} yr");
-            let bond = regolith.bond(SurfaceState::Airless, &sun);
-            assert_eq!(bond.stand_in, None, "{age} yr: weathered, not capped");
-            assert!(bond.bond > moon, "{age} yr: {}", bond.bond);
-        }
-        let under_air = at(100.0, SurfaceState::Temperate);
-        assert!(
-            Regolith::weathered_lid(komatiite, SurfaceMaterial::Rock, under_air).is_weathered()
-        );
-        let young = at(100.0, SurfaceState::Airless);
-        let reduced = Regolith::weathered_lid(id("basalt_reduced"), SurfaceMaterial::Rock, young);
-        assert_eq!(
-            reduced.bond(SurfaceState::Airless, &sun).stand_in,
-            Some(StandIn::SpaceWeathering)
-        );
-        let water = id("H2O");
-        let frost = Regolith::weathered_lid(water, SurfaceMaterial::Ice, young);
-        assert!(frost.is_weathered());
-        assert_same_bits(
-            frost.bond(SurfaceState::Airless, &sun).bond,
-            solid_bond(water, &sun).bond,
-        );
-        let fresh = solid_bond(komatiite, &sun).bond;
-        eprintln!(
-            "an airless komatiite lid: {moon:.4} at 100 yr (its fresh row {fresh:.4}), {:.4} at \
-             2 Myr, m 1e-10",
-            Regolith::weathered_lid(
-                komatiite,
-                SurfaceMaterial::Rock,
-                at(2.0e6, SurfaceState::Airless)
-            )
-            .bond(SurfaceState::Airless, &sun)
-            .bond
-        );
-    });
+    let sun = sun_bands();
+    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+    let komatiite = id("komatiite");
+    assert!(capped_lid(komatiite, SurfaceState::Airless));
+    assert!(
+        solid_bond(komatiite, &sun).bond > moon,
+        "its fresh row lies above the cap"
+    );
+    assert_same_bits(REGOLITH_FORMATION_TIME.value(), 1.0e6);
+    let at = |age: f64, state| LidWeathering {
+        surface_age: Years::new(age),
+        ..lid_at(1e-10, kelvin(140.0), state)
+    };
+    for state in [SurfaceState::Airless, SurfaceState::Tenuous] {
+        let lava = Regolith::weathered_lid(komatiite, SurfaceMaterial::Rock, at(100.0, state));
+        assert!(!lava.is_weathered(), "{state:?}");
+        assert_eq!(lava.weathering, RegolithWeathering::UnweatheredLava);
+        let bond = lava.bond(state, &sun);
+        assert_eq!(bond.stand_in, Some(StandIn::UnweatheredLava), "{state:?}");
+        assert_same_bits(bond.bond, moon);
+        // The cold traps' bare regolith reads it airless: the same cap.
+        assert_eq!(lava.bond(SurfaceState::Airless, &sun), bond);
+    }
+    for age in [2.0e6, REGOLITH_FORMATION_TIME.value()] {
+        let at_age = at(age, SurfaceState::Airless);
+        let regolith = Regolith::weathered_lid(komatiite, SurfaceMaterial::Rock, at_age);
+        assert!(regolith.is_weathered(), "{age} yr");
+        let bond = regolith.bond(SurfaceState::Airless, &sun);
+        assert_eq!(bond.stand_in, None, "{age} yr: weathered, not capped");
+        assert!(bond.bond > moon, "{age} yr: {}", bond.bond);
+    }
+    let under_air = at(100.0, SurfaceState::Temperate);
+    assert!(Regolith::weathered_lid(komatiite, SurfaceMaterial::Rock, under_air).is_weathered());
+    let young = at(100.0, SurfaceState::Airless);
+    let reduced = Regolith::weathered_lid(id("basalt_reduced"), SurfaceMaterial::Rock, young);
+    assert_eq!(
+        reduced.bond(SurfaceState::Airless, &sun).stand_in,
+        Some(StandIn::SpaceWeathering)
+    );
+    let water = id("H2O");
+    let frost = Regolith::weathered_lid(water, SurfaceMaterial::Ice, young);
+    assert!(frost.is_weathered());
+    assert_same_bits(
+        frost.bond(SurfaceState::Airless, &sun).bond,
+        solid_bond(water, &sun).bond,
+    );
+    let fresh = solid_bond(komatiite, &sun).bond;
+    eprintln!(
+        "an airless komatiite lid: {moon:.4} at 100 yr (its fresh row {fresh:.4}), {:.4} at \
+         2 Myr, m 1e-10",
+        Regolith::weathered_lid(
+            komatiite,
+            SurfaceMaterial::Rock,
+            at(2.0e6, SurfaceState::Airless)
+        )
+        .bond(SurfaceState::Airless, &sun)
+        .bond
+    );
 }
 
-/// Under the weathered area mix, every 24 hold in force (P14.T54.b.e; decision-p14-t49k Q5):
+/// Under the weathered area mix (P14.T54.b.e; decision-p14-t49k Q5):
 ///
 /// - **Mercury**, an airless `basalt_reduced` lid about a Sun at Mercury's maturity (its
 ///   k ≈ 8.9 over a surface of some Gyr: 1 to the double), keeps the cap's 0.11 as its Bond
@@ -1772,93 +1658,89 @@ fn an_airless_silicate_lid_younger_than_a_regolith_keeps_the_cap() {
 ///   asserted (P14.T49.k rides 24; the row swap and the assertion are P14.T54.b.l's).
 #[test]
 fn under_the_weathered_area_mix_mercury_keeps_the_cap_and_a_vesta_like_basalt_is_darkened_once() {
-    use crate::planetary::testing::with_every_24_hold;
-
     let held_basalt_fe = solid_bond(id("basalt_fe"), &sun_bands()).bond;
-    with_every_24_hold(|| {
-        let sun = sun_bands();
-        let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
-        let reduced = id("basalt_reduced");
-        assert_eq!(CAPPED_ROWS, ["basalt_reduced"]);
-        let mercury = Regolith::weathered_lid(
-            reduced,
-            SurfaceMaterial::Rock,
-            airless_at(1.0, kelvin(440.0)),
-        );
-        assert!(!mercury.is_weathered());
-        let bond = mercury.bond(SurfaceState::Airless, &sun);
-        assert_eq!(bond.stand_in, Some(StandIn::SpaceWeathering));
-        assert_same_bits(bond.bond, moon);
-        let (mallama, allowance) = (0.088, 1.25);
-        assert!(
-            (mallama / allowance..=(mallama + 0.003) * allowance).contains(&bond.bond),
-            "Mercury's {} against Mallama 2017's 0.088 ± 0.003 within 1.25",
-            bond.bond
-        );
-        let fresh = reduced.substance().condensed_optics().unwrap();
-        let fresh_bond = solid_bond(reduced, &sun).bond;
-        let v = fresh.spherical_albedo_bins()[2];
-        let uncapped = {
-            let optics = reduced.substance().condensed_optics().unwrap();
-            let law = reduced.substance().condensed().unwrap().phase_law();
-            let density = reduced
-                .substance()
-                .grain_density(CondensedPhase::Solid, kelvin(440.0))
-                .unwrap()
-                .value();
-            let feo = palette_feo_mass_fraction(reduced).unwrap();
-            weathered_spherical_albedo(
-                optics.spherical_albedo_bins()[2],
-                bin_wavelength_nm(2),
-                law,
-                density,
-                feo,
-                1.0,
-            )
-        };
-        eprintln!(
-            "Mercury (basalt_reduced, airless, about a Sun): Bond {:.4} by the cap (Mallama 2017 \
-             0.088 ± 0.003 over 0–4 µm; Domingue et al. 2011 0.081 over 0.43–1.01 µm), over the \
-             twelve bins 0.3–5 µm, the first and last standing for the light outside them; its \
-             fresh row {fresh_bond:.4}; its V-band spherical albedo fresh {v:.4}, under the cap's \
-             scaling {:.4}, and by the law at m = 1 uncapped {uncapped:.4}, beside Mallama et al. \
-             2002's p_V q_V 0.068",
-            bond.bond,
-            v * moon / fresh_bond
-        );
-        // A Vesta-like basalt_fe lid: weathered once, never capped.
-        let basalt_fe = id("basalt_fe");
-        assert_same_bits(solid_bond(basalt_fe, &sun).bond, held_basalt_fe);
-        let vesta = Regolith::weathered_lid(
-            basalt_fe,
-            SurfaceMaterial::Rock,
-            airless_at(0.9, kelvin(200.0)),
-        );
-        assert!(vesta.is_weathered());
-        let weathered = vesta.bond(SurfaceState::Airless, &sun);
-        assert_eq!(weathered.stand_in, None);
-        assert!(weathered.bond < held_basalt_fe, "{}", weathered.bond);
-        assert!((weathered.bond - moon).abs() > 1e-6, "not the cap's");
-        // Mars, its basalt_fe lid under its air (m = +0: its row's own) and ferric over 0.31.
-        let mars_lid = Regolith::weathered_lid(
-            basalt_fe,
-            SurfaceMaterial::Rock,
-            lid_at(0.0, kelvin(210.0), SurfaceState::Temperate),
+    let sun = sun_bands();
+    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+    let reduced = id("basalt_reduced");
+    assert_eq!(CAPPED_ROWS, ["basalt_reduced"]);
+    let mercury = Regolith::weathered_lid(
+        reduced,
+        SurfaceMaterial::Rock,
+        airless_at(1.0, kelvin(440.0)),
+    );
+    assert!(!mercury.is_weathered());
+    let bond = mercury.bond(SurfaceState::Airless, &sun);
+    assert_eq!(bond.stand_in, Some(StandIn::SpaceWeathering));
+    assert_same_bits(bond.bond, moon);
+    let (mallama, allowance) = (0.088, 1.25);
+    assert!(
+        (mallama / allowance..=(mallama + 0.003) * allowance).contains(&bond.bond),
+        "Mercury's {} against Mallama 2017's 0.088 ± 0.003 within 1.25",
+        bond.bond
+    );
+    let fresh = reduced.substance().condensed_optics().unwrap();
+    let fresh_bond = solid_bond(reduced, &sun).bond;
+    let v = fresh.spherical_albedo_bins()[2];
+    let uncapped = {
+        let optics = reduced.substance().condensed_optics().unwrap();
+        let law = reduced.substance().condensed().unwrap().phase_law();
+        let density = reduced
+            .substance()
+            .grain_density(CondensedPhase::Solid, kelvin(440.0))
+            .unwrap()
+            .value();
+        let feo = palette_feo_mass_fraction(reduced).unwrap();
+        weathered_spherical_albedo(
+            optics.spherical_albedo_bins()[2],
+            bin_wavelength_nm(2),
+            law,
+            density,
+            feo,
+            1.0,
         )
-        .bond(SurfaceState::Temperate, &sun)
-        .bond;
-        let ferric = solid_bond(id("ferric"), &sun).bond;
-        let mars = 0.69 * mars_lid + 0.31 * ferric;
-        eprintln!(
-            "a Vesta-like basalt_fe at m = 0.9: Bond {:.4} against its fresh row's {:.4}, \
-             uncapped; Mars by item 13's terms (basalt_fe {mars_lid:.4}, ferric {ferric:.4} over \
-             0.31), ice and cloud aside: {mars:.4} against 0.20–0.30, stated",
-            weathered.bond, held_basalt_fe
-        );
-    });
+    };
+    eprintln!(
+        "Mercury (basalt_reduced, airless, about a Sun): Bond {:.4} by the cap (Mallama 2017 \
+         0.088 ± 0.003 over 0–4 µm; Domingue et al. 2011 0.081 over 0.43–1.01 µm), over the \
+         twelve bins 0.3–5 µm, the first and last standing for the light outside them; its \
+         fresh row {fresh_bond:.4}; its V-band spherical albedo fresh {v:.4}, under the cap's \
+         scaling {:.4}, and by the law at m = 1 uncapped {uncapped:.4}, beside Mallama et al. \
+         2002's p_V q_V 0.068",
+        bond.bond,
+        v * moon / fresh_bond
+    );
+    // A Vesta-like basalt_fe lid: weathered once, never capped.
+    let basalt_fe = id("basalt_fe");
+    assert_same_bits(solid_bond(basalt_fe, &sun).bond, held_basalt_fe);
+    let vesta = Regolith::weathered_lid(
+        basalt_fe,
+        SurfaceMaterial::Rock,
+        airless_at(0.9, kelvin(200.0)),
+    );
+    assert!(vesta.is_weathered());
+    let weathered = vesta.bond(SurfaceState::Airless, &sun);
+    assert_eq!(weathered.stand_in, None);
+    assert!(weathered.bond < held_basalt_fe, "{}", weathered.bond);
+    assert!((weathered.bond - moon).abs() > 1e-6, "not the cap's");
+    // Mars, its basalt_fe lid under its air (m = +0: its row's own) and ferric over 0.31.
+    let mars_lid = Regolith::weathered_lid(
+        basalt_fe,
+        SurfaceMaterial::Rock,
+        lid_at(0.0, kelvin(210.0), SurfaceState::Temperate),
+    )
+    .bond(SurfaceState::Temperate, &sun)
+    .bond;
+    let ferric = solid_bond(id("ferric"), &sun).bond;
+    let mars = 0.69 * mars_lid + 0.31 * ferric;
+    eprintln!(
+        "a Vesta-like basalt_fe at m = 0.9: Bond {:.4} against its fresh row's {:.4}, \
+         uncapped; Mars by item 13's terms (basalt_fe {mars_lid:.4}, ferric {ferric:.4} over \
+         0.31), ice and cloud aside: {mars:.4} against 0.20–0.30, stated",
+        weathered.bond, held_basalt_fe
+    );
 }
 
-/// Under the weathered area mix (every 24 hold in force): an airless rocky body whose lid is not
+/// Under the weathered area mix: an airless rocky body whose lid is not
 /// known keeps the Moon's 0.11, labelled (a maturity comes only with a lid, `pass_regolith`), and
 /// the table's Moon, derived over the passes' stand-in (its lid not known), keeps it as its Bond
 /// albedo to the bit, its passes taking no maturity; Europa's airless `H2O` lid on a rocky bulk, of
@@ -1870,42 +1752,39 @@ fn under_the_weathered_area_mix_mercury_keeps_the_cap_and_a_vesta_like_basalt_is
 fn under_the_weathered_area_mix_the_moon_keeps_0_11_and_europa_its_frost() {
     use crate::planetary::derive::atmosphere::{NoMaturity, pass_regolith};
     use crate::planetary::hooks::surface::tests::table;
-    use crate::planetary::testing::with_every_24_hold;
 
-    with_every_24_hold(|| {
-        let sun = sun_bands();
-        let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
-        let unknown = pass_regolith(&Regolith::of_material, SurfaceMaterial::Rock, None)
-            .bond(SurfaceState::Airless, &sun);
-        assert_eq!(unknown.stand_in, Some(StandIn::MoonForAnUnknownAirlessLid));
-        assert_same_bits(unknown.bond, moon);
-        let table = table();
-        let (_, the_moon, _) = table.iter().find(|(name, ..)| *name == "Moon").unwrap();
-        assert_same_bits(the_moon.albedo().value(), moon);
-        assert_eq!(
-            the_moon.weathered().as_ref().err(),
-            Some(&NoMaturity::NoRegolith)
-        );
-        let water = id("H2O");
-        let europa =
-            Regolith::weathered_lid(water, SurfaceMaterial::Rock, airless_at(0.5, kelvin(102.0)));
-        let frost = water.substance().condensed_optics().unwrap();
-        let RegolithWeathering::Weathered { spherical_bins } = europa.weathering else {
-            panic!("an H2O lid takes the weathered arm");
-        };
-        for (a, b) in spherical_bins.iter().zip(frost.spherical_albedo_bins()) {
-            assert_same_bits(*a, b);
-        }
-        let bond = europa.bond(SurfaceState::Airless, &sun).bond;
-        eprintln!(
-            "the Moon (the table's, its lid not known): {:.4}; Europa's H2O lid, FeO_T 0: its \
-             normal albedos in B, V and R {:?}, H2O's fresh frost's, against Europa's normal \
-             reflectances 0.48–0.85, a miss pending P14.T49.m; its Bond albedo about a Sun \
-             {bond:.4}, stated",
-            the_moon.albedo().value(),
-            frost.normal_albedo_bvr()
-        );
-    });
+    let sun = sun_bands();
+    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+    let unknown = pass_regolith(&Regolith::of_material, SurfaceMaterial::Rock, None)
+        .bond(SurfaceState::Airless, &sun);
+    assert_eq!(unknown.stand_in, Some(StandIn::MoonForAnUnknownAirlessLid));
+    assert_same_bits(unknown.bond, moon);
+    let table = table();
+    let (_, the_moon, _) = table.iter().find(|(name, ..)| *name == "Moon").unwrap();
+    assert_same_bits(the_moon.albedo().value(), moon);
+    assert_eq!(
+        the_moon.weathered().as_ref().err(),
+        Some(&NoMaturity::NoRegolith)
+    );
+    let water = id("H2O");
+    let europa =
+        Regolith::weathered_lid(water, SurfaceMaterial::Rock, airless_at(0.5, kelvin(102.0)));
+    let frost = water.substance().condensed_optics().unwrap();
+    let RegolithWeathering::Weathered { spherical_bins } = europa.weathering else {
+        panic!("an H2O lid takes the weathered arm");
+    };
+    for (a, b) in spherical_bins.iter().zip(frost.spherical_albedo_bins()) {
+        assert_same_bits(*a, b);
+    }
+    let bond = europa.bond(SurfaceState::Airless, &sun).bond;
+    eprintln!(
+        "the Moon (the table's, its lid not known): {:.4}; Europa's H2O lid, FeO_T 0: its \
+         normal albedos in B, V and R {:?}, H2O's fresh frost's, against Europa's normal \
+         reflectances 0.48–0.85, a miss pending P14.T49.m; its Bond albedo about a Sun \
+         {bond:.4}, stated",
+        the_moon.albedo().value(),
+        frost.normal_albedo_bvr()
+    );
 }
 
 /// The Moon's recorded miss (decision-p14-t51d-weathering, addendum 2026-10-19, D1–D3;
@@ -1917,37 +1796,34 @@ fn under_the_weathered_area_mix_the_moon_keeps_0_11_and_europa_its_frost() {
 /// Sun, the area mix's.
 #[test]
 fn the_moon_s_recorded_miss_is_stated() {
-    use crate::planetary::testing::with_every_24_hold;
     use crate::substance::optics::resolve_palette_entry;
     use hyperion_surface::field::PaletteRole;
     use hyperion_surface::material::weathered_entry_bvr;
 
-    with_every_24_hold(|| {
-        let sun = sun_bands();
-        let at_one = |key: &str| {
-            let row = id(key);
-            let mut entry =
-                resolve_palette_entry(row, PaletteRole::PrimaryCrust, kelvin(250.0)).unwrap();
-            entry.feo_mass_fraction = palette_feo_mass_fraction(row);
-            let bvr = weathered_entry_bvr(&entry, 1.0);
-            let bond =
-                Regolith::weathered_lid(row, SurfaceMaterial::Rock, airless_at(1.0, kelvin(250.0)))
-                    .bond(SurfaceState::Airless, &sun)
-                    .bond;
-            (entry.feo_mass_fraction, bvr, bond)
-        };
-        let (highland_feo, highlands, highland_bond) = at_one("feldspathic");
-        let (mare_feo, maria, mare_bond) = at_one("basalt_fe");
-        eprintln!(
-            "the Moon's recorded miss at m = 1: highlands (feldspathic, FeO_T {highland_feo:?}) \
-             A_N {highlands:.3?} against 0.094/0.132/0.147, Bond {highland_bond:.4}; maria \
-             (basalt_fe, FeO_T {mare_feo:?}) A_N {maria:.3?} against 0.051/0.054/0.056, Bond \
-             {mare_bond:.4}; the maria's B/R {:.3} against 0.733; the V contrast {:.2} against \
-             the measured 1.58",
-            maria[0] / maria[2],
-            highlands[1] / maria[1]
-        );
-    });
+    let sun = sun_bands();
+    let at_one = |key: &str| {
+        let row = id(key);
+        let mut entry =
+            resolve_palette_entry(row, PaletteRole::PrimaryCrust, kelvin(250.0)).unwrap();
+        entry.feo_mass_fraction = palette_feo_mass_fraction(row);
+        let bvr = weathered_entry_bvr(&entry, 1.0);
+        let bond =
+            Regolith::weathered_lid(row, SurfaceMaterial::Rock, airless_at(1.0, kelvin(250.0)))
+                .bond(SurfaceState::Airless, &sun)
+                .bond;
+        (entry.feo_mass_fraction, bvr, bond)
+    };
+    let (highland_feo, highlands, highland_bond) = at_one("feldspathic");
+    let (mare_feo, maria, mare_bond) = at_one("basalt_fe");
+    eprintln!(
+        "the Moon's recorded miss at m = 1: highlands (feldspathic, FeO_T {highland_feo:?}) \
+         A_N {highlands:.3?} against 0.094/0.132/0.147, Bond {highland_bond:.4}; maria \
+         (basalt_fe, FeO_T {mare_feo:?}) A_N {maria:.3?} against 0.051/0.054/0.056, Bond \
+         {mare_bond:.4}; the maria's B/R {:.3} against 0.733; the V contrast {:.2} against \
+         the measured 1.58",
+        maria[0] / maria[2],
+        highlands[1] / maria[1]
+    );
 }
 
 /// The area mix takes a weathering deposit as a further solid at its row's optics (P14.T54.b.e):

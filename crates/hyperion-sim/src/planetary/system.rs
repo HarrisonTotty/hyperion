@@ -80,7 +80,7 @@
 //! What is not computed is said in every record rather than left to be read as "none" (ruling
 //! 34): a gas-envelope body's surface is [`Section::NotApplicable`] (P14.T48.e) and its `envelope`
 //! `NotModelled` below generator version 24, and from it where the generator does not model it
-//! (P14.T54.b.i, behind the air's sections' hold), and a dwarf planet's rings `NotModelled`. Its
+//! (P14.T54.b.i), and a dwarf planet's rings `NotModelled`. Its
 //! `hooks` hold the body's detail seed alone (the rendering plans' R09.T1.b): [`Section::Ok`] for
 //! a planet, moon or dwarf planet present at the time, `NotApplicable` otherwise. Events on bodies
 //! (P14.T31) are not built, so there is no `events_between`.
@@ -141,7 +141,7 @@ use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
 use crate::planetary::hooks::cold_traps::{
-    self, ColdTrapRules, ColdTrapSky, NoColdTraps, PassColdTraps, RecordColdTraps, RecordField,
+    self, ColdTrapSky, NoColdTraps, PassColdTraps, RecordColdTraps, RecordField,
 };
 use crate::planetary::hooks::crust::{
     CrustComposition, CrustLid, CrustLithology, CrustOrigin, CrustRecord, FormationWindow,
@@ -153,7 +153,7 @@ use crate::planetary::hooks::figures::{
     VolatileHistory, VolatileHistoryInputs, WaterIce, WetEpoch, WindowAt, WindowEntryInputs,
     pass_figures, past_outgassing, relief, window_entry,
 };
-use crate::planetary::hooks::ocean::{OceanInputs, OceanRules, OceanSolutes, subsurface_ocean};
+use crate::planetary::hooks::ocean::{OceanInputs, OceanSolutes, subsurface_ocean};
 use crate::planetary::hooks::surface::{
     ClimateInputs, HourCosines, SeasonalSpin, SeasonsFrom, SurfaceInputs, ZonalInsolation,
 };
@@ -210,14 +210,14 @@ use crate::units::{
     KilogramsPerCubicMetre, Megayears, Metres, MetresPerSecondSquared, Radians, Seconds,
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
-use air::{AirRules, AirSurface, record_aerosols, record_structure};
+use air::{AirSurface, record_aerosols, record_structure};
 use envelope::{DeriveEnvelopeError, EnvelopeOf, record_envelope};
 use modifiers::{
     ModifierCase, ModifierStar, ModifierSurface, PlanetField, RecordPrimary, planet_field,
-    planet_field_rules, reads_modifier_star, record_modifiers, weathering_case,
+    record_modifiers, weathering_case,
 };
-use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water, shell_lag};
-use small_bodies::{SmallBodyRules, SmallBodyTypes};
+use moon_ice::{HotHistory, MoonIce, kept_water, shell_lag};
+use small_bodies::SmallBodyTypes;
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
 /// seven reserved.
@@ -814,23 +814,18 @@ fn icy_member_ice(body: &Body) -> Option<f64> {
 /// [`moon_radius`] gives its ice ([`icy_member_ice`]) at that mass and its rock-and-ice fractions,
 /// known before the derivation. `None` for anything else.
 ///
-/// Under the moon bulk's batch rules its surface lag is its derivation's own
-/// ([`GivenLag::AboveMelting`], P14.T56.g; decision-p14-t56g §3): its heated shell's rock lag where
-/// its zero-albedo temperature lies above the melting point. Its bulk keeps its ice (R1.2).
+/// Its surface lag is its derivation's own ([`GivenLag::AboveMelting`], P14.T56.g;
+/// decision-p14-t56g §3): its heated shell's rock lag where its zero-albedo temperature lies above
+/// the melting point. Its bulk keeps its ice (R1.2).
 #[must_use]
 fn icy_member_given_bulk(body: &Body, mass: EarthMasses) -> Option<GivenBulk> {
     let ice = icy_member_ice(body)?;
-    let lag = if MoonBulkRules::in_force().lags() {
-        GivenLag::AboveMelting
-    } else {
-        GivenLag::Stated(SurfaceLag::Bare)
-    };
     Some(
         GivenBulk::new(
             moon_radius(mass, ice),
             GivenFractions::Exactly(MassFractions::solid(0.0, 1.0 - ice, ice)),
         )
-        .with_lag(lag),
+        .with_lag(GivenLag::AboveMelting),
     )
 }
 
@@ -1016,38 +1011,6 @@ pub struct PlanetarySystem {
     satellites: Vec<Satellites>,
     belts: Vec<Belt>,
     halo: Option<SystemHalo>,
-    /// Which rules its records' cold traps (P14.T51.f), air's sections (P14.T54.b) and small bodies'
-    /// taxonomic classes (P14.T51.e) follow: those in force, which the tests may change
-    /// ([`with_record_rules`](Self::with_record_rules)).
-    record: RecordRules,
-}
-
-/// The rules a system's records' cold traps (P14.T51.f), air's sections (P14.T24.e's vertical
-/// structure, P14.T24.c's aerosol inventory and, under the same hold, P14.T51.d's modifiers,
-/// P14.T54.b) and small bodies' taxonomic classes (P14.T51.e, behind their own hold) follow: the
-/// generator version's, and for the tests the batch's ahead of its bump. P14.T54.b deletes it with
-/// the holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RecordRules {
-    /// Its cold traps: their hold at 24.
-    pub(crate) cold_traps: ColdTrapRules,
-    /// Its air's sections: their hold at 24 (`air::AIR_SECTIONS_VERSION`).
-    pub(crate) air: AirRules,
-    /// Its small bodies' taxonomic classes (P14.T51.e): their hold at 24
-    /// (`small_bodies::SMALL_BODY_TYPES_VERSION`).
-    pub(crate) small_bodies: SmallBodyRules,
-}
-
-impl RecordRules {
-    /// The rules this generator version gives.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        Self {
-            cold_traps: ColdTrapRules::in_force(),
-            air: AirRules::in_force(),
-            small_bodies: SmallBodyRules::in_force(),
-        }
-    }
 }
 
 /// A system's cometary halo and the orbit host it surrounds.
@@ -1319,7 +1282,6 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         satellites: Vec::new(),
         belts: Vec::new(),
         halo: None,
-        record: RecordRules::in_force(),
     }
 }
 
@@ -1765,18 +1727,6 @@ impl PlanetarySystem {
         &self.satellites
     }
 
-    /// The same system with its records' cold traps (P14.T51.i) and air's sections (P14.T54.b)
-    /// under `rules`, for the tests and the cold traps' probe to reach 24's record path ahead of
-    /// the bump. P14.T54.b deletes it with the holds.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn with_record_rules(self, rules: RecordRules) -> Self {
-        Self {
-            record: rules,
-            ..self
-        }
-    }
-
     /// The satellites of the body `parent`: [`Satellites::none`] for a body with none.
     #[must_use]
     pub fn satellites_of(&self, parent: BodyIndex) -> Satellites {
@@ -1923,9 +1873,7 @@ impl PlanetarySystem {
     /// ([`StarModel::state_at`](crate::stellar::system::StarModel::state_at)).
     #[must_use]
     pub fn snapshot_at(&self, ctx: &SystemContext, t: UniverseTime) -> SystemSnapshot {
-        let epoch = Epoch::new(self, ctx, t)
-            .with_shades()
-            .with_small_bodies(self.record.small_bodies);
+        let epoch = Epoch::new(self, ctx, t).with_shades().with_small_bodies();
         // Once for the whole snapshot, every body's zonal profiles reading them (lever (h)).
         let cosines = HourCosines::new();
         let labels: Vec<(BodyIndex, BodyLabel)> = label::labels(self);
@@ -2196,9 +2144,7 @@ impl PlanetarySystem {
             return Ok(self.halo_record(&epoch, halo, label));
         }
         // A planet's, member's or satellite's record derives its bodies: their shades' book.
-        let epoch = epoch
-            .with_shades()
-            .with_small_bodies(self.record.small_bodies);
+        let epoch = epoch.with_shades().with_small_bodies();
         let cosines = HourCosines::new();
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
         match body.host {
@@ -2399,9 +2345,7 @@ impl PlanetarySystem {
             return Ok(None);
         };
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
-        let epoch = Epoch::new(self, ctx, t)
-            .with_shades()
-            .with_small_bodies(self.record.small_bodies);
+        let epoch = Epoch::new(self, ctx, t).with_shades().with_small_bodies();
         let primary = match body.host {
             OrbitHost::Body(parent) => self
                 .body(parent)
@@ -2494,11 +2438,9 @@ impl PlanetarySystem {
     /// derivation is `derived` and whose published bulk is `bulk`, from the tag
     /// [`surface_or_envelope`](Self::surface_or_envelope) gave it, `envelope` (P14.T54.b.i): a
     /// sub-Neptune's or a giant's, which the tag leaves not modelled, is its visible atmosphere
-    /// under the record's air's rules (`envelope::record_envelope`, behind the air's sections'
-    /// hold, `AirRules`), which under the hold reads and computes nothing; every other tag stands,
-    /// so that a solid body's under a supercritical envelope stays not modelled (P14.T53.b part 2,
-    /// until P14.T53.f). The query's network is built at the first envelope it records
-    /// ([`Epoch::network`]).
+    /// (`envelope::record_envelope`); every other tag stands, so that a solid body's under a
+    /// supercritical envelope stays not modelled (P14.T53.b part 2, until P14.T53.f). The query's
+    /// network is built at the first envelope it records ([`Epoch::network`]).
     #[must_use]
     fn envelope_section(
         &self,
@@ -2512,9 +2454,8 @@ impl PlanetarySystem {
             return envelope;
         }
         record_envelope(
-            self.record.air,
-            || self.envelope_inputs(epoch, body, (derived, bulk)),
-            || epoch.network(),
+            &self.envelope_inputs(epoch, body, (derived, bulk)),
+            epoch.network(),
         )
     }
 
@@ -2530,9 +2471,8 @@ impl PlanetarySystem {
     ///   as 0), and its C/O and Mg/Si (P14.T50.a's [`HostAbundances`] at its `system.abundances`
     ///   draws, the crust's);
     /// - its primordial He/H: the He/H its derivation's escape left it (P14.T53.a's
-    ///   fractionation from the host star's own, [`DerivedBody::envelope_helium`]), and where the
-    ///   escape is held, which carries none, the host's unfractionated (`host_helium_per_hydrogen`,
-    ///   the protosolar below generator version 24);
+    ///   fractionation from the host star's own, [`DerivedBody::envelope_helium`]), and where it
+    ///   carries none, the host's unfractionated (`host_helium_per_hydrogen`);
     /// - whether a star's ultraviolet lights it, the aerosols' photochemistry star's rule
     ///   ([`Epoch::photochemistry_temperature`] of its zone's brightest star).
     #[must_use]
@@ -2649,9 +2589,8 @@ impl PlanetarySystem {
                 modifiers: ModifierCase {
                     star: frame.modifier_star,
                     primary: RecordPrimary::Star,
-                    mantle_sulphur: mantle_sulphur(self.record.air, derived.element_inventory()),
+                    mantle_sulphur: mantle_sulphur(derived.element_inventory()),
                 },
-                record: self.record,
             },
             SurfaceOf::Moon {
                 moon,
@@ -2673,9 +2612,8 @@ impl PlanetarySystem {
                         field: planet,
                         semi_major_axis: orbit.semi_major_axis(),
                     },
-                    mantle_sulphur: mantle_sulphur(self.record.air, derived.element_inventory()),
+                    mantle_sulphur: mantle_sulphur(derived.element_inventory()),
                 },
-                record: self.record,
             },
         };
         let surface = published_surface(&time, &case);
@@ -2728,23 +2666,14 @@ impl PlanetarySystem {
             cold_traps: ColdTrapCase {
                 exposed_fraction: cold_traps::exposed_fraction(self.seed, id),
                 star_radius: brightest.map(|(_, state)| state.radius()),
-                rules: self.record.cold_traps,
             },
-            // The air's photochemistry and the modifiers read the star on the record only under
-            // the batch's rules, and the passes' maturity under the weathered area mix's
-            // (P14.T54.b.e): under both holds neither is computed.
-            star_temperature: match self.record.air {
-                AirRules::Held => None,
-                AirRules::Batch => epoch.photochemistry_temperature(brightest),
-            },
-            modifier_star: if reads_modifier_star(self.record.air) {
-                brightest.map(|(member, state)| ModifierStar {
-                    radius: state.radius(),
-                    xuv: epoch.xuv[usize::from(member)],
-                })
-            } else {
-                None
-            },
+            // The air's photochemistry and the modifiers read the star on the record, and the
+            // passes' maturity (P14.T54.b.e).
+            star_temperature: epoch.photochemistry_temperature(brightest),
+            modifier_star: brightest.map(|(member, state)| ModifierStar {
+                radius: state.radius(),
+                xuv: epoch.xuv[usize::from(member)],
+            }),
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
         }
@@ -3296,13 +3225,9 @@ impl PlanetarySystem {
     /// What the moons of `body`, present as `now` says at `epoch`'s time, read of their birthplace
     /// and their ice's history (P14.T56.f): its orbit about its host and its neighbouring belt, as
     /// [`moon_craters`](Self::moon_craters) reads them, and its sky and its zone's history
-    /// ([`hot_history`](Self::hot_history)); `None` where the arms are held
-    /// ([`MoonBulkRules::Held`]).
+    /// ([`hot_history`](Self::hot_history)).
     #[must_use]
-    fn moon_ice(&self, epoch: &Epoch<'_>, body: &Body, now: &ParentNow) -> Option<ParentMoonIce> {
-        if !MoonBulkRules::in_force().thins() {
-            return None;
-        }
+    fn moon_ice(&self, epoch: &Epoch<'_>, body: &Body, now: &ParentNow) -> ParentMoonIce {
         let neighbouring_belt = self
             .nearest_belt(body.index)
             .filter(|belt| belt.adjacency() == BeltAdjacency::Neighbouring)
@@ -3316,11 +3241,11 @@ impl PlanetarySystem {
                 glow: sky.planet_light().luminosity(),
                 history: self.hot_history(epoch, body),
             });
-        Some(ParentMoonIce {
+        ParentMoonIce {
             orbiter: self.host_orbiter(body),
             neighbouring_belt,
             ice,
-        })
+        }
     }
 
     /// How long the zone of `body` may have held its moons hot at `epoch`'s time (P14.T56.f's
@@ -3674,7 +3599,7 @@ impl PlanetarySystem {
                 let (surface, envelope) =
                     self.surface_or_envelope(body, of, body_spin, (&bulk, derived.atmosphere()));
                 let envelope = self.envelope_section(epoch, body, (&derived, &bulk), envelope);
-                // P14.T51.e: its taxonomic class, from its built surface, behind its hold.
+                // P14.T51.e: its taxonomic class, from its built surface.
                 let surface = small_bodies::with_class(
                     epoch.small_bodies,
                     (self, body),
@@ -3715,8 +3640,8 @@ impl PlanetarySystem {
             .build()
             .expect("a generated record withholds no section and has a known kind");
         // What its moons' modifiers read of its magnetosphere, from the record it is (P14.T54.b.c),
-        // and their passes' maturity under the weathered area mix (P14.T54.b.e).
-        now.planet_field = planet_field(planet_field_rules(self.record.air), &record);
+        // and their passes' maturity (P14.T54.b.e).
+        now.planet_field = planet_field(&record);
         (record, now)
     }
 
@@ -3786,7 +3711,7 @@ impl PlanetarySystem {
                 });
                 now.sky = sky;
                 now.nursery = self.nursery(epoch.ctx, body);
-                now.moon_ice = self.moon_ice(epoch, body, &now);
+                now.moon_ice = Some(self.moon_ice(epoch, body, &now));
             }
             BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {}
         }
@@ -4038,7 +3963,7 @@ impl PlanetarySystem {
                     },
                 );
                 let bulk = bulk.map_or(Section::NotModelled, |(bulk, _)| Section::Ok(bulk));
-                // P14.T51.e: its taxonomic class, from its built surface, behind its hold.
+                // P14.T51.e: its taxonomic class, from its built surface.
                 let surface =
                     small_bodies::with_class(epoch.small_bodies, (self, body), bulk.ok(), surface);
                 builder
@@ -4260,7 +4185,7 @@ impl PlanetarySystem {
                 lag,
             };
         }
-        // Held, or with no sky, a regular moon keeps all its ice: no placement is redone.
+        // With no derivation or no sky, a regular moon keeps all its ice: no placement is redone.
         let (Some(nursery), Some(_)) = (
             &parent.nursery,
             parent.moon_ice.as_ref().and_then(|m| m.ice.as_ref()),
@@ -4767,11 +4692,10 @@ struct SurfaceFrame<'a> {
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
     /// The effective temperature of the star its air's photochemistry reads, its primary's
-    /// brightest host's; `None` for a brown dwarf or no star (`Epoch::photochemistry_temperature`),
-    /// and under the air's hold (`AirRules::Held`), which computes none.
+    /// brightest host's; `None` for a brown dwarf or no star (`Epoch::photochemistry_temperature`).
     star_temperature: Option<Kelvin>,
     /// The star its modifiers read, its primary's brightest host with its X-ray and ultraviolet
-    /// history; `None` before any forms (`modifiers::ModifierStar`), and under the air's hold.
+    /// history; `None` before any forms (`modifiers::ModifierStar`).
     modifier_star: Option<ModifierStar>,
     /// The system's \[Fe/H\].
     fe_h: Dex,
@@ -4789,27 +4713,21 @@ impl SurfaceFrame<'_> {
     ///
     /// # Errors
     ///
-    /// [`NoColdTraps::Held`] under its record's cold traps' hold, and [`NoColdTraps::NoSky`] with
-    /// no seasonal orbit at the time.
+    /// [`NoColdTraps::NoSky`] with no seasonal orbit at the time.
     fn cold_trap_sky(
         &self,
         spin: &SeasonalSpin,
         flux: WattsPerSquareMetre,
     ) -> Result<ColdTrapSky, NoColdTraps> {
         let case = &self.cold_traps;
-        match case.rules {
-            ColdTrapRules::Held => Err(NoColdTraps::Held),
-            ColdTrapRules::Batch => {
-                let seasonal = self.seasonal.as_ref().ok_or(NoColdTraps::NoSky)?;
-                Ok(ColdTrapSky::at_periapsis(
-                    spin.obliquity,
-                    flux,
-                    (seasonal.semi_major_axis(), seasonal.eccentricity().value()),
-                    case.star_radius,
-                    case.exposed_fraction,
-                ))
-            }
-        }
+        let seasonal = self.seasonal.as_ref().ok_or(NoColdTraps::NoSky)?;
+        Ok(ColdTrapSky::at_periapsis(
+            spin.obliquity,
+            flux,
+            (seasonal.semi_major_axis(), seasonal.eccentricity().value()),
+            case.star_radius,
+            case.exposed_fraction,
+        ))
     }
 
     /// What the figures of a body of mass `mass`, record's bulk `bulk` and inventory's water
@@ -5135,8 +5053,9 @@ impl MoonRecordOf for SatellitePasses<'_> {
             self.system
                 .moon_craters(self.frame.primary, moon, shape.ice_fraction, &orbit)?;
         let figure = PlanetarySystem::moon_figure_of_shape(moon, shape, &bulk.fractions, parent);
-        // The ocean its tidal branch keeps, as the record's figures read it ([`moon_ocean`]).
-        let subsurface = moon_ocean(moon, tide.subsurface);
+        // The ocean its tidal branch keeps, as the record's figures read it: every moon's, the
+        // solve's at its branch's root (P14.T51.g.b).
+        let subsurface = tide.subsurface;
         self.frame
             .figures_of(
                 (moon.satellite.mass(), figure, bulk.inventory_water),
@@ -5380,13 +5299,13 @@ struct ParentNow {
     /// epoch holds one and it has moons.
     shades: Option<ShadeBook>,
     /// What its moons' bulk reads of their birthplace and their ice's history (P14.T56.f): `None`
-    /// held ([`MoonBulkRules::Held`]) or for a parent not present.
+    /// for a parent not present.
     moon_ice: Option<ParentMoonIce>,
     /// Its magnetosphere as its moons' modifiers read it, from its record
     /// (`modifiers::planet_field`, P14.T54.b.c): set by
     /// [`primary_record`](PlanetarySystem::primary_record) once it has built the record; `None`
-    /// where no record is built ([`parent_now`](PlanetarySystem::parent_now)), while the air's
-    /// sections are held, and where the record gives no field.
+    /// where no record is built ([`parent_now`](PlanetarySystem::parent_now)), and where the record
+    /// gives no field.
     planet_field: Option<PlanetField>,
 }
 
@@ -5439,7 +5358,7 @@ struct SurfaceSky<'a> {
     /// crust is built; `None` where its passes took none.
     crust_lid: Option<&'a CrustLid>,
     /// What its published pass's maturity carries (P14.T54.b.e), which its record's modifiers
-    /// read; `None` where it took none, and under the weathered area mix's hold.
+    /// read; `None` where it took none.
     weathered: Option<&'a PassWeathered>,
     /// Its surface lag (P14.T56.g), its derivation's, which its surface material reads.
     lag: SurfaceLag,
@@ -5518,29 +5437,13 @@ impl SurfaceInterior {
             mass: moon.satellite.mass(),
             inventory_water: derived.inventory().water(),
             tidal_heat_flow: derived.heat_flux(),
-            subsurface_ocean: moon_ocean(moon, derived.subsurface()),
+            // Its tidal branch's ocean (its derivation's at the pass, `DerivedMoon::subsurface`):
+            // every moon's, the solve's at its branch's root, whose shell alone may make its
+            // regime an ice shell's (decision-p14-t51g Q1: captures and giant-impact moons too,
+            // and never a lagged moon, which takes no ocean branch). The record publishes its own
+            // ocean in its place (`record_subsurface_ocean`).
+            subsurface_ocean: derived.subsurface(),
             ocean_solutes: derived.ocean_solutes(),
-        }
-    }
-}
-
-/// The ocean a moon `moon`'s figures read under its surface, from its tidal branch's `branch` (its
-/// derivation's at the pass, [`DerivedMoon::subsurface`]): below P14.T51.g.b's bump
-/// (`OCEAN_VERSION`) a regular moon's, its flag's, and no rule's for another moon, though its
-/// tides read one; from it every moon's, the solve's at its branch's root, whose shell alone may
-/// make its regime an ice shell's (decision-p14-t51g Q1: captures and giant-impact moons too, and
-/// never a lagged moon, which takes no ocean branch). The record publishes its own ocean in its
-/// place ([`record_subsurface_ocean`]).
-#[must_use]
-fn moon_ocean(moon: &MoonPart, branch: Subsurface) -> Subsurface {
-    match (OceanRules::in_force(), moon.satellite.moon()) {
-        (
-            OceanRules::Solved,
-            SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_),
-        )
-        | (OceanRules::Held, SatelliteMoon::Regular(_)) => branch,
-        (OceanRules::Held, SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_)) => {
-            Subsurface::NotComputed
         }
     }
 }
@@ -5687,20 +5590,16 @@ struct SurfaceCase<'a> {
     /// What its modifiers read beyond its published surface (P14.T51.d, wired by P14.T54.b.c):
     /// its frame's star, what it orbits and its mantle's sulphur.
     modifiers: ModifierCase,
-    /// The rules its cold traps and its air's sections follow.
-    record: RecordRules,
 }
 
 /// What a body's cold traps read beyond its sky and its spin (P14.T51.f): its exposed fraction,
 /// word 0 of its `body.cold_traps` stream, and the radius of the brightest star its zone's bodies
-/// orbit at the time, `None` before one forms; and the rules its record's cold traps follow, which
-/// its passes follow too (P14.T54.b.f), so that `with_cold_trap_rules` and
-/// `PlanetarySystem::with_record_rules` drive both.
+/// orbit at the time, `None` before one forms, which its record and its passes read alike
+/// (P14.T54.b.f).
 #[derive(Debug, Clone, Copy)]
 struct ColdTrapCase {
     exposed_fraction: f64,
     star_radius: Option<SolarRadii>,
-    rules: ColdTrapRules,
 }
 
 /// What a body's water window reads of its hosts over its past (P14.T48.b; science-p14-t24b-laws
@@ -5831,22 +5730,22 @@ struct SurfaceCraters {
 ///
 /// **The vertical structure** (P14.T24.e, wired by P14.T54.b; `air::record_structure`): from the
 /// conditions with their regime, the bulk section's equilibrium temperature and the figures' heat
-/// flow, as plan 14's T54.b names them; computed as none for a surface with no air. Not modelled
-/// while the air's sections are held, below generator version 24 (`air::AIR_SECTIONS_VERSION`).
+/// flow, as plan 14's T54.b names them; computed as none for a surface with no air. On the record
+/// from generator version 24.
 ///
 /// **The aerosol and absorber inventory** (P14.T24.c with T24.g, wired by P14.T54.b.b;
 /// `air::record_aerosols`): from the state, the conditions' pressure, gases, molar mass and
 /// liquid-water flag, the bulk section's gravity, the vertical structure, the figures' cloud
 /// fraction, liquids' cover and outgassing, and the photochemistry's star; the empty inventory for
-/// a surface with no air and for a magma ocean. Not modelled while the air's sections are held, and
-/// nothing of it is computed then.
+/// a surface with no air and for a magma ocean whose volatiles are gone. On the record from
+/// generator version 24.
 ///
 /// **The modifiers** (P14.T51.d with T51.j, wired by P14.T54.b.c; `modifiers::record_modifiers`):
 /// from the frame's brightest star, the orbit about it (a moon's planet's), what the body orbits (a
 /// moon's planet's magnetosphere from that planet's record), the bulk section's gravity, the
 /// conditions, figures, condensates and crust it publishes, the mantle's sulphur and the air's
-/// partial pressures; not modelled without a crust or a star, and while the air's sections are
-/// held, which computes nothing of them ([`with_held_members`]).
+/// partial pressures; not modelled without a crust or a star ([`with_held_members`]). On the record
+/// from generator version 24.
 #[must_use]
 fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<Surface> {
     let Some(seasonal) = time.seasonal else {
@@ -5921,13 +5820,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     // T24.b's ice is the partition's cover's, read off the profile it built (lever (a)).
     let figures = figures.with_surface_under(&conditions, history, Some(&published), table, ice);
     // P14.T51.g.b's ocean, the record's own, in place of the tidal branch's its regime read.
-    let figures = match OceanRules::in_force() {
-        OceanRules::Held => figures,
-        OceanRules::Solved => {
-            let ocean = record_subsurface_ocean(case, &figures, &conditions, &published);
-            figures.with_subsurface_ocean(ocean)
-        }
-    };
+    let ocean = record_subsurface_ocean(case, &figures, &conditions, &published);
+    let figures = figures.with_subsurface_ocean(ocean);
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
@@ -5951,12 +5845,11 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
 }
 
 /// The published surface `surface` of the body `case` describes, about its hosts on `seasonal` at
-/// the system's age `age`, with the members P14.T54.b first puts on the record, each built from
-/// what the surface publishes and held off the record until the bump: its air's sections
-/// ([`record_air_sections`]) and its modifiers (`modifiers::record_modifiers`, P14.T54.b.c), from
-/// the frame's star, the orbit, what the body orbits, the bulk section's gravity, the surface's
-/// conditions, figures, condensates and crust, the mantle's sulphur and the air's partial
-/// pressures. None of them is computed while the air's sections are held.
+/// the system's age `age`, with the members P14.T54.b first put on the record at version 24, each
+/// built from what the surface publishes: its air's sections ([`record_air_sections`]) and its
+/// modifiers (`modifiers::record_modifiers`, P14.T54.b.c), from the frame's star, the orbit, what
+/// the body orbits, the bulk section's gravity, the surface's conditions, figures, condensates and
+/// crust, the mantle's sulphur and the air's partial pressures.
 #[must_use]
 fn with_held_members(
     surface: Surface,
@@ -5974,7 +5867,6 @@ fn with_held_members(
         Modelled::NotModelled => None,
     };
     let modifiers = record_modifiers(
-        case.record.air,
         &case.modifiers,
         &ModifierSurface {
             seasonal,
@@ -5995,14 +5887,10 @@ fn with_held_members(
 }
 
 /// The mass of sulphur in the mantle of a body whose element inventory is `elements` (P14.T50.a),
-/// which an Io's volcanic deposits read (P14.T51.d's `ModifierInputs::mantle_sulphur`), under the
-/// rules `rules`: `None` under [`AirRules::Held`], which computes nothing of the modifiers.
+/// which an Io's volcanic deposits read (P14.T51.d's `ModifierInputs::mantle_sulphur`).
 #[must_use]
-fn mantle_sulphur(rules: AirRules, elements: &ElementInventory) -> Option<Kilograms> {
-    match rules {
-        AirRules::Held => None,
-        AirRules::Batch => Some(elements.mass(Element::S, Reservoir::Mantle)),
-    }
+fn mantle_sulphur(elements: &ElementInventory) -> Kilograms {
+    elements.mass(Element::S, Reservoir::Mantle)
 }
 
 /// The record's air's sections of the body `case` describes, whose surface is in the state `state`
@@ -6011,7 +5899,7 @@ fn mantle_sulphur(rules: AirRules, elements: &ElementInventory) -> Option<Kilogr
 /// temperature and the figures' heat flow, and its aerosol and absorber inventory
 /// (`air::record_aerosols`), from that structure, the published surface with its published
 /// atmosphere's runaway deck (P14.T24.g's case, P14.T54.b.g), the bulk section's gravity and the
-/// photochemistry's star. Neither is computed while the air's sections are held.
+/// photochemistry's star.
 #[must_use]
 fn record_air_sections(
     case: &SurfaceCase<'_>,
@@ -6022,9 +5910,8 @@ fn record_air_sections(
     Modelled<Option<VerticalStructure>>,
     Modelled<AerosolInventory>,
 ) {
-    let (rules, bulk) = (case.record.air, case.bulk);
+    let bulk = case.bulk;
     let structure = record_structure(
-        rules,
         conditions,
         bulk.equilibrium_temperature(),
         figures.heat_flow(),
@@ -6037,7 +5924,7 @@ fn record_air_sections(
         gravity: bulk.surface_gravity(),
         star_temperature: case.star_temperature,
     };
-    let aerosols = record_aerosols(rules, &surface, &structure);
+    let aerosols = record_aerosols(&surface, &structure);
     (structure, aerosols)
 }
 
@@ -6157,8 +6044,8 @@ pub(crate) fn with_crust_water_by_material<R>(run: impl FnOnce() -> R) -> R {
 /// pass's context's): the conditions' liquid-water flag, the ocean and ices, and the regime's
 /// reservoirs read it. Its cold traps (P14.T51.f) publish over the field its published pass read
 /// (P14.T54.b.f; [`RecordField::Carried`]), with that pass's sky, regolith albedo, heat flow, crust
-/// and craters, under their own hold at 24, which follows the case's rules: the record builds no
-/// field. The cold profile reads the body's insolation table `table`.
+/// and craters: the record builds no field. The cold profile reads the body's insolation table
+/// `table`.
 #[must_use]
 fn with_partition(
     figures: &GlobalFigures,
@@ -6190,8 +6077,7 @@ fn with_partition(
         case.sky.atmosphere,
         &conditions,
         ground,
-        &RecordColdTraps {
-            rules: case.record.cold_traps,
+        RecordColdTraps {
             field: RecordField::Carried(carried),
         },
         table,
@@ -6452,14 +6338,14 @@ struct Epoch<'c> {
     /// are computed body by body, to the same bits.
     shades: Option<ShadeBook>,
     /// What its records' taxonomic classes share (P14.T51.e): built by the queries that build
-    /// records ([`with_small_bodies`](Self::with_small_bodies)), under the batch's rules the
-    /// reference wind term, derived once for the query and never once a body; held for the
-    /// others, which derive nothing of it.
-    small_bodies: SmallBodyTypes,
+    /// records ([`with_small_bodies`](Self::with_small_bodies)), the reference wind term, derived
+    /// once for the query and never once a body; `None` for the others, which derive nothing of
+    /// it.
+    small_bodies: Option<SmallBodyTypes>,
     /// P14.T52.a's network of the registry's gases, which its records' envelopes read
     /// (P14.T54.b.i): built lazily, at the first envelope the query records
-    /// ([`network`](Self::network)), and never under the air's sections' hold, which records
-    /// none. It is a documented lazy value (the sim-determinism rule): [`Network::registry`] is a
+    /// ([`network`](Self::network)), and never by a query that records none. It is a documented
+    /// lazy value (the sim-determinism rule): [`Network::registry`] is a
     /// pure function of the substance registry alone, which is fixed, draws on no stream and never
     /// reads this member, so it gives the same bits whichever envelope asks first, and the epoch is
     /// neither compared nor printed. A `OnceLock` keeps the epoch `Sync`, as the rule asks.
@@ -6492,7 +6378,7 @@ impl<'c> Epoch<'c> {
             states: ctx.stars().iter().map(|star| star.state_at(t)).collect(),
             xuv: ctx.xuv_histories(),
             shades: None,
-            small_bodies: SmallBodyTypes::Held,
+            small_bodies: None,
             network: OnceLock::new(),
         }
     }
@@ -6515,14 +6401,13 @@ impl<'c> Epoch<'c> {
         }
     }
 
-    /// The same queries, with what their records' taxonomic classes share under the rules `rules`
-    /// (P14.T51.e, `small_bodies::SmallBodyTypes::under`): the reference wind term under the
-    /// batch's, derived here once for the query, and nothing under the hold. Only the queries that
-    /// build records call it.
+    /// The same queries, with what their records' taxonomic classes share (P14.T51.e,
+    /// `small_bodies::SmallBodyTypes::new`): the reference wind term, derived here once for the
+    /// query. Only the queries that build records call it.
     #[must_use]
-    fn with_small_bodies(self, rules: SmallBodyRules) -> Self {
+    fn with_small_bodies(self) -> Self {
         Self {
-            small_bodies: SmallBodyTypes::under(rules),
+            small_bodies: Some(SmallBodyTypes::new()),
             ..self
         }
     }

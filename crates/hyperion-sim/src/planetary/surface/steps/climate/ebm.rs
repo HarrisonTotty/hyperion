@@ -1299,9 +1299,9 @@ const BAR_PA: f64 = 1e5;
 /// §2.2): the constants, and the share of water's saturation pressure, by weight, that the water
 /// term's partial pressure takes, for the air `air`.
 ///
-/// The constants in force ([`GreenhouseConstants::in_force`]): P14.T57.a's fits (water 4.47 per
-/// √bar) to version 23, and P14.T53.a's broadened carbon dioxide term with its refits from 24,
-/// behind the escape's hold. The water is held at [`WATER_SURFACE_HUMIDITY`] of its saturation
+/// The constants in force ([`GreenhouseConstants::in_force`]): P14.T53.a's broadened carbon dioxide
+/// term with its refits from 24 (water 4.17 per √bar), where P14.T57.a's fits (water 4.47 per √bar)
+/// held to version 23. The water is held at [`WATER_SURFACE_HUMIDITY`] of its saturation
 /// pressure by mole (Manabe and Wetherald's 0.77, P14.T51.a's partition), so
 /// [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's mean molar mass: 0.481 on
 /// the reference Earth's air (μ 28.82 g mol⁻¹; plan 14's `GREENHOUSE_WATER` documents 0.496 from
@@ -7157,8 +7157,9 @@ mod tests {
         assert!(runs[answer].0.run.converged);
     }
 
-    /// Plan 14's greenhouse (decision-r09-t13i §2.2): water's 4.47 per √bar at 0.77 of its
-    /// saturation by mole, `M_w` ÷ μ of that by weight on the reference Earth's air.
+    /// Plan 14's greenhouse (decision-r09-t13i §2.2): water's 4.17 per √bar from 24 (P14.T53.a's
+    /// refit; 4.47 at 23) at 0.77 of its saturation by mole, `M_w` ÷ μ of that by weight on the
+    /// reference Earth's air.
     #[test]
     fn the_greenhouse_reads_the_batch_s_rules() {
         let inputs = reference::earth_like();
@@ -7186,11 +7187,11 @@ mod tests {
                 .map_or(0.0, GreyTerm::depth)
         };
         let (batch, batch_humidity) = greenhouse_in_force(&air);
-        assert!((water_term(&batch) - 4.47).abs() < 1e-12);
+        assert!((water_term(&batch) - 4.17).abs() < 1e-12);
         let expected =
             WATER_SURFACE_HUMIDITY * Gas::Water.molar_mass_g_per_mol() / air.molar_mass_g_per_mol;
         assert_same_bits(batch_humidity, expected);
-        eprintln!("23's humidity by weight on the reference Earth's air {batch_humidity:.4}");
+        eprintln!("the humidity by weight on the reference Earth's air {batch_humidity:.4}");
         assert!((0.47..0.50).contains(&batch_humidity), "{batch_humidity}");
     }
 
@@ -7210,7 +7211,7 @@ mod tests {
             water.humidity
         );
         assert!((0.40..0.55).contains(&share), "{share}");
-        assert_same_bits(water.constant, 4.47);
+        assert_same_bits(water.constant, 4.17);
         let radiation = Radiation::at(model.greenhouse, 1.65, 288.0);
         let Radiation::Vapour { multiplier, .. } = radiation else {
             panic!("a water term")
