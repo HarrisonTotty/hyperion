@@ -179,43 +179,43 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "condensate_extinction",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "condensate_extinction_2",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "condensate_extinction_3",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "condensate_extinction_4",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "condensate_extinction_5",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "condensate_extinction_6",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "condensate_extinction_7",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
@@ -395,13 +395,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "substance_albedos",
         revision: 2,
-        since_generator_version: 23,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "thermo_equilibrium",
         revision: 0,
-        since_generator_version: 23,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {

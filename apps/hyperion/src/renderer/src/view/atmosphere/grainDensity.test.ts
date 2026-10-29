@@ -97,6 +97,11 @@ describe("the fixture's grain densities", () => {
     ["H2O", "liquid", 373.15, 958.35],
     // Basalt's room-temperature grain density, held at every temperature.
     ["basalt", "solid", 150, 3010],
+    // fcc argon on its sublimation curve (Maltby, Hammer and Wilhelmsen 2024), read from
+    // generator version 24 (P14.T49.n; none at 23).
+    ["Ar", "solid", 60, 1691.6],
+    // β-O₂, from 23.14 to 43.78 K, read from generator version 24 (P14.T49.n; none at 23).
+    ["O2", "solid", 30, 1512.23],
   ])("give %s as a %s at %s K the sim's %s kg m⁻³ within 10⁻⁴", (key, phase, t, expected) => {
     expect(relative(grainDensityKgPerM3(row(key), phase, t), expected)).toBeLessThan(TOLERANCE);
   });
@@ -147,10 +152,6 @@ describe("the fixture's grain densities", () => {
     ["supercooled water", "H2O", "liquid", 260],
     // A rock's melt is not a registry column.
     ["a rock's melt", "basalt", "liquid", 1400],
-    // Solid argon's density was not read.
-    ["solid argon", "Ar", "solid", 60],
-    // β-O₂ runs from 23.14 to 43.78 K.
-    ["β-O₂", "O2", "solid", 30],
     // β-CO runs from 61.585 K to the triple point.
     ["β-CO", "CO", "solid", 65],
     ["β-CO at its start", "CO", "solid", 61.585],

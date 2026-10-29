@@ -516,7 +516,8 @@ describe("signoff-12.md item 30's rule on T4.a's figures", () => {
   // in three. The second, from the fixture alone, fails, which settles the rule; a fixture on which
   // it held would fail this test, for the counts to be taken again and the rule applied anew.
   it("keeps the hard bound, the per-patch maxima passing 4σ in more than one patch in three", () => {
-    // Four of the six at generator version 23: the Mars-, Moon-, Ceres- and Europa-like worlds.
+    // Four of the six at generator version 24, as at 23: the Mars-, Moon-, Ceres- and Europa-like
+    // worlds.
     const past = WORLDS.filter((world) => world.pastBodySigma > world.patches / 3);
     expect(past.length).toBeGreaterThan(0);
     expect(SELECTION_RULE).toBe("hard");
@@ -660,8 +661,9 @@ describe("decision-r10-item30's guard on the hard rule's drawn error", () => {
   // 30 s at 1920 × 1080, 60°, τ = 1 px and 604 patches on flat boxes, leaving out the poses where
   // the camera stands in a seen patch's box under either, the hard rule's mean drawn error is at
   // most 1.5 times the oracle's. Measured at generator version 23, over 40 of the 42 poses on every
-  // world: 1.13–1.26 on five worlds and 1.33 on the Ceres-like (R10.T4.c's record). The 24
-  // re-bless trips it if the premise fails, for the ruling to be taken up again (R10.T15.b).
+  // world: 1.13–1.26 on five worlds and 1.33 on the Ceres-like (R10.T4.c's record). It holds on
+  // the fixture re-blessed at 24 (P14.T54.b.l), where only the two Earths moved; a later re-bless
+  // trips it if the premise fails, for the ruling to be taken up again (R10.T15.b).
   it("draws a mean error within 1.5 times a perfect bound's on every world", () => {
     const failing: string[] = [];
     for (const world of WORLDS) {

@@ -35,7 +35,7 @@
 //! [`CoarseInputs::for_body`](hyperion_sim::planetary::surface::CoarseInputs::for_body), behind
 //! the serve gate: it answers every body that reads
 //! [`SurfaceInputsError::NotModelled`](hyperion_sim::planetary::surface::SurfaceInputsError::NotModelled)
-//! naming the surface section until the gate opens (`GENERATED_SURFACES_FROM`, 24; P14.T54.a).
+//! naming the surface section until the gate opens (`GENERATED_SURFACES_FROM`, 25; P14.T54.a).
 //! Until then the service and the wire are tested on the coarse pass's reference worlds, given as
 //! the source through
 //! [`ServerConfigBuilder::surface_inputs`](crate::ServerConfigBuilder::surface_inputs). A source's

@@ -1,4 +1,4 @@
-# generator_version = 23
+# generator_version = 24
 H2O law: Diagram, limiting Reactant { vapour: Species(SubstanceKey("H2O")), count: 1 }, others [], share 1
 H2O law at 0.001 bar = 0x406422cdaa7dd202  # 161.08760571073805
 H2O law at 1 bar = 0x40689c31e3eb51e6  # 196.8810901256649
@@ -317,8 +317,9 @@ Uranus H2S vapour above = 0x3cc46d602baecc09  # 5.669700458412704e-16
 Uranus H2S gas left at its base = 0x3f44a4d2b2bfdf7b  # 0.000630000000000116
 Uranus H2S gas left at its top = 0x3cc03f0000000000  # 4.509196835367213e-16
 Uranus H2S column mass = 0x405c5c14162b12d0  # 113.43872598844905
-Uranus H2S size: H2S has no grain density as a solid at 145.5682804772313 K
-Uranus H2S tau: the mode's size: H2S has no grain density as a solid at 145.5682804772313 K
+Uranus H2S r_eff = 0x3edc96eef87ae5f1  # 6.81628797110635e-6
+Uranus H2S tau basis: Table(SphereFallback)
+Uranus H2S tau = 0x40d6771b16ba7263  # 23004.423262225824
 Uranus H2S coverage = 0x3ff0000000000000  # 1.0
 Uranus CH4: Crossing Solid
 Uranus CH4 base = 0x4100e01f9811cbf3  # 138243.94925269447
@@ -368,8 +369,8 @@ a 1,200 K giant Fe vapour above = 0x3d71e89caeee8960  # 1.0179883700994069e-12
 a 1,200 K giant Fe gas left at its base = 0x3f0bc408e556296b  # 5.295898578612758e-5
 a 1,200 K giant Fe gas left at its top = 0x3d71e89cae000000  # 1.017988366942401e-12
 a 1,200 K giant Fe column mass = 0x4003ae5f6247aef2  # 2.4601428678632766
-a 1,200 K giant Fe size: Fe has no grain density as a liquid at 1905.1889487269616 K
-a 1,200 K giant Fe tau: the mode's size: Fe has no grain density as a liquid at 1905.1889487269616 K
+a 1,200 K giant Fe r_eff = 0x3eb8478fc6ca4064  # 1.4471732142952654e-6
+a 1,200 K giant Fe tau: the mode's optics: Fe has no index file as a liquid of that variant
 a 1,200 K giant Fe coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant Mg2SiO4: Crossing Solid
 a 1,200 K giant Mg2SiO4 base = 0x41037d74bb40295c  # 159662.5914309722
@@ -434,8 +435,8 @@ a 600 K sub-Neptune Al2O3 vapour above = 0x32d64d4da5dc4c8b  # 8.470793184524422
 a 600 K sub-Neptune Al2O3 gas left at its base = 0x3f30c43fa6393626  # 0.0002558379548859034
 a 600 K sub-Neptune Al2O3 gas left at its top = 0x0000000000000000  # 0.0
 a 600 K sub-Neptune Al2O3 column mass = 0x406a5ab482534a28  # 210.83453480021967
-a 600 K sub-Neptune Al2O3 size: Al2O3 has no grain density as a liquid at 2603.654036923734 K
-a 600 K sub-Neptune Al2O3 tau: the mode's size: Al2O3 has no grain density as a liquid at 2603.654036923734 K
+a 600 K sub-Neptune Al2O3 r_eff = 0x3ea1b78463981c7c  # 5.280036880502774e-7
+a 600 K sub-Neptune Al2O3 tau: the mode's optics: Al2O3 has no index file as a liquid of that variant
 a 600 K sub-Neptune Al2O3 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune CaTiO3: Crossing Liquid
 a 600 K sub-Neptune CaTiO3 base = 0x412299cd577fd548  # 609510.6708971644
@@ -446,8 +447,8 @@ a 600 K sub-Neptune CaTiO3 vapour above = 0x2c10812f48ceeee1  # 1.93173313733209
 a 600 K sub-Neptune CaTiO3 gas left at its base = 0x3edfab16532c67c8  # 7.550313329907376e-6
 a 600 K sub-Neptune CaTiO3 gas left at its top = 0x0000000000000000  # 0.0
 a 600 K sub-Neptune CaTiO3 column mass = 0x402ded209110ad61  # 14.963139088903235
-a 600 K sub-Neptune CaTiO3 size: CaTiO3 has no grain density as a liquid at 2514.709588693323 K
-a 600 K sub-Neptune CaTiO3 tau: the mode's size: CaTiO3 has no grain density as a liquid at 2514.709588693323 K
+a 600 K sub-Neptune CaTiO3 r_eff = 0x3ea1c48c11eb0260  # 5.295205801267944e-7
+a 600 K sub-Neptune CaTiO3 tau: the mode's optics: CaTiO3 has no index file as a liquid of that variant
 a 600 K sub-Neptune CaTiO3 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune Fe: Crossing Liquid
 a 600 K sub-Neptune Fe base = 0x411b22b2b6174e78  # 444588.6778232823
@@ -458,8 +459,8 @@ a 600 K sub-Neptune Fe vapour above = 0x3a73aa2c4b130e05  # 3.9712622860262704e-
 a 600 K sub-Neptune Fe gas left at its base = 0x3f64f54f8fc783b3  # 0.0025583795488590354
 a 600 K sub-Neptune Fe gas left at its top = 0x0000000000000000  # 0.0
 a 600 K sub-Neptune Fe column mass = 0x4094af74ac3c3424  # 1323.8639382750343
-a 600 K sub-Neptune Fe size: Fe has no grain density as a liquid at 2323.978516832569 K
-a 600 K sub-Neptune Fe tau: the mode's size: Fe has no grain density as a liquid at 2323.978516832569 K
+a 600 K sub-Neptune Fe r_eff = 0x3e9328e3de43ebf8  # 2.8550218035522987e-7
+a 600 K sub-Neptune Fe tau: the mode's optics: Fe has no index file as a liquid of that variant
 a 600 K sub-Neptune Fe coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune Mg2SiO4: Crossing Liquid
 a 600 K sub-Neptune Mg2SiO4 base = 0x41190088de709061  # 409634.2172262725
@@ -470,8 +471,8 @@ a 600 K sub-Neptune Mg2SiO4 vapour above = 0x377affdf084aa5c1  # 1.9371189053149
 a 600 K sub-Neptune Mg2SiO4 gas left at its base = 0x3f69c8c6390852ee  # 0.0031474944628463375
 a 600 K sub-Neptune Mg2SiO4 gas left at its top = 0x0000000000000000  # 0.0
 a 600 K sub-Neptune Mg2SiO4 column mass = 0x409fceffd61dfb99  # 2035.7498402294934
-a 600 K sub-Neptune Mg2SiO4 size: Mg2SiO4 has no grain density as a liquid at 2276.8874645803307 K
-a 600 K sub-Neptune Mg2SiO4 tau: the mode's size: Mg2SiO4 has no grain density as a liquid at 2276.8874645803307 K
+a 600 K sub-Neptune Mg2SiO4 r_eff = 0x3ea1a36b6fd33d8f  # 5.256640346565399e-7
+a 600 K sub-Neptune Mg2SiO4 tau: the mode's optics: Mg2SiO4 has no index file as a liquid of that variant
 a 600 K sub-Neptune Mg2SiO4 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune MgSiO3: Crossing Liquid
 a 600 K sub-Neptune MgSiO3 base = 0x410f873d2e2c9f88  # 258279.64754604944
@@ -482,8 +483,8 @@ a 600 K sub-Neptune MgSiO3 vapour above = 0x3892960e01e0acbc  # 3.49566652483637
 a 600 K sub-Neptune MgSiO3 gas left at its base = 0x3f596b41834d1132  # 0.0015514507078516313
 a 600 K sub-Neptune MgSiO3 gas left at its top = 0x0000000000000000  # 0.0
 a 600 K sub-Neptune MgSiO3 column mass = 0x408c44849c3f6e26  # 904.564751143979
-a 600 K sub-Neptune MgSiO3 size: MgSiO3 has no grain density as a liquid at 2028.9206190266955 K
-a 600 K sub-Neptune MgSiO3 tau: the mode's size: MgSiO3 has no grain density as a liquid at 2028.9206190266955 K
+a 600 K sub-Neptune MgSiO3 r_eff = 0x3ea079ab09ae765f  # 4.910011911389732e-7
+a 600 K sub-Neptune MgSiO3 tau: the mode's optics: MgSiO3 has no index file as a liquid of that variant
 a 600 K sub-Neptune MgSiO3 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune Cr: Crossing Solid
 a 600 K sub-Neptune Cr base = 0x4101a909c59d077a  # 144673.2214909157
@@ -561,8 +562,8 @@ a hot Jupiter Fe vapour above = 0x3e5bb0c16cf85543  # 2.5788742528679076e-8
 a hot Jupiter Fe gas left at its base = 0x3f0c6168dafaeb6d  # 5.4131519730180436e-5
 a hot Jupiter Fe gas left at its top = 0x3e5bb0c16cf85800  # 2.5788742528681395e-8
 a hot Jupiter Fe column mass = 0x4051c0c565cd12e3  # 71.01204819704758
-a hot Jupiter Fe size: Fe has no grain density as a liquid at 2400 K
-a hot Jupiter Fe tau: the mode's size: Fe has no grain density as a liquid at 2400 K
+a hot Jupiter Fe r_eff = 0x3eb94791abaec491  # 1.5067795817553775e-6
+a hot Jupiter Fe tau: the mode's optics: Fe has no index file as a liquid of that variant
 a hot Jupiter Fe coverage = 0x3fe0000000000000  # 0.5
 a hot Jupiter CaTiO3: Crossing Solid
 a hot Jupiter CaTiO3 base = 0x4177388ece5dffda  # 24348908.897949077

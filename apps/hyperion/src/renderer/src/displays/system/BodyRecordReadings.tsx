@@ -385,107 +385,39 @@ function coldTrapsKnown(condensates: Modelled<ReadonlyArray<SurfaceCondensate>>)
   );
 }
 
-/** The registry key of water, the one substance the wire appends to a cover list with no entry. */
-const WATER = "H2O";
-
-/**
- * The liquid entry of `substance` among a surface's condensates, or `undefined` where none is
- * listed, or the condensates are not a value.
- */
-function liquidEntry(
-  condensates: Modelled<ReadonlyArray<SurfaceCondensate>>,
-  substance: string,
-): SurfaceCondensate | undefined {
-  return condensates.kind === "value"
-    ? condensates.value.find((entry) => entry.phase === "liquid" && entry.substance === substance)
-    : undefined;
-}
-
-/**
- * The item of a surface's liquids that is the ocean under a `snowball`'s ice, which covers none of
- * the surface, or `null` on every other surface (plan 14, P14.T43.h; decision-absurd-states-24).
- *
- * @remarks
- * The wire's contract (`BodySurfaceDto.condensates`, decision-p14-t54a-water-consistency W3)
- * appends that ocean to `surface_liquids` as an `H2O` item with no entry, on a `snowball` surface
- * whose condensates list no `H2O` liquid, its water held inside the `H2O` solid. This reads the
- * contract's own test and infers no state or phase: a sea of liquid water listed among the
- * condensates, as at 273.15 K, is a liquid on the surface, and so is any `H2O` item of any other
- * state. Moot from generator version 24, where P14.T53.c ends the appended item behind its hold:
- * it goes at the 24 bump (P14.T54.b.l), with {@link liquidsOnIce} and P14.T43.i's rule 5, by which
- * a subsurface ocean computed as none beside this one reads this one (decision-ux-ocean-row §4).
- */
-function oceanUnderIce(surface: BodySurface): SubstanceArea | null {
-  const noLiquidWaterListed =
-    surface.condensates.kind === "value" && liquidEntry(surface.condensates, WATER) === undefined;
-  return surface.state === "snowball" && noLiquidWaterListed
-    ? (surface.surfaceLiquids.find((area) => area.substance === WATER) ?? null)
-    : null;
-}
-
-/**
- * The liquids on a `snowball`'s ice, as `LIQUID COVER` reads them where {@link oceanUnderIce}
- * picks out `ocean`: every other item of the surface's liquids at its liquid entry's own area,
- * the deposit's extent, divided by their total where it exceeds 1, as the wire divides its list
- * without the ocean (decision-p14-t54a-water-consistency W2).
- *
- * @remarks
- * The wire's list divides them by its total, the ocean's item included. An item with no liquid
- * entry keeps its listed share. No server that keeps the contract sends one, since it builds the
- * list from the condensates it sends, after their cut to eight, and appends the ocean alone: it is
- * the fallback the task's rule gives.
- */
-function liquidsOnIce(surface: BodySurface, ocean: SubstanceArea): ReadonlyArray<SubstanceArea> {
-  const onIce = surface.surfaceLiquids
-    .filter((area) => area !== ocean)
-    .map((area) => ({
-      substance: area.substance,
-      areaFraction:
-        liquidEntry(surface.condensates, area.substance)?.areaFraction ?? area.areaFraction,
-    }));
-  const total = onIce.reduce((sum, area) => sum + area.areaFraction, 0);
-  return total > 1
-    ? onIce.map((area) => ({ substance: area.substance, areaFraction: area.areaFraction / total }))
-    : onIce;
-}
-
 /**
  * What `SUBSURFACE OCEAN`, the ocean under a body's ice, reads (plan 14, P14.T43.i,
  * decision-p14-t43h-review §4; P14.T51.g.b, decision-p14-t51gb-ice-ii §3 and
- * decision-ux-ocean-row §1). In this order: the liquid of {@link BodySurface.subsurfaceOcean}, the
- * member, where it is a value, on any surface; else the substance of `ocean`, the ocean under a
- * `snowball`'s ice ({@link oceanUnderIce}); else `NONE` where the member is computed as none; else
- * `NOT YET MODELLED`, the member not modelled.
+ * decision-ux-ocean-row §1): the liquid of {@link BodySurface.subsurfaceOcean}, the member, where
+ * it is a value, on any surface; `NONE` where the member is computed as none; `NOT YET MODELLED`
+ * where it is not modelled.
  *
  * @remarks
  * The member is the generator's own statement of the ocean, not an item of the cover, so it stands
- * whatever the condensates are, and its liquid is the one read where both are present. It has the
- * wire's three states, each with its reading: a value, the ocean, reads its liquid; `none`, the
- * wire's `null`, a body computed to hold none, reads `NONE`, which is data, as `MELT COVER`'s is;
- * and `not_modelled`, the wire's absent key, an ocean the generator does not compute, as a
- * version-23 server sends every body's but a regular moon's, or one whose floor would be ice II
- * (Triton's), reads `NOT YET MODELLED`, as `EXOSPHERE` and `COLD TRAPS` do, so that an ocean the
- * generator does not compute is never read as none (the guide's Data states). `ocean` stands
- * before `none` and `not_modelled` alike until the 24 bump (P14.T54.b.l; decision-ux-ocean-row
- * §4): a version-23 server sends a Snowball's ocean in its cover alone, with no member, and a
- * member computed as none beside it reads the cover's (P14.T43.i's rule 5), the ocean the view
- * draws its seas from. Which of `NONE` and `NOT YET MODELLED` a row that neither the member nor
- * `ocean` states reads follows the member's state alone, never the surface's state, its
- * temperature, the body's kind or the generator version, since a state is the server's to set.
+ * whatever the condensates are. It has the wire's three states, each with its reading: a value, the
+ * ocean, reads its liquid; `none`, the wire's `null`, a body computed to hold none, reads `NONE`,
+ * which is data, as `MELT COVER`'s is; and `not_modelled`, the wire's absent key, an ocean the
+ * generator does not compute, as one whose floor would be ice II (Triton's), reads
+ * `NOT YET MODELLED`, as `EXOSPHERE` and `COLD TRAPS` do, so that an ocean the generator does not
+ * compute is never read as none (the guide's Data states). The reading follows the member's state
+ * alone, never the surface's state, its temperature, the body's kind or the generator version,
+ * since a state is the server's to set. To generator version 23 a server appended a Snowball's
+ * ocean to its cover, and the row read that item before the member (P14.T43.i's rule 5); from
+ * version 24 no server appends it, and the rule went with the bump (P14.T54.b.l;
+ * decision-ux-ocean-row §4).
  */
-function subsurfaceOceanShown(surface: BodySurface, ocean: SubstanceArea | null): Shown {
+function subsurfaceOceanShown(surface: BodySurface): Shown {
   const member = surface.subsurfaceOcean;
-  const cover = ocean === null ? null : value(substanceName(ocean.substance, "upper"));
   let reading: Shown;
   switch (member.kind) {
     case "value":
       reading = value(substanceName(member.value.liquid, "upper"));
       break;
     case "none":
-      reading = cover ?? value("NONE");
+      reading = value("NONE");
       break;
     case "not_modelled":
-      reading = cover ?? value(sectionStateLabel("not_modelled"));
+      reading = value(sectionStateLabel("not_modelled"));
       break;
   }
   return reading;
@@ -534,19 +466,16 @@ function subsurfaceOceanShown(surface: BodySurface, ocean: SubstanceArea | null)
  * ({@link coldTrapsKnown}), as T54.a labels an airless body's cold traps, so that its `ICE COVER` is
  * never read as all the ice it holds.
  *
- * On a `snowball` surface whose condensates are a value with no `H2O` liquid entry, the `H2O` item
- * of its liquids is the ocean under its ice ({@link oceanUnderIce}; plan 14, P14.T43.h), which
- * covers none of the surface. `LIQUID COVER` then reads the liquids on the ice alone, at their own
- * extents ({@link liquidsOnIce}), or `NONE`, and the ocean reads in a row of its own, the last of
- * the section's, `SUBSURFACE OCEAN`, its liquid named with no share (`SUBSURFACE OCEAN H2O`). The
- * row stands on every shown surface section, once, in that place ({@link subsurfaceOceanShown}). It
- * reads the ocean under any surface's ice that the wire states, as a regular moon's
- * ({@link BodySurface.subsurfaceOcean}, the wire's `subsurface_ocean`; P14.T43.i), the member's
- * liquid where both stand: `SUBSURFACE OCEAN NaCl BRINE`. Where no ocean under a `snowball`'s ice
- * stands, a member computed as none reads `SUBSURFACE OCEAN NONE`, as the section's other rows read
- * a quantity computed and empty (decision-ux-ocean-row §1), and one not modelled
- * `SUBSURFACE OCEAN NOT YET MODELLED`, as `EXOSPHERE` and `COLD TRAPS` read theirs, so that an
- * ocean the generator does not compute, as Triton's, is never read as none (the guide's Data
+ * The ocean under a body's ice, which covers none of the surface, reads in a row of its own, the
+ * last of the section's, `SUBSURFACE OCEAN`, its liquid named with no share
+ * (`SUBSURFACE OCEAN H2O`), and `LIQUID COVER` reads the liquids on the surface alone, as the wire
+ * lists them. The row stands on every shown surface section, once, in that place
+ * ({@link subsurfaceOceanShown}). It reads the ocean under any surface's ice that the wire states
+ * ({@link BodySurface.subsurfaceOcean}, the wire's `subsurface_ocean`; P14.T43.i):
+ * `SUBSURFACE OCEAN NaCl BRINE`. A member computed as none reads `SUBSURFACE OCEAN NONE`, as the
+ * section's other rows read a quantity computed and empty (decision-ux-ocean-row §1), and one not
+ * modelled `SUBSURFACE OCEAN NOT YET MODELLED`, as `EXOSPHERE` and `COLD TRAPS` read theirs, so that
+ * an ocean the generator does not compute, as Triton's, is never read as none (the guide's Data
  * states; P14.T51.g.b, decision-p14-t51gb-ice-ii §3).
  *
  * The section's other members are on the wire and not yet read here: its material, climate regime
@@ -564,8 +493,6 @@ function surfaceRows(surface: BodySurface): ReactNode {
   // A server that models no condensates, as every one before P14.T54.a, sends its water alone in
   // the cover's lists, so they are not the whole cover and never read as it.
   const coverModelled = surface.condensates.kind !== "not_modelled";
-  const ocean = oceanUnderIce(surface);
-  const liquids = ocean === null ? surface.surfaceLiquids : liquidsOnIce(surface, ocean);
   const notModelled = value(sectionStateLabel("not_modelled"));
   return (
     <>
@@ -594,7 +521,7 @@ function surfaceRows(surface: BodySurface): ReactNode {
       {crustRows(surface.crust)}
       <ReadoutRow
         label="LIQUID COVER"
-        shown={coverModelled ? coverShown(liquids) : notModelled}
+        shown={coverModelled ? coverShown(surface.surfaceLiquids) : notModelled}
         wide
       />
       <ReadoutRow
@@ -605,7 +532,7 @@ function surfaceRows(surface: BodySurface): ReactNode {
       {surface.state === "airless" && !coldTrapsKnown(surface.condensates) ? (
         <ReadoutRow label="COLD TRAPS" shown={notModelled} wide />
       ) : null}
-      <ReadoutRow label="SUBSURFACE OCEAN" shown={subsurfaceOceanShown(surface, ocean)} wide />
+      <ReadoutRow label="SUBSURFACE OCEAN" shown={subsurfaceOceanShown(surface)} wide />
     </>
   );
 }

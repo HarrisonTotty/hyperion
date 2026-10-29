@@ -5,8 +5,8 @@
 //! inputs-sha256: 0e45512bba94ce25b0bba223c68a5b5058c0b2c8d373a1ffb99aa8e312909bf2
 //! manifest: crates/hyperion-fit/manifests/substance_albedos.toml
 //! data: `warren_brandt_2008_h2o@50d002252443`, `grundy_schmitt_1998_h2o@f67800282259`, `grundy_2002_ch4@22feca3de7c4`, `martonchik_orton_1994_ch4@6bbbf73b898b`, `martonchik_1984_nh3@16ed9d06cb88`, `grundy_1993_n2@ea0831f951a8`, `warren_1986_co2@7fc5a714dfff`, `gerakines_2023_co@69666ddf2689`, `usgs_splib07a@6faab825485f`, `palik_1985_zns@b61e7c1180df`, `dorschner_1995_mgsio3@a3e01c52760e`, `jager_2003_mg2sio4@1fc46febd2c1`, `khare_1984_tholin@9ddf8a63c8c6`, `wolff_2009_mars_dust@8dfe4152d962`, `pollack_1973_basalt@5d934eb83dfc`, `pollack_1973_basaltic_glass@0c37a866b1aa`, `materials/water-ice.json@4b5b4e4d1e7b`, `materials/methane-ice.json@d0d20b6538a4`, `materials/ammonia-ice.json@cac6695caf56`, `materials/nitrogen-ice.json@004b27f568a1`, `materials/oxygen-ice.json@1361da6cac22`, `materials/carbon-dioxide-ice.json@018af3699369`, `materials/argon-ice.json@3ddfc13dcf58`, `materials/carbon-monoxide-ice.json@24e5198be8ef`, `materials/hydrogen-sulphide-ice.json@ced397e09e05`, `materials/ammonium-hydrosulphide.json@0008ea1500eb`, `materials/zinc-sulphide.json@30008e2deb83`, `materials/sodium-sulphide.json@b1f773f2bdbe`, `materials/manganese-sulphide.json@373ae8f70919`, `materials/chromium.json@0ac4df30f087`, `materials/enstatite-glass.json@9c86314de93f`, `materials/forsterite-amorphous.json@d65badba21ca`, `materials/calcium-titanate.json@48ba3f9bcd9d`, `materials/graphite.json@4d5c69ffb0ce`, `materials/tholin.json@3331f2e46b6c`, `materials/mars-dust.json@b8d91469e87e`, `materials/basalt.json@4e99436854ff`, `materials/basaltic-glass.json@fca0074278e8`
-//! sim-fingerprint: 51ade69568cb27ddc72e0991661e1ad8906fdf5c768018daa7ffcfa6ca0c3361
-//! since-generator-version: 23
+//! sim-fingerprint: 50265db631b38a9a9670b81837e8b15a3bfbeb37a0f6c4145f227879406d5568
+//! since-generator-version: 24
 //! source: Hapke's equivalent slab (Hapke 2012's surface-reflection fits, as Davalos 2026
 //!   reproduces them) and reflectance factor with isotropic multiple scattering (Hapke et al.
 //!   2012, eqs. 2-4) with Chandrasekhar's H-function (Kawabata 2016, eqs. 2-3), and the energy
@@ -24,13 +24,12 @@
 //!   1.132, `ZnS` 0.769, `Na2S` 0.058, `MnS` 0.127, `Cr` 0.258, `FeS` 0.061, `MgSiO3` 0.623,
 //!   `Mg2SiO4` 0.264, `SiO2` 0.914, `Al2O3` 0.857, `CaTiO3` 0.092, `TiO2` 0.366, `graphite`
 //!   0.139, `tholin` 0.051, `soot` 0.037, `mars_dust` 0.351, `anorthosite` 0.853, `feldspathic`
-//!   0.667, `basalt` 0.093, `basalt_fe` 0.410, `komatiite` 0.430, `basalt_reduced` 0.651,
-//!   `granite` 0.818, `ultramafic` 0.507, `ferric` 0.369, `phyllosilicate` 0.770, `lava_glass`
+//!   0.667, `basalt` 0.093, `basalt_fe` 0.410, `komatiite` 0.430, `basalt_reduced` 0.273,
+//!   `granite` 0.818, `ultramafic` 0.507, `ferric` 0.115, `phyllosilicate` 0.770, `lava_glass`
 //!   0.168, `ca_al_residue` 0.857, `iron_nickel` 0.209, `MgSO4` 0.980, `Na2CO3` 1.092, `CaCO3`
 //!   1.023, `carbonaceous` 0.037, `chondrite_ci` 0.072, `chondrite_cm` 0.070, `chondrite_cv`
 //!   0.157, `chondrite_h` 0.445, `chondrite_l` 0.433, `chondrite_ll` 0.417, `chondrite_e` 0.385,
-//!   `cometary` 0.041; the 2 darkened rows (P14.T49.k), within the same bounds, `A_N` in V:
-//!   `basalt_reduced` 0.273, `ferric` 0.115
+//!   `cometary` 0.041
 //!
 //! Each row is the substance's grains in its reference form by Hapke's model, in B, V and
 //! R (440, 550 and 640 nm): the single-scattering albedo w, by the equivalent slab from

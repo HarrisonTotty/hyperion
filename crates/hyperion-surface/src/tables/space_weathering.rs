@@ -5,8 +5,8 @@
 //! inputs-sha256: 7d81313f355b0bc1936ae89ad7228e0327d7ba7073cf8fc59b5d09c526ee1193
 //! manifest: crates/hyperion-fit/manifests/space_weathering.toml
 //! data: `johnson_christy_1974_fe@3aafe92717ad`, `ordal_1988_fe@7d8536c36c6e`
-//! sim-fingerprint: 6abba6546823362383f8461f2043c7c91fcf81a3ddd7e15f8c875cd262c49c2d
-//! since-generator-version: 22
+//! sim-fingerprint: fb5b0e49862aa3d3b0954fe6205a7736acbb7ca92d3e374ba3b03f81cfff1127
+//! since-generator-version: 24
 //! source: Hapke 2001's nanophase-iron absorption in the equivalent slab (as
 //!   decision-p14-t51d-weathering §1.1 re-derives it), on each reference form's albedos by
 //!   `substance_albedos`' Hapke solution and Hapke 2012's slab; iron from Johnson and Christy

@@ -432,7 +432,7 @@ fn the_envelope_profiles_are_pinned() {
         "# skin and photosphere; node[k] the adiabat's k-th node, pressure (Pa) then temperature",
     );
     w.line("# (K), the pressures ascending from the join; level[k] temperature_at at a stated pressure.");
-    w.line("# Pure until P14.T54.b; nothing on the record reads it.");
+    w.line("# On the record from generator version 24 (P14.T54.b).");
     for (n, profile, ratio) in &cases {
         pin(&mut w, n, profile, *ratio);
     }
@@ -1608,7 +1608,7 @@ fn the_envelope_atmosphere_is_pinned() {
     );
     w.line("# each deck (kind, bound, phase, base Pa, base K, top Pa, f_sed, column kg/m2, vapour");
     w.line("# below and above); each mode; each absorber (molecules/m2, slab Pa); the hazes' tau(550);");
-    w.line("# the rows not formed and not modelled. Pure until P14.T54.b; nothing on the record reads it.");
+    w.line("# the rows not formed and not modelled. On the record from generator version 24 (P14.T54.b).");
     for (name, case) in golden_cases() {
         pin_atmosphere(&mut w, name, &case);
     }

@@ -1337,10 +1337,12 @@ fn check_pieces(row: &Substance, phase: CondensedPhase, pieces: &[Piece]) {
     }
 }
 
-/// Asserts the shapes the ruling names (decision-p14-t54a-grain-density §2.6): O₂'s two solid
-/// pieces about the β gap, CO's one, N₂'s and CH₄'s two; no solid for Ar, H₂S and C₂H₆; and the
-/// acid's liquid alone, one node of 1,662.6 kg m⁻³ at 300 K held at every temperature, of its
-/// `75wt%` variant.
+/// Asserts the shapes the ruling names (decision-p14-t54a-grain-density §2.6), as P14.T49.n's read
+/// densities give them from generator version 24: O₂'s three solid pieces, α, β and γ, meeting at
+/// 23.14 and 43.78 K (two about the β gap at 23); CO's one (β-CO is not read); N₂'s, CH₄'s and
+/// C₂H₆'s two; Ar's one (fcc); H₂S's two about phase II's gap, 103.52–126.22 K (Ar, H₂S and C₂H₆
+/// had none at 23); and the acid's liquid alone, one node of 1,662.6 kg m⁻³ at 300 K held at every
+/// temperature, of its `75wt%` variant.
 fn check_named_shapes(mirror: &[MirrorRow]) {
     let read = |key: &str| {
         mirror
@@ -1351,19 +1353,35 @@ fn check_named_shapes(mirror: &[MirrorRow]) {
     let oxygen = read("O2")
         .solid
         .as_ref()
-        .expect("α- and γ-O₂ have densities");
-    assert_eq!(oxygen.len(), 2, "β-O₂ is a gap");
-    let (Some(alpha_end), Some(gamma_start)) = (oxygen[0].to_k, oxygen[1].from_k) else {
+        .expect("α-, β- and γ-O₂ have densities");
+    assert_eq!(oxygen.len(), 3, "α-, β- and γ-O₂");
+    let bounds = (
+        oxygen[0].to_k,
+        oxygen[1].from_k,
+        oxygen[1].to_k,
+        oxygen[2].from_k,
+    );
+    let (Some(alpha_end), Some(beta_start), Some(beta_end), Some(gamma_start)) = bounds else {
         panic!("O₂'s pieces are bounded: {oxygen:?}");
     };
     assert_same_bits(alpha_end, 23.14);
+    assert_same_bits(beta_start, 23.14);
+    assert_same_bits(beta_end, 43.78);
     assert_same_bits(gamma_start, 43.78);
-    for (key, count) in [("CO", 1), ("N2", 2), ("CH4", 2)] {
+    for (key, count) in [("CO", 1), ("N2", 2), ("CH4", 2), ("C2H6", 2), ("Ar", 1)] {
         assert_eq!(read(key).solid.as_ref().map_or(0, Vec::len), count, "{key}");
     }
-    for key in ["Ar", "H2S", "C2H6"] {
-        assert_eq!(read(key).solid, None, "{key} has no solid density");
-    }
+    let hydrogen_sulphide = read("H2S")
+        .solid
+        .as_ref()
+        .expect("H₂S's phases III and I have densities");
+    assert_eq!(hydrogen_sulphide.len(), 2, "H₂S's phase II is a gap");
+    let (Some(iii_end), Some(i_start)) = (hydrogen_sulphide[0].to_k, hydrogen_sulphide[1].from_k)
+    else {
+        panic!("H₂S's pieces are bounded: {hydrogen_sulphide:?}");
+    };
+    assert_same_bits(iii_end, 103.52);
+    assert_same_bits(i_start, 126.22);
     let acid = read("H2SO4");
     assert_eq!(acid.solid, None);
     assert_eq!(acid.variant.as_deref(), Some("75wt%"));

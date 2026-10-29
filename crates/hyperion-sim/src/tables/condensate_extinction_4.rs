@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/condensate_extinction_4.toml
 //! data: `materials/iron-sulphide.json@7e88c4731cfe`, `materials/iron.json@b01b03376019`, `materials/jovian-chromophore.json@b88b3ece9af4`, `materials/manganese-sulphide.json@373ae8f70919`, `materials/mars-dust.json@b8d91469e87e`, `materials/mars-regolith-simulant.json@0753b59246ed`, `materials/methane-ice.json@d0d20b6538a4`, `materials/phase/iron-sulphide.json@6d8c9b34a732`, `materials/phase/iron.json@6689caf9532d`, `materials/phase/manganese-sulphide.json@b7b796d78b33`, `materials/phase/mars-dust.json@2f3b64914dbc`, `materials/phase/mars-regolith-simulant.json@6992712a4a22`
 //! sim-fingerprint: e566aad3ce8f86043744a9e4fbe6abc11c88d52c25b0bcc4692ccab09abcd9b2
-//! since-generator-version: 22
+//! since-generator-version: 24
 //! source: rendering plan R08's committed index files
 //!   (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its own
 //!   primaries, and its phase tables (`materials/phase/`): `TAMUdust2020`'s hexahedra (Saito et

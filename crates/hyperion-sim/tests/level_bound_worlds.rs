@@ -39,9 +39,9 @@
 //! `LevelBounds::contribution_range_m`; and the measured figures above, `null` where a level has
 //! none (no point's or no median patch's height differs from c's). `HYPERION_BLESS=1` writes it;
 //! otherwise the test holds it to the figures byte for byte, line ends aside. The heights are the
-//! generator's, so it moves with them: it was measured at generator version 23, and at 24 the
-//! coarse fields move by plan 14's T53.a water term, so R10.T15.b re-records the figures there
-//! (main's process call, 2026-10-26; the fixture's description says so while the version is 23).
+//! generator's, so it moves with them: measured at generator version 23, it was re-recorded at 24,
+//! where the coarse fields move by plan 14's T53.a water term, by the bump's bless (P14.T54.b.l;
+//! main's process call of 2026-10-26 had named R10.T15.b, whose served-world pass keeps the rest).
 //!
 //! The worlds are R09.T16's `sample_worlds()` (`tests/common/surface_worlds.rs`), all six, each
 //! through the whole coarse pass under `reference::SEED`, drawn with one detail seed ([`DETAIL`]).
@@ -156,15 +156,9 @@ const DESCRIPTION: &str = "The level bound measured on the sample worlds (render
      by crates/hyperion-sim/tests/level_bound_worlds.rs under HYPERION_BLESS=1 and checked byte \
      for byte otherwise; never edit it by hand.";
 
-/// The fixture's note on the generator version its figures were measured at. At 23, main's
-/// process call of 2026-10-26: the coarse fields move at 24, and R10.T15.b re-records there.
+/// The fixture's note on the generator version its figures were measured at.
 fn version_note() -> String {
-    match GENERATOR_VERSION.get() {
-        23 => "Measured at generator_version 23: the coarse fields move at 24 by plan 14's T53.a \
-               water term, and R10.T15.b re-records the figures there."
-            .to_owned(),
-        version => format!("Measured at generator_version {version}."),
-    }
+    format!("Measured at generator_version {}.", GENERATOR_VERSION.get())
 }
 
 /// A contribution to the height above the base elevation, which every level evaluates alike.

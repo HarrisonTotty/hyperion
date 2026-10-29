@@ -26,7 +26,7 @@
 //! the record's own from `for_body`.
 //! The tests and the reference worlds build their inputs with [`CoarseInputsBuilder`], each value
 //! a plain argument (Design note 3, "Until an ask lands"). The server serves no generated body's
-//! field until its serve gate opens (P14.T54.a's `GENERATED_SURFACES_FROM`, expected at 24), so
+//! field until its serve gate opens (P14.T54.a's `GENERATED_SURFACES_FROM`, 25 since 24's bump), so
 //! that R09's and R10's changes re-bless at the version in force until then.
 //! The types here are the pass's own vocabulary for those values, each named after the plan-14
 //! task that supplies it, and wherever the pass computes a figure plan 14 also states, the result

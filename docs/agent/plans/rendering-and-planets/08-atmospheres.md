@@ -19025,6 +19025,15 @@ SATURN` (asserted).
     - The Jupiter envelope's deck in `body_detail_jupiter` carries a τ(550) of 8.0, the fixture's
       illustrative value, not the sim's, so the row cannot run against it now (the test's doc says
       so).
+    - _Restated at 24_ (P14.T54.b.l, 2026-10-29). The tripwire does not fire at 24: the fixture's
+      surfaces are written by hand, and none carries `aerosols`. So the hold is restated, its
+      trigger now the member itself, a fixture message carrying a generated surface's inventory:
+      "is held until a protocol fixture message carries a surface's aerosol inventory (restated at
+      version 24): none does". Row 5 is not built, since it needs that inventory in the fixture,
+      kept the generator's by a server test as the envelopes are, and the client's τ(550) for each
+      of its modes. The fixture's two envelopes are the generator's from P14.T54.b.i, so their
+      decks' modes carry the record's τ(550) in place of the illustrative 8.0 above; the row reads
+      a surface's inventory, so it does not run against them.
   - _One check in one place._ Moved, not copied: `transparency.test.ts`'s "the registry's
     absorbers" (its fixture and `crossSectionAt` imports dropped), `materials.test.ts`'s "serve
     every aerosol-material row of the registry's fixture with a file of their own" (the rest of its

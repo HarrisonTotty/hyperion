@@ -19,7 +19,7 @@ export interface RegistryOpticsFlags {
   readonly rayleigh: boolean;
 }
 
-/** The fixture's rows at registry version 23, in index order (115 rows; 54 `absorber`, 43 `rayleigh`). */
+/** The fixture's rows at generator version 24, in index order (115 rows; 54 `absorber`, 43 `rayleigh`). */
 const ROWS = {
   H2: { absorber: true, rayleigh: true },
   He: { absorber: true, rayleigh: true },

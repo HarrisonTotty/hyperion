@@ -742,7 +742,10 @@ const DRY_ICE: SurfaceCondensateDto = {
   seasonal: true,
 };
 
-/** A seasonal argon frost, illustrative, with no layer: the registry has not read its density. */
+/**
+ * A seasonal argon frost, illustrative, with no layer, as a version-23 server sent argon's, whose
+ * density it had not read (P14.T49.n reads it from generator version 24).
+ */
 const ARGON_FROST: SurfaceCondensateDto = {
   substance: "Ar",
   phase: "solid",

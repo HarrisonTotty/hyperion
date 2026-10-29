@@ -114,8 +114,9 @@
 //! - **The rate** `R_b` = Ψ × V ÷ V☾ ([`Impactors::rate`]; science-p14-t24b-laws §2.2, with its
 //!   §2.7 re-rule against Zahnle et al. 2003): the projectiles' abundance over the Moon's, by the
 //!   same source rule from the belts' masses at [`SOURCE_MASS_AGE`], times the encounter factor
-//!   over the Moon's [`LUNAR_ENCOUNTER_SPEED`]. It gives the Moon 1, Earth 1.42, Mars 1.96 (Ivanov
-//!   2001's 1.92), Venus 1.17, Mercury 1.25, Ceres 134, Ganymede 3.71 and Pluto 30.1.
+//!   over the Moon's [`POPULATION_LUNAR_ENCOUNTER_SPEED`]. Under P14.T48.g's population, from 24,
+//!   it gives the Moon 1, Earth 1.42, Mars 1.94 (Ivanov 2001's 1.92), Venus 1.17, Mercury 1.24,
+//!   Ceres 124, Ganymede 3.69 and Pluto 29.4 (1.96, 1.25, 134, 3.71 and 30.1 at 23).
 //! - **A moon's birthplace** ([`MoonBirth::formed`]; §2.4): a regular moon's by its ice, a
 //!   giant-impact moon's its parent's, a giant's capture beyond the ice line, and a rocky planet's
 //!   capture its neighbouring belt's side.

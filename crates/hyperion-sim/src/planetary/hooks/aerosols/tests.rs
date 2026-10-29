@@ -1265,7 +1265,7 @@ fn the_inventory_is_pinned() {
     w.line(
         "# Mars and Titan at their own outgassing under a whole sky's coverage, and an Earth at",
     );
-    w.line("# 1 PAL of O2. Pure until P14.T54.b; nothing on the record reads it. The measured");
+    w.line("# 1 PAL of O2. On the record from generator version 24 (P14.T54.b). The measured");
     w.line("# Mars, by hand, carries its dust.");
     for (name, inventory) in golden_cases() {
         pin(&mut w, name, &inventory);

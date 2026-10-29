@@ -1404,13 +1404,15 @@ fn golden_systems_are_pinned() {
 /// P14.T48.e's gas-envelope split on the golden systems: a present planet's surface is `Ok`
 /// exactly when its class has a solid surface, and then never in the gas-envelope state, or, from
 /// generator version 24, its class has a solid surface under a supercritical envelope (P14.T53.b
-/// part 2), when its surface is not applicable and its envelope not modelled; its envelope is not
-/// modelled exactly when its surface does not apply, and not applicable otherwise, so that exactly
-/// one of the two applies; and degrading below `Surface` withholds the envelope.
+/// part 2), when its surface is not applicable and its envelope not modelled; from 24 a gas
+/// envelope's section is the record's own (P14.T54.b.i; not modelled to 23), `Ok` or not modelled
+/// where the record refuses it (`close_binary`'s 0500), and a solid surface's envelope is not
+/// applicable, so that exactly one of the two applies; and degrading below `Surface` withholds the
+/// envelope.
 #[test]
 fn the_golden_systems_split_surfaces_from_envelopes() {
     let galaxy = fixture();
-    let (mut solid, mut enveloped) = (0, 0);
+    let (mut solid, mut enveloped, mut modelled) = (0, 0, 0_u32);
     for golden in &GOLDEN_SYSTEMS {
         let (_, context, system) = pinned(&galaxy, golden.id);
         let snapshot = system.snapshot_at(&context, UniverseTime::EPOCH);
@@ -1443,12 +1445,17 @@ fn the_golden_systems_split_surfaces_from_envelopes() {
                 assert_eq!(record.surface(), &Section::NotApplicable, "{name}");
                 enveloped += 1;
             }
-            let expected = if has_solid_surface && !hidden {
-                Section::NotApplicable
+            if has_solid_surface && !hidden {
+                assert_eq!(record.envelope(), &Section::NotApplicable, "{name}");
+            } else if hidden {
+                assert_eq!(record.envelope(), &Section::NotModelled, "{name}");
             } else {
-                Section::NotModelled
-            };
-            assert_eq!(record.envelope(), &expected, "{name}");
+                assert!(
+                    matches!(record.envelope(), Section::Ok(_) | Section::NotModelled),
+                    "{name}"
+                );
+                modelled += u32::from(matches!(record.envelope(), Section::Ok(_)));
+            }
             assert_eq!(
                 record.degrade(DetailLevel::Bulk).envelope(),
                 &Section::NotResolved,
@@ -1457,8 +1464,8 @@ fn the_golden_systems_split_surfaces_from_envelopes() {
         }
     }
     assert!(
-        solid > 10 && enveloped > 10,
-        "{solid} solid, {enveloped} enveloped"
+        solid > 10 && enveloped > 10 && modelled > 10,
+        "{solid} solid, {enveloped} enveloped, {modelled} envelopes modelled"
     );
 }
 

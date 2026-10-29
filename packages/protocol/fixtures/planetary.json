@@ -1473,6 +1473,11 @@
                 "phase": "liquid",
                 "deck": "Fe",
                 "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 1.2247981361661768e-7,
+                  "effective_variance": 0.6168066722416747
+                },
                 "column_mass_kg_m2": 4171.409334093871,
                 "base_pa": 999999999.9999993,
                 "top_pa": 2376312.8389387666,
@@ -1480,9 +1485,7 @@
                 "coverage": 1.0,
                 "temperature_k": 2660.640622705595,
                 "not_modelled": {
-                  "type": "no_grain_density",
-                  "phase": "liquid",
-                  "temperature_k": 2660.640622705595
+                  "type": "optics_not_modelled"
                 }
               },
               {
@@ -1490,6 +1493,11 @@
                 "phase": "liquid",
                 "deck": "CaTiO3",
                 "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 1.862624347107444e-7,
+                  "effective_variance": 0.6168066722416747
+                },
                 "column_mass_kg_m2": 308.0975030700753,
                 "base_pa": 970517637.3453927,
                 "top_pa": 920143.2015283837,
@@ -1497,9 +1505,7 @@
                 "coverage": 1.0,
                 "temperature_k": 2637.2428026433363,
                 "not_modelled": {
-                  "type": "no_grain_density",
-                  "phase": "liquid",
-                  "temperature_k": 2637.2428026433363
+                  "type": "optics_not_modelled"
                 }
               },
               {
@@ -1507,6 +1513,11 @@
                 "phase": "liquid",
                 "deck": "Al2O3",
                 "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 1.829762951106409e-7,
+                  "effective_variance": 0.6168066722416747
+                },
                 "column_mass_kg_m2": 3474.6283994497826,
                 "base_pa": 884280998.9052861,
                 "top_pa": 832687.2746623612,
@@ -1514,9 +1525,7 @@
                 "coverage": 1.0,
                 "temperature_k": 2565.7932898160584,
                 "not_modelled": {
-                  "type": "no_grain_density",
-                  "phase": "liquid",
-                  "temperature_k": 2565.7932898160584
+                  "type": "optics_not_modelled"
                 }
               },
               {
@@ -1524,6 +1533,11 @@
                 "phase": "liquid",
                 "deck": "Mg2SiO4",
                 "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 1.9662348244432903e-7,
+                  "effective_variance": 0.6168066722416747
+                },
                 "column_mass_kg_m2": 45855.94069538409,
                 "base_pa": 728032201.368191,
                 "top_pa": 648706.4151794605,
@@ -1531,9 +1545,7 @@
                 "coverage": 1.0,
                 "temperature_k": 2422.6920544564364,
                 "not_modelled": {
-                  "type": "no_grain_density",
-                  "phase": "liquid",
-                  "temperature_k": 2422.6920544564364
+                  "type": "optics_not_modelled"
                 }
               },
               {
@@ -1558,6 +1570,11 @@
                 "phase": "liquid",
                 "deck": "MgSiO3",
                 "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 2.0271673426939834e-7,
+                  "effective_variance": 0.6168066722416747
+                },
                 "column_mass_kg_m2": 22473.707038813704,
                 "base_pa": 481602892.04240966,
                 "top_pa": 435065.0703075627,
@@ -1565,9 +1582,7 @@
                 "coverage": 1.0,
                 "temperature_k": 2144.5090117377736,
                 "not_modelled": {
-                  "type": "no_grain_density",
-                  "phase": "liquid",
-                  "temperature_k": 2144.5090117377736
+                  "type": "optics_not_modelled"
                 }
               },
               {
@@ -2239,6 +2254,11 @@
                 "phase": "liquid",
                 "deck": "Fe",
                 "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 5.3931728949491054e-8,
+                  "effective_variance": 0.6168066722416747
+                },
                 "column_mass_kg_m2": 43.592851550640574,
                 "base_pa": 300988.3774151456,
                 "top_pa": 1882.343138101846,
@@ -2246,9 +2266,7 @@
                 "coverage": 1.0,
                 "temperature_k": 2039.5777792063043,
                 "not_modelled": {
-                  "type": "no_grain_density",
-                  "phase": "liquid",
-                  "temperature_k": 2039.5777792063043
+                  "type": "optics_not_modelled"
                 }
               },
               {

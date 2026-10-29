@@ -1,4 +1,4 @@
-# generator_version = 23
+# generator_version = 24
 hot_jupiter 0x41fcecba00000006: OldThinDisc, 1 stars
 fe_h = 0x3fd0561a147a08fb  # 0.25525524139096917
 age_at_epoch_yr = 0x41dcf22eac798392  # 1942534833.8986554
@@ -88,7 +88,7 @@ phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3faefb619e23dc78  # 0.060511637262543994
 bond_ratio = 0x3ff7851d829b2126  # 1.4699988462253457
-envelope: NotModelled
+envelope: Ok
 body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3c912e65df4b7a7d  # 5.960940750416032e-17
 orbit: NotApplicable
@@ -154,7 +154,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe35e2d6d1630c4  # 0.6052462702368975
 water = 0x3fd943a525d39e79  # 0.3947537297631026
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4037fdc9e619c06f  # 23.991361981665644
+t_eq_k = 0x4037fd0439dc50a7  # 23.988345733917097
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -192,9 +192,9 @@ figure_pole_y = 0x3fcd744b6c4a904e  # 0.2301115301862659
 figure_pole_z = 0xbfeea6ac0c0fa51b  # -0.9578457103317847
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fdca86ebf310e35  # 0.4477803103547758
-geometric_albedo_v = 0x3fdca86ebf310e35  # 0.4477803103547758
-geometric_albedo_r = 0x3fdca86ebf310e35  # 0.4477803103547758
+geometric_albedo_b = 0x3fdca9004d2c4990  # 0.4478150132792047
+geometric_albedo_v = 0x3fdca9004d2c4990  # 0.4478150132792047
+geometric_albedo_r = 0x3fdca9004d2c4990  # 0.4478150132792047
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -202,31 +202,35 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3febb9ef7bfc84bb  # 0.8664472028359776
-bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
-surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4037fdc9e619c06f  # 23.991361981665644
-equator_pole_contrast_k = 0x4018d632b5c128b0  # 6.209177818216787
+bond_albedo = 0x3febba7c4ea212be  # 0.8665143523981766
+bond_ratio = 0x3fda75ce943cd76a  # 0.4134403655656259
+surface_state: Tenuous, Ice; climate AirlessLike, Seasonal, N2, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4037fd0439dc50a7  # 23.988345733917097
+equator_pole_contrast_k = 0x4018d56612720260  # 6.208397186478209
 day_night_contrast_k = 0x0000000000000000  # 0.0
-surface_pressure_pa = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x3f68c79555cb35dd  # 0.0030248562528416415
 sigma_h_m = 0x4093831ae33382c7  # 1248.7762573288508
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f7db8d99e0b58d1  # 0.007256364887061121
 surface_age_yr = 0x41ce75c344546b5c  # 1022068360.6595263
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3ff0000000000000  # 1.0
+ice_fraction = 0x3fefffffffffffff  # 0.9999999999999999
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41b138173ba08b05  # 288888635.62712127
-reservoir_gel_m = 0x4112e1ef0f553bf0  # 309371.7649735799
+reservoir_gel_m = 0x4112e1ef0f385ded  # 309371.76486346015
 area_fraction = 0x3ff0000000000000  # 1.0
 condensate: CH4, Solid, seasonal false
-reservoir_kg_m2 = 0x4138d4cb611c6647  # 1627339.3793395923
-reservoir_gel_m = 0x40a813163bdcfd44  # 3081.5434254702723
-area_fraction = 0x3fd90d361d180210  # 0.39143135873021695
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40e73a096524e6f7  # 47568.293596697906
-reservoir_gel_m = 0x404704b5638590aa  # 46.036785545556384
-area_fraction = 0x3f986cfcf6bcf3b5  # 0.02385325675935564
+reservoir_kg_m2 = 0x4138b07e5ba09afd  # 1618046.3579193943
+reservoir_gel_m = 0x40a7efe200ce367b  # 3063.941412395621
+area_fraction = 0x3fd911d5e1db2dac  # 0.3917135911585443
+condensate: N2, Solid, seasonal false
+reservoir_kg_m2 = 0x40e73a093cc5359a  # 47568.28866825551
+reservoir_gel_m = 0x40473a142b16ad8b  # 46.45374048812217
+area_fraction = 0x3f98a59f1595037f  # 0.02406929558970061
+condensate: Ar, Solid, seasonal false
+reservoir_kg_m2 = 0x4014d2bd99eb2c43  # 5.20580139634973
+reservoir_gel_m = 0x3f683c8ac32b168d  # 0.0029585561945591533
+area_fraction = 0x3eb9b7e318d9a08d  # 1.532930670756038e-6
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40abbfcff8541747  # 3551.9061914709487
@@ -254,7 +258,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe3608c642ab5e5  # 0.6055356937774233
 water = 0x3fd93ee737aa9436  # 0.39446430622257667
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4034d4fdd2422535  # 20.831998006008877
+t_eq_k = 0x4039d7dbd807d537  # 25.84319830123169
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -292,9 +296,9 @@ figure_pole_y = 0x3fb70de5b0faf89e  # 0.09005580492791629
 figure_pole_z = 0xbfef76df96a4e16d  # -0.9832609121577157
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fde98ec6c1578e0  # 0.4780837111956213
-geometric_albedo_v = 0x3fde98ec6c1578e0  # 0.4780837111956213
-geometric_albedo_r = 0x3fde98ec6c1578e0  # 0.4780837111956213
+geometric_albedo_b = 0x3fdb34e0a681fdc2  # 0.4251023889591715
+geometric_albedo_v = 0x3fdb34e0a681fdc2  # 0.4251023889591715
+geometric_albedo_r = 0x3fdb34e0a681fdc2  # 0.4251023889591715
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -302,11 +306,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fed9a49434327d3  # 0.9250837625233949
-bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
+bond_albedo = 0x3fea52758b2a2c2e  # 0.8225658147870314
+bond_ratio = 0x3fda75ce943cd76a  # 0.4134403655656259
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4034d4fdd2422535  # 20.831998006008877
-equator_pole_contrast_k = 0x4022cf0fd03eadbd  # 9.404417522097782
+mean_surface_temperature_k = 0x4039d7dbd807d537  # 25.84319830123169
+equator_pole_contrast_k = 0x40275556e8534eb2  # 11.66667867676674
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409858f0d2ce057a  # 1558.2351791563838
@@ -314,19 +318,15 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f783cdc01b9195f  # 0.005917415047923618
 surface_age_yr = 0x41db8f7143cac5ef  # 1849541903.168331
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3ff0000000000000  # 1.0
+ice_fraction = 0x3fefffffffffffff  # 0.9999999999999999
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41a76b8bf258265a  # 196462073.1721676
-reservoir_gel_m = 0x4109aebe9e0b85d7  # 210391.82717041552
+reservoir_gel_m = 0x4109aebf6b667766  # 210391.9274415329
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal false
-reservoir_kg_m2 = 0x4130e62f0bc58629  # 1107503.045982728
-reservoir_gel_m = 0x40a05bf7e91a9581  # 2093.9842003161907
-area_fraction = 0x3ff0000000000000  # 1.0
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40df9d46c6f1b7bb  # 32373.105892590927
-reservoir_gel_m = 0x403f50e906256e63  # 31.31605566419456
-area_fraction = 0x3f909d881a9b27bc  # 0.016225935577302883
+condensate: Ar, Solid, seasonal false
+reservoir_kg_m2 = 0x400c5ad63639aa26  # 3.544353889117036
+reservoir_gel_m = 0x3f608ba71ef574c8  # 0.0020197166519851685
+area_fraction = 0x3eb18e9ec4cc3912  # 1.0464853119094138e-6
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40b5d7df3ea48915  # 5591.8720496020005
@@ -354,7 +354,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe0c7999de7dba4  # 0.5243652423949823
 water = 0x3fde70ccc43048b8  # 0.4756347576050177
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403509dc0d053216  # 21.038513959663838
+t_eq_k = 0x4038b8f504165f16  # 24.722488646947646
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -392,9 +392,9 @@ figure_pole_y = 0x3fd49c4a71f46c60  # 0.3220392334785114
 figure_pole_z = 0xbfedfb8de76e7a2c  # -0.9369573135516638
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fddff5b67f027d3  # 0.4687107577343543
-geometric_albedo_v = 0x3fddff5b67f027d3  # 0.4687107577343543
-geometric_albedo_r = 0x3fddff5b67f027d3  # 0.4687107577343543
+geometric_albedo_b = 0x3fdb34e050daaf12  # 0.425102309188092
+geometric_albedo_v = 0x3fdb34e050daaf12  # 0.425102309188092
+geometric_albedo_r = 0x3fdb34e050daaf12  # 0.425102309188092
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -402,11 +402,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fed05b641eaa146  # 0.9069472587043854
-bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
+bond_albedo = 0x3fea5275384bb0f0  # 0.8225656604313638
+bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x403509dc0d053216  # 21.038513959663838
-equator_pole_contrast_k = 0x401cdc9305fd0252  # 7.215404599730919
+mean_surface_temperature_k = 0x4038b8f504165f16  # 24.722488646947646
+equator_pole_contrast_k = 0x4020f52e08b30e48  # 8.478866836411854
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409e0f9b156f2fd1  # 1923.9014489529548
@@ -417,16 +417,12 @@ ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41a520145e5d8485  # 177211951.18265167
-reservoir_gel_m = 0x41072a8682218eaa  # 189776.81354056793
+reservoir_gel_m = 0x41072a86eb2168ac  # 189776.86480981612
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal true
-reservoir_kg_m2 = 0x412948ab29c49094  # 828501.5815777951
-reservoir_gel_m = 0x40987a78e0725fc9  # 1566.6180436964953
-area_fraction = 0x3fe9f99a87c4f924  # 0.8117191936251271
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40d7a66c64001273  # 24217.693603532807
-reservoir_gel_m = 0x403768eaea5585dd  # 23.409834524039855
-area_fraction = 0x3f88d752f1c38a11  # 0.012129447939917022
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x3fe32829928810d1  # 0.5986526357596863
+reservoir_gel_m = 0x3f3654d4d7f375d9  # 0.0003407497060388932
+area_fraction = 0x3e87b25b9f6260ef  # 1.7655425183362343e-7
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40a375b85c42b659  # 2490.860078892478
@@ -454,7 +450,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe3077835fec92e  # 0.5946618132204884
 water = 0x3fd9f10f94026da3  # 0.40533818677951156
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40367a6e1d3ddf67  # 22.478242709737426
+t_eq_k = 0x4039d270d20e8098  # 25.822034004726987
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -492,9 +488,9 @@ figure_pole_y = 0x3fda7e8798a488f4  # 0.4139727583552848
 figure_pole_z = 0xbfed199197856601  # -0.9093711814304585
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fddb48abf127b6a  # 0.4641444078387652
-geometric_albedo_v = 0x3fddb48abf127b6a  # 0.4641444078387652
-geometric_albedo_r = 0x3fddb48abf127b6a  # 0.4641444078387652
+geometric_albedo_b = 0x3fdb34e03f787e30  # 0.42510229299839164
+geometric_albedo_v = 0x3fdb34e03f787e30  # 0.42510229299839164
+geometric_albedo_r = 0x3fdb34e03f787e30  # 0.42510229299839164
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -502,11 +498,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fecbd5439529bad  # 0.8981114501556157
+bond_albedo = 0x3fea5275277a2b70  # 0.822565629104572
 bond_ratio = 0x3fda75ce943cd76a  # 0.4134403655656259
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x40367a6e1d3ddf67  # 22.478242709737426
-equator_pole_contrast_k = 0x4020efb89216b697  # 8.468205037376988
+mean_surface_temperature_k = 0x4039d270d20e8098  # 25.822034004726987
+equator_pole_contrast_k = 0x402374b05d81b608  # 9.727908060153837
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a05499482bc52d  # 2090.2993787458604
@@ -515,18 +511,10 @@ heat_flow_w_m2 = 0x3f70974cbeb4f210  # 0.004050540718989484
 surface_age_yr = 0x41dcf22eac798392  # 1942534833.8986554
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal false
+condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x41a039e4e1c96b52  # 136114800.8933969
-reservoir_gel_m = 0x4101cb2e0f141587  # 145765.7573625261
+reservoir_gel_m = 0x4101cb2e8f3d9755  # 145765.81994169453
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal true
-reservoir_kg_m2 = 0x4126c9cda3c06c15  # 746726.8198274398
-reservoir_gel_m = 0x4095e94e6ca12dfa  # 1402.3265862640678
-area_fraction = 0x3fe740423daf036c  # 0.7265940861471853
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40d550d696d6db9c  # 21827.35295649954
-reservoir_gel_m = 0x40351988a27e8564  # 21.099741130722933
-area_fraction = 0x3f8663c86ee20b8e  # 0.01093250835788753
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40b6fe2d4623b0bf  # 5886.176851492549
@@ -554,7 +542,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe120807e1bc348  # 0.5352175200515399
 water = 0x3fddbeff03c87970  # 0.4647824799484601
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403585194628acb3  # 21.51991690152199
+t_eq_k = 0x40380a322a13605d  # 24.03982794735963
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -592,9 +580,9 @@ figure_pole_y = 0xbfc8ba2da0b4996b  # -0.19318170878359395
 figure_pole_z = 0xbfee97dc30b18871  # -0.9560376120609942
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fdd4e80ab9f42a6  # 0.457916419601171
-geometric_albedo_v = 0x3fdd4e80ab9f42a6  # 0.457916419601171
-geometric_albedo_r = 0x3fdd4e80ab9f42a6  # 0.457916419601171
+geometric_albedo_b = 0x3fdb34e03f787e30  # 0.42510229299839164
+geometric_albedo_v = 0x3fdb34e03f787e30  # 0.42510229299839164
+geometric_albedo_r = 0x3fdb34e03f787e30  # 0.42510229299839164
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -602,11 +590,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fec5a9b57063a01  # 0.8860603999799538
-bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
+bond_albedo = 0x3fea5275277a2b70  # 0.822565629104572
+bond_ratio = 0x3fda75ce943cd76a  # 0.4134403655656259
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x403585194628acb3  # 21.51991690152199
-equator_pole_contrast_k = 0x40227a5aec070a97  # 9.238974929675619
+mean_surface_temperature_k = 0x40380a322a13605d  # 24.03982794735963
+equator_pole_contrast_k = 0x4024a4439beb5e4a  # 10.320828316194042
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a2db7c1f62a956  # 2413.7424269515714
@@ -615,18 +603,10 @@ heat_flow_w_m2 = 0x3f6894a4ef4feb06  # 0.003000566614443814
 surface_age_yr = 0x41dcf22eac798392  # 1942534833.8986554
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal false
+condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x419f587ebc9ec689  # 131473327.15505423
-reservoir_gel_m = 0x41012fd9789864c4  # 140795.18388441775
+reservoir_gel_m = 0x41012fd9a9b6d9c9  # 140795.20786829133
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal true
-reservoir_kg_m2 = 0x4123323060a8c7a1  # 629016.1887876877
-reservoir_gel_m = 0x40926a49b2ecf747  # 1178.5719716096808
-area_fraction = 0x3fe38a84da841365  # 0.610659052647503
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40d1f49bdeb9177c  # 18386.435468933996
-reservoir_gel_m = 0x4031c40da6c37fdb  # 17.765833304147105
-area_fraction = 0x3f82da1eef0948cc  # 0.009205094976242022
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x409a399538ca37f5  # 1678.3957244488386
@@ -987,7 +967,7 @@ phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3faefb61920caf18  # 0.06051163585502034
 bond_ratio = 0x3ff7851d829b2126  # 1.4699988462253457
-envelope: NotModelled
+envelope: Ok
 body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3c912e65df4b7a7d  # 5.960940750416032e-17
 orbit: NotApplicable
@@ -1053,7 +1033,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe35e2d6d1630c4  # 0.6052462702368975
 water = 0x3fd943a525d39e79  # 0.3947537297631026
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4037fdc9f0074893  # 23.99136257341213
+t_eq_k = 0x4037fd0443cf41d5  # 23.988346326923267
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1091,9 +1071,9 @@ figure_pole_y = 0x3fcd744b6c4a904e  # 0.2301115301862659
 figure_pole_z = 0xbfeea6ac0c0fa51b  # -0.9578457103317847
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fdca86ebd04c568  # 0.447780308331025
-geometric_albedo_v = 0x3fdca86ebd04c568  # 0.447780308331025
-geometric_albedo_r = 0x3fdca86ebd04c568  # 0.447780308331025
+geometric_albedo_b = 0x3fdca9004afc1078  # 0.4478150112411252
+geometric_albedo_v = 0x3fdca9004afc1078  # 0.4478150112411252
+geometric_albedo_r = 0x3fdca9004afc1078  # 0.4478150112411252
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1101,13 +1081,13 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3febb9ef79e2516f  # 0.8664471989200545
-bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
-surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4037fdc9f0074893  # 23.99136257341213
-equator_pole_contrast_k = 0x4018d632c0083e38  # 6.209177971366039
+bond_albedo = 0x3febba7c4c840ff0  # 0.8665143484545279
+bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
+surface_state: Tenuous, Ice; climate AirlessLike, Seasonal, N2, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4037fd0443cf41d5  # 23.988346326923267
+equator_pole_contrast_k = 0x4018d5661cbeb1c4  # 6.208397339953482
 day_night_contrast_k = 0x0000000000000000  # 0.0
-surface_pressure_pa = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x3f68c795dd41ae77  # 0.0030248572384630706
 sigma_h_m = 0x4093831ae33382c7  # 1248.7762573288508
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f7db8d969bdd60d  # 0.00725636412595555
@@ -1116,16 +1096,20 @@ ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41b138173ba08b05  # 288888635.62712127
-reservoir_gel_m = 0x4112e1ef0f553d63  # 309371.7649736015
+reservoir_gel_m = 0x4112e1ef0f385f60  # 309371.76486348175
 area_fraction = 0x3ff0000000000000  # 1.0
 condensate: CH4, Solid, seasonal false
-reservoir_kg_m2 = 0x4138d4cb611c6647  # 1627339.3793395923
-reservoir_gel_m = 0x40a813163bfbe922  # 3081.5434263918005
-area_fraction = 0x3fd90d35e1bc1528  # 0.39143130344776234
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40e73a096524e6f7  # 47568.293596697906
-reservoir_gel_m = 0x404704b5636bb9eb  # 46.03678553352423
-area_fraction = 0x3f986cfcf6a18889  # 0.023853256753121364
+reservoir_kg_m2 = 0x4138b07e5a3cdaa5  # 1618046.3524910596
+reservoir_gel_m = 0x40a7efe1ff941c34  # 3063.9414030346325
+area_fraction = 0x3fd911d5a62e9a38  # 0.3917135355826846
+condensate: N2, Solid, seasonal false
+reservoir_kg_m2 = 0x40e73a093cc534bd  # 47568.2886682539
+reservoir_gel_m = 0x40473a142b3d4ebf  # 46.45374050611053
+area_fraction = 0x3f98a59f15be0152  # 0.024069295599020997
+condensate: Ar, Solid, seasonal false
+reservoir_kg_m2 = 0x4014d2bdfddccea2  # 5.205802885629653
+reservoir_gel_m = 0x3f683c8b37a5aa48  # 0.0029585570420540865
+area_fraction = 0x3eb9b7e394734f17  # 1.5329311098725838e-6
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40abbfd058cd7924  # 3551.9069275102975
@@ -1153,7 +1137,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe3608c642ab5e5  # 0.6055356937774233
 water = 0x3fd93ee737aa9436  # 0.39446430622257667
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4034d4fdd731b743  # 20.831998300206816
+t_eq_k = 0x4039d7dbde2f8a5c  # 25.843198668104705
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1191,9 +1175,9 @@ figure_pole_y = 0x3fb70de5b0faf89e  # 0.09005580492791629
 figure_pole_z = 0xbfef76df96a4e16d  # -0.9832609121577157
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fde98ec6c9e37b1  # 0.4780837116930981
-geometric_albedo_v = 0x3fde98ec6c9e37b1  # 0.4780837116930981
-geometric_albedo_r = 0x3fde98ec6c9e37b1  # 0.4780837116930981
+geometric_albedo_b = 0x3fdb34e0a7be6ea0  # 0.42510239011037676
+geometric_albedo_v = 0x3fdb34e0a7be6ea0  # 0.42510239011037676
+geometric_albedo_r = 0x3fdb34e0a7be6ea0  # 0.42510239011037676
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1201,11 +1185,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fed9a4943c7749e  # 0.9250837634860039
-bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
+bond_albedo = 0x3fea52758c5c5390  # 0.8225658170145937
+bond_ratio = 0x3fda75ce943cd76a  # 0.4134403655656259
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4034d4fdd731b743  # 20.831998300206816
-equator_pole_contrast_k = 0x4022cf0fd4b388a1  # 9.40441765491079
+mean_surface_temperature_k = 0x4039d7dbde2f8a5c  # 25.843198668104705
+equator_pole_contrast_k = 0x40275556ede1fc40  # 11.66667884238825
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409858f0d2ce057a  # 1558.2351791563838
@@ -1216,16 +1200,12 @@ ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41a76b8bf258265a  # 196462073.1721676
-reservoir_gel_m = 0x4109aebe9e0b85d6  # 210391.8271704155
+reservoir_gel_m = 0x4109aebf6b6679a0  # 210391.9274415495
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal false
-reservoir_kg_m2 = 0x4130e62f0bc58629  # 1107503.045982728
-reservoir_gel_m = 0x40a05bf7e92412ec  # 2093.984200599012
-area_fraction = 0x3ff0000000000000  # 1.0
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40df9d46c6f1b7bb  # 32373.105892590927
-reservoir_gel_m = 0x403f50e905ebc1cf  # 31.316055650766256
-area_fraction = 0x3f909d881a7c8e17  # 0.01622593557034521
+condensate: Ar, Solid, seasonal false
+reservoir_kg_m2 = 0x400c5ad6be4f16f7  # 3.5443549030195487
+reservoir_gel_m = 0x3f608ba76e60c42d  # 0.0020197172298357575
+area_fraction = 0x3eb18e9f19129656  # 1.0464856113138639e-6
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40b5d7df3eb12ff7  # 5591.872050356112
@@ -1253,7 +1233,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe0c7999de7dba4  # 0.5243652423949823
 water = 0x3fde70ccc43048b8  # 0.4756347576050177
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403509dc1200f043  # 21.038514256695873
+t_eq_k = 0x4038b8f509f9c1c6  # 24.72248899791318
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1291,9 +1271,9 @@ figure_pole_y = 0x3fd49c4a71f46c60  # 0.3220392334785114
 figure_pole_z = 0xbfedfb8de76e7a2c  # -0.9369573135516638
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fddff5b689a367a  # 0.4687107583530189
-geometric_albedo_v = 0x3fddff5b689a367a  # 0.4687107583530189
-geometric_albedo_r = 0x3fddff5b689a367a  # 0.4687107583530189
+geometric_albedo_b = 0x3fdb34e052171daa  # 0.42510231033926493
+geometric_albedo_v = 0x3fdb34e052171daa  # 0.42510231033926493
+geometric_albedo_r = 0x3fdb34e052171daa  # 0.42510231033926493
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1301,11 +1281,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fed05b6428f28ac  # 0.9069472599014907
-bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
+bond_albedo = 0x3fea5275397dd61f  # 0.8225656626588637
+bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x403509dc1200f043  # 21.038514256695873
-equator_pole_contrast_k = 0x401cdc930cd32204  # 7.215404701601532
+mean_surface_temperature_k = 0x4038b8f509f9c1c6  # 24.72248899791318
+equator_pole_contrast_k = 0x4020f52e0cbd01ba  # 8.478866956779587
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409e0f9b156f2fd1  # 1923.9014489529548
@@ -1316,16 +1296,12 @@ ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41a520145e5d8485  # 177211951.18265167
-reservoir_gel_m = 0x41072a8682218eb6  # 189776.81354056828
+reservoir_gel_m = 0x41072a86eb216a0b  # 189776.86480982634
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal true
-reservoir_kg_m2 = 0x412948ab29c49094  # 828501.5815777951
-reservoir_gel_m = 0x40987a78e080ce2f  # 1566.6180439115376
-area_fraction = 0x3fe9f99a87d4496a  # 0.811719193736548
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40d7a66c64001273  # 24217.693603532807
-reservoir_gel_m = 0x403768eaea257fae  # 23.40983451285836
-area_fraction = 0x3f88d752f1909438  # 0.012129447934123502
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x3fe328291a8e5c25  # 0.5986524122880651
+reservoir_gel_m = 0x3f3654d44c184f7f  # 0.0003407495788405531
+area_fraction = 0x3e87b25b0afa3a5c  # 1.7655418592774774e-7
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40a375b85c4c74be  # 2490.860079182864
@@ -1353,7 +1329,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe3077835fec92e  # 0.5946618132204884
 water = 0x3fd9f10f94026da3  # 0.40533818677951156
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40367a6e23a3334a  # 22.478243090957484
+t_eq_k = 0x4039d270d834ed85  # 25.822034371301488
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1391,9 +1367,9 @@ figure_pole_y = 0x3fda7e8798a488f4  # 0.4139727583552848
 figure_pole_z = 0xbfed199197856601  # -0.9093711814304585
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fddb48abf28340d  # 0.4641444079177866
-geometric_albedo_v = 0x3fddb48abf28340d  # 0.4641444079177866
-geometric_albedo_r = 0x3fddb48abf28340d  # 0.4641444079177866
+geometric_albedo_b = 0x3fdb34e040b4ed35  # 0.4251022941495706
+geometric_albedo_v = 0x3fdb34e040b4ed35  # 0.4251022941495706
+geometric_albedo_r = 0x3fdb34e040b4ed35  # 0.4251022941495706
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1401,11 +1377,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fecbd5439679f8b  # 0.8981114503085207
+bond_albedo = 0x3fea527528ac5108  # 0.8225656313320835
 bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x40367a6e23a3334a  # 22.478243090957484
-equator_pole_contrast_k = 0x4020efb896e85ee9  # 8.468205180993623
+mean_surface_temperature_k = 0x4039d270d834ed85  # 25.822034371301488
+equator_pole_contrast_k = 0x402374b06223f972  # 9.727908198253065
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a05499482bc52d  # 2090.2993787458604
@@ -1414,18 +1390,10 @@ heat_flow_w_m2 = 0x3f70974c60c3d2f1  # 0.004050539351955194
 surface_age_yr = 0x41dcf22fa6798392  # 1942535833.8986554
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal false
+condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x41a039e4e1c96b52  # 136114800.8933969
-reservoir_gel_m = 0x4101cb2e0f1415f0  # 145765.75736252917
+reservoir_gel_m = 0x4101cb2e8f3d98dd  # 145765.81994170594
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal true
-reservoir_kg_m2 = 0x4126c9cda3c06c15  # 746726.8198274398
-reservoir_gel_m = 0x4095e94e66ed513b  # 1402.3265645104245
-area_fraction = 0x3fe7404237a1e52f  # 0.7265940748758676
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40d550d696d6d155  # 21827.35295648997
-reservoir_gel_m = 0x40351988a24d35f4  # 21.099741119241983
-area_fraction = 0x3f8663c86eadb853  # 0.010932508351938852
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40b6fe2d4626f6cd  # 5886.176851687674
@@ -1453,7 +1421,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe120807e1bc348  # 0.5352175200515399
 water = 0x3fddbeff03c87970  # 0.4647824799484601
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403585194b4b0a97  # 21.51991720754685
+t_eq_k = 0x40380a322fcd230d  # 24.03982828863359
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1491,9 +1459,9 @@ figure_pole_y = 0xbfc8ba2da0b4996b  # -0.19318170878359395
 figure_pole_z = 0xbfee97dc30b18871  # -0.9560376120609942
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fdd4e80ac68e1c3  # 0.4579164203346659
-geometric_albedo_v = 0x3fdd4e80ac68e1c3  # 0.4579164203346659
-geometric_albedo_r = 0x3fdd4e80ac68e1c3  # 0.4579164203346659
+geometric_albedo_b = 0x3fdb34e040b4ed36  # 0.4251022941495707
+geometric_albedo_v = 0x3fdb34e040b4ed36  # 0.4251022941495707
+geometric_albedo_r = 0x3fdb34e040b4ed36  # 0.4251022941495707
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1501,11 +1469,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fec5a9b57c94b2d  # 0.8860604013992536
-bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
+bond_albedo = 0x3fea527528ac5109  # 0.8225656313320836
+bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x403585194b4b0a97  # 21.51991720754685
-equator_pole_contrast_k = 0x40227a5af06f9d59  # 9.23897506105884
+mean_surface_temperature_k = 0x40380a322fcd230d  # 24.03982828863359
+equator_pole_contrast_k = 0x4024a443a0d5ef59  # 10.320828462710482
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a2db7c1f62a956  # 2413.7424269515714
@@ -1514,18 +1482,10 @@ heat_flow_w_m2 = 0x3f6894a456bfaf4e  # 0.0030005655043989004
 surface_age_yr = 0x41dcf22fa6798392  # 1942535833.8986554
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal false
+condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x419f587ebc9ec689  # 131473327.15505423
-reservoir_gel_m = 0x41012fd9789864e3  # 140795.18388441866
+reservoir_gel_m = 0x41012fd9a9b6da90  # 140795.20786829712
 area_fraction = 0x3ff0000000000000  # 1.0
-condensate: CH4, Solid, seasonal true
-reservoir_kg_m2 = 0x4123323060a8c7a1  # 629016.1887876877
-reservoir_gel_m = 0x40926a49b2cdd8e4  # 1178.571971145976
-area_fraction = 0x3fe38a84da630df1  # 0.6106590524072414
-condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x40d1f49bdeb82b71  # 18386.435468714164
-reservoir_gel_m = 0x4031c40da69e4357  # 17.765833295477332
-area_fraction = 0x3f82da1eeee1c577  # 0.009205094971749912
 crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x409a399538e453ee  # 1678.395724837897

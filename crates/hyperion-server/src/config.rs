@@ -788,7 +788,7 @@ impl ServerConfigBuilder {
     /// Where the surface service takes each body's coarse-pass inputs from.
     ///
     /// [`RecordInputs`], the body's record, by default. Until the serve gate opens
-    /// (`GENERATED_SURFACES_FROM`, 24; P14.T54.a), that answers every body it reads `NotModelled`,
+    /// (`GENERATED_SURFACES_FROM`, 25; P14.T54.a), that answers every body it reads `NotModelled`,
     /// so tests give the coarse pass's reference worlds; no option or variable sets it.
     #[must_use]
     pub fn surface_inputs(mut self, inputs: impl InputsSource + 'static) -> Self {

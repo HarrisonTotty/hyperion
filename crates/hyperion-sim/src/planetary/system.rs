@@ -2545,19 +2545,19 @@ impl PlanetarySystem {
     /// radius and surface material (of its mass fractions, [`SurfaceMaterial::of`], or its heated
     /// shell's rock lag, P14.T56.g), its spin under its seasonal orbit then (its own for a planet
     /// or a member, its planet's for a moon, [`SeasonalSpin::of`]) and the context its published
-    /// pass read (rule (f)). The figures read
-    /// its mass, its bulk section's radius, gravity, class and fractions, its atmosphere and its
-    /// volatile inventory's water, its sidereal rotation period, the system's \[Fe/H\] and age,
-    /// and for a moon the tide its planet raises in it, its derivation's (P14.T17.b), with a
-    /// regular moon's subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag); its
-    /// crater inputs with its primary's host's impactor sources (P14.T48.c, T48.f); and its
-    /// continental asymptote, word 0 of its `body.continents` stream (P14.T48.a), with whether it
-    /// entered its hosts' water window holding water (P14.T48.b's start condition). The figures'
-    /// volatile history (P14.T48.b) reads the conditions' liquid-water flag, the hosts' light over
-    /// the primary's past (each star at its state then, along the primary's orbit then for a star
-    /// of its zone and the pair's for a companion), and the body's outgassing then, and their
-    /// ocean, ice and cloud the conditions. The conditions' climate regime (P14.T48.d) reads the
-    /// body's mass, the reservoirs its atmosphere holds, the figures' history and their ice.
+    /// pass read (rule (f)). The figures read its mass, its bulk section's radius, gravity, class
+    /// and fractions, its atmosphere and its volatile inventory's water, its sidereal rotation
+    /// period, the system's \[Fe/H\] and age, and for a moon the tide its planet raises in it, its
+    /// derivation's (P14.T17.b), with its subsurface ocean, its tidal branch's solve (P14.T51.g.b;
+    /// P14.T17.b's flag to version 23); its crater inputs with its primary's host's impactor
+    /// sources (P14.T48.c, T48.f); and its continental asymptote, word 0 of its `body.continents`
+    /// stream (P14.T48.a), with whether it entered its hosts' water window holding water
+    /// (P14.T48.b's start condition). The figures' volatile history (P14.T48.b) reads the
+    /// conditions' liquid-water flag, the hosts' light over the primary's past (each star at its
+    /// state then, along the primary's orbit then for a star of its zone and the pair's for a
+    /// companion), and the body's outgassing then, and their ocean, ice and cloud the conditions.
+    /// The conditions' climate regime (P14.T48.d) reads the body's mass, the reservoirs its
+    /// atmosphere holds, the figures' history and their ice.
     #[must_use]
     fn surface_section(
         &self,
@@ -5429,8 +5429,8 @@ impl SurfaceInterior {
 
     /// The interior of the moon `moon`, derived as `derived`: its tide is its derivation's,
     /// P14.T17.b's (science-p14-t24b-laws §1.1's `q_tid`) at its own tides (P14.T56.d), and the
-    /// ocean its figures read is its tidal branch's ([`moon_ocean`]: a regular moon's flag's below
-    /// P14.T51.g.b's bump, every moon's branch's from it; decision-p14-moons §F-ocean F3).
+    /// ocean its figures read is its tidal branch's (every moon's, P14.T51.g.b; decision-p14-moons
+    /// §F-ocean F3).
     #[must_use]
     fn of_moon(moon: &MoonPart, derived: &DerivedMoon) -> Self {
         Self {

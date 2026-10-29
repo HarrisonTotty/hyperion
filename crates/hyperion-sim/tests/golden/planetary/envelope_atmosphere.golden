@@ -1,11 +1,11 @@
-# generator_version = 23
+# generator_version = 24
 # P14.T52.d's visible atmospheres (hyperion_sim::planetary::hooks::envelope_atmosphere):
 # the Solar System table's four giants (protosolar host, this module's T_int, adopted grey
 # profile, starlit), a KELT-9b-like dayside (f 1/2) and an 8 M_E sub-Neptune. Per body: its
 # inputs; its composition at 1 bar by mole fraction, largest first; mu (g/mol), c_p/R;
 # each deck (kind, bound, phase, base Pa, base K, top Pa, f_sed, column kg/m2, vapour
 # below and above); each mode; each absorber (molecules/m2, slab Pa); the hazes' tau(550);
-# the rows not formed and not modelled. Pure until P14.T54.b; nothing on the record reads it.
+# the rows not formed and not modelled. On the record from generator version 24 (P14.T54.b).
 jupiter.internal_temperature_k = 0x405a33be117f70fd  # 104.80847585149236
 jupiter.equilibrium_temperature_k = 0x4059e8c6e4960d8a  # 103.63713946012118
 jupiter.gravity_m_s2 = 0x4038c98600fd136f  # 24.787200986658203
@@ -134,33 +134,41 @@ jupiter.deck[12].NH3.column_kg_m2 = 0x3f8675a145867d16  # 0.010966548856969054
 jupiter.deck[12].NH3.vapour_below = 0x3f2fc1c8f6974237  # 0.00024228647389047824
 jupiter.deck[12].NH3.vapour_above = 0x3e8ba6c9b2279ccc  # 2.0601984214373926e-7
 jupiter.mode[00] = Fe Liquid sphere of deck Fe
-jupiter.mode[00].size: Fe has no grain density as a liquid at 2577.5196619528056 K
+jupiter.mode[00].size = log-normal
+jupiter.mode[00].r_eff_m = 0x3e805c7e0cc00f83  # 1.219011721565962e-7
+jupiter.mode[00].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[00].column_kg_m2 = 0x40a27ce136f95692  # 2366.439872543161
-jupiter.mode[00].tau: the mode's size: Fe has no grain density as a liquid at 2577.5196619528056 K
+jupiter.mode[00].tau: the mode's optics: Fe has no index file as a liquid of that variant
 jupiter.mode[00].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 jupiter.mode[00].top_pa = 0x414876979cee276f  # 3206447.2260178844
 jupiter.mode[00].exponent = 0x4000000000000000  # 2.0
 jupiter.mode[00].coverage = 0x3ff0000000000000  # 1.0
 jupiter.mode[01] = CaTiO3 Liquid sphere of deck CaTiO3
-jupiter.mode[01].size: CaTiO3 has no grain density as a liquid at 2577.5196619528056 K
+jupiter.mode[01].size = log-normal
+jupiter.mode[01].r_eff_m = 0x3e88b239dc071d24  # 1.840009940091873e-7
+jupiter.mode[01].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[01].column_kg_m2 = 0x40519f1f8e69ea67  # 70.4863010439236
-jupiter.mode[01].tau: the mode's size: CaTiO3 has no grain density as a liquid at 2577.5196619528056 K
+jupiter.mode[01].tau: the mode's optics: CaTiO3 has no index file as a liquid of that variant
 jupiter.mode[01].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 jupiter.mode[01].top_pa = 0x413f370aba5f0bec  # 2045706.7280127956
 jupiter.mode[01].exponent = 0x4000000000000000  # 2.0
 jupiter.mode[01].coverage = 0x3ff0000000000000  # 1.0
 jupiter.mode[02] = Al2O3 Liquid sphere of deck Al2O3
-jupiter.mode[02].size: Al2O3 has no grain density as a liquid at 2574.457867356744 K
+jupiter.mode[02].size = log-normal
+jupiter.mode[02].r_eff_m = 0x3e884dee882fe36f  # 1.810820472179238e-7
+jupiter.mode[02].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[02].column_kg_m2 = 0x40af9688a7c4d72f  # 4043.2669049751926
-jupiter.mode[02].tau: the mode's size: Al2O3 has no grain density as a liquid at 2574.457867356744 K
+jupiter.mode[02].tau: the mode's optics: Al2O3 has no index file as a liquid of that variant
 jupiter.mode[02].base_pa = 0x41cdae975923f962  # 995962546.281048
 jupiter.mode[02].top_pa = 0x412c149e672eba72  # 920143.2015283837
 jupiter.mode[02].exponent = 0x4000000000000000  # 2.0
 jupiter.mode[02].coverage = 0x3ff0000000000000  # 1.0
 jupiter.mode[03] = Mg2SiO4 Liquid sphere of deck Mg2SiO4
-jupiter.mode[03].size: Mg2SiO4 has no grain density as a liquid at 2438.5062847648987 K
+jupiter.mode[03].size = log-normal
+jupiter.mode[03].r_eff_m = 0x3e8a1ff99d2161b4  # 1.9464569206668484e-7
+jupiter.mode[03].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[03].column_kg_m2 = 0x40eafd265c63273a  # 55273.198777748694
-jupiter.mode[03].tau: the mode's size: Mg2SiO4 has no grain density as a liquid at 2438.5062847648987 K
+jupiter.mode[03].tau: the mode's optics: Mg2SiO4 has no index file as a liquid of that variant
 jupiter.mode[03].base_pa = 0x41c8ad59bd7eaae4  # 828027770.9895902
 jupiter.mode[03].top_pa = 0x4126ff0f5deda69a  # 753543.6834537566
 jupiter.mode[03].exponent = 0x4000000000000000  # 2.0
@@ -174,9 +182,11 @@ jupiter.mode[04].top_pa = 0x417366c45a23ad42  # 20343877.633710153
 jupiter.mode[04].exponent = 0x4012000000000000  # 4.5
 jupiter.mode[04].coverage = 0x3ff0000000000000  # 1.0
 jupiter.mode[05] = MgSiO3 Liquid sphere of deck MgSiO3
-jupiter.mode[05].size: MgSiO3 has no grain density as a liquid at 2152.168198812357 K
+jupiter.mode[05].size = log-normal
+jupiter.mode[05].r_eff_m = 0x3e8aee32d06c16f3  # 2.0064758406866953e-7
+jupiter.mode[05].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[05].column_kg_m2 = 0x40d8ccc3b93af21b  # 25395.058180557662
-jupiter.mode[05].tau: the mode's size: MgSiO3 has no grain density as a liquid at 2152.168198812357 K
+jupiter.mode[05].tau: the mode's optics: MgSiO3 has no index file as a liquid of that variant
 jupiter.mode[05].base_pa = 0x41c02170b4c8d26d  # 541253993.5689217
 jupiter.mode[05].top_pa = 0x411d57dd461d3489  # 480759.31847078406
 jupiter.mode[05].exponent = 0x4000000000000000  # 2.0
@@ -408,9 +418,11 @@ saturn.deck[13].H2SO4.column_kg_m2 = 0x383cd05270ccbb22  # 8.467602422309941e-38
 saturn.deck[13].H2SO4.vapour_below = 0x37350915fb493c17  # 9.432640692102724e-43
 saturn.deck[13].H2SO4.vapour_above = 0x3640089927039f50  # 2.194125071174434e-47
 saturn.mode[00] = Fe Liquid sphere of deck Fe
-saturn.mode[00].size: Fe has no grain density as a liquid at 2228.1813662874624 K
+saturn.mode[00].size = log-normal
+saturn.mode[00].r_eff_m = 0x3e80233ddf3723c3  # 1.2023495764141387e-7
+saturn.mode[00].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[00].column_kg_m2 = 0x40722a426bfcda86  # 290.64121626635495
-saturn.mode[00].tau: the mode's size: Fe has no grain density as a liquid at 2228.1813662874624 K
+saturn.mode[00].tau: the mode's optics: Fe has no index file as a liquid of that variant
 saturn.mode[00].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 saturn.mode[00].top_pa = 0x417a2dd7e24cbcea  # 27450750.14373485
 saturn.mode[00].exponent = 0x4000000000000000  # 2.0
@@ -438,17 +450,21 @@ saturn.mode[02].top_pa = 0x419bd9599e290882  # 116807271.54007152
 saturn.mode[02].exponent = 0x4000000000000000  # 2.0
 saturn.mode[02].coverage = 0x3ff0000000000000  # 1.0
 saturn.mode[03] = Mg2SiO4 Liquid sphere of deck Mg2SiO4
-saturn.mode[03].size: Mg2SiO4 has no grain density as a liquid at 2228.1813662874624 K
+saturn.mode[03].size = log-normal
+saturn.mode[03].r_eff_m = 0x3e89b477e4d0135e  # 1.915168347522902e-7
+saturn.mode[03].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[03].column_kg_m2 = 0x4093ea731d0dc918  # 1274.612415519141
-saturn.mode[03].tau: the mode's size: Mg2SiO4 has no grain density as a liquid at 2228.1813662874624 K
+saturn.mode[03].tau: the mode's optics: Mg2SiO4 has no index file as a liquid of that variant
 saturn.mode[03].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 saturn.mode[03].top_pa = 0x41718eb21868f229  # 18410273.525621567
 saturn.mode[03].exponent = 0x4000000000000000  # 2.0
 saturn.mode[03].coverage = 0x3ff0000000000000  # 1.0
 saturn.mode[04] = MgSiO3 Liquid sphere of deck MgSiO3
-saturn.mode[04].size: MgSiO3 has no grain density as a liquid at 2228.1813662874624 K
+saturn.mode[04].size = log-normal
+saturn.mode[04].r_eff_m = 0x3e8a5b6f9889782b  # 1.963762310706007e-7
+saturn.mode[04].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[04].column_kg_m2 = 0x40e84079abb40135  # 49667.802209856374
-saturn.mode[04].tau: the mode's size: MgSiO3 has no grain density as a liquid at 2228.1813662874624 K
+saturn.mode[04].tau: the mode's optics: MgSiO3 has no index file as a liquid of that variant
 saturn.mode[04].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 saturn.mode[04].top_pa = 0x4149b74213131b34  # 3370628.149020577
 saturn.mode[04].exponent = 0x4000000000000000  # 2.0
@@ -1505,41 +1521,51 @@ sub_neptune.deck[09].KCl.column_kg_m2 = 0x40696b99e8646813  # 203.36253757105496
 sub_neptune.deck[09].KCl.vapour_below = 0x3ef94d8a86b733bd  # 2.4130721085136498e-5
 sub_neptune.deck[09].KCl.vapour_above = 0x3d7e583e0c583a58  # 1.7248963093106666e-12
 sub_neptune.mode[00] = Fe Liquid sphere of deck Fe
-sub_neptune.mode[00].size: Fe has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[00].size = log-normal
+sub_neptune.mode[00].r_eff_m = 0x3e8c2d61b8d27eda  # 2.0993703878524532e-7
+sub_neptune.mode[00].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[00].column_kg_m2 = 0x40d5d58af01f5f6f  # 22358.170905917355
-sub_neptune.mode[00].tau: the mode's size: Fe has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[00].tau: the mode's optics: Fe has no index file as a liquid of that variant
 sub_neptune.mode[00].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[00].top_pa = 0x4157691ac0a8756d  # 6136939.010281903
 sub_neptune.mode[00].exponent = 0x4000000000000000  # 2.0
 sub_neptune.mode[00].coverage = 0x3ff0000000000000  # 1.0
 sub_neptune.mode[01] = Mg2SiO4 Liquid sphere of deck Mg2SiO4
-sub_neptune.mode[01].size: Mg2SiO4 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[01].size = log-normal
+sub_neptune.mode[01].r_eff_m = 0x3e96e574573f2857  # 3.4118155345082827e-7
+sub_neptune.mode[01].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[01].column_kg_m2 = 0x40e9dbeebe307928  # 52959.46071647323
-sub_neptune.mode[01].tau: the mode's size: Mg2SiO4 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[01].tau: the mode's optics: Mg2SiO4 has no index file as a liquid of that variant
 sub_neptune.mode[01].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[01].top_pa = 0x4157691ac0a8756d  # 6136939.010281903
 sub_neptune.mode[01].exponent = 0x4000000000000000  # 2.0
 sub_neptune.mode[01].coverage = 0x3ff0000000000000  # 1.0
 sub_neptune.mode[02] = CaTiO3 Liquid sphere of deck CaTiO3
-sub_neptune.mode[02].size: CaTiO3 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[02].size = log-normal
+sub_neptune.mode[02].r_eff_m = 0x3e95f946d690d91f  # 3.274341993682599e-7
+sub_neptune.mode[02].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[02].column_kg_m2 = 0x400299712120ef9d  # 2.324922808473231
-sub_neptune.mode[02].tau: the mode's size: CaTiO3 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[02].tau: the mode's optics: CaTiO3 has no index file as a liquid of that variant
 sub_neptune.mode[02].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[02].top_pa = 0x4191c482baede5b0  # 74522798.7323215
 sub_neptune.mode[02].exponent = 0x4000000000000000  # 2.0
 sub_neptune.mode[02].coverage = 0x3ff0000000000000  # 1.0
 sub_neptune.mode[03] = Al2O3 Liquid sphere of deck Al2O3
-sub_neptune.mode[03].size: Al2O3 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[03].size = log-normal
+sub_neptune.mode[03].r_eff_m = 0x3e9506730c3e1b78  # 3.132997898825766e-7
+sub_neptune.mode[03].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[03].column_kg_m2 = 0x409383aa19c907de  # 1248.916113988023
-sub_neptune.mode[03].tau: the mode's size: Al2O3 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[03].tau: the mode's optics: Al2O3 has no index file as a liquid of that variant
 sub_neptune.mode[03].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[03].top_pa = 0x4164461aa8ad53a7  # 10629333.271158053
 sub_neptune.mode[03].exponent = 0x4000000000000000  # 2.0
 sub_neptune.mode[03].coverage = 0x3ff0000000000000  # 1.0
 sub_neptune.mode[04] = MgSiO3 Liquid sphere of deck MgSiO3
-sub_neptune.mode[04].size: MgSiO3 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[04].size = log-normal
+sub_neptune.mode[04].r_eff_m = 0x3e972dba44939b96  # 3.453884046114844e-7
+sub_neptune.mode[04].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[04].column_kg_m2 = 0x414086ad8b37b7ee  # 2166107.087637893
-sub_neptune.mode[04].tau: the mode's size: MgSiO3 has no grain density as a liquid at 2908.595079703896 K
+sub_neptune.mode[04].tau: the mode's optics: MgSiO3 has no index file as a liquid of that variant
 sub_neptune.mode[04].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[04].top_pa = 0x41304f2f4ba07d56  # 1068847.2954176269
 sub_neptune.mode[04].exponent = 0x4000000000000000  # 2.0

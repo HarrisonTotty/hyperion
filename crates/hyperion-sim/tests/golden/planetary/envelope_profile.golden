@@ -1,4 +1,4 @@
-# generator_version = 23
+# generator_version = 24
 # P14.T24.d's envelope profiles (hyperion_sim::planetary::hooks::structure::envelope,
 # with hooks::envelope_atmosphere's internal temperature): the Solar System table's four
 # giants on their hydrogen and helium, a 5 M_E sub-Neptune at T_eq 600 K and a hot
@@ -6,7 +6,7 @@
 # He/H2, T_int and T_irr (K), g (m/s2), kappa_1 (m2/kg at 1 bar), n, gamma, f; its join,
 # skin and photosphere; node[k] the adiabat's k-th node, pressure (Pa) then temperature
 # (K), the pressures ascending from the join; level[k] temperature_at at a stated pressure.
-# Pure until P14.T54.b; nothing on the record reads it.
+# On the record from generator version 24 (P14.T54.b).
 jupiter.helium_to_molecular_hydrogen = 0x3fc39fd415427232  # 0.1533150771910115
 jupiter.internal_temperature_k = 0x405a33be117f70fd  # 104.80847585149236
 jupiter.irradiation_temperature_k = 0x40625214dff11e71  # 146.56504819005525

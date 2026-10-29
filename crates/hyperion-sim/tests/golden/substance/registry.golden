@@ -1,4 +1,4 @@
-# generator_version = 23
+# generator_version = 24
 [elements]
 element 0 H
 element 1 He
@@ -1374,8 +1374,8 @@ diagram 8 Ar: clausius_clapeyron_j_per_mol at mid = 0x40b9c7032451aff2  # 6599.0
 diagram 8 Ar: saturation_pressure_pa at 0.99 T_c = 0x41517e55a7052bab  # 4585814.609690587
 diagram 8 Ar: clausius_clapeyron_j_per_mol at 0.99 T_c = 0x40bc21103379c237  # 7201.063285455623
 diagram 8 Ar: liquid_density_kg_per_m3 at mid = 0x409287f62bff8796  # 1185.9904022146707
-diagram 8 Ar: solid_density_kg_per_m3 at 0.3 T_t none
-diagram 8 Ar: solid_density_kg_per_m3 at 0.9 T_t none
+diagram 8 Ar: solid_density_kg_per_m3 at 0.3 T_t = 0x409b7904811e7891  # 1758.2543988
+diagram 8 Ar: solid_density_kg_per_m3 at 0.9 T_t = 0x4099c5558da8ca8f  # 1649.3335482
 diagram 8 Ar: melting_pressure_pa at 0.95 T_t none
 diagram 8 Ar: melting_pressure_pa at 1.05 T_t = 0x41703df45f8927b5  # 17030981.970985133
 diagram 8 Ar: falling_melting_pressure_pa at 0.95 T_t none
@@ -1562,8 +1562,8 @@ diagram 15 H2S: clausius_clapeyron_j_per_mol at mid = 0x40d1bba006a62994  # 1815
 diagram 15 H2S: saturation_pressure_pa at 0.99 T_c = 0x4160177078be03ce  # 8436611.773195174
 diagram 15 H2S: clausius_clapeyron_j_per_mol at 0.99 T_c = 0x40d31906dfa607d7  # 19556.10740042463
 diagram 15 H2S: liquid_density_kg_per_m3 at mid = 0x40898a089add1a29  # 817.2542016290291
-diagram 15 H2S: solid_density_kg_per_m3 at 0.3 T_t none
-diagram 15 H2S: solid_density_kg_per_m3 at 0.9 T_t none
+diagram 15 H2S: solid_density_kg_per_m3 at 0.3 T_t = 0x4093380000000000  # 1230.0
+diagram 15 H2S: solid_density_kg_per_m3 at 0.9 T_t = 0x4092280a3d70a3d7  # 1162.01
 diagram 15 H2S: melting_pressure_pa at 0.95 T_t none
 diagram 15 H2S: melting_pressure_pa at 1.05 T_t none
 diagram 15 H2S: falling_melting_pressure_pa at 0.95 T_t none
@@ -1593,8 +1593,8 @@ diagram 20 C2H6: clausius_clapeyron_j_per_mol at mid = 0x40cd75649da6b348  # 150
 diagram 20 C2H6: saturation_pressure_pa at 0.99 T_c = 0x41516de691517be3  # 4568986.270598385
 diagram 20 C2H6: clausius_clapeyron_j_per_mol at 0.99 T_c = 0x40cf23f2f61f3078  # 15943.898136042277
 diagram 20 C2H6: liquid_density_kg_per_m3 at mid = 0x4080753e168c9023  # 526.6553164464461
-diagram 20 C2H6: solid_density_kg_per_m3 at 0.3 T_t none
-diagram 20 C2H6: solid_density_kg_per_m3 at 0.9 T_t none
+diagram 20 C2H6: solid_density_kg_per_m3 at 0.3 T_t = 0x4086780000000000  # 719.0
+diagram 20 C2H6: solid_density_kg_per_m3 at 0.9 T_t = 0x4086780000000000  # 719.0
 diagram 20 C2H6: melting_pressure_pa at 0.95 T_t none
 diagram 20 C2H6: melting_pressure_pa at 1.05 T_t = 0x41686c2c610efb6b  # 12804451.03307887
 diagram 20 C2H6: falling_melting_pressure_pa at 0.95 T_t none
@@ -1641,7 +1641,7 @@ condensed 7 CO2: transition triple point
 condensed 7 CO2: transition_k = 0x406b12f1a9fbe76d  # 216.592
 condensed 7 CO2: mechanics VolatileIce
 condensed 8 Ar: grain density of its diagram
-condensed 8 Ar: solid grain_density_kg_per_m3 at 0.9 T_t none
+condensed 8 Ar: solid grain_density_kg_per_m3 at 0.9 T_t = 0x4099c5558da8ca8f  # 1649.3335482
 condensed 8 Ar: liquid grain_density_kg_per_m3 at T_t = 0x409622c0cbbdec1e  # 1416.6882772136082
 condensed 8 Ar: transition triple point
 condensed 8 Ar: transition_k = 0x4054f3923a29c77a  # 83.8058
@@ -1677,13 +1677,13 @@ condensed 14 SO2: transition triple point
 condensed 14 SO2: transition_k = 0x4068b66666666666  # 197.7
 condensed 14 SO2: mechanics VolatileIce
 condensed 15 H2S: grain density of its diagram
-condensed 15 H2S: solid grain_density_kg_per_m3 at 0.9 T_t none
+condensed 15 H2S: solid grain_density_kg_per_m3 at 0.9 T_t = 0x4092280a3d70a3d7  # 1162.01
 condensed 15 H2S: liquid grain_density_kg_per_m3 at T_t = 0x408f00555914e413  # 992.0416738159278
 condensed 15 H2S: transition triple point
 condensed 15 H2S: transition_k = 0x4067766666666666  # 187.7
 condensed 15 H2S: mechanics VolatileIce
 condensed 20 C2H6: grain density of its diagram
-condensed 20 C2H6: solid grain_density_kg_per_m3 at 0.9 T_t none
+condensed 20 C2H6: solid grain_density_kg_per_m3 at 0.9 T_t = 0x4086780000000000  # 719.0
 condensed 20 C2H6: liquid grain_density_kg_per_m3 at T_t = 0x408458c540fc785f  # 651.0963153576121
 condensed 20 C2H6: transition triple point
 condensed 20 C2H6: transition_k = 0x4056978d4fdf3b64  # 90.368
@@ -1695,10 +1695,13 @@ condensed 22 CH3OH: liquid grain_density_kg_per_m3 none
 condensed 22 CH3OH: transition melting
 condensed 22 CH3OH: transition_k = 0x4065ebd70a3d70a4  # 175.37
 condensed 22 CH3OH: mechanics VolatileIce
-condensed 29 Fe: grain density fixed
+condensed 29 Fe: grain density fixed solid, liquid by temperature
 condensed 29 Fe: solid grain_density_kg_per_m3 = 0x40bec20000000000  # 7874.0
 condensed 29 Fe: solid grain_density_at_k = 0x4072500000000000  # 293.0
-condensed 29 Fe: liquid grain_density_kg_per_m3 none
+condensed 29 Fe: liquid node 0 at_k = 0x409c4c999999999a  # 1811.15
+condensed 29 Fe: liquid node 0 grain_density_kg_per_m3 = 0x40bb7ad2339c0ebf  # 7034.8211
+condensed 29 Fe: liquid node 1 at_k = 0x40a3880000000000  # 2500.0
+condensed 29 Fe: liquid node 1 grain_density_kg_per_m3 = 0x40b8fcf22d0e5604  # 6396.946
 condensed 29 Fe: transition melting
 condensed 29 Fe: transition_k = 0x409c4c999999999a  # 1811.15
 condensed 29 Fe: mechanics Metal
@@ -1717,10 +1720,17 @@ condensed 58 H2SO4: transition eutectic
 condensed 58 H2SO4: transition_k = 0x406d3570a3d70a3d  # 233.67
 condensed 58 H2SO4: eutectic solute_mass_fraction = 0x3fe79db22d0e5604  # 0.738
 condensed 58 H2SO4: mechanics Salt
-condensed 59 S8: grain density fixed
+condensed 59 S8: grain density fixed solid, liquid by temperature
 condensed 59 S8: solid grain_density_kg_per_m3 = 0x40a0260000000000  # 2067.0
 condensed 59 S8: solid grain_density_at_k = 0x4072a00000000000  # 298.0
-condensed 59 S8: liquid grain_density_kg_per_m3 none
+condensed 59 S8: liquid node 0 at_k = 0x407845c28f5c28f6  # 388.36
+condensed 59 S8: liquid node 0 grain_density_kg_per_m3 = 0x409c42cccccccccd  # 1808.7
+condensed 59 S8: liquid node 1 at_k = 0x407b026666666666  # 432.15
+condensed 59 S8: liquid node 1 grain_density_kg_per_m3 = 0x409bb06666666666  # 1772.1
+condensed 59 S8: liquid node 2 at_k = 0x407bc73333333333  # 444.45
+condensed 59 S8: liquid node 2 grain_density_kg_per_m3 = 0x409ba9cccccccccd  # 1770.45
+condensed 59 S8: liquid node 3 at_k = 0x4086700000000000  # 718.0
+condensed 59 S8: liquid node 3 grain_density_kg_per_m3 = 0x40991b999999999a  # 1606.9
 condensed 59 S8: transition melting
 condensed 59 S8: transition_k = 0x407845c28f5c28f6  # 388.36
 condensed 59 S8: mechanics Salt
@@ -1773,17 +1783,43 @@ condensed 66 FeS: liquid grain_density_kg_per_m3 none
 condensed 66 FeS: transition melting
 condensed 66 FeS: transition_k = 0x4096dc0000000000  # 1463.0
 condensed 66 FeS: mechanics Silicate
-condensed 67 MgSiO3: grain density fixed
+condensed 67 MgSiO3: grain density fixed solid, liquid by temperature
 condensed 67 MgSiO3: solid grain_density_kg_per_m3 = 0x40a9040000000000  # 3202.0
 condensed 67 MgSiO3: solid grain_density_at_k = 0x4072a00000000000  # 298.0
-condensed 67 MgSiO3: liquid grain_density_kg_per_m3 none
+condensed 67 MgSiO3: liquid node 0 at_k = 0x409ce80000000000  # 1850.0
+condensed 67 MgSiO3: liquid node 0 grain_density_kg_per_m3 = 0x40a40ab851eb851f  # 2565.36
+condensed 67 MgSiO3: liquid node 1 at_k = 0x409f400000000000  # 2000.0
+condensed 67 MgSiO3: liquid node 1 grain_density_kg_per_m3 = 0x40a3cb3333333333  # 2533.6
+condensed 67 MgSiO3: liquid node 2 at_k = 0x40a1300000000000  # 2200.0
+condensed 67 MgSiO3: liquid node 2 grain_density_kg_per_m3 = 0x40a378eb851eb852  # 2492.46
+condensed 67 MgSiO3: liquid node 3 at_k = 0x40a2c00000000000  # 2400.0
+condensed 67 MgSiO3: liquid node 3 grain_density_kg_per_m3 = 0x40a329428f5c28f6  # 2452.63
+condensed 67 MgSiO3: liquid node 4 at_k = 0x40a4500000000000  # 2600.0
+condensed 67 MgSiO3: liquid node 4 grain_density_kg_per_m3 = 0x40a2dc1eb851eb85  # 2414.06
+condensed 67 MgSiO3: liquid node 5 at_k = 0x40a5e00000000000  # 2800.0
+condensed 67 MgSiO3: liquid node 5 grain_density_kg_per_m3 = 0x40a2915c28f5c28f  # 2376.68
+condensed 67 MgSiO3: liquid node 6 at_k = 0x40a7700000000000  # 3000.0
+condensed 67 MgSiO3: liquid node 6 grain_density_kg_per_m3 = 0x40a248e147ae147b  # 2340.44
 condensed 67 MgSiO3: transition melting
 condensed 67 MgSiO3: transition_k = 0x409ce80000000000  # 1850.0
 condensed 67 MgSiO3: mechanics Silicate
-condensed 68 Mg2SiO4: grain density fixed
+condensed 68 Mg2SiO4: grain density fixed solid, liquid by temperature
 condensed 68 Mg2SiO4: solid grain_density_kg_per_m3 = 0x40a9260000000000  # 3219.0
 condensed 68 Mg2SiO4: solid grain_density_at_k = 0x4072a26666666666  # 298.15
-condensed 68 Mg2SiO4: liquid grain_density_kg_per_m3 none
+condensed 68 Mg2SiO4: liquid node 0 at_k = 0x40a0f60000000000  # 2171.0
+condensed 68 Mg2SiO4: liquid node 0 grain_density_kg_per_m3 = 0x40a48b2e147ae148  # 2629.59
+condensed 68 Mg2SiO4: liquid node 1 at_k = 0x40a1f80000000000  # 2300.0
+condensed 68 Mg2SiO4: liquid node 1 grain_density_kg_per_m3 = 0x40a4398a3d70a3d7  # 2588.77
+condensed 68 Mg2SiO4: liquid node 2 at_k = 0x40a3240000000000  # 2450.0
+condensed 68 Mg2SiO4: liquid node 2 grain_density_kg_per_m3 = 0x40a3ddbd70a3d70a  # 2542.87
+condensed 68 Mg2SiO4: liquid node 3 at_k = 0x40a4500000000000  # 2600.0
+condensed 68 Mg2SiO4: liquid node 3 grain_density_kg_per_m3 = 0x40a38523d70a3d71  # 2498.57
+condensed 68 Mg2SiO4: liquid node 4 at_k = 0x40a57c0000000000  # 2750.0
+condensed 68 Mg2SiO4: liquid node 4 grain_density_kg_per_m3 = 0x40a32f947ae147ae  # 2455.79
+condensed 68 Mg2SiO4: liquid node 5 at_k = 0x40a6a80000000000  # 2900.0
+condensed 68 Mg2SiO4: liquid node 5 grain_density_kg_per_m3 = 0x40a2dce147ae147b  # 2414.44
+condensed 68 Mg2SiO4: liquid node 6 at_k = 0x40a7700000000000  # 3000.0
+condensed 68 Mg2SiO4: liquid node 6 grain_density_kg_per_m3 = 0x40a2a74ccccccccd  # 2387.65
 condensed 68 Mg2SiO4: transition melting
 condensed 68 Mg2SiO4: transition_k = 0x40a0f60000000000  # 2171.0
 condensed 68 Mg2SiO4: mechanics Silicate
@@ -1794,17 +1830,37 @@ condensed 69 SiO2: liquid grain_density_kg_per_m3 none
 condensed 69 SiO2: transition melting
 condensed 69 SiO2: transition_k = 0x409f300000000000  # 1996.0
 condensed 69 SiO2: mechanics Silicate
-condensed 70 Al2O3: grain density fixed
+condensed 70 Al2O3: grain density fixed solid, liquid by temperature
 condensed 70 Al2O3: solid grain_density_kg_per_m3 = 0x40af2a0000000000  # 3989.0
 condensed 70 Al2O3: solid grain_density_at_k = 0x4072a00000000000  # 298.0
-condensed 70 Al2O3: liquid grain_density_kg_per_m3 none
+condensed 70 Al2O3: liquid node 0 at_k = 0x40a22e0000000000  # 2327.0
+condensed 70 Al2O3: liquid node 0 grain_density_kg_per_m3 = 0x40a6a80000000000  # 2900.0
+condensed 70 Al2O3: liquid node 1 at_k = 0x40a9500000000000  # 3240.0
+condensed 70 Al2O3: liquid node 1 grain_density_kg_per_m3 = 0x40a603a8f5c28f5c  # 2817.83
 condensed 70 Al2O3: transition melting
 condensed 70 Al2O3: transition_k = 0x40a22e0000000000  # 2327.0
 condensed 70 Al2O3: mechanics Silicate
-condensed 71 CaTiO3: grain density fixed
+condensed 71 CaTiO3: grain density fixed solid, liquid by temperature
 condensed 71 CaTiO3: solid grain_density_kg_per_m3 = 0x40af900000000000  # 4040.0
 condensed 71 CaTiO3: solid grain_density_at_k = 0x4072a00000000000  # 298.0
-condensed 71 CaTiO3: liquid grain_density_kg_per_m3 none
+condensed 71 CaTiO3: liquid node 0 at_k = 0x40a1904ccccccccd  # 2248.15
+condensed 71 CaTiO3: liquid node 0 grain_density_kg_per_m3 = 0x40a74d6147ae147b  # 2982.69
+condensed 71 CaTiO3: liquid node 1 at_k = 0x40a1f80000000000  # 2300.0
+condensed 71 CaTiO3: liquid node 1 grain_density_kg_per_m3 = 0x40a7092e147ae148  # 2948.59
+condensed 71 CaTiO3: liquid node 2 at_k = 0x40a2c00000000000  # 2400.0
+condensed 71 CaTiO3: liquid node 2 grain_density_kg_per_m3 = 0x40a689f5c28f5c29  # 2884.98
+condensed 71 CaTiO3: liquid node 3 at_k = 0x40a3880000000000  # 2500.0
+condensed 71 CaTiO3: liquid node 3 grain_density_kg_per_m3 = 0x40a610199999999a  # 2824.05
+condensed 71 CaTiO3: liquid node 4 at_k = 0x40a4500000000000  # 2600.0
+condensed 71 CaTiO3: liquid node 4 grain_density_kg_per_m3 = 0x40a59b47ae147ae1  # 2765.64
+condensed 71 CaTiO3: liquid node 5 at_k = 0x40a5180000000000  # 2700.0
+condensed 71 CaTiO3: liquid node 5 grain_density_kg_per_m3 = 0x40a52b3333333333  # 2709.6
+condensed 71 CaTiO3: liquid node 6 at_k = 0x40a5e00000000000  # 2800.0
+condensed 71 CaTiO3: liquid node 6 grain_density_kg_per_m3 = 0x40a4bf947ae147ae  # 2655.79
+condensed 71 CaTiO3: liquid node 7 at_k = 0x40a6a80000000000  # 2900.0
+condensed 71 CaTiO3: liquid node 7 grain_density_kg_per_m3 = 0x40a45823d70a3d71  # 2604.07
+condensed 71 CaTiO3: liquid node 8 at_k = 0x40a7700000000000  # 3000.0
+condensed 71 CaTiO3: liquid node 8 grain_density_kg_per_m3 = 0x40a3f4a8f5c28f5c  # 2554.33
 condensed 71 CaTiO3: transition melting
 condensed 71 CaTiO3: transition_k = 0x40a1904ccccccccd  # 2248.15
 condensed 71 CaTiO3: mechanics Silicate
@@ -3462,57 +3518,59 @@ albedo 90 komatiite: spherical_albedo 2800-3500 nm = 0x3fe0b19b578eb62a  # 0.521
 albedo 90 komatiite: spherical_albedo 3500-5000 nm = 0x3fe0b19b578eb62a  # 0.5216805181605129
 albedo 90 komatiite: data from nm = 0x4072d1998f1d3ed5  # 301.09999
 albedo 90 komatiite: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
-albedo 91 basalt_reduced: Regolith from a mixture of 4 parts, fine grains 1 um (stand-in), phase law Regolith
-albedo 91 basalt_reduced: part 0 anorthite HS201.3B Form volume_fraction = 0x3fe147ae147ae148  # 0.54
+albedo 91 basalt_reduced: Regolith from a mixture of 5 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 91 basalt_reduced: part 0 anorthite HS201.3B Form volume_fraction = 0x3fe0f694467381d8  # 0.5301
 albedo 91 basalt_reduced: part 0: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
 albedo 91 basalt_reduced: part 0: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
 albedo 91 basalt_reduced: part 0: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
-albedo 91 basalt_reduced: part 1 enstatite NMNH128288 Form volume_fraction = 0x3fd1f212d77318fc  # 0.2804
+albedo 91 basalt_reduced: part 1 enstatite NMNH128288 Form volume_fraction = 0x3fd19e83e425aee6  # 0.2753
 albedo 91 basalt_reduced: part 1: enstatite NMNH128288 spectra ["splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"]
 albedo 91 basalt_reduced: part 1: enstatite NMNH128288 slab n = 0x3ffa9374bc6a7efa  # 1.661
 albedo 91 basalt_reduced: part 1: enstatite NMNH128288 slab lab grain m = 0x3efa36e2eb1c432c  # 2.4999999999999998e-5
-albedo 91 basalt_reduced: part 2 diopside HS15.3B Form volume_fraction = 0x3fb74538ef34d6a1  # 0.0909
+albedo 91 basalt_reduced: part 2 diopside HS15.3B Form volume_fraction = 0x3fb6d5cfaacd9e84  # 0.0892
 albedo 91 basalt_reduced: part 2: diopside HS15.3B spectra ["splib07a_Diopside_HS15.3B_Pyroxene_BECKc_AREF.txt"]
 albedo 91 basalt_reduced: part 2: diopside HS15.3B slab n = 0x3ffad4fdf3b645a2  # 1.677
 albedo 91 basalt_reduced: part 2: diopside HS15.3B slab lab grain m = 0x3f3355475a31a4bd  # 0.00029499999999999996
-albedo 91 basalt_reduced: part 3 olivine GDS71.a Fo91 Form volume_fraction = 0x3fb6ae7d566cf41f  # 0.0886
+albedo 91 basalt_reduced: part 3 olivine GDS71.a Fo91 Form volume_fraction = 0x3fb645a1cac08312  # 0.087
 albedo 91 basalt_reduced: part 3: olivine GDS71.a Fo91 spectra ["splib07a_Olivine_GDS71.a_Fo91_65um_BECKb_AREF.txt"]
 albedo 91 basalt_reduced: part 3: olivine GDS71.a Fo91 slab n = 0x3ffab4395810624e  # 1.669
 albedo 91 basalt_reduced: part 3: olivine GDS71.a Fo91 slab lab grain m = 0x3f110a137f38c543  # 6.5e-5
-albedo 91 basalt_reduced: w B = 0x3fec9d1701f4e87e  # 0.8941760099617253
-albedo 91 basalt_reduced: w V = 0x3fedfc95ff7976b1  # 0.9370832433448496
-albedo 91 basalt_reduced: w R = 0x3fee00d6c71af429  # 0.9376024140143545
-albedo 91 basalt_reduced: normal_albedo B = 0x3fe19b0fa16a56d2  # 0.5501783516544612
-albedo 91 basalt_reduced: normal_albedo V = 0x3fe4d0e85a8ed2c3  # 0.6505014198979427
-albedo 91 basalt_reduced: normal_albedo R = 0x3fe4dda421440bcc  # 0.6520558023188356
-albedo 91 basalt_reduced: spherical_albedo B = 0x3fdf0843414d9a9b  # 0.4848793161130886
-albedo 91 basalt_reduced: spherical_albedo V = 0x3fe26bc3829b0e60  # 0.575654749955401
-albedo 91 basalt_reduced: spherical_albedo R = 0x3fe276d7a8702f00  # 0.5770071306046418
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 B = 0x3fdafd7cd0f7892a  # 0.4217216530506841
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 V = 0x3fe06febbb90de80  # 0.5136622107883824
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 R = 0x3fe07b666820964c  # 0.5150634797798346
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 B = 0x3fe079cb3663f4a7  # 0.5148674070657265
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 V = 0x3fe3603e65d0eaaa  # 0.6054985035510374
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 R = 0x3fe36b2c7fabea10  # 0.6068327420792361
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 B = 0x3fe324e581a5d21a  # 0.5982539684469572
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 V = 0x3fe5d6734e4ede68  # 0.6824280290083609
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 R = 0x3fe5e04e844fa13c  # 0.6836311897468828
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 B = 0x3fe511cf6ac31f47  # 0.6584240994643346
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 V = 0x3fe78517d09855a5  # 0.7349967073557094
-albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 R = 0x3fe78de1d385e8b1  # 0.736069596415538
+albedo 91 basalt_reduced: part 4 graphite.json opaque slab Fine volume_fraction = 0x3f92bd3c36113405  # 0.0183
+albedo 91 basalt_reduced: part 4: graphite.json opaque slab by the opaque slab of graphite.json
+albedo 91 basalt_reduced: w B = 0x3fe1f27286be579b  # 0.560845626040407
+albedo 91 basalt_reduced: w V = 0x3fe27bd46e9ec9cf  # 0.5776159439613425
+albedo 91 basalt_reduced: w R = 0x3fe29a9e89e473e7  # 0.581374425240594
+albedo 91 basalt_reduced: normal_albedo B = 0x3fd0f6dc4ff6c0cc  # 0.26506717499706833
+albedo 91 basalt_reduced: normal_albedo V = 0x3fd17676d6013ab1  # 0.272855481137337
+albedo 91 basalt_reduced: normal_albedo R = 0x3fd193c1ee302a3c  # 0.27464340458451253
+albedo 91 basalt_reduced: spherical_albedo B = 0x3fc7ff58f41411b7  # 0.18748008649721523
+albedo 91 basalt_reduced: spherical_albedo V = 0x3fc91f08d0235d66  # 0.19625959551806743
+albedo 91 basalt_reduced: spherical_albedo R = 0x3fc960fbea95a92c  # 0.19827221826864994
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 B = 0x3fc31c6ab7c422d4  # 0.14930471394497735
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 V = 0x3fc40f6ec522bf34  # 0.1567209684922034
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 R = 0x3fc4475120e69f0c  # 0.15842641931998747
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 B = 0x3fca26b6456713e4  # 0.2043063963775743
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 V = 0x3fcb5bd00a74a2b0  # 0.21373940001037317
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 R = 0x3fcba29b3798d97c  # 0.21589985098553288
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 B = 0x3fd10da320da2b6c  # 0.2664573498556624
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 V = 0x3fd1c5e6a776dcca  # 0.2777039180177324
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 R = 0x3fd1efe919e327d8  # 0.28026797798213243
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 B = 0x3fd4a06558e73b1a  # 0.3222897880740888
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 V = 0x3fd56c3fcd525606  # 0.3347320084661479
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 R = 0x3fd59a88b280d5ae  # 0.33755700523337395
 albedo 91 basalt_reduced: infrared None
-albedo 91 basalt_reduced: spherical_albedo 300-390 nm = 0x3fd701fd0781c183  # 0.35949636204806995
-albedo 91 basalt_reduced: spherical_albedo 390-495 nm = 0x3fdf2cab658bedfe  # 0.48710141102466753
-albedo 91 basalt_reduced: spherical_albedo 495-595 nm = 0x3fe223ac7bb8e954  # 0.5668547073794721
-albedo 91 basalt_reduced: spherical_albedo 595-700 nm = 0x3fe284e4115de363  # 0.5787220324701646
-albedo 91 basalt_reduced: spherical_albedo 700-780 nm = 0x3fe29e26da2c455b  # 0.5818056355657676
-albedo 91 basalt_reduced: spherical_albedo 780-1000 nm = 0x3fdf461244a33080  # 0.4886518163955387
-albedo 91 basalt_reduced: spherical_albedo 1000-1300 nm = 0x3fe140c1000bfb3c  # 0.5391545296587092
-albedo 91 basalt_reduced: spherical_albedo 1300-1700 nm = 0x3fe2f80354f478b4  # 0.5927750262524314
-albedo 91 basalt_reduced: spherical_albedo 1700-2200 nm = 0x3fe30ce44f2ac0f1  # 0.595323710082111
-albedo 91 basalt_reduced: spherical_albedo 2200-2800 nm = 0x3fe4761bd37b9b0d  # 0.6394175653957476
-albedo 91 basalt_reduced: spherical_albedo 2800-3500 nm = 0x3fe4761bd37b9b0d  # 0.6394175653957476
-albedo 91 basalt_reduced: spherical_albedo 3500-5000 nm = 0x3fe4761bd37b9b0d  # 0.6394175653957476
+albedo 91 basalt_reduced: spherical_albedo 300-390 nm = 0x3fc583f42c5453a5  # 0.16808941044351147
+albedo 91 basalt_reduced: spherical_albedo 390-495 nm = 0x3fc808d35c8f55d4  # 0.18776933688665898
+albedo 91 basalt_reduced: spherical_albedo 495-595 nm = 0x3fc90a600fc5f560  # 0.1956291272180506
+albedo 91 basalt_reduced: spherical_albedo 595-700 nm = 0x3fc96e564c4e7e5b  # 0.19867972112568819
+albedo 91 basalt_reduced: spherical_albedo 700-780 nm = 0x3fc9d538703654eb  # 0.20181947211373283
+albedo 91 basalt_reduced: spherical_albedo 780-1000 nm = 0x3fc8b1e9cbde8be4  # 0.19292948202664129
+albedo 91 basalt_reduced: spherical_albedo 1000-1300 nm = 0x3fc9773ddd065442  # 0.19895146648619472
+albedo 91 basalt_reduced: spherical_albedo 1300-1700 nm = 0x3fca2249493ec31a  # 0.2041713340418248
+albedo 91 basalt_reduced: spherical_albedo 1700-2200 nm = 0x3fca2480323c0f7c  # 0.20423891499387625
+albedo 91 basalt_reduced: spherical_albedo 2200-2800 nm = 0x3fca9891e099cdd2  # 0.20778106180988104
+albedo 91 basalt_reduced: spherical_albedo 2800-3500 nm = 0x3fca9891e099cdd2  # 0.20778106180988104
+albedo 91 basalt_reduced: spherical_albedo 3500-5000 nm = 0x3fca9891e099cdd2  # 0.20778106180988104
 albedo 91 basalt_reduced: data from nm = 0x4072d1998f1d3ed5  # 301.09999
 albedo 91 basalt_reduced: data to nm = 0x40a4bffff2e48e8a  # 2655.9999
 albedo 92 granite: Regolith from a mixture of 5 parts, fine grains 1 um (stand-in), phase law Regolith
@@ -3617,67 +3675,67 @@ albedo 93 ultramafic: spherical_albedo 3500-5000 nm = 0x3fe1d6abe724316e  # 0.55
 albedo 93 ultramafic: data from nm = 0x4072d1998f1d3ed5  # 301.09999
 albedo 93 ultramafic: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
 albedo 94 ferric: Regolith from a mixture of 8 parts, fine grains 1 um (stand-in), phase law Regolith
-albedo 94 ferric: part 0 augite NMNH120049 Form volume_fraction = 0x3fd2305532617c1c  # 0.2842
+albedo 94 ferric: part 0 augite NMNH120049 Form volume_fraction = 0x3fd1f6fd21ff2e49  # 0.2807
 albedo 94 ferric: part 0: augite NMNH120049 spectra ["splib07a_Augite_NMNH120049_BECKb_AREF.txt"]
 albedo 94 ferric: part 0: augite NMNH120049 held
-albedo 94 ferric: part 1 pigeonite HS199.3B Form volume_fraction = 0x3fd2305532617c1c  # 0.2842
+albedo 94 ferric: part 1 pigeonite HS199.3B Form volume_fraction = 0x3fd1f6fd21ff2e49  # 0.2807
 albedo 94 ferric: part 1: pigeonite HS199.3B spectra ["splib07a_Pigeonite_HS199.3B_BECKc_AREF.txt"]
 albedo 94 ferric: part 1: pigeonite HS199.3B slab n = 0x3ffb70a3d70a3d71  # 1.715
 albedo 94 ferric: part 1: pigeonite HS199.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
-albedo 94 ferric: part 2 olivine KI3054 Fo66 Form volume_fraction = 0x3fae5c91d14e3bcd  # 0.0593
+albedo 94 ferric: part 2 olivine KI3054 Fo66 Form volume_fraction = 0x3fadf3b645a1cac1  # 0.0585
 albedo 94 ferric: part 2: olivine KI3054 Fo66 spectra ["splib07a_Olivine_KI3054_Fo66_lt60um_BECKb_AREF.txt"]
 albedo 94 ferric: part 2: olivine KI3054 Fo66 slab n = 0x3ffb916872b020c5  # 1.723
 albedo 94 ferric: part 2: olivine KI3054 Fo66 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
-albedo 94 ferric: part 3 anorthite HS201.3B Form volume_fraction = 0x3fcd3c36113404ea  # 0.2284
+albedo 94 ferric: part 3 anorthite HS201.3B Form volume_fraction = 0x3fcce075f6fd21ff  # 0.2256
 albedo 94 ferric: part 3: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
 albedo 94 ferric: part 3: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
 albedo 94 ferric: part 3: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
-albedo 94 ferric: part 4 ilmenite HS231.3B Form volume_fraction = 0x3fb05bc01a36e2eb  # 0.0639
+albedo 94 ferric: part 4 ilmenite HS231.3B Form volume_fraction = 0x3fb027525460aa65  # 0.0631
 albedo 94 ferric: part 4: ilmenite HS231.3B spectra ["splib07a_Ilmenite_HS231.3B_BECKb_AREF.txt"]
 albedo 94 ferric: part 4: ilmenite HS231.3B held
-albedo 94 ferric: part 5 ferrihydrite GDS75 Form volume_fraction = 0x3fafb15b573eab36  # 0.0619
+albedo 94 ferric: part 5 ferrihydrite GDS75 Fine volume_fraction = 0x3fb2d77318fc5048  # 0.0736
 albedo 94 ferric: part 5: ferrihydrite GDS75 spectra ["splib07a_Ferrihydrite_GDS75_Syn_F6_BECKb_AREF.txt"]
 albedo 94 ferric: part 5: ferrihydrite GDS75 held
-albedo 94 ferric: part 6 hematite GDS27 Form volume_fraction = 0x3f7a36e2eb1c432d  # 0.0064
+albedo 94 ferric: part 6 hematite GDS27 Form volume_fraction = 0x3f79ce075f6fd220  # 0.0063
 albedo 94 ferric: part 6: hematite GDS27 spectra ["splib07a_Hematite_GDS27_BECKa_AREF.txt"]
 albedo 94 ferric: part 6: hematite GDS27 held
-albedo 94 ferric: part 7 magnetite HS195.3B Form volume_fraction = 0x3f87f62b6ae7d567  # 0.0117
+albedo 94 ferric: part 7 magnetite HS195.3B Form volume_fraction = 0x3f87c1bda5119ce0  # 0.0116
 albedo 94 ferric: part 7: magnetite HS195.3B spectra ["splib07a_Magnetite_HS195.3B_BECKb_AREF.txt"]
 albedo 94 ferric: part 7: magnetite HS195.3B held
-albedo 94 ferric: w B = 0x3fe5fad82be97ed8  # 0.6868706567438165
-albedo 94 ferric: w V = 0x3fe79fb14aec4310  # 0.738243719419275
-albedo 94 ferric: w R = 0x3fe89d6366836423  # 0.7692124368869638
-albedo 94 ferric: normal_albedo B = 0x3fd54c7b99ae7fdf  # 0.3327931404874089
-albedo 94 ferric: normal_albedo V = 0x3fd79a209e014da6  # 0.36878219061073947
-albedo 94 ferric: normal_albedo R = 0x3fd9391cf6c41918  # 0.39411090944521865
-albedo 94 ferric: spherical_albedo B = 0x3fd0d45c68739971  # 0.2629614849123732
-albedo 94 ferric: spherical_albedo V = 0x3fd354bd7a99235b  # 0.3020471284149175
-albedo 94 ferric: spherical_albedo R = 0x3fd50eeeacea834f  # 0.32903639684996205
-albedo 94 ferric: hemispherical_albedo at mu0 1 B = 0x3fcb6e527fe38f50  # 0.21430426830840554
-albedo 94 ferric: hemispherical_albedo at mu0 1 V = 0x3fcfe15d6203efc4  # 0.24906508718401998
-albedo 94 ferric: hemispherical_albedo at mu0 1 R = 0x3fd18128680baad6  # 0.2735081687994073
-albedo 94 ferric: hemispherical_albedo at mu0 0.5 B = 0x3fd23c4973fc5552  # 0.28492962195135363
-albedo 94 ferric: hemispherical_albedo at mu0 0.5 V = 0x3fd4e0f3c8bd4130  # 0.32622999766774097
-albedo 94 ferric: hemispherical_albedo at mu0 0.5 R = 0x3fd6b116c07828aa  # 0.3545586471160599
-albedo 94 ferric: hemispherical_albedo at mu0 0.2 B = 0x3fd709cc73c5ac3e  # 0.35997306161761233
-albedo 94 ferric: hemispherical_albedo at mu0 0.2 V = 0x3fd9f71391190b76  # 0.4057053486796386
-albedo 94 ferric: hemispherical_albedo at mu0 0.2 R = 0x3fdbec000f2ad74a  # 0.43627931100069317
-albedo 94 ferric: hemispherical_albedo at mu0 0.05 B = 0x3fdb17460166085c  # 0.4232954991968023
-albedo 94 ferric: hemispherical_albedo at mu0 0.05 V = 0x3fde20fadcde9e80  # 0.4707629353456255
-albedo 94 ferric: hemispherical_albedo at mu0 0.05 R = 0x3fe00f0d33f9e0ea  # 0.5018373503835651
+albedo 94 ferric: w B = 0x3fc7a9ada9919605  # 0.18486567287179426
+albedo 94 ferric: w V = 0x3fd052668a4f911c  # 0.2550293303195461
+albedo 94 ferric: w R = 0x3fdc8d0930402ab0  # 0.44610814773538277
+albedo 94 ferric: normal_albedo B = 0x3fb4fec5e7f782f6  # 0.0820125285458849
+albedo 94 ferric: normal_albedo V = 0x3fbd89b08f069571  # 0.1153822278198129
+albedo 94 ferric: normal_albedo R = 0x3fcba2215f4820f0  # 0.21588532593182874
+albedo 94 ferric: spherical_albedo B = 0x3fa7d6435d8a2fb5  # 0.046556573074752285
+albedo 94 ferric: spherical_albedo V = 0x3fb12ea958c422b3  # 0.06711824814932292
+albedo 94 ferric: spherical_albedo R = 0x3fc14166fcc8a151  # 0.13480841963724768
+albedo 94 ferric: hemispherical_albedo at mu0 1 B = 0x3fa2274aac3d3c80  # 0.03545602180985785
+albedo 94 ferric: hemispherical_albedo at mu0 1 V = 0x3faa589639fedad0  # 0.051457113818676015
+albedo 94 ferric: hemispherical_albedo at mu0 1 R = 0x3fbb091c9616c3d0  # 0.10560778297691731
+albedo 94 ferric: hemispherical_albedo at mu0 0.5 B = 0x3faa33907549cf50  # 0.05117465430967505
+albedo 94 ferric: hemispherical_albedo at mu0 0.5 V = 0x3fb2ddcbb2cde688  # 0.0736968337568219
+albedo 94 ferric: hemispherical_albedo at mu0 0.5 R = 0x3fc2df088385dec0  # 0.14743143484132837
+albedo 94 ferric: hemispherical_albedo at mu0 0.2 B = 0x3fb23a2058f75238  # 0.07119943782829175
+albedo 94 ferric: hemispherical_albedo at mu0 0.2 V = 0x3fb9fd9403ac61f8  # 0.10152554597551233
+albedo 94 ferric: hemispherical_albedo at mu0 0.2 R = 0x3fc93156be20fa60  # 0.19681820186265764
+albedo 94 ferric: hemispherical_albedo at mu0 0.05 B = 0x3fb77db170432b00  # 0.09176167479305875
+albedo 94 ferric: hemispherical_albedo at mu0 0.05 V = 0x3fc093a27afd5c3c  # 0.12950545316081896
+albedo 94 ferric: hemispherical_albedo at mu0 0.05 R = 0x3fcf255b68b0a490  # 0.24332754718605942
 albedo 94 ferric: infrared None
-albedo 94 ferric: spherical_albedo 300-390 nm = 0x3fc7a189a20c0552  # 0.18461723720978768
-albedo 94 ferric: spherical_albedo 390-495 nm = 0x3fd0c3276a3fef34  # 0.2619112527461198
-albedo 94 ferric: spherical_albedo 495-595 nm = 0x3fd339d275c693fa  # 0.30040418149502524
-albedo 94 ferric: spherical_albedo 595-700 nm = 0x3fd52e1619909759  # 0.3309378862053243
-albedo 94 ferric: spherical_albedo 700-780 nm = 0x3fd65d2f2261e738  # 0.34943750722560507
-albedo 94 ferric: spherical_albedo 780-1000 nm = 0x3fd4e2549a2ae8ed  # 0.3263141160529262
-albedo 94 ferric: spherical_albedo 1000-1300 nm = 0x3fd56b7daec404e8  # 0.33468572680437925
-albedo 94 ferric: spherical_albedo 1300-1700 nm = 0x3fdad40c226640ef  # 0.41919234618491336
-albedo 94 ferric: spherical_albedo 1700-2200 nm = 0x3fda9688886dc456  # 0.41543782542345775
-albedo 94 ferric: spherical_albedo 2200-2800 nm = 0x3fda3fad11046d64  # 0.4101364771065248
-albedo 94 ferric: spherical_albedo 2800-3500 nm = 0x3fda3fad11046d64  # 0.4101364771065248
-albedo 94 ferric: spherical_albedo 3500-5000 nm = 0x3fda3fad11046d64  # 0.4101364771065248
+albedo 94 ferric: spherical_albedo 300-390 nm = 0x3fa31e737b9ccfa6  # 0.037341698493406114
+albedo 94 ferric: spherical_albedo 390-495 nm = 0x3fa81c356a32b584  # 0.047090214933045466
+albedo 94 ferric: spherical_albedo 495-595 nm = 0x3fb150dca986e49c  # 0.06764010561791384
+albedo 94 ferric: spherical_albedo 595-700 nm = 0x3fc22dbd77ae40f2  # 0.1420208773020089
+albedo 94 ferric: spherical_albedo 700-780 nm = 0x3fcd048562ca5946  # 0.2267004711508866
+albedo 94 ferric: spherical_albedo 780-1000 nm = 0x3fceb758072c2d93  # 0.23997021055434384
+albedo 94 ferric: spherical_albedo 1000-1300 nm = 0x3fd5050dfe484da3  # 0.32843351204175003
+albedo 94 ferric: spherical_albedo 1300-1700 nm = 0x3fe22fc47f7c3163  # 0.5683310022300642
+albedo 94 ferric: spherical_albedo 1700-2200 nm = 0x3fe0c605d74248db  # 0.524172707011782
+albedo 94 ferric: spherical_albedo 2200-2800 nm = 0x3fd951392af31f39  # 0.3955824775152795
+albedo 94 ferric: spherical_albedo 2800-3500 nm = 0x3fd951392af31f39  # 0.3955824775152795
+albedo 94 ferric: spherical_albedo 3500-5000 nm = 0x3fd951392af31f39  # 0.3955824775152795
 albedo 94 ferric: data from nm = 0x4072d1998f1d3ed5  # 301.09999
 albedo 94 ferric: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
 albedo 95 phyllosilicate: Regolith from a mixture of 2 parts, fine grains 1 um (stand-in), phase law Regolith

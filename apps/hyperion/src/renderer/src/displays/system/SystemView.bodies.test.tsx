@@ -297,8 +297,8 @@ function e101Earth(
 }
 
 /**
- * The fixture's Titan's `ok` surface section with no `subsurface_ocean` key, as a planet's wire
- * sends it, so that a Snowball's `SUBSURFACE OCEAN` row stands by its cover alone (P14.T43.h).
+ * The fixture's Titan's `ok` surface section with no `subsurface_ocean` key, as the wire sends an
+ * ocean the generator does not model.
  */
 function titanWithNoOceanKey(): BodySurfaceDto {
   const { subsurface_ocean: _ocean, ...titan } = surfaceOf(titanDetail());
@@ -347,9 +347,9 @@ const NITROGEN_SEA_0700: SurfaceCondensateDto = {
 /**
  * LOOK72's `020e56ef60080003.0700`, a Snowball at 126 K whose whole surface lies under water ice,
  * its seas of methane–ethane and nitrogen on the ice, on the fixture's Titan, whose air and crust
- * it keeps (P14.T43.h). Its condensates list no `H2O` liquid, so the wire appends the ocean under
- * its ice to its liquids as an `H2O` item at 0.5, and divides the list by its total, 2, halving
- * the seas' shares.
+ * it keeps, with no `subsurface_ocean` key (P14.T43.h). Its liquids are its seas at their own
+ * extents: from generator version 24 no server appends the ocean under its ice to them
+ * (P14.T53.c), as a version-23 server did, as an `H2O` item.
  */
 function snowball0700(): BodySurfaceDto {
   return {
@@ -358,9 +358,8 @@ function snowball0700(): BodySurfaceDto {
     mean_surface_temperature_k: 126.33534432935379,
     condensates: [ICE_0700, METHANE_SEA_0700, NITROGEN_SEA_0700],
     surface_liquids: [
-      { substance: "ch4_c2h6_n2", area_fraction: 0.48638485945736065 },
-      { substance: "N2", area_fraction: 0.013615140542639275 },
-      { substance: "H2O", area_fraction: 0.5 },
+      { substance: "ch4_c2h6_n2", area_fraction: 0.9727697189147213 },
+      { substance: "N2", area_fraction: 0.02723028108527855 },
     ],
     ocean_fraction: 1,
     surface_ices: [{ substance: "H2O", area_fraction: 1 }],
@@ -368,13 +367,24 @@ function snowball0700(): BodySurfaceDto {
   };
 }
 
+/** {@link snowball0700} with the fixture's Titan's ocean under its ice, which its wire states. */
+function snowball0700WithItsOcean(): BodySurfaceDto {
+  return { ...snowball0700(), subsurface_ocean: titanOcean() };
+}
+
 /**
  * {@link snowball0700} with a sea of liquid water over half its surface listed among its
- * condensates, its reservoir a stand-in, and its cover lists as {@link snowball0700}'s.
+ * condensates, its reservoir a stand-in, and its liquids the wire's list of the three seas, divided
+ * by their total.
  */
 function snowball0700WithWaterSea(): BodySurfaceDto {
   return {
     ...snowball0700(),
+    surface_liquids: [
+      { substance: "ch4_c2h6_n2", area_fraction: 0.6485131459431476 },
+      { substance: "N2", area_fraction: 0.018153520723519032 },
+      { substance: "H2O", area_fraction: 0.3333333333333333 },
+    ],
     condensates: [
       ICE_0700,
       METHANE_SEA_0700,
@@ -400,35 +410,16 @@ function snowball0700OfAnOlderServer(): BodySurfaceDto {
 }
 
 /**
- * The fixture's Earth with its liquid water's entry left out of its condensates and its `H2O` item
- * kept, a list no server sends, so that only its `temperate` state tells it from a Snowball whose
- * ocean lies under its ice.
- */
-function earthWithNoLiquidWaterEntry(): ResponseFor<"body_detail"> {
-  return earthWithSurface((surface) => {
-    const { condensates } = surface;
-    if (condensates === undefined || condensates === null) {
-      throw new Error("the fixture's Earth sends its condensates");
-    }
-    return {
-      ...surface,
-      condensates: condensates.filter(
-        (entry) => !(entry.substance === "H2O" && entry.phase === "liquid"),
-      ),
-    };
-  });
-}
-
-/**
- * LOOK72's `620e377802000074.0703`, a Snowball at 83 K under water and CO2 ice whose only liquid is
- * the ocean under its ice, on the fixture's Titan, as {@link snowball0700} is.
+ * LOOK72's `620e377802000074.0703`, a Snowball at 83 K under water and CO2 ice with no liquid on
+ * its surface and an ocean under its ice, the fixture's Titan's, on the fixture's Titan, as
+ * {@link snowball0700} is.
  *
  * @remarks
  * Its areas are the census's; its reservoirs, which the readout does not read, stand in.
  */
 function snowball0703(): BodySurfaceDto {
   return {
-    ...titanWithNoOceanKey(),
+    ...surfaceOf(titanDetail()),
     state: "snowball",
     mean_surface_temperature_k: 82.88430268358076,
     condensates: [
@@ -441,8 +432,8 @@ function snowball0703(): BodySurfaceDto {
         seasonal: false,
       },
     ],
-    surface_liquids: [{ substance: "H2O", area_fraction: 1 }],
-    ocean_fraction: 1,
+    surface_liquids: [],
+    ocean_fraction: 0,
     surface_ices: [
       { substance: "H2O", area_fraction: 0.9780315384051066 },
       { substance: "CO2", area_fraction: 0.021968461594893355 },
@@ -1226,11 +1217,11 @@ describe("SystemView's body readout", () => {
   });
 
   // P14.T43.h (decision-absurd-states-24): the ocean under a Snowball's ice covers none of it.
-  it("reads a Snowball's seas on its ice at their own extents, and the ocean under the ice last, as SUBSURFACE OCEAN", async () => {
+  it("reads a Snowball's seas on its ice as the wire lists them, and the ocean under the ice last, as SUBSURFACE OCEAN", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
-    await answerDetail(socket, earthWithSurface(snowball0700));
+    await answerDetail(socket, earthWithSurface(snowball0700WithItsOcean));
 
     expect(rowsBetween("SURFACE", "GENERATOR INPUTS")).toEqual([
       ["SURFACE", "SNOWBALL"],
@@ -1240,14 +1231,13 @@ describe("SystemView's body readout", () => {
       ["CRUST", "PRIMARY · H2O"],
       ["MANTLE REDOX", "OXIDISED"],
       ["MELT COVER", "NONE"],
-      // The seas' entries, 0.97277 and 0.02723, not the wire's halved shares; no `H2O` part.
       ["LIQUID COVER", "CH4–C2H6–N2 MIXTURE 97.3\u00A0% · N2\u00A02.72\u00A0%"],
       ["ICE COVER", partsReading("H2O 100 %")],
       ["SUBSURFACE OCEAN", "H2O"],
     ]);
   });
 
-  it("reads LIQUID COVER NONE on a Snowball whose only liquid is the ocean under its ice, and the ocean in its own row", async () => {
+  it("reads LIQUID COVER NONE on a Snowball with no liquid on its ice, and the ocean under it in its own row", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
@@ -1271,54 +1261,9 @@ describe("SystemView's body readout", () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
-    await answerDetail(socket, earthWithSurface(snowball0700));
+    await answerDetail(socket, earthWithSurface(snowball0700WithItsOcean));
 
     expect(readingOf("SUBSURFACE OCEAN").querySelector(".body-readout__unit")).toBeNull();
-  });
-
-  it("divides a Snowball's seas on its ice by their total where it exceeds the whole", async () => {
-    const { user, socket } = renderView();
-    await answer(socket);
-    await selectRow(user, /\/768/);
-    // The seas' entries, 0.8 and 0.4, sum to 1.2; the wire's list, 0.4, 0.2 and the ocean's 0.4,
-    // to 1.
-    await answerDetail(
-      socket,
-      earthWithSurface(() => ({
-        ...snowball0700(),
-        condensates: [
-          ICE_0700,
-          { ...METHANE_SEA_0700, area_fraction: 0.8 },
-          { ...NITROGEN_SEA_0700, area_fraction: 0.4 },
-        ],
-        surface_liquids: [
-          { substance: "ch4_c2h6_n2", area_fraction: 0.4 },
-          { substance: "N2", area_fraction: 0.2 },
-          { substance: "H2O", area_fraction: 0.4 },
-        ],
-        ocean_fraction: 1,
-      })),
-    );
-
-    expect(reading("LIQUID COVER")).toBe("CH4–C2H6–N2 MIXTURE 66.7\u00A0% · N2\u00A033.3\u00A0%");
-    expect(reading("SUBSURFACE OCEAN")).toBe("H2O");
-  });
-
-  it("keeps a Snowball's sea at its listed share where its liquid entry is not listed", async () => {
-    const { user, socket } = renderView();
-    await answer(socket);
-    await selectRow(user, /\/768/);
-    // A list the contract never sends, with the nitrogen sea's item and no entry: the rule's
-    // fallback reads the share as listed.
-    await answerDetail(
-      socket,
-      earthWithSurface(() => ({
-        ...snowball0700(),
-        condensates: [ICE_0700, METHANE_SEA_0700],
-      })),
-    );
-
-    expect(reading("LIQUID COVER")).toBe("CH4–C2H6–N2 MIXTURE 97.3\u00A0% · N2\u00A01.36\u00A0%");
   });
 
   // decision-ux-ocean-row §1: an ocean computed as none is a value, read as the section's other
@@ -1336,10 +1281,6 @@ describe("SystemView's body readout", () => {
     [
       "a Snowball whose condensates list liquid water, its ocean computed as none",
       () => oceanComputedAsNone(earthWithSurface(snowball0700WithWaterSea)),
-    ],
-    [
-      "a temperate surface whose condensates list no liquid water, its ocean computed as none",
-      () => oceanComputedAsNone(earthWithNoLiquidWaterEntry()),
     ],
   ])("reads SUBSURFACE OCEAN NONE, the last surface row, for %s", async (_name, detail) => {
     const { user, socket } = renderView();
@@ -1359,7 +1300,6 @@ describe("SystemView's body readout", () => {
       () => earthWithSurface(snowball0700WithWaterSea),
     ],
     ["a temperate Earth, its water a sea", earthDetail],
-    ["a temperate surface whose condensates list no liquid water", earthWithNoLiquidWaterEntry],
     [
       "a Snowball whose condensates are not modelled",
       () => earthWithSurface(snowball0700OfAnOlderServer),
@@ -1389,7 +1329,7 @@ describe("SystemView's body readout", () => {
     await answerDetail(socket, earthWithSurface(snowball0700WithWaterSea));
 
     expect(reading("LIQUID COVER")).toBe(
-      "H2O\u00A050.0\u00A0% · CH4–C2H6–N2 MIXTURE 48.6\u00A0% · N2\u00A01.36\u00A0%",
+      "CH4–C2H6–N2 MIXTURE 64.9\u00A0% · H2O\u00A033.3\u00A0% · N2\u00A01.82\u00A0%",
     );
   });
 
@@ -1449,37 +1389,42 @@ describe("SystemView's body readout", () => {
     ]);
   });
 
-  it("reads one SUBSURFACE OCEAN row, the wire's ocean's liquid, where a Snowball's cover holds an ocean under its ice too", async () => {
-    const { user, socket } = renderView();
-    await answer(socket);
-    await selectRow(user, /\/768/);
-    await answerDetail(
-      socket,
-      earthWithSurface(() => ({
-        ...snowball0700(),
-        subsurface_ocean: { ...titanOcean(), liquid: "brine_nacl" },
-      })),
-    );
+  // The member decides (decision-ux-ocean-row §1): the `H2O` item a version-23 server appended to
+  // the cover, which none appends from generator version 24, is read in `LIQUID COVER` alone.
+  it.each<readonly [string, (surface: BodySurfaceDto) => BodySurfaceDto, string]>([
+    [
+      "computes its subsurface ocean as none",
+      (surface) => ({ ...surface, subsurface_ocean: null }),
+      "NONE",
+    ],
+    ["sends no subsurface ocean", (surface) => surface, "NOT YET MODELLED"],
+  ])(
+    "reads a Snowball whose wire %s in SUBSURFACE OCEAN, whatever its cover lists",
+    async (_label, withOcean, expected) => {
+      const { user, socket } = renderView();
+      await answer(socket);
+      await selectRow(user, /\/768/);
+      await answerDetail(
+        socket,
+        earthWithSurface(() =>
+          withOcean({
+            ...snowball0700(),
+            surface_liquids: [
+              { substance: "ch4_c2h6_n2", area_fraction: 0.48638485945736065 },
+              { substance: "N2", area_fraction: 0.013615140542639275 },
+              { substance: "H2O", area_fraction: 0.5 },
+            ],
+          }),
+        ),
+      );
 
-    expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
-    expect(reading("SUBSURFACE OCEAN")).toBe("NaCl BRINE");
-    expect(reading("LIQUID COVER")).toBe("CH4–C2H6–N2 MIXTURE 97.3\u00A0% · N2\u00A02.72\u00A0%");
-  });
-
-  it("reads the ocean under a Snowball's ice from its cover where its wire computes its subsurface ocean as none", async () => {
-    const { user, socket } = renderView();
-    await answer(socket);
-    await selectRow(user, /\/768/);
-    // To generator version 23 the cover's ocean stands before the member's `NONE` (rule 5;
-    // decision-ux-ocean-row §4): one row, the cover's.
-    await answerDetail(
-      socket,
-      earthWithSurface(() => ({ ...snowball0700(), subsurface_ocean: null })),
-    );
-
-    expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
-    expect(reading("SUBSURFACE OCEAN")).toBe("H2O");
-  });
+      expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);
+      expect(reading("SUBSURFACE OCEAN")).toBe(expected);
+      expect(reading("LIQUID COVER")).toBe(
+        "H2O\u00A050.0\u00A0% · CH4–C2H6–N2 MIXTURE 48.6\u00A0% · N2\u00A01.36\u00A0%",
+      );
+    },
+  );
 
   it("names a subsurface ocean's liquid the console does not know as UNLISTED MATERIAL, never by its key", async () => {
     const { user, socket } = renderView();
@@ -1498,13 +1443,12 @@ describe("SystemView's body readout", () => {
   });
 
   // P14.T51.g.b (decision-p14-t51gb-ice-ii §3): a Triton-like ocean the generator does not model.
-  it("reads SUBSURFACE OCEAN NOT YET MODELLED last on a Triton-like icy surface, its ocean not modelled and none under its ice in its cover", async () => {
+  it("reads SUBSURFACE OCEAN NOT YET MODELLED last on a Triton-like icy surface, its ocean not modelled", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
-    // A Snowball with no `H2O` liquid item, so no ocean under its ice from its cover, and no
-    // `subsurface_ocean` key, as a version-24 server sends Triton's, whose ocean's floor would lie
-    // in ice II's field.
+    // A Snowball with no `subsurface_ocean` key, as a version-24 server sends Triton's, whose
+    // ocean's floor would lie in ice II's field.
     await answerDetail(socket, earthWithSurface(titanWithNoOceanKey));
 
     expect(terms("SUBSURFACE OCEAN")).toHaveLength(1);

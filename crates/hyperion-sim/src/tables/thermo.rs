@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/thermo_equilibrium.toml
 //! data: `nasa_cea_thermo@3b8186ddc525`
 //! sim-fingerprint: 82b2cf17ae11ee7a3bdca4ccd5ff4228efd2715460d477be5c3f2563315456a9
-//! since-generator-version: 23
+//! since-generator-version: 24
 //! source: NASA Glenn's 9-coefficient records (McBride, Zehe and Gordon 2002,
 //!   NASA/TP-2002-211556) in `data/thermo.inp` of NASA's CEA, nasa/cea at 2f79a647 (Apache 2.0),
 //!   the subset of the dataset `nasa_cea_thermo`; the reference states by NIST-JANAF's convention

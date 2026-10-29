@@ -52,7 +52,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "space_weathering",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 24,
         provisional: false,
     },
 ];

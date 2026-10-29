@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/condensate_extinction_3.toml
 //! data: `materials/enstatite-glass.json@9c86314de93f`, `materials/ethane-liquid.json@47aded4fa9be`, `materials/forsterite-amorphous.json@d65badba21ca`, `materials/graphite.json@4d5c69ffb0ce`, `materials/hydrogen-sulphide-ice.json@ced397e09e05`, `materials/hydrogen-sulphide-liquid.json@9c6e1ee983f0`, `materials/ice-giant-haze.json@877c09c618ab`, `materials/phase/enstatite-glass.json@82f49f3f0a99`, `materials/phase/forsterite-amorphous.json@1162e0a66af4`, `materials/phase/graphite.json@6be941f02ad3`
 //! sim-fingerprint: e566aad3ce8f86043744a9e4fbe6abc11c88d52c25b0bcc4692ccab09abcd9b2
-//! since-generator-version: 22
+//! since-generator-version: 24
 //! source: rendering plan R08's committed index files
 //!   (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its own
 //!   primaries, and its phase tables (`materials/phase/`): `TAMUdust2020`'s hexahedra (Saito et

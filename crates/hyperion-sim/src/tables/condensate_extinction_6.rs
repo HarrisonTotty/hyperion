@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/condensate_extinction_6.toml
 //! data: `materials/silicon-dioxide.json@0e736d3a8027`, `materials/sodium-chloride.json@17ab234e7aa4`, `materials/sodium-sulphide.json@b1f773f2bdbe`, `materials/soot.json@a454fd44cbf5`, `materials/sulphur-liquid.json@f6e8e255d4d6`, `materials/sulphur.json@808fda436c78`, `materials/sulphuric-acid-75.json@921f2be0dea5`, `materials/phase/silicon-dioxide.json@7d60b27be19b`, `materials/phase/sodium-chloride.json@767c2544f222`, `materials/phase/sodium-sulphide.json@442002a3f217`, `materials/phase/sulphur.json@068a46bf273a`
 //! sim-fingerprint: e566aad3ce8f86043744a9e4fbe6abc11c88d52c25b0bcc4692ccab09abcd9b2
-//! since-generator-version: 22
+//! since-generator-version: 24
 //! source: rendering plan R08's committed index files
 //!   (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its own
 //!   primaries, and its phase tables (`materials/phase/`): `TAMUdust2020`'s hexahedra (Saito et

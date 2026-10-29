@@ -147,7 +147,7 @@ describe("the client's table of the registry's optics flags (R08.T10.a)", () => 
     );
   });
 
-  it("holds 115 rows at registry version 23, 54 of them absorbers and 43 Rayleigh scatterers", () => {
+  it("holds 115 rows at generator version 24, 54 of them absorbers and 43 Rayleigh scatterers", () => {
     const flags = [...REGISTRY_OPTICS_FLAGS.values()];
     expect([
       flags.length,
@@ -189,13 +189,12 @@ interface FileForm {
 /**
  * The index files of aerosol-material rows that have no grain density of their phase and variant
  * at any temperature, each with its reason: the sim's `NoDensity` refusals
- * (`substance_aerosol_refuses_what_it_cannot_serve`; decision-p14-t54a-grain-density §2.6).
+ * (`substance_aerosol_refuses_what_it_cannot_serve`; decision-p14-t54a-grain-density §2.6). From
+ * generator version 24 the fixture reads liquid sulphur's, solid H2S's and solid argon's densities
+ * (P14.T49.n), which 23's refused.
  */
 const NO_GRAIN_DENSITY: ReadonlyArray<FileForm & { readonly reason: string }> = [
   { key: "H2SO4", phase: "liquid", variant: "84.5wt%", reason: "not the row's 75 wt% reference" },
-  { key: "S8", phase: "liquid", variant: null, reason: "liquid sulphur's density not read" },
-  { key: "H2S", phase: "solid", variant: null, reason: "solid H2S's density not read" },
-  { key: "Ar", phase: "solid", variant: null, reason: "solid argon's density not read" },
   { key: "H2O", phase: "liquid", variant: "S35", reason: "seawater, not the row's pure water" },
 ];
 
@@ -337,29 +336,34 @@ function aerosolsMembers(value: unknown, path: string): ReadonlyArray<string> {
 
 /** What to do when the τ(550) hold's tripwire fires. */
 const TAU_550_HOLD_LIFTED =
-  "the protocol fixture now carries an aerosol inventory. If its modes carry the sim's τ(550) " +
-  "(P14.T54.b, generator version 24: P14.T24.c's inventory with P14.T49.e's condensate " +
-  "extinction, decision-bump-plan-after-22), build R08.T19's fifth row in this test's place: the " +
-  "client's τ(550) for each of the fixture's modes within 1% of the record's. Otherwise restate " +
-  "the hold's condition here and record why in plan R08 (R08.T19's records in 08-atmospheres.md)";
+  "the protocol fixture now carries an aerosol inventory. If it is a generated surface's, whose " +
+  "modes carry the sim's τ(550) from generator version 24 (P14.T24.c's inventory with P14.T49.e's " +
+  "condensate extinction, decision-bump-plan-after-22), build R08.T19's fifth row in this test's " +
+  "place: the client's τ(550) for each of the fixture's modes within 1% of the record's. Otherwise " +
+  "restate the hold's condition here and record why in plan R08 (R08.T19's records in " +
+  "08-atmospheres.md)";
 
 describe("τ(550), the record's against the client's", () => {
   /**
-   * The hold on R08.T19's fifth row (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15).
+   * The hold on R08.T19's fifth row (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15;
+   * restated at generator version 24, P14.T54.b.l, 2026-10-29).
    *
    * @remarks
-   * P14.T54.b, at generator version 24, wires the aerosol inventory (P14.T24.c with T24.g) and the
-   * vertical structure (T24.e). Its τ(550) is computed from R08's index files through P14.T49.e's
-   * `condensate_extinction`, so that the record's τ(550) and the client's Mie agree; before 24
-   * nothing on the record reads that table. The client has no generator version, so the hold
-   * asserts what it can see: no message of the protocol fixture carries an `aerosols` member,
-   * `BodySurfaceDto.aerosols`, which its doc says is absent until P14.T24.c.
+   * P14.T54.b, from generator version 24, wires the aerosol inventory (P14.T24.c with T24.g) and
+   * the vertical structure (T24.e). Its τ(550) is computed from R08's index files through
+   * P14.T49.e's `condensate_extinction`, so that the record's τ(550) and the client's Mie agree.
+   * The hold was to end at 24, but the protocol fixture's surfaces are written by hand and carry no
+   * `aerosols` member, `BodySurfaceDto.aerosols`, so at 24 the row still has no record's inventory
+   * to read. The trigger is now that member itself: the client has no generator version, so the
+   * hold asserts what it can see, that no message of the fixture carries one, and the row is built
+   * when a message carries a generated surface's inventory.
    *
-   * The Jupiter envelope's deck in the fixture's `body_detail_jupiter` carries a τ(550) of 8.0, but
-   * the fixture's description calls the envelope's values illustrative. It is not the sim's, so the
-   * row cannot run against it now.
+   * The fixture's `body_detail_jupiter` and `body_detail_hot_jupiter` envelopes are the
+   * generator's (P14.T54.b.i; hyperion-server's `the_fixture_s_envelopes_are_the_generator_s`), and
+   * their decks' modes carry the record's τ(550), but the row reads a surface's aerosol inventory,
+   * not an envelope's decks, so it does not run against them.
    */
-  it("is held until P14.T54.b's version 24 (decision-bump-plan-after-22): the protocol fixture carries no aerosols", () => {
+  it("is held until a protocol fixture message carries a surface's aerosol inventory (restated at version 24): none does", () => {
     // The instruction rides with the members found, so that a failure prints it.
     expect({
       aerosolsMembers: aerosolsMembers(planetary, "planetary.json"),

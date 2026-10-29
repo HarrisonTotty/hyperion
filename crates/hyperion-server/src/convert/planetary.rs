@@ -3094,7 +3094,7 @@ mod tests {
     /// record holds its cold traps, so every condensate sends its trapped area; to 23 none did,
     /// which a reader took as not modelled, never as none.
     #[test]
-    fn no_condensate_sends_its_trapped_area_while_the_cold_traps_are_held() {
+    fn every_condensate_sends_its_trapped_area() {
         assert!(
             Surface::cold_traps_modelled(),
             "the cold traps are on the record from P14.T54.b's bump"
@@ -3683,10 +3683,10 @@ mod tests {
     /// the envelope's chain fails it until the fixture is refreshed from [`envelope`]'s output for
     /// the same inputs (`serde_json::to_string_pretty` of it, pasted).
     ///
-    /// The values are the generator's under the rules in force, generator version 23's: the
-    /// read densities' hold (`READ_DENSITIES_VERSION`, 24) leaves the liquid refractory deck
-    /// modes (Fe, `CaTiO3`, `Al2O3`, `Mg2SiO4`, `MgSiO3`) with no grain density, so with no size,
-    /// and P14.T54.b.l's bump, which deletes the hold, refreshes them here.
+    /// The values are the generator's under the rules in force, generator version 24's: from
+    /// P14.T54.b.l's bump the read densities (P14.T49.n) give the liquid refractory deck modes
+    /// (Fe, `CaTiO3`, `Al2O3`, `Mg2SiO4`, `MgSiO3`) their grain density and so their size, where
+    /// at 23 they had none (their optics are still not modelled).
     ///
     /// The fixture meets the three docs its interim values broke (review-r08-shapes-i C2): the
     /// adiabat's first node is the join at the grey profile's temperature there, to the bit; its

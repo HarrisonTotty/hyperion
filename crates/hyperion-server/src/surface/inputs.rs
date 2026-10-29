@@ -9,8 +9,11 @@ use hyperion_sim::planetary::record::{BodyRecord, RecordSection};
 use hyperion_sim::planetary::surface::{CoarseInputs, ReadCoarseInputsError, SurfaceInputsError};
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
-/// The generator version from which [`RecordInputs`] serves a generated body's inputs: 24, the
-/// serve gate (plan 14's P14.T54.a, "The serve gate"; decision-bump-plan-after-22 §1.4).
+/// The generator version from which [`RecordInputs`] serves a generated body's inputs: 25, the
+/// serve gate (plan 14's P14.T54.a, "The serve gate"; decision-bump-plan-after-22 §1.4), raised
+/// from 24 at the 23 → 24 bump (P14.T54.b.l): of decision-bump-plan-after-22 V3.9's list, W3 (a)'s
+/// H₂O ice under dark lids, checked with P14.T53.c's exposed share through a lag, is not met, so
+/// the gate does not open at 24.
 ///
 /// From version 23 the sim's [`CoarseInputs::for_body`] answers `Ok` for a generated body with a
 /// solid surface, but the server answers it not modelled until this version, so that R09's and
@@ -21,7 +24,7 @@ use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 /// needs a generated world served sooner. Its tripwire,
 /// `the_serve_gate_holds_until_its_version`, fails at the version, so that the bump that reaches it
 /// opens the gate or raises it.
-pub(crate) const GENERATED_SURFACES_FROM: GeneratorVersion = GeneratorVersion::new(24);
+pub(crate) const GENERATED_SURFACES_FROM: GeneratorVersion = GeneratorVersion::new(25);
 
 /// Where the surface service takes a body's coarse-pass inputs from.
 ///
@@ -57,7 +60,7 @@ pub trait InputsSource: fmt::Debug + Send + Sync {
 }
 
 /// The production source: the body's record, with a moon's planet's, read by
-/// [`CoarseInputs::for_body`], behind the serve gate (`GENERATED_SURFACES_FROM`, 24).
+/// [`CoarseInputs::for_body`], behind the serve gate (`GENERATED_SURFACES_FROM`, 25).
 ///
 /// From the gate's version it answers as `for_body` does. Until then it answers as generator
 /// version 22 did, whose reading stopped at the crust, which the record did not model: the

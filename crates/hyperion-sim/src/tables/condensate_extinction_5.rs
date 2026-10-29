@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/condensate_extinction_5.toml
 //! data: `materials/methane-liquid.json@b605ae3f62b3`, `materials/nitrogen-ice.json@004b27f568a1`, `materials/nitrogen-liquid.json@cbdf7f3a55d0`, `materials/oxygen-ice.json@1361da6cac22`, `materials/oxygen-liquid.json@31c8478f59da`, `materials/potassium-chloride.json@f73963390764`, `materials/seawater.json@bde00900111f`, `materials/phase/potassium-chloride.json@955d8be79942`
 //! sim-fingerprint: e566aad3ce8f86043744a9e4fbe6abc11c88d52c25b0bcc4692ccab09abcd9b2
-//! since-generator-version: 22
+//! since-generator-version: 24
 //! source: rendering plan R08's committed index files
 //!   (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its own
 //!   primaries, and its phase tables (`materials/phase/`): `TAMUdust2020`'s hexahedra (Saito et
