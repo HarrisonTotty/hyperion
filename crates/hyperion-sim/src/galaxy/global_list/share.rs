@@ -5,16 +5,19 @@
 //! nowhere. That draw cannot be what the halo gives up: a halo of about 1% of the galaxy holds a
 //! few 10⁸ M☉, while a recent progenitor runs to 10⁹·⁵ M☉, so a drawn share and drawn progenitors
 //! agree only if one yields. The drawn share is therefore a ceiling, and the share applied is the
-//! smaller of it and the physical share: the mass in tubes and cores inside the halo's 65,000 ly
-//! ([`INSIDE_LY`]) over the halo's budget, `GalaxyParams::population_mass(Population::Halo)`.
+//! smaller of it and the physical share, unless the globular tubes alone pass it (below): the
+//! mass in tubes and cores inside the halo's 65,000 ly ([`INSIDE_LY`]) over the halo's budget,
+//! `GalaxyParams::population_mass(Population::Halo)`.
 //! Every count of the list is a mass over the halo's mean system mass, so the ratio of masses is
 //! the ratio of systems. The physical share has two parts:
 //!
 //! - **Globular tubes**: [`ORPHAN_STREAMS_PER_GLOBULAR`] (1.5) tubes per expected globular,
 //!   plan 02's count, each at the orphan law's mean mass, 1.63 × 10⁴ M☉
-//!   ([`MassLaw::mean_solar_masses`](super::orphans::MassLaw::mean_solar_masses)). Nothing is
-//!   drawn, and a living globular's own history is not read: the budget's 5% tolerance (P10.T12)
-//!   covers the difference (plan 10, Risks, "Living globulars' tube masses").
+//!   ([`MassLaw::mean_solar_masses`](super::orphans::MassLaw::mean_solar_masses)), counted by
+//!   the share of their mass inside 65,000 ly, [`GLOBULAR_TUBES_INSIDE`], as a dwarf's tube is
+//!   counted by its period share. Nothing is drawn, and a living globular's own history is not
+//!   read: the budget's 5% tolerance (P10.T12) covers the difference (plan 10, Risks, "Living
+//!   globulars' tube masses").
 //! - **Dwarfs**: each recent progenitor's tube mass times the share of its radial period spent
 //!   inside 65,000 ly, by the spherical orbit's own quadrature of `dr ÷ v_r` in the mid-plane
 //!   potential (no integration), plus its core's mass whole, since a core exists only where its
@@ -22,7 +25,8 @@
 //!   first four in its order (Design note 12), as [`Debris`](super::Debris) numbers them.
 //!
 //! When the drawn share is the smaller, the dwarfs' cold masses (their tubes' and cores') are
-//! scaled down together until the two parts meet it; when the physical share is the smaller, the
+//! scaled down together until the two parts meet it, or to nothing where the globular tubes alone
+//! pass it; when the physical share is the smaller, the
 //! smooth components keep the difference. [`Debris::generate`](super::Debris::generate) applies
 //! that scale from these same figures, so it is the same whether or not a galaxy stores the share
 //! (P10.T3.d.b stores it through `FeatureShares::set_halo_discrete`). A scaled core left under
@@ -30,12 +34,14 @@
 //! dropped, as `Debris` documents. The share still counts them, so the list serves less than it
 //! says by those cores alone, under 10³ systems each.
 //!
-//! The 2% floor of the drawn share is not enforced: globular tubes alone come to 0.84% of the
+//! The 2% floor of the drawn share is not enforced: globular tubes alone come to 0.46% of the
 //! Milky Way fixture's halo, and a galaxy with no recent dwarf inside the cube has no more (plan
 //! 10, Risks, "The discrete share against the dwarf mass range"). Over drawn galaxies they range
-//! from 0.2% to 7% (P10.T3.d.a, as built): plan 02's globular count follows the dark halo's mass,
-//! the halo's budget the stars'. Where they pass the drawn share, the dwarfs are scaled to nothing
-//! and the applied share is the drawn one, below what the globular tubes hold.
+//! from 0.13% to 3.9% (plan 10's records, "P10.T3.d.a's globular part"): plan 02's globular count
+//! follows the dark halo's mass, the halo's budget the stars'. Where they alone pass the drawn
+//! share, a few galaxies in 10⁴, the dwarfs are scaled to nothing and the applied share is the
+//! globular tubes' own: the ceiling yields to them, since they are never scaled (plan 15's
+//! P15.T11.b fits their 1.5 per globular to the known streams).
 //!
 //! Everything comes from the galaxy's parameters, its seed (the dwarfs' stripping fractions on
 //! `dwarf.stripping`, their arguments of pericentre on `dwarf.orbit`) and its in-plane potential
@@ -62,10 +68,22 @@ use super::spec::SphericalOrbit;
 /// ly, which keeps it inside the root cube (brainstorm, "Populations"; plan 02's `HALO_CUT`).
 pub const INSIDE_LY: f64 = 65_000.0;
 
+/// The share of the globular tubes' mass inside [`INSIDE_LY`], the mass-weighted share of their
+/// radial periods spent there: 0.55, a parameter of the generator version.
+///
+/// It is the mean over the first 64 galaxies of P10.T3.d.a's sweep, 0.549 (per galaxy
+/// 0.41–0.67), of the living globulars' tubes and the orphans' together as
+/// [`Debris`](super::Debris) draws them. The share cannot draw the tubes, whose orbits start from
+/// velocities that need the kinematic tables, so it takes the measured mean, as the brainstorm has
+/// φ come from the catalogue's rates and never from individual clusters (plan 10's records,
+/// "P10.T3.d.a's globular part"; pinned by `the_globular_tubes_inside_share_is_the_sweep_s_mean`).
+/// It moves with the orphans' orbits and the potential, and is measured again then.
+pub const GLOBULAR_TUBES_INSIDE: f64 = 0.55;
+
 /// The halo's discrete share of the galaxy of `seed` and `params` with in-plane tables `tables`:
-/// the share of the halo's budget in streams and dwarf cores, at most the drawn
-/// [`HaloParams::discrete_share`](crate::galaxy::params::HaloParams::discrete_share) (module
-/// documentation).
+/// the share of the halo's budget in streams and dwarf cores, at most the greater of the drawn
+/// [`HaloParams::discrete_share`](crate::galaxy::params::HaloParams::discrete_share) and the
+/// globular tubes' own share (module documentation).
 ///
 /// The dwarfs' tubes beyond the list's 4,096 streams, which [`Debris`](super::Debris) would drop,
 /// are counted: no galaxy comes near that. It costs the dwarfs' quadratures, most of them their
@@ -87,8 +105,8 @@ pub const INSIDE_LY: f64 = 65_000.0;
 /// let params = GalaxyParams::milky_way_like();
 /// let tables = PotentialTables::in_plane(&MassModel::new(&params));
 /// let phi = discrete_share(Seed::new(7), &params, &tables);
-/// // The drawn share is a ceiling (plan 10, Design note 1), and the globular tubes alone give
-/// // some tenths of a per cent.
+/// // The drawn share is a ceiling (plan 10, Design note 1), which yields only to globular tubes
+/// // that pass it alone; the fixture's give some tenths of a per cent, far below it.
 /// assert!(phi <= params.halo().discrete_share());
 /// assert!(phi > 0.001);
 /// ```
@@ -102,7 +120,7 @@ pub fn discrete_share(seed: Seed, params: &GalaxyParams, tables: &PotentialTable
 /// The figures the share is made of (module documentation).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ShareFigures {
-    /// The globular tubes' mass.
+    /// The globular tubes' mass inside [`INSIDE_LY`].
     globular_solar_masses: f64,
     /// The dwarfs' cold mass inside [`INSIDE_LY`], before any scaling.
     dwarfs_solar_masses: f64,
@@ -122,7 +140,10 @@ impl ShareFigures {
         dwarfs: &[DwarfDebris],
     ) -> Self {
         let globulars = f64::from(params.accretion().globular_count());
-        let globular = ORPHAN_STREAMS_PER_GLOBULAR * globulars * MASS_LAW.mean_solar_masses();
+        let globular = ORPHAN_STREAMS_PER_GLOBULAR
+            * globulars
+            * MASS_LAW.mean_solar_masses()
+            * GLOBULAR_TUBES_INSIDE;
         let phi = |r: f64| tables.potential_in_plane(LightYears::new(r));
         let mut cores = 0;
         let mut cold = 0.0;
@@ -145,8 +166,7 @@ impl ShareFigures {
         }
     }
 
-    /// The globular tubes' share of the halo.
-    #[cfg(test)]
+    /// The globular tubes' share of the halo, inside [`INSIDE_LY`].
     #[must_use]
     fn globular_share(&self) -> f64 {
         self.globular_solar_masses / self.budget_solar_masses
@@ -160,10 +180,11 @@ impl ShareFigures {
         (self.globular_solar_masses + self.dwarfs_solar_masses) / self.budget_solar_masses
     }
 
-    /// The share applied: the smaller of the physical and the drawn.
+    /// The share applied: the smaller of the physical and the drawn, unless the globular tubes
+    /// alone pass the drawn share, when it is theirs (module documentation).
     #[must_use]
     pub(crate) fn applied(&self) -> f64 {
-        self.physical().min(self.drawn)
+        self.physical().min(self.drawn.max(self.globular_share()))
     }
 
     /// What the dwarfs' cold masses are multiplied by: the factor that brings the globular tubes
@@ -275,12 +296,13 @@ mod tests {
         assert!((cut - INSIDE_LY).abs() < 1e-9, "{cut}");
     }
 
-    /// The share is never above the drawn share, and a scaled galaxy's dwarfs, scaled, meet it,
-    /// unless the globular tubes alone pass it: over the Milky Way fixture and sixteen drawn
-    /// galaxies. The globular tubes' share is pinned provisionally to the 2,000 galaxies' range,
-    /// 0.2–8% ([`GLOBULAR_SHARE_PIN`]), against P10.T3.d.a's 0.3–1% (a finding).
+    /// The share is never above the greater of the drawn share and the globular tubes' share, and
+    /// a scaled galaxy's dwarfs, scaled, meet the drawn share, unless the globular tubes alone pass
+    /// it: over the Milky Way fixture and sixteen drawn galaxies. At the fixture the globular tubes
+    /// inside 65,000 ly are P10.T3.d.a's 0.3–1% of the halo; over drawn galaxies their share is
+    /// pinned to the 2,000 galaxies' range ([`GLOBULAR_SHARE_PIN`]).
     #[test]
-    fn the_share_is_capped_by_the_drawn_share_and_the_scale_meets_it() {
+    fn the_share_is_capped_by_the_drawn_or_globular_share_and_the_scale_meets_it() {
         let milky_way = GalaxyParams::milky_way_like();
         let tables = PotentialTables::in_plane(&MassModel::new(&milky_way));
         let mut debris = dwarfs(Seed::new(7), &milky_way, &tables);
@@ -293,13 +315,18 @@ mod tests {
             fixture.applied(),
             fixture.drawn
         );
+        let globular = fixture.globular_share();
+        assert!(
+            (0.003..=0.01).contains(&globular),
+            "the fixture's globular tubes {globular}"
+        );
         let mut scaled = 0;
         for n in 0..16_u64 {
             let seed = Seed::new(0x0a10_3d00 | n);
             let (params, mut debris, f) = figures(seed);
-            assert!(f.applied() <= f.drawn, "seed {seed}: {f:?}");
-            assert!(f.applied().is_finite() && f.applied() > 0.0, "{f:?}");
             let globular = f.globular_share();
+            assert!(f.applied() <= f.drawn.max(globular), "seed {seed}: {f:?}");
+            assert!(f.applied().is_finite() && f.applied() > 0.0, "{f:?}");
             assert!(
                 (GLOBULAR_SHARE_PIN.0..=GLOBULAR_SHARE_PIN.1).contains(&globular),
                 "seed {seed}: globular tubes {globular}"
@@ -308,6 +335,10 @@ mod tests {
             assert!((0.0..=1.0).contains(&scale));
             if globular >= f.drawn && f.dwarfs_solar_masses > 0.0 {
                 assert!(scale.abs() < f64::MIN_POSITIVE, "seed {seed}: {f:?}");
+                assert!(
+                    f.applied().total_cmp(&globular).is_eq(),
+                    "seed {seed}: {f:?}"
+                );
             } else if scale < 1.0 {
                 scaled += 1;
                 let tables = PotentialTables::in_plane(&MassModel::new(&params));
@@ -326,13 +357,13 @@ mod tests {
         eprintln!("{scaled} of 16 galaxies scale their dwarfs");
     }
 
-    /// The globular tubes' share of the halo, pinned provisionally: 0.23–7.0% over the 2,000
-    /// galaxies of the summary (median 1.0%) at `GENERATOR_VERSION` 23, against P10.T3.d.a's
-    /// 0.3–1%, which holds for the Milky Way fixture (0.84%) and about half of them. Plan 02's
-    /// globular count follows the dark halo's mass and the halo's budget the stars', so a galaxy
-    /// of a low stellar-to-halo mass ratio has many globulars for a small halo (P10.T3.d.a, as
-    /// built).
-    const GLOBULAR_SHARE_PIN: (f64, f64) = (0.002, 0.08);
+    /// The globular tubes' share of the halo inside 65,000 ly, pinned over drawn galaxies:
+    /// 0.13–3.9% over the 2,000 galaxies of the summary (median 0.55%) at `GENERATOR_VERSION` 23.
+    /// P10.T3.d.a's 0.3–1% is a Milky Way figure, which the fixture meets (0.46%). Plan 02's
+    /// globular count follows the dark halo's mass and the halo's budget the stars', so a galaxy of
+    /// a low stellar-to-halo mass ratio has many globulars for a small halo: variety, not error
+    /// (plan 10's records, "P10.T3.d.a's globular part").
+    const GLOBULAR_SHARE_PIN: (f64, f64) = (0.001, 0.045);
 
     /// The percentiles the golden summary records.
     const PERCENTILES: [u32; 11] = [0, 1, 5, 10, 25, 50, 75, 90, 95, 99, 100];
@@ -341,22 +372,22 @@ mod tests {
     fn summary(values: &[f64]) -> ([f64; 11], f64) {
         let mut sorted = values.to_vec();
         sorted.sort_by(f64::total_cmp);
-        let last = u32::try_from(sorted.len() - 1).expect("2,000 galaxies");
+        let last = u32::try_from(sorted.len() - 1).expect("some thousands of galaxies");
         let at = |p: u32| {
             let rank = (p * last + 50) / 100;
-            sorted[usize::try_from(rank).expect("a rank below 2,000")]
+            sorted[usize::try_from(rank).expect("a rank below the count")]
         };
         let mean = values.iter().fold(0.0, |s, v| s + v) / f64::from(last + 1);
         (PERCENTILES.map(at), mean)
     }
 
-    /// P10.T3.d.a over 2,000 seeds: the applied share is never above the drawn share; the
-    /// globular tubes alone give 0.3–1% of the halo, which holds for about half the galaxies and
-    /// is pinned provisionally ([`GLOBULAR_SHARE_PIN`], the median to 0.8–1.2%); and the
-    /// distribution of the applied share is recorded in a golden summary, with a digest of every
-    /// galaxy's applied share in seed order, for the brainstorm's owner (plan 10, Risks, "The
-    /// discrete share against the dwarf mass range"). It moves with the potential and the dwarfs,
-    /// and is re-blessed then.
+    /// P10.T3.d.a over 2,000 seeds: the applied share is never above the greater of the drawn
+    /// share and the globular tubes' share; the globular tubes' share inside 65,000 ly is recorded
+    /// and pinned ([`GLOBULAR_SHARE_PIN`], the median to 0.4–0.7%), P10.T3.d.a's 0.3–1% being a
+    /// Milky Way figure; and the distribution of the applied share is recorded in a golden
+    /// summary, with a digest of every galaxy's applied share in seed order, for the brainstorm's
+    /// owner (plan 10, Risks, "The discrete share against the dwarf mass range"). It moves with the
+    /// potential, the dwarfs and [`GLOBULAR_TUBES_INSIDE`], and is re-blessed then.
     #[test]
     #[ignore = "slow: builds the in-plane potential of 2,000 galaxies"]
     fn the_applied_share_over_2000_galaxies_is_summarised() {
@@ -368,7 +399,7 @@ mod tests {
             .collect();
         for (n, f) in rows.iter().enumerate() {
             assert!(
-                f.applied().is_finite() && f.applied() <= f.drawn,
+                f.applied().is_finite() && f.applied() <= f.drawn.max(f.globular_share()),
                 "galaxy {n}: {f:?}"
             );
         }
@@ -380,7 +411,7 @@ mod tests {
             );
         }
         let median = summary(&globular).0[5];
-        assert!((0.008..=0.012).contains(&median), "{median}");
+        assert!((0.004..=0.007).contains(&median), "{median}");
         let outside = globular
             .iter()
             .filter(|g| !(0.003..=0.01).contains(*g))
@@ -443,9 +474,16 @@ mod tests {
         golden!("galaxy/global_list/discrete_share", w.as_str());
     }
 
+    /// Sweep galaxies whose globular tubes inside 65,000 ly alone pass the drawn share, by 1.33,
+    /// 1.28 and 1.18 times at [`GLOBULAR_TUBES_INSIDE`]'s 0.55: the widest of the 9 such among
+    /// the first 40,000 sweep seeds, found from their parameters alone (plan 10's records,
+    /// "P10.T3.d.a's globular part"). None of the first 2,000 is.
+    const GLOBULAR_TUBES_PASS: [u64; 3] = [7_805, 39_409, 38_661];
+
     /// `Debris::generate` carries the dwarfs' tubes and cores scaled by the share's own figures,
     /// and drops a tube scaled to nothing and a core scaled under 10³ systems: in the first sweep
-    /// galaxy whose drawn share binds, and in the first whose globular tubes alone reach it.
+    /// galaxy whose drawn share binds, and in the first of [`GLOBULAR_TUBES_PASS`] that has dwarf
+    /// debris inside, where the globular tubes alone pass the drawn share.
     #[test]
     #[ignore = "slow: builds two galaxies' (R, z) grids and kinematic tables"]
     fn debris_carries_the_scaled_dwarfs_and_drops_what_the_scale_empties() {
@@ -453,15 +491,19 @@ mod tests {
         use crate::galaxy::global_list::dwarfs::CORE_MIN_SYSTEMS;
         use crate::galaxy::global_list::{Debris, StreamOrigin};
 
-        let find = |want: &dyn Fn(&ShareFigures) -> bool| {
-            (0..2_000_u64)
+        let find = |seeds: &mut dyn Iterator<Item = u64>, want: &dyn Fn(&ShareFigures) -> bool| {
+            seeds
                 .map(|n| Seed::new(0x0a10_3d00_0000_0000 | n))
                 .find(|&seed| want(&figures(seed).2))
         };
-        let scaled = find(&|f| f.dwarf_scale() > 0.0 && f.dwarf_scale() < 1.0)
-            .expect("a sweep galaxy whose drawn share binds");
-        let emptied = find(&|f| f.dwarfs_solar_masses > 0.0 && f.dwarf_scale() <= 0.0)
-            .expect("a sweep galaxy whose globular tubes reach the drawn share");
+        let scaled = find(&mut (0..2_000), &|f| {
+            f.dwarf_scale() > 0.0 && f.dwarf_scale() < 1.0
+        })
+        .expect("a sweep galaxy whose drawn share binds");
+        let emptied = find(&mut GLOBULAR_TUBES_PASS.into_iter(), &|f| {
+            f.dwarfs_solar_masses > 0.0 && f.dwarf_scale() <= 0.0
+        })
+        .expect("a sweep galaxy whose globular tubes alone pass the drawn share, with dwarfs");
         for seed in [scaled, emptied] {
             let (params, mut want, f) = figures(seed);
             let scale = f.dwarf_scale();
@@ -504,6 +546,9 @@ mod tests {
             assert!(debris.streams().iter().all(|s| s.mass().value() > 0.0));
             if scale <= 0.0 {
                 assert!(got.is_empty() && debris.cores().is_empty(), "seed {seed}");
+                // The ceiling yields to the globular tubes.
+                assert!(f.applied().total_cmp(&f.globular_share()).is_eq(), "{f:?}");
+                assert!(f.applied() > f.drawn, "{f:?}");
             }
             eprintln!(
                 "seed {seed}: scale {scale:.4}, {} dwarf tubes, {} cores",
@@ -531,5 +576,92 @@ mod tests {
         };
         assert!((small.applied() - 0.03).abs() < 1e-15);
         assert!((small.dwarf_scale() - 1.0).abs() < f64::EPSILON);
+    }
+
+    /// The ceiling yields to globular tubes that pass the drawn share alone: in made-up figures,
+    /// and in the sweep galaxies of [`GLOBULAR_TUBES_PASS`], where the dwarfs keep nothing and the
+    /// share applied is the globular tubes', above the drawn share.
+    #[test]
+    fn the_ceiling_yields_to_globular_tubes_that_pass_it_alone() {
+        // Globular tubes of 3 × 10⁷ M☉, 0.075 of the halo, pass the drawn 0.05 alone.
+        let globular = ShareFigures {
+            globular_solar_masses: 3e7,
+            dwarfs_solar_masses: 8e7,
+            budget_solar_masses: 4e8,
+            drawn: 0.05,
+        };
+        assert!((globular.applied() - 0.075).abs() < 1e-15);
+        assert!(globular.dwarf_scale().abs() < f64::MIN_POSITIVE);
+        let alone = ShareFigures {
+            dwarfs_solar_masses: 0.0,
+            ..globular
+        };
+        assert!((alone.applied() - 0.075).abs() < 1e-15);
+        for n in GLOBULAR_TUBES_PASS {
+            let f = figures(Seed::new(0x0a10_3d00_0000_0000 | n)).2;
+            assert!(f.globular_share() > f.drawn, "sweep galaxy {n}: {f:?}");
+            assert!(
+                f.applied().total_cmp(&f.globular_share()).is_eq(),
+                "sweep galaxy {n}: {f:?}"
+            );
+            assert!(f.dwarf_scale() < 1.0, "sweep galaxy {n}: {f:?}");
+        }
+    }
+
+    /// [`GLOBULAR_TUBES_INSIDE`] against the globular tubes [`Debris`](super::super::Debris)
+    /// draws, the living globulars' and the orphans': per galaxy the mass-weighted share of their
+    /// radial periods inside [`INSIDE_LY`], whose mean over the first 64 sweep galaxies is the
+    /// constant to 0.03. For P10.T12's budget test it also prints each galaxy's tube mass inside
+    /// against the share's globular term, the band that test holds per galaxy.
+    #[test]
+    #[ignore = "slow: builds 64 galaxies' (R, z) grids and kinematic tables"]
+    fn the_globular_tubes_inside_share_is_the_sweep_s_mean() {
+        use crate::galaxy::Galaxy;
+        use crate::galaxy::global_list::{Debris, StreamOrigin};
+
+        let (mut shares, mut against_term) = (Vec::new(), Vec::new());
+        for n in 0..64_u64 {
+            let seed = Seed::new(0x0a10_3d00_0000_0000 | n);
+            let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
+            let galaxy = Galaxy::from_params(seed, params)
+                .expect("a drawn galaxy builds")
+                .with_full_potential();
+            let tables = galaxy.potential();
+            let phi = |r: f64| tables.potential_in_plane(LightYears::new(r));
+            let (mut mass, mut inside) = (0.0, 0.0);
+            for s in Debris::generate(&galaxy).streams() {
+                let globular = match s.origin() {
+                    StreamOrigin::LivingGlobular(_) | StreamOrigin::Orphan => true,
+                    StreamOrigin::Dwarf(_) => false,
+                };
+                if globular {
+                    mass += s.mass().value();
+                    inside += s.mass().value() * share_inside(s.orbit(), &phi, INSIDE_LY);
+                }
+            }
+            let term = ShareFigures::of(galaxy.params(), tables, &[]).globular_solar_masses;
+            shares.push(inside / mass);
+            against_term.push(inside / term);
+            eprintln!(
+                "sweep galaxy {n}: globular tubes {mass:.4e} M☉, {:.4} inside, {:.4} of the term",
+                inside / mass,
+                inside / term
+            );
+        }
+        // The least, the median and the most (`PERCENTILES`' 0th, 50th and 100th), and the mean.
+        let spread = |v: &[f64]| {
+            let (p, mean) = summary(v);
+            (p[0], p[5], p[10], mean)
+        };
+        let (lo, mid, hi, mean) = spread(&shares);
+        let (term_lo, term_mid, term_hi, term_mean) = spread(&against_term);
+        eprintln!(
+            "inside share {lo:.4} / {mid:.4} / {hi:.4}, mean {mean:.4} (least / median / most); \
+             against the term {term_lo:.4} / {term_mid:.4} / {term_hi:.4}, mean {term_mean:.4}"
+        );
+        assert!(
+            (mean - GLOBULAR_TUBES_INSIDE).abs() < 0.03,
+            "{mean} against {GLOBULAR_TUBES_INSIDE}"
+        );
     }
 }

@@ -255,9 +255,12 @@ lifetime` (only `ProvisionalFates` implements it); no item is named the evolved 
 1. **The drawn discrete share is a ceiling, and the physical share is what is applied.** Plan 02
    draws a discrete share of 2–15% and leaves it unapplied. This plan derives the physical share:
    the expected systems in tubes and cores inside the cube ÷ the halo's budget, from 1.5 tubes per
-   expected globular at the orphan law's mean mass, plus each recent progenitor's cold mass times
+   expected globular at the orphan law's mean mass and the measured share of their mass inside
+   65,000 ly, plus each recent progenitor's cold mass times
    the share of its orbital period spent inside 65,000 ly (a fixed quadrature of dr ÷ v_r in the
-   mid-plane potential, no integration). φ for the halo is the smaller of the two. When the drawn
+   mid-plane potential, no integration). φ for the halo is the smaller of the two, unless the
+   globular tubes alone pass the drawn share, when φ is theirs (Risks, "P10.T3.d.a's globular
+   part"). When the drawn
    share is the smaller, the dwarfs' cold masses are scaled down together to meet it; when the
    physical share is the smaller, the smooth components keep the difference. Both come from the
    galaxy's parameters, its seed (the dwarfs' stripping fractions, as built: Risks, "T3.a–c as
@@ -265,7 +268,8 @@ lifetime` (only `ProvisionalFates` implements it); no item is named the evolved 
    of about 1% of the
    galaxy is a few 10⁸ M☉, while progenitors run to 10⁹·⁵ M☉, so a drawn share and drawn progenitors
    cannot agree unless one yields. The ceiling is the brainstorm's 15%; its floor of 2% is not
-   enforced, because globular tubes alone come to under 1% of the halo and raising them to 2% would
+   enforced, because globular tubes alone come to under 1% of the halo at Milky Way values,
+   about 0.1–4% over drawn galaxies, and raising them to 2% would
    break the brainstorm's own figures for their masses and their contrast (25–45 against the old
    r^−3.5 halo, roughly 7–15 against the slopes ruled on 2026-09-21). See Risks.
 2. **Axisymmetric forces.** The integrator reads the (R, z) potential table only. The bar is left
@@ -456,8 +460,10 @@ P10.T10.b's registration member (below)._
     from a stored φ, so it is the same whether or not a galaxy stores φ, and `dwarfs::dwarfs`
     and its golden `galaxy/global_list/dwarfs.golden` keep the unscaled masses. Nothing generated
     reads `Debris` (only the global list's tests call `Debris::generate`), so the scaling moves no
-    wired output. Nothing stores φ yet. Tests: never above the drawn share; globular tubes alone
-    are 0.3–1% of the halo; the distribution of the applied share over 2,000 seeds is recorded in
+    wired output. Nothing stores φ yet. Tests: never above the greater of the drawn share and the
+    globular tubes' share; at the Milky Way fixture, the globular tubes inside 65,000 ly are 0.3–1%
+    of the halo, and over the 2,000 galaxies their share is recorded in the summary and pinned;
+    the distribution of the applied share over 2,000 seeds is recorded in
     a golden summary, a new golden under `tests/golden/galaxy/global_list/` written by a slow
     test, since 2,000 seeds' in-plane tables take minutes, as T3.c's sweep does; evaluating it
     costs about 10 ms for a drawn galaxy and 1.3 ms for the fixture (pod, 4 vCPU; restated from
@@ -815,11 +821,16 @@ at zero; the halo's field gives up φ in the train where its members are first s
 T3.d lands inside the potential freeze. P10.T3.d.a and the rest of P10.T4–T12 add output on new
 tags and kinds and move nothing that existed, so they land at the version in force with their new
 goldens at its header (decision-bump-plan-after-22, 2026-10-14, §3, amended to 2026-10-27).
-Stream and core members are additions in the sim, and their registration is what moves the
-census. Reserved: the `10` sub-kind `11`; the three unused bits of a stream member's ID; stream
+Until P10.T3.d.b stores φ, the share's and `Debris`' own unwired goldens
+(`galaxy/global_list/discrete_share.golden` and those of the list's) are re-blessed by name at
+the version in force when a fix to them moves them, with no bump (main's ruling, 2026-10-29, on
+`research-p10`'s fixes: Risks, "P10.T3.d.a's globular part"); from T3.d.b on, a change to φ moves
+stored output and needs a bump. Stream and core members are additions in the sim, and their
+registration is what moves the census. Reserved: the `10` sub-kind `11`; the three unused bits of a stream member's ID; stream
 numbers above the list's length; `dwarf.*` and `stream.*` domain tags. Parameters that belong to
 the generator version and are named as such in code: the streams per globular (1.5, from
-`tables::streams`), the orphan mass
+`tables::streams`), the globular tubes' share inside 65,000 ly (`GLOBULAR_TUBES_INSIDE`, 0.55,
+measured), the orphan mass
 law, η's constant, the step rule, the tracer count and kernel width, the gap noise's amplitude and
 wavelengths, the cut at four widths, the dwarfs' stripping fraction, the shell-widening factor.
 
@@ -1772,3 +1783,64 @@ galaxy_potential`. Slow, by name, in the slow-test profile:
 hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pins the orphans'
     bits, and T4's golden of the first ten entries may hold none (the living globulars come first),
     so T4's golden and its order-independence test should cover orphans (determinism review).
+- **P10.T3.d.a's globular part and the ceiling (lane `p10-fixes`, 2026-10-29, on `13b8b05` at
+  `GENERATOR_VERSION` 23).** Research `research-p10`'s item 6, changes 2–4, as main ruled it
+  (2026-10-29), after T3.b's fix above. It supersedes the T3.d.a record's "Every globular tube
+  counts whole" and its finding on the globular tubes' 0.23–7.0%. Only unwired output moved:
+  `discrete_share.golden`, re-blessed by name at 23 on x86_64 (main's ruling: nothing stores or
+  reads φ until T3.d.b, with P10.T10.b's registration at 27 or later), and `Debris`' dwarf scale.
+  - _The globular term._ `ShareFigures::of` multiplies it by a new `share::GLOBULAR_TUBES_INSIDE`,
+    0.55: the mass-weighted share of the globular tubes' radial periods inside 65,000 ly, living
+    and orphan together as `Debris` draws them, a parameter of the generator version. Over the
+    first 64 sweep galaxies it is 0.41–0.67 a galaxy (median 0.551, mean 0.549), and
+    `the_globular_tubes_inside_share_is_the_sweep_s_mean` (slow, 535 s in the slow-test profile,
+    pod) holds the mean to the constant within 0.03. The share cannot draw the tubes (their orbits
+    need the kinematic tables), so a measured constant stands for "the catalogue's rates". It
+    moves with the orphans' orbits and the potential.
+  - _The ceiling's guard._ `ShareFigures::applied` is `physical.min(drawn.max(globular))`: the
+    globular tubes are never scaled, since P15.T11.b fits their 1.5 per globular, so the ceiling
+    yields to them. `dwarf_scale` keeps its form; it is already 0 there. Design note 1 says so.
+  - _Where the guard acts._ None of the 2,000 summary galaxies' globular tubes reach the drawn
+    share now (14 before). Over the first 40,000 sweep seeds, by their parameters alone, 9 do at
+    0.55 (6 at 0.5), the widest by 1.33 times (sweep galaxy 7,805). The slow test
+    `debris_carries_the_scaled_dwarfs_and_drops_what_the_scale_empties` took its emptied galaxy
+    from the first 2,000, of which none qualifies now; it takes the first with dwarf debris of
+    sweep galaxies 7,805, 39,409 and 38,661 (`GLOBULAR_TUBES_PASS`) and checks that the share
+    applied there is the globular tubes', above the drawn share.
+  - _The summary (v23, the same 2,000 seeds)._ Applied share 0.14–14.7%, median 1.23%, mean
+    2.11% (from 0.26–14.7%, 1.80%, 2.58%): 812 under 1%, 592 at 1–2%, 403 at 2–5%, 144 at 5–10%
+    and 49 at 10–15%, so 1,404 fall under the brainstorm's 2% floor (from 1,107). The drawn share
+    binds in 215 (from 251); 10 have no dwarf debris inside 65,000 ly. The globular tubes inside
+    65,000 ly are 0.13–3.86% of the halo, median 0.55%, mean 0.65%; 645 galaxies lie outside
+    0.3–1% (from 1,024). The Milky Way fixture: globular tubes 0.46% (from 0.84%), applied 2.79%
+    (from 3.17%), drawn 8.5%.
+  - _The tests, restated._ "Never above the drawn share" is now "never above the greater of the
+    drawn share and the globular tubes' share", in the fast test (renamed
+    `the_share_is_capped_by_the_drawn_or_globular_share_and_the_scale_meets_it`) and the summary.
+    "Globular tubes alone are 0.3–1% of the halo" is now held at the fixture (a new assertion),
+    and over drawn galaxies `GLOBULAR_SHARE_PIN` is 0.1–4.5% (from 0.2–8%) and the summary's
+    median 0.4–0.7% (from 0.8–1.2%). A new fast test,
+    `the_ceiling_yields_to_globular_tubes_that_pass_it_alone`, checks the guard on made-up figures
+    and on the three `GLOBULAR_TUBES_PASS` galaxies, on in-plane tables (review fix). T3.d.a's
+    text says so.
+  - _For P10.T12 (ii)._ Each sweep galaxy's globular tube mass inside 65,000 ly, as drawn, is
+    0.71–1.33 of the share's globular term (mean 1.00 over the 64): the per-galaxy band is about
+    ±30%, a little wider than the research's ±25%. The mean over 64 galaxies is the term's to 1%.
+  - _Findings (science check, 2026-10-29), none a blocker._ (1) The orphans' radial law is the
+    globulars' `r^−3.5`, which the Harris 2010 catalogue measures over 3–40 kpc and which steepens
+    beyond (plan 09's records); taken out to 10⁶ ly it puts 0.18 of its mass beyond 40 kpc, where
+    the catalogue's 105 clusters of [Fe/H] < −1 have 7 (0.07, Poisson P(≤ 7 | 19.3) ≈ 10⁻³), and
+    0.30 beyond 65,000 ly against the living system's 0.18 (`POOR_PLACED_SHARE`). Destroyed
+    clusters should sit at least as far in as survivors, so `GLOBULAR_TUBES_INSIDE` may be low:
+    with the catalogue's 0.18 beyond the cut, or the law cut at 40 kpc, the share of the law
+    outside corotation that lies inside 65,000 ly would be 0.67–0.72 against 0.50, and the
+    constant about 0.65–0.7 (a scaling estimate, not a measurement); the fixture's globular
+    tubes would stay inside 0.3–1%. Recorded in `orphans.rs`; the fix (plan 09's normalisation
+    for the orphans, or a law steepened beyond 40 kpc) is a ruling for main, and re-measures the
+    constant (lean, 2026-10-29: leave it until P10.T4 or T5 next touch the orphans, at 23 while
+    unwired). (2) The 0.3–1% is of the fixture's halo budget, about 5.2 × 10⁸ M☉; against the
+    Milky Way's measured stellar halo, 1.4 ± 0.4 × 10⁹ M☉ (Deason, Belokurov and Sanders 2019,
+    MNRAS 490, 3426), the fixture's 2.4 × 10⁶ M☉ of globular tubes inside 65,000 ly would be about
+    0.2%. The known thin streams inside 20 kpc hold about 6.8 × 10⁵ M☉ (Bonaca and Price-Whelan
+    2024's table, as the science check summed it), so the model has about 3.5 times the known
+    mass, plausible for an incomplete census.

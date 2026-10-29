@@ -28,6 +28,11 @@
 //! the orphans' tube mass lay inside 65,000 ly, against half now (plan 10's records, "P10.T3.b's
 //! orphans keep their radius").
 //!
+//! The law is the `r^−3.5` that the Harris 2010 catalogue measures over 3–40 kpc (plan 09's
+//! records), extrapolated beyond: it puts 0.18 of its mass beyond 40 kpc, where the catalogue has
+//! 7 of its 105 clusters of [Fe/H] < −1 (0.07), so the orphans may still sit somewhat far out (a
+//! finding: plan 10's records, "P10.T3.d.a's globular part").
+//!
 //! The stripping time is Design note 5's with the tidal radius at the orphan's mass, and stops at
 //! the cluster's age.
 
