@@ -89,7 +89,8 @@
           "zenithDeg": 64.39121438608214,
           "azimuthDeg": 73.81480000915364
         }
-      ]
+      ],
+      "samples": 25600
     },
     {
       "name": "limb-air-0.3H",
@@ -106,7 +107,8 @@
           "zenithDeg": 64.38392653089954,
           "azimuthDeg": 73.82684173235518
         }
-      ]
+      ],
+      "samples": 23552
     },
     {
       "name": "limb-air-1H",
@@ -123,7 +125,8 @@
           "zenithDeg": 64.35841553610993,
           "azimuthDeg": 73.86909931872576
         }
-      ]
+      ],
+      "samples": 39936
     },
     {
       "name": "limb-air-3H",
@@ -140,7 +143,8 @@
           "zenithDeg": 64.28549690029972,
           "azimuthDeg": 73.99080265020724
         }
-      ]
+      ],
+      "samples": 79872
     },
     {
       "name": "limb-air-10H",
@@ -157,7 +161,8 @@
           "zenithDeg": 64.02992819468464,
           "azimuthDeg": 74.42851038205883
         }
-      ]
+      ],
+      "samples": 4096
     },
     {
       "name": "limb-air-slab-base",
@@ -174,7 +179,8 @@
           "zenithDeg": 64.31470568945586,
           "azimuthDeg": 73.94188790569815
         }
-      ]
+      ],
+      "samples": 59392
     },
     {
       "name": "limb-air-slab-top",
@@ -191,7 +197,8 @@
           "zenithDeg": 64.2286527334874,
           "azimuthDeg": 74.08663606410333
         }
-      ]
+      ],
+      "samples": 163840
     }
   ],
   "aggregates": []
