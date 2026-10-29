@@ -109,17 +109,6 @@ mod tests {
 
     use super::*;
 
-    /// Work that takes about `rounds` multiplications, so that shares finish out of order.
-    fn busy(seed: usize, rounds: usize) -> u64 {
-        let mut x = u64::try_from(seed).expect("a share number fits 64 bits");
-        for _ in 0..rounds {
-            x = x
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
-        }
-        x
-    }
-
     #[test]
     fn a_reservation_is_capped_at_the_runs_test_threads() {
         assert_eq!(granted_of(8, Some("4")), 4);
@@ -147,38 +136,54 @@ mod tests {
         assert_eq!(in_shares(0, 4, |k| k), Vec::<usize>::new());
     }
 
-    /// Shares of uneven cost come back the same on one, two, three and seven threads.
-    #[test]
+    /// The tests that run threads, which WebAssembly has none of (compiled out there, as the
+    /// browser suites' check expects of a module of this name).
     #[cfg(not(target_family = "wasm"))]
-    fn any_number_of_threads_gives_the_same_results() {
-        let share = |k: usize| (k, busy(k, (k % 3) * 20_000));
-        let one = in_shares_on(1, 11, share);
-        for threads in [2, 3, 7] {
-            assert_eq!(in_shares_on(threads, 11, share), one, "{threads} threads");
-        }
-        let order: Vec<usize> = one.iter().map(|&(k, _)| k).collect();
-        assert_eq!(order, (0..11).collect::<Vec<_>>());
-    }
+    mod native_only {
+        use super::*;
 
-    /// Of two shares that panic, the lower's panic is resumed on any number of threads, though the
-    /// higher, quicker one panics first on several.
-    #[test]
-    #[cfg(not(target_family = "wasm"))]
-    fn the_lowest_failing_shares_panic_is_resumed() {
-        for threads in [1, 2, 4] {
-            let caught = panic::catch_unwind(|| {
-                in_shares_on(threads, 8, |k| {
-                    assert_ne!(k, 5, "share 5 fails");
-                    if k == 2 {
-                        assert_ne!(busy(k, 2_000_000), 0, "share 2's work");
-                        panic!("share 2 fails");
-                    }
-                    k
-                })
-            });
-            let payload = caught.expect_err("a share panics");
-            let message = payload.downcast_ref::<&str>().copied().unwrap_or_default();
-            assert_eq!(message, "share 2 fails", "{threads} threads");
+        /// Work that takes about `rounds` multiplications, so that shares finish out of order.
+        fn busy(seed: usize, rounds: usize) -> u64 {
+            let mut x = u64::try_from(seed).expect("a share number fits 64 bits");
+            for _ in 0..rounds {
+                x = x
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+            }
+            x
+        }
+
+        /// Shares of uneven cost come back the same on one, two, three and seven threads.
+        #[test]
+        fn any_number_of_threads_gives_the_same_results() {
+            let share = |k: usize| (k, busy(k, (k % 3) * 20_000));
+            let one = in_shares_on(1, 11, share);
+            for threads in [2, 3, 7] {
+                assert_eq!(in_shares_on(threads, 11, share), one, "{threads} threads");
+            }
+            let order: Vec<usize> = one.iter().map(|&(k, _)| k).collect();
+            assert_eq!(order, (0..11).collect::<Vec<_>>());
+        }
+
+        /// Of two shares that panic, the lower's panic is resumed on any number of threads, though
+        /// the higher, quicker one panics first on several.
+        #[test]
+        fn the_lowest_failing_shares_panic_is_resumed() {
+            for threads in [1, 2, 4] {
+                let caught = panic::catch_unwind(|| {
+                    in_shares_on(threads, 8, |k| {
+                        assert_ne!(k, 5, "share 5 fails");
+                        if k == 2 {
+                            assert_ne!(busy(k, 2_000_000), 0, "share 2's work");
+                            panic!("share 2 fails");
+                        }
+                        k
+                    })
+                });
+                let payload = caught.expect_err("a share panics");
+                let message = payload.downcast_ref::<&str>().copied().unwrap_or_default();
+                assert_eq!(message, "share 2 fails", "{threads} threads");
+            }
         }
     }
 }
