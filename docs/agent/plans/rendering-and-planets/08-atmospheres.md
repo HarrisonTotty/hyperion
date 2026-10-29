@@ -22409,3 +22409,258 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     Lean: keep both as built (one floor height in every band, as the split; the ruling's black
     floor); if `giant-deck`'s gate misses for it, give the floor the plane albedo of the medium
     beneath it, or read it at τ 1,000 × s_min.
+- **Deviations in R08.T4.f, as built** (2026-10-29, lane r08-t4f; decision-r08-t4ef-storage,
+  decision-r08-t4e-budget §1.4's E1′ and decision-r08-t4e-unsold's lattice rule). Part 1 of the
+  task: VO and hot H₂O wait for a part 2 (below). `src/tools/exomolLines.ts` (`.def` text
+  definitions, `readDefinition` and `parseDefinitionText`; Q(T) from a list's `.pf`,
+  `partitionSumFromPf`, `partitionSumsOf` and the `PartitionSource` union; `AssumedWidth`; a
+  pass's `PassTarget`, one set of bins for several isotopologues; `maxDeltaV`, a cut on v′ − v″;
+  `intensityScale`, a stated factor on every line), `exomolCli.ts` (the archive's sources, the
+  `hot` table kind with `HotTable`, `HOT_TABLES` and `T4F_RULES` through `rulesOf`,
+  `ISOTOPE_FRACTIONS`, `gridOfTable`, `reductionSourceOf`, `cellsWithLines`, `sampleCellsOf` and
+  `withReferences`; `exomol-k-distributions --pressures`, `exomol-projection`, the merge's
+  `refine-pressures:` line and `exomol-cell-references --into`), `kDistributions.ts` (the Rayleigh
+  mirrors `hydrogenSulphideRayleighCm2`, `carbonMonoxideRayleighCm2` and `nitrogenRayleighCm2`)
+  and `atmosphereData.ts`, with their tests; the client's `absorbers/kDistribution.ts` (`tableAt`,
+  `handOverK`, `loadKDistributions` loading every sidecar of a key, `committedLineSpecies` once a
+  key), `absorbers.ts`, `negligible.ts`, `opticsJobs.ts`, `absorbers/transparency.ts` and
+  `atmosphereInput.ts` (`ATMOSPHERE_OPTICS_VERSION` 3); the seven tables in
+  `absorbers/exomol/kDistributions/` and `absorbers/exomol/lineReferencesHot.json`, new;
+  `bounds.json` and `exomol/bounds.json`, the drawn species' entries gone and N₂'s
+  `secondPositive` part new; `exomol/README.md`, `NOTICE` and `.prettierignore`; tests
+  `absorbers/hotLines.test.ts` (new), `kDistribution.test.ts`, `lineCurves.test.ts`,
+  `lineReferences.test.ts`, `transparency.test.ts`, `negligible.test.ts`, `assemble.test.ts`,
+  `AtmosphereCacheOptics.test.ts` and `test/opticsFakes.ts`. No Rust, wire, WGSL or generator
+  change, and no GENERATOR_VERSION bump.
+  - _The plan's entry, superseded_ where the rulings or the data route moved it:
+    - "for 500–4,000 K": each species' own range (decision-r08-t4ef-storage §1.4, E2), below;
+    - "a temperature ladder (50 K steps to 1,000 K, 100 K to 2,000 K, 200 K beyond, each failing
+      interval bisected twice)": E1′ (decision-r08-t4e-budget §1.4), refined to a quarter of E1's
+      step;
+    - "`absorbers/exomol/<species>.json`": `absorbers/exomol/kDistributions/<species>.json` and its
+      parts `<species>-<n>.bin`, as R08.T4.g's tables are;
+    - "N₂'s first positive (B–A) bands … as an LTE band model (Huber and Herzberg's constants)":
+      WCCRMT's line list, `estimated`, its second positive bands left pending (below);
+    - "hot CO and HCN (HITEMP or ExoMol, checked at fetch)": ExoMol's Li2015 and Harris, HITEMP
+      being unreachable from the reducing machine;
+    - VO, hot H₂O and CO₂ above 500 K: not drawn (below).
+  - _The data route._ ExoMol's site and HITRAN's could not be reached from the reducing machine (a
+    pod behind a firewall, not worked around). Every list came from the database's archive of its
+    dataset on Zenodo, each record's DOI and each file's SHA-256 in its sidecar. The records state
+    CC BY 4.0, and the tables keep the database's CC BY-SA 4.0 (`exomol/README.md`, `NOTICE`).
+    Several archived states or transitions files differ from those R08.T4.c summed for
+    `bounds.json`; each table's notes name the earlier file's SHA-256. The archive holds no HyVO
+    record, and POKAZATEL's opacities without its `.trans` files, so VO and hot H₂O are part 2's.
+    HITRAN's line files could not be re-read either, so the hand-overs (below) compare the hot
+    tables with R08.T4.d's committed tables, not with HITRAN's lines.
+  - _The species drawn_, each from its own floor or hand-over (E2) to 4,000 K or its list's limit,
+    held and `estimated` beyond:
+    - FeH's F⁴Δ–X⁴Δ bands (MoLLIST's FeH as ExoMol carries it), 1,000–4,000 K, `measured`;
+    - TiO (Toto's five Ti isotopologues in one set of bins), 1,000–4,000 K, `measured`;
+    - H₂S's visible overtones (AYT2's 14 files of 13,000–27,000 cm⁻¹), 296–1,500 K, the limit its
+      `.def` gives (its paper's is 2,000 K), `measured` as R08.T4.c judged the list, though AYT2 is
+      complete only to 11,000 cm⁻¹ above room temperature and to about 20,000 cm⁻¹ at 296 K (Azzam
+      et al. 2016), so its hot visible values are lower limits (a question below);
+    - CO (Li2015, v′ − v″ ≤ 7, every line scaled by 2.05), 300–4,000 K, handed over from
+      R08.T4.d's HITRAN2024 table at 300 K, `estimated`;
+    - HCN (Harris), 300–4,000 K, handed over at 300 K, `estimated` (R08.T4.c's judgement of
+      Harris's hot bands, lower limits). Harris ends at 568.6 nm, so its cells run 568–760 nm, the
+      568 nm cell holding wings alone;
+    - SiO (SiOUVenIR), 1,000–4,000 K, `measured`. Its visible absorption begins near 1,000 K in
+      the spin-forbidden d³Δ–X band, its A–X hot bands dominant from about 2,500 K (R08.T4.c's
+      bound): the bullet's "A–X hot bands, which reach the range above about 1,000 K" names the
+      later system;
+    - N₂'s triplet system (WCCRMT: the A, B, W and B′ states), 1,800–4,000 K, `estimated`
+      (below).
+  - _Not drawn._
+    - VO (HyVO) and hot H₂O (POKAZATEL): part 2, once a machine reaches ExoMol's site. Their
+      pending entries stay, `what` naming why. Hot H₂O's hand-over from R08.T4.d's HITRAN at a
+      recorded temperature is part 2's too.
+    - CO₂ above HITRAN's 500 K (UCL-4000 considered, its archive fetched in part): deferred, a lean
+      for main, since the plan's deferral order stops at H₂S. R08.T4.d's CO₂ table carries χ
+      far-wing variants (Perrin and Hartmann's sub-Lorentzian wings), which the super-lines do not,
+      so a hot table could not continue it at a hand-over without that machinery. Its pending entry
+      stays at HITRAN's 500 K row, `estimated`, `what` naming why. T10.a's record ("Venus-class CO₂
+      stays non-negligible until R08.T4.f") is superseded: until a later task. T4.g's "until
+      R08.T4.f" (TYM's lines under HITRAN's cut-off above 296 K, bounded by follow-up 5's k = 100)
+      has no end in T4.f either, hot N₂O not being drawn.
+    - N₂'s second positive (C³Πu–B³Πg) bands: WCCRMT's states do not reach the C state, so the
+      table holds none, and over 380–459 nm, where the system's strongest bands in range lie (0–2
+      to 1–6), the band model's cells reach 10³–10⁷ times the table's (at 4,000 K the 380 nm cell
+      5.7 × 10⁻³⁰ m² against 2.7 × 10⁻³⁶). The band model's entry, both systems' cell means,
+      stays in `bounds.json` as N₂'s `secondPositive` part, R08.T4.f, `estimated`, an upper bound
+      on the second positive alone (`hotLines.test.ts`). It was first dropped whole with the table
+      (3f9840a), the final review restoring it.
+    - Hot NH₃ (CoYuTe) and hot N₂O: as ruled (decision-r08-t4ef-storage §5.4), their entries stay.
+    - CH₄ above 300 K: no open list reaches 380–760 nm as known when ruled (HITEMP 2020's stops at
+      746 nm), and the archive was not searched for another. CH₄ stays at Eq. 8's 300 K value,
+      `estimated` and labelled, as the bullet says failing one.
+    - AlO, CaH and MgH: P14.T52.a carries none of them (CaH, like AlH, is in its list of species
+      not carried; AlO and MgH are not in its network), so nothing reaches the client to draw.
+      Their lists (ATP, MoLLIST's CaH and MgH) were fetched and checked, not reduced.
+    - HCl's and CO's `overtones` parts stay pending under R08.T4.f: no list holds HCl's 9–0 to
+      11–0 bands or CO's 8–0 to 13–0 (Li2015's from Δv = 8 being dropped, as R08.T4.d found).
+    - H₂–He below 200 K, which T10.a's record leaves "for R08.T4.f or a colder data set", is a pair
+      and in none of T4.f's lists: it waits for a colder data set.
+  - _The projection_, made first for each species from three sample cells (its strongest, a
+    median and a band-edge cell, reduced on all its nodes and the pressures they kept): T4.d's
+    format (20 + 8G + 2·T·P·G bytes a cell) at the samples' mean G; "as specified"
+    is a 50 K grid over each range on the standard 30 pressures, as T4.e's projection took it (the
+    plan's 50/100/200 K ladder would give about 48 MB); CPU is the reduction's, from the samples'
+    times. It came to 29.3 MB against the budget's 71.4, so no species was deferred for bytes and
+    E4's raised first node was not taken.
+
+    | Species   |     Cells | Nodes: range, ladder | G: strongest/median/edge (cells, nm) | MB, E1′–E3 (as specified) |   P |   CPU, h |
+    | --------- | --------: | -------------------- | ------------------------------------ | ------------------------: | --: | -------: |
+    | FeH       |       142 | 1,000–4,000 K, 18    | 34/46/38 (741/671/742)               |              4.07 (20.49) |  20 |      1.4 |
+    | TiO       |       381 | 1,000–4,000 K, 18    | 14/14/14 (623/580/624)               |              3.89 (19.57) |  20 |      4.6 |
+    | H₂S       |       381 | 296–1,500 K, 20      | 32/16/24 (697/595/696)               |              7.40 (13.84) |  20 |      5.5 |
+    | CO        |        71 | 300–4,000 K, 32      | 18/18/6 (691/725/690)                |               1.28 (4.48) |  20 |      2.2 |
+    | HCN       |        99 | 300–4,000 K, 32      | 38/30/34 (684/736/683)               |              4.77 (15.18) |  22 |      1.6 |
+    | SiO       |       381 | 1,000–4,000 K, 18    | 16/14/22 (382/574/381)               |              4.82 (24.23) |  20 |      4.4 |
+    | N₂        |       381 | 1,800–4,000 K, 11    | 22/12/20 (757/546/756)               |              3.08 (18.58) |  20 |      1.7 |
+    | **Total** | **1,836** |                      |                                      |        **29.30 (116.37)** |     | **21.3** |
+
+  - _The tables, as built._ P counts the pressures, with the alternates below 1 MPa the merge kept;
+    node, chain and 16-bit are the worst over the table (tiers 10⁻³, 2 × 10⁻³ and 2 × 10⁻⁴); "1 Pa"
+    is the 1 Pa check, whose failure leaves the hold below 10 Pa `estimated`; "beyond cap" is the
+    worst chain error past the test's cap, recorded, not a tier; bytes are the parts and the
+    sidecar.
+
+    | Species   | Cells | Nodes, K        | P (kept, kPa)           | G = 1 |        Node |       Chain |      16-bit |               1 Pa | Beyond cap | Parts |          Bytes | Basis       |
+    | --------- | ----: | --------------- | ----------------------- | ----: | ----------: | ----------: | ----------: | -----------------: | ---------: | ----: | -------------: | ----------- |
+    | FeH       |   142 | 1,000–4,000, 18 | 22 (177.8, 562.3)       |     0 | 8.19 × 10⁻⁴ | 1.68 × 10⁻³ | 3.05 × 10⁻⁵ | 2.36 × 10⁻¹, fails |       0.85 |    10 |      4,215,736 | `measured`  |
+    | TiO       |   381 | 1,000–4,000, 18 | 20                      |     0 | 8.09 × 10⁻⁴ | 1.86 × 10⁻³ | 1.69 × 10⁻⁵ |        1.64 × 10⁻³ |       0.00 |    10 |      4,580,424 | `measured`  |
+    | H₂S       |   381 | 296–1,500, 20   | 21 (177.8)              |     1 | 8.21 × 10⁻⁴ | 1.25 × 10⁻³ | 3.40 × 10⁻⁵ |        1.15 × 10⁻⁵ |       0.97 |    11 |      5,180,179 | `measured`  |
+    | CO        |    71 | 300–4,000, 32   | 20                      |     0 | 8.70 × 10⁻⁴ | 8.67 × 10⁻⁴ | 9.85 × 10⁻⁵ |                  0 |       0.05 |     4 |      1,488,302 | `estimated` |
+    | HCN       |    99 | 300–4,000, 32   | 23 (56.2, 177.8, 562.3) |     0 | 8.19 × 10⁻⁴ | 1.88 × 10⁻³ | 3.78 × 10⁻⁵ |        3.59 × 10⁻⁴ |       0.99 |    10 |      4,323,225 | `estimated` |
+    | SiO       |   381 | 1,000–4,000, 18 | 20                      |     0 | 8.53 × 10⁻⁴ | 1.43 × 10⁻³ | 6.94 × 10⁻⁵ |        6.04 × 10⁻⁴ |       0.12 |     9 |      4,220,180 | `measured`  |
+    | N₂        |   381 | 1,800–4,000, 11 | 20                      |    37 | 8.55 × 10⁻⁴ | 1.49 × 10⁻³ | 6.31 × 10⁻⁵ |        1.09 × 10⁻⁵ |       0.39 |     5 |      2,224,217 | `estimated` |
+    | **Total** |       |                 |                         |       |             |             |             |                    |            |       | **26,232,263** |             |
+
+    T4.f's 26,232,263 bytes are within its budget, 71,366,237 (the cap less the 78,633,763
+    committed when its projection was made); the cap's directories hold 104,866,026 of
+    150,000,000, leaving 45,133,974 for part 2.
+
+  - _The grid._ E1′ from each floor, H₂S's from 350 K after AYT2's 296 K, refined to a quarter of
+    E1's step where the between-node test asks (`ladderFinestStepK`, as T4.e's atoms are); no
+    table asked. E1′ is cited to decision-r08-t4e-budget §1.4, where it is ruled (T4.e's record
+    names §3). Pressures are E3's 20 with the alternates the merge asks for (`refine-pressures:`),
+    on the lattice rule; a table asking for one is reduced again whole on its kept pressures, as
+    FeH, H₂S and HCN were (HCN's first pass failed the chain tier to 4.56 × 10⁻³, H₂S's to
+    2.40 × 10⁻³). FeH keeps 177.8 and 562.3 kPa, though its commit's message (88011cd) names
+    177.8 kPa alone. No hot table takes a condensing cap, though H₂S's and HCN's start below their
+    critical points (373 and 457 K): the between-node test runs on to the Rayleigh column, stricter
+    than T4.g's note.
+  - _The lists' quantities._ Q(T) is each list's `.pf` (linear between its 1 K rows). FeH's states
+    file holds only the states its transitions reach, whose sum falls 3.1 times under the `.pf` at
+    3,000 K; WCCRMT's holds the triplet states alone. Toto's five Ti isotopologues share one set of
+    bins, each line at its own Q and abundance (CIAAW's representative fractions), with 48TiO's
+    Doppler width for all. Widths are each `.def`'s default (WCCRMT's gives none: 0.07 cm⁻¹ bar⁻¹
+    with n = 0.5, `estimated`), so every node's line shape is `estimated`.
+  - _Two tables a key_ (a contract change, which the bullet's "handing over from R08.T4.d's HITRAN
+    at recorded temperatures" asks for; a question below). The client loads every committed table
+    of a key.
+    Where a hot table continues R08.T4.d's HITRAN one (CO, HCN), `tableAt` serves the temperate
+    table at and below their hand-over, the hot table's first node, which must be a node of both
+    (`handOverK`), and the hot table above it; more than two tables, or two of one first node,
+    throw. `absorberSpecs`' column profiles, the negligibility bound's two sites and the optics
+    worker's cache read through it. The temperate tables' nodes above 300 K are no longer read.
+  - _The hand-overs_ at 300 K, the hot tables' first node at or above HITRAN's 296 K. Over the
+    columns at which R08.T4.d's table transmits 0.2–0.8, a shared cell's transmittance steps by at
+    most (`hotLines.test.ts`, each figure a test):
+
+    | Key | Cells compared                                   | 1 kPa | 0.1 MPa |
+    | --- | ------------------------------------------------ | ----: | ------: |
+    | CO  | all 13                                           | 0.029 |   0.132 |
+    | HCN | the 41 above a hundredth of the peak cell's mean | 0.088 |   0.086 |
+    | HCN | all 84                                           | 0.475 |   0.768 |
+    - CO's steps compound each cell's own ratio to HITRAN2024's 7–0 band (1.40–2.22 over 691–700
+      nm, falling along the P branch; 1.79–2.22 over 691–696 nm, 96% of the band) with Li2015's
+      default width over HITRAN's air widths (about 0.06 cm⁻¹ atm⁻¹ at 296 K, intensity-weighted:
+      the science check, from an earlier HITRAN edition's 1–0 band), its lines saturated in that
+      window. With n = 0.5 against HITRAN's 0.67–0.76, the assumed width is about 2.2 times a
+      HITRAN-like one at 4,000 K. Its cells from 701 nm, past HITRAN2024's lines, hold Li2015's
+      alone, at most 1.6 × 10⁻³⁶ m² a cell at 300 K.
+    - HCN's 41 stronger cells agree in mean to 0.3–0.5% at 10 Pa (HITRAN2024's sum 0.996 of
+      Harris's), the hot table transmitting more there, as narrower lines would: Harris's default
+      0.084 cm⁻¹ bar⁻¹ against HITRAN's air widths of about 0.11 cm⁻¹ atm⁻¹ at 300 K,
+      intensity-weighted (the science check, from HITRAN2020's). With n = 0.5 against HITRAN's
+      0.75–0.84, Harris's width is about a HITRAN-like one's near 600 K and 2.5 times it at
+      4,000 K. That the agreement is close and flat may mean HITRAN2024's visible HCN lines come
+      from the same ab initio list (its last line, 17,585.79 cm⁻¹, is Harris's): unconfirmed.
+    - HCN's 43 weaker cells, at the bands' edges, run from 0.84–0.90 times R08.T4.d's (five cells
+      of line wings alone, Harris's lines narrower) through 12 within 1% to 3.4 times where both
+      hold lines; in six (658, 659, 696, 741, 748 and 750 nm), where R08.T4.d's table holds only
+      wings of at most 4 × 10⁻³⁸ m², Harris's lines give 4.5 × 10⁻³⁵ to 6.8 × 10⁻³⁴ m², and its
+      15 cells past that table's lines (660–662, 697–707 and 749 nm) hold up to
+      2.0 × 10⁻³⁴ m². The tool's notes first claimed 0.4% in every cell, from the strongest cells
+      alone; the final review's commit corrects them.
+    - The steps lie at columns far past a body's: the windows start near 7.5 × 10³² m⁻² (CO) and
+      1.3 × 10²⁸ m⁻² (HCN) at 0.1 MPa, where 10⁻³ of a 1-bar N₂ column is about
+      2 × 10²⁶ m⁻².
+      HITRAN's widths and lines on the hot side would remove most of them: a later task's, with
+      HITEMP or the lists' `.broad` files reachable.
+
+  - _N₂'s method._ The plan's bullet asks for an LTE band model with Huber and Herzberg's
+    constants. The table is WCCRMT's line list instead (Western et al. 2018), `estimated` as the
+    model was: its PGOPHER fit spans 4,500–15,700 cm⁻¹ (to 637 nm) and is carried past it, its
+    widths assumed. It starts at the stated none's 1,800 K (the `belowK` contract's table branch,
+    `transparency.test.ts`). At the nodes they share its 760 nm cell lies 20–34 times under the
+    band model, which put each band's strength in its origin's cell from short lifetimes (τ
+    1.2 × 10⁻⁷ at 1,800 K and 10³ km-amagat against the model's 2.5 × 10⁻⁶), and its other
+    460–760 nm cells above a hundredth of the model's peak 14 times under at the median
+    (0.5–44). Its second positive bands stay pending (above).
+  - _The M-dwarf limitation_ (the bullet's test). TiO's table makes it concrete: an M dwarf's
+    photosphere is darkest in TiO's own bands, so the 15 bake bins' S weights the planet's TiO
+    cells by a flux the star lacks there (Risks, "M-dwarf suns"). The curves are tested under
+    2,500 K and 30,000 K Planck suns only, and a model spectrum at 1 nm for M stars stays R06's
+    open ask.
+  - _The references._ `exomol/lineReferencesHot.json` holds two cells a species (its projection's
+    strongest and median samples), each with its curves of growth about the table's middle node at
+    three node pressures and three midpoints, from the super-lines the table was reduced from,
+    as T4.g's references are; no line-by-line pass over the lists is made.
+  - _Acceptance._ The task's command selects `hotLines.test.ts`, `kDistribution.test.ts`,
+    `lineCurves.test.ts`, `lineReferences.test.ts`, `transparency.test.ts` and `absorbers.test.ts`;
+    `negligible.test.ts`, `assemble.test.ts`, `AtmosphereCacheOptics.test.ts` and the tools'
+    tests run under `pnpm test` and the gate.
+  - _`ATMOSPHERE_OPTICS_VERSION`_ is raised from 2 to 3, by its own rule: CO's and HCN's media
+    above 300 K change, and FeH, TiO, H₂S, SiO and N₂ are drawn where they were pending
+    (`assemble.test.ts` reads it). A question below, as T10.d's raise was.
+  - _Costs_ (pod, 4 vCPU, 16 GiB). Downloads 8.4 GB (TiO's five isotopologues 3.5 GB, the part of
+    UCL-4000 fetched 2.9 GB, SiOUVenIR 1.1 GB); bin caches 16.1 GB; bins 13 s (FeH) to 19 min
+    (TiO's 3.0 × 10⁸ transitions) a species; reductions 25.0 cell-hours over every pass, two to
+    four workers at once (FeH 2.9, TiO 3.5, H₂S 9.8 over its two passes, CO 1.1, HCN 3.3 over
+    two, SiO 3.2, N₂ 1.2), about 5 hours' wall time; references 1–2 minutes a species. None of
+    it is in the clone.
+  - _Questions, with leans_ (2026-10-29), listed for main:
+    - N₂ from WCCRMT's list rather than the plan's band model: lean, the list, `estimated`.
+    - HCN `estimated` though its stronger cells agree with HITRAN2024 at 300 K: lean, `estimated`,
+      as R08.T4.c judged its hot bands.
+    - CO's scale, 2.05, the summed ratio at the hand-over: lean, 2.05 (R08.T4.c's bound took the
+      peak cell's 2.13).
+    - CO₂ above 500 K deferred: lean, a later task with χ far-wing super-lines.
+    - N₂'s second positive pending as a part, bounded by the band model of both systems: lean, kept
+      until a list with N₂'s C state is read.
+    - H₂S `measured` though AYT2's hot visible values are lower limits: lean, kept as R08.T4.c
+      judged it, its notes saying why; `estimated` by HCN's rule if main prefers.
+    - Two tables a key, the client's hand-over: lean, as built, under the bullet's hand-over.
+    - `ATMOSPHERE_OPTICS_VERSION` raised to 3: lean, raised, by its own rule.
+    - Part 2 (VO, hot H₂O): lean, a machine that reaches ExoMol's site; VOMYT (McKemmish et al.
+      2016), if archived, is an alternative to HyVO for VO.
+- **Deferred findings (2026-10-13 rule)** (R08.T4.f). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _FeH's hold below 10 Pa._ Its 1 Pa check fails (2.36 × 10⁻¹), so below 10 Pa FeH is
+    `estimated`, labelled; the other six pass.
+  - _The widths._ Every hot table takes its list's default Lorentz width, so every line shape is
+    `estimated` and the hand-overs step (above). ExoMol's `.broad` files (H₂ and He, where a list
+    has them) were not in the archive's records fetched.
+  - _T4.e's E1′ citation._ T4.e's record cites E1′ to decision-r08-t4e-budget §3; the ruling holds
+    it in §1.4.
+  - _N₂'s table on every N₂ body._ `lineSpeciesOf` lists the species a record holds with committed
+    tables, so the optics worker now loads N₂'s 2.2 MB on Earth and every N₂ air, though N₂ is
+    transparent below 1,800 K (`assemble.test.ts`); the table-branch atoms load alike. Lean: leave
+    a stated none's table unloaded where the column's warmest layer is under its limit, for
+    R08.T11's arrival budget.
+  - _Isotopologue names in `NOTICE`._ AYT2's is written `H2-32S`, the others by mass number before
+    each atom (`12C16O`, `28Si16O`), the line being full.
