@@ -119,7 +119,7 @@ impl ObjectKey {
     /// The seed streams check the tag's scope, not the key's (see below).
     pub const fn surface_cell(face: u8, level: u8, i: u32, j: u32, instance: u16)
         -> Result<Self, SurfaceCellKeyError>;
-    pub const fn surface_item(n: u64) -> Self;          // plate k, crater slot k, …
+    pub const fn surface_item(n: u64) -> Self;          // plate k, crater octave k, …
 }
 ```
 
@@ -150,10 +150,10 @@ Design note 4), which holds R05's `selftest.surface.test_planet` and tests the `
 | Tag                      | Scope           | Key            | Draws                                                                  |
 | ------------------------ | --------------- | -------------- | ---------------------------------------------------------------------- |
 | `body.surface.detail`    | `Body`          | `BodyId`       | the detail seed, one block output keyed by `BodyId`                    |
-| `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, crust type per plate                  |
-| `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency boundary warp's lattice                              |
+| `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, areas, continental nuclei             |
+| `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency warp's lattice, of boundaries and continents         |
 | `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces                              |
-| `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of D_b and wider: count, place, age, morphology                |
+| `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of D_b and wider: count, place, diameter, age                  |
 | `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                            |
 | `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's `noise` keys it |
 | `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                                   |
@@ -754,7 +754,8 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    memory). Where the regime is mobile-lid, the plates are drawn on `surface.coarse.plates` keyed by
    `surface_item(k)`: seven above 1 sr and a tail N(>A) = 7 (A ÷ 1 sr)^−0.31 down to 0.002 sr,
    giving about 48 plates (41 below 1 sr; Bird's PB2002 has 48 at or above 0.002 sr and 52 in
-   all), truncated at the coarse cell's solid angle, with Euler poles and crust types. Bird 2003
+   all), truncated at the coarse cell's solid angle, with Euler poles and continental nuclei (as
+   built, R09.T11: the crust is placed per cell from the nuclei, the plates mixed). Bird 2003
    fits 0.002–1 sr by eye with −1/3 (56 plates by this anchor); Sornette and Pisarenko 2003's −0.25
    ± 0.05 is fitted to the 42-plate PB2001 over all sizes with the 4π constraint and no anchor at
    1 sr, so it does not combine with the anchor; a maximum-likelihood fit to PB2002's 41 plates in
@@ -767,9 +768,10 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    cover its drawn area (a power diagram; "Deviations in T11, as built"), ties to the lower seed
    index; a part cut off a plate joins the neighbour it shares most edges with. Boundaries are cell
    adjacencies. The distance transform is a multi-source shortest path over the cell graph with
-   great-circle edge lengths, settled in (distance, cell index) order, giving each cell its signed
-   distance to the nearest boundary, that boundary's kind (convergent with subduction, convergent
-   collision, divergent, transform) from the plates' relative motion, and its obliquity. A stagnant
+   great-circle edge lengths, settled in (distance, cell, source) order over each plate's own
+   cells (as built, R09.T11), giving each cell its signed distance to the nearest boundary, that
+   boundary's kind (convergent with subduction, convergent collision, divergent, transform) from
+   the plates' relative motion, and its obliquity. A stagnant
    lid gets no boundaries: volcanic provinces sized by the volcanism level, with the flexure about
    each load, its moat filled and its bulge planed to the surface's level
    (`decision-r09-t12-coarse.md` addenda 2 and 3).
@@ -925,7 +927,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    convergence, a divergent band's export falling on its sea alone; and the whole is rescaled so
    that global precipitation equals global evaporation. Prevailing winds are the
    three-cell pattern scaled by the Hadley width, centred each month on the month's energy-flux
-   equator, and converging on the substellar point for slow and locked rotators.
+   equator, and converging on the substellar point for slow and locked rotators. _As built
+   (R09.T13.e's record): the pattern is centred on the rain band's capped centre, not the
+   energy-flux equator (decision-r09-t13ge §2.10); only a world in tidally locked coordinates
+   converges on its substellar point, and a slow rotator runs the geographic model, capped as any
+   rotating world is (§2.12)._
    - Each month's orographic step carries vapour along its recorded wind's component along the
      model's bands; the zonal budget carries the meridional transport, Hadley and eddy, which the
      wind's meridional part would count again over land (decision-r09-t13e-revision). The record
@@ -1489,6 +1495,7 @@ runs; the governor recorded), since the research's figures were taken under load
   `cargo test -p hyperion-surface tags` and
   `cargo test -p hyperion-sim --test foundation_golden domain_tags`.
   Records: [09-surface-generator/records/R09.T1.a.md](09-surface-generator/records/R09.T1.a.md).
+  _Built 2026-10-09_ (`d627f1bd`).
 - **R09.T1.b The detail seed on the wire.** After T1.a; P14.T23 is built (`hooks/seed.rs`,
   `surface_seed`, `PlanetarySystem::{surface_seed, hooks_at}`). `planetary::hooks::detail_seed` in
   `hooks/seed.rs` beside `surface_seed`, and the record's hooks section inhabited: `record::Hooks`,
@@ -1507,6 +1514,8 @@ runs; the governor recorded), since the research's figures were taken under load
   `cargo test -p hyperion-sim planetary::hooks`, `cargo test -p hyperion-protocol planetary` and
   `cargo test -p hyperion-server --test system_bodies`.
   Records: [09-surface-generator/records/R09.T1.b.md](09-surface-generator/records/R09.T1.b.md).
+  _Built 2026-10-14_ (`7a6dd8b7`; lane `r09-detail-seed`, picked into galaxy plan 14's 21 → 22
+  batch).
 
 ### R09.T2 The field's types
 
@@ -1631,6 +1640,9 @@ _Follow-up C, runoff, grain densities and the read solidus_ (science-r09-drainag
 Follow-ups A–C landed under R09.T2; D and E take R09.T2.d and R09.T2.e by their letters, and
 R09.T2.a–c are not used (main's ruling for R09.T2.e, 2026-10-15).
 
+_Built 2026-10-09_ (`880835f6`), with follow-ups A (`e37b16d6`), B and C (2026-10-10; lane commits
+`a1ec12cc` and `751517b8`), each in the record.
+
 - **R09.T2.d Follow-up D, an undifferentiated body's role and the crust ruling's synthetic rows**
   (science-composition-crusts.md §1, §3, §4, §7 and §8, 2026-10-11; after follow-up C). One lane,
   in the surface crate: it touches `field/palette.rs` and `testing/worlds.rs`, not R09.T10.c's or
@@ -1663,6 +1675,8 @@ R09.T2.a–c are not used (main's ruling for R09.T2.e, 2026-10-15).
     `palette_role` row, an extension (codes only gain), before T19's first send. Neither
     `GENERATOR_VERSION` nor `SURFACE_PAYLOAD_FORMAT` is bumped (Generator version).
   - _Accept:_ `cargo test -p hyperion-surface field`; `cargo test -p hyperion-surface wire`.
+  - _Built 2026-10-12_ (`0e931a8b`, `3bf4223a`, `27db4cad`). Records: follow-up D in
+    [09-surface-generator/records/R09.T2.md](09-surface-generator/records/R09.T2.md).
 
 - **R09.T2.e Follow-up E, the palette's liquid record and the reserved header parts**
   (`decision-r11-palette-liquids.md` §1, §2 and §4, 2026-10-14; lane r09-palette-liquids; after
@@ -1697,6 +1711,7 @@ R09.T2.a–c are not used (main's ruling for R09.T2.e, 2026-10-15).
     `cargo test -p hyperion-surface testing`; `cargo test -p hyperion-surface lava_world`;
     `cargo test -p hyperion-sim planetary::surface`; `cargo test -p hyperion-protocol surface`;
     `cargo test -p hyperion-server surface`; `just gen-protocol-check`; `just smart-ci`.
+  - _Built 2026-10-15_ (`298f51ca`; the water refresh `4908897b`).
 
 - **R09.T2.f Follow-up F, the palette's FeO_T and the weathering rate**
   (decision-p14-t51d-weathering §1.6 and §2.3, 2026-10-16; lane r10-weathering). It is layout
@@ -1710,6 +1725,7 @@ R09.T2.a–c are not used (main's ruling for R09.T2.e, 2026-10-15).
   - The DTO mirrors: `PaletteEntryDto.feo_mass_fraction` and `SurfaceHeaderDto.weathering_rate`,
     both `Modelled<f64>`.
   - _Accept:_ as T2.e's, plus `just gen-protocol-check`.
+  - _Built 2026-10-20_ (`490f0e94`, with R10.T1.d).
 
 ### R09.T3 The payload codec
 
@@ -1734,6 +1750,8 @@ wrong-version or wrong-body block is refused with its error; no block exceeds 1 
 synthetic field encodes to 10–15 MB, recomputed with the 22-byte synthesis record and
 decision-r09-t2's climate record. Acceptance: `cargo test -p hyperion-surface wire`.
 
+_Built 2026-10-09_ (`976afe0a`).
+
 ### R09.T4 Interpolation and base elevation
 
 Records: [09-surface-generator/records/R09.T4.md](09-surface-generator/records/R09.T4.md).
@@ -1752,6 +1770,8 @@ the field is C¹ (not C²) across face centre lines, as the warp allows; a const
 to itself and no value leaves the cells' range; the interpolant's instrumented read set never
 reaches beyond `SYNTHESIS_MARGIN_CELLS` from the query's cell (the whole function's is T8's).
 Acceptance: `cargo test -p hyperion-surface synth::interp`.
+
+_Built 2026-10-09_ (`b914b98e`, `084280ce`).
 
 ### R09.T5 Structural octaves
 
@@ -1789,6 +1809,9 @@ and T9).
   belt factor g(λ)^b; the pinned unit-variance structure functions of the plain and ridged terms;
   `octave_bound` with the factor. The plain styles' heights do not move.
 
+_Built 2026-10-10_ (`67a6a9cf`; follow-up 1 `f2d96549`; follow-up 2 and item 8 from lane commits
+`ceb7a633` and `b698e3d9`).
+
 ### R09.T6 Channels
 
 - **R09.T6.a The first levels.** `synth/channels.rs`: the network's first level from the coarse
@@ -1802,6 +1825,7 @@ and T9).
   minimum slope; the network leaves each coarse cell through the cell its flow direction names; a
   key point next to a face edge gives the same segments from either face.
   Records: [09-surface-generator/records/R09.T6.a.md](09-surface-generator/records/R09.T6.a.md).
+  _Built 2026-10-10_ (`5a62320b`).
 - **R09.T6.b The full depth and the mean.** The network to about fourteen levels, with the 3 × 3
   search, cached bounding boxes and the level cut by channel width; widths and depths from
   discharge (Design note 13): a tributary's r A, from its cell's `runoff`, and a trunk's r̄ A, from
@@ -1819,6 +1843,8 @@ and T9).
   (`[[bench]]`, `harness = false`, Criterion off the browser target as `test_planet.rs` is), which
   T8 extends.
   Records: [09-surface-generator/records/R09.T6.b.md](09-surface-generator/records/R09.T6.b.md).
+  _Built 2026-10-13_ (`8305810b`). Its doc comments took signoff-12's item 16 at the RM5 close-out
+  (2026-10-29).
 - **R09.T6.c Valleys of a short wet epoch** (after R09.T14, whose T14.d keeps the solver's channel
   incision; before the serve gate, and before R09.T16 if it can, so that T16's goldens pin it once,
   otherwise they re-bless at the version in force; decision-r09-t14-choices F2 with its T14.c and
@@ -1978,6 +2004,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     1.5 D_t.
   - _The balance._ Every shape's interior, peak and exterior sum to zero to 10⁻⁹ of its cavity
     volume. a ≤ 1.543 for every D ÷ D_t from 10⁻⁴ to 100, so the reach stays 2.54 rim radii.
+  - _Built 2026-10-10_ (`c2746fa7`, with the crater text `dc2e0da3`).
 - **R09.T7.e The target and the impactors** (science-r09-craters.md items 2 and 5, F1 and F2).
   After T7.a. `craters.rs`, `wire/form.rs`, `testing/worlds.rs`, `testing.rs` and
   `planetary/surface/reference.rs`.
@@ -2022,6 +2049,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     - a ≤ 1.543 over 10⁻⁴–100 D_t;
     - the peak relief is Pike's law to 10⁻⁹ over 1.5–9 D_t;
     - it is zero at and below 0.8 D_t and at and above 13 D_t.
+  - _Built 2026-10-11_ (`0e6f681e`).
 - **R09.T7.b Small craters.** `synth/craters.rs`: octave levels, the 3 × 3 search across face edges,
   counts from the header's density at the canonical point by true area capped at saturation with
   ages from τ(D) through `chronology_age` at the contract's system age (Design note 12), morphology
@@ -2032,6 +2060,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   straddling a face edge is found from both faces; each crater integrates to zero at every level to
   10⁻⁶ of its cavity volume (a quadrature test pins the fillet's closed form).
   Records: [09-surface-generator/records/R09.T7.b.md](09-surface-generator/records/R09.T7.b.md).
+  _Built 2026-10-13_ (`567ee236`).
 - **R09.T7.c Coarse craters' rims.** Sharpening the rims of the coarse list at finer levels. The
   coarse elevation already holds each coarse crater smoothed to the coarse cell, so level n adds
   only the difference between the profile band-limited at level n and at the coarse cell's
@@ -2040,6 +2069,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   coarse cell edges it spans; the added difference integrates to zero over every coarse cell it
   touches, to 10⁻⁶ of the crater's cavity volume; at the coarse level it adds nothing.
   Records: [09-surface-generator/records/R09.T7.c.md](09-surface-generator/records/R09.T7.c.md).
+  _Built 2026-10-13_ (`a6e73a08`).
 - **R09.T7.d The cold-trap fraction** (a T7 follow-up, split out of T13.f and built early: the
   galaxy audit's B4; science-r09-drainage.md §4 and §8). It needs nothing of T7.a–c and can be
   built at once. T13.f and galaxy plan 14's P14.T51.f call it, so it lands before the 23 → 24
@@ -2125,6 +2155,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     - _No latitude cut._ A single bowl of d/D 0.25 at 60° (δ 1.54°) keeps a permanent shadow
       between 0.1 and 0.3 of its area, against exact ray geometry's 0.17. A d/D 0.1 bowl there
       keeps none.
+  - _Built 2026-10-10_ (`4ef539df`).
 
 - **R09.T7.f The exact bowl's permanent shadow** (a T7 follow-up; science-r09-drainage.md §8.12;
   decision-r09-t7f.md). After T7.d.
@@ -2207,6 +2238,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     `cargo test -p hyperion-surface cold_trap`; `cargo test -p hyperion-fit bowl_permanent_shadow`;
     `just fit-check`; `just gen-surface` leaves `hyperion_surface_bg.wasm` unchanged byte for
     byte.
+  - _Built 2026-10-12_ (`d093bbd9`, `ea127bc5`).
 - **R09.T7.g The plains from ray-traced surfaces** (a T7 follow-up; science-r09-drainage.md
   §8.13; signed off 2026-10-19, `signoff-12.md` item 13). After T7.f, after RM5's close. Until it
   lands the plains' two fits stand, labelled (Risks, "Cold traps"): they match the ray traces at
@@ -2269,6 +2301,9 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   `cargo test -p hyperion-surface --lib height_golden`, `just test-wasm-fast`, and
   `just test-slow -E 'binary(surface_reading_worlds)'`.
   Records: [09-surface-generator/records/R09.T7.h.md](09-surface-generator/records/R09.T7.h.md).
+  _Built 2026-10-14_ (`70603c79`, `8fc62692`, `788c2d3f`, `742aa3e6`). As built, the pooled reading
+  test keeps its crater gap for the Ceres-like world at 1 km (`CRATER_GAP`), by main's ruling (the
+  record; R10.T5's).
 - **R09.T7.i The fillet through the peak** (a T7 follow-up, after R09.T12.e;
   `decision-r09-t12-coarse.md` addendum 4, D1.5 and D4.2, and addendum 5). Before
   R09.T14, whose drainage reads the coarse field. A fillet whose inner end 1 − w lay inside a
@@ -2311,6 +2346,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     `cargo test -p hyperion-surface --lib height_golden`,
     `cargo test -p hyperion-sim --lib planetary::surface::steps::craters` and
     `just test-wasm-fast`.
+  - _Built 2026-10-20_ (`9941171c`, `42beaeb1`).
 - **R09.T7.j Craters worn to equilibrium** (a T7 follow-up, after T7.i;
   `decision-r09-t12-coarse.md` item 5b, addendum 4, D1.4 and D4.1, and addendum 5;
   `decision-r09-t7ij-refresh.md`). Before R09.T16's goldens. The relief factor carried only
@@ -2360,6 +2396,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     rendered at the band limit, lies within 25% of plan 14's 2.05 km basin share (estimated
     1.88–2.02 km; 3.67 km before). Goldens as T7.i's. Acceptance: T7.i's, with
     `cargo test -p hyperion-sim --lib planetary::surface::steps::relief`.
+  - _Built 2026-10-20_ (`6fa6a405`).
 
 - **R09.T7.k The cold-trap fraction's shared integral and cheaper rules** (a T7.d follow-up,
   built by plan 14's P14.T51.i in lane `p14-t51hij`, the `p14-snapshot` lane's successor;
@@ -2407,6 +2444,9 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
       compares live plan-14 values or uses at least 5 × 10⁻³.
     - `bowl_permanent_shadow`'s fit (`hyperion-fit`) reads the cap through it, and its 0.003
       acceptance cannot tell 4.4 × 10⁻¹⁶.
+  - _Built 2026-10-19_ (`a941eba4`, under P14.T51.i, lane `p14-t51hij`; galaxy plan 14's Risks,
+    "Deviations in P14.T51.i, as built"). Records:
+    [09-surface-generator/records/R09.T7.k.md](09-surface-generator/records/R09.T7.k.md).
 
 Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c, T7.e, T7.i and T7.j, with
 `cargo test -p hyperion-sim --lib planetary::surface::steps::craters` for T7.i–j) and
@@ -2439,6 +2479,8 @@ finding for open question 5, and the hash levers of Design note 14 are tried onl
 every bench binary, so it selects the `surface/…` IDs; on a quiet machine, under the heavy lock, or
 recorded provisional).
 
+_Built 2026-10-13_ (`c280f604`; the fused interpolant pass `13fb4bf1`, 2026-10-15).
+
 - **R09.T8.d The reach's two loose terms** (a follow-up of T8, high priority: before R10.T14.b's
   measured sizes and T15; decision-r10-t14c-leans F4, ruled in decision-r09-t8d-reach). The
   table's reach, about ±155–160 km on every generated world against a realised relief of 15.8 km
@@ -2467,6 +2509,7 @@ planetary::surface::quantise`, the slow
     `synth::levels::tests::the_level_bound_and_the_reach_hold_at_every_level_at_ten_thousand_points`
     by name, `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`, and the
     gate.
+  - _Built 2026-10-21_ (`f547af5a`, `82e36522`).
 
 ### R09.T9 Golden heights across targets
 
@@ -2492,6 +2535,8 @@ R09's goldens elsewhere) is narrowed to exclude `height/`, with its comment corr
 to any synthesis constant fails it; `golden_diff.py` reports the new goldens under the generator's
 version and R05's under the test planet's.
 
+_Built 2026-10-13_ (`2c052f09`; the bench record `070da8ee`).
+
 ### R09.T10 The coarse pass's frame
 
 Records: [09-surface-generator/records/R09.T10.md](09-surface-generator/records/R09.T10.md).
@@ -2513,6 +2558,8 @@ P14.T48.e lands second adds a generated sub-Neptune (decision-p14-t35e-wire).
 Tests: a no-op pass yields a valid field twice with identical bytes; solid angles sum to 2π ÷ 3 a
 face to 10⁻¹²; edge-neighbour lists are symmetric, every cell has four and a corner cell three
 vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
+
+_Built 2026-10-09_ (`5af6c08a`, then `a7b6fb94` and `c1ba7c9c`).
 
 - **R09.T10.c The crust's options and the reference rows** (science-r09-drainage.md §3–§5; a T10
   follow-up, after T2's follow-up C).
@@ -2551,6 +2598,8 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
     reference world builds a valid field.
   - _Moves:_ nothing, since no reference golden exists before T16.
   - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
+  - _Built 2026-10-12_ (`2f63eb3a`). Left: the record's refusal of a cell whose crust has no palette
+    entry, handed to T12.a and not yet built (the RM5 close-out's list).
 
 - **R09.T10.d An undifferentiated body's bulk, the lid, and the highland and iron-rich rows**
   (science-composition-crusts.md §1, §2, §5 and §7; after T2's follow-up D, R09.T2.d, and T10.c,
@@ -2612,6 +2661,7 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
       Mars.
   - _Moves:_ nothing, since no reference golden exists before T16.
   - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
+  - _Built 2026-10-13_ (`9c6a7f2b`).
 
 - **R09.T10.e The record's other sections** (new 2026-10-14, decision-bump-plan-after-22 §1.5; no
   bump; a T10 follow-up at version 22). `for_body`'s reading of the record's sections other than
@@ -2629,6 +2679,7 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
   - _Tests:_ the assembly on hand-made crusts.
   - _Moves:_ nothing.
   - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
+  - _Built 2026-10-15_ (`e21fe668`).
 
 - **R09.T10.f `for_body`'s planet, and the service's** (new 2026-10-15, decision-backlog-2 §3; S;
   no bump; after T10.e, before P14.T54.a). `for_body` takes a moon's planet's record, and the
@@ -2668,6 +2719,7 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
   - _Accept:_ `cargo test -p hyperion-sim --lib planetary::surface`,
     `cargo test -p hyperion-sim --doc planetary::surface` and
     `cargo test -p hyperion-server surface`.
+  - _Built 2026-10-15_ (`b8f49505`).
 
 ### R09.T11 Plates
 
@@ -2685,6 +2737,8 @@ capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻
 (`decision-r09-t5.md` item 5); that age is the kinematic age, which R09.T12.a ranks into the
 steady-state age (`decision-r09-t12-coarse.md` item 1). Acceptance:
 `cargo test -p hyperion-sim planetary::surface::steps::plates`.
+
+_Built 2026-10-14_ (`28e9aad4`).
 
 ### R09.T12 Coarse elevation
 
@@ -2714,12 +2768,14 @@ Records: [09-surface-generator/records/R09.T12.md](09-surface-generator/records/
   `STAGNANT_LID_RELIEF`, its degree variance ∝ l^−β₁ from degree 2 to the cell (Turcotte 1987)
   (`decision-r09-t12-coarse.md` addendum A1).
   Records: [09-surface-generator/records/R09.T12.a.md](09-surface-generator/records/R09.T12.a.md).
+  _Built 2026-10-19_ (with T12.b–d in `ae634b79`…`aefe5444`).
 - **R09.T12.b Convergent landforms.** Belts, trenches and arcs by boundary kind, scaled as Design
   note 7 says. Tests: belts lie within their stated distance of convergent boundaries; trenches lie
   2–4 km below the neighbouring sea floor and the arcs' volcanic fronts lie behind them with
   medians within 15 km of 190 km (oceanic overriding plate) and 260 km (continental), 80% of
   fronts within 140–250 and 180–330 km (`decision-r09-t5.md` item 6).
   Records: [09-surface-generator/records/R09.T12.b.md](09-surface-generator/records/R09.T12.b.md).
+  _Built 2026-10-19_ (with T12.a–d in `ae634b79`…`aefe5444`).
 - **R09.T12.c Stagnant-lid provinces and flexure.** After T0.b's isotherm item. Volcanic provinces
   sized by the volcanism level and the flexure about each load, its moat filled and its bulge planed
   to the surface's level (addenda 2 and 3), with T_e = k (870 K − T_s) ÷ F (T0.b's ruling, Design
@@ -2735,6 +2791,7 @@ Records: [09-surface-generator/records/R09.T12.md](09-surface-generator/records/
   Mars the loads' footprint covers at most 25% of the surface (`decision-r09-t12-coarse.md`
   addendum 2).
   Records: [09-surface-generator/records/R09.T12.c.md](09-surface-generator/records/R09.T12.c.md).
+  _Built 2026-10-19_ (with T12.a–d in `ae634b79`…`aefe5444`).
 - **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.e. Each
   crater's shape is T7.a's `crater_shape`, so the coarse elevation and the client's T7.c rims are
   one profile. Tests:
@@ -2743,6 +2800,7 @@ Records: [09-surface-generator/records/R09.T12.md](09-surface-generator/records/
   reference Mars; the list is sorted and each crater's `reach` is complete; before degradation,
   the reference Moon's coarse craters' rim heights are Pike 1980b's 0.236 D^0.399 to 1%.
   Records: [09-surface-generator/records/R09.T12.d.md](09-surface-generator/records/R09.T12.d.md).
+  _Built 2026-10-19_ (with T12.a–d in `ae634b79`…`aefe5444`).
 - **R09.T12.e σ_h and sea level.** Design note 7, on the reconstructed field, after T4 and T5.
   Its σ_h budget books the realised structural share, the area mean of each quadrature point's
   `Relief::point_variance`, which includes the belts' lift (`decision-r09-t5.md` item 8), with the
@@ -2769,6 +2827,7 @@ Records: [09-surface-generator/records/R09.T12.md](09-surface-generator/records/
   spectrum; `structural_spectrum` takes each crust class's anchor, the ice-rich one in every regime,
   and the mobile lid's halves at 2 g⊕.
   Records: [09-surface-generator/records/R09.T12.e.md](09-surface-generator/records/R09.T12.e.md).
+  _Built 2026-10-19_ (`5182e391`, `0e476335`).
 
 Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.a–c and e) and
 `cargo test -p hyperion-sim planetary::surface::steps::craters` (T12.d).
@@ -2794,6 +2853,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   period's twelfths, and at e = 0.6 the periapsis month's record averages 0.4 twelfths of the
   orbit.
   Records: [09-surface-generator/records/R09.T13.a.md](09-surface-generator/records/R09.T13.a.md).
+  _Built 2026-10-19_ (`57df11f6`, T13.a–d together; lane `r09-climate`).
 - **R09.T13.b Longitude and locked coordinates.** The periodic longitude solve split after the
   latitude one in a fixed order, and the tidally locked coordinates about P14.T14's substellar
   axis. The locked solver steps seasons as the zonal one does: a world locked 1:1 to its star has
@@ -2804,6 +2864,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   a world locked 1:1 to its star on an eccentric orbit, or with obliquity, has twelve months, and
   its months differ.
   Records: [09-surface-generator/records/R09.T13.b.md](09-surface-generator/records/R09.T13.b.md).
+  _Built 2026-10-19_ (`57df11f6`, T13.a–d together; lane `r09-climate`).
 - **R09.T13.c The other regimes.** `steps/climate/{airless,isothermal}.rs`: radiative equilibrium
   with thermal inertia for airless and thin-atmosphere worlds, and the isothermal surface for a
   Venus. _As built since P14.T54.a, the radiative model's Γ is the record's
@@ -2821,6 +2882,11 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   isothermal model's own field, before T13.d imposes plan 14's contrasts, varies by under 1 K; a
   locked lava world's melt is the dayside region above the solidus, and its nightside is solid.
   Records: [09-surface-generator/records/R09.T13.c.md](09-surface-generator/records/R09.T13.c.md).
+  _Built 2026-10-19_ (`57df11f6`, T13.a–d together; lane `r09-climate`). As built, the 300 K test
+  runs on an airless world locked to its star and on a 3:2 rotator's equator: the reference Moon's
+  equator, a lunar-like rotator, spans 293.1 K, within Diviner's 292–302 K (the record's deferred
+  findings, whose lean for the test's text, main's to rule, is "an airless world locked to its
+  star, or a slow rotator, has a day–night contrast above 300 K").
 - **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on the field as
   plan 14 defines them (decision-r09-t13d-normalisation): the equator–pole contrast on the annual
   field's T(0°) less its poles' mean, a locked world's day–night contrast on its μ-weighted day and
@@ -2851,6 +2917,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   places CO₂ ice, placed first, inside its water-ice cap's latitude, given by hand, with every iced
   cell poleward of 75°; a Titan-like world's methane liquid fills its basins to its share.
   Records: [09-surface-generator/records/R09.T13.d.md](09-surface-generator/records/R09.T13.d.md).
+  _Built 2026-10-19_ (`57df11f6`, T13.a–d together; lane `r09-climate`).
 - **R09.T13.e Precipitation and wind.** Design note 8's heuristic, labelled in the header, and
   each month's 10 m wind. Tests (decision-r09-t13ge §2.13):
   Records: [09-surface-generator/records/R09.T13.e.md](09-surface-generator/records/R09.T13.e.md).
@@ -2903,6 +2970,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     form; on the reference Earth through the coarse pass (slow) every month converges before the
     cap, its budget closes, and every land climate cell's monthly and annual rate lies within 1% of
     a deep solve's (decision-r09-t13e-lfpm-convergence).
+  - _Built 2026-10-20_ (`021f2957`, `149758f8`, `a7e30fa4`; the batch review's fixes `1870973b`).
 - **R09.T13.f Cold traps.** After T13.c, T13.d and T7.d (science-r09-drainage.md §4;
   decision-r09-t13f-cold-traps, whose interface text and tests bind).
   Records: [09-surface-generator/records/R09.T13.f.md](09-surface-generator/records/R09.T13.f.md).
@@ -2951,12 +3019,16 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     - the airless frost points of H₂O and CO₂ are `trap_threshold`'s to the bit.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate` and
     `cargo test -p hyperion-sim planetary::surface::inputs` (the §7.2 tests and the tripwire).
+  - _Built 2026-10-20_ (the interface `3d7bf246`, 2026-10-19, then `26455119`; the review's fixes
+    `1870973b`). The tripwire named above was replaced by P14.T54.b.f's two hold tests,
+    `under_the_cold_traps_hold_the_record_gives_no_cold_traps` and
+    `under_the_batch_the_record_gives_its_cold_traps_to_the_bit`.
 - **R09.T13.g Relief in the energy balance** (after T13.a, before T13.d, which takes its lapse rate;
   decision-r09-t13a-relief). `steps/climate/ebm.rs` and one lapse-rate function. Each model grid
   point holds its surface heights above the sea level (the water's surface over water) as eight
-  equal-area quantiles of the field cells whose centres it holds, a point holding none taking the
-  nearest point's, equatorward first. The prognostic temperature stays the sea-level one, T, and
-  the transport is unchanged. The albedo and the ice heat capacity read each quantile's ground
+  equal-area quantiles of the field cells whose centres it holds (a point holding none: below,
+  decision-r09-t13ge g5). The prognostic temperature stays the sea-level one, T, and the transport
+  is unchanged. The albedo and the ice heat capacity read each quantile's ground
   temperature T − Γz, and the outgoing radiation is σT⁴ ÷ (1 + ¾τ) − e^(−(3/2)τ_z) σ(T⁴ − (T − Γz)⁴)
   with τ_z = τ e^(−z ÷ 2H), plan 14's τ ∝ √p and H the air's scale height at plan 14's mean, each
   averaged over the quantiles. The sea's ice heat capacity reads the water's own surface,
@@ -2992,6 +3064,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     ground's emission transmitted through the column above it; a τ = 10 column four scale heights
     up takes that floor.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
+  - _Built 2026-10-20_ (`a1a1b3c3`).
 - **R09.T13.h The thin air's slab and frost** (after T13.d, in any order with T13.e–g and T13.j;
   decision-r09-t13-thin-air §1.8–§1.10, as decision-r09-t13h-scope amends them, whose specification
   and tests bind). R09.T13.c's thin air revised: the balanced bounded slab with its snowfall.
@@ -3072,6 +3145,8 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
       10⁻¹² relative, and at β = 1 the band is empty, F stepping from B to 2A at (2 − ε)A.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`, and the surface
     module's slow tests by name.
+  - _Built 2026-10-20_ (`817e44c4`). Its ruled follow-ons A and B (decision-r09-t13h-scope §6.3; the
+    record) have no entry yet; both move thin-aired worlds' climate, so they ride a bump.
 - **R09.T13.j The land's water** (after T13.e and T13.f, before R09.T14–T16;
   decision-r09-t13e-revision, whose specification and tests bind). R09.T13.e's revision for its
   finding E-P1, land-heavy midlatitudes too dry. The sea rains its own evaporation plus its band's
@@ -3090,6 +3165,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   tests by name, among them `the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp` and
   `the_reference_earth_s_pass_is_order_independent`.
   Records: [09-surface-generator/records/R09.T13.j.md](09-surface-generator/records/R09.T13.j.md).
+  _Built 2026-10-20_ (`e1c94a43`).
 
 - **R09.T13.i Ocean heat transport and the energy balance's next revision** (after T13.j, before
   R09.T16; decision-r09-t13i, with its §2.4 follow-ups 1–3, its §2.4 follow-up 4 (cost), its
@@ -3205,6 +3281,8 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     machine (load ≤ 2), one thread; 30–35 s lands with its figure and each lever's saving recorded,
     over 35 s holds (follow-up 10 §1, restating follow-ups 4 §2 and 6 §3 for R09.T13.i); `cargo test -p hyperion-sim planetary::surface::steps::climate`;
     and the surface module's slow tests by name.
+  - _Built 2026-10-21_ (batch 1 `a5bd4f33`, `60a85b5a`, `5ffd64fd`, `8fb1bfa0`, 2026-10-20; batch 2
+    `768481cd`, `84573e84`, `4880791f`, `5dd04c2b`).
 
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:
@@ -3407,6 +3485,8 @@ convergent boundaries, rivers to the sea) is recorded in this task's entry. Acce
 -p hyperion-sim planetary::surface::steps::classes` and `cargo run -p hyperion-sim --features
 testing --example surface_map` writing its three images.
 
+_Built 2026-10-21_ (`6a5f2845`).
+
 ### R09.T16 Coarse goldens and benches
 
 Records: [09-surface-generator/records/R09.T16.md](09-surface-generator/records/R09.T16.md).
@@ -3592,6 +3672,8 @@ cancelled job leaves nothing cached; the server's field, from `reference_inputs`
 `crates/hyperion-server/src/surface/inputs.rs`; updated 2026-10-15). Acceptance:
 `cargo test -p hyperion-server surface`.
 
+_Built 2026-10-13_ (`9ebb725d`).
+
 - **R09.T17.a The passes in flight** (a T17 follow-up, after R09.T16; decision-r09-pass-cost §C).
   R09.T17's deferred _Concurrent passes_, which R09.T16 measured at 408 MB a level-8 pass.
   `SurfaceService` bounds the passes it runs at once by a semaphore of `surface_passes` permits
@@ -3645,6 +3727,8 @@ it).
 Tests: round trip; reopening a universe restores the same coverage bytes; the finest resolution
 wins; folding is independent of pass order. Acceptance: `cargo test -p hyperion-server knowledge`.
 
+_Built 2026-10-09_ (`952f7e05`).
+
 ### R09.T19 The wire and the gate
 
 After T8, T17 and T18.
@@ -3667,6 +3751,7 @@ After T8, T17 and T18.
   `cargo test -p hyperion-protocol surface`, `cargo test -p hyperion-server requests` and
   `just gen-protocol-check`.
   Records: [09-surface-generator/records/R09.T19.a.md](09-surface-generator/records/R09.T19.a.md).
+  _Built 2026-10-13_ (`c6d77cac`).
 - **R09.T19.b The payload, the gate and the revisions.** The `surface_field` handler: the payload
   through R03's `Answer`, gated by coverage with the margin and the craters, the revision and the
   delta since `have_revision`, and `NotModelled` for a body whose inputs are not modelled; the
@@ -3680,6 +3765,7 @@ After T8, T17 and T18.
   Acceptance: `cargo test -p hyperion-server surface` and `cargo test -p hyperion-server
 subscriptions`.
   Records: [09-surface-generator/records/R09.T19.b.md](09-surface-generator/records/R09.T19.b.md).
+  _Built 2026-10-13_ (`7392c064`).
 - **R09.T19.c The Knowledge-bound test.** Over a real socket, extending R03's, on
   `reference_inputs`: after one orbital pass over a region, no block carries a cell outside the
   region and its margin, and margin cells are marked; the cover's resolution codes match the
@@ -3692,6 +3778,9 @@ subscriptions`.
   (P14.T24, P14.T48), and a page that asks for it, which is R10's client; until both exist it stays
   pending and is recorded so here.
   Records: [09-surface-generator/records/R09.T19.c.md](09-surface-generator/records/R09.T19.c.md).
+  _Built 2026-10-13_ (`c1735b34`); its follow-up, the client's seed from `body_detail` and the
+  Mars-like and Earth-like worlds' heights and channels compared over the wire, 2026-10-26
+  (`f2331483`; the record). R03.T15's 61-chunk check passes to R10.T15.b.
 
 ### R09.T20 Verification and hand-over
 
@@ -3742,7 +3831,10 @@ the owner and main.
 
 _As verified (R09.T20, 2026-10-26):_ item by item in Risks, "Verification and hand-over, as run
 (R09.T20)". The by-eye look stays pending for the owner. The channels have not been compared
-across the wire (a deferred finding there), and the benches are provisional.
+across the wire (a deferred finding there), and the benches are provisional. _Since (RM5's
+close-out, 2026-10-29): T19.c's follow-up compared them, the server's and the client's heights,
+gradients and channels equal bit for bit on the Mars-like and Earth-like worlds (`f2331483`,
+2026-10-26; T19.c's record); the by-eye look and the benches' quiet re-run stay pending._
 
 ## Generator version
 
