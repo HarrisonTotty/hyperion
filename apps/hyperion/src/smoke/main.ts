@@ -16,6 +16,9 @@
  * and `--smoke-soak=<seconds>` runs T11's and T12's soak scene instead of the checks, hidden and
  * offscreen unless `--smoke-show=1`. They reach the page in the query string. The main process
  * makes no request itself (Node's `fetch` would bypass Chromium's `webRequest`).
+ * `--smoke-watchdog-scale=<k>`, which stays in the main process, stretches the watchdog's
+ * allowances k times, a whole number from 1 to {@link SMOKE_WATCHDOG_SCALE_MAX}, for a machine
+ * much slower than the development one (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`).
  * `--smoke-captures=<dir>` asks the page for R05.T12.c's atmosphere comparison frames, which are
  * saved there as PNGs, for a person to look at.
  *
@@ -39,8 +42,10 @@ import {
   judgeSmokeRun,
   readSmokeImages,
   readSmokeResult,
+  readWatchdogScale,
   SMOKE_EXIT,
   SMOKE_RESULT_CHANNEL,
+  SMOKE_WATCHDOG_SCALE_MAX,
   smokeWatchdogMs,
 } from "./result";
 import { isOwnPage } from "../main/ipcSender";
@@ -93,6 +98,9 @@ const childSeconds = Number(argument("smoke-child", "0"));
 const childHidden = argument("smoke-child-hidden", "0") === "1";
 /** Where the child-window run's record goes, or "" for none. */
 const outDir = argument("smoke-out", "");
+/** The watchdog's factor (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`), as given. */
+const watchdogScaleText = argument("smoke-watchdog-scale", "1");
+const watchdogScale = readWatchdogScale(watchdogScaleText);
 const cancelled: CancelledRequest[] = [];
 /** The page's uncaptured GPU errors, as the engine logged them. */
 const gpuErrors: string[] = [];
@@ -163,6 +171,14 @@ if (!Number.isFinite(childSeconds) || childSeconds < 0) {
     SMOKE_EXIT.setup,
   );
 }
+if (watchdogScale === null) {
+  finish(
+    [
+      `SETUP --smoke-watchdog-scale must be a whole number from 1 to ${SMOKE_WATCHDOG_SCALE_MAX}, not ${watchdogScaleText}`,
+    ],
+    SMOKE_EXIT.setup,
+  );
+}
 
 /** The client's own switches, for the child-window run: T21 asks of the client's graphics. */
 const childSwitches =
@@ -178,7 +194,7 @@ applyGraphicsSwitches(app.commandLine, childSwitches);
 
 /**
  * How long a run may take before the watchdog ends it: part 1's grows with the captures and with
- * the GPU timings.
+ * the GPU timings, and every run's with the scale.
  */
 const WATCHDOG_MS = smokeWatchdogMs({
   part,
@@ -186,6 +202,7 @@ const WATCHDOG_MS = smokeWatchdogMs({
   gpuTiming: gpuTiming === "1",
   soakSeconds,
   childSeconds,
+  scale: watchdogScale ?? 1,
 });
 
 /** A display as the child-window run records it. */

@@ -48,8 +48,13 @@
 # ascent, R05.T11.c's terrain, R05.T13.b's spike, R07.T9's occultation, R07.T10.c's eclipse scene)
 # and saves them in DIR as PNGs, each named for its variant; they are part 1's, and they scale part
 # 1's watchdog (`src/smoke/result.ts`'s `smokeWatchdogMs`): it gains `CAPTURES_WATCHDOG_MS`, and
-# part 1's outer limit below gains the same `captures_allowance_s`, so that it stays 120 s over the
-# watchdog. Alone the captures overran part 1's 180 s (2026-10-21).
+# part 1's outer limit below gains the same `captures_allowance_s` (each times the scale below), so
+# that it stays 120 s over the watchdog. Alone the captures overran part 1's 180 s (2026-10-21).
+#
+# HYPERION_SMOKE_WATCHDOG_SCALE=k (1 to `scale_max` below; 1 when unset or empty) stretches every
+# watchdog k times, and the outer limits below with it, for a machine much slower than the
+# development one (`src/smoke/result.ts`'s `SMOKE_WATCHDOG_SCALE_MAX`); a run with k ≠ 1 says so on
+# its first line.
 #
 # --drop-adapter-switches removes only `--enable-unsafe-webgpu` and `--use-webgpu-adapter`, keeping
 # the headless Ozone, ANGLE and Vulkan switches, so that Electron starts and finds no adapter.
@@ -95,11 +100,24 @@ if [[ ${#parts[@]} -eq 0 ]]; then
     parts=(1 2 3 4 5 6 7 8 9 10 11 12 13)
 fi
 
-# Each run's outer limit, s: 120 s over its watchdog (`src/smoke/result.ts`'s
+# Each run's outer limit, s: 120 s (`outer_margin_s`) over its watchdog (`src/smoke/result.ts`'s
 # `SMOKE_WATCHDOG_BASE_MS`, 180 s), and over part 1's with the captures, which gains
-# `CAPTURES_WATCHDOG_MS` (`result.test.ts` holds the allowance equal to it).
+# `CAPTURES_WATCHDOG_MS` (`result.test.ts` holds the allowance equal to it). The scale stretches
+# the watchdog's share of each limit and leaves the margin as it is.
 outer_limit_s=300
 captures_allowance_s=1380
+outer_margin_s=120
+
+# The watchdogs' scale, and its largest (`src/smoke/result.ts`'s `SMOKE_WATCHDOG_SCALE_MAX`).
+scale_max=4
+scale="${HYPERION_SMOKE_WATCHDOG_SCALE:-1}"
+case "$scale" in
+    [1-${scale_max}]) ;;
+    *) echo "testRender.sh: HYPERION_SMOKE_WATCHDOG_SCALE must be a whole number from 1 to $scale_max, not '$scale'" >&2; exit 2 ;;
+esac
+if [[ "$scale" != 1 ]]; then
+    echo "testRender.sh: every watchdog stretched $scale times (HYPERION_SMOKE_WATCHDOG_SCALE)"
+fi
 
 # Milliseconds since the epoch: GNU date's `%3N`, or Perl's clock where date has no `%N` (macOS).
 now_ms() {
@@ -165,9 +183,9 @@ logs="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke-logs.XXXXXX")"
 for part in "${parts[@]}"; do
     start=$(now_ms)
     first=${#run_parts[@]}
-    limit_s=$outer_limit_s
+    limit_s=$(( (outer_limit_s - outer_margin_s) * scale + outer_margin_s ))
     if [[ ${#captures[@]} -gt 0 && "$part" == 1 ]]; then
-        limit_s=$((outer_limit_s + captures_allowance_s))
+        limit_s=$((limit_s + captures_allowance_s * scale))
     fi
     for variant in "${variants[@]}"; do
         i=${#run_parts[@]}
@@ -178,7 +196,8 @@ for part in "${parts[@]}"; do
             setsid timeout --kill-after=10 "$limit_s" "$electron" \
             ${adapter_switches[@]+"${adapter_switches[@]}"} "${headless_switches[@]}" \
             "--user-data-dir=${profiles[i]}" "$here/out/main/smoke.js" --smoke-variant="$variant" \
-            --smoke-part="$part" --smoke-fixture="$fixture" ${captures[@]+"${captures[@]}"} \
+            --smoke-part="$part" --smoke-fixture="$fixture" --smoke-watchdog-scale="$scale" \
+            ${captures[@]+"${captures[@]}"} \
             >"$logs/$i.log" 2>&1 &
         groups[i]=$!
     done

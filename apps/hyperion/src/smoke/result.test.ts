@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -11,8 +13,10 @@ import {
   judgeSmokeRun,
   readSmokeImages,
   readSmokeResult,
+  readWatchdogScale,
   SMOKE_EXIT,
   SMOKE_WATCHDOG_BASE_MS,
+  SMOKE_WATCHDOG_SCALE_MAX,
   type SmokeResult,
   smokeWatchdogMs,
   UNCAPTURED_GPU_ERROR,
@@ -126,7 +130,14 @@ describe("readSmokeImages", () => {
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
 describe("smokeWatchdogMs", () => {
-  const plain = { part: "1", captures: false, gpuTiming: false, soakSeconds: 0, childSeconds: 0 };
+  const plain = {
+    part: "1",
+    captures: false,
+    gpuTiming: false,
+    soakSeconds: 0,
+    childSeconds: 0,
+    scale: 1,
+  };
 
   it("is 180 s for a run without the captures", () => {
     expect(SMOKE_WATCHDOG_BASE_MS).toBe(180_000);
@@ -173,6 +184,22 @@ describe("smokeWatchdogMs", () => {
     );
   });
 
+  it("stretches the work's allowances by the scale", () => {
+    expect(smokeWatchdogMs({ ...plain, part: "7", scale: 2 })).toBe(360_000);
+    expect(smokeWatchdogMs({ ...plain, captures: true, scale: 2 })).toBe(
+      2 * (180_000 + CAPTURES_WATCHDOG_MS),
+    );
+    expect(smokeWatchdogMs({ ...plain, gpuTiming: true, scale: 3 })).toBe(
+      3 * (180_000 + GPU_TIMING_WATCHDOG_MS),
+    );
+  });
+
+  it("leaves the soak's and the child window's seconds unscaled", () => {
+    expect(smokeWatchdogMs({ ...plain, soakSeconds: 60, childSeconds: 30, scale: 2 })).toBe(
+      450_000,
+    );
+  });
+
   it("is the allowance testRender.sh adds to part 1's outer limit", () => {
     const allowance = /^captures_allowance_s=(\d+)$/mu.exec(script())?.[1];
     expect(Number(allowance) * 1000).toBe(CAPTURES_WATCHDOG_MS);
@@ -181,5 +208,94 @@ describe("smokeWatchdogMs", () => {
   it("leaves testRender.sh's outer limit 120 s over the base watchdog", () => {
     const limit = /^outer_limit_s=(\d+)$/mu.exec(script())?.[1];
     expect(Number(limit) * 1000).toBe(SMOKE_WATCHDOG_BASE_MS + 120_000);
+  });
+
+  it("stretches testRender.sh's outer limit with the watchdog, keeping its margin", () => {
+    const margin = /^outer_margin_s=(\d+)$/mu.exec(script())?.[1];
+    expect(Number(margin) * 1000).toBe(120_000);
+    expect(script()).toMatch(
+      /^ {4}limit_s=\$\(\( \(outer_limit_s - outer_margin_s\) \* scale \+ outer_margin_s \)\)$/mu,
+    );
+    expect(script()).toMatch(/^ {8}limit_s=\$\(\(limit_s \+ captures_allowance_s \* scale\)\)$/mu);
+  });
+
+  it("keeps testRender.sh's outer limits 120 s over the watchdog at every scale", () => {
+    const outerS = Number(/^outer_limit_s=(\d+)$/mu.exec(script())?.[1]);
+    const marginS = Number(/^outer_margin_s=(\d+)$/mu.exec(script())?.[1]);
+    const allowanceS = Number(/^captures_allowance_s=(\d+)$/mu.exec(script())?.[1]);
+    for (let scale = 1; scale <= SMOKE_WATCHDOG_SCALE_MAX; scale++) {
+      // The script's two `limit_s` lines, evaluated.
+      const limitS = (outerS - marginS) * scale + marginS;
+      expect(limitS * 1000).toBe(smokeWatchdogMs({ ...plain, part: "2", scale }) + 120_000);
+      expect((limitS + allowanceS * scale) * 1000).toBe(
+        smokeWatchdogMs({ ...plain, captures: true, scale }) + 120_000,
+      );
+    }
+  });
+
+  it("passes testRender.sh's scale to every run", () => {
+    expect(script()).toMatch(/ --smoke-watchdog-scale="\$scale" /u);
+  });
+
+  it("allows testRender.sh the same scales as the harness", () => {
+    const largest = /^scale_max=(\d)$/mu.exec(script())?.[1];
+    expect(Number(largest)).toBe(SMOKE_WATCHDOG_SCALE_MAX);
+    expect(script()).toMatch(/^ {4}\[1-\$\{scale_max\}\]\) ;;$/mu);
+  });
+});
+
+/**
+ * Runs a copy of `scripts/testRender.sh` with `HYPERION_SMOKE_WATCHDOG_SCALE` at `scale`, in a
+ * directory of its own where no Electron can be found, so that a refusal lost would launch nothing.
+ */
+function runScriptAtScale(scale: string): SpawnSyncReturns<string> {
+  const dir = mkdtempSync(join(tmpdir(), "hyperion-test-render-script-"));
+  try {
+    mkdirSync(join(dir, "scripts"));
+    const copy = join(dir, "scripts", "testRender.sh");
+    writeFileSync(copy, script());
+    return spawnSync("bash", [copy], {
+      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HYPERION_SMOKE_WATCHDOG_SCALE: scale },
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// The script needs bash, which Windows has only under WSL or Git Bash.
+describe.runIf(process.platform !== "win32")("testRender.sh's scale", () => {
+  it("refuses a scale that is not a whole number from 1 to the largest, before any run", () => {
+    for (const scale of ["0", "2x", String(SMOKE_WATCHDOG_SCALE_MAX + 1)]) {
+      const run = runScriptAtScale(scale);
+      expect(run.status).toBe(2);
+      expect(run.stderr).toContain(
+        `HYPERION_SMOKE_WATCHDOG_SCALE must be a whole number from 1 to ${SMOKE_WATCHDOG_SCALE_MAX}, not '${scale}'`,
+      );
+    }
+  });
+});
+
+describe("readWatchdogScale", () => {
+  it("reads a whole number from 1 to the largest scale", () => {
+    expect(readWatchdogScale("1")).toBe(1);
+    expect(readWatchdogScale("2")).toBe(2);
+    expect(readWatchdogScale(String(SMOKE_WATCHDOG_SCALE_MAX))).toBe(SMOKE_WATCHDOG_SCALE_MAX);
+  });
+
+  it("refuses anything else", () => {
+    for (const text of [
+      "",
+      "0",
+      "01",
+      "1.5",
+      "-1",
+      "2x",
+      " 2",
+      String(SMOKE_WATCHDOG_SCALE_MAX + 1),
+    ]) {
+      expect(readWatchdogScale(text)).toBeNull();
+    }
   });
 });

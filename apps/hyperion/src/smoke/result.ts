@@ -59,8 +59,9 @@ export const SMOKE_WATCHDOG_BASE_MS = 180_000;
  * 28.1 / 28.2 s and the far limb 62.7 / 64.6 s: 667.2 / 670.9 s in all, and part 1 757.9 /
  * 756.1 s. Twice 670.9 s is 1,341.8 s, 23 minutes rounded up.
  *
- * `scripts/testRender.sh` adds the same allowance to its outer limit, as `captures_allowance_s`,
- * so that the outer limit stays 120 s over the watchdog; `result.test.ts` holds the two equal.
+ * `scripts/testRender.sh` adds the same allowance to its outer limit, as `captures_allowance_s`
+ * (each times the same scale, {@link SmokeWatchdogInputs.scale}), so that the outer limit stays
+ * 120 s over the watchdog; `result.test.ts` holds the two equal.
  */
 export const CAPTURES_WATCHDOG_MS = 1_380_000;
 
@@ -80,6 +81,21 @@ export const CAPTURES_WATCHDOG_MS = 1_380_000;
  */
 export const GPU_TIMING_WATCHDOG_MS = 480_000;
 
+/**
+ * The largest whole factor `--smoke-watchdog-scale` may stretch a run's watchdog by
+ * (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`).
+ *
+ * @remarks
+ * For a machine much slower than the development one. Measured 2026-10-29 on a cloud machine
+ * (an AMD EPYC 7571, Zen 1 at 2.5 GHz, 4 cores with SMT, no GPU): with both variants side by
+ * side, as `just test-render` runs them, 7 of the 13 parts outlasted 180 s at a 1-minute load of
+ * 9 to 17, with no check failing; at a scale of 2 the longest, part 7, took 255 s of its 360 s. A
+ * scale is a hang detector's margin, not a budget: no check reads it. Four is a cap, so that a
+ * hung part of `just test-render` still ends within 12 minutes (part 1 with the captures within
+ * 104).
+ */
+export const SMOKE_WATCHDOG_SCALE_MAX = 4;
+
 /** What sets a run's watchdog: the main process's switches. */
 export interface SmokeWatchdogInputs {
   /** `--smoke-part`'s value: `1` to `13`, or `all`. */
@@ -92,20 +108,37 @@ export interface SmokeWatchdogInputs {
   readonly soakSeconds: number;
   /** `--smoke-child`'s seconds, 0 for none. */
   readonly childSeconds: number;
+  /**
+   * `--smoke-watchdog-scale`'s whole factor, 1 to {@link SMOKE_WATCHDOG_SCALE_MAX} (1 without it),
+   * by which the allowances for the page's work are stretched.
+   */
+  readonly scale: number;
 }
 
 /**
- * A run's watchdog, ms: {@link SMOKE_WATCHDOG_BASE_MS}, plus the soak's and the child window's
- * seconds, plus {@link CAPTURES_WATCHDOG_MS} where the captures are asked for and
- * {@link GPU_TIMING_WATCHDOG_MS} where timestamp quantization is lifted, each where the run takes
- * part 1, whose groups they are (part 1 or all of them).
+ * A run's watchdog, ms: {@link SMOKE_WATCHDOG_BASE_MS}, plus {@link CAPTURES_WATCHDOG_MS} where the
+ * captures are asked for and {@link GPU_TIMING_WATCHDOG_MS} where timestamp quantization is
+ * lifted, each where the run takes part 1, whose groups they are (part 1 or all of them), those
+ * three times the scale; plus the soak's and the child window's seconds, which are the clock's and
+ * are not scaled.
  */
 export function smokeWatchdogMs(inputs: SmokeWatchdogInputs): number {
-  const { part, captures, gpuTiming, soakSeconds, childSeconds } = inputs;
+  const { part, captures, gpuTiming, soakSeconds, childSeconds, scale } = inputs;
   const partOne = part === "1" || part === "all";
   const capturesMs = captures && partOne ? CAPTURES_WATCHDOG_MS : 0;
   const timingMs = gpuTiming && partOne ? GPU_TIMING_WATCHDOG_MS : 0;
-  return SMOKE_WATCHDOG_BASE_MS + (soakSeconds + childSeconds) * 1000 + capturesMs + timingMs;
+  return (
+    (SMOKE_WATCHDOG_BASE_MS + capturesMs + timingMs) * scale + (soakSeconds + childSeconds) * 1000
+  );
+}
+
+/**
+ * `--smoke-watchdog-scale`'s value as a factor, or `null` unless it is a whole number from 1 to
+ * {@link SMOKE_WATCHDOG_SCALE_MAX} in plain digits (`01`, `+2` and `2.0` are refused).
+ */
+export function readWatchdogScale(text: string): number | null {
+  const scale = Number(text);
+  return /^[1-9]\d*$/u.test(text) && scale <= SMOKE_WATCHDOG_SCALE_MAX ? scale : null;
 }
 
 /** Whether a URL may load in the harness: the built page and inline data only. */
