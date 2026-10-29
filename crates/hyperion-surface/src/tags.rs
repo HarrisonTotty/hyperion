@@ -30,8 +30,8 @@
 //!
 //! | Tag                      | Scope           | Key            | Draws                                                          |
 //! | ------------------------ | --------------- | -------------- | -------------------------------------------------------------- |
-//! | `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, crust type per plate          |
-//! | `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency boundary warp's lattice                      |
+//! | `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, areas, continental nuclei     |
+//! | `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency warp's lattice, of boundaries and continents |
 //! | `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces                      |
 //! | `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of the boundary diameter and wider: count, place, age, morphology |
 //! | `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                    |
@@ -48,12 +48,14 @@ hyperion_base::domain_tags! {
 
     // Plan R09: the surface generator (R09.T1.a), each with the key form of the table above.
 
-    /// The coarse pass's plates (R09, Design note 6), keyed by `surface_item(k)` for plate k: the
-    /// plate count, each plate's seed point, Euler pole and crust type.
+    /// The coarse pass's plates (R09, Design note 6), keyed by `surface_item(k)` for plate k: each
+    /// plate's seed point, Euler pole, area and continental nucleus (its centre and size), and the
+    /// tail's plate count from a word of item 0 (R09.T11).
     SURFACE_COARSE_PLATES: SurfaceCoarse = "surface.coarse.plates";
 
-    /// The coarse pass's low-frequency warp of the plate boundaries (R09, Design note 6), keyed by
-    /// `surface_cell` of the warp lattice's cells.
+    /// The coarse pass's low-frequency warp of the plate boundaries and of the continents' outlines
+    /// about their nuclei (R09, Design note 6), keyed by `surface_cell` of the warp lattice's
+    /// cells.
     SURFACE_COARSE_WARP: SurfaceCoarse = "surface.coarse.warp";
 
     /// The coarse pass's landform noise and volcanic provinces (R09, Design notes 6 and 7), keyed
