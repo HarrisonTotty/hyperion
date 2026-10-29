@@ -5727,7 +5727,10 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       ΔJ_pol share T14.b's grid, and are stored summed in one table of m = 0..2, so that the
       kernels make one read where a thin world makes Ψ_ms's and the correction's.
 
-  Acceptance: `pnpm test` and `just test-render` pass.
+  Acceptance: `pnpm test` and `just test-render` pass. _Built 2026-10-29_ (Risks, "Deviations in
+  T14.f, as built"; "R08.T14.f's vector gates", which no case passes; "R08.T14.f's frame and bytes
+  record", pending the owner's RTX run; and "Preconditions of the correction's route", which main
+  turns on).
 
 - **R08.T14.d The gates.**
   - It needs R08.T14.f. The Venus-class cases (92 and 58 bar) and the Titan-class case, through the
@@ -5823,10 +5826,11 @@ Acceptance: `pnpm test`.
     [The scales the view spans](../../brainstorming/rendering-and-planets.md#the-scales-the-view-spans),
     is the same figure at width ÷ field.
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
-  and tables, one layer a latitude band (Design note 17). This task adds its read path to R07's
-  `view/shaders/bodyDisc.wgsl`, read at each disc pixel's geodetic latitude, beyond
-  `GAS_GIANT_FULL_PASS_BOUNDARY_M` for a body with an atmosphere, keeping the albedo-only shading
-  for airless bodies, and updates the catalogue entries that compose the library (`bodies:disc`,
+  and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
+  polarisation correction in it or alone, as the march does (`shaders/thickRead.wgsl`). This task
+  adds its read path to R07's `view/shaders/bodyDisc.wgsl`, read at each disc pixel's geodetic
+  latitude, beyond `GAS_GIANT_FULL_PASS_BOUNDARY_M` for a body with an atmosphere, keeping the
+  albedo-only shading for airless bodies, and updates the catalogue entries that compose the library (`bodies:disc`,
   `bodies:discLimb`, the smooth mesh and the `disc cells` kernel). The table binds through
   `view/bodies/draw.ts`'s `DISC_TEXTURES` at a free group 2 binding (6 or above, after R08.T9.b's),
   and R07's CPU twin `view/bodies/discShading.ts` gains the same read. The boundary's hysteresis,
@@ -21063,6 +21067,180 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
   - _The depolarisers' peak_ (changed after the science check, above). If a ruling prefers the
     check's model, in which a depolariser's peak passes polarisation, only `truncatedMoments`
     changes, along with the slab test's bound. No test column has a depolariser mixed with air.
+- **Deviations in T14.f, as built** (2026-10-29; `thick/read.ts`, `shaders/thickRead.wgsl`,
+  `hillaire.ts`, `tables.ts`, `tablesCpu.ts`, `reference/twin.ts`, `thick/columnLayout.ts`,
+  `thick/routing.ts`, `thick/keptBake.ts`, `thick/polarisation.ts`, `opticsPool.ts`,
+  `AtmosphereCache.ts`, `view/photoreal/renderer.ts`, the smoke's `atmosphere.ts`, `page.ts` and
+  `frameTiming.ts`, `testRender.sh`, `reference/caseGate.ts`, `reference/vectorGate.test.ts` and
+  `vectorGate.json`, `test/thickTables.ts`, each with its tests; `decision-r08-t13c2-classes.md`
+  §6).
+  - _One table, two kinds._ Binding 24's table (`rgba32uint`) holds either kind, named in its info
+    row's word 34 (`thick/read.ts`'s `ThickTableKind`):
+    - `thick`, the bake's E with σ_s ΔJ_pol summed into it on T14.b's grid, which they share to
+      the bit (T14.e's record), in place of Ψ_ms from the first μ₀ cell up: §6's lever, one read a
+      sample and source. m = 2 is σ_s ΔJ_2 alone, since the bake holds m ≤ 1; a body with no
+      correction holds 0 there.
+    - `correction`, a thin world's ΔJ_pol alone, added to Ψ_ms, which stays whole with the lobes'
+      orders, the sum held at 0 (a correction is of either sign).
+    - The correction is packed per unit of the kernels' σ_s,k: ΔJ × σ_s(h) ÷ σ_s,k(h), σ_s the
+      drawn medium's terms' scattering at the kernel medium's densities, which is the record's
+      σ_s,k ÷ (1 − f̄_c). Only `read.test.ts` holds that factor: no gated case has a forward
+      delta but Mars, whose correction is 0.02% rms.
+  - _m = 2 in the spare word._ G₂ = E² ÷ (σ_s,k sin²θ_v sin²θ₀) as three 9-bit two's-complement
+    mantissas and a shared exponent (bias 24): 2⁻²⁴ to 32,640, each to 1 in 255 of its texel's
+    largest (2⁻²⁵ at the least exponent). The read is J⁰ + G·h⊥ + G₂·(2h⊥² − (1 − μ_v²)(1 − μ₀²)),
+    which is Σ_m Eᵐ cos mΔφ ÷ σ_s,k at the cells' centres (the science check, 2026-10-29: the
+    identity, the azimuth origin shared with the bake, and the sinᵐ regularity of the modes). A
+    band and light stays 270,592 B allocated, against Design note 11's 393 KB for three modes in
+    `rgba16float`, so the lever costs no byte over T14.c's table. `THICK_MODES` is 3, the stored
+    modes; `THICK_SOURCE_MODES` (2) is the bake's.
+  - _No new kernels._ A thin world with a correction draws by T14.c's six thick kernels, which
+    branch on the kind: `VIEW_KERNELS`, R01.T15's bound and `MarchKernels` are unchanged, and
+    `thickKernels.test.ts` still pins the thin kernels' digests as at e8b5c6f3. The forward
+    lobes' rewrite takes `thickAnalyticWeight` (the share on a `thick` table, 1 beside a
+    `correction`). Such a world takes no tile cull, which a view does not use (`area` cover).
+    Shared lines changed: `TABLE_SIZES` gains `polarisation` (`POLARISATION_TABLE_SIZE`, the
+    thick grid at three modes) on both settings, and `THICK_TABLE_SIZE.modes` is 3.
+  - _Below the horizon_ (as ruled for the thick table, and T14.e's "ΔJ_pol = 0 where the beam is
+    undefined"). The correction takes the table's share, clamp(32 μ₀, 0, 1), on both kinds: none
+    at μ₀ ≤ 0, so that a sunset's sky is continuous. That leaves the polarisation of twilight
+    uncorrected, the gates' largest new miss (below).
+  - _The tables_ gain `setPolarisationCorrection`, which packs beside the bake held (or alone),
+    `holdsPolarisationCorrection`, and the restore keeps both. The twin (`TwinOptions.polarisation`,
+    `TwinSources.thick` with its kind) mixes as `thickRead.wgsl`'s `thickMultipleAt` does.
+  - _The bake per world_ (`AtmosphereCache.ts`). A drawn body whose column needs it
+    (`thick/columnLayout.ts`'s `correctionBySources`, by its sources alone, so the render thread
+    loads no optics: a molecular or Thomson term, or a Rayleigh channel source; `null`, an
+    aerosol column alone, is asked and the bake tells) has its correction asked once its tables
+    are made, beside any thick bake: the pool's `bakePolarisation`, one `polarisation-bake` with
+    the thick bake's fields. Its failures are a thick bake's: never item 6's fault.
+  - _The labels._ While the thick bake runs, `ATMOSPHERE: COMPUTING` as T14.c built it. While the
+    correction alone runs, COMPUTING stands only where its landing leaves no `ATMOSPHERE:
+APPROXIMATE` (the UX review, against the guide's COMPUTING row: the computed light replaces
+    the approximation); an unrouted thick world keeps APPROXIMATE with `THICK_REASON` throughout.
+    A failed correction adds APPROXIMATE with `POLARISATION_REASON`, "multiple scattering: drawn
+    without its polarisation", until the atmosphere is next computed. Both texts await the
+    guide's sign-off (below).
+  - _The route held_ (lean, 2026-10-29). `thick/routing.ts`'s `CORRECTION_ROUTED` is `false`: the
+    product asks no correction yet, its tests by injection (`corrects`), as T14.c held the thick
+    bake. Turned on, every world with air changes its draw path, as T14.d's routing changes a
+    thick world's, so it waits on "Preconditions of the correction's route" (below); the renderer
+    then makes the thick kernels ahead (`FrameKernelsAhead.thick`), which T14.c left for T14.d.
+  - _R08.T16.b_ is not built: its text now says it reads the table as the march does.
+  - _The gates_ (`reference/vectorGate.test.ts`, `vectorGate.json`; below). Recorded, never
+    asserted (`decision-r08-t13-scope.md`, ruling 12). By hand (`HYPERION_VECTOR_GATE=1`, with
+    `HYPERION_BLESS=1` to write) the four cases are baked and corrected (`thick/keptBake.ts`'s new
+    `bakeKeptCorrection`) and both paths' twins computed: 264 s on a pod's 4 vCPU. In `pnpm test`
+    the route's verdicts are re-formed from the record's values and `earth`'s route is baked and
+    sampled (49 s there); the whole record, byte for byte, under `HYPERION_SLOW_TESTS=1` (135 s).
+    `caseGate.ts` takes the recorded runs' `recordImagesOf` and `recordRatiosOf`.
+  - _The smoke._ Part 13's Earth twins and part 3's Saturn-class twins now draw the summed table
+    (an m = 2 in every texel, `test/thickTables.ts`'s new `patternedCorrection`), and part 13
+    gains "R08.T14.f the correction's kernels against their twins on Earth" (the correction alone,
+    from 2 km at the sun 20° and 1° up): every check within R08.T6.b's 10⁻³ on a pod. The frame
+    timing's (K) and (L) now draw the bake with its correction summed in, and (M) and (N) the
+    correction alone, under `--smoke-thick-read=1`.
+- **R08.T14.f's vector gates** (`reference/vectorGate.json`, 2026-10-29; nothing re-traced). c1's
+  case gate against the committed references' vector I with the correction, each case through
+  `classifyRegime`'s route under a clear sky (all four `thickScattering`: the bake with the
+  correction summed in), beside the analytic path with the correction, the uncorrected twin against
+  the vector I, and c1's own record. Misses of the comparisons; worst |ΔL| ÷ (T + 4σ):
+
+  | Case               | Routed, vector I | T14.c's bake, scalar I | Analytic with the correction | Uncorrected, vector I | c1 (uncorrected, scalar I) |
+  | ------------------ | ---------------- | ---------------------- | ---------------------------- | --------------------- | -------------------------- |
+  | `earth`            | 56 of 360, 2.92  | 47, 2.92               | 120, 3.58                    | 119, 3.81             | 109, 3.68                  |
+  | `earth-ozone-slab` | 52 of 360, 2.97  | 44, 2.98               | 115, 3.55                    | 120, 3.78             | 108, 3.65                  |
+  | `mars`             | 197 of 384, 27.9 | 197, 27.9              | 213, 7.48                    | 213, 7.49             | 213, 7.48                  |
+  | `saturn-oblate`    | 124 of 474, 40.0 | 122, 38.8              | 263, 40.0                    | 256, 40.0             | 255, 38.8                  |
+  - **No case passes.** These are findings against R08.T14.d's preconditions, the gate unloosened.
+  - **In daylight the correction is right.** The analytic path's change from it tracks the
+    references' (I_vector − I_scalar) ÷ I_scalar over the s0–s80 views:
+    - `earth`: correlation 0.988, slope 1.02, rms residual 0.21% of an rms 1.33% effect (σ_ref
+      0.48%);
+    - `saturn-oblate`: 0.980, slope 1.18, residual 1.14% of 3.83%;
+    - `mars`: 0.983, its effect 0.02% rms (its dust a depolariser, its CO₂ thin).
+    - The 1.18 is the analytic path's own bias scaling a relative change. Taken absolute, the
+      correction is 0.97–0.98 of the references' difference on both (the science check's
+      reconstruction), inside T14.e's 0.5% of I.
+    - On the route, every daylit image misses as T14.c's scalar run through the bake did: `earth`
+      s30 2, s60 12, s80 12 (T14.c 1, 12, 13), `saturn-oblate`'s s60 and s80 0 at every latitude.
+      Those misses are the bake's m ≤ 1 (precondition 1).
+  - **Twilight is not corrected.** At μ₀ ≤ 0 the correction is 0 by the table's domain, and the
+    references' polarisation grows through the terminator (the science check), rms
+    (I_v − I_s) ÷ I_s:
+    - `earth`: 1.5% at s80, 2.6% at s90 (−5.7% to +8.4%), 3.5% at s95 (to +10.4%);
+    - `saturn-oblate`: 5.1–5.8%, 5.8–6.3% (to +18%), 5.2–5.3%.
+    - So `earth`'s ground-s90 goes from 17 misses (scalar) to 26, `earth-ozone-slab`'s from 16 to
+      24, and `saturn-oblate`'s s90 images from 8, 5 and 4 to 13, 11 and 10.
+  - **R08.T13's surface irradiance**, uncorrected, against `earth`'s vector `flux-s0`
+    downwelling: +0.29%, +0.24% and −0.07% (red, green, blue): passes at 2%.
+  - **The correction's tables.** `earth` one band and slot, 270,592 B, 5 solves; `mars` 3;
+    `saturn-oblate` four bands, 1,082,368 B, 12. Largest |ΔJ_m|, m = 0, 1, 2: `earth` 7.0, 6.3 and
+    2.7 × 10⁻³ sr⁻¹; `mars` 4.1, 3.1 and 1.9 × 10⁻⁵; `saturn-oblate` 1.28, 1.28 and 0.52 × 10⁻².
+    The correction alone's J⁰ halves under the least normal (6.1 × 10⁻⁵): 9,403 of 50,736 on
+    `earth`, 50,322 of 50,736 on `mars` (its whole correction is under it), 6,652 of 202,944 on
+    `saturn-oblate`; a subnormal's step, 6 × 10⁻⁸ sr⁻¹, is under 10⁻⁵ of J there.
+
+- **R08.T14.f's frame and bytes record** (pending: the owner's RTX run). In the pod there is no
+  GPU, so no frame was timed.
+  - **The run**, QW33 for the owner: the hidden RTX run of part 1 with `--smoke-gpu-timing=1
+--smoke-thick-read=1`, as QW32's, on the lane's last task commit. (K) and (L) now hold the
+    measured Earth's bake with its correction summed in (the lever, against QW32's (K) and (L),
+    the bake alone: the same read and one more word a texel), and (M) and (N) the correction
+    alone, the path every world with air takes once routed, against the 15.67 and 16.67 ms rows.
+  - **The UHD 620's cost** is the owner's to record. If the low setting misses its budget, it
+    drops the correction from the aerial perspective first and m = 1 second (the task).
+  - **Bytes a planet**, against Design note 11's 2 MB row: a correction adds 270,592 B a band and
+    light slot, as the thick table does, and a summed table adds nothing over the bake.
+    - The measured Earth: 439,200 + 270,592 = 709,792 B with one star; 598,704 + 541,184 =
+      1,139,888 B with two.
+    - A Saturn-class world, four bands, about 1.25 MB before it (R08.T11's giants' rows): +1.08 MB
+      with one star, 2.33 MB, and +2.16 MB with two, 3.41 MB. Over 2 MB either way: Design note
+      11's "the correction's μ₀ axis halves first" is not built, and `rowBodyOf` decides on the base
+      bytes alone (precondition 4's).
+- **Preconditions of the correction's route** (lean, 2026-10-29; main's to rule). Before
+  `CORRECTION_ROUTED` turns on:
+  1. QW33's (M) and (N) meet `decision-r08-t11-frame.md`'s p95 ≤ 16.67 ms at every high row
+     (15.67 the target). T14.c's thick read cost +0.8 to +1.8 ms, and class map 10⁷ m x4 stood
+     at 16.45–16.51 ms; a correction alone also reads Ψ_ms at every μ₀.
+  2. The guide's rows signed off (`docs/frontend/ux-guidelines.md`; the UX review's drafts):
+     - `ATMOSPHERE: COMPUTING`, now limited to multiple scattering beyond the thin method's
+       checked range, would read: "…while the console computes the light of an atmosphere the
+       view draws: its multiple scattering, where that lies beyond the thin-atmosphere method's
+       checked range, for a kind that has passed its check against an independent path-traced
+       reference, such as an Earth-, Venus- or Titan-class world's; or its multiple scattering's
+       polarisation, for every world with air, thin or thick. … the note stands in place of
+       `ATMOSPHERE: APPROXIMATE` only where the computations under way would clear it."
+     - `ATMOSPHERE: APPROXIMATE` gains "It also stands where a body's polarisation correction
+       failed, its multiple scattering drawn without its polarisation, until the body's
+       atmosphere is next computed (`Multiple scattering: drawn without its polarisation, for
+KX 4417 /2`)."
+     - Whether a tenuous world whose correction failed is APPROXIMATE at all: Design note 10's
+       uncorrected error at τ 0.06 is ±3.6%, inside the 5%, and no thin case is gated.
+  3. Design note 11's 2 MB row counts the correction: the μ₀ axis halved first (16 cells, each
+     the mean of two of the bake's), then the widening; `rowBodyOf` deciding on the bytes with
+     it (with T14.d's precondition 4).
+- **R08.T14.d's preconditions after T14.f** (lean, 2026-10-29; beside main's five):
+  - _Twilight's polarisation._ Earth's ground-s90 now misses 26 against the vector I where the
+    bake missed 17 against the scalar. The science check's cheap lever: on a `correction` table,
+    below μ₀ = 1/64, add ΔJ read at 1/64 times Ψ_ms(h, μ₀) ÷ Ψ_ms(h, 1/64), one more Ψ_ms read in
+    that band, continuous, and 0 at night with Ψ_ms; on a `thick` table the same for its
+    analytic share. It departs from "ΔJ_pol = 0 where the beam is undefined" and §6's
+    below-horizon rule, so it waits on a ruling.
+  - _Precondition 1's m = 2 of the bake_ (about 0.71 of m = 0 on Earth's aerosol, T14.c's record)
+    would share G₂'s word with the correction's: 1 in 255 of the texel's largest channel. If that
+    is too coarse there, the table takes a second texel a cell.
+- **Deferred findings (2026-10-13 rule)** (R08.T14.f). Recorded and deferred:
+  - _The smoke's parts on a pod_ (4 vCPU, 2026-10-29): part 13 ran 131 s at the base and 162 s
+    with the correction's group (19 s) while tsc ran beside it; part 3 overran its 180 s watchdog
+    at the base and with T14.f alike, R08.T6.g's group alone 151–169 s there (67 s on the
+    desktop). The gate's own figures are main's to read on the desktop.
+  - _Bakes of zeros._ A column of depolarising aerosols alone (`correctionBySources` `null`) is
+    asked a correction of zeros under COMPUTING; no world in plan 14 has one.
+  - _The f32 corrections past an eviction_ (608,256 B a band and light) are held with the entry,
+    uncounted by the 32 MB budget, as T14.c's bakes are.
+  - _`packThickTable`'s inputs_ (`bands | null`, `correction | null`) could be a union of the two
+    kinds; both `null` is refused at run time.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
