@@ -283,8 +283,8 @@ describe("the key the cache holds a medium under", () => {
     );
   });
 
-  it("keys on the optics' version 2, raised by R08.T10.d's H's own width", () => {
-    expect(ATMOSPHERE_OPTICS_VERSION).toBe(2);
+  it("keys on the optics' version 3, raised by R08.T4.f's hot tables", () => {
+    expect(ATMOSPHERE_OPTICS_VERSION).toBe(3);
   });
 
   it.each(["unset", "airless"] as const)(
@@ -361,7 +361,8 @@ describe("the assembly's seams", () => {
   });
 
   it("lists the line species the worker loads: those the record lists with committed tables", () => {
-    expect(lineSpeciesOf(recordInput(detailOf(earthDetail())))).toEqual(["CO2", "H2O"]);
+    // N₂'s hot table among them, though N₂ is transparent below its 1,800 K (R08.T4.f).
+    expect(lineSpeciesOf(recordInput(detailOf(earthDetail())))).toEqual(["CO2", "H2O", "N2"]);
   });
 
   it("lists none for a body that draws no air", () => {

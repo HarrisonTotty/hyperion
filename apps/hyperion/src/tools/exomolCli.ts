@@ -828,9 +828,9 @@ export const HARRIS: ExoMolSource = archivedList({
   species: "HCN",
   citation:
     "ExoMol line list Harris for 1H-12C-14N, as its archive holds it (G. J. Harris et al., Mon. " +
-    "Not. R. Astron. Soc. 367 (2006) 400-406; R. J. Barber et al., ExoMol line lists III: An " +
-    "improved hot rotation-vibration line list for HCN and HNC, Mon. Not. R. Astron. Soc. 437 " +
-    "(2014) 1828-1835)",
+    "Not. R. Astron. Soc. 367 (2006) 400-406, DOI 10.1111/j.1365-2966.2005.09960.x; R. J. " +
+    "Barber et al., ExoMol line lists III: An improved hot rotation-vibration line list for HCN " +
+    "and HNC, Mon. Not. R. Astron. Soc. 437 (2014) 1828-1835, DOI 10.1093/mnras/stt2011)",
   record: 5_716_828,
   def: fetched(
     "1H-12C-14N__Harris.def",
@@ -1014,7 +1014,12 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
     notes:
       "From 296 K, where its overtones already pass the pending bound, to AYT2's limit, 1500 K by " +
       "its definition: below 296 K the 296 K node is held and above 1500 K the 1500 K node, each " +
-      "estimated. The nodes 296 K, then T4.d's 50 K grid from 350 K and E1' from 1000 K. Fetched " +
+      "estimated (its paper gives 2000 K). AYT2 is complete only to 11000 cm-1 above room " +
+      "temperature and to about 20000 cm-1 (500 nm) at 296 K, its visible intensities less " +
+      "accurate (Azzam et al. 2016, abstract and section 2): its hot visible values are lower " +
+      "limits, and those below 500 nm lie past its completeness at every temperature. The table " +
+      "is kept measured, as R08.T4.c judged the list. " +
+      "The nodes 296 K, then T4.d's 50 K grid from 350 K and E1' from 1000 K. Fetched " +
       "from the database's archive, whose states file differs from the one R08.T4.c summed " +
       "(SHA-256 52cf071a...da13), its .pf the same.",
   }),
@@ -1025,9 +1030,11 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
     basis: "measured",
     what: "SiO's A-X hot bands and its other systems in the range (SiOUVenIR, R08.T4.f), from 1000 K (E2).",
     notes:
-      "Below 1000 K the 1000 K node is held, estimated: SiO's visible A-X hot bands reach the range " +
-      "only above about 1000 K (decision-r08-t4ef-storage section 1.4, E2), where its X 12-0 band's " +
-      "296 K cells are 1e-39 m2; above 4000 K the 4000 K node is held, estimated, SiOUVenIR " +
+      "Below 1000 K the 1000 K node is held, estimated: SiO's visible absorption begins near " +
+      "1000 K, in its spin-forbidden d3Delta-X band (ab initio) at 1000-1500 K, its A-X hot bands " +
+      "dominant from about 2500 K (R08.T4.c's bound; decision-r08-t4ef-storage section 1.4, E2), " +
+      "where its X 12-0 band's 296 K cells are 1e-39 m2; above 4000 K the 4000 K node is held, " +
+      "estimated, SiOUVenIR " +
       "being valid to 10000 K. Fetched from the database's archive, whose states file differs " +
       "from the one R08.T4.c summed (SHA-256 acf9fc10...0756), its transitions and .pf the same.",
   }),
@@ -1069,16 +1076,23 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
       "Hands over from R08.T4.d's HITRAN2024 table at 300 K, its first node at or above HITRAN's " +
       "296 K. There Harris's cell means at 10 Pa are 1.003-1.005 times that table's in its 41 cells " +
       "above a hundredth of its peak (HITRAN2024's sum over its 84 cells 0.996 of Harris's direct " +
-      "sums), while its 43 weaker cells, at the bands' edges, hold lines HITRAN2024 lacks, up to 3.4 " +
-      "times a cell's mean. Over the columns at which R08.T4.d's table transmits 0.2-0.8, a cell's " +
-      "transmittance steps by up to 0.09 in the stronger cells at 1 kPa and 0.1 MPa, the hot table " +
-      "transmitting more, as narrower lines would (Harris's default width, 0.084 cm-1 per bar with " +
-      "n = 0.5, its .def), and by up to 0.48 at 1 kPa and 0.77 at 0.1 MPa in the weaker cells " +
-      "(hotLines.test.ts). At and below 300 K the client reads R08.T4.d's table, above it this one " +
+      "sums). Its 43 weaker cells, at the bands' edges, run from 0.84-0.90 times that table's (five " +
+      "cells of line wings alone, Harris's lines narrower) through 12 within 1% to 3.4 times where " +
+      "both hold lines; in six (658, 659, 696, 741, 748 and 750 nm), where R08.T4.d's table holds " +
+      "only wings of at most 4e-38 m2, Harris's lines give 4.5e-35 to 6.8e-34 m2, and its 15 cells " +
+      "past that table's lines (660-662, 697-707 and 749 nm) hold up to 2.0e-34 m2. Over the " +
+      "columns at which R08.T4.d's table transmits 0.2-0.8 (from about 1.3e28 m-2 at 0.1 MPa), a " +
+      "cell's transmittance steps by up to 0.09 in the stronger cells at 1 kPa and 0.1 MPa, the " +
+      "hot table transmitting more, as narrower lines would (Harris's default width, 0.084 cm-1 " +
+      "per bar with n = 0.5, its .def, against HITRAN's air widths of about 0.11 cm-1 per atm at " +
+      "300 K, intensity-weighted, the science check's figure from HITRAN2020's), and by up to 0.48 " +
+      "at 1 kPa and 0.77 at 0.1 MPa in the weaker cells (hotLines.test.ts). With n = 0.5 against " +
+      "HITRAN's 0.75-0.84 the assumed width is about a HITRAN-like one's near 600 K and 2.5 times " +
+      "it at 4000 K. At and below 300 K the client reads R08.T4.d's table, above it this one " +
       "(kDistribution.ts's tableAt). Above 4000 K, Harris's limit, the 4000 K node " +
       "is held, estimated. The table is estimated, as R08.T4.c judged Harris's values: the list " +
       "holds few hot bands in the range, so its hot values are lower limits. The list ends at " +
-      "17585.79 cm-1 (568.6 nm), so its cells run 569-760 nm. " +
+      "17585.79 cm-1 (568.6 nm), so its cells run 568-760 nm, the 568 nm cell holding wings alone. " +
       "Fetched from the database's archive, whose states file differs from the one R08.T4.c summed " +
       "(SHA-256 631f775e...516a), its transitions and .pf the same.",
   }),
@@ -1098,9 +1112,14 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
       "4500-15700 cm-1 and carried past it, its widths assumed. Its .def gives no default width, so " +
       "every line takes 0.07 cm-1 per bar with n = 0.5, the default all the other R08.T4.f lists' " +
       ".def give but Harris's (0.084), estimated; its Q(T) is its .pf, interpolated from Barklem " +
-      "and Collet 2016's, its states file holding the triplet states alone. Its cells lie 20-30 " +
-      "times under the band model's pending bound, which put each band's strength in its origin's " +
-      "cell from short lifetimes.",
+      "and Collet 2016's, its states file holding the triplet states A, B, W and B' alone. At the " +
+      "nodes they share (1800, 2500, 3000 and 4000 K) its 760 nm cell lies 20-34 times under the " +
+      "band model's bound, which put each band's strength in its origin's cell from short " +
+      "lifetimes, and its other 460-760 nm cells above a hundredth of the bound's peak 14 times " +
+      "under it at the median (0.5-44). Its states do not reach the C state, so the second " +
+      "positive (C3Piu-B3Pig) bands are not in it: the band model of both systems stays pending " +
+      "as N2's secondPositive part (bounds.json), its cells over 380-459 nm reaching 10^3-10^7 " +
+      "times the table's.",
   }),
 };
 

@@ -591,7 +591,11 @@ const PENDING: ReadonlyArray<PendingListing> = [
     task: "R08.T4.e",
     what: "H2- free-free, from Bell 1980's table once a lawful copy is fetched",
   },
-  { key: "VO", task: "R08.T4.f", what: "its bands (ExoMol's HyVO, which its service serves)" },
+  {
+    key: "VO",
+    task: "R08.T4.f",
+    what: "its bands (ExoMol's HyVO), R08.T4.f's part 2: the list is in no archive the reducing machine could reach",
+  },
   {
     key: "CO",
     task: "R08.T4.f",
@@ -607,7 +611,13 @@ const PENDING: ReadonlyArray<PendingListing> = [
   {
     key: "CO2",
     task: "R08.T4.f",
-    what: "hot CO2 above HITRAN's 500 K, to which R08.T4.d's table is held (ExoMol's UCL-4000 considered)",
+    what: "hot CO2 above HITRAN's 500 K, to which R08.T4.d's table is held (ExoMol's UCL-4000 considered), deferred by R08.T4.f, the super-lines carrying none of that table's chi far-wing variants",
+  },
+  {
+    key: "N2",
+    task: "R08.T4.f",
+    part: "secondPositive",
+    what: "the second positive (C-B) bands from the B state above 1800 K, which WCCRMT's states do not reach, bounded by the band model of both systems (estimated)",
   },
   {
     key: "HCl",
@@ -615,7 +625,11 @@ const PENDING: ReadonlyArray<PendingListing> = [
     part: "overtones",
     what: "the 8-0 band (HITRAN2024's, an extrapolation) and the 9-0 to 11-0 bands, which HITRAN2024 lacks, by the overtone ladder below 8-0 (estimated)",
   },
-  { key: "H2O", task: "R08.T4.f", what: "hot H2O (POKAZATEL)" },
+  {
+    key: "H2O",
+    task: "R08.T4.f",
+    what: "hot H2O (POKAZATEL), R08.T4.f's part 2: its archive holds its opacities, not its transitions",
+  },
 ];
 
 /** A pending absorber: its key, the task that draws it, what it draws, and its cell means. */

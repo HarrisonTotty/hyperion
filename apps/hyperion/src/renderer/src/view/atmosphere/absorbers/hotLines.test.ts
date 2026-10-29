@@ -180,7 +180,7 @@ describe("the species R08.T4.f draws and leaves pending", () => {
     ]).toEqual([[], []]);
   });
 
-  it("leave each drawn species no R08.T4.f entry but its parts' (CO's overtones)", () => {
+  it("leave each drawn species no R08.T4.f entry but its parts' (CO's overtones, N₂'s second positive)", () => {
     expect(
       PENDING_ABSORBERS.filter(
         (p) => p.task === "R08.T4.f" && p.part === undefined && DRAWN.some((key) => key === p.key),
@@ -194,6 +194,15 @@ describe("the species R08.T4.f draws and leaves pending", () => {
         (key) => !PENDING_ABSORBERS.some((p) => p.key === key && p.task === "R08.T4.f"),
       ),
     ).toEqual([]);
+  });
+
+  it("keep N₂'s second positive bands pending, which WCCRMT's states do not reach, from 1,800 K", () => {
+    const part = PENDING_ABSORBERS.find((p) => p.key === "N2" && p.part === "secondPositive");
+    expect([part?.task, part?.bound.basis, part?.bound.temperaturesK[0]]).toEqual([
+      "R08.T4.f",
+      "estimated",
+      1_800,
+    ]);
   });
 
   it("stay within T4.f's budget, the cap less what was committed before it", () => {
@@ -251,6 +260,10 @@ describe("the drawn tables' recorded tiers (T4.d's)", () => {
 
   it.each(DRAWN)("pass %s's chain tier, 2 × 10⁻³", (key) => {
     expect(sidecarOf(key).worstChainError).toBeLessThanOrEqual(2e-3);
+  });
+
+  it("keep the hold below 10 Pa measured where the 1 Pa check passes, all but FeH's", () => {
+    expect(DRAWN.filter((key) => !sidecarOf(key).measuredBelowGrid)).toEqual(["FeH"]);
   });
 
   it.each(DRAWN)("keep each of %s's parts under 480,000 bytes", (key) => {
@@ -380,9 +393,13 @@ function handOverDifference(
   const hot = kDistributionAt(hotTable(species), atK);
   const coldSigmas = cellSigmasAt(cold, pressurePa);
   const hotSigmas = cellSigmasAt(hot, pressurePa);
-  const means = cold.cells.map((cell, c) =>
-    cellMeanSigma(cell.weights, coldSigmas[c] ?? new Float64Array(0)),
-  );
+  const means = cold.cells.map((cell, c) => {
+    const sigmas = coldSigmas[c];
+    if (sigmas === undefined) {
+      throw new Error(`${species}'s ${cell.cellNm} nm cell has no σ at ${pressurePa} Pa`);
+    }
+    return cellMeanSigma(cell.weights, sigmas);
+  });
   const floorM2 = peakShare * Math.max(...means);
   let worst = 0;
   let compared = 0;
