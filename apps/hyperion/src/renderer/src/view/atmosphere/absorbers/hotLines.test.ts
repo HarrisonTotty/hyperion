@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { earthLikeColumn, planckBakeSpectrum } from "../../../test/atmosphereFixtures";
 import { inlinePart } from "../../../test/kDistributionFixtures";
+import { memoised } from "../../../test/memo";
 import {
   ABSORBER_TRANSMITTANCE_FLOOR,
   absorberCurve,
@@ -45,8 +46,11 @@ const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
  */
 const LADDER_FROM: Readonly<Partial<Record<string, number>>> = { H2S: 350 };
 
-/** The drawn species whose intensities take a stated scale, their tables `estimated`: CO's. */
-const SCALED: ReadonlyArray<Drawn> = [];
+/**
+ * The drawn species whose tables are `estimated`: CO's, its intensities taking a stated scale;
+ * HCN's, its hot bands incomplete in the range; N₂'s, its model carried past its fitted range.
+ */
+const ESTIMATED: ReadonlyArray<Drawn> = [];
 
 /**
  * The species R08.T4.f leaves pending, each keeping its entry: VO and hot H₂O, whose lists (HyVO,
@@ -161,10 +165,7 @@ describe("the species R08.T4.f draws and leaves pending", () => {
   it("leave each drawn species no R08.T4.f entry but its parts' (CO's overtones)", () => {
     expect(
       PENDING_ABSORBERS.filter(
-        (p) =>
-          p.task === "R08.T4.f" &&
-          p.part === undefined &&
-          (DRAWN as readonly string[]).includes(p.key),
+        (p) => p.task === "R08.T4.f" && p.part === undefined && DRAWN.some((key) => key === p.key),
       ).map((p) => p.key),
     ).toEqual([]);
   });
@@ -233,8 +234,8 @@ describe("the drawn tables' recorded tiers (T4.d's)", () => {
     expect(sidecarOf(key).parts.filter((p) => p.bytes >= 480_000)).toEqual([]);
   });
 
-  it("are measured, but where a list's intensities take a stated scale (CO's)", () => {
-    expect(DRAWN.filter((key) => sidecarOf(key).basis !== "measured")).toEqual(SCALED);
+  it("are measured, but CO's, HCN's and N₂'s, each estimated for its stated reason", () => {
+    expect(DRAWN.filter((key) => sidecarOf(key).basis !== "measured")).toEqual(ESTIMATED);
   });
 });
 
@@ -255,49 +256,76 @@ function hotTable(species: Drawn): KDistributionTable {
   return table;
 }
 
-describe.each(DRAWN)("%s's curves", (key) => {
-  it.each([
-    ["a 2,500 K", planckBakeSpectrum(2_500)],
-    ["a 30,000 K", planckBakeSpectrum(30_000)],
-  ])(
-    "lie in [10⁻⁶, 1] and are non-increasing along each row under %s Planck sun",
-    (_, sun) => {
-      const nodes = hotTable(key).temperaturesK;
-      const temperatureK = nodes[Math.floor(nodes.length / 2)] ?? Number.NaN;
-      const column = earthLikeColumn();
-      const specs = absorberSpecs(
-        [{ species: key, columnPerM2: 1e24, basePa: 101_325, topPa: 0 }],
-        { ...column, temperaturesK: column.temperaturesK.map(() => temperatureK) },
-        [],
-        [],
-        {
-          kDistributions: tables,
-          bulkMoleFractions: new Map([
-            ["H2", 0.86],
-            ["He", 0.14],
-          ]),
-        },
-      );
-      const spec = specs.specs.find((s): s is ColumnAbsorberSpec => s.kind === "column");
-      if (spec === undefined) {
-        throw new Error(`no column spec for ${key}`);
-      }
-      const curve = absorberCurve(spec, sun);
-      const columns = curve.logColumns.length;
-      let least = Infinity;
-      let most = -Infinity;
-      let rise = 0;
-      for (const channel of curve.transmittance) {
-        for (let r = 0; r < curve.logPressures.length; r += 1) {
-          for (let j = 0; j < columns; j += 1) {
-            const t = channel[r * columns + j] ?? Number.NaN;
-            least = Math.min(least, t);
-            most = Math.max(most, t);
-            rise = Math.max(rise, j > 0 ? t - (channel[r * columns + j - 1] ?? Number.NaN) : 0);
-          }
+/** The suns the curves are read under: a 2,500 K and a 30,000 K Planck sun. */
+const CURVE_SUNS = [
+  ["a 2,500 K", 2_500],
+  ["a 30,000 K", 30_000],
+] as const;
+
+/**
+ * A drawn species' curves under a Planck sun, at its hot table's middle node through an Earth-like
+ * column of H₂ and He: their least and largest T_c, and their largest rise along a row.
+ */
+const curveFigures = memoised(
+  ([key, sunK]: readonly [Drawn, number]): {
+    readonly least: number;
+    readonly most: number;
+    readonly rise: number;
+  } => {
+    const nodes = hotTable(key).temperaturesK;
+    const temperatureK = nodes[Math.floor(nodes.length / 2)] ?? Number.NaN;
+    const column = earthLikeColumn();
+    const specs = absorberSpecs(
+      [{ species: key, columnPerM2: 1e24, basePa: 101_325, topPa: 0 }],
+      { ...column, temperaturesK: column.temperaturesK.map(() => temperatureK) },
+      [],
+      [],
+      {
+        kDistributions: tables,
+        bulkMoleFractions: new Map([
+          ["H2", 0.86],
+          ["He", 0.14],
+        ]),
+      },
+    );
+    const spec = specs.specs.find((s): s is ColumnAbsorberSpec => s.kind === "column");
+    if (spec === undefined) {
+      throw new Error(`no column spec for ${key}`);
+    }
+    const curve = absorberCurve(spec, planckBakeSpectrum(sunK));
+    const columns = curve.logColumns.length;
+    let least = Infinity;
+    let most = -Infinity;
+    let rise = 0;
+    for (const channel of curve.transmittance) {
+      for (let r = 0; r < curve.logPressures.length; r += 1) {
+        for (let j = 0; j < columns; j += 1) {
+          const t = channel[r * columns + j] ?? Number.NaN;
+          least = Math.min(least, t);
+          most = Math.max(most, t);
+          rise = Math.max(rise, j > 0 ? t - (channel[r * columns + j - 1] ?? Number.NaN) : 0);
         }
       }
-      expect([least >= ABSORBER_TRANSMITTANCE_FLOOR, most <= 1, rise]).toEqual([true, true, 0]);
+    }
+    return { least, most, rise };
+  },
+  ([key, sunK]) => `${key} ${String(sunK)}`,
+);
+
+describe.each(DRAWN)("%s's curves", (key) => {
+  it.each(CURVE_SUNS)(
+    "lie in [10⁻⁶, 1] under %s Planck sun",
+    (_, sunK) => {
+      const { least, most } = curveFigures([key, sunK]);
+      expect([least >= ABSORBER_TRANSMITTANCE_FLOOR, most <= 1]).toEqual([true, true]);
+    },
+    60_000,
+  );
+
+  it.each(CURVE_SUNS)(
+    "are non-increasing in u along each row under %s Planck sun",
+    (_, sunK) => {
+      expect(curveFigures([key, sunK]).rise).toBe(0);
     },
     60_000,
   );

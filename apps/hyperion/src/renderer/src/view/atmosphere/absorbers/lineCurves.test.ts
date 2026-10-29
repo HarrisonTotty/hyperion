@@ -82,6 +82,32 @@ function onlyColumnSpec(specs: ReturnType<typeof absorberSpecs>): ColumnAbsorber
   return spec;
 }
 
+describe("a line species whose hot table continues its temperate one (R08.T4.f)", () => {
+  const temperate = toyTable("CO", { source: "temperate" });
+  const hot = toyTable("CO", {
+    source: "hot",
+    temperaturesK: [300, 400, 500, 600, 700],
+    measuredRangeK: [300, 700],
+  });
+
+  /** The source of the table absorberSpecs draws CO's lines from on an isothermal column. */
+  function drawnFrom(temperatureK: number): string | undefined {
+    const column = { ...COLUMN, temperaturesK: COLUMN.temperaturesK.map(() => temperatureK) };
+    const specs = absorberSpecs([wellMixed("CO", 1e24)], column, [], [], {
+      kDistributions: [hot, temperate],
+    });
+    return onlyColumnSpec(specs).species[0]?.lines?.kDistribution.source;
+  }
+
+  it("draws from the temperate table below the hand-over", () => {
+    expect([drawnFrom(250), drawnFrom(290)]).toEqual(["temperate. toy", "temperate. toy"]);
+  });
+
+  it("draws from the hot table above it", () => {
+    expect(drawnFrom(500)).toBe("hot. toy");
+  });
+});
+
 describe("a line species in absorberSpecs", () => {
   const table = toyTable("H2O");
 

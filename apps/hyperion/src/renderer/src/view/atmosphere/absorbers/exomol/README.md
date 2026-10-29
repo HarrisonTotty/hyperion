@@ -31,8 +31,8 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   archive of each dataset on Zenodo (each record's DOI in its sidecar), whose records state CC BY
   4.0 (read 2026-10-29), the database's own licence quoted above:
   - `FeH`: MoLLIST's FeH as ExoMol carries it (M. Dulick et al., Astrophys. J. 594 (2003) 651; S.
-    Wende, A. Reiners and A. Seifahrt, Astron. Astrophys. 523 (2010) A58; P. F. Bernath, J. Quant.
-    Spectrosc. Radiat. Transf. 240 (2020) 106687).
+    Wende, A. Reiners, A. Seifahrt and P. F. Bernath, Astron. Astrophys. 523 (2010) A58; P. F.
+    Bernath, J. Quant. Spectrosc. Radiat. Transf. 240 (2020) 106687).
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which

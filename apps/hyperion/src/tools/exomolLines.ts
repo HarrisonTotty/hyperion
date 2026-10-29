@@ -85,6 +85,29 @@ export interface StatesLayout {
   readonly v?: number;
 }
 
+/**
+ * Where a list's Q(T) comes from: the states file's sum, with ExoMol's `.pf` read only as a check
+ * of it where ExoMol serves one (R08.T4.g's C2018, which has none, and TYM); or the list's `.pf`
+ * itself (R08.T4.f's lists, whose states file may hold only the states its transitions reach).
+ */
+export type PartitionSource =
+  | { readonly from: "states"; readonly check: ExoMolFile | undefined }
+  | { readonly from: "pf"; readonly file: ExoMolFile };
+
+/** A list's `.pf` file, whether it gives Q(T) or checks the states' sum, or `undefined` for none. */
+export function partitionFileOf(source: ExoMolSource): ExoMolFile | undefined {
+  let file: ExoMolFile | undefined;
+  switch (source.partition.from) {
+    case "states":
+      file = source.partition.check;
+      break;
+    case "pf":
+      file = source.partition.file;
+      break;
+  }
+  return file;
+}
+
 /** A width every line of a list takes where its definition gives none, with why it was taken. */
 export interface AssumedWidth {
   /** cm⁻¹ bar⁻¹ at 296 K, ExoMol's unit. */
@@ -119,16 +142,8 @@ export interface ExoMolSource {
   readonly def: DefinitionFile;
   readonly states: ExoMolFile & { readonly layout: StatesLayout };
   readonly transitions: ReadonlyArray<TransitionFile>;
-  /**
-   * ExoMol's own partition function, where it serves one: Q(T) where {@link partitionFrom} is
-   * `pf`, and a check of the states' sum otherwise.
-   */
-  readonly partitionFunction?: ExoMolFile;
-  /**
-   * Where Q(T) comes from: the states file's sum (R08.T4.g's C2018 and TYM), or the list's `.pf`
-   * (R08.T4.f's lists), which then must be given.
-   */
-  readonly partitionFrom: "states" | "pf";
+  /** Where Q(T) comes from ({@link PartitionSource}). */
+  readonly partition: PartitionSource;
   readonly broadeners: ReadonlyArray<BroadeningFile>;
   /**
    * The isotopologue's natural abundance: HITRAN's (hitran.org/docs/iso-meta/) for a species HITRAN
@@ -241,7 +256,9 @@ export function parseDefinitionText(
           .trim()
           .startsWith(label)
       ) {
-        return Number(line.slice(0, hash).trim().split(/\s+/u)[0]);
+        // A label with no value before it is missing, not 0 (`Number("")`).
+        const value = line.slice(0, hash).trim().split(/\s+/u)[0] ?? "";
+        return value === "" ? undefined : Number(value);
       }
     }
     return undefined;
@@ -722,7 +739,8 @@ export function parsePartitionFunction(text: string): ReadonlyMap<number, number
 
 /**
  * Q(T) from a `.pf` table: at a tabulated temperature its value, and between two, linear in T
- * (ExoMol tabulates Q every 1 K, over which ln Q moves by under 10⁻³ above 100 K).
+ * (ExoMol tabulates Q every 1 K, between whose rows linear interpolation errs by under 10⁻⁵ of Q
+ * above 100 K, the science check's figure).
  *
  * @throws RangeError for a temperature outside the table.
  */
@@ -744,6 +762,31 @@ export function partitionSumFromPf(pf: ReadonlyMap<number, number>, temperatureK
     throw new RangeError(`${temperatureK} K lies outside the partition function's table`);
   }
   return below[1] + ((above[1] - below[1]) * (temperatureK - below[0])) / (above[0] - below[0]);
+}
+
+/**
+ * Q(T) as a list takes it ({@link PartitionSource}): the states' sum, or its `.pf`'s, the file read
+ * from the data directory, checked by the caller.
+ */
+export function partitionSumsOf(
+  source: ExoMolSource,
+  states: ExoMolStates,
+  dataDir: string,
+): (temperatureK: number) => number {
+  let q: (temperatureK: number) => number;
+  switch (source.partition.from) {
+    case "states":
+      q = (t) => partitionSum(states, t);
+      break;
+    case "pf": {
+      const pf = parsePartitionFunction(
+        readFileSync(join(dataDir, source.partition.file.name), "utf8"),
+      );
+      q = (t) => partitionSumFromPf(pf, t);
+      break;
+    }
+  }
+  return q;
 }
 
 /** One `.broad` code's widths by its quanta, cm⁻¹ bar⁻¹ at 296 K, with their n. */
@@ -884,17 +927,30 @@ function cellIndexOf(wavenumberPerCm: number): number {
   return nm >= CELLS_NM[0] && nm <= CELLS_NM[1] ? nm - CELLS_NM[0] : -1;
 }
 
+/**
+ * The bands a pass bins apart, by key, over a range of wavenumbers, cm⁻¹ (N₂O's matched bands,
+ * R08.T4.g); every band's 296 K strength there is gathered too.
+ */
+export interface ApartBands {
+  readonly bands: ReadonlySet<number>;
+  readonly rangePerCm: readonly [number, number];
+}
+
+/**
+ * Where a pass bins its lines: into bins of its own, with a set apart where bands are binned apart;
+ * or into shared bins, one a temperature in the pass's order, which several isotopologues fill in
+ * turn (R08.T4.f's TiO), and on which the caller applies stimulated emission once every list is in
+ * ({@link applyStimulatedEmission}).
+ */
+export type PassTarget =
+  | { readonly kind: "own"; readonly apart: ApartBands | undefined }
+  | { readonly kind: "shared"; readonly into: ReadonlyArray<SuperLineBins> };
+
 /** Options of a streaming pass. */
 export interface PassOptions {
   readonly temperaturesK: ReadonlyArray<number>;
-  /**
-   * The bands binned apart, by key, over `apartRangePerCm` (N₂O's matched bands, R08.T4.g); every
-   * band's 296 K strength there is gathered too.
-   */
-  readonly apart?: {
-    readonly bands: ReadonlySet<number>;
-    readonly rangePerCm: readonly [number, number];
-  };
+  /** Where the lines are binned. */
+  readonly target: PassTarget;
   /** The `.broad` tables whose sums are gathered. */
   readonly broadening: ReadonlyArray<BroadeningTable>;
   /** How many `bzip2` processes run at once. */
@@ -911,18 +967,6 @@ export interface PassOptions {
   }>;
   /** Only the transition files overlapping these wavenumbers are read, where given (a survey's). */
   readonly filesPerCm?: readonly [number, number];
-  /**
-   * Q(T) at a temperature from the list's `.pf` ({@link partitionSumFromPf}), where its source takes
-   * Q so; the states' sum ({@link partitionSum}) otherwise.
-   */
-  readonly partitionSumAt?: (temperatureK: number) => number;
-  /**
-   * The main bins to add this pass's lines to, one a temperature in `temperaturesK`'s order, where
-   * several isotopologues share them (R08.T4.f's TiO): the pass then neither makes its own nor
-   * applies stimulated emission to them, which its caller does once every list is binned
-   * ({@link applyStimulatedEmission}). No set apart is taken with them.
-   */
-  readonly into?: ReadonlyArray<SuperLineBins>;
 }
 
 /** A band's lines in a surveyed window: Σ S(296), Σ S(296) ν and the count. */
@@ -943,12 +987,14 @@ export interface PassBins {
 /**
  * One streaming pass over a list's transition files: each line within the binned range binned at
  * every temperature asked for (`superLines.ts`), its band's lines binned apart where asked, and the
- * pass's records ({@link PassRecord}); `jobs` files decompressed at once. A transition past its
- * source's cut on v′ − v″ ({@link ExoMolSource.maxDeltaV}) is read and not binned.
+ * pass's records ({@link PassRecord}); `jobs` files decompressed at once. Q(T) is its source's
+ * ({@link PartitionSource}): the states' sum ({@link partitionSum}), or the list's `.pf`, read from
+ * `dataDir` ({@link partitionSumFromPf}). A transition past its source's cut on v′ − v″
+ * ({@link ExoMolSource.maxDeltaV}) is read and not binned.
  *
  * @param dataDir - The directory holding the source's fetched files, each checked by the caller.
  * @throws Error for a transition whose state is unknown or has no energy.
- * @throws RangeError for shared bins not one a temperature, or given with a set apart.
+ * @throws RangeError for shared bins not one a temperature.
  */
 export async function streamPass(
   source: ExoMolSource,
@@ -964,19 +1010,30 @@ export async function streamPass(
   const [low, high] = source.binRangePerCm;
   const temps = options.temperaturesK;
   const mass = definition.molecularMassDa;
-  const shared = options.into;
-  if (shared !== undefined && (shared.length !== temps.length || options.apart !== undefined)) {
-    throw new RangeError("shared bins take one set a temperature, and no set apart");
+  const { target } = options;
+  let main: ReadonlyArray<SuperLineBins>;
+  let apartBands: ReadonlySet<number> | undefined;
+  let apartRange: readonly [number, number] | undefined;
+  switch (target.kind) {
+    case "own":
+      main = temps.map((t) => emptyBins(t, low, high, binStepPerCm(t, low, mass)));
+      apartBands = target.apart?.bands;
+      apartRange = target.apart?.rangePerCm;
+      break;
+    case "shared":
+      if (target.into.length !== temps.length) {
+        throw new RangeError("shared bins take one set a temperature");
+      }
+      main = target.into;
+      break;
   }
-  const main = shared ?? temps.map((t) => emptyBins(t, low, high, binStepPerCm(t, low, mass)));
-  const apartRange = options.apart?.rangePerCm;
   // The set apart on the main set's grid, from its origin to the top of its own range, so that
   // their nodes coincide.
   const apart =
     apartRange === undefined
       ? undefined
       : temps.map((t) => emptyBins(t, low, apartRange[1], binStepPerCm(t, low, mass)));
-  const qOf = options.partitionSumAt ?? ((t: number): number => partitionSum(states, t));
+  const qOf = partitionSumsOf(source, states, dataDir);
   const partitionSums = temps.map((t) => [t, qOf(t)] as const);
   const q296 = qOf(296);
   const factors = Float64Array.from(partitionSums, ([, q]) => source.abundance / q);
@@ -1000,7 +1057,6 @@ export async function streamPass(
       toPerCm: number;
     }
   >();
-  const apartBands = options.apart?.bands;
   const survey = options.survey ?? [];
   const surveyed = survey.map(() => new Map<number, SurveyedBand>());
   let linesRead = 0;
@@ -1152,7 +1208,7 @@ export async function streamPass(
       : new Error("a pass's reader failed", { cause: failure });
   }
   // Shared bins take stimulated emission from their caller, once every list is in them.
-  for (const bins of shared === undefined ? [...main, ...(apart ?? [])] : []) {
+  for (const bins of target.kind === "own" ? [...main, ...(apart ?? [])] : []) {
     applyStimulatedEmission(bins);
   }
   for (const [t, temperatureK] of temps.entries()) {

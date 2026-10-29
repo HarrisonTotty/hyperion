@@ -27,8 +27,17 @@ export function toySigma(temperatureK: number, pressurePa: number, g: number): n
   return g === 0 ? 2e-30 * scale : (6e-27 * scale) / Math.sqrt(1 + pressurePa / 1e3);
 }
 
-/** A toy line table for `species`: cells 690–694 nm, each a weak and a strong g-point. */
-export function toyTable(species: string): KDistributionTable {
+/**
+ * A toy line table for `species`: cells 690–694 nm, each a weak and a strong g-point, over
+ * {@link TEMPERATURES_K} and measured over 150–296 K unless other nodes (as many) and a range are
+ * given, `source` its source.
+ */
+export function toyTable(
+  species: string,
+  temperaturesK: ReadonlyArray<number> = TEMPERATURES_K,
+  measuredRangeK: readonly [number, number] = [150, 296],
+  source = "toy",
+): KDistributionTable {
   const sigmasM2 = TEMPERATURES_K.flatMap((temperatureK) =>
     PRESSURES_PA.flatMap((pressurePa) => [
       toySigma(temperatureK, pressurePa, 0),
@@ -36,9 +45,10 @@ export function toyTable(species: string): KDistributionTable {
     ]),
   );
   const cells = [690, 691, 692, 693, 694].map((nm) => ({ nm, weights: [0.8, 0.2], sigmasM2 }));
-  const sidecar = toySidecar(TEMPERATURES_K, PRESSURES_PA, cells.length, {
+  const sidecar = toySidecar(temperaturesK, PRESSURES_PA, cells.length, {
     species,
-    measuredRangeK: [150, 296],
+    source,
+    measuredRangeK,
     broadening: { self: 1.5 },
   });
   const part = toyPart(cells, {
@@ -47,6 +57,14 @@ export function toyTable(species: string): KDistributionTable {
     pressures: PRESSURES_PA.length,
   });
   return readKDistribution(sidecar, [part], `toy ${species}`);
+}
+
+/**
+ * A toy hot table for `species` continuing {@link toyTable}'s from its 300 K node (R08.T4.f): the
+ * same cells over 300–700 K, its source `hot toy`.
+ */
+export function hotToyTable(species: string): KDistributionTable {
+  return toyTable(species, [300, 400, 500, 600, 700], [300, 700], "hot toy");
 }
 
 /**

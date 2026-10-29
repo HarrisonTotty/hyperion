@@ -57,22 +57,23 @@ import { parseArgs } from "node:util";
 import { ladderFinestStepK, ladderTemperatures } from "./atomicKDistributions";
 import { tableBytes, THINNED_PRESSURES_PA } from "./atomicKDistributionsCli";
 import {
+  type ApartBands,
+  type AssumedWidth,
   bandKey,
   bandLabel,
   binsFileName,
   type BroadeningFile,
   cachedSpecies,
   checkFile,
-  type AssumedWidth,
   type ExoMolDefinition,
   type ExoMolFile,
   type ExoMolSource,
   packVibration,
+  partitionFileOf,
   type PassBins,
   type PassRecord,
   parseBroadening,
   parsePartitionFunction,
-  partitionSumFromPf,
   readDefinition,
   readStates,
   type StatesLayout,
@@ -299,7 +300,7 @@ export const C2018: ExoMolSource = {
     fromPerCm: from,
     toPerCm: from + 1_000,
   })),
-  partitionFrom: "states",
+  partition: { from: "states", check: undefined },
   broadeners: NH3_BROADENERS,
   abundance: 0.995_872,
   binRangePerCm: [13_100, 20_000],
@@ -335,12 +336,14 @@ export const TYM: ExoMolSource = {
     fromPerCm: from,
     toPerCm: from + 1_000,
   })),
-  partitionFunction: {
-    name: "14N2-16O__TYM.pf",
-    bytes: 125_000,
-    sha256: "ea4313508abb065bf887588755afb6399d0b68d46c447de5193900dd73bc4290",
+  partition: {
+    from: "states",
+    check: {
+      name: "14N2-16O__TYM.pf",
+      bytes: 125_000,
+      sha256: "ea4313508abb065bf887588755afb6399d0b68d46c447de5193900dd73bc4290",
+    },
   },
-  partitionFrom: "states",
   broadeners: [],
   abundance: 0.990_333,
   binRangePerCm: [13_100, 20_000],
@@ -356,18 +359,6 @@ const N2O_PAR: CheckedFile & { readonly url: string } = {
 /** What every ExoMol table names: its list, grid, shape, condensation and statements. */
 interface ExoMolTableBase {
   readonly exomol: ExoMolSource;
-  /**
-   * The list's other isotopologues, binned with it into one set of bins, each at its own Q and
-   * abundance (Toto's four minor Ti isotopologues, R08.T4.f), or none.
-   */
-  readonly isotopologues: ReadonlyArray<ExoMolSource>;
-  /**
-   * The task whose grid rules the table takes: R08.T4.g's (the 30 standard pressures, intervals
-   * refined to 12.5 K) or R08.T4.f's (E1′'s ladder, E3's thinned pressures with the alternates and
-   * midpoints the merge asks for, E4's raised first node, intervals refined to a quarter of E1's
-   * step; decision-r08-t4ef-storage §1.4, decision-r08-t4e-budget §1.4).
-   */
-  readonly task: "R08.T4.g" | "R08.T4.f";
   readonly basis: "measured" | "estimated";
   readonly measuredRangeK: readonly [number, number];
   /** The first pass's temperature nodes, K. */
@@ -384,19 +375,16 @@ interface ExoMolTableBase {
   readonly reduction: string;
   /** The cells reduced: every cell a line's wing reaches within the list's coverage. */
   readonly cellsNm: readonly [number, number];
-  /**
-   * What the table's sidecar records beyond its reduction (R08.T4.f): its range, holds and the
-   * choices its list took, each with its reason.
-   */
-  readonly notes?: string;
 }
 
 /**
- * An ExoMol table: one list's super-lines alone (NH₃'s), or a list's super-lines merged with
- * HITRAN2024's bands (N₂O's; `decision-r08-t4d-kdist-chain.md` §11).
+ * An ExoMol table: R08.T4.g's, one list's super-lines alone (NH₃'s) or a list's super-lines merged
+ * with HITRAN2024's bands (N₂O's; `decision-r08-t4d-kdist-chain.md` §11), on the 30 standard
+ * pressures with intervals refined to 12.5 K; or R08.T4.f's hot ones ({@link HotTable}).
  */
 export type ExoMolTable =
   | (ExoMolTableBase & { readonly kind: "superLines" })
+  | HotTable
   | (ExoMolTableBase & {
       readonly kind: "merged";
       /** The HITRAN2024 part: its lines' source and band assignments, and where the merge splits. */
@@ -409,6 +397,73 @@ export type ExoMolTable =
         readonly apartRangePerCm: readonly [number, number];
       };
     });
+
+/**
+ * An R08.T4.f table: one list's super-lines, with its other isotopologues' in the same bins, on
+ * R08.T4.f's grid rules: E1′'s ladder, E3's thinned pressures with the alternates and midpoints the
+ * merge asks for, E4's raised first node, intervals refined to a quarter of E1's step
+ * (decision-r08-t4ef-storage §1.4, decision-r08-t4e-budget §1.4).
+ */
+export interface HotTable extends ExoMolTableBase {
+  readonly kind: "hot";
+  /**
+   * The list's other isotopologues, binned with it into one set of bins, each at its own Q and
+   * abundance (Toto's four minor Ti isotopologues), or none.
+   */
+  readonly isotopologues: ReadonlyArray<ExoMolSource>;
+  /** What the sidecar records beyond the reduction: the range, holds and choices, each with why. */
+  readonly notes: string;
+}
+
+/** The task whose grid rules a table takes, and what follows from them. */
+export interface TaskRules {
+  readonly task: "R08.T4.g" | "R08.T4.f";
+  /** Whether a run may give the grid's pressures: R08.T4.f's alternates and midpoints. */
+  readonly ownPressures: boolean;
+  /** The finest step a failing interval refines to from its lower node, K. */
+  readonly finestStepK: (lowerK: number) => number;
+  /** How the merge names that step where it asks for a refinement. */
+  readonly finestStepText: string;
+  /** The rulings the sidecar's description names. */
+  readonly rulings: string;
+}
+
+/** R08.T4.g's rules: the 30 standard pressures, intervals refined to 12.5 K. */
+const T4G_RULES: TaskRules = {
+  task: "R08.T4.g",
+  ownPressures: false,
+  finestStepK: () => FINEST_STEP_K,
+  finestStepText: `the finest step ${FINEST_STEP_K} K`,
+  rulings:
+    "rendering plan R08, R08.T4.g; decision-r08-t4d-kdist.md; decision-r08-t4d-kdist-chain.md " +
+    "sections 9-11",
+};
+
+/** R08.T4.f's rules ({@link HotTable}). */
+const T4F_RULES: TaskRules = {
+  task: "R08.T4.f",
+  ownPressures: true,
+  finestStepK: ladderFinestStepK,
+  finestStepText: "the finest step a quarter of E1's",
+  rulings:
+    "rendering plan R08, R08.T4.f; decision-r08-t4ef-storage; decision-r08-t4e-budget; " +
+    "decision-r08-t4d-kdist-chain.md sections 9-11",
+};
+
+/** A table's task rules, by its kind. */
+export function rulesOf(table: ExoMolTable): TaskRules {
+  let rules: TaskRules;
+  switch (table.kind) {
+    case "superLines":
+    case "merged":
+      rules = T4G_RULES;
+      break;
+    case "hot":
+      rules = T4F_RULES;
+      break;
+  }
+  return rules;
+}
 
 /** What every ExoMol reduction's statement shares (T4.d's statement's, on super-lines). */
 const SUPER_LINE_REDUCTION =
@@ -490,8 +545,7 @@ function archivedList(list: {
     def: { ...list.def, format: "text" },
     states: { ...list.states, layout: list.layout },
     transitions: list.transitions,
-    partitionFunction: list.pf,
-    partitionFrom: "pf",
+    partition: { from: "pf", file: list.pf },
     broadeners: [],
     abundance: list.abundance,
     binRangePerCm: HOT_BIN_RANGE_PER_CM,
@@ -508,10 +562,12 @@ function oneFile(name: string, bytes: number, sha256: string): ReadonlyArray<Tra
 
 /**
  * The representative isotopic compositions of the elements R08.T4.f's lists name that HITRAN holds
- * no abundance for (J. Meija et al., Isotopic compositions of the elements 2013, Pure Appl. Chem.
- * 88 (2016) 293, Table 1, as CIAAW tabulates them; read through `periodictable` 2.1.0's copy of
- * CIAAW's table, which matches it for Ti): ¹H 0.999 885, ¹⁶O 0.997 57, ⁴⁶Ti 0.0825, ⁴⁷Ti 0.0744,
- * ⁴⁸Ti 0.7372, ⁴⁹Ti 0.0541, ⁵⁰Ti 0.0518, ⁵⁶Fe 0.917 54, ²⁸Si 0.922 23.
+ * no abundance for, IUPAC's (J. Meija et al., Isotopic compositions of the elements 2013, Pure
+ * Appl. Chem. 88 (2016) 293, Table 1): ¹H 0.999 885, ¹⁶O 0.997 57, ⁴⁶Ti 0.0825, ⁴⁷Ti 0.0744, ⁴⁸Ti
+ * 0.7372, ⁴⁹Ti 0.0541, ⁵⁰Ti 0.0518, ⁵⁶Fe 0.917 54, ²⁸Si 0.922 23. Ti's and Fe's were read through
+ * `periodictable` 2.1.0's copy of CIAAW's table; H's, O's and Si's, which it holds only as CIAAW
+ * 2021's intervals, as NIST's Atomic Weights and Isotopic Compositions tabulates them (through
+ * `molmass`'s copy, the science check's); Table 1 itself was not reachable to re-read.
  */
 const ISOTOPE_FRACTIONS = {
   H1: 0.999_885,
@@ -548,7 +604,7 @@ function totoList(
   const iso = `${mass}Ti-16O__Toto`;
   return archivedList({
     species: "TiO",
-    citation: `ExoMol line list Toto for ${mass}Ti-16O, as its archive holds it (the states' MARVEL update of 2021-08-25) (${TOTO_CITATION})`,
+    citation: `ExoMol line list Toto for ${mass}Ti-16O, version ${mass === 48 ? "20210825, as its archive holds it (the states' MARVEL update of 2021-08-25)" : "20190514, as its archive holds it"} (${TOTO_CITATION})`,
     record,
     def: fetched(`${iso}.def`, ...files.def),
     states: fetched(`${iso}.states.bz2`, ...files.states),
@@ -600,10 +656,11 @@ export const MOLLIST_FEH: ExoMolSource = archivedList({
   species: "FeH",
   citation:
     "ExoMol's copy of MoLLIST's line list for 56Fe-1H, version 20160726 (M. Dulick et al., " +
-    "Astrophys. J. 594 (2003) 651, DOI 10.1086/376791; S. Wende, A. Reiners and A. Seifahrt, CRIRES " +
-    "spectroscopy and empirical line-by-line identification of FeH molecular absorption in an M " +
-    "dwarf, Astron. Astrophys. 523 (2010) A58, as its README names it; P. F. Bernath, J. Quant. " +
-    "Spectrosc. Radiat. Transf. 240 (2020) 106687)",
+    "Astrophys. J. 594 (2003) 651-663, DOI 10.1086/376791; S. Wende, A. Reiners, A. Seifahrt and " +
+    "P. F. Bernath, CRIRES spectroscopy and empirical line-by-line identification of FeH molecular " +
+    "absorption in an M dwarf, Astron. Astrophys. 523 (2010) A58, DOI " +
+    "10.1051/0004-6361/201015220, which its README names; P. F. Bernath, J. Quant. Spectrosc. " +
+    "Radiat. Transf. 240 (2020) 106687)",
   record: 5_362_929,
   def: fetched(
     "56Fe-1H__MoLLIST.def",
@@ -688,8 +745,9 @@ export const SIOUVENIR: ExoMolSource = archivedList({
   species: "SiO",
   citation:
     "ExoMol line list SiOUVenIR for 28Si-16O, as its archive holds it (S. N. Yurchenko, J. " +
-    "Tennyson, A.-M. Syme et al., ExoMol line lists - XLIV. IR and UV line list of silicon " +
-    "monoxide (28Si16O), Mon. Not. R. Astron. Soc. 510 (2022) 903, DOI 10.1093/mnras/stab3267)",
+    "Tennyson, A.-M. Syme et al., ExoMol line lists - XLIV. Infrared and ultraviolet line list for " +
+    "silicon monoxide (28Si16O), Mon. Not. R. Astron. Soc. 510 (2022) 903-919, DOI " +
+    "10.1093/mnras/stab3267)",
   record: 5_910_818,
   def: fetched(
     "28Si-16O__SiOUVenIR.def",
@@ -755,12 +813,13 @@ export const LI2015: ExoMolSource = archivedList({
   abundance: 0.986_544,
   maxDeltaV: 7,
   intensityScale: {
-    factor: 2.13,
+    factor: 2.05,
     why:
-      "R08.T4.c's scale for Li2015's visible bands (exomol/bounds.json's hot CO entry): HITRAN2024's " +
-      "measurement-anchored 7-0 band (Medvedev and Ushakov 2022, x1.074 after Balashov et al. 2023) " +
-      "over Li2015's in their peak 1 nm cell at 296 K, 5.096e-34 over 2.397e-34 m2; every line " +
-      "binned, the Delta v = 7 bands alone in the range, takes it, a stated estimate",
+      "R08.T4.d's HITRAN2024 table's 7-0 band (Medvedev and Ushakov 2022, x1.074 after Balashov et " +
+      "al. 2023, measurement-anchored) over Li2015's at the 300 K hand-over: the table's 13 cells' " +
+      "means at 10 Pa summed, 1.2044e-33 m2, over Li2015's direct sums in the same cells, 5.8622e-34 " +
+      "m2, 2.054, to three figures (R08.T4.c's bound took the peak cell's 2.13, rounded up); every " +
+      "line binned, the Delta v = 7 bands alone in the range, takes it, a stated estimate",
   },
 });
 
@@ -799,13 +858,13 @@ export const HARRIS: ExoMolSource = archivedList({
 });
 
 /**
- * The width WCCRMT's lines take, its `.def` giving none: ExoMol's usual default, 0.07 cm⁻¹ bar⁻¹ at
- * 296 K with n = 0.5 (the other R08.T4.f lists' `.def` default), a stated estimate.
+ * The width WCCRMT's lines take, its `.def` giving none: 0.07 cm⁻¹ bar⁻¹ at 296 K with n = 0.5, the
+ * default every other R08.T4.f list's `.def` gives but Harris's (0.084), a stated estimate.
  */
 const WCCRMT_WIDTH: AssumedWidth = {
   halfWidthPerCmBar: 0.07,
   exponent: 0.5,
-  why: "WCCRMT's .def gives no default width; ExoMol's usual default, as the other R08.T4.f lists' .def give it, estimated",
+  why: "WCCRMT's .def gives no default width; the 0.07 cm-1/bar, n 0.5 every other R08.T4.f list's .def gives but Harris's (0.084), estimated",
 };
 
 /** WCCRMT's ¹⁴N₂ triplet system (archive record 5717009). */
@@ -874,7 +933,8 @@ const HOT_TOP_K = 4_000;
 
 /**
  * An R08.T4.f table: one list's super-lines (with its other isotopologues'), on E1′'s ladder from
- * its floor, measured over its nodes, CUTOFF_25's shape, the cells of 380–760 nm its lines reach.
+ * its floor, its measured range its nodes', CUTOFF_25's shape, the cells of 380–760 nm its lines
+ * reach.
  */
 function hotTable(spec: {
   readonly exomol: ExoMolSource;
@@ -883,17 +943,20 @@ function hotTable(spec: {
   readonly rayleighCm2: RayleighCrossSection;
   readonly what: string;
   readonly notes: string;
-  /** `estimated` where the list's intensities take a stated scale (CO's); `measured` otherwise. */
-  readonly basis?: "measured" | "estimated";
-}): ExoMolTable {
+  /**
+   * `estimated` where the list's intensities take a stated scale (CO's), its hot bands are known
+   * incomplete in the range (HCN's, as R08.T4.c judged them) or its model is extrapolated past its
+   * fitted range (N₂'s); `measured` otherwise.
+   */
+  readonly basis: "measured" | "estimated";
+}): HotTable {
   const first = spec.temperaturesK[0] ?? 0;
   const last = spec.temperaturesK.at(-1) ?? 0;
   return {
-    kind: "superLines",
+    kind: "hot",
     exomol: spec.exomol,
     isotopologues: spec.isotopologues ?? [],
-    task: "R08.T4.f",
-    basis: spec.basis ?? "measured",
+    basis: spec.basis,
     measuredRangeK: [first, last],
     temperaturesK: spec.temperaturesK,
     policy: CUTOFF_25,
@@ -906,16 +969,18 @@ function hotTable(spec: {
 }
 
 /** R08.T4.f's tables, by registry key (decision-r08-t4ef-storage §5.4's order). */
-const HOT_TABLES: Readonly<Record<string, ExoMolTable>> = {
+export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
   FeH: hotTable({
     exomol: MOLLIST_FEH,
     temperaturesK: ladderTemperatures(1_000, HOT_TOP_K, "E1prime"),
     rayleighCm2: heliumRayleighCm2,
+    basis: "measured",
     what: "FeH's F4Delta-X4Delta bands below 760 nm (MoLLIST, R08.T4.f), from 1000 K (E2).",
     notes:
       "Below 1000 K the 1000 K node is held, estimated: Fe condenses at about 1100-2000 K at " +
       "photospheric pressures (decision-r08-t4ef-storage section 1.4, E2); above 4000 K the 4000 K " +
-      "node is held, estimated. Q(T) is the list's .pf, valid over 1000-8000 K by its README: its " +
+      "node is held, estimated. Q(T) is the list's .pf, valid over 1000-8000 K by its README (its " +
+      "296 K row, read for the cache's 296 K diagnostics alone, lies under the states' own sum): its " +
       "states file holds only the states its transitions reach, whose sum falls 3.1 times under the " +
       ".pf at 3000 K. Fetched from the database's archive, whose states file differs from the one " +
       "R08.T4.c summed (SHA-256 e978d8ec...900a), its transitions and .pf the same.",
@@ -925,6 +990,7 @@ const HOT_TABLES: Readonly<Record<string, ExoMolTable>> = {
     isotopologues: TOTO_MINOR,
     temperaturesK: ladderTemperatures(1_000, HOT_TOP_K, "E1prime"),
     rayleighCm2: heliumRayleighCm2,
+    basis: "measured",
     what: "TiO's bands (Toto, its five Ti isotopologues, R08.T4.f), from 1000 K (E2).",
     notes:
       "Below 1000 K the 1000 K node is held, estimated: Ti condenses as CaTiO3 and TiO2 at about " +
@@ -932,14 +998,16 @@ const HOT_TABLES: Readonly<Record<string, ExoMolTable>> = {
       "4000 K the 4000 K node is held, estimated, Toto being valid to 5000 K. The five Ti " +
       "isotopologues share one set of bins, each line at its own Q (its .pf) and abundance (CIAAW's " +
       "representative Ti and O fractions), and take 48TiO's Doppler width in the convolution (the " +
-      "others' differ by 1.5-1.6%). Fetched from the database's archive, which holds Toto with the " +
-      "states' MARVEL update of 2021-08-25; its 48TiO transitions differ from the 2024-05-09 version " +
+      "others' differ by 0.8-1.6%). Fetched from the database's archive, which holds 48TiO with the " +
+      "states' MARVEL update of 2021-08-25 and the others as of 2019-05-14; its 48TiO transitions " +
+      "differ from the 2024-05-09 version " +
       "R08.T4.c summed (SHA-256 50bca5ad...bec7), its .pf the same.",
   }),
   H2S: hotTable({
     exomol: AYT2,
     temperaturesK: [296, ...ladderTemperatures(350, 1_500, "E1prime")],
     rayleighCm2: hydrogenSulphideRayleighCm2,
+    basis: "measured",
     what: "H2S's visible overtones (AYT2, R08.T4.f), from 296 K.",
     notes:
       "From 296 K, where its overtones already pass the pending bound, to AYT2's limit, 1500 K by " +
@@ -952,6 +1020,7 @@ const HOT_TABLES: Readonly<Record<string, ExoMolTable>> = {
     exomol: SIOUVENIR,
     temperaturesK: ladderTemperatures(1_000, HOT_TOP_K, "E1prime"),
     rayleighCm2: heliumRayleighCm2,
+    basis: "measured",
     what: "SiO's A-X hot bands and its other systems in the range (SiOUVenIR, R08.T4.f), from 1000 K (E2).",
     notes:
       "Below 1000 K the 1000 K node is held, estimated: SiO's visible A-X hot bands reach the range " +
@@ -968,8 +1037,9 @@ const HOT_TABLES: Readonly<Record<string, ExoMolTable>> = {
     notes:
       "Hands over from R08.T4.d's HITRAN2024 table at 300 K, its first node at or above HITRAN's " +
       "296 K. Li2015's Delta v = 7 bands lie 2.05 times under HITRAN2024's measurement-anchored " +
-      "7-0 band there, summed over that table's 13 cells (1.79-2.22 times cell by cell), so every " +
-      "line takes R08.T4.c's scale, 2.13 (the source's intensityScale), and the table is estimated: " +
+      "7-0 band there, summed over that table's 13 cells at 10 Pa (1.79-2.22 times cell by cell), " +
+      "so every line takes that summed ratio, 2.05 (the source's intensityScale; R08.T4.c's bound " +
+      "took the peak cell's 2.13, rounded up), and the table is estimated: " +
       "at and below 300 K the client reads R08.T4.d's table, above it this one (kDistribution.ts's " +
       "tableAt). The bands from Delta v = 8 are left out, bounded by CO's pending overtones part. " +
       "Above 4000 K the 4000 K node is held, estimated, Li2015 being valid to 9000 K. Fetched from " +
@@ -981,13 +1051,16 @@ const HOT_TABLES: Readonly<Record<string, ExoMolTable>> = {
     exomol: HARRIS,
     temperaturesK: ladderTemperatures(300, HOT_TOP_K, "E1prime"),
     rayleighCm2: heliumRayleighCm2,
+    basis: "estimated",
     what: "Hot HCN (Harris, R08.T4.f), from its hand-over.",
     notes:
       "Hands over from R08.T4.d's HITRAN2024 table at 300 K, its first node at or above HITRAN's " +
       "296 K, where Harris's direct sums lie within 0.4% of that table's cell means in every one of " +
       "its 84 cells (0.996 of them, summed): at and below 300 K the client reads R08.T4.d's table, " +
       "above it this one (kDistribution.ts's tableAt). Above 4000 K, Harris's limit, the 4000 K node " +
-      "is held, estimated. The list ends at 17585.79 cm-1 (568.6 nm), so its cells run 569-760 nm. " +
+      "is held, estimated. The table is estimated, as R08.T4.c judged Harris's values: the list " +
+      "holds few hot bands in the range, so its hot values are lower limits. The list ends at " +
+      "17585.79 cm-1 (568.6 nm), so its cells run 569-760 nm. " +
       "Fetched from the database's archive, whose states file differs from the one R08.T4.c summed " +
       "(SHA-256 631f775e...516a), its transitions and .pf the same.",
   }),
@@ -995,15 +1068,21 @@ const HOT_TABLES: Readonly<Record<string, ExoMolTable>> = {
     exomol: WCCRMT,
     temperaturesK: ladderTemperatures(1_800, HOT_TOP_K, "E1prime"),
     rayleighCm2: nitrogenRayleighCm2,
+    basis: "estimated",
     what:
       "N2's triplet system in the range, the first positive (B3Pig-A3Sigmau+) bands from the " +
       "metastable A state among them (WCCRMT, R08.T4.f), from 1800 K.",
     notes:
       "Stated none below 1800 K (transparency.ts's N2 entry, whose limit the table's first node " +
       "meets: the belowK contract's table branch); above 4000 K the 4000 K node is held, " +
-      "estimated. In LTE: a non-LTE A-state population (an aurora's) is not modelled. WCCRMT's " +
-      ".def gives no default width, so every line takes ExoMol's usual 0.07 cm-1 per bar with n = " +
-      "0.5, estimated; its Q(T) is its .pf, Barklem and Collet 2016's.",
+      "estimated. In LTE: a non-LTE A-state population (an aurora's) is not modelled. The table " +
+      "is estimated, as the plan's band model was: WCCRMT's PGOPHER model is fitted to spectra over " +
+      "4500-15700 cm-1 and carried past it, its widths assumed. Its .def gives no default width, so " +
+      "every line takes 0.07 cm-1 per bar with n = 0.5, the default all the other R08.T4.f lists' " +
+      ".def give but Harris's (0.084), estimated; its Q(T) is its .pf, interpolated from Barklem " +
+      "and Collet 2016's, its states file holding the triplet states alone. Its cells lie 20-30 " +
+      "times under the band model's pending bound, which put each band's strength in its origin's " +
+      "cell from short lifetimes.",
   }),
 };
 
@@ -1013,8 +1092,6 @@ export const EXOMOL_TABLES: Readonly<Record<string, ExoMolTable>> = {
   NH3: {
     kind: "superLines",
     exomol: C2018,
-    isotopologues: [],
-    task: "R08.T4.g",
     basis: "measured",
     measuredRangeK: [100, 300],
     temperaturesK: [100, 150, 200, 250, 300],
@@ -1032,8 +1109,6 @@ export const EXOMOL_TABLES: Readonly<Record<string, ExoMolTable>> = {
   N2O: {
     kind: "merged",
     exomol: TYM,
-    isotopologues: [],
-    task: "R08.T4.g",
     saturation: N2O_SATURATION,
     rayleighCm2: nitrousOxideRayleighCm2,
     basis: "measured",
@@ -1227,9 +1302,19 @@ export function readCacheRecord(cacheDir: string, species: string): CacheRecord 
   return parsed;
 }
 
-/** A table's lists: its own, then its other isotopologues'. */
-function tableLists(table: ExoMolTable): ReadonlyArray<ExoMolSource> {
-  return [table.exomol, ...table.isotopologues];
+/** A table's lists: its own, then a hot table's other isotopologues'. */
+export function tableLists(table: ExoMolTable): ReadonlyArray<ExoMolSource> {
+  let lists: ReadonlyArray<ExoMolSource>;
+  switch (table.kind) {
+    case "superLines":
+    case "merged":
+      lists = [table.exomol];
+      break;
+    case "hot":
+      lists = [table.exomol, ...table.isotopologues];
+      break;
+  }
+  return lists;
 }
 
 /** Checks a list's fetched files against its record: definition, states, transitions and `.pf`. */
@@ -1239,37 +1324,18 @@ function checkInputs(data: string, source: ExoMolSource): void {
   for (const file of source.transitions) {
     checkFile(join(data, file.name), file);
   }
-  if (source.partitionFunction !== undefined) {
-    checkFile(join(data, source.partitionFunction.name), source.partitionFunction);
+  const pf = partitionFileOf(source);
+  if (pf !== undefined) {
+    checkFile(join(data, pf.name), pf);
   }
 }
 
 /** A list's `.pf` table, from its checked file, or `undefined` where it serves none. */
 function pfOf(data: string, source: ExoMolSource): ReadonlyMap<number, number> | undefined {
-  const file = source.partitionFunction;
+  const file = partitionFileOf(source);
   return file === undefined
     ? undefined
     : parsePartitionFunction(readCheckedText(join(data, file.name), file.sha256));
-}
-
-/**
- * Q(T) as a list takes it ({@link ExoMolSource.partitionFrom}): its `.pf`'s, or `undefined` for
- * the states' sum.
- *
- * @throws Error for a list that takes its `.pf` and serves none.
- */
-function partitionSumOf(
-  data: string,
-  source: ExoMolSource,
-): ((temperatureK: number) => number) | undefined {
-  if (source.partitionFrom === "states") {
-    return undefined;
-  }
-  const pf = pfOf(data, source);
-  if (pf === undefined) {
-    throw new Error(`${source.states.name}'s list takes Q from its .pf, and names none`);
-  }
-  return (t) => partitionSumFromPf(pf, t);
 }
 
 /** What a pass over a table's lists gives: its bins, its record and each list's own figures. */
@@ -1286,20 +1352,20 @@ interface TablePass {
  * and direct sums; its Q(T) is the first list's, the others' in {@link TablePass.isotopologues}.
  */
 async function sharedPass(
-  table: ExoMolTable,
+  table: HotTable,
   data: string,
   temperaturesK: ReadonlyArray<number>,
   jobs: number,
 ): Promise<TablePass> {
   const sources = tableLists(table);
   const definitions = sources.map((source) => readDefinition(data, source));
-  const heaviest = Math.max(...definitions.map((d) => d.molecularMassDa));
+  const heaviestDa = Math.max(...definitions.map((d) => d.molecularMassDa));
   const [low, high] = table.exomol.binRangePerCm;
   if (sources.some((s) => s.binRangePerCm.join() !== table.exomol.binRangePerCm.join())) {
     throw new Error(`${table.exomol.species}'s isotopologues bin over different ranges`);
   }
   const main: SuperLineBins[] = temperaturesK.map((t) =>
-    emptyBins(t, low, high, binStepPerCm(t, low, heaviest)),
+    emptyBins(t, low, high, binStepPerCm(t, low, heaviestDa)),
   );
   const records: PassRecord[] = [];
   for (const [i, source] of sources.entries()) {
@@ -1307,14 +1373,13 @@ async function sharedPass(
     // oxlint-disable-next-line eslint/no-await-in-loop
     const states = await readStates(join(data, source.states.name), source);
     const definition = definitions[i] ?? readDefinition(data, source);
-    const partitionSumAt = partitionSumOf(data, source);
+    // The lists fill the shared bins one after another, so each pass waits for the last.
     // oxlint-disable-next-line eslint/no-await-in-loop
     const { record } = await streamPass(source, definition, states, data, {
       temperaturesK,
+      target: { kind: "shared", into: main },
       broadening: [],
       jobs,
-      into: main,
-      ...(partitionSumAt === undefined ? {} : { partitionSumAt }),
     });
     records.push(record);
   }
@@ -1388,9 +1453,7 @@ export async function runExomolBins(rest: readonly string[]): Promise<void> {
     const dir = values.broad ?? data;
     return parseBroadening(readCheckedText(join(dir, file.name), file.sha256), file, definition);
   });
-  let apart:
-    | { readonly bands: ReadonlySet<number>; readonly rangePerCm: readonly [number, number] }
-    | undefined;
+  let apart: ApartBands | undefined;
   if (table.kind === "merged") {
     // TYM's bands matched to HITRAN2024's, by the survey run before binning.
     const survey = readBandSurvey(cache, source.species);
@@ -1399,17 +1462,15 @@ export async function runExomolBins(rest: readonly string[]): Promise<void> {
   const listPf = pfOf(data, source)?.get(296);
   const jobs = Number(values.jobs ?? "3");
   let pass: TablePass;
-  if (table.isotopologues.length > 0) {
+  if (table.kind === "hot" && table.isotopologues.length > 0) {
     pass = await sharedPass(table, data, temperaturesK, jobs);
   } else {
     const states = await readStates(join(data, source.states.name), source);
-    const partitionSumAt = partitionSumOf(data, source);
     const own = await streamPass(source, definition, states, data, {
       temperaturesK,
-      ...(apart === undefined ? {} : { apart }),
+      target: { kind: "own", apart },
       broadening,
       jobs,
-      ...(partitionSumAt === undefined ? {} : { partitionSumAt }),
     });
     pass = { ...own, isotopologues: undefined };
   }
@@ -1524,7 +1585,7 @@ function tableSpectra(
   readonly close: () => void;
 } {
   const source = table.exomol;
-  if (table.kind === "superLines") {
+  if (table.kind !== "merged") {
     const species = cachedSpecies(source, definition, cacheDir, "all");
     return { spectra: superLineSpectra(species, table.policy), close: species.close };
   }
@@ -1552,6 +1613,8 @@ function tableSpectra(
 /**
  * The reduction's grid: its temperature nodes and pressures, R08.T4.g's the 30 standard pressures,
  * R08.T4.f's E3's thinned pressures unless given, with their rows ({@link chainRowsPa}).
+ *
+ * @throws Error for pressures given to a table on the 30 standard pressures.
  */
 export function gridOfTable(
   table: ExoMolTable,
@@ -1559,7 +1622,10 @@ export function gridOfTable(
   pressuresPa?: ReadonlyArray<number>,
 ): ReductionGrid {
   const nodes = temperaturesK ?? table.temperaturesK;
-  if (table.task === "R08.T4.g") {
+  if (!rulesOf(table).ownPressures) {
+    if (pressuresPa !== undefined) {
+      throw new Error(`${table.exomol.species}'s table takes the 30 standard pressures`);
+    }
     return { temperaturesK: nodes, pressuresPa: STORED_PRESSURES_PA };
   }
   const pressures = pressuresPa ?? THINNED_PRESSURES_PA;
@@ -1572,7 +1638,7 @@ function hitranSpecies(
   lines: string | undefined,
   tips: string | undefined,
 ): LineSpecies | undefined {
-  if (table.kind === "superLines") {
+  if (table.kind !== "merged") {
     return undefined;
   }
   if (lines === undefined || tips === undefined) {
@@ -1604,9 +1670,6 @@ export function runExomolKDistributions(rest: readonly string[]): void {
     throw new Error(
       "usage: exomol-k-distributions --species <key> --cache <dir> [--hitran-lines <csv> --tips <dir>] [--cells a-b] [--stride n:k] [--temperatures t,...] [--pressures p,...] --out <json>",
     );
-  }
-  if (values.pressures !== undefined && table.task === "R08.T4.g") {
-    throw new Error(`${table.exomol.species}'s table takes the 30 standard pressures`);
   }
   const grid = gridOfTable(
     table,
@@ -1759,18 +1822,13 @@ export function runExomolProjection(rest: readonly string[]): void {
   });
   const table = exomolTableOf(values.species);
   const { cache, out } = values;
-  if (
-    table === undefined ||
-    table.task !== "R08.T4.f" ||
-    cache === undefined ||
-    out === undefined
-  ) {
+  if (table?.kind !== "hot" || cache === undefined || out === undefined) {
     throw new Error("usage: exomol-projection --species <R08.T4.f key> --cache <dir> --out <json>");
   }
   const species = table.exomol.species;
   const record = readCacheRecord(cache, species);
-  const nodes = table.temperaturesK;
-  const middleK = nodes[Math.floor(nodes.length / 2)] ?? nodes[0] ?? 1_000;
+  const nodesK = table.temperaturesK;
+  const middleK = nodesK[Math.floor(nodesK.length / 2)] ?? nodesK[0] ?? 1_000;
   const cells = cellsWithLines(table, record);
   const means = record.temperatures[String(middleK)]?.cellMeansM2 ?? [];
   const samples = sampleCellsOf(cells, means);
@@ -1778,7 +1836,7 @@ export function runExomolProjection(rest: readonly string[]): void {
   const runs: ExoMolSample[] = [];
   try {
     for (const [role, cellNm] of Object.entries(samples)) {
-      let grid = gridOfTable(table, nodes);
+      let grid = gridOfTable(table, nodesK);
       for (let pass = 1; pass <= PROJECTION_PASSES; pass += 1) {
         const started = process.cpuUsage();
         const source = reductionSourceOf(table, record.definition, grid);
@@ -1795,7 +1853,7 @@ export function runExomolProjection(rest: readonly string[]): void {
         );
         const added = [...sorting.keepPressuresPa, ...sorting.addMidpointsPa];
         if (added.length > 0 && pass < PROJECTION_PASSES) {
-          grid = gridOfTable(table, nodes, withKeptPressures(grid.pressuresPa, added));
+          grid = gridOfTable(table, nodesK, withKeptPressures(grid.pressuresPa, added));
           continue;
         }
         let firstPa = grid.pressuresPa[0] ?? 10;
@@ -1844,21 +1902,21 @@ export function runExomolProjection(rest: readonly string[]): void {
   }
   const meanG = runs.reduce((sum, r) => sum + r.g, 0) / Math.max(runs.length, 1);
   const pressures = Math.max(...runs.map((r) => r.pressuresPa.length), THINNED_PRESSURES_PA.length);
-  const refined = nodes.length + Math.max(0, ...runs.map((r) => r.refine));
+  const refined = nodesK.length + Math.max(0, ...runs.map((r) => r.refine));
   const projected = {
     species,
     cells: cells.length,
     cellsNm: [cells[0], cells.at(-1)],
-    nodes,
+    nodesK,
     meanG,
     pressures,
     temperaturesRefined: refined,
     bytes: tableBytes(cells.length, meanG, refined, pressures),
-    bytesUnrefined: tableBytes(cells.length, meanG, nodes.length, THINNED_PRESSURES_PA.length),
+    bytesUnrefined: tableBytes(cells.length, meanG, nodesK.length, THINNED_PRESSURES_PA.length),
     bytesAsSpecified: tableBytes(
       cells.length,
       meanG,
-      (nodes.at(-1) ?? 0) / 50 - (nodes[0] ?? 0) / 50 + 1,
+      (nodesK.at(-1) ?? 0) / 50 - (nodesK[0] ?? 0) / 50 + 1,
       STORED_PRESSURES_PA.length,
     ),
     cpuSecondsPerCellNode:
@@ -1868,7 +1926,7 @@ export function runExomolProjection(rest: readonly string[]): void {
   };
   writeFileSync(out, `${JSON.stringify(projected, null, 1)}\n`);
   process.stdout.write(
-    `${species}: ${cells.length} cells, G ${runs.map((r) => r.g).join("/")} (mean ${meanG.toFixed(1)}), T ${refined} P ${pressures}: ${(projected.bytes / 1e6).toFixed(2)} MB (as specified ${(projected.bytesAsSpecified / 1e6).toFixed(2)} MB); ${runs.map((r) => `${r.role} ${r.cellNm} nm chain ${r.worstChain.toExponential(2)} refine ${r.refine} estimated ${r.estimated} at nodes ${r.atNodes} first ${r.firstPa.toPrecision(3)} Pa 1 Pa ${r.belowGrid1Pa.toExponential(2)} ${r.seconds.toFixed(0)} s`).join("; ")}\n`,
+    `${species}: ${cells.length} cells, G ${runs.map((r) => r.g).join("/")} (mean ${meanG.toFixed(1)}), T ${refined} P ${pressures}: ${(projected.bytes / 1e6).toFixed(2)} MB (as specified ${(projected.bytesAsSpecified / 1e6).toFixed(2)} MB); ${runs.map((r) => `${r.role} ${r.cellNm} nm chain ${r.worstChain.toExponential(2)} refine ${r.refine} estimated ${r.estimated} at nodesK ${r.atNodes} first ${r.firstPa.toPrecision(3)} Pa 1 Pa ${r.belowGrid1Pa.toExponential(2)} ${r.seconds.toFixed(0)} s`).join("; ")}\n`,
   );
 }
 
@@ -1877,7 +1935,7 @@ export function runExomolProjection(rest: readonly string[]): void {
  * mass, condensation and Rayleigh cross-section, and where E4 raises its first pressure node above
  * 10 Pa, the hold's checks at 1 Pa and at every standard node below it.
  */
-function reductionSourceOf(
+export function reductionSourceOf(
   table: ExoMolTable,
   definition: ExoMolDefinition,
   grid: ReductionGrid,
@@ -1915,8 +1973,9 @@ function tableInputs(table: ExoMolTable): string {
   const files: ExoMolFile[] = [];
   for (const s of tableLists(table)) {
     files.push(s.def, s.states, ...s.transitions);
-    if (s.partitionFunction !== undefined) {
-      files.push(s.partitionFunction);
+    const pf = partitionFileOf(s);
+    if (pf !== undefined) {
+      files.push(pf);
     }
     files.push(...s.broadeners);
   }
@@ -1930,6 +1989,7 @@ function tableInputs(table: ExoMolTable): string {
 /** A table as its sidecar names it ({@link TableSource}). */
 export function tableSourceOf(table: ExoMolTable): TableSource {
   const s = table.exomol;
+  const rules = rulesOf(table);
   const hitran = table.kind === "merged" ? table.hitran : undefined;
   return {
     species: s.species,
@@ -1944,20 +2004,15 @@ export function tableSourceOf(table: ExoMolTable): TableSource {
     basis: table.basis,
     measuredRangeK: table.measuredRangeK,
     policy: table.policy,
-    reduction: table.notes === undefined ? table.reduction : `${table.reduction} ${table.notes}`,
+    reduction: table.kind === "hot" ? `${table.reduction} ${table.notes}` : table.reduction,
     description:
       `Line absorbers' k-distributions per 1 nm cell reduced from the ${s.citation.split(" (")[0] ?? "line list"} ` +
-      (table.task === "R08.T4.g"
-        ? "(rendering plan R08, R08.T4.g; decision-r08-t4d-kdist.md; decision-r08-t4d-kdist-chain.md " +
-          "sections 9-11)"
-        : "(rendering plan R08, R08.T4.f; decision-r08-t4ef-storage; decision-r08-t4e-budget; " +
-          "decision-r08-t4d-kdist-chain.md sections 9-11)") +
-      ", written by apps/hyperion/scripts/atmosphereData.mjs " +
+      `(${rules.rulings}), written by apps/hyperion/scripts/atmosphereData.mjs ` +
       "exomol-k-distributions-merge from the fetched files named here, which are not committed. " +
       "Adapted material of the ExoMol database, offered under CC BY-SA 4.0 (README.md beside this " +
       "directory, and NOTICE). " +
       PART_LAYOUT_TEXT,
-    ...(table.task === "R08.T4.g" ? {} : { finestStepK: ladderFinestStepK }),
+    finestStepK: rules.finestStepK,
   };
 }
 
@@ -2174,7 +2229,7 @@ export async function runExomolBands(rest: readonly string[]): Promise<void> {
   const states = await readStates(join(data, source.states.name), source);
   const { record } = await streamPass(source, definition, states, data, {
     temperaturesK: [],
-    apart: { bands: new Set(), rangePerCm: range },
+    target: { kind: "own", apart: { bands: new Set(), rangePerCm: range } },
     broadening: [],
     jobs: Number(values.jobs ?? "2"),
     survey: windows,
@@ -2261,9 +2316,7 @@ export function runExomolKDistributionsMerge(rest: readonly string[]): number {
         process.stdout.write(`refine-pressures: ${outcome.pressuresPa.join(",")}\n`);
       }
       process.stdout.write(
-        table.task === "R08.T4.g"
-          ? `exomol-bins then takes these nodes, and their midpoints, for the cache (the finest step ${FINEST_STEP_K} K)\n`
-          : "exomol-bins then takes these nodes, and their midpoints, for the cache (the finest step a quarter of E1's)\n",
+        `exomol-bins then takes these nodes, and their midpoints, for the cache (${rulesOf(table).finestStepText})\n`,
       );
       code = 2;
       break;
@@ -2407,13 +2460,14 @@ export function runExomolCellReferences(rest: readonly string[]): void {
   }
   const nodesK = sidecar.temperaturesK.map(Number);
   // A sidecar writes its pressures to six figures; the lattice's are the reduction's own.
+  const ownPressures = rulesOf(table).ownPressures;
   const grid = gridOfTable(
     table,
     nodesK,
-    table.task === "R08.T4.g" ? undefined : sidecar.pressuresPa.map(Number).map(latticePressurePa),
+    ownPressures ? sidecar.pressuresPa.map(Number).map(latticePressurePa) : undefined,
   );
   // R08.T4.g's references sit about 250 K; a hot table's about its middle node.
-  const nearK = table.task === "R08.T4.g" ? 250 : (nodesK[Math.floor(nodesK.length / 2)] ?? 250);
+  const nearK = ownPressures ? (nodesK[Math.floor(nodesK.length / 2)] ?? 250) : 250;
   const lines = hitranSpecies(table, values["hitran-lines"], values.tips);
   const { definition } = readCacheRecord(values.cache, table.exomol.species);
   const { spectra, close } = tableSpectra(table, values.cache, lines, definition);
@@ -2445,23 +2499,38 @@ export function runExomolCellReferences(rest: readonly string[]): void {
     writeFileSync(values.out, `${entry}\n`);
     return;
   }
-  // The file's other species' entries, each kept as its text, in their order; this one's replaced
-  // or added last.
+  const held = existsSync(values.out) ? readFileSync(values.out, "utf8") : undefined;
+  writeFileSync(values.out, withReferences(held, source.species, entry));
+}
+
+/**
+ * A file of several species' references (`{"references": […]}`) with one species' entry put in, in
+ * place of any it held: the other species' entries kept as they were, in their order, this one's
+ * last.
+ *
+ * @param heldText - The file's text as it was, or `undefined` for a file not yet written.
+ * @throws Error for held text that is not a file of several species' references.
+ */
+export function withReferences(
+  heldText: string | undefined,
+  species: string,
+  entry: string,
+): string {
   const others: string[] = [];
-  if (existsSync(values.out)) {
-    const held: unknown = JSON.parse(readFileSync(values.out, "utf8"));
+  if (heldText !== undefined) {
+    const held: unknown = JSON.parse(heldText);
     const references =
       typeof held === "object" && held !== null && "references" in held
         ? held.references
         : undefined;
     if (!Array.isArray(references)) {
-      throw new Error(`${values.out} is not a file of several species' references`);
+      throw new Error("the file is not one of several species' references");
     }
     for (const r of references) {
-      if (typeof r === "object" && r !== null && "species" in r && r.species !== source.species) {
+      if (typeof r === "object" && r !== null && "species" in r && r.species !== species) {
         others.push(JSON.stringify(r));
       }
     }
   }
-  writeFileSync(values.out, `{"references":[${[...others, entry].join(",")}]}\n`);
+  return `{"references":[${[...others, entry].join(",")}]}\n`;
 }

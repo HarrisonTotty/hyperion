@@ -662,32 +662,52 @@ describe("a hot table continuing a temperate one (R08.T4.f)", () => {
   });
 
   it("hands over at the hot table's first node, a node of the temperate one", () => {
-    expect([handOverK([temperate, hot], "XX"), handOverK([temperate], "XX")]).toEqual([
-      300,
-      undefined,
+    expect(handOverK([temperate, hot], "XX")).toBe(300);
+  });
+
+  it("names no hand-over for a species of one table", () => {
+    expect(handOverK([temperate], "XX")).toBeUndefined();
+  });
+
+  it("serves the temperate table at and below the hand-over", () => {
+    expect([50, 299, 300].map((t) => tableAt([hot, temperate], "XX", t) === temperate)).toEqual([
+      true,
+      true,
+      true,
     ]);
   });
 
-  it("serves the temperate table at and below the hand-over and the hot one above it", () => {
-    expect(
-      [50, 299, 300, 301, 4_000].map((t) => tableAt([hot, temperate], "XX", t) === temperate),
-    ).toEqual([true, true, true, false, false]);
-  });
-
-  it("serves a species' one table at every temperature, and none for a species without", () => {
-    expect([tableAt([temperate], "XX", 4_000), tableAt([temperate], "YY", 200)]).toEqual([
-      temperate,
-      undefined,
+  it("serves the hot table above the hand-over", () => {
+    expect([301, 4_000].map((t) => tableAt([hot, temperate], "XX", t) === hot)).toEqual([
+      true,
+      true,
     ]);
   });
 
-  it("refuses a hand-over off the temperate table's nodes, or a third table", () => {
+  it("serves a species' one table at every temperature", () => {
+    expect(tableAt([temperate], "XX", 4_000)).toBe(temperate);
+  });
+
+  it("serves no table for a species without one", () => {
+    expect(tableAt([temperate], "YY", 200)).toBeUndefined();
+  });
+
+  it("refuses a hand-over off the temperate table's nodes", () => {
     const off = toyTable({
       species: "XX",
       temperaturesK: [325, 350, 400, 450, 500],
       measuredRangeK: [325, 500],
     });
     expect(() => handOverK([temperate, off], "XX")).toThrow("not a temperate one");
+  });
+
+  it("refuses two tables that start at one node", () => {
+    expect(() => handOverK([temperate, toyTable({ species: "XX" })], "XX")).toThrow(
+      "not a temperate one",
+    );
+  });
+
+  it("refuses a third table", () => {
     expect(() => tableAt([temperate, hot, hot], "XX", 400)).toThrow("has 3 tables");
   });
 });

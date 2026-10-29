@@ -1164,18 +1164,22 @@ export async function loadKDistributions(
 }
 
 /**
- * Where a hot table continues a temperate one, the hand-over, K: the hot table's first node, a node
- * of both, at and below which the temperate table serves (plan R08, R08.T4.f: a hot list hands over
- * from R08.T4.d's HITRAN at a recorded temperature where the two agree). `undefined` for a species
- * with one table or none.
+ * A species' tables where a hot table continues a temperate one: the temperate, the hot and the
+ * hand-over, K; `undefined` for a species with one table or none.
  *
  * @throws Error for a species with more than two tables, or two whose hand-over is not a node of
- *   the temperate table's within its grid, a broken invariant of the committed data.
+ *   the temperate table's above its first, a broken invariant of the committed data.
  */
-export function handOverK(
+function continuedTables(
   tables: ReadonlyArray<KDistributionTable>,
   species: string,
-): number | undefined {
+):
+  | {
+      readonly temperate: KDistributionTable;
+      readonly hot: KDistributionTable;
+      readonly atK: number;
+    }
+  | undefined {
   const own = tables.filter((t) => t.species === species);
   if (own.length <= 1) {
     return undefined;
@@ -1184,12 +1188,37 @@ export function handOverK(
     (a, b) => (a.temperaturesK[0] ?? Number.NaN) - (b.temperaturesK[0] ?? Number.NaN),
   );
   const atK = hot?.temperaturesK[0];
-  if (own.length > 2 || atK === undefined || temperate?.temperaturesK.includes(atK) !== true) {
+  const fromK = temperate?.temperaturesK[0];
+  if (
+    own.length > 2 ||
+    temperate === undefined ||
+    hot === undefined ||
+    atK === undefined ||
+    fromK === undefined ||
+    !(atK > fromK) ||
+    !temperate.temperaturesK.includes(atK)
+  ) {
     throw new Error(
       `${species} has ${own.length} tables, which are not a temperate one and a hot one continuing it at one of its nodes`,
     );
   }
-  return atK;
+  return { temperate, hot, atK };
+}
+
+/**
+ * Where a hot table continues a temperate one, the hand-over, K: the hot table's first node, a node
+ * of both above the temperate table's first, at and below which the temperate table serves (plan
+ * R08, R08.T4.f: a hot list hands over from R08.T4.d's HITRAN at a recorded temperature where the
+ * two agree). `undefined` for a species with one table or none.
+ *
+ * @throws Error for a species with more than two tables, or two whose hand-over is not a node of
+ *   the temperate table's above its first, a broken invariant of the committed data.
+ */
+export function handOverK(
+  tables: ReadonlyArray<KDistributionTable>,
+  species: string,
+): number | undefined {
+  return continuedTables(tables, species)?.atK;
 }
 
 /**
@@ -1204,10 +1233,9 @@ export function tableAt(
   species: string,
   temperatureK: number,
 ): KDistributionTable | undefined {
-  const own = tables.filter((t) => t.species === species);
-  const atK = handOverK(tables, species);
-  if (atK === undefined) {
-    return own[0];
+  const continued = continuedTables(tables, species);
+  if (continued === undefined) {
+    return tables.find((t) => t.species === species);
   }
-  return own.find((t) => temperatureK <= atK === (t.temperaturesK[0] ?? Infinity) < atK);
+  return temperatureK <= continued.atK ? continued.temperate : continued.hot;
 }

@@ -1070,3 +1070,54 @@ describe("CO₂'s held χ and fixed-g mix on a snowball-class body", () => {
     );
   });
 });
+
+describe("a species whose hot table continues its temperate one (R08.T4.f)", () => {
+  // Two toy CO tables of one 690 nm cell: a temperate one over 150–350 K and a hot one over
+  // 300–700 K, measured to 400 K, continuing it at 300 K. At 500 K the lines come from the hot
+  // table, measured nowhere there but within its nodes; read against the temperate table's nodes,
+  // 500 K would lie past them.
+  const pressuresPa = [10, 100, 1e3, 1e4, 1e5, 1e6];
+  const toy = (temperaturesK: ReadonlyArray<number>, measuredRangeK: readonly [number, number]) =>
+    readKDistribution(
+      toySidecar(temperaturesK, pressuresPa, 1, {
+        species: "CO",
+        broadening: { self: 1 },
+        measuredRangeK,
+      }),
+      [
+        toyPart(
+          [
+            {
+              nm: 690,
+              weights: [1],
+              sigmasM2: temperaturesK.flatMap(() => pressuresPa.map(() => 1e-28)),
+            },
+          ],
+          { variants: 1, temperatures: temperaturesK.length, pressures: pressuresPa.length },
+        ),
+      ],
+      "toy",
+    );
+  const temperate = toy([150, 200, 250, 300, 350], [150, 296]);
+  const hot = toy([300, 400, 500, 600, 700], [300, 400]);
+  const gases = [["N2", 1]] as const;
+
+  it("weighs the drawn lines by the hot table's nodes above the hand-over", () => {
+    const body: NegligibleBody = {
+      ...isothermalBody({
+        surfacePa: 1e5,
+        temperatureK: 500,
+        molarMassGPerMol: 28,
+        gravityMS2: 9.8,
+        radiusM: 6_371_000,
+        gases: [...gases, ["CO", 1e-6]],
+        bulk: gases,
+      }),
+      kDistributions: [temperate, hot],
+    };
+    const drawn = absorptionOf(negligibleAbsorbers(body), "CO")?.entries.filter(
+      (e) => e.origin === "drawn",
+    );
+    expect(drawn?.map((e) => e.rule)).toEqual(["unmeasuredNodes"]);
+  });
+});

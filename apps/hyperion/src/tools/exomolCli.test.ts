@@ -1,28 +1,42 @@
 import { describe, expect, it } from "vitest";
 
+import { ladderFinestStepK } from "./atomicKDistributions";
+import { THINNED_PRESSURES_PA } from "./atomicKDistributionsCli";
 import {
   BAND_STRENGTH_FACTOR,
   binTemperatures,
   type CacheRecord,
+  cellsWithLines,
   EXOMOL_TABLES,
+  gridOfTable,
   type HitranBand,
   hitranBands,
+  HOT_TABLES,
+  type HotTable,
   matchBands,
   mergeFailures,
   N2O_SATURATION,
   NH3_SATURATION,
+  reductionSourceOf,
+  rulesOf,
+  sampleCellsOf,
   type SurveyWindow,
   tableBroadening,
+  tableLists,
   tableSourceOf,
+  withReferences,
 } from "./exomolCli";
-import { bandKey, type ExoMolFile, packVibration } from "./exomolLines";
+import { bandKey, type ExoMolFile, packVibration, partitionFileOf } from "./exomolLines";
 import {
   ammoniaRayleighCm2,
+  chainRowsPa,
   columnCapCm2,
   nitrousOxideRayleighCm2,
+  raisedFirstNodeChecksPa,
   saturationPressurePa,
+  STORED_PRESSURES_PA,
 } from "./kDistributions";
-import type { PartialCell } from "./kDistributionsCli";
+import { FINEST_STEP_K, type PartialCell } from "./kDistributionsCli";
 
 /** A quanta string, `v1 v2 l2 v3`, packed. */
 function pack(q: string): number {
@@ -214,10 +228,11 @@ describe("the grids and the records", () => {
       const source = tableSourceOf(table);
       // Every file of every list the table takes, its isotopologues' among them, with its SHA-256.
       const files: ExoMolFile[] = [];
-      for (const list of [table.exomol, ...table.isotopologues]) {
+      for (const list of tableLists(table)) {
         files.push(list.def, list.states, ...list.transitions, ...list.broadeners);
-        if (list.partitionFunction !== undefined) {
-          files.push(list.partitionFunction);
+        const pf = partitionFileOf(list);
+        if (pf !== undefined) {
+          files.push(pf);
         }
       }
       expect(source.terms).toMatch(/CC BY-SA 4\.0/u);
@@ -279,5 +294,173 @@ describe("NH₃'s saturation (Fray and Schmitt 2009)", () => {
       saturationPressurePa(NH3_SATURATION, 195.410_001) / at,
       saturationPressurePa(NH3_SATURATION, 300) > 1e6,
     ]).toEqual([expect.closeTo(1, 6), true]);
+  });
+});
+
+/** A hot table by its key, or a test failure. */
+function hot(species: string): HotTable {
+  const table = HOT_TABLES[species];
+  if (table === undefined) {
+    throw new Error(`no hot table ${species}`);
+  }
+  return table;
+}
+
+/** A definition of a toy list, for the reduction's source. */
+const TOY_DEFINITION = {
+  molecularMassDa: 64,
+  airHalfWidthPerCmBar: 0.07,
+  airExponent: 0.5,
+  broadeners: {},
+};
+
+describe("R08.T4.f's hot tables (decision-r08-t4ef-storage §1.4; decision-r08-t4e-budget §1.4)", () => {
+  it.each([
+    ["TiO", 1_000, 4_000],
+    ["FeH", 1_000, 4_000],
+    ["SiO", 1_000, 4_000],
+    ["N2", 1_800, 4_000],
+    ["H2S", 296, 1_500],
+    ["CO", 300, 4_000],
+    ["HCN", 300, 4_000],
+  ] as const)("run %s from its floor or hand-over, %i K, to %i K (E2)", (species, first, last) => {
+    const nodes = hot(species).temperaturesK;
+    expect([nodes[0], nodes.at(-1)]).toEqual([first, last]);
+  });
+
+  it("take E1′'s 18 nodes over 1,000–4,000 K", () => {
+    expect(hot("TiO").temperaturesK).toEqual([
+      1_000, 1_100, 1_200, 1_300, 1_400, 1_500, 1_650, 1_800, 1_950, 2_100, 2_300, 2_500, 2_750,
+      3_000, 3_300, 3_600, 3_950, 4_000,
+    ]);
+  });
+
+  it("bin TiO's five Ti isotopologues together, each at its own abundance", () => {
+    const lists = tableLists(hot("TiO"));
+    const share = lists.reduce((sum, list) => sum + list.abundance, 0);
+    // The Ti fractions sum to 1, so the five take ¹⁶O's share of TiO.
+    expect([lists.length, share]).toEqual([5, expect.closeTo(0.997_57, 9)]);
+  });
+
+  it("take each list's Q(T) from its .pf", () => {
+    const lists = Object.values(HOT_TABLES).flatMap(tableLists);
+    expect(lists.filter((list) => list.partition.from !== "pf").map((l) => l.species)).toEqual([]);
+  });
+
+  it("scale CO's Li2015 lines by the stated hand-over ratio, and only CO's", () => {
+    const scaled = Object.values(HOT_TABLES).filter((t) => t.exomol.intensityScale !== undefined);
+    expect([scaled.map((t) => t.exomol.species), hot("CO").exomol.intensityScale?.factor]).toEqual([
+      ["CO"],
+      2.05,
+    ]);
+  });
+
+  it("refine to a quarter of E1's step, R08.T4.g's tables to 12.5 K", () => {
+    const nh3 = EXOMOL_TABLES["NH3"];
+    if (nh3 === undefined) {
+      throw new Error("NH3 has a table");
+    }
+    expect([rulesOf(hot("TiO")).finestStepK(1_500), rulesOf(nh3).finestStepK(150)]).toEqual([
+      ladderFinestStepK(1_500),
+      FINEST_STEP_K,
+    ]);
+  });
+});
+
+describe("a hot table's grid (E3)", () => {
+  it("takes E3's thinned pressures, read at their rows", () => {
+    const grid = gridOfTable(hot("TiO"), undefined);
+    expect([grid.pressuresPa, grid.rowsPa]).toEqual([
+      THINNED_PRESSURES_PA,
+      chainRowsPa(THINNED_PRESSURES_PA),
+    ]);
+  });
+
+  it("takes the pressures a run gives, the alternates the merge kept among them", () => {
+    const pressures = [...THINNED_PRESSURES_PA, 177_827.941_003_892_28].toSorted((a, b) => a - b);
+    expect(gridOfTable(hot("TiO"), undefined, pressures).pressuresPa).toEqual(pressures);
+  });
+
+  it("keeps R08.T4.g's tables on the 30 standard pressures", () => {
+    const nh3 = EXOMOL_TABLES["NH3"];
+    if (nh3 === undefined) {
+      throw new Error("NH3 has a table");
+    }
+    expect(gridOfTable(nh3, undefined).pressuresPa).toEqual(STORED_PRESSURES_PA);
+  });
+
+  it("refuses pressures given to an R08.T4.g table", () => {
+    const nh3 = EXOMOL_TABLES["NH3"];
+    if (nh3 === undefined) {
+      throw new Error("NH3 has a table");
+    }
+    expect(() => gridOfTable(nh3, undefined, THINNED_PRESSURES_PA)).toThrow("30 standard");
+  });
+
+  it("checks a raised first node's hold below it (E4)", () => {
+    const raised = gridOfTable(hot("TiO"), undefined, THINNED_PRESSURES_PA.slice(2));
+    expect(reductionSourceOf(hot("TiO"), TOY_DEFINITION, raised).belowGridChecksPa).toEqual(
+      raisedFirstNodeChecksPa(100),
+    );
+  });
+
+  it("checks no raised hold on a table from 10 Pa", () => {
+    const grid = gridOfTable(hot("TiO"), undefined);
+    expect(reductionSourceOf(hot("TiO"), TOY_DEFINITION, grid).belowGridChecksPa).toBeUndefined();
+  });
+});
+
+describe("the projection's samples", () => {
+  /** A cache record whose direct sums light 600 and 650 nm at 1,000 K. */
+  const record = (means: ReadonlyArray<number>): CacheRecord => ({
+    species: "TiO",
+    definition: TOY_DEFINITION,
+    temperatures: { "1000": { partitionSum: 1, cellMeansM2: means } },
+    partitionSum296: 1,
+    cellMeans296M2: [],
+    intensity296Cm: 1,
+    broadening: [],
+    bands: [],
+    bandExtents: [],
+    apart: [],
+    passes: [],
+  });
+  const means = Array.from({ length: 381 }, (_, c) => (c === 220 ? 2e-20 : c === 270 ? 1e-20 : 0));
+
+  it("take every cell a line's wing reaches: each lit cell and its neighbours", () => {
+    expect(cellsWithLines(hot("TiO"), record(means))).toEqual([599, 600, 601, 649, 650, 651]);
+  });
+
+  it("take the strongest cell, a median one and the strongest's weaker neighbour", () => {
+    const lit = [599, 600, 601, 649, 650, 651];
+    // Ranked 600, 650, 601, 649, 651, 599: the median the fourth, 649; 600's weaker neighbour 599.
+    const shaded = means.map((m, c) =>
+      c === 221 ? 5e-21 : c === 219 ? 1e-21 : c === 269 ? 3e-21 : c === 271 ? 2e-21 : m,
+    );
+    expect(sampleCellsOf(lit, shaded)).toEqual({ strongest: 600, median: 649, edge: 599 });
+  });
+});
+
+describe("a file of several species' references (exomol-cell-references --into)", () => {
+  const file = withReferences(
+    withReferences(undefined, "FeH", '{"species":"FeH","cells":[1]}'),
+    "TiO",
+    '{"species":"TiO","cells":[2]}',
+  );
+
+  it("adds a species' entry after those it holds", () => {
+    expect(file).toBe(
+      '{"references":[{"species":"FeH","cells":[1]},{"species":"TiO","cells":[2]}]}\n',
+    );
+  });
+
+  it("replaces a species' entry, keeping the others in their order", () => {
+    expect(withReferences(file, "FeH", '{"species":"FeH","cells":[3]}')).toBe(
+      '{"references":[{"species":"TiO","cells":[2]},{"species":"FeH","cells":[3]}]}\n',
+    );
+  });
+
+  it("refuses a file that is not one of several species' references", () => {
+    expect(() => withReferences('{"species":"FeH"}', "TiO", "{}")).toThrow("several species");
   });
 });

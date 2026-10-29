@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -210,11 +210,25 @@ describe("a .def text file (the archive's definitions, R08.T4.f)", () => {
     });
   });
 
-  it("takes the assumed width where the file gives none, and refuses it missing otherwise", () => {
-    const bare = text.split("\n").slice(0, 3).join("\n");
+  /** The toy without its default width and exponent. */
+  const bare = text.split("\n").slice(0, 3).join("\n");
+
+  it("takes the assumed width where the file gives none", () => {
     const assumed = { halfWidthPerCmBar: 0.07, exponent: 0.5, why: "toy" };
     expect(parseDefinitionText(bare, "toy.def", assumed).airHalfWidthPerCmBar).toBe(0.07);
+  });
+
+  it("refuses a file that gives no width, with none assumed", () => {
     expect(() => parseDefinitionText(bare, "toy.def")).toThrow("Lorentzian half-width");
+  });
+
+  it("reads a labelled line with no value as missing, not as 0", () => {
+    const empty = [
+      bare,
+      "0.0700  # Default value of Lorentzian half-width for all lines (in cm-1/bar)",
+      "        # Default value of temperature exponent for all lines",
+    ].join("\n");
+    expect(() => parseDefinitionText(empty, "toy.def")).toThrow("temperature exponent");
   });
 });
 
@@ -224,11 +238,12 @@ describe("a .pf file's Q(T)", () => {
     [1_001, 9_040.0],
   ]);
 
-  it("takes a tabulated temperature's value, and between two, linear in T", () => {
-    expect([partitionSumFromPf(pf, 1_000), partitionSumFromPf(pf, 1_000.5)]).toEqual([
-      9_025.7336,
-      (9_025.7336 + 9_040) / 2,
-    ]);
+  it("takes a tabulated temperature's value", () => {
+    expect(partitionSumFromPf(pf, 1_000)).toBe(9_025.7336);
+  });
+
+  it("takes Q between two tabulated temperatures linear in T", () => {
+    expect(partitionSumFromPf(pf, 1_000.5)).toBe((9_025.7336 + 9_040) / 2);
   });
 
   it("refuses a temperature outside its table", () => {
@@ -295,11 +310,14 @@ const TOY: ExoMolSource = {
     layout: { energy: 2, degeneracy: 3, j: 4, vibration: [5, 6, 7, 8] },
   },
   transitions: [{ name: "toy.trans", bytes: 0, sha256: "", fromPerCm: 13_000, toPerCm: 17_000 }],
-  partitionFrom: "states",
+  partition: { from: "states", check: undefined },
   broadeners: [],
   abundance: 0.99,
   binRangePerCm: [13_100, 16_500],
 };
+
+/** A pass's target of bins of its own, no band apart. */
+const OWN = { kind: "own", apart: undefined } as const;
 
 /** Reads the toy files' text by name, as `streamBzip2Lines` reads a file's. */
 const readToy: LineReader = async (path, onLine) => {
@@ -397,7 +415,7 @@ describe("a streaming pass over a list", () => {
       directory,
       {
         temperaturesK: [200, 300],
-        apart: { bands: new Set([MATCHED]), rangePerCm: [13_100, 15_000] },
+        target: { kind: "own", apart: { bands: new Set([MATCHED]), rangePerCm: [13_100, 15_000] } },
         broadening: [],
         jobs: 1,
       },
@@ -434,51 +452,64 @@ describe("a streaming pass over a list", () => {
     expect(record.bands.get(MATCHED)?.lines).toBe(1);
   });
 
-  it("adds two lists' lines to shared bins, each at its own Q and abundance, emission left to its caller", async () => {
-    const states = await readStates("toy.states", TOY, readToy);
-    const shared = [emptyBins(300, 13_100, 16_500, 0.01)];
-    const minor = { ...TOY, abundance: 0.01 };
-    const options = { temperaturesK: [300], broadening: [], jobs: 1, into: shared } as const;
-    await streamPass(TOY, TOY_DEFINITION, states, directory, options, readToy);
-    const before = total(shared[0]?.values ?? new Float64Array(0));
-    await streamPass(minor, TOY_DEFINITION, states, directory, options, readToy);
-    const after = total(shared[0]?.values ?? new Float64Array(0));
-    // Each pass adds S without stimulated emission, so the second adds 0.01 ÷ 0.99 of the first.
-    expect(after / before).toBeCloseTo(1 + 0.01 / 0.99, 12);
-    const check = emptyBins(300, 13_100, 16_500, 0.01);
+  /** One pass over the toy at 300 K into a set of bins of its own, no band apart. */
+  async function ownPass(
+    source: ExoMolSource,
+  ): Promise<Awaited<ReturnType<typeof streamPass>> & { readonly sum: number }> {
+    const states = await readStates("toy.states", source, readToy);
+    const pass = await streamPass(
+      source,
+      TOY_DEFINITION,
+      states,
+      directory,
+      { temperaturesK: [300], target: OWN, broadening: [], jobs: 1 },
+      readToy,
+    );
+    return { ...pass, sum: total(pass.bins.main[0]?.values ?? new Float64Array(0)) };
+  }
+
+  /** A pass over a list into shared bins at 300 K. */
+  async function sharedPassInto(
+    source: ExoMolSource,
+    into: ReadonlyArray<SuperLineBins>,
+  ): Promise<void> {
+    const states = await readStates("toy.states", source, readToy);
     await streamPass(
-      TOY,
+      source,
       TOY_DEFINITION,
       states,
       directory,
-      { ...options, into: [check] },
+      { temperaturesK: [300], target: { kind: "shared", into }, broadening: [], jobs: 1 },
       readToy,
     );
-    applyStimulatedEmission(check);
-    const { bins } = await streamPass(
-      TOY,
-      TOY_DEFINITION,
-      states,
-      directory,
-      { temperaturesK: [300], broadening: [], jobs: 1 },
-      readToy,
-    );
-    expect(total(check.values) / total(bins.main[0]?.values ?? new Float64Array(0))).toBeCloseTo(
-      1,
-      12,
-    );
+  }
+
+  it("adds a second list's lines to shared bins at its own abundance", async () => {
+    const shared = [emptyBins(300, 13_100, 16_500, 0.01)];
+    await sharedPassInto(TOY, shared);
+    const before = total(shared[0]?.values ?? new Float64Array(0));
+    await sharedPassInto({ ...TOY, abundance: 0.01 }, shared);
+    const after = total(shared[0]?.values ?? new Float64Array(0));
+    expect(after / before).toBeCloseTo(1 + 0.01 / 0.99, 12);
   });
 
-  it("refuses shared bins with a set apart, or not one a temperature", async () => {
+  it("leaves shared bins' stimulated emission to its caller", async () => {
+    const check = emptyBins(300, 13_100, 16_500, 0.01);
+    await sharedPassInto(TOY, [check]);
+    applyStimulatedEmission(check);
+    expect(total(check.values) / (await ownPass(TOY)).sum).toBeCloseTo(1, 12);
+  });
+
+  it("refuses shared bins that are not one a temperature", async () => {
     const states = await readStates("toy.states", TOY, readToy);
-    const shared = [emptyBins(300, 13_100, 16_500, 0.01)];
+    const into = [emptyBins(300, 13_100, 16_500, 0.01)];
     await expect(
       streamPass(
         TOY,
         TOY_DEFINITION,
         states,
         directory,
-        { temperaturesK: [200, 300], broadening: [], jobs: 1, into: shared },
+        { temperaturesK: [200, 300], target: { kind: "shared", into }, broadening: [], jobs: 1 },
         readToy,
       ),
     ).rejects.toThrow(RangeError);
@@ -486,26 +517,21 @@ describe("a streaming pass over a list", () => {
 
   it("takes Q(T) from the list's .pf where its source does", async () => {
     const states = await readStates("toy.states", TOY, readToy);
-    const fromStates = await streamPass(
-      TOY,
-      TOY_DEFINITION,
-      states,
-      directory,
-      { temperaturesK: [300], broadening: [], jobs: 1 },
-      readToy,
-    );
     const q = 2 * partitionSum(states, 300);
-    const fromPf = await streamPass(
-      TOY,
-      TOY_DEFINITION,
-      states,
-      directory,
-      { temperaturesK: [300], broadening: [], jobs: 1, partitionSumAt: () => q },
-      readToy,
-    );
-    const sum = (pass: typeof fromPf): number =>
-      total(pass.bins.main[0]?.values ?? new Float64Array(0));
-    expect([fromPf.record.partitionSums[0]?.[1], sum(fromPf) / sum(fromStates)]).toEqual([q, 0.5]);
+    writeFileSync(join(directory, "toy.pf"), `   296.0 ${q}\n   300.0 ${q}\n   301.0 ${q}\n`);
+    const fromPf = await ownPass({
+      ...TOY,
+      partition: { from: "pf", file: { name: "toy.pf", bytes: 0, sha256: "" } },
+    });
+    expect([fromPf.record.partitionSums[0]?.[1], fromPf.sum / (await ownPass(TOY)).sum]).toEqual([
+      q,
+      0.5,
+    ]);
+  });
+
+  it("scales every binned line by its source's stated factor", async () => {
+    const scaled = await ownPass({ ...TOY, intensityScale: { factor: 2, why: "toy" } });
+    expect(scaled.sum / (await ownPass(TOY)).sum).toBeCloseTo(2, 12);
   });
 
   it("reads and drops the transitions past a source's cut on v' - v''", async () => {
@@ -515,30 +541,12 @@ describe("a streaming pass over a list", () => {
       states: { ...TOY.states, layout: { ...TOY.states.layout, v: 5 } },
       maxDeltaV: 1,
     };
-    const states = await readStates("toy.states", cut, readToy);
-    const { record } = await streamPass(
-      cut,
-      TOY_DEFINITION,
-      states,
-      directory,
-      { temperaturesK: [300], broadening: [], jobs: 1 },
-      readToy,
-    );
+    const { record } = await ownPass(cut);
     expect([record.linesRead, record.linesBinned]).toEqual([4, 2]);
   });
 
   it("refuses a cut on v' - v'' whose states give no v", async () => {
-    const states = await readStates("toy.states", TOY, readToy);
-    await expect(
-      streamPass(
-        { ...TOY, maxDeltaV: 1 },
-        TOY_DEFINITION,
-        states,
-        directory,
-        { temperaturesK: [300], broadening: [], jobs: 1 },
-        readToy,
-      ),
-    ).rejects.toThrow("needs its states' v");
+    await expect(ownPass({ ...TOY, maxDeltaV: 1 })).rejects.toThrow("needs its states' v");
   });
 
   it("refuses a number of jobs under 1", async () => {
@@ -549,7 +557,7 @@ describe("a streaming pass over a list", () => {
         TOY_DEFINITION,
         states,
         directory,
-        { temperaturesK: [300], broadening: [], jobs: 0 },
+        { temperaturesK: [300], target: OWN, broadening: [], jobs: 0 },
         readToy,
       ),
     ).rejects.toThrow("whole number of jobs");
@@ -563,7 +571,7 @@ describe("a streaming pass over a list", () => {
         TOY_DEFINITION,
         states,
         directory,
-        { temperaturesK: [300], broadening: [], jobs: 2 },
+        { temperaturesK: [300], target: OWN, broadening: [], jobs: 2 },
         failingReader,
       ),
     ).rejects.toThrow("a broken stream");
@@ -583,7 +591,7 @@ describe("a streaming pass over a list", () => {
       directory,
       {
         temperaturesK: [300],
-        apart: { bands: new Set([MATCHED]), rangePerCm: [13_100, 15_000] },
+        target: { kind: "own", apart: { bands: new Set([MATCHED]), rangePerCm: [13_100, 15_000] } },
         broadening: [],
         jobs: 1,
       },

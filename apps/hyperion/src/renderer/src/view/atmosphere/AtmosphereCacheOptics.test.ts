@@ -15,7 +15,7 @@ import {
 } from "../../test/atmosphereFixtures";
 import { detailOf, recordInput, SUN_LIGHT } from "../../test/atmosphereRecords";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
-import { microtasks, NOT_MODELLED, toyLoader, toyTable } from "../../test/opticsFakes";
+import { hotToyTable, microtasks, NOT_MODELLED, toyLoader, toyTable } from "../../test/opticsFakes";
 import {
   earthDetail,
   earthDetailOfAnOlderServer,
@@ -29,7 +29,7 @@ import {
   absorberCurvesBySun,
   type AbsorberSpec,
 } from "./absorbers";
-import type { AssembledMedium } from "./assemble";
+import { type AssembledMedium, lineSpeciesOf } from "./assemble";
 import type { BodyAtmosphereInput, BodyLight } from "./atmosphereInput";
 import { R05_EARTH_REFERENCE } from "./earth";
 import { OpticsJobs } from "./opticsJobs";
@@ -230,6 +230,28 @@ describe("an optics worker's answers", () => {
       share: { index: 0, count: 1 },
     });
     expect([asked.length > 0, asked]).toEqual([true, [...new Set(asked)]]);
+  });
+
+  it("keeps both of a species' tables where a hot one continues a temperate one", async () => {
+    const earth = earthInput();
+    const species = lineSpeciesOf(earth)[0] ?? "";
+    const hot = hotToyTable(species);
+    const jobs = new OpticsJobs({
+      // The hot table first, so that a cache keeping one table a species would keep the wrong one
+      // for an Earth.
+      loadKDistributions: async (asked) =>
+        Promise.resolve(asked.flatMap((key) => (key === species ? [hot, toyTable(key)] : []))),
+    });
+    const { reply } = await jobs.answer({ kind: "assemble", id: 1, input: earth });
+    if (reply.kind !== "assembled" || reply.assembled.drawn === undefined) {
+      throw new Error(`the Earth was answered ${reply.kind} with no medium`);
+    }
+    const sources = reply.assembled.drawn.absorbers.flatMap((spec) =>
+      spec.kind === "column"
+        ? spec.species.flatMap((s) => (s.lines === undefined ? [] : [s.lines.kDistribution.source]))
+        : [],
+    );
+    expect([sources.length > 0, sources.every((s) => !s.startsWith("hot"))]).toEqual([true, true]);
   });
 
   it("answers a job that throws as failed, with its message", async () => {
