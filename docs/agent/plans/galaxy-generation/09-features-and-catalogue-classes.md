@@ -3710,12 +3710,31 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `a_cell_s_farthest_radius_is_its_farthest_corner_s`, and the nested walk level by level. The
     integration file's fast tests take some 14 s of test time natively.
   - _The bench_ `centre_query/century_query_cached` (0.1 ly at the black hole, +100 yr, a warm
-    `KeepCentreOrbits`): **not run**, pending main's quiet window. A probe at opt-level 2 on a
-    shared machine measured 102 ms warm, after the shell test, the integer key and one
-    classification per cell (160 ms before), against "about 10 ms": the 480,000 band-cell lookups
-    of the full scan some 45 ms, the cell choice and the propagation of some 110,000 members the
-    rest. Cold it took 17.6 s, nearly all member placement (about 160 µs a member, P09.T27's
-    draws). `CentreModel::new` is not re-benched either.
+    `KeepCentreOrbits`): **not run** with the task, pending main's quiet window. A probe at
+    opt-level 2 on a shared machine measured 102 ms warm, after the shell test, the integer key and
+    one classification per cell (160 ms before), against "about 10 ms": the 480,000 band-cell
+    lookups of the full scan some 45 ms, the cell choice and the propagation of some 110,000
+    members the rest. Cold it took 17.6 s, nearly all member placement (about 160 µs a member,
+    P09.T27's draws). `CentreModel::new` is not re-benched either.
+    - _Run (lane `p09-centre`, 2026-10-29, at `GENERATOR_VERSION` 23; pod, 4 vCPU, not the
+      target desktop)._ `cargo bench -p hyperion-sim --bench centre`, release (thin LTO), with
+      nothing else running, Criterion's 20 samples:
+      - `centre_query/century_query_cached`: **159.5 ms** (159.1–159.9 ms; a second run 159.5 ms),
+        against the old machine's probe of 102 ms at opt-level 2 and the plan's "about 10 ms". The
+        cold query before it, 11,793 hits with 109,544 members placed and propagated, took about
+        29 s from the process's start (the galaxy's and the centre's builds included, under a
+        second of it; the bench times only the warm query), against the probe's 17.6 s: some
+        265 µs a member.
+      - `centre/model` (`CentreModel::new`, the four inversions, the marks' acceptances and the
+        classes): **233.7 ms** (233.5–234.0 ms), against Design note 15's 100 ms and P09.T27's
+        91 ms with three inversions.
+      - `centre/profile_and_four_inversions`: **185.6 ms** (185.4–185.8 ms), against the 50 ms set
+        for three inversions.
+      - _Findings (2026-10-13 rule; recorded, not blockers: cost alone is not one)._ The warm
+        query misses its 10 ms about sixteen times over, and `CentreModel::new` its 100 ms more
+        than twice over; the galaxy pays the model once, when its centre is first read
+        (`Galaxy::centre`), and a galaxy that never asks pays nothing. The pod's figures are not
+        the target desktop's; the owner's machine should re-run the bench before either is tuned.
   - _For P09.T28.b.b._ Wire `kepler_pad_for` into `sphere_for_layer` behind `kepler_regime`, with
     its census moves in C1; run a range-query brute force near the centre under both arms; if a
     centre member's `position_at` is gated on the rule, gate the source's `Trajectory` with it, so
