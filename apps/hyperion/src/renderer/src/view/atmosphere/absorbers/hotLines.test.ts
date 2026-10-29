@@ -16,17 +16,22 @@ import {
   type ColumnAbsorberSpec,
 } from "../absorbers";
 import {
+  cellSigmasAt,
+  cellTransmittance,
   curveRowsPa,
+  handOverK,
   type KDistributionFile,
   type KDistributionTable,
+  kDistributionAt,
   loadKDistributions,
   PRESSURE_LATTICE_PA,
   STANDARD_PRESSURES_PA,
+  tableAt,
 } from "./kDistribution";
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./transparency";
 
 /** The species R08.T4.f draws from ExoMol's lists (decision-r08-t4ef-storage §5.4's order). */
-const DRAWN = ["FeH", "TiO", "N2"] as const;
+const DRAWN = ["FeH", "TiO", "CO", "N2"] as const;
 
 /** A drawn species. */
 type Drawn = (typeof DRAWN)[number];
@@ -39,6 +44,7 @@ type Drawn = (typeof DRAWN)[number];
 const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
   FeH: [1_000, 4_000],
   TiO: [1_000, 4_000],
+  CO: [300, 4_000],
   N2: [1_800, 4_000],
 };
 
@@ -52,7 +58,13 @@ const LADDER_FROM: Readonly<Partial<Record<string, number>>> = { H2S: 350 };
  * The drawn species whose tables are `estimated`: CO's, its intensities taking a stated scale;
  * HCN's, its hot bands incomplete in the range; N₂'s, its model carried past its fitted range.
  */
-const ESTIMATED: ReadonlyArray<Drawn> = ["N2"];
+const ESTIMATED: ReadonlyArray<Drawn> = ["CO", "N2"];
+
+/**
+ * The drawn species whose hot tables continue R08.T4.d's HITRAN2024 tables, handing over at their
+ * first node, 300 K.
+ */
+const HANDED_OVER: ReadonlyArray<Drawn> = ["CO"];
 
 /**
  * The species R08.T4.f leaves pending, each keeping its entry: VO and hot H₂O, whose lists (HyVO,
@@ -336,4 +348,65 @@ describe.each(DRAWN)("%s's curves", (key) => {
     },
     60_000,
   );
+});
+
+/**
+ * A key's two tables at their hand-over, at a pressure node both hold: each shared cell's
+ * transmittance through the columns at which the temperate table's lies in [0.2, 0.8], the hot
+ * table's against it, the largest difference over the cells.
+ */
+function handOverDifference(species: Drawn, pressurePa: number): number {
+  const atK = handOverK(tables, species);
+  if (atK === undefined) {
+    throw new Error(`${species} has no hand-over`);
+  }
+  const temperate = tableAt(tables, species, atK);
+  if (temperate === undefined || temperate === hotTable(species)) {
+    throw new Error(`${species}'s temperate table does not serve at its hand-over`);
+  }
+  const cold = kDistributionAt(temperate, atK);
+  const hot = kDistributionAt(hotTable(species), atK);
+  const coldSigmas = cellSigmasAt(cold, pressurePa);
+  const hotSigmas = cellSigmasAt(hot, pressurePa);
+  let worst = 0;
+  for (const [c, cell] of cold.cells.entries()) {
+    const h = hot.cells.findIndex((x) => x.cellNm === cell.cellNm);
+    const hotCell = hot.cells[h];
+    if (hotCell === undefined) {
+      continue;
+    }
+    for (let k = 0; k <= 160; k += 1) {
+      const columnPerM2 = 10 ** (16 + k / 8);
+      const t = cellTransmittance(cell.weights, coldSigmas[c] ?? new Float64Array(0), columnPerM2);
+      if (t >= 0.2 && t <= 0.8) {
+        const th = cellTransmittance(
+          hotCell.weights,
+          hotSigmas[h] ?? new Float64Array(0),
+          columnPerM2,
+        );
+        worst = Math.max(worst, Math.abs(th - t));
+      }
+    }
+  }
+  return worst;
+}
+
+describe.each(HANDED_OVER)("%s's hand-over from R08.T4.d's HITRAN2024 table", (key) => {
+  it("lies at the hot table's first node, the temperate table serving at and below it", () => {
+    expect([
+      handOverK(tables, key),
+      tableAt(tables, key, 300) === hotTable(key),
+      tableAt(tables, key, 301) === hotTable(key),
+    ]).toEqual([RANGES[key][0], false, true]);
+  });
+});
+
+describe("the hand-overs' agreement at 300 K (the recorded figures)", () => {
+  it("holds CO's two tables within 0.03 of each other at 1 kPa, the scale's spread cell by cell", () => {
+    expect(handOverDifference("CO", 1e3)).toBeLessThan(0.03);
+  });
+
+  it("holds CO's within 0.14 at 0.1 MPa, its lines' assumed widths over HITRAN2024's", () => {
+    expect(handOverDifference("CO", 1e5)).toBeLessThan(0.14);
+  });
 });

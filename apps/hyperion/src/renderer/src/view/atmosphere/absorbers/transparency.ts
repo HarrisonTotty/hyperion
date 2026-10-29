@@ -597,7 +597,6 @@ const PENDING: ReadonlyArray<PendingListing> = [
     task: "R08.T4.f",
     what: "its A-X hot bands (SiOUVenIR), which reach the range above about 1000 K",
   },
-  { key: "CO", task: "R08.T4.f", what: "hot CO (Li2015, its 8-0 bands and up dropped)" },
   {
     key: "CO",
     task: "R08.T4.f",

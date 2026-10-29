@@ -550,11 +550,14 @@ ruled 2026-10-09 and 2026-10-10).
   al., Astrophys. J. 594 (2003) 651, DOI: 10.1086/376791; S. Wende, A. Reiners, A. Seifahrt and P.
   F. Bernath, Astron. Astrophys. 523 (2010) A58, DOI: 10.1051/0004-6361/201015220; P. F. Bernath, J.
   Quant. Spectrosc. Radiat. Transf. 240 (2020) 106687); Toto's TiO, its five Ti isotopologues (L. K.
-  McKemmish et al., Mon. Not. R. Astron. Soc. 488 (2019) 2836-2854, DOI: 10.1093/mnras/stz1818); and
+  McKemmish et al., Mon. Not. R. Astron. Soc. 488 (2019) 2836-2854, DOI: 10.1093/mnras/stz1818);
   WCCRMT's 14N2, its triplet system (C. M. Western, L. Carter-Blatchford, P. Crozet, A. J. Ross, J.
   Morville and D. W. Tokaryk, J. Quant. Spectrosc. Radiat. Transf. 219 (2018) 127-141, DOI:
   10.1016/j.jqsrt.2018.07.017; its partition function from P. S. Barklem and R. Collet, Astron.
-  Astrophys. 588 (2016) A96, DOI: 10.1051/0004-6361/201526961). That adapted material is offered
+  Astrophys. 588 (2016) A96, DOI: 10.1051/0004-6361/201526961); and Li2015's 12C16O, its bands from
+  v' - v'' = 8 left out and its intensities scaled by 2.05 to HITRAN2024's 7-0 band (G. Li, I. E.
+  Gordon, L. S. Rothman, Y. Tan, S.-M. Hu, S. Kassi, A. Campargue and E. S. Medvedev, Astrophys. J.
+  Suppl. Ser. 216 (2015) 15, DOI: 10.1088/0067-0049/216/1/15). That adapted material is offered
   under CC BY-SA 4.0 (its README.md beside it); the line lists' files are not committed.
 
 - Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,

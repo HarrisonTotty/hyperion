@@ -1041,7 +1041,10 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
       "so every line takes that summed ratio, 2.05 (the source's intensityScale; R08.T4.c's bound " +
       "took the peak cell's 2.13, rounded up), and the table is estimated: " +
       "at and below 300 K the client reads R08.T4.d's table, above it this one (kDistribution.ts's " +
-      "tableAt). The bands from Delta v = 8 are left out, bounded by CO's pending overtones part. " +
+      "tableAt). There a cell's transmittance steps by up to 0.03 at 1 kPa, the scale's spread, and " +
+      "0.13 at 0.1 MPa, the list's default width (0.07 cm-1 per bar) exceeding HITRAN2024's air " +
+      "widths (hotLines.test.ts). The bands from Delta v = 8 are left out, bounded by CO's pending " +
+      "overtones part. " +
       "Above 4000 K the 4000 K node is held, estimated, Li2015 being valid to 9000 K. Fetched from " +
       "the database's archive, whose states file differs from the one R08.T4.c summed (SHA-256 " +
       "83ca3036...04e1), its transitions and .pf the same.",

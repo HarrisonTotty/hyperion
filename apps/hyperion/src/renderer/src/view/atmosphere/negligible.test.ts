@@ -427,12 +427,13 @@ describe("the bound's pieces", () => {
   });
 
   it("holds an entry's end nodes beyond them, and says so", () => {
-    const co = PENDING_ABSORBERS.find((p) => p.key === "CO" && p.part === undefined)?.bound;
-    if (co === undefined) {
-      throw new Error("CO's hot list is pending");
+    // VO's entry, from 1,000 K, stays pending until R08.T4.f's part 2.
+    const vo = PENDING_ABSORBERS.find((p) => p.key === "VO" && p.part === undefined)?.bound;
+    if (vo === undefined) {
+      throw new Error("VO's list is pending");
     }
-    const below = boundCellMeansAt(co, 500);
-    const atFirst = boundCellMeansAt(co, co.temperaturesK[0] ?? Number.NaN);
+    const below = boundCellMeansAt(vo, 500);
+    const atFirst = boundCellMeansAt(vo, vo.temperaturesK[0] ?? Number.NaN);
     expect([below.pastNodes, atFirst.pastNodes, Array.from(below.cellMeans)]).toEqual([
       true,
       false,

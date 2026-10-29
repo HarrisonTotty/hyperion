@@ -39,6 +39,10 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
     Ross, J. Morville and D. W. Tokaryk, J. Quant. Spectrosc. Radiat. Transf. 219 (2018) 127, DOI
     10.1016/j.jqsrt.2018.07.017), its partition function from P. S. Barklem and R. Collet, Astron.
     Astrophys. 588 (2016) A96.
+  - `CO`: Li2015's ¹²C¹⁶O, its bands from v′ − v″ = 8 left out and its intensities scaled by 2.05
+    to HITRAN2024's 7–0 band (G. Li, I. E. Gordon, L. S. Rothman, Y. Tan, S.-M. Hu, S. Kassi, A.
+    Campargue and E. S. Medvedev, Astrophys. J. Suppl. Ser. 216 (2015) 15, DOI
+    10.1088/0067-0049/216/1/15).
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which
