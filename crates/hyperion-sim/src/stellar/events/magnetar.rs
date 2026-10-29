@@ -35,11 +35,13 @@
 //! [`EPISODE_BIN_SECONDS`] = 30 days at r = [`EPISODES_PER_E_FOLD`] × B(t) ÷ (10¹⁹ G yr), 2,000
 //! episodes per e-fold of the field (the ruling's): 0.2 a year at 10¹⁵ G, 0.02 at 10¹⁴ G and 0.009
 //! at 4.4 × 10¹³ G, and 0.05 at 2.5 × 10¹⁴ G, against Coti Zelati et al.'s (2018, MNRAS 474, 961)
-//! 23 outbursts of 17 magnetars over 2003–2016, about 0.05 per magnetar-year among the some 30
-//! known. An episode's marks, word 0 and word 1 of its stream, are its expected burst count
-//! `N_b`, log-uniform on [3, 1,000] ([`BURST_COUNT`]), and its e-folding `τ_b`, log-uniform on
-//! 0.3–10 days ([`BURST_E_FOLDING_DAYS`]); it lasts 10 `τ_b` ([`EPISODE_SPAN_E_FOLDINGS`]), at
-//! most 100 days, and [`EPISODE_LOOK_BACK_BINS`] = 4 bins of look-back cover it.
+//! 23 outbursts of 17 magnetars over 1998–2016 (their Table 2), about 0.05 per magnetar-year (23
+//! over 19 years among the 26 sources of Olausen and Kaspi's catalogue, whose online version now
+//! lists 30 magnetars and candidates). An episode's marks, word 0 and word 1 of its stream, are
+//! its expected burst count `N_b`, log-uniform on [3, 1,000] ([`BURST_COUNT`]), and its e-folding
+//! `τ_b`, log-uniform on 0.3–10 days ([`BURST_E_FOLDING_DAYS`]); it lasts 10 `τ_b`
+//! ([`EPISODE_SPAN_E_FOLDINGS`]), at most 100 days, and [`EPISODE_LOOK_BACK_BINS`] = 4 bins of
+//! look-back cover it.
 //!
 //! # Short bursts
 //!
@@ -55,7 +57,7 @@
 //! later. Marks: word 0 the episode the burst belongs to, picked in proportion to the episodes'
 //! rates at its time; word 1 its energy, dN/dE ∝ E^(−5/3) on 10³⁷–10⁴¹ erg ([`BURST_ENERGY_JOULES`],
 //! Göğüş et al. 1999, ApJ 526, L93, and 2000, ApJ 532, L121; Cheng et al. 1996, Nature 382,
-//! 518); word 2 its duration, log-normal about 0.1 s with σ 0.3 dex (Göğüş et al. 2001, ApJ 558,
+//! 518); word 2 its duration, log-normal about 0.1 s with σ 0.35 dex (Göğüş et al. 2001, ApJ 558,
 //! 228), truncated at ±4σ.
 //!
 //! # Giant flares
@@ -71,9 +73,10 @@
 //! giant flare's light here is its initial spike alone, [`GIANT_FLARE_SPIKE`]; the pulsating tail
 //! that follows is not modelled.
 //!
-//! Every figure cited from the ruling's memory is marked in its constant's documentation; this
-//! build could not read them at source (the science check that reads each at source is left to a
-//! machine with network access).
+//! Every figure the ruling cited from memory was read at source on 2026-10-29 (arXiv copies, and
+//! Olausen and Kaspi's online catalogue as the Internet Archive kept it), and each constant's documentation names
+//! the section or table it was read in. One moved: the bursts' duration width, 0.35 dex, not the
+//! ruling's 0.3 ([`BURST_DURATION_SIGMA_DEX`]).
 //!
 //! An event may change what a console reads, never what the star's track is (design note 14):
 //! nothing here changes the star or its neutron star.
@@ -126,15 +129,17 @@ pub const FIELD_DECAY_PRODUCT_GAUSS_YEARS: f64 = DECAY_TIME_AT_1E15_G.value() * 
 /// The episodes of a magnetar per e-fold of its field: 2,000 (the ruling's own figure,
 /// decision-galaxy-25-train §5.1).
 ///
-/// The check, from the ruling: Coti Zelati et al. (2018, MNRAS 474, 961) catalogue 23 outbursts of
-/// 17 magnetars over 2003–2016, about 0.05 per magnetar-year among the some 30 known, whose dipole
-/// fields lie mostly between 10¹⁴ and 10¹⁵ G (Olausen and Kaspi 2014, ApJS 212, 6, their online
-/// catalogue); the law gives 0.05 a year at 2.5 × 10¹⁴ G. Both cited from the ruling, not read at
-/// source in this build.
+/// The check, from the ruling: Coti Zelati et al. (2018, MNRAS 474, 961, §1 and Table 2) catalogue
+/// 23 outbursts of 17 magnetars over 1998–2016, about 0.05 per magnetar-year (derived: 23 over 19
+/// years among the 26 sources of Olausen and Kaspi's catalogue, whose online version now lists 30
+/// magnetars and candidates), whose dipole fields lie mostly between 10¹⁴ and 10¹⁵ G (Olausen and
+/// Kaspi 2014, ApJS 212, 6, Table 2: 16 of their 21 confirmed; the online catalogue, 18 of 24); the
+/// law gives 0.05 a year at 2.5 × 10¹⁴ G. Both read at source 2026-10-29 (arXiv copies; the online
+/// catalogue as the Internet Archive kept it on 2026-10-22).
 ///
 /// Recorded, not tested (the ruling's): an episode then releases about R³B² ÷ (3 `N_EP`), 4 × 10⁴³
-/// erg at 5 × 10¹⁴ G with R = 10 km, above X-ray outbursts' 10⁴⁰–10⁴³ erg, a radiative efficiency
-/// of 10⁻⁴–10⁻¹.
+/// erg at 5 × 10¹⁴ G with R = 10 km, above X-ray outbursts' 10⁴⁰–10⁴³ erg (Coti Zelati et al.'s
+/// Table 2: 6 × 10⁴⁰ to 2.4 × 10⁴³ erg), a radiative efficiency of 10⁻⁴–10⁻¹.
 pub const EPISODES_PER_E_FOLD: f64 = 2_000.0;
 
 /// The Galaxy's rate of giant flares that the constant [`GIANT_FLARES_PER_E_FOLD`] is set to, per
@@ -144,8 +149,14 @@ pub const EPISODES_PER_E_FOLD: f64 = 2_000.0;
 /// and SGR 1806−20 on 2004-12-27 (Hurley et al. 2005, Nature 434, 1098; Palmer et al. 2005, Nature
 /// 434, 1107), in the some 45 years of all-sky coverage since 1979; SGR 0526−66's flare of
 /// 1979-03-05 (Mazets et al. 1979, Nature 282, 587) was in the Large Magellanic Cloud and is not
-/// counted. The ruling's figures, with the papers as the review recalls them, not read at source in
-/// this build.
+/// counted. The dates read at source 2026-10-29 (arXiv copies): Hurley et al. 1999, "August 27,
+/// 1998"; Hurley et al. 2005 and Palmer et al. 2005, 27 December 2004; Olausen and Kaspi 2014,
+/// "1979 March 5, from … the Large Magellanic Cloud" (Mazets et al.'s own text was not reached).
+/// No other Galactic giant flare: "only three have been seen … in the Milky Way and in the Large
+/// Magellanic Cloud" (Mereghetti et al. 2024, arXiv:2312.14645), "only 3 such events have been
+/// observed" (Trigg et al. 2025, A&A 710, A139). The 45 years are a choice: Mereghetti et al. say
+/// "∼50 years" and Trigg et al. "the last 57 years", or 0.035–0.044 a year, inside two events'
+/// Poisson error.
 pub const GALACTIC_GIANT_FLARES_PER_YEAR: f64 = 0.044;
 
 /// The giant flares of a magnetar per e-fold of its field: 67.29, derived from T21's census.
@@ -165,8 +176,12 @@ pub const GIANT_FLARES_PER_E_FOLD: f64 = 67.29;
 /// The ruling's checks: over 400 bursts in a day from SGR J1550−5418 in January 2009 (Kaneko et
 /// al. 2010, ApJ 710, 1335; van der Horst et al. 2012, ApJ 749, 122), hundreds from SGR 1935+2154
 /// in April 2020 (Younes et al. 2020, ApJL 904, L21) and about 440 bursts of 8 magnetars in 5 years
-/// of Fermi GBM (Collazzi et al. 2015, ApJS 218, 11); cited from the ruling, with the journals as
-/// the review recalls them, not read at source in this build.
+/// of Fermi GBM (Collazzi et al. 2015, ApJS 218, 11). Read at source 2026-10-29 (arXiv copies):
+/// Kaneko et al. §1, "a total of ∼450 bursts during this 24 hour period" from 2009 January 22 (van
+/// der Horst et al. merge their 555 untriggered events of that day into 286 bursts over January
+/// 22–29); Younes et al.'s abstract, "over 217 bursts" in the first 1,120 s of 2020-04-28; and
+/// Collazzi et al.'s abstract, 440 bursts from July 2008 to June 2013 (their Table 1: 427 from 8
+/// magnetars, 19 of unknown origin).
 pub const BURST_COUNT: (f64, f64) = (3.0, 1_000.0);
 
 /// The range of an episode's burst e-folding time `τ_b`, days, log-uniform: 0.3–10 (the ruling's
@@ -182,36 +197,47 @@ pub const MAX_EPISODE_SPAN: Span = Span::from_seconds(100 * 86_400);
 
 /// The range of a short burst's energy, J, under dN/dE ∝ E^(−5/3): 10³⁷–10⁴¹ erg.
 ///
-/// The index is the bursts' of SGR 1806−20 and SGR 1900+14 (Göğüş et al. 1999, ApJ 526, L93; 2000,
-/// ApJ 532, L121; Cheng et al. 1996, Nature 382, 518, who liken it to earthquakes'), as the ruling
-/// cites them, not read at source in this build; the range is the ruling's.
+/// The index is the bursts' of SGR 1900+14 and SGR 1806−20, read at source 2026-10-29 (arXiv
+/// copies): Göğüş et al. 1999 (ApJ 526, L93, §4), a differential γ = 1.66 (+0.13/−0.12) from BATSE
+/// and 1.66 ± 0.05 from RXTE "over 4 orders of magnitude", and Göğüş et al. 2000 (ApJ 532, L121),
+/// 1.67–1.76 from BATSE and ICE (1.43 ± 0.06 from RXTE). Cheng et al. (1996, Nature 382, 518)
+/// liken the law to earthquakes'; their index was not read (Göğüş et al. 1999 quote their γ =
+/// 1.6). The range is the ruling's, inside the observed 7 × 10³⁵–1.6 × 10⁴¹ erg (BATSE, RXTE and
+/// ICE, the same papers); its floor is a choice.
 pub const BURST_ENERGY_JOULES: (f64, f64) = (1e37 * JOULES_PER_ERG, 1e41 * JOULES_PER_ERG);
 
 /// The index of the short bursts' energy law: dN/dE ∝ E^(−5/3).
 pub const BURST_ENERGY_INDEX: f64 = 5.0 / 3.0;
 
-/// The median of a short burst's duration, s: 0.1 (Göğüş et al. 2001, ApJ 558, 228, as the ruling
-/// cites it, not read at source in this build).
+/// The median of a short burst's duration, s: 0.1 (Göğüş et al. 2001, ApJ 558, 228, read at source
+/// 2026-10-29, arXiv copy: §3.1's log-Gaussians in T90 peak at 93.9 ± 0.2 ms for SGR 1900+14's 455
+/// bursts and 161.8 ± 0.2 ms for SGR 1806−20's 190, and the abstract has "a peak at ∼0.1 s").
 pub const BURST_DURATION_MEDIAN_SECONDS: f64 = 0.1;
 
-/// The standard deviation of log₁₀ of a short burst's duration: 0.3 dex (Göğüş et al. 2001, as
-/// the ruling cites it).
-pub const BURST_DURATION_SIGMA_DEX: f64 = 0.3;
+/// The standard deviation of log₁₀ of a short burst's duration: 0.35 dex.
+///
+/// Göğüş et al. 2001, ApJ 558, 228, §3.1: a log-Gaussian in T90, 0.35 ± 0.01 decades wide (SGR
+/// 1900+14, peak 93.9 ms) and 0.34 ± 0.02 (SGR 1806−20, 161.8 ms); read at source 2026-10-29
+/// (arXiv copy), which moved it from the ruling's 0.3. Later Fermi samples of SGR J1550−5418 are
+/// wider, 0.41 ± 0.02 (van der Horst et al. 2012) and 0.40 ± 0.02 (Collazzi et al. 2015).
+pub const BURST_DURATION_SIGMA_DEX: f64 = 0.35;
 
-/// Where the log-normal of a burst's duration is cut, in standard deviations: ±4, so 6.3 ms to
-/// 1.58 s (this module's choice, as P06.T28.b cuts its large glitches' sizes).
+/// Where the log-normal of a burst's duration is cut, in standard deviations: ±4, so 3.98 ms to
+/// 2.512 s (this module's choice, as P06.T28.b cuts its large glitches' sizes).
 pub const BURST_DURATION_TRUNCATION: f64 = 4.0;
 
-/// A bound on a short burst's duration: 2 s, above the duration law's top of 0.1 s × 10^1.2 =
-/// 1.585 s and far under the 15-minute look-back.
-pub const MAX_BURST_DURATION: Span = Span::from_seconds(2);
+/// A bound on a short burst's duration: 3 s, above the duration law's top of 0.1 s × 10^1.4 =
+/// 2.512 s and far under the 15-minute look-back.
+pub const MAX_BURST_DURATION: Span = Span::from_seconds(3);
 
 /// The range of a giant flare's energy, J, under dN/dE ∝ E^(−1.7): 10⁴⁴–10⁴⁷ erg.
 ///
-/// The range is the plan's and the index the ruling's, which the review recalls as Burns et al.'s
-/// (2021, ApJL 907, L28) fit; not read at source in this build. Burns et al. put the
-/// volumetric rate of giant flares above 4 × 10⁴⁴ erg at about 3.8 × 10⁵ Gpc⁻³ yr⁻¹ (the
-/// ruling's cross-check, recorded, not read at source in this build).
+/// The range is the plan's, consistent with Burns et al.'s (2021, ApJL 907, L28) search over
+/// 1.0 × 10⁴⁴–5.75 × 10⁴⁷ erg, whose largest observed flare is 2.3 × 10⁴⁶ erg. The index is their
+/// fit's, α = 1.7 ± 0.4 (90%), a differential index (their PDF (1 − α) E^(−α) ÷
+/// (`E_max`^(1−α) − `E_min`^(1−α))). They put the volumetric rate of giant flares above 4 × 10⁴⁴
+/// erg at 3.8 (+4.0 −3.1) × 10⁵ Gpc⁻³ yr⁻¹ (their abstract; `E_iso,min` = 3.7 × 10⁴⁴ erg, §4.1),
+/// the ruling's cross-check, recorded. Read at source 2026-10-29 (arXiv copy).
 pub const GIANT_FLARE_ENERGY_JOULES: (f64, f64) = (1e44 * JOULES_PER_ERG, 1e47 * JOULES_PER_ERG);
 
 /// The index of the giant flares' energy law: dN/dE ∝ E^(−1.7).
@@ -219,10 +245,10 @@ pub const GIANT_FLARE_ENERGY_INDEX: f64 = 1.7;
 
 /// The light of a giant flare, its initial spike: 0.2 s.
 ///
-/// SGR 1806−20's spike lasted about 0.2 s
-/// and SGR 1900+14's under a second before their pulsating tails of some 400 s (Hurley et al.
-/// 2005, Nature 434, 1098; Hurley et al. 1999, Nature 397, 41; recalled, not read at source in
-/// this build). The tail is not modelled.
+/// SGR 1806−20's spike lasted ~0.2 s (Hurley et al. 2005, Nature 434, 1098; ~0.5 s in Swift-BAT,
+/// Palmer et al. 2005, Nature 434, 1107), SGR 1900+14's about 1 s (Hurley et al. 1999, Nature 397,
+/// 41, Table 1), before pulsating tails of 380 s and ~300 s; read at source 2026-10-29 (arXiv
+/// copies). The tail is not modelled.
 pub const GIANT_FLARE_SPIKE: Span = match Span::new(0, 200_000_000) {
     Ok(span) => span,
     Err(_) => panic!("0.2 s is a span"),
@@ -735,7 +761,7 @@ fn power_law_at((lo, hi): (f64, f64), index: f64, u: f64) -> f64 {
     math::powf(math::mul_add(u, high - low, low), 1.0 / power).clamp(lo, hi)
 }
 
-/// A short burst's duration at `u`, s: 10^(log₁₀ 0.1 + 0.3 z), z the standard normal truncated at
+/// A short burst's duration at `u`, s: 10^(log₁₀ 0.1 + 0.35 z), z the standard normal truncated at
 /// ±4 by inverse transform, z = Φ⁻¹(Φ(−4) + u [Φ(4) − Φ(−4)]).
 #[must_use]
 fn burst_duration_seconds_at(u: f64) -> f64 {
@@ -901,7 +927,7 @@ impl BurstRate<'_> {
             onset,
             energy_joules,
             duration: Span::from_seconds_f64(duration_seconds)
-                .expect("a burst of at most 1.6 s is a span"),
+                .expect("a burst of at most 2.512 s is a span"),
         }
     }
 }
@@ -941,7 +967,7 @@ impl Burst {
         saturating_add(self.onset, self.duration)
     }
 
-    /// The duration, 6.3 ms to 1.6 s, floored to the nanosecond.
+    /// The duration, 4.0 ms to 2.5 s, floored to the nanosecond.
     #[must_use]
     pub const fn duration(&self) -> Span {
         self.duration
