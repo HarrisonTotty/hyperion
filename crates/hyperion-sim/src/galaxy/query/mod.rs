@@ -30,11 +30,11 @@ use std::fmt;
 pub use census::decide_census;
 pub use expected::expected_counts;
 pub use mode::{QueryMode, range_query_observed};
-pub(crate) use motion::drifted;
 pub use motion::{
     PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, kepler_pad_for,
     pad_for, pad_speed, position_at,
 };
+pub(crate) use motion::{drifted, walk_pad};
 pub use request::{
     DEFAULT_CELL_BUDGET, DEFAULT_CENSUS_LIMIT, MassFloor, RangeQuery, RangeQueryBuilder,
     SubstellarRequest,
@@ -125,7 +125,7 @@ pub fn range_query<C: CellCache>(
         .collect();
     let from_sources = sum_source_counts(&per_source);
     let census = decide_census(query, &grid, &from_sources, |layer| {
-        count_cells_in_sphere(layer, &sphere_for_layer(query, layer))
+        count_cells_in_sphere(layer, &sphere_for_layer(galaxy, query, layer))
     });
     let layers = census.layers();
 
@@ -142,7 +142,7 @@ pub fn range_query<C: CellCache>(
         }
         // Each layer is walked with its own pad, so raising one layer's padding speed (plan 08's
         // unbound class) moves no other layer's cells (plan 03, Design note 13).
-        let sphere = sphere_for_layer(query, layer);
+        let sphere = sphere_for_layer(galaxy, query, layer);
         for key in cells_in_sphere(layer, &sphere) {
             stats.cells_visited += 1;
             cache.with_cell(galaxy, key, |cell| {
@@ -219,14 +219,22 @@ fn ids_are_unique(systems: &[SystemHit]) -> bool {
     ids.windows(2).all(|pair| pair[0] != pair[1])
 }
 
-/// The sphere a layer is walked with: the query's, padded by that layer's speed.
+/// The sphere a layer is walked with: the query's, padded by that layer's speed ([`walk_pad`]),
+/// and from generator version 25 for the Kepler regime's orbits near the black hole (plan 09,
+/// P09.T28.b.b, held below it).
 #[must_use]
-fn sphere_for_layer(query: &RangeQuery, layer: Layer) -> QuerySphere {
-    sphere_with_pad(query, pad_for(query.time(), pad_speed(layer)))
+pub(crate) fn sphere_for_layer(galaxy: &Galaxy, query: &RangeQuery, layer: Layer) -> QuerySphere {
+    sphere_with_pad(
+        query,
+        walk_pad(galaxy, layer, query.centre(), query.radius(), query.time()),
+    )
 }
 
-/// The widest sphere any layer is walked with: what the sources are asked about, since they are asked
-/// once for the whole query, and what the statistics report.
+/// The widest sphere any layer is walked with at the straight lines' pads: what the sources are
+/// asked about, since they are asked once for the whole query, and what the statistics report.
+///
+/// The sources pad for their own members' motion, so the grid's Kepler-regime pad, which only the
+/// grid's records need, does not widen it (plan 09, P09.T28.b.b).
 #[must_use]
 fn widest_sphere(query: &RangeQuery) -> QuerySphere {
     let pad = Layer::ALL

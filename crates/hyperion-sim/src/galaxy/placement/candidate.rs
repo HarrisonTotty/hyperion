@@ -21,6 +21,7 @@ use crate::coords::GalacticPosition;
 use crate::galaxy::displaced::site::{ExplosionSite, RECENT_DEATH_CLAIM, explosion_site};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
+use crate::galaxy::motion::{KeplerRegimeRules, carved_by_the_loss_cone};
 #[cfg(doc)]
 use crate::galaxy::shares::ShareMatrix;
 use crate::galaxy::{Galaxy, PointLy};
@@ -49,9 +50,16 @@ pub enum CandidateOutcome {
     /// A catalogue class claimed it, so the field does not place it (plan 09). No class claims
     /// anything in the first milestone.
     ClaimedByCatalogue,
+    /// Its orbit about the black hole, from its epoch velocity, passes inside the loss cone, so
+    /// there is no such system (plan 09, Design note 12: "one whose pericentre falls inside the
+    /// loss cone resolves to 'no such system', as a member would"). Only a grid system in the
+    /// Kepler regime of a galaxy with its kinematic tables can be, and only from generator version
+    /// 25: below it the carve-out is held (P09.T28.b.b), and this never appears.
+    InLossCone,
 }
 
-/// Evaluates one candidate of a cell: its position, the thinning, its marks and the carve-out hook.
+/// Evaluates one candidate of a cell: its position, the thinning, its marks, the carve-out hook
+/// and, from generator version 25, the loss cone (P09.T28.b.b, held below it).
 ///
 /// This is what resolving an ID does, and what generating a cell does for each index in turn, so
 /// the two always agree. It costs one density evaluation and four words, and it never generates the
@@ -123,8 +131,27 @@ pub(super) fn evaluate_with_hook(
     // layers (plan 13, P13.T3.c).
     if record.kind() == SystemKind::Stellar && claims(galaxy, &record) {
         CandidateOutcome::ClaimedByCatalogue
+    } else if in_loss_cone(galaxy, &record) {
+        CandidateOutcome::InLossCone
     } else {
         CandidateOutcome::Accepted(record)
+    }
+}
+
+/// Whether the loss cone carves `record` out (plan 09, Design note 12; P09.T28.b.b).
+///
+/// Never under the held arm of P09.T28.b.b's hold (`KEPLER_REGIME_VERSION`); under the Kepler
+/// regime's rules, if its orbit from plan 08's epoch velocity passes inside the black hole's loss
+/// cone (`carved_by_the_loss_cone`), for a record of any layer. The cone is the centre's members'
+/// (about 2 au at Sgr A*'s mass, some 2.6 times a Sun-like star's tidal radius); brown dwarfs and
+/// rogue planets would survive to about 0.34–0.79 au, so it removes a few times more of them than
+/// it need (plan 09, "P09.T28.b.b as built"). It reads the record's own `system.velocity`
+/// stream, which adds no word to any draw of the candidate.
+#[must_use]
+fn in_loss_cone(galaxy: &Galaxy, record: &SystemRecord) -> bool {
+    match galaxy.rules().kepler_regime {
+        KeplerRegimeRules::Straight => false,
+        KeplerRegimeRules::Kepler => carved_by_the_loss_cone(galaxy, record),
     }
 }
 
@@ -617,6 +644,9 @@ mod tests {
                 CandidateOutcome::ClaimedByCatalogue => {
                     unreachable!("no class claims a candidate before plan 09")
                 }
+                CandidateOutcome::InLossCone => {
+                    unreachable!("the loss cone is held, and a solar-circle cell is far from it")
+                }
             }
         }
         assert!(
@@ -676,6 +706,9 @@ mod tests {
                         }
                         CandidateOutcome::ClaimedByCatalogue => {
                             unreachable!("the test's claim says no")
+                        }
+                        CandidateOutcome::InLossCone => {
+                            unreachable!("the loss cone is held")
                         }
                     }
                 }

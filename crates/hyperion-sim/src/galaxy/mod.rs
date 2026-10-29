@@ -38,6 +38,7 @@ pub mod placement;
 pub mod potential;
 pub mod quad;
 pub mod query;
+pub(crate) mod rules;
 pub mod shares;
 pub mod snr;
 pub mod special;
@@ -57,12 +58,13 @@ use self::kinematics::KinematicTables;
 use self::motion::CentreMotion;
 use self::params::GalaxyParams;
 use self::potential::{MassModel, PotentialTables};
+use self::rules::GalaxyRules;
 use self::shares::ShareMatrix;
 use self::snr::WindowCaps;
 use self::substellar::{SubstellarAbundance, SubstellarParams};
-use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::units::SolarMasses;
+use crate::{GENERATOR_VERSION, Seed};
 
 /// A point of the galactic frame in light-years, as `f64`s: the argument of every density.
 ///
@@ -162,7 +164,9 @@ impl Population {
 /// It holds the drawn and derived parameters, the mass function they were derived with, the mass
 /// model with its potential tables, the density fields, the gas field and the share matrix, all
 /// pure functions of the seed (or of the parameters, for a fixture) and the generator version. The
-/// fates behind the mean masses are held as their result, [`GalaxyParams::mean_system_mass`].
+/// fates behind the mean masses are held as their result, [`GalaxyParams::mean_system_mass`]. It
+/// also carries the arms its galaxy-side holds take, the generator version's, which its equality
+/// compares (decision-galaxy-25-train §1; plan 09, P09.T28.b.b).
 ///
 /// A galaxy is immutable and `Send + Sync`, so one build can be shared between threads behind an
 /// `Arc`, as the server's galaxy cache holds it (plan 04). Its only interior mutability is the
@@ -214,6 +218,7 @@ pub struct Galaxy {
     window_caps: WindowCaps,
     centre_motion: CentreMotionCell,
     centre: CentreModelCell,
+    rules: GalaxyRules,
 }
 
 impl Galaxy {
@@ -268,6 +273,49 @@ impl Galaxy {
     /// does: the caps are largest at the lowest pressure floor a galaxy's gas has, 300 K cm⁻³,
     /// where the field's is 3.67 Myr (P09.T15.b, ruling 136.3).
     pub fn from_params(seed: Seed, params: GalaxyParams) -> Result<Self, BuildGalaxyError> {
+        Self::build(seed, params, GalaxyRules::of_version(GENERATOR_VERSION))
+    }
+
+    /// [`from_params`](Self::from_params) under `rules` in place of the generator version's: the
+    /// tests' door to a later version's galaxy-side holds (decision-galaxy-25-train §1.3), such as
+    /// `GalaxyRules::every_25_hold()`.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_params`](Self::from_params).
+    ///
+    /// # Panics
+    ///
+    /// As [`from_params`](Self::from_params).
+    #[cfg(test)]
+    pub(crate) fn from_params_with_rules(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+    ) -> Result<Self, BuildGalaxyError> {
+        Self::build(seed, params, rules)
+    }
+
+    /// This galaxy under `rules`, for tests that compare two arms on one galaxy without building its
+    /// potential's grid twice.
+    ///
+    /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
+    /// seed and parameters, with the builders after it, since nothing a galaxy builds or holds
+    /// reads its rules: each held call site reads them when asked, and a test holds the two equal.
+    /// It keeps the centre's motion and model if they have been read, which holds only while
+    /// neither memo reads the rules; a hold whose arm reaches one must reset them here.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
+        Self { rules, ..self }
+    }
+
+    /// [`from_params`](Self::from_params) under `rules`.
+    fn build(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+    ) -> Result<Self, BuildGalaxyError> {
         let mass_function = HeldMassFunction::of(params.mass_function());
         let model = MassModel::new(&params);
         let potential = PotentialTables::in_plane(&model);
@@ -305,6 +353,7 @@ impl Galaxy {
             window_caps,
             centre_motion: CentreMotionCell::default(),
             centre: CentreModelCell::default(),
+            rules,
         })
     }
 
@@ -387,10 +436,10 @@ impl Galaxy {
     ///
     /// That is the mass about the black hole, the cluster's and the rest of the galaxy's, the
     /// influence radius where it weighs the black hole, and the loss cone. Nothing on the record
-    /// reads it until P09.T28.b.b. It is held with the galaxy (plan 09, Design note 15) and built when first read, from the
-    /// parameters and the mass model alone, so it is the same bits whichever caller reads it first
-    /// and whenever; the galaxy's equality and its `Debug` text do not depend on whether it has
-    /// been read. Building it takes about 64 ms, nearly all of it the galaxy's spherical average
+    /// reads it until version 25 (`KEPLER_REGIME_VERSION`, P09.T28.b.b's hold). It is held with the
+    /// galaxy (plan 09, Design note 15) and built when first read, from the parameters and the mass
+    /// model alone, so it is the same bits whichever caller reads it first and whenever; the
+    /// galaxy's equality and its `Debug` text do not depend on whether it has been read. Building it takes about 64 ms, nearly all of it the galaxy's spherical average
     /// ([`SphericalAverage::of_extended`](potential::SphericalAverage::of_extended)), which a
     /// galaxy that never asks about the centre's motion does not pay (P09.T28.b.a as built).
     ///
@@ -422,9 +471,9 @@ impl Galaxy {
     /// whenever, and the galaxy's equality and `Debug` text do not depend on whether it has been
     /// read. Building it takes the motion's 64 ms, if not yet paid, and the four inversions, the
     /// marks' acceptances and the classes (`CentreModel::new`: 91 ms in release with three
-    /// inversions, P09.T27 as built; not benched since ruling 144's fourth); a galaxy that never
-    /// asks about its centre pays nothing. The range query's centre source and `resolve` of a
-    /// centre member read it. [`with_full_potential`](Self::with_full_potential) and
+    /// inversions, P09.T27 as built, and 234 ms with ruling 144's fourth on a 4-vCPU pod, P09.T29
+    /// as built); a galaxy that never asks about its centre pays nothing. The range query's centre
+    /// source and `resolve` of a centre member read it. [`with_full_potential`](Self::with_full_potential) and
     /// [`with_substellar_params`](Self::with_substellar_params) carry it, built or not, as they
     /// carry the motion: neither changes the parameters, the mass model or the mass function it
     /// reads.
@@ -452,6 +501,17 @@ impl Galaxy {
             })
             .as_deref()
             .map_err(|e| *e)
+    }
+
+    /// The galaxy-side holds' arms this galaxy takes, which each held call site reads its field of
+    /// (decision-galaxy-25-train §1).
+    ///
+    /// They are the generator version's, from [`from_params`](Self::from_params) and every builder
+    /// that calls it, and [`with_full_potential`](Self::with_full_potential) and
+    /// [`with_substellar_params`](Self::with_substellar_params) keep them.
+    #[must_use]
+    pub(crate) const fn rules(&self) -> GalaxyRules {
+        self.rules
     }
 
     /// The free-floating brown dwarfs and rogue planets per system, with the rogue planets' cap

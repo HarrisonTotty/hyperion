@@ -20,8 +20,7 @@ use std::fmt;
 use crate::coords::GalacticPosition;
 use crate::galaxy::placement::{CellCache, Existence, LayerSpec, STELLAR_LAYERS, SystemRecord};
 use crate::galaxy::query::{
-    LayerSet, QuerySphere, SystemHit, SystemSource, cells_in_sphere, hit_at, pad_for, pad_speed,
-    position_at,
+    LayerSet, QuerySphere, SystemHit, SystemSource, cells_in_sphere, hit_at, position_at, walk_pad,
 };
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemId};
@@ -329,7 +328,10 @@ pub fn frame_at<C: CellCache>(
     // The sources are asked once, over the widest sphere any layer was walked with and for every
     // stellar layer, because a source reports its members by the layer they would fall in and this
     // rule has no census to admit layers by. A member farther away than its own layer's search
-    // radius can only fail to hold the ship, never win.
+    // radius can only fail to hold the ship, never win. From version 25 (P09.T28.b.b's hold) the
+    // widest is chosen by the walk's Kepler pad near the black hole, where `range_query` asks its
+    // sources about the straight lines' sphere; a source reads only its centre, radius and time,
+    // and pads for its own members.
     if let Some(sphere) = widest {
         let layers: LayerSet = STELLAR_LAYERS.iter().map(LayerSpec::layer).collect();
         let mut hits = Vec::new();
@@ -347,7 +349,8 @@ pub fn frame_at<C: CellCache>(
 ///
 /// The radius is [`SEARCH_MARGIN`] times the tidal radius of `largest` at the ship's position, and
 /// the pad is the layer's, as in the range query, so that cells chosen by epoch position cannot
-/// miss a system that has drifted in by `t` (plan 03, Design note 13).
+/// miss a system that has drifted in by `t` (plan 03, Design note 13); from generator version 25,
+/// held below it, the Kepler regime's near the black hole (plan 09, P09.T28.b.b).
 #[must_use]
 fn search_sphere(
     galaxy: &Galaxy,
@@ -363,7 +366,7 @@ fn search_sphere(
     // The only rejection a positive finite radius can meet is a pad that is not finite, and the pad
     // is a few light-years over the whole clock window; a radius of zero is the centre, handled by
     // returning `None`.
-    QuerySphere::new(*ship, radius, t, pad_for(t, pad_speed(layer))).ok()
+    QuerySphere::new(*ship, radius, t, walk_pad(galaxy, layer, ship, radius, t)).ok()
 }
 
 /// The candidate a system near the ship makes, or `None` for a system whose tidal radius is no
@@ -493,6 +496,50 @@ mod tests {
     /// A candidate at `ratio` of a 4 ly tidal radius.
     fn at_ratio(index: u32, ratio: f64) -> FrameCandidate {
         FrameCandidate::new(id(index), ly(4.0 * ratio), ly(4.0)).unwrap()
+    }
+
+    /// P09.T28.b.b's hold: the search pads each layer's sphere as the range query's walk does, by
+    /// the straight lines under the version's rules and, near the black hole, for the Kepler
+    /// regime's orbits under every 25 hold, which is wider but where the straight pad already
+    /// holds them.
+    #[test]
+    fn the_search_pads_as_the_walk_does_under_either_arm() {
+        use crate::galaxy::params::GalaxyParams;
+        use crate::galaxy::query::{kepler_pad_for, pad_for, pad_speed};
+        use crate::galaxy::rules::GalaxyRules;
+        use crate::rng::Seed;
+
+        let held = Galaxy::from_params(
+            Seed::new(0x0928_bb00_0000_0002),
+            GalaxyParams::milky_way_like(),
+        )
+        .expect("the Milky Way fixture builds");
+        let kepler = held.clone().with_rules(GalaxyRules::every_25_hold());
+        let ship = GalacticPosition::from_light_years([1.5, -0.5, 0.0]).unwrap();
+        let mut wider = 0;
+        for spec in STELLAR_LAYERS {
+            let (layer, largest) = (spec.layer(), SolarMasses::new(spec.band().hi()));
+            for years in [-1_000, -100, 100, 1_000] {
+                let t = UniverseTime::from_julian_years(years).unwrap();
+                let straight = search_sphere(&held, &ship, t, layer, largest).unwrap();
+                let curved = search_sphere(&kepler, &ship, t, layer, largest).unwrap();
+                let radius = straight.radius();
+                let pad = kepler_pad_for(&held, layer, &ship, radius, t);
+                assert_eq!(
+                    straight,
+                    QuerySphere::new(ship, radius, t, pad_for(t, pad_speed(layer))).unwrap()
+                );
+                assert_eq!(curved, QuerySphere::new(ship, radius, t, pad).unwrap());
+                // Never narrower: the Kepler pad is at least the straight lines'.
+                let (a, b) = (straight.padded_radius(), curved.padded_radius());
+                assert!(b.value() >= a.value(), "{layer:?} at {years} yr");
+                if b.value() > a.value() {
+                    wider += 1;
+                }
+            }
+        }
+        // Layer E's straight pad at ±1,000 yr, 10 ly, already holds the orbits there.
+        assert!(wider >= 18, "{wider} of 20 layer-times padded wider");
     }
 
     #[test]

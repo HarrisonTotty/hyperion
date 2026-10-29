@@ -26,9 +26,16 @@
 //! ([`loss_cone_verdict`]). The galaxy holds what these read, its [`CentreMotion`], and builds it
 //! on first read (Design note 15).
 //!
-//! **Nothing on the record calls these yet.** Plan 03's `position_at`, `hit_at` and `resolve` are
-//! unchanged, so no generated output moves; plan 09's P09.T28.b.b swaps them in behind its galaxy
-//! hold for version 25 (decision-galaxy-25-train §1 and §2), and P09.T29's centre source reads them.
+//! **They reach the record at version 25, behind a galaxy hold** (P09.T28.b.b;
+//! decision-galaxy-25-train §1 and §2). Under the rules of `KEPLER_REGIME_VERSION`, plan 03's
+//! [`position_at`](crate::galaxy::query::position_at) takes [`position_velocity_at`] for a grid
+//! record, the candidate evaluation behind
+//! [`generate_cell`](crate::galaxy::placement::generate_cell) and
+//! [`resolve`](crate::galaxy::placement::resolve) lets the loss cone carve out a grid record whose
+//! orbit passes inside it, and the walks pad for the orbits
+//! ([`kepler_pad_for`](crate::galaxy::query::kepler_pad_for)). Below that version, which is every
+//! galaxy built today, each takes its held arm, the straight lines verbatim, so no generated
+//! output moves; P09.T29's centre source reads these under either.
 //!
 //! # The range query near the black hole (P09.T29)
 //!
@@ -83,9 +90,9 @@
 //! platform gives the same bits; the residual's test compares deterministic values, so a state
 //! takes the bisection on every platform or on none. [`UNIVERSAL_ITERATIONS`],
 //! `UNSOLVED_RESIDUAL`, `BISECTION_STEPS`, the Stumpff series' length, the bisection of the
-//! influence radius and the form of every expression here belong to the generator version once
-//! P09.T28.b.b wires the propagator
-//! into the drift hook; until then nothing generated reads it. A grid system's velocity is plan
+//! influence radius and the form of every expression here belong to the generator version from
+//! version 25, when P09.T28.b.b's hold is lifted and the drift hook reads the propagator; below it
+//! nothing generated reads it. A grid system's velocity is plan
 //! 08's draw on its own stream ([`epoch_velocity`]), which [`EpochState::of_grid_record`] reads and
 //! nothing here adds a word to.
 
@@ -100,10 +107,10 @@ use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::potential::MassModel;
 use crate::galaxy::query::{drifted, epoch_velocity};
 use crate::galaxy::{Galaxy, PointLy};
-use crate::math;
 use crate::time::UniverseTime;
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SPEED_OF_LIGHT};
 use crate::units::{GravitationalParameter, LightYears, Metres, Seconds, SolarMasses};
+use crate::{GeneratorVersion, math};
 
 /// How many Laguerre–Conway iterations solve Kepler's equation in universal form: a fixed count,
 /// never stopped early, so that every platform takes the same steps; a result they leave unsolved
@@ -1160,7 +1167,9 @@ fn verdict_on(motion: &CentreMotion, start: &EpochState) -> LossConeVerdict {
 /// and the mass inside over the span to leading order in t, 0.0130 ly at the Milky Way fixture's
 /// 7.19 ly (P09.T28.b.a as built).
 ///
-/// Nothing on the record calls this yet: plan 03's `position_at` is unchanged until P09.T28.b.b.
+/// Plan 03's [`position_at`](crate::galaxy::query::position_at) reads it for a grid record from
+/// version 25, behind P09.T28.b.b's hold (`KEPLER_REGIME_VERSION`); below that, nothing on the
+/// record does.
 ///
 /// # Panics
 ///
@@ -1367,6 +1376,105 @@ impl Trajectory {
     }
 }
 
+/// The generator version from which the Kepler regime moves the grid's systems (plan 09,
+/// P09.T28.b.b): 25, the galaxy-side member of the next train (decision-galaxy-25-train §1 and
+/// §2; it boards 26 if 25's wiring starts before it lands, §1.6, C3).
+///
+/// It is the hold of three call sites, each one `match` on
+/// [`KeplerRegimeRules`] read from the galaxy's rules:
+///
+/// - plan 03's [`position_at`](crate::galaxy::query::position_at), which takes
+///   [`position_velocity_at`] for a grid record (`kepler_regime_position_at`);
+/// - the candidate evaluation that [`generate_cell`](crate::galaxy::placement::generate_cell) and
+///   [`resolve`](crate::galaxy::placement::resolve) share, where the loss cone carves out a grid
+///   record whose orbit passes inside it (`carved_by_the_loss_cone`; plan 03's
+///   [`CandidateOutcome::InLossCone`](crate::galaxy::placement::CandidateOutcome::InLossCone));
+/// - the pad the range query's walk and the frame search choose cells by, which takes
+///   [`kepler_pad_for`](crate::galaxy::query::kepler_pad_for) in place of the straight lines'
+///   [`pad_for`](crate::galaxy::query::pad_for).
+///
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`KeplerRegimeRules::Straight`], which is the code of version 23 verbatim, so every generated
+/// value keeps its bits; the tests reach the new arm through a galaxy built under
+/// `GalaxyRules::every_25_hold()`. The bump to 25 deletes this hold, [`KeplerRegimeRules`] with its
+/// `Straight` arm, the galaxy's `kepler_regime` field and its tripwire
+/// (`the_kepler_regime_is_held_only_until_the_25_bump`).
+pub(crate) const KEPLER_REGIME_VERSION: GeneratorVersion = GeneratorVersion::new(25);
+
+/// Which law the grid's systems move by near the black hole (the hold of
+/// [`KEPLER_REGIME_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum KeplerRegimeRules {
+    /// Version 24's and before: every grid system drifts in a straight line at its epoch velocity,
+    /// the loss cone carves out no grid system, and the walks pad by the straight lines alone.
+    Straight,
+    /// Version 25's: a grid system in the Kepler regime follows its orbit about the black hole and
+    /// the mass inside its epoch radius ([`position_velocity_at`]), one whose orbit passes inside
+    /// the loss cone is no system ([`loss_cone_verdict`]), and the walks pad for the orbits.
+    Kepler,
+}
+
+/// Where grid `record` is at `t` under the Kepler regime's rules (P09.T28.b.b): plan 03's
+/// [`position_at`](crate::galaxy::query::position_at) once the hold is lifted, away from the epoch.
+///
+/// A grid record's state is [`position_velocity_at`] from its epoch state with plan 08's velocity
+/// ([`EpochState::of_grid_record`]): the straight line outside the regime, the same bits as the
+/// held arm, and its orbit inside. A record the loss cone carves out is no system of the galaxy,
+/// which [`generate_cell`](crate::galaxy::placement::generate_cell) and
+/// [`resolve`](crate::galaxy::placement::resolve) never give; asked about one, made by hand, this
+/// gives its straight line, the held arm's answer, rather than a position on an orbit it does not
+/// have. A feature member's or a centre member's record keeps the held arm's answer: its own source
+/// moves it (the feature's members by their velocities, the centre's on its
+/// [`Trajectory`]s), and [`epoch_velocity`] panics for it in a galaxy with kinematic tables, as
+/// before.
+///
+/// # Panics
+///
+/// As [`epoch_velocity`]: in a galaxy with kinematic tables, if `record` is not a grid record.
+#[must_use]
+pub(crate) fn kepler_regime_position_at(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    t: UniverseTime,
+) -> GalacticPosition {
+    match record.origin() {
+        SystemOrigin::Grid(_) => {
+            let start = EpochState::of_grid_record(galaxy, record);
+            match position_velocity_at(galaxy, &start, t) {
+                StateAt::Exists(state) => state.position,
+                StateAt::NoSuchSystem => drifted(record, start.velocity, t),
+            }
+        }
+        SystemOrigin::FeatureMember { .. } | SystemOrigin::CentreMember { .. } => {
+            drifted(record, epoch_velocity(galaxy, record), t)
+        }
+    }
+}
+
+/// Whether the loss cone carves grid `record` out under the Kepler regime's rules (P09.T28.b.b):
+/// its orbit from plan 08's epoch velocity passes inside the black hole's loss cone
+/// ([`loss_cone_verdict`]), so that there is no such system (plan 09, Design note 12).
+///
+/// Only a Kepler-regime record with an orbit can be: in a galaxy without kinematic tables every
+/// grid record has no velocity and so no orbit, and none is carved out. That galaxy is answered
+/// without reading [`Galaxy::centre_motion`], which a galaxy that never asks about its centre does
+/// not build (about 64 ms, P09.T28.b.a as built); a galaxy with its tables builds it with the first
+/// record it places. A record outside the regime is answered by its epoch distance, and only one
+/// inside draws its velocity.
+///
+/// # Panics
+///
+/// As [`epoch_velocity`]: in a galaxy with kinematic tables, if `record` is not a grid record.
+#[must_use]
+pub(crate) fn carved_by_the_loss_cone(galaxy: &Galaxy, record: &SystemRecord) -> bool {
+    // The regime first: a record outside it, nearly every one, is answered by a distance, without
+    // drawing its velocity.
+    galaxy.kinematics().is_some()
+        && galaxy.centre_motion().regime_at(record.epoch_position()) == Regime::Kepler
+        && loss_cone_verdict(galaxy, &EpochState::of_grid_record(galaxy, record))
+            == LossConeVerdict::Inside
+}
+
 /// The relative margin every pad and reach below is widened by, 10⁻⁹: it covers the rounding of
 /// their closed forms and of the distances they are compared with, some 10⁻¹⁵ relative, and moves
 /// no bound measurably.
@@ -1559,6 +1667,9 @@ impl SpeedBound {
         LightYears::new(bound_m * (1.0 + REACH_MARGIN) / METRES_PER_LIGHT_YEAR)
     }
 }
+
+#[cfg(test)]
+mod kepler_regime_hold;
 
 #[cfg(test)]
 mod tests {

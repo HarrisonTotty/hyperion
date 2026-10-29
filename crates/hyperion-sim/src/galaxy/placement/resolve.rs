@@ -38,7 +38,9 @@ use crate::id::{SystemId, SystemIdKind};
 ///   [`resolve_centre_member`] (P09.T27), which builds the centre's model.
 /// - [`ResolveSystemError::NoSuchSystem`] if the index is at or above the cell's
 ///   [`candidate_count`](super::candidate_count), or its candidate was thinned, or a catalogue
-///   class claimed it; for a feature member, if [`resolve_member`] finds none.
+///   class claimed it, or, from generator version 25, its orbit passes inside the black hole's
+///   loss cone ([`CandidateOutcome::InLossCone`]; plan 09, P09.T28.b.b, held below it); for a
+///   feature member, if [`resolve_member`] finds none.
 ///
 /// # Examples
 ///
@@ -172,9 +174,9 @@ fn resolve_candidate_with(
     }
     match evaluate_with_hook(galaxy, key, index, bound, claims) {
         CandidateOutcome::Accepted(record) => Ok(record),
-        CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => {
-            Err(ResolveSystemError::NoSuchSystem)
-        }
+        CandidateOutcome::Thinned
+        | CandidateOutcome::ClaimedByCatalogue
+        | CandidateOutcome::InLossCone => Err(ResolveSystemError::NoSuchSystem),
     }
 }
 

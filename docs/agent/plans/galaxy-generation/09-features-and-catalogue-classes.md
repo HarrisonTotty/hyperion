@@ -1156,6 +1156,8 @@ hundred innermost members.
       the same seed twice.
     - **Census C1:** over the three seeds, at t = ±100, ±1,000 yr and ±H. The movers, the largest
       displacement, every mover finite, and the carve-outs by ID.
+    - _Built behind its hold (lane `p09-centre`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
+      moved): see Risks, "P09.T28.b.b as built"._
 - **P09.T28.c Sphere of influence at pericentre.** A Kepler-regime system's tidal radius is taken at
   its pericentre and is constant in time: 2.7 au for a semi-major axis of 0.01 ly. Test: that
   figure, and about 0.01 ly for a near-circular orbit at 3 ly.
@@ -1610,7 +1612,11 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   as built".)_
 - **Grid systems inside the influence radius** are not drawn from the distribution function, so
   their density is not exactly stationary. They are about one in a hundred of the systems there and
-  the effect is confined to the inner 1.5 ly over the clock window.
+  the effect is confined to the inner 1.5 ly over the clock window. _(As built in P09.T28.b.b,
+  under its hold's new arm: 78.6% of the sampled Kepler-regime grid records are unbound about the
+  mass inside their epoch radius, and they move up to 4.63 ly from their straight lines over ±H
+  across the whole regime, not the inner 1.5 ly alone; see "P09.T28.b.b as built", "Unbound
+  orbits".)_
 - **Scratch constants** (helium) ship as defaults and change with plan 15's tables, each a version
   bump. The cluster-dynamics three (black-hole loss, equipartition, pulsar counts) are production
   at their scratch values (decision-p15-t8-blocks, no bump), with plan 15's findings on the closed
@@ -3899,3 +3905,175 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
      pinhole tail. Neither moves a figure the plan names.
   4. _Minor._ L_Edd is for ionised hydrogen; SM16 equation 24 takes 0.34 cm² g⁻¹, 17% higher.
      Ho's C_X applies below a tenth of Eddington, so not to a tail's first five years.
+- **P09.T28.b.b as built (lane `p09-centre`, 2026-10-29, on 3161136a at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §1 and §2).** Built behind its hold, `KEPLER_REGIME_VERSION` = 25, so
+  no output moves at 23: `golden_diff.py` finds no golden changed, T28.b.a's pre-pin
+  (`regime_records_near_the_centre_are_pinned`) passes by name, and the gate's `fit-check` holds
+  every table. `Galaxy`'s `Debug` text gains `rules: GalaxyRules { kepler_regime: Straight }`,
+  which no persisted digest reads, and its equality compares the rules. Files: `galaxy/rules.rs`
+  (new), `galaxy/motion.rs`, `galaxy/motion/kepler_regime_hold.rs` (new, the hold's tests),
+  `galaxy/mod.rs` (with P09.T29's bench figure in `Galaxy::centre`'s doc),
+  `galaxy/placement/{candidate,generate,resolve}.rs`, `galaxy/query/{mod,motion,result}.rs` and
+  `galaxy/frame.rs`.
+  - _The hold (decision §1.2–§1.3, E1–E6)._ The crate-internal `galaxy::rules::GalaxyRules` with
+    one field, `kepler_regime`, and `of_version` and `#[cfg(test)] every_25_hold()`, as
+    `bump-25-list.md` names them; `galaxy::motion::{KEPLER_REGIME_VERSION, KeplerRegimeRules}`
+    (`Straight`, held; `Kepler`). `Galaxy` carries `rules`, which `from_params` sets from
+    `of_version(GENERATOR_VERSION)` through a private `build`; `rules()` reads it, and the tests'
+    doors are `#[cfg(test)] from_params_with_rules` and `#[cfg(test)] with_rules`. Three call sites, each one `match` whose held arm is the old code
+    verbatim: plan 03's `position_at`; the candidate evaluation that `generate_cell` and `resolve`
+    share (`in_loss_cone`); and the crate-internal `query::walk_pad`, which the range query's
+    `sphere_for_layer` (now taking the galaxy) and the frame search's `search_sphere` read. Nothing
+    gated feeds a static or a table (E2, E3), and no payload or protocol type moves (E5).
+  - _`with_rules` (a test door the decision does not name)._ It swaps the rules of a built galaxy,
+    so that D2, C1 and the frame test compare both arms on one galaxy without building its
+    potential's grid twice (8 s a build in the test profile on the pod); D4 holds it equal to
+    `from_params_with_rules`, with the same cells, positions and memo. It keeps the centre's motion
+    and model if read, which holds while neither memo reads the rules: a hold whose arm reaches one
+    (T28.d's secular term stays at its call site) must reset them there.
+  - _The swap._ Under `Kepler`, `position_at` of a grid record away from the epoch is
+    `position_velocity_at` from `EpochState::of_grid_record` (`motion::kepler_regime_position_at`),
+    which outside the regime is the straight line to the bit.
+  - _Members' `position_at`, against the task's "members and grid systems alike" (lean,
+    2026-10-29; for main)._ Under either arm a feature or centre member's `position_at` is the held
+    arm's: in a galaxy with kinematic tables it panics (`draw_velocity` on a record with no
+    component; plan 03's Risks, "`position_at` and feature members"), and without them it is the
+    epoch position, while `CentreMemberSource` moves the member on its orbit. A `SystemRecord`
+    does not carry a member's velocity, and resolving the member inside `position_at` would be a
+    fourth call site and a change outside the hold. The members move by their own sources:
+    the centre's on its `Trajectory`, the features' on their lines (`observe::Drift::of_record`
+    resolves a feature member). _Finding, a crash at version 23 already:_ the server's extinction
+    request (`requests/galaxy.rs`, `LineEnd::System`) resolves any ID and calls `position_at`, so a
+    feature or centre member's ID away from the epoch panics in its job; `resolve_system` already
+    dispatches on the origin. Lean: route it through the origin as `resolve_system` does, a fix of
+    its own outside this hold.
+  - _The carve-out, where `resolve` and the walk both see it (lean, 2026-10-29)._ The task text
+    names `resolve` alone. The carve-out sits in the candidate evaluation that `generate_cell` and
+    `resolve` share, after the catalogue hook, as a new `CandidateOutcome::InLossCone`, so that a
+    range query never returns a system `resolve` refuses, which plan 03's placement promises. It
+    applies to the grid records of every layer, the substellar two included, by the members' own
+    test (`LossCone::contains`, the pericentre about the black hole alone), and only to a
+    Kepler-regime record: a record outside the regime is answered by its distance, without drawing
+    its velocity. A galaxy without kinematic tables carves out nothing (no velocity, no orbit) and
+    is answered without building `centre_motion`, so under the new arm such a galaxy and its
+    `with_full_potential` differ near the black hole by the carve-outs. A candidate a class claims
+    is `ClaimedByCatalogue` first; no class claims any yet. _Finding (science check):_ the cone is
+    the stars' (about 2 au at Sgr A*'s mass, some 2.6 times a Sun-like star's tidal radius, r_t ≃
+    R (M_bh ÷ m)^⅓; Rees 1988, Nature 333, 523; Alexander 2017, ARA&A 55, 17, §1.2); brown dwarfs
+    and rogue planets are destroyed or swallowed only inside about 0.34–0.79 au (the larger of
+    their tidal radius and direct capture at 8GM ÷ c²), so for them it is 2.5–6 times too wide and
+    removes a few times more than it need: here one record in 4.5 × 10⁵. As Design note 12's "as
+    a member would" sets the members' test, it is recorded, not changed (with T28.b.a's deferred
+    finding (1) on `LOSS_CONE_AU`'s doc).
+  - _A carved-out record made by hand (lean, 2026-10-29)._ `position_at` gives it its straight
+    line, the held arm's answer, rather than a panic or a position on an orbit it does not have;
+    neither `generate_cell` nor `resolve` gives one.
+  - _Members, and the source's `Trajectory`._ No member's `position_at` is gated: the centre's
+    members move by `CentreMemberSource` on their `Trajectory`, one law under either rule (P09.T29
+    as built), so the source needs no gate, and it and the grid agree under both arms once P09.T37
+    registers it.
+  - _The walk's pad._ Under `Kepler`, `walk_pad` is `kepler_pad_for`, and the census counts the
+    same sphere's cells. The range query's `widest_sphere`, what its sources are asked about, and
+    `QueryStats::padded_radius` stay the straight lines' (the sources pad for their own members;
+    `padded_radius`'s doc says so). The frame search picks the sphere its sources are asked about
+    as the widest of its layers' search spheres, which under the new arm are Kepler-padded near
+    the black hole (its comment says so); a source reads only the sphere's centre, radius and
+    time.
+  - _Tests (as run)._ In `galaxy/rules.rs`: `a_galaxy_carries_the_version_s_rules` (D3: the
+    version's rules, equal to a galaxy built under them explicitly, `Debug` text and all, and
+    unequal to one under every 25 hold; `with_substellar_params` keeps them) and
+    `each_hold_turns_on_at_its_version`. In `galaxy/frame.rs`:
+    `the_search_pads_as_the_walk_does_under_either_arm` (the frame search's spheres near the black
+    hole, every stellar layer at ±100 and ±1,000 yr: the straight pad under the held arm, the
+    Kepler pad under the new one, wider in 18 of 20 layer-times; layer E's 10 ly at ±1,000 yr
+    already holds the orbits). In `galaxy/motion/kepler_regime_hold.rs`, fast:
+    `the_kepler_regime_is_held_only_until_the_25_bump` (the tripwire, E6);
+    `the_kepler_arm_moves_records_inside_the_radius_and_no_others_pinned` (D2, in the wasip1
+    suite: the fixture's 12,671 layer-B records within 1.5 r_h, 3,286 in the regime and 9,385
+    outside, at ±100 and ±1,000 yr; at the epoch both arms give the epoch position; the held arm is
+    the straight line; the new arm moves every Kepler-regime record onto `position_velocity_at`'s
+    state, 13,144 record-times, the farthest 1.40 ly, and no other; the cells are the held arm's
+    less the loss cone's, none here; the walks' pad is `pad_for` under the held arm and
+    `kepler_pad_for` under the new one, to the bit; the counts and a digest of the new arm's
+    positions, `0xdc2a4657d88c161e` on x86-64, are pinned, which T28.d's secular term may re-pin by
+    name, §1.3); and `the_kepler_arm_gives_the_same_seed_the_same_answers_twice_and_in_any_order`
+    (D4 on seed 0x5eed0000c0ffee00: built under the rules, it equals the galaxy given them by
+    `with_rules`, with the same cell, positions and centre motion to the bit; the census's
+    carved-out rogue planet is resolved under the held arm, and under the new one is
+    `InLossCone`, "no such system" and missing from its cell, which loses nothing else; and
+    `assert_order_independent` over its cell, a central layer-B cell, two resolutions, three
+    positions and a pad, once on one galaxy and once on a fresh copy each time, so that the
+    centre's motion is built from inside cell generation, first or last). Slow, by name:
+    `the_kepler_arm_s_census_near_the_black_hole` (C1, below, 426 s on the pod in the test
+    profile) and `a_range_query_near_the_black_hole_finds_what_a_scan_finds_under_either_arm`
+    (four spheres of 0.5–2 ly at and near the black hole at ±100 and ±1,000 yr, grid only, against
+    a scan of every Kepler-regime record and the straight-regime records within the straight pad:
+    3,674 hits under the held arm and 3,817 under the new one, 369 s; no stellar hit came from
+    beyond the straight pad, which C1 shows for the rogue planets). The fast tests take 37 s of
+    test time on the pod, each in its own nextest process (D4 22 s, D2 9.7 s). T28.b.a's pre-pin
+    passes by name (223 s).
+  - _"Positions at t = 0 unchanged for every golden system", as tested._ No integration golden can
+    run under every 25 hold (`from_params_with_rules` is `#[cfg(test)]`): the tests hold it for
+    the pre-pin's records (C1) and D2's sample, and everywhere else `position_at` returns the epoch
+    position before it reads the rules. Under the new arm `0xcfffe0003fff0b41` no longer exists, so
+    `regime.golden` loses it at the bump.
+  - _Census C1 (decision §1.6), under every 25 hold against the held arm._ Over T28.b.a's pre-pin
+    (the Milky Way fixture, seeds 0x5eed0000c0ffee00 and 0x2: 790,511 grid records, 453,819 in the
+    regime; ±100 yr and ±1,000 yr, which is ±H): every Kepler-regime record moves at every time,
+    and none outside the regime; every mover is finite; the largest moves are 4.04, 4.63 and
+    3.94 ly at −1,000 yr (rogue planets; the stellar layers at most 2.47, 3.70 and 2.30 ly), as
+    T28.b.a's tally forecast, and at ±100 yr 0.34, 0.43 and 0.31 ly; every record lies within the
+    walk's Kepler pad of where it ends, and some rogue planets passing near the black hole faster
+    than 1,000 km/s end farther from their epoch positions than the straight lines' pad (5
+    record-times in the fixture, at ±100 yr; 55 in seed 0x5eed, 10–16 at each time; none in seed
+    0x2 or in a stellar layer), which only the Kepler pad holds. The one carve-out in the sample is
+    rogue planet `0xcfffe0003fff0b41` of seed 0x5eed0000c0ffee00, 2.54 ly from the black hole, the
+    one T28.b.a forecast: "no such system" under the new arm. The substellar layers are sampled
+    within 4 ly, as in the pre-pin, so their records between 4 ly and r_h, most of the regime's by
+    number, are not counted. The range query's census (48 queries a galaxy:
+    spheres of 0.5–50 ly at and near the black hole, stellar and with the substellar layers, at
+    ±100 and ±1,000 yr) moves for none of the 144: near the black hole the census limit stops
+    first and the 2²⁰-cell budget never binds. The cells the census counts rise: a 3 ly sphere
+    12.2 ly out at ±1,000 yr from 38 to 158–174, and a 1 ly sphere 3.2 ly out from 40 to 46–66
+    (stellar) and from 74 to 124–208 (with the substellar layers). So P09.T29's finding (4) stands
+    for a caller's smaller budget, and at the default budgets the pad moved no census here.
+  - _Unbound orbits (P09.T29's deferred finding (3))._ The held arm does not change the centre's
+    members, which have one law under either rule. Under the new arm the grid's Kepler-regime
+    records take the same law with plan 08's velocities, and 78.6% of them are unbound about the
+    mass inside their epoch radius (the fixture 79.9%, 0x5eed 73.2%, 0x2 87.3%; the stellar layers
+    alone 80.6%, 74.1% and 87.6%). The science check traces it to the tracers, not to the draw's
+    cut: plan 08's populations there (the nuclear disc, the bulge, the bar) are cored over tens to
+    hundreds of light-years, and their Jeans dispersions at a few light-years, about 170–290 km/s
+    per axis at 1–5 ly in the black hole's and cluster's well alone, carry the whole well's depth,
+    against a Kepler escape speed of 222 km/s about M(< 3 ly) = 5.28 × 10⁶ M☉ (circular 157 km/s);
+    they pass through on orbits that reach far beyond r₀, hyperbolae about that point mass, and the
+    cut, 1,000 km/s there, removes under 10⁻⁴ of them (its estimate, 68–79% unbound, matches; not
+    re-checked at source). The centre's members, at about 100 km/s, are 27–39% unbound by the same
+    measure (P09.T29's (3)). They move no farther than the figures above over the clock window
+    (a crossing at 3 ly takes some 2,600 yr), but the density inside r_h is not stationary under
+    the new arm, where the brainstorm's "Orbits and time" says "the density is exactly the profile
+    at every time". Recorded for main and the
+    brainstorm's owner with P09.T29's (3), not as a blocker: no state, class or value is wrong or
+    non-finite, and the walks hold every move.
+  - _Deferred findings (2026-10-13 rule), for the 25 wiring and the plans named._ (1)
+    `observe::Drift::of_record`, which the sky census's retarded times and plan 12 read, still
+    draws a Kepler-regime grid record's straight line under the new arm, so it and `position_at`
+    part inside r_h at 25 (the sky census's pads stay the straight lines', consistent with it);
+    (2) the server reports `epoch_velocity` beside `position_at` (`convert.rs`,
+    `requests/observe.rs`, `scene/core.rs`), which inside r_h is not the orbit's velocity at t
+    (`position_velocity_at` gives both); (3) feature members inside r_h keep their source's
+    straight lines under either arm, though the task text says "members and grid systems alike";
+    (4) under the new arm a galaxy with its kinematic tables builds `centre_motion` (64 ms) with
+    the first record it places, and every galaxy with its first range query or frame search
+    (`kepler_pad_for` reads it); (5) `displaced::site::explosion_site` drifts a grid record in a
+    straight line to its death, and plan 08's test holds the site equal to `position_at` inside the
+    clock window, so under the new arm a Kepler-regime layer-E record's site parts from its orbit
+    (nothing reads it until P09.T35 sets `RECENT_DEATH_CLAIM`, train 26); (6) from 25 a cell
+    depends on whether its galaxy has its kinematic tables (the carve-out), which the server's
+    `(GalaxyKey, CellKey)` cell key does not say: every production galaxy has them
+    (`compute/galaxies.rs`), and a debug assertion in the shared cell cache, or the tables' state
+    in the key, would keep it so (determinism audit). None moves output at 23.
+  - _D5._ The new arm propagates on `position_at`'s path, so the D2 test, named `pinned`, runs in
+    the wasip1 suite (wasmtime 49.0.1). Run by name on the pod before the gate, it passes in
+    12.1 s with the digest blessed natively on x86-64; the gate's wasip1 suite runs it again with
+    the module's other fast tests.

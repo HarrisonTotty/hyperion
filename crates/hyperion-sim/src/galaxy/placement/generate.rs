@@ -180,7 +180,9 @@ mod tests {
             let one_at_a_time: Vec<_> = (0..candidate_count(&galaxy, key))
                 .filter_map(|index| match evaluate_candidate(&galaxy, key, index) {
                     CandidateOutcome::Accepted(system) => Some(system),
-                    CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => None,
+                    CandidateOutcome::Thinned
+                    | CandidateOutcome::ClaimedByCatalogue
+                    | CandidateOutcome::InLossCone => None,
                 })
                 .collect();
             assert_eq!(cell, one_at_a_time, "{:?}", spec.layer());
@@ -272,7 +274,9 @@ mod tests {
         let accepted: Vec<_> = (0..count)
             .filter_map(|index| match evaluate_candidate(&galaxy, key, index) {
                 CandidateOutcome::Accepted(system) => Some((index, system.primary_initial_mass())),
-                CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => None,
+                CandidateOutcome::Thinned
+                | CandidateOutcome::ClaimedByCatalogue
+                | CandidateOutcome::InLossCone => None,
             })
             .collect();
         assert_ne!(accepted, []);
