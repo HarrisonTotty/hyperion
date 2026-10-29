@@ -1129,11 +1129,14 @@ pub const ANCHOR_WAVELENGTH: Metres = Metres::new(72_000.0);
 /// strength-limited factor the coarse pass gives belts and trenches (R09.T12.b, 1 on the reference
 /// Earth), so that a belt's coarse and fine relief scale together.
 ///
-/// Earth2014's BED layer carries 184 m above degree 556 (Hirt and Rexer 2015's fitted degree
+/// Earth2014's BED layer carries 183 m above degree 556 (Hirt and Rexer 2015's fitted degree
 /// variance, Int. J. Appl. Earth Obs. Geoinf. 39, 103, recomputed by the ruling); its bathymetry,
-/// about 90% altimetric at 4–5′, lacks the abyssal hills, which GMRT's multibeam shows carrying
-/// 50–230 m RMS at 2–10 km over 71% of the surface, which brings it to about 200–210 m, Design
-/// note 7's "about 200 m". Medium confidence.
+/// about 90% altimetric at 4–5′, lacks the abyssal hills, which the multibeam of GMRT (the grid of
+/// Ryan et al. 2009, G³ 10, Q03014, doi:10.1029/2008GC002332) shows carrying 50–230 m RMS at
+/// 2–10 km over 71% of the surface (the ruling's reading; no abyssal-hill source is re-read here).
+/// Added in quadrature to the BED layer's 183 m over the 71%, √(183² + 0.71 x²), that gives
+/// 188–266 m, and Design note 7's "about 200 m" is a choice within it, labelled as one. Medium
+/// confidence.
 pub const STRUCTURAL_RMS_MOBILE_LID: Metres = Metres::new(200.0);
 
 /// A rocky stagnant lid's structural RMS in wavelengths shorter than [`ANCHOR_WAVELENGTH`], 60 m,
@@ -1144,8 +1147,10 @@ pub const STRUCTURAL_RMS_MOBILE_LID: Metres = Metres::new(200.0);
 /// with their small craters and wrinkle ridges on LOLA's 16 ppd grid (Smith et al. 2010, GRL 37,
 /// L18204), times 1.15, the Earth's ratio of that window RMS to the RMS above 72 km (the ruling's
 /// measurements). The maria and Mars's plains differ by under 2× at 10 km though their gravities
-/// differ by 2.3×, both being set by emplacement and craters rather than by strength. Medium-low
-/// confidence.
+/// differ by 2.3×, both being set by emplacement and craters rather than by strength. The windows'
+/// bounds, detrending and statistic are not recorded, so 60 m is not derived from them: times
+/// 1.15 they give 49–63 m for Mars's plains and 102 m for the maria (R09.T12.e's science check),
+/// and 60 m is a choice within the plains' range, labelled as one. Medium-low confidence.
 pub const STRUCTURAL_RMS_STAGNANT_LID: Metres = Metres::new(60.0);
 
 /// An ice-rich crust's structural RMS in wavelengths shorter than [`ANCHOR_WAVELENGTH`], 50 m, with
@@ -1155,9 +1160,12 @@ pub const STRUCTURAL_RMS_STAGNANT_LID: Metres = Metres::new(60.0);
 /// 2008, LPSC XXXIX, abstract 1464, Fig. 5a; its Table 1 gives 5.6–8.5 m at 100 m), and in the
 /// ruling's reading a Hurst exponent of about 0.4 from 1 to 70 km, the ice shape's β₁ of 1.8
 /// ([`SpectrumShape::ICE_RICH`], whose documentation gives the sources' own exponents). With that
-/// shape it gives adirectional RMS slopes (√2 times a profile's) of 2.0°, 5.7° and 10.3° over
-/// 1 km, 100 m and 10 m, against Europa's 2.8–4.1°, 4.5–6.9° and 8.5–13° (the last extrapolated).
-/// Medium-low confidence.
+/// shape the anchor gives an RMS deviation of 24.7 m at 1 km, 0.49–0.71 of Fig. 5a's (meeting it
+/// would take an anchor of about 71–101 m), and 6.5 m at 100 m, inside Table 1's; the value is
+/// kept (main's ruling for R09.T12.e, 2026-10-19). Its adirectional RMS slopes (√2 times a
+/// profile's) are 2.0°, 5.3° and 9.5° over 1 km, 100 m and 10 m (R09.T12.e's science check),
+/// against Europa's 2.8–4.1°, 4.5–6.9° and 8.5–13° (the last extrapolated). Medium-low
+/// confidence.
 pub const STRUCTURAL_RMS_ICE_RICH: Metres = Metres::new(50.0);
 
 impl BandSpectrum {

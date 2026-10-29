@@ -119,9 +119,11 @@ pub struct FieldHeaderParts {
     pub climate_model: ClimateModelKind,
     /// Where the precipitation came from: always the labelled heuristic (Design note 8).
     pub precipitation: PrecipitationSource,
-    /// The realised hypsometric standard deviation `σ_h` of the reconstructed field, metres: the
-    /// area-weighted RMS elevation about its mean, which the pass constrains to plan 14's
-    /// (Design note 7). Finite and non-negative.
+    /// The realised hypsometric standard deviation `σ_h` of the whole surface at its band limit,
+    /// metres: √(`Var_recon` + `S_s` + `K_w` + `R_inc` + `C_c`), the reconstructed field's
+    /// area-weighted variance about its mean with the shares the synthesis adds below the cells
+    /// (R09.T12.e), which the pass constrains to plan 14's (Design note 7). Finite and
+    /// non-negative.
     pub realised_sigma_h: Metres,
     /// The realised greatest relief, metres: the highest elevation less the lowest, reported
     /// rather than matched, since a greatest relief grows with resolution (Design note 3); about
