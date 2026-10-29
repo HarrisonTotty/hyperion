@@ -25,9 +25,18 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   HITRAN2024's four N₂O bands (I. E. Gordon et al., J. Quant. Spectrosc. Radiat. Transf. 353
   (2026) 109807), each band from one list only. The whole table is offered under CC BY-SA 4.0, its
   HITRAN2024 part with HITRAN's citation.
-- `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g): named cells' curves
-  of growth at three node pressures and three midpoints, computed from the same lists, beside the
-  reduction's own, which the tests read.
+- `kDistributions/<key>.json` and its parts `<key>-<n>.bin` for the hot molecules (plan R08,
+  R08.T4.f): their k-distributions per 1 nm cell, reduced by super-lines on the grid and in the
+  16-bit format each sidecar states, from these lists, their files fetched from the database's
+  archive of each dataset on Zenodo (each record's DOI in its sidecar), whose records state CC BY
+  4.0 (read 2026-10-29), the database's own licence quoted above:
+  - `FeH`: MoLLIST's FeH as ExoMol carries it (M. Dulick et al., Astrophys. J. 594 (2003) 651; S.
+    Wende, A. Reiners and A. Seifahrt, Astron. Astrophys. 523 (2010) A58; P. F. Bernath, J. Quant.
+    Spectrosc. Radiat. Transf. 240 (2020) 106687).
+- `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
+  `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
+  pressures and three midpoints, computed from the same lists, beside the reduction's own, which
+  the tests read.
 - `n2oMerge.json` (plan R08, R08.T4.g): HITRAN2024's N₂O bands against TYM's of the same
   assignment, and each merged cell's bands by list and its mean cross-sections, which the tests
   read.

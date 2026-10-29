@@ -530,10 +530,10 @@ ruled 2026-10-09 and 2026-10-10).
   band-model estimates, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json,
   HCl's 8-0 band and its overtone-ladder estimate among them (R08.T4.h).
 
-- Cross-sections of the pending absorbers, and NH3's and N2O's k-distributions, derived from the
-  ExoMol database (J. Tennyson et al., the ExoMol database and the line lists each file names,
-  https://www.exomol.com; J. Tennyson et al., J. Quant. Spectrosc. Radiat. Transf. 326 (2024)
-  109083, DOI: 10.1016/j.jqsrt.2024.109083), licensed under CC BY-SA 4.0
+- Cross-sections of the pending absorbers, and the k-distributions of NH3, N2O and the hot
+  molecules, derived from the ExoMol database (J. Tennyson et al., the ExoMol database and the
+  line lists each file names, https://www.exomol.com; J. Tennyson et al., J. Quant. Spectrosc.
+  Radiat. Transf. 326 (2024) 109083, DOI: 10.1016/j.jqsrt.2024.109083), licensed under CC BY-SA 4.0
   (https://creativecommons.org/licenses/by-sa/4.0/). The values in
   apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/ are reduced from those line
   lists, a modification: bounds.json's cell means (plan R08, R08.T4.c); and (plan R08, R08.T4.g)
@@ -543,8 +543,14 @@ ruled 2026-10-09 and 2026-10-10).
   J. Quant. Spectrosc. Radiat. Transf. 219 (2018) 199-212, DOI: 10.1016/j.jqsrt.2018.07.022), with
   its H2 and He broadening files, and the TYM list of 14N2-16O (S. N. Yurchenko, T. M. Mellor and
   J. Tennyson, Mon. Not. R. Astron. Soc. 534 (2024) 1364-1375, DOI: 10.1093/mnras/stae2201), N2O's
-  merged with HITRAN2024's bands (I. E. Gordon et al., as above). That adapted material is offered
-  under CC BY-SA 4.0 (its README.md beside it); the line lists' files are not committed.
+  merged with HITRAN2024's bands (I. E. Gordon et al., as above); and (plan R08, R08.T4.f) the hot
+  molecules' k-distributions in its kDistributions/ directory and their reference curves
+  lineReferencesHot.json, each list fetched from the database's archive on Zenodo (its record's DOI
+  in the sidecar; the records licensed CC BY 4.0): MoLLIST's FeH as ExoMol carries it (M. Dulick et
+  al., Astrophys. J. 594 (2003) 651, DOI: 10.1086/376791; S. Wende, A. Reiners and A. Seifahrt,
+  Astron. Astrophys. 523 (2010) A58; P. F. Bernath, J. Quant. Spectrosc. Radiat. Transf. 240 (2020)
+  106687). That adapted material is offered under CC BY-SA 4.0 (its README.md beside it); the line
+  lists' files are not committed.
 
 - Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,
   "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14

@@ -12,7 +12,9 @@ import {
   kDistributionAt,
   loadKDistributions,
   type SpeciesKDistribution,
+  tableAt,
 } from "./kDistribution";
+import hot from "./exomol/lineReferencesHot.json" with { type: "json" };
 import nitrousOxide from "./exomol/lineReferencesN2O.json" with { type: "json" };
 import ammonia from "./exomol/lineReferencesNH3.json" with { type: "json" };
 import atoms from "./lineReferencesAtoms.json" with { type: "json" };
@@ -120,6 +122,10 @@ const NITROUS_OXIDE: References = nitrousOxide;
 // R08.T4.e's atoms and ions: their strongest cells, about each table's middle node.
 const ATOMS: ReadonlyArray<References> = atoms.references;
 
+// R08.T4.f's hot molecules: two cells each, about each hot table's middle node, from the
+// super-lines the tables were reduced from.
+const HOT: ReadonlyArray<References> = hot.references;
+
 /** Every committed species' references, by its name. */
 const ALL_REFERENCES: ReadonlyArray<readonly [string, References]> = [
   ["O₂", OXYGEN],
@@ -127,14 +133,17 @@ const ALL_REFERENCES: ReadonlyArray<readonly [string, References]> = [
   ["NH₃", AMMONIA],
   ["N₂O", NITROUS_OXIDE],
   ...ATOMS.map((r): readonly [string, References] => [r.species, r]),
+  ...HOT.map((r): readonly [string, References] => [`${r.species} (hot)`, r]),
 ];
 
 describe.each(ALL_REFERENCES)(
   "%s's committed cells against their line-by-line curves",
   (_, references) => {
-    let table: KDistributionTable | undefined;
+    // Every table of the species, the one at each state's temperature read (a hot table continues
+    // a temperate one above their hand-over, R08.T4.f).
+    let tables: ReadonlyArray<KDistributionTable> = [];
     beforeAll(async () => {
-      [table] = await loadKDistributions([references.species], inlinePart);
+      tables = await loadKDistributions([references.species], inlinePart);
     }, 120_000); // M2 worst 0.65 s, desktop over 10 s under load (2026-10-15): 100× M2
     const states = references.cells.flatMap((cell) =>
       cell.states.map((state) => [cell.nm, state] as const),
@@ -144,6 +153,7 @@ describe.each(ALL_REFERENCES)(
     // for each row shift there, by the first test that needs it, rather than whole in every test.
     const kdAt = memoised(
       (temperatureK: number): SpeciesKDistribution => {
+        const table = tableAt(tables, references.species, temperatureK);
         if (table === undefined) {
           throw new Error(`no committed table for ${references.species}`);
         }

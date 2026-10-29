@@ -9,7 +9,8 @@
  * (R08.T4.d's, R08.T4.e's and R08.T4.g's k-distributions, `kDistribution.ts`), an entry of
  * {@link PENDING_ABSORBERS} with its cell means for what a later task, or a deferral, leaves, or an
  * entry of {@link NO_VISIBLE_ABSORPTION} (R08.T19 holds the client to it). A species leaves
- * R08.T4.d's, R08.T4.e's and R08.T4.g's pending lists when its table is committed.
+ * R08.T4.d's, R08.T4.e's and R08.T4.g's pending lists when its table is committed, and R08.T4.f's
+ * when its hot table is (`exomol/kDistributions/`), its parts' entries kept.
  * - A transparent species takes no column and no label.
  * - A pending one draws nothing and is labelled `ATMOSPHERE: APPROXIMATE` meanwhile, under Design
  *   note 12's τ rule, as any species without cross-sections is, unless R08.T10.a finds it
@@ -591,7 +592,6 @@ const PENDING: ReadonlyArray<PendingListing> = [
   },
   { key: "TiO", task: "R08.T4.f", what: "its bands (ExoMol's Toto)" },
   { key: "VO", task: "R08.T4.f", what: "its bands (ExoMol's HyVO, which its service serves)" },
-  { key: "FeH", task: "R08.T4.f", what: "its F-X bands below 760 nm (MoLLIST)" },
   { key: "H2S", task: "R08.T4.f", what: "its visible overtones (AYT2), from 296 K" },
   {
     key: "SiO",
