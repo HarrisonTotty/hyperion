@@ -23011,7 +23011,7 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     there (a property: the terrain has no CPU twin of a frame); then on the lava world's night
     side, the block's first palette slot made `Melt` for the check, it holds that the `Melt`
     texels alone glow, none above what its brightest A emits at the melt's least temperature.
-  - _Pending: the owner's RTX run._ The frame-timing harness's new part (M) (`smoke/frameTiming.ts`)
+  - _Pending: the owner's RTX run._ The frame-timing harness's new part (O) (`smoke/frameTiming.ts`)
     times (G)'s bare frames of the measured Earth's body at its five cameras and `x1`, `x2` and
     `x4`, given the protocol lava world's ground field, so drawn by the emissive forms, made ahead
     of its timed frames: the disc rows and the lava-world row. It runs only on a run that lifts

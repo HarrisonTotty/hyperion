@@ -66,7 +66,7 @@
  *
  * R08.T18.a adds one, timed and reported as (G) is, for the owner's RTX run:
  *
- * - (M) the frame without its air, its ground emitting: (G)'s frames of the measured Earth's body
+ * - (O) the frame without its air, its ground emitting: (G)'s frames of the measured Earth's body
  *   at `x1`, `x2` and `x4`, given the protocol fixture's locked lava world's ground temperature
  *   field (`LitBodyInput.thermal`), so that R07's disc, mesh and `disc cells` draw it by their
  *   emissive forms (`discReflectance.ts`), made and prepared before the timed frames
@@ -1477,7 +1477,7 @@ async function timeBare(
   const viewport = settingOutput("high");
   on.view.resize(viewport);
   if (thermal !== null) {
-    // (M)'s emissive forms made before its timed frames (R08.T18.a).
+    // (O)'s emissive forms made before its timed frames (R08.T18.a).
     await on.renderer.prepareEmissive();
   }
   const failures: string[] = [];
@@ -2226,6 +2226,7 @@ function summaryCheckNames(): string[] {
     CHECK_NAMES.small,
     CHECK_NAMES.trio,
     CHECK_NAMES.bare(MEASURED_EARTH_NAME),
+    CHECK_NAMES.emitting(MEASURED_EARTH_NAME),
     CHECK_NAMES.frameTable("high", CLASS_MAP_NAME),
     CHECK_NAMES.frameTable("high", PALETTE_NAME),
     CHECK_NAMES.frameTable("high", SATURN_NAME),
@@ -2350,10 +2351,10 @@ function thickMeasuredMedium(
 
 /**
  * R08.T11's photorealistic frame's timings (the module's remarks): (D) first, so that its cold
- * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), R08.T11.c's
- * (H), (I) and (J), R08.T14.c's (K) and (L) and R08.T14.f's (M) and (N) where `options.thickRead`
- * asks (their bake and correction made before the renderer, with (I)'s and (J)'s media), then (E)
- * and (F);
+ * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), R08.T18.a's
+ * (O), R08.T11.c's (H), (I) and (J), R08.T14.c's (K) and (L) and R08.T14.f's (M) and (N) where
+ * `options.thickRead` asks (their bake and correction made before the renderer, with (I)'s and
+ * (J)'s media), then (E) and (F);
  * a check a table, one per combination with its per-frame sums, and one that no timed frame was
  * dropped. Without `timestamp-query` each check fails with the reason.
  */
@@ -2446,7 +2447,7 @@ export async function timeAtmosphereFrame(
     if (lava === null) {
       throw new Error("the lava world has no medium");
     }
-    const emittingMissing = await timedPart("(M)", () =>
+    const emittingMissing = await timedPart("(O)", () =>
       timeBare(on, checks, ledger, measured, lava),
     );
     const trioMissing = await timedPart("(H)", () => timeSmallTrio(on, checks, ledger, measured));
@@ -2513,7 +2514,7 @@ export async function timeAtmosphereFrame(
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (M) ${emittingMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (O) ${emittingMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>
