@@ -340,6 +340,39 @@ same constants, the same operations in the same order and the same reinterpretat
 written with Rust's cast_signed, cast_unsigned and From in place of `as` where those give the same
 value.
 
+Ported from src/math/exp.rs, log.rs, log1p.rs, expm1.rs, sin.rs, cos.rs, tan.rs, k_sin.rs,
+k_cos.rs, k_tan.rs, rem_pio2.rs, rem_pio2_large.rs, asin.rs, acos.rs, atan.rs, atan2.rs, cbrt.rs,
+pow.rs, generic/scalbn.rs and mod.rs (the word helpers), libm 0.2.16 as published on crates.io,
+into TypeScript (plan R08, R08.T20):
+
+  apps/hyperion/src/renderer/src/lib/pinnedMath.ts
+
+Changes: none to the arithmetic. The same constants (their decimal literals as Prettier writes
+them), the same operations in the same order, and the same reinterpretations of a double's two
+32-bit words, with JavaScript's integer operators where Rust's u32 and i32 ones stand; the
+remainder of rem_pio2 is returned through module state rather than a tuple; the fused
+multiply-adds of cbrt.rs are Dekker's exact product error, which equals them on cbrt's arguments;
+the paths no f64 argument reaches (rem_pio2_large's other precisions, cbrt's directed roundings)
+and the force_eval! calls, which raise exception flags and change no value, are left out. The file
+keeps the FreeBSD sources' Sun Microsystems notices: the 2004 notice quoted above, which e_exp.c,
+e_pow.c and k_tan.c carry, and this one, which the others carry (with "SunSoft" for "SunPro" in
+e_log.c, e_asin.c, e_acos.c, e_atan2.c, k_sin.c, k_cos.c and k_rem_pio2.c):
+
+  ====================================================
+  Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+
+  Developed at SunPro, a Sun Microsystems, Inc. business.
+  Permission to use, copy, modify, and distribute this
+  software is freely granted, provided that this notice
+  is preserved.
+  ====================================================
+
+Its cbrt is the CORE-MATH project's
+(https://core-math.gitlabpages.inria.fr/, core-math/src/binary64/cbrt/cbrt.c), Copyright (c)
+2021-2022 Alexei Sibidanov, available under the MIT licence quoted above, and ported to Rust in
+2025 by Trevor Gross. libm's LICENSE.txt also credits musl libc (Copyright (c) 2005-2020 Rich
+Felker, et al.), whose forms of the FreeBSD sources several of these files take.
+
 ================================================================================
 Data
 
