@@ -19,6 +19,7 @@ import {
   wgslStructs,
 } from "../../test/atmosphereWgsl";
 import { boundNames, countingRenderEngine } from "../../test/countingRenderEngine";
+import { patternedThickBake } from "../../test/thickTables";
 import { lookAlong, quaternion } from "../camera/quaternion";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { TextureHandle } from "../engine/types";
@@ -51,12 +52,16 @@ import {
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_KERNEL,
   RAY_MARCH_SPECIAL_KERNEL,
   SKY_VIEW_KERNEL,
   localScaleHeightM,
+  marchOneBandFor,
   marchSourcesOf,
   marchSpecialisedFor,
   marchWeightOf,
@@ -70,6 +75,7 @@ import {
   tableRadiusM,
   topShellOf,
   viewExactOf,
+  withMarchOneBand,
   withMarchSpecialised,
 } from "./hillaire";
 import { marchAreaOf, marchAreaTexels } from "./marchArea";
@@ -86,6 +92,7 @@ import {
   type AtmosphereBody,
   AtmosphereTables,
   KERNEL_ARM_FORMAT,
+  kernelMedium,
   marchEdgeCountOf,
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
@@ -1242,6 +1249,8 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
     ["the ray march by slot at the centre ray", RAY_MARCH_SLOTS_CENTRE_KERNEL.reference],
     ["the specialised ray march", RAY_MARCH_SPECIAL_KERNEL.reference],
     ["the specialised ray march by slot", RAY_MARCH_SLOTS_SPECIAL_KERNEL.reference],
+    ["the ray march for one band, edged", RAY_MARCH_ONE_BAND_KERNEL.reference],
+    ["the ray march by slot for one band, edged", RAY_MARCH_SLOTS_ONE_BAND_KERNEL.reference],
   ])("calls the march from one place in %s's entry point", (_name, source) => {
     const main = wgslFunctions(source).get("main");
     expect(main?.body.match(/\bmarchRay\(/gu)).toHaveLength(1);
@@ -1944,6 +1953,8 @@ describe("the ray march by slot (R08.T8.e, lever 5; decision-r08-t8-leans.md §1
     ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL.reference],
     ["the specialised ray march", RAY_MARCH_SPECIAL_KERNEL.reference],
     ["the specialised ray march by slot", RAY_MARCH_SLOTS_SPECIAL_KERNEL.reference],
+    ["the ray march for one band, edged", RAY_MARCH_ONE_BAND_KERNEL.reference],
+    ["the ray march by slot for one band, edged", RAY_MARCH_SLOTS_ONE_BAND_KERNEL.reference],
   ])("reaches every binding %s declares from its entry point", (_name, source) => {
     expect(unreachedBindings(source)).toEqual([]);
   });
@@ -1958,6 +1969,8 @@ describe("the ray march by slot (R08.T8.e, lever 5; decision-r08-t8-leans.md §1
         "atmosphere ray march by slot",
         RAY_MARCH_SPECIAL_KERNEL.name,
         RAY_MARCH_SLOTS_SPECIAL_KERNEL.name,
+        RAY_MARCH_ONE_BAND_KERNEL.name,
+        RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name,
         "atmosphere slot depths",
       ]),
     );
@@ -2375,14 +2388,16 @@ describe("the ray march specialised for one band, edge-free (R08.T11.d)", () => 
     ]);
   });
 
-  it("marches the area of a body of layer edges by the general march", async () => {
+  // A body of layer edges and one band takes R08.T11.g's one-band march instead.
+  it("marches the area of a body of several slices and bands by the general march", async () => {
     const engine = await countingRenderEngine();
     const kernels = await createAtmosphereFrameKernels(engine);
     const tables = new AtmosphereTables(
       engine,
-      EARTH_SLAB_REFERENCE,
-      tableRadiusM(WGS84),
-      EARTH_SLAB_REFERENCE_CURVES,
+      saturnClassMedium(),
+      tableRadiusM(SATURN_SPHEROID),
+      NO_ABSORBER_CURVES,
+      saturnBody(),
     );
     const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
     engine.dispatched.length = 0;
@@ -2402,6 +2417,235 @@ describe("the ray march specialised for one band, edge-free (R08.T11.d)", () => 
     expect(march === undefined ? [] : boundNames(march.bindings)).toEqual(
       [...kernelBindings(RAY_MARCH_SPECIAL_KERNEL.reference).keys()].toSorted(),
     );
+  });
+});
+
+describe("the ray march for one band, edged (R08.T11.g)", () => {
+  /** From 10⁹ m over the equator, looking at the centre: the Earth's air a few texels across. */
+  const distant: AtmosphereCamera = {
+    positionM: { x: 1e9, y: 0, z: 0 },
+    orientation: lookAlong({ x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    fovXRad: Math.PI / 3,
+    viewport: { widthPx: 320, heightPx: 180 },
+  };
+  const EDGES_GENERAL = "let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);";
+  const EDGES_SPECIAL = "let edgeCount = min(u32(layerEdges.count.x), 0u);";
+
+  it.each([
+    ["the ray march", RAY_MARCH_KERNEL, RAY_MARCH_ONE_BAND_KERNEL],
+    ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL, RAY_MARCH_SLOTS_ONE_BAND_KERNEL],
+  ] as const)(
+    "holds the slices' and bands' counts at 1 in %s, and leaves the edges' count on its uniform",
+    (_name, general, oneBand) => {
+      expect(oneBand.name).toBe(`${general.name} for one band, edged`);
+      expect(oneBand.reference.split("\n")).toHaveLength(general.reference.split("\n").length);
+      expect(linesDiffering(general.reference, oneBand.reference)).toEqual([
+        ["return clamp(u32(body.counts.x), 1u, MAX_SLICES);", "return 1u;"],
+        ["return clamp(u32(body.counts.y), 1u, MAX_BANDS);", "return 1u;"],
+      ]);
+      expect(oneBand.reference.split(EDGES_GENERAL)).toHaveLength(2);
+      expect([...kernelBindings(oneBand.reference).keys()]).toEqual([
+        ...kernelBindings(general.reference).keys(),
+      ]);
+    },
+  );
+
+  it.each([
+    ["the ray march", RAY_MARCH_ONE_BAND_KERNEL, RAY_MARCH_SPECIAL_KERNEL],
+    ["the ray march by slot", RAY_MARCH_SLOTS_ONE_BAND_KERNEL, RAY_MARCH_SLOTS_SPECIAL_KERNEL],
+  ] as const)(
+    "differs in %s from the specialised march in the edges' count alone",
+    (_name, oneBand, special) => {
+      expect(linesDiffering(oneBand.reference, special.reference)).toEqual([
+        [EDGES_GENERAL, EDGES_SPECIAL],
+      ]);
+    },
+  );
+
+  it("refuses sources that hold a place to rewrite nowhere, or twice", () => {
+    const empty = { ...RAY_MARCH_KERNEL, name: "no march", reference: "fn main() {}" };
+    expect(() => withMarchOneBand(empty)).toThrow(/^kernel no march holds no single place/u);
+    const twice = {
+      ...RAY_MARCH_KERNEL,
+      name: "two marches",
+      reference: `${RAY_MARCH_KERNEL.reference}\n${RAY_MARCH_KERNEL.reference}`,
+    };
+    expect(() => withMarchOneBand(twice)).toThrow(/^kernel two marches holds no single place/u);
+  });
+
+  it("rewrites sources that hold no edges' count", () => {
+    const counts = { ...RAY_MARCH_KERNEL, name: "the body's counts", reference: oblateWgsl };
+    expect(withMarchOneBand(counts).name).toBe("the body's counts for one band, edged");
+  });
+
+  // From the tables alone, as R08.T11.d's choice is: one slice, one band and layer edges, never the
+  // body's class. No tables take both variants.
+  const venus = venusClassMedium();
+  it.each<
+    readonly [string, AtmosphereMedium, AbsorberCurveSlots, AtmosphereBody | null, number, boolean]
+  >([
+    [
+      "R05's Earth on WGS 84",
+      R05_EARTH_REFERENCE,
+      NO_ABSORBER_CURVES,
+      earthBody(),
+      tableRadiusM(WGS84),
+      false,
+    ],
+    [
+      "the measured Earth on WGS 84",
+      EARTH_REFERENCE,
+      EARTH_REFERENCE_CURVES,
+      earthBody(),
+      tableRadiusM(WGS84),
+      false,
+    ],
+    [
+      "the slab Earth on WGS 84",
+      EARTH_SLAB_REFERENCE,
+      EARTH_SLAB_REFERENCE_CURVES,
+      earthBody(),
+      tableRadiusM(WGS84),
+      true,
+    ],
+    [
+      "a Saturn-class figure",
+      saturnClassMedium(),
+      NO_ABSORBER_CURVES,
+      saturnBody(),
+      tableRadiusM(SATURN_SPHEROID),
+      false,
+    ],
+    ["a medium with a cloud deck", venus.medium, NO_ABSORBER_CURVES, null, venus.radiusM, true],
+  ])(
+    "chooses the one-band march for %s from its tables alone",
+    async (_name, medium, curves, body, radiusM, oneBand) => {
+      const engine = await countingRenderEngine();
+      const tables = new AtmosphereTables(engine, medium, radiusM, curves, body);
+      expect([
+        marchOneBandFor(tables),
+        marchOneBandFor(tables) && marchSpecialisedFor(tables),
+      ]).toEqual([oneBand, false]);
+      tables.dispose();
+    },
+  );
+
+  /** The slab Earth's tables on WGS 84, which hold the slot layers. */
+  function slabTables(engine: Awaited<ReturnType<typeof countingRenderEngine>>): AtmosphereTables {
+    return new AtmosphereTables(
+      engine,
+      EARTH_SLAB_REFERENCE,
+      tableRadiusM(WGS84),
+      EARTH_SLAB_REFERENCE_CURVES,
+      earthBody(),
+    );
+  }
+
+  it("marches the slab's area by the one-band march, and the reference path and the tile cull by the general", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const tables = slabTables(engine);
+    expect(tables.slotDepths).not.toBeNull();
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    const covers = (["area", "whole frame", "tiles"] as const).map((cover) => {
+      view.setMarchCover(cover);
+      engine.dispatched.length = 0;
+      view.drawFrame(distant, [NOON], SCENE);
+      return [cover, marchesOf(engine).map((d) => d.kernel)];
+    });
+    expect(covers).toEqual([
+      ["area", [RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name]],
+      ["whole frame", [RAY_MARCH_SLOTS_KERNEL.name]],
+      ["tiles", [RAY_MARCH_SLOTS_CENTRE_KERNEL.name, RAY_MARCH_SLOTS_KERNEL.name]],
+    ]);
+  });
+
+  /** The Venus-class deck's tables, of layer edges and one band, which keep the shared read. */
+  function deckTables(engine: Awaited<ReturnType<typeof countingRenderEngine>>): AtmosphereTables {
+    return new AtmosphereTables(engine, venus.medium, venus.radiusM, NO_ABSORBER_CURVES);
+  }
+
+  it.each([
+    ["the slab Earth's, by slot", RAY_MARCH_SLOTS_ONE_BAND_KERNEL, slabTables],
+    ["a cloud deck's, over the shared read", RAY_MARCH_ONE_BAND_KERNEL, deckTables],
+  ] as const)(
+    "gives the one-band march %s every binding it declares, and no other",
+    async (_name, kernel, tablesOf) => {
+      const engine = await countingRenderEngine();
+      const kernels = await createAtmosphereFrameKernels(engine);
+      const tables = tablesOf(engine);
+      const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+      engine.dispatched.length = 0;
+      view.drawFrame(distant, [NOON], SCENE);
+      const march = engine.dispatched.find((d) => d.kernel === kernel.name);
+      expect(march === undefined ? [] : boundNames(march.bindings)).toEqual(
+        [...kernelBindings(kernel.reference).keys()].toSorted(),
+      );
+    },
+  );
+
+  it("is made up front with the device's shared kernels for each read asked", async () => {
+    const engine = await countingRenderEngine();
+    const ahead: string[] = [];
+    const createAsync = engine.createComputeAsync.bind(engine);
+    engine.createComputeAsync = (pair) => {
+      ahead.push(pair.name);
+      return createAsync(pair);
+    };
+    await createAtmosphereFrameKernels(engine);
+    expect(ahead).toEqual(
+      expect.arrayContaining([
+        RAY_MARCH_ONE_BAND_KERNEL.name,
+        RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name,
+      ]),
+    );
+    ahead.length = 0;
+    await createAtmosphereFrameKernels(engine, { reads: "by slot" });
+    expect(ahead).toContain(RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name);
+    expect(ahead).not.toContain(RAY_MARCH_ONE_BAND_KERNEL.name);
+  });
+
+  it("is made once over an atmosphere's own kernels, at its first frame over the area", async () => {
+    const engine = await countingRenderEngine();
+    const made: string[] = [];
+    const create = engine.createCompute.bind(engine);
+    engine.createCompute = (pair) => {
+      made.push(pair.name);
+      return create(pair);
+    };
+    const own = new HillaireAtmosphere(
+      engine,
+      EARTH_SLAB_REFERENCE,
+      TABLE_SIZES.high,
+      WGS84,
+      EARTH_SLAB_REFERENCE_CURVES,
+    );
+    own.drawFrame(distant, [NOON], SCENE);
+    expect(made).not.toContain(RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name);
+    own.setMarchCover("area");
+    own.drawFrame(distant, [NOON], SCENE);
+    own.drawFrame(distant, [DUSK], SCENE);
+    expect(made.filter((name) => name === RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name)).toHaveLength(1);
+  });
+
+  // The thick read has no one-band form (R08.T11.g is the thin march's): a thick body of one band
+  // and layer edges takes the thick read's general march over its area.
+  it("marches the area of a thick body of one band and layer edges by the thick read's general march", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const tables = slabTables(engine);
+    tables.setThickTables(
+      patternedThickBake(
+        tables.plan.bands,
+        kernelMedium(tables.medium),
+        EARTH_SLAB_REFERENCE_CURVES.length,
+      ),
+    );
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    engine.dispatched.length = 0;
+    view.drawFrame(distant, [NOON], SCENE);
+    expect(marchOneBandFor(tables)).toBe(true);
+    expect(marchesOf(engine).map((d) => d.kernel)).toEqual([RAY_MARCH_SLOTS_THICK_KERNEL.name]);
   });
 });
 

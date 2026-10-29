@@ -15,8 +15,10 @@ import {
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_KERNEL,
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
@@ -142,6 +144,16 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ];
 
 /**
+ * R08.T11.g's ray march for one band, edged, over both reads (`hillaire.ts`'s `withMarchOneBand`).
+ * The smoke page compiles them in a part of their own (`smoke/page.ts`), for the watchdog of the
+ * part that compiles the rest.
+ */
+export const ATMOSPHERE_ONE_BAND_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  RAY_MARCH_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
+].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
+
+/**
  * R08.T14.c's per-frame atmosphere over the thick multiple-scattering table (`hillaire.ts`'s
  * `withThickRead`): the sky view, the aerial perspective and both marches' footprints, each with
  * its form specialised for one band and no layer edge. The smoke page compiles them in a part of
@@ -234,6 +246,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_TABLE_ENTRIES,
   ...POST_ENTRIES,
   ...ATMOSPHERE_VIEW_ENTRIES,
+  ...ATMOSPHERE_ONE_BAND_ENTRIES,
   ...ATMOSPHERE_THICK_ENTRIES,
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,

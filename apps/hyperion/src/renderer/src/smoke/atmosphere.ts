@@ -77,6 +77,7 @@ import {
   type MarchBand,
   type MarchCover,
   marchSourcesOf,
+  marchOneBandFor,
   marchSpecialisedFor,
   marchWeightOf,
   skyViewHeight,
@@ -2626,6 +2627,12 @@ interface AreaBody {
    */
   readonly specialised: boolean;
   /**
+   * Whether its tables take the march for one band, edged, over the area (`hillaire.ts`'s
+   * `marchOneBandFor`, R08.T11.g), which the check then holds to the general march; not where
+   * absent.
+   */
+  readonly oneBand?: boolean;
+  /**
    * Whether its tables hold a thick table ({@link withThickTable}, R08.T14.c), so that its frames
    * are drawn by the thick read's kernels; none where absent.
    */
@@ -2690,6 +2697,23 @@ const SPECIALISED_BODIES: ReadonlyArray<AreaBody> = [
     body: earthBody,
     frames: AREA_FRAMES.filter((frame) => frame.distanceM !== 1e8),
     specialised: true,
+  },
+];
+
+/**
+ * The slab Earth on WGS 84 (R08.T11.g), its ozone a slab with a base and a top, so layer edges, and
+ * one slice and one band, its area by the march for one band, edged, in
+ * {@link SPECIALISED_BODIES}' frames. Its tables hold the slot layers: the march by slot.
+ */
+const ONE_BAND_BODIES: ReadonlyArray<AreaBody> = [
+  {
+    name: "the slab Earth",
+    medium: EARTH_SLAB_REFERENCE,
+    curves: EARTH_SLAB_REFERENCE_CURVES,
+    body: earthBody,
+    frames: AREA_FRAMES.filter((frame) => frame.distanceM !== 1e8),
+    specialised: false,
+    oneBand: true,
   },
 ];
 
@@ -2898,6 +2922,30 @@ export async function checkMarchSpecialised(
 }
 
 /**
+ * R08.T11.g: the march for one band, edged, exact (`hillaire.ts`'s `withMarchOneBand`; main's
+ * pre-ruling of 2026-10-28): the slab Earth's frames over the air's area, which take it, held to the
+ * general march over the whole frame as {@link checkMarchArea} holds the measured Earth's, byte for
+ * byte on a fallback adapter and within T8.d's ulp on hardware.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkMarchOneBand(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  // The slab's tables hold the slot layers: the march by slot alone, up front, as checkMarchArea's
+  // in the same part, so that no part compiles both reads' marches.
+  const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot" });
+  try {
+    await checkAreaBodies(engine, checks, fallback, kernels, ONE_BAND_BODIES, false, "R08.T11.g");
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
  * A smoke check's correction alone for `tables` (R08.T14.f): `test/thickTables.ts`'s correction
  * pattern, a thin world's table, one layer a band and light slot.
  */
@@ -2977,9 +3025,9 @@ export async function checkThickMarchSpecialised(
 }
 
 /**
- * {@link checkMarchArea}'s and {@link checkMarchSpecialised}'s bodies and frames over the device's
- * shared kernels, each frame over the area and, where `tileCull`, under the tile cull, each held
- * to the whole frame's.
+ * {@link checkMarchArea}'s, {@link checkMarchSpecialised}'s and {@link checkMarchOneBand}'s bodies
+ * and frames over the device's shared kernels, each frame over the area and, where `tileCull`,
+ * under the tile cull, each held to the whole frame's.
  */
 async function checkAreaBodies(
   engine: RenderEngine,
@@ -3004,9 +3052,15 @@ async function checkAreaBodies(
       if (body.thick === true) {
         withThickTable(tables, body.curves.length);
       }
-      // Whether the area's frames take the specialised march, as the body is listed to.
+      // Whether the area's frames take the specialised march, or the thin read's march for one
+      // band, edged (R08.T11.g), as the body is listed to.
       const specialised = marchSpecialisedFor(tables);
-      const march = specialised ? "the specialised march" : "the general march";
+      const oneBand = body.thick !== true && marchOneBandFor(tables);
+      const march = specialised
+        ? "the specialised march"
+        : oneBand
+          ? "the march for one band, edged"
+          : "the general march";
       for (const frame of body.frames) {
         // The harness's GPU work runs in order: each frame is read back before the next draws.
         // oxlint-disable-next-line no-await-in-loop
@@ -3025,7 +3079,7 @@ async function checkAreaBodies(
             `${march} over the air's area`,
             area,
             `the area ${area.area}`,
-            specialised === body.specialised,
+            specialised === body.specialised && oneBand === (body.oneBand ?? false),
           ],
         ];
         if (tiles !== null) {

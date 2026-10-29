@@ -20,7 +20,8 @@
  * R08.T11.b's face count in part 12; R08.T11.e's unread tables in two, a giant's in part 9 after
  * R08.T8.a's march band and Earth's in part 12 after R08.T11.b's face count; R08.T11.d's march
  * area in part 8 after R07.T8.e–g's cell pass, and its specialised march over the shared read in
- * part 12 after R08.T11.e's Earth; R08.T6.b's kernels
+ * part 12 after R08.T11.e's Earth; R08.T11.g's march for one band, edged, in part 8 after
+ * R08.T11.d's march area, and its kernels' catalogue in part 9, first; R08.T6.b's kernels
  * over N terms in two, its medium of four
  * absorbers in part 6 and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the
  * Saturn-class figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
@@ -41,7 +42,11 @@
  * captures, with the other captures; a plain `just test-render` runs none of them.
  */
 
-import { ATMOSPHERE_THICK_ENTRIES, WGSL_CATALOGUE } from "../view/engine/catalogue";
+import {
+  ATMOSPHERE_ONE_BAND_ENTRIES,
+  ATMOSPHERE_THICK_ENTRIES,
+  WGSL_CATALOGUE,
+} from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
 import {
   type CapabilityOverrides,
@@ -71,6 +76,7 @@ import {
   checkLowPick,
   checkMarchArea,
   checkMarchBand,
+  checkMarchOneBand,
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
   checkThickFrameTwinsEarth,
@@ -154,8 +160,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * R08.T7, R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11), whose twins outweigh their
  * GPU work (2 R08.T6.b's but its medium of four absorbers, 3 R08.T6.g's, 4 R08.T8.b's far limb, with the
  * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
- * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7's
- * several suns, R08.T8.e's slot layers on its binary and R10.T16.g's datum over the image, 11
+ * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, R08.T11.d's march area and R08.T11.g's
+ * march for one band, edged, 9 R08.T11.g's kernels' catalogue and R08.T8.a's march band, 10
+ * R08.T7's several suns, R08.T8.e's slot layers on its binary and R10.T16.g's datum over the image, 11
  * R08.T9.b's Earth and Saturn-class figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's
  * face count, R08.T11.e's Earth and R08.T11.d's specialised march over the shared read), 7 R10's
  * terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2
@@ -360,12 +367,20 @@ async function run(
   };
 
   // R08.T14.c's thick read's kernels are compiled in part 13, first: with them part 1's catalogue
-  // took 33 s more under load, the part past its watchdog.
-  const thin = WGSL_CATALOGUE.filter((entry) => !ATMOSPHERE_THICK_ENTRIES.includes(entry));
+  // took 33 s more under load, the part past its watchdog. R08.T11.g's one-band march's two are
+  // compiled in part 9, first: with them part 1 went from 170 s to past its watchdog on one variant
+  // on a slower machine (4 vCPU, 2026-10-29).
+  const thin = WGSL_CATALOGUE.filter(
+    (entry) =>
+      !ATMOSPHERE_THICK_ENTRIES.includes(entry) && !ATMOSPHERE_ONE_BAND_ENTRIES.includes(entry),
+  );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
   await group(13, "T9.b catalogue: the thick read's kernels", () =>
     checkCatalogue(engine, status, ATMOSPHERE_THICK_ENTRIES, checks),
+  );
+  await group(9, "T9.b catalogue: the one-band march's kernels", () =>
+    checkCatalogue(engine, status, ATMOSPHERE_ONE_BAND_ENTRIES, checks),
   );
   await group(1, "T9.a clear and triangle", () => checkClearAndTriangle(engine, checks));
   await group(1, "T9.d three canvases", () => checkThreeCanvases(engine, checks));
@@ -452,6 +467,11 @@ async function run(
   // 149 to 177 s at a CPU quota of 400%, and part 10 takes R10.T16.g's group).
   await group(8, "R08.T11.d the march over the air's area and the tile cull", () =>
     checkMarchArea(engine, checks, summary.fallback),
+  );
+  // In part 8 after R08.T11.d's march area, which compiles the march by slot that the slab Earth
+  // takes too, so that no part's GPU process compiles both reads' marches.
+  await group(8, "R08.T11.g the one-band march with layer edges", () =>
+    checkMarchOneBand(engine, checks, summary.fallback),
   );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
     checkFaceCount(engine, checks, twins),

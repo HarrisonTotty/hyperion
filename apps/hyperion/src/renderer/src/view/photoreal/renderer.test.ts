@@ -44,8 +44,10 @@ import {
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_KERNEL,
@@ -58,7 +60,11 @@ import {
   tableRadiusM,
 } from "../atmosphere/hillaire";
 import { EngineUnavailable } from "../engine/resilientEngine";
-import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
+import {
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+} from "../atmosphere/earth";
 import type { AtmosphereMedium } from "../atmosphere/medium";
 import {
   type AbsorberCurveSlots,
@@ -825,16 +831,17 @@ async function overlayDatums(
 /**
  * Every kernel VIEW makes on a device (plan R01, R01.T15): the photorealistic renderer's histogram
  * and disc cells; the atmosphere's per-frame kernels, its sky view, aerial perspective, its two
- * marches' footprint entry points, each general and specialised for one band and no layer edge
- * (R08.T11.d), their centre ray's entry points under R08.T11.d's tile cull (off for a view) and the
- * march's fill; since R08.T14.c the sky view, the aerial perspective and both marches' footprints,
+ * marches' footprint entry points, each general, specialised for one band and no layer edge
+ * (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points under
+ * R08.T11.d's tile cull (off for a view) and the march's fill; since R08.T14.c the sky view, the
+ * aerial perspective and both marches' footprints,
  * general and specialised, reading the thick table (`withThickRead`), for a body whose tables hold
  * one; its per-planet tables' four; and the sky bake's four. Each is a module constant, its
  * WGSL fixed text with no value of a medium, a body or a setting in it (term counts, slices, bands
- * and light slots are uniforms; the specialised march and the thick read are variants of fixed
- * text, chosen from the tables), so the records a device's cache holds for VIEW are bounded by this
- * list's length, 25, however many bodies a session visits. The smoke's kernel arm (`withKernelArmFormat`, twelve more)
- * and its probes are the smoke's alone.
+ * and light slots are uniforms; the specialised and one-band marches and the thick read are
+ * variants of fixed text, chosen from the tables), so the records a device's cache holds for VIEW
+ * are bounded by this list's length, 27, however many bodies a session visits. The smoke's kernel
+ * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
 const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   HISTOGRAM_KERNEL,
@@ -847,6 +854,8 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   SKY_VIEW_THICK_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
@@ -886,9 +895,10 @@ function onEarth(medium: AtmosphereMedium, curves: AbsorberCurveSlots): AirKind 
 /**
  * The fixtures' kinds of air, each built once (their curves of growth are most of a build's cost):
  * R05's Earth, with and without its ozone as an absorber, four column absorbers under one, two and
- * three seeded lights, a line absorber, five line slots, a Venus-class deck, a Titan-class methane
- * air, an oblate ice giant and an oblate Saturn-class air; so they differ in their terms,
- * absorbers, light slots, slices and bands.
+ * three seeded lights, a line absorber, five line slots, the slab Earth (layer edges and one band,
+ * R08.T11.g), a Venus-class deck, a Titan-class methane air, an oblate ice giant and an oblate
+ * Saturn-class air; so they differ in their terms, absorbers, light slots, layer edges, slices and
+ * bands.
  */
 function airKinds(random: () => number): AirKind[] {
   const ozone = r05EarthWithOzoneAbsorber();
@@ -907,6 +917,7 @@ function airKinds(random: () => number): AirKind[] {
     }),
     onEarth(lines.medium, lines.curves),
     onEarth(slots.medium, slots.curves),
+    onEarth(EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES),
     {
       air: { medium: venus.medium, bottomRadiusM: venus.radiusM, curves: [], body: null },
       earthLike: false,
@@ -1019,10 +1030,12 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     expect(bound.size).toBe(VIEW_KERNELS.length);
     expect([...distinct].filter((key) => !bound.has(key))).toEqual([]);
     // Every kind of air has been met by its first body thin, and by its first thick (the second
-    // pass); none after adds a kernel. The thin first pass makes 12, and the thick pass 6 more, 18
-    // in all, bounded however many bodies follow. All but seven are made: the sky bake's four are
-    // the sky's, the march's fill a reader's, which no frame asks, and the tile cull's two centre
-    // ray's kernels its own cover's, which a view never takes (R08.T11.d).
+    // pass); none after adds a kernel. The thin first pass makes 14: the view's, made up front with
+    // both reads' one-band marches among them (R08.T11.g, which the slab Earth takes by slot and the
+    // deck over the shared read), and the tables' four. The thick pass makes 6 more, 20 in all,
+    // bounded however many bodies follow. All but seven are made: the sky bake's four are the
+    // sky's, the march's fill a reader's, which no frame asks, and the tile cull's two centre ray's
+    // kernels its own cover's, which a view never takes (R08.T11.d).
     expect(new Set(held.slice(0, kinds.length).slice(-1))).toEqual(
       new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 3 - 6]),
     );
