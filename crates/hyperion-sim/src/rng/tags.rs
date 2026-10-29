@@ -17,6 +17,17 @@
 //! - The tag behind each event tag is an ordinary entry of scope `Event`, which the event-tag
 //!   registry in `id/event_tags.rs` names by constant.
 
+// `domain_tags!`'s compile-time check of its names (`assert_tag_names`) hashes every earlier name
+// again for each name, so its steps grow as the square of the registry. With P10.T7.a's
+// `dwarf.core.metallicity` they pass the step count at which rustc's const evaluator warns that a
+// loop may not end, a deny-by-default lint. The loop ends: it is finite, and rustc's own note says
+// such a lint may be allowed. A check that compared each tag's stored hash instead would keep it
+// linear in the hashing, a change to `hyperion-base` (P10.T7.a, as built).
+#![expect(
+    long_running_const_eval,
+    reason = "the registry's name check is finite; it only grows with the registry"
+)]
+
 use hyperion_base::domain_tags;
 
 pub use hyperion_base::rng::tags::SELFTEST_STREAM;
@@ -907,6 +918,14 @@ domain_tags! {
     /// cell's volume (`Stream::poisson`: no word at a mean of 0, one below 10, two per attempt
     /// from 10).
     CLASS_CELL: Cell = "class.cell";
+
+    // Plan 10 (P10.T7.a): a dwarf core's mean metallicity, under the "Plan 10" heading's rule of
+    // keys. Appended here, after P09.T32's `class.cell`, because the macro's order fixes `ALL`.
+
+    /// A dwarf core's offset of its mean \[Fe/H\] from Kirby et al. 2013's eq. 4: one normal draw
+    /// of 0.17 dex, two words, keyed by `ObjectKey::galaxy_item` of its progenitor's number, `6 +
+    /// j`, as the progenitor's other draws are (P10.T7.a).
+    DWARF_CORE_METALLICITY: Galaxy = "dwarf.core.metallicity";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1305,6 +1324,7 @@ mod tests {
             STREAM_ORPHAN_ORBIT,
             DWARF_ORBIT,
             DWARF_STRIPPING,
+            DWARF_CORE_METALLICITY,
         ];
         for tag in tags {
             assert_eq!(tag.scope(), crate::rng::TagScope::Galaxy, "{}", tag.name());

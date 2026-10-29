@@ -1286,3 +1286,91 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
     slow pins of T3.a–c's record were run at 23 on this lane: `dwarfs.rs`'s sweep gives v15's
     figures (a ≥ 10⁸ M☉ tube in 0.127 of galaxies as drawn and 0.203 on the moved orbits, no core
     in 0.017 and 0.337) and passes, as does the orbit's far-field monopole..
+- **Deviations in P10.T7.a, as built (lane `p10-share`, 2026-10-28, on `9f4a60da` at
+  `GENERATOR_VERSION` 23).** No output moved: nothing places a core's members (T7.b). The one
+  golden touched, `rng/tags.golden`, gains only the appended `dwarf.core.metallicity`; T7.a names
+  no golden of its own, so the model's figures are pinned by tests, not bits (T7.b's goldens).
+  - _Items._ `global_list::dwarf_core` (new): `DwarfCoreModel::from_spec(&Galaxy, &DwarfCoreSpec)`
+    with `number`, `systems`, `position`, `velocity`, `plummer_scale`, `half_mass_radius`,
+    `extent`, `dispersion`, `dispersion_at(LightYears)`, `history`, `fe_h`, `fe_h_spread`,
+    `table`, `grid`; `StarFormationHistory::{of(mass, accreted), old_share, tail, age_quantile}`;
+    `mass_metallicity`, `metallicity_spread`, `half_light_radius`, `velocity_dispersion`, and the
+    laws' constants (`SIZE_MASS`, `VELOCITY_DISPERSION`, `MASS_METALLICITY`,
+    `MEAN_METALLICITY_SCATTER_DEX`, `METALLICITY_SPREAD`, `METALLICITY_SPREAD_FLOOR_DEX`,
+    `MASS_TO_LIGHT_V`, `OLD_BURST_AGES_YR`, `OLD_SHARE`, `FLATTENING`, `HALF_MASS_RADIUS_LIMIT_LY`,
+    `EXTENT_LIMIT_LY`, `CORE_GRID_WIDTH_MIN_LOG2`). In plan 09's `features/interior/table.rs`:
+    `MemberClassTable::from_classes(&[ClassCount], tidal, flattening)` (no tails, depletion or
+    runaways) and crate-visible `grid_width_from` and `grid_from(floor_log2)`, which `grid_width`
+    and `grid` call at `GRID_WIDTH_MIN_LOG2`, so every cluster's grid is as it was, bit for bit.
+    Made crate-visible: `interior::counts::moments`, `potential::TIDAL_FLOOR`.
+  - _`from_spec` takes the `Galaxy`_ with the spec: its in-plane tables (the extent), its mass
+    function (the classes) and its seed (the offset).
+  - _Size and shape (the plan names no relation; science check, 2026-10-28)._ The Plummer scale
+    is the projected half-light radius of `SIZE_MASS`, `log₁₀(R_e ÷ pc) = 0.855 + 0.267 log₁₀ M★`,
+    a fit (ours, rms 0.21 dex, not drawn) to Woo, Courteau and Dekel 2008's Table 1 scale lengths
+    × 1.678 (Wolf et al. 2010, appendix B), at the core's present mass, held so that the half-mass
+    radius, 1.305 a, stays at or under 8,500 ly (reached near 10⁹·¹⁶ M☉). The flattening is 0.67,
+    one less McConnachie 2012's median ellipticity (Table 3), a projected figure taken as the
+    intrinsic one.
+  - _The extent (the plan gives no rule)._ The Jacobi radius at the core's present radius for a
+    bound mass `max(M★, 2 σ² r ÷ G)`, the stars' or an isothermal halo's of the observed σ, the
+    denominator floored as plan 02's tidal radius floors it, held to the brainstorm's 20,000 ly. A
+    dwarf is dark-matter dominated: the stars alone give a radius 2.5 times smaller at 10⁶ M☉,
+    inside its own half-light radius; above a few 10⁸ M☉ they give the larger (review fix). With
+    no tails the grid is the least power of two from 16 ly that holds the extent: 16 ly up to
+    16,384 ly, 32 ly above. Measured on hand-made specs at 20,000–65,000 ly from the fixture's
+    centre: a 2 × 10³ M☉ core reaches 491 ly (a 178 ly), 10⁶ M☉ 1,733 ly (934 ly), 10⁸ M☉ 5,302 ly
+    (3,195 ly), 3 × 10⁹ M☉ 6,231 ly (6,515 ly, held), every grid 16 ly.
+  - _The dispersion, against "the Plummer dispersion" (lean, 2026-10-28)._ A Plummer sphere of the
+    stars alone falls 1.8 (NGC 205) to 15 (Canes Venatici I) times short of measured dispersions.
+    So σ is `VELOCITY_DISPERSION`, `log₁₀(σ ÷ km/s) = −0.045 + 0.159 log₁₀ M★`, a fit (ours, rms
+    0.14 dex) to McConnachie 2012's Table 4 (10⁵·⁴–10⁸·⁷ M☉, extrapolated outside), and
+    `dispersion_at` keeps a Plummer sphere's radial shape, `σ₀² (1 + r² ÷ a²)^(−½)` with
+    `σ₀² = 16 σ² ÷ 3π`, so that its mass-weighted mean square is σ². Measured dwarf spheroidals'
+    profiles are nearer flat (Walker et al. 2007, ApJ 667, L53), a finding for T7.b.
+  - _Classes, by plan 09's device but not its `class_counts`_, which is for one age: per band, the
+    living stars below each age's turn-off (`stellar::sse::turn_off_mass` at the core's mean
+    [Fe/H]) and the white dwarfs, over the history's 64 Gauss–Legendre nodes; band E's neutron
+    stars and black holes per primary formed (`retention_tabulated`'s, retained or not), over the
+    ages at which an 8 M☉ star has died, so a core accreted in the last 40 Myr leaves out its
+    youngest remnants. Nothing is lost. Every class is single and first population and shares the
+    one profile: with q = 1 a binary class changes no profile, and multiplicity is the member's
+    (T7.b, plan 11). The classes are scaled together to the spec's systems.
+  - _Ages, against "a tail that lasts longer the more massive the dwarf" (lean, 2026-10-28)._ The
+    burst is uniform over 10–13 Gyr ago; the tail uniform from 10 Gyr ago to the accretion at every
+    mass, holding `1 − clamp(0.8 − 0.25 (log₁₀ M★ − 5), 0.3, 0.8)` of the stars at the infall mass
+    (Weisz et al. 2014, §4.2: "≳80%" before z ≈ 2 below 10⁵ M☉, "only ~30%" above 10⁷). So the
+    tail's weight grows with mass, not its length. _Deferred finding (2026-10-13 rule):_ satellites
+    go on forming stars after infall, longer the more massive (Wetzel, Tollerud and Weisz 2015,
+    Fig. 3: under 1.5 Gyr below 10⁷ M☉, 2–3 Gyr at 10⁷–10⁸, about 5 Gyr at 10⁸–10⁹), which the
+    plan's "ending at accretion" leaves out.
+  - _Metallicity, as ruled (issue #123, point 4)._ Eq. 4 at `accreted_mass` plus one 0.17 dex
+    normal on `dwarf.core.metallicity`; the science check found eq. 4 fitted over 10³·⁷–10⁸·⁰ M☉
+    (Coma Berenices to IC 1613, Table 4), the paper's "unbroken … up to 5 × 10⁸ M☉ (NGC 205)" not
+    in the fit, so the doc says it is extrapolated above 5 × 10⁸. Members' σ is Kirby et al. 2011's
+    eq. 13 at the infall mass (lean, 2026-10-28: the stars formed before the stripping), fitted
+    over 15 dwarf spheroidals of 10³·⁶–10⁷·³ L☉ (10³·⁸–10⁷·⁵ M☉ at 1.6), held at 0.32 from
+    10⁷·³⁷ M☉.
+  - _Which mass._ Size, extent and dispersion read the present mass (`DwarfCoreSpec::mass`, after
+    T3.d.a's scaling: a scaled core is a smaller dwarf, lean 2026-10-28); ages, mean [Fe/H] and
+    σ([Fe/H]) read `accreted_mass`. _Finding:_ the core's extent assumes a dark-dominated bound
+    mass, while T3.c's tube tidal radius still uses the stellar mass at accretion (T3.c's deferred
+    finding); one ruling should cover both.
+  - _The tag and a lint._ `dwarf.core.metallicity` (Galaxy): two words, keyed `galaxy_item(6 + j)`
+    as `dwarf.orbit` and `dwarf.stripping` are; appended after `class.cell`, since the macro's
+    order fixes `ALL` (Provides' "five so far, P10.T3" is now six). It took the registry past
+    rustc's deny-by-default `long_running_const_eval` step count: `domain_tags!`'s
+    `assert_tag_names` hashes every earlier name again for each name, quadratic in the registry. A
+    module-level `#![expect(long_running_const_eval, reason = …)]` on `rng/tags.rs` stands in. The
+    fix is in `hyperion-base`, outside this lane: compare each `DomainTag`'s stored hash and the
+    names only on equal hashes, then drop the `expect`. **For main**: every lane that adds a tag
+    after this needs it or the fix. `McConnachie` is added to the sim's `clippy.toml`.
+  - _Tests._ Fast, by
+    `cargo test -p hyperion-sim --lib -- galaxy::global_list galaxy::features::interior::table rng::tags`,
+    since a bare `galaxy::global_list` filter misses the last two: in `dwarf_core::tests`, the
+    metallicity laws, the size and dispersion fits, a 10⁸ M☉
+    core's 5–95% ages over more than 2 Gyr for accretion at 0–6 Gyr, the density integrated over
+    space (spherical quadrature) equal to the spec's systems to 10⁻³ inside an extent under 20,000
+    ly, every remnant kept with one profile and the dispersion's mean square, every core of six
+    drawn galaxies modelled, purity, the offset's own stream bit for bit and order independence;
+    in `table.rs`, `a_grid_tried_from_a_floor_is_the_rule_s_from_there`.

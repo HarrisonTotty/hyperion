@@ -30,7 +30,7 @@ const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
 
 /// Where the denominator of the tidal radius is floored, as a fraction of Ω² (plan 02, Design
 /// note 17; brainstorm, "Coordinates").
-const TIDAL_FLOOR: f64 = 0.05;
+pub(crate) const TIDAL_FLOOR: f64 = 0.05;
 
 /// The share by which [`PotentialTables::tidal_radius_bound_within`] lowers the least Ω² it
 /// finds at the grid points, for the interpolation between them.

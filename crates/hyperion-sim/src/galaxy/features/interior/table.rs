@@ -29,7 +29,7 @@ use crate::units::LightYears;
 use super::super::cluster::ClusterModel;
 use super::super::nested::{NestedCell, NestedGrid};
 use super::MemberClass;
-use super::counts::{ClassCounts, class_counts};
+use super::counts::{CANONICAL_SLOPE, ClassCount, ClassCounts, class_counts};
 use super::profile::{CUSP_SOFTENING, ClassProfile, ProfileShape};
 
 /// A cubic cell in the cluster's frame: its least corner and edge, ly.
@@ -226,6 +226,48 @@ impl MemberClassTable {
             tails,
             depleted_slope: counts.depleted_slope,
             runaway_share: counts.runaway_share,
+            tidal,
+        }
+    }
+
+    /// The table of `classes` for a feature with no cluster model: plan 10's dwarf cores
+    /// (P10.T7.a).
+    ///
+    /// Every class is profiled inside `tidal` and flattened along the grid's z by `flattening` (1
+    /// for a sphere), with no tails, no depletion and no runaways. Classes of no expected members
+    /// are left out, as in [`from_counts`](Self::from_counts); the rest keep their order within
+    /// each band.
+    ///
+    /// # Panics
+    ///
+    /// If `tidal` is not positive and finite or `flattening` is not in (0, 1], and as
+    /// [`ClassProfile::new`] if a shape's scale is not.
+    #[must_use]
+    pub fn from_classes(classes: &[ClassCount], tidal: LightYears, flattening: f64) -> Self {
+        let tidal = tidal.value();
+        assert!(
+            tidal > 0.0 && tidal.is_finite(),
+            "a class table inside {tidal} ly"
+        );
+        assert!(
+            flattening > 0.0 && flattening <= 1.0,
+            "a flattening of {flattening}"
+        );
+        let mut bands: [Vec<Row>; 5] = Default::default();
+        for c in classes {
+            if c.expected > 0.0 {
+                bands[c.class.band.index()].push(Row {
+                    class: c.class,
+                    expected: c.expected,
+                    profile: ClassProfile::new(c.shape, tidal, flattening),
+                });
+            }
+        }
+        Self {
+            bands,
+            tails: [None; 5],
+            depleted_slope: CANONICAL_SLOPE,
+            runaway_share: 0.0,
             tidal,
         }
     }
@@ -576,8 +618,20 @@ impl MemberClassTable {
     /// Never: a table's extent is finite, so some power of two up to 2³⁰ ly reaches it.
     #[must_use]
     pub fn grid_width(&self) -> LightYears {
+        self.grid_width_from(GRID_WIDTH_MIN_LOG2)
+    }
+
+    /// [`grid_width`](Self::grid_width) tried from `2^floor_log2` ly up instead of
+    /// [`GRID_WIDTH_MIN_LOG2`]'s 1 ⁄ 64 ly: plan 10's dwarf cores start at 16 ly (P10.T7.a).
+    ///
+    /// # Panics
+    ///
+    /// If `floor_log2` is outside the nested grid's range of widths, 2⁻³⁰ to 2³⁰ ly; never
+    /// otherwise, as [`grid_width`](Self::grid_width) says.
+    #[must_use]
+    pub(crate) fn grid_width_from(&self, floor_log2: i32) -> LightYears {
         let reaches = |k: i32, r: f64| feature_grid(k).reach().value() >= r;
-        let mut k = GRID_WIDTH_MIN_LOG2;
+        let mut k = floor_log2;
         while !reaches(k, self.tidal) {
             k += 1;
         }
@@ -597,8 +651,22 @@ impl MemberClassTable {
     /// Never: the width is a power of two within the grid's range.
     #[must_use]
     pub fn grid(&self) -> NestedGrid {
-        NestedGrid::new(self.grid_width(), FEATURE_GRID_CELLS, FEATURE_GRID_LEVELS)
-            .expect("a grid width is a power of two")
+        self.grid_from(GRID_WIDTH_MIN_LOG2)
+    }
+
+    /// [`grid`](Self::grid) at [`grid_width_from`](Self::grid_width_from)`(floor_log2)`.
+    ///
+    /// # Panics
+    ///
+    /// As [`grid_width_from`](Self::grid_width_from).
+    #[must_use]
+    pub(crate) fn grid_from(&self, floor_log2: i32) -> NestedGrid {
+        NestedGrid::new(
+            self.grid_width_from(floor_log2),
+            FEATURE_GRID_CELLS,
+            FEATURE_GRID_LEVELS,
+        )
+        .expect("a grid width is a power of two")
     }
 }
 
@@ -721,6 +789,10 @@ pub const FEATURE_GRID_LEVELS: u8 = 8;
 pub const GRID_WIDTH_MIN_LOG2: i32 = -6;
 
 /// The catalogue features' grid of width `2^k` ly.
+///
+/// # Panics
+///
+/// If `k` is outside the nested grid's range of widths, 2⁻³⁰ to 2³⁰ ly.
 #[must_use]
 fn feature_grid(k: i32) -> NestedGrid {
     let mut w = 1.0;
@@ -728,7 +800,7 @@ fn feature_grid(k: i32) -> NestedGrid {
         w *= if k >= 0 { 2.0 } else { 0.5 };
     }
     NestedGrid::new(LightYears::new(w), FEATURE_GRID_CELLS, FEATURE_GRID_LEVELS)
-        .expect("a width of 2^k ly from 2^-6 up is a power of two")
+        .expect("a width of 2^k ly within the nested grid's range is a power of two")
 }
 
 #[cfg(test)]
@@ -806,6 +878,46 @@ mod tests {
         let reach = LightYears::new(4.0 * model.tidal_radius().value());
         let table = MemberClassTable::new(&galaxy, &model, reach, [1.0, 0.0, 0.0]);
         (model, table)
+    }
+
+    /// The floor argument leaves a cluster's grid as it was (P10.T7.a), and a floor above the
+    /// rule's width is the width, since the doubling stops at the tails' extent or the target.
+    #[test]
+    fn a_grid_tried_from_a_floor_is_the_rule_s_from_there() {
+        let (_, table) = table();
+        let w = table.grid_width();
+        assert!(
+            table
+                .grid_width_from(GRID_WIDTH_MIN_LOG2)
+                .value()
+                .total_cmp(&w.value())
+                .is_eq()
+        );
+        assert_eq!(table.grid_from(GRID_WIDTH_MIN_LOG2), table.grid());
+        let above = table.grid_width_from(12).value();
+        assert!(above >= 4_096.0 && above >= w.value(), "{above}");
+        // A table of classes alone: no tails, so the grid is the least that holds the tidal radius.
+        let classes = [ClassCount {
+            class: MemberClass {
+                kind: super::super::ClassKind::Living,
+                band: MassBand::A,
+                generation: super::super::Generation::First,
+                multiplicity: super::super::Multiplicity::Single,
+                initial_mass_range: (
+                    crate::units::SolarMasses::new(0.08),
+                    crate::units::SolarMasses::new(0.5),
+                ),
+                mean_mass: crate::units::SolarMasses::new(0.2),
+            },
+            expected: 1e6,
+            shape: ProfileShape::Plummer { scale: 900.0 },
+        }];
+        let core = MemberClassTable::from_classes(&classes, LightYears::new(5_000.0), 0.67);
+        assert!(MassBand::ALL.iter().all(|&b| core.tail(b).is_none()));
+        assert!((core.expected(MassBand::A) - 1e6).abs() < 1e-6);
+        assert!((core.extent().value() - 5_000.0).abs() < 1e-12);
+        assert!((core.grid_width_from(4).value() - 8.0 * 2.0).abs() < 1e-12);
+        assert!((core.grid_width_from(-6).value() - 8.0).abs() < 1e-12);
     }
 
     #[test]

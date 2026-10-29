@@ -327,7 +327,12 @@ pub fn band_depletion(f: &dyn MassFunction, alpha: f64) -> [f64; 5] {
 
 /// `∫ φ w(m) dm` and `∫ m φ w(m) dm` over `[lo, hi]` for the normalised mass function φ and weight
 /// `w`, by 32-node Gauss–Legendre panels in `ln m` split at the depletion's kinks.
-fn moments(f: &dyn MassFunction, lo: f64, hi: f64, w: impl Fn(f64) -> f64) -> (f64, f64) {
+pub(crate) fn moments(
+    f: &dyn MassFunction,
+    lo: f64,
+    hi: f64,
+    w: impl Fn(f64) -> f64,
+) -> (f64, f64) {
     if hi <= lo {
         return (0.0, 0.0);
     }

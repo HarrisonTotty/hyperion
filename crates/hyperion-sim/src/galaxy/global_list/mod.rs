@@ -16,8 +16,8 @@
 //! core in every run. The list is built by P10.T4; this module so far holds the numbers, the
 //! kinds, the cache trait, the orbit integrator ([`orbit`]), the debris the list is built from
 //! ([`Debris`]: which progenitors get a tube or a core, P10.T3, with [`spec`], [`orphans`] and
-//! [`dwarfs`]) and the halo's discrete share it makes up ([`discrete_share`], P10.T3.d.a, in
-//! [`share`]).
+//! [`dwarfs`]), the halo's discrete share it makes up ([`discrete_share`], P10.T3.d.a, in
+//! [`share`]) and the dwarf cores' model ([`dwarf_core`], P10.T7.a).
 //!
 //! # Caches
 //!
@@ -27,6 +27,7 @@
 //! through it. The sim keeps nothing.
 
 mod debris;
+pub mod dwarf_core;
 pub mod dwarfs;
 pub mod orbit;
 pub mod orphans;

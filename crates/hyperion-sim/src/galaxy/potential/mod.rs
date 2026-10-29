@@ -31,8 +31,8 @@ pub use force::CylindricalForce;
 pub use model::MassModel;
 pub(crate) use model::bulge_spheroid;
 pub use monopole::SphericalAverage;
-pub(crate) use tables::GRID_EDGE_LY;
 pub use tables::PotentialTables;
+pub(crate) use tables::{GRID_EDGE_LY, TIDAL_FLOOR};
 
 /// A mass component could not be built: `quantity` is `value`, which is not finite or lies
 /// outside its range (a mass below zero, a length, width, ratio or slope margin not above zero).
