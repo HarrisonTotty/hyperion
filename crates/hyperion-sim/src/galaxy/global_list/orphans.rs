@@ -10,14 +10,23 @@
 //!   stripping time, which leaves the gap; the age and [Fe/H] by the accreted globulars' laws of
 //!   plan 09 (P09.T12.b: ages uniform on 10.5–13 Gyr, [Fe/H] `N(−1.55, 0.35)`), since an orphan
 //!   is a destroyed cluster of the same system.
-//! - **Orbit**, on `stream.orphan.orbit`, redrawn on that one stream until the pericentre lies
-//!   outside the bar's corotation and the apocentre inside 10⁶ ly ([`APOCENTRE_LIMIT_LY`]): a radius
-//!   from the metal-poor globulars' law `(1 + r² ÷ r_c²)^(−7/4)` (P09.T12.a, the core
-//!   [`GLOBULAR_CORE`]) out to that limit, an isotropic direction, and a velocity from the
-//!   globular-born debris component's law there (plan 08). The turning points are plan 09's
-//!   (P09.T13), so the test is the living globulars'. Attempt `a` reads its own block of
-//!   [`ORBIT_WORDS`] words. An orphan whose [`ORBIT_ATTEMPTS`] attempts all fail is dropped; at
-//!   the Milky Way's parameters none is.
+//! - **Orbit**, on `stream.orphan.orbit`: a radius from the metal-poor globulars' law
+//!   `(1 + r² ÷ r_c²)^(−7/4)` (P09.T12.a, the core [`GLOBULAR_CORE`]) out to 10⁶ ly
+//!   ([`APOCENTRE_LIMIT_LY`]), an isotropic direction, and a velocity from the globular-born
+//!   debris component's law there (plan 08), redrawn on that one stream until the pericentre lies
+//!   outside the bar's corotation and the apocentre inside that limit. The radius is the first
+//!   drawn outside corotation, since no pericentre inside it clears corotation, and is kept while
+//!   only the direction and the velocity are redrawn. The turning points are plan 09's (P09.T13),
+//!   so the test is the living globulars'. Attempt `a` reads its own block of [`ORBIT_WORDS`]
+//!   words, its radius word first whether or not it keeps that radius. An orphan whose
+//!   [`ORBIT_ATTEMPTS`] attempts all fail is dropped: about 1%, kept just outside corotation,
+//!   which no velocity drawn there clears (2 of 259 in the Milky Way fixture).
+//!
+//! Keeping the radius keeps the orphans on the radial law outside corotation, half of which lies
+//! inside 65,000 ly. Redrawn with the velocity, as P10.T3.b first built it, a radius stayed only
+//! where a radially biased velocity happened to clear corotation, mostly far out, and a quarter of
+//! the orphans' tube mass lay inside 65,000 ly, against half now (plan 10's records, "P10.T3.b's
+//! orphans keep their radius").
 //!
 //! The stripping time is Design note 5's with the tidal radius at the orphan's mass, and stops at
 //! the cluster's age.
@@ -136,10 +145,19 @@ pub(crate) fn orphans(galaxy: &Galaxy, living: u32, room: usize) -> Vec<StreamSp
             let (fe_h_mean, fe_h_sigma) = METALLICITY_LAWS.1;
             let fe_h = Dex::new(marks.normal(fe_h_mean, fe_h_sigma));
             let mut stream = Stream::open(seed, tags::STREAM_ORPHAN_ORBIT, key);
+            // The first radius drawn outside corotation, inside which no pericentre clears it;
+            // later attempts redraw only the direction and the velocity (module documentation).
+            let mut kept = None;
             let (position, velocity, orbit) = (0..ORBIT_ATTEMPTS).find_map(|attempt| {
                 let first = u64::from(attempt) * ORBIT_WORDS;
                 stream.seek(first);
-                let r = radial.quantile(stream.uniform());
+                // Every attempt reads its radius word, kept or not, so that each block's words
+                // keep their places.
+                let drawn = radial.quantile(stream.uniform());
+                if kept.is_none() && drawn > corotation {
+                    kept = Some(drawn);
+                }
+                let r = kept?;
                 let cos_theta = stream.uniform_in(-1.0, 1.0);
                 let azimuth = stream.uniform_in(0.0, 2.0 * core::f64::consts::PI);
                 let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();

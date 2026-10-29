@@ -1735,3 +1735,40 @@ galaxy_potential`. Slow, by name, in the slow-test profile:
     `the_applied_share_over_2000_galaxies_is_summarised` (`discrete_share.golden` unchanged, 683 s
     against the 902 s recorded before), `debris_carries_the_scaled_dwarfs_and_drops_what_the_scale_empties`
     (44 s), `tests/global_list_debris.rs` (65 s) and `tests/global_list_orbit.rs`' eleven.
+- **P10.T3.b's orphans keep their radius (lane `p10-fixes`, 2026-10-29, on `13b8b05` at
+  `GENERATOR_VERSION` 23).** Research `research-p10`'s item 6, change 1, as main ruled it
+  (2026-10-29). An orphan keeps the first radius it draws outside corotation and redraws only
+  its direction and velocity after it, which is T3.b's "drawn from the globular system's radial
+  law … redrawn on the same stream until the pericentre is outside corotation" read as written.
+  Each attempt still reads its radius word first, so every block of `ORBIT_WORDS` keeps its
+  layout, and an orphan accepted at the attempt that first keeps a radius is unchanged. Only
+  unwired output moved, `Debris`' orphans, and no golden: `dwarfs.golden` and
+  `discrete_share.golden` read no orphan, and the orphans have none.
+  - _Why._ As first built the radius was redrawn with the velocity, so the radii kept were those
+    where a radially biased velocity cleared corotation, mostly far out. In the Milky Way fixture
+    and sweep galaxies 0–11 (a release probe, pod, 4 vCPU) 0.13–0.31 of the orphans' tube mass
+    (mass-weighted share of their radial periods, median 0.23) lay inside 65,000 ly, and
+    0.10–0.22 of them at the epoch, against 0.50 of the radial law outside corotation (0.70 of
+    the whole law) and 0.82 of the Milky Way's metal-poor globulars inside 20 kpc (Harris 2010,
+    as `POOR_PLACED_SHARE` cites it).
+  - _Measured, the same thirteen galaxies._ The orphans' tube mass inside 65,000 ly 0.43–0.59
+    (median 0.53); 0.43–0.58 of them inside at the epoch; all the globular tubes, the living
+    included, 0.53 in the mean, from 0.24. `discrete_share` is unchanged: it draws no orphan
+    (its globular term follows in the next record).
+  - _Finding: about 1% of orphans are dropped._ A radius kept just outside corotation leaves only
+    nearly circular velocities to clear it, which 256 attempts may not find: 46 of 4,844 orphans
+    over the thirteen galaxies (0.95%; 0.4–1.7% a galaxy, the most where corotation lies
+    farthest out, 23,393 ly in sweep galaxy 6), 2 of 259 in the fixture, where none were before.
+    The share's globular term, 1.5 tubes per expected globular, then stands about 1% above the
+    tubes drawn, inside P10.T12's 5%. Not a blocker; recorded.
+  - _Tests._ `tests/global_list_debris.rs`'s slow test gains a Kolmogorov–Smirnov test of the
+    orphans' radii at the epoch against the radial law outside corotation (α = 10⁻³), which the
+    first rule fails. Over the eight fixture seeds (slow-test profile, pod, x86_64): D 0.019 over 2,104 orphans, p
+    0.41, 1,066 inside 65,000 ly at the epoch; the first rule, the same test, fails it at D 0.378
+    over 2,136 (p 2 × 10⁻²⁶⁶), 272 inside. The test's other pins hold: 0.036 of the globulars
+    qualify, the orphans' median mass 10^4.001 M☉, and the leapfrog's cross-check, now on orphans
+    nearer corotation, gives Ω̄ 0.762–1.000 of the quadrature's (median 0.961) and a pericentre
+    0.968–1.185 of the spherical one (median 1.009), none inside corotation. Fast: `cargo test -p
+hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pins the orphans'
+    bits, and T4's golden of the first ten entries may hold none (the living globulars come first),
+    so T4's golden and its order-independence test should cover orphans (determinism review).

@@ -10,12 +10,16 @@ use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::FeatureCatalogue;
+use hyperion_sim::galaxy::features::kinds::globular::GLOBULAR_CORE;
 use hyperion_sim::galaxy::global_list::orbit::Leapfrog;
 use hyperion_sim::galaxy::global_list::orphans::{APOCENTRE_LIMIT_LY, MASS_LAW};
+use hyperion_sim::galaxy::global_list::share::INSIDE_LY;
 use hyperion_sim::galaxy::global_list::{Debris, MassLoss, StreamOrigin, StreamSpec};
 use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::quad::gl_panels;
 use hyperion_sim::math;
 use hyperion_sim::units::{LightYears, Metres, Seconds};
+use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
 const SEED: u64 = 0x0a10_3000_0000_0000;
 
@@ -33,22 +37,74 @@ fn median(values: &mut [f64]) -> f64 {
     values[values.len() / 2]
 }
 
+/// The metal-poor globulars' radial law `r² (1 + r² ÷ r_c²)^(−7/4)` (P09.T12.a) out to 10⁶ ly,
+/// conditioned on lying outside a galaxy's corotation.
+struct LawOutside {
+    /// Panel edges for the quadrature, ly.
+    edges: Vec<f64>,
+    /// The unconditioned law's integral below corotation, and out to 10⁶ ly.
+    below: f64,
+    total: f64,
+}
+
+impl LawOutside {
+    fn new(corotation_ly: f64) -> Self {
+        let edges = (0..=64)
+            .map(|k| APOCENTRE_LIMIT_LY * math::powf(f64::from(k) / 64.0, 3.0))
+            .collect();
+        let mut law = Self {
+            edges,
+            below: 0.0,
+            total: 0.0,
+        };
+        law.below = law.integral(corotation_ly);
+        law.total = law.integral(APOCENTRE_LIMIT_LY);
+        law
+    }
+
+    /// The unconditioned law's integral out to `radius_ly`, panel by panel.
+    fn integral(&self, radius_ly: f64) -> f64 {
+        let shell = |r: f64| {
+            let x = r / GLOBULAR_CORE;
+            r * r * math::powf(1.0 + x * x, -1.75)
+        };
+        let mut cut: Vec<f64> = self
+            .edges
+            .iter()
+            .copied()
+            .filter(|&e| e < radius_ly)
+            .collect();
+        cut.push(radius_ly);
+        gl_panels(shell, &cut)
+    }
+
+    /// The conditioned law's cumulative share at `radius_ly`.
+    fn cdf(&self, radius_ly: f64) -> f64 {
+        (self.integral(radius_ly) - self.below) / (self.total - self.below)
+    }
+}
+
 /// P10.T3.a–b: about a fifth (0.12–0.30) of the globulars qualify, pinned provisionally at what
 /// v15 gives (below); orphan masses within 10³–10⁵ M☉ with a median near 10⁴ (within 0.1 dex: the
 /// sample median's error is about 0.02 dex); every stream's pericentre outside corotation and an
-/// orphan's apocentre inside 10⁶ ly; the numbering of Design note 12; the same seed gives the same
-/// debris twice.
+/// orphan's apocentre inside 10⁶ ly; the orphans' radii at the epoch follow the radial law outside
+/// corotation (Kolmogorov–Smirnov), since an orphan keeps the first radius drawn there while its
+/// velocity is redrawn; the numbering of Design note 12; the same seed gives the same debris twice.
 #[test]
 #[ignore = "slow: builds the full potential of eight Milky Way galaxies and walks their globulars twice"]
 fn milky_way_debris_is_numbered_bounded_and_measured() {
     let (mut globulars, mut living) = (0_u32, 0_u32);
     let mut orphan_masses = Vec::new();
+    // Each orphan's radius at the epoch as the share of the radial law outside its galaxy's
+    // corotation below it, and how many lie inside the halo's 65,000 ly.
+    let (mut orphan_quantiles, mut orphans_inside) = (Vec::new(), 0_u32);
     let mut living_masses = Vec::new();
     let mut windows = Vec::new();
     let mut counts = Vec::new();
     for n in 0..GALAXIES {
         let galaxy = milky_way(n);
         let corotation = galaxy.potential().bar_corotation().value();
+        let law = LawOutside::new(corotation);
         let last_merger = galaxy.params().accretion().last_major_merger().value();
         let placed = FeatureCatalogue::walk_process(&galaxy, FeatureProcess::Globular).count();
         globulars += u32::try_from(placed).unwrap();
@@ -99,6 +155,11 @@ fn milky_way_debris_is_numbered_bounded_and_measured() {
                     assert!((0.0..window).contains(&ago.value()));
                     assert!(s.progenitor_mass().value().abs() < 1e-300);
                     orphan_masses.push(math::log10(mass));
+                    let radius = LightYears::from(s.position().length()).value();
+                    orphan_quantiles.push(law.cdf(radius));
+                    if radius < INSIDE_LY {
+                        orphans_inside += 1;
+                    }
                 }
                 StreamOrigin::Dwarf(_) => {
                     assert!(s.stars().is_none());
@@ -137,6 +198,24 @@ fn milky_way_debris_is_numbered_bounded_and_measured() {
         (orphan_median - 4.0).abs() <= 0.1,
         "orphan median 10^{orphan_median}"
     );
+    assert_radii_follow_the_law(&mut orphan_quantiles, orphans_inside);
+}
+
+/// The orphans' radii at the epoch, each as [`LawOutside::cdf`] of its galaxy, are uniform
+/// (Kolmogorov–Smirnov); `inside` of them lie inside 65,000 ly.
+///
+/// P10.T3.b's fix (plan 10's records): redrawn with the velocity, the radius stayed mostly far
+/// out, where a radially biased velocity clears corotation more often. The few orphans whose kept
+/// radius never clears it in 256 attempts are dropped, about 1%, too few to show here.
+fn assert_radii_follow_the_law(quantiles: &mut [f64], inside: u32) {
+    let n = quantiles.len();
+    let ks = ks_one_sample(quantiles, |u| u.clamp(0.0, 1.0));
+    eprintln!(
+        "orphans' radii against the radial law outside corotation: D {:.4} over {n}, p {:.3}; \
+         {inside} inside 65,000 ly at the epoch",
+        ks.statistic, ks.p_value
+    );
+    assert_p_value("orphan radii outside corotation", ks.p_value, ALPHA);
 }
 
 /// Integrates each specification's epoch state for three of its radial periods at ruling 146's

@@ -132,8 +132,8 @@ pub(crate) fn draw_on(
 }
 
 /// [`draw_on`] with its attempts from word `first_word` of `stream` rather than word 0: attempt
-/// `k` at word `first_word + 4k`. Plan 10's orphans redraw a progenitor's whole orbit on one
-/// stream, each attempt at its own block of words (P10.T3.b).
+/// `k` at word `first_word + 4k`. Plan 10's orphans redraw a progenitor's direction and velocity,
+/// its radius once kept, on one stream, each attempt at its own block of words (P10.T3.b).
 ///
 /// # Panics
 ///
