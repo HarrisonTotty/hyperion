@@ -188,6 +188,11 @@ pub enum Forcing {
     /// A slow rotator, past the onset that rises with flux, its circulation converging on the
     /// substellar point: in Yang et al. 2014's Table 1 (sidereal rotation periods, at an orbital
     /// period of 225 d), between 8 and 16 d at 1.40 S⊕ and between 32 and 48 d at 1.92 S⊕.
+    ///
+    /// Rendering plan R09's climate step does not draw that convergence: it runs such a world in
+    /// its geographic model, its rain band centred on its energy-flux equator and capped as any
+    /// rotating world's is, at Guendelman and Kaspi 2019's ascending branch (their Eq. 20, held to
+    /// 0–90°; R09.T13.e).
     SlowRotator,
     /// A world locked 1:1 to its seasonal host, in tidally locked coordinates about the
     /// substellar axis.

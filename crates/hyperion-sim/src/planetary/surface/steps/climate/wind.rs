@@ -2,7 +2,10 @@
 //! §2.10): "the three-cell pattern scaled by the Hadley width, centred each month on the month's
 //! energy-flux equator, and converging on the substellar point for slow and locked rotators", each
 //! month's orographic step carrying vapour along its component along the model's bands
-//! ([`along_bands`]; decision-r09-t13e-revision §4.3).
+//! ([`along_bands`]; decision-r09-t13e-revision §4.3). As built, the pattern is centred on the rain
+//! band's capped centre, not the energy-flux equator (decision-r09-t13ge §2.10); only a world in
+//! tidally locked coordinates converges on its substellar point, and a slow rotator runs the
+//! geographic model, capped as any rotating world is (decision-r09-t13ge §2.12).
 //!
 //! # The meridional wind
 //!
