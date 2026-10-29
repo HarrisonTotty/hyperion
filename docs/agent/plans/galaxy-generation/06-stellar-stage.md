@@ -5656,7 +5656,11 @@ R06.
     plan's own T42.a text writes it. The module's list under `Hurley2000` now names it the fifth
     ("Five places"), for the owner's confirmation as ruling 10 gave the first four, and
     `HURLEY_LBV`'s and `hurley_lbv`'s docs credit the form to SSE's code. No output moves. The
-    printed MNRAS text was not seen: if it prints the − 1, there is no difference.
+    printed MNRAS text was not seen: if it prints the − 1, there is no difference. _Settled
+    2026-10-29 (research):_ the published text (MNRAS 315, 562) prints the − 1.0 in the cube; only
+    the arXiv preprint omits it. There is no fifth difference, and the module's list is four again
+    (lane `p06-land`: `wind.rs`'s docs say so, and credit the form to the published text and SSE's
+    code alike).
   - _Tests_ (`stellar::sse::wind`):
     `within_the_humphreys_davidson_limit_the_limited_rate_is_the_modern_rate` (a grid of 2,160
     states in nine phases at four metallicities, each that is not an evolved star beyond the limit

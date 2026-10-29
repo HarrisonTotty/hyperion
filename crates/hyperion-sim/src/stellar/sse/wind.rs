@@ -11,11 +11,11 @@
 //!
 //! # `WindRecipe::Hurley2000`
 //!
-//! HPT section 7.1, as the published SSE code (`mlwind.f`) applies it to a single star. Five
-//! places differ between the printed text and the code, and in each the text's form moves the rate
-//! by far more than the tolerances P06.T12.b validates the backbone to (1% in mass, 0.02 dex in L
-//! and R), so the code's form is used, for the owner to confirm (plan 06, ruling 10 of
-//! 2026-09-22, for the first four; P06.T42.a found the fifth); each is named again where it acts:
+//! HPT section 7.1, as the published SSE code (`mlwind.f`) applies it to a single star. Four
+//! places differ between the published text and the code, and in each the text's form moves the
+//! rate by far more than the tolerances P06.T12.b validates the backbone to (1% in mass, 0.02 dex
+//! in L and R), so the code's form is used, for the owner to confirm (plan 06, ruling 10 of
+//! 2026-09-22); each is named again where it acts:
 //!
 //! - Nieuwenhuijzen and de Jager's rate is switched on at L = 4,000 L☉ by a linear ramp over
 //!   4,000–4,500 L☉ ([`nieuwenhuijzen_de_jager`]). The text switches it on in full at 4,000 L☉, a
@@ -28,10 +28,12 @@
 //! - The luminous-blue-variable term acts from the Hertzsprung gap to the thermally pulsing AGB
 //!   (types 2–6), not on the main sequence, where the text does not restrict it (it is reached
 //!   there only by the most massive stars near their terminal main sequence).
-//! - That term cubes 10⁻⁵ R L^½ − 1 ([`hurley_lbv`]), so that it vanishes on the
-//!   Humphreys–Davidson limit, where the text (arXiv astro-ph/0001295v1) cubes 10⁻⁵ R L^½ and so
-//!   steps to 0.1 (L ÷ 6 × 10⁵ − 1) there, 0.07 M☉ per year at 10⁶ L☉; at 4,000 K the text's form
-//!   is 21–28% higher from log L 5.78 to 5.90 (see "The Humphreys–Davidson limit enforced").
+//!
+//! HPT's luminous-blue-variable term, 0.1 (10⁻⁵ R L^½ − 1)³ (L ÷ 6 × 10⁵ − 1) M☉ per year, is the
+//! same in the published text (MNRAS 315, 543, section 7.1, p. 562) and in SSE's code
+//! ([`hurley_lbv`]), and vanishes on the Humphreys–Davidson limit. Only the arXiv preprint
+//! (astro-ph/0001295v1, its one version) drops the − 1 from the cube, which would step the rate to
+//! 0.07 M☉ per year at 10⁶ L☉ on the limit.
 //!
 //! SSE scales the naked-helium-star rate by an input `hewind`, which its distributed input file
 //! sets to 0.5 while its source comment calls 1.0 normal; the paper has no such factor, and this
@@ -114,12 +116,12 @@
 //! floor alone would change nothing. The main sequence and naked helium stars are left as they
 //! are: SSE applies the term from the Hertzsprung gap to the thermally pulsing AGB (types 2–6).
 //!
-//! HPT's printed term (arXiv astro-ph/0001295v1, section 7.1) is 0.1 (10⁻⁵ R L^½)³ (L ÷ 6 ×
-//! 10⁵ − 1), with no − 1 in the cube, which jumps to 0.1 (L ÷ 6 × 10⁵ − 1) at the limit; SSE's
-//! code (`mlwind.f`, `0.1d0*(x-1.d0)**3*(lum/6.0d+05-1.d0)` for types 2–6), COMPAS
-//! (`CalculateMassLossRateLBVHurley`) and Belczynski et al. (2010, equation 5) cube
-//! 10⁻⁵ R L^½ − 1, which vanishes on it, and both recipes here use the code's form, the fifth
-//! difference of `Hurley2000`'s list.
+//! HPT's term as published (MNRAS 315, 543, section 7.1, p. 562) is 0.1 (10⁻⁵ R L^½ − 1.0)³
+//! (L ÷ 6 × 10⁵ − 1.0). SSE's code (`mlwind.f`, `0.1d0*(x-1.d0)**3*(lum/6.0d+05-1.d0)`, for
+//! types 2–6), COMPAS (`CalculateMassLossRateLBVHurley`), COSMIC and Belczynski et al. (2010,
+//! section 2.1, equation 5) write the same, and both recipes here use it. The arXiv preprint prints
+//! the cube without the − 1.0, a slip the journal's text corrects; at 4,000 K the preprint's form
+//! would be 21–28% higher from log L 5.78 to 5.90.
 
 use crate::math;
 use crate::stellar::composition::Z_SOLAR;
@@ -315,9 +317,9 @@ const HD_LUMINOSITY: f64 = 6e5;
 /// See [`HD_LUMINOSITY`]: per R☉ L☉^½.
 const HD_RADIUS_SCALE: f64 = 1e-5;
 
-/// HPT's luminous-blue-variable rate as SSE's code writes it,
-/// 0.1 (10⁻⁵ R L^½ − 1)³ (L ÷ 6 × 10⁵ − 1) M☉ yr⁻¹, added to the others (section 7.1, whose text
-/// cubes 10⁻⁵ R L^½: the fifth difference of the module documentation's list).
+/// HPT's luminous-blue-variable rate as HPT publish it (section 7.1, p. 562) and SSE's code writes
+/// it, 0.1 (10⁻⁵ R L^½ − 1)³ (L ÷ 6 × 10⁵ − 1) M☉ yr⁻¹, added to the others; the arXiv preprint
+/// omits the − 1.
 const HURLEY_LBV: f64 = 0.1;
 
 /// The luminous-blue-variable rate beyond the Humphreys–Davidson limit, M☉ yr⁻¹: `f_lbv` × 10⁻⁴
@@ -677,9 +679,9 @@ fn beyond_humphreys_davidson(s: &Surface) -> bool {
     s.l > HD_LUMINOSITY && humphreys_davidson_x(s) > 1.0
 }
 
-/// HPT's luminous-blue-variable rate beyond the Humphreys–Davidson limit as SSE's code writes it,
-/// 0.1 (x − 1)³ (L ÷ 6 × 10⁵ − 1) with x = 10⁻⁵ R L^½, and zero within it; it vanishes on the limit
-/// itself (module documentation, the fifth difference).
+/// HPT's luminous-blue-variable rate beyond the Humphreys–Davidson limit as HPT publish it (p. 562)
+/// and SSE's code writes it, 0.1 (x − 1)³ (L ÷ 6 × 10⁵ − 1) with x = 10⁻⁵ R L^½, and zero within
+/// it; it vanishes on the limit itself. The arXiv preprint omits the − 1.
 #[must_use]
 fn hurley_lbv(s: &Surface) -> f64 {
     if !beyond_humphreys_davidson(s) {
