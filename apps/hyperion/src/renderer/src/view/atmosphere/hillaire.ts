@@ -1275,9 +1275,10 @@ interface FrameKernels {
   readonly rayMarchFill: () => ComputeHandle;
   /**
    * The kernels that read the thick table ({@link withThickRead}; plan R08, R08.T14.c), for a body
-   * whose tables hold one ({@link AtmosphereTables.thickTable}): made at the first frame of such
-   * tables where they were not made ahead ({@link FrameKernelsAhead.thick}), so that a view of thin
-   * bodies alone compiles none of them.
+   * whose tables hold one ({@link AtmosphereTables.thickTable}), a thick bake or a polarisation
+   * correction alone (R08.T14.f): made at the first frame of such tables where they were not made
+   * ahead ({@link FrameKernelsAhead.thick}), so that a view of bodies with neither compiles none of
+   * them.
    */
   readonly thick: () => ThickKernels;
 }
@@ -1432,8 +1433,10 @@ export interface FrameKernelsAhead {
   readonly tiles?: boolean;
   /**
    * Whether the kernels that read the thick table are made too (plan R08, R08.T14.c): for a caller
-   * that draws a body with one, as the smoke's frame timing with the thick read forced does. Not
-   * where absent; then made at the first frame of tables that hold one.
+   * that draws a body with one, as the smoke's frame timing with the thick read forced does, and a
+   * view once the polarisation correction is routed (R08.T14.f, `thick/routing.ts`'s
+   * `CORRECTION_ROUTED`), since every world with air then draws by them. Not where absent; then made
+   * at the first frame of tables that hold one.
    */
   readonly thick?: boolean;
 }

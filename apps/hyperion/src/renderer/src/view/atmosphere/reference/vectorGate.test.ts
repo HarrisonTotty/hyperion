@@ -42,7 +42,12 @@ import { kernelMedium } from "../tables";
 import type { MsSourceTable } from "../thick/bake";
 import { bakeKeptCase, bakeKeptCorrection } from "../thick/keptBake";
 import type { PolarisationTable } from "../thick/polarisation";
-import { packThickTable, thickTableBytes } from "../thick/read";
+import {
+  type PackedThickTable,
+  packThickTable,
+  type ThickTableKind,
+  thickTableBytes,
+} from "../thick/read";
 import { type AtmosphereRegime, CLEAR_COVER, classifyRegime } from "../thick/regime";
 import committedGate from "./caseGate.json" with { type: "json" };
 import {
@@ -67,7 +72,7 @@ import earthOzoneSlabReference from "./earth-ozone-slab.reference.json" with { t
 import marsReference from "./mars.reference.json" with { type: "json" };
 import type { ReferenceFile } from "./references";
 import saturnOblateReference from "./saturn-oblate.reference.json" with { type: "json" };
-import { twinBakeBody } from "./twin";
+import { twinBakeBody, type TwinOptions } from "./twin";
 import committed from "./vectorGate.json" with { type: "json" };
 
 /** The committed references, by case. */
@@ -138,19 +143,33 @@ const SAMPLED: ReadonlyArray<string> = PATH_SPECS.filter(
   .slice(0, 3)
   .map(twinValueKey);
 
-/** A case's regime under a clear sky, and how its route reads the correction. */
+/**
+ * A case's regime under a clear sky, the table its route reads (`thick/read.ts`'s kinds), and how
+ * the record says it.
+ *
+ * @throws Error for a case routed `cloudDeck`, whose deck split is R08.T15's: none is.
+ */
 function routeOf(referenceCase: ReferenceCase): {
   readonly regime: AtmosphereRegime;
+  readonly table: ThickTableKind;
   readonly path: string;
 } {
   const regime = classifyRegime(referenceCase.medium, CLEAR_COVER);
-  return {
-    regime,
-    path:
-      regime.kind === "thin"
-        ? "the correction alone beside Psi_ms"
-        : "the thick bake with the correction summed into it",
-  };
+  let table: ThickTableKind;
+  let path: string;
+  switch (regime.kind) {
+    case "thin":
+      table = "correction";
+      path = "the correction alone beside Psi_ms";
+      break;
+    case "thickScattering":
+      table = "thick";
+      path = "the thick bake with the correction summed into it";
+      break;
+    case "cloudDeck":
+      throw new Error(`${referenceCase.name} routes cloudDeck, whose deck split is R08.T15's`);
+  }
+  return { regime, table, path };
 }
 
 /** A case's bake and correction, one table a band of its twin's. */
@@ -175,13 +194,17 @@ function twinOn(
   referenceCase: ReferenceCase,
   bakes: CaseBakes,
 ): ReturnType<typeof caseTwin> {
-  const routedThick = routeOf(referenceCase).regime.kind !== "thin";
-  return caseTwin(
-    referenceCase,
-    path === "routed" && routedThick
-      ? { thick: bakes.bands, polarisation: bakes.correction }
-      : { polarisation: bakes.correction },
-  );
+  const table = path === "routed" ? routeOf(referenceCase).table : "correction";
+  let options: Partial<TwinOptions>;
+  switch (table) {
+    case "thick":
+      options = { thick: bakes.bands, polarisation: bakes.correction };
+      break;
+    case "correction":
+      options = { polarisation: bakes.correction };
+      break;
+  }
+  return caseTwin(referenceCase, options);
 }
 
 /** A twin's values of `specs`, as recorded. */
@@ -203,11 +226,16 @@ function valuesOf(
 function tablesOf(referenceCase: ReferenceCase, bakes: CaseBakes): Record<string, unknown> {
   const drawn = kernelMedium(referenceCase.medium);
   const correction = { bands: bakes.correction, medium: referenceCase.medium };
-  const routed =
-    routeOf(referenceCase).regime.kind === "thin"
-      ? packThickTable(null, drawn, correction)
-      : packThickTable(bakes.bands, drawn, correction);
   const alone = packThickTable(null, drawn, correction);
+  let routed: PackedThickTable;
+  switch (routeOf(referenceCase).table) {
+    case "thick":
+      routed = packThickTable(bakes.bands, drawn, correction);
+      break;
+    case "correction":
+      routed = alone;
+      break;
+  }
   const largest = [0, 0, 0];
   for (const band of bakes.correction) {
     for (const slot of band.slots) {

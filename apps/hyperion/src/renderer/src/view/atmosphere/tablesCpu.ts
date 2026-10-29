@@ -1954,18 +1954,21 @@ export interface TwinSources {
    */
   readonly sunOpticalDepth?: (heightM: number, muSun: number, out: TwinRgb) => void;
   /**
-   * The thick table's kind (`thick/read.ts`; R08.T14.f): present with
-   * {@link TwinSources.thickSource}, and then the march mixes the table's J with
-   * {@link TwinSources.multiScattering} by it, as `thickRead.wgsl`'s `thickMultipleAt` does.
+   * The thick table's read, present where the planet holds the thick table (`thick/read.ts`;
+   * R08.T14.c and R08.T14.f): the march then mixes its J with {@link TwinSources.multiScattering} by
+   * its kind, as `thickRead.wgsl`'s `thickMultipleAt` does.
    */
-  readonly thickKind?: ThickTableKind;
+  readonly thick?: TwinThickSource;
+}
+
+/** The thick table's read for a twin's march (R08.T14.c, R08.T14.f; {@link TwinSources.thick}). */
+export interface TwinThickSource {
+  readonly kind: ThickTableKind;
   /**
-   * The thick table's J per unit illuminance and of scattering at a height, into `out`, slot
-   * `slot`'s (`thick/read.ts`, R08.T14.c and R08.T14.f), not held at 0: `muTravel` the view's travel
-   * cosine, −(v·n), and `horizontal` v·s − (v·n)(s·n). Present where the planet holds the thick
-   * table.
+   * The table's J per unit illuminance and of scattering at a height, into `out`, slot `slot`'s,
+   * not held at 0: `muTravel` the view's travel cosine, −(v·n), and `horizontal` v·s − (v·n)(s·n).
    */
-  readonly thickSource?: (
+  readonly read: (
     heightM: number,
     muSun: number,
     muTravel: number,
@@ -1975,8 +1978,8 @@ export interface TwinSources {
   ) => void;
 }
 
-/** One band's thick table read as {@link TwinSources.thickSource}: band 0's, at s = 1. */
-function thickSourceOf(table: PackedThickTable): NonNullable<TwinSources["thickSource"]> {
+/** One band's thick table read as {@link TwinThickSource.read}: band 0's, at s = 1. */
+function thickSourceOf(table: PackedThickTable): TwinThickSource["read"] {
   const scratch = thickSourceScratch();
   const oneBand = Float64Array.of(0);
   return (heightM, muSun, muTravel, horizontal, out, slot) => {
@@ -2046,7 +2049,7 @@ export function tableSources(planet: PlanetTwin, read: SunRead = "curves"): Twin
     },
     ...(planet.thick === undefined
       ? {}
-      : { thickKind: planet.thick.kind, thickSource: thickSourceOf(planet.thick) }),
+      : { thick: { kind: planet.thick.kind, read: thickSourceOf(planet.thick) } }),
     sunOpticalDepth: (heightM, muSun, out) => {
       const rM = bottom + Math.min(Math.max(heightM, 0), atmosphereM);
       const [u, v] = transmittanceRMuToUv(shell, rM, muSun);
@@ -2502,11 +2505,7 @@ class Marcher {
       terms.some((term) => term.lobe !== null) &&
       (reads.kind === "oblate" || reads.sources.sunOpticalDepth !== undefined);
     this.#thick =
-      reads.kind === "oblate"
-        ? reads.reader.thickKind
-        : reads.sources.thickSource === undefined
-          ? null
-          : (reads.sources.thickKind ?? "thick");
+      reads.kind === "oblate" ? reads.reader.thickKind : (reads.sources.thick?.kind ?? null);
     // A path a light slot under an absorber, slot 0's always (the views' mean transmittance), and
     // one path for every source of a medium with none, as `hillaire.ts`'s `frameSourcesOf` sends
     // them (`source.wgsl`'s `ViewMarch`).
@@ -2620,7 +2619,7 @@ class Marcher {
       if (kind !== null && thickAnalyticShare(muSun) < 1) {
         const muView = (d.x * gx + d.y * gy + d.z * gz) / gLength;
         const horizontal = d.x * s.x + d.y * s.y + d.z * s.z - muView * muSun;
-        sources.thickSource?.(heightM, muSun, -muView, horizontal, this.#thickRead, slot);
+        sources.thick?.read(heightM, muSun, -muView, horizontal, this.#thickRead, slot);
         thickMultipleInto(kind, muSun, this.#thickRead, this.#multiple);
       }
       phasedInto(this.#terms, this.#densities, source.phases, this.#phased);

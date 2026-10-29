@@ -86,17 +86,26 @@
  * asks for none and is drawn as before.
  *
  * **The polarisation correction** (R08.T14.f; Design note 10). Every drawn body whose medium needs
- * it ({@link AtmosphereCacheOptions.corrects}: `thick/columnLayout.ts`'s `correctionBySources`,
- * every world with air, thin or thick) has its correction asked once its tables are made, beside
- * any thick bake, every band in one request ({@link AtmosphereBuilder.bakePolarisation}), and given
- * to its tables when it lands (`AtmosphereTables.setPolarisationCorrection`, which reads it beside
- * Ψ_ms, or summed into the thick bake where they hold one). Its labels follow it as a thick bake's
- * do (the plan's "as for any gated bake"): `atmosphereComputing` in `atmosphereApproximate`'s place
- * while either bake runs, with no reason; once both have landed, the entry's labels as each bake's
- * outcome leaves them; and a failed correction adds `atmosphereApproximate` with
- * {@link POLARISATION_REASON}, since the sky it draws then carries the scalar error past the 5%
- * metric, until the body's atmosphere is next computed. Like a failed thick bake, it is never item
- * 6's fault. A medium with no sources to bake from asks for none, and is drawn as before.
+ * it ({@link AtmosphereCacheOptions.corrects}: `thick/routing.ts`'s `correctionRouted`, every world
+ * with air, thin or thick, once the route is on; none in the product until main turns it on) has
+ * its correction asked once its tables are made, beside any thick bake, every band in one request
+ * ({@link AtmosphereBuilder.bakePolarisation}), and given to its tables when it lands
+ * (`AtmosphereTables.setPolarisationCorrection`, which reads it beside Ψ_ms, or summed into the
+ * thick bake where they hold one). Its labels follow it as a thick bake's do (the plan's "as for
+ * any gated bake"), but `atmosphereComputing` takes `atmosphereApproximate`'s place for it only
+ * where nothing the correction leaves holds `atmosphereApproximate` (the guide's row: the computed
+ * light replaces the approximation):
+ *
+ * - while the thick bake runs, `atmosphereComputing` with no reason, as before;
+ * - while the correction alone runs, `atmosphereComputing` with no reason where the entry's labels
+ *   with its bakes landed carry no `atmosphereApproximate`, and those labels and reasons where they
+ *   do, an unrouted thick world's `THICK_REASON` among them;
+ * - once both have landed, the entry's labels as each bake's outcome leaves them;
+ * - a failed correction adds `atmosphereApproximate` with {@link POLARISATION_REASON}, since the sky
+ *   it draws then carries the scalar error the correction takes out, until the body's atmosphere is
+ *   next computed. Like a failed thick bake, it is never item 6's fault.
+ *
+ * A medium with no sources to bake from asks for none, and is drawn as before.
  */
 
 import type {
@@ -150,7 +159,7 @@ import type {
 import type { BakeSpectrum } from "./spectralColour";
 import { type AbsorberCurveSlots, type AtmosphereBody, AtmosphereTables } from "./tables";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
-import { correctionBySources, spectralColumnOf } from "./thick/columnLayout";
+import { spectralColumnOf } from "./thick/columnLayout";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
   approximateRegime,
@@ -160,7 +169,7 @@ import {
   classifyRegime,
   THICK_REASON,
 } from "./thick/regime";
-import { thickBakeRouted } from "./thick/routing";
+import { correctionRouted, thickBakeRouted } from "./thick/routing";
 import type { SpectralColumn, SpectralSource } from "./thick/spectralColumn";
 
 /**
@@ -391,8 +400,8 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
   readonly routes?: (regime: AtmosphereRegime) => boolean;
   /**
    * Whether a body drawn from `column` takes its polarisation correction (R08.T14.f):
-   * `thick/columnLayout.ts`'s `correctionBySources` if absent, every column it does not rule out,
-   * so every world with air; a test's choice otherwise.
+   * `thick/routing.ts`'s `correctionRouted` if absent, which asks none until main turns the route
+   * on (`CORRECTION_ROUTED`), and then every world with air; a test's choice otherwise.
    */
   readonly corrects?: (column: SpectralColumn) => boolean;
 }
@@ -558,12 +567,12 @@ const BAKE_FAILED = { kind: "failed" } as const;
 
 /**
  * Why a body whose polarisation correction failed carries `atmosphereApproximate` (R08.T14.f), as
- * player text: its multiple scattering is drawn by the scalar method alone, whose error the
- * correction takes out (Design note 10's polarisation: up to −5.2% to +4.6% in an Earth-like blue,
- * past the metric's 5% in a thicker air).
+ * player text, describing the drawing as `THICK_REASON` does: its multiple scattering is drawn by
+ * the scalar method alone, whose error the correction takes out (Design note 10's polarisation: up
+ * to −5.2% to +4.6% in an Earth-like blue, past the metric's 5% in a thicker air). Pending the
+ * guide's sign-off (plan R08's Risks, "Preconditions of the correction's route").
  */
-export const POLARISATION_REASON =
-  "multiple scattering's polarisation: left out, its computation failed";
+export const POLARISATION_REASON = "multiple scattering: drawn without its polarisation";
 
 /**
  * What a kept body's thick bake carries as its input (R08.T14.c): no medium of its own, since a
@@ -766,21 +775,32 @@ function thickLabelsOf(made: Labelled, state: "baked" | "failed"): Labelled {
 
 /**
  * An entry's labels and reasons under its thick bake's and its polarisation correction's states,
- * `null` for one not asked (the module's remarks): while either bakes, `atmosphereComputing` in
- * `atmosphereApproximate`'s place and no reason; once both have landed, the thick bake's outcome
- * read into the made labels ({@link thickLabelsOf}), and a failed correction's
- * `atmosphereApproximate` with {@link POLARISATION_REASON}.
+ * `null` for one not asked (the module's remarks): while the thick bake runs,
+ * `atmosphereComputing` in `atmosphereApproximate`'s place and no reason; while the correction alone
+ * runs, the same where its landing would leave no `atmosphereApproximate`, and the labels its
+ * landing leaves where it would; once both have landed, the thick bake's outcome read into the made
+ * labels ({@link thickLabelsOf}), and a failed correction's `atmosphereApproximate` with
+ * {@link POLARISATION_REASON}.
  */
 function bakeLabelsOf(
   made: Labelled,
   thick: BakeState<unknown>["kind"] | null,
   correction: CorrectionState<unknown>["kind"] | null,
 ): Labelled {
-  if (thick === "baking" || correction === "baking") {
-    const others = made.labels.filter((label) => label !== "atmosphereApproximate");
-    return { labels: ordered([...others, "atmosphereComputing"]), reasons: [] };
+  const computing = (): Labelled => ({
+    labels: ordered([
+      ...made.labels.filter((label) => label !== "atmosphereApproximate"),
+      "atmosphereComputing",
+    ]),
+    reasons: [],
+  });
+  if (thick === "baking") {
+    return computing();
   }
   let labelled = thick === null ? made : thickLabelsOf(made, thick);
+  if (correction === "baking") {
+    return labelled.labels.includes("atmosphereApproximate") ? labelled : computing();
+  }
   if (correction === "failed") {
     labelled = {
       labels: ordered([...labelled.labels, "atmosphereApproximate"]),
@@ -903,7 +923,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#tables = opts.tables;
     this.#schedule = opts.schedule ?? scheduleTimeout;
     this.#routes = opts.routes ?? ((regime): boolean => thickBakeRouted(regime));
-    this.#corrects = opts.corrects ?? ((column): boolean => correctionBySources(column) !== false);
+    this.#corrects = opts.corrects ?? ((column): boolean => correctionRouted(column));
   }
 
   /** How many bodies the cache holds, drawn or not. */

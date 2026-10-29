@@ -126,7 +126,7 @@ import {
   type TransmittanceTextures,
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
-import type { PackedThickTable } from "../view/atmosphere/thick/read";
+import type { PackedThickTable, ThickTableKind } from "../view/atmosphere/thick/read";
 import {
   type FarLimbShells,
   farLimbFootprintTwin,
@@ -2086,7 +2086,7 @@ async function checkFrameTwins(
  */
 interface ThickTwinBody {
   readonly name: string;
-  readonly table: "thick" | "correction";
+  readonly table: ThickTableKind;
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly figure: SpheroidFigure;
@@ -2205,10 +2205,17 @@ async function checkThickTwinBodies(
         body.gravity,
       );
       try {
-        if (body.table === "thick") {
-          withThickTable(atmosphere.tables, body.curves.length);
-        } else {
-          withCorrectionTable(atmosphere.tables, body.curves.length);
+        // The check's head names the table it draws over.
+        let over: string;
+        switch (body.table) {
+          case "thick":
+            withThickTable(atmosphere.tables, body.curves.length);
+            over = "R08.T14.c {label}: {what}, over the thick table,";
+            break;
+          case "correction":
+            withCorrectionTable(atmosphere.tables, body.curves.length);
+            over = "R08.T14.f {label}: {what}, beside the correction alone,";
+            break;
         }
         const read = kernelMedium(body.medium);
         // The harness's GPU work runs in order: each body's tables are read back before the next's.
@@ -2229,10 +2236,6 @@ async function checkThickTwinBodies(
           void ordered.later(async (later) => {
             const result = await agreements();
             const label = `${body.name}, high, ${frame.name}`;
-            const over =
-              body.table === "thick"
-                ? "R08.T14.c {label}: {what}, over the thick table,"
-                : "R08.T14.f {label}: {what}, beside the correction alone,";
             for (const [what, held] of [
               ["the sky view", result.skyView],
               ["the aerial perspective", result.aerial],

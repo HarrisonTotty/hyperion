@@ -42,7 +42,10 @@
  * - G and G₂ in place of E¹ and E² keep the read continuous where the view or the sun is vertical.
  *   Eᵐ is an m-th Fourier coefficient, driven by the beam's Λ_lᵐ(μ₀) (the ground, Lambertian, acts
  *   at m = 0 alone) and smooth at the poles, so it falls as sinᵐ θ_v sinᵐ θ₀, and their quotient is
- *   smooth. Read as Eᵐ cos mΔφ with Eᵐ held at the last cell (μ_v = ±15/16) beyond it, the table
+ *   smooth: Pₗᵐ(μ) ∝ (1 − μ²)^(m/2) (S. Chandrasekhar, _Radiative Transfer_, Oxford 1950, §48), and
+ *   the I row of a mode with an unpolarised beam carries the generalised spherical function
+ *   P^l_m0 alike (W. A. de Rooij and C. C. A. H. van der Stap, A&A 131 (1984) 237), so the
+ *   correction's modes fall so too. Read as Eᵐ cos mΔφ with Eᵐ held at the last cell (μ_v = ±15/16) beyond it, the table
  *   would spin about the zenith, where Δφ has no value.
  * - On a `thick` table, where J dips below 0 (by up to 49% of E⁰ on the Titan-class fixture's far
  *   side of a forward-peaked point, T14.b's _m ≤ 1 dips below 0_), the read is held at 0 (T14.b's
@@ -56,7 +59,8 @@
  * G's green and blue (`pack2x16float`'s order, the first in the low half); and G₂ in its fourth, three
  * 9-bit two's-complement mantissas (red in bits 0–8, green 9–17, blue 18–26) and their shared
  * exponent e in bits 27–31, each channel m·2^(e − 24) ({@link THICK_CURVE_EXPONENT_BIAS}): 2⁻²⁴ to
- * 32,640, each to 1 in 255 of the texel's largest. G₂ is a correction's m = 2, a few per cent of the
+ * 32,640, each to 1 in 255 of the texel's largest, or to 2⁻²⁵ where that is the larger (its least
+ * exponent). G₂ is a correction's m = 2, a few per cent of the
  * source at most (Design note 10's figures), so the shared exponent's rounding is some 10⁻⁴ of J,
  * and the texel stays one load. A band and light is 270,336 B, the bake's figure for `rgba16float`
  * (33 × 32 × 16 texels × 16 B), and the info row 256 B more, so that the lever costs no byte over
@@ -349,8 +353,9 @@ function checkBands(
  *   {@link THICK_TRAVEL_COSINES} μ_v at their cells' centres, {@link THICK_SOURCE_MODES} modes a
  *   bake and {@link THICK_CORRECTION_MODES} a correction), bands with different altitudes or light
  *   slots, a correction of other bands, s, altitudes or light slots than the bake's, a correction
- *   whose medium is not the kernel medium's term for term, no light slot, or a J⁰ or G that is not
- *   finite or past the half float's largest, 65,504, or a G₂ not finite or past 32,640.
+ *   whose medium has another count of terms than the kernel medium (the terms' order is the
+ *   caller's to keep), no light slot, or a J⁰ or G that is not finite or past the half float's
+ *   largest, 65,504, or a G₂ not finite or past 32,640.
  */
 export function packThickTable(
   bands: ReadonlyArray<MsSourceTable> | null,

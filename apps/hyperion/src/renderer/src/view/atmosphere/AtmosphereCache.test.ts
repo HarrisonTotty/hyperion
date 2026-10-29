@@ -79,11 +79,11 @@ import {
 import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "./reference/cases";
 import { type AtmosphereBody, perPlanetRowOf, tablesPlanOf } from "./tables";
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
-import { correctionBySources, spectralColumnOf } from "./thick/columnLayout";
+import { spectralColumnOf } from "./thick/columnLayout";
 import type { PolarisationTable } from "./thick/polarisation";
 import { keptColumnOf, sphereBakeBody } from "./thick/keptBake";
 import { type AtmosphereRegime, THICK_REASON } from "./thick/regime";
-import { thickBakeRouted } from "./thick/routing";
+import { correctionRouted, thickBakeRouted } from "./thick/routing";
 import { channelSource, type SpectralColumn } from "./thick/spectralColumn";
 
 /** A build the scripted builder holds, landed by the test. */
@@ -239,13 +239,12 @@ interface Harness {
 /**
  * A cache over the fakes, its tables reporting `rowBytes` each, or their per-planet row's, routing
  * its thick bakes by `routes`, or by the product's routing if absent, and asking polarisation
- * corrections by `corrects`: none if absent, so that the tests before R08.T14.f read their labels
- * as they were; R08.T14.f's give the product's, `correctionBySources`.
+ * corrections by `corrects`, or by the product's if absent, which asks none until the route is on.
  */
 function harness(
   rowBytes?: number,
   routes?: (regime: AtmosphereRegime) => boolean,
-  corrects: (column: SpectralColumn) => boolean = () => false,
+  corrects?: (column: SpectralColumn) => boolean,
 ): Harness {
   const seam = new BodyDetailSeam();
   const builder = new ScriptedBuilder();
@@ -255,7 +254,7 @@ function harness(
     requests: seam.client,
     builder,
     ...(routes === undefined ? {} : { routes }),
-    corrects,
+    ...(corrects === undefined ? {} : { corrects }),
     tables: (built) => {
       if (factory.throws !== null) {
         throw factory.throws;
@@ -1706,19 +1705,19 @@ function airAssembly(labels: ReadonlyArray<AtmosphereLabel> = []): AssembledMedi
   };
 }
 
-/** The product's choice of the bodies that take the correction (R08.T14.f). */
-function productCorrects(column: SpectralColumn): boolean {
-  return correctionBySources(column) !== false;
+/** The product's choice of the bodies that take the correction once its route is on (R08.T14.f). */
+function routedCorrects(column: SpectralColumn): boolean {
+  return correctionRouted(column, true);
 }
 
 describe("a body's polarisation correction (R08.T14.f)", () => {
-  /** A cache with A drawn from `assembled`, its correction asked by the product's choice. */
+  /** A cache with A drawn from `assembled`, its correction asked as the routed product asks it. */
   async function correcting(
     assembled = airAssembly(),
     routes?: (regime: AtmosphereRegime) => boolean,
     rowBytes?: number,
   ): Promise<Harness> {
-    const h = harness(rowBytes, routes, productCorrects);
+    const h = harness(rowBytes, routes, routedCorrects);
     await drawn(h, [lit(A)], assembled);
     return h;
   }
@@ -1751,15 +1750,10 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
     ]);
   });
 
-  it("reads a world with air as needing the correction by its sources, and an airless column not", () => {
-    const column = spectralColumnOf(
-      R05_EARTH_REFERENCE,
-      R05_EARTH_REFERENCE.terms.map(channelSource),
-    );
-    expect([correctionBySources(column), correctionBySources({ ...column, terms: [] })]).toEqual([
-      true,
-      false,
-    ]);
+  it("asks no correction by default, the product's route held, a world with air drawn as before", async () => {
+    const h = harness();
+    const report = await drawn(h, [lit(A)], airAssembly());
+    expect([h.builder.corrections.length, report.labels]).toEqual([0, []]);
   });
 
   it("shows COMPUTING while it runs, with no reason, and clears it once the correction lands in its tables", async () => {
@@ -1775,19 +1769,33 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
     ]).toEqual([[["atmosphereComputing"], []], true, [[], []], 1]);
   });
 
-  it("keeps COMPUTING in an unrouted thick world's APPROXIMATE's place while it runs, and APPROXIMATE with its reason once it lands", async () => {
+  it("keeps an unrouted thick world's APPROXIMATE and its reason while its correction runs, which cannot clear it, and after", async () => {
     const h = await correcting(thickAssembly());
     const during = note(h, [lit(A)]);
     await landCorrection(h);
     const after = note(h, [lit(A)]);
     expect([
+      h.builder.corrections.length,
       h.builder.bakes.length,
       [during.labels, [...during.reasons]],
       [after.labels, [...after.reasons]],
     ]).toEqual([
+      1,
       0,
-      [["atmosphereComputing"], []],
       [["atmosphereApproximate"], [[A, [THICK_REASON]]]],
+      [["atmosphereApproximate"], [[A, [THICK_REASON]]]],
+    ]);
+  });
+
+  it("shows no COMPUTING on a routed thick world whose bake landed while its correction runs, where a stand-in still holds APPROXIMATE", async () => {
+    const h = await correcting(thickAssembly([STAND_IN, THICK_REASON]), routedThick);
+    const tables = patternedThickBake(madeAt(h, 0).plan.bands, R05_EARTH_REFERENCE, 1);
+    latestBake(h).settle({ kind: "baked", tables });
+    await microtasks();
+    const report = note(h, [lit(A)]);
+    expect([report.labels, [...report.reasons]]).toEqual([
+      ["atmosphereApproximate"],
+      [[A, [STAND_IN]]],
     ]);
   });
 
@@ -1826,7 +1834,7 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
     ]);
   });
 
-  it("fails the correction where its tables refuse it, and gives it at a later frame where the device was lost", async () => {
+  it("gives its tables the correction at a later frame where the device was lost as it landed", async () => {
     const h = await correcting();
     const errors = vi.spyOn(console, "error").mockImplementation(ignore);
     const tables = madeAt(h, 0);
@@ -1836,17 +1844,26 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
     const during = tables.corrections.length;
     tables.correctionThrows = null;
     const later = note(h, [lit(A)]);
-    const refused = await correcting();
-    madeAt(refused, 0).correctionThrows = new RangeError("a correction of 2 bands");
-    await landCorrection(refused);
-    const report = note(refused, [lit(A)]);
     expect([
       during,
       tables.correctionHeld === corrected,
       later.labels,
-      [report.labels, [...report.reasons], report.problems.size],
       errors.mock.calls.length,
-    ]).toEqual([0, true, [], [["atmosphereApproximate"], [[A, [POLARISATION_REASON]]], 0], 1]);
+    ]).toEqual([0, true, [], 0]);
+  });
+
+  it("fails the correction where its tables refuse it, with one console.error and no fault", async () => {
+    const h = await correcting();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    madeAt(h, 0).correctionThrows = new RangeError("a correction of 2 bands");
+    await landCorrection(h);
+    const report = note(h, [lit(A)]);
+    expect([
+      report.labels,
+      [...report.reasons],
+      report.problems.size,
+      errors.mock.calls.length,
+    ]).toEqual([["atmosphereApproximate"], [[A, [POLARISATION_REASON]]], 0, 1]);
   });
 
   it("gives tables made again after an eviction the correction, asking none again", async () => {
@@ -1865,28 +1882,27 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
   });
 
   it("asks none for a medium with no sources to bake from, drawn as before", async () => {
-    const h = harness(undefined, undefined, productCorrects);
+    const h = harness(undefined, undefined, routedCorrects);
     const report = await drawn(h, [lit(A)], earthAssembly());
     expect([h.builder.corrections.length, report.labels]).toEqual([0, []]);
   });
 
-  it("cancels the correction when the body is dropped, or a new key's build lands", async () => {
+  it("cancels the correction when the body is dropped", async () => {
     const h = await correcting();
-    const first = latestCorrection(h);
     vi.spyOn(console, "error").mockImplementation(ignore);
     h.view.reportDrawFailure(A, new Error("a bug in the draw"), "VIEW 1");
     await microtasks();
-    const second = await correcting();
-    const before = latestCorrection(second);
+    expect(latestCorrection(h).cancelled).toBe(true);
+  });
+
+  it("cancels the correction when a new key's build lands, asking the new entry's", async () => {
+    const h = await correcting();
+    const first = latestCorrection(h);
     const lights = [SUN_LIGHT, { ...SUN_LIGHT, star: `${FIXTURE_SYSTEM}.0101` }];
-    note(second, [lit(A, "disc", lights)]);
-    await land(second, A, { kind: "built", assembled: airAssembly() });
-    note(second, [lit(A, "disc", lights)]);
-    expect([first.cancelled, before.cancelled, second.builder.corrections.length]).toEqual([
-      true,
-      true,
-      2,
-    ]);
+    note(h, [lit(A, "disc", lights)]);
+    await land(h, A, { kind: "built", assembled: airAssembly() });
+    note(h, [lit(A, "disc", lights)]);
+    expect([first.cancelled, h.builder.corrections.length]).toEqual([true, 2]);
   });
 });
 
@@ -2040,13 +2056,20 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
     return over.view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
   }
 
-  it("posts the polarisation correction after the bake, every band in one polarisation-bake request, and gives APPROXIMATE with its reason where it is answered failed (R08.T14.f)", async () => {
+  it("posts the polarisation correction after the bake, every band in one polarisation-bake request, and gives APPROXIMATE with its reason alone where it is answered failed (R08.T14.f)", async () => {
     const over = await bakingOverPool({
-      corrects: (column) => correctionBySources(column) !== false,
+      corrects: routedCorrects,
     });
     const worker = workerAt(over.workers, 0);
     const bake = lastPosted(worker);
-    worker.reply({ kind: "thick-baked", id: bake.id, tables: [] });
+    if (bake.kind !== "thick-bake") {
+      throw new Error(`the worker was posted ${bake.kind}, not the bake`);
+    }
+    worker.reply({
+      kind: "thick-baked",
+      id: bake.id,
+      tables: patternedThickBake(thickBakeBands(bake.body), R05_EARTH_REFERENCE, 1),
+    });
     const computing = await frame(over);
     const posted = lastPosted(worker);
     vi.spyOn(console, "error").mockImplementation(ignore);
@@ -2069,7 +2092,7 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
       [0],
       ["atmosphereComputing"],
       ["atmosphereApproximate"],
-      [[A, [THICK_REASON, POLARISATION_REASON]]],
+      [[A, [POLARISATION_REASON]]],
       0,
     ]);
   });

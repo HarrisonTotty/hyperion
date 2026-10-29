@@ -45,6 +45,7 @@ import { gravityRatio } from "../atmosphere/oblate";
 import { skySources } from "../atmosphere/sources";
 import { surfaceLightingTablesOf } from "../atmosphere/surfaceLighting";
 import { absorberCount, type AtmosphereTables } from "../atmosphere/tables";
+import { CORRECTION_ROUTED } from "../atmosphere/thick/routing";
 import {
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
@@ -477,7 +478,9 @@ export class PhotorealRenderer {
         engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
         engine.createComputeAsync(HISTOGRAM_KERNEL),
         engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
-        createAtmosphereFrameKernels(engine),
+        // Every world with air draws by the thick read's kernels once its correction is routed
+        // (R08.T14.f), so they are made ahead of the first frame of one.
+        createAtmosphereFrameKernels(engine, { thick: CORRECTION_ROUTED }),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it.

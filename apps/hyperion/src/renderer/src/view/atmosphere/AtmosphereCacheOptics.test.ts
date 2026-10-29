@@ -22,7 +22,7 @@ import {
   FIXTURE_SYSTEM,
 } from "../../test/planetaryFixture";
 import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
-import { patternedThickBake } from "../../test/thickTables";
+import { patternedCorrection, patternedThickBake } from "../../test/thickTables";
 import {
   type AbsorberCurve,
   type AbsorberCurveSums,
@@ -40,6 +40,7 @@ import {
   type OpticsBuildOutcome,
   OpticsWorkerPool,
   type ThickBakeAsk,
+  type PolarisationBakeOutcome,
   type ThickBakeOutcome,
 } from "./opticsPool";
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
@@ -657,6 +658,125 @@ describe("the optics-worker pool's thick bake (R08.T14.c)", () => {
     const { pool } = scriptedPool(1);
     pool.terminate();
     expect(() => pool.bakeThick(bakeAsk())).toThrow(/terminated/u);
+  });
+});
+
+/** A correction's tables for `ask`, one a band it asks, on the bake's grid (R08.T14.f). */
+function correctionFor(ask: ThickBakeAsk): ReturnType<typeof patternedCorrection> {
+  return patternedCorrection(thickBakeBands(ask.body), R05_EARTH_REFERENCE, ask.slots.length);
+}
+
+describe("the optics-worker pool's polarisation correction (R08.T14.f)", () => {
+  /** A correction of R05's Earth's column, by its channels, on a sphere's one band. */
+  function correctionAsk(): ThickBakeAsk {
+    const body = sphereBakeBody(6_371_008.8, 9.806_65);
+    return {
+      input: KEPT_UNSET,
+      slots: [0],
+      bands: thickBakeBands(body).map((_, band) => band),
+      column: spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      body,
+    };
+  }
+
+  it("asks every band in one polarisation-bake request and lands its tables as baked", async () => {
+    const { pool, workers } = scriptedPool(2);
+    const ask = correctionAsk();
+    const correction = pool.bakePolarisation(ask);
+    const worker = workerAt(workers, 0);
+    const posted = lastPosted(worker);
+    const tables = correctionFor(ask);
+    worker.reply({ kind: "polarisation-baked", id: posted.id, tables });
+    const outcome = await correction.outcome;
+    expect([
+      workers.map((each) => each.received.length),
+      posted,
+      outcome.kind === "baked" && outcome.tables === tables,
+    ]).toEqual([[1, 0], { kind: "polarisation-bake", id: posted.id, ...ask }, true]);
+  });
+
+  it.each([
+    [
+      "polarisation-bake-failed, as failed with its message",
+      (id: number): OpticsReply => ({
+        kind: "polarisation-bake-failed",
+        id,
+        bands: [0],
+        message: "the vector solver refused a layer",
+      }),
+      { kind: "failed", message: "the vector solver refused a layer" },
+    ],
+    [
+      "failed, a job that threw, as failed with its message",
+      (id: number): OpticsReply => ({ kind: "failed", id, message: "a bug in the correction" }),
+      { kind: "failed", message: "a bug in the correction" },
+    ],
+    [
+      "with another kind's answer, as failed",
+      (id: number): OpticsReply => ({ kind: "thick-baked", id, tables: [] }),
+      { kind: "failed", message: "a polarisation correction was answered thick-baked" },
+    ],
+    [
+      "with a table fewer than its bands, as failed",
+      (id: number): OpticsReply => ({ kind: "polarisation-baked", id, tables: [] }),
+      {
+        kind: "failed",
+        message: "a polarisation correction of 1 bands was answered with 0 tables",
+      },
+    ],
+  ] satisfies ReadonlyArray<
+    readonly [string, (id: number) => OpticsReply, PolarisationBakeOutcome]
+  >)("settles a correction answered %s", async (_, replyOf, expected) => {
+    const { pool, workers } = scriptedPool(1);
+    const correction = pool.bakePolarisation(correctionAsk());
+    const worker = workerAt(workers, 0);
+    worker.reply(replyOf(lastPosted(worker).id));
+    expect(await correction.outcome).toEqual(expected);
+  });
+
+  it("asks the correction again of a replacement when its worker fails, and lands the answer", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = correctionAsk();
+    const correction = pool.bakePolarisation(ask);
+    workerAt(workers, 0).fail();
+    const replacement = workerAt(workers, 1);
+    const asked = lastPosted(replacement);
+    replacement.reply({ kind: "polarisation-baked", id: asked.id, tables: correctionFor(ask) });
+    expect([asked.kind, (await correction.outcome).kind]).toEqual(["polarisation-bake", "baked"]);
+  });
+
+  it("fails the correction once every worker is given up, saying so", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const correction = pool.bakePolarisation(correctionAsk());
+    failEveryTime(workers);
+    expect(await correction.outcome).toEqual({
+      kind: "failed",
+      message: "every optics worker was given up",
+    });
+  });
+
+  it("settles a correction cancelled at once, its late answer taken by none", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = correctionAsk();
+    const correction = pool.bakePolarisation(ask);
+    const worker = workerAt(workers, 0);
+    const late = lastPosted(worker);
+    correction.cancel();
+    worker.reply({ kind: "polarisation-baked", id: late.id, tables: correctionFor(ask) });
+    expect(await correction.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("settles a correction under way cancelled when the pool is terminated", async () => {
+    const { pool } = scriptedPool(1);
+    const correction = pool.bakePolarisation(correctionAsk());
+    pool.terminate();
+    expect(await correction.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("refuses a correction once the pool is terminated", () => {
+    const { pool } = scriptedPool(1);
+    pool.terminate();
+    expect(() => pool.bakePolarisation(correctionAsk())).toThrow(/terminated/u);
   });
 });
 

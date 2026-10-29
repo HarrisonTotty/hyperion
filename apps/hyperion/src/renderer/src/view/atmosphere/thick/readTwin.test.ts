@@ -47,12 +47,14 @@ function sources(
     ...(thick === false
       ? {}
       : {
-          thickKind: thick === "correction" ? "correction" : "thick",
-          thickSource: (h, muSun, muTravel, horizontal, out) => {
-            reads.push([h, muSun, muTravel, horizontal]);
-            out[0] = j[0];
-            out[1] = j[1];
-            out[2] = j[2];
+          thick: {
+            kind: thick === "correction" ? "correction" : "thick",
+            read: (h, muSun, muTravel, horizontal, out) => {
+              reads.push([h, muSun, muTravel, horizontal]);
+              out[0] = j[0];
+              out[1] = j[1];
+              out[2] = j[2];
+            },
           },
         }),
   };
