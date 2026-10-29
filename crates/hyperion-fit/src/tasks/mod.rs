@@ -22,6 +22,7 @@ pub mod liquid_optics;
 pub mod mge;
 pub mod period_correction;
 pub mod pulsars;
+pub mod rough_plains_cold_traps;
 pub mod saturation_curves;
 pub mod sky_binary_light;
 pub mod sky_envelope;

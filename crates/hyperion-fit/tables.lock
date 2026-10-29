@@ -334,6 +334,17 @@ provisional = false
 acceptance = "adopted A = 40, γ = 0.7 and cap 40 (decision-p15-t8-blocks); fitted over 126 clusters (17 left out for want of a distance; 363 known pulsars): γ = 0.632 (0.5–0.9; passes), A = 38.0 at 47 Tucanae's Γ (30–50; passes), completeness distance 4.8 kpc; the adopted law inside the census's 95% joint region, d₀ profiled to 4.71 kpc: 2Δln L = 4.41 (at most 5.99; passes). Reported: the implied total over those clusters 1560 at the adopted law and 1539 at the fit (2,000–8,000)"
 
 [[table]]
+name = "rough_plains_cold_traps"
+path = "rough_plains_cold_traps.rs"
+task = "rough_plains_cold_traps"
+revision = 0
+inputs_sha256 = "544f813bd8d74e92aafb3b8e3d316d2a14d3f0d5365bddef15e76c6cbdc0ab39"
+body_sha256 = "1cd53bd22b6039b8a578669d2af6dad16d3ff5111eb2cb4a0f108dd44f57ea32"
+since_generator_version = 23
+provisional = false
+acceptance = "8 surfaces of 512² pixels, 27.5 pieces a sampled view azimuth; instantaneous shadow within 0.133 of Smith 1967's at 0.5–4° for w 0.1, 0.3 and 0.5 (worst at w 0.1, 4°); under a point star 1.54° from the equator, permanent shadow over 80–90° from 0.0230 to 0.0318 across the surfaces at w 0.1 and 0.2107 to 0.2360 at w 0.3; w 0.1: shadow 0.0267 over 80–90° and 0.00047 over 70–80°, under the real Sun water (110 K) 0.0201 and CO₂ (57 K) 0.000968 over 80–90°; w 0.2: shadow 0.1306 over 80–90° and 0.02165 over 70–80°, under the real Sun water (110 K) 0.0537 and CO₂ (57 K) 0.000515 over 80–90°; w 0.3: shadow 0.2231 over 80–90° and 0.07263 over 70–80°, under the real Sun water (110 K) 0.0402 and CO₂ (57 K) 0.000377 over 80–90°; w 0.5: shadow 0.3399 over 80–90° and 0.18121 over 70–80°, under the real Sun water (110 K) 0.0209 and CO₂ (57 K) 0.000326 over 80–90°; the largest shadow at the last colatitude node 3.81e-6 and at the last limb node 0.00e0"
+
+[[table]]
 name = "saturation_curves"
 path = "saturation.rs"
 task = "saturation_curves"

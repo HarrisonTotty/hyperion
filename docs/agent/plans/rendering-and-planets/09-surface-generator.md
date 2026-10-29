@@ -2215,6 +2215,10 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   D 10–20°, permanent shadow (up to 15 times). R09.T13.f places its ice with that overstatement.
   Landing later, T7.g moves P14.T51.f's published areas and R09.T16's goldens, so it rides a
   generator bump.
+  _Built in two halves:_ the table and its reader, `cold_trap::rough_plains`, landed pure at 23
+  (lane `r09-t7g`, 2026-10-28), read by nothing generated; the swap below, the use, is still to
+  build, behind a hold after 24 (the record says what moves).
+  Records: [09-surface-generator/records/R09.T7.g.md](09-surface-generator/records/R09.T7.g.md).
   - **The table:** a new `hyperion-fit` task, `rough_plains_cold_traps`, ray traces Gaussian
     surfaces built as Hayne et al. 2021's Methods D builds them:
     - random phases on the task's own seeded stream;
@@ -2239,7 +2243,11 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     within the ray-traced surfaces' spread at σ_s 5.7° and 16.7°, and within 15% at 11.3° and
     26.6°; its water cold traps are within 15% of §8.13's, and its CO₂ within a factor of two. A
     body of another albedo and emissivity reads the same table.
-    T7.d's band, Ceres and CO₂ tests hold.
+    T7.d's band, Ceres and CO₂ tests hold. _Acceptance (the pure half):_
+    `cargo test -p hyperion-surface cold_trap`;
+    `cargo test -p hyperion-fit --lib tasks::rough_plains_cold_traps`;
+    `cargo test -p hyperion-fit --test rough_plains_cold_traps`; `just fit-check`;
+    `just gen-surface` leaves `hyperion_surface_bg.wasm` unchanged byte for byte.
 - **R09.T7.h The kept craters' sharpening in the closed forms** (a T7 follow-up, after R10.T5;
   decision-r10-t5-closed-forms.md). `synth/craters.rs`: the small craters' closed forms count what
   a level's fillet leaves out of the ground's. For each octave the level keeps, that is its
