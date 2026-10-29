@@ -591,6 +591,13 @@ interface Device {
    * `depth-only`; `null` before, on the low setting, and for the other shadings.
    */
   shadowMaterial: MaterialHandle | null;
+  /**
+   * A lit terrain's emissive form (R08.T18.a), compiled at the first frame whose lighting carries
+   * the ground's emission, which the plain form draws until it is made; `null` before.
+   */
+  emissiveMaterial: MaterialHandle | null;
+  /** Whether the emissive form has been asked for on this device. */
+  emissiveAsked: boolean;
   /** Each resident patch's layers' summary and request, by key string. */
   readonly residents: Map<string, Resident>;
   /** The resident patches asked for again by the rebake rule, at their last requests. */
@@ -1184,7 +1191,7 @@ export class TerrainPass {
    * the wireframe's into the canvas), and R05's spike shading into the scene target (`rgba16float`).
    */
   #materialOf(
-    kind: TerrainShading | "depth" | "shadow",
+    kind: TerrainShading | "depth" | "shadow" | "lit-emissive",
     device: Device,
     path: TerrainLayout["vertexPath"],
   ): Promise<MaterialHandle> {
@@ -1245,6 +1252,29 @@ export class TerrainPass {
     } catch (error: unknown) {
       if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
         console.error("the terrain's shadow caster failed: the cascades are not drawn", error);
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s lit material's emissive form (R08.T18.a), once a device; never
+   * rejects. One that cannot be made is reported, and the plain form draws on, without the ground's
+   * emission.
+   */
+  async #readyEmissive(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    try {
+      const emissive = await this.#materialOf("lit-emissive", device, path);
+      if (device === this.#device && !this.#disposed && device.emissiveMaterial === null) {
+        device.emissiveMaterial = emissive;
+      } else {
+        this.#releaseOwn(emissive);
+      }
+    } catch (error: unknown) {
+      if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
+        console.error(
+          "the terrain's emissive form failed: its ground is drawn unlit by itself",
+          error,
+        );
       }
     }
   }
@@ -1707,6 +1737,10 @@ export class TerrainPass {
       this.#releaseOwn(device.shadowMaterial);
       device.shadowMaterial = null;
     }
+    if (device.emissiveMaterial !== null) {
+      this.#releaseOwn(device.emissiveMaterial);
+      device.emissiveMaterial = null;
+    }
     if (device.airless !== null) {
       this.#engine.releaseTexture(device.airless.body);
     }
@@ -1742,6 +1776,8 @@ export class TerrainPass {
       material: null,
       depthMaterial: null,
       shadowMaterial: null,
+      emissiveMaterial: null,
+      emissiveAsked: false,
       residents: new Map(),
       rebakes: new Map(),
       gates: [],
@@ -2383,7 +2419,18 @@ export class TerrainPass {
     c[3] = 1 / this.#planet.figure.equatorialRadiusM;
     const table = resources.phaseTable;
     const atmosphere = lighting?.atmosphere ?? device.airless;
-    const material = device.material;
+    // The ground's emission's form where the lighting carries it and it is made, the plain form
+    // until then (R08.T18.a).
+    if (lighting?.emission !== undefined && !device.emissiveAsked) {
+      device.emissiveAsked = true;
+      void this.#readyEmissive(device, resources.layout.vertexPath).catch((error: unknown) => {
+        console.error("the terrain's emissive form could not be taken:", error);
+      });
+    }
+    const material =
+      lighting?.emission !== undefined && device.emissiveMaterial !== null
+        ? device.emissiveMaterial
+        : device.material;
     const drawable = table !== null && atmosphere !== null && material !== null;
     const live =
       drawable &&
@@ -2403,7 +2450,8 @@ export class TerrainPass {
       state.drawDevice !== device ||
       state.drawnTable !== table ||
       state.drawnAtmosphere !== atmosphere ||
-      state.drawnShadow !== shadow
+      state.drawnShadow !== shadow ||
+      state.draw.material !== material
     ) {
       state.draw = this.#drawItem(device, state, material, { table, atmosphere, shadow });
       state.drawDevice = device;

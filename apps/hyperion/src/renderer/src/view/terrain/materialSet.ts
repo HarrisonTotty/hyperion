@@ -49,17 +49,19 @@ import { fittedTerrainLayout, type TerrainLimits, terrainMeshSpec } from "./gpu/
 import type { TerrainShading } from "./slotLayout";
 import {
   terrainDepthMaterialSpec,
+  terrainLitEmissiveMaterialSpec,
   terrainLitMaterialSpec,
   terrainShadowMaterialSpec,
 } from "./terrainMaterial";
 import { terrainWireMaterialSpec, wireframeTerrainSettings } from "./terrainWire";
 
 /**
- * A material of the terrain session's passes: R10's lit material (`lit`), its depth material for
- * the symbology's pass (`depth`, R10.T16.c), the wireframe's (`wire`, R10.T11), and the lit
- * terrain as a caster into the high setting's shadow cascades (`shadow`, R10.T9.b).
+ * A material of the terrain session's passes: R10's lit material (`lit`), its emissive form for a
+ * body above R08's visibility cut (`lit-emissive`, R08.T18.a), compiled at its first ask, its depth
+ * material for the symbology's pass (`depth`, R10.T16.c), the wireframe's (`wire`, R10.T11), and
+ * the lit terrain as a caster into the high setting's shadow cascades (`shadow`, R10.T9.b).
  */
-export type TerrainMaterialKind = "lit" | "depth" | "wire" | "shadow";
+export type TerrainMaterialKind = "lit" | "lit-emissive" | "depth" | "wire" | "shadow";
 
 /** A material of the terrain and a vertex path it is compiled on. */
 export interface TerrainMaterialKey {
@@ -97,6 +99,13 @@ export function terrainMaterialOf(
   switch (kind) {
     case "lit":
       made = { spec: terrainLitMaterialSpec(path), targets: ["rgba16float"], shading: "lit" };
+      break;
+    case "lit-emissive":
+      made = {
+        spec: terrainLitEmissiveMaterialSpec(path),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
       break;
     case "depth":
       made = { spec: terrainDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };

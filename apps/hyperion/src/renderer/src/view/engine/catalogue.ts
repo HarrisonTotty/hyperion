@@ -56,6 +56,7 @@ import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import {
   TERRAIN_DEPTH_MATERIALS,
+  TERRAIN_LIT_EMISSIVE_MATERIALS,
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
 } from "../terrain/terrainMaterial";
@@ -248,7 +249,8 @@ const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 
 /**
  * R08.T18.a's emissive forms of the lit bodies' kernels (`discReflectance.ts`' `withDiscEmission`):
- * the disc's interior and limb, the mesh regime's figure and the `disc cells` kernel, each with the
+ * the disc's interior and limb, the mesh regime's figure and the `disc cells` kernel, and the lit
+ * terrain's on both vertex paths (`terrainMaterial.ts`' `withTerrainEmission`), each with the
  * ground's thermal emission, made only for a body above the visibility cut. The smoke page compiles
  * them in a part of their own (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
  */
@@ -257,6 +259,8 @@ export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BODY_DISC_EMISSIVE_MATERIALS.limb },
   { kind: "material", spec: SMOOTH_MESH_EMISSIVE_MATERIAL },
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_KERNEL },
+  // R10.T10.b's lit terrain's emissive form, one material per vertex path.
+  ...TERRAIN_LIT_EMISSIVE_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
 ];
 
 /** Every shader the engine can create; later plans add theirs here. */

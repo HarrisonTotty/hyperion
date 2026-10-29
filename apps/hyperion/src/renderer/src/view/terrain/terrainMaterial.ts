@@ -47,6 +47,16 @@
  *   (`shadows/cascadeShadow.wgsl`, its twin `shadows/cascadeShadow.ts`), star 0's direct light
  *   taking min(1, c′ ÷ m) beside the horizon map; the caster ({@link terrainShadowMaterialSpec})
  *   draws the lit vertices into each cascade, depth alone.
+ * - **The ground's thermal emission** (plan R08, R08.T18.a; decision-composition §1.9): a body above
+ *   R08's visibility cut is drawn by the lit material's emissive form
+ *   ({@link terrainLitEmissiveMaterialSpec}), whose `shade_terrain` adds what the texel emits as its
+ *   last step (`shaders/terrainEmission.wgsl`): its laws' A by their shares through R08's shared
+ *   function (`thermal.wgsl`) at its record's field's temperature there, each slot of the `Melt`
+ *   form at no less than the melt's least temperature (its laws' word 6, {@link packClassLaws}), as
+ *   R07's disc draws it (`discReflectance.ts`, whose `discEmissionAt` is the twin of both). Its
+ *   block lies past the lights ({@link packTerrainLighting}). The plain form is drawn for every
+ *   other body and stays as it was, byte for byte; `terrainLit.wgsl`'s note that the emission is
+ *   not drawn is left as it was with it, and stands for the plain form.
  */
 import { brdfFromTable } from "../appearance/brdf";
 import {
@@ -56,7 +66,13 @@ import {
   type PhotometricLaw,
 } from "../appearance/law";
 import { withTemplateCurve } from "../appearance/phase";
+import {
+  DISC_EMISSION_ROWS,
+  type DiscEmission,
+  packDiscEmission,
+} from "../atmosphere/discReflectance";
 import { SURFACE_LIGHTING_WGSL, surfaceLightingTextures } from "../atmosphere/surfaceLighting";
+import { THERMAL_WGSL } from "../atmosphere/thermal";
 import type { DiscLight, DiscOccluder, DiscSecondary } from "../bodies/discShading";
 import { oblateAlbedoScale } from "../bodies/oblate";
 import type { StorageBufferSpec, UniformSpec, WgslMaterialSpec } from "../engine/types";
@@ -79,6 +95,7 @@ import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import patchVertexWgsl from "./shaders/patchVertex.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
+import terrainEmissionWgsl from "./shaders/terrainEmission.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
@@ -233,6 +250,59 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
   };
 }
 
+/** The console names of the two paths' lit materials' emissive forms (R08.T18.a). */
+const EMISSIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "EMISSIVE TERRAIN OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN",
+};
+
+/**
+ * The line of `terrainLit.wgsl`'s `shade_terrain` after which its emissive form adds the texel's
+ * emission: the last of its planetshine loop, its closing brace and the function's return.
+ */
+const SHADE_TERRAIN_END =
+  "    out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;\n  }\n  return out;\n}";
+
+/** {@link SHADE_TERRAIN_END} with the emission added before the return. */
+const EMISSIVE_SHADE_TERRAIN_END =
+  "    out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;\n  }\n  out.radiance = out.radiance + terrain_emission(nu, shares, albedos, in.slot);\n  return out;\n}";
+
+/**
+ * A lit terrain source's emissive form (the module's remarks): `source` with `shade_terrain` adding
+ * `terrain_emission` to each texel's light as its last step, and R08's shared function
+ * (`thermal.ts`' `THERMAL_WGSL`) and the terrain's term (`shaders/terrainEmission.wgsl`) appended,
+ * no binding of its own: the block is read from the lights' buffer, the `Melt` flags from the class
+ * layers'.
+ *
+ * @throws Error unless `shade_terrain`'s end occurs exactly once in `source`.
+ */
+export function withTerrainEmission(source: string): string {
+  const parts = source.split(SHADE_TERRAIN_END);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a lit terrain's emissive form needs terrainLit.wgsl's shade_terrain once, found ${parts.length - 1}`,
+    );
+  }
+  return `${parts.join(EMISSIVE_SHADE_TERRAIN_END)}\n${THERMAL_WGSL}\n${terrainEmissionWgsl}`;
+}
+
+/**
+ * The lit terrain material of a vertex path in its emissive form (plan R08, R08.T18.a;
+ * {@link withTerrainEmission}), for a body above R08's visibility cut: the plain form's bindings,
+ * uniforms and states.
+ */
+export function terrainLitEmissiveMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const plain = terrainLitMaterialSpec(path);
+  const source = withTerrainEmission(plain.fragmentWgsl);
+  return {
+    ...plain,
+    name: `terrain-lit-emissive-${path}`,
+    displayName: EMISSIVE_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+}
+
 /** The console names of the two paths' depth materials. */
 const DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
   "baked-offsets": "TERRAIN DEPTH OFFSETS",
@@ -340,6 +410,12 @@ export function terrainShadowMaterialSpec(
 export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitMaterialSpec("baked-offsets"),
   terrainLitMaterialSpec("face-differences"),
+];
+
+/** Both paths' lit materials' emissive forms (R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitEmissiveMaterialSpec("baked-offsets"),
+  terrainLitEmissiveMaterialSpec("face-differences"),
 ];
 
 /** Both paths' depth materials (R10.T16.c), for the catalogue. */
@@ -537,17 +613,21 @@ export function figureScaledA(photometry: ClassPhotometry, polarOverEquatorial: 
  * figureScaledA}), and L(0), then its row (−1 for a slot with no law), the rows taken from `rows`,
  * which adds any it lacks, then whether the slot is drawn from its maturity nodes (R10.T1.c): 1 for
  * a slot with a law where `drawnFromNodes`, else 0, so that a patch without a maturity layer packs
- * what it packed before, bit for bit.
+ * what it packed before, bit for bit; then 1 where the slot's form is `Melt` (`meltSlots`, R08.T18.a),
+ * which the plain material never reads and its emissive form does, else 0.
  *
  * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
  * @param drawnFromNodes - Whether the patch carries a maturity layer (`TerrainLayers.maturity`),
  *   whose nodes ({@link packClassNodes}) its named slots are then drawn from.
+ * @param meltSlots - Which of the palette's slots are of the `Melt` form ({@link paletteMeltSlots});
+ *   none where absent.
  */
 export function packClassLaws(
   photometry: Float32Array,
   rows: TerrainPhaseRows,
   polarOverEquatorial: number,
   drawnFromNodes = false,
+  meltSlots: ReadonlyArray<boolean> = [],
 ): Float32Array {
   const out = new Float32Array(CLASS_LAW_ROWS * 4);
   for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
@@ -561,8 +641,19 @@ export function packClassLaws(
     if (drawnFromNodes) {
       out[8 * k + 5] = 1;
     }
+    if (meltSlots[k] === true) {
+      out[8 * k + 6] = 1;
+    }
   }
   return out;
+}
+
+/**
+ * Which of a patch's palette slots (`TerrainLayers.palette`, two bytes a slot: its form's class code
+ * and its entry) are of the `Melt` form ({@link MELT_CLASS_CODE}), an empty slot none.
+ */
+export function paletteMeltSlots(palette: Uint8Array): ReadonlyArray<boolean> {
+  return Array.from({ length: TERRAIN_CLASSES }, (_, k) => palette[2 * k] === MELT_CLASS_CODE);
 }
 
 /** The `f32` values of a patch's maturity nodes, as the module gives them and as packed. */
@@ -622,6 +713,12 @@ export const MAX_TERRAIN_SECONDARIES = 2;
 /** `vec4f` rows of `terrain_lights` (`terrainLit.wgsl`'s head). */
 export const TERRAIN_LIGHT_ROWS = 25;
 
+/**
+ * `vec4f` rows of the lights' buffer: {@link TERRAIN_LIGHT_ROWS}, then the emission block that the
+ * emissive form reads from row 25 (`terrainEmission.wgsl`'s `FIRST_TERRAIN_EMISSION_ROW`; R08.T18.a).
+ */
+export const TERRAIN_LIGHT_BUFFER_ROWS = TERRAIN_LIGHT_ROWS + DISC_EMISSION_ROWS;
+
 const FIRST_LIGHT_ROW = 3;
 const LIGHT_ROWS = 8;
 const FIRST_OCCLUDER_ROW = 19;
@@ -642,17 +739,31 @@ export interface TerrainLighting {
   readonly elsewhere: PhotometricLaw;
   /** The frame's pre-exposure (R02's `exposureScale` of its EV100). */
   readonly exposureScale: number;
+  /**
+   * The ground's thermal emission, body-fixed, for a body above R08's visibility cut (R08.T18.a;
+   * its disc record's, `DiscRecord.emission`, its star turned into the body's axes); absent below
+   * it, when the plain material draws the terrain.
+   */
+  readonly emission?: DiscEmission;
 }
 
 /**
  * The lights as `terrainLit.wgsl`'s `terrain_lights`, {@link TERRAIN_LIGHT_ROWS} rows, law 0 in row
- * 0 of the phase table and its A scaled for a figure of c ÷ a `polarOverEquatorial`.
+ * 0 of the phase table and its A scaled for a figure of c ÷ a `polarOverEquatorial`; with the
+ * lighting's emission (R08.T18.a), its block after them (`discReflectance.ts`' `packDiscEmission`
+ * at the frame's exposure), {@link TERRAIN_LIGHT_BUFFER_ROWS} rows in all.
  */
 export function packTerrainLighting(
   lighting: TerrainLighting,
   polarOverEquatorial: number,
 ): Float32Array {
-  const out = new Float32Array(TERRAIN_LIGHT_ROWS * 4);
+  const { emission } = lighting;
+  const out = new Float32Array(
+    (emission === undefined ? TERRAIN_LIGHT_ROWS : TERRAIN_LIGHT_BUFFER_ROWS) * 4,
+  );
+  if (emission !== undefined) {
+    out.set(packDiscEmission(emission, lighting.exposureScale), TERRAIN_LIGHT_ROWS * 4);
+  }
   const put = (row: number, values: ReadonlyArray<number>): void => {
     out.set(values, row * 4);
   };

@@ -8,6 +8,9 @@
 import type { BodyIdHex, SurfaceHeaderDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+
 import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   FIXTURE_MOON,
@@ -248,6 +251,17 @@ describe("a body's terrain lights from its disc record (R10.T16.c; decision D5)"
       record.occluders.map((occluder) => ({ ...occluder, centre: cyclic(occluder.centre) })),
       record.secondaries.map((source) => ({ ...source, direction: cyclic(source.direction) })),
     ]);
+  });
+
+  it("carries the record's ground's emission, its star rotated into the body-fixed axes, and none without one (R08.T18.a)", () => {
+    const emission = {
+      field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+      star: normalise(vec3(1, 2, 3)),
+      meltClasses: [],
+    };
+    const { lighting } = terrainLightingOf({ ...record, emission }, CYCLIC, EXPOSURE);
+    expect(lighting.emission).toEqual({ ...emission, star: cyclic(emission.star) });
+    expect(terrainLightingOf(record, CYCLIC, EXPOSURE).lighting).not.toHaveProperty("emission");
   });
 
   it("takes the record's uniform law, or its class map's unsurveyed ground's, and the pre-exposure", () => {

@@ -39,8 +39,12 @@ import {
   packTerrainLighting,
   type TerrainLighting,
   terrainDepthMaterialSpec,
+  terrainLitEmissiveMaterialSpec,
   terrainLitMaterialSpec,
 } from "./terrainMaterial";
+import { microtasks } from "../../test/opticsFakes";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import {
   effectiveTauPx,
   morphRangeM,
@@ -1129,6 +1133,40 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     expect(withAir.draw?.textures["atmosphereBody"]).toBe(air.body);
   });
 
+  it("draws a body whose lighting carries its ground's emission by the emissive form once made, the plain form until then (R08.T18.a)", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = bodyLayers();
+    const view = northPole(2_000_000);
+    const emitting: TerrainLighting = {
+      ...LIGHTING,
+      emission: {
+        field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+        star: { x: 0, y: 0, z: 1 },
+        meltClasses: [],
+      },
+    };
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool().bakeDemand(pass);
+    const plain = pass.frame({ ...inputAt(view), lighting: emitting });
+    expect(plain.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+    await microtasks();
+    const emissive = pass.frame({ ...inputAt(view), lighting: emitting });
+    expect(emissive.draw?.material.name).toBe(
+      terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name,
+    );
+    // The lights' buffer holds the block past the lights.
+    const lights = engine.writes.findLast((w) => w.buffer === "terrain lights");
+    expect(lights?.data).toEqual(
+      new Uint8Array(
+        packTerrainLighting(emitting, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
+          .buffer,
+      ),
+    );
+    // A frame without it goes back to the plain form.
+    const after = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(after.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+  });
+
   it("binds the larger phase table once the slots' laws outgrow it", async () => {
     const { pass, pool } = await passOn("low", { source: BODY });
     pool().layers = bodyLayers();
@@ -1235,6 +1273,7 @@ describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r0
   const materials = (["baked-offsets", "face-differences"] as const).flatMap((path) => [
     terrainMaterialSpec(path),
     terrainLitMaterialSpec(path),
+    terrainLitEmissiveMaterialSpec(path),
     terrainDepthMaterialSpec(path),
     terrainWireMaterialSpec(path),
   ]);

@@ -20,6 +20,13 @@
  * (drawn alone, at k = 0) wherever both draw, to within the rounding of two meshes over one
  * surface; drawn at k = 1 with no parent to blend to, its own finer normals and maps must not, so
  * that the check can fail.
+ *
+ * Then the ground's thermal emission (plan R08, R08.T18.a): the block drawn by the lit material's
+ * emissive form with no star and no planetshine, its ground a magma ocean's field about the star's
+ * old direction, so that its light is its own alone. Each texel the first frame draws as terrain
+ * must emit, in luminance, between the least and the most that `thermal.ts`' shared function gives
+ * any of the block's laws' A, its laws' and its maturity nodes', over the field's temperature
+ * across the block, to 1% for the half floats and `f32`'s exponentials.
  */
 
 import { withTemplateCurve } from "../view/appearance/phase";
@@ -54,8 +61,11 @@ import { parentKey, type PatchKey } from "../view/terrain/patchKey";
 import type { BodyFigure } from "../view/terrain/planet";
 import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
 import {
+  classPhotometryOf,
   SHADOW_CASCADES_TEXTURE,
+  TERRAIN_CLASSES,
   type TerrainLighting,
+  terrainLitEmissiveMaterialSpec,
   terrainLitMaterialSpec,
 } from "../view/terrain/terrainMaterial";
 import type {
@@ -65,6 +75,15 @@ import type {
   HeightWorkerRequest,
 } from "../view/terrain/workers/messages";
 import { moonLikeFixture, type WorkerFixture } from "../test/moonLikeFixture";
+import { magmaOceanSurface } from "../test/thermalSurfaces";
+import { rec709Luminance } from "../view/atmosphere/solar";
+import {
+  fieldTemperatureK,
+  groundTemperatureFieldOf,
+  type SurfaceTemperatureField,
+  thermalRadiance,
+} from "../view/atmosphere/thermal";
+import type { Rgb } from "../view/photometry/toneCurve";
 import { type Checks, halfTexels, projection } from "./harness";
 
 /** The Moon-like world's equatorial radius, m: R ÷ ∛(1 − f) ({@link MOON_LIKE}). */
@@ -240,6 +259,8 @@ interface LitFrame {
 interface LitFrames {
   readonly lit: LitFrame;
   readonly morph: LitFrame;
+  /** The ground's thermal emission's frame (R08.T18.a). */
+  readonly emission: LitFrame;
 }
 
 /**
@@ -445,7 +466,8 @@ async function drawInto(
     patches: bakes.length,
   };
   try {
-    const blended = litFrameOf(layout.vertexPath, draw, await renderInto(engine, target, draw));
+    const first = await renderInto(engine, target, draw);
+    const blended = litFrameOf(layout.vertexPath, draw, first);
     // The morph's end's frames run in order, each read back before the next is written.
     writeBlock(MORPH_DONE_M, true);
     const done = await renderInto(engine, target, draw);
@@ -453,10 +475,138 @@ async function drawInto(
     const coarse = await renderInto(engine, target, draw);
     writeBlock(MORPH_DONE_M, false);
     const unblended = await renderInto(engine, target, draw);
-    return { lit: blended, morph: morphFrameOf(done, coarse, unblended) };
+    // The ground's own light alone (R08.T18.a): no star, no planetshine, the field about the star's
+    // old direction.
+    const star = lighting.lights[0];
+    const ocean = groundTemperatureFieldOf(magmaOceanSurface());
+    if (star === undefined || ocean === null) {
+      throw new Error("the frame has a star and the magma ocean no medium");
+    }
+    writeBlock(MORPH_M, true);
+    resources.setLighting({
+      ...lighting,
+      lights: [],
+      secondaries: [],
+      emission: { field: ocean, star: star.direction, meltClasses: [] },
+    });
+    const emissive = await engine.createMaterialAsync(
+      terrainLitEmissiveMaterialSpec(layout.vertexPath),
+      ["rgba16float"],
+      [resources.mesh],
+    );
+    const emitted = await renderInto(engine, target, { ...draw, material: emissive });
+    const albedos = blockAlbedos(bakes, lighting.elsewhere.a);
+    return {
+      lit: blended,
+      morph: morphFrameOf(done, coarse, unblended),
+      emission: emissionFrameOf(first, emitted, {
+        field: ocean,
+        star: star.direction,
+        nu,
+        albedos,
+        exposureScale: lighting.exposureScale,
+      }),
+    };
   } finally {
     target.dispose();
   }
+}
+
+/**
+ * Every A a texel of the block may emit with: law 0's, each slot's photometry's and each of its
+ * maturity nodes', per display channel (Johnson R, V and B as r, g and b).
+ */
+function blockAlbedos(bakes: ReadonlyArray<BakedPatch>, elsewhere: Rgb): Rgb[] {
+  const out: Rgb[] = [elsewhere];
+  for (const bake of bakes) {
+    const layers = bake.layers;
+    if (layers === null) {
+      continue;
+    }
+    for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+      const law = classPhotometryOf(layers.photometry, k);
+      if (law !== null) {
+        out.push(law.a);
+      }
+    }
+    const nodes = layers.maturity?.nodes;
+    if (nodes !== undefined) {
+      for (let at = 0; at + 3 <= nodes.length; at += 3) {
+        const [b = 0, v = 0, r = 0] = nodes.subarray(at, at + 3);
+        if (b > 0 || v > 0 || r > 0) {
+          out.push([r, v, b]);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** What the emission's frame is held to (the module's remarks). */
+interface EmissionBounds {
+  readonly field: SurfaceTemperatureField;
+  /** The field's star, body-fixed, and the block's centre's datum normal. */
+  readonly star: Xyz;
+  readonly nu: Xyz;
+  readonly albedos: ReadonlyArray<Rgb>;
+  readonly exposureScale: number;
+}
+
+/** The emission's luminance's relative margin: the half floats' and `f32`'s exponentials'. */
+const EMISSION_MARGIN = 0.01;
+
+/** The cosine's spread from the block's centre over its 3 × 3 level-7 patches, generous. */
+const BLOCK_COSINE_SPREAD = 0.05;
+
+/**
+ * The emission's check (R08.T18.a; the module's remarks): every texel `terrain` draws as terrain
+ * finite, and its luminance in `emitted` between the least and the most any of the block's A
+ * emits over the field's temperatures across the block, within {@link EMISSION_MARGIN}.
+ */
+function emissionFrameOf(
+  terrain: Float32Array,
+  emitted: Float32Array,
+  bounds: EmissionBounds,
+): LitFrame {
+  const mu =
+    bounds.nu.x * bounds.star.x + bounds.nu.y * bounds.star.y + bounds.nu.z * bounds.star.z;
+  const temperatures = [mu - BLOCK_COSINE_SPREAD, mu + BLOCK_COSINE_SPREAD].map((m) =>
+    fieldTemperatureK(bounds.field, m, bounds.nu.z),
+  );
+  const luminances = bounds.albedos.flatMap((a) =>
+    temperatures.map((t) => rec709Luminance(thermalRadiance(a, 1, t)) * bounds.exposureScale),
+  );
+  const least = Math.min(...luminances) * (1 - EMISSION_MARGIN);
+  const most = Math.max(...luminances) * (1 + EMISSION_MARGIN);
+  let texels = 0;
+  let within = 0;
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (!isTerrain(terrain, p)) {
+      continue;
+    }
+    texels += 1;
+    const y = rec709Luminance([
+      emitted[4 * p] ?? Number.NaN,
+      emitted[4 * p + 1] ?? Number.NaN,
+      emitted[4 * p + 2] ?? Number.NaN,
+    ]);
+    lowest = Math.min(lowest, y);
+    highest = Math.max(highest, y);
+    if (y >= least && y <= most) {
+      within += 1;
+    }
+  }
+  const finite = emitted.every(Number.isFinite);
+  return {
+    pass: finite && texels >= 0.5 * FRAME.widthPx * FRAME.heightPx && within === texels,
+    detail:
+      `${String(within)} of ${String(texels)} terrain texels emit within ` +
+      `[${least.toPrecision(4)}, ${most.toPrecision(4)}] pre-exposed (drawn ` +
+      `${lowest.toPrecision(4)} to ${highest.toPrecision(4)}), at ` +
+      `${temperatures.map((t) => t.toFixed(0)).join(" to ")} K over ${String(bounds.albedos.length)} A; finite ${String(finite)}`,
+  };
 }
 
 /** One frame's draw, as {@link drawInto} assembles it. */
@@ -624,7 +774,7 @@ export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Pro
   for (const setting of ["high", "low"] as const) {
     // The frames run in order: each bakes, draws and reads back before the next allocates.
     // oxlint-disable-next-line no-await-in-loop
-    const { lit, morph } = await drawLit(engine, setting, field);
+    const { lit, morph, emission } = await drawLit(engine, setting, field);
     checks.check(
       `R10.T10.b the lit terrain of a generated world (${setting}) is finite, drawn and lit`,
       lit.pass,
@@ -634,6 +784,11 @@ export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Pro
       `R10.T8.c a fine patch at k = 1 shades as its parents, normals and horizon (${setting})`,
       morph.pass,
       morph.detail,
+    );
+    checks.check(
+      `R08.T18.a the lit terrain's emissive form draws its ground's own light (${setting})`,
+      emission.pass,
+      emission.detail,
     );
   }
 }

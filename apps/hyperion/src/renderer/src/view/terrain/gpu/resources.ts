@@ -83,7 +83,8 @@ import {
   packClassLaws,
   packClassNodes,
   packTerrainLighting,
-  TERRAIN_LIGHT_ROWS,
+  paletteMeltSlots,
+  TERRAIN_LIGHT_BUFFER_ROWS,
   type TerrainLighting,
   TerrainPhaseRows,
 } from "../terrainMaterial";
@@ -765,7 +766,10 @@ export interface TerrainViewBuffers {
   readonly contacts: BufferHandle;
   /** Its `drawIndexedIndirect` arguments, for `DrawItem.indirect` at offset 0. */
   readonly indirect: BufferHandle;
-  /** A lit layout's lights for it, `TERRAIN_LIGHT_ROWS` `vec4f`; `null` for R05's spike shading. */
+  /**
+   * A lit layout's lights for it, `TERRAIN_LIGHT_BUFFER_ROWS` `vec4f`: the lights, then room for the
+   * ground's emission's block (R08.T18.a); `null` for R05's spike shading.
+   */
   readonly lights: BufferHandle | null;
   /**
    * A wireframe layout's phase records for it ({@link WIRE_PHASE_RECORD_BYTES} each), one per slot
@@ -1198,7 +1202,13 @@ export class TerrainResources {
       this.#writeField(
         "class-layers",
         slot,
-        packClassLaws(layers.photometry, this.#rows, c / a, maturity !== undefined),
+        packClassLaws(
+          layers.photometry,
+          this.#rows,
+          c / a,
+          maturity !== undefined,
+          paletteMeltSlots(layers.palette),
+        ),
         CLASS_WEIGHTS_BYTES,
       );
       if (maturity !== undefined) {
@@ -1509,12 +1519,12 @@ export class TerrainResources {
     if (traits.lit) {
       lights = engine.createBuffer({
         name: named("lights"),
-        bytes: TERRAIN_LIGHT_ROWS * 16,
+        bytes: TERRAIN_LIGHT_BUFFER_ROWS * 16,
         usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
         category: "other",
       });
       // No star until the view's first frame's lights: nothing is lit.
-      engine.writeBuffer(lights, 0, new Float32Array(TERRAIN_LIGHT_ROWS * 4));
+      engine.writeBuffer(lights, 0, new Float32Array(TERRAIN_LIGHT_BUFFER_ROWS * 4));
     }
     const phases = traits.phases
       ? engine.createBuffer({

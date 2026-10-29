@@ -58,21 +58,26 @@ import {
   classRowLaw,
   classTexelLaw,
   dominantSlot,
+  MELT_CLASS_CODE,
   packClassLaws,
   packClassNodes,
   packTerrainLighting,
+  paletteMeltSlots,
   SHADOW_CASCADES_TEXTURE,
   SHADOW_COMPARE_SAMPLER,
   TERRAIN_CLASSES,
+  TERRAIN_LIGHT_BUFFER_ROWS,
   TERRAIN_LIGHT_ROWS,
   TERRAIN_DEPTH_MATERIALS,
   TERRAIN_LIT_BINDINGS,
+  TERRAIN_LIT_EMISSIVE_MATERIALS,
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
   PHASE_LAW,
   type TerrainLighting,
   TerrainPhaseRows,
   terrainDepthMaterialSpec,
+  terrainLitEmissiveMaterialSpec,
   terrainLitMaterialSpec,
   terrainReflectance,
   terrainShadowMaterialSpec,
@@ -81,7 +86,12 @@ import {
   texelClassAlbedo,
   texelLawOf,
   texelWeights,
+  withTerrainEmission,
 } from "./terrainMaterial";
+import { packDiscEmission } from "../atmosphere/discReflectance";
+import { THERMAL_WGSL, surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import terrainEmissionWgsl from "./shaders/terrainEmission.wgsl?raw";
 
 const RAD = Math.PI / 180;
 
@@ -1285,5 +1295,109 @@ describe("the rows' energy bound, with their f and L(α) (decision-r10-limb §3)
     for (const mu0 of MU0S) {
       expect(Math.abs(eta(table, mu0) - 1)).toBeLessThan(1e-6);
     }
+  });
+});
+
+describe("the lit terrain's emissive form (R08.T18.a)", () => {
+  /** The line `withTerrainEmission` adds to `shade_terrain`. */
+  const LINE = "  out.radiance = out.radiance + terrain_emission(nu, shares, albedos, in.slot);\n";
+
+  it.each(["baked-offsets", "face-differences"] as const)(
+    "makes the %s path's from its plain form, one line added to shade_terrain and the emission appended, its bindings and states the same",
+    (path) => {
+      const plain = terrainLitMaterialSpec(path);
+      const emissive = terrainLitEmissiveMaterialSpec(path);
+      const appended = `\n${THERMAL_WGSL}\n${terrainEmissionWgsl}`;
+      expect(emissive.fragmentWgsl.endsWith(appended)).toBe(true);
+      const head = emissive.fragmentWgsl.slice(0, -appended.length);
+      expect(head.split(LINE)).toHaveLength(2);
+      expect(head.replace(LINE, "")).toBe(plain.fragmentWgsl);
+      expect(emissive.vertexWgsl).toBe(emissive.fragmentWgsl);
+      expect({
+        ...emissive,
+        name: plain.name,
+        displayName: plain.displayName,
+        vertexWgsl: plain.vertexWgsl,
+        fragmentWgsl: plain.fragmentWgsl,
+      }).toEqual(plain);
+      // The `terrain-lit-` prefix the probes and the hand-over check read (R10.T14, R10.T16).
+      expect(emissive.name).toBe(`terrain-lit-emissive-${path}`);
+    },
+  );
+
+  it("is registered for both paths, and refuses a source without shade_terrain's end", () => {
+    expect(TERRAIN_LIT_EMISSIVE_MATERIALS.map((spec) => spec.name)).toEqual([
+      "terrain-lit-emissive-baked-offsets",
+      "terrain-lit-emissive-face-differences",
+    ]);
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "material" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(TERRAIN_LIT_EMISSIVE_MATERIALS.map((m) => m.name)),
+    );
+    expect(() => withTerrainEmission("fn main() {}")).toThrow(/once, found 0/u);
+  });
+
+  it("reads its block from the row the lights end at", () => {
+    const first = /const FIRST_TERRAIN_EMISSION_ROW : u32 = (\d+)u;/u.exec(terrainEmissionWgsl);
+    expect(Number(first?.[1])).toBe(TERRAIN_LIGHT_ROWS);
+    expect(TERRAIN_LIGHT_BUFFER_ROWS).toBe(TERRAIN_LIGHT_ROWS + 3);
+  });
+
+  it("packs the lighting's emission after the lights, and the lights alone as before without it", () => {
+    const lighting: TerrainLighting = {
+      lights: [],
+      occluders: [],
+      secondaries: [],
+      elsewhere: classRowLaw(1, 1),
+      exposureScale: 1e-4,
+    };
+    const emission = {
+      field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+      star: vec3(0, 0.6, 0.8),
+      meltClasses: [],
+    };
+    const plain = packTerrainLighting(lighting, 1);
+    expect(plain).toHaveLength(TERRAIN_LIGHT_ROWS * 4);
+    const emitting = packTerrainLighting({ ...lighting, emission }, 1);
+    expect(emitting).toHaveLength(TERRAIN_LIGHT_BUFFER_ROWS * 4);
+    expect([...emitting.subarray(0, TERRAIN_LIGHT_ROWS * 4)]).toEqual([...plain]);
+    expect([...emitting.subarray(TERRAIN_LIGHT_ROWS * 4)]).toEqual([
+      ...packDiscEmission(emission, 1e-4),
+    ]);
+  });
+
+  it("flags each palette slot of the Melt form in its laws' word 6, and no other, as before without them", () => {
+    const palette = Uint8Array.from([
+      1,
+      0,
+      MELT_CLASS_CODE,
+      1,
+      255,
+      255,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]);
+    const slots = paletteMeltSlots(palette);
+    expect(slots).toEqual([false, true, false, false, false, false, false, false]);
+    const photometry = photometryOf([
+      [0.1, 0.12, 0.14, 1, 1],
+      [0.05, 0.05, 0.05, 1, 1],
+    ]);
+    const rows = new TerrainPhaseRows(classRowLaw(3, 0));
+    const flagged = packClassLaws(photometry, rows, 1, false, slots);
+    const plain = packClassLaws(photometry, rows, 1);
+    expect([flagged[6], flagged[8 + 6]]).toEqual([0, 1]);
+    expect(plain[8 + 6]).toBe(0);
+    expect([...flagged].filter((value, i) => value !== plain[i])).toEqual([1]);
   });
 });

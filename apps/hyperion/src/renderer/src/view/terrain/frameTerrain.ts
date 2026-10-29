@@ -108,8 +108,9 @@ const NO_SUN = vec3(0, 0, 1);
  * distance, radius, illuminance and annuli and each occluder's radius as they stand; its uniform
  * law, `elsewhere` (the record's surface's first law, `discSurfaceLaws`: its uniform law, or its
  * class map's unsurveyed ground's), whose A the terrain scales for the figure as the disc does;
- * the frame's pre-exposure; and the record's atmosphere tables, where it has them (R08.T10.b). The sun is the brightest light's, the record's first (`lightsAt` puts
- * the brightest first).
+ * the frame's pre-exposure; the record's atmosphere tables, where it has them (R08.T10.b); and its
+ * ground's emission, where it carries one (R08.T18.a), its star turned body-fixed as the lights
+ * are. The sun is the brightest light's, the record's first (`lightsAt` puts the brightest first).
  *
  * @param rotation - The rotation the plan drew the body's figure with, body-fixed to galactic.
  * @param exposureScale - The frame's pre-exposure (R02's `exposureScale` of its EV100).
@@ -136,8 +137,10 @@ export function terrainLightingOf(
     throw new Error(`disc ${record.body} shades with no law`);
   }
   const brightest = lights[0];
+  const { emission } = record;
   return {
-    // The record's air, where the frame draws its atmosphere (R08.T10.b).
+    // The record's air, where the frame draws its atmosphere (R08.T10.b), and its ground's
+    // emission above the thermal cut, its star turned into the body's axes (R08.T18.a).
     lighting: {
       lights,
       occluders,
@@ -145,6 +148,9 @@ export function terrainLightingOf(
       elsewhere,
       exposureScale,
       ...(record.atmosphere === undefined ? {} : { atmosphere: record.atmosphere }),
+      ...(emission === undefined
+        ? {}
+        : { emission: { ...emission, star: rotateToBodyFixed(rotation, emission.star) } }),
     },
     sunDirectionBodyFixed: brightest?.direction ?? NO_SUN,
     sunIlluminanceLx: brightest === undefined ? [0, 0, 0] : [...brightest.illuminance],

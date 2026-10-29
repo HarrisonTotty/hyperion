@@ -9,9 +9,12 @@
  * record's ground temperature field), drawn through the `disc cells` pass's emissive kernel and the
  * disc's, the limb's and the mesh regime's emissive materials, and held two ways:
  * - **the kernel's own output**: every pixel's sums the emissive `disc cells` kernel leaves in
- *   `cell_sums`, read back as `f32`, against the twin's (`discCellSums`), each channel within
- *   10⁻³ · max(|twin|, 10⁻⁶ · largest), the plan's twin-bound arm for a kernel's own output
- *   (`decision-r08-t6b-floor.md`), and each covered share as closely;
+ *   `cell_sums`, read back as `f32`, against the twin's (`discCellSums`): a wholly covered pixel's
+ *   light and covered share within 10⁻³ · max(|twin|, 10⁻⁶ · largest), the plan's twin-bound arm
+ *   for a kernel's own output (`decision-r08-t6b-floor.md`); a pixel the limb covers in part within
+ *   the image's bound below, which R07's `f32` limb geometry is held to (the limb's last pixels'
+ *   covered share, a sliver of 10⁻⁵ of a pixel, differs by a few per cent of itself between `f32`
+ *   and `f64` whatever the light: 7.5% of 1.7 × 10⁻⁴ on the 160 px disc, measured);
  * - **the image**: the scene target's `rgba16float` pixels against the twin's composite
  *   (`rasteriseDisc`), each channel within 10⁻⁴ + 4 × 10⁻³ of it, as R07's disc checks hold it
  *   (`smoke/bodies.ts`), and every interior pixel's meter class equal.
@@ -48,6 +51,7 @@ import {
   viewRotation4,
 } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
+import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { BufferHandle, ComputeHandle, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
@@ -142,7 +146,13 @@ function planOf(item: ThermalCase): BodyFramePlan {
   );
 }
 
-/** The renderer's engine, keeping the sums buffer each `disc cells` dispatch binds. */
+/** The renderer's name of the `disc cells` pass's sums (`draw.ts`' `LitBodyRenderer`). */
+const CELL_SUMS_BUFFER = "bodies:disc cell sums";
+
+/**
+ * The renderer's engine, keeping the sums buffer each `disc cells` dispatch binds, made readable
+ * (`COPY_SRC`), which the renderer's own is not, so that the kernel's own output is read back.
+ */
 function keepingSums(engine: RenderEngine): {
   readonly engine: LitBodyEngine;
   readonly sums: () => BufferHandle | null;
@@ -151,7 +161,12 @@ function keepingSums(engine: RenderEngine): {
   const kept: LitBodyEngine = {
     createMaterial: (...args) => engine.createMaterial(...args),
     createMesh: (...args) => engine.createMesh(...args),
-    createBuffer: (...args) => engine.createBuffer(...args),
+    createBuffer: (spec) =>
+      engine.createBuffer(
+        spec.name === CELL_SUMS_BUFFER
+          ? { ...spec, usage: spec.usage | BUFFER_USAGE.COPY_SRC }
+          : spec,
+      ),
     createTexture: (...args) => engine.createTexture(...args),
     writeBuffer: (...args) => {
       engine.writeBuffer(...args);
@@ -254,16 +269,27 @@ function imageAgreement(
   return { worst, classes, pixels: expected.length };
 }
 
+/** One arm of the pass's sums against the twin's: its worst error over its bound, and where. */
+interface SumsArm {
+  readonly worst: number;
+  readonly pixels: number;
+  readonly where: string;
+}
+
 /**
- * The pass's sums against the twin's (the module's remarks): the worst channel's and covered
- * share's error over its bound, the sums compared, and the largest light among them.
+ * The pass's sums against the twin's (the module's remarks): each wholly covered pixel's light and
+ * covered share at the kernel arm, 10⁻³ · max(|twin|, 10⁻⁶ · largest); each pixel the limb covers
+ * in part at the image's bound, 10⁻⁴ + 4 × 10⁻³ of the twin's, which R07's f32 limb geometry is
+ * held to (its covered share's sliver at the limb's last pixels, some 10⁻⁵ of a pixel, differs
+ * by a few per cent of itself between `f32` and `f64` whatever the light); and the largest light
+ * among them.
  */
 function sumsAgreement(
   plan: BodyFramePlan,
   viewport: Viewport,
   sums: Float32Array,
   engine: RenderEngine,
-): { readonly worst: number; readonly pixels: number; readonly largest: number } {
+): { readonly whole: SumsArm; readonly limb: SumsArm; readonly largest: number } {
   const fits = Math.floor(engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
   const frame = {
     viewRotation: viewRotation4(CAMERA.orientation),
@@ -294,22 +320,33 @@ function sumsAgreement(
     }
   }
   const largest = Math.max(0, ...twins.flatMap(({ rgb }) => rgb.map(Math.abs)));
-  let worst = 0;
+  const arms = {
+    whole: { worst: 0, pixels: 0, where: "none" },
+    limb: { worst: 0, pixels: 0, where: "none" },
+  };
   for (const { job, rgb, coverage } of twins) {
     const at = 8 * job;
+    const whole = coverage >= 1;
+    const arm = whole ? arms.whole : arms.limb;
+    arm.pixels += 1;
     const pairs: ReadonlyArray<readonly [number, number, number]> = [
       [sums[at] ?? Number.NaN, rgb[0], largest],
       [sums[at + 1] ?? Number.NaN, rgb[1], largest],
       [sums[at + 2] ?? Number.NaN, rgb[2], largest],
       [sums[at + 3] ?? Number.NaN, coverage, 1],
     ];
-    for (const [got, want, scaleOf] of pairs) {
-      const bound = KERNEL_TOLERANCE * Math.max(Math.abs(want), KERNEL_FLOOR * scaleOf);
+    pairs.forEach(([got, want, scaleOf], c) => {
+      const bound = whole
+        ? KERNEL_TOLERANCE * Math.max(Math.abs(want), KERNEL_FLOOR * scaleOf)
+        : TEXEL_ABSOLUTE + TEXEL_RELATIVE * Math.abs(want);
       const error = Math.abs(got - want) / bound;
-      worst = Math.max(worst, Number.isFinite(error) ? error : Number.POSITIVE_INFINITY);
-    }
+      if (!(error <= arm.worst)) {
+        arm.worst = Number.isFinite(error) ? error : Number.POSITIVE_INFINITY;
+        arm.where = `(${String(cells.jobs[4 * job + 1])}, ${String(cells.jobs[4 * job + 2])}) channel ${String(c)}`;
+      }
+    });
   }
-  return { worst, pixels: twins.length, largest };
+  return { ...arms, largest };
 }
 
 /** The share of a record's composite light, summed over its pixels, that is its emission's. */
@@ -414,8 +451,9 @@ export async function checkThermalDiscs(engine: RenderEngine, checks: Checks): P
         regime === (item.mesh ? "mesh" : "disc") &&
         drawn.dispatched &&
         sums !== null &&
-        sums.pixels > 0 &&
-        sums.worst <= 1 &&
+        sums.whole.pixels > 0 &&
+        sums.whole.worst <= 1 &&
+        sums.limb.worst <= 1 &&
         image.pixels > 0 &&
         image.worst <= 1 &&
         image.classes &&
@@ -423,7 +461,7 @@ export async function checkThermalDiscs(engine: RenderEngine, checks: Checks): P
       checks.check(
         `R08.T18.a ${item.name}`,
         ok,
-        `${String(regime)}, its emission ${String(Math.round(100 * share))}% of its light; the emissive disc cells' ${String(sums?.pixels ?? 0)} pixels' sums within ${(sums?.worst ?? Number.POSITIVE_INFINITY).toFixed(3)} of 10⁻³ of the twin's (largest ${(sums?.largest ?? 0).toPrecision(4)}); its ${String(image.pixels)} pixels within ${image.worst.toFixed(3)} of the image's tolerance, its classes ${String(image.classes)}`,
+        `${String(regime)}, its emission ${(100 * share).toPrecision(3)}% of its light; the emissive disc cells' sums of its ${String(sums?.whole.pixels ?? 0)} wholly covered pixels within ${(sums?.whole.worst ?? Number.POSITIVE_INFINITY).toFixed(3)} of 10⁻³ of the twin's (worst at ${sums?.whole.where ?? "none"}), of its ${String(sums?.limb.pixels ?? 0)} on the limb within ${(sums?.limb.worst ?? Number.POSITIVE_INFINITY).toFixed(3)} of the image's tolerance (largest light ${(sums?.largest ?? 0).toPrecision(4)}); its ${String(image.pixels)} pixels within ${image.worst.toFixed(3)} of the image's tolerance, its classes ${String(image.classes)}`,
       );
     }
   } finally {
