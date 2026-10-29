@@ -2110,7 +2110,9 @@ The order:
   gates) follows T13, T14.c and T14.e; and T14.d (the gates) follows T14.f. T15 follows T14, whose
   solver it uses.
 - T16 needs T8 and T15. It runs on the hand giant fixture, and re-runs on plan 14's envelope when
-  P14.T24.d is on the wire. T18 needs T6, T9, T14 and T16.b. T19 needs P14.T49.a's fixture and
+  P14.T24.d is on the wire. T18 is built in two parts (its entry's split): T18.a needs T6's bins,
+  T4.a's colour pipeline and T9.b's surface lighting; T18.b needs T14.f, T16.b and the solver's
+  thermal source. T19 needs P14.T49.a's fixture and
   T5.b, and grows with the registry. Both precede T17. T17 closes.
 
 Some tasks wait on the owner or on another plan, and say so where they do:
@@ -5942,6 +5944,27 @@ Acceptance: `pnpm test` and `just test-render`.
   - on R07's disc, through `discReflectance.ts`, from the record's surface temperature and signed
     contrasts (a locked airless world's T_ss cos^¼θ) and P14.T51.c's melt area;
   - on terrain, through the same exported function, which R10.T10.b calls.
+  - _The split_ (lean, 2026-10-29; research's lean, ruled by main). T18 is built in two parts.
+    T18.a draws the ground's emission on the bodies the client draws with no medium (airless
+    bodies, and melt surfaces whose volatiles are gone): `thermal.ts`'s function (B_λ(T) at the
+    15 bake bins, the emissivity 1 − A per bin by Kirchhoff on the bake's ground rule, and the
+    reduction to the render channels); the record's temperature field; the visibility cut, per
+    body; a first `discReflectance.ts` holding the emission term alone, to which T16.b adds the
+    reflectance table; the disc's read and its twin; and the terrain's call for `Melt` and for
+    any texel above the cut. T18.b, after T14.f, T16.b and the solver's thermal source, builds the
+    medium's source term (1 − ω) B_λ(T(h)) in the march, the sky-view, the aerial perspective and
+    the bakes; `AtmosphereRegime`'s `selfLuminous`; the bodies with air, their ground's emission
+    seen through the medium; and the ultra-hot giant's dayside test. The entry's "after T6, T9,
+    T14 and T16.b" is T18.b's: T18.a needs T6's bins, T4.a's colour pipeline and T9.b's surface
+    lighting, all built. Of the tests, T18.a takes the 300 K world (nothing computed, in place of
+    `selfLuminous` unset), the lava world's night side (the twin: its radiance there is the
+    emission term, its reflected light 0), a 2,500 K surface of emissivity 1 against an
+    independent integration of Planck's law times the matching functions, the constants (h, c and
+    k_B, CODATA's exact SI values), and the kernels' emission against the twin's under
+    `just test-render` in a smoke group of its own; T18.b the isothermal column and the
+    ultra-hot giant. T18.a's acceptance is
+    `pnpm --filter hyperion exec vitest run view/atmosphere/thermal view/atmosphere/discReflectance`
+    and `just test-render`.
 
 This assigns the roadmap's open item on visible thermal emission (README, "Open across plans").
 
@@ -22855,3 +22878,144 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     is; three crashes spread over more than its window with the status dropped read as the
     crashes'). Safe and default modes, which never relaunch, are unchanged. Every views-check run
     kind takes it; a spike launch still relaunches.
+- **Deviations in T18.a, as built** (2026-10-29; lane `r08-glow`; the split is the task entry's).
+  Client only: no generated output, no `GENERATOR_VERSION` (23), `PROTOCOL_VERSION` (3) or
+  `ATMOSPHERE_OPTICS_VERSION` change, and no golden moves.
+  - _Files._ New: `view/atmosphere/thermal.ts`, `shaders/thermal.wgsl`, `discReflectance.ts`,
+    `shaders/discEmission.wgsl`, `view/terrain/shaders/terrainEmission.wgsl`, `smoke/thermal.ts`,
+    `test/thermalSurfaces.ts`, and their tests. Changed: R07's `view/bodies/discShading.ts` and
+    `draw.ts`, `view/photoreal/renderer.ts`, `view/engine/catalogue.ts`; R10's
+    `view/terrain/terrainMaterial.ts`, `terrainPass.ts`, `materialSet.ts`, `frameTerrain.ts`,
+    `gpu/resources.ts` and `classMap.ts`; `view/appearance/bodyAppearance.ts`;
+    `AtmosphereCache.ts`; `displays/view/photorealFrame.ts`, `viewAtmosphere.ts`,
+    `viewFrameDrawer.ts` and `check/handoverCheckRun.ts`; `smoke/page.ts`, `smoke/litTerrain.ts`
+    and `smoke/frameTiming.ts`; `scripts/testRender.sh`'s part list, a comment.
+  - _The bins._ B_λ(T) is taken at the bake bins' centres (`BAKE_WAVELENGTHS_NM`), each bin's
+    emissivity constant, and each bin reaches the channels by the colour pipeline's 1 nm rows in
+    it, the partition and trapezoid weights of `thick/binConversion.ts` with a flat spectrum, so
+    V_cb = 683 Σ c̄_c Δλ (`EMISSION_CHANNEL_WEIGHTS`), the conversion T18.b's medium source will
+    take. Against Planck's law times the matching functions over their whole table at 0.1 nm the
+    bins read +0.14%, +0.31% and +1.51% (r, g, b) at 2,500 K, +0.25% in luminance; +2.2%, +18.8%
+    and +2.7% at 1,000 K, where green and blue are a few per cent of red. Bin means, or the
+    stars' linear interpolation between bin centres (`bakeSpectrumAt`), were measured worse at
+    every temperature from 700 to 3,500 K. The 760–830 nm the bake range leaves out is 0.13% of
+    red at 1,000 K and 0.7% at 700 K. `binOfRow` is restated in `thermal.ts`, which the render
+    thread loads, so that it loads none of the thick bake's modules (`AtmosphereCache.test.ts`);
+    `thermal.test.ts` holds the two equal.
+  - _Units._ The HDR target holds pre-exposed luminance, linear Rec. 709 cd m⁻² times the frame's
+    exposure scale (R02's `exposureScale`), the scale R06 builds the stars' channels in (each
+    channel's Rec. 709 luminance their photopic illuminance) and in which R07's disc multiplies
+    E × I/F by `exposureOverPi`. The emission's luminance is K_cd Σ c̄ ε B_λ Δλ with K_cd =
+    683 lm W⁻¹, the 2019 SI's (the CIE's K_m at ȳ's peak, 683.002, is 3 × 10⁻⁶ above), times the
+    exposure scale, which the disc's block carries; no star multiplies it. The shared function is
+    `thermalLuminance` (`thermal_luminance` in WGSL), for the luminance it returns.
+  - _Kirchhoff on the laws' A_ (lean, 2026-10-29). ε = 1 − A per bin takes the disc's or the
+    terrain's law's A, c A_N scaled for the figure, in place of the hemispherical albedo
+    Kirchhoff's law takes. A_N carries the opposition surge, so it exceeds the hemispherical
+    albedo and biases ε low: for the dark ground hot enough to glow (lava and basalt, A_N about
+    0.05 to 0.15) by a few hundredths of A, ε 2–3% low, the glow up to 3–5% faint at A_N 0.15
+    (the science check); a bright frost never passes the cut. The terrain takes its laws' A
+    without `terrain_decoration`'s albedo factor (1 today, R11's hook), which its reflected light
+    takes.
+  - _The temperature field_ (lean, 2026-10-29; `surfaceTemperatureFieldOf`). A world locked 1:1
+    (`climateRegime.forcing` `locked`) takes the sim's eyeball, σT⁴ = σT_n⁴ + (σT_ss⁴ − σT_n⁴)
+    max(μ, 0), T_ss⁴ = T_n⁴ + (3/2)(T_d⁴ − T_n⁴), Cowan and Agol's local model (§2), T_d and T_n
+    their eqs. 4–5 as the sim scales them, T_s (8/3 − 5ε/3)^¼ and T_s ε^¼, with ε solved by
+    bisection from the record's T_s and day–night contrast: on the protocol fixture's lava world
+    T_ss 1,751.8 K and T_n 21.4 K, its emission mean T_s to 10⁻⁹. Its equator–pole contrast, the
+    sim's zonal model's, is not added: the eyeball holds the poles on the terminator. Any other
+    world takes T_s + T₂ P₂(sin φ) + (3/4) ΔT_dn μ, T₂ = −(2/3)(T(0°) − T(90°)) as R09 shapes the
+    contrast and the day–night term a P₁ about the brightest star, whose hemispheres' μ-weighted
+    means differ by ΔT_dn, as the sim's Cowan and Agol day and night do (the science check found
+    the term first built at ΔT_dn μ, a third too strong); its area mean T_s is 1.3 K under the
+    record's emission mean for Earth-like contrasts, and it has no night floor but 2.725 K. The
+    melt's least temperature is the profile's value at the melt's edge (the cap μ > 1 − 2f on a
+    locked world, the band or caps of area f on another): on the lava world 1,473.1 K,
+    `basalt_reduced`'s transition 1,473.15 K to 0.05 K. On a rotating world it is P₂'s value at the
+    edge, where the sim reads its 64-point modal profile, so it matches the lid's transition only
+    roughly; no test holds it. A `magma_ocean` surface is held everywhere at the dry peridotite
+    solidus the sim holds its mean at, 1,394 K (Hirschmann's 1,393.81 K, rounded as the sim's), its
+    night side included, where its record's contrast alone would put 21 K: its melt area is 1.
+  - _The cut_ (lean on its floor, 2026-10-29; `aboveThermalCut`). A body is drawn emitting where
+    its field's peak, emitted at any of its laws' A, exceeds 10⁻⁶ of the brightest law's A face-on
+    to its stars, E A ÷ π summed, in some channel; the reflected never under 10⁻⁵ cd m⁻², the
+    scene span's foot, so that a cold body no star lights is not drawn emitting. The 300 K world
+    (an airless rotator, 40 K equator to pole and 10 K day to night, its peak 320.8 K) emits
+    2.1 × 10⁻¹⁹ cd m⁻² in red at A 0.3, 1.6 × 10⁻²³ of its reflected light at 1 au, and less in
+    green and blue; the lava world at 0.048 au emits 11% of its reflected red at
+    its substellar point.
+  - _The night side's test_ (lean, 2026-10-29). The task's lava world whose night side its own light
+    lights is drawn as the protocol fixture's world made a `magma_ocean` (melt area 1): the
+    fixture's locked lava world's night is its 21.4 K floor and its melt pool is on its dayside, so
+    its night side draws black, its own light being nil there. Asked of main.
+  - _Which bodies._ `groundTemperatureFieldOf` takes an `airless` surface, or one with no volatile
+    air that is not `tenuous`; every other is T18.b's. The atmosphere cache, which holds every lit
+    body's `body_detail` already, gives the field (`AtmosphereCache.groundFieldOf`, read once a
+    reply) and the photorealistic frame passes it to the lit bodies (`LitBodyInput.thermal`); no
+    decoder changed. A body with no star lighting it takes a zero star direction, which gives its
+    whole surface the terminator's temperature (lean).
+  - _The disc._ A record above the cut carries `DiscRecord.emission`: the field, the brightest
+    star's direction (light 0), and which class-map classes are `Melt`
+    (`ClassMapDiscSurface.meltClasses`, from the class map's class codes, `MELT_CLASS_CODE` 6).
+    Its block lies past
+    the records and the limbs' spans, row 46's y its first (0 for none). Each sample adds, as
+    `shade`'s last step, its laws by their shares split into the ground's and the `Melt` classes',
+    each through the shared function, the melt at no less than its least temperature. The meter's
+    class stays the starlight's: a glowing night side meters as unlit (lean).
+  - _The emissive forms_ (`withDiscEmission`, `withTerrainEmission`). Each is its plain source with
+    one line added at the end of `shade` or `shade_terrain` and `thermal.wgsl` and the term
+    appended, the R08.T11.d precedent's text substitution; no binding of its own. The plain
+    sources are pinned by digest (`discReflectance.test.ts`): the disc's interior and limb
+    a5a28799a09284f8, the mesh 123e93f990e998f9, the disc cells 58080e27ceb54f68, and the lit,
+    depth and shadow terrain materials of both paths, unchanged since BASE. A lane that edits the
+    plain disc, mesh, cells or terrain sources (R08.T16.b's `bodyDisc.wgsl` first) re-pins those
+    digests and keeps `shade`'s and `shade_terrain`'s last lines, which the substitutions anchor
+    on: an anchor that moves throws as `draw.ts` and `terrainMaterial.ts` load. `terrainLit.wgsl`'s
+    note that the emission is not drawn is left as it was, to keep the plain form to the byte; it
+    stands for the plain form. The forms are made at a body's first frame above the cut and
+    prepared off the frame (decision-r10-t14d-stall): until the disc's are prepared its records are
+    drawn without their emission, until the emissive disc cells kernel is made they sum their own
+    cells, and until the terrain's is made the plain form draws its ground, a few frames each
+    (`LitBodyRenderer.prepareEmissive` and `PhotorealRenderer.prepareEmissive` make them ahead).
+  - _The kernels added._ One compute kernel to R01.T15's bounded cache, the disc cells' emissive
+    form (`VIEW_KERNELS`, 25 to 26; the session test's arithmetic counts it among those no
+    fixture body makes). Five materials, outside that cache: the disc's interior and limb and the
+    mesh regime's figure (`bodies:discEmissive`, `bodies:discLimbEmissive`,
+    `bodies:smoothMeshEmissive`), and the lit terrain on both paths
+    (`terrain-lit-emissive-<path>`, the material set's `lit-emissive` kind). Their console names
+    (`EMISSIVE BODY DISCS`, `EMISSIVE DISC LIMBS`, `EMISSIVE BODY MESHES`, `EMISSIVE TERRAIN`,
+    `EMISSIVE TERRAIN OFFSETS`) show only on a refused shader's row.
+  - _The terrain._ A `Melt` slot of a patch's palette has 1 in its laws' word 6
+    (`packClassLaws`' `meltSlots`, from `TerrainLayers.palette`), a word the plain form never
+    read; the lights' buffer holds 28 rows, the 25 lights then the block (`packTerrainLighting`),
+    the star turned body-fixed (`terrainLightingOf`). Each texel adds its laws' emission as the
+    disc's, on its datum normal, against the body-fixed pole; the cut is the body's, not a
+    texel's.
+  - _Signed channels._ A black body below about 1,900 K lies outside the Rec. 709 gamut, so its
+    blue channel, and below about 1,000 K its green, is slightly negative (1,394 K: r 7,166, g 770,
+    b −154 cd m⁻² at A 0.1). The pipeline keeps signed colour as its spectral bakes do; AgX takes
+    the HDR value into Rec. 2020 before its clamp at 0.
+  - _The smoke_ (`smoke/thermal.ts`, part 9, after the emissive forms' catalogue; and
+    `smoke/litTerrain.ts`, part 7). Part 9's group draws five cases through the emissive kernels: a
+    13 px magma ocean's night side, a 13 px lava world's dayside, the lava world's 13 px night side
+    under a half-surveyed two-class map whose second class is `Melt` (alone glowing, at the melt's
+    least temperature), a 160 px magma ocean at quadrature and a 96 px one in the mesh regime. It
+    holds the emissive disc cells' own sums of each wholly covered pixel to the twin's within
+    10⁻³ · max(|twin|, 10⁻⁶ · largest), the plan's arm for a kernel's own output, and those of a
+    pixel the limb covers in part, and the image, to the disc's texel bound, 10⁻⁴ + 4 × 10⁻³ of the
+    twin's, which R07's `f32` limb geometry is held to: the limb's last pixels' covered share, a
+    sliver of some 10⁻⁵ of a pixel, differs by a few per cent of itself between `f32` and `f64`
+    whatever the light (7.5% of 1.7 × 10⁻⁴ on the 160 px disc, measured). Part 7's lit terrain
+    check draws its block by the emissive form with no star, and holds each terrain texel's
+    luminance between the least and the most its laws' A emit over the magma ocean's temperatures
+    there (a property: the terrain has no CPU twin of a frame); then on the lava world's night
+    side, the block's first palette slot made `Melt` for the check, it holds that the `Melt`
+    texels alone glow, none above what its brightest A emits at the melt's least temperature.
+  - _Pending: the owner's RTX run._ The frame-timing harness's new part (M) (`smoke/frameTiming.ts`)
+    times (G)'s bare frames of the measured Earth's body at its five cameras and `x1`, `x2` and
+    `x4`, given the protocol lava world's ground field, so drawn by the emissive forms, made ahead
+    of its timed frames: the disc rows and the lava-world row. It runs only on a run that lifts
+    timestamp quantization: the smoke page's part 1 with `--smoke-gpu-timing=1`, hidden and
+    offscreen, as QW31's (`docs/measurements/atmosphere-frame/2026-10-27-qw31-frame-timings.md`),
+    on the RTX 3080 in a quiet window, against (G)'s plain rows. The UHD 620's look is the
+    owner's.

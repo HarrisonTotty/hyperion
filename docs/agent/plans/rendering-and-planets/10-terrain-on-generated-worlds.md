@@ -597,6 +597,8 @@ targets at header 21 (below).
     `preciseSinCos` and `preciseCos`, and no `asin` or `acos`.
   - Refraction is not drawn: until it is, this plan reads the geometric elevation (R08's Risks).
   - R08.T18's thermal emission, which T10.b calls on terrain (decision-composition), is not built.
+    _Built by R08.T18.a (2026-10-29): records/R10.T10.b.md, "The ground's thermal emission, built
+    by R08.T18.a"._
 - **R09:** `field`'s `FieldView`, `PartialField`, `CoarseField`, `FieldHeader`, `SynthesisCell`,
   `ClimateCell`, `CoarseCrater`, `Cover` and `SYNTHESIS_MARGIN_CELLS`; `wire::decode_payload`;
   `PartialField::{is_surveyed, resolution}`, its `insert(&wire::DecodedBlock)`, and
@@ -1332,7 +1334,7 @@ plan, then R09's server and coarse pass):
   after T16 (decision-r10-t1c-maturity).
 - **T10.a** follows T1.b; its server test of `surface_field`'s answer waits on R09.T19.b. **T10.b**
   draws the atmosphere through R07's stubs until R08.T9.b lands, and the ground's thermal emission
-  waits on R08.T18.
+  waits on R08.T18 (_built by R08.T18.a, 2026-10-29_).
 - **T16** after T10.c–f land, then T11 and T12 on its session; T14.c, then T14.b, after it, T14.a
   free, T14.e after T14.a, and T14.d and T14.e before T14.b's measurements; T14.f after T10.g and
   before T1.c's client half; T15.a free
