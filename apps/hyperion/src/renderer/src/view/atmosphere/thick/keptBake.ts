@@ -1,7 +1,8 @@
 /**
- * A kept scene's thick bake made directly, with no optics worker (plan R08, R08.T14.c;
- * `decision-r08-t13c2-classes.md` §6): for the tests and the recorded runs, from a kept medium and
- * its sources, as `opticsJobs.ts` answers a kept body's `thick-bake`.
+ * A kept scene's thick bake and polarisation correction made directly, with no optics worker (plan
+ * R08, R08.T14.c and R08.T14.f; `decision-r08-t13c2-classes.md` §6): for the tests, the recorded
+ * runs and the vector gates, from a kept medium and its sources, as `opticsJobs.ts` answers a kept
+ * body's `thick-bake` and `polarisation-bake`.
  *
  * @remarks
  * A kept medium is handed to the atmosphere cache whole and never assembled, so its terms' sources
@@ -25,6 +26,11 @@ import {
   type ThickBakeGrid,
   thickBakeLights,
 } from "./bake";
+import {
+  bakePolarisationCorrection,
+  type PolarisationTable,
+  preparePolarisation,
+} from "./polarisation";
 import { type SpectralColumn, type SpectralSource, spectralColumnOf } from "./spectralColumn";
 
 /**
@@ -78,6 +84,31 @@ export function bakeKeptCase(
   );
   const bands = options.bands ?? thickBakeBands(body).map((_, band) => band);
   return bands.map((band) => bakeMultipleScattering(prepared, body, band));
+}
+
+/**
+ * A kept medium's polarisation correction (R08.T14.f), one table a band asked in its order, each with
+ * a slot a light of `lights` in theirs: `preparePolarisation` of its column under the lights' bin
+ * curves, formed as {@link bakeKeptCase} forms them, then `bakePolarisationCorrection` a band, as the
+ * optics worker answers a kept body's `polarisation-bake`.
+ *
+ * @throws RangeError as {@link keptColumnOf}, `thickBakeLights`, `preparePolarisation` and
+ *   `bakePolarisationCorrection` refuse their inputs (a band the body does not have).
+ */
+export function bakeKeptCorrection(
+  kept: KeptMedium,
+  lights: KeptBakeLights,
+  body: ThickBakeBody,
+  options: KeptBakeOptions = {},
+): ReadonlyArray<PolarisationTable> {
+  const column = keptColumnOf(kept);
+  const prepared = preparePolarisation(
+    column,
+    thickBakeLights(column, lights.absorbers, lights.spectra),
+    { grid: options.grid ?? THICK_BAKE_GRID },
+  );
+  const bands = options.bands ?? thickBakeBands(body).map((_, band) => band);
+  return bands.map((band) => bakePolarisationCorrection(prepared, body, band));
 }
 
 /**

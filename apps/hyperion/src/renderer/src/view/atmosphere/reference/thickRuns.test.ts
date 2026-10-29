@@ -58,6 +58,8 @@ import {
   caseGateRecord,
   caseTwin,
   type GateCase,
+  recordImagesOf,
+  recordRatiosOf,
   recorded,
   recordedRgb,
   twinValueKey,
@@ -221,75 +223,6 @@ const SWEEP_CASES = import.meta.glob<unknown>(["./ms-sweep-w1000.case.json"], {
   eager: true,
 });
 
-/** The record's case section's images, as c1's record writes them. */
-function imagesOf(record: unknown, caseName: string): unknown {
-  if (typeof record !== "object" || record === null) {
-    return null;
-  }
-  const cases: unknown = Reflect.get(record, "cases");
-  if (typeof cases !== "object" || cases === null) {
-    return null;
-  }
-  const section: unknown = Reflect.get(cases, caseName);
-  if (typeof section !== "object" || section === null) {
-    return null;
-  }
-  return { all: Reflect.get(section, "all"), images: Reflect.get(section, "images") };
-}
-
-/**
- * Per image of a record's case section, the least and largest twin ÷ reference over its
- * geometries and channels, each with where it lies (`name/channel`).
- */
-function ratiosOf(record: unknown, caseName: string): unknown[] {
-  const cases: unknown =
-    typeof record === "object" && record !== null ? Reflect.get(record, "cases") : null;
-  const section: unknown =
-    typeof cases === "object" && cases !== null ? Reflect.get(cases, caseName) : null;
-  const rows: unknown =
-    typeof section === "object" && section !== null ? Reflect.get(section, "geometries") : null;
-  if (!Array.isArray(rows)) {
-    return [];
-  }
-  const letters = ["r", "g", "b"];
-  const byImage = new Map<
-    string,
-    { least: number; leastAt: string; most: number; mostAt: string }
-  >();
-  for (const row of rows) {
-    if (!Array.isArray(row) || typeof row[0] !== "string" || typeof row[1] !== "string") {
-      continue;
-    }
-    for (let c = 0; c < 3; c += 1) {
-      const twin: unknown = row[4 + c];
-      const reference: unknown = row[10 + c];
-      if (typeof twin === "number" && typeof reference === "number" && reference > 0) {
-        const ratio = twin / reference;
-        const at = `${row[0]}/${letters[c] ?? "?"}`;
-        const held = byImage.get(row[1]) ?? {
-          least: Number.POSITIVE_INFINITY,
-          leastAt: "",
-          most: 0,
-          mostAt: "",
-        };
-        byImage.set(row[1], {
-          least: ratio < held.least ? ratio : held.least,
-          leastAt: ratio < held.least ? at : held.leastAt,
-          most: ratio > held.most ? ratio : held.most,
-          mostAt: ratio > held.most ? at : held.mostAt,
-        });
-      }
-    }
-  }
-  return [...byImage].map(([image, held]) => [
-    image,
-    figure(held.least),
-    held.leastAt,
-    figure(held.most),
-    held.mostAt,
-  ]);
-}
-
 /** The twin's radiance and drawn-surface share of `referenceCase`'s own setting, as recorded. */
 function caseValuesOf(
   twin: ReturnType<typeof caseTwin>,
@@ -418,8 +351,8 @@ function runEarthControl(): Record<string, unknown> {
   });
   return {
     twin: "c1's analytic twin, Psi_ms 128 x 32 (four times its mu_s), the sky view 192 x 432 (four times its rows)",
-    fine: imagesOf(record, EARTH_CASE.name),
-    fineRatios: ratiosOf(record, EARTH_CASE.name),
+    fine: recordImagesOf(record, EARTH_CASE.name),
+    fineRatios: recordRatiosOf(record, EARTH_CASE.name),
   };
 }
 
@@ -507,10 +440,10 @@ describe.skipIf(!RUN)("R08.T14.c's recorded runs (by hand)", () => {
             name,
             {
               bake: caseRuns.get(name)?.bake ?? null,
-              thick: imagesOf(thickRecord, name),
-              c1: imagesOf(committedGate, name),
-              thickRatios: ratiosOf(thickRecord, name),
-              c1Ratios: ratiosOf(committedGate, name),
+              thick: recordImagesOf(thickRecord, name),
+              c1: recordImagesOf(committedGate, name),
+              thickRatios: recordRatiosOf(thickRecord, name),
+              c1Ratios: recordRatiosOf(committedGate, name),
             },
           ]),
         ),

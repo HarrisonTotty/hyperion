@@ -2102,6 +2102,79 @@ export function caseGateRecord(
 
 // --- Reading a committed record back -------------------------------------------------------------
 
+/**
+ * A record's case section's tallies, `{ all, images }`, as {@link caseGateRecord} writes them, or
+ * `null` for a record without the case (R08.T14.c's and R08.T14.f's recorded runs).
+ */
+export function recordImagesOf(record: unknown, caseName: string): unknown {
+  if (typeof record !== "object" || record === null) {
+    return null;
+  }
+  const cases: unknown = Reflect.get(record, "cases");
+  if (typeof cases !== "object" || cases === null) {
+    return null;
+  }
+  const section: unknown = Reflect.get(cases, caseName);
+  if (typeof section !== "object" || section === null) {
+    return null;
+  }
+  return { all: Reflect.get(section, "all"), images: Reflect.get(section, "images") };
+}
+
+/**
+ * Per image of a record's case section, the least and largest twin ÷ reference over its
+ * geometries and channels, each with where it lies (`name/channel`), to the record's significant
+ * figures (R08.T14.c's and R08.T14.f's recorded runs).
+ */
+export function recordRatiosOf(record: unknown, caseName: string): unknown[] {
+  const cases: unknown =
+    typeof record === "object" && record !== null ? Reflect.get(record, "cases") : null;
+  const section: unknown =
+    typeof cases === "object" && cases !== null ? Reflect.get(cases, caseName) : null;
+  const rows: unknown =
+    typeof section === "object" && section !== null ? Reflect.get(section, "geometries") : null;
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  const letters = ["r", "g", "b"];
+  const byImage = new Map<
+    string,
+    { least: number; leastAt: string; most: number; mostAt: string }
+  >();
+  for (const row of rows) {
+    if (!Array.isArray(row) || typeof row[0] !== "string" || typeof row[1] !== "string") {
+      continue;
+    }
+    for (let c = 0; c < 3; c += 1) {
+      const twin: unknown = row[4 + c];
+      const reference: unknown = row[10 + c];
+      if (typeof twin === "number" && typeof reference === "number" && reference > 0) {
+        const ratio = twin / reference;
+        const at = `${row[0]}/${letters[c] ?? "?"}`;
+        const held = byImage.get(row[1]) ?? {
+          least: Number.POSITIVE_INFINITY,
+          leastAt: "",
+          most: 0,
+          mostAt: "",
+        };
+        byImage.set(row[1], {
+          least: ratio < held.least ? ratio : held.least,
+          leastAt: ratio < held.least ? at : held.leastAt,
+          most: ratio > held.most ? ratio : held.most,
+          mostAt: ratio > held.most ? at : held.mostAt,
+        });
+      }
+    }
+  }
+  return [...byImage].map(([image, held]) => [
+    image,
+    recorded(held.least),
+    held.leastAt,
+    recorded(held.most),
+    held.mostAt,
+  ]);
+}
+
 /** Whether a value is a plain record of fields. */
 function isFields(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
