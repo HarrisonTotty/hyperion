@@ -57,7 +57,7 @@ const LBV_MIN_TEFF: f64 = 8_000.0;
 /// limit as Hurley, Pols and Tout (2000, section 7.1) write it (L above 6 × 10⁵ L☉ and
 /// 10⁻⁵ R L^½ above 1), and hotter than 8,000 K (plan 06, P06.T24.a).
 ///
-/// The limit is T(eff) below 5,772 K × (L ÷ 10⁵ L☉)^¼: 14,100 K at 6 × 10⁵ L☉, 18,300 K at
+/// The limit is T(eff) below 5,772 K × (L ÷ 10⁵ L☉)^½: 14,100 K at 6 × 10⁵ L☉, 18,300 K at
 /// 10⁶ L☉. It is the criterion of [`PhasePredicate::Lbv`](crate::stellar::sse::PhasePredicate),
 /// whose window plan 09's catalogue class reads, and of the S Doradus cycles
 /// ([`variability`](crate::stellar::variability::variability)).

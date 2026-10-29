@@ -4450,7 +4450,9 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
       WN star is WN2–3; observed WN5–9 stars have T* of 36–63 kK (Crowther 2007, section 3.3).
       (4) The LBV criterion's 8,000 K is the plan's; Humphreys and Davidson (1994, section 2.4)
       put eruptions at 7,000–8,000 K, and HPT's limit only admits stars cooler than
-      5,772 K (L ÷ 10⁵ L☉)^¼, 14–32 kK, cooler than many quiescent LBVs.
+      5,772 K (L ÷ 10⁵ L☉)^½, 14–32 kK, cooler than many quiescent LBVs (the exponent printed
+      as ¼ until 2026-10-29: R = L^½ (5,772 K ÷ T)² in solar units, so 10⁻⁵ R L^½ > 1 is
+      T < 5,772 K (L ÷ 10⁵ L☉)^½, as the figures beside it have always been).
     - `Track::window_where` returns the hull of the ages at which the predicate holds (257
       samples a living segment, 60 bisections at each change), within the part of the track
       that is built; the 60 M☉ star's window has no gap in the test.
