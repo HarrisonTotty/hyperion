@@ -993,8 +993,10 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
     basis: "measured",
     what: "TiO's bands (Toto, its five Ti isotopologues, R08.T4.f), from 1000 K (E2).",
     notes:
-      "Below 1000 K the 1000 K node is held, estimated: Ti condenses as CaTiO3 and TiO2 at about " +
-      "1500-2000 K at photospheric pressures (decision-r08-t4ef-storage section 1.4, E2); above " +
+      "Below 1000 K the 1000 K node is held, estimated: Ti condenses as the calcium titanates and " +
+      "perovskite (Ca3Ti2O7, Ca4Ti3O10, CaTiO3) at about 1700-2050 K over 1 mbar to 10 bar (H. R. " +
+      "Wakeford et al., Mon. Not. R. Astron. Soc. 464 (2017) 4247, DOI 10.1093/mnras/stw2639, " +
+      "Eqs. 5-7, after Lodders 2002; decision-r08-t4ef-storage section 1.4, E2); above " +
       "4000 K the 4000 K node is held, estimated, Toto being valid to 5000 K. The five Ti " +
       "isotopologues share one set of bins, each line at its own Q (its .pf) and abundance (CIAAW's " +
       "representative Ti and O fractions), and take 48TiO's Doppler width in the convolution (the " +
@@ -1037,14 +1039,21 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
     notes:
       "Hands over from R08.T4.d's HITRAN2024 table at 300 K, its first node at or above HITRAN's " +
       "296 K. Li2015's Delta v = 7 bands lie 2.05 times under HITRAN2024's measurement-anchored " +
-      "7-0 band there, summed over that table's 13 cells at 10 Pa (1.79-2.22 times cell by cell), " +
-      "so every line takes that summed ratio, 2.05 (the source's intensityScale; R08.T4.c's bound " +
+      "7-0 band there, summed over that table's 13 cells at 10 Pa (1.40-2.22 times cell by cell over " +
+      "691-700 nm, falling along the P branch; 1.79-2.22 over 691-696 nm, 96% of the band), so " +
+      "every line takes that summed ratio, 2.05 (the source's intensityScale; R08.T4.c's bound " +
       "took the peak cell's 2.13, rounded up), and the table is estimated: " +
       "at and below 300 K the client reads R08.T4.d's table, above it this one (kDistribution.ts's " +
-      "tableAt). There a cell's transmittance steps by up to 0.03 at 1 kPa, the scale's spread, and " +
-      "0.13 at 0.1 MPa, the list's default width (0.07 cm-1 per bar) exceeding HITRAN2024's air " +
-      "widths (hotLines.test.ts). The bands from Delta v = 8 are left out, bounded by CO's pending " +
-      "overtones part. " +
+      "tableAt). There, over the columns at which R08.T4.d's table transmits 0.2-0.8, a cell's " +
+      "transmittance steps by up to 0.03 at 1 kPa and 0.13 at 0.1 MPa (hotLines.test.ts): its " +
+      "lines saturated, each step compounds the cell's own ratio's departure from the summed scale " +
+      "with the list's default width (0.07 cm-1 per bar, n = 0.5, its .def) over HITRAN's air " +
+      "widths (about 0.06 cm-1 per atm at 296 K, intensity-weighted, from an earlier HITRAN " +
+      "edition's 1-0 band, the science check's figure), the width the larger part at 1 kPa. With " +
+      "n = 0.5 against HITRAN's 0.67-0.76 the assumed width grows apart with temperature, about " +
+      "2.2 times a HITRAN-like width at 4000 K. The cells from 701 nm, past HITRAN2024's lines, " +
+      "hold Li2015's alone, at most 1.6e-36 m2 a cell at 300 K. The bands from Delta v = 8 are " +
+      "left out, bounded by CO's pending overtones part. " +
       "Above 4000 K the 4000 K node is held, estimated, Li2015 being valid to 9000 K. Fetched from " +
       "the database's archive, whose states file differs from the one R08.T4.c summed (SHA-256 " +
       "83ca3036...04e1), its transitions and .pf the same.",

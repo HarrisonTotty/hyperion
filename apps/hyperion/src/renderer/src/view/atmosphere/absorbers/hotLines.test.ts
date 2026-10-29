@@ -353,9 +353,13 @@ describe.each(DRAWN)("%s's curves", (key) => {
 /**
  * A key's two tables at their hand-over, at a pressure node both hold: each shared cell's
  * transmittance through the columns at which the temperate table's lies in [0.2, 0.8], the hot
- * table's against it, the largest difference over the cells.
+ * table's against it, the largest difference over the cells, and how many cells and columns were
+ * compared.
  */
-function handOverDifference(species: Drawn, pressurePa: number): number {
+function handOverDifference(
+  species: Drawn,
+  pressurePa: number,
+): { readonly worst: number; readonly compared: number } {
   const atK = handOverK(tables, species);
   if (atK === undefined) {
     throw new Error(`${species} has no hand-over`);
@@ -369,26 +373,31 @@ function handOverDifference(species: Drawn, pressurePa: number): number {
   const coldSigmas = cellSigmasAt(cold, pressurePa);
   const hotSigmas = cellSigmasAt(hot, pressurePa);
   let worst = 0;
+  let compared = 0;
   for (const [c, cell] of cold.cells.entries()) {
     const h = hot.cells.findIndex((x) => x.cellNm === cell.cellNm);
     const hotCell = hot.cells[h];
     if (hotCell === undefined) {
       continue;
     }
+    const coldCell = coldSigmas[c];
+    const hotCellSigmas = hotSigmas[h];
+    if (coldCell === undefined || hotCellSigmas === undefined) {
+      throw new Error(`${species}'s ${cell.cellNm} nm cell has no σ at ${pressurePa} Pa`);
+    }
     for (let k = 0; k <= 160; k += 1) {
       const columnPerM2 = 10 ** (16 + k / 8);
-      const t = cellTransmittance(cell.weights, coldSigmas[c] ?? new Float64Array(0), columnPerM2);
+      const t = cellTransmittance(cell.weights, coldCell, columnPerM2);
       if (t >= 0.2 && t <= 0.8) {
-        const th = cellTransmittance(
-          hotCell.weights,
-          hotSigmas[h] ?? new Float64Array(0),
-          columnPerM2,
+        compared += 1;
+        worst = Math.max(
+          worst,
+          Math.abs(cellTransmittance(hotCell.weights, hotCellSigmas, columnPerM2) - t),
         );
-        worst = Math.max(worst, Math.abs(th - t));
       }
     }
   }
-  return worst;
+  return { worst, compared };
 }
 
 describe.each(HANDED_OVER)("%s's hand-over from R08.T4.d's HITRAN2024 table", (key) => {
@@ -401,12 +410,16 @@ describe.each(HANDED_OVER)("%s's hand-over from R08.T4.d's HITRAN2024 table", (k
   });
 });
 
+// CO's steps compound each cell's own ratio to HITRAN2024 (1.40–2.22) with Li2015's default width
+// over HITRAN's air widths, its lines saturated where the transmittance is 0.2–0.8 (CO's notes).
 describe("the hand-overs' agreement at 300 K (the recorded figures)", () => {
-  it("holds CO's two tables within 0.03 of each other at 1 kPa, the scale's spread cell by cell", () => {
-    expect(handOverDifference("CO", 1e3)).toBeLessThan(0.03);
+  it("holds CO's two tables within 0.03 of each other at 1 kPa", () => {
+    const { worst, compared } = handOverDifference("CO", 1e3);
+    expect([worst < 0.03, compared > 0]).toEqual([true, true]);
   });
 
-  it("holds CO's within 0.14 at 0.1 MPa, its lines' assumed widths over HITRAN2024's", () => {
-    expect(handOverDifference("CO", 1e5)).toBeLessThan(0.14);
+  it("holds CO's within 0.14 at 0.1 MPa", () => {
+    const { worst, compared } = handOverDifference("CO", 1e5);
+    expect([worst < 0.14, compared > 0]).toEqual([true, true]);
   });
 });

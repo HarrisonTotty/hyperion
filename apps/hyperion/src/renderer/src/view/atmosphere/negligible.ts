@@ -787,7 +787,7 @@ function marginOf(rule: MarginRule): number {
  *   estimated part alone: H₂O's continuum below 567 nm where only those wavelengths are estimated)
  *   or a pending entry in force. A pending entry with a part is in force wherever its species is
  *   listed and not stated transparent; a whole entry likewise where the client draws nothing for the
- *   key; a hot list beside a drawn table (CO, N₂O, HCN, H₂O, NH₃ and CO₂ in R08.T4.f) only above the
+ *   key; a hot list beside a drawn table (N₂O, HCN, H₂O, NH₃ and CO₂ in R08.T4.f) only above the
  *   drawn table's measured range, below which the table holds its lines. A pending pair is formed
  *   from its members' layers as `absorberSpecs` forms a pair.
  * - `heldChi` ({@link HeldChiVerdict}): a drawn line table whose χ is held at the temperature.

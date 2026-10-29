@@ -94,8 +94,8 @@ export interface AbsorberBoundBase {
   /** The task that draws its absorption. */
   readonly task: PendingTask;
   /**
-   * The part of the key's absorption it bounds, where one task holds two entries for a key (CO's
-   * overtones from 8–0, beside its hot list in R08.T4.f), or `undefined`.
+   * The part of the key's absorption it bounds, where the client draws the rest (CO's and HCl's
+   * overtones from 8–0, beside their tables), or `undefined`.
    */
   readonly part: string | undefined;
   /** Whether the values are measured or a stated estimate, which takes the hundredfold margin. */
@@ -268,6 +268,7 @@ const EQUIVALENT_WIDTH_METHOD =
  * adds O, stated none to 5,000 K in Na⁺'s form (decision-r08-t4e-budget §7), and H and Zn, each
  * stated none below its visibility floor, 3,300 K on the 10% ladder, from which its table draws
  * it (the floors of the deferred Ca⁺, Ti⁺ and Fe⁺ are recorded in the plan, their entries kept).
+ * R08.T4.f draws N₂ from its 1,800 K limit by WCCRMT's table, the same branch.
  */
 export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
   {
@@ -634,8 +635,8 @@ export interface PendingAbsorber extends PendingListing {
  * The species and pairs whose absorption over the bake range R08.T4.d–g draw, each with its 1 nm
  * cell-mean cross-sections (`decision-r08-t4b-t12c.md`, follow-up 3, ruling 2, and follow-up 4,
  * ruling 3). A species may be listed under two tasks (a temperate list in T4.d and a hot one in
- * T4.f), each with its own values, or twice under one task by part (CO's `overtones`, from 8–0,
- * beside its hot list in T4.f).
+ * T4.f), each with its own values, or by part beside the tables that draw the rest of its absorption
+ * (CO's and HCl's `overtones`, from 8–0, in T4.f).
  *
  * @throws Error at load for a listing whose values are in neither bounds file, a broken invariant
  *   of the committed data.
