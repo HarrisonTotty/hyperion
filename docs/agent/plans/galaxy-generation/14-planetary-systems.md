@@ -9136,9 +9136,10 @@ it:
       `RECORD_TIME`, and the coarse pass and synthesis as versioned output.
     - Frozen at 24: `BodySurfaceDto`'s `vertical_structure`, `aerosols`, `modifiers`,
       `subsurface_ocean`, the small-body type, the tenuous gas list and the absent `biosphere`;
-      `BodyRecordDto.envelope`'s members; and the steam envelope's section.
+      and `BodyRecordDto.envelope`'s members. The steam envelope's section rides 25 with P14.T53.b
+      part 3 (`STEAM_ENVELOPE_VERSION`).
 
-    `PROTOCOL_VERSION` stays 2 at 23 and 24.
+    `PROTOCOL_VERSION` is 3 at 24 (raised from 2 by R08.T13.b, before the bump).
 - P14.T47.e (Earth after Robinson 2026) took version 21 in the 20 → 21 bump with P11.T4.h and
   plan 11's protostar and build-age fix (decision-r07-earth-albedo), and with P11.T4.i–k. Its
   goldens were blessed at 20 until that bump, which only flipped the version (Phase J lane,
@@ -9201,6 +9202,31 @@ it:
   - The bump commit adds no draw or domain tag; the batch's new streams, `system.abundances`,
     `body.formation` and `body.cold_traps`, and words 3–5 of `planet.volatiles`, were declared
     before it (the Phase L bullet above).
+- **Version 24, the 23 → 24 batch, "the record", as built** (lane `p14-wire-24`, B1–B4,
+  2026-10-29; decision-bump-plan-after-22 §1.3, decision-p14-t54b-open). It carries what plan 14's
+  T54.b and its riders held at 23 (Risks, "Deviations in P14.T54.b, as built", its sub-parts' bullets
+  a–l). No commit of the batch lands alone.
+  - B1–B3's commits are checkpoints at 23 that move no golden but the new
+    `planetary/primordial_helium`, an extension. B4's first commit deletes the sixteen holds and
+    restates the tests at 24 with the version still 23, so its goldens and `fit-check` fail there:
+    skip it when bisecting. The bump commit raises the version and blesses every golden by test
+    name: 38 move in content (B3's step F's 32, the server's `galaxy_parameters` by its version
+    value, R10's four `worker/` goldens by the version field of their blocks' headers, and
+    `planetary/envelope_profile` by its restated header prose), 184 by their header alone
+    (`golden_diff.py`: consistent). The test planet's goldens keep
+    `TEST_PLANET_VERSION` 2.
+  - In the same commit `thermo_equilibrium`, the seven `condensate_extinction` tables and the
+    surface crate's `space_weathering` are restamped to `since 24` by the tool's new-table path
+    (decision-displaced-since's procedure), their bodies unchanged and Λ to the bit, and
+    `substance_albedos`, whose body is `ROW_DARKENING`'s swapped rows, is refitted over the inbox's
+    table at `--since 24`. `fit-check`: 45 fresh, 5 provisional, no failure; no stellar table
+    flagged. SO₂'s `aerosol_material` flag stays off: R08's SO₂ ice file has not landed.
+  - `GENERATED_SURFACES_FROM` is raised to 25: V3.9's W3 (a) is not met (P14.T54.b.l's bullet).
+  - Its cost (decision-24-cost D5, on the lane's probe, release, one thread, pod, 4 vCPU, 23 rebuilt
+    in the same window): `generate` 8.39× of 23 and `snapshot_at` 6.44× over the first 20 systems,
+    its 400-system stage 5.85× and 8.59×, D5's reference missed as B3's k-3 found (8.55× and
+    6.19×); the slowest system 2.46 s on the pod, about 1.2 s on the owner's desktop, under 3 s.
+  - The bump commit adds no draw or domain tag, and no stream, key or draw line moved.
 
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
@@ -30974,6 +31000,213 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       `testing` feature: the record's formation zone is now a `Result` (`formation_zone`), its
       refusal that variant and a host with no disc `NoDisc`, so that a refused zone is not
       modelled with its reason rather than read as no disc.
+  - _P14.T54.b.l, the bump_ (B4, lane `p14-wire-24`, 2026-10-29; decision-p14-t54b-open, B3's
+    handoff). `GENERATOR_VERSION` 23 → 24; `PROTOCOL_VERSION` stays 3. Three commits, not the
+    brief's four: its first two are merged (lean, 2026-10-29), since a restatement can only be
+    checked once the holds are gone, and the restamps need the bump's `--since 24`.
+    1. The holds' deletion, with every test deleted or restated at 24. It is still at version 23,
+       so its goldens and `fit-check` fail there: skip it when bisecting. §C.7's first split, the
+       system tests' continuity window, is in it too.
+    2. The bump, the restamps and the bless, with the fixtures, the client and the bindings.
+    3. §C.7's splits, the review's fixes, the docs and this record.
+    - _The holds deleted_, each with its tripwire, switch and arm:
+      - `RAYLEIGH_FLOOR`;
+      - `ESCAPE`, with `GreenhouseConstants::FITTED`, `CarbonDioxideTerm::SquareRoot`,
+        `thick_air_anchor: None` and `PresentState`;
+      - `PRIMORDIAL_HELIUM`, `UNLIT_MEAN`;
+      - `MOON_BULK`, its `BulkOnly` arm too;
+      - `COLD_TRAPS`, with `RecordRules` and `PlanetarySystem::with_record_rules`;
+      - `READ_DENSITIES`, `COMPRESSED_LIQUIDS`, `ROW_DARKENING`, `AIR_SECTIONS`, `OCEAN_FLOOR`,
+        `TENUOUS`;
+      - `SMALL_BODY_TYPES`: the epoch's "no query opted in" is now `Option<SmallBodyTypes>`;
+      - `OCEAN`;
+      - `BELT_POPULATION`, with T48.f's `LUNAR_ENCOUNTER_SPEED`;
+      - `WEATHERED_AREA_MIX`.
+
+      Also deleted: `with_every_24_hold`, and the five air scans and T51.e's, with their `HELD`
+      lists. `STEAM_ENVELOPE_VERSION` (25) and `with_every_25_hold` stand, and the steam switch is
+      now the helper's only one.
+
+    - _`ROW_DARKENING`'s swap:_
+      - The darkened `basalt_reduced` and `ferric` are `OPTICS`'s rows. 23's parts, modes and
+        labels are deleted, and the darkened ones take the rows' own names.
+      - `DARKENED` and `substance::optics::darkened_rows` are gone.
+      - `hyperion-fit`'s `substance_albedos` fits 55 items, its darkened half gone, and its anchors
+        read the swapped rows as the rows in force.
+      - `basalt_reduced`'s bound below 23's carbon-free 0.5275 is now a cited constant. Its "the
+        graphite part cuts no reach" check went with 23's row.
+    - _The restamps_ (`hyperion-fit run <task> --since 24`):
+      - `substance_albedos` is refitted over the inbox's table, since the hand swap's identical body
+        would keep 23's stamp. It is now since 24, its two items the darkened ones' to the bit.
+      - `thermo_equilibrium`, the seven `condensate_extinction` tables and the surface crate's
+        `space_weathering` are restamped since 24 by the tool's new-table path, as the 23 bump did
+        (decision-displaced-since's procedure). Only the three `since` fields move each. The
+        bodies are unchanged, and `space_weathering`'s Λ (2.1301 µm) holds to the bit.
+      - `fit-check`: 45 fresh, 5 provisional, 0 failures. No stellar table is flagged.
+      - SO₂'s `aerosol_material` flag stays off: R08's SO₂ ice file has not landed (the client's
+        materials hold `sulphur-dioxide-liquid.json` alone).
+    - _The serve gate:_ `GENERATED_SURFACES_FROM` is raised to 25, not opened (lean, 2026-10-29).
+      Of decision-bump-plan-after-22 V3.9's items, W3 (a) is not met: "H₂O ice under dark lids,
+      checked with P14.T53.c's exposed share through a lag". T53.c built no exposed share through
+      a lag. That alone raises the gate, so the lane did not re-audit the other items. Of T53.a's
+      hot `Snowball`s, six H₂-led ones remain (below).
+    - _The tests_ (B3's `c7-failures.txt`, 124 with the holds gone, and this lane's runs):
+      - 71 deleted:
+        - 18 tripwires: the holds', the hold helper's own, and the bump's Venus re-check;
+        - 11 source scans, with their `HELD` lists;
+        - 6 tests of the switches' mechanics;
+        - 35 tests of a hold's arm, of 23's own arms, or comparing against a deleted arm. Among
+          them is `under_every_24_hold_arm_c_s_first_solves_over_set_a_are_stated`, with
+          `PresentState`;
+        - the duplicate `under_the_escape_batch_the_speciated_atmosphere_is_the_same_twice`.
+      - 3 are new: `the_record_s_moments_are_the_laws`, `a_kilobar_runaway_takes_the_thick_air_closure`
+        and `a_table_body_that_does_not_qualify_publishes_t51a_s_entries`. §C.7's 10 slow twins are
+        listed below.
+      - 100 are restated at 24's figures, each saying what 23 gave; this counts every test whose
+        body's or doc's figures moved. 159 more lose a switch, a held half or a doc's hold, or
+        take §C.7's chunk, with no figure moved. The lists are the outbox's
+        (`tests-deleted-and-restated.md`).
+      - 11 renamed where the name no longer said what the test does:
+        - `…_reaches_680_to_710_k` → `…_reaches_590_to_700_k`;
+        - the darkened rows' test →
+          `substance_optics_the_darkened_rows_are_ferric_s_and_basalt_reduced_s_own`;
+        - Europa's calibration → `europa_s_surface_at_its_own_tides_lies_in_bierhaus_s_range`;
+        - Triton's → `…_under_a_tenuous_air`;
+        - the table's three airless bodies →
+          `…_mercury_and_the_moon_are_airless_and_ganymede_tenuous`;
+        - the server's held cold traps → `every_condensate_sends_its_trapped_area`;
+        - and five more whose held half, second arm or rule name went.
+      - The `under_every_24_hold_…` and `under_the_escape_batch_…` names stay (lean, 2026-10-29):
+        the escape handoff's and B3's by-name lists use them, and they now read the generator's
+        rules.
+    - _Restated at 24, with the figure each now pins_ (the findings are below):
+      - _The table:_
+        - Venus is 618.9 K at 57.84 bar (590–700 K), its climate range 617.4–619.8 K, and 307.3 K
+          at 1 bar (356.4 at 23), so T24.e's re-check is made on T53.a's Venus. The measured Venus
+          is held to 300–370 K (347.7 K).
+        - Venus's deck's base lies at 3.36 bar and 385.7 K. The bound is raised from 3 to 3.5 bar,
+          since T24.g's "below 3 bar" was 23's Venus. This is a plan figure, for main.
+        - Mars keeps 0.22 bar on T53.a part C's warm branch at 252.9 K. It is bracketed at 4.67 ×
+          10⁻¹¹ in 56 passes, not a jump, and takes water's lapse factor.
+        - Ganymede, Pluto and Triton are `Tenuous` (T53.c). Their greenhouse is the airless one (τ
+          0), and Ganymede's inventory is not modelled.
+        - The measured Earth's gain is 0.4022 with `B_eff`⊕ 1.995. The table's Earth's is 0.4230
+          and 1.948 at 290.38 K. The wet world's gains are 0.215–0.667, peaking at 330 K. R09's
+          water constant is 4.17 per √bar.
+        - The hot Earth's impact velocity is 132.7 km/s ± 0.5 under T48.g's approach (134 under
+          23's cube).
+        - The Solar System's rates at 24: Earth 1.42, Mars 1.94, Venus 1.17, Mercury 1.24, Ceres
+          124, Ganymede 3.69 and Pluto 29.4.
+      - _Hand cases:_
+        - The icy members hold argon ice at 0.95, since their N₂ and CH₄ escape at 24.
+        - `titan_inputs` takes `cold_moon`'s zero XUV, since Earth's fluence strips its methane.
+        - Beyond the snow line: 103.1 and 101.5 K (128.7 and 127.2 at 23; T_eq 89.1 K).
+        - P14.T48.d's 90° world: T53.a's thermostat holds it at 273.2 K out to 1.6 au. Without the
+          thermostat its warm branch collapses between 1.08 and 1.10 au. Its belt is taken at a
+          cover threshold of 270 K, and the model's own perennial-edge check goes.
+      - _Moons and tides:_
+        - The tides' cases are at 273.16 K, the shell's liquidus: 273 K lies under it from 24.
+        - Ganymede's loss on its rock alone is 9.25 × 10⁻⁴, and the bracket is now 5 × 10⁻⁴–0.008
+          (0.002–0.008 at 23). Its heat flow is `F_nt` within 10⁻¹², no longer to the bit.
+        - Callisto is the first moon on the ocean branch bare; its ocean is not computed.
+        - The ocean branch's heat flow meets the figures' to 8.7 × 10⁻⁹ (bound 10⁻⁷; 10⁻⁹ at 23),
+          the root's settling.
+        - Round 2 takes 153 of 426 moons (151 at 23).
+        - Europa's surface is about 74.6 Myr on T51.g.b's shell, at the unrefitted 0.019 239 4 W
+          m⁻². The test holds Bierhaus et al.'s 40–90 Myr in place of 60 Myr ± 3% and the refit;
+          this is for main.
+      - _The record over the generated systems:_
+        - The published oceans are the record's solve, counted by kind and branch;
+          `system::ocean_tests` holds them at the record's inputs.
+        - A solid class may sit under a supercritical envelope.
+        - A solid's cold-trapped area, the taxonomic class in the rebuild, either runaway deck in
+          the inventory's rebuild and the weathered passes' modifiers are on the record.
+        - A tenuous air's inventory is not modelled.
+        - The airless mean is at least its night floor.
+        - The golden unlit census has 7 argon ices (2 at 23), and the dark lids have 0 at no area
+          (3 at 23).
+        - The gas envelopes are `Ok` or not modelled (`close_binary` 0500).
+        - The Rayleigh floor's sample measurement loses its flips guard and its count of moved
+          bodies, which compared against the floor's hold.
+      - _Densities:_ argon's fcc, H₂S's phases III and I, C₂H₆'s and β-O₂'s are read; β-CO and
+        H₂S's phase II are not. The fixture's O₂ has three pieces.
+      - _The compressed sea:_ `close_binary` .0700's sea (32.8 bar at 273.1 K, 0.1–0.3% above
+        saturation) stands for .0800, which the escape leaves a CO₂ `Snowball` with no sea (2–7%
+        at .0800). The palette's bound is 1.001, against 1.02.
+    - _The bless_ (by test name, never the whole tree; the outbox's `goldens-reblessed.md` lists
+      the runs):
+      - 38 goldens move in content:
+        - B3's step F's 32;
+        - the server's `galaxy_parameters`, by its version value;
+        - R10's four `worker/` goldens, by their blocks' version byte;
+        - `planetary/envelope_profile`, by its restated header prose alone. "Pure until
+          P14.T54.b; nothing on the record reads it" is restated, as in `planetary/aerosols` and
+          `envelope_atmosphere`.
+      - 184 move by their header alone. `planetary/aerosols` moves in content (by T53.a's table),
+        not by its header alone as decision-thick-acid-decks expected. `golden_diff.py --base`
+        against the inbox commit: consistent.
+      - The fixtures:
+        - `substances.json` is blessed. Only `READ_DENSITIES`' rows move it: `ROW_DARKENING` moves
+          `registry.golden`'s albedo lines and the table, not the fixture.
+        - `planetary.json`'s two giant envelopes are refreshed to the generator's. Six liquid
+          refractory modes gain a size from their compressed liquid's density, and their
+          `not_modelled` is now `optics_not_modelled` in place of `no_grain_density`.
+          hyperion-server's `the_fixture_s_envelopes_are_the_generator_s` holds them.
+        - The terrain's `level-bounds.json` is blessed by its slow test; the two Earths move, by
+          T53.a's water term. R10.T15.b's records had it re-recorded at 24. The bump's bless does
+          it, since the test holds the fixture byte for byte.
+      - No binding moves (`just gen-protocol-check`).
+    - _The client:_
+      - 23's ocean under a `Snowball`'s ice, appended to its liquids, goes with P14.T43.i's rule
+        5 (`oceanUnderIce`, `liquidsOnIce`), its tests and the guide's sentence on it
+        (decision-ux-ocean-row §4). The Snowball fixture's seas are 24's list.
+      - The density refusals and cases are restated at 24's fixture.
+      - R08.T19's τ(550) hold does not fire at 24: the fixture's surfaces are written by hand and
+        carry no `aerosols`. It is restated, with the member itself as its trigger. Row 5 is left
+        for a lane of its own (R08.T19's record).
+    - _§C.7's splits_ (decision-p14-t54a-passes §C.7, pre-authorised for 24 by D5):
+      - _Sizing:_ each was timed alone on the pod (4 vCPU). Three of them were also timed on the 23
+        tree against the handoff's 23 times, which gives a scale of 1.49, so 120 s on the desktop
+        is about 179 s here. Desktop equivalents are in brackets. The handoff's six "just under
+        120 s" read 115–119 s on B3's desktop at F; here they take 246–248 s (166), so they are
+        split too (lean, 2026-10-29).
+      - _Split into disjoint chunks_, the fast tier's at the test's own resolution, with an ignored
+        twin over the rest, so that the two cover the original sample:
+        - the system tests' continuity (12 systems): 292 s at ±100 yr → ±50 yr, 148 s (99), the
+          whole window its twin;
+        - the flattening (60 systems): 415 s → the first 20, 116 s (78);
+        - the velocity test (200 systems): 248 s → the first 100, 135 s (90);
+        - the five whole-sample property tests: `satellites_share_…`, `no_overlapping_orbits_…`,
+          `every_body_…_inside_its_zone_…`, `no_planet_hotter_…_in_generated_systems` and
+          `few_evolving_orbits_…`. Each took 246–247 s and runs the first 200 of the 400
+          (`whole_fast`) in 129–131 s (87–88);
+        - `planetary_properties`' continuity: 572 s at ±100 yr → ±25 yr, 145 s (97), its
+          existing whole-window test the twin;
+        - its satellites (1,500 systems): 386 s → the first third of the cells, 152 s (102);
+        - its guard `no_planet_hotter_than_its_star`: 209 s → the ages 0.1 and 5 Gyr, with the whole
+          run's draws, 108 s (73), each half holding the 10⁻³ share (0 of 15,090 saturated).
+      - _To the slow tier whole:_ `records_of_halved_and_cut_drift_cells_…`, an order-independence
+        test, at 977 s (656).
+      - _The bless note's §4 has the table._
+    - _Findings, recorded and deferred_ (the bless note's §5):
+      - **TO MAIN:** the photometry walk's guards are missed at 24.
+        - 24 of 954 bodies jump (2.5%, against 1%) and 29 are bracketed (3.04%, against 3%).
+        - The jumps are 21 cover flips, mostly 15–28 K icy members gaining or losing argon ice
+          between passes, with 2 onsets and a state edge.
+        - They are pinned at 24 and 29, the planets at 8 (5 at 23).
+      - **TO MAIN:** six hot `Snowball`s under H₂-led airs (K6's "any left goes to main"). Lean:
+        not a blocker.
+      - The hand Titan collapses at 6.39 Gyr. The sample's water seas all lie on `Snowball`s at
+        the cap.
+      - Behaviour-neutral cleanups left for a later lane (the review's):
+        - `GreenhouseConstants`' always-`Some` `water_cloud`, `hydrogen` and `thick_air_anchor`;
+        - `Atmosphere::escape`, always `Some`;
+        - the pass-through `in_force` functions;
+        - T48.g's twin impactors golden;
+        - the regenerated-system test caches;
+        - the kept 23 fits (`GREENHOUSE_CARBON_DIOXIDE`, `GREENHOUSE_WATER` and
+          `EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`, now documented as version 23's);
+        - P14.T17.b's and T51.g.a's pure laws.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

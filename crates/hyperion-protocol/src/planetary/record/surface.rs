@@ -26,11 +26,18 @@
 //! with no condensable's `condensable`, a world never wet's `wet_epoch`, a body computed to hold no
 //! subsurface ocean's `subsurface_ocean`, an H₂/He envelope's `supercritical`. A member this
 //! generator version does not compute is absent ([`Modelled::NotModelled`]), and a reader takes it
-//! as not modelled, never as none. The members whose tasks land later (P14.T24.c, T24.e, T51.d,
-//! T51.e, T53.d and T55.b) are absent until they do, and each task may reshape its own member's
-//! type while no build has sent a value of it; once a build has, a change bumps
+//! as not modelled, never as none. The members whose tasks land later (P14.T53.d's biosphere and
+//! P14.T55.b's silicate vapour) are absent until they do. The silicate vapour's task may reshape
+//! its member's type while no build has sent a value of it, and the biosphere's shape is fixed at
+//! 24 with the members below; once a build has sent a value, a change bumps
 //! [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The condensates (P14.T51.a) and the crust
-//! (P14.T51.c) are sent from P14.T54.a's batch, so their shapes are now fixed.
+//! (P14.T51.c) are sent from P14.T54.a's batch, and from generator version 24 P14.T54.b's: the
+//! vertical structure (P14.T24.e), the aerosol and absorber inventory (P14.T24.c with T24.g), the
+//! modifiers (P14.T51.d with T51.j), the subsurface ocean as P14.T51.g.b solves it, the taxonomic
+//! class (P14.T51.e), a tenuous air's gas list (P14.T53.c), the condensates' cold-trapped areas
+//! (P14.T51.f and T51.i) and the envelope section (P14.T24.d with T52.d) with its `supercritical`
+//! member (P14.T53.b part 2). Their shapes are now fixed, as plan 14's "Generator version" lists
+//! them; the steam envelope's section is 25's (P14.T53.b part 3).
 //!
 //! # Closed classes
 //!

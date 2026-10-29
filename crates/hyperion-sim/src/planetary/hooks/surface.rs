@@ -203,12 +203,13 @@ pub const EARTH_TRANSPORT_PARTITION: f64 = 0.310;
 /// and [`EARTH_TRANSPORT_PARTITION`] are the measured balance [`WET_ALBEDO_GRADIENT`] is fitted in.
 pub const EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K: f64 = 2.09;
 
-/// Earth's meridional conductance D⊕, W m⁻² K⁻¹ (North, Cahalan and Coakley's units: the
-/// diffusion's flux divergence per kelvin of the `P₂` mode is 6D): 0.6760, so that Earth's
-/// measured state, at its own restoring with its vapour feedback, `B_eff`⊕, and at
+/// Version 23's meridional conductance of Earth D⊕, W m⁻² K⁻¹ (North, Cahalan and Coakley's
+/// units: the diffusion's flux divergence per kelvin of the `P₂` mode is 6D): 0.6760, so that
+/// Earth's measured state, at its own restoring with its vapour feedback, `B_eff`⊕, and at
 /// [`WET_ALBEDO_GRADIENT`], holds [`EARTH_EQUATOR_POLE_CONTRAST_K`] (`Fitted`, by bisection on the
-/// zonal solver, with the 64-step bisection of each end, the tests', as its oracle; a test refits
-/// it).
+/// zonal solver, with the 64-step bisection of each end, the tests', as its oracle). From 24 the
+/// generator reads [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], which a test refits; this
+/// one is kept as its documented fit (P14.T54.b.l).
 ///
 /// It is North, Cahalan and Coakley's procedure carried to the model's own restoring
 /// (decision-p14-t54a-bands §2.6, amending decision-pre-23-review item 20(2)): they measured B and

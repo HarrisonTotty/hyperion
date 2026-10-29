@@ -2369,13 +2369,12 @@ mod tests {
         assert_same_bits(Regolith::of(&carried).inertia_j_per_m2_k_sqrt_s, 123.0);
     }
 
-    /// One Γ (decision-p14-t54a-passes §3.5; Batch D's review, D3-1) over the systems `systems`,
-    /// read under the rules in force on the calling thread: on every body whose record names R09's
-    /// radiative model, airless or under a thin air, bracketed or not, the regolith of its inputs
-    /// from `for_body` takes its record's ground inertia, to the bit. A body `for_body` answers
-    /// not modelled reads no inputs, and is counted; its gap is asserted one of the recorded: no
-    /// crust, an unlit record, or an ice the registry has no density of. Gives the airless, the
-    /// thin-aired and the unread bodies.
+    /// One Γ (decision-p14-t54a-passes §3.5; Batch D's review, D3-1) over the systems `systems`: on
+    /// every body whose record names R09's radiative model, airless or under a thin air, bracketed
+    /// or not, the regolith of its inputs from `for_body` takes its record's ground inertia, to the
+    /// bit. A body `for_body` answers not modelled reads no inputs, and is counted; its gap is
+    /// asserted the recorded one, no crust (to version 23 an unlit record and an ice the registry
+    /// had no density of were gaps too). Gives the airless, the thin-aired and the unread bodies.
     fn one_gamma<'a>(
         systems: impl Iterator<
             Item = (
@@ -2414,7 +2413,8 @@ mod tests {
                             ))
                         );
                         // The recorded gap: no crust. From 24 an unlit record's mean is its night
-                        // floor (P14.T24.i) and every ice's solid density is read (P14.T49.n).
+                        // floor (P14.T24.i), and the ices the registry still has no density of
+                        // (β-CO, H2S's phase II) are not on any of these records' surfaces.
                         let gap = matches!(surface.crust(), Modelled::NotModelled);
                         assert!(gap, "{:?}: {error:?}", record.index());
                         unread += 1;

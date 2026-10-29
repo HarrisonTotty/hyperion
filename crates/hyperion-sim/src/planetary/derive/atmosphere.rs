@@ -803,8 +803,8 @@ pub fn volatile_inventory(
     )
 }
 
-/// The greenhouse constant of carbon dioxide, per √bar: 14.86, fitted on Venus's measured state
-/// (P14.T57.a, decision-p14-moons §4 and decision-p14-t57a-fits §1–§3; amends P14.T13.c).
+/// Version 23's greenhouse constant of carbon dioxide, per √bar: 14.86, fitted on Venus's measured
+/// state (P14.T57.a, decision-p14-moons §4 and decision-p14-t57a-fits §1–§3; amends P14.T13.c).
 ///
 /// The grey greenhouse's constants are fitted in this order, each at its body's measured inventory
 /// and measured Bond albedo under the generator's own irradiation: nitrogen on Titan
@@ -840,7 +840,8 @@ pub fn volatile_inventory(
 /// - _The fit:_ at the generator's irradiation for Venus at 0.76, 229.06 K, which the batch's
 ///   passes give the measured Venus, with the nitrogen term as built and no water, which a runaway
 ///   world has lost, 737 K needs τ = 141.6, which gives 14.862. At 14.86 the measured Venus
-///   reaches 737.0 K (the test `the_greenhouse_constants_are_their_fits`).
+///   reached 737.0 K (the test `the_greenhouse_constants_are_their_fits`, which went with the
+///   23 → 24 bump).
 ///
 /// The generated Venus is a median draw of the inventory, not the measured one: the table's Venus
 /// holds 57.8 bar and reaches 696.3 K, while the measured Venus lies at the 65th percentile of its
@@ -852,9 +853,9 @@ pub fn volatile_inventory(
 /// ([`BROADENED_CARBON_DIOXIDE_BAND`]).
 pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 
-/// The greenhouse constant of water vapour, per √bar: 4.47, fitted on Earth's measured state after
-/// carbon dioxide (P14.T57.a, decision-p14-t57a-fits §1–§2; amends P14.T13.c), the last of the
-/// three fits ([`GREENHOUSE_CARBON_DIOXIDE`] gives their order and the rule).
+/// Version 23's greenhouse constant of water vapour, per √bar: 4.47, fitted on Earth's measured
+/// state after carbon dioxide (P14.T57.a, decision-p14-t57a-fits §1–§2; amends P14.T13.c), the last
+/// of the three fits ([`GREENHOUSE_CARBON_DIOXIDE`] gives their order and the rule).
 ///
 /// - _Earth's air:_ the table's median Earth's, whose carbon dioxide and nitrogen are Earth's per
 ///   unit mass: 42 Pa of carbon dioxide by weight, the pre-industrial 2.2 × 10¹⁵ kg (278.3 ±
@@ -875,7 +876,8 @@ pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 ///   The climatology's ±0.5 K (AR6 WG1 Fig. 1.11) is about ±2.5% in this constant.
 /// - _The fit:_ at the generator's irradiation for the table's Earth at 0.294, 255.14 K, 288 K
 ///   needs τ = 0.8314; less carbon dioxide's 0.3048 and nitrogen's 0.1177 that leaves 0.4089 for
-///   the water, which gives 4.469 (the test `the_greenhouse_constants_are_their_fits`).
+///   the water, which gives 4.469 (the test `the_greenhouse_constants_are_their_fits`, which went
+///   with the 23 → 24 bump).
 ///
 /// The fit reads none of the passes' stand-ins, and the generated Earth is not fitted: through the
 /// batch's passes at their stand-in surface (no basins, so no sea; a Bond albedo of 0.2798) the
@@ -1340,8 +1342,8 @@ impl GreenhouseConstants {
     }
 
     /// Water cloud's term, `τ_c` `A_w` ([`water_cloud_availability`]), over the partial pressures
-    /// `partials` under the surface gravity `gravity`: `None` under P14.T57.a's constants, which
-    /// have none.
+    /// `partials` under the surface gravity `gravity`: `None` for constants with no cloud term,
+    /// which the generator no longer builds (P14.T57.a's had none, to version 23).
     #[must_use]
     fn cloud_depth(
         &self,
@@ -1453,7 +1455,7 @@ impl GreenhouseConstants {
     /// [`optical_depth`]'s) under the surface gravity `gravity` (decision-p14-t53a-thick-co2 §3):
     /// (`τ_a`, `T_a`, `T_ad`) where these constants carry its anchor `p_a`
     /// ([`THICK_AIR_ANCHOR_PRESSURE`]) and the surface pressure `p_s`, the partial pressures'
-    /// total, lies beyond it; `None` elsewhere, and so under P14.T57.a's constants, to version 23.
+    /// total, lies beyond it; `None` elsewhere.
     ///
     /// - `τ_a` is the grey depth of the air's own top `p_a`: every partial pressure scaled by f =
     ///   `p_a` ÷ `p_s`, at the same base and gravity ([`optical_depth`](Self::optical_depth)).
@@ -2561,7 +2563,8 @@ impl Atmosphere {
     /// What escape and the climate made of the body's volatiles (P14.T53.a): each element's
     /// outcome, the cosmic shoreline's shares, its water's oxygen, its envelope's helium, its
     /// methane, the share of its carbon left airborne and the carbon monoxide its desiccated
-    /// carbon dioxide made. `None` to generator version 23; from 24 every body's.
+    /// carbon dioxide made: every body's from generator version 24, whose escape is never held
+    /// (the `Option` is version 23's, under which the hold recorded none).
     #[must_use]
     pub const fn escape(&self) -> Option<&EscapeOutcome> {
         self.escape.as_ref()
@@ -3480,8 +3483,8 @@ impl<'a> StepClimate<'a> {
 ///    temperature ([`exobase_temperature`], [`Retention`]). On a body whose bulk is ice
 ///    ([`SurfaceMaterial::Ice`]) with a solid crust, water and nitrogen that fail that test but
 ///    whose ice's saturated vapour at the base temperature, the airless surface's mean (the
-///    larger of the equilibrium temperature and the night floor at the heat flow under the unlit
-///    mean's rules, held at 24; P14.T24.i's follow-up, decision-t24i-airless-state D1.3), is
+///    larger of the equilibrium temperature and the night floor at the heat flow, P14.T24.i's
+///    unlit mean from 24; P14.T24.i's follow-up, decision-t24i-airless-state D1.3), is
 ///    under [`AIRLESS_PRESSURE`] are held by their ice: each keeps its inventory less its vapour's
 ///    own Jeans escape over the age with the exobase at the surface, where that leaves any
 ///    (Schaller and Brown 2007, ApJ 659, L61; decision-p14-t54a-ganymede, C0 follow-up, rule (b),

@@ -7161,7 +7161,7 @@ mod tests {
     /// refit; 4.47 at 23) at 0.77 of its saturation by mole, `M_w` ÷ μ of that by weight on the
     /// reference Earth's air.
     #[test]
-    fn the_greenhouse_reads_the_batch_s_rules() {
+    fn the_greenhouse_reads_the_refit_water_term() {
         let inputs = reference::earth_like();
         let air = Air::of(&inputs);
         let water_term = |constants: &GreenhouseConstants| {

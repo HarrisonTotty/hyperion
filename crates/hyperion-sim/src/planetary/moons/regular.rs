@@ -4537,7 +4537,7 @@ mod tests {
     /// band, 0.72–0.92 (Hillier et al. 1990, Science 250, 419: 0.82 ± 0.05; decision-p14-t51-batch
     /// E2), and its passes converge within the plain passes (`Converged`, P14.T51.h).
     #[test]
-    fn the_table_s_triton_holds_its_nitrogen_ice_and_stays_airless() {
+    fn the_table_s_triton_holds_its_nitrogen_ice_under_a_tenuous_air() {
         use crate::planetary::chem::partition::CondensatePhase;
         use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
         let volatiles = MoonVolatiles {
@@ -4652,7 +4652,7 @@ mod tests {
     /// must-fix, beside its observed whole-disc Bond albedo of about 0.5, which is its SO₂ frost's
     /// and sulphur's, deposits the area mix leaves out (P14.T54.b.e's recorded deviation).
     #[test]
-    fn under_every_24_hold_the_table_s_io_s_albedo_is_stated_held_and_weathered() {
+    fn under_every_24_hold_the_table_s_io_s_albedo_is_stated_weathered() {
         use crate::planetary::derive::atmosphere::{PassWeathered, SurfaceMaterial};
         use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
         use crate::units::MetresPerSecondSquared;

@@ -2282,7 +2282,7 @@ fn under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density(
 /// 0.419 against 0.406 compressed, are an earlier record's); from 24 the escape leaves it a carbon
 /// dioxide `Snowball` with no sea.
 #[test]
-fn close_binary_s_sea_shrinks_under_its_compressed_water() {
+fn close_binary_s_sea_reads_its_compressed_water() {
     use hyperion_surface::field::PaletteRole;
 
     use crate::Seed;

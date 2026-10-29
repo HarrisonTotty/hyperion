@@ -1976,7 +1976,7 @@ fn the_figures_are_the_same_twice() {
 /// The ruling's reference Moon: an Earth of 1 M⊕ at 1 au, eccentricity 0.016 710 22 and no
 /// inclination, inside the Solar main belt at its own edges and mass ([`SOLAR_MAIN_BELT_EDGES_AU`],
 /// [`SOLAR_MAIN_BELT_MASS`]) about the nominal Sun, with Jupiter; and the Moon at 384,400 km, of GM
-/// 4,902.800 km³ s⁻² and radius 1,737.4 km, as [`LUNAR_ENCOUNTER_SPEED`] documents it.
+/// 4,902.800 km³ s⁻² and radius 1,737.4 km, as [`POPULATION_LUNAR_ENCOUNTER_SPEED`] documents it.
 fn reference_moon() -> Impactors {
     let (inner, outer) = SOLAR_MAIN_BELT_EDGES_AU;
     let belt = SourceBelt {
@@ -2517,10 +2517,10 @@ fn the_resurfacing_exponent_is_fitted_on_mars() {
 
 /// Io's surface at its measured elements is under 1 Myr old. Europa's measured bulk is ice-rich,
 /// and at the calibration's heat flow ([`ICE_RESURFACING_HEAT_FLOW`]) its surface is 60 Myr ± 10%
-/// old: here its tide is set so that its whole heat flow is that; P14.T56.d's own tides refit the
-/// constant in `europa_s_surface_at_its_own_tides_is_its_calibration`. Under the generated dry
-/// Europa's tide, Io's response on the heated branch, scaled to its measured radius, its age is
-/// recorded.
+/// old: here its tide is set so that its whole heat flow is that; P14.T56.d's own tides fitted the
+/// constant to version 23 ([`europa_s_surface_at_its_own_tides_lies_in_bierhaus_s_range`]). Under
+/// the generated dry Europa's tide, Io's response on the heated branch, scaled to its measured
+/// radius, its age is recorded.
 #[test]
 fn io_s_surface_is_young_and_europa_s_is_its_calibration() {
     let io = jovian(8.931_9e22, 421_700.0, 0.0041);
@@ -2565,7 +2565,7 @@ fn io_s_surface_is_young_and_europa_s_is_its_calibration() {
 /// (JUP365) and Europa's sidereal period NASA's Jovian satellite fact sheet's, 3.551181 d, read
 /// 2026-10-16.
 #[test]
-fn europa_s_surface_at_its_own_tides_is_its_calibration() {
+fn europa_s_surface_at_its_own_tides_lies_in_bierhaus_s_range() {
     use crate::planetary::derive::rotation::moment_of_inertia_factor;
     use crate::planetary::moons::tides::{
         MoonTides, TidalBranch, TidalMaterial, TideInputs, tidal_forcing,

@@ -214,7 +214,7 @@ pub(in crate::substance) const CARBON_DIOXIDE: CondensedColumns = of_diagram(
     MechanicsFamily::VolatileIce,
     VOLATILE_SOURCES,
 );
-/// Argon, whose solid's density was not read: its solid is not modelled.
+/// Argon, its fcc solid's density read (P14.T49.n; from generator version 24).
 pub(in crate::substance) const ARGON: CondensedColumns = of_diagram(
     &diagrams::ARGON,
     MechanicsFamily::VolatileIce,
@@ -250,13 +250,14 @@ pub(in crate::substance) const SULPHUR_DIOXIDE: CondensedColumns = of_diagram(
     MechanicsFamily::VolatileIce,
     VOLATILE_SOURCES,
 );
-/// Hydrogen sulphide, whose solids' densities were not read.
+/// Hydrogen sulphide, its phase III's and phase I's densities read and phase II's not (P14.T49.n;
+/// from generator version 24).
 pub(in crate::substance) const HYDROGEN_SULPHIDE: CondensedColumns = of_diagram(
     &diagrams::HYDROGEN_SULPHIDE,
     MechanicsFamily::VolatileIce,
     VOLATILE_SOURCES,
 );
-/// Ethane, whose solid's density was not read.
+/// Ethane, its solid's density read (P14.T49.n; from generator version 24).
 pub(in crate::substance) const ETHANE: CondensedColumns = of_diagram(
     &diagrams::ETHANE,
     MechanicsFamily::VolatileIce,

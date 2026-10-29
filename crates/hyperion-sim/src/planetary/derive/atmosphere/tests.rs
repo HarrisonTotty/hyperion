@@ -4302,7 +4302,7 @@ fn under_the_escape_batch_venus_earth_and_titan_keep_their_airs() {
 /// is `Tenuous`, the vapour of what its ice holds at the ice's own temperature, where to version 23
 /// it was airless.
 #[test]
-fn under_the_escape_batch_mercury_the_moon_and_ganymede_are_airless() {
+fn under_the_escape_batch_mercury_and_the_moon_are_airless_and_ganymede_tenuous() {
     let batch = table();
     for name in ["Mercury", "Moon", "Ganymede"] {
         let air = found(&batch, name).atmosphere();
@@ -5282,14 +5282,6 @@ fn under_the_escape_batch_the_ceiling_leaves_venus_earth_mars_and_titan_to_the_b
         found(&capped, "Titan").atmosphere().greenhouse_ceiling(),
         GreenhouseCeiling::MaximumGreenhouse
     );
-}
-
-/// The batch's rules are pure as the bump's are (sim-determinism): under the batch, with both 24
-/// holds lifted, the table, a methane world and an oxygen world derived twice are the same
-/// (`the_speciated_atmosphere_is_the_same_twice`'s, under the batch).
-#[test]
-fn under_the_escape_batch_the_speciated_atmosphere_is_the_same_twice() {
-    the_speciated_atmosphere_is_the_same_twice();
 }
 
 // P14.T53.b part 1: the state from the present insolation, and the runaway's deck

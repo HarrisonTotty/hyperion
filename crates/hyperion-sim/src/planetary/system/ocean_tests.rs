@@ -461,7 +461,7 @@ fn golden_census() -> Census {
 /// floor and version 23's, and the regimes that moved, went with the ocean's hold at the 23 → 24
 /// bump.
 #[test]
-fn every_solid_body_publishes_its_ocean_under_the_hold() {
+fn every_solid_body_publishes_its_ocean_over_the_golden_systems() {
     let solved = golden_census();
     solved.print("the golden systems");
     solved.assert_holds();

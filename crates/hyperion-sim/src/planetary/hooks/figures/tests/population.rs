@@ -190,8 +190,9 @@ fn under_every_24_hold_the_solar_system_s_rates_follow_the_ruling() {
     check_the_solar_system_s_rates(POPULATION_LUNAR_ENCOUNTER_SPEED);
 }
 
-/// The Solar System's impactors at 24, pinned to the bit as
-/// [`the_solar_system_s_impactors_are_pinned`] pins version 23's.
+/// The Solar System's impactors at 24, pinned to the bit: from 24 the same figures as
+/// [`the_solar_system_s_impactors_are_pinned`]'s, which pinned version 23's (a twin left for the
+/// next cleanup, P14.T54.b.l).
 #[test]
 fn under_every_24_hold_the_solar_system_s_impactors_are_pinned() {
     use hyperion_testkit::golden;

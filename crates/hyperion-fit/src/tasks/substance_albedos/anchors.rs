@@ -541,22 +541,28 @@ fn label_of(optics: &CondensedOptics) -> &'static str {
 /// brighter than its mature surface, whose weathering is P14.T54.b's (decision-p14-t49k Q5).
 const FRESH_MERCURY_FLOOR: f64 = 0.085;
 
+/// The Bond albedo under a 5,772 K blackbody of 23's carbon-free `basalt_reduced`, the mixture
+/// that went with the 23 → 24 bump (P14.T49.k's tests, plan 14: the darkened row lies "below the
+/// carbon-free mixture's 0.5275"), which the row's label quotes.
+const CARBON_FREE_BASALT_REDUCED_BOND: f64 = 0.5275;
+
 /// Mercury's fresh row from the 23 → 24 bump (P14.T49.k; decision-p14-t49k Q5): the darkened
 /// `basalt_reduced`, the row in force from 24, its Bond albedo under a 5,772 K blackbody at or
-/// above [`FRESH_MERCURY_FLOOR`], with no allowance, as `basalt_fe`'s bounds take none, and below
-/// 23's carbon-free mixture, its label's figure (the mixture went with the bump); a stand-in
-/// labelled an upper bound, which states its own, and, stated and not asserted, its reflectance factor at i 30°, e 0° and 750 nm against `feldspathic`'s, their ratio
-/// beside Braden and Robinson 2013's (JGR Planets 118, 1903) 1.9 ± 0.4, immature lunar over
-/// immature Mercurian material, and its spherical albedo in V beside NASA's V-band 0.068 (Mallama,
-/// Wang and Howard 2002, Icarus 155, 253: p 0.142 × q 0.478).
+/// above [`FRESH_MERCURY_FLOOR`] and below [`CARBON_FREE_BASALT_REDUCED_BOND`], with no allowance,
+/// as `basalt_fe`'s bounds take none; a stand-in labelled an upper bound, which states both, and,
+/// stated and not asserted, its reflectance factor at i 30°, e 0° and 750 nm against
+/// `feldspathic`'s, their ratio beside Braden and Robinson 2013's (JGR Planets 118, 1903) 1.9 ±
+/// 0.4, immature lunar over immature Mercurian material, and its spherical albedo in V beside
+/// NASA's V-band 0.068 (Mallama, Wang and Howard 2002, Icarus 155, 253: p 0.142 × q 0.478).
 #[test]
 fn substance_albedos_the_darkened_basalt_reduced_lies_within_its_bounds() {
     let sun = |row: AlbedoRow| bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);
     let darkened = fitted_row("basalt_reduced");
     let bond = sun(darkened);
     assert!(
-        bond >= FRESH_MERCURY_FLOOR,
-        "basalt_reduced's Bond albedo {bond} against {FRESH_MERCURY_FLOOR}"
+        (FRESH_MERCURY_FLOOR..CARBON_FREE_BASALT_REDUCED_BOND).contains(&bond),
+        "basalt_reduced's Bond albedo {bond} against {FRESH_MERCURY_FLOOR} and \
+         {CARBON_FREE_BASALT_REDUCED_BOND}"
     );
     let optics = optics_of("basalt_reduced");
     assert!(optics.is_stand_in());
@@ -574,6 +580,7 @@ fn substance_albedos_the_darkened_basalt_reduced_lies_within_its_bounds() {
         "an upper bound".to_owned(),
         format!("{bond:.4}"),
         format!("{FRESH_MERCURY_FLOOR}"),
+        format!("{CARBON_FREE_BASALT_REDUCED_BOND}"),
         format!("{r_row:.3}"),
         format!("{r_highlands:.3}"),
         format!("ratio of {ratio:.2}"),
@@ -590,8 +597,8 @@ fn substance_albedos_the_darkened_basalt_reduced_lies_within_its_bounds() {
 
 /// `ferric`'s darkened row (P14.T49.k; decision-p14-t49k Q5), the row in force from 24: no band,
 /// its Bond albedo under a 5,772 K blackbody stated in its reason beside Mars's bright regions'
-/// 0.27 (Pleskot and Miner 1981, Icarus 45, 179, abstract), as context, its nanophase oxide fine
-/// (below 23's row, which went with the bump).
+/// 0.27 (Pleskot and Miner 1981, Icarus 45, 179, abstract), as context, its nanophase oxide fine.
+/// It lay below 23's row, which went with the bump and is not compared here.
 #[test]
 fn substance_albedos_the_darkened_ferric_states_its_value() {
     let sun = |row: AlbedoRow| bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);

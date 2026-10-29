@@ -465,6 +465,6 @@ fn print_0501() {
 /// towards 0.97 T0.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
-fn the_0501_capture_s_surface_under_both_arms() {
+fn the_0501_capture_s_surface_on_its_lag_is_stated() {
     print_0501();
 }

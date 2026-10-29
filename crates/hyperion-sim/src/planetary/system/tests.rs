@@ -67,6 +67,35 @@ pub(crate) fn whole() -> &'static [(SystemContext, PlanetarySystem)] {
     })
 }
 
+/// How many of the sample's systems the fast tier's whole-system property tests walk, the first in
+/// the sample's order: P14.T54.b.l's §C.7 split (decision-p14-t54a-passes §C.7, pre-authorised for
+/// 24 by decision-24-cost D5), sized on 24's times, where a record costs several times 23's. Each
+/// such test has an ignored twin over [`whole_rest`], so that the two walk disjoint chunks of the
+/// sample, each with the full per-record check.
+const FAST_WHOLE: usize = 200;
+
+/// The first [`FAST_WHOLE`] of [`whole`]'s systems, generated once: the fast tier's chunk.
+pub(crate) fn whole_fast() -> &'static [(SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(|| {
+        sample()[..FAST_WHOLE]
+            .iter()
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
+            .collect()
+    })
+}
+
+/// The rest of [`whole`]'s systems, after [`whole_fast`]'s, generated once: the slow tier's chunk.
+pub(crate) fn whole_rest() -> &'static [(SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(|| {
+        sample()[FAST_WHOLE..]
+            .iter()
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
+            .collect()
+    })
+}
+
 /// The ID of candidate `index` of a cell at the solar circle, for synthetic hosts.
 pub(crate) fn id(index: u32) -> SystemId {
     CellKey::new(Layer::C, [0, 812, 0])
@@ -1593,11 +1622,34 @@ fn a_star_s_zone_moves_with_star_states_at_bit_for_bit() {
 /// a second, to 10⁻⁶ relative, with a floor for the positions' own rounding, a few ε of the widest
 /// orbit on its path (the host's pairs' and its own apocentres, and its distance), which a
 /// difference over 2 s carries into the velocity.
+///
+/// The fast tier walks the first [`FAST_VELOCITY`] of the 200 systems, and
+/// [`a_body_s_velocity_is_the_derivative_of_its_position_over_the_rest_of_its_systems`] the rest.
 #[test]
 fn a_body_s_velocity_is_the_derivative_of_its_position() {
+    a_body_s_velocity_is_the_derivative_of_its_position_in(&whole_fast()[..FAST_VELOCITY]);
+}
+
+/// [`a_body_s_velocity_is_the_derivative_of_its_position`] over the rest of its 200 systems: the
+/// slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the velocities of 100 whole systems at ±H, the fast tier's other chunk"]
+fn a_body_s_velocity_is_the_derivative_of_its_position_over_the_rest_of_its_systems() {
+    a_body_s_velocity_is_the_derivative_of_its_position_in(&whole_fast()[FAST_VELOCITY..]);
+}
+
+/// How many of [`a_body_s_velocity_is_the_derivative_of_its_position`]'s 200 systems the fast tier
+/// walks (P14.T54.b.l's §C.7 split, sized on 24's times: 248 s over the 200, pod, 4 vCPU).
+const FAST_VELOCITY: usize = 100;
+
+/// The body of [`a_body_s_velocity_is_the_derivative_of_its_position`] and its slow twin, over the
+/// systems `systems`.
+fn a_body_s_velocity_is_the_derivative_of_its_position_in(
+    systems: &[(SystemContext, PlanetarySystem)],
+) {
     let second = Span::from_seconds(1);
     let mut checked = 0;
-    for (ctx, system) in whole().iter().take(200) {
+    for (ctx, system) in systems {
         let pairs = ctx
             .hierarchy()
             .pairs()
@@ -1643,7 +1695,7 @@ fn a_body_s_velocity_is_the_derivative_of_its_position() {
             }
         }
     }
-    assert!(checked > 1_000, "{checked} bodies checked");
+    assert!(checked > 500, "{checked} bodies checked");
 }
 
 #[test]
@@ -1719,13 +1771,31 @@ fn a_companion_s_light_pushes_a_star_s_habitable_zone_out() {
 /// evolution (P11.T4) a pair's orbit does not widen as its stars lose mass (ruling 33), while
 /// their planets' orbits do, so an evolved star's planet can outgrow the zone its companion bounds
 /// at birth: 7 of this sample's 4,830 bodies at the epoch, all about hosts that have lost mass.
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 246 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn no_overlapping_orbits_in_generated_systems() {
+    no_overlapping_orbits_in(whole_fast());
+}
+
+/// [`no_overlapping_orbits_in_generated_systems`] over the rest of the sample ([`whole_rest`]): the
+/// slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the orbits of 200 whole systems at ±H, the fast tier's other chunk"]
+fn no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample() {
+    no_overlapping_orbits_in(whole_rest());
+}
+
+/// The body of [`no_overlapping_orbits_in_generated_systems`] and its slow twin, over the systems
+/// `systems`.
+fn no_overlapping_orbits_in(systems: &'static [(SystemContext, PlanetarySystem)]) {
     let (mut pairs, mut bodies, mut outgrown, mut unstable) = (0_u32, 0_u32, 0_u32, 0_u32);
     // On whole systems (P14.T30.b): the planets about each host, the records whose parent is the
     // host; moons keep T22.b's rule about their planet, and a belt's members, listed under their
     // belt, keep T21.c's clearance of the chaotic zones instead.
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         let strip = ctx.strip_radius();
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
@@ -1797,7 +1867,7 @@ fn no_overlapping_orbits_in_generated_systems() {
         }
     }
     assert!(
-        pairs > 300 && bodies > 900,
+        pairs > 150 && bodies > 450,
         "{pairs} pairs, {bodies} bodies"
     );
     assert!(
@@ -1902,11 +1972,29 @@ fn hottest_light(ctx: &SystemContext, t: UniverseTime) -> Option<Kelvin> {
 /// P14.T16.b rerun on whole generated systems (P14.T30.b): no present body, its internal heat
 /// included, is hotter than the hottest star that lights it, at −H, the epoch and +H; systems with
 /// a black hole are left out.
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`no_planet_hotter_than_its_star_in_generated_systems_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 246 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn no_planet_hotter_than_its_star_in_generated_systems() {
+    no_planet_hotter_than_its_star_in(whole_fast());
+}
+
+/// [`no_planet_hotter_than_its_star_in_generated_systems`] over the rest of the sample
+/// ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the bodies of 200 whole systems at ±H, the fast tier's other chunk"]
+fn no_planet_hotter_than_its_star_in_generated_systems_over_the_rest_of_the_sample() {
+    no_planet_hotter_than_its_star_in(whole_rest());
+}
+
+/// The body of [`no_planet_hotter_than_its_star_in_generated_systems`] and its slow twin, over the
+/// systems `systems`.
+fn no_planet_hotter_than_its_star_in(systems: &'static [(SystemContext, PlanetarySystem)]) {
     let (mut bodies, mut giants) = (0_u32, 0_u32);
     // On whole systems (P14.T30.b): planets, moons and belt members.
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         for t in window() {
             let Some(hottest) = hottest_light(ctx, t) else {
                 continue;
@@ -1930,15 +2018,16 @@ fn no_planet_hotter_than_its_star_in_generated_systems() {
         }
     }
     assert!(
-        bodies > 900 && giants > 20,
+        bodies > 450 && giants > 10,
         "{bodies} bodies, {giants} giants"
     );
 }
 
 /// How far either side of the epoch the fast tier's continuity test steps, years: P14.T54.b.l's
 /// §C.7 split (decision-p14-t54a-passes §C.7, pre-authorised for 24 by decision-24-cost D5), sized
-/// on 24's times, where the record's path across times costs many times 23's.
-const FAST_CONTINUITY_YEARS: i64 = 100;
+/// on 24's times, where the record's path across times costs many times 23's (±100 years took
+/// 292 s, pod, 4 vCPU).
+const FAST_CONTINUITY_YEARS: i64 = 50;
 
 /// P14.T16.b's continuity rerun on whole generated systems: at steps of a year, no present body's
 /// radius, equilibrium temperature or envelope fraction jumps by a relative 10⁻³, except in a step
@@ -2034,7 +2123,7 @@ fn continuity<'a>(
             previous = Some((phases, snapshot));
         }
     }
-    assert!(checked > 5_000, "{checked} steps");
+    assert!(checked > 4_000, "{checked} steps");
 }
 
 /// T28's states in whole systems: a body that has ended stays ended, and one present at +H was
@@ -2077,10 +2166,28 @@ fn every_body_s_states_across_the_window_are_a_prefix_of_its_life() {
 /// not, and takes its parent's state then (a giant engulfed by its evolved host takes its moons
 /// and rings with it); a regular or captured moon and a ring are present whenever their parent
 /// is; and a belt member's moon is no exception (P14.T30.b).
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`satellites_share_their_parent_s_state_across_the_window_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 247 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn satellites_share_their_parent_s_state_across_the_window() {
+    satellites_share_their_parent_s_state(whole_fast());
+}
+
+/// [`satellites_share_their_parent_s_state_across_the_window`] over the rest of the sample
+/// ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the satellites of 200 whole systems at ±H, the fast tier's other chunk"]
+fn satellites_share_their_parent_s_state_across_the_window_over_the_rest_of_the_sample() {
+    satellites_share_their_parent_s_state(whole_rest());
+}
+
+/// The body of [`satellites_share_their_parent_s_state_across_the_window`] and its slow twin, over
+/// the systems `systems`.
+fn satellites_share_their_parent_s_state(systems: &'static [(SystemContext, PlanetarySystem)]) {
     let (mut followed, mut engulfed) = (0u32, 0u32);
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
             let state_of = |index: BodyIndex| {
@@ -2275,10 +2382,32 @@ fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
 
 /// P14.T30.b: on whole systems, every body lies inside its zone and the strip radius at ±H, and
 /// every population inside the strip radius; an unborn system's bodies are all not yet formed.
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`every_body_of_the_rest_of_the_sample_lies_inside_its_zone_and_the_strip_radius`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 247 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius() {
+    every_body_lies_inside_its_zone_and_the_strip_radius(whole_fast());
+    unborn_systems_hold_no_formed_body();
+}
+
+/// [`every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius`] over the rest of the
+/// sample ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the bodies of 200 whole systems at ±H, the fast tier's other chunk"]
+fn every_body_of_the_rest_of_the_sample_lies_inside_its_zone_and_the_strip_radius() {
+    every_body_lies_inside_its_zone_and_the_strip_radius(whole_rest());
+}
+
+/// The sample's half of
+/// [`every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius`], over the systems
+/// `systems`.
+fn every_body_lies_inside_its_zone_and_the_strip_radius(
+    systems: &'static [(SystemContext, PlanetarySystem)],
+) {
     let mut checked = 0;
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         let strip = ctx.strip_radius();
         for t in window() {
             for record in system.snapshot_at(ctx, t).bodies() {
@@ -2317,7 +2446,13 @@ fn every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius() {
             }
         }
     }
-    assert!(checked > 1_000, "{checked}");
+    assert!(checked > 500, "{checked}");
+}
+
+/// The unborn half of
+/// [`every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius`]: an unborn system's
+/// bodies are all not yet formed.
+fn unborn_systems_hold_no_formed_body() {
     for i in 0..20 {
         let ctx = synthetic_star(
             id(900 + i),
@@ -2399,8 +2534,16 @@ fn a_companion_widens_by_its_regime() {
 fn drifting_records(
     t: UniverseTime,
 ) -> Vec<(&'static SystemContext, &'static PlanetarySystem, BodyRecord)> {
+    drifting_records_in(whole(), t)
+}
+
+/// [`drifting_records`] over the systems `systems`.
+fn drifting_records_in(
+    systems: &'static [(SystemContext, PlanetarySystem)],
+    t: UniverseTime,
+) -> Vec<(&'static SystemContext, &'static PlanetarySystem, BodyRecord)> {
     let mut found = Vec::new();
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         for record in system.snapshot_at(ctx, t).bodies() {
             if record
                 .orbit()
@@ -2451,7 +2594,10 @@ fn last_instant_of(orbit: &BodyOrbit) -> UniverseTime {
 /// Records are one per cell where cells are halved or cut too: before the window's start, at the
 /// epoch and in the window's last cells, where the sample's 2¹⁶ s cells sit, at the reference, the
 /// middle and the last instant of each cell, bit for bit and whatever was asked before (P14.T45.a).
+/// An order-independence test, so §C.7 never splits it: at 24 it takes the slow tier whole
+/// (P14.T54.b.l; 977 s, pod, 4 vCPU, 71 s on the owner's desktop at 23).
 #[test]
+#[ignore = "slow: an order-independence test over the drift cells at every time in them"]
 fn records_of_halved_and_cut_drift_cells_are_the_same_at_every_time_in_them() {
     use crate::planetary::drift::DRIFT_CELL_MAX_LOG2;
     let before_start = ClockWindow::START
@@ -2567,14 +2713,34 @@ fn a_drifting_record_s_velocity_is_the_derivative_of_its_position() {
 
 /// The share of evolving orbits whose cells fall to the smallest size, over the sample at three
 /// times, counting the cells that neither a segment nor a state cut: under 10⁻³ (P14.T45.a).
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`few_evolving_orbits_fall_to_the_smallest_drift_cell_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 246 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn few_evolving_orbits_fall_to_the_smallest_drift_cell() {
+    few_evolving_orbits_fall_to_the_smallest_drift_cell_in(whole_fast());
+}
+
+/// [`few_evolving_orbits_fall_to_the_smallest_drift_cell`] over the rest of the sample
+/// ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the drift cells of 200 whole systems at three times, the fast tier's other chunk"]
+fn few_evolving_orbits_fall_to_the_smallest_drift_cell_over_the_rest_of_the_sample() {
+    few_evolving_orbits_fall_to_the_smallest_drift_cell_in(whole_rest());
+}
+
+/// The body of [`few_evolving_orbits_fall_to_the_smallest_drift_cell`] and its slow twin, over the
+/// systems `systems`.
+fn few_evolving_orbits_fall_to_the_smallest_drift_cell_in(
+    systems: &'static [(SystemContext, PlanetarySystem)],
+) {
     use crate::planetary::drift::{DRIFT_CELL_MAX_LOG2, DRIFT_CELL_MIN_LOG2};
     let (mut cells, mut floor) = (0_u32, 0_u32);
     let mut sizes = [0_u32; DRIFT_CELL_MAX_LOG2 as usize + 1];
     let later = UniverseTime::from_julian_years(500).expect("in the window");
     for t in [ClockWindow::START, UniverseTime::EPOCH, later] {
-        for (_, _, record) in drifting_records(t) {
+        for (_, _, record) in drifting_records_in(systems, t) {
             let orbit = record.orbit().ok().expect("drifting");
             let start = orbit.drift().expect("drifting").reference();
             let Some(until) = orbit.valid_until() else {
@@ -2598,7 +2764,7 @@ fn few_evolving_orbits_fall_to_the_smallest_drift_cell() {
             }
         }
     }
-    assert!(cells > 300, "{cells} cells");
+    assert!(cells > 150, "{cells} cells");
     assert!(
         f64::from(floor) < 1e-3 * f64::from(cells),
         "{floor} of {cells} cells at the floor; sizes by log2 {sizes:?}"
@@ -3074,8 +3240,31 @@ fn the_photometry_section_by_kind_and_level() {
 
 /// P14.T46.c (c): a body's flattening is continuous in time across the clock window, except where
 /// its law locks between two times, a recorded state change.
+///
+/// The fast tier walks the first [`FAST_FLATTENING`] of the sample's first 60 systems, and
+/// [`the_flattening_is_continuous_in_time_over_the_rest_of_its_systems`] the rest (P14.T54.b.l's
+/// §C.7 split, sized on 24's times: 415 s over the 60, pod, 4 vCPU).
 #[test]
 fn the_flattening_is_continuous_in_time() {
+    let checked = the_flattening_is_continuous_in(&whole_fast()[..FAST_FLATTENING]);
+    assert!(checked > 300, "{checked}");
+}
+
+/// [`the_flattening_is_continuous_in_time`] over the rest of its 60 systems: the slow tier's chunk
+/// of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the flattening of 40 whole systems at 17 times, the fast tier's other chunk"]
+fn the_flattening_is_continuous_in_time_over_the_rest_of_its_systems() {
+    let checked = the_flattening_is_continuous_in(&whole_fast()[FAST_FLATTENING..60]);
+    assert!(checked > 600, "{checked}");
+}
+
+/// How many of [`the_flattening_is_continuous_in_time`]'s 60 systems the fast tier walks.
+const FAST_FLATTENING: usize = 20;
+
+/// The body of [`the_flattening_is_continuous_in_time`] and its slow twin, over the systems
+/// `systems`: the pairs of times checked.
+fn the_flattening_is_continuous_in(systems: &[(SystemContext, PlanetarySystem)]) -> u32 {
     let step = CLOCK_WINDOW_H.as_seconds_f64() / 8.0;
     let times: Vec<UniverseTime> = (-8_i32..=8)
         .map(|k| {
@@ -3085,7 +3274,7 @@ fn the_flattening_is_continuous_in_time() {
         })
         .collect();
     let mut checked = 0;
-    for (ctx, system) in whole().iter().take(60) {
+    for (ctx, system) in systems {
         for body in system.bodies() {
             let Some(rotation) = system.rotation_of(ctx, body.index()).unwrap() else {
                 continue;
@@ -3118,7 +3307,8 @@ fn the_flattening_is_continuous_in_time() {
             }
         }
     }
-    assert!(checked > 1_000, "{checked}");
+    eprintln!("{checked} pairs of times checked");
+    checked
 }
 
 /// P14.T24.a's surface conditions and P14.T24.b's global figures, published from the 21 → 22

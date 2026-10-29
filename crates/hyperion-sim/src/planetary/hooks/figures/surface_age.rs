@@ -65,7 +65,9 @@ pub const ICE_RESURFACING_TIME: Years = Years::new(60e6);
 /// The heat flow at which an ice-rich crust resurfaces in [`ICE_RESURFACING_TIME`], W m⁻²: 0.019 24,
 /// the measured Europa's whole heat flow at its measured elements under P14.T56.d's own tides, as
 /// built, so that its surface is Zahnle et al.'s 60 Myr (decision-p14-t56d-membrane §4.6 and §7.2).
-/// `Fitted`: `europa_s_surface_at_its_own_tides_is_its_calibration` refits it.
+/// `Fitted` to generator version 23. From 24 the ocean branch reads P14.T51.g.b's spherical shell,
+/// and the constant, not refitted, gives the measured Europa about 74.6 Myr, inside Bierhaus et
+/// al.'s 40–90 Myr, which `europa_s_surface_at_its_own_tides_lies_in_bierhaus_s_range` holds.
 ///
 /// It is calibrated on the moons' own tides, which it takes effect with. It replaces T48.c's
 /// 0.0386, Europa's under decision-p14-moons F2's membrane, which the ruling found was not
