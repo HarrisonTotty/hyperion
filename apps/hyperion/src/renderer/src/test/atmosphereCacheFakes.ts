@@ -1,11 +1,13 @@
 import type { BuiltAtmosphere, CachedTables } from "../view/atmosphere/AtmosphereCache";
 import { type AtmosphereBody, type TablesPlan, tablesPlanOf } from "../view/atmosphere/tables";
 import type { MsSourceTable } from "../view/atmosphere/thick/bake";
+import type { PolarisationTable } from "../view/atmosphere/thick/polarisation";
 
 /**
  * A body's per-planet tables as a test's factory makes them for the atmosphere cache (plan R08,
- * R08.T10.a; R08.T14.c): what they were built from, the bytes they report, their plan and body as
- * `AtmosphereTables` gives them for an unwidened row, and every thick bake given them.
+ * R08.T10.a; R08.T14.c; R08.T14.f): what they were built from, the bytes they report, their plan
+ * and body as `AtmosphereTables` gives them for an unwidened row, and every thick bake and
+ * polarisation correction given them.
  */
 export class FakeTables implements CachedTables {
   readonly built: BuiltAtmosphere;
@@ -17,6 +19,13 @@ export class FakeTables implements CachedTables {
   readonly thick: Array<ReadonlyArray<MsSourceTable> | null> = [];
   /** What `setThickTables` throws while set, taking nothing. */
   thickThrows: Error | null = null;
+  /**
+   * Every correction {@link FakeTables.setPolarisationCorrection} took, in order, `null` for one
+   * taken away.
+   */
+  readonly corrections: Array<ReadonlyArray<PolarisationTable> | null> = [];
+  /** What `setPolarisationCorrection` throws while set, taking nothing. */
+  correctionThrows: Error | null = null;
   disposed = false;
 
   constructor(built: BuiltAtmosphere, rowBytes: number) {
@@ -37,6 +46,18 @@ export class FakeTables implements CachedTables {
       throw this.thickThrows;
     }
     this.thick.push(bands);
+  }
+
+  /** The correction the tables hold: the last given, or `null`. */
+  get correctionHeld(): ReadonlyArray<PolarisationTable> | null {
+    return this.corrections.at(-1) ?? null;
+  }
+
+  setPolarisationCorrection(bands: ReadonlyArray<PolarisationTable> | null): void {
+    if (this.correctionThrows !== null) {
+      throw this.correctionThrows;
+    }
+    this.corrections.push(bands);
   }
 
   dispose(): void {

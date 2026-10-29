@@ -20,6 +20,7 @@ import { atmosphereFrameOf, atmosphereShownOf, ViewAtmosphereHandle } from "./vi
 const NEVER: AtmosphereBuilder = {
   build: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
   bakeThick: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
+  bakePolarisation: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
   terminate: () => undefined,
 };
 

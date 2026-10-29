@@ -122,6 +122,7 @@ import {
   type ThickBakeLight,
 } from "./bake";
 import { binOfRow } from "./binConversion";
+import { correctionBySources } from "./columnLayout";
 import {
   type BeamPath,
   DISCRETE_ORDINATE_CONSERVATIVE_CO_ALBEDO,
@@ -149,8 +150,6 @@ import {
   type SpectralColumn,
   spectralOptics,
   type SpectralPhase,
-  type SpectralSource,
-  type SpectralTerm,
   type SpectralTermOptics,
 } from "./spectralColumn";
 import {
@@ -2274,31 +2273,6 @@ export function preparePolarisation(
 }
 
 /**
- * Whether a channel source scatters by a matrix whose b₁ is not 0, read by its phase: Rayleigh's
- * does wherever it scatters, as a molecular term's; a table's where it scatters in green and its
- * matrix's b₁ there is not 0, as an aerosol's is read; Cornette–Shanks's and none's never (the
- * correction takes them as depolarisers).
- */
-function channelSourcePolarises(source: Extract<SpectralSource, { kind: "channels" }>): boolean {
-  const { phase } = source;
-  let polarises: boolean;
-  switch (phase.kind) {
-    case "rayleigh":
-      polarises = source.scattering.some((s) => s > 0);
-      break;
-    case "tabulated":
-      polarises =
-        source.scattering[1] > 0 && phase.table.matrix?.b1[1].some((value) => value !== 0) === true;
-      break;
-    case "cornette-shanks":
-    case "none":
-      polarises = false;
-      break;
-  }
-  return polarises;
-}
-
-/**
  * Whether a column needs the correction: whether some term scatters by a matrix whose b₁ is not 0
  * (Design note 10: "every world with a term whose b₁ ≠ 0, thin or thick"). A molecular or Thomson
  * term does, by Rayleigh's matrix (b₁ = −¾Δ sin²Θ, Δ > 0 for every ρ < 1), so every world with air;
@@ -2314,37 +2288,13 @@ function channelSourcePolarises(source: Extract<SpectralSource, { kind: "channel
  *   column with no molecular or Thomson term.
  */
 export function needsPolarisationCorrection(column: SpectralColumn): boolean {
-  const aerosols: SpectralTerm[] = [];
-  for (const term of column.terms) {
-    const { source } = term;
-    switch (source.kind) {
-      case "molecular":
-        if (source.numberDensityPerM3 > 0) {
-          return true;
-        }
-        break;
-      case "thomson":
-        if (source.electronDensityPerM3 > 0) {
-          return true;
-        }
-        break;
-      case "aerosol":
-        if (source.extinction550PerM > 0) {
-          aerosols.push(term);
-        }
-        break;
-      case "absorber":
-        break;
-      case "channels":
-        if (channelSourcePolarises(source)) {
-          return true;
-        }
-        break;
-    }
+  const bySources = correctionBySources(column);
+  if (bySources !== null) {
+    return bySources;
   }
-  if (aerosols.length === 0) {
-    return false;
-  }
+  const aerosols = column.terms.filter(
+    (term) => term.source.kind === "aerosol" && term.source.extinction550PerM > 0,
+  );
   const [optics] = spectralOptics({ ...column, terms: aerosols }, [CHANNEL_WAVELENGTHS_NM[1]]);
   return (optics ?? []).some(
     (t) =>

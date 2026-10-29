@@ -34,6 +34,10 @@
  * review item 1). Its request transfers nothing, so a worker that fails with it is replaced and
  * the bake asked again of the next free worker, as an assembly is.
  *
+ * **A polarisation correction** ({@link OpticsWorkerPool.bakePolarisation}; R08.T14.f) is one
+ * `polarisation-bake` job, asked as a thick bake is, with the same request's fields, and failing as
+ * one does: its own failure, never a build's.
+ *
  * The workers start at the first build or bake, so a session that draws no disc loads none of the
  * optics. This module takes only types of `assemble.ts` and of the thick bake's modules, whose
  * tables stay in the workers.
@@ -49,6 +53,7 @@ import {
   transferablesOf,
 } from "./opticsMessages";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import type { PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
 /** The part of a `Worker` the pool uses, so that tests can stand in for one. */
@@ -156,12 +161,33 @@ export interface ThickBake {
   cancel(): void;
 }
 
+/** How a polarisation correction's bake ended (R08.T14.f), as a thick bake's does. */
+export type PolarisationBakeOutcome =
+  /** One table a band asked, in their order, each with a slot a light asked, in theirs. */
+  | { readonly kind: "baked"; readonly tables: ReadonlyArray<PolarisationTable> }
+  /** The bake failed, as a thick bake fails, with the message for the console's log. */
+  | { readonly kind: "failed"; readonly message: string }
+  | { readonly kind: "cancelled" };
+
+/** A polarisation correction's bake under way (R08.T14.f). */
+export interface PolarisationBake {
+  /** Settles once with how the bake ended; never rejects. */
+  readonly outcome: Promise<PolarisationBakeOutcome>;
+  /** Drops its job if not yet sent and ignores its answer if sent; settles it `cancelled`. */
+  cancel(): void;
+}
+
 /** What builds a body's medium and its curves for the atmosphere cache: the pool, or a test's. */
 export interface AtmosphereBuilder {
   /** Builds a body's assembly and its light slots' curves. */
   build(input: BodyAtmosphereInput): OpticsBuild;
   /** Bakes a thick body's multiple-scattering tables (R08.T14.c), every band in one request. */
   bakeThick(ask: ThickBakeAsk): ThickBake;
+  /**
+   * Bakes a body's polarisation correction (R08.T14.f), every band in one request: a thick bake's
+   * request's fields, for a thin or a thick body.
+   */
+  bakePolarisation(ask: ThickBakeAsk): PolarisationBake;
   /** Stops every worker; builds and bakes under way settle `cancelled`. */
   terminate(): void;
 }
@@ -451,6 +477,36 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
     };
   }
 
+  /**
+   * Bakes a body's polarisation correction (see the module's remarks): one `polarisation-bake` job
+   * asking every band and slot of `ask`.
+   *
+   * @throws Error once the pool is terminated.
+   */
+  bakePolarisation(ask: ThickBakeAsk): PolarisationBake {
+    if (this.#terminated) {
+      throw new Error("the optics-worker pool was terminated");
+    }
+    this.#start();
+    const job = this.#submit((id) => ({ kind: "polarisation-bake", id, ...ask }), []);
+    let cancelled = false;
+    const settled = job.outcome.then(
+      (outcome): PolarisationBakeOutcome =>
+        cancelled ? CANCELLED : polarisationOutcomeOf(outcome, ask),
+      (error: unknown): PolarisationBakeOutcome => ({
+        kind: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return {
+      outcome: settled,
+      cancel: () => {
+        cancelled = true;
+        job.cancel();
+      },
+    };
+  }
+
   /** Stops every worker; every job settles `cancelled`, and the pool cannot be used afterwards. */
   terminate(): void {
     if (this.#terminated) {
@@ -680,6 +736,43 @@ function bakeOutcomeOf(outcome: JobOutcome, ask: ThickBakeAsk): ThickBakeOutcome
       // A bake's request transfers nothing, so the pool asks it again rather than losing it: held
       // here for a request that would.
       baked = { kind: "failed", message: "an optics worker failed with the thick bake's request" };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/** A polarisation correction's job's outcome as the bake's, as {@link bakeOutcomeOf} reads a thick one. */
+function polarisationOutcomeOf(outcome: JobOutcome, ask: ThickBakeAsk): PolarisationBakeOutcome {
+  let baked: PolarisationBakeOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "polarisation-baked") {
+        baked =
+          reply.tables.length === ask.bands.length
+            ? { kind: "baked", tables: reply.tables }
+            : {
+                kind: "failed",
+                message: `a polarisation correction of ${ask.bands.length} bands was answered with ${reply.tables.length} tables`,
+              };
+      } else if (reply.kind === "polarisation-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a polarisation correction was answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = {
+        kind: "failed",
+        message: "an optics worker failed with the polarisation correction's request",
+      };
       break;
     case "cancelled":
       baked = CANCELLED;

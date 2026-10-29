@@ -140,9 +140,14 @@ function keptCache(): AtmosphereCache<CachedTables> {
       bakeThick: () => {
         throw new Error("the product's routing routes no body to its bake");
       },
+      bakePolarisation: () => {
+        throw new Error("these bodies take no polarisation correction");
+      },
       terminate: () => undefined,
     },
     tables: (built) => new FakeTables(built, 0),
+    // The router's labels alone: the correction's COMPUTING is `AtmosphereCache.test.ts`'s.
+    corrects: () => false,
   });
 }
 

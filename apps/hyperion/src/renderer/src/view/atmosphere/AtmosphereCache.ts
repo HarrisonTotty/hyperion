@@ -84,6 +84,19 @@
  * refused them while the device was lost, are given them with no new bake. A new entry drawn for the
  * body, the body dropped, or the cache disposed cancels its bake. A body the router does not route
  * asks for none and is drawn as before.
+ *
+ * **The polarisation correction** (R08.T14.f; Design note 10). Every drawn body whose medium needs
+ * it ({@link AtmosphereCacheOptions.corrects}: `thick/columnLayout.ts`'s `correctionBySources`,
+ * every world with air, thin or thick) has its correction asked once its tables are made, beside
+ * any thick bake, every band in one request ({@link AtmosphereBuilder.bakePolarisation}), and given
+ * to its tables when it lands (`AtmosphereTables.setPolarisationCorrection`, which reads it beside
+ * Ψ_ms, or summed into the thick bake where they hold one). Its labels follow it as a thick bake's
+ * do (the plan's "as for any gated bake"): `atmosphereComputing` in `atmosphereApproximate`'s place
+ * while either bake runs, with no reason; once both have landed, the entry's labels as each bake's
+ * outcome leaves them; and a failed correction adds `atmosphereApproximate` with
+ * {@link POLARISATION_REASON}, since the sky it draws then carries the scalar error past the 5%
+ * metric, until the body's atmosphere is next computed. Like a failed thick bake, it is never item
+ * 6's fault. A medium with no sources to bake from asks for none, and is drawn as before.
  */
 
 import type {
@@ -127,11 +140,18 @@ import {
 import type { AtmosphereMedium } from "./medium";
 import { bodyGravity } from "./oblate";
 import { keptBakeLightsOf } from "./opticsMessages";
-import type { AtmosphereBuilder, OpticsBuild, ThickBake, ThickBakeAsk } from "./opticsPool";
+import type {
+  AtmosphereBuilder,
+  OpticsBuild,
+  PolarisationBake,
+  ThickBake,
+  ThickBakeAsk,
+} from "./opticsPool";
 import type { BakeSpectrum } from "./spectralColour";
 import { type AbsorberCurveSlots, type AtmosphereBody, AtmosphereTables } from "./tables";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
-import { spectralColumnOf } from "./thick/columnLayout";
+import { correctionBySources, spectralColumnOf } from "./thick/columnLayout";
+import type { PolarisationTable } from "./thick/polarisation";
 import {
   approximateRegime,
   type AtmosphereRegime,
@@ -141,7 +161,7 @@ import {
   THICK_REASON,
 } from "./thick/regime";
 import { thickBakeRouted } from "./thick/routing";
-import type { SpectralSource } from "./thick/spectralColumn";
+import type { SpectralColumn, SpectralSource } from "./thick/spectralColumn";
 
 /**
  * The cache's size, B: 32,000,000 of per-planet rows, decimal as `PER_PLANET_ROW_BYTES` is,
@@ -169,7 +189,13 @@ export interface AtmosphereRequests {
  */
 export type CachedTables = Pick<
   AtmosphereTables,
-  "rowBytes" | "dispose" | "setThickTables" | "plan" | "body" | "bottomRadiusM"
+  | "rowBytes"
+  | "dispose"
+  | "setThickTables"
+  | "setPolarisationCorrection"
+  | "plan"
+  | "body"
+  | "bottomRadiusM"
 >;
 
 /** What a body's per-planet tables are made from. */
@@ -363,6 +389,12 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
    * routing otherwise.
    */
   readonly routes?: (regime: AtmosphereRegime) => boolean;
+  /**
+   * Whether a body drawn from `column` takes its polarisation correction (R08.T14.f):
+   * `thick/columnLayout.ts`'s `correctionBySources` if absent, every column it does not rule out,
+   * so every world with air; a test's choice otherwise.
+   */
+  readonly corrects?: (column: SpectralColumn) => boolean;
 }
 
 /**
@@ -470,6 +502,26 @@ interface HeldBake<T> {
   readonly state: BakeState<T>;
 }
 
+/** Where a drawn entry's polarisation correction stands (R08.T14.f), as a thick bake's state. */
+type CorrectionState<T> =
+  | { readonly kind: "baking"; readonly handle: PolarisationBake }
+  | {
+      readonly kind: "baked";
+      /** The correction's tables, one a band of the tables' plan, kept for tables made again. */
+      readonly tables: ReadonlyArray<PolarisationTable>;
+      /** The tables that hold them; `null` before any did, or once another set stands. */
+      given: T | null;
+    }
+  /** Its bake failed: `atmosphereApproximate` stands with {@link POLARISATION_REASON}. */
+  | { readonly kind: "failed" };
+
+/** A drawn entry's polarisation correction, with the labels and reasons the entry was made with. */
+interface HeldCorrection<T> {
+  /** The entry's labels and reasons before either bake's state is read into them. */
+  readonly made: Labelled;
+  readonly state: CorrectionState<T>;
+}
+
 /** A body as the cache holds it. */
 interface HeldBody<T> {
   readonly id: BodyIdHex;
@@ -493,6 +545,8 @@ interface HeldBody<T> {
   drawn: AtmosphereEntry<T> | null;
   /** The drawn entry's thick bake; `null` where none is asked, or nothing is drawn. */
   bake: HeldBake<T> | null;
+  /** The drawn entry's polarisation correction; `null` where none is asked, or nothing is drawn. */
+  correction: HeldCorrection<T> | null;
   problem: AtmosphereProblem | null;
 }
 
@@ -501,6 +555,15 @@ const WAITING: Fetch = { kind: "waiting" };
 const FAILED: AtmosphereProblem = { kind: "failed" };
 const LOAD_FAILED: AtmosphereProblem = { kind: "loadFailed" };
 const BAKE_FAILED = { kind: "failed" } as const;
+
+/**
+ * Why a body whose polarisation correction failed carries `atmosphereApproximate` (R08.T14.f), as
+ * player text: its multiple scattering is drawn by the scalar method alone, whose error the
+ * correction takes out (Design note 10's polarisation: up to −5.2% to +4.6% in an Earth-like blue,
+ * past the metric's 5% in a thicker air).
+ */
+export const POLARISATION_REASON =
+  "multiple scattering's polarisation: left out, its computation failed";
 
 /**
  * What a kept body's thick bake carries as its input (R08.T14.c): no medium of its own, since a
@@ -673,18 +736,14 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
 }
 
 /**
- * An entry's labels and reasons under its thick bake's state (the module's remarks): while it
- * bakes, `atmosphereComputing` in `atmosphereApproximate`'s place and no reason; baked, the made
- * reasons but `THICK_REASON`, and `atmosphereApproximate` only where one remains; failed,
+ * An entry's labels and reasons under its landed thick bake's state (the module's remarks): baked,
+ * the made reasons but `THICK_REASON`, and `atmosphereApproximate` only where one remains; failed,
  * `atmosphereApproximate` with every made reason and `THICK_REASON`.
  */
-function bakeLabelsOf(made: Labelled, state: BakeState<unknown>["kind"]): Labelled {
+function thickLabelsOf(made: Labelled, state: "baked" | "failed"): Labelled {
   const others = made.labels.filter((label) => label !== "atmosphereApproximate");
   let labelled: Labelled;
   switch (state) {
-    case "baking":
-      labelled = { labels: ordered([...others, "atmosphereComputing"]), reasons: [] };
-      break;
     case "baked": {
       const reasons = made.reasons.filter((reason) => reason !== THICK_REASON);
       labelled = {
@@ -701,6 +760,34 @@ function bakeLabelsOf(made: Labelled, state: BakeState<unknown>["kind"]): Labell
           : [...made.reasons, THICK_REASON],
       };
       break;
+  }
+  return labelled;
+}
+
+/**
+ * An entry's labels and reasons under its thick bake's and its polarisation correction's states,
+ * `null` for one not asked (the module's remarks): while either bakes, `atmosphereComputing` in
+ * `atmosphereApproximate`'s place and no reason; once both have landed, the thick bake's outcome
+ * read into the made labels ({@link thickLabelsOf}), and a failed correction's
+ * `atmosphereApproximate` with {@link POLARISATION_REASON}.
+ */
+function bakeLabelsOf(
+  made: Labelled,
+  thick: BakeState<unknown>["kind"] | null,
+  correction: CorrectionState<unknown>["kind"] | null,
+): Labelled {
+  if (thick === "baking" || correction === "baking") {
+    const others = made.labels.filter((label) => label !== "atmosphereApproximate");
+    return { labels: ordered([...others, "atmosphereComputing"]), reasons: [] };
+  }
+  let labelled = thick === null ? made : thickLabelsOf(made, thick);
+  if (correction === "failed") {
+    labelled = {
+      labels: ordered([...labelled.labels, "atmosphereApproximate"]),
+      reasons: labelled.reasons.includes(POLARISATION_REASON)
+        ? labelled.reasons
+        : [...labelled.reasons, POLARISATION_REASON],
+    };
   }
   return labelled;
 }
@@ -801,6 +888,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #tables: AtmosphereTablesFactory<T>;
   readonly #schedule: AtmosphereSchedule;
   readonly #routes: (regime: AtmosphereRegime) => boolean;
+  readonly #corrects: (column: SpectralColumn) => boolean;
   /** Every body held, least recently wanted first. */
   readonly #bodies = new Map<BodyIdHex, HeldBody<T>>();
   /** Each open view's wanted bodies, as its latest frame noted them. */
@@ -815,6 +903,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#tables = opts.tables;
     this.#schedule = opts.schedule ?? scheduleTimeout;
     this.#routes = opts.routes ?? ((regime): boolean => thickBakeRouted(regime));
+    this.#corrects = opts.corrects ?? ((column): boolean => correctionBySources(column) !== false);
   }
 
   /** How many bodies the cache holds, drawn or not. */
@@ -1000,6 +1089,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       build: null,
       drawn: null,
       bake: null,
+      correction: null,
       problem: null,
     };
     this.#bodies.set(body.id, held);
@@ -1277,8 +1367,9 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       if (drawn !== null && drawn.tables !== null) {
         drawn.tables.dispose();
       }
-      // The entry replaced takes its bake with it: the new one is another computation.
+      // The entry replaced takes its bakes with it: the new ones are another computation.
       this.#cancelBake(held);
+      this.#cancelCorrection(held);
       held.build = null;
       held.problem = null;
       held.drawn = { ...entry, tables };
@@ -1290,6 +1381,9 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       ) {
         this.#bake(held, entry, entry.built, tables);
       }
+      if (tables !== null && entry.built !== null) {
+        this.#correct(held, entry, entry.built, tables);
+      }
     } else if (drawn !== null && drawn.built !== null && drawn.tables === null) {
       const made = this.#make(held, drawn.built);
       if (made !== "unavailable" && made !== "failed") {
@@ -1297,6 +1391,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       }
     }
     this.#giveBake(held);
+    this.#giveCorrection(held);
   }
 
   /**
@@ -1390,11 +1485,25 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
   }
 
-  /** Sets a body's thick bake, its drawn entry's labels and reasons read from its state. */
+  /** Sets a body's thick bake, its drawn entry's labels and reasons read from both bakes' states. */
   #showBake(held: HeldBody<T>, bake: HeldBake<T>): void {
     held.bake = bake;
+    this.#relabel(held, bake.made);
+  }
+
+  /** Sets a body's polarisation correction, its drawn entry's labels read as {@link #showBake}'s. */
+  #showCorrection(held: HeldBody<T>, correction: HeldCorrection<T>): void {
+    held.correction = correction;
+    this.#relabel(held, correction.made);
+  }
+
+  /** A drawn entry's labels and reasons, `made` read under its bakes' states (`bakeLabelsOf`). */
+  #relabel(held: HeldBody<T>, made: Labelled): void {
     if (held.drawn !== null) {
-      held.drawn = { ...held.drawn, ...bakeLabelsOf(bake.made, bake.state.kind) };
+      held.drawn = {
+        ...held.drawn,
+        ...bakeLabelsOf(made, held.bake?.state.kind ?? null, held.correction?.state.kind ?? null),
+      };
     }
   }
 
@@ -1408,8 +1517,115 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       bake.state.handle.cancel();
     }
     held.bake = null;
-    if (held.drawn !== null) {
-      held.drawn = { ...held.drawn, labels: bake.made.labels, reasons: bake.made.reasons };
+    this.#relabel(held, bake.made);
+  }
+
+  /** Cancels a body's polarisation correction under way, or drops one held, as {@link #cancelBake}. */
+  #cancelCorrection(held: HeldBody<T>): void {
+    const { correction } = held;
+    if (correction === null) {
+      return;
+    }
+    if (correction.state.kind === "baking") {
+      correction.state.handle.cancel();
+    }
+    held.correction = null;
+    this.#relabel(held, correction.made);
+  }
+
+  /**
+   * Asks a drawn entry's polarisation correction (the module's remarks), drawn meanwhile under
+   * `atmosphereComputing`; a medium with no sources, or none listed, asks for none; a request that
+   * cannot be formed or asked is a failed correction, with one `console.error`.
+   */
+  #correct(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere, tables: T): void {
+    const made: Labelled = { labels: entry.labels, reasons: entry.reasons };
+    if (built.sources === undefined || built.sources.length === 0) {
+      return;
+    }
+    let handle: PolarisationBake;
+    try {
+      if (!this.#corrects(spectralColumnOf(built.medium, built.sources))) {
+        return;
+      }
+      const ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights);
+      if (ask === null) {
+        // No light to bake under: drawn uncorrected, as a body that needs none.
+        return;
+      }
+      handle = this.#builder.bakePolarisation(ask);
+    } catch (error: unknown) {
+      console.error(`the polarisation correction of ${held.id} could not be asked:`, error);
+      this.#showCorrection(held, { made, state: BAKE_FAILED });
+      return;
+    }
+    const correction: HeldCorrection<T> = { made, state: { kind: "baking", handle } };
+    this.#showCorrection(held, correction);
+    void this.#correctionLanded(held, correction, handle).catch((error: unknown) => {
+      // A bug in taking the correction: it failed, and the body is drawn uncorrected.
+      console.error(`the polarisation correction of ${held.id} could not be taken:`, error);
+      if (!this.#disposed && this.#bodies.get(held.id) === held && held.correction === correction) {
+        this.#showCorrection(held, { made, state: BAKE_FAILED });
+      }
+    });
+  }
+
+  /** Takes a polarisation correction's outcome, unless the body has moved on from it. */
+  async #correctionLanded(
+    held: HeldBody<T>,
+    correction: HeldCorrection<T>,
+    handle: PolarisationBake,
+  ): Promise<void> {
+    const outcome = await handle.outcome;
+    if (this.#disposed || this.#bodies.get(held.id) !== held || held.correction !== correction) {
+      return;
+    }
+    switch (outcome.kind) {
+      case "baked":
+        this.#showCorrection(held, {
+          made: correction.made,
+          state: { kind: "baked", tables: outcome.tables, given: null },
+        });
+        this.#giveCorrection(held);
+        break;
+      case "failed":
+        // The correction's failure alone: the body stays drawn, under APPROXIMATE, with no fault.
+        console.error(`the polarisation correction of ${held.id} failed: ${outcome.message}`);
+        this.#showCorrection(held, { made: correction.made, state: BAKE_FAILED });
+        break;
+      case "cancelled":
+        this.#cancelCorrection(held);
+        break;
+    }
+  }
+
+  /**
+   * Gives a corrected body's tables its correction where they do not hold it, as
+   * {@link #giveBake} gives a thick bake; tables that refuse it otherwise make it a failed
+   * correction, with one `console.error`.
+   */
+  #giveCorrection(held: HeldBody<T>): void {
+    const { correction } = held;
+    const tables = held.drawn?.tables ?? null;
+    if (correction === null || correction.state.kind !== "baked" || tables === null) {
+      return;
+    }
+    const { state } = correction;
+    if (state.given === tables) {
+      return;
+    }
+    try {
+      tables.setPolarisationCorrection(state.tables);
+      state.given = tables;
+    } catch (error: unknown) {
+      if (error instanceof EngineUnavailable) {
+        return;
+      }
+      console.error(
+        `the polarisation correction of ${held.id} could not be given to its tables:`,
+        error,
+      );
+      this.#showCorrection(held, { made: correction.made, state: BAKE_FAILED });
     }
   }
 
@@ -1530,9 +1746,10 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     held.build = null;
   }
 
-  /** Disposes a body's tables, cancels its thick bake and draws nothing of it. */
+  /** Disposes a body's tables, cancels its bakes and draws nothing of it. */
   #dropDrawn(held: HeldBody<T>): void {
     this.#cancelBake(held);
+    this.#cancelCorrection(held);
     held.drawn?.tables?.dispose();
     held.drawn = null;
   }
