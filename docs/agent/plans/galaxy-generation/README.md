@@ -186,7 +186,8 @@ task's, and `plan_split.py` beside it).
 - A split plan's Risks keeps the open points and the records of no one task: rulings across
   tasks, re-validations of the plan (whose titles open "Re-validated"), a phase's validation. A
   record whose title names several tasks ("Deviations in T4 and T5, as built") is the first
-  named's.
+  named's. A bullet with a keep mark, a line `<!-- plan-split: keep -->` of its own inside it,
+  stays whatever it names; `plan_split.py --keep` adds the mark.
 - A record names its task by full ID in its bold title, as in
   `**Deviations in P14.T53.b, as built (…).**`, and a deferred finding in its first sentence, as in
   `**Deferred findings (2026-10-13 rule)**, from P14.T53.b:`. That is how the split files it.

@@ -153,6 +153,11 @@ RECORDS_INDEX = (
     "Task records as built: [{stem}/{dir}/]({stem}/{dir}/), one file per task, each linked from its"
     " entry under Tasks."
 )
+# The keep mark: a line of its own inside a Risks bullet (`  <!-- plan-split: keep -->`, at the
+# indent of the bullet's text, outside a code fence) that keeps the bullet in Risks whatever it
+# names. plan_split.py's `--keep` writes it, so the bullet stays on every later split; an HTML
+# comment, Prettier leaves it as it is.
+KEEP_MARK = "<!-- plan-split: keep -->"
 RECORD_HEADER = (
     "# {key}: records as built\n"
     "\n"
@@ -327,6 +332,7 @@ def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_id
 
     - Only a top-level bullet before any sub-heading of the section moves, and not a re-validation
       (a title opening "Re-validated"): implement-task and revalidate-plan look for those in Risks.
+      Nor does a bullet with a keep mark (has_keep_mark()).
     - It belongs to the tasks of this plan that its title names (the bold or italic span it opens
       with, code spans aside). If the title names none: those that the rest of its first sentence
       names ("**Deferred findings (2026-10-13 rule)**, from P14.T49.e:"), else those whose
@@ -343,6 +349,9 @@ def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_id
     for item in items:
         if item.kind != "bullet" or item.under_heading:
             item.why = "a sub-heading's item" if item.under_heading else f"a {item.kind}, not a bullet"
+            continue
+        if has_keep_mark(lines, item):
+            item.why = "a keep mark"
             continue
         title, tail = item_head(lines, item)
         if REVALIDATED_RE.match(title):
@@ -370,6 +379,19 @@ def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_id
             item.key, item.why = keys[0], "its title names it first, of " + ", ".join(keys)
         else:
             item.why = f"its {where} names several tasks: " + ", ".join(keys)
+
+
+def has_keep_mark(lines: list[str], item: RiskItem) -> bool:
+    """Whether a Risks bullet holds the keep mark: a line of its own at the indent of the bullet's
+    text, outside a code fence (a mark quoted in a fence, or nested deeper, keeps nothing)."""
+    depth = len(re.match(r"(?:[-*+]|\d+[.)])\s+|", lines[item.start]).group(0))
+    fenced = False
+    for line in lines[item.start + 1 : item.body_end]:
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and depth and indent(line) == depth and line.strip() == KEEP_MARK:
+            return True
+    return False
 
 
 def plan_prefix(plan: Path) -> str | None:

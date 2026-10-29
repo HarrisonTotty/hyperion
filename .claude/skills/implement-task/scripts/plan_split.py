@@ -13,14 +13,21 @@ Usage (from the repository root, as `python3 -I`):
                                         revision REV (with its record files then) and compare the
                                         result with the working tree, byte for byte.
     --assign 'TEXT=ID'                  File the Risks bullet whose first line starts with TEXT
-                                        (after its `- `) under task ID (repeatable).
-    --keep 'TEXT'                       Keep that bullet in Risks (repeatable).
+                                        (after its `- `) under task ID (repeatable). A bullet with
+                                        a keep mark refuses it: delete the mark's line first.
+    --keep 'TEXT'                       Keep that bullet in Risks, now and on every later split:
+                                        a bullet the rule would move gains a keep mark as its last
+                                        line, written by --write and --dry-run (repeatable).
     --json                              Print the report as JSON; --verbose lists each bullet moved.
 
 What moves: each top-level bullet of "Risks and open points" that belongs to one task of the plan
 by plan_task.assign_records()'s rule, filed under plan_task.record_file_key(); a bullet stays in
 Risks when it names no task of the plan (an open point, a ruling across tasks), when it is a
-re-validation, and when it is under a sub-heading of the section. Every bullet that stays is
+re-validation, when it is under a sub-heading of the section, and when it has a keep mark: a line
+of its own inside it, `<!-- plan-split: keep -->` (plan_task.KEEP_MARK) at its text's indent,
+which `--keep` adds and Prettier leaves as it is, so the bullet stays wherever it is moved or
+edited, and on a split run without the flag (as implement-task's records step runs it). The check
+takes a mark the split adds out again, as it does a link line. Every bullet that stays is
 reported, with its first line and why, and so is a line that keeps Prettier from formatting the
 rest of the plan (a warning, not a failure). Nothing outside Risks moves. The plan gains RECORDS_INDEX after the Risks
 heading, and each task with records gains RECORD_LINE in its entry under Tasks: a paragraph of its
@@ -144,6 +151,7 @@ class Result:
     order: list[str | None]  # each Risks item's container, in the plan's order
     links: dict[str, str]  # key -> "added" or "present"
     head_len: int  # the Risks heading and the lines before its first item
+    marked: list[int]  # the Risks items `--keep` gave a keep mark, by index
 
     @property
     def moved(self) -> list[pt.RiskItem]:
@@ -158,11 +166,15 @@ def first_line(line: str) -> str:
     return re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", plain(line)).strip()
 
 
-def apply_overrides(result_items, firsts, assign, keep, ids) -> list[str]:
-    problems = []
+def apply_overrides(p, result_items, firsts, assign, keep, ids) -> tuple[list[str], list[int]]:
+    """Apply `--assign` and `--keep` to the Risks items: the problems, and the items `--keep` is to
+    mark (their indices), those the rule would move. A marked bullet refuses `--assign`, and one
+    that ends inside a code fence refuses `--keep`, whose mark would be code."""
+    problems: list[str] = []
+    marks: list[int] = []
 
-    def find(text: str) -> pt.RiskItem | None:
-        hits = [it for it, f in zip(result_items, firsts) if it.kind == "bullet" and f.startswith(text)]
+    def find(text: str) -> int | None:
+        hits = [k for k, (it, f) in enumerate(zip(result_items, firsts)) if it.kind == "bullet" and f.startswith(text)]
         if len(hits) != 1:
             problems.append(f"{len(hits)} Risks bullets start with {text!r}, not one")
             return None
@@ -174,12 +186,22 @@ def apply_overrides(result_items, firsts, assign, keep, ids) -> list[str]:
         if key is None:
             problems.append(f"--assign {text!r}: {task} has no entry under Tasks, nor has its parent")
             continue
-        if (item := find(text)) is not None:
-            item.key, item.why = key, f"--assign {task}"
+        if (k := find(text)) is None:
+            continue
+        if pt.has_keep_mark(p, result_items[k]):
+            problems.append(f"--assign {text!r}: the bullet has a keep mark; delete its `{pt.KEEP_MARK}` line first")
+            continue
+        result_items[k].key, result_items[k].why = key, f"--assign {task}"
     for text in keep:
-        if (item := find(text)) is not None:
-            item.key, item.why = None, "--keep"
-    return problems
+        if (k := find(text)) is None or result_items[k].key is None:
+            continue  # the rule keeps it already (a keep mark among the reasons)
+        item = result_items[k]
+        if sum(p[i].lstrip().startswith(("```", "~~~")) for i in range(item.start, item.body_end)) % 2:
+            problems.append(f"--keep {text!r}: the bullet ends inside a code fence; close it first")
+            continue
+        item.key, item.why = None, "--keep, marked"
+        marks.append(k)
+    return problems, sorted(marks)
 
 
 def link_insertion(p: list[str], marker: pt.Marker, marker_lines: set[int], line: str) -> tuple[int, list[str]]:
@@ -219,9 +241,10 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
     items = pt.risk_items(p, span)
     pt.assign_records(p, items, prefix, ids)
     firsts = [first_line(lines[it.start]) for it in items]
-    problems = apply_overrides(items, firsts, assign, keep, ids)
+    problems, marks = apply_overrides(p, items, firsts, assign, keep, ids)
     if problems:
         raise UsageError("; ".join(problems))
+    to_mark = set(marks)
     index = pt.RECORDS_INDEX.format(stem=plan.stem, dir=pt.RECORDS_DIR)
     already = any(it.kind == "para" and p[it.start] == index for it in items)
 
@@ -250,10 +273,13 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
             if text in existing[it.key]:
                 raise SplitError(f"{firsts[k][:60]!r} is already in {pt.record_rel(plan, it.key)}")
 
+    marked_at: list[tuple[int, str]] = []  # each new keep mark: where the run of the plan's own items puts it
+
     def run(c: Container, end_trail: list[str]) -> list[str]:
         """The container's items, each followed by the blank lines it had after it, except that a
         list ends with a blank line before a heading or a paragraph, and the last item takes
-        end_trail. Each trail changed so is kept in c.trails, to be put back."""
+        end_trail. Each trail changed so is kept in c.trails, to be put back. An item `--keep`
+        marks gains the keep mark as its last line, at its bullet's indent; marked_at gets where."""
         out: list[str] = []
         for n, k in enumerate(c.items):
             it = items[k]
@@ -266,7 +292,12 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
                 new = trail
             if new != trail:
                 c.trails[n] = "".join(trail)
-            out += lines[it.start : it.body_end] + new
+            out += lines[it.start : it.body_end]
+            if k in to_mark:
+                mark = " " * re.match(r"(?:[-*+]|\d+[.)])\s+", p[it.start]).end() + pt.KEEP_MARK + eol
+                marked_at.append((len(out), mark))
+                out.append(mark)
+            out += new
         return out
 
     # The new Risks section: its heading and the blank lines after it, the index line, then the
@@ -315,6 +346,8 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
     out += lines[cursor : span[0]]
     if inserted_risks:
         inserted.append((len(out) + len(risks), [x + eol for x in inserted_risks]))
+    own_items = len(out) + len(risks) + len(inserted_risks)  # where the run of the plan's own items starts
+    inserted += [(own_items + at, [mark]) for at, mark in marked_at]
     out += region
     out += lines[span[1] :]
 
@@ -324,7 +357,7 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
             body = "".join(run(c, []))
             records[key] = (c.prefix + c.join + body) if c.prefix else (c.header + body)
     return Result(plan, original, "".join(out), records, dict(existing), items, firsts, inserted, containers, order,
-                  links, head_end - span[0])
+                  links, head_end - span[0], marks)
 
 
 def recombine(result: Result, text: str, records: dict[str, str]) -> str:
@@ -506,6 +539,7 @@ def report(result: Result, problems: list[str]) -> dict:
         "record_files_appended": appended,
         "bullets_moved": len(moved),
         "bullets_kept": len(kept),
+        "keep_marks_added": [result.first_lines[k] for k in result.marked],
         "links": result.links,
         "kept": kept,
         "moved": moved,
@@ -518,8 +552,9 @@ def report(result: Result, problems: list[str]) -> dict:
 def print_report(rep: dict, verbose: bool) -> None:
     print(f"{rep['plan']}: {rep['lines_before']} lines -> {rep['lines_after']}; "
           f"{len(rep['record_files_new'])} record files new, {len(rep['record_files_appended'])} appended "
-          f"({rep['record_lines']} lines); {rep['bullets_moved']} bullets moved, {rep['bullets_kept']} kept; "
-          f"check {rep['check']}")
+          f"({rep['record_lines']} lines); {rep['bullets_moved']} bullets moved, {rep['bullets_kept']} kept"
+          + (f" ({len(rep['keep_marks_added'])} keep marks added)" if rep["keep_marks_added"] else "")
+          + f"; check {rep['check']}")
     for k in rep["kept"]:
         print(f"  kept {k['line']} ({k['lines']} lines, {k['why']}): {k['first'][:100]}")
     if verbose:
@@ -607,7 +642,7 @@ def main(argv: list[str] | None = None) -> int:
         root = pt.repo_root()
         if records_dirty(root, plan):
             problems.append(f"{pt.records_dir(plan)} has uncommitted changes: commit or restore them first")
-        elif result.records:
+        elif result.records or result.text != result.original:
             folder = pt.records_dir(plan)
             write_all({plan: result.text, **{folder / f"{k}.md": t for k, t in result.records.items()}})
             problems += verify_files(result, plan, folder)
