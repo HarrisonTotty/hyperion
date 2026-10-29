@@ -5779,6 +5779,14 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   - R08.T14.e's correction runs over the medium above the deck, with the deck as a depolarising
     lower boundary (a stated approximation), and the giant-deck case's gate is against the
     vector I.
+  - _The split_ (ruled by "main", 2026-10-29). T15.a is built in two parts.
+    - T15.a.1: the deck's reflection R^m from the solver over the deck's layers, per band, and the
+      upper medium's J_ms over it. Its tests: a thick non-absorbing deck reflects its incident flux
+      to 1%; the Saturn-class band test above; and the correction's solve over the upper medium
+      with the deck as a depolarising lower boundary.
+    - T15.a.2, after R08.T12.b.2's `giant-deck` reference and R08.T14.f: the twin's and the
+      kernels' read of the deck as the upper medium's ground (with `just test-render`), the optics
+      worker's job, and the `giant-deck` gate against the vector I.
 - **R08.T15.b Below the deck.** The plane-parallel downwelling table by altitude, view angle and
   sun angle, one layer a band, gives sky and aerial perspective beneath. Tests:
   - the Venus-class surface passes the gate and the flux sanity test of R08.T12.b;
@@ -5789,6 +5797,13 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     Design note 9: a deck above τ 10 with cloud fraction 1 splits, and a fraction below 1 does
     not; of two such decks the shallowest splits, though the inventory lists the deeper first,
     and the deeper lies in the medium below; a gas envelope splits at its floor (R08.T16.a).
+  - _The split_ (ruled by "main", 2026-10-29). T15.b is built in two parts.
+    - T15.b.1: the downwelling table by altitude, view angle and sun angle, one layer a band; the
+      table's surface flux equals the solver's.
+    - T15.b.2, after R08.T12.b.2's Venus references and T15.a.2: the reads below the deck
+      (`atmosphere_sky_irradiance`, the deck's direct transmittance); the Venus-class gate and
+      R08.T12.b's flux sanity; and the routing of `cloudDeck` worlds, under
+      `decision-r08-t11-frame.md`'s blocker, as at R08.T14.d.
 
   By hand, the Venus-class surface and a descent through its deck are recorded here.
 
