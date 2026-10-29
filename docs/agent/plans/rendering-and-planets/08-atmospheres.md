@@ -21230,6 +21230,28 @@ KX 4417 /2`)."
   - _Precondition 1's m = 2 of the bake_ (about 0.71 of m = 0 on Earth's aerosol, T14.c's record)
     would share G₂'s word with the correction's: 1 in 255 of the texel's largest channel. If that
     is too coarse there, the table takes a second texel a cell.
+  - _Precondition 1 against the summed table_ (main's question, 2026-10-29): not met by T14.f.
+    - The table and its read carry m = 0, 1 and 2 (`THICK_MODES` 3: J⁰, G, and G₂ in the spare
+      word, read as G₂·(2h⊥² − (1 − μ_v²)(1 − μ₀²)) by the kernels and both twins), and the
+      correction holds m ≤ 2 (`POLARISATION_MODES`). But the scalar bake still solves m = 0 and 1
+      (`bake.ts`'s `THICK_BAKE_MODES` 2), so a `thick` table's m = 2 is the correction's
+      σ_s ΔJ_2 alone, never the scalar source's E².
+    - For m = 2, T14.d raises `THICK_BAKE_MODES` to 3 (one more Fourier mode a term on the same
+      layers; its cost unmeasured) and has `packThickTable` read E² into G₂ beside σ_s ΔJ_2
+      (`THICK_SOURCE_MODES` 3). No new texel, read or binding: the summed table stays one texel a
+      cell, and the frame's (K) and (L) already decode G₂. G₂'s 1 in 255 of its texel's largest
+      channel then carries E², about 0.71 of E⁰ for Earth's aerosol at s80 v85 (T14.c's record):
+      some 0.3% of J at worst, to be held to the gate, or G₂ moves to halves in a second texel.
+    - m = 3 has no room in the texel, whose four words are full: it takes a second texel a cell, a
+      second dependent load a cell and source and twice the table's bytes (541,184 B a band and
+      light). That is precondition 1's "the read takes a second texel a cell".
+    - Whether forward-peaked aerosols need m = 3. On Earth's Cornette–Shanks aerosol the science
+      check's estimate (T14.c's record) puts m = 3 at 0.32 of m = 0 in red at s80 v85, and m ≤ 2
+      brings that row to 0.97–1.04 of the reference (m ≤ 3 to 0.97–1.01): inside the 5% with m ≤ 2,
+      by that estimate. Mars's dust is more forward-peaked (T14.c: "far more modes than two"), so
+      it likely needs m = 3 or more, unmeasured here, and its route waits on precondition 2 (the
+      lobes' in-lobe light) whatever the modes. T14.d measures both with this gate
+      (`HYPERION_VECTOR_GATE=1`) once the bake's modes change.
 - **Deferred findings (2026-10-13 rule)** (R08.T14.f). Recorded and deferred:
   - _The smoke's parts on a pod_ (4 vCPU, 2026-10-29): part 13 ran 131 s at the base and 162 s
     with the correction's group (19 s) while tsc ran beside it; part 3 overran its 180 s watchdog
