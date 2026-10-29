@@ -24,6 +24,9 @@
  *   named class's A from its nodes at the texels' codes and the point folds them into its elements'
  *   shares; the class's law takes its node K − 1, its albedo at the body's background maturity
  *   ({@link classMapLawsOf}).
+ * - **The melt** (plan R08, R08.T18.a): the surface says which classes' form is `Melt`
+ *   ({@link MELT_CLASS_CODE}), which R07's disc draws emitting at its melt's temperature where its
+ *   body's ground is drawn emitting ({@link classMapMeltOf}).
  * - **The normal map** (R10.T10.g; decision-r10-t16-leans §1, remedy 1) comes in the same answer:
  *   each surveyed cell of the field's own level with the shading normal the coarsest terrain gives
  *   its centre, packed as R07's disc reads it (`bodies/discNormals.ts`' `packNormalMap`,
@@ -57,7 +60,7 @@ import type { RenderEngine, TextureHandle } from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
 import { fieldCellAt } from "./coverage";
 import { MATURITY_NODES } from "./maturityNodes";
-import { classPhotometryOf, classRowLaw, PHASE_LAW } from "./terrainMaterial";
+import { classPhotometryOf, classRowLaw, MELT_CLASS_CODE, PHASE_LAW } from "./terrainMaterial";
 import type { ClassMapAnswer, ClassMapMaturityAnswer } from "./workers/messages";
 import { PHOTOMETRY_STRIDE } from "./workers/messages";
 import type { FieldChange, HeightWorkerPool } from "./workers/pool";
@@ -114,6 +117,14 @@ export function classMapLawsOf(answer: ClassMapAnswer): ReadonlyArray<Photometri
         : [nodes[at] ?? Number.NaN, nodes[at + 1] ?? Number.NaN, nodes[at + 2] ?? Number.NaN];
     return { ...classRowLaw(photometry.code, photometry.l0), a };
   });
+}
+
+/** Whether each class of an answered map has the `Melt` form ({@link MELT_CLASS_CODE}), in its order. */
+export function classMapMeltOf(answer: ClassMapAnswer): ReadonlyArray<boolean> {
+  return Array.from(
+    { length: classCount(answer) },
+    (_, k) => answer.classes[2 * k] === MELT_CLASS_CODE,
+  );
 }
 
 /**
@@ -241,6 +252,8 @@ export type ClassMapPool = Pick<HeightWorkerPool, "classMap" | "onFieldChange">;
 interface HeldMap {
   readonly texels: ClassMapTexels;
   readonly laws: ReadonlyArray<PhotometricLaw | null>;
+  /** Whether each class's form is `Melt` (R08.T18.a). */
+  readonly meltClasses: ReadonlyArray<boolean>;
   /** The normal map's texels, `null` for none (no surveyed cell answered). */
   readonly normals: NormalMapTexels | null;
   /** Whether every texel the survey touched, and every surveyed cell's normal, was answered. */
@@ -366,6 +379,7 @@ export class ClassMapStore implements ClassMapSource {
           map.normals === null || map.normalTexture === null
             ? null
             : { texture: map.normalTexture, texels: map.normals },
+        ...(map.meltClasses.includes(true) ? { meltClasses: map.meltClasses } : {}),
       };
       map.handedOut = map.surface;
     }
@@ -457,6 +471,7 @@ export class ClassMapStore implements ClassMapSource {
     const map: HeldMap = {
       texels,
       laws: classMapLawsOf(answer),
+      meltClasses: classMapMeltOf(answer),
       normals,
       complete: answer.complete && answer.normalsComplete,
       texture: null,

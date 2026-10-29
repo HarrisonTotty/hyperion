@@ -27,9 +27,10 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import {
   CLASS_MAP_FACE_TEXELS,
   CLASS_MAP_LEVEL,
+  classMapLawsOf,
+  classMapMeltOf,
   type ClassMapPool,
   ClassMapStore,
-  classMapLawsOf,
   classMapTexelsOf,
   normalMapTexelsOf,
 } from "./classMap";
@@ -38,7 +39,8 @@ import { faceUvToXyz, stToUv } from "./cube";
 import { MATURITY_NODES } from "./maturityNodes";
 import type { Face } from "./patchKey";
 import type { BodyFigure } from "./planet";
-import { classRowLaw, PHASE_LAW } from "./terrainMaterial";
+import { materialFormName } from "./readouts";
+import { classRowLaw, MELT_CLASS_CODE, PHASE_LAW } from "./terrainMaterial";
 import { type ClassMapAnswer, PALETTE_NONE } from "./workers/messages";
 import type { FieldChange } from "./workers/pool";
 
@@ -229,6 +231,13 @@ afterEach(() => {
 });
 
 describe("a class map from a worker's answer", () => {
+  it("says which classes have the Melt form, by their class code (R08.T18.a)", () => {
+    expect(classMapMeltOf(answerOf(TEXELS))).toEqual([false, false, false]);
+    const molten = { ...answerOf(TEXELS), classes: Uint8Array.from([1, 0, MELT_CLASS_CODE, 1]) };
+    expect(classMapMeltOf(molten)).toEqual([false, true]);
+    expect(materialFormName(MELT_CLASS_CODE)).toBe("MELT");
+  });
+
   it("is at level 6, 64 texels a face, each texel's weights taken at band level 0", () => {
     expect([CLASS_MAP_LEVEL, CLASS_MAP_FACE_TEXELS, classMapSide(CLASS_MAP_FACE_TEXELS)]).toEqual([
       6, 64, 66,

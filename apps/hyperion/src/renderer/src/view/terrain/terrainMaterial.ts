@@ -510,6 +510,13 @@ export class TerrainPhaseRows {
   }
 }
 
+/**
+ * The `Melt` form's class code (`hyperion-surface`'s `MaterialClass::Melt`, `material/class.rs`;
+ * `readouts.ts`' `MELT`), whose ground emits at no less than its melt's temperature (plan R08,
+ * R08.T18.a).
+ */
+export const MELT_CLASS_CODE = 6;
+
 /** `vec4f` rows of one slot's class laws in `class_layers`: two per palette slot. */
 export const CLASS_LAW_ROWS = 2 * TERRAIN_CLASSES;
 

@@ -61,6 +61,11 @@ export interface ClassMapDiscSurface {
    * everywhere, as before.
    */
   readonly normals: DiscNormalMap | null;
+  /**
+   * Whether each class's form is `Melt` (plan R08, R08.T18.a), which emits at no less than its
+   * melt's temperature where its body's ground is drawn emitting; absent, none is.
+   */
+  readonly meltClasses?: ReadonlyArray<boolean>;
 }
 
 /**

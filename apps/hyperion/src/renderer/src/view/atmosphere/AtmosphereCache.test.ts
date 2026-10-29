@@ -32,6 +32,7 @@ import {
   FIXTURE_EARTH,
   FIXTURE_SYSTEM,
   FIXTURE_UNIVERSE,
+  lavaWorldDetail,
 } from "../../test/planetaryFixture";
 import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
 import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
@@ -43,6 +44,7 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import { builtOfCase } from "../scenes/atmosphereScene";
 import { ANNUNCIATION_CLEAR_MS, ANNUNCIATION_ONSET_MS } from "../terrain/annunciation";
 import { type AssembledMedium, assembleMedium, mediumTableRadiusM } from "./assemble";
+import { groundTemperatureFieldOf } from "./thermal";
 import {
   ATMOSPHERE_CACHE_BYTES,
   AtmosphereCache,
@@ -533,6 +535,32 @@ describe("the atmosphere cache's requests", () => {
     note(h, [lit(A)]);
     await answer(h, A, earthDetail());
     expect(h.builder.latestOf(A).input).toEqual(inputOf(earthDetail()));
+  });
+});
+
+describe("the ground's temperature field (R08.T18.a)", () => {
+  it("is none before a body's record is held, its surface's field after, and none where the body has a medium", async () => {
+    const h = harness();
+    note(h, [lit(A), lit(bodyId(1))]);
+    expect(h.cache.groundFieldOf(A)).toBeNull();
+    await answer(h, A, answerFor(A, lavaWorldDetail()));
+    await answer(h, bodyId(1), answerFor(bodyId(1), earthDetail()));
+    const converted = toBodyDetail(answerFor(A, lavaWorldDetail()), FIXTURE_SYSTEM, DESIGNATION);
+    if (converted.kind !== "ok" || converted.detail.record.surface.state !== "ok") {
+      throw new Error("the lava world's record converts, its surface ok");
+    }
+    expect(h.cache.groundFieldOf(A)).toEqual(
+      groundTemperatureFieldOf(converted.detail.record.surface.value),
+    );
+    expect(h.cache.groundFieldOf(A)?.profile.kind).toBe("substellar");
+    expect(h.cache.groundFieldOf(bodyId(1))).toBeNull();
+  });
+
+  it("reads a reply's field once, however many frames ask it", async () => {
+    const h = harness();
+    note(h, [lit(A)]);
+    await answer(h, A, answerFor(A, lavaWorldDetail()));
+    expect(h.cache.groundFieldOf(A)).toBe(h.cache.groundFieldOf(A));
   });
 });
 

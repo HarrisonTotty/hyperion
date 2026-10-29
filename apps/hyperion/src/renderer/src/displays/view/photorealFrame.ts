@@ -18,6 +18,7 @@ import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { atmosphereToBodyFixed, bodyAtmosphereCamera } from "../../view/atmosphere/bodyCamera";
 import type { AtmosphereTables } from "../../view/atmosphere/tables";
+import type { SurfaceTemperatureField } from "../../view/atmosphere/thermal";
 
 import { rotateToBody } from "../../view/coords/rotation";
 import { relativeToCamera } from "../../view/coords/relative";
@@ -112,12 +113,24 @@ export interface PhotorealInputs {
    */
   readonly atmospheres?: ((body: BodyIdHex) => AtmosphereTables | null) | undefined;
   /**
+   * A lit body's ground temperature field as its record gives it (plan R08, R08.T18.a;
+   * `AtmosphereCache.groundFieldOf`), `null` for one with a medium or no record held; absent, no
+   * ground is drawn emitting.
+   */
+  readonly groundFields?: GroundFieldSource | undefined;
+  /**
    * Takes a throw from the drawing of a body's atmosphere (`PhotorealFrame.onAtmosphereFailed`):
    * the view's handle on the cache (`AtmosphereView.reportDrawFailure`).
    */
   readonly atmosphereFailed?:
     ((body: BodyIdHex, error: unknown, viewName: string) => void) | undefined;
 }
+
+/**
+ * Where a frame's lit bodies find their ground's temperature field (plan R08, R08.T18.a): the
+ * atmosphere cache's, from the records it holds.
+ */
+export type GroundFieldSource = (body: BodyIdHex) => SurfaceTemperatureField | null;
 
 /** What the lit bodies take of a view's terrain (plan R10, R10.T10.e). */
 export interface LitBodiesTerrain {
@@ -148,12 +161,14 @@ export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
  * A lit body of the scene as the frame lights it, with its rotation where it has one, its class
  * map where `classMaps` holds one, and its relief and survey's coverage mask where `terrain` holds
  * them and its rotation is known: a body whose rotation is not known is never handed over, its
- * figure and disc standing (R10.T16.c; decision-r10-live-path, D5).
+ * figure and disc standing (R10.T16.c; decision-r10-live-path, D5). Its ground's temperature field
+ * where `groundFields` holds one (R08.T18.a).
  */
 function litBodyOf(
   { body, centreM, frame }: LitBodyLighting,
   classMaps: ClassMapSource | undefined,
   terrain: LitBodiesTerrain,
+  groundFields: GroundFieldSource | undefined,
 ): LitBodyInput {
   const id = body.id;
   const figure = body.appearance?.figure ?? {
@@ -166,6 +181,7 @@ function litBodyOf(
   // Its terrain, mask and class map are drawn in its body-fixed axes, so it hands over only with them.
   const reliefM = body.rotation === null ? null : (terrain.reliefs?.reliefM(id) ?? null);
   const coverage = terrain.terrain?.surveyCoverage(id) ?? null;
+  const thermal = groundFields?.(id) ?? null;
   return {
     id,
     centreM,
@@ -178,6 +194,7 @@ function litBodyOf(
     ...(coverage === null || body.rotation === null
       ? {}
       : { surveyCoverage: { mask: coverage, rotation: body.rotation } }),
+    ...(thermal === null ? {} : { thermal }),
     lighting: frame,
   };
 }
@@ -202,6 +219,7 @@ function litBodyOf(
  * @param discs - The scene's host discs (`sceneHostDiscs`).
  * @param classMaps - The bodies' class maps; absent, every disc is uniform.
  * @param terrain - The bodies' reliefs and coverage masks; absent, none hands over.
+ * @param groundFields - The bodies' ground temperature fields (R08.T18.a); absent, none emits.
  */
 export function litBodiesOf(
   scene: ViewScene,
@@ -209,8 +227,11 @@ export function litBodiesOf(
   discs: ReadonlyArray<HostDiscDto>,
   classMaps?: ClassMapSource,
   terrain: LitBodiesTerrain = {},
+  groundFields?: GroundFieldSource,
 ): LitBodyInput[] {
-  return lightingFramesOf(scene, pose, discs).map((lit) => litBodyOf(lit, classMaps, terrain));
+  return lightingFramesOf(scene, pose, discs).map((lit) =>
+    litBodyOf(lit, classMaps, terrain, groundFields),
+  );
 }
 
 /** The photorealistic frame of a stage's run. */
@@ -293,10 +314,14 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     hostDraws,
     glareSources: inputs.discs.glareSources(camera, viewport, run.camera.role),
     lights,
-    bodies: litBodiesOf(scene, pose, discs, inputs.classMaps, {
-      reliefs: inputs.reliefs,
-      terrain: inputs.terrain,
-    }),
+    bodies: litBodiesOf(
+      scene,
+      pose,
+      discs,
+      inputs.classMaps,
+      { reliefs: inputs.reliefs, terrain: inputs.terrain },
+      inputs.groundFields,
+    ),
     // A body handed over to terrain writes depth as a mesh does (`drawnAsMesh`), its footprint
     // counted by its regime (R10.T16.c); lit craft will add theirs.
     depthWriters: [],

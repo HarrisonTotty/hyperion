@@ -614,6 +614,8 @@ export class ViewFrameDrawer {
           overlay: (surveyed) =>
             overlaySubmission(this.#wireframe, list, tokens, camera, viewport, surveyed),
           atmospheres: inputs.atmosphere?.tablesOf,
+          // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
+          groundFields: inputs.atmosphere?.groundFieldOf,
           // A body's air that throws as it is drawn is the cache's to hold failed (R08.T10.b;
           // decision-r08-t10b-leans §2).
           atmosphereFailed: reportAirFailure,

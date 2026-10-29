@@ -25,6 +25,7 @@ import {
   type BodyAtmosphereProblem,
 } from "../../view/atmosphere/labels";
 import type { AtmosphereTables } from "../../view/atmosphere/tables";
+import type { SurfaceTemperatureField } from "../../view/atmosphere/thermal";
 import type { BodyLightSources } from "../../view/bodies/draw";
 import type { LitRegime } from "../../view/bodies/regime";
 import { isLitBody } from "../../view/lighting/retarded";
@@ -36,6 +37,11 @@ export interface ViewAtmosphereInput {
   readonly view: AtmosphereView;
   /** A body's tables as the cache holds them now (`AtmosphereCache.entryOf(id).tables`). */
   readonly tablesOf: (body: BodyIdHex) => AtmosphereTables | null;
+  /**
+   * A body's ground temperature field from the record the cache holds (plan R08, R08.T18.a;
+   * `AtmosphereCache.groundFieldOf`).
+   */
+  readonly groundFieldOf: (body: BodyIdHex) => SurfaceTemperatureField | null;
   /** The server's scene as the cache's requests take it; `null` for a kept scene. */
   readonly scene: AtmosphereScene | null;
   /** A monotonic time, ms: the frame's, which `ATMOSPHERE: PENDING`'s hold reads. */
@@ -71,7 +77,13 @@ export class ViewAtmosphereHandle {
     if (cache === null || view === null) {
       return undefined;
     }
-    return { view, tablesOf: (body) => cache.entryOf(body)?.tables ?? null, scene, nowMs };
+    return {
+      view,
+      tablesOf: (body) => cache.entryOf(body)?.tables ?? null,
+      groundFieldOf: (body) => cache.groundFieldOf(body),
+      scene,
+      nowMs,
+    };
   }
 
   /** Lets the view's bodies go, as its view goes. */

@@ -17,6 +17,7 @@ import { BOLTZMANN_J_PER_K } from "./rayleigh";
 import { rec709Luminance } from "./solar";
 import { MATCHING_FUNCTIONS, PIPELINE_WAVELENGTHS_NM } from "./spectralColour";
 import { binGroundAlbedo } from "./thick/bake";
+import { binOfRow } from "./thick/binConversion";
 import {
   aboveThermalCut,
   EMISSION_CHANNEL_WEIGHTS,
@@ -163,7 +164,25 @@ describe("the reduction to the channels (R08.T18.a)", () => {
     ).toBeLessThan(4e-3);
   });
 
-  it("weighs each bin by 683 Σ c̄ Δλ over its pipeline rows, the bins together the whole bake range's", () => {
+  it("weighs each bin by 683 Σ c̄ Δλ over the pipeline rows binConversion.ts puts in it", () => {
+    const offset = (PIPELINE_WAVELENGTHS_NM[0] ?? 0) - MATCHING_FUNCTIONS.firstNm;
+    const last = PIPELINE_WAVELENGTHS_NM.length - 1;
+    const green = Array.from({ length: BAKE_BIN_COUNT }, () => 0);
+    PIPELINE_WAVELENGTHS_NM.forEach((nm, i) => {
+      const bin = binOfRow(nm);
+      green[bin] =
+        (green[bin] ?? 0) +
+        683 * (MATCHING_FUNCTIONS.green[offset + i] ?? 0) * (i === 0 || i === last ? 0.5 : 1);
+    });
+    EMISSION_CHANNEL_WEIGHTS.forEach((weights, b) => {
+      // ḡ is signed: negative in the blue bins.
+      expect(Math.abs(weights[1] - (green[b] ?? 0))).toBeLessThanOrEqual(
+        1e-12 * Math.abs(green[b] ?? 0),
+      );
+    });
+  });
+
+  it("weighs the bins together as the whole bake range", () => {
     const offset = (PIPELINE_WAVELENGTHS_NM[0] ?? 0) - MATCHING_FUNCTIONS.firstNm;
     const last = PIPELINE_WAVELENGTHS_NM.length - 1;
     let wholeRed = 0;

@@ -47,6 +47,7 @@ import { surfaceLightingTablesOf } from "../atmosphere/surfaceLighting";
 import { absorberCount, type AtmosphereTables } from "../atmosphere/tables";
 import { CORRECTION_ROUTED } from "../atmosphere/thick/routing";
 import {
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
   type BodyLightSources,
@@ -400,6 +401,11 @@ export class PhotorealRenderer {
   >();
   /** The colour the latest frame's later passes read: its last composite's, or the scene's. */
   #drawnColour: TextureHandle | null = null;
+  /**
+   * The `disc cells` kernel's emissive form (R08.T18.a), made at the first frame with a record that
+   * carries its ground's emission, on the generation it was asked on; `kernel` `null` until made.
+   */
+  #emissiveCells: { readonly generation: number; kernel: ComputeHandle | null } | null = null;
   readonly #unsubscribe: () => void;
 
   constructor(engine: RenderEngine, viewName: string) {
@@ -416,6 +422,7 @@ export class PhotorealRenderer {
       this.#drawnColour = null;
       // Their shared kernels died with the device; each is made again at its next frame.
       this.#releaseAtmospheres();
+      this.#emissiveCells = null;
       this.#histogram = undefined;
       this.#making = null;
       this.#status = "idle";
@@ -675,11 +682,16 @@ export class PhotorealRenderer {
     // The small discs' cells and the larger discs' limbs' and face bands', all at once, a dispatch
     // for each set of textures, before any draw reads their sums (R07.T8.d–g); in the frame the
     // `discs` pass draws in, the scene target's.
-    this.#bodies.dispatchCells(plan, resources.discCells, {
-      viewRotation,
-      projection,
-      size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
-    });
+    this.#bodies.dispatchCells(
+      plan,
+      resources.discCells,
+      {
+        viewRotation,
+        projection,
+        size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
+      },
+      this.#emissiveCellsFor(plan),
+    );
     // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
     // handed over to it over them; no pass where there are none. On the high setting the terrain's
     // draws submit the view's shadow cascades first (R10.T9.b's `terrain shadows`), whose times
@@ -959,6 +971,43 @@ export class PhotorealRenderer {
       target = resources.airTargets[index];
     }
     return target;
+  }
+
+  /**
+   * The `disc cells` kernel's emissive form for a plan with a record that carries its ground's
+   * emission (R08.T18.a), or `null`: asked for at the first such plan, off the frame, as the
+   * renderer's other kernels are made, so that the frame never waits on its compile; until it is
+   * made those records take no cells and their draws sum their own. A failure is reported once and
+   * leaves them so.
+   */
+  #emissiveCellsFor(plan: BodyFramePlan): ComputeHandle | null {
+    const held = this.#emissiveCells;
+    if (held !== null && held.generation === this.#generation) {
+      return held.kernel;
+    }
+    if (!plan.discs.some((record) => record.emission !== undefined)) {
+      return null;
+    }
+    const making: { readonly generation: number; kernel: ComputeHandle | null } = {
+      generation: this.#generation,
+      kernel: null,
+    };
+    this.#emissiveCells = making;
+    void this.#makeEmissiveCells(making).catch((error: unknown) => {
+      console.error(`the emissive disc cells of ${this.#name} could not be taken:`, error);
+    });
+    return null;
+  }
+
+  /** Makes the emissive `disc cells` kernel into `making`; a failure is reported, a loss's not. */
+  async #makeEmissiveCells(making: { kernel: ComputeHandle | null }): Promise<void> {
+    try {
+      making.kernel = await this.#engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL);
+    } catch (error: unknown) {
+      if (!lostDevice(error)) {
+        console.error(`the emissive disc cells of ${this.#name} could not be made:`, error);
+      }
+    }
   }
 
   /** Lets go of every body's atmosphere on this view. */

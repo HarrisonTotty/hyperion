@@ -160,7 +160,8 @@ export function regimeOf(materials: Iterable<string>): HandoverRegime {
     if (name.startsWith(TERRAIN_LIT_PREFIX)) {
       return "terrain";
     }
-    figure ||= name === "bodies:smoothMesh";
+    // The smooth figure's plain form or its emissive one (R08.T18.a).
+    figure ||= name === "bodies:smoothMesh" || name === "bodies:smoothMeshEmissive";
     disc ||= name.startsWith("bodies:disc");
   }
   return figure ? "figure" : disc ? "disc" : "none";

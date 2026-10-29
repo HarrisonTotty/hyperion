@@ -44,11 +44,24 @@
  * record carries each class's nodes from row {@link FIRST_NODE_ROW} on, and says so in row 25's w;
  * without a maturity it packs what it packed before, its node rows 0, and every value is as before,
  * bit for bit.
+ *
+ * A record of a body above R08's visibility cut for its ground's thermal emission (plan R08,
+ * R08.T18.a; `atmosphere/discReflectance.ts`) carries its {@link DiscRecord.emission}: its disc is
+ * drawn by the kernels' emissive forms, each sample adding the light its surface emits there
+ * (`discEmissionAt`), and its emission block lies past the records and the limbs' spans, row 46's y
+ * its first. Every other record packs what it packed before, its row 46's y 0, and is drawn by the
+ * plain kernels.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ClassMapDiscSurface, UniformDiscSurface } from "../appearance/bodyAppearance";
+import {
+  DISC_EMISSION_ROWS,
+  type DiscEmission,
+  discEmissionAt,
+  packDiscEmission,
+} from "../atmosphere/discReflectance";
 import {
   AIRLESS_LIGHTING,
   surfaceLightingDrawTextures,
@@ -287,6 +300,11 @@ export interface DiscCellSet {
   readonly firstGroup: number;
   /** Its workgroups, the dispatch's. */
   readonly groups: number;
+  /**
+   * Whether its records carry their ground's emission (R08.T18.a), which the `disc cells` kernel's
+   * emissive form shades: a set's records all do, or none.
+   */
+  readonly emissive: boolean;
 }
 
 /**
@@ -692,7 +710,8 @@ function plannedCellsOf(record: DiscRecord, frame: DiscLimbFrame | null): Planne
 
 /**
  * The records that may share a dispatch (R07.T8.e), each set's by index, in the order of its first
- * record, each record's textures taken once.
+ * record, each record's textures taken once: those that bind the same textures and either all carry
+ * their ground's emission or none do (R08.T18.a), which the kernel's two forms shade.
  */
 function boundSets(
   records: ReadonlyArray<DiscRecord>,
@@ -700,6 +719,7 @@ function boundSets(
 ): number[][] {
   const sets: Array<{
     readonly textures: ReadonlyArray<TextureHandle | null>;
+    readonly emissive: boolean;
     readonly indices: number[];
   }> = [];
   records.forEach((record, index) => {
@@ -707,9 +727,12 @@ function boundSets(
       return;
     }
     const textures = boundTexturesOf(record);
-    const set = sets.find((each) => sameTextures(each.textures, textures));
+    const emissive = record.emission !== undefined;
+    const set = sets.find(
+      (each) => each.emissive === emissive && sameTextures(each.textures, textures),
+    );
     if (set === undefined) {
-      sets.push({ textures, indices: [index] });
+      sets.push({ textures, emissive, indices: [index] });
     } else {
       set.indices.push(index);
     }
@@ -786,14 +809,20 @@ function runsOf(
  *   hold fewer pixels' sums.
  * @param frame - The `discs` pass's frame, in which a large disc's limb is found; `null` takes no
  *   limb.
+ * @param emissiveCells - Whether the kernel's emissive form is there to shade the records that
+ *   carry their ground's emission (R08.T18.a); without it they take no jobs, and their draws sum
+ *   their own cells.
  */
 export function discCellJobs(
   records: ReadonlyArray<DiscRecord>,
   maxJobs: number = MAX_CELL_JOBS,
   frame: DiscLimbFrame | null = null,
+  emissiveCells = false,
 ): DiscCellJobs {
   const most = Math.min(maxJobs, MAX_CELL_JOBS);
-  const planned = records.map((record) => plannedCellsOf(record, frame));
+  const planned = records.map((record) =>
+    record.emission !== undefined && !emissiveCells ? null : plannedCellsOf(record, frame),
+  );
   let count = 0;
   let spanRows = 0;
   const ranges: Array<DiscCellRange | null> = records.map(() => null);
@@ -852,6 +881,7 @@ export function discCellJobs(
         record: head,
         firstGroup,
         groups: groupCount - firstGroup,
+        emissive: records[head]?.emission !== undefined,
       });
     }
   }
@@ -941,6 +971,12 @@ export interface DiscRecord {
    * {@link SurfaceLightingReader} given beside the record, as it reads a class map's texels.
    */
   readonly atmosphere?: SurfaceLightingTables;
+  /**
+   * Its ground's thermal emission, for a body above R08's visibility cut (plan R08, R08.T18.a;
+   * `discReflectance.ts`' `discEmissionOf`), which the kernels' emissive forms draw; absent below
+   * it, when the plain kernels draw it as before.
+   */
+  readonly emission?: DiscEmission;
 }
 
 /** The pole's stretch M x = x + (a ÷ c − 1)(x · p) p. */
@@ -1032,6 +1068,10 @@ function bodyAxesOf(rotation: Rotation3): readonly [Vec3, Vec3] {
  * (T8.g; empty without a band), each one span's first sum, its first pixel's x and its end's, px,
  * and 0, so that the buffer is {@link DISC_ROWS} rows a record and `cells.spanRows` more.
  *
+ * Past the spans, each record that carries its ground's emission (R08.T18.a) has its block,
+ * `DISC_EMISSION_ROWS` rows in the records' order (`packDiscEmission`, at the record's exposure
+ * scale), whose first row its row 46's y holds; 0 there for every other record, as before.
+ *
  * @param cells - The `disc cells` pass's jobs for these records, whose ranges row 51 carries; `null`
  *   where no pass runs, when every record's row 51 says its draws sum their own cells.
  * @throws Error if `cells` was made for another number of records.
@@ -1046,7 +1086,15 @@ export function packDiscRecords(
     );
   }
   const recordRows = records.length * DISC_ROWS;
-  const out = new Float32Array((recordRows + (cells?.spanRows ?? 0)) * 4);
+  // The emission blocks past the spans, each record's first row by its index (R08.T18.a).
+  const firstBlockRow = recordRows + (cells?.spanRows ?? 0);
+  const blockRows = new Map<number, number>();
+  records.forEach((record, index) => {
+    if (record.emission !== undefined) {
+      blockRows.set(index, firstBlockRow + blockRows.size * DISC_EMISSION_ROWS);
+    }
+  });
+  const out = new Float32Array((firstBlockRow + blockRows.size * DISC_EMISSION_ROWS) * 4);
   records.forEach((record, index) => {
     const base = index * DISC_ROWS * 4;
     const put = (rowIndex: number, values: ReadonlyArray<number>): void => {
@@ -1120,7 +1168,12 @@ export function packDiscRecords(
       put(FIRST_OCCLUDER_ROW + slot, [c.x, c.y, c.z, occluder.radius]);
     });
     const secondaries = record.secondaries.slice(0, MAX_DISC_SECONDARIES);
-    put(SECONDARY_COUNT_ROW, [secondaries.length, 0, 0, 0]);
+    // y: the first row of its emission block, 0 for none (R08.T18.a).
+    put(SECONDARY_COUNT_ROW, [secondaries.length, blockRows.get(index) ?? 0, 0, 0]);
+    const blockRow = blockRows.get(index);
+    if (record.emission !== undefined && blockRow !== undefined) {
+      out.set(packDiscEmission(record.emission, record.exposureOverPi * Math.PI), blockRow * 4);
+    }
     secondaries.forEach((source, j) => {
       const first = FIRST_SECONDARY_ROW + j * SECONDARY_ROWS;
       const d = source.direction;
@@ -1180,6 +1233,8 @@ interface ViewBody {
   readonly classMap: ViewClassMap | null;
   /** Its atmosphere's lookups (R08.T9.b), or a body's without one. */
   readonly lighting: SurfaceLightingReader;
+  /** Its emission's star in the view's axes (R08.T18.a); `null` for a record with no emission. */
+  readonly emissionStar: Vec3 | null;
 }
 
 function viewBodyOf(
@@ -1216,6 +1271,7 @@ function viewBodyOf(
     laws,
     classMap,
     lighting,
+    emissionStar: record.emission === undefined ? null : toView(record.emission.star),
     lights: record.lights
       .slice(0, MAX_DISC_LIGHTS)
       .map((light) => ({ place: scale(toView(light.direction), light.distance), light })),
@@ -1661,6 +1717,22 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
         source.illuminance[c] * record.exposureOverPi * reflectance[c] * transmitted[c];
     }
   }
+  // The ground's thermal emission, its last step (R08.T18.a; `disc_emission`): no star's, so cut
+  // by no horizon, eclipse or ring, and the meter's class stays the starlight's.
+  if (record.emission !== undefined && body.emissionStar !== null) {
+    const emitted = discEmissionAt(
+      record.emission,
+      record.exposureOverPi * Math.PI,
+      normal,
+      body.emissionStar,
+      body.pole,
+      shares,
+      laws.map((law) => law.a),
+    );
+    for (const c of CHANNELS) {
+      radiance[c] += emitted[c];
+    }
+  }
   return { radiance, lit };
 }
 
@@ -1765,7 +1837,7 @@ function clampHdr(v: number): number {
 }
 
 /** One cell's light, its covered share and whether its shaded points were lit. */
-interface CellSum {
+export interface DiscCellSum {
   readonly radiance: Rgb;
   readonly coverage: number;
   readonly lit: number;
@@ -1773,50 +1845,22 @@ interface CellSum {
 }
 
 /**
- * The disc's pixels as the shader's two draws leave them, in `f64`: the CPU rasteriser the flux and
- * geometry tests read.
- *
- * @remarks
- * A pixel is the interior draw's where its four corner rays all meet the body, which then covers it
- * wholly, the silhouette being convex; the limb draw's where any corner lies outside or within
- * {@link LIMB_OVERLAP_PX} inside the limb, so that a pixel at the threshold is drawn by both and
- * never by neither. Each of a pixel's n × n samples stands for its cell of side h = 1 ÷ n. Near the
- * limb a cell's profile across the limb's local normal n̂ (the gradient of the limb angle at the
- * sample) is a trapezoid, the convolution of boxes of widths h|n̂_x| and h|n̂_y|; its covered share
- * is the profile's integral inside the limb over h², and its light the profile-weighted integral
- * over its depth δ inside the limb by three Gauss points in u = √δ per linear piece, exact where
- * the light goes as A + B√δ + Cδ: μ, and μ₀ on a crescent, go as √δ at the limb, which a point
- * sample of a thin crescent cannot follow. Deeper cells are shaded at their centre. The interior's
- * class is pure: `litBody` where every shaded point is lit directly (above
- * {@link LIT_IRRADIANCE}), `unlitBody` where none is, `other` where they are mixed (at the
- * terminator) or no star lights the body.
- *
- * @param classMap - The texels of the record's class map, which its surface holds only as a
- *   texture; `null` for a uniform surface. Its normal map's texels, where it carries one
- *   (R10.T10.g), are read from the record's surface, which holds them beside the texture.
- * @param lighting - The body's atmosphere's lookups (plan R08, R08.T9.b), which its record's
- *   tables hold only as textures: `tablesCpu.ts`'s `surfaceLightingTwin`, or
- *   {@link AIRLESS_LIGHTING} for a body without one.
- * @throws Error for a class-map record without its texels, or with another map's class count.
+ * A view body's pixel sums as `pixel_sum` forms them, in `f64`: each of a pixel's n × n cells by
+ * `cell_sum` (`rasteriseDisc`'s remarks), its light and covered share as means over the cells, and
+ * its lit and shaded points counted.
  */
-export function rasteriseDisc(
+function pixelSummer(
+  body: ViewBody,
   record: DiscRecord,
-  camera: ProjectionCamera,
-  viewport: Viewport,
-  classMap: ClassMapTexels | null = null,
-  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
-): DiscPixel[] {
-  const body = viewBodyOf(record, camera, classMap, lighting);
-  const pixels: DiscPixel[] = [];
-  const { rect } = record;
-  const rayAt = viewRays(camera, viewport);
+  rayAt: (xPx: number, yPx: number) => Vec3,
+): (x: number, y: number, n: number) => DiscCellSum {
   const angleAt = (x: number, y: number): number => limbAngle(body, rayAt(x, y));
   const shadeAt = (x: number, y: number): Shaded | null => {
     const ray = rayAt(x, y);
     const q = hitSpheroid(body, ray);
     return q === null ? null : shade(body, record, q, ray);
   };
-  const cell = (px: number, py: number, n: number): CellSum => {
+  const cell = (px: number, py: number, n: number): DiscCellSum => {
     const angle = angleAt(px, py);
     const sx = (angleAt(px + GRADIENT_STEP_PX, py) - angle) / GRADIENT_STEP_PX;
     const sy = (angleAt(px, py + GRADIENT_STEP_PX) - angle) / GRADIENT_STEP_PX;
@@ -1865,7 +1909,7 @@ export function rasteriseDisc(
     }
     return { radiance, coverage: Math.min(1, covered / (h * h)), lit, shaded };
   };
-  const pixelSum = (x: number, y: number, n: number): CellSum => {
+  const pixelSum = (x: number, y: number, n: number): DiscCellSum => {
     const radiance: [number, number, number] = [0, 0, 0];
     let coverage = 0;
     let lit = 0;
@@ -1888,6 +1932,71 @@ export function rasteriseDisc(
       shaded,
     };
   };
+  return pixelSum;
+}
+
+/**
+ * The `disc cells` pass's sums of the given pixels at n × n cells each, in `f64` (R07.T8.d; the
+ * twin of `bodyDiscCells.wgsl`'s two `vec4f` a pixel): each one's light and covered share as means
+ * over its cells, and its lit and shaded points, by {@link rasteriseDisc}'s own arithmetic.
+ *
+ * @param pixels - Each pixel's top-left corner, px, and its cells per axis.
+ * @param classMap - As {@link rasteriseDisc}'s.
+ * @param lighting - As {@link rasteriseDisc}'s.
+ */
+export function discCellSums(
+  record: DiscRecord,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+  pixels: ReadonlyArray<readonly [number, number, number]>,
+  classMap: ClassMapTexels | null = null,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
+): ReadonlyArray<DiscCellSum> {
+  const body = viewBodyOf(record, camera, classMap, lighting);
+  const pixelSum = pixelSummer(body, record, viewRays(camera, viewport));
+  return pixels.map(([x, y, n]) => pixelSum(x, y, n));
+}
+
+/**
+ * The disc's pixels as the shader's two draws leave them, in `f64`: the CPU rasteriser the flux and
+ * geometry tests read.
+ *
+ * @remarks
+ * A pixel is the interior draw's where its four corner rays all meet the body, which then covers it
+ * wholly, the silhouette being convex; the limb draw's where any corner lies outside or within
+ * {@link LIMB_OVERLAP_PX} inside the limb, so that a pixel at the threshold is drawn by both and
+ * never by neither. Each of a pixel's n × n samples stands for its cell of side h = 1 ÷ n. Near the
+ * limb a cell's profile across the limb's local normal n̂ (the gradient of the limb angle at the
+ * sample) is a trapezoid, the convolution of boxes of widths h|n̂_x| and h|n̂_y|; its covered share
+ * is the profile's integral inside the limb over h², and its light the profile-weighted integral
+ * over its depth δ inside the limb by three Gauss points in u = √δ per linear piece, exact where
+ * the light goes as A + B√δ + Cδ: μ, and μ₀ on a crescent, go as √δ at the limb, which a point
+ * sample of a thin crescent cannot follow. Deeper cells are shaded at their centre. The interior's
+ * class is pure: `litBody` where every shaded point is lit directly (above
+ * {@link LIT_IRRADIANCE}), `unlitBody` where none is, `other` where they are mixed (at the
+ * terminator) or no star lights the body.
+ *
+ * @param classMap - The texels of the record's class map, which its surface holds only as a
+ *   texture; `null` for a uniform surface. Its normal map's texels, where it carries one
+ *   (R10.T10.g), are read from the record's surface, which holds them beside the texture.
+ * @param lighting - The body's atmosphere's lookups (plan R08, R08.T9.b), which its record's
+ *   tables hold only as textures: `tablesCpu.ts`'s `surfaceLightingTwin`, or
+ *   {@link AIRLESS_LIGHTING} for a body without one.
+ * @throws Error for a class-map record without its texels, or with another map's class count.
+ */
+export function rasteriseDisc(
+  record: DiscRecord,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+  classMap: ClassMapTexels | null = null,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
+): DiscPixel[] {
+  const body = viewBodyOf(record, camera, classMap, lighting);
+  const pixels: DiscPixel[] = [];
+  const { rect } = record;
+  const rayAt = viewRays(camera, viewport);
+  const angleAt = (x: number, y: number): number => limbAngle(body, rayAt(x, y));
+  const pixelSum = pixelSummer(body, record, rayAt);
   // Each pixel corner's limb angle, taken once: four pixels share a corner.
   const left = Math.floor(rect.leftPx);
   const top = Math.floor(rect.topPx);

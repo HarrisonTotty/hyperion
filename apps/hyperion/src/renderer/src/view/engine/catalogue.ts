@@ -29,7 +29,14 @@ import {
   SKY_VIEW_THICK_KERNEL,
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
-import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS, SMOOTH_MESH_MATERIAL } from "../bodies/draw";
+import {
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_EMISSIVE_MATERIALS,
+  BODY_DISC_MATERIALS,
+  SMOOTH_MESH_EMISSIVE_MATERIAL,
+  SMOOTH_MESH_MATERIAL,
+} from "../bodies/draw";
 import {
   IRRADIANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
@@ -239,6 +246,19 @@ const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: BODY_DISC_CELLS_KERNEL },
 ];
 
+/**
+ * R08.T18.a's emissive forms of the lit bodies' kernels (`discReflectance.ts`' `withDiscEmission`):
+ * the disc's interior and limb, the mesh regime's figure and the `disc cells` kernel, each with the
+ * ground's thermal emission, made only for a body above the visibility cut. The smoke page compiles
+ * them in a part of their own (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ */
+export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: BODY_DISC_EMISSIVE_MATERIALS.interior },
+  { kind: "material", spec: BODY_DISC_EMISSIVE_MATERIALS.limb },
+  { kind: "material", spec: SMOOTH_MESH_EMISSIVE_MATERIAL },
+  { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_KERNEL },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -251,5 +271,6 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,
+  ...THERMAL_ENTRIES,
   ...SKY_ENTRIES,
 ];

@@ -157,6 +157,7 @@ import type {
   ThickBakeAsk,
 } from "./opticsPool";
 import type { BakeSpectrum } from "./spectralColour";
+import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "./thermal";
 import { type AbsorberCurveSlots, type AtmosphereBody, AtmosphereTables } from "./tables";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
@@ -550,6 +551,8 @@ interface HeldBody<T> {
   lights: ReadonlyArray<BodyLight>;
   /** The reply taken, for the scene, which a changed light set or an eviction builds from. */
   reply: BodyDetail | null;
+  /** The ground's temperature field of the reply it was read from (R08.T18.a); `null` before. */
+  ground: { readonly reply: BodyDetail; readonly field: SurfaceTemperatureField | null } | null;
   build: Build | null;
   drawn: AtmosphereEntry<T> | null;
   /** The drawn entry's thick bake; `null` where none is asked, or nothing is drawn. */
@@ -971,6 +974,27 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     return held === undefined || held.problem !== null ? null : held.drawn;
   }
 
+  /**
+   * A body's ground temperature field (plan R08, R08.T18.a; `thermal.ts`' `groundTemperatureFieldOf`)
+   * from the record the cache holds for it, read once a reply: `null` for a body with a medium, one
+   * whose surface section is not `ok`, or one of no record held.
+   */
+  groundFieldOf(body: BodyIdHex): SurfaceTemperatureField | null {
+    const held = this.#bodies.get(body);
+    const reply = held?.reply ?? null;
+    if (held === undefined || reply === null) {
+      return null;
+    }
+    if (held.ground?.reply !== reply) {
+      const { surface } = reply.record;
+      held.ground = {
+        reply,
+        field: surface.state === "ok" ? groundTemperatureFieldOf(surface.value) : null,
+      };
+    }
+    return held.ground.field;
+  }
+
   /** A body's labels: its entry's, `atmospherePending` while pending, none with a problem. */
   labelsOf(body: BodyIdHex): ReadonlyArray<AtmosphereLabel> {
     const held = this.#bodies.get(body);
@@ -1106,6 +1130,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       busyAnswers: 0,
       lights: body.lights,
       reply: null,
+      ground: null,
       build: null,
       drawn: null,
       bake: null,

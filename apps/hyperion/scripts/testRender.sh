@@ -13,7 +13,8 @@
 # 8 to 13 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3 R08.T6.g and
 # R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
 # Saturn-class figure and R08.T6.i, 6 R08.T6.b's four absorbers, 8 R08.T6.f's Earth and
-# R07.T8.e–f's cell pass, 9 R08.T8.a's march band and R08.T11.e's giant, 10 R08.T7 and R08.T8.e's
+# R07.T8.e–f's cell pass, 9 R08.T8.a's march band, R08.T11.e's giant and R08.T18.a's thermal
+# emission, 10 R08.T7 and R08.T8.e's
 # slot layers on its binary, 11 R08.T9.b's two and R08.T8.c's far limb's footprint, 12 R08.T11.b's
 # face count, which took part 8 to its watchdog, and R08.T11.e's Earth, 13 R08.T14.c's thick read,
 # its kernels' catalogue, its Earth, R08.T14.f's correction alone on Earth and its specialised march, which would have taken parts 9, 11

@@ -44,6 +44,13 @@
  * A class-map disc whose surface carries the field's normal map (plan R10, R10.T10.g) shades its
  * surveyed ground with those normals, in its draws and in the point it switches with: its records'
  * flag (`packDiscRecords`' row 24) and the normal map's texture at binding 14 (`surfaceNormals`).
+ *
+ * A body given its ground's temperature field ({@link LitBodyInput.thermal}, plan R08, R08.T18.a)
+ * above R08's visibility cut has its record carry its emission (`discReflectance.ts`'
+ * `discEmissionOf`), and its disc, its mesh and its cells are drawn by the kernels' emissive forms
+ * ({@link BODY_DISC_EMISSIVE_MATERIALS}, {@link SMOOTH_MESH_EMISSIVE_MATERIAL},
+ * {@link BODY_DISC_CELLS_EMISSIVE_KERNEL}), made at the first such record; every other body is
+ * drawn by the plain kernels, as before.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -71,12 +78,15 @@ import type {
   DrawItem,
   MaterialHandle,
   MeshHandle,
+  PreparedTarget,
   RenderEngine,
   TextureBindingSpec,
   TextureHandle,
   ViewSize,
   WgslMaterialSpec,
 } from "../engine/types";
+import { discEmissionOf, withDiscEmission } from "../atmosphere/discReflectance";
+import type { SurfaceTemperatureField } from "../atmosphere/thermal";
 import {
   createAirlessTables,
   SURFACE_LIGHTING_WGSL,
@@ -174,6 +184,12 @@ export interface LitBodyInput {
    * draws a body's atmosphere in the view, no caller gives one.
    */
   readonly atmosphere?: SurfaceLightingTables;
+  /**
+   * Its ground's temperature field (plan R08, R08.T18.a; `thermal.ts`' `groundTemperatureFieldOf`),
+   * for a body drawn with no medium whose record gives one; above the visibility cut its disc adds
+   * the light its ground emits (`discReflectance.ts`). Absent, its disc reflects alone.
+   */
+  readonly thermal?: SurfaceTemperatureField;
   /**
    * The GPU's coverage mask of its survey (plan R10, R10.T10.c; `terrain/coverage.ts`'
    * `CoverageMask.texture`) with the axes it is read in, given by a view that draws its terrain,
@@ -536,6 +552,17 @@ function discRecordOf(
     radius: source.radiusM / a,
     illuminance: source.illuminance,
   }));
+  // Its ground's emission above the cut (R08.T18.a), about its brightest star.
+  const emission =
+    body.thermal === undefined
+      ? null
+      : discEmissionOf(
+          body.thermal,
+          discSurfaceLaws(surface).map((law) => law.a),
+          lights.map((light) => light.illuminance),
+          lights[0]?.direction ?? vec3(0, 0, 0),
+          surface.kind === "class-map" ? (surface.meltClasses ?? []) : [],
+        );
   return {
     body: body.id,
     rect,
@@ -552,6 +579,7 @@ function discRecordOf(
     occluders: blockers,
     secondaries: shine,
     ...(body.atmosphere === undefined ? {} : { atmosphere: body.atmosphere }),
+    ...(emission === null ? {} : { emission }),
   };
 }
 
@@ -850,6 +878,33 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
   },
 };
 
+/**
+ * The disc's two materials' emissive forms (plan R08, R08.T18.a): their source with `shade` adding
+ * the ground's emission (`discReflectance.ts`' `withDiscEmission`), drawn for the records that carry
+ * it; the same bindings, uniforms and states.
+ */
+export const BODY_DISC_EMISSIVE_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> =
+  (() => {
+    const source = withDiscEmission(DISC_SOURCE);
+    const { interior, limb } = BODY_DISC_MATERIALS;
+    return {
+      interior: {
+        ...interior,
+        name: "bodies:discEmissive",
+        displayName: "EMISSIVE BODY DISCS",
+        vertexWgsl: source,
+        fragmentWgsl: source,
+      },
+      limb: {
+        ...limb,
+        name: "bodies:discLimbEmissive",
+        displayName: "EMISSIVE DISC LIMBS",
+        vertexWgsl: source,
+        fragmentWgsl: source,
+      },
+    };
+  })();
+
 const SMOOTH_MESH_SOURCE = LIT_SOURCE + patchVertexWgsl + smoothMeshWgsl;
 
 /** The group 2 binding of a mesh body's coverage mask (`smoothMesh.wgsl`, R10.T10.c), past the disc's. */
@@ -891,6 +946,21 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
 };
 
 /**
+ * The mesh regime's material's emissive form (plan R08, R08.T18.a; `withDiscEmission`), for the
+ * records that carry their ground's emission; the same bindings, uniforms and states.
+ */
+export const SMOOTH_MESH_EMISSIVE_MATERIAL: WgslMaterialSpec = (() => {
+  const source = withDiscEmission(SMOOTH_MESH_SOURCE);
+  return {
+    ...SMOOTH_MESH_MATERIAL,
+    name: "bodies:smoothMeshEmissive",
+    displayName: "EMISSIVE BODY MESHES",
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+})();
+
+/**
  * The `disc cells` pass's label (R07.T8.d), between R06's sky and the mesh bodies' figures, which
  * read its sums as the `discs` pass does (`PHOTOREAL_PASS_LABELS.discCells`).
  */
@@ -913,6 +983,18 @@ export const DISC_CELLS_PASS = "disc cells";
 export const BODY_DISC_CELLS_KERNEL: KernelPair = {
   name: "BODY DISC CELLS",
   reference: LIT_SOURCE + bodyDiscCellsWgsl,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/**
+ * The `disc cells` kernel's emissive form (plan R08, R08.T18.a; `withDiscEmission`), one dispatch
+ * a set of records that carry their ground's emission (`DiscCellSet.emissive`): one kernel more in
+ * R01.T15's bounded cache, made at the first frame that has such a record.
+ */
+export const BODY_DISC_CELLS_EMISSIVE_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, emissive",
+  reference: withDiscEmission(LIT_SOURCE + bodyDiscCellsWgsl),
   subgroup: null,
   readback: "bit-exact",
 };
@@ -1015,6 +1097,42 @@ interface DeviceResources {
   /** Its workgroups' runs of the jobs (R07.T8.g). */
   cellGroups: BufferHandle;
   cellSums: BufferHandle;
+  /**
+   * The disc's and the mesh's emissive forms (R08.T18.a), made and prepared at the first record
+   * that carries its ground's emission, and drawn once prepared; `null` until then.
+   */
+  emissive: EmissiveMaterials | null;
+}
+
+/** The emissive forms of a disc's two materials and the mesh's (R08.T18.a), and whether they are prepared. */
+interface EmissiveMaterials {
+  readonly interior: MaterialHandle;
+  readonly limb: MaterialHandle;
+  readonly mesh: MaterialHandle;
+  ready: boolean;
+  /** Settles once their pipelines are prepared, or could not be. */
+  prepared: Promise<void>;
+}
+
+/**
+ * A plan's records as the renderer draws them (R08.T18.a): its own, or with no record's emission
+ * while the emissive forms are not prepared, so that a frame draws its emission in all its passes
+ * or in none.
+ */
+interface DrawnPlan {
+  readonly plan: BodyFramePlan;
+  readonly records: ReadonlyArray<DiscRecord>;
+  /** The prepared emissive forms its emitting records are drawn by; `null` where none emits. */
+  readonly emissive: EmissiveMaterials | null;
+}
+
+/** A record without its emission, as the plain forms draw it. */
+function withoutEmission(record: DiscRecord): DiscRecord {
+  if (record.emission === undefined) {
+    return record;
+  }
+  const { emission: _emission, ...plain } = record;
+  return plain;
 }
 
 /**
@@ -1043,6 +1161,8 @@ export class LitBodyRenderer {
   /** The plan whose records were written last, and each of its meshes' first instance. */
   #written: { readonly plan: BodyFramePlan; readonly firstInstance: ReadonlyArray<number> } | null =
     null;
+  /** The plan whose records were last drawn, as they are drawn (R08.T18.a). */
+  #drawn: DrawnPlan | null = null;
   readonly #unsubscribe: () => void;
 
   constructor(engine: LitBodyEngine, spriteMaterial: WgslMaterialSpec) {
@@ -1055,6 +1175,7 @@ export class LitBodyRenderer {
       this.#prepareRegimes(this.#resources);
       this.#tableLaws = [];
       this.#written = null;
+      this.#drawn = null;
     });
   }
 
@@ -1120,7 +1241,90 @@ export class LitBodyRenderer {
       cellJobs: this.#buffer("bodies:disc cell jobs", MIN_BUFFER_BYTES),
       cellGroups: this.#buffer("bodies:disc cell groups", MIN_BUFFER_BYTES),
       cellSums: this.#buffer("bodies:disc cell sums", MIN_BUFFER_BYTES),
+      emissive: null,
     };
+  }
+
+  /**
+   * The emissive forms, prepared (R08.T18.a), or `null`: they are made and their pipelines prepared
+   * for the scene target at the first call, off the frame, as the plain forms are at construction
+   * (decision-r10-t14d-stall), so that a body's first frame above the cut never stalls on their
+   * compile; until they are prepared its records are drawn as the plain forms draw them.
+   */
+  #emissiveMaterials(): EmissiveMaterials | null {
+    const made = this.#emissiveMade();
+    return made.ready ? made : null;
+  }
+
+  /** The emissive forms, made at the first call on a device with their pipelines' preparing begun. */
+  #emissiveMade(): EmissiveMaterials {
+    const resources = this.#resources;
+    if (resources.emissive !== null) {
+      return resources.emissive;
+    }
+    const engine = this.#engine;
+    const interior = engine.createMaterial(BODY_DISC_EMISSIVE_MATERIALS.interior);
+    const limb = engine.createMaterial(BODY_DISC_EMISSIVE_MATERIALS.limb);
+    const mesh = engine.createMaterial(SMOOTH_MESH_EMISSIVE_MATERIAL);
+    const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
+    const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
+      [mesh, resources.patch],
+      [interior, resources.quad],
+      [limb, resources.quad],
+    ];
+    const made: EmissiveMaterials = {
+      interior,
+      limb,
+      mesh,
+      ready: false,
+      prepared: Promise.resolve(),
+    };
+    made.prepared = this.#readyEmissive(made, prepared, scene);
+    resources.emissive = made;
+    return made;
+  }
+
+  /** Prepares the emissive forms' pipelines, and marks them ready once they are; never rejects. */
+  async #readyEmissive(
+    made: EmissiveMaterials,
+    prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]>,
+    scene: ReadonlyArray<PreparedTarget>,
+  ): Promise<void> {
+    try {
+      await Promise.all(
+        prepared.map(([material, each]) => this.#engine.prepareMaterial(material, scene, [each])),
+      );
+      made.ready = true;
+    } catch (error: unknown) {
+      // A loss meanwhile is no failure: the restore makes the forms again at their next record.
+      if (!(error instanceof EngineUnavailable)) {
+        console.error("the emissive forms of the lit bodies could not be prepared:", error);
+      }
+    }
+  }
+
+  /**
+   * Makes the emissive forms and prepares their pipelines (R08.T18.a), ahead of a body's first
+   * frame above the cut, which until they are prepared draws its records as the plain forms do;
+   * resolves once they are, or could not be. A record drawn after it draws its emission.
+   */
+  prepareEmissive(): Promise<void> {
+    return this.#emissiveMade().prepared;
+  }
+
+  /**
+   * A plan's records as this renderer draws them, decided once per plan ({@link DrawnPlan}): its
+   * own where its emission can be drawn, every record's emission dropped while it cannot.
+   */
+  #drawnPlan(plan: BodyFramePlan): DrawnPlan {
+    if (this.#drawn?.plan === plan) {
+      return this.#drawn;
+    }
+    const emits = plan.discs.some((record) => record.emission !== undefined);
+    const emissive = emits ? this.#emissiveMaterials() : null;
+    const records = emits && emissive === null ? plan.discs.map(withoutEmission) : plan.discs;
+    this.#drawn = { plan, records, emissive };
+    return this.#drawn;
   }
 
   /** {@link DeviceResources.noCoverage}: one 0 texel a face, of the coverage mask's format. */
@@ -1236,12 +1440,22 @@ export class LitBodyRenderer {
     };
   }
 
-  /** One of a disc's two draws: 0 its wholly covered pixels, 1 its limb, at `depths`. */
-  #discDraw(index: number, record: DiscRecord, edgePass: 0 | 1, depths: LimbDepths): DrawItem {
+  /**
+   * One of a disc's two draws: 0 its wholly covered pixels, 1 its limb, at `depths`; by the
+   * emissive forms where its record, as drawn, carries its emission (R08.T18.a).
+   */
+  #discDraw(
+    index: number,
+    record: DiscRecord,
+    edgePass: 0 | 1,
+    depths: LimbDepths,
+    emissive: EmissiveMaterials | null,
+  ): DrawItem {
     const resources = this.#resources;
+    const forms = record.emission !== undefined && emissive !== null ? emissive : resources;
     return {
       mesh: resources.quad,
-      material: edgePass === 0 ? resources.interior : resources.limb,
+      material: edgePass === 0 ? forms.interior : forms.limb,
       offsetFromCameraM: new Float32Array(3),
       uniforms: {
         disc: new Float32Array([index]),
@@ -1265,7 +1479,8 @@ export class LitBodyRenderer {
     }
     const resources = this.#resources;
     this.#writeTable(plan.laws);
-    resources.discs = this.#write(resources.discs, packDiscRecords(plan.discs, cells));
+    const drawn = this.#drawnPlan(plan);
+    resources.discs = this.#write(resources.discs, packDiscRecords(drawn.records, cells));
     const records = packSmoothMeshes(plan.meshes.map(({ mesh }) => mesh));
     resources.slots = this.#write(resources.slots, records.slots);
     resources.instances = this.#write(resources.instances, records.instances);
@@ -1290,17 +1505,28 @@ export class LitBodyRenderer {
    * of the workgroups from its first, and has {@link cellWorkgroups}' grid for them, each workgroup
    * a run of up to `pixelsPerGroup` pixels of one cell count (R07.T8.g).
    *
+   * A set of records that carry their ground's emission (R08.T18.a) is dispatched with
+   * `emissiveKernel` ({@link BODY_DISC_CELLS_EMISSIVE_KERNEL}); without it, or while the emissive
+   * forms are not prepared, such records take no jobs and their draws sum their own cells.
+   *
    * @param frame - The `discs` pass's own frame, which the kernel shades in and a large disc's limb
    *   is found in.
+   * @param emissiveKernel - The kernel's emissive form, or `null` where it is not made yet.
    * @returns Whether it dispatched.
    */
-  dispatchCells(plan: BodyFramePlan, kernel: ComputeHandle, frame: DiscCellFrame): boolean {
+  dispatchCells(
+    plan: BodyFramePlan,
+    kernel: ComputeHandle,
+    frame: DiscCellFrame,
+    emissiveKernel: ComputeHandle | null = null,
+  ): boolean {
     if (this.#written?.plan === plan) {
       return false;
     }
     // As many pixels' sums as one storage binding holds; a disc past them sums its own cells.
     const fits = Math.floor(this.#engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
-    const cells = discCellJobs(plan.discs, fits, frame);
+    const { records } = this.#drawnPlan(plan);
+    const cells = discCellJobs(records, fits, frame, emissiveKernel !== null);
     if (cells.count === 0) {
       this.#upload(plan);
       return false;
@@ -1312,12 +1538,16 @@ export class LitBodyRenderer {
     resources.cellSums = this.#reserve(resources.cellSums, cells.count * CELL_SUM_BYTES);
     const block = discCellFrameBlock(frame);
     for (const set of cells.sets) {
-      const record = plan.discs[set.record];
+      const record = records[set.record];
       if (record === undefined) {
         throw new Error(`the cell pass's set from job ${set.first} has no record ${set.record}`);
       }
+      const setKernel = set.emissive ? emissiveKernel : kernel;
+      if (setKernel === null) {
+        throw new Error(`the cell pass's emissive set from job ${set.first} has no kernel`);
+      }
       this.#engine.dispatch(
-        kernel,
+        setKernel,
         {
           uniforms: {
             frame: block,
@@ -1351,8 +1581,9 @@ export class LitBodyRenderer {
   meshDraws(plan: BodyFramePlan): DrawItem[] {
     const firstInstance = this.#upload(plan);
     const resources = this.#resources;
+    const { records, emissive } = this.#drawnPlan(plan);
     return plan.meshes.flatMap((body, i) => {
-      const record = plan.discs[body.index];
+      const record = records[body.index];
       if (record === undefined) {
         throw new Error(`the plan's mesh ${i} has no record ${body.index}`);
       }
@@ -1367,7 +1598,8 @@ export class LitBodyRenderer {
       return [
         {
           mesh: resources.patch,
-          material: resources.mesh,
+          material:
+            record.emission !== undefined && emissive !== null ? emissive.mesh : resources.mesh,
           offsetFromCameraM: new Float32Array(3),
           uniforms: {
             disc: new Float32Array([body.index]),
@@ -1426,6 +1658,7 @@ export class LitBodyRenderer {
     hostDraws: ReadonlyMap<number, ReadonlyArray<DrawItem>> = new Map(),
   ): DrawItem[] {
     this.#upload(plan);
+    const { records, emissive } = this.#drawnPlan(plan);
     const draws: DrawItem[] = [];
     let run = 0;
     for (const step of plan.steps) {
@@ -1434,23 +1667,23 @@ export class LitBodyRenderer {
           draws.push(...(hostDraws.get(step.star) ?? []));
           break;
         case "disc": {
-          const record = plan.discs[step.index];
+          const record = records[step.index];
           if (record === undefined) {
             throw new Error(`the plan's disc step ${step.index} has no record`);
           }
           draws.push(
-            this.#discDraw(step.index, record, 0, DISC_LIMB_DEPTHS),
-            this.#discDraw(step.index, record, 1, DISC_LIMB_DEPTHS),
+            this.#discDraw(step.index, record, 0, DISC_LIMB_DEPTHS, emissive),
+            this.#discDraw(step.index, record, 1, DISC_LIMB_DEPTHS, emissive),
           );
           break;
         }
         case "limb": {
           const body = plan.meshes[step.mesh];
-          const record = body === undefined ? undefined : plan.discs[body.index];
+          const record = body === undefined ? undefined : records[body.index];
           if (body === undefined || record === undefined) {
             throw new Error(`the plan's limb step ${step.mesh} has no mesh or record`);
           }
-          draws.push(this.#discDraw(body.index, record, 1, body.limbDepths));
+          draws.push(this.#discDraw(body.index, record, 1, body.limbDepths, emissive));
           break;
         }
         case "points":

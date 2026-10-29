@@ -17,8 +17,12 @@ import {
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { microtasks } from "../../test/opticsFakes";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
   DISC_CELLS_PASS,
@@ -830,22 +834,24 @@ async function overlayDatums(
 
 /**
  * Every kernel VIEW makes on a device (plan R01, R01.T15): the photorealistic renderer's histogram
- * and disc cells; the atmosphere's per-frame kernels, its sky view, aerial perspective, its two
- * marches' footprint entry points, each general, specialised for one band and no layer edge
- * (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points under
- * R08.T11.d's tile cull (off for a view) and the march's fill; since R08.T14.c the sky view, the
+ * and disc cells, and since R08.T18.a the disc cells' emissive form, for a body above the thermal
+ * emission's visibility cut (`withDiscEmission`); the atmosphere's per-frame kernels, its sky view,
+ * aerial perspective, its two marches' footprint entry points, each general, specialised for one band
+ * and no layer edge (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points
+ * under R08.T11.d's tile cull (off for a view) and the march's fill; since R08.T14.c the sky view, the
  * aerial perspective and both marches' footprints,
  * general and specialised, reading the thick table (`withThickRead`), for a body whose tables hold
  * one; its per-planet tables' four; and the sky bake's four. Each is a module constant, its
  * WGSL fixed text with no value of a medium, a body or a setting in it (term counts, slices, bands
  * and light slots are uniforms; the specialised and one-band marches and the thick read are
  * variants of fixed text, chosen from the tables), so the records a device's cache holds for VIEW
- * are bounded by this list's length, 27, however many bodies a session visits. The smoke's kernel
+ * are bounded by this list's length, 28, however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
 const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   HISTOGRAM_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
   SKY_VIEW_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
@@ -1033,14 +1039,15 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // pass); none after adds a kernel. The thin first pass makes 14: the view's, made up front with
     // both reads' one-band marches among them (R08.T11.g, which the slab Earth takes by slot and the
     // deck over the shared read), and the tables' four. The thick pass makes 6 more, 20 in all,
-    // bounded however many bodies follow. All but seven are made: the sky bake's four are the
-    // sky's, the march's fill a reader's, which no frame asks, and the tile cull's two centre ray's
-    // kernels its own cover's, which a view never takes (R08.T11.d).
+    // bounded however many bodies follow. All but eight are made: the sky bake's four are the
+    // sky's, the march's fill a reader's, which no frame asks, the tile cull's two centre ray's
+    // kernels its own cover's, which a view never takes (R08.T11.d), and the disc cells' emissive
+    // form a body's above the thermal cut, which none of these is (R08.T18.a).
     expect(new Set(held.slice(0, kinds.length).slice(-1))).toEqual(
-      new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 3 - 6]),
+      new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 4 - 6]),
     );
     expect(new Set(held.slice(2 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));
-    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 3);
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 4);
     // Each body's tables made their own handles all the while.
     expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
     renderer.dispose();
@@ -1344,6 +1351,45 @@ function smallDiscs(viewport: Viewport = VIEWPORT): LitBodyInput[] {
     bodyAcross(13, -third, "0200080020000000.0402", viewport),
   ];
 }
+
+describe("the photorealistic renderer's emissive cells (R08.T18.a)", () => {
+  it("asks for the disc cells' emissive form at the first frame with an emitting record, once, and shades that record's cells with it once made", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const emissiveMade = (): number =>
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_EMISSIVE_KERNEL.name)
+        .length;
+    renderer.render(new RecordingView(), frameOfDiscs(smallDiscs()));
+    expect(emissiveMade()).toBe(0);
+    const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+    const [small, larger] = smallDiscs();
+    if (small === undefined || larger === undefined) {
+      throw new Error("two small discs");
+    }
+    const bodies = [small, { ...larger, thermal: field }];
+    const first = engine.dispatched.length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    // Until it is made, and the emissive draws prepared, the frame is drawn as before.
+    expect(
+      engine.dispatched
+        .slice(first)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel),
+    ).toEqual([BODY_DISC_CELLS_KERNEL.name]);
+    await microtasks();
+    const second = engine.dispatched.length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    expect(emissiveMade()).toBe(1);
+    expect(
+      engine.dispatched
+        .slice(second)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel),
+    ).toEqual([BODY_DISC_CELLS_KERNEL.name, BODY_DISC_CELLS_EMISSIVE_KERNEL.name]);
+    renderer.dispose();
+  });
+});
 
 describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
   it("shades the small discs' cells once, after the sky and before the discs", async () => {

@@ -22,7 +22,7 @@
  * **Spectrally**, B_λ is taken at the 15 bake bins' centres ({@link BAKE_WAVELENGTHS_NM}, the
  * wavelengths every off-frame bake solves at), each bin's emissivity is constant, and each bin's
  * value reaches the channels through the colour pipeline's rows in it: the 1 nm rows of 380–760 nm
- * with their trapezoid weights, each in its bin by `binConversion.ts`' {@link binOfRow}, so that
+ * with their trapezoid weights, each in its bin as `binConversion.ts`' `binOfRow` puts it, so that
  * the weight of bin b in channel c is V_cb = K_cd Σ c̄_c(λ) Δλ over its rows
  * ({@link EMISSION_CHANNEL_WEIGHTS}), the conversion R08.T14.b's bakes take with a flat spectrum in
  * place of the star's. Against Planck's law times the matching functions integrated over their
@@ -79,10 +79,14 @@
 import type { BodySurface } from "../../lib/system/model";
 import { SPEED_OF_LIGHT_M_PER_S } from "../../lib/scene/lightTime";
 import type { Rgb } from "../photometry/toneCurve";
-import { BAKE_BIN_COUNT, BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM } from "./medium";
+import {
+  BAKE_BIN_COUNT,
+  BAKE_RANGE_NM,
+  BAKE_WAVELENGTHS_NM,
+  CHANNEL_WAVELENGTHS_NM,
+} from "./medium";
 import { BOLTZMANN_J_PER_K } from "./rayleigh";
 import { MATCHING_FUNCTIONS, PIPELINE_WAVELENGTHS_NM } from "./spectralColour";
-import { binOfRow } from "./thick/binConversion";
 import thermalWgsl from "./shaders/thermal.wgsl?raw";
 
 /**
@@ -174,6 +178,17 @@ export function kirchhoffEmissivity(albedo: Rgb): Float64Array {
     GROUND_RULE_WEIGHTS,
     (weights) => 1 - Math.min(Math.max(ruled(weights, albedo), 0), 1),
   );
+}
+
+/**
+ * The bin of a pipeline row, nm: ⌊15 (λ − 380) ÷ 380⌋, the last bin for 760 nm, as
+ * `binConversion.ts`' `binOfRow` takes it; written here so that the render thread, which draws the
+ * emission, loads none of the thick bake's modules (`AtmosphereCache.test.ts`).
+ */
+function binOfRow(wavelengthNm: number): number {
+  const [low, high] = BAKE_RANGE_NM;
+  const bin = Math.floor((BAKE_BIN_COUNT * (wavelengthNm - low)) / (high - low));
+  return Math.min(Math.max(bin, 0), BAKE_BIN_COUNT - 1);
 }
 
 /**

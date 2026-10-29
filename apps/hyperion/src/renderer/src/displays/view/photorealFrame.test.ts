@@ -12,6 +12,8 @@ import { HostDiscLayer } from "../../view/sky/disc";
 import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
 import { vec3 } from "../../geometry/vec3";
 import { FIXTURE_EARTH, FIXTURE_JUPITER } from "../../test/planetaryFixture";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { surfaceTemperatureFieldOf } from "../../view/atmosphere/thermal";
 import {
   sceneModelOf,
   shipFrameOf,
@@ -301,6 +303,18 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     });
     expect(surfaces[0]).toMatchObject({ kind: "class-map", rotation: earth.rotation });
     expect(surfaces[1]).toEqual({ kind: "uniform", law: PROVISIONAL_PHOTOMETRY.law });
+  });
+
+  it("give each body its ground's temperature field where the source holds one, and none emits without (R08.T18.a)", () => {
+    const { scene, pose } = sliceScene();
+    const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {}, (body) =>
+      body === FIXTURE_EARTH ? field : null,
+    );
+    expect(lit.find((body) => body.id === FIXTURE_EARTH)?.thermal).toBe(field);
+    expect(lit.filter((body) => body.thermal !== undefined)).toHaveLength(1);
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    expect(bare.filter((body) => body.thermal !== undefined)).toEqual([]);
   });
 
   it("shade every disc uniform without class maps", () => {
