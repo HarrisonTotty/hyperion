@@ -1699,6 +1699,10 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
     its basis in its doc comment.
   - T28.c lands before T28.g's wiring. If it lands after, adding it to `active_events` moves
     summary output at a later train.
+  - **Done (lane `p06-events`, 2026-10-28; at version 23, no bump), with burst bins of 15 minutes
+    and N_GF = 67.29 from T21's census:** the record is under Risks ("Deviations in T28.c, as
+    built" and "Deferred findings (2026-10-13 rule) (P06.T28.c)"); the [S] figures were not read
+    at source (no literature host from the build machine), left to main.
 - **P06.T28.d FU Orionis outbursts.** Poisson bins (Δ = 500 years, look-back 1 bin): one per 5,000
   years while a protostar (age < 0.5 Myr), one per 112,000 years afterwards while the disc of T15.c
   lasts, the rate stepping smoothly over 0.05 Myr so the bound stays tight. Marks: luminosity factor
@@ -1742,8 +1746,8 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
 - **T28.a done (lane `14-p06-t28a-flares`, 2026-10-14; at version 22, no bump: new output on a
   new kind that moves nothing existing, as "Generator version" says of every task but T30.b and
   T19.e).** The record is under Risks ("Deviations in T28.a, as built" and "Deferred findings
-  (2026-10-13 rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above) and T28.e and
-  T28.f (2026-10-28, above), and T28.c and T28.g are open; T28.g composes
+  (2026-10-13 rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above) and T28.c, T28.e
+  and T28.f (2026-10-28, above), and T28.g is open; T28.g composes
   `Flare::luminosity_factor_at` into `summary_at`.
 
 ### Phase G: system assembly and galaxy integration
@@ -6048,3 +6052,155 @@ R06.
   - _Sources not read at source._ The profile's descriptions and the first pulses' growth were
     recalled on a machine with no literature access; a science check with network access should
     read them, set the six figures from them, and drop the "recalled" notes.
+- **Deviations in T28.c, as built (lane `p06-events`, 2026-10-28; at version 23, no bump: new
+  output on the registered tags 0x0103–0x0105 and a new golden, moving nothing existing).**
+  Magnetar episodes, short bursts and giant flares are `stellar::events::magnetar`, built to
+  decision-galaxy-25-train §5.1 (2026-10-27); nothing reads them yet (T28.g and P12.T5.e will).
+  `system.rs`, `remnant`, `events/` and the other kinds are unchanged.
+  - _API._ `MagnetarSeries::new(seed, body)` opens `star.ev.magnetar_episode`,
+    `star.ev.magnetar_burst` and `star.ev.magnetar_giant` together (`episodes`, `bursts`,
+    `giant_flares`), as T28.b's `GlitchCycle::of` opens its two, since the bursts are thinned by
+    the episodes and the three must not come from two universes. `MagnetarModel::of(&StarModel)`
+    is `None` unless the star leaves a neutron star by +H born above 4.4 × 10¹³ G, with `star`,
+    `neutron_star`, `birth`, `quiet_from`, `neutron_star_age_at` (`Years`), `pulsar_at`,
+    `is_magnetar_at`, `episode_rate_at`, `giant_flare_rate_at` and the listings `episodes_in`,
+    `episodes_active_at`, `episode`, `bursts_in`, `bursts_active_at`, `burst`, `giant_flares_in`,
+    `giant_flares_active_at` and `giant_flare` on `&MagnetarSeries`; free functions of the same
+    names build the model per call. `Episode` (`Copy`): `id`, `onset`, `end`, `expected_bursts`,
+    `e_folding_seconds`, `is_active_at`, `burst_rate_at`. `Burst` (`Copy`): `id`, `episode` (its
+    episode's ID), `onset`, `end`, `duration`, `energy_joules`, `mean_luminosity_watts`,
+    `is_active_at`. `GiantFlare` (`Copy`): `id`, `onset`, `end`, `energy_joules`,
+    `mean_luminosity_watts`, `is_active_at`. `field_e_folds_per_year(Gauss)`. Constants:
+    `EPISODE_BIN_SECONDS` (2,592,000), `EPISODE_LOOK_BACK_BINS` (4), `BURST_BIN_SECONDS` (900),
+    `BURST_LOOK_BACK_BINS` (1), `GIANT_FLARE_BIN_SECONDS` (31,557,600),
+    `GIANT_FLARE_LOOK_BACK_BINS` (1), `FIELD_DECAY_PRODUCT_GAUSS_YEARS` (10¹⁹, from T21's
+    `DECAY_TIME_AT_1E15_G`), `EPISODES_PER_E_FOLD`, `GALACTIC_GIANT_FLARES_PER_YEAR`,
+    `GIANT_FLARES_PER_E_FOLD`, `BURST_COUNT` and `BURST_E_FOLDING_DAYS` (`(lo, hi)` pairs),
+    `EPISODE_SPAN_E_FOLDINGS` (10), `MAX_EPISODE_SPAN` (100 days), `BURST_ENERGY_JOULES`,
+    `BURST_ENERGY_INDEX`, `BURST_DURATION_MEDIAN_SECONDS`, `BURST_DURATION_SIGMA_DEX`,
+    `BURST_DURATION_TRUNCATION`, `MAX_BURST_DURATION` (2 s), `GIANT_FLARE_ENERGY_JOULES`,
+    `GIANT_FLARE_ENERGY_INDEX` and `GIANT_FLARE_SPIKE` (0.2 s). Energies in J, the erg ranges in
+    the docs.
+  - _Who bursts._ A star whose neutron star is a magnetar at t (`PulsarState::is_magnetar`, T21.c);
+    none is one at birth, and once it stops it never is again (tested). Its rates read the neutron
+    star's age at t, `age_at(t)` less the death age, in `remnant_age_at`'s arithmetic. Listings are
+    cut to the birth less a day through the field's reaching 4.4 × 10¹³ G plus a day (the margin
+    covers the ages' rounding, which can leave the field a hair above the critical field at the
+    quiet instant); every bound is zero outside, so the cut drops nothing.
+  - _Bounds._ Episodes and giant flares: the rate at the bin's first instant after the birth,
+    padded by 2⁻⁴⁰ as T28.d pads its bound, zero for a bin that ends before the birth or starts with
+    the field at or below the critical field. Bursts: the sum over the episodes overlapping the bin
+    of each one's (N_b ÷ τ_b) e^(−Δt ÷ τ_b) at the bin's start or its onset, whichever is later,
+    the ruling's "N_b ÷ τ_b at the bin's start" read with the decay since the onset, padded the
+    same way.
+  - _Burst bins (deviation)._ 900 s, not the ruling's hour: at N_b ÷ τ_b up to 1,000 ÷ 0.3 days an
+    hour expects up to 138.9 bursts, above `PoissonBins::MAX_MEAN_PER_BIN` = 64, for 1.47% of
+    episodes; a quarter hour expects at most 34.7 from one episode. Two of the strongest episodes
+    starting within about τ_b of each other (each in about the top 0.07% of N_b ÷ τ_b, some 10⁻¹⁰
+    of episodes) still exceed 64, which a debug build asserts (tested on built episodes). The
+    look-back over episodes is the ruling's: onsets within 100 days of a bin (4 episode bins),
+    regenerated from their own series for each listing. `bursts_in` lists each run of bins that
+    the episodes' spans touch, with the slice of the onset-sorted episodes that can overlap it (an
+    episode that does not adds an exact zero to every bound, rate and pick), its bins clamped to
+    the 40-bit bin numbers as `PoissonBins::events_in` clamps them (±15.7 Myr at 900 s, tested at
+    the lower end).
+  - _N_GF (derived, as ruled)._ 67.29 giant flares per e-fold, from T21's census sample
+    (`magnetars_are_the_high_tail_of_the_birth_field`: 20,000 neutron stars of seed 11, 701
+    log-spaced edges to 10 Myr, two core collapses a century, 62% leaving a neutron star): 83.7
+    active magnetars and 6.539 × 10⁻⁴ e-folds a year in all, 0.044 ÷ 6.539 × 10⁻⁴ = 67.29,
+    re-derived by a unit test to 10⁻³. The ruling expected about 30 from 1.5 × 10⁻⁵ e-folds a year
+    per magnetar; the census's decay at 7.8 × 10⁻⁶ (a mean field near 7.8 × 10¹³ G), so a 10¹⁵ G
+    magnetar flares once in 149 years, not 330. Within the ruling's form; no new ruling.
+  - _Episodes._ Word 0 N_b and word 1 τ_b, log-uniform by one `uniform()` each. An episode lasts
+    10 τ_b, floored to the nanosecond, its bursts cut there (dropping e⁻¹⁰ of N_b), so "within 10
+    τ_b of its onset" holds by construction; at most 100 days, which four 30-day bins of look-back
+    cover. Recorded, not tested: R³B² ÷ (3 N_EP), 4 × 10⁴³ erg at 5 × 10¹⁴ G and R = 10 km (the
+    ruling's "roughly 10⁴⁴"), a radiative efficiency of 10⁻⁴–10⁻¹ against X-ray outbursts'
+    10⁴⁰–10⁴³ erg.
+  - _Bursts._ Word 0 the episode, picked in proportion to the episodes' rates at the onset
+    (`Mark::pick_weighted`), so `Burst::episode` needs no history and is the same however the
+    episodes reaching a bin are gathered; word 1 the energy, inverse transform of E^(−5/3) on
+    10³⁷–10⁴¹ erg; word 2 the duration, log-normal about 0.1 s with σ 0.3 dex truncated at ±4σ
+    (6.3 ms–1.585 s), as T28.b truncates its large glitches (the truncation ours).
+  - _Giant flares._ Word 0 the energy, E^(−1.7) on 10⁴⁴–10⁴⁷ erg. A flare's light is its initial
+    spike alone, 0.2 s (SGR 1806−20's about 0.2 s, Hurley et al. 2005, Nature 434, 1098; SGR
+    1900+14's under a second, Hurley et al. 1999, Nature 397, 41; recalled); the pulsating tail of
+    some 400 s is not modelled. Bursts and flares carry `mean_luminosity_watts`, energy over
+    duration, not a factor of the star's luminosity. Under E^(−1.7) 37.4% of flares exceed
+    4 × 10⁴⁴ erg, 0.0165 a year for the Galaxy, to set against Burns et al.'s (2021, ApJL 907, L28)
+    3.8 × 10⁵ Gpc⁻³ yr⁻¹.
+  - _Sources: the ruling's [S] figures were not read at source._ The pod reaches no literature
+    host, so the science check of the review worked from memory: every formula and derived figure
+    checked out (its own census of 2 × 10⁶ neutron stars gave N_GF = 66.1), the papers' journals
+    were added as it recalls them, and it flagged Coti Zelati et al.'s first year (2002 or 2003),
+    σ = 0.3 dex and ">400 bursts in a day" (it recalls van der Horst et al.'s 286 GBM bursts in
+    January 2009) as the least sure. Each constant's documentation says "not read at source in
+    this build". The ruling asks this read before commit; it is left to main (lean: a networked
+    science check before landing, moving any figure its source contradicts within the same form,
+    recorded).
+  - _Tests._ `cargo test -p hyperion-sim -- stellar::events::magnetar`: 15 tests and one ignored,
+    and the doctests on `MagnetarModel` and `bursts_in`: the scaling and the ruling's 0.2, 0.02,
+    0.0088 and 0.05 a year; N_GF re-derived; no model for a sub-critical neutron star, a living
+    star, a white dwarf, a black hole and a brown dwarf; rates zero off the magnetar and
+    non-increasing on it at 4,001 instants for three stars, and the bounds about the birth, the
+    onset, the quiet and the epoch; a sweep of the bounds over birth fields of 10^13.7–10^16 G ×
+    periods of 0.02–0.6 s × 163 instants log-spaced in the neutron star's age, and of the burst
+    bound at the marks' corners alone and in overlapping pairs; every burst inside its episode
+    and the burst bound over an episode's span (3,520 bursts against 3,432.5 expected over four
+    series of 20 years of a 10¹⁵ G magnetar, z = +1.49); K–S tests of N_b, τ_b, both energies and
+    the durations, and the ranges; regeneration by ID, foreign IDs rejected; partitions in any
+    order (bursts about a busy episode and where two episodes overlap, with a cut between their
+    onsets; episodes and flares over ±3,000 years and at the birth and the quiet ± 1 ns; the burst
+    bins' lower end) and on threads (compiled out on wasm32-wasip1); `active_at` against the
+    listings; the +900-year no-history test. The golden `stellar/magnetars` (596 lines, header 23):
+    three magnetars (10¹⁵ G at 0.2 s born 2,000 years before the epoch, 10^14.5 G at 0.3 s 10,000
+    years before, 10^15.2 G at 0.25 s 300 years after) on series of their own, each with its birth,
+    quiet, rates at five instants, the three kinds' bin bounds at the birth, its first episode and
+    the quiet, its episodes over 100 years, the bursts of its first episode's first two days and
+    its giant flares over 3,000 years; and the bursts where two episodes of the first star overlap,
+    word 0 choosing between them. The slow test
+    `the_mean_counts_over_10_000_magnetars_match_the_rate_integrals` (`#[ignore]`): 10⁴ series of
+    1,000 synthetic neutron stars rather than 10⁴ stars of T31's sampler, few of whose stars are
+    magnetars; each a 15 M☉ solar progenitor with log B₀ uniform on 13.7–15.4, P₀ of the birth law
+    and an age to 3 × 10⁵ years from a test-local LCG; episodes over five years, giant flares over
+    300 years and bursts over 30 days given the episodes listed: episodes 721 against 717.5
+    expected (Poisson interval 631–807 at α = 10⁻³), giant flares 1,415 against 1,442.4 (1,319–1,569)
+    and bursts 1,756 against 1,701.3 (1,567–1,839); 562 of the 1,000 are magnetars at the epoch.
+  - _Galaxy-wide._ `giant_flares_galaxy_wide_at_milky_way_values` in `stellar::testing::tests`
+    (`#[ignore]`): 4,000 primaries of bands D and E of each component with ages below 10⁸ years
+    (the rest asserted to weigh nothing there), each magnetar step of T21's sweep weighted by the
+    component's ages, times the rate: active magnetars 98.9 (T21's
+    window 20–300) and giant flares **0.0518** a year (0.02–0.09); nothing pinned. The five slow
+    tests of the lane took 174 s together under `slow-test` (pod, 4 vCPU), 136 s of it T28.f's.
+  - _Left to T28.g._ `StarEventKind::MagnetarBurst` and `MagnetarGiantFlare` (an episode is no
+    `StarEventKind`; plan 12's `TransientKind` has `MagnetarBurst` only), a rule for putting an
+    absolute burst or spike luminosity into `summary_at`, and building the model once per summary
+    (`MagnetarModel::of` reads `neutron_star()` and `death()` per free call).
+- **Deferred findings (2026-10-13 rule) (P06.T28.c).** Recorded and deferred: each leaves the
+  algorithm and every contract as they are. The leads are unread unless said.
+  - _The model's magnetars are weak, so its outbursts are few._ T21's active magnetars average
+    about 7.8 × 10¹³ G, where the catalogue's lie mostly at 10¹⁴–10¹⁵ G (the review recalls the
+    known magnetars' fields alone decaying at about 8.1 × 10⁻⁴ e-folds a year, more than the census's
+    whole Galaxy). The population gives 0.016 episodes per magnetar-year against the ruling's check
+    of 0.05, which the law meets star by star at 2.5 × 10¹⁴ G, and the Galaxy 1.31 episodes a year
+    against Coti Zelati et al.'s 23 in 2003–2016 from the known magnetars alone (1.6–1.8 a year).
+    Lean: revisit T21's field law, or set N_EP against the Galaxy's count as N_GF is set; either a
+    later task with a bump.
+  - _Giant flares are independent of episodes._ Observed ones came in active phases (lead:
+    Mereghetti et al. 2005 on SGR 1806−20 before 2004-12-27). Lean: thin them by the episodes'
+    rate, a later task with a bump.
+  - _No marks scale with the field._ N_b, τ_b and both energy laws are the same at every B, though
+    the rate's own argument has an outburst's energy scale with B².
+  - _Intermediate flares._ The two energy laws leave 10⁴¹–10⁴⁴ erg empty (SGR 1900+14's of
+    2001-04-18 is an intermediate flare); the ruling's scope.
+  - _Outbursts outside the predicate._ SGR 0418+5729's dipole is near 6 × 10¹² G (lead: Rea et al.
+    2010, Science 330, 944) and PSR J1846−0258's 2006 outburst came from a rotation-powered pulsar
+    (lead: Gavriil et al. 2008, Science 319, 1802); neither has an analogue here.
+  - _Magnetar glitches._ T28.b deferred them "for T28.c's active episodes or a later task" (lead:
+    Dib and Kaspi 2014); none is added, so they stay deferred.
+  - _The dipole energy's convention._ T21's L_B, −R³ B Ḃ ÷ 3, takes the external energy as
+    B²R³ ÷ 6; with the timing convention's equatorial field the review finds B_eq² R³ ÷ 3, a factor
+    of two that also reaches `is_magnetar` and so the census (marked provisional in T21).
+  - _For P06.T42.b._ Its fates move the neutron-star share past the limit; its train reruns
+    `giant_flares_galaxy_wide_at_milky_way_values` and re-derives N_GF (a bump) if the figure
+    leaves 0.02–0.09.

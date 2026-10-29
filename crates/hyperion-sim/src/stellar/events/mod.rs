@@ -13,6 +13,9 @@
 //!   monotone phase (P06.T28.b).
 //! - [`lbv`]: the giant eruptions of luminous blue variables, Poisson bins of 100 years
 //!   (P06.T28.e).
+//! - [`magnetar`]: the outburst episodes, short bursts and giant flares of magnetars, Poisson bins
+//!   of 30 days, 15 minutes and a year, their rates scaled by the field's fractional decay
+//!   (P06.T28.c).
 //! - [`thermal_pulse`]: the thermal pulses of stars on the thermally pulsing AGB, on a monotone
 //!   phase of their track's own pulse count (P06.T28.f).
 
@@ -20,4 +23,5 @@ pub mod flares;
 pub mod fu_orionis;
 pub mod glitches;
 pub mod lbv;
+pub mod magnetar;
 pub mod thermal_pulse;

@@ -1274,4 +1274,93 @@ mod tests {
         checks.within("giant eruptions in ±H", eruptions, (15.0, 60.0));
         checks.finish();
     }
+
+    /// The ages under which a star can be a magnetar: a field reaches the critical field
+    /// 10¹⁹ G yr ÷ 4.4 × 10¹³ G − τ, under 2.3 × 10⁵ years, after the birth, and the lightest
+    /// progenitor of a neutron star dies by about 50 Myr (P06.T28.c).
+    const MAGNETAR_YOUNG_YEARS: f64 = 1e8;
+
+    /// The Galaxy's giant flares a year at Milky Way values (P06.T28.c; decision-galaxy-25-train
+    /// §5.1): each component's system count × its band share × the band's mean, over 4,000
+    /// primaries a component in each of bands D and E (below solar metallicity a single star from
+    /// about 6.7 M☉ leaves a neutron star), of the weight under its ages of each step of the neutron star's age
+    /// at which it is a magnetar, times the giant-flare rate there, the steps 700 log-spaced edges
+    /// from a year to 10⁷ years (T21's census sweep), the rate over each step the exact e-folds of
+    /// its field over the step's length. The ruling's window is 0.02–0.09 a year; the active
+    /// magnetars, the same weights without the rate, are T21's 20–300.
+    #[test]
+    #[ignore = "slow: 4,000 primaries of bands D and E of each young component, each with its full track"]
+    fn giant_flares_galaxy_wide_at_milky_way_values() {
+        use crate::stellar::events::magnetar::{GIANT_FLARES_PER_E_FOLD, field_e_folds_per_year};
+        use crate::stellar::remnant::neutron_star::QUANTUM_CRITICAL_FIELD;
+        const N: u32 = 4_000;
+        let mut checks = Checks::default();
+        let galaxy = milky_way();
+        let edges: Vec<f64> = (0..=700)
+            .map(|i| math::exp10(f64::from(i) * 0.01))
+            .collect();
+        let (mut magnetars, mut flares, mut included) = (0.0, 0.0, 0);
+        for (i, component) in galaxy.fields().components().iter().enumerate() {
+            let ages = component.ages();
+            let population = component.population();
+            if ages.min().value() >= MAGNETAR_YOUNG_YEARS {
+                assert!(
+                    weight(ages, 0.0, MAGNETAR_YOUNG_YEARS) <= 0.0,
+                    "{population:?} component {i}"
+                );
+                continue;
+            }
+            included += 1;
+            for band in [MassBand::D, MassBand::E] {
+                let sampling = banded(&galaxy, i, band);
+                let t = tally(
+                    u64::from(N),
+                    |k| sample_inputs(&galaxy, &sampling, SEED, k),
+                    |inputs, t| {
+                        let track =
+                            Track::full(inputs.initial_mass, &inputs.composition, &inputs.draws);
+                        if track
+                            .remnant()
+                            .is_none_or(|r| r.kind() != RemnantKind::NeutronStar)
+                        {
+                            return;
+                        }
+                        let ns = NeutronStar::from_draws(&inputs.draws);
+                        if ns.birth_field() <= QUANTUM_CRITICAL_FIELD {
+                            return;
+                        }
+                        let death = track.lifetime().expect("a full track dies").value();
+                        for w in edges.windows(2) {
+                            let middle = (w[0] * w[1]).sqrt();
+                            if !ns.state_at(Years::new(middle)).is_magnetar() {
+                                continue;
+                            }
+                            let weight = weight(ages, death + w[0], death + w[1]);
+                            let field = |age: f64| ns.field_at(Years::new(age)).value();
+                            let e_folds_a_year =
+                                math::ln(field(w[0]) / field(w[1])) / (w[1] - w[0]);
+                            t.add("magnetars", weight);
+                            t.add(
+                                "giant flares a year",
+                                weight * GIANT_FLARES_PER_E_FOLD * e_folds_a_year,
+                            );
+                            debug_assert!(
+                                e_folds_a_year
+                                    <= field_e_folds_per_year(ns.field_at(Years::new(w[0])))
+                                        * (1.0 + 1e-9)
+                            );
+                        }
+                    },
+                );
+                let per_star =
+                    component.count() * galaxy.shares().share(band, population) / f64::from(N);
+                magnetars += t.get("magnetars") * per_star;
+                flares += t.get("giant flares a year") * per_star;
+            }
+        }
+        assert!(included > 0);
+        checks.within("active magnetars", magnetars, (20.0, 300.0));
+        checks.within("giant flares a year", flares, (0.02, 0.09));
+        checks.finish();
+    }
 }
