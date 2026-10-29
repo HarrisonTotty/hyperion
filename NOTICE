@@ -558,10 +558,12 @@ ruled 2026-10-09 and 2026-10-10).
   v'' = 8 left out and its intensities scaled by 2.05 to HITRAN2024's 7-0 band (G. Li, I. E. Gordon,
   L. S. Rothman, Y. Tan, S.-M. Hu, S. Kassi, A. Campargue and E. S. Medvedev, Astrophys. J. Suppl.
   Ser. 216 (2015) 15, DOI: 10.1088/0067-0049/216/1/15); SiOUVenIR's 28Si16O (S. N. Yurchenko et al.,
-  Mon. Not. R. Astron. Soc. 510 (2022) 903-919, DOI: 10.1093/mnras/stab3267); and AYT2's H2-32S, its
+  Mon. Not. R. Astron. Soc. 510 (2022) 903-919, DOI: 10.1093/mnras/stab3267); AYT2's H2-32S, its
   transitions of 13000-27000 cm-1 (A. A. A. Azzam, J. Tennyson, S. N. Yurchenko and O. V. Naumenko,
-  Mon. Not. R. Astron. Soc. 460 (2016) 4063-4074, DOI: 10.1093/mnras/stw1133). That adapted material
-  is offered under CC BY-SA 4.0 (its README.md beside it); the line lists' files are not committed.
+  Mon. Not. R. Astron. Soc. 460 (2016) 4063-4074, DOI: 10.1093/mnras/stw1133); and Harris's H12C14N
+  (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400-406; R. J. Barber et al., Mon. Not.
+  R. Astron. Soc. 437 (2014) 1828-1835). That adapted material is offered under CC BY-SA 4.0 (its
+  README.md beside it); the line lists' files are not committed.
 
 - Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,
   "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14

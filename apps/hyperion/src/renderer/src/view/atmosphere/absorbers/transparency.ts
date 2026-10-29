@@ -609,7 +609,6 @@ const PENDING: ReadonlyArray<PendingListing> = [
     task: "R08.T4.f",
     what: "hot CO2 above HITRAN's 500 K, to which R08.T4.d's table is held (ExoMol's UCL-4000 considered)",
   },
-  { key: "HCN", task: "R08.T4.f", what: "hot HCN (Harris)" },
   {
     key: "HCl",
     task: "R08.T4.f",

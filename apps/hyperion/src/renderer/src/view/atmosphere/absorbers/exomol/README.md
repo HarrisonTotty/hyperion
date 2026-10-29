@@ -48,6 +48,8 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   - `H2S`: AYT2's H₂³²S, its transitions of 13,000–27,000 cm⁻¹ (A. A. A. Azzam, J. Tennyson, S. N.
     Yurchenko and O. V. Naumenko, Mon. Not. R. Astron. Soc. 460 (2016) 4063, DOI
     10.1093/mnras/stw1133).
+  - `HCN`: Harris's H¹²C¹⁴N (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400; R. J.
+    Barber et al., Mon. Not. R. Astron. Soc. 437 (2014) 1828).
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which

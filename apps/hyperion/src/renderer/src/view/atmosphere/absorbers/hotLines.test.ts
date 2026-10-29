@@ -16,6 +16,7 @@ import {
   type ColumnAbsorberSpec,
 } from "../absorbers";
 import {
+  cellMeanSigma,
   cellSigmasAt,
   cellTransmittance,
   curveRowsPa,
@@ -31,7 +32,7 @@ import {
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./transparency";
 
 /** The species R08.T4.f draws from ExoMol's lists (decision-r08-t4ef-storage §5.4's order). */
-const DRAWN = ["FeH", "TiO", "H2S", "CO", "SiO", "N2"] as const;
+const DRAWN = ["FeH", "TiO", "H2S", "CO", "HCN", "SiO", "N2"] as const;
 
 /** A drawn species. */
 type Drawn = (typeof DRAWN)[number];
@@ -46,6 +47,7 @@ const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
   TiO: [1_000, 4_000],
   H2S: [296, 1_500],
   CO: [300, 4_000],
+  HCN: [300, 4_000],
   SiO: [1_000, 4_000],
   N2: [1_800, 4_000],
 };
@@ -60,13 +62,13 @@ const LADDER_FROM: Readonly<Partial<Record<string, number>>> = { H2S: 350 };
  * The drawn species whose tables are `estimated`: CO's, its intensities taking a stated scale;
  * HCN's, its hot bands incomplete in the range; N₂'s, its model carried past its fitted range.
  */
-const ESTIMATED: ReadonlyArray<Drawn> = ["CO", "N2"];
+const ESTIMATED: ReadonlyArray<Drawn> = ["CO", "HCN", "N2"];
 
 /**
  * The drawn species whose hot tables continue R08.T4.d's HITRAN2024 tables, handing over at their
  * first node, 300 K.
  */
-const HANDED_OVER: ReadonlyArray<Drawn> = ["CO"];
+const HANDED_OVER: ReadonlyArray<Drawn> = ["CO", "HCN"];
 
 /**
  * The species R08.T4.f leaves pending, each keeping its entry: VO and hot H₂O, whose lists (HyVO,
@@ -357,10 +359,14 @@ describe.each(DRAWN)("%s's curves", (key) => {
  * transmittance through the columns at which the temperate table's lies in [0.2, 0.8], the hot
  * table's against it, the largest difference over the cells, and how many cells and columns were
  * compared.
+ *
+ * @param peakShare - The cells compared: those whose temperate mean σ is at least this share of
+ *   the temperate table's largest (0, every shared cell).
  */
 function handOverDifference(
   species: Drawn,
   pressurePa: number,
+  peakShare: number,
 ): { readonly worst: number; readonly compared: number } {
   const atK = handOverK(tables, species);
   if (atK === undefined) {
@@ -374,9 +380,16 @@ function handOverDifference(
   const hot = kDistributionAt(hotTable(species), atK);
   const coldSigmas = cellSigmasAt(cold, pressurePa);
   const hotSigmas = cellSigmasAt(hot, pressurePa);
+  const means = cold.cells.map((cell, c) =>
+    cellMeanSigma(cell.weights, coldSigmas[c] ?? new Float64Array(0)),
+  );
+  const floorM2 = peakShare * Math.max(...means);
   let worst = 0;
   let compared = 0;
   for (const [c, cell] of cold.cells.entries()) {
+    if (!((means[c] ?? 0) >= floorM2)) {
+      continue;
+    }
     const h = hot.cells.findIndex((x) => x.cellNm === cell.cellNm);
     const hotCell = hot.cells[h];
     if (hotCell === undefined) {
@@ -416,12 +429,35 @@ describe.each(HANDED_OVER)("%s's hand-over from R08.T4.d's HITRAN2024 table", (k
 // over HITRAN's air widths, its lines saturated where the transmittance is 0.2–0.8 (CO's notes).
 describe("the hand-overs' agreement at 300 K (the recorded figures)", () => {
   it("holds CO's two tables within 0.03 of each other at 1 kPa", () => {
-    const { worst, compared } = handOverDifference("CO", 1e3);
+    const { worst, compared } = handOverDifference("CO", 1e3, 0);
     expect([worst < 0.03, compared > 0]).toEqual([true, true]);
   });
 
   it("holds CO's within 0.14 at 0.1 MPa", () => {
-    const { worst, compared } = handOverDifference("CO", 1e5);
+    const { worst, compared } = handOverDifference("CO", 1e5, 0);
     expect([worst < 0.14, compared > 0]).toEqual([true, true]);
+  });
+
+  // HCN's cells above a hundredth of its peak agree in mean to 0.3–0.5%, the hot table's narrower
+  // default widths transmitting more; its weaker cells, at the bands' edges, hold Harris's lines
+  // that HITRAN2024 lacks (HCN's notes).
+  it("holds HCN's two tables within 0.09 of each other at 1 kPa in its stronger cells", () => {
+    const { worst, compared } = handOverDifference("HCN", 1e3, 0.01);
+    expect([worst < 0.09, compared > 0]).toEqual([true, true]);
+  });
+
+  it("holds HCN's within 0.09 at 0.1 MPa in its stronger cells", () => {
+    const { worst, compared } = handOverDifference("HCN", 1e5, 0.01);
+    expect([worst < 0.09, compared > 0]).toEqual([true, true]);
+  });
+
+  it("holds HCN's within 0.48 at 1 kPa in every shared cell", () => {
+    const { worst, compared } = handOverDifference("HCN", 1e3, 0);
+    expect([worst < 0.48, compared > 0]).toEqual([true, true]);
+  });
+
+  it("holds HCN's within 0.77 at 0.1 MPa in every shared cell", () => {
+    const { worst, compared } = handOverDifference("HCN", 1e5, 0);
+    expect([worst < 0.77, compared > 0]).toEqual([true, true]);
   });
 });

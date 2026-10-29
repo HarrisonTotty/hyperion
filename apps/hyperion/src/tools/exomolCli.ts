@@ -1067,9 +1067,15 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
     what: "Hot HCN (Harris, R08.T4.f), from its hand-over.",
     notes:
       "Hands over from R08.T4.d's HITRAN2024 table at 300 K, its first node at or above HITRAN's " +
-      "296 K, where Harris's direct sums lie within 0.4% of that table's cell means in every one of " +
-      "its 84 cells (0.996 of them, summed): at and below 300 K the client reads R08.T4.d's table, " +
-      "above it this one (kDistribution.ts's tableAt). Above 4000 K, Harris's limit, the 4000 K node " +
+      "296 K. There Harris's cell means at 10 Pa are 1.003-1.005 times that table's in its 41 cells " +
+      "above a hundredth of its peak (HITRAN2024's sum over its 84 cells 0.996 of Harris's direct " +
+      "sums), while its 43 weaker cells, at the bands' edges, hold lines HITRAN2024 lacks, up to 3.4 " +
+      "times a cell's mean. Over the columns at which R08.T4.d's table transmits 0.2-0.8, a cell's " +
+      "transmittance steps by up to 0.09 in the stronger cells at 1 kPa and 0.1 MPa, the hot table " +
+      "transmitting more, as narrower lines would (Harris's default width, 0.084 cm-1 per bar with " +
+      "n = 0.5, its .def), and by up to 0.48 at 1 kPa and 0.77 at 0.1 MPa in the weaker cells " +
+      "(hotLines.test.ts). At and below 300 K the client reads R08.T4.d's table, above it this one " +
+      "(kDistribution.ts's tableAt). Above 4000 K, Harris's limit, the 4000 K node " +
       "is held, estimated. The table is estimated, as R08.T4.c judged Harris's values: the list " +
       "holds few hot bands in the range, so its hot values are lower limits. The list ends at " +
       "17585.79 cm-1 (568.6 nm), so its cells run 569-760 nm. " +
