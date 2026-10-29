@@ -374,7 +374,12 @@ index, and each query is given the body's detail seed, which the field does not 
   `selectionBound(bounds, level, rule)`. As built, R05's selection reads its bound from the body's
   level table (`PlanetGeometry.levels`, four values a level: bound, lowest and highest height,
   spacing; `planet.ts`'s `levelBoundM`), and `select.ts`'s `selectionErrorM` adds the chord
-  sagitta before `screenSpaceErrorPx`; so `selectionBound` fills that table's bound column.
+  sagitta before `screenSpaceErrorPx`; so `selectionBound` fills that table's bound column. _As
+  built by R10.T4.b (its record, "Provides' sketch, as built"): `LevelBounds` is
+  `{ table, sigmaM }`, held per body by the pool (`fieldBounds`), and
+  `selectionBound(hardM, sigmaM, rule)` takes one level's values, read a level at a time by
+  `planet.ts`' `selectionBoundM`; the table's bound column stays ε_n, which culling, the skirts and
+  the baked ranges' widening read, and only the selection error takes the rule._
 - `classMap.ts`: the per-body coarse class-weights map R07's disc samples.
 - `shaders/terrainLit.wgsl` (the file R07 names) with `terrainMaterial.ts`: palette and weights to
   `body_brdf`'s per-class law, the survey mask, skirts at the survey edge, and the hooks R11 fills:
@@ -530,7 +535,7 @@ targets at header 21 (below).
     `normals`, `vertexPath`, `cacheBytes`); high is τ 1, double normals, `BakedOffsets`,
     400,000,000 B; low is τ 2 at 720 px, mesh normals, `FaceDifferences`, 64 MiB.
   - `gpu/vertexEmulation.ts` (`faceDifferencePositionF32`, `faceDifferenceMorphF32`) forms the
-    vertices in `Math.fround`, for T15.
+    vertices in `Math.fround`, for T15.a.
 - **R07:** in `shaders/litBody.wgsl`,
   `struct LunarLambert { a: vec3f, l: f32, s: vec3f, table_row: u32 }` (`table_row`, not `template`, a
   WGSL reserved word: the row of `phase_factor_table` holding the law's f, R07.T4.c as built),
@@ -773,7 +778,7 @@ targets at header 21 (below).
    0.5 m spacing is L² ÷ 8R, about 5 nm at an Earth's radius, so interpolating in face coordinates
    or in space differs far below the 2 mm target. What this plan adds is goldens on generated
    worlds, the face-edge and corner cases on real fields, and the end-to-end agreement with the mesh
-   (T15). R09's Design note 18 also gives this plan the retirement of R05's provisional height
+   (T15.a). R09's Design note 18 also gives this plan the retirement of R05's provisional height
    function from the client path; the spike keeps it for its own reproducibility.
 5. **The stated bound is R09's hard bound; selection may take a statistical one** (researched
    2026-09-29). R09 provides `level_bound_m(header, level)`, a hard bound summed over the omitted
@@ -1085,7 +1090,9 @@ targets at header 21 (below).
     are from memory in the research and are checked against the sources in T9.a.
 12. **Unsurveyed ground is the reference surface, and its edge is marked.** A patch's vertices whose
     coarse cell is not surveyed (R09's margin cells are held but not surveyed) carry a survey mask
-    of zero, and the terrain shader discards fragments whose interpolated mask is below one half.
+    of zero, and the terrain shader discards fragments whose interpolated mask is below one half
+    (_as built by R10.T10.c, its record's lean for main's wording: fragments outside a surveyed
+    coarse cell, read from the survey mask at the cell's centre vertex_).
     Beneath them R07's `mesh`-regime body, the reference spheroid of its `BodyFigure`, is drawn with
     its own fragments discarded where the GPU's coverage mask says surveyed, so no terrain is
     claimed there and no reference surface shows through a surveyed valley. Terrain heights are
@@ -1116,7 +1123,11 @@ targets at header 21 (below).
     patches, 64 quads a side over a cell, since level 5's bound (17.1 km) exceeds the relief, so
     the roots are only its first draw. The 0.42 stop of F2 was taken with the switch at about 94.5°
     and 102° of phase; the committed check (`--handover`) at 90° measures the figures in
-    "Deviations in T10.g, as built"._ A body with no survey never hands over.
+    "Deviations in T10.g, as built"._ A body with no survey never hands over. _As built by
+    R10.T10.e (its record's leans, for main's wording): the relief subtends τ pixels at the body's
+    limb, the camera's distance to the limb, and the live view measures its pixel at the centre
+    pixel, 2 tan(fov ÷ 2) ÷ width (6.014 × 10⁻⁴ rad at 1080p across 60°, where 10 km hands over at
+    1.663 × 10⁷ m)._
 14. **The wireframe's contours are chosen as a scale is** (researched 2026-09-29). The wireframe
     draws its terrain once, depth only, at 4 px, and writes colour only where the interpolated
     height crosses a contour level. The interval is one deterministic rule of pose alone, so every
@@ -1235,7 +1246,9 @@ targets at header 21 (below).
     2,996 low lit (455 MiB) and 3,764 wireframe, the frustum term governing everywhere and the high
     setting's all-round set never resident (11% at most), so its rule is the frustum rule; the
     constants are held at 400,000,000 B, 64 MiB and 520 slots until R10.T4.b's statistical bound
-    and, for the low setting, the UHD 620 run._
+    and, for the low setting, the UHD 620 run._ _Since decision-r10-item30 the hard bound stays,
+    so the re-size waits on R09's lever (ii) alone, with the owner's UHD 620 runs for the low
+    setting and the wireframe (R10.T14.b's mark)._
 
 16. **The client fetches what the camera can resolve, and nothing more.** A body's field is wanted
     once it is the camera's local body or within the hand-over range of Design note 13 of any view's
@@ -1283,7 +1296,7 @@ keeps its number because the roadmap cites `R10.T13`. T14 (cache sizes) follows 
 closes. T16 (the live terrain path, new at the scoping of 2026-10-16, `decision-r10-live-path.md`)
 wires T7's store, T6.b's fields, T10.b's pass, T10.c's survey edge, T10.d's class map and T10.e's
 hand-over into `VIEW`; it follows T10.c–f and precedes T11 and T12, which are built on its session,
-and T14.b and T15, which measure on it. There is no interface-reconciliation task: this plan is
+and T14.b and T15.b, which measure on it. There is no interface-reconciliation task: this plan is
 re-validated against R05 and R09 as built when its turn comes.
 
 As re-validated at `c6d77cac` (Risks), with the critical path's order (R09's synthesis, then this
@@ -1325,6 +1338,12 @@ plan, then R09's server and coarse pass):
   before T1.c's client half; T15.a free
   (decision-r10-t15a-scope), and T15.b after the serve gate opens (decision-bump-plan-after-22
   §1.4).
+
+_As of RM5's close-out (2026-10-29): every task above has landed, each marked in its entry, but
+T15.b, after the serve gate (24), and T10.a's `sample_worlds()` case, which main holds until
+P14.T54.b lands. T4.a, T4.b, T4.c (the σ survey only where the rule reads it, added 2026-10-26)
+and the `sample_worlds()` cases of T1.b, T2, T3 and T5 landed from 2026-10-23 to 2026-10-26, and
+T6.a's quiet bench is T15.b's._
 
 Rust files are under `crates/hyperion-surface/src/` and client files under
 `apps/hyperion/src/renderer/src/view/terrain/` unless a path says otherwise. Every test in
@@ -1368,6 +1387,8 @@ that own them measure them.
   interpolates between its points and is `None` outside them. Acceptance:
   `cargo test -p hyperion-surface material`.
   Records: [10-terrain-on-generated-worlds/records/R10.T1.a.md](10-terrain-on-generated-worlds/records/R10.T1.a.md).
+  _Built 2026-10-13_ (`eef1fabb`; the limb follow-up `fe12a05e`; the slope follow-up `ddc5fa1f`
+  and `6c2fd60b`, 2026-10-14).
 - **R10.T1.b The classifier.** `material_at` with the decision order of Design note 1, over R09's
   `Synthesiser` and the finest level's gradient, projected into the tangent plane first (R09's
   "Deviations in T4, as built"), reading the cell's substance byte (`SynthesisCell::ice_entry`,
@@ -1378,10 +1399,11 @@ that own them measure them.
   `crates/hyperion-surface/tests/golden/material/` (a thousand points on each of
   `synthetic_worlds()`; corrected 2026-10-14; R09.T9's pattern), and
   `crates/hyperion-sim/tests/surface_material_worlds.rs`.
-  Tests: a `cliff_field` is `Bedrock` above 40° and not below; on `sample_worlds()`, a warm pole
-  has no ice cap and a locked world's ice lies where R09's field puts it (the brainstorm's two
-  examples under Materials); `Seabed` exactly below the water surface; an arid filled basin is
-  `Evaporite`; the Pluto-like and lava-world `FieldBuilder` worlds of decision-composition take
+  Tests: a `cliff_field` is `Bedrock` above 40° and not below; on `sample_worlds()`, no ice cap
+  the field does not place (main's rulings of 2026-10-23: no sample world has a warm pole, and
+  R09's `a_warm_pole_gets_no_cap` holds one on the field) and a locked world's ice lies where R09's
+  field puts it (the brainstorm's two examples under Materials); `Seabed` exactly below the water
+  surface; an arid filled basin is `Evaporite`; the Pluto-like and lava-world `FieldBuilder` worlds of decision-composition take
   their frost and `Melt`; the order of rules is total; the goldens match on native,
   `wasm32-wasip1` and `wasm32-unknown-unknown` through R04's checks. The `sample_worlds()` cases
   follow R09.T16 (the order of tasks). Bumps `GENERATOR_VERSION` (see Generator version).
@@ -1391,6 +1413,10 @@ that own them measure them.
   and `just test-wasm-fast` runs the goldens on both wasm targets (the orchestrator's `just ci`
   runs all three).
   Records: [10-terrain-on-generated-worlds/records/R10.T1.b.md](10-terrain-on-generated-worlds/records/R10.T1.b.md).
+  _Built 2026-10-13_ (`7e1537eb`; the `sample_worlds()` follow-up `51cd8f9b`, `19e44f30`,
+  2026-10-23). As built it bumped nothing of its own: R09's first bump rode P14.T48.e's 21 → 22 (the
+  record), and its `sample_worlds()` test is "no ice cap the field does not place" (the ruling of
+  2026-10-23, in the record).
 - **R10.T1.d The space-weathering law** (decision-p14-t51d-weathering §1, 2026-10-16; lane
   r10-weathering, after R09.T2.f; built early for P14.T54.b, as R09.T7.d was for P14.T51.f).
   Records: [10-terrain-on-generated-worlds/records/R10.T1.d.md](10-terrain-on-generated-worlds/records/R10.T1.d.md).
@@ -1432,6 +1458,7 @@ that own them measure them.
   - _Accept:_ `cargo test -p hyperion-surface material::weathering`;
     `cargo test -p hyperion-fit space_weathering`; `cargo run -p hyperion-fit -- check`;
     `just test-wasm-fast`.
+  - _Built 2026-10-20_ (`96965d76`, its doc links `a4f0c3b7`).
 - **R10.T1.c Maturity and cover.** New at the re-validation (decision-composition §1.8 and
   §7.5); ruled 2026-10-20 (decision-r10-t1c-maturity). Each material's `A_N` and colour come from
   R10.T1.d's law at the ground's maturity, blended with the organic cover, by one shared function
@@ -1505,6 +1532,10 @@ that own them measure them.
     native and both wasm targets. Accept: `cargo test -p hyperion-surface material::maturity`,
     `--lib material::albedo`, `--lib material::golden`, `--test panics maturity`;
     `cargo test -p hyperion-server albedo_scale`; `just test-wasm-fast`.
+  - _Built 2026-10-22_ (the Rust half `8f307d16` with its halo follow-up `8a7378d6`, 2026-10-20; the
+    client half `6b7de6fd`…`aa8e63e8`). Its follow-up after 24, the young craters' haloes in the
+    sim's area-mix p with a bump of its own, is recorded in galaxy plan 14's records, not here (the
+    RM5 close-out, 2026-10-29).
 
 ### R10.T2 Class weights for coarser levels
 
@@ -1530,6 +1561,9 @@ full belts put about a third of their area above 40° at 2 m and plain styles no
 "Deviations in T5's second follow-up"); the `sample_worlds()` binary follows R09.T16. Acceptance:
 `cargo test -p hyperion-surface material::weights`,
 and the slow case under `just test-slow -E 'binary(surface_weights_worlds)'`.
+
+_Built 2026-10-14_ (`e20efe8e`; the `sample_worlds()` follow-up, with T5's, in `df007c0d`,
+`c9be6e77` and `818e5136`, 2026-10-26).
 
 ### R10.T3 The authoritative ground on real terrain
 
@@ -1562,6 +1596,8 @@ header 21). Acceptance:
 module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as built"), and
 `cargo test -p hyperion-sim --features testing --test surface_ground_worlds`.
 
+_Built 2026-10-13_ (`741a39cb`, `627e9b35`; the `sample_worlds()` follow-up `9908a70e`, 2026-10-23).
+
 ### R10.T4 The level bound on generated worlds
 
 - **R10.T4.a The bound measured.** R09's `level_bound_m` on `sample_worlds()`, the real coarse
@@ -1579,6 +1615,8 @@ module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as buil
   from._ Acceptance: `just test-slow -E 'binary(level_bound_worlds)'` passes, and the
   figures are recorded.
   Records: [10-terrain-on-generated-worlds/records/R10.T4.a.md](10-terrain-on-generated-worlds/records/R10.T4.a.md).
+  _Built 2026-10-26_ (`3e9f0a54`). Its fixture is re-blessed by name at 24 (the slow test with
+  `HYPERION_BLESS=1`), and T15.b re-records its figures.
 - **R10.T4.b Selection by the real bound.** The worker answers `field_init` with the body's
   `LevelBounds` (hard and σ per level, σ R09's level-keyed `Synthesiser::omitted_rms`, added by
   R10.T5); `levelBounds.ts` holds them per body and `selectionBound` gives R05's
@@ -1608,6 +1646,8 @@ module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as buil
   Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the counts
   recorded.
   Records: [10-terrain-on-generated-worlds/records/R10.T4.b.md](10-terrain-on-generated-worlds/records/R10.T4.b.md).
+  _Built 2026-10-26_ (`eab5f788`). As built, `LevelBounds` is `{ table, sigmaM }` and selection
+  reads its own bound (the record; Provides' sketch above predates it).
 - **R10.T4.c The σ survey only where the rule reads it** (added 2026-10-26 by
   decision-r10-item30 §6; before RM5). The hard bound stays at RM5 (item 30 applied, no
   calibration factor), so nothing reads σ, which costs some 25 s of every worker's time for a whole
@@ -1632,6 +1672,7 @@ module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as buil
   does not move; no bump. Acceptance: `cargo test -p hyperion-surface --lib worker::` and
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` pass, with the worker's
   time per level-8 field recorded before and after.
+  - _Built 2026-10-26_ (`fdffa930`).
 
 ### R10.T5 Surveyed readings
 
@@ -1662,6 +1703,9 @@ gives `LineOfSight::NoGround` (as ruled, `decision-r10-t5-closed-forms.md`; the 
 level-keyed `omitted_rms`, the slope's v its `omitted_structure_function`). Acceptance: `cargo test -p hyperion-surface reading`, and the
 pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
 
+_Built 2026-10-13_ (`a7a70f06`, `1a56ee17`; the `sample_worlds()` follow-up with T2's,
+2026-10-26).
+
 ### R10.T6 The bake on real terrain
 
 - **R10.T6.a The Rust bake.** R05's `bake_patch`, pointed through T3's `HeightSource` implementation
@@ -1690,6 +1734,8 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   `cargo test -p hyperion-surface bake`, and the bench's figure in this task's entry
   (`just bench -- bake/patch`, on a quiet machine, under the heavy lock, or recorded provisional).
   Records: [10-terrain-on-generated-worlds/records/R10.T6.a.md](10-terrain-on-generated-worlds/records/R10.T6.a.md).
+  _Built 2026-10-14_ (`373a0158`). Its bench stays provisional; T15.b's `just bench -- bake/` takes
+  it quiet.
 - **R10.T6.b The worker binding.** The worker's entry points on R05's binding:
   `field_init(body, header)`, `field_chunk(body, block)` (one R09 payload block, Design note 16),
   `field_release(body)`, holding one `PartialField` per body; `bake`, taking R05's `BakeOptions`
@@ -1712,6 +1758,7 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   Acceptance: `just gen-surface`, then
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/workers`.
   Records: [10-terrain-on-generated-worlds/records/R10.T6.b.md](10-terrain-on-generated-worlds/records/R10.T6.b.md).
+  _Built 2026-10-14_ (`bfdcc837`).
 
 ### R10.T7 The client's coarse-field store
 
@@ -1751,6 +1798,8 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
 `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and
 `pnpm --filter @hyperion/protocol test`.
 
+_Built 2026-10-13_ (`9b3c55f4`).
+
 ### R10.T8 Horizon-map shadows
 
 - **R10.T8.a The bake.** `HorizonMap`, `far_field_point` and the bake of Design note 10 in
@@ -1773,6 +1822,7 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   `cargo test -p hyperion-surface bake::horizon` and the bench's figure recorded
   (`just bench -- bake/horizon`, in T6.a's `benches/bake.rs`).
   Records: [10-terrain-on-generated-worlds/records/R10.T8.a.md](10-terrain-on-generated-worlds/records/R10.T8.a.md).
+  _Built 2026-10-16_ (`256a234a`).
 - **R10.T8.b The shadow lookup.** `shadows/horizon.wgsl`: the sun's apparent direction from
   `body_fixed_at`, its elevation against the datum's normal ν and its grid azimuth in the patch's
   face's grid frame (`grid_azimuth`, T8.a; R08's lookups keep their azimuth from local north), the
@@ -1816,6 +1866,7 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   points") and a face edge near a cube corner (decision-r10-t8a §1). Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows` and the smoke run.
   Records: [10-terrain-on-generated-worlds/records/R10.T8.b.md](10-terrain-on-generated-worlds/records/R10.T8.b.md).
+  _Built 2026-10-16_ (`a934d1ec`).
 - **R10.T8.c The sunset's steps at patch edges** (new, decision-r10-t16-leans §9 and §16). The
   shading normal morphs with the height: blended to the parent's normals tile by k, as
   `terrainLit.wgsl` blends the horizon, so that a fine patch at k = 1 shades as its parent at a
@@ -1830,6 +1881,8 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   parent's along their edge; the invariant; `just test-render --part=6`. By hand, hidden on the RTX
   3080: the sunset at the same moments; then the owner's UHD 620 look.
   Records: [10-terrain-on-generated-worlds/records/R10.T8.c.md](10-terrain-on-generated-worlds/records/R10.T8.c.md).
+  _Built 2026-10-21_ (`689e581b`, `8ef421c4`, `b1398bb4`). Since R10.T9.b its smoke groups run in
+  `just test-render --part=7`, not part 6.
 
 ### R10.T9 Cascaded terrain shadows on the high setting
 
@@ -1855,6 +1908,7 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   the horizon map's. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows`.
   Records: [10-terrain-on-generated-worlds/records/R10.T9.a.md](10-terrain-on-generated-worlds/records/R10.T9.a.md).
+  _Built 2026-10-20_ (`bf642ecb`).
 - **R10.T9.b The high setting's shadow term** (after T9.a, T11, T12 and R10.T8.c; on the development
   machine). The `shadows` member of R01's `MemoryCategory` and the layers' creation: one set of four
   for the engine (64 MiB), drawn again for each photorealistic view that hands a body over on the
@@ -1876,6 +1930,9 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   `depth-clip-control` and so runs the pulled-back path. Acceptance: the smoke run passes and the
   figures are recorded.
   Records: [10-terrain-on-generated-worlds/records/R10.T9.b.md](10-terrain-on-generated-worlds/records/R10.T9.b.md).
+  _Built 2026-10-21_ (`c2508e2d`, `14094589`). As built, SwiftShader offers `depth-clip-control`,
+  and the smoke harness's `no-subgroups` variant withholds it to run the pulled-back path (the
+  record).
 
 ### R10.T10 The lit style on generated terrain
 
@@ -1915,6 +1972,8 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   `cargo test -p hyperion-sim --features testing --test surface_albedo_worlds` and
   `cargo test -p hyperion-server surface`.
   Records: [10-terrain-on-generated-worlds/records/R10.T10.a.md](10-terrain-on-generated-worlds/records/R10.T10.a.md).
+  _Built 2026-10-14_ (`87adcd38`). Left: its `sample_worlds()` case of `surface_albedo_worlds.rs`,
+  held by main until P14.T54.b lands (2026-10-23).
 - **R10.T10.b The terrain shader.** `terrainMaterial.ts` and `shaders/terrainLit.wgsl`: the palette
   and weights to one lunar-Lambert law per class (A_N × c, L(0), and f(α) and L(α) from the class's
   row) through `body_brdf`, summed by weight, the normals at the setting's resolution, the shadow
@@ -1985,6 +2044,7 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   and `shaders/`, which the view's `lighting`, `photoreal`, `post` and `scenes` tests also read) and
   `just test-render` (the WGSL).
   Records: [10-terrain-on-generated-worlds/records/R10.T10.b.md](10-terrain-on-generated-worlds/records/R10.T10.b.md).
+  _Built 2026-10-15_ (`ff02b7c0`).
 - **R10.T10.c The survey edge.** The survey mask's discard, the skirts at the survey edge, and the
   reference surface drawn beneath with the inverse mask from the GPU coverage mask (Design note 12),
   in `terrainLit.wgsl` and the `mesh`-regime body's material; the edge mark over the image from
@@ -2016,6 +2076,7 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   (the `view/engine/` files it changes) and the smoke run. _As built (Risks, "Deviations in T10.c,
   as built")._
   Records: [10-terrain-on-generated-worlds/records/R10.T10.c.md](10-terrain-on-generated-worlds/records/R10.T10.c.md).
+  _Built 2026-10-19_ (`8ced7879`, with T10.d–f).
 - **R10.T10.d The class map on the disc.**
   Records: [10-terrain-on-generated-worlds/records/R10.T10.d.md](10-terrain-on-generated-worlds/records/R10.T10.d.md).
   - **The map.** `classMap.ts` builds the per-body coarse class-weights map over surveyed cells
@@ -2072,6 +2133,7 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
 src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-render`.
   - _As built (Risks, "Deviations in T10.d, as built")._
+  - _Built 2026-10-19_ (`d24e03b2`, with T10.c, T10.e and T10.f).
 - **R10.T10.e The disc hands over.** R07's `disc` regime gives way to the quadtree at the range of
   Design note 13, per view and style. Tests: the handover range as a pure function (about
   1.8 × 10⁷ m for 10 km of relief at 1080p and 1 px, and 4.6 × 10⁶ m at the wireframe's 4 px), and a
@@ -2087,6 +2149,7 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   input is not built (asked of main), so the check by hand ran scripted on the Moon-like fixture
   and stays pending on screen._
   Records: [10-terrain-on-generated-worlds/records/R10.T10.e.md](10-terrain-on-generated-worlds/records/R10.T10.e.md).
+  _Built 2026-10-19_ (`376519ff`, with T10.c, T10.d and T10.f). Its check on a fully surveyed served world is R10.T15.b's.
 - **R10.T10.f The point under a class map.**
   Records: [10-terrain-on-generated-worlds/records/R10.T10.f.md](10-terrain-on-generated-worlds/records/R10.T10.f.md).
   - **What it does.** R07's point regime (`pointFlux` in `bodies/draw.ts`) integrates the body's
@@ -2113,6 +2176,9 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/bodies` and
     `just test-render`.
   - _As built (Risks, "Deviations in T10.f, as built")._
+  - _Built 2026-10-19_ (`b021342b`, begun 2026-10-16). As built, the point is
+    `view/bodies/classMapPoint.ts`'s, and its switch test rasterises the disc at 64 × 64
+    samples a pixel, not R07.T8.c's 8 × 8 (the record).
 - **R10.T10.g The hand-over's photometry** (new, decision-r10-t16-leans §1 and §13). The hand-over
   is measured at the presented width's centre pixel, as the field's want is, so that the resolution
   controller never moves it. The disc shades surveyed ground with the field's own normals: a
@@ -2122,7 +2188,7 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   the hysteresis band only if a texel still changes by more than 1/3 stop. The survey's +0.04 stop
   rise at the terrain's first draw at 90° traced (each pixel's law and shading normal, in a scratch
   build) and fixed if it is a law or albedo mismatch. T10.e's harness committed as a check-only
-  variant of the terrain run, for T15. Tests: the hand-over range independent of the frame's
+  variant of the terrain run, for T15.b. Tests: the hand-over range independent of the frame's
   internal scale; with the normal map the disc's I/F equals the terrain's at the same cell normal,
   per class, to 10⁻⁶; the point's flux at the 3 px switch within R07's 1% with the normals; the
   harness at 30°, 90° and a view near the terminator (incidence 75° or more), both settings, every
@@ -2136,6 +2202,7 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   cell is within 1/3 stop at 30° and 90° on both settings (worst 0.093 stop), and the terminator
   keeps 2 cells over on high, deferred; no cross-fade (ruled)._
   Records: [10-terrain-on-generated-worlds/records/R10.T10.g.md](10-terrain-on-generated-worlds/records/R10.T10.g.md).
+  _Built 2026-10-21_ (`09fabb72`).
 
 ### R10.T16 The live terrain path
 
@@ -2220,6 +2287,7 @@ version in force.
     - one pool a session, of Design note 11's count.
   - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
 src/renderer/src/displays/view src/renderer/src/lib/scene`.
+  - _Built 2026-10-20_ (`962594fe`).
 
 - **R10.T16.b A body's terrain pass, shared by the views.**
   Records: [10-terrain-on-generated-worlds/records/R10.T16.b.md](10-terrain-on-generated-worlds/records/R10.T16.b.md).
@@ -2338,6 +2406,7 @@ src/renderer/src/displays/view src/renderer/src/lib/scene`.
       again.
   - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
 src/renderer/src/view/spike` and `just test-render --part=6`.
+  - _Built 2026-10-20_ (`5b88006f`). Since R10.T9.b its smoke group runs in part 7.
 
 - **R10.T16.c Terrain in `VIEW`.**
   Records: [10-terrain-on-generated-worlds/records/R10.T16.c.md](10-terrain-on-generated-worlds/records/R10.T16.c.md).
@@ -2413,6 +2482,7 @@ src/renderer/src/view/spike` and `just test-render --part=6`.
       datum, and every texel finite.
   - **Acceptance.** `pnpm --filter hyperion test` (its files reach `displays/view`,
     `view/photoreal`, `view/bodies` and `view/wireframe`) and `just test-render`.
+  - _Built 2026-10-20_ (`ac92390c`). Since R10.T9.b its smoke group runs in part 7.
 
 - **R10.T16.d The terrain test scene and the hidden run.**
   Records: [10-terrain-on-generated-worlds/records/R10.T16.d.md](10-terrain-on-generated-worlds/records/R10.T16.d.md).
@@ -2482,7 +2552,7 @@ src/renderer/src/view/spike` and `just test-render --part=6`.
     - T10.c's edge;
     - T10.d's disc under a live survey;
     - T10.e's mean brightness across the hand-over at about 30° and 90° of phase, over the surveyed
-      texels; its fully surveyed world waits for a served one (T15).
+      texels; its fully surveyed world waits for a served one (T15.b).
 
     The owner's UHD 620 runs of the same stay his.
 
@@ -2504,6 +2574,7 @@ src/renderer/src/view/spike` and `just test-render --part=6`.
     `pnpm --filter hyperion exec vitest run src/renderer/src/view/scenes src/renderer/src/displays/view
 src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-ux checks; and the
     figures recorded.
+  - _Built 2026-10-20_ (`28e0d898`).
 
 - **R10.T16.e The live path's small fixes** (new, decision-r10-t16-leans §8 and §11). A guarded
   failure of the session's step or of a view's survey edges lasting `ANNUNCIATION_ONSET_MS` faults
@@ -2516,6 +2587,7 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
   single throw does not; a views-check launch's header reads `MEASUREMENT` on every display; a
   terrain fault fails the run's verdict; the console-ux checks.
   Records: [10-terrain-on-generated-worlds/records/R10.T16.e.md](10-terrain-on-generated-worlds/records/R10.T16.e.md).
+  _Built 2026-10-20_ (`d84d7483`).
 
 - **R10.T16.f The image's datum gives way over surveyed ground** (new, 2026-10-22, from main's
   graticule triage at `aa8e63e8`; a blocker, low in severity: a visibly wrong picture).
@@ -2580,6 +2652,7 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
     before and after captures, hidden and offscreen under `just _locked` and the GPU lock, of TEST
     MOON weathered at descent-100s, descent-150s and lowest-180s on high and low
     (`viewsCheck.sh --hidden --terrain --weathered`), the line gone over the surveyed plain.
+  - _Built 2026-10-22_ (`e1a44211`).
 
 - **R10.T16.g The datum's limb stroked inside the figure over the image** (new, 2026-10-27, from
   `decision-r08-approximate-plate.md`, item 2; a blocker, low in severity: a visibly wrong picture).
@@ -2678,6 +2751,8 @@ may take T16.d's `TERRAIN TEST`._
 
 _From R10.T16 (decision-r10-t16-review §2): wherever a wireframe view takes the survey mask, the
 same code-0 rule withholds it._
+
+_Built 2026-10-20_ (`0ff2a854`). Since R10.T9.b its smoke group runs in part 7.
 
 ### R10.T12 Coverage and terrain readouts on the view
 
@@ -2786,6 +2861,9 @@ the label block's lower plate, which R10.T12.b builds, as its groups with their 
 T12 lands after R10.T12.b; its by-hand look is that ruling's §12, in place of the 1280 × 720 look
 above.
 
+_Built 2026-10-20_ (`29c4bd23`, `730d731b`, `b9515f03`), the whole entry, its `SURVEY EDGE` notes by
+R10.T16.c.
+
 - **R10.T12.a The readout's `BASELINE` selector, its line where no line of sight forms, and its
   labels kept whole** (new; decision-r10-t12-leans §1, decision-r10-t12a-scope). Three of R10.T12's
   follow-ups, client-only:
@@ -2829,6 +2907,7 @@ modelled`, `NOT AVAILABLE: camera more than 6.68 AU from the body` (`MAX_SIGHT_M
   `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view
 src/renderer/src/view/terrain`, the console-ux checks, `just smart-ci origin/rendering-and-planets`.
   Priority: medium; after R10.T12, before T15.
+  - _Built 2026-10-21_ (`f53609b5`).
 
 - **R10.T12.b `VIEW`'s room** (new, decision-r10-view-block-room). The `PRIMARY` view's label block
   as two plates and the order in which its parts give way, the instrument slots held where the
@@ -2879,6 +2958,7 @@ src/renderer/src/view/terrain`, the console-ux checks, `just smart-ci origin/ren
   `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view` and
   `src/renderer/src/view/terrain`, the console-ux checks, `just ci`. Priority: high; r10-wireframe's
   next task after R10.T11; before R10.T12 lands, and so before T15.
+  - _Built 2026-10-20_ (`27f8af0b`).
 
 #### The drafts, for the owner
 
@@ -3745,6 +3825,9 @@ RESOLUTION       410 m
     0 error(s), 0 check(s) in 1 file(s) scanned. Heuristic: confirm each line against the guide.
     ```
 
+_Done 2026-10-13_ (`6c7ec2e0`): the drafts above were signed off under delegation (signoff-9) and
+are in the guide.
+
 ### R10.T14 Cache sizes
 
 - **R10.T14.a The count model and the slot layout.** `patchCountModel` as a pure function of camera,
@@ -3772,6 +3855,7 @@ RESOLUTION       410 m
   coarse patches below the horizon; R10.T14.e fixes it; the constants stay provisional and
   unchanged; every GPU item is T14.b's but the compile lever, T14.d's.
   Records: [10-terrain-on-generated-worlds/records/R10.T14.a.md](10-terrain-on-generated-worlds/records/R10.T14.a.md).
+  _Built 2026-10-20_ (`ae4bd052`).
 - **R10.T14.c The descent over a generated world** (new at the scoping of 2026-10-16,
   `decision-r10-live-path.md`; before T14.b). R05's descent spike flies a body source:
   `--world terrain-test` takes `TERRAIN TEST`'s fixture body and field through T16's session (its
@@ -3792,8 +3876,8 @@ RESOLUTION       410 m
   body's frame is judged against the body it nears, its velocity chained through the system frame by
   each body's velocity at the epoch it is drawn at, the ship's local body's present velocity and
   every other body's retarded one (decision-r10-t16-leans §13; decision-r10-ship-frame, finding 4).
-  T14.b measures on it, and T15's descent on a served world takes the same path once the serve gate
-  opens. Files: `view/spike/` (`spikeRun.ts`, `spikeScene.ts`, `descentProfile.ts`'s inputs,
+  T14.b measures on it, and T15.b's descent on a served world takes the same path once the serve
+  gate opens. Files: `view/spike/` (`spikeRun.ts`, `spikeScene.ts`, `descentProfile.ts`'s inputs,
   `DescentSpike.tsx`) and `scripts/descentSpike.sh`; `view/terrain/grounded.ts` and `session.ts`;
   R02's `view/scene/model.ts` and `fromServer.ts` for the local body's present velocity; the guide's
   `SITE ELEVATION`, `SPIKE LIT`, designation, `DESCENT SPIKE`, `TERRAIN NOT AVAILABLE`,
@@ -3805,6 +3889,7 @@ RESOLUTION       410 m
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/spike src/renderer/src/view/terrain src/renderer/src/view/scene`
   and the smoke. _Leans ruled: decision-r10-t14c-leans._
   Records: [10-terrain-on-generated-worlds/records/R10.T14.c.md](10-terrain-on-generated-worlds/records/R10.T14.c.md).
+  _Built 2026-10-20_ (`adf8848f`).
 - **R10.T14.b The measured sizes.** Measure the all-round and frustum peaks per view on R05's
   scripted descent over a generated world (T14.c's, through T16's session), on both settings and in
   both styles, with a second view
@@ -3857,6 +3942,10 @@ RESOLUTION       410 m
   the device's storage binding keeps its slot count on `face-differences`, clamped to the
   binding's ceiling._
   Records: [10-terrain-on-generated-worlds/records/R10.T14.b.md](10-terrain-on-generated-worlds/records/R10.T14.b.md).
+  _Built 2026-10-21_ (`f0cdbc61`, `dc220fdb`, `7aceef15`, `536530aa`). The constants are held by
+  ruling (decision-r10-t14b-constants): low's 64 MiB and the wireframe's 520 slots wait on the
+  owner's UHD 620 runs, and the re-size waits on R09's lever (ii) alone, since decision-r10-item30
+  keeps the hard bound and so its other trigger, T4.b's statistical bound, will not come.
 - **R10.T14.d The hand-over's compile stall** (new, decision-r10-t14a §1, from
   decision-r10-t16-leans §2; amended by decision-r10-t14d-stall, 2026-10-20). A hand-over stopped
   the page for 1,317 ms with no animation frame on low, a defect under the guide's Motion rule that
@@ -3896,6 +3985,7 @@ RESOLUTION       410 m
   and after a restore; the terrain run fails on a gap over the limit in its judged span.
   Acceptance: the lane's `just smart-ci`, `just test-render` and the two cold hidden terrain runs,
   with the gaps, the load and each cache's state recorded.
+  - _Built 2026-10-20_ (`e1da578e`).
 
 - **R10.T14.e The patch boxes' margin along the normal** (new, decision-r10-t14a's #56 follow-up).
   R05's `packPatchBounds` (`bounds.ts`) adds its margin, the largest chord between neighbouring
@@ -3916,6 +4006,7 @@ RESOLUTION       410 m
   `just test-render` at landing, since the smoke harness's terrain parts select through the boxes.
   After T14.a; before T14.b's measurements.
   Records: [10-terrain-on-generated-worlds/records/R10.T14.e.md](10-terrain-on-generated-worlds/records/R10.T14.e.md).
+  _Built 2026-10-20_ (`b0ae9223`).
 - **R10.T14.f The class-mapped point's first frame, off the render thread** (new,
   decision-next-lane-2026-10-21b §1–§2; a critical bug, from T10.f's deferred "A map's first point
   costs a frame" and T10.g's "The point's first frame at levels 7 and 8"). The first frame a body
@@ -3953,6 +4044,7 @@ RESOLUTION       410 m
   the stand-in's step at readiness recorded on T10.f's synthetic Iapetus and on a remade level-8
   map. No golden, and no generator or protocol version: client presentation only. After T10.g;
   before T1.c's client half, which adds a maturity to the same shares.
+  - _Built 2026-10-21_ (`b4c8c93e`).
 
 - **From R10.T16's rulings** (decision-r10-t16-leans §2, §13 and §16, 2026-10-20). T14 also takes
   (routed by decision-r10-t14a §1: the compile lever to T14.d, the rest to T14.b):
@@ -3993,6 +4085,7 @@ pass.
   paths within 3 mm, the half check passing, the frames' check passing, and the control failing as
   expected.
   Records: [10-terrain-on-generated-worlds/records/R10.T15.a.md](10-terrain-on-generated-worlds/records/R10.T15.a.md).
+  _Built 2026-10-21_ (`9203743e`).
 - **R10.T15.b The served-world pass** (after the serve gate opens, decision-bump-plan-after-22
   §1.4, and after T4.a). R05's descent run on a served generated world at both settings, through
   T14.c's body source, once the serve gate opens (decision-bump-plan-after-22 §1.4), with T10.e's
@@ -4014,10 +4107,42 @@ pass.
   Acceptance: the lane's `just smart-ci` and `just test-wasm-fast`, this plan's slow binaries by
   name (`just test-slow -E 'binary(…)'`) and `just bench -- bake/` complete, and the descent's
   figures are recorded; `just ci` and the slow pass are the orchestrator's.
+  - _From earlier tasks' records_ (gathered at RM5's close-out, 2026-10-29: item 30's step as
+    decision-r10-item30 §6 rules it, the rest the records' hand-offs, each source's text binding;
+    the gathering is a lean, main's to adopt):
+    - _Item 30 at 24._ It re-runs T4.b's count harness and R10.T4.c's drawn-error harness on the
+      re-blessed `level-bounds.json` and re-applies `signoff-12.md` item 30 and
+      decision-r10-item30 §5.4. Item 30 re-opens if min(ε, 4σ) passes its condition 2 on every
+      world, or the hard rule's drawn mean passes 1.5 times the perfect bound's
+      (decision-r10-item30 §6; the Ceres-like world's ratio is 1.33 at 23, R10.T4.c's record).
+    - _The figures at 24._ It re-records T4.a's figures and the pins of `surface_weights_worlds`
+      (T2) and `surface_reading_worlds` (T5; `STYLE_GAP_Z` 1.36 at 23), with R09.T6.f's dry
+      ground's variance of z at band levels 3 and 4, after R09's follow-up on the closed forms (the
+      neighbours' trunks) if it has landed (R09.T6.f's, R10.T2's and R10.T5's records). The bump's
+      bless re-runs those binaries by name first.
+    - _Its looks also take:_ the reference Mars, a world dry now, for its trunks' two straight
+      chords a cell (signoff-r09-t6c-brainstorm); T11's wireframe legibility on a small body;
+      T8.b's face edge near a cube corner at close range, and whether eight azimuths miss peaks;
+      T10.d's class map under a patterned survey; T16.f's night side in the photorealistic style
+      (a draped graticule is scoped only if surveyed ground is unreadable there); and T16.b's mask
+      at survey cell code 0 on a level-7 or level-8 field.
+    - _The crater gap._ It retires `CRATER_GAP` (the synthetic Ceres-like world at 1 km, var z held
+      in [0.85, 1.25]) by a check weighted by crater count, or a larger cratered sample, or records
+      why the gap stays (R09.T7.h's and R10.T5's records).
+    - _Its runs._ `place-ship` takes `--distance` until its default is fixed, and the run takes the
+      served-world look decision-r10-ship-frame §5 leaves to this pass (R10.T12's record).
+    - _The hand-over check also traces_ T10.g's untraced pair on the served world: `elsewhere`'s
+      Mercury template against the classes' Regolith row, and the 10.4% of the survey that is
+      reference surface at the roots' first draw (T10.g's record).
+    - _Its figures judge two sets of triggers:_ R09.T8.d's for its levers (b2) and (ii) (the
+      channel term's pass-through on served wet worlds; whether the flare-demand figures are
+      usable), and T14.b's eviction in place of rebakes, on a served world's revision rise
+      (R09.T8.d's and R10.T14.b's records).
 
 ## Verification
 
-- **Collision agrees with what is drawn:** the finest mesh and `ground_at` to 2 mm (T3, T15.a).
+- **Collision agrees with what is drawn:** the finest mesh and `ground_at` to 2 mm (T3), and to
+  3 mm with the vertex formation's stated error (T15.a).
 - **Level-of-detail consistency:** every coarser level inside R09's bound on generated worlds, both
   ratios recorded (T4.a); selection by that bound, history-independent (T4.b).
 - **The ground drawn and the ground quoted agree:** the largest weight is the authoritative class at
