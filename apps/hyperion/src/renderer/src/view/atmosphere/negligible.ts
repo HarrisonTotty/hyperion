@@ -72,6 +72,7 @@ import {
   type KDistributionTable,
   mixLimitColumnM2,
   type SpeciesKDistribution,
+  tableAt,
 } from "./absorbers/kDistribution";
 import {
   type AbsorberBound,
@@ -857,7 +858,7 @@ export function negligibleAbsorbers(
           if (lines === undefined) {
             continue;
           }
-          const table = kDistributions.find((t) => t.species === s.species);
+          const table = tableAt(kDistributions, s.species, temperatureK);
           const largestBroadeningPa = spec.basePa * lines.broadeningFactor;
           const cellMeans = lineCellMeans(lines.kDistribution, largestBroadeningPa);
           const rule = linesRule(lines, table);
@@ -1131,7 +1132,7 @@ function pendingEntry(
       if (isTransparent(listing.key, temperatureK)) {
         return undefined;
       }
-      const lineTable = context.kDistributions.find((t) => t.species === listing.key);
+      const lineTable = tableAt(context.kDistributions, listing.key, temperatureK);
       const crossTable = context.crossSections.find((t) => t.species === listing.key);
       const drawnTopK = (lineTable ?? crossTable)?.measuredRangeK[1];
       if (listing.part === undefined && drawnTopK !== undefined && !(temperatureK > drawnTopK)) {

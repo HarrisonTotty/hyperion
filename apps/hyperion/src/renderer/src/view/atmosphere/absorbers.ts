@@ -55,6 +55,7 @@ import {
   type KDistributionTable,
   kDistributionAt,
   type SpeciesKDistribution,
+  tableAt,
 } from "./absorbers/kDistribution";
 import { ABSORBER_K_DISTRIBUTIONS } from "./absorbers/lineAbsorbers";
 import { isTransparent } from "./absorbers/transparency";
@@ -1727,7 +1728,9 @@ function columnProfile(
     column.surfaceNumberDensityPerM3 *
     layerIntegralM(layerOnColumn(column, profile.basePa, profile.topPa), 1);
   const species = profile.layers.map((layer): AbsorberSpecies => {
-    const table = kTables.find((t) => t.species === layer.species);
+    // The table at the profile's temperature: where a hot table continues a temperate one, the
+    // temperate one to their hand-over (R08.T4.f).
+    const table = tableAt(kTables, layer.species, temperatureK);
     const base = {
       species: layer.species,
       columnPerM2: layer.columnPerM2,

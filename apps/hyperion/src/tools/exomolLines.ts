@@ -1,6 +1,6 @@
 /**
- * ExoMol's line lists for R08.T4.g (plan R08, R08.T4.g; `decision-r08-t4d-kdist-chain.md` §§9–11):
- * the states and transition files of ExoMol's C2018 (¹⁴NH₃) and TYM (¹⁴N₂¹⁶O) lists, read by
+ * ExoMol's line lists for R08.T4.g and R08.T4.f (plan R08; `decision-r08-t4d-kdist-chain.md`
+ * §§9–11; decision-r08-t4ef-storage): the states and transition files of ExoMol's lists, read by
  * streaming each `.bz2` file through the system's `bzip2 -dc` (which must be on the PATH: Linux and
  * macOS ship it; on Windows, Git for Windows or MSYS2 provides it), each line's intensity at every
  * temperature asked for binned into super-lines (`superLines.ts`), and the bins cached outside the
@@ -12,17 +12,25 @@
  *   (2016) 73, the ExoMol format paper): a transition from
  *   lower state l to upper state u of wavenumber ν = E_u − E_l has
  *   S(T) = g_u A_ul ÷ (8π c ν²) × e^(−c₂E_l ÷ T) (1 − e^(−c₂ν ÷ T)) ÷ Q(T), cm a molecule, c in
- *   cm s⁻¹, per molecule of the isotopologue. Each is multiplied by HITRAN's natural abundance of
- *   the isotopologue, so that, as T4.d's HITRAN lines are, it is per molecule of the species; the
- *   minor isotopologues, which neither list holds, are not drawn.
- * - **Q(T)** is summed from the states file, Σ g e^(−c₂E ÷ T): ExoMol serves no `.pf` for C2018,
- *   and TYM's `.pf` is read only as a check of the sum.
- * - **Widths.** Neither list gives air widths. Every line takes the list's default from its
- *   `def.json` (cm⁻¹ bar⁻¹ at 296 K, ExoMol's unit), converted to atm, with its exponent: C2018's
+ *   cm s⁻¹, per molecule of the isotopologue. Each is multiplied by the isotopologue's natural
+ *   abundance, so that, as T4.d's HITRAN lines are, it is per molecule of the species. R08.T4.g's
+ *   lists hold one isotopologue each, the minor ones not drawn; R08.T4.f's TiO takes Toto's five
+ *   Ti isotopologues into one set of bins, each at its own Q and abundance.
+ * - **Q(T)** is summed from the states file, Σ g e^(−c₂E ÷ T), where the source says so: ExoMol
+ *   serves no `.pf` for C2018, and TYM's `.pf` is read only as a check of the sum. R08.T4.f's lists
+ *   take the list's own `.pf` ({@link partitionSumFromPf}), since a states file may hold only the
+ *   states its transitions reach (MoLLIST's FeH: its sum falls 3.1 times under the `.pf` at
+ *   3,000 K).
+ * - **Widths.** No list gives air widths. Every line takes the list's default from its `def.json`
+ *   or `.def` (cm⁻¹ bar⁻¹ at 296 K, ExoMol's unit), converted to atm, with its exponent: C2018's
  *   0.053 cm⁻¹ bar⁻¹ (0.0537 cm⁻¹ atm⁻¹) and TYM's 0.07 (0.0709), both with n = 0.5, `estimated`.
  *   C2018's H₂ and He `.broad` files give each line's width in those gases by its quantum numbers
  *   ({@link broadWidth}), from which their ratios to the default air width and their exponents are
  *   taken as T4.d takes HITRAN's.
+ * - **The archive's files.** ExoMol's own site was not reachable for R08.T4.f; its lists were
+ *   fetched from the database's archive of each dataset on Zenodo (each record's DOI in its source),
+ *   whose definitions are the `.def` text files ({@link parseDefinitionText}). Where a file's
+ *   SHA-256 was recorded at an earlier fetch from ExoMol's site, the two are compared.
  */
 
 import { spawn } from "node:child_process";
@@ -56,6 +64,14 @@ export interface TransitionFile extends ExoMolFile {
   readonly toPerCm: number;
 }
 
+/**
+ * A list's definition file: ExoMol's `def.json` ({@link parseDefinition}), or the `.def` text the
+ * database's archive holds ({@link parseDefinitionText}).
+ */
+export interface DefinitionFile extends ExoMolFile {
+  readonly format: "json" | "text";
+}
+
 /** Where a states file keeps the fields read here, 1-based whitespace-separated field numbers. */
 export interface StatesLayout {
   readonly energy: number;
@@ -65,6 +81,16 @@ export interface StatesLayout {
   readonly k?: number;
   /** N₂O's Herzberg v₁ v₂ l₂ v₃, for matching HITRAN's bands. */
   readonly vibration?: readonly [number, number, number, number];
+  /** A diatomic's vibrational quantum number v, for its source's cut on Δv (CO's, R08.T4.f). */
+  readonly v?: number;
+}
+
+/** A width every line of a list takes where its definition gives none, with why it was taken. */
+export interface AssumedWidth {
+  /** cm⁻¹ bar⁻¹ at 296 K, ExoMol's unit. */
+  readonly halfWidthPerCmBar: number;
+  readonly exponent: number;
+  readonly why: string;
 }
 
 /**
@@ -77,7 +103,10 @@ export interface BroadeningFile extends ExoMolFile {
   readonly url: string;
 }
 
-/** An ExoMol line list's source record, as R08.T4.g reads it: its files, layout and abundance. */
+/**
+ * An ExoMol line list's source record, as R08.T4.g and R08.T4.f read it: one isotopologue's files,
+ * layout and abundance.
+ */
 export interface ExoMolSource {
   /** The registry key. */
   readonly species: string;
@@ -87,16 +116,39 @@ export interface ExoMolSource {
   readonly url: string;
   readonly fetched: string;
   readonly terms: string;
-  readonly def: ExoMolFile;
+  readonly def: DefinitionFile;
   readonly states: ExoMolFile & { readonly layout: StatesLayout };
   readonly transitions: ReadonlyArray<TransitionFile>;
-  /** ExoMol's own partition function, where it serves one, read as a check of the states' sum. */
+  /**
+   * ExoMol's own partition function, where it serves one: Q(T) where {@link partitionFrom} is
+   * `pf`, and a check of the states' sum otherwise.
+   */
   readonly partitionFunction?: ExoMolFile;
+  /**
+   * Where Q(T) comes from: the states file's sum (R08.T4.g's C2018 and TYM), or the list's `.pf`
+   * (R08.T4.f's lists), which then must be given.
+   */
+  readonly partitionFrom: "states" | "pf";
   readonly broadeners: ReadonlyArray<BroadeningFile>;
-  /** HITRAN's natural abundance of the isotopologue (hitran.org/docs/iso-meta/). */
+  /**
+   * The isotopologue's natural abundance: HITRAN's (hitran.org/docs/iso-meta/) for a species HITRAN
+   * holds, and otherwise the product of its atoms' (each source names its own).
+   */
   readonly abundance: number;
-  /** The wavenumbers binned, cm⁻¹: every line whose wing reaches 380–760 nm. */
+  /** The wavenumbers binned, cm⁻¹: every line whose wing reaches the cells reduced. */
   readonly binRangePerCm: readonly [number, number];
+  /** The width every line takes where the definition gives none, a stated estimate. */
+  readonly assumedWidth?: AssumedWidth;
+  /**
+   * The largest v′ − v″ a transition keeps, by the states' `v` ({@link StatesLayout.v}), or none:
+   * Li2015's CO bands from Δv = 8 are dropped (decision-r08-t4b-t12c.md follow-up 3).
+   */
+  readonly maxDeltaV?: number;
+  /**
+   * A factor every binned line's intensity takes, with why, a stated estimate (Li2015's Δv = 7
+   * bands scaled to HITRAN2024's measurement-anchored 7–0, as R08.T4.c's bound is), or none.
+   */
+  readonly intensityScale?: { readonly factor: number; readonly why: string };
 }
 
 /**
@@ -163,6 +215,77 @@ export function parseDefinition(
   };
 }
 
+/**
+ * A `.def` text file's mass and default width ({@link ExoMolDefinition}), the ExoMol format's
+ * definition file (J. Tennyson et al., J. Mol. Spectrosc. 327 (2016) 73), each value at the start
+ * of its line and its label after `#`: `Isotopologue mass (Da) and (kg)`, `Default value of
+ * Lorentzian half-width for all lines (in cm-1/bar)` and `Default value of temperature exponent for
+ * all lines`. A file that gives no default width takes `assumed` where given. It names no `.broad`
+ * gas's default, so its definition lists none.
+ *
+ * @throws Error for a value missing (the width's without `assumed`), or not a finite number above 0
+ *   (an exponent may be 0).
+ */
+export function parseDefinitionText(
+  text: string,
+  name: string,
+  assumed?: AssumedWidth,
+): ExoMolDefinition {
+  const labelled = (label: string): number | undefined => {
+    for (const line of text.split(/\r?\n/u)) {
+      const hash = line.indexOf("#");
+      if (
+        hash >= 0 &&
+        line
+          .slice(hash + 1)
+          .trim()
+          .startsWith(label)
+      ) {
+        return Number(line.slice(0, hash).trim().split(/\s+/u)[0]);
+      }
+    }
+    return undefined;
+  };
+  const number = (label: string, positive: boolean, fallback: number | undefined): number => {
+    const v = labelled(label) ?? fallback;
+    if (v === undefined || !Number.isFinite(v) || (positive ? v <= 0 : v < 0)) {
+      throw new Error(
+        `${name}'s "${label}" is not given as a finite number${positive ? " above 0" : ""}`,
+      );
+    }
+    return v;
+  };
+  return {
+    molecularMassDa: number("Isotopologue mass (Da)", true, undefined),
+    airHalfWidthPerCmBar: number(
+      "Default value of Lorentzian half-width",
+      true,
+      assumed?.halfWidthPerCmBar,
+    ),
+    airExponent: number("Default value of temperature exponent", false, assumed?.exponent),
+    broadeners: {},
+  };
+}
+
+/**
+ * A source's definition from its checked file ({@link parseDefinition} or
+ * {@link parseDefinitionText}, by its format), with the `.broad` gases' defaults where it is a
+ * `def.json`.
+ *
+ * @throws Error for a file whose size or SHA-256 is not the record's, or a definition the parser
+ *   refuses.
+ */
+export function readDefinition(dataDir: string, source: ExoMolSource): ExoMolDefinition {
+  const text = readCheckedSmall(join(dataDir, source.def.name), source.def);
+  return source.def.format === "json"
+    ? parseDefinition(
+        text,
+        source.broadeners.map((file) => file.gas),
+        source.def.name,
+      )
+    : parseDefinitionText(text, source.def.name, source.assumedWidth);
+}
+
 /** A states file's fields, by state ID (index 0 unused). */
 export interface ExoMolStates {
   readonly energiesPerCm: Float64Array;
@@ -171,6 +294,8 @@ export interface ExoMolStates {
   readonly k: Int32Array | undefined;
   /** v₁, v₂, l₂ and v₃ packed into one integer a state ({@link packVibration}), or none. */
   readonly vibration: Int32Array | undefined;
+  /** A diatomic's v by state, where the layout reads it, or none. */
+  readonly v: Int32Array | undefined;
 }
 
 /** v₁ v₂ l₂ v₃ as one integer, each quantum under 64. */
@@ -505,12 +630,14 @@ export async function readStates(
   let j = ints(1 << 20);
   let k = layout.k === undefined ? undefined : ints(1 << 20);
   let vibration = layout.vibration === undefined ? undefined : ints(1 << 20);
+  let v = layout.v === undefined ? undefined : ints(1 << 20);
   const fields = new Int32Array(64);
   const need = Math.max(
     layout.energy,
     layout.degeneracy,
     layout.j,
     layout.k ?? 0,
+    layout.v ?? 0,
     ...(layout.vibration ?? []),
   );
   const at = (n: number, bytes: Uint8Array): number =>
@@ -533,6 +660,7 @@ export async function readStates(
         j = grown(j, id + 1, ints);
         k = k === undefined ? undefined : grown(k, id + 1, ints);
         vibration = vibration === undefined ? undefined : grown(vibration, id + 1, ints);
+        v = v === undefined ? undefined : grown(v, id + 1, ints);
       }
       energiesPerCm[id] = at(layout.energy, bytes);
       degeneracies[id] = at(layout.degeneracy, bytes);
@@ -540,14 +668,17 @@ export async function readStates(
       if (k !== undefined && layout.k !== undefined) {
         k[id] = at(layout.k, bytes);
       }
-      const v = layout.vibration;
-      if (vibration !== undefined && v !== undefined) {
+      const quanta = layout.vibration;
+      if (vibration !== undefined && quanta !== undefined) {
         vibration[id] = packVibration(
-          at(v[0], bytes),
-          at(v[1], bytes),
-          at(v[2], bytes),
-          at(v[3], bytes),
+          at(quanta[0], bytes),
+          at(quanta[1], bytes),
+          at(quanta[2], bytes),
+          at(quanta[3], bytes),
         );
+      }
+      if (v !== undefined && layout.v !== undefined) {
+        v[id] = at(layout.v, bytes);
       }
       expected += 1;
     },
@@ -560,6 +691,7 @@ export async function readStates(
     j: j.slice(0, end),
     k: k?.slice(0, end),
     vibration: vibration?.slice(0, end),
+    v: v?.slice(0, end),
   };
 }
 
@@ -586,6 +718,32 @@ export function parsePartitionFunction(text: string): ReadonlyMap<number, number
     }
   }
   return out;
+}
+
+/**
+ * Q(T) from a `.pf` table: at a tabulated temperature its value, and between two, linear in T
+ * (ExoMol tabulates Q every 1 K, over which ln Q moves by under 10⁻³ above 100 K).
+ *
+ * @throws RangeError for a temperature outside the table.
+ */
+export function partitionSumFromPf(pf: ReadonlyMap<number, number>, temperatureK: number): number {
+  const exact = pf.get(temperatureK);
+  if (exact !== undefined) {
+    return exact;
+  }
+  let below: readonly [number, number] | undefined;
+  let above: readonly [number, number] | undefined;
+  for (const [t, q] of pf) {
+    if (t < temperatureK && (below === undefined || t > below[0])) {
+      below = [t, q];
+    } else if (t > temperatureK && (above === undefined || t < above[0])) {
+      above = [t, q];
+    }
+  }
+  if (below === undefined || above === undefined) {
+    throw new RangeError(`${temperatureK} K lies outside the partition function's table`);
+  }
+  return below[1] + ((above[1] - below[1]) * (temperatureK - below[0])) / (above[0] - below[0]);
 }
 
 /** One `.broad` code's widths by its quanta, cm⁻¹ bar⁻¹ at 296 K, with their n. */
@@ -753,6 +911,18 @@ export interface PassOptions {
   }>;
   /** Only the transition files overlapping these wavenumbers are read, where given (a survey's). */
   readonly filesPerCm?: readonly [number, number];
+  /**
+   * Q(T) at a temperature from the list's `.pf` ({@link partitionSumFromPf}), where its source takes
+   * Q so; the states' sum ({@link partitionSum}) otherwise.
+   */
+  readonly partitionSumAt?: (temperatureK: number) => number;
+  /**
+   * The main bins to add this pass's lines to, one a temperature in `temperaturesK`'s order, where
+   * several isotopologues share them (R08.T4.f's TiO): the pass then neither makes its own nor
+   * applies stimulated emission to them, which its caller does once every list is binned
+   * ({@link applyStimulatedEmission}). No set apart is taken with them.
+   */
+  readonly into?: ReadonlyArray<SuperLineBins>;
 }
 
 /** A band's lines in a surveyed window: Σ S(296), Σ S(296) ν and the count. */
@@ -773,10 +943,12 @@ export interface PassBins {
 /**
  * One streaming pass over a list's transition files: each line within the binned range binned at
  * every temperature asked for (`superLines.ts`), its band's lines binned apart where asked, and the
- * pass's records ({@link PassRecord}); `jobs` files decompressed at once.
+ * pass's records ({@link PassRecord}); `jobs` files decompressed at once. A transition past its
+ * source's cut on v′ − v″ ({@link ExoMolSource.maxDeltaV}) is read and not binned.
  *
  * @param dataDir - The directory holding the source's fetched files, each checked by the caller.
  * @throws Error for a transition whose state is unknown or has no energy.
+ * @throws RangeError for shared bins not one a temperature, or given with a set apart.
  */
 export async function streamPass(
   source: ExoMolSource,
@@ -792,7 +964,11 @@ export async function streamPass(
   const [low, high] = source.binRangePerCm;
   const temps = options.temperaturesK;
   const mass = definition.molecularMassDa;
-  const main = temps.map((t) => emptyBins(t, low, high, binStepPerCm(t, low, mass)));
+  const shared = options.into;
+  if (shared !== undefined && (shared.length !== temps.length || options.apart !== undefined)) {
+    throw new RangeError("shared bins take one set a temperature, and no set apart");
+  }
+  const main = shared ?? temps.map((t) => emptyBins(t, low, high, binStepPerCm(t, low, mass)));
   const apartRange = options.apart?.rangePerCm;
   // The set apart on the main set's grid, from its origin to the top of its own range, so that
   // their nodes coincide.
@@ -800,8 +976,9 @@ export async function streamPass(
     apartRange === undefined
       ? undefined
       : temps.map((t) => emptyBins(t, low, apartRange[1], binStepPerCm(t, low, mass)));
-  const partitionSums = temps.map((t) => [t, partitionSum(states, t)] as const);
-  const q296 = partitionSum(states, 296);
+  const qOf = options.partitionSumAt ?? ((t: number): number => partitionSum(states, t));
+  const partitionSums = temps.map((t) => [t, qOf(t)] as const);
+  const q296 = qOf(296);
   const factors = Float64Array.from(partitionSums, ([, q]) => source.abundance / q);
   const inverseT = Float64Array.from(temps, (t) => -c2 / t);
   const factor296 = source.abundance / q296;
@@ -829,6 +1006,12 @@ export async function streamPass(
   let linesRead = 0;
   let linesBinned = 0;
   const { energiesPerCm, degeneracies } = states;
+  const scale = source.intensityScale?.factor ?? 1;
+  const vOf = source.maxDeltaV === undefined ? undefined : states.v;
+  const maxDeltaV = source.maxDeltaV ?? Infinity;
+  if (source.maxDeltaV !== undefined && vOf === undefined) {
+    throw new Error(`${source.species}'s cut on v' - v'' needs its states' v`);
+  }
   // The hot loop's arrays: each set's values, and each temperature's reciprocal step (both sets
   // share their grid's origin and step).
   const nT = temps.length;
@@ -851,8 +1034,11 @@ export async function streamPass(
     if (!Number.isFinite(eUpper) || !Number.isFinite(eLower)) {
       throw new Error(`a transition ${upper} - ${lower} names a state the states file lacks`);
     }
+    if (vOf !== undefined && (vOf[upper] ?? 0) - (vOf[lower] ?? 0) > maxDeltaV) {
+      return;
+    }
     const a = parseNumber(bytes, fields[4] ?? 0, fields[5] ?? 0);
-    const strength = ((degeneracies[upper] ?? 0) * a) / (8 * Math.PI * cCmPerS * nu * nu);
+    const strength = (scale * (degeneracies[upper] ?? 0) * a) / (8 * Math.PI * cCmPerS * nu * nu);
     if (!(strength > 0)) {
       return;
     }
@@ -965,7 +1151,8 @@ export async function streamPass(
       ? failure
       : new Error("a pass's reader failed", { cause: failure });
   }
-  for (const bins of [...main, ...(apart ?? [])]) {
+  // Shared bins take stimulated emission from their caller, once every list is in them.
+  for (const bins of shared === undefined ? [...main, ...(apart ?? [])] : []) {
     applyStimulatedEmission(bins);
   }
   for (const [t, temperatureK] of temps.entries()) {

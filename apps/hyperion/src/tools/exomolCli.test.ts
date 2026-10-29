@@ -15,7 +15,7 @@ import {
   tableBroadening,
   tableSourceOf,
 } from "./exomolCli";
-import { bandKey, packVibration } from "./exomolLines";
+import { bandKey, type ExoMolFile, packVibration } from "./exomolLines";
 import {
   ammoniaRayleighCm2,
   columnCapCm2,
@@ -212,8 +212,17 @@ describe("the grids and the records", () => {
   it("name each table's inputs and its licence in its sidecar's records", () => {
     for (const table of Object.values(EXOMOL_TABLES)) {
       const source = tableSourceOf(table);
+      // Every file of every list the table takes, its isotopologues' among them, with its SHA-256.
+      const files: ExoMolFile[] = [];
+      for (const list of [table.exomol, ...table.isotopologues]) {
+        files.push(list.def, list.states, ...list.transitions, ...list.broadeners);
+        if (list.partitionFunction !== undefined) {
+          files.push(list.partitionFunction);
+        }
+      }
       expect(source.terms).toMatch(/CC BY-SA 4\.0/u);
-      expect(source.inputs.split(", ").length).toBeGreaterThanOrEqual(9);
+      expect(files.filter((f) => !source.inputs.includes(`${f.name} ${f.sha256}`))).toEqual([]);
+      expect(files.length).toBeGreaterThanOrEqual(4);
       expect(source.description).toMatch(/CC BY-SA 4\.0/u);
     }
   });

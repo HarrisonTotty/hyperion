@@ -98,7 +98,7 @@ interface HeldBody {
 export class OpticsJobs {
   readonly #load: OpticsJobsDeps["loadKDistributions"];
   /** Each line species' table as loaded, or `null` where the client holds none. */
-  readonly #tables = new Map<string, Promise<KDistributionTable | null>>();
+  readonly #tables = new Map<string, Promise<ReadonlyArray<KDistributionTable>>>();
   /** The bodies kept, by key, least recently asked first. */
   readonly #bodies = new Map<string, HeldBody>();
 
@@ -277,14 +277,17 @@ export class OpticsJobs {
     }
   }
 
-  /** The tables of `species`, each loaded once a worker; rejects where a load fails. */
+  /**
+   * The tables of `species`, each species' loaded once a worker (two where a hot table continues a
+   * temperate one); rejects where a load fails.
+   */
   async #tablesOf(species: ReadonlyArray<string>): Promise<ReadonlyArray<KDistributionTable>> {
     const tables = await Promise.all(
       species.map((key) => {
         let table = this.#tables.get(key);
         if (table === undefined) {
-          const loading = this.#load([key]).then(
-            (loaded) => loaded.find((each) => each.species === key) ?? null,
+          const loading = this.#load([key]).then((loaded) =>
+            loaded.filter((each) => each.species === key),
           );
           table = loading;
           this.#tables.set(key, loading);
@@ -299,7 +302,7 @@ export class OpticsJobs {
         return table;
       }),
     );
-    return tables.flatMap((table) => (table === null ? [] : [table]));
+    return tables.flat();
   }
 }
 

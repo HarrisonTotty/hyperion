@@ -1562,6 +1562,62 @@ export function ammoniaRayleighCm2(wavelengthNm: number): number {
   );
 }
 
+/** σ², the squared vacuum wavenumber, µm⁻². */
+function perUmSquared(wavelengthNm: number): number {
+  const perUm = 1_000 / wavelengthNm;
+  return perUm * perUm;
+}
+
+/**
+ * H₂S's Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
+ * takes it (held equal by `kDistributions.test.ts`; R08.T4.f): C. and M. Cuthbertson 1910's
+ * dispersion (Proc. R. Soc. Lond. A 83, 171), n − 1 = 0.053 711 ÷ (86.756 − σ²), σ in µm⁻¹, at 0 °C
+ * and 1 atm with the client's Z = 0.991 571 ÷ 0.990 92, and the King factor 1 + (2/9)(Δα ÷ ᾱ)²,
+ * Δα = 0.6735 a.u. (Bogaard, Buckingham and Ritchie 1982; Monan, Bribes and Gaufrès 1982) over
+ * ᾱ = 25.5 a.u.
+ */
+export function hydrogenSulphideRayleighCm2(wavelengthNm: number): number {
+  const nMinusOne = 0.053_711 / (86.756 - perUmSquared(wavelengthNm));
+  const density = 101_325 / ((0.991_571 / 0.990_92) * BOLTZMANN_J_PER_K * 273.15);
+  return dispersionRayleighCm2(
+    nMinusOne,
+    density,
+    1 + (2 / 9) * (0.673_5 / 25.5) ** 2,
+    wavelengthNm,
+  );
+}
+
+/**
+ * CO's Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts` takes
+ * it (held equal by `kDistributions.test.ts`; R08.T4.f): C. and M. Cuthbertson 1920's dispersion
+ * (Proc. R. Soc. Lond. A 97, 152, Table II), n − 1 = 0.040 508 ÷ (123.77 − σ²), σ in µm⁻¹, at 0 °C
+ * and 1 atm with Z = 0.999 54, and the King factor 1.017 (Bogaard et al. 1978; Couling and Graham
+ * 1994).
+ */
+export function carbonMonoxideRayleighCm2(wavelengthNm: number): number {
+  const nMinusOne = 0.040_508 / (123.77 - perUmSquared(wavelengthNm));
+  const density = 101_325 / (0.999_54 * BOLTZMANN_J_PER_K * 273.15);
+  return dispersionRayleighCm2(nMinusOne, density, 1.017, wavelengthNm);
+}
+
+/**
+ * N₂'s Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
+ * takes it (held equal by `kDistributions.test.ts`; R08.T4.f): Peck and Khanna 1966's dispersion
+ * (J. Opt. Soc. Am. 56, 1059) from 468 nm, (n − 1) × 10⁸ = 6,497.378 + 3,073,864.9 ÷ (144 − σ²), σ
+ * in µm⁻¹, and below it Bates 1984's (Planet. Space Sci. 32, 785, as Sneep and Ubachs 2005, eq.
+ * 11, print it), (n − 1) × 10⁸ = 5,677.465 + 318.818 74 × 10¹² ÷ (14.4 × 10⁹ − ν²), ν in cm⁻¹, both
+ * at 15 °C and 1 atm with Z = 0.999 715; Bates's King factor 1.034 + 3.17 × 10⁻⁴ ÷ λ², λ in µm.
+ */
+export function nitrogenRayleighCm2(wavelengthNm: number): number {
+  const s2 = perUmSquared(wavelengthNm);
+  const nMinusOne =
+    wavelengthNm >= 468
+      ? (6_497.378 + 3_073_864.9 / (144 - s2)) * 1e-8
+      : (5_677.465 + 318.818_74e12 / (14.4e9 - s2 * 1e8)) * 1e-8;
+  const density = 101_325 / (0.999_715 * BOLTZMANN_J_PER_K * 288.15);
+  return dispersionRayleighCm2(nMinusOne, density, 1.034 + 3.17e-4 * s2, wavelengthNm);
+}
+
 /**
  * The species' own Rayleigh column at a cell, cm⁻² (R08.T4.g's ruling on the between-node test):
  * −ln 10⁻⁶ ÷ σ_R,s at the cell's centre for a species whose σ_R is measured, helium's

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ammoniaRayleighCm2,
+  carbonMonoxideRayleighCm2,
   broadeningExponentOffsets,
   broadeningRatios,
   chainColumnCm2,
@@ -35,7 +36,9 @@ import {
   reduceCell,
   columnCapCm2,
   gatedColumnCm2,
+  hydrogenSulphideRayleighCm2,
   linearCell,
+  nitrogenRayleighCm2,
   nitrousOxideRayleighCm2,
   rayleighCapCm2,
   type RayleighCrossSection,
@@ -455,7 +458,7 @@ describe("the Rayleigh cap and linear cells (decision-r08-t4d-kdist-chain.md §�
     ]).toEqual([n2o(668), rayleighCapCm2(668), gatedColumnCm2(undefined, 668, 300, 10, 44)]);
   });
 
-  it("take N₂O's and NH₃'s Rayleigh cross-sections as the client's rayleigh.ts does", async () => {
+  it("take N₂O's, NH₃'s, H₂S's, CO's and N₂'s Rayleigh cross-sections as the client's rayleigh.ts does", async () => {
     // The node project's compiler does not reach the renderer's modules (a project of their own),
     // so the client's module is loaded at run time and its function narrowed.
     const url = new URL("../renderer/src/view/atmosphere/rayleigh.ts", import.meta.url).href;
@@ -477,9 +480,13 @@ describe("the Rayleigh cap and linear cells (decision-r08-t4d-kdist-chain.md §�
     const tool: ReadonlyArray<readonly [string, RayleighCrossSection]> = [
       ["N2O", nitrousOxideRayleighCm2],
       ["NH3", ammoniaRayleighCm2],
+      ["H2S", hydrogenSulphideRayleighCm2],
+      ["CO", carbonMonoxideRayleighCm2],
+      ["N2", nitrogenRayleighCm2],
     ];
+    // N₂'s two branches meet at 468 nm; 467 and 468 nm read one each.
     const ratios = tool.flatMap(([gas, ours]) =>
-      [380, 500, 668, 701, 760].map((nm) => ours(nm) / clientCm2(gas, nm)),
+      [380, 467, 468, 500, 668, 701, 760].map((nm) => ours(nm) / clientCm2(gas, nm)),
     );
     expect(Math.max(...ratios.map((r) => Math.abs(r - 1)))).toBeLessThan(1e-12);
   });

@@ -67,6 +67,7 @@ import {
   runExomolCellReferences,
   runExomolKDistributions,
   runExomolKDistributionsMerge,
+  runExomolProjection,
 } from "./exomolCli";
 import { runHclOvertones } from "./hclOvertones";
 import { broadeningRatios } from "./kDistributions";
@@ -1731,14 +1732,15 @@ const USAGE =
   "--cells <nm,...> --gas CO2|H2|He|H2O [--pressures <Pa,...>]\n" +
   "       atmosphereData exomol-bands --species N2O --data <dir> --hitran-par <file> " +
   "--cache <dir> [--jobs n]\n" +
-  "       atmosphereData exomol-bins --species NH3|N2O --data <dir> [--broad <dir>] " +
+  "       atmosphereData exomol-bins --species <ExoMol key> --data <dir> [--broad <dir>] " +
   "--cache <dir> [--temperatures t,...] [--jobs n]\n" +
-  "       atmosphereData exomol-k-distributions --species NH3|N2O --cache <dir> " +
+  "       atmosphereData exomol-projection --species <R08.T4.f key> --cache <dir> --out <json>\n" +
+  "       atmosphereData exomol-k-distributions --species <ExoMol key> --cache <dir> " +
   "[--hitran-lines <csv> --tips <dir>] [--cells a-b] [--stride n:k] [--temperatures t,...] " +
-  "--out <partial.json>\n" +
-  "       atmosphereData exomol-k-distributions-merge --species NH3|N2O --cache <dir> " +
+  "[--pressures p,...] --out <partial.json>\n" +
+  "       atmosphereData exomol-k-distributions-merge --species <ExoMol key> --cache <dir> " +
   "--out-dir <dir> [--hitran-par <file> --record <json>] <partial.json>...\n" +
-  "       atmosphereData exomol-cell-references --species NH3|N2O --cache <dir> " +
+  "       atmosphereData exomol-cell-references --species <ExoMol key> --cache <dir> " +
   "[--hitran-lines <csv> --tips <dir>] --table <sidecar.json> --cells <nm,...> --out <json>\n" +
   "       atmosphereData atomic-shares --kurucz <dir> --barklem <dir> [--asd-zn2 <csv>] " +
   "[--stages <key,...>] [--out <json>]\n" +
@@ -1961,6 +1963,8 @@ export function main(args: readonly string[]): number | Promise<number> {
           return 1;
         },
       );
+    } else if (command === "exomol-projection") {
+      runExomolProjection(rest);
     } else if (command === "exomol-k-distributions") {
       runExomolKDistributions(rest);
     } else if (command === "exomol-k-distributions-merge") {

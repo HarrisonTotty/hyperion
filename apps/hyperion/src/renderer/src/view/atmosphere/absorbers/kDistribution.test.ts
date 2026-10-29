@@ -11,6 +11,7 @@ import {
   curveRowsPa,
   DIPOLAR_BROADENERS,
   fetchPart,
+  handOverK,
   type KDistributionFile,
   type KDistributionTable,
   kDistributionAt,
@@ -19,7 +20,14 @@ import {
   readKDistribution,
   SELF_BROADENED_ATOMS,
   STANDARD_PRESSURES_PA,
+  tableAt,
 } from "./kDistribution";
+
+/** The committed sidecars' paths, both directories, as the loader globs them. */
+const COMMITTED_SIDECARS = import.meta.glob([
+  "./kDistributions/*.json",
+  "./exomol/kDistributions/*.json",
+]);
 
 /**
  * σ of a toy cell at a node, m²: ln σ a cubic in T and in ln p, which the 4-point interpolations
@@ -631,11 +639,57 @@ describe("the committed k-distributions", () => {
     await expect(loadKDistributions(["Xx"], inlinePart)).resolves.toEqual([]);
   });
 
-  it("load every species they list, each through its sidecar and binary parts", async () => {
+  it("load every species they list, each through its sidecars and binary parts", async () => {
     const species = committedLineSpecies();
     const tables = await loadKDistributions(species, inlinePart);
-    expect(tables.map((t) => t.species)).toEqual(species);
+    // A species whose hot table continues its temperate one (R08.T4.f) loads both.
+    expect([[...new Set(tables.map((t) => t.species))], tables.length]).toEqual([
+      species,
+      Object.keys(COMMITTED_SIDECARS).length,
+    ]);
+    for (const key of species) {
+      expect(() => handOverK(tables, key)).not.toThrow();
+    }
   }, 120_000);
+});
+
+describe("a hot table continuing a temperate one (R08.T4.f)", () => {
+  const temperate = toyTable({ species: "XX" });
+  const hot = toyTable({
+    species: "XX",
+    temperaturesK: [300, 350, 400, 450, 500],
+    measuredRangeK: [300, 500],
+  });
+
+  it("hands over at the hot table's first node, a node of the temperate one", () => {
+    expect([handOverK([temperate, hot], "XX"), handOverK([temperate], "XX")]).toEqual([
+      300,
+      undefined,
+    ]);
+  });
+
+  it("serves the temperate table at and below the hand-over and the hot one above it", () => {
+    expect(
+      [50, 299, 300, 301, 4_000].map((t) => tableAt([hot, temperate], "XX", t) === temperate),
+    ).toEqual([true, true, true, false, false]);
+  });
+
+  it("serves a species' one table at every temperature, and none for a species without", () => {
+    expect([tableAt([temperate], "XX", 4_000), tableAt([temperate], "YY", 200)]).toEqual([
+      temperate,
+      undefined,
+    ]);
+  });
+
+  it("refuses a hand-over off the temperate table's nodes, or a third table", () => {
+    const off = toyTable({
+      species: "XX",
+      temperaturesK: [325, 350, 400, 450, 500],
+      measuredRangeK: [325, 500],
+    });
+    expect(() => handOverK([temperate, off], "XX")).toThrow("not a temperate one");
+    expect(() => tableAt([temperate, hot, hot], "XX", 400)).toThrow("has 3 tables");
+  });
 });
 
 describe("the dipolar broadeners (R08.T10.d)", () => {

@@ -19,8 +19,10 @@ import {
   packVibration,
   parseBroadening,
   parseDefinition,
+  parseDefinitionText,
   parseNumber,
   partitionSum,
+  partitionSumFromPf,
   readStates,
   splitFields,
   splitLines,
@@ -29,7 +31,7 @@ import {
   writeBins,
 } from "./exomolLines";
 import { SECOND_RADIATION_CONSTANT_CM_K, SPEED_OF_LIGHT_M_PER_S } from "./molecularLines";
-import type { SuperLineBins } from "./superLines";
+import { applyStimulatedEmission, emptyBins, type SuperLineBins } from "./superLines";
 
 /** A field's bytes, for the parser. */
 function bytesOf(text: string): Uint8Array {
@@ -190,6 +192,50 @@ describe("a def.json", () => {
   });
 });
 
+describe("a .def text file (the archive's definitions, R08.T4.f)", () => {
+  const text = [
+    "EXOMOL.def                                                # ID",
+    "   63.942857 1.06179671e-25                               # Isotopologue mass (Da) and (kg)",
+    " 5000.00                                                  # Maximum temperature of linelist",
+    "0.0700                                                    # Default value of Lorentzian half-width for all lines (in cm-1/bar)",
+    "0.500                                                     # Default value of temperature exponent for all lines",
+  ].join("\n");
+
+  it("gives the reduction its mass and default width, and no .broad gas", () => {
+    expect(parseDefinitionText(text, "toy.def")).toEqual({
+      molecularMassDa: 63.942_857,
+      airHalfWidthPerCmBar: 0.07,
+      airExponent: 0.5,
+      broadeners: {},
+    });
+  });
+
+  it("takes the assumed width where the file gives none, and refuses it missing otherwise", () => {
+    const bare = text.split("\n").slice(0, 3).join("\n");
+    const assumed = { halfWidthPerCmBar: 0.07, exponent: 0.5, why: "toy" };
+    expect(parseDefinitionText(bare, "toy.def", assumed).airHalfWidthPerCmBar).toBe(0.07);
+    expect(() => parseDefinitionText(bare, "toy.def")).toThrow("Lorentzian half-width");
+  });
+});
+
+describe("a .pf file's Q(T)", () => {
+  const pf = new Map([
+    [1_000, 9_025.7336],
+    [1_001, 9_040.0],
+  ]);
+
+  it("takes a tabulated temperature's value, and between two, linear in T", () => {
+    expect([partitionSumFromPf(pf, 1_000), partitionSumFromPf(pf, 1_000.5)]).toEqual([
+      9_025.7336,
+      (9_025.7336 + 9_040) / 2,
+    ]);
+  });
+
+  it("refuses a temperature outside its table", () => {
+    expect(() => partitionSumFromPf(pf, 999)).toThrow(RangeError);
+  });
+});
+
 describe("a .broad file", () => {
   const table = parseBroadening(
     ["a0 0.0908 0.583 0", "a0 0.0935 0.559 1", "m0 0.0972 0.718 1", "m1 0.1028 0.730 1 1"].join(
@@ -241,7 +287,7 @@ const TOY: ExoMolSource = {
   url: "",
   fetched: "",
   terms: "",
-  def: { name: "toy.def", bytes: 0, sha256: "" },
+  def: { name: "toy.def", bytes: 0, sha256: "", format: "json" },
   states: {
     name: "toy.states",
     bytes: 0,
@@ -249,6 +295,7 @@ const TOY: ExoMolSource = {
     layout: { energy: 2, degeneracy: 3, j: 4, vibration: [5, 6, 7, 8] },
   },
   transitions: [{ name: "toy.trans", bytes: 0, sha256: "", fromPerCm: 13_000, toPerCm: 17_000 }],
+  partitionFrom: "states",
   broadeners: [],
   abundance: 0.99,
   binRangePerCm: [13_100, 16_500],
@@ -385,6 +432,113 @@ describe("a streaming pass over a list", () => {
   it("records each band's lines over the range binned apart", async () => {
     const { record } = await sharedToyPass();
     expect(record.bands.get(MATCHED)?.lines).toBe(1);
+  });
+
+  it("adds two lists' lines to shared bins, each at its own Q and abundance, emission left to its caller", async () => {
+    const states = await readStates("toy.states", TOY, readToy);
+    const shared = [emptyBins(300, 13_100, 16_500, 0.01)];
+    const minor = { ...TOY, abundance: 0.01 };
+    const options = { temperaturesK: [300], broadening: [], jobs: 1, into: shared } as const;
+    await streamPass(TOY, TOY_DEFINITION, states, directory, options, readToy);
+    const before = total(shared[0]?.values ?? new Float64Array(0));
+    await streamPass(minor, TOY_DEFINITION, states, directory, options, readToy);
+    const after = total(shared[0]?.values ?? new Float64Array(0));
+    // Each pass adds S without stimulated emission, so the second adds 0.01 ÷ 0.99 of the first.
+    expect(after / before).toBeCloseTo(1 + 0.01 / 0.99, 12);
+    const check = emptyBins(300, 13_100, 16_500, 0.01);
+    await streamPass(
+      TOY,
+      TOY_DEFINITION,
+      states,
+      directory,
+      { ...options, into: [check] },
+      readToy,
+    );
+    applyStimulatedEmission(check);
+    const { bins } = await streamPass(
+      TOY,
+      TOY_DEFINITION,
+      states,
+      directory,
+      { temperaturesK: [300], broadening: [], jobs: 1 },
+      readToy,
+    );
+    expect(total(check.values) / total(bins.main[0]?.values ?? new Float64Array(0))).toBeCloseTo(
+      1,
+      12,
+    );
+  });
+
+  it("refuses shared bins with a set apart, or not one a temperature", async () => {
+    const states = await readStates("toy.states", TOY, readToy);
+    const shared = [emptyBins(300, 13_100, 16_500, 0.01)];
+    await expect(
+      streamPass(
+        TOY,
+        TOY_DEFINITION,
+        states,
+        directory,
+        { temperaturesK: [200, 300], broadening: [], jobs: 1, into: shared },
+        readToy,
+      ),
+    ).rejects.toThrow(RangeError);
+  });
+
+  it("takes Q(T) from the list's .pf where its source does", async () => {
+    const states = await readStates("toy.states", TOY, readToy);
+    const fromStates = await streamPass(
+      TOY,
+      TOY_DEFINITION,
+      states,
+      directory,
+      { temperaturesK: [300], broadening: [], jobs: 1 },
+      readToy,
+    );
+    const q = 2 * partitionSum(states, 300);
+    const fromPf = await streamPass(
+      TOY,
+      TOY_DEFINITION,
+      states,
+      directory,
+      { temperaturesK: [300], broadening: [], jobs: 1, partitionSumAt: () => q },
+      readToy,
+    );
+    const sum = (pass: typeof fromPf): number =>
+      total(pass.bins.main[0]?.values ?? new Float64Array(0));
+    expect([fromPf.record.partitionSums[0]?.[1], sum(fromPf) / sum(fromStates)]).toEqual([q, 0.5]);
+  });
+
+  it("reads and drops the transitions past a source's cut on v' - v''", async () => {
+    // The toy's v is its first Herzberg quantum: 3 → 1 and 4 → 2 change it by 1, 5 → 1 by 2.
+    const cut: ExoMolSource = {
+      ...TOY,
+      states: { ...TOY.states, layout: { ...TOY.states.layout, v: 5 } },
+      maxDeltaV: 1,
+    };
+    const states = await readStates("toy.states", cut, readToy);
+    const { record } = await streamPass(
+      cut,
+      TOY_DEFINITION,
+      states,
+      directory,
+      { temperaturesK: [300], broadening: [], jobs: 1 },
+      readToy,
+    );
+    expect([record.linesRead, record.linesBinned]).toEqual([4, 2]);
+  });
+
+  it("refuses a cut on v' - v'' whose states give no v", async () => {
+    const states = await readStates("toy.states", TOY, readToy);
+    await expect(
+      streamPass(
+        { ...TOY, maxDeltaV: 1 },
+        TOY_DEFINITION,
+        states,
+        directory,
+        { temperaturesK: [300], broadening: [], jobs: 1 },
+        readToy,
+      ),
+    ).rejects.toThrow("needs its states' v");
   });
 
   it("refuses a number of jobs under 1", async () => {

@@ -1116,20 +1116,23 @@ function sidecarSpecies(
     : { directory: match[1], key: match[2] };
 }
 
-/** The species the client holds committed k-distribution tables for, ascending. */
+/** The species the client holds committed k-distribution tables for, ascending, each once. */
 export function committedLineSpecies(): ReadonlyArray<string> {
-  return Object.keys(SIDECAR_LOADERS)
-    .flatMap((path) => {
-      const found = sidecarSpecies(path);
-      return found === undefined ? [] : [found.key];
-    })
-    .toSorted();
+  return [
+    ...new Set(
+      Object.keys(SIDECAR_LOADERS).flatMap((path) => {
+        const found = sidecarSpecies(path);
+        return found === undefined ? [] : [found.key];
+      }),
+    ),
+  ].toSorted();
 }
 
 /**
  * The committed k-distribution tables of the species asked for that the client holds, each
- * species' sidecar and parts read on first need (`decision-r08-t4d-kdist.md` §4: per species, by
- * the optics worker). A species with no table is left out.
+ * species' sidecars and parts read on first need (`decision-r08-t4d-kdist.md` §4: per species, by
+ * the optics worker): one a species, or two where a hot table continues a temperate one
+ * ({@link tableAt}). A species with no table is left out.
  *
  * @param readPart - How a part's bytes are read: {@link fetchPart} in the worker.
  */
@@ -1138,19 +1141,73 @@ export async function loadKDistributions(
   readPart: PartReader = fetchPart,
 ): Promise<ReadonlyArray<KDistributionTable>> {
   const tables = await Promise.all(
-    species.map(async (key) => {
-      const path = Object.keys(SIDECAR_LOADERS).find((p) => sidecarSpecies(p)?.key === key);
-      const load = path === undefined ? undefined : SIDECAR_LOADERS[path];
-      const directory = path === undefined ? undefined : sidecarSpecies(path)?.directory;
-      if (load === undefined || directory === undefined) {
-        return [];
-      }
-      const sidecar = await load();
-      const buffers = await Promise.all(
-        sidecar.parts.map(async (part) => readPart(`${directory}${part.file}`)),
-      );
-      return [readKDistribution(sidecar, buffers, `${key}'s k-distribution`)];
-    }),
+    species.flatMap((key) =>
+      Object.keys(SIDECAR_LOADERS).flatMap((path) => {
+        const found = sidecarSpecies(path);
+        const load = SIDECAR_LOADERS[path];
+        if (found?.key !== key || load === undefined) {
+          return [];
+        }
+        return [
+          (async (): Promise<KDistributionTable> => {
+            const sidecar = await load();
+            const buffers = await Promise.all(
+              sidecar.parts.map(async (part) => readPart(`${found.directory}${part.file}`)),
+            );
+            return readKDistribution(sidecar, buffers, `${key}'s k-distribution`);
+          })(),
+        ];
+      }),
+    ),
   );
-  return tables.flat();
+  return tables;
+}
+
+/**
+ * Where a hot table continues a temperate one, the hand-over, K: the hot table's first node, a node
+ * of both, at and below which the temperate table serves (plan R08, R08.T4.f: a hot list hands over
+ * from R08.T4.d's HITRAN at a recorded temperature where the two agree). `undefined` for a species
+ * with one table or none.
+ *
+ * @throws Error for a species with more than two tables, or two whose hand-over is not a node of
+ *   the temperate table's within its grid, a broken invariant of the committed data.
+ */
+export function handOverK(
+  tables: ReadonlyArray<KDistributionTable>,
+  species: string,
+): number | undefined {
+  const own = tables.filter((t) => t.species === species);
+  if (own.length <= 1) {
+    return undefined;
+  }
+  const [temperate, hot] = own.toSorted(
+    (a, b) => (a.temperaturesK[0] ?? Number.NaN) - (b.temperaturesK[0] ?? Number.NaN),
+  );
+  const atK = hot?.temperaturesK[0];
+  if (own.length > 2 || atK === undefined || temperate?.temperaturesK.includes(atK) !== true) {
+    throw new Error(
+      `${species} has ${own.length} tables, which are not a temperate one and a hot one continuing it at one of its nodes`,
+    );
+  }
+  return atK;
+}
+
+/**
+ * The table of a species that serves a temperature, K, of those loaded: its one table, or where a
+ * hot table continues a temperate one ({@link handOverK}), the temperate table at and below the
+ * hand-over and the hot table above it; `undefined` for a species with none.
+ *
+ * @throws Error as {@link handOverK} does.
+ */
+export function tableAt(
+  tables: ReadonlyArray<KDistributionTable>,
+  species: string,
+  temperatureK: number,
+): KDistributionTable | undefined {
+  const own = tables.filter((t) => t.species === species);
+  const atK = handOverK(tables, species);
+  if (atK === undefined) {
+    return own[0];
+  }
+  return own.find((t) => temperatureK <= atK === (t.temperaturesK[0] ?? Infinity) < atK);
 }
