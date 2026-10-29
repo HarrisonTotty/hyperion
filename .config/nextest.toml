@@ -254,6 +254,14 @@ slow-timeout = "120s"
 filter = "package(hyperion-server) & binary(density_map) & test(=density_map_512_builds_within_budget)"
 threads-required = "num-cpus"
 
+# R10.T4.a's level bounds (`level_bound_worlds`, one slow test) measure each of the six sample worlds
+# on a thread of its own, its body's σ on one more and its points and patches on four more
+# (`THREADS`): up to 36 threads at once, more than a run's pool, so the test takes every slot and
+# runs alone (main's ruling of 2026-10-26, R10.T4.a's records, "Deviations in R10.T4.a, as built").
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(=level_bound_worlds)"
+threads-required = "num-test-threads"
+
 # Nextest starts tests in binary order, so without priorities the longest ones could start ten
 # minutes in and then run alone for the last quarter of an hour. Higher priorities start sooner
 # (-100 to 100); the order follows each test's slot time in the slow-test audit of 2026-09-27,

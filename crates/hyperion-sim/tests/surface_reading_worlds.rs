@@ -21,7 +21,11 @@
 //! `cargo nextest run -p hyperion-sim --features testing --cargo-profile slow-test --profile slow
 //! --test surface_reading_worlds --run-ignored only`. The one fast test checks that every sample
 //! world has its slow test.
-#![cfg(feature = "testing")]
+//!
+//! Native only (main's ruling of 2026-10-26, R10.T2's records): on WebAssembly, which runs the
+//! slow pass's sim suites too, these cases would take a few times their native hours, and the
+//! binary is empty there.
+#![cfg(all(feature = "testing", not(target_family = "wasm")))]
 
 #[expect(
     dead_code,
