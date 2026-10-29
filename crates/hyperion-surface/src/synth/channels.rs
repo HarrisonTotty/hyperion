@@ -130,10 +130,11 @@
 //! discharge is its own cell's `runoff` times its drainage area where it joins, and a trunk's is its
 //! cell's `catchment_runoff` times its `drainage` ([`mean_discharge_m3_s`]). The channel-forming
 //! discharge is the bankfull flood, a multiple of the mean that falls with the drainage area
-//! ([`channel_forming_discharge_m3_s`], drafted for sign-off), and Parker et al. 2007's hydraulic
-//! geometry gives the width and depth from it ([`bankfull_width`], [`bankfull_depth`]). Each
-//! function's documentation gives its sources. Both are Earth's on every world: the field carries
-//! neither the body's gravity, by which they scale, nor its bed's grain size.
+//! ([`channel_forming_discharge_m3_s`], an empirical fit to humid terrestrial rivers), and Parker
+//! et al. 2007's hydraulic geometry gives the width and depth from it ([`bankfull_width`],
+//! [`bankfull_depth`]). Each function's documentation gives its sources. The ratio is humid Earth's
+//! on every world; the hydraulic geometry takes the body's gravity (the header's) but Earth's
+//! reference grain size, since the field does not carry its bed's.
 //!
 //! # What it reads, and the incision
 //!
@@ -240,7 +241,7 @@ pub fn mean_discharge_m3_s(runoff_m_per_year: f64, area: SquareMetres) -> f64 {
 }
 
 /// The ratio of the channel-forming discharge to the mean at [`BANKFULL_RATIO_AREA`], 55
-/// ([`channel_forming_discharge_m3_s`]; drafted for sign-off).
+/// ([`channel_forming_discharge_m3_s`]; an empirical fit to humid terrestrial rivers).
 pub const BANKFULL_RATIO: f64 = 55.0;
 
 /// The drainage area at which the channel-forming discharge is [`BANKFULL_RATIO`] times the mean,
@@ -248,7 +249,7 @@ pub const BANKFULL_RATIO: f64 = 55.0;
 pub const BANKFULL_RATIO_AREA: SquareMetres = SquareMetres::new(5e6);
 
 /// The exponent of the drainage area in the ratio of the channel-forming discharge to the mean,
-/// −0.25 ([`channel_forming_discharge_m3_s`]; drafted for sign-off).
+/// −0.25 ([`channel_forming_discharge_m3_s`]; an empirical fit to humid terrestrial rivers).
 pub const BANKFULL_RATIO_EXPONENT: f64 = -0.25;
 
 /// The drainage areas the ratio was fitted over, square metres: Slade Run's 5.4 km² to the
@@ -263,22 +264,31 @@ const BANKFULL_RATIO_RANGE_M2: (f64, f64) = (5.4e6, 2.964e12);
 /// 10⁴ km² and 2.6 at 10⁶ km².
 ///
 /// Bankfull is taken as the 1.5-year flood of the annual series (Leopold, Wolman and Miller 1964,
-/// *Fluvial Processes in Geomorphology*, Freeman, not read here). The ratio is **drafted for
-/// sign-off**: R09.T6.b's science check fitted it by least squares to the 1.5-year floods of
-/// lognormal fits to seven humid-to-subhumid USGS gauges' annual peaks: Slade Run (5.4 km², ratio
-/// 50); the Juniata, Delaware and Potomac (0.9–3 × 10⁴ km², 8.2, 6.5 and 8.2); the Ohio at
-/// Metropolis (5.3 × 10⁵ km², 2.8); and the Mississippi at St Louis and Vicksburg (1.8–3.0 ×
-/// 10⁶ km², 2.1 and 1.7). Its scatter is ×1.16. It is not a published relation.
+/// *Fluvial Processes in Geomorphology*, Freeman, not read here). The ratio is **empirical**, not a
+/// published relation: R09.T6.b's science check fitted it by least squares to the 1.5-year floods
+/// of lognormal fits to seven USGS gauges' annual peaks, each over its mean daily flow: Slade Run
+/// near Glyndon, MD (01583000; 5.4 km², ratio 50); the Juniata at Newport, PA (01567000), the
+/// Delaware at Trenton, NJ (01463500) and the Potomac at Little Falls (01646500;
+/// 0.9–3 × 10⁴ km², 8.2, 6.5 and 8.2); the Ohio at Metropolis, IL (03611500; 5.3 × 10⁵ km², 2.8);
+/// and the Mississippi at St Louis (07010000) and Vicksburg (07289000; 1.8–3.0 × 10⁶ km², 2.1 and
+/// 1.7). Its scatter is ×1.16. It is **calibrated on humid-to-subhumid rivers of the eastern and
+/// central United States only**, and its small end rests on one gauge (signoff-12, item 16).
+/// Measured bankfull recurs about every 1.4 years (1.2 on humid streams: Castro and Jackson 2001,
+/// JAWRA 37, 1249; median 1.4, 1.01–9.7, in Ohio: Sherwood and Huitger 2005, USGS SIR
+/// 2005-5153).
 ///
 /// A great river's floods are a small multiple of its mean and a small catchment's a large one, so
 /// no single factor serves. The mean over the field's reference flood intermittency, 0.05
-/// (science-hoke.md §3), is twenty times the mean. That is near a 5 km² basin's 55, but 2.5 times
-/// too high at 10⁴ km² and about 8 times at 10⁶ km², where it makes channels 2–2.6 times too deep.
-/// Williams 1978 (WRR 14(6), 1141, doi:10.1029/WR014i006p01141, its abstract) warns that bankfull
-/// discharge "does not have a common recurrence frequency" and that "the 1.5-year recurrence
-/// interval in most cases does not represent the bank-full discharge". The ratio is Earth's on
-/// every world: a Mars's episodic storm runoff has flood statistics of its own, which nothing here
-/// models. Medium-low confidence.
+/// (science-hoke.md §3), is twenty times the mean. That is near a 5 km² basin's 55, but 2.4 times
+/// too high at 10⁴ km² and 7.7 times at 10⁶ km², where it makes channels 2.3 times too deep and 2.6
+/// times too wide. Williams 1978 (WRR 14(6), 1141, doi:10.1029/WR014i006p01141, its abstract)
+/// warns that bankfull discharge "does not have a common recurrence frequency" and that "the
+/// 1.5-year recurrence interval in most cases does not represent the bank-full discharge". The
+/// ratio is humid Earth's on every world, a labelled stand-in: arid, snowmelt and monsoon rivers
+/// and Titan's storms are flashier, and a Mars's wet-epoch runoff is its storms' times 0.05
+/// (science-hoke.md §3), so by that calibration its channel-forming flow is about 20 times its
+/// mean, against 8.2–4.6 here at 10⁴–10⁵ km² (R09's Risks, deferred findings). Medium-low
+/// confidence.
 ///
 /// # Panics
 ///
