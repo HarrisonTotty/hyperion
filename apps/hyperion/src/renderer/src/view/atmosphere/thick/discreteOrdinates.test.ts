@@ -9,6 +9,8 @@ import {
   type OrdinateLayer,
   doubleGaussQuadrature,
   factorLayerStack,
+  groundCosinesOf,
+  type GroundReflectance,
   homogeneousSolution,
   intensityAtAzimuth,
   layerStackRightHandSide,
@@ -781,6 +783,161 @@ describe("the layer stack", () => {
       }
       expect(Math.abs(bottomOf(layerCount - 1, i) - reflected)).toBeLessThan(1e-12);
     }
+  });
+});
+
+/**
+ * A slab's reflectance read the way `deck.ts` reads a deck's: ρ^m(μ, μ′) = π I^m(0, +μ) ÷ μ′ for a
+ * plane-parallel beam at μ′, at each outgoing cosine (as a user cosine) and each incident one.
+ */
+function slabReflectance(
+  layers: ReadonlyArray<OrdinateLayer>,
+  groundAlbedo: number,
+  cosines: { readonly outgoingCosines: Float64Array; readonly incidentCosines: Float64Array },
+  maxMode: number,
+): GroundReflectance {
+  const { outgoingCosines, incidentCosines } = cosines;
+  const solution = solveDiscreteOrdinates({
+    layers,
+    groundAlbedo,
+    beamCosines: incidentCosines,
+    userCosines: outgoingCosines,
+    maxMode,
+  });
+  const columns = incidentCosines.length;
+  const modes = Array.from({ length: maxMode + 1 }, (_, m) => {
+    const rho = new Float64Array(outgoingCosines.length * columns);
+    for (let j = 0; j < columns; j += 1) {
+      const up = beamAt(solution, j).modes[m]?.userUp ?? new Float64Array();
+      for (let i = 0; i < outgoingCosines.length; i += 1) {
+        rho[i * columns + j] = (Math.PI * entry(up, i)) / entry(incidentCosines, j);
+      }
+    }
+    return rho;
+  });
+  return { outgoingCosines, incidentCosines, modes };
+}
+
+/** The largest |a − b| over two beams' modes at the interfaces `interfaces`, of each mode's largest |b|. */
+function largestModeMiss(
+  actual: BeamSolution,
+  expected: BeamSolution,
+  interfaces: number,
+  pick: (mode: BeamSolution["modes"][number]) => Float64Array,
+): number {
+  let worst = 0;
+  expected.modes.forEach((mode, m) => {
+    const other = actual.modes[m];
+    if (other === undefined) {
+      throw new Error(`no mode ${m}`);
+    }
+    const want = pick(mode);
+    const got = pick(other);
+    const width = want.length / expected.fluxes.direct.length;
+    const count = interfaces * width;
+    let largest = 0;
+    for (let i = 0; i < count; i += 1) {
+      largest = Math.max(largest, Math.abs(entry(want, i)));
+    }
+    // A mode that vanishes (any m > 0 under an overhead sun) is held absolutely.
+    const scale = largest > 0 ? largest : 1;
+    for (let i = 0; i < count; i += 1) {
+      worst = Math.max(worst, Math.abs(entry(got, i) - entry(want, i)) / scale);
+    }
+  });
+  return worst;
+}
+
+describe("a ground other than Lambertian (R08.T15)", () => {
+  const beamCosines = [0.25, 0.6, 1];
+  const userCosines = [0.15, 0.5, 0.9];
+  const maxMode = 3;
+  const cosines = groundCosinesOf(DISCRETE_ORDINATE_STREAMS, userCosines, beamCosines);
+  const base = { beamCosines, userCosines, maxMode };
+
+  // Measured 2026-10-29: the user cosines 1.5 × 10⁻¹⁷ of each mode's largest; the split 2.3 × 10⁻¹³.
+  it("reproduces a Lambertian ground given as ρ⁰ = A: the nodes to the bit, the user cosines to 10⁻¹⁵", () => {
+    const layers = [...slab(0.4, 0.95, RAYLEIGH, 2), ...slab(3, 0.9, henyeyGreenstein(0.7), 3)];
+    const albedo = 0.3;
+    const size = cosines.outgoingCosines.length * cosines.incidentCosines.length;
+    const lambertian: GroundReflectance = {
+      ...cosines,
+      modes: [new Float64Array(size).fill(albedo)],
+    };
+    const albedoSolve = solveDiscreteOrdinates({ ...base, layers, groundAlbedo: albedo });
+    const groundSolve = solveDiscreteOrdinates({
+      ...base,
+      layers,
+      groundAlbedo: 0,
+      groundReflectance: lambertian,
+    });
+    let userMiss = 0;
+    albedoSolve.beams.forEach((beam, b) => {
+      const other = beamAt(groundSolve, b);
+      expect(other.fluxes).toEqual(beam.fluxes);
+      beam.modes.forEach((mode, m) => {
+        const twin = other.modes[m];
+        expect([twin?.quadratureUp, twin?.quadratureDown, twin?.userDown]).toEqual([
+          mode.quadratureUp,
+          mode.quadratureDown,
+          mode.userDown,
+        ]);
+      });
+      userMiss = Math.max(
+        userMiss,
+        largestModeMiss(other, beam, layers.length + 1, (mode) => mode.userUp),
+      );
+    });
+    expect(userMiss).toBeLessThan(1e-15);
+  });
+
+  it("gives a slab's reflectance as the ground the solve of the whole column, to 10⁻¹²", () => {
+    const upper = slab(0.5, 0.97, henyeyGreenstein(0.5), 3);
+    const lower = slab(6, 0.95, henyeyGreenstein(0.75), 4);
+    const albedo = 0.2;
+    const deck = slabReflectance(lower, albedo, cosines, maxMode);
+    const split = solveDiscreteOrdinates({
+      ...base,
+      layers: upper,
+      groundAlbedo: 0,
+      groundReflectance: deck,
+    });
+    const whole = solveDiscreteOrdinates({
+      ...base,
+      layers: [...upper, ...lower],
+      groundAlbedo: albedo,
+    });
+    let worst = 0;
+    whole.beams.forEach((beam, b) => {
+      const other = beamAt(split, b);
+      for (const pick of [
+        (mode: BeamSolution["modes"][number]) => mode.quadratureUp,
+        (mode: BeamSolution["modes"][number]) => mode.quadratureDown,
+        (mode: BeamSolution["modes"][number]) => mode.userUp,
+        (mode: BeamSolution["modes"][number]) => mode.userDown,
+      ]) {
+        worst = Math.max(worst, largestModeMiss(other, beam, upper.length + 1, pick));
+      }
+    });
+    expect(worst).toBeLessThan(1e-12);
+  });
+
+  it("refuses a ground reflectance beside an albedo, missing a cosine, of the wrong size or not finite", () => {
+    const layers = slab(1, 0.9, RAYLEIGH);
+    const size = cosines.outgoingCosines.length * cosines.incidentCosines.length;
+    const ground: GroundReflectance = { ...cosines, modes: [new Float64Array(size).fill(0.2)] };
+    const solve = (groundAlbedo: number, groundReflectance: GroundReflectance): unknown =>
+      solveDiscreteOrdinates({ ...base, layers, groundAlbedo, groundReflectance });
+    expect(() => solve(0.1, ground)).toThrow(RangeError);
+    const fewer = groundCosinesOf(DISCRETE_ORDINATE_STREAMS, userCosines.slice(1), beamCosines);
+    const fewerSize = fewer.outgoingCosines.length * fewer.incidentCosines.length;
+    expect(() => solve(0, { ...fewer, modes: [new Float64Array(fewerSize).fill(0.2)] })).toThrow(
+      RangeError,
+    );
+    expect(() => solve(0, { ...cosines, modes: [new Float64Array(size - 1)] })).toThrow(RangeError);
+    expect(() =>
+      solve(0, { ...cosines, modes: [new Float64Array(size).fill(Number.NaN)] }),
+    ).toThrow(RangeError);
   });
 });
 

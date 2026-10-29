@@ -91,6 +91,9 @@ import {
   DISCRETE_ORDINATE_STREAMS,
   type DiscreteOrdinatesSolution,
   doubleGaussQuadrature,
+  type GroundCosines,
+  groundCosinesOf,
+  type GroundReflectance,
   normalizedAssociatedLegendre,
   type OrdinateLayer,
   solveDiscreteOrdinates,
@@ -443,13 +446,15 @@ export interface TermExtinction {
   readonly absorptionPerM: number;
 }
 
-/** The layer interfaces in h\*, from the top down (the module's remarks). */
+/** The layer interfaces in h\*, from the top down (the module's remarks), over `span`. */
 function layerInterfaces(
   column: SpectralColumn,
   reference: ReadonlyArray<TermExtinction>,
   layers: number,
+  span: BakeSpan = { bottomM: 0, topM: column.topHeightM },
 ): Float64Array {
-  const top = column.topHeightM;
+  const top = span.topM;
+  const bottom = span.bottomM;
   const totals = column.terms.map((term) => columnLengthM(term.density, top));
   const depthAbove = (h: number): number => {
     let depth = 0;
@@ -465,15 +470,17 @@ function layerInterfaces(
     }
     return depth;
   };
-  const whole = depthAbove(0);
+  const whole = depthAbove(bottom);
   const xi = (h: number): number =>
-    whole > 0 ? 0.5 * (1 - depthAbove(h) / whole) + (0.5 * h) / top : h / top;
+    whole > 0
+      ? 0.5 * (1 - depthAbove(h) / whole) + (0.5 * (h - bottom)) / (top - bottom)
+      : (h - bottom) / (top - bottom);
   const heights = new Float64Array(layers + 1);
   heights[0] = top;
-  heights[layers] = 0;
+  heights[layers] = bottom;
   for (let k = 1; k < layers; k += 1) {
     const target = 1 - k / layers;
-    let low = 0;
+    let low = bottom;
     let high = top;
     for (let i = 0; i < 52; i += 1) {
       const middle = 0.5 * (low + high);
@@ -706,8 +713,12 @@ export function prepareBake(
   lights: ReadonlyArray<ThickBakeLight>,
   grid: ThickBakeGrid = THICK_BAKE_GRID,
   options: ExpSumOptions = EXP_SUM_OPTIONS,
+  layout?: BakeLayout,
 ): PreparedBake {
   checkBakeInputs(column, lights, grid);
+  if (layout !== undefined) {
+    checkBakeLayout(layout, grid);
+  }
   const optics = spectralOptics(column, BAKE_WAVELENGTHS_NM);
   const order = THICK_BAKE_STREAMS;
   const binOptics = optics.map((terms) =>
@@ -718,7 +729,8 @@ export function prepareBake(
       forwardDelta: forwardDeltaShare(t.phase),
     })),
   );
-  const layering = bakeLayering(column, binOptics[THICK_BAKE_REFERENCE_BIN] ?? [], grid);
+  const layering =
+    layout?.layering ?? bakeLayering(column, binOptics[THICK_BAKE_REFERENCE_BIN] ?? [], grid);
   const { interfaceHeightsM, layerColumnsM, altitudesM } = layering;
   const pointOptics = binOptics.map((terms) =>
     Array.from(altitudesM, (h): PointOptics => {
@@ -760,7 +772,7 @@ export function prepareBake(
     }),
   );
   const everyBin = Array.from({ length: BAKE_BIN_COUNT }, (_, b) => b);
-  const bins = bakeLightBins(column, layering, lights, everyBin, options);
+  const bins = bakeLightBins(column, layout?.fitLayering ?? layering, lights, everyBin, options);
   return {
     column,
     grid,
@@ -829,6 +841,52 @@ function absorberTermsOf(column: SpectralColumn): number[] {
   return column.terms.flatMap((term, t) => (term.source.kind === "absorber" ? [t] : []));
 }
 
+/**
+ * The heights a bake's layers fill, h\* in m, `bottomM` below `topM`: the whole column, 0 to its
+ * top, by default; R08.T15's deck split lays the table above the split and the deck below it.
+ */
+export interface BakeSpan {
+  readonly bottomM: number;
+  readonly topM: number;
+}
+
+/**
+ * A bake's layers laid by its caller (R08.T15's deck split, `deck.ts`): the table's, and the whole
+ * column's, over which its lights' exponential sums are fitted and laid, so that each term of a
+ * bin's gases is one term from the column's top to its floor (Design note 5's correlated sums).
+ */
+export interface BakeLayout {
+  /** The table's layers on the bake's grid ({@link bakeLayering} over a span). */
+  readonly layering: BakeLayering;
+  /**
+   * The layers the lights' sums are fitted over and laid on ({@link bakeLightBins}): the table's
+   * from the top down, then any below them, so that a term's `absorptionDepth` holds the table's
+   * layers first.
+   */
+  readonly fitLayering: BakeLayering;
+}
+
+/**
+ * Checks a {@link BakeLayout} against its grid, as {@link prepareBake} does: the table's layers the
+ * grid's count, and the fit's layers beginning with them.
+ *
+ * @throws RangeError for a layout that is not so.
+ */
+export function checkBakeLayout(layout: BakeLayout, grid: ThickBakeGrid): void {
+  const table = layout.layering.interfaceHeightsM;
+  const fit = layout.fitLayering.interfaceHeightsM;
+  if (table.length !== grid.layers + 1 || fit.length < table.length) {
+    throw new RangeError(
+      `a layout lays the grid's ${grid.layers} layers first, not ${table.length - 1} of ${fit.length - 1}`,
+    );
+  }
+  table.forEach((h, k) => {
+    if (fit[k] !== h) {
+      throw new RangeError(`a layout's fit departs from the table's layers at interface ${k}`);
+    }
+  });
+}
+
 /** A bake's layers: their interfaces, each term's column in each, and the table's altitudes. */
 export interface BakeLayering {
   /** The interfaces' h\*, m, from the top down: L + 1. */
@@ -846,14 +904,17 @@ export interface BakeLayering {
  *
  * @param reference - Each term's extinction at relative density 1 in
  *   {@link THICK_BAKE_REFERENCE_BIN}, in the column's order.
+ * @param span - The heights the layers fill, the whole column by default (R08.T15's split lays a
+ *   part of it): ξ is then taken over the span, its own optical depth and height.
  */
 export function bakeLayering(
   column: SpectralColumn,
   reference: ReadonlyArray<TermExtinction>,
   grid: ThickBakeGrid,
+  span?: BakeSpan,
 ): BakeLayering {
   const { layers, altitudeStride } = grid;
-  const interfaceHeightsM = layerInterfaces(column, reference, layers);
+  const interfaceHeightsM = layerInterfaces(column, reference, layers, span);
   const layerColumnsM = column.terms.map((term) => {
     const totals = Float64Array.from(interfaceHeightsM, (h) => columnLengthM(term.density, h));
     return Float64Array.from(
@@ -1010,9 +1071,34 @@ export interface BinSolve {
 }
 
 /**
+ * A ground other than Lambertian for a band's solves (R08.T15's deck): its reflectance in bin
+ * `bin` for one term of the bin's gases, at the cosines the solve reads it (`discreteOrdinates.ts`'s
+ * `groundCosinesOf`) and modes 0 … `maxMode`, in place of the column's albedo.
+ */
+export type BakeGround = (
+  bin: number,
+  term: BinTerm,
+  cosines: GroundCosines,
+  maxMode: number,
+) => GroundReflectance;
+
+/** A band's bake options (R08.T15's deck split). */
+export interface BakeBandOptions {
+  /** A ground other than Lambertian for every solve, in place of the column's albedo. */
+  readonly ground?: BakeGround;
+  /**
+   * Called with each solve once it is made, once a bin and term of the band, before the next: so
+   * that a caller reads its fields (the deck, its radiance at the ground) without a second solve.
+   */
+  readonly onSolve?: (bin: number, term: BinTerm, solve: BinSolve) => void;
+}
+
+/**
  * One solve of a band's bin for one term of its gases (the module's remarks): the delta-M layers,
  * the pseudo-spherical beams, the solve, and E at every table point of this solve alone.
  *
+ * @param ground - A ground other than Lambertian ({@link BakeBandOptions}); the column's albedo
+ *   when absent.
  * @throws RangeError as {@link bakeMultipleScattering}.
  */
 export function bakeBinSolve(
@@ -1020,6 +1106,7 @@ export function bakeBinSolve(
   band: ThickBakeBand,
   bin: number,
   term: BinTerm,
+  ground?: BakeGround,
 ): BinSolve {
   return solveOf(
     prepared,
@@ -1028,6 +1115,7 @@ export function bakeBinSolve(
     bandBinOf(prepared, bin, band.coefficientFactor),
     term,
     sourceLegendre(prepared),
+    ground,
   );
 }
 
@@ -1049,6 +1137,7 @@ function solveOf(
   base: BandBin,
   term: BinTerm,
   legendre: SourceLegendre,
+  ground?: BakeGround,
 ): BinSolve {
   const { grid, interfaceHeightsM } = prepared;
   const layers = grid.layers;
@@ -1079,9 +1168,16 @@ function solveOf(
   const kernelBeams = Array.from(grid.sunCosines, (mu0) =>
     sphericalBeamPath(radius, interfaceHeightsM, kernelDepths, mu0),
   );
+  const groundReflectance = ground?.(
+    bin,
+    term,
+    groundCosinesOf(THICK_BAKE_STREAMS, grid.upwardCosines, grid.sunCosines),
+    THICK_BAKE_MODES - 1,
+  );
   const solution = solveDiscreteOrdinates({
     layers: scaled,
-    groundAlbedo: prepared.groundAlbedo[bin] ?? Number.NaN,
+    groundAlbedo: groundReflectance === undefined ? (prepared.groundAlbedo[bin] ?? Number.NaN) : 0,
+    ...(groundReflectance === undefined ? {} : { groundReflectance }),
     beamCosines: grid.sunCosines,
     userCosines: grid.upwardCosines,
     maxMode: THICK_BAKE_MODES - 1,
@@ -1187,6 +1283,8 @@ function solveOf(
  * summed by the terms' weights, then converted to the channels.
  *
  * @param band - The band's index in {@link thickBakeBands}' order.
+ * @param options - A ground other than Lambertian and a reader of each solve (R08.T15's deck);
+ *   neither by default.
  * @throws RangeError for a band the body does not have, or as the solver refuses a layer (which
  *   delta-M's truncation is there to prevent).
  */
@@ -1194,6 +1292,7 @@ export function bakeMultipleScattering(
   prepared: PreparedBake,
   body: ThickBakeBody,
   band: number,
+  options?: BakeBandOptions,
 ): MsSourceTable {
   const bands = thickBakeBands(body);
   const geometry = bands[band];
@@ -1231,8 +1330,9 @@ export function bakeMultipleScattering(
       for (const term of lightBin.terms) {
         let solve = solved.get(term);
         if (solve === undefined) {
-          solve = solveOf(prepared, geometry, b, base, term, legendre);
+          solve = solveOf(prepared, geometry, b, base, term, legendre, options?.ground);
           solved.set(term, solve);
+          options?.onSolve?.(b, term, solve);
         }
         out.solves += 1;
         const w = term.weight;

@@ -13,7 +13,10 @@ import { mieSphere } from "../mie";
 import { PHASE_TABLE_MU, PHASE_TABLE_U, sphereScatteringMatrix } from "../sizeDistribution";
 import { phaseTableMoment } from "../forwardPeak";
 import {
+  groundCosinesOf,
+  type GroundReflectance,
   normalizedAssociatedLegendre,
+  type OrdinateLayer,
   solveDiscreteOrdinates,
   type StreamDirection,
 } from "./discreteOrdinates";
@@ -908,6 +911,158 @@ describe("layering, one factorisation and V", () => {
       }
       expect(entry(b, 3)).toBe(0);
     }
+  });
+});
+
+// Measured 2026-10-29: Q, U and V up at the ground's nodes 2.0 × 10⁻¹⁶ of I; the split against the
+// whole column 2.4 × 10⁻¹⁵ of each mode's largest.
+describe("a depolarising ground other than Lambertian (R08.T15)", () => {
+  const streams = 8;
+  const beamCosines = [0.2, 0.55, 1];
+  const userCosines = [0.1, 0.5, 0.95];
+  const maxMode = 2;
+  const common = { beamCosines, userCosines, maxMode, streams };
+  const cosines = groundCosinesOf(streams, userCosines, beamCosines);
+  const air: PolarisedLayer[] = [0.15, 0.25].map((tau) => ({
+    opticalDepth: tau,
+    singleScatteringAlbedo: 1,
+    moments: rayleigh(0.03, 16),
+  }));
+  const hg = Array.from({ length: 16 }, (_, l) => 0.7 ** l);
+  const cloud: OrdinateLayer[] = [2, 3].map((tau) => ({
+    opticalDepth: tau,
+    singleScatteringAlbedo: 0.98,
+    moments: hg,
+  }));
+
+  /** The cloud's scalar reflectance, read as `deck.ts` reads a deck's, over a ground of 0.2. */
+  function cloudReflectance(deckStreams = 16): GroundReflectance {
+    const solution = solveDiscreteOrdinates({
+      layers: cloud,
+      groundAlbedo: 0.2,
+      beamCosines: cosines.incidentCosines,
+      userCosines: cosines.outgoingCosines,
+      maxMode,
+      streams: deckStreams,
+    });
+    const columns = cosines.incidentCosines.length;
+    const modes = Array.from({ length: maxMode + 1 }, (_, m) => {
+      const rho = new Float64Array(cosines.outgoingCosines.length * columns);
+      solution.beams.forEach((beam, j) => {
+        const up = beam.modes[m]?.userUp ?? new Float64Array();
+        for (let i = 0; i < cosines.outgoingCosines.length; i += 1) {
+          rho[i * columns + j] = (Math.PI * entry(up, i)) / entry(cosines.incidentCosines, j);
+        }
+      });
+      return rho;
+    });
+    return { ...cosines, modes };
+  }
+
+  it("reflects I as the Lambertian albedo does, given as ρ⁰ = A: the nodes to the bit, the user cosines to 10⁻¹⁵", () => {
+    const size = cosines.outgoingCosines.length * cosines.incidentCosines.length;
+    const albedo = 0.4;
+    const byAlbedo = solvePolarised({ ...common, layers: air, groundAlbedo: albedo });
+    const byGround = solvePolarised({
+      ...common,
+      layers: air,
+      groundAlbedo: 0,
+      groundReflectance: { ...cosines, modes: [new Float64Array(size).fill(albedo)] },
+    });
+    let worst = 0;
+    byAlbedo.beams.forEach((beam, b) => {
+      beam.modes.forEach((mode, m) => {
+        const other = beamOf(byGround, b).modes[m];
+        expect([other?.quadratureUp, other?.quadratureDown, other?.userDown]).toEqual([
+          mode.quadratureUp,
+          mode.quadratureDown,
+          mode.userDown,
+        ]);
+        // A mode that vanishes (m > 0 under an overhead sun) is held absolutely.
+        const largest = Math.max(1e-300, ...Array.from(mode.userUp, Math.abs));
+        const scale = largest > 1e-300 ? largest : 1;
+        mode.userUp.forEach((value, k) => {
+          worst = Math.max(worst, Math.abs(entry(other?.userUp ?? [], k) - value) / scale);
+        });
+      });
+    });
+    expect(worst).toBeLessThan(1e-15);
+  });
+
+  it("reflects no Q, U or V: the upward polarisation at the ground is 0, at the nodes to the boundary solve's rounding", () => {
+    const solution = solvePolarised({
+      ...common,
+      layers: air,
+      groundAlbedo: 0,
+      groundReflectance: cloudReflectance(),
+    });
+    const ground = air.length;
+    const count = streams / 2;
+    let largestI = 0;
+    let largestNode = 0;
+    let largestUser = 0;
+    for (const beam of solution.beams) {
+      for (const mode of beam.modes) {
+        const c = mode.components;
+        for (let i = 0; i < count; i += 1) {
+          const k = (ground * count + i) * c;
+          largestI = Math.max(largestI, Math.abs(entry(mode.quadratureUp, k)));
+          for (let x = 1; x < c; x += 1) {
+            largestNode = Math.max(largestNode, Math.abs(entry(mode.quadratureUp, k + x)));
+          }
+        }
+        for (let u = 0; u < userCosines.length; u += 1) {
+          for (let x = 1; x < c; x += 1) {
+            const k = (ground * userCosines.length + u) * c + x;
+            largestUser = Math.max(largestUser, Math.abs(entry(mode.userUp, k)));
+          }
+        }
+      }
+    }
+    expect([largestNode < 1e-14 * largestI, largestUser]).toEqual([true, 0]);
+  });
+
+  it("gives a depolarising cloud's scalar reflectance as the ground the vector solve of the whole column, to 10⁻¹²", () => {
+    // The cloud's reflectance on the whole column's own quadrature, so that the two are one system.
+    const split = solvePolarised({
+      ...common,
+      layers: air,
+      groundAlbedo: 0,
+      groundReflectance: cloudReflectance(streams),
+    });
+    const whole = solvePolarised({
+      ...common,
+      layers: [
+        ...air,
+        ...cloud.map((layer): PolarisedLayer => ({
+          opticalDepth: layer.opticalDepth,
+          singleScatteringAlbedo: layer.singleScatteringAlbedo,
+          moments: depolarisingMoments(15, layer.moments),
+        })),
+      ],
+      groundAlbedo: 0.2,
+    });
+    let worst = 0;
+    whole.beams.forEach((beam, b) => {
+      beam.modes.forEach((mode, m) => {
+        const other = beamOf(split, b).modes[m];
+        if (other === undefined) {
+          throw new Error(`no mode ${m}`);
+        }
+        const width = userCosines.length * mode.components;
+        const count = (air.length + 1) * width;
+        const largest = Math.max(...Array.from(mode.userUp.subarray(0, count), Math.abs));
+        const scale = largest > 0 ? largest : 1;
+        for (let k = 0; k < count; k += 1) {
+          worst = Math.max(
+            worst,
+            Math.abs(entry(other.userUp, k) - entry(mode.userUp, k)) / scale,
+            Math.abs(entry(other.userDown, k) - entry(mode.userDown, k)) / scale,
+          );
+        }
+      });
+    });
+    expect(worst).toBeLessThan(1e-12);
   });
 });
 

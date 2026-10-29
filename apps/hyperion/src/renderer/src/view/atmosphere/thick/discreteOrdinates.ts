@@ -76,9 +76,16 @@
  * integral a divided difference of two exponentials, taken stably where the two rates meet (a
  * user cosine at μ₀ or at a 1 ÷ k_n), so that no user angle is singular.
  *
+ * **A ground other than Lambertian** (R08.T15, the cloud deck as the upper medium's ground): a
+ * {@link GroundReflectance} gives ρ^m at the nodes, the user cosines and the beams, mode by mode, in
+ * the same three places the Lambertian albedo enters (Stamnes et al. 1988's bottom boundary
+ * condition; {@link GroundReflectance}'s remarks). A Lambertian ground given that way reproduces
+ * the albedo's solve to the bit at the nodes, and at the user cosines to the rounding of the
+ * ground's sum, taken as Σ_j R_uj I⁻_j in place of 2A Σ_j w_j μ_j I⁻_j.
+ *
  * Out of scope here (plan R08): delta-M and the Nakajima–Tanaka corrections and the optics worker
- * (R08.T14.b), thermal emission (R08.T18), a ground other than Lambertian (R08.T15) and the
- * vector mode (R08.T14.e). Pure: no state, no clock, no platform API.
+ * (R08.T14.b), thermal emission (R08.T18) and the vector mode (R08.T14.e). Pure: no state, no
+ * clock, no platform API.
  */
 
 import { gaussLegendre } from "../irradianceQuadrature";
@@ -297,12 +304,78 @@ export interface BeamPath {
   readonly slantFactor: ArrayLike<number>;
 }
 
+/**
+ * A ground's bidirectional reflectance by azimuthal mode, at the cosines a solve reads it (R08.T15's
+ * cloud deck): a ground other than Lambertian.
+ *
+ * @remarks
+ * The reflected radiance is I⁺(μ, φ) = (1 ÷ π) ∫ ρ(μ, φ; μ′, φ′) I⁻(μ′, φ′) μ′ dΩ′ with
+ * ρ = Σ_m ρ^m(μ, μ′) cos m(φ − φ′), φ and φ′ the azimuths of the two streams' directions of
+ * travel ({@link BeamSolution}'s convention), so that a Lambertian ground of albedo A is ρ⁰ = A and
+ * no mode past it. With I = Σ_m I^m cos mΔφ, the ground's boundary condition is, mode by mode,
+ * I^m(τ_L, +μ) = (1 + δ_m0) ∫₀¹ ρ^m(μ, μ′) I^m(τ_L, −μ′) μ′ dμ′ + (μ₀ T_L ÷ π) ρ^m(μ, μ₀), the
+ * integral on the quadrature: R_ij = (1 + δ_m0) ρ^m(μ_i, μ_j) w_j μ_j, the Lambertian
+ * R_ij = 2A w_j μ_j at m = 0 (Stamnes et al. 1988's bottom boundary; the DISORT report, K. Stamnes,
+ * S.-C. Tsay, W. Wiscombe and I. Laszlo, v1.1, 2000, for the (1 + δ_m0) and the beam's term, read
+ * for the conventions only). The factor 1 + δ_m0 is the azimuth's integral,
+ * ∫₀^{2π} cos m(φ − φ′) cos k(φ′ − φ₀) dφ′ = π (1 + δ_m0) δ_mk cos m(φ − φ₀).
+ *
+ * A slab's ρ^m(μ, μ′) is π I^m(0, +μ) ÷ μ′ for a beam at μ′ of flux 1 normal to itself
+ * (`deck.ts`'s `deckReflectance`). Reciprocity, ρ^m(μ, μ′) = ρ^m(μ′, μ), is the ground's to hold.
+ */
+export interface GroundReflectance {
+  /**
+   * μ of the reflected streams, in (0, 1]: they must hold the solve's every quadrature node and
+   * user cosine exactly ({@link groundCosinesOf}).
+   */
+  readonly outgoingCosines: Float64Array;
+  /** μ′ of the incident streams, in (0, 1]: every quadrature node and beam cosine of the solve. */
+  readonly incidentCosines: Float64Array;
+  /**
+   * ρ^m for m = 0 … `modes.length` − 1, each outgoing × incident, entry (i, j) at
+   * `i × incidentCosines.length + j`, finite; the modes past them are not reflected.
+   */
+  readonly modes: ReadonlyArray<Float64Array>;
+}
+
+/** The cosines a solve reads its ground at ({@link groundCosinesOf}). */
+export interface GroundCosines {
+  /** Every quadrature node, ascending, then every user cosine in the solve's order. */
+  readonly outgoingCosines: Float64Array;
+  /** Every quadrature node, ascending, then every beam cosine in the solve's order. */
+  readonly incidentCosines: Float64Array;
+}
+
+/**
+ * The cosines a solve of `streams` streams reads its ground's reflectance at: the nodes and the user
+ * cosines going out, the nodes and the beams coming in, as a {@link GroundReflectance} must hold
+ * them.
+ *
+ * @throws RangeError for a stream count that is not an even integer of at least 2.
+ */
+export function groundCosinesOf(
+  streams: number,
+  userCosines: ArrayLike<number>,
+  beamCosines: ArrayLike<number>,
+): GroundCosines {
+  const { nodes } = doubleGaussQuadrature(streams);
+  return {
+    outgoingCosines: Float64Array.from([...nodes, ...Array.from(userCosines)]),
+    incidentCosines: Float64Array.from([...nodes, ...Array.from(beamCosines)]),
+  };
+}
+
 /** A solve: the layers, the ground, the beams, the user cosines and the modes. */
 export interface DiscreteOrdinatesProblem {
   /** The layers from the top down; at least one. */
   readonly layers: ReadonlyArray<OrdinateLayer>;
-  /** A, the ground's Lambertian albedo, in [0, 1]. */
+  /** A, the ground's Lambertian albedo, in [0, 1]; 0 under a `groundReflectance`. */
   readonly groundAlbedo: number;
+  /**
+   * A ground other than Lambertian (R08.T15's deck), in place of the albedo, which must then be 0;
+   * a Lambertian ground of albedo `groundAlbedo` when absent.
+   */
+  readonly groundReflectance?: GroundReflectance;
   /** μ₀ of each beam, in (0, 1]; all are solved on each mode's one factorisation. */
   readonly beamCosines: ArrayLike<number>;
   /** The user cosines, in (0, 1]: each is solved upward (+μ) and downward (−μ). */
@@ -1058,6 +1131,119 @@ function userTransfer(
 }
 
 // ---------------------------------------------------------------------------------------------
+// The ground.
+
+/**
+ * A ground's terms at one mode, as the boundary condition takes them ({@link GroundReflectance}'s
+ * remarks): for this solver and R08.T14.e's vector mode, which reflects I alone.
+ */
+export interface GroundModeTerms {
+  /** R, n × n: (1 + δ_m0) ρ^m(μ_i, μ_j) w_j μ_j, entry (i, j) at `i × n + j`. */
+  readonly nodes: Float64Array;
+  /** The same from the nodes to each user cosine u, U × n, entry (u, j) at `u × n + j`. */
+  readonly users: Float64Array;
+  /** Per beam in the solve's order, ρ^m(μ, μ₀) ÷ π at the nodes and then the user cosines: n + U. */
+  readonly beams: ReadonlyArray<Float64Array>;
+}
+
+/**
+ * A ground's terms at mode m ({@link GroundReflectance}'s remarks), or `undefined` past its modes.
+ *
+ * @throws RangeError for a ground whose cosines miss one of the solve's nodes, user cosines or beam
+ *   cosines.
+ */
+export function groundModeTerms(
+  ground: GroundReflectance,
+  m: number,
+  quadrature: DoubleGaussQuadrature,
+  userCosines: ArrayLike<number>,
+  beamCosines: ArrayLike<number>,
+): GroundModeTerms | undefined {
+  const rho = ground.modes[m];
+  if (rho === undefined) {
+    return undefined;
+  }
+  const outgoing = cosineIndices(ground.outgoingCosines);
+  const incident = cosineIndices(ground.incidentCosines);
+  const columns = ground.incidentCosines.length;
+  const { nodes, weights } = quadrature;
+  const n = nodes.length;
+  const users = userCosines.length;
+  const nodesOut = Array.from(nodes, (mu) => cosineIndexOf(outgoing, mu, "outgoing"));
+  const nodesIn = Array.from(nodes, (mu) => cosineIndexOf(incident, mu, "incident"));
+  const usersOut = Array.from({ length: users }, (_, u) =>
+    cosineIndexOf(outgoing, userCosines[u] ?? Number.NaN, "outgoing"),
+  );
+  const azimuthal = m === 0 ? 2 : 1;
+  const reflection = (rows: ReadonlyArray<number>): Float64Array => {
+    const out = new Float64Array(rows.length * n);
+    for (const [i, row] of rows.entries()) {
+      for (let j = 0; j < n; j += 1) {
+        out[i * n + j] =
+          azimuthal * at(rho, row * columns + (nodesIn[j] ?? -1)) * at(weights, j) * at(nodes, j);
+      }
+    }
+    return out;
+  };
+  const beams = Array.from({ length: beamCosines.length }, (_, b) => {
+    const column = cosineIndexOf(incident, beamCosines[b] ?? Number.NaN, "incident");
+    return Float64Array.from(
+      [...nodesOut, ...usersOut],
+      (row) => at(rho, row * columns + column) / Math.PI,
+    );
+  });
+  return { nodes: reflection(nodesOut), users: reflection(usersOut), beams };
+}
+
+/**
+ * A cosine's index in a ground's cosines.
+ *
+ * @throws RangeError for a cosine they do not hold.
+ */
+function cosineIndexOf(indices: ReadonlyMap<number, number>, mu: number, side: string): number {
+  const index = indices.get(mu);
+  if (index === undefined) {
+    throw new RangeError(`the ground's ${side} cosines do not hold the solve's ${mu}`);
+  }
+  return index;
+}
+
+/** Each cosine's first index. */
+function cosineIndices(cosines: Float64Array): ReadonlyMap<number, number> {
+  const indices = new Map<number, number>();
+  cosines.forEach((mu, i) => {
+    if (!indices.has(mu)) {
+      indices.set(mu, i);
+    }
+  });
+  return indices;
+}
+
+/**
+ * Checks a ground other than Lambertian: the albedo 0 beside it, its cosines in (0, 1], and each
+ * mode's entries finite and outgoing × incident in number.
+ *
+ * @throws RangeError for any that is not so.
+ */
+export function checkGroundReflectance(ground: GroundReflectance, groundAlbedo: number): void {
+  if (groundAlbedo !== 0) {
+    throw new RangeError(`a ground reflectance stands in place of the albedo, not ${groundAlbedo}`);
+  }
+  for (const mu of [...ground.outgoingCosines, ...ground.incidentCosines]) {
+    requireIn("the ground's cosine", mu, (v) => v > 0 && v <= 1, "in (0, 1]");
+  }
+  const size = ground.outgoingCosines.length * ground.incidentCosines.length;
+  ground.modes.forEach((rho, m) => {
+    if (rho.length !== size) {
+      throw new RangeError(`the ground's mode ${m} needs ${size} entries, not ${rho.length}`);
+    }
+    rho.forEach((value) => {
+      requireIn(`the ground's mode ${m}`, value, () => true, "finite");
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
 // The solve.
 
 /**
@@ -1094,10 +1280,14 @@ interface ModeContext {
   readonly userLegendre: Float64Array;
   readonly userCosines: Float64Array;
   readonly groundAlbedo: number;
+  /** A ground other than Lambertian at this mode, or `undefined` for the albedo's or none. */
+  readonly ground: GroundModeTerms | undefined;
 }
 
 /** A beam as validated: μ₀, its path, and its transmission at the ground. */
 interface PreparedBeam {
+  /** Its index in the solve's beams. */
+  readonly index: number;
   readonly cosine: number;
   readonly topTransmission: Float64Array;
   readonly slantFactor: Float64Array;
@@ -1139,12 +1329,17 @@ export function solveDiscreteOrdinates(
     throw new RangeError("a solve needs at least one layer");
   }
   requireIn("groundAlbedo", problem.groundAlbedo, (v) => v >= 0 && v <= 1, "in [0, 1]");
+  const { groundReflectance } = problem;
+  if (groundReflectance !== undefined) {
+    checkGroundReflectance(groundReflectance, problem.groundAlbedo);
+  }
   const layers = problem.layers.map((layer, p) => prepareLayer(layer, p, streams));
   const userCosines = Float64Array.from(problem.userCosines);
   userCosines.forEach((mu) => {
     requireIn("userCosine", mu, (v) => v > 0 && v <= 1, "in (0, 1]");
   });
   const beams = prepareBeams(problem, layers);
+  const beamCosines = beams.map((beam) => beam.cosine);
   const quadrature = doubleGaussQuadrature(streams);
   const n = quadrature.nodes.length;
   const layerCount = layers.length;
@@ -1155,7 +1350,11 @@ export function solveDiscreteOrdinates(
 
   const perBeam: ModeIntensities[][] = beams.map(() => []);
   for (let m = 0; m <= problem.maxMode; m += 1) {
-    const context = modeContext(m, quadrature, layers, userCosines, problem.groundAlbedo);
+    const ground =
+      groundReflectance === undefined
+        ? undefined
+        : groundModeTerms(groundReflectance, m, quadrature, userCosines, beamCosines);
+    const context = modeContext(m, quadrature, layers, userCosines, problem.groundAlbedo, ground);
     beams.forEach((beam, b) => {
       perBeam[b]?.push(solveBeamMode(context, beam));
     });
@@ -1232,6 +1431,7 @@ function modeContext(
   layers: ReadonlyArray<PreparedLayer>,
   userCosines: Float64Array,
   groundAlbedo: number,
+  ground: GroundModeTerms | undefined,
 ): ModeContext {
   const lmax = quadrature.streams - 1;
   const n = quadrature.nodes.length;
@@ -1252,6 +1452,9 @@ function modeContext(
     }
     reflection = r;
   }
+  if (ground !== undefined) {
+    reflection = ground.nodes;
+  }
   const stack = factorLayerStack(faces, n, reflection);
   return {
     m,
@@ -1264,6 +1467,7 @@ function modeContext(
     userLegendre,
     userCosines,
     groundAlbedo,
+    ground,
   };
 }
 
@@ -1305,7 +1509,7 @@ function solveBeamModeAt(
 ): ModeIntensities {
   const { m, quadrature, layerModes, faces, transfers, stack, nodeLegendre, userLegendre } =
     context;
-  const { userCosines, groundAlbedo } = context;
+  const { userCosines, groundAlbedo, ground } = context;
   const n = quadrature.nodes.length;
   const span = 2 * n;
   const users = userCosines.length;
@@ -1368,7 +1572,15 @@ function solveBeamModeAt(
     m === 0 && groundAlbedo > 0
       ? (groundAlbedo / Math.PI) * beam.cosine * beam.groundTransmission
       : 0;
-  const groundSource = groundBeam > 0 ? new Float64Array(n).fill(groundBeam) : undefined;
+  let groundSource = groundBeam > 0 ? new Float64Array(n).fill(groundBeam) : undefined;
+  // A ground other than Lambertian: its reflection of the beam, (μ₀ T_L ÷ π) ρ^m(μ, μ₀).
+  const reflectedBeam = ground?.beams[beam.index];
+  if (reflectedBeam !== undefined) {
+    groundSource = Float64Array.from(
+      { length: n },
+      (_, i) => at(reflectedBeam, i) * beam.cosine * beam.groundTransmission,
+    );
+  }
   const coefficients = solveLayerStack(
     stack,
     layerStackRightHandSide(stack, particularTop, particularBottom, groundSource),
@@ -1419,6 +1631,15 @@ function solveBeamModeAt(
         at(quadratureDown, layerCount * n + j);
     }
     userUp.fill(2 * groundAlbedo * flux + groundBeam, layerCount * users);
+  }
+  if (ground !== undefined && reflectedBeam !== undefined) {
+    for (let u = 0; u < users; u += 1) {
+      let value = at(reflectedBeam, n + u) * beam.cosine * beam.groundTransmission;
+      for (let j = 0; j < n; j += 1) {
+        value += at(ground.users, u * n + j) * at(quadratureDown, layerCount * n + j);
+      }
+      userUp[layerCount * users + u] = value;
+    }
   }
   for (let p = layerCount - 1; p >= 0; p -= 1) {
     const transfer = transfers[p];
@@ -1531,7 +1752,7 @@ function prepareBeams(
     const groundTransmission =
       at(topTransmission, last) *
       Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN));
-    return { cosine, topTransmission, slantFactor, groundTransmission };
+    return { index: b, cosine, topTransmission, slantFactor, groundTransmission };
   });
 }
 

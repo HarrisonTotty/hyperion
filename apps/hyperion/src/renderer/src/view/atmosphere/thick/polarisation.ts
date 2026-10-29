@@ -107,11 +107,13 @@ import { BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM, densityAt } from "../mediu
 import {
   type BakeLayering,
   bakeLayering,
+  type BakeLayout,
   type BakeLightBin,
   bakeLightBins,
   binGroundAlbedo,
   type BinTerm,
   checkBakeInputs,
+  checkBakeLayout,
   deltaMLayer,
   THICK_BAKE_GRID,
   THICK_BAKE_REFERENCE_BIN,
@@ -125,12 +127,18 @@ import { binOfRow } from "./binConversion";
 import { correctionBySources } from "./columnLayout";
 import {
   type BeamPath,
+  checkGroundReflectance,
   DISCRETE_ORDINATE_CONSERVATIVE_CO_ALBEDO,
   DISCRETE_ORDINATE_STREAMS,
   type DiscreteOrdinatesSolution,
   doubleGaussQuadrature,
   type DoubleGaussQuadrature,
   factorLayerStack,
+  type GroundCosines,
+  groundCosinesOf,
+  type GroundModeTerms,
+  groundModeTerms,
+  type GroundReflectance,
   type InterfaceFluxes,
   type LayerFaces,
   layerStackRightHandSide,
@@ -536,8 +544,17 @@ export interface PolarisedLayer {
 export interface PolarisedProblem {
   /** The layers from the top down; at least one. */
   readonly layers: ReadonlyArray<PolarisedLayer>;
-  /** A, the ground's Lambertian albedo, in [0, 1]: it reflects I alone, depolarised. */
+  /**
+   * A, the ground's Lambertian albedo, in [0, 1]: it reflects I alone, depolarised; 0 under a
+   * `groundReflectance`.
+   */
   readonly groundAlbedo: number;
+  /**
+   * A ground other than Lambertian (R08.T15's deck, `discreteOrdinates.ts`'s `GroundReflectance`),
+   * in place of the albedo, which must then be 0: a depolarising ground, which reflects I into I
+   * alone by its ρ^m and Q, U and V not at all.
+   */
+  readonly groundReflectance?: GroundReflectance;
   /** μ₀ of each beam, in (0, 1]: an unpolarised beam of flux 1 normal to itself. */
   readonly beamCosines: ArrayLike<number>;
   /** The user cosines, in (0, 1]: each is solved upward and downward. */
@@ -1601,10 +1618,14 @@ interface VectorModeContext {
   readonly functions: ModeFunctions;
   readonly userCosines: Float64Array;
   readonly groundAlbedo: number;
+  /** A ground other than Lambertian at this mode, on the I rows, or `undefined`. */
+  readonly ground: GroundModeTerms | undefined;
 }
 
 /** A beam as validated: μ₀, its path, and its transmission at the ground. */
 interface PreparedBeam {
+  /** Its index in the solve's beams. */
+  readonly index: number;
   readonly cosine: number;
   readonly topTransmission: Float64Array;
   readonly slantFactor: Float64Array;
@@ -1646,6 +1667,10 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
     throw new RangeError("a solve needs at least one layer");
   }
   requireIn("groundAlbedo", problem.groundAlbedo, (v) => v >= 0 && v <= 1, "in [0, 1]");
+  const { groundReflectance } = problem;
+  if (groundReflectance !== undefined) {
+    checkGroundReflectance(groundReflectance, problem.groundAlbedo);
+  }
   const layers = problem.layers.map((layer, p) => prepareVectorLayer(layer, p, streams));
   const circular = problem.circular ?? layers.some((layer) => layer.circular);
   const userCosines = Float64Array.from(problem.userCosines);
@@ -1653,6 +1678,7 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
     requireIn("userCosine", mu, (v) => v > 0 && v <= 1, "in (0, 1]");
   });
   const beams = prepareBeams(problem, layers);
+  const beamCosines = beams.map((beam) => beam.cosine);
   const quadrature = doubleGaussQuadrature(streams);
   const count = quadrature.nodes.length;
   const layerCount = layers.length;
@@ -1664,6 +1690,10 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
   const eigen: ModeEigenRecord[] = [];
   for (let m = 0; m <= problem.maxMode; m += 1) {
     const components = componentsOf(m, circular);
+    const ground =
+      groundReflectance === undefined
+        ? undefined
+        : groundModeTerms(groundReflectance, m, quadrature, userCosines, beamCosines);
     const context = vectorModeContext(
       m,
       components,
@@ -1671,6 +1701,7 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
       layers,
       userCosines,
       problem.groundAlbedo,
+      ground,
     );
     const complexLayers = context.layerModes.flatMap((lm, p) => (lm.complexPairs > 0 ? [p] : []));
     eigen.push({
@@ -1755,6 +1786,7 @@ function vectorModeContext(
   layers: ReadonlyArray<PreparedVectorLayer>,
   userCosines: Float64Array,
   groundAlbedo: number,
+  ground: GroundModeTerms | undefined,
 ): VectorModeContext {
   const lmax = quadrature.streams - 1;
   const count = quadrature.nodes.length;
@@ -1780,6 +1812,16 @@ function vectorModeContext(
     }
     reflection = r;
   }
+  if (ground !== undefined) {
+    // Depolarising: R^m on the I rows' I columns, Q, U and V reflected not at all.
+    const r = new Float64Array(n * n);
+    for (let i = 0; i < count; i += 1) {
+      for (let j = 0; j < count; j += 1) {
+        r[i * components * n + j * components] = at(ground.nodes, i * count + j);
+      }
+    }
+    reflection = r;
+  }
   const stack = factorLayerStack(faces, n, reflection);
   return {
     m,
@@ -1792,6 +1834,7 @@ function vectorModeContext(
     functions,
     userCosines,
     groundAlbedo,
+    ground,
   };
 }
 
@@ -1833,7 +1876,7 @@ function solveVectorBeamModeAt(
   slantFactor: Float64Array,
 ): StokesModeIntensities {
   const { m, components, quadrature, layerModes, faces, transfers, stack, functions } = context;
-  const { userCosines, groundAlbedo } = context;
+  const { userCosines, groundAlbedo, ground } = context;
   const count = quadrature.nodes.length;
   const n = count * components;
   const span = 2 * n;
@@ -1900,6 +1943,14 @@ function solveVectorBeamModeAt(
       groundSource[i * components] = groundBeam;
     }
   }
+  // A ground other than Lambertian: its reflection of the beam, on the I rows.
+  const reflectedBeam = ground?.beams[beam.index];
+  if (reflectedBeam !== undefined) {
+    groundSource = new Float64Array(n);
+    for (let i = 0; i < count; i += 1) {
+      groundSource[i * components] = at(reflectedBeam, i) * beam.cosine * beam.groundTransmission;
+    }
+  }
   const coefficients = solveLayerStack(
     stack,
     layerStackRightHandSide(stack, particularTop, particularBottom, groundSource),
@@ -1958,6 +2009,16 @@ function solveVectorBeamModeAt(
     }
     for (let u = 0; u < users; u += 1) {
       userUp[layerCount * width + u * components] = 2 * groundAlbedo * flux + groundBeam;
+    }
+  }
+  if (ground !== undefined && reflectedBeam !== undefined) {
+    for (let u = 0; u < users; u += 1) {
+      let value = at(reflectedBeam, count + u) * beam.cosine * beam.groundTransmission;
+      for (let j = 0; j < count; j += 1) {
+        value +=
+          at(ground.users, u * count + j) * at(quadratureDown, layerCount * n + j * components);
+      }
+      userUp[layerCount * width + u * components] = value;
     }
   }
   for (let p = layerCount - 1; p >= 0; p -= 1) {
@@ -2116,6 +2177,11 @@ export interface PolarisationOptions {
   readonly momentOrder?: number;
   /** {@link PolarisationMatrices}; `drawn` by default. */
   readonly matrices?: PolarisationMatrices;
+  /**
+   * The layers laid by the caller (`bake.ts`'s `BakeLayout`; R08.T15's deck split, the upper
+   * medium's table and the whole column's fit), in place of the whole column's on the grid.
+   */
+  readonly layout?: BakeLayout;
 }
 
 /** A term's optics at one wavelength, at relative density 1, with its matrix's moments. */
@@ -2236,6 +2302,9 @@ export function preparePolarisation(
 ): PreparedPolarisation {
   const grid = options.grid ?? THICK_BAKE_GRID;
   checkBakeInputs(column, lights, grid);
+  if (options.layout !== undefined) {
+    checkBakeLayout(options.layout, grid);
+  }
   const order = options.momentOrder ?? POLARISATION_MOMENT_ORDER;
   if (!(Number.isInteger(order) && order >= 2 && order % 2 === 0)) {
     throw new RangeError(`a correction keeps an even moment order ≥ 2, not ${order}`);
@@ -2244,7 +2313,7 @@ export function preparePolarisation(
   const wavelengths = options.wavelengthsNm ?? CHANNEL_WAVELENGTHS_NM;
   const reference = BAKE_WAVELENGTHS_NM[THICK_BAKE_REFERENCE_BIN] ?? Number.NaN;
   const [referenceOptics, ...pointOptics] = spectralOptics(column, [reference, ...wavelengths]);
-  const layering = bakeLayering(column, referenceOptics ?? [], grid);
+  const layering = options.layout?.layering ?? bakeLayering(column, referenceOptics ?? [], grid);
   const points = wavelengths.map((nm, i): PolarisationPoint => ({
     wavelengthNm: nm,
     bin: binOfRow(nm),
@@ -2252,7 +2321,13 @@ export function preparePolarisation(
     terms: (pointOptics[i] ?? []).map((t) => polarisedTermOptics(t, order, matrices)),
   }));
   const bins = [...new Set(points.map((point) => point.bin))];
-  const perLight = bakeLightBins(column, layering, lights, bins, options.expSum ?? EXP_SUM_OPTIONS);
+  const perLight = bakeLightBins(
+    column,
+    options.layout?.fitLayering ?? layering,
+    lights,
+    bins,
+    options.expSum ?? EXP_SUM_OPTIONS,
+  );
   return {
     column,
     grid,
@@ -2304,12 +2379,27 @@ export function needsPolarisationCorrection(column: SpectralColumn): boolean {
   );
 }
 
-/** A correction's solve options: the streams and the highest mode. */
+/**
+ * A ground other than Lambertian for a correction's solves (R08.T15's deck, a depolarising
+ * boundary): its scalar reflectance at the wavelength `point` for one term of its bin's gases, at
+ * the cosines the solves read it (`discreteOrdinates.ts`'s `groundCosinesOf`) and modes
+ * 0 … `maxMode`, in place of the point's albedo, in the vector solve and the scalar solve alike.
+ */
+export type PolarisationGround = (
+  point: PolarisationPoint,
+  term: BinTerm,
+  cosines: GroundCosines,
+  maxMode: number,
+) => GroundReflectance;
+
+/** A correction's solve options: the streams, the highest mode and the ground. */
 export interface PolarisationSolveOptions {
   /** NSTR; {@link POLARISATION_STREAMS} by default. At most the preparation's moment order. */
   readonly streams?: number;
   /** M, the modes 0 … M; {@link POLARISATION_MODES} − 1 by default. */
   readonly maxMode?: number;
+  /** A depolarising ground other than Lambertian; the point's albedo when absent. */
+  readonly ground?: PolarisationGround;
 }
 
 /**
@@ -2465,6 +2555,7 @@ function solvePoint(
   term: BinTerm,
   streams: number,
   maxMode: number,
+  ground?: PolarisationGround,
 ): PointSolve {
   const { grid, layering } = prepared;
   const layers = grid.layers;
@@ -2507,8 +2598,15 @@ function solvePoint(
   const kernelBeams = Array.from(grid.sunCosines, (mu0) =>
     sphericalBeamPath(radius, heights, kernelDepths, mu0),
   );
+  const groundReflectance = ground?.(
+    point,
+    term,
+    groundCosinesOf(streams, grid.upwardCosines, grid.sunCosines),
+    maxMode,
+  );
   const common = {
-    groundAlbedo: point.groundAlbedo,
+    groundAlbedo: groundReflectance === undefined ? point.groundAlbedo : 0,
+    ...(groundReflectance === undefined ? {} : { groundReflectance }),
     beamCosines: grid.sunCosines,
     userCosines: grid.upwardCosines,
     maxMode,
@@ -2814,7 +2912,7 @@ export function polarisationSources(
     for (const term of bin.terms) {
       let solve = solved.get(term);
       if (solve === undefined) {
-        solve = solvePoint(prepared, geometry, at0, term, streams, maxMode);
+        solve = solvePoint(prepared, geometry, at0, term, streams, maxMode, options.ground);
         solved.set(term, solve);
       }
       for (const record of solve.vector.eigen) {
@@ -2901,6 +2999,8 @@ export interface PolarisationTable {
  *
  * @param prepared - {@link preparePolarisation} at the render channels.
  * @param band - The band's index in `bake.ts`'s `thickBakeBands` order.
+ * @param ground - A depolarising ground other than Lambertian (R08.T15's deck); each channel's
+ *   albedo when absent.
  * @throws RangeError for a preparation not at the render channels, a band the body does not have,
  *   or as the solvers refuse a layer.
  */
@@ -2908,6 +3008,7 @@ export function bakePolarisationCorrection(
   prepared: PreparedPolarisation,
   body: ThickBakeBody,
   band: number,
+  ground?: PolarisationGround,
 ): PolarisationTable {
   const channels = CHANNEL_WAVELENGTHS_NM;
   if (
@@ -2916,7 +3017,9 @@ export function bakePolarisationCorrection(
   ) {
     throw new RangeError("the correction's table is stored at the render channels' wavelengths");
   }
-  const perChannel = channels.map((_, c) => polarisationSources(prepared, body, band, c));
+  const perChannel = channels.map((_, c) =>
+    polarisationSources(prepared, body, band, c, ground === undefined ? {} : { ground }),
+  );
   const { grid } = prepared;
   const geometry = thickBakeBands(body)[band];
   if (geometry === undefined) {
@@ -3047,7 +3150,7 @@ function prepareBeams(
     const groundTransmission =
       at(topTransmission, last) *
       Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN));
-    return { cosine, topTransmission, slantFactor, groundTransmission };
+    return { index: b, cosine, topTransmission, slantFactor, groundTransmission };
   });
 }
 

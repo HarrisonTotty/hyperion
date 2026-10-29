@@ -534,8 +534,19 @@ export function bakeMultipleScattering(
   body: ThickBakeBody, // the figure, the gravity and R_ref
   band: number,
 ): MsSourceTable;
-/** Above: the deck as a reflecting boundary; below: downwelling radiance. One latitude band. */
-export function bakeDeck(medium: AtmosphereMedium, deckAltitudeM: number, band: number): DeckTables;
+/** Everything of a deck's bake but the band (R08.T15.a.1, as built, in T14.b's shape): the floor,
+ * the upper medium's layers above the split and the deck's below it, and the upper medium's
+ * thick-bake preparation, its lights' sums fitted over the whole column (`bake.ts`'s `BakeLayout`). */
+export function prepareDeck(
+  column: SpectralColumn,
+  lights: ReadonlyArray<ThickBakeLight>,
+  split: DeckSplit, // the split's altitude (`AtmosphereRegime`'s deckAltitudeM) and its floor
+  options?: DeckOptions, // the grid, the sums' options, the deck's layers
+): PreparedDeck;
+/** Above: the deck as a reflecting boundary (its ρ^m and its sky-lit radiance, the solver's over
+ * the deck's layers) and J_ms over it; below: downwelling radiance (R08.T15.b.1). One latitude
+ * band. */
+export function bakeDeck(prepared: PreparedDeck, body: ThickBakeBody, band: number): DeckTables;
 /** Everything of the correction but the band (R08.T14.e, as built): the column's optics with each
  * term's matrix moments at the render channels (and 570 nm for the layers), the thick bake's
  * layers, and each light's exponential sums in the channels' bins. */
@@ -21909,3 +21920,117 @@ analogue`.
     and Hudson 2022, Icarus 373, 114799 ("Crystalline ices – Densities and comparisons …"),
     reported open to read, may give crystalline H2S's index at 670 nm; if it does, H2S ice's text
     and estimate want revisiting.
+- **Deviations in T15.a.1, as built** (2026-10-29; `thick/deck.ts`, its test and benchmark, and
+  `test/deckFixtures.ts`; `thick/discreteOrdinates.ts`, `thick/polarisation.ts` and `thick/bake.ts`,
+  each with its tests; main's split of R08.T15, 2026-10-29).
+  - _The signatures._ T14.b's shape, in place of the sketch's `bakeDeck(medium, deckAltitudeM,
+band)` (Provides updated):
+    - `prepareDeck(column, lights, split, options?): PreparedDeck`, with
+      `split: DeckSplit = { altitudeM, floor }`, `floor` `"ground"` or `"envelope"`, and
+      `options = { grid?, expSum?, deckLayers? }`;
+    - then `bakeDeck(prepared, body, band): DeckTables`.
+    - Also exported: `deckReflectance(layers, floorAlbedo, cosines, maxMode, streams?)`;
+      `deckGround(prepared, band)`, the deck as `bake.ts`'s `BakeGround`; `prepareDeckPolarisation`,
+      `deckPolarisationGround` and `bakeDeckPolarisation`, the correction over the deck;
+      `DECK_FLOOR_OPTICAL_DEPTH` (1,000) and `DECK_LAYERS` (32).
+  - _The ground, widened_ (`discreteOrdinates.ts`). A `GroundReflectance` holds ρ^m at its
+    `outgoingCosines` and `incidentCosines`, one array a mode. The problem's `groundReflectance`
+    stands in place of `groundAlbedo`, which must then be 0. `groundCosinesOf(streams, users,
+beams)` gives the cosines a solve reads: the nodes and the user cosines going out, the nodes and
+    the beams coming in.
+    - The terms (`groundModeTerms`), per mode: R_ij = (1 + δ_m0) ρ^m(μ_i, μ_j) w_j μ_j at the nodes
+      and from the nodes to the user cosines, and the beam's (μ₀ T_L ÷ π) ρ^m(μ, μ₀) at both
+      (Stamnes et al. 1988's bottom boundary; the DISORT report v1.1 for the 1 + δ_m0 and the
+      beam's term, read for the conventions only). 1 + δ_m0 is the azimuth's integral of
+      cos m(φ − φ′) cos k(φ′ − φ₀). The Lambertian path is unchanged.
+    - A Lambertian ground given as ρ⁰ = A gives the albedo's solve to the bit at the nodes, in
+      `userDown` and in the fluxes, and `userUp` to 1.5 × 10⁻¹⁷ of each mode's largest (held to
+      10⁻¹⁵): the ground's sum is Σ_j R_uj I⁻_j there, not 2A Σ_j w_j μ_j I⁻_j.
+    - A slab's reflectance read from beams, as the ground, gives the plane-parallel solve of the
+      slab and the layers above it together to 2.3 × 10⁻¹³ at every upper interface, node and
+      user cosine, m = 0–3 (held to 10⁻¹²). So the split adds no quadrature error of its own: a
+      diffuse stream at node j is the beam at μ_j scaled by 2π w_j ÷ (2 − δ_m0) in the discrete
+      system, and its formal solution likewise.
+    - `polarisation.ts`: `groundReflectance` on the I–I block, Q, U and V not reflected. The
+      Lambertian check holds as the scalar's (to the bit at the nodes, 10⁻¹⁵ at the user cosines).
+      Q, U and V upward at the ground are 2.0 × 10⁻¹⁶ of I at the nodes, the boundary solve's
+      rounding, and 0 at the user cosines. A depolarising cloud's scalar reflectance as the ground
+      gives the vector solve of the whole column to 2.4 × 10⁻¹⁵.
+  - _The layers._ The upper medium takes the grid's layers between the split and the top, evenly in
+    ξ over that span (`bake.ts`'s `bakeLayering` gains an optional `span`, which reproduces the
+    whole column's layers to the bit at its default). The deck takes `DECK_LAYERS` = 32 between the
+    floor and the split by the same rule (lean, 2026-10-29). Each light's sums are fitted over the
+    whole column and laid on its layers (`prepareBake` gains an optional `layout`, `BakeLayout`:
+    the table's layers and the fit's), so that one term of a bin's gases is one g interval from the
+    top to the floor, and a term's `absorptionDepth` holds the upper layers first. The table's
+    altitudes run from the split up, `above.altitudesM`.
+  - _The floor._ `ground`: the medium's ground, its albedo the deck's floor. `envelope`: the
+    highest h\* at which τ from the top in the green channel, of every term but the absorbers
+    (`regime.ts`'s `envelopeFloorM`'s reading), reaches 1,000, or the ground if never; black. On
+    the conservative envelope (τ 3,000 at the datum) it lies at H ln 3, to 10⁻³ H.
+  - _The deck's reflectance_ (`deckReflectance`). The solver at 16 streams over the deck's delta-M
+    layers, with plane-parallel beams at every incident cosine and the formal solution at every
+    outgoing one: ρ^m = π I^m(0, +μ) ÷ μ′. It is solved once a bin and term of a band's bake (one
+    solve beside each of T14.b's) and once a channel and term of the correction, at that solve's
+    own cosines.
+    - The deck's layers are mixed in `deck.ts` with `bake.ts`'s arithmetic, term by term:
+      `bandBinOf` is private to `bake.ts`, and the correction's points need the same mixing of
+      their own optics. The correction's scalar half over the deck equals the thick bake's source
+      over it bit for bit (below), so the two decks agree.
+  - _What is stored_ (`DeckTables`, a band). `above`, T14.b's `MsSourceTable` over the upper medium
+    with the deck as its ground, and per light slot, at the grid's μ₀ and upward view cosines,
+    m = 0 and 1, RGB:
+    - `reflectance`, ρ^m(μ_v, μ₀), each bin's weighted over its gases' terms, then converted by
+      the bins' conversion (lean: the deck's reflectance under the star's light);
+    - `diffuse`, the deck's upward radiance at its top less its reflection of the kernels' own
+      beam, I^m(τ_L, +μ_v) − (μ₀ T_k ÷ π) ρ^m, sr⁻¹ per unit of the star's irradiance normal to its
+      beam (lean: the kernels add their own beam's reflection by `reflectance`, as they add their
+      own single scattering beside E);
+    - `deckOpticalDepth`, the deck's vertical extinction in each bin in the band's frame.
+    - Bytes, as `f32`: 405,504 B (`above`) and 12,288 B (the deck), 417,792 B a band and light.
+  - _The tests' figures_ (every comparison deterministic, no α).
+    - The 1% test: the conservative envelope's deck, τ about 990 of Cornette–Shanks g 0.8 over a
+      black floor, reflects 0.9906–0.9975 of its incident flux at every node and sun (held to
+      over 0.99). The medium above returns 1.0061, 0.9935 and 0.9906 of μ₀ to the top at μ₀ 0.3,
+      0.7 and 1 (held to 1%); the excess at the low sun is the pseudo-spherical beam's.
+    - Reciprocity, ρ^m(μ, μ′) = ρ^m(μ′, μ) at five cosines: 1.5 × 10⁻¹⁵ of each mode's largest
+      (held to 10⁻¹²).
+    - The band test, on the NH₃-like deck (τ 20, Cornette–Shanks g 0.75, ω 0.99, uniform from the
+      1-bar datum to 0.5 bar) under `saturnClassMedium()`'s air, an envelope on `SATURN_SPHEROID`:
+      four bands, s 0.868, 0.954, 1.048 and 1.152; the split at 0.5 bar in each (10⁻¹²); the column
+      above it (τ at 570 nm 0.135–0.102) and the deck's own (23.17–17.47) in the bands' inverse
+      ratio to 3.3 × 10⁻¹⁶ (held to 10⁻¹²).
+    - A grey deck's stored `reflectance` and `diffuse` equal one bin's solve to 4.4 × 10⁻⁸, the
+      `f32`'s rounding.
+    - The correction over the deck: its scalar half at 16 streams and m ≤ 1, with the bins'
+      wavelengths, equals the thick bake's source over the deck bit for bit in bins 2, 7 and 12
+      (held to 10⁻¹²); with every term a depolariser the correction is 3.1 × 10⁻¹⁶ (held to
+      10⁻¹²); its altitudes are `above`'s.
+  - _Timing_ (`thick/deck.bench.ts`, by hand, never asserted; provisional). Pod, 4 vCPU: the
+    benchmark on one thread at `nice 10`, the 1-minute load 0.8 at the start and 3.0 at the end,
+    each a mean of 3; Vitest's module runner flagged its export getters (`bandIndex`).
+
+    | Fixture                                                    | Solves (deck + above) | Preparation | A band | The correction, a band |
+    | ---------------------------------------------------------- | --------------------- | ----------- | ------ | ---------------------- |
+    | Venus-class, split at the cloud's top, deck to the ground  | 34 + 34               | 13.8 s      | 4.89 s | —                      |
+    | Saturn-class NH₃-like deck, an envelope, one of four bands | 15 + 15               | 6.5 ms      | 2.20 s | 1.21 s                 |
+    - A deck's solve and the solve above it take about 145 ms a pair.
+    - Against `BAKE_CEILING_S` = 5 s a world: a Venus-class band is at it before its preparation
+      (13.8 s, the cloud's Mie in 15 bins, T14.b's finding), and a four-band Saturn-class giant
+      takes about 8.8 s of deck bakes and 4.8 s of correction. Findings, not blockers; the UHD 620
+      host's times are pending: the owner's run.
+
+  - _Stated approximations_ (`deck.ts`'s remarks): the deck reflects as a plane-parallel slab lit
+    at the upper medium's μ₀, its own sphericity left out; its reflectance is delta-M's with no
+    TMS, so a cloud top's glory and backscatter lobe are smoothed into the truncated phase
+    function; in the correction it depolarises.
+  - _Sources._ Read: T14.a's solver and record, T14.b's and T14.e's modules and records; Stamnes et
+    al. 1988 as T14.a's record reads it (the bottom boundary and the user-angle integration); the
+    DISORT report v1.1 for the conventions only; decision-deep-decks-split §3.3 item 4 (the floor's
+    τ 1,000); decision-r08-vector §2 ("Lambertian ground and decks depolarise"). Nothing was ported
+    from code.
+  - _Departures from the brief._
+    - The deck's layers are mixed in `deck.ts`, not by an export of `bake.ts`'s `bandBinOf`, to
+      keep `bake.ts`'s changes to added optional parameters.
+    - The tests add the split's identity with the whole column (solver and vector solver) and the
+      correction's scalar half against the bake over the deck, beside the brief's three.
