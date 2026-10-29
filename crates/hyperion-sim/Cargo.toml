@@ -103,3 +103,8 @@ required-features = ["testing"]
 name = "surface_map"
 # `planetary::surface::reference` builds the reference Earth (R09.T15).
 required-features = ["testing"]
+
+[[example]]
+name = "trunk_map"
+# `planetary::surface::reference` builds the reference Mars (R09.T6.c's look).
+required-features = ["testing"]
