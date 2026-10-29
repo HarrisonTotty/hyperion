@@ -96,6 +96,14 @@ export const GPU_TIMING_WATCHDOG_MS = 480_000;
  */
 export const SMOKE_WATCHDOG_SCALE_MAX = 4;
 
+/**
+ * What the transfer check's run gains (`--smoke-transfer`; plan R10, R10.T15.b), ms: the check's
+ * waits for the server's welcome and the field's answer (`smoke/transfer.ts`' `TRANSFER_TIMING`,
+ * 60 s and 540 s, which a level-8 coarse pass of about a minute natively, R09.T16.a, may take on a
+ * slower machine), and a minute's margin.
+ */
+export const TRANSFER_WATCHDOG_MS = 660_000;
+
 /** What sets a run's watchdog: the main process's switches. */
 export interface SmokeWatchdogInputs {
   /** `--smoke-part`'s value: `1` to `13`, or `all`. */
@@ -113,6 +121,8 @@ export interface SmokeWatchdogInputs {
    * by which the allowances for the page's work are stretched.
    */
   readonly scale: number;
+  /** Whether `--smoke-transfer` runs the transfer check in place of the checks. */
+  readonly transfer: boolean;
 }
 
 /**
@@ -120,15 +130,19 @@ export interface SmokeWatchdogInputs {
  * captures are asked for and {@link GPU_TIMING_WATCHDOG_MS} where timestamp quantization is
  * lifted, each where the run takes part 1, whose groups they are (part 1 or all of them), those
  * three times the scale; plus the soak's and the child window's seconds, which are the clock's and
- * are not scaled.
+ * are not scaled; plus {@link TRANSFER_WATCHDOG_MS} for the transfer check, whose waits are its own
+ * and are not scaled either.
  */
 export function smokeWatchdogMs(inputs: SmokeWatchdogInputs): number {
-  const { part, captures, gpuTiming, soakSeconds, childSeconds, scale } = inputs;
+  const { part, captures, gpuTiming, soakSeconds, childSeconds, scale, transfer } = inputs;
   const partOne = part === "1" || part === "all";
   const capturesMs = captures && partOne ? CAPTURES_WATCHDOG_MS : 0;
   const timingMs = gpuTiming && partOne ? GPU_TIMING_WATCHDOG_MS : 0;
+  const transferMs = transfer ? TRANSFER_WATCHDOG_MS : 0;
   return (
-    (SMOKE_WATCHDOG_BASE_MS + capturesMs + timingMs) * scale + (soakSeconds + childSeconds) * 1000
+    (SMOKE_WATCHDOG_BASE_MS + capturesMs + timingMs) * scale +
+    (soakSeconds + childSeconds) * 1000 +
+    transferMs
   );
 }
 
@@ -144,6 +158,33 @@ export function readWatchdogScale(text: string): number | null {
 /** Whether a URL may load in the harness: the built page and inline data only. */
 export function isOfflineUrl(url: string): boolean {
   return url.startsWith("file:") || url.startsWith("data:");
+}
+
+/** The loopback hosts the transfer check's server may be on, as a URL's `hostname` reads them. */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/**
+ * The transfer check's server (`--smoke-transfer`; plan R10, R10.T15.b), the one request beside
+ * {@link isOfflineUrl}'s that the harness lets out: a `ws:` URL of a loopback host, with a port,
+ * at the server's `/ws`, as the WHATWG parser writes it; `null` for anything else, so that the
+ * check reaches this machine's server alone and the offline rule holds for every other request.
+ */
+export function transferSocketUrl(value: string): string | null {
+  const url = URL.canParse(value) ? new URL(value) : null;
+  if (
+    url === null ||
+    url.protocol !== "ws:" ||
+    !LOOPBACK_HOSTS.has(url.hostname) ||
+    url.port === "" ||
+    url.pathname !== "/ws" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    return null;
+  }
+  return url.href;
 }
 
 /** Whether `value` is a check, by its fields. */

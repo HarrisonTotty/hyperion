@@ -19,6 +19,8 @@ import {
   SMOKE_WATCHDOG_SCALE_MAX,
   type SmokeResult,
   smokeWatchdogMs,
+  TRANSFER_WATCHDOG_MS,
+  transferSocketUrl,
   UNCAPTURED_GPU_ERROR,
 } from "./result";
 
@@ -137,6 +139,7 @@ describe("smokeWatchdogMs", () => {
     soakSeconds: 0,
     childSeconds: 0,
     scale: 1,
+    transfer: false,
   };
 
   it("is 180 s for a run without the captures", () => {
@@ -198,6 +201,14 @@ describe("smokeWatchdogMs", () => {
     expect(smokeWatchdogMs({ ...plain, soakSeconds: 60, childSeconds: 30, scale: 2 })).toBe(
       450_000,
     );
+  });
+
+  it("adds the transfer check's waits to its run (R10.T15.b)", () => {
+    expect(smokeWatchdogMs({ ...plain, part: "all", transfer: true })).toBe(
+      180_000 + TRANSFER_WATCHDOG_MS,
+    );
+    // The page's waits, 60 s for the welcome and 540 s for the answer, and a minute.
+    expect(TRANSFER_WATCHDOG_MS).toBe(660_000);
   });
 
   it("is the allowance testRender.sh adds to part 1's outer limit", () => {
@@ -297,5 +308,28 @@ describe("readWatchdogScale", () => {
     ]) {
       expect(readWatchdogScale(text)).toBeNull();
     }
+  });
+});
+
+describe("the transfer check's server (R10.T15.b)", () => {
+  it("takes a loopback server's WebSocket at /ws, with its port", () => {
+    expect(transferSocketUrl("ws://127.0.0.1:7881/ws")).toBe("ws://127.0.0.1:7881/ws");
+    expect(transferSocketUrl("ws://localhost:7881/ws")).toBe("ws://localhost:7881/ws");
+    expect(transferSocketUrl("ws://[::1]:7881/ws")).toBe("ws://[::1]:7881/ws");
+  });
+
+  it.each([
+    "",
+    "not a url",
+    "wss://127.0.0.1:7881/ws",
+    "http://127.0.0.1:7881/ws",
+    "ws://10.0.0.2:7881/ws",
+    "ws://example.com:7881/ws",
+    "ws://127.0.0.1/ws",
+    "ws://127.0.0.1:7881/",
+    "ws://127.0.0.1:7881/ws?x=1",
+    "ws://user@127.0.0.1:7881/ws",
+  ])("refuses %j, so that every other request stays cancelled", (value) => {
+    expect(transferSocketUrl(value)).toBeNull();
   });
 });

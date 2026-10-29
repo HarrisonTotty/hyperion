@@ -40,6 +40,9 @@
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
  * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
  * captures, with the other captures; a plain `just test-render` runs none of them.
+ *
+ * With `transfer` in its query (`--smoke-transfer`; plan R10, R10.T15.b) the page runs R03.T15's
+ * transfer check instead of every group (`transfer.ts`): no adapter, only the server's socket.
  */
 
 import {
@@ -110,6 +113,7 @@ import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
 import { checkPhotoreal } from "./photoreal";
 import { checkBodies, checkClassMap, checkPhotorealFrame, checkSpriteDepth } from "./bodies";
 import { runChildWindow } from "./childWindow";
+import { checkTransfer } from "./transfer";
 import { runSoak } from "./soak";
 import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
@@ -728,12 +732,33 @@ async function childWindow(): Promise<Report> {
   };
 }
 
+/** R03.T15's transfer check's server, instead of the checks (plan R10, R10.T15.b), or `null`. */
+const transferUrl = parameters.get("transfer");
+
+/** Runs the transfer check, which asks the GPU nothing, and reports its checks. */
+async function transfer(url: string): Promise<Report> {
+  const checks = new Checks();
+  await checkTransfer(
+    { url, universe: parameters.get("universe") ?? "", body: parameters.get("body") ?? "" },
+    checks,
+  );
+  return {
+    variant: "transfer",
+    adapter: null,
+    capabilities: null,
+    checks: checks.list,
+    setupError: null,
+  };
+}
+
 void (
-  soakSeconds > 0
-    ? soak()
-    : childSeconds > 0
-      ? childWindow()
-      : run(variant, fixture, partOf(parameters.get("part")))
+  transferUrl !== null
+    ? transfer(transferUrl)
+    : soakSeconds > 0
+      ? soak()
+      : childSeconds > 0
+        ? childWindow()
+        : run(variant, fixture, partOf(parameters.get("part")))
 )
   .catch((error: unknown): Report => ({
     variant,

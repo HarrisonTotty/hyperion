@@ -22,6 +22,13 @@
  * `--smoke-captures=<dir>` asks the page for R05.T12.c's atmosphere comparison frames, which are
  * saved there as PNGs, for a person to look at.
  *
+ * `--smoke-transfer=<ws URL>` runs R03.T15's transfer check instead (plan R10, R10.T15.b;
+ * `smoke/transfer.ts` on the page): `--smoke-transfer-universe=<ID>`'s
+ * `--smoke-transfer-body=<ID>` field asked of the server at that loopback WebSocket, the one
+ * request beside `file:` and `data:` it lets out (`transferSocketUrl`); a URL that is not a
+ * loopback server's is a setup error (exit 2). `scripts/transferCheck.sh` starts the server and
+ * surveys the body first.
+ *
  * `--smoke-child=<seconds>` runs R07.T21's child window instead (`childWindow.ts`): on the client's
  * own graphics switches, shown, the child on a second display, refused with a setup error (exit 2)
  * before any window opens when Electron sees one display; `--smoke-child-hidden=1` puts it
@@ -47,6 +54,7 @@ import {
   SMOKE_RESULT_CHANNEL,
   SMOKE_WATCHDOG_SCALE_MAX,
   smokeWatchdogMs,
+  transferSocketUrl,
 } from "./result";
 import { isOwnPage } from "../main/ipcSender";
 import { describeMachine, nodeMachineSources } from "../main/results";
@@ -101,6 +109,12 @@ const outDir = argument("smoke-out", "");
 /** The watchdog's factor (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`), as given. */
 const watchdogScaleText = argument("smoke-watchdog-scale", "1");
 const watchdogScale = readWatchdogScale(watchdogScaleText);
+/** The transfer check's server, as given, or "" for the checks (plan R10, R10.T15.b). */
+const transferAsked = argument("smoke-transfer", "");
+/** The server's WebSocket the transfer check may reach, or `null` with none asked or allowed. */
+const transferUrl = transferAsked === "" ? null : transferSocketUrl(transferAsked);
+const transferUniverse = argument("smoke-transfer-universe", "");
+const transferBody = argument("smoke-transfer-body", "");
 const cancelled: CancelledRequest[] = [];
 /** The page's uncaptured GPU errors, as the engine logged them. */
 const gpuErrors: string[] = [];
@@ -165,6 +179,18 @@ app.on("window-all-closed", () => {
 if (!Number.isFinite(soakSeconds) || soakSeconds < 0) {
   finish([`SETUP --smoke-soak must be a number of seconds, not ${soakSeconds}`], SMOKE_EXIT.setup);
 }
+if (transferAsked !== "" && transferUrl === null) {
+  finish(
+    [`SETUP --smoke-transfer must be a loopback server's ws://host:port/ws, not ${transferAsked}`],
+    SMOKE_EXIT.setup,
+  );
+}
+if (transferUrl !== null && (transferUniverse === "" || transferBody === "")) {
+  finish(
+    ["SETUP --smoke-transfer needs --smoke-transfer-universe and --smoke-transfer-body"],
+    SMOKE_EXIT.setup,
+  );
+}
 if (!Number.isFinite(childSeconds) || childSeconds < 0) {
   finish(
     [`SETUP --smoke-child must be a number of seconds, not ${String(childSeconds)}`],
@@ -203,6 +229,7 @@ const WATCHDOG_MS = smokeWatchdogMs({
   soakSeconds,
   childSeconds,
   scale: watchdogScale ?? 1,
+  transfer: transferUrl !== null,
 });
 
 /** A display as the child-window run records it. */
@@ -262,7 +289,8 @@ void app
     session.defaultSession.webRequest.onBeforeRequest(
       { urls: ["<all_urls>"] },
       (details, reply) => {
-        if (isOfflineUrl(details.url)) {
+        // The transfer check's one socket, to the server it was given.
+        if (isOfflineUrl(details.url) || details.url === transferUrl) {
           reply({});
           return;
         }
@@ -418,6 +446,9 @@ void app
             }),
         captures: capturesDir === "" ? "0" : "1",
         ...(video === "" ? {} : { video: pathToFileURL(video).href }),
+        ...(transferUrl === null
+          ? {}
+          : { transfer: transferUrl, universe: transferUniverse, body: transferBody }),
       },
     });
     return undefined;
