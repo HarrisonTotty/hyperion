@@ -2156,8 +2156,9 @@ impl SystemStars {
     }
 
     /// The recoil of the pair holding the primary after its supernovae, while the pair stays bound
-    /// ([`BinaryTimeline::recoil`]): `None` for a primary in no pair the engine ran, or one whose
-    /// pair had no supernova or was unbound.
+    /// ([`BinaryTimeline::recoil`]): `None` for a primary in no pair `run_pairs` ran, or one whose
+    /// pair had no supernova or was unbound. A pair the pre-test passes over is run for its
+    /// remnant, and its collapses' recoils count (P11.T4.l).
     #[must_use]
     pub fn recoil(&self) -> Option<SystemVelocity> {
         self.pairs
@@ -2394,11 +2395,13 @@ fn summarised<'a>(
 
 /// Every pair of two stars of `hierarchy` that can interact by +H or holds a remnant by then, run
 /// through the binary engine on the tracks of `stars` (P11.T11): from zero age to the pair's age at
-/// the end of the clock window, +H, so that its timeline covers the source horizon. Any other pair
-/// is two single stars on their orbit, in no class, whose timeline would be one detached segment of
-/// its models, so it is not run. A pair with a brown dwarf, or with a member that is itself a pair,
-/// is not run either. Each pair runs under the stellar stage's `rules`, those of the galaxy the
-/// stars were generated in.
+/// the end of the clock window, +H, so that its timeline covers the source horizon. A pair the
+/// pre-test passes over that holds a remnant is run so that its stars' collapses act on its orbit,
+/// with their records, and the engine takes it over where a collapse leaves an orbit that can
+/// interact (P11.T4.l). Any other pair is two single stars on their orbit, in no class, whose
+/// timeline would be one detached segment of its models, so it is not run. A pair with a brown
+/// dwarf, or with a member that is itself a pair, is not run either. Each pair runs under the
+/// stellar stage's `rules`, those of the galaxy the stars were generated in.
 #[must_use]
 fn run_pairs(
     hierarchy: &SystemHierarchy,

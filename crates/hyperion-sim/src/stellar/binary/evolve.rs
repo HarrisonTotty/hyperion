@@ -11,6 +11,10 @@
 //! these ends a segment of the timeline; a timeline holds at most [`MAX_SEGMENTS`], and a pair that
 //! reaches the cap is left as it stands, which the tests count as a broken invariant.
 //!
+//! A pair the pre-test passes over is two single stars on its drawn orbit, and its stars' core
+//! collapses change that orbit by BSE appendix A1 in closed form; the engine takes it over from a
+//! collapse whose new orbit can interact (P11.T4.l, [`Engine::passed_over`]).
+//!
 //! A primary of `m_cc(Z) − 1` M☉ or more whose single-star death is a collapse dies when plan 06
 //! says, with plan 06's remnant and kick (design note 16): the engine takes that age as a fixed
 //! boundary, holds the star at its last living state if its own binary history would end it
@@ -37,6 +41,7 @@ use crate::stellar::substellar;
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, Radians, SolarMasses, Years};
 
+use super::detached::TestedOrbit;
 use super::star::{Member, Path, positive, zams_spin};
 use super::timeline::{
     BinaryInput, BinaryTimeline, Context, FixedOrbit, OrbitPath, PooledIaEvent, Segment,
@@ -62,13 +67,15 @@ pub(super) const MAX_STEPS: u32 = 200_000;
 /// [`Track::max_radius_until`]), or the engine's own sinks of orbital angular momentum can shrink
 /// the orbit into that test by then (P11.T4.j, ruling p11-channels of 2026-10-06): magnetic braking
 /// at the tidal equilibrium spin (BSE equation 50), gravitational radiation (equation 48) and the
-/// spin the tides can take from the orbit (equations 34–35), each at its largest. Those are the
-/// W Ursae Majoris channel and the giants' tidal captures, which the lobe test alone passes over.
+/// spin the tides can take from the orbit (equations 34–35, with what a locked star's wind takes,
+/// HPT equation 110, P11.T4.l), each at its largest. Those are the W Ursae Majoris channel and the
+/// giants' tidal captures, which the lobe test alone passes over.
 ///
 /// A star that has not arrived by then takes its zero-age main-sequence radius, as the engine
 /// carries it (P11.T4.i). A star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits,
-/// their first. Everything else is two single stars on an orbit: a pair this passes over at an age
-/// shows no interaction before it in a run to any later age.
+/// their first. Everything else is two single stars on an orbit that their core collapses change
+/// (BSE appendix A1, P11.T4.l): a pair this passes over at an age shows no interaction before it
+/// in a run to any later age.
 ///
 /// # Examples
 ///
@@ -133,9 +140,9 @@ pub(crate) fn can_interact_with_tracks(
 /// Runs the pair of `input` forward once from zero age to `until_age`, into its timeline (plan
 /// 11, design note 6).
 ///
-/// A pair that cannot interact ([`can_interact`]) is one detached segment of two single stars on
-/// their orbit, whose states are plan 06's own. Otherwise the engine runs event to event (see the
-/// module documentation).
+/// A pair that cannot interact ([`can_interact`]) is two single stars on their drawn orbit, whose
+/// states are plan 06's own, until a star's collapse, which BSE appendix A1 applies to that orbit
+/// (P11.T4.l). Otherwise the engine runs event to event (see the module documentation).
 ///
 /// # Examples
 ///
@@ -199,12 +206,18 @@ pub(crate) fn evolve_with_tracks(
 
 /// Whether [`run_pair`] reads the pre-test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PreTest {
-    /// A pair that cannot interact is two single stars on the drawn orbit (the generator's).
+pub(super) enum PreTest {
+    /// A pair that cannot interact is two single stars on the drawn orbit, and one whose orbit a
+    /// collapse leaves cannot interact on goes on on it (the generator's).
     Gate,
     /// Every pair is run through the engine, for the tests that check the pre-test against it.
     #[cfg(test)]
     Past,
+    /// The pre-test is read on the drawn orbit, and every pair a bound collapse leaves is run
+    /// through the engine from it, for the tests that check the pre-test asked again after a
+    /// collapse (P11.T4.l).
+    #[cfg(test)]
+    PastAfterCollapse,
 }
 
 /// [`evolve`] with the stars' own tracks, the pre-test read as `pre_test` says.
@@ -230,21 +243,12 @@ fn run_pair(
     let gated = match pre_test {
         PreTest::Gate => true,
         #[cfg(test)]
+        PreTest::PastAfterCollapse => true,
+        #[cfg(test)]
         PreTest::Past => false,
     };
     if gated && !interacts(input, &members, until) {
-        let segment = Segment::new(
-            SegmentKind::Detached,
-            0.0,
-            until,
-            members,
-            Some(OrbitPath {
-                fixed: Some(FixedOrbit::always(*input.orbit())),
-                ..LiveOrbit::of(input, Years::ZERO).path()
-            }),
-            None,
-        );
-        return BinaryTimeline::new(vec![segment], None, Vec::new(), until, ctx, false);
+        return Engine::passed_over(input, ctx, until, members, pin.map(|p| p.pin), pre_test);
     }
     // Before the start the stars are their own and the orbit the drawn one (`arrival`): the paths
     // the engine carries begin there, so that nothing before it depends on the steps after it.
@@ -262,6 +266,18 @@ fn run_pair(
 #[must_use]
 pub(super) fn evolve_past_the_pre_test(input: &BinaryInput, until_age: Years) -> BinaryTimeline {
     run_pair(input, until_age, [None, None], PreTest::Past)
+}
+
+/// [`evolve`] past the pre-test asked again after a passed-over pair's bound collapse: the engine
+/// runs every such pair from the collapse, whatever that pre-test says, so that the tests can check
+/// it against the engine (P11.T4.l).
+#[cfg(test)]
+#[must_use]
+pub(super) fn evolve_past_the_second_pre_test(
+    input: &BinaryInput,
+    until_age: Years,
+) -> BinaryTimeline {
+    run_pair(input, until_age, [None, None], PreTest::PastAfterCollapse)
 }
 
 /// Where the engine starts stepping for a pair of `members` run to `until`: where the first star
@@ -410,7 +426,14 @@ pub(super) fn interacts(input: &BinaryInput, members: &[Member; 2], until: f64) 
     }
     let radii = largest_radii_rsun(input, members, until);
     reaches_lobe(input, radii)
-        || super::detached::decay_reaches(input, members, start, until, radii)
+        || super::detached::decay_reaches(
+            input.params(),
+            &TestedOrbit::drawn(input, members, until),
+            members,
+            start,
+            until,
+            radii,
+        )
 }
 
 /// Each star's largest radius up to the engine's age `until_years`, R☉, as the lobe test reads
@@ -444,10 +467,23 @@ pub(super) fn largest_radii_rsun(
 #[must_use]
 pub(super) fn reaches_lobe(input: &BinaryInput, radii_rsun: [f64; 2]) -> bool {
     let [m1, m2] = input.masses().map(SolarMasses::value);
-    let periastron = input.orbit().periapsis();
+    lobe_reached_at(input.orbit().periapsis(), [m1 / m2, m2 / m1], radii_rsun)
+}
+
+/// The lobe test on `tested` (P11.T4.l, the orbit a passed-over pair's collapse leaves): whether
+/// either star of the largest radii `radii_rsun` reaches its Roche lobe at the orbit's periastron,
+/// at its lobe ratio ([`TestedOrbit::lobe_ratios`]).
+#[must_use]
+pub(super) fn reaches_lobe_on(tested: &TestedOrbit, radii_rsun: [f64; 2]) -> bool {
+    lobe_reached_at(tested.elements.periapsis(), tested.lobe_ratios, radii_rsun)
+}
+
+/// Whether either star of the largest radii `radii_rsun` (R☉) reaches its Roche lobe at
+/// `periastron`, star i at the mass ratio `ratios[i]`, its mass ÷ its companion's (Eggleton 1983).
+#[must_use]
+fn lobe_reached_at(periastron: Metres, ratios: [f64; 2], radii_rsun: [f64; 2]) -> bool {
     (0..2).any(|i| {
-        let (m, other) = if i == 0 { (m1, m2) } else { (m2, m1) };
-        let lobe = roche_lobe_radius(m / other, periastron).value() / SOLAR_RADIUS_M;
+        let lobe = roche_lobe_radius(ratios[i], periastron).value() / SOLAR_RADIUS_M;
         radii_rsun[i] >= lobe
     })
 }
@@ -553,7 +589,7 @@ pub(super) struct LiveOrbit {
 impl LiveOrbit {
     /// The input's orbit, drawn, up to the engine's start at `start`, where its paths begin.
     #[must_use]
-    fn of(input: &BinaryInput, start: Years) -> Self {
+    pub(super) fn of(input: &BinaryInput, start: Years) -> Self {
         let k = input.orbit();
         let a = k.semi_major_axis().value() / SOLAR_RADIUS_M;
         let e = k.eccentricity().value();

@@ -478,7 +478,11 @@ given; where it is not, the task that builds it is named.
    _(P11.T4.j, ruling p11-channels of 2026-10-06:)_ a pair can interact if it reaches that test on
    the drawn orbit, or after the decay the engine's sinks can make by then: magnetic braking at the
    tidal equilibrium spin, gravitational radiation and the spins' reservoir, bounded from above.
-   Everything else is two single stars on an orbit. Wind-fed symbiotics need no orbit change, so
+   Everything else is two single stars on an orbit that their core collapses change (BSE appendix
+   A1; _P11.T4.l, ruling p11-supernova-pins of 2026-10-06:_ each collapse is applied once in closed
+   form on the drawn orbit, widened by Jeans's mode for the winds, and the pre-test is asked again
+   of a bound new orbit, from which the engine runs the pair if it can interact). Wind-fed
+   symbiotics need no orbit change, so
    they are classified from the state of a wide pair. _(P11.T4.i, ruling p11-channels of
    2026-10-06:)_ the engine starts at the first arrival on the main sequence. A star that has not
    arrived by then is its own zero-age main-sequence star to the test and to the engine, its clock
@@ -1264,6 +1268,9 @@ P11.T4, as built"._
     updated 2026-10-15) with every golden re-blessed, and P11.T10's agreement test, if it then
     exists, re-baselined.
 
+  _As built (lane p11-t4l, 2026-10-28; at version 23 on its lane branch, held for 25's train): see
+  Risks, "P11.T4.l as built"._
+
 - **P11.T4.m A fed helium star or white dwarf swells around its own core** (ruling p11-c2-swell,
   2026-10-06; finding C2 of P11.T4.g, and F15; output moves; an anchor of version 25 (S1), built
   after P11.T4.l on its lane branch and landed only with the train, by decision-bump-plan-after-22
@@ -1730,11 +1737,22 @@ Acceptance: `cargo test -p hyperion-sim binary::events`.
 
 Build the conditional multiplicity of layer-D and -E systems on plan 08's `record.placement_class()`
 and plan 06's stripped mark (Design note 1): `Displaced { kind: Remnant, .. }` with an ordinary-mode
-kick is `ForcedSingle`; `Retained` and low-mode remnants keep their drawn companion and move at the
-pair's recoil (10–30 km/s, checked against the velocity plan 08 drew and its `kick_constraint()`);
-`Displaced` with kind `Runaway` or `Walkaway` is `ForcedSingle`; a grid binary whose supernova
-unbinds it shows the remnant alone, because the released companion is plan 08's independent object.
+kick is `ForcedSingle`; `Retained` and low-mode remnants keep their companion where the engine's
+collapse leaves the pair bound (P11.T4.k–l), and move at its recoil (`SystemStars::recoil`; 10–30
+km/s, checked against the velocity plan 08 drew and its `kick_constraint()`), and where it unbinds
+them, for example when more than half the pair's mass is lost, the remnant is alone; `Displaced`
+with kind `Runaway` or `Walkaway` is `ForcedSingle`; a grid binary whose supernova unbinds it, the
+engine's `Disrupted`, shows the remnant alone, because the released companion is plan 08's
+independent object. That applies to every pair, since every collapse is applied (P11.T4.l).
 Low-mass released companions are left out, as the brainstorm says. Bump the version.
+
+_Amended by P11.T4.l (ruling p11-supernova-pins §7, 2026-10-06; written 2026-10-28):_ the
+agreement test runs after T4.l. Without it the engine released 1,001 companions of 2.5 M☉ or more
+per 12,000 layer-E prior pairs, 40% of them faster than 30 km/s; with it, 2,212 and 18% (the
+ruling's probe). Its walkaway figure is likely to miss (the ruling's §8, F11: the record holds
+speeds at the explosion, Renzo et al. speeds at infinity). A system this task moves at its recoil
+must stay below its layer's `pad_speed`, through P08.T17's check: layer D's neutron-star recoils
+measure at most 76 km/s, and T4.l's new bound pairs recoil at most 22 km/s.
 
 Files: `stellar/system.rs`, `stellar/binary/supernova.rs`.
 
@@ -1742,7 +1760,8 @@ Tests (slow, prior-sampled massive binaries): the stripped share equals `strippe
 the low mode is 20 ± 10% of neutron stars and nearly all of its members keep a companion; more than
 half of double neutron stars have e < 0.3; the rate of released companions above 2.5 M☉ matches the
 supernova-release part of plan 08's `RunawayModel` (walkaways, and the half of runaways not ejected
-by encounters) to 25%, most of them under 30 km/s; retention in a cluster with a 50 km/s birth
+by encounters, amended to the tenth by design note 24 as ruling 128.2–3 amended it) to 25%, most
+of them under 30 km/s; retention in a cluster with a 50 km/s birth
 escape speed is at least a tenth with pairs judged on system velocity; at least half of black holes
 are unkicked; and, for Design note 16, `SystemStars::death_time` and `natal_kick` of 10⁴ layer-E
 systems equal what plan 06 alone gives. Acceptance: `just test-slow` passes these by name
@@ -2037,7 +2056,12 @@ engine, with its kick. Then:
 - `Detached` must still bound the periastron after a kick, or return `None` for every pair a star
   of which can explode by the window's end. T17.a does the latter at 21 already.
 - T17.a's test `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` pins today's
-  behaviour and fails when T4.l lands, so the rule is looked at again then.
+  behaviour and fails when T4.l lands, so the rule is looked at again then. _(Looked at again by
+  P11.T4.l, 2026-10-28: the collapse rule, `None` for every pair a star of which may have
+  collapsed, stands, and the test is restated as
+  `a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it`. T17.a's closed
+  form gains T4.l's wind-spin term, so that `Detached` still implies the pre-test fails. See
+  Risks, "P11.T4.l as built".)_
 - Re-run T17.a's and T17.c's slow tests, and refit T17.b's tables, in the batch.
 
 - **P11.T17.a The reach table, the interface and `Detached`.**
@@ -4454,6 +4478,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     island, F14's merging yield against Pol et al.'s intervals, and Tauris et al.'s 39 of 47 for A.
 - **Version 21 limit: a passed-over pair's collapses** (ruling p11-supernova-pins, 2026-10-06,
   figures re-measured by ruling p11-t4k-faults; fixed by P11.T4.l in the deferred bump batch).
+  _Closed by P11.T4.l (lane p11-t4l, 2026-10-28), on its lane branch for version 25's train: the
+  limit holds at versions 21 to 24. See "P11.T4.l as built"._
   - A pair that the pre-test passes over keeps its drawn orbit through its stars' core collapses,
     with no record, mass loss or kick.
   - These are 42% of layer-E primaries' collapses (5,012 of 11,915 in the 12,000 prior pairs,
@@ -4838,7 +4864,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       zero-miss gate covers interactions before the first supernova only.
     - So the rule is needed at 21 as well as after the deferred bump batch. The test
       `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` pins the F3 behaviour and
-      fails when T4.l lands, by design.
+      fails when T4.l lands, by design. _(P11.T4.l, 2026-10-28: it did, and is restated as
+      `a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it`; the rule
+      stands. See "P11.T4.l as built".)_
   - **The sampling, set by the dense test and the science check:**
     - each cell's stars at 9 masses, 7 metallicities (0.083 dex apart at most) and 11 η draws (η =
       0, then −3.5σ to +3.5σ in nine steps, then +7σ);
@@ -6316,3 +6344,212 @@ galaxy_sweeps`.
   merger that ejects nothing lists no kilonova: 8.9% of the class's black holes eject, at most
   0.026 M☉. `stellar/binary_events.golden`'s kilonova fixture is now the first double neutron
   star (one line, its subject and onset). `remnant_mass()` is still the total.
+- **P11.T4.l as built** (lane p11-t4l, 2026-10-28; ruling p11-supernova-pins, finding F3, and the
+  orchestrator's wind-spin ruling of 2026-10-06). A pair the pre-test passes over has each of its
+  stars' core collapses applied once, in closed form, on its drawn orbit. **Built as version 25's
+  behaviour at version 23, on its lane branch, with no hold and no bump**: an anchor of version
+  25's train (decision-bump-plan-after-22 §2.2; decision-galaxy-25-train §1.7), its goldens
+  re-blessed by name at header 23, which the train's bump re-blesses at 25. `golden_diff.py`
+  therefore reports "changed values, not bumped", as the lane's brief expects.
+  - _The rule, as built._
+    - `evolve.rs` `run_pair`'s passed-over branch calls `Engine::passed_over` (`supernova.rs`).
+      A pair with no collapse before the age asked is the one detached segment it was, bit for
+      bit.
+    - `collapses_before` lists the sudden deaths before the age asked, in age order, the
+      primary's first at a tie (`total_cmp`). The pinned primary takes the pin's age and kick and
+      `held_to(pin.remnant, living mass)`, the living mass its own track's death's progenitor
+      mass (T4.k). Any other star takes its own track's death and remnant, and `own_kick` with
+      its progenitor's own stripping: `own_kick` is `companion_kick`'s body, which now calls it
+      with `Stripping::Companion` where the binary took the envelope.
+    - A1's arithmetic is `appendix_a1`, taken out of `lose_mass` and shared with it bit for bit
+      (with `universe_time_at` and `alone`; its bound flag is now whether an orbit follows). The
+      closed form has no engine, so it calls neither `explode` nor `lose_mass` but writes the
+      record as `explode` does. Its input is `jeans_widened_state`: the rails' relative state at
+      the collapse's universe time, r × f and v ÷ f with f = M on the rails ÷ M now (the drawn
+      masses' sum for the first collapse, the mass after it for a later one).
+    - Bound: the orbit after is A1's, shown on fixed elements (`rails_elements`, e held to
+      0.9998 as the engine reports it), and a later collapse is applied on it the same way.
+      Unbound: `Disrupted { by }`, no orbit; a later collapse is recorded with its kick alone.
+    - After each bound collapse `interacts_after_collapse` asks the pre-test again of A1's orbit
+      (its own eccentricity, unclamped), from the collapse to the age asked: the lobe test
+      (`evolve.rs` `reaches_lobe_on`) and the decay bound, on a `TestedOrbit`. If it passes,
+      `Engine::new` at the collapse with the members (restarted there), A1's orbit and any pin
+      still ahead, then `take_over` (the segments and records so far) and `run`.
+    - `detached.rs`: `decay_reaches(params, &TestedOrbit, members, start, until, radii)`;
+      `TestedOrbit { elements, masses_msun, lobe_ratios, wind_loss_msun }` (`TestedOrbit::drawn`
+      reproduces the drawn test bit for bit: the same ratios m₁ ÷ m₂ and the same Eggleton
+      fraction, now `lobe_fraction`, which `light.rs` shares); the wind-spin term
+      `WIND_SPIN_SHARE` (2/3 − k′₂) Σᵢ ΔMᵢ Rᵢ², with tides and the wind's spin switch on, added to
+      the reservoir's inertia in the coarse test and the fine one. ΔMᵢ (`wind_loss_msun`) is the
+      star's mass at the span's start less its least living mass by the age asked: its track's
+      mass then, or its death's progenitor mass if it dies first.
+    - `light.rs` (P11.T17.a's closed form) gains the same term, bounded by ΔMᵢ ≤ mᵢ: each kᵢ in
+      its c gains 2/3 − k′₂. Without it the engine's pre-test would pass pairs that `Detached`
+      certifies, against "`Detached` ⇒ the pre-test fails" (decision-observed-class-findings
+      §A.5's forward condition for T4.l).
+    - `stellar/system.rs`: `run_pairs`' doc (a dead pair is run so that its collapses act on its
+      orbit), and `SystemStars::recoil`'s (a passed-over pair's collapses' recoils count).
+  - _Deviations from the ruling's text, and the lane's choices (lean, 2026-10-28)._
+    - **The pre-test asked again**: each living star at its own track's `max_radius_until` the
+      age asked, which bounds the span's largest from above; a star dead by the collapse at its
+      remnant's radius; each star's lobe at its least living mass by the age asked against the
+      other's mass at the collapse (the earlier port's science must-fix).
+    - **The engine's spins at a takeover** (not in the ruling, which says `Engine::new`): each
+      living star on its own track carries the angular momentum it arrived on its main sequence
+      with (`Engine::zero_age_spin`, the engine's own start there: HPT equations 107 and 108, BSE
+      equation 35), held at most at its break-up now, √(G M ÷ R³). A single star only loses spin,
+      so this bounds its spin from above. `Engine::new`'s start, the zero-age velocity at the
+      star's radius then, spins a red supergiant past break-up (a 10 M☉ star at 500 R☉: 232 km/s
+      against 62 km/s), and the cap is for a companion its wind has stripped to a compact helium
+      star (1.0–2.8 times break-up for 25–40 M☉ twins, the science check). The remnant keeps
+      `Engine::new`'s.
+    - **A later collapse in an unbound pair** keeps the label `Disrupted { by: <the first> }`,
+      the star whose collapse unbound the pair; the engine's `explode` relabels it by the later
+      star (an engine quirk, recorded, not changed here).
+    - **A collapse at the age asked itself** is not reached, as the engine's own deaths at its
+      age are not: the build-age comparisons skip that instant.
+    - **The build-age contract** holds bit for bit where the pre-test, and the pre-test asked
+      again after each bound collapse, pass a pair over at both ages. Where the second passes it
+      over at an age and not at a later one, the later run's engine evolves the orbit from the
+      collapse where the earlier keeps it fixed; the history to the collapse is the same and the
+      later run shows no interaction before the earlier age (T4.j's wording, which the plan says
+      covers it). `check_any_age` checks exactly that.
+    - **`a_wide_black_hole_pair_stays_bound`**: at version 23 the 40 M☉ primary, stripped by its
+      own winds to a 9.83 M☉ helium star, collapses at 5.51 Myr into a black hole of its whole
+      mass with no kick: no mass is lost, so A1's a′ is the widened 84,263 R☉ (f = 2.52) and e′ =
+      0, with a recoil of about 0 (the plan's "small mass lost" was the prototype's). The test
+      adds the kick-free case of the companion's collapse at 27.82 Myr, which loses a quarter to
+      a half of the pair's mass on the circular orbit the first left: Blaauw's a′ and e′ from the
+      orbit widened by the companion's wind since, and the recoil v m_BH ΔM ÷ (M M′), to 10⁻⁹.
+    - **`a_kicked_wide_pair_that_closes_is_run_from_its_collapse`** (in `tests/binary_classes.rs`,
+      beside the prior sampler): layer-E prior pair 35928, 8.30 + 5.88 M☉ at 56,573 d, e 0.47,
+      whose neutron star (38.92 Myr) is kicked onto e 0.994; the engine takes over and the
+      companion's first giant branch meets it in a common envelope at 72.33 Myr, after which its
+      helium star feeds the neutron star (the ruling's pair 6441, at version 21, went the same
+      way). A search of 10⁵ layer-E prior pairs found seven such pairs (17367, 29814, 35423,
+      35928, 57273, 68325, 80075) among 38,847 passed over, 38,368 with a collapse and 7,702 bound
+      after their first.
+    - **`the_widening_is_jeans_mode`** tests `jeans_widened_state` on three constructed orbits:
+      the separation × f exactly, and a × f, e, the orientation and the rails' phase (so the true
+      anomaly) to 10⁻¹²; `a_wide_pair_is_unbound_by_its_primarys_collapse` checks the engine-level
+      input through the record's velocities to 10⁻⁹.
+    - **T17.a's version-21 test**,
+      `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21`, failed as planned and is
+      restated as
+      `a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it`: the collapse rule
+      (item 3, `None` for a pair a star of which may have collapsed by the window's end) stands.
+    - **More tests** (the reviews): `the_second_pre_test_never_passes_over_an_interaction` (slow;
+      `evolve_past_the_second_pre_test` runs every pair a bound collapse leaves through the engine);
+      `a_taken_over_star_keeps_its_zero_age_spin`; `passed_over_collapses_are_pinned`, a new
+      golden; the build-age suites' wide massive pairs (`wide_massive_pair`, beside every tenth
+      pinned pair: 6 in the fast suite, 100 in the slow one); `check_collapses` on passed-over
+      pairs; two wide pairs in `a_timeline_is_the_same_in_any_order`; and a 1.5 + 0.45 M☉ pair at
+      2,300 d in `the_bound_follows_the_engines_switches`, which passes by 13.8 Gyr only with the
+      wind's spin.
+  - _Known departures_ (the plan's, as built): the shown orbit before a collapse is the drawn one,
+    and steps to A1's orbit from the widened state at the collapse; a white dwarf's birth keeps
+    the orbit (F1). The widening assumes the stars' mass-loss times far exceed the period, which
+    beyond periods of about 10⁷ d it extrapolates, as BSE's orbit-averaged rates do (science
+    check, recorded). `SystemStars`: a passed-over pair's star now has its collapse's record, and
+    `recoil()` is `Some` for a pair bound after its collapses.
+  - _Goldens_ (blessed by name at header 23, `uname -m` x86_64; `golden_diff.py --base` the lane's
+    base: three files, no header change, "changed values, not bumped"):
+    - `stellar/binary_timelines`: **29 of 1,000 digests**, each a single segment at the base.
+      - 10 by the closed form: 0083, 0221, 0430, 0629, 0648, 0775, 0836, 0872, 0887, 0998. Six
+        are disrupted by the primary's collapse (0221, 0430, 0648, 0775, 0872, 0998, four of them
+        recording the companion's collapse later); four stay bound on A1's orbit (0083, 0629,
+        0836, 0887), of which three are disrupted by the companion's collapse and 0836 stays bound
+        through both. None is taken over by the engine.
+      - 19 by the wind-spin term, which now passes them, so that the engine runs them from the
+        first arrival; none interacts: 0018, 0218, 0290, 0350, 0414, 0440, 0511, 0532, 0538, 0573,
+        0575, 0620, 0628, 0801, 0817, 0837, 0920, 0925, 0978 (0538, 26.9 + 19.6 M☉ at 5,653 d,
+        collapses on the engine's orbit; the plan's list had it as a closed-form pair).
+      - Of the plan's fifteen, 0330, 0480, 0782 and 0886 do not move: T4.j's bound runs them
+        since T4.k (as T4.k's record said).
+    - `stellar/pair_light`: **13 of its 256 verdict queries**, all `Detached` at the base, by
+      T17.a's wind-spin term: 8 to `Bright` (026, 055, 061, 077, 150, 213, 221, 248), 2 to
+      `Unchanged` (179, 253), 3 to `None` (131, 156, 199); 8 `M_V` lines are new, for the new
+      `Bright` verdicts. `Detached` falls from 143 to 130 of the queries.
+    - `sky/census_near_sun` (`the_census_near_the_sun_is_pinned`): the systems the census
+      generates in full rise, as T17.a's `Detached` certifies fewer pairs (A 559 → 570, B 437 →
+      453, C 3,311 → 3,334, D 782 → 797; C's and D's without photometry 828 → 858 and 916 → 941);
+      every accepted and listed count is unchanged, so the census's stars do not move.
+    - `stellar/passed_over_collapses`: new (an extension), from `passed_over_collapses_are_pinned`.
+    - No other golden moves: all 357 golden tests the change reaches, in the sim and the server,
+      run without stopping at a failure, and the gate's fast suite.
+  - _Statistics_ (layer E, the 12,000 prior pairs of `binary_classes`' sampler, all run to
+    13.8 Gyr as `run_pairs` runs them; the lane's probe against the base, x86_64, pod 4 vCPU):
+    - the bound share after the primary's collapse **66.8% → 33.9%** (neutron stars 62.1% →
+      17.0%, black holes 74.4% → 61.1%; the plan expected 34.0%, 17.2% and 61.2%);
+    - the hydrogen-poor share of the recorded collapses 0.538 → **0.376** (8,393 → 14,084
+      records);
+    - bound NS/BH beside a living star 26.4 × 10⁶ → **4.26 × 10⁶** pair-Myr (−84%; the plan −86%),
+      on a log grid of 400 ages;
+    - the double-neutron-star class shown in 282 → **115** pairs, against 115 by record before and
+      after (the plan expected 126 against 112);
+    - symbiotic neutron-star X-ray binaries 24,600 → **1,870** pair-Myr (−92%; the plan −95%);
+    - released companions of 2.5 M☉ or more 1,039 → **2,234**, 61% → 82% of them below 30 km/s
+      (the plan: 2,212, the new ones nearly all slow);
+    - pairs the pre-test passes over by 13.8 Gyr 5,068 → 4,625: the wind-spin term passes 443
+      more (+8.7% engine runs in this sample);
+    - **the zero-miss gate** (`the_decay_bound_never_passes_over_an_interaction`, 3 × 6,000
+      pairs): **0 misses** in each sample; the pre-test passes 2,262, 2,611 and 5,041 (at version
+      21, before the term: 2,262, 2,576 and 2,761; the probe's 2,761 → 5,047), of which 542, 126
+      and 3,730 do not interact;
+    - **the pre-test asked again** (`the_second_pre_test_never_passes_over_an_interaction`, 3,000
+      wide massive pairs): 1,071 bound after a collapse, 2 taken over by the engine, 1
+      interaction when the engine is forced from every bound collapse, **0 missed** (the plan's
+      probe: 0–3 of 5,607);
+    - the build-age suites: 3,803 runs just past events and 30 between arrivals; at any age 397
+      run, 598 passed over, 5 through collapses, 0 missed; between arrivals 60 run, 661 passed
+      over, 0 missed; the 100 wide massive pairs 10 passed over and 90 through collapses, 0
+      missed. The 10³ close pairs keep the engine's invariants, `check_collapses` now on
+      passed-over pairs too;
+    - `binary_classes` (4 of 4): every class reached; 115 bound double neutron stars in the
+      window test, 72 (63%) at e < 0.3, 26 merging, about 30 a Myr by VG18's yield (Pol et al.
+      28–72); **the shown class 115 against 115 by record** (the new test; within 15); recycled
+      pulsars' median periods 27.7 ms beside CO/ONe white dwarfs and 70.3 ms beside neutron stars;
+    - `binary_system` (3 of 3): ruling 137's share per exploding star **0.472** (2,723 of 5,765
+      collapses; 0.500 at version 21 before T4.l, by the earlier port's run), not asserted;
+      Rucinski's contact pairs 2.84 × 10⁻³ a star; the bright exception 4 of 86,184 thin-disc
+      systems;
+    - `binary_carve` (1 of 1): redrawn A 0, B 0, C 1.0 × 10⁻³, D 6.85 × 10⁻³, E 4.0 × 10⁻³; no
+      system uses every attempt;
+    - P11.T17.a's agreement (`detached_generated_pairs_are_passed_over`, and the slow
+      `no_detached_pair_is_passed_by_the_pre_test` over 10⁵ pairs a layer): **no `Detached` pair
+      passes the pre-test.** The term's ΔMᵢ ≤ mᵢ costs `Detached` most where a heavy star has a
+      light companion (its (1 + q) factor): against "P11.T17.a as built"'s table, A 99.69% →
+      99.38% (young 99.93% → 99.79%), B 98.20% → 96.76% (99.63% → 99.11%), C 77.46% → 72.87%
+      (99.38% → 97.74%), D 25.96% → 19.92% (97.35% → 90.55%), E 0.95% → 0.72% (66.16% →
+      49.93%); the pre-test passes over C 81.98%, D 26.67% and E 9.77% at the records' ages;
+    - P11.T17.c's `the_pair_verdicts_hold_against_the_engine`: 0 violations and 0 engine panics
+      over its 4.05 × 10⁵ pairs (1,141 s);
+    - `the_gate_is_conservative` (P11.T11.a; decision-observed-class-findings §A.5) passes, run by
+      name, and `briefs_are_the_full_systems_over_thirty_thousand_systems` passes (23,888
+      table-routed rows inside their stated error, 514 s);
+    - R06's census oracles: within 1,000 ly of the Sun
+      (`the_census_is_its_oracle_1000_ly_from_the_sun`, 1,400 s) the census generates 476,140 of
+      1,411,018 systems in full, against R06's last record of 453,260 (+5.0%: C 251,630 →
+      270,421, D 137,060 → 141,147, E 64,570 → 64,572), from T17.a's smaller `Detached`; the
+      150 ly and dwarfs' oracles pass; the four nuclear-disc ones were not run (stopped to give
+      the gate the pod's cores);
+    - **the R06 census** (`a_hundred_thousand_systems_live_and_die_in_order`) passes in **381 s**
+      (pod, 4 vCPU, alone: not comparable with T4.k's 188 s on the old machine under the heavy
+      lock), and `multiple_systems_follow_the_model_over_ten_thousand_systems` passes;
+    - `just fit-check`: 45 fresh, 5 provisional as at the base (`displaced_forms`, `helium`,
+      `kick_rank`, `mge`, `streams`), **0 stale**: no table moves, so no refit here. T17.b's
+      tables' refit (P11.T17's note on the deferred batch) stays with the train's wiring, at
+      `--since 25`.
+  - _Findings_ (recorded; not this task's):
+    - **Ruling 137's share in `binary_system` is 0.472**, against the ruling's expected 0.32–0.38
+      (scaled from the prior sample, where it is 0.376): for the binary-population calibration,
+      as the earlier port recorded.
+    - **T17.a's `Detached` shrinks** under ΔMᵢ ≤ mᵢ (above): a tighter bound per cell, such as
+      the least living mass the reach table could store, would recover much of it, in T17.b's
+      refit for the train (lean, 2026-10-28). It costs the census more table reads and the brief
+      gate fewer certified rows; no verdict is wrong.
+    - **The engine's `explode` relabels `Disrupted { by }`** by a later collapse in an unbound
+      pair (the closed form keeps the first).
+    - **Citations not re-read in the pod** (no web access): HTP02 §2.2 for Jeans's mode (the
+      plan's), HPT equations 107–110 and BSE equation 35. The science check derived every formula
+      (all ok) and leaves the section and equation numbers to a check against the sources.

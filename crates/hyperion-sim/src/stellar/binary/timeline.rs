@@ -218,7 +218,7 @@ impl FixedOrbit {
 
 /// The largest eccentricity a bound orbit is reported with: plan 14 carries bound orbits from
 /// 0.9999 up as open ones (ruling 39 of 2026-09-22), which a secular binary never needs.
-const MAX_REPORTED_ECCENTRICITY: f64 = 0.9998;
+pub(super) const MAX_REPORTED_ECCENTRICITY: f64 = 0.9998;
 
 impl OrbitPath {
     /// The elements at `age` for a pair of total mass `total` M☉, or `None` if they cannot be

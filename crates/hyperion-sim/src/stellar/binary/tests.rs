@@ -795,11 +795,11 @@ fn check_no_bare_giant(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
 
 /// P11.T4.k's invariants on `timeline`, the timeline of `input` (rulings p11-supernova-pins and
 /// p11-t4k-faults, 2026-10-06: every collapse is applied once, from the star's last living mass),
-/// in a pair the engine runs and whose timeline is not capped. A pair the pre-test passes over
-/// keeps its drawn orbit through its stars' collapses with no record, the version-21 limit that
-/// P11.T4.l lifts, and a capped timeline never reaches its later deaths (P11.T4.g's finding C2,
-/// `swell`'s core, can cycle a helium accretor to the cap; the 10³ suites assert no pair reaches
-/// it); neither is checked. `what` describes the pair for the failure message.
+/// whose timeline is not capped: a pair the engine runs, or one the pre-test passes over, whose
+/// collapses the closed form applies (P11.T4.l). A capped timeline never reaches its later deaths
+/// (P11.T4.g's finding C2, `swell`'s core, can cycle a helium accretor to the cap; the 10³ suites
+/// assert no pair reaches it), and is not checked. `what` describes the pair for the failure
+/// message.
 ///
 /// - No member goes from a living phase to a neutron star or black hole without a supernova
 ///   record of its component at that age (10⁻⁹ relative), but where it is the compact star its
@@ -813,7 +813,7 @@ fn check_collapses(input: &BinaryInput, timeline: &BinaryTimeline, what: &impl F
     use super::star::Member;
 
     let until = timeline.until();
-    if timeline.hit_segment_cap() || !can_interact(input, until) {
+    if timeline.hit_segment_cap() {
         return;
     }
     let compact = |phase: Phase| matches!(phase, Phase::NeutronStar | Phase::BlackHole);
@@ -958,7 +958,18 @@ fn a_thousand_close_pairs_keep_the_engines_invariants() {
 /// the same states whatever was asked before.
 #[test]
 fn a_timeline_is_the_same_in_any_order() {
-    let inputs = sample_pairs(12, 0x5eed_0003);
+    // With two wide pairs whose collapses the closed form applies (P11.T4.l).
+    let no_kicks = BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    };
+    let inputs: Vec<BinaryInput> = sample_pairs(12, 0x5eed_0003)
+        .into_iter()
+        .chain([
+            pair(40.0, 10.0, 1.0e5, 0.0, 0.02).with_params(no_kicks),
+            pair(15.0, 12.0, 1.0e5, 0.4, 0.02).with_params(no_kicks),
+        ])
+        .collect();
     let until = Years::new(1.2e10);
     let forward: Vec<_> = inputs.iter().map(|i| evolve(i, until)).collect();
     let backward: Vec<_> = inputs.iter().rev().map(|i| evolve(i, until)).collect();
@@ -1931,6 +1942,9 @@ enum EarlierRun {
     /// The pre-test passed over the pair at the earlier age (two single stars on the drawn orbit),
     /// and the later run met no interaction before it.
     PassedOver,
+    /// The pre-test passed over the pair at both ages, and a star collapsed before the earlier
+    /// one (P11.T4.l): the same history to the earlier age, bit for bit.
+    PassedOverThroughCollapses,
     /// The pre-test passed over the pair at the earlier age, but the later run holds an
     /// interaction before it ([`interaction_before`]): the pre-test failed to bound the decay.
     MissedInteraction,
@@ -1938,10 +1952,11 @@ enum EarlierRun {
 
 /// Plan 11's consistency to any age (P11's build-age dependence, 2026-10-05), for `input` run to
 /// `until` and to `later`. A pair that [`can_interact`] by `until` has the same history to `until`
-/// as the later run, bit for bit ([`assert_same_history`]). One it passes over is one detached
-/// segment of its stars' own forms on the drawn orbit, and each star on its own track is the later
-/// run's to the later run's first event (a star below 0.1 M☉ on the cooling fits takes its
-/// companion's wind in the later run).
+/// as the later run, bit for bit ([`assert_same_history`]). One it passes over is a detached
+/// segment of its stars' own forms on the drawn orbit to its first collapse (P11.T4.l). If the
+/// pre-test passes it over at `later` too, the two runs are the same to `until`, bit for bit;
+/// otherwise each star on its own track is the later run's to the later run's first event (a star
+/// below 0.1 M☉ on the cooling fits takes its companion's wind in the later run).
 fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
     use super::star::Member;
 
@@ -1952,7 +1967,35 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
         assert_same_history(&early, &late, until);
         return EarlierRun::Same;
     }
-    assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+    let first_collapse = early
+        .supernovae()
+        .first()
+        .map_or(until, SupernovaRecord::age);
+    let first = &early.segments()[0];
+    assert_eq!(first.kind(), SegmentKind::Detached, "{}", describe(&early));
+    assert_eq!(first.end(), first_collapse, "{}", describe(&early));
+    if !can_interact(input, later) {
+        // The same history to `until`, bit for bit, unless the pre-test asked again after a
+        // collapse passes the pair at `later` and not at `until`: then the later run's engine
+        // evolves the orbit from the collapse where the earlier keeps it fixed, and only the
+        // history up to the collapse is the same, with no interaction before `until`.
+        match (taken_over_at(&early), taken_over_at(&late)) {
+            (None, Some(collapse)) if collapse < until => {
+                assert_same_history(&early, &late, Years::new(collapse.value() * (1.0 - 1e-12)));
+                assert!(
+                    interaction_after_a_collapse(&late, until).is_none(),
+                    "{}",
+                    describe(&late)
+                );
+            }
+            (None | Some(_), _) => assert_same_history(&early, &late, until),
+        }
+        return if early.supernovae().is_empty() {
+            EarlierRun::PassedOver
+        } else {
+            EarlierRun::PassedOverThroughCollapses
+        };
+    }
     // To the later run's first event, which is not compared unless it lies past `until`.
     let first_event = late.segments()[0].end();
     let (horizon, last) = if first_event < until {
@@ -1982,11 +2025,39 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
     }
 }
 
+/// Where the engine took over a pair the pre-test passed over, after a collapse (P11.T4.l): the
+/// start of `timeline`'s first segment whose orbit is the engine's, not fixed, if any (the closed
+/// form's orbits are all fixed).
+fn taken_over_at(timeline: &BinaryTimeline) -> Option<Years> {
+    timeline
+        .segments()
+        .iter()
+        .find(|s| s.paths().0.is_some_and(|o| o.fixed.is_none()))
+        .map(Segment::start)
+}
+
+/// The first segment of `timeline` that is an interaction starting after its first supernova and
+/// before `until`: stable transfer, a common envelope, contact, or a merger that leaves one star
+/// (P11.T4.l's pre-test asked again after a collapse).
+fn interaction_after_a_collapse(timeline: &BinaryTimeline, until: Years) -> Option<&Segment> {
+    let first = timeline.supernovae().first()?.age();
+    timeline.segments().iter().find(|s| {
+        let interacts = match s.kind() {
+            SegmentKind::Detached | SegmentKind::Disrupted { .. } => false,
+            SegmentKind::Merged => one_star_left(timeline, s),
+            SegmentKind::StableTransfer { .. }
+            | SegmentKind::CommonEnvelope
+            | SegmentKind::Contact => true,
+        };
+        interacts && s.start() >= first && s.start() < until
+    })
+}
+
 /// The first segment of `timeline` that is an interaction starting before `until` and before the
 /// pair's first supernova (ruling p11-channels of 2026-10-06, section 1.2): stable transfer, a
 /// common envelope, contact, or a merger that leaves one star. A detached or disrupted segment is
-/// none, and a supernova of a pair the pre-test passes over is not the pre-test's to foresee
-/// (finding F3: plan 11's P11.T10 decides wide pairs' supernovae).
+/// none, and a supernova of a pair the pre-test passes over is not the pre-test's to foresee: the
+/// closed form applies it, and asks the pre-test again of the orbit it leaves (P11.T4.l).
 fn interaction_before(timeline: &BinaryTimeline, until: Years) -> Option<&Segment> {
     let first_supernova = timeline
         .supernovae()
@@ -2018,27 +2089,35 @@ fn one_star_left(timeline: &BinaryTimeline, segment: &Segment) -> bool {
 /// Runs `n` pinned-sample pairs ([`pinned_pair`]), each to an age log-uniform in 10⁵–1.2 × 10¹⁰
 /// years, and one whose stars' arrivals differ also to an age uniform between them (P11.T4.i), and
 /// each to 1.5 × 10¹⁰, through [`check_any_age`], and returns how many runs were the same, passed
-/// over and missed interactions, at the first ages and between the arrivals. The ages between
-/// arrivals are drawn on a stream of their own, so that the pairs and their first ages are the
-/// sample's as before.
-fn any_age_over(n: u32, seed: u64) -> [[u32; 3]; 2] {
+/// over (without and with a collapse before the age) and missed interactions, at the first ages,
+/// between the arrivals, and for a wide massive pair ([`wide_massive_pair`]) beside every tenth,
+/// whose collapses the pre-test leaves to the closed form (P11.T4.l). The ages between arrivals
+/// and the wide pairs are drawn on streams of their own, so that the pairs and their first ages
+/// are the sample's as before.
+fn any_age_over(n: u32, seed: u64) -> [[u32; 4]; 3] {
     let mut mix = Mix(seed);
     let mut between = Mix(seed ^ 0x0a77_1fa1_0000_0000);
-    let mut counts = [[0_u32; 3]; 2];
+    let mut wide = Mix(seed ^ 0x0a77_1fa1_0000_0001);
+    let mut counts = [[0_u32; 4]; 3];
     for i in 0..n {
         let input = pinned_pair(&mut mix, i);
         let until =
             crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e10 / 1.0e5));
-        let mut ages = vec![(0, until)];
+        let mut runs = vec![(0, until, input.clone())];
         if let Some((first, late)) = first_and_late(&input) {
-            ages.push((1, first + (late - first) * between.next()));
+            runs.push((1, first + (late - first) * between.next(), input));
         }
-        for (kind, until) in ages {
+        if i % 10 == 0 {
+            let (pair, age) = wide_massive_pair(&mut wide, i);
+            runs.push((2, age, pair));
+        }
+        for (kind, until, input) in runs {
             let outcome = check_any_age(&input, Years::new(until), Years::new(1.5e10));
             let slot = match outcome {
                 EarlierRun::Same => 0,
                 EarlierRun::PassedOver => 1,
-                EarlierRun::MissedInteraction => 2,
+                EarlierRun::PassedOverThroughCollapses => 2,
+                EarlierRun::MissedInteraction => 3,
             };
             counts[kind][slot] += 1;
         }
@@ -2046,41 +2125,92 @@ fn any_age_over(n: u32, seed: u64) -> [[u32; 3]; 2] {
     counts
 }
 
+/// A wide massive pair for the build-age suites (P11.T4.l), the `i`th of its stream: primary
+/// log-uniform in 8–40 M☉, mass ratio uniform in 0.05–1 (no lighter than 0.08 M☉), period
+/// log-uniform in 10⁵–10⁷ d, e uniform in 0–0.7, one of three metallicities and each star's own
+/// draws, with an age log-uniform in 5 × 10⁶–1.2 × 10¹⁰ years to run it to: mostly passed over,
+/// and mostly past its primary's collapse.
+fn wide_massive_pair(mix: &mut Mix, i: u32) -> (BinaryInput, f64) {
+    use crate::Seed;
+    use crate::coords::{CellSize, GenCell};
+    use crate::id::{BodyId, Layer, SystemId};
+
+    let m1 = log_uniform(8.0, 40.0, mix.next());
+    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+    let period = log_uniform(1.0e5, 1.0e7, mix.next());
+    let e = 0.7 * mix.next();
+    let z = [0.02, 0.004, 0.0005][usize::try_from(i % 3).expect("a small index")];
+    let until = log_uniform(5.0e6, 1.2e10, mix.next());
+    let base = pair(m1, m2, period, e, z);
+    let x = i32::try_from(i).expect("a small index") - 500;
+    let cell = GenCell::new(CellSize::Ly8, [x, 8, 0]).expect("a cell");
+    let system = SystemId::from_parts(Layer::A, cell, 0).expect("a system");
+    let draws = [0, 1].map(|k| StarDraws::for_star(Seed::new(0x0b1e_5eef), BodyId::new(system, k)));
+    let input = BinaryInput::new(
+        base.masses()[0],
+        base.masses()[1],
+        *base.composition(),
+        *base.orbit(),
+        draws,
+        base.age_at_epoch(),
+    )
+    .expect("a pair");
+    (input, until)
+}
+
 /// The engine's history does not depend on the age it is run to (P11's build-age dependence,
-/// 2026-10-05): [`check_any_age`] over 60 pairs, and between their stars' arrivals (P11.T4.i).
-/// No pair the pre-test passes over interacts before its age in the later run (P11.T4.j: the
-/// pre-test bounds the decay that magnetic braking, tides and gravitational radiation make).
+/// 2026-10-05): [`check_any_age`] over 60 pairs, between their stars' arrivals (P11.T4.i), and
+/// over six wide massive pairs whose collapses the closed form applies (P11.T4.l). No pair the
+/// pre-test passes over interacts before its age in the later run (P11.T4.j: the pre-test bounds
+/// the decay that magnetic braking, tides and gravitational radiation make).
 #[test]
 fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
     // The runs between the arrivals are checked as the others are; none of them passes the
     // pre-test in this sample (`a_late_companion_meets_its_primarys_envelope` compares such runs
     // directly).
-    let [[same, passed, missed], _] = any_age_over(60, 0x0b1e_00a9);
+    let [
+        [same, passed, collapsed, missed],
+        _,
+        [_, _, wide_collapsed, wide_missed],
+    ] = any_age_over(60, 0x0b1e_00a9);
     assert!(same > 10 && passed > 10, "{same} run, {passed} passed over");
-    assert_eq!(missed, 0, "{missed} interactions missed");
+    assert!(
+        collapsed + wide_collapsed > 0,
+        "{collapsed} + {wide_collapsed} passed over through collapses"
+    );
+    assert_eq!(missed + wide_missed, 0, "interactions missed");
 }
 
 /// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs, with the ages between
-/// arrivals (P11.T4.i). No interaction is missed (P11.T4.j): before the decay-aware pre-test, 4 of
-/// the first ages and 9 of the 721 between the arrivals were pairs under 1.4 d that braking or
-/// tides bring into contact or a merger before the age, which the drawn-orbit test passed over.
+/// arrivals (P11.T4.i) and a hundred wide massive pairs (P11.T4.l). No interaction is missed
+/// (P11.T4.j): before the decay-aware pre-test, 4 of the first ages and 9 of the 721 between the
+/// arrivals were pairs under 1.4 d that braking or tides bring into contact or a merger before the
+/// age, which the drawn-orbit test passed over.
 #[test]
-#[ignore = "slow: about 3.4 × 10³ binaries run through the engine"]
+#[ignore = "slow: about 3.6 × 10³ binaries run through the engine"]
 fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
     let [
-        [same, passed, missed],
-        [same_between, passed_between, missed_between],
+        [same, passed, collapsed, missed],
+        [same_between, passed_between, _, missed_between],
+        [same_wide, passed_wide, collapsed_wide, missed_wide],
     ] = any_age_over(1_000, 0x0b1e_00aa);
     eprintln!(
-        "{same} run at both ages, {passed} passed over, {missed} interactions missed; between \
-         arrivals {same_between} run, {passed_between} passed over, {missed_between} missed"
+        "{same} run at both ages, {passed} passed over, {collapsed} through collapses, {missed} \
+         interactions missed; between arrivals {same_between} run, {passed_between} passed over, \
+         {missed_between} missed; wide massive pairs {same_wide} run, {passed_wide} passed over, \
+         {collapsed_wide} through collapses, {missed_wide} missed"
     );
     assert_eq!(missed, 0, "{missed} interactions missed at the first ages");
     assert_eq!(
         missed_between, 0,
         "{missed_between} interactions missed between the arrivals"
     );
+    assert_eq!(missed_wide, 0, "{missed_wide} missed in the wide pairs");
     assert!(same_between > 0, "{same_between} run between arrivals");
+    assert!(
+        collapsed_wide > 10,
+        "{collapsed_wide} wide pairs through collapses"
+    );
 }
 
 /// Each star's arrival on its main sequence, years ([`Track::main_sequence_arrival`], which needs
@@ -3378,7 +3508,8 @@ fn the_decay_bound_never_passes_over_an_interaction() {
 /// The braked 1.04 + 0.45 M☉ pair at 0.69 d passes at 2 Gyr only with magnetic braking and the
 /// tides that pass it to the orbit. A 0.3 + 0.3 M☉ pair at 0.2 d, below BSE's braking floor and
 /// inside its lobes on the drawn orbit, passes at 13.8 Gyr by gravitational radiation alone, which
-/// merges it in the engine at about 3.6 Gyr, and fails without it.
+/// merges it in the engine at about 3.6 Gyr, and fails without it. A giant near its reach passes
+/// only with the wind's spin (P11.T4.l).
 #[test]
 fn the_bound_follows_the_engines_switches() {
     let with = |params: BinaryParams| move |input: BinaryInput| input.with_params(params);
@@ -3416,6 +3547,20 @@ fn the_bound_follows_the_engines_switches() {
         merger.is_some_and(|age| (3.0e9..4.2e9).contains(&age)),
         "{merger:?}:\n{}",
         describe(&timeline)
+    );
+    // P11.T4.l: a giant near its drawn reach, 1.5 + 0.45 M☉ at 2,300 d, passes by 13.8 Gyr only
+    // by the spin its wind takes beyond its inertia's share, which the tides restore from the
+    // orbit, and so only with the wind's spin switch on.
+    let no_wind_spin = with(BinaryParams {
+        wind_angular_momentum: false,
+        ..BinaryParams::GENERATOR
+    });
+    let giant = || pair(1.5, 0.45, 2_300.0, 0.0, 0.02);
+    assert!(!lobe_reached(&giant(), until));
+    assert!(can_interact(&generator(giant()), until));
+    assert!(
+        !can_interact(&no_wind_spin(giant()), until),
+        "without the wind's spin"
     );
 }
 
@@ -3831,4 +3976,517 @@ fn a_transfer_without_a_living_donor_ends() {
     };
     engine.end_without_a_living_donor(0);
     assert_eq!(engine.kind, SegmentKind::Detached);
+}
+
+// --- P11.T4.l: a passed-over pair's collapses --------------------------------------------------
+
+/// The universe time of the engine's age `age_years` in `input`'s pair, as the engine maps it.
+fn universe_time_of(input: &BinaryInput, age_years: f64) -> crate::time::UniverseTime {
+    super::supernova::universe_time_at(&super::timeline::Context::of(input), age_years)
+}
+
+/// The full tracks of `input`'s two stars, to compare a passed-over pair's stars with their own.
+fn own_tracks(input: &BinaryInput) -> [crate::stellar::sse::Track; 2] {
+    core::array::from_fn(|i| {
+        crate::stellar::sse::Track::full(
+            super::evolve::track_mass(input.masses()[i]),
+            input.composition(),
+            &input.draws()[i],
+        )
+    })
+}
+
+/// That every state of `timeline`, `input`'s run, holds each star as its own track's state, at 64
+/// even ages and either side of each supernova.
+fn assert_own_models(input: &BinaryInput, timeline: &BinaryTimeline) {
+    let tracks = own_tracks(input);
+    let until = timeline.until().value();
+    let ages = (0..=64_u32).map(|k| until * f64::from(k) / 64.0).chain(
+        timeline.supernovae().iter().flat_map(|s| {
+            let age = s.age().value();
+            [super::detached::last_living(age), age]
+        }),
+    );
+    for age in ages {
+        let state = timeline.state_at(Years::new(age));
+        for (star, track) in state.stars().iter().zip(&tracks) {
+            assert_eq!(
+                *star,
+                track.state_at(Years::new(age)),
+                "at {age} yr: {}",
+                describe(timeline)
+            );
+        }
+    }
+}
+
+/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06, finding F3): a wide pair the pre-test passes
+/// over is unbound by its primary's collapse. 15 + 3 M☉ at P = 10⁵ d (about 23,760 R☉), circular,
+/// \[Fe/H\] 0 with the median draws, kicks off: the pinned primary collapses at plan 06's death
+/// (14.32 Myr) from its living 12.6 M☉ to a 1.43 M☉ neutron star, more than half the pair's mass,
+/// so the pair is `Disrupted` by the primary (Blaauw 1961). With no kick each star keeps the
+/// velocity it had in the barycentre's frame, on the orbit's rails widened by Jeans's mode, to
+/// 10⁻⁹; there is no recoil, and both stars are their own models throughout. Before T4.l the pair
+/// kept its drawn orbit through the collapse, with no record.
+#[test]
+fn a_wide_pair_is_unbound_by_its_primarys_collapse() {
+    let params = BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    };
+    let input = pair(15.0, 3.0, 1.0e5, 0.0, 0.02).with_params(params);
+    let until = Years::new(1.0e8);
+    assert!(!can_interact(&input, until), "the pre-test passes it over");
+    let timeline = evolve(&input, until);
+    let death = plan_06_star(&input).death().expect("a massive star dies");
+    let d = death.age().value();
+    let [record] = timeline.supernovae() else {
+        panic!("one collapse: {}", describe(&timeline));
+    };
+    assert_eq!(record.component(), Component::Primary);
+    assert!(
+        (record.age().value() - d).abs() <= 1e-9 * d,
+        "{:?} against plan 06's {d} yr",
+        record.age()
+    );
+    assert_eq!(record.kick(), None);
+    assert!(!record.bound());
+    assert_eq!((record.recoil(), timeline.recoil()), (None, None));
+    let kinds: Vec<SegmentKind> = timeline.segments().iter().map(Segment::kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            SegmentKind::Detached,
+            SegmentKind::Disrupted {
+                by: Component::Primary
+            }
+        ],
+        "{}",
+        describe(&timeline)
+    );
+    let p = death.progenitor();
+    let living = p.helium_core_mass().value() + p.envelope_mass().value();
+    let before = timeline.state_at(Years::new(super::detached::last_living(d)));
+    let companion = before.stars()[1].mass().value();
+    let total = living + companion;
+    let lost = total - (record.remnant().mass().value() + companion);
+    assert!(lost > 0.5 * total, "{lost} of {total} M☉ lost");
+    assert_eq!(
+        before.orbit(),
+        Some(input.orbit()),
+        "the drawn orbit to the collapse"
+    );
+    assert_eq!(timeline.state_at(record.age()).orbit(), None);
+    // Each star's velocity in the barycentre's frame before, on the widened rails.
+    let f = (15.0 + 3.0) / total;
+    let (_, v) = input
+        .orbit()
+        .relative_state_at(universe_time_of(&input, record.age().value()));
+    let v = v.metres_per_second().map(|c| c / f);
+    let speed = v.iter().map(|c| c * c).sum::<f64>().sqrt();
+    let expected = [
+        v.map(|c| -c * companion / total),
+        v.map(|c| c * living / total),
+    ];
+    for (shown, expected) in record.velocities().iter().zip(expected) {
+        for (a, b) in shown.metres_per_second().iter().zip(expected) {
+            assert!((a - b).abs() <= 1e-9 * speed, "{a} against {b} m/s");
+        }
+    }
+    assert_own_models(&input, &timeline);
+}
+
+/// P11.T4.l: a direct-collapse primary beside a wide companion stays bound. 40 + 10 M☉ at
+/// P = 10⁵ d, circular, \[Fe/H\] 0 with the median draws: plan 06's 40 M☉ star, stripped by its
+/// own winds to a 9.83 M☉ helium star, collapses at 5.51 Myr into a black hole of its whole mass
+/// with no kick. BSE appendix A1 from the rails widened by Jeans's mode, by f = 50 ÷ 19.8 = 2.52
+/// for the winds of both stars, leaves the orbit at A1's a′ and e′ for the mass lost (none, to
+/// rounding, at version 23: the plan's "small mass lost" was the prototype's), here the widened
+/// 84,260 R☉ circular orbit, with a record and the pair's recoil. The stars stay their own
+/// models, and the companion's own collapse at 27.82 Myr is recorded on the orbit the first left.
+/// With kicks off that collapse, which loses most of the companion's mass but under half the
+/// pair's, keeps the pair bound: A1 from the first collapse's orbit, widened by Jeans's mode for the
+/// companion's wind since, gives Blaauw's a′ and e′ and the recoil v `m_BH` ΔM ÷ (M M′), to 10⁻⁹.
+#[test]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the orbits' a and e, before and after, and the widening's f"
+)]
+fn a_wide_black_hole_pair_stays_bound() {
+    let input = pair(40.0, 10.0, 1.0e5, 0.0, 0.02);
+    let until = Years::new(1.0e8);
+    assert!(!can_interact(&input, until), "the pre-test passes it over");
+    let timeline = evolve(&input, until);
+    let record = primary_record(&timeline);
+    let d = record.age().value();
+    assert!((d - 5.5118e6).abs() < 1.0e3, "{d}");
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::BlackHole
+    );
+    assert!(kick_speed_m_s(&record) <= 0.0, "{:?}", record.kick());
+    assert!(record.bound(), "{}", describe(&timeline));
+    let before = timeline.state_at(Years::new(super::detached::last_living(d)));
+    let after = timeline.state_at(record.age());
+    let (a0, e0) = axis_rsun_and_e(&before).expect("the drawn orbit");
+    assert!(e0 < 1e-12 && (a0 - 33_401.1).abs() < 0.1, "{a0} R☉, e {e0}");
+    let death = plan_06_star(&input).death().expect("a massive star dies");
+    let p = death.progenitor();
+    let living = p.helium_core_mass().value() + p.envelope_mass().value();
+    let total = living + before.stars()[1].mass().value();
+    let total_after = record.remnant().mass().value() + before.stars()[1].mass().value();
+    let f = 50.0 / total;
+    assert!((f - 2.52).abs() < 0.01, "f {f}");
+    let (a1, e1) = blaauw_orbit_rsun(a0 * f, total, total_after).expect("bound");
+    let (a, e) = axis_rsun_and_e(&after).expect("bound after the collapse");
+    assert!((a / a1 - 1.0).abs() < 1e-9, "a {a} R☉ against A1's {a1}");
+    assert!((e - e1).abs() < 1e-9, "e {e} against A1's {e1}");
+    assert!((a - 84_263.4).abs() < 1.0, "{a} R☉");
+    let recoil = record.recoil().expect("a bound pair recoils");
+    let lost = total - total_after;
+    let (_, v) = input.orbit().relative_state_at(universe_time_of(&input, d));
+    let speed = v.speed().value() / f;
+    let expected = speed * before.stars()[1].mass().value() * lost / (total * total_after);
+    assert!(
+        (recoil.speed().value() - expected).abs() <= 1e-9 * speed,
+        "recoil {:?} against {expected} m/s",
+        recoil.speed()
+    );
+    assert_eq!(timeline.recoil(), None, "the companion's kick unbinds it");
+    let [_, second] = timeline.supernovae() else {
+        panic!("the companion collapses too: {}", describe(&timeline));
+    };
+    assert_eq!(second.component(), Component::Secondary);
+    assert!((second.age().value() - 27.8177e6).abs() < 1.0e3);
+    assert_own_models(&input, &timeline);
+
+    let no_kicks = input.clone().with_params(BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    });
+    let timeline = evolve(&no_kicks, until);
+    let [first, second] = timeline.supernovae() else {
+        panic!("two collapses: {}", describe(&timeline));
+    };
+    assert!(first.bound() && second.bound(), "{}", describe(&timeline));
+    let c = second.age().value();
+    let before = timeline.state_at(Years::new(super::detached::last_living(c)));
+    let after = timeline.state_at(second.age());
+    let (a0, e0) = axis_rsun_and_e(&before).expect("the first collapse's orbit");
+    assert!(e0 < 1e-12, "circular: e {e0}");
+    let p = own_tracks(&no_kicks)[1]
+        .death()
+        .expect("the companion dies")
+        .progenitor();
+    let living = p.helium_core_mass().value() + p.envelope_mass().value();
+    let hole = first.remnant().mass().value();
+    let rails = hole + timeline.state_at(first.age()).stars()[1].mass().value();
+    let (total, total_after) = (hole + living, hole + second.remnant().mass().value());
+    let lost = total - total_after;
+    assert!(
+        lost > 0.25 * total && lost < 0.5 * total,
+        "{lost} of {total} M☉ lost"
+    );
+    let f = rails / total;
+    let (a1, e1) = blaauw_orbit_rsun(a0 * f, total, total_after).expect("bound");
+    let (a, e) = axis_rsun_and_e(&after).expect("bound after the collapse");
+    assert!((a / a1 - 1.0).abs() < 1e-9, "a {a} R☉ against A1's {a1}");
+    assert!((e - e1).abs() < 1e-9, "e {e} against A1's {e1}");
+    let (_, v) = before
+        .orbit()
+        .expect("the first collapse's orbit")
+        .relative_state_at(universe_time_of(&no_kicks, c));
+    let speed = v.speed().value() / f;
+    let expected = speed * hole * lost / (total * total_after);
+    let recoil = second.recoil().expect("a bound pair recoils");
+    assert!(expected > 1.0e3, "{expected} m/s");
+    assert!(
+        (recoil.speed().value() - expected).abs() <= 1e-9 * speed,
+        "recoil {:?} against {expected} m/s",
+        recoil.speed()
+    );
+}
+
+/// P11.T4.l: A1's input on a passed-over pair's rails is widened by Jeans's mode (Hurley, Tout and
+/// Pols 2002, section 2.2): for the mass falling from M₀ to M, the separation is the drawn one × f,
+/// f = M₀ ÷ M, the velocity ÷ f, so that the state lies on the orbit of a × f about M, of the
+/// drawn e, at the true anomaly the rails give then, to 10⁻¹².
+#[test]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the state's r and v, the orbit's e and k, the time t and the widening's f"
+)]
+fn the_widening_is_jeans_mode() {
+    use crate::orbit::{Orbit, elements_from_state};
+
+    use super::supernova::jeans_widened_state;
+
+    let mu = |m: f64| GravitationalParameter::from_solar_masses(SolarMasses::new(m));
+    let (m0, now) = (25.0, 16.0);
+    let f = m0 / now;
+    for (e, mean_anomaly, years) in [(0.0, 0.0, 1.0e7), (0.3, 1.0, 2.3e7), (0.7, 4.0, 3.1e8)] {
+        let drawn = KeplerElements::from_period(
+            Seconds::new(1.0e5 * 86_400.0),
+            mu(m0),
+            Eccentricity::new(e).expect("an eccentricity"),
+            Orientation::new(Radians::new(0.3), Radians::new(0.5), Radians::new(1.2))
+                .expect("an orientation"),
+            Radians::new(mean_anomaly),
+        )
+        .expect("an orbit");
+        let t = crate::time::UniverseTime::EPOCH
+            .checked_add(
+                crate::time::Span::from_seconds_f64(
+                    years * crate::units::consts::SECONDS_PER_JULIAN_YEAR,
+                )
+                .expect("a span"),
+            )
+            .expect("a time");
+        let (r, v) = drawn.relative_state_at(t);
+        let (widened, slower) = jeans_widened_state(&drawn, m0, now, t);
+        assert_eq!(widened, r * f, "the separation × f");
+        for (a, b) in slower.metres_per_second().iter().zip(v.metres_per_second()) {
+            assert!(
+                (a * f - b).abs() <= 1e-15 * b.abs().max(1.0),
+                "{a} × {f} against {b}"
+            );
+        }
+        let Ok(Orbit::Bound(k)) = elements_from_state(widened, slower, mu(now), t) else {
+            panic!("the widened state is bound");
+        };
+        let axis = drawn.semi_major_axis().value() * f;
+        assert!(
+            (k.semi_major_axis().value() / axis - 1.0).abs() < 1e-12,
+            "a {:?} against {axis} m",
+            k.semi_major_axis()
+        );
+        assert!(
+            (k.eccentricity().value() - e).abs() < 1e-12,
+            "e {:?} against {e}",
+            k.eccentricity()
+        );
+        if e > 0.0 {
+            // At the drawn e, the same mean anomaly is the same true anomaly.
+            let turn = core::f64::consts::TAU;
+            let phase =
+                (k.mean_anomaly_at(t).value() - drawn.mean_anomaly_at(t).value()).rem_euclid(turn);
+            assert!(
+                phase.min(turn - phase) < 1e-12,
+                "the phase moves by {phase} rad"
+            );
+            for (a, b) in [
+                (k.inclination(), drawn.inclination()),
+                (k.ascending_node(), drawn.ascending_node()),
+                (k.argument_of_periapsis(), drawn.argument_of_periapsis()),
+            ] {
+                assert!((a.value() - b.value()).abs() < 1e-12, "{a:?} against {b:?}");
+            }
+        }
+    }
+}
+
+/// The ages a passed-over pair of `timeline` is run to in
+/// [`a_passed_over_pair_is_the_same_whatever_age_it_is_run_to`]: before its first collapse, just
+/// past each collapse and between them, and late, but never a collapse's own age, where the run to
+/// it ends at the instant a run past it applies the collapse.
+fn ages_around_collapses(timeline: &BinaryTimeline) -> Vec<Years> {
+    let collapses: Vec<f64> = timeline
+        .supernovae()
+        .iter()
+        .map(|s| s.age().value())
+        .collect();
+    let mut ages = vec![0.5 * collapses[0], 0.999_999 * collapses[0]];
+    for (k, &age) in collapses.iter().enumerate() {
+        let next = collapses
+            .get(k + 1)
+            .copied()
+            .unwrap_or(0.9 * timeline.until().value());
+        ages.extend([
+            age + 1.0e-3,
+            age + 1.0e3,
+            f64::midpoint(age, next),
+            next * (1.0 - 1e-9),
+        ]);
+    }
+    ages.into_iter().map(Years::new).collect()
+}
+
+/// P11.T4.l's build-age contract: a pair the pre-test passes over at every age shows the drawn
+/// orbit up to its first collapse, and the closed form starts at each collapse, so a run to any age
+/// before, between or after its collapses is the run to 10⁸ years to then, bit for bit, with the
+/// same records. Over four wide pairs, kicks on and off, bound and unbound by each collapse.
+#[test]
+fn a_passed_over_pair_is_the_same_whatever_age_it_is_run_to() {
+    let no_kicks = BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    };
+    let later = Years::new(1.0e8);
+    let (mut bound, mut unbound) = (0, 0);
+    for input in [
+        pair(15.0, 3.0, 1.0e5, 0.0, 0.02).with_params(no_kicks),
+        pair(40.0, 10.0, 1.0e5, 0.0, 0.02),
+        pair(15.0, 12.0, 1.0e5, 0.4, 0.02).with_params(no_kicks),
+        pair(15.0, 12.0, 1.0e5, 0.0, 0.004),
+    ] {
+        assert!(!can_interact(&input, later));
+        let late = evolve(&input, later);
+        assert!(!late.supernovae().is_empty(), "{}", describe(&late));
+        for record in late.supernovae() {
+            if record.bound() {
+                bound += 1;
+            } else {
+                unbound += 1;
+            }
+        }
+        for until in ages_around_collapses(&late) {
+            assert!(!can_interact(&input, until), "to {until:?}");
+            let early = evolve(&input, until);
+            assert_same_history(&early, &late, until);
+            let reached: Vec<_> = late
+                .supernovae()
+                .iter()
+                .filter(|s| s.age() < until)
+                .copied()
+                .collect();
+            assert_eq!(early.supernovae(), reached, "to {until:?}");
+        }
+    }
+    assert!(bound > 0 && unbound > 0, "{bound} bound, {unbound} unbound");
+}
+
+/// P11.T4.l: the engine that takes over a passed-over pair at a collapse carries each living star
+/// with its zero-age spin's angular momentum, held at most at its break-up now, where
+/// [`super::evolve::Engine::new`] gives it the zero-age velocity at its radius then. 15 + 14.9 M☉
+/// (median draws, \[Fe/H\] 0): at the primary's death (14.32 Myr) the companion has left its
+/// main sequence, and `Engine::new`'s start would spin it past break-up; a 3 M☉ companion is still
+/// on its main sequence and keeps its zero-age angular momentum. The remnant keeps `Engine::new`'s.
+#[test]
+fn a_taken_over_star_keeps_its_zero_age_spin() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{G, Member, moment_of_inertia, zams_spin};
+    use hyperion_testkit::float::bits;
+
+    for (m2, evolved) in [(14.9, true), (3.0, false)] {
+        let input = pair(15.0, m2, 1.0e5, 0.0, 0.02);
+        let tracks = own_tracks(&input).map(Arc::new);
+        let death = tracks[0].lifetime().expect("built in full").value();
+        let arrival = tracks[1]
+            .main_sequence_arrival()
+            .expect("a main sequence")
+            .value();
+        let members = tracks.map(|track| Member::Track { track, offset: 0.0 });
+        let k = input.orbit();
+        let orbit = LiveOrbit::new(
+            death,
+            k.semi_major_axis().value() / crate::units::consts::SOLAR_RADIUS_M,
+            0.5,
+            *k.orientation(),
+            k.mean_anomaly_at_epoch(),
+        );
+        let ctx = Arc::new(super::timeline::Context::of(&input));
+        let mut engine = Engine::new(ctx, death, 1.0e8, members, orbit, None);
+        let started = engine.spins;
+        engine.take_over(Vec::new(), Vec::new());
+        assert_eq!(bits(engine.spins[0]), bits(started[0]), "the remnant's");
+        let (mass, tau) = engine.current(1);
+        let now = engine.structure(1, death, mass, tau).expect("living");
+        let zero_age = engine
+            .structure(1, arrival, mass, tau)
+            .expect("its arrival");
+        let zero_age_momentum = moment_of_inertia(&zero_age)
+            * zams_spin(
+                zero_age.state.mass().value(),
+                zero_age.state.radius().value(),
+            );
+        let (m, r) = (now.state.mass().value(), now.state.radius().value());
+        let break_up = moment_of_inertia(&now) * (G * m / (r * r * r)).sqrt();
+        assert_eq!(
+            bits(engine.spins[1]),
+            bits(zero_age_momentum.min(break_up)),
+            "{:?}",
+            now.state
+        );
+        assert_eq!(
+            now.state.phase() != Phase::MainSequence,
+            evolved,
+            "{:?}",
+            now.state
+        );
+        if evolved {
+            assert!(started[1] > break_up, "{} against {break_up}", started[1]);
+            assert!(engine.spins[1] < started[1]);
+        } else {
+            assert_eq!(bits(engine.spins[1]), bits(zero_age_momentum));
+        }
+    }
+}
+
+/// P11.T4.l: the pre-test asked again after a passed-over pair's bound collapse never passes over
+/// an interaction. Over 3,000 wide massive pairs ([`wide_massive_pair`]) run to their ages, every
+/// pair whose bound collapse the closed form keeps on its fixed orbit shows no stable transfer,
+/// common envelope, contact or merger after the collapse before its age when the engine runs it
+/// from the collapse anyway ([`super::evolve::evolve_past_the_second_pre_test`]). None is allowed.
+/// The bound pairs checked, the engine's takeovers and the interactions are recorded.
+#[test]
+#[ignore = "slow: 3,000 wide massive pairs, those bound after a collapse run through the engine"]
+fn the_second_pre_test_never_passes_over_an_interaction() {
+    use super::evolve::evolve_past_the_second_pre_test;
+
+    let mut mix = Mix(0x0b1e_0c12);
+    let pairs: Vec<(BinaryInput, Years)> = (0..3_000)
+        .map(|i| {
+            let (input, until) = wide_massive_pair(&mut mix, i);
+            (input, Years::new(until))
+        })
+        .collect();
+    // In the tally: `pairs` the pairs passed over with a bound collapse before their age,
+    // `passes` those the engine takes over, `interacting` those the engine run from the collapse
+    // brings into an interaction, and `missed` those of them the closed form kept.
+    let t = in_shares(&pairs, |tally, (input, until)| {
+        if can_interact(input, *until) {
+            return;
+        }
+        let timeline = evolve(input, *until);
+        if !timeline.supernovae().iter().any(SupernovaRecord::bound) {
+            return;
+        }
+        tally.pairs += 1;
+        let taken_over = taken_over_at(&timeline).is_some();
+        tally.passes += u32::from(taken_over);
+        let forced = evolve_past_the_second_pre_test(input, *until);
+        if let Some(segment) = interaction_after_a_collapse(&forced, *until) {
+            tally.interacting += 1;
+            if !taken_over {
+                let [m1, m2] = input.masses().map(SolarMasses::value);
+                tally.missed.push(format!(
+                    "{m1:.3} + {m2:.3} M☉ at {:.3e} d, e {:.2}, to {:.3e} yr: {:?} at {:.4e} yr",
+                    input.orbit().period().value() / 86_400.0,
+                    input.orbit().eccentricity().value(),
+                    until.value(),
+                    segment.kind(),
+                    segment.start().value()
+                ));
+            }
+        }
+    });
+    eprintln!(
+        "{} passed-over pairs bound after a collapse; the pre-test asked again passes {}; the \
+         engine run from the collapse interacts in {}; missed {}",
+        t.pairs,
+        t.passes,
+        t.interacting,
+        t.missed.len()
+    );
+    for line in t.missed.iter().take(20) {
+        eprintln!("  missed: {line}");
+    }
+    assert!(t.pairs > 100, "{} bound pairs checked", t.pairs);
+    assert_eq!(
+        t.missed.len(),
+        0,
+        "interactions the pre-test asked again passed over"
+    );
 }

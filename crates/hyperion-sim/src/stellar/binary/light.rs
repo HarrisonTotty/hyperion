@@ -40,10 +40,12 @@
 //!    critical `p_c` = `r_c` (1 + e), `r_c` = maxᵢ Rᵢ ÷ `f_L`(qᵢ); divided by (1 + e)⁵ throughout:
 //!    - the spins' reservoir takes a share Φ I ÷ (μ (1 + e)² `r_c`^{3/2} √`r_p`) of the orbit's
 //!      angular momentum, with Φ = f₂(e) ÷ f₅(e) (Hut 1981; BSE equation 34) and I = Σ kᵢ mᵢ Rᵢ²
-//!      (BSE equation 35's coarse bound). Since Φ ÷ (1 + e)² ≤ 1 and `r_c` ≥ Rᵢ ÷ `f_L`(qᵢ),
-//!      the share is at most c ÷ √`r_p`, c = Σᵢ kᵢ √R̂ᵢ `f_L`(qᵢ,max)^{3/2} (1 + qᵢ,max),
-//!      whichever star sets `r_c`, with kᵢ the core's k′₃ = 0.21 where the table says a star may
-//!      have left its main sequence and the envelope's k′₂ = 0.1 elsewhere;
+//!      (BSE equation 35's coarse bound), with the spin a locked star's wind takes beyond its
+//!      inertia's share, (2/3 − k′₂) `ΔMᵢ` Rᵢ² (HPT equation 110; P11.T4.l), its wind's `ΔMᵢ` at
+//!      most mᵢ. Since Φ ÷ (1 + e)² ≤ 1 and `r_c` ≥ Rᵢ ÷ `f_L`(qᵢ), the share is at most c ÷ √`r_p`,
+//!      c = Σᵢ kᵢ √R̂ᵢ `f_L`(qᵢ,max)^{3/2} (1 + qᵢ,max), whichever star sets `r_c`, with kᵢ the
+//!      core's k′₃ = 0.21 where the table says a star may have left its main sequence and the
+//!      envelope's k′₂ = 0.1 elsewhere, each plus the wind's 2/3 − k′₂;
 //!    - magnetic braking (BSE equation 50) at the equilibrium spin carries Φ³, and Φ³ ÷ (1 + e)⁵
 //!      is at most [`BRAKING_ECCENTRICITY_FACTOR`], its value as e → 1; its integral is at most
 //!      Σ R̂ᵢ³ over the whole age, of each star above BSE's 0.35 M☉ floor, with M ÷ μ at its
@@ -94,8 +96,9 @@
 //!
 //! Every term is monotone in the R̂ᵢ, the masses and the age, so later ages and smaller periastra
 //! only take pairs out of `Detached`. The engine's own span starts at the first arrival, after
-//! zero age, so the whole age bounds it. The test is the engine's at version 21, before P11.T4.l's
-//! wind-spin term and its passed-over collapses: its slow test runs again when they land.
+//! zero age, so the whole age bounds it. The test is the engine's with P11.T4.l's wind-spin term;
+//! T4.l's passed-over collapses need no more than item 3, which already refuses every pair a star
+//! of which may have collapsed by the window's end.
 //!
 //! # `Unchanged`, `Remnants` and `Bright` (P11.T17.c)
 //!
@@ -166,7 +169,6 @@
 
 use std::ops::RangeInclusive;
 
-use crate::orbit::roche_lobe_radius;
 use crate::stellar::Composition;
 use crate::stellar::sse::{CORE_GYRATION, ENVELOPE_GYRATION, MIN_INITIAL_MASS};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
@@ -175,6 +177,7 @@ use crate::units::{Magnitudes, Metres, SolarMasses, Years};
 
 use super::detached::{
     DECAY_SAFETY, GRAVITATIONAL_WAVE_RATE, MAGNETIC_BRAKING, MAGNETIC_BRAKING_FLOOR,
+    WIND_SPIN_SHARE, lobe_fraction,
 };
 use super::pair_light::{
     self, DARK_CMAG, FAINTEST_CMAG, LAYERS as TABLE_LAYERS, PairLightTable, from_cmag,
@@ -588,7 +591,7 @@ fn passed_over(
             CORE_GYRATION
         } else {
             ENVELOPE_GYRATION
-        };
+        } + WIND_SPIN_SHARE;
         sum + k * radius[i].sqrt() * f_max[i] * f_max[i].sqrt() * (1.0 + q_max[i])
     });
     let s = p.sqrt() - c;
@@ -614,13 +617,6 @@ fn passed_over(
         return false;
     }
     s9 * s - DECAY_SAFETY * (braking_rate * braking + radiation * p) > crate::math::powi(r_c, 5)
-}
-
-/// Eggleton's (1983) Roche-lobe radius over the separation for a star of mass ratio `q` = its
-/// mass ÷ its companion's, as the engine reads it.
-#[must_use]
-fn lobe_fraction(q: f64) -> f64 {
-    roche_lobe_radius(q, Metres::new(1.0)).value()
 }
 
 #[cfg(test)]
@@ -1290,24 +1286,28 @@ mod tests {
         assert_eq!(solar(1.0, 0.3, 1.0e4, 1.3e10), Some(PairLight::Detached));
     }
 
-    /// At version 21 a pair the pre-test passes over keeps its drawn orbit through its stars'
-    /// collapses, with no kick and no supernova record (P11.T4.l's finding F3, which the
-    /// version-22 batch fixes), so its stars are their own models across a supernova. When T4.l
-    /// lands this fails: then a collapse can hand the pair to the engine with its kick, and
-    /// P11.T17's collapse rule (the module's item 3) must still hold, or `Detached` must bound
-    /// the periastron after the kick (plan 11, P11.T17's 22-batch note).
+    /// A pair the pre-test passes over has its stars' collapses applied to its drawn orbit, with
+    /// their kicks (P11.T4.l, finding F3; at version 21 it kept the drawn orbit through them, with
+    /// no record, which this test pinned before T4.l), and a collapse that leaves it bound can
+    /// hand it to the engine on an orbit the drawn periastron does not bound. So P11.T17's
+    /// collapse rule (the module's item 3) still holds, as T17.a ruled it for this case (plan 11,
+    /// P11.T17's note on the deferred batch): such a pair is never `Detached`, and its verdict is
+    /// the tables', which sample the kicks.
     #[test]
-    fn a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21() {
-        use crate::stellar::binary::evolve;
+    fn a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it() {
+        use crate::stellar::binary::{Component, evolve};
         let input = super::super::tests::pair(15.0, 3.0, 1.0e5, 0.0, 0.02);
         let until = Years::new(1.0e8);
         assert!(!can_interact(&input, until));
         let timeline = evolve(&input, until);
-        assert_eq!(timeline.segments().len(), 1);
-        assert_eq!(timeline.supernovae(), []);
-        assert_eq!(timeline.state_at(until).orbit(), Some(input.orbit()));
-        // The bound does not lean on it: the primary may have collapsed, so the pair is not
-        // `Detached`, and its verdict is the tables', which sample the kicks.
+        let [record] = timeline.supernovae() else {
+            panic!("the primary's collapse is recorded");
+        };
+        assert_eq!(record.component(), Component::Primary);
+        assert_eq!(timeline.segments().len(), 2);
+        assert_ne!(timeline.state_at(until).orbit(), Some(input.orbit()));
+        // The bound does not lean on the drawn orbit: the primary may have collapsed, so the pair
+        // is not `Detached`.
         let [m1, m2] = input.masses();
         let p = input.orbit().periapsis();
         assert_ne!(
