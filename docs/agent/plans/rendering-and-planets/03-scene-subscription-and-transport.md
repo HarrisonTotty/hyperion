@@ -1955,6 +1955,11 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
     largest payload runs in R06.T17. No sky reaches 15 MiB: its largest payload is 7,494,912 bytes
     (29 chunks). The 61-chunk check is R09's coarse field's, after RM3 (R09's Risks; decided
     2026-10-07 by the orchestrator)._
+    _Built by R10.T15.b.1 (2026-10-29) as the smoke harness's transfer mode over R09's coarse
+    field (`smoke/transfer.ts`, `scripts/transferCheck.sh`): at generator version 23, with the
+    serve gate opened in a scratch build, an Earth-sized world fully surveyed at level 8 served
+    15,140,689 bytes in 58 chunks, whole and in order, in a pod on SwiftShader; the 15 MiB run is
+    R10.T15.b.2's at 24 (plan 10's R10.T15.b record)._
   - **The envelope against P12.T9**, for plan 12's writer. As P12.T9 designs it: `subscribe`,
     `unsubscribe`, `Subscribed { subscription, state }`, `SubscriptionTopic`, `SubscriptionState`,
     `ServerMessage::Notification { subscription, body }`, `NotificationBody`, the unknown

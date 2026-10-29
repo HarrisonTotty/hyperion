@@ -4107,6 +4107,19 @@ pass.
   Acceptance: the lane's `just smart-ci` and `just test-wasm-fast`, this plan's slow binaries by
   name (`just test-slow -E 'binary(…)'`) and `just bench -- bake/` complete, and the descent's
   figures are recorded; `just ci` and the slow pass are the orchestrator's.
+  - _The split (ruled by main, 2026-10-29, on research's lean): T15.b.1 and T15.b.2._ T15.b.1 is
+    the code this pass needs that the serve gate does not hold, built at generator version 23,
+    where the committed code says plainly that a generated body has no served surface and stops: a
+    served world for the descent spike (`--world served`), a served `HandoverWorld` for the
+    hand-over check, R03.T15's 61-chunk transfer check in the Electron renderer, T4.b's count
+    harness rebuilt from its record, and `place-ship`'s distance. T15.b.2, after B4 (P14.T54.b.l)
+    opens the gate at 24, is everything else this entry runs, the figures at 24, item 30, the looks
+    and R10.T10.a's `sample_worlds()` case, with two pieces of code the split leaves it: the
+    hand-over check's μ-floor exclusion (its per-texel bound leaving out each cell where
+    n′ · v < ½ μ_ν, those cells counted in the record) and an instrument for the horizon map's
+    share of the workers' bake time. Records:
+    [10-terrain-on-generated-worlds/records/R10.T15.b.md](10-terrain-on-generated-worlds/records/R10.T15.b.md).
+    _T15.b.1 built 2026-10-29 (`2206d2d`, `500aba6`, `2700d8b`, `35c69d5`)._
   - _From earlier tasks' records_ (gathered at RM5's close-out, 2026-10-29: item 30's step as
     decision-r10-item30 §6 rules it, the rest the records' hand-offs, each source's text binding;
     the gathering is a lean, main's to adopt):
