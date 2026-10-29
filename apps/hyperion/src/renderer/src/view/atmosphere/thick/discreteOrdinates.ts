@@ -317,7 +317,9 @@ export interface BeamPath {
  * integral on the quadrature: R_ij = (1 + δ_m0) ρ^m(μ_i, μ_j) w_j μ_j, the Lambertian
  * R_ij = 2A w_j μ_j at m = 0 (Stamnes et al. 1988's bottom boundary; the DISORT report, K. Stamnes,
  * S.-C. Tsay, W. Wiscombe and I. Laszlo, v1.1, 2000, for the (1 + δ_m0) and the beam's term, read
- * for the conventions only). The factor 1 + δ_m0 is the azimuth's integral,
+ * for the conventions only; checked against PythonicDISORT's documentation, D. Ho, J. Open Source
+ * Softw., doi:10.21105/joss.06442, §§1.5, 3.2.1 and 3.4.2, by R08.T15.a.1's science check). The
+ * factor 1 + δ_m0 is the azimuth's integral,
  * ∫₀^{2π} cos m(φ − φ′) cos k(φ′ − φ₀) dφ′ = π (1 + δ_m0) δ_mk cos m(φ − φ₀).
  *
  * A slab's ρ^m(μ, μ′) is π I^m(0, +μ) ÷ μ′ for a beam at μ′ of flux 1 normal to itself
@@ -1316,8 +1318,11 @@ interface PreparedBeam {
  *   τ that is negative or not finite; an ω outside [0, 1]; a moment that is not finite, or χ₀ more
  *   than 10⁻¹² from 1; a beam or user cosine outside (0, 1]; a ground albedo outside [0, 1]; a
  *   mode that is not a whole number in [0, NSTR − 1]; beam paths that do not match the beams and
- *   layers, or hold a transmission outside [0, 1] or a slant factor not positive and finite; or
- *   moments whose discrete scattering operator is not a contraction ({@link homogeneousSolution}).
+ *   layers, or hold a transmission outside [0, 1] or a slant factor not positive and finite;
+ *   moments whose discrete scattering operator is not a contraction ({@link homogeneousSolution});
+ *   or a `groundReflectance` beside an albedo other than 0, with a cosine outside (0, 1], a mode
+ *   of the wrong size or not finite, or cosines that miss a node, user cosine or beam cosine of the
+ *   solve ({@link checkGroundReflectance}, {@link groundModeTerms}).
  */
 export function solveDiscreteOrdinates(
   problem: DiscreteOrdinatesProblem,

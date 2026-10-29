@@ -13,7 +13,10 @@
  * deck's layers are the medium below the split: down to the ground, its albedo beneath, for a deck
  * over a surface (Venus-class); for an envelope, no deeper than τ(550) {@link
  * DECK_FLOOR_OPTICAL_DEPTH} from the top, over a black floor (decision-deep-decks-split §3.3 item
- * 4, R08.T16.a's "reads the medium below it no deeper than τ(550) 1,000").
+ * 4, R08.T16.a's "reads the medium below it no deeper than τ(550) 1,000"). The τ is read as the
+ * split's is (`regime.ts`'s `envelopeFloorM`): in the green channel at 544 nm, at most 4.6% over
+ * 550 nm's in Rayleigh's τ, and in the reference frame, s = 1, so that the floor lies at one height
+ * in every band and a band of gravity ratio s reads the deck to τ 1,000 ÷ s.
  *
  * **The layers.** The upper medium takes the thick bake's grid, its layers evenly in ξ between the
  * split and the top (`bake.ts`'s `bakeLayering` over a span), and the deck {@link DECK_LAYERS} of
@@ -41,6 +44,12 @@
  *   (a glory, a backscatter lobe) are smoothed into the truncated phase function.
  * - In the polarisation correction the deck depolarises: it reflects I into I alone, and Q, U and
  *   V not at all (decision-r08-vector §2, "Lambertian ground and decks depolarise").
+ * - Its reflectance is held to the table's modes, m = 0 and 1, though a cloud top's single
+ *   scattering carries strong higher ones: on a deck of Cornette–Shanks g 0.75, m ≤ 1 misses ρ by
+ *   up to 87% where μ and μ₀ are at least 0.25, m ≤ 2 by 47% and m ≤ 7 by 1.9% (measured
+ *   2026-10-29, plan R08's records); the `giant-deck` gate (R08.T15.a.2) judges it.
+ * - An envelope's floor is black: a conservative deck of g 0.8 read to τ 1,000 ÷ s loses 0.9–1.3%
+ *   of its incident flux through it (measured, the four bands of a Saturn-class figure).
  *
  * **What is stored** ({@link DeckTables}), per band and light, in the render channels on storage
  * (`binConversion.ts`):
@@ -48,11 +57,13 @@
  *   (`bake.ts`'s `MsSourceTable`, its altitudes from the split up);
  * - each slot's `reflectance`, ρ^m(μ_v, μ₀) at the grid's upward view cosines and μ₀, each bin's the
  *   weighted mean over its gases' terms;
- * - and its `diffuse`, the deck's upward radiance at its top less its reflection of the kernels' own
+ * - its `diffuse`, the deck's upward radiance at its top less its reflection of the kernels' own
  *   beam, I^m(τ_L, +μ_v) − (μ₀ T_k ÷ π) ρ^m(μ_v, μ₀), T_k the kernels' beam at the deck (extinction
  *   less the forward delta), per unit of the star's irradiance normal to its beam at the top: the
  *   deck's reflection of the sky and of the aureole, which the kernels add beside their own beam's
- *   reflection, as they add their own single scattering beside E.
+ *   reflection, as they add their own single scattering beside E;
+ * - and its `beamReflection`, T_k ρ^m term by term, so that the beam's reflection and `diffuse`
+ *   add up to the deck's radiance exactly where a bin's gases take several terms.
  *
  * **Below the deck** (R08.T15.b.1; {@link BelowDeckTable}). Under a deck over a surface the sky and
  * the aerial perspective read a plane-parallel table of the diffuse radiance by altitude, travel
@@ -71,6 +82,7 @@ import {
   type BakeLayering,
   bakeLayering,
   bakeMultipleScattering,
+  binGroundAlbedo,
   type BinSolve,
   type BinTerm,
   checkBakeInputs,
@@ -253,12 +265,18 @@ export function prepareDeck(
     );
   }
   let floorAltitudeM: number;
+  let floorAlbedo: Float64Array;
   switch (split.floor) {
     case "ground":
       floorAltitudeM = 0;
+      // The bake's own ground, bin by bin (`prepareBake`'s `groundAlbedo`).
+      floorAlbedo = Float64Array.from(BAKE_WAVELENGTHS_NM, (nm) =>
+        binGroundAlbedo(column.groundAlbedo, nm),
+      );
       break;
     case "envelope":
       floorAltitudeM = envelopeDeckFloorM(column);
+      floorAlbedo = new Float64Array(BAKE_WAVELENGTHS_NM.length);
       break;
   }
   if (!(split.altitudeM > floorAltitudeM && split.altitudeM < column.topHeightM)) {
@@ -292,10 +310,7 @@ export function prepareDeck(
     upperLayering,
     deck,
     whole,
-    floorAlbedo:
-      split.floor === "ground"
-        ? upper.groundAlbedo.slice()
-        : new Float64Array(BAKE_WAVELENGTHS_NM.length),
+    floorAlbedo,
   };
 }
 
@@ -455,6 +470,14 @@ export interface DeckSlot {
    * irradiance normal to its beam at the top, in the layout of `reflectance`.
    */
   readonly diffuse: Float32Array;
+  /**
+   * Σ_t w_t T_k,t ρ^m_t, the deck's reflectance weighted term by term by the kernels' beam at its
+   * top (extinction less the forward delta, pseudo-spherical), in the layout of `reflectance`:
+   * (μ₀ ÷ π) times it, with `diffuse`, is the deck's upward radiance at its top exactly. The
+   * kernels' own T_k times `reflectance` misses the covariance of a bin's terms' beams and
+   * reflectances, which a strong gas term makes large (the science check, 2026-10-29).
+   */
+  readonly beamReflection: Float32Array;
   /** The deck's solves, one a solve of the table above it. */
   readonly solves: number;
 }
@@ -465,7 +488,7 @@ export interface DeckSlot {
  *
  * @remarks
  * A band of the default grids holds `above`'s 405,504 B a light as `f32` (`bake.ts`'s
- * `MsSourceTable`) and the deck's 2 × 32 × 8 × 2 × 3 values, 12,288 B a light.
+ * `MsSourceTable`) and the deck's 3 × 32 × 8 × 2 × 3 values, 18,432 B a light.
  */
 export interface DeckTables {
   readonly band: ThickBakeBand;
@@ -496,7 +519,12 @@ export interface DeckTables {
 interface DeckRecord {
   readonly reflectance: Float64Array;
   readonly diffuse: Float64Array;
+  /** T_k ρ^m, the reflectance weighted by the kernels' beam at the deck. */
+  readonly beamReflection: Float64Array;
 }
+
+/** The deck record's tables, in their order. */
+const DECK_RECORD_KEYS = ["reflectance", "diffuse", "beamReflection"] as const;
 
 /** A band of a body, or a refusal. */
 function bandOf(body: ThickBakeBody, band: number): ThickBakeBand {
@@ -528,10 +556,13 @@ export function bakeDeck(prepared: PreparedDeck, body: ThickBakeBody, band: numb
   const n = THICK_BAKE_STREAMS / 2;
   const ground = deckGround(prepared, geometry);
   const records = new Map<number, Map<BinTerm, DeckRecord>>();
-  let reflectance: GroundReflectance | undefined;
   const recordOf = (solve: BinSolve, rho: GroundReflectance): DeckRecord => {
     const size = suns * views * modes;
-    const out = { reflectance: new Float64Array(size), diffuse: new Float64Array(size) };
+    const out = {
+      reflectance: new Float64Array(size),
+      diffuse: new Float64Array(size),
+      beamReflection: new Float64Array(size),
+    };
     const columns = rho.incidentCosines.length;
     for (let s = 0; s < suns; s += 1) {
       const beam = solve.solution.beams[s];
@@ -545,18 +576,17 @@ export function bakeDeck(prepared: PreparedDeck, body: ThickBakeBody, band: numb
           const i = (s * views + v) * modes + m;
           out.reflectance[i] = r;
           out.diffuse[i] = leaving - ((mu0 * kernel) / Math.PI) * r;
+          out.beamReflection[i] = kernel * r;
         }
       }
     }
     return out;
   };
   const above = bakeMultipleScattering(upper, body, band, {
-    ground: (bin, term, cosines, maxMode) => {
-      reflectance = ground(bin, term, cosines, maxMode);
-      return reflectance;
-    },
+    ground,
     onSolve: (bin, term, solve) => {
-      if (reflectance === undefined) {
+      const { groundReflectance } = solve;
+      if (groundReflectance === undefined) {
         throw new Error(`bin ${String(bin)}'s solve took no deck`);
       }
       let byTerm = records.get(bin);
@@ -564,8 +594,7 @@ export function bakeDeck(prepared: PreparedDeck, body: ThickBakeBody, band: numb
         byTerm = new Map();
         records.set(bin, byTerm);
       }
-      byTerm.set(term, recordOf(solve, reflectance));
-      reflectance = undefined;
+      byTerm.set(term, recordOf(solve, groundReflectance));
     },
   });
   const deckLayerCount = prepared.deck.interfaceHeightsM.length - 1;
@@ -583,33 +612,38 @@ export function bakeDeck(prepared: PreparedDeck, body: ThickBakeBody, band: numb
   );
   const size = suns * views * modes;
   const slots = upper.lights.map((light, slot): DeckSlot => {
-    const perBin = light.bins.map((bin, b) => {
-      const sum = { reflectance: new Float64Array(size), diffuse: new Float64Array(size) };
+    const perBin = light.bins.map((bin, b): DeckRecord => {
+      const sum = {
+        reflectance: new Float64Array(size),
+        diffuse: new Float64Array(size),
+        beamReflection: new Float64Array(size),
+      };
       for (const term of bin.terms) {
         const record = records.get(b)?.get(term);
         if (record === undefined) {
           throw new Error(`light ${slot}'s bin ${b} has a term with no deck`);
         }
-        for (let i = 0; i < size; i += 1) {
-          sum.reflectance[i] =
-            (sum.reflectance[i] ?? 0) + term.weight * (record.reflectance[i] ?? Number.NaN);
-          sum.diffuse[i] = (sum.diffuse[i] ?? 0) + term.weight * (record.diffuse[i] ?? Number.NaN);
+        for (const key of DECK_RECORD_KEYS) {
+          const target = sum[key];
+          const source = record[key];
+          for (let i = 0; i < size; i += 1) {
+            target[i] = (target[i] ?? 0) + term.weight * (source[i] ?? Number.NaN);
+          }
         }
       }
       return sum;
     });
     const { factors } = light.conversion;
+    const converted = (key: (typeof DECK_RECORD_KEYS)[number]): Float32Array =>
+      inChannels(
+        factors,
+        perBin.map((bin) => bin[key]),
+        size,
+      );
     return {
-      reflectance: inChannels(
-        factors,
-        perBin.map((bin) => bin.reflectance),
-        size,
-      ),
-      diffuse: inChannels(
-        factors,
-        perBin.map((bin) => bin.diffuse),
-        size,
-      ),
+      reflectance: converted("reflectance"),
+      diffuse: converted("diffuse"),
+      beamReflection: converted("beamReflection"),
       solves: above.slots[slot]?.solves ?? 0,
     };
   });
@@ -736,12 +770,17 @@ export interface BelowDeckSlot {
    * to its beam at the top, A × S × V × M × 3 row-major, entry `(((a S + s) V + v) M + m) 3 + c`:
    * a the altitude, s the sun's cosine, v the travel cosine of {@link BelowDeckTable}, m the mode, c
    * red, green, blue. I = I⁰ + I¹ cos Δφ, Δφ the azimuth of the light's direction of travel less
-   * the sun's beam's (`discreteOrdinates.ts`'s convention).
+   * the sun's beam's (`discreteOrdinates.ts`'s convention). It is delta-M's diffuse field: the
+   * aureole inside the truncated lobe and the exact single scattering (Nakajima and Tanaka's TMS)
+   * are not in it, a stated approximation for R08.T15.b.2's read to judge.
    */
   readonly radiance: Float32Array;
   /**
-   * The diffuse downward flux 2π ∫₀¹ I⁰(h, −μ) μ dμ on the quadrature, per unit of the star's
-   * irradiance normal to its beam at the top, A × S × 3, entry `(a S + s) 3 + c`.
+   * The downward flux the kernels' own beam leaves out, per unit of the star's irradiance normal to
+   * its beam at the top, A × S × 3, entry `(a S + s) 3 + c`: the diffuse field's
+   * 2π ∫₀¹ I⁰(h, −μ) μ dμ on the quadrature and delta-M's aureole μ₀ (T′ − T_k), the light it
+   * counts as beam beyond the kernels' T_k. With μ₀ times `direct` it is the solve's whole downward
+   * flux, μ₀ T′ and the diffuse field's.
    */
   readonly irradiance: Float32Array;
   /**
@@ -814,8 +853,12 @@ function belowDeck(prepared: PreparedDeck, band: ThickBakeBand): BelowDeckTable 
       const k = ground - a * grid.altitudeStride;
       for (let s = 0; s < suns; s += 1) {
         const beam = solve.solution.beams[s];
-        out.irradiance[a * suns + s] = beam?.fluxes.diffuseDown[k] ?? Number.NaN;
-        out.direct[a * suns + s] = solve.kernelBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
+        const kernel = solve.kernelBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
+        const scaled = solve.scaledBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
+        // The aureole, the light delta-M counts as beam that the kernels' own beam leaves out.
+        const aureole = (grid.sunCosines[s] ?? Number.NaN) * Math.max(scaled - kernel, 0);
+        out.irradiance[a * suns + s] = (beam?.fluxes.diffuseDown[k] ?? Number.NaN) + aureole;
+        out.direct[a * suns + s] = kernel;
         const cell = (a * suns + s) * v2;
         for (let m = 0; m < modes; m += 1) {
           const mode = beam?.modes[m];
@@ -898,13 +941,20 @@ function belowDeck(prepared: PreparedDeck, band: ThickBakeBand): BelowDeckTable 
  * `preparePolarisation` on the deck's grid and layers (the upper medium's table and the whole
  * column's fit), so that its table's altitudes are `above`'s to the bit.
  *
- * @throws RangeError as `preparePolarisation` refuses.
+ * @throws RangeError as `preparePolarisation` refuses, or for a moment order below the deck's 16
+ *   streams, whose delta-M reads χ₀ … χ₁₆ of the correction's own optics.
  */
 export function prepareDeckPolarisation(
   prepared: PreparedDeck,
   lights: ReadonlyArray<ThickBakeLight>,
   options: Omit<PolarisationOptions, "grid" | "layout"> = {},
 ): PreparedPolarisation {
+  const order = options.momentOrder;
+  if (order !== undefined && !(order >= THICK_BAKE_STREAMS)) {
+    throw new RangeError(
+      `the deck's ${THICK_BAKE_STREAMS}-stream reflectance reads moments to ${THICK_BAKE_STREAMS}, past ${order}`,
+    );
+  }
   return preparePolarisation(prepared.upper.column, lights, {
     ...options,
     grid: prepared.upper.grid,

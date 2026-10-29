@@ -455,6 +455,11 @@ function layerInterfaces(
 ): Float64Array {
   const top = span.topM;
   const bottom = span.bottomM;
+  if (!(Number.isFinite(bottom) && Number.isFinite(top) && bottom < top)) {
+    throw new RangeError(
+      `a bake's layers fill heights from a bottom below their top, not ${bottom}–${top} m`,
+    );
+  }
   const totals = column.terms.map((term) => columnLengthM(term.density, top));
   const depthAbove = (h: number): number => {
     let depth = 0;
@@ -704,9 +709,12 @@ export function deltaMLayer(
  * in every bin (an aerosol's Mie or MMF once a bin), the layers and their integrals, the table's
  * altitudes and their point optics, and each light's exponential sums and conversion.
  *
+ * @param layout - The layers laid by the caller (R08.T15's deck split), in place of the whole
+ *   column's on the grid; absent, the bake's own.
  * @throws RangeError for a grid that is not whole, a light whose absorbers do not match the
  *   column's absorber terms in count and kind, a curve with pressure rows on a column with no
- *   pressure profile, or as the column's optics refuse.
+ *   pressure profile, a `layout` whose table does not hold the grid's layers or whose fit does not
+ *   begin with them, or as the column's optics refuse.
  */
 export function prepareBake(
   column: SpectralColumn,
@@ -906,6 +914,7 @@ export interface BakeLayering {
  *   {@link THICK_BAKE_REFERENCE_BIN}, in the column's order.
  * @param span - The heights the layers fill, the whole column by default (R08.T15's split lays a
  *   part of it): ξ is then taken over the span, its own optical depth and height.
+ * @throws RangeError for a span that is not finite with its bottom below its top.
  */
 export function bakeLayering(
   column: SpectralColumn,
@@ -1068,6 +1077,8 @@ export interface BinSolve {
   /** Per altitude and μ₀, `[a × S + s]`: IMS's left-out light, and the point's light (the module's remarks). */
   readonly leftOut: Float64Array;
   readonly light: Float64Array;
+  /** The ground other than Lambertian the solve took (R08.T15's deck), or `undefined` for the albedo. */
+  readonly groundReflectance: GroundReflectance | undefined;
 }
 
 /**
@@ -1274,7 +1285,7 @@ function solveOf(
       }
     }
   }
-  return { solution, scaledBeams, kernelBeams, source, leftOut, light };
+  return { solution, scaledBeams, kernelBeams, source, leftOut, light, groundReflectance };
 }
 
 /**

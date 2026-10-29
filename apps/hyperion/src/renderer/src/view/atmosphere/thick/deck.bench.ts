@@ -116,6 +116,7 @@ describe("one deck bake, one band and one light", () => {
       (slot?.values.byteLength ?? 0) +
       (tables.slots[0]?.reflectance.byteLength ?? 0) +
       (tables.slots[0]?.diffuse.byteLength ?? 0) +
+      (tables.slots[0]?.beamReflection.byteLength ?? 0) +
       (below?.radiance.byteLength ?? 0) +
       (below?.irradiance.byteLength ?? 0) +
       (below?.direct.byteLength ?? 0);

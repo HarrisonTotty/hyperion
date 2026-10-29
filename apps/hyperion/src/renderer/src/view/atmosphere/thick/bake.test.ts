@@ -13,12 +13,13 @@ import {
 } from "../../../test/atmosphereFixtures";
 import { absorberBinCurves, type AbsorberBinCurves } from "../absorbers";
 import { mediumTableRadiusM } from "../assemble";
-import { CHANNEL_WAVELENGTHS_NM } from "../medium";
+import { BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM } from "../medium";
 import { normalizedAssociatedLegendre } from "./discreteOrdinates";
 import { tablesPlanOf } from "../tables";
 import {
   BAKE_CEILING_S,
   bakeBinSolve,
+  bakeLayering,
   bakeMultipleScattering,
   binGroundAlbedo,
   type MsSourceTable,
@@ -27,6 +28,7 @@ import {
   THICK_BAKE_GRID,
   THICK_BAKE_MAX_TERMS_PER_BIN,
   THICK_BAKE_MODES,
+  THICK_BAKE_REFERENCE_BIN,
   thickBakeBands,
   type ThickBakeBody,
   type ThickBakeGrid,
@@ -536,5 +538,50 @@ describe("the bake's latitude bands", () => {
   ] as const)("lays %s's bands as the tables do (tables.ts's tablesPlanOf)", ([, bodyOf]) => {
     const body = bodyOf();
     expect(thickBakeBands(body)).toEqual(tablesPlanOf(body, body.bottomRadiusM).bands);
+  });
+});
+
+describe("the bake's span and layout (R08.T15's deck split)", () => {
+  const column = once(rayleighColumn);
+  const grid = smallGrid(Float64Array.of(0.5));
+  const reference = once(
+    () =>
+      spectralOptics(column(), [BAKE_WAVELENGTHS_NM[THICK_BAKE_REFERENCE_BIN] ?? Number.NaN])[0] ??
+      [],
+  );
+
+  it("lays the whole column's layers to the bit at the default span", () => {
+    const whole = { bottomM: 0, topM: column().topHeightM };
+    expect(bakeLayering(column(), reference(), grid, whole)).toEqual(
+      bakeLayering(column(), reference(), grid),
+    );
+  });
+
+  it("refuses a span whose bottom is not below its top", () => {
+    for (const span of [
+      { bottomM: 5e3, topM: 5e3 },
+      { bottomM: 6e3, topM: 5e3 },
+      { bottomM: Number.NaN, topM: 5e3 },
+    ]) {
+      expect(() => bakeLayering(column(), reference(), grid, span)).toThrow(RangeError);
+    }
+  });
+
+  it("refuses a layout whose table does not hold the grid's layers", () => {
+    const layering = bakeLayering(column(), reference(), { ...grid, layers: 8 });
+    expect(() =>
+      prepareBake(column(), [UNABSORBED], grid, undefined, { layering, fitLayering: layering }),
+    ).toThrow(RangeError);
+  });
+
+  it("refuses a layout whose fit departs from the table's layers", () => {
+    const layering = bakeLayering(column(), reference(), grid);
+    const other = bakeLayering(column(), reference(), grid, {
+      bottomM: 1e3,
+      topM: column().topHeightM,
+    });
+    expect(() =>
+      prepareBake(column(), [UNABSORBED], grid, undefined, { layering, fitLayering: other }),
+    ).toThrow(RangeError);
   });
 });

@@ -2288,12 +2288,13 @@ function polarisedTermOptics(
  *
  * @remarks
  * Its layers are the thick bake's to the bit (`bake.ts`'s `bakeLayering` on the reference bin's
- * optics), so that a thick world's two tables share their altitudes. It computes the aerosols'
+ * optics, or the caller's `layout`, which the thick bake takes too), so that a thick world's two
+ * tables share their altitudes. It computes the aerosols'
  * optics at the reference bin and the channels only, not in the 15 bins the thick bake's
  * `prepareBake` takes, and fits the sums only in the channels' three bins.
  *
- * @throws RangeError as `bake.ts`'s `prepareBake` refuses its grid or lights, for a moment order
- *   that is not even and at least 2, or as the column's optics refuse.
+ * @throws RangeError as `bake.ts`'s `prepareBake` refuses its grid, lights or `layout`, for a
+ *   moment order that is not even and at least 2, or as the column's optics refuse.
  */
 export function preparePolarisation(
   column: SpectralColumn,
