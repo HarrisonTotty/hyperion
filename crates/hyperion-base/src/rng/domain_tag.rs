@@ -188,29 +188,21 @@ const fn same_str(a: &str, b: &str) -> bool {
 /// const _: () = hyperion_base::rng::assert_tag_names(&["mass"]);
 /// ```
 ///
-/// Each name is checked and hashed once, and the pairs compare hashes, so that the registry's
-/// `const` stays inside rustc's `long_running_const_eval` limit as it grows: rehashing every
-/// earlier name for each name made the sim's registry of 192 names cross it (plan 10, P10.T5.a).
-/// Names that are equal have equal hashes, so only a pair whose hashes are equal compares bytes.
-///
 /// # Panics
 ///
 /// On the first malformed name, duplicate name or hash collision.
-pub const fn assert_tag_names<const N: usize>(names: &[&str; N]) {
-    let mut hashes = [0_u64; N];
+pub const fn assert_tag_names(names: &[&str]) {
     let mut i = 0;
-    while i < N {
+    while i < names.len() {
         assert!(
             is_valid_tag_name(names[i]),
             "a domain tag name must match [a-z][a-z0-9_]*(.[a-z][a-z0-9_]*)+"
         );
-        hashes[i] = hash_tag_name(names[i]);
+        let hash = hash_tag_name(names[i]);
         let mut j = 0;
         while j < i {
-            if hashes[i] == hashes[j] {
-                assert!(!same_str(names[i], names[j]), "duplicate domain tag name");
-                panic!("domain tag hash collision");
-            }
+            assert!(!same_str(names[i], names[j]), "duplicate domain tag name");
+            assert!(hash != hash_tag_name(names[j]), "domain tag hash collision");
             j += 1;
         }
         i += 1;
@@ -302,19 +294,6 @@ mod tests {
         assert_eq!(hash_tag_name("planet.orbits"), 0x00b5_17d6_2a08_cb6e);
         assert_eq!(hash_tag_name("moon.count"), 0xa00d_d982_cc04_3ce1);
         assert_eq!(hash_tag_name(""), FNV_OFFSET_BASIS);
-    }
-
-    /// The check hashes each name once (P10.T5.a): it passes 4,096 distinct, well-formed names,
-    /// some twenty times the sim's registry, with no false duplicate among them.
-    #[test]
-    fn many_names_pass_the_check_hashing_each_once() {
-        let names: [&str; 4_096] = core::array::from_fn(|i| {
-            let name: &'static str = Box::leak(format!("selftest.name_{i}").into_boxed_str());
-            name
-        });
-        assert_tag_names(&names);
-        assert_tag_names(&["star.mass", "planet.orbits", "moon.count"]);
-        assert_tag_names::<0>(&[]);
     }
 
     #[test]

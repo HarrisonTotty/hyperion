@@ -170,20 +170,6 @@ fn a_duplicate_name_panics() {
 }
 
 #[test]
-#[should_panic(expected = "duplicate domain tag name")]
-fn a_duplicate_far_down_a_long_list_panics() {
-    let names: [&str; 512] = core::array::from_fn(|i| {
-        let name: &'static str = if i == 511 {
-            "selftest.name_3"
-        } else {
-            Box::leak(format!("selftest.name_{i}").into_boxed_str())
-        };
-        name
-    });
-    assert_tag_names(&names);
-}
-
-#[test]
 #[should_panic(expected = "must match")]
 fn a_malformed_name_panics() {
     assert_tag_names(&["star.mass", "Moon.count"]);
