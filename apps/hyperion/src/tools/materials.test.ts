@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { CiaSet } from "./atmosphereData";
 import {
@@ -200,6 +202,7 @@ import {
   MO_TABLE_2_VISIBLE,
   moPnkRatios,
   parseKarkoschka1998,
+  main,
 } from "./materials";
 
 const MATERIALS = new URL("../renderer/src/view/atmosphere/materials/", import.meta.url);
@@ -256,6 +259,11 @@ function committed(file: string): {
 }
 
 /** A committed material file's text field. */
+/** A committed material file's JSON as read. */
+function committedRaw(file: string): unknown {
+  return JSON.parse(readFileSync(fileURLToPath(new URL(file, MATERIALS)), "utf8"));
+}
+
 function committedText(file: string, field: string): string {
   const raw: unknown = JSON.parse(readFileSync(fileURLToPath(new URL(file, MATERIALS)), "utf8"));
   const value: unknown =
@@ -746,7 +754,7 @@ describe("acid_uv_absorber's k_UA (science-r08-unowned-absorbers; decision-r08-t
     expect([ACID_UV_K365, ACID_UV_DECAY_NM]).toEqual([fitted("k365"), fitted("decayNm")]);
   });
 
-  it("holds Spacek et al.'s bound, 26.9 nm, which the fitted L passes", () => {
+  it("holds Spacek et al.'s bound, 26.9 nm, which the fitted L exceeds", () => {
     // Their absorption coefficients, 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm, bound
     // k = αλ ÷ 4π's decay length by 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)); the ruling's
     // shorthand, ln(1278 ÷ 54), would give 25.3 nm.
@@ -783,11 +791,24 @@ describe("acid_uv_absorber's k_UA (science-r08-unowned-absorbers; decision-r08-t
   });
 
   it("writes the committed file from the committed 75 wt% file, as from the fetched source", () => {
-    const committedFile = (name: string): unknown =>
-      JSON.parse(readFileSync(fileURLToPath(new URL(name, MATERIALS)), "utf8"));
-    expect(acidUvAbsorberFileFrom(committedFile("sulphuric-acid-75.json"))).toEqual(
-      committedFile(ACID_UV_FILE),
+    expect(acidUvAbsorberFileFrom(committedRaw("sulphuric-acid-75.json"))).toEqual(
+      committedRaw(ACID_UV_FILE),
     );
+  });
+
+  it("refuses to write it from any file but the 75 wt% acid's", () => {
+    expect(() => acidUvAbsorberFileFrom(committedRaw("sulphuric-acid-84.json"))).toThrow(
+      /75 wt% acid's/u,
+    );
+  });
+
+  it("refuses to write it from a 75 wt% file off the acid grid", () => {
+    const raw = committedRaw("sulphuric-acid-75.json");
+    if (typeof raw !== "object" || raw === null) {
+      throw new Error("the 75 wt% file is a JSON object");
+    }
+    const grid = committed("sulphuric-acid-75.json").wavelengthsNm.slice(1);
+    expect(() => acidUvAbsorberFileFrom({ ...raw, wavelengthsNm: grid })).toThrow(/acid grid/u);
   });
 
   it("is exactly 0 from 550 nm", () => {
@@ -2324,5 +2345,30 @@ describe("the derived files' headers (R08.T10.f)", () => {
     const read = (field: (typeof FIELDS)[number]): unknown =>
       typeof raw === "object" && raw !== null ? Reflect.get(raw, field) : undefined;
     expect(FIELDS.map(read)).toEqual(FIELDS.map((field) => material[field]));
+  });
+});
+
+/** The materials tool's `main` on `args` and the files it wrote, in a directory of its own. */
+function runMaterials(args: readonly string[]): readonly [number, readonly string[]] {
+  const out = mkdtempSync(join(tmpdir(), "materials-only-"));
+  try {
+    const code = main(["--out", out, ...args]);
+    return [code, readdirSync(out)];
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}
+
+describe("the tool's --only", () => {
+  it("writes the files it names alone, asking no other's source", () => {
+    expect(runMaterials(["--only", "sulphur.json"])).toEqual([0, ["sulphur.json"]]);
+  });
+
+  it("refuses a name of no file it writes, and writes nothing", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect([runMaterials(["--only", "sulfur.json"]), error.mock.calls]).toEqual([
+      [1, []],
+      [["materials: --only names no file the tool writes: sulfur.json"]],
+    ]);
   });
 });

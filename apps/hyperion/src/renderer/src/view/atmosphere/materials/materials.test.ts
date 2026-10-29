@@ -1119,7 +1119,7 @@ describe("acid_uv_absorber, Venus's empirical ultraviolet absorber (decision-r08
       "standIn",
     ]);
     expect(absorber.standIn).toBe(
-      "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's 365 nm albedo and visible colour and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
+      "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's 365 nm albedo and visible colour, and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
     );
   });
 

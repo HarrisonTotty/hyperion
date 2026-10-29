@@ -1,7 +1,7 @@
 {
   "format": 1,
   "name": "venus-92bar-albedo",
-  "seed": 4,
+  "seed": 10,
   "wavelengthsNm": [365, 436, 549, 469, 616],
   "shells": {
     "kind": "sphere",

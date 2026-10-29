@@ -1896,9 +1896,9 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
         "ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe",
       ),
       licence: NO_TERMS,
-      reduction: `the 75 wt% file's own reduction (${standardReductionOnto(ACID_GRID_NM)}, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = ${ACID_UV_K365} and L = ${ACID_UV_DECAY_NM} nm are R08.T5.e's fit on the reference tracer's plane-parallel Venus deck, k₃₆₅ to Venus's 365 nm geometric albedo, 0.36 (Lee et al. 2019), and L to its g′ ÷ r′ albedo ratio, 0.933 (Mallama et al. 2017, Table 7), from the ruling's a-priori 1.2 × 10⁻³ and ${ACID_UV_DECAY_BOUND_NM} nm, the latter Spacek et al.'s bound (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), their decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling), which the fitted L passes. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry`,
+      reduction: `the 75 wt% file's own reduction (${standardReductionOnto(ACID_GRID_NM)}, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = ${ACID_UV_K365} and L = ${ACID_UV_DECAY_NM} nm are R08.T5.e's fit on the reference tracer's plane-parallel Venus deck, k₃₆₅ to Venus's 365 nm geometric albedo, 0.36 (Lee et al. 2019), and L to its g′ ÷ r′ albedo ratio, 0.933 (Mallama et al. 2017, Table 7), from the ruling's a-priori 1.2 × 10⁻³ and ${ACID_UV_DECAY_BOUND_NM} nm, the latter Spacek et al.'s bound (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), their decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling), which the fitted L exceeds. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry`,
       standIn:
-        "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's 365 nm albedo and visible colour and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
+        "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's 365 nm albedo and visible colour, and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
       fit: null,
     },
   },
@@ -6408,9 +6408,19 @@ export function main(args: readonly string[]): number {
       writeFileSync(join(out, ACID_UV_FILE), `${JSON.stringify(file, null, 2)}\n`);
       return 0;
     }
-    // `--only`: the files named, comma-separated, and only their sources asked for.
+    // `--only`: the files named, comma-separated, and only their sources asked for; a name of no
+    // file the tool writes is refused, so that a misspelt one writes nothing in silence.
     const onlyValue = values["only"];
     const only = typeof onlyValue === "string" ? new Set(onlyValue.split(",")) : undefined;
+    const written = new Set([
+      ...FETCHED_MATERIALS.map((m) => m.file),
+      ...COMBINED_MATERIALS.map((m) => m.file),
+      ...Object.values(DERIVED_FILES),
+    ]);
+    const unknown = [...(only ?? [])].filter((name) => !written.has(name));
+    if (unknown.length > 0) {
+      throw new Error(`--only names no file the tool writes: ${unknown.join(", ")}`);
+    }
     const wanted = (file: string): boolean => only === undefined || only.has(file);
     const textOf = (input: SourceInput): string => {
       const path = values[input.option];

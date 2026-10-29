@@ -1,5 +1,5 @@
 {
-  "description": "R08.T5.e's fit of Venus's ultraviolet absorber (plan R08): every trial's geometric albedo on the reference tracer's plane-parallel Venus deck (test/venusAlbedo.ts's case at the trial's acid_uv_absorber), its sigma, its wall time on 4 threads (pod, 4 vCPU), and the fitted k365 and L, which apps/hyperion/src/tools/materials.ts holds. Written by the lane's fit driver; do not edit by hand.",
+  "description": "R08.T5.e's fit of Venus's ultraviolet absorber (plan R08): every trial's geometric albedo on the reference tracer's plane-parallel Venus deck, its sigma, its wall time on 4 threads (pod, 4 vCPU), and the fitted k365 and L, which apps/hyperion/src/tools/materials.ts holds. Each trial is test/venusAlbedo.ts's albedoCaseJson at this seed and the trial's bands, mode 2 on the 75 wt% acid's file with k from acidUvAbsorberIndexK at the trial's k365 and L ('none': the 75 wt% acid's own k, the clear deck), traced by `hyperion-fit atmosphere-reference <case> --out <reference> --samples 1024 --stokes --threads 4` and read by geometricAlbedo. The trials were run in turn, by hand, as R08's records (T5.e) state their order. A record: not to be edited.",
   "targets": {
     "p365": 0.36,
     "gOverR": 0.933
