@@ -993,18 +993,13 @@ mod cold_trap {
         #[test]
         #[should_panic(expected = "a threshold must be finite and positive")]
         fn a_threshold_of_no_temperature_is_refused() {
-            let _ = irradiance_limit(Radians::new(0.1), Radians::new(0.03), &body(), Kelvin::ZERO);
+            let _ = irradiance_limit(Radians::new(0.1), &body(), Kelvin::ZERO);
         }
 
         #[test]
         #[should_panic(expected = "a colatitude must be in [0, π/2]")]
         fn an_irradiance_limit_past_the_equator_is_refused() {
-            let _ = irradiance_limit(
-                Radians::new(1.6),
-                Radians::new(0.03),
-                &body(),
-                Kelvin::new(110.0),
-            );
+            let _ = irradiance_limit(Radians::new(1.6), &body(), Kelvin::new(110.0));
         }
 
         #[test]

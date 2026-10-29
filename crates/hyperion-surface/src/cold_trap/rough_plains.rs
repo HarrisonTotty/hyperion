@@ -19,11 +19,14 @@
 //! a lit facet scatters A of its direct flux and re-emits the absorbed 1 − A in the thermal
 //! infrared, of which the shadow absorbs 1 − A and ε, so it absorbs (1 − A)(A + ε) E. A shadow is
 //! cold below the threshold T when that and the heat flow q stay under its emission εσT⁴, so the
-//! share is read at (εσT⁴ − q) ÷ ((1 − A)(A + ε) S sin e) ([`irradiance_limit`], [`fraction`]);
-//! none is cold where that is not positive. The heating leaves out light scattered more than once
-//! and the shadowed terrain's own emission, which would add to it, and takes the star as a point at
-//! its upper limb, D = δ + α from the equator, for the shadow and the sunlit facets alike, as the
-//! table was traced, which lights the facets a little more than the star's disk does.
+//! share is read at (εσT⁴ − q) ÷ ((1 − A)(A + ε) S sin `e_eff`) ([`irradiance_limit`],
+//! [`fraction`]); none is cold where that is not positive. The heating leaves out light scattered
+//! more than once and the shadowed terrain's own emission, which would add to it. The table was
+//! traced under a point star at its upper limb, D = δ + α from the equator, for the shadow and the
+//! sunlit facets alike, which lights the facets more than the star's disk does (1.18 times at the
+//! Moon's pole, 1.04 at 85°). The shadow keeps the upper limb, while the heating takes `e_eff`, the
+//! disk's flux-weighted elevation at its highest, as the bowls do, which removes that excess to
+//! first order.
 //!
 //! Heights and angles scale together, so at small slopes a plain's shadow depends on e₀ ÷ w and
 //! D ÷ w alone, and a slope below the table's 0.05 reads its 0.05 slice at its own ratios. At those
@@ -249,22 +252,29 @@ pub fn instantaneous_shadow(slope: Radians, elevation: Radians) -> f64 {
 }
 
 /// The irradiance fraction at which `body`'s rough plains are cold below `threshold`, at
-/// `colatitude` under D = `limb`: (εσT⁴ − q) ÷ ((1 − A)(A + ε) S sin e), e = min(90°,
-/// colatitude + `limb`), with the body's own albedo A, emissivity ε, flux S and heat flow q.
+/// `colatitude` radians: (εσT⁴ − q) ÷ ((1 − A)(A + ε) S sin `e_eff`), with the body's own albedo
+/// A, emissivity ε, flux S and heat flow q.
 ///
-/// It is the shadow's absorbed flux to first order, the sunlit facets' scattered light and their
-/// thermal emission, against what its emission at the threshold leaves after the heat flow (the
-/// module documentation). It is zero where the heat flow alone warms the shadow past the
-/// threshold, and infinite where the star never rises (e = 0) but the shadow can be cold.
+/// `e_eff` is the flux-weighted elevation of the star's disk at its highest, its centre at
+/// min(90°, colatitude + δ) ([`flux_weighted_elevation`](super::flux_weighted_elevation)): the
+/// bowls' sin e, bit for bit
+/// (`Sky::at`). It is the shadow's absorbed flux to first order, the sunlit facets' scattered
+/// light and their thermal emission, against what its emission at the threshold leaves after the
+/// heat flow (the module documentation). The table traced the sunlit facets under a point at the
+/// disk's upper limb, D = δ + α, and holds their heating over S sin(colatitude + D), while a plain
+/// under the disk intercepts S sin `e_eff`. To first order the facets' heating scales with the
+/// flux they intercept, so the shares are read at fractions of S sin `e_eff`: the shadow takes the
+/// upper limb, and the heating the disk (`decision-r09-t7g-table` §2). It is zero where the heat
+/// flow alone warms the shadow past the threshold, and infinite where `e_eff` = 0, a point star
+/// that never rises, but the shadow can be cold.
 ///
 /// # Panics
 ///
-/// If the colatitude is not in [0, π/2], `limb` not in [0, π) or the threshold not finite and
-/// positive.
+/// If the colatitude is not in [0, π/2] or the threshold not finite and positive.
 #[must_use]
-pub fn irradiance_limit(colatitude: Radians, limb: Radians, body: &Body, threshold: Kelvin) -> f64 {
-    // Only the angles' refusals: the slope is not this function's.
-    let (_, _, _) = checked(Radians::ZERO, colatitude, limb);
+pub fn irradiance_limit(colatitude: Radians, body: &Body, threshold: Kelvin) -> f64 {
+    // Only the colatitude's refusal: the slope and D are not this function's.
+    let (_, _, _) = checked(Radians::ZERO, colatitude, Radians::ZERO);
     let t = threshold.value();
     assert!(
         t.is_finite() && t > 0.0,
@@ -276,8 +286,10 @@ pub fn irradiance_limit(colatitude: Radians, limb: Radians, body: &Body, thresho
         return 0.0;
     }
     let a = p.bond_albedo;
-    let e = num::min(FRAC_PI_2, colatitude.value() + limb.value());
-    let lit = (1.0 - a) * (a + p.emissivity) * p.flux.value() * math::sin(e);
+    let lit = (1.0 - a)
+        * (a + p.emissivity)
+        * p.flux.value()
+        * Sky::sin_highest_at(colatitude.value(), body);
     if lit > 0.0 {
         allowed / lit
     } else {
@@ -318,7 +330,7 @@ pub fn fraction(latitude: Radians, body: &Body, slope: Radians, threshold: Kelvi
         Radians::new(sky.band.colatitude),
         Radians::new(sky.band.limb),
     );
-    let x = irradiance_limit(colatitude, limb, body, threshold);
+    let x = irradiance_limit(colatitude, body, threshold);
     cold_share(slope, colatitude, limb, x)
 }
 
@@ -462,12 +474,13 @@ mod tests {
     #[test]
     fn the_plains_cold_traps_follow_the_ray_traces() {
         // science-r09-drainage.md §8.13: plains alone over 80–90° under the real Sun, no
-        // conduction share. Water (110 K) within 15% of 2.16% and 6.13% at σ_s 5.7° and 11.3°;
-        // CO₂ (57 K) within a factor of two of 0.12% (0.090–0.146%) and 0.031% at 5.7° and 26.6°.
+        // conduction share. Water (110 K) within 15% of 2.16%, 6.13% and 4.87% at σ_s 5.7°, 11.3°
+        // and 16.7°; CO₂ (57 K) within a factor of two of 0.12% (0.090–0.146%) and 0.031% at 5.7°
+        // and 26.6°.
         let body = real_moon();
         let band =
             |w: f64, t: Kelvin| band_mean(80.0, 90.0, |lat| fraction(lat, &body, slope(w), t));
-        for (w, traced) in [(0.1, 0.0216), (0.2, 0.0613)] {
+        for (w, traced) in [(0.1, 0.0216), (0.2, 0.0613), (0.3, 0.0487)] {
             let water = band(w, WATER);
             assert!(
                 (water / traced - 1.0).abs() <= 0.15,
@@ -482,14 +495,15 @@ mod tests {
                 "w {w}: CO₂ {traps} against {traced}"
             );
         }
-        // Pinned as built, findings (R09.T7.g's record): water at σ_s 16.7° and 26.6° falls 17%
-        // and 22% under §8.13's 4.87% and 2.69%, and CO₂ at 11.3° and 16.7° is 5.2 and 3.8 times
-        // its 0.010%, outside the plan's 15% and factor of two.
+        // Pinned as built, findings (R09.T7.g's record): water at σ_s 26.6° falls 17% under
+        // §8.13's 2.69%, outside the plan's 15%, and CO₂ at 11.3° and 16.7° is 2.7 and 2.1 times
+        // the 0.0215% and 0.0195% of an independent tracer (2026-10-29; 8 surfaces, not
+        // literature), outside the plan's factor of two: the table's read between its coarse cold
+        // nodes, which R09.T7.l refits.
         for (w, threshold, as_built) in [
-            (0.3, WATER, 0.0402),
-            (0.5, WATER, 0.0209),
-            (0.2, co2, 5.15e-4),
-            (0.3, co2, 3.77e-4),
+            (0.5, WATER, 0.0222),
+            (0.2, co2, 5.72e-4),
+            (0.3, co2, 4.07e-4),
         ] {
             let traps = band(w, threshold);
             assert!(
@@ -502,7 +516,7 @@ mod tests {
     #[test]
     fn another_albedo_and_emissivity_read_the_same_table() {
         // A darker, less emissive body reads the table at its own fraction, (εσT⁴ − q) ÷
-        // ((1 − A)(A + ε) S sin e), and so traps what the Moon does at the threshold whose
+        // ((1 − A)(A + ε) S sin e_eff), and so traps what the Moon does at the threshold whose
         // fraction is the same.
         let moon = real_moon();
         let other = Body::new(BodyParts {
@@ -517,11 +531,13 @@ mod tests {
             let lat = degrees(latitude);
             let colatitude = Radians::new(FRAC_PI_2 - lat.value());
             let limb = Radians::new(p.greatest_declination.value() + p.star_radius.value());
-            let sin_e = math::sin(colatitude.value() + limb.value());
+            // The disk is wholly above the horizon here, so its flux-weighted elevation is its
+            // centre's.
+            let sin_e = math::sin(colatitude.value() + p.greatest_declination.value());
             let t = WATER.value();
             let by_hand = (0.8 * STEFAN_BOLTZMANN * t * t * t * t - p.heat_flow.value())
                 / ((1.0 - 0.3) * (0.3 + 0.8) * p.flux.value() * sin_e);
-            let x = irradiance_limit(colatitude, limb, &other, WATER);
+            let x = irradiance_limit(colatitude, &other, WATER);
             assert!(
                 (x / by_hand - 1.0).abs() < 1e-14,
                 "{latitude}°: {x} against {by_hand}"
@@ -538,9 +554,45 @@ mod tests {
                 "{latitude}°"
             );
             assert!(
-                (irradiance_limit(colatitude, limb, &moon, WATER) / x - 1.0).abs() > 1e-3,
+                (irradiance_limit(colatitude, &moon, WATER) / x - 1.0).abs() > 1e-3,
                 "{latitude}°: the two bodies' fractions differ"
             );
+        }
+    }
+
+    #[test]
+    fn the_heating_takes_the_disks_flux_weighted_elevation() {
+        // decision-r09-t7g-table §2: the shadow takes the star's upper limb and the heating its
+        // disk. At the pole of a body whose star is mostly below the horizon at its highest (δ
+        // 0.034° and α 0.87°, Mercury's at perihelion, science-r09-drainage.md §8.4), the disk's
+        // flux-weighted elevation is about 0.20° against the upper limb's 0.90°, so the fraction
+        // is about 4.5 times the upper limb's.
+        let (declination, star_radius) = (degrees(0.034), degrees(0.867));
+        let body = Body::new(BodyParts {
+            flux: WattsPerSquareMetre::new(1361.0 / (0.3075 * 0.3075)),
+            greatest_declination: declination,
+            star_radius,
+            ..point_moon()
+        })
+        .unwrap();
+        let t = WATER.value();
+        let allowed = 0.95 * STEFAN_BOLTZMANN * t * t * t * t;
+        let lit = (1.0 - 0.12) * (0.12 + 0.95) * body.parts().flux.value();
+        let upper = allowed / (lit * math::sin(declination.value() + star_radius.value()));
+        let ratio = irradiance_limit(Radians::ZERO, &body, WATER) / upper;
+        assert!((4.4..=4.6).contains(&ratio), "{ratio}");
+        // Its sin e is the bowls' to the bit at every latitude, the disk cut by the horizon or
+        // not, for this body and the real Moon.
+        for body in [body, real_moon()] {
+            let p = body.parts();
+            let (a, emissivity) = (p.bond_albedo, p.emissivity);
+            let allowed = emissivity * STEFAN_BOLTZMANN * t * t * t * t - p.heat_flow.value();
+            for latitude in [0.0, 30.0, 60.0, 80.0, 85.0, 88.0, 89.0, 89.9, 90.0] {
+                let sky = Sky::at(degrees(latitude), &body);
+                let colatitude = Radians::new(sky.band.colatitude);
+                let lit = (1.0 - a) * (a + emissivity) * p.flux.value() * sky.sin_highest;
+                assert_same_bits(irradiance_limit(colatitude, &body, WATER), allowed / lit);
+            }
         }
     }
 
@@ -606,7 +658,7 @@ mod tests {
         })
         .unwrap();
         let co = Kelvin::new(30.0);
-        assert_same_bits(irradiance_limit(pole, degrees(1.54), &warm, co), 0.0);
+        assert_same_bits(irradiance_limit(pole, &warm, co), 0.0);
         assert_same_bits(fraction(Radians::new(FRAC_PI_2), &warm, s, co), 0.0);
         // A star that never rises over the pole leaves every shadow's fraction infinite, read at
         // the table's last node.
@@ -615,7 +667,7 @@ mod tests {
             ..point_moon()
         })
         .unwrap();
-        let x = irradiance_limit(pole, pole, &still, WATER);
+        let x = irradiance_limit(pole, &still, WATER);
         assert!(x.is_infinite() && x > 0.0, "{x}");
         let last = table::IRRADIANCE[table::IRRADIANCE.len() - 1];
         assert_same_bits(

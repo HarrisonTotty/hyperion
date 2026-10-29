@@ -1532,12 +1532,7 @@ fn band_mean(lo: f64, hi: f64, f: impl Fn(f64) -> f64) -> f64 {
 fn moon_cold(fit: &RoughPlainsFit, w: f64, colatitude: f64, threshold: Kelvin) -> f64 {
     let moon = real_moon();
     let limb = MOON_DECLINATION + moon.parts().star_radius.value();
-    let x = irradiance_limit(
-        Radians::new(colatitude),
-        Radians::new(limb),
-        &moon,
-        threshold,
-    );
+    let x = irradiance_limit(Radians::new(colatitude), &moon, threshold);
     fit.cold_share(w, colatitude, limb, x)
 }
 

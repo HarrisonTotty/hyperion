@@ -727,11 +727,20 @@ impl Sky {
         let colatitude = FRAC_PI_2 - lat.abs();
         let declination = body.parts.greatest_declination.value();
         let radius = body.parts.star_radius;
-        let highest = Radians::new(num::min(FRAC_PI_2, colatitude + declination));
         Self {
-            sin_highest: math::sin(flux_weighted_elevation(highest, radius).value()),
+            sin_highest: Self::sin_highest_at(colatitude, body),
             band: Band::new(colatitude, declination + radius.value()),
         }
+    }
+
+    /// sin e of `body`'s star's disk's flux-weighted elevation at its highest over `colatitude`
+    /// radians, its centre at min(90°, colatitude + δ): [`Sky::at`]'s `sin_highest`, which the
+    /// rough plains' heating takes too.
+    #[must_use]
+    fn sin_highest_at(colatitude: f64, body: &Body) -> f64 {
+        let declination = body.parts.greatest_declination.value();
+        let highest = Radians::new(num::min(FRAC_PI_2, colatitude + declination));
+        math::sin(flux_weighted_elevation(highest, body.parts.star_radius).value())
     }
 }
 

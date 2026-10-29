@@ -2304,7 +2304,11 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   generator bump.
   _Built in two halves:_ the table and its reader, `cold_trap::rough_plains`, landed pure at 23
   (lane `r09-t7g`, 2026-10-28), read by nothing generated; the swap below, the use, is still to
-  build, behind a hold after 24 (the record says what moves).
+  build, behind a hold after 24 (the record says what moves). _The normaliser, as built_
+  (2026-10-29, at 23, no bump): `irradiance_limit` takes the heating's sin e as the disk's
+  flux-weighted elevation's, the bowls' to the bit, and the shadow keeps the upper limb
+  (`decision-r09-t7g-table` §2). It moved the reader's as-built pins, not its golden (the record,
+  "The flux-weighted normaliser").
   Records: [09-surface-generator/records/R09.T7.g.md](09-surface-generator/records/R09.T7.g.md).
   - **The table:** a new `hyperion-fit` task, `rough_plains_cold_traps`, ray traces Gaussian
     surfaces built as Hayne et al. 2021's Methods D builds them:
