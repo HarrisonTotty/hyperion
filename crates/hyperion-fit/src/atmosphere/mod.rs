@@ -1046,6 +1046,16 @@ mod tests {
         let one = trace(&absorbing, Polarisation::Scalar, 300, 1).to_json();
         let four = trace(&absorbing, Polarisation::Scalar, 300, 4).to_json();
         assert_eq!(one, four);
+        // And R08.T12.b.2's: a pair absorber, and a curve with pressure rows read at each path's
+        // Curtis–Godson pressure, its `pressureBar` adding a shell boundary of its own.
+        let pair = as_pair(&absorbing, 2);
+        let one = trace(&pair, Polarisation::Scalar, 300, 1).to_json();
+        let four = trace(&pair, Polarisation::Scalar, 300, 4).to_json();
+        assert_eq!(one, four);
+        let rows = pressure_rows_case();
+        let one = trace(&rows, Polarisation::Stokes, 300, 1).to_json();
+        let four = trace(&rows, Polarisation::Stokes, 300, 4).to_json();
+        assert_eq!(one, four);
     }
 
     /// `value` traced with its vertices counted, `samples` a source, on `threads` threads.
@@ -2007,7 +2017,7 @@ mod tests {
     #[test]
     fn atmosphere_a_pair_absorber_traces_as_its_column_twin() {
         // R08.T12.b.2: a pair absorber is read as a column absorber is, its amount n_A n_B ∫ρ ds
-        // in molecule pairs m⁻⁵ on its curve's ln(u ÷ 1 m⁻⁵): the same density and curves given as
+        // in molecules² m⁻⁵ on its curve's ln(u ÷ 1 m⁻⁵): the same density and curves given as
         // a pair trace bit for bit as the column absorber, which traces as its absorption.
         let absorbing = json!({
             "format": 1, "name": "absorbing",
@@ -2069,9 +2079,12 @@ mod tests {
     #[test]
     fn atmosphere_a_curve_with_pressure_rows_reads_the_whole_paths_curtis_godson_pressure() {
         // R08.T12.b.2: an absorbing-only slab seen from above on a grey ground, its absorber's
-        // density falling linearly from 1 at the ground to 0 at the top and the pressure from 1 to
-        // 0.5 bar, so that a chord's absorber-weighted pressure is ∫ρp ÷ ∫ρ over the heights it
-        // crosses: 5 ÷ 6 bar through the whole slab and 2 ÷ 3 bar from its middle up. The curve is
+        // density falling linearly from 1 at the ground to 0 at the top and the pressure linearly
+        // from 1 bar to 0.8 at 300 m and on to 0.5 at the top, so that a chord's absorber-weighted
+        // pressure is ∫ρp ÷ ∫ρ over the heights it crosses: 161 ÷ 200 bar through the whole slab
+        // and 9 ÷ 14 bar from its middle up. The profile's node at 300 m is a shell boundary of its
+        // own, so that the 8-point rule takes ρp, quadratic within each piece, exactly; across the
+        // kink it would read the whole slab's p̄ 4 × 10⁻⁴ high. The curve is
         // τ = k (u ÷ U)(a + b ln p) on five rows, linear in u and in ln p, so that the log–log read
         // and the rows' 4-point Lagrange are exact; the ground seen directly scores at T(u₁ + u₂,
         // p̄) of the two legs together, and each beam at its own column's p̄.
@@ -2105,11 +2118,11 @@ mod tests {
         );
         case["suns"] = json!([{ "name": "sun", "irradiance": [irradiance, irradiance] }]);
         case["pressureBar"] = json!({
-            "kind": "tabulated", "altitudesM": [0.0, length], "relative": [1.0, 0.5]
+            "kind": "tabulated", "altitudesM": [0.0, 300.0, length], "relative": [1.0, 0.8, 0.5]
         });
         let reference = trace(&case, Polarisation::Scalar, 16, 1);
         let (mu_view, mu_sun) = (math::cos(radians(30.0)), math::cos(radians(60.0)));
-        let whole = math::ln(1e5 * 5.0 / 6.0);
+        let whole = math::ln(1e5 * 161.0 / 200.0);
         let (u1, u2) = (vertical / mu_view, vertical / mu_sun);
         let down = &reference.geometries()[0];
         for w in 0..2 {
@@ -2123,16 +2136,81 @@ mod tests {
                 down.radiance()[w]
             );
         }
-        // From the middle the beam crosses the upper half: a quarter of the column at 2 ÷ 3 bar.
+        // From the middle the beam crosses the upper half: a quarter of the column at 9 ÷ 14 bar.
         let middle = &reference.geometries()[1];
         for w in 0..2 {
             let beam = middle.sun_optical_depth()[0][w].unwrap();
-            let expected = depth(w, 0.25 * vertical / mu_sun, math::ln(1e5 * 2.0 / 3.0));
+            let expected = depth(w, 0.25 * vertical / mu_sun, math::ln(1e5 * 9.0 / 14.0));
             assert!(
                 (beam / expected - 1.0).abs() < 1e-8,
                 "{w}: {beam} against {expected}"
             );
         }
+    }
+
+    /// A scattering slab over a grey ground whose absorber's curve has five pressure rows that
+    /// differ, τ ∝ u (0.2 + 0.1 ln p), its `pressureBar` with a node of its own at 300 m: R08.T12.b.2's
+    /// paths, for the one-and-four-threads test.
+    fn pressure_rows_case() -> Value {
+        let (n, length) = (1e20, 1000.0);
+        let vertical = 0.5 * n * length;
+        let rows: Vec<f64> = [1e3, 1e4, 3e4, 1e5, 3e5]
+            .iter()
+            .map(|&p| math::ln(p))
+            .collect();
+        let depth =
+            move |w: usize, u: f64, y: f64| [1.0, 2.0][w] * (u / vertical) * (0.2 + 0.1 * y);
+        let mut case = slab(
+            &json!([
+                {
+                    "name": "gas", "density": uniform(),
+                    "scattering": [3e-4, 5e-4], "absorption": [0.0, 0.0],
+                    "phase": { "kind": "rayleigh", "depolarisation": [0.03, 0.03] }
+                },
+                {
+                    "name": "layer",
+                    "density": {
+                        "kind": "tabulated", "altitudesM": [0.0, length], "relative": [1.0, 0.0]
+                    },
+                    "scattering": [0.0, 0.0], "absorption": [0.0, 0.0], "phase": { "kind": "none" },
+                    "absorber": {
+                        "kind": "column", "numberDensityPerM3": n,
+                        "curves": [pressure_curve_json(vertical, 2, &rows, math::ln(2e5), depth)]
+                    }
+                }
+            ]),
+            &json!([0.3, 0.5]),
+            &json!([
+                geometry("down", 1001.0, (150.0, 0.0), (60.0, 0.0)),
+                geometry("up", 0.0, (40.0, 120.0), (30.0, 0.0))
+            ]),
+        );
+        case["aggregates"] =
+            json!([{ "name": "sun", "sunDirections": [{ "zenithDeg": 30.0, "azimuthDeg": 0.0 }] }]);
+        case["pressureBar"] = json!({
+            "kind": "tabulated", "altitudesM": [0.0, 300.0, length], "relative": [1.0, 0.8, 0.5]
+        });
+        case
+    }
+
+    #[test]
+    fn atmosphere_a_pressure_profile_that_no_curve_reads_moves_nothing() {
+        // R08.T12.b.2: a case's `pressureBar` adds shell boundaries, and its paths carry a
+        // pressure, only where some curve has pressure rows, so a case whose curves have one row
+        // traces bit for bit with the profile or without it, its node at 37% of the top none of
+        // the case's own.
+        let absorbing = as_absorber(&case::tests::sample_case(), 2, 1e18, 1.5e22);
+        let top = absorbing["topHeightM"].as_f64().unwrap();
+        let mut with = absorbing.clone();
+        with["pressureBar"] = json!({
+            "kind": "tabulated", "altitudesM": [0.0, 0.37 * top, top], "relative": [1.0, 0.6, 0.01]
+        });
+        assert_eq!(
+            shell_grid(&case_of(&absorbing)).len(),
+            shell_grid(&case_of(&with)).len()
+        );
+        let [a, b] = [&absorbing, &with].map(|c| trace(c, Polarisation::Scalar, 300, 2).to_json());
+        assert_eq!(a, b);
     }
 
     #[test]

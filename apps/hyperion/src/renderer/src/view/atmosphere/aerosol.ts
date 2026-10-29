@@ -408,8 +408,18 @@ function lnPressure(column: AtmosphereColumn, i: number): number {
   return log(column.pressuresPa[i] ?? Number.NaN);
 }
 
-/** A column quantity at pressure p, linear in ln p between the levels that bracket it. */
-function atPressure(column: AtmosphereColumn, values: Float64Array, pressurePa: number): number {
+/**
+ * A column quantity at pressure p, linear in ln p between the levels that bracket it: how a mode's
+ * base and top are laid, and the reference cases' heights at a pressure (`reference/cases.ts`).
+ *
+ * @param values - The quantity at each of the column's levels.
+ * @throws RangeError for a pressure outside the column.
+ */
+export function atPressure(
+  column: AtmosphereColumn,
+  values: Float64Array,
+  pressurePa: number,
+): number {
   const target = log(pressurePa);
   const levels = column.pressuresPa.length;
   for (let i = 0; i + 1 < levels; i += 1) {

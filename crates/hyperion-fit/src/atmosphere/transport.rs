@@ -34,8 +34,10 @@
 //!   read by the client's rule (the [`absorber`](super::absorber) module). A curve with pressure
 //!   rows (R08.T12.b.2) is read at the whole path's absorber-weighted pressure
 //!   `p̄ = p_ref (w_path + w_leg) ÷ (u_path + u_leg)`, `w = n ∫ρ (p ÷ p_ref) ds` by the same rule,
-//!   p the case's `pressureBar`. The draws do not depend on it, a case without an absorber runs as before, bit
-//!   for bit, and an absorber's amount is taken as before whether or not another reads a pressure.
+//!   p the case's `pressureBar`. The draws do not depend on it, and a case without an absorber, or
+//!   whose curves read no pressure, runs as before, bit for bit. Where some curve reads one, the
+//!   `pressureBar` profile's nodes are shell boundaries for every term (the crate's `shell_grid`),
+//!   so that the 8-point rule takes ρ p within one piece of each.
 //! - **The ground** is Lambertian: next-event estimation with A ÷ π, then a cosine-weighted
 //!   direction with the weight times A.
 //! - **Russian roulette** (Arvo and Kirk 1990) once a path's weight falls below
@@ -154,8 +156,8 @@ use hyperion_sim::math;
 use hyperion_sim::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
 
 use super::Polarisation;
-use super::absorber::{Curve, MAX_ABSORBERS, weighted_pressure_pa};
-use super::case::{AbsorberCurve, Aggregate, AtmosphereCase, Geometry, LocalDirection};
+use super::absorber::{AbsorberAmount, AbsorberDensity, Curve, MAX_ABSORBERS};
+use super::case::{Aggregate, AtmosphereCase, Geometry, LocalDirection};
 use super::geometry::{LocalFrame, Next, ShellGrid, Vec3, basis, cosine_weighted, in_cone, turned};
 use super::optics::{Phase, ProfileLookup, ScatteringMatrix};
 use crate::tasks::displaced_forms::births::Draws;
@@ -266,15 +268,14 @@ pub(crate) struct Medium<'a> {
 }
 
 /// Each absorber's amounts along a path, in the case's order of the absorber terms, each in its
-/// kind's unit, molecules m⁻² for a column absorber and molecule pairs m⁻⁵ for a pair: zero past
-/// the case's last.
+/// kind's unit ([`AbsorberAmount`]): zero past the case's last.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct Amounts {
     /// u = n ∫ρ ds.
-    amount: [f64; MAX_ABSORBERS],
+    amount: [AbsorberAmount; MAX_ABSORBERS],
     /// `w = n ∫ρ (p ÷ p_ref) ds`, `p_ref` the absorber module's `PRESSURE_REFERENCE_PA`, where the
     /// absorber's curves read a pressure, and 0 for every other.
-    weighted: [f64; MAX_ABSORBERS],
+    weighted: [AbsorberAmount; MAX_ABSORBERS],
 }
 
 impl Amounts {
@@ -294,8 +295,8 @@ impl Amounts {
 #[derive(Debug)]
 struct AbsorberRead<'a> {
     profile: ProfileLookup<'a>,
-    /// n at relative density 1: molecules m⁻³, or molecule pairs m⁻⁶ for a pair absorber.
-    density: f64,
+    /// n at relative density 1, in its kind's unit.
+    density: AbsorberDensity,
     /// Per sun, in the case's order.
     curves: Vec<Curve<'a>>,
     /// Whether its curves read a path's pressure: some has pressure rows.
@@ -307,13 +308,8 @@ impl AbsorberRead<'_> {
     /// pressure-weighted amount is `weighted`, read at the absorber-weighted pressure where its
     /// curve has pressure rows.
     #[must_use]
-    fn transmittance(&self, sun: usize, amount: f64, weighted: f64) -> f64 {
-        let curve = &self.curves[sun];
-        if curve.reads_pressure() && amount > 0.0 {
-            curve.transmittance(amount, weighted_pressure_pa(amount, weighted))
-        } else {
-            curve.transmittance(amount, f64::NAN)
-        }
+    fn transmittance(&self, sun: usize, amount: AbsorberAmount, weighted: AbsorberAmount) -> f64 {
+        self.curves[sun].transmittance(amount, weighted)
     }
 }
 
@@ -819,25 +815,15 @@ impl<'a> Medium<'a> {
         let absorbers: Vec<AbsorberRead<'a>> = terms
             .iter()
             .filter_map(|t| {
-                t.absorber.as_ref().map(|absorber| AbsorberRead {
-                    profile: ProfileLookup::new(&t.density),
-                    density: absorber.density(),
-                    curves: absorber
-                        .curves()
-                        .iter()
-                        .map(|c| {
-                            Curve::new(
-                                &c.log_columns,
-                                c.log_pressures(),
-                                c.read_top_log_pressure.unwrap_or(f64::NAN),
-                                &c.optical_depth[wavelength],
-                            )
-                        })
-                        .collect(),
-                    reads_pressure: absorber
-                        .curves()
-                        .iter()
-                        .any(AbsorberCurve::has_pressure_rows),
+                t.absorber.as_ref().map(|absorber| {
+                    let curves: Vec<Curve<'a>> =
+                        absorber.curves().iter().map(|c| c.at(wavelength)).collect();
+                    AbsorberRead {
+                        profile: ProfileLookup::new(&t.density),
+                        density: absorber.density(),
+                        reads_pressure: curves.iter().any(Curve::reads_pressure),
+                        curves,
+                    }
                 })
             })
             .collect();
@@ -1025,10 +1011,17 @@ impl<'a> Medium<'a> {
                 }
             }
         }
-        for (k, absorber) in self.absorbers.iter().enumerate() {
-            amounts.amount[k] += absorber.density * sums[k] * half;
+        let totals = amounts.amount.iter_mut().zip(&mut amounts.weighted);
+        for ((absorber, (&sum, &weighted)), (amount, weighted_amount)) in self
+            .absorbers
+            .iter()
+            .zip(sums.iter().zip(&weighted))
+            .zip(totals)
+        {
+            let density = absorber.density.value();
+            *amount += AbsorberAmount::new(density * sum * half);
             if absorber.reads_pressure {
-                amounts.weighted[k] += absorber.density * weighted[k] * half;
+                *weighted_amount += AbsorberAmount::new(density * weighted * half);
             }
         }
     }
@@ -1075,10 +1068,10 @@ impl<'a> Medium<'a> {
     fn absorber_transmittance(&self, sun: usize, path: &Amounts, leg: &Amounts) -> f64 {
         self.absorbers
             .iter()
-            .enumerate()
-            .map(|(k, absorber)| {
-                let amount = path.amount[k] + leg.amount[k];
-                absorber.transmittance(sun, amount, path.weighted[k] + leg.weighted[k])
+            .zip(path.amount.iter().zip(&path.weighted))
+            .zip(leg.amount.iter().zip(&leg.weighted))
+            .map(|((absorber, (&path_u, &path_w)), (&leg_u, &leg_w))| {
+                absorber.transmittance(sun, path_u + leg_u, path_w + leg_w)
             })
             .product()
     }
@@ -1140,9 +1133,9 @@ impl<'a> Medium<'a> {
         let absorbed: f64 = self
             .absorbers
             .iter()
-            .enumerate()
-            .map(|(k, absorber)| {
-                -math::ln(absorber.transmittance(sun, leg.amount[k], leg.weighted[k]))
+            .zip(leg.amount.iter().zip(&leg.weighted))
+            .map(|(absorber, (&amount, &weighted))| {
+                -math::ln(absorber.transmittance(sun, amount, weighted))
             })
             .sum();
         Some(depth + absorbed)

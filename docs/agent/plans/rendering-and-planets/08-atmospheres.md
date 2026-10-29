@@ -595,8 +595,10 @@ smooth mesh and the `disc cells` kernel share its source and `view/bodies/draw.t
 ```rust
 // crates/hyperion-fit/src/atmosphere/
 pub struct AtmosphereCase { /* a spectral medium, as the TypeScript writes it, an absorber term
-    carrying each sun's curve of growth (`absorber`, R08.T12.b.1), its `Shells`, and its geometry
-    set and aggregates, each with its own `samples` where the case gives them */ }
+    carrying each sun's curve of growth (`absorber`, R08.T12.b.1), of kind `column` or `pair` and
+    with or without pressure rows (`logPressures`, `readTopLogPressure`) read at the case's
+    `pressureBar` (R08.T12.b.2), its `Shells`, and its geometry set and aggregates, each with its
+    own `samples` where the case gives them */ }
 pub enum Polarisation { Scalar, Stokes }                 // Stokes: every gate's reference, Design note 10
 pub enum Shells {                                        // Design note 17
     Sphere { radius_m: f64 },
@@ -618,10 +620,12 @@ crate's convention (`parallel::map_reduce_chunks`, with counter-based draws keye
 `tasks/displaced_forms/births.rs`'s `Draws` are). `--samples` is the count of each geometry and
 aggregate the case gives none of its own; the reference records each one's count and the standard
 error of its own first quarter of samples, from which R08's N^(−1/2) check reads (R08.T12.b.1).
-An absorber term's curve is read at each path's whole column at every next-event score, and its
-−ln T of the beam's own column joins `sunOpticalDepth`. Fixtures:
-`view/atmosphere/reference/{earth,earth-ozone-slab,mars,venus-92bar,venus-58bar,titan-class,giant-deck,saturn-oblate}.case.json`
-and their `.reference.json`, formatted so that `prettier --check .` (in `just ci`) passes, or
+An absorber term's curve is read at each path's whole column at every next-event score, a curve
+with pressure rows at the path's absorber-weighted (Curtis–Godson) pressure, and its −ln T of the
+beam's own column joins `sunOpticalDepth`. Fixtures:
+`view/atmosphere/reference/{earth,earth-ozone-slab,mars,venus-92bar,venus-58bar,titan-class,giant-deck,saturn-oblate,earth-high-limb,earth-ozone-slab-high-limb,venus-92bar-albedo}.case.json`
+and their `.reference.json` (the last R08.T5.e's albedo case), formatted so that
+`prettier --check .` (in `just ci`) passes, or
 listed in `.prettierignore` as written data, and each under the repository's 500 kB added-file
 hook. The metric is `gate.ts` (R08.T12.b).
 
@@ -4927,7 +4931,8 @@ Design note 16: Earth, Earth with ozone, Mars with hand dust, Venus at 92 and at
 Titan, and a hand giant. Their media are R08.T12.b's reference cases, built in
 `view/atmosphere/reference/cases.ts` (`decision-r08-t12b-scope.md`, ruling 3): `earth` (its
 measured ozone), `earth-ozone-slab`, `mars` and `saturn-oblate` from R08.T12.b.1, the thick ones
-(Venus, Titan, the giant's deck) from R08.T12.b.2, so that the kept scenes, the CPU twin and the
+(Venus, Titan, the giant's deck) from R08.T12.b.2 in `view/atmosphere/reference/thickCases.ts`,
+built on first need (about a minute of Mie), so that the kept scenes, the CPU twin and the
 reference read one medium on one figure. Those that need R08.T5.b's files (Venus's clouds, Mars's
 dust, Titan's haze) wait on those files. Their licences were ruled on 2026-10-09
 (`decision-r08-licences.md`).

@@ -66,13 +66,15 @@ apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/n2oMerge.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesAtoms.json
-# The reference tracer's cloud-free cases, written by `reference/cases.test.ts` through `bless.ts`,
-# their references, `hyperion-fit atmosphere-reference`'s `serde_json` pretty form, and their
-# refusals (`references.test.ts`); the curves' shared values the tracer's `absorber` module reads
-# (`absorberCurves.test.ts`; plan R08, R08.T12.b.1)
+# The reference tracer's cases, written by `reference/cases.test.ts`, `thickCases.test.ts` and
+# `venusAlbedo.test.ts` through `bless.ts`, their references, `hyperion-fit atmosphere-reference`'s
+# `serde_json` pretty form, and their refusals and sanity ranges (`references.test.ts`); the curves'
+# shared values the tracer's `absorber` module reads (`absorberCurves.test.ts`; plan R08,
+# R08.T12.b.1 and b.2)
 apps/hyperion/src/renderer/src/view/atmosphere/reference/*.case.json
 apps/hyperion/src/renderer/src/view/atmosphere/reference/*.reference.json
 apps/hyperion/src/renderer/src/view/atmosphere/reference/refusals.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/sanityRanges.json
 crates/hyperion-fit/src/atmosphere/absorber_curves.json
 # R08.T13's sweep cases, written by `reference/sweepCases.test.ts` through `bless.ts`, and their
 # outputs, `hyperion-fit atmosphere-sweep`'s, a cell or a point a line; the smoke's sweep the

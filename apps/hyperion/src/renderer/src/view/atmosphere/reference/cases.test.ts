@@ -230,11 +230,14 @@ describe("the geometry sets", () => {
   });
 
   it("take the air's own scale height for the higher limb, about 85 km at 10 H", () => {
-    expect([
-      EARTH_AIR_SCALE_HEIGHT_M,
-      EARTH_OZONE_SLAB_HEIGHTS_M[0],
-      EARTH_OZONE_SLAB_HEIGHTS_M[1],
-    ]).toEqual([expect.closeTo(8450, -2), expect.closeTo(18_600, -2), expect.closeTo(38_500, -2)]);
+    expect(EARTH_AIR_SCALE_HEIGHT_M).toEqual(expect.closeTo(8450, -2));
+  });
+
+  it("put the slab's base and top at about 18.6 and 38.5 km", () => {
+    expect(EARTH_OZONE_SLAB_HEIGHTS_M).toEqual([
+      expect.closeTo(18_600, -2),
+      expect.closeTo(38_500, -2),
+    ]);
   });
 
   it("put saturn-oblate's limbs at n H ÷ s(φ) over the equator, 45° and the pole", () => {

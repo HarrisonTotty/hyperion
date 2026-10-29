@@ -20,9 +20,11 @@
 //! transmittances is not exact even for one absorber: two factors that both fall with σ are
 //! correlated, and their product is too low.
 //!
-//! The amount is of the absorber's kind (the client's `AbsorberAmount`): a column absorber's
-//! column, molecules m⁻², or a pair absorber's pair column, molecule pairs m⁻⁵ (R08.T4.c), whose
-//! term's relative density is already the square of its column's. The read is the same for both.
+//! The amount is of the absorber's kind ([`AbsorberAmount`], the client's `AbsorberAmount`): a
+//! column absorber's column, molecules m⁻², or a pair absorber's, molecules² m⁻⁵, the product
+//! `n_A n_B ∫ρ ds` (R08.T4.c; n² for a like pair, as HITRAN's collision-induced absorption takes
+//! it, α = k `n_A n_B`), whose term's relative density is already the square of its column's. The
+//! read is the same for both.
 //!
 //! The read is `view/atmosphere/absorbers.ts`'s `absorberTransmittance`, which is `depthAt` and
 //! `depthAtPressure` (module-private there) and `clampedTransmittance`:
@@ -51,6 +53,60 @@ pub(crate) const TRANSMITTANCE_FLOOR: f64 = 1e-6;
 /// columns its per-planet tables store, so that a path carries a fixed array of columns.
 pub(crate) const MAX_ABSORBERS: usize = 5;
 
+/// An absorber's density at relative density 1, in its kind's unit: n, molecules m⁻³, for a column
+/// absorber, or `n_A n_B`, molecules² m⁻⁶, for a pair absorber (n² for a like pair; module
+/// documentation).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub(crate) struct AbsorberDensity(f64);
+
+impl AbsorberDensity {
+    /// The density `value`, in its kind's unit.
+    #[must_use]
+    pub(crate) const fn new(value: f64) -> Self {
+        Self(value)
+    }
+
+    /// Its value, in its kind's unit.
+    #[must_use]
+    pub(crate) const fn value(self) -> f64 {
+        self.0
+    }
+}
+
+/// An absorber's amount along a path in its kind's unit (module documentation): u = n ∫ρ ds,
+/// molecules m⁻² for a column absorber, or molecules² m⁻⁵ for a pair absorber; or a
+/// pressure-weighted amount, `w = n ∫ρ (p ÷ p_ref) ds`, in the same unit.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub(crate) struct AbsorberAmount(f64);
+
+impl AbsorberAmount {
+    /// The amount `value`, in its kind's unit.
+    #[must_use]
+    pub(crate) const fn new(value: f64) -> Self {
+        Self(value)
+    }
+
+    /// Its value, in its kind's unit.
+    #[must_use]
+    pub(crate) const fn value(self) -> f64 {
+        self.0
+    }
+}
+
+impl core::ops::Add for AbsorberAmount {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
+    }
+}
+
+impl core::ops::AddAssign for AbsorberAmount {
+    fn add_assign(&mut self, other: Self) {
+        self.0 += other.0;
+    }
+}
+
 /// One row of a curve of growth at one wavelength and sun: ln u at each node, ascending, and the
 /// optical depth −ln T there.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,7 +130,8 @@ impl<'a> CurveRow<'a> {
         }
     }
 
-    /// The optical depth at x = ln(u ÷ 1 m⁻²), by the client's `depthAt` (module documentation).
+    /// The optical depth at x = ln(u ÷ 1 unit), m⁻² or m⁻⁵, by the client's `depthAt` (module
+    /// documentation).
     #[must_use]
     pub(crate) fn depth_at(&self, ln_u: f64) -> f64 {
         let last = self.log_columns.len() - 1;
@@ -96,11 +153,11 @@ impl<'a> CurveRow<'a> {
         }
     }
 
-    /// The transmittance through the amount `amount`, in the curve's unit (molecules m⁻², or
-    /// molecule pairs m⁻⁵), at least 0: 1 at 0, and otherwise e^(−τ) clamped to
+    /// The transmittance through `amount`, at least 0: 1 at 0, and otherwise e^(−τ) clamped to
     /// [[`TRANSMITTANCE_FLOOR`], 1].
     #[must_use]
-    pub(crate) fn transmittance(&self, amount: f64) -> f64 {
+    pub(crate) fn transmittance(&self, amount: AbsorberAmount) -> f64 {
+        let amount = amount.value();
         if amount <= 0.0 {
             return 1.0;
         }
@@ -122,23 +179,23 @@ pub(crate) const PRESSURE_REFERENCE_PA: f64 = 1e5;
 /// pressure-weighted amount is 0 reads at that row rather than at ln 0.
 pub(crate) const PRESSURE_FLOOR_PA: f64 = 1e-3;
 
-/// A curve of growth at one wavelength and sun: its rows, one per pressure (R08.T12.b.2; one for a
-/// curve without lines), on one set of nodes.
+/// A curve of growth with pressure rows at one wavelength and sun (R08.T12.b.2; R08.T4.d's line
+/// absorbers): a row per pressure on one set of nodes, read at a path's absorber-weighted pressure.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Curve<'a> {
+pub(crate) struct PressureRows<'a> {
     log_columns: &'a [f64],
-    /// ln(p ÷ 1 Pa) at each row, strictly ascending; a curve of one row reads none.
+    /// ln(p ÷ 1 Pa) at each row, strictly ascending: at least two.
     log_pressures: &'a [f64],
-    /// ln(p ÷ 1 Pa) above which the read holds p̄; a curve of one row reads none.
+    /// ln(p ÷ 1 Pa) above which the read holds p̄, finite.
     read_top_log_pressure: f64,
     /// −ln T at each row and node, row-major, `[r × nodes + j]`.
     depths: &'a [f64],
 }
 
-impl<'a> Curve<'a> {
-    /// The curve of `depths` on `log_columns` and `log_pressures`, which the case has checked: at
-    /// least two nodes, ln u finite and strictly ascending, ln p finite and strictly ascending (or
-    /// of at most one row), and one finite depth at least 0 per row and node.
+impl<'a> PressureRows<'a> {
+    /// The rows of `depths` on `log_columns` and `log_pressures`, which the case has checked: at
+    /// least two nodes, ln u finite and strictly ascending, at least two rows, ln p finite and
+    /// strictly ascending, the read's top finite, and one finite depth at least 0 per row and node.
     #[must_use]
     pub(crate) fn new(
         log_columns: &'a [f64],
@@ -147,8 +204,11 @@ impl<'a> Curve<'a> {
         depths: &'a [f64],
     ) -> Self {
         debug_assert!(
-            depths.len() == log_columns.len() * log_pressures.len().max(1),
-            "a curve has a depth per row and node"
+            log_pressures.len() >= 2
+                && read_top_log_pressure.is_finite()
+                && depths.len() == log_columns.len() * log_pressures.len(),
+            "a curve with pressure rows has two rows or more, its read's top, and a depth per row \
+             and node"
         );
         Self {
             log_columns,
@@ -158,32 +218,23 @@ impl<'a> Curve<'a> {
         }
     }
 
-    /// How many pressure rows the curve has: 1 for one without lines.
-    #[must_use]
-    pub(crate) fn rows(&self) -> usize {
-        self.log_pressures.len().max(1)
-    }
-
-    /// Whether its read takes a path's pressure: a curve of several rows.
-    #[must_use]
-    pub(crate) fn reads_pressure(&self) -> bool {
-        self.rows() > 1
-    }
-
     /// Row `r`.
+    #[must_use]
     fn row(&self, r: usize) -> CurveRow<'a> {
         let nodes = self.log_columns.len();
         CurveRow::new(self.log_columns, &self.depths[r * nodes..(r + 1) * nodes])
     }
 
     /// The optical depth at x = ln(u ÷ 1 unit) and the absorber-weighted pressure `pressure_pa`,
-    /// Pa, above 0 (module documentation): row 0's on a curve of one row, which reads no pressure.
+    /// Pa, finite and above 0 (module documentation; the client's `depthAtPressure` refuses any
+    /// other).
     #[must_use]
     pub(crate) fn depth_at(&self, ln_u: f64, pressure_pa: f64) -> f64 {
-        let rows = self.rows();
-        if rows == 1 {
-            return self.row(0).depth_at(ln_u);
-        }
+        debug_assert!(
+            pressure_pa.is_finite() && pressure_pa > 0.0,
+            "a curve with pressure rows reads at a pressure above 0"
+        );
+        let rows = self.log_pressures.len();
         let first = self.log_pressures[0];
         let top = self.log_pressures[rows - 1].min(self.read_top_log_pressure);
         let y = math::ln(pressure_pa).max(first).min(top);
@@ -215,15 +266,12 @@ impl<'a> Curve<'a> {
         depth.clamp(0.0, CURVE_DEPTH_MAX)
     }
 
-    /// The transmittance through the amount `amount`, in the curve's unit, at least 0, at the
-    /// absorber-weighted pressure `pressure_pa`, Pa (read only on a curve of several rows): 1 at 0,
-    /// and otherwise e^(−τ) clamped to [[`TRANSMITTANCE_FLOOR`], 1]. A curve of one row reads as
-    /// its [`CurveRow`] does, bit for bit.
+    /// The transmittance through `amount`, at least 0, at the absorber-weighted pressure
+    /// `pressure_pa`, Pa, finite and above 0: 1 at 0, and otherwise e^(−τ) clamped to
+    /// [[`TRANSMITTANCE_FLOOR`], 1].
     #[must_use]
-    pub(crate) fn transmittance(&self, amount: f64, pressure_pa: f64) -> f64 {
-        if self.rows() == 1 {
-            return self.row(0).transmittance(amount);
-        }
+    pub(crate) fn transmittance(&self, amount: AbsorberAmount, pressure_pa: f64) -> f64 {
+        let amount = amount.value();
         if amount <= 0.0 {
             return 1.0;
         }
@@ -231,12 +279,44 @@ impl<'a> Curve<'a> {
     }
 }
 
+/// A curve of growth at one wavelength and sun, as an absorber's term carries it: one row, or rows
+/// at several pressures (R08.T12.b.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Curve<'a> {
+    /// A curve without lines: one row, which reads no pressure.
+    Row(CurveRow<'a>),
+    /// A curve with pressure rows, read at a path's absorber-weighted pressure.
+    Rows(PressureRows<'a>),
+}
+
+impl Curve<'_> {
+    /// Whether its read takes a path's pressure: a curve with pressure rows.
+    #[must_use]
+    pub(crate) fn reads_pressure(&self) -> bool {
+        matches!(self, Self::Rows(_))
+    }
+
+    /// The transmittance of a path that has crossed `amount`, at least 0, its pressure-weighted
+    /// amount `weighted`: a row's T(u), or, on a curve with pressure rows, T(u) at the path's
+    /// absorber-weighted pressure ([`weighted_pressure_pa`]), 1 at u = 0.
+    #[must_use]
+    pub(crate) fn transmittance(&self, amount: AbsorberAmount, weighted: AbsorberAmount) -> f64 {
+        match self {
+            Self::Row(row) => row.transmittance(amount),
+            Self::Rows(rows) if amount.value() > 0.0 => {
+                rows.transmittance(amount, weighted_pressure_pa(amount, weighted))
+            }
+            Self::Rows(_) => 1.0,
+        }
+    }
+}
+
 /// A path's absorber-weighted (Curtis–Godson) pressure, Pa, from its amount u and its
-/// pressure-weighted amount `w = n ∫ρ (p ÷ p_ref) ds`, both in the absorber's unit: `p_ref w ÷ u`, at
-/// least [`PRESSURE_FLOOR_PA`] (the client's tables' and twin's reading). `amount` is above 0.
+/// pressure-weighted amount `w = n ∫ρ (p ÷ p_ref) ds`: `p_ref w ÷ u`, at least
+/// [`PRESSURE_FLOOR_PA`] (the client's tables' and twin's reading). `amount` is above 0.
 #[must_use]
-pub(crate) fn weighted_pressure_pa(amount: f64, weighted: f64) -> f64 {
-    (PRESSURE_REFERENCE_PA * weighted / amount).max(PRESSURE_FLOOR_PA)
+pub(crate) fn weighted_pressure_pa(amount: AbsorberAmount, weighted: AbsorberAmount) -> f64 {
+    (PRESSURE_REFERENCE_PA * weighted.value() / amount.value()).max(PRESSURE_FLOOR_PA)
 }
 
 #[cfg(test)]
@@ -300,12 +380,16 @@ mod tests {
                 .zip(&curve.transmittance)
                 .enumerate()
             {
-                let read = Curve::new(
-                    &curve.log_columns,
-                    &curve.log_pressures,
-                    curve.read_top_log_pressure,
-                    depths,
-                );
+                let read = if curve.log_pressures.len() > 1 {
+                    Curve::Rows(PressureRows::new(
+                        &curve.log_columns,
+                        &curve.log_pressures,
+                        curve.read_top_log_pressure,
+                        depths,
+                    ))
+                } else {
+                    Curve::Row(CurveRow::new(&curve.log_columns, depths))
+                };
                 assert_eq!(
                     read.reads_pressure(),
                     curve.pressures_pa.is_some(),
@@ -313,7 +397,11 @@ mod tests {
                     curve.name
                 );
                 for ((&u, &p), &t) in curve.amounts.iter().zip(&pressures).zip(expected) {
-                    let transmittance = read.transmittance(u, p);
+                    let amount = AbsorberAmount::new(u);
+                    let transmittance = match read {
+                        Curve::Row(row) => row.transmittance(amount),
+                        Curve::Rows(rows) => rows.transmittance(amount, p),
+                    };
                     let difference = (transmittance - t).abs() / t;
                     assert!(
                         difference <= 1e-12,
@@ -328,8 +416,8 @@ mod tests {
                     if u > 0.0 && math::ln(u) > last {
                         beyond += 1;
                     }
-                    if read.reads_pressure() && u > 0.0 {
-                        let depth = read.depth_at(math::ln(u), p);
+                    if let (Curve::Rows(rows), true) = (read, u > 0.0) {
+                        let depth = rows.depth_at(math::ln(u), p);
                         if (depth - CURVE_DEPTH_MAX).abs() < f64::MIN_POSITIVE {
                             ceiled += 1;
                         }
@@ -382,18 +470,21 @@ mod tests {
         for u in [1e15, 1e19, 3.3e19, 7e20, 1e22, 2e22] {
             let expected = math::exp(-2e-20 * u).max(TRANSMITTANCE_FLOOR);
             assert!(
-                (row.transmittance(u) / expected - 1.0).abs() < 1e-12,
+                (row.transmittance(AbsorberAmount::new(u)) / expected - 1.0).abs() < 1e-12,
                 "{u:e}"
             );
         }
-        assert!((row.transmittance(0.0) - 1.0).abs() < f64::MIN_POSITIVE);
+        assert!((row.transmittance(AbsorberAmount::default()) - 1.0).abs() < f64::MIN_POSITIVE);
         // Where a node's τ is 0, linear in τ: half way between 0 and 0.4 in ln u.
         let flat = [0.0, 0.4];
         let row = CurveRow::new(&log_columns[..2], &flat);
         let middle = math::exp(f64::midpoint(log_columns[0], log_columns[1]));
-        assert!((row.transmittance(middle) - math::exp(-0.2)).abs() < 1e-15);
+        assert!((row.transmittance(AbsorberAmount::new(middle)) - math::exp(-0.2)).abs() < 1e-15);
         // Deep past the floor.
-        assert!((row.transmittance(1e80) - TRANSMITTANCE_FLOOR).abs() < f64::MIN_POSITIVE);
+        assert!(
+            (row.transmittance(AbsorberAmount::new(1e80)) - TRANSMITTANCE_FLOOR).abs()
+                < f64::MIN_POSITIVE
+        );
     }
 
     #[test]
@@ -412,9 +503,8 @@ mod tests {
             .iter()
             .flat_map(|&y| log_columns.iter().map(move |&x| tau(math::exp(x), y)))
             .collect();
-        let curve = Curve::new(&log_columns, &log_pressures, 12.5, &depths);
-        assert!(curve.reads_pressure());
-        let u = 3e19;
+        let curve = PressureRows::new(&log_columns, &log_pressures, 12.5, &depths);
+        let u = AbsorberAmount::new(3e19);
         for (y, held) in [
             (4.0, 4.0),
             (9.5, 9.5),
@@ -422,35 +512,41 @@ mod tests {
             (1.0, 2.0),
             (13.5, 12.5),
         ] {
-            let expected = math::exp(-tau(u, held));
+            let expected = math::exp(-tau(u.value(), held));
             assert!(
                 (curve.transmittance(u, math::exp(y)) / expected - 1.0).abs() < 1e-13,
                 "ln p {y}"
             );
         }
-        let two = Curve::new(&log_columns, &log_pressures[..2], 6.0, &depths[..6]);
-        let expected = math::exp(-tau(u, 3.5));
+        let two = PressureRows::new(&log_columns, &log_pressures[..2], 6.0, &depths[..6]);
+        let expected = math::exp(-tau(u.value(), 3.5));
         assert!((two.transmittance(u, math::exp(3.5)) / expected - 1.0).abs() < 1e-13);
-        assert!((curve.transmittance(0.0, 1e5) - 1.0).abs() < f64::MIN_POSITIVE);
+        assert!(
+            (curve.transmittance(AbsorberAmount::default(), 1e5) - 1.0).abs() < f64::MIN_POSITIVE
+        );
         // Past its ceiling, a curve with pressure rows reads −ln 10⁻⁶ however deep its rows.
         let deep: Vec<f64> = depths.iter().map(|d| 100.0 * d).collect();
-        let deep = Curve::new(&log_columns, &log_pressures, 12.5, &deep);
+        let deep = PressureRows::new(&log_columns, &log_pressures, 12.5, &deep);
         assert!((deep.depth_at(math::ln(1e21), 1e5) - CURVE_DEPTH_MAX).abs() < f64::MIN_POSITIVE);
-        // A curve of one row reads as its row, whatever the pressure.
-        let one = Curve::new(&log_columns, &log_pressures[..1], f64::NAN, &depths[..3]);
-        assert!(!one.reads_pressure());
+        // A path's read: at its absorber-weighted pressure, p_ref w ÷ u, and 1 where it has crossed
+        // none, whatever its weighted amount.
+        let rows = Curve::Rows(curve);
+        assert!(rows.reads_pressure());
+        let weighted = AbsorberAmount::new(0.25 * u.value());
+        assert_eq!(
+            hyperion_testkit::float::bits(rows.transmittance(u, weighted)),
+            hyperion_testkit::float::bits(curve.transmittance(u, 0.25e5))
+        );
+        let none = AbsorberAmount::default();
+        assert!((rows.transmittance(none, none) - 1.0).abs() < f64::MIN_POSITIVE);
         let row = CurveRow::new(&log_columns, &depths[..3]);
-        assert_eq!(
-            hyperion_testkit::float::bits(one.transmittance(u, f64::NAN)),
-            hyperion_testkit::float::bits(row.transmittance(u))
-        );
-        let none = Curve::new(&log_columns, &[], f64::NAN, &depths[..3]);
-        assert_eq!(
-            hyperion_testkit::float::bits(none.transmittance(u, 1e5)),
-            hyperion_testkit::float::bits(row.transmittance(u))
-        );
+        assert!(!Curve::Row(row).reads_pressure());
         // The absorber-weighted pressure and its floor.
-        assert!((weighted_pressure_pa(2.0, 1.5) - 0.75e5).abs() < 1e-9);
-        assert!((weighted_pressure_pa(2.0, 0.0) - PRESSURE_FLOOR_PA).abs() < f64::MIN_POSITIVE);
+        let (two, one_and_a_half) = (AbsorberAmount::new(2.0), AbsorberAmount::new(1.5));
+        assert!((weighted_pressure_pa(two, one_and_a_half) - 0.75e5).abs() < 1e-9);
+        assert!(
+            (weighted_pressure_pa(two, AbsorberAmount::default()) - PRESSURE_FLOOR_PA).abs()
+                < f64::MIN_POSITIVE
+        );
     }
 }

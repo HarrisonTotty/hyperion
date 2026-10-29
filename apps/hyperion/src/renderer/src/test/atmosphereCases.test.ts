@@ -194,17 +194,38 @@ describe("the case writer's line media (R08.T12.b.2)", () => {
   it("writes no pressure profile for a medium without one", () => {
     expect(caseJson(EARTH_CASE, undefined).pressureBar).toBeUndefined();
   });
+
+  it("writes its pressure profile and its curves' pressure rows to the case's figures", () => {
+    const json = caseJson({ ...lineCase, significantFigures: 3 }, undefined);
+    const profile = json.pressureBar;
+    const rows = json.terms.flatMap((t) => t.absorber?.curves ?? []);
+    const numbers = [
+      ...(profile?.kind === "tabulated" ? [...profile.altitudesM, ...profile.relative] : []),
+      ...rows.flatMap((c) => [
+        ...(c.logPressures ?? []),
+        ...(c.readTopLogPressure === undefined ? [] : [c.readTopLogPressure]),
+        ...c.opticalDepth.flat(),
+      ]),
+    ];
+    expect([
+      profile?.kind,
+      rows.some((c) => (c.logPressures?.length ?? 0) > 1),
+      numbers.filter((v) => Number(v.toPrecision(3)) !== v),
+    ]).toEqual(["tabulated", true, []]);
+  });
 });
 
 describe("the case writer's figures (R08.T12.b.2)", () => {
-  it("writes a case's terms to its figures and its geometries in full", () => {
+  it("writes a case's terms to its figures", () => {
     const json = caseJson({ ...MARS_CASE, significantFigures: 3 }, undefined);
-    const full = caseJson(MARS_CASE, undefined);
     const dust = json.terms.find((t) => t.name === "dust");
-    expect([
-      dust?.scattering.every((v) => Number(v.toPrecision(3)) === v),
-      json.geometries,
-    ]).toEqual([true, full.geometries]);
+    expect(dust?.scattering.filter((v) => Number(v.toPrecision(3)) !== v)).toEqual([]);
+  });
+
+  it("writes a case's geometries in full whatever its figures", () => {
+    expect(caseJson({ ...MARS_CASE, significantFigures: 3 }, undefined).geometries).toEqual(
+      caseJson(MARS_CASE, undefined).geometries,
+    );
   });
 
   it("keeps each matrix element no larger than a₁ when rounded", () => {

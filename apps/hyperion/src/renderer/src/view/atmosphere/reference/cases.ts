@@ -36,7 +36,7 @@ import {
 } from "../../../lib/system/constants";
 import type { Rgb } from "../../photometry/toneCurve";
 import type { AbsorberCurve } from "../absorbers";
-import { type AerosolParticles, aerosolTerm } from "../aerosol";
+import { type AerosolParticles, aerosolTerm, atPressure } from "../aerosol";
 import {
   MARS_AIR,
   MARS_DUST_MODE,
@@ -141,7 +141,7 @@ export interface ReferenceCase {
  * Each case's seed, its own, so that two cases' references draw independent noise: Design note
  * 10's false failures over ten cases assume it, and `earth` and `earth-ozone-slab` would otherwise
  * follow the same paths, their shells alike but at the slab's edges. The pilots took seeds from
- * 1000 (ruling 8).
+ * 1000 (ruling 8). `venus-92bar-albedo` is R08.T5.e's plane-parallel albedo case (`test/venusAlbedo.ts`).
  */
 export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   earth: 0,
@@ -154,6 +154,7 @@ export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   "giant-deck": 7,
   "earth-high-limb": 8,
   "earth-ozone-slab-high-limb": 9,
+  "venus-92bar-albedo": 10,
 };
 
 /**
@@ -587,28 +588,20 @@ export const SATURN_OBLATE_CASE: ReferenceCase = {
 
 /**
  * A column's height at a pressure, m: linear in ln p between the levels about it, as `aerosol.ts`
- * lays a mode's base and top.
+ * lays a mode's base and top ({@link atPressure}).
  *
  * @throws RangeError for a pressure outside the column.
  */
 export function heightAtPressureM(column: AtmosphereColumn, pressurePa: number): number {
-  const target = Math.log(pressurePa);
-  for (let i = 0; i + 1 < column.pressuresPa.length; i += 1) {
-    const a = Math.log(column.pressuresPa[i] ?? Number.NaN);
-    const b = Math.log(column.pressuresPa[i + 1] ?? Number.NaN);
-    if (target <= a && target >= b) {
-      const low = column.altitudesM[i] ?? Number.NaN;
-      const high = column.altitudesM[i + 1] ?? Number.NaN;
-      return low + ((target - a) / (b - a)) * (high - low);
-    }
-  }
-  throw new RangeError(`pressure ${pressurePa} Pa lies outside the column`);
+  return atPressure(column, column.altitudesM, pressurePa);
 }
 
 /**
- * The air's own scale height at Earth's ground, m: the green extinction's e-folding of
- * {@link EARTH_REFERENCE}'s molecular term alone (`localScaleHeightM`), 8.45 km, where the medium's
- * whole, `earth`'s limb's, is 2.10 km with its aerosol (main, 2026-10-21).
+ * The air's own scale height at Earth's ground, m: {@link EARTH_REFERENCE}'s molecular term alone
+ * by `localScaleHeightM`, its green optical depth over its extinction at the ground, the column's
+ * equivalent height (on a hydrostatic column the pressure scale height kT ÷ m̄g at the ground,
+ * within 0.3%), 8.45 km, where the medium's whole, `earth`'s limb's, is 2.10 km with its aerosol
+ * (main, 2026-10-21).
  */
 export const EARTH_AIR_SCALE_HEIGHT_M: number = (() => {
   const rayleigh = EARTH_REFERENCE.terms.find((t) => t.name === "rayleigh");

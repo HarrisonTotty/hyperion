@@ -8,8 +8,8 @@
  * Their decks' and hazes' Mie and mean-field optics run for about a minute, so the cases are built
  * on first need ({@link thickReferenceCases}), in a test or a worker, never on the render thread
  * (`reference/cases.ts`'s cloud-free cases are cheap). Like those, they are R08.T10's fixtures
- * (ruling 3): `ATMOSPHERE TEST`'s thick bodies read these media. This module imports nothing from
- * the tests.
+ * (ruling 3), whose media `ATMOSPHERE TEST`'s thick bodies are to read, once a worker builds them
+ * for it (not yet: R08's records, T12.b.2). This module imports nothing from the tests.
  *
  * - `venus-92bar` and `venus-58bar`: a Venus-class air, the real 92 bar and plan 14's 58
  *   (Design note 16), under P14.T24.g's case-1 deck of four sulphuric-acid modes, mode 2
@@ -261,12 +261,18 @@ export interface VenusDeckMode {
 }
 
 /**
- * P14.T24.g's four modes (`science-r08-unowned-absorbers.md` §1.4: Pollack et al. 1993's radii and
- * widths, Icarus 103, 1; the shares Mie at 550 nm over Haus et al. 2016's columns), each well mixed
- * across its span: 1, `H2SO4`, r_eff 0.49 µm, v_eff 0.21, u 0–1, 0.15 of τ; 2,
- * `acid_uv_absorber`, 1.17 µm, 0.064, u 0.55–1, 0.18; 2′, `H2SO4`, 1.56 µm, 0.045, u 0–0.5, 0.27;
- * 3, `H2SO4`, 4.27 µm, 0.064, u 0–0.33, 0.39. The shares sum to 0.99 as tabled, and each mode
- * takes its share of 34.5, so the deck's τ(550) is 34.155.
+ * P14.T24.g's four modes (`science-r08-unowned-absorbers.md` §1.4; the shares Mie at 550 nm over
+ * Haus et al. 2016's columns), each well mixed across its span: 1, `H2SO4`, r_eff 0.49 µm, v_eff
+ * 0.21, u 0–1, 0.15 of τ; 2, `acid_uv_absorber`, 1.17 µm, 0.064, u 0.55–1, 0.18; 2′, `H2SO4`,
+ * 1.56 µm, 0.045, u 0–0.5, 0.27; 3, `H2SO4`, 4.27 µm, 0.064, u 0–0.33, 0.39. The shares sum to 0.99
+ * as tabled, and each mode takes its share of 34.5, so the deck's τ(550) is 34.155.
+ *
+ * @remarks
+ * r_eff and v_eff are derived, r_eff = r_g e^(2.5 ln²σ_g) and v_eff = e^(ln²σ_g) − 1 (J. E. Hansen
+ * and L. D. Travis, Space Sci. Rev. 16 (1974) 527, eq. 2.60, r_g the number median), from Pollack
+ * et al. 1993's r_g of 0.30, 1.00, 1.40 and 3.65 µm (J. B. Pollack et al., Icarus 103 (1993) 1, as
+ * the plan reads it, not re-read here) at ln σ_g rounded to 0.44, 0.25, 0.21 and 0.25, as
+ * P14.T49.e keeps them; Pollack's own σ_g would move r_eff by at most 0.6% and v_eff by up to 5%.
  */
 export const VENUS_DECK_MODES: ReadonlyArray<VenusDeckMode> = [
   {

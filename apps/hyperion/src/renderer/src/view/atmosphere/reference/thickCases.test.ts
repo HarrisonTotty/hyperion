@@ -179,24 +179,26 @@ describe("titan-class's medium", () => {
   });
 });
 
-describe("giant-deck's medium", () => {
-  it(
-    "is saturn-oblate's air with its absorbers and a deck past the split",
-    {
-      timeout: BUILD_MS,
-    },
-    () => {
-      const { medium } = thickReferenceCases()["giant-deck"];
-      const deck = termOf(medium.terms, GIANT_DECK.name);
-      expect([
-        medium.terms.map((t) => t.name),
-        termOf(medium.terms, "rayleigh").scattering,
-        (verticalDepth(deck, medium.topHeightM)[1] ?? 0) > 10,
-      ]).toEqual([
-        ["rayleigh", "absorber:H2+CH4", "pair:H2+He,H2+H2", GIANT_DECK.name],
-        termOf(SATURN_OBLATE_REFERENCE.terms, "rayleigh").scattering,
-        true,
-      ]);
-    },
-  );
+describe("giant-deck's medium", { timeout: BUILD_MS }, () => {
+  it("is saturn-oblate's air with its absorbers and the deck, in that order", () => {
+    expect(thickReferenceCases()["giant-deck"].medium.terms.map((t) => t.name)).toEqual([
+      "rayleigh",
+      "absorber:H2+CH4",
+      "pair:H2+He,H2+H2",
+      GIANT_DECK.name,
+    ]);
+  });
+
+  it("scatters as saturn-oblate's air", () => {
+    const { medium } = thickReferenceCases()["giant-deck"];
+    expect(termOf(medium.terms, "rayleigh").scattering).toEqual(
+      termOf(SATURN_OBLATE_REFERENCE.terms, "rayleigh").scattering,
+    );
+  });
+
+  it("has a deck past the split's optical depth", () => {
+    const { medium } = thickReferenceCases()["giant-deck"];
+    const deck = termOf(medium.terms, GIANT_DECK.name);
+    expect(verticalDepth(deck, medium.topHeightM)[1]).toBeGreaterThan(10);
+  });
 });

@@ -10,8 +10,9 @@
  *   `TEST EARTH O3 SLAB` (`earth-ozone-slab`, T6.d's 300 DU slab), `TEST MARS` (`mars`, with its hand
  *   dust) and `TEST SATURN` (`saturn-oblate`, the Saturn-class air on Saturn's level spheroid, its
  *   pole +z); and `TEST MOON`, airless, of the Moon's radius, full in `TEST EARTH`'s night sky.
- *   R08.T12.b.2's thick cases, Venus at 92 and 58 bar, Titan and the giant's deck, do not exist yet
- *   and are left out.
+ *   R08.T12.b.2's thick cases, Venus at 92 and 58 bar, Titan and the giant's deck, are not among
+ *   them yet: their optics run for about a minute, which the page's lazy import would run on the
+ *   render thread, so they wait for a worker to build their media (R08's records, T12.b.2).
  * - **Its layout** ({@link ATMOSPHERE_FIXTURES}): `TEST EARTH` 1 au out along +x, and the other air
  *   fixtures a quarter of the way round the star, 1.41 au from it, so that its night is lit by its
  *   moon alone; there each after `TEST EARTH O3 SLAB` lies {@link ATMOSPHERE_LEG_M} from the one before,

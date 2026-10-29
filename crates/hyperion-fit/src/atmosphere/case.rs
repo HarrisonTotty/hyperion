@@ -78,10 +78,11 @@
 //!   by the curve alone, which the estimator applies to the whole amount a path crosses (the
 //!   `absorber` module), and a case has at most five. Since R08.T12.b.2:
 //!   - a `pair` absorber (R08.T4.c), `{ "kind": "pair", "pairDensityPerM6": n, "curves": [...] }`:
-//!     molecule pairs absorbing as σ `n_A n_B`, n their `n_A n_B` at relative density 1, molecule
-//!     pairs m⁻⁶, the term's relative density already the square of its column's, so that a path's
-//!     pair column is u = n ∫ρ ds molecule pairs m⁻⁵, which its curves' ln(u ÷ 1 m⁻⁵) read as a
-//!     column curve's ln(u ÷ 1 m⁻²);
+//!     molecule pairs absorbing as σ `n_A n_B`, n their `n_A n_B` at relative density 1,
+//!     molecules² m⁻⁶ (n² for a like pair, as HITRAN's collision-induced absorption takes it,
+//!     α = k `n_A n_B`), the term's relative density already the square of its column's, so that a
+//!     path's pair column is u = n ∫ρ ds, molecules² m⁻⁵, which its curves' ln(u ÷ 1 m⁻⁵) read as
+//!     a column curve's ln(u ÷ 1 m⁻²);
 //!   - a curve with pressure rows (R08.T4.d's line absorbers): `"logPressures"`, ln(p ÷ 1 Pa) at
 //!     each row, strictly ascending, `"readTopLogPressure"`, the ln p above which the read holds p̄,
 //!     and each wavelength's `opticalDepth` row-major, `[r × nodes + j]`, read at each path's
@@ -111,7 +112,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::absorber::MAX_ABSORBERS;
+use super::absorber::{AbsorberDensity, Curve, CurveRow, MAX_ABSORBERS, PressureRows};
 use super::optics;
 use super::spheroid::{BuildLevelSpheroidError, LevelSpheroid};
 
@@ -288,10 +289,11 @@ pub(crate) enum TermAbsorber {
         /// One curve per sun, in the case's order of them.
         curves: Vec<AbsorberCurve>,
     },
-    /// Molecule pairs (the client's `pair`, R08.T4.c): u = `n_A n_B` ∫ρ ds, molecule pairs m⁻⁵,
-    /// the term's ρ the square of its column's relative density (R08.T12.b.2).
+    /// Molecule pairs (the client's `pair`, R08.T4.c): u = `n_A n_B` ∫ρ ds, molecules² m⁻⁵ (n² for a
+    /// like pair, as HITRAN's collision-induced absorption takes it), the term's ρ the square of
+    /// its column's relative density (R08.T12.b.2).
     Pair {
-        /// `n_A n_B` at relative density 1, molecule pairs m⁻⁶.
+        /// `n_A n_B` at relative density 1, molecules² m⁻⁶ (n² for a like pair).
         pair_density_per_m6: f64,
         /// One curve per sun.
         curves: Vec<AbsorberCurve>,
@@ -307,18 +309,18 @@ impl TermAbsorber {
         }
     }
 
-    /// Its density at relative density 1: n, molecules m⁻³, or `n_A n_B`, molecule pairs m⁻⁶.
+    /// Its density at relative density 1: n, molecules m⁻³, or `n_A n_B`, molecules² m⁻⁶.
     #[must_use]
-    pub(crate) fn density(&self) -> f64 {
+    pub(crate) fn density(&self) -> AbsorberDensity {
         match self {
             Self::Column {
                 number_density_per_m3,
                 ..
-            } => *number_density_per_m3,
+            } => AbsorberDensity::new(*number_density_per_m3),
             Self::Pair {
                 pair_density_per_m6,
                 ..
-            } => *pair_density_per_m6,
+            } => AbsorberDensity::new(*pair_density_per_m6),
         }
     }
 }
@@ -352,6 +354,23 @@ impl AbsorberCurve {
     #[must_use]
     pub(crate) fn has_pressure_rows(&self) -> bool {
         self.log_pressures().len() > 1
+    }
+
+    /// Its read at wavelength `wavelength` (the [`absorber`](super::absorber) module's): its one
+    /// row, or its pressure rows with their read's top, which the case gives every curve of
+    /// several rows.
+    #[must_use]
+    pub(crate) fn at(&self, wavelength: usize) -> Curve<'_> {
+        let depths = &self.optical_depth[wavelength];
+        match self.read_top_log_pressure {
+            Some(top) if self.has_pressure_rows() => Curve::Rows(PressureRows::new(
+                &self.log_columns,
+                self.log_pressures(),
+                top,
+                depths,
+            )),
+            _ => Curve::Row(CurveRow::new(&self.log_columns, depths)),
+        }
     }
 }
 
@@ -1857,6 +1876,38 @@ pub(crate) mod tests {
             }),
             format!("{curve}.opticalDepth[1]")
         );
+    }
+
+    #[test]
+    fn an_absorber_curve_reads_as_its_one_row_or_its_pressure_rows() {
+        // R08.T12.b.2: a curve of one row is its row, read at no pressure; one of several rows is
+        // read at a path's pressure, with the read's top the case gives it.
+        let one = read(&with_ozone_absorber()).unwrap();
+        let curve = &one.terms()[2].absorber.as_ref().unwrap().curves()[0];
+        assert!(matches!(curve.at(1), Curve::Row(_)));
+        let mut with_rows = with_ozone_absorber();
+        let rows = &mut with_rows["terms"][2]["absorber"]["curves"][0];
+        rows["logPressures"] = json!([2.3, 9.2, 16.1]);
+        rows["readTopLogPressure"] = json!(16.0);
+        rows["opticalDepth"] = json!([
+            [0.0, 0.1, 0.8, 0.0, 0.2, 1.6, 0.0, 0.3, 2.4],
+            [0.0, 0.0, 0.05, 0.0, 0.0, 0.1, 0.0, 0.0, 0.15]
+        ]);
+        with_rows["pressureBar"] = json!({
+            "kind": "tabulated", "altitudesM": [0.0, 50_000.0, 100_000.0],
+            "relative": [1.0, 0.002, 0.0]
+        });
+        let case = read(&with_rows).unwrap();
+        let curve = &case.terms()[2].absorber.as_ref().unwrap().curves()[0];
+        let Curve::Rows(rows) = curve.at(1) else {
+            panic!("a curve of three rows reads its pressure rows")
+        };
+        // Its second wavelength's rows at the last node, 0.05, 0.1 and 0.15, at their pressures,
+        // linear in ln p between them, and held at the read's top, 16.0, under the last row's 16.1.
+        for (y, expected) in [(2.3, 0.05), (9.2, 0.1), (16.0, 0.15 - 0.05 * 0.1 / 6.9)] {
+            let depth = rows.depth_at(54.0, hyperion_sim::math::exp(y));
+            assert!((depth - expected).abs() < 1e-12, "ln p {y}: {depth}");
+        }
     }
 
     #[test]
