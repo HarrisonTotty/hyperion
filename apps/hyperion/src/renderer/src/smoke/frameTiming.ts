@@ -64,6 +64,14 @@
  *   its rows;
  * - (N) (M)'s tables under the class map, (I)'s judged rows.
  *
+ * R08.T18.a adds one, timed and reported as (G) is, for the owner's RTX run:
+ *
+ * - (M) the frame without its air, its ground emitting: (G)'s frames of the measured Earth's body
+ *   at `x1`, `x2` and `x4`, given the protocol fixture's locked lava world's ground temperature
+ *   field (`LitBodyInput.thermal`), so that R07's disc, mesh and `disc cells` draw it by their
+ *   emissive forms (`discReflectance.ts`), made and prepared before the timed frames
+ *   (`PhotorealRenderer.prepareEmissive`): what the emission costs beside (G)'s plain frames.
+ *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
  * timed, back to back; two sweeps over every combination, the second in the reverse order. There
@@ -76,8 +84,10 @@
 
 import type { BodyIdHex } from "@hyperion/protocol";
 
+import { lavaWorldSurface } from "../test/thermalSurfaces";
 import type { DiscSurface } from "../view/appearance/bodyAppearance";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
+import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "../view/atmosphere/thermal";
 import type { PhotometricLaw } from "../view/appearance/law";
 import {
   ATMOSPHERE_COMPOSITE_PASS,
@@ -232,6 +242,10 @@ const CHECK_NAMES = {
   bare: (medium: string): string => `${TASK} the frame without its air's timings, high, ${medium}`,
   bareSums: (medium: string, place: string, set: string): string =>
     `${TASK} the frame without its air's per-frame sums, high, ${medium}, ${place}, ${set}`,
+  emitting: (medium: string): string =>
+    `${TASK} the frame without its air, its ground emitting's timings, high, ${medium}`,
+  emittingSums: (medium: string, place: string, set: string): string =>
+    `${TASK} the frame without its air, its ground emitting's per-frame sums, high, ${medium}, ${place}, ${set}`,
   tables: `${TASK} the per-planet tables' builds`,
   bytes: `${TASK} the per-view bytes of a body's air`,
   firstAir: `${TASK} the first air frame on the main thread, high`,
@@ -1458,16 +1472,32 @@ async function timeBare(
   checks: Checks,
   ledger: ResolveLedger,
   measured: FrameMedium,
+  thermal: SurfaceTemperatureField | null = null,
 ): Promise<number> {
   const viewport = settingOutput("high");
   on.view.resize(viewport);
+  if (thermal !== null) {
+    // (M)'s emissive forms made before its timed frames (R08.T18.a).
+    await on.renderer.prepareEmissive();
+  }
   const failures: string[] = [];
   const sets = sourceSetsOf("high").filter((set) => set.name !== "x2p");
   const combinations: Array<Timed<BareCombination>> = FAR_LIMB_TIMING_PLACES.flatMap((place) =>
     sets.map((set) => {
       const { item } = frameCombination("high", measured, place, set, failures);
+      const bodies =
+        thermal === null
+          ? item.frame.bodies
+          : item.frame.bodies.map((body) =>
+              body.id === measured.id ? { ...body, thermal } : body,
+            );
       return {
-        item: { place: place.label, set, frame: { ...item.frame, atmospheres: [] }, regime: null },
+        item: {
+          place: place.label,
+          set,
+          frame: { ...item.frame, atmospheres: [], bodies },
+          regime: null,
+        },
         records: [],
       };
     }),
@@ -1502,11 +1532,11 @@ async function timeBare(
     ].join(" | "),
   );
   checks.check(
-    CHECK_NAMES.bare(measured.name),
+    thermal === null ? CHECK_NAMES.bare(measured.name) : CHECK_NAMES.emitting(measured.name),
     kept.every(({ frames }) => frames.length === TIMED_IN_ALL && framesFinite(frames)) &&
       failures.length === 0,
     [
-      `high at ${viewport.widthPx} × ${viewport.heightPx}, (A)'s frames of ${measured.name} with the same scene and sources but no atmosphere drawn (atmospheres: []), R07's regimes drawing the body bare`,
+      `high at ${viewport.widthPx} × ${viewport.heightPx}, (A)'s frames of ${measured.name} with the same scene and sources but no atmosphere drawn (atmospheres: []), R07's regimes drawing the body bare${thermal === null ? "" : ", its ground the locked lava world's field, drawn by the emissive forms (R08.T18.a)"}`,
       timerText(timerSummary(all)),
       `the frame's GPU pass sum and its passes by label, and the main thread's time in render (performance.now(), 0.1 ms steps here), µs, median / p95: ${[heading, ...rows].join(" || ")}`,
     ].join("; "),
@@ -1514,7 +1544,11 @@ async function timeBare(
   for (const combination of combinations) {
     const { frames } = keptOf(combination);
     checks.check(
-      CHECK_NAMES.bareSums(measured.name, combination.item.place, combination.item.set.name),
+      (thermal === null ? CHECK_NAMES.bareSums : CHECK_NAMES.emittingSums)(
+        measured.name,
+        combination.item.place,
+        combination.item.set.name,
+      ),
       frames.length === TIMED_IN_ALL && framesFinite(frames),
       `${frames.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
     );
@@ -2408,6 +2442,13 @@ export async function timeAtmosphereFrame(
       timeSmallBodies(on, checks, ledger, measured),
     );
     const bareMissing = await timedPart("(G)", () => timeBare(on, checks, ledger, measured));
+    const lava = groundTemperatureFieldOf(lavaWorldSurface());
+    if (lava === null) {
+      throw new Error("the lava world has no medium");
+    }
+    const emittingMissing = await timedPart("(M)", () =>
+      timeBare(on, checks, ledger, measured, lava),
+    );
     const trioMissing = await timedPart("(H)", () => timeSmallTrio(on, checks, ledger, measured));
     const mappedFrames = await timedPart("(I)", () => timeClassMap(on, ledger, mapped));
     const specAbout = new Map(specs.map((spec) => [spec.name, spec.about]));
@@ -2464,6 +2505,7 @@ export async function timeAtmosphereFrame(
       aloneMissing +
       smallMissing +
       bareMissing +
+      emittingMissing +
       trioMissing +
       mappedMissing +
       saturnMissing +
@@ -2471,7 +2513,7 @@ export async function timeAtmosphereFrame(
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (M) ${emittingMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import { bindingStages } from "../../test/wgslStages";
@@ -1133,38 +1133,95 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     expect(withAir.draw?.textures["atmosphereBody"]).toBe(air.body);
   });
 
-  it("draws a body whose lighting carries its ground's emission by the emissive form once made, the plain form until then (R08.T18.a)", async () => {
-    const { pass, pool, engine } = await passOn("low", { source: BODY });
-    pool().layers = bodyLayers();
+  /** A lit pass on low over `bodyLayers`, its patches baked, and its view. */
+  async function bakedLitPass(): Promise<
+    Awaited<ReturnType<typeof passOn>> & { readonly view: TerrainView }
+  > {
+    const made = await passOn("low", { source: BODY });
+    made.pool().layers = bodyLayers();
     const view = northPole(2_000_000);
-    const emitting: TerrainLighting = {
-      ...LIGHTING,
-      emission: {
-        field: surfaceTemperatureFieldOf(lavaWorldSurface()),
-        star: { x: 0, y: 0, z: 1 },
-        meltClasses: [],
-      },
-    };
-    pass.frame({ ...inputAt(view), lighting: LIGHTING });
-    pool().bakeDemand(pass);
-    const plain = pass.frame({ ...inputAt(view), lighting: emitting });
+    made.pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    made.pool().bakeDemand(made.pass);
+    return { ...made, view };
+  }
+
+  /** {@link LIGHTING} carrying the lava world's ground's emission about a star over the pole. */
+  const EMITTING: TerrainLighting = {
+    ...LIGHTING,
+    emission: {
+      field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+      star: { x: 0, y: 0, z: 1 },
+      meltClasses: [],
+    },
+  };
+
+  it("draws a body whose lighting carries its ground's emission by the plain form until the emissive form is made (R08.T18.a)", async () => {
+    const { pass, view } = await bakedLitPass();
+    const plain = pass.frame({ ...inputAt(view), lighting: EMITTING });
     expect(plain.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+  });
+
+  it("draws it by the emissive form once that is made (R08.T18.a)", async () => {
+    const { pass, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
     await microtasks();
-    const emissive = pass.frame({ ...inputAt(view), lighting: emitting });
+    const emissive = pass.frame({ ...inputAt(view), lighting: EMITTING });
     expect(emissive.draw?.material.name).toBe(
       terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name,
     );
-    // The lights' buffer holds the block past the lights.
+  });
+
+  it("writes the emission's block past the lights (R08.T18.a)", async () => {
+    const { pass, engine, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
     const lights = engine.writes.findLast((w) => w.buffer === "terrain lights");
     expect(lights?.data).toEqual(
       new Uint8Array(
-        packTerrainLighting(emitting, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
+        packTerrainLighting(EMITTING, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
           .buffer,
       ),
     );
-    // A frame without it goes back to the plain form.
+  });
+
+  it("goes back to the plain form for a frame without the emission (R08.T18.a)", async () => {
+    const { pass, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
     const after = pass.frame({ ...inputAt(view), lighting: LIGHTING });
     expect(after.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+  });
+
+  it("asks for the emissive form again on the device a restore makes (R08.T18.a)", async () => {
+    const { pass, pool, engine, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const name = terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name;
+    const asked = (): number => engine.compiles.filter((made) => made.name === name).length;
+    expect(asked()).toBe(1);
+    engine.loseDevice();
+    engine.restore();
+    await pass.ready();
+    // The new device's slots are empty until its pool bakes them again.
+    pool().layers = bodyLayers();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    pool().bakeDemand(pass);
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    expect(asked()).toBe(2);
+  });
+
+  it("reports an emissive form the device refuses, and draws on by the plain form (R08.T18.a)", async () => {
+    const { pass, engine, view } = await bakedLitPass();
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    engine.failMaterials((name) => name.startsWith("terrain-lit-emissive"));
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const frame = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect(frame.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+    expect(reported).toHaveBeenCalledWith(
+      "the terrain's emissive form failed: its ground is drawn unlit by itself",
+      expect.any(Error),
+    );
   });
 
   it("binds the larger phase table once the slots' laws outgrow it", async () => {

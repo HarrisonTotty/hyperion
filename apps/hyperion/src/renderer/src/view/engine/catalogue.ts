@@ -252,7 +252,8 @@ const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * the disc's interior and limb, the mesh regime's figure and the `disc cells` kernel, and the lit
  * terrain's on both vertex paths (`terrainMaterial.ts`' `withTerrainEmission`), each with the
  * ground's thermal emission, made only for a body above the visibility cut. The smoke page compiles
- * them in a part of their own (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ * them in part 9, beside their twin's group (`smoke/page.ts`), not in part 1, which compiles the
+ * rest, for its watchdog.
  */
 export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BODY_DISC_EMISSIVE_MATERIALS.interior },

@@ -62,26 +62,28 @@ import type { BodyFigure } from "../view/terrain/planet";
 import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
 import {
   classPhotometryOf,
+  MELT_CLASS_CODE,
   SHADOW_CASCADES_TEXTURE,
   TERRAIN_CLASSES,
   type TerrainLighting,
   terrainLitEmissiveMaterialSpec,
   terrainLitMaterialSpec,
 } from "../view/terrain/terrainMaterial";
-import type {
-  BakedPatch,
-  BakeSettings,
-  HeightWorkerReply,
-  HeightWorkerRequest,
+import {
+  type BakedPatch,
+  type BakeSettings,
+  type HeightWorkerReply,
+  type HeightWorkerRequest,
+  PALETTE_NONE,
 } from "../view/terrain/workers/messages";
 import { moonLikeFixture, type WorkerFixture } from "../test/moonLikeFixture";
-import { magmaOceanSurface } from "../test/thermalSurfaces";
+import { lavaWorldSurface, magmaOceanSurface } from "../test/thermalSurfaces";
 import { rec709Luminance } from "../view/atmosphere/solar";
 import {
   fieldTemperatureK,
   groundTemperatureFieldOf,
   type SurfaceTemperatureField,
-  thermalRadiance,
+  thermalLuminance,
 } from "../view/atmosphere/thermal";
 import type { Rgb } from "../view/photometry/toneCurve";
 import { type Checks, halfTexels, projection } from "./harness";
@@ -261,6 +263,8 @@ interface LitFrames {
   readonly morph: LitFrame;
   /** The ground's thermal emission's frame (R08.T18.a). */
   readonly emission: LitFrame;
+  /** The `Melt` slots' frame on a night side (R08.T18.a). */
+  readonly melt: LitFrame;
 }
 
 /**
@@ -310,7 +314,9 @@ async function drawInto(
     field,
   );
   baked.forEach((bake, slot) => {
-    const result = resources.upload({ slot, ...bake });
+    // Each patch's first palette slot takes the `Melt` form (R08.T18.a), which only the emissive
+    // form reads (its laws' word 6), so that its night side's frame below has melt to draw.
+    const result = resources.upload({ slot, ...withMeltFirst(bake) });
     if (result.kind !== "uploaded") {
       throw new Error(`slot ${String(slot)} refused: ${result.reason}`);
     }
@@ -496,6 +502,19 @@ async function drawInto(
     );
     const emitted = await renderInto(engine, target, { ...draw, material: emissive });
     const albedos = blockAlbedos(bakes, lighting.elsewhere.a);
+    // The locked lava world's night side over the block: its ground at its 21 K night, its first
+    // slot's `Melt` at the melt's least temperature.
+    const lava = groundTemperatureFieldOf(lavaWorldSurface());
+    if (lava === null || lava.meltK === null) {
+      throw new Error("the lava world has no medium and a melt");
+    }
+    resources.setLighting({
+      ...lighting,
+      lights: [],
+      secondaries: [],
+      emission: { field: lava, star: { x: -nu.x, y: -nu.y, z: -nu.z }, meltClasses: [] },
+    });
+    const molten = await renderInto(engine, target, { ...draw, material: emissive });
     return {
       lit: blended,
       morph: morphFrameOf(done, coarse, unblended),
@@ -506,10 +525,73 @@ async function drawInto(
         albedos,
         exposureScale: lighting.exposureScale,
       }),
+      melt: meltFrameOf(first, molten, {
+        meltK: lava.meltK,
+        albedos,
+        exposureScale: lighting.exposureScale,
+      }),
     };
   } finally {
     target.dispose();
   }
+}
+
+/** A bake with its palette's first slot of the `Melt` form, its entry kept; an empty slot kept. */
+function withMeltFirst(bake: BakedPatch): BakedPatch {
+  const { layers } = bake;
+  if (layers === null || layers.palette[1] === PALETTE_NONE) {
+    return bake;
+  }
+  const palette = Uint8Array.from(layers.palette);
+  palette[0] = MELT_CLASS_CODE;
+  return { ...bake, layers: { ...layers, palette } };
+}
+
+/**
+ * The `Melt` frame's check (R08.T18.a): the block's night side, its ground at its night's 21 K
+ * and so dark, and its first slots of the `Melt` form at the melt's least temperature; every
+ * texel the first frame draws as terrain finite and at most what the brightest emitting A gives
+ * at that temperature, within {@link EMISSION_MARGIN}, and some of them lit by the melt alone.
+ */
+function meltFrameOf(
+  terrain: Float32Array,
+  molten: Float32Array,
+  bounds: {
+    readonly meltK: number;
+    readonly albedos: ReadonlyArray<Rgb>;
+    readonly exposureScale: number;
+  },
+): LitFrame {
+  const most =
+    Math.max(...bounds.albedos.map((a) => rec709Luminance(thermalLuminance(a, 1, bounds.meltK)))) *
+    bounds.exposureScale *
+    (1 + EMISSION_MARGIN);
+  let texels = 0;
+  let glowing = 0;
+  let over = 0;
+  let highest = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (!isTerrain(terrain, p)) {
+      continue;
+    }
+    texels += 1;
+    const y = rec709Luminance([
+      molten[4 * p] ?? Number.NaN,
+      molten[4 * p + 1] ?? Number.NaN,
+      molten[4 * p + 2] ?? Number.NaN,
+    ]);
+    highest = Math.max(highest, y);
+    glowing += y > 1e-3 * most ? 1 : 0;
+    over += y > most ? 1 : 0;
+  }
+  const finite = molten.every(Number.isFinite);
+  return {
+    pass: finite && texels > 0 && glowing > 0 && over === 0,
+    detail:
+      `the night side at the ground's 21 K: ${String(glowing)} of ${String(texels)} terrain ` +
+      `texels glow by their Melt slot at ${bounds.meltK.toFixed(1)} K, the brightest ` +
+      `${highest.toPrecision(4)} of at most ${most.toPrecision(4)} pre-exposed, ${String(over)} over; finite ${String(finite)}`,
+  };
 }
 
 /**
@@ -574,7 +656,7 @@ function emissionFrameOf(
     fieldTemperatureK(bounds.field, m, bounds.nu.z),
   );
   const luminances = bounds.albedos.flatMap((a) =>
-    temperatures.map((t) => rec709Luminance(thermalRadiance(a, 1, t)) * bounds.exposureScale),
+    temperatures.map((t) => rec709Luminance(thermalLuminance(a, 1, t)) * bounds.exposureScale),
   );
   const least = Math.min(...luminances) * (1 - EMISSION_MARGIN);
   const most = Math.max(...luminances) * (1 + EMISSION_MARGIN);
@@ -774,7 +856,7 @@ export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Pro
   for (const setting of ["high", "low"] as const) {
     // The frames run in order: each bakes, draws and reads back before the next allocates.
     // oxlint-disable-next-line no-await-in-loop
-    const { lit, morph, emission } = await drawLit(engine, setting, field);
+    const { lit, morph, emission, melt } = await drawLit(engine, setting, field);
     checks.check(
       `R10.T10.b the lit terrain of a generated world (${setting}) is finite, drawn and lit`,
       lit.pass,
@@ -789,6 +871,11 @@ export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Pro
       `R08.T18.a the lit terrain's emissive form draws its ground's own light (${setting})`,
       emission.pass,
       emission.detail,
+    );
+    checks.check(
+      `R08.T18.a the lit terrain's Melt slots glow on a night side at the melt's temperature (${setting})`,
+      melt.pass,
+      melt.detail,
     );
   }
 }

@@ -33,16 +33,17 @@ import {
   packTemperatureField,
   type SurfaceTemperatureField,
   THERMAL_WGSL,
-  thermalRadiance,
+  thermalLuminance,
 } from "./thermal";
 
 /** The ground's thermal emission on one disc (the module's remarks). */
 export interface DiscEmission {
   readonly field: SurfaceTemperatureField;
   /**
-   * The brightest star's unit direction from the body's centre, along the galactic axes, about
-   * which the field's substellar term turns; zero where no star lights the body, which leaves it
-   * the terminator's.
+   * The brightest star's unit direction from the body's centre, about which the field's substellar
+   * term turns, in its holder's axes: the galactic axes on a disc record, the body-fixed ones in a
+   * terrain's lighting (`TerrainLighting.emission`); zero where no star lights the body, which
+   * leaves it the terminator's temperature.
    */
   readonly star: Vec3;
   /**
@@ -146,7 +147,7 @@ export function discEmissionAt(
   });
   const out = [0, 0, 0];
   const add = (sum: ReadonlyArray<number>, share: number, temperatureK: number): void => {
-    const emitted = thermalRadiance([sum[0] ?? 0, sum[1] ?? 0, sum[2] ?? 0], share, temperatureK);
+    const emitted = thermalLuminance([sum[0] ?? 0, sum[1] ?? 0, sum[2] ?? 0], share, temperatureK);
     for (const c of [0, 1, 2] as const) {
       out[c] = (out[c] ?? 0) + emitted[c];
     }

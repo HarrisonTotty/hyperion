@@ -42,9 +42,10 @@
  * section as the wire carries it at generator version 23 (`BodySurface`, P14.T24.a, P14.T51.c):
  * - **A world locked 1:1** to its seasonal host (`climateRegime.forcing` `locked`) takes its
  *   eyeball about the substellar point, σT⁴ = σT_n⁴ + (σT_ss⁴ − σT_n⁴) max(μ, 0), μ the cosine
- *   from the substellar point: the sim's own dayside flux E_n + (3/2)(E_d − E_n) μ and night E_n
- *   (Pierrehumbert 2011, ApJ 726, L8; Cowan and Agol 2011, ApJ 729, 54, whose day and night means
- *   the profile keeps), so T_ss⁴ = T_n⁴ + (3/2)(T_d⁴ − T_n⁴), which an airless world's night floor
+ *   from the substellar point: the sim's own dayside flux E_n + (3/2)(E_d − E_n) μ and night E_n,
+ *   Cowan and Agol's local model (2011, ApJ 729, 54, §2), whose day and night, the μ-weighted means
+ *   of the hemispheres, the profile keeps (the eyeball of Pierrehumbert 2011, ApJ 726, L8), so
+ *   T_ss⁴ = T_n⁴ + (3/2)(T_d⁴ − T_n⁴), which an airless world's night floor
  *   makes T_ss cos^¼θ above it. T_d and T_n are Cowan and Agol's eqs. 4–5 as the sim scales them to
  *   the surface, T_s (8/3 − 5ε/3)^¼ and T_s ε^¼, the redistribution ε solved from the record's
  *   mean T_s and its day–night contrast T_d − T_n, which a locked world's are about the substellar
@@ -52,11 +53,13 @@
  *   contrast, the sim's zonal model's, is not added: the eyeball already holds its poles on the
  *   terminator.
  * - **Any other world** takes a zonal profile about its pole with a day–night term about its
- *   brightest star: T = T_s + T₂ P₂(sin φ) + ΔT_dn μ, T₂ = −(2/3)(T(0°) − T(90°)), the signed
- *   equator–pole contrast shaped as P₂, as rendering plan R09 imposes it on its annual field
- *   (R09 Design note 8; North 1975, J. Atmos. Sci. 32, 2033, the two-mode solution), and ΔT_dn
- *   shaped as P₁, whose hemispheres differ by it. Both have no area mean, so T_s is the profile's
- *   area mean, 1.3 K below the record's emission mean for Earth-like contrasts.
+ *   brightest star: T = T_s + T₂ P₂(sin φ) + (3/4) ΔT_dn μ, T₂ = −(2/3)(T(0°) − T(90°)), the
+ *   signed equator–pole contrast shaped as P₂, as rendering plan R09 imposes it on its annual field
+ *   (R09 Design note 8; the two-mode solution of North's diffusive model, North 1975, J. Atmos.
+ *   Sci. 32, 1301 and 2033), and the day–night contrast ΔT_dn shaped as P₁, (3/4) ΔT_dn μ, whose
+ *   hemispheres' μ-weighted means differ by ΔT_dn, as the sim's Cowan and Agol day and night do
+ *   (their area means by (3/4) ΔT_dn). Both have no area mean, so T_s is the profile's area mean,
+ *   1.3 K below the record's emission mean for Earth-like contrasts.
  * - **The melt** (`crust.melt_area_fraction` f, P14.T51.c): the sim melts the area above its lid's
  *   transition of that profile (`hooks/crust.rs`' `melt_area`), so the profile already holds the
  *   melt there at its own temperature, above the transition; and the transition is the profile's
@@ -65,7 +68,7 @@
  *   warmer. The terrain's `Melt` texels, and a disc's `Melt` classes, emit at no less than it
  *   ({@link SurfaceTemperatureField.meltK}). A `magma_ocean` surface is molten everywhere (its melt
  *   area is 1), so the whole surface is held at no less than the dry peridotite solidus the sim
- *   holds it at, 1,394 K (Hirschmann 2000; {@link SurfaceTemperatureField.floorK}).
+ *   holds it at, 1,394 K ({@link SILICATE_SOLIDUS_K}; {@link SurfaceTemperatureField.floorK}).
  * - A body with a medium (any volatile air, or a `tenuous` haze) is R08.T18.b's, whose ground is
  *   seen through it ({@link groundTemperatureFieldOf}).
  *
@@ -100,7 +103,8 @@ export const PLANCK_J_S = 6.626_070_15e-34;
 /**
  * The luminous efficacy K_cd of monochromatic radiation of 540 × 10¹² Hz, lm W⁻¹: 683, exact in the
  * 2019 SI's definition of the candela (BIPM 2019, §2.3.1), the factor of the photopic luminance
- * 683 ∫ ȳ L_e,λ dλ (CIE 015:2018 gives K_m = 683.002 lm W⁻¹ at ȳ's peak, 3 × 10⁻⁶ above it), as
+ * 683 ∫ ȳ L_e,λ dλ (the CIE's K_m at ȳ's peak, 683 ÷ ȳ(555.016 nm) = 683.002 lm W⁻¹, is 3 × 10⁻⁶
+ * above it), as
  * R05's `solar.ts` and the sim's `sky::eye` take it.
  */
 export const LUMINOUS_EFFICACY_LM_PER_W = 683;
@@ -237,7 +241,7 @@ export function emittedLuminance(emissivity: ArrayLike<number>, temperatureK: nu
 }
 
 /**
- * The exponent c₂ ÷ (λ T) past which a bin's term is dropped by {@link thermalRadiance} and its
+ * The exponent c₂ ÷ (λ T) past which a bin's term is dropped by {@link thermalLuminance} and its
  * kernel: there e^(−80) = 1.8 × 10⁻³⁵ of 2 h c² λ⁻⁵, at most 10⁻²³ cd m⁻² in any channel, and still
  * a normal `f32`, so that the kernel never takes `exp` past `f32`'s range.
  */
@@ -259,14 +263,14 @@ const BIN_LUMINANCE_CD_M2: ReadonlyArray<Rgb> = EMISSION_CHANNEL_WEIGHTS.map((we
  * the exposure, that a share of a surface emits at `temperatureK`, its laws' A summed by their
  * shares: Σ_b V_cb ε_b B_λ(λ_b, T) × share, with ε_b share = share − A_b held to [0, share], A_b the
  * ground rule of `albedoSum` ({@link GROUND_RULE_WEIGHTS}), so that its shares' laws need not be
- * divided out. `thermal.wgsl`'s `thermal_radiance` is it in `f32`, operation for operation: each
+ * divided out. `thermal.wgsl`'s `thermal_luminance` is it in `f32`, operation for operation: each
  * bin's 1 ÷ (e^x − 1) as e^(−x) ÷ (1 − e^(−x)), and none past {@link THERMAL_EXPONENT_MAX}.
  *
  * @param albedoSum - Σ share_m A_m per render channel over the laws it emits for.
  * @param share - Σ share_m, in [0, 1].
  * @param temperatureK - Positive.
  */
-export function thermalRadiance(albedoSum: Rgb, share: number, temperatureK: number): Rgb {
+export function thermalLuminance(albedoSum: Rgb, share: number, temperatureK: number): Rgb {
   const out = [0, 0, 0];
   for (const [b, weights] of GROUND_RULE_WEIGHTS.entries()) {
     const x = (BIN_EXPONENT_K[b] ?? Number.NaN) / temperatureK;
@@ -314,7 +318,7 @@ function thermalConstantsWgsl(): string {
 }
 
 /**
- * The shared function's WGSL (`shaders/thermal.wgsl`, after its tables): `thermal_radiance` and the
+ * The shared function's WGSL (`shaders/thermal.wgsl`, after its tables): `thermal_luminance` and the
  * temperature field's `thermal_field_temperature`, with no binding, composed into the disc's and
  * the terrain's emissive forms alone.
  */
@@ -328,8 +332,9 @@ export const THERMAL_WGSL: string = thermalConstantsWgsl() + thermalWgsl;
 export const FIELD_LEAST_K = 2.725_48;
 
 /**
- * The dry peridotite solidus at the surface, K: 1,394 (Hirschmann 2000, G³ 1, 1042), at or above
- * which the sim holds a molten surface (`derive/atmosphere.rs`' `SILICATE_SOLIDUS`).
+ * The dry peridotite solidus at the surface, K: 1,394, Hirschmann's fit at 0 GPa, 1,120.661 °C =
+ * 1,393.81 K (Hirschmann 2000, G³ 1, 1042, doi:10.1029/2000GC000070), rounded as the sim's
+ * `SILICATE_SOLIDUS`, at or above which it holds a molten surface.
  */
 export const SILICATE_SOLIDUS_K = 1_394;
 
@@ -349,7 +354,7 @@ export interface ZonalProfile {
   readonly meanK: number;
   /** T(0°) − T(90°), K, signed. */
   readonly equatorPoleK: number;
-  /** The day's less the night's, K, not negative. */
+  /** The day's less the night's, K, not negative: Cowan and Agol's μ-weighted day and night. */
   readonly dayNightK: number;
 }
 
@@ -430,9 +435,16 @@ export function groundTemperatureFieldOf(surface: BodySurface): SurfaceTemperatu
 }
 
 /**
+ * The zonal profile's day–night term's share of the contrast, 3/4: a P₁ term b μ's hemispheres'
+ * μ-weighted means are ±(2/3) b, Cowan and Agol's day and night, so b = (3/4) ΔT_dn gives their
+ * difference ΔT_dn.
+ */
+const DAY_NIGHT_SHARE = 0.75;
+
+/**
  * A field's profile as `thermal.wgsl`'s `thermal_field_temperature` reads it: 1, T_n⁴ and
- * T_ss⁴ − T_n⁴ (K⁴) for a locked world's eyeball, and 0; or 2, T_s, (T(0°) − T(90°)) ÷ 3 and the
- * day–night contrast (K) for a zonal profile.
+ * T_ss⁴ − T_n⁴ (K⁴) for a locked world's eyeball, and 0; or 2, T_s, (T(0°) − T(90°)) ÷ 3 and
+ * (3/4) ΔT_dn (K) for a zonal profile.
  */
 export function packTemperatureField(
   field: SurfaceTemperatureField,
@@ -446,7 +458,7 @@ export function packTemperatureField(
       break;
     }
     case "zonal":
-      packed = [2, profile.meanK, profile.equatorPoleK / 3, profile.dayNightK];
+      packed = [2, profile.meanK, profile.equatorPoleK / 3, DAY_NIGHT_SHARE * profile.dayNightK];
       break;
   }
   return packed;
@@ -485,7 +497,7 @@ export function fieldPeakK(field: SurfaceTemperatureField): number {
       peak =
         profile.meanK +
         Math.max(profile.equatorPoleK / 3, (-2 * profile.equatorPoleK) / 3) +
-        Math.abs(profile.dayNightK);
+        DAY_NIGHT_SHARE * Math.abs(profile.dayNightK);
       break;
   }
   return Math.max(peak, field.floorK, field.meltK ?? 0);
@@ -523,7 +535,7 @@ export function aboveThermalCut(
     const brightest = Math.max(0, ...albedos.map((a) => a[c]));
     const lit = illuminancesLx.reduce((sum, e) => sum + e[c], 0);
     const reflected = Math.max((brightest * lit) / Math.PI, REFLECTED_FLOOR_CD_M2);
-    const emitted = Math.max(...albedos.map((a) => thermalRadiance(a, 1, peakK)[c]));
+    const emitted = Math.max(...albedos.map((a) => thermalLuminance(a, 1, peakK)[c]));
     return emitted > THERMAL_CUT * reflected;
   });
 }

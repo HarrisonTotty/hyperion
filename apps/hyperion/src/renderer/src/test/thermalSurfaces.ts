@@ -5,6 +5,7 @@
 
 import { toBodyDetail } from "../lib/system/bodiesWire";
 import type { BodySurface } from "../lib/system/model";
+import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "../view/atmosphere/thermal";
 import { earthDetail, FIXTURE_SYSTEM, lavaWorldDetail } from "./planetaryFixture";
 
 /** The designation the fixture's records are decoded under; the surface does not read it. */
@@ -29,6 +30,19 @@ function surfaceOf(answer: ReturnType<typeof earthDetail>): BodySurface {
  */
 export function lavaWorldSurface(): BodySurface {
   return surfaceOf(lavaWorldDetail());
+}
+
+/**
+ * The ground temperature field of a surface the client draws with no medium.
+ *
+ * @throws Error for a surface with a medium, whose field is R08.T18.b's.
+ */
+export function groundFieldOf(surface: BodySurface): SurfaceTemperatureField {
+  const field = groundTemperatureFieldOf(surface);
+  if (field === null) {
+    throw new Error("the surface has a medium");
+  }
+  return field;
 }
 
 /** The fixture's Earth: `temperate`, 287.9 K, under its N₂–O₂ air. */

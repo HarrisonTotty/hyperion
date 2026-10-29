@@ -2,7 +2,9 @@
  * The smoke page's check of the ground's thermal emission on R07's disc (plan R08, R08.T18.a;
  * `view/atmosphere/discReflectance.ts`): the lit bodies' kernels' emissive forms against their CPU
  * twin on SwiftShader, for an airless magma ocean, whose night side its own light alone draws at the
- * solidus and above, and for the protocol fixture's locked lava world on its dayside.
+ * solidus and above, for the protocol fixture's locked lava world on its dayside, and for that world's
+ * night side under a two-class map whose second class is `Melt`, which alone glows there, at the
+ * melt's least temperature.
  *
  * @remarks
  * Each case is planned as the photorealistic frame plans it (`planLitBodies`, its body given its
@@ -24,9 +26,11 @@
  */
 
 import { add, scale, vec3 } from "../geometry/vec3";
-import { lavaWorldSurface, magmaOceanSurface } from "../test/thermalSurfaces";
+import { groundFieldOf, lavaWorldSurface, magmaOceanSurface } from "../test/thermalSurfaces";
+import type { ClassMapDiscSurface } from "../view/appearance/bodyAppearance";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
-import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "../view/atmosphere/thermal";
+import { lawFor } from "../view/appearance/phase";
+import type { SurfaceTemperatureField } from "../view/atmosphere/thermal";
 import {
   compositeDiscPixels,
   discCellJobs,
@@ -34,6 +38,7 @@ import {
   type DiscRecord,
   rasteriseDisc,
 } from "../view/bodies/discShading";
+import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
 import {
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
@@ -51,6 +56,7 @@ import {
   viewRotation4,
 } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
+import { rotation3FromRows } from "../view/coords/rotation";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { BufferHandle, ComputeHandle, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
@@ -96,11 +102,19 @@ const KERNEL_FLOOR = 1e-6;
 /** Bytes of one pixel's sums in `cell_sums`: two `vec4f`. */
 const CELL_SUM_BYTES = 32;
 
+/** A case's class map, whose second class is `Melt`, and the map's texels for the twin. */
+interface MeltMap {
+  readonly surface: ClassMapDiscSurface;
+  readonly texels: ClassMapTexels;
+}
+
 /** One case: a body drawn in a view. */
 interface ThermalCase {
   readonly name: string;
   readonly viewport: Viewport;
   readonly field: SurfaceTemperatureField;
+  /** Its class map, under which its `Melt` class emits at the melt's least temperature; or none. */
+  readonly mapped: MeltMap | null;
   readonly diameterPx: number;
   /** Its distance from its star, au. */
   readonly distanceAu: number;
@@ -128,6 +142,12 @@ function planOf(item: ThermalCase): BodyFramePlan {
     photometry: PROVISIONAL_PHOTOMETRY,
     lighting: undefined,
     thermal: item.field,
+    ...(item.mapped === null
+      ? {}
+      : {
+          surface: item.mapped.surface,
+          rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+        }),
   };
   return planLitBodies(
     [body],
@@ -252,8 +272,9 @@ function imageAgreement(
   record: DiscRecord,
   viewport: Viewport,
   image: Float32Array,
+  texels: ClassMapTexels | null,
 ): { readonly worst: number; readonly classes: boolean; readonly pixels: number } {
-  const expected = compositeDiscPixels(rasteriseDisc(record, CAMERA, viewport));
+  const expected = compositeDiscPixels(rasteriseDisc(record, CAMERA, viewport, texels));
   let worst = 0;
   let classes = true;
   for (const pixel of expected) {
@@ -289,6 +310,7 @@ function sumsAgreement(
   viewport: Viewport,
   sums: Float32Array,
   engine: RenderEngine,
+  texels: ClassMapTexels | null,
 ): { readonly whole: SumsArm; readonly limb: SumsArm; readonly largest: number } {
   const fits = Math.floor(engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
   const frame = {
@@ -313,7 +335,7 @@ function sumsAgreement(
       }
       const x = cells.jobs[4 * job + 1] ?? 0;
       const y = cells.jobs[4 * job + 2] ?? 0;
-      const [sum] = discCellSums(record, CAMERA, viewport, [[x, y, n]]);
+      const [sum] = discCellSums(record, CAMERA, viewport, [[x, y, n]], texels);
       if (sum !== undefined) {
         twins.push({ job, rgb: sum.radiance, coverage: sum.coverage });
       }
@@ -350,9 +372,13 @@ function sumsAgreement(
 }
 
 /** The share of a record's composite light, summed over its pixels, that is its emission's. */
-function emittedShare(record: DiscRecord, viewport: Viewport): number {
+function emittedShare(
+  record: DiscRecord,
+  viewport: Viewport,
+  texels: ClassMapTexels | null,
+): number {
   const total = (each: DiscRecord): number =>
-    compositeDiscPixels(rasteriseDisc(each, CAMERA, viewport)).reduce(
+    compositeDiscPixels(rasteriseDisc(each, CAMERA, viewport, texels)).reduce(
       (sum, pixel) => sum + pixel.rgb[0] + pixel.rgb[1] + pixel.rgb[2],
       0,
     );
@@ -361,24 +387,26 @@ function emittedShare(record: DiscRecord, viewport: Viewport): number {
   return all > 0 ? 1 - total(plain) / all : 0;
 }
 
-/** The field of a surface this task draws the ground of. */
-function groundOf(surface: ReturnType<typeof lavaWorldSurface>): SurfaceTemperatureField {
-  const field = groundTemperatureFieldOf(surface);
-  if (field === null) {
-    throw new Error("the surface has a medium");
-  }
-  return field;
-}
-
 /** The check's cases (the module's remarks). */
-function casesOf(): ReadonlyArray<ThermalCase> {
-  const ocean = groundOf(magmaOceanSurface());
-  const lava = groundOf(lavaWorldSurface());
+function casesOf(melt: MeltMap): ReadonlyArray<ThermalCase> {
+  const ocean = groundFieldOf(magmaOceanSurface());
+  const lava = groundFieldOf(lavaWorldSurface());
   return [
+    {
+      name: "a 13 px locked lava world's night side under a half-surveyed two-class map, its second class Melt",
+      viewport: { widthPx: 48, heightPx: 48 },
+      field: lava,
+      mapped: melt,
+      diameterPx: 13,
+      distanceAu: 0.048,
+      phaseDeg: 180,
+      mesh: false,
+    },
     {
       name: "a 13 px magma ocean's night side",
       viewport: { widthPx: 48, heightPx: 48 },
       field: ocean,
+      mapped: null,
       diameterPx: 13,
       distanceAu: 0.048,
       phaseDeg: 180,
@@ -388,6 +416,7 @@ function casesOf(): ReadonlyArray<ThermalCase> {
       name: "a 13 px locked lava world's dayside, its pool towards the camera",
       viewport: { widthPx: 48, heightPx: 48 },
       field: lava,
+      mapped: null,
       diameterPx: 13,
       distanceAu: 0.048,
       phaseDeg: 30,
@@ -397,6 +426,7 @@ function casesOf(): ReadonlyArray<ThermalCase> {
       name: "a 160 px magma ocean at quadrature",
       viewport: { widthPx: 192, heightPx: 192 },
       field: ocean,
+      mapped: null,
       diameterPx: 160,
       distanceAu: 0.048,
       phaseDeg: 90,
@@ -406,6 +436,7 @@ function casesOf(): ReadonlyArray<ThermalCase> {
       name: "a 96 px magma ocean at quadrature in the mesh regime",
       viewport: { widthPx: 128, heightPx: 112 },
       field: ocean,
+      mapped: null,
       diameterPx: 96,
       distanceAu: 0.048,
       phaseDeg: 90,
@@ -422,13 +453,34 @@ function casesOf(): ReadonlyArray<ThermalCase> {
 export async function checkThermalDiscs(engine: RenderEngine, checks: Checks): Promise<void> {
   const kept = keepingSums(engine);
   const renderer = new LitBodyRenderer(kept.engine, WIREFRAME_MATERIALS.starSprite);
+  // Half the cells surveyed (i + j even): class 0 where i and j are even, a quarter class 0 and
+  // three quarters class 1, `Melt`, where both are odd (`smoke/cellPass.ts`' map).
+  const twoClass = packClassMap(4, 2, ({ i, j }) =>
+    (i + j) % 2 !== 0 ? null : i % 2 === 0 ? [1, 0] : [0.25, 0.75],
+  );
+  const melt: MeltMap = {
+    surface: {
+      ...classMapSurface(
+        engine,
+        "smoke thermal class map",
+        twoClass,
+        [
+          lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+          lawFor([0.05, 0.05, 0.05], [0.6, 0.6, 0.6], "moon"),
+        ],
+        PROVISIONAL_PHOTOMETRY.law,
+      ),
+      meltClasses: [false, true],
+    },
+    texels: twoClass,
+  };
   try {
     const [plain, emissive] = await Promise.all([
       engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
       engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL),
       renderer.prepareEmissive(),
     ]);
-    for (const item of casesOf()) {
+    for (const item of casesOf(melt)) {
       const plan = planOf(item);
       const record = plan.discs[0];
       const regime = plan.regimes.get("0200080020000000.0001");
@@ -442,10 +494,11 @@ export async function checkThermalDiscs(engine: RenderEngine, checks: Checks): P
         plain,
         emissive,
       });
-      const image = imageAgreement(record, item.viewport, drawn.image);
+      const texels = item.mapped?.texels ?? null;
+      const image = imageAgreement(record, item.viewport, drawn.image, texels);
       const sums =
-        drawn.sums === null ? null : sumsAgreement(plan, item.viewport, drawn.sums, engine);
-      const share = emittedShare(record, item.viewport);
+        drawn.sums === null ? null : sumsAgreement(plan, item.viewport, drawn.sums, engine, texels);
+      const share = emittedShare(record, item.viewport, texels);
       const ok =
         record.emission !== undefined &&
         regime === (item.mesh ? "mesh" : "disc") &&
@@ -466,5 +519,6 @@ export async function checkThermalDiscs(engine: RenderEngine, checks: Checks): P
     }
   } finally {
     renderer.dispose();
+    engine.releaseTexture(melt.surface.weights);
   }
 }

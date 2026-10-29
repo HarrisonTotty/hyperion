@@ -275,6 +275,15 @@ function blueNoiseTexels(): Uint16Array {
   return blueNoiseHalves;
 }
 
+/** The emissive `disc cells` kernel as one device's renderer asks for it (R08.T18.a). */
+interface EmissiveCells {
+  readonly generation: number;
+  /** The kernel, once made; `null` before, and where it could not be made. */
+  kernel: ComputeHandle | null;
+  /** Settles once it is made, or could not be; never rejects. */
+  made: Promise<void>;
+}
+
 /** The renderer's GPU objects on one device. */
 interface Resources {
   readonly target: RenderTarget;
@@ -403,9 +412,10 @@ export class PhotorealRenderer {
   #drawnColour: TextureHandle | null = null;
   /**
    * The `disc cells` kernel's emissive form (R08.T18.a), made at the first frame with a record that
-   * carries its ground's emission, on the generation it was asked on; `kernel` `null` until made.
+   * carries its ground's emission, or at {@link PhotorealRenderer.prepareEmissive}, on the
+   * generation it was asked on; `kernel` `null` until made.
    */
-  #emissiveCells: { readonly generation: number; kernel: ComputeHandle | null } | null = null;
+  #emissiveCells: EmissiveCells | null = null;
   readonly #unsubscribe: () => void;
 
   constructor(engine: RenderEngine, viewName: string) {
@@ -985,21 +995,40 @@ export class PhotorealRenderer {
     if (held !== null && held.generation === this.#generation) {
       return held.kernel;
     }
-    if (!plan.discs.some((record) => record.emission !== undefined)) {
-      return null;
+    if (plan.discs.some((record) => record.emission !== undefined)) {
+      this.#askEmissiveCells();
     }
-    const making: { readonly generation: number; kernel: ComputeHandle | null } = {
-      generation: this.#generation,
-      kernel: null,
-    };
-    this.#emissiveCells = making;
-    void this.#makeEmissiveCells(making).catch((error: unknown) => {
-      console.error(`the emissive disc cells of ${this.#name} could not be taken:`, error);
-    });
     return null;
   }
 
-  /** Makes the emissive `disc cells` kernel into `making`; a failure is reported, a loss's not. */
+  /** Asks for the emissive `disc cells` kernel on this generation's device. */
+  #askEmissiveCells(): EmissiveCells {
+    const making: EmissiveCells = {
+      generation: this.#generation,
+      kernel: null,
+      made: Promise.resolve(),
+    };
+    making.made = this.#makeEmissiveCells(making);
+    this.#emissiveCells = making;
+    return making;
+  }
+
+  /**
+   * Makes the lit bodies' emissive forms and the emissive `disc cells` kernel (R08.T18.a) ahead of
+   * a body's first frame above the cut, as a timed run needs them made before its timed frames;
+   * resolves once both are made, or could not be.
+   */
+  async prepareEmissive(): Promise<void> {
+    const held = this.#emissiveCells;
+    const making =
+      held !== null && held.generation === this.#generation ? held : this.#askEmissiveCells();
+    await Promise.all([this.#bodies.prepareEmissive(), making.made]);
+  }
+
+  /**
+   * Makes the emissive `disc cells` kernel into `making`; a failure is reported, a loss's not, and
+   * it never rejects.
+   */
   async #makeEmissiveCells(making: { kernel: ComputeHandle | null }): Promise<void> {
     try {
       making.kernel = await this.#engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL);

@@ -539,12 +539,16 @@ describe("the atmosphere cache's requests", () => {
 });
 
 describe("the ground's temperature field (R08.T18.a)", () => {
-  it("is none before a body's record is held, its surface's field after, and none where the body has a medium", async () => {
+  it("is none before a body's record is held", () => {
     const h = harness();
-    note(h, [lit(A), lit(bodyId(1))]);
+    note(h, [lit(A)]);
     expect(h.cache.groundFieldOf(A)).toBeNull();
+  });
+
+  it("is the held record's surface's field once its reply is taken", async () => {
+    const h = harness();
+    note(h, [lit(A)]);
     await answer(h, A, answerFor(A, lavaWorldDetail()));
-    await answer(h, bodyId(1), answerFor(bodyId(1), earthDetail()));
     const converted = toBodyDetail(answerFor(A, lavaWorldDetail()), FIXTURE_SYSTEM, DESIGNATION);
     if (converted.kind !== "ok" || converted.detail.record.surface.state !== "ok") {
       throw new Error("the lava world's record converts, its surface ok");
@@ -552,8 +556,13 @@ describe("the ground's temperature field (R08.T18.a)", () => {
     expect(h.cache.groundFieldOf(A)).toEqual(
       groundTemperatureFieldOf(converted.detail.record.surface.value),
     );
-    expect(h.cache.groundFieldOf(A)?.profile.kind).toBe("substellar");
-    expect(h.cache.groundFieldOf(bodyId(1))).toBeNull();
+  });
+
+  it("is none for a body with a medium", async () => {
+    const h = harness();
+    note(h, [lit(A)]);
+    await answer(h, A, answerFor(A, earthDetail()));
+    expect(h.cache.groundFieldOf(A)).toBeNull();
   });
 
   it("reads a reply's field once, however many frames ask it", async () => {

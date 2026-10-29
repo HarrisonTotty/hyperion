@@ -1391,6 +1391,55 @@ describe("the photorealistic renderer's emissive cells (R08.T18.a)", () => {
   });
 });
 
+describe("the photorealistic renderer's emissive forms prepared ahead (R08.T18.a)", () => {
+  it("shades an emitting record's cells by the emissive kernel at its first frame once prepared", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    await renderer.prepareEmissive();
+    const [small, larger] = smallDiscs();
+    if (small === undefined || larger === undefined) {
+      throw new Error("two small discs");
+    }
+    const bodies = [small, { ...larger, thermal: surfaceTemperatureFieldOf(lavaWorldSurface()) }];
+    const before = engine.dispatched.length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    expect(
+      engine.dispatched
+        .slice(before)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel),
+    ).toEqual([BODY_DISC_CELLS_KERNEL.name, BODY_DISC_CELLS_EMISSIVE_KERNEL.name]);
+    renderer.dispose();
+  });
+});
+
+describe("the photorealistic renderer's emissive cells after a device loss (R08.T18.a)", () => {
+  it("asks for the disc cells' emissive form again on the device a restore makes", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const [small, larger] = smallDiscs();
+    if (small === undefined || larger === undefined) {
+      throw new Error("two small discs");
+    }
+    const bodies = [small, { ...larger, thermal: surfaceTemperatureFieldOf(lavaWorldSurface()) }];
+    const asked = (): number =>
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_EMISSIVE_KERNEL.name)
+        .length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    await microtasks();
+    expect(asked()).toBe(1);
+    engine.loseDevice();
+    engine.restore();
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    await microtasks();
+    expect(asked()).toBe(2);
+    renderer.dispose();
+  });
+});
+
 describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
   it("shades the small discs' cells once, after the sky and before the discs", async () => {
     const engine = await countingRenderEngine();

@@ -10,7 +10,8 @@
 //   0  the brightest star's unit direction from the body's centre, zero where none lights it; w the
 //      frame's exposure scale;
 //   1  the temperature field's profile (`thermal.ts`' `packTemperatureField`);
-//   2  x the field's floor, K; y the melt's least temperature, K, 0 with no melt; z, w 0.
+//   2  x the field's floor, K; y the melt's least temperature, K, 0 with no melt; z the disc's
+//      `Melt` classes' mask, unread here (the terrain's are its slots' word 6); w 0.
 // A palette slot whose form is `Melt` has 1 in its laws' word 6 (`packClassLaws`), unread by the
 // plain forms; its share emits at no less than the melt's least temperature.
 const FIRST_TERRAIN_EMISSION_ROW : u32 = 25u;
@@ -24,7 +25,7 @@ fn class_melt(slot : u32, k : u32) -> bool {
 
 // The light a texel emits, pre-exposed: the field's temperature at its datum normal `nu`, from the
 // star's cosine and the latitude's sine about the body's pole; its laws by their shares split into
-// the ground's and the `Melt` slots', each through `thermal_radiance` with its laws' A (`albedos`,
+// the ground's and the `Melt` slots', each through `thermal_luminance` with its laws' A (`albedos`,
 // `terrain_albedos`') summed by their shares, the melt's at no less than its least temperature;
 // times the exposure scale.
 fn terrain_emission(
@@ -56,10 +57,10 @@ fn terrain_emission(
   }
   var out = vec3f(0.0);
   if (ground > 0.0) {
-    out = out + thermal_radiance(ground_a, ground, t);
+    out = out + thermal_luminance(ground_a, ground, t);
   }
   if (melt > 0.0) {
-    out = out + thermal_radiance(melt_a, melt, max(t, floors.y));
+    out = out + thermal_luminance(melt_a, melt, max(t, floors.y));
   }
   return out * star.w;
 }

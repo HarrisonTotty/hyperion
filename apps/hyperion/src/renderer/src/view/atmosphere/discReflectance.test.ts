@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { add, scale, vec3 } from "../../geometry/vec3";
 import { wgslFunctions, wgslReached } from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
+  groundFieldOf,
   lavaWorldSurface,
   magmaOceanSurface,
   warmAirlessSurface,
@@ -18,6 +19,7 @@ import {
   BODY_DISC_MATERIALS,
   type BodyFramePlan,
   type DiscCellFrame,
+  type LitBodyEngine,
   type LitBodyInput,
   LitBodyRenderer,
   planLitBodies,
@@ -53,11 +55,10 @@ import {
 import discEmissionWgsl from "./shaders/discEmission.wgsl?raw";
 import {
   fieldTemperatureK,
-  groundTemperatureFieldOf,
   type SurfaceTemperatureField,
   surfaceTemperatureFieldOf,
   THERMAL_WGSL,
-  thermalRadiance,
+  thermalLuminance,
 } from "./thermal";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -145,15 +146,6 @@ function withoutEmission(record: DiscRecord): DiscRecord {
   return plain;
 }
 
-/** The field of a surface whose ground this task draws. */
-function groundOf(surface: ReturnType<typeof lavaWorldSurface>): SurfaceTemperatureField {
-  const field = groundTemperatureFieldOf(surface);
-  if (field === null) {
-    throw new Error("the surface has a medium");
-  }
-  return field;
-}
-
 /** A kernel's source as one line-end form: a checkout's line ends do not move its digest. */
 function digestOf(source: string): string {
   return fnv1a64(new TextEncoder().encode(source.replaceAll("\r\n", "\n"))).toString(16);
@@ -236,7 +228,7 @@ describe("the disc's kernels (R08.T18.a)", () => {
       (name) => functions.get(name)?.body ?? "",
     );
     expect(wgslReached(emissive, ["main"]).has("disc_emission")).toBe(true);
-    expect(wgslReached(emissive, ["main"]).has("thermal_radiance")).toBe(true);
+    expect(wgslReached(emissive, ["main"]).has("thermal_luminance")).toBe(true);
     expect(
       [...kernelBindings(emissive).keys()].filter(
         (name) => !bodies.some((body) => new RegExp(`\\b${name}\\b`, "u").test(body)),
@@ -253,14 +245,14 @@ describe("the disc's kernels (R08.T18.a)", () => {
 
 describe("the disc's emission (R08.T18.a)", () => {
   it("computes nothing for a 300 K world: its record carries no emission and packs as before, byte for byte", () => {
-    const field = groundOf(warmAirlessSurface());
+    const field = groundFieldOf(warmAirlessSurface());
     const record = recordOf(field, 1, 60);
     expect(record.emission).toBeUndefined();
     expect(packDiscRecords([record])).toEqual(packDiscRecords([recordOf(null, 1, 60)]));
   });
 
   it("carries the locked lava world's emission 0.048 au from its star, its block past the records", () => {
-    const record = recordOf(groundOf(lavaWorldSurface()), 0.048, 60);
+    const record = recordOf(groundFieldOf(lavaWorldSurface()), 0.048, 60);
     const emission = record.emission;
     if (emission === undefined) {
       throw new Error("the lava world is above the cut");
@@ -273,7 +265,7 @@ describe("the disc's emission (R08.T18.a)", () => {
   });
 
   it("lights a lava world's night side by itself alone: its radiance there is the emission term, its reflected light 0", () => {
-    const field = groundOf(magmaOceanSurface());
+    const field = groundFieldOf(magmaOceanSurface());
     // The star behind the body: the camera sees the night side face-on at the disc's centre.
     const record = recordOf(field, 0.048, 180);
     const emission = record.emission;
@@ -299,7 +291,7 @@ describe("the disc's emission (R08.T18.a)", () => {
   });
 
   it("adds the emission to the dayside's reflected light, which it leaves as it was", () => {
-    const field = groundOf(lavaWorldSurface());
+    const field = groundFieldOf(lavaWorldSurface());
     const record = recordOf(field, 0.048, 0);
     const emission = record.emission;
     if (emission === undefined) {
@@ -315,7 +307,7 @@ describe("the disc's emission (R08.T18.a)", () => {
     const substellar = surfaceTemperatureFieldOf(lavaWorldSurface());
     const t = fieldTemperatureK(substellar, 1, 0);
     expect(t).toBeCloseTo(1_751.8, 0);
-    const emitted = thermalRadiance(lawA, 1, t);
+    const emitted = thermalLuminance(lawA, 1, t);
     for (const c of [0, 1, 2] as const) {
       const expected = reflected.radiance[c] + EXPOSURE * emitted[c];
       expect(Math.abs(drawn.radiance[c] - expected)).toBeLessThanOrEqual(1e-9 * expected);
@@ -323,7 +315,7 @@ describe("the disc's emission (R08.T18.a)", () => {
   });
 
   it("emits a Melt class at no less than its melt's temperature, the rest of the ground at the field's", () => {
-    const field = groundOf(lavaWorldSurface());
+    const field = groundFieldOf(lavaWorldSurface());
     const emission = { field, star: vec3(0, 0, 1), meltClasses: [true] };
     // On the night side the field is its 21 K floor; the melt class holds its transition.
     const at = (shares: ReadonlyArray<number>) =>
@@ -334,7 +326,7 @@ describe("the disc's emission (R08.T18.a)", () => {
     const meltK = field.meltK ?? 0;
     expect(at([1, 0])[0]).toBeLessThan(1e-20);
     const half = at([0.5, 0.5]);
-    const expected = thermalRadiance([0.025, 0.025, 0.025], 0.5, meltK);
+    const expected = thermalLuminance([0.025, 0.025, 0.025], 0.5, meltK);
     for (const c of [0, 1, 2] as const) {
       expect(Math.abs(half[c] - expected[c])).toBeLessThanOrEqual(1e-12 * expected[0]);
     }
@@ -343,7 +335,7 @@ describe("the disc's emission (R08.T18.a)", () => {
   it("shades an emitting record's cells with the kernel's emissive form alone, and none without it", () => {
     // Two small discs of the same textures, which the pass shades whole: one emitting, one not.
     const plain = recordOf(null, 0.048, 60, 13);
-    const emitting = recordOf(groundOf(lavaWorldSurface()), 0.048, 60, 13);
+    const emitting = recordOf(groundFieldOf(lavaWorldSurface()), 0.048, 60, 13);
     const without = discCellJobs([plain, emitting], undefined, null, false);
     expect(without.ranges[0]).not.toBeNull();
     expect(without.ranges[1]).toBeNull();
@@ -369,7 +361,7 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
   it("draws an emitting record as the plain forms do until its forms are prepared, then by them", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
-    const field = groundOf(lavaWorldSurface());
+    const field = groundFieldOf(lavaWorldSurface());
     const first = renderer.draws(planOf(field, 0.048, 60));
     expect(first.map((draw) => draw.material.name)).toEqual(["bodies:disc", "bodies:discLimb"]);
     // Its emission is dropped from the records written while the forms are not prepared.
@@ -397,7 +389,7 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     await renderer.prepareEmissive();
-    const plan = planOf(groundOf(magmaOceanSurface()), 0.048, 90, 96, true);
+    const plan = planOf(groundFieldOf(magmaOceanSurface()), 0.048, 90, 96, true);
     expect(plan.regimes.get(plan.discs[0]?.body ?? "0200080020000000.0300")).toBe("mesh");
     expect(renderer.meshDraws(plan).map((draw) => draw.material.name)).toEqual([
       "bodies:smoothMeshEmissive",
@@ -408,13 +400,79 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
     renderer.dispose();
   });
 
+  it("makes and prepares its emissive forms again after a device loss, at the next emitting record", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const field = groundFieldOf(lavaWorldSurface());
+    await renderer.prepareEmissive();
+    const prepared = (): number =>
+      engine.prepares.filter((each) => each.name === "bodies:discEmissive").length;
+    expect(prepared()).toBe(1);
+    engine.loseDevice();
+    engine.restore();
+    // The restore's renderer holds none until an emitting record asks for them.
+    renderer.draws(planOf(null, 0.048, 60));
+    expect(prepared()).toBe(1);
+    renderer.draws(planOf(field, 0.048, 60));
+    await renderer.prepareEmissive();
+    expect(prepared()).toBe(2);
+    expect(renderer.draws(planOf(field, 0.048, 60)).map((draw) => draw.material.name)).toEqual([
+      "bodies:discEmissive",
+      "bodies:discLimbEmissive",
+    ]);
+    renderer.dispose();
+  });
+
+  it("reports emissive forms the device refuses to prepare, and draws on by the plain forms", async () => {
+    const engine = await countingRenderEngine();
+    const refusing: LitBodyEngine = {
+      createMaterial: (...args) => engine.createMaterial(...args),
+      createMesh: (...args) => engine.createMesh(...args),
+      createBuffer: (...args) => engine.createBuffer(...args),
+      createTexture: (...args) => engine.createTexture(...args),
+      writeBuffer: (...args) => {
+        engine.writeBuffer(...args);
+      },
+      writeTexture: (...args) => {
+        engine.writeTexture(...args);
+      },
+      releaseBuffer: (...args) => {
+        engine.releaseBuffer(...args);
+      },
+      releaseTexture: (...args) => {
+        engine.releaseTexture(...args);
+      },
+      dispatch: (...args) => {
+        engine.dispatch(...args);
+      },
+      onRestored: (...args) => engine.onRestored(...args),
+      get capabilities() {
+        return engine.capabilities;
+      },
+      prepareMaterial: (material, targets, meshes) =>
+        material.name.endsWith("Emissive")
+          ? Promise.reject(new Error(`${material.name} is refused`))
+          : engine.prepareMaterial(material, targets, meshes),
+    };
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const renderer = new LitBodyRenderer(refusing, WIREFRAME_MATERIALS.starSprite);
+    await renderer.prepareEmissive();
+    expect(reported).toHaveBeenCalledWith(
+      "the emissive forms of the lit bodies could not be prepared:",
+      expect.any(Error),
+    );
+    const draws = renderer.draws(planOf(groundFieldOf(lavaWorldSurface()), 0.048, 60));
+    expect(draws.map((draw) => draw.material.name)).toEqual(["bodies:disc", "bodies:discLimb"]);
+    renderer.dispose();
+  });
+
   it("shades an emitting small disc's cells with the kernel's emissive form, and leaves them to its draws without it", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     await renderer.prepareEmissive();
     const plain = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
     const emissive = await engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL);
-    const field = groundOf(lavaWorldSurface());
+    const field = groundFieldOf(lavaWorldSurface());
     expect(renderer.dispatchCells(planOf(field, 0.048, 60, 13), plain, FRAME, emissive)).toBe(true);
     expect(engine.dispatched.map((each) => each.kernel)).toEqual([
       BODY_DISC_CELLS_EMISSIVE_KERNEL.name,

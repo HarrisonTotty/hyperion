@@ -36,7 +36,7 @@ import {
   surfaceTemperatureFieldOf,
   THERMAL_CUT,
   THERMAL_WGSL,
-  thermalRadiance,
+  thermalLuminance,
 } from "./thermal";
 
 /**
@@ -152,7 +152,7 @@ describe("Planck's law (R08.T18.a)", () => {
 
 describe("the reduction to the channels (R08.T18.a)", () => {
   it("reads a 2,500 K surface of emissivity 1 as Planck's law times the matching functions, within 0.2%, 0.4% and 2% in r, g and b", () => {
-    const drawn = thermalRadiance([0, 0, 0], 1, 2_500);
+    const drawn = thermalLuminance([0, 0, 0], 1, 2_500);
     const [r, g, b] = relative(drawn, integratedLuminance(2_500));
     // As measured: +0.14%, +0.31% and +1.51% (the bins' steps; `thermal.ts`' remarks).
     expect(Math.abs(r)).toBeLessThan(2e-3);
@@ -201,7 +201,7 @@ describe("the reduction to the channels (R08.T18.a)", () => {
     ] satisfies Rgb[]) {
       for (const temperatureK of [900, 1_500, 2_500]) {
         const direct = emittedLuminance(kirchhoffEmissivity(albedo), temperatureK);
-        const shared = thermalRadiance(albedo, 1, temperatureK);
+        const shared = thermalLuminance(albedo, 1, temperatureK);
         for (const c of [0, 1, 2] as const) {
           expect(Math.abs(shared[c] - direct[c])).toBeLessThanOrEqual(1e-12 * Math.abs(direct[0]));
         }
@@ -220,8 +220,8 @@ describe("the reduction to the channels (R08.T18.a)", () => {
   });
 
   it("emits a share of a surface in proportion, its laws' A summed by their shares", () => {
-    const whole = thermalRadiance([0.1, 0.1, 0.1], 1, 1_800);
-    const quarter = thermalRadiance([0.025, 0.025, 0.025], 0.25, 1_800);
+    const whole = thermalLuminance([0.1, 0.1, 0.1], 1, 1_800);
+    const quarter = thermalLuminance([0.025, 0.025, 0.025], 0.25, 1_800);
     for (const c of [0, 1, 2] as const) {
       expect(Math.abs(quarter[c] - 0.25 * whole[c])).toBeLessThan(1e-12 * whole[0]);
     }
@@ -240,6 +240,41 @@ describe("the reduction to the channels (R08.T18.a)", () => {
     });
   });
 });
+
+/**
+ * A field over the sphere, its star over the equator (μ = cos φ cos λ), by the midpoint rule on
+ * 400 rows in sin φ and 400 in longitude: its area mean, and its hemispheres' means weighted by
+ * |μ|, Cowan and Agol's day and night.
+ */
+function overSphere(field: ReturnType<typeof surfaceTemperatureFieldOf>): {
+  readonly mean: number;
+  readonly dayWeighted: number;
+  readonly nightWeighted: number;
+} {
+  let sum = 0;
+  let day = 0;
+  let dayWeight = 0;
+  let night = 0;
+  let nightWeight = 0;
+  const n = 400;
+  for (let i = 0; i < n; i += 1) {
+    const x = -1 + (2 * (i + 0.5)) / n;
+    for (let j = 0; j < n; j += 1) {
+      const longitude = -Math.PI + (2 * Math.PI * (j + 0.5)) / n;
+      const mu = Math.sqrt(1 - x * x) * Math.cos(longitude);
+      const t = fieldTemperatureK(field, mu, x);
+      sum += t;
+      if (mu > 0) {
+        day += mu * t;
+        dayWeight += mu;
+      } else {
+        night -= mu * t;
+        nightWeight -= mu;
+      }
+    }
+  }
+  return { mean: sum / (n * n), dayWeighted: day / dayWeight, nightWeighted: night / nightWeight };
+}
 
 describe("the temperature field (R08.T18.a)", () => {
   it("gives the locked lava world its eyeball, whose day and night differ by the record's contrast and whose emission mean is its T_s", () => {
@@ -277,37 +312,30 @@ describe("the temperature field (R08.T18.a)", () => {
     expect(fieldTemperatureK(field, 1, 0)).toBeGreaterThan(1_700);
   });
 
-  it("gives a rotating world its zonal profile, area mean T_s, its ends the contrast apart and its hemispheres the day–night contrast", () => {
-    const surface = warmAirlessSurface();
-    const field = surfaceTemperatureFieldOf(surface);
+  it("gives a rotating world its zonal profile, its ends the equator–pole contrast apart", () => {
+    const field = surfaceTemperatureFieldOf(warmAirlessSurface());
     expect(field.profile.kind).toBe("zonal");
     expect(fieldTemperatureK(field, 0, 0) - fieldTemperatureK(field, 0, 1)).toBeCloseTo(40, 12);
-    // The star over the equator: μ = cos φ cos λ. The area mean, and day less night.
-    let sum = 0;
-    let day = 0;
-    let night = 0;
-    const n = 400;
-    for (let i = 0; i < n; i += 1) {
-      const x = -1 + (2 * (i + 0.5)) / n;
-      for (let j = 0; j < n; j += 1) {
-        const longitude = -Math.PI + (2 * Math.PI * (j + 0.5)) / n;
-        const mu = Math.sqrt(1 - x * x) * Math.cos(longitude);
-        const t = fieldTemperatureK(field, mu, x);
-        sum += t;
-        if (mu > 0) {
-          day += t;
-        } else {
-          night += t;
-        }
-      }
-    }
-    // The midpoint rule's own error in x², 8 × 10⁻⁵ K at 400 rows.
-    expect(sum / (n * n)).toBeCloseTo(300, 3);
-    expect((day - night) / ((n * n) / 2)).toBeCloseTo(10, 3);
   });
 
-  it("leaves a body with a medium to R08.T18.b, and takes an airless one", () => {
+  it("keeps a rotating world's area mean at T_s", () => {
+    const field = surfaceTemperatureFieldOf(warmAirlessSurface());
+    const { mean } = overSphere(field);
+    // The midpoint rule's own error in x², 8 × 10⁻⁵ K at 400 rows.
+    expect(mean).toBeCloseTo(300, 3);
+  });
+
+  it("parts a rotating world's hemispheres' μ-weighted means by the day–night contrast, as the sim's Cowan and Agol day and night", () => {
+    const field = surfaceTemperatureFieldOf(warmAirlessSurface());
+    const { dayWeighted, nightWeighted } = overSphere(field);
+    expect(dayWeighted - nightWeighted).toBeCloseTo(10, 3);
+  });
+
+  it("leaves a body with a medium to R08.T18.b", () => {
     expect(groundTemperatureFieldOf(earthSurface())).toBeNull();
+  });
+
+  it("takes an airless body and a magma ocean with no volatile air", () => {
     expect(groundTemperatureFieldOf(lavaWorldSurface())).not.toBeNull();
     expect(groundTemperatureFieldOf(magmaOceanSurface())).not.toBeNull();
   });
@@ -320,19 +348,21 @@ describe("the visibility cut (R08.T18.a)", () => {
     const field = surfaceTemperatureFieldOf(warmAirlessSurface());
     const albedo: Rgb = [0.3, 0.3, 0.3];
     const lit = starIlluminance(sun, AU_M);
-    const emitted = thermalRadiance(albedo, 1, fieldPeakK(field));
+    const emitted = thermalLuminance(albedo, 1, fieldPeakK(field));
     for (const c of [0, 1, 2] as const) {
       expect(emitted[c]).toBeLessThan(THERMAL_CUT * ((albedo[c] * lit[c]) / Math.PI));
     }
     expect(aboveThermalCut(field, [albedo], [lit])).toBe(false);
   });
 
-  it("draws the locked lava world 0.048 au from its star, and a magma ocean that no star lights", () => {
+  it("draws the locked lava world 0.048 au from its star", () => {
     const lava = surfaceTemperatureFieldOf(lavaWorldSurface());
     const albedo: Rgb = [0.1, 0.1, 0.1];
     expect(aboveThermalCut(lava, [albedo], [starIlluminance(sun, 0.048 * AU_M)])).toBe(true);
-    expect(aboveThermalCut(surfaceTemperatureFieldOf(magmaOceanSurface()), [albedo], [])).toBe(
-      true,
-    );
+  });
+
+  it("draws a magma ocean that no star lights, against the reflected light's floor", () => {
+    const ocean = surfaceTemperatureFieldOf(magmaOceanSurface());
+    expect(aboveThermalCut(ocean, [[0.1, 0.1, 0.1]], [])).toBe(true);
   });
 });

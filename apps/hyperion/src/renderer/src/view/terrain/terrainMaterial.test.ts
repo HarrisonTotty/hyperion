@@ -1325,7 +1325,7 @@ describe("the lit terrain's emissive form (R08.T18.a)", () => {
     },
   );
 
-  it("is registered for both paths, and refuses a source without shade_terrain's end", () => {
+  it("is registered in the catalogue for both paths", () => {
     expect(TERRAIN_LIT_EMISSIVE_MATERIALS.map((spec) => spec.name)).toEqual([
       "terrain-lit-emissive-baked-offsets",
       "terrain-lit-emissive-face-differences",
@@ -1336,6 +1336,9 @@ describe("the lit terrain's emissive form (R08.T18.a)", () => {
     expect(names).toEqual(
       expect.arrayContaining(TERRAIN_LIT_EMISSIVE_MATERIALS.map((m) => m.name)),
     );
+  });
+
+  it("refuses a source without shade_terrain's end", () => {
     expect(() => withTerrainEmission("fn main() {}")).toThrow(/once, found 0/u);
   });
 

@@ -14,7 +14,7 @@ const EMISSION_ROWS : u32 = 3u;
 // The light a sample emits, pre-exposed: the field's temperature at its datum normal `normal`, from
 // the star's cosine and the latitude's sine about the disc's pole; its laws by their shares at the
 // sample (`surface`, `laws` of them) split into the ground's and the `Melt` classes', each through
-// `thermal_radiance` with its laws' A summed by their shares, the melt's at no less than its least
+// `thermal_luminance` with its laws' A summed by their shares, the melt's at no less than its least
 // temperature; times the exposure scale.
 fn disc_emission(body : Body, normal : vec3f, surface : SurfaceAt, laws : u32) -> vec3f {
   let first = u32(disc_row(SECONDARY_COUNT_ROW).y);
@@ -50,10 +50,10 @@ fn disc_emission(body : Body, normal : vec3f, surface : SurfaceAt, laws : u32) -
   }
   var out = vec3f(0.0);
   if (ground > 0.0) {
-    out = out + thermal_radiance(ground_a, ground, t);
+    out = out + thermal_luminance(ground_a, ground, t);
   }
   if (melt > 0.0) {
-    out = out + thermal_radiance(melt_a, melt, max(t, floors.y));
+    out = out + thermal_luminance(melt_a, melt, max(t, floors.y));
   }
   return out * star.w;
 }
