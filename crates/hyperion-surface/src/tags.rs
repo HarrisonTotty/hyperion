@@ -33,7 +33,7 @@
 //! | `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, areas, continental nuclei     |
 //! | `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency warp's lattice, of boundaries and continents |
 //! | `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces                      |
-//! | `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of the boundary diameter and wider: count, place, age, morphology |
+//! | `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of the boundary diameter and wider: count, place, diameter, age |
 //! | `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                    |
 //! | `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's [`noise`](crate::noise) keys it, and the octaves' offsets, words 2⁴⁰ + 4m + axis of item 0 |
 //! | `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                           |
@@ -59,11 +59,14 @@ hyperion_base::domain_tags! {
     SURFACE_COARSE_WARP: SurfaceCoarse = "surface.coarse.warp";
 
     /// The coarse pass's landform noise and volcanic provinces (R09, Design notes 6 and 7), keyed
-    /// by `surface_cell` of the coarse cells.
+    /// by `surface_cell`, by instance: the noise's octaves of the lattice cells at each level from
+    /// level 1 to the field's, and the provinces' and their edifices' draws on level 0's first cell
+    /// (R09.T12).
     SURFACE_COARSE_RELIEF: SurfaceCoarse = "surface.coarse.relief";
 
     /// The coarse pass's craters of the boundary diameter D_b and wider (R09, Design note 10),
-    /// keyed by `surface_item(k)` for crater slot k: their count, places, ages and morphologies.
+    /// keyed by `surface_item(k)` for octave k: each octave's count, then its craters' places,
+    /// diameters and ages, their morphologies following from the diameters (R09.T12.d).
     SURFACE_COARSE_CRATER: SurfaceCoarse = "surface.coarse.crater";
 
     /// The coarse pass's erosion (R09, Design note 9), keyed by `surface_cell` of the coarse
