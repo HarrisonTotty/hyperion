@@ -31,7 +31,7 @@ import {
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./transparency";
 
 /** The species R08.T4.f draws from ExoMol's lists (decision-r08-t4ef-storage §5.4's order). */
-const DRAWN = ["FeH", "TiO", "CO", "SiO", "N2"] as const;
+const DRAWN = ["FeH", "TiO", "H2S", "CO", "SiO", "N2"] as const;
 
 /** A drawn species. */
 type Drawn = (typeof DRAWN)[number];
@@ -44,6 +44,7 @@ type Drawn = (typeof DRAWN)[number];
 const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
   FeH: [1_000, 4_000],
   TiO: [1_000, 4_000],
+  H2S: [296, 1_500],
   CO: [300, 4_000],
   SiO: [1_000, 4_000],
   N2: [1_800, 4_000],

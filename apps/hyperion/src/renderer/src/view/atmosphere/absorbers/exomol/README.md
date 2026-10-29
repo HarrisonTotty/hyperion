@@ -45,6 +45,9 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
     10.1088/0067-0049/216/1/15).
   - `SiO`: SiOUVenIR's ²⁸Si¹⁶O (S. N. Yurchenko et al., Mon. Not. R. Astron. Soc. 510 (2022) 903,
     DOI 10.1093/mnras/stab3267).
+  - `H2S`: AYT2's H₂³²S, its transitions of 13,000–27,000 cm⁻¹ (A. A. A. Azzam, J. Tennyson, S. N.
+    Yurchenko and O. V. Naumenko, Mon. Not. R. Astron. Soc. 460 (2016) 4063, DOI
+    10.1093/mnras/stw1133).
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which
