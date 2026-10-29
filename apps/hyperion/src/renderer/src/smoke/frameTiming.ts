@@ -729,7 +729,7 @@ interface FrameTimings {
   readonly failures: ReadonlyArray<string>;
 }
 
-/** A renderer and the view it draws into: (A)'s, (C)'s, (G)'s and (F)'s, or (E)'s own. */
+/** A renderer and the view it draws into: (A)'s, (C)'s, (G)'s, (O)'s and (F)'s, or (E)'s own. */
 interface FrameView {
   readonly renderer: PhotorealRenderer;
   readonly view: RenderView;
@@ -1463,7 +1463,9 @@ interface BareCombination {
  * `x1`, `x2` and the setting's whole count, with the same scene and sources but no atmosphere
  * (`atmospheres: []`), so that R07's regimes draw the body bare (disc or mesh as the plan picks,
  * the `disc cells` pass where it runs): the air's own share of `bodies` and `discs` (the mesh
- * promotion, the limb's draw, the surface lit through the air) apart from R07's bare frame.
+ * promotion, the limb's draw, the surface lit through the air) apart from R07's bare frame. Given
+ * a `thermal` field it is R08.T18.a's (O): the same frames, the body's ground that field, drawn by
+ * the emissive forms, under the emitting checks' names.
  *
  * @returns Its timed frames with a resolve missing.
  */
@@ -2213,8 +2215,9 @@ async function firstAirFrame(
 
 /**
  * The group's summary checks, which fail together without `timestamp-query`: each setting's and
- * medium's table of (A), and (B), (C), (G), (D), (E) and (F)'s, and the dropped frames', by the
- * full run's own templates ({@link CHECK_NAMES}).
+ * medium's table of (A), and (B), (C), (H), (G), R08.T18.a's (O), (I)'s two tables, (J)'s on each
+ * setting, (D), (E) and (F)'s, and the dropped frames', by the full run's own templates
+ * ({@link CHECK_NAMES}). (K) to (N), which only `options.thickRead` runs, are not among them.
  */
 function summaryCheckNames(): string[] {
   const frameTables = (["high", "low"] as const).flatMap((setting) =>

@@ -23018,4 +23018,10 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     timestamp quantization: the smoke page's part 1 with `--smoke-gpu-timing=1`, hidden and
     offscreen, as QW31's (`docs/measurements/atmosphere-frame/2026-10-27-qw31-frame-timings.md`),
     on the RTX 3080 in a quiet window, against (G)'s plain rows. The UHD 620's look is the
-    owner's.
+    owner's. (O) runs whatever `--smoke-thick-read` says, so the run R08.T14.f's frame record
+    asks for (`--smoke-gpu-timing=1 --smoke-thick-read=1`) times it too: one run serves both.
+  - _The timing part's letter._ The part is (O): R08.T14.f's (M) and (N), the correction alone
+    and its class map, landed first, and T18.a, built on an older base, took the next letter
+    when it was applied over them; its fourth commit's message still calls the part (M). (O)
+    runs after (G) and before (H), and its timings' check is among the summary checks that fail
+    together without `timestamp-query` (`smoke/frameTiming.test.ts`).
