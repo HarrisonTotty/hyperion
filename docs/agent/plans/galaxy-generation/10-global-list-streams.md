@@ -1374,3 +1374,128 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
     ly, every remnant kept with one profile and the dispersion's mean square, every core of six
     drawn galaxies modelled, purity, the offset's own stream bit for bit and order independence;
     in `table.rs`, `a_grid_tried_from_a_floor_is_the_rule_s_from_there`.
+- **T5.a–b as built (lane `p10-spray`, 2026-10-28, on `9f4a60da` at `GENERATOR_VERSION` 23; T5.a
+  at `75ab070` before landing).** No output moved: nothing places the spray's tracers yet (T6,
+  T8). Two tags, `stream.spray.release` and `stream.spray.offsets` (`Galaxy`, keyed by
+  `ObjectKey::galaxy_item` of the stream number, Design note 14), are appended after P09.T32's
+  `class.cell`, so `rng/tags.golden` is extended only; new unwired golden
+  `galaxy/global_list/spray.golden` (the spray table at three points, the three test streams'
+  specifications and sprays of four tracers an arm), which moves with the potential, the step
+  rule, the release offsets and the table, and is re-blessed then. Every figure below is v23's,
+  x86-64, measured in the Lightchord pod (4 vCPU).
+  - _Items._ `global_list::spray::{SprayParams (MAX_TRACERS_PER_ARM), TRACERS_PER_ARM (1,000),
+ReleaseSchedule, Release, Spray, Tracer, Arm, SprayForce, NODES (70), spray, RADIAL_OFFSET,
+TANGENTIAL_OFFSET, VERTICAL_SPREAD, IN_PLANE_SPREAD, FILLING_FACTOR, OFFSET_CUT, PLUMMER_SCALE,
+OFFSET_WORDS}`, beyond Provides' three. `spray(&Galaxy, &StreamSpec) -> Result<Vec<Tracer>,
+BuildLeapfrogError>` builds the galaxy's `SprayForce` each call; `Spray::new(seed, &SprayForce,
+&PotentialTables, &StreamSpec, &SprayParams)` integrates the progenitor and holds the schedule,
+    and `Spray::tracer(index)` integrates one tracer, a pure function of its index (tracer `2r` is
+    release `r`'s leading one, `2r + 1` its trailing one), so a caller's pool runs them and gathers
+    them by index (ruling 146.3). The sim spawns no threads: no pool runs them yet, and
+    `TubeTable::build(&Galaxy, &StreamSpec)` (T6) runs them in turn unless its sketch takes a pool.
+    `global_list::testing::{pal5_like, gd1_like, sagittarius_like}(&PotentialTables)`, stream
+    numbers 0–2, behind `cfg(any(test, feature = "testing"))`.
+  - _The registry's lint._ `stream.spray.release`, the registry's 193rd tag, pushed the
+    `domain_tags!` name check past rustc's deny-by-default `long_running_const_eval`, since it
+    hashes every earlier name again for each name. T5.a first made `hyperion-base`'s
+    `assert_tag_names` hash each name once, with a 400-name `const` test that the old check fails;
+    by main's ruling of 2026-10-29 that change is reverted (a fix comparing stored hashes is queued
+    separately), and the registry takes P10.T7.a's module attribute instead, word for word:
+    `#![expect(long_running_const_eval, reason = "the registry's name check is finite; it only
+grows with the registry")]`.
+  - _Outside plan 10's files._ Plan 02's `potential/tables.rs`: `grid_point` (now to index
+    255), `hermite`, `hermite_slope`, `FIRST`, `LN_FIRST` and `STEP` crate-visible, re-exported
+    as `GRID_*`; `orbit.rs`: `potential` split into `potential_ly` (the same operations, so
+    `orbit.golden` holds) and `Leapfrog::potential_and_gradient`, `dot`, `cross` and the SI factors
+    `pub(super)`; `dwarfs.rs`: `epoch_state`, `pericentres_within` and `remaining` `pub(super)`.
+    T2.c's source scan reads `spray.rs` and `spray/force.rs` too.
+  - _T5.a, the schedule._ Stratified in mass: release `i` of `N` at the time the mass lost reaches
+    `(i + Uᵢ) ÷ N` of the tube's, `Uᵢ` word `i` of `stream.spray.release`, rounded to the nearest
+    step boundary of the spec's `fixed_step` over `T_s` (an orphan's no later than the last before
+    its dissolution); one tracer from each Lagrange point a release, each `M ÷ 2N`, so the weights
+    sum to the tube's mass to 10⁻¹². The bound mass at release `i` is `m₀ + M (1 − uᵢ)`, so an
+    orphan's cluster shrinks to nothing as it dissolves. _Deviation (lean, 2026-10-28):_ a dwarf's
+    pulses fall on the integrated orbit's pericentres (the boundaries nearer the centre than both
+    neighbours on the forward pass), not on the spec's spherical times, since the spherical period
+    drifts from the integrated one (T3's cross-check, Ω̄ 0.87–1.00 of the quadrature's); the
+    spec's count of the most recent carry `(1 − f)^−(k+1)` each, and with none inside the
+    stripping time the spherical ones stand in. Each pulse is released at its pericentre's boundary
+    (Design note 11's "at each pericentre"), not spread over the passage.
+  - _T5.b, the release._ Fardal, Huang and Weinberg 2015 (MNRAS 452, 301), checked at source:
+    eq. 1's tidal radius, which is plan 02's `(G m ÷ (4Ω² − κ²))^⅓`, at the bound mass and radius
+    of the release; eqs. 3–9 with `k_φ = k_vr = 0`, Ω the circular frequency at the progenitor's
+    radius, and eq. 7's printed `k_z r_tidal ÷ r` read as `k_z r_tidal` (gala reads it so);
+    `k̄_r = 2.0`, `k̄_vφ = 0.3` (eqs. 19–20); `σ(k_z) = σ(k_vz) = 0.5` (eqs. 22–24);
+    `σ(k_r) = σ(k_vφ) = min(0.15 f_t² R_acc^⅔, 0.4)` (eq. 21) with `R_acc` from the spec's turning
+    points (0.278, 0.249 and the cap 0.4 for the three test streams). _Leans (2026-10-28):_
+    `f_t` = 0.8, the five suffix-less runs of their Table 1, since no progenitor has a King
+    radius; each offset cut at ±2.5σ (their Gaussians are "unlikely to be accurate in the
+    extremes"), which keeps `k_r + k_vφ ≥ 0.3`; the Plummer scale 0.11 of the spec's tidal radius
+    (Hénon's maximum `r_h ÷ r_J` of 0.145, Gieles, Heggie and Zhao 2011, §2.2, over Plummer's
+    1.305), a choice with no source for a dwarf; the Plummer sphere acts while the bound mass is
+    above zero, which reads "a living progenitor" as a living globular always, an orphan until it
+    dissolves and a dwarf whose core remains, its mass the stellar mass (P10.T3.c's finding).
+    _Finding (science check):_ Fardal et al. fitted their offsets to tracers in the host's
+    potential alone (§5.2), from satellites of about 3.5 × 10⁻⁶ of the host's mass, so the
+    sphere moves the releases away from their calibration, most for a massive dwarf.
+  - _T5.b, the force (ruling 146.3)._ `SprayForce`: the leapfrog's potential, far field and blend
+    included, on the tables' 64 nodes a log axis continued at their spacing to 70, the last at
+    2^20.095 ly, the first node past 2²⁰ ly; `Φ`, `R ∂Φ ÷ ∂R`, `z ∂Φ ÷ ∂z` from the leapfrog and
+    the cross derivative by central differences in the logarithms (2⁻¹² each way); bicubic
+    Hermite with its exact gradient. _Lean:_ held flat within 2⁻⁴ ly of the plane and the axis
+    (the vertical force there is 9 × 10⁻⁵ of its value 1,000 ly up), and continued beyond the last
+    node as `A ÷ h` from the clamped point, as plan 02 continues its grid (P02.T6.f). Against the
+    leapfrog over 1–300 kpc at nine latitudes: the potential to 1.05 × 10⁻⁵ and the force to
+    2.54 × 10⁻⁴ (asserted at 2 × 10⁻⁵ and 10⁻³); its own gradient to 10⁻⁶, beyond the last node
+    included. Build 25 ms, 157 kB; a lookup 260 ns against the leapfrog's 466 ns (the dev
+    profile's `opt-level` 2).
+  - _T5.b, the integration._ The progenitor goes back over `T_s` and forward again in the table
+    (alone, no Plummer sphere), returning to its epoch state to 6 × 10⁻¹² of its radius
+    (`pal5_like`); tracers step in the table plus the Plummer sphere at each boundary's progenitor;
+    ψ is each body's summed `math::atan2` swept angle, the tracer's less the progenitor's over the
+    same steps.
+  - _The test streams._ `pal5_like`: the Baumgardt–Hilker catalogue's Pal 5 (1.34 × 10⁴ M☉, born
+    10^4.78, 8.88–17.54 kpc), Harris's [Fe/H] −1.41, 11.5 Gyr, losing `4.1 × 10⁻⁶` M☉ a year,
+    just past apocentre on a plane inclined 70°: `T_s` 10 Gyr (the last major merger; its wrap time
+    is longer), 20,474 steps of 0.49 Myr, a tube of 4.1 × 10⁴ M☉. `gd1_like`: Koposov, Rix and Hogg
+    2010 (14–26 kpc, retrograde at 39°, 9 Gyr, [Fe/H] −1.9), 7 × 10³ M☉ (Bonaca and Price-Whelan
+    2024), dissolved halfway through `T_s` = 9 Gyr (its age), 10,858 steps. `sagittarius_like`: Law
+    and Majewski 2010 (19–59 kpc, a plane at 76°, 6.4 × 10⁸ M☉ taken as the stellar mass at
+    accretion 6 Gyr ago), 0.3 lost a pericentre: `T_s` 2.75 Gyr (its wrap time), three pulses,
+    a core of 5.3 × 10⁷ and a tube of 1.0 × 10⁸ M☉. The stripping times are Design note 5's, so
+    `pal5_like`'s ψ runs to ±3.5 rad: **its tube will be far longer than P10.T6.a's "near 82,000
+    ly"** (the review estimates 300,000 ly), which looks set for a stripping time near 3 Gyr, the
+    `FixedStep` example's; T6 measures it.
+  - _Tests._ Fast: `spray::tests` (the schedule's weights, the orphan's last release, the steady
+    and pulsed histories, determinism; on the Milky Way fixture, one test, the golden, the table's
+    gradient and accuracy, `assert_order_independent` over the three streams' tracers, the weights
+    and the pairs) and `spray::force::tests`, in the lib so that the fast suite compares the
+    golden on `wasm32-wasip1`, whose run turns no feature on. Slow, in `tests/global_list_spray.rs`
+    (`testing`), by name:
+    `the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit` (about 20 s) and
+    `a_drawn_galaxy_s_streams_keep_nearly_every_tracer_on_its_arm_s_side` (about 60 s). ψ grows
+    with the time since release in every arm (groups of a tenth, a pulse one group);
+    `pal5_like`'s mean track departs from its orbit by 39.0 tidal radii within one wrap (bound
+    6), `gd1_like`'s by 12.2, `sagittarius_like`'s by 9.0. Commands:
+    `cargo test -p hyperion-sim --lib -- galaxy::global_list rng::tags`,
+    `cargo test -p hyperion-sim --test foundation_golden`, and
+    `cargo test -p hyperion-sim --features testing --test global_list_spray -- --ignored`.
+  - _Finding: not every tracer is on its arm's side._ T5.b's "positive for every leading and
+    negative for every trailing tracer" holds for `pal5_like` and `gd1_like`; `sagittarius_like`
+    has 27 of 2,000 on the other side (39 under another seed and plane) and none with the Plummer
+    sphere left out, so it is the 10⁸ M☉ progenitor's pull on tracers released near its Jacobi
+    radius; a drawn Milky Way galaxy's streams (five orphans at the step counts' quantiles and its
+    one dwarf) have 13, 0, 24, 20, 13 and 32 of 2,000, from eccentric orbits, where eq. 21's
+    dispersion reaches its cap and a trailing tracer released near pericentre with `k_vφ` low in
+    its range leaves with less energy than the progenitor. Pinned as found: 60 for
+    `sagittarius_like`, 2.5 % a stream. P10.T6.a sorts each arm by ψ, so these tracers sit at
+    their arm's root unless T6 splits the arms by ψ's sign; for the owner, with whether the
+    Plummer sphere stays for dwarfs.
+  - _Finding: the cost._ A spray costs about 0.32 µs a tracer-step, about 1,000 × the step count
+    for a stream. A drawn Milky Way galaxy's 309 streams take 5,000–49,120 steps (median 12,969;
+    4.96 × 10⁶ in all, nearly every one at the 10 Gyr cap of `T_s`), so a stream takes 1.7–29 s
+    alone (median 4.6 s) and 0.7–7.7 s on four threads (median 1.9 s), and `pal5_like` 6.6 s alone,
+    against P10.T6.c's 0.2 s of parallel wall time for a tube: 4–40 times over on four threads, 10
+    at the median.
+    Ruling 146.3's fallback, `τ_p ÷ 32`, would halve it; not applied. For the owner, with T6.c's
+    bench.

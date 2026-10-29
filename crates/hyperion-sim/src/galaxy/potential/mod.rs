@@ -34,6 +34,13 @@ pub use monopole::SphericalAverage;
 pub use tables::PotentialTables;
 pub(crate) use tables::{GRID_EDGE_LY, TIDAL_FLOOR};
 
+// The tables' node spacing and Hermite basis, for plan 10's spray table (P10.T5.b), which shares
+// the (R, |z|) grid's nodes.
+pub(crate) use tables::{
+    FIRST as GRID_FIRST_LY, LN_FIRST as GRID_LN_FIRST, STEP as GRID_LN_STEP, grid_point, hermite,
+    hermite_slope,
+};
+
 /// A mass component could not be built: `quantity` is `value`, which is not finite or lies
 /// outside its range (a mass below zero, a length, width, ratio or slope margin not above zero).
 #[derive(Debug, Clone, Copy, PartialEq)]

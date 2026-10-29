@@ -1,0 +1,244 @@
+# generator_version = 23
+table.sun.potential = 0xc242215a28a65154  # -155737936204.63538
+table.sun.acceleration.x = 0xbdeacddc7127a73b  # -1.9502582238165705e-10
+table.sun.acceleration.y = 0x8000000000000000  # -0.0
+table.sun.acceleration.z = 0xbd77838ee1930efb  # -1.3366104066865136e-12
+table.halo.potential = 0xc23658215f7fb813  # -95967862655.71904
+table.halo.acceleration.x = 0x3db29dc6397662c2  # 1.6931431596515688e-11
+table.halo.acceleration.y = 0xbda8d25da1f32e58  # -1.1287621064343792e-11
+table.halo.acceleration.z = 0xbdbc1d16817bf274  # -2.5569192677009805e-11
+table.far.potential = 0xc216fec9701bc4d3  # -24690973702.94221
+table.far.acceleration.x = 0xbd6453690d40b50c  # -5.776945986547664e-13
+table.far.acceleration.y = 0xbd516c10e6c9bfc1  # -2.475833994234713e-13
+table.far.acceleration.z = 0x3d7b46601df542b2  # 1.5503987998152334e-12
+pal5.stripping_time = 0x4202a05f20000000  # 10000000000.0
+pal5.mass = 0x40e3e509fa88430d  # 40744.31183255287
+pal5.tidal_radius = 0x405c7910040403de  # 113.89160251991368
+pal5.steps 20474
+pal5.in_plane_spread = 0x3fd1cfa4258b9500  # 0.2782984129574544
+pal5.tracer.0.release Leading 2054
+pal5.tracer.0.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.0.position.x = 0x4417e1b82c649eeb  # 1.101349781400607e20
+pal5.tracer.0.velocity.x = 0x410d7d31153e63eb  # 241574.1353729063
+pal5.tracer.0.position.y = 0xc4175e3988ef5f64  # -1.077661805425591e20
+pal5.tracer.0.velocity.y = 0xc0ac38e0fdca72f8  # -3612.4394362702697
+pal5.tracer.0.position.z = 0xc42b62184acaec75  # -2.525652859203634e20
+pal5.tracer.0.velocity.z = 0x40ee521c5e36fabc  # 62096.88650082561
+pal5.tracer.0.psi = 0x4004b6ccff54c0c0  # 2.589258188985781
+pal5.tracer.1.release Trailing 2054
+pal5.tracer.1.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.1.position.x = 0x442b175c097dedec  # 2.4987266039367742e20
+pal5.tracer.1.velocity.x = 0xc0fa9f0078b7547f  # -109040.02947171217
+pal5.tracer.1.position.y = 0x441473e43a944ea1  # 9.432143637297288e19
+pal5.tracer.1.velocity.y = 0x40f00ee62f4fadf5  # 65774.38655059769
+pal5.tracer.1.position.z = 0x44254d061b8bda31  # 1.9646588971307817e20
+pal5.tracer.1.velocity.z = 0x4108e29e9db6b227  # 203859.82700862104
+pal5.tracer.1.psi = 0xbffcc3e45cbf6d00  # -1.7978252051314598
+pal5.tracer.2.release Leading 5714
+pal5.tracer.2.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.2.position.x = 0xc42d3dddf47f1166  # -2.697067830851668e20
+pal5.tracer.2.velocity.x = 0x4107997f142c59a2  # 193327.88485021616
+pal5.tracer.2.position.y = 0xc40980a6201a5811  # -5.8804841752905785e19
+pal5.tracer.2.velocity.y = 0xc0ea55a4c1aa8506  # -53933.148640880405
+pal5.tracer.2.position.z = 0xc42638812fc9001d  # -2.049499788500333e20
+pal5.tracer.2.velocity.z = 0xc0fb4d6f4446c268  # -111830.95416904392
+pal5.tracer.2.psi = 0x3ff4c5967d3d2300  # 1.2982392208234046
+pal5.tracer.3.release Trailing 5714
+pal5.tracer.3.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.3.position.x = 0x4414362eabca1bce  # 9.320978207142651e19
+pal5.tracer.3.velocity.x = 0xc103918c0c1cc8c3  # -160305.50591427655
+pal5.tracer.3.position.y = 0x441fdb2a35acd89c  # 1.4691039008620223e20
+pal5.tracer.3.velocity.y = 0x40dbcd54c21a2b99  # 28469.3243470598
+pal5.tracer.3.position.z = 0x4434597cf7501bb1  # 3.753831821641128e20
+pal5.tracer.3.velocity.z = 0x40fbd897be7b27b8  # 114057.48400416865
+pal5.tracer.3.psi = 0xbff28b14fd702dc0  # -1.1589555644921887
+pal5.tracer.4.release Leading 11981
+pal5.tracer.4.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.4.position.x = 0xc4391451183bf4dc  # -4.626325798424011e20
+pal5.tracer.4.velocity.x = 0x40e312947fd77e41  # 39060.64060568484
+pal5.tracer.4.position.y = 0x43fb6d8f632d859d  # 3.16222954818205e19
+pal5.tracer.4.velocity.y = 0xc0ec4f9e718fbe38  # -57980.951362487336
+pal5.tracer.4.position.z = 0x440a578c18298e4f  # 6.074047370765598e19
+pal5.tracer.4.velocity.z = 0xc103c51ebb6ba17d  # -161955.84151388324
+pal5.tracer.4.psi = 0x3fdf6fc101f10f00  # 0.49119591893780523
+pal5.tracer.5.release Trailing 11981
+pal5.tracer.5.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.5.position.x = 0xc42daa9da5a83991  # -2.736248714186536e20
+pal5.tracer.5.velocity.x = 0xc100af5b17897b54  # -136683.38649269438
+pal5.tracer.5.position.y = 0x442106ba9efe1ad4  # 1.5703976198858356e20
+pal5.tracer.5.velocity.y = 0xc0d2da6b8774d8ce  # -19305.680142604564
+pal5.tracer.5.position.z = 0x443754762a1c19da  # 4.3036121194193866e20
+pal5.tracer.5.velocity.z = 0xc0e5de6b4a84e2c0  # -44787.352846567985
+pal5.tracer.5.psi = 0xbfd9abe76debd700  # -0.40111718878266345
+pal5.tracer.6.release Leading 20448
+pal5.tracer.6.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.6.position.x = 0xc43745092007e62e  # -4.2924965617702574e20
+pal5.tracer.6.velocity.x = 0xc0f124c255a77da4  # -70220.14591168478
+pal5.tracer.6.position.y = 0x44174a141e9ff685  # 1.0740325970651128e20
+pal5.tracer.6.velocity.y = 0xc0e44ac25838fe6a  # -41558.073269364264
+pal5.tracer.6.position.z = 0x44302308cada21d9  # 2.9767239580871354e20
+pal5.tracer.6.velocity.z = 0xc0fc701775a54c88  # -116481.46622209449
+pal5.tracer.6.psi = 0x3f39cc3cc091f400  # 0.0003936432190768113
+pal5.tracer.7.release Trailing 20448
+pal5.tracer.7.weight = 0x40b3e509fa88430d  # 5093.038979069109
+pal5.tracer.7.position.x = 0xc4378e0a59a90e5f  # -4.34510205381098e20
+pal5.tracer.7.velocity.x = 0xc0f1529b8da32b99  # -70953.72207943945
+pal5.tracer.7.position.y = 0x44178ecacc0f9049  # 1.0864109359030457e20
+pal5.tracer.7.velocity.y = 0xc0e4c964417bc2a9  # -42571.132993583866
+pal5.tracer.7.position.z = 0x44305d51673d9e80  # 3.0187217441234354e20
+pal5.tracer.7.velocity.z = 0xc0fc74f401ca5731  # -116559.25043710765
+pal5.tracer.7.psi = 0xbf3649ef0a90d600  # -0.0003401001545769444
+gd1.stripping_time = 0x4200c388d0000000  # 9000000000.0
+gd1.mass = 0x40bb580000000000  # 7000.0
+gd1.tidal_radius = 0x40604ffe7666f102  # 130.49981231790304
+gd1.steps 10858
+gd1.in_plane_spread = 0x3fcfd7a1457f1e44  # 0.2487680043543482
+gd1.tracer.0.release Leading 451
+gd1.tracer.0.weight = 0x408b580000000000  # 875.0
+gd1.tracer.0.position.x = 0x4429a7d4df18eef8  # 2.3663106902015843e20
+gd1.tracer.0.velocity.x = 0x410635106922fad6  # 181922.05133624998
+gd1.tracer.0.position.y = 0x443455d90ca64790  # 3.7512087094566584e20
+gd1.tracer.0.velocity.y = 0xc0f27cbaf298cdeb  # -75723.68422775685
+gd1.tracer.0.position.z = 0x4430537c6dbe2fd6  # 3.0116370904522673e20
+gd1.tracer.0.velocity.z = 0x40f7b97a02c5c544  # 97175.62567688996
+gd1.tracer.0.psi = 0x3fedb8d8de52a900  # 0.9288143484348268
+gd1.tracer.1.release Trailing 451
+gd1.tracer.1.weight = 0x408b580000000000  # 875.0
+gd1.tracer.1.position.x = 0xc435b0f439d236c2  # -4.001325055679179e20
+gd1.tracer.1.velocity.x = 0x40f6b58ccc7d2faf  # 93016.79992407442
+gd1.tracer.1.position.y = 0x4422bb83b80c3ec2  # 1.727766194982728e20
+gd1.tracer.1.velocity.y = 0x4105a8b55034203a  # 177430.66416192224
+gd1.tracer.1.position.z = 0xc42a19c7b24eadcf  # -2.407364976693776e20
+gd1.tracer.1.velocity.z = 0x40fdae18da14d473  # 121569.55324252117
+gd1.tracer.1.psi = 0xbff07eb2f28f9d80  # -1.0309323763884493
+gd1.tracer.2.release Leading 2668
+gd1.tracer.2.weight = 0x408b580000000000  # 875.0
+gd1.tracer.2.position.x = 0x441ed35406e0ea67  # 1.4215753150360202e20
+gd1.tracer.2.velocity.x = 0x4107a01d39caf205  # 193539.65321911886
+gd1.tracer.2.position.y = 0x4436326ec38b4aca  # 4.094624265739673e20
+gd1.tracer.2.velocity.y = 0xc0e7310ec494fc02  # -47496.46149682255
+gd1.tracer.2.position.z = 0x442aca9a616a3f2d  # 2.471072170837388e20
+gd1.tracer.2.velocity.z = 0x40fcfbce21ed2812  # 118716.88328281071
+gd1.tracer.2.psi = 0x3fe71d6d2df86400  # 0.7223420999390555
+gd1.tracer.3.release Trailing 2668
+gd1.tracer.3.weight = 0x408b580000000000  # 875.0
+gd1.tracer.3.position.x = 0xc4312aac07f71754  # -3.166694906564793e20
+gd1.tracer.3.velocity.x = 0x4100df84963e012f  # 138224.57336045193
+gd1.tracer.3.position.y = 0x442ffea02bc5924c  # 2.9509838964723325e20
+gd1.tracer.3.velocity.y = 0x4101d893a05c6fec  # 146194.45330130996
+gd1.tracer.3.position.z = 0xc41dace46c9f4a76  # -1.3685344500954887e20
+gd1.tracer.3.velocity.z = 0x410210145463b477  # 147970.54120579708
+gd1.tracer.3.psi = 0xbfe52f9e19dee180  # -0.6620626931462965
+gd1.tracer.4.release Leading 3796
+gd1.tracer.4.weight = 0x408b580000000000  # 875.0
+gd1.tracer.4.position.x = 0x43fa5fa8d6675ed0  # 3.040677130534997e19
+gd1.tracer.4.velocity.x = 0x410884ad73943987  # 200853.68143505996
+gd1.tracer.4.position.y = 0x44373bbe7cca9124  # 4.2858012919859275e20
+gd1.tracer.4.velocity.y = 0xc0c0a02f2b591632  # -8512.368510375822
+gd1.tracer.4.position.z = 0x44229abbea364ae4  # 1.7159557807408166e20
+gd1.tracer.4.velocity.z = 0x410117346f7678be  # 140006.5544251855
+gd1.tracer.4.psi = 0x3fdc9c9b9f700280  # 0.44705858774253926
+gd1.tracer.5.release Trailing 3796
+gd1.tracer.5.weight = 0x408b580000000000  # 875.0
+gd1.tracer.5.position.x = 0xc42ba21025ef3ad6  # -2.5486998276667205e20
+gd1.tracer.5.velocity.x = 0x4103b99764636c0e  # 161586.92401775758
+gd1.tracer.5.position.y = 0x4432f5d3017bb32a  # 3.497548967169487e20
+gd1.tracer.5.velocity.y = 0x40fd22ae30406f3b  # 119338.88678019952
+gd1.tracer.5.position.z = 0xc40ebdff2c47536d  # -7.088662903604626e19
+gd1.tracer.5.velocity.z = 0x410358afa8caf666  # 158485.95741837024
+gd1.tracer.5.psi = 0xbfdb58c0ca06f400  # -0.4272920582696429
+gd1.tracer.6.release Leading 4504
+gd1.tracer.6.weight = 0x408b580000000000  # 875.0
+gd1.tracer.6.position.x = 0xc3d0762928c49102  # -4.74472322772789e18
+gd1.tracer.6.velocity.x = 0x41087a5d742b7e9e  # 200523.68172358436
+gd1.tracer.6.position.y = 0x443752bf033b6f63  # 4.302376016807882e20
+gd1.tracer.6.velocity.y = 0x40b5b2fcf45e90dc  # 5554.988103781096
+gd1.tracer.6.position.z = 0x441faa0dfe50d582  # 1.460256990173185e20
+gd1.tracer.6.velocity.z = 0x4101d7b104259aa5  # 146166.1270248491
+gd1.tracer.6.psi = 0x3fd6b8ba25a13600  # 0.3550248496511301
+gd1.tracer.7.release Trailing 4504
+gd1.tracer.7.weight = 0x408b580000000000  # 875.0
+gd1.tracer.7.position.x = 0xc42c8ab03f1a3068  # -2.632511955093582e20
+gd1.tracer.7.velocity.x = 0x41036c841aac94c6  # 159120.5130244849
+gd1.tracer.7.position.y = 0x4432a6894b0311c9  # 3.440415984854327e20
+gd1.tracer.7.velocity.y = 0x40fdfa83198e9727  # 122792.19373950046
+gd1.tracer.7.position.z = 0xc41116688d161a7f  # -7.8802336211387e19
+gd1.tracer.7.velocity.z = 0x41033345acc3d021  # 157288.70935785866
+gd1.tracer.7.psi = 0xbfdd3e4ffaa85c80  # -0.4569282481983876
+sagittarius.stripping_time = 0x41e47f69c1447419  # 2751155722.139172
+sagittarius.mass = 0x419811f0fffffffe  # 100957247.99999997
+sagittarius.tidal_radius = 0x40bd41542ef3342c  # 7489.328841400373
+sagittarius.steps 2863
+sagittarius.in_plane_spread = 0x3fd999999999999a  # 0.4
+sagittarius.tracer.0.release Leading 839
+sagittarius.tracer.0.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.0.position.x = 0xc437d9a85056d90d  # -4.3995898773157636e20
+sagittarius.tracer.0.velocity.x = 0xc0b3cb40ea7201a1  # -5067.253577351949
+sagittarius.tracer.0.position.y = 0x445106d4685ae578  # 1.2563471290078352e21
+sagittarius.tracer.0.velocity.y = 0xc0f3276fec80e399  # -78454.99524010568
+sagittarius.tracer.0.position.z = 0xc4344e8bf1b1ce58  # -3.745947645768856e20
+sagittarius.tracer.0.velocity.z = 0xc0f47fdd50e50ceb  # -83965.83224968954
+sagittarius.tracer.0.psi = 0x3ffcd603d24bb448  # 1.8022497381855533
+sagittarius.tracer.1.release Trailing 839
+sagittarius.tracer.1.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.1.position.x = 0xc3fbc212ff08cede  # -3.200291313727451e19
+sagittarius.tracer.1.velocity.x = 0x40e39e3c7906fc0b  # 40177.8897738383
+sagittarius.tracer.1.position.y = 0xc454679d89a08d96  # -1.5056046262164175e21
+sagittarius.tracer.1.velocity.y = 0xc0d3253e8ac43ddc  # -19604.977219639215
+sagittarius.tracer.1.position.z = 0xc452f341d78f756c  # -1.3982796862504997e21
+sagittarius.tracer.1.velocity.z = 0x40fc11d46a357a4a  # 114973.27592990655
+sagittarius.tracer.1.psi = 0xc0034f1c6de7975e  # -2.413628443365197
+sagittarius.tracer.2.release Leading 839
+sagittarius.tracer.2.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.2.position.x = 0xc43021cab414ca2d  # -2.975828617292843e20
+sagittarius.tracer.2.velocity.x = 0xc0e1e592ed863429  # -36652.5914946574
+sagittarius.tracer.2.position.y = 0x445409d04fecfcd7  # 1.478568137979844e21
+sagittarius.tracer.2.velocity.y = 0x40f198ae276e7cb4  # 72074.8846268531
+sagittarius.tracer.2.position.z = 0x4431832121c3454c  # 3.2304351986882734e20
+sagittarius.tracer.2.velocity.z = 0xc0f27aae65d9abeb  # -75690.8998657909
+sagittarius.tracer.2.psi = 0x3ff4ce09aba31a28  # 1.3003021912169377
+sagittarius.tracer.3.release Trailing 839
+sagittarius.tracer.3.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.3.position.x = 0xc415749e2e499fa4  # -9.894620759909158e19
+sagittarius.tracer.3.velocity.x = 0xc0eda9a25fb070b0  # -60749.074180812924
+sagittarius.tracer.3.position.y = 0x4445aadbce15f694  # 7.99386572295949e20
+sagittarius.tracer.3.velocity.y = 0x41081faeba383afb  # 197621.84092756346
+sagittarius.tracer.3.position.z = 0x44418440cabbca1e  # 6.46248977944954e20
+sagittarius.tracer.3.velocity.z = 0xc0d7055be76632cd  # -23573.4359984871
+sagittarius.tracer.3.psi = 0x3feb007387727940  # 0.8438050885631938
+sagittarius.tracer.4.release Leading 1832
+sagittarius.tracer.4.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.4.position.x = 0xc42d78778368f3d7  # -2.7181806471557385e20
+sagittarius.tracer.4.velocity.x = 0xc0e8a66a85286e99  # -50483.32875463105
+sagittarius.tracer.4.position.y = 0x44502f7886d9980f  # 1.1942741494618315e21
+sagittarius.tracer.4.velocity.y = 0x40fa4b60918ddee6  # 107702.03553568907
+sagittarius.tracer.4.position.z = 0x443394b93d6c46ae  # 3.6120480172403786e20
+sagittarius.tracer.4.velocity.z = 0xc0f46c1e66679591  # -83649.90000112938
+sagittarius.tracer.4.psi = 0x3ff3b7b6362a1d48  # 1.232351504879107
+sagittarius.tracer.5.release Trailing 1832
+sagittarius.tracer.5.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.5.position.x = 0x44302dbc6484cc5c  # 2.984435247282082e20
+sagittarius.tracer.5.velocity.x = 0x40bfadfbfe640b92  # 8109.98435044558
+sagittarius.tracer.5.position.y = 0xc44c84e7ffdd763f  # -1.0521714770462616e21
+sagittarius.tracer.5.velocity.y = 0x41007a4fb8804d7a  # 134985.96508846787
+sagittarius.tracer.5.position.z = 0xc4119aa47373cbf8  # -8.118445189306607e19
+sagittarius.tracer.5.velocity.z = 0x4107d8e869308ba0  # 195357.05136212427
+sagittarius.tracer.5.psi = 0xbffb0d4c42637792  # -1.690746554689643
+sagittarius.tracer.6.release Leading 2825
+sagittarius.tracer.6.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.6.position.x = 0x4416ad44b9e5f8e3  # 1.0457841952149057e20
+sagittarius.tracer.6.velocity.x = 0xc0ef756b602f28d3  # -64427.35549123739
+sagittarius.tracer.6.position.y = 0x44149aef3d46de58  # 9.502477271251327e19
+sagittarius.tracer.6.velocity.y = 0x41104e121370e378  # 267140.51898532314
+sagittarius.tracer.6.position.z = 0x443e70876e6a51f6  # 5.615108932683111e20
+sagittarius.tracer.6.velocity.z = 0x40f12a16c3c49842  # 70305.42279490925
+sagittarius.tracer.6.psi = 0x3faf303ba04ad340  # 0.060914862934998926
+sagittarius.tracer.7.release Trailing 2825
+sagittarius.tracer.7.weight = 0x416811f0fffffffe  # 12619655.999999996
+sagittarius.tracer.7.position.x = 0x442009c2da8117ef  # 1.479256349595816e20
+sagittarius.tracer.7.velocity.x = 0xc0edd082c60cdb7f  # -61060.086676052764
+sagittarius.tracer.7.position.y = 0x4407ccb00a0365dd  # 5.487805168558353e19
+sagittarius.tracer.7.velocity.y = 0x4110e34a996e0515  # 276690.6498337549
+sagittarius.tracer.7.position.z = 0x44422603ff3a4629  # 6.695614139017872e20
+sagittarius.tracer.7.velocity.z = 0x40f3e7d9e6799c92  # 81533.61876832161
+sagittarius.tracer.7.psi = 0xbf9ea4f04b3fa9a0  # -0.02992606601029879

@@ -12,13 +12,13 @@ use crate::units::{KilometresPerSecond, LightYears, Metres, PerYear, SolarMasses
 const POINTS: usize = 64;
 
 /// `ln` of the grids' first point, 2⁻⁴ ly.
-const LN_FIRST: f64 = -4.0 * core::f64::consts::LN_2;
+pub(crate) const LN_FIRST: f64 = -4.0 * core::f64::consts::LN_2;
 
 /// `ln` of the grids' last point, 2¹⁸ ly.
 const LN_LAST: f64 = 18.0 * core::f64::consts::LN_2;
 
 /// The grids' first and last points, ly.
-const FIRST: f64 = 0.0625;
+pub(crate) const FIRST: f64 = 0.0625;
 const LAST: f64 = 262_144.0;
 
 /// The (R, |z|) grid's outer edge on both axes, 2¹⁸ ly: beyond it the tables continue the
@@ -26,7 +26,7 @@ const LAST: f64 = 262_144.0;
 pub(crate) const GRID_EDGE_LY: f64 = LAST;
 
 /// The step between grid points in `ln R` (and `ln |z|`): 22 ln 2 ÷ 63.
-const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
+pub(crate) const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
 
 /// Where the denominator of the tidal radius is floored, as a fraction of Ω² (plan 02, Design
 /// note 17; brainstorm, "Coordinates").
@@ -36,12 +36,21 @@ pub(crate) const TIDAL_FLOOR: f64 = 0.05;
 /// finds at the grid points, for the interpolation between them.
 pub const TIDAL_BOUND_MARGIN: f64 = 0.01;
 
-/// The grid point `i` of either axis, ly: `2⁻⁴ × 2^(22 i ÷ 63)`, with both ends exact.
-fn grid_point(i: usize) -> f64 {
+/// The grid point `i` of either axis, ly: `2⁻⁴ × 2^(22 i ÷ 63)`, with both ends exact. Beyond
+/// the last, 63, it continues the spacing, as plan 10's spray table does (P10.T5.b), up to 255.
+#[must_use]
+pub(crate) fn grid_point(i: usize) -> f64 {
     match i {
         0 => FIRST,
         63 => LAST,
-        _ => math::exp(LN_FIRST + STEP * f64::from(u8::try_from(i).expect("below 64"))),
+        _ => math::exp(
+            LN_FIRST
+                + STEP
+                    * f64::from(
+                        u8::try_from(i)
+                            .expect("a node below 256: the grids have 64 and the spray's 70"),
+                    ),
+        ),
     }
 }
 
@@ -60,7 +69,8 @@ fn cell(x: f64) -> (usize, f64) {
 
 /// The cubic Hermite basis at `t`: the weights of the two values and of the two slopes (in units
 /// of the cell).
-fn hermite(t: f64) -> [f64; 4] {
+#[must_use]
+pub(crate) fn hermite(t: f64) -> [f64; 4] {
     let t2 = t * t;
     let t3 = t2 * t;
     [
@@ -220,7 +230,8 @@ impl Grid {
 }
 
 /// The derivative in `t` of the cubic Hermite basis of [`hermite`].
-fn hermite_slope(t: f64) -> [f64; 4] {
+#[must_use]
+pub(crate) fn hermite_slope(t: f64) -> [f64; 4] {
     let t2 = t * t;
     [
         6.0 * t2 - 6.0 * t,

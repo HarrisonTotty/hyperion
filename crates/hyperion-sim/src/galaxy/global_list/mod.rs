@@ -35,6 +35,8 @@ pub mod orphans;
 pub mod share;
 pub mod spec;
 pub mod spray;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod tube;
 
 use std::error::Error;

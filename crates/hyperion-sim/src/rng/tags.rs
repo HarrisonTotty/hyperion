@@ -934,6 +934,11 @@ domain_tags! {
     /// A stream's release schedule (P10.T5.a, `global_list::spray::ReleaseSchedule`): word `i`, one
     /// uniform, where release `i` falls inside its stratum of the tube's mass.
     STREAM_SPRAY_RELEASE: Galaxy = "stream.spray.release";
+
+    /// A stream's release offsets (P10.T5.b, `global_list::spray::Spray`): words `4t` to `4t + 3`
+    /// for tracer `t`, one uniform each, the ranks of its `k_r`, `k_vφ`, `k_z` and `k_vz` in their
+    /// cut Gaussians (Fardal, Huang and Weinberg 2015).
+    STREAM_SPRAY_OFFSETS: Galaxy = "stream.spray.offsets";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1334,6 +1339,7 @@ mod tests {
             DWARF_STRIPPING,
             DWARF_CORE_METALLICITY,
             STREAM_SPRAY_RELEASE,
+            STREAM_SPRAY_OFFSETS,
         ];
         for tag in tags {
             assert_eq!(tag.scope(), crate::rng::TagScope::Galaxy, "{}", tag.name());
