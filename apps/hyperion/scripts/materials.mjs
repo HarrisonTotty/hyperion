@@ -37,6 +37,9 @@
 // absorption file (the atmosphere tool's `--o2o2`), gives oxygen-liquid.json its k. Since R08.T5.j
 // `1995LOW.TAB`, Karkoschka 1998's methane coefficients from NASA's Planetary Data System (volume
 // GBAT_0001), gives methane-liquid.json its k over 380–555.6 nm, with Martonchik-liquid-90K.yml's n.
+// Since R08.T5.e `--only <file>,…` writes the files named, asking for their sources alone, and
+// `--acid-uv-from src/renderer/src/view/atmosphere/materials/sulphuric-acid-75.json` writes
+// sulphuric-acid-uv-absorber.json alone from the committed 75 wt% file, with no source fetched.
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";

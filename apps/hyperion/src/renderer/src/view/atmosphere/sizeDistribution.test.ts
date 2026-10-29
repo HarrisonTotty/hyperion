@@ -5,6 +5,7 @@ import { refractiveIndex } from "./materials/materials";
 import { mieSphere, mieTermCount } from "./mie";
 import {
   modeOptics,
+  modeOpticsWithIndex,
   resolveModeMaterial,
   PHASE_TABLE_MU,
   PHASE_TABLE_SIZE,
@@ -287,6 +288,27 @@ describe("a mode's optics", () => {
     const generic = sphereModeOptics(sizes, { n: 1.5, k: 0 }, 550);
     expect(unknown.provenance).toBe("standIn");
     expect(unknown.qExt).toBe(generic.qExt);
+  });
+
+  it("at an index of their own keep their material's shape and provenance", () => {
+    // R08.T5.e's fit varies acid_uv_absorber's k: the mode is still its material's droplets.
+    const sizes: SizeDistribution = {
+      kind: "gamma",
+      effectiveRadiusUm: 0.5,
+      effectiveVariance: 0.1,
+    };
+    const mode = { material: "H2SO4", sizes };
+    const index = { n: 1.43, k: 1e-3 };
+    const own = modeOpticsWithIndex(mode, index, 365);
+    const sphere = sphereModeOptics(sizes, index, 365);
+    const plain = modeOptics(mode, 365);
+    expect([own.provenance, own.shape, own.qExt, own.singleScatteringAlbedo]).toEqual([
+      plain.provenance,
+      plain.shape,
+      sphere.qExt,
+      sphere.singleScatteringAlbedo,
+    ]);
+    expect(modeOpticsWithIndex(mode, refractiveIndex("H2SO4", 365).index, 365)).toEqual(plain);
   });
 
   it("mark a non-sphere's Mie values by its shape and carry no matrix for it", () => {

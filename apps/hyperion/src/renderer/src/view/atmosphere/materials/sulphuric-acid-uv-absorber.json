@@ -6,11 +6,11 @@
   "temperatureK": 300,
   "shape": "sphere",
   "provenance": "standIn",
-  "paper": "K. F. Palmer and D. Williams, \"Optical constants of sulfuric acid; application to the clouds of Venus?\", Appl. Opt. 14 (1975) 208–219, DOI 10.1364/AO.14.000208, for n and the acid's own k; for the absorber's a-priori decay length, J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, \"A model of UV–blue absorbance in bulk liquid of Venusian cloud aerosols is consistent with efficient organic absorbers at high concentrations\", Astrobiology 26 (2026) 727–739, DOI 10.1177/15311074261477502, its values read from the preprint, arXiv:2505.00880v3 (CC BY 4.0)",
+  "paper": "K. F. Palmer and D. Williams, \"Optical constants of sulfuric acid; application to the clouds of Venus?\", Appl. Opt. 14 (1975) 208–219, DOI 10.1364/AO.14.000208, for n and the acid's own k; for the absorber's a-priori decay length, J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, \"A model of UV–blue absorbance in bulk liquid of Venusian cloud aerosols is consistent with efficient organic absorbers at high concentrations\", Astrobiology 26 (2026) 727–739, DOI 10.1177/15311074261477502, its values read from the preprint, arXiv:2505.00880v3 (CC BY 4.0); for R08.T5.e's fit's targets, Venus's 365 nm geometric albedo, Y. J. Lee et al., AJ 158 (2019) 126, and its g′ and r′ geometric albedos, A. Mallama, B. Krobusek and H. Pavlov, Icarus 282 (2017) 19, Table 7",
   "source": "the Aerosol Refractive Index Archive (ARIA), University of Oxford, H2SO4_75%_300K_R_Palmer_1975.ri, the 75 wt% file's source, https://eodg.atm.ox.ac.uk/ARIA/data_files/Acids/Sulphuric/70%25_to_79%25/Sulphuric_acid_75%25_300K_(Palmer_and_Williams_1975)/original/H2SO4_75%25_300K_R_Palmer_1975.ri, SHA-256 ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe, fetched 2026-10-09",
   "licence": "reduced values; the source states no terms (decision-r08-licences.md)",
-  "reduction": "the 75 wt% file's own reduction (n linear and k linear in log k in wavelength between the source's rows, onto 360–780 nm every 5 nm, to six significant figures, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = 0.0012 and L = 26.9 nm are the a-priori values (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), Spacek et al.'s decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling; k₃₆₅ is the ruling's), which R08.T5.e refits to Venus's 365 nm albedo and g′ ÷ r′ colour. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry",
-  "standIn": "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's albedo spectrum and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
+  "reduction": "the 75 wt% file's own reduction (n linear and k linear in log k in wavelength between the source's rows, onto 360–780 nm every 5 nm, to six significant figures, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = 0.00149 and L = 47.6 nm are R08.T5.e's fit on the reference tracer's plane-parallel Venus deck, k₃₆₅ to Venus's 365 nm geometric albedo, 0.36 (Lee et al. 2019), and L to its g′ ÷ r′ albedo ratio, 0.933 (Mallama et al. 2017, Table 7), from the ruling's a-priori 1.2 × 10⁻³ and 26.9 nm, the latter Spacek et al.'s bound (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), their decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling), which the fitted L passes. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry",
+  "standIn": "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's 365 nm albedo and visible colour and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
   "fit": null,
   "wavelengthsNm": [
     360, 365, 370, 375, 380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450,
@@ -30,15 +30,15 @@
     1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427
   ],
   "k": [
-    0.00144514, 0.00120002, 0.000996475, 0.000827455, 0.000687104, 0.00057056, 0.000473784,
-    0.000393424, 0.000326694, 0.000271283, 0.000225271, 0.000187064, 0.000155338, 0.000128992,
-    0.000107116, 0.0000889504, 0.000073866, 0.0000613403, 0.0000509392, 0.0000423023, 0.0000351304,
-    0.0000291751, 0.0000242299, 0.0000201235, 0.0000167136, 0.0000138821, 0.0000115309,
-    0.00000957855, 0.00000795734, 0.00000595207, 0.00000439873, 0.00000320169, 0.00000228478,
-    0.0000015874, 0.00000106147, 6.68872e-7, 3.79519e-7, 1.69678e-7, 2.07e-8, 2.07e-8, 2.07e-8,
+    0.00165505, 0.00149002, 0.00134145, 0.00120769, 0.00108727, 0.000978856, 0.000881253,
+    0.000793382, 0.000714274, 0.000643053, 0.000578934, 0.000521209, 0.00046924, 0.000422452,
+    0.00038033, 0.000342408, 0.000308268, 0.000277531, 0.00024986, 0.000224948, 0.000202519,
+    0.000182328, 0.000164149, 0.000147783, 0.000133049, 0.000119785, 0.000107843, 0.0000970913,
+    0.0000874121, 0.0000708303, 0.0000566864, 0.0000446592, 0.0000344671, 0.0000258637,
+    0.0000186336, 0.0000125884, 0.00000756372, 0.00000341614, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
     2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
     2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
-    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.23638e-8, 2.51924e-8,
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.23638e-8, 2.51924e-8,
     2.83841e-8, 3.20165e-8, 3.61587e-8, 4.14925e-8, 4.76131e-8, 5.58373e-8, 6.55712e-8, 7.14803e-8,
     7.59752e-8, 7.91355e-8, 8.06745e-8, 8.21203e-8, 8.29066e-8, 8.37004e-8
   ]

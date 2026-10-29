@@ -8,8 +8,11 @@ import {
   type AbsorptionRow,
   absorptionIndex,
   ACID_GRID_NM,
+  ACID_UV_DECAY_BOUND_NM,
   ACID_UV_DECAY_NM,
+  ACID_UV_FILE,
   ACID_UV_K365,
+  acidUvAbsorberFileFrom,
   acidUvAbsorberK,
   ammoniaLiquidLevelled,
   AR_DISPERSION,
@@ -727,35 +730,68 @@ describe("resampling on a file's own grid and its ends (decision-r08-t5d ruling 
 });
 
 describe("acid_uv_absorber's k_UA (science-r08-unowned-absorbers; decision-r08-t5d ruling 4)", () => {
-  it("holds the a-priori k₃₆₅, 1.2 × 10⁻³", () => {
-    expect(ACID_UV_K365).toBe(1.2e-3);
+  /** R08.T5.e's fit record. */
+  const fit: unknown = JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL("../renderer/src/view/atmosphere/reference/venus-uv-fit.json", import.meta.url),
+      ),
+      "utf8",
+    ),
+  );
+  const fitted = (field: string): unknown =>
+    typeof fit === "object" && fit !== null ? Reflect.get(fit, field) : undefined;
+
+  it("holds k₃₆₅ and L at R08.T5.e's fit, its record's", () => {
+    expect([ACID_UV_K365, ACID_UV_DECAY_NM]).toEqual([fitted("k365"), fitted("decayNm")]);
   });
 
-  it("holds L at Spacek et al.'s bound, 26.9 nm", () => {
+  it("holds Spacek et al.'s bound, 26.9 nm, which the fitted L passes", () => {
     // Their absorption coefficients, 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm, bound
     // k = αλ ÷ 4π's decay length by 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)); the ruling's
     // shorthand, ln(1278 ÷ 54), would give 25.3 nm.
-    expect(ACID_UV_DECAY_NM).toBeCloseTo(80 / Math.log((1278 * 375) / (54 * 455)), 1);
+    expect(ACID_UV_DECAY_BOUND_NM).toBeCloseTo(80 / Math.log((1278 * 375) / (54 * 455)), 1);
+    expect(ACID_UV_DECAY_NM).toBeGreaterThan(ACID_UV_DECAY_BOUND_NM);
   });
 
   it("is k₃₆₅ at 365 nm", () => {
-    expect(acidUvAbsorberK(365)).toBe(1.2e-3);
+    expect(acidUvAbsorberK(365)).toBe(ACID_UV_K365);
   });
 
   it("decays to its value at 500 nm", () => {
-    expect(acidUvAbsorberK(500)).toBeCloseTo(1.2e-3 * Math.exp(-135 / 26.9), 18);
+    expect(acidUvAbsorberK(500)).toBeCloseTo(ACID_UV_K365 * Math.exp(-135 / ACID_UV_DECAY_NM), 18);
   });
 
   it("joins its taper continuously at 500 nm", () => {
-    expect(acidUvAbsorberK(500 + 1e-9)).toBeCloseTo(acidUvAbsorberK(500), 15);
+    // A step of 10⁻⁹ nm moves k by its slopes' 10⁻⁹ ÷ L and 10⁻⁹ ÷ 50 of itself, no jump.
+    const at500 = acidUvAbsorberK(500);
+    expect(Math.abs(acidUvAbsorberK(500 + 1e-9) - at500)).toBeLessThan(1e-9 * at500);
   });
 
   it("is half the decay at 525 nm, midway down the taper", () => {
-    expect(acidUvAbsorberK(525)).toBeCloseTo(0.5 * 1.2e-3 * Math.exp(-160 / 26.9), 18);
+    expect(acidUvAbsorberK(525)).toBeCloseTo(
+      0.5 * ACID_UV_K365 * Math.exp(-160 / ACID_UV_DECAY_NM),
+      18,
+    );
+  });
+
+  it("takes a trial's parameters where a fit gives them", () => {
+    expect(acidUvAbsorberK(400, { k365: 2e-3, decayNm: 20 })).toBeCloseTo(
+      2e-3 * Math.exp(-35 / 20),
+      18,
+    );
+  });
+
+  it("writes the committed file from the committed 75 wt% file, as from the fetched source", () => {
+    const committedFile = (name: string): unknown =>
+      JSON.parse(readFileSync(fileURLToPath(new URL(name, MATERIALS)), "utf8"));
+    expect(acidUvAbsorberFileFrom(committedFile("sulphuric-acid-75.json"))).toEqual(
+      committedFile(ACID_UV_FILE),
+    );
   });
 
   it("is exactly 0 from 550 nm", () => {
-    expect([550, 551, 780].map(acidUvAbsorberK)).toEqual([0, 0, 0]);
+    expect([550, 551, 780].map((nm) => acidUvAbsorberK(nm))).toEqual([0, 0, 0]);
   });
 
   it("is the committed file's k less the 75 wt% file's, to six figures, and adds nothing to n", () => {

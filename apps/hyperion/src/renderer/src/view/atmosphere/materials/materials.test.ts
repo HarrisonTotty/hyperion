@@ -203,7 +203,8 @@ function absorberK(nm: number): number {
   if (nm >= 550) {
     return 0;
   }
-  const decay = 1.2e-3 * Math.exp(-(nm - 365) / 26.9);
+  // R08.T5.e's fit: k₃₆₅ 1.49 × 10⁻³ and L 47.6 nm (the ruling's a priori 1.2 × 10⁻³ and 26.9 nm).
+  const decay = 1.49e-3 * Math.exp(-(nm - 365) / 47.6);
   return nm > 500 ? (decay * (550 - nm)) / 50 : decay;
 }
 
@@ -1118,7 +1119,7 @@ describe("acid_uv_absorber, Venus's empirical ultraviolet absorber (decision-r08
       "standIn",
     ]);
     expect(absorber.standIn).toBe(
-      "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's albedo spectrum and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
+      "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's 365 nm albedo and visible colour and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
     );
   });
 

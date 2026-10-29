@@ -857,6 +857,25 @@ export function modeOptics(
   mu: Float64Array = PHASE_TABLE_MU,
 ): ModeOptics {
   const material = resolveModeMaterial(mode);
+  return modeOpticsWithIndex(mode, indexAt(material, wavelengthNm), wavelengthNm, mu);
+}
+
+/**
+ * A mode's optics at one wavelength as {@link modeOptics} gives them, but at `index` in place of its
+ * material's: for a fit that varies a material's index (plan R08, R08.T5.e's ultraviolet absorber),
+ * the mode's shape and provenance still its material's.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm.
+ * @param mu - The cosines to give the matrix at; the phase tables' by default.
+ * @throws RangeError as {@link modeOptics} does but for the wavelength's range.
+ */
+export function modeOpticsWithIndex(
+  mode: AerosolMode,
+  index: ComplexIndex,
+  wavelengthNm: number,
+  mu: Float64Array = PHASE_TABLE_MU,
+): ModeOptics {
+  const material = resolveModeMaterial(mode);
   const shape = modeShape(mode, material);
   let keepsMatrix: boolean;
   switch (shape) {
@@ -871,7 +890,6 @@ export function modeOptics(
     case "aggregate":
       throw new RangeError(`a mode of ${mode.material} aggregates takes aggregateOptics, not Mie`);
   }
-  const index = indexAt(material, wavelengthNm);
   const optics = sphereModeOptics(mode.sizes, index, wavelengthNm, keepsMatrix ? mu : NO_ANGLES);
   return {
     wavelengthNm: optics.wavelengthNm,

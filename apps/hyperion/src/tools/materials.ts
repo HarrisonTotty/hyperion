@@ -996,44 +996,117 @@ export const FETCHED_T5K = "2026-10-16";
 export const FETCHED_T5J = "2026-10-19";
 
 /**
- * The a-priori k of Venus's ultraviolet absorber at 365 nm, k₃₆₅: the ruled value
- * (science-r08-unowned-absorbers, adopted; decision-r08-t5d), not derived here. R08.T5.e refits it
- * to Venus's 365 nm albedo. For scale, Spacek et al.'s §2.1 asks k ≈ 0.003 of mode-2 droplets at
- * 365 nm (the preprint below), 2.5 times this.
+ * The k of Venus's ultraviolet absorber at 365 nm, k₃₆₅: R08.T5.e's fit to Venus's 365 nm geometric
+ * albedo, 0.36 (Y. J. Lee et al., AJ 158 (2019) 126: about 0.33 in 2011 and 0.40 in 2015–2017), on
+ * the reference tracer's plane-parallel `venus-92bar` deck (`reference/venus-uv-fit.json`'s record,
+ * every trial in it; the fitted p(365) 0.364 ± 0.005), to three figures. The ruling's a-priori value
+ * was 1.2 × 10⁻³ (science-r08-unowned-absorbers). For scale, Spacek et al.'s §2.1 asks k ≈ 0.003 of
+ * mode-2 droplets at 365 nm (the preprint below), twice this.
  */
-export const ACID_UV_K365 = 1.2e-3;
+export const ACID_UV_K365 = 1.49e-3;
 
 /**
- * The a-priori decay length of Venus's ultraviolet absorber, L, nm (science-r08-unowned-absorbers,
- * ruled): the bound from J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, Astrobiology 26
- * (2026) 727–739, DOI 10.1177/15311074261477502, its values read from the preprint,
- * arXiv:2505.00880v3 (CC BY 4.0), whose decadic absorption coefficients (a = α ÷ ln 10, its §2.1)
- * are 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm. In k = ln(10) aλ ÷ 4π that is a fall by
- * (1278 × 375) ÷ (54 × 455) = 19.51 over 80 nm, ln 10 cancelling, so L ≤ 80 nm ÷ ln 19.51 =
- * 26.9 nm (the ruling's shorthand 80 nm ÷ ln(1278 ÷ 54), 25.3 nm, leaves out λ). R08.T5.e refits
- * it to Venus's g′ ÷ r′ colour.
+ * The decay length of Venus's ultraviolet absorber, L, nm: R08.T5.e's fit to Venus's g′ ÷ r′
+ * geometric-albedo ratio, 0.664 ÷ 0.712 = 0.933 (A. Mallama, B. Krobusek and H. Pavlov, Icarus 282
+ * (2017) 19, Table 7), at the fitted {@link ACID_UV_K365} on the same deck (`venus-uv-fit.json`;
+ * the fitted ratio 0.936 ± 0.022, its noise the fit's limit), to three figures. It lies past the
+ * ruling's a-priori value, the bound {@link ACID_UV_DECAY_BOUND_NM}, a recorded deviation (R08's
+ * records): the deck needs more absorption at g′ than the bulk liquid's decline allows.
  */
-export const ACID_UV_DECAY_NM = 26.9;
+export const ACID_UV_DECAY_NM = 47.6;
+
+/**
+ * Spacek et al.'s bound on the decay length, L ≤ 26.9 nm (science-r08-unowned-absorbers, ruled):
+ * from J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, Astrobiology 26 (2026) 727–739, DOI
+ * 10.1177/15311074261477502, its values read from the preprint, arXiv:2505.00880v3 (CC BY 4.0),
+ * whose decadic absorption coefficients (a = α ÷ ln 10, its §2.1) are 1278 cm⁻¹ at 375 nm and
+ * under 54 cm⁻¹ at 455 nm. In k = ln(10) aλ ÷ 4π that is a fall by (1278 × 375) ÷ (54 × 455) =
+ * 19.51 over 80 nm, ln 10 cancelling, so L ≤ 80 nm ÷ ln 19.51 = 26.9 nm (the ruling's shorthand
+ * 80 nm ÷ ln(1278 ÷ 54), 25.3 nm, leaves out λ), an upper bound since 54 cm⁻¹ is one. The ruling's
+ * a-priori L.
+ */
+export const ACID_UV_DECAY_BOUND_NM = 26.9;
+
+/** The absorber's two parameters: k₃₆₅ and its decay length L, nm. */
+export interface AcidUvAbsorber {
+  readonly k365: number;
+  readonly decayNm: number;
+}
+
+/** The absorber's parameters in force: {@link ACID_UV_K365} and {@link ACID_UV_DECAY_NM}. */
+export const ACID_UV_ABSORBER: AcidUvAbsorber = { k365: ACID_UV_K365, decayNm: ACID_UV_DECAY_NM };
 
 /**
  * The absorber's k, k_UA, at a wavelength, nm: k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times
  * (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that the material's κ_ext and ω
  * at 550 nm are H₂SO₄'s (decision-r08-t5d ruling 4).
+ *
+ * @param absorber - The parameters: those in force by default, a fit's trial otherwise (R08.T5.e).
  */
-export function acidUvAbsorberK(wavelengthNm: number): number {
+export function acidUvAbsorberK(
+  wavelengthNm: number,
+  absorber: AcidUvAbsorber = ACID_UV_ABSORBER,
+): number {
   if (wavelengthNm >= 550) {
     return 0;
   }
-  const decay = ACID_UV_K365 * Math.exp(-(wavelengthNm - 365) / ACID_UV_DECAY_NM);
+  const decay = absorber.k365 * Math.exp(-(wavelengthNm - 365) / absorber.decayNm);
   return wavelengthNm > 500 ? (decay * (550 - wavelengthNm)) / 50 : decay;
+}
+
+/**
+ * `acid_uv_absorber`'s k from the 75 wt% acid's on its grid: k = rounded(k_H₂SO₄ + k_UA), the
+ * file's six figures.
+ *
+ * @param absorber - As {@link acidUvAbsorberK}'s.
+ */
+export function acidUvAbsorberIndexK(
+  acidK: ReadonlyArray<number>,
+  grid: ReadonlyArray<number>,
+  absorber: AcidUvAbsorber = ACID_UV_ABSORBER,
+): number[] {
+  return acidK.map((k, i) => rounded(k + acidUvAbsorberK(grid[i] ?? Number.NaN, absorber)));
 }
 
 /** `acid_uv_absorber`'s index from the 75 wt% acid's: n unchanged, k = rounded(k_H₂SO₄ + k_UA). */
 function addAcidUvAbsorber(acid: ReducedIndex, grid: ReadonlyArray<number>): ReducedIndex {
-  return {
-    n: acid.n,
-    k: acid.k.map((k, i) => rounded(k + acidUvAbsorberK(grid[i] ?? Number.NaN))),
-  };
+  return { n: acid.n, k: acidUvAbsorberIndexK(acid.k, grid) };
+}
+
+/** `acid_uv_absorber`'s file's name. */
+export const ACID_UV_FILE = "sulphuric-acid-uv-absorber.json";
+
+/** A JSON array of numbers, or a thrown error naming the field. */
+function numbersIn(raw: object, field: string): number[] {
+  const value: unknown = Reflect.get(raw, field);
+  if (!Array.isArray(value) || !value.every((v) => typeof v === "number")) {
+    throw new Error(`the 75 wt% file's ${field} is an array of numbers`);
+  }
+  return value;
+}
+
+/**
+ * `acid_uv_absorber`'s file from the committed 75 wt% acid's (R08.T5.e): its header as the tool
+ * states it, the 75 wt% file's grid and n, and k = rounded(k_H₂SO₄ + k_UA), the very file
+ * {@link addAcidUvAbsorber} makes from the fetched source, since the 75 wt% file holds that source's
+ * reduction rounded as the tool rounds it.
+ *
+ * @throws Error for a file that is not the 75 wt% acid's on the acid grid.
+ */
+export function acidUvAbsorberFileFrom(raw: unknown): MaterialFile {
+  if (typeof raw !== "object" || raw === null || Reflect.get(raw, "variant") !== "75wt%") {
+    throw new Error("the acid's file is the 75 wt% acid's");
+  }
+  const grid = numbersIn(raw, "wavelengthsNm");
+  if (grid.length !== ACID_GRID_NM.length || grid.some((nm, i) => nm !== ACID_GRID_NM[i])) {
+    throw new Error("the 75 wt% file is on the acid grid, 360–780 nm");
+  }
+  const spec = FETCHED_MATERIALS.find((m) => m.file === ACID_UV_FILE);
+  if (spec === undefined) {
+    throw new Error(`no fetched spec for ${ACID_UV_FILE}`);
+  }
+  const { n, k } = addAcidUvAbsorber({ n: numbersIn(raw, "n"), k: numbersIn(raw, "k") }, grid);
+  return { ...spec.header, wavelengthsNm: ACID_GRID_NM, n, k };
 }
 
 /**
@@ -1816,16 +1889,16 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       shape: "sphere",
       provenance: "standIn",
       paper:
-        'K. F. Palmer and D. Williams, "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14 (1975) 208–219, DOI 10.1364/AO.14.000208, for n and the acid\'s own k; for the absorber\'s a-priori decay length, J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, "A model of UV–blue absorbance in bulk liquid of Venusian cloud aerosols is consistent with efficient organic absorbers at high concentrations", Astrobiology 26 (2026) 727–739, DOI 10.1177/15311074261477502, its values read from the preprint, arXiv:2505.00880v3 (CC BY 4.0)',
+        "K. F. Palmer and D. Williams, \"Optical constants of sulfuric acid; application to the clouds of Venus?\", Appl. Opt. 14 (1975) 208–219, DOI 10.1364/AO.14.000208, for n and the acid's own k; for the absorber's a-priori decay length, J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, \"A model of UV–blue absorbance in bulk liquid of Venusian cloud aerosols is consistent with efficient organic absorbers at high concentrations\", Astrobiology 26 (2026) 727–739, DOI 10.1177/15311074261477502, its values read from the preprint, arXiv:2505.00880v3 (CC BY 4.0); for R08.T5.e's fit's targets, Venus's 365 nm geometric albedo, Y. J. Lee et al., AJ 158 (2019) 126, and its g′ and r′ geometric albedos, A. Mallama, B. Krobusek and H. Pavlov, Icarus 282 (2017) 19, Table 7",
       source: fetchedSource(
         "the Aerosol Refractive Index Archive (ARIA), University of Oxford, H2SO4_75%_300K_R_Palmer_1975.ri, the 75 wt% file's source",
         "https://eodg.atm.ox.ac.uk/ARIA/data_files/Acids/Sulphuric/70%25_to_79%25/Sulphuric_acid_75%25_300K_(Palmer_and_Williams_1975)/original/H2SO4_75%25_300K_R_Palmer_1975.ri",
         "ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe",
       ),
       licence: NO_TERMS,
-      reduction: `the 75 wt% file's own reduction (${standardReductionOnto(ACID_GRID_NM)}, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = ${ACID_UV_K365} and L = ${ACID_UV_DECAY_NM} nm are the a-priori values (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), Spacek et al.'s decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling; k₃₆₅ is the ruling's), which R08.T5.e refits to Venus's 365 nm albedo and g′ ÷ r′ colour. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry`,
+      reduction: `the 75 wt% file's own reduction (${standardReductionOnto(ACID_GRID_NM)}, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = ${ACID_UV_K365} and L = ${ACID_UV_DECAY_NM} nm are R08.T5.e's fit on the reference tracer's plane-parallel Venus deck, k₃₆₅ to Venus's 365 nm geometric albedo, 0.36 (Lee et al. 2019), and L to its g′ ÷ r′ albedo ratio, 0.933 (Mallama et al. 2017, Table 7), from the ruling's a-priori 1.2 × 10⁻³ and ${ACID_UV_DECAY_BOUND_NM} nm, the latter Spacek et al.'s bound (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), their decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling), which the fitted L passes. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry`,
       standIn:
-        "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's albedo spectrum and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
+        "an empirical absorber, droplets that carry an unidentified ultraviolet absorber whose k is fitted to Venus's 365 nm albedo and visible colour and whose candidates are FeCl3, S2O, OSSO, Sx and organics",
       fit: null,
     },
   },
@@ -6299,12 +6372,18 @@ export function sourceOptions(): ReadonlyArray<SourceInput> {
 
 /**
  * The command line: `--out <dir>` and one `--<option> <path>` per fetched source (the options of
- * {@link sourceOptions}). Writes every material file into the directory. Returns the exit code.
+ * {@link sourceOptions}). Writes every material file into the directory, or with `--only <file>,…`
+ * the files named, their sources alone asked for, or with `--acid-uv-from <sulphuric-acid-75.json>`
+ * `acid_uv_absorber`'s file alone from the committed 75 wt% file (R08.T5.e). Returns the exit code.
  */
 export function main(args: readonly string[]): number {
   try {
     const inputs = sourceOptions();
-    const options: Record<string, { readonly type: "string" }> = { out: { type: "string" } };
+    const options: Record<string, { readonly type: "string" }> = {
+      out: { type: "string" },
+      only: { type: "string" },
+      "acid-uv-from": { type: "string" },
+    };
     for (const input of inputs) {
       options[input.option] = { type: "string" };
     }
@@ -6316,9 +6395,23 @@ export function main(args: readonly string[]): number {
     const out = values["out"];
     if (typeof out !== "string") {
       throw new Error(
-        `usage: materials --out <dir> ${inputs.map((s) => `--${s.option} <path>`).join(" ")}`,
+        `usage: materials --out <dir> [--acid-uv-from <path> | [--only <file>,…] ${inputs.map((s) => `--${s.option} <path>`).join(" ")}]`,
       );
     }
+    // `--acid-uv-from`: `acid_uv_absorber`'s file alone, from the committed 75 wt% file's reduction
+    // (R08.T5.e's refit, with no fetched source).
+    const acidFrom = values["acid-uv-from"];
+    if (typeof acidFrom === "string") {
+      mkdirSync(out, { recursive: true });
+      const raw: unknown = JSON.parse(readFileSync(acidFrom, "utf8"));
+      const file = acidUvAbsorberFileFrom(raw);
+      writeFileSync(join(out, ACID_UV_FILE), `${JSON.stringify(file, null, 2)}\n`);
+      return 0;
+    }
+    // `--only`: the files named, comma-separated, and only their sources asked for.
+    const onlyValue = values["only"];
+    const only = typeof onlyValue === "string" ? new Set(onlyValue.split(",")) : undefined;
+    const wanted = (file: string): boolean => only === undefined || only.has(file);
     const textOf = (input: SourceInput): string => {
       const path = values[input.option];
       if (typeof path !== "string") {
@@ -6327,11 +6420,11 @@ export function main(args: readonly string[]): number {
       return readChecked(path, input.sha256);
     };
     mkdirSync(out, { recursive: true });
-    for (const spec of FETCHED_MATERIALS) {
+    for (const spec of FETCHED_MATERIALS.filter((m) => wanted(m.file))) {
       const file = reduceSource(spec, textOf(spec));
       writeFileSync(join(out, spec.file), `${JSON.stringify(file, null, 2)}\n`);
     }
-    for (const spec of COMBINED_MATERIALS) {
+    for (const spec of COMBINED_MATERIALS.filter((m) => wanted(m.file))) {
       const { n, k } = spec.reduce(spec.inputs.map(textOf));
       const file: MaterialFile = { ...spec.header, wavelengthsNm: MATERIAL_GRID_NM, n, k };
       writeFileSync(join(out, spec.file), `${JSON.stringify(file, null, 2)}\n`);
@@ -6341,7 +6434,9 @@ export function main(args: readonly string[]): number {
       if (name === undefined) {
         throw new Error(`no file name for the derived material ${file.key}, ${file.phase}`);
       }
-      writeFileSync(join(out, name), `${JSON.stringify(file, null, 2)}\n`);
+      if (wanted(name)) {
+        writeFileSync(join(out, name), `${JSON.stringify(file, null, 2)}\n`);
+      }
     }
     return 0;
   } catch (error: unknown) {
