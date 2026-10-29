@@ -4399,7 +4399,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   deferred "no shared position draw"); `ages.rs` (`AgeDistribution::max_pdf_between`);
   `placement/record.rs` (`SystemOrigin::CatalogueSystem(ClassId)`) and every match on the origin;
   `supernova.rs` (v_fast, below); `rng/tags.rs` (five `System` tags under `class.core_collapse.`:
-  `site`, `mass`, `metallicity`, `death`, `velocity`); `hyperion-base`'s `rng/domain_tag.rs` (below); the
+  `site`, `mass`, `metallicity`, `death`, `velocity`, appended after `class.cell` at the end of
+  `domain_tags!`, and the registry's lint attribute, below); the
   server's system cache; `tests/source_horizon.rs` (the class's row, P12.T0's rule).
   - _Signatures_ (what P09.T43, T36.a, T37 and P11.T8 consume). In `catalogue_classes::core_collapse`:
     `CoreCollapseProcess::new(&Galaxy)`, `components() -> &[YoungComponent]` (`id`, `share`,
@@ -4414,8 +4415,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `ClassProcess::system(&self, &Galaxy, &CatalogueMember<Self::Entry>) -> CatalogueSystem`;
     `CatalogueCellKey::position_from_words([u64; 3]) -> GalacticPosition`;
     `AgeDistribution::max_pdf_between(Years, Years) -> f64`;
-    `TraceMotionError::CatalogueMotionNotTraced(SystemId)`;
-    `hyperion_base::rng::assert_tag_names<const N: usize>(&[&str; N])`, which took `&[&str]`.
+    `TraceMotionError::CatalogueMotionNotTraced(SystemId)`.
   - _The process_ (module documentation). Sites follow the young field's layer-E density: every
     component with layer-E systems younger than `RECENT_DEATH_AGES` (100 Myr), at 23 the young thin
     disc and the nuclear disc's two components; the old thin disc's youngest sub-disc starts at
@@ -4491,11 +4491,13 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     before P09.T35, so no output moves. T17's marks test asserts the new rule and a regression case
     (v = −0.9 × kick). This supersedes "P09.T17 as built"'s design point (a), |v + kick|;
     `of_type_ia`'s bound, |v| + the survivor's speed, is unchanged.
-  - _The registry's const assertion._ `hyperion-base`'s `assert_tag_names` re-hashed every earlier
-    name in its inner loop; with five more tags the sim's registry passed rustc's
-    `long_running_const_eval` limit (a compile error). It now hashes each name once into an array
-    (`const N`, the macro's literal) and compares names only on equal hashes; same messages, same
-    `compile_fail` doctests. A base change, so the gate's plan gains the surface module and vitest.
+  - _The registry's const assertion._ With the five tags the sim's registry passes rustc's
+    deny-by-default `long_running_const_eval` (the macro's name check is quadratic), as P10.T7.a's
+    one tag did on integration. `rng/tags.rs` carries P10.T7.a's module-level
+    `#![expect(long_running_const_eval, …)]`, with its reason string, as main asked (2026-10-29),
+    so the merge is trivial; the real fix in `hyperion-base`'s `assert_tag_names`, comparing stored
+    hashes, is queued separately. The lane's first commit changed `assert_tag_names` itself, and
+    its fix commit takes that back.
   - _Figures (pod, 4 vCPU, opt-level 2)._ Fixture (seed `0x0933_0000_6363_6f6c`): layer-E share
     0.00946; deaths per system over the 3.43 Myr interval 0.0345 (young disc) and 1.71 × 10⁻⁴
     (nuclear disc); 54 entries in the 21 sample cells (73 deaths without a shell, 229 before their
