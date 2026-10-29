@@ -41,10 +41,12 @@ export type SpikeNormals = "double" | "mesh";
 export type SpikeSwitch = "on" | "off";
 
 /**
- * The world the spike flies (`--world`, plan R10, R10.T14.c): R05's test planet, or `TERRAIN TEST`'s
- * moon through the terrain session; the renderer's `SpikeWorldName` is this type.
+ * The world the spike flies (`--world`, plan R10, R10.T14.c): R05's test planet, `TERRAIN TEST`'s
+ * moon through the terrain session, or a generated body the server serves (`served`, plan R10,
+ * R10.T15.b), named by the launch's `universe` and `body`; the renderer's `SpikeWorldName` is this
+ * type.
  */
-export type SpikeWorldName = "test-planet" | "terrain-test";
+export type SpikeWorldName = "test-planet" | "terrain-test" | "served";
 
 /**
  * The style the spike's main view draws in over a generated world (`--style`, R10.T14.c), through
@@ -93,6 +95,21 @@ export interface SpikeLaunch {
    * file records, are as they were before the option.
    */
   readonly sizes?: "on";
+  /**
+   * The served world's universe and body (`--universe`, `--body`; plan R10, R10.T15.b): present
+   * exactly where `world` is `served`, and absent on every other launch, whose options and results
+   * file are as before.
+   */
+  readonly served?: ServedWorldNames;
+}
+
+/**
+ * A served world as a launch names it (plan R10, R10.T15.b): the universe's ID and the body's ID,
+ * in their wire forms.
+ */
+export interface ServedWorldNames {
+  readonly universe: string;
+  readonly body: string;
 }
 
 /** Where a spike run's results file and its summary were written. */
@@ -950,6 +967,13 @@ export interface ViewsCheckLaunch {
    * run serve none.
    */
   readonly fixture: ViewsCheckTerrainFixture;
+  /**
+   * The hand-over check's served world (`--universe`, `--body`; plan R10, R10.T15.b): present only
+   * on a `--terrain --handover` launch that names one, whose looks are then made on the body the
+   * server serves in `TERRAIN TEST`'s place (its `fixture` `terrain-test`, unread), and absent on
+   * every other launch.
+   */
+  readonly served?: ServedWorldNames;
 }
 
 /**

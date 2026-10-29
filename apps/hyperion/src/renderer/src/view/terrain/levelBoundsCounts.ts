@@ -202,9 +202,13 @@ export const COUNT_BOXES: ReadonlyArray<CountBoxes> = ["unbaked", "flat"];
 /** Boxes baked flat at ±1 m, so that τ alone sets the depth. */
 const FLAT: HeightRangeLookup = { heightRangeM: () => [-1, 1] };
 
-/** The presented view every style is counted on: 1920 × 1080, 60° across (Design note 23). */
+/** The presented view every style is counted on: 1920 × 1080 (Design note 23). */
 export const COUNT_VIEWPORT = { widthPx: 1920, heightPx: 1080 } as const;
+
+/** The counted view's horizontal field, degrees: 60°, as T4.b's record took it. */
 export const COUNT_FOV_X_DEG = 60;
+
+/** {@link COUNT_FOV_X_DEG} in radians, π ÷ 3, as `levelBounds.test.ts` writes it. */
 export const COUNT_FOV_X_RAD = Math.PI / 3;
 
 /** The most patches the guard selection holds, a pose's count capped where it binds. */
@@ -373,8 +377,10 @@ export function savingOf(hard: CellFigures, statistical: CellFigures): Saving {
   };
 }
 
-/** The record's schema name and version; the version bumped with any change to its shape. */
+/** The record's schema name. */
 export const LEVEL_COUNTS_SCHEMA = "hyperion.terrain.level-counts";
+
+/** The record's schema version, bumped with any change to its shape or to what a field means. */
 export const LEVEL_COUNTS_VERSION = 1;
 
 /** A world's T4.a figures, as the record states them beside its cells. */

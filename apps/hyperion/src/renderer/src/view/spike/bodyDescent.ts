@@ -42,7 +42,12 @@
  *   calibrated table alone, which is the hard one.
  */
 
-import type { BodyIdHex, DetailSeedHex, SurfaceHeaderDto } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  DetailSeedHex,
+  RecordSectionDto,
+  SurfaceHeaderDto,
+} from "@hyperion/protocol";
 
 import { scale, vec3 } from "../../geometry/vec3";
 import type { ViewId } from "../camera/state";
@@ -228,6 +233,23 @@ export class NoLandingSite extends Error {
   }
 }
 
+/**
+ * The server serves no surface for a served world's body (plan R10, R10.T15.b): its field is
+ * answered `not_modelled`, naming the record section the coarse pass needs, as every generated
+ * body's is behind the serve gate (`GENERATED_SURFACES_FROM`, generator version 24). Thrown, as the
+ * measurement's other refusals are ({@link NoLandingSite}, `DescentRefused`), out of its poll of
+ * the session, and the spike says so and stops.
+ */
+export class FieldNotServed extends Error {
+  readonly section: RecordSectionDto;
+
+  constructor(body: BodyIdHex, section: RecordSectionDto) {
+    super(`the server serves no surface for ${body}: its field is not modelled (${section})`);
+    this.name = "FieldNotServed";
+    this.section = section;
+  }
+}
+
 /** `TerrainLayers.surveyMask`'s byte for a surveyed vertex (Design note 12). */
 export const SURVEYED_VERTEX = 255;
 
@@ -359,6 +381,10 @@ function heldFieldOf(
   revision: number,
 ): Polled<HeldBodyField> {
   const survey = session.survey(body);
+  const notModelled = survey?.status.notModelled ?? null;
+  if (notModelled !== null) {
+    throw new FieldNotServed(body, notModelled);
+  }
   const failure = survey?.status.failure ?? null;
   if (failure !== null) {
     throw new Error(
@@ -396,8 +422,9 @@ function heldFieldOf(
  * seed and a settled level table, noting the measuring view's report for `options.viewId` first
  * and stepping the session between looks.
  *
- * @throws Error (a rejection) where the field fails, or is not held within `options.timeoutMs`,
- *   naming what it lacked, or with the abort's reason once `options.signal` aborts.
+ * @throws {@link FieldNotServed} where the server answers the field `not_modelled`, and Error (a
+ *   rejection) where the field fails, or is not held within `options.timeoutMs`, naming what it
+ *   lacked, or with the abort's reason once `options.signal` aborts.
  */
 export async function holdBodyField(
   session: BodyDescentSession,
@@ -964,6 +991,38 @@ export const TERRAIN_TEST_REVISION = 2;
 export const FIELD_HOLD_TIMEOUT_MS = 120_000;
 
 /**
+ * The coverage revision the spike waits for over a served world (R10.T15.b): 1, any survey, which
+ * `just place-ship --survey` records before the client starts (`descentSpike.sh`).
+ */
+export const SERVED_REVISION = 1;
+
+/**
+ * How long the spike waits for a served world's field, ms: ten minutes, since the server computes
+ * the body's coarse field before its first answer, about a minute natively for an Earth at level 8
+ * (R09.T16.a, 57–60 s), and sends it whole, some 15 MB for an Earth fully surveyed (R10.T15.b's
+ * transfer check at generator version 23 under the scratch gate: 15,140,689 bytes), before the
+ * workers' level table settles; the room is for a loaded machine. `main/index.ts` keeps its own
+ * copy for the watchdog.
+ */
+export const SERVED_FIELD_HOLD_TIMEOUT_MS = 600_000;
+
+/** What the spike waits for of `world`'s field: the revision, and how long. */
+function fieldWaitOf(world: SpikeWorld): { readonly revision: number; readonly timeoutMs: number } {
+  let wait: { readonly revision: number; readonly timeoutMs: number };
+  switch (world.name) {
+    case "terrain-test":
+      wait = { revision: TERRAIN_TEST_REVISION, timeoutMs: FIELD_HOLD_TIMEOUT_MS };
+      break;
+    case "served":
+      wait = { revision: SERVED_REVISION, timeoutMs: SERVED_FIELD_HOLD_TIMEOUT_MS };
+      break;
+    case "test-planet":
+      throw new Error("the test planet has no field: prepareDescent measures its terrain");
+  }
+  return wait;
+}
+
+/**
  * How long each attempt of the descent's measurement waits for its bakes, ms: ten minutes. The
  * measurement over `TERRAIN TEST` bakes about 1,600 patches, some 40 s on three workers (110 s on
  * one in-process worker in `bodyDescent.wasm.test.ts`); the room is for one worker (`--workers 1`)
@@ -981,11 +1040,13 @@ export type MeasureDescent = (
 
 /**
  * The spike's measurement of `seed`'s descent over `world` through `session` (R10.T14.c): its field
- * held at {@link TERRAIN_TEST_REVISION} ({@link holdBodyField}) for the spike's main view, then the
- * descent measured over it ({@link measureBodyDescent}), each within its timeout and stopped by
- * `signal`.
+ * held ({@link holdBodyField}) for the spike's main view, at {@link TERRAIN_TEST_REVISION} within
+ * {@link FIELD_HOLD_TIMEOUT_MS} over `TERRAIN TEST`, or at {@link SERVED_REVISION} within
+ * {@link SERVED_FIELD_HOLD_TIMEOUT_MS} over a served world (R10.T15.b), then the descent measured
+ * over it ({@link measureBodyDescent}), within its timeout, each stopped by `signal`.
  *
- * @throws As {@link holdBodyField} and {@link measureBodyDescent} do.
+ * @throws As {@link holdBodyField} and {@link measureBodyDescent} do, and Error over the test
+ *   planet, which has no field.
  */
 export async function measureWorldDescent(
   session: BodyDescentSession,
@@ -993,10 +1054,11 @@ export async function measureWorldDescent(
   seed: bigint,
   signal: AbortSignal,
 ): Promise<BodyDescent> {
+  const { revision, timeoutMs } = fieldWaitOf(world);
   await holdBodyField(session, world, {
     viewId: SPIKE_MAIN_VIEW_ID,
-    revision: TERRAIN_TEST_REVISION,
-    timeoutMs: FIELD_HOLD_TIMEOUT_MS,
+    revision,
+    timeoutMs,
     signal,
   });
   return measureBodyDescent(session, world, seed, {

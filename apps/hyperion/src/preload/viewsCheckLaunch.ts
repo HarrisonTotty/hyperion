@@ -5,11 +5,12 @@
  * As `spikeLaunch.ts` does for the descent spike's: the options ride in the renderer's own `argv`
  * as one extra switch, `--hyperion-views-check=<options>`, present only when the client was
  * launched with `--views-check`, and the preload gives `HyperionApi` its `viewsCheck` member only
- * then. Both sides of the hand-off use this module; it imports types only, so it is safe in either
- * bundle.
+ * then. Both sides of the hand-off use this module; it imports types and `spikeLaunch.ts`' ID
+ * reader only, which imports types alone, so it is safe in either bundle.
  */
 
 import type { ViewsCheckLaunch, ViewsCheckRunKind, ViewsCheckTerrainFixture } from "./api";
+import { readServedWorldNames } from "./spikeLaunch";
 
 export type { ViewsCheckLaunch, ViewsCheckRunKind, ViewsCheckTerrainFixture } from "./api";
 
@@ -43,13 +44,14 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
  * `value` as the check's options, or `null` if it is not one: every field present and of its type,
  * and the weathered fixture on a terrain run or its hand-over check alone (T20's run and the
  * atmosphere run, plan R08, R08.T10.b, serve no field, so their launches name `TERRAIN TEST`'s, the
- * default).
+ * default); a served world (plan R10, R10.T15.b), its universe's and body's IDs, only on a
+ * hand-over check of `TERRAIN TEST`'s own fixture.
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { setting, smoke, out } = value;
+  const { setting, smoke, out, served } = value;
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
   if (
@@ -62,7 +64,14 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   ) {
     return null;
   }
-  return { setting, smoke, out, run, fixture };
+  if (served === undefined) {
+    return { setting, smoke, out, run, fixture };
+  }
+  const names = readServedWorldNames(served);
+  if (names === null || run !== "handover" || fixture !== "terrain-test") {
+    return null;
+  }
+  return { setting, smoke, out, run, fixture, served: names };
 }
 
 /**

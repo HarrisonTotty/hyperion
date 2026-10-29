@@ -11,7 +11,23 @@ import {
 } from "../../../view/scenes/terrainScene";
 import { SCENE_OPTIONS } from "../viewRun";
 import { HANDOVER_APPROACH, HANDOVER_LOOKS, type HandoverLook } from "./handoverGeometry";
-import { handoverRangeAtM, HandoverScenes, terrainTestHandoverWorld } from "./handoverScenes";
+import {
+  coverageSurveyedCells,
+  handoverRangeAtM,
+  HandoverScenes,
+  servedHandoverWorld,
+  surveyMiddleOf,
+  terrainTestHandoverWorld,
+} from "./handoverScenes";
+import { moonLikeHeader } from "../../../test/coarseFieldFixtures";
+import { FIXTURE_EARTH } from "../../../test/planetaryFixture";
+import { sceneModelOf, stateNearEarth } from "../../../test/sceneFixture";
+import { TEST_HULL } from "../../../view/scene/hull";
+import { type ServedBody, servedBodyOf } from "../../../view/scene/servedBody";
+import { TERRAIN_HOST_DISCS } from "../../../view/scenes/terrainScene";
+import { CoverageView, fieldCellAt } from "../../../view/terrain/coverage";
+import { vertexDir } from "../../../view/terrain/cube";
+import type { TerrainRequests } from "../../../view/terrain/session";
 import { TerrainProbe } from "./terrainProbe";
 import { ViewsProbe } from "./viewsProbe";
 
@@ -72,6 +88,117 @@ describe("TERRAIN TEST's hand-over world", () => {
       6,
       48,
     ]);
+  });
+});
+
+/** The slice's Earth, served, from the ship's scene in its frame. */
+function servedEarth(): ServedBody {
+  const read = servedBodyOf(sceneModelOf(stateNearEarth()), "000000000000002a", FIXTURE_EARTH);
+  if (read.kind !== "served") {
+    throw new Error(`the slice's Earth is a served world, not ${read.gap}`);
+  }
+  return read.served;
+}
+
+/** A coverage at level 5 of the cells from `start` to `end`, surveyed. */
+function coverageOf(start: number, end: number): CoverageView {
+  const merged = CoverageView.empty(5).merged({ ranges: [{ start, end, resolution: 9 }] }, 1);
+  if (!merged.ok) {
+    throw new Error(merged.message);
+  }
+  return merged.coverage;
+}
+
+/** A link that answers nothing, which the world hands each look's fixture. */
+const LINK = {
+  requests: {
+    request: () => {
+      throw new Error("not asked");
+    },
+    requestBulk: () => {
+      throw new Error("not asked");
+    },
+  } satisfies TerrainRequests,
+  onSurface: () => () => undefined,
+};
+
+describe("a served world's hand-over world (R10.T15.b)", () => {
+  const served = servedEarth();
+  const header = moonLikeHeader(FIXTURE_EARTH);
+  const coverage = coverageOf(0, 1_024);
+  const world = servedHandoverWorld({
+    served,
+    hostDiscs: TERRAIN_HOST_DISCS,
+    header,
+    coverage,
+    link: LINK,
+  });
+
+  it("is the served body by its designation, its field's figure, relief, level and survey", () => {
+    expect(world.name).toBe(served.body.designation);
+    expect(world.body).toBe(FIXTURE_EARTH);
+    expect(world.figure).toEqual({
+      equatorialRadiusM: header.equatorial_radius_m,
+      polarRadiusM: header.polar_radius_m,
+    });
+    expect([world.reliefM, world.cellLevel, world.surveyedCells]).toEqual([
+      header.realised_relief_m,
+      5,
+      1_024,
+    ]);
+    expect(world.towardStarM).toBe(served.towardStarM);
+    expect(world.eyePointM).toBe(TEST_HULL.eyePointM);
+  });
+
+  it("draws each look's star at the origin and the body where the server's scene puts it", () => {
+    const made = new HandoverScenes(world, HANDOVER_APPROACH.full, PROVISIONAL_M);
+    const scene = made.sceneOptions[0]?.make().sceneAt(0);
+    const [star, body] = scene?.bodies ?? [];
+    expect(scene?.system).toBe(served.system);
+    expect([star?.id, star?.designation, star?.radiusM, star?.centreM]).toEqual([
+      served.star.id,
+      served.star.designation,
+      served.star.radiusM,
+      { x: 0, y: 0, z: 0 },
+    ]);
+    expect([body?.id, body?.kind, body?.parent, body?.hillRadiusM]).toEqual([
+      FIXTURE_EARTH,
+      "planet",
+      served.star.id,
+      served.hillRadiusM,
+    ]);
+    expect(body?.centreM).toEqual(scale(served.towardStarM, -1));
+    expect(body?.appearance?.photometry).toBe(served.appearance.photometry);
+    // Its session asks the server for the seed.
+    expect(body !== undefined && "detailSeed" in body).toBe(false);
+    expect(scene?.hostDiscs).toBe(TERRAIN_HOST_DISCS);
+  });
+
+  it("serves each look's terrain through the server's link, which no look closes", () => {
+    const fixture = world.fixture();
+    expect(fixture.universe).toBe(served.universe);
+    const link = fixture.open();
+    expect(link.requests).toBe(LINK.requests);
+    expect(link.onSurface).toBe(LINK.onSurface);
+    expect(() => {
+      link.close();
+    }).not.toThrow();
+  });
+
+  it("takes its survey's middle as its surveyed cells' mean direction", () => {
+    // One cell: the middle is its centre.
+    const cell = fieldCellAt(5, 300);
+    const [x, y, z] = vertexDir(cell, 32, 32);
+    const middle = surveyMiddleOf(coverageOf(300, 301));
+    expect([middle.x, middle.y, middle.z].map((each) => Number(each.toFixed(12)))).toEqual(
+      [x, y, z].map((each) => Number(each.toFixed(12))),
+    );
+  });
+
+  it("takes TERRAIN TEST's middle for a survey of the whole body, whose mean is nought", () => {
+    const whole = coverageOf(0, 6 * 4 ** 5);
+    expect(coverageSurveyedCells(whole)).toBe(6_144);
+    expect(surveyMiddleOf(whole)).toEqual(normalise({ x: 1, y: 1, z: 0.71 }));
   });
 });
 

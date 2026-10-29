@@ -17,12 +17,26 @@ import { stubCanvas } from "./test/RecordingContext2D";
 import { stubHyperionApi, TEST_GRAPHICS, TEST_SERVER_URL } from "./test/stubHyperionApi";
 import type { ViewsCheckApi } from "../../preload/api";
 import { statusLine } from "./test/statusLine";
+import { FIXTURE_EARTH } from "./test/planetaryFixture";
+import {
+  answerServedField,
+  answerServedScene,
+  answerServedSky,
+} from "./test/servedHandoverFixtures";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function answer(play: () => void): Promise<void> {
   await act(async () => {
     play();
     await Promise.resolve();
+  });
+}
+
+/** Plays the server's part, then lets every outcome it settles, and their effects, run on. */
+async function served(play: () => void): Promise<void> {
+  await act(async () => {
+    play();
+    await vi.advanceTimersByTimeAsync(0);
   });
 }
 
@@ -216,6 +230,76 @@ describe("App", () => {
       stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
       render(<App />);
       expect(lookButtons()).toEqual([null, null, null]);
+    });
+
+    it("are made on a served world, read from the server, on a hand-over launch naming one (R10.T15.b)", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const api = {
+        ...viewsCheckApi(),
+        launch: {
+          ...viewsCheckApi().launch,
+          run: "handover" as const,
+          served: { universe: "000000000000002a", body: FIXTURE_EARTH },
+        },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      const socket = FakeWebSocket.latest();
+      await served(() => {
+        socket.serverWelcomes();
+      });
+      // No look before the world is read.
+      expect(screen.queryByRole("button", { name: "HAND-OVER 30°" })).toBeNull();
+      await served(() => {
+        answerServedScene(socket);
+      });
+      await served(() => {
+        answerServedSky(socket);
+      });
+      await served(() => {
+        answerServedField(socket, FIXTURE_EARTH, 64);
+      });
+      for (const name of LOOK_SCENES) {
+        screen.getByRole("button", { name });
+      }
+      expect(api.end).not.toHaveBeenCalled();
+    });
+
+    it("ends a served hand-over launch failed where the server serves no surface (R10.T15.b)", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const api = {
+        ...viewsCheckApi(),
+        launch: {
+          ...viewsCheckApi().launch,
+          run: "handover" as const,
+          served: { universe: "000000000000002a", body: FIXTURE_EARTH },
+        },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      const socket = FakeWebSocket.latest();
+      await served(() => {
+        socket.serverWelcomes();
+      });
+      await served(() => {
+        answerServedScene(socket);
+      });
+      await served(() => {
+        answerServedSky(socket);
+      });
+      await served(() => {
+        socket.serverAnswers("surface_field", () => ({
+          kind: "surface_field",
+          state: "not_modelled",
+          section: "surface",
+        }));
+      });
+      expect(api.end).toHaveBeenCalledWith({
+        status: "fail",
+        reason: `the server serves no surface for ${FIXTURE_EARTH}: its field is not modelled (surface)`,
+      });
+      expect(screen.queryByRole("button", { name: "HAND-OVER 30°" })).toBeNull();
     });
 
     it("are offered after the kept scenes on a hand-over launch", () => {

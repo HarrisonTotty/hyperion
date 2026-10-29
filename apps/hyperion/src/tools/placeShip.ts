@@ -106,18 +106,19 @@ export const DEFAULT_BARYCENTRE_DISTANCE_AU = 1;
 /**
  * The distance from a body whose Hill radius the server does not state (its mass or a bound orbit
  * withheld or absent), au: 1.5 million km, where a Jupiter spans about 5° and an Earth about half a
- * degree. It is outside an Earth's entry ratio (1.017 of its Hill radius at pericentre) and far
- * outside an inner planet's, so a body whose Hill radius is known takes
+ * degree. It is outside an Earth's entry ratio (1.017 of its Hill radius at pericentre) and further
+ * outside the other inner planets', so a body whose Hill radius is known takes
  * {@link defaultBodyDistanceM} instead (plan R10, R10.T12's record).
  */
 export const DEFAULT_BODY_DISTANCE_AU = 0.01;
 
 /**
  * The share of a body's Hill radius at pericentre the ship stands at without `--distance`: half,
- * inside the ratio of distance to Hill radius at which a camera enters a body's frame, 0.9 (the
- * sim's `BODY_FRAME_ENTRY`, plan R02's Design note 6), with room for the body's eccentricity to
- * carry it no further than the band (plan R10, R10.T12's record: "the fix is a default of half the
- * target's pericentre Hill radius").
+ * well inside the ratio of distance to Hill radius at which a camera enters a body's frame, 0.9
+ * (the sim's `BODY_FRAME_ENTRY`, plan R02's Design note 6). The ship is held at rest in the body's
+ * frame and the Hill radius is the orbit's least, so it stays there; the margin is for a camera
+ * flown from it (plan R10, R10.T12's record: "the fix is a default of half the target's pericentre
+ * Hill radius").
  */
 export const DEFAULT_HILL_FRACTION = 0.5;
 
@@ -708,8 +709,8 @@ export function pericentreHillRadiusM(body: BodySummaryDto): number | null {
  * where the server states none.
  *
  * @throws Error where half the Hill radius is within the body's mean radius (a small moon deep in
- *   its planet's tide, such as Phobos, whose Hill radius is 1.5 of its own): no default stands
- *   outside the body and inside its entry ratio, so `--distance` must say.
+ *   its planet's tide, a Phobos): no default stands outside the body and inside its entry ratio, so
+ *   `--distance` must say.
  */
 export function defaultBodyDistanceM(body: BodySummaryDto): number {
   const hillRadiusM = pericentreHillRadiusM(body);

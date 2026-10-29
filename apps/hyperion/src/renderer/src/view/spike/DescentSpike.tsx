@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { StatusLine } from "../../components/StatusLine";
+import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { GroundSnapshot } from "../../displays/view/groundReadout";
 import { litLabelsOf } from "../../displays/view/photorealFrame";
 import { terrainLowerParts } from "../../displays/view/terrainPlate";
@@ -47,7 +47,7 @@ import {
 import type { Selection, SelectionInput } from "../terrain/select";
 import type { TestPlanetRidges } from "../terrain/workers/messages";
 import { type DrawnSurveyEdge, viewStrokesAt } from "../wireframe/drawList";
-import { type MeasureDescent, measureWorldDescent } from "./bodyDescent";
+import { FieldNotServed, type MeasureDescent, measureWorldDescent } from "./bodyDescent";
 import { spikeExposure } from "./litView";
 import {
   DEFAULT_SPIKE_WORKERS,
@@ -67,7 +67,8 @@ import { SPIKE_RETRY, spikeFaultLine } from "./spikeFaults";
 import { cameraElevationDeg, spikeScene } from "./spikeScene";
 import { surveySnapshotOf } from "./spikeSessionView";
 import { SIZES_READOUT_INTERVAL_MS, type SpikeSizes } from "./spikeSizes";
-import { type SpikeWorldName, spikeWorldNamed } from "./spikeWorld";
+import { SpikeHeader } from "./SpikeHeader";
+import { type ServedSpikeWorld, type SpikeWorldName, spikeWorldNamed } from "./spikeWorld";
 import { SurfaceQuery } from "./surfaceQuery";
 
 /** The shortest time between two changes of the readouts: 4 Hz, as the `VIEW`'s. */
@@ -97,7 +98,17 @@ export const MAIN_CANVAS_SELECTOR = 'canvas[data-spike-view="main"]';
 const NOT_MEASURED = `TERRAIN NOT MEASURED: surface query failed, ${SPIKE_RETRY}`;
 
 /** The status while the terrain is measured. */
-const MEASURING = "MEASURING TERRAIN: landing site and ground track";
+export const MEASURING = "MEASURING TERRAIN: landing site and ground track";
+
+/**
+ * The status where the server serves no surface for a served world's body, named by its
+ * designation (plan R10, R10.T15.b): its field answered `not_modelled`, as every generated body's is
+ * behind the serve gate, a data state rather than a failure; nothing on the client's side would
+ * help, so it names no remedy. The section goes to the log.
+ */
+export function surfaceNotServed(designation: string): string {
+  return `TERRAIN NOT MEASURED: the surface of ${designation} is not yet modelled at this generator version`;
+}
 
 /** The status where the script cannot clear the measured terrain (decision-r05-spike-ux.md). */
 export const DESCENT_REFUSED =
@@ -119,8 +130,12 @@ export interface DescentSpikeProps {
   readonly workers: number;
   /** The terrain variant (`--vertex-path`, `--normals`; T13.c); the setting's own if absent. */
   readonly variant?: TerrainVariant | undefined;
-  /** The world flown (`--world`, R10.T14.c): the test planet unless given. */
-  readonly world?: SpikeWorldName | undefined;
+  /**
+   * The world flown (`--world`, R10.T14.c): the test planet unless given, `TERRAIN TEST`'s by its
+   * name, or a served world as read from the server's scene, with its terrain session's source and
+   * its link's state (R10.T15.b).
+   */
+  readonly world?: Exclude<SpikeWorldName, "served"> | ServedSpikeWorld | undefined;
   /**
    * The style the main view draws in over a generated world (`--style`, R10.T14.c):
    * photorealistic unless given; the test planet's main view is the spike's own lit view.
@@ -155,7 +170,9 @@ type Preparation =
   | { readonly kind: "ready"; readonly prepared: PreparedDescent }
   | { readonly kind: "failed" }
   /** The terrain was measured, but the script cannot clear it (`DescentRefused`). */
-  | { readonly kind: "refused" };
+  | { readonly kind: "refused" }
+  /** The server serves no surface for the served world's body (`FieldNotServed`, R10.T15.b). */
+  | { readonly kind: "not served" };
 
 /** What the run's loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
 interface Published {
@@ -435,6 +452,13 @@ function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: In
  * whose pipelines could not be made (`GRAPHICS STYLE REFUSED`): each stands on the main view's
  * fault lines, and the loop draws no more.
  *
+ * Over a served world (`world` a `ServedSpikeWorld`; plan R10, R10.T15.b) it flies a generated body
+ * the server serves, read from the server's scene (`ServedDescentSpike`): its terrain session asks
+ * the server for the body's field over the link, its header shows the link's state, and the descent
+ * is measured once the field holds its survey, as over `TERRAIN TEST`; where the server serves no
+ * surface for it (behind the serve gate, its field `not_modelled`) the spike says so in plain text
+ * ({@link surfaceNotServed}), a data state and not a fault, and the run ends failed.
+ *
  * With `sizes` over the terrain world (`--sizes on`, plan R10, R10.T14.b) the craft instrument's
  * canvas is the run's second session view, named and labelled in the style it drew in, the
  * session's height workers are started on the measurement's bake clock, and at `VIEW`'s 4 Hz
@@ -462,14 +486,18 @@ export function DescentSpike({
   const normals = variant?.normals;
   const listId = `${id}-targets`;
   const engineState = useViewEngine(engineSource);
-  const spikeWorld = spikeWorldNamed(world);
+  const served = typeof world === "string" ? null : world;
+  const worldName: SpikeWorldName = typeof world === "string" ? world : "served";
+  const spikeWorld = typeof world === "string" ? spikeWorldNamed(world) : world.world;
+  // A generated world, `TERRAIN TEST`'s or a served one, flies through the terrain session.
+  const generated = worldName !== "test-planet";
   // `TERRAIN TEST`'s fixture, made once: its payloads are decoded only when a link first answers.
   const [fixture] = useState(() => terrainSceneFixture());
   // The generated world's terrain session, made and disposed as `VIEW`'s is, keyed on the fixture;
   // none on the test planet.
   const session = useTerrainSession({
     engineState,
-    source: world === "terrain-test" ? { kind: "fixture", fixture } : null,
+    source: worldName === "terrain-test" ? { kind: "fixture", fixture } : (served?.source ?? null),
     // Under the measured sizes, each height worker on the bake clock: the same wrapper for the
     // same factory, so that the session is made once.
     createWorker: measured?.heightWorkers(spikeWorkers.height) ?? spikeWorkers.height,
@@ -525,7 +553,7 @@ export function DescentSpike({
   // The test planet's terrain is measured once, in the surface query's worker, before the run
   // starts.
   useEffect(() => {
-    if (world !== "test-planet") {
+    if (worldName !== "test-planet") {
       return undefined;
     }
     const query = new SurfaceQuery(spikeWorkers.query(), ridges);
@@ -559,18 +587,20 @@ export function DescentSpike({
       query.dispose();
       setPreparation({ kind: "measuring" });
     };
-  }, [world, spikeWorkers, ridges, seed, prepare]);
+  }, [worldName, spikeWorkers, ridges, seed, prepare]);
 
   // A generated world's terrain is measured once, through the terrain session, once it is made:
   // the fixture's revision is raised first, so that the session's first ask, at its first step, is
   // answered with the larger survey. The poll stops when the spike goes or the session changes.
   useEffect(() => {
-    if (world !== "terrain-test" || session === null) {
+    if (worldName === "test-planet" || session === null) {
       return undefined;
     }
     const life = { ended: false };
     const abort = new AbortController();
-    fixture.notePlayed(TERRAIN_TEST_SCRIPT.deltaAtS);
+    if (worldName === "terrain-test") {
+      fixture.notePlayed(TERRAIN_TEST_SCRIPT.deltaAtS);
+    }
     void measure(session, spikeWorld, seed, abort.signal)
       .then((prepared) => {
         if (!life.ended) {
@@ -585,6 +615,11 @@ export function DescentSpike({
             console.error("the descent spike refuses to fly:", error);
             inputsRef.current.listeners?.onFailed?.(DESCENT_REFUSED);
             setPreparation({ kind: "refused" });
+          } else if (error instanceof FieldNotServed) {
+            // Behind the serve gate a served world's body has no surface to measure (R10.T15.b).
+            console.error("the descent spike's served world has no served surface:", error);
+            inputsRef.current.listeners?.onFailed?.(surfaceNotServed(spikeWorld.bodyDesignation));
+            setPreparation({ kind: "not served" });
           } else {
             console.error("the descent spike's terrain could not be measured:", error);
             inputsRef.current.listeners?.onFailed?.(NOT_MEASURED);
@@ -597,7 +632,7 @@ export function DescentSpike({
       abort.abort(new Error("the descent spike's measurement was stopped"));
       setPreparation({ kind: "measuring" });
     };
-  }, [world, session, fixture, spikeWorld, seed, measure]);
+  }, [worldName, session, fixture, spikeWorld, seed, measure]);
 
   const prepared = preparation.kind === "ready" ? preparation.prepared : null;
   // The script's kept scene, which the runs below and each publish's survey read.
@@ -616,7 +651,7 @@ export function DescentSpike({
       mainCanvas === null ||
       orbitCanvas === null ||
       craftCanvas === null ||
-      (world === "terrain-test" && session === null)
+      (generated && session === null)
     ) {
       return undefined;
     }
@@ -633,7 +668,7 @@ export function DescentSpike({
             ...(vertexPath === undefined ? {} : { vertexPath }),
             ...(normals === undefined ? {} : { normals }),
           },
-          ...(world === "terrain-test" && session !== null
+          ...(generated && session !== null
             ? {
                 body: {
                   world: spikeWorld,
@@ -741,11 +776,7 @@ export function DescentSpike({
           stop(drawn.refusal, drawn.refusal);
           return;
         }
-        if (
-          measured !== undefined &&
-          world === "terrain-test" &&
-          nowMs - readoutMs >= SIZES_READOUT_INTERVAL_MS
-        ) {
+        if (measured !== undefined && generated && nowMs - readoutMs >= SIZES_READOUT_INTERVAL_MS) {
           readoutMs = nowMs;
           // `VIEW`'s readout at its 4 Hz, so that the workers' figures include its queries; its
           // answers are counted and never shown (decision-r10-t14b-measure §6(f)).
@@ -755,7 +786,7 @@ export function DescentSpike({
           publishedMs = nowMs;
           setPublished({
             frame: drawn,
-            ground: world === "terrain-test" ? surveySnapshotOf(session, mainRunOf(drawn)) : null,
+            ground: generated ? surveySnapshotOf(session, mainRunOf(drawn)) : null,
           });
         }
       }
@@ -784,7 +815,7 @@ export function DescentSpike({
     normals,
     spikeWorkers,
     forwarding,
-    world,
+    generated,
     session,
     spikeWorld,
     style,
@@ -812,19 +843,22 @@ export function DescentSpike({
   // the engine is ready and starts the measurement in the same commit's effects: while the adapter
   // is still acquired the line says so, and with no adapter its fault stands in place of the wait.
   const measuring =
-    preparation.kind === "measuring" && (world === "test-planet" || engineState.kind === "ready");
-  const status: { readonly text: string; readonly standing: "waiting" | "fault" } | null =
+    preparation.kind === "measuring" &&
+    (worldName === "test-planet" || engineState.kind === "ready");
+  const status: { readonly text: string; readonly standing: StatusStanding } | null =
     preparation.kind === "failed"
       ? { text: NOT_MEASURED, standing: "fault" }
-      : preparation.kind === "refused"
-        ? { text: DESCENT_REFUSED, standing: "fault" }
-        : measuring
-          ? { text: MEASURING, standing: "waiting" }
-          : engineState.kind === "unavailable"
-            ? { text: NO_ADAPTER, standing: "fault" }
-            : engineState.kind === "pending"
-              ? { text: "GRAPHICS ACQUIRING ADAPTER", standing: "waiting" }
-              : null;
+      : preparation.kind === "not served"
+        ? { text: surfaceNotServed(spikeWorld.bodyDesignation), standing: "refused" }
+        : preparation.kind === "refused"
+          ? { text: DESCENT_REFUSED, standing: "fault" }
+          : measuring
+            ? { text: MEASURING, standing: "waiting" }
+            : engineState.kind === "unavailable"
+              ? { text: NO_ADAPTER, standing: "fault" }
+              : engineState.kind === "pending"
+                ? { text: "GRAPHICS ACQUIRING ADAPTER", standing: "waiting" }
+                : null;
 
   const pose = shownFrame?.pose ?? null;
   // The height's unit switches with hysteresis from the one last shown, adjusted during render.
@@ -836,7 +870,7 @@ export function DescentSpike({
   const terrain = shownFrame?.terrain ?? null;
   // The main view's style as its label reads it: the spike's lit view's over the test planet, the
   // style drawn over a generated world, the style asked before its first frame, as `VIEW`'s.
-  const drawnStyle = world === "test-planet" ? null : (shownFrame?.drawnStyle ?? style);
+  const drawnStyle = worldName === "test-planet" ? null : (shownFrame?.drawnStyle ?? style);
   // Its fault lines, as `VIEW`'s (`faultsFor`): its graphics fault, then the terrain's, in `VIEW`'s
   // words for every test of them, and shown with the spike's remedy (`spikeFaultLine`).
   const terrainFault = terrainFaults.get(SPIKE_MAIN_VIEW_ID);
@@ -871,7 +905,7 @@ export function DescentSpike({
   // The test planet's statement stands from the first render; a generated world's terrain line gives
   // way to the terrain's fault, as `VIEW`'s does (`terrainStatementOf`).
   const statements =
-    world === "test-planet"
+    worldName === "test-planet"
       ? [
           TEST_PLANET_STATEMENT,
           ...(runs === null ? [] : labelStatements(runs.main, terrain?.annunciation ?? null)),
@@ -888,24 +922,14 @@ export function DescentSpike({
   const siteElevation =
     prepared === null
       ? null
-      : world === "test-planet"
+      : worldName === "test-planet"
         ? siteElevationReading(prepared.siteHeightM)
         : prepared.siteReading === undefined || prepared.siteReading === null
           ? null
           : siteSurveyReading(prepared.siteReading);
   return (
     <div className="spike">
-      <header className="console__header">
-        <div className="console__identity">
-          <span className="console__ship">HYPERION</span>
-          <h1 className="console__title">DESCENT SPIKE</h1>
-        </div>
-        <div className="console__status">
-          <output className="console__banner" aria-label="Mode">
-            MEASUREMENT
-          </output>
-        </div>
-      </header>
+      <SpikeHeader link={served?.link} />
       <main className="view spike__work">
         <div className="view__main">
           <div className="view__stage" ref={mainStageRef}>
@@ -996,7 +1020,7 @@ export function DescentSpike({
               {/* Over a generated world its field holds an Estimated reading: under its label. */}
               <Reading
                 value={siteElevation}
-                className={world === "test-planet" ? undefined : "spike__site-survey"}
+                className={worldName === "test-planet" ? undefined : "spike__site-survey"}
               />
               <dt>Finest Terrain Held</dt>
               <Reading value={shownFrame === null ? null : shownFrame.contact ? "YES" : "NO"} />

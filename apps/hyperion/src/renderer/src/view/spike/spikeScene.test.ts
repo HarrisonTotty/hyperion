@@ -4,6 +4,7 @@ import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../
 import type { CameraPose } from "../camera/pose";
 import { lookAlong } from "../camera/quaternion";
 import { rotateToBody } from "../coords/rotation";
+import { keptTime } from "../scenes/kept";
 import { terrainStar, terrainSystem, terrainTestGolden } from "../scenes/terrainScene";
 import { MAX_BLOCK_BYTES } from "../terrain/coarseFieldStore";
 import { vertexSpacing, type Xyz } from "../terrain/cube";
@@ -307,6 +308,30 @@ describe("the scene over TERRAIN TEST's moon (R10.T14.c)", () => {
       rotateToBody(rotation, vecOf(spheroidNormal(world.figure, [g.x, g.y, g.z]))),
     );
     expect((Math.asin(dot(up, sun)) * 180) / Math.PI).toBeGreaterThan(61);
+  });
+
+  it("stands a served world at its own distance from a star of its own radius (R10.T15.b)", () => {
+    const epoch = { seconds: 234, nanos: 500_000_000 };
+    const served = {
+      ...world,
+      name: "served",
+      starDistanceM: 2.2e11,
+      starRadiusM: 5e8,
+      epoch,
+    } as const;
+    const scene = spikeScene(profile, served).sceneAt(0);
+    expect(scene.bodies[0]?.radiusM).toBe(5e8);
+    // Its clock counts the script's seconds from the scene's time it was read at.
+    expect(spikeScene(profile, served).sceneAt(10.25).time).toEqual({
+      seconds: 244,
+      nanos: 750_000_000,
+    });
+    expect(spikeScene(profile, world).sceneAt(10).time).toEqual(keptTime(10));
+    expect(norm(scene.bodies[1]?.centreM ?? vec3(0, 0, 0))).toBeCloseTo(2.2e11, 0);
+    // Every other world stands 1 au from a star of the Sun's radius.
+    const atAu = spikeScene(profile, world).sceneAt(0);
+    expect(atAu.bodies[0]?.radiusM).toBe(6.957e8);
+    expect(norm(atAu.bodies[1]?.centreM ?? vec3(0, 0, 0))).toBeCloseTo(149_597_870_700, 0);
   });
 
   it("stands the test planet's sun at its site's x and y with z 0, bit for bit, as T13.b did", () => {

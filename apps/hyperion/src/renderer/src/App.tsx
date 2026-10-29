@@ -1,5 +1,5 @@
 import { galacticPositionFromLy } from "@hyperion/protocol";
-import { Activity, type ReactElement, useCallback, useMemo, useState } from "react";
+import { Activity, type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ConsoleFrame } from "./components/ConsoleFrame";
@@ -14,8 +14,10 @@ import { HANDOVER_APPROACH } from "./displays/view/check/handoverGeometry";
 import {
   handoverRangeAtM,
   HandoverScenes,
+  type HandoverWorld,
   terrainTestHandoverWorld,
 } from "./displays/view/check/handoverScenes";
+import { readServedHandoverWorld } from "./displays/view/check/servedHandover";
 import { terrainProbeOptions } from "./displays/view/check/terrainCheckRun";
 import { TerrainProbe } from "./displays/view/check/terrainProbe";
 import { ViewsProbe } from "./displays/view/check/viewsProbe";
@@ -32,7 +34,7 @@ import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
 import type { QualitySetting } from "./view/quality/qualitySetting";
-import type { ViewsCheckLaunch } from "../../preload/api";
+import type { ServedWorldNames, ViewsCheckLaunch } from "../../preload/api";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -80,8 +82,19 @@ interface CheckProbes {
   readonly run: CheckedRun;
 }
 
-/** A `--views-check` launch's probes, by its options. */
-function checkProbesOf(launch: ViewsCheckLaunch): CheckProbes {
+/**
+ * The served world a `--handover` launch names (`--universe`, `--body`; plan R10, R10.T15.b), or
+ * `null` for `TERRAIN TEST`'s.
+ */
+function servedHandoverOf(launch: ViewsCheckLaunch): ServedWorldNames | null {
+  return launch.run === "handover" ? (launch.served ?? null) : null;
+}
+
+/**
+ * A `--views-check` launch's probes, by its options; a `--handover` launch's looks on `served`,
+ * the served world read from the server, where it names one, else on `TERRAIN TEST`'s.
+ */
+function checkProbesOf(launch: ViewsCheckLaunch, served: HandoverWorld | null = null): CheckProbes {
   const views = new ViewsProbe();
   // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
   const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>
@@ -102,7 +115,7 @@ function checkProbesOf(launch: ViewsCheckLaunch): CheckProbes {
       run = { kind: "terrain", terrain: terrainProbe([]) };
       break;
     case "handover": {
-      const world = terrainTestHandoverWorld(launch.fixture);
+      const world = served ?? terrainTestHandoverWorld(launch.fixture);
       // A look chosen by hand before the run measures the primary is drawn at the range of a
       // canvas the window's width, and measures nothing (`HandoverScenes`).
       const windowPx = Math.max(1, Math.round(window.innerWidth * window.devicePixelRatio));
@@ -216,10 +229,64 @@ export function App() {
   const link = useServerLinkValue(connection);
   const viewsCheck = window.hyperion.viewsCheck;
   // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20); a
-  // `--terrain` one also its terrain run's (R10.T16.d).
-  const [probes] = useState((): CheckProbes | null =>
-    viewsCheck === undefined ? null : checkProbesOf(viewsCheck.launch),
+  // `--terrain` one also its terrain run's (R10.T16.d). A hand-over check of a served world
+  // (R10.T15.b) makes them once the world is read from the server.
+  const [probes, setProbes] = useState((): CheckProbes | null =>
+    viewsCheck === undefined || servedHandoverOf(viewsCheck.launch) !== null
+      ? null
+      : checkProbesOf(viewsCheck.launch),
   );
+  const awaitingServed =
+    probes === null && viewsCheck !== undefined && servedHandoverOf(viewsCheck.launch) !== null;
+  const connected = connection.status === "connected";
+  const requests = connection.requests;
+  useEffect(() => {
+    // `awaitingServed` is true only on a views check's launch, by which TypeScript narrows `viewsCheck`.
+    if (!awaitingServed || !connected) {
+      return undefined;
+    }
+    const target = servedHandoverOf(viewsCheck.launch);
+    if (target === null) {
+      return undefined;
+    }
+    const abort = new AbortController();
+    /** Ends the run failed with `reason`, which the main process writes. */
+    const fail = (reason: string): void => {
+      viewsCheck.end({ status: "fail", reason }).catch((error: unknown) => {
+        console.error("views check: the run could not be ended:", error);
+      });
+    };
+    readServedHandoverWorld(requests, target.universe, target.body, abort.signal)
+      .then((read) => {
+        if (abort.signal.aborted) {
+          return undefined;
+        }
+        switch (read.kind) {
+          case "read":
+            setProbes(checkProbesOf(viewsCheck.launch, read.world));
+            break;
+          case "not served":
+            fail(
+              `the server serves no surface for ${target.body}: its field is not modelled (${read.section})`,
+            );
+            break;
+          case "failed":
+            fail(`the hand-over check's served world could not be read: ${read.message}`);
+            break;
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        // A bug in reading the world: the run ends failed, the error in the log.
+        console.error("views check: the hand-over check's served world could not be read:", error);
+        if (!abort.signal.aborted) {
+          fail(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => {
+      abort.abort();
+    };
+  }, [awaitingServed, connected, requests, viewsCheck]);
   const [activeDisplay, setActiveDisplay] = useState<DisplayId>(
     viewsCheck === undefined ? "link" : "view",
   );

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { GraphicsApi, SpikeApi } from "../../../../preload/api";
+import { StatusLine } from "../../components/StatusLine";
 import type { ViewEngineSource } from "../../displays/view/useViewEngine";
 import { GraphicsStatusProvider } from "../engine/GraphicsStatusProvider";
 import { navigatorGpu } from "../engine/status";
@@ -8,6 +9,8 @@ import type { TerrainVariant } from "../quality/qualitySetting";
 import type { MeasureDescent } from "./bodyDescent";
 import { GpuCapture } from "./capture";
 import { DescentSpike, MAIN_CANVAS_SELECTOR } from "./DescentSpike";
+import { SERVED_WORLD_NOT_READ, ServedDescentSpike } from "./ServedDescentSpike";
+import { SpikeHeader } from "./SpikeHeader";
 import { SpikeController, variantOf } from "./spikeController";
 import { SPIKE_PASS_ROWS, spikeGpu } from "./spikeHarness";
 import {
@@ -34,6 +37,11 @@ export interface SpikeAppProps {
   readonly loadEngine?: ViewEngineSource["load"] | undefined;
   /** How the terrain world's descent is measured (`DescentSpike`'s `measure`): a fake in a test. */
   readonly measure?: MeasureDescent | undefined;
+  /**
+   * The server's WebSocket URL, `window.hyperion.serverUrl`, which a served world links to
+   * (`--world served`, plan R10, R10.T15.b); unread over every other world.
+   */
+  readonly serverUrl: string;
 }
 
 /** The run's measured engine, its control and its listeners, made once. */
@@ -53,7 +61,7 @@ function makeHarness(spike: SpikeApi, loadEngine: ViewEngineSource["load"] | und
   // The command line refuses `--sizes on` over the test planet; the measurement is the terrain
   // session's.
   const sizes =
-    launch.sizes === "on" && launch.world === "terrain-test"
+    launch.sizes === "on" && launch.world !== "test-planet"
       ? new SpikeSizes({
           setting: launch.setting,
           style: launch.style ?? "photorealistic",
@@ -151,7 +159,14 @@ function makeHarness(spike: SpikeApi, loadEngine: ViewEngineSource["load"] | und
  * on their bake clock; the adapter's and the device's storage-binding limits are noted as the
  * engine is made, and the report's `sizes` block is taken at the run's end.
  */
-export function SpikeApp({ spike, graphics, spikeWorkers, loadEngine, measure }: SpikeAppProps) {
+export function SpikeApp({
+  spike,
+  graphics,
+  spikeWorkers,
+  loadEngine,
+  measure,
+  serverUrl,
+}: SpikeAppProps) {
   // Made once, with the engine's loader given at the first render: the run's is its launch's.
   const [harness] = useState(() => makeHarness(spike, loadEngine));
   const { launch } = spike;
@@ -162,27 +177,44 @@ export function SpikeApp({ spike, graphics, spikeWorkers, loadEngine, measure }:
       harness.controller.fail("the graphics safe mode draws no WebGPU view");
     } else if (navigatorGpu() === undefined) {
       harness.controller.fail("this renderer has no WebGPU");
+    } else if (launch.world === "served" && launch.served === undefined) {
+      harness.controller.fail("the served world's launch names no universe and body");
     }
-  }, [harness, graphics]);
+  }, [harness, graphics, launch]);
   // A run left by a closed window ends its capture's hold on the canvases.
   useEffect(() => () => harness.capture?.dispose(), [harness]);
+  const spikeProps = {
+    seed: BigInt(launch.seed),
+    setting: launch.setting,
+    ridges: launch.ridged,
+    workers: launch.workers ?? defaultSpikeWorkers(navigator.hardwareConcurrency),
+    variant: harness.variant,
+    // The test planet's launch has no style: its main view is the spike's own lit view.
+    style: launch.style ?? undefined,
+    engineSource: harness.gpu.source,
+    spikeWorkers,
+    measure,
+    listeners: harness.listeners,
+    sizes: harness.sizes ?? undefined,
+  };
   return (
     <GraphicsStatusProvider graphics={graphics} gpu={navigatorGpu()}>
-      <DescentSpike
-        seed={BigInt(launch.seed)}
-        setting={launch.setting}
-        ridges={launch.ridged}
-        workers={launch.workers ?? defaultSpikeWorkers(navigator.hardwareConcurrency)}
-        variant={harness.variant}
-        world={launch.world}
-        // The test planet's launch has no style: its main view is the spike's own lit view.
-        style={launch.style ?? undefined}
-        engineSource={harness.gpu.source}
-        spikeWorkers={spikeWorkers}
-        measure={measure}
-        listeners={harness.listeners}
-        sizes={harness.sizes ?? undefined}
-      />
+      {launch.world !== "served" ? (
+        <DescentSpike {...spikeProps} world={launch.world} />
+      ) : launch.served === undefined ? (
+        // The type's other case, which `readSpikeLaunch` refuses: no world to read, the run failed.
+        <div className="spike">
+          <SpikeHeader />
+          <StatusLine text={SERVED_WORLD_NOT_READ} standing="fault" />
+        </div>
+      ) : (
+        <ServedDescentSpike
+          {...spikeProps}
+          serverUrl={serverUrl}
+          universe={launch.served.universe}
+          body={launch.served.body}
+        />
+      )}
     </GraphicsStatusProvider>
   );
 }

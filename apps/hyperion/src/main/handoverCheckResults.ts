@@ -43,6 +43,7 @@ import type {
   HandoverSharedMeans,
   HandoverSwitchName,
   HandoverTexelRecord,
+  ServedWorldNames,
   TerrainCheckFault,
   ViewsCheckTerrainFixture,
 } from "../preload/api";
@@ -132,8 +133,11 @@ const SWITCHES: ReadonlyArray<HandoverSwitchName> = [
 
 /** Everything the results are built from. */
 export interface HandoverCheckInput {
-  /** The run, as the main process describes it at its start: the terrain run's description. */
-  readonly run: TerrainCheckRunInput;
+  /**
+   * The run, as the main process describes it at its start: the terrain run's description, with
+   * the served world the launch named where it named one (R10.T15.b).
+   */
+  readonly run: TerrainCheckRunInput & { readonly served?: ServedWorldNames };
   readonly record: HandoverCheckRecord;
   /** The GPU process's exits over the run. */
   readonly gpuProcessExits: number;
@@ -212,6 +216,8 @@ export interface HandoverCheckResults {
     readonly smoke: boolean;
     /** The weathered fixture on a `--weathered` run; absent on `TERRAIN TEST`'s (`fixtureRecord`). */
     readonly fixture?: Exclude<ViewsCheckTerrainFixture, "terrain-test">;
+    /** The served world on a `--universe --body` run (R10.T15.b); absent on a fixture's. */
+    readonly served?: ServedWorldNames;
     readonly switches: ReadonlyArray<string>;
     readonly shown: boolean;
     readonly window: TerrainCheckRunInput["window"];
@@ -472,6 +478,7 @@ export function buildHandoverCheckResults(input: HandoverCheckInput): HandoverCh
       setting: run.setting,
       smoke: run.smoke,
       ...fixtureRecord(run.fixture),
+      ...(run.served === undefined ? {} : { served: run.served }),
       switches: run.switches,
       shown: run.shown,
       window: run.window,
@@ -575,6 +582,11 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}`,
     ...fixtureNaming(run.fixture).lines,
+    ...(run.served === undefined
+      ? []
+      : [
+          `- **Served world:** body \`${run.served.body}\` of universe \`${run.served.universe}\`, as the server serves it, in TERRAIN TEST's place`,
+        ]),
     `- **World:** ${results.world}; the primary ${String(results.canvas.widthPx)} × ${String(results.canvas.heightPx)} px presented, its scene target ${String(results.target.widthPx)} × ${String(results.target.heightPx)} px; the hand-over range ${(results.rangeM / 1000).toFixed(0)} km (relief ${results.reliefM.toFixed(0)} m at τ ${String(results.tauPx)} px, ${results.radPerPx.toExponential(4)} rad a pixel); cells of level ${String(results.cellLevel)}`,
     `- **The line:** ${(results.approach.ratePerS * 100).toFixed(0)}% of the limb distance a second, from ${String(results.approach.startRatio)} to ${String(results.approach.closestRatio)} of the range, a ${String(results.approach.holdS)} s hold, out to ${String(results.approach.endRatio)}`,
     `- **Bounds:** ${results.bounds.stops.toFixed(3)} stop at every switch, cells of ${String(results.bounds.minSharedPixels)} shared pixels or more judged, no floor; at most ${String(results.bounds.missLimit * 100)}% of a frame's body pixels off the datum`,
@@ -642,7 +654,7 @@ export async function writeHandoverResults(
   files: ResultsFiles = NODE_FILES,
 ): Promise<{ readonly json: string; readonly markdown: string }> {
   await files.mkdir(dir);
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-handover${fixtureNaming(results.run.fixture).stem}${results.run.smoke ? "-smoke" : ""}`;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-handover${fixtureNaming(results.run.fixture).stem}${results.run.served === undefined ? "" : "-served"}${results.run.smoke ? "-smoke" : ""}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

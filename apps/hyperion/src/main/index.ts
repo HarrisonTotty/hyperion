@@ -225,10 +225,11 @@ function pageUrl(): string {
 /**
  * The renderer's two waits of a generated world's measurement before it flies (plan R10,
  * R10.T14.c; `bodyDescent.ts`' constants of the same names, which this project cannot import): the
- * field's hold, at most `FIELD_HOLD_TIMEOUT_MS`, then each site's bakes, at most
- * `MEASURE_TIMEOUT_MS` an attempt.
+ * field's hold, at most `FIELD_HOLD_TIMEOUT_MS`, or `SERVED_FIELD_HOLD_TIMEOUT_MS` over a served
+ * world (R10.T15.b), then each site's bakes, at most `MEASURE_TIMEOUT_MS` an attempt.
  */
 const FIELD_HOLD_TIMEOUT_MS = 120_000;
+const SERVED_FIELD_HOLD_TIMEOUT_MS = 600_000;
 const MEASURE_TIMEOUT_MS = 600_000;
 
 /** The room past those waits for the site's reading and the session's own start, ms. */
@@ -239,7 +240,9 @@ const MEASUREMENT_MARGIN_MS = 60_000;
  * and the descent's 20.5 minutes, each with room for building the scene and writing the results;
  * and over a generated world (R10.T14.c) 13 minutes more, its measurement's longest for one site:
  * the field's hold at its 120 s limit, then the site's bakes at their 600 s limit, and a minute's
- * margin, against some 40 s in a typical run on three workers.
+ * margin, against some 40 s in a typical run on three workers; over a served world (R10.T15.b)
+ * 21 minutes more, its field's hold at its 600 s limit, since the server computes the body's coarse
+ * field before its first answer (about a minute natively at level 8, R09.T16.a).
  *
  * @remarks
  * A site whose floors the profile refuses is measured afresh at the next candidate, each attempt's
@@ -248,10 +251,18 @@ const MEASUREMENT_MARGIN_MS = 60_000;
  * limit above this one, so that the watchdog ends a run first.
  */
 function spikeWatchdogMs(launch: SpikeLaunch): number {
-  const measurementMs =
-    launch.world === "terrain-test"
-      ? FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS
-      : 0;
+  let measurementMs: number;
+  switch (launch.world) {
+    case "test-planet":
+      measurementMs = 0;
+      break;
+    case "terrain-test":
+      measurementMs = FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+      break;
+    case "served":
+      measurementMs = SERVED_FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+      break;
+  }
   return (launch.smoke ? 180_000 : 45 * 60_000) + measurementMs;
 }
 
@@ -419,8 +430,10 @@ function viewsCheckDirs(launch: ViewsCheckLaunch): {
  * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
  * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
  * each, 30; its hand-over check (R10.T10.g), three looks of about 3.5 minutes (a smoke's about one),
- * takes the same; the atmosphere run's (plan R08, R08.T10.b), its media awaited and a flight to
- * four air fixtures and the seat's night, 8 and 15.
+ * takes the same, and 15 minutes more on a served world (R10.T15.b), whose body's coarse field the
+ * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
+ * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
+ * awaited and a flight to four air fixtures and the seat's night, 8 and 15.
  */
 function viewsCheckWatchdogMs(launch: ViewsCheckLaunch): number {
   let ms: number;
@@ -430,7 +443,8 @@ function viewsCheckWatchdogMs(launch: ViewsCheckLaunch): number {
       break;
     case "terrain":
     case "handover":
-      ms = launch.smoke ? 8 * 60_000 : 30 * 60_000;
+      ms =
+        (launch.smoke ? 8 * 60_000 : 30 * 60_000) + (launch.served === undefined ? 0 : 15 * 60_000);
       break;
     case "atmosphere":
       ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;

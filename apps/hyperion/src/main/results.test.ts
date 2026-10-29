@@ -1377,6 +1377,14 @@ describe("a results file's world and style (R10.T14.c)", () => {
     expect(validateResults(parsedOver("test-planet", null))).toEqual([]);
   });
 
+  it("reads a served world's file as a generated world's, its style its own (R10.T15.b)", () => {
+    const parsed = parsedOver("terrain-test", "wireframe");
+    const run = { ...fieldsOf(parsed["run"]), world: "served" };
+    expect(worldOfRun(run)).toEqual({ world: "served", style: "wireframe" });
+    expect(worldOfRun({ ...run, style: null })).toBeNull();
+    expect(validateResults({ ...parsed, run })).toEqual([]);
+  });
+
   it("reads a file without them as the test planet's, with no style", () => {
     const parsed = parsedOver("test-planet", null);
     const { world: _world, style: _style, ...older } = fieldsOf(parsed["run"]);
@@ -1388,7 +1396,7 @@ describe("a results file's world and style (R10.T14.c)", () => {
     const parsed = parsedOver("terrain-test", "wireframe");
     const run = fieldsOf(parsed["run"]);
     const refusal =
-      "run.world is not test-planet or terrain-test, or run.style not its world's: none on test-planet, photorealistic or wireframe on terrain-test";
+      "run.world is not test-planet, terrain-test or served, or run.style not its world's: none on test-planet, photorealistic or wireframe on a generated world";
     expect(
       [
         { ...run, world: "earth" },
@@ -1587,6 +1595,56 @@ describe("a results file's untimed passes (R10.T14.c)", () => {
       ),
       [],
     ]);
+  });
+
+  it("claims none over a served world either, and names its body in the summary (R10.T15.b)", () => {
+    const results = buildResults({
+      run: runOf({
+        world: "served",
+        style: "photorealistic",
+        options: {
+          setting: "low",
+          seed: "7",
+          world: "served",
+          universe: "000000000000002a",
+          body: "0200080020000000.0300",
+        },
+      }),
+      report: reportOf({ untimedPasses: 0 }),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect([
+      results.gpu.untimedPasses,
+      validateResults(JSON.parse(JSON.stringify(results))),
+    ]).toEqual([missing(UNTIMED_NOT_COUNTED), []]);
+    expect(summaryMarkdown(results)).toContain(
+      "world served (body 0200080020000000.0300 of universe 000000000000002a), style photorealistic",
+    );
+  });
+
+  it("records a served world's universe and body among the launch's options (R10.T15.b)", () => {
+    const launch = parseClientArgs(
+      [
+        "--descent-spike",
+        "--world",
+        "served",
+        "--universe",
+        "000000000000002a",
+        "--body",
+        "0200080020000000.0300",
+      ],
+      "0.1.0",
+    ).spike;
+    if (launch === undefined) {
+      throw new Error("the command line gave a spike launch");
+    }
+    expect(runOptionsOf(launch)).not.toHaveProperty("served");
+    expect(runOptionsOf(launch)).toMatchObject({
+      world: "served",
+      universe: "000000000000002a",
+      body: "0200080020000000.0300",
+    });
   });
 
   it("reads an older file's bare count, as a native replay writes it too, and refuses a count that is not one", () => {

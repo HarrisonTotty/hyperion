@@ -6,7 +6,7 @@ import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import { FakeAdapter, FakeGpu, SWIFTSHADER_INFO } from "../../test/fakeGpu";
 import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
-import { TEST_GRAPHICS, TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
+import { TEST_GRAPHICS, TEST_SERVER_URL, TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import { planetGeometry } from "../terrain/planet";
 import type { MeasureDescent } from "./bodyDescent";
@@ -124,6 +124,7 @@ async function flySmoke(launch: SpikeLaunch): Promise<ReadonlyArray<DescentSpike
       spikeWorkers={WORKERS}
       loadEngine={() => countingRenderEngine()}
       measure={MEASURE}
+      serverUrl={TEST_SERVER_URL}
     />,
   );
   // The smoke's script and a second more, a step at a time, each step's work let settle.

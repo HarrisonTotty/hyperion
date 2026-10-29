@@ -1,6 +1,8 @@
 /**
- * The world the descent spike flies (plan R10, R10.T14.c): R05's test planet, the default, or
- * `TERRAIN TEST`'s fixture moon, whose field comes through T16's terrain session.
+ * The world the descent spike flies (plan R10, R10.T14.c): R05's test planet, the default,
+ * `TERRAIN TEST`'s fixture moon, whose field comes through T16's terrain session, or a generated
+ * body the server serves (R10.T15.b), whose field comes through the same session over the server's
+ * link.
  *
  * @remarks
  * A world is what the scene, the camera, the sun and the measurement read of the bodies: their
@@ -14,13 +16,31 @@
  *   read there and never restated. The spike's clock runs at one scene second a second, where
  *   `TERRAIN TEST`'s runs at {@link TERRAIN_TIME_RATE}, so the spike's script seconds are the moon's
  *   scene seconds: its rotation is `terrainMoonRotationAt` of the script's time.
+ * - **A served world** ({@link servedSpikeWorld}) is a body as the server's scene draws it
+ *   (`servedBody.ts`, through `fromServer.ts`): its and its star's IDs and designations, its kind,
+ *   figure with its pole, Hill radius at pericentre and appearance, its star's radius and distance,
+ *   and the host discs the server's sky gives its system. Its rotation is its rotation section's
+ *   law at the scene's time when it was read plus the script's seconds, the spike's clock running at
+ *   one second a second. It carries no detail seed: the session asks `body_detail` for it, as
+ *   `VIEW`'s does over the server's scene.
  */
 
-import type { BodyIdHex, DetailSeedHex, HostDiscDto, SystemIdHex } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  DetailSeedHex,
+  HostDiscDto,
+  SystemIdHex,
+  UniverseTime,
+} from "@hyperion/protocol";
 
 import type { SpikeWorldName as LaunchWorldName } from "../../../../preload/api";
+import type { TerrainSessionSource } from "../../displays/view/useTerrainSession";
+import type { ConnectionStatus } from "../../lib/connection";
+import { norm } from "../../geometry/vec3";
+import { spanFromSeconds, timeBefore } from "../../lib/scene/lightTime";
 import type { WireAppearance } from "../appearance/fromWire";
 import type { Rotation3 } from "../coords/rotation";
+import type { ServedBody } from "../scene/servedBody";
 import { KEPT_SYSTEM, keptBody } from "../scenes/kept";
 import {
   TERRAIN_HOST_DISCS,
@@ -51,7 +71,7 @@ export interface SpikeWorld {
   /** The star's and the body's designations, as the view labels them. */
   readonly starDesignation: string;
   readonly bodyDesignation: string;
-  readonly bodyKind: "planet" | "moon";
+  readonly bodyKind: "planet" | "dwarf_planet" | "moon";
   /** The body's reference spheroid, its heights' datum. */
   readonly figure: BodyFigure;
   /** The body's Hill radius, m. */
@@ -67,6 +87,30 @@ export interface SpikeWorld {
   readonly detailSeed?: DetailSeedHex;
   /** The scene's host discs (`ViewScene.hostDiscs`); absent for the test planet's scene. */
   readonly hostDiscs?: ReadonlyArray<HostDiscDto>;
+  /**
+   * The body's distance from its star, m, and the star's radius, m: a served world's; 1 au and the
+   * Sun's nominal radius where absent, as the test planet and `TERRAIN TEST` stand.
+   */
+  readonly starDistanceM?: number;
+  readonly starRadiusM?: number;
+  /**
+   * The scene's time at the script's start, a served world's (the push it was read at), from which
+   * its scene's clock counts the script's seconds; absent for the kept worlds, whose clock starts at
+   * the kept epoch (`keptTime`).
+   */
+  readonly epoch?: UniverseTime;
+}
+
+/**
+ * A served world as the spike flies it (R10.T15.b): its world, its terrain session's source (the
+ * server's link with its scene's surface events), and the link's state, which the spike's header
+ * shows.
+ */
+export interface ServedSpikeWorld {
+  readonly kind: "served";
+  readonly world: SpikeWorld;
+  readonly source: TerrainSessionSource;
+  readonly link: ConnectionStatus;
 }
 
 /** The scene's star, at the kept system's barycentre. */
@@ -130,15 +174,62 @@ export function terrainTestWorld(): SpikeWorld {
   };
 }
 
+/** The instant `seconds` after `time`, before it where negative, to the nanosecond. */
+export function timeAfter(time: UniverseTime, seconds: number): UniverseTime {
+  if (seconds < 0) {
+    return timeBefore(time, spanFromSeconds(-seconds));
+  }
+  const span = spanFromSeconds(seconds);
+  const nanos = time.nanos + span.nanos;
+  const carry = nanos >= NANOS_PER_SECOND ? 1 : 0;
+  return {
+    seconds: time.seconds + span.seconds + carry,
+    nanos: nanos - carry * NANOS_PER_SECOND,
+  };
+}
+
+/** Nanoseconds in a second. */
+const NANOS_PER_SECOND = 1_000_000_000;
+
+/**
+ * A served world from `served`, a body as the server's scene drew it, lit by `hostDiscs`, its
+ * system's discs as the server's sky gives them (`servedHostDiscs`).
+ */
+export function servedSpikeWorld(
+  served: ServedBody,
+  hostDiscs: ReadonlyArray<HostDiscDto>,
+): SpikeWorld {
+  const { epoch } = served;
+  return {
+    name: "served",
+    system: served.system,
+    star: served.star.id,
+    body: served.body.id,
+    starDesignation: served.star.designation,
+    bodyDesignation: served.body.designation,
+    bodyKind: served.kind,
+    figure: served.figure,
+    hillRadiusM: served.hillRadiusM,
+    // One scene second a script second from the scene's time when the body was read.
+    rotationAt: (tS) => served.rotationAt(timeAfter(epoch, tS)),
+    appearance: served.appearance,
+    hostDiscs,
+    starDistanceM: norm(served.towardStarM),
+    starRadiusM: served.star.radiusM,
+    epoch,
+  };
+}
+
 /** `TERRAIN TEST`'s world once made, which every later call of {@link spikeWorldNamed} returns. */
 let terrainWorld: SpikeWorld | null = null;
 
 /**
  * The world `--world` names, one object a name for the life of the page, so that it is stable in
  * identity where an effect depends on it: {@link TEST_PLANET_WORLD}, or {@link terrainTestWorld}'s
- * made at the first call.
+ * made at the first call. The served world is read from the server ({@link servedSpikeWorld}), not
+ * named.
  */
-export function spikeWorldNamed(name: SpikeWorldName): SpikeWorld {
+export function spikeWorldNamed(name: Exclude<SpikeWorldName, "served">): SpikeWorld {
   let world: SpikeWorld;
   switch (name) {
     case "test-planet":

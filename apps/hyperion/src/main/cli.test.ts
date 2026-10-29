@@ -39,6 +39,10 @@ function refusal(args: readonly string[]): CommanderError {
   throw new Error(`${args.join(" ")} was accepted`);
 }
 
+/** A served world's universe and body, as place-ship's placement names them (R10.T15.b). */
+const UNIVERSE = "3504954ff4feabf4";
+const BODY = "61ffd967fe000023.0100";
+
 describe("the client's command line", () => {
   beforeEach(() => {
     written.length = 0;
@@ -252,6 +256,34 @@ describe("the descent spike's options", () => {
     ).toMatchObject({ world: "terrain-test", style: drawn, ridged: "off" });
   });
 
+  it("flies a served world named by its universe and body (R10.T15.b)", () => {
+    const { spike } = parse([
+      "--descent-spike",
+      "--world",
+      "served",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--style",
+      "wireframe",
+      "--sizes",
+      "on",
+    ]);
+    expect(spike).toMatchObject({
+      world: "served",
+      served: { universe: UNIVERSE, body: BODY },
+      style: "wireframe",
+      sizes: "on",
+    });
+  });
+
+  it("names no served world on any other world's launch", () => {
+    expect(parse(["--descent-spike", "--world", "terrain-test"]).spike).not.toHaveProperty(
+      "served",
+    );
+  });
+
   it("takes the test planet by its name, recording no style for its SPIKE LIT main view", () => {
     expect(parse(["--descent-spike", "--world", "test-planet"]).spike).toMatchObject({
       world: "test-planet",
@@ -260,7 +292,7 @@ describe("the descent spike's options", () => {
   });
 
   it.each([
-    [["--style", "wireframe"], "--style is an option of --world terrain-test"],
+    [["--style", "wireframe"], "--style is an option of a generated world"],
     [["--world", "test-planet", "--style", "photorealistic"], "SPIKE LIT"],
     [["--world", "terrain-test", "--ridged", "on"], "the ridges are the test planet's"],
     [
@@ -268,7 +300,19 @@ describe("the descent spike's options", () => {
       "--vertex-path does not fit",
     ],
     [["--world", "terrain-test", "--normals", "mesh"], "--normals does not fit"],
-    [["--sizes", "on"], "--sizes on is an option of --world terrain-test"],
+    [["--sizes", "on"], "--sizes on is an option of a generated world"],
+    [["--world", "served", "--universe", UNIVERSE], "--world served needs --universe and --body"],
+    [["--world", "served", "--body", BODY], "--world served needs --universe and --body"],
+    [["--universe", UNIVERSE, "--body", BODY], "--universe is an option of --world served"],
+    [["--world", "terrain-test", "--body", BODY], "--body is an option of --world served"],
+    [
+      ["--world", "served", "--universe", UNIVERSE, "--body", BODY, "--ridged", "on"],
+      "--ridged on does not fit --world served",
+    ],
+    [
+      ["--world", "served", "--universe", UNIVERSE, "--body", BODY, "--normals", "mesh"],
+      "--normals does not fit --world served",
+    ],
     [["--world", "test-planet", "--sizes", "on"], "the terrain session's caches"],
   ])("refuses %j on its world", (args, reason) => {
     const error = refusal(["--descent-spike", ...args]);
@@ -291,6 +335,9 @@ describe("the descent spike's options", () => {
     ["--world", "earth"],
     ["--style", "lit"],
     ["--sizes", "yes"],
+    ["--universe", "Dev Fixture"],
+    ["--universe", "00000000000004D2"],
+    ["--body", "61ffd967fe000023"],
   ])("refuses %s %s", (name, value) => {
     expect(refusal(["--descent-spike", name, value]).exitCode).toBe(1);
   });
@@ -321,6 +368,8 @@ describe("the descent spike's options", () => {
     ["--world", "terrain-test"],
     ["--style", "wireframe"],
     ["--sizes", "on"],
+    ["--universe", "3504954ff4feabf4"],
+    ["--body", "61ffd967fe000023.0100"],
   ])("refuses %s without --descent-spike", (...option) => {
     const error = refusal(option);
     expect(error.exitCode).toBe(1);
@@ -379,6 +428,35 @@ describe("the several-views check's options", () => {
       run: "handover",
       fixture: "terrain-test",
     });
+  });
+
+  it("checks the hand-over on a served world named by its universe and body (R10.T15.b)", () => {
+    expect(
+      parse(["--views-check", "--terrain", "--handover", "--universe", UNIVERSE, "--body", BODY])
+        .viewsCheck,
+    ).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "handover",
+      fixture: "terrain-test",
+      served: { universe: UNIVERSE, body: BODY },
+    });
+  });
+
+  it.each([
+    [["--terrain", "--universe", UNIVERSE, "--body", BODY], "options of --terrain --handover"],
+    [["--universe", UNIVERSE, "--body", BODY], "options of --terrain --handover"],
+    [["--terrain", "--handover", "--universe", UNIVERSE], "needs --universe and --body"],
+    [["--terrain", "--handover", "--body", BODY], "needs --universe and --body"],
+    [
+      ["--terrain", "--handover", "--weathered", "--universe", UNIVERSE, "--body", BODY],
+      "--weathered does not fit a served world",
+    ],
+  ])("refuses a served world on %j", (args, reason) => {
+    const error = refusal(["--views-check", ...args]);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain(reason);
   });
 
   it.each([

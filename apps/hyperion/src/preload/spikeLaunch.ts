@@ -8,7 +8,7 @@
  * sides of the hand-off use this module; it imports types only, so it is safe in either bundle.
  */
 
-import type { SpikeLaunch, SpikeStyleName, SpikeWorldName } from "./api";
+import type { ServedWorldNames, SpikeLaunch, SpikeStyleName, SpikeWorldName } from "./api";
 
 export type { SpikeLaunch } from "./api";
 
@@ -43,12 +43,36 @@ function stringOrNull(value: unknown): value is string | null {
   return value === null || (typeof value === "string" && value.length > 0);
 }
 
+/** Whether `value` is a universe's ID: 16 lowercase hexadecimal digits, as the wire writes it. */
+export function isUniverseId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{16}$/u.test(value);
+}
+
+/**
+ * Whether `value` is a body's ID as the wire writes it: a system's 16 lowercase hexadecimal digits,
+ * a full stop and the body's index in 4 (`@hyperion/protocol`'s `isBodyId`, which this module, of
+ * types only, does not import).
+ */
+export function isBodyIdText(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{16}\.[0-9a-f]{4}$/u.test(value);
+}
+
+/** `value` as a served world's names (R10.T15.b): a universe's ID and a body's, or `null`. */
+export function readServedWorldNames(value: unknown): ServedWorldNames | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { universe, body } = value;
+  return isUniverseId(universe) && isBodyIdText(body) ? { universe, body } : null;
+}
+
 /**
  * `value` as spike options, or `null` if it is not one: every field present and of its type, the
  * seed a u64, the worker count a whole number from 1 to 64, the world among `--world`'s choices,
- * and the style among `--style`'s over the terrain world and `null` over the test planet, which
- * takes none; `sizes` (R10.T14.b) absent, or `on` over the terrain world alone. An `off` is read
- * as absent, which is off, so that an unmeasured launch is as it was before the option.
+ * and the style among `--style`'s over a generated world and `null` over the test planet, which
+ * takes none; `sizes` (R10.T14.b) absent, or `on` over a generated world alone; and `served` a
+ * universe's and a body's IDs over the served world (R10.T15.b), absent over every other. An `off`
+ * is read as absent, which is off, so that an unmeasured launch is as it was before the option.
  */
 export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
   if (!isRecord(value)) {
@@ -69,6 +93,7 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     world,
     style,
     sizes,
+    served,
   } = value;
   if (
     !oneOf(setting, ["high", "low"] as const) ||
@@ -86,15 +111,17 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     !oneOf(dawnSafety, ["on", "off"] as const) ||
     !stringOrNull(capture) ||
     !oneOf(traceProfile, ["on", "off"] as const) ||
-    !oneOf(world, ["test-planet", "terrain-test"] as const)
+    !oneOf(world, ["test-planet", "terrain-test", "served"] as const)
   ) {
     return null;
   }
   const worldStyle = styleOf(world, style);
+  const names = readServedWorldNames(served);
   if (
     worldStyle === undefined ||
     !(sizes === undefined || oneOf(sizes, ["on", "off"] as const)) ||
-    (sizes === "on" && world !== "terrain-test")
+    (sizes === "on" && world === "test-planet") ||
+    (world === "served" ? names === null : served !== undefined)
   ) {
     return null;
   }
@@ -113,12 +140,14 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     world,
     style: worldStyle,
     ...(sizes === "on" ? { sizes } : {}),
+    ...(names === null ? {} : { served: names }),
   };
 }
 
 /**
  * The launch's style on `world`, or `undefined` where it is not one: `null` over the test planet,
- * whose main view takes no `--style`, and one of `--style`'s choices over the terrain world.
+ * whose main view takes no `--style`, and one of `--style`'s choices over a generated world, the
+ * terrain world or the served one.
  */
 function styleOf(world: SpikeWorldName, style: unknown): SpikeStyleName | null | undefined {
   let read: SpikeStyleName | null | undefined;
@@ -127,6 +156,7 @@ function styleOf(world: SpikeWorldName, style: unknown): SpikeStyleName | null |
       read = style === null ? null : undefined;
       break;
     case "terrain-test":
+    case "served":
       read = oneOf(style, ["photorealistic", "wireframe"] as const) ? style : undefined;
       break;
   }

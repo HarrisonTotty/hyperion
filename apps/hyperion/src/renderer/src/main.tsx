@@ -30,7 +30,11 @@ createRoot(container).render(
       <App />
     ) : (
       <Suspense fallback={null}>
-        <SpikeApp spike={spike} graphics={window.hyperion.graphics} />
+        <SpikeApp
+          spike={spike}
+          graphics={window.hyperion.graphics}
+          serverUrl={window.hyperion.serverUrl}
+        />
       </Suspense>
     )}
   </StrictMode>,

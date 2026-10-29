@@ -249,13 +249,18 @@ function parentOf(
  * A body's rotation from body-fixed to body axes at `time` from its rotation section, through
  * `rotation3FromRows` (decision-p14-phase-j), or `null` where the section is not `ok`: where the
  * rotation is not modelled or not resolved, which `ViewBody.rotationNotResolved` tells apart.
+ * Exported for the served worlds that turn a body at times of their own (plan R10, R10.T15.b;
+ * `servedBody.ts`).
  *
  * @remarks
  * The rows are the transpose of the simulation's `FrameRotation` rows (meridian, east, pole): the
  * body-fixed axes are R's columns, as R02's `BodyFixedRotation` holds them. `toSystemBodiesModel`
  * accepted only axes whose turn by any W passes the check.
  */
-function rotationAt(section: Section<SystemBodyRotation>, time: UniverseTime): Rotation3 | null {
+export function bodyRotationAt(
+  section: Section<SystemBodyRotation>,
+  time: UniverseTime,
+): Rotation3 | null {
   if (section.state !== "ok") {
     return null;
   }
@@ -466,7 +471,7 @@ export function viewSceneFromServer(
       centreM,
       retarded,
       ...(presentVelocityMPerS === null ? {} : { presentVelocityMPerS }),
-      rotation: rotationAt(record.rotation, drawnAt),
+      rotation: bodyRotationAt(record.rotation, drawnAt),
       // A rotation the granted detail level withholds, which the view states as such rather than
       // as one not modelled (rotation-not-resolved).
       ...(record.rotation.state === "not_resolved" ? { rotationNotResolved: true as const } : {}),

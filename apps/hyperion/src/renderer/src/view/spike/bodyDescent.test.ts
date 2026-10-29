@@ -1,4 +1,4 @@
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, RecordSectionDto } from "@hyperion/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
@@ -26,11 +26,13 @@ import {
   offSurveyCeilingM,
   bodySiteOf,
   CEILING_SLACK_M,
+  FieldNotServed,
   floorsOf,
   holdBodyField,
   keyBakeOf,
   keyWhollyCovered,
   measureBodyDescent,
+  measureWorldDescent,
   NoLandingSite,
   planFloors,
   siteCandidates,
@@ -342,6 +344,8 @@ class StubSession implements BodyDescentSession {
   table: Float64Array = TABLE;
   /** The store's failure of the field, if it failed. */
   failure: FieldFailure | null = null;
+  /** The section the server names where it answers the field `not_modelled` (R10.T15.b). */
+  notModelled: RecordSectionDto | null = null;
   readonly script: LaneScript = {
     bake: (key) => bakeOf(key, 1_900),
     failing: new Set(),
@@ -368,7 +372,12 @@ class StubSession implements BodyDescentSession {
     }
     const held = this.#held();
     return {
-      status: { reason: "local-body", pending: !held, notModelled: null, failure: this.failure },
+      status: {
+        reason: "local-body",
+        pending: !held,
+        notModelled: this.notModelled,
+        failure: this.failure,
+      },
       coverage: held ? this.coverage : null,
       header: held ? golden.header : null,
       stale: false,
@@ -725,6 +734,43 @@ function measure(session: StubSession): Promise<unknown> {
 function lanesTerminated(session: StubSession): boolean[] {
   return session.lanes.map(({ terminated }) => terminated);
 }
+
+describe("a served world's field (R10.T15.b)", () => {
+  it("says the server serves no surface where it answers the field not modelled", async () => {
+    const session = new StubSession();
+    session.heldAfter = Infinity;
+    session.notModelled = "surface";
+    const error = await rejectionOf(
+      holdBodyField(session, world, { viewId: VIEW, revision: 1, timeoutMs: 100, ...fakeClock() }),
+    );
+    expect(error).toBeInstanceOf(FieldNotServed);
+    expect([error.name, error.message, session.steps]).toEqual([
+      "FieldNotServed",
+      `the server serves no surface for ${golden.body}: its field is not modelled (surface)`,
+      1,
+    ]);
+  });
+
+  it("is measured once it holds any survey, at revision 1", async () => {
+    // One surveyed cell at revision 1 holds the field over a served world, where TERRAIN TEST's
+    // waits for revision 2; with no whole 3 × 3 block the measurement then finds no site.
+    const session = new StubSession();
+    session.coverage = coverageOf([4061]);
+    const served = { ...world, name: "served" } as const;
+    const error = await rejectionOf(
+      measureWorldDescent(session, served, 7n, new AbortController().signal),
+    );
+    expect(error).toBeInstanceOf(NoLandingSite);
+  });
+
+  it("is no field the test planet has", async () => {
+    const session = new StubSession();
+    const planet = { ...world, name: "test-planet" } as const;
+    await expect(
+      measureWorldDescent(session, planet, 7n, new AbortController().signal),
+    ).rejects.toThrow("the test planet has no field");
+  });
+});
 
 describe("the measurement's failures over a stand-in session", () => {
   it("rejects while holding the field once the store's ask fails, naming the server's message", async () => {

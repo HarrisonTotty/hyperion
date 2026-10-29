@@ -1,0 +1,56 @@
+/**
+ * A served world's answers over R03's fake socket (plan R10, R10.T15.b): the slice's Earth's scene,
+ * its sky's discs and its field, as the hand-over check's served world reads them.
+ */
+import type { BodyIdHex } from "@hyperion/protocol";
+
+import { TERRAIN_HOST_DISCS } from "../view/scenes/terrainScene";
+import {
+  fieldBlock,
+  fieldCover,
+  fieldPayload,
+  latestFieldAsk,
+  moonLikeHeader,
+  readyField,
+  sendFieldFrames,
+} from "./coarseFieldFixtures";
+import type { FakeWebSocket } from "./FakeWebSocket";
+import { stateNearEarth } from "./sceneFixture";
+import { skyResponse } from "./skyFixtures";
+
+/** Opens the latest `subscribe` on the ship's scene in the slice's Earth's frame. */
+export function answerServedScene(socket: FakeWebSocket): void {
+  socket.serverAnswers("subscribe", () => ({
+    kind: "subscribe",
+    subscription: 1,
+    state: { topic: "scene", ...stateNearEarth() },
+  }));
+}
+
+/** Answers the latest `sky` with no star and `TERRAIN TEST`'s disc. */
+export function answerServedSky(socket: FakeWebSocket): void {
+  socket.serverAnswers("sky", (body) => ({
+    kind: "sky",
+    ...skyResponse(body, new Uint8Array(0), 0, 0, 0),
+    hosts: [...TERRAIN_HOST_DISCS],
+  }));
+}
+
+/**
+ * Answers the latest `surface_field` for `body` with a Moon-like header at level 5 and `cells` cells
+ * from cell 0 at resolution code `code` (9, surveyed, unless given; 0 marks a margin), in one block
+ * over one frame.
+ */
+export function answerServedField(
+  socket: FakeWebSocket,
+  body: BodyIdHex,
+  cells: number,
+  code = 9,
+): void {
+  const { id } = latestFieldAsk(socket);
+  const bulk = sendFieldFrames(socket, id, fieldPayload([fieldBlock(64, 1)]), 64);
+  socket.serverResponds(
+    id,
+    readyField(moonLikeHeader(body), 1, fieldCover([0, cells, code]), bulk),
+  );
+}

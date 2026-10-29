@@ -397,6 +397,21 @@ describe("the hand-over check's files", () => {
     );
   });
 
+  it("are named -handover-served for a served world's run, its run block and summary naming it (R10.T15.b)", async () => {
+    const { files, written } = inMemory();
+    const served = { universe: "000000000000002a", body: "0200080020000000.0300" };
+    const { json, markdown } = await writeHandoverResults(
+      "/out",
+      buildHandoverCheckResults({ ...input(), run: { ...input().run, served } }),
+      files,
+    );
+    expect(json).toBe("/out/2026-10-21-effect-high-handover-served.json");
+    expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({ run: { served } });
+    expect(written.get(markdown)).toContain(
+      "- **Served world:** body `0200080020000000.0300` of universe `000000000000002a`, as the server serves it, in TERRAIN TEST's place",
+    );
+  });
+
   it("keep TERRAIN TEST's run block, and its summary, as before the option (R10.T1.c)", () => {
     const results = buildHandoverCheckResults(input());
     expect([

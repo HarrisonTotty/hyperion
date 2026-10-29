@@ -15,8 +15,9 @@
  * checks that the field was served, that every chunk came for the one request, in order, before
  * its terminal response, that the payload is whole against its manifest in frames of R03's size,
  * that it splits into R09's blocks ending at a block's end, and records its size against 15 MiB, 61
- * chunks: a body served at generator version 24 may not reach it (R09's header puts an Earth fully
- * surveyed at level 8 near 13.2 MB), and the check then records the payload it took.
+ * chunks: a body served may not reach it (an Earth-sized dry world fully surveyed at level 8 served
+ * 15,140,689 bytes in 58 chunks at generator version 23 with the serve gate opened in a scratch
+ * build, R10.T15.b's record), and the check then records the payload it took.
  */
 
 import {

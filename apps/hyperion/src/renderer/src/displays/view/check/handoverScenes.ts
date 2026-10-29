@@ -9,14 +9,17 @@
  *   look's scene and its session's fixture are made. {@link terrainTestHandoverWorld} is
  *   `TERRAIN TEST`'s: its star and moon, the moon's terrain served by the scene's fixture from the
  *   terrain golden, both survey passes at once; on a `--weathered` launch, `TEST MOON` weathered's
- *   field in its place, as `TERRAIN TEST WEATHERED` (plan R10, R10.T1.c's client half). T15's
- *   served world gives the same members from the server (its body's header, its coverage's
- *   middle) and its own scene and field source; the run (`handoverCheckRun.ts`) reads the world
- *   alone and is unchanged by it. That half is T15's.
- * - **Each look's scene** is `TERRAIN TEST`'s bodies with the moon held still at the look's rotation
- *   ({@link lookGeometry}) and the clock at one second a second, and the own ship, `TEST HULL`,
- *   flown along the look's line ({@link limbRatioAt}) looking at the moon's centre, its seat the
- *   camera's. Each look has its own fixture, so each choice of a look makes a fresh terrain session.
+ *   field in its place, as `TERRAIN TEST WEATHERED` (plan R10, R10.T1.c's client half).
+ *   {@link servedHandoverWorld} is a served world's (plan R10, R10.T15.b): the same members from the
+ *   server (its field header's relief and level, its coverage's surveyed cells and their middle,
+ *   its star's direction from the server's scene, its sky's host discs) and its own scene and field
+ *   source, the server's link (`servedHandover.ts` reads it). The run (`handoverCheckRun.ts`) reads
+ *   the world alone and is unchanged by either.
+ * - **Each look's scene** is the world's star and body ({@link LookBodies}) with the body held still
+ *   at the look's rotation ({@link lookGeometry}) and the clock at one second a second, and the own
+ *   ship, `TEST HULL`, flown along the look's line ({@link limbRatioAt}) looking at the body's
+ *   centre, its seat the camera's. Each look has its own fixture, so each choice of a look makes a
+ *   fresh terrain session.
  * - **The range** the lines are drawn at is the run's, measured on the primary's canvas
  *   ({@link handoverRangeAtM}) and set ({@link HandoverScenes.setRangeM}) before the run chooses a
  *   look. A look chosen by hand before then, on a shown launch, is drawn at the provisional range
@@ -28,10 +31,17 @@
  *   member of `SCENE_OPTIONS`.
  */
 
-import type { BodyIdHex } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  DetailSeedHex,
+  HostDiscDto,
+  SurfaceHeaderDto,
+  SystemIdHex,
+  UniverseIdHex,
+} from "@hyperion/protocol";
 
 import type { QualitySettingName, ViewsCheckTerrainFixture } from "../../../../../preload/api";
-import { scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
+import { add, norm, normalise, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
 import { DEFAULT_FOV_DEG } from "../../../view/camera/projection";
 import { handoverRangeM, handoverTauPx, pixelAngleRad } from "../../../view/terrain/handover";
 import type { BodyPhotometry, WireAppearance } from "../../../view/appearance/fromWire";
@@ -39,6 +49,10 @@ import type { CameraPose } from "../../../view/camera/pose";
 import { IDENTITY_QUATERNION, rotate } from "../../../view/camera/quaternion";
 import { SUN_RADIUS_M } from "../../../view/lighting/hostDisc";
 import { TEST_HULL } from "../../../view/scene/hull";
+import type { ServedBody } from "../../../view/scene/servedBody";
+import { type CoverageView, fieldCellAt, fieldCellCount } from "../../../view/terrain/coverage";
+import { PATCH_QUADS, vertexDir } from "../../../view/terrain/cube";
+import type { TerrainRequests } from "../../../view/terrain/session";
 import {
   bodyKindSymbol,
   staticRetarded,
@@ -63,7 +77,7 @@ import {
   terrainSystem,
   terrainTestGolden,
 } from "../../../view/scenes/terrainScene";
-import type { TerrainFixture } from "../useTerrainSession";
+import type { SurfaceEvents, TerrainFixture } from "../useTerrainSession";
 import type { SceneOption } from "../viewRun";
 import {
   approachDurationS,
@@ -124,38 +138,55 @@ const TERRAIN_TEST_SURVEY_MIDDLE = vec3(1, 1, 0.71);
 const VELOCITY_STEP_S = 0.05;
 
 /**
- * `TERRAIN TEST`'s moon at the look's rotation, on `fixture`'s field, the own ship on its line, at
- * script time `tS`.
+ * What a look's scene draws of its world: the star at the origin and the body about it, as the
+ * world gives them, `TERRAIN TEST`'s or a served one's.
  */
-function terrainLookSceneAt(
-  fixture: ViewsCheckTerrainFixture,
+export interface LookBodies {
+  readonly system: SystemIdHex;
+  readonly star: {
+    readonly id: BodyIdHex;
+    readonly designation: string;
+    readonly radiusM: number;
+  };
+  readonly body: {
+    readonly id: BodyIdHex;
+    readonly kind: "planet" | "dwarf_planet" | "moon";
+    readonly designation: string;
+    readonly figure: HandoverFigure;
+    readonly hillRadiusM: number;
+    readonly photometry: BodyPhotometry;
+    /** Its detail seed, which the terrain session takes in place of asking `body_detail`. */
+    readonly detailSeed?: DetailSeedHex;
+  };
+  /** The body's centre, m from the star along the galactic axes. */
+  readonly bodyCentreM: Vec3;
+  readonly hostDiscs: ReadonlyArray<HostDiscDto>;
+}
+
+/** The world's body at the look's rotation, the own ship on its line, at script time `tS`. */
+function lookSceneAt(
+  world: LookBodies,
   look: HandoverLook,
   geometry: LookGeometry,
   approach: HandoverApproach,
-  photometry: BodyPhotometry,
   tS: number,
 ): ViewScene {
-  const golden = terrainTestGolden(fixture);
-  const { header } = golden;
   const appearance: WireAppearance = {
-    photometry,
-    figure: {
-      equatorialRadiusM: header.equatorial_radius_m,
-      polarRadiusM: header.polar_radius_m,
-      pole: geometry.pole,
-    },
+    photometry: world.body.photometry,
+    figure: { ...world.body.figure, pole: geometry.pole },
     labels: [],
     bondRatioFinding: null,
   };
-  const star = terrainStar(fixture);
-  const moon = golden.body;
+  const star = world.star.id;
+  const moon = world.body.id;
+  const centreM = world.bodyCentreM;
   const bodies: ViewBody[] = [
     {
       id: star,
       parent: null,
       kind: "star",
-      designation: "TEST STAR",
-      radiusM: SUN_RADIUS_M,
+      designation: world.star.designation,
+      radiusM: world.star.radiusM,
       hillRadiusM: null,
       centreM: vec3(0, 0, 0),
       retarded: staticRetarded(vec3(0, 0, 0)),
@@ -167,19 +198,20 @@ function terrainLookSceneAt(
     {
       id: moon,
       parent: star,
-      kind: "moon",
-      designation: "TEST MOON",
-      radiusM: header.equatorial_radius_m,
-      hillRadiusM: TERRAIN_MOON_HILL_M,
-      centreM: TERRAIN_MOON_CENTRE_M,
-      retarded: staticRetarded(TERRAIN_MOON_CENTRE_M),
+      kind: world.body.kind,
+      designation: world.body.designation,
+      radiusM: world.body.figure.equatorialRadiusM,
+      hillRadiusM: world.body.hillRadiusM,
+      centreM,
+      retarded: staticRetarded(centreM),
       rotation: geometry.rotation,
       appearance,
-      symbol: bodyKindSymbol("moon"),
+      symbol: bodyKindSymbol(world.body.kind),
       orbitNormal: null,
-      detailSeed: golden.seed,
+      ...(world.body.detailSeed === undefined ? {} : { detailSeed: world.body.detailSeed }),
     },
   ];
+  // The camera's line is the body's, about its centre: the scene's own place, the star's at the origin.
   const placeAt = (s: number): Vec3 => cameraOnLineM(geometry, limbRatioAt(approach, s));
   const place = placeAt(tS);
   const before = Math.max(tS - VELOCITY_STEP_S, 0);
@@ -197,7 +229,7 @@ function terrainLookSceneAt(
     provenance: { kind: "kept", name: look.scene },
     time: keptTime(tS),
     timeRate: 1,
-    system: terrainSystem(fixture),
+    system: world.system,
     barycentre: KEPT_BARYCENTRE,
     tidalRadiusM: KEPT_TIDAL_RADIUS_M,
     bodies,
@@ -223,6 +255,33 @@ function terrainLookSceneAt(
       positionM: TEST_HULL.eyePointM,
       orientation: IDENTITY_QUATERNION,
     },
+    hostDiscs: world.hostDiscs,
+  };
+}
+
+/** `TERRAIN TEST`'s star and moon on `fixture`'s field, with `photometry`, for its looks' scenes. */
+function terrainLookBodies(
+  fixture: ViewsCheckTerrainFixture,
+  photometry: BodyPhotometry,
+): LookBodies {
+  const golden = terrainTestGolden(fixture);
+  const { header } = golden;
+  return {
+    system: terrainSystem(fixture),
+    star: { id: terrainStar(fixture), designation: "TEST STAR", radiusM: SUN_RADIUS_M },
+    body: {
+      id: golden.body,
+      kind: "moon",
+      designation: "TEST MOON",
+      figure: {
+        equatorialRadiusM: header.equatorial_radius_m,
+        polarRadiusM: header.polar_radius_m,
+      },
+      hillRadiusM: TERRAIN_MOON_HILL_M,
+      photometry,
+      detailSeed: golden.seed,
+    },
+    bodyCentreM: TERRAIN_MOON_CENTRE_M,
     hostDiscs: TERRAIN_HOST_DISCS,
   };
 }
@@ -252,6 +311,7 @@ export function terrainTestHandoverWorld(
   // Its crust's photometry, made once for every frame of every look: the weathered field's from its
   // golden's crust_albedo (`terrainMoonPhotometry`).
   const photometry = terrainMoonPhotometry(header, golden.maturity);
+  const bodies = terrainLookBodies(fixture, photometry);
   return {
     name: HANDOVER_WORLD_NAMES[fixture],
     body: golden.body,
@@ -265,7 +325,7 @@ export function terrainTestHandoverWorld(
     scene: (look, geometry, approach): KeptScene => ({
       name: look.scene,
       durationS: approachDurationS(approach),
-      sceneAt: (tS) => terrainLookSceneAt(fixture, look, geometry, approach, photometry, tS),
+      sceneAt: (tS) => lookSceneAt(bodies, look, geometry, approach, tS),
       cameraAt: (): CameraPose => {
         const attitude = lookAttitude(geometry);
         return {
@@ -282,6 +342,121 @@ export function terrainTestHandoverWorld(
         deltaAtS: 0,
         chunkIntervalMs: 0,
       }),
+  };
+}
+
+/**
+ * A survey's middle, body-fixed: the mean direction of its surveyed cells' centres, or, for a
+ * survey whose cells balance about the centre, as one of the whole body does (its mean shorter than
+ * {@link WHOLE_SURVEY_MEAN} of a unit), `TERRAIN TEST`'s middle astride the edge of the cube's faces
+ * +x and +y, which any whole survey holds (a lean of R10.T15.b.1's record).
+ */
+export function surveyMiddleOf(coverage: Pick<CoverageView, "level" | "resolutionAtM">): Vec3 {
+  const { level } = coverage;
+  let sum = vec3(0, 0, 0);
+  let cells = 0;
+  for (let index = 0; index < fieldCellCount(level); index += 1) {
+    const cell = fieldCellAt(level, index);
+    if (coverage.resolutionAtM(cell) === null) {
+      continue;
+    }
+    // The cell's centre: the middle vertex of its 64 quads a side.
+    const [x, y, z] = vertexDir(cell, PATCH_QUADS / 2, PATCH_QUADS / 2);
+    sum = add(sum, vec3(x, y, z));
+    cells += 1;
+  }
+  return cells > 0 && norm(sum) > WHOLE_SURVEY_MEAN * cells
+    ? normalise(sum)
+    : normalise(TERRAIN_TEST_SURVEY_MIDDLE);
+}
+
+/** The mean's length below which a survey is taken as one about the whole body, of a unit. */
+export const WHOLE_SURVEY_MEAN = 0.1;
+
+/** The cells a coverage holds surveyed: its mask's texels, a cell each, that are surveyed. */
+export function coverageSurveyedCells(coverage: Pick<CoverageView, "maskTexels">): number {
+  return coverage.maskTexels().reduce((count, texel) => count + (texel === 0 ? 0 : 1), 0);
+}
+
+/** The server's link a served world's looks ask through: its requests and its surface events. */
+export interface ServedLink {
+  readonly requests: TerrainRequests;
+  readonly onSurface: SurfaceEvents;
+}
+
+/** What a served hand-over world is made of (plan R10, R10.T15.b): `servedHandover.ts` reads it. */
+export interface ServedHandoverInput {
+  /** The body as the server's scene draws it, with its star. */
+  readonly served: ServedBody;
+  /** Its system's discs, from the server's sky. */
+  readonly hostDiscs: ReadonlyArray<HostDiscDto>;
+  /** Its field's header and coverage, as the server answers them: the survey the looks judge. */
+  readonly header: SurfaceHeaderDto;
+  readonly coverage: CoverageView;
+  /** The link every look's terrain session asks through, for the world's life. */
+  readonly link: ServedLink;
+}
+
+/**
+ * A served world's hand-over world (plan R10, R10.T15.b): the body the server serves, named by its
+ * designation, its figure, relief and level its field header's, its surveyed cells and their middle
+ * ({@link surveyMiddleOf}) its coverage's, its star where the server's scene draws it, and each look's
+ * scene its star and body ({@link LookBodies}), lit by its sky's discs, with no detail seed, which
+ * the session asks the server for; each look's fixture is the server's link, which no look closes.
+ */
+export function servedHandoverWorld(input: ServedHandoverInput): HandoverWorld {
+  const { served, header, coverage, link } = input;
+  const figure: HandoverFigure = {
+    equatorialRadiusM: header.equatorial_radius_m,
+    polarRadiusM: header.polar_radius_m,
+  };
+  const bodies: LookBodies = {
+    system: served.system,
+    star: {
+      id: served.star.id,
+      designation: served.star.designation,
+      radiusM: served.star.radiusM,
+    },
+    body: {
+      id: served.body.id,
+      kind: served.kind,
+      designation: served.body.designation,
+      figure,
+      hillRadiusM: served.hillRadiusM,
+      photometry: served.appearance.photometry,
+    },
+    bodyCentreM: scale(served.towardStarM, -1),
+    hostDiscs: input.hostDiscs,
+  };
+  const universe: UniverseIdHex = served.universe;
+  return {
+    name: served.body.designation,
+    body: served.body.id,
+    figure,
+    reliefM: header.realised_relief_m,
+    cellLevel: header.level,
+    surveyedCells: coverageSurveyedCells(coverage),
+    surveyMiddle: surveyMiddleOf(coverage),
+    towardStarM: served.towardStarM,
+    eyePointM: TEST_HULL.eyePointM,
+    scene: (look, geometry, approach): KeptScene => ({
+      name: look.scene,
+      durationS: approachDurationS(approach),
+      sceneAt: (tS) => lookSceneAt(bodies, look, geometry, approach, tS),
+      cameraAt: (): CameraPose => {
+        const attitude = lookAttitude(geometry);
+        return {
+          frame: { kind: "craft", craft: TERRAIN_TEST_SHIP },
+          positionM: rotate(attitude, TEST_HULL.eyePointM),
+          orientation: attitude,
+        };
+      },
+    }),
+    fixture: (): TerrainFixture => ({
+      universe,
+      // The link is the launch's; a look's session neither opens nor closes it.
+      open: () => ({ requests: link.requests, onSurface: link.onSurface, close: () => undefined }),
+    }),
   };
 }
 

@@ -56,7 +56,7 @@ import {
 import { type BodyFigure, planetGeometry, spheroidNormal } from "../terrain/planet";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 import type { DescentPose, DescentProfile } from "./descentProfile";
-import { SPIKE_PLANET, type SpikeWorld, TEST_PLANET_WORLD } from "./spikeWorld";
+import { SPIKE_PLANET, type SpikeWorld, TEST_PLANET_WORLD, timeAfter } from "./spikeWorld";
 
 /** The spike scene's name, as the label block's `SCENE` line shows it. */
 export const SPIKE_SCENE_NAME = "DESCENT SPIKE";
@@ -127,7 +127,10 @@ export function postSyntheticField(pool: Pick<HeightWorkerPool, "fieldInit" | "f
  */
 export const SPIKE_SUN_ANGULAR_RADIUS_RAD = 0.004_650_5;
 
-/** The star's nominal radius, m (IAU 2015 Resolution B3). */
+/**
+ * The Sun's nominal radius R☉ᴺ, m (IAU 2015 Resolution B3): the star's radius where the world
+ * states none, as the test planet and `TERRAIN TEST` do.
+ */
 const SUN_RADIUS_M = 6.957e8;
 
 /** The craft's bounding radius, m: the test hull's farthest vertex from its reference point. */
@@ -350,14 +353,16 @@ function remainingPath(
  * @remarks
  * A generated world's body carries its appearance and detail seed, which the terrain session takes
  * in place of asking `body_detail`, and the scene its host discs; the test planet's carries
- * neither, as T13.b built it.
+ * neither, as T13.b built it. A served world's body carries no detail seed, which the session asks
+ * the server for, and stands at its own distance from a star of its own radius (R10.T15.b); every
+ * other world's at 1 au from a star of the Sun's.
  */
 export function spikeScene(
   profile: DescentProfile,
   world: SpikeWorld = TEST_PLANET_WORLD,
 ): KeptScene {
   const sunBody = sunDirectionBody(profile, world);
-  const planetCentreM = scale(sunBody, -AU_M);
+  const planetCentreM = scale(sunBody, -(world.starDistanceM ?? AU_M));
   return {
     name: SPIKE_SCENE_NAME,
     durationS: profile.durationS,
@@ -369,7 +374,8 @@ export function spikeScene(
       const velocity = rotateToBody(rotation, pose.velocityMps);
       return {
         provenance: { kind: "kept", name: SPIKE_SCENE_NAME },
-        time: keptTime(tS),
+        // A served world's clock counts from the scene's time it was read at (R10.T15.b).
+        time: world.epoch === undefined ? keptTime(tS) : timeAfter(world.epoch, tS),
         timeRate: 1,
         system: world.system,
         barycentre: KEPT_BARYCENTRE,
@@ -380,7 +386,7 @@ export function spikeScene(
             parent: null,
             kind: "star",
             designation: world.starDesignation,
-            radiusM: SUN_RADIUS_M,
+            radiusM: world.starRadiusM ?? SUN_RADIUS_M,
             hillRadiusM: null,
             centreM: vec3(0, 0, 0),
             retarded: staticRetarded(vec3(0, 0, 0)),

@@ -44,6 +44,37 @@ describe("the spike's switch", () => {
   });
 });
 
+/** A served world's launch (R10.T15.b): its universe and body, place-ship's placement's. */
+const SERVED: SpikeLaunch = {
+  ...LAUNCH,
+  ridged: "off",
+  vertexPath: null,
+  normals: null,
+  world: "served",
+  served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+};
+
+describe("a served world's launch (R10.T15.b)", () => {
+  it("carries its universe and body to the preload", () => {
+    expect(spikeLaunchFromArgv([spikeSwitch(SERVED)])).toEqual(SERVED);
+    expect(readSpikeLaunch({ ...SERVED, sizes: "on" })).toEqual({ ...SERVED, sizes: "on" });
+  });
+
+  it.each([
+    [{ served: undefined }],
+    [{ served: { universe: "3504954ff4feabf4" } }],
+    [{ served: { universe: "3504954FF4FEABF4", body: "61ffd967fe000023.0100" } }],
+    [{ served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023" } }],
+    [{ style: null }],
+  ])("refuses a served launch with %j", (change) => {
+    expect(readSpikeLaunch({ ...SERVED, ...change })).toBeNull();
+  });
+
+  it("refuses a served world's names on any other world", () => {
+    expect(readSpikeLaunch({ ...LAUNCH, served: SERVED.served })).toBeNull();
+  });
+});
+
 describe("readSpikeLaunch", () => {
   it("reads valid options", () => {
     expect(readSpikeLaunch({ ...LAUNCH, seed: DEFAULT_SPIKE_SEED })).toEqual({

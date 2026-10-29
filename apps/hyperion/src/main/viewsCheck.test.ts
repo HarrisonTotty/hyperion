@@ -481,6 +481,22 @@ describe("a hand-over check's session (R10.T10.g)", () => {
     expect(handoverWritten[0]?.overall).toBe("pass");
   });
 
+  it("records the served world of a --universe --body launch (R10.T15.b)", async () => {
+    const served = { universe: "000000000000002a", body: "0200080020000000.0300" };
+    const { session: run, handoverWritten } = handoverSession({
+      launch: {
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "handover",
+        fixture: "terrain-test",
+        served,
+      },
+    });
+    await run.writeHandoverResults(HANDOVER_RECORD);
+    expect(handoverWritten[0]?.run.served).toEqual(served);
+  });
+
   it("records the weathered fixture of a --weathered launch, and none of TERRAIN TEST's (R10.T1.c)", async () => {
     const plain = handoverSession();
     const weathered = handoverSession({

@@ -20,14 +20,16 @@
  * in the trace, off by default; a profiled run is a diagnostic, never judged). Each of its own is
  * refused without the flag.
  *
- * `--world test-planet|terrain-test` is the world it flies (plan R10, R10.T14.c): R05's test planet
- * by default, or `TERRAIN TEST`'s moon, whose field the fixture serves through `VIEW`'s terrain
- * session. `--style photorealistic|wireframe` is the style the terrain world's main view draws in
- * through `VIEW`'s frame drawer, photorealistic by default; a test-planet run's launch records no
- * style (`SpikeLaunch.style` `null`). Three pairings are refused: `--style`
+ * `--world test-planet|terrain-test|served` is the world it flies (plan R10, R10.T14.c): R05's test
+ * planet by default, or `TERRAIN TEST`'s moon, whose field the fixture serves through `VIEW`'s
+ * terrain session, or a generated body the server at `--address` and `--port` serves (`served`,
+ * R10.T15.b), named by `--universe <ID>` and `--body <ID>`, which `--world served` needs and no
+ * other world takes. `--style photorealistic|wireframe` is the style a generated world's main view
+ * draws in through `VIEW`'s frame drawer, photorealistic by default; a test-planet run's launch
+ * records no style (`SpikeLaunch.style` `null`). Three pairings are refused: `--style`
  * with the test planet, whose main view is the spike's own lit view (`SPIKE LIT`); `--ridged on`
- * with the terrain world, since the ridges are the test planet's; and `--vertex-path` or
- * `--normals` with the terrain world, whose session's passes take the setting's own terrain, until
+ * with a generated world, since the ridges are the test planet's; and `--vertex-path` or
+ * `--normals` with a generated world, whose session's passes take the setting's own terrain, until
  * a later task gives them the variants.
  *
  * `--sizes on|off` measures the terrain caches' sizes (plan R10, R10.T14.b;
@@ -50,7 +52,10 @@
  * weathered's field (`terrain_test_weathered.golden`: the moon on a 1 Gyr surface, its young
  * craters ringed by haloes of fresh regolith) in `TERRAIN TEST`'s place (`ViewsCheckLaunch.fixture`),
  * and its results are named `…-terrain-weathered` or `…-handover-weathered`; `--weathered` is
- * refused without `--terrain`, as `--handover` is. With `--atmosphere` instead (plan R08,
+ * refused without `--terrain`, as `--handover` is. With `--universe <ID>` and `--body <ID>` (plan
+ * R10, R10.T15.b) the hand-over check's looks are made on that body as the server serves it, in
+ * `TERRAIN TEST`'s place: both or neither, on `--terrain --handover` alone, never with
+ * `--weathered`. With `--atmosphere` instead (plan R08,
  * R08.T10.b) it runs the atmosphere run on `ATMOSPHERE TEST`, at its `--setting`: the primary
  * photorealistic, its atmosphere media awaited, the moonlit night captured from the seat, then a
  * scripted free-camera flight to a few radii of each air fixture, each captured. `--atmosphere` is
@@ -64,8 +69,14 @@
 
 import { Command, InvalidArgumentError, Option } from "commander";
 
-import type { QualitySettingName } from "../preload/api";
-import { DEFAULT_SPIKE_SEED, isU64Decimal, type SpikeLaunch } from "../preload/spikeLaunch";
+import type { QualitySettingName, ServedWorldNames } from "../preload/api";
+import {
+  DEFAULT_SPIKE_SEED,
+  isBodyIdText,
+  isU64Decimal,
+  isUniverseId,
+  type SpikeLaunch,
+} from "../preload/spikeLaunch";
 import type { ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
 
 /** The variable giving the address of the server to link to, for `--address`. */
@@ -114,10 +125,12 @@ const SPIKE_OPTIONS = [
   "world",
   "style",
   "sizes",
+  "universe",
+  "body",
 ] as const;
 
 /** The spike's options that `--views-check` takes too. */
-const VIEWS_CHECK_OPTIONS = ["setting", "smoke", "out"] as const;
+const VIEWS_CHECK_OPTIONS = ["setting", "smoke", "out", "universe", "body"] as const;
 
 /** Reads a `--seed` value: a u64 in decimal. */
 export function parseSeed(value: string): string {
@@ -134,6 +147,22 @@ export function parseWorkers(value: string): number {
     throw new InvalidArgumentError("expected a worker count from 1 to 64");
   }
   return workers;
+}
+
+/** Reads a `--universe` value: a universe's ID, 16 lowercase hexadecimal digits. */
+export function parseUniverse(value: string): string {
+  if (!isUniverseId(value)) {
+    throw new InvalidArgumentError("expected a universe's ID, 16 lowercase hexadecimal digits");
+  }
+  return value;
+}
+
+/** Reads a `--body` value: a body's ID, such as `61ffd967fe000023.0100`. */
+export function parseBody(value: string): string {
+  if (!isBodyIdText(value)) {
+    throw new InvalidArgumentError("expected a body's ID, such as 61ffd967fe000023.0100");
+  }
+  return value;
 }
 
 /** Reads a directory argument: any non-empty path. */
@@ -276,13 +305,26 @@ export function buildCommand(version: string): Command {
       new Option("--world <WORLD>", "the world the spike flies (default test-planet)").choices([
         "test-planet",
         "terrain-test",
+        "served",
       ]),
     )
     .addOption(
       new Option(
         "--style <STYLE>",
-        "the style the terrain world's main view draws in (default photorealistic)",
+        "the style a generated world's main view draws in (default photorealistic)",
       ).choices(["photorealistic", "wireframe"]),
+    )
+    .addOption(
+      new Option(
+        "--universe <ID>",
+        "the served world's universe (--world served, or the hand-over check's)",
+      ).argParser(parseUniverse),
+    )
+    .addOption(
+      new Option(
+        "--body <ID>",
+        "the served world's body (--world served, or the hand-over check's)",
+      ).argParser(parseBody),
     )
     .addOption(
       new Option("--sizes <ON>", "measure the terrain world's cache sizes (default off)").choices([
@@ -337,6 +379,10 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
       command.error(`error: --${kebab(stray)} is an option of --descent-spike, not --views-check`);
     }
     const viewsCheck = viewsCheckLaunchOf(options);
+    const servedRefusal = viewsCheckServedRefusal(options, viewsCheck);
+    if (servedRefusal !== null) {
+      command.error(`error: ${servedRefusal}`);
+    }
     return { address, port, setting: viewsCheck.setting, viewsCheck };
   }
   if (options["descentSpike"] !== true) {
@@ -368,36 +414,68 @@ function settingOf(options: Readonly<Record<string, unknown>>): QualitySettingNa
 }
 
 /**
- * Why the spike's options cannot fly together on their world (R10.T14.c, R10.T14.b), or `null`
- * where they can: `--style` or `--sizes on` with the test planet, `--ridged on` with the terrain
- * world, or the terrain variants with it.
+ * Why the spike's options cannot fly together on their world (R10.T14.c, R10.T14.b, R10.T15.b), or
+ * `null` where they can: `--style` or `--sizes on` with the test planet, `--ridged on` with a
+ * generated world, or the terrain variants with it; `--universe` and `--body` with any world but
+ * the served one, which needs both.
  */
 function worldRefusal(
   options: Readonly<Record<string, unknown>>,
   spike: SpikeLaunch,
 ): string | null {
+  const named = options["universe"] !== undefined || options["body"] !== undefined;
+  if (spike.world !== "served" && named) {
+    const given = options["universe"] !== undefined ? "--universe" : "--body";
+    return `${given} is an option of --world served: it names the served world`;
+  }
   let refusal: string | null;
   switch (spike.world) {
     case "test-planet":
       refusal =
         options["style"] !== undefined
-          ? "--style is an option of --world terrain-test: the test planet's main view is the spike's own lit view, SPIKE LIT"
+          ? "--style is an option of a generated world, --world terrain-test or served: the test planet's main view is the spike's own lit view, SPIKE LIT"
           : spike.sizes === "on"
-            ? "--sizes on is an option of --world terrain-test: the measured sizes are the terrain session's caches"
+            ? "--sizes on is an option of a generated world, --world terrain-test or served: the measured sizes are the terrain session's caches"
             : null;
       break;
-    case "terrain-test": {
+    case "terrain-test":
+    case "served": {
       const variant = spike.vertexPath !== null ? "--vertex-path" : "--normals";
       refusal =
-        spike.ridged === "on"
-          ? "--ridged on does not fit --world terrain-test: the ridges are the test planet's"
-          : spike.vertexPath === null && spike.normals === null
-            ? null
-            : `${variant} does not fit --world terrain-test yet: its terrain session's passes take the setting's own terrain`;
+        spike.world === "served" && spike.served === undefined
+          ? "--world served needs --universe and --body: the universe and the body the server serves"
+          : spike.ridged === "on"
+            ? `--ridged on does not fit --world ${spike.world}: the ridges are the test planet's`
+            : spike.vertexPath === null && spike.normals === null
+              ? null
+              : `${variant} does not fit --world ${spike.world} yet: its terrain session's passes take the setting's own terrain`;
       break;
     }
   }
   return refusal;
+}
+
+/**
+ * Why a views-check launch's served world cannot be checked (plan R10, R10.T15.b), or `null`: its
+ * `--universe` and `--body` both or neither, and both only on `--terrain --handover`, not
+ * `--weathered`.
+ */
+function viewsCheckServedRefusal(
+  options: Readonly<Record<string, unknown>>,
+  launch: ViewsCheckLaunch,
+): string | null {
+  const universe = options["universe"] !== undefined;
+  const body = options["body"] !== undefined;
+  if (!universe && !body) {
+    return null;
+  }
+  if (launch.run !== "handover") {
+    return "--universe and --body are options of --terrain --handover: the hand-over check's served world";
+  }
+  if (launch.fixture !== "terrain-test") {
+    return "--weathered does not fit a served world: the body is the server's, not a fixture";
+  }
+  return universe && body ? null : "the hand-over check's served world needs --universe and --body";
 }
 
 /** A commander attribute name as its option: `vertexPath` is `vertex-path`. */
@@ -423,7 +501,20 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
             ? "handover"
             : "terrain",
     fixture: options["weathered"] === true ? "terrain-test-weathered" : "terrain-test",
+    // Both or neither, which `viewsCheckServedRefusal` holds the launch to.
+    ...servedOf(options),
   };
+}
+
+/** The served world `--universe` and `--body` name where both are given, else nothing. */
+function servedOf(
+  options: Readonly<Record<string, unknown>>,
+): { readonly served: ServedWorldNames } | Record<string, never> {
+  const universe = options["universe"];
+  const body = options["body"];
+  return typeof universe === "string" && typeof body === "string"
+    ? { served: { universe, body } }
+    : {};
 }
 
 /** The spike's options, each parsed and checked by commander, with their defaults. */
@@ -435,7 +526,8 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
   const workers = options["workers"];
   const vertexPath = text("vertexPath");
   const normals = text("normals");
-  const world = text("world") === "terrain-test" ? "terrain-test" : "test-planet";
+  const named = text("world");
+  const world = named === "terrain-test" || named === "served" ? named : "test-planet";
   return {
     setting: settingOf(options),
     seed: text("seed") ?? DEFAULT_SPIKE_SEED,
@@ -459,6 +551,8 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
           : "photorealistic",
     // Absent when off, so that an unmeasured launch's options, and its results file's, are as before.
     ...(text("sizes") === "on" ? { sizes: "on" as const } : {}),
+    // The served world's, which `worldRefusal` holds to `--world served`.
+    ...servedOf(options),
   };
 }
 

@@ -3,15 +3,17 @@
 # after a build. It starts a local hyperion-server with its pool capped at two workers, runs the
 # built client with `--descent-spike` and the spike's options, and stops everything it started.
 #
-#   descentSpike.sh [--companion-load <threads>] [--cold-cache] [--hidden] [spike options...]
+#   descentSpike.sh [--companion-load <threads>] [--cold-cache] [--hidden]
+#                   [--universe <NAME|ID>] [--body <BODY_ID>] [--survey <SOURCE> <RESOLUTION_M>]
+#                   [--distance <AU>] [spike options...]
 #
 # Spike options (the client's, `src/main/cli.ts`): --setting high|low, --seed <u64>, --smoke,
 # --out <dir>, --workers <n>, --vertex-path baked-offsets|face-differences, --normals double|mesh,
 # --ridged on|off, --dawn-safety on|off, --capture <dir>, --trace-profile on|off (V8's CPU profiler
 # and `gpu` in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e),
-# --world test-planet|terrain-test and --style photorealistic|wireframe (R10.T14.c), and
-# --sizes on|off (R10.T14.b: the terrain world's cache sizes measured, off by default; refused on
-# the test planet).
+# --world test-planet|terrain-test|served and --style photorealistic|wireframe (R10.T14.c,
+# R10.T15.b), and --sizes on|off (R10.T14.b: a generated world's cache sizes measured, off by
+# default; refused on the test planet).
 #
 # --world test-planet, the default, flies R05's test planet. --world terrain-test flies TERRAIN
 # TEST's moon over a generated world's terrain: its field is served in the page by TERRAIN TEST's
@@ -21,7 +23,19 @@
 # measures its descent through the session before it flies (about 1,600 bakes, some 40 s on three
 # workers), so its run is given 13 minutes more: the field's 2-minute hold and one site's 10 minutes
 # of bakes at their limits, and a minute's margin. The client refuses --style on the test planet,
-# and --ridged on, --vertex-path and --normals on the terrain world.
+# and --ridged on, --vertex-path and --normals on a generated world.
+#
+# --world served flies a generated body this script's server serves (plan R10, R10.T15.b). The
+# script builds the server and waits for it, then places the ship with `just place-ship` (its
+# `--json` placement): at --body (place-ship's default without it, the first planet of the nearest
+# system with one) in --universe (place-ship's dev universe without it), at --distance au if given
+# (half the body's Hill radius at pericentre without it), surveying every cell of the body's coarse
+# field (--survey, orbital at 50 m by default), and hands the client the placement's universe and
+# body as its own --universe and --body. Its run is given 21 minutes more: the field's 10-minute
+# hold, since the server computes the body's coarse field before its first answer, one site's 10
+# minutes of bakes, and a minute. Behind the serve gate (`GENERATED_SURFACES_FROM`, generator
+# version 24) the server answers every generated body's field not modelled, and the spike says so
+# and ends failed.
 #
 # --companion-load <threads> runs that many busy threads beside the run, standing in for the
 # server's arrival work (Design note 20). --cold-cache starts with an empty Chromium GPU shader
@@ -51,6 +65,11 @@ port="${HYPERION_SPIKE_PORT:-7879}"
 companion=0
 cold=0
 hidden=0
+universe=""
+body=""
+survey_source=orbital
+survey_resolution=50
+distance=""
 spike_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -58,6 +77,10 @@ while [[ $# -gt 0 ]]; do
         --companion-load=*) companion="${1#--companion-load=}"; shift ;;
         --cold-cache) cold=1; shift ;;
         --hidden) hidden=1; shift ;;
+        --universe) universe="$2"; shift 2 ;;
+        --body) body="$2"; shift 2 ;;
+        --survey) survey_source="$2"; survey_resolution="$3"; shift 3 ;;
+        --distance) distance="$2"; shift 2 ;;
         *) spike_args+=("$1"); shift ;;
     esac
 done
@@ -67,6 +90,7 @@ if ! [[ "$companion" =~ ^[0-9]+$ ]]; then
 fi
 smoke=0
 terrain=0
+served=0
 previous=""
 for arg in ${spike_args[@]+"${spike_args[@]}"}; do
     if [[ "$arg" == --smoke ]]; then
@@ -75,8 +99,15 @@ for arg in ${spike_args[@]+"${spike_args[@]}"}; do
     if [[ "$arg" == --world=terrain-test || ( "$previous" == --world && "$arg" == terrain-test ) ]]; then
         terrain=1
     fi
+    if [[ "$arg" == --world=served || ( "$previous" == --world && "$arg" == served ) ]]; then
+        served=1
+    fi
     previous="$arg"
 done
+if [[ $served -eq 0 && ( -n "$universe" || -n "$body" || -n "$distance" ) ]]; then
+    echo "descentSpike.sh: --universe, --body and --distance are options of --world served" >&2
+    exit 2
+fi
 
 profile=""
 spool=""
@@ -95,12 +126,47 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # The client's watchdog ends a run first (status 3): 3 minutes for a smoke and 45 for a descent,
-# each 13 more on the terrain world (`spikeWatchdogMs`), so that this limit stays above it.
-limit=$(( (smoke == 1 ? 300 : 3600) + (terrain == 1 ? 780 : 0) ))
+# each 13 more on the terrain world and 21 more on a served one (`spikeWatchdogMs`), so that this
+# limit stays above it.
+limit=$(( (smoke == 1 ? 300 : 3600) + (terrain == 1 ? 780 : 0) + (served == 1 ? 1260 : 0) ))
+if [[ $served -eq 1 ]]; then
+    # Built first, so that the server is up within seconds of starting and the ship can be placed.
+    cargo build --release --quiet --manifest-path "$repo/Cargo.toml" -p hyperion-server
+fi
 setsid timeout --kill-after=10 "$(( limit + 60 ))" \
     cargo run --release --quiet --manifest-path "$repo/Cargo.toml" -p hyperion-server -- \
     --num-workers 2 --port "$port" >/dev/null 2>&1 &
 groups+=("$!")
+
+if [[ $served -eq 1 ]]; then
+    place=(--port "$port" --json --survey "$survey_source" "$survey_resolution")
+    if [[ -n "$universe" ]]; then
+        place+=(--universe "$universe")
+    fi
+    if [[ -n "$body" ]]; then
+        place+=(--look-at "$body")
+    fi
+    if [[ -n "$distance" ]]; then
+        place+=(--distance "$distance")
+    fi
+    # place-ship fails at once until the server listens, a few seconds after it starts.
+    placement=""
+    for (( try = 0; try < 60; try++ )); do
+        if placement="$(cd "$here" && node scripts/placeShip.mjs "${place[@]}" 2>/dev/null)"; then
+            break
+        fi
+        placement=""
+        sleep 1
+    done
+    if [[ -z "$placement" ]]; then
+        echo "descentSpike.sh: place-ship could not place the ship on the server at port $port:" >&2
+        (cd "$here" && node scripts/placeShip.mjs "${place[@]}") >&2 || true
+        exit 2
+    fi
+    ids="$(node -e 'const p = JSON.parse(process.argv[1]); process.stdout.write(`${p.universe.id} ${p.body}`);' "$placement")"
+    echo "descent spike: served world body ${ids#* } in universe ${ids% *}, $survey_source survey at $survey_resolution m"
+    spike_args+=(--universe "${ids% *}" --body "${ids#* }")
+fi
 
 for (( i = 0; i < companion; i++ )); do
     setsid timeout --kill-after=10 "$(( limit + 60 ))" bash -c 'while :; do :; done' &

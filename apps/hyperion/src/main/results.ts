@@ -314,14 +314,20 @@ export interface RunDescription {
 /**
  * A launch's options as its run records them ({@link RunDescription.options}): every option it
  * holds, those it holds as `null` left out. An unmeasured launch holds no `sizes` (R10.T14.b), so
- * that its options are as they were before the option, and a `--sizes on` launch's say `on`.
+ * that its options are as they were before the option, and a `--sizes on` launch's say `on`. A
+ * served world's launch (R10.T15.b) records its universe and body as the options `universe` and
+ * `body`, as the command line gave them.
  */
 export function runOptionsOf(launch: SpikeLaunch): RunDescription["options"] {
-  return Object.fromEntries(
-    Object.entries(launch).filter(
-      (entry): entry is [string, string | number | boolean] => entry[1] !== null,
+  const { served, ...flat } = launch;
+  return {
+    ...Object.fromEntries(
+      Object.entries(flat).filter(
+        (entry): entry is [string, string | number | boolean] => entry[1] !== null,
+      ),
     ),
-  );
+    ...(served === undefined ? {} : { universe: served.universe, body: served.body }),
+  };
 }
 
 /** Memory at one instant of a run (Design note 18). */
@@ -1659,9 +1665,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       timer: report.timer,
       tolerancePerPassMs,
       untimedPasses:
-        run.world === "terrain-test"
-          ? missing(UNTIMED_NOT_COUNTED)
-          : measured(report.untimedPasses),
+        run.world === "test-planet" ? measured(report.untimedPasses) : missing(UNTIMED_NOT_COUNTED),
       passes,
       sumP95Ms,
       rows,
@@ -1857,7 +1861,7 @@ export function validateResults(value: unknown): string[] {
     }
     if (worldOfRun(run) === null) {
       problems.push(
-        "run.world is not test-planet or terrain-test, or run.style not its world's: none on test-planet, photorealistic or wireframe on terrain-test",
+        "run.world is not test-planet, terrain-test or served, or run.style not its world's: none on test-planet, photorealistic or wireframe on a generated world",
       );
     }
     checkLoadAverage(run, problems);
@@ -1907,7 +1911,8 @@ export function validateResults(value: unknown): string[] {
  * A results file's world and its main view's style (`run.world`, `run.style`; plan R10,
  * R10.T14.c), or `null` where the world is not one of its choices or the style not its world's:
  * none (`null`) over the test planet, whose main view is the spike's own lit view, and
- * `photorealistic` or `wireframe` over the terrain world.
+ * `photorealistic` or `wireframe` over a generated world, the terrain world or the served one
+ * (R10.T15.b).
  *
  * @remarks
  * A file with neither, written before them, is the test planet's with no style, as it was flown.
@@ -1921,7 +1926,8 @@ export function worldOfRun(run: Readonly<Record<string, unknown>>): {
   if (world === "test-planet") {
     return style === null ? { world, style } : null;
   }
-  return world === "terrain-test" && (style === "photorealistic" || style === "wireframe")
+  return (world === "terrain-test" || world === "served") &&
+    (style === "photorealistic" || style === "wireframe")
     ? { world, style }
     : null;
 }
@@ -2918,7 +2924,7 @@ export function summaryMarkdown(results: DescentResults): string {
     `- **Overall:** ${criteria.overall}${run.quiet.provisional ? (load.value === null ? ` (provisional: ${load.reason})` : " (provisional: not a quiet machine)") : ""}`,
     `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${load.value === null ? `none (${load.reason})` : load.value.map((average) => average.toFixed(2)).join(", ")}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, world ${run.world}${run.style === null ? "" : `, style ${run.style}`}${typeof run.options["sizes"] === "string" ? `, sizes ${run.options["sizes"]}` : ""}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, world ${run.world}${typeof run.options["body"] === "string" ? ` (body ${run.options["body"]} of universe ${String(run.options["universe"])})` : ""}${run.style === null ? "" : `, style ${run.style}`}${typeof run.options["sizes"] === "string" ? `, sizes ${run.options["sizes"]}` : ""}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
     `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,
     `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Incomplete pass times:** ${textOr(results.gpu.incompleteFrames, describeIncomplete)}`,

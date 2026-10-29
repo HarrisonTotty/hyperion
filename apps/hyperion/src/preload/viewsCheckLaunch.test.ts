@@ -51,6 +51,29 @@ describe("the views check's launch switch", () => {
     expect(() => viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toThrow(/does not hold/);
   });
 
+  it("carries a hand-over check's served world, its universe and body (R10.T15.b)", () => {
+    const launch: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "handover",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+  });
+
+  it.each([
+    [{ run: "terrain" }],
+    [{ fixture: "terrain-test-weathered" }],
+    [{ served: { universe: "3504954ff4feabf4" } }],
+    [{ served: { universe: "not hex", body: "61ffd967fe000023.0100" } }],
+  ])("refuses a served world on a launch with %j", (change) => {
+    const served = {
+      ...LAUNCH,
+      run: "handover",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+    };
+    expect(readViewsCheckLaunch({ ...served, ...change })).toBeNull();
+  });
+
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
   });

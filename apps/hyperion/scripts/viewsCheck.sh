@@ -7,7 +7,7 @@
 # summary. No server is needed.
 #
 #   viewsCheck.sh [--hidden] [--setting high|low] [--smoke] [--out <dir>]
-#                 [--terrain [--handover] [--weathered] | --atmosphere]
+#                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered] | --atmosphere]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --hidden never shows the window (offscreen rendering): no presentation times and no question,
@@ -31,6 +31,13 @@
 # surveyed cell's brightness compared. Both settings by default, as --terrain; it writes
 # <date>-<machine>-<setting>-handover.json and .md beside the terrain run's, and exits 1 unless
 # every judged cell is within 1/3 stop. --handover without --terrain is refused by the client.
+#
+# --terrain --handover --universe <ID> --body <ID> makes the hand-over check's looks on that body as a
+# running server serves it, in TERRAIN TEST's place (plan R10, R10.T15.b): start the server and place
+# and survey the body first (`just server`, then `just place-ship --look-at <body> --survey orbital 50
+# --json`, whose placement names the universe's ID), and give the client the server's --port if it
+# is not the default. Each launch is given 20 minutes more, above the client's 15 for reading the
+# served world and its looks' fields. The files are named <date>-<machine>-<setting>-handover-served.
 #
 # --terrain --weathered, with or without --handover, serves the run TEST MOON weathered's field in
 # TERRAIN TEST's place (plan R10, R10.T1.c; decision-r10-t1c-client-scope §3): the same moon on a
@@ -64,6 +71,7 @@ electron="${HYPERION_VIEWS_CHECK_ELECTRON:-$here/node_modules/.bin/electron}"
 hidden=0
 smoke=0
 terrain=0
+served=0
 atmosphere=0
 setting=""
 check_args=()
@@ -74,6 +82,7 @@ while [[ $# -gt 0 ]]; do
         --terrain) terrain=1; check_args+=("$1"); shift ;;
         --handover) check_args+=("$1"); shift ;;
         --atmosphere) atmosphere=1; check_args+=("$1"); shift ;;
+        --universe) served=1; check_args+=("$1"); shift ;;
         --setting)
             if [[ $# -lt 2 ]]; then
                 echo "views check: --setting needs high or low" >&2
@@ -128,7 +137,7 @@ fi
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
 # 15). Given both, the client refuses the launch at once, so the terrain run's limit stands.
 if [[ $terrain -eq 1 ]]; then
-    limit=$(( smoke == 1 ? 600 : 2400 ))
+    limit=$(( (smoke == 1 ? 600 : 2400) + (served == 1 ? 1200 : 0) ))
 elif [[ $atmosphere -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : 1200 ))
 else
