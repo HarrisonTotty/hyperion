@@ -23,10 +23,10 @@ import {
   PRESSURE_LATTICE_PA,
   STANDARD_PRESSURES_PA,
 } from "./kDistribution";
-import { PENDING_ABSORBERS } from "./transparency";
+import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./transparency";
 
 /** The species R08.T4.f draws from ExoMol's lists (decision-r08-t4ef-storage §5.4's order). */
-const DRAWN = ["FeH", "TiO"] as const;
+const DRAWN = ["FeH", "TiO", "N2"] as const;
 
 /** A drawn species. */
 type Drawn = (typeof DRAWN)[number];
@@ -39,6 +39,7 @@ type Drawn = (typeof DRAWN)[number];
 const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
   FeH: [1_000, 4_000],
   TiO: [1_000, 4_000],
+  N2: [1_800, 4_000],
 };
 
 /**
@@ -51,7 +52,7 @@ const LADDER_FROM: Readonly<Partial<Record<string, number>>> = { H2S: 350 };
  * The drawn species whose tables are `estimated`: CO's, its intensities taking a stated scale;
  * HCN's, its hot bands incomplete in the range; N₂'s, its model carried past its fitted range.
  */
-const ESTIMATED: ReadonlyArray<Drawn> = [];
+const ESTIMATED: ReadonlyArray<Drawn> = ["N2"];
 
 /**
  * The species R08.T4.f leaves pending, each keeping its entry: VO and hot H₂O, whose lists (HyVO,
@@ -212,6 +213,11 @@ describe("the drawn tables' grids", () => {
       ]).toEqual([true, true, 30]);
     },
   );
+
+  it("start N₂'s table at its stated none's limit, the belowK contract's table branch", () => {
+    const n2 = NO_VISIBLE_ABSORPTION.find((n) => n.species === "N2");
+    expect([n2?.belowK, sidecarOf("N2").temperaturesK[0]]).toEqual([1_800, 1_800]);
+  });
 
   it.each(DRAWN)("estimate every node's line shape of %s: its widths the list's default", (key) => {
     expect(sidecarOf(key).measuredShapeTo.every((p) => p === -1)).toBe(true);

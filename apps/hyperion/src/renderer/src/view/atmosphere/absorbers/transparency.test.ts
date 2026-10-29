@@ -86,7 +86,7 @@ describe("the stated transparency", () => {
     ).toEqual(byShare.map((n) => [n.species, true]));
   });
 
-  it("draws Mg⁺, Si⁺, H and Zn from their limits by tables, and pends the other stated nones", () => {
+  it("draws N₂, Mg⁺, Si⁺, H and Zn from their limits by tables, and pends the other stated nones", () => {
     expect(
       NO_VISIBLE_ABSORPTION.filter((n) => n.belowK !== undefined).map((n) => [
         n.species,
@@ -94,7 +94,7 @@ describe("the stated transparency", () => {
       ]),
     ).toEqual([
       ["He", "pending"],
-      ["N2", "pending"],
+      ["N2", "table"],
       ["Na+", "pending"],
       ["Mg+", "table"],
       ["Al+", "pending"],

@@ -35,6 +35,10 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
     Bernath, J. Quant. Spectrosc. Radiat. Transf. 240 (2020) 106687).
   - `TiO`: Toto's five Ti isotopologues (L. K. McKemmish et al., Mon. Not. R. Astron. Soc. 488
     (2019) 2836, DOI 10.1093/mnras/stz1818).
+  - `N2`: WCCRMT's ¹⁴N₂, its triplet system (C. M. Western, L. Carter-Blatchford, P. Crozet, A. J.
+    Ross, J. Morville and D. W. Tokaryk, J. Quant. Spectrosc. Radiat. Transf. 219 (2018) 127, DOI
+    10.1016/j.jqsrt.2018.07.017), its partition function from P. S. Barklem and R. Collet, Astron.
+    Astrophys. 588 (2016) A96.
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which

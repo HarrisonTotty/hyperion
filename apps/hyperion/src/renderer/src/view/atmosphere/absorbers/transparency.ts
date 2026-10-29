@@ -623,11 +623,6 @@ const PENDING: ReadonlyArray<PendingListing> = [
     what: "the 8-0 band (HITRAN2024's, an extrapolation) and the 9-0 to 11-0 bands, which HITRAN2024 lacks, by the overtone ladder below 8-0 (estimated)",
   },
   { key: "H2O", task: "R08.T4.f", what: "hot H2O (POKAZATEL)" },
-  {
-    key: "N2",
-    task: "R08.T4.f",
-    what: "the first positive (B-A) bands from the metastable A state, above 1800 K (estimated)",
-  },
 ];
 
 /** A pending absorber: its key, the task that draws it, what it draws, and its cell means. */
