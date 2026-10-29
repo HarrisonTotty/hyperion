@@ -4682,3 +4682,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     epoch, the age plan 06's `draw_metallicity` reads a grid record's law at, and at
     `RECENT_DEATH_AGES`; 8.3 s on the pod. A slope in either law fails it, and the class must then
     read its candidate's age.
+  - _`v_fast`'s reason, corrected._ `v_fast` = max(|v|, |v + kick|) stays, but "P09.T33.a as
+    built"'s reason, that over the field's thinning interval a progenitor above about 360 km/s
+    outruns `LIFETIME_REACH` before T, is wrong: nothing reads an entry before −(H + L), the source
+    horizon's start, so a progenitor's line is read for at most L + 2H before T, and only one above
+    4,096 ly ÷ (L + 2H), about 4,649 km/s (`lifetime_cap`'s edge), could outrun the reach.
+    `DeathMarks::of`'s doc now says so, and keeps the max as the fastest member's speed over the
+    entry's lifetime, the brainstorm's v_fast. A debug guard at that speed is P09.T35's.

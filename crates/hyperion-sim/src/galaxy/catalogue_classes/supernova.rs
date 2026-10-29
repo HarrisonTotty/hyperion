@@ -5,14 +5,15 @@
 //! (−(`W_eff` + L + H), +H], where `W_eff` is its shell's window as the test cuts it ([`claims`],
 //! [`SupernovaInterval`]). What the test reads of a death is its [`DeathMarks`]: T, what exploded,
 //! the explosion's energy (one uniform of `snr.energy`, keyed by the system's ID) and the fastest
-//! speed any member has over the entry's lifetime. Every side of the carve-out (the grid, the displaced bins, the
-//! feature members and the catalogue classes) builds the marks of its own candidate with
-//! [`DeathMarks::of`] (or, for a Type Ia candidate, [`DeathMarks::of_type_ia`]) and calls the one
-//! [`claims`], after plan 08's [`death_in_interval`](crate::galaxy::displaced::death_in_interval),
-//! the shared test's first half, has put the death in the interval at its widest. The test reads
-//! the smooth gas at the site and the marks, and for a shell inside a superbubble the interior its
-//! caller passes ([`Surroundings`]); it never looks up a feature or another system, so the
-//! carve-out's dependency graph stays acyclic.
+//! speed any member has over the entry's lifetime. Every side of the carve-out (the grid, the
+//! displaced bins, the feature members and the catalogue classes) builds the marks of its own
+//! candidate with [`DeathMarks::of`] (or, for a Type Ia candidate, [`DeathMarks::of_type_ia`]) and
+//! calls the one [`claims`], after plan 08's
+//! [`death_in_interval`](crate::galaxy::displaced::death_in_interval), the shared test's first
+//! half, has put the death in the interval at its widest. The test reads the smooth gas at the site
+//! and the marks, and for a shell inside a superbubble the interior its caller passes
+//! ([`Surroundings`]); it never looks up a feature or another system, so the carve-out's dependency
+//! graph stays acyclic.
 //!
 //! **The entry.** Membership does not depend on the time of a query, so an entry has one ID on
 //! both sides of its explosion; what it is depends on the time it is evaluated at (brainstorm,
@@ -562,9 +563,13 @@ impl DeathMarks {
     /// - The fastest member's speed is the greater of the system's before T, |`velocity`|, and its
     ///   compact remnant's after it, at `velocity` plus the natal kick
     ///   ([`SystemStars::natal_kick`]), or at `velocity` where it has none: a kick against the
-    ///   system's motion leaves the remnant slower than its progenitor was, and the progenitor too
-    ///   must stay within [`LIFETIME_REACH`] of its site over the entry's lifetime (P09.T33.a). The
-    ///   system's companions are not members of the entry and are not read (plan 11's binaries).
+    ///   system's motion leaves the remnant slower than its progenitor was, and `v_fast` is the
+    ///   fastest member's speed over the entry's whole lifetime, as the brainstorm names it
+    ///   (P09.T33.a). The progenitor does not need it to stay within [`LIFETIME_REACH`] of its
+    ///   site: nothing reads an entry before −(H + L), the source horizon's start, so its line is
+    ///   read for at most L + 2H before T, which only a progenitor above 4,096 ly ÷ (L + 2H),
+    ///   about 4,649 km/s ([`lifetime_cap`]), could outrun. The system's companions are not
+    ///   members of the entry and are not read (plan 11's binaries).
     /// - The energy is the `snr.energy` draw (the type's documentation), through the
     ///   electron-capture law for an electron-capture death.
     ///
