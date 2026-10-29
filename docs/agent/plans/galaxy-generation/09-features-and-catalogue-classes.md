@@ -4672,3 +4672,13 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     and T43's. (5) Census C1 counts the grid records of P09.T28.b.a's pre-pin, which no class claims
     at 23 (`RECENT_DEATH_CLAIM` is `None`), so no catalogue system is among them; under every 25
     hold the catalogue systems move as they do at 23.
+- **P09.T33.a's leans, kept (main's research, 2026-10-29).** Its four leans stand and nothing
+  blocks landing. Two follow-ups, each its own commit, no golden moved:
+  - _[Fe/H] at age zero, pinned (determinism audit)._
+    `a_candidate_s_metallicity_is_read_at_age_zero` (`core_collapse/tests.rs`): every candidate of
+    a young-disc cell and of the cell at the centre (5, 197 and 21 by component) has the
+    composition of the one normal of `class.core_collapse.metallicity` from its component's law at
+    its site read at age zero, to the bit, and both young laws give the same bits at its age at the
+    epoch, the age plan 06's `draw_metallicity` reads a grid record's law at, and at
+    `RECENT_DEATH_AGES`; 8.3 s on the pod. A slope in either law fails it, and the class must then
+    read its candidate's age.

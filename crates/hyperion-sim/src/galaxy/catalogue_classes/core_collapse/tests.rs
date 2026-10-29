@@ -313,6 +313,55 @@ fn candidates_follow_the_young_field_s_recent_deaths() {
     assert!(observed[0] > 50 && nuclear > 500, "{observed:?}");
 }
 
+/// A candidate's \[Fe/H\] is its component's law at its site read at age zero, one normal on
+/// `class.core_collapse.metallicity` (the module documentation's step 2, P09.T33.a's lean), to the
+/// bit; and both young components' laws are flat in age, so that read gives the bits a read at the
+/// candidate's age at the epoch would, the age plan 06's `draw_metallicity` reads a grid record's
+/// law at, and a read at [`RECENT_DEATH_AGES`] too (determinism audit). A slope in either law fails
+/// the second half: the class must then read its candidate's age, which moves its draws. The
+/// candidates of a cell of the young disc and of the cell at the centre, every component's.
+#[test]
+fn a_candidate_s_metallicity_is_read_at_age_zero() {
+    let galaxy = galaxy();
+    let process = CoreCollapseProcess::new(galaxy);
+    let fields = galaxy.fields();
+    let mut checked = vec![0_u32; process.components().len()];
+    for cell in [key([0, 16, 0]), key([0, 0, 0])] {
+        let bound = process.bound(galaxy, &cell);
+        for index in 0..candidate_count(galaxy.seed(), &cell, bound) {
+            let id = cell.candidate_id(index, 0).unwrap();
+            let Some(candidate) = process.candidate(galaxy, &cell, id, bound) else {
+                continue;
+            };
+            let laws = fields.component(candidate.component);
+            let site = PointLy::from(&candidate.site);
+            let at_zero = laws.metallicity(&site, Years::ZERO);
+            let object = ObjectKey::from(SystemId::from(id));
+            let mut stream =
+                Stream::open(galaxy.seed(), tags::CLASS_CORE_COLLAPSE_METALLICITY, object);
+            let feh = stream.normal(at_zero.mean().value(), at_zero.sigma().value());
+            assert_eq!(
+                candidate.composition,
+                Composition::from_fe_h(Dex::new(feh), HeliumExcess::ZERO),
+                "{id:?}"
+            );
+            for age in [candidate.age_at_epoch, RECENT_DEATH_AGES] {
+                let at_age = laws.metallicity(&site, age);
+                assert_same_bits(at_age.mean().value(), at_zero.mean().value());
+                assert_same_bits(at_age.sigma().value(), at_zero.sigma().value());
+            }
+            let slot = process
+                .components()
+                .iter()
+                .position(|young| young.id() == candidate.component)
+                .unwrap();
+            checked[slot] += 1;
+        }
+    }
+    eprintln!("candidates checked, by component: {checked:?}");
+    assert!(checked.iter().all(|&n| n > 0), "{checked:?}");
+}
+
 // 3. The entries.
 
 /// Every entry is the one shared test's: plan 08's interval predicate puts its death at its T, its
