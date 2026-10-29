@@ -77,8 +77,9 @@ pub(super) const MAX_STEPS: u32 = 200_000;
 /// A star that has not arrived by then takes its zero-age main-sequence radius, as the engine
 /// carries it (P11.T4.i). A star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits,
 /// their first. Everything else is two single stars on an orbit that their core collapses change
-/// (BSE appendix A1, P11.T4.l): a pair this passes over at an age shows no interaction before it
-/// in a run to any later age.
+/// (BSE appendix A1, P11.T4.l): a pair this passes over at an age shows no interaction before that
+/// age and before its first supernova in a run to any later age (P11.T4.j's wording). After a
+/// collapse a later run may take the pair over where an earlier one keeps its new orbit fixed.
 ///
 /// # Examples
 ///

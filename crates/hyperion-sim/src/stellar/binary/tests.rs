@@ -1973,6 +1973,27 @@ fn assert_same_history(early: &BinaryTimeline, later: &BinaryTimeline, until: Ye
     }
 }
 
+/// That `early` and `later`, the same pair run to `until` and past it, hold the same supernova
+/// records before `until`, bit for bit (P11.T4.l's build-age contract covers the records as well as
+/// the states: a record is a collapse's recoil, kick and velocities, which no state shows).
+fn assert_same_records(early: &BinaryTimeline, later: &BinaryTimeline, until: Years) {
+    let before = |timeline: &BinaryTimeline| -> Vec<SupernovaRecord> {
+        timeline
+            .supernovae()
+            .iter()
+            .filter(|record| record.age() < until)
+            .copied()
+            .collect()
+    };
+    assert_eq!(
+        before(early),
+        before(later),
+        "the records before {until:?}:\n{}\nagainst\n{}",
+        describe(early),
+        describe(later)
+    );
+}
+
 /// How a pair run to an earlier age compares with the same pair run to a later one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EarlierRun {
@@ -1991,9 +2012,11 @@ enum EarlierRun {
 
 /// Plan 11's consistency to any age (P11's build-age dependence, 2026-10-05), for `input` run to
 /// `until` and to `later`. A pair that [`can_interact`] by `until` has the same history to `until`
-/// as the later run, bit for bit ([`assert_same_history`]). One it passes over is a detached
-/// segment of its stars' own forms on the drawn orbit to its first collapse (P11.T4.l). If the
-/// pre-test passes it over at `later` too, the two runs are the same to `until`, bit for bit;
+/// as the later run, bit for bit ([`assert_same_history`]), and the same supernova records before
+/// it ([`assert_same_records`]). One it passes over is a detached segment of its stars' own forms
+/// on the drawn orbit to its first collapse (P11.T4.l). If the pre-test passes it over at `later`
+/// too, the two runs are the same to `until`, records included, bit for bit, or, where the later
+/// run's engine takes the pair over after a collapse, to that collapse, its record included;
 /// otherwise each star on its own track is the later run's to the later run's first event (a star
 /// below 0.1 M☉ on the cooling fits takes its companion's wind in the later run).
 fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
@@ -2004,6 +2027,7 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
     if can_interact(input, until) {
         assert!(!early.hit_segment_cap(), "{}", describe(&early));
         assert_same_history(&early, &late, until);
+        assert_same_records(&early, &late, until);
         return EarlierRun::Same;
     }
     let first_collapse = early
@@ -2021,13 +2045,17 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
         match (taken_over_at(&early), taken_over_at(&late)) {
             (None, Some(collapse)) if collapse < until => {
                 assert_same_history(&early, &late, Years::new(collapse.value() * (1.0 - 1e-12)));
+                assert_same_records(&early, &late, Years::new(collapse.value() * (1.0 + 1e-12)));
                 assert!(
                     interaction_after_a_collapse(&late, until).is_none(),
                     "{}",
                     describe(&late)
                 );
             }
-            (None | Some(_), _) => assert_same_history(&early, &late, until),
+            (None | Some(_), _) => {
+                assert_same_history(&early, &late, until);
+                assert_same_records(&early, &late, until);
+            }
         }
         return if early.supernovae().is_empty() {
             EarlierRun::PassedOver

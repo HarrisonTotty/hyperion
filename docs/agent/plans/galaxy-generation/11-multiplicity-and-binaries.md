@@ -6425,7 +6425,13 @@ galaxy_sweeps`.
       over at an age and not at a later one, the later run's engine evolves the orbit from the
       collapse where the earlier keeps it fixed; the history to the collapse is the same and the
       later run shows no interaction before the earlier age (T4.j's wording, which the plan says
-      covers it). `check_any_age` checks exactly that.
+      covers it). `check_any_age` checks exactly that. _(The review of T4.l's questions,
+      2026-10-29: the weaker form is accepted. `can_interact`'s doc, which claimed "no interaction
+      before it" outright, before T4.l as after, now has T4.j's wording: none before that age and
+      before the pair's first supernova; a later run may take the pair over after a collapse.
+      `check_any_age` now compares the supernova records too (`assert_same_records`): before the
+      earlier age, or to the collapse, its record included, where the later run's engine takes
+      over.)_
     - **`a_wide_black_hole_pair_stays_bound`**: at version 23 the 40 M☉ primary, stripped by its
       own winds to a 9.83 M☉ helium star, collapses at 5.51 Myr into a black hole of its whole
       mass with no kick: no mass is lost, so A1's a′ is the widened 84,263 R☉ (f = 2.52) and e′ =
@@ -6522,7 +6528,8 @@ galaxy_sweeps`.
       28–72); **the shown class 115 against 115 by record** (the new test; within 15); recycled
       pulsars' median periods 27.7 ms beside CO/ONe white dwarfs and 70.3 ms beside neutron stars;
     - `binary_system` (3 of 3): ruling 137's share per exploding star **0.472** (2,723 of 5,765
-      collapses; 0.500 at version 21 before T4.l, by the earlier port's run), not asserted;
+      collapses; 0.500 at version 21 before T4.l, by the earlier port's run), not asserted (but
+      see Findings: the share over the collapses that leave a neutron star is now asserted);
       Rucinski's contact pairs 2.84 × 10⁻³ a star; the bright exception 4 of 86,184 thin-disc
       systems;
     - `binary_carve` (1 of 1): redrawn A 0, B 0, C 1.0 × 10⁻³, D 6.85 × 10⁻³, E 4.0 × 10⁻³; no
@@ -6555,7 +6562,13 @@ galaxy_sweeps`.
   - _Findings_ (recorded; not this task's):
     - **Ruling 137's share in `binary_system` is 0.472**, against the ruling's expected 0.32–0.38
       (scaled from the prior sample, where it is 0.376): for the binary-population calibration,
-      as the earlier port recorded.
+      as the earlier port recorded. _Restated (the review of T4.l's questions, 2026-10-29): not a
+      defect._ T4.l adds only 393 collapses (6.8%) to `binary_system`'s, and the test's share
+      counts the direct collapses to black holes, where Sana et al.'s (2012) 37% counts
+      supernovae. Over the collapses that leave a neutron star the share is 0.354 (the review's
+      figure), inside the ruling's 0.28–0.40.
+      `binary_system_stripped_marks_and_the_share_per_exploding_star` now prints both shares and
+      asserts that one in 0.28–0.40.
     - **T17.a's `Detached` shrinks** under ΔMᵢ ≤ mᵢ (above): a tighter bound per cell, such as
       the least living mass the reach table could store, would recover much of it, in T17.b's
       refit for the train (lean, 2026-10-28). It costs the census more table reads and the brief
