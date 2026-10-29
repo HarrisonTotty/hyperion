@@ -5,22 +5,24 @@
 //! "A system follows the Kepler orbit about the black hole and the cluster mass inside its own
 //! radius, with the relativistic advance of pericentre, and the precession from the enclosed stars,
 //! added as secular rates" (brainstorm, "Orbits and time"). [`KeplerOrbit::propagate`] keeps the
-//! two-body law; [`KeplerOrbit::propagate_secular`] is the secular step, the two-body orbit
-//! propagated at the corrected mean motion and turned in its plane by the rates × dt, from the
-//! [`SecularRates`] of the orbit ([`KeplerOrbit::secular_rates`]). Nothing reads them at this
+//! two-body law; [`SecularOrbit::propagate`] is the secular step, the two-body orbit propagated at
+//! the corrected mean motion and turned in its plane by the rates × dt, from the orbit with its
+//! [`SecularRates`] ([`KeplerOrbit::secular`]). Nothing reads them at this
 //! version: the term in [`position_velocity_at`](super::position_velocity_at) is P09.T28.d.b's,
 //! behind `KEPLER_SECULAR_VERSION` = 25.
 //!
 //! # The relativistic advance
 //!
 //! The Schwarzschild advance of a bound orbit is `Δω = 6π G M ÷ (c² a (1 − e²))` a radial period
-//! about a black hole of mass M (Einstein 1915; Weinberg 1972, *Gravitation and Cosmology*, §8.6),
-//! so `ω̇ = 3 G M n ÷ (c² a (1 − e²))` with the orbit's mean motion n
-//! ([`KeplerOrbit::schwarzschild_rate`]). M is the black hole's alone: the stars' own term is of
-//! order `G M★ ÷ (c² r)`, under 10⁻¹⁰ of the orbit's. S2's orbit (a = 0.0163 ly, e = 0.8846;
-//! GRAVITY Collaboration 2020, A&A 636, L5) advances 12.3′ an orbit about the Milky Way fixture's
-//! 4.297 × 10⁶ M☉, where GRAVITY measured 12.1′ about their 4.261 × 10⁶ M☉. The change it makes to
-//! the radial period, of order `G M ÷ (c² a)`, depends on the coordinates and is not modelled.
+//! about a black hole of mass M (Einstein 1915, Sitzungsber. Preuss. Akad. Wiss., 831; Weinberg
+//! 1972, *Gravitation and Cosmology*, §8.6), so `ω̇ = 3 G M n ÷ (c² a (1 − e²))` with the orbit's
+//! mean motion n ([`KeplerOrbit::schwarzschild_rate`]). M is the black hole's alone: the stars' own
+//! relativistic term is about `M★(<a) ÷ M_bh` of the black hole's, and at most some 10⁻⁴ of the
+//! orbit's apsidal rate, `G M_bh ÷ (c² a)` of the stars' Newtonian precession where it matters.
+//! S2's orbit (a = 0.0163 ly, e = 0.8846; GRAVITY Collaboration 2020, A&A 636, L5) advances 12.3′
+//! an orbit about the Milky Way fixture's 4.297 × 10⁶ M☉, where GRAVITY measured 12.1′ about their
+//! 4.261 × 10⁶ M☉. The change it makes to the radial period, of order `G M ÷ (c² a)`, depends on
+//! the coordinates and is not modelled.
 //!
 //! # The stars' precession
 //!
@@ -29,8 +31,9 @@
 //! holds the stars spread over the orbit. The difference, `ΔΦ = Φ + μ ÷ r`, perturbs it. Averaged
 //! over the orbit it depends on a and e alone, so it moves neither, and turns the pericentre and
 //! shifts the mean motion at rates given by Lagrange's equations for the disturbing function
-//! `R = −⟨ΔΦ⟩` (Murray and Dermott 1999, *Solar System Dynamics*, §6.8, eqs. 6.145–6.150; Merritt
-//! 2013, *Dynamics and Evolution of Galactic Nuclei*, §4.4.1, for the stars about a black hole):
+//! `R = −⟨ΔΦ⟩` (Murray and Dermott 1999, *Solar System Dynamics*, §6.8, who write them in ϖ and ε:
+//! in the orbit's plane, with `∂R ÷ ∂I = 0`, `ω̇ = ϖ̇` and `Ṁ − n = ε̇ − ϖ̇`; Merritt 2013,
+//! *Dynamics and Evolution of Galactic Nuclei*, §4.4.1, for the stars about a black hole):
 //!
 //! `ω̇ = √(1 − e²) ÷ (n a² e) ∂R ÷ ∂e`,
 //! `Ṁ − n = −2 ÷ (n a) ∂R ÷ ∂a − (1 − e²) ÷ (n a² e) ∂R ÷ ∂e`.
@@ -138,6 +141,7 @@ struct Axis {
 
 impl Axis {
     /// The axis of `ln (r ÷ 1 ly)` from `lo` ly over `decades` decades at `per_decade` knots each.
+    #[must_use]
     fn decades(lo: f64, decades: u32, per_decade: u32) -> Self {
         Self {
             lo: math::ln(lo),
@@ -147,13 +151,16 @@ impl Axis {
     }
 
     /// Knot `k`.
+    #[must_use]
     fn knot(&self, k: u32) -> f64 {
         self.lo + f64::from(k) * self.step
     }
 
     /// The first of the four knots that interpolate at `x`, clamped to the axis, and the cubic
     /// Lagrange weights of the four.
+    #[must_use]
     fn window(&self, x: f64) -> (u32, [f64; 4]) {
+        debug_assert!(x.is_finite(), "a table is read at a finite point, not {x}");
         let last = f64::from(self.count - 1);
         let u = ((x - self.lo) / self.step).clamp(0.0, last);
         #[expect(
@@ -166,7 +173,14 @@ impl Axis {
     }
 }
 
+/// `k` as an index into a table.
+#[must_use]
+fn index(k: u32) -> usize {
+    usize::try_from(k).expect("a table index under 2³² fits a usize on every target")
+}
+
 /// The cubic Lagrange weights at offset `t` from the second of four uniform knots.
+#[must_use]
 fn lagrange(t: f64) -> [f64; 4] {
     let (tm, t1, t2) = (t + 1.0, t - 1.0, t - 2.0);
     [
@@ -178,13 +192,16 @@ fn lagrange(t: f64) -> [f64; 4] {
 }
 
 /// The eccentricity node `j`, `(j + ½) ÷ 32`.
+#[must_use]
 fn eccentricity_node(j: u32) -> f64 {
     (f64::from(j) + 0.5) / f64::from(ECCENTRICITY_NODES)
 }
 
 /// The four eccentricity nodes that interpolate at `e`, as indices into the table's row (a node
 /// below e = 0 mirrored to its image above), and their weights.
+#[must_use]
 fn eccentricity_window(e: f64) -> ([u32; 4], [f64; 4]) {
+    debug_assert!(e.is_finite(), "an eccentricity is finite, not {e}");
     let n = f64::from(ECCENTRICITY_NODES);
     let u = (e * n - 0.5).min(n - 1.0);
     #[expect(
@@ -209,8 +226,8 @@ fn eccentricity_window(e: f64) -> ([u32; 4], [f64; 4]) {
 ///
 /// # Examples
 ///
-/// A star 0.1 ly from the Milky Way's black hole, on an orbit of e ≈ 0.5, precesses backwards by
-/// some arcminutes an orbit, and S2's relativistic advance is the larger:
+/// A star 0.1 ly from the Milky Way's black hole, on an orbit of e ≈ 0.5, is turned backwards by
+/// the stars inside it and forwards by the black hole's relativistic advance:
 ///
 /// ```
 /// use hyperion_sim::coords::GalacticVelocity;
@@ -304,25 +321,29 @@ impl SecularTable {
     }
 
     /// G M★(<r) at `r` m, m³ s⁻², from the stars' table.
+    #[must_use]
     fn stars_at(&self, r: f64) -> f64 {
         self.read_radius(&self.stars, r)
     }
 
     /// The stars' potential Γ★ at `r` m, m² s⁻², from its table.
+    #[must_use]
     fn potential_at(&self, r: f64) -> f64 {
         self.read_radius(&self.potential, r)
     }
 
     /// `values`, tabulated at the radius knots, at `r` m.
+    #[must_use]
     fn read_radius(&self, values: &[f64], r: f64) -> f64 {
         let (first, w) = self.radii.window(math::ln(r / METRES_PER_LIGHT_YEAR));
-        let at = |k: u32| values[k as usize];
+        let at = |k: u32| values[index(k)];
         w[0] * at(first) + w[1] * at(first + 1) + w[2] * at(first + 2) + w[3] * at(first + 3)
     }
 
     /// `[α★, β★] ÷ G M★(<a)` and `(⟨Γ★⟩ − Γ★(a)) a ÷ G M★(<a)` of the orbit of semi-major axis `a`
     /// m and eccentricity `e` in `(0, 1)`, by quadrature in the eccentric anomaly; zero where the
     /// stars inside a weigh nothing.
+    #[must_use]
     fn normalised_averages(&self, a: f64, e: f64) -> [f64; 3] {
         let scale = self.stars_at(a);
         if scale <= 0.0 {
@@ -353,6 +374,7 @@ impl SecularTable {
     }
 
     /// The normalised averages at semi-major axis `a` m and eccentricity `e`, interpolated.
+    #[must_use]
     fn averages_at(&self, a: f64, e: f64) -> [f64; 3] {
         let (first, wa) = self.axes.window(math::ln(a / METRES_PER_LIGHT_YEAR));
         let (nodes, we) = eccentricity_window(e);
@@ -360,7 +382,7 @@ impl SecularTable {
         for (di, &w_a) in (0..4).zip(&wa) {
             let row = (first + di) * ECCENTRICITY_NODES;
             for (&j, &w_e) in nodes.iter().zip(&we) {
-                let value = self.averages[(row + j) as usize];
+                let value = self.averages[index(row + j)];
                 for (o, v) in out.iter_mut().zip(value) {
                     *o += w_a * w_e * v;
                 }
@@ -371,43 +393,134 @@ impl SecularTable {
 }
 
 /// The secular rates of one bound Kepler orbit about the black hole (module documentation), from
-/// [`KeplerOrbit::secular_rates`], for [`KeplerOrbit::propagate_secular`] on the same orbit.
+/// [`KeplerOrbit::secular_rates`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SecularRates {
-    /// The Schwarzschild advance of the pericentre, rad s⁻¹.
-    schwarzschild: f64,
-    /// The stars' precession of the pericentre, rad s⁻¹.
-    mass_precession: f64,
-    /// The mean anomaly's rate less the orbit's two-body mean motion, rad s⁻¹.
-    mean_motion: f64,
+    schwarzschild: PerYear,
+    mass_precession: PerYear,
+    mean_motion: PerYear,
 }
 
 impl SecularRates {
     /// The Schwarzschild advance of the pericentre, radians per Julian year: positive, prograde.
     #[must_use]
-    pub fn schwarzschild(&self) -> PerYear {
-        PerYear::new(self.schwarzschild * SECONDS_PER_JULIAN_YEAR)
+    pub const fn schwarzschild(&self) -> PerYear {
+        self.schwarzschild
     }
 
     /// The precession of the pericentre that the stars about the black hole drive, radians per
     /// Julian year: negative, retrograde.
     #[must_use]
-    pub fn mass_precession(&self) -> PerYear {
-        PerYear::new(self.mass_precession * SECONDS_PER_JULIAN_YEAR)
+    pub const fn mass_precession(&self) -> PerYear {
+        self.mass_precession
     }
 
     /// The rate at which the orbit turns in its plane, the sum of the two, radians per Julian year.
     #[must_use]
     pub fn apsidal(&self) -> PerYear {
-        PerYear::new((self.schwarzschild + self.mass_precession) * SECONDS_PER_JULIAN_YEAR)
+        self.schwarzschild + self.mass_precession
     }
 
     /// The mean anomaly's rate less the two-body mean motion of the orbit from the epoch state,
     /// radians per Julian year: the mean orbit's mean motion and the stars' shift of it, less
     /// `2π ÷ P` (module documentation).
     #[must_use]
-    pub fn mean_motion_correction(&self) -> PerYear {
-        PerYear::new(self.mean_motion * SECONDS_PER_JULIAN_YEAR)
+    pub const fn mean_motion_correction(&self) -> PerYear {
+        self.mean_motion
+    }
+}
+
+/// A bound Kepler orbit and its secular rates, taken at the state it holds: where the secular step
+/// starts ([`KeplerOrbit::secular`]), so that the step cannot be given another orbit's rates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SecularOrbit {
+    orbit: KeplerOrbit,
+    rates: SecularRates,
+}
+
+impl SecularOrbit {
+    /// The orbit at the state the step starts from.
+    #[must_use]
+    pub const fn orbit(&self) -> &KeplerOrbit {
+        &self.orbit
+    }
+
+    /// Its secular rates.
+    #[must_use]
+    pub const fn rates(&self) -> &SecularRates {
+        &self.rates
+    }
+
+    /// The orbit's state `dt` later under its secular rates, the secular step (module
+    /// documentation): the two-body orbit propagated at its mean motion plus
+    /// [`SecularRates::mean_motion_correction`], then turned in its plane about its angular
+    /// momentum by [`SecularRates::apsidal`] × dt. [`KeplerOrbit::propagate`] is the two-body law
+    /// alone.
+    ///
+    /// At `dt` = 0 it is the orbit itself. It keeps the orbit's energy and the length of its
+    /// angular momentum about μ, which the turn does not change and the propagation keeps.
+    ///
+    /// # Panics
+    ///
+    /// As [`KeplerOrbit::propagate`].
+    ///
+    /// # Examples
+    ///
+    /// S2, started at apocentre about the Milky Way's black hole, is back there a period later,
+    /// turned forward by the Schwarzschild advance of some 12′:
+    ///
+    /// ```
+    /// use hyperion_sim::coords::GalacticVelocity;
+    /// use hyperion_sim::galaxy::PointLy;
+    /// use hyperion_sim::galaxy::motion::secular::SecularTable;
+    /// use hyperion_sim::galaxy::motion::{CentreMotion, KeplerOrbit};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::galaxy::potential::MassModel;
+    /// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+    /// use hyperion_sim::units::{GravitationalParameter, LightYears};
+    ///
+    /// let params = GalaxyParams::milky_way_like();
+    /// let motion = CentreMotion::new(&params, &MassModel::new(&params))?;
+    /// let table = SecularTable::new(&motion);
+    /// // S2's semi-major axis in light-years and eccentricity (GRAVITY Collaboration 2020).
+    /// let (a, e) = (0.0163, 0.8846);
+    /// let apocentre = a * (1.0 + e);
+    /// let inside = motion.enclosed_mass(LightYears::new(apocentre));
+    /// let mu = GravitationalParameter::from_solar_masses(inside);
+    /// let speed = (mu.value() * (1.0 - e) / (apocentre * METRES_PER_LIGHT_YEAR)).sqrt();
+    /// let orbit = KeplerOrbit::from_state(
+    ///     PointLy::new(apocentre, 0.0, 0.0),
+    ///     GalacticVelocity::new([0.0, speed, 0.0]),
+    ///     mu,
+    /// )?;
+    /// let secular = orbit.secular(&table).expect("the orbit is bound");
+    /// let later = secular.propagate(orbit.period().expect("bound")).position();
+    /// let turned = later.y.atan2(later.x).to_degrees() * 60.0;
+    /// assert!((11.5..13.0).contains(&turned), "{turned}′");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn propagate(&self, dt: Seconds) -> KeplerOrbit {
+        let orbit = &self.orbit;
+        let t = dt.value();
+        let n = orbit.mean_motion_si();
+        let per_second = |rate: PerYear| rate.value() / SECONDS_PER_JULIAN_YEAR;
+        let later = orbit.propagate(Seconds::new(
+            t + t * (per_second(self.rates.mean_motion) / n),
+        ));
+        let angle = per_second(self.rates.apsidal()) * t;
+        let h = orbit.angular_momentum_m2_per_s();
+        let norm = length(h);
+        let axis = h.map(|c| c / norm);
+        let (sin, cos) = math::sin_cos(angle);
+        // Rodrigues' rotation about the unit axis k:
+        // x cos θ + (k × x) sin θ + k (k · x)(1 − cos θ).
+        let turn = |x: [f64; 3]| {
+            let across = cross(axis, x);
+            let along = dot(axis, x) * (1.0 - cos);
+            [0, 1, 2].map(|i| x[i] * cos + across[i] * sin + axis[i] * along)
+        };
+        KeplerOrbit::from_si(turn(later.position), turn(later.velocity), orbit.mu)
     }
 }
 
@@ -416,6 +529,9 @@ impl KeplerOrbit {
     /// `black_hole`, radians per Julian year: `3 G M n ÷ (c² a (1 − e²))`, which is
     /// `6π G M ÷ (c² a (1 − e²))` a radial period (module documentation); `None` for a parabolic or
     /// unbound orbit, which takes no secular rate.
+    ///
+    /// It takes the black hole's μ, since the orbit's own holds the stars inside its epoch radius
+    /// too.
     #[must_use]
     pub fn schwarzschild_rate(&self, black_hole: GravitationalParameter) -> Option<PerYear> {
         (self.alpha > 0.0).then(|| {
@@ -426,6 +542,9 @@ impl KeplerOrbit {
     /// The precession of the pericentre that the stars about the black hole drive, radians per
     /// Julian year, from `table`: `−n √(1 − e²) β★ ÷ μ`, negative (module documentation); `None`
     /// for a parabolic or unbound orbit.
+    ///
+    /// It takes the centre's table, which holds the orbit averages of its stars; no galaxy holds
+    /// one yet (P09.T28.d.b adds the carrier).
     #[must_use]
     pub fn mass_precession_rate(&self, table: &SecularTable) -> Option<PerYear> {
         self.secular_rates(table)
@@ -437,6 +556,14 @@ impl KeplerOrbit {
     /// documentation); `None` for a parabolic or unbound orbit, which takes neither rate.
     #[must_use]
     pub fn secular_rates(&self, table: &SecularTable) -> Option<SecularRates> {
+        self.secular(table).map(|secular| secular.rates)
+    }
+
+    /// The orbit with its secular rates about the centre whose table is `table`, from which the
+    /// secular step propagates ([`SecularOrbit::propagate`]); `None` for a parabolic or unbound
+    /// orbit, which takes neither rate and keeps the two-body law ([`propagate`](Self::propagate)).
+    #[must_use]
+    pub fn secular(&self, table: &SecularTable) -> Option<SecularOrbit> {
         if self.alpha <= 0.0 {
             return None;
         }
@@ -454,58 +581,31 @@ impl KeplerOrbit {
         let offset = (mu - black_hole) * (1.0 / r0 - 1.0 / a) + table.potential_at(r0)
             - table.potential_at(a)
             - gamma;
+        // The first-order correction is a small share of 1 ÷ a wherever the theory holds; it could
+        // pass it only where the stars over the orbit outweigh μ, where no rate is right, and the
+        // floor keeps the mean motion finite and non-negative there.
         let inverse_mean_a = (1.0 / a - 2.0 * offset / mu).max(0.0);
+        let per_year = |rate: f64| PerYear::new(rate * SECONDS_PER_JULIAN_YEAR);
         let mean_n = mu.sqrt() * inverse_mean_a * inverse_mean_a.sqrt();
-        Some(SecularRates {
-            schwarzschild: self.schwarzschild_si(black_hole),
-            mass_precession,
-            mean_motion: mean_n + shift - n,
+        Some(SecularOrbit {
+            orbit: *self,
+            rates: SecularRates {
+                schwarzschild: per_year(self.schwarzschild_si(black_hole)),
+                mass_precession: per_year(mass_precession),
+                mean_motion: per_year(mean_n + shift - n),
+            },
         })
     }
 
-    /// The orbit's state `dt` later under its secular rates (the secular step, module
-    /// documentation): the two-body orbit propagated at its mean motion plus
-    /// [`SecularRates::mean_motion_correction`], then turned in its plane about its angular
-    /// momentum by [`SecularRates::apsidal`] × dt. `rates` are this orbit's
-    /// ([`secular_rates`](Self::secular_rates)), taken at the epoch state that `dt` counts from. A
-    /// parabolic or unbound orbit takes neither rate, and is [`propagate`](Self::propagate)d.
-    ///
-    /// At `dt` = 0 it is the orbit itself. It keeps the orbit's energy and angular momentum about
-    /// μ, which the turn does not change and the propagation keeps.
-    ///
-    /// # Panics
-    ///
-    /// As [`propagate`](Self::propagate).
-    #[must_use]
-    pub fn propagate_secular(&self, dt: Seconds, rates: &SecularRates) -> Self {
-        if self.alpha <= 0.0 {
-            return self.propagate(dt);
-        }
-        let t = dt.value();
-        let n = self.mean_motion_si();
-        let later = self.propagate(Seconds::new(t + t * (rates.mean_motion / n)));
-        let angle = (rates.schwarzschild + rates.mass_precession) * t;
-        let h = self.angular_momentum_m2_per_s();
-        let norm = length(h);
-        let axis = h.map(|c| c / norm);
-        let (sin, cos) = math::sin_cos(angle);
-        // Rodrigues' rotation about the unit axis k:
-        // x cos θ + (k × x) sin θ + k (k · x)(1 − cos θ).
-        let turn = |x: [f64; 3]| {
-            let across = cross(axis, x);
-            let along = dot(axis, x) * (1.0 - cos);
-            [0, 1, 2].map(|i| x[i] * cos + across[i] * sin + axis[i] * along)
-        };
-        Self::from_si(turn(later.position), turn(later.velocity), self.mu)
-    }
-
     /// The mean motion `√(μ α³)` of a bound orbit, rad s⁻¹; meaningful only when α > 0.
+    #[must_use]
     fn mean_motion_si(&self) -> f64 {
         TAU / self.period_si()
     }
 
     /// The Schwarzschild advance about `black_hole` (G M, m³ s⁻²), rad s⁻¹; meaningful only when
     /// α > 0.
+    #[must_use]
     fn schwarzschild_si(&self, black_hole: f64) -> f64 {
         let a = 1.0 / self.alpha;
         let e = self.eccentricity();
@@ -738,13 +838,16 @@ mod tests {
             let sum = rates.mass_precession().value() + rates.mean_motion_correction().value();
             let scale = rates.mass_precession().value().abs();
             assert!(sum.abs() < 1e-4 * scale, "{r} ly: {rates:?}");
-            let newtonian = SecularRates {
-                schwarzschild: 0.0,
-                ..rates
+            let newtonian = SecularOrbit {
+                orbit,
+                rates: SecularRates {
+                    schwarzschild: PerYear::new(0.0),
+                    ..rates
+                },
             };
             let dt = Seconds::new(1_000.0 * YEAR);
             let two_body = orbit.propagate(dt).position;
-            let secular = orbit.propagate_secular(dt, &newtonian).position;
+            let secular = newtonian.propagate(dt).position;
             let gap = length([0, 1, 2].map(|i| secular[i] - two_body[i]));
             assert!(
                 gap < 1e-6 * r * METRES_PER_LIGHT_YEAR,
@@ -754,40 +857,49 @@ mod tests {
         }
     }
 
-    /// Parabolic and unbound orbits take neither rate, and their secular step is the two-body
-    /// propagation; at dt = 0 the step gives the orbit itself; and the same inputs give the same
-    /// bits, table and all.
+    /// Parabolic and unbound orbits take neither rate; at dt = 0 the step gives the orbit itself;
+    /// the step keeps the energy and the angular momentum's length; and the same inputs give the
+    /// same bits, the table's included.
     #[test]
     fn unbound_orbits_take_neither_rate_and_the_step_repeats_to_the_bit() {
         let motion = milky_way();
         let table = SecularTable::new(&motion);
-        assert_eq!(table, SecularTable::new(&motion));
-        let bound = orbit_at(&motion, 0.5, 0.9, 0.4);
-        let rates = bound.secular_rates(&table).expect("bound");
+        let again = SecularTable::new(&motion);
+        assert_eq!(table.averages.len(), again.averages.len());
+        for (one, two) in table.averages.iter().zip(&again.averages) {
+            for (a, b) in one.iter().zip(two) {
+                assert_same_bits(*a, *b);
+            }
+        }
+        for (a, b) in table.potential.iter().zip(&again.potential) {
+            assert_same_bits(*a, *b);
+        }
         for factor in [1.5, 2.0, 4.0] {
             let open = orbit_at(&motion, 0.5, factor, 0.4);
+            assert_eq!(open.secular(&table), None);
             assert_eq!(open.secular_rates(&table), None);
             assert_eq!(open.mass_precession_rate(&table), None);
             assert_eq!(
                 open.schwarzschild_rate(GravitationalParameter::new(table.black_hole)),
                 None
             );
-            let dt = Seconds::new(300.0 * YEAR);
-            assert_eq!(open.propagate_secular(dt, &rates), open.propagate(dt));
         }
-        assert_eq!(bound.propagate_secular(Seconds::new(0.0), &rates), bound);
+        let bound = orbit_at(&motion, 0.5, 0.9, 0.4);
+        let secular = bound.secular(&table).expect("bound");
+        assert_eq!(secular.propagate(Seconds::new(0.0)), bound);
+        let h = |o: &KeplerOrbit| length(o.angular_momentum_m2_per_s());
         for years in [-1_000.0, 10.0, 1_000.0] {
             let dt = Seconds::new(years * YEAR);
-            let once = bound.propagate_secular(dt, &rates);
-            let twice = bound.propagate_secular(dt, &bound.secular_rates(&table).expect("bound"));
+            let once = secular.propagate(dt);
+            let twice = bound.secular(&again).expect("bound").propagate(dt);
             for i in 0..3 {
                 assert_same_bits(once.position[i], twice.position[i]);
                 assert_same_bits(once.velocity[i], twice.velocity[i]);
             }
-            // The turn keeps the energy and the angular momentum's length.
             let later = bound.propagate(dt);
             let energy = |o: &KeplerOrbit| o.specific_energy_j_per_kg();
             assert!((energy(&once) / energy(&later) - 1.0).abs() < 1e-12);
+            assert!((h(&once) / h(&bound) - 1.0).abs() < 1e-12);
         }
     }
 
@@ -847,7 +959,7 @@ mod tests {
     /// The secular step's variants, for the plan's test: the stars' rates as built (the mean
     /// orbit's mean motion and the stars' shift of it), without the mean orbit's correction, the
     /// precession alone (the plan's "two rates × dt"), and none (the two-body law), each Newtonian.
-    fn variants(orbit: &KeplerOrbit, table: &SecularTable) -> [SecularRates; 4] {
+    fn variants(orbit: &KeplerOrbit, table: &SecularTable) -> [SecularOrbit; 4] {
         let rates = orbit.secular_rates(table).expect("bound");
         let (mu, a) = (orbit.mu, 1.0 / orbit.alpha);
         let e = orbit.eccentricity();
@@ -855,16 +967,20 @@ mod tests {
         let scale = table.stars_at(a);
         let [alpha, beta, _] = table.averages_at(a, e).map(|v| v * scale);
         let shift = n * (2.0 * (table.black_hole - mu) + 2.0 * alpha + (1.0 - e * e) * beta) / mu;
-        let with = |mass_precession: f64, mean_motion: f64| SecularRates {
-            schwarzschild: 0.0,
-            mass_precession,
-            mean_motion,
+        let with = |mass_precession: PerYear, mean_motion: PerYear| SecularOrbit {
+            orbit: *orbit,
+            rates: SecularRates {
+                schwarzschild: PerYear::new(0.0),
+                mass_precession,
+                mean_motion,
+            },
         };
+        let (precession, none) = (rates.mass_precession, PerYear::new(0.0));
         [
-            with(rates.mass_precession, rates.mean_motion),
-            with(rates.mass_precession, shift),
-            with(rates.mass_precession, 0.0),
-            with(0.0, 0.0),
+            with(precession, rates.mean_motion),
+            with(precession, PerYear::new(shift * YEAR)),
+            with(precession, none),
+            with(none, none),
         ]
     }
 
@@ -881,7 +997,7 @@ mod tests {
     /// two-body law beats the step on every eccentric orbit, since the rates are orbit averages and
     /// the arc is short.
     #[test]
-    fn the_secular_step_against_a_direct_integration() {
+    fn the_secular_step_beats_the_two_body_law_only_where_the_span_holds_whole_periods() {
         let motion = milky_way();
         let table = SecularTable::new(&motion);
         let cases = [(1.0, 0.0), (0.7, 0.0), (1.25, 0.0), (0.9, 0.9), (1.1, -1.0)];
@@ -908,9 +1024,8 @@ mod tests {
                     let finer = integrate(&motion, orbit.position, orbit.velocity, t, 1e-3);
                     let off = |x: [f64; 3]| length([0, 1, 2].map(|i| x[i] - truth[i]));
                     assert!(off(finer) < 1e-3 * bound, "the integration converges");
-                    let errors = steps.map(|rates| {
-                        off(orbit.propagate_secular(Seconds::new(t), &rates).position) / bound
-                    });
+                    let errors =
+                        steps.map(|step| off(step.propagate(Seconds::new(t)).position) / bound);
                     println!(
                         "r {r} ly, ×{factor} at {tilt} rad (e {:.3}, P {:.0} yr), {years} yr, \
                          bound {:.3e} ly: {}",

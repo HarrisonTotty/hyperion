@@ -60,10 +60,11 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{GravitationalParameter, Metres, SolarMasses};
 
 /// Where the denominator `ω_p² − Φ″` is floored, as a fraction of `ω_p²`: the floor plan 02's
-/// tidal radius takes in a harmonic core (`PotentialTables`' own, 0.05 Ω²; plan 02, Design note 17).
+/// tidal radius takes in a harmonic core (`PotentialTables`' own, 0.05 Ω²; plan 02, Design note
+/// 17).
 ///
-/// It is never reached by an orbit about the black hole: `Φ″ ≥ −G M(<r) ÷ r³` for any density that
-/// falls outward, and `ω_p² ≥ μ ÷ r_p³` with μ the mass inside the epoch radius, beyond the
+/// It is never reached by an orbit about the black hole: `−Φ″ ≥ −G M(<r) ÷ r³` for any density
+/// that falls outward, and `ω_p² ≥ μ ÷ r_p³` with μ the mass inside the epoch radius, beyond the
 /// pericentre, so the denominator is positive; the floor keeps a root of a negative number out
 /// should the two masses' rounding ever meet.
 const TIDAL_FLOOR: f64 = 0.05;
@@ -94,12 +95,15 @@ impl CentreMotion {
     /// use hyperion_sim::galaxy::params::GalaxyParams;
     /// use hyperion_sim::galaxy::potential::MassModel;
     /// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
-    /// use hyperion_sim::units::{AstronomicalUnits, GravitationalParameter, LightYears, SolarMasses};
+    /// use hyperion_sim::units::{
+    ///     AstronomicalUnits, GravitationalParameter, LightYears, SolarMasses,
+    /// };
     ///
     /// let params = GalaxyParams::milky_way_like();
     /// let motion = CentreMotion::new(&params, &MassModel::new(&params))?;
     /// let r = 0.01;
-    /// let mu = GravitationalParameter::from_solar_masses(motion.enclosed_mass(LightYears::new(r)));
+    /// let inside = motion.enclosed_mass(LightYears::new(r));
+    /// let mu = GravitationalParameter::from_solar_masses(inside);
     /// let speed = (mu.value() / (r * METRES_PER_LIGHT_YEAR)).sqrt();
     /// let orbit = KeplerOrbit::from_state(
     ///     PointLy::new(r, 0.0, 0.0),

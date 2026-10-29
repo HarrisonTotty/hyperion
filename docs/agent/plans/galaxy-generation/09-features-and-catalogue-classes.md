@@ -4217,16 +4217,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `galaxy.potential().tidal_radius(m, &PointLy::from(record.epoch_position()))`, bit for bit.
     It takes an `EpochState` (Provides names no signature): a grid record's is
     `EpochState::of_grid_record`, a centre member's `of_centre_member`.
-  - _The form (lean, 2026-10-29; science check below)._ `r_t = (G m ÷ (ω_p² − Φ″(r_p)))^⅓` at the
-    Kepler pericentre `r_p` (`KeplerOrbit::pericentre`), with `ω_p = h ÷ r_p²` the orbit's own
-    angular speed there and Φ″ the centre's spherical potential's (`CentreProfile::psi_curvature`:
-    the black hole, the cluster and the galaxy's monopole, dark halo included), which carries King's
-    d ln M ÷ d ln r term. It is King's (1962) radius at perigalacticon in its general form: about a
-    point mass it is `r_p (m ÷ ((3 + e) M))^⅓`, and for a circular orbit `ω² − Φ″ = 4Ω² − κ²`, the
-    brainstorm's formula, so the rule and plan 02's radius agree where the orbit is circular. The
-    denominator is floored at 0.05 ω_p², plan 02's own floor, which no orbit about the black hole
-    reaches. μ excludes the dark halo (P09.T28.b.a) and Φ″ includes it, some 10⁻³ of the mass
-    inside the fixture's edge.
+  - _The form (lean, 2026-10-29; science check in this record)._ `r_t = (G m ÷ (ω_p² − Φ″(r_p)))^⅓`
+    at the Kepler pericentre `r_p` (`KeplerOrbit::pericentre`), with `ω_p = h ÷ r_p²` the orbit's
+    own angular speed there and Φ″ the centre's spherical potential's
+    (`CentreProfile::psi_curvature`: the black hole, the cluster and the galaxy's monopole, dark
+    halo included), which carries King's d ln M ÷ d ln r term. It is King's (1962) radius at
+    perigalacticon in its general form: about a point mass it is `r_p (m ÷ ((3 + e) M))^⅓`, and for
+    a circular orbit `ω² − Φ″ = 4Ω² − κ²`, the brainstorm's formula, so the rule and plan 02's
+    radius agree where the orbit is circular. The denominator is floored at 0.05 ω_p², plan 02's own
+    floor, which no orbit about the black hole reaches. μ excludes the dark halo (P09.T28.b.a) and
+    Φ″ includes it, some 10⁻³ of the mass inside the fixture's edge.
   - _Figures (Milky Way fixture, a solar mass)._ A circular orbit at 0.01 ly keeps **2.6965 au**
     (the plan's 2.7 au; M(<0.01 ly) = 4.300 × 10⁶ M☉, so King's term is under 10⁻⁴), and one at
     3 ly **0.01240 ly**, where plan 02's radius at that position is also 0.01240 ly (about 0.01 ly,
@@ -4236,9 +4236,20 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     at its one pericentre passage, before or after the epoch. (2) The call reads neither the
     galaxy's rules nor the loss cone: the radius is the planets' whatever the drift hook draws
     (`KEPLER_REGIME_VERSION`), and a system the loss cone carves out is not asked about. (3) The
-    plan's 2.7 au "for a semi-major axis of 0.01 ly" is the circular orbit's; an eccentric orbit
-    of that a keeps less, `a (1 − e) (m ÷ ((3 + e) M))^⅓`, so P14.T29's test ("nothing beyond 2.7
-    au") holds for a circular one.
+    plan's 2.7 au "for a semi-major axis of 0.01 ly" is the circular orbit's; an eccentric orbit of
+    that a keeps less, `a (1 − e) (m ÷ ((3 + e) M))^⅓`, so P14.T29's test ("nothing beyond 2.7 au")
+    holds for a circular one. (4) King's turning term makes the radius at pericentre up to 9%
+    smaller, `(3 ÷ (3 + e))^⅓`, than the brainstorm's point-mass radius `r_p (m ÷ 3M)^⅓` taken at
+    the same pericentre: for main and the brainstorm's owner, with (3).
+  - _Tolerances._ 2.7 ± 0.05 au and the point-mass radius to 10⁻⁴ at 0.01 ly; 0.008–0.015 ly and
+    within 10% of plan 02's radius at 3 ly; King's point-mass form to 10⁻¹²; the radius from the
+    orbit propagated ±1,000 yr to 10⁻⁹.
+  - _Science check (2026-10-29)._ The form, its two reductions and the figures re-derived: ok
+    (2.6965 au; S2's 0.4655 au, its pericentre 118.96 au). The citations were not re-checked at
+    source (no access to the journals from the pod): King 1962 for the `(3 + e)` form, and Webb et
+    al. 2013, §1, for the general form, which may credit Bertin and Varri (2008, ApJ 689, 1005); to
+    re-check before P14.T29 wires the rule. The floor's doc had its inequality's sign wrong
+    (`−Φ″ ≥ −G M(<r) ÷ r³`), fixed in the review's commit.
   - _Tests (in `motion/tidal.rs`, fast, 1.2 s together):_
     `a_circular_orbit_a_hundredth_of_a_light_year_out_keeps_2_7_au`,
     `a_near_circular_orbit_at_3_ly_keeps_about_a_hundredth_of_a_light_year` (against plan 02's
@@ -4261,13 +4272,15 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Signatures._ In `motion::secular`: `SecularTable` (`new(&CentreMotion)`), the eccentricity
     table, a value built from the centre's motion and held by no `Galaxy` field (the held half adds
     the carrier with `GalaxyRules`); `SecularRates` (`schwarzschild`, `mass_precession`, `apsidal`,
-    `mean_motion_correction`, each a `PerYear`). On `KeplerOrbit`, in the child module:
-    `schwarzschild_rate(GravitationalParameter) -> Option<PerYear>` (it takes the black hole's μ,
-    since the orbit's own μ holds the stars inside r₀: Provides named no argument),
-    `mass_precession_rate(&SecularTable) -> Option<PerYear>`,
-    `secular_rates(&SecularTable) -> Option<SecularRates>` and the secular step
-    `propagate_secular(Seconds, &SecularRates) -> KeplerOrbit`. Parabolic and unbound orbits take
-    `None`, and their step is `propagate`.
+    `mean_motion_correction`, each a `PerYear`); and `SecularOrbit` (`orbit`, `rates`, and the
+    secular step `propagate(Seconds) -> KeplerOrbit`), the orbit with its own rates, so that the
+    step cannot be given another orbit's (review). On `KeplerOrbit`, in the child module:
+    `schwarzschild_rate(GravitationalParameter) -> Option<PerYear>` (the black hole's μ, since the
+    orbit's own holds the stars inside r₀), `mass_precession_rate(&SecularTable) -> Option<PerYear>`
+    (the table, since no galaxy holds one until T28.d.b's carrier),
+    `secular_rates(&SecularTable) -> Option<SecularRates>` and
+    `secular(&SecularTable) -> Option<SecularOrbit>`; Provides named no arguments. Parabolic and
+    unbound orbits take `None`, and keep `propagate`.
   - _The rates._ Schwarzschild: `3 G M_bh n ÷ (c² a (1 − e²))`, `6π G M_bh ÷ (c² a (1 − e²))` a
     radial period, about the black hole alone. The stars: Lagrange's equations for the
     orbit-averaged `ΔΦ = Φ + μ ÷ r` about T28.b.a's μ = G M(<r₀), whose partial derivatives reduce
@@ -4283,7 +4296,11 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `1 ÷ ā = 1 ÷ a − 2 (ΔΦ(r₀) − ⟨ΔΦ⟩) ÷ μ` (the epoch's osculating a is not the mean one). The step
     is the two-body orbit propagated by dt (1 + δn ÷ n), then turned about its angular momentum by
     the two precession rates × dt. With the GR advance it changes no radial period, which is
-    gauge-dependent at order G M ÷ (c² a).
+    gauge-dependent at order G M ÷ (c² a). The deviation has a cost the direct integration shows
+    (below): on the eccentric orbits at 1 and 5 ly the step as built is the worst of the four
+    variants (3,181 and 1,953, against 323 and 276 for the precession alone), the mean-motion
+    correction that keeps circular orbits exact costing a factor of 6–10 there; at 0.1 ly it is the
+    best by far (65 against 1,838).
   - _The table's design point (lean, 2026-10-29)._ On (a, e), of the profile itself: `α★`, `β★` and
     `⟨Γ★⟩ − Γ★(a)` (Γ★ the stars' potential), each over its scale G M★(<a) (or ÷ a), at 16 knots a
     decade from 10⁻⁴ to 10⁴ ly and 32 eccentricities `(j + ½) ÷ 32` (mirrored across e = 0), read by
@@ -4325,8 +4342,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     of order the variation of M(<r) over the orbit times a, which only an orbit inside some 0.03 ly
     keeps under a tenth of its tidal radius. The two-body law's own miss (380 at 1 ly) is T28.b.a's
     fixed μ = G M(<r₀) on an orbit whose enclosed mass changes by percents. The test
-    (`the_secular_step_against_a_direct_integration`, fast, 1.5 s with the module's others) pins
-    each worst to 10% and holds the order above.
+    (`the_secular_step_beats_the_two_body_law_only_where_the_span_holds_whole_periods`, fast, 1.5 s
+    with the others) pins each worst to 10% and holds the order above.
 
   - _For P09.T28.d.b (lean, 2026-10-29; QUESTION for main)._ The term as the plan has it would move
     Kepler-regime records at 1–7 ly by up to a few light-years more than the two-body law, a move
@@ -4338,6 +4355,27 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Tests (in `motion/secular.rs`, fast):_ `an_s2_like_orbit_advances_12_arcminutes_an_orbit`,
     `the_table_holds_a_harmonic_core_s_closed_forms`,
     `the_table_holds_the_profile_s_orbit_averages`, `a_circular_orbit_keeps_its_two_body_motion`,
-    `unbound_orbits_take_neither_rate_and_the_step_repeats_to_the_bit` (with the same table twice,
-    dt = 0 the orbit itself, the energy kept) and `the_secular_step_against_a_direct_integration`; a
-    doctest on `SecularTable`. T28.a's `kepler.golden` is unchanged (`golden_diff.py`).
+    `unbound_orbits_take_neither_rate_and_the_step_repeats_to_the_bit` (the table's entries the same
+    bits twice, dt = 0 the orbit itself, the energy and the angular momentum's length kept) and
+    `the_secular_step_beats_the_two_body_law_only_where_the_span_holds_whole_periods`; doctests on
+    `SecularTable` and `SecularOrbit::propagate` (S2 back at apocentre a period on, turned some
+    12′). T28.a's `kepler.golden` is unchanged (`golden_diff.py`: nothing to reconcile).
+  - _Tolerances._ 11.8–12.6′ for both S2-like orbits and the closed form to 10⁻⁹; the harmonic
+    core's averages to 10⁻⁴ (10⁻³ for the potential's) and its rate to 10⁻⁴; the profile's averages
+    to 5 × 10⁻⁴ inside 100 ly and 3 × 10⁻³ beyond; a circular orbit's precession and mean-motion
+    shift cancelling to 10⁻⁴ and its step within 10⁻⁶ r of the two-body orbit; the integration's
+    worsts pinned to 10%.
+  - _Science check (2026-10-29)._ Re-derived and ok: the Schwarzschild rate and S2's 12.260′ and
+    12.192′; Lagrange's equations from Murray and Dermott's ϖ and ε forms (`ω̇ = ϖ̇`,
+    `Ṁ − n = ε̇ − ϖ̇` in the plane); the two partial derivatives, the point masses adding nothing to
+    the e-derivative; the small-e limit `Ω − κ` (a numerical ratio of 1.00004); the harmonic core's
+    closed forms; and the mean orbit's 1 ÷ ā, which is Lagrange's first-order short-period δa.
+    Against the exact radial period and apsidal angle of a black hole and a harmonic core, ω̇★ errs
+    at second order (7.8 × 10⁻⁴ at a stellar mass of 10⁻³ of the black hole's) and the mean motion
+    with the mean orbit to 2 × 10⁻⁷, against 5 × 10⁻⁴ to 10⁻³ without it. The short-arc conclusion
+    holds: about μ = G M(<r₀) the two-body law feels no perturbing force at the epoch, so its error
+    grows as t³ and the step's as t. Fixed in the review's commit: the stars' relativistic term is
+    about M★(<a) ÷ M_bh of the black hole's, not "under 10⁻¹⁰". Not re-checked at source (no access
+    from the pod): Weinberg 1972 §8.6, Murray and Dermott §6.8, Merritt 2013 §4.4.1 (which the plan
+    marks "to re-check"), Binney and Tremaine §3.2.3, and GRAVITY 2020's printed 12.1′ (their
+    elements give 12.156′).
