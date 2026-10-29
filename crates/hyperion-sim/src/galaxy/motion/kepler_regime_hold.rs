@@ -17,6 +17,8 @@ use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
 use crate::GENERATOR_VERSION;
+use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId, system_of};
 use crate::galaxy::imf::MassFunctionKind;
 use crate::galaxy::placement::{
     CandidateOutcome, CellCache, CellKey, NoCache, ResolveSystemError, evaluate_candidate,
@@ -30,6 +32,8 @@ use crate::galaxy::query::{
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::rng::Seed;
+use crate::time::{ClockWindow, Span};
+use crate::units::MetresPerSecond;
 
 /// The seed of P09.T28.b.a's pre-pin's Milky Way fixture.
 const MILKY_WAY_SEED: u64 = 0x0928_b0a0_0000_0001;
@@ -282,6 +286,115 @@ fn the_walks_pad_by_the_arm(held: &Galaxy, kepler: &Galaxy) {
             }
         }
     }
+}
+
+/// A catalogue system moves by its class under either arm (P09.T33.a over this hold): plan 03's
+/// `position_at` gives a core collapse its class's line broken at its explosion, bit for bit the
+/// same under both rules, and so does `kepler_regime_position_at` asked about it directly, rather
+/// than an orbit or a drift at its epoch velocity, which is its remnant's once it has exploded. Its
+/// class's cell and the system its ID names are the same under both rules, since the class reads
+/// none. Its fastest speed (`DeathMarks`'s `v_fast`) is under its layer's pad speed, so either
+/// arm's walk pad would hold it, though no walk reaches a catalogue system yet: the class's lookups
+/// pad by its own reach, and P09.T37's source will. The class cell at the black hole, where the
+/// nuclear disc's young deaths lie, at the epoch, ±100 and ±1,000 yr and either side of any
+/// explosion inside the clock window; and, where the line and that drift part, a millennium on the
+/// far side of each explosion from the epoch. Its counts are pinned as measured.
+#[test]
+fn a_catalogue_system_moves_by_its_class_under_either_arm() {
+    let (held, kepler) = (held(), kepler());
+    let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, 0, 0]).expect("the centre's cell");
+    let entries =
+        CatalogueClassCell::generate(held, &CoreCollapseProcess::new(held), key).into_entries();
+    assert!(!entries.is_empty(), "the nuclear disc has recent deaths");
+    assert_eq!(
+        CatalogueClassCell::generate(kepler, &CoreCollapseProcess::new(kepler), key).into_entries(),
+        entries,
+        "the class's cell reads no rule"
+    );
+    let mut inside = 0_u32;
+    for entry in &entries {
+        let record = entry.value().record();
+        let system = system_of(held, entry.id()).expect("an entry names its system");
+        assert_eq!(system_of(kepler, entry.id()), Ok(system));
+        if regime_of(held, record) == Regime::Kepler {
+            inside += 1;
+        }
+        let layer = record.layer();
+        assert_eq!(layer, Layer::E, "a core collapse's primary is of band E");
+        let fastest = entry.value().marks().fastest_member_speed().value();
+        assert!(
+            fastest < MetresPerSecond::from(pad_speed(layer)).value(),
+            "{:?} moves at {fastest} m/s",
+            entry.id()
+        );
+        let death = entry.value().site().death();
+        let one_second = Span::from_seconds(1);
+        let times = TIMES
+            .map(years)
+            .into_iter()
+            .chain([UniverseTime::EPOCH])
+            .chain(
+                [Some(death), death.checked_sub(one_second)]
+                    .into_iter()
+                    .flatten(),
+            )
+            .filter(|&t| ClockWindow::contains(t));
+        for t in times {
+            let class = system.position_at(t);
+            assert_eq!(
+                position_at(held, record, t),
+                class,
+                "{:?} at {t}",
+                entry.id()
+            );
+            assert_eq!(
+                position_at(kepler, record, t),
+                class,
+                "{:?} at {t}",
+                entry.id()
+            );
+            assert_eq!(
+                kepler_regime_position_at(kepler, record, t),
+                class,
+                "{:?} at {t}",
+                entry.id()
+            );
+            for galaxy in [held, kepler] {
+                let pad = walk_pad(galaxy, layer, &class, LightYears::ZERO, t).value();
+                let moved = apart(record.epoch_position(), &class);
+                assert!(moved <= pad, "{:?} moved {moved} ly by {t}", entry.id());
+            }
+        }
+        // On the leg the epoch is not on, a drift at the epoch velocity misses the line by the
+        // kick's travel, so this is where the arm's answer is told from it.
+        let millennium = Span::from_julian_years(1_000).expect("a millennium");
+        // From its explosion on, its line's velocity is the remnant's.
+        let far_leg = if death <= UniverseTime::EPOCH {
+            death.checked_sub(millennium)
+        } else {
+            death.checked_add(millennium)
+        }
+        .expect("inside the clock's range");
+        let class = system.position_at(far_leg);
+        assert_eq!(
+            kepler_regime_position_at(kepler, record, far_leg),
+            class,
+            "{:?} at {far_leg}",
+            entry.id()
+        );
+        assert_ne!(
+            drifted(record, epoch_velocity(kepler, record), far_leg),
+            class,
+            "{:?}: its kick moves it",
+            entry.id()
+        );
+    }
+    println!(
+        "{} core collapses in the class cell at the black hole, {inside} inside the influence radius",
+        entries.len()
+    );
+    // None lies inside the fixture's 7.19 ly edge, so the arms are told apart by the origin alone.
+    assert_eq!((entries.len(), inside), (20, 0));
 }
 
 /// The seed whose central grid holds the one record of the census C1 that the loss cone carves

@@ -980,7 +980,7 @@ domain_tags! {
     // `class.core_collapse.`, one per property group, opened with `ObjectKey::from(SystemId)` of
     // the candidate's ID, its member 0 (Design note 23). Its primary's own draws are plan 06's
     // `star.*` tags, keyed by its body 0 at attempt 0, and its explosion's energy `snr.energy`.
-    // Appended after P09.T32's `class.cell`, because the macro's order fixes `ALL`.
+    // Appended after P10.T7.a's `dwarf.core.metallicity`, because the macro's order fixes `ALL`.
 
     /// A core-collapse candidate's site: words 0–2 its position in its 512 ly cell, x, y and z,
     /// and word 3 the mark that thins it on the young field's density and picks its density

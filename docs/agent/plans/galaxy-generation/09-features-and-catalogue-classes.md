@@ -4631,3 +4631,44 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   process and reruns the candidate and its test, some milliseconds each time. Before P09.T37 puts
   catalogue systems into the range query, callers that hold the `CatalogueSystem` should pass it,
   or the process should be cached per galaxy (Rust review).
+- **P09.T33.a merged over P09.T28.b.b, T30.b and P10.T7.a (lane `gate-p09-t33a`, 2026-10-29, at
+  `GENERATOR_VERSION` 23, no output moves).** T33.a was built on an older base; its three commits
+  were applied over the integration tip with their textual conflicts resolved (both docs of
+  `placement::resolve`; the union of `query/motion.rs`'s imports, `position_at` giving a catalogue
+  system its class's motion before T28.b.b's `match` on the rules; P10.T7.a's lint attribute and
+  tag, then T33.a's five; both lanes' records). One semantic gap remained:
+  - _The Kepler arm's `match` on the origin._ T28.b.b's `motion::kepler_regime_position_at` did
+    not cover `SystemOrigin::CatalogueSystem` (E0004). It gains that arm, its class's broken line
+    (`system_of_record(..).position_at(t)`), the answer `position_at` gives before it reads the
+    rules, rather than a drift at the epoch velocity, which is the remnant's after the explosion. So
+    a catalogue system moves by its class under either arm, as T28.b.b's "its own source moves it"
+    has a member do; `regime_of`'s doc says the regime does not choose its law. Test, in
+    `galaxy/motion/kepler_regime_hold.rs`: `a_catalogue_system_moves_by_its_class_under_either_arm`
+    (the core collapses of the class cell at the black hole, on T28.b.b's fixture: the same entries
+    and systems under both rules; `position_at` under both arms and `kepler_regime_position_at` are
+    the class's line, bit for bit, at ±100 and ±1,000 yr and either side of an explosion inside the
+    clock window; a millennium on the far side of each explosion from the epoch, the arm's answer is
+    the line and a drift at the epoch velocity is not; every entry is of layer E, its v_fast under
+    layer E's pad speed and its moves within either arm's walk pad; 20 entries, none inside the
+    7.19 ly influence radius, pinned; 11.6 s on the pod). The tag registry's comment now says
+    T33.a's tags follow P10.T7.a's.
+  - _Joins checked, no gap._ (1) The loss cone: `CandidateOutcome::InLossCone` is the grid
+    candidates' outcome, after the claim hook; a catalogue candidate never reaches it, `verdict_on`
+    answers `Clear` for a catalogue system, and the class reads no rule, so a core collapse is kept
+    or thinned alike under either arm (T33.a's deferred finding (2), no Kepler regime). A placed
+    class without a process still answers `KindNotGenerated`, and a carved-out grid candidate
+    `NoSuchSystem`. (2) The pads: no walk reaches a catalogue system before P09.T37 (the range
+    query, the frame search, the sky census and the lensing walk read grid cells and feature
+    sources), so `walk_pad` pads grid records alone. Every core collapse's primary is of band E, so
+    its layer is E, and its v_fast, at most |v| + 990 km/s with plan 08's cut below 1,000 km/s, is
+    under layer E's 3,000 km/s, which the test holds; T37's source pads by the class's own v_fast.
+    (3) T30.b's victims are the centre's feature-level IDs (`SystemIdKind::Centre`, indices 1 to N),
+    which `resolve_centre_member` answers; T33.a's dispatch takes `SystemIdKind::Catalogue` alone,
+    where class 7, `TIDAL_DISRUPTION_VICTIM`, is never placed and answers `NoSuchSystem`, and the
+    server's system cache and the planetary context still send a centre ID through `resolve` and
+    refuse its stars. (4) The headroom: the core collapses are a field class in the class grid's
+    index space, not on the centre's list, so `CentreListForecast`'s entries (the victims and the
+    carved classes' candidates) are unchanged, and its doc's other classes there are still T36's
+    and T43's. (5) Census C1 counts the grid records of P09.T28.b.a's pre-pin, which no class claims
+    at 23 (`RECENT_DEATH_CLAIM` is `None`), so no catalogue system is among them; under every 25
+    hold the catalogue systems move as they do at 23.

@@ -916,8 +916,9 @@ fn influence_radius_of(profile: &CentreProfile) -> Result<LightYears, BuildCentr
 /// ([`CentreMotion::influence_radius`]), whatever the time it is asked about, and
 /// [`Regime::Straight`] otherwise.
 ///
-/// It reads the epoch position alone, so it is the same for a grid system, a feature member or a
-/// centre member, and costs a distance.
+/// It reads the epoch position alone, so it is the same for a grid system, a feature member, a
+/// centre member or a catalogue system, and costs a distance. It does not say which law moves the
+/// system: a catalogue system follows its class's line in either regime (P09.T33.a).
 ///
 /// # Examples
 ///
@@ -1434,11 +1435,16 @@ pub(crate) enum KeplerRegimeRules {
 /// have. A feature member's or a centre member's record keeps the held arm's answer: its own source
 /// moves it (the feature's members by their velocities, the centre's on its
 /// [`Trajectory`]s), and [`epoch_velocity`] panics for it in a galaxy with kinematic tables, as
-/// before.
+/// before. A catalogue system is moved by its class, on the line its class breaks at its explosion
+/// (plan 09, P09.T33.a), under either arm: the answer
+/// [`position_at`](crate::galaxy::query::position_at) gives it before it reads the rules.
 ///
 /// # Panics
 ///
-/// As [`epoch_velocity`]: in a galaxy with kinematic tables, if `record` is not a grid record.
+/// - As [`epoch_velocity`]: in a galaxy with kinematic tables, if `record` is a feature member or
+///   a centre member.
+/// - If `record` is a catalogue system that does not resolve in `galaxy`, as
+///   [`system_of_record`].
 #[must_use]
 pub(crate) fn kepler_regime_position_at(
     galaxy: &Galaxy,
