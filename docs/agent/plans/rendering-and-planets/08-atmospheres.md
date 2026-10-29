@@ -5775,6 +5775,33 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     - **The frame blocker binds here.** Routing Earth-class worlds changes their draw path, so the
       high rows with the route meet `decision-r08-t11-frame.md`'s p95 ≤ 16.67 ms (15.67 the
       target) before T14.d routes them.
+  - _The split_ (ruled 2026-10-29: main, on the research advice that followed T14.f, each of its
+    six questions as the advice leaned). T14.d is built in four subtasks, in this order:
+    - **T14.d.1, the bake's m = 2 and its channels.** `THICK_BAKE_MODES` is 3, and the bake's
+      m = 2 is packed into G₂ beside σ_s ΔJ_2, with no new texel (precondition 1; no m = 3 now,
+      question 5). The bake's channels are converted from each bin's J, its E over the bin's own
+      kernel scattering σ_s (1 − f_c) at the altitude, in place of the bins' E over the channel's
+      σ_s,k (question 2, with the science-checker's ruling on the conversion). The vector gate is
+      run at m = 0 alone, m ≤ 1 and m ≤ 2, which is the first bullet's "which is needed", and the
+      bake's time a band is recorded against `BAKE_CEILING_S`.
+    - **T14.d.2, twilight: the bake below the horizon.** The bake and the correction extend below
+      μ₀ = 0, over the lit air above the planet's shadow, where the pseudo-spherical beam is
+      defined (question 1). This departs from T14.e's "ΔJ_pol = 0 where the beam is undefined"
+      and from the table's μ₀ ≤ 0 limit, which is T14.b's choice; the table's rows and read
+      follow. It comes after T14.d.1 and R08.T11.g.
+    - **T14.d.3, Mars's aureole** (precondition 2): one of its options (a) or (b), then m = 3
+      measured again on Mars alone.
+    - **T14.d.4, the gates and the route.** The Venus- and Titan-class cases above,
+      preconditions 3–5 (the 2 MB row counting the thick and correction tables), the bake's time
+      on the UHD 620's host, `classifyRegime`'s route, `CORRECTION_ROUTED` and the labels.
+  - _Ruled with the split_ (main, 2026-10-29):
+    - An unrouted thick world takes no correction (question 3): `CORRECTION_ROUTED` turns on in
+      T14.d.4's routing commit, for thin worlds and routed thick worlds alone. This amends Design
+      note 10's "in both regimes".
+    - Earth- and Saturn-class worlds are routed while a Mars-class world stays
+      `ATMOSPHERE: APPROXIMATE` (question 4). This is ruled again once T14.d.3 reports.
+    - A tenuous world whose correction failed reads `ATMOSPHERE: APPROXIMATE`, as built
+      (question 6).
 
   Acceptance: `pnpm test`.
 
