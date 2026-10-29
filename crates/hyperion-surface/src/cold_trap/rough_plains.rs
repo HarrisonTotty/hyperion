@@ -1,6 +1,6 @@
 //! Rough plains from ray-traced surfaces: the reader of `hyperion-fit`'s table
-//! `rough_plains_cold_traps` (plan R09, R09.T7.g; `science-r09-drainage.md` §8.13, signed off in
-//! `signoff-12.md` item 13).
+//! `rough_plains_cold_traps` (plan R09, R09.T7.g, refitted by R09.T7.l; `science-r09-drainage.md`
+//! §8.13, signed off in `signoff-12.md` item 13; `decision-r09-t7g-table`).
 //!
 //! Hayne et al. (2021, Nat. Astron. 5, 169) give rough plains no closed form: they ray-trace
 //! Gaussian surfaces (their Methods D). The fitting task does the same offline, on periodic
@@ -12,8 +12,10 @@
 //!   ([`permanent_shadow`]);
 //! - **the shares of it that sunlit terrain warms least**: those whose peak irradiance from the
 //!   sunlit facets they see, to first order (each facet's direct flux weighted by the view factor
-//!   to it), is at most each of fixed fractions of S sin e, e = min(90°, e₀ + D) the point star's
-//!   highest elevation ([`cold_share`]). The table holds no albedo or emissivity.
+//!   to it), is at most each of fixed fractions of S sin e, e = e₀ + max(0, D − α) the highest
+//!   elevation of the point at the disk's centre that lit the facets, for the table's one α
+//!   ([`STAR_RADIUS`](table::STAR_RADIUS), the Sun's at the Moon) ([`cold_share`]). The table
+//!   holds no albedo or emissivity.
 //!
 //! A body's own albedo A and emissivity ε turn that irradiance E into the shadow's absorbed flux:
 //! a lit facet scatters A of its direct flux and re-emits the absorbed 1 − A in the thermal
@@ -22,17 +24,20 @@
 //! share is read at (εσT⁴ − q) ÷ ((1 − A)(A + ε) S sin `e_eff`) ([`irradiance_limit`],
 //! [`fraction`]); none is cold where that is not positive. The heating leaves out light scattered
 //! more than once and the shadowed terrain's own emission, which would add to it. The table was
-//! traced under a point star at its upper limb, D = δ + α from the equator, for the shadow and the
-//! sunlit facets alike, which lights the facets more than the star's disk does (1.18 times at the
-//! Moon's pole, 1.04 at 85°). The shadow keeps the upper limb, while the heating takes `e_eff`, the
-//! disk's flux-weighted elevation at its highest, as the bowls do, which removes that excess to
-//! first order.
+//! traced with the shadow under a point at the star's upper limb, D = δ + α from the equator, and
+//! the sunlit facets lit by a point at its disk's centre (a point at the upper limb lights them
+//! more than the disk does, 1.18 times at the Moon's pole). The heating takes `e_eff`, the body's
+//! own disk's flux-weighted elevation at its highest, as the bowls do: for a disk that clears the
+//! horizon and the table's α it is the traced point's own elevation, and for another α it corrects
+//! the traced heating to first order.
 //!
 //! Heights and angles scale together, so at small slopes a plain's shadow depends on e₀ ÷ w and
 //! D ÷ w alone, and a slope below the table's 0.05 reads its 0.05 slice at its own ratios. At those
 //! ratios the irradiance over S sin e scales as w² (a spherical bowl's f (1 − f) ≈ 4γ²), so each
 //! slope node is read at the fraction scaled by its (`w_n` ÷ w)², the 0.05 slice included. A plain
-//! with no slope casts no shadow.
+//! with no slope casts no shadow. The cold shares are tabulated at fewer nodes than the shadow,
+//! every node where D ÷ w and e₀ ÷ w are small and sparser beyond, and each cold node's shadow is
+//! found by its indices among the shadow's (`COLD_COLATITUDE_INDEX`, `COLD_LIMB_INDEX`).
 //!
 //! **Nothing generated reads this yet.** [`fraction`](super::fraction) and
 //! [`permanent_shadow`](super::permanent_shadow) still take the plains as the labelled half-normal
@@ -115,10 +120,10 @@ enum Share {
 /// D ≥ 90° (the star passes the zenith, which a height field cannot hide), and beyond the
 /// colatitude's or D's last node. The shadow is trilinear in w, the colatitude over w and D over
 /// w. The cold share is the shadow times the mean of the cold nodes' shares about the point, each
-/// weighted by its trilinear weight times its node's shadow, so that the cold share never exceeds
-/// the shadow. Each slope node `w_n` reads its shares at the fraction times (`w_n` ÷ w)², since at
-/// fixed ratios the irradiance over S sin e scales as w² (a spherical bowl's f (1 − f) ≈ 4γ²),
-/// and each share is read by [`share_at`].
+/// weighted by its trilinear weight times its node's shadow, found by the node's indices among
+/// the shadow's, so that the cold share never exceeds the shadow. Each slope node `w_n` reads its
+/// shares at the fraction times (`w_n` ÷ w)², since at fixed ratios the irradiance over S sin e
+/// scales as w² (a spherical bowl's f (1 − f) ≈ 4γ²), and each share is read by [`share_at`].
 #[must_use]
 fn read(w: f64, colatitude: f64, limb: f64, what: Share) -> f64 {
     let not_positive = matches!(what, Share::Cold(fraction) if fraction <= 0.0);
@@ -159,8 +164,6 @@ fn read(w: f64, colatitude: f64, limb: f64, what: Share) -> f64 {
     }
     let cold_width = table::COLD_COLATITUDE_PER_SLOPE.len();
     let cold_limbs = table::COLD_LIMB_PER_SLOPE.len();
-    let colatitude_stride = (width - 1) / (cold_width - 1);
-    let limb_stride = (table::LIMB_PER_SLOPE.len() - 1) / (cold_limbs - 1);
     let (cold_colatitude_cell, cold_colatitude_at) =
         cell(&table::COLD_COLATITUDE_PER_SLOPE, colatitude_over);
     let (cold_limb_cell, cold_limb_at) = cell(&table::COLD_LIMB_PER_SLOPE, limb_over);
@@ -172,13 +175,17 @@ fn read(w: f64, colatitude: f64, limb: f64, what: Share) -> f64 {
             [(0, 1.0 - cold_colatitude_at), (1, cold_colatitude_at)]
         {
             let fine = &table::SHADOW[(slope_cell + slope_step) * width
-                + (cold_colatitude_cell + colatitude_step) * colatitude_stride];
+                + usize::from(
+                    table::COLD_COLATITUDE_INDEX[cold_colatitude_cell + colatitude_step],
+                )];
             let coarse =
                 (slope_cell + slope_step) * cold_width + cold_colatitude_cell + colatitude_step;
             for (limb_step, limb_weight) in [(0, 1.0 - cold_limb_at), (1, cold_limb_at)] {
                 let limb_node = cold_limb_cell + limb_step;
-                let k =
-                    slope_weight * colatitude_weight * limb_weight * fine[limb_node * limb_stride];
+                let k = slope_weight
+                    * colatitude_weight
+                    * limb_weight
+                    * fine[usize::from(table::COLD_LIMB_INDEX[limb_node])];
                 let row = &table::COLD[coarse * cold_limbs + limb_node];
                 sum += k * share_at(row, scaled);
                 weight += k;
@@ -210,8 +217,9 @@ pub fn permanent_shadow(slope: Radians, colatitude: Radians, limb: Radians) -> f
 }
 
 /// The share of rough plains' ground in permanent shadow whose peak irradiance from the sunlit
-/// terrain it sees is at most `irradiance` × S sin e, e = min(90°, colatitude + `limb`): the
-/// table's cold share, as [`permanent_shadow`] takes its other inputs.
+/// terrain it sees is at most `irradiance` × S sin e, e = colatitude + max(0, `limb` − α), α the
+/// table's [`STAR_RADIUS`](table::STAR_RADIUS): the table's cold share, as [`permanent_shadow`]
+/// takes its other inputs.
 ///
 /// It never exceeds [`permanent_shadow`], does not fall as `irradiance` rises, and is zero where
 /// `irradiance` is not positive. Past the table's last fraction it is that fraction's.
@@ -261,12 +269,13 @@ pub fn instantaneous_shadow(slope: Radians, elevation: Radians) -> f64 {
 /// (`Sky::at`). It is the shadow's absorbed flux to first order, the sunlit facets' scattered
 /// light and their thermal emission, against what its emission at the threshold leaves after the
 /// heat flow (the module documentation). The table traced the sunlit facets under a point at the
-/// disk's upper limb, D = δ + α, and holds their heating over S sin(colatitude + D), while a plain
-/// under the disk intercepts S sin `e_eff`. To first order the facets' heating scales with the
-/// flux they intercept, so the shares are read at fractions of S sin `e_eff`: the shadow takes the
-/// upper limb, and the heating the disk (`decision-r09-t7g-table` §2). That is exact for the
-/// plain's mean heating and leaves a pixel that peaks away from noon somewhat overheated; where
-/// the horizon cuts the disk it is an extrapolation (R09.T7.g's record). It is zero where the heat
+/// disk's centre, D − α for its own α ([`STAR_RADIUS`](table::STAR_RADIUS)), and holds their
+/// heating over S sin(colatitude + D − α), while a plain under the disk intercepts S sin `e_eff`.
+/// For a disk that clears the horizon and the table's α the two are one. Otherwise, to first order
+/// the facets' heating scales with the flux they intercept, so the shares are read at fractions of
+/// S sin `e_eff`: the shadow takes the upper limb, and the heating the disk
+/// (`decision-r09-t7g-table` §2). That is exact for the plain's mean heating; where the horizon
+/// cuts the disk it is an extrapolation (R09.T7.g's record). It is zero where the heat
 /// flow alone warms the shadow past the threshold, and infinite where `e_eff` = 0, a point star
 /// that never rises, but the shadow can be cold.
 ///
@@ -715,20 +724,34 @@ mod tests {
             table::SHADOW.len(),
             table::SLOPE.len() * table::COLATITUDE_PER_SLOPE.len()
         );
-        // The cold nodes are every k-th of the shadow's.
-        for (cold, all) in [
+        // The cold nodes are the shadow's at their indices, ascending from its first to its last.
+        for (cold, indices, all) in [
             (
                 &table::COLD_COLATITUDE_PER_SLOPE[..],
+                &table::COLD_COLATITUDE_INDEX[..],
                 &table::COLATITUDE_PER_SLOPE[..],
             ),
-            (&table::COLD_LIMB_PER_SLOPE[..], &table::LIMB_PER_SLOPE[..]),
+            (
+                &table::COLD_LIMB_PER_SLOPE[..],
+                &table::COLD_LIMB_INDEX[..],
+                &table::LIMB_PER_SLOPE[..],
+            ),
         ] {
-            let stride = (all.len() - 1) / (cold.len() - 1);
-            assert_eq!(stride * (cold.len() - 1), all.len() - 1);
-            for (i, &node) in cold.iter().enumerate() {
-                assert_same_bits(node, all[i * stride]);
+            assert_eq!(cold.len(), indices.len());
+            assert!(indices.windows(2).all(|w| w[0] < w[1]), "{indices:?}");
+            assert_eq!(indices.first(), Some(&0));
+            assert_eq!(indices.last().map(|&i| usize::from(i)), Some(all.len() - 1));
+            for (&node, &i) in cold.iter().zip(indices) {
+                assert_same_bits(node, all[usize::from(i)]);
             }
         }
+        // The table's facets were lit by the Sun's centre at the Moon, the real Moon's α.
+        let alpha = real_moon().parts().star_radius.value();
+        assert!(
+            (table::STAR_RADIUS / alpha - 1.0).abs() < 1e-12,
+            "{}",
+            table::STAR_RADIUS
+        );
         assert_eq!(
             table::COLD.len(),
             table::SLOPE.len()
@@ -779,6 +802,39 @@ mod tests {
             for elevation in [0.5, 2.0, 10.0] {
                 let shadow = instantaneous_shadow(slope(w), degrees(elevation));
                 out.f64(&format!("w {w} e {elevation} instantaneous"), shadow);
+            }
+        }
+        // The heating's normaliser: a disk the horizon cuts and one it clears, a point star, a
+        // heat flow that warms the shadow past the threshold (0) and a star that never rises (∞);
+        // then the real Moon's cold traps.
+        let disk = |declination: f64, radius: f64, heat_flow: f64| {
+            Body::new(BodyParts {
+                greatest_declination: degrees(declination),
+                star_radius: degrees(radius),
+                heat_flow: WattsPerSquareMetre::new(heat_flow),
+                ..point_moon()
+            })
+            .unwrap()
+        };
+        for (name, body) in [
+            ("cut", disk(0.034, 0.8665, 0.0)),
+            ("moon", real_moon()),
+            ("point", disk(1.54, 0.0, 0.0)),
+            ("warm", disk(1.54, 0.2711, 1.0)),
+            ("still", disk(0.0, 0.0, 0.0)),
+        ] {
+            for colatitude in [0.0, 0.5, 5.0] {
+                for t in [30.0, 57.0, 110.0] {
+                    let x = irradiance_limit(degrees(colatitude), &body, Kelvin::new(t));
+                    out.f64(&format!("{name} e0 {colatitude} T {t} limit"), x);
+                }
+            }
+        }
+        let moon = real_moon();
+        for latitude in [80.0, 85.0, 88.0, 89.5, 90.0] {
+            for t in [57.0, 110.0] {
+                let traps = fraction(degrees(latitude), &moon, slope(0.1), Kelvin::new(t));
+                out.f64(&format!("moon {latitude} T {t} fraction"), traps);
             }
         }
         out.finish()

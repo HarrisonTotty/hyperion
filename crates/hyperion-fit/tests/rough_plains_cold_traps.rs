@@ -1,7 +1,7 @@
-//! The rough plains' cold-trap table (rendering plan R09, R09.T7.g): the committed body is the
-//! rendering of its committed values, the surface crate's reader is the fit's own read to the bit,
-//! and the task's smoke run goes end to end through the command line, the same bytes on one thread
-//! and on four and at two chunk sizes.
+//! The rough plains' cold-trap table (rendering plan R09, R09.T7.g and R09.T7.l): the committed
+//! body is the rendering of its committed values, the surface crate's reader is the fit's own read
+//! to the bit, and the task's smoke run goes end to end through the command line, the same bytes on
+//! one thread and on four and at two chunk sizes.
 
 mod common;
 
@@ -51,6 +51,9 @@ fn committed() -> RoughPlainsFit {
         assert_eq!(built.len(), table.len());
         assert!(built.iter().zip(table).all(|(a, b)| a.total_cmp(b).is_eq()));
     }
+    assert_eq!(axes.cold_colatitude_indices, table::COLD_COLATITUDE_INDEX);
+    assert_eq!(axes.cold_limb_indices, table::COLD_LIMB_INDEX);
+    assert!(params.star_radius.total_cmp(&table::STAR_RADIUS).is_eq());
     RoughPlainsFit {
         axes,
         shadow: table::SHADOW.iter().map(|row| row.to_vec()).collect(),
