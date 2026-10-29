@@ -535,7 +535,12 @@ which T4 checks (Risks, "T3.a–c as built").
   to −T_s and forwards again; at each release the tracer starts at the tidal radius from the
   progenitor along the galactocentric radius, with the offsets in position and velocity and their
   scatters of Fardal, Huang and Weinberg (2015), to be taken from the paper. Tracers feel the
-  table's force plus a Plummer sphere for a living progenitor, with its mass following the history.
+  table's force alone. _Deviation from the plan's text (main's ruling of 2026-10-29, after the
+  research lane `research-galaxy-leans`, items 10 and 13):_ the text had "plus a Plummer sphere
+  for a living progenitor, with its mass following the history", which counts the progenitor's
+  pull twice, since Fardal et al.'s release offsets already hold it (their §6), and the offsets'
+  Gaussians, cut at ±2.5σ, are widened so that they keep the fitted dispersions (Risks, "P10.T5.b,
+  the spray's fix, as built").
   Each body accumulates the angle it sweeps in its own orbital plane, step by step, with
   `math::atan2`; ψ is the tracer's angle minus the progenitor's over the same interval. Tests: ψ is
   positive for every leading and negative for every trailing tracer and monotone in release time on
@@ -1499,3 +1504,38 @@ grows with the registry")]`.
     at the median.
     Ruling 146.3's fallback, `τ_p ÷ 32`, would halve it; not applied. For the owner, with T6.c's
     bench.
+- **P10.T5.b, the spray's fix, as built (lane `p10-t6a`, 2026-10-29, on `7a674ea` at
+  `GENERATOR_VERSION` 23).** Main's rulings of 2026-10-29, after the research lane
+  `research-galaxy-leans` (items 10, 12 and 13). No output moved but the unwired `spray.golden`,
+  re-blessed by name (its 168 tracer values; the table's, the specifications' and the releases'
+  lines are unchanged; x86-64), which `golden_diff` names alone. Every figure is v23's, x86-64,
+  measured in a pod (4 vCPU).
+  - _The Plummer sphere is dropped, for every progenitor (item 10)._ Fardal, Huang and Weinberg
+    2015, §6: the progenitor "can be omitted with an appropriate choice of release constants
+    (equations 19–24); the time-integrated effect of the progenitor is encapsulated by our larger
+    action offset", so their `k̄_r` = 2 and `k̄_vφ` = 0.3 with a sphere counted its pull twice; their
+    §5.2 tested the host-only recipe on a Sagittarius of 8.5 × 10⁻⁴ of its host's mass ("the
+    agreement is extremely good"), and the brainstorm has no sphere. `PLUMMER_SCALE` and the
+    track's bound mass for the force are removed; the bound mass still sets each release's tidal
+    radius (eq. 1). This supersedes "T5.a–b as built"'s leans on the Plummer scale and on "a living
+    progenitor", and its science check's finding.
+  - _The cut keeps the fitted dispersions (item 13)._ `spray::cut_widening()`,
+    `1 ÷ √(1 − 2a φ(a) ÷ (2Φ(a) − 1))` at `a` = 2.5, 1.04756: each offset's Gaussian is widened by
+    it, so that cut at ±2.5σ (which drops 1.24 % of draws and leaves 0.9113 of the variance) it
+    keeps eq. 21's and eqs. 22–24's dispersions; `k_r + k_vφ` stays at 0.204 or more.
+    `Spray::in_plane_spread()` is still eq. 21's σ. `f_t` = 0.8 stays (item 12), its documentation
+    citing §5.2's Sagittarius run beside Table 1. Test: `spray::tests::the_cut_offsets_keep_their_fitted_dispersion` (the cut
+    distribution's variance by a stratified midpoint rule, to 10⁻⁸).
+  - _Tracers on the other arm's side, measured again._ `pal5_like` 0, `gd1_like` 0 and
+    `sagittarius_like` 1 of 2,000 (27 with the sphere); the drawn galaxy's six sampled streams 0
+    each (13, 0, 24, 20, 13 and 32 with it). So the drawn orphans' strays, which "T5.a–b as built"
+    put down to eccentric orbits, came from the sphere too, its pull integrated over the long time
+    a slowly drifting tracer spends near its progenitor. The slow tests now allow 10 for
+    `sagittarius_like` (was 60) and 0.5 % of a drawn stream's tracers (was 2.5 %). The tracks
+    depart from their orbits within one wrap by 35.3, 11.2 and 9.4 tidal radii (were 39.0, 12.2
+    and 9.0).
+  - _For the owner._ Chen, Valluri, Gnedin and Ash 2025 (arXiv:2408.01496) find host-only Fardal
+    streams 15–50 % too narrow for globulars, and give a release distribution calibrated with the
+    progenitor's gravity for 10⁴–10⁶ M☉ and `e` ≤ 0.6 (gala's `ChenStreamDF`): the globulars'
+    option, a new release model. Dwarfs above about 10⁻³ of the host's mass, up to 10⁹·⁵ M☉, are an
+    extrapolation of every calibration (Fardal et al. §2.2).

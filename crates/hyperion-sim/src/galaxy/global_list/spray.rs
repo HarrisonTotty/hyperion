@@ -73,19 +73,25 @@
 //!
 //! Each is cut at [`OFFSET_CUT`], ±2.5 dispersions, by inverse transform of one word of
 //! `stream.spray.offsets`, four a tracer. Fardal et al. find their Gaussians "unlikely to be
-//! accurate in the extremes of the distribution" (§2.4); the cut keeps `k_r + k_vφ` at 0.3 or
+//! accurate in the extremes of the distribution" (§2.4), and blame "an excessively long tail" in
+//! another recipe on Gaussians used "rather than a more sharply truncated distribution" (§5.1).
+//! The cut leaves `1 − 2a φ(a) ÷ (2Φ(a) − 1)` of the Gaussian's variance at `a` = 2.5, 0.9113, so
+//! each draw's Gaussian is widened by [`cut_widening`], 1.0476, and the cut distribution keeps the
+//! fitted dispersion (main's ruling of 2026-10-29). The cut still keeps `k_r + k_vφ` at 0.204 or
 //! more at the largest dispersion, 0.4, so that near a circular orbit, where a tracer's guiding
 //! radius moves by about `(k_r + k_vφ) r_t`, every tracer drifts the way its arm does.
 //!
 //! # The integration
 //!
-//! A tracer feels the table's force and a Plummer sphere at the progenitor's position at each
-//! boundary, of its bound mass there and of scale [`PLUMMER_SCALE`] of the specification's tidal
-//! radius, so an orphan's fades as its cluster dissolves. That is plan 10's model, not Fardal et
-//! al.'s: their offsets were fitted to tracers integrated in the host's potential alone ("our
-//! model does not include the satellite potential", §5.2), from satellites of some 3.5 × 10⁻⁶ of
-//! the host's mass, so the sphere moves the release energies away from their calibration, and
-//! most for a massive dwarf ("The arms"). Every body sums the angle it sweeps
+//! A tracer feels the table's force alone, the host's potential, as Fardal et al.'s tracers do
+//! ("our model does not include the satellite potential", §5.2). Their recipe leaves the
+//! progenitor out on purpose: it "can be omitted with an appropriate choice of release constants
+//! (equations 19–24); the time-integrated effect of the progenitor is encapsulated by our larger
+//! action offset" (§6), the `k̄_r` = 2 and `k̄_vφ` = 0.3 above, so a progenitor's sphere added to
+//! them would count its pull twice. They tested it on a Sagittarius of 8.5 × 10⁻⁴ of its host's
+//! mass and found "the agreement is extremely good" (§5.2) (main's ruling of 2026-10-29, dropping
+//! plan 10's Plummer sphere for every progenitor). The progenitor's bound mass still sets each
+//! release's tidal radius. Every body sums the angle it sweeps
 //! about the centre at each step, `atan2(|x₀ × x₁|, x₀ · x₁)` by [`math::atan2`], the angle in its
 //! own orbital plane, as [`Leapfrog::integrate`](super::orbit::Leapfrog::integrate) does. A
 //! tracer's ψ is its angle less the progenitor's over the same steps: positive for one that gains
@@ -94,13 +100,13 @@
 //! # The arms
 //!
 //! A tracer's arm is the Lagrange point it left from, and nearly every tracer's ψ has its arm's
-//! sign. A few do not (P10.T5.b, as built). A massive progenitor's Plummer sphere pulls back some
-//! of those released near its Jacobi radius: 27 of `sagittarius_like`'s 2,000 in its test at v23,
-//! and none with the sphere left out. Away from circular orbits, where eq. 21's dispersion reaches its cap,
-//! a trailing tracer released near pericentre with `k_vφ` low in its range can leave with less
-//! energy than the progenitor, the tangential speed there exceeding the circular: up to 1.6 % of
-//! the tracers of a drawn Milky Way galaxy's streams. Plan 10 asks for every tracer; the tests pin
-//! these as found.
+//! sign: in their tests at v23, one of `sagittarius_like`'s 2,000 does not, and none of six
+//! sampled streams of a drawn Milky Way galaxy. The Plummer sphere this module once added sent up
+//! to 1.6 % of a drawn galaxy's tracers onto the other arm's orbits, some a radian or more along
+//! it (P10.T5.b, as built). Fardal et al. describe the same artefact in another recipe, stars
+//! thrown "backwards into the stream emerging from the opposing Lagrange point" (§5.1). So
+//! [`Arm`] is a diagnostic, and the tube table ([`tube`](super::tube), P10.T6) takes a tracer's
+//! arm from the sign of its ψ.
 //!
 //! # A pool
 //!
@@ -113,7 +119,6 @@
 use std::num::NonZeroU32;
 
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
-use crate::galaxy::consts::G;
 use crate::galaxy::potential::PotentialTables;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::math;
@@ -146,21 +151,28 @@ pub const VERTICAL_SPREAD: f64 = 0.5;
 pub const IN_PLANE_SPREAD: (f64, f64) = (0.15, 0.4);
 
 /// `f_t`, a satellite's initial King radius over its tidal radius at apocentre, for eq. 21: 0.8,
-/// the value of the five `m6.0` runs of Fardal et al.'s Table 1 (2015) without a suffix, a
-/// parameter of the generator version.
+/// the value of the five `m6.0` runs of Fardal et al.'s Table 1 (2015) without a suffix, and the
+/// "tidal factor `f_t` = 0.8" of their Sagittarius run (§5.2), a parameter of the generator
+/// version.
 pub const FILLING_FACTOR: f64 = 0.8;
 
 /// Where each release offset's Gaussian is cut, in its dispersions (module documentation, "The
 /// release"), a parameter of the generator version.
 pub const OFFSET_CUT: f64 = 2.5;
 
-/// The progenitor's Plummer scale over its specification's tidal radius: 0.11, a parameter of the
-/// generator version. A Plummer sphere's half-mass radius is 1.305 times its scale, and Hénon's
-/// (1961, Ann. Astrophys. 24, 369) homologous cluster keeps its half-mass radius at 0.145 of its
-/// Jacobi radius, the ratio's maximum, in the phase of evolution driven by evaporation (Gieles,
-/// Heggie and Zhao 2011, MNRAS 413, 2509, §2.2 and Table 1). For a dwarf's core the same scale is
-/// a choice with no source behind it.
-pub const PLUMMER_SCALE: f64 = 0.11;
+/// How much each release offset's Gaussian is widened, so that, cut at [`OFFSET_CUT`], it keeps
+/// the dispersion Fardal et al. fitted (module documentation, "The release"):
+/// `1 ÷ √(1 − 2a φ(a) ÷ (2Φ(a) − 1))` at `a` = [`OFFSET_CUT`], 1.0476, with `φ` and `Φ` the
+/// standard normal density and distribution function: the inverse square root of the variance of
+/// a standard normal truncated to `[−a, a]` (Johnson, Kotz and Balakrishnan 1994, *Continuous
+/// Univariate Distributions*, vol. 1, 2nd ed., ch. 13, the truncated normal distribution).
+#[must_use]
+pub fn cut_widening() -> f64 {
+    let a = OFFSET_CUT;
+    let density = math::exp(-0.5 * a * a) / core::f64::consts::TAU.sqrt();
+    let inside = 1.0 - math::erfc(a * core::f64::consts::FRAC_1_SQRT_2);
+    1.0 / (1.0 - 2.0 * a * density / inside).sqrt()
+}
 
 /// Words of `stream.spray.offsets` a tracer reads: `k_r`, `k_vφ`, `k_z`, `k_vz`, one each.
 pub const OFFSET_WORDS: u64 = 4;
@@ -533,8 +545,7 @@ fn spherical_pericentres(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Arm {
     /// The inner point: the tracer gains on the progenitor, so its ψ is positive, but for the few
-    /// that a massive progenitor or an eccentric orbit sends the other way (module documentation,
-    /// "The arms").
+    /// that end on the other arm's orbits (module documentation, "The arms").
     Leading,
     /// The outer point: the tracer falls behind, so its ψ is negative, but for the same few.
     Trailing,
@@ -606,8 +617,6 @@ struct Boundary {
     position_ly: [f64; 3],
     /// The angle swept since boundary 0.
     swept_rad: f64,
-    /// The bound mass.
-    mass: SolarMasses,
 }
 
 /// One stream's spray, ready to release and integrate its tracers (module documentation): the
@@ -658,7 +667,9 @@ pub struct Spray<'a> {
     offsets: Stream,
     /// `σ(k_r) = σ(k_vφ)` (eq. 21).
     in_plane_spread: f64,
-    plummer_scale_sq_ly2: f64,
+    /// The in-plane and the vertical offsets' Gaussians' dispersions before the cut: eq. 21's and
+    /// [`VERTICAL_SPREAD`], each times [`cut_widening`].
+    widened: [f64; 2],
     /// The Gaussian's distribution function at the lower cut, and its share between the cuts.
     cut: [f64; 2],
 }
@@ -722,9 +733,6 @@ impl<'a> Spray<'a> {
             .map(|(s, _)| s)
             .collect();
         let schedule = ReleaseSchedule::new(seed, spec, params, &pericentres)?;
-        for (s, b) in (0_u32..).zip(&mut track) {
-            b.mass = schedule.bound_mass(s);
-        }
         // R_acc^⅔ = (r_t(r_a) ÷ r_t(r_p))², at any one mass.
         let at = |r: LightYears| {
             tables
@@ -739,7 +747,7 @@ impl<'a> Spray<'a> {
         let (coefficient, cap) = IN_PLANE_SPREAD;
         let in_plane_spread =
             (coefficient * FILLING_FACTOR * FILLING_FACTOR * ratio * ratio).min(cap);
-        let plummer = PLUMMER_SCALE * spec.tidal_radius().value();
+        let widening = cut_widening();
         let below = 0.5 * math::erfc(OFFSET_CUT * core::f64::consts::FRAC_1_SQRT_2);
         Ok(Self {
             force,
@@ -753,7 +761,7 @@ impl<'a> Spray<'a> {
                 ObjectKey::galaxy_item(u64::from(spec.number().get())),
             ),
             in_plane_spread,
-            plummer_scale_sq_ly2: plummer * plummer,
+            widened: [in_plane_spread * widening, VERTICAL_SPREAD * widening],
             cut: [below, 1.0 - 2.0 * below],
         })
     }
@@ -776,8 +784,8 @@ impl<'a> Spray<'a> {
         )
     }
 
-    /// `σ(k_r) = σ(k_vφ)`, the in-plane release offsets' dispersion (module documentation, "The
-    /// release").
+    /// `σ(k_r) = σ(k_vφ)`, the in-plane release offsets' dispersion, eq. 21's, which their cut
+    /// distribution keeps (module documentation, "The release").
     #[must_use]
     pub fn in_plane_spread(&self) -> f64 {
         self.in_plane_spread
@@ -821,21 +829,19 @@ impl<'a> Spray<'a> {
             .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more");
         let from = self.track[start];
         let mut body = self.release(&from, release.bound_mass(), arm, index);
-        let mut acceleration = self.acceleration(body.0, &from);
+        let mut acceleration = self.acceleration(body.0);
         let h = self.schedule.step().step().value();
+        let steps = self.schedule.step().count();
         let mut angle = 0.0;
-        for at in &self.track[start + 1..] {
+        for _ in release.step()..steps {
             let before = body.0;
-            kick_drift_kick(&mut body, &mut acceleration, h, |x| {
-                self.acceleration(x, at)
-            });
+            kick_drift_kick(&mut body, &mut acceleration, h, |x| self.acceleration(x));
             angle += swept(before, body.0);
         }
         let last = self
             .track
             .last()
             .expect("the track holds its first boundary");
-        let steps = self.schedule.step().count();
         let psi = angle - (last.swept_rad - from.swept_rad);
         // P10.T6 sorts the tracers by ψ, and a NaN's sign, which `total_cmp` reads, is not
         // portable (the sim-determinism skill's "Hazards across targets").
@@ -870,12 +876,12 @@ impl<'a> Spray<'a> {
         words.seek(OFFSET_WORDS * u64::from(index));
         let [below, between] = self.cut;
         let mut draw = || math::normal_quantile(below + words.uniform() * between);
-        let spread = self.in_plane_spread;
+        let [in_plane, out_of_plane] = self.widened;
         // k_r, k_vφ, k_z and k_vz, in that order.
-        let radial = RADIAL_OFFSET + spread * draw();
-        let tangential = TANGENTIAL_OFFSET + spread * draw();
-        let vertical = VERTICAL_SPREAD * draw();
-        let vertical_speed = VERTICAL_SPREAD * draw();
+        let radial = RADIAL_OFFSET + in_plane * draw();
+        let tangential = TANGENTIAL_OFFSET + in_plane * draw();
+        let vertical = out_of_plane * draw();
+        let vertical_speed = out_of_plane * draw();
         [radial, tangential, vertical, vertical_speed]
     }
 
@@ -907,23 +913,13 @@ impl<'a> Spray<'a> {
         )
     }
 
-    /// The acceleration at `x` (m), m/s²: the table's, and the progenitor's Plummer sphere as it
-    /// is at boundary `at`.
+    /// The acceleration at `x` (m), m/s²: the table's, the host's alone (module documentation,
+    /// "The integration").
     #[must_use]
-    fn acceleration(&self, x: [f64; 3], at: &Boundary) -> [f64; 3] {
-        let here = x.map(|c| c / METRES_PER_LIGHT_YEAR);
-        let mut total = self.force.acceleration_ly(here);
-        let mass = at.mass.value();
-        if mass > 0.0 {
-            let there = at.position_ly;
-            let offset = [here[0] - there[0], here[1] - there[1], here[2] - there[2]];
-            let softened = dot(offset, offset) + self.plummer_scale_sq_ly2;
-            let pull = G * mass / (softened * softened.sqrt());
-            for (a, d) in total.iter_mut().zip(offset) {
-                *a -= pull * d;
-            }
-        }
-        total.map(|a| a * FORCE_IN_SI)
+    fn acceleration(&self, x: [f64; 3]) -> [f64; 3] {
+        self.force
+            .acceleration_ly(x.map(|c| c / METRES_PER_LIGHT_YEAR))
+            .map(|a| a * FORCE_IN_SI)
     }
 }
 
@@ -975,8 +971,7 @@ fn swept(before: [f64; 3], after: [f64; 3]) -> f64 {
     math::atan2(dot(normal, normal).sqrt(), dot(before, after))
 }
 
-/// The progenitor's boundary record of `body` at swept angle `angle` (radians), its mass to be
-/// filled in.
+/// The progenitor's boundary record of `body` at swept angle `angle` (radians).
 #[must_use]
 fn boundary((position_m, velocity_m_s): Body, swept_rad: f64) -> Boundary {
     Boundary {
@@ -984,7 +979,6 @@ fn boundary((position_m, velocity_m_s): Body, swept_rad: f64) -> Boundary {
         velocity_m_s,
         position_ly: position_m.map(|c| c / METRES_PER_LIGHT_YEAR),
         swept_rad,
-        mass: SolarMasses::ZERO,
     }
 }
 

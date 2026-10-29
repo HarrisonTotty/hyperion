@@ -179,11 +179,10 @@ fn departure(spray: &Spray<'_>, spec: &StreamSpec, tracers: &[Tracer]) -> f64 {
 /// the tube's mass; and `pal5_like`'s mean track departs from its progenitor's orbit by more than
 /// six tidal radii within one wrap, the brainstorm's reason for measuring the track.
 ///
-/// `sagittarius_like`'s arms are not apart: 27 of its 2,000 tracers end on the other side (v23,
-/// x86-64; 39 under another seed and a plane 1° steeper), pinned at 60, and none with the Plummer
-/// sphere left out (a probe, 2026-10-28), so it is the 10⁸ M☉ progenitor's pull on tracers
-/// released near its Jacobi radius (P10.T5.b, as built). The tracks depart from the orbits by
-/// 39.0, 12.2 and 9.0 tidal radii (v23, x86-64).
+/// One of `sagittarius_like`'s 2,000 tracers ends on the other side (v23, x86-64), pinned at 10;
+/// with the progenitor's Plummer sphere, which main's ruling of 2026-10-29 dropped, 27 did
+/// (P10.T5.b, as built). The tracks depart from the orbits by 35.3, 11.2 and 9.4 tidal radii (v23,
+/// x86-64).
 #[test]
 #[ignore = "slow: sprays three test streams of 2,000 tracers, 20,000 steps for the longest"]
 fn the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit() {
@@ -196,7 +195,7 @@ fn the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit() {
             "{name}: weights {total}"
         );
         let astray = tracers.iter().filter(|t| !on_its_side(t)).count();
-        let allowed = if name == "sagittarius" { 60 } else { 0 };
+        let allowed = if name == "sagittarius" { 10 } else { 0 };
         assert!(
             astray <= allowed,
             "{name}: {astray} tracers on the other arm's side"
@@ -223,12 +222,11 @@ fn the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit() {
 }
 
 /// A drawn Milky Way galaxy's streams at the step counts' quantiles (0, 0.1, 0.5, 0.9 and the
-/// most), and its dwarfs': few tracers end on the other arm's side, at most 2.5 % of a stream's
-/// against plan 10's "every" (v23, x86-64: 13, 0, 24, 20 and 13 of 2,000 for the five orphans
-/// these quantiles drew, 32 for the one dwarf). Away from the circular orbits Fardal et al.'s
-/// in-plane dispersion reaches its cap of 0.4, and a trailing tracer released near pericentre
-/// with `k_vφ` low in its range leaves with less energy than the progenitor, where the tangential
-/// speed exceeds the circular (P10.T5.b, as built).
+/// most), and its dwarfs': few tracers end on the other arm's side, at most 0.5 % of a stream's
+/// against plan 10's "every" (v23, x86-64: none of 2,000 for the five orphans these quantiles
+/// drew and for the one dwarf). With the progenitor's Plummer sphere, which main's ruling of
+/// 2026-10-29 dropped, they had 13, 0, 24, 20, 13 and 32, and up to 2.5 % was allowed (P10.T5.b,
+/// as built).
 #[test]
 #[ignore = "slow: builds a Milky Way galaxy's debris and sprays six of its streams"]
 fn a_drawn_galaxy_s_streams_keep_nearly_every_tracer_on_its_arm_s_side() {
@@ -281,7 +279,7 @@ fn a_drawn_galaxy_s_streams_keep_nearly_every_tracer_on_its_arm_s_side() {
             tracers.len()
         );
         assert!(
-            astray * 40 <= tracers.len(),
+            astray * 200 <= tracers.len(),
             "stream {k}: {astray} of {} on the other arm's side",
             tracers.len()
         );

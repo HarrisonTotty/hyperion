@@ -235,6 +235,32 @@ fn the_same_stream_gives_the_same_schedule() {
     assert_ne!(schedule(&spec, &[]), seed);
 }
 
+/// The release offsets' Gaussians, cut at ±2.5 dispersions and widened by `cut_widening`, keep
+/// the dispersion they were fitted with (main's ruling of 2026-10-29): the cut distribution's
+/// variance by a stratified midpoint rule over its distribution function, the draw's own
+/// inverse transform, is the widening's inverse square to 10⁻⁸ (the rule's own error is 2.6 ×
+/// 10⁻⁹).
+#[test]
+fn the_cut_offsets_keep_their_fitted_dispersion() {
+    let widening = cut_widening();
+    assert!((widening - 1.0476).abs() < 5e-5, "{widening}");
+    let below = 0.5 * math::erfc(OFFSET_CUT * core::f64::consts::FRAC_1_SQRT_2);
+    let between = 1.0 - 2.0 * below;
+    let n = 100_000_u32;
+    let variance = (0..n)
+        .map(|i| {
+            let q = math::normal_quantile(below + (f64::from(i) + 0.5) / f64::from(n) * between);
+            q * q
+        })
+        .sum::<f64>()
+        / f64::from(n);
+    assert!(
+        (variance * widening * widening - 1.0).abs() < 1e-8,
+        "{variance} against {}",
+        1.0 / (widening * widening)
+    );
+}
+
 /// A spray is shared by reference between a pool's threads (ruling 146.3).
 #[test]
 fn a_spray_and_its_table_are_shared_between_threads() {
